@@ -15,24 +15,23 @@
  * call is given today's date and the CURRENT model state afresh (`turnContextItems`), in its instructions, which the
  * Conversation never stores: conversation history never overrides saved state (after Undo, the restored state is given).
  *
- * Retained bridges, each for a requirement the SDK does not meet on its own:
- *   1. TRANSPORT. The SDK's Responses model calls `responses.create` on a client we hand it; ours posts through Olumi's
- *      provider policy (`postResponses`), so every call stays on this request's OPENAI_ONLY policy and its `_provider_calls`
- *      row, now with the returned model, the tool names sent and a digest of the input sent (core-acceptance witness).
- *   2. CONSENT. Three protocol checks on a tool call, as the existing loop makes them: a change proposed this turn is never
+ * The SDK's Responses model runs on the SDK's own client (`ledgeredAgentsClient`: native retries), whose fetch writes each
+ * attempt to this request's `_provider_calls` with the returned model, the tool names sent and a digest of the input sent.
+ *
+ * Retained bridge, for a requirement the SDK does not meet on its own:
+ *   CONSENT. Three protocol checks on a tool call, as the existing loop makes them: a change proposed this turn is never
  *      approved by the AI in the same turn; one approval carries one change; only this turn's own card may be withdrawn.
  *
  * No local session, no previous_response_id and no transcript of our own: the Conversation is the one state strategy. A store
- * that cannot hold the id yet (the column not migrated) keeps it in process memory, so a restart then starts a new one.
+ * that cannot hold the id stops the turn (`CoreStateUnavailableError`): never a Conversation the next turn could not find.
  */
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import {
-  Agent, MaxTurnsExceededError, OpenAIResponsesModel, run, setTracingDisabled, tool, ToolCallError, withTrace, type OpenAIClient,
+  Agent, MaxTurnsExceededError, OpenAIResponsesModel, run, setTracingDisabled, startOpenAIConversationsSession, tool, ToolCallError,
+  withTrace, type AgentInputItem,
 } from '@openai/agents';
 import { getRuntimeEnv } from '../../../config/env-resolver.js';
-import { postResponses } from '../../../adapters/llm/openai.js';
-import { createOpenAiConversation } from '../../../adapters/llm/openai-conversations.js';
-import { recordProviderReturnedModel } from '../../../adapters/llm/provider-policy.js';
+import { ledgeredAgentsClient } from '../../../adapters/llm/openai-agents-client.js';
 import { log } from '../../../utils/telemetry.js';
 import { agentRequestIdentity } from '../runtime/prompt-identity.js';
 import { dispatchTool, toolsFor, type AgentCapabilities, type AgentLaneMode, type AgentToolContext, type ToolResult } from '../runtime/agent-tools.js';
@@ -81,56 +80,19 @@ export interface ConversationIdStore {
  * The scenario's ONE Conversation, read from the store on every turn (no process copy): the saved one, else a new one
  * whose id is saved atomically before the turn uses it. A store that cannot hold the id stops the turn (no fallback).
  */
-async function scenarioConversation(scenarioId: string, store: ConversationIdStore | undefined, firstItems: readonly unknown[],
-  signal: AbortSignal | undefined): Promise<{ readonly id: string; readonly created: boolean }> {
+async function scenarioConversation(scenarioId: string, store: ConversationIdStore | undefined,
+  create: () => Promise<string>): Promise<{ readonly id: string; readonly created: boolean }> {
   if (store === undefined) throw new CoreStateUnavailableError('store_cannot_hold_id');
   let saved: string | null | undefined;
   try { saved = await store.read(scenarioId); } catch (err) { throw new CoreStateUnavailableError('store_unreadable', err); }
   if (saved === undefined) throw new CoreStateUnavailableError('store_cannot_hold_id');
   if (typeof saved === 'string' && saved !== '') return { id: saved, created: false };
-  const created = await createOpenAiConversation({ olumi_scenario_id: scenarioId, olumi_lane: 'core' }, firstItems, signal);
+  const created = await create();
   let winner: string | null | undefined;
   try { winner = await store.claim(scenarioId, created); } catch (err) { throw new CoreStateUnavailableError('id_not_saved', err); }
   if (typeof winner !== 'string' || winner === '') throw new CoreStateUnavailableError('id_not_saved');
   // A concurrent first turn saved its own Conversation first: continue that one (ours is left unused).
   return { id: winner, created: winner === created };
-}
-
-const sha256 = (value: unknown): string => {
-  let text = '';
-  try { text = JSON.stringify(value) ?? ''; } catch { text = ''; }
-  return createHash('sha256').update(text, 'utf8').digest('hex');
-};
-const toolNamesOf = (tools: unknown): string[] => (Array.isArray(tools) ? tools : [])
-  .map((t) => (t !== null && typeof t === 'object' ? (t as { name?: unknown }).name : undefined))
-  .filter((n): n is string => typeof n === 'string');
-
-/**
- * Bridge 1: the client the SDK's Responses model calls. Only `responses.create` is used on the non-streaming path the
- * runner takes; it posts the SDK's own request body through `postResponses` and returns the provider's response unchanged.
- */
-function ledgeredClient(budget: CallBudget, signal: AbortSignal | undefined): OpenAIClient {
-  const create = async (body: Record<string, unknown>, options?: { signal?: AbortSignal }): Promise<unknown> => {
-    const { r, usageHandle } = await postResponses(body, {
-      site: 'agent-core.sdk',
-      detail: {
-        model: budget.model, purpose: 'conversation', ...agentRequestIdentity('agent.converse', body),
-        tool_names: toolNamesOf(body['tools']), input_sha256: sha256(body['input']),
-      },
-      ...(options?.signal ?? signal) !== undefined ? { signal: options?.signal ?? signal } : {},
-      preserveResponseErrors: true,
-    });
-    if (!r.ok) {
-      const text = await r.text().catch(() => '');
-      // A 429 ends the turn: the runner surfaces it and nothing is retried here.
-      throw new Error(`openai_${r.status}: ${text.slice(0, 300)}`);
-    }
-    const j = (await r.json()) as { model?: unknown };
-    recordProviderReturnedModel(usageHandle, j.model);
-    return j;
-  };
-  // forbidden-exempt: the SDK's Responses model calls only `responses.create` on this path; this object is that one method.
-  return { responses: { create } } as unknown as OpenAIClient;
 }
 
 /**
@@ -230,10 +192,12 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
     // does on the existing loop: the route's own handlers answer it. Never turned into text for the model.
     errorFunction: null,
   }));
+  const client = ledgeredAgentsClient({ site: 'agent-core.sdk',
+    detailOf: (body) => ({ model: input.budget.model, purpose: 'conversation', ...agentRequestIdentity('agent.converse', body) }) });
   const agent = new Agent({
     name: 'Olumi',
     instructions: input.instructions,
-    model: new OpenAIResponsesModel(ledgeredClient(input.budget, input.signal), input.budget.model),
+    model: new OpenAIResponsesModel(client, input.budget.model),
     modelSettings: {
       maxTokens: input.budget.max_output_tokens,
       ...(input.budget.reasoning_effort !== undefined ? { reasoning: { effort: input.budget.reasoning_effort } } : {}),
@@ -247,17 +211,17 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
   /**
    * Olumi's own facts for THIS turn, given fresh on every model call in its instructions (never stored in the Conversation):
    * today's date, the CURRENT model state as the turn began, and the Run-facts rule when a Run is in it. The user's own
-   * words are the Conversation's: the brief is its first item when it was written apart from this message.
+   * words are the Conversation's: on the turn that creates it, a brief written apart from this message goes in first, once.
    */
   const stateContext = runFactsContext(input.canonicalState);
   const turnFacts = turnContextItems({
     now: new Date(startedAt), briefText: undefined, conversation: [],
     canonicalState: stateContext.facts, runFactsUse: stateContext.use,
   }).map(turnContextText).filter((t) => t !== '');
+  const conversation = await scenarioConversation(input.ctx.scenario_id, input.conversationStore, () => startOpenAIConversationsSession(client));
   const brief = typeof input.briefText === 'string' ? input.briefText.trim() : '';
-  const firstItems = brief !== '' && brief !== input.message.trim()
-    ? [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: `${BRIEF_LABEL}\n${brief}` }] }] : [];
-  const conversation = await scenarioConversation(input.ctx.scenario_id, input.conversationStore, firstItems, input.signal);
+  const turnInput: string | AgentInputItem[] = conversation.created && brief !== '' && brief !== input.message.trim()
+    ? [{ role: 'user', content: `${BRIEF_LABEL}\n${brief}` }, { role: 'user', content: input.message }] : input.message;
 
   let traceId = `trace_${randomUUID().replace(/-/g, '')}`;
   const finish = (text: string, stopped: AgentTurnResult['stopped_reason'], calls: number, author: 'ai' | 'host'): AgentTurnResult & { sdk: CoreTurnSdk } => {
@@ -274,7 +238,7 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
   try {
     return await withTrace('Olumi core turn', async (trace) => {
       traceId = trace.traceId;
-      const result = await run(agent, input.message, {
+      const result = await run(agent, turnInput, {
         conversationId: conversation.id,
         maxTurns: CORE_MAX_MODEL_CALLS,
         ...(input.signal !== undefined ? { signal: input.signal } : {}),

@@ -7,9 +7,9 @@
 import { createRequire } from 'node:module';
 import { tool } from '@openai/agents';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { z as z4 } from 'zod/v4';
+import { z as z4 } from 'zod-v4';
 import { ForbiddenProviderError, OPENAI_ONLY, recordedProviderCalls, runWithProviderPolicy } from '../../../adapters/llm/provider-policy.js';
-import { createOpenAiConversation } from '../../../adapters/llm/openai-conversations.js';
+import { ledgeredAgentsClient } from '../../../adapters/llm/openai-agents-client.js';
 import { AGENTS_SDK, CORE_COMPACT_THRESHOLD, CoreStateUnavailableError, runCoreTurn, type ConversationIdStore } from '../core/sdk-turn.js';
 import { budgetFor } from '../model-budgets.js';
 import type { AgentCapabilities, AgentToolContext } from '../runtime/agent-tools.js';
@@ -48,10 +48,10 @@ beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
     if (String(url).endsWith('/v1/conversations')) {
       created.push(JSON.parse(String(init?.body ?? '{}')) as Json);
-      return new Response(JSON.stringify({ id: `conv_${created.length}`, object: 'conversation' }), { status: 200 });
+      return new Response(JSON.stringify({ id: `conv_${created.length}`, object: 'conversation' }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
     sent.push(JSON.parse(String(init?.body ?? '{}')) as Json);
-    return new Response(JSON.stringify(body(scripted.shift() ?? [{ type: 'message', text: 'Noted.' }])), { status: 200 });
+    return new Response(JSON.stringify(body(scripted.shift() ?? [{ type: 'message', text: 'Noted.' }])), { status: 200, headers: { 'content-type': 'application/json' } });
   }));
 });
 afterEach(() => { vi.unstubAllGlobals(); });
@@ -126,9 +126,11 @@ describe('PATH-B core turn on the Agents SDK', () => {
     const one = await turn('First synthetic question.', caps(), { conversationStore: store, briefText: 'A synthetic brief, written apart.', state: { revision: 1 } });
     expect(one.result.sdk).toMatchObject({ conversation_id: 'conv_1', conversation_created: true });
     expect(created).toHaveLength(1);
-    // The brief written apart from the message is the Conversation's first item, once, as the user's words.
-    expect(JSON.stringify(created[0]!.items)).toContain('A synthetic brief, written apart.');
-    expect(created[0]!.items[0].role).toBe('user');
+    // The brief written apart from the message goes in first on the turn that creates the Conversation, once, as the user's words.
+    expect(sent[0]!.conversation).toBe('conv_1');
+    expect(sent[0]!.input.map((i: Json) => i.role)).toEqual(['user', 'user']);
+    expect(JSON.stringify(sent[0]!.input[0])).toContain('A synthetic brief, written apart.');
+    expect(JSON.stringify(sent[0]!.input[1])).toContain('First synthetic question.');
     expect(column.get(SCENARIO), 'saved on the scenario before the turn used it').toBe('conv_1');
 
     // No process copy: the next turn (or a restarted process) finds the Conversation only on the scenario.
@@ -142,6 +144,7 @@ describe('PATH-B core turn on the Agents SDK', () => {
     const input = JSON.stringify(second.input);
     expect(input).toContain('Second synthetic question.');
     expect(input, 'no replay: the server holds turn 1').not.toContain('First synthetic question.');
+    expect(input, 'the brief was seeded once').not.toContain('A synthetic brief, written apart.');
     expect(input).not.toContain('First answer.');
     expect(input, 'the state is never put in the Conversation').not.toContain('CURRENT MODEL STATE');
     // Today's facts, fresh: the CURRENT state (revision 2, not 1) and the date ride this call's instructions, once each.
@@ -151,21 +154,45 @@ describe('PATH-B core turn on the Agents SDK', () => {
     expect(second.instructions.split('TODAY, from Olumi').length - 1).toBe(1);
   });
 
-  it('⛔ the Conversation create obeys the request policy: a route that does not allow OpenAI never reaches the provider', async () => {
-    const refused = runWithProviderPolicy({ ...OPENAI_ONLY('refused'), allowed: new Set() }, () =>
-      createOpenAiConversation({ olumi_lane: 'core' }, [], undefined));
-    await expect(refused).rejects.toBeInstanceOf(ForbiddenProviderError);
-    expect(created, 'nothing left the process').toHaveLength(0);
-    // Contrast: the same call under OPENAI_ONLY creates one.
-    await expect(runWithProviderPolicy(OPENAI_ONLY('allowed'), () => createOpenAiConversation({ olumi_lane: 'core' }, [], undefined))).resolves.toBe('conv_1');
+  it('⛔ the SDK client obeys the request policy: a route that does not allow OpenAI never gets one, so nothing leaves', async () => {
+    const ledger = { site: 'agent-core.sdk', detailOf: () => ({ model: 'm' }) };
+    expect(() => runWithProviderPolicy({ ...OPENAI_ONLY('refused'), allowed: new Set() }, () => ledgeredAgentsClient(ledger)))
+      .toThrow(ForbiddenProviderError);
+    // Contrast: the same client under OPENAI_ONLY creates the Conversation natively, with no model row (it is not a model call).
+    const id = await runWithProviderPolicy(OPENAI_ONLY('allowed'), async () => {
+      const conv = await ledgeredAgentsClient(ledger).conversations.create({});
+      expect(recordedProviderCalls()).toHaveLength(0);
+      return conv.id;
+    });
+    expect(id).toBe('conv_1');
+    expect(sent).toHaveLength(0);
   });
 
-  it('zod isolation: the SDK runs on its own zod 4, the service stays on zod 3, and a `zod/v4` adapter schema is the tool\'s schema', () => {
+  it('a failed attempt the SDK client resends is marked retried; the resend is its own row with the returned model', async () => {
+    let first = true;
+    vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
+      if (String(url).endsWith('/v1/conversations')) return new Response(JSON.stringify({ id: 'conv_r', object: 'conversation' }), { status: 200, headers: { 'content-type': 'application/json' } });
+      sent.push(JSON.parse(String(init?.body ?? '{}')) as Json);
+      if (first) { first = false; return new Response(JSON.stringify({ error: { message: 'busy' } }), { status: 500, headers: { 'content-type': 'application/json', 'retry-after-ms': '1' } }); }
+      return new Response(JSON.stringify(body([{ type: 'message', text: 'Recovered.' }])), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    const { result, calls } = await turn('A synthetic question.', caps());
+    expect(result.assistant_text).toBe('Recovered.');
+    expect(sent).toHaveLength(2);
+    expect(calls.map((c) => [c.attempt?.outcome, c.attempt?.retry, c.returned_model ?? null])).toEqual([
+      ['http_error', true, null], ['success', false, RETURNED_MODEL]]);
+    expect(calls[0]!.input_sha256).toBe(calls[1]!.input_sha256);
+  });
+
+  it('zod isolation: the SDK and the adapters share ONE zod 4 (`zod-v4`); the service stays on zod 3; a zod schema is the tool\'s schema', () => {
     const service = createRequire(`${process.cwd()}/package.json`);
     const sdkCore = createRequire(createRequire(service.resolve('@openai/agents')).resolve('@openai/agents-core'));
+    const sdkZod = sdkCore.resolve('zod');
+    expect(service.resolve('zod-v4'), 'the adapters\' zod IS the SDK\'s (one instance: types and runtime agree)').toBe(sdkZod);
     expect((sdkCore('zod/package.json') as { version: string }).version).toMatch(/^4\./);
     expect((service('zod/package.json') as { version: string }).version).toMatch(/^3\./);
-    const probe = tool({ name: 'probe', description: 'A synthetic probe.', parameters: z4.object({ reason: z4.string() }), execute: async () => 'ok' });
+    // Typed: `parameters` accepts the zod object (tsc in CI), and the SDK turns it into the tool's JSON schema.
+    const probe = tool({ name: 'probe', description: 'A synthetic probe.', parameters: z4.object({ reason: z4.string() }), execute: async ({ reason }) => reason });
     expect(probe.parameters).toMatchObject({ type: 'object', properties: { reason: { type: 'string' } }, required: ['reason'] });
   });
 
