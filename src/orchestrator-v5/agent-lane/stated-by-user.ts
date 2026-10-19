@@ -35,7 +35,7 @@ import { launchWindowOf } from '../goal-target/goal-target-basis.js';
 import { findStatedAmounts, findStatedRanges, joinedAsRange, readCurrencyUnitWithQualifiers, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
 import { findLinkEffectAmounts, hasLinkEffectRange, linkEffectSourceLevels } from './link-effect-figures.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
-import { CARDINAL_AMOUNT_SOURCE, CARDINAL_FRACTION_WORDS, CARDINAL_HUNDRED_WORD, CARDINAL_SCALE_MULTIPLIERS, CARDINAL_WORD_VALUES, parseCardinalAmount } from '../../utils/cardinal-words.js';
+import { CARDINAL_AMOUNT_SOURCE, CARDINAL_FRACTION_WORDS, CARDINAL_HUNDRED_WORD, CARDINAL_SCALE_MULTIPLIERS, CARDINAL_WORD_VALUES, cardinalReadings, parseCardinalAmount } from '../../utils/cardinal-words.js';
 import { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from './model-primitives.js';
 import { attestHorizon, type HorizonAttestation } from './horizon-attestation.js';
 import { unitPhraseFamily } from './unit-conflict.js';
@@ -1036,11 +1036,12 @@ export function figureAppearsIn(value: number, unit: unknown, text: string | nul
  * journey E07 (DL pj-20260927T181846Z): the user's 1 and 2 were dropped as "not written" (Canonical #70 5859331002).
  */
 export function countsInWords(text: string): { kind: 'words'; magnitude: number; index: number; matchedText: string }[] {
-  return [...text.matchAll(CARDINAL_PHRASE)].flatMap((m) => {
-    const v = wordsAmount(m[0]);
-    return v === null || m.index === undefined || touchesAnotherNumber(text, m.index, m.index + m[0].length) ? []
-      : [{ kind: 'words' as const, magnitude: v, index: m.index, matchedText: m[0] }];
-  });
+  // A range written in words gives its two ends, or nothing (`cardinalReadings`: the range class, C5 #3442), read whole or not at all
+  // (`touchesAnotherNumber`), a range as its one span.
+  return [...text.matchAll(CARDINAL_PHRASE)].flatMap((m) => m.index === undefined ? []
+    : cardinalReadings(text, m.index, m.index + m[0].length, wordsAmount)
+      .filter((r) => !touchesAnotherNumber(text, r.index, r.index + r.matchedText.length))
+      .map((r) => ({ kind: 'words' as const, ...r })));
 }
 
 /**

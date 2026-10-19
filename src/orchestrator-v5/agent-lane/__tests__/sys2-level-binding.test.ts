@@ -9,12 +9,10 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { buildModelFromBrief } from '../runtime/build-model.js';
-import { projectEntity } from '../runtime/agent-capabilities.js';
 import { statementBindsFactorLevel } from '../verified-option-setting.js';
 import { targetTestabilityOf } from '../../admission/target-testability.js';
 import { valueProvenanceOf } from '../../../cee/provenance/provenance-of.js';
 import { goalLevelIsOlumisEstimate } from '../../goal-target/goal-chance-licence.js';
-import { goalReadingsOf } from '../../coaching/goal-reading-disclosure.js';
 
 type Rec = Record<string, any>;
 const SERVED = JSON.parse(readFileSync('tests/fixtures/sys2/served-capacity-e4ff6039.json', 'utf8')) as { brief: string; raw_text: string };
@@ -25,9 +23,9 @@ const HIRING = { brief: (JSON.parse(readFileSync('tests/fixtures/introduction-st
 const EIGHTY = 'Our existing team resolves 80 tickets per week.';
 const sid = '7a7a7a7a-7a7a-4a7a-8a7a-7a7a7a7a7a7a';
 
-async function registered(draft: Rec): Promise<Rec> {
+async function registered(draft: Rec, brief = SERVED.brief): Promise<Rec> {
   let graph: Rec | undefined;
-  const result = await buildModelFromBrief(sid, SERVED.brief, (async (path: string, body: Rec) => {
+  const result = await buildModelFromBrief(sid, brief, (async (path: string, body: Rec) => {
     if (path.endsWith('/graph/register')) { graph = structuredClone(body.graph); return { status: 200, json: { registered: true, model_version: { version_number: 1 } } }; }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: null } };
   }) as never, (async () => ({ text: JSON.stringify(draft), status: 'completed' })) as never) as Rec;
@@ -36,37 +34,35 @@ async function registered(draft: Rec): Promise<Rec> {
 }
 const node = (g: Rec, id: string): Rec => g.nodes.find((n: Rec) => n.id === id);
 const asksForToday = (g: Rec): boolean => JSON.stringify(targetTestabilityOf(g)).includes('missing_goal_baseline');
-const withoutStatusQuoZero = (): Rec => ({ ...RAW, statements: RAW.statements.filter((s: Rec) => s.quote !== 'Keep current staffing adds no specialist.') });
-const DERIVED = 'Today’s level of ‘Weekly support capacity’ is derived from your figures, by your definition: ‘Existing team support capacity’ is 80 tickets per week; ‘Additional specialist capacity’ is none today, because it counts only what is added';
+/** The user states the total's level today directly (DL-3's genuine affirmative), as the SYSTEM 2 drafter records it. */
+const HANDLE = 'Today we handle 80 tickets per week (60 + 20).';
+const handled = (): Rec => ({ ...RAW, statements: [...RAW.statements, { quote: HANDLE, subject: { kind: 'goal', label: 'Weekly support capacity', to_label: null,
+  factor_label: null }, field: 'level', form: 'point', value: 80, low: null, high: null, unit: 'tickets per week', qualifier: null, conditions: null }] });
 
-describe('SYSTEM 2 step 2: the stated level is the user\'s, and the goal\'s level today is DERIVED from their figures (80 + 0)', () => {
-  it('RED (served raw): the user\'s 80 is theirs; the goal\'s level today is derived from their figures, never a measured total', async () => {
+/**
+ * ⛔ CHANGED (Codex #3440 R3; DL-3 ruling by measurement): the goal's level today was DERIVED from the user's quoted sum (80 + 0).
+ * Measured, a supposed sum ("In a world where …", "Let's say …") derived it too. While user-declared exact sums are owed, no level
+ * is derived from a quoted sum: the goal's level is withheld and readiness asks. A level the user states directly is theirs.
+ */
+describe('SYSTEM 2 step 2: the stated level is the user\'s; the goal\'s level today is never derived from a quoted sum (owed)', () => {
+  it('served raw: the user\'s 80 is theirs; the goal\'s level today is not derived from the quoted sum: withheld, readiness asks', async () => {
     const g = await registered(RAW);
     expect(node(g, 'existing_team_support_capacity').observed_state).toMatchObject({ raw_value: 80, source: 'brief_extraction', extractionType: 'explicit' });
     expect(node(g, 'existing_team_support_capacity').observed_state.user_material_unverified).toBeUndefined();
     const goal = node(g, 'weekly_support_capacity');
-    expect(goal.observed_state).toMatchObject({ raw_value: 80, baseline: 0.16, source: 'brief_extraction' });
-    expect(goal.observed_state.extractionType).toBeUndefined(); // never presented as an explicitly measured total
-    expect(goal.goal_level_reading).toEqual({ level: 80, level_unit: 'tickets per week', lead: DERIVED, derived: true,
-      quote: 'Total weekly support capacity is defined as the existing 80 tickets per week plus the additional specialist capacity.' });
+    expect(goal.observed_state ?? null).toBeNull();
+    expect(goal.goal_level_reading).toBeUndefined();
+    expect(asksForToday(g)).toBe(true);
   });
 
-  it('CONSUMERS use it: the licence (not Olumi\'s estimate; its readings say "derived"), readiness (no re-ask), the Run\'s words and the AI\'s goal', async () => {
-    const g = await registered(RAW);
+  it('⭐ POSITIVE (DL-3): the user states the total today, "Today we handle 80 tickets per week (60 + 20).": the goal\'s 80 is theirs, no re-ask', async () => {
+    const g = await registered(handled(), `${SERVED.brief} ${HANDLE}`);
     const goal = node(g, 'weekly_support_capacity');
+    expect(goal.observed_state).toMatchObject({ raw_value: 80, source: 'brief_extraction' });
     expect(goalLevelIsOlumisEstimate(g, 'weekly_support_capacity')).toBe(false);
     expect(valueProvenanceOf(goal.observed_state).origin).toBe('human');
-    // The licence's typed readings (the UI says them beside the chance) and the Run reply's tail are this one list.
-    expect(goalReadingsOf(g, 'weekly_support_capacity')).toEqual([{ kind: 'level', node_id: 'weekly_support_capacity', words: `${DERIVED}.` }]);
+    expect(goal.goal_level_reading?.derived).toBeUndefined();
     expect(asksForToday(g)).toBe(false);
-    const entity = projectEntity(goal as Parameters<typeof projectEntity>[0]);
-    // The AI's goal: the user's figures (system 3's one authority), and how today's level was reached, in the reading's words.
-    expect(entity).toMatchObject({ kind: 'goal', raw_value: 80, value_provenance: { origin: 'user' }, level_today_reading: `${DERIVED}.` });
-  });
-
-  it('the 0 is by the user\'s DEFINITION ("additional"), never the status quo\'s setting: without "adds no specialist" it still holds', async () => {
-    const g = await registered(withoutStatusQuoZero());
-    expect(node(g, 'weekly_support_capacity').goal_level_reading?.lead).toBe(DERIVED);
   });
 
   it('CONTRAST (no default 0): a part the definition does not name as additional gives no level, and readiness still asks', async () => {

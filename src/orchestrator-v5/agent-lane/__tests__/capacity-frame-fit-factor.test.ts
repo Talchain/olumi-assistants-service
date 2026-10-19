@@ -211,15 +211,16 @@ describe('a stated per-unit effect into a part the drafter left unframed reaches
     identities: [], unknowns: [], decision_question: null,
   };
   const SCENARIO = '5e8e8e8e-0000-4000-8000-0000000000b8';
-  async function stored(): Promise<Rec> {
+  async function built(draft: Rec = DRAFT): Promise<{ graph: Rec; out: Rec }> {
     let graph: Rec | undefined;
     const out = await buildModelFromBrief(SCENARIO, BRIEF, (async (path: string, body: Rec) => {
       if (path.endsWith('/graph/register')) { graph = structuredClone(body.graph); return { status: 200, json: { model_version: { version_number: 1 } } }; }
       return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
-    }) as never, (async () => ({ text: JSON.stringify(DRAFT) })) as never) as Rec;
+    }) as never, (async () => ({ text: JSON.stringify(draft) })) as never) as Rec;
     expect(out.ok, JSON.stringify(out).slice(0, 1500)).toBe(true);
-    return graph!;
+    return { graph: graph!, out };
   }
+  const stored = async (draft: Rec = DRAFT): Promise<Rec> => (await built(draft)).graph;
   async function request(g: Rec): Promise<Rec> {
     const bytes = JSON.stringify(g);
     const port = { loadGraphAndBriefText: vi.fn(async () => ({ graph: JSON.parse(bytes), briefText: null, revision: 2 })), readMostRecentPendingActions: vi.fn(async () => []) };
@@ -256,5 +257,162 @@ describe('a stated per-unit effect into a part the drafter left unframed reaches
     expect(link2(g, 'additional_packer_output', 'daily_order_throughput').provenance.magnitude).toBe('olumi_estimate');
     expect(natural(g, 'additional_packer_output', 'daily_order_throughput')).toBeCloseTo(1, 9);
     expect(natural(g, 'additional_packers', 'additional_packer_output') * natural(g, 'additional_packer_output', 'daily_order_throughput')).toBeCloseTo(15, 9);
+  });
+});
+
+/**
+ * ⭐ STEP 8 (capacity, Codex SUMLEVELS pair AMEND; AIE: "use only the existing exact mechanism and retain its conditions"):
+ * "the existing 50 plus the additional output" DECLARED as a sum (L2, `checkDeclaredSums`) over a part held at 0 that the
+ * drafter left unframed. That part read as a 0–1 switch, so its definition said "per switch" and L2 refused the user's own
+ * sum ("not linked … one for one in the same unit"). A definition now says its natural size per the part's own unit.
+ * Route A is unchanged. Synthetic text in the served shape; every hop is real, to the Run's PLoT request.
+ * ⭐ AUTHORSHIP (Codex #3440 BLOCK; AIE L2-RELATION 18bf4f8c): this draft carries no `statements`, so nothing in it states the
+ * relation in the user's words; its sum is declared WITHOUT a quote, i.e. Olumi's reading (`stated_in_brief: false`). The carrier
+ * is the same structural check on either path; the user's own stated sum is proven on the served SYSTEM 2 draft
+ * (`declared-sum-identity.test.ts`, cfa31dfb).
+ */
+describe('a declared sum whose part is held at 0 with no frame is the goal\'s identity on the Run, each operand keeping its own inputs', () => {
+  const BRIEF = 'We are comparing two crewing options, labelled exactly "Keep current crew" and "Add one packer". Use the exact goal '
+    + 'label "Daily order throughput". Our current crew ships 50 orders per day. We need at least 70 orders per day. Keep current '
+    + 'crew adds no packer. Add one packer adds one packer. Each packer adds 15 orders per day. Daily order throughput is the '
+    + 'existing 50 orders per day plus the additional packer output.';
+  const QUOTE = 'Daily order throughput is the existing 50 orders per day plus the additional packer output.';
+  const factor = (label: string, role: string, unit: string, baseline: number | null, max: number | null, provenance = 'inferred') =>
+    ({ label, role, baseline_known: baseline !== null, baseline_value: baseline, unit, provenance, plausible_max: max });
+  const lk = (from: string, to: string, amount: number, definitional: true | null, quote: string | null, by = 'explicit') => ({ from, to, direction: 'positive',
+    provenance: by, effect_amount: amount, effect_per_source_change: 1, effect_provenance: by, definitional, basis: null, source_quote: quote });
+  const draft = (o: { declare: boolean; flag: boolean; existing?: number; quote?: string }) => ({
+    goal: { metric: 'Daily order throughput', operator: '>=', target_stated: true, value: 70, unit: 'orders per day', horizon_months: null, provenance: 'explicit',
+      frame: 'level', baseline_known: true, baseline_value: 50, baseline_provenance: 'explicit', scope: null },
+    constraints: [],
+    options: [
+      { label: 'Keep current crew', provenance: 'explicit', changes: [], is_status_quo: true, interventions: [] },
+      { label: 'Add one packer', provenance: 'explicit', changes: [], is_status_quo: null, interventions: [
+        { factor_label: 'Additional packers', value: 1, value_kind: 'absolute', unit: 'packers', provenance: 'explicit' }] },
+    ],
+    factors: [factor('Existing crew output', 'observable', 'orders per day', o.existing ?? 50, 100, 'explicit'),
+      factor('Additional packers', 'controllable', 'packers', 0, null), factor('Additional packer output', 'observable', 'orders per day', 0, null)],
+    risks: [], outcomes: [],
+    links: [
+      lk('Existing crew output', 'Daily order throughput', 1, true, QUOTE),
+      lk('Additional packers', 'Additional packer output', 15, null, 'Each packer adds 15 orders per day.'),
+      o.flag ? lk('Additional packer output', 'Daily order throughput', 1, true, QUOTE) : lk('Additional packer output', 'Daily order throughput', 1, null, null, 'inferred'),
+    ],
+    identities: o.declare ? [{ outcome: 'Daily order throughput', operation: 'sum', factors: ['Existing crew output', 'Additional packer output'],
+      provenance: 'explicit', evidence: o.quote === undefined ? null : { quote: o.quote } }] : [],
+    unknowns: [], decision_question: null,
+  });
+  const SCENARIO = '5e8e8e8e-0000-4000-8000-0000000000d8';
+  async function built(d: Rec): Promise<{ graph: Rec; out: Rec }> {
+    let graph: Rec | undefined;
+    const out = await buildModelFromBrief(SCENARIO, BRIEF, (async (path: string, body: Rec) => {
+      if (path.endsWith('/graph/register')) { graph = structuredClone(body.graph); return { status: 200, json: { model_version: { version_number: 1 } } }; }
+      return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
+    }) as never, (async () => ({ text: JSON.stringify(d) })) as never) as Rec;
+    expect(out.ok, JSON.stringify(out).slice(0, 1500)).toBe(true);
+    return { graph: graph!, out };
+  }
+  /** The Run's PLoT request from a COLD snapshot of the saved bytes (a fresh read, nothing carried over). */
+  async function sent(g: Rec): Promise<Rec> {
+    const bytes = JSON.stringify(g);
+    const port = { loadGraphAndBriefText: vi.fn(async () => ({ graph: JSON.parse(bytes), briefText: null, revision: 2 })), readMostRecentPendingActions: vi.fn(async () => []) };
+    const snapshot = await loadScenarioSnapshotForRunAnalysis(SCENARIO, 'req-sumlevels', port as never);
+    let payload: Rec | undefined;
+    const handler = createRunAnalysisHandler({ plotClient: { run: vi.fn(), validatePatch: vi.fn() } as never,
+      scenarioReader: async () => snapshot, probe: async (s) => { payload = s.plotPayload as Rec; } });
+    await handler({ context: { stage: 'analyse', entity_registry: { option_ids: [], goal_id: null }, capabilities: {}, messages: [], session_id: SCENARIO,
+      request_id: 'req-sumlevels', budgets: { turn_ms: 180000, llm_narrate_ms: 60000 }, prior_turns: [], prior_facts: [], scenarioBriefText: null, persistedGraph: null },
+      payload: makeMessagePayload({ turn_id: 't-sumlevels', scenario_id: SCENARIO, message: 'Run analysis.', turn_class: 'decide', stage: 'analyse' }),
+      requestId: 'req-sumlevels', signal: new AbortController().signal, orientationText: '' } as never);
+    expect(payload, 'the Run handler built a PLoT request').toBeDefined();
+    return payload!.graph as Rec;
+  }
+  const said = (out: Rec): string[] => { const f: string[] = []; const walk = (o: unknown): void => { if (typeof o === 'string') { if (o.includes('added together')) f.push(o); }
+    else if (Array.isArray(o)) o.forEach(walk); else if (o && typeof o === 'object') Object.values(o).forEach(walk); }; walk(out); return [...new Set(f)]; };
+  const goal = (g: Rec): Rec => (g.nodes as Rec[]).find((n) => n.kind === 'goal')!;
+  const e = (g: Rec, from: string, to: string): Rec => (g.edges as Rec[]).find((x) => x.from === from && x.to === to)!;
+  const SUM = { operation: 'sum', factor_ids: ['existing_crew_output', 'additional_packer_output'], stated_in_brief: false };
+
+  it('⭐ RED→GREEN: declared and flagged, the identity survives construction → save → cold snapshot → Run', async () => {
+    const { graph, out } = await built(draft({ declare: true, flag: true }));
+    expect(said(out)).toEqual([]);
+    expect(goal(graph).nonlinear_identity).toEqual(SUM);
+    expect(e(graph, 'additional_packer_output', 'daily_order_throughput').provenance.natural_effect.per_source_change_unit).toBe('orders per day');
+    const wire = await sent(graph);
+    expect(goal(wire).nonlinear_identity).toEqual(SUM);
+    for (const part of SUM.factor_ids) expect(e(wire, part, 'daily_order_throughput').exists_probability).toBe(1);
+  });
+  it('⭐ each operand keeps its own inputs: the levels, and the empirical link into the part, are sent exactly as without the sum', async () => {
+    const withSum = await sent((await built(draft({ declare: true, flag: true }))).graph);
+    const without = await sent((await built(draft({ declare: false, flag: false }))).graph);
+    expect(goal(withSum).nonlinear_identity).toEqual(SUM);
+    expect(goal(without).nonlinear_identity).toBeUndefined();
+    const node = (g: Rec, id: string): Rec => (g.nodes as Rec[]).find((n) => n.id === id)!;
+    for (const id of SUM.factor_ids) expect(node(withSum, id).observed_state).toEqual(node(without, id).observed_state);
+    const empirical = (g: Rec): Rec => { const x = e(g, 'additional_packers', 'additional_packer_output'); return { strength: x.strength, exists: x.exists_probability, magnitude: x.provenance?.magnitude }; };
+    expect(empirical(withSum)).toEqual(empirical(without));
+    expect(empirical(withSum).magnitude).toBe('user_stated');
+    // A change to that empirical link's own spread reaches the engine; the identity does not absorb it.
+    const g = (await built(draft({ declare: true, flag: true }))).graph;
+    e(g, 'additional_packers', 'additional_packer_output').strength.std /= 5;
+    expect(e(await sent(g), 'additional_packers', 'additional_packer_output').strength.std).toBeCloseTo(empirical(withSum).strength.std / 5, 12);
+  });
+  it('NEGATIVE (fail-safe): declared, but the part\'s link is not flagged as a definition → refused and said, nothing assumed', async () => {
+    const { graph, out } = await built(draft({ declare: true, flag: false }));
+    expect(goal(graph).nonlinear_identity).toBeUndefined();
+    expect(said(out).join(' ')).toContain('"Additional packer output" is not linked into "Daily order throughput" one for one in the same unit');
+  });
+  it('NEGATIVE (fail-safe): flagged but not declared → no sum (Route A is unchanged: a part with a level, or labels d5 does not hold, stay as drafted)', async () => {
+    const { graph, out } = await built(draft({ declare: false, flag: true }));
+    expect(goal(graph).nonlinear_identity).toBeUndefined();
+    expect(said(out)).toEqual([]);
+  });
+  it('NEGATIVE (fail-safe): today\'s levels do not add up (50 ≠ 40 + 0) → refused and said', async () => {
+    const { graph, out } = await built(draft({ declare: true, flag: true, existing: 40 }));
+    expect(goal(graph).nonlinear_identity).toBeUndefined();
+    expect(said(out).join(' ')).toContain('while those parts add up to');
+  });
+  /**
+   * ⭐ Codex #3440 BLOCK (AIE L2-RELATION 18bf4f8c): with the carrier corrected, a declaration quoting a DENIAL or a mere
+   * co-mention reached the Run as the user's exact sum. Codex's own two probe sentences, each the declaration's quoted source
+   * and the brief's only defining sentence: no sum, the links as drafted, the reason said. The denial withholds Olumi's reading
+   * too (no quote): a contradictory source is never overridden. A quoted sum is the user's: a capability still owed, so
+   * temporarily fail-closed (Codex R3), whatever the sentence says.
+   */
+  const PROBES: [string, string | null, string][] = [
+    ['Daily order throughput is not the existing 50 orders per day plus the additional packer output.', 'quoted', 'your brief says that is not so'],
+    ['Daily order throughput is not the existing 50 orders per day plus the additional packer output.', null, 'your brief says that is not so'],
+    ['Daily order throughput was discussed while existing crew output was 50 and additional packer output was 0.', 'quoted', 'Olumi can’t yet take a sum from your own words'],
+  ];
+  it.each(PROBES)('NEGATIVE (relation source): "%s" (%s) → no sum, the links as drafted, said', async (probe, how, reason) => {
+    const swap = (d: Rec): Rec => JSON.parse(JSON.stringify(d).split(QUOTE).join(probe));
+    const build = async (d: Rec): Promise<{ graph: Rec; out: Rec }> => {
+      let graph: Rec | undefined;
+      const out = await buildModelFromBrief(SCENARIO, BRIEF.replace(QUOTE, probe), (async (path: string, body: Rec) => {
+        if (path.endsWith('/graph/register')) { graph = structuredClone(body.graph); return { status: 200, json: { model_version: { version_number: 1 } } }; }
+        return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
+      }) as never, (async () => ({ text: JSON.stringify(d) })) as never) as Rec;
+      expect(out.ok, JSON.stringify(out).slice(0, 600)).toBe(true);
+      return { graph: graph!, out };
+    };
+    const { graph, out } = await build(swap(draft({ declare: true, flag: true, ...(how === null ? {} : { quote: QUOTE }) })));
+    const { graph: drafted } = await build(swap(draft({ declare: false, flag: true })));
+    expect(goal(graph).nonlinear_identity).toBeUndefined();
+    const [wire, base] = [await sent(graph), await sent(drafted)];
+    expect(goal(wire).nonlinear_identity).toBeUndefined();
+    // The links as drafted: each part's link into the goal is sent exactly as the same draft with no sum declared.
+    const into = (g: Rec, part: string): Rec => { const x = e(g, part, 'daily_order_throughput'); return { exists: x.exists_probability, strength: x.strength }; };
+    for (const part of SUM.factor_ids) expect(into(wire, part), part).toEqual(into(base, part));
+    expect(said(out).join(' ')).toContain(reason);
+  });
+  it('the defining sentence QUOTED is the user\'s sum, a capability still owed (temporarily fail-closed): no sum, said', async () => {
+    const { graph, out } = await built(draft({ declare: true, flag: true, quote: QUOTE }));
+    expect(goal(graph).nonlinear_identity).toBeUndefined();
+    expect(said(out).join(' ')).toContain('Olumi can’t yet take a sum from your own words');
+  });
+
+  it('CARRIER SCOPE: a link out of that part that is NOT a definition still says "per switch", as before', async () => {
+    const { graph } = await built(draft({ declare: false, flag: false }));
+    expect(e(graph, 'additional_packer_output', 'daily_order_throughput').provenance.natural_effect.per_source_change_unit).toBe('switch');
   });
 });
