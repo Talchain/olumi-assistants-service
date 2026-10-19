@@ -15,7 +15,7 @@
  *      and one option setting; the panel said "Olumi supplied 1".
  */
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { buildModelFromBrief } from '../../agent-lane/runtime/build-model.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
@@ -30,6 +30,17 @@ import { transformNodeToV2 } from '../../../cee/transforms/schema-v2.js';
 import { actionFactsOf } from '../../agent-lane/actions/state.js';
 import { decidePress } from '../../agent-lane/actions/handlers.js';
 import { sayOlumiEstimates } from '../../agent-lane/olumi-estimates-feeding-result.js';
+
+/**
+ * ⭐ STEP 8 (AIE `point_uncertainty` 564fe768): a chance resting on a user's size whose spread nobody stated is withheld
+ * (`run-analysis-unsupported-spread.test.ts` pins that rule, its words and every surface). This file tests
+ * the Check estimates census, not that rule, so the Run's spread selection is held empty here; the rest of the support walk runs as served.
+ */
+vi.mock('../../agent-lane/goal-certainty.js', async (original) => {
+  const actual = await original<typeof import('../../agent-lane/goal-certainty.js')>();
+  return { ...actual, chanceSupportGoalPaths: (...args: Parameters<typeof actual.chanceSupportGoalPaths>) =>
+    ({ ...actual.chanceSupportGoalPaths(...args), unsupportedSpread: [] }) };
+});
 
 type Rec = Record<string, any>;
 const clone = <T>(x: T): T => structuredClone(x);

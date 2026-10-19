@@ -21,6 +21,17 @@ import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js'
 import { STATIC_MODEL_SCOPE_NOTE } from '../../goal-target/goal-chance-licence.js';
 import { goalChanceFactsForAgent } from '../../goal-target/goal-chance-range-agent.js';
 
+/**
+ * ⭐ STEP 8 (AIE `point_uncertainty` 564fe768): a chance resting on a user's size whose spread nobody stated is withheld
+ * (`run-analysis-unsupported-spread.test.ts` pins that rule, its words and every surface). This file tests
+ * the screen's chance and range lines, not that rule, so the Run's spread selection is held empty here; the rest of the support walk runs as served.
+ */
+vi.mock('../goal-certainty.js', async (original) => {
+  const actual = await original<typeof import('../goal-certainty.js')>();
+  return { ...actual, chanceSupportGoalPaths: (...args: Parameters<typeof actual.chanceSupportGoalPaths>) =>
+    ({ ...actual.chanceSupportGoalPaths(...args), unsupportedSpread: [] }) };
+});
+
 type Json = Record<string, any>;
 const READ_B3 = (JSON.parse(readFileSync(new URL('./fixtures/waveB3-unseen2-7addf05-readback-run1.json', import.meta.url), 'utf8')) as { j: Json }).j;
 /** B5 T1b on 3fce64f: three point lines on the `each` licence, leader withheld (near tie); the gate deleted the chat's copy. */

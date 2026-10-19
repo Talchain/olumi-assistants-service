@@ -15,6 +15,17 @@ import { SupabaseSessionStore } from '../../session/supabase-store.js';
 import { SessionLRUCache } from '../../session/cache.js';
 import * as seedReuse from '../../coaching/seed-reuse.js';
 
+/**
+ * ⭐ STEP 8 (AIE `point_uncertainty` 564fe768): a chance resting on a user's size whose spread nobody stated is withheld
+ * (`run-analysis-unsupported-spread.test.ts` pins that rule, its words and every surface). This file tests
+ * the evaluated-question record authority, not that rule, so the Run's spread selection is held empty here; the rest of the support walk runs as served.
+ */
+vi.mock('../../agent-lane/goal-certainty.js', async (original) => {
+  const actual = await original<typeof import('../../agent-lane/goal-certainty.js')>();
+  return { ...actual, chanceSupportGoalPaths: (...args: Parameters<typeof actual.chanceSupportGoalPaths>) =>
+    ({ ...actual.chanceSupportGoalPaths(...args), unsupportedSpread: [] }) };
+});
+
 const stored = () => ({ ...structuredClone(captured.result), run_id: captured.evidence.run_id,
   input_snapshot: structuredClone(captured.evidence.input_snapshot), graph_hash_at_run: 'saved-capture' });
 const evidence = () => ({ runId: captured.evidence.run_id, inputSnapshot: structuredClone(captured.evidence.input_snapshot),
