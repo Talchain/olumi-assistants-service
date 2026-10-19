@@ -840,8 +840,9 @@ export const EdgeProvenanceV3 = z.object({
      */
     stated_range: z.object({ low: z.number().finite(), high: z.number().finite(), text: z.string().min(1), end: z.enum(["low", "high", "centre"]) }).optional().catch(undefined),
     /**
-     * STEP 8 producer (AIE df3304b7): a supported uncertainty for THIS size, written only by the chat strength writer with its
-     * `std_defaulted: false` (`stated-uncertainty.ts`). CEE-owned. Malformed: dropped, and the size's chance stays withheld.
+     * STEP 8 producer (AIE df3304b7): an uncertainty for THIS size, written only by the chat strength writer (`stated-uncertainty.ts`):
+     * the user's own stated spread with its `std_defaulted: false`, or Olumi's reading of their words (`read_by`), never attested.
+     * CEE-owned. Malformed: dropped.
      */
     uncertainty: z.object({
       stated_as: z.enum(["standard_deviation", "normal_quantiles"]),
@@ -855,6 +856,7 @@ export const EdgeProvenanceV3 = z.object({
       assessor: z.string().min(1),
       basis: z.string().min(1),
       source_quote: z.string().min(1),
+      read_by: z.literal("olumi").optional(),
     }).optional().catch(undefined),
   }).optional().catch(undefined),
   /**

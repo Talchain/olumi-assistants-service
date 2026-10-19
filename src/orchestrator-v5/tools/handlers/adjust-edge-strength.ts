@@ -544,7 +544,9 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
           const provenance = (edge.provenance ?? {}) as Record<string, unknown>;
           const naturalEffect = provenance.natural_effect as Record<string, unknown>;
           edge.provenance = { ...provenance, natural_effect: { ...naturalEffect, uncertainty: { ...uncertainty } } } as typeof edge.provenance;
-          edge.std_defaulted = false;
+          // Attested only as the user's own stated spread; Olumi's reading of their words is recorded and labelled, never attested.
+          if (uncertainty.read_by === 'olumi') delete edge.std_defaulted;
+          else edge.std_defaulted = false;
           return {
             before: beforeSnapshot as Record<string, unknown>,
             after: afterSnapshot as Record<string, unknown>,

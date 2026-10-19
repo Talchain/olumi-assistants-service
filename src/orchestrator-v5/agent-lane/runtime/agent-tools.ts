@@ -183,13 +183,13 @@ const LINK_UNCERTAINTY = obj({
   probability_inside: { type: 'number', description: 'normal_quantiles only: the percent stated as lying between lower and upper (90 for "90%").' },
   probability_below: { type: 'number', description: 'normal_quantiles only, when stated: the percent below lower (5 for "5% below 10").' },
   probability_above: { type: 'number', description: 'normal_quantiles only, when stated: the percent above upper (5 for "5% above 30").' },
-  unit: { type: 'string', description: 'The unit the values are written in, as written.' },
-  from_words: { type: 'string', description: 'The user\u2019s words in THIS message that give the values, copied exactly.' },
+  unit: { type: 'string', description: 'The unit written straight after the figure, as written.' },
+  from_words: { type: 'string', description: 'The user\u2019s complete statement in THIS message that gives the values, copied exactly, including who it is from.' },
   tails_words: { type: 'string', description: 'When given: the user\u2019s exact words saying how much lies below and above (for example "5% below 10 and 5% above 30").' },
   shape_words: { type: 'string', description: 'When given: the user\u2019s exact words saying it is symmetric, bell-shaped or Normal.' },
   basis_words: { type: 'string', description: 'When given: the user\u2019s exact words saying what the assessment is based on.' },
-  source: { type: 'string', description: 'Only when the assessment is another party\u2019s: who, exactly as the user names them (for example "the supplier").' },
-}, ['stated_as', 'unit', 'from_words']);
+  speaker: QUOTE_SPEAKER,
+}, ['stated_as', 'unit', 'from_words', 'speaker']);
 
 const UNMODELLED_MECHANISMS = {
   type: 'array', maxItems: 5, items: { type: 'string', minLength: 1, maxLength: 80 },
@@ -1105,7 +1105,7 @@ export interface AgentCapabilities {
     uncertainty?: {
       stated_as: 'standard_deviation' | 'normal_quantiles'; sd?: number; lower?: number; upper?: number;
       probability_inside?: number; probability_below?: number; probability_above?: number; unit: string; from_words: string;
-      tails_words?: string; shape_words?: string; basis_words?: string; source?: string;
+      tails_words?: string; shape_words?: string; basis_words?: string; speaker?: 'user' | 'other' | 'unknown';
     };
     direction?: 'positive' | 'negative'; rationale: string;
     /** The user's own phrase THIS turn when `strength` is Olumi's reading of it (slice C3). */

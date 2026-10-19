@@ -46,8 +46,14 @@ export interface StatedUncertainty {
   /** The engine samples a Normal; whether the source stated that shape or adopted Olumi's provisional approximation. */
   readonly distribution: 'normal';
   readonly distribution_origin: 'stated' | 'olumi_provisional';
-  /** Whose assessment, as the card names it: `you`, or the words naming another source ("the supplier"). */
+  /** Whose assessment: `you` (the user's own, verified literally), or `OLUMI_READING_ASSESSOR` with `read_by`. */
   readonly assessor: string;
+  /**
+   * ⭐ OLUMI'S READING (DL-3 ruling 19 Oct, Paul's show-label rule): the figures are the user's words, but the host could not verify
+   * literally that the user stated this link's spread (another speaker, a cut statement, a link it does not name). Saved and shown
+   * as Olumi's reading, never the user's, never attested.
+   */
+  readonly read_by?: 'olumi';
   /** What the assessment is based on, in the words it was given. */
   readonly basis: string;
   /** The words that state the uncertainty. */
@@ -116,7 +122,8 @@ export function statedUncertaintyOf(raw: unknown, amount: number): StatedUncerta
   const assessor = text(raw.assessor); const basis = text(raw.basis); const quote = text(raw.source_quote);
   const sd = raw.sd;
   if (origin === undefined || assessor === undefined || basis === undefined || quote === undefined || !finite(sd) || sd <= 0) return undefined;
-  const common = { sd, distribution: 'normal' as const, distribution_origin: origin, assessor, basis, source_quote: quote };
+  const common = { sd, distribution: 'normal' as const, distribution_origin: origin, assessor, basis, source_quote: quote,
+    ...(raw.read_by === 'olumi' ? { read_by: 'olumi' as const } : {}) };
   if (raw.stated_as === 'standard_deviation') return { stated_as: 'standard_deviation', ...common };
   const lower = raw.lower; const pLower = raw.p_lower; const upper = raw.upper; const pUpper = raw.p_upper;
   if (raw.stated_as !== 'normal_quantiles' || !finite(lower) || !finite(pLower) || !finite(upper) || !finite(pUpper)) return undefined;
@@ -131,13 +138,21 @@ export function statedUncertaintyOf(raw: unknown, amount: number): StatedUncerta
  * a record alone, a stale spread or a clamped size is no support.
  */
 export function statedUncertaintyAttested(edge: unknown): boolean {
-  if (!isRec(edge) || edge.std_defaulted !== false) return false;
-  const size = currentUserSize(edge);
-  if (size === undefined) return false;
+  const record = isRec(edge) && edge.std_defaulted === false ? recordedSpreadOf(edge) : undefined;
+  return record !== undefined && record.read_by === undefined;
+}
+
+/**
+ * The record this link holds for the size it still holds, when its spread is the one that record maps to on the link's current
+ * frame, whoever's it is (the user's own, or Olumi's reading): else `undefined`. No flag is read.
+ */
+export function recordedSpreadOf(edge: unknown): StatedUncertainty | undefined {
+  const size = isRec(edge) ? currentUserSize(edge) : undefined;
+  if (!isRec(edge) || size === undefined) return undefined;
   const ne = isRec(edge.provenance) && isRec(edge.provenance.natural_effect) ? edge.provenance.natural_effect : undefined;
   const record = statedUncertaintyOf(ne?.uncertainty, size.amount);
   const std = isRec(edge.strength) ? edge.strength.std : undefined;
-  return record !== undefined && finite(std) && SAME(std, record.sd * Math.abs(size.strength_mean / size.amount));
+  return record !== undefined && finite(std) && SAME(std, record.sd * Math.abs(size.strength_mean / size.amount)) ? record : undefined;
 }
 
 // ── The AIE's exact product strings (`exact_words`), with the actual values substituted ─────────────────────────────────────
@@ -180,7 +195,12 @@ export function sizeWords(size: { readonly amount: number; readonly amount_unit:
   return `${fmt(size.amount)} ${size.amount_unit} per ${per}${quote !== undefined ? ` (“${quote}”)` : ''}`;
 }
 
-const sourceOf = (u: StatedUncertainty): string => (u.assessor === 'you' ? 'your' : `${u.assessor}’s`);
+/** The assessor an Olumi reading is recorded under (`read_by: 'olumi'`). */
+export const OLUMI_READING_ASSESSOR = 'olumi_reading';
+const sourceOf = (u: StatedUncertainty): string => (u.read_by === 'olumi' ? 'Olumi’s reading of the' : u.assessor === 'you' ? 'your' : `${u.assessor}’s`);
+/** ⚠ DRAFT words, pending the AIE (#94 6268847822 item 3): an Olumi reading is labelled as such, never the user's assessment. */
+const OLUMI_READING_LABEL = ' This is Olumi’s reading, not an assessment you stated.';
+const readingLabel = (u: StatedUncertainty): string => (u.read_by === 'olumi' ? OLUMI_READING_LABEL : '');
 const shapeOf = (u: StatedUncertainty, centre: number): string => u.distribution_origin === 'stated'
   ? `a symmetric bell-shaped distribution centred on ${fmt(centre)}`
   : `a symmetric bell-shaped approximation centred on ${fmt(centre)}`;
@@ -188,13 +208,13 @@ const shapeOf = (u: StatedUncertainty, centre: number): string => u.distribution
 /** `confirmation_card_direct_sd` / `confirmation_card_central_normal` (its percentages generalised to the stated quantiles). */
 export function uncertaintyCardWords(effect: string, size: string, u: StatedUncertainty, unit: string, centre: number): string {
   if (u.stated_as === 'standard_deviation') {
-    return `Keep ${effect} at ${size}. Record ${sourceOf(u)} uncertainty assessment: standard deviation ${fmt(u.sd)} ${unit}, using ${shapeOf(u, centre)}${u.distribution_origin === 'olumi_provisional' ? ' (a provisional approximation)' : ''}, based on ${u.basis}. Calculations using it remain conditional on these assumptions.`;
+    return `Keep ${effect} at ${size}. Record ${sourceOf(u)} uncertainty assessment: standard deviation ${fmt(u.sd)} ${unit}, using ${shapeOf(u, centre)}${u.distribution_origin === 'olumi_provisional' ? ' (a provisional approximation)' : ''}, based on ${u.basis}.${readingLabel(u)} Calculations using it remain conditional on these assumptions.`;
   }
   const l = u.lower as number; const h = u.upper as number; const pL = u.p_lower as number; const pU = u.p_upper as number;
-  return `Keep ${effect} at ${size}. Record ${sourceOf(u)} assessment: ${pct(pL)} below ${fmt(l)}, ${pct(pU - pL)} between ${fmt(l)} and ${fmt(h)}, and ${pct(1 - pU)} above ${fmt(h)}. Use ${shapeOf(u, centre)}, based on ${u.basis}. This remains a provisional modelling assumption.`;
+  return `Keep ${effect} at ${size}. Record ${sourceOf(u)} assessment: ${pct(pL)} below ${fmt(l)}, ${pct(pU - pL)} between ${fmt(l)} and ${fmt(h)}, and ${pct(1 - pU)} above ${fmt(h)}. Use ${shapeOf(u, centre)}, based on ${u.basis}.${readingLabel(u)} This remains a provisional modelling assumption.`;
 }
 
 /** `receipt_after_confirmed_exact_readback`: said only once the saved link reads back exactly as approved. */
 export function uncertaintyReceiptWords(effect: string, size: string, u: StatedUncertainty, centre: number): string {
-  return `Saved the uncertainty assessment for ${effect}. Its size remains ${size}. Calculations using it remain conditional on ${shapeOf(u, centre)}, based on ${u.basis}.`;
+  return `Saved ${u.read_by === 'olumi' ? 'Olumi’s reading of the uncertainty' : 'the uncertainty assessment'} for ${effect}. Its size remains ${size}. Calculations using it remain conditional on ${shapeOf(u, centre)}, based on ${u.basis}.${readingLabel(u)}`;
 }
