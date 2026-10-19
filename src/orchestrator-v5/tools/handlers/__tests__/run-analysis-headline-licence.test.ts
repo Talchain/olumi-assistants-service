@@ -13,6 +13,18 @@ import type { PLoTClient } from '../../../../orchestrator/plot-client.js';
 import { buildAnalysisResultHeadlineParts } from '../../../coaching/analysis-result-headline.js';
 import { boundRunLeaderClaim } from '../../../model-management/version-result-binding.js';
 
+/**
+ * ⭐ STEP 8 (AIE `point_uncertainty` 564fe768, cc9fbadf): a chance resting on a user's size whose spread is not attested is
+ * withheld (`run-analysis-unsupported-spread.test.ts` pins that rule, its words and every surface). This fixture's user sizes
+ * have no attested spread, and no positive is invented for them. This file tests
+ * the range writer's recorded target, not that rule, so the Run's spread selection is held empty here; the rest of the support walk runs as served.
+ */
+vi.mock('../../../agent-lane/goal-certainty.js', async (original) => {
+  const actual = await original<typeof import('../../../agent-lane/goal-certainty.js')>();
+  return { ...actual, chanceSupportGoalPaths: (...args: Parameters<typeof actual.chanceSupportGoalPaths>) =>
+    ({ ...actual.chanceSupportGoalPaths(...args), unsupportedSpread: [] }) };
+});
+
 const scenario = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const invocation = { context: { stage: 'analyse', entity_registry: { option_ids: [], goal_id: null }, capabilities: {},
   messages: [{ role: 'user', content: 'run analysis' }], session_id: scenario, request_id: 'headline-licence',
@@ -85,9 +97,6 @@ describe('real range Run writer keeps its recorded target before any cold projec
     for (const edge of graph.edges) {
       if (edge.to === 'monthly_churn_rate' || edge.to === 'paying_subscribers_at_12_months') {
         edge.provenance = { ...edge.provenance, source: 'user_specified' };
-        // STEP 8 (AIE 764e9c72): the user's band, attested by the chat writer; an unattested spread would withhold the chance
-        // and bar its range (`run-analysis-unsupported-spread.test.ts`). This row tests the range writer's recorded target.
-        edge.std_defaulted = false;
       }
       if (edge.from === 'pro_plan_price' && edge.to === 'monthly_churn_rate') {
         edge.provenance = { ...edge.provenance, source: 'cee_hypothesis', magnitude: 'olumi_placeholder' };

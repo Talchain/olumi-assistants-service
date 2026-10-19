@@ -2005,10 +2005,12 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // size on Olumi's default spread has no supported chance: withheld for that option only, with the AIE's exact words. Its
       // range cannot return either: `goalChanceRangeOf` refuses beside any withhold code other than its own two. Gate 5 speaks alone.
       if (support.unsupportedSpread.length > 0 && !productGateWithholds) {
-        // ONLY the dependent chance (DL-3, AMENDED): the point, joint and target claims go; the comparison and the outcome stay
-        // (`keepOrdering`, `keepOutcome`): neither is a chance of meeting the goal, and the qualitative help reads them.
+        // The dependent claims go: the point, joint and target chances, and every win share and the leader (AIE cc9fbadf: a share
+        // drawn on the same unsupported spread has no warrant of its own, and never stands in for the withheld chance). The
+        // outcome stays in the saved Run for the structural challenge (`keepOutcome`); its range never reaches a public block or
+        // the AI (`unsupportedIntervalOptionIds`, AIE 764e9c72).
         response = withholdOptionGoalFigures(response, new Set(support.unsupportedSpread.map((p) => p.option_id)),
-          unsupportedSpreadWarning(graphForAnalysis, support.unsupportedSpread), { keepOrdering: true, keepOutcome: true });
+          unsupportedSpreadWarning(graphForAnalysis, support.unsupportedSpread), { keepOutcome: true });
         log.info(
           {
             event: 'run_analysis.goal_figures_withheld_for_unsupported_spread',

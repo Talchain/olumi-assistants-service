@@ -106,7 +106,7 @@ describe('m1 after the identity card\'s Yes: target failures belong to their aff
     expect(GOAL_FIGURES_WITHHELD_CODES.has(placeholder.code)).toBe(true);
   });
 
-  it('CONTROL: the user sized the route (price → churn → subscribers at 12 months) → the chance is shown', async () => {
+  it('CONTROL: the user sized the route (price → churn → subscribers at 12 months) → the target is testable; the chance waits only on the unattested spread', async () => {
     const g = structuredClone(M1.graph);
     // §(ad) S4: horizon removed — this row's claim is not about time (a held month without a carrier withholds the chance).
     for (const goal of g.nodes.filter((n: Json) => n.kind === 'goal')) {
@@ -116,13 +116,14 @@ describe('m1 after the identity card\'s Yes: target failures belong to their aff
     for (const e of g.edges as Json[]) {
       if ((e.to === 'monthly_churn_rate' || e.to === 'paying_subscribers_at_12_months') && (e.defaulted === true || String(e.provenance?.magnitude ?? '').startsWith('olumi_'))) {
         e.provenance = { ...(e.provenance ?? {}), source: 'user_specified' };
-        // STEP 8 (AIE 764e9c72): and named its band, which the chat writer attests (`std_defaulted: false`); a user's size with
-        // no attested spread withholds the chance resting on it (`run-analysis-unsupported-spread.test.ts`).
-        e.std_defaulted = false;
       }
     }
     const result = await runOn(g);
-    expect(chances(result)['59_price']).toBeCloseTo(0.9929, 4);
+    // STEP 8 (AIE 564fe768, cc9fbadf): the user's sizes on that route carry no attested spread, so the chance resting on them is
+    // truthfully withheld for that reason (`run-analysis-unsupported-spread.test.ts`). This row's claim still holds: once the
+    // user sized the route, the TARGET is testable — no target-not-testable withhold.
+    expect(chances(result)['59_price']).toBeUndefined();
+    expect(warningsOf(result).some((x) => x.code === 'GOAL_FIGURES_UNSUPPORTED_SPREAD' && (x.option_ids as string[]).includes('59_price'))).toBe(true);
     expect(warningsOf(result).some((x) => x.code === GOAL_FIGURES_TARGET_NOT_TESTABLE)).toBe(false);
   });
 });

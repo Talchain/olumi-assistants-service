@@ -94,8 +94,8 @@ export function projectUnsupportedIntervalsForTransport(
   return mapOptionRows(transport, (row) => withoutUnsupportedInterval(row, ids));
 }
 
-/** One option row without its simulated outcome range when `ids` names it (the AI's facts and the decision review read it too). */
-export function withoutUnsupportedInterval(row: RecordValue, ids: ReadonlySet<string>): RecordValue {
+/** One option row without its simulated outcome range when `ids` names it. */
+function withoutUnsupportedInterval(row: RecordValue, ids: ReadonlySet<string>): RecordValue {
   const id = typeof row.option_id === 'string' ? row.option_id : typeof row.id === 'string' ? row.id : undefined;
   if (id === undefined || !ids.has(id)) return row;
   const projected: RecordValue = { ...row };
