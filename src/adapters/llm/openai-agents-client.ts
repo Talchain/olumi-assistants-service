@@ -36,7 +36,7 @@ export interface AgentsClientLedger {
 export function ledgeredAgentsClient(ledger: AgentsClientLedger): OpenAI {
   if (!isProviderAllowed('openai')) throw new ForbiddenProviderError('openai', currentProviderPolicy()?.route ?? 'unknown', ledger.site);
   let previous: { readonly handle: ProviderCallHandle; readonly input: string; ok: boolean } | undefined;
-  const ledgerFetch = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+  const ledgerFetch = async (url: string | URL | Request, init?: Parameters<typeof fetch>[1]): Promise<Response> => {
     const path = new URL(url instanceof Request ? url.url : String(url)).pathname;
     if (!path.endsWith('/responses')) return fetch(url, init);
     const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as Record<string, unknown>;
