@@ -3539,11 +3539,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      */
     const corePaused = mode === 'core' && result === undefined && (approvedProposal !== undefined || declinedHold !== undefined)
       ? await store.readOpenAiPausedRun?.(scenarioId).catch(() => undefined) : undefined;
-    // ⛔ A paused SDK run takes no edits: an approval of it that carries any (malformed or not) is refused with the existing
-    // sentence, and nothing resumes or is written (Codex #3461 R1). The change stays waiting for the person.
-    if (corePaused != null && result === undefined && approvedProposal !== undefined && approvedProposal === corePaused.proposal_id
-      && proposalEdits !== undefined) {
-      const said = editsRefusedSentence(proposalEdits === null ? 'malformed' : 'refused');
+    /**
+     * ⛔ ONE consent check for a paused core change, whether pressed on its card or typed (Codex #3461 R1/R2). An approval of it
+     * resumes it only when its words are THE offered card's own button words (a chip sends them; typed words equal to them are
+     * the press, #3013) and it carries no edits (the paused tool takes none). With edits it is refused, and nothing resumes;
+     * other words are not a press: they go to the AI as a message, which declines the paused call. The legacy path never acts.
+     */
+    const coreOwns = corePaused != null && result === undefined
+      && ((approvedProposal !== undefined && approvedProposal === corePaused.proposal_id) || (declinedHold !== undefined && declinedHold === corePaused.proposal_id));
+    const sentEdits = coreOwns && approvedProposal !== undefined ? parseProposalEdits(body['proposal_edits']) : undefined;
+    if (coreOwns && sentEdits !== undefined) {
+      const said = editsRefusedSentence(sentEdits === null ? 'malformed' : 'refused');
       result = {
         assistant_text: said,
         items: [...(history ?? []), { role: 'user', content: [{ type: 'input_text', text: message }] },
@@ -3552,11 +3558,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 },
       };
     }
-    const corePress = corePaused == null || result !== undefined ? undefined
-      : approvedProposal !== undefined && approvedProposal === corePaused.proposal_id ? { decision: 'approve' as const, proposal_id: approvedProposal }
-      : declinedHold !== undefined && declinedHold === corePaused.proposal_id ? { decision: 'decline' as const, proposal_id: declinedHold }
-      : undefined;
-    if (declinedHold !== undefined && result === undefined && corePress === undefined) {
+    const coreCard = coreOwns && approvedProposal !== undefined
+      ? [offeredCard, soleCard].find((c) => c !== undefined && typedApprovalOf({ chip: { id: c.id } }) === approvedProposal) : undefined;
+    const corePress = !coreOwns || result !== undefined ? undefined
+      : approvedProposal !== undefined ? (coreCard !== undefined && coreCard.message === message ? { decision: 'approve' as const, proposal_id: approvedProposal } : undefined)
+      : { decision: 'decline' as const, proposal_id: declinedHold! };
+    if (declinedHold !== undefined && result === undefined && !coreOwns) {
       const started = Date.now();
       const named = heldAtStart.find((p) => heldProposalId(p) === declinedHold);
       const withdrawn = await dispatchTool(WITHDRAW_PROPOSAL, JSON.stringify({ proposal_id: declinedHold }), toolCtx, capabilities, mode);
@@ -3577,7 +3584,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * proposal that takes none in slice 1) apply nothing: the proposal stays held, and the reply says why. Valid edits
      * ride the SAME approval below (the tool context's `proposal_edits`) to the existing door, which applies them in one commit.
      */
-    if (approvedProposal !== undefined && result === undefined && corePress === undefined && proposalEdits !== undefined && editsForThisCard === undefined) {
+    if (approvedProposal !== undefined && result === undefined && !coreOwns && proposalEdits !== undefined && editsForThisCard === undefined) {
       const said = editsRefusedSentence('malformed');
       result = {
         assistant_text: said,
@@ -3587,7 +3594,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 },
       };
     }
-    if (approvedProposal !== undefined && result === undefined && corePress === undefined) {
+    if (approvedProposal !== undefined && result === undefined && !coreOwns) {
       const fastStartedAt = Date.now();
       let edited: ReturnType<typeof amendAgentProposal> | undefined;
       let editsFailure: 'stale' | 'not_held' | 'refused' | undefined;
@@ -4372,7 +4379,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           items: [], tool_calls: [], tool_results: [], mutated: false, hops: 0, stopped_reason: 'answered',
           timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0,
             provider_calls: 0, tool_calls: 0, hops: 0 } };
-      } else if (mode === 'core' && (corePress !== undefined || (!runPress && methodTurn === null && widenRun === undefined
+      } else if (mode === 'core' && (corePress !== undefined || coreOwns || (!runPress && methodTurn === null && widenRun === undefined
         && risksRun === undefined && (body['chip'] === undefined || body['chip'] === null)))) {
         // ⭐ PATH-B: an ordinary typed `core` turn runs on the OpenAI Agents SDK (`core/sdk-turn.ts`): its runner, its session
         // memory and its trace, with Olumi's capabilities as the tools. Presses and method turns keep their existing paths.
