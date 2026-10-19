@@ -277,6 +277,27 @@ describe('PATH-B core turn on the Agents SDK', () => {
     expect(sent[0]!.conversation).toBe('conv_winner');
   });
 
+  it('a typed adapter records its own row: the kit\'s fields reach `tool_calls`, its result reaches `tool_results`, an unknown write is no claim', async () => {
+    const adapters = (onCall: Parameters<NonNullable<Parameters<typeof runCoreTurn>[0]['tools']>>[0]) => [
+      tool({ name: 'run_analysis', description: 'Run the analysis.', parameters: z4.object({ reason: z4.string() }),
+        execute: async () => { onCall({ name: 'run_analysis', ok: true, mutated: false, outcome: 'ok', refusal: null, ran: true }, { ok: true, mutated: false, ran: true }); return '{"ran":true}'; } }),
+      tool({ name: 'apply_change', description: 'Apply.', parameters: z4.object({ proposal_id: z4.string() }),
+        execute: async () => { onCall({ name: 'apply_change', ok: false, mutated: null, outcome: 'unavailable', refusal: 'not_confirmed', ran: null },
+          { ok: false, mutated: false, outcome: 'unavailable', refusal: 'not_confirmed', proposal_id: PID }); return '{"outcome":"unavailable"}'; } }),
+    ];
+    scripted = [[{ type: 'function_call', name: 'run_analysis', args: { reason: 'asked' } }],
+      [{ type: 'function_call', name: 'apply_change', args: { proposal_id: PID } }], [{ type: 'message', text: 'Ran; the save is not confirmed.' }]];
+    const { result } = await turn('Run it and apply that.', caps(), { tools: adapters });
+    expect(result.tool_calls).toEqual([
+      { name: 'run_analysis', ok: true, mutated: false, outcome: 'ok', ran: true },
+      { name: 'apply_change', ok: false, mutated: false, outcome: 'unavailable', refusal: 'not_confirmed', proposal_id: PID },
+    ]);
+    expect(result.tool_results.map((r) => r['ran'] ?? null)).toEqual([true, null]);
+    expect(result.mutated).toBe(false);
+    // The interim wrapper is not used when the adapters are given: only their tools were sent.
+    expect(sent[0]!.tools.map((t: Json) => t.name)).toEqual(['run_analysis', 'apply_change']);
+  });
+
   describe('APPROVAL: a tool that needs approval pauses the SDK run; the press resumes that same saved RunState', () => {
     let pausedColumn: OpenAiPausedRun | null = null;
     const pausedStore = (overrides: Partial<PausedRunStore> = {}): PausedRunStore => ({
@@ -299,7 +320,7 @@ describe('PATH-B core turn on the Agents SDK', () => {
 
     it('⭐ PAUSE: the run stops at the approval, its state is saved on the scenario, nothing is applied, and the AI\'s words are the reply', async () => {
       scripted = [pausing()];
-      const { result } = await turn('Please drop option B.', caps(), { tools: applyTool(), pausedRunStore: pausedStore() });
+      const { result } = await turn('Please drop option B.', caps(), { tools: () => applyTool(), pausedRunStore: pausedStore() });
       expect(applied, 'nothing applied before the press').toBe(0);
       expect(result.assistant_text).toBe('I propose taking option B out of the comparison; approve it on the card.');
       expect(result.reply_author).toBe('ai');
@@ -313,10 +334,10 @@ describe('PATH-B core turn on the Agents SDK', () => {
 
     it('⭐ RESUME: the press approves the SAME saved run; the tool runs once; a second press finds nothing to resume and applies nothing', async () => {
       scripted = [pausing()];
-      await turn('Please drop option B.', caps(), { tools: applyTool(), pausedRunStore: pausedStore() });
+      await turn('Please drop option B.', caps(), { tools: () => applyTool(), pausedRunStore: pausedStore() });
       const pausedCall = pausedColumn!.call_id;
       scripted = [[{ type: 'message', text: 'Done: option B is out of the comparison.' }]];
-      const { result } = await turn('Approve', caps(), { tools: applyTool(), pausedRunStore: pausedStore(), press: { decision: 'approve', proposal_id: PID } });
+      const { result } = await turn('Approve', caps(), { tools: () => applyTool(), pausedRunStore: pausedStore(), press: { decision: 'approve', proposal_id: PID } });
       expect(applied).toBe(1);
       expect(result.sdk.resumed).toMatchObject({ answer: 'approved' });
       expect(result.assistant_text).toBe('Done: option B is out of the comparison.');
@@ -330,15 +351,15 @@ describe('PATH-B core turn on the Agents SDK', () => {
       expect(resumeInput).not.toContain('Approve');
       // A duplicate press: the run was taken, so there is nothing to resume and the tool never runs again.
       scripted = [[{ type: 'message', text: 'That change is already applied.' }]];
-      await turn('Approve', caps(), { tools: applyTool(), pausedRunStore: pausedStore(), press: { decision: 'approve', proposal_id: PID } });
+      await turn('Approve', caps(), { tools: () => applyTool(), pausedRunStore: pausedStore(), press: { decision: 'approve', proposal_id: PID } });
       expect(applied, 'applied once in all').toBe(1);
     });
 
     it('a decline on the card answers the paused call with the decline; nothing is applied', async () => {
       scripted = [pausing()];
-      await turn('Please drop option B.', caps(), { tools: applyTool(), pausedRunStore: pausedStore() });
+      await turn('Please drop option B.', caps(), { tools: () => applyTool(), pausedRunStore: pausedStore() });
       scripted = [[{ type: 'message', text: 'Understood; option B stays in.' }]];
-      const { result } = await turn('Decline', caps(), { tools: applyTool(), pausedRunStore: pausedStore(), press: { decision: 'decline', proposal_id: PID } });
+      const { result } = await turn('Decline', caps(), { tools: () => applyTool(), pausedRunStore: pausedStore(), press: { decision: 'decline', proposal_id: PID } });
       expect(applied).toBe(0);
       expect(result.sdk.resumed).toMatchObject({ answer: 'declined' });
       expect(JSON.stringify(sent[1]!.input)).toContain(PAUSE_DECLINED);
@@ -346,9 +367,9 @@ describe('PATH-B core turn on the Agents SDK', () => {
 
     it('⛔ a typed message instead of a press declines the paused call first, then the message; ONE reply; nothing applied', async () => {
       scripted = [pausing()];
-      await turn('Please drop option B.', caps(), { tools: applyTool(), pausedRunStore: pausedStore() });
+      await turn('Please drop option B.', caps(), { tools: () => applyTool(), pausedRunStore: pausedStore() });
       scripted = [[{ type: 'message', text: 'Then let us look at the costs first.' }]];
-      const { result } = await turn('Actually, what about the costs?', caps(), { tools: applyTool(), pausedRunStore: pausedStore() });
+      const { result } = await turn('Actually, what about the costs?', caps(), { tools: () => applyTool(), pausedRunStore: pausedStore() });
       expect(applied).toBe(0);
       expect(result.sdk.resumed).toMatchObject({ answer: 'superseded' });
       expect(result.assistant_text).toBe('Then let us look at the costs first.');
@@ -363,7 +384,7 @@ describe('PATH-B core turn on the Agents SDK', () => {
 
     it('⛔ a pause that cannot be kept is answered in the same turn: nothing applied, nothing left open, the AI says so', async () => {
       scripted = [pausing(), [{ type: 'message', text: 'I could not hold that change for your approval; nothing changed.' }]];
-      const { result } = await turn('Please drop option B.', caps(), { tools: applyTool(), pausedRunStore: pausedStore({ save: async () => false }) });
+      const { result } = await turn('Please drop option B.', caps(), { tools: () => applyTool(), pausedRunStore: pausedStore({ save: async () => false }) });
       expect(applied).toBe(0);
       expect(result.sdk.paused).toBeUndefined();
       expect(result.assistant_text).toBe('I could not hold that change for your approval; nothing changed.');
