@@ -300,15 +300,16 @@ export async function applyChange(deps: ChangeDeps, ctx: ChangeCtx, args: ApplyC
     if (res.status === 'refused') {
       return refused(codeOf(res.reason), undefined, { ...(res.value ?? res.frame ?? res.pair ?? {}) });
     }
-    if (res.already_applied) {
-      deps.proposals.markApplied(p.proposal_id, []);
-      return ok({ unchanged: true });
-    }
+    // ONE success predicate for every arm (buddy 16:0x): the complete approved postimage, read back afresh. A verified no-op
+    // ("the model already held it") is said as unchanged, with no receipt, and only when the readback holds as approved.
     const after = await readSaved(deps, ctx.scenario_id);
     const back = isSavedRead(after) ? readbackOf(after, ops) : null;
-    if (res.receipt === null || res.receipt.source_turn_id !== turnId || back === null || !back.holds || !isSavedRead(after)) {
-      return unavailable('not_verified', 'unknown');
+    if (back === null || !back.holds || !isSavedRead(after)) return unavailable('not_verified', 'unknown');
+    if (res.already_applied) {
+      deps.proposals.markApplied(p.proposal_id, []);
+      return ok({ unchanged: true, faithful: back.faithful, written: back.written });
     }
+    if (res.receipt === null || res.receipt.source_turn_id !== turnId) return unavailable('not_verified', 'unknown');
     const receipt: ReceiptSummary = { ...res.receipt, source_turn_id: turnId };
     deps.proposals.markApplied(p.proposal_id, [receipt]);
     return ok({ saved: true, faithful: back.faithful, receipt, revision: { graph_hash: after.graphHash, graph_identity_hash: after.identity },
