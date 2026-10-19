@@ -165,19 +165,25 @@ const DIGIT_AMOUNT_START = `(?:[A-Z]{0,3}[^\\s\\w])?\\d`;
 /** An amount in digits ends: its last digit, then its own magnitude and percent sign, if written. */
 const DIGIT_AMOUNT_END = `\\d(?:\\s*(?:${MAGNITUDE_ALTERNATION})\\b)?%?`;
 /**
- * ⛔ TWO FORMS NEVER SHARE ONE SCALE (DL-3 on Codex R2 #3442: "between 2 and three thousand" credited 2, "five million to 7" 7).
- * A number in words is never read alone as one end of a range whose other end is in digits, joined by "to", "or", a dash, or "and"
- * after "between": before it ("2 to three million", "between 2 and three thousand") or after it ("two to 3 million", "between two
- * and 3 thousand"). The digit reader refuses the digits end of the same range (`joinedToARangeEndInWords`), so such a range gives
- * nothing, never one end alone.
+ * An amount this grammar reads no figure from, written as one end of a range: an article and a word ("a dozen", "a few", "a
+ * hundred", any word at all), or a word that is no number before a scale word ("several hundred"). No word list: "not read" is
+ * "not parsed here" (Codex R3 on #3445).
  */
-const NOT_AFTER_A_DIGIT_END = `(?<!${DIGIT_AMOUNT_END}${DIGIT_RANGE_JOIN})`
-  + `(?<!\\bbetween\\s+${DIGIT_AMOUNT_START}[\\d,.]*(?:\\s*(?:${MAGNITUDE_ALTERNATION})\\b)?%?\\s+and\\s+)`
-  + `(?!(?<=\\bbetween\\s+)(?:${NUMBER_CORE})\\s+and\\s+${DIGIT_AMOUNT_START})`;
-const NOT_BEFORE_A_DIGIT_END = `(?!${DIGIT_RANGE_JOIN}${DIGIT_AMOUNT_START})`;
+const UNREAD_AMOUNT = `(?:\\ban?\\s+[a-z]+(?:[\\s-]+(?:${MULTIPLIER_ALTERNATION}))*|\\b(?!(?:${TOKEN_ALTERNATION})\\b)[a-z]+(?:[\\s-]+(?:${MULTIPLIER_ALTERNATION}))+)`;
+/** "between" opened a range whose "and" comes just before this point ("between a dozen and …"). */
+const AFTER_BETWEEN_AND = `\\bbetween\\s+[^.;:!?\\n]{1,40}?\\s+and\\s+`;
+/**
+ * ⛔ A RANGE IS FOUND BY ITS CONNECTOR, AND GIVES BOTH ENDS OR NOTHING (DL-3 on Codex R2 #3442 and R3 #3445). A number in words is
+ * never read alone as one end of a range ("to", "or", a dash, or "between … and") whose other end this grammar does not read with
+ * it: an end in digits ("2 to three million", "two to 3 million": two forms never share one scale), an amount it reads no figure
+ * from (`UNREAD_AMOUNT`: "a dozen to twenty", "two to a few hundred"), or any "between … and" it could not read whole ("between a
+ * dozen and twenty"). The digit reader refuses its own end of the same range (`joinedToARangeEndInWords`).
+ */
+const NOT_AFTER_ANOTHER_END = `(?<!${DIGIT_AMOUNT_END}${DIGIT_RANGE_JOIN})(?<!${UNREAD_AMOUNT}${RANGE_JOIN})(?<!${AFTER_BETWEEN_AND})`
+  + `(?!(?<=\\bbetween\\s+)(?:${NUMBER_CORE})\\s+and\\s+)`;
+const NOT_BEFORE_ANOTHER_END = `(?!${DIGIT_RANGE_JOIN}${DIGIT_AMOUNT_START})(?!${RANGE_JOIN}${UNREAD_AMOUNT})`;
 /** Number words of any shape, an article and a fraction included ("a million", "two and a half million"). */
 const NUMBER_WORD = `(?:${TOKEN_ALTERNATION}|${FRACTION_ALTERNATION})`;
-const NUMBER_WORDS_RUN = `(?:(?:an?|${NUMBER_WORD}|and|point|zero)[\\s-]+)*?`;
 
 /**
  * The fraction words whose arrival after a cardinal phrase means the phrase
@@ -223,19 +229,10 @@ const BARE_END = `(?:${SMALL_ALTERNATION})(?:[\\s-]+(?:${SMALL_ALTERNATION}))*(?
  */
 const NOT_A_BARE_HIGH_END = `(?!(?<=\\b(?:${MULTIPLIER_ALTERNATION})(?:(?:\\s+and\\s+|\\s+point\\s+|[\\s-]+)(?:${TOKEN_ALTERNATION}|zero))*${RANGE_JOIN})${BARE_END}${WHOLE})`;
 /**
- * The same range-end refusals for a pattern that reads number words beyond this grammar (an article: "a million", "a hundred and
- * twenty"), around its own capture. BEFORE: never right after "between" (a range this grammar does not read whole), nor after a
- * digits end and its joiner. AFTER: nothing that continues the number follows (so no refusal shortens the capture into a
- * fragment), no digits end, and no bare number its scale would have to reach ("a million to seven").
- */
-export const CARDINAL_RANGE_END_GUARD_BEFORE = `(?<!\\bbetween\\s+)(?<!${DIGIT_AMOUNT_END}${DIGIT_RANGE_JOIN})`;
-export const CARDINAL_RANGE_END_GUARD_AFTER = `(?![\\s,]+and\\s+(?:${TOKEN_ALTERNATION})\\b|[\\s-]+(?:${TOKEN_ALTERNATION})\\b)`
-  + `${NOT_BEFORE_A_DIGIT_END}(?!${RANGE_JOIN}${BARE_END}${WHOLE})`;
-/**
  * ONE number in free text. `WHOLE` keeps a refusal after it from shortening the capture into a fragment ("two hundred to 3": never
  * "two").
  */
-const ONE_NUMBER = `${START_GUARD}${NOT_AFTER_A_DIGIT_END}${NOT_A_BARE_HIGH_END}${NUMBER_CORE}${NO_LONGER_AMOUNT}${WHOLE}${NOT_BEFORE_A_DIGIT_END}`;
+const ONE_NUMBER = `${START_GUARD}${NOT_AFTER_ANOTHER_END}${NOT_A_BARE_HIGH_END}${NUMBER_CORE}${NO_LONGER_AMOUNT}${WHOLE}${NOT_BEFORE_ANOTHER_END}`;
 
 /**
  * The phrase grammar, as a SOURCE string with NO capture groups so one pattern can embed it twice under different named
@@ -246,7 +243,7 @@ const ONE_NUMBER = `${START_GUARD}${NOT_AFTER_A_DIGIT_END}${NOT_A_BARE_HIGH_END}
  * 203,000), "X to Y" / "X or Y" / "X – Y" with a shared scale ("two to three million": never 2 and 3,000,000), and the same
  * with a scale on the low end only ("five million to seven", "two hundred and fifty to three": never 7 or 3). Any other "X to Y" keeps its ends as single
  * captures, as before ("two to three": 2 and 3; "two thousand to three million": 2,000 and 3,000,000). A number in words is
- * never one end of a range whose other end is in digits (`NOT_AFTER_A_DIGIT_END`). `parseCardinalAmount` refuses a whole
+ * never one end of a range whose other end it does not read with it (`NOT_AFTER_ANOTHER_END`). `parseCardinalAmount` refuses a whole
  * range (its connector is outside the vocabulary); `cardinalReadings` reads its two ends, or nothing. The repetition is
  * greedy, so "two hundred and fifty thousand" is consumed whole.
  *
@@ -429,16 +426,18 @@ export function cardinalReadings(
   return [{ magnitude: low, index, matchedText: matched }, { magnitude: high, index, matchedText: matched }];
 }
 
-const WORDS_RANGE_END_AFTER = new RegExp(`^${DIGIT_RANGE_JOIN}(?:an?\\s+)?${NUMBER_WORD}\\b`, "i");
-// A scale word straight after digits is that amount's own magnitude ("2 thousand to 3 thousand"), never a words end.
-const WORDS_RANGE_END_BEFORE = new RegExp(`(?:(?<!\\d\\s*)\\b${NUMBER_WORD}${DIGIT_RANGE_JOIN}|\\bbetween\\s+${NUMBER_WORDS_RUN}${NUMBER_WORD}\\s+and\\s+)$`, "i");
-const WORDS_RANGE_END_AFTER_BETWEEN = new RegExp(`^\\s+and\\s+(?:an?\\s+)?${NUMBER_WORD}\\b`, "i");
+const WORDS_RANGE_END_AFTER = new RegExp(`^${DIGIT_RANGE_JOIN}(?:(?:an?\\s+)?${NUMBER_WORD}\\b|${UNREAD_AMOUNT})`, "i");
+// A scale word straight after digits is that amount's own magnitude ("2 thousand to 3 thousand"), never a words end; a "between"
+// whose low end has digits is the digit reader's own range.
+const WORDS_RANGE_END_BEFORE = new RegExp(`(?:(?:(?<!\\d\\s*)\\b${NUMBER_WORD}|${UNREAD_AMOUNT})${DIGIT_RANGE_JOIN}|\\bbetween\\s+[^\\d.;:!?\\n]{1,40}?\\s+and\\s+)$`, "i");
+const WORDS_RANGE_END_AFTER_BETWEEN = new RegExp(`^\\s+and\\s+(?!${DIGIT_AMOUNT_START})\\S`, "i");
 
 /**
  * ⛔ TWO FORMS NEVER SHARE ONE SCALE, at the digit reader (DL-3 on Codex R2 #3442). Whether the amount in digits written at
- * `[start, end)` is one end of a range whose other end is in number words, of any shape this grammar reads or not (an article,
- * a fraction: "a million to 3", "two and a half million to 3"): joined by "to", "or" or a dash ("2 to three million", "five
- * million to 7"), or by "and" after "between" ("between 2 and three thousand"). The words end is never read alone there
+ * `[start, end)` is one end of a range whose other end is in words: number words of any shape this grammar reads or not (an
+ * article, a fraction: "a million to 3", "two and a half million to 3"), or an amount it reads no figure from ("a dozen to 20",
+ * "20 to a few hundred"). Joined by "to", "or" or a dash ("2 to three million", "five million to 7"), or by "and" after "between"
+ * ("between 2 and three thousand", "between a dozen and 20", "between 20 and a dozen"). The words end is never read alone there
  * (`CARDINAL_AMOUNT_SOURCE`), so the digit reader refuses this end too: such a range gives nothing, never one end alone. Pure.
  */
 export function joinedToARangeEndInWords(text: string, start: number, end: number): boolean {

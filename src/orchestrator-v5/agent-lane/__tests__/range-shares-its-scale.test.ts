@@ -112,6 +112,32 @@ describe('⛔ a range with no ONE shared scale gives nothing, never one end alon
   });
 });
 
+/** Codex R3 on #3445 @6a7a47e8 (held-out witnesses, adopted verbatim), then each side and connector with an end not read. */
+const AN_END_NOT_READ = [
+  'a dozen to twenty', 'a dozen to 20', 'between a dozen and twenty', 'a dozen or twenty', 'a dozen – twenty',
+  'We expect a few to 20 users.', 'We expect a couple or three users.', 'We expect a handful – twenty users.', 'We expect a zillion to twenty users.',
+  'We expect several hundred to 2,000 users.', 'We expect several hundred to three thousand users.',
+  'We expect two to a dozen users.', 'We expect 20 to a few hundred users.', 'We expect between 20 and a dozen users.', 'We expect between two and a dozen users.',
+];
+
+describe('⛔ a range is found by its connector: an end the grammar does not read means the range gives nothing (Codex R3 on #3445)', () => {
+  it.each(AN_END_NOT_READ)('"%s": neither reader reads either end', (text) => {
+    expect(read(text)).toEqual([]);
+    expect(figuresWritten(text)).toEqual([]);
+  });
+  const texts = (m: string) => ({ now: m, conversation: m, messages: [m] });
+  it('the witness is never the user\'s 20 (typed, as Codex typed it)', () => {
+    const quote = 'People total a dozen to twenty people.';
+    expect(userStated({ quote, value: 20 }, texts(quote), { quantity: 'level', node_id: 'people' }).origin).not.toBe('human');
+  });
+  it.each([
+    ['We want to grow to twenty stores.', [20]], ['Grow the team to 20 people.', [20]], ['Increase MRR to £20k.', [20_000]],
+    ['We need 20 or more customers.', [20]], ['Target – 20 hires.', [20]], ['Hire two to three engineers.', [2, 3]],
+  ] as const)('CONTROL a connector beside no amount still reads its number: "%s"', (text, expected) => {
+    expect(read(text).map(([, v]) => v)).toEqual(expected);
+  });
+});
+
 describe('what the user wrote: a bare low end is never their figure', () => {
   it.each([
     'We expect 2 to 3 million users.',
@@ -172,6 +198,11 @@ describe('⭐ GENERATED: every two-ended range gives its two true ends or nothin
       cases.push({ text, truth: lowScaled || highScaled ? [2 * s, 3 * s] : [2, 3] });
     }
   }
+  // An end the grammar reads no figure from, on either side of every connector: the range has no true reading, so nothing.
+  for (const unread of ['a dozen', 'a few', 'a zillion', 'several hundred']) for (const join of joins) for (const other of ['twenty', '20']) {
+    cases.push({ text: `We expect ${join(unread, other)} users.`, truth: [] as unknown as [number, number] });
+    cases.push({ text: `We expect ${join(other, unread)} users.`, truth: [] as unknown as [number, number] });
+  }
   const bothOrNothing = (got: readonly number[], truth: readonly number[]): boolean =>
     got.length === 0 || [...got].sort((a, b) => a - b).join() === [...truth].join();
 
@@ -183,7 +214,8 @@ describe('⭐ GENERATED: every two-ended range gives its two true ends or nothin
 
   it('CONTROL the property is not vacuous: one form with one shared scale reads both ends', () => {
     const read2 = cases.filter((c) => read(c.text).length === 2);
-    expect(read2.length).toBeGreaterThan(cases.length / 4);
+    expect(read2.length).toBeGreaterThan(cases.length / 5);
+    expect(cases.filter((c) => c.truth.length === 0).length).toBeGreaterThan(50);
     expect(read2.some((c) => /\btwo\b/.test(c.text)) && read2.some((c) => /\b2\b/.test(c.text))).toBe(true);
   });
 });
