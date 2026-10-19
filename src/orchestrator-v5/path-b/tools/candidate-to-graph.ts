@@ -52,7 +52,7 @@ import { CONSTRUCTION_ATTEST, userStatementRecord, withUserStatement } from '../
 import { isStatementField, subjectKey, type DoorSubject } from '../../statement-door/subject.js';
 import { userStatementOf, type UserStatement } from '../../agent-lane/user-statements.js';
 import { verbatimSourceLine } from '../../agent-lane/quote-confirmation.js';
-import { admitInterventionRange, interventionPoint } from '../../intervention-range.js';
+import { admitInterventionRange, interventionPoint, StoredInterventionRange } from '../../intervention-range.js';
 
 type Rec = Record<string, any>;
 /** Whose figure the AI declared it to be. */
@@ -584,7 +584,7 @@ function withDeclaredStatements(graph: Rec, input: unknown, carry: StatementCarr
   for (const { subject, statements } of groups.values()) {
     out = withUserStatement(out, userStatementRecord(subject, statements, carry.recorded_at, CONSTRUCTION_ATTEST), subject) ?? out;
   }
-  return withStatedSettingRanges(out, input, carry.words, [...groups.values()]);
+  return withRecordedRanges(out, input, carry.words, [...groups.values()]);
 }
 
 /**
@@ -595,13 +595,26 @@ function withDeclaredStatements(graph: Rec, input: unknown, carry: StatementCarr
  * declared ADDITION on the total Olumi computed is not carried (the setting is the total), nor one that brackets both readings.
  * Another person's or an unclear range stays in the record, since the range cannot say whose it is. The range is an interval; how
  * the analysis reads it is its existing, disclosed law (an equal-tail approximation the person adopts before any chance is shown).
+ * ⭐ A FACTOR'S OWN LEVEL TODAY, the same way (DL 19 Oct): the user's recorded range rides the existing level carrier
+ * (`observed_state.range`, `min_max`: the ends as written, read as bounds and nothing more), only where it contains the stored
+ * figure. Nothing samples it, so the analysis is unchanged (`withoutStatedLevelRanges`).
  */
-function withStatedSettingRanges(graph: Rec & { nodes: unknown[] }, input: unknown, words: string,
+function withRecordedRanges(graph: Rec & { nodes: unknown[] }, input: unknown, words: string,
   said: readonly { subject: DoorSubject; statements: UserStatement[] }[]): Rec & { nodes: unknown[] } {
   const nodes = list<Rec>(graph.nodes).map((n) => ({ ...n }));
   const nameOf = (id: string | undefined): string => canonicalLabel(String(nodes.find((n) => n.id === id)?.description ?? nodes.find((n) => n.id === id)?.label ?? ''));
   for (const { subject, statements } of said) {
     const ranges = statements.filter((st) => st.speaker === 'user' && st.form === 'range' && finite(st.low) && finite(st.high));
+    if (subject.kind === 'factor' && subject.field === 'level' && subject.option_id === undefined) {
+      const factor = nodes.find((n) => n.id === subject.id && n.kind === 'factor');
+      const os = factor?.observed_state as Rec | undefined;
+      const figure: unknown = finite(os?.raw_value) ? os!.raw_value : os?.value;
+      const r = ranges.length === 1 ? ranges[0]! : undefined;
+      const range = r === undefined ? undefined : { low: r.low, high: r.high, meaning: 'min_max', source: 'brief_extraction', source_quote: r.quote };
+      if (range !== undefined && os !== undefined && finite(figure) && r!.low! <= figure && figure <= r!.high! && StoredInterventionRange.safeParse(range).success
+        && !(typeof r!.unit === 'string' && typeof os.unit === 'string' && !sameUnit(r!.unit, os.unit))) factor!.observed_state = { ...os, range };
+      continue;
+    }
     const option = nodes.find((n) => n.id === subject.option_id && n.kind === 'option');
     const cell = (option?.interventions as Rec | undefined)?.[subject.id] as Rec | undefined;
     const point = interventionPoint(cell);
