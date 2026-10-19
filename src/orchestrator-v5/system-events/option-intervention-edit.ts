@@ -969,10 +969,6 @@ export type CompoundStructuralMember =
   | { readonly kind: 'rename'; readonly node_id: string; readonly expected_label: string; readonly label: string }
   | { readonly kind: 'remove'; readonly node_ids: readonly string[]; readonly edges: readonly { readonly from: string; readonly to: string }[] };
 /**
- * ⭐ GAP 2: present ONLY from the typed core caller (PATH-B). Its link strengths ride with its figures (on their postimage)
- * and its renames and removals ride too; every other caller's link set stays ALONE (`link_strengths_not_alone`).
- */
-/**
  * ⭐ add_to_model (PATH-B): a NEW factor exactly as the add-factor door holds one (`HoldAddFactorInput`): its id, name, its ONE
  * link (Olumi's placeholder strength) and its figure, framed by the ONE framing rule and stamped as the declared source's.
  */
@@ -980,7 +976,19 @@ export type CompoundAddFactor = {
   readonly id: string; readonly label: string; readonly link: { readonly to_id: string; readonly effect_direction: 'positive' | 'negative' };
   readonly observed_state: Readonly<Record<string, unknown>>; readonly basis: UserTodayBasis; readonly quote?: string;
 };
-export type CompoundChange = { readonly structural: readonly CompoundStructuralMember[]; readonly adds?: readonly CompoundAddFactor[] };
+/**
+ * ⭐ GAP 2: present ONLY from the typed core caller (PATH-B). Its link strengths ride with its figures (on their postimage)
+ * and its renames and removals ride too; every other caller's link set stays ALONE (`link_strengths_not_alone`).
+ */
+export type CompoundChange = {
+  readonly structural: readonly CompoundStructuralMember[];
+  readonly adds?: readonly CompoundAddFactor[];
+  /**
+   * ⭐ GAP 1 (DL-3 GO, 19 Oct): each person's claim for a figure this commit writes (`isFigureClaimRecord`: who said it, a party's
+   * name, their words, conditions and stance), by the ONE claim-record writer on the SAME candidate. Never an attest.
+   */
+  readonly claims?: readonly ApprovedStatementRecord[];
+};
 
 /**
  * ⭐ GAP 2: the members of ONE compound change never act on the same part twice: a part another member writes, sizes or
@@ -1085,7 +1093,8 @@ function validateOptionInterventionBatchInput(input: OptionInterventionBatchExec
       return { kind: 'refused', reason: 'compound_not_alone' };
     }
     const links = [...(input.linkStrengths ?? []), ...(input.expectedLinks ?? []).map(k => ({ from: k.split('::')[0] ?? '', to: k.split('::')[1] ?? '' }))];
-    const nodes = [...input.targets.flatMap(t => [t.optionId, t.factorId]), ...(input.values ?? []).map(v => v.factorId), ...(input.frames ?? []).map(f => f.factorId)];
+    const nodes = [...input.targets.flatMap(t => [t.optionId, t.factorId]), ...(input.values ?? []).map(v => v.factorId), ...(input.frames ?? []).map(f => f.factorId),
+      ...(compound.claims ?? []).map(c => c.node_id)];
     if (compoundMembersConflict({ nodes, links }, compound.structural)) return { kind: 'refused', reason: 'compound_members_conflict' };
   }
   return { kind: 'valid', optionGaps, rangeLaws };
@@ -1560,7 +1569,8 @@ export async function prepareOptionInterventionBatchExecution(
   // are the whole plan: the same writer, adoption authority, scope guard, ONE append and ONE read-back.
   const structural = compound?.structural ?? [];
   const adds = compound?.adds ?? [];
-  const candidate = targets.length === 0 && values.length + frames.length + linkStrengths.length + effectCount + optionGaps.length + structural.length + adds.length > 0
+  const claims = compound?.claims ?? [];
+  const candidate = targets.length === 0 && values.length + frames.length + linkStrengths.length + effectCount + optionGaps.length + structural.length + adds.length + claims.length > 0
     ? ({ kind: 'unchanged' } as const)
     : applyOptionInterventionBatch({ ...common, expectedGraphHash: levelBaseHash, persistedGraph: levelBase, targets });
   if (candidate.kind === 'refused') return candidate;
@@ -1605,6 +1615,25 @@ export async function prepareOptionInterventionBatchExecution(
       plan = { ...plan, graph, operations, analysisGraphHash, handlerFacts: [...valueFacts, fact] as unknown[] };
     }
   }
+  // ⭐ GAP 1: each person's figure claim, by the ONE claim-record writer, beside the figure on the SAME candidate. The card's node
+  // is checked against the persisted base; the record is then written on this postimage (the figures' own node bytes moved).
+  let claimsWritten = false;
+  for (const r of claims) {
+    const nodeIn = (g: unknown): unknown => (isEditableGraph(g) ? g.nodes.find(n => n.id === r.node_id) : undefined);
+    if (!isDeepStrictEqual(nodeIn(before), r.expected_node)) return { kind: 'refused', reason: 'claim_node_changed' };
+    const base = plan.graph;
+    const onBase: ApprovedStatementRecord = { ...r, expected_node: structuredClone(nodeIn(base)) as ApprovedStatementRecord['expected_node'] };
+    const written = applyStatementRecordEdit(base, onBase);
+    if (written.kind === 'refused') return { kind: 'refused', reason: `claim_${written.reason}` };
+    if (written.kind === 'unchanged') continue;
+    const graph = projectGraphForPersistence(written.mutatedGraph);
+    if (!isEditableGraph(graph) || !statementRecordPostimageIsScoped(base, graph, onBase)) return { kind: 'refused', reason: 'claim_scope_mismatch' };
+    const hash = computeAnalysisAffectingGraphHash(graph);
+    if (!hash) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    plan = { ...plan, graph, analysisGraphHash: hash, handlerFacts: [...plan.handlerFacts, ...written.handlerFacts] };
+    valueConfirmations = [...valueConfirmations, written.confirmation];
+    claimsWritten = true;
+  }
   // ⭐ GAP 2 (DL ruling B): the compound's renames and removals, by the structural writers, IN MEMORY on the SAME candidate,
   // each on the postimage of everything before it. Any member refused refuses the whole change; nothing is written.
   for (const member of structural) {
@@ -1632,7 +1661,7 @@ export async function prepareOptionInterventionBatchExecution(
       handlerFacts: [...plan.handlerFacts, ...written.handlerFacts] };
     valueConfirmations = [...valueConfirmations, written.response.assistant_text];
   }
-  if (candidate.kind === 'unchanged' && !valuesChanged && !gapsChanged && structural.length === 0 && adds.length === 0) return candidate;
+  if (candidate.kind === 'unchanged' && !valuesChanged && !gapsChanged && structural.length === 0 && adds.length === 0 && !claimsWritten) return candidate;
   if (expectedLinks !== undefined) {
     const adding = plan.operations.filter(o => o.op === 'add_edge').map(o => o.path).sort();
     if (!isDeepStrictEqual(adding, [...new Set(expectedLinks)].sort())) return { kind: 'refused', reason: 'links_mismatch' };

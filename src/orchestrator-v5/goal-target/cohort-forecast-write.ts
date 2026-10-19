@@ -257,8 +257,20 @@ export type StatementRecordEditResult =
   | { readonly kind: 'unchanged' }
   | { readonly kind: 'refused'; readonly reason: 'invalid_graph' | 'invalid_statement' | 'node_not_found' | 'node_changed' };
 
+/**
+ * ⭐ GAP 1 (DL-3 GO, 19 Oct): a person's own figure for a factor's level, or for an option's setting of it (PATH-B's
+ * `propose_change`), kept as THEIR claim beside the figure the SAME commit writes: who said it, a party's name, their words, its
+ * conditions and stance. It carries no attest (no adoption, no law), so it is never read as a range, an adoption or a size; other
+ * sources' claims on the subject stay beside it (`withClaimsKept`).
+ */
+export function isFigureClaimRecord(subject: DoorSubject, record: UserStatementRecord): boolean {
+  return subject.kind === 'factor' && subject.field === 'level' && subject.to_id === undefined && record.attest === undefined
+    && record.statements.some((st) => st.form === 'point' && saidByOf(st) !== 'olumi' && st.low !== undefined && st.low === st.high);
+}
+
 /** The subjects this member records, each with the statements it holds: never a figure-bearing record in place of its own carrier. */
 function recordable(subject: DoorSubject, record: UserStatementRecord): boolean {
+  if (isFigureClaimRecord(subject, record)) return true;
   if (subject.kind === 'goal' && subject.field === 'relation') return record.statements.length === 1 && record.statements[0]!.form === 'holds_now';
   if (subject.kind === 'option' && subject.field === 'lead') {
     return record.statements.length >= 1 && record.statements.length <= 2 && record.attest !== undefined && typeof record.attest.fingerprint === 'string';
@@ -341,7 +353,8 @@ export function applyStatementRecordEdit(persistedGraph: unknown, approved: Appr
   const label = link ? `${labelOf(said.subject.id)} → ${labelOf(said.subject.to_id)}` : String(matches[0]!.label ?? approved.node_id).trim();
   const lead = said.subject.field === 'lead';
   // ⛔ BUDDY-A 05:30Z: only an option's level range is the range-law adoption; a factor's own definition is words, not a figure.
-  const rangeLaw = said.subject.kind === 'factor' && said.subject.option_id !== undefined && said.subject.field === 'level';
+  const figureClaim = isFigureClaimRecord(said.subject, record);
+  const rangeLaw = !figureClaim && said.subject.kind === 'factor' && said.subject.option_id !== undefined && said.subject.field === 'level';
   const definition = said.subject.kind === 'factor' && said.subject.option_id === undefined && said.subject.field === 'measure';
   const fact = EditGraphHandlerFactSchema.parse({
     fact_type: 'edit_graph', fact_version: 1, noop: false,
@@ -350,6 +363,7 @@ export function applyStatementRecordEdit(persistedGraph: unknown, approved: Appr
       graph_hash_before: computeAnalysisAffectingGraphHash(persistedGraph as never) || null,
       graph_hash_after: computeAnalysisAffectingGraphHash(graph as never) || null,
       safe_summary: lead ? 'Recorded from your words when an option’s effect is fully in place'
+        : figureClaim ? 'Recorded who stated this figure, in their own words'
         : rangeLaw ? 'Recorded your range as stated, with the Olumi approximation you adopted'
           : definition ? 'Recorded your words and Olumi’s reading of what it covers; no figure changed'
           : link ? 'Recorded Olumi’s reading of your words for this link; it does not size the link'
@@ -359,6 +373,7 @@ export function applyStatementRecordEdit(persistedGraph: unknown, approved: Appr
   });
   return { kind: 'mutated', mutatedGraph: graph, handlerFacts: [fact as HandlerFact],
     confirmation: lead ? `Recorded from your words when ‘${label}’ is fully in place.`
+      : figureClaim ? `Recorded who stated the figure for ‘${label}’, in their own words, beside it.`
       : rangeLaw ? `Recorded your range for ‘${label}’ as stated, with the Olumi approximation you adopted.`
         : definition ? `Recorded your words on ‘${label}’, with Olumi’s reading of what it covers. No figure changed: the model and its analysis use it exactly as before.`
         : link ? `Recorded Olumi’s reading of your words for ‘${label}’. It does not size the link.` : sameCohortRecordedWords(graph) };

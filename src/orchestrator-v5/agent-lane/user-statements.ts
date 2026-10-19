@@ -96,7 +96,14 @@ export interface UserStatement {
   readonly answering?: string;
   /** The form and figure are Olumi's reading of the words until the user's press adopts it. */
   readonly reading: 'olumi';
+  /**
+   * ⭐ GAP 1 (DL-3 schema authority, 19 Oct; AIE stance 15:24): how the speaker put this figure forward, as the AI read it: an
+   * asserted current level, a supposition, a target, or an estimate. Separate from who said it and from whether it is true.
+   */
+  readonly stance?: StatementStance;
 }
+export type StatementStance = 'stated_current' | 'hypothetical' | 'target' | 'estimate';
+const STANCES: readonly StatementStance[] = ['stated_current', 'hypothetical', 'target', 'estimate'];
 
 /** One statement as the Agent passes it. */
 export interface StatementArgs {
@@ -644,6 +651,8 @@ export function userStatementOf(v: unknown): UserStatement | undefined {
   const claim = claimFieldsOf(r);
   if (claim === undefined) return undefined;
   const low = end('low'), high = end('high'), qualifier = optional('qualifier'), conditions = optional('conditions');
+  if (r.stance !== undefined && !STANCES.some((x) => x === r.stance)) return undefined;
+  const stance = STANCES.find((x) => x === r.stance);
   return { ...(legacy !== undefined ? { speaker: legacy } : {}), ...(saidBy !== undefined ? { said_by: saidBy } : {}),
     ...(party !== undefined ? { party } : {}), ...(relayedBy !== undefined ? { relayed_by: relayedBy } : {}),
     ...(end('value') !== undefined ? { value: end('value') } : {}), ...claim,
@@ -655,7 +664,7 @@ export function userStatementOf(v: unknown): UserStatement | undefined {
     ...(optional('period') !== undefined ? { period: optional('period') } : {}),
     ...(qualifier !== undefined ? { qualifier, ...(typeof r.qualifier_in_quote === 'boolean' ? { qualifier_in_quote: r.qualifier_in_quote } : {}) } : {}),
     ...(r.negated === true ? { negated: true as const } : {}), ...(conditions !== undefined ? { conditions } : {}),
-    ...(optional('answering') !== undefined ? { answering: optional('answering') } : {}) };
+    ...(optional('answering') !== undefined ? { answering: optional('answering') } : {}), ...(stance !== undefined ? { stance } : {}) };
 }
 
 /** How a statement's reading reads on a card: "at least 7 months", "a likely upper end of 8 months". */
