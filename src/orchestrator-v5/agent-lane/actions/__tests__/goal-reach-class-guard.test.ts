@@ -11,7 +11,7 @@ import {
   GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_OPTIONS_IDENTICAL, GOAL_FIGURES_PLACEHOLDER_PATH,
   GOAL_FIGURES_PROBABILITY_UNUSABLE, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_MISSING_CURRENT_LEVEL, GOAL_FIGURES_HORIZON_NOT_TESTED,
   GOAL_FIGURES_SHARE_APPROXIMATION, GOAL_FIGURES_USER_EFFECT_CLAMPED, GOAL_FIGURES_WITHHELD_CODES, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
-  GOAL_FIGURES_OPTION_NOT_IN_PLACE,
+  GOAL_FIGURES_OPTION_NOT_IN_PLACE, GOAL_FIGURES_UNSUPPORTED_SPREAD,
   readOptionResultSources,
 } from '../../../../orchestrator/context/option-result-source.js';
 import { withholdOptionGoalFigures } from '../../../../orchestrator/context/constraint-feasibility.js';
@@ -75,6 +75,10 @@ export const KNOWN_GAPS = new Set<string>([
   // §(g) "a target stated as an amount": every goal door refuses a CHANGE-framed target (`goal_is_a_change`:
   // propose_goal_target, goal_target_edit, add-constraint), so Set target would be INERT here (Codex r1, #2816).
   'THRESHOLD:change_rel_base_zero',
+  // STEP 8 (AIE `point_uncertainty` 564fe768): a user's size on Olumi's default spread. Its recovery is the user's evidence of how
+  // much the effect varies, asked in the AIE's own question and answered in chat; no bar control exists, and accepting the default
+  // spread is never one.
+  GOAL_FIGURES_UNSUPPORTED_SPREAD,
 ]);
 
 const paul = (): Graph => structuredClone(paulStored) as Graph;
@@ -170,6 +174,10 @@ const INVENTORY: Readonly<Record<string, { make: () => Fixture; resolves: readon
     message: "Not shown. Your size for how ‘Pro paying subscribers’ moves ‘MRR’ is bigger than this model's scale can hold, so the run couldn't use it at full size, and the figures that depend on it would be wrong.",
   }), resolves: [] },
   [GOAL_FIGURES_PLACEHOLDER_PATH]: { make: placeholderPath, resolves: ['strengthen'] },
+  // STEP 8: the Run's own warning words (`unsupportedSpreadWarning`), replayed at the boundary as its siblings are.
+  [GOAL_FIGURES_UNSUPPORTED_SPREAD]: { make: () => boundaryWithhold(twoParentGraph(), GOAL_FIGURES_UNSUPPORTED_SPREAD, {
+    message: 'On the link from ‘Pro paying subscribers’ to ‘MRR’: You gave the size of this effect; I’ve kept it and its conditions. The calculation’s assumption about how much it varies is not yet supported, so I can’t give a supported chance of meeting the goal. What evidence tells us how much this effect could vary?',
+  }), resolves: [] },
   [GOAL_FIGURES_SHARE_APPROXIMATION]: { make: () => {
     // The real S2a gate: a share-by-deadline goal (definitional '% of …' threshold) with no supported forecast carrier.
     const graph = twoParentGraph(); const goal = goalOf(graph);

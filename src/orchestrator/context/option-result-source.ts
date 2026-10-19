@@ -74,6 +74,11 @@ export const GOAL_FIGURES_USER_EFFECT_CLAMPED = 'GOAL_FIGURES_USER_EFFECT_CLAMPE
  * status quo) keeps its chance, so unlike #416 it is PER OPTION; the win shares and the leader go with it.
  */
 export const GOAL_FIGURES_PLACEHOLDER_PATH = 'GOAL_FIGURES_PLACEHOLDER_PATH';
+/**
+ * ⭐ STEP 8 (AIE `point_uncertainty` 564fe768): CEE withheld the chances that rest on a user's size whose spread is Olumi's D3
+ * default (`unsupportedSpreadWarning`, goal-certainty.ts). The size stays the user's; the chance is not supported.
+ */
+export const GOAL_FIGURES_UNSUPPORTED_SPREAD = 'GOAL_FIGURES_UNSUPPORTED_SPREAD';
 
 /**
  * CEE's code for a run whose goal figures it withheld because the user's own levels make the goal a rate × count product
@@ -133,6 +138,7 @@ export const GOAL_FIGURES_WITHHELD_CODES: ReadonlySet<string> = new Set([
   GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
   GOAL_FIGURES_USER_EFFECT_CLAMPED,
   GOAL_FIGURES_PLACEHOLDER_PATH,
+  GOAL_FIGURES_UNSUPPORTED_SPREAD,
   GOAL_FIGURES_PRODUCT_NOT_READ,
   GOAL_FIGURES_TARGET_NOT_TESTABLE,
   GOAL_FIGURES_MISSING_CURRENT_LEVEL,
