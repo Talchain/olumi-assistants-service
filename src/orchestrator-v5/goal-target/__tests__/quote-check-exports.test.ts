@@ -3,7 +3,7 @@
  * extraction, no caller changes. One row per rule, each with its contrast.
  */
 import { describe, expect, it } from 'vitest';
-import { namesBothEnds, wholeStatementIn } from '../input-claim-context.js';
+import { namesBothEnds, usersSpanIn, wholeStatementIn } from '../input-claim-context.js';
 
 const nodes = [{ id: 'price', label: 'Price' }, { id: 'mrr', label: 'MRR' }, { id: 'quality', label: 'Quality' }];
 
@@ -128,5 +128,21 @@ describe('namesBothEnds: the text names both ends of the directed link', () => {
   });
   it('one named end never binds', () => {
     expect(namesBothEnds('Price is weak.', nodes, 'price', 'mrr')).toBe(false);
+  });
+  // ⭐ DL-3 19 Oct (#3427): a possessive-shaped mark with NO later mark in its paragraph is the only mark that can close the term, so
+  // the user's own correction naming a plural term ("keep 'delayed scans' as the report") is theirs; RED before (unbounded speech).
+  it('a plural term in single marks closes at its only possible mark; the colon-introduced and later-mark cases keep the fail-safe', () => {
+    for (const term of ['delayed scans', 'delayed labels']) {
+      const own = `For Dispatch updates, retract 'the entire shift has stopped'; keep '${term}' as the report.`;
+      expect(usersSpanIn(own, own)).toBe(0);
+      expect(wholeStatementIn(own, own)).toBe(true);
+      expect(wholeStatementIn(own, term)).toBe(false);
+    }
+    // CONTROLS (unchanged): another speaker's words after a colon, and a later mark that could still close the speech.
+    const reported = "Sam: 'the users' pilot works.";
+    expect(usersSpanIn(reported, reported)).toBe(-1);
+    expect(wholeStatementIn(`We fit kitchens. ${reported}`, 'pilot works.')).toBe(false);
+    const later = "Sam thinks 'the users' pilot works, he said' and left.";
+    expect(usersSpanIn(later, later)).toBe(-1);
   });
 });
