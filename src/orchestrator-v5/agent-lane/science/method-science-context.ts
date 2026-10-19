@@ -477,7 +477,19 @@ export function methodScienceContext(input: MethodScienceInput): MethodScienceCo
   }
   // Unlicensed decision stories never offer an approval. Preserve the original W9 licensed-leader control.
   if (decision && !s['run.leader_licensed']) items = items.map(item => ({ ...item, card: null }));
+  // The citation stays bound to its own warranted evidence gap (DSK-P-001 required_inputs), read before any story-only fallback.
   const { citation, reason } = adjudicate(input, plan, items);
+  // AIE 19 Oct (prompt/AIE-PREMORTEM-HUMAN-SOURCE-GROUNDING-20261019-v1.json, AMEND): with nothing above to ground it, a real
+  // relationship the USER sized on this plan's own current path (the own options' paths for a decision) grounds a hypothetical,
+  // qualitative story. Story only (`card: null`): human source is not an evidence gap, an estimate, a size, an uncertainty or
+  // permission to change a value. Never off-plan, never invented; a decision keeps its existing current-Run boundary.
+  if (items.length === 0 && (plan !== null || (decision && s['run.kind'] === 'complete_current'))) {
+    const planIds = plan !== null ? [plan.option_id] : s['model.non_sq_option_ids'];
+    items = s['model.goal_path_links']
+      .filter(l => l.link_sizing === 'user' && l.option_ids.some(id => planIds.includes(id)))
+      .sort((a, b) => a.goal_distance - b.goal_distance || byCodepoint(a.link_id, b.link_id))
+      .map((l): SuppliedItem => ({ id: l.link_id, kind: 'link', labels: [l.from_label, l.to_label], card: null }));
+  }
   const horizon = input.method === 'pre_mortem' ? goalHorizonOf(s['model.goal_horizon']) : null;
   return {
     method: input.method,

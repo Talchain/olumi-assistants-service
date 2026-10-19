@@ -284,3 +284,24 @@ describe('the ask the Agent is given at the limit door names both quantities',()
    +'rather than another. Ask whether it is, quoting their words; never offer a figure of your own as theirs.');
  });
 });
+
+/** Codex R6 on #3433 @a3649f14 (held-out, adopted verbatim): an unlisted held head ("nurses") keeps the user's figure out and the Agent is given the quantity-specific ask. */
+describe('R6 unknown held head keeps the known figure and asks',()=>{it.each(["seats", "contractors", "tickets", "teams", "accounts", "shifts", "contractor teams", "unknownwidgets"])('nurses <- %s: next input accurately asks about the quantity',async(noun)=>{
+ const words='The team capacity limit should be at most 2 '+noun+'.';
+ await refuse(targetTurn(words,singleRate('nurses'),'Team capacity',2,'<=','nurses'));
+ const sent=vi.mocked(fetch).mock.calls.map(([,init])=>JSON.parse(String((init as {body?:string}|undefined)?.body??'{}')) as Rec);
+ const outputs=sent.flatMap(req=>((req.input??[]) as Rec[]).filter(i=>i.type==='function_call_output').map(i=>JSON.parse(String(i.output)) as Rec));
+ const asks=outputs.filter(o=>o.refusal==='figure_not_stated');
+ expect(asks).toHaveLength(1);
+ expect(asks[0].detail).toBe('Nothing was prepared: the user wrote this figure, but their words give it to another quantity (named in written_for), write it in another unit, or turn it down for the limit on "Team capacity". Ask the user which they mean, naming this limit and, when written_for names one, that quantity too, and quote their words; never just refuse.');
+ expect(asks[0].written_for).toEqual([]);
+ });});
+/** Codex R6 on #3433 @a3649f14 (held-out, adopted verbatim, minus its console capture): the person/thing heads at the limit door. */
+describe("R6 person and nonperson counted heads",()=>{it.each([["nurses", "nurses", true], ["nurses", "seats", false], ["nurses", "contractors", false], ["nurses", "tickets", false], ["nurses", "teams", false], ["nurses", "accounts", false], ["nurses", "shifts", false], ["nurses", "nurse teams", false], ["nurses", "contractor teams", false], ["nurses", "unknownwidgets", false], ["seats", "nurses", false], ["seats", "seats", true], ["seats", "contractors", true], ["seats", "tickets", false], ["seats", "teams", false], ["seats", "accounts", false], ["seats", "shifts", false], ["seats", "nurse teams", false], ["seats", "contractor teams", false], ["seats", "unknownwidgets", false], ["contractors", "nurses", false], ["contractors", "seats", true], ["contractors", "contractors", true], ["contractors", "tickets", false], ["contractors", "teams", false], ["contractors", "accounts", false], ["contractors", "shifts", false], ["contractors", "nurse teams", false], ["contractors", "contractor teams", false], ["contractors", "unknownwidgets", false], ["hires", "nurses", false], ["hires", "seats", true], ["hires", "contractors", true], ["hires", "tickets", false], ["hires", "teams", false], ["hires", "accounts", false], ["hires", "shifts", false], ["hires", "nurse teams", false], ["hires", "contractor teams", false], ["hires", "unknownwidgets", false], ["hires", "developers", true], ["nurses", "nurses per week", false], ["nurses per week", "nurses", false], ["nurses per week", "nurses per week", true], ["contractors per week", "tickets per week", false], ["hires per week", "contractors per week", true]]) ("%s <- %s; expected write %s",async(unit,noun,write)=>{
+ const {w,turn,r,made}=await targetTurn("The team capacity limit should be at most 2 "+noun+".",singleRate(unit),"Team capacity",2,"<=",unit);
+ let pressed:Rec|undefined;
+ if(made?.ok===true){const chip=chipFor(r,idOf(r,"propose_limit_change"));pressed=await turn({message:chip.message,source:"chip_click",chip:{id:chip.id},agent_session_id:r._agent.session_id});}
+ expect(limitRows(w.read()).map(c=>c.value)).toEqual([write?2:3]);
+ if(write)expect(authorised(pressed!)).toEqual([expect.objectContaining({ok:true,mutated:true})]);
+ else expect(made).toEqual(expect.objectContaining({ok:false,refusal:'figure_not_stated'}));
+});});

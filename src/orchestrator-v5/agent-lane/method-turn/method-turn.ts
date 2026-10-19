@@ -307,7 +307,8 @@ function itemPhrase(item: SuppliedItem): string {
 }
 
 const ITEM_CLASS: Readonly<Record<SuppliedItem['kind'], string>> = {
-  link: 'nobody has sized this yet',
+  // AIE 19 Oct AMEND: neutral for every link, whoever sized it (a story-only link may be the user's own).
+  link: 'a relationship on this plan’s path',
   factor: 'a figure Olumi estimated',
   risk: 'a risk on this plan’s path',
   limit: 'a limit this plan must stay within',

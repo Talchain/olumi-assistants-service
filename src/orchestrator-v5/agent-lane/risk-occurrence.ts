@@ -29,6 +29,7 @@ import { readGoalRecord } from '../goal-target/goal-record.js';
 import { goalReadingProjectionOf } from '../goal-target/goal-reading-write.js';
 import { EventRiskV1, type EventRiskV1T } from '../../schemas/event-risk.js';
 import { userStatementOf, type UserStatement } from './user-statements.js';
+import { riskHoldsAPlainLevel, withUnsizedOlumiRiskMarksReconciled } from './unsized-risk.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -114,11 +115,7 @@ export function riskOccurrenceGoalHolds(approved: Pick<ApprovedRiskOccurrence, '
 
 /** Readiness's level rule, on the node as stored (`observed_state`, the V1 `data`, a sampled prior, a CURRENT event block). */
 export function riskHoldsALevel(node: Rec, graph: unknown): boolean {
-  if (finite(isRec(node.observed_state) ? node.observed_state.value : undefined)) return true;
-  if (finite(isRec(node.data) ? node.data.value : undefined)) return true;
-  const prior = isRec(node.prior) ? node.prior : undefined;
-  if (prior !== undefined && prior.distribution === 'uniform' && finite(prior.range_min) && finite(prior.range_max)
-    && prior.range_min !== prior.range_max) return true;
+  if (riskHoldsAPlainLevel(node)) return true;
   if (node.event_risk === undefined || node.event_risk === null) return false;
   // Olumi's own range stated over a window that is no longer the goal's is stale, so no level (offered again over the current
   // window). Any other block, valid or not, is held as it stands and is never overwritten here.
@@ -308,9 +305,20 @@ export function riskEffectBasisWords(graph: unknown, riskId: string): string {
 export const riskStatedOccurrenceRecordedWords = (label: string, s: UserStatement, block: EventRiskV1T, effect: string): string =>
   `Recorded your estimate: ${chanceAsStated(s)} that ‘${label.trim()}’ happens at least once ${statedWindowWords(block)}. `
   + `${effect.charAt(0).toUpperCase()}${effect.slice(1)}.`;
-/** The risk node as the S2 write leaves it: its block, and (for the user's own statement) its durable record beside it. */
-export const riskOccurrencePostimageNode = (approved: ApprovedRiskOccurrence): Rec =>
-  withStatementRecord({ ...approved.expected_node, event_risk: approved.event_risk }, approved);
+/**
+ * The risk node as the S2 write leaves it: its block, and (for the user's own statement) its durable record beside it. Given the
+ * graph it is (or was) written in, also as the saved write stores it: the persisted form ends the unsized Olumi risk rule's own
+ * "not included" mark when this block sizes it (`withUnsizedOlumiRiskMarksReconciled`, #3441). Read-backs pass the graph they read,
+ * so they recognise exactly the stored postimage.
+ */
+export function riskOccurrencePostimageNode(approved: ApprovedRiskOccurrence, graph?: unknown): Rec {
+  const node = withStatementRecord({ ...approved.expected_node, event_risk: approved.event_risk }, approved);
+  const at = isRec(graph) && Array.isArray(graph.nodes) && Array.isArray(graph.edges)
+    ? graph.nodes.findIndex((n) => isRec(n) && n.id === approved.risk_id) : -1;
+  if (at < 0) return node;
+  const g = graph as Rec & { nodes: unknown[] };
+  return withUnsizedOlumiRiskMarksReconciled({ ...g, nodes: g.nodes.map((n, i) => (i === at ? node : n)) }).nodes[at] as Rec;
+}
 /** The goal the window belongs to, by label (the card and receipt name it). */
 export const riskOccurrenceGoalLabel = (graph: unknown, goalId: string): string => String((isRec(graph) && Array.isArray(graph.nodes)
   ? graph.nodes.find((n): n is Rec => isRec(n) && n.id === goalId)?.label : undefined) ?? 'the goal');
@@ -346,7 +354,7 @@ export function applyRiskOccurrenceEdit(persistedGraph: unknown, approved: Appro
   if (matches.length !== 1) return { kind: 'refused', reason: 'risk_not_found' };
   // ⭐ IDEMPOTENT, by identity: a retry after THIS proposal's own write landed finds exactly the card's node with this block. The
   // same block found without that identity is a node that changed since the card (refused below), never this card's write.
-  if (approved.own_write_landed === true && isDeepStrictEqual(matches[0], riskOccurrencePostimageNode(approved))) return { kind: 'unchanged' };
+  if (approved.own_write_landed === true && isDeepStrictEqual(matches[0], riskOccurrencePostimageNode(approved, persistedGraph))) return { kind: 'unchanged' };
   if (!isDeepStrictEqual(matches[0], approved.expected_node)) return { kind: 'refused', reason: 'risk_changed' };
   const subject = riskOccurrenceSubject(persistedGraph, approved.risk_id);
   if (subject.kind === 'ineligible') return { kind: 'refused', reason: subject.reason };
@@ -388,7 +396,8 @@ export function applyRiskOccurrenceEdit(persistedGraph: unknown, approved: Appro
 /** The freshly computed atomic write, exactly: the writer's own postimage of `before`, nothing else. */
 export function riskOccurrencePostimageIsScoped(before: unknown, after: unknown, approved: ApprovedRiskOccurrence): boolean {
   const written = applyRiskOccurrenceEdit(before, approved);
-  return written.kind === 'mutated' && isDeepStrictEqual(written.mutatedGraph, after);
+  // `after` is in persisted form, which re-evaluates the unsized rule's own mark (#3441); the writer's candidate is compared so too.
+  return written.kind === 'mutated' && isDeepStrictEqual(withUnsizedOlumiRiskMarksReconciled(written.mutatedGraph), after);
 }
 
 /** The card as its stored operation carries it (`agent-capabilities.ts` proposeRiskOccurrence), or `undefined` if malformed. */

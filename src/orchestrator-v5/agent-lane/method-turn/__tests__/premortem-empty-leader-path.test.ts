@@ -6,10 +6,11 @@ import { describe, it } from 'vitest';
 import { leaderLicenceFromState } from '../../../compose/leader-licence.js';
 import { assembleGuidanceSignals, type GuidanceSignalInputs } from '../../turn-context/guidance-signals.js';
 import {
-  PREMORTEM_PRESS_ID, TALK_IT_THROUGH_CHIP, cardCallFor,
+  PREMORTEM_PRESS_ID, cardCallFor,
   methodTurnForReadback, planMethodTurn, planPickChipId, type RunMethodTurn,
 } from '../method-turn.js';
 import { withApprovedMethodWords } from './helpers/approved-method-words.js';
+import { assertUserLinkStories } from './helpers/user-link-stories.js';
 
 type Graph = { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[]; goal_constraints?: unknown };
 type Capture = {
@@ -119,7 +120,9 @@ describe('W9: empty licensed-leader path on a generic pre-mortem press', () => {
     assert.equal(out.context.not_cited, 'no_identified_plan');
   });
 
-  it('CONTROL: a whole model with only user-sized links and values still refuses without denying estimates', () => {
+  // ⭐ RE-RULED (AIE 19 Oct AMEND, DL-3 order; was "still refuses"): the user's own links ground story-only stories; nothing says
+  // Olumi estimated them, nothing offers an approval, the citation stays unearned.
+  it('CONTROL: a whole model with only user-sized links and values grounds story-only stories on its own links, without claiming estimates', () => {
     const c = structuredClone(captures.draw1);
     c.graph.nodes = c.graph.nodes.filter(n => n.kind !== 'risk');
     const ids = new Set(c.graph.nodes.map(n => n.id));
@@ -130,14 +133,11 @@ describe('W9: empty licensed-leader path on a generic pre-mortem press', () => {
       ...n, observed_state: { ...(n.observed_state as object), source: 'user_specified' },
     } : n);
     delete c.graph.goal_constraints;
-    const out = turnFor(c);
-    assert.equal(out?.kind, 'unavailable');
-    if (out?.kind !== 'unavailable') throw new Error('expected an empty-grounding refusal');
-    assert.equal(out.reason, 'no_grounded_item');
-    assert.ok(out.reply.includes('this decision'));
-    assert.ok(!out.reply.includes('nothing on'));
-    assert.ok(!out.reply.includes('Olumi’s estimate'));
-    assert.deepEqual(out.actions, [TALK_IT_THROUGH_CHIP]);
+    const out = assertUserLinkStories(turnFor(c), c.graph);
+    assert.equal(out.context.decision_level, true);
+    assert.ok(out.directive.includes('Stress-test the whole decision.'));
+    assert.ok(!out.directive.includes('Olumi’s estimate'));
+    assert.ok(!out.directive.includes('a figure Olumi estimated'));
   });
 
   it('CONTROL: an explicit own-option press stays on that plan and its path', () => {

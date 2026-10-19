@@ -113,6 +113,8 @@ describe('corpus A — union assertion: the owned set covers every stamp reachab
     expect(extra).toEqual([
       // F1 T6 (1 Oct, CODEX #2467 P1-1): an option's lifecycle authority — CEE-owned; no producer may add it.
       'analysis_participation',
+      // #3441 (19 Oct): which rule owns a participation mark — minted with the mark by CEE only.
+      'analysis_participation_reason',
       'beliefexistssource',
       'directionsource',
       // G1 (27 Sep): the goal's stated direction and deadline — CEE-owned; construction writes them from the brief.
@@ -197,6 +199,8 @@ const SMUGGLE_NAMES = [
   'proposed_by',
   'option_status',
   'analysis_participation',
+  // #3441 (19 Oct): which rule owns a participation mark, never a producer's to write.
+  'analysis_participation_reason',
   'relies_on',
   // Science PR-4 (AIE same-cohort law): an option's cohort forecast, never a producer's to write.
   'cohort_forecast',

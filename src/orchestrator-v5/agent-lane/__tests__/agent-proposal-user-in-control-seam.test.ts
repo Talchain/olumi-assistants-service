@@ -244,6 +244,37 @@ describe('S-D slice 2 Agent proposals', () => {
     expect(again._agent.tool_calls).toEqual([expect.objectContaining({ ok: true, mutated: false, proposal_id: p.proposal_id })]);
     expect(bytes()).toBe(before); expect(graphWrites.get(SCENARIO)).toBe(writes);
   }, 120_000);
+  /**
+   * REC-WRITE (served CEE 390a1dbe, scenario 894b40fb, turns 03-04): the UI presses a card with its displayed empty binding
+   * (`proposal_edits.fields: []`). The first press committed and the turn was interrupted after the write; the user's re-press
+   * of that same card read "Nothing changed. That card is out of date: the change it shows has been replaced." That is false:
+   * the change it shows was saved. The re-press says the change was already saved, writes nothing and runs nothing.
+   */
+  it('REC-WRITE RED: a re-press of an applied card with its empty binding says already saved, never "out of date", and writes nothing', async () => {
+    seed(); const b = await assumptions(); const p = shown(b);
+    const was = { env: process.env.OLUMI_ENV, seam: process.env.CEE_RECOVERY_FAULT_SEAM };
+    process.env.OLUMI_ENV = 'staging'; process.env.CEE_RECOVERY_FAULT_SEAM = 'on';
+    vi.setSystemTime(Date.now() + 10_000);
+    const edits = { proposal_id: p.proposal_id, revision: p.revision, digest: p.digest, graph_hash: b._proposal_fields!.graph_hash, fields: [] };
+    const first = await (async () => { try {
+      return await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(),
+        ...press(p), proposal_edits: edits, _recovery_fault: { scenario_id: SCENARIO, point: 'after_write' } } });
+    } finally {
+      if (was.env === undefined) delete process.env.OLUMI_ENV; else process.env.OLUMI_ENV = was.env;
+      if (was.seam === undefined) delete process.env.CEE_RECOVERY_FAULT_SEAM; else process.env.CEE_RECOVERY_FAULT_SEAM = was.seam;
+    } })();
+    expect(first.statusCode, first.body.slice(0, 400)).toBe(503);
+    expect(first.json()).toEqual({ error: 'RECOVERY_FAULT_INJECTED', point: 'after_write' });
+    expect(os('fac_hours')).toMatchObject({ raw_value: 10, source: 'user_assumption' });
+    expect(graphWrites.get(SCENARIO)).toBe(1);
+    const before = bytes(); const calls = openAiCalls;
+    const again = await turn({ ...press(p), proposal_edits: edits });
+    expect(again._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: false, proposal_id: p.proposal_id })]);
+    expect(again.assistant_text).not.toContain(stalePlainApprovalWords);
+    // The narrator's own already-saved status leads; the readiness line that follows is the route's, unchanged.
+    expect(again.assistant_text).toMatch(/^That change was already saved; nothing was written again\. /);
+    expect(bytes()).toBe(before); expect(graphWrites.get(SCENARIO)).toBe(1); expect(openAiCalls).toBe(calls);
+  }, 120_000);
   it('A1 edits RED: one user value, untouched Olumi value, one commit and both receipt lines', async () => {
     seed(); const b = await assumptions();
     const r = await submit(b, [{ field_id: 'factor_value:fac_hours', value: 12 }]);
