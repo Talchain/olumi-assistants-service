@@ -52,6 +52,8 @@ import { limitChecksForAgent } from '../../../agent-lane/limit-checks.js';
 import { readLimitVerdictsFromResult } from '../../../../orchestrator/context/constraint-feasibility.js';
 import { CONDITION_FIGURES_UNSUPPORTED_SPREAD } from '../../../../orchestrator/context/option-result-source.js';
 import { notesAsShown } from '../../../goal-target/goal-targets-joint.js';
+import { compactAnalysis } from '../../../../orchestrator/context/analysis-compact.js';
+import { buildInvokeInputForTests } from '../../../coaching/decision-review-enricher.js';
 
 type Json = Record<string, any>;
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
@@ -191,24 +193,26 @@ function expectWithheldEverywhere(r: Json, fact: Json, graph: Json, withheld: re
 
 const CUT_BANDED = await chatWritten(CUT_GRAPH, CUT_MOVERS, 'band');
 
-describe('PREMISE (supported positives through the ACTUAL chat writer): a named band or an explicit spread keeps every chance', () => {
+describe('PREMISE (supported positives through the ACTUAL chat writer): the band the user named, attested at its writer, keeps every chance', () => {
   it('cut-costs: the placeholders withhold today; the user\'s named band, written by the writer on the same links, shows every chance', async () => {
     expect(coded((await cutRun(CUT_GRAPH)).result, GOAL_FIGURES_PLACEHOLDER_PATH)).not.toEqual([]);
     for (const e of writtenLinks(CUT_BANDED, CUT_GRAPH, CUT_MOVERS)) {
       expect(linkSizing(e), 'the user\'s strength').toBe('user');
-      expect(e, 'the writer recorded the spread as theirs').not.toHaveProperty('std_defaulted');
+      expect(e.std_defaulted, 'the writer ATTESTS the spread as theirs (AIE 764e9c72)').toBe(false);
       expect([edgeBandStd('moderate'), edgeBandStd('strong')]).toContain(e.strength.std);
     }
     const { result } = await cutRun(CUT_BANDED);
     expect(coded(result, GOAL_FIGURES_UNSUPPORTED_SPREAD)).toEqual([]);
     for (const id of [...CUT_MOVERS, CUT_SQ]) expect(chanceShown(result, id), id).toBe(true);
   });
-  it('cut-costs: an explicit spread the user gave, through the same writer, shows every chance', async () => {
+  it('cut-costs: an explicit `std` reaching the writer carries no verified user origin, so it is NOT attested and is withheld', async () => {
     const g = await chatWritten(CUT_GRAPH, CUT_MOVERS, 'std');
-    for (const e of writtenLinks(g, CUT_GRAPH, CUT_MOVERS)) expect(e).toMatchObject({ strength: { std: 0.07 } });
-    const { result } = await cutRun(g);
-    expect(coded(result, GOAL_FIGURES_UNSUPPORTED_SPREAD)).toEqual([]);
-    for (const id of [...CUT_MOVERS, CUT_SQ]) expect(chanceShown(result, id), id).toBe(true);
+    for (const e of writtenLinks(g, CUT_GRAPH, CUT_MOVERS)) {
+      expect(e).toMatchObject({ strength: { std: 0.07 } });
+      expect(e).not.toHaveProperty('std_defaulted');
+    }
+    const { result, fact } = await cutRun(g);
+    expectWithheldEverywhere(result, fact, g, CUT_MOVERS, UNSUPPORTED_POINT_WORDS, UNSUPPORTED_POINT_QUESTION);
   });
   it('price/MRR: the named-band control on the second family', async () => {
     const { result } = await mrrRun(await chatWritten(mrrGraph(), MRR_OPTIONS, 'band'));
@@ -217,21 +221,27 @@ describe('PREMISE (supported positives through the ACTUAL chat writer): a named 
   });
 });
 
-describe('THE WRITER\'S OWN RECORD: an exact figure keeps Olumi\'s spread, and only that record tells it from a named band', () => {
+describe('THE WRITER\'S ATTESTATION IS THE ONLY SUPPORT: an exact figure, and a band saved before the attestation, stay withheld', () => {
   it('cut-costs: an exact figure through the writer (std_defaulted, A6f) is withheld on every surface with the point words', async () => {
     const g = await chatWritten(CUT_GRAPH, CUT_MOVERS, 'figure');
     for (const e of writtenLinks(g, CUT_GRAPH, CUT_MOVERS)) expect(e).toMatchObject({ std_defaulted: true, provenance: { source: 'user_specified' } });
     const { result, fact } = await cutRun(g);
     expectWithheldEverywhere(result, fact, g, CUT_MOVERS, UNSUPPORTED_POINT_WORDS, UNSUPPORTED_POINT_QUESTION);
   });
-  it('DISCLOSED RESIDUAL: a named-band write and an exact write differ in who-authored-what ONLY by `std_defaulted`, so an exact write saved before A6f cannot be told apart from a band without reading the std', async () => {
+  it('LEGACY: a band written before the attestation (no flag) is byte-identical in authorship to a pre-A6f exact figure, so absent is NOT support: withheld (AIE 764e9c72)', async () => {
+    const legacy = clone(CUT_BANDED);
+    for (const e of writtenLinks(legacy, CUT_GRAPH, CUT_MOVERS)) delete e.std_defaulted;
+    const { result, fact } = await cutRun(legacy);
+    expectWithheldEverywhere(result, fact, legacy, CUT_MOVERS, UNSUPPORTED_POINT_WORDS, UNSUPPORTED_POINT_QUESTION);
+  });
+  it('a named-band write and an exact write differ in who-authored-what ONLY by the writer\'s record: attested (false) against Olumi\'s (true)', async () => {
     const figure = await chatWritten(CUT_GRAPH, CUT_MOVERS, 'figure');
     const authorship = (e: Json): Json => Object.fromEntries(LINK_AUTHORSHIP_MEMBERS.filter((k) => k !== 'std_defaulted' && k in e)
       .map((k) => [k, k === 'provenance' ? { ...e.provenance, reviewed_by_user: undefined } : e[k]]));
     const banded = writtenLinks(CUT_BANDED, CUT_GRAPH, CUT_MOVERS);
     writtenLinks(figure, CUT_GRAPH, CUT_MOVERS).forEach((e, i) => {
       expect(authorship(e)).toEqual(authorship(banded[i]!));
-      expect([e.std_defaulted, banded[i]!.std_defaulted]).toEqual([true, undefined]);
+      expect([e.std_defaulted, banded[i]!.std_defaulted]).toEqual([true, false]);
     });
   });
 });
@@ -256,6 +266,35 @@ describe('⭐ RED→GREEN: a user\'s POINT on the default spread withholds only 
       expect(e.provenance.magnitude, 'the size stays the user\'s').toBe('user_stated');
       const was = (CUT_GRAPH.edges as Json[]).find((x) => x.from === e.from && x.to === e.to)!;
       expect(e.strength).toEqual(was.strength);
+    }
+  });
+  it('⭐ INTERVALS (AIE 764e9c72): the saved Run keeps every engine figure; no public block, AI fact or review carries the movers\' range', async () => {
+    const g = userSized(CUT_GRAPH, CUT_MOVERS);
+    const { result, fact } = await cutRun(g);
+    const range = (e: Json): boolean => ['std', 'p10', 'p90'].some((k) => typeof e.outcome?.[k] === 'number');
+    // PREMISE: the served body has a range for every option, and the saved Run keeps it (history untouched).
+    for (const id of [CUT_SQ, ...CUT_MOVERS]) expect(entriesFor(envOf(result), id).some(range), `${id}: saved range`).toBe(true);
+    // The public block (turn and cold read): the movers keep their centre, never their range; the status quo keeps both.
+    const block = buildAnalysisResultBlock(fact as never) as Json;
+    for (const id of CUT_MOVERS) {
+      expect(entriesFor(block.enrichment, id).some(range), `${id}: block range`).toBe(false);
+      expect(entriesFor(block.enrichment, id).some((e) => typeof e.outcome?.mean === 'number'), `${id}: block centre`).toBe(true);
+    }
+    expect(entriesFor(block.enrichment, CUT_SQ).some(range), 'status quo range').toBe(true);
+    // The AI's facts: no range for a mover, so no uncertainty band either (all-or-nothing).
+    const compact = compactAnalysis(envOf(result) as never) as Json;
+    for (const o of (compact.options as Json[]).filter((x) => CUT_MOVERS.includes(x.option_id))) {
+      expect(o).not.toHaveProperty('outcome_p10');
+      expect(o).not.toHaveProperty('outcome_p90');
+    }
+    expect(compact.uncertainty_bands ?? null).toBeNull();
+    // The decision review's AI input: the same.
+    const review = buildInvokeInputForTests('brief', envOf(result) as Json, null) as Json;
+    const reviewed = (review.isl_results.option_comparison as Json[]);
+    expect(reviewed.map((r) => r.option_id).sort()).toEqual([CUT_SQ, ...CUT_MOVERS].sort());
+    for (const r of reviewed) {
+      if (CUT_MOVERS.includes(r.option_id)) expect([r.outcome.p10, r.outcome.p90], r.option_id).toEqual([null, null]);
+      else expect(typeof r.outcome.p10, 'the status quo keeps its range').toBe('number');
     }
   });
   it('price/MRR, UNMARKED: the same on the second family; the options that move nothing keep theirs', async () => {
@@ -429,7 +468,9 @@ describe('⭐ SECOND TARGET AND LIMIT (Codex R1 #3443 BLOCK; DL-3: targets AND l
   const userPoint = (): Json => ({ source: 'user_specified', magnitude: 'user_stated', natural_effect: { amount: 0.3, amount_unit: '%',
     per_source_change: 1, per_source_change_unit: '%', strength_mean: 0.3, strength_mean_frame: 'edge_strength' } });
   /** The ACTUAL chat writer's record of a named band (`adjust-edge-strength.ts`): the user's strength and their spread. */
-  const bandStated = (e: Json): void => { e.provenance = { source: 'user_specified' }; e.provenance_display = 'user_set'; delete e.std_defaulted; };
+  const bandStated = (e: Json): void => {
+    e.provenance = { source: 'user_specified' }; e.provenance_display = 'user_set'; e.std_defaulted = false; e.strength.std = edgeBandStd('moderate');
+  };
   function jointGraph(o: { limitVia?: 'x' | 'y'; optionsSetLimit?: boolean; planC?: boolean } = {}): Json {
     // Codex's probe names the definition's part as part of the total (`Quality contribution`), so the definition validates.
     const names: Record<string, string> = { g: 'Quality', other: 'Reach', limit: 'Cost', x: 'Quality contribution', y: 'Audience' };

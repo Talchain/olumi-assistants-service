@@ -921,7 +921,8 @@ export const EdgeV3 = z.object({
    * Without this flag that std read as the user's.
    *
    * CEE-MINTED, TWO WRITERS: `adjust-edge-strength.ts` sets it to `true` on every user write whose std the user did
-   * not state, and REMOVES it when the write states the spread itself (a named band, or an explicit `std`);
+   * not state, sets it to `false` (ATTESTED, STEP 8 / AIE 764e9c72) only for the band the user named for this link, and
+   * REMOVES it for an explicit `std` (no verified user origin). Only `false` supports a chance resting on the spread;
    * `structural-add-edge.ts` sets it on a causal link the user draws, whose `DEFAULT_STD` is Olumi's. The
    * confirmation guard (`isProvenanceOnlyEdgeConfirmation`) admits absent → `true` on a figure confirm and present →
    * absent on a band confirm, and nothing else. A producer cannot write it: the root is in `field-safety.ts`

@@ -167,14 +167,14 @@ describe('(a) Paul’s captured edge (17d1cd3a): the user writes the exact figur
 // (b) CONTRAST — a band write
 // ─────────────────────────────────────────────────────────────────────────────
 describe('(b) CONTRAST: a band the user named — a set stores the band’s spread and is NOT flagged; a confirm keeps it all', () => {
-  it('⭐ the Agent’s "very strong" (band set): std is the band’s, no `std_defaulted`', async () => {
+  it('⭐ the Agent’s "very strong" (band set): std is the band’s, attested (`std_defaulted: false`)', async () => {
     const edge = persistedEdge(await applyStated(paulGraph(), eventFor(), 'very strong'));
     expect(edge.strength).toStrictEqual({ mean: USER_FIGURE, std: edgeBandStd('very strong') });
-    expect(edge).not.toHaveProperty('std_defaulted');
+    expect(edge.std_defaulted, 'AIE 764e9c72: the writer ATTESTS the band the user named (`false`); absent is never support').toBe(false);
     expect(edge.exists_defaulted).toBe(true);
   });
 
-  it('⭐ a band write on an edge a FIGURE had flagged clears the flag — the band states the spread', async () => {
+  it('⭐ a band write on an edge a FIGURE had flagged attests it (`false`) — the band states the spread', async () => {
     const flagged = paulGraph({
       strength: { mean: 0.5, std: 0.25 },
       std_defaulted: true,
@@ -185,7 +185,7 @@ describe('(b) CONTRAST: a band the user named — a set stores the band’s spre
     });
     const edge = persistedEdge(await applyStated(flagged, eventFor({ expected: { mean: 0.5, effect_direction: 'positive' } }), 'very strong'));
     expect(edge.strength.std).toBe(edgeBandStd('very strong'));
-    expect(edge).not.toHaveProperty('std_defaulted');
+    expect(edge.std_defaulted, 'AIE 764e9c72: the writer ATTESTS the band the user named (`false`); absent is never support').toBe(false);
   });
 
   // R11 (AIQ #72 5872082179): a confirm is REVIEW, not authorship, so it keeps every authorship flag exactly — the

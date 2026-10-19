@@ -433,20 +433,15 @@ export function unsizedLeaderGoalPaths(graph: unknown, optionIds: readonly strin
 }
 
 /**
- * ⭐ STEP 8 (AIE `point_uncertainty` 564fe768; DL-3 #94 6260306712 as AMENDED; PL 06:05): a link the USER sized whose SPREAD
- * nobody stated. Its size is theirs and stays theirs; the spread the engine draws is Olumi's, which supports no chance of meeting
- * the goal. Read from the carrier that records who stated each number, never from the std's value or `defaulted` (whole-edge,
- * and it can mean existence):
- *  · a size stated in the user's own units (`magnitude: 'user_stated'`). Its writers never state a spread: construction draws the
- *    D3 default (`link-effect.ts`, σ = |β|/2; `admit-model` passes no `strength_std`), the chat statement writer marks it Olumi's
- *    (`link-effect-edit.ts`), and a held range sets none (Science C1, `held-user-links.ts` `rangeHold`). So it is unsupported
- *    with or without the A6f mark: a reopened, unmarked or legacy graph reads exactly as a new one.
- *  · a strength the user wrote in chat (`user_specified`, no stated size): its writer records the spread per field (A6f,
- *    `adjust-edge-strength.ts`): `std_defaulted` set = Olumi's; removed = the user's named band or explicit spread.
- * Exact links are decided by the walk (`chanceSupportGoalPaths`).
+ * ⭐ STEP 8 (AIE `point_uncertainty` 564fe768 and `legacy_attestation` 764e9c72; DL-3): a link the USER sized whose spread
+ * is not attested. Its size is theirs and stays theirs; the spread the engine draws is Olumi's, which supports no chance of
+ * meeting the goal. Support is only the writer's attestation for THIS link (`std_defaulted: false`, written by
+ * `adjust-edge-strength.ts` for the band the user named): never the std's value, `defaulted`, or a missing flag. A size
+ * stated in the user's own units (`magnitude: 'user_stated'`) is never attested: its writers state no spread (construction's
+ * D3 default, the chat statement writer, a held range: Science C1). Exact links are decided by the walk.
  */
 function unsupportedSpreadLink(edge: unknown): boolean {
-  return isRec(edge) && linkSizing(edge) === 'user' && (hasUserStatedSize(edge) || edge.std_defaulted === true);
+  return isRec(edge) && linkSizing(edge) === 'user' && (hasUserStatedSize(edge) || edge.std_defaulted !== false);
 }
 
 /**

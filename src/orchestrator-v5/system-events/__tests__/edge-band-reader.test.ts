@@ -113,13 +113,13 @@ function persistedEdge(result: Awaited<ReturnType<typeof apply>>): RawEdge {
 // (a) The pill's band reaches the writer
 // ─────────────────────────────────────────────────────────────────────────────
 describe('(a) the UI event with band "strong" and magnitude 0.55', () => {
-  it('⭐ RED: std is the band’s (0.7 − 0.4)/√12 ≈ 0.0866, mean 0.55, NO `std_defaulted`', async () => {
+  it('⭐ RED: std is the band’s (0.7 − 0.4)/√12 ≈ 0.0866, mean 0.55, attested (`std_defaulted: false`)', async () => {
     const result = await apply(graph(), eventFor({ band: 'strong' }));
     const edge = persistedEdge(result);
     expect(edge.strength.mean).toBe(0.55);
     expect(edge.strength.std).toBe(STRONG_BAND_STD);
     expect(edge.strength.std).toBeCloseTo(0.0866, 4);
-    expect(edge).not.toHaveProperty('std_defaulted');
+    expect(edge.std_defaulted, 'AIE 764e9c72: the writer ATTESTS the band the user named (`false`); absent is never support').toBe(false);
     // The dispatcher's post-commit confirmation guard reads this same answer.
     if (result.kind === 'mutated') expect(result.statedBand).toBe('strong');
     // Existence is still Olumi's (A6e) — the band speaks only for the strength.
@@ -145,14 +145,14 @@ describe('(b) StrengthBand → InfluenceBand: one row per contract band, through
     expect(MAPPING_ROWS.map((r) => r[0]).sort()).toStrictEqual([...StrengthBand.options].sort());
   });
 
-  it.each(MAPPING_ROWS)('⭐ %s → %s: a write at %s stores the band’s spread, unflagged', async (wire, cee, midpoint, bandStd) => {
+  it.each(MAPPING_ROWS)('⭐ %s → %s: a write at %s stores the band’s spread, attested', async (wire, cee, midpoint, bandStd) => {
     expect(edgeBandFromStrengthBand(wire)).toBe(cee);
     const result = await apply(graph(), eventFor({ band: wire, magnitude: midpoint }));
     const edge = persistedEdge(result);
     expect(edge.strength.mean).toBe(midpoint);
     expect(edge.strength.std).toBeCloseTo(bandStd, 12);
     expect(edge.strength.std).toBe(edgeBandStd(cee));
-    expect(edge).not.toHaveProperty('std_defaulted');
+    expect(edge.std_defaulted, 'AIE 764e9c72: the writer ATTESTS the band the user named (`false`); absent is never support').toBe(false);
     if (result.kind === 'mutated') expect(result.statedBand).toBe(cee);
   });
 
@@ -300,7 +300,7 @@ describe('(f) the event is parsed by the real 0.60.0 schema and `band` survives 
     });
     const edge = persistedEdge(result);
     expect(edge.strength).toStrictEqual({ mean: 0.55, std: STRONG_BAND_STD });
-    expect(edge).not.toHaveProperty('std_defaulted');
+    expect(edge.std_defaulted, 'AIE 764e9c72: the writer ATTESTS the band the user named (`false`); absent is never support').toBe(false);
   });
 
   it('the production root (B1) parser keeps `band` byte-for-byte', () => {
