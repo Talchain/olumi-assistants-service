@@ -210,13 +210,29 @@ describe('ROW 3: each declared origin, through the real writers, read back by th
     expect(provenanceOf({ setting: cellOf('add_staff', 'staff'), target: nodeOf('staff') })).toMatchObject({ origin: 'ai' });
   });
 
-  it.each(['user', 'third_party', 'unknown'])('BLOCKED-SCHEMA: an option setting declared %s cannot be stored as declared, so nothing is proposed', async (origin) => {
+  it.each(['user', 'third_party', 'unknown'])('BLOCKED-SCHEMA: an option setting declared %s cannot be stored as declared: unavailable, nothing proposed', async (origin) => {
     const proposals = new ProposalStore();
     const out = await proposeChange({ dispatch, proposals }, ctx, { public_label: 'Set the assistants', basis: 'From what the user said.', ops: [{
       op: 'set_option_setting', option_id: 'add_staff', factor_id: 'staff', value: 3, unit: 'people',
       source: { origin, quote: 'about 20 minutes', named_source: null } }] } as never);
-    expect(out).toMatchObject({ status: 'refused', reason: 'blocked_schema', data: { op: 0, carrier: 'option_setting' } });
+    expect(out).toMatchObject({ status: 'unavailable', reason: 'blocked_schema', write: 'none' });
     expect(proposals.size()).toBe(0);
+  });
+
+  it.each([
+    ['set_goal_target', 'the goal\'s target'],
+    ['set_link_strength', 'how strongly one factor affects another'],
+    ['add_to_model', 'Adding a factor or an option'],
+    ['remove_from_model', 'Removing something'],
+    ['rename', 'Renaming'],
+  ])('%s is not on this path yet: unavailable, named, and nothing is read, proposed or saved', async (op, named) => {
+    const proposals = new ProposalStore();
+    const out = await proposeChange({ dispatch, proposals }, ctx, { public_label: 'A change', basis: 'b',
+      ops: [queueTo('user', 'about 20 minutes'), { op, target_id: 'goal' }] } as never);
+    expect(out).toMatchObject({ status: 'unavailable', reason: `${op}_not_available`, write: 'none' });
+    expect((out as { detail: string }).detail).toContain(named);
+    expect(proposals.size()).toBe(0);
+    expect(dispatch).not.toHaveBeenCalled();
   });
 
   it.each([
