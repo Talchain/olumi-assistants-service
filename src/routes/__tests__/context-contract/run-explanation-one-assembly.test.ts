@@ -262,7 +262,9 @@ describe('Explain scoped assembly safety', () => {
       // PROMPT-INT coach currentness (#3423, merged at 7d052e5d; fix-forward of its one NEW CI red): the coach template's TRUTH,
       // REASONING, AUTHORSHIP and CALCULATION BOUNDARY sentences only: 49,310 → 50,626 bytes. Captured from the SENT body; swapping
       // back exactly the template text reproduces 52520051… and 49,310 bytes.
-      .toBe('e68f11f78bec9d74f60a300b32284ffb922926e9ea848c98528097e1e0b26b5e');
+      // REFUSAL WORDS (AIE bb91dcdd): the coach template's AGENCY sentence and host #9/#25/#42 only: 50,626 → 50,951 bytes,
+      // re-derived from the SENT body; swapping back exactly that template and host text reproduces e68f11f7….
+      .toBe('2ce31441b3d5728dc0eb56973b8920e430702d672b2ecd8fdb6770c301f83bb8');
   },60000);
 });
 
