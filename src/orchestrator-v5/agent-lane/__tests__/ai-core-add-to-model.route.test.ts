@@ -147,6 +147,7 @@ describe('PATH-B gap 2: a new factor the person states is prepared on a card in 
   const post = (payload: Json) => app.inject({ method: 'POST', url: '/agent/v1/turn', headers: CORE,
     payload: { kind: 'message', scenario_id: SCENARIO, stage: 'analyse', turn_class: 'frame', ...payload } });
   const commits = () => [...doorRows.values()].filter((r) => r.receipt !== undefined);
+  let issuedGraphHash = '';
   const outputOf = (callId: string): Json | undefined => {
     const item = calls.flatMap((b) => (Array.isArray(b.input) ? b.input : [])).find((i: Json) => i.type === 'function_call_output' && i.call_id === callId);
     return item === undefined ? undefined : JSON.parse(String(item.output)) as Json;
@@ -158,15 +159,18 @@ describe('PATH-B gap 2: a new factor the person states is prepared on a card in 
     const r = await post({ turn_id: randomUUID(), message: SAID, source: 'composer' });
     expect(r.statusCode, r.body).toBe(200);
     const j = r.json() as Json;
+    issuedGraphHash = String(j._proposal_fields?.graph_hash ?? '');
     preparedId = String((j._agent.tool_calls as Json[]).find((c) => c.name === 'propose_change' && c.ok)?.proposal_id ?? '');
     const card = (j.suggested_actions as Json[]).find((c) => c.id === `agent-approve-proposal:${preparedId}`);
     const rec = (j._proposal_fields?.proposals as Json[] | undefined)?.find((f) => f.proposal_id === preparedId);
     return { j, card: card!, rec: rec!, out: outputOf('prop_call') };
   };
+  /** The UI's ordinary press (`SuggestedChips.tsx`, served bytes in browser K5 21:40Z): source `chip`, the card's own id and words,
+   * and the issued record as `proposal_edits` with NO fields. */
   const pressed = (card: Json, rec: Json) => {
     outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply_call' }], [{ type: 'message', text: SAVED_WORDS }]];
-    return post({ turn_id: randomUUID(), message: card.message, source: 'chip_click', chip: { id: card.id },
-      displayed_proposals: [{ proposal_id: rec.proposal_id, revision: rec.revision }] });
+    return post({ turn_id: randomUUID(), message: card.message, source: 'chip', chip: { id: card.id },
+      proposal_edits: { proposal_id: rec.proposal_id, revision: rec.revision, digest: rec.digest, graph_hash: issuedGraphHash, fields: [] } });
   };
 
   it('⭐ RED→GREEN: the new factor is prepared on a card in THAT turn; nothing is committed', async () => {
