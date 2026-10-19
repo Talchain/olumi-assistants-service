@@ -332,6 +332,43 @@ describe('PATH-B gap 4: commit and Undo each run the existing Run pipeline once;
     expect((again.json() as Json).assistant_text).toBe(UNDONE);
   });
 
+  it('⭐ RED→GREEN (Codex R2, kept verbatim in substance): a head that cannot be read is NO Run, never a fresh operation', async () => {
+    Object.assign(world, { graph: GRAPH_AT_2, hash: HASH_2 });
+    head = { status: 'ok', value: versionRow() };
+    const script = () => [[{ type: 'function_call', name: 'run_analysis', call_id: 'run_call', args: { reason: 'Run after Undo', effects_timing: null } }], [{ type: 'message', text: UNDONE }]];
+    outputs = script();
+    expect((await runPress()).statusCode).toBe(200);
+    expect(runTurns).toBe(1);
+    // The same restore is still saved; only its metadata lookup is temporarily unavailable.
+    head = { status: 'error', error: { code: 'store_error', recoverable: false, message: 'temporary metadata read failure' } };
+    calls = []; outputs = [[{ type: 'function_call', name: 'run_analysis', call_id: 'run_call', args: { reason: 'Run after Undo', effects_timing: null } }],
+      [{ type: 'message', text: 'The analysis could not be run just now; nothing changed.' }]];
+    const again = await runPress();
+    expect(again.statusCode, again.body).toBe(200);
+    expect(runTurns, 'the already completed Undo must not spend another engine Run when its head cannot be classified').toBe(1);
+    expect(outputOf('run_call'), 'said truthfully: the existing unavailable outcome').toMatchObject({ status: 'unavailable', reason: 'run_failed' });
+    expect((again.json() as Json).assistant_text).toBe('The analysis could not be run just now; nothing changed.');
+  });
+
+  it('CONTRAST: no version store (model management disabled) is a KNOWN head with no restore: the press runs once', async () => {
+    Object.assign(world, { graph: GRAPH_AT_2, hash: HASH_2 });
+    head = { status: 'disabled' };
+    outputs = [[{ type: 'function_call', name: 'run_analysis', call_id: 'run_call', args: { reason: 'Run it', effects_timing: null } }], [{ type: 'message', text: COACHED }]];
+    expect((await runPress()).statusCode).toBe(200);
+    expect(runTurns).toBe(1);
+    expect(outputOf('run_call')).toMatchObject({ status: 'ok', ran: true });
+  });
+
+  it('CONTRAST (Codex R2): a second restore of the same graph is its own operation and gets its own Run', async () => {
+    Object.assign(world, { graph: GRAPH_AT_2, hash: HASH_2 });
+    head = { status: 'ok', value: versionRow() };
+    const script = () => [[{ type: 'function_call', name: 'run_analysis', call_id: 'run_call', args: { reason: 'Run after Undo', effects_timing: null } }], [{ type: 'message', text: UNDONE }]];
+    outputs = script(); await runPress();
+    head = { status: 'ok', value: versionRow({ mutation_id: 'e5f6a7b8-0000-4000-8000-0000000000d5' }) };
+    outputs = script(); await runPress();
+    expect(runTurns, 'deduplication is by restore operation, never by graph').toBe(2);
+  });
+
   it('CONTRAST: an ordinary head (an edit, not a restore) keeps a fresh Run per press', async () => {
     Object.assign(world, { graph: GRAPH_AT_2, hash: HASH_2 });
     outputs = [[{ type: 'function_call', name: 'run_analysis', call_id: 'run_call', args: { reason: 'Run it', effects_timing: null } }], [{ type: 'message', text: COACHED }]];

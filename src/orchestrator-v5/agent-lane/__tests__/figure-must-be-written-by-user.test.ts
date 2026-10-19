@@ -265,7 +265,7 @@ describe('the Agent route binds the user\'s words to every tool it runs', () => 
     // PATH-B gap 4: it is asked for once per request (`analyseCommittedChange`), by the committing core tool or the turn's end.
     expect(route).toContain("return { run: await capabilities.runAnalysis(toolCtx, { reason: 'Analyse the model as just saved.',");
     // …and the core SDK turn's Run is the press-guarded pipeline on the SAME carrier (a Run press spends its ONE Run there).
-    expect(route).toContain('runAnalysis: (args) => loopCapabilities.runAnalysis(toolCtx, args),');
+    expect(route).toContain(': loopCapabilities.runAnalysis(toolCtx, args),');
     // S2 one-press card the route issues after the Run (#3129, the user's own figure): a dispatch site on the SAME typed carrier.
     expect(route).toContain("dispatchTool('propose_assumptions', JSON.stringify(heldConfirm), toolCtx, capabilities, mode)");
     // SYSTEM 1 M1: the ONE door issuer (a risk's chance from THIS turn's typed words, else the brief's holds-now sentence) replaces

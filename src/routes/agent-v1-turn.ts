@@ -3155,14 +3155,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * ⭐ ONE RESTORE = ONE Run (PATH-B gap 4; Codex R1 on #3469). On `core`, a Run press while the saved head is a restore
      * (the canvas's Run after an Undo, DGAI #2767) is that restore's Run operation (`restoreRunOperation`), not the request's:
      * a re-press with another turn id recovers the Run the restore already has (`readRecordedRun`, the existing reader) and
-     * never runs the engine again. Any other Run press keeps its own operation, so a deliberate Run still runs.
+     * never runs the engine again. A press on any other head keeps its own operation, so a deliberate Run still runs. A head
+     * that cannot be read (Codex R2) is NO Run: the press's Run answers the existing unavailable outcome, never a fresh operation.
      */
-    const restoreRun = mode === 'core' && approvedProposal === undefined && typedRunOf(body) ? await restoreRunOperation(scenarioId) : undefined;
-    if (restoreRun !== undefined && recoveredRun === undefined) {
+    const restoreRun = mode === 'core' && approvedProposal === undefined && typedRunOf(body) ? await restoreRunOperation(scenarioId) : null;
+    if (typeof restoreRun === 'string' && recoveredRun === undefined) {
       recoveredRun = await readRecordedRun(store, scenarioId, restoreRun, () => readBackState(
         (path, b) => readCache.dispatch(path, { ...(b as Record<string, unknown>), ...FRESH_READ }), scenarioId));
     }
-    const runOperationKey = restoreRun ?? turnId;
+    const runOperationKey = restoreRun === null ? turnId : restoreRun;
     const capabilities = createAgentCapabilities(
       capDispatch, proposals, capCallStructured, mode, onCapAnalysis,
       {
@@ -4427,7 +4428,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ctx: coreCtx, message, budget, userId,
           tools: (onCall) => pathBTools({ dispatch: capDispatch, proposals, callStructured: capCallStructured,
             commitOptionLevels: commitOptionLevelsDoor, onModelRegistered: (raw) => emitGraphReady(raw),
-            runAnalysis: (args) => loopCapabilities.runAnalysis(toolCtx, args),
+            runAnalysis: (args) => restoreRun === undefined ? Promise.resolve({ ok: false, mutated: false, ran: false, refusal: 'run_failed' })
+              : loopCapabilities.runAnalysis(toolCtx, args),
             analyseAfterCommit: () => { analysisToCore = true; return analyseCommittedChange(); } }, coreCtx, mode,
             (row, result) => onCall(row, { ...result })),
           instructions: instructionsForMode(mode, eligibleIntervention === undefined ? AGENT_TOOL_INSTRUCTIONS : `${AGENT_TOOL_INSTRUCTIONS}\n\n${ELIGIBLE_INTERVENTION_INSTRUCTION}`),
