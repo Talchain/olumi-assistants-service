@@ -15,7 +15,7 @@
  *      and one option setting; the panel said "Olumi supplied 1".
  */
 import { readFileSync } from 'node:fs';
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { buildModelFromBrief } from '../../agent-lane/runtime/build-model.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';

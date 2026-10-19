@@ -21,6 +21,7 @@ import type { HandlerInvocation } from '../../registry.js';
 import { createRunAnalysisHandler, withholdGoalFiguresForUntestableTarget } from '../run-analysis.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 
+import { RUN_EVALUATED_BEFORE_SUPPORT_KEY } from '../../../context/analysis-projection-policy.js';
 type Json = Record<string, any>;
 const M1 = JSON.parse(readFileSync(new URL('./fixtures/r3-m1-card-yes-served-run-20260930.json', import.meta.url), 'utf8')) as {
   _provenance: { brief_text: string }; graph: Json; plot_body: Json;
@@ -64,7 +65,8 @@ const chances = (result: Json): Record<string, number> => {
     if (v === null || typeof v !== 'object') return;
     const r = v as Json;
     if (typeof r.probability_of_goal === 'number') out[String(r.option_id ?? r.id)] = r.probability_of_goal;
-    Object.values(r).forEach(walk);
+    // The saved Run's evaluated copy is internal (never a public surface nor the AI's): the chance a reader sees is the projection.
+    Object.entries(r).forEach(([k, x]) => { if (k !== RUN_EVALUATED_BEFORE_SUPPORT_KEY) walk(x); });
   };
   walk(result);
   return out;
