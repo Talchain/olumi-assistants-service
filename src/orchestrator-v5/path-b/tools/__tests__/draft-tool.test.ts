@@ -5,8 +5,9 @@
  * saved"; an unknown write is said as unknown. The drafter and the routes are scripted (no module mock: the conversion and the
  * construction's own helpers are real). SYNTHETIC brief.
  */
+import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
-import { BuildModelParams, buildModel, type DraftDeps } from '../draft-tool.js';
+import { BuildModelParams, B_DRAFTER_SENTENCE, buildModel, type DraftDeps } from '../draft-tool.js';
 import { candidateToGraph } from '../candidate-to-graph.js';
 import { BUILD_INSTRUCTIONS, constructionOperationId, type CallStructuredModel } from '../../../agent-lane/runtime/build-model.js';
 import { registrationTurnId } from '../../../graph-registration/registration-identity.js';
@@ -98,10 +99,23 @@ describe('the drafter is told the static instructions and the literal brief, not
     await buildModel(p, { scenario_id: SID, verified_user_messages: [brief], user_turn_text: brief }, { brief });
     expect(p.callStructured).toHaveBeenCalledTimes(1);
     const sent = p.callStructured.mock.calls[0]![0];
-    expect(sent.instructions).toBe(BUILD_INSTRUCTIONS);
+    expect(sent.instructions).toBe(`${BUILD_INSTRUCTIONS} ${B_DRAFTER_SENTENCE}`);
     expect(sent.input).toContain(brief);
     expect(sent.input).not.toContain('Construction notes');
     expect(`${sent.instructions}\n${sent.input}`).not.toContain('deterministic reader');
+  });
+});
+
+// ⭐ THE AIE'S B-ONLY DRAFTER SENTENCE (DL 19 Oct): the sent bytes after A's static instructions are exactly the AIE's sentence.
+describe('B\'s drafter request carries the AIE\'s one sentence verbatim; A\'s instructions do not', () => {
+  it('the sent instructions are A\'s static instructions, one space, then bytes whose sha256 is the AIE\'s', async () => {
+    const p = product({ graph: [EMPTY], register: [{ status: 422, json: {} }] });
+    await buildModel(p, ctx, { brief: BRIEF });
+    const sent = String(p.callStructured.mock.calls[0]![0].instructions);
+    expect(sent.startsWith(`${BUILD_INSTRUCTIONS} `)).toBe(true);
+    expect(createHash('sha256').update(Buffer.from(sent.slice(BUILD_INSTRUCTIONS.length + 1), 'utf8')).digest('hex'))
+      .toBe('cfbe03aa8d84e1ed6452817987d331bbf15596be25487da26b93978316d95f49');
+    expect(BUILD_INSTRUCTIONS).not.toContain(B_DRAFTER_SENTENCE.slice(0, 60));
   });
 });
 
