@@ -1393,13 +1393,14 @@ const quotedList = (items: readonly string[]): string => {
   return q.length <= 1 ? (q[0] ?? '') : `${q.slice(0, -1).join(', ')} and ${q[q.length - 1]}`;
 };
 
-/** A declared `sum` that held whole (`checkDeclaredSums`), with its bound source and authorship. */
-export interface AcceptedDeclaredSum {
+/**
+ * A declared `sum` that held whole (`checkDeclaredSums`). Always Olumi's reading while user-declared exact sums are a capability
+ * still owed (#3440: a quoted sum is never taken as the user's), so it carries no quote and no user authorship.
+ */
+interface AcceptedDeclaredSum {
   readonly outcome_id: string;
   readonly factor_ids: readonly string[];
-  readonly stated_in_brief: boolean;
-  /** Located brief sentence bound to the declared quantities. */
-  readonly quote?: string;
+  readonly stated_in_brief: false;
 }
 
 /** ISL's reconciliation tolerance for a stated level (`IDENTITY_RECONCILIATION_TOLERANCE`, robustness_analyzer_v2.py). */
@@ -5967,8 +5968,7 @@ function admitOnce(
       field_path: `nodes[${s.outcome_id}].sum_identity`,
       before: null,
       after: { operation: 'sum', factor_ids: [...s.factor_ids], stated_in_brief: s.stated_in_brief },
-      reason: declaredSumSentence(labelById.get(s.outcome_id) ?? s.outcome_id, s.factor_ids.map((id) => labelById.get(id) ?? id), s.stated_in_brief)
-        + (s.quote !== undefined ? ` Brief quote: “${s.quote}”` : ''),
+      reason: declaredSumSentence(labelById.get(s.outcome_id) ?? s.outcome_id, s.factor_ids.map((id) => labelById.get(id) ?? id), s.stated_in_brief),
       severity: 'info',
     } as RepairEntry);
   }
@@ -6018,8 +6018,8 @@ function admitOnce(
   }
   // ⭐ L2: a carried DECLARED sum's parts are its definition too, at existence 1 and the spread floor, as R3-2's. The size is
   // the one admission already checked (`holdsByDefinition`: ±1 per 1 in one unit, β on the two frames), kept as it is so
-  // the frame fits after admission move it like any other link. Bound explicit declarations retain user authorship
-  // and their `source_quote`. Olumi's pending fit and basis are dropped: a definition has no estimate to refit.
+  // the frame fits after admission move it like any other link. A declared sum is Olumi's reading (`AcceptedDeclaredSum`), so
+  // its parts are too. Olumi's pending fit and basis are dropped: a definition has no estimate to refit.
   if (declaredCarried.length > 0) {
     const declaredOf = new Map(declaredCarried.map((s) => [s.outcome_id, s] as const));
     finalEdges = finalEdges.map((e) => {
@@ -6029,9 +6029,7 @@ function admitOnce(
       const { reasoning: _guess, basis: _guessBasis, source: _drafted, source_quote: _drafterQuote, olumi_fit_candidate: _fit,
         mean_projected: _projected, ...provenance } = e.provenance ?? { source: 'cee_hypothesis' };
       return { ...edge, strength: { mean: e.strength.mean, std: LLM_STRENGTH_STD_FLOOR }, exists_probability: 1, effect_direction: 'positive' as const,
-        provenance: { ...provenance, source: declared.stated_in_brief ? 'brief_extraction' : 'cee_hypothesis',
-          magnitude: declared.stated_in_brief ? 'user_stated' as const : 'olumi_estimate' as const, definitional: true as const,
-          ...(declared.quote !== undefined ? { source_quote: declared.quote } : {}) } };
+        provenance: { ...provenance, source: 'cee_hypothesis', magnitude: 'olumi_estimate' as const, definitional: true as const } };
     });
     for (const s of declaredCarried) definedParts.set(s.outcome_id, new Set(s.factor_ids));
   }
