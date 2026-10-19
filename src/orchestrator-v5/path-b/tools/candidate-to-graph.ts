@@ -57,8 +57,9 @@ function asCandidate(v: unknown): CandidateModel | null {
   if (v === null || typeof v !== 'object' || Array.isArray(v)) return null;
   const c = v as Rec;
   if (c.goal === null || typeof c.goal !== 'object' || typeof c.goal.metric !== 'string' || c.goal.metric.trim() === '') return null;
-  return { ...c, constraints: list(c.constraints), options: list(c.options), factors: list(c.factors), risks: list(c.risks),
-    outcomes: list(c.outcomes), links: list(c.links), identities: list(c.identities) } as unknown as CandidateModel;
+  const model: Rec = { ...c, constraints: list(c.constraints), options: list(c.options), factors: list(c.factors), risks: list(c.risks),
+    outcomes: list(c.outcomes), links: list(c.links), identities: list(c.identities) };
+  return model as CandidateModel;
 }
 
 export function candidateToGraph(input: unknown, _brief: string): CandidateToGraphResult {
@@ -84,7 +85,7 @@ export function candidateToGraph(input: unknown, _brief: string): CandidateToGra
     return big > 1 ? { cap: defaultFrameFor(big), convention: true } : {};
   };
 
-  const entities: { label: string; kind: CandidateNodeKind; provenance: string; node: Partial<AdmittedNode> & Rec }[] = [
+  const entities: { label: string; kind: CandidateNodeKind; provenance: string; node: Rec }[] = [
     { label: g.metric, kind: 'goal', provenance: g.provenance, node: goalFields(c, speakerOf, whoOf, loss) },
     ...c.options.map((o) => ({ label: o.label, kind: 'option' as const, provenance: o.provenance, node: {} })),
     ...c.factors.map((f) => {
@@ -113,7 +114,7 @@ export function candidateToGraph(input: unknown, _brief: string): CandidateToGra
     const label = shortLabel(e.label);
     const os = e.node.observed_state;
     nodes.push({ id, kind: e.kind, label, ...(label !== e.label ? { description: e.label } : {}),
-      provenance: os !== undefined ? nodeProvenanceDisplay(undefined, os) : displayProvenanceFor(e.provenance), ...e.node });
+      provenance: os !== undefined && e.kind !== 'goal' ? nodeProvenanceDisplay(undefined, os) : displayProvenanceFor(e.provenance), ...e.node });
   }
   const nodeById = new Map(nodes.map((n) => [n.id, n] as const));
   const kindOf = (id: string): string | undefined => nodeById.get(id)?.kind;
@@ -195,11 +196,11 @@ export function candidateToGraph(input: unknown, _brief: string): CandidateToGra
   const links = admitCandidateLinks(causal, sizing);
   loss.push(...links.loss, ...links.withheld.map((w) => note(`edges[${w.from}::${w.to}]`, { from: w.from, to: w.to }, w.detail, 'warn')));
   for (const e of links.edges) {
-    const quote = causal.find((l) => l.from === e.from && l.to === e.to)?.source_quote;
+    const quote = (causal.find((l) => l.from === e.from && l.to === e.to) as Rec | undefined)?.source_quote;
     if (typeof quote === 'string' && quote.trim() !== '' && e.provenance !== undefined) e.provenance.source_quote = quote;
   }
 
-  const topo = (from: string, to: string): Rec => ({ from, to, strength: { ...STRUCTURAL_EDGE_DEFAULTS.strength },
+  const topo = (from: string, to: string): { from: string; to: string } & Rec => ({ from, to, strength: { ...STRUCTURAL_EDGE_DEFAULTS.strength },
     exists_probability: STRUCTURAL_EDGE_DEFAULTS.exists_probability, effect_direction: STRUCTURAL_EDGE_DEFAULTS.effect_direction,
     provenance: { source: 'cee_hypothesis' } });
   const decisionId = nodes.find((n) => n.kind === 'decision')!.id;
@@ -213,7 +214,7 @@ export function candidateToGraph(input: unknown, _brief: string): CandidateToGra
   if (heldEdges.length > 0) nodeById.get(held!.optionId)!.is_baseline = true;
 
   const goalId = nodes.find((n) => n.kind === 'goal')!.id;
-  const loops = breakLoops([...topology, ...heldEdges, ...links.edges] as Rec[] as { from: string; to: string }[], {
+  const loops = breakLoops([...topology, ...heldEdges, ...links.edges] as { from: string; to: string }[], {
     mayWithhold: (e) => kindOf(e.from) !== 'option' && kindOf(e.from) !== 'decision', goalId, kindOf });
   loss.push(...loops.withheld.map(({ edge }) => note(`edges[${edge.from}::${edge.to}].loop_withheld`, { from: edge.from, to: edge.to },
     `The link from "${nodeById.get(edge.from)?.label}" to "${nodeById.get(edge.to)?.label}" closes a loop, which the analysis cannot run, so it is left out.`, 'warn')));
@@ -231,6 +232,13 @@ export function candidateToGraph(input: unknown, _brief: string): CandidateToGra
   loss.push(...sums.loss);
   for (const s of sums.accepted) nodeById.get(s.outcome_id)!.nonlinear_identity = { operation: 'sum', factor_ids: [...s.factor_ids], stated_in_brief: false };
 
+  // What the draft declares that this conversion does not carry yet is said (and kept, verbatim, in `declared`).
+  const notCarried = [...(g.kind === 'event_by_date' ? [`a forecast for the deadline of "${g.deliverable ?? g.metric}"`] : []),
+    ...list<Rec>(c.identities).filter((d) => d?.operation === 'product' || (d?.operation === 'accumulation' && !finite(g.horizon_months)))
+      .map((d) => `how "${d.outcome}" is made up`), ...(g.scope ? [`whether "${g.metric}" is one part or the whole`] : [])];
+  if (notCarried.length > 0) {
+    loss.push(note(`nodes[${goalId}].not_carried`, null, `This draft does not include ${notCarried.join(', or ')} yet; Olumi kept it as drafted.`));
+  }
   // A declared accumulation over a declared horizon, before the refits.
   let graphNodes: Rec[] = nodes;
   if (finite(g.horizon_months)) {
@@ -248,7 +256,7 @@ export function candidateToGraph(input: unknown, _brief: string): CandidateToGra
 
 /** The goal as declared: an open aim gets no threshold; a target is read on its own cap, with the existing level rules. */
 function goalFields(c: CandidateModel, speakerOf: (kind: string, label: string, extra?: (s: Rec) => boolean) => unknown,
-  whoOf: (provenance: unknown, speaker: unknown) => Who, loss: RepairEntry[]): Partial<AdmittedNode> & Rec {
+  whoOf: (provenance: unknown, speaker: unknown) => Who, loss: RepairEntry[]): Rec {
   const g = c.goal;
   const raw = g.value;
   const unit = g.unit ? { goal_threshold_unit: g.unit } : {};
