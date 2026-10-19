@@ -361,7 +361,7 @@ async function proposeLinks(deps: Pick<ChangeDeps, 'dispatch' | 'proposals' | 'p
     const from = labelOf.get(l.from);
     const to = labelOf.get(l.to);
     if (typeof from !== 'string' || typeof to !== 'string') return refused('not_in_model', undefined, { op: i });
-    asked.push({ from_label: from, to_label: to, strength: l.band, origin: 'olumi', basis: args.basis });
+    asked.push({ from_id: l.from, to_id: l.to, from_label: from, to_label: to, strength: l.band, origin: 'olumi', basis: args.basis });
   }
   const r = await deps.proposeLinkStrengths(ctx, { links: asked, rationale: args.basis });
   const { ok: done, mutated: _mutated, refusal, detail, ...data } = r;

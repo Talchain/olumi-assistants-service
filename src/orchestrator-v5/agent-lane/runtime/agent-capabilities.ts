@@ -2382,6 +2382,12 @@ function resolveNamed(
   return candidates.length > 0 ? { kind: 'other', node: candidates[0] } : { kind: 'none' };
 }
 
+/** PATH-B's exact reference (gap 2): a node id the caller already bound, never a name to match, so a shared label cannot reach it. */
+function resolveId(g: Pick<GraphRead, 'nodes'>, id: string): Resolution {
+  const node = g.nodes.find((n) => n.id === id);
+  return node === undefined ? { kind: 'none' } : { kind: 'one', node };
+}
+
 /** A canonical request-selected directed edge disambiguates its ends; labels are only display/statement data. */
 function resolveLinkEffectEnds(g: GraphRead, ctx: AgentToolContext, fromName: string, toName: string): readonly [Resolution, Resolution] {
   const matches = ctx.grounded_selection?.unresolved === 'none' ? (ctx.grounded_links ?? []).flatMap(link => {
@@ -6030,8 +6036,10 @@ export function createAgentCapabilities(
           return refuseSet('unreadable_strength', `The strength for ${name} must be one of weak (the canvas\u2019s Slight), moderate, strong or very strong.`);
         }
         const band = l.strength;
-        const fromRes = resolveNamed(g, String(l.from_label ?? ''), () => true);
-        const toRes = resolveNamed(g, String(l.to_label ?? ''), () => true);
+        // A caller that holds the link's ids (PATH-B core) is resolved by them alone; the A lane's labels are matched as before.
+        const byIds = l.from_id !== undefined || l.to_id !== undefined;
+        const fromRes = byIds ? resolveId(g, String(l.from_id ?? '')) : resolveNamed(g, String(l.from_label ?? ''), () => true);
+        const toRes = byIds ? resolveId(g, String(l.to_id ?? '')) : resolveNamed(g, String(l.to_label ?? ''), () => true);
         const ambiguousEnds = [
           ...(fromRes.kind === 'ambiguous' ? [describeAmbiguity(g, String(l.from_label ?? ''), fromRes.candidates)] : []),
           ...(toRes.kind === 'ambiguous' ? [describeAmbiguity(g, String(l.to_label ?? ''), toRes.candidates)] : []),

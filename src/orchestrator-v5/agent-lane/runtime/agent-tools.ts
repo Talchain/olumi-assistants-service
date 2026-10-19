@@ -1113,7 +1113,9 @@ export interface AgentCapabilities {
     // #3002 known-origin transport: whose band the AI declares (`origin`, required in the tool schema), with its quote, cited
     // source or Olumi's own basis. An absent or unknown origin is never written.
     links: readonly { from_label: string; to_label: string; strength: 'weak' | 'moderate' | 'strong' | 'very strong'; from_words?: string;
-      origin?: 'user' | 'third_party' | 'olumi'; source?: string; basis?: string }[];
+      origin?: 'user' | 'third_party' | 'olumi'; source?: string; basis?: string;
+      /** PATH-B core's exact ends: given, the link is resolved by these ids alone (never by the labels, which then only name it). */
+      from_id?: string; to_id?: string }[];
     rationale: string;
   }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). */
