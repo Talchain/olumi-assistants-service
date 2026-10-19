@@ -110,12 +110,21 @@ describe('sources, as the ONE authority answers them', () => {
   });
 });
 
+describe('a NEW scenario: no model yet is a valid state (the served read: graph null, graph_present false)', () => {
+  it('the AI sees an empty model, revision none, nothing selected, never "malformed"', async () => {
+    const d = await data({ scenario_id: 'scn_1', graph: null, graph_present: false, graph_hash: null, graph_identity_hash: null, brief_text: null });
+    expect(d).toMatchObject({ scenario_id: 'scn_1', empty: true, nodes: [], links: [], selected_run: null,
+      revision: { graph_hash: null, graph_identity_hash: null } });
+  });
+});
+
 describe('truthful outcomes when the read fails', () => {
   it.each([
     ['not found', 404, read(), { status: 'refused', reason: 'not_found' }],
     ['a server failure', 500, {}, { status: 'unavailable', reason: 'read_failed', write: 'none', detail: 'HTTP 500' }],
     ['a read without its hash', 200, { graph: graph() }, { status: 'unavailable', reason: 'read_malformed', write: 'none' }],
     ['a read without a graph', 200, { graph_hash: 'h_one' }, { status: 'unavailable', reason: 'read_malformed', write: 'none' }],
+    ['a null graph the route does not call absent', 200, { graph: null, graph_hash: null }, { status: 'unavailable', reason: 'read_malformed', write: 'none' }],
   ] as const)('%s', async (_name, status, json, outcome) => {
     expect(await readCanonicalContext(deps(status, json as Rec), ctx)).toEqual(outcome);
   });
