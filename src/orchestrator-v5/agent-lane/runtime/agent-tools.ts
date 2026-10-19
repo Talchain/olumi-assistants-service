@@ -296,6 +296,8 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     parameters: obj({
       brief: { type: 'string', description: 'For initial construction, the user’s brief verbatim. For an explicitly requested replacement, Olumi’s proposed framing; it is context, never human source.' },
       explicit_rebuild_request: { type: 'string', description: 'Only for a saved model: the complete verified current typed request verbatim.' },
+      // AIE packet AIE-K6-EXISTING-C5-WORDING-20261018-v1 (`arg_description`, sha256 ab6a2d6f…), byte for byte.
+      explicit_draft_request: { type: 'string', description: 'Use only when the user explicitly requests a provisional draft now. Quote the complete applicable CURRENT typed request verbatim, including negation, conditions and qualifications. A request to discuss drafting, a quoted example, a conditional future request or an ambiguous yes is not that instruction. This arg does not grant approval for unrelated edits, replacing an existing saved model, or numerical analysis. Keep supplied facts and any stated aim or limits; missing information remains unknown. Any added framing, option or assumption is Olumi’s provisional suggestion, never attributed to the user.' },
       whole_request: WHOLE_REQUEST,
     }, ['brief']),
   },
@@ -1161,7 +1163,7 @@ export interface AgentCapabilities {
    * `run_analysis` tool never passes it (`runAgentTool` hands over `(ctx, args)` only).
    */
   runAnalysis(ctx: AgentToolContext, args: { reason: string; effects_timing: EffectsTiming | null }, opts?: { readonly afterCommittedChange?: boolean }): Promise<ToolResult>;
-  buildModelFromBrief(ctx: AgentToolContext, args: { brief: string; explicit_rebuild_request?: string }): Promise<ToolResult>;
+  buildModelFromBrief(ctx: AgentToolContext, args: { brief: string; explicit_rebuild_request?: string; explicit_draft_request?: string }): Promise<ToolResult>;
   proposeAssumptions(ctx: AgentToolContext, args: {
     // `revise` is in the tool's schema (above) and read by the capability (`a?.revise === true`); the type now says so.
     assumptions: readonly { factor_id?: string; factor_label: string; value: number; unit: string; basis: string; user_stated: boolean; revise?: boolean; keep?: boolean }[];
