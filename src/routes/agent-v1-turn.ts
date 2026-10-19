@@ -83,7 +83,7 @@ import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { runOmittedRisks, type RunOmittedRisk } from '../orchestrator-v5/agent-lane/unsized-risk.js';
 import { drawnLinkPress, isDrawnLinkPress } from '../orchestrator-v5/agent-lane/drawn-link-press.js';
 import { answerIsIncomplete, heldChangeSentence, runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
-import { runCoreTurn, type CoreTurnSdk } from '../orchestrator-v5/agent-lane/core/sdk-turn.js';
+import { CoreStateUnavailableError, runCoreTurn, type CoreTurnSdk } from '../orchestrator-v5/agent-lane/core/sdk-turn.js';
 import { parseSelectedElements } from '../orchestrator-v5/boundary/request-extensions.js';
 import { agentSelectionContext, type AgentSelectionContext } from '../orchestrator-v5/agent-lane/selection-context.js';
 import type { AgentLaneMode, AgentToolContext, ToolResult } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
@@ -4357,7 +4357,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             .then(read => read.status === 200 ? read.json.brief_text : undefined).catch(() => undefined),
           canonicalState: canonicalContext?.packet?.state,
           withheldTools: withheldToolsOf(body),
-          // The scenario's ONE OpenAI Conversation id is saved on the scenario, so a reopen continues it.
+          // The scenario's ONE OpenAI Conversation id is saved on the scenario, so a reopen continues it. A store without it
+          // stops the turn (CoreStateUnavailableError → 503 below): never a Conversation the next turn could not find.
           ...(typeof store.readOpenAiConversationId === 'function' && typeof store.claimOpenAiConversationId === 'function' ? {
             conversationStore: {
               read: (sid: string) => store.readOpenAiConversationId!(sid),
@@ -4468,6 +4469,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             ...(turnId !== undefined ? { retry_safe: released } : {}),
           } };
           return reply.code(409).send(refusal.error);
+        }
+        // PATH-B: a `core` turn whose Conversation id cannot be kept on the scenario stops before any model call and says so.
+        if (err instanceof CoreStateUnavailableError) {
+          return reply.code(503).send({ error: err.code, detail: err.reason, _agent: { mode },
+            _provider_calls: recordedProviderCalls(), ...(turnId !== undefined ? { retry_safe: released } : {}) });
         }
         return reply.code(502).send({
           error: 'UPSTREAM_ERROR', detail: String(err).slice(0, 300),
