@@ -38,7 +38,14 @@ const store = {
   readFactsFor: vi.fn(async () => []),
   readAnalysisInvalidatedAt: vi.fn(async () => null),
   readExistingScenario: vi.fn(async () => null),
+  // The scenario's saved Conversation id (`scenarios.openai_conversation_id`); `undefined` = the column is absent.
+  readOpenAiConversationId: vi.fn(async (sid: string): Promise<string | null | undefined> => conversationIds.get(sid) ?? null),
+  claimOpenAiConversationId: vi.fn(async (sid: string, id: string): Promise<string | null | undefined> => {
+    if (!conversationIds.has(sid)) conversationIds.set(sid, id);
+    return conversationIds.get(sid);
+  }),
 };
+const conversationIds = new Map<string, string>();
 vi.mock('../../session/index.js', () => ({ getSessionStore: () => store }));
 vi.mock('../../../orchestrator/user-identity.js', async (original) => ({
   ...await original<Record<string, unknown>>(), resolveUserIdentity: async () => ({ mode: 'off' }),
@@ -101,7 +108,7 @@ describe('PATH-B core: the AI\'s own words are the reply; protocol, cards, resul
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { rows.clear(); sent.length = 0; graph = READ.graph; state = READ.analysis_state; outputs = []; });
+  beforeEach(() => { rows.clear(); conversationIds.clear(); sent.length = 0; graph = READ.graph; state = READ.analysis_state; outputs = []; });
 
   const typed = async (message: string, headers: Record<string, string> = {}, turnId = randomUUID()): Promise<Json> => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', headers, payload: {
@@ -145,6 +152,18 @@ describe('PATH-B core: the AI\'s own words are the reply; protocol, cards, resul
     // Protocol and data are unchanged: the same readback, readiness and result block ride the wire.
     expect(core.graph_hash).toBe(full.graph_hash);
     expect(core.analysis_ready).toEqual(full.analysis_ready);
+  });
+
+  it('⛔ a core turn whose scenario cannot hold its Conversation id stops before any model call, with a typed 503', async () => {
+    store.readOpenAiConversationId.mockImplementationOnce(async () => undefined);
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', headers: CORE, payload: {
+      kind: 'message', turn_id: randomUUID(), scenario_id: SCENARIO, stage: 'analyse', turn_class: 'frame', message: 'What next?', source: 'composer' } });
+    expect(r.statusCode, r.body).toBe(503);
+    expect(r.json()).toMatchObject({ error: 'CORE_STATE_UNAVAILABLE', detail: 'store_cannot_hold_id', _agent: { mode: 'core' } });
+    expect(sent.filter((b) => b.includes(CORE_RULE)), 'no model call').toHaveLength(0);
+    // Contrast: the same store with the column continues normally.
+    await typed('What next?', CORE);
+    expect(conversationIds.get(SCENARIO)).toBe('conv_route');
   });
 
   it('a core turn\'s durable row holds the AI\'s words, and resending the same turn replays those exact bytes', async () => {

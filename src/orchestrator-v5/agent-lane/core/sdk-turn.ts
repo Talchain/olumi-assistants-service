@@ -29,9 +29,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import {
   Agent, MaxTurnsExceededError, OpenAIResponsesModel, run, setTracingDisabled, tool, ToolCallError, withTrace, type OpenAIClient,
 } from '@openai/agents';
-import { config } from '../../../config/index.js';
 import { getRuntimeEnv } from '../../../config/env-resolver.js';
 import { postResponses } from '../../../adapters/llm/openai.js';
+import { createOpenAiConversation } from '../../../adapters/llm/openai-conversations.js';
 import { recordProviderReturnedModel } from '../../../adapters/llm/provider-policy.js';
 import { log } from '../../../utils/telemetry.js';
 import { agentRequestIdentity } from '../runtime/prompt-identity.js';
@@ -51,57 +51,49 @@ export const AGENTS_SDK = '@openai/agents@0.18.0';
 export const CORE_MAX_MODEL_CALLS = 8;
 /** Rendered tokens past which the server compacts the Conversation (native compaction; the window grows every turn). */
 export const CORE_COMPACT_THRESHOLD = 100_000;
-/** Conversation ids held in process memory at once (a cache of the saved id, or the id itself when it cannot be saved). */
-const CONVERSATIONS_CAP = 500;
 const LIMIT_CHANGE_TOOL = 'propose_limit_change';
 const AUTHORISE_CHANGE = 'authorise_change';
 
 // Tests never export traces; a deployed runtime uses the SDK's built-in exporter, which reads the lane's OPENAI_API_KEY.
 if (getRuntimeEnv() === 'test') setTracingDisabled(true);
 
-const conversations = new Map<string, string>();
-const remember = (scenarioId: string, id: string): string => {
-  conversations.delete(scenarioId);
-  conversations.set(scenarioId, id);
-  if (conversations.size > CONVERSATIONS_CAP) conversations.delete(conversations.keys().next().value!);
-  return id;
-};
-/** Test-only: forget the process cache (a restart). */
-export function resetCoreConversationsForTests(): void { conversations.clear(); }
+/**
+ * The turn cannot keep its conversation state durable, so it stops before any model call: the scenario's store cannot
+ * hold the id (the column is not there yet), or the id could not be saved. A Conversation the next turn could not find
+ * would silently start the reasoning over; this says so instead. Nothing was written, so a retry is safe.
+ */
+export class CoreStateUnavailableError extends Error {
+  readonly code = 'CORE_STATE_UNAVAILABLE';
+  constructor(readonly reason: 'store_cannot_hold_id' | 'id_not_saved' | 'store_unreadable', cause?: unknown) {
+    super(`core conversation state unavailable: ${reason}`, cause === undefined ? undefined : { cause });
+    this.name = 'CoreStateUnavailableError';
+  }
+}
 
-/** Where a scenario's Conversation id is saved: `undefined` = this store cannot hold it (keep it in memory). */
+/** Where a scenario's Conversation id is saved. `undefined` from either call = this store cannot hold it. */
 export interface ConversationIdStore {
   read(scenarioId: string): Promise<string | null | undefined>;
-  /** Save `id` unless the scenario already has one; returns the scenario's id after the call (the winner of a race). */
+  /** Save `id` only if the scenario has none (one conditional write); returns the scenario's id after it (a race's winner). */
   claim(scenarioId: string, id: string): Promise<string | null | undefined>;
 }
 
-/** Create the scenario's OpenAI Conversation. A brief written apart from this message is its first item, once. */
-async function createConversation(scenarioId: string, firstItems: readonly unknown[], signal: AbortSignal | undefined): Promise<string> {
-  const r = await fetch('https://api.openai.com/v1/conversations', {
-    method: 'POST',
-    headers: { authorization: `Bearer ${config.llm.openaiApiKey ?? ''}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ metadata: { olumi_scenario_id: scenarioId, olumi_lane: 'core' }, items: firstItems }),
-    signal: signal ?? AbortSignal.timeout(15_000),
-  });
-  if (!r.ok) throw new Error(`openai_conversation_${r.status}: ${(await r.text().catch(() => '')).slice(0, 300)}`);
-  const id = ((await r.json()) as { id?: unknown }).id;
-  if (typeof id !== 'string' || id === '') throw new Error('openai_conversation_no_id');
-  return id;
-}
-
-/** The scenario's Conversation: the cached or saved one, else a new one, saved so a reopen continues it. */
+/**
+ * The scenario's ONE Conversation, read from the store on every turn (no process copy): the saved one, else a new one
+ * whose id is saved atomically before the turn uses it. A store that cannot hold the id stops the turn (no fallback).
+ */
 async function scenarioConversation(scenarioId: string, store: ConversationIdStore | undefined, firstItems: readonly unknown[],
-  signal: AbortSignal | undefined): Promise<{ readonly id: string; readonly created: boolean; readonly saved: boolean }> {
-  const cached = conversations.get(scenarioId);
-  if (cached !== undefined) return { id: remember(scenarioId, cached), created: false, saved: store !== undefined };
-  const saved = await store?.read(scenarioId).catch(() => undefined);
-  if (typeof saved === 'string' && saved !== '') return { id: remember(scenarioId, saved), created: false, saved: true };
-  const created = await createConversation(scenarioId, firstItems, signal);
-  const winner = await store?.claim(scenarioId, created).catch(() => undefined);
-  return typeof winner === 'string' && winner !== ''
-    ? { id: remember(scenarioId, winner), created: winner === created, saved: true }
-    : { id: remember(scenarioId, created), created: true, saved: false };
+  signal: AbortSignal | undefined): Promise<{ readonly id: string; readonly created: boolean }> {
+  if (store === undefined) throw new CoreStateUnavailableError('store_cannot_hold_id');
+  let saved: string | null | undefined;
+  try { saved = await store.read(scenarioId); } catch (err) { throw new CoreStateUnavailableError('store_unreadable', err); }
+  if (saved === undefined) throw new CoreStateUnavailableError('store_cannot_hold_id');
+  if (typeof saved === 'string' && saved !== '') return { id: saved, created: false };
+  const created = await createOpenAiConversation({ olumi_scenario_id: scenarioId, olumi_lane: 'core' }, firstItems, signal);
+  let winner: string | null | undefined;
+  try { winner = await store.claim(scenarioId, created); } catch (err) { throw new CoreStateUnavailableError('id_not_saved', err); }
+  if (typeof winner !== 'string' || winner === '') throw new CoreStateUnavailableError('id_not_saved');
+  // A concurrent first turn saved its own Conversation first: continue that one (ours is left unused).
+  return { id: winner, created: winner === created };
 }
 
 const sha256 = (value: unknown): string => {
@@ -159,7 +151,7 @@ export interface CoreTurnInput {
   readonly canonicalState?: unknown;
   readonly withheldTools?: readonly string[];
   readonly userId: string | null;
-  /** Where the scenario's Conversation id is saved (the session store); absent → process memory only. */
+  /** Where the scenario's Conversation id is saved (the session store); absent → the turn stops (CoreStateUnavailableError). */
   readonly conversationStore?: ConversationIdStore;
   readonly signal?: AbortSignal;
   readonly now?: () => number;
@@ -173,8 +165,6 @@ export interface CoreTurnSdk {
   readonly conversation_id: string;
   /** This turn created the Conversation (the scenario's first `core` turn, or the first since its id was lost). */
   readonly conversation_created: boolean;
-  /** The id is saved on the scenario, so a reopen continues it; false = process memory only. */
-  readonly conversation_saved: boolean;
   readonly compact_threshold: number;
 }
 
@@ -278,7 +268,7 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
       timing: { total_ms: total, provider_ms: Math.max(0, total - toolMs), tool_ms: toolMs, tool_provider_ms: 0, overhead_ms: 0,
         provider_calls: calls, tool_calls: toolCalls.length, hops: calls },
       sdk: { runtime: AGENTS_SDK, trace_id: traceId, state: 'openai_conversation', conversation_id: conversation.id,
-        conversation_created: conversation.created, conversation_saved: conversation.saved, compact_threshold: CORE_COMPACT_THRESHOLD },
+        conversation_created: conversation.created, compact_threshold: CORE_COMPACT_THRESHOLD },
     };
   };
   try {
