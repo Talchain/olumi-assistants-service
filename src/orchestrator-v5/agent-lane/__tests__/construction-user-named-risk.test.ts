@@ -36,6 +36,9 @@ describe('K3 (DL 5932372585, generalised): every risk the user names is drawn as
     // 5a909f57 / 6d6cae9d: an explicit absence of testing stays a visible concern, not only a question; an exact target keeps both bounds.
     expect(text).toContain('Keep an explicit absence of evidence or testing visible with the claim it qualifies; an unknowns question adds to that item, never replaces it.');
     expect(text).toContain('A numerical exact target keeps both its lower and upper bound at the stated value on that same quantity in the existing goal-and-limit representation.');
+    // AIE f5be6cc8: an evidence or testing gap qualifies a claim's support and is never itself the modelled cause.
+    expect(text).toContain('An evidence or testing gap qualifies a claim’s support; keep it visible without treating that status as a cause of the modelled outcome.');
+    expect(text).not.toContain('Lack of testing alone supplies no numerical loss, causal direction or probability.');
   });
 
   it('RED: user-named risks outrank the 4-to-6 envelope, stated once, directly after the MATERIAL RISKS paragraph and before the widening limit', () => {
