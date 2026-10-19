@@ -293,6 +293,29 @@ describe('S-D slice 2 Agent proposals', () => {
     expect(again.assistant_text).toMatch(/^Nothing was written again\. Check the current model to confirm whether this change is saved\./);
     expect(bytes()).toBe(original); expect(graphWrites.get(SCENARIO)).toBe(writes); expect(openAiCalls).toBe(calls);
   }, 120_000);
+  /**
+   * Codex delta check of #3456 @1c01e0fe (its ai-echo probe, adopted): the Agent reads the tool's `detail` and may repeat it.
+   * After an Undo, a memory replay's detail said "already applied and saved as version 7" and the route kept the AI's echo.
+   * The detail now carries the same proof as the user's words. Guest routes mint no version receipt: the original receipt is
+   * a sentinel, which must still travel unchanged.
+   */
+  it('REC-WRITE AI-echo RED: after Undo, the Agent is never told the change is saved, so its echo cannot say it', async () => {
+    seed(); const original = structuredClone(graphNow()); const b = await assumptions(); const p = shown(b);
+    await turn({ ...press(p), proposal_edits: { proposal_id: p.proposal_id, revision: p.revision, digest: p.digest, graph_hash: b._proposal_fields!.graph_hash, fields: [] } });
+    const receipts = [{ version: 7, version_id: 'original-version-seven', mutation_id: 'original-mutation-seven', source_turn_id: 'original-turn' }];
+    proposalsForApp.markApplied(p.proposal_id, receipts); graphOf.set(SCENARIO, original);
+    const before = bytes(); const writes = graphWrites.get(SCENARIO); let saw: Record<string, unknown> = {};
+    script = [() => fnCall('authorise_change', { proposal_id: p.proposal_id }), (body) => {
+      const result = (body.input as Record<string, unknown>[]).filter((i) => i.type === 'function_call_output').at(-1)!;
+      saw = JSON.parse(String(result.output)); return say(String(saw.detail));
+    }];
+    const r = await turn({ message: 'Confirm the outcome of the earlier proposal.' });
+    expect(r._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: false })]);
+    expect(saw.receipts).toEqual(receipts);
+    expect(saw.detail).toBe('Nothing was written again. Check the current model to confirm whether this change is saved.');
+    expect(r.assistant_text).not.toMatch(/already applied and saved|already saved/);
+    expect(bytes()).toBe(before); expect(graphWrites.get(SCENARIO)).toBe(writes);
+  }, 120_000);
   /** Codex post-merge check of #3453, probe 7: an applied flag with no write behind it is never said as "saved". */
   it('REC-WRITE flag-only RED: an applied mark with no write says nothing was written again, never "already saved", and writes nothing', async () => {
     seed(); const b = await assumptions(); const p = shown(b);

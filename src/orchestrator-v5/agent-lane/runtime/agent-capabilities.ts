@@ -419,7 +419,8 @@ import { sayFigureExactly, sayFigureRead, sayFigureWithoutRounding } from '../sa
 import { rangeApproximationWords, rangeLawAdopted } from '../../intervention-range.js';
 import { authorshipOf, heldFigureOwnerOf, isHumanStatementSource, isUnverifiedUserMaterial, linkDrawnByOf, provenanceOf, settingDisplayOf, settingProvenanceOf, whoseOf } from '../../../cee/provenance/provenance-of.js';
 import { isPercentScaledUnit } from '../../../cee/draft/records/projector.js';
-import { DRAWN_LINK_ESTIMATE_CONFLICT_MESSAGE, PARTIAL_WRITE_MESSAGES, partialRangeLevelsWarning, quoteLabelForUser, TYPED_APPROVAL_READ_BY_OLUMI, type NotSavedValue } from '../write-outcome.js';
+import { FRESH_READ } from '../turn-read-cache.js';
+import { ALREADY_APPLIED_UNCONFIRMED, DRAWN_LINK_ESTIMATE_CONFLICT_MESSAGE, PARTIAL_WRITE_MESSAGES, partialRangeLevelsWarning, quoteLabelForUser, TYPED_APPROVAL_READ_BY_OLUMI, type NotSavedValue } from '../write-outcome.js';
 import { isChangeFrame, sayGoalChange, sayLimitInFrame } from '../limit-frame.js';
 import { runOutcomeOf } from '../run-outcome.js';
 import { checkProvisionalView, type LeaderStanding } from '../provisional-view.js';
@@ -2788,8 +2789,9 @@ export function createAgentCapabilities(
     return '';
   };
 
-  const readGraph = async (scenarioId: string, section?: 'run_explanation'): Promise<GraphRead | null> => {
-    const r = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {});
+  // `fresh`: a read that must see other writers (an Undo in another tab) bypasses the turn's kept read (`FRESH_READ`).
+  const readGraph = async (scenarioId: string, section?: 'run_explanation', read?: { readonly fresh?: boolean }): Promise<GraphRead | null> => {
+    const r = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, read?.fresh === true ? { ...FRESH_READ } : {});
     if (r.status !== 200) return null;
     const g = (r.json.graph ?? {}) as Record<string, unknown>;
     const view = isPlainRecord(r.json.canonical_analysis_view) ? r.json.canonical_analysis_view : undefined;
@@ -3888,9 +3890,10 @@ export function createAgentCapabilities(
     const pid = parent.proposal_id, a = parent.operations[0]!.value as ApprovedHiringTimes;
     const notApplied = (refusal: string, detail: string): ToolResult => ({ ok: false, mutated: false, applied: false, proposal_id: pid, refusal, detail });
     if (ctx.typed_approval_of !== pid) return notApplied('not_applied', 'These hiring timings are set only by pressing their own card, so nothing was changed.');
-    if (hiringTimesHeld(before.raw, a)) {
+    // "Saved" only from the stored model now: a fresh read, never the turn's kept read (Codex, #3456: an Undo elsewhere).
+    const heldNow = hiringTimesHeld(before.raw, a) ? await readGraph(ctx.scenario_id, undefined, { fresh: true }).catch(() => null) : null;
+    if (heldNow !== null && hiringTimesHeld(heldNow.raw, a)) {
       proposals.markApplied(pid, []);
-      // Read back from the stored model (`hiringTimesHeld` on this read): durable proof, so "saved" may be said.
       return { ok: true, mutated: false, applied: true, already_applied: true, saved_state_confirmed: true, proposal_id: pid, receipts: [], follow_up: HIRING_TIMES_APPLIED };
     }
     if (!hiringTimesStillApply(a, before.raw)) {
@@ -3941,9 +3944,10 @@ export function createAgentCapabilities(
     const done = optionCapacityRecordedWords(a);
     const note = 'The analysis runs on the saved model; speak only to its result, and state no chance before it returns.';
     if (ctx.typed_approval_of !== pid) return notApplied('not_applied', 'This change is made only by pressing its own card, so nothing was changed.');
-    if (optionCapacityChangeHeld(before.raw, a)) {
+    // "Saved" only from the stored model now: a fresh read, never the turn's kept read (Codex, #3456: an Undo elsewhere).
+    const heldNow = optionCapacityChangeHeld(before.raw, a) ? await readGraph(ctx.scenario_id, undefined, { fresh: true }).catch(() => null) : null;
+    if (heldNow !== null && optionCapacityChangeHeld(heldNow.raw, a)) {
       proposals.markApplied(pid, []);
-      // Read back from the stored model (`optionCapacityChangeHeld` on this read): durable proof, so "saved" may be said.
       return { ok: true, mutated: false, applied: true, already_applied: true, saved_state_confirmed: true, proposal_id: pid, receipts: [], follow_up: done, note };
     }
     if (!optionCapacityChangeStillApplies(a, before.raw)) {
@@ -8528,8 +8532,11 @@ export function createAgentCapabilities(
       // from its native registration operation AND the whole approved postimage; another writer's equal graph is no receipt.
       const correction = pendingAdoption?.operations.length === 1 && isPreparedSavedCorrection(pendingAdoption.operations[0])
         ? pendingAdoption.operations[0]!.value as { operation_id?: unknown; candidate?: unknown; brief_text?: unknown } : undefined;
-      const correctionSaved = correction !== undefined && typeof correction.operation_id === 'string'
-        && correction.brief_text === before.brief_text && approvedGraphHeld(correction.candidate, before.raw)
+      // ⛔ "Saved" is earned only from the STORED model now (Codex, #3456): a fresh read, never the turn's kept read, which an
+      // Undo in another tab does not move.
+      const correctionNow = correction === undefined ? null : await readGraph(ctx.scenario_id, undefined, { fresh: true }).catch(() => null);
+      const correctionSaved = correction !== undefined && typeof correction.operation_id === 'string' && correctionNow !== null
+        && correction.brief_text === correctionNow.brief_text && approvedGraphHeld(correction.candidate, correctionNow.raw)
         && opts.readCommittedTurnLedger !== undefined
         && await opts.readCommittedTurnLedger(ctx.scenario_id).then(l => l.write_turn_ids.includes(
           registrationTurnId(ctx.scenario_id, correction.operation_id as string)), () => false);
@@ -8563,7 +8570,8 @@ export function createAgentCapabilities(
           const committed = opts.readCommittedTurnLedger !== undefined
             && await opts.readCommittedTurnLedger(ctx.scenario_id).then(l => l.write_turn_ids.includes(
               authorisationTurnId(`${decision.proposal.proposal_id}#deadline`)), () => false);
-          if (!committed || !appliedDeadlineHolds(op, before.raw)) return {
+          const deadlineNow = committed ? await readGraph(ctx.scenario_id, undefined, { fresh: true }).catch(() => null) : null;
+          if (!committed || deadlineNow === null || !appliedDeadlineHolds(op, deadlineNow.raw)) return {
             ok: false, mutated: false, applied: false, proposal_id: decision.proposal.proposal_id, refusal: 'not_confirmed',
             follow_up: LINK_SET_SAVE_NOT_CONFIRMED,
           };
@@ -8579,8 +8587,9 @@ export function createAgentCapabilities(
           ...(savedStateConfirmed ? { saved_state_confirmed: true } : {}),
           proposal_id: decision.proposal.proposal_id,
           receipts: decision.receipts,
-          detail:
-            decision.receipts.length > 0
+          // The Agent reads `detail`, and may repeat it: the SAME proof as the user's words (Codex, #3456), never memory alone.
+          detail: !savedStateConfirmed ? ALREADY_APPLIED_UNCONFIRMED
+            : decision.receipts.length > 0
               ? `That proposal was already applied and saved as version ${Math.max(...decision.receipts.map((x) => x.version))}. Nothing was applied twice.`
               : 'That proposal was already applied. No saved version was recorded for it. Nothing was applied twice.',
         };
