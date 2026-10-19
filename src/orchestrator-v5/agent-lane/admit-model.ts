@@ -1423,15 +1423,15 @@ const ISL_IDENTITY_RECONCILIATION_TOLERANCE = 0.05;
  *  · the total and every part have a scale and a level today, and today's levels add up within ISL's own reconciliation
  *    (|total − Σ parts| ≤ 5% × max(|total|, Σ |parts|)), so a stated sum is never one ISL would refuse the Run over. A
  *    constant is only ever a part with its own level: the candidate has no other place for one.
- * DL L3b ruling: an explicit declaration with located, bound brief evidence retains original user authorship.
- * ⭐ THE RELATION'S SOURCE (Codex #3440 BLOCK; AIE L2-RELATION 18bf4f8c): a quote that merely names the quantities is not support.
- * The user's sum needs their AFFIRMATIVE statement of it: the located sentence is no question or denial, read whole by the existing
- * context reader (`briefSentencesRead`), and the ONE source authority (`sourceMapOf`) verifies the user's own `relation` statement
- * on that very sentence, about the total or a part. A brief sentence naming the total and every part that DENIES it is a
- * contradictory source: it withholds the sum on every path, Olumi's reading included, so a denied relation is never operative nor
- * relabelled as Olumi's. The links then stay as drafted (base), and the reason is said once.
- * No declaration means no declared sum. A quote CEE cannot locate or bind is rejected as before. Any failure writes
- * nothing: the links stay as drafted, and the refusal is said once (`nonlinear_identity_rejected`). Pure.
+ * ⛔ USER-DECLARED EXACT SUMS: A CAPABILITY STILL OWED, TEMPORARILY FAIL-CLOSED (Codex #3440 R1–R3; DL-3, PL 11:05). A sum
+ * read from a sentence of the brief (the drafter's quote) would be the USER's definition, and no finite reading of a sentence
+ * establishes that it asserts the sum rather than supposing it ("In a world where …", "Let's say …"). So a quoted declaration is
+ * never taken, as the user's or relabelled as Olumi's: the links stay as drafted (base) and the reason is said once. Olumi's own
+ * reading (a declaration with no quote) and Route A (`goal-definition-sum.ts`, Olumi-read) are unchanged.
+ * A brief sentence naming the total and every part that DENIES it is a contradictory source: it withholds the sum on every path,
+ * Olumi's reading included (AIE L2-RELATION 18bf4f8c), read whole by the existing context reader (`briefSentencesRead`).
+ * No declaration means no declared sum. Any failure writes nothing: the links stay as drafted, and the refusal is said once
+ * (`nonlinear_identity_rejected`). Pure.
  */
 function checkDeclaredSums(
   allDeclared: readonly CandidateIdentity[],
@@ -1440,16 +1440,11 @@ function checkDeclaredSums(
   edges: readonly { from: string; to: string; strength?: { mean: number }; effect_direction?: string; provenance?: AdmittedEdge['provenance'] }[],
   frameOf: (id: string) => number | undefined,
   brief: string | undefined,
-  statements: unknown,
 ): { accepted: AcceptedDeclaredSum[]; loss: RepairEntry[] } {
   const accepted: AcceptedDeclaredSum[] = [];
   const loss: RepairEntry[] = [];
   const declared = allDeclared.filter((d) => d?.operation === 'sum');
   const read = declared.length === 0 || typeof brief !== 'string' ? [] : briefSentencesRead(brief);
-  const relations = read.length === 0 ? [] : [...sourceMapOf(statements, brief!).verified]
-    .filter(([key]) => key.endsWith('|relation'))
-    .flatMap(([key, said]) => said.filter((st) => st.speaker === 'user' && st.negated !== true)
-      .map((st) => ({ about: key.split('|')[1]!, sentence: locatedBriefSentence(brief, st.quote) })));
   if (declared.length === 0) return { accepted, loss };
   const nodeOf = new Map(nodes.map((n) => [n.id, n] as const));
   const unitOf = nodeUnitOf(nodes);
@@ -1497,7 +1492,6 @@ function checkDeclaredSums(
       || (id !== totalId && findStatedAmounts(s).some((a) => a.magnitude === Math.abs(todayRaw(id) ?? Number.NaN))));
     // The brief's denial comes first: whatever else holds, a sum the user's own sentence denies is never taken (AIE L2-RELATION).
     if (read.some((s) => s.miss === 'denied' && namesEach(s.text))) { reject('your brief says that is not so'); continue; }
-    const quantities = new Set([totalId, ...partIds].map((id) => labelOf(id).trim().replace(/\s+/g, ' ').toLowerCase()));
     const definitional = edges.filter((e) => e.to === totalId && holdsByDefinition(e as Record<string, unknown>, unitOf));
     const plusOne = (id: string): boolean => {
       const links = edges.filter((e) => e.from === id && e.to === totalId);
@@ -1531,12 +1525,7 @@ function checkDeclaredSums(
       reject('the sentence it was read from is not one Olumi can find in your brief naming each of them');
       continue;
     }
-    if (read.find((s) => s.text === sentence)?.miss !== null
-      || !relations.some((r) => r.sentence === sentence && quantities.has(r.about))) {
-      reject('that sentence does not state it in your own words');
-      continue;
-    }
-    accepted.push({ outcome_id: totalId, factor_ids: [...partIds], stated_in_brief: d.provenance === 'explicit', quote: sentence });
+    reject('Olumi can’t yet take a sum from your own words');
   }
   return { accepted, loss };
 }
@@ -6025,7 +6014,7 @@ function admitOnce(
   // wins over R3-2's minted tally. Said once among what was done with the brief (`declaredSumSentence`).
   const frameOfNode = (id: string): number | undefined => { const m = magnitudeNodeById.get(id); return m === undefined ? undefined : resolveMagnitudeFrame(m); };
   const declaredSums = checkDeclaredSums(Array.isArray(model.identities) ? model.identities : [], resolveEntity, levers.nodes,
-    finalEdges, frameOfNode, brief, (model as { statements?: unknown }).statements);
+    finalEdges, frameOfNode, brief);
   loss.push(...declaredSums.loss);
   // ⭐ STEP 8 ROUTE A (`goal-definition-sum.ts`): the goal's validated definitional parts plus its level today, proposed as ONE
   // Olumi-read sum and checked by the same `checkDeclaredSums`, in its own call so every drafter declaration is judged exactly as
@@ -6036,8 +6025,7 @@ function admitOnce(
     const { part, link, declaration } = definitionSum;
     const compiled = checkDeclaredSums([declaration],
       (label) => (canonicalLabel(label) === canonicalLabel(part.label) ? part.id : resolveEntity(label)),
-      [...levers.nodes, part], [...finalEdges, link], (id) => (id === part.id ? frameOfNode(goalForReach!.id) : frameOfNode(id)), brief,
-      (model as { statements?: unknown }).statements);
+      [...levers.nodes, part], [...finalEdges, link], (id) => (id === part.id ? frameOfNode(goalForReach!.id) : frameOfNode(id)), brief);
     if (compiled.accepted.length === 1) {
       levers.nodes.push(part);
       finalEdges = [...finalEdges, link];

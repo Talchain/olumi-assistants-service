@@ -376,12 +376,13 @@ describe('a declared sum whose part is held at 0 with no frame is the goal\'s id
    * ⭐ Codex #3440 BLOCK (AIE L2-RELATION 18bf4f8c): with the carrier corrected, a declaration quoting a DENIAL or a mere
    * co-mention reached the Run as the user's exact sum. Codex's own two probe sentences, each the declaration's quoted source
    * and the brief's only defining sentence: no sum, the links as drafted, the reason said. The denial withholds Olumi's reading
-   * too (no quote): a contradictory source is never overridden. The quoted positive is the served draft's (cfa31dfb).
+   * too (no quote): a contradictory source is never overridden. A quoted sum is the user's: a capability still owed, so
+   * temporarily fail-closed (Codex R3), whatever the sentence says.
    */
   const PROBES: [string, string | null, string][] = [
     ['Daily order throughput is not the existing 50 orders per day plus the additional packer output.', 'quoted', 'your brief says that is not so'],
     ['Daily order throughput is not the existing 50 orders per day plus the additional packer output.', null, 'your brief says that is not so'],
-    ['Daily order throughput was discussed while existing crew output was 50 and additional packer output was 0.', 'quoted', 'that sentence does not state it in your own words'],
+    ['Daily order throughput was discussed while existing crew output was 50 and additional packer output was 0.', 'quoted', 'Olumi can’t yet take a sum from your own words'],
   ];
   it.each(PROBES)('NEGATIVE (relation source): "%s" (%s) → no sum, the links as drafted, said', async (probe, how, reason) => {
     const swap = (d: Rec): Rec => JSON.parse(JSON.stringify(d).split(QUOTE).join(probe));
@@ -404,10 +405,10 @@ describe('a declared sum whose part is held at 0 with no frame is the goal\'s id
     for (const part of SUM.factor_ids) expect(into(wire, part), part).toEqual(into(base, part));
     expect(said(out).join(' ')).toContain(reason);
   });
-  it('the defining sentence QUOTED, with no statement of the relation, is no sum either: a quote alone supports nothing', async () => {
+  it('the defining sentence QUOTED is the user\'s sum, a capability still owed (temporarily fail-closed): no sum, said', async () => {
     const { graph, out } = await built(draft({ declare: true, flag: true, quote: QUOTE }));
     expect(goal(graph).nonlinear_identity).toBeUndefined();
-    expect(said(out).join(' ')).toContain('that sentence does not state it in your own words');
+    expect(said(out).join(' ')).toContain('Olumi can’t yet take a sum from your own words');
   });
 
   it('CARRIER SCOPE: a link out of that part that is NOT a definition still says "per switch", as before', async () => {
