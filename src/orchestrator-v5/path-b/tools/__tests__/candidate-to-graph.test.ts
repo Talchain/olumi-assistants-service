@@ -10,7 +10,7 @@
 import { describe, expect, it } from 'vitest';
 import { candidateToGraph } from '../candidate-to-graph.js';
 import { admitCandidateModel } from '../../../agent-lane/admit-model.js';
-import { settingProvenanceOf, valueProvenanceOf } from '../../../../cee/provenance/provenance-of.js';
+import { linkProvenanceOf, settingProvenanceOf, valueProvenanceOf } from '../../../../cee/provenance/provenance-of.js';
 import { GraphV3 } from '../../../../schemas/cee-v3.js';
 
 type Rec = Record<string, any>;
@@ -61,7 +61,7 @@ const dilemmaDraft = (): Rec => ({
 
 // A level goal with a stated target and today's level, a framed lever, a stated size, an addition and a declared status quo.
 const AD_QUOTE = 'Every £20 of ads brings about one pre-order.';
-const salesDraft = (): Rec => ({
+const salesDraft = (size: 'olumi' | 'user' = 'olumi'): Rec => ({
   goal: { kind: null, deliverable: null, metric: 'Monthly pre-orders', operator: '>=', target_stated: true, value: 600, unit: 'orders',
     horizon_months: 6, provenance: 'explicit', frame: 'level', baseline_known: true, baseline_value: 400, baseline_provenance: 'explicit',
     scope: null, quantity_frame: 'level', basis: null, source_quote: 'We want 600 pre-orders a month within six months; we get 400 now.' },
@@ -76,7 +76,8 @@ const salesDraft = (): Rec => ({
   factors: [{ label: 'Ad spend', role: 'controllable', baseline_known: true, baseline_value: 2000, unit: '£', provenance: 'explicit',
     plausible_max: 10000, baseline_evidence: { quote: 'We spend £2,000 a month on ads.' } }],
   risks: [], outcomes: [],
-  links: [link('Ad spend', 'Monthly pre-orders', 'positive', AD_QUOTE, { effect_amount: 1, effect_per_source_change: 20, effect_provenance: 'explicit' })],
+  links: [link('Ad spend', 'Monthly pre-orders', 'positive', size === 'user' ? AD_QUOTE : null,
+    { effect_amount: 1, effect_per_source_change: 20, effect_provenance: size === 'user' ? 'explicit' : 'inferred' })],
   identities: [], unknowns: [], decision_question: 'How should we change our ad spend?', unknown_concerns: [], statements: [],
 });
 
@@ -168,10 +169,11 @@ describe('candidateToGraph: conversion + science only', () => {
     expect(levelOf('Double the ad spend')).toMatchObject({ value: 0.4, raw_value: 4000, source: 'brief_extraction' });
     expect(levelOf('Add £1,000 of ad spend')).toMatchObject({ value: 0.3, raw_value: 3000, value_confidence: 'medium' });
     expect(settingProvenanceOf(levelOf('Double the ad spend')).origin).toBe('human');
-    // One order per £20 is the user's stated size: 1/20 × 10,000 / 750 = 0.6667 on the goal's frame, its sentence kept.
+    // Olumi's estimate of one order per £20: 1/20 × 10,000 / 750 = 0.6667 on the goal's frame, labelled as Olumi's.
     const sized = edge(graph, 'Ad spend', 'Monthly pre-orders')!;
     expect(sized.strength.mean).toBeCloseTo(10000 / 20 / 750, 6);
-    expect(sized.provenance).toMatchObject({ magnitude: 'user_stated', source_quote: AD_QUOTE });
+    expect(sized.provenance.magnitude).toBe('olumi_estimate');
+    expect(linkProvenanceOf(sized).origin).toBe('ai');
     // The declared status quo is held at today's level of what the others set.
     expect(byLabel(graph, 'Keep spending as now').is_baseline).toBe(true);
     expect(edge(graph, 'Keep spending as now', 'Ad spend')).toBeDefined();
@@ -196,7 +198,7 @@ describe('candidateToGraph: conversion + science only', () => {
   });
 
   it('BLOCKED-SCHEMA: a target another person stated and a size from an unclear source are listed, never relabelled', () => {
-    const draft = salesDraft();
+    const draft = salesDraft('user');
     const said = (quote: string, subject: Rec, field: string, speaker: string): Rec => ({ quote, subject: { to_label: null, factor_label: null, ...subject },
       field, form: 'point', value: null, low: null, high: null, unit: null, qualifier: null, conditions: null, speaker });
     draft.statements = [said('Our agent reckons 600 pre-orders a month is the target.', { kind: 'goal', label: 'Monthly pre-orders' }, 'target', 'other'),
@@ -204,10 +206,74 @@ describe('candidateToGraph: conversion + science only', () => {
     const { graph, blocked_schema } = converted(draft);
     expect(blocked_schema).toEqual([
       { field_path: 'nodes[monthly_pre_orders].goal_threshold_raw', declared: 'other', missing: 'target_origin' },
-      { field_path: 'edges[ad_spend::monthly_pre_orders]', declared: 'unknown', missing: 'link_origin' },
+      { field_path: 'edges[ad_spend::monthly_pre_orders]', declared: 'unknown', missing: 'link_size_origin' },
     ]);
     expect(ofKind(graph, 'goal')[0]!.goal_threshold_raw).toBe(600);
+    // The unclear source's size is never the person's: Olumi's placeholder, never `user_stated`, never read as human.
+    const unsized = edge(graph, 'Ad spend', 'Monthly pre-orders')!;
+    expect(unsized.provenance.magnitude).not.toBe('user_stated');
+    expect(linkProvenanceOf(unsized).origin).not.toBe('human');
     expect(converted(salesDraft()).blocked_schema).toEqual([]);
+  });
+
+  it('⭐ LINK SIZES (DL ruling): the user\'s stated size keeps Olumi\'s placeholder, said in their words, kept and listed', () => {
+    const { graph, loss, declared, blocked_schema } = converted(salesDraft('user'));
+    const link = edge(graph, 'Ad spend', 'Monthly pre-orders')!;
+    expect(link.provenance.magnitude).not.toBe('user_stated');
+    expect(link.provenance.natural_effect).toBeUndefined();
+    expect(linkProvenanceOf(link).origin).not.toBe('human');
+    expect(loss.map((l) => l.reason)).toContain(`You said "${AD_QUOTE}"; this path doesn't use your link sizes in the calculation yet, `
+      + 'so the link from "Ad spend" to "Monthly pre-orders" keeps Olumi\'s placeholder size.');
+    expect(blocked_schema).toEqual([{ field_path: 'edges[ad_spend::monthly_pre_orders]', declared: 'user', missing: 'link_size_origin' }]);
+    expect(declared.links[0]).toMatchObject({ effect_amount: 1, effect_per_source_change: 20, effect_provenance: 'explicit' });
+  });
+
+  it('round 2 (B1): an addition is framed on its total — £9,000 + £2,000 = £11,000 on a 100,000 frame, as A frames it', () => {
+    const draft = salesDraft();
+    draft.factors[0].baseline_value = 9000;
+    draft.options[1].interventions[0].value = 2000;
+    const { graph } = converted(draft);
+    const added = byLabel(graph, 'Add £1,000 of ad spend').interventions[byLabel(graph, 'Ad spend').id];
+    expect(added).toMatchObject({ value: 0.11, raw_value: 11000 });
+    expect(byLabel(graph, 'Ad spend').observed_state).toMatchObject({ value: 0.09, raw_value: 9000, cap: 100000 });
+  });
+
+  it('round 2 (B2): an "above" target keeps today\'s level on the floor rule (400 of 750), with no label read', () => {
+    const draft = salesDraft(); draft.goal.operator = '>';
+    const goal = ofKind(converted(draft).graph, 'goal')[0]!;
+    expect(goal).toMatchObject({ goal_direction: '>', observed_state: { baseline: 400 / 750, raw_value: 400 } });
+  });
+
+  it('round 2 (B4, B5): a setting\'s speaker is its LEVEL statement\'s; a declared speaker wins over the provenance tag', () => {
+    const draft = salesDraft();
+    const said = (subject: Rec, field: string, speaker: string): Rec => ({ quote: 'synthetic', subject: { to_label: null, factor_label: null, ...subject },
+      field, form: 'point', value: null, low: null, high: null, unit: null, qualifier: null, conditions: null, speaker });
+    draft.statements = [said({ kind: 'option', label: 'Double the ad spend', factor_label: 'Ad spend' }, 'lead', 'other'),
+      said({ kind: 'option', label: 'Double the ad spend', factor_label: 'Ad spend' }, 'level', 'user'),
+      said({ kind: 'factor', label: 'Ad spend' }, 'level', 'other')];
+    draft.factors[0].provenance = 'inferred';
+    const { graph, blocked_schema } = converted(draft);
+    const setting = byLabel(graph, 'Double the ad spend').interventions[byLabel(graph, 'Ad spend').id];
+    expect(settingProvenanceOf(setting).origin).toBe('human');
+    expect(valueProvenanceOf(byLabel(graph, 'Ad spend').observed_state).origin).toBe('unknown');
+    expect(blocked_schema).toContainEqual({ field_path: 'nodes[ad_spend].observed_state', declared: 'other', missing: 'speaker_name' });
+  });
+
+  it('round 2 (B6): a declared status quo that itself acts is not held', () => {
+    const draft = salesDraft();
+    draft.options[2].interventions = [{ factor_label: 'Ad spend', value: 2000, value_kind: 'absolute', unit: '£', provenance: 'explicit', stated_evidence: null }];
+    const { graph } = converted(draft);
+    expect(byLabel(graph, 'Keep spending as now').is_baseline).toBeUndefined();
+  });
+
+  it('round 2 (B7): a relative change in % is not carried yet (said, kept, no label read); a change in the metric\'s own unit is', () => {
+    const rel = salesDraft(); rel.goal = { ...rel.goal, frame: 'change_rel', value: 10, unit: '%' };
+    const r = converted(rel);
+    expect('goal_threshold_raw' in ofKind(r.graph, 'goal')[0]!).toBe(false);
+    expect(r.loss.map((l) => l.reason).join(' ')).toContain('does not say whether "Monthly pre-orders" is itself measured in %');
+    expect(r.declared.goal).toMatchObject({ frame: 'change_rel', value: 10 });
+    const abs = salesDraft(); abs.goal = { ...abs.goal, frame: 'change_abs', value: 200 };
+    expect(ofKind(converted(abs).graph, 'goal')[0]).toMatchObject({ goal_threshold_frame: 'change_abs', goal_threshold_raw: 200 });
   });
 
   it('protocol only: a draft with no goal is refused as unreadable; nothing is refused for what it means', () => {

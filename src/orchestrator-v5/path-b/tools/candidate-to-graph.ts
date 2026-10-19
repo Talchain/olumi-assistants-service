@@ -7,7 +7,7 @@
  *    label reader never runs), change targets (`admitStatedGoalChange`) and basis (`admitGoalTargetBasis`); limits
  *    (`admitCandidateConstraints`); declared sums' units, operands, frames and arithmetic (`checkDeclaredSums` with no brief
  *    and no quote, so neither its denial reader nor its quote refusal runs); the declared status quo held
- *    (`wireInertStatusQuo`, its label fallback never kept); loops (`breakLoops`); declared accumulations; then the build's refit
+ *    (as `wireInertStatusQuo` holds a declared one, with no label fallback); loops (`breakLoops`); declared accumulations; then the build's refit
  *    chain (stated `{goalOwnRows}` → Olumi → `clampForPersist`).
  *  · NO C1/C2: no unattested-goal refusal, no authorship binding, no range eligibility, no demotion. Each figure keeps the
  *    origin the AI DECLARED, in the existing fields the one provenance authority reads (`cee/provenance/provenance-of.ts`):
@@ -20,7 +20,7 @@
 import type { RepairEntry } from '@talchain/schemas';
 import {
   admitStatedGoalChange, admitStatedGoalLevel, assignIds, canonicalLabel, slugId, checkDeclaredSums, constructedLevel, defaultFrameFor,
-  displayProvenanceFor, framedObservedState, shortLabel, wireInertStatusQuo, breakLoops,
+  displayProvenanceFor, framedObservedState, shortLabel, breakLoops,
   type AdmittedNode, type CandidateIdentity, type CandidateModel, type CandidateNodeKind, type ConstructedLevel,
 } from '../../agent-lane/admit-model.js';
 import { admitCandidateLinks, type CandidateLink } from '../../agent-lane/admit-candidate.js';
@@ -31,6 +31,7 @@ import { clampForPersist, refitFramesForOlumiEstimates, refitFramesForStatedEffe
 import { resolveMagnitudeFrame, sizeLink, type LinkSizing, type MagnitudeNode } from '../../../cee/magnitude/link-effect.js';
 import { CEE_GOAL_THRESHOLD_FRAME, resolveGoalThresholdCapWithProvenance } from '../../../utils/goal-threshold-cap.js';
 import { admitGoalTargetBasis } from '../../goal-target/goal-target-basis.js';
+import { isRelativeChangePercentUnit } from '../../agent-lane/same-unit.js';
 import { nodeProvenanceDisplay } from '../../../cee/provenance/provenance-of.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../../orchestrator/context/constants.js';
 import { REPAIR_AUTHORED_ORIGIN } from '../../../graph/repair-authored-edge.js';
@@ -43,8 +44,8 @@ type Who = 'user' | 'olumi' | 'other' | 'unknown';
 /** An origin the AI declared that GraphV3 has no field for (DL 19 Oct: BLOCKED-SCHEMA, never a downgrade); `declared` keeps it. */
 export interface BlockedSchema {
   readonly field_path: string;
-  readonly declared: 'other' | 'unknown';
-  readonly missing: 'speaker_name' | 'link_origin' | 'target_origin';
+  readonly declared: 'user' | 'other' | 'unknown';
+  readonly missing: 'speaker_name' | 'link_origin' | 'link_size_origin' | 'target_origin';
 }
 export type CandidateToGraphResult =
   | { readonly graph: Record<string, unknown>; readonly declared: unknown; readonly loss: readonly RepairEntry[];
@@ -79,14 +80,18 @@ export function candidateToGraph(input: unknown): CandidateToGraphResult {
   const statements = list<Rec>((input as Rec).statements);
   const speakerOf = (kind: string, label: string, extra: (s: Rec) => boolean = () => true): unknown =>
     statements.find((s) => s?.subject?.kind === kind && canonicalLabel(String(s.subject.label ?? '')) === canonicalLabel(label) && extra(s))?.speaker;
-  const whoOf = (provenance: unknown, speaker: unknown): Who => (provenance !== 'explicit' ? 'olumi'
-    : speaker === 'other' ? 'other' : speaker === 'unknown' ? 'unknown' : 'user');
+  const whoOf = (provenance: unknown, speaker: unknown): Who => (speaker === 'other' ? 'other' : speaker === 'unknown' ? 'unknown'
+    : provenance === 'explicit' ? 'user' : 'olumi');
 
   // Frames: the frame the AI declared (`plausible_max`), else the convention frame of the largest figure drafted for it.
   const largest = new Map<string, number>();
   const seeFigure = (label: string, v: unknown): void => { if (finite(v)) largest.set(label, Math.max(largest.get(label) ?? 0, Math.abs(v))); };
   for (const f of c.factors) seeFigure(f.label, f.baseline_value);
-  for (const o of c.options) for (const iv of o.interventions ?? []) seeFigure(iv.factor_label, iv.value);
+  const todayOf = (label: string): unknown => c.factors.find((f) => canonicalLabel(f.label) === canonicalLabel(label))?.baseline_value;
+  for (const o of c.options) for (const iv of o.interventions ?? []) {
+    const today = todayOf(iv.factor_label);
+    seeFigure(iv.factor_label, (iv as Rec).value_kind === 'additional' && finite(today) && finite(iv.value) ? today + iv.value : iv.value);
+  }
   const frameFor = (label: string, declared: unknown): { cap?: number; convention?: true } => {
     const big = largest.get(label) ?? 0;
     if (finite(declared) && declared > 1 && declared >= big) return { cap: declared };
@@ -158,7 +163,8 @@ export function candidateToGraph(input: unknown): CandidateToGraphResult {
           `"${o.label}" puts "${iv.factor_label}" at ${level}, and a level below zero cannot be analysed beside the others, so it is kept as what the option changes, with no level of its own.`, 'warn'));
         continue;
       }
-      const who = whoOf(iv.provenance, speakerOf('option', o.label, (s) => canonicalLabel(String(s.subject.factor_label ?? '')) === canonicalLabel(iv.factor_label)));
+      const who = whoOf(iv.provenance, speakerOf('option', o.label, (s) => s.field === 'level'
+        && canonicalLabel(String(s.subject.factor_label ?? '')) === canonicalLabel(iv.factor_label)));
       if (bundle[fid] !== undefined && !(who === 'user' && bundle[fid]!.source !== 'brief_extraction')) continue;
       if (who === 'other') blocked.push({ field_path: `nodes[${oid}].interventions.${fid}`, declared: 'other', missing: 'speaker_name' });
       bundle[fid] = { ...constructedLevel(fid, level, factor.scale_frame, who === 'olumi' ? 'cee_hypothesis' : 'brief_extraction', factor,
@@ -172,6 +178,7 @@ export function candidateToGraph(input: unknown): CandidateToGraphResult {
 
   // Links: an option's link to a factor is the option acting on it; every other link is sized on both ends' frames.
   const causal: CandidateLink[] = [];
+  const sizeWho = new Map<CandidateLink, Who>();
   for (const l of c.links) {
     const from = idFor(l.from), to = idFor(l.to);
     if (from === undefined || to === undefined || from === to) {
@@ -179,10 +186,14 @@ export function candidateToGraph(input: unknown): CandidateToGraphResult {
       continue;
     }
     if (kindOf(from) === 'option' && kindOf(to) === 'factor') { actsOn.get(from)?.add(to); continue; }
-    const who = whoOf(l.effect_provenance ?? l.provenance,
-      speakerOf('link', l.from, (s) => canonicalLabel(String(s.subject.to_label ?? '')) === canonicalLabel(l.to)));
-    if (who === 'other' || who === 'unknown') blocked.push({ field_path: `edges[${from}::${to}]`, declared: who, missing: 'link_origin' });
-    causal.push({ ...l, from, to });
+    const said = (field: string) => (st: Rec): boolean => st.field === field && canonicalLabel(String(st.subject.to_label ?? '')) === canonicalLabel(l.to);
+    const drawnBy = whoOf(l.provenance, speakerOf('link', l.from, said('relation')));
+    if (drawnBy === 'other' || drawnBy === 'unknown') blocked.push({ field_path: `edges[${from}::${to}]`, declared: drawnBy, missing: 'link_origin' });
+    // A drafted `strength_mean` (a legacy contract) is never read as an authored size: sizes come only from the natural effect.
+    const { strength_mean: _mean, strength_std: _std, ...drafted } = l;
+    const link: CandidateLink = { ...drafted, from, to };
+    sizeWho.set(link, whoOf(l.effect_provenance ?? l.provenance, speakerOf('link', l.from, said('effect'))));
+    causal.push(link);
   }
   const optionLevels = new Map<string, number[]>();
   for (const b of interventionsByOption.values()) for (const [fid, lv] of Object.entries(b)) optionLevels.set(fid, [...(optionLevels.get(fid) ?? []), lv.value]);
@@ -197,13 +208,28 @@ export function candidateToGraph(input: unknown): CandidateToGraphResult {
       goal_threshold_cap: n.goal_threshold_cap, goal_threshold_unit: n.goal_threshold_unit, ...(n.quantity_frame !== undefined ? { quantity_frame: n.quantity_frame } : {}),
       unit: unitOf.get(n.id) ?? null, option_levels: optionLevels.get(n.id) ?? [], ...(gap !== undefined ? { goal_gap: gap } : {}) };
   };
+  // Link sizes (DL ruling, 19 Oct): Olumi's declared sizes and checked one-for-one definitions are sized as Olumi's. A size
+  // the AI declared as a person's keeps Olumi's placeholder, said in their words, kept in `declared` and listed: a link has
+  // no "declared, not attested" state, and `user_stated` means attested (Science Fi). This site never passes it true.
   const sizing = new Map<string, LinkSizing>();
   for (const l of causal) {
-    if (l.direction === 'unknown' || finite(l.strength_mean)) continue;
-    const userStated = (l.effect_provenance ?? l.provenance) === 'explicit';
-    const signed = olumiSignedSize(l, userStated);
-    sizing.set(`${l.from}::${l.to}`, sizeLink({ definitional: l.definitional === true && !signed.resolved, direction: l.direction,
-      effect_amount: signed.amount, effect_per_source_change: signed.per, user_stated: userStated },
+    if (l.direction === 'unknown') continue;
+    const amount = l.effect_amount, per = l.effect_per_source_change;
+    const stated = finite(amount) && finite(per) && per !== 0;
+    const definition = stated && l.definitional === true && Math.abs(amount / per) === 1;
+    const who = sizeWho.get(l)!;
+    const used = stated && (who === 'olumi' || definition);
+    if (stated && !used) {
+      const quoted = (l as Rec).source_quote;
+      const words = typeof quoted === 'string' && quoted.trim() !== '' ? quoted.trim() : `${amount} per ${per}`;
+      loss.push(note(`edges[${l.from}::${l.to}].link_size_not_used`, { effect_amount: amount, effect_per_source_change: per },
+        `${who === 'user' ? 'You said' : 'Your brief says'} "${words}"; this path doesn't use ${who === 'user' ? 'your link sizes' : 'link sizes from your brief'} in the calculation yet, so the link `
+        + `from "${nodeById.get(l.from)?.label}" to "${nodeById.get(l.to)?.label}" keeps Olumi's placeholder size.`, 'warn'));
+      blocked.push({ field_path: `edges[${l.from}::${l.to}]`, declared: who as BlockedSchema['declared'], missing: 'link_size_origin' });
+    }
+    const signed = used ? olumiSignedSize(l, false) : { amount: null, per: null, resolved: false };
+    sizing.set(`${l.from}::${l.to}`, sizeLink({ definitional: definition && !signed.resolved, direction: l.direction,
+      effect_amount: signed.amount, effect_per_source_change: signed.per, user_stated: false },
     magnitude(nodeById.get(l.from)!), magnitude(nodeById.get(l.to)!)));
   }
   const links = admitCandidateLinks(causal, sizing);
@@ -219,12 +245,16 @@ export function candidateToGraph(input: unknown): CandidateToGraphResult {
   const decisionId = nodes.find((n) => n.kind === 'decision')!.id;
   const options = nodes.filter((n) => n.kind === 'option');
   const topology = options.flatMap((o) => [topo(decisionId, o.id), ...[...(actsOn.get(o.id) ?? [])].map((fid) => topo(o.id, fid))]);
-  // The status quo the AI declared is held at today's levels; the label fallback's answer is never kept.
-  const declaredStatusQuo = new Set(c.options.filter((o) => o.is_status_quo === true).map((o) => idFor(o.label)!));
-  const held = declaredStatusQuo.size === 0 ? null : wireInertStatusQuo(nodes, [...topology, ...links.edges], interventionsByOption, declaredStatusQuo);
-  const heldEdges = held === null || !declaredStatusQuo.has(held.optionId) ? [] : held.factorIds.map((fid) => ({ ...topo(held.optionId, fid),
+  // The ONE status quo the AI declared, if it acts on nothing, is held at today's level of what the others set (as
+  // `wireInertStatusQuo` holds a declared one; its label fallback is never reached here).
+  const declaredStatusQuo = [...new Set(c.options.filter((o) => o.is_status_quo === true).map((o) => idFor(o.label)!))];
+  const sq = declaredStatusQuo.length === 1 && (actsOn.get(declaredStatusQuo[0]!)?.size ?? 0) === 0 ? declaredStatusQuo[0]! : undefined;
+  const basis = new Set<string>();
+  for (const [oid, b] of interventionsByOption) if (oid !== sq) for (const fid of Object.keys(b)) basis.add(fid);
+  if (basis.size === 0) for (const [oid, acts] of actsOn) if (oid !== sq) for (const fid of acts) basis.add(fid);
+  const heldEdges = sq === undefined ? [] : [...basis].map((fid) => ({ ...topo(sq, fid),
     origin: REPAIR_AUTHORED_ORIGIN, provenance: { source: 'cee_hypothesis', reasoning: CONNECTIVITY_REPAIR_WIRING_REASON } }));
-  if (heldEdges.length > 0) nodeById.get(held!.optionId)!.is_baseline = true;
+  if (heldEdges.length > 0) nodeById.get(sq!)!.is_baseline = true;
 
   const goalId = nodes.find((n) => n.kind === 'goal')!.id;
   const loops = breakLoops([...topology, ...heldEdges, ...links.edges] as { from: string; to: string }[], {
@@ -291,6 +321,12 @@ function goalFields(c: CandidateModel, speakerOf: (kind: string, label: string, 
   if (baseWho === 'other' && finite(base)) blocked.push({ field_path: `${goalPath}.observed_state`, declared: 'other', missing: 'speaker_name' });
   const baselineStamp = (os: Rec | undefined): Rec => (os === undefined ? {} : { observed_state: { ...unstamped(os), ...valueStamp(baseWho) } });
   const withheld = (reason: string): void => { loss.push(note(`nodes[${slugId(c.goal.metric)}].observed_state.baseline`, base ?? null, reason, 'warn')); };
+  if (g.frame === 'change_rel' && isRelativeChangePercentUnit(g.unit, raw)) {
+    // Whether this "%" is the change's own or the metric's is not declared, and only a label reader could guess it.
+    loss.push(note(`${goalPath}.not_carried`, raw, `This draft does not include the target for "${g.metric}" (a change of ${raw}${g.unit}) yet: `
+      + `it does not say whether "${g.metric}" is itself measured in ${g.unit}. Olumi kept it as drafted.`, 'warn'));
+    return { goal_threshold_frame: CEE_GOAL_THRESHOLD_FRAME, ...horizon, ...quote };
+  }
   if (g.frame === 'change_abs' || g.frame === 'change_rel') {
     // The level is the one the AI declared, whoever's it is: the rule runs as for a stated level, and the stamp says whose.
     const change = admitStatedGoalChange({ ...g, baseline_known: true, baseline_provenance: 'explicit' }, raw, () => true, null);
@@ -305,7 +341,9 @@ function goalFields(c: CandidateModel, speakerOf: (kind: string, label: string, 
   let observed_state: Rec | undefined;
   if (resolved !== null && finite(base)) {
     // The declared comparator is held as the level rule's comparator; a strict floor is never passed, so no label is read.
-    const verdict = admitStatedGoalLevel({ metric: g.metric, operator: g.operator, rawTarget: raw, rawBaseline: base, cap: resolved.cap,
+    // A strict floor's level is read on the floor rule (`>` and `>=` differ only at the target, which the held `goal_direction`
+    // scores); a ceiling's comparator is held as declared. No strict comparator is passed, so no label is ever read.
+    const verdict = admitStatedGoalLevel({ metric: g.metric, operator: g.operator === '>' ? '>=' : g.operator, rawTarget: raw, rawBaseline: base, cap: resolved.cap,
       targetUnit: g.unit, ...(g.operator === '<=' || g.operator === '<' ? { heldComparator: g.operator } : {}),
       ...((g.frame ?? 'level') === 'level' ? { targetFrame: 'level' } : {}),
       ...(signedScale !== undefined && resolved.provenance === 'level_frame' ? { signedLevel: true as const } : {}) });
