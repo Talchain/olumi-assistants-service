@@ -83,14 +83,16 @@ const salesDraft = (size: 'olumi' | 'user' = 'olumi'): Rec => ({
   identities: [], unknowns: [], decision_question: 'How should we change our ad spend?', unknown_concerns: [], statements: [],
 });
 
-// Structure A shapes itself: a loop between two factors, a limit, and a later ambition (A restates that node's label, keeping its id).
+// Structure A shapes itself: a loop between two factors, a limit, a later ambition (A restates that node's label, keeping its id),
+// and a factor with no level today whose range A carries as its node's scale_frame.
 const structureDraft = (): Rec => ({
   ...salesDraft(),
   constraints: [{ metric: 'Ad spend', operator: '<=', value: 5000, unit: '£', provenance: 'explicit', frame: 'level', role: 'limit' },
     { metric: 'Word of mouth', operator: '>=', value: 200, unit: 'mentions', provenance: 'explicit', frame: 'level', role: 'ambition' }],
-  factors: [...salesDraft().factors, factor('Word of mouth', 50, 'mentions', 'explicit')],
+  factors: [...salesDraft().factors, factor('Word of mouth', 50, 'mentions', 'explicit'), { ...factor('Influencer posts', null, 'posts', 'inferred'), plausible_max: 40 }],
   links: [...salesDraft().links, link('Ad spend', 'Word of mouth', 'positive', null, { effect_amount: 1, effect_per_source_change: 100, effect_provenance: 'inferred' }),
-    link('Word of mouth', 'Ad spend', 'positive'), link('Word of mouth', 'Monthly pre-orders', 'positive', null, { effect_amount: 1, effect_per_source_change: 5, effect_provenance: 'inferred' })],
+    link('Word of mouth', 'Ad spend', 'positive'), link('Word of mouth', 'Monthly pre-orders', 'positive', null, { effect_amount: 1, effect_per_source_change: 5, effect_provenance: 'inferred' }),
+    link('Influencer posts', 'Monthly pre-orders', 'positive', null, { effect_amount: 10, effect_per_source_change: 1, effect_provenance: 'inferred' })],
 });
 
 // A goal the AI declared to be two parts added together, with the sentence it read it from.
