@@ -57,6 +57,18 @@ import {
   WITHHELD_SEPARATION_UNAVAILABLE, WITHHELD_UNREQUESTED_ANALYSIS,
 } from '../../../compose/analysis-state-v1.js';
 
+/**
+ * ⭐ STEP 8 (AIE `point_uncertainty` 564fe768, cc9fbadf): a chance, win share or leader resting on a user's size whose spread is
+ * not attested is withheld (`run-analysis-unsupported-spread.test.ts` pins that rule, its words and every surface). This served
+ * graph's user sizes have no attested spread, and no positive is invented for them. This file tests
+ * the leader licence shadow, not that rule, so the Run's spread selection is held empty here; the rest of the support walk runs as served.
+ */
+vi.mock('../../../agent-lane/goal-certainty.js', async (original) => {
+  const actual = await original<typeof import('../../../agent-lane/goal-certainty.js')>();
+  return { ...actual, chanceSupportGoalPaths: (...args: Parameters<typeof actual.chanceSupportGoalPaths>) =>
+    ({ ...actual.chanceSupportGoalPaths(...args), unsupportedSpread: [] }) };
+});
+
 type Rec = Record<string, any>;
 const FA027 = 'fa027cf5-c5c9-4021-9578-ee79b15c6eb8';
 const fa027Graph = JSON.parse(readFileSync(new URL('../../../handlers/__tests__/fixtures/sci-deep-fa027cf5-graph.json', import.meta.url), 'utf8')) as Rec;
@@ -173,9 +185,7 @@ describe('A2 L1 through run_analysis (real handler; only PLoT doubled)', () => {
     expect(r.fact.result.leading_option_id).toBeNull();
     expect(r.fact.result.constraint_verdict.may_name_leading_option).toBe(true);
     // Science 393023 LICENCE (a)/(b), 7 Oct: placeholder paths replace legacy disclosure; the no-target record stays.
-    // ⭐ STEP 8 (AIE `point_uncertainty` 564fe768): the user's own 0.1 on ‘AI reporting module availability’ → ‘Enterprise prospect
-    // signing likelihood’ is set with no spread (`std_defaulted`), so the chance resting on it is withheld too, by its own record.
-    expect(warningCodes(r.fact)).toEqual(['GOAL_FIGURES_PLACEHOLDER_PATH', 'GOAL_FIGURES_UNSUPPORTED_SPREAD', 'GOAL_FIGURES_NO_STATED_TARGET']);
+    expect(warningCodes(r.fact)).toEqual(['GOAL_FIGURES_PLACEHOLDER_PATH', 'GOAL_FIGURES_NO_STATED_TARGET']);
   });
 
   it('LICENCE (a) door constant: shadow is withheld/goal_figures_withheld, CV still permits', async () => {
@@ -194,9 +204,7 @@ describe('A2 L1 through run_analysis (real handler; only PLoT doubled)', () => {
     // ⭐ RE-PINNED, D3 step 1 (DL 0df0e1 #87 6006078553, PL rec 5), merged with MC P0 (#2613): this served goal holds NO
     // target, so whatever goal chances P0's Olumi-supplied-link withhold leaves are stripped with ONE typed `info` record —
     // not a withhold of anything the leader rests on.
-    // ⭐ STEP 8 (AIE `point_uncertainty` 564fe768): the user's own 0.1 with no stated spread withholds the chance resting on it, by its
-    // own record; the leader and its entitlement above are unchanged (only the dependent chance goes).
-    expect(warningCodes(r.fact)).toEqual(['GOAL_FIGURES_UNSUPPORTED_SPREAD', 'GOAL_FIGURES_OLUMI_SUPPLIED_LINK', 'GOAL_FIGURES_NO_STATED_TARGET']);
+    expect(warningCodes(r.fact)).toEqual(['GOAL_FIGURES_OLUMI_SUPPLIED_LINK', 'GOAL_FIGURES_NO_STATED_TARGET']);
   });
 
   it('L1-b (SYNTHETIC envelope): a separated comparative_leader Run is `permitted`, names the stored leader, and every live site agrees', async () => {

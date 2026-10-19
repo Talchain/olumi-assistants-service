@@ -193,7 +193,7 @@ function expectWithheldEverywhere(r: Json, fact: Json, graph: Json, withheld: re
 
 const CUT_BANDED = await chatWritten(CUT_GRAPH, CUT_MOVERS, 'band');
 
-describe('PREMISE (supported positives through the ACTUAL chat writer): the band the user named, attested at its writer, keeps every chance', () => {
+describe('PREMISE (chat-band controls on links NOBODY had sized, so no physical size is traded): the band the user named, attested at its writer, keeps every chance', () => {
   it('cut-costs: the placeholders withhold today; the user\'s named band, written by the writer on the same links, shows every chance', async () => {
     expect(coded((await cutRun(CUT_GRAPH)).result, GOAL_FIGURES_PLACEHOLDER_PATH)).not.toEqual([]);
     for (const e of writtenLinks(CUT_BANDED, CUT_GRAPH, CUT_MOVERS)) {
@@ -258,8 +258,10 @@ describe('⭐ RED→GREEN: a user\'s POINT on the default spread withholds only 
     expectWithheldEverywhere(result, fact, g, CUT_MOVERS, UNSUPPORTED_POINT_WORDS, UNSUPPORTED_POINT_QUESTION);
     expect(chanceShown(result, CUT_SQ)).toBe(true);
     expect(coded(result, GOAL_FIGURES_PLACEHOLDER_PATH)).toEqual([]);
-    // Only the dependent chance goes: the comparison (each option's share of runs) is no chance of meeting the goal, and stays.
-    for (const id of [CUT_SQ, ...CUT_MOVERS]) expect(entriesFor(envOf(result), id).some((e) => typeof e.win_probability === 'number'), id).toBe(true);
+    // A share of runs drawn on the same unsupported spread has no warrant of its own and never stands in for the chance (AIE
+    // cc9fbadf): every option's share goes (a share compares with every other option), and with it the leader.
+    for (const id of [CUT_SQ, ...CUT_MOVERS]) expect(entriesFor(envOf(result), id).some((e) => typeof e.win_probability === 'number'), id).toBe(false);
+    expect(coded(result, GOAL_FIGURES_UNSUPPORTED_SPREAD)[0]!.withheld_claims).toEqual(['goal_probability', 'joint_probability', 'downside', 'win_share']);
     // The outcome distribution is no chance of meeting the goal either, and the qualitative help (the structural challenge) reads it.
     for (const id of CUT_MOVERS) expect(entriesFor(envOf(result), id).some((e) => typeof e.outcome?.mean === 'number'), `${id}: outcome kept`).toBe(true);
     for (const e of users) {
@@ -288,14 +290,8 @@ describe('⭐ RED→GREEN: a user\'s POINT on the default spread withholds only 
       expect(o).not.toHaveProperty('outcome_p90');
     }
     expect(compact.uncertainty_bands ?? null).toBeNull();
-    // The decision review's AI input: the same.
-    const review = buildInvokeInputForTests('brief', envOf(result) as Json, null) as Json;
-    const reviewed = (review.isl_results.option_comparison as Json[]);
-    expect(reviewed.map((r) => r.option_id).sort()).toEqual([CUT_SQ, ...CUT_MOVERS].sort());
-    for (const r of reviewed) {
-      if (CUT_MOVERS.includes(r.option_id)) expect([r.outcome.p10, r.outcome.p90], r.option_id).toEqual([null, null]);
-      else expect(typeof r.outcome.p10, 'the status quo keeps its range').toBe('number');
-    }
+    // The decision review's AI gets no input at all: with every share withheld there is no result to review.
+    expect(buildInvokeInputForTests('brief', envOf(result) as Json, null)).toBeNull();
   });
   it('price/MRR, UNMARKED: the same on the second family; the options that move nothing keep theirs', async () => {
     const before = await mrrRun(await chatWritten(mrrGraph(), MRR_OPTIONS, 'band'));
@@ -467,9 +463,15 @@ describe('⭐ SECOND TARGET AND LIMIT (Codex R1 #3443 BLOCK; DL-3: targets AND l
   const FIXTURE = JSON.parse(readFileSync('tests/fixtures/plot/v2-run-golden-minimal.json', 'utf8')) as Json;
   const userPoint = (): Json => ({ source: 'user_specified', magnitude: 'user_stated', natural_effect: { amount: 0.3, amount_unit: '%',
     per_source_change: 1, per_source_change_unit: '%', strength_mean: 0.3, strength_mean_frame: 'edge_strength' } });
-  /** The ACTUAL chat writer's record of a named band (`adjust-edge-strength.ts`): the user's strength and their spread. */
-  const bandStated = (e: Json): void => {
-    e.provenance = { source: 'user_specified' }; e.provenance_display = 'user_set'; e.std_defaulted = false; e.strength.std = edgeBandStd('moderate');
+  /**
+   * A genuinely supported input for the second target, with no physical size traded away (AIE cc9fbadf): ‘Audience’ becomes the
+   * part of ‘Reach’ the user defined it as, one for one in %, a VALIDATED definition that the Run draws exactly.
+   */
+  const exactPart = (g: Json): void => {
+    g.nodes.find((n: Json) => n.id === 'y').label = 'Reach contribution';
+    Object.assign(g.edges.find((e: Json) => e.from === 'y' && e.to === 'other'), { strength: { mean: 1, std: 0.5 },
+      provenance: { source: 'brief_extraction', magnitude: 'user_stated', definitional: true, natural_effect: { amount: 1, per_source_change: 1,
+        amount_unit: '%', per_source_change_unit: '%', strength_mean: 1, strength_mean_frame: 'edge_strength' } } });
   };
   function jointGraph(o: { limitVia?: 'x' | 'y'; optionsSetLimit?: boolean; planC?: boolean } = {}): Json {
     // Codex's probe names the definition's part as part of the total (`Quality contribution`), so the definition validates.
@@ -528,9 +530,9 @@ describe('⭐ SECOND TARGET AND LIMIT (Codex R1 #3443 BLOCK; DL-3: targets AND l
   const says = (l: Json): string => notesAsShown(l.targets.notes ?? [], l.targets.note_groups).join(' ');
   const spreadRecords = (r: Json): Json[] => warningsOf(r).filter((w) => w?.code === CONDITION_FIGURES_UNSUPPORTED_SPREAD);
 
-  it('POSITIVE CONTROL: with the user\'s band on ‘Audience’ → ‘Reach’ (their spread), both targets and the joint are licensed', async () => {
+  it('POSITIVE CONTROL: with the second target\'s part a validated definition (exact), both targets and the joint are licensed', async () => {
     const g = jointGraph();
-    bandStated(g.edges.find((e: Json) => e.from === 'y' && e.to === 'other'));
+    exactPart(g);
     const { result, licence } = await runJoint(g);
     expect(spreadRecords(result)).toEqual([]);
     expect(perTarget(licence, 'primary')).toEqual({ a: 41, b: 51 });
@@ -574,7 +576,7 @@ describe('⭐ SECOND TARGET AND LIMIT (Codex R1 #3443 BLOCK; DL-3: targets AND l
 
   it('⭐ LIMIT: a limit moved through the user\'s point with no stated spread is withheld for those plans, with the joint; the targets stand', async () => {
     const g = jointGraph({ limitVia: 'x', optionsSetLimit: false });
-    bandStated(g.edges.find((e: Json) => e.from === 'y' && e.to === 'other'));
+    exactPart(g);
     const { result, licence } = await runJoint(g);
     expect(perTarget(licence, 'primary')).toEqual({ a: 41, b: 51 });
     expect(perTarget(licence, 'secondary')).toEqual({ a: 51, b: 61 });
@@ -607,7 +609,7 @@ describe('⭐ SECOND TARGET AND LIMIT (Codex R1 #3443 BLOCK; DL-3: targets AND l
 
   it('SCOPE: a limit each plan SETS itself is a fixed input — a user point into it carries no plan\'s P, so nothing is withheld', async () => {
     const g = jointGraph({ limitVia: 'y', optionsSetLimit: true });
-    bandStated(g.edges.find((e: Json) => e.from === 'y' && e.to === 'other'));
+    exactPart(g);
     const { result, licence } = await runJoint(g);
     expect(spreadRecords(result)).toEqual([]);
     expect(licence.targets.joint).toMatchObject({ status: 'licensed', pct_by_option: { a: 21, b: 31 } });

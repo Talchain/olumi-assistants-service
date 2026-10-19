@@ -13,6 +13,18 @@ import type { HandlerInvocation } from '../../registry.js';
 import { createRunAnalysisHandler } from '../run-analysis.js';
 import minimalFixture from '../../../../../tests/fixtures/plot/v2-run-golden-minimal.json';
 
+/**
+ * ⭐ STEP 8 (AIE `point_uncertainty` 564fe768, cc9fbadf): a chance resting on a user's size whose spread is not attested is
+ * withheld (`run-analysis-unsupported-spread.test.ts` pins that rule, its words and every surface). This fixture's user sizes
+ * have no attested spread, and no positive is invented for them. This file tests
+ * the accumulation horizon, not that rule, so the Run's spread selection is held empty here; the rest of the support walk runs as served.
+ */
+vi.mock('../../../agent-lane/goal-certainty.js', async (original) => {
+  const actual = await original<typeof import('../../../agent-lane/goal-certainty.js')>();
+  return { ...actual, chanceSupportGoalPaths: (...args: Parameters<typeof actual.chanceSupportGoalPaths>) =>
+    ({ ...actual.chanceSupportGoalPaths(...args), unsupportedSpread: [] }) };
+});
+
 type Rec = Record<string, any>;
 const served = JSON.parse(readFileSync(new URL('../../../../../tests/fixtures/served/c96fc4bb-saved-graph.json', import.meta.url), 'utf8')).graph as Rec;
 const clone = <T>(value: T): T => structuredClone(value);
@@ -114,9 +126,7 @@ describe('Run accumulation horizon drift — the wire copy uses the current dead
       Object.assign(node(graph, 'mrr'), { goal_threshold: 0.8, goal_threshold_raw: 85000,
         goal_threshold_cap: 106250, goal_threshold_unit: 'GBP/month', goal_threshold_frame: 'level', goal_direction: '>=' });
       const ratePath = graph.edges.find((e: Rec) => e.from === 'pro_plan_price' && e.to === 'monthly_churn');
-      // STEP 8 (AIE 764e9c72): the user's band on it, attested by the chat writer (`std_defaulted: false`); unattested, its chance
-      // would be withheld for the spread (`run-analysis-unsupported-spread.test.ts`). This row tests the accumulation horizon.
-      Object.assign(ratePath, { exists_probability: 1, defaulted: false, provenance: { source: 'user_specified' }, provenance_display: 'user_set', std_defaulted: false });
+      Object.assign(ratePath, { exists_probability: 1, defaulted: false, provenance: { source: 'user_specified' } });
       graph.edges.find((e: Rec) => e.from === 'monthly_churn' && e.to === CARRIER_ID).exists_probability = 0.5;
       const { result } = await run(graph, body);
       const licence = result.enrichment.inference_warnings.find((w: Rec) => w.code === GOAL_CHANCE_LICENSED);

@@ -82,8 +82,6 @@ import {
 import type { DecisionReviewOutput } from './types.js';
 import { applyDskGroundingPolicy } from '../../cee/decision-review/dsk-grounding-policy.js';
 import { redactUngroundedPolarityFigures } from '../../cee/decision-review/figure-polarity.js';
-import { unsupportedIntervalOptionIds } from '../../orchestrator/context/option-result-source.js';
-import { withoutUnsupportedInterval } from '../compose/goal-probability-transport.js';
 
 export interface EnrichDecisionReviewInput {
   readonly handlerFacts: readonly HandlerFact[];
@@ -1114,10 +1112,7 @@ function readIslResults(
     : [];
   const optionComparisonSource = currentEntries.length > 0 ? currentEntries : legacyEntries;
   const optionComparison: Record<string, unknown>[] = [];
-  // STEP 8 (AIE 764e9c72): a range resting on an unsupported spread never reaches the review's AI as a result fact.
-  const unsupportedIntervals = unsupportedIntervalOptionIds(enrichment);
-  for (const raw of optionComparisonSource) {
-    const r = withoutUnsupportedInterval(raw, unsupportedIntervals);
+  for (const r of optionComparisonSource) {
     const outcomeNested = readRecord(r.outcome);
     const mean = readNumber(r.outcome_mean) ?? readNumber(outcomeNested?.mean);
     const p10 = readNumber(r.outcome_p10) ?? readNumber(outcomeNested?.p10);
