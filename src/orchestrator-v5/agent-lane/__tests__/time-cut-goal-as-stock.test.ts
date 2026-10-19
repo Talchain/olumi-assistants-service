@@ -30,6 +30,17 @@ import { buildAnalysisResultBlock } from '../../compose.js';
 import { goalChanceFactsForAgent } from '../../goal-target/goal-chance-range-agent.js';
 import { buildCandidateSchema, strictForTheDrafter } from '../runtime/build-model.js';
 
+/**
+ * ⭐ STEP 8 (AIE `point_uncertainty` 564fe768): a chance resting on a user's size whose spread nobody stated is withheld
+ * (`run-analysis-unsupported-spread.test.ts` pins that rule, its words and every surface). This brief's figures are such sizes, so
+ * on staging its chance is now withheld. This file tests the stock goal's time cut, not that rule, so the Run's spread selection is held empty
+ * here and every other part of the support walk (`unsized`, exact links, the licence) runs as served.
+ */
+vi.mock('../goal-certainty.js', async (original) => {
+  const actual = await original<typeof import('../goal-certainty.js')>();
+  return { ...actual, chanceSupportGoalPaths: (...args: Parameters<typeof actual.chanceSupportGoalPaths>) =>
+    ({ ...actual.chanceSupportGoalPaths(...args), unsupportedSpread: [] }) };
+});
 const memory = vi.hoisted(() => ({ graph: null as any, rows: [] as any[], run: null as any }));
 vi.mock('../../session/index.js', async original => ({
   ...(await original<typeof import('../../session/index.js')>()),

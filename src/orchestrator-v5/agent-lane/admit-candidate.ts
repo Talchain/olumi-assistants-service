@@ -119,8 +119,6 @@ export interface AdmittedEdge {
   provenance?: { source: string; reasoning?: string; source_quote?: string; magnitude?: MagnitudeAuthor; natural_effect?: NaturalEffect; olumi_fit_candidate?: OlumiFitCandidate; definitional?: true; mean_projected?: true; basis?: string };
   /** CIL flag — true when the magnitude is a projection default, not authored. */
   defaulted?: boolean;
-  /** A6f: the user sized this link but nobody stated its spread, so `strength.std` is Olumi's (D3), as the chat writers mark it. */
-  std_defaulted?: true;
 }
 
 export interface WithheldLink {
@@ -339,8 +337,6 @@ export function admitCandidateLinks(
       };
       projected_fields[key] = projected;
       if (projected.length > 0) edge.defaulted = true;
-      // ⭐ STEP 8 (AIE point_effect_uncertainty_ruling cc6410a4; DL-3 #94 6260306712): the user's figure is the size, never the spread.
-      if (!stdAuthored && sized.magnitude === 'user_stated') edge.std_defaulted = true;
       if (!meanOurs) authored_magnitudes.push(key);
       if (!stdAuthored) {
         loss.push({
