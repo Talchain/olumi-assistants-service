@@ -56,7 +56,11 @@ import { recordExplicitTurnStop } from "./turn-stop.js";
  * traffic at it are different decisions with different blast radii.
  */
 export const AI_MODE_HEADER = "x-olumi-ai-mode" as const;
-export type BrowserAiMode = "conventional" | "openai";
+/**
+ * `core` (PATH-B): the same Agent route, whose own per-request mode then drops Olumi's added reply prose
+ * (`agent-tools.ts` `laneModeFor`; ignored in production). The value is forwarded unchanged with the other allowed headers.
+ */
+export type BrowserAiMode = "conventional" | "openai" | "core";
 export type ProxyInternalTarget = "/orchestrate/v2/turn" | "/agent/v1/turn";
 
 /**
@@ -66,7 +70,7 @@ export type ProxyInternalTarget = "/orchestrate/v2/turn" | "/agent/v1/turn";
  */
 export function resolveProxyInternalTarget(mode: unknown): ProxyInternalTarget {
   if (mode === "conventional") return "/orchestrate/v2/turn";
-  if (mode === "openai") return "/agent/v1/turn";
+  if (mode === "openai" || mode === "core") return "/agent/v1/turn";
   return config.proxy.proxyV5Target === "agent"
     ? "/agent/v1/turn"
     : "/orchestrate/v2/turn";

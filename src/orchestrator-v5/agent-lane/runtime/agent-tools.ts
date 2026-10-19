@@ -1028,7 +1028,25 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  */
 export const MUTATION_TOOLS: readonly string[] = ['propose_statement', 'propose_new_option', 'propose_option_status', 'propose_change', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_goal_deadline', 'propose_team_time', 'propose_hiring_times', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'reconcile_goal_scope', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal', 'propose_new_limit'];
 
-export type AgentLaneMode = 'full' | 'preview';
+/**
+ * `core` (PATH-B, Paul 19 Oct: run the AI core apart from Olumi's meaning layer, on the same build, per request): the full
+ * tool surface; the AI's own words are the reply, and Olumi adds or rewrites no prose after it. Protocol (identity, approval,
+ * digest, CAS, readback, replay) and the science engine are unchanged. Selected per request by `x-olumi-ai-mode: core`
+ * ({@link laneModeFor}), never in production, and never over a read-only preview.
+ */
+export type AgentLaneMode = 'full' | 'preview' | 'core';
+
+/** The request's `x-olumi-ai-mode` value that selects {@link AgentLaneMode} `core`. */
+export const AI_CORE_MODE = 'core';
+
+/**
+ * The lane mode for ONE request. A read-only preview stays read-only whatever the request says; `core` is honoured only on a
+ * staging, local or test runtime, so a header can never select it in production (or on a runtime whose class is unknown).
+ */
+export function laneModeFor(base: AgentLaneMode, aiModeHeader: unknown, runtimeEnv: string): AgentLaneMode {
+  if (base === 'preview') return 'preview';
+  return aiModeHeader === AI_CORE_MODE && (runtimeEnv === 'staging' || runtimeEnv === 'local' || runtimeEnv === 'test') ? 'core' : base;
+}
 
 export function toolsFor(mode: AgentLaneMode): readonly ToolDefinition[] {
   if (mode !== 'preview') return AGENT_TOOLS;

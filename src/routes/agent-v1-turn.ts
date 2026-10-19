@@ -85,7 +85,7 @@ import { drawnLinkPress, isDrawnLinkPress } from '../orchestrator-v5/agent-lane/
 import { answerIsIncomplete, heldChangeSentence, runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import { parseSelectedElements } from '../orchestrator-v5/boundary/request-extensions.js';
 import { agentSelectionContext, type AgentSelectionContext } from '../orchestrator-v5/agent-lane/selection-context.js';
-import type { AgentLaneMode, AgentToolContext } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
+import type { AgentLaneMode, AgentToolContext, ToolResult } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { createAgentCapabilities, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
 import { runExplanationCurrentness } from '../orchestrator-v5/agent-lane/run-currentness.js';
 import { turnReadCache, FRESH_READ } from '../orchestrator-v5/agent-lane/turn-read-cache.js';
@@ -149,7 +149,8 @@ import { derivePendingActionsFromFinalizedChips } from '../orchestrator-v5/compo
 import { isPendingActionExpired, PENDING_ACTIONS_PER_TURN_CAP, type PendingAction } from '../orchestrator-v5/session/pending-action.js';
 import { computeSurvivingPriorPendingsDetailed } from '../orchestrator-v5/commit.js';
 import { GM_HELD_HANDLER_ID } from '../orchestrator-v5/handlers/edit-graph-referee-gate.js';
-import { dispatchTool, toolsFor } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
+import { dispatchTool, laneModeFor, toolsFor } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
+import { getRuntimeEnv } from '../config/env-resolver.js';
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
 import { currentStageEmitter, graphPreviewEmitted } from '../cee/unified-pipeline/stage-stream-context.js';
 import { readBrief, readingWithin, BRIEF_READING_TIMEOUT_MS, BRIEF_ROUTE_WAIT_MS, type CallBriefReading } from '../orchestrator-v5/agent-lane/brief-reading.js';
@@ -923,6 +924,22 @@ const AGENT_INSTRUCTIONS = SELECTED_COACH_V02_TEMPLATE.replace(
 );
 /** The Agent's call that offers its proposing tools: the shared instructions, then the stated-figure rule. */
 const AGENT_TOOL_INSTRUCTIONS = `${AGENT_INSTRUCTIONS}\n\n${STATED_FIGURE_INSTRUCTION}`;
+
+/**
+ * ⭐ PATH-B `core` (agent-tools.ts `AgentLaneMode`): Olumi appends and rewrites nothing after the AI's reply, so the reply
+ * itself carries what the host would otherwise add, from the typed facts the AI already holds. Sent only in `core`, after
+ * the shared instructions, so every other mode's instructions stay byte-identical. ⚠ Prompt text: AIE review owed.
+ */
+export const CORE_REPLY_INSTRUCTION = 'In this mode Olumi adds nothing to your reply and rewrites none of it: the user reads exactly your words. '
+  + 'So say, from this turn\u2019s tool results, what was saved, what was not saved and why, and any proposal that is waiting for the user\u2019s approval on its card. '
+  + 'Give at most one next step, chosen from the current readiness facts, and never ask for something the user has already said. '
+  + 'Keep every must_say disclosure and the licences in run_facts: never call a win share a chance, and never call an option best, a winner or recommended. '
+  + 'When a calculation rests on Olumi\u2019s own untested assumptions, say \u201cIllustrative calculation \u2014 uses untested Olumi assumptions.\u201d and name the assumptions that matter most. '
+  + 'Keep each item\u2019s recorded source: the user\u2019s words stay the user\u2019s, another person\u2019s stay theirs, an unknown source stays unknown, and Olumi\u2019s readings stay Olumi\u2019s; approving a reading adopts it but does not make the user its author.';
+/** The instructions for one call in this lane mode: unchanged outside `core`. */
+export function instructionsForMode(mode: AgentLaneMode, instructions: string): string {
+  return mode === 'core' ? `${instructions}\n\n${CORE_REPLY_INSTRUCTION}` : instructions;
+}
 
 /**
  * Read the persisted state back for the response: `graph_hash`, readiness and
@@ -1874,9 +1891,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
 
   /**
    * READ-ONLY preview. Resolved ONCE at registration, not per request, so no
-   * request header or body can select the writable surface.
+   * request header or body can select the writable surface. A request may only
+   * narrow a full lane to `core` (`laneModeFor`, per request below), never widen a preview.
    */
-  const mode: AgentLaneMode = config.proxy.agentLanePreview === true ? 'preview' : 'full';
+  const baseMode: AgentLaneMode = config.proxy.agentLanePreview === true ? 'preview' : 'full';
 
   /**
    * The internal dispatch, built PER REQUEST so it carries the caller's own
@@ -2195,6 +2213,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
    */
   const agentTurnHandler = async (req: FastifyRequest, reply: FastifyReply, takeActiveRun: (key: string) => boolean) => {
     const startedAt = Date.now();
+    // PATH-B: this request's lane mode. `core` = the AI's own reply, with no Olumi prose added or rewritten (agent-tools.ts).
+    const mode: AgentLaneMode = laneModeFor(baseMode, req.headers['x-olumi-ai-mode'], getRuntimeEnv());
     let body = (req.body ?? {}) as Record<string, unknown>;
     const scenarioId = typeof body.scenario_id === 'string' ? body.scenario_id : '';
     // ⭐ Lane A recovery seam (`recovery-fault-seam.ts`): staging-only, off by default, armed by THIS request for its own scenario.
@@ -2861,7 +2881,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       });
       // K2: committed loop prose already crossed the live gates. Preserve those exact bytes;
       // currentness belongs to typed controls/narration, not a new sentence in the saved answer.
-      if (replayLoopRun || historicalReceiptKey !== undefined) gatedReplay.assistant_text = prior.assistant_message ?? '';
+      // PATH-B `core`: the stored reply is the AI's own words; its replay returns those exact bytes too.
+      if (replayLoopRun || historicalReceiptKey !== undefined || mode === 'core') gatedReplay.assistant_text = prior.assistant_message ?? '';
       // Accel P24 / SCI-10: the typed rows go on AFTER every replay guard (a structured scrub must never reach them), and only
       // when each row and figure is in the reply those guards left. withShapeOnlyIfItDerives below never changes
       // assistant_text and keeps every other key (it can only drop `_answer_shape`), so this is the text that ships.
@@ -2973,7 +2994,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             return reply.code(200).send(await replayed(answer));
           }
           // A concurrent original/recovery request finishes its reply first. No duplicate interpreting call here.
-          if (mode === 'full' && !recoveryAttempted && !activeRunTurns.has(runKey) && (typedRunOf(body) || chiplessRetry)) {
+          if (mode !== 'preview' && !recoveryAttempted && !activeRunTurns.has(runKey) && (typedRunOf(body) || chiplessRetry)) {
             const recorded = await readRecordedRun(store, scenarioId, turnId, () => readBackState(
               (path, body) => readCache.dispatch(path, { ...(body as Record<string, unknown>), ...FRESH_READ }), scenarioId));
             if (recorded !== undefined && takeActiveRun(runKey)) {
@@ -3404,6 +3425,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (typedNow !== null) recordUnsavableEffect();
 
     let levelAsk: ReturnType<typeof latestCurrentLevelAsk> = null;
+    // Olumi's own current-level and deadline asks (and the cards they force) are host asks: `full` only, never `core`.
     if (mode === 'full' && typeof store.readMostRecentPendingActions === 'function') {
       try {
         levelAsk = latestCurrentLevelAsk(await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' }), scenarioId, userId);
@@ -3476,7 +3498,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let result: AgentTurnResult | undefined;
     if (isDrawnLinkPress((body['chip'] as { id?: unknown } | undefined)?.id)) {
       result = await drawnLinkPress(
-        (body['chip'] as { id: string }).id, { ctx: toolCtx, history, message, instructions: AGENT_INSTRUCTIONS, maxOutputTokens: budget.max_output_tokens, mode },
+        (body['chip'] as { id: string }).id, { ctx: toolCtx, history, message, instructions: instructionsForMode(mode, AGENT_INSTRUCTIONS), maxOutputTokens: budget.max_output_tokens, mode },
         (await readBackState(readingDispatch, scenarioId)).graph, capabilities, callModelFor(budget));
       fastPath = 'method';
     }
@@ -3736,7 +3758,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const interpret = interpretBudget();
         const resp = await callModelFor(interpret)({
           // Standing unit/authorship/calculation safeguards remain; RUN_FACTS_USE is the one Run coaching instruction.
-          instructions: `${AGENT_INSTRUCTIONS}\n\n${eligibleIntervention === undefined ? '' : `${ELIGIBLE_INTERVENTION_INSTRUCTION}\n\n`}${askView ? `${RUN_INTERPRETATION_VIEW_INSTRUCTION}\n\n` : ''}${INTERPRET_ONLY_CONSTRAINT}\n\n${RUN_FACTS_USE}`,
+          instructions: instructionsForMode(mode, `${AGENT_INSTRUCTIONS}\n\n${eligibleIntervention === undefined ? '' : `${ELIGIBLE_INTERVENTION_INSTRUCTION}\n\n`}${askView ? `${RUN_INTERPRETATION_VIEW_INSTRUCTION}\n\n` : ''}${INTERPRET_ONLY_CONSTRAINT}\n\n${RUN_FACTS_USE}`),
           input: explanationInput,
           // No tools at all: acting is structurally impossible on this call (and no schema tokens
           // are spent on tools it may not use). Measured against the live API: accepted with the
@@ -4197,7 +4219,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const loopStartedAt = Date.now();
     let runPressProviderMs = 0;
     let runPressProviderCalls = 0;
-    if (result === undefined && mode === 'full' && recoveredRun !== undefined && runPress) {
+    if (result === undefined && mode !== 'preview' && recoveredRun !== undefined && runPress) {
       // The operation already ran. Reuse its proven capability result directly; only its existing interpreter calls AI.
       const started = Date.now();
       const recorded = await loopCapabilities.runAnalysis(toolCtx, { reason: message, effects_timing: null });
@@ -4333,10 +4355,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             briefText: await readingDispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {})
               .then(read => read.status === 200 ? read.json.brief_text : undefined).catch(() => undefined),
             message,
-            instructions: methodTurn?.kind === 'run' ? `${AGENT_INSTRUCTIONS}\n\n${methodTurn.directive}\n\n${premortemProducerDirective(methodTurn, methodGraph)}`
+            instructions: instructionsForMode(mode, methodTurn?.kind === 'run' ? `${AGENT_INSTRUCTIONS}\n\n${methodTurn.directive}\n\n${premortemProducerDirective(methodTurn, methodGraph)}`
               : widenRun !== undefined ? `${AGENT_INSTRUCTIONS}\n\n${widenRun.directive}`
               : risksRun !== undefined ? `${AGENT_INSTRUCTIONS}\n\n${risksRun.directive}`
-              : eligibleIntervention === undefined ? AGENT_TOOL_INSTRUCTIONS : `${AGENT_TOOL_INSTRUCTIONS}\n\n${ELIGIBLE_INTERVENTION_INSTRUCTION}`,
+              : eligibleIntervention === undefined ? AGENT_TOOL_INSTRUCTIONS : `${AGENT_TOOL_INSTRUCTIONS}\n\n${ELIGIBLE_INTERVENTION_INSTRUCTION}`),
             maxOutputTokens: budget.max_output_tokens,
             mode,
             // T3: a method turn is structurally ONE model call with NO tool (DL 5939415083 (2)): every tool withheld, one hop.
@@ -4356,12 +4378,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             ...(hostFirstCall !== undefined ? { hostFirstCall } : {}),
             ...(selectionContext !== null && selectionContext !== undefined ? { selectionNote: selectionContext.note } : {}),
             // PJ-C1 latency: a lone proposal is answered from its own result, with no narrating call (proposal-reply.ts).
-            composeReply: (tool, args, toolResult) => {
+            // PATH-B `core`: no host-composed reply; the AI narrates every tool result itself (one more call).
+            ...(mode === 'core' ? {} : { composeReply: (tool: string, args: unknown, toolResult: ToolResult) => {
               const firstResult = tool === 'build_model_from_brief'
                 ? firstAnalysisResultReply(args, toolResult, firstAnalysis?.outcome.ran === true) : null;
               if (firstResult !== null) { firstAnalysisResultFirst = true; return firstResult; }
               return composeProposalReply(tool, args, toolResult, message);
-            },
+            } }),
             // The "Suggest starting assumptions" press: its first call IS the proposal (`SUGGEST_STARTING_ASSUMPTIONS_CHIP`).
             ...((body['chip'] as { id?: unknown } | null | undefined)?.id === SUGGEST_STARTING_ASSUMPTIONS_CHIP.id
               ? { firstCallTool: STARTING_ASSUMPTIONS_TOOL } : {}),
@@ -5961,8 +5984,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * stays beside a face figure when its typed subjects match. The 80-word demotion order belongs to this one composer.
      * Whole profiles/envelopes retain their existing behavior; an uninterpreted Run uses coaching.
      * ⛔ THE ONE LAST WRITER: nothing below this block writes `assistant_text` (pinned by `reply-composer-last-writer.test.ts`).
+     *
+     * ⭐ PATH-B `core` (agent-tools.ts `AgentLaneMode`): the reply is the AI's own words, exactly. Every host line, ask, face,
+     * disclosure and prose rewrite above is dropped here, once; the AI held the same facts as typed context (tool results,
+     * canonical state, readiness, run_facts and the leader and goal-chance licences). Only the display boundary stays: a
+     * proposal id is never text a user reads (display-ids.ts). Cards, blocks, the licensed result view, receipts on the wire,
+     * the durable row and replay are unchanged. A host-written reply (no AI words, or a host truth swap) keeps today's path.
      */
-    if (aiWroteReply && noDirectLink === null && fastPath !== 'method') {
+    if (mode === 'core' && aiWroteReply) {
+      const { _answer_shape: _hostShape, ...unshaped } = wireBody as OlumiResponse & Record<string, unknown> & { _answer_shape?: unknown };
+      wireBody = { ...unshaped, assistant_text: withoutProposalIds(narratorWords ?? text) } as OlumiResponse & Record<string, unknown>;
+    } else if (aiWroteReply && noDirectLink === null && fastPath !== 'method') {
       const checked = withEstimateGoalPointsAtEgress(wireBody, {
         analysisResult, graph: readbackGraph ?? null, current: selectedRunCurrent,
         narrator: 'olumi',
