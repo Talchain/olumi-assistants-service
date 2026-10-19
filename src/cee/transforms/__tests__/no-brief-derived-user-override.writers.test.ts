@@ -341,6 +341,7 @@ const REVIEWED_EDGE_SIZE_WRITERS: Readonly<Record<string, string>> = {
   'cee/magnitude/link-effect.ts': 'existing converter: emits user_stated magnitude only for its caller-earned user_stated size, preserving the natural effect',
   'cee/magnitude/frame-defaulted-links.ts': 'existing converter caller: explicitly passes user_stated false; only projects Olumi sizes',
   'orchestrator-v5/system-events/link-effect-edit.ts': 'existing user edit: a user_specified structured link effect, checked against the endpoints and converted unchanged',
+  'orchestrator-v5/path-b/tools/candidate-to-graph.ts': 'Step 8 path-B draft conversion (DL ruling, 19 Oct 2026): sizes ONLY Olumi-declared sizes and checked one-for-one definitions, as Olumi\'s; every sizeLink call here passes the literal user_stated: false (pinned below), so it never stamps user_stated; a person\'s declared size stays unsized and is listed BLOCKED-SCHEMA link_size_origin',
   'orchestrator-v5/agent-lane/admit-model.ts': 'Fi reviewed by Science 5 Oct 2026: user edit wins; existing strict label door unchanged OR one C2 sentence/link pair under W3, equal node units under C1, and SIGN-1/direction checks; stores that exact sentence as provenance.source_quote through the existing user_stated size path, never changes any value/sign/unit or stamps user_override',
 };
 
@@ -371,6 +372,25 @@ function writesEdgeUserSize(file: string): boolean {
 }
 
 describe('Science Fi — edge user_stated sizing writers are DERIVED and reviewed', () => {
+  // DL lease 19 Oct (Step 8): the path-B conversion is a sizing door only because it NEVER passes user_stated: true.
+  it('path-B conversion: every sizeLink call passes the literal user_stated: false', () => {
+    const file = resolve(SRC_ROOT, 'orchestrator-v5/path-b/tools/candidate-to-graph.ts');
+    const tree = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, false);
+    const flags: string[] = [];
+    const visit = (n: ts.Node): void => {
+      if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === 'sizeLink') {
+        const statement = n.arguments[0];
+        const prop = statement !== undefined && ts.isObjectLiteralExpression(statement)
+          ? statement.properties.find((q) => q.name !== undefined && ts.isIdentifier(q.name) && q.name.text === 'user_stated') : undefined;
+        flags.push(prop !== undefined && ts.isPropertyAssignment(prop) ? prop.initializer.getText(tree) : '(missing or not a literal)');
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(tree);
+    expect(flags.length).toBeGreaterThan(0);
+    expect(flags).toEqual(flags.map(() => 'false'));
+  });
+
   it('pins every actual magnitude stamp or converter sizing door, including shorthand', () => {
     const files = walkTypeScript(SRC_ROOT);
     expect(files.length).toBeGreaterThan(100);
