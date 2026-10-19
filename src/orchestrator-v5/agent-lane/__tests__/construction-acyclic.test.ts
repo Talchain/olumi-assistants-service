@@ -433,11 +433,13 @@ describe('the whole class: every loop shape', () => {
     expect(has(graph, DELAY, AVAILABILITY)).toBe(false);
     expect(loopWithheld(out)).toEqual([`${DELAY}->${AVAILABILITY}`]);
     expect(saidAbout(out, 'AI release delay', 'AI feature availability')[0]).toContain('the link from "AI release delay" to "AI feature availability" was left out');
-    // ⛔ REVIEW (a): the risk left with no link gets the SAME risk -> goal repair every unconnected risk gets —
-    // computed after the loop is broken, not from the edges before it.
-    const repair = graph.edges.find((e) => e.from === DELAY && e.to === GOAL);
-    expect(repair?.effect_direction).toBe('negative');
-    expect(repair?.provenance?.source).toBe('cee_hypothesis');
+    // ⛔ REVIEW (a), re-ruled (AIE 19 Oct 02:54Z): the risk left with nothing onward is NOT wired into the goal at Olumi's
+    // placeholder size. With the user's link still drawn into it, it is K3's: kept, left out of this analysis and asked.
+    expect(graph.edges.filter((e) => e.from === DELAY), 'no invented risk -> goal link').toEqual([]);
+    expect(graph.nodes.some((n) => n.id === DELAY)).toBe(true);
+    const ledger = admitCandidateModel(prepareProvisionalCandidate(quoted(c)).candidate, {}).loss;
+    expect(ledger.filter((l) => l.field_path === `nodes[${DELAY}].left_out_of_analysis`).map((l) => l.reason)).toEqual([
+      '"AI release delay" is kept in the model but left out of this analysis, because nothing says which way it moves "MRR". Say whether it raises or lowers "MRR" and it will count.']);
     expect(blockers(graph)).not.toContain('NO_PATH_TO_GOAL');
     expect(blockers(graph)).not.toContain('CYCLE_DETECTED');
   });
@@ -575,8 +577,8 @@ describe('BLOCKING-2: the user’s link restated by Olumi is ONE link, and it is
   });
 });
 
-describe('(a) a risk a withheld loop link leaves unconnected gets the risk -> goal repair', () => {
-  it('RED: a risk and a factor linked only to each other — the risk’s link back is withheld, and the risk is connected to the goal', async () => {
+describe('(a) a risk a withheld loop link leaves with nothing onward is kept and asked, never wired into the goal (AIE 19 Oct 02:54Z)', () => {
+  it('RED: a risk and a factor linked only to each other — the risk’s link back is withheld; the risk and what feeds only it are left out and said, with no invented link', async () => {
     const c = extended(servedCandidate(), {
       factors: ['Competitor pricing'],
       risks: ['Competitor launch'],
@@ -584,15 +586,84 @@ describe('(a) a risk a withheld loop link leaves unconnected gets the risk -> go
     });
     const { out, graph } = await build(c);
     expect(loopWithheld(out)).toContain('competitor_launch->competitor_pricing');
-    const repair = graph.edges.find((e) => e.from === 'competitor_launch' && e.to === GOAL);
-    expect(repair?.effect_direction).toBe('negative');
-    expect(repair?.provenance?.source).toBe('cee_hypothesis');
-    expect(reaches(graph, 'competitor_pricing', GOAL)).toBe(true);
+    expect(graph.edges.filter((e) => e.from === 'competitor_launch'), 'no invented risk -> goal link').toEqual([]);
     expect(blockers(graph)).not.toContain('NO_PATH_TO_GOAL');
     expect(cycleFree(graph)).toBe(true);
-    // The repair's record says why this risk needed one — not "never connected to anything".
-    const record = admitCandidateModel(prepareProvisionalCandidate(c).candidate, {}).loss.find((l) => l.field_path === `edges[competitor_launch->${GOAL}]`);
-    expect(record?.reason).toContain('led only to "Competitor pricing", and that link was left out to break a loop');
+    // Said once, with what feeds only it (K3's one line), never "connected to the goal as a negative influence".
+    const loss = admitCandidateModel(prepareProvisionalCandidate(c).candidate, {}).loss;
+    expect(loss.filter((l) => l.field_path === 'nodes[competitor_launch].left_out_of_analysis').map((l) => l.reason)).toEqual([
+      '"Competitor launch" is kept in the model but left out of this analysis, because nothing says which way it moves "MRR", and so is "Competitor pricing", which feeds only what is left out. Say whether it raises or lowers "MRR" and it will count.']);
+    expect(loss.some((l) => l.field_path === `edges[competitor_launch->${GOAL}]`)).toBe(false);
+  });
+});
+
+/**
+ * ⭐ NO PLACEHOLDER LINK FOR AN UNLINKED CONCERN (AIE 19 Oct 02:54Z: "An incoming causal edge does not size a risk ... do not invent a
+ * −0.5 response or call omission probability 0"; PROMPT-INT #3435 bench row 1/1b). On staging d2cb10ef every risk with no outgoing
+ * link was wired into the goal, direction negative, mean +0.5 (Olumi's placeholder): a concern the drafter deliberately left unlinked
+ * (a consequence of missing the target) became a cause, was asked for a figure (`MISSING_FACTOR_LEVEL`), and once sized went to PLoT
+ * as +0.5 beside "negative". Synthetic labels.
+ */
+describe('NO PLACEHOLDER LINK FOR AN UNLINKED CONCERN: kept, left out of the calculation, said; never wired into the goal', () => {
+  const withConcern = (provenance: 'inferred' | 'explicit', link?: Link): CandidateModel => {
+    const c = extended(servedCandidate(), link === undefined ? {} : { links: [link] }) as unknown as { risks: Record<string, unknown>[] };
+    c.risks.push({ label: 'Storage overflow', provenance });
+    return c as unknown as CandidateModel;
+  };
+  const CONCERN = 'storage_overflow';
+  const KEPT_OUT = '"Storage overflow" is kept in the model but left out of this analysis, because nothing in the model says how it affects "MRR". It has not been connected to "MRR" as a cause.';
+
+  it.each([['Olumi’s', 'inferred'], ['of unknown origin', 'explicit']] as const)('RED: a concern %s with no link at all — no link is invented, it is kept and left out, the Run proceeds without it, and the ledger says why', async (_who, provenance) => {
+    const c = withConcern(provenance);
+    const { graph } = await build(c);
+    const node = graph.nodes.find((n) => n.id === CONCERN) as (Node & { analysis_participation?: unknown }) | undefined;
+    expect(node?.label, 'kept, visibly').toBe('Storage overflow');
+    expect(graph.edges.filter((e) => e.from === CONCERN || e.to === CONCERN), 'no invented link').toEqual([]);
+    expect(node?.analysis_participation).toBe('retained_excluded');
+    // Was ['MISSING_FACTOR_LEVEL'] for the unknown-origin concern on d2cb10ef: a figure asked for a cause nobody stated.
+    expect(blockers(graph)).toEqual([]);
+    // SAVE → REOPEN: the production snapshot loader reads the saved model back cold; the concern is still there, still unlinked.
+    const store = { readMostRecentPendingActions: async () => [], loadGraph: async () => graph,
+      loadGraphAndBriefText: async () => ({ graph, briefText: null }) } as unknown as SessionStore;
+    const reopened = (await loadScenarioSnapshotForRunAnalysis('77777777-7777-4777-8777-777777777777', 'req-reopen', store)).rawPersistedGraph as Graph;
+    expect((reopened.nodes.find((n) => n.id === CONCERN) as { analysis_participation?: unknown } | undefined)?.analysis_participation).toBe('retained_excluded');
+    expect(reopened.edges.filter((e) => e.from === CONCERN || e.to === CONCERN)).toEqual([]);
+    const { plotCalls, error } = await runAnalysis(graph);
+    expect(error).toBeNull();
+    expect(plotCalls).toHaveLength(1);
+    expect(JSON.stringify((plotCalls[0] as unknown as { graph: unknown }).graph)).not.toContain(CONCERN);
+    const loss = admitCandidateModel(prepareProvisionalCandidate(quoted(c)).candidate, {}).loss;
+    expect(loss.filter((l) => l.field_path === `nodes[${CONCERN}].left_out_of_analysis`).map((l) => l.reason)).toEqual([KEPT_OUT]);
+    expect(loss.some((l) => l.field_path === `edges[${CONCERN}->${GOAL}]`)).toBe(false);
+    // Never said as a blocker it no longer is ("the analysis cannot be run while it is unconnected").
+    expect(loss.filter((l) => l.field_path === `nodes[${CONCERN}]`)).toEqual([]);
+  });
+
+  it('RED (the sign on the wire): every link the Run sends carries a mean whose sign agrees with its direction', async () => {
+    const { graph } = await build(withConcern('explicit'));
+    // Sized, so a concern wired into the goal would be sent (d2cb10ef: +0.5 beside "negative", flipped only by PLoT's normaliser).
+    const sized = { ...graph, nodes: graph.nodes.map((n) => (n.id === CONCERN
+      ? { ...n, observed_state: { value: 0.2, raw_value: 0.2, source: 'cee_inference', extractionType: 'inferred' } } : n)) } as Graph;
+    const { plotCalls, error } = await runAnalysis(sized);
+    expect(error).toBeNull();
+    const wire = (plotCalls[0] as unknown as { graph: Graph }).graph.edges;
+    expect(wire.length).toBeGreaterThan(0);
+    expect(wire.filter((e) => (e.effect_direction === 'negative' ? (e.strength?.mean ?? 0) > 0 : (e.strength?.mean ?? 0) < 0))).toEqual([]);
+  });
+
+  it('CONTROL: a concern WITH its own link keeps the drafter’s link and sign, and still asks for its figure (operative material is never left out)', async () => {
+    const { graph } = await build(withConcern('explicit', L('Storage overflow', 'MRR', 'negative')));
+    const own = graph.edges.filter((e) => e.from === CONCERN);
+    expect(own.map((e) => [e.to, e.effect_direction])).toEqual([[GOAL, 'negative']]);
+    expect(own[0]!.strength!.mean).toBeLessThan(0);
+    expect((graph.nodes.find((n) => n.id === CONCERN) as { analysis_participation?: unknown }).analysis_participation).toBeUndefined();
+    expect(blockers(graph)).toContain('MISSING_FACTOR_LEVEL');
+  });
+
+  it('CONTROL: a concern whose link the drafter stated with direction unknown keeps its question, unmarked', async () => {
+    const { graph } = await build(withConcern('explicit', L('Storage overflow', 'MRR', 'unknown')));
+    expect(graph.edges.filter((e) => e.from === CONCERN)).toEqual([]);
+    expect((graph.nodes.find((n) => n.id === CONCERN) as { analysis_participation?: unknown }).analysis_participation).toBeUndefined();
   });
 });
 

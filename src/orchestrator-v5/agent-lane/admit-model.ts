@@ -41,7 +41,6 @@ import type { DraftOptionWideningT, DraftRiskWideningT, DraftWideningT, Interven
 import { validateGraphStructure } from '../../orchestrator/graph-structure-validator.js';
 import { log } from '../../utils/telemetry.js';
 import { admitInterventionRange } from '../intervention-range.js';
-import { DEFAULT_EXISTS_PROBABILITY, STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
 import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
 import { readIsBaseline } from '../../cee/baseline-identity.js';
 import { REPAIR_AUTHORED_ORIGIN } from '../../graph/repair-authored-edge.js';
@@ -60,7 +59,6 @@ import { bindOptionLabelToBrief, bindingEarnsBriefClaim } from '../../cee/proven
 import { resolveMagnitudeFrame, naturalAmountUnitOf, sourceUnitWords, sizeLink, statementWords, type LinkSizing, type MagnitudeNode, type StatedRangeEnd } from '../../cee/magnitude/link-effect.js';
 import { LLM_STRENGTH_STD_FLOOR } from '../../cee/constants.js';
 import { niceFrameAtLeast } from './refit-frames.js';
-import { markPlaceholder } from '../../cee/magnitude/link-sizing.js';
 import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { briefWritesFigure, conventionClassOf, conventionFrameFor, conventionFrameWords, estimatedSpreadUpper, isFlowUnit, olumiSignedSize, rescueConventionFrames, hasBasis } from './convention-frame.js';
 import { sayFigure, sayFigureWithoutRounding } from './say-figure.js';
@@ -5662,16 +5660,13 @@ function admitOnce(
    *
    * Two steps, in order, because they are different kinds of claim:
    *
-   * 1. A RISK with no outgoing edge is connected to the goal, negative and
-   *    `defaulted`. This is NOT a guess about which factor it threatens: in
-   *    this taxonomy a risk is by definition something that threatens the
-   *    goal, so the link is entailed by the node's own kind (whether that
-   *    entailment stands is Release Control's call — Panel N7, 5793954535).
-   *    ⛔ EXCEPT a risk whose link the drafter STATED with direction `unknown`:
-   *    that risk was not "never connected" — its direction was declined, and a
-   *    default `negative` would override the stated uncertainty (Panel review
-   *    5793954535, B1, probe P3; #63 5793252993: ASK instead of defaulting). It
-   *    stays unconnected, named below, and its withheld link is the question.
+   * 1. (WITHDRAWN 19 Oct, AIE 02:54Z.) A risk with no outgoing edge used to be connected to the goal,
+   *    negative, at Olumi's placeholder size, "entailed by the node's own kind". It is not: a concern the
+   *    drafter left unlinked may be a consequence of missing the goal, not a cause of it, and an incoming
+   *    edge does not size a risk. No link is invented now (`unlinkedConcerns`, below): a risk with no link
+   *    at all is kept and left out of the calculation, one with only a cause drawn in is K3's, and a risk
+   *    whose link the drafter STATED with direction `unknown` keeps its withheld link as the question
+   *    (#63 5793252993: ASK instead of defaulting).
    * 2. Anything that STILL cannot reach the goal is withheld from the admitted
    *    graph and named in `loss`, because there is no non-guessing repair for
    *    it — and a model nobody can analyse is worse than a model that says
@@ -5718,19 +5713,16 @@ function admitOnce(
   /**
    * ⛔ NO LOOP IS REGISTERED THAT ONE OF OLUMI'S OWN LINKS CLOSES (`breakLoops`).
    *
-   * Run over the edge set readiness checks — every edge admitted, the risk repairs
-   * below included — and BEFORE the reachability pass, so a node a withheld link
+   * Run over the edge set readiness checks — every edge admitted — and BEFORE the
+   * reachability pass, so a node a withheld link
    * leaves unconnected is named there like any other. The structural edges (the
    * decision's options, what each option sets, the held status quo) and the user's
    * own links are never withheld; a loop made only of those is kept and said.
    * Everything withheld travels in `withheld` and is said in `not_represented`,
    * and the projection entries for a withheld link go with it, as for a fold.
    *
-   * ⛔ BROKEN FIRST, THEN THE RISK REPAIRS (review of f504b8e0, (a)). The repair list
-   * was read off the edges BEFORE a loop was broken, so a risk whose only link was the
-   * one withheld looked connected, got no repair, and readiness swapped CYCLE_DETECTED
-   * for NO_PATH_TO_GOAL. The repairs are now computed from the broken edge set; a
-   * second pass then breaks any loop a repair itself closes (a repair is Olumi's link).
+   * ⛔ BROKEN FIRST (review of f504b8e0, (a)): which risks are left unlinked is read off the broken edge
+   * set, so a risk whose only link was the one withheld is kept and said like any other unlinked concern.
    */
   const structuralEdges = new Set<object>([...topologyEdges, ...heldStatusQuoEdges]);
   /**
@@ -5752,7 +5744,7 @@ function admitOnce(
     return !USER_AUTHORED_EDGE_SOURCES.has(String(level?.source ?? ''));
   };
   const loopWithheld: { from: string; to: string; reason: string; detail: string; loop: readonly string[] }[] = [];
-  const acyclic = <E extends AdmittedEdge>(edges: readonly E[], reportKept: boolean): E[] => {
+  const acyclic = <E extends AdmittedEdge>(edges: readonly E[]): E[] => {
     const labelsOf = (loop: readonly { from: string }[]) => loop.map((e) => labelById.get(e.from) ?? e.from);
     // The drafter's own words (a shortened label keeps its full text as `description`).
     const drafterLabel = (id: string): string => {
@@ -5784,8 +5776,8 @@ function admitOnce(
       });
       loopWithheld.push({ from: edge.from, to: edge.to, reason: 'loop_closing_link', detail, loop: loop.map((e) => drafterLabel(e.from)) });
     }
-    // A loop left after the second pass was already left (and said) by the first: a repair is breakable.
-    for (const loop of reportKept ? result.kept : []) {
+    // A loop made only of links that are never withheld (the user's own, structural) is kept, and said.
+    for (const loop of result.kept) {
       loss.push({
         code: REPAIR_CODES.RESOLVE_BELIEF_PRECEDENCE,
         layer: 'cee',
@@ -5804,15 +5796,14 @@ function admitOnce(
     return result.edges;
   };
 
-  const riskRepairs: AdmittedEdge[] = [];
   // Widening risks are retained hypotheses, never unsized causal effects. Keep their attachments as metadata only.
   const wideningRiskIds = new Set(nodes.filter((n) => n.kind === 'risk'
     && n.draft_widening?.provenance === 'ai_suggested_widen').map((n) => n.id));
   const brokenEdges = acyclic(wideningRiskIds.size === 0 ? allEdges
-    : allEdges.filter((e) => !wideningRiskIds.has(e.from) && !wideningRiskIds.has(e.to)), true);
+    : allEdges.filter((e) => !wideningRiskIds.has(e.from) && !wideningRiskIds.has(e.to)));
   // The level a withheld self-link carried goes with it, as a withheld link's projection entries do: left on the
   // node it reached the Run as a level on an option (`advertising_investment: 0.2`). The node's bundle is the one
-  // `interventionsByOption` holds, so both read the same. A repair (the second pass) never closes a self-link.
+  // `interventionsByOption` holds, so both read the same.
   for (const w of loopWithheld) {
     if (w.from !== w.to) continue;
     const n = nodes.find((x) => x.id === w.from);
@@ -5826,41 +5817,36 @@ function admitOnce(
     // RC3 a′'s `relies_on` stamp is SERVER-authored by the More-risks hold/apply door on a stored GraphV3. This fresh
     // drafter CandidateModel path accepts no stamp and never re-admits that stored graph; neither register nor the
     // Run loader calls it. Only server-authored draft widening metadata exempts a new zero-edge suggestion here.
-    const hasOutgoingNow = new Set(brokenEdges.map((e) => e.from));
-    // A risk whose own link was withheld as direction-unknown was answered
-    // "I cannot say which way" — not left unconnected.
+    /**
+     * ⭐ NO PLACEHOLDER LINK FOR AN UNLINKED CONCERN (AIE 19 Oct 02:54Z: "An incoming causal edge does not size a risk ... do not
+     * invent a −0.5 response or call omission probability 0"; PROMPT-INT #3435 bench row 1/1b). Every risk with no outgoing link
+     * used to be wired into the goal, negative, at Olumi's placeholder size (mean +0.5 beside direction negative), so a concern the
+     * drafter deliberately left unlinked (a consequence of missing the target) re-entered the Run as a cause and was asked for a
+     * figure. Now no link is invented:
+     *  · a risk with NO link at all is kept, visibly, and left out of the calculation (`retained_excluded`: readiness, the Run's
+     *    participation guard and its disclosure already read that mark), and the ledger says why;
+     *  · a risk with a cause drawn into it but nothing onward is K3's (`graph/inert-risk.ts`): left out and asked, below;
+     *  · a risk whose own link was withheld as direction-unknown keeps its question, and a widening suggestion its stamp.
+     * A risk with an outgoing link (human, adopted or Olumi's) is untouched: it still asks for its figure or is withheld as before.
+     */
+    const touchedNow = new Set(brokenEdges.flatMap((e) => [e.from, e.to]));
+    // A risk whose own link was withheld as direction-unknown was answered "I cannot say which way" — not left unconnected.
     const directionDeclined = new Set(linkResult.withheld.map((w) => w.from));
-    for (const r of nodes.filter((n) => n.kind === 'risk' && !hasOutgoingNow.has(n.id) && !directionDeclined.has(n.id)
-      && !wideningRiskIds.has(n.id))) {
-      const lostToLoop = loopWithheld.filter((w) => w.from === r.id).map((w) => `"${labelById.get(w.to) ?? w.to}"`);
-      riskRepairs.push(markPlaceholder({
-        from: r.id,
-        to: goalForReach.id,
-        effect_direction: 'negative',
-        strength: { mean: STRENGTH_DEFAULT_SIGNATURE.mean, std: STRENGTH_DEFAULT_SIGNATURE.std },
-        exists_probability: DEFAULT_EXISTS_PROBABILITY,
-        // The same structured provenance every other machine-authored edge
-        // carries — a repaired link is a hypothesis, and must read as one.
-        provenance: { source: 'cee_hypothesis' },
-      } as AdmittedEdge));
+    const unlinkedConcerns = new Set<string>();
+    nodes.forEach((r, i) => {
+      if (r.kind !== 'risk' || touchedNow.has(r.id) || directionDeclined.has(r.id) || wideningRiskIds.has(r.id)) return;
+      unlinkedConcerns.add(r.id);
+      if (r.analysis_participation === undefined) nodes[i] = { ...r, analysis_participation: 'retained_excluded' as const };
       loss.push({
-        field_path: `edges[${r.id}->${goalForReach.id}]`,
-        before: null,
-        after: 'connected',
-        reason:
-          (lostToLoop.length > 0
-            ? `The risk "${r.label}" led only to ${lostToLoop.join(' and ')}, and ${lostToLoop.length === 1 ? 'that link was' : 'those links were'} left out to break a loop, ` +
-              'so it no longer led anywhere, which stops the whole model being analysed. '
-            : `The risk "${r.label}" was named but never connected to anything, which stops the whole ` +
-              'model being analysed. ') +
-          `It has been connected to "${goalForReach.label}" as a negative ` +
-          'influence, with a placeholder strength — that link follows from it being a risk, not ' +
-          'from anything you said, and neither it nor its strength is a measurement.',
+        field_path: `nodes[${r.id}].left_out_of_analysis`,
+        before: r.label,
+        after: 'retained_excluded',
+        reason: `"${r.label}" is kept in the model but left out of this analysis, because nothing in the model says how it affects `
+          + `"${goalForReach.label}". It has not been connected to "${goalForReach.label}" as a cause.`,
         severity: 'warn',
       } as RepairEntry);
-    }
-
-    const edgesNow = riskRepairs.length === 0 ? brokenEdges : acyclic([...brokenEdges, ...riskRepairs], false);
+    });
+    const edgesNow = brokenEdges;
     /**
      * ⛔ REPORTED, NOT ENFORCED — and that is a deliberate reversal.
      *
@@ -5903,7 +5889,7 @@ function admitOnce(
     for (const n of nodes) {
       // A pure limit left with no edge out ends at its limit by construction (above): readiness holds it as a valid
       // terminal. One that still feeds something is judged like any other node.
-      if (n.id === goalForReach.id || n.kind === 'decision' || reachesGoal(n.id) || sinkBranch.has(n.id)
+      if (n.id === goalForReach.id || n.kind === 'decision' || unlinkedConcerns.has(n.id) || reachesGoal(n.id) || sinkBranch.has(n.id)
         || (pureLimits.some((p) => p.node_id === n.id) && !edgesNow.some((e) => e.from === n.id))) continue;
       // The risk itself is said; a cause drawn only into it is left out with it and comes back when the risk does.
       if (leftOut.has(n.id)) {
@@ -5948,7 +5934,7 @@ function admitOnce(
   /**
    * ⛔ THE PARITY LOCK (DL verdict on #2249 @ 04dd4649, merge condition 1). §3's exemption (above) read the goal
    * identities admission accepted on `nodes` + `edgesBeforeRollups`; this verdict reads `levers.nodes` + `finalEdges`.
-   * Between them a loop may be broken (`acyclic`) and risk repairs added, so a declaration can be accepted there and
+   * Between them a loop may be broken (`acyclic`), so a declaration can be accepted there and
    * rejected here: a user-stated "Monthly churn → Pro plan price" beside Olumi's "Pro plan price → Monthly churn" is a
    * loop whose only breakable link is Olumi's, and when that is the price's only route to the goal, "MRR = price × spend"
    * is rejected here while its spend → MRR edge was kept for it — an edge kept beside a rejected identity (Codex #72
