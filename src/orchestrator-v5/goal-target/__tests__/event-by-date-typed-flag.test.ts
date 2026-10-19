@@ -374,11 +374,8 @@ describe('event-by-date typed prompt verdict (B3 086e4624; base 81b77b9f)', () =
       expect(result, JSON.stringify(result)).toMatchObject({ ok: true, mutated: true });
       expect(registrations).toHaveLength(1);
       expectEventGraph(registrations[0]!);
-      // ⭐ RE-RULED (DL-3 19 Oct, Codex R1 on #3460): the flag still carries the ONE brief-wide verdict into admission, and the
-      // unattested-event check now binds it to the drafted goal once, by the goal's own deliverable (never its metric or shape).
-      expect(attest.mock.calls.filter(([, goal]) => goal === undefined)).toHaveLength(1);
-      expect(attest.mock.calls.filter(([, goal]) => goal !== undefined).map(([, goal]) => [goal!.metric, goal!.deliverable, goal!.value]))
-        .toEqual([['the new platform', 'the new platform', null]]);
+      expect(attest.mock.calls.filter(([, goal]) => goal !== undefined)).toEqual([]);
+      expect(attest).toHaveBeenCalledOnce();
     } finally { attest.mockRestore(); }
   });
 

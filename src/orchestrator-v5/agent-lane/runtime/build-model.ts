@@ -2054,15 +2054,7 @@ async function buildModelFromBriefOnce(
   let linksSetAside = apart.setAside;
   const firstCandidate = candidate;
   // ⛔ An event the brief does not attest is never saved as the goal: asked of the one construction retry, else clarified.
-  // ⛔ Codex R1 on #3460: the brief-wide flag attests only the event the brief states, never ANOTHER drafted one ("launch the
-  // website by December" never made "Open a second café" the user's goal). Under the flag the drafted event is the prompted one
-  // only where the ONE event reader finds the drafter's own declaration of WHICH event (its deliverable) in the brief's event
-  // sentence. Its metric is the drafter's name for the quantity ("Platform completion") and its quantity shape is set aside, as
-  // admission sets both aside for a flagged event (R6-C "flagged event prompt wins").
-  const deliverable = firstCandidate.goal.deliverable;
-  const promptedThisGoal = construction.event_by_date_prompted === true && typeof deliverable === 'string'
-    && briefAttestsEventByDate(brief, { ...firstCandidate.goal, metric: deliverable, value: null, unit: '' });
-  const unattested = unattestedEventGoal(firstCandidate, brief, promptedThisGoal);
+  const unattested = unattestedEventGoal(firstCandidate, brief, construction.event_by_date_prompted === true);
   /**
    * The redraft still holds the unattested event as its goal: as an event, or under ANY kind with the event's own label
    * (⛔ Codex FAIL 3026 r1: a retry keeping "Urgent launch" with `kind: null` registered). Identity, never a word match.
