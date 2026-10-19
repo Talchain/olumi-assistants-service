@@ -1,8 +1,10 @@
 /**
- * ⭐ STATED CASES, NOT A MISSING LEVEL (AIE 10:54, 19 Oct, exact words; VERIFIER C6). A user who gives a factor's level as several
- * cases, each with its probability, is never asked "What is it today… treat it as zero": the draft schema cannot carry the
- * distribution yet, so the factor still blocks, but the ask names that limitation, offers no zero or mean, and claims no structured
- * support. A single missing level keeps today's ask. SYNTHETIC wording.
+ * ⭐ RECORDED CASES, NOT A MISSING LEVEL (AIE 11:54Z, packet AIE-RECORDED-CASE-LIMITATION-AND-LIVE-GOAL-RECOVERY-SCOPE-20261019-v1, exact
+ * words; VERIFIER C6). A user who gave a factor's level as several cases is never asked "What is it today… treat it as zero". Each
+ * statement counts only at its own evidence strength: the user's distinct bound figures are "different cases"; one sentence read as
+ * several unbound level readings (C6) is "the recorded information". No probability is read from the words (Codex R1 on #3451: quote-wide
+ * percentages, duplicate levels and near-100 totals claimed a distribution), so the probability-for-each-case words are never served
+ * until a distribution has a carrier. An ordinary missing level keeps today's ask. The Run still waits. SYNTHETIC wording.
  */
 import { describe, expect, it } from 'vitest';
 import { resolveRunAdmission } from '../analysis-ready-core.js';
@@ -11,8 +13,10 @@ import { assessCanonicalAnalysisReadiness } from '../../../../orchestrator/tools
 type Rec = Record<string, unknown>;
 const LABEL = 'Walk-in visits next week';
 const TODAY_ASK = `What is "${LABEL}" today, before any option changes it? Without a current level the analysis would treat it as zero.`;
-const CASES_ASK = (what: string): string => `You supplied a probability for each possible ‘${what}’. This calculation cannot yet use that `
-  + 'distribution faithfully. We can still reason through your stated cases and what each would mean.';
+const CASES = (what: string): string => `You supplied different cases for ‘${what}’. This calculation cannot yet use them together faithfully. `
+  + 'We can still reason through each case and what it would mean.';
+const RECORDED = (what: string): string => `This calculation cannot yet use the recorded information about ‘${what}’ faithfully. `
+  + 'We can still reason through that information and what it would mean.';
 
 const edge = (from: string, to: string): Rec => ({ from, to, strength: { mean: 0.4, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' });
 const option = (id: string, label: string, value: number, is_baseline = false): Rec => ({
@@ -38,58 +42,67 @@ function graphWith(statements: readonly Rec[], field = 'level'): Rec {
 }
 
 const subject = { quantity: 'factor|walk-in visits next week|||level' };
-/** One sentence that states three cases and a probability for each, kept three times as the brief's speaker-unknown words (C6's shape). */
-const unboundCase = (quote: string): Rec => ({ speaker: 'unknown', quote, source: quote, subject, form: 'describes', reading: 'olumi' });
-const pointCase = (quote: string, value: number, extra: Rec = {}): Rec => ({
+/** The brief's words, kept verbatim because the quote check could not bind them as one statement (C6's shape). */
+const unbound = (quote: string): Rec => ({ speaker: 'unknown', quote, source: quote, subject, form: 'describes', reading: 'olumi' });
+const point = (quote: string, value: number, extra: Rec = {}): Rec => ({
   speaker: 'user', quote, source: quote, subject, form: 'point', low: value, high: value, unit: 'visits', reading: 'olumi', ...extra,
 });
+const points = (quote: string, values: readonly number[], extra: Rec = {}): Rec[] => values.map((v) => point(quote, v, extra));
 const visitsAsk = (g: Rec): string | undefined => assessCanonicalAnalysisReadiness(g).blockingIssues
   .find((i) => i.code === 'MISSING_FACTOR_LEVEL' && i.factor_id === 'visits')?.message;
+const C6_LIKE = 'With no outreach we would see 30 walk-in visits next week with probability 20 percent, 45 with probability 60 percent, or 70 '
+  + 'with probability 20 percent.';
 
-describe('a level given as stated cases, each with its probability, is never asked for again (VERIFIER C6)', () => {
-  const sentence = 'With no outreach we would see 30, 45 or 70 walk-in visits next week, at 20 percent, 60 percent and 20 percent.';
-
-  it('C6\'s shape: the brief\'s words kept three times as speaker-unknown descriptions get the limitation words, and the Run still waits', () => {
-    const g = graphWith([unboundCase(sentence), unboundCase(sentence), unboundCase(sentence)]);
-    expect(visitsAsk(g)).toBe(CASES_ASK(LABEL));
+describe('several cases for one quantity are never asked for again, each at its own evidence strength (VERIFIER C6)', () => {
+  it('C6\'s shape: one sentence kept as three unbound level readings is the recorded information, and the Run still waits', () => {
+    const g = graphWith([unbound(C6_LIKE), unbound(C6_LIKE), unbound(C6_LIKE)]);
+    expect(visitsAsk(g)).toBe(RECORDED(LABEL));
     expect(resolveRunAdmission(g).willProceed).toBe(false);
   });
 
-  it('three cases read as the user\'s points, with percentage signs, get the same words', () => {
-    const q = 'Walk-ins next week: 30 (20%), 45 (60%) or 70 (20%).';
-    expect(visitsAsk(graphWith([pointCase(q, 30), pointCase(q, 45), pointCase(q, 70)]))).toBe(CASES_ASK(LABEL));
+  it('three distinct figures of the user\'s own are their different cases, never a distribution read from the percentages', () => {
+    expect(visitsAsk(graphWith(points('Walk-ins next week: 30 (20%), 45 (60%) or 70 (20%).', [30, 45, 70])))).toBe(CASES(LABEL));
   });
 
   it('the cases\' own period is named where the label does not say it', () => {
-    const q = 'Callbacks could be 10, 20 or 40, at 25%, 50% and 25%.';
-    const period = { period: 'per day' };
-    expect(visitsAsk(graphWith([pointCase(q, 10, period), pointCase(q, 20, period), pointCase(q, 40, period)])))
-      .toBe(CASES_ASK(`${LABEL} per day`));
+    expect(visitsAsk(graphWith(points('Callbacks could be 10, 20 or 40, at 25%, 50% and 25%.', [10, 20, 40], { period: 'per day' }))))
+      .toBe(CASES(`${LABEL} per day`));
   });
 
   it('the words carry no figure (never zero, never the cases\' mean of 47), and claim no saved support', () => {
-    const ask = visitsAsk(graphWith([unboundCase(sentence), unboundCase(sentence), unboundCase(sentence)]))!;
-    expect(ask).not.toMatch(/\d|\bzero\b|\baverage\b|\bsaved\b/i);
+    for (const ask of [visitsAsk(graphWith([unbound(C6_LIKE), unbound(C6_LIKE)]))!, visitsAsk(graphWith(points('30 or 45.', [30, 45])))!]) {
+      expect(ask).not.toMatch(/\d|\bzero\b|\baverage\b|\bsaved\b/i);
+    }
   });
 });
 
-describe('CONTROLS: anything short of stated cases with their probabilities keeps today\'s ask', () => {
+describe('every other shape: the words say only what the kept statements support', () => {
   it.each([
-    ['no statement at all', []],
-    ['a single level', [pointCase('About 45 walk-ins next week.', 45)]],
-    ['several cases with no probabilities', [pointCase('Maybe 30 or 45 walk-ins.', 30), pointCase('Maybe 30 or 45 walk-ins.', 45)]],
-    ['probabilities that cover only part of the cases', [pointCase('30 (20%) or 45 (30%) walk-ins.', 30), pointCase('30 (20%) or 45 (30%) walk-ins.', 45)]],
-    ['levels that are themselves percentages', [
-      { ...pointCase('Return rate of 40% or 60%.', 40), unit: '%' }, { ...pointCase('Return rate of 40% or 60%.', 60), unit: '%' }]],
-    ['one kept level with a confidence split is no set of cases', [pointCase('About 45 walk-ins: 90% sure, 10% not.', 45)]],
+    ['no statement at all: an ordinary missing level', [], TODAY_ASK],
+    ['a single level', [point('About 45 walk-ins next week.', 45)], TODAY_ASK],
+    ['several cases with no probabilities (AIE 11:54Z: their different cases)', points('Maybe 30 or 45 walk-ins.', [30, 45]), CASES(LABEL)],
+    ['probabilities that cover only part of the cases', points('30 (20%) or 45 (30%) walk-ins.', [30, 45]), CASES(LABEL)],
+    ['levels that are themselves percentages', points('Return rate of 40% or 60%.', [40, 60], { unit: '%' }), CASES(LABEL)],
+    ['one kept level with a confidence split is no set of cases', [point('About 45 walk-ins: 90% sure, 10% not.', 45)], TODAY_ASK],
     ['levels for two different periods are not cases of one quantity', [
-      pointCase('About 30 a day (50%) and 200 a week (50%).', 30, { period: 'per day' }),
-      pointCase('About 30 a day (50%) and 200 a week (50%).', 200, { period: 'per week' })]],
-  ] as const)('%s', (_case, statements) => {
-    expect(visitsAsk(graphWith(statements as readonly Rec[]))).toBe(TODAY_ASK);
+      point('About 30 a day (50%) and 200 a week (50%).', 30, { period: 'per day' }),
+      point('About 30 a day (50%) and 200 a week (50%).', 200, { period: 'per week' })], TODAY_ASK],
+    // Codex R1 probes (held-out shapes): never the probability-for-each-case words.
+    ['Codex R1: another quantity\'s percentages in the same sentence', points('We expect 30 or 45 walk-in visits next week; online conversion is 20% or 80%.', [30, 45]), CASES(LABEL)],
+    ['Codex R1: one level repeated is no set of cases', points('45 walk-ins (25%), 45 (50%) or 45 (25%).', [45, 45, 45]), TODAY_ASK],
+    ['Codex R1: a case with no probability', points('30 walk-ins (20%), 45 (80%) or 70.', [30, 45, 70]), CASES(LABEL)],
+    ['Codex R1: probabilities that total 99%', points('30 walk-ins (20%), 45 (60%) or 70 (19%).', [30, 45, 70]), CASES(LABEL)],
+    ['Codex R1: probabilities that total 101%', points('30 walk-ins (20%), 45 (60%) or 70 (21%).', [30, 45, 70]), CASES(LABEL)],
+    // An ordinary missing level with words about it is still asked for (AIE 11:54Z: the fallback is never for every missing baseline).
+    ['one unbound reading of the brief\'s words', [unbound('Walk-ins have been patchy lately.')], TODAY_ASK],
+    ['two different unbound sentences about the quantity', [unbound('Walk-ins have been patchy lately.'), unbound('Walk-ins dipped after the move.')], TODAY_ASK],
+  ] as const)('%s', (_case, statements, expected) => {
+    const ask = visitsAsk(graphWith(statements as readonly Rec[]));
+    expect(ask).toBe(expected);
+    expect(ask).not.toMatch(/probability/i);
   });
+
   it('cases kept on another field (how strongly it drives the goal) are not its level', () => {
-    const q = 'It could add 10, 20 or 40 visits, at 25%, 50% and 25%.';
-    expect(visitsAsk(graphWith([pointCase(q, 10), pointCase(q, 20), pointCase(q, 40)], 'relation'))).toBe(TODAY_ASK);
+    expect(visitsAsk(graphWith(points('It could add 10, 20 or 40 visits.', [10, 20, 40]), 'relation'))).toBe(TODAY_ASK);
   });
 });
