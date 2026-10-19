@@ -9,7 +9,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
+import { buildModelFromBrief, type CallStructuredModel, OPEN_AIM_GOAL_LABEL } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 
@@ -140,6 +140,16 @@ const targetStatement = (kind: 'factor' | 'goal') => ({ quote: GOVERNING, speake
 describe('row 3 (#3401): a re-chosen goal never overwrites the user\'s verified +10% target', () => {
   const withStatement = (d: Rec, kind: 'factor' | 'goal'): Rec => { d.statements = [targetStatement(kind)]; return d; };
   const firstDraft = (): Rec => { const d = withStatement(first(), 'factor'); d.constraints = (d.constraints as Rec[]).filter((c) => c.role !== 'target'); return d; };
+  /**
+   * ⭐ RE-RULED (signed change 6, DL-3 19 Oct; was "never registered"): the re-choice is still not adopted, and the FIRST draft is
+   * saved with the aim open (K6). What this row protects holds on the saved graph: the goal is Olumi's open aim with no figure, and
+   * no target row carries the re-choice's terms (the first draft states the user's +10% only as a statement, never as a row).
+   */
+  const reChoiceNotAdopted = (graph: Rec | undefined): void => {
+    expect((graph!.nodes as Rec[]).filter((n) => n.kind === 'goal')).toEqual([expect.objectContaining({ label: OPEN_AIM_GOAL_LABEL, provenance: 'ai_inferred' })]);
+    expect('goal_threshold_raw' in goalOf(graph)!, `no figure on the goal: ${JSON.stringify(goalOf(graph))}`).toBe(false);
+    expect(((graph!.goal_constraints ?? []) as Rec[]).filter((r) => r.role === 'goal_target')).toEqual([]);
+  };
   it.each([
     ['12% for their 10%', { value: 12 }],
     ['−10% for their +10%', { value: -10 }],
@@ -149,7 +159,7 @@ describe('row 3 (#3401): a re-chosen goal never overwrites the user\'s verified 
     Object.assign(retry.goal, change);
     const { graph, inputs } = await construct([firstDraft(), retry], FX.brief);
     expect(inputs, 'PRECONDITION: the one retry was asked').toHaveLength(2);
-    expect(graph, `never registered: ${JSON.stringify(goalOf(graph))}`).toBeUndefined();
+    reChoiceNotAdopted(graph);
   });
   // Codex #3412 r1: a target the first draft verified only as a STATEMENT keeps that statement's own terms (comparator, unit), in a
   // level frame too, where the binder reads the figure alone.
@@ -161,7 +171,7 @@ describe('row 3 (#3401): a re-chosen goal never overwrites the user\'s verified 
     Object.assign(retry.goal, change);
     const { graph, inputs } = await construct([firstDraft(), retry], FX.brief);
     expect(inputs, 'PRECONDITION: the one retry was asked').toHaveLength(2);
-    expect(graph, `never registered: ${JSON.stringify(goalOf(graph))}`).toBeUndefined();
+    reChoiceNotAdopted(graph);
   });
   it('RED: a re-choice that marks the kept target Olumi\'s (ai_proposed) never relabels it: the bound statement keeps it the user\'s', async () => {
     const retry = withStatement(redraft(), 'goal');

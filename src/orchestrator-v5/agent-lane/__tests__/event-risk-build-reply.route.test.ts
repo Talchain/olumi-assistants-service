@@ -186,7 +186,9 @@ describe('event-risk disclosure through the served build reply', () => {
     ['empty', '', false, ''],
     ['server fallback', '', true, 'My answer ran too long and was cut short, so I have not shown it. Try asking about one part at a time.'],
   ] as const)('%s after a rejected draft: truthful receipt with no promised question or retry', async (_kind, narration, incomplete, expected) => {
-    rejectedDraft = true; narratorText = narration; incompleteAnswer = incomplete;
+    // ⭐ RE-RULED (signed change 6, DL-3 19 Oct): a full unattested draft now saves with its aim open (K6), so the rejected draft
+    // here is the one construction still refuses: the event with nothing else drafted.
+    rejectedDraft = true; emptyDraft = true; narratorText = narration; incompleteAnswer = incomplete;
     const brief = (JSON.parse(readFileSync(new URL('./fixtures/hiring-unattested-event-raw-20261014.json', import.meta.url), 'utf8')) as { brief: string }).brief;
     const body = await turn(brief, false);
     expect(buildOutput).toMatchObject({ ok: false, mutated: false, refusal: 'construction_needs_redraft' });

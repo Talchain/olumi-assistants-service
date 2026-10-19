@@ -280,7 +280,7 @@ function leftOutClause(notAFactor: readonly { label: string; kind: string }[]): 
 }
 
 /**
- * The words the AI quotes as the user's CURRENT request (`explicit_rebuild_request`, `explicit_draft_request`) are a WHOLE
+ * The words the AI quotes as the user's CURRENT request (`explicit_rebuild_request`) are a WHOLE
  * statement of this turn's verified typed message, never a fragment, an earlier message or a card press. No word list:
  * the AI reads the request; the host checks only that it quotes the user. The failed checks (none: verified).
  */
@@ -10733,11 +10733,8 @@ export function createAgentCapabilities(
         }
         const constructionContext = { history: opts.readTurnHistory?.() ?? [], verified_user_messages: ctx.verified_user_messages,
           request: ctx.user_turn_text ?? brief };
-        // ⭐ K6 (PL amendment 2, DL ack 18 Oct): the user's explicit "draft it now", quoted by the AI and verified as a whole
-        // statement of this turn, lets a brief with no stated aim be drafted provisionally (`withOpenAim`).
-        const draftNow = typeof args.explicit_draft_request === 'string' && currentRequestChecks(ctx, args.explicit_draft_request).length === 0;
         built = await buildWithDrafterRawRecord(ctx, brief, constructionOperationId(ctx.scenario_id, brief), callStructured, (drafter) => buildModelFromBrief(ctx.scenario_id, brief, dispatch, drafter, opts.onConstructionTrace, opts.deadlineAt, callStructured,
-          undefined, constructionContext, undefined, undefined, opts.onDraftAdmitted, draftNow));
+          undefined, constructionContext, undefined, undefined, opts.onDraftAdmitted));
         if (built.ok !== true) return built;
       }
 

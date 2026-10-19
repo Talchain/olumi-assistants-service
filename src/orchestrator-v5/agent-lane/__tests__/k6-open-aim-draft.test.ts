@@ -1,9 +1,9 @@
 /**
  * ⭐ K6 (PL amendment 2; DL ack 18 Oct): a one-line "should we do X?" brief states no aim, so the drafter takes the ACTION as
- * an event goal, which #3026 rightly never saves as the goal. On the user's explicit "draft it now" (the AI quotes it,
- * `explicit_draft_request`; the host checks it is a whole statement of this turn's typed message), the draft is kept as a
- * labelled provisional model: the event becomes an option and the aim an open question. A brief that states a figure keeps
- * the retry-then-ask path, so an attested aim always wins (#3026's hiring case).
+ * an event goal, which #3026 rightly never saves as the goal. The draft is kept as a labelled provisional model: the event
+ * becomes an option and the aim an open question. The goal retry runs first, so an aim the drafter can name wins.
+ * ⭐ RE-RULED (signed change 6, DL-3 19 Oct; Paul's live test dd904404): for EVERY brief. The "draft it now" request and the
+ * no-figure condition are retired (they left a good draft unshown when the brief stated any figure).
  *
  * Construction replayed for real (`buildModelFromBrief`). Scripted: the drafter. SYNTHETIC wording (a café). 0 provider calls.
  */
@@ -38,7 +38,7 @@ const cafeDraft = (): Rec => ({
   identities: [], unknowns: [], decision_question: BRIEF, unknown_concerns: [],
 });
 
-async function construct(answers: readonly string[], brief: string, draftNow?: boolean, widen = false): Promise<{ graph: Rec | undefined; result: Rec; calls: number }> {
+async function construct(answers: readonly string[], brief: string, widen = false): Promise<{ graph: Rec | undefined; result: Rec; calls: number }> {
   let graph: Rec | undefined; let calls = 0;
   const dispatch = async (path: string, body: unknown) => {
     if (path.endsWith('/graph/register')) { graph = structuredClone((body as { graph: Rec }).graph);
@@ -48,15 +48,15 @@ async function construct(answers: readonly string[], brief: string, draftNow?: b
   };
   const drafter = async () => { calls += 1; return { text: answers[Math.min(calls, answers.length) - 1]!, status: 'completed' }; };
   const result = await buildModelFromBrief('00000000-0000-4000-8000-0000000000k6', brief, dispatch as never, drafter as never,
-    undefined, undefined, widen ? drafter as never : undefined, undefined, undefined, undefined, undefined, undefined, draftNow) as Rec;
+    undefined, undefined, widen ? drafter as never : undefined) as Rec;
   return { graph, result, calls };
 }
 const goalOf = (g: Rec): Rec => (g.nodes as Rec[]).find((n) => n.kind === 'goal')!;
 const labels = (g: Rec, kind: string): string[] => (g.nodes as Rec[]).filter((n) => n.kind === kind).map((n) => String(n.label));
 
-describe('K6: an explicit "draft it now" on a brief with no stated aim gets a labelled provisional draft', () => {
-  it('⭐ RED→GREEN: the one-line brief + a verified "draft it now" → registered; the event is an option, the aim an open question', async () => {
-    const { graph, result, calls } = await construct([JSON.stringify(cafeDraft()), JSON.stringify(cafeDraft())], BRIEF, true);
+describe('K6: a brief with no stated aim gets a labelled provisional draft', () => {
+  it('⭐ RED→GREEN: the one-line brief, with no request → registered; the event is an option, the aim an open question', async () => {
+    const { graph, result, calls } = await construct([JSON.stringify(cafeDraft()), JSON.stringify(cafeDraft())], BRIEF);
     expect(result, JSON.stringify(result).slice(0, 600)).toMatchObject({ ok: true, mutated: true });
     expect(calls, 'the one goal retry runs first (a stated aim, qualitative included, is kept when the drafter can name it)').toBe(2);
     expect(result.open_aim, 'said as a provisional draft with its aim open').toBe(true);
@@ -70,14 +70,14 @@ describe('K6: an explicit "draft it now" on a brief with no stated aim gets a la
   }, 60_000);
 
   it('⛔ Codex on #3426 @a36d8e6b: with the capability path\'s widening provider passed, the open-aim draft still makes exactly the two calls (draft, goal retry) — no widening on an open aim', async () => {
-    const { result, calls } = await construct([JSON.stringify(cafeDraft()), JSON.stringify(cafeDraft())], BRIEF, true, true);
+    const { result, calls } = await construct([JSON.stringify(cafeDraft()), JSON.stringify(cafeDraft())], BRIEF, true);
     expect(result, JSON.stringify(result).slice(0, 600)).toMatchObject({ ok: true, mutated: true, open_aim: true });
     expect(calls, 'draft + goal retry; the open-aim pass answers its own first call and does not widen').toBe(2);
   }, 60_000);
 
   it('a draft with no choice of its own: the action becomes the option beside it', async () => {
     const one = cafeDraft(); one.options = (one.options as Rec[]).filter((o) => o.label === 'Keep one café');
-    const { graph, result } = await construct([JSON.stringify(one), JSON.stringify(one)], BRIEF, true);
+    const { graph, result } = await construct([JSON.stringify(one), JSON.stringify(one)], BRIEF);
     expect(result, JSON.stringify(result).slice(0, 600)).toMatchObject({ ok: true, mutated: true });
     expect(labels(graph!, 'option').sort()).toEqual(['Keep one café', EVENT]);
     expect((graph!.nodes as Rec[]).find((n) => n.label === EVENT)).toMatchObject({ kind: 'option', provenance: 'ai_inferred' });
@@ -86,40 +86,93 @@ describe('K6: an explicit "draft it now" on a brief with no stated aim gets a la
   it('⭐ a stated QUALITATIVE aim is kept: when the retry names it, that goal is saved, never the open aim (AIE protection)', async () => {
     const aimed = cafeDraft(); aimed.goal = { ...aimed.goal, kind: null, deliverable: null, metric: 'Weekend sales', unit: '£', provenance: 'explicit', source_quote: null };
     aimed.links = (aimed.links as Rec[]).map((l) => (l.to === EVENT ? { ...l, to: 'Weekend sales' } : l));
-    const { graph, result } = await construct([JSON.stringify(cafeDraft()), JSON.stringify(aimed)], 'Should we open a second café in Bristol next spring to grow weekend sales?', true);
+    const { graph, result } = await construct([JSON.stringify(cafeDraft()), JSON.stringify(aimed)], 'Should we open a second café in Bristol next spring to grow weekend sales?');
     expect(result, JSON.stringify(result).slice(0, 600)).toMatchObject({ ok: true, mutated: true });
     expect(result.open_aim).toBeUndefined();
     expect(labels(graph!, 'goal')).toEqual(['Weekend sales']);
   }, 60_000);
 
-  it('CONTRAST: the same brief WITHOUT the request → refused and asked, as today (turn one stays a question)', async () => {
-    const { graph, result } = await construct([JSON.stringify(cafeDraft()), JSON.stringify(cafeDraft())], BRIEF);
-    expect(result).toMatchObject({ ok: false, refusal: 'construction_needs_redraft' });
-    expect(graph).toBeUndefined();
-  }, 60_000);
-
-  it('⭐ an attested aim wins: a brief that states a figure keeps the retry-then-ask path, even with the request', async () => {
-    const stated = 'Should we open a second café in Bristol next spring to reach 5000 customers a month?';
-    const { graph, result, calls } = await construct([JSON.stringify(cafeDraft()), JSON.stringify(cafeDraft())], stated, true);
-    expect(calls, 'the retry is asked to re-choose the goal').toBe(2);
-    expect(result).toMatchObject({ ok: false, refusal: 'construction_needs_redraft' });
-    expect(graph).toBeUndefined();
-  }, 60_000);
-
-  // ⛔ Codex on #3426 @a36d8e6b: the figure guard read digits only, so a figure in WORDS drafted an open aim. The ONE reader
-  // (`amountsWrittenIn`, #3429) reads both forms: the word form refuses exactly as the digit form does.
+  // ⭐ RE-RULED (signed change 6): a stated figure no longer withholds the draft (Paul's dd904404 stated two durations and
+  // saw nothing). The aim is still Olumi's open question, never a goal built from the figure.
   it.each([['digits', 'We currently have 5 cafés. Should we open another in Bristol next spring?'],
-    ['words', 'We currently have five cafés. Should we open another in Bristol next spring?']])(
-    '⭐ RED→GREEN (%s): a brief that states a figure is never drafted with an open aim', async (_form, stated) => {
-      const { graph, result } = await construct([JSON.stringify(cafeDraft()), JSON.stringify(cafeDraft())], stated, true);
-      expect(result).toMatchObject({ ok: false, refusal: 'construction_needs_redraft' });
-      expect(graph).toBeUndefined();
+    ['words', 'We currently have five cafés. Should we open another in Bristol next spring?'],
+    ['a stated aim the drafter never names', 'Should we open a second café in Bristol next spring to reach 5000 customers a month?']])(
+    '⭐ RE-RULED (%s): a brief that states a figure is drafted with the aim open, Olumi\'s, no figure invented for it', async (_form, stated) => {
+      const { graph, result, calls } = await construct([JSON.stringify(cafeDraft()), JSON.stringify(cafeDraft())], stated);
+      expect(calls).toBe(2);
+      expect(result, JSON.stringify(result).slice(0, 400)).toMatchObject({ ok: true, open_aim: true });
+      expect(goalOf(graph!)).toMatchObject({ label: OPEN_AIM_GOAL_LABEL, provenance: 'ai_inferred' });
+      expect('goal_threshold_raw' in goalOf(graph!)).toBe(false);
     }, 60_000);
+});
 
-  it('CONTRAST: a word that counts nothing is no figure ("one of the options"): the open-aim draft still runs', async () => {
-    const { result } = await construct([JSON.stringify(cafeDraft()), JSON.stringify(cafeDraft())],
-      'Opening in Bristol next spring is one of the options. Should we open a second café there?', true);
-    expect(result, JSON.stringify(result).slice(0, 400)).toMatchObject({ ok: true, open_aim: true });
+/**
+ * ⭐ Paul's live test (scenario dd904404, CEE cae490f4, 13:01Z): a dilemma about a dated release, stated with two durations and
+ * two courses of action, no aim. The drafter took the release as an inferred event goal twice (the retry under kind null),
+ * #3026 refused both and the K6 path was skipped (no "draft it now"; the brief states figures), so nothing was shown. SYNTHETIC
+ * brief of the same structure (another domain): an unattested dated event as the goal, durations (one another speaker's), two
+ * stated options, four risks, no link into the goal.
+ */
+describe('signed change 6: a dilemma brief with figures and no aim is shown as a labelled provisional draft', () => {
+  const S = [
+    'Our new exhibition is meant to open before the spring half-term.',
+    'Priya has just told us the climate control in the main gallery keeps failing, and a proper repair needs at least 4 weeks.',
+    "Our school bookings need 2 weeks' notice to move.",
+    'If we postpone the opening we lose the school bookings, but if we open with the main gallery closed we will get complaints and refund requests.',
+    'Should we postpone the opening or open with the main gallery closed?',
+  ];
+  const DILEMMA = S.join(' ');
+  const OPENING = 'Spring exhibition opening';
+  const link = (from: string, to: string, direction: string, quote: string | null = null): Rec => ({ from, to, direction,
+    provenance: quote === null ? 'inferred' : 'explicit', effect_amount: null, effect_per_source_change: null, effect_provenance: null,
+    definitional: null, basis: null, source_quote: quote });
+  const statement = (quote: string, kind: string, label: string, field: string, form: string, extra: Rec = {}): Rec => ({ quote,
+    subject: { kind, label, to_label: null, factor_label: null }, field, form, value: null, low: null, high: null, unit: null,
+    qualifier: null, conditions: null, speaker: 'user', ...extra });
+  const dilemmaDraft = (kind: 'event_by_date' | null): Rec => ({
+    goal: { kind, deliverable: kind === null ? null : 'exhibition opening', metric: OPENING, operator: '>=', target_stated: false, value: null,
+      unit: '', horizon_months: null, provenance: 'inferred', frame: 'level', baseline_known: false, baseline_value: null,
+      baseline_provenance: 'inferred', scope: null, quantity_frame: 'level', basis: null, source_quote: S[0] },
+    constraints: [],
+    options: [
+      { label: 'Postpone the opening', provenance: 'explicit', changes: ['Opening timing'], interventions: [], added_capacity: null, is_status_quo: null },
+      { label: 'Open with the main gallery closed', provenance: 'explicit', changes: [], interventions: [], added_capacity: null, is_status_quo: true },
+    ],
+    factors: [
+      { label: 'Climate control failure', role: 'observable', baseline_known: false, baseline_value: null, unit: null, provenance: 'inferred', plausible_max: null },
+      { label: 'Repair duration', role: 'external', baseline_known: false, baseline_value: null, unit: 'weeks', provenance: 'inferred', plausible_max: null },
+      { label: 'School booking notice', role: 'external', baseline_known: true, baseline_value: 2, unit: 'weeks', provenance: 'explicit', plausible_max: null },
+      { label: 'Opening timing', role: 'controllable', baseline_known: false, baseline_value: null, unit: null, provenance: 'inferred', plausible_max: null },
+      { label: 'Repair window before opening', role: 'external', baseline_known: false, baseline_value: null, unit: 'weeks', provenance: 'inferred', plausible_max: null },
+    ],
+    risks: ['Lost school bookings', 'Visitor complaints', 'Refund requests'].map((label) => ({ label, provenance: 'explicit', unit: null, plausible_max: null, already_true_evidence: null }))
+      .concat([{ label: 'Repair-status disagreement', provenance: 'inferred', unit: null, plausible_max: null, already_true_evidence: null }]),
+    outcomes: [],
+    links: [link('Opening timing', 'Repair window before opening', 'positive'), link('Repair window before opening', 'Climate control failure', 'negative'),
+      link('Opening timing', 'Lost school bookings', 'positive', S[3]!), link('Climate control failure', 'Visitor complaints', 'positive', S[3]!),
+      link('Visitor complaints', 'Refund requests', 'positive', S[3]!)],
+    identities: [], unknowns: ['What date does the spring half-term start?'], decision_question: S[4], unknown_concerns: [],
+    statements: [statement(S[0]!, 'goal', OPENING, 'measure', 'describes'),
+      statement(S[1]!, 'factor', 'Repair duration', 'level', 'lower_bound', { value: 4, unit: 'weeks', qualifier: 'at least', speaker: 'other' }),
+      statement(S[2]!, 'factor', 'School booking notice', 'level', 'point', { value: 2, unit: 'weeks' })],
+  });
+
+  it('PRECONDITION: the brief states figures and no aim, and the dated event is not one it attests', async () => {
+    const { unattestedEventGoal } = await import('../../goal-target/event-by-date-model.js');
+    expect(unattestedEventGoal(dilemmaDraft('event_by_date') as never, DILEMMA, false)).toMatchObject({ event: OPENING });
+    expect(DILEMMA).toMatch(/\d/);
+  });
+
+  it('⭐ RED on cae490f4 (refused twice, nothing shown) → GREEN: saved with the aim open and Olumi\'s, both stated options, every risk, the event never the goal', async () => {
+    const { graph, result, calls } = await construct([JSON.stringify(dilemmaDraft('event_by_date')), JSON.stringify(dilemmaDraft(null))], DILEMMA);
+    expect(calls, 'draft + goal retry, no third call').toBe(2);
+    expect(result, JSON.stringify(result).slice(0, 600)).toMatchObject({ ok: true, mutated: true, open_aim: true });
+    expect((graph!.nodes as Rec[]).filter((n) => n.kind === 'goal')).toEqual([expect.objectContaining({ label: OPEN_AIM_GOAL_LABEL, provenance: 'ai_inferred' })]);
+    expect('goal_threshold_raw' in goalOf(graph!), 'no figure is invented for the open aim').toBe(false);
+    expect(labels(graph!, 'goal').concat(labels(graph!, 'option'))).not.toContain(OPENING);
+    expect((graph!.nodes as Rec[]).filter((n) => n.kind === 'option').map((n) => [n.label, n.provenance]).sort())
+      .toEqual([['Open with the main gallery closed', 'from_brief'], ['Postpone the opening', 'from_brief']]);
+    expect(labels(graph!, 'risk')).toHaveLength(4);
   }, 60_000);
 });
 
