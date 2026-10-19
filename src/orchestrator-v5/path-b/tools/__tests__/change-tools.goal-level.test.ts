@@ -102,8 +102,13 @@ describe('the goal’s current level: the existing goal-level door, ONE registra
     const applied = await applyChange(d, ctxSaying(SAID), { proposal_id: id });
     const receiptTurn = registrationTurnId(SCN, authorisationTurnId(`${id}#goal_current_level`));
     expect(applied, JSON.stringify(applied)).toMatchObject({ status: 'ok', mutated: true, data: { saved: true, receipt: { source_turn_id: receiptTurn },
-      written: [{ op: 'set_goal_current_level', goal_id: 'orders', figure: 110, unit: 'orders a week', not_kept: [{ what: 'words', declared: 'about 110 a week' }] }] } });
+      faithful: true, written: [{ op: 'set_goal_current_level', goal_id: 'orders', figure: 110, unit: 'orders a week', claim: { said_by: 'user' }, not_kept: [] }] } });
     expect(registered, 'ONE registration').toHaveLength(1);
+    // PL 22:18: the person's exact words, "about" included, are kept as THEIR claim on the goal, in that ONE registration.
+    const claims = ((goal().user_statements ?? []) as Rec[]).flatMap((r) => r.statements as Rec[]);
+    expect(claims).toContainEqual(expect.objectContaining({ said_by: 'user', quote: 'about 110 a week', source: SAID, form: 'point', low: 110, high: 110,
+      unit: 'orders a week', stance: 'stated_current' }));
+    expect(((registered[0]!.graph as Rec).nodes as Rec[]).find((n) => n.id === 'orders')!.user_statements, 'in the same registration').toEqual(goal().user_statements);
     expect((goal().observed_state as Rec).raw_value).toBe(110);
     expect(provenanceOf({ value: goal().observed_state }).origin).toBe('human');
     // Exactly once: the same press again reads its own receipt and writes nothing.

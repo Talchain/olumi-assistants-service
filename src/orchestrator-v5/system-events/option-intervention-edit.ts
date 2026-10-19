@@ -1615,25 +1615,6 @@ export async function prepareOptionInterventionBatchExecution(
       plan = { ...plan, graph, operations, analysisGraphHash, handlerFacts: [...valueFacts, fact] as unknown[] };
     }
   }
-  // ⭐ GAP 1: each person's figure claim, by the ONE claim-record writer, beside the figure on the SAME candidate. The card's node
-  // is checked against the persisted base; the record is then written on this postimage (the figures' own node bytes moved).
-  let claimsWritten = false;
-  for (const r of claims) {
-    const nodeIn = (g: unknown): unknown => (isEditableGraph(g) ? g.nodes.find(n => n.id === r.node_id) : undefined);
-    if (!isDeepStrictEqual(nodeIn(before), r.expected_node)) return { kind: 'refused', reason: 'claim_node_changed' };
-    const base = plan.graph;
-    const onBase: ApprovedStatementRecord = { ...r, expected_node: structuredClone(nodeIn(base)) as ApprovedStatementRecord['expected_node'] };
-    const written = applyStatementRecordEdit(base, onBase);
-    if (written.kind === 'refused') return { kind: 'refused', reason: `claim_${written.reason}` };
-    if (written.kind === 'unchanged') continue;
-    const graph = projectGraphForPersistence(written.mutatedGraph);
-    if (!isEditableGraph(graph) || !statementRecordPostimageIsScoped(base, graph, onBase)) return { kind: 'refused', reason: 'claim_scope_mismatch' };
-    const hash = computeAnalysisAffectingGraphHash(graph);
-    if (!hash) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
-    plan = { ...plan, graph, analysisGraphHash: hash, handlerFacts: [...plan.handlerFacts, ...written.handlerFacts] };
-    valueConfirmations = [...valueConfirmations, written.confirmation];
-    claimsWritten = true;
-  }
   // ⭐ GAP 2 (DL ruling B): the compound's renames and removals, by the structural writers, IN MEMORY on the SAME candidate,
   // each on the postimage of everything before it. Any member refused refuses the whole change; nothing is written.
   for (const member of structural) {
@@ -1661,7 +1642,8 @@ export async function prepareOptionInterventionBatchExecution(
       handlerFacts: [...plan.handlerFacts, ...written.handlerFacts] };
     valueConfirmations = [...valueConfirmations, written.response.assistant_text];
   }
-  if (candidate.kind === 'unchanged' && !valuesChanged && !gapsChanged && structural.length === 0 && adds.length === 0 && !claimsWritten) return candidate;
+  const nothingElse = candidate.kind === 'unchanged' && !valuesChanged && !gapsChanged && structural.length === 0 && adds.length === 0;
+  if (nothingElse && claims.length === 0) return candidate;
   if (expectedLinks !== undefined) {
     const adding = plan.operations.filter(o => o.op === 'add_edge').map(o => o.path).sort();
     if (!isDeepStrictEqual(adding, [...new Set(expectedLinks)].sort())) return { kind: 'refused', reason: 'links_mismatch' };
@@ -1685,6 +1667,28 @@ export async function prepareOptionInterventionBatchExecution(
     if (!isEditableGraph(graph) || !hash) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
     plan = { ...plan, graph, operations: [...plan.operations, ...operations.data], analysisGraphHash: hash, handlerFacts: [...plan.handlerFacts, done.fact] };
   }
+  // ⭐ GAP 1: each person's figure claim, by the ONE claim-record writer, beside the figure on the SAME candidate (last, so a factor
+  // this commit adds holds its person's claim too). The card's node is checked against the persisted base (a new factor: absent
+  // from it); the record is then written on this postimage.
+  let claimsWritten = false;
+  for (const r of claims) {
+    const nodeIn = (g: unknown): unknown => (isEditableGraph(g) ? g.nodes.find(n => n.id === r.node_id) : undefined);
+    const added = adds.some(a => a.id === r.node_id);
+    if (added ? nodeIn(before) !== undefined : !isDeepStrictEqual(nodeIn(before), r.expected_node)) return { kind: 'refused', reason: 'claim_node_changed' };
+    const base = plan.graph;
+    const onBase: ApprovedStatementRecord = { ...r, expected_node: structuredClone(nodeIn(base)) as ApprovedStatementRecord['expected_node'] };
+    const written = applyStatementRecordEdit(base, onBase);
+    if (written.kind === 'refused') return { kind: 'refused', reason: `claim_${written.reason}` };
+    if (written.kind === 'unchanged') continue;
+    const graph = projectGraphForPersistence(written.mutatedGraph);
+    if (!isEditableGraph(graph) || !statementRecordPostimageIsScoped(base, graph, onBase)) return { kind: 'refused', reason: 'claim_scope_mismatch' };
+    const hash = computeAnalysisAffectingGraphHash(graph);
+    if (!hash) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    plan = { ...plan, graph, analysisGraphHash: hash, handlerFacts: [...plan.handlerFacts, ...written.handlerFacts] };
+    valueConfirmations = [...valueConfirmations, written.confirmation];
+    claimsWritten = true;
+  }
+  if (nothingElse && !claimsWritten) return candidate;
   return { kind: 'candidate', ...plan, targets, optionGaps, values, frames, valueConfirmations, linksResized,
     reencodedSiblings: siblingBase.reencoded, gapsChanged, horizonBasisWrite, teamTime, goalHorizon };
 }

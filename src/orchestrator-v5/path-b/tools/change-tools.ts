@@ -60,7 +60,7 @@ import { approvedGraphHeld } from '../../agent-lane/runtime/draft-replacement.js
 import { claimRecordFor, userStatementRecord, withClaimsKept } from '../../statement-door/statements.js';
 import { subjectKey, type DoorSubject } from '../../statement-door/subject.js';
 import { saidByOf, userStatementOf, type UserStatement } from '../../agent-lane/user-statements.js';
-import type { ApprovedStatementRecord } from '../../goal-target/cohort-forecast-write.js';
+import { applyStatementRecordEdit, type ApprovedStatementRecord } from '../../goal-target/cohort-forecast-write.js';
 import { isDeepStrictEqual } from 'node:util';
 import { isSavedRead, readSaved, type SavedRead } from './context-tool.js';
 import { targetCandidate, targetReadback, type TargetDeclaration } from './goal-target.js';
@@ -217,9 +217,9 @@ const operationOf = (o: FigureOp, ctx: TypedWords, recordedAt: string): Proposal
  * stored declaration alone: who said it (the user; a party by the name they gave, relayed by the user; else unresolved), their
  * words and the line they are in, the figure and unit, and its stance. Olumi's own figure is no one's claim: none.
  */
-function claimOf(o: Op): { readonly subject: DoorSubject; readonly statement: UserStatement } | null {
+function claimOf(o: Op, kind: 'factor' | 'goal' = 'factor'): { readonly subject: DoorSubject; readonly statement: UserStatement } | null {
   if (o.source.origin === 'olumi' || o.source.quote === null) return null;
-  const subject: DoorSubject = { kind: 'factor', id: o.factor_id, field: 'level', ...(o.option_id === undefined ? {} : { option_id: o.option_id }) };
+  const subject: DoorSubject = { kind, id: o.factor_id, field: 'level', ...(o.option_id === undefined ? {} : { option_id: o.option_id }) };
   const party = o.source.origin === 'third_party' ? o.source.named_source?.trim() || undefined : undefined;
   const statement = userStatementOf({ said_by: o.source.origin === 'user' ? 'user' : party !== undefined ? 'party' : 'unknown',
     ...(party !== undefined ? { party, relayed_by: 'user' } : {}), quote: o.source.quote, source: o.said_in ?? o.source.quote,
@@ -239,14 +239,17 @@ function claimHeld(graph: Rec, claim: NonNullable<ReturnType<typeof claimOf>>): 
     return isDeepStrictEqual(rest, claim.statement);
   });
 }
-/** The door's claims member: each person's figure claim, written beside the figure in the same commit (other sources kept). */
-function claimsFor(graph: Rec, ops: readonly Op[]): ApprovedStatementRecord[] {
+/**
+ * The door's claims member: each person's figure claim, written beside the figure in the same commit (other sources kept). A
+ * factor this commit `adds` has no node yet: the door checks it is absent from the base and writes the claim on the new node.
+ */
+function claimsFor(graph: Rec, ops: readonly Op[], adds: ReadonlySet<string> = new Set(), kind: 'factor' | 'goal' = 'factor'): ApprovedStatementRecord[] {
   return ops.flatMap((o) => {
-    const claim = claimOf(o);
+    const claim = claimOf(o, kind);
     const node = nodesOf(graph).find((n) => n.id === o.factor_id);
-    if (claim === null || node === undefined || attested(graph, claim.subject)) return [];
+    if (claim === null || (node === undefined) !== adds.has(o.factor_id) || attested(graph, claim.subject)) return [];
     const record = withClaimsKept(graph, claim.subject, userStatementRecord(claim.subject, [claim.statement], o.recorded_at ?? new Date().toISOString()));
-    return [{ node_id: o.factor_id, expected_node: structuredClone(node), user_statement: { subject: claim.subject, record } }];
+    return [{ node_id: o.factor_id, expected_node: node === undefined ? {} : structuredClone(node), user_statement: { subject: claim.subject, record } }];
   });
 }
 /** What a held claim keeps of what the figure's carrier cannot: the words and the stance; the speaker and name when resolved. */
@@ -411,23 +414,37 @@ async function proposeGoalLevel(deps: Pick<ChangeDeps, 'dispatch' | 'proposals'>
   }
   // The same base as every core proposer and the card machinery (#3472, K7/K9): the graph hash, plus the model's full identity.
   const p = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: read.graphHash,
-    base_model_identity: read.identity, operations: prepared.operations, provenance: { authored_by: 'user_stated', basis: o.source.quote },
+    base_model_identity: read.identity, provenance: { authored_by: 'user_stated', basis: o.source.quote },
+    // The person's declaration rides on the door's operation (hashed into the id): their claim is written in the same save.
+    operations: prepared.operations.map((op) => ({ ...op, value: { ...(isRec(op.value) ? op.value : {}), declared: operationOf({ op: 'set_factor_value',
+      factor_id: o.goal_id, value: o.value, unit: o.unit, stance: o.stance, source: o.source }, ctx, new Date().toISOString()).value } })),
     validation: prepared.validation, public_label: prepared.public_label });
   deps.proposals.put(p);
   return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: read.graphHash });
 }
 
-/** The goal's level as the model now holds it: the approved figure, unit and source on the goal; the user's words are not kept. */
+/** The person's declared figure stored on a goal-level proposal (its claim's only source); `null` on a proposal without one. */
+function goalDeclaredOf(p: StructuredProposal): Op | null {
+  const op = p.operations[0];
+  const d = StoredFigure.safeParse(isRec(op?.value) ? op.value.declared : undefined);
+  return op === undefined || !d.success ? null : { kind: 'value', factor_id: op.path, ...d.data };
+}
+
+/** The goal's level as the model now holds it: the approved figure, unit and source on the goal, and the person's claim beside it. */
 function goalLevelRead(read: SavedRead, p: StructuredProposal): { holds: boolean; faithful: boolean; written: Rec[] } {
   const op = p.operations[0]!;
   const want = isRec(op.value) && isRec(op.value.goal_current_level) ? op.value.goal_current_level : {};
   const os = nodesOf(read.graph).find((n) => n.id === op.path)?.observed_state;
   const held = isRec(os) ? os : undefined;
+  const declared = goalDeclaredOf(p);
+  const claim = declared === null ? null : claimOf(declared, 'goal');
+  const kept = claim !== null && claimHeld(read.graph, claim);
   const holds = held !== undefined && close(held.raw_value, Number(want.raw_value)) && held.source === want.source
-    && (want.unit === undefined || held.unit === want.unit);
-  return { holds, faithful: false, written: [{ op: 'set_goal_current_level', goal_id: op.path, figure: held?.raw_value ?? null, unit: held?.unit ?? null,
+    && (want.unit === undefined || held.unit === want.unit) && (claim === null || kept);
+  const notKept: NotKept[] = kept ? [] : [{ what: 'words', declared: String(p.provenance.basis) }];
+  return { holds, faithful: notKept.length === 0, written: [{ op: 'set_goal_current_level', goal_id: op.path, figure: held?.raw_value ?? null, unit: held?.unit ?? null,
     declared: { origin: 'user', quote: p.provenance.basis, stance: 'stated_current' }, stored_as: provenanceOf({ value: held }),
-    not_kept: [{ what: 'words', declared: p.provenance.basis }] }] };
+    ...(kept ? { claim: { said_by: saidByOf(claim!.statement) } } : {}), not_kept: notKept }] };
 }
 
 /** The goal's level: the goal-level door's own writer (ONE registration, its operation id), then PATH-B's receipt and readback. */
@@ -438,7 +455,13 @@ function goalLevelApplier(deps: ChangeDeps, ctx: ChangeCtx, p: StructuredProposa
     receiptTurn,
     readNow,
     commit: async (before) => {
-      const approved = goalLevelReadOf(before);
+      // The person's claim, by the ONE claim-record writer, on the read the door's writer registers: the level and the claim
+      // land in its ONE registration (CAS on this read's hashes).
+      const declared = goalDeclaredOf(p);
+      const record = declared === null ? undefined : claimsFor(before.graph, [declared], new Set(), 'goal')[0];
+      const written = record === undefined ? undefined : applyStatementRecordEdit(before.graph, record);
+      if (written?.kind === 'refused') return refused(codeOf(`claim_${written.reason}`));
+      const approved = goalLevelReadOf(written?.kind === 'mutated' ? { ...before, graph: written.mutatedGraph } : before);
       if (approved === null) return unavailable('read_malformed');
       // ONE applied-state authority (#3467 R1): the writer marks its own private copy; the shared store is marked applied only
       // below, with THIS registration's own receipt. A save with none stays unknown, never "already saved" on a retry.
@@ -624,7 +647,9 @@ function membersOf(operations: readonly ProposalOperation[]): CompoundStructural
 }
 
 /** This path's change: figures, Olumi's link bands, renames and removals, as stored on its ONE proposal. */
-type Compound = { readonly figures: Op[]; readonly links: StoredLink[]; readonly structural: CompoundStructuralMember[]; readonly adds: CompoundAddFactor[] };
+type Compound = { readonly figures: Op[]; readonly links: StoredLink[]; readonly structural: CompoundStructuralMember[]; readonly adds: CompoundAddFactor[];
+  /** Each new factor's figure as declared (stored beside its add): its person's claim is written and read back like a figure's. */
+  readonly addFigures: Op[] };
 function compoundOf(p: StructuredProposal): Compound | null {
   const of = (ops: readonly string[]) => p.operations.filter((o) => ops.includes(o.op));
   const figureOps = of(['set_factor_value', 'set_option_intervention']);
@@ -636,12 +661,13 @@ function compoundOf(p: StructuredProposal): Compound | null {
   const links = linkOps.length === 0 ? [] : linksOf(linkOps);
   const structural = membersOf(structuralOps);
   const adds = addsOf(addOps);
-  return figures === null || links === null || structural === null || adds === null ? null : { figures, links, structural, adds };
+  const addFigures = declaredOf(addOps.flatMap((o) => (isRec(o.value) && o.value.declared !== undefined ? [{ op: 'set_factor_value', path: o.path, value: o.value.declared }] : [])));
+  return figures === null || links === null || structural === null || adds === null || addFigures === null ? null : { figures, links, structural, adds, addFigures };
 }
 
 /** The whole change as read back: every figure, link, rename and removal holding as approved. */
 function compoundRead(read: SavedRead, c: Compound): { holds: boolean; faithful: boolean; written: Rec[] } {
-  const parts = [readbackOf(read, c.figures), linksRead(read, c.links), structuralRead(read, c.structural), addsRead(read, c.adds)];
+  const parts = [readbackOf(read, c.figures), linksRead(read, c.links), structuralRead(read, c.structural), addsRead(read, c.adds, c.addFigures)];
   return { holds: parts.every((x) => x.holds), faithful: parts.every((x) => x.faithful), written: parts.flatMap((x) => x.written) };
 }
 
@@ -700,19 +726,24 @@ function addsOf(operations: readonly ProposalOperation[]): CompoundAddFactor[] |
 }
 
 /** Each new factor as the model now holds it: by its id, with its name, its ONE link and its figure; the person's words are not kept on it. */
-function addsRead(read: SavedRead, adds: readonly CompoundAddFactor[]): { holds: boolean; faithful: boolean; written: Rec[] } {
+function addsRead(read: SavedRead, adds: readonly CompoundAddFactor[], figures: readonly Op[] = []): { holds: boolean; faithful: boolean; written: Rec[] } {
   const nodes = nodesOf(read.graph);
   const edges = Array.isArray(read.graph.edges) ? read.graph.edges.filter(isRec) : [];
   const figureOf = (os: unknown): unknown => (isRec(os) ? (typeof os.raw_value === 'number' ? os.raw_value : os.value) : undefined);
   const written = adds.map((a) => {
     const node = nodes.find((n) => n.id === a.id);
     const figure = figureOf(node?.observed_state);
+    // The person's figure is approved WITH their claim (GAP 1): required, and it keeps their words.
+    const declared = figures.find((f) => f.factor_id === a.id);
+    const claim = declared === undefined ? null : claimOf(declared);
+    const held = claim !== null && claimHeld(read.graph, claim);
     const holds = node !== undefined && node.kind === 'factor' && node.label === a.label && close(figure, Number(figureOf(a.observed_state)))
-      && edges.some((e) => e.from === a.id && e.to === a.link.to_id);
-    const notKept: NotKept[] = a.quote === undefined ? [] : [{ what: 'words', declared: a.quote }];
+      && edges.some((e) => e.from === a.id && e.to === a.link.to_id) && (claim === null || held);
+    const notKept: NotKept[] = (a.quote === undefined ? [] : [{ what: 'words' as const, declared: a.quote }]).filter((k) => !held || !keptByClaim(claim!.statement)(k));
     return { holds, notKept, row: { op: 'add_to_model', id: a.id, label: node?.label ?? null, acts_on: a.link.to_id, figure: figure ?? null,
       unit: isRec(node?.observed_state) && typeof node.observed_state.unit === 'string' ? node.observed_state.unit : null,
-      stored_as: node === undefined ? null : provenanceOf({ value: node.observed_state }), not_kept: notKept } };
+      stored_as: node === undefined ? null : provenanceOf({ value: node.observed_state }),
+      ...(held ? { claim: { said_by: saidByOf(claim!.statement) } } : {}), not_kept: notKept } };
   });
   return { holds: written.every((w) => w.holds), faithful: written.every((w) => w.notKept.length === 0), written: written.map((w) => w.row) };
 }
@@ -774,7 +805,9 @@ async function proposeCompound(deps: Pick<ChangeDeps, 'dispatch' | 'proposals' |
       ...added.map((a) => ({ from: a.id, to: a.link.to_id }))] };
   if (compoundMembersConflict(written, members)) return refused('compound_members_conflict');
   const p = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: read.graphHash, base_model_identity: read.identity,
-    operations: [...figureOps, ...linkOps, ...prepared, ...added.map((a): ProposalOperation => ({ op: 'add_node', path: a.id, value: a }))],
+    operations: [...figureOps, ...linkOps, ...prepared, ...added.map((a, i): ProposalOperation => ({ op: 'add_node', path: a.id,
+      value: { ...a, declared: operationOf({ op: 'set_factor_value', factor_id: a.id, value: adds[i]!.value, unit: adds[i]!.unit, stance: adds[i]!.stance,
+        source: adds[i]!.source }, ctx, recordedAt).value } }))],
     provenance: { authored_by: 'model_proposed', basis: args.basis },
     validation: { admitted: true, loss_count: 0, refusals: [] },
     public_label: cards.length === 1 ? cards[0]! : `Save these changes together:\n${cards.join('\n')}` });
@@ -862,7 +895,7 @@ function doorApplier(deps: ChangeDeps, ctx: ChangeCtx, p: StructuredProposal, c:
     commit: async (before) => {
       const plan = planOf(ctx.scenario_id, p.proposal_id, c.figures, before.graph);
       if ('refusal' in plan) return stopped(plan, c.figures);
-      const claims = claimsFor(before.graph, c.figures);
+      const claims = claimsFor(before.graph, [...c.figures, ...c.addFigures], new Set(c.adds.map((a) => a.id)));
       const input: CommitOptionLevelsInput = { scenario_id: ctx.scenario_id, base_graph_hash: before.graphHash, turn_id: turnId,
         links: plan.links, levels: plan.levels, ...(plan.values!.length > 0 ? { values: plan.values } : {}), ...(plan.frames!.length > 0 ? { frames: plan.frames } : {}),
         ...(c.links.length > 0 ? { link_strengths: linkStrengthsIn(c.links) } : {}),

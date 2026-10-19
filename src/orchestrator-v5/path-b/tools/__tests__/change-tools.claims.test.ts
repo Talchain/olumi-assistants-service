@@ -108,11 +108,11 @@ beforeEach(() => {
   dispatch.mockClear();
 });
 const door = () => vi.fn((input: Parameters<typeof commitOptionLevelsInProcess>[0]) => commitOptionLevelsInProcess(input, 'req-c5'));
-async function saved(ops: readonly unknown[]): Promise<Rec> {
+async function saved(ops: readonly unknown[], c: typeof ctx = ctx): Promise<Rec> {
   const proposals = new ProposalStore();
-  const p = await proposeChange({ dispatch, proposals }, ctx, { public_label: 'Record it', basis: 'From what the user said.', ops } as never);
+  const p = await proposeChange({ dispatch, proposals }, c, { public_label: 'Record it', basis: 'From what the user said.', ops } as never);
   expect(p.status, JSON.stringify(p)).toBe('ok');
-  const out = await applyChange({ dispatch, proposals, commitOptionLevels: door() }, ctx, { proposal_id: String((p as { data: Rec }).data.proposal_id) });
+  const out = await applyChange({ dispatch, proposals, commitOptionLevels: door() }, c, { proposal_id: String((p as { data: Rec }).data.proposal_id) });
   expect(out, JSON.stringify(out)).toMatchObject({ status: 'ok', mutated: true, data: { saved: true } });
   expect(rows.size, 'ONE commit holds the figure and the claim').toBe(1);
   return (out as { data: Rec }).data;
@@ -153,6 +153,27 @@ describe('GAP 1: a person\u2019s figure is kept as THEIR claim, in the same comm
   it('an unnamed party: their words are kept, but WHO is not known: said as unresolved, and that it was a third party is named as not kept', async () => {
     const data = await saved([fig({ op: 'set_factor_value', factor_id: 'visits', value: 55, unit: 'visits', stance: 'estimate' }, 'third_party', 'visits are 55')]);
     expect(data).toMatchObject({ faithful: false, written: [{ claim: { said_by: 'unknown' }, not_kept: [{ what: 'speaker', declared: 'third_party' }] }] });
+  });
+
+  const ADDING = 'We also run 4 weekend volunteers who keep the queue down.';
+  const adding = { ...ctx, user_turn_text: ADDING, verified_user_messages: [ADDING] };
+  const volunteers = (origin: string, quote: string | null, stance: string) => ({ op: 'add_to_model', kind: 'factor', label: 'Weekend volunteers',
+    acts_on: 'queue', direction: 'negative', value: 4, unit: 'people', stance, source: { origin, quote, named_source: null } });
+  const added = (data: Rec): Rec => (data.written as Rec[]).find((w) => w.op === 'add_to_model')!;
+
+  it('RED: a factor the user ADDS with their figure: their claim on the new factor, in the SAME commit, read back cold; their words kept', async () => {
+    const data = await saved([volunteers('user', 'We also run 4 weekend volunteers', 'stated_current')], adding);
+    expect(data, JSON.stringify(data)).toMatchObject({ faithful: true });
+    expect(added(data)).toMatchObject({ figure: 4, claim: { said_by: 'user' }, not_kept: [] });
+    expect(await coldClaims(String(added(data).id))).toContainEqual(expect.objectContaining({ said_by: 'user', quote: 'We also run 4 weekend volunteers',
+      form: 'point', low: 4, high: 4, unit: 'people', stance: 'stated_current' }));
+    expect(claimsOn(String(added(data).id))).toContainEqual(expect.objectContaining({ said_by: 'user', source: ADDING }));
+  });
+
+  it('a factor Olumi adds with its own estimate: no one\u2019s claim on it', async () => {
+    const data = await saved([volunteers('olumi', null, 'estimate')], adding);
+    expect(added(data)).not.toHaveProperty('claim');
+    expect(nodeOf(String(added(data).id)).user_statements ?? []).toEqual([]);
   });
 
   it('Olumi\u2019s own figure is no one\u2019s claim: nothing is added to the record', async () => {
