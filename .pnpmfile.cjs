@@ -15,6 +15,13 @@ function readPackage(pkg) {
   // The SDK's MCP client is OPTIONAL and unused here (no MCP server is connected); leaving it out keeps its whole subtree,
   // released days ago, out of this service.
   if (pkg.name === '@openai/agents-core' && pkg.optionalDependencies) delete pkg.optionalDependencies['@modelcontextprotocol/client'];
+  // The SDK's client (openai v7, also imported directly as `openai-v7` for its fetch hook) takes zod only as an OPTIONAL
+  // peer for helpers this service does not use. Dropping it keeps ONE openai v7 instance, so the client the service builds
+  // is the very type the SDK's Responses model accepts.
+  if (pkg.name === 'openai' && /^7\./.test(pkg.version) && pkg.peerDependencies && pkg.peerDependencies.zod !== undefined) {
+    delete pkg.peerDependencies.zod;
+    if (pkg.peerDependenciesMeta) delete pkg.peerDependenciesMeta.zod;
+  }
   return pkg;
 }
 

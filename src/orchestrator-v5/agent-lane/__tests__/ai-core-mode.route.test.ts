@@ -84,12 +84,12 @@ describe('PATH-B core: the AI\'s own words are the reply; protocol, cards, resul
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
       // The core lane's one OpenAI Conversation per scenario (`core/sdk-turn.ts`).
-      if (String(url).endsWith('/v1/conversations')) return new Response(JSON.stringify({ id: 'conv_route', object: 'conversation' }), { status: 200 });
+      if (String(url).endsWith('/v1/conversations')) return new Response(JSON.stringify({ id: 'conv_route', object: 'conversation' }), { status: 200, headers: { 'content-type': 'application/json' } });
       const runCall = runPressToolResponse(JSON.parse(String(init?.body ?? '{}')));
       if (runCall) return runCall;
       sent.push(typeof init?.body === 'string' ? init.body : '');
       const output = outputs.shift() ?? [{ type: 'message', content: [{ type: 'output_text', text: AI_WORDS }] }];
-      return new Response(JSON.stringify(responsesBody(output)), { status: 200 });
+      return new Response(JSON.stringify(responsesBody(output)), { status: 200, headers: { 'content-type': 'application/json' } });
     }));
     vi.resetModules();
     process.env.AGENT_LANE_ENABLED = 'true';
