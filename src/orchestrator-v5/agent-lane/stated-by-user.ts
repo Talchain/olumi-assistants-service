@@ -32,7 +32,7 @@
  */
 import { requestWasTyped } from '../../cee/provenance/provenance-of.js';
 import { launchWindowOf } from '../goal-target/goal-target-basis.js';
-import { findStatedAmounts, findStatedRanges, readCurrencyUnitWithQualifiers, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
+import { findStatedAmounts, findStatedRanges, readCurrencyUnitWithQualifiers, sharesOneMagnitude, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
 import { findLinkEffectAmounts, hasLinkEffectRange, linkEffectSourceLevels } from './link-effect-figures.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
 import { CARDINAL_AMOUNT_SOURCE, CARDINAL_FRACTION_CONTINUATION, CARDINAL_HUNDRED_WORD, CARDINAL_SCALE_MULTIPLIERS, parseCardinalAmount } from '../../utils/cardinal-words.js';
@@ -64,7 +64,7 @@ export function hasApproximateFigureQualifier(before: string, after: string): bo
  */
 export type WrittenAmount = StatedAmount | ReturnType<typeof countsInWords>[number];
 export function amountsWrittenIn(text: string | null | undefined): readonly WrittenAmount[] {
-  return [...findStatedAmounts(text), ...(typeof text === 'string' ? countsInWords(text) : [])];
+  return typeof text !== 'string' ? findStatedAmounts(text) : withClosingScale(text, [...findStatedAmounts(text), ...countsInWords(text)]);
 }
 
 /**
@@ -883,6 +883,51 @@ export function countsInWords(text: string): { kind: 'words'; magnitude: number;
     const v = parseCardinalAmount(m[0]);
     return v === null || m.index === undefined ? [] : [{ kind: 'words' as const, magnitude: v, index: m.index, matchedText: m[0] }];
   });
+}
+
+/**
+ * ⭐ A RANGE'S CLOSING SCALE BELONGS TO BOTH ENDS, IN WORDS AS IN DIGITS (DL-3 on C5's finding, 19 Oct: a range in words closed by a
+ * scale word read its low end as a bare count, a figure the user never wrote). Two amounts joined as one range or as alternatives
+ * (`sharesOneMagnitude`, the digit reader's own joiner; a range in digits alone already shares its magnitude there): a low end with
+ * no scale of its own reads at the scale its high end closes with (`closingScale`), when both are counts; where the high end closes
+ * with no ONE scale, or is another kind of amount (money), the bare low end is refused, never credited. A low end with its own scale
+ * keeps it, and a high end closing with no scale word changes nothing.
+ */
+function withClosingScale(text: string, amounts: readonly WrittenAmount[]): readonly WrittenAmount[] {
+  const order = [...amounts].sort((x, y) => x.index - y.index);
+  const read = new Map<WrittenAmount, WrittenAmount | null>();
+  order.forEach((low, i) => {
+    const high = order[i + 1];
+    if (high === undefined || (low.kind !== 'words' && high.kind !== 'words') || ownScale(low) !== 1) return;
+    if (!sharesOneMagnitude(text, low, high)) return;
+    const scale = closingScale(high);
+    if (scale === 1) return;
+    const counts = (a: WrittenAmount): boolean => a.kind === 'words' || a.kind === 'plain';
+    read.set(low, scale !== null && counts(low) && counts(high) ? { ...low, magnitude: low.magnitude * scale } : null);
+  });
+  return amounts.flatMap((a) => { const r = read.get(a); return r === undefined ? [a] : r === null ? [] : [r]; });
+}
+/** A scale word's own multiplier (THE ONE SCALE VOCABULARY), or undefined for any other word. */
+const scaleWordMultiplier = (w: string): number | undefined => (w === CARDINAL_HUNDRED_WORD ? 100 : CARDINAL_SCALE_MULTIPLIERS[w]);
+/** The scale an amount carries itself: its magnitude over its digits, or the scale words in its words (1 with none). */
+function ownScale(a: WrittenAmount): number {
+  if (a.kind !== 'words') return writtenWithALetter(a) ? a.magnitude / Number(a.matchedText.replace(/[^0-9.]/g, '')) : 1;
+  return a.matchedText.toLowerCase().split(/[\s-]+/).reduce((p, w) => p * (scaleWordMultiplier(w) ?? 1), 1);
+}
+/**
+ * The ONE scale an amount closes with, for a low end to share: in digits its magnitude letter or word; in words the scale words it
+ * ends with, after a plain cardinal lead. 1 when it closes with none, or its lead is no plain cardinal (an article's "a" is one
+ * thing, never a shared count); null when its lead has a scale word of its own (no ONE scale to share).
+ */
+function closingScale(a: WrittenAmount): number | null {
+  if (a.kind !== 'words') return ownScale(a);
+  const words = a.matchedText.toLowerCase().split(/[\s-]+/).filter((w) => w !== '');
+  let lead = words.length;
+  while (lead > 0 && scaleWordMultiplier(words[lead - 1]!) !== undefined) lead -= 1;
+  if (lead === words.length) return 1;
+  if (words.slice(0, lead).some((w) => scaleWordMultiplier(w) !== undefined)) return null;
+  if (parseCardinalAmount(words.slice(0, lead).join(' ')) === null) return 1;
+  return words.slice(lead).reduce((p, w) => p * scaleWordMultiplier(w)!, 1);
 }
 
 /**
