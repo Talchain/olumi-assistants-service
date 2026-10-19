@@ -207,8 +207,9 @@ export function inAnotherSpeakersWords(text: string, a: WrittenAmount, names: re
  */
 export function figureOnlyInQuotation(value: number, unit: unknown, userText: string | null | undefined): string | null {
   if (typeof value !== 'number' || !Number.isFinite(value) || typeof userText !== 'string') return null;
-  const at = amountsWrittenIn(userText).filter((a) => amountIs(a, value, unit, unitPhraseFamily(unit), userText));
-  return at.length > 0 && at.every((a) => inAnotherSpeakersWords(userText, a)) ? quoteOfFigure(value, unit, userText) : null;
+  // The same eligibility as the one check (a joined expression or an incomplete span is no figure to ask about), less the speaker rule.
+  const at = amountsWrittenIn(userText).filter((a) => amountIs(a, value, unit, unitPhraseFamily(unit), userText) && amountComplete(a, unit, userText));
+  return at.length > 0 && at.every((a) => inAnotherSpeakersWords(userText, a)) ? sentenceAround(at[0]!, userText) : null;
 }
 
 /** Whether `value`, in `unit`, is a figure written in `userText`. No text (or none bound) proves nothing: false. */
@@ -1035,7 +1036,10 @@ export const FIGURE_QUOTE_MAX = 160;
 export function quoteOfFigure(value: number, unit: unknown, userText: string | null | undefined): string | null {
   if (typeof value !== 'number' || !Number.isFinite(value) || typeof userText !== 'string') return null;
   const a = amountsWrittenIn(userText).find((x) => amountTheUserWrote(x, value, unit, userText));
-  if (a === undefined || typeof a.index !== 'number') return null;
+  return a === undefined ? null : sentenceAround(a, userText);
+}
+/** The sentence `a` is written in, verbatim (the window `quoteOfFigure` documents). */
+function sentenceAround(a: WrittenAmount, userText: string): string | null {
   const end = a.index + a.matchedText.length;
   const starts = [...userText.slice(0, a.index).matchAll(/[.!?](?=\s)|\n/g)];
   const start = starts.length === 0 ? 0 : starts[starts.length - 1]!.index! + 1;

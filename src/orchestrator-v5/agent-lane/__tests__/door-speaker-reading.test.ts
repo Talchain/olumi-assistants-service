@@ -54,6 +54,14 @@ describe('the reader: the AI\'s speaker reading decides whose claim a quoted ent
     expect(figureOnlyInQuotation(59, 'GBP per month', 'Our CFO said: "£59 for new Pro customers".')).toContain('£59');
     expect(figureOnlyInQuotation(59, 'GBP per month', 'We charge £59 for new Pro customers.')).toBeNull();
   });
+  // The ask quotes a figure by the one eligibility (#3438 R8): a quoted tolerance or an incomplete span is no figure to ask about.
+  it.each([
+    ['a tolerance', 'Our ops lead said: "night shift load is 20 ± 5 hours".', 5],
+    ['the value of a tolerance', 'Our ops lead said: "night shift load is twenty give or take five hours".', 20],
+  ])('the ask never quotes %s inside quoted words', (_c, text, value) => {
+    expect(figureOnlyInQuotation(value, 'hours', text)).toBeNull();
+    expect(figureOnlyInQuotation(45, 'hours', 'Our ops lead said: "night shift load is 45 hours".')).toContain('45 hours');
+  });
 });
 
 describe('the tool schemas: the existing QUOTE_SPEAKER field and the AIE\'s exact door words at every option-level and limit door', () => {
