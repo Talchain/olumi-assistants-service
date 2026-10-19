@@ -140,7 +140,8 @@ const MULTIPLIER_ALTERNATION = alternation([CARDINAL_HUNDRED_WORD, CARDINAL_DOZE
  * scale or small tokens joined by whitespace, hyphens or "and", then an optional decimal ("seven POINT FIVE", "two point five
  * MILLION"). The capture takes every "and", so the parser sees the whole: "two and three" is one capture that reads no number, never
  * 5, and "between two hundred and three thousand" one capture that the range reader splits (`cardinalReadings`). The repetition is
- * greedy, so "two hundred and fifty thousand" is consumed whole.
+ * greedy, so "two hundred and fifty thousand" is consumed whole. A SOURCE string with NO capture groups, so one pattern can embed it
+ * twice under different named wrappers (the same constraint that shaped `MAGNITUDE_SUFFIX_ANON`).
  *
  * NO GUARD AND NO RANGE SHAPE IN IT. V8 compiles a large pattern to native code on its second use: the goal extractor's second call
  * took 10 ms with staging's 437-character grammar and about 60 ms with the range shapes and guards written in. So whether a capture
