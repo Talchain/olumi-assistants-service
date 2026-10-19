@@ -90,6 +90,15 @@ describe('PATH-B core turn on the Agents SDK', () => {
     expect(sent[0]!.model).toBe('gpt-6.1-sol');
   });
 
+  it('⛔ A capability that throws ends the turn with ITS error (the route answers ownership and conflicts as today), never a string to the model', async () => {
+    class OwnershipRefused extends Error {}
+    const refusal = new OwnershipRefused('not your scenario');
+    const c = { ...caps(), getCanonicalState: vi.fn(async () => { throw refusal; }) };
+    scripted = [[{ type: 'function_call', name: 'get_canonical_state', args: {} }], [{ type: 'message', text: 'Should never be asked.' }]];
+    await expect(turn('What is in my model?', c)).rejects.toBe(refusal);
+    expect(sent, 'no further model call after the throw').toHaveLength(1);
+  });
+
   it('MEMORY: the SDK session carries the conversation to the next turn; the turn\'s state is given fresh and never stored', async () => {
     scripted = [[{ type: 'message', text: 'First answer.' }]];
     await turn('First synthetic question.', caps());
