@@ -105,6 +105,22 @@ describe('K6: an explicit "draft it now" on a brief with no stated aim gets a la
     expect(result).toMatchObject({ ok: false, refusal: 'construction_needs_redraft' });
     expect(graph).toBeUndefined();
   }, 60_000);
+
+  // ⛔ Codex on #3426 @a36d8e6b: the figure guard read digits only, so a figure in WORDS drafted an open aim. The ONE reader
+  // (`amountsWrittenIn`, #3429) reads both forms: the word form refuses exactly as the digit form does.
+  it.each([['digits', 'We currently have 5 cafés. Should we open another in Bristol next spring?'],
+    ['words', 'We currently have five cafés. Should we open another in Bristol next spring?']])(
+    '⭐ RED→GREEN (%s): a brief that states a figure is never drafted with an open aim', async (_form, stated) => {
+      const { graph, result } = await construct([JSON.stringify(cafeDraft()), JSON.stringify(cafeDraft())], stated, true);
+      expect(result).toMatchObject({ ok: false, refusal: 'construction_needs_redraft' });
+      expect(graph).toBeUndefined();
+    }, 60_000);
+
+  it('CONTRAST: a word that counts nothing is no figure ("one of the options"): the open-aim draft still runs', async () => {
+    const { result } = await construct([JSON.stringify(cafeDraft()), JSON.stringify(cafeDraft())],
+      'Opening in Bristol next spring is one of the options. Should we open a second café there?', true);
+    expect(result, JSON.stringify(result).slice(0, 400)).toMatchObject({ ok: true, open_aim: true });
+  }, 60_000);
 });
 
 describe('the request is the user\'s CURRENT words, quoted whole (the explicit_rebuild_request rule)', () => {
