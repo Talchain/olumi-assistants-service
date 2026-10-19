@@ -1089,6 +1089,91 @@ describe('candidateToGraph: conversion + science only', () => {
     expect(byLabel(converted({ ...salesDraft(), statements: [level()] }).graph, 'Ad spend').observed_state.range).toBeUndefined();
   });
 
+  // ⭐ K5 P0 (DL ruling (a), 19 Oct): the K5 draft's SHAPE, synthetic wording. An option switches a lever on; the lever adds the person's
+  // stated amount to a part of the goal; the part counts one for one into the goal. The person's size is used where the record backs it.
+  const K5_AIM = 'We sell about 90 loaves a day and want at least 110 by spring.';
+  const K5_SAID = 'A late shift would add about 12 loaves a day (anywhere from 8 to 16).';
+  const k5Draft = (effect: Rec = {}): Rec => ({
+    goal: { kind: null, deliverable: null, metric: 'Loaves a day', operator: '>=', target_stated: true, value: 110, unit: 'loaves a day', horizon_months: 6,
+      provenance: 'explicit', frame: 'level', baseline_known: true, baseline_value: 90, baseline_provenance: 'explicit', scope: null, quantity_frame: 'level', basis: null },
+    constraints: [], risks: [], outcomes: [], identities: [], unknowns: [], unknown_concerns: [], decision_question: null,
+    options: [{ label: 'Keep current hours', provenance: 'ai_proposed', changes: [], interventions: [], added_capacity: null, is_status_quo: true },
+      { label: 'Run a late shift', provenance: 'explicit', changes: [], added_capacity: null, is_status_quo: null,
+        interventions: [{ factor_label: 'Late shift', value: 1, value_kind: 'absolute', unit: 'late shifts', provenance: 'ai_proposed', stated_evidence: null }] }],
+    factors: [{ label: 'Late shift', role: 'controllable', baseline_known: false, baseline_value: 0, unit: 'late shifts', provenance: 'ai_proposed', plausible_max: null },
+      { label: 'Extra loaves from the late shift', role: 'observable', baseline_known: true, baseline_value: 0, unit: 'loaves a day', provenance: 'inferred', plausible_max: null }],
+    links: [link('Late shift', 'Extra loaves from the late shift', 'positive', K5_SAID, { effect_amount: 12, effect_per_source_change: 1, effect_provenance: 'explicit' }),
+      link('Extra loaves from the late shift', 'Loaves a day', 'positive', null, { provenance: 'inferred', effect_amount: 1, effect_per_source_change: 1, effect_provenance: 'inferred', definitional: true })],
+    statements: [said(K5_SAID, { kind: 'link', label: 'Late shift', to_label: 'Extra loaves from the late shift' }, 'effect', 'range', { value: 12, low: 8, high: 16, unit: 'loaves a day', ...effect }, 'user')],
+  });
+  const k5Edge = (draft: Rec, words: string | null = `${K5_AIM} ${K5_SAID}`) => {
+    const out = words === null ? candidateToGraph(draft) : candidateToGraph(draft, { words, recorded_at: AT });
+    if ('refused' in out) throw new Error(out.refused);
+    return { e: edge(out.graph as Rec, 'Late shift', 'Extra loaves from the late shift')!, loss: out.loss, blocked: out.blocked_schema };
+  };
+  it('⭐ K5 P0: the person\'s stated amount on the lever\'s link is USED where their recorded statement backs it, as theirs', () => {
+    const { e, loss, blocked } = k5Edge(k5Draft());
+    expect(e.provenance).toMatchObject({ magnitude: 'user_stated', natural_effect: { amount: 12, per_source_change: 1 } });
+    // #3485 R1: the stated range rides on A's carrier, the point inside it (never a bare point with an assumed spread).
+    expect(e.provenance.natural_effect.stated_range).toEqual({ low: 8, high: 16, text: K5_SAID, end: 'centre' });
+    expect(linkProvenanceOf(e).origin).toBe('human');
+    expect(loss.some((l) => String(l.field_path).endsWith('.link_size_not_used') && String(l.field_path).startsWith('edges[late_shift::'))).toBe(false);
+    expect(blocked.filter((b) => b.missing === 'link_size_origin' && String(b.field_path).startsWith('edges[late_shift::'))).toEqual([]);
+  });
+  it('⭐ K5 P0: a point with no range is used as theirs, with no range invented', () => {
+    const POINT = 'A late shift would add about 12 loaves a day.';
+    const { e } = k5Edge(k5Draft({ quote: POINT, form: 'point', low: null, high: null }), `${K5_AIM} ${POINT}`);
+    expect(e.provenance).toMatchObject({ magnitude: 'user_stated', natural_effect: { amount: 12 } });
+    expect(e.provenance.natural_effect.stated_range).toBeUndefined();
+  });
+  const NO_FIGURE = 'A late shift would help us bake more.';
+  const WEEKLY = 'A late shift would add about 12 loaves a week (anywhere from 8 to 16).';
+  const BARE = 'A late shift would add anywhere from 8 to 16 loaves a day.';
+  const MINUS = 'A late shift would add about -12 loaves a day (anywhere from 8 to 16).';
+  const END_UNWRITTEN = 'A late shift would add about 12 loaves a day (anywhere from 8 to 15).';
+  it.each([
+    ['another person said it', k5Draft({ speaker: 'other' }), undefined],
+    ['the quote does not write the figure (R1 probe)', k5Draft({ quote: NO_FIGURE }), `${K5_AIM} ${NO_FIGURE}`],
+    ['a weekly figure on a daily link (R1 probe)', k5Draft({ quote: WEEKLY, unit: 'loaves a week' }), `${K5_AIM} ${WEEKLY}`],
+    ['a bare range, no stated point (R1 probe: no invented midpoint)', k5Draft({ quote: BARE, value: null }), `${K5_AIM} ${BARE}`],
+    ['the figure is written with the other sign', k5Draft({ quote: MINUS }), `${K5_AIM} ${MINUS}`],
+    ['a declared range end the quote does not write', k5Draft({ quote: END_UNWRITTEN }), `${K5_AIM} ${END_UNWRITTEN}`],
+    ['the statement records no unit', k5Draft({ unit: null }), undefined],
+    ['an unclear speaker', k5Draft({ speaker: null }), undefined],
+    ['the quote is not byte for byte in the words (typographic dash)', k5Draft({ quote: 'A late shift would add about 12 loaves a day (anywhere from 8-16).' }),
+      `${K5_AIM} A late shift would add about 12 loaves a day (anywhere from 8–16).`],
+    ['the statement\'s point is not the declared figure', k5Draft({ low: 13, high: 16, value: 14 }), undefined],
+    ['the statement\'s point is another figure, though the quote writes the declared one', k5Draft({ value: 14 }), undefined],
+    ['the statement is about another link', k5Draft({ subject: { kind: 'link', label: 'Late shift', to_label: 'Loaves a day', factor_label: null } }), undefined],
+    ['no words given (nothing recorded)', k5Draft(), null],
+  ] as const)('⛔ K5 P0 negative: %s: the size keeps Olumi\'s placeholder, said and listed', (_name, draft, words) => {
+    const { e, loss, blocked } = k5Edge(draft as Rec, words === undefined ? `${K5_AIM} ${K5_SAID}` : words);
+    expect(e.provenance.magnitude).toBe('olumi_placeholder');
+    expect(loss.some((l) => String(l.field_path).endsWith('.link_size_not_used') && String(l.field_path).startsWith('edges[late_shift::'))).toBe(true);
+    expect(blocked.some((b) => b.missing === 'link_size_origin' && String(b.field_path).startsWith('edges[late_shift::'))).toBe(true);
+  });
+  it('⛔ K5 P0 negative: the only byte-exact statement holding the figure is another person\'s; the user\'s own is not in the words', () => {
+    const OTHER = 'Our baker thinks a late shift adds 12 loaves a day.';
+    const draft = k5Draft({ quote: 'A late shift adds about 12 loaves.' });
+    (draft.statements as Rec[]).push(said(OTHER, { kind: 'link', label: 'Late shift', to_label: 'Extra loaves from the late shift' }, 'effect', 'point',
+      { value: 12, unit: 'loaves a day' }, 'other'));
+    expect(k5Edge(draft, `${K5_AIM} ${K5_SAID} ${OTHER}`).e.provenance.magnitude).toBe('olumi_placeholder');
+  });
+  it.each([
+    ['a target with no level today', (d: Rec) => { Object.assign((d.factors as Rec[])[1]!, { baseline_known: false, baseline_value: null }); }, K5_SAID],
+    // A's sizing reads a size against the link's drawn direction as a sign conflict, not as theirs.
+    ['a written size whose sign contradicts the drawn direction', (d: Rec) => { (d.links as Rec[])[0]!.effect_amount = -12;
+      Object.assign((d.statements as Rec[])[0]!, { value: -12, quote: 'A late shift would change it by -12 loaves a day (anywhere from 8 to 16).' }); },
+    'A late shift would change it by -12 loaves a day (anywhere from 8 to 16).'],
+  ] as const)('⛔ K5 P0 negative: %s: the person\'s size keeps the placeholder, said and listed (as before)', (_name, edit, said) => {
+    const draft = k5Draft();
+    edit(draft);
+    const { e, loss, blocked } = k5Edge(draft, `${K5_AIM} ${said}`);
+    expect(e.provenance.magnitude).toBe('olumi_placeholder');
+    expect(loss.some((l) => String(l.field_path) === 'edges[late_shift::extra_loaves_from_the_late_shift].link_size_not_used')).toBe(true);
+    expect(blocked).toContainEqual({ field_path: 'edges[late_shift::extra_loaves_from_the_late_shift]', declared: 'user', missing: 'link_size_origin' });
+  });
+
   it('STATEMENTS CARRIED (contrast): without the user\'s words nothing is recorded, and the rest of the model is the same', () => {
     const bare = converted(carriedDraft());
     expect((bare.graph.nodes as Rec[]).filter((n) => n.user_statements !== undefined)).toEqual([]);

@@ -65,7 +65,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { isSavedRead, readSaved, type SavedRead } from './context-tool.js';
 import { targetCandidate, targetReadback, type TargetDeclaration } from './goal-target.js';
 import { ok, refused, unavailable, type ToolOutcome } from './outcome.js';
-import { inTheUsersWords, verbatimInTheUsersWords, type TypedWords } from './user-words.js';
+import { inTheUsersWords, quoteHoldsFigure, verbatimInTheUsersWords, type TypedWords } from './user-words.js';
 
 export const PROPOSE_CHANGE = 'propose_change';
 export const APPLY_CHANGE = 'apply_change';
@@ -377,12 +377,6 @@ function goalLevelReadOf(read: SavedRead): GoalLevelRead | null {
   return nodes.length !== all.length || nodes.length === 0 ? null
     : { graph_hash: read.graphHash, graph_identity_hash: read.identity ?? '', nodes, raw: read.graph };
 }
-/**
- * Whether the quote writes this figure WITH ITS SIGN: its numerals read as digits only ("1,250" is 1250), never a word or a unit.
- * A minus that no digit precedes belongs to the numeral ("-110" is -110, never 110); a range's dash ("2-3") does not.
- */
-const quoteHoldsFigure = (quote: string, value: number): boolean =>
-  (quote.match(/(?:(?<!\d)[-\u2212])?\d[\d,]*(?:\.\d+)?/g) ?? []).some((n) => Number(n.replace(/,/g, '').replace('\u2212', '-')) === value);
 /** The goal-level door's context: the user's typed words as one text (`user_text`, the composer messages it binds to). */
 const levelCtx = (ctx: ChangeCtx): AgentToolContext => {
   const typed = ctx.verified_user_messages ?? [];

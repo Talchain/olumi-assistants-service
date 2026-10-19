@@ -9,14 +9,15 @@
  *    goal threshold, limit and Olumi-sized link is copied from what A admitted for the same entity (A's `canonicalLabel`
  *    identity). A figure A did not convert is said and kept in `declared`, never computed here. A setting in another unit
  *    than its factor (`sameUnit`), or on something that is not a factor, is not used, and said. Placeholders for unsized
- *    links come from the stored-graph sizing view (`magnitudeNodes` → `sizeLink`, never `user_stated`).
+ *    links come from the stored-graph sizing view (`magnitudeNodes` → `sizeLink`, `user_stated` only for a record-backed person's size).
  *  · STRUCTURE AND AUTHORSHIP ARE THE DRAFT's, with NO C1/C2: every declared option, risk, outcome and link is kept; each
  *    figure keeps the origin the AI DECLARED, in the fields the one provenance authority reads (`cee/provenance/provenance-of.ts`):
  *    the user's (`explicit`) = a type-less `brief_extraction` (human, by its stamp: declared, not attested); Olumi's (`ai_proposed`,
  *    or a factor level the AI did not declare known) = `cee_inference` + `inferred` / `cee_hypothesis`; the drafter's `inferred`
  *    (its contract: a reformulation of supplied material, or unresolved), an unknown speaker or a named third party = no stamp
  *    (unknown), or `user_material_unverified` on a setting. A computed total is Olumi's derived figure, said with its arithmetic (signed plan item 7). A link size the
- *    AI declared as a person's keeps Olumi's placeholder (DL ruling (a)). Origins GraphV3 cannot hold are `blocked_schema`.
+ *    AI declared as a person's keeps Olumi's placeholder (DL ruling (a)) unless the user's own recorded statement of that link backs
+ *    it (K5 P0 ruling (a)): then it is sized as theirs, through A's sizing. Origins GraphV3 cannot hold are `blocked_schema`.
  *  · The raw draft travels beside the graph verbatim (`declared`); C5's draft tool returns it, so the scenario's one
  *    Conversation keeps it. The draft is Olumi's provisional model. A is untouched: it still applies its gates.
  *  · A "stay at or below" goal's level the AI declared known and the user's is carried on A's science (cap, unit, frame,
@@ -39,7 +40,7 @@ import { oneRoutePerEffect } from '../../agent-lane/one-route-per-effect.js';
 import { sayFigure } from '../../agent-lane/say-figure.js';
 import { admitAccumulationIdentities, withAdmittedAccumulations } from '../../agent-lane/accumulation-identity.js';
 import { clampForPersist, refitFramesForOlumiEstimates, refitFramesForStatedEffects } from '../../agent-lane/refit-frames.js';
-import { resolveMagnitudeFrame, sizeLink, type LinkSizing } from '../../../cee/magnitude/link-effect.js';
+import { naturalAmountUnitOf, resolveMagnitudeFrame, sizeLink, type LinkSizing, type StatedRangeEnd } from '../../../cee/magnitude/link-effect.js';
 import { magnitudeNodes, percentLevelIds } from '../../../cee/magnitude/frame-defaulted-links.js';
 import { nodeProvenanceDisplay } from '../../../cee/provenance/provenance-of.js';
 import { UNSIZED_OLUMI_RISK_REASON } from '../../agent-lane/unsized-risk.js';
@@ -53,6 +54,7 @@ import { isStatementField, subjectKey, type DoorSubject } from '../../statement-
 import { userStatementOf, type UserStatement } from '../../agent-lane/user-statements.js';
 import { verbatimSourceLine } from '../../agent-lane/quote-confirmation.js';
 import { admitInterventionRange, interventionPoint, StoredInterventionRange } from '../../intervention-range.js';
+import { quoteHoldsFigure } from './user-words.js';
 
 type Rec = Record<string, any>;
 /** Whose figure the AI declared it to be. */
@@ -197,7 +199,7 @@ function convertedByA(c: CandidateModel): { a: AdmittedModel } | null {
 }
 
 /** The converted graph BEFORE the build's refit chain (what the differential compares with A's admission). */
-export function candidateToAdmittedGraph(input: unknown): Converted | { readonly refused: 'candidate_invalid' | 'not_convertible' } {
+export function candidateToAdmittedGraph(input: unknown, usersWords?: string): Converted | { readonly refused: 'candidate_invalid' | 'not_convertible' } {
   const c = asCandidate(input);
   if (c === null) return { refused: 'candidate_invalid' };
   const byA = convertedByA(c);
@@ -213,6 +215,26 @@ export function candidateToAdmittedGraph(input: unknown): Converted | { readonly
     ?? a.nodes.find((n) => n.kind !== 'decision' && n.id === slugId(label));
   // The AI's own reading of whose words each statement is, by the subject it declared.
   const statements = list<Rec>((input as Rec).statements);
+  /**
+   * ⭐ K5 P0 (DL ruling (a) + #3485 R1, 19 Oct): the user's own statement of exactly this link's effect that backs a person's
+   * declared size: speaker user; its quote a byte substring of the user's words that WRITES the figure with its sign (#3475's literal
+   * check, `quoteHoldsFigure`); its point that figure; its unit the link's natural unit (`sameUnit`: a weekly figure never sizes a
+   * daily link). A stated range rides on A's existing carrier (`stated_range`, the point inside, both ends written); a range with
+   * no stated point backs nothing (no invented midpoint). `undefined` when nothing backs it.
+   */
+  const userRecordOf = (l: CandidateLink, naturalUnit: string): { readonly range?: StatedRangeEnd } | undefined => {
+    const amount = l.effect_amount;
+    if (usersWords === undefined || !finite(amount)) return undefined;
+    for (const st of statements) {
+      if (st?.subject?.kind !== 'link' || st.field !== 'effect' || st.speaker !== 'user' || typeof st.quote !== 'string' || !usersWords.includes(st.quote)
+        || canonicalLabel(String(st.subject.label ?? '')) !== canonicalLabel(l.from) || canonicalLabel(String(st.subject.to_label ?? '')) !== canonicalLabel(l.to)
+        || st.value !== amount || !quoteHoldsFigure(st.quote, amount) || !sameUnit(st.unit, naturalUnit)) continue;
+      if (!finite(st.low) && !finite(st.high)) return {};
+      if (finite(st.low) && finite(st.high) && st.low < Math.abs(amount) && Math.abs(amount) < st.high
+        && quoteHoldsFigure(st.quote, st.low) && quoteHoldsFigure(st.quote, st.high)) return { range: { low: st.low, high: st.high, text: st.quote, end: 'centre' } };
+    }
+    return undefined;
+  };
   const speakerOf = (kind: string, label: string, extra: (s: Rec) => boolean = () => true): unknown =>
     statements.find((s) => s?.subject?.kind === kind && canonicalLabel(String(s.subject.label ?? '')) === canonicalLabel(label) && extra(s))?.speaker;
   // ⛔ THE DRAFTER'S OWN CONTRACT (runtime/build-model.ts `introducedBy`; DL 19 Oct, gap 3 swap): `explicit` is supplied in the
@@ -375,7 +397,7 @@ export function candidateToAdmittedGraph(input: unknown): Converted | { readonly
 
   // Links: an option's links are A's (below). Every other link carries A's size for the same pair, except a size the AI
   // declared as a person's (DL ruling (a)): that keeps Olumi's placeholder, said, kept and listed, unless the link is a part of a
-  // sum A holds (below).
+  // sum A holds (below), or the user's own recorded statement of that link backs it (`userRecordOf`): then it is sized as theirs.
   const aEdgeOf = new Map<string, Rec>(a.edges.map((e) => [`${e.from}::${e.to}`, e]));
   // ⭐ THE AIE'S MAPPING A, ON B (DL 19 Oct): a link that is a part of a sum A holds (one the AI declared, or A's limited tally) is
   // that sum's DEFINITION, never anyone's size estimate: each part linked one for one in the total's unit, every definitional part
@@ -385,6 +407,10 @@ export function candidateToAdmittedGraph(input: unknown): Converted | { readonly
     ? n.nonlinear_identity.factor_ids.map((f) => `${bIdOfA.get(f)}::${bIdOfA.get(n.id)}`) : [])));
   const causal: CandidateLink[] = [];
   const placeholder = new Set<CandidateLink>();
+  const personSized = new Set<CandidateLink>();
+  // The stored-graph sizing view of these nodes (A's numbers).
+  const view = magnitudeNodes(nodes, percentLevelIds({ goal_constraints: [] }));
+  const sizing = new Map<string, LinkSizing>();
   const drawnByPair = new Map<string, Who>();
   for (const l of c.links) {
     const from = idFor(l.from), to = idFor(l.to);
@@ -401,9 +427,18 @@ export function candidateToAdmittedGraph(input: unknown): Converted | { readonly
     const link: CandidateLink = { ...drafted, from, to };
     const sizeBy = whoOf(l.effect_provenance ?? l.provenance, speakerOf('link', l.from, said('effect')));
     const sized = finite(l.effect_amount) && finite(l.effect_per_source_change) && l.effect_per_source_change !== 0 && sizeBy !== 'olumi';
+    // The person's record-backed size, through A's own sizing as theirs (Science census exception, DL ruling (a)); used only
+    // where A's sizing holds it as theirs, else it keeps the placeholder below, said and listed.
+    const record = sized && sizeBy === 'user' ? userRecordOf(l, naturalAmountUnitOf(view.get(to)!)) : undefined;
+    const theirs = record === undefined || link.direction === 'unknown' ? undefined : sizeLink({ direction: link.direction, effect_amount: link.effect_amount,
+      effect_per_source_change: link.effect_per_source_change, user_stated: true, ...(record.range !== undefined ? { stated_range: record.range } : {}) },
+    view.get(from)!, view.get(to)!);
     if (sized && sumParts.has(`${from}::${to}`) && aEdgeOf.has(aPair(from, to))) {
       // The definition replaces the declared size; whose the AI said that size was is still listed (GraphV3 cannot hold it).
       blocked.push({ field_path: `edges[${from}::${to}]`, declared: sizeBy as BlockedSchema['declared'], missing: 'link_size_origin' });
+    } else if (theirs?.outcome === 'user_stated') {
+      personSized.add(link);
+      sizing.set(`${from}::${to}`, theirs);
     } else if (sized) {
       const quoted = (l as Rec).source_quote;
       const words = typeof quoted === 'string' && quoted.trim() !== '' ? quoted.trim() : `${l.effect_amount} per ${l.effect_per_source_change}`;
@@ -415,10 +450,7 @@ export function candidateToAdmittedGraph(input: unknown): Converted | { readonly
     } else if (!aEdgeOf.has(aPair(from, to))) placeholder.add(link);
     causal.push(link);
   }
-  // Placeholders: the stored-graph sizing view of these nodes (A's numbers), direction only. This site never passes
-  // user_stated true (pinned by the Science Fi census).
-  const view = magnitudeNodes(nodes, percentLevelIds({ goal_constraints: [] }));
-  const sizing = new Map<string, LinkSizing>();
+  // Placeholders: direction only. This site never passes user_stated true (pinned by the Science Fi census).
   for (const l of placeholder) {
     if (l.direction === 'unknown') continue;
     sizing.set(`${l.from}::${l.to}`, sizeLink({ direction: l.direction, effect_amount: null, effect_per_source_change: null, user_stated: false },
@@ -428,7 +460,7 @@ export function candidateToAdmittedGraph(input: unknown): Converted | { readonly
   loss.push(...drawn.withheld.map((w) => note(`edges[${w.from}::${w.to}]`, { from: w.from, to: w.to }, w.detail, 'warn')));
   const linkEdges = drawn.edges.map((e) => {
     const l = causal.find((x) => x.from === e.from && x.to === e.to)!;
-    const aEdge = placeholder.has(l) ? undefined : aEdgeOf.get(aPair(e.from, e.to));
+    const aEdge = placeholder.has(l) || personSized.has(l) ? undefined : aEdgeOf.get(aPair(e.from, e.to));
     const quote = (l as Rec).source_quote;
     const sized: Rec = aEdge === undefined ? e : { ...aEdge, from: e.from, to: e.to };
     return typeof quote === 'string' && quote.trim() !== '' ? { ...sized, provenance: { ...(sized.provenance ?? {}), source_quote: quote } } : sized;
@@ -639,7 +671,7 @@ function withRecordedRanges(graph: Rec & { nodes: unknown[] }, input: unknown, w
  * With the user's words (`carry`), the draft's statements are recorded on their subjects (`withDeclaredStatements`).
  */
 export function candidateToGraph(input: unknown, carry?: StatementCarry): CandidateToGraphResult {
-  const converted = candidateToAdmittedGraph(input);
+  const converted = candidateToAdmittedGraph(input, carry?.words);
   if ('refused' in converted) return converted;
   const c = asCandidate(input)!;
   let graph0 = converted.graph as Rec;

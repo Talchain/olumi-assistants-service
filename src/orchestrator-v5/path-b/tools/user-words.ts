@@ -24,3 +24,10 @@ export function inTheUsersWords(words: string, ctx: TypedWords): boolean {
 export function verbatimInTheUsersWords(words: string, ctx: TypedWords): boolean {
   return words !== '' && typedMessages(ctx).some((m) => quoteSpansIn(m, words).length > 0);
 }
+
+/**
+ * Whether the quote writes this figure WITH ITS SIGN: its numerals read as digits only ("1,250" is 1250), never a word or a unit.
+ * A minus that no digit precedes belongs to the numeral ("-110" is -110, never 110); a range's dash ("2-3") does not.
+ */
+export const quoteHoldsFigure = (quote: string, value: number): boolean =>
+  (quote.match(/(?:(?<!\d)[-\u2212])?\d[\d,]*(?:\.\d+)?/g) ?? []).some((n) => Number(n.replace(/,/g, '').replace('\u2212', '-')) === value);
