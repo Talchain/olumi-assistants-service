@@ -330,7 +330,7 @@ async function proposeTarget(deps: Pick<ChangeDeps, 'dispatch' | 'proposals'>, c
     conversation: (ctx.verified_user_messages ?? []).join('\n') }, t.source.quote) ?? null;
   const stored: z.infer<typeof TargetStored> = { value: t.value, unit: t.unit, comparator: t.comparator, quantity: t.quantity, frame: 'level',
     stance: t.stance, source: t.source, said_in: saidIn, recorded_at: new Date().toISOString() };
-  const p = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: read.identity,
+  const p = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: read.graphHash, base_model_identity: read.identity,
     operations: [{ op: 'set_goal_target', path: t.goal_id, value: stored }], provenance: { authored_by: 'model_proposed', basis: args.basis },
     validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: args.public_label });
   // The writer's own gates, run once on this read before any card exists (nothing is written).
@@ -339,7 +339,7 @@ async function proposeTarget(deps: Pick<ChangeDeps, 'dispatch' | 'proposals'>, c
     return dry.refusal === 'goal_is_a_change' ? unavailable('change_target_not_available', 'none', CHANGE_TARGET) : refused(codeOf(dry.refusal), undefined, { op: 0 });
   }
   deps.proposals.put(p);
-  return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: read.identity });
+  return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: read.graphHash });
 }
 
 /**
@@ -422,7 +422,6 @@ function linksApplier(deps: ChangeDeps, ctx: ChangeCtx, p: StructuredProposal, l
   const readNow = (read: SavedRead) => linksRead(read, links);
   return {
     receiptTurn: turnId,
-    baseOf: (read) => read.graphHash,
     readNow,
     commit: (before) => viaDoor(deps, ctx, p, turnId, readNow, () => commitOptionLevels({ scenario_id: ctx.scenario_id,
       base_graph_hash: before.graphHash, turn_id: turnId, links: [], levels: [], link_strengths: linkStrengthsIn(links) })),
@@ -541,12 +540,12 @@ async function proposeCompound(deps: Pick<ChangeDeps, 'dispatch' | 'proposals' |
   const written = { nodes: [...plan.levels.flatMap((l) => [l.option_id, l.factor_id]), ...(plan.values ?? []).map((v) => v.factor_id), ...(plan.frames ?? []).map((f) => f.factor_id)],
     links: [...plan.links.map((l) => ({ from: l.option_id, to: l.factor_id })), ...links.map((l) => ({ from: l.from, to: l.to }))] };
   if (compoundMembersConflict(written, members)) return refused('compound_members_conflict');
-  const p = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: read.identity,
+  const p = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: read.graphHash, base_model_identity: read.identity,
     operations: [...figureOps, ...linkOps, ...prepared], provenance: { authored_by: 'model_proposed', basis: args.basis },
     validation: { admitted: true, loss_count: 0, refusals: [] },
     public_label: cards.length === 1 ? cards[0]! : `Save these changes together:\n${cards.join('\n')}` });
   deps.proposals.put(p);
-  return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: read.identity });
+  return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: read.graphHash });
 }
 
 export async function proposeChange(deps: Pick<ChangeDeps, 'dispatch' | 'proposals' | 'proposeLinkStrengths'>, ctx: ChangeCtx, args: ProposeChangeArgs): Promise<ToolOutcome> {
@@ -565,7 +564,7 @@ export async function proposeChange(deps: Pick<ChangeDeps, 'dispatch' | 'proposa
   const read = await readSaved(deps, ctx.scenario_id);
   if (!isSavedRead(read)) return read;
   if (read.identity === null) return unavailable('read_malformed');
-  const content = { scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: read.identity,
+  const content = { scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: read.graphHash, base_model_identity: read.identity,
     operations: ops.map(operationOf), provenance: { authored_by: 'model_proposed' as const, basis: args.basis },
     validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: args.public_label };
   const p = createProposal(content);
@@ -573,14 +572,12 @@ export async function proposeChange(deps: Pick<ChangeDeps, 'dispatch' | 'proposa
   const plan = planOf(ctx.scenario_id, p.proposal_id, declared, read.graph);
   if ('refusal' in plan) return stopped(plan, declared);
   deps.proposals.put(p);
-  return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: read.identity });
+  return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: read.graphHash });
 }
 
 /** One kind of approved change: where its own receipt is recorded, how it reads back, and its ONE write. */
 interface Applier {
   readonly receiptTurn: string;
-  /** The revision the proposal was prepared on, as this kind records it (the capability's link set: the analysis hash). */
-  readonly baseOf?: (read: SavedRead) => string | null;
   readonly readNow: (read: SavedRead) => { holds: boolean; faithful: boolean; written: Rec[] };
   readonly commit: (before: SavedRead, reconcile: () => Promise<ToolOutcome>) => Promise<ToolOutcome>;
 }
@@ -677,6 +674,9 @@ function targetApplier(deps: ChangeDeps, ctx: ChangeCtx, p: StructuredProposal, 
   };
 }
 
+/** A change this path prepared (a goal target, or figures, links and structural members): `apply_change` commits it. */
+export const isChangeProposal = (p: StructuredProposal | undefined): boolean => p !== undefined && (targetOf(p) !== null || compoundOf(p) !== null);
+
 export async function applyChange(deps: ChangeDeps, ctx: ChangeCtx, args: ApplyChangeArgs): Promise<ToolOutcome> {
   const p = deps.proposals.get(args.proposal_id);
   if (p === undefined) return refused('unknown_proposal');
@@ -701,12 +701,13 @@ export async function applyChange(deps: ChangeDeps, ctx: ChangeCtx, args: ApplyC
     return ok({ already_saved: true, receipt, holds_now: now.holds, faithful: now.faithful, written: now.written });
   };
   if (prior !== null) return alreadySaved(prior);
-  const base = applier.baseOf === undefined ? before.identity : applier.baseOf(before);
-  if (base === null) return unavailable('read_malformed');
+  // Every change is prepared on the read's graph hash (the base every proposer and the card machinery use).
   const decision = deps.proposals.authorise({ proposal_id: p.proposal_id, scenario_id: ctx.scenario_id,
-    authenticated_user_id: ctx.authenticated_user_id, current_graph_identity_hash: base, typed_approval_of: p.proposal_id });
+    authenticated_user_id: ctx.authenticated_user_id, current_graph_identity_hash: before.graphHash, typed_approval_of: p.proposal_id });
   if (decision.status === 'already_applied') return alreadySaved(decision.receipts[0] ?? null);
   if (decision.status !== 'execute') return refused(decision.status);
+  // ...and on the model's FULL identity when it was prepared: a rename or other wording the graph hash leaves out moved it too.
+  if (p.base_model_identity !== undefined && p.base_model_identity !== before.identity) return refused('superseded');
   const reconcile = async (): Promise<ToolOutcome> => {
     const own = await ownReceipt(deps.dispatch, ctx.scenario_id, applier.receiptTurn);
     return own !== null && own !== 'unreadable' ? alreadySaved(own) : unavailable('not_confirmed', 'unknown');

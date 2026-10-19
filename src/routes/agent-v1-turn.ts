@@ -85,6 +85,7 @@ import { drawnLinkPress, isDrawnLinkPress } from '../orchestrator-v5/agent-lane/
 import { answerIsIncomplete, heldChangeSentence, runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import { CoreStateUnavailableError, runCoreTurn, type CoreTurnSdk } from '../orchestrator-v5/agent-lane/core/sdk-turn.js';
 import { pathBTools } from '../orchestrator-v5/path-b/tools/index.js';
+import { APPLY_CHANGE, isChangeProposal } from '../orchestrator-v5/path-b/tools/change-tools.js';
 import { parseSelectedElements } from '../orchestrator-v5/boundary/request-extensions.js';
 import { agentSelectionContext, type AgentSelectionContext } from '../orchestrator-v5/agent-lane/selection-context.js';
 import type { AgentLaneMode, AgentToolContext, ToolResult } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
@@ -3580,8 +3581,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * the press, #3013) and it carries no edits (the paused tool takes none). With edits it is refused, and nothing resumes;
      * other words are not a press: they go to the AI as a message, which declines the paused call. The legacy path never acts.
      */
-    const coreOwns = corePaused != null && result === undefined
-      && ((approvedProposal !== undefined && approvedProposal === corePaused.proposal_id) || (declinedHold !== undefined && declinedHold === corePaused.proposal_id));
+    /**
+     * A core change shown on its card WITHOUT a paused run (the AI prepared it with propose_change and said so; VERIFIER K7):
+     * its press approves that same change through the SDK's own apply_change (the run's first call; the press approves the
+     * interruption it raises), never the full lane's writer, under this same ONE consent check.
+     */
+    const coreCardOnly = mode === 'core' && result === undefined && corePaused == null && approvedProposal !== undefined
+      && isChangeProposal(proposals.get(approvedProposal));
+    const coreOwns = coreCardOnly || (corePaused != null && result === undefined
+      && ((approvedProposal !== undefined && approvedProposal === corePaused.proposal_id) || (declinedHold !== undefined && declinedHold === corePaused.proposal_id)));
     const sentEdits = coreOwns && approvedProposal !== undefined ? parseProposalEdits(body['proposal_edits']) : undefined;
     if (coreOwns && sentEdits !== undefined) {
       const said = editsRefusedSentence(sentEdits === null ? 'malformed' : 'refused');
@@ -4439,7 +4447,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           canonicalState: canonicalContext?.packet?.state,
           // A Run press permits calculation and reading only (`withheldToolsOf`), on this lane's own tool names.
           withheldTools: runPress ? CORE_RUN_PRESS_WITHHELD : withheldToolsOf(body),
-          ...(runPress ? { firstTool: 'run_analysis' } : {}),
+          ...(runPress ? { firstTool: 'run_analysis' } : coreCardOnly && corePress !== undefined ? { firstTool: APPLY_CHANGE } : {}),
           ...(corePress !== undefined ? { press: corePress } : {}),
           ...(canonicalContext?.packet?.graph_revision !== undefined ? { traceMeta: { revision: canonicalContext.packet.graph_revision } } : {}),
           // A run paused for the person's approval is saved on the scenario, so the press (any later request) resumes it.

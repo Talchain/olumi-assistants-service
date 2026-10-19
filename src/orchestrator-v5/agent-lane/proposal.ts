@@ -191,6 +191,12 @@ export interface StructuredProposal {
   readonly user_id: string | null;
   /** The model state this proposal was evaluated against. */
   readonly base_graph_identity_hash: string;
+  /**
+   * The model's FULL identity (labels, wording, provenance included) when this proposal was prepared. A PATH-B change
+   * carries it beside the graph hash the card machinery reads, and its commit is refused `superseded` unless the model
+   * still has this identity (Codex #3472 R1: a rename the graph hash cannot see). Part of the id when present.
+   */
+  readonly base_model_identity?: string;
   readonly operations: readonly ProposalOperation[];
   /** Who authored the change being proposed — never the user, for an AI proposal. */
   readonly provenance: { readonly authored_by: 'model_proposed' | 'user_stated'; readonly basis?: string; readonly original_basis?: string };
@@ -253,6 +259,7 @@ export function computeProposalId(c: ProposalContent): string {
     c.public_label,
     // Appended only when present, so every proposal without a reading keeps the id it always had.
     ...(c.interpretation === undefined ? [] : [c.interpretation]),
+    ...(c.base_model_identity === undefined ? [] : [['base_model_identity', c.base_model_identity]]),
   ]));
   return 'prop_' + createHash('sha256').update(canonical).digest('hex').slice(0, 32);
 }

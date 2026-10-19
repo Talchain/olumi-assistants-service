@@ -249,6 +249,11 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
     turnInput = state;
     resumed = { pause_id: held.pause_id, answer };
   }
+  /**
+   * A press on a card whose change never paused (the AI prepared it and said so): the run's first call is that change's own
+   * apply_change (`firstTool`), and THIS press is the approval of the interruption it raises, for that proposal only.
+   */
+  const approvesNow = held == null && input.press?.decision === 'approve' ? input.press.proposal_id : undefined;
   let paused: CoreTurnSdk['paused'];
 
   let traceId = `trace_${randomUUID().replace(/-/g, '')}`;
@@ -301,6 +306,13 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
       };
       let result = await go(turnInput);
       let calls = result.rawResponses.length;
+      const pressed = result.interruptions.length === 1 ? result.interruptions[0] : undefined;
+      if (pressed !== undefined && approvesNow !== undefined && argsOf(pressed)['proposal_id'] === approvesNow) {
+        result.state.approve(pressed);
+        resumed = { pause_id: callIdOf(pressed) ?? '', answer: 'approved' };
+        result = await go(result.state);
+        calls += result.rawResponses.length;
+      }
       const pause = result.interruptions[0];
       if (pause !== undefined) {
         const args = argsOf(pause);
