@@ -9,8 +9,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { candidateToAdmittedGraph, candidateToGraph, type AdmitDraft } from '../candidate-to-graph.js';
-import { admitCandidateModel, admitOrdinaryCandidateModel, canonicalLabel, withQuantityFrames } from '../../../agent-lane/admit-model.js';
+import { candidateToAdmittedGraph, candidateToGraph } from '../candidate-to-graph.js';
+import { admitCandidateModel, admitOrdinaryCandidateModel, canonicalLabel } from '../../../agent-lane/admit-model.js';
 import { prepareProvisionalCandidate } from '../../../agent-lane/runtime/build-model.js';
 import { linkProvenanceOf, settingProvenanceOf, valueProvenanceOf } from '../../../../cee/provenance/provenance-of.js';
 import { GraphV3 } from '../../../../schemas/cee-v3.js';
@@ -111,12 +111,51 @@ const sumDraft = (totalToday: number, definedBy: 'olumi' | 'user' = 'olumi'): Re
     evidence: { quote: 'All our orders come either online or from the shop.' } }],
 });
 
-// A's admission with no brief, injected as the build injects its own (S7: the converter never imports the raw admitter).
-const admitA: AdmitDraft = (c) => {
-  try { return admitCandidateModel(withQuantityFrames(c), {}, undefined); } catch { return admitOrdinaryCandidateModel(withQuantityFrames(c), {}, undefined); }
+// STRUCTURE SCIENCE (DL 19 Oct): a declared product, a lever no option reaches, Olumi's unlinked unsized risk beside the user's,
+// a factor → risk link that re-draws the factor's own direct link, two of Olumi's options alike as drafted, and a declared status quo.
+const sciOption = (label: string, provenance: string, ivs: Rec[] = [], changes: string[] = [], sq: boolean | null = null): Rec =>
+  ({ label, provenance, changes, interventions: ivs, added_capacity: null, is_status_quo: sq });
+const sciLevel = (factor_label: string, value: number, unit: string): Rec => ({ factor_label, value, value_kind: 'absolute', unit, provenance: 'explicit', stated_evidence: null });
+const scienceDraft = (opts: { userFold?: boolean; undeclaredStatusQuo?: boolean; otherRisk?: boolean } = {}): Rec => ({
+  goal: { kind: null, deliverable: null, metric: 'Monthly revenue', operator: '>=', target_stated: true, value: 30000, unit: '£', horizon_months: 6,
+    provenance: 'explicit', frame: 'level', baseline_known: true, baseline_value: 20000, baseline_provenance: 'explicit', scope: null, quantity_frame: 'level', basis: null },
+  constraints: [],
+  identities: [{ operation: 'product', outcome: 'Monthly revenue', factors: ['Price', 'Customers'], provenance: 'inferred', evidence: null }],
+  options: [sciOption('Raise the price', 'explicit', [sciLevel('Price', 25, '£')]), sciOption('Run a referral scheme', 'explicit', [sciLevel('Customers', 1200, 'customers')]),
+    sciOption('Promote more', 'inferred', [], ['Customers']), sciOption('Advertise more', 'inferred', [], ['Customers']),
+    sciOption('Carry on as now', 'explicit', [], [], opts.undeclaredStatusQuo === true ? null : true)],
+  factors: [{ ...factor('Price', 20, '£', 'explicit'), role: 'controllable', plausible_max: 50 }, { ...factor('Customers', 1000, 'customers', 'explicit'), role: 'controllable', plausible_max: 3000 },
+    { ...factor('Brand awareness', 30, '%', 'explicit'), role: 'controllable', plausible_max: 100 }],
+  risks: [{ label: 'Competitor price cut', provenance: 'inferred' }, { label: 'Key supplier failure', provenance: opts.otherRisk === true ? 'inferred' : 'explicit' },
+    { label: 'Churn spike', provenance: 'inferred' }],
+  outcomes: [],
+  links: [link('Price', 'Monthly revenue', 'positive'), link('Customers', 'Monthly revenue', 'positive'), link('Brand awareness', 'Customers', 'positive'),
+    { ...link('Price', 'Churn spike', 'positive'), ...(opts.userFold === true ? { provenance: 'explicit' } : {}) }, link('Churn spike', 'Customers', 'negative'),
+    link('Price', 'Customers', 'negative')],
+  unknowns: [], decision_question: 'How do we grow revenue?', unknown_concerns: [],
+  statements: opts.otherRisk === true ? [{ quote: 'Our buyer warns a key supplier could fail.', subject: { kind: 'risk', label: 'Key supplier failure', to_label: null,
+    factor_label: null }, field: 'level', form: 'point', value: null, low: null, high: null, unit: null, qualifier: null, conditions: null, speaker: 'other' }] : [],
+});
+
+// ROUTE A (`goal-definition-sum.ts`): a lever the options set, 0 today, declared as the complete net change in the goal's own quantity.
+const definitionDraft = (): Rec => ({
+  goal: { kind: null, deliverable: null, metric: 'Orders per day', operator: '>=', target_stated: true, value: 120, unit: 'orders per day', horizon_months: null,
+    provenance: 'explicit', frame: 'level', baseline_known: true, baseline_value: 80, baseline_provenance: 'explicit', scope: null, quantity_frame: 'level', basis: null },
+  constraints: [], identities: [],
+  options: [sciOption('Keep as now', 'ai_proposed', [], [], true), sciOption('Add a night shift', 'explicit', [sciLevel('Net change in orders per day', 30, 'orders per day')]),
+    sciOption('Open a second line', 'explicit', [sciLevel('Net change in orders per day', 50, 'orders per day')])],
+  factors: [{ ...factor('Net change in orders per day', 0, 'orders per day', 'inferred'), role: 'controllable', baseline_known: true }],
+  risks: [], outcomes: [],
+  links: [link('Net change in orders per day', 'Orders per day', 'positive', null, { effect_amount: 1, effect_per_source_change: 1, effect_provenance: 'inferred', definitional: true })],
+  unknowns: [], decision_question: 'How do we reach 120 orders a day?', unknown_concerns: [], statements: [],
+});
+
+// A's admission with no brief: the build's preparation, then admission with the brief `undefined` (the path-B door's call).
+const admitA = (c: Rec): Rec => {
+  try { return admitCandidateModel(c as never, {}, undefined) as never; } catch { return admitOrdinaryCandidateModel(c as never, {}, undefined) as never; }
 };
 const converted = (draft: Rec): { graph: Rec; declared: Rec; loss: Rec[]; blocked_schema: Rec[] } => {
-  const out = candidateToGraph(draft, admitA);
+  const out = candidateToGraph(draft);
   if ('refused' in out) throw new Error(`refused: ${out.refused}`);
   return out as unknown as { graph: Rec; declared: Rec; loss: Rec[]; blocked_schema: Rec[] };
 };
@@ -125,17 +164,30 @@ const ofKind = (g: Rec, kind: string): Rec[] => (g.nodes as Rec[]).filter((n) =>
 const edge = (g: Rec, from: string, to: string): Rec | undefined =>
   (g.edges as Rec[]).find((e) => e.from === byLabel(g, from).id && e.to === byLabel(g, to).id);
 
+/** Whose the AI declared an entity or link to be (the spec of B's rule): a speaker other/unknown wins; else explicit = the user's. */
+const declaredWho = (draft: Rec, kind: string, label: string, provenance: unknown, field = 'level'): string => {
+  const st = ((draft.statements ?? []) as Rec[]).find((x) => x?.subject?.kind === kind && x?.field === field
+    && canonicalLabel(String(x.subject.label ?? '')) === canonicalLabel(label));
+  return st?.speaker === 'other' || st?.speaker === 'unknown' ? st.speaker : provenance === 'explicit' ? 'user' : 'olumi';
+};
+
 /**
  * The differential: A's own admission of the draft (the build's preparation + admission, no brief) against B's converted
- * graph before the refit chain. For every figure A admits — a value, a level, a goal threshold, a limit, a link size — B's
- * number, unit, frame and sign must equal A's. A person's link size B keeps as a placeholder (DL ruling (a)) and a level in
- * another unit than its factor or set on something that is not a factor (B does not use it, and says so) are counted apart,
- * never as equal. A draft B refuses as unreadable is reported with A's figures it does not carry.
+ * graph before the refit chain.
+ *  · FIGURES: for every figure A admits — a value, a level, a goal threshold, a limit, a link size — B's number, unit, frame
+ *    and sign must equal A's.
+ *  · STRUCTURE (DL 19 Oct, the science/gate test): every node and link A keeps, B keeps, and no other; each node's kind,
+ *    category, Run participation, identity carrier and held status quo equal A's.
+ * Counted apart, never as equal, each by its rule: a person's link size (ruling (a)); a level in another unit than its factor
+ * or set on something that is not a factor (B says so); and A's GATES, which B reads by the declared origin instead — an
+ * unsized risk the AI declared a person's or of unclear origin stays in the Run; a person's factor → risk link A folds stays;
+ * A's label reading of an option as "carrying on" is not taken; a declared sum A refuses only for its quote is kept; Route A's
+ * part (it needs the person's own verified figure). A draft B refuses as unreadable is reported with A's figures it does not carry.
  */
 function differential(draft: Rec): { compared: number; equal: number; mismatches: string[]; not_used: string[]; a_created: string[]; refused?: { reason: string; figures: number } } {
-  const prepared = prepareProvisionalCandidate(draft as never).candidate;
+  const prepared = prepareProvisionalCandidate(draft as never).candidate as Rec;
   const a: Rec = admitA(prepared);
-  const converted = candidateToAdmittedGraph(draft, admitA);
+  const converted = candidateToAdmittedGraph(draft);
   // A draft B refuses as unreadable (protocol) is reported with the count of A's figures it does not carry, never hidden.
   const refused = 'refused' in converted ? converted.refused : undefined;
   const b = 'refused' in converted ? { graph: { nodes: [], edges: [], goal_constraints: [] }, loss: [], blocked_schema: [] } : converted;
@@ -172,13 +224,53 @@ function differential(draft: Rec): { compared: number; equal: number; mismatches
       if (bObj !== undefined && same(av, bObj[f])) equal += 1; else mismatches.push(`${where}.${f}: A ${JSON.stringify(av)} B ${JSON.stringify(bObj?.[f])}`);
     }
   };
+  // A structure value B must equal, compared both ways (B may not add one A has not).
+  const checkBoth = (where: string, av: unknown, bv: unknown): void => {
+    if ((av === undefined || av === null) && (bv === undefined || bv === null)) return;
+    compared += 1;
+    if (same(av, bv)) equal += 1; else mismatches.push(`${where}: A ${JSON.stringify(av)} B ${JSON.stringify(bv)}`);
+  };
+  const draftRisk = (n: Rec): Rec | undefined => ((draft.risks ?? []) as Rec[]).find((r) => canonicalLabel(String(r.label)) === key(n));
+  const declaredSq = ((draft.options ?? []) as Rec[]).filter((o) => o.is_status_quo === true).map((o) => canonicalLabel(String(o.label)));
+  const aIsLabelHeld = (optionId: string): boolean => {
+    const o = (a.nodes as Rec[]).find((n) => n.id === optionId);
+    const acts = (a.edges as Rec[]).some((e) => e.from === optionId && e.origin !== 'repair');
+    return o === undefined || declaredSq.length !== 1 || declaredSq[0] !== key(o) || acts;
+  };
+  const identity = (carrier: Rec | undefined, idOf: (id: string) => string | undefined): unknown => (carrier === undefined ? undefined
+    : { operation: carrier.operation, stated_in_brief: carrier.stated_in_brief, factor_ids: [...carrier.factor_ids].map((f: string) => idOf(f) ?? `A:${f}`).sort() });
+
   for (const n of a.nodes as Rec[]) {
-    if (n.kind === 'decision' || n.kind === 'option') continue;
+    if (n.kind === 'decision') continue;
     if (aCreated.has(n.id)) { a_created.push(`node ${key(n)}`); continue; }
     const bn = bNodeFor(n);
+    if (bn === undefined) { mismatches.push(`node ${key(n)} (${n.kind}): in A, not in B`); continue; }
+    if (n.kind === 'option') {
+      if (n.is_baseline === true && bn.is_baseline !== true && aIsLabelHeld(n.id)) not_used.push(`gate_label_status_quo: option ${key(n)}`);
+      else checkBoth(`option ${key(n)}.is_baseline`, n.is_baseline, bn.is_baseline);
+      continue;
+    }
     check(`node ${key(n)}`, n, bn, ['scale_frame', 'goal_threshold', 'goal_threshold_raw', 'goal_threshold_cap', 'goal_threshold_unit', 'goal_threshold_frame', 'quantity_frame']);
     check(`node ${key(n)}.observed_state`, n.observed_state, bn?.observed_state, ['value', 'raw_value', 'cap', 'unit', 'baseline']);
+    checkBoth(`node ${key(n)}.kind`, n.kind, bn.kind);
+    checkBoth(`node ${key(n)}.category`, n.category, bn.category);
+    const r = n.kind === 'risk' ? draftRisk(n) : undefined;
+    if (n.analysis_participation === 'retained_excluded' && r !== undefined && declaredWho(draft, 'risk', String(r.label), r.provenance) !== 'olumi'
+      && bn.analysis_participation === undefined) not_used.push(`gate_risk_origin: risk ${key(n)}`);
+    else {
+      checkBoth(`node ${key(n)}.analysis_participation`, n.analysis_participation, bn.analysis_participation);
+      checkBoth(`node ${key(n)}.analysis_participation_reason`, n.analysis_participation_reason, bn.analysis_participation_reason);
+    }
+    const aId = identity(n.nonlinear_identity, bIdFor) as Rec | undefined;
+    const bId = identity(bn.nonlinear_identity, (x) => x) as Rec | undefined;
+    if (aId !== undefined && (aId.factor_ids as string[]).some((f) => f.startsWith('A:')) && bId === undefined) not_used.push(`gate_route_a_unverified: ${key(n)}`);
+    else if (aId === undefined && bId?.operation === 'sum' && b.loss.some((l) => l.field_path === `nodes[${bn.id}].sum_identity`)) not_used.push(`gate_sum_quote: ${key(n)}`);
+    else checkBoth(`node ${key(n)}.nonlinear_identity`, aId, bId);
   }
+  // A node only B has would be structure A does not keep: none is allowed.
+  const aOfB = new Set((a.nodes as Rec[]).map((n) => bNodeFor(n)?.id).filter((x): x is string => x !== undefined));
+  for (const n of bg.nodes as Rec[]) if (n.kind !== 'decision' && !aOfB.has(n.id)) mismatches.push(`node ${key(n)} (${n.kind}): in B, not in A`);
+
   for (const o of (a.nodes as Rec[]).filter((n) => n.kind === 'option' && n.interventions)) {
     const bo = bNodeFor(o);
     for (const [aFid, lv] of Object.entries(o.interventions as Rec)) {
@@ -192,15 +284,36 @@ function differential(draft: Rec): { compared: number; equal: number; mismatches
       check(where, lv as Rec, bo?.interventions?.[bFid ?? ''], ['value', 'raw_value', 'unit']);
     }
   }
-  const structural = new Set((a.nodes as Rec[]).filter((n) => n.kind === 'option' || n.kind === 'decision').map((n) => n.id));
-  for (const e of (a.edges as Rec[]).filter((x) => !structural.has(x.from))) {
+  const aDecision = new Set((a.nodes as Rec[]).filter((n) => n.kind === 'decision').map((n) => n.id));
+  const bDecision = new Set((bg.nodes as Rec[]).filter((n) => n.kind === 'decision').map((n) => n.id));
+  const bEdgeKeys = new Set<string>();
+  for (const e of (a.edges as Rec[]).filter((x) => !aDecision.has(x.from))) {
     const where = `edge ${aKey.get(e.from)} → ${aKey.get(e.to)}`;
     if (aCreated.has(e.from) || aCreated.has(e.to)) { a_created.push(where); continue; }
     const be = (bg.edges as Rec[]).find((x) => x.from === bIdFor(e.from) && x.to === bIdFor(e.to));
-    if (be !== undefined && personSized.has(`edges[${be.from}::${be.to}]`)) { not_used.push(`person_size: ${where}`); continue; }
+    if (be === undefined && e.origin === 'repair' && aIsLabelHeld(e.from)) { not_used.push(`gate_label_status_quo: ${where}`); continue; }
+    compared += 1;
+    if (be === undefined) { mismatches.push(`${where}: in A, not in B`); continue; }
+    equal += 1;
+    bEdgeKeys.add(`${be.from}::${be.to}`);
+    if (personSized.has(`edges[${be.from}::${be.to}]`)) { not_used.push(`person_size: ${where}`); continue; }
     check(where, e, be, ['exists_probability', 'effect_direction']);
     check(`${where}.strength`, e.strength, be?.strength, ['mean', 'std']);
     check(`${where}.natural_effect`, e.provenance?.natural_effect, be?.provenance?.natural_effect, ['amount', 'per_source_change', 'amount_unit', 'per_source_change_unit']);
+  }
+  // A link only B has: a person's link A folds as a second route (a gate read by the declared origin), else a mismatch.
+  const label = (id: string): string => String((bg.nodes as Rec[]).find((n) => n.id === id)?.description ?? (bg.nodes as Rec[]).find((n) => n.id === id)?.label ?? id);
+  for (const e of (bg.edges as Rec[]).filter((x) => !bDecision.has(x.from) && !bEdgeKeys.has(`${x.from}::${x.to}`))) {
+    const where = `edge ${canonicalLabel(label(e.from))} → ${canonicalLabel(label(e.to))}`;
+    const l = ((draft.links ?? []) as Rec[]).find((x) => canonicalLabel(String(x.from)) === canonicalLabel(label(e.from)) && canonicalLabel(String(x.to)) === canonicalLabel(label(e.to)));
+    const folded = (a.loss as Rec[]).some((x) => String(x.field_path).endsWith('.one_route') && String(x.field_path).includes(`${e.from}::${e.to}`));
+    if (folded && l !== undefined && declaredWho(draft, 'link', String(l.from), l.provenance, 'relation') === 'user') { not_used.push(`gate_user_link: ${where}`); continue; }
+    // A on the raw draft leaves a reference unresolved that differs from its entity's own label only by A's canonicalLabel
+    // (case, spacing); B writes every reference with the entity's own label first, so A binds it there.
+    const unresolved = l !== undefined && (a.withheld as Rec[]).some((w) => w.reason === 'unresolved_endpoint' && w.from === l.from && w.to === l.to);
+    if (unresolved && (l!.from !== label(e.from) || l!.to !== label(e.to))) { not_used.push(`case_bound: ${where}`); continue; }
+    compared += 1;
+    mismatches.push(`${where}: in B, not in A`);
   }
   for (const k of (a.goal_constraints ?? []) as Rec[]) {
     if (aCreated.has(k.node_id)) { a_created.push(`limit ${aKey.get(k.node_id)}`); continue; }
@@ -486,7 +599,8 @@ describe('candidateToGraph: conversion + science only', () => {
   });
 
   it('⭐ DIFFERENTIAL (synthetic drafts): every figure A admits, B carries with the same number, unit, frame and sign', () => {
-    const drafts = [dilemmaDraft(), salesDraft(), salesDraft('user'), sumDraft(400), sumDraft(500), sumDraft(400, 'user'), structureDraft()];
+    const drafts = [dilemmaDraft(), salesDraft(), salesDraft('user'), sumDraft(400), sumDraft(500), sumDraft(400, 'user'), structureDraft(),
+      scienceDraft(), scienceDraft({ userFold: true }), scienceDraft({ undeclaredStatusQuo: true }), scienceDraft({ otherRisk: true }), definitionDraft()];
     const results = drafts.map(differential);
     expect(results.flatMap((r) => r.mismatches)).toEqual([]);
     expect(results.filter((r) => r.refused !== undefined)).toEqual([]);
@@ -513,8 +627,66 @@ describe('candidateToGraph: conversion + science only', () => {
     expect(summary.mismatches).toEqual([]);
   }, 600_000);
 
+  it('⭐ STRUCTURE SCIENCE (DL 19 Oct): a declared product, a lever no option reaches, an unsized Olumi risk, a double route and an option alike as drafted follow A, in A\'s words', () => {
+    const { graph, loss } = converted(scienceDraft());
+    const reasons = loss.map((l) => String(l.reason));
+    const id = (label: string): string => byLabel(graph, label).id;
+    // A product A checked on the structure: carried on the goal, as Olumi's reading (the declaration's own provenance).
+    expect(byLabel(graph, 'Monthly revenue').nonlinear_identity).toEqual({ operation: 'product', factor_ids: [id('Price'), id('Customers')], stated_in_brief: false });
+    expect(reasons.some((r) => r.startsWith('Olumi reads "Monthly revenue" as "Price" and "Customers" multiplied together.'))).toBe(true);
+    // A lever no option reaches is context, as readiness reads it.
+    expect(byLabel(graph, 'Brand awareness').category).toBe('external');
+    expect(reasons.some((r) => r.startsWith('No option in this model changes "Brand awareness", so it is held at its value as context'))).toBe(true);
+    // Olumi's unlinked, unsized risk is left out of the Run; Olumi's root risk too.
+    expect(byLabel(graph, 'Competitor price cut')).toMatchObject({ analysis_participation: 'retained_excluded', analysis_participation_reason: 'unsized_olumi_risk' });
+    expect(byLabel(graph, 'Churn spike').analysis_participation).toBe('retained_excluded');
+    expect(reasons.some((r) => r.startsWith('"Competitor price cut" is Olumi’s suggestion and is kept in the model but left out of this analysis'))).toBe(true);
+    // A factor → risk link that only re-draws the factor's own direct link is left out, in A's words.
+    expect(edge(graph, 'Price', 'Churn spike')).toBeUndefined();
+    expect(reasons.some((r) => r.startsWith('The link from "Price" to "Churn spike" was left out: "Price" already moves "Customers" straight'))).toBe(true);
+    // Olumi's options alike as drafted (each sets nothing the referral scheme does not) are left out, kept in `declared`; the user's stay.
+    expect(ofKind(graph, 'option').map((o) => o.label)).toEqual(['Raise the price', 'Run a referral scheme', 'Carry on as now']);
+    expect(['Promote more', 'Advertise more'].map((o) => reasons.some((r) => r.startsWith(`I left out "${o}" as a separate option`)))).toEqual([true, true]);
+    // The user's unsized risk stays in the Run (A and B agree: it is not Olumi's).
+    expect(byLabel(graph, 'Key supplier failure').analysis_participation).toBeUndefined();
+    // The declared status quo is held at today's levels, as A holds it.
+    expect(byLabel(graph, 'Carry on as now').is_baseline).toBe(true);
+    expect(['Price', 'Customers'].map((f) => edge(graph, 'Carry on as now', f)?.origin)).toEqual(['repair', 'repair']);
+    const diff = differential(scienceDraft());
+    expect(diff.mismatches).toEqual([]);
+  });
+
+  it('⛔ GATES read by the DECLARED origin (DL 19 Oct): another person\'s unsized risk stays in the Run; the user\'s link stays; A\'s label reading of "carrying on" is not taken', () => {
+    // A risk the AI declared another person's: A reads its tag as Olumi's and leaves it out; here it stays in (readiness holds what needs it).
+    const other = scienceDraft({ otherRisk: true });
+    expect(byLabel(converted(other).graph, 'Key supplier failure').analysis_participation).toBeUndefined();
+    expect(differential(other)).toMatchObject({ mismatches: [] });
+    expect(differential(other).not_used).toContain('gate_risk_origin: risk key supplier failure');
+    // The same double route, declared as the user's link, is their claim: it stays.
+    const userFold = scienceDraft({ userFold: true });
+    expect(edge(converted(userFold).graph, 'Price', 'Churn spike')).toBeDefined();
+    expect(differential(userFold).mismatches).toEqual([]);
+    // An option that only READS as carrying on (not declared the status quo) is not held: no label reading.
+    const undeclared = scienceDraft({ undeclaredStatusQuo: true });
+    const { graph } = converted(undeclared);
+    expect(byLabel(graph, 'Carry on as now').is_baseline).toBeUndefined();
+    expect(['Price', 'Customers'].map((f) => edge(graph, 'Carry on as now', f))).toEqual([undefined, undefined]);
+    expect(differential(undeclared).mismatches).toEqual([]);
+  });
+
+  it('⭐ ROUTE A from A: a validated definition into the goal is worked out exactly — the goal\'s own level today as a part, plus the change', () => {
+    const { graph, loss } = converted(definitionDraft());
+    const goal = ofKind(graph, 'goal')[0]!;
+    const part = byLabel(graph, 'Orders per day today');
+    expect(part).toMatchObject({ kind: 'factor', observed_state: { raw_value: 80, source: 'brief_extraction' } });
+    expect(goal.nonlinear_identity).toEqual({ operation: 'sum', factor_ids: [part.id, byLabel(graph, 'Net change in orders per day').id], stated_in_brief: false });
+    expect(edge(graph, 'Orders per day today', 'Orders per day')).toBeDefined();
+    expect(loss.some((l) => String(l.reason).startsWith('Olumi reads "Orders per day" as "Orders per day today" + "Net change in orders per day"'))).toBe(true);
+    expect(differential(definitionDraft())).toMatchObject({ mismatches: [], a_created: [] });
+  });
+
   it('protocol only: a draft with no goal is refused as unreadable; nothing is refused for what it means', () => {
-    expect(candidateToGraph(null, admitA)).toEqual({ refused: 'candidate_invalid' });
-    expect(candidateToGraph({ goal: { metric: ' ' }, options: [], factors: [], links: [] }, admitA)).toEqual({ refused: 'candidate_invalid' });
+    expect(candidateToGraph(null)).toEqual({ refused: 'candidate_invalid' });
+    expect(candidateToGraph({ goal: { metric: ' ' }, options: [], factors: [], links: [] })).toEqual({ refused: 'candidate_invalid' });
   });
 });

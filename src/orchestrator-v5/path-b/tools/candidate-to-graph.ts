@@ -3,8 +3,8 @@
  * `{nodes, edges, goal_constraints}`.
  *  · EVERY NUMBER IS A's (DL, 19 Oct, after four red rounds: "the converter must NOT re-implement number, frame or unit
  *    conversion"). The draft runs through A's own conversion — the build's preparation (`prepareProvisionalCandidate`) and
- *    A's admission, INJECTED (`admit`; S7 one admission path, DL 87114: the build owns admission, as `widen-draft.ts` takes
- *    it) — with NO brief, so no reading of the brief runs. Each value, level, frame, unit,
+ *    A's admission through the ONE named path-B door (`admitWithoutBrief`; S7 lock, DL 19 Oct: brief pinned `undefined`) —
+ *    so no reading of the brief runs. Each value, level, frame, unit,
  *    goal threshold, limit and Olumi-sized link is copied from what A admitted for the same entity (A's `canonicalLabel`
  *    identity). A figure A did not convert is said and kept in `declared`, never computed here. A setting in another unit
  *    than its factor (`sameUnit`), or on something that is not a factor, is not used, and said. Placeholders for unsized
@@ -20,7 +20,8 @@
  */
 import type { RepairEntry } from '@talchain/schemas';
 import {
-  assignIds, breakLoops, canonicalLabel, checkDeclaredSums, declaredSumSentence, displayProvenanceFor, shortLabel, slugId,
+  admitCandidateModel, admitOrdinaryCandidateModel, assignIds, breakLoops, canonicalLabel, checkDeclaredSums, declaredSumSentence,
+  displayProvenanceFor, shortLabel, slugId,
   type AdmittedModel, type AdmittedNode, type CandidateIdentity, type CandidateModel, type CandidateNodeKind,
 } from '../../agent-lane/admit-model.js';
 import { prepareProvisionalCandidate } from '../../agent-lane/runtime/build-model.js';
@@ -31,10 +32,10 @@ import { admitAccumulationIdentities, withAdmittedAccumulations } from '../../ag
 import { clampForPersist, refitFramesForOlumiEstimates, refitFramesForStatedEffects } from '../../agent-lane/refit-frames.js';
 import { resolveMagnitudeFrame, sizeLink, type LinkSizing } from '../../../cee/magnitude/link-effect.js';
 import { magnitudeNodes, percentLevelIds } from '../../../cee/magnitude/frame-defaulted-links.js';
-import { nodeProvenanceDisplay } from '../../../cee/provenance/provenance-of.js';
+import { isPersonsOwnValue, nodeProvenanceDisplay } from '../../../cee/provenance/provenance-of.js';
+import { UNSIZED_OLUMI_RISK_REASON } from '../../agent-lane/unsized-risk.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../../orchestrator/context/constants.js';
 import { REPAIR_AUTHORED_ORIGIN } from '../../../graph/repair-authored-edge.js';
-import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../../cee/unified-pipeline/stages/repair/status-quo-fix.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 
 type Rec = Record<string, any>;
@@ -91,22 +92,27 @@ function asCandidate(v: unknown): CandidateModel | null {
   return model as CandidateModel;
 }
 
-/** A's admission of a prepared draft with no brief, injected by the caller (the build owns admission and its fallback). */
-export type AdmitDraft = (candidate: CandidateModel) => AdmittedModel;
+/**
+ * ⭐ S7 PATH-B DOOR (DL 19 Oct): the ONE admission outside the build's `admitForBuild`, and it never sees a brief. The S7
+ * census (`one-admission-path.test.ts`) allows admission calls only inside this function, and only with the brief `undefined`.
+ */
+function admitWithoutBrief(prepared: CandidateModel): AdmittedModel {
+  try { return admitCandidateModel(prepared, {}, undefined); } catch { return admitOrdinaryCandidateModel(prepared, {}, undefined); }
+}
 
-/** A's own conversion of the draft, with no brief: the numbers this converter copies. */
-function convertedByA(c: CandidateModel, admit: AdmitDraft): { a: AdmittedModel; prepared: CandidateModel } | null {
+/** A's own conversion of the draft, with no brief: the numbers and the structure science this converter copies. */
+function convertedByA(c: CandidateModel): { a: AdmittedModel; prepared: CandidateModel } | null {
   try {
     const prepared = prepareProvisionalCandidate(c).candidate;
-    return { a: admit(prepared), prepared };
+    return { a: admitWithoutBrief(prepared), prepared };
   } catch { return null; }
 }
 
 /** The converted graph BEFORE the build's refit chain (what the differential compares with A's admission). */
-export function candidateToAdmittedGraph(input: unknown, admit: AdmitDraft): Converted | { readonly refused: 'candidate_invalid' | 'not_convertible' } {
+export function candidateToAdmittedGraph(input: unknown): Converted | { readonly refused: 'candidate_invalid' | 'not_convertible' } {
   const c = asCandidate(input);
   if (c === null) return { refused: 'candidate_invalid' };
-  const byA = convertedByA(c, admit);
+  const byA = convertedByA(c);
   if (byA === null) return { refused: 'not_convertible' };
   const { a } = byA;
   const loss: RepairEntry[] = [];
@@ -123,6 +129,12 @@ export function candidateToAdmittedGraph(input: unknown, admit: AdmitDraft): Con
     statements.find((s) => s?.subject?.kind === kind && canonicalLabel(String(s.subject.label ?? '')) === canonicalLabel(label) && extra(s))?.speaker;
   const whoOf = (provenance: unknown, speaker: unknown): Who => (speaker === 'other' ? 'other' : speaker === 'unknown' ? 'unknown'
     : provenance === 'explicit' ? 'user' : 'olumi');
+  // A's own sentences, by the field they are about: a science decision this converter takes from A is said in A's words.
+  const aSaid = (path: string): RepairEntry[] => a.loss.filter((l) => l.field_path === path);
+  // SCIENCE (structure): an option A leaves out because it sets nothing the model can hold that another option does not is
+  // left out here too, said in A's words; it stays in `declared`.
+  const options = c.options.filter((o) => aSaid(`nodes[${slugId(o.label)}].option_indistinct`).length === 0);
+  for (const o of c.options) if (!options.includes(o)) loss.push(...aSaid(`nodes[${slugId(o.label)}].option_indistinct`));
 
   // The goal: A's threshold, cap, frame and today's level; the AI's declared comparator, horizon and words beside them.
   const aGoal = [aFor(g.metric)].find((n) => n?.kind === 'goal') ?? a.nodes.find((n) => n.kind === 'goal');
@@ -142,18 +154,30 @@ export function candidateToAdmittedGraph(input: unknown, admit: AdmitDraft): Con
     ...(finite(g.horizon_months) && g.horizon_months > 0 ? { goal_horizon_months: g.horizon_months } : {}),
     ...(typeof (g as Rec).source_quote === 'string' ? { source_quote: (g as Rec).source_quote } : {}) };
 
+  // SCIENCE with an authorship input, read by the DECLARED origin: A leaves out of the Run what has no size or is a later aim.
+  // An unsized risk is left out only when the AI declared it Olumi's (A, with no brief, reads every risk as Olumi's: a gate,
+  // not copied); a person's or an unclear source's unsized risk stays in, and readiness holds the result it would need.
+  const outOfRun = (an: AdmittedNode | undefined, kind: string, who: Who): Rec => {
+    if (an?.analysis_participation !== 'retained_excluded' || (kind === 'risk' && who !== 'olumi')) return {};
+    if (kind === 'risk') loss.push(...aSaid(`nodes[${an.id}].left_out_of_analysis`));
+    return { analysis_participation: 'retained_excluded', ...(an.analysis_participation_reason === UNSIZED_OLUMI_RISK_REASON
+      ? { analysis_participation_reason: UNSIZED_OLUMI_RISK_REASON } : {}) };
+  };
   const factorWho = new Map<string, Who>();
   const entities: { label: string; kind: CandidateNodeKind; provenance: string; node: Rec }[] = [
     { label: g.metric, kind: 'goal', provenance: g.provenance, node: goalNode },
-    ...c.options.map((o) => ({ label: o.label, kind: 'option' as const, provenance: o.provenance, node: {} })),
+    ...options.map((o) => ({ label: o.label, kind: 'option' as const, provenance: o.provenance, node: {} })),
     ...c.factors.map((f) => {
       const an = aFor(f.label);
       const who = whoOf(f.provenance, speakerOf('factor', f.label, (s) => s.field === 'level'));
       factorWho.set(canonicalLabel(f.label), who);
       if (who === 'other' && an?.observed_state !== undefined) blocked.push({ field_path: `nodes[${slugId(f.label)}].observed_state`, declared: 'other', missing: 'speaker_name' });
       if (finite(f.baseline_value) && an?.observed_state === undefined) loss.push(notConverted(a, `nodes[${slugId(f.label)}].observed_state`, f.label, "Today's level", f.baseline_value));
+      // SCIENCE (structure): A's category — a lever no option reaches is held as context (`demoteUnreachedLevers`), which
+      // readiness reads; said in A's words.
+      if (an?.category !== undefined && an.category !== f.role) loss.push(...aSaid(`nodes[${an.label}].category`));
       return { label: f.label, kind: 'factor' as const, provenance: f.provenance, node: {
-        category: f.role, ...(an?.scale_frame !== undefined ? { scale_frame: an.scale_frame } : {}),
+        category: an?.category ?? f.role, ...(an?.scale_frame !== undefined ? { scale_frame: an.scale_frame } : {}), ...outOfRun(an, 'factor', who),
         ...(an?.observed_state !== undefined ? { observed_state: { ...numbersOf(an.observed_state), ...valueStamp(who) },
           ...(typeof f.baseline_evidence?.quote === 'string' ? { source_quote: f.baseline_evidence.quote } : {}) } : {}),
       } };
@@ -161,7 +185,10 @@ export function candidateToAdmittedGraph(input: unknown, admit: AdmitDraft): Con
     ...[...c.risks.map((r) => ({ ...r, kind: 'risk' as const })), ...c.outcomes.map((o) => ({ ...o, kind: 'outcome' as const }))].map((n) => {
       const an = aFor(n.label);
       const who = whoOf(n.provenance, speakerOf(n.kind, n.label, (s) => s.field === 'level'));
-      return { label: n.label, kind: n.kind, provenance: n.provenance, node: { ...(an?.scale_frame !== undefined ? { scale_frame: an.scale_frame } : {}),
+      // SCIENCE (units, constraints): an outcome a limit holds at a percentage level is a factor that can hold it (A's re-kind).
+      const kind = n.kind === 'outcome' && an?.kind === 'factor' ? 'factor' as const : n.kind;
+      return { label: n.label, kind, provenance: n.provenance, node: { ...(an?.scale_frame !== undefined ? { scale_frame: an.scale_frame } : {}),
+        ...(kind === 'factor' && an?.category !== undefined ? { category: an.category } : {}), ...outOfRun(an, n.kind, who),
         ...(an?.observed_state !== undefined ? { observed_state: { ...numbersOf(an.observed_state), ...valueStamp(who) } } : {}) } };
     }),
   ];
@@ -192,14 +219,10 @@ export function candidateToAdmittedGraph(input: unknown, admit: AdmitDraft): Con
   const aPair = (from: string, to: string): string => `${aIdOf.get(from)}::${aIdOf.get(to)}`;
 
   // Option settings: A's level for the same option and factor; the declared origin; a computed total is Olumi's.
-  const interventionsByOption = new Map<string, Rec>();
-  const actsOn = new Map<string, Set<string>>();
-  for (const o of c.options) {
+  for (const o of options) {
     const oid = idFor(o.label)!;
-    const acts = new Set<string>();
     const bundle: Rec = {};
     const aOption = aFor(o.label);
-    for (const label of o.changes ?? []) { const fid = idFor(label); if (fid !== undefined && kindOf(fid) === 'factor') acts.add(fid); }
     for (const iv of o.interventions ?? []) {
       const fid = idFor(iv.factor_label);
       if (fid === undefined || kindOf(fid) !== 'factor') {
@@ -207,7 +230,6 @@ export function candidateToAdmittedGraph(input: unknown, admit: AdmitDraft): Con
           + `${iv.unit ? ` ${iv.unit}` : ''}, but "${iv.factor_label}" is not a factor in this model, so that level is not used; Olumi kept it as drafted.`, 'warn'));
         continue;
       }
-      acts.add(fid);
       const factorLabel = String(nodeById.get(fid)!.description ?? nodeById.get(fid)!.label);
       const declaredFactor = c.factors.find((f) => idFor(f.label) === fid);
       const aFactorId = aIdOf.get(fid);
@@ -237,12 +259,11 @@ export function candidateToAdmittedGraph(input: unknown, admit: AdmitDraft): Con
         target_match: { node_id: fid, match_type: 'exact_id', confidence: 'high' },
         ...(who === 'other' || who === 'unknown' ? { user_material_unverified: true as const } : {}) };
     }
-    if (Object.keys(bundle).length > 0) { interventionsByOption.set(oid, bundle); nodeById.get(oid)!.interventions = bundle; }
-    actsOn.set(oid, acts);
+    if (Object.keys(bundle).length > 0) nodeById.get(oid)!.interventions = bundle;
   }
 
-  // Links: an option's link to a factor is the option acting on it. Every other link carries A's size for the same pair,
-  // except a size the AI declared as a person's (DL ruling (a)): that keeps Olumi's placeholder, said, kept and listed.
+  // Links: an option's links are A's (below). Every other link carries A's size for the same pair, except a size the AI
+  // declared as a person's (DL ruling (a)): that keeps Olumi's placeholder, said, kept and listed.
   const aEdgeOf = new Map<string, Rec>(a.edges.map((e) => [`${e.from}::${e.to}`, e]));
   const causal: CandidateLink[] = [];
   const placeholder = new Set<CandidateLink>();
@@ -252,9 +273,13 @@ export function candidateToAdmittedGraph(input: unknown, admit: AdmitDraft): Con
       loss.push(note(`edges[${l.from}::${l.to}]`, { from: l.from, to: l.to }, `The link from "${l.from}" to "${l.to}" names something not in the model, so it is not drawn.`, 'warn'));
       continue;
     }
-    if (kindOf(from) === 'option' && kindOf(to) === 'factor') { actsOn.get(from)?.add(to); continue; }
+    if (kindOf(from) === 'option') continue;
     const said = (field: string) => (st: Rec): boolean => st.field === field && canonicalLabel(String(st.subject.to_label ?? '')) === canonicalLabel(l.to);
     const drawnBy = whoOf(l.provenance, speakerOf('link', l.from, said('relation')));
+    // SCIENCE (structure, signs): a factor → risk link that only re-draws the factor's own direct links counts that effect
+    // twice, so A leaves it out (`oneRoutePerEffect`); its authorship exemption is read by the DECLARED origin (a person's link stays).
+    const folded = aSaid(`edges[${aPair(from, to)}].one_route`);
+    if (folded.length > 0 && drawnBy !== 'user') { loss.push(...folded); continue; }
     if (drawnBy === 'other' || drawnBy === 'unknown') blocked.push({ field_path: `edges[${from}::${to}]`, declared: drawnBy, missing: 'link_origin' });
     const { strength_mean: _mean, strength_std: _std, ...drafted } = l;
     const link: CandidateLink = { ...drafted, from, to };
@@ -293,17 +318,27 @@ export function candidateToAdmittedGraph(input: unknown, admit: AdmitDraft): Con
     exists_probability: STRUCTURAL_EDGE_DEFAULTS.exists_probability, effect_direction: STRUCTURAL_EDGE_DEFAULTS.effect_direction,
     provenance: { source: 'cee_hypothesis' } });
   const decisionId = nodes.find((n) => n.kind === 'decision')!.id;
-  const topology = nodes.filter((n) => n.kind === 'option').flatMap((o) => [topo(decisionId, o.id), ...[...(actsOn.get(o.id) ?? [])].map((fid) => topo(o.id, fid))]);
-  // The ONE status quo the AI declared, if it acts on nothing, is held at today's level of what the others set (as
-  // `wireInertStatusQuo` holds a declared one; its label fallback is never reached here).
-  const declaredStatusQuo = [...new Set(c.options.filter((o) => o.is_status_quo === true).map((o) => idFor(o.label)!))];
-  const sq = declaredStatusQuo.length === 1 && (actsOn.get(declaredStatusQuo[0]!)?.size ?? 0) === 0 ? declaredStatusQuo[0]! : undefined;
-  const basis = new Set<string>();
-  for (const [oid, b] of interventionsByOption) if (oid !== sq) for (const fid of Object.keys(b)) basis.add(fid);
-  if (basis.size === 0) for (const [oid, acts] of actsOn) if (oid !== sq) for (const fid of acts) basis.add(fid);
-  const heldEdges = sq === undefined ? [] : [...basis].map((fid) => ({ ...topo(sq, fid),
-    origin: REPAIR_AUTHORED_ORIGIN, provenance: { source: 'cee_hypothesis', reasoning: CONNECTIVITY_REPAIR_WIRING_REASON } }));
-  if (heldEdges.length > 0) nodeById.get(sq!)!.is_baseline = true;
+  // SCIENCE (structure): each option's links are A's — what it sets and acts on, with A's rules (a level on a quantity its own
+  // levers make, a link with no direction, are not drawn). A status quo is held as A holds it only when it is the ONE status
+  // quo the AI declared and it acts on nothing: A's reading of an option's label as "carrying on" is never taken (a gate).
+  const declaredStatusQuo = [...new Set(options.filter((o) => o.is_status_quo === true).map((o) => idFor(o.label)!))];
+  const sq = declaredStatusQuo.length === 1 ? declaredStatusQuo[0]! : undefined;
+  const held = (e: object): boolean => (e as Rec).origin === REPAIR_AUTHORED_ORIGIN;
+  const sqActs = sq !== undefined && a.edges.some((e) => e.from === aIdOf.get(sq) && !held(e));
+  const optionEdges = a.edges.flatMap((e) => {
+    const from = bIdOfA.get(e.from), to = bIdOfA.get(e.to);
+    if (from === undefined || to === undefined || kindOf(from) !== 'option') return [];
+    return held(e) && (from !== sq || sqActs) ? [] : [{ ...e, from, to }];
+  });
+  if (optionEdges.some(held)) {
+    nodeById.get(sq!)!.is_baseline = true;
+    loss.push(...aSaid(`nodes[${aIdOf.get(sq!)}].status_quo_held`));
+  }
+  for (const w of a.withheld) {
+    const from = bIdOfA.get(String(w.from)) ?? idFor(String(w.from));
+    if (from !== undefined && kindOf(from) === 'option' && w.loop === undefined) loss.push(note(`edges[${from}::${w.to}]`, { from: w.from, to: w.to }, w.detail, 'warn'));
+  }
+  const topology = [...nodes.filter((n) => n.kind === 'option').map((o) => topo(decisionId, o.id)), ...optionEdges];
 
   const goalId = nodes.find((n) => n.kind === 'goal')!.id;
   // A loop is broken where A broke it (A's own withheld links), then by `breakLoops` for any loop only this draft has.
@@ -311,7 +346,7 @@ export function candidateToAdmittedGraph(input: unknown, admit: AdmitDraft): Con
   const keptLinks = linkEdges.filter((e) => !aLeftOut.has(aPair(e.from, e.to)));
   loss.push(...linkEdges.filter((e) => !keptLinks.includes(e)).map((e) => note(`edges[${e.from}::${e.to}].loop_withheld`, { from: e.from, to: e.to },
     a.withheld.find((w) => `${w.from}::${w.to}` === aPair(e.from, e.to))?.detail ?? 'This link closes a loop, which the analysis cannot run, so it is left out.', 'warn')));
-  const loops = breakLoops([...topology, ...heldEdges, ...keptLinks] as { from: string; to: string }[], {
+  const loops = breakLoops([...topology, ...keptLinks] as { from: string; to: string }[], {
     mayWithhold: (e) => kindOf(e.from) !== 'option' && kindOf(e.from) !== 'decision', goalId, kindOf });
   loss.push(...loops.withheld.map(({ edge }) => note(`edges[${edge.from}::${edge.to}].loop_withheld`, { from: edge.from, to: edge.to },
     `The link from "${nodeById.get(edge.from)?.label}" to "${nodeById.get(edge.to)?.label}" closes a loop, which the analysis cannot run, so it is left out.`, 'warn')));
@@ -334,10 +369,35 @@ export function candidateToAdmittedGraph(input: unknown, admit: AdmitDraft): Con
       ? ` Today: ${derivation(String(today(s.outcome_id)), s.factor_ids.map((id) => ({ by: factorWho.get(canonicalLabel(named(id))) ?? 'unknown', amount: String(today(id)) })))}.` : '';
     loss.push(note(`nodes[${s.outcome_id}].sum_identity`, null, declaredSumSentence(named(s.outcome_id), s.factor_ids.map(named), false) + arithmetic));
   }
+  // SCIENCE (structure, units): A's identity carriers on the same nodes — a declared product A checked on the structure
+  // (`markProductIdentities`; whose reading it is follows the declaration's own provenance), a limited tally of same-unit
+  // levers (`findSumTallies`), a validated definition into the goal (Route A, `goal-definition-sum.ts`, with A's "today"
+  // part: a copy of the goal's own level today, taken when that level is the person's own figure by the declared origin) —
+  // said in A's words.
+  for (const an of a.nodes) {
+    const id = bIdOfA.get(an.id);
+    const carrier = an.nonlinear_identity;
+    if (id === undefined || carrier === undefined || nodeById.get(id)!.nonlinear_identity !== undefined) continue;
+    const made = a.nodes.filter((n) => carrier.factor_ids.includes(n.id) && !bIdOfA.has(n.id));
+    const today = nodeById.get(id)!.observed_state;
+    const madeLinks = made.map((p) => a.edges.find((e) => e.from === p.id && e.to === an.id));
+    if (made.length > 0 && (id !== goalId || !isPersonsOwnValue(today) || madeLinks.some((l) => l === undefined))) continue;
+    made.forEach((p, i) => {
+      const part = { ...p, observed_state: { ...(today as Rec) } } as AdmittedNode & Rec;
+      nodes.push(part); nodeById.set(p.id, part); bIdOfA.set(p.id, p.id); edges.push({ ...madeLinks[i]!, to: id });
+    });
+    nodeById.get(id)!.nonlinear_identity = { ...carrier, factor_ids: carrier.factor_ids.map((f) => bIdOfA.get(f)!) };
+    loss.push(...aSaid(`nodes[${an.id}].nonlinear_identity`), ...aSaid(`nodes[${an.id}].sum_identity`));
+  }
+  // A's refusal of a declared identity, said where no carrier stands on that node here (a sum A refuses only for its quote is kept above).
+  loss.push(...a.loss.filter((l) => {
+    const m = /^nodes\[(.+)\]\.nonlinear_identity_rejected$/.exec(String(l.field_path));
+    return m !== null && nodeById.get(bIdOfA.get(m[1]!) ?? m[1]!)?.nonlinear_identity === undefined;
+  }));
 
   // What the draft declares that this conversion does not carry yet is said (and kept, verbatim, in `declared`).
   const notCarried = [...(g.kind === 'event_by_date' ? [`a forecast for the deadline of "${g.deliverable ?? g.metric}"`] : []),
-    ...list<Rec>(c.identities).filter((d) => d?.operation === 'product' || (d?.operation === 'accumulation' && !finite(g.horizon_months)))
+    ...list<Rec>(c.identities).filter((d) => d?.operation === 'accumulation' && !finite(g.horizon_months))
       .map((d) => `how "${d.outcome}" is made up`), ...(g.scope ? [`whether "${g.metric}" is one part or the whole`] : [])];
   if (notCarried.length > 0) loss.push(note(`nodes[${goalId}].not_carried`, null, `This draft does not include ${notCarried.join(', or ')} yet; Olumi kept it as drafted.`));
   return { graph: { nodes, edges, ...(goal_constraints.length > 0 ? { goal_constraints } : {}) }, declared: structuredClone(input), loss, blocked_schema: blocked };
@@ -347,8 +407,8 @@ export function candidateToAdmittedGraph(input: unknown, admit: AdmitDraft): Con
  * The draft as Olumi's provisional model: the converted graph through the build's own post-admission science — a declared
  * accumulation over a declared horizon, then the refit chain (stated `{goalOwnRows}` → Olumi → `clampForPersist`) — schema-checked.
  */
-export function candidateToGraph(input: unknown, admit: AdmitDraft): CandidateToGraphResult {
-  const converted = candidateToAdmittedGraph(input, admit);
+export function candidateToGraph(input: unknown): CandidateToGraphResult {
+  const converted = candidateToAdmittedGraph(input);
   if ('refused' in converted) return converted;
   const c = asCandidate(input)!;
   let graph0 = converted.graph as Rec;
