@@ -7601,7 +7601,7 @@ export function createAgentCapabilities(
         // one (`figureIsThisQuantitys`, Codex R3 on #3433): this factor is never written with it, labelled or not, and the user is
         // asked which they mean. The verdict's own presence is the user's words (Codex R6: "70 tickets" for a factor counted in
         // nurses was "origin unknown", so the ask was generic). Olumi's own estimate is never the user's figure, so it stays Olumi's
-        // and is never asked about (P53: "Suggest two hundred pounds as the cost estimate" proposes Olumi's £200).
+        // and is never asked about (P53: a user asking for a cost estimate in words gets Olumi's £200 proposed).
         if (origin !== 'ai' && identity?.verdict === 'not_this') {
           notThisFactors.push({ label: node.label, value: Number(a.value), written_for: identity.givenTo });
           continue;
