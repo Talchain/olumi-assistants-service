@@ -3,12 +3,17 @@
  * prompt/AIE-SPEAKER-CARRIER-AND-UNCERTAINTY-SUPPORT-20261019-v1.json sha256 564fe768…; DL-3 #94 6260306712 as AMENDED; Codex
  * pair e2ce67bb's minimum rows).
  *
- * A user's point gives the size, never the spread: construction marks the spread Olumi's (`std_defaulted`), and the Run's one
- * chance-support walk (`chanceSupportGoalPaths`, behind `unsizedLeaderGoalPaths`) withholds only the options whose path runs
- * through such a link, with the AIE's exact words, on every chance surface: the stored result, the licence, the card, the typed
- * rows, the reply, and no range re-entry. The size stays the user's; β and σ are unchanged; a stated spread, an exact definition
- * or identity operand, an off-path link and the status quo keep their chances. Real path: stored bytes → cold snapshot → the real
- * Run handler (PLoT's served body) → the stored fact and its readers. Two brief families: cut-costs (1f9d769) and price/MRR (17d1).
+ * A user's point gives the size, never the spread. The Run's one chance-support walk (`chanceSupportGoalPaths`, behind
+ * `unsizedLeaderGoalPaths`) withholds only the options whose path runs through such a link, with the AIE's exact words, on every
+ * chance surface: the stored result, the licence, the card, the typed rows, the reply, and no range re-entry. The size stays the
+ * user's; β and σ are unchanged; a named band or explicit spread the ACTUAL chat writer recorded, an exact definition or identity
+ * operand, a fixed option level, an off-path link and the status quo keep their chances.
+ * PL 06:05: support is read from the carrier that records who stated each number (`magnitude: 'user_stated'` for a size in the
+ * user's units, whose writers never state a spread; the chat writer's per-field `std_defaulted` for a strength), never from the
+ * std's value or `defaulted`. So the user-sized links below are UNMARKED (no `std_defaulted`), as construction writes them and as
+ * every graph saved before this PR holds them: each row is also the reopened / legacy case.
+ * Real path: stored bytes → cold snapshot → the real Run handler (PLoT's served body) → the stored fact and its readers. Two brief
+ * families: cut-costs (1f9d769) and price/MRR (17d1).
  */
 import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -35,6 +40,10 @@ import { createRunAnalysisHandler } from '../run-analysis.js';
 import { buildModelFromBrief } from '../../../agent-lane/runtime/build-model.js';
 import { clampForPersist, refitFramesForStatedEffects } from '../../../agent-lane/refit-frames.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
+import { createAdjustEdgeStrengthHandler } from '../adjust-edge-strength.js';
+import { EDGE_STRENGTH_MIDPOINTS, edgeBandStd } from '../../../format/edge-strength-bands.js';
+import { linkSizing } from '../../../../cee/magnitude/link-sizing.js';
+import { LINK_AUTHORSHIP_MEMBERS } from '../run-input-residual.js';
 
 type Json = Record<string, any>;
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
@@ -59,15 +68,18 @@ function mrrGraph(): Json {
   return c;
 }
 
+/** The links every mover's path runs through that nobody sized (the served placeholders). */
+const goalPathKeys = (graph: Json, movers: readonly string[]): string[] =>
+  [...new Set(unsizedLeaderGoalPaths(graph, movers).flatMap((p) => p.links).map((l) => `${l.from}->${l.to}`))];
+
 /**
- * The links every mover's path runs through that nobody sized, made the USER's size, as construction now writes a stated
- * point: `magnitude: 'user_stated'`, the same strength (β and σ unchanged), and the spread Olumi's (`std_defaulted`) unless the
- * user stated it. `range`: the user's range held on the link.
+ * Those links made the USER's size, as construction writes a stated point: `magnitude: 'user_stated'`, the same strength (β and σ
+ * unchanged), and NO `std_defaulted` — unmarked, as construction writes it and as a reopened or legacy graph holds it. `stamped`:
+ * the A6f mark as the chat statement writer adds it (`link-effect-edit.ts`). `range`: the user's range held on the link.
  */
-function userSized(graph: Json, movers: readonly string[], o: { spreadStated?: boolean; range?: boolean; only?: number } = {}): Json {
+function userSized(graph: Json, movers: readonly string[], o: { stamped?: boolean; range?: boolean; only?: number } = {}): Json {
   const g = clone(graph);
-  const links = unsizedLeaderGoalPaths(g, movers).flatMap((p) => p.links);
-  const keys = [...new Set(links.map((l) => `${l.from}->${l.to}`))].slice(0, o.only ?? Infinity);
+  const keys = goalPathKeys(g, movers).slice(0, o.only ?? Infinity);
   for (const e of g.edges as Json[]) {
     if (!keys.includes(`${e.from}->${e.to}`)) continue;
     const { mean_projected: _m, magnitude: _g, ...rest } = e.provenance ?? {};
@@ -75,10 +87,40 @@ function userSized(graph: Json, movers: readonly string[], o: { spreadStated?: b
       ...(o.range ? { natural_effect: { amount: 2, per_source_change: 1, amount_unit: 'units', per_source_change_unit: 'units', strength_mean: e.strength.mean, strength_mean_frame: 'edge_strength',
         stated_range: { low: 1, high: 3, text: 'between 1 and 3', end: 'centre' } } } : {}) };
     delete e.defaulted;
-    if (o.spreadStated !== true) e.std_defaulted = true;
+    delete e.std_defaulted;
+    if (o.stamped === true) e.std_defaulted = true;
   }
   return g;
 }
+
+/**
+ * The same links written by the ACTUAL chat writer (`adjust_edge_strength`) as the user's own strength. `band`: a band the user
+ * named (the trusted side band its approval carries, `stated-link-band-context.ts`), so the writer stores the band's spread and
+ * records it as theirs; `std`: an explicit spread; `figure`: an exact figure, whose spread the writer records as Olumi's (A6f). Each
+ * write moves the strength to a band midpoint (a same-value write is review, not authorship).
+ */
+async function chatWritten(graph: Json, movers: readonly string[], mode: 'band' | 'std' | 'figure'): Promise<Json> {
+  let g = clone(graph);
+  for (const key of goalPathKeys(graph, movers)) {
+    const [from, to] = key.split('->') as [string, string];
+    const edge = (g.edges as Json[]).find((e) => e.from === from && e.to === to)!;
+    const band = (['moderate', 'strong'] as const).find((b) => EDGE_STRENGTH_MIDPOINTS[b] !== Math.abs(edge.strength.mean))!;
+    const value = (edge.strength.mean < 0 ? -1 : 1) * EDGE_STRENGTH_MIDPOINTS[band];
+    const proposal = { handler_id: 'adjust_edge_strength', cited_context_fields: [],
+      entity: { id: `${from}→${to}`, kind: 'edge', resolution_status: 'resolved', resolution_method: 'id_match' },
+      parameters: [{ name: 'strength', value, operator: 'set', source: 'user_explicit' }, ...(mode === 'std' ? [{ name: 'std', value: 0.07, source: 'user_explicit' }] : [])] };
+    const outcome = await createAdjustEdgeStrengthHandler()({
+      context: { session_id: 'sp-writer', stage: 'frame', request_id: 'req-sp-w', prior_turns: [], prior_facts: [], scenarioBriefText: null, persistedGraph: null },
+      payload: { kind: 'message', scenario_id: 'sp-writer', turn_id: '11111111-1111-4111-8111-111111111499', stage: 'frame', message: 'Yes, record that.' },
+      requestId: 'req-sp-w', signal: new AbortController().signal, orientationText: '', proposal, graphForTurn: g,
+      ...(mode === 'band' ? { edgeStrengthBandAuthority: band } : {}),
+    } as unknown as HandlerInvocation);
+    g = clone(outcome.mutated_graph) as Json;
+  }
+  return g;
+}
+const writtenLinks = (g: Json, of: Json, movers: readonly string[]): Json[] =>
+  goalPathKeys(of, movers).map((k) => (g.edges as Json[]).find((e) => `${e.from}->${e.to}` === k)!);
 
 async function run(graph: Json, body: Json, brief: string, scenario: string): Promise<{ result: Json; fact: Json }> {
   const store = { readMostRecentPendingActions: async () => [], loadGraphAndBriefText: vi.fn(async () => ({ graph: clone(graph), briefText: brief })),
@@ -139,39 +181,77 @@ function expectWithheldEverywhere(r: Json, fact: Json, graph: Json, withheld: re
   expect(reply!.say).toContain(question);
 }
 
-describe('PREMISE: both served runs show the movers\' chances once their links are sized with a supported spread', () => {
-  it('cut-costs: the placeholder links withhold today; a stated spread on the same user sizes shows every chance (positive control)', async () => {
+const CUT_BANDED = await chatWritten(CUT_GRAPH, CUT_MOVERS, 'band');
+
+describe('PREMISE (supported positives through the ACTUAL chat writer): a named band or an explicit spread keeps every chance', () => {
+  it('cut-costs: the placeholders withhold today; the user\'s named band, written by the writer on the same links, shows every chance', async () => {
     expect(coded((await cutRun(CUT_GRAPH)).result, GOAL_FIGURES_PLACEHOLDER_PATH)).not.toEqual([]);
-    const { result } = await cutRun(userSized(CUT_GRAPH, CUT_MOVERS, { spreadStated: true }));
+    for (const e of writtenLinks(CUT_BANDED, CUT_GRAPH, CUT_MOVERS)) {
+      expect(linkSizing(e), 'the user\'s strength').toBe('user');
+      expect(e, 'the writer recorded the spread as theirs').not.toHaveProperty('std_defaulted');
+      expect([edgeBandStd('moderate'), edgeBandStd('strong')]).toContain(e.strength.std);
+    }
+    const { result } = await cutRun(CUT_BANDED);
     expect(coded(result, GOAL_FIGURES_UNSUPPORTED_SPREAD)).toEqual([]);
     for (const id of [...CUT_MOVERS, CUT_SQ]) expect(chanceShown(result, id), id).toBe(true);
   });
-  it('price/MRR: the same control on the second family', async () => {
-    const { result } = await mrrRun(userSized(mrrGraph(), MRR_OPTIONS, { spreadStated: true }));
+  it('cut-costs: an explicit spread the user gave, through the same writer, shows every chance', async () => {
+    const g = await chatWritten(CUT_GRAPH, CUT_MOVERS, 'std');
+    for (const e of writtenLinks(g, CUT_GRAPH, CUT_MOVERS)) expect(e).toMatchObject({ strength: { std: 0.07 } });
+    const { result } = await cutRun(g);
+    expect(coded(result, GOAL_FIGURES_UNSUPPORTED_SPREAD)).toEqual([]);
+    for (const id of [...CUT_MOVERS, CUT_SQ]) expect(chanceShown(result, id), id).toBe(true);
+  });
+  it('price/MRR: the named-band control on the second family', async () => {
+    const { result } = await mrrRun(await chatWritten(mrrGraph(), MRR_OPTIONS, 'band'));
     expect(coded(result, GOAL_FIGURES_UNSUPPORTED_SPREAD)).toEqual([]);
     expect(MRR_OPTIONS.filter((id) => chanceShown(result, id)).length).toBeGreaterThan(1);
   });
 });
 
+describe('THE WRITER\'S OWN RECORD: an exact figure keeps Olumi\'s spread, and only that record tells it from a named band', () => {
+  it('cut-costs: an exact figure through the writer (std_defaulted, A6f) is withheld on every surface with the point words', async () => {
+    const g = await chatWritten(CUT_GRAPH, CUT_MOVERS, 'figure');
+    for (const e of writtenLinks(g, CUT_GRAPH, CUT_MOVERS)) expect(e).toMatchObject({ std_defaulted: true, provenance: { source: 'user_specified' } });
+    const { result, fact } = await cutRun(g);
+    expectWithheldEverywhere(result, fact, g, CUT_MOVERS, UNSUPPORTED_POINT_WORDS, UNSUPPORTED_POINT_QUESTION);
+  });
+  it('DISCLOSED RESIDUAL: a named-band write and an exact write differ in who-authored-what ONLY by `std_defaulted`, so an exact write saved before A6f cannot be told apart from a band without reading the std', async () => {
+    const figure = await chatWritten(CUT_GRAPH, CUT_MOVERS, 'figure');
+    const authorship = (e: Json): Json => Object.fromEntries(LINK_AUTHORSHIP_MEMBERS.filter((k) => k !== 'std_defaulted' && k in e)
+      .map((k) => [k, k === 'provenance' ? { ...e.provenance, reviewed_by_user: undefined } : e[k]]));
+    const banded = writtenLinks(CUT_BANDED, CUT_GRAPH, CUT_MOVERS);
+    writtenLinks(figure, CUT_GRAPH, CUT_MOVERS).forEach((e, i) => {
+      expect(authorship(e)).toEqual(authorship(banded[i]!));
+      expect([e.std_defaulted, banded[i]!.std_defaulted]).toEqual([true, undefined]);
+    });
+  });
+});
+
 describe('⭐ RED→GREEN: a user\'s POINT on the default spread withholds only the dependent chances, on every surface', () => {
-  it('cut-costs: the movers are withheld with the AIE\'s point words and question; the status quo keeps its chance; β/σ unchanged', async () => {
+  it('cut-costs, UNMARKED (reopened / legacy): the movers are withheld with the AIE\'s point words; the status quo keeps its chance; β/σ unchanged', async () => {
     const g = userSized(CUT_GRAPH, CUT_MOVERS);
+    const keys = goalPathKeys(CUT_GRAPH, CUT_MOVERS);
+    const users = (g.edges as Json[]).filter((e) => keys.includes(`${e.from}->${e.to}`));
+    for (const e of users) expect(e, 'no A6f mark: the graph a reopen or a legacy save holds').not.toHaveProperty('std_defaulted');
+    // The mark changes nothing: the size's own carrier decides.
+    expect(chanceSupportGoalPaths(g, CUT_MOVERS).unsupportedSpread).toEqual(chanceSupportGoalPaths(userSized(CUT_GRAPH, CUT_MOVERS, { stamped: true }), CUT_MOVERS).unsupportedSpread);
     const { result, fact } = await cutRun(g);
     expectWithheldEverywhere(result, fact, g, CUT_MOVERS, UNSUPPORTED_POINT_WORDS, UNSUPPORTED_POINT_QUESTION);
     expect(chanceShown(result, CUT_SQ)).toBe(true);
     expect(coded(result, GOAL_FIGURES_PLACEHOLDER_PATH)).toEqual([]);
     // Only the dependent chance goes: the comparison (each option's share of runs) is no chance of meeting the goal, and stays.
     for (const id of [CUT_SQ, ...CUT_MOVERS]) expect(entriesFor(envOf(result), id).some((e) => typeof e.win_probability === 'number'), id).toBe(true);
-    const sent = (fact.result.input_snapshot?.links ?? []) as Json[];
-    for (const e of (g.edges as Json[]).filter((x) => x.std_defaulted === true)) {
+    // The outcome distribution is no chance of meeting the goal either, and the qualitative help (the structural challenge) reads it.
+    for (const id of CUT_MOVERS) expect(entriesFor(envOf(result), id).some((e) => typeof e.outcome?.mean === 'number'), `${id}: outcome kept`).toBe(true);
+    for (const e of users) {
       expect(e.provenance.magnitude, 'the size stays the user\'s').toBe('user_stated');
       const was = (CUT_GRAPH.edges as Json[]).find((x) => x.from === e.from && x.to === e.to)!;
       expect(e.strength).toEqual(was.strength);
     }
-    expect(Array.isArray(sent)).toBe(true);
   });
-  it('price/MRR: the same on the second family, the options that move nothing keep theirs', async () => {
-    const before = await mrrRun(userSized(mrrGraph(), MRR_OPTIONS, { spreadStated: true }));
+  it('price/MRR, UNMARKED: the same on the second family; the options that move nothing keep theirs', async () => {
+    const before = await mrrRun(await chatWritten(mrrGraph(), MRR_OPTIONS, 'band'));
     const shownBefore = MRR_OPTIONS.filter((id) => chanceShown(before.result, id));
     const g = userSized(mrrGraph(), MRR_OPTIONS);
     const withheld = chanceSupportGoalPaths(g, MRR_OPTIONS).unsupportedSpread.map((p) => p.option_id);
@@ -183,17 +263,17 @@ describe('⭐ RED→GREEN: a user\'s POINT on the default spread withholds only 
 });
 
 describe('a user RANGE (or bound) on the default spread is not a supported distribution either (Science C1)', () => {
-  it('cut-costs: withheld with the AIE\'s range words and its question; the range is kept; no point words', async () => {
+  it('cut-costs, UNMARKED: withheld with the AIE\'s range words and its question; the range is kept; no point words', async () => {
     const g = userSized(CUT_GRAPH, CUT_MOVERS, { range: true });
     const { result, fact } = await cutRun(g);
     expectWithheldEverywhere(result, fact, g, CUT_MOVERS, UNSUPPORTED_RANGE_WORDS, UNSUPPORTED_RANGE_QUESTION);
     expect(coded(result, GOAL_FIGURES_UNSUPPORTED_SPREAD)[0]!.message).not.toContain(UNSUPPORTED_POINT_WORDS);
-    for (const e of (g.edges as Json[]).filter((x) => x.std_defaulted === true)) expect(e.provenance.natural_effect.stated_range).toMatchObject({ low: 1, high: 3 });
+    for (const e of (g.edges as Json[]).filter((x) => x.provenance?.magnitude === 'user_stated')) expect(e.provenance.natural_effect.stated_range).toMatchObject({ low: 1, high: 3 });
   });
 });
 
 describe('MIXED PATH: a placeholder beside a user point cannot bring the chance back as a range (Codex probe :130)', () => {
-  it('cut-costs: one link the user\'s on the default spread, the other unsized: both causes withhold, and no range re-enters', async () => {
+  it('cut-costs, UNMARKED: one link the user\'s on the default spread, the other unsized: both causes withhold, and no range re-enters', async () => {
     const g = userSized(CUT_GRAPH, CUT_MOVERS, { only: 1 });
     const support = chanceSupportGoalPaths(g, CUT_MOVERS);
     expect(support.unsized.length).toBeGreaterThan(0);
@@ -205,14 +285,21 @@ describe('MIXED PATH: a placeholder beside a user point cannot bring the chance 
   });
 });
 
-describe('SCOPE: exact links, off-path links and the status quo are never named', () => {
+describe('SCOPE: exact links, fixed option levels, off-path links and the status quo are never named', () => {
   it('a user size on the default spread off every mover\'s path names nothing', () => {
-    const g = userSized(CUT_GRAPH, CUT_MOVERS, { spreadStated: true });
+    const g = clone(CUT_BANDED);
     const off = (g.edges as Json[]).find((e) => e.from === 'gcp_unit_cost_discount')!;
     off.provenance = { ...off.provenance, magnitude: 'user_stated' };
-    off.std_defaulted = true;
     expect(chanceSupportGoalPaths(g, [CUT_SQ, ...CUT_MOVERS]).unsupportedSpread
       .flatMap((p) => p.links).some((l) => l.from === 'gcp_unit_cost_discount')).toBe(false);
+  });
+  it('a FIXED conditional input — each option\'s own set level and its link to what it sets, even made the user\'s — is never named', () => {
+    const g = clone(CUT_BANDED);
+    for (const e of (g.edges as Json[]).filter((x) => [CUT_SQ, ...CUT_MOVERS].includes(x.from))) {
+      e.provenance = { source: 'brief_extraction', magnitude: 'user_stated' };
+      e.std_defaulted = true;
+    }
+    expect(chanceSupportGoalPaths(g, [CUT_SQ, ...CUT_MOVERS]).unsupportedSpread).toEqual([]);
   });
   it('the status quo moves nothing, so no path of its own is named', () => {
     const g = userSized(CUT_GRAPH, CUT_MOVERS);
@@ -220,15 +307,15 @@ describe('SCOPE: exact links, off-path links and the status quo are never named'
   });
   /** A part of the goal's own quantity, user-sized on the default spread, with its link into the goal shaped by `into`. */
   function withPart(into: (unit: string) => Json, goalIdentity?: Json): { g: Json; part: string; goal: string } {
-    const g = userSized(CUT_GRAPH, CUT_MOVERS, { spreadStated: true });
+    const g = clone(CUT_BANDED);
     const goal = (g.nodes as Json[]).find((n) => n.kind === 'goal')!;
     const unit = goal.observed_state?.unit as string;
     expect(typeof unit, 'the goal states its level unit').toBe('string');
     g.nodes.push({ id: 'gcp_spend_part', kind: 'factor', label: 'Monthly cloud spend on GCP', observed_state: { value: 0, raw_value: 0, unit } });
     if (goalIdentity !== undefined) goal.nonlinear_identity = goalIdentity;
-    g.edges.push({ from: 'gcp_workload_share', to: 'gcp_spend_part', strength: { mean: 0.5, std: 0.25 }, exists_probability: 0.8, std_defaulted: true,
+    g.edges.push({ from: 'gcp_workload_share', to: 'gcp_spend_part', strength: { mean: 0.5, std: 0.25 }, exists_probability: 0.8,
       provenance: { source: 'brief_extraction', magnitude: 'user_stated' } },
-    { from: 'gcp_spend_part', to: goal.id, strength: { mean: 1, std: 0.5 }, exists_probability: 0.8, std_defaulted: true, ...into(unit) });
+    { from: 'gcp_spend_part', to: goal.id, strength: { mean: 1, std: 0.5 }, exists_probability: 0.8, ...into(unit) });
     return { g, part: 'gcp_spend_part', goal: goal.id };
   }
   const definition = (unit: string, strengthMean = 1): Json => ({ provenance: { source: 'brief_extraction', magnitude: 'user_stated', definitional: true,
@@ -258,7 +345,8 @@ describe('RANGE RE-ENTRY (Codex probe :130, reproduced on the range producer): a
   function probe(): { g: Json; envelope: (spread: boolean) => Json; inputs: Json } {
     const sizing = sizeLink({ direction: 'positive', effect_amount: 20, effect_per_source_change: 1, user_stated: true }, src as never, tgt as never);
     const point = admitCandidateLinks([{ from: 'x', to: 'm', direction: 'positive', provenance: 'explicit' } as never], new Map([['x::m', sizing]])).edges[0] as Json;
-    expect(point.std_defaulted, 'construction marks the spread Olumi\'s').toBe(true);
+    expect(point.provenance.magnitude, 'construction: the user\'s size').toBe('user_stated');
+    expect(point, 'construction writes no A6f mark: the unmarked case').not.toHaveProperty('std_defaulted');
     const g: Json = { nodes: [
       { id: 'x', ...src },
       { id: 'g', ...tgt, goal_direction: '>=', goal_threshold: 0.6, goal_threshold_raw: 600, goal_threshold_cap: 1000, goal_threshold_unit: 'packs',
@@ -287,7 +375,7 @@ describe('RANGE RE-ENTRY (Codex probe :130, reproduced on the range producer): a
   });
 });
 
-describe('PROVENANCE: construction marks a stated point\'s spread as Olumi\'s, and it survives save, reload, refit and clamp', () => {
+describe('PROVENANCE: construction\'s UNMARKED stated point is named through save, cold reopen, refit and clamp', () => {
   const BRIEF = 'We are comparing two crewing options, labelled exactly "Keep current crew" and "Add one packer". Use the exact goal '
     + 'label "Daily order throughput". Our current crew ships 50 orders per day. We need at least 70 orders per day. Keep current '
     + 'crew adds no packer. Add one packer adds one packer. Each packer adds 15 orders per day.';
@@ -300,7 +388,7 @@ describe('PROVENANCE: construction marks a stated point\'s spread as Olumi\'s, a
     risks: [], outcomes: [], identities: [], unknowns: [], decision_question: null,
     links: [{ from: 'Additional packers', to: 'Daily order throughput', direction: 'positive', provenance: 'explicit', effect_amount: 15,
       effect_per_source_change: 1, effect_provenance: 'explicit', definitional: null, basis: null, source_quote: 'Each packer adds 15 orders per day.' }] };
-  it('the user\'s 15 per packer is theirs (user_stated); its spread is marked Olumi\'s, through save → cold snapshot → refit → clamp', async () => {
+  it('the user\'s 15 per packer is theirs (user_stated), carries no mark, and is named at save → cold snapshot → refit → clamp', async () => {
     let saved: Json | undefined;
     const out = await buildModelFromBrief('5e8e8e8e-0000-4000-8000-0000000000f2', BRIEF, (async (path: string, body: Json) => {
       if (path.endsWith('/graph/register')) { saved = clone(body.graph); return { status: 200, json: { model_version: { version_number: 1 } } }; }
@@ -308,13 +396,16 @@ describe('PROVENANCE: construction marks a stated point\'s spread as Olumi\'s, a
     }) as never, (async () => ({ text: JSON.stringify(draft) })) as never) as Json;
     expect(out.ok).toBe(true);
     const link = (g: Json): Json => (g.edges as Json[]).find((e) => e.from === 'additional_packers' && e.to === 'daily_order_throughput')!;
-    expect(link(saved!)).toMatchObject({ std_defaulted: true, provenance: { magnitude: 'user_stated' } });
+    expect(link(saved!)).toMatchObject({ provenance: { magnitude: 'user_stated' } });
+    expect(link(saved!), 'construction writes no A6f mark').not.toHaveProperty('std_defaulted');
+    const named = [{ option_id: 'add_one_packer', links: [{ from: 'additional_packers', to: 'daily_order_throughput' }] }];
+    expect(chanceSupportGoalPaths(saved!, ['add_one_packer']).unsupportedSpread).toEqual(named);
     const store = { readMostRecentPendingActions: async () => [], loadGraphAndBriefText: vi.fn(async () => ({ graph: clone(saved!), briefText: BRIEF })),
       loadGraph: vi.fn(async () => clone(saved!)) };
     const snapshot = await loadScenarioSnapshotForRunAnalysis('5e8e8e8e-0000-4000-8000-0000000000f2', 'req-sp-prov', store as never) as Json;
-    expect(link(snapshot.graph)).toMatchObject({ std_defaulted: true });
-    expect(link(clampForPersist(refitFramesForStatedEffects(clone(saved!)).graph))).toMatchObject({ std_defaulted: true });
-    expect(chanceSupportGoalPaths(snapshot.graph, ['add_one_packer']).unsupportedSpread)
-      .toEqual([{ option_id: 'add_one_packer', links: [{ from: 'additional_packers', to: 'daily_order_throughput' }] }]);
+    expect(chanceSupportGoalPaths(snapshot.graph, ['add_one_packer']).unsupportedSpread).toEqual(named);
+    const refit = clampForPersist(refitFramesForStatedEffects(clone(saved!)).graph) as Json;
+    expect(link(refit)).toMatchObject({ provenance: { magnitude: 'user_stated' } });
+    expect(chanceSupportGoalPaths(refit, ['add_one_packer']).unsupportedSpread).toEqual(named);
   });
 });
