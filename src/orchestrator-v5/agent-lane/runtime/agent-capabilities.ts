@@ -429,6 +429,7 @@ import { approvalSizes, isAcceptedOlumiSize, linkSizing, sizedByApproval, type L
 import { ADJUST_EDGE_STRENGTH_STD_MAX } from '../../../cee/magnitude/olumi-spread.js';
 import { linkWorkingPointOf, linkWorkingPointWords } from '../link-working-point.js';
 import { mentionsLabel, REPLACE_KEEPS_DIRECTION_TEXT, replaceClauseOf, userFigureHeld, userFigureHeldRefusalText, userFigureReplacedReceipt } from '../../../cee/magnitude/user-figure-held.js';
+import { convertLinkEffect } from '../../../cee/magnitude/link-effect.js';
 import { centreAgrees, currentUserSize, linkSpreadOf, missingBasisWords, missingIntervalMeaningWords, normalQuantilesSd, sizeQuoteOf, sizeWords, statedUncertaintyAttested, uncertaintyCardWords, uncertaintyReceiptWords, UNSUPPORTED_UNCERTAINTY_WORDS, type StatedUncertainty } from '../../../cee/magnitude/stated-uncertainty.js';
 import { notModelledContext, notModelledOfRead } from '../not-modelled-carrier.js';
 import type { NotModelledManifest } from '../../../cee/context-integrity/not-modelled-manifest.js';
@@ -5364,7 +5365,7 @@ export function createAgentCapabilities(
       return tell('uncertainty_not_representable', UNSUPPORTED_UNCERTAINTY_WORDS);
     }
     // Dry run: the spread the writer will store, through the size's own conversion frames, inside what the engine holds.
-    if (linkSpreadOf(record.sd, size, linkEffectConversionFrames(g.raw, from.id, to.id)) === undefined) {
+    if (linkSpreadOf(record.sd, size, linkEffectConversionFrames(g.raw, from.id, to.id), convertLinkEffect) === undefined) {
       return tell('uncertainty_not_representable', UNSUPPORTED_UNCERTAINTY_WORDS);
     }
     const mean = (edge.strength as { mean: number }).mean;

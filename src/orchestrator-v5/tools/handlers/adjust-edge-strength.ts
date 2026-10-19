@@ -38,6 +38,7 @@ import { edgeStrengthWords } from '../../format/edge-strength-words.js';
 import { REPLACE_KEEPS_DIRECTION_TEXT, userFigureHeld, userFigureHeldRefusalText, userFigureReplacedReceipt } from '../../../cee/magnitude/user-figure-held.js';
 import { currentUserSize, linkSpreadOf, sizeQuoteOf, sizeWords, statedUncertaintyOf, uncertaintyReceiptWords, UNSUPPORTED_UNCERTAINTY_WORDS } from '../../../cee/magnitude/stated-uncertainty.js';
 import { linkEffectConversionFrames } from '../../system-events/link-effect-edit.js';
+import { convertLinkEffect } from '../../../cee/magnitude/link-effect.js';
 import { sanitiseUserFacingText } from '../../../orchestrator/shared/output-safety.js';
 import type { HandlerFn, HandlerInvocation, HandlerOutcome } from '../registry.js';
 import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../handler-errors.js';
@@ -466,7 +467,7 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
       const userSize = uncertaintyAuthority === undefined ? undefined : currentUserSize(rawTargetEdge ?? targetEdge);
       const uncertainty = userSize === undefined ? undefined : statedUncertaintyOf(uncertaintyAuthority, userSize.amount);
       const uncertaintyStd = uncertainty === undefined || userSize === undefined ? undefined
-        : linkSpreadOf(uncertainty.sd, userSize, linkEffectConversionFrames(rawGraph, parsed.from, parsed.to));
+        : linkSpreadOf(uncertainty.sd, userSize, linkEffectConversionFrames(rawGraph, parsed.from, parsed.to), convertLinkEffect);
       if (uncertaintyAuthority !== undefined && (uncertaintyStd === undefined || drawn !== undefined || replacesHeldFigure
         || bandAuthority !== undefined || newStd !== undefined || invocation.edgeStrengthAdoptedEstimateAuthority !== undefined
         || newMean !== beforeMean || newDirection !== targetEdge.effect_direction)) {
