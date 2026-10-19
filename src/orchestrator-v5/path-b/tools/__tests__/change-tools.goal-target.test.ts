@@ -121,8 +121,22 @@ describe('a goal target: one candidate, one registration, the declared comparato
 
   it('a model moved by someone else: superseded, nothing registered', async () => {
     const { store, id } = await proposed([target()]);
-    // Someone else moved the MODEL (an analysis-affecting figure): the base every proposer and the card machinery read (the graph
-    // hash) no longer matches. (A label-only rename moves no graph hash, as for every other proposer's card.)
+    persisted = { ...persisted, nodes: (persisted.nodes as Rec[]).map((n) => n.id === 'goal' ? { ...n, label: 'Serve every visitor the same day' } : n) };
+    expect(hashOf(persisted), 'PRECONDITION: a rename the graph hash cannot see').toBe(hashOf(stored()));
+    expect(await applyChange({ dispatch, proposals: store }, ctx, { proposal_id: id })).toEqual({ status: 'refused', reason: 'superseded' });
+    expect(registered).toHaveLength(0);
+  });
+
+  it('a stored copy re-based onto the renamed model fails its own id (integrity), never registered', async () => {
+    const { store, id } = await proposed([target()]);
+    persisted = { ...persisted, nodes: (persisted.nodes as Rec[]).map((n) => n.id === 'goal' ? { ...n, label: 'Serve every visitor the same day' } : n) };
+    store.put({ ...store.get(id)!, base_model_identity: identityOf(persisted) });
+    expect(await applyChange({ dispatch, proposals: store }, ctx, { proposal_id: id })).toEqual({ status: 'refused', reason: 'integrity_failed' });
+    expect(registered).toHaveLength(0);
+  });
+
+  it('a figure moved by someone else (the graph hash moved too): superseded, nothing registered', async () => {
+    const { store, id } = await proposed([target()]);
     persisted = { ...persisted, nodes: (persisted.nodes as Rec[]).map((n) => n.id === 'queue' ? { ...n, observed_state: { value: 0.9, raw_value: 90, unit: 'minutes', cap: 100 } } : n) };
     expect(hashOf(persisted), 'PRECONDITION: the model moved').not.toBe(hashOf(stored()));
     expect(await applyChange({ dispatch, proposals: store }, ctx, { proposal_id: id })).toEqual({ status: 'refused', reason: 'superseded' });

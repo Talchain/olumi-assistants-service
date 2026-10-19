@@ -260,6 +260,18 @@ describe('PATH-B: a core correction shows its card in THAT turn; a press on it c
     expect(queueRaw()).toBe(30);
   });
 
+  it('⛔ CAS kept (Codex #3472 R1): the card\'s own factor RENAMED after the card (graph hash unchanged) → superseded, nothing committed', async () => {
+    const { card, rec } = await corrected();
+    const identityBefore = identityOf(persisted), hashBefore = hashOf(persisted);
+    persisted = { ...persisted, nodes: (persisted.nodes as Json[]).map((n) => n.id === 'queue' ? { ...n, label: 'Time to resolve a complaint' } : n) };
+    expect(identityOf(persisted), 'PRECONDITION: the model\'s identity moved').not.toBe(identityBefore);
+    expect(hashOf(persisted), 'PRECONDITION: a rename the graph hash cannot see').toBe(hashBefore);
+    await pressed(card, rec);
+    expect(outputOf('apply_call'), 'the identity CAS refuses it').toMatchObject({ status: 'refused', reason: 'superseded' });
+    expect(commits()).toHaveLength(0);
+    expect(queueRaw()).toBe(30);
+  });
+
   it('⛔ a press carrying edits is refused before anything runs; nothing is committed', async () => {
     const { card, rec } = await corrected();
     calls = [];

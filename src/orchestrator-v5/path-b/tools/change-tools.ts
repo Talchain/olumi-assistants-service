@@ -330,7 +330,7 @@ async function proposeTarget(deps: Pick<ChangeDeps, 'dispatch' | 'proposals'>, c
     conversation: (ctx.verified_user_messages ?? []).join('\n') }, t.source.quote) ?? null;
   const stored: z.infer<typeof TargetStored> = { value: t.value, unit: t.unit, comparator: t.comparator, quantity: t.quantity, frame: 'level',
     stance: t.stance, source: t.source, said_in: saidIn, recorded_at: new Date().toISOString() };
-  const p = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: read.graphHash,
+  const p = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: read.graphHash, base_model_identity: read.identity,
     operations: [{ op: 'set_goal_target', path: t.goal_id, value: stored }], provenance: { authored_by: 'model_proposed', basis: args.basis },
     validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: args.public_label });
   // The writer's own gates, run once on this read before any card exists (nothing is written).
@@ -540,7 +540,7 @@ async function proposeCompound(deps: Pick<ChangeDeps, 'dispatch' | 'proposals' |
   const written = { nodes: [...plan.levels.flatMap((l) => [l.option_id, l.factor_id]), ...(plan.values ?? []).map((v) => v.factor_id), ...(plan.frames ?? []).map((f) => f.factor_id)],
     links: [...plan.links.map((l) => ({ from: l.option_id, to: l.factor_id })), ...links.map((l) => ({ from: l.from, to: l.to }))] };
   if (compoundMembersConflict(written, members)) return refused('compound_members_conflict');
-  const p = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: read.graphHash,
+  const p = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: read.graphHash, base_model_identity: read.identity,
     operations: [...figureOps, ...linkOps, ...prepared], provenance: { authored_by: 'model_proposed', basis: args.basis },
     validation: { admitted: true, loss_count: 0, refusals: [] },
     public_label: cards.length === 1 ? cards[0]! : `Save these changes together:\n${cards.join('\n')}` });
@@ -564,7 +564,7 @@ export async function proposeChange(deps: Pick<ChangeDeps, 'dispatch' | 'proposa
   const read = await readSaved(deps, ctx.scenario_id);
   if (!isSavedRead(read)) return read;
   if (read.identity === null) return unavailable('read_malformed');
-  const content = { scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: read.graphHash,
+  const content = { scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: read.graphHash, base_model_identity: read.identity,
     operations: ops.map(operationOf), provenance: { authored_by: 'model_proposed' as const, basis: args.basis },
     validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: args.public_label };
   const p = createProposal(content);
@@ -706,6 +706,8 @@ export async function applyChange(deps: ChangeDeps, ctx: ChangeCtx, args: ApplyC
     authenticated_user_id: ctx.authenticated_user_id, current_graph_identity_hash: before.graphHash, typed_approval_of: p.proposal_id });
   if (decision.status === 'already_applied') return alreadySaved(decision.receipts[0] ?? null);
   if (decision.status !== 'execute') return refused(decision.status);
+  // ...and on the model's FULL identity when it was prepared: a rename or other wording the graph hash leaves out moved it too.
+  if (p.base_model_identity !== undefined && p.base_model_identity !== before.identity) return refused('superseded');
   const reconcile = async (): Promise<ToolOutcome> => {
     const own = await ownReceipt(deps.dispatch, ctx.scenario_id, applier.receiptTurn);
     return own !== null && own !== 'unreadable' ? alreadySaved(own) : unavailable('not_confirmed', 'unknown');
