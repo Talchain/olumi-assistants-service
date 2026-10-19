@@ -792,6 +792,13 @@ export interface SessionStore {
   /** DB-stamped restore chronology marker; null means no restore invalidation. */
   readAnalysisInvalidatedAt?(scenarioId: string): Promise<string | null>;
   /**
+   * PATH-B `core`: the scenario's ONE OpenAI Conversation id (`scenarios.openai_conversation_id`, migration 20261019150000).
+   * `undefined` = this store cannot hold it yet (column absent), so the caller keeps it in process memory.
+   */
+  readOpenAiConversationId?(scenarioId: string): Promise<string | null | undefined>;
+  /** Save `id` only where the scenario holds none; returns the scenario's id afterwards (the winner of a race). */
+  claimOpenAiConversationId?(scenarioId: string, id: string): Promise<string | null | undefined>;
+  /**
    * Idempotently ensure a row exists in `public.scenarios` for `scenarioId`,
    * creating it with `userId` as the owner if absent. `userId` may be null
    * for guest sessions (VITE_AUTH_MODE=guest) — the row is created with a

@@ -270,6 +270,9 @@ export interface SupabaseSessionStoreOptions {
 }
 
 /** Telemetry hash-prefix length for the 64-hex identity hashes. */
+/** PostgREST / Postgres codes for a column this build knows and the database does not have yet (migration not applied). */
+const OPENAI_CONVERSATION_COLUMN_ABSENT: ReadonlySet<string> = new Set(['42703', 'PGRST204']);
+
 const GRAPH_CAS_HASH_PREFIX_LENGTH = 16;
 /** Rows the restated-goal ledger reads: an unreviewed draft has a handful; more than this is not one (`complete: false`). */
 const COMMITTED_TURN_LEDGER_ROWS = 200;
@@ -3141,6 +3144,28 @@ export class SupabaseSessionStore implements SessionStore {
     if (data == null) return null;
     const userId = (data as { user_id?: unknown }).user_id;
     return typeof userId === 'string' && userId.length > 0 ? userId : null;
+  }
+
+  /** PATH-B `core`: the scenario's OpenAI Conversation id; `undefined` when the column is not migrated yet (order-safe). */
+  async readOpenAiConversationId(scenarioId: string): Promise<string | null | undefined> {
+    const { data, error } = await this.client.from('scenarios').select('openai_conversation_id').eq('id', scenarioId).maybeSingle();
+    if (error) {
+      if (OPENAI_CONVERSATION_COLUMN_ABSENT.has(errCode(error) ?? '')) return undefined;
+      throw new SessionReadError(`readOpenAiConversationId failed for scenario ${scenarioId}: ${errMsg(error)}`, { cause: error, code: errCode(error) });
+    }
+    const id = (data as { openai_conversation_id?: unknown } | null)?.openai_conversation_id;
+    return typeof id === 'string' && id !== '' ? id : null;
+  }
+
+  /** Save the id only where none is held (first writer wins), then return what the scenario holds. */
+  async claimOpenAiConversationId(scenarioId: string, id: string): Promise<string | null | undefined> {
+    const { error } = await this.client.from('scenarios').update({ openai_conversation_id: id })
+      .eq('id', scenarioId).is('openai_conversation_id', null);
+    if (error) {
+      if (OPENAI_CONVERSATION_COLUMN_ABSENT.has(errCode(error) ?? '')) return undefined;
+      throw new SessionReadError(`claimOpenAiConversationId failed for scenario ${scenarioId}: ${errMsg(error)}`, { cause: error, code: errCode(error) });
+    }
+    return this.readOpenAiConversationId(scenarioId);
   }
 
   async readAnalysisInvalidatedAt(scenarioId: string): Promise<string | null> {

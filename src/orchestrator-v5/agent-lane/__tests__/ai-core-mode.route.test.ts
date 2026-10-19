@@ -75,7 +75,9 @@ describe('PATH-B core: the AI\'s own words are the reply; protocol, cards, resul
   const sent: string[] = [];
   let outputs: Record<string, unknown>[][] = [];
   beforeAll(async () => {
-    vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: unknown }) => {
+    vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
+      // The core lane's one OpenAI Conversation per scenario (`core/sdk-turn.ts`).
+      if (String(url).endsWith('/v1/conversations')) return new Response(JSON.stringify({ id: 'conv_route', object: 'conversation' }), { status: 200 });
       const runCall = runPressToolResponse(JSON.parse(String(init?.body ?? '{}')));
       if (runCall) return runCall;
       sent.push(typeof init?.body === 'string' ? init.body : '');
@@ -123,6 +125,8 @@ describe('PATH-B core: the AI\'s own words are the reply; protocol, cards, resul
     expect(core._agent.mode, 'the witness reads the mode on the wire').toBe('core');
     // The ordinary typed turn ran on the Agents SDK: its runtime on the wire, and each provider row's witness fields.
     expect(core._agent.sdk?.runtime).toBe('@openai/agents@0.18.0');
+    expect(core._agent.sdk?.state).toBe('openai_conversation');
+    expect(core._agent.sdk?.conversation_id).toBe('conv_route');
     const rows = (core._provider_calls as Json[]).filter((c) => c.site === 'agent-core.sdk');
     expect(rows.length).toBeGreaterThan(0);
     for (const row of rows) {

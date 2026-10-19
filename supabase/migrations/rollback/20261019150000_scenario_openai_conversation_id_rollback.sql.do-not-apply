@@ -1,0 +1,3 @@
+-- Rollback for 20261019150000_scenario_openai_conversation_id.sql. Drops only what that migration added.
+ALTER TABLE public.scenarios DROP CONSTRAINT IF EXISTS scenarios_openai_conversation_id_shape;
+ALTER TABLE public.scenarios DROP COLUMN IF EXISTS openai_conversation_id;
