@@ -72,6 +72,13 @@ const NO_ONE_SHARED_SCALE = [
   'We expect five million or seven users.',
   'We expect five million - seven users.',
   'We need £5m to 7.',
+  // A low end this grammar reads no number from (an article, a fraction) still holds the range's scale.
+  'We expect a million to 3 users.',
+  'We expect a million to seven users.',
+  'We expect 3 to a million users.',
+  'We expect between a million and seven users.',
+  'We expect a hundred to 3 hundred users.',
+  'We need half a million to 7.',
 ];
 
 describe('⛔ a range with no ONE shared scale gives nothing, never one end alone (Codex R2 on #3442)', () => {
@@ -80,6 +87,14 @@ describe('⛔ a range with no ONE shared scale gives nothing, never one end alon
   });
   it.each(NO_ONE_SHARED_SCALE)('"%s": the authorship rule\'s span reader reads neither end', (text) => {
     expect(figuresWritten(text)).toEqual([]);
+  });
+  it.each([
+    'We expect two and a half million to 3 users.',
+    'We expect two and a half million to three users.',
+  ])('"%s": a fraction\'s low end holds the scale; the bare high end is never read', (text) => {
+    expect(read(text)).toEqual([]);
+    // The authorship rule's reader still reads the "two" of "two and a half": the fraction class (#3438, fail-safe), on staging as here.
+    expect(figuresWritten(text).filter((f) => f.low === 3 || f.low === 3_000_000)).toEqual([]);
   });
   const texts = (m: string) => ({ now: m, conversation: m, messages: [m] });
   it.each([
