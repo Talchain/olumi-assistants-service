@@ -104,6 +104,12 @@ describe("explicit AI comparison target", () => {
     expect(resolveProxyInternalTarget("openai")).toBe("/agent/v1/turn");
   });
 
+  it("PATH-B: `core` reaches the same Agent route (whose own mode drops Olumi's added prose), whatever the deployment default", () => {
+    expect(resolveProxyInternalTarget("core")).toBe("/agent/v1/turn");
+    // Contrast: a near-miss value is not a mode, so it keeps the deployment default (orchestrator here).
+    expect(resolveProxyInternalTarget("Core ")).toBe("/orchestrate/v2/turn");
+  });
+
   it("keeps the deployment default for an absent or invalid mode", () => {
     expect(resolveProxyInternalTarget(undefined)).toBe("/orchestrate/v2/turn");
     expect(resolveProxyInternalTarget("anything-else")).toBe("/orchestrate/v2/turn");

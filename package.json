@@ -92,6 +92,7 @@
     "@fastify/cors": "^10.1.0",
     "@fastify/helmet": "^13.0.2",
     "@fastify/rate-limit": "^10.3.0",
+    "@openai/agents": "0.18.0",
     "@sentry/node": "^10.42.0",
     "@supabase/supabase-js": "^2.90.1",
     "@talchain/schemas": "file:./vendor/talchain-schemas-0.83.0.tgz",
@@ -105,15 +106,18 @@
     "ioredis": "^5.8.2",
     "jose": "^5.10.0",
     "openai": "^6.7.0",
+    "openai-v7": "npm:openai@7.14.0",
     "papaparse": "^5.4.1",
     "pdf-parse": "^1.1.1",
     "pino": "^9.3.1",
     "postgres": "^3.4.7",
     "undici": "^6.19.8",
-    "zod": "^3.23.8"
+    "zod": "^3.23.8",
+    "zod-v4": "npm:zod@4.6.1"
   },
   "pnpm": {
     "overrides": {
+      "openai@>=7.0.0 <8": "7.14.0",
       "jws": ">=3.2.3 <4",
       "lodash@>=4.0.0 <=4.17.22": ">=4.17.23 <5",
       "undici@<7.29.1": ">=7.29.1 <8",

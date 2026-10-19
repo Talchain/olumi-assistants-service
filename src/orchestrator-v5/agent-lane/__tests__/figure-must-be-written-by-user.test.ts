@@ -258,6 +258,9 @@ describe('the Agent route binds the user\'s words to every tool it runs', () => 
     // Item 3 (Canvas, 7 Oct; DL D1): the drawn-link press's ONE forced call is a dispatch site on the SAME typed carrier.
     expect(route).toContain('result = await drawnLinkPress(');
     expect(route).toContain('{ ctx: toolCtx, history, message, instructions: AGENT_INSTRUCTIONS,');
+    // PATH-B core (19 Oct): the SDK turn's typed adapters (`pathBTools`) run on the SAME typed carrier, extended only by the
+    // grounded selection, as the existing loop's tool context is.
+    expect(route).toContain('const coreCtx = { ...toolCtx, ...(selectionContext != null');
     // Paul #94 6166259456: the route's automatic Run after a committed change is a dispatch site on the SAME typed carrier.
     expect(route).toContain('autoRun = await capabilities.runAnalysis(toolCtx, ');
     // S2 one-press card the route issues after the Run (#3129, the user's own figure): a dispatch site on the SAME typed carrier.
@@ -269,6 +272,6 @@ describe('the Agent route binds the user\'s words to every tool it runs', () => 
     // Recorded-Run answer recovery uses the SAME verified context and capability permission gate.
     expect(route).toContain('await capabilities.runAnalysis(toolCtx,');
     // S1 Explain adds two reads of the SAME verified context: verified_user_messages and unverified_user_text.
-    expect(route.match(/\btoolCtx\b/g)?.length, 'declared once, used at the dispatch sites (the approve and widen-Add sites twice; GOAL-REACH confirm_reading press is the eleventh), the state read and two typed-words reads and Explain read, and the route-issued deadline card (its issuer read and its ONE dispatch, both on this same typed carrier), the typed-history completeness read (recordTyped … toolCtx.user_text_complete, A2i), the automatic Run after a committed change, and the three S2 one-press cards the route issues (the held figure, holds now, the user’s own risk chance), plus recorded-Run answer recovery').toBe(27);
+    expect(route.match(/\btoolCtx\b/g)?.length, 'declared once, used at the dispatch sites (the approve and widen-Add sites twice; GOAL-REACH confirm_reading press is the eleventh), the state read and two typed-words reads and Explain read, and the route-issued deadline card (its issuer read and its ONE dispatch, both on this same typed carrier), the typed-history completeness read (recordTyped … toolCtx.user_text_complete, A2i), the automatic Run after a committed change, and the three S2 one-press cards the route issues (the held figure, holds now, the user’s own risk chance), plus recorded-Run answer recovery, plus PATH-B core: the SDK turn’s typed adapters on this SAME carrier (coreCtx)').toBe(28);
   });
 });

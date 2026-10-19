@@ -65,7 +65,7 @@ import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
 import { CONSTRUCTION_TAIL_RESERVE_MS } from '../orchestrator-v5/agent-lane/runtime/construction-deadline.js';
 export { CONSTRUCTION_TAIL_RESERVE_MS } from '../orchestrator-v5/agent-lane/runtime/construction-deadline.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
-import { answerRunNarrationOf, type CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
+import { answerRunNarrationOf, type CommittedTurnRecord, type OpenAiPausedRun } from '../orchestrator-v5/session/store.js';
 import { ModelReadFailedError, isRevisionConflict, promoteRevisionConflictResponse } from '../orchestrator-v5/graph-revision-conflict.js';
 import { toErrorV1 } from '../utils/errors.js';
 import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
@@ -83,9 +83,11 @@ import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { runOmittedRisks, type RunOmittedRisk } from '../orchestrator-v5/agent-lane/unsized-risk.js';
 import { drawnLinkPress, isDrawnLinkPress } from '../orchestrator-v5/agent-lane/drawn-link-press.js';
 import { answerIsIncomplete, heldChangeSentence, runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
+import { CoreStateUnavailableError, runCoreTurn, type CoreTurnSdk } from '../orchestrator-v5/agent-lane/core/sdk-turn.js';
+import { pathBTools } from '../orchestrator-v5/path-b/tools/index.js';
 import { parseSelectedElements } from '../orchestrator-v5/boundary/request-extensions.js';
 import { agentSelectionContext, type AgentSelectionContext } from '../orchestrator-v5/agent-lane/selection-context.js';
-import type { AgentLaneMode, AgentToolContext } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
+import type { AgentLaneMode, AgentToolContext, ToolResult } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { createAgentCapabilities, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
 import { runExplanationCurrentness } from '../orchestrator-v5/agent-lane/run-currentness.js';
 import { turnReadCache, FRESH_READ } from '../orchestrator-v5/agent-lane/turn-read-cache.js';
@@ -95,7 +97,7 @@ import { computeAnalysisAffectingGraphHash } from '../orchestrator-v5/context/gr
 import { compareAnalysisRunFactIdentity } from '../orchestrator-v5/context/analysis-interpretation-identity.js';
 import { notModelledOfRead, notModelledTurnCarrier } from '../orchestrator-v5/agent-lane/not-modelled-carrier.js';
 import type { NotModelledManifest } from '../cee/context-integrity/not-modelled-manifest.js';
-import { commitLimitAddInProcess, commitLimitEditInProcess, commitOptionLevelsInProcess, commitOptionRenameInProcess, commitOptionStatusInProcess, commitStructuralDeleteInProcess, holdAddFactorInProcess, holdAddRiskInProcess } from '../orchestrator-v5/system-events/dispatch.js';
+import { commitLimitAddInProcess, commitLimitEditInProcess, commitOptionLevelsInProcess, type CommitOptionLevelsInput, type CommitOptionLevelsResult, commitOptionRenameInProcess, commitOptionStatusInProcess, commitStructuralDeleteInProcess, holdAddFactorInProcess, holdAddRiskInProcess } from '../orchestrator-v5/system-events/dispatch.js';
 import { declinedProposalOf, declineChipIdFor, displayedProposalsOf, shownAsHeldNow, heldChangeName, heldChangeLabel, isHeldProposal, heldProposalId, proposalRecord, agentProposalOf, proposalFieldsWire, heldRecordAppliesAt, heldRecordsApplyAt, issuedTurnIdsForProposalRecords, proposalIssuances, type ProposalRecord } from '../orchestrator-v5/agent-lane/proposal-object/record.js';
 import { amendAgentProposal, parseProposalEdits, proposalEditsDigest, readUserEdits } from '../orchestrator-v5/agent-lane/proposal-object/amend.js';
 import { refreshedHold, reconcileHeldProposals } from '../orchestrator-v5/agent-lane/proposal-object/lifecycle.js';
@@ -149,7 +151,8 @@ import { derivePendingActionsFromFinalizedChips } from '../orchestrator-v5/compo
 import { isPendingActionExpired, PENDING_ACTIONS_PER_TURN_CAP, type PendingAction } from '../orchestrator-v5/session/pending-action.js';
 import { computeSurvivingPriorPendingsDetailed } from '../orchestrator-v5/commit.js';
 import { GM_HELD_HANDLER_ID } from '../orchestrator-v5/handlers/edit-graph-referee-gate.js';
-import { dispatchTool, toolsFor } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
+import { dispatchTool, laneModeFor, toolsFor } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
+import { getRuntimeEnv } from '../config/env-resolver.js';
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
 import { currentStageEmitter, graphPreviewEmitted } from '../cee/unified-pipeline/stage-stream-context.js';
 import { readBrief, readingWithin, BRIEF_READING_TIMEOUT_MS, BRIEF_ROUTE_WAIT_MS, type CallBriefReading } from '../orchestrator-v5/agent-lane/brief-reading.js';
@@ -923,6 +926,22 @@ const AGENT_INSTRUCTIONS = SELECTED_COACH_V02_TEMPLATE.replace(
 );
 /** The Agent's call that offers its proposing tools: the shared instructions, then the stated-figure rule. */
 const AGENT_TOOL_INSTRUCTIONS = `${AGENT_INSTRUCTIONS}\n\n${STATED_FIGURE_INSTRUCTION}`;
+
+/**
+ * ⭐ PATH-B `core` (agent-tools.ts `AgentLaneMode`): Olumi appends and rewrites nothing after the AI's reply, so the reply
+ * itself carries what the host would otherwise add, from the typed facts the AI already holds. Sent only in `core`, after
+ * the shared instructions, so every other mode's instructions stay byte-identical. ⚠ Prompt text: AIE review owed.
+ */
+export const CORE_REPLY_INSTRUCTION = 'In this mode Olumi adds nothing to your reply and rewrites none of it: the user reads exactly your words. '
+  + 'So say, from this turn\u2019s tool results, what was saved, what was not saved and why, and any proposal that is waiting for the user\u2019s approval on its card. '
+  + 'Give at most one next step, chosen from the current readiness facts, and never ask for something the user has already said. '
+  + 'Keep every must_say disclosure and the licences in run_facts: never call a win share a chance, and never call an option best, a winner or recommended. '
+  + 'When a calculation rests on Olumi\u2019s own untested assumptions, say \u201cIllustrative calculation \u2014 uses untested Olumi assumptions.\u201d and name the assumptions that matter most. '
+  + 'Keep each item\u2019s recorded source: the user\u2019s words stay the user\u2019s, another person\u2019s stay theirs, an unknown source stays unknown, and Olumi\u2019s readings stay Olumi\u2019s; approving a reading adopts it but does not make the user its author.';
+/** The instructions for one call in this lane mode: unchanged outside `core`. */
+export function instructionsForMode(mode: AgentLaneMode, instructions: string): string {
+  return mode === 'core' ? `${instructions}\n\n${CORE_REPLY_INSTRUCTION}` : instructions;
+}
 
 /**
  * Read the persisted state back for the response: `graph_hash`, readiness and
@@ -1874,9 +1893,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
 
   /**
    * READ-ONLY preview. Resolved ONCE at registration, not per request, so no
-   * request header or body can select the writable surface.
+   * request header or body can select the writable surface. A request may only
+   * narrow a full lane to `core` (`laneModeFor`, per request below), never widen a preview.
    */
-  const mode: AgentLaneMode = config.proxy.agentLanePreview === true ? 'preview' : 'full';
+  const baseMode: AgentLaneMode = config.proxy.agentLanePreview === true ? 'preview' : 'full';
 
   /**
    * The internal dispatch, built PER REQUEST so it carries the caller's own
@@ -2195,6 +2215,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
    */
   const agentTurnHandler = async (req: FastifyRequest, reply: FastifyReply, takeActiveRun: (key: string) => boolean) => {
     const startedAt = Date.now();
+    // PATH-B: this request's lane mode. `core` = the AI's own reply, with no Olumi prose added or rewritten (agent-tools.ts).
+    const mode: AgentLaneMode = laneModeFor(baseMode, req.headers['x-olumi-ai-mode'], getRuntimeEnv());
     let body = (req.body ?? {}) as Record<string, unknown>;
     const scenarioId = typeof body.scenario_id === 'string' ? body.scenario_id : '';
     // ⭐ Lane A recovery seam (`recovery-fault-seam.ts`): staging-only, off by default, armed by THIS request for its own scenario.
@@ -2861,7 +2883,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       });
       // K2: committed loop prose already crossed the live gates. Preserve those exact bytes;
       // currentness belongs to typed controls/narration, not a new sentence in the saved answer.
-      if (replayLoopRun || historicalReceiptKey !== undefined) gatedReplay.assistant_text = prior.assistant_message ?? '';
+      // PATH-B `core`: the stored reply is the AI's own words; its replay returns those exact bytes too.
+      if (replayLoopRun || historicalReceiptKey !== undefined || mode === 'core') gatedReplay.assistant_text = prior.assistant_message ?? '';
       // Accel P24 / SCI-10: the typed rows go on AFTER every replay guard (a structured scrub must never reach them), and only
       // when each row and figure is in the reply those guards left. withShapeOnlyIfItDerives below never changes
       // assistant_text and keeps every other key (it can only drop `_answer_shape`), so this is the text that ships.
@@ -2973,7 +2996,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             return reply.code(200).send(await replayed(answer));
           }
           // A concurrent original/recovery request finishes its reply first. No duplicate interpreting call here.
-          if (mode === 'full' && !recoveryAttempted && !activeRunTurns.has(runKey) && (typedRunOf(body) || chiplessRetry)) {
+          if (mode !== 'preview' && !recoveryAttempted && !activeRunTurns.has(runKey) && (typedRunOf(body) || chiplessRetry)) {
             const recorded = await readRecordedRun(store, scenarioId, turnId, () => readBackState(
               (path, body) => readCache.dispatch(path, { ...(body as Record<string, unknown>), ...FRESH_READ }), scenarioId));
             if (recorded !== undefined && takeActiveRun(runKey)) {
@@ -3107,12 +3130,24 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         elapsed_ms: Date.now() - startedAt,
       });
     };
+    // The objects the capabilities run on, named once so PATH-B's typed adapters (`pathBTools`) run on the SAME ones.
+    const capDispatch = bindHeldApprovalWriter(countingDispatch, (input) => {
+      writesDispatched += 1;
+      return undoRefusedWrite(() => readCache.around(async () => promoteRevisionConflictResponse(await commitHeldProposalInProcess(input, String(req.id)))));
+    });
+    const capCallStructured: CallStructuredModel = (reqBody, deadlineAt) => callStructured(reqBody, deadlineAt ?? constructionDeadlineAt);
+    const onCapAnalysis: NonNullable<Parameters<typeof createAgentCapabilities>[4]> = (payload) => { lastRun = { ...payload, trigger: payload.trigger ?? 'explicit_run' }; };
+    // ⭐ Whole-request atomicity (ChatGPT #70 5847200462): N option levels and their links as ONE commit, in-process.
+    // S2b team_time uses this same fenced batch door and cached read-back.
+    const commitOptionLevelsDoor = async (input: CommitOptionLevelsInput): Promise<CommitOptionLevelsResult> => {
+      // F1b B8: the in-process graph write takes its place in the scenario's turn fence.
+      writesDispatched += 1;
+      return undoRefusedWrite(() => {
+        return readCache.around(() => runFencedInProcessWrite(input.scenario_id, input.turn_id, () => commitOptionLevelsInProcess(input, String(req.id)), () => ({ status: 'stale' as const }), fenceRefused));
+      });
+    };
     const capabilities = createAgentCapabilities(
-      bindHeldApprovalWriter(countingDispatch, (input) => {
-        writesDispatched += 1;
-        return undoRefusedWrite(() => readCache.around(async () => promoteRevisionConflictResponse(await commitHeldProposalInProcess(input, String(req.id)))));
-      }), proposals, (reqBody, deadlineAt) => callStructured(reqBody, deadlineAt ?? constructionDeadlineAt), mode,
-      (payload) => { lastRun = { ...payload, trigger: payload.trigger ?? 'explicit_run' }; },
+      capDispatch, proposals, capCallStructured, mode, onCapAnalysis,
       {
         turnAuthority: true,
         ...(recoveredRun !== undefined ? { recoveredRun } : {}),
@@ -3157,15 +3192,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(typeof store.readMostRecentPendingActions === 'function'
           ? { readPendingActions: (sid: string) => store.readMostRecentPendingActions!(sid, { validation: 'strict' }) }
           : {}),
-        // ⭐ Whole-request atomicity (ChatGPT #70 5847200462): N option levels and their links as ONE commit, in-process.
-        // S2b team_time uses this same fenced batch door and cached read-back.
-        commitOptionLevels: async (input) => {
-          // F1b B8: the in-process graph write takes its place in the scenario's turn fence.
-          writesDispatched += 1;
-          return undoRefusedWrite(() => {
-            return readCache.around(() => runFencedInProcessWrite(input.scenario_id, input.turn_id, () => commitOptionLevelsInProcess(input, String(req.id)), () => ({ status: 'stale' as const }), fenceRefused));
-          });
-        },
+        commitOptionLevels: commitOptionLevelsDoor,
         // ⭐ C5: the provisional view is accepted only while the analysis withholds its leader — read from THIS route's
         // readback through the wire gate's own predicate, so the capability and the gate below cannot disagree.
         readLeaderStanding: async (sid: string) => leaderStandingOf(await readBackState(readingDispatch, sid)),
@@ -3404,6 +3431,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (typedNow !== null) recordUnsavableEffect();
 
     let levelAsk: ReturnType<typeof latestCurrentLevelAsk> = null;
+    // Olumi's own current-level and deadline asks (and the cards they force) are host asks: `full` only, never `core`.
     if (mode === 'full' && typeof store.readMostRecentPendingActions === 'function') {
       try {
         levelAsk = latestCurrentLevelAsk(await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' }), scenarioId, userId);
@@ -3474,6 +3502,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     /** CEE's own words for a Run that did not run (the Run button), a typed host part for the composer. */
     let runOutcomeText: string | undefined;
     let result: AgentTurnResult | undefined;
+    /** PATH-B: the SDK runtime and trace of a `core` turn the Agents SDK ran (`_agent.sdk`); undefined on every other turn. */
+    let coreSdk: CoreTurnSdk | undefined;
     if (isDrawnLinkPress((body['chip'] as { id?: unknown } | undefined)?.id)) {
       result = await drawnLinkPress(
         (body['chip'] as { id: string }).id, { ctx: toolCtx, history, message, instructions: AGENT_INSTRUCTIONS, maxOutputTokens: budget.max_output_tokens, mode },
@@ -3503,7 +3533,37 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * this exact press does, through the same withdraw the Agent uses, and Olumi says so.
      */
     const declinedHold = declinedProposalOf((body['chip'] as { id?: unknown } | undefined)?.id);
-    if (declinedHold !== undefined && result === undefined) {
+    /**
+     * ⭐ PATH-B: in `core`, a press on the card of the scenario's paused SDK run answers THAT run: the SDK resumes its saved
+     * state, and the tool's own approval path (authorise, write, readback) runs under it. Every other press keeps its path.
+     */
+    const corePaused = mode === 'core' && result === undefined && (approvedProposal !== undefined || declinedHold !== undefined)
+      ? await store.readOpenAiPausedRun?.(scenarioId).catch(() => undefined) : undefined;
+    /**
+     * ⛔ ONE consent check for a paused core change, whether pressed on its card or typed (Codex #3461 R1/R2). An approval of it
+     * resumes it only when its words are THE offered card's own button words (a chip sends them; typed words equal to them are
+     * the press, #3013) and it carries no edits (the paused tool takes none). With edits it is refused, and nothing resumes;
+     * other words are not a press: they go to the AI as a message, which declines the paused call. The legacy path never acts.
+     */
+    const coreOwns = corePaused != null && result === undefined
+      && ((approvedProposal !== undefined && approvedProposal === corePaused.proposal_id) || (declinedHold !== undefined && declinedHold === corePaused.proposal_id));
+    const sentEdits = coreOwns && approvedProposal !== undefined ? parseProposalEdits(body['proposal_edits']) : undefined;
+    if (coreOwns && sentEdits !== undefined) {
+      const said = editsRefusedSentence(sentEdits === null ? 'malformed' : 'refused');
+      result = {
+        assistant_text: said,
+        items: [...(history ?? []), { role: 'user', content: [{ type: 'input_text', text: message }] },
+          { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: said }] }],
+        tool_calls: [], tool_results: [], mutated: false, hops: 0, stopped_reason: 'answered',
+        timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 },
+      };
+    }
+    const coreCard = coreOwns && approvedProposal !== undefined
+      ? [offeredCard, soleCard].find((c) => c !== undefined && typedApprovalOf({ chip: { id: c.id } }) === approvedProposal) : undefined;
+    const corePress = !coreOwns || result !== undefined ? undefined
+      : approvedProposal !== undefined ? (coreCard !== undefined && coreCard.message === message ? { decision: 'approve' as const, proposal_id: approvedProposal } : undefined)
+      : { decision: 'decline' as const, proposal_id: declinedHold! };
+    if (declinedHold !== undefined && result === undefined && !coreOwns) {
       const started = Date.now();
       const named = heldAtStart.find((p) => heldProposalId(p) === declinedHold);
       const withdrawn = await dispatchTool(WITHDRAW_PROPOSAL, JSON.stringify({ proposal_id: declinedHold }), toolCtx, capabilities, mode);
@@ -3524,7 +3584,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * proposal that takes none in slice 1) apply nothing: the proposal stays held, and the reply says why. Valid edits
      * ride the SAME approval below (the tool context's `proposal_edits`) to the existing door, which applies them in one commit.
      */
-    if (approvedProposal !== undefined && result === undefined && proposalEdits !== undefined && editsForThisCard === undefined) {
+    if (approvedProposal !== undefined && result === undefined && !coreOwns && proposalEdits !== undefined && editsForThisCard === undefined) {
       const said = editsRefusedSentence('malformed');
       result = {
         assistant_text: said,
@@ -3534,7 +3594,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 },
       };
     }
-    if (approvedProposal !== undefined && result === undefined) {
+    if (approvedProposal !== undefined && result === undefined && !coreOwns) {
       const fastStartedAt = Date.now();
       let edited: ReturnType<typeof amendAgentProposal> | undefined;
       let editsFailure: 'stale' | 'not_held' | 'refused' | undefined;
@@ -3736,7 +3796,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const interpret = interpretBudget();
         const resp = await callModelFor(interpret)({
           // Standing unit/authorship/calculation safeguards remain; RUN_FACTS_USE is the one Run coaching instruction.
-          instructions: `${AGENT_INSTRUCTIONS}\n\n${eligibleIntervention === undefined ? '' : `${ELIGIBLE_INTERVENTION_INSTRUCTION}\n\n`}${askView ? `${RUN_INTERPRETATION_VIEW_INSTRUCTION}\n\n` : ''}${INTERPRET_ONLY_CONSTRAINT}\n\n${RUN_FACTS_USE}`,
+          instructions: instructionsForMode(mode, `${AGENT_INSTRUCTIONS}\n\n${eligibleIntervention === undefined ? '' : `${ELIGIBLE_INTERVENTION_INSTRUCTION}\n\n`}${askView ? `${RUN_INTERPRETATION_VIEW_INSTRUCTION}\n\n` : ''}${INTERPRET_ONLY_CONSTRAINT}\n\n${RUN_FACTS_USE}`),
           input: explanationInput,
           // No tools at all: acting is structurally impossible on this call (and no schema tokens
           // are spent on tools it may not use). Measured against the live API: accepted with the
@@ -4197,7 +4257,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const loopStartedAt = Date.now();
     let runPressProviderMs = 0;
     let runPressProviderCalls = 0;
-    if (result === undefined && mode === 'full' && recoveredRun !== undefined && runPress) {
+    if (result === undefined && mode !== 'preview' && recoveredRun !== undefined && runPress) {
       // The operation already ran. Reuse its proven capability result directly; only its existing interpreter calls AI.
       const started = Date.now();
       const recorded = await loopCapabilities.runAnalysis(toolCtx, { reason: message, effects_timing: null });
@@ -4319,6 +4379,44 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           items: [], tool_calls: [], tool_results: [], mutated: false, hops: 0, stopped_reason: 'answered',
           timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0,
             provider_calls: 0, tool_calls: 0, hops: 0 } };
+      } else if (mode === 'core' && (corePress !== undefined || coreOwns || (!runPress && methodTurn === null && widenRun === undefined
+        && risksRun === undefined && (body['chip'] === undefined || body['chip'] === null)))) {
+        // ⭐ PATH-B: an ordinary typed `core` turn runs on the OpenAI Agents SDK (`core/sdk-turn.ts`): its runner, its session
+        // memory and its trace, with Olumi's capabilities as the tools. Presses and method turns keep their existing paths.
+        // The SDK turn's tools are the typed adapters, on the SAME verified typed-words carrier and the same primitives the
+        // capabilities above run on (dispatch, proposals, the drafter call, the fenced levels door and both observers).
+        const coreCtx = { ...toolCtx, ...(selectionContext != null ? { grounded_selection: selectionContext.grounded,
+          ...(selectionContext.links !== undefined ? { grounded_links: selectionContext.links } : {}) } : {}) };
+        const core = await runCoreTurn({
+          ctx: coreCtx, message, budget, userId,
+          tools: (onCall) => pathBTools({ dispatch: capDispatch, proposals, callStructured: capCallStructured, onAnalysis: onCapAnalysis,
+            commitOptionLevels: commitOptionLevelsDoor, onModelRegistered: (raw) => emitGraphReady(raw) }, coreCtx, mode,
+            (row, result) => onCall(row, { ...result })),
+          instructions: instructionsForMode(mode, eligibleIntervention === undefined ? AGENT_TOOL_INSTRUCTIONS : `${AGENT_TOOL_INSTRUCTIONS}\n\n${ELIGIBLE_INTERVENTION_INSTRUCTION}`),
+          briefText: await readingDispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {})
+            .then(read => read.status === 200 ? read.json.brief_text : undefined).catch(() => undefined),
+          canonicalState: canonicalContext?.packet?.state,
+          withheldTools: withheldToolsOf(body),
+          ...(corePress !== undefined ? { press: corePress } : {}),
+          ...(canonicalContext?.packet?.graph_revision !== undefined ? { traceMeta: { revision: canonicalContext.packet.graph_revision } } : {}),
+          // A run paused for the person's approval is saved on the scenario, so the press (any later request) resumes it.
+          ...(typeof store.readOpenAiPausedRun === 'function' && typeof store.saveOpenAiPausedRun === 'function'
+            && typeof store.takeOpenAiPausedRun === 'function' ? {
+            pausedRunStore: {
+              read: (sid: string) => store.readOpenAiPausedRun!(sid),
+              save: (sid: string, run: OpenAiPausedRun) => store.saveOpenAiPausedRun!(sid, run),
+              take: (sid: string, id: string) => store.takeOpenAiPausedRun!(sid, id),
+            } } : {}),
+          // The scenario's ONE OpenAI Conversation id is saved on the scenario, so a reopen continues it. A store without it
+          // stops the turn (CoreStateUnavailableError → 503 below): never a Conversation the next turn could not find.
+          ...(typeof store.readOpenAiConversationId === 'function' && typeof store.claimOpenAiConversationId === 'function' ? {
+            conversationStore: {
+              read: (sid: string) => store.readOpenAiConversationId!(sid),
+              claim: (sid: string, id: string) => store.claimOpenAiConversationId!(sid, id),
+            } } : {}),
+        });
+        coreSdk = core.sdk;
+        result = core;
       } else {
         result = await runAgentTurn(
           {
@@ -4333,10 +4431,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             briefText: await readingDispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {})
               .then(read => read.status === 200 ? read.json.brief_text : undefined).catch(() => undefined),
             message,
-            instructions: methodTurn?.kind === 'run' ? `${AGENT_INSTRUCTIONS}\n\n${methodTurn.directive}\n\n${premortemProducerDirective(methodTurn, methodGraph)}`
+            instructions: instructionsForMode(mode, methodTurn?.kind === 'run' ? `${AGENT_INSTRUCTIONS}\n\n${methodTurn.directive}\n\n${premortemProducerDirective(methodTurn, methodGraph)}`
               : widenRun !== undefined ? `${AGENT_INSTRUCTIONS}\n\n${widenRun.directive}`
               : risksRun !== undefined ? `${AGENT_INSTRUCTIONS}\n\n${risksRun.directive}`
-              : eligibleIntervention === undefined ? AGENT_TOOL_INSTRUCTIONS : `${AGENT_TOOL_INSTRUCTIONS}\n\n${ELIGIBLE_INTERVENTION_INSTRUCTION}`,
+              : eligibleIntervention === undefined ? AGENT_TOOL_INSTRUCTIONS : `${AGENT_TOOL_INSTRUCTIONS}\n\n${ELIGIBLE_INTERVENTION_INSTRUCTION}`),
             maxOutputTokens: budget.max_output_tokens,
             mode,
             // T3: a method turn is structurally ONE model call with NO tool (DL 5939415083 (2)): every tool withheld, one hop.
@@ -4356,12 +4454,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             ...(hostFirstCall !== undefined ? { hostFirstCall } : {}),
             ...(selectionContext !== null && selectionContext !== undefined ? { selectionNote: selectionContext.note } : {}),
             // PJ-C1 latency: a lone proposal is answered from its own result, with no narrating call (proposal-reply.ts).
-            composeReply: (tool, args, toolResult) => {
+            // PATH-B `core`: no host-composed reply; the AI narrates every tool result itself (one more call).
+            ...(mode === 'core' ? {} : { composeReply: (tool: string, args: unknown, toolResult: ToolResult) => {
               const firstResult = tool === 'build_model_from_brief'
                 ? firstAnalysisResultReply(args, toolResult, firstAnalysis?.outcome.ran === true) : null;
               if (firstResult !== null) { firstAnalysisResultFirst = true; return firstResult; }
               return composeProposalReply(tool, args, toolResult, message);
-            },
+            } }),
             // The "Suggest starting assumptions" press: its first call IS the proposal (`SUGGEST_STARTING_ASSUMPTIONS_CHIP`).
             ...((body['chip'] as { id?: unknown } | null | undefined)?.id === SUGGEST_STARTING_ASSUMPTIONS_CHIP.id
               ? { firstCallTool: STARTING_ASSUMPTIONS_TOOL } : {}),
@@ -4420,6 +4519,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             ...(turnId !== undefined ? { retry_safe: released } : {}),
           } };
           return reply.code(409).send(refusal.error);
+        }
+        // PATH-B: a `core` turn whose Conversation id cannot be kept on the scenario stops before any model call and says so.
+        if (err instanceof CoreStateUnavailableError) {
+          return reply.code(503).send({ error: err.code, detail: err.reason, _agent: { mode },
+            _provider_calls: recordedProviderCalls(), ...(turnId !== undefined ? { retry_safe: released } : {}) });
         }
         return reply.code(502).send({
           error: 'UPSTREAM_ERROR', detail: String(err).slice(0, 300),
@@ -4901,7 +5005,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const partFigures = identityPartFiguresToIssue({ graph: readbackGraph, userText: typedNow,
       toolCalls: result.tool_calls, mutated: result.mutated,
       proposalOffered: proposalsAwaitingApproval(result.tool_calls).size > 0, pending: liveHolds });
-    if (partFigures !== undefined || identityAutoIssueAllowed({ issue: !ceilingAnswerSettled && identityCardToIssue(result.tool_calls, result.tool_results), reoffer, heldWaiting: liveHolds.length > 0 })) {
+    // PATH-B `core`: the route issues no card of its own (here, the confirm card and the statement card below); the AI proposes.
+    if (mode !== 'core' && (partFigures !== undefined || identityAutoIssueAllowed({ issue: !ceilingAnswerSettled && identityCardToIssue(result.tool_calls, result.tool_results), reoffer, heldWaiting: liveHolds.length > 0 }))) {
       const issued = await dispatchTool('propose_identity', JSON.stringify(partFigures ?? {}), toolCtx, capabilities, mode);
       if (issued.ok === true && typeof issued.proposal_id === 'string') automaticIdentityProposalId = issued.proposal_id;
       result = {
@@ -4919,7 +5024,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // ⭐ S2 CONFIRM, ONE PRESS (DL 20:09Z 14 Oct; served 2a35ff31 pricing turn 02): when this turn's Run asked to confirm a
     // figure the user wrote ("Is your £49 … today's ‘Pro plan price’?") and nothing was proposed, the route issues #3113's
     // confirm card itself, quoting the brief's one sentence that states it: the SAME tool, once, writing nothing.
-    const heldAsk = fastPath === 'approve' ? undefined : heldFigureAskToConfirm({ toolCalls: result.tool_calls, toolResults: result.tool_results,
+    const heldAsk = fastPath === 'approve' || mode === 'core' ? undefined : heldFigureAskToConfirm({ toolCalls: result.tool_calls, toolResults: result.tool_results,
       mutated: result.mutated, proposalOffered: proposalsAwaitingApproval(result.tool_calls).size > 0, heldWaiting: liveHolds.length > 0 });
     const heldConfirm = heldAsk === undefined || readbackGraph == null ? undefined : heldFigureConfirmArgs(readbackGraph, identityOfferBrief, heldAsk);
     if (heldConfirm !== undefined) {
@@ -4936,7 +5041,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * brief's own sentence the model holds for a risk (`already_true_quote`), gets its door card: the SAME tool, once, writing
      * nothing; the door re-verifies it and only the press records it.
      */
-    const doorArgs = fastPath === 'approve' || readbackGraph == null ? undefined : doorIssueArgs(readbackGraph, typedNow,
+    const doorArgs = fastPath === 'approve' || mode === 'core' || readbackGraph == null ? undefined : doorIssueArgs(readbackGraph, typedNow,
       { ...(selectionContext?.grounded !== undefined ? { selection: selectionContext.grounded } : {}),
         ...(precedingAsk === undefined ? {} : { preceding_ask: precedingAsk }) },
       { toolCalls: result.tool_calls, mutated: result.mutated, proposalOffered: proposalsAwaitingApproval(result.tool_calls).size > 0,
@@ -5961,8 +6066,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * stays beside a face figure when its typed subjects match. The 80-word demotion order belongs to this one composer.
      * Whole profiles/envelopes retain their existing behavior; an uninterpreted Run uses coaching.
      * ⛔ THE ONE LAST WRITER: nothing below this block writes `assistant_text` (pinned by `reply-composer-last-writer.test.ts`).
+     *
+     * ⭐ PATH-B `core` (agent-tools.ts `AgentLaneMode`): the reply is the AI's own words, exactly. Every host line, ask, face,
+     * disclosure and prose rewrite above is dropped here, once; the AI held the same facts as typed context (tool results,
+     * canonical state, readiness, run_facts and the leader and goal-chance licences). Only the display boundary stays: a
+     * proposal id is never text a user reads (display-ids.ts). Cards, blocks, the licensed result view, receipts on the wire,
+     * the durable row and replay are unchanged. A host-written reply (no AI words, or a host truth swap) keeps today's path.
      */
-    if (aiWroteReply && noDirectLink === null && fastPath !== 'method') {
+    if (mode === 'core' && aiWroteReply) {
+      const { _answer_shape: _hostShape, ...unshaped } = wireBody as OlumiResponse & Record<string, unknown> & { _answer_shape?: unknown };
+      // A replacement by the AI's own words (nothing appended): every host line above is dropped, not added to.
+      const aiOwnWords = withoutProposalIds(narratorWords ?? text);
+      wireBody = { ...unshaped, assistant_text: aiOwnWords } as OlumiResponse & Record<string, unknown>;
+    } else if (aiWroteReply && noDirectLink === null && fastPath !== 'method') {
       const checked = withEstimateGoalPointsAtEgress(wireBody, {
         analysisResult, graph: readbackGraph ?? null, current: selectedRunCurrent,
         narrator: 'olumi',
@@ -6596,6 +6712,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       _agent: {
         session_id: sessionId,
         mode,
+        ...(coreSdk !== undefined ? { sdk: coreSdk } : {}),
         tool_calls: result.tool_calls,
         mutated: result.mutated,
         hops: result.hops,

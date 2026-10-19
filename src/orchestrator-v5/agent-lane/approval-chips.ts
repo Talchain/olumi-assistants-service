@@ -71,6 +71,8 @@ const COHORT_FORECAST_APPROVE = { label: 'Record this forecast', message: 'Yes, 
 const REPLACE_DRAFT_APPROVE = { label: 'Use the revised draft', message: 'Yes, use the revised draft.' } as const;
 
 const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
+  // PATH-B `core`: the SDK pauses `apply_change` for the person's approval; this card is that pause (its press resumes it).
+  apply_change: { label: 'Make this change', message: 'Yes, make this change.' },
   propose_starting_point: { label: 'Use as starting assumptions', message: 'Yes, use those.' },
   propose_assumptions: { label: 'Use as starting assumptions', message: 'Yes, use those.' },
   // SYSTEM 1: the ONE statement door's card records the user's own words (`DOOR_APPROVE`).

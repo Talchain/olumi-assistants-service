@@ -1,0 +1,6 @@
+-- Rollback for 20261019150000_scenario_openai_conversation_id.sql (project etmmuzwxtcjipwphdola). Drops exactly what that
+-- migration added: two CHECK constraints and two columns. Any saved Conversation ids and paused runs are lost with them.
+ALTER TABLE public.scenarios DROP CONSTRAINT IF EXISTS scenarios_openai_paused_run_shape;
+ALTER TABLE public.scenarios DROP CONSTRAINT IF EXISTS scenarios_openai_conversation_id_shape;
+ALTER TABLE public.scenarios DROP COLUMN IF EXISTS openai_paused_run;
+ALTER TABLE public.scenarios DROP COLUMN IF EXISTS openai_conversation_id;

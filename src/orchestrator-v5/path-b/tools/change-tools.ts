@@ -1,0 +1,335 @@
+/**
+ * ⭐ PATH-B: PROPOSE AND APPLY A CHANGE (C5, 19 Oct 2026; DL-3 rulings 1–3 and 7, PL 3b; outbox/C5-PATHB-PROPOSE-APPLY-DESIGN.md).
+ *
+ * `propose_change` writes nothing. The AI declares each figure and its SOURCE (origin, the user's words, a named third party);
+ * the host checks only literal facts on one fresh read: the ids exist, the quote is literally in the user's typed messages,
+ * and the carrier can hold the declared origin. It records the declaration in ONE content-hashed proposal (`createProposal`).
+ *
+ * `apply_change` runs only after the user's press (the SDK's approval interruption, owned by PATH-B):
+ *  1. EXACTLY ONCE: this proposal's own committed receipt is looked up first (`/versions` by `authorisationTurnId`), so a
+ *     commit whose response was lost, or a restart, reconciles to "already saved", never to `superseded`;
+ *  2. the existing approval seam: `proposals.authorise` on the fresh identity, then `executeApproved` (single flight; an
+ *     unknown outcome stays blocked);
+ *  3. ONE commit through the product's batch door (`commitOptionLevels`: CAS on the base, idempotent on the turn id), with
+ *     the declared origins stamped by the writers' own contexts;
+ *  4. a save is claimed only on THIS commit's receipt AND the complete approved postimage read back afresh.
+ *
+ * HOW EACH CARRIER HOLDS A DECLARED SOURCE: ONE table (`holdingOf`), read back by the ONE authority (`provenanceOf`). What a
+ * carrier cannot hold is returned in the receipt as `not_kept`, with the original material; a save that lost anything is
+ * never called faithful (PL AMEND 15:35). A source a carrier could hold only by changing its origin is BLOCKED-SCHEMA.
+ *  · factor value — Olumi's: adopted by the press (`user_assumption` + review → ai, accepted). The user's or a third party's,
+ *    with the words literally the user's: an unverified binding (`user_material_unverified` → human, role unverified). A
+ *    literal match proves the bytes, never the speaker (PL 3b), so it is never "the user's, verified". Not kept: the words,
+ *    and for a third party that it was someone else, and their name. An unknown speaker: BLOCKED-SCHEMA (it would read human).
+ *  · option setting — Olumi's: `cee_hypothesis` (ai). Not kept: the user's approval (a cell holds no acceptance marker). Any
+ *    other source: BLOCKED-SCHEMA — the level writer stamps only the user's verified figure or Olumi's.
+ *  · stance (AIE 15:24/15:54, separate from source): a value holds a current level, a setting a what-if. A target or a
+ *    supposition is never saved as a value; a stance the carrier does not mean is saved with the stance named as not kept.
+ * Changes this path does not make yet (the goal's target, a link's strength, add, remove, rename) come back `unavailable`,
+ * naming what is not available.
+ */
+import { z } from 'zod-v4';
+import type { AgentToolContext } from '../../agent-lane/runtime/agent-tools.js';
+import { authorisationTurnId, type InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
+import { createProposal, type ProposalOperation, type ProposalStore, type ReceiptSummary, type StructuredProposal } from '../../agent-lane/proposal.js';
+import { runWithApprovedBindings, type ApprovedAdoption } from '../../agent-lane/approved-adoption-context.js';
+import { defaultFrameFor } from '../../agent-lane/admit-model.js';
+import { GraphStaleWriteError } from '../../build-turn-context.js';
+import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../../system-events/dispatch.js';
+import { provenanceOf, type Provenance } from '../../../cee/provenance/provenance-of.js';
+import { isSavedRead, readSaved, type SavedRead } from './context-tool.js';
+import { ok, refused, unavailable, type ToolOutcome } from './outcome.js';
+import { inTheUsersWords, type TypedWords } from './user-words.js';
+
+export const PROPOSE_CHANGE = 'propose_change';
+export const APPLY_CHANGE = 'apply_change';
+
+const Source = z.object({
+  /** Who the figure comes from, as the AI read it: the user, a third party they named, Olumi, or not known. */
+  origin: z.enum(['user', 'third_party', 'olumi', 'unknown']),
+  /** The words it comes from, copied verbatim from the user's own messages; null for Olumi's estimate. */
+  quote: z.string().nullable(),
+  /** The third party the user named as its source; otherwise null. */
+  named_source: z.string().nullable(),
+}).strict();
+const id = z.string();
+const unit = z.string().nullable();
+/** The AIE's per-figure stance, verbatim (prompt/AIE-MULTIMODEL-SCOPE-AND-STANCE-REPLY-20261019-v1.json, 15:24). */
+export const STANCE_DESCRIPTION =
+  'How this particular figure is put forward in its full source context, not whether it is true and not who authored it. hypothetical: a supposition, conditional scenario or what-if, including numbers embedded inside that assumed situation. target: a desired or required outcome or threshold, rather than an observed level. estimate: a tentative assessment, approximation or prediction offered as such, rather than an asserted current fact. stated_current: the speaker asserts an actual current or already observed level for this subject at the relevant time, outside a supposition, target or estimate. Read the whole proposition and its conditions: indicative wording inside a supposition does not make its embedded figure stated_current. Classify each figure by its own proposition; one statement\'s status must not transfer to a different quantity or subject. Preserve the original source, wording, sign, units, period and conditions. stated_current describes the assertion; it does not mean verified, accurate or adopted.';
+const Stance = z.enum(['stated_current', 'hypothetical', 'target', 'estimate']).describe(STANCE_DESCRIPTION);
+const Declared = z.object({ value: z.number(), unit, stance: Stance, source: Source }).strict();
+/**
+ * Changes this path cannot make yet (DL-3 ruling, 19 Oct: one dispatch path, no interim wrapper). The AI can still name one,
+ * and is told truthfully that it is not available here, never refused as if a rule forbade it.
+ */
+const NOT_YET = {
+  set_goal_target: 'Changing the goal\'s target isn\'t available on this path yet.',
+  set_link_strength: 'Changing how strongly one factor affects another isn\'t available on this path yet.',
+  add_to_model: 'Adding a factor or an option isn\'t available on this path yet.',
+  remove_from_model: 'Removing something from the model isn\'t available on this path yet.',
+  rename: 'Renaming isn\'t available on this path yet.',
+} as const;
+type NotYet = keyof typeof NOT_YET;
+const notYet = (op: NotYet) => z.object({ op: z.literal(op), target_id: id }).strict();
+export const ChangeOp = z.discriminatedUnion('op', [
+  z.object({ op: z.literal('set_factor_value'), factor_id: id, value: z.number(), unit, stance: Stance, source: Source }).strict(),
+  z.object({ op: z.literal('set_option_setting'), option_id: id, factor_id: id, value: z.number(), unit, stance: Stance, source: Source }).strict(),
+  notYet('set_goal_target'), notYet('set_link_strength'), notYet('add_to_model'), notYet('remove_from_model'), notYet('rename'),
+]);
+type FigureOp = Extract<z.infer<typeof ChangeOp>, { source: unknown }>;
+const isNotYet = (o: z.infer<typeof ChangeOp>): o is Extract<z.infer<typeof ChangeOp>, { op: NotYet }> => Object.hasOwn(NOT_YET, o.op);
+export const ProposeChangeParams = z.object({
+  /** What the approval card says, in a few plain words. */
+  public_label: z.string(),
+  /** Why, in Olumi's words. */
+  basis: z.string(),
+  ops: z.array(ChangeOp).min(1).max(12),
+}).strict();
+/** No pattern: the SDK's strict schema drops it, so a malformed id would fail the parse and end the turn. An id the store
+ * does not hold is refused as `unknown_proposal` instead. */
+export const ApplyChangeParams = z.object({ proposal_id: z.string() }).strict();
+export type ProposeChangeArgs = z.infer<typeof ProposeChangeParams>;
+export type ApplyChangeArgs = z.infer<typeof ApplyChangeParams>;
+
+export interface ChangeDeps {
+  readonly dispatch: InternalDispatch;
+  readonly proposals: ProposalStore;
+  /** The product's batch door (`commitOptionLevelsInProcess`), as the route already gives the capabilities. */
+  readonly commitOptionLevels?: (input: CommitOptionLevelsInput) => Promise<CommitOptionLevelsResult>;
+}
+type ChangeCtx = Pick<AgentToolContext, 'scenario_id' | 'authenticated_user_id' | 'turn_id'> & TypedWords;
+
+type Rec = Record<string, unknown>;
+type Op = { kind: 'value' | 'setting'; option_id?: string; factor_id: string } & z.infer<typeof Declared>;
+type DeclaredSource = z.infer<typeof Source>;
+/** What a carrier cannot hold of the declared source, with the declared material itself. */
+type NotKept = { readonly what: 'speaker' | 'name' | 'words' | 'approval' | 'stance'; readonly declared: string };
+type DeclaredStance = z.infer<typeof Stance>;
+type Holding = { readonly stored: Pick<Provenance, 'origin'> & { readonly accepted?: true; readonly role?: 'unverified' }; readonly not_kept: readonly NotKept[] }
+  | { readonly blocked: string };
+/**
+ * THE ONE TABLE: how each carrier holds a declared source and stance, what the authority must read back, and what is not kept.
+ * A factor value IS the factor's current level; an option's setting IS the level under that option (a what-if). A figure whose
+ * stance that carrier would change into an operative current level (a supposition or a target as a value) is BLOCKED (AIE
+ * 15:54: a hypothetical never becomes an operative current level).
+ */
+function holdingOf(kind: Op['kind'], s: DeclaredSource, stance: DeclaredStance): Holding {
+  if (kind === 'setting' && s.origin !== 'olumi') return { blocked: 'an option\'s setting can be saved only as Olumi\'s own estimate on this path yet' };
+  if (kind === 'value' && s.origin === 'unknown') return { blocked: 'a figure whose speaker is not known cannot be saved as unknown on this path yet; it would read as a person\'s figure' };
+  if (stance === 'target') return { blocked: kind === 'value' ? 'a target would become this factor\'s current level; setting a target isn\'t available on this path yet' : 'a target is not an option\'s setting' };
+  if (kind === 'value' && stance === 'hypothetical') return { blocked: 'a supposed figure would become this factor\'s current level; it cannot be kept as a supposition on this path yet' };
+  // What the carrier means for this source: Olumi's figure is held as Olumi's estimate; a person's value as a stated level;
+  // an option's setting as a what-if. Any other declared stance is saved with its stance named as not kept.
+  const held: readonly DeclaredStance[] = s.origin === 'olumi' ? (kind === 'value' ? ['estimate'] : ['estimate', 'hypothetical']) : ['stated_current'];
+  const stanceLost: NotKept[] = held.includes(stance) ? [] : [{ what: 'stance', declared: stance }];
+  if (s.origin === 'olumi') {
+    return kind === 'value' ? { stored: { origin: 'ai', accepted: true }, not_kept: stanceLost }
+      : { stored: { origin: 'ai' }, not_kept: [...stanceLost, { what: 'approval', declared: 'adopted_by_the_press' }] };
+  }
+  const words: NotKept = { what: 'words', declared: s.quote ?? '' };
+  return { stored: { origin: 'human', role: 'unverified' }, not_kept: [...stanceLost, ...(s.origin === 'user' ? [words]
+    : [{ what: 'speaker' as const, declared: 'third_party' }, ...(s.named_source === null ? [] : [{ what: 'name' as const, declared: s.named_source }]), words])] };
+}
+const isBlocked = (h: Holding): h is Extract<Holding, { blocked: string }> => 'blocked' in h;
+const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
+const nodesOf = (g: Rec): Rec[] => (Array.isArray(g.nodes) ? g.nodes.filter(isRec) : []);
+const frameOf = (n: Rec): number | null => {
+  const os = isRec(n.observed_state) ? n.observed_state : {};
+  return typeof os.cap === 'number' && os.cap > 0 ? os.cap : typeof n.scale_frame === 'number' && n.scale_frame > 0 ? n.scale_frame : null;
+};
+const close = (a: unknown, b: number): boolean => typeof a === 'number' && Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(b));
+const cellOf = (option: Rec | undefined, factorId: string): unknown => (isRec(option?.interventions) ? option.interventions[factorId] : undefined);
+
+/** The operations as stored on the proposal: the declaration, hashed into its id. */
+const operationOf = (o: FigureOp): ProposalOperation => ({
+  op: o.op === 'set_factor_value' ? 'set_factor_value' : 'set_option_intervention',
+  path: o.op === 'set_factor_value' ? o.factor_id : `${o.option_id}::${o.factor_id}`,
+  value: { value: o.value, unit: o.unit, stance: o.stance, source: o.source },
+});
+function declaredOf(p: StructuredProposal): Op[] | null {
+  const out: Op[] = [];
+  for (const o of p.operations) {
+    const d = Declared.safeParse(o.value);
+    if (!d.success || (o.op !== 'set_factor_value' && o.op !== 'set_option_intervention')) return null;
+    const [optionId, factorId] = o.op === 'set_option_intervention' ? o.path.split('::') : [undefined, o.path];
+    out.push({ kind: o.op === 'set_factor_value' ? 'value' : 'setting', factor_id: factorId ?? '', ...(optionId === undefined ? {} : { option_id: optionId }), ...d.data });
+  }
+  return out;
+}
+
+type Plan = Pick<CommitOptionLevelsInput, 'links' | 'levels' | 'values' | 'frames'> & { bindings: ApprovedAdoption[] };
+type Stop = { refusal: string; op: number };
+/** The declared ops as the door's one input, on the read graph. Conversion (ranges, units) stays the writers'. */
+function planOf(scenarioId: string, proposalId: string, ops: readonly Op[], graph: Rec): Plan | Stop {
+  const byId = new Map(nodesOf(graph).map((n) => [n.id, n]));
+  const edges = Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
+  const plan: Plan & { values: NonNullable<Plan['values']>[number][]; frames: NonNullable<Plan['frames']>[number][];
+    levels: Plan['levels'][number][]; links: Plan['links'][number][] } = { links: [], levels: [], values: [], frames: [], bindings: [] };
+  for (const [i, o] of ops.entries()) {
+    const factor = byId.get(o.factor_id);
+    if (factor?.kind !== 'factor') return { refusal: 'not_a_factor', op: i };
+    if (isBlocked(holdingOf(o.kind, o.source, o.stance))) return { refusal: 'blocked_schema', op: i };
+    const olumi = o.source.origin === 'olumi';
+    if (o.kind === 'value') {
+      plan.values.push({ factor_id: o.factor_id, value: o.value, ...(o.unit === null ? {} : { unit: o.unit }), author: olumi ? 'model_proposed' : 'user_specified' });
+      if (!olumi) plan.bindings.push({ scenarioId, proposalId, targetId: o.factor_id, rawValue: o.value, unverifiedBinding: { source: o.source.quote ?? '', quote: o.source.quote ?? '' } });
+      if (frameOf(factor) === null && Math.abs(o.value) > 1) plan.frames.push({ factor_id: o.factor_id, cap: defaultFrameFor(o.value) });
+      continue;
+    }
+    if (byId.get(o.option_id)?.kind !== 'option') return { refusal: 'not_an_option', op: i };
+    const frame = frameOf(factor) ?? plan.frames.find((f) => f.factor_id === o.factor_id)?.cap ?? null;
+    // #3461 R1: only a unitless share may take the model's 0–1 scale on a factor with no range. A figure with a unit (or above 1)
+    // would lose its figure and unit there, so it is not proposed at all (`needs_range`), never written and found short after.
+    if (frame === null && (o.unit !== null || Math.abs(o.value) > 1)) return { refusal: 'needs_range', op: i };
+    plan.levels.push(frame === null ? { option_id: o.option_id!, factor_id: o.factor_id, value: o.value, author: 'model_proposed' }
+      : { option_id: o.option_id!, factor_id: o.factor_id, value: o.value / frame, raw_value: o.value, cap: frame, ...(o.unit === null ? {} : { unit: o.unit }), author: 'model_proposed' });
+    if (!edges.some((e) => e.from === o.option_id && e.to === o.factor_id)) plan.links.push({ option_id: o.option_id!, factor_id: o.factor_id });
+  }
+  return plan;
+}
+
+/**
+ * Each op as the model now holds it: the declared source, the source the ONE authority reads, and what was not kept.
+ * `holds` only when every figure is there as approved AND the authority reads exactly the holding's source.
+ */
+function readbackOf(read: SavedRead, ops: readonly Op[]): { holds: boolean; faithful: boolean; written: Rec[] } {
+  const byId = new Map(nodesOf(read.graph).map((n) => [n.id, n]));
+  const written = ops.map((o) => {
+    const holding = holdingOf(o.kind, o.source, o.stance);
+    const factor = byId.get(o.factor_id);
+    const carrier = o.kind === 'value' ? factor?.observed_state : cellOf(byId.get(o.option_id), o.factor_id);
+    const figure = typeof carrier === 'number' ? carrier : isRec(carrier) ? (typeof carrier.raw_value === 'number' ? carrier.raw_value : carrier.value) : undefined;
+    const source: Provenance = o.kind === 'value' ? provenanceOf({ value: carrier }) : provenanceOf({ setting: carrier, target: factor });
+    const storedUnit = isRec(carrier) && typeof carrier.unit === 'string' ? carrier.unit : null;
+    const asHeld = !isBlocked(holding) && source.origin === holding.stored.origin
+      && (holding.stored.role === undefined || source.role === holding.stored.role)
+      && (holding.stored.accepted !== true || source.accepted);
+    const holds = close(figure, o.value) && asHeld && (o.unit === null || storedUnit?.trim().toLowerCase() === o.unit.trim().toLowerCase());
+    const notKept = isBlocked(holding) ? [] : holding.not_kept;
+    return { holds, notKept, row: { op: o.kind === 'value' ? 'set_factor_value' : 'set_option_setting', ...(o.option_id === undefined ? {} : { option_id: o.option_id }),
+      factor_id: o.factor_id, figure: figure ?? null, unit: storedUnit, declared: { ...o.source, stance: o.stance }, stored_as: source, not_kept: notKept } };
+  });
+  return { holds: written.every((w) => w.holds), faithful: written.every((w) => w.notKept.length === 0), written: written.map((w) => w.row) };
+}
+
+/** THIS proposal's own committed version, by the turn id its write carries; 'unreadable' when the history cannot be read. */
+async function ownReceipt(dispatch: InternalDispatch, scenarioId: string, turnId: string): Promise<ReceiptSummary | null | 'unreadable'> {
+  let cursor: string | undefined;
+  for (let page = 0; page < 5; page += 1) {
+    let r: Awaited<ReturnType<InternalDispatch>>;
+    try { r = await dispatch(`/assist/v1/scenarios/${scenarioId}/versions`, { limit: 200, ...(cursor === undefined ? {} : { cursor }) }); } catch { return 'unreadable'; }
+    if (r.status !== 200) return 'unreadable';
+    const hit = (Array.isArray(r.json.versions) ? r.json.versions.filter(isRec) : [])
+      .find((v) => isRec(v.creation) && v.creation.source_turn_id === turnId);
+    if (hit !== undefined && isRec(hit.creation)) {
+      return { version: Number(hit.sequence), version_id: String(hit.version_id), mutation_id: String(hit.creation.mutation_id), source_turn_id: turnId };
+    }
+    cursor = typeof r.json.next_cursor === 'string' ? r.json.next_cursor : undefined;
+    if (cursor === undefined) return null;
+  }
+  return null;
+}
+
+/** A plan that stopped: a figure no carrier can take as given is unavailable with the figure kept; anything else is refused. */
+function stopped(plan: Stop, ops: readonly Op[]): ToolOutcome {
+  if (plan.refusal !== 'needs_range') return refused(plan.refusal, undefined, { op: plan.op });
+  const o = ops[plan.op]!;
+  return unavailable('needs_range', 'none', `Change ${plan.op + 1}: this factor has no range yet, so this figure cannot be saved with its unit; nothing was proposed or saved.`,
+    { op: plan.op, not_kept: [{ what: 'figure', declared: o.unit === null ? String(o.value) : `${o.value} ${o.unit}` }] });
+}
+
+/** BLOCKED-SCHEMA, said with the change it stopped: nothing is proposed or saved. */
+const blockedSaid = (i: number, why: string): string => `Change ${i + 1}: ${why}, so nothing was proposed or saved.`;
+
+const codeOf = (reason: string): string => {
+  const c = reason.toLowerCase().replace(/[^a-z0-9_]/g, '_');
+  return /^[a-z]/.test(c) ? c : 'change_refused';
+};
+
+export async function proposeChange(deps: Pick<ChangeDeps, 'dispatch' | 'proposals'>, ctx: ChangeCtx, args: ProposeChangeArgs): Promise<ToolOutcome> {
+  const later = args.ops.find(isNotYet);
+  if (later !== undefined) return unavailable(`${later.op}_not_available`, 'none', `${NOT_YET[later.op]} Nothing was proposed or saved.`);
+  const ops = args.ops.filter((o): o is FigureOp => !isNotYet(o));
+  if (args.public_label.trim() === '') return refused('label_empty');
+  for (const [i, o] of ops.entries()) {
+    const holding = holdingOf(o.op === 'set_factor_value' ? 'value' : 'setting', o.source, o.stance);
+    if (isBlocked(holding)) return unavailable('blocked_schema', 'none', blockedSaid(i, holding.blocked));
+    if (o.source.origin !== 'olumi' && (o.source.quote === null || !inTheUsersWords(o.source.quote, ctx))) return refused('quote_not_in_users_words', undefined, { op: i });
+  }
+  const read = await readSaved(deps, ctx.scenario_id);
+  if (!isSavedRead(read)) return read;
+  if (read.identity === null) return unavailable('read_malformed');
+  const content = { scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: read.identity,
+    operations: ops.map(operationOf), provenance: { authored_by: 'model_proposed' as const, basis: args.basis },
+    validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: args.public_label };
+  const p = createProposal(content);
+  const declared = declaredOf(p) ?? [];
+  const plan = planOf(ctx.scenario_id, p.proposal_id, declared, read.graph);
+  if ('refusal' in plan) return stopped(plan, declared);
+  deps.proposals.put(p);
+  return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: read.identity });
+}
+
+export async function applyChange(deps: ChangeDeps, ctx: ChangeCtx, args: ApplyChangeArgs): Promise<ToolOutcome> {
+  const p = deps.proposals.get(args.proposal_id);
+  if (p === undefined) return refused('unknown_proposal');
+  if (p.scenario_id !== ctx.scenario_id || p.user_id !== ctx.authenticated_user_id) return refused('not_authorised');
+  const ops = declaredOf(p);
+  if (ops === null) return refused('not_a_change_proposal');
+  if (deps.commitOptionLevels === undefined) return unavailable('writer_unavailable');
+  const turnId = authorisationTurnId(p.proposal_id);
+  const prior = await ownReceipt(deps.dispatch, ctx.scenario_id, turnId);
+  if (prior === 'unreadable') return unavailable('read_failed');
+  const before = await readSaved(deps, ctx.scenario_id);
+  if (!isSavedRead(before)) return before;
+  const alreadySaved = (receipt: ReceiptSummary | null): ToolOutcome => {
+    if (receipt !== null) deps.proposals.markApplied(p.proposal_id, [receipt]);
+    const now = readbackOf(before, ops);
+    return ok({ already_saved: true, receipt, holds_now: now.holds, faithful: now.faithful, written: now.written });
+  };
+  if (prior !== null) return alreadySaved(prior);
+  if (before.identity === null) return unavailable('read_malformed');
+  const decision = deps.proposals.authorise({ proposal_id: p.proposal_id, scenario_id: ctx.scenario_id,
+    authenticated_user_id: ctx.authenticated_user_id, current_graph_identity_hash: before.identity, typed_approval_of: p.proposal_id });
+  if (decision.status === 'already_applied') return alreadySaved(decision.receipts[0] ?? null);
+  if (decision.status !== 'execute') return refused(decision.status);
+  const plan = planOf(ctx.scenario_id, p.proposal_id, ops, before.graph);
+  if ('refusal' in plan) return stopped(plan, ops);
+  const input: CommitOptionLevelsInput = { scenario_id: ctx.scenario_id, base_graph_hash: before.graphHash, turn_id: turnId,
+    links: plan.links, levels: plan.levels, ...(plan.values!.length > 0 ? { values: plan.values } : {}), ...(plan.frames!.length > 0 ? { frames: plan.frames } : {}) };
+
+  const commit = async (): Promise<ToolOutcome> => {
+    let res: CommitOptionLevelsResult;
+    try {
+      res = await runWithApprovedBindings(plan.bindings, () => deps.commitOptionLevels!(input));
+    } catch (err) {
+      return err instanceof GraphStaleWriteError ? refused('superseded') : unavailable('not_confirmed', 'unknown');
+    }
+    if (res.status === 'stale') return refused('superseded');
+    if (res.status === 'unconfirmed') return unavailable('not_confirmed', 'unknown');
+    if (res.status === 'refused') {
+      return refused(codeOf(res.reason), undefined, { ...(res.value ?? res.frame ?? res.pair ?? {}) });
+    }
+    // ONE success predicate for every arm (buddy 16:0x): the complete approved postimage, read back afresh. A verified no-op
+    // ("the model already held it") is said as unchanged, with no receipt, and only when the readback holds as approved.
+    const after = await readSaved(deps, ctx.scenario_id);
+    const back = isSavedRead(after) ? readbackOf(after, ops) : null;
+    if (back === null || !back.holds || !isSavedRead(after)) return unavailable('not_verified', 'unknown');
+    if (res.already_applied) {
+      deps.proposals.markApplied(p.proposal_id, []);
+      return ok({ unchanged: true, faithful: back.faithful, written: back.written });
+    }
+    if (res.receipt === null || res.receipt.source_turn_id !== turnId) return unavailable('not_verified', 'unknown');
+    const receipt: ReceiptSummary = { ...res.receipt, source_turn_id: turnId };
+    deps.proposals.markApplied(p.proposal_id, [receipt]);
+    return ok({ saved: true, faithful: back.faithful, receipt, revision: { graph_hash: after.graphHash, graph_identity_hash: after.identity },
+      written: back.written }, { mutated: true });
+  };
+  const reconcile = async (): Promise<ToolOutcome> => {
+    const own = await ownReceipt(deps.dispatch, ctx.scenario_id, turnId);
+    return own !== null && own !== 'unreadable' ? alreadySaved(own) : unavailable('not_confirmed', 'unknown');
+  };
+  return deps.proposals.executeApproved(p, ctx.turn_id ?? turnId, commit,
+    (o) => (o.status === 'ok' ? 'applied' : o.status === 'unavailable' && o.write === 'unknown' ? 'unknown' : 'none'), reconcile);
+}
