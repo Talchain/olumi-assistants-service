@@ -170,10 +170,10 @@ describe('the goal’s current level: the existing goal-level door, ONE registra
     expect((goal().observed_state as Rec).raw_value).toBe(120);
   });
 
-  it.each([['widgets'], ['']])('an unknown or missing declared unit (%j) is refused, nothing proposed', async (unit) => {
+  it.each([['widgets', 'unit_mismatch'], ['', 'unit_unstated']])('an unknown or missing declared unit (%j) is refused %s, nothing proposed', async (unit, reason) => {
     const d = deps();
     const out = await propose(d, [{ ...level('user', 'stated_current', 'about 110 a week'), unit }]);
-    expect(out.status).toBe('refused');
+    expect(out, JSON.stringify(out)).toMatchObject({ status: 'refused', reason });
     expect(d.proposals.size()).toBe(0);
   });
 
@@ -198,6 +198,9 @@ describe('the goal’s current level: the existing goal-level door, ONE registra
     expect(statedGoalLevelInUsersWords(110, 'orders a week', goalUnit, 'We have about 120 a week.')).toMatchObject({ ok: false, refusal: 'figure_not_in_users_words' });
     expect(statedGoalLevelInUsersWords(110, 'orders a week', goalUnit, 'We have about 120 a week.', 'about 110 a week')).toMatchObject({ ok: true, raw: 110, quote: 'about 110 a week' });
     expect(statedGoalLevelInUsersWords(110, 'orders a month', goalUnit, '', 'about 110 a month')).toMatchObject({ ok: false, refusal: 'unit_mismatch' });
+    // DL-3 (19 Oct): NO unit stated stays A's base (its words carry the figure); only B's typed caller refuses it.
+    expect(statedGoalLevelInUsersWords(110, '', goalUnit, 'We have about 110 orders a week.')).toMatchObject({ ok: true, raw: 110 });
+    expect(statedGoalLevelInUsersWords(110, '', goalUnit, 'We have about 110 orders a week.', 'about 110 orders a week')).toMatchObject({ ok: false, refusal: 'unit_unstated' });
   });
 
   it('a model that moved since the card: superseded, nothing written', async () => {

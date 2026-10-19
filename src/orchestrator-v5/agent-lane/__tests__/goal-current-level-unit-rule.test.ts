@@ -76,12 +76,14 @@ describe('refused: never recorded as the goal\'s current level', () => {
 describe('A GOAL IN A UNIT NO CLASSIFIER READS takes only its OWN unit (DL-3 decision after Codex R1 on #3467: the residual is closed)', () => {
   it.each([
     ['customers', 'customers'], ['£M ARR', '£M ARR'], ['orders a week', 'orders a week'],
-  ])('goal in %j, stated %j (its own unit) → admitted unchanged', (goalUnit, stated) => {
+    // DL-3 (19 Oct): no unit stated stays admitted here, as the base does (A's words carry it; B's typed caller refuses it).
+    ['customers', ''], ['orders a week', ''],
+  ])('goal in %j, stated %j (its own unit, or none) → admitted unchanged', (goalUnit, stated) => {
     expect(read(12, stated, goalUnit)).toStrictEqual({ ok: true, raw: 12 });
   });
 
   it.each([
-    ['customers', '', 'unit_unstated'], ['customers', 'subscribers', 'unit_mismatch'], ['orders a week', 'orders a month', 'unit_mismatch'],
+    ['customers', 'subscribers', 'unit_mismatch'], ['orders a week', 'orders a month', 'unit_mismatch'], ['customers', 'widgets', 'unit_mismatch'],
   ])('goal in %j, stated %j → refused %s: never relabelled with the goal\u2019s unit', (goalUnit, stated, refusal) => {
     expect(read(12, stated, goalUnit)).toMatchObject({ ok: false, refusal });
   });

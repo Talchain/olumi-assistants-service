@@ -353,14 +353,11 @@ export function readStatedGoalLevel(value: number, statedUnit: unknown, goal: { 
 
   // ⛔ #3467 R1 (Codex: "110 orders a month" saved as 110 orders a WEEK, the user's): a goal no classifier reads ("orders a
   // week") takes only its OWN unit phrase (`sameUnitPhrase`: the same head, and no other period or measure after it). Another
-  // phrase, an unknown unit or none is refused, never relabelled with the goal's unit (it used to fail open here).
+  // phrase or an unknown unit is refused, never relabelled with the goal's unit (it used to fail open here). NO unit stated is
+  // admitted, as before (DL-3, 19 Oct): A's callers then need the figure in the user's own words; B's typed caller refuses it.
   if (goalFamily === null) {
     if (statedFamily !== null) return anotherKind;
-    if (stated === '') {
-      return { ok: false, refusal: 'unit_unstated', detail: `${value} was given with no unit, and "${goal.label}" is measured in ${goal.unit}. `
-        + `A figure is never assumed to be in the goal's unit. ${askInstead}` };
-    }
-    return sameUnitPhrase(stated, goal.unit) ? { ok: true, raw: value } : anotherMeasure;
+    return stated === '' || sameUnitPhrase(stated, goal.unit) ? { ok: true, raw: value } : anotherMeasure;
   }
 
   if (goalFamily === 'currency' && stated !== '') {
@@ -457,6 +454,12 @@ export function statedGoalLevelInUsersWords(
   if (!stated.ok) return stated;
   const raw = stated.raw;
   const statedUnit = typeof statedUnitArg === 'string' ? statedUnitArg.trim() : '';
+  // B's typed caller: its words are not re-read for the figure here, so nothing else ties a figure with NO unit to the goal's unit.
+  if (typedQuote !== undefined && goal.unit !== undefined && statedUnit === '') {
+    return { ok: false, refusal: 'unit_unstated', detail: `${value} was given with no unit, and "${goal.label}" is measured in ${goal.unit}. `
+      + `A figure is never assumed to be in the goal's unit. Nothing was prepared; ask the user for the current level of "${goal.label}" `
+      + `in ${goal.unit}, written out in full.` };
+  }
   const goalUnit = goal.unit;
   const recordedIn = goalUnit !== undefined ? (unitPhraseHead(goalUnit) ?? goalUnit) : statedUnit;
   if (typedQuote === undefined && (!figureTheUserWrote(raw, goalUnit ?? statedUnit, userText) || !isAmountStatedInBrief(raw, recordedIn, userText))) {
