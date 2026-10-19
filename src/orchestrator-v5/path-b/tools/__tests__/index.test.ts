@@ -63,3 +63,35 @@ describe('the adapters as SDK function tools', () => {
     expect(dispatch).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * THE AIE'S WORDS, BYTE-EQUAL (prompt/AIE-PATH-B-FIVE-TOOL-DESCRIPTIONS-AND-STANCE-20261019-v1.json, sha256
+ * e8b43291c16d8f460158aa75cc862982949fd916711aa832434bca95cd936993; stance: AIE-MULTIMODEL-SCOPE-AND-STANCE-REPLY-20261019-v1.json).
+ * Copied from the packets, never from the source under test: a change to either side turns this RED.
+ */
+const AIE_DESCRIPTIONS: Record<string, string> = {
+  read_canonical_context:
+    'Read the current saved scenario view, its revision, recorded sources, analysis readiness and selected Run. Use the returned saved facts rather than old conversation claims. Check the Run’s revision and staleness before using it; missing source or context remains unknown.',
+  build_model_from_brief:
+    'Create and save Olumi’s provisional first Living Model from the user’s actual brief, supplied verbatim from their messages. Use only when there is no existing model to replace. Preserve the brief’s known sources, assumptions, conditions and disagreement; creating the model does not verify its claims. Report creation only from the tool’s confirmed outcome.',
+  propose_change:
+    'Prepare the complete requested change for review without changing the operative saved model. Preserve supplied values, signs, units, periods, conditions and retain, replace or retract intent. Declare each figure’s actual source using the available fields; keep unknown source unknown and assumptions distinct from current claims. Quote only actual supplied words; do not invent a quote, source or estimate. If required meaning cannot be represented, report the specific unavailable capability rather than silently dropping part of the change or relabelling its source.',
+  apply_change:
+    'Commit the exact prepared change after the user approves that current proposal. Approval is permission to apply, not proof that a save succeeded or that its claims are verified. Use the operation’s own receipt and approved postimage readback. Distinguish an earlier completed save from a new write, honour stale or conflicting proposals, and report unknown outcomes without repeating a completed effect.',
+  run_analysis:
+    'Request a fresh scientific Run of the current saved model. Eligible committed changes and Undo use the existing automatic analysis and coaching path; do not issue a duplicate Run after them. Read actual readiness and the recorded Run, then explain only what its results support. Report refusal or unavailability honestly. Do not rerun analysis merely to retry an explanation.',
+};
+const AIE_STANCE = 'How this particular figure is put forward in its full source context, not whether it is true and not who authored it. hypothetical: a supposition, conditional scenario or what-if, including numbers embedded inside that assumed situation. target: a desired or required outcome or threshold, rather than an observed level. estimate: a tentative assessment, approximation or prediction offered as such, rather than an asserted current fact. stated_current: the speaker asserts an actual current or already observed level for this subject at the relevant time, outside a supposition, target or estimate. Read the whole proposition and its conditions: indicative wording inside a supposition does not make its embedded figure stated_current. Classify each figure by its own proposition; one statement\'s status must not transfer to a different quantity or subject. Preserve the original source, wording, sign, units, period and conditions. stated_current describes the assertion; it does not mean verified, accurate or adopted.';
+
+describe('the AIE\'s signed words', () => {
+  it('each tool\'s description is the AIE\'s, byte for byte, replacing the old text', () => {
+    for (const t of setup().tools as FunctionTool[]) expect(t.description, t.name).toBe(AIE_DESCRIPTIONS[t.name]);
+    expect(Object.keys(AIE_DESCRIPTIONS)).toHaveLength(5);
+  });
+
+  it('propose_change carries the per-figure stance enum with the AIE\'s description, verbatim', () => {
+    const params = JSON.stringify(named(setup().tools, 'propose_change').parameters);
+    expect(params).toContain(JSON.stringify(AIE_STANCE));
+    for (const v of ['stated_current', 'hypothetical', 'target', 'estimate']) expect(params).toContain(`"${v}"`);
+  });
+});
