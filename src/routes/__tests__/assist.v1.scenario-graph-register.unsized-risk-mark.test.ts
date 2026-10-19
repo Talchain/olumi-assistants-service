@@ -2,9 +2,11 @@ import { injectAsCeeWriter } from '../../../tests/utils/inject-as-cee-writer.js'
 import { withScenarioRevision } from '../../../tests/utils/revision-store-double.js';
 /**
  * ⭐ THE REGISTRATION RECONCILES AN UNSIZED OLUMI RISK'S MARK LIKE EVERY OTHER SAVED WRITE (Codex R1 BLOCK on CEE #3441: graph/register
- * bypassed it). A registration over a saved model is CEE's own writer's (`injectAsCeeWriter`); it reaches the ONE persisted-form preparation (`projectGraphForPersistence`) with the stored graph it
- * replaces, so a model that sizes Olumi's kept-out risk is saved with it taking part; a model that leaves it unsized keeps it out;
- * and a mark a stored graph already carries is never rewritten by a write that did not end it. Synthetic labels.
+ * bypassed it; Codex R2 BLOCK: a lost-response retry with no operation id restored the stale mark). A registration over a saved model
+ * is CEE's own writer's (`injectAsCeeWriter`); it reaches the ONE persisted form (`projectGraphForPersistence`), which re-evaluates the
+ * rule's own mark (`analysis_participation_reason: 'unsized_olumi_risk'`) on the registered candidate alone. So a model that sizes
+ * Olumi's kept-out risk is saved with it taking part, however often it is sent; one that leaves it unsized keeps it out; and a mark
+ * without the rule's reason (another rule's, or one saved before the reason) is never touched. Synthetic labels.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify from 'fastify';
@@ -46,7 +48,7 @@ import { unsizedOlumiRiskIds } from '../../orchestrator-v5/agent-lane/unsized-ri
 type Rec = Record<string, unknown>;
 const RISK = 'risk_supplier_delay';
 const link = (from: string, to: string, mean = 1) => ({ from, to, strength: { mean, std: 0.01 }, exists_probability: 1, effect_direction: mean < 0 ? 'negative' : 'positive' });
-/** Olumi's unsized risk on the goal's path, persisted as left out (`retained_excluded`), as admission saves it. */
+/** Olumi's unsized risk on the goal's path, persisted as left out with the rule's reason, as admission saves it. */
 const stored = (risk: Rec = {}) => ({
   goal_node_id: 'g_output',
   nodes: [
@@ -55,7 +57,8 @@ const stored = (risk: Rec = {}) => ({
     { id: 'fac_hours', kind: 'factor', label: 'Weekly hours', category: 'controllable', observed_state: { value: 0.4 } },
     { id: 'opt_now', kind: 'option', label: 'Keep shifts', is_baseline: true, interventions: { fac_hours: 0.4 } },
     { id: 'opt_more', kind: 'option', label: 'Add a shift', interventions: { fac_hours: 0.6 } },
-    { id: RISK, kind: 'risk', label: 'Supplier delay', provenance: 'ai_inferred', analysis_participation: 'retained_excluded', ...risk },
+    { id: RISK, kind: 'risk', label: 'Supplier delay', provenance: 'ai_inferred', analysis_participation: 'retained_excluded',
+      analysis_participation_reason: 'unsized_olumi_risk', ...risk },
   ],
   edges: [
     link('fac_hours', 'g_output', 0.5), link(RISK, 'g_output', -0.3),
@@ -87,7 +90,7 @@ beforeEach(() => {
   readMostRecentPendingActions.mockResolvedValue([]);
 });
 
-describe('/graph/register reconciles an unsized Olumi risk’s mark against the stored graph it replaces', () => {
+describe('/graph/register reconciles an unsized Olumi risk’s own mark on the registered candidate', () => {
   it('PRECONDITION: the stored risk is the unsized rule’s, and a level ends the rule on the node itself', () => {
     expect(unsizedOlumiRiskIds(stored()).has(RISK)).toBe(true);
     expect(unsizedOlumiRiskIds(stored(SIZED)).has(RISK)).toBe(false);
@@ -98,6 +101,7 @@ describe('/graph/register reconciles an unsized Olumi risk’s mark against the 
     const res = await register(stored(SIZED));
     expect(res.statusCode, res.body).toBe(200);
     expect(risk(written()).analysis_participation).toBeUndefined();
+    expect(risk(written()).analysis_participation_reason).toBeUndefined();
     expect(risk(written()).observed_state).toMatchObject({ value: 0.2 });
   });
 
@@ -108,9 +112,25 @@ describe('/graph/register reconciles an unsized Olumi risk’s mark against the 
     expect(risk(written()).analysis_participation).toBe('retained_excluded');
   });
 
-  it('CONTROL (no history rewrite): a stored graph that already carries the mark beside a level is written as it stands when the write did not end the rule', async () => {
-    loadGraph.mockResolvedValue(stored(SIZED));
-    const res = await register(stored(SIZED));
+  it('RED (Codex R2 retry): the same sizing registration sent twice with no operation id → both 200, and NEITHER write keeps the stale mark', async () => {
+    let latest: unknown = stored();
+    loadGraph.mockImplementation(async () => latest);
+    append.mockImplementation(async (w: Rec) => { latest = w.graph; return { id: `turn-${append.mock.calls.length}` }; });
+    const first = await register(stored(SIZED));
+    const second = await register(stored(SIZED));
+    expect([first.statusCode, second.statusCode], `${first.body}\n${second.body}`).toEqual([200, 200]);
+    expect(append).toHaveBeenCalledTimes(2);
+    for (const call of append.mock.calls) {
+      const g = (call[0] as Rec).graph as Rec;
+      expect(risk(g).analysis_participation).toBeUndefined();
+      expect(risk(g).analysis_participation_reason).toBeUndefined();
+    }
+  });
+
+  it('CONTROL (another rule’s mark, or one saved before the reason): a mark with no reason beside a level is written as it stands', async () => {
+    const legacy = (): Rec => { const g = stored(SIZED) as Rec; delete risk(g).analysis_participation_reason; return g; };
+    loadGraph.mockResolvedValue(legacy());
+    const res = await register(legacy());
     expect(res.statusCode, res.body).toBe(200);
     expect(risk(written()).analysis_participation).toBe('retained_excluded');
   });

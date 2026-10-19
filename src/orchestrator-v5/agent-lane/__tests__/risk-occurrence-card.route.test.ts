@@ -215,12 +215,12 @@ describe('Hiring path (a): Olumi’s starting assumption for the risk root, thro
     expect(JSON.stringify(readiness.needs_from_user ?? [])).not.toContain(LABEL);
   }, ROUTE_MS);
 
-  // ⭐ DL-3 + Codex R1 on #3441: admission persists Olumi's unsized risk as left out (`retained_excluded`). Sizing it through this
-  // card ends that mark in the SAME saved write (the persisted form, against the stored graph it replaces), and the press's own
+  // ⭐ DL-3 + Codex R1/R2 on #3441: admission persists Olumi's unsized risk as left out, with the rule's reason. Sizing it through
+  // this card ends that mark in the SAME saved write (the persisted form re-evaluates it on the candidate), and the press's own
   // read-back confirms exactly those bytes: no false "not confirmed", no second write on a duplicate press.
   it('RED (the mark ends with the size): the risk kept out as Olumi’s unsized suggestion → the press → saved with its block and no longer left out → confirmed; a duplicate press writes nothing; the Run takes it', async () => {
     const marked = structuredClone(SERVED) as Rec;
-    riskOf(marked.graph).analysis_participation = 'retained_excluded';
+    Object.assign(riskOf(marked.graph), { analysis_participation: 'retained_excluded', analysis_participation_reason: 'unsized_olumi_risk' });
     expect(unsizedOlumiRiskIds(marked.graph).has(RISK), 'PRECONDITION: the rule keeps it out').toBe(true);
     const w = world(marked);
     const turn = await route(w);

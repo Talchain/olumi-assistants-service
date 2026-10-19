@@ -81,7 +81,7 @@ import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, wit
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
 import { authorshipOf, hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
 import { figureSource, figuresWritten, goalTargetStatements, linkEffectRangeEnd, linkEffectRangeInOtherUnit, linkEffectStatedRange, sourceMapOf, subjectSource, type FigureSource, type StatedWholeRangeOfLink } from './construction-source-map.js';
-import { retainUnsizedOlumiRisks, unsizedOlumiRiskIds } from './unsized-risk.js';
+import { retainUnsizedOlumiRisks, UNSIZED_OLUMI_RISK_REASON, unsizedOlumiRiskIds } from './unsized-risk.js';
 import { carriesStatements, levelQuotedByBrief, recordedRawLevelQuote, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 import { labelHoldsQuantity } from '../goal-target/held-user-links.js';
@@ -562,6 +562,8 @@ export interface AdmittedNode {
   already_true_quote?: string;
   proposed_by?: 'olumi';
   analysis_participation?: 'included' | 'retained_excluded';
+  /** Which rule owns a `retained_excluded` mark (`NodeV3.analysis_participation_reason`; `unsized-risk.ts`). */
+  analysis_participation_reason?: typeof UNSIZED_OLUMI_RISK_REASON;
   /**
    * `cee-v3.ts` option field. Written ONLY on the option the drafter DECLARED as the
    * status quo (`is_status_quo`) and that was wired as held — readiness's own first
@@ -5836,7 +5838,8 @@ function admitOnce(
     const unlinked = new Set(nodes.filter((n) => n.kind === 'risk' && !linkedNow.has(n.id) && !directionDeclined.has(n.id)
       && !wideningRiskIds.has(n.id) && n.analysis_participation === undefined).map((n) => n.id));
     // The unsized-risk rule decides which of them is Olumi's own, unsized and not needed (its authorship safeguards, unchanged).
-    const marked = (n: AdmittedNode): AdmittedNode => (unlinked.has(n.id) ? { ...n, analysis_participation: 'retained_excluded' as const } : n);
+    const marked = (n: AdmittedNode): AdmittedNode => (unlinked.has(n.id)
+      ? { ...n, analysis_participation: 'retained_excluded' as const, analysis_participation_reason: UNSIZED_OLUMI_RISK_REASON } : n);
     const olumisUnlinked = new Set([...unsizedOlumiRiskIds({ nodes: nodes.map(marked), edges: edgesNow, goal_constraints: constraintResult.constraints })]
       .filter((id) => unlinked.has(id)));
     nodes.forEach((n, i) => { if (olumisUnlinked.has(n.id)) nodes[i] = marked(n); });

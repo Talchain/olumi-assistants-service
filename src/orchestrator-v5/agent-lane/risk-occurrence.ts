@@ -307,9 +307,9 @@ export const riskStatedOccurrenceRecordedWords = (label: string, s: UserStatemen
   + `${effect.charAt(0).toUpperCase()}${effect.slice(1)}.`;
 /**
  * The risk node as the S2 write leaves it: its block, and (for the user's own statement) its durable record beside it. Given the
- * graph it is (or was) written in, also as the saved write stores it: the persisted-form preparation ends an unsized Olumi risk's
- * "not included" mark when this block sizes it (`withUnsizedOlumiRiskMarksReconciled`, DL-3 on #3441). Read-backs pass the graph
- * they read, so they recognise exactly the stored postimage.
+ * graph it is (or was) written in, also as the saved write stores it: the persisted form ends the unsized Olumi risk rule's own
+ * "not included" mark when this block sizes it (`withUnsizedOlumiRiskMarksReconciled`, #3441). Read-backs pass the graph they read,
+ * so they recognise exactly the stored postimage.
  */
 export function riskOccurrencePostimageNode(approved: ApprovedRiskOccurrence, graph?: unknown): Rec {
   const node = withStatementRecord({ ...approved.expected_node, event_risk: approved.event_risk }, approved);
@@ -317,9 +317,7 @@ export function riskOccurrencePostimageNode(approved: ApprovedRiskOccurrence, gr
     ? graph.nodes.findIndex((n) => isRec(n) && n.id === approved.risk_id) : -1;
   if (at < 0) return node;
   const g = graph as Rec & { nodes: unknown[] };
-  const before = { ...g, nodes: g.nodes.map((n, i) => (i === at ? approved.expected_node : n)) };
-  const after = withUnsizedOlumiRiskMarksReconciled(before, { ...before, nodes: before.nodes.map((n, i) => (i === at ? node : n)) });
-  return after.nodes[at] as Rec;
+  return withUnsizedOlumiRiskMarksReconciled({ ...g, nodes: g.nodes.map((n, i) => (i === at ? node : n)) }).nodes[at] as Rec;
 }
 /** The goal the window belongs to, by label (the card and receipt name it). */
 export const riskOccurrenceGoalLabel = (graph: unknown, goalId: string): string => String((isRec(graph) && Array.isArray(graph.nodes)
@@ -398,7 +396,8 @@ export function applyRiskOccurrenceEdit(persistedGraph: unknown, approved: Appro
 /** The freshly computed atomic write, exactly: the writer's own postimage of `before`, nothing else. */
 export function riskOccurrencePostimageIsScoped(before: unknown, after: unknown, approved: ApprovedRiskOccurrence): boolean {
   const written = applyRiskOccurrenceEdit(before, approved);
-  return written.kind === 'mutated' && isDeepStrictEqual(written.mutatedGraph, after);
+  // `after` is in persisted form, which re-evaluates the unsized rule's own mark (#3441); the writer's candidate is compared so too.
+  return written.kind === 'mutated' && isDeepStrictEqual(withUnsizedOlumiRiskMarksReconciled(written.mutatedGraph), after);
 }
 
 /** The card as its stored operation carries it (`agent-capabilities.ts` proposeRiskOccurrence), or `undefined` if malformed. */
