@@ -1873,17 +1873,19 @@ export async function buildModelFromBrief(
   const first = await buildModelFromBriefOnce(scenarioId, brief, dispatch, callStructured, observeConstruction, deadlineAt, wideningCallStructured,
     observeAdmissionForTests, context, attestedDeliverable, revisedDraft, onDraftAdmitted, draftNow === true ? k6 : undefined);
   if (draftNow !== true || first.refusal !== 'construction_needs_redraft' || k6.openAim === undefined || k6.firstText === undefined
-    // A figure in words is a figure (Codex on #3426 @a36d8e6b: "we currently have five cafés" drafted an open aim): the ONE reader.
-    || amountsWrittenIn(brief).some((a) => a.kind !== 'words' || amountTheUserWrote(a, a.magnitude, undefined, brief))) return first;
+    // A figure the user wrote, in digits or words, is a figure (Codex on #3426 @a36d8e6b: "we currently have five cafés"
+    // drafted an open aim), and one only another speaker said is not theirs (R2 @9cad55e7: a quoted "5 cafés"): the ONE check.
+    || amountsWrittenIn(brief).some((a) => amountTheUserWrote(a, a.magnitude, undefined, brief))) return first;
   const drafted = JSON.stringify(withOpenAim(JSON.parse(k6.firstText) as CandidateModel, k6.openAim));
   let answered = false;
-  // The first draft again, with the aim open: no new provider call for it; any repair or size retry still asks the drafter.
-  const openAimFirst: CallStructuredModel = async (req, deadline) => {
-    if (!answered) { answered = true; return { text: drafted, status: 'completed' }; }
-    return callStructured(req, deadline);
+  // The first draft again, with the aim open, and NO further provider call: a repair or size retry it would need answers empty,
+  // so the pass keeps its first draft or refuses (Codex R2 on #3426 @9cad55e7: a cycle repair made a third call). No widening
+  // either (R1 @a36d8e6b): there is no aim yet to widen toward (AIE K6_bounds). Two calls in all, as the refusal it replaces.
+  const openAimFirst: CallStructuredModel = async () => {
+    if (answered) return { text: '', status: 'incomplete', incomplete_reason: 'open_aim_draft_only' };
+    answered = true;
+    return { text: drafted, status: 'completed' };
   };
-  // No widening on the open-aim draft (Codex on #3426 @a36d8e6b: it made a third provider call): there is no aim yet to widen
-  // toward, and the draft keeps the supplied facts with what is missing left unknown (AIE K6_bounds). Two calls, as the refusal.
   const second = await buildModelFromBriefOnce(scenarioId, brief, dispatch, openAimFirst, observeConstruction, deadlineAt, undefined,
     observeAdmissionForTests, context, attestedDeliverable, revisedDraft, onDraftAdmitted);
   return second.ok === true ? { ...second, open_aim: true } : first;
