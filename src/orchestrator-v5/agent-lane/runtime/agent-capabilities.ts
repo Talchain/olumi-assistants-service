@@ -2612,6 +2612,30 @@ const LINK_SET_THIRD_PARTY_AGENT_NOTE = 'Some proposed links were left out as at
 /** The user's line when a link set's save cannot be confirmed: the AIE's exact text (packet 2b19ae59, `card_receipt`). */
 export const LINK_SET_SAVE_NOT_CONFIRMED = 'The save could not be confirmed. Check the current model before retrying.';
 
+/**
+ * ⭐ GAP 2 (DL ruling B, 19 Oct): the EXISTING rename and removal proposers, run privately on ONE saved read, as
+ * `proposeChangeSet` prepares its members: the prepared operation carried literally (`rename_option`, `remove_node`,
+ * `remove_edge`) with its card, or the proposer's own refusal. Nothing reaches the user's store; the read is all it serves.
+ */
+export async function prepareStructuralOp(ctx: AgentToolContext, raw: Record<string, unknown>,
+  read: { readonly graph: unknown; readonly brief_text: unknown }): Promise<{ readonly ok: true; readonly operation: ProposalOperation; readonly public_label: string }
+  | (ToolResult & { readonly ok: false })> {
+  const held = new ProposalStore();
+  const served: InternalDispatch = async (path) => {
+    if (!path.endsWith('/graph')) throw new Error('Structural preparation cannot dispatch a write');
+    return { status: 200, json: { graph: structuredClone(read.graph), brief_text: read.brief_text,
+      graph_hash: computeAnalysisAffectingGraphHash(read.graph as never), graph_identity_hash: computeGraphIdentityHash(read.graph as never) } };
+  };
+  const prepare = createAgentCapabilities(served, held, undefined, 'full', undefined, { turnAuthority: true });
+  const offered = raw.op === 'rename' ? await prepare.proposeRename!(ctx, raw as never)
+    : raw.op === 'remove' ? await prepare.proposeRemoval!(ctx, raw as never)
+    : { ok: false, mutated: false, refusal: 'unsupported_change', detail: 'Only a rename or a removal is prepared here. Nothing was prepared.' };
+  const one = offered.ok && typeof offered.proposal_id === 'string' ? held.get(offered.proposal_id) : undefined;
+  if (!offered.ok) return { ...offered, ok: false, mutated: false };
+  if (one === undefined || one.operations.length !== 1) return { ok: false, mutated: false, refusal: 'unsupported_change', detail: 'One correction could not be prepared completely, so nothing was prepared.' };
+  return { ok: true, operation: one.operations[0]!, public_label: one.public_label };
+}
+
 export function createAgentCapabilities(
   dispatch: InternalDispatch,
   proposals: ProposalStore,

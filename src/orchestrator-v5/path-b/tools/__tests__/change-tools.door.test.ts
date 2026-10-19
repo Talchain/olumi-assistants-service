@@ -14,7 +14,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import { projectGraphForPersistence } from '../../../persisted-graph-projection.js';
 import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
-import { provenanceOf } from '../../../../cee/provenance/provenance-of.js';
+import { linkProvenanceOf, linkSizing, provenanceOf } from '../../../../cee/provenance/provenance-of.js';
 import { graph as fixtureGraph, type Rec } from './fixtures.js';
 
 const SCN = '5c5c5c5c-0000-4000-8000-000000000019';
@@ -105,7 +105,9 @@ let applyChange: Mod['applyChange'];
 let ProposalStore: typeof import('../../../agent-lane/proposal.js').ProposalStore;
 let authorisationTurnId: typeof import('../../../agent-lane/runtime/agent-capabilities.js').authorisationTurnId;
 let commitOptionLevelsInProcess: typeof import('../../../system-events/dispatch.js').commitOptionLevelsInProcess;
+let createAgentCapabilities: typeof import('../../../agent-lane/runtime/agent-capabilities.js').createAgentCapabilities;
 beforeAll(async () => {
+  ({ createAgentCapabilities } = await import('../../../agent-lane/runtime/agent-capabilities.js'));
   ({ proposeChange, applyChange, ProposeChangeParams } = await import('../change-tools.js'));
   ({ ProposalStore } = await import('../../../agent-lane/proposal.js'));
   ({ authorisationTurnId } = await import('../../../agent-lane/runtime/agent-capabilities.js'));
@@ -243,21 +245,60 @@ describe('ROW 3: each declared source, through the real writers, read back by th
     expect(provenanceOf({ setting: cellOf('add_staff', 'staff'), target: nodeOf('staff') })).toMatchObject({ origin: 'human' });
   });
 
-  it.each(['user', 'third_party', 'unknown'])('BLOCKED-SCHEMA: an option setting declared %s cannot be stored as declared: unavailable, nothing proposed', async (origin) => {
+  /**
+   * R3 (DL lease 19 Oct; PL 3b): an option setting from words the user typed, whoever the AI says gave them, is saved as ORIGIN
+   * UNKNOWN (`cee_hypothesis` beside `user_material_unverified`): a literal match proves the bytes, never the speaker or the binding.
+   * Never Olumi's estimate, never the user's verified figure; what the cell cannot hold is returned, and the save is never faithful.
+   */
+  const SAID3 = 'With the new rota we would have 3 assistants on a Saturday, our area manager said.';
+  const ctx3 = { ...ctx, user_turn_text: SAID3, verified_user_messages: [SAID3] };
+  const words = 'we would have 3 assistants on a Saturday';
+  it.each([
+    ['user', null, [{ what: 'origin', declared: 'user' }, { what: 'words', declared: words }]],
+    ['third_party', 'their area manager', [{ what: 'origin', declared: 'third_party' }, { what: 'name', declared: 'their area manager' }, { what: 'words', declared: words }]],
+    ['unknown', null, [{ what: 'words', declared: words }]],
+  ] as const)('RED: an option setting declared %s, in the user\u2019s literal words, is saved as origin unknown \u2014 never Olumi\u2019s, never the user\u2019s verified figure', async (origin, named, notKept) => {
     const proposals = new ProposalStore();
-    const out = await proposeChange({ dispatch, proposals }, ctx, { public_label: 'Set the assistants', basis: 'From what the user said.', ops: [{
+    const p = await proposeChange({ dispatch, proposals }, ctx3, { public_label: 'Set the assistants', basis: 'From what the user said.', ops: [{
       op: 'set_option_setting', option_id: 'add_staff', factor_id: 'staff', value: 3, unit: 'people', stance: 'hypothetical',
-      source: { origin, quote: 'about 20 minutes', named_source: null } }] } as never);
-    expect(out).toMatchObject({ status: 'unavailable', reason: 'blocked_schema', write: 'none' });
-    expect(proposals.size()).toBe(0);
+      source: { origin, quote: words, named_source: named } }] } as never);
+    expect(p.status, JSON.stringify(p)).toBe('ok');
+    const out = await applyChange({ dispatch, proposals, commitOptionLevels: door() }, ctx3, { proposal_id: String((p as { data: Rec }).data.proposal_id) });
+    expect(out, JSON.stringify(out)).toMatchObject({ status: 'ok', mutated: true, data: { saved: true, faithful: false,
+      written: [{ op: 'set_option_setting', option_id: 'add_staff', factor_id: 'staff', figure: 3, unit: 'people',
+        declared: { origin, quote: words, named_source: named, stance: 'hypothetical' }, stored_as: { origin: 'unknown' }, not_kept: notKept }] } });
+    expect(cellOf('add_staff', 'staff')).toMatchObject({ raw_value: 3, cap: 10, source: 'cee_hypothesis', user_material_unverified: true });
+    expect(provenanceOf({ setting: cellOf('add_staff', 'staff'), target: nodeOf('staff') }).origin).toBe('unknown');
+  });
+
+  it('a writer fault that stores the person\u2019s setting as Olumi\u2019s is never reported saved: not verified', async () => {
+    const proposals = new ProposalStore();
+    const p = await proposeChange({ dispatch, proposals }, ctx3, { public_label: 'Set the assistants', basis: 'b', ops: [{
+      op: 'set_option_setting', option_id: 'add_staff', factor_id: 'staff', value: 3, unit: 'people', stance: 'hypothetical',
+      source: { origin: 'user', quote: words, named_source: null } }] } as never);
+    const relabelling = vi.fn((input: Parameters<typeof commitOptionLevelsInProcess>[0]) =>
+      commitOptionLevelsInProcess({ ...input, levels: input.levels.map((l) => ({ ...l, author: 'model_proposed' as const })) }, 'req-c5'));
+    expect(await applyChange({ dispatch, proposals, commitOptionLevels: relabelling }, ctx3, { proposal_id: String((p as { data: Rec }).data.proposal_id) }))
+      .toEqual({ status: 'unavailable', reason: 'not_verified', write: 'unknown' });
+    expect(provenanceOf({ setting: cellOf('add_staff', 'staff'), target: nodeOf('staff') }).origin).toBe('ai');
+  });
+
+  it('an equal figure on the brief\u2019s own setting is never reported "unchanged" while it names another author: refused, nothing written', async () => {
+    const SAID4 = 'They said we would have 2 assistants with the new rota.';
+    const ctx4 = { ...ctx, user_turn_text: SAID4, verified_user_messages: [SAID4] };
+    const proposals = new ProposalStore();
+    const p = await proposeChange({ dispatch, proposals }, ctx4, { public_label: 'Set the assistants', basis: 'b', ops: [{
+      op: 'set_option_setting', option_id: 'add_staff', factor_id: 'staff', value: 2, unit: 'people', stance: 'hypothetical',
+      source: { origin: 'unknown', quote: 'we would have 2 assistants', named_source: null } }] } as never);
+    const before = JSON.stringify(persisted);
+    const out = await applyChange({ dispatch, proposals, commitOptionLevels: door() }, ctx4, { proposal_id: String((p as { data: Rec }).data.proposal_id) });
+    expect(out).toMatchObject({ status: 'refused', reason: 'same_figure_other_source' });
+    expect(rows.size).toBe(0);
+    expect(JSON.stringify(persisted)).toBe(before);
   });
 
   it.each([
-    ['set_goal_target', 'the goal\'s target'],
-    ['set_link_strength', 'how strongly one factor affects another'],
     ['add_to_model', 'Adding a factor or an option'],
-    ['remove_from_model', 'Removing something'],
-    ['rename', 'Renaming'],
   ])('%s is not on this path yet: unavailable, named, and nothing is read, proposed or saved', async (op, named) => {
     const proposals = new ProposalStore();
     const out = await proposeChange({ dispatch, proposals }, ctx, { public_label: 'A change', basis: 'b',
@@ -269,9 +310,24 @@ describe('ROW 3: each declared source, through the real writers, read back by th
   });
 
   it.each([
+    ['rename', { op: 'rename', kind: 'factor', target_id: 'price', new_label: 'Entry price', quote: 'Rename Ticket price to Entry price.' }],
+    ['remove_from_model', { op: 'remove_from_model', kind: 'factor', target_id: 'price', to_id: null, quote: 'Take Ticket price out of the model.' }],
+  ])('a %s the user did not ask for in this message: the existing proposer\u2019s own refusal, nothing proposed or saved', async (_op, op) => {
+    const proposals = new ProposalStore();
+    const out = await proposeChange({ dispatch, proposals }, ctx, { public_label: 'A change', basis: 'b', ops: [op] } as never);
+    expect(out).toMatchObject({ status: 'refused', reason: 'not_asked', data: { op: 0 } });
+    expect(proposals.size()).toBe(0);
+    expect(rows.size).toBe(0);
+  });
+
+  it.each([
     ['a declared human source with no quote', queueTo('user', null), 'quote_not_in_users_words'],
     ['a quote that is not in the user\'s typed words', queueTo('user', 'about 25 minutes'), 'quote_not_in_users_words'],
     ['a third party with no words to hold', queueTo('third_party', null, 'their manager'), 'quote_not_in_users_words'],
+    ['an option setting declared the user\u2019s with no quote', { op: 'set_option_setting', option_id: 'add_staff', factor_id: 'staff', value: 3, unit: 'people',
+      stance: 'hypothetical', source: { origin: 'user', quote: null, named_source: null } }, 'quote_not_in_users_words'],
+    ['an option setting of unknown origin whose words are not the user\u2019s', { op: 'set_option_setting', option_id: 'add_staff', factor_id: 'staff', value: 3,
+      unit: 'people', stance: 'hypothetical', source: { origin: 'unknown', quote: 'about 3 assistants', named_source: null } }, 'quote_not_in_users_words'],
   ] as const)('%s: refused, nothing proposed', async (_name, op, reason) => {
     const proposals = new ProposalStore();
     const out = await proposeChange({ dispatch, proposals }, ctx, { public_label: 'Record the queue time', basis: 'b', ops: [op] } as never);
@@ -291,15 +347,20 @@ describe('WITNESS: a mixed user + third-party change is saved whole or not at al
   const mine = queueTo('user', 'Queue time is about 20 minutes');
   const theirs = (op: Rec): Rec => ({ ...op, source: { origin: 'third_party', quote: 'the ticket price should be £6', named_source: 'finance lead' } });
 
-  it('the other person\'s figure as an option setting cannot be kept as theirs: the WHOLE change is unavailable, nothing is proposed or written', async () => {
-    const before = JSON.stringify(persisted);
+  it('the other person\'s figure as an option setting: ONE commit holds both; theirs reads unknown, never the user\'s, and what was lost is returned', async () => {
     const proposals = new ProposalStore();
-    const out = await proposeChange({ dispatch, proposals }, ctx2, { public_label: 'Queue time and price', basis: 'b',
+    const p = await proposeChange({ dispatch, proposals }, ctx2, { public_label: 'Queue time and price', basis: 'b',
       ops: [mine, theirs({ op: 'set_option_setting', option_id: 'add_staff', factor_id: 'price', value: 6, unit: 'GBP', stance: 'stated_current' })] } as never);
-    expect(out).toMatchObject({ status: 'unavailable', reason: 'blocked_schema', write: 'none' });
-    expect(proposals.size()).toBe(0);
-    expect(rows.size).toBe(0);
-    expect(JSON.stringify(persisted)).toBe(before);
+    expect(p.status, JSON.stringify(p)).toBe('ok');
+    const out = await applyChange({ dispatch, proposals, commitOptionLevels: door() }, ctx2, { proposal_id: String((p as { data: Rec }).data.proposal_id) });
+    expect(out, JSON.stringify(out)).toMatchObject({ status: 'ok', mutated: true, data: { saved: true, faithful: false } });
+    expect(rows.size, 'ONE commit').toBe(1);
+    expect(provenanceOf({ value: nodeOf('queue').observed_state })).toMatchObject({ origin: 'human', role: 'unverified' });
+    expect(cellOf('add_staff', 'price')).toMatchObject({ raw_value: 6, source: 'cee_hypothesis', user_material_unverified: true });
+    expect(provenanceOf({ setting: cellOf('add_staff', 'price'), target: nodeOf('price') }).origin).toBe('unknown');
+    const written = out.status === 'ok' ? out.data.written as Rec[] : [];
+    expect(written[1]).toMatchObject({ factor_id: 'price', stored_as: { origin: 'unknown' }, not_kept: expect.arrayContaining([
+      { what: 'origin', declared: 'third_party' }, { what: 'name', declared: 'finance lead' }, { what: 'words', declared: 'the ticket price should be £6' }]) });
   });
 
   it('both as factor values: ONE commit holds both; the other person\'s is never the user\'s, and the lost name is returned, not called faithful', async () => {
@@ -408,5 +469,109 @@ describe('R1: a setting with a declared unit on a factor with no range is never 
     const { proposals, id } = await proposed([{ op: 'set_option_setting', option_id: 'add_staff', factor_id: 'visits', value: 0.5, unit: null,
       stance: 'estimate', source: { origin: 'olumi', quote: null, named_source: null } }]);
     expect(await applyChange({ dispatch, proposals, commitOptionLevels: door() }, ctx, { proposal_id: id })).toMatchObject({ status: 'ok', mutated: true });
+  });
+});
+
+/**
+ * LINK STRENGTH (candidate 2, item 3; design outbox/C5-PATHB-LINK-STRENGTH-DESIGN.md v2, buddy AMEND): Olumi's band for an
+ * existing link, through the existing capability's ONE rule set (`proposeLinkStrengths`) and the SAME door, ALONE (the writer
+ * refuses a link set beside anything else). A person's band is BLOCKED-SCHEMA: no link carrier holds "human, unverified" or
+ * "unknown" (PL 3b). SYNTHETIC wording.
+ */
+describe('LINK STRENGTH: Olumi\u2019s band for a link, as its own candidate, read back by the one authority', () => {
+  const edgeOf = (from: string, to: string): Rec => ((persisted as { edges: Rec[] }).edges.find((e) => e.from === from && e.to === to))!;
+  beforeEach(() => {
+    const g = JSON.parse(JSON.stringify(stored())) as { edges: Rec[] };
+    g.edges.find((e) => e.from === 'staff' && e.to === 'goal')!.provenance = { source: 'cee_hypothesis', magnitude: 'olumi_estimate' };
+    persisted = projectGraphForPersistence(g);
+  });
+  let proposals0: InstanceType<typeof ProposalStore>;
+  const caps = (commit = door()) => createAgentCapabilities(dispatch as never, proposals0, undefined, 'full', undefined, { commitOptionLevels: commit });
+  const link = (band: string, origin = 'olumi', stance = 'estimate', from = 'staff', to = 'goal', quote: string | null = null) =>
+    ({ op: 'set_link_strength', from, to, band, stance, source: { origin, quote, named_source: null } });
+  const linkDeps = (commit = door()) => {
+    proposals0 = new ProposalStore();
+    const c = caps(commit);
+    return { dispatch, proposals: proposals0, commitOptionLevels: commit,
+      proposeLinkStrengths: (cx: Rec, a: Rec) => c.proposeLinkStrengths!({ request_id: 'req-c5', ...cx } as never, a as never) };
+  };
+  const propose = async (deps: ReturnType<typeof linkDeps>, ops: readonly unknown[]) =>
+    proposeChange(deps, ctx, { public_label: 'Size the link', basis: 'More assistants clear the queue faster, from the model.', ops } as never);
+
+  it('RED: Olumi\u2019s band applied by the press: ONE commit, the band\u2019s midpoint, the sign kept, read back as Olumi\u2019s accepted estimate', async () => {
+    const deps = linkDeps();
+    const p = await propose(deps, [link('moderate')]);
+    expect(p, JSON.stringify(p)).toMatchObject({ status: 'ok', data: { proposal_id: expect.any(String) } });
+    const id = String((p as { data: Rec }).data.proposal_id);
+    const out = await applyChange(deps, ctx, { proposal_id: id });
+    expect(out, JSON.stringify(out)).toMatchObject({ status: 'ok', mutated: true, data: { saved: true, faithful: true,
+      receipt: { source_turn_id: authorisationTurnId(`${id}#links`) },
+      written: [{ op: 'set_link_strength', from: 'staff', to: 'goal', band: 'moderate', figure: 0.3, stored_as: { origin: 'ai', accepted: true } }] } });
+    expect(rows.size, 'ONE commit').toBe(1);
+    expect((edgeOf('staff', 'goal').strength as Rec).mean).toBeCloseTo(0.3, 9);
+    expect(linkSizing(edgeOf('staff', 'goal'))).toBe('olumi_accepted');
+    expect(linkProvenanceOf(edgeOf('staff', 'goal'))).toMatchObject({ origin: 'ai', accepted: true });
+  });
+
+  it('exactly once: the response is lost after the commit, the press again → the committed receipt, no second write', async () => {
+    const real = door();
+    let lose = true;
+    const lossy = vi.fn(async (input: Parameters<typeof commitOptionLevelsInProcess>[0]) => {
+      const r = await real(input);
+      if (lose) { lose = false; throw new Error('socket closed after the commit'); }
+      return r;
+    });
+    const deps = linkDeps(lossy);
+    const p = await propose(deps, [link('moderate')]);
+    const id = String((p as { data: Rec }).data.proposal_id);
+    expect((await applyChange(deps, ctx, { proposal_id: id })).status).not.toBe('ok');
+    const again = await applyChange(deps, { ...ctx, turn_id: 'turn-c5-2' }, { proposal_id: id });
+    expect(again, JSON.stringify(again)).toMatchObject({ status: 'ok', data: { already_saved: true, receipt: { source_turn_id: authorisationTurnId(`${id}#links`) }, holds_now: true } });
+    expect(rows.size).toBe(1);
+  });
+
+  it.each(['user', 'third_party', 'unknown'])('BLOCKED-SCHEMA: a band declared %s would read as the person\u2019s verified size: unavailable, nothing proposed', async (origin) => {
+    const deps = linkDeps();
+    // Put forward as an estimate, so only WHOSE band it is decides (a person's band, whatever its stance).
+    const out = await propose(deps, [link('moderate', origin, 'estimate', 'staff', 'goal', 'about 20 minutes')]);
+    expect(out).toMatchObject({ status: 'unavailable', reason: 'blocked_schema', write: 'none' });
+    expect((out as { detail: string }).detail).toContain('would read as their own verified size');
+    expect(proposals0.size()).toBe(0);
+  });
+
+  it.each(['hypothetical', 'target', 'stated_current'])('a band put forward as %s is not saved as Olumi\u2019s estimate: unavailable, nothing proposed', async (stance) => {
+    const deps = linkDeps();
+    expect(await propose(deps, [link('moderate', 'olumi', stance)])).toMatchObject({ status: 'unavailable', reason: 'blocked_schema' });
+    expect(proposals0.size()).toBe(0);
+  });
+
+  it('GAP 2: a link beside a figure is ONE card for ONE commit (change-tools.compound.test.ts), never two', async () => {
+    const deps = linkDeps();
+    const out = await propose(deps, [link('moderate'), queueTo('user', 'about 20 minutes')]);
+    expect(out, JSON.stringify(out)).toMatchObject({ status: 'ok', data: { proposal_id: expect.any(String) } });
+    expect(proposals0.size()).toBe(1);
+    expect(proposals0.get(String((out as { data: Rec }).data.proposal_id))!.operations.map((o) => o.op)).toEqual(['set_factor_value', 'set_link_strength']);
+  });
+
+  it('no such link: the capability\u2019s own refusal, nothing proposed', async () => {
+    const deps = linkDeps();
+    const out = await propose(deps, [link('moderate', 'olumi', 'estimate', 'price', 'staff')]);
+    expect(out).toMatchObject({ status: 'refused', reason: 'no_such_link' });
+    expect(proposals0.size()).toBe(0);
+  });
+
+  it('without the capability on this path: truthfully not available', async () => {
+    const { proposeLinkStrengths: _absent, ...deps } = linkDeps();
+    expect(await propose(deps as never, [link('moderate')])).toMatchObject({ status: 'unavailable', reason: 'set_link_strength_not_available' });
+  });
+
+  it('a writer fault that stores Olumi\u2019s band as the user\u2019s own is never reported saved: not verified', async () => {
+    const relabelling = vi.fn((input: Parameters<typeof commitOptionLevelsInProcess>[0]) =>
+      commitOptionLevelsInProcess({ ...input, link_strengths: input.link_strengths!.map((l) => ({ ...l, author: 'user_specified' as const })) }, 'req-c5'));
+    const deps = linkDeps(relabelling);
+    const p = await propose(deps, [link('moderate')]);
+    const out = await applyChange(deps, ctx, { proposal_id: String((p as { data: Rec }).data.proposal_id) });
+    expect(out).toEqual({ status: 'unavailable', reason: 'not_verified', write: 'unknown' });
+    expect(linkSizing(edgeOf('staff', 'goal'))).toBe('user');
   });
 });

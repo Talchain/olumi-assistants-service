@@ -90,6 +90,8 @@ import { structuralEdgeValue } from '../routing/add-option-transaction.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 import { applyFactorValueEdit, type FactorValueEditResult } from './factor-value-edit.js';
 import { applyEdgeStrengthEdit } from './edge-strength-edit.js';
+import { applyStructuralRename } from './structural-rename.js';
+import { applyStructuralDelete } from './structural-delete.js';
 import { applyLinkEffectEdit, linkEffectEdgeToken, storedGaugeSign, type LinkEffectReversal, type LinkEffectStatement } from './link-effect-edit.js';
 import type { LinkEffectUnitReading } from './link-effect-unit-reading.js';
 import { mediatorReadings, storedGaugesKept } from '../agent-lane/mediator-reading.js';
@@ -952,7 +954,35 @@ export type OptionInterventionBatchExecutionInput =
     readonly teamTime?: ApprovedTeamTime;
     /** The last Run's use of each declared identity (`identityRunUseFromFacts`); null = no Run, a definition refuses. */
     readonly lastRunIdentityUse?: IdentityRunUse | null;
+    /** ⭐ GAP 2: the typed core caller's compound change (PATH-B only; see `CompoundChange`). */
+    readonly compound?: CompoundChange;
   };
+
+/**
+ * ⭐ GAP 2 (DL ruling B, 19 Oct): a rename or a removal the existing proposers prepared, carried literally, applied IN
+ * MEMORY by the structural writers on the SAME candidate as the figures and links, so the whole change is ONE commit.
+ */
+export type CompoundStructuralMember =
+  | { readonly kind: 'rename'; readonly node_id: string; readonly expected_label: string; readonly label: string }
+  | { readonly kind: 'remove'; readonly node_ids: readonly string[]; readonly edges: readonly { readonly from: string; readonly to: string }[] };
+/**
+ * ⭐ GAP 2: present ONLY from the typed core caller (PATH-B). Its link strengths ride with its figures (on their postimage)
+ * and its renames and removals ride too; every other caller's link set stays ALONE (`link_strengths_not_alone`).
+ */
+export type CompoundChange = { readonly structural: readonly CompoundStructuralMember[] };
+
+/**
+ * ⭐ GAP 2: the members of ONE compound change never act on the same part twice: a part another member writes, sizes or
+ * renames that a member removes (or a link to or from it), or a part renamed twice, refuses the WHOLE change before any write.
+ */
+export function compoundMembersConflict(written: { readonly nodes: readonly string[]; readonly links: readonly { readonly from: string; readonly to: string }[] },
+  structural: readonly CompoundStructuralMember[]): boolean {
+  const removedNodes = new Set(structural.flatMap(m => (m.kind === 'remove' ? m.node_ids : [])));
+  const removedLinks = structural.flatMap(m => (m.kind === 'remove' ? m.edges : []));
+  const renamed = structural.flatMap(m => (m.kind === 'rename' ? [m.node_id] : []));
+  return new Set(renamed).size !== renamed.length || [...written.nodes, ...renamed].some(id => removedNodes.has(id))
+    || written.links.some(l => removedNodes.has(l.from) || removedNodes.has(l.to) || removedLinks.some(r => r.from === l.from && r.to === l.to));
+}
 
 type OptionInterventionBatchRefusal = {
   readonly kind: 'refused'; readonly reason: string; readonly index?: number; readonly valueIndex?: number;
@@ -1035,6 +1065,18 @@ function validateOptionInterventionBatchInput(input: OptionInterventionBatchExec
     || input.goalHorizon !== undefined || input.teamTime !== undefined)) {
     return { kind: 'refused', reason: 'option_gaps_not_alone_with_identity_or_links' };
   }
+  // ⭐ GAP 2: a compound holds figures, link strengths, renames and removals only; its members never touch one part twice.
+  const compound = input.compound;
+  if (compound !== undefined) {
+    if (input.linkEffect !== undefined || (input.linkEffects?.length ?? 0) > 0 || input.identityConfirm !== undefined || input.goalHorizon !== undefined
+      || input.goalReading !== undefined || input.riskOccurrence !== undefined || input.cohortForecast !== undefined || input.statementRecord !== undefined
+      || input.goalSteady !== undefined || input.teamTime !== undefined || optionGaps.length > 0 || rangeLaws.length > 0) {
+      return { kind: 'refused', reason: 'compound_not_alone' };
+    }
+    const links = [...(input.linkStrengths ?? []), ...(input.expectedLinks ?? []).map(k => ({ from: k.split('::')[0] ?? '', to: k.split('::')[1] ?? '' }))];
+    const nodes = [...input.targets.flatMap(t => [t.optionId, t.factorId]), ...(input.values ?? []).map(v => v.factorId), ...(input.frames ?? []).map(f => f.factorId)];
+    if (compoundMembersConflict({ nodes, links }, compound.structural)) return { kind: 'refused', reason: 'compound_members_conflict' };
+  }
   return { kind: 'valid', optionGaps, rangeLaws };
 }
 
@@ -1084,7 +1126,7 @@ export async function prepareOptionInterventionBatchExecution(
   }
   const { targets: _callerTargets, optionGaps: _callerGaps, expectedLinks, values: _callerValues, frames: _callerFrames, linkStrengths: _callerLinks,
     linkEffect: _callerEffect, linkEffects: _callerEffects, identityConfirm: _callerIdentity, goalHorizon: _callerHorizon, goalSteady: _callerSteady, teamTime: _callerTeamTime,
-    goalReading: _callerReading, riskOccurrence: _callerRisk, cohortForecast: _callerForecast, statementRecord: _callerRecord, rangeLaws: _callerRangeLaws, lastRunIdentityUse: _callerRunUse, ...common } = input;
+    goalReading: _callerReading, riskOccurrence: _callerRisk, cohortForecast: _callerForecast, statementRecord: _callerRecord, rangeLaws: _callerRangeLaws, lastRunIdentityUse: _callerRunUse, compound, ...common } = input;
   // ⭐ THE VALUES FIRST, ON THE PERSISTED BASE, IN MEMORY — then the links and levels on the graph they produce, and ONE
   // append for all of it. The caller's base is checked against the PERSISTED model before anything is applied: the
   // levels are prepared on the post-value graph, so their own stale check can no longer see the caller's base.
@@ -1190,7 +1232,8 @@ export async function prepareOptionInterventionBatchExecution(
    */
   const linkStrengths = input.linkStrengths ?? [];
   if (linkStrengths.length > 0) {
-    if (targets.length + values.length + frames.length > 0 || (expectedLinks?.length ?? 0) > 0) {
+    // ⭐ GAP 2: only the typed core caller's compound writes its links beside figures, on the figures' postimage.
+    if (compound === undefined && (targets.length + values.length + frames.length > 0 || (expectedLinks?.length ?? 0) > 0)) {
       return { kind: 'refused', reason: 'link_strengths_not_alone' };
     }
     if (!isEditableGraph(before)
@@ -1198,15 +1241,17 @@ export async function prepareOptionInterventionBatchExecution(
       return { kind: 'refused', reason: 'canonical_graph_unavailable' };
     }
     if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };
-    const applied = await applyApprovedLinkStrengths(before, linkStrengths, { scenarioId: input.scenarioId, turnId: input.turnId,
+    const linkBase = compound === undefined ? before : levelBase;
+    if (!isEditableGraph(linkBase)) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    const applied = await applyApprovedLinkStrengths(linkBase, linkStrengths, { scenarioId: input.scenarioId, turnId: input.turnId,
       requestId: input.requestId, stage: input.stage, lastRunIdentityUse: input.lastRunIdentityUse ?? null });
     if (applied.kind === 'refused') return { kind: 'refused', reason: applied.reason, linkIndex: applied.linkIndex };
     const appliedHash = computeAnalysisAffectingGraphHash(applied.graph);
     if (!appliedHash) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
     levelBase = applied.graph;
     levelBaseHash = appliedHash;
-    valueFacts = applied.handlerFacts;
-    valueConfirmations = applied.confirmations;
+    valueFacts = compound === undefined ? applied.handlerFacts : [...valueFacts, ...applied.handlerFacts];
+    valueConfirmations = compound === undefined ? applied.confirmations : [...valueConfirmations, ...applied.confirmations];
   }
   /**
    * ⭐ ONE USER-STATED LINK EFFECT, the strength set's own shape: alone, on the persisted base, through the canonical
@@ -1502,7 +1547,8 @@ export async function prepareOptionInterventionBatchExecution(
   // ⭐ A VALUES-ONLY APPROVAL IS ONE COMMIT TOO (Canonical #70 5850018984): Olumi's starting point is usually values
   // with no level, and wrote each value as its own commit. With no level to prepare, the values (and their ranges)
   // are the whole plan: the same writer, adoption authority, scope guard, ONE append and ONE read-back.
-  const candidate = targets.length === 0 && values.length + frames.length + linkStrengths.length + effectCount + optionGaps.length > 0
+  const structural = compound?.structural ?? [];
+  const candidate = targets.length === 0 && values.length + frames.length + linkStrengths.length + effectCount + optionGaps.length + structural.length > 0
     ? ({ kind: 'unchanged' } as const)
     : applyOptionInterventionBatch({ ...common, expectedGraphHash: levelBaseHash, persistedGraph: levelBase, targets });
   if (candidate.kind === 'refused') return candidate;
@@ -1547,7 +1593,34 @@ export async function prepareOptionInterventionBatchExecution(
       plan = { ...plan, graph, operations, analysisGraphHash, handlerFacts: [...valueFacts, fact] as unknown[] };
     }
   }
-  if (candidate.kind === 'unchanged' && !valuesChanged && !gapsChanged) return candidate;
+  // ⭐ GAP 2 (DL ruling B): the compound's renames and removals, by the structural writers, IN MEMORY on the SAME candidate,
+  // each on the postimage of everything before it. Any member refused refuses the whole change; nothing is written.
+  for (const member of structural) {
+    const base = plan.graph;
+    const baseHash = computeAnalysisAffectingGraphHash(base);
+    if (!baseHash) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    const payload = { kind: 'system_event' as const, scenario_id: input.scenarioId, turn_id: input.turnId, stage: input.stage };
+    let written: ReturnType<typeof applyStructuralRename> | ReturnType<typeof applyStructuralDelete>;
+    try {
+      if (member.kind === 'rename') {
+        const event = { kind: 'structural_rename' as const, node_id: member.node_id, expected_label: member.expected_label, label: member.label, base_graph_hash: baseHash };
+        written = applyStructuralRename({ payload: { ...payload, event }, event, requestId: input.requestId, persistedGraph: base });
+      } else {
+        const event = { kind: 'structural_delete' as const, removed_node_ids: [...member.node_ids], removed_edges: member.edges.map(e => ({ from: e.from, to: e.to })), base_graph_hash: baseHash };
+        written = applyStructuralDelete({ payload: { ...payload, event }, event, requestId: input.requestId, persistedGraph: base });
+      }
+    } catch {
+      return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    }
+    if (written.kind !== 'mutated') return { kind: 'refused', reason: `structural_${written.reason}` };
+    const graph = projectGraphForPersistence(written.mutatedGraph);
+    const hash = isEditableGraph(graph) ? computeAnalysisAffectingGraphHash(graph) : null;
+    if (!isEditableGraph(graph) || !hash) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    plan = { ...plan, graph, operations: [...plan.operations, ...written.appliedOperations], analysisGraphHash: hash,
+      handlerFacts: [...plan.handlerFacts, ...written.handlerFacts] };
+    valueConfirmations = [...valueConfirmations, written.response.assistant_text];
+  }
+  if (candidate.kind === 'unchanged' && !valuesChanged && !gapsChanged && structural.length === 0) return candidate;
   if (expectedLinks !== undefined) {
     const adding = plan.operations.filter(o => o.op === 'add_edge').map(o => o.path).sort();
     if (!isDeepStrictEqual(adding, [...new Set(expectedLinks)].sort())) return { kind: 'refused', reason: 'links_mismatch' };
