@@ -391,7 +391,7 @@ import { groupedGoalPathLinks } from '../../compose/grouped-link-sizing.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { getModelManagementService } from '../../model-management/index.js';
 import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysis-state-v1.js';
-import { RISK_LINKS_RULE, type AgentCapabilities, type AgentToolContext, type ToolResult } from './agent-tools.js';
+import { RISK_LINKS_RULE, type AgentCapabilities, type AgentLaneMode, type AgentToolContext, type ToolResult } from './agent-tools.js';
 import { isRevisionConflict } from '../../graph-revision-conflict.js';
 import { buildModelFromBrief, constructionOperationId, findConstructionVersion, type CallStructuredModel, type ConstructionTrace } from './build-model.js';
 import { goalTargetBasisOf, launchWindowOf, periodWords } from '../../goal-target/goal-target-basis.js';
@@ -2627,7 +2627,7 @@ export function createAgentCapabilities(
    * are not declared, `dispatchTool` refuses the names, and these refuse too.
    * Defence in depth, because a single prompt sentence is not a boundary.
    */
-  mode: 'full' | 'preview' = 'full',
+  mode: AgentLaneMode = 'full',
   /**
    * ⭐ THE UI RENDERS THE ANALYSIS FROM `blocks` AND `analysis_ready`, NOT FROM
    * THE PROSE. Measured on the real browser transport at `2fd8cbba`: the turn
