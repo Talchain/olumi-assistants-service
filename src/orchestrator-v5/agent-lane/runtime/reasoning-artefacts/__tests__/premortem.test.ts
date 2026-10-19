@@ -3,6 +3,7 @@ import { computeAnalysisAffectingGraphHash } from '../../../../context/graph-has
 import { PREMORTEM_PRESS_ID, methodTurnForReadback, methodPressOf, planPickChipId, planMethodTurn, settleMethodTurn } from '../../../method-turn/method-turn.js';
 import { methodPlanOf } from '../../../guidance/plan.js';
 import { PremortemWorksheetV1Schema, premortemProducerDirective, readPremortemProduction } from '../premortem.js';
+import { assertUserLinkStories } from '../../../method-turn/__tests__/helpers/user-link-stories.js';
 import { OPTION, LINK, REPLY, ONE_STORY_REPLY, FAILURE, WARNING, captures, fixture, candidate, outside, worksheet } from './premortem-fixture.js';
 
 describe('A2 producer and coverage', () => {
@@ -38,14 +39,19 @@ describe('A2 producer and coverage', () => {
     expect(turn.context.supplied_items.map(i => i.id)).toEqual(key === 'draw1' ? [LINK, 'customer_losses_from_price_rise'] : ['price_change_from_today', 'starter_tier_availability', 'monthly_recurring_revenue_lost_to_price_driven_churn->monthly_recurring_revenue', 'monthly_recurring_revenue_lost_to_price_driven_churn']);
     expect(JSON.stringify(c)).toBe(before);
   });
-  it('all user-sized fixture still refuses; removed and ambiguous picks refuse even with a licence', () => {
+  // ⭐ RE-RULED (AIE 19 Oct AMEND, DL-3 order; was "all user-sized fixture still refuses"): with nothing else to ground it, the
+  // all-user-sized model grounds story-only stories on its own user-sized links (no card, no citation, no write). The removed and
+  // ambiguous picks still refuse.
+  it('all user-sized fixture grounds story-only stories on its own links; removed and ambiguous picks refuse even with a licence', () => {
     const c = structuredClone(captures.draw1);
     c.graph.nodes = c.graph.nodes.filter(n => n.kind !== 'risk');
     const ids = new Set(c.graph.nodes.map(n => n.id));
     c.graph.edges = c.graph.edges.filter(e => ids.has(e.from) && ids.has(e.to)).map(e => ({ ...e, defaulted: false, provenance: { source: 'user_specified', magnitude: 'user_stated' } }));
     c.graph.nodes = c.graph.nodes.map(n => n.kind === 'factor' ? { ...n, observed_state: { ...(n.observed_state as object), source: 'user_specified' } } : n);
     delete c.graph.goal_constraints;
-    expect(methodTurnForReadback(PREMORTEM_PRESS_ID, c)).toMatchObject({ kind: 'unavailable', reason: 'no_grounded_item' });
+    const before = structuredClone(c.graph);
+    assertUserLinkStories(methodTurnForReadback(PREMORTEM_PRESS_ID, c), c.graph);
+    expect(c.graph).toEqual(before);
     expect(methodTurnForReadback(planPickChipId('removed'), captures.draw1)).toMatchObject({ kind: 'choose_plan' });
     expect(methodPressOf(planPickChipId(OPTION), [OPTION, OPTION])).toEqual({ pick: null });
   });
