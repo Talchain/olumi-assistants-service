@@ -109,7 +109,9 @@ describe('acyclic: arms a surviving mutant could not see (verifier rows)', () =>
     const c = servedCandidate(links, { risks: ['Orphan risk'] });
     const r = await build(c);
     const kept = loopSaid(r.out).filter((s) => s.includes('AI feature availability') && s.includes('AI release delay'));
-    expect(r.graph!.edges.some((e) => e.from === 'orphan_risk' && e.to === 'mrr')).toBe(true);
+    // AIE 19 Oct: the unconnected risk is kept out of the calculation, never wired into the goal at a placeholder.
+    expect(r.graph!.edges.some((e) => e.from === 'orphan_risk' || e.to === 'orphan_risk')).toBe(false);
+    expect((r.graph!.nodes.find((n) => n.id === 'orphan_risk') as { analysis_participation?: unknown } | undefined)?.analysis_participation).toBe('retained_excluded');
     expect(kept).toHaveLength(1);
   });
 

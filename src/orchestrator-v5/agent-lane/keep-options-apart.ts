@@ -179,8 +179,37 @@ export function keepOptionsAndQuantitiesApart(candidate: CandidateModel): {
     ...(candidate.identities !== undefined
       ? { identities: candidate.identities.map((i) => ({ ...i, outcome: re(i.outcome), factors: i.factors.map(re) })) }
       : {}),
+    // ⭐ CLASS 4 (PROMPT-INT STEP7 §5, CLASS4-RENAME-PROBE): what each question and each statement is ABOUT follows the rename,
+    // like every other reference above, or the renamed quantity's statements and its questions' bindings keep naming the option.
+    ...renamedReferences(candidate, re),
   };
   return { model, renamed, ambiguous, setAside };
+}
+
+/**
+ * The draft's `unknown_concerns` (labels, and links as "<from> → <to>") and `statements[].subject` with the renamed labels, each
+ * only where the draft carries it. A statement ABOUT an option keeps its own label (the option keeps the user's words); its
+ * `factor_label`, like an intervention's, follows the rename. Anything not in the expected shape is passed through unchanged.
+ */
+function renamedReferences(candidate: CandidateModel, re: (label: string) => string): { unknown_concerns?: unknown; statements?: unknown } {
+  const c = candidate as { unknown_concerns?: unknown; statements?: unknown };
+  const isRec = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
+  const concern = (x: unknown): unknown => {
+    if (typeof x !== 'string') return x;
+    const link = /^(.+?)(\s*(?:\u2192|->)\s*)(.+)$/u.exec(x);
+    return link === null ? re(x) : `${re(link[1]!)}${link[2]}${re(link[3]!)}`;
+  };
+  const label = (x: unknown): unknown => (typeof x === 'string' ? re(x) : x);
+  return {
+    ...(Array.isArray(c.unknown_concerns) ? { unknown_concerns: c.unknown_concerns.map((e) => (isRec(e) && Array.isArray(e.concerns)
+      ? { ...e, concerns: e.concerns.map(concern) } : e)) } : {}),
+    ...(Array.isArray(c.statements) ? { statements: c.statements.map((st) => {
+      if (!isRec(st) || !isRec(st.subject)) return st;
+      const sub = st.subject;
+      const ends = (sub.kind === 'option' ? ['factor_label'] : ['label', 'to_label', 'factor_label']).filter((k) => k in sub);
+      return { ...st, subject: { ...sub, ...Object.fromEntries(ends.map((k) => [k, label(sub[k])])) } };
+    }) } : {}),
+  };
 }
 
 /** What is said for a link set aside (`not_represented`, suffix `.link_set_aside`). */

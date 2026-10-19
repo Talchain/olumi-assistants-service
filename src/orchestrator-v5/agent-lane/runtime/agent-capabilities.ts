@@ -4565,7 +4565,7 @@ export function createAgentCapabilities(
     // stated over is still exactly as bound (Codex r1: a concurrent 3 → 6 month change still said the 3-month receipt).
     const check = await readGraph(ctx.scenario_id);
     const held = (check?.raw as { nodes?: unknown[] } | undefined)?.nodes?.find((n) => isPlainRecord(n) && n.id === op.path);
-    if (check === null || !isDeepStrictEqual(held, riskOccurrencePostimageNode(approved))
+    if (check === null || !isDeepStrictEqual(held, riskOccurrencePostimageNode(approved, check.raw))
       || !riskOccurrenceGoalHolds(approved, check.raw)) return notConfirmed;
     const receipts = res.receipt === null ? [] : [res.receipt];
     proposals.markApplied(pid, receipts);
