@@ -386,6 +386,11 @@ function differentialOf(draft: Rec): ReturnType<typeof differential> {
     equal += 1;
     bEdgeKeys.add(`${be.from}::${be.to}`);
     if (personSized.has(`edges[${be.from}::${be.to}]`)) { not_used.push(`person_size: ${where}`); continue; }
+    // A part of a sum B carries and A (judging the sum by its quote) does not: B's exact definition (the AIE's mapping A), counted apart.
+    const bTotal = (bg.nodes as Rec[]).find((n) => n.id === be.to);
+    const aTotal = (a.nodes as Rec[]).find((n) => n.id === e.to);
+    if (bTotal?.nonlinear_identity?.operation === 'sum' && (bTotal.nonlinear_identity.factor_ids as string[]).includes(be.from)
+      && aTotal?.nonlinear_identity === undefined) { not_used.push(`sum_part_exact: ${where}`); continue; }
     check(where, e, be, ['exists_probability', 'effect_direction']);
     check(`${where}.strength`, e.strength, be?.strength, ['mean', 'std']);
     check(`${where}.natural_effect`, e.provenance?.natural_effect, be?.provenance?.natural_effect, ['amount', 'per_source_change', 'amount_unit', 'per_source_change_unit']);
@@ -504,10 +509,24 @@ describe('candidateToGraph: conversion + science only', () => {
     const off = converted(sumDraft(500));
     expect(ofKind(off.graph, 'goal')[0]!.nonlinear_identity).toBeUndefined();
     expect(off.loss.map((l) => l.reason).join(' ')).toContain('while those parts add up to');
-    // Definitions the AI declared as the user's are a person's sizes: Olumi's placeholder, listed, so no sum is carried on them.
+    // ⭐ THE AIE'S MAPPING A (DL 19 Oct): parts of a sum the AI declared are its DEFINITION whoever the AI said sized them, so the sum is
+    // carried and each part is exact (existence 1, no estimate spread), as Olumi's reading; the declared origin of the size is listed.
     const theirs = converted(sumDraft(400, 'user'));
-    expect(ofKind(theirs.graph, 'goal')[0]!.nonlinear_identity).toBeUndefined();
+    expect(ofKind(theirs.graph, 'goal')[0]!.nonlinear_identity).toEqual({ operation: 'sum',
+      factor_ids: [byLabel(theirs.graph, 'Online orders').id, byLabel(theirs.graph, 'Shop orders').id], stated_in_brief: false });
+    for (const part of ['Online orders', 'Shop orders']) {
+      const e = edge(theirs.graph, part, 'Total orders')!;
+      expect(e).toMatchObject({ exists_probability: 1, provenance: { definitional: true } });
+      expect(e.strength.std).toBeLessThan(e.strength.mean / 2);
+      expect(linkProvenanceOf(e).origin).not.toBe('human');
+    }
     expect(theirs.blocked_schema.filter((b) => b.missing === 'link_size_origin').map((b) => b.declared)).toEqual(['user', 'user']);
+    expect(theirs.loss.some((l) => String(l.field_path).endsWith('.link_size_not_used'))).toBe(false);
+    // A sum whose parts do not add up today is not carried, and its parts' declared sizes are not used (ruling (a)).
+    const offTheirs = converted(sumDraft(500, 'user'));
+    expect(ofKind(offTheirs.graph, 'goal')[0]!.nonlinear_identity).toBeUndefined();
+    expect(edge(offTheirs.graph, 'Online orders', 'Total orders')!.exists_probability).not.toBe(1);
+    expect(offTheirs.loss.filter((l) => String(l.field_path).endsWith('.link_size_not_used'))).toHaveLength(2);
   });
 
   // ⭐ GENERATIVE (signed plan item 7; DL 19 Oct): whatever its operands' origins (all the user's, all Olumi's, mixed), a
@@ -558,15 +577,23 @@ describe('candidateToGraph: conversion + science only', () => {
     expect(settingProvenanceOf(converted(salesDraft()).graph.nodes.find((n: Rec) => n.label === 'Double the ad spend')
       .interventions.ad_spend).origin).toBe('human');
   });
-  it.each(ORIGINS)('GENERATIVE (definition): a one-for-one definition declared by %s is sized only when it is Olumi\'s', (by) => {
-    const draft = sumDraft(400, by === 'olumi' ? 'olumi' : 'user');
-    draft.statements = (draft.links as Rec[]).flatMap((l) => (by === 'other' || by === 'unknown' ? [{ quote: 'synthetic',
-      subject: { kind: 'link', label: l.from, to_label: l.to, factor_label: null }, field: 'effect', form: 'point', value: null, low: null,
-      high: null, unit: null, qualifier: null, conditions: null, speaker: by }] : []));
-    const { graph } = converted(draft);
-    const part = edge(graph, 'Online orders', 'Total orders')!;
-    expect(part.provenance.magnitude === 'olumi_estimate').toBe(by === 'olumi');
-    expect(linkProvenanceOf(part).origin).not.toBe('human');
+  it.each(ORIGINS)('GENERATIVE (definition): a one-for-one definition declared by %s is exact only as a part of a declared sum; alone, sized only when it is Olumi\'s', (by) => {
+    const draftOf = (identities: boolean): Rec => {
+      const draft = sumDraft(400, by === 'olumi' ? 'olumi' : 'user');
+      draft.statements = (draft.links as Rec[]).flatMap((l) => (by === 'other' || by === 'unknown' ? [{ quote: 'synthetic',
+        subject: { kind: 'link', label: l.from, to_label: l.to, factor_label: null }, field: 'effect', form: 'point', value: null, low: null,
+        high: null, unit: null, qualifier: null, conditions: null, speaker: by }] : []));
+      return identities ? draft : { ...draft, identities: [] };
+    };
+    // In the declared sum: its definition, exact, whoever the AI said sized it; never the user's.
+    const inSum = edge(converted(draftOf(true)).graph, 'Online orders', 'Total orders')!;
+    expect(inSum).toMatchObject({ exists_probability: 1, provenance: { definitional: true, magnitude: 'olumi_estimate' } });
+    expect(linkProvenanceOf(inSum).origin).not.toBe('human');
+    // ⛔ The definitional flag and equal units alone are not proof (the AIE): with no declared sum, a person's size keeps the placeholder.
+    const alone = edge(converted(draftOf(false)).graph, 'Online orders', 'Total orders')!;
+    expect(alone.provenance.magnitude === 'olumi_estimate').toBe(by === 'olumi');
+    expect(alone.exists_probability).not.toBe(1);
+    expect(linkProvenanceOf(alone).origin).not.toBe('human');
   });
 
   it('BLOCKED-SCHEMA: a target another person stated and a size from an unclear source are listed, never relabelled', () => {

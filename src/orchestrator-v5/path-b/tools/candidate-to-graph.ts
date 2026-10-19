@@ -21,6 +21,8 @@
  *    Conversation keeps it. The draft is Olumi's provisional model. A is untouched: it still applies its gates.
  *  · A "stay at or below" goal's level the AI declared known and the user's is carried on A's science (cap, unit, frame,
  *    `admitGoalBaseline`), since A reads that ceiling only from the brief (gap 3 ruling (c)).
+ *  · A declared sum is judged on its operands, units, frames and today's arithmetic, never its quote, by A and by B alike; its
+ *    parts' links are then A's exact definition through the existing identity (the AIE's mapping A), whoever the AI said sized them.
  *  · Given the user's words, the draft's declared statements are recorded on their subjects, as construction records them
  *    (`withDeclaredStatements`): data carried, never a reading of the words' meaning.
  */
@@ -185,7 +187,10 @@ function labelBlind(c: CandidateModel): { readonly candidate: CandidateModel; re
 /** A's own conversion of the draft, with no brief and no names (`labelBlind`): the numbers and structure science this converter copies. */
 function convertedByA(c: CandidateModel): { a: AdmittedModel } | null {
   try {
-    const { candidate, readBack } = labelBlind(c);
+    // A declared sum is judged as B judges it (`checkDeclaredSums` below): on its operands, units, frames and today's arithmetic, as
+    // Olumi's reading, so no quote reaches A's check either (A takes no sum from a quote, and B has no brief to find one in).
+    const unquoted = { ...c, identities: (c.identities ?? []).map((d) => (d?.operation === 'sum' ? { ...d, evidence: null } : d)) };
+    const { candidate, readBack } = labelBlind(unquoted);
     return { a: readBack(admitWithoutBrief(prepareProvisionalCandidate(candidate).candidate)) };
   } catch { return null; }
 }
@@ -368,8 +373,15 @@ export function candidateToAdmittedGraph(input: unknown): Converted | { readonly
   }
 
   // Links: an option's links are A's (below). Every other link carries A's size for the same pair, except a size the AI
-  // declared as a person's (DL ruling (a)): that keeps Olumi's placeholder, said, kept and listed.
+  // declared as a person's (DL ruling (a)): that keeps Olumi's placeholder, said, kept and listed, unless the link is a part of a
+  // sum A holds (below).
   const aEdgeOf = new Map<string, Rec>(a.edges.map((e) => [`${e.from}::${e.to}`, e]));
+  // ⭐ THE AIE'S MAPPING A, ON B (DL 19 Oct): a link that is a part of a sum A holds (one the AI declared, or A's limited tally) is
+  // that sum's DEFINITION, never anyone's size estimate: each part linked one for one in the total's unit, every definitional part
+  // named, today's parts adding up to today's total. It takes A's exact definition (existence 1, no estimate spread) beside the
+  // identity the Run evaluates. A definitional flag or equal units alone never does this.
+  const sumParts = new Set(a.nodes.flatMap((n) => (n.nonlinear_identity?.operation === 'sum'
+    ? n.nonlinear_identity.factor_ids.map((f) => `${bIdOfA.get(f)}::${bIdOfA.get(n.id)}`) : [])));
   const causal: CandidateLink[] = [];
   const placeholder = new Set<CandidateLink>();
   const drawnByPair = new Map<string, Who>();
@@ -387,7 +399,11 @@ export function candidateToAdmittedGraph(input: unknown): Converted | { readonly
     const { strength_mean: _mean, strength_std: _std, ...drafted } = l;
     const link: CandidateLink = { ...drafted, from, to };
     const sizeBy = whoOf(l.effect_provenance ?? l.provenance, speakerOf('link', l.from, said('effect')));
-    if (finite(l.effect_amount) && finite(l.effect_per_source_change) && l.effect_per_source_change !== 0 && sizeBy !== 'olumi') {
+    const sized = finite(l.effect_amount) && finite(l.effect_per_source_change) && l.effect_per_source_change !== 0 && sizeBy !== 'olumi';
+    if (sized && sumParts.has(`${from}::${to}`) && aEdgeOf.has(aPair(from, to))) {
+      // The definition replaces the declared size; whose the AI said that size was is still listed (GraphV3 cannot hold it).
+      blocked.push({ field_path: `edges[${from}::${to}]`, declared: sizeBy as BlockedSchema['declared'], missing: 'link_size_origin' });
+    } else if (sized) {
       const quoted = (l as Rec).source_quote;
       const words = typeof quoted === 'string' && quoted.trim() !== '' ? quoted.trim() : `${l.effect_amount} per ${l.effect_per_source_change}`;
       loss.push(note(`edges[${from}::${to}].link_size_not_used`, { effect_amount: l.effect_amount, effect_per_source_change: l.effect_per_source_change },
