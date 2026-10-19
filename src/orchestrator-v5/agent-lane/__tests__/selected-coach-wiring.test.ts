@@ -22,7 +22,10 @@ const sha256 = (text: string | Buffer) => createHash('sha256').update(text).dige
 // correction / recorded Run / what-if apart; REASONING sets a requested what-if beside the saved setting; AUTHORSHIP separates
 // stated from derived ranges; CALCULATION BOUNDARY allows a user-defined total at a stated range's end points as arithmetic only:
 // 8,207 → 9,523 bytes. Reversing exactly those five sentence edits on the new template reproduces 7546b130….
-const TEMPLATE_SHA = 'b32b1fd01f10098b7b002bfc873c0bca0d9695c8fd7fd21ae1e2919103cd1951';
+// REFUSAL WORDS (AIE bb91dcdd `refusal_prompt_replacement`; DL-3 18 Oct; verifier: 15 internal-word sentences, all AI-written):
+// AGENCY's "If a tool refuses, report the refusal truthfully." becomes the AIE's plain-language rule: 9,523 → 10,022 bytes.
+// Reversing exactly that sentence on the new template reproduces b32b1fd0….
+const TEMPLATE_SHA = 'bb95cec532a823482dfd1a8b2d66a2c8ad47af7a6e3ab3df652665d9dbc3b130';
 // AI HARNESS (1 Oct, DL 5936996041 on R3 DEFECT 2): the links sentence defines `sizing` (F1b's linkSizing) and no longer
 // says `defaulted` means unsized: 325bb61e… → 26f7e9c0…. The template sha above is unchanged.
 // MODEL GENERATION (2 Oct, M1 Accept receipt; Codex pre-review 2 on CEE mg/accept-receipt-authorship): the link-set sentence
@@ -52,7 +55,9 @@ const TEMPLATE_SHA = 'b32b1fd01f10098b7b002bfc873c0bca0d9695c8fd7fd21ae1e2919103
 //   contract's links clause only: 22,232 → 22,410 bytes (+178; clause 529 → 707 bytes). The last green head's (staging 7fa0aa53d)
 //   host reproduces c716ecec… and 22,232 bytes; staging 75fc1a95a's reproduces 7234aa43… (22,271); swapping in exactly this
 //   clause gives this.
-const HOST_SHA = 'ffc8144ffc131379110e79504cf18bce484976581ee69a8817db052752e39d01';
+// REFUSAL WORDS (AIE bb91dcdd): #9 and #42 lose only their refusal clauses and #25 is removed whole (folded into AGENCY):
+// reversing exactly those three edits reproduces ffc8144f….
+const HOST_SHA = 'a118a398d9e214017df46195c40ece2105d70d8343577ed14521b10736edf64d';
 // + REPLY_LENGTH_INSTRUCTION appended after the host contract (1 Oct, AIQ bound v2 5922412812): 26,834 → 27,324 bytes.
 // + K2: the budgets are limits, one question, the goal's target left to the host's D1 (1 Oct, DL 5925649954 item 5): 27,324 → 27,547 bytes.
 // + AI HARNESS: the links sentence's `sizing` definition replaces the `defaulted` one (1 Oct, DL 5936996041): 27,547 → 27,833 bytes.
@@ -102,8 +107,10 @@ const HOST_SHA = 'ffc8144ffc131379110e79504cf18bce484976581ee69a8817db052752e39d
 // + PROMPT-INT coach currentness (DL-3 18 Oct; AIE live-proof order 18:05–18:13Z; Codex pair AMENDs adopted): the template's
 //   TRUTH, REASONING, AUTHORSHIP and CALCULATION BOUNDARY sentences only: 36,584 → 37,900 bytes. Derived from the rendered
 //   AGENT_INSTRUCTIONS at the branch head; swapping back exactly the template's text on it reproduces e3b4f5cf… and 36,584 bytes.
-const RENDERED_SHA = '8ce39cf1d4b9804d86a911690842bad5c7ffeac9ad57b878190ac4f51f2e9246';
-const RENDERED_BYTES = 37_900;
+// + REFUSAL WORDS (AIE bb91dcdd): the template's AGENCY sentence and host #9/#25/#42 only: 37,900 → 38,225 bytes. Swapping back
+//   exactly the template and host text on the rendered AGENT_INSTRUCTIONS reproduces 8ce39cf1… and 37,900 bytes.
+const RENDERED_SHA = '651aaa4e213eb370a5783638038ff3c35845d13f33ff6d2a359e13de4fc9aa2a';
+const RENDERED_BYTES = 38_225;
 /**
  * BYPASS1 (AIE #94 6158232014): a call that offers the Agent's proposing tools carries the selected coach, then the
  * stated-figure rule; a tool-less call carries the coach alone. The coach bytes stay exactly RENDERED either way.
