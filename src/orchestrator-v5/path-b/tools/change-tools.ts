@@ -27,19 +27,24 @@
  *    party's name, the words.
  *  · stance (AIE 15:24/15:54, separate from source): a value holds a current level, a setting a what-if. A target or a
  *    supposition is never saved as a value; a stance the carrier does not mean is saved with the stance named as not kept.
- * Changes this path does not make yet (the goal's target, a link's strength, add, remove, rename) come back `unavailable`,
- * naming what is not available.
+ *  · link strength (candidate 2, outbox/C5-PATHB-LINK-STRENGTH-DESIGN.md v2) — Olumi's band only, through the existing
+ *    capability's ONE rule set (`proposeLinkStrengths`: midpoint or review, placeholders, definitional links and the user's own
+ *    figures left out, "already") and the SAME door, ALONE (the writer refuses a link set beside anything else). A person's
+ *    band: BLOCKED-SCHEMA — no link carrier holds "human, unverified" or "unknown" (`linkSizing`, provenance-of.ts:721–723).
+ * Changes this path does not make yet (add, remove, rename) come back `unavailable`, naming what is not available.
  */
 import { z } from 'zod-v4';
-import type { AgentToolContext } from '../../agent-lane/runtime/agent-tools.js';
+import type { AgentToolContext, ToolResult } from '../../agent-lane/runtime/agent-tools.js';
 import { authorisationTurnId, type InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
 import { createProposal, type ProposalOperation, type ProposalStore, type ReceiptSummary, type StructuredProposal } from '../../agent-lane/proposal.js';
 import { runWithApprovedBindings, type ApprovedAdoption } from '../../agent-lane/approved-adoption-context.js';
 import { defaultFrameFor } from '../../agent-lane/admit-model.js';
 import { GraphStaleWriteError } from '../../build-turn-context.js';
 import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../../system-events/dispatch.js';
-import { provenanceOf, type Provenance } from '../../../cee/provenance/provenance-of.js';
+import { linkProvenanceOf, linkSizing, provenanceOf, type Provenance } from '../../../cee/provenance/provenance-of.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
+import { EDGE_STRENGTH_MIDPOINTS } from '../../format/edge-strength-bands.js';
+import type { InfluenceBand } from '../../format/influence-bands.js';
 import { verbatimSourceLine } from '../../agent-lane/quote-confirmation.js';
 import { approvedGraphHeld } from '../../agent-lane/runtime/draft-replacement.js';
 import { isSavedRead, readSaved, type SavedRead } from './context-tool.js';
@@ -70,7 +75,6 @@ const Declared = z.object({ value: z.number(), unit, stance: Stance, source: Sou
  * and is told truthfully that it is not available here, never refused as if a rule forbade it.
  */
 const NOT_YET = {
-  set_link_strength: 'Changing how strongly one factor affects another isn\'t available on this path yet.',
   add_to_model: 'Adding a factor or an option isn\'t available on this path yet.',
   remove_from_model: 'Removing something from the model isn\'t available on this path yet.',
   rename: 'Renaming isn\'t available on this path yet.',
@@ -80,13 +84,16 @@ const notYet = (op: NotYet) => z.object({ op: z.literal(op), target_id: id }).st
 export const ChangeOp = z.discriminatedUnion('op', [
   z.object({ op: z.literal('set_factor_value'), factor_id: id, value: z.number(), unit, stance: Stance, source: Source }).strict(),
   z.object({ op: z.literal('set_option_setting'), option_id: id, factor_id: id, value: z.number(), unit, stance: Stance, source: Source }).strict(),
+  /** An existing link's strength band. Its direction is kept; a reversal or a new link is not this change. */
+  z.object({ op: z.literal('set_link_strength'), from: id, to: id, band: z.enum(['weak', 'moderate', 'strong', 'very strong']), stance: Stance, source: Source }).strict(),
   /** The goal's success target. The comparator, figure, unit, what it measures and its frame are the AI's, carried literally. */
   z.object({ op: z.literal('set_goal_target'), goal_id: id, comparator: z.enum(['<', '<=', '>', '>=']), value: z.number(), unit: z.string(),
     quantity: z.string(), frame: z.enum(['level', 'change']), stance: Stance, source: Source }).strict(),
-  notYet('set_link_strength'), notYet('add_to_model'), notYet('remove_from_model'), notYet('rename'),
+  notYet('add_to_model'), notYet('remove_from_model'), notYet('rename'),
 ]);
 type FigureOp = Extract<z.infer<typeof ChangeOp>, { op: 'set_factor_value' | 'set_option_setting' }>;
 type TargetArgs = Extract<z.infer<typeof ChangeOp>, { op: 'set_goal_target' }>;
+type LinkArgs = Extract<z.infer<typeof ChangeOp>, { op: 'set_link_strength' }>;
 /** A target as stored on the proposal: the declaration plus the literal source line and when it was proposed (hashed). */
 const TargetStored = z.object({ value: z.number(), unit: z.string(), comparator: z.enum(['<', '<=', '>', '>=']), quantity: z.string(),
   frame: z.literal('level'), stance: Stance, source: Source, said_in: z.string().nullable(), recorded_at: z.string() }).strict();
@@ -109,6 +116,8 @@ export interface ChangeDeps {
   readonly proposals: ProposalStore;
   /** The product's batch door (`commitOptionLevelsInProcess`), as the route already gives the capabilities. */
   readonly commitOptionLevels?: (input: CommitOptionLevelsInput) => Promise<CommitOptionLevelsResult>;
+  /** The existing link-set capability (`capabilities.proposeLinkStrengths`), on the SAME proposal store; absent → not available. */
+  readonly proposeLinkStrengths?: (ctx: ChangeCtx, args: { readonly links: readonly Rec[]; readonly rationale: string }) => Promise<ToolResult>;
 }
 type ChangeCtx = Pick<AgentToolContext, 'scenario_id' | 'authenticated_user_id' | 'turn_id'> & TypedWords;
 
@@ -126,7 +135,14 @@ type Holding = { readonly stored: Pick<Provenance, 'origin'> & { readonly accept
  * stance that carrier would change into an operative current level (a supposition or a target as a value) is BLOCKED (AIE
  * 15:54: a hypothetical never becomes an operative current level).
  */
-function holdingOf(kind: Op['kind'] | 'target', s: DeclaredSource, stance: DeclaredStance): Holding {
+function holdingOf(kind: Op['kind'] | 'target' | 'link', s: DeclaredSource, stance: DeclaredStance): Holding {
+  // A link's band is held only as Olumi's estimate, reviewed by the press. The capability's proposal carries no stance, so any
+  // other stance is blocked rather than lost unsaid.
+  if (kind === 'link') {
+    if (s.origin !== 'olumi') return { blocked: 'a link\'s strength from a person\'s words would read as their own verified size; it can be saved only as Olumi\'s estimate on this path yet' };
+    if (stance !== 'estimate') return { blocked: 'Olumi\'s band for a link is an estimate; put forward as anything else it cannot be saved on this path yet' };
+    return { stored: { origin: 'ai', accepted: true }, not_kept: [] };
+  }
   // A goal's target figure is held as Olumi's reading of the binding (the existing target carrier has no unverified-human
   // stamp); a person's words are kept as theirs beside it, and the declared origin of the figure is named as not kept.
   if (kind === 'target') {
@@ -272,6 +288,8 @@ const codeOf = (reason: string): string => {
   return /^[a-z]/.test(c) ? c : 'change_refused';
 };
 
+const LINKS_NOT_HERE = 'Changing how strongly one factor affects another isn\'t available on this path yet. Nothing was proposed or saved.';
+const MIXED_LINKS = 'Changing link strengths together with other changes isn\'t available on this path yet; propose the links on their own. Nothing was proposed or saved.';
 const MIXED_TARGET = 'Changing the goal\'s target together with other changes isn\'t available on this path yet; propose the target on its own. Nothing was proposed or saved.';
 const CHANGE_TARGET = 'A target stated as a change from today isn\'t available on this path yet. Nothing was proposed or saved.';
 
@@ -318,12 +336,119 @@ async function proposeTarget(deps: Pick<ChangeDeps, 'dispatch' | 'proposals'>, c
   return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: read.identity });
 }
 
-export async function proposeChange(deps: Pick<ChangeDeps, 'dispatch' | 'proposals'>, ctx: ChangeCtx, args: ProposeChangeArgs): Promise<ToolOutcome> {
+/**
+ * Olumi's bands for existing links: the table first (a person's band, or a band not put forward as an estimate, is BLOCKED),
+ * then the existing capability on the same read — the ids' own labels, Olumi's basis — and its result as this path's outcome.
+ */
+async function proposeLinks(deps: Pick<ChangeDeps, 'dispatch' | 'proposals' | 'proposeLinkStrengths'>, ctx: ChangeCtx, args: ProposeChangeArgs,
+  links: readonly LinkArgs[]): Promise<ToolOutcome> {
+  if (deps.proposeLinkStrengths === undefined) return unavailable('set_link_strength_not_available', 'none', LINKS_NOT_HERE);
+  for (const [i, l] of links.entries()) {
+    const holding = holdingOf('link', l.source, l.stance);
+    if (isBlocked(holding)) return unavailable('blocked_schema', 'none', blockedSaid(i, holding.blocked));
+  }
+  const read = await readSaved(deps, ctx.scenario_id);
+  if (!isSavedRead(read)) return read;
+  const labelOf = new Map(nodesOf(read.graph).map((n) => [n.id, n.label]));
+  const asked: Rec[] = [];
+  for (const [i, l] of links.entries()) {
+    const from = labelOf.get(l.from);
+    const to = labelOf.get(l.to);
+    if (typeof from !== 'string' || typeof to !== 'string') return refused('not_in_model', undefined, { op: i });
+    asked.push({ from_label: from, to_label: to, strength: l.band, origin: 'olumi', basis: args.basis });
+  }
+  const r = await deps.proposeLinkStrengths(ctx, { links: asked, rationale: args.basis });
+  const { ok: done, mutated: _mutated, refusal, detail, ...data } = r;
+  if (!done) return refused(codeOf(typeof refusal === 'string' ? refusal : 'link_set_refused'), typeof detail === 'string' ? detail : undefined, data);
+  return ok(data);
+}
+
+/** The capability's stored link set, as its own apply reads it (agent-capabilities.ts `applyLinkStrengthSet`); else `null`. */
+/** The band vocabulary, by the ONE band table (as the capability reads it). */
+const isInfluenceBand = (v: unknown): v is InfluenceBand => typeof v === 'string' && Object.hasOwn(EDGE_STRENGTH_MIDPOINTS, v);
+type StoredLink = { from: string; to: string; magnitude: number; intent: 'set' | 'confirm_current'; band: InfluenceBand;
+  expected: { mean: number; effect_direction: 'positive' | 'negative'; reviewed_at: string | null }; sizing_after_approval: string; std?: number };
+function linksOf(p: StructuredProposal): StoredLink[] | null {
+  if (p.operations.length === 0 || p.operations.some((o) => o.op !== 'set_link_strength')) return null;
+  const out: StoredLink[] = [];
+  for (const o of p.operations) {
+    const [from, to] = o.path.split('::');
+    const v = isRec(o.value) ? o.value : {};
+    const e = isRec(v.expected) ? v.expected : {};
+    // Olumi's estimate only: this path never proposes a person's band, so it never applies one.
+    if (!from || !to || typeof v.magnitude !== 'number' || (v.intent !== 'set' && v.intent !== 'confirm_current') || !isInfluenceBand(v.band)
+      || v.author !== 'model_proposed' || typeof v.sizing_after_approval !== 'string' || typeof e.mean !== 'number'
+      || (e.effect_direction !== 'positive' && e.effect_direction !== 'negative') || (v.std !== undefined && typeof v.std !== 'number')) return null;
+    out.push({ from, to, magnitude: v.magnitude, intent: v.intent, band: v.band, sizing_after_approval: v.sizing_after_approval,
+      expected: { mean: e.mean, effect_direction: e.effect_direction, reviewed_at: typeof e.reviewed_at === 'string' ? e.reviewed_at : null },
+      ...(typeof v.std === 'number' ? { std: v.std } : {}) });
+  }
+  return out;
+}
+
+/** Each link as the model now holds it: the approved |mean| and sign, and the sizing the approval was shown, by the authority. */
+function linksRead(read: SavedRead, links: readonly StoredLink[]): { holds: boolean; faithful: boolean; written: Rec[] } {
+  const kindOf = new Map(nodesOf(read.graph).map((n) => [n.id, n.kind]));
+  const edges = Array.isArray(read.graph.edges) ? read.graph.edges.filter(isRec) : [];
+  const written = links.map((l) => {
+    const edge = edges.find((e) => e.from === l.from && e.to === l.to);
+    const mean = isRec(edge?.strength) && typeof edge.strength.mean === 'number' ? edge.strength.mean : undefined;
+    const sign = edge?.effect_direction === 'negative' || edge?.effect_direction === 'positive' ? edge.effect_direction
+      : mean === undefined ? undefined : mean < 0 ? 'negative' : 'positive';
+    const sizing = edge === undefined ? null : linkSizing(edge);
+    const holds = mean !== undefined && close(Math.abs(mean), l.magnitude) && sign === l.expected.effect_direction && sizing === l.sizing_after_approval;
+    const fromKind = kindOf.get(l.from);
+    return { holds, row: { op: 'set_link_strength', from: l.from, to: l.to, band: l.band, figure: mean ?? null, sizing,
+      stored_as: edge === undefined ? null : linkProvenanceOf(edge, typeof fromKind === 'string' ? { fromKind } : {}), not_kept: [] } };
+  });
+  return { holds: written.every((w) => w.holds), faithful: true, written: written.map((w) => w.row) };
+}
+
+/** A link set: ONE door call holding only `link_strengths`, idempotent on the capability's own turn (`#links`), so either lane is once. */
+function linksApplier(deps: ChangeDeps, ctx: ChangeCtx, p: StructuredProposal, links: readonly StoredLink[]): Applier | ToolOutcome {
+  if (deps.commitOptionLevels === undefined) return unavailable('writer_unavailable');
+  const commitOptionLevels = deps.commitOptionLevels;
+  const turnId = authorisationTurnId(`${p.proposal_id}#links`);
+  return {
+    receiptTurn: turnId,
+    baseOf: (read) => read.graphHash,
+    readNow: (read) => linksRead(read, links),
+    commit: async (before) => {
+      let res: CommitOptionLevelsResult;
+      try {
+        res = await commitOptionLevels({ scenario_id: ctx.scenario_id, base_graph_hash: before.graphHash, turn_id: turnId, links: [], levels: [],
+          link_strengths: links.map((l) => ({ from: l.from, to: l.to, magnitude: l.magnitude, intent: l.intent, expected: l.expected, band: l.band,
+            author: 'model_proposed' as const, ...(l.std === undefined ? {} : { std: l.std }) })) });
+      } catch (err) {
+        return err instanceof GraphStaleWriteError ? refused('superseded') : unavailable('not_confirmed', 'unknown');
+      }
+      if (res.status === 'stale') return refused('superseded');
+      if (res.status === 'unconfirmed') return unavailable('not_confirmed', 'unknown');
+      if (res.status === 'refused') return refused(codeOf(res.reason), undefined, { ...(res.link ?? {}) });
+      const after = await readSaved(deps, ctx.scenario_id);
+      const back = isSavedRead(after) ? linksRead(after, links) : null;
+      if (back === null || !back.holds || !isSavedRead(after)) return unavailable('not_verified', 'unknown');
+      if (res.already_applied) {
+        deps.proposals.markApplied(p.proposal_id, []);
+        return ok({ unchanged: true, faithful: back.faithful, written: back.written });
+      }
+      if (res.receipt === null || res.receipt.source_turn_id !== turnId) return unavailable('not_verified', 'unknown');
+      const receipt: ReceiptSummary = { ...res.receipt, source_turn_id: turnId };
+      deps.proposals.markApplied(p.proposal_id, [receipt]);
+      return ok({ saved: true, faithful: back.faithful, receipt, revision: { graph_hash: after.graphHash, graph_identity_hash: after.identity },
+        written: back.written }, { mutated: true });
+    },
+  };
+}
+
+export async function proposeChange(deps: Pick<ChangeDeps, 'dispatch' | 'proposals' | 'proposeLinkStrengths'>, ctx: ChangeCtx, args: ProposeChangeArgs): Promise<ToolOutcome> {
   const later = args.ops.find(isNotYet);
   if (later !== undefined) return unavailable(`${later.op}_not_available`, 'none', `${NOT_YET[later.op]} Nothing was proposed or saved.`);
   if (args.public_label.trim() === '') return refused('label_empty');
   const target = args.ops.find((o): o is TargetArgs => o.op === 'set_goal_target');
   if (target !== undefined) return args.ops.length > 1 ? unavailable('mixed_change_not_available', 'none', MIXED_TARGET) : proposeTarget(deps, ctx, args, target);
+  const links = args.ops.filter((o): o is LinkArgs => o.op === 'set_link_strength');
+  if (links.length > 0) return links.length < args.ops.length ? unavailable('mixed_change_not_available', 'none', MIXED_LINKS) : proposeLinks(deps, ctx, args, links);
   const ops = args.ops.filter((o): o is FigureOp => o.op === 'set_factor_value' || o.op === 'set_option_setting');
   for (const [i, o] of ops.entries()) {
     const holding = holdingOf(o.op === 'set_factor_value' ? 'value' : 'setting', o.source, o.stance);
@@ -347,6 +472,8 @@ export async function proposeChange(deps: Pick<ChangeDeps, 'dispatch' | 'proposa
 /** One kind of approved change: where its own receipt is recorded, how it reads back, and its ONE write. */
 interface Applier {
   readonly receiptTurn: string;
+  /** The revision the proposal was prepared on, as this kind records it (the capability's link set: the analysis hash). */
+  readonly baseOf?: (read: SavedRead) => string | null;
   readonly readNow: (read: SavedRead) => { holds: boolean; faithful: boolean; written: Rec[] };
   readonly commit: (before: SavedRead, reconcile: () => Promise<ToolOutcome>) => Promise<ToolOutcome>;
 }
@@ -435,9 +562,11 @@ export async function applyChange(deps: ChangeDeps, ctx: ChangeCtx, args: ApplyC
   if (p.scenario_id !== ctx.scenario_id || p.user_id !== ctx.authenticated_user_id) return refused('not_authorised');
   const turnId = authorisationTurnId(p.proposal_id);
   const target = targetOf(p);
-  const ops = target === null ? declaredOf(p) : null;
-  if (target === null && ops === null) return refused('not_a_change_proposal');
-  const applier = target !== null ? targetApplier(deps, ctx, p, target, turnId) : figuresApplier(deps, ctx, p, ops!, turnId);
+  const links = target === null ? linksOf(p) : null;
+  const ops = target === null && links === null ? declaredOf(p) : null;
+  if (target === null && links === null && ops === null) return refused('not_a_change_proposal');
+  const applier = target !== null ? targetApplier(deps, ctx, p, target, turnId)
+    : links !== null ? linksApplier(deps, ctx, p, links) : figuresApplier(deps, ctx, p, ops!, turnId);
   if (!('commit' in applier)) return applier;
   const prior = await ownReceipt(deps.dispatch, ctx.scenario_id, applier.receiptTurn);
   if (prior === 'unreadable') return unavailable('read_failed');
@@ -451,9 +580,10 @@ export async function applyChange(deps: ChangeDeps, ctx: ChangeCtx, args: ApplyC
     return ok({ already_saved: true, receipt, holds_now: now.holds, faithful: now.faithful, written: now.written });
   };
   if (prior !== null) return alreadySaved(prior);
-  if (before.identity === null) return unavailable('read_malformed');
+  const base = applier.baseOf === undefined ? before.identity : applier.baseOf(before);
+  if (base === null) return unavailable('read_malformed');
   const decision = deps.proposals.authorise({ proposal_id: p.proposal_id, scenario_id: ctx.scenario_id,
-    authenticated_user_id: ctx.authenticated_user_id, current_graph_identity_hash: before.identity, typed_approval_of: p.proposal_id });
+    authenticated_user_id: ctx.authenticated_user_id, current_graph_identity_hash: base, typed_approval_of: p.proposal_id });
   if (decision.status === 'already_applied') return alreadySaved(decision.receipts[0] ?? null);
   if (decision.status !== 'execute') return refused(decision.status);
   const reconcile = async (): Promise<ToolOutcome> => {
