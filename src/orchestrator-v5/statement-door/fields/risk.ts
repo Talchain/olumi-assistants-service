@@ -165,7 +165,7 @@ const holdsApproved = (write: { readonly payload: unknown }, after: unknown): bo
   const approved = approvedOf(write.payload);
   if (approved === undefined) return false;
   const held = isRec(after) && Array.isArray(after.nodes) ? after.nodes.find((n) => isRec(n) && n.id === approved.risk_id) : undefined;
-  return isDeepStrictEqual(held, riskOccurrencePostimageNode(approved)) && riskOccurrenceGoalHolds(approved, after);
+  return isDeepStrictEqual(held, riskOccurrencePostimageNode(approved, after)) && riskOccurrenceGoalHolds(approved, after);
 };
 const writes = (approved: ApprovedRiskOccurrence, graph: unknown): boolean => applyRiskOccurrenceEdit(graph, approved).kind !== 'refused';
 

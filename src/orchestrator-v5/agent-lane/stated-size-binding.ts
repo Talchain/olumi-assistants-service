@@ -4,7 +4,7 @@ import { centreRangeAt, sameWord, sentenceNamesOtherQuantity } from './stated-by
 // The ONE centre-range reading lives in stated-by-user.ts (the answer door reads it too, without this module's
 // factor-extraction imports); re-exported for construction's callers.
 export { centreRangeAt };
-import { sameUnit } from './same-unit.js';
+import { readUnitParts, sameUnit } from './same-unit.js';
 import type { StatedRangeEnd } from '../../cee/magnitude/link-effect.js';
 import { canAdoptLabelUnit, labelHeadUnit, type LabelHeadReading } from './label-head-unit.js';
 
@@ -156,7 +156,7 @@ export function bindStatedLinkSizes(
     let through: PassThroughBinding | undefined;
     if (sentenceNamesOtherQuantity(sentences[p.sentence]!, d.amount_unit, { target, others })) {
       through = passThroughOf(p.link, sentences[p.sentence]!);
-      if (through === undefined) return false;
+      if (through === undefined && !namesOnlyTheLinksRate(p.link, d, sentences[p.sentence]!)) return false;
     }
     const sign = Math.sign(d.amount * d.per_source_change);
     if ((l.effect_direction !== 'positive' || sign !== 1) && (l.effect_direction !== 'negative' || sign !== -1)) return false;
@@ -210,6 +210,33 @@ export function bindStatedLinkSizes(
       return undefined;
     }
     return through;
+  }
+
+  /**
+   * ⭐ THE LINK'S OWN RATE IS NO OTHER QUANTITY (step 8 replay of the served capacity draft cfa31dfb: "Each additional specialist resolves
+   * about 20 tickets per week, between 10 and 30" names every word of ‘Tickets resolved per additional specialist’, so the direct bind
+   * refused it and the user's 20 ran as Olumi's placeholder). The ONE other quantity the sentence names is a RATE R of this link: R feeds
+   * the same target through a link of no size of its own, and R's unit is the target's own unit PER the source's (`readUnitParts`:
+   * "tickets per week per specialist" is "tickets per week" for each one of "specialists"). R is then the per-source change of the target
+   * this link carries, the very figure the sentence states, never a second quantity. Any other quantity named, a second such rate, or a
+   * unit that is not that ratio, still refuses.
+   */
+  function namesOnlyTheLinksRate(link: number, d: StatedEffectDetail, sentence: string): boolean {
+    const l = links[link]!;
+    const target = readUnitParts(d.amount_unit);
+    const source = readUnitParts(d.per_source_change_unit);
+    if (target === null || target.per !== null || source?.kind !== 'count' || source.per !== null) return false;
+    const rateUnit = JSON.stringify({ ...target, per: source.noun });
+    const rates = links.flatMap((x) => {
+      const r = x.to === l.to && x.from !== l.from && x.natural_effect == null ? nodeById.get(x.from) : undefined;
+      return r !== undefined && typeof r.label === 'string' && JSON.stringify(readUnitParts(r.unit)) === rateUnit ? [r] : [];
+    });
+    if (rates.length !== 1) return false;
+    const rate = rates[0]!;
+    const others = nodes.filter((n) => n.id !== l.from && n.id !== l.to && n.id !== rate.id && n.kind !== 'option' && n.kind !== 'decision')
+      .flatMap((n) => (typeof n.label === 'string' ? [n.label] : []));
+    // The reader reads only `others` (Codex R1 SIMPLER: no target list is built for it).
+    return !sentenceNamesOtherQuantity(sentence, d.amount_unit, { target: [], others });
   }
 
   /**

@@ -46,6 +46,18 @@ describe('Canvas\'s cloud-bill brief (saved live draft): the option and the fact
     expect(edges.some((e) => e.from === option.id && e.to === 'monthly_cloud_bill'), 'no option → goal shortcut').toBe(false);
     expect(r.not_represented).toContain('"Enterprise discount" names both an option and the factor it acts on, so the factor is called "Enterprise discount level" to keep the two apart.');
   });
+  // ⭐ CLASS 4 (PROMPT-INT STEP7 §5), real build: the user's own current discount, stated for the factor the rename separates.
+  it('RED 1b (Class 4) — the user\'s stated level for the renamed factor still reaches it: saved as theirs, from their own sentence', async () => {
+    const said = 'Our enterprise discount today is 8%.';
+    const c = structuredClone(FX.candidate) as Rec;
+    c.factors = (c.factors as Rec[]).map((f) => (f.label === 'Enterprise discount' ? { ...f, baseline_known: true, baseline_value: 8, provenance: 'explicit' } : f));
+    c.statements = [{ quote: said, subject: { kind: 'factor', label: 'Enterprise discount', to_label: null, factor_label: null }, field: 'level',
+      form: 'point', value: 8, low: null, high: null, unit: '%', qualifier: null, conditions: null, speaker: 'user' }];
+    const { r, g } = await build(c, `${FX.brief} ${said}`);
+    expect(r).toMatchObject({ ok: true });
+    const factor = (g.nodes as Rec[]).find((n) => n.kind === 'factor' && n.label === 'Enterprise discount level')!;
+    expect(factor.observed_state, JSON.stringify(factor)).toMatchObject({ raw_value: 8, source: 'brief_extraction' });
+  });
   it('12 (real build) — option, factor AND risk all "Enterprise discount": FAIL CLOSED AT REGISTRATION — nothing is saved, the refusal names why', async () => {
     const c = structuredClone(FX.candidate) as Rec;
     c.risks = [...(c.risks ?? []), { label: 'Enterprise discount', provenance: 'inferred' }];
@@ -101,6 +113,44 @@ describe('the pure rule', () => {
     expect(model.links[0]).toMatchObject({ from: 'Discount level', to: 'Monthly cloud bill' });
     expect((model.constraints[0] as Rec).metric).toBe('Discount level');
     expect(model.identities![0]!.factors).toEqual(['Discount level', 'Usage']);
+  });
+  // ⭐ CLASS 4 (PROMPT-INT STEP7 §5, CLASS4-RENAME-PROBE): the rename renamed the factor and its link, while the draft's statement
+  // subject and its question's concern kept naming "Discount", so they no longer pointed at the renamed quantity.
+  it('2b (Class 4) — what each statement and question is ABOUT is renamed too; a statement about the OPTION keeps the option\'s name', () => {
+    const statements = [
+      { quote: 'q1', subject: { kind: 'factor', label: 'Discount', to_label: null, factor_label: null }, field: 'level' },
+      { quote: 'q2', subject: { kind: 'link', label: 'Discount', to_label: 'Monthly cloud bill', factor_label: null }, field: 'effect' },
+      { quote: 'q3', subject: { kind: 'option', label: 'Discount', to_label: null, factor_label: 'Discount' }, field: 'level' },
+      { quote: 'q4', subject: { kind: 'factor', label: 'Usage', to_label: null, factor_label: null }, field: 'level' },
+    ];
+    const unknown_concerns = [
+      { unknown: 'How much does Discount cut the bill?', concerns: ['Discount \u2192 Monthly cloud bill'] },
+      { unknown: 'What is the Discount today?', concerns: ['Discount', 'Usage'] },
+      { unknown: 'How does usage move the bill?', concerns: ['Usage -> Monthly cloud bill'] },
+    ];
+    const { model } = keepOptionsAndQuantitiesApart(base({ statements, unknown_concerns } as never));
+    const m = model as unknown as { statements: Rec[]; unknown_concerns: Rec[] };
+    expect(m.statements.map((st) => st.subject)).toEqual([
+      { kind: 'factor', label: 'Discount level', to_label: null, factor_label: null },
+      { kind: 'link', label: 'Discount level', to_label: 'Monthly cloud bill', factor_label: null },
+      // The option keeps the user's words; what it sets follows the rename, as its intervention does.
+      { kind: 'option', label: 'Discount', to_label: null, factor_label: 'Discount level' },
+      { kind: 'factor', label: 'Usage', to_label: null, factor_label: null },
+    ]);
+    expect(m.statements.map((st) => [st.quote, st.field])).toEqual([['q1', 'level'], ['q2', 'effect'], ['q3', 'level'], ['q4', 'level']]);
+    expect(m.unknown_concerns).toEqual([
+      { unknown: 'How much does Discount cut the bill?', concerns: ['Discount level \u2192 Monthly cloud bill'] },
+      { unknown: 'What is the Discount today?', concerns: ['Discount level', 'Usage'] },
+      { unknown: 'How does usage move the bill?', concerns: ['Usage -> Monthly cloud bill'] },
+    ]);
+  });
+  it('CONTROL 2c — no rename: the statements and concerns come back as they came (the same object), and a draft without them gains neither', () => {
+    const statements = [{ quote: 'q', subject: { kind: 'factor', label: 'Usage', to_label: null, factor_label: null }, field: 'level' }];
+    const plain = base({ options: [{ label: 'Negotiate', provenance: 'explicit', interventions: [{ factor_label: 'Discount', value: 10, provenance: 'ai_proposed' }] }], statements } as never);
+    expect(keepOptionsAndQuantitiesApart(plain).model).toBe(plain);
+    const { model } = keepOptionsAndQuantitiesApart(base());
+    expect(model).not.toHaveProperty('statements');
+    expect(model).not.toHaveProperty('unknown_concerns');
   });
   it('3 — case and spacing do not hide a clash ("Enterprise  Discount" vs "enterprise discount")', () => {
     const c = base({ options: [{ label: 'Enterprise  Discount', provenance: 'explicit' }], factors: [{ label: 'enterprise discount', role: 'controllable', baseline_known: false, baseline_value: null, unit: '%', provenance: 'inferred' }], links: [{ from: 'enterprise discount', to: 'Monthly cloud bill', direction: 'negative', provenance: 'inferred' } as never], constraints: [], identities: [] });
