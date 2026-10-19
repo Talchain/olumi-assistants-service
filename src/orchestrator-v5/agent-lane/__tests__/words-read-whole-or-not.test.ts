@@ -105,7 +105,7 @@ describe('adjacency property: a number in words is credited only with its unit r
 /**
  * ⛔ THE VERIFIER READS THE SAME ELIGIBILITY (Codex #3438 R5 BLOCK: `figuresWritten` listed every amount in words with no span check,
  * so `userStated` verified 120 from "a hundred and twenty-odd hours" and "a hundred and twenty give or take five hours"). Its figure
- * list now goes through the one complete-span eligibility (`wordsAmountComplete`), in the statement's own unit. No phrase, parser or
+ * list now goes through the one complete-span eligibility (`amountComplete`), in the statement's own unit. No phrase, parser or
  * refusal rule: the same adjacency property, at the verifier, beside the held-unit and own-source positives.
  */
 describe('the verifier: the same complete-span eligibility as the one check', () => {
@@ -116,6 +116,7 @@ describe('the verifier: the same complete-span eligibility as the one check', ()
   it.each([
     ['CODEX R5 "-odd" after the amount', 'It takes a hundred and twenty-odd hours.', 120, 'hours'],
     ['CODEX R5 "give or take" after the amount', 'It takes a hundred and twenty give or take five hours.', 120, 'hours'],
+    ['CODEX R6 the tolerance itself', 'It takes a hundred and twenty give or take five hours.', 5, 'hours'],
     ['CODEX R5 "give or take", per week', 'Night shifts take forty-five give or take five hours per week.', 45, 'hours per week'],
     ['CODEX R5 "-odd", per week', 'Night shifts take forty-odd hours per week.', 40, 'hours per week'],
     ['another counted noun, words', 'Correction: forty-five nurses cover the night shifts.', 45, 'hours per week'],
@@ -160,5 +161,61 @@ describe('the verifier: the same complete-span eligibility as the one check', ()
       }
     }
     expect({ credited, refused }).toEqual({ credited: AMOUNTS.length * UNITS.length, refused: AMOUNTS.length * UNITS.length * X.length });
+  });
+});
+
+/**
+ * ⛔ ONE JOINED EXPRESSION IS NO STANDALONE VALUE (DL-3 class rule on Codex #3438 R6: "… twenty give or take five hours" credited 5 as
+ * the hours, and with engineers both 20 and 5). An amount joined, in one clause, to another that carries no unit of its own is a
+ * tolerance or an operand: both are refused at every consumer (the shared check, the binder, the verifier's figure list, the
+ * verifier). Generated: first operand (words, digits) × joining shape × second operand (words, digits) × unit. Controls: ranges,
+ * changes, separate counts, a year, a ratio and a new sentence keep their figures. SYNTHETIC wording.
+ */
+describe('a joined expression: neither operand is a standalone value', () => {
+  const FIRSTS: [string, number][] = [['twenty', 20], ['20', 20], ['a hundred and twenty', 120], ['120', 120]];
+  const SHAPES = [' give or take ', ', give or take ', ' give or take about ', ' plus or minus ', ' ± ', ' +/- ', ' or ', ' plus '];
+  const SECONDS: [string, number][] = [['five', 5], ['5', 5]];
+  const JOINED_UNITS: [string, string][] = [['hours', 'hours'], ['hours per week', 'hours'], ['engineers', 'engineers'], ['people', 'engineers']];
+  const subject = { quantity: 'Night shift load' };
+  const scope = { target: ['Night shift load'], others: ['Day shift load'] };
+  const credits = (text: string, value: number, unit: string): string[] => [
+    figureTheUserWrote(value, unit, text) ? 'one check' : '',
+    figureTheUserWroteFor(value, unit, text, scope) ? 'binder' : '',
+    figuresWritten(text, unit).some((f) => f.low === value && f.high === value) ? 'figure list' : '',
+    userStated({ quote: text, form: 'point', value, unit }, { now: text }, subject).origin === 'human' ? 'verifier' : '',
+  ].filter((c) => c !== '');
+  it('CODEX R6: "… twenty give or take five hours" credits neither 120 nor 5; with engineers neither 20 nor 5', () => {
+    expect(credits('It takes a hundred and twenty give or take five hours.', 5, 'hours')).toEqual([]);
+    expect(credits('It takes a hundred and twenty give or take five hours.', 120, 'hours')).toEqual([]);
+    expect(credits('We need twenty give or take five engineers.', 5, 'engineers')).toEqual([]);
+    expect(credits('We need twenty give or take five engineers.', 20, 'engineers')).toEqual([]);
+  });
+  it('generated: every operand of every joined shape is refused at all four consumers', () => {
+    let rows = 0;
+    for (const [first, a] of FIRSTS) for (const shape of SHAPES) for (const [second, b] of SECONDS) for (const [unit, noun] of JOINED_UNITS) {
+      const text = `The night shift load is ${first}${shape}${second} ${noun} this week.`;
+      for (const v of [a, b]) expect(credits(text, v, unit), `${v} ${unit} | ${text}`).toEqual([]);
+      rows += 1;
+    }
+    expect(rows).toBe(FIRSTS.length * SHAPES.length * SECONDS.length * JOINED_UNITS.length);
+  });
+  it('a count in words right before plain digits is one expression ("ten 5-hour shifts")', () => {
+    expect(credits('We run ten 5-hour shifts.', 5, 'hours')).toEqual([]);
+    expect(credits('We run 5-hour shifts.', 5, 'hours'), 'CONTROL no count before it').toContain('one check');
+  });
+  it.each([
+    ['a range is the range grammar\'s', 'Night shifts take 20 to 30 hours.', 30, 'hours'],
+    ['a change from one level to another', 'We will grow from 400 to 500 customers.', 400, 'customers'],
+    ['a change, its target', 'We will grow from 400 to 500 customers.', 500, 'customers'],
+    ['separate counts, each with its own noun', 'Hire two engineers or five analysts.', 5, 'analysts'],
+    ['separate counts in digits', 'We have 12 engineers and 5 designers.', 5, 'designers'],
+    ['a year before a count', 'In 2024 we had 400 customers.', 400, 'customers'],
+    ['a period after a target', 'We want to reach 500 customers in 6 months.', 500, 'customers'],
+    ['a ratio keeps its own grammar', 'Our satisfaction score is 4.2/5 today.', 4.2, 'points'],
+    ['a new sentence is never joined', 'The load is twenty. Give or take five hours of overtime is normal.', 5, 'hours'],
+    ['the first amount carries its unit', 'Night shifts take 40 hours, give or take 5 hours.', 40, 'hours'],
+    ['money carries its own unit', 'Yes, let\'s make that one £62 a month.', 62, 'GBP per month'],
+  ])('CONTROL %s: "%s" still credits %d', (_case, text, value, unit) => {
+    expect(figureTheUserWrote(value, unit, text), 'one check').toBe(true);
   });
 });

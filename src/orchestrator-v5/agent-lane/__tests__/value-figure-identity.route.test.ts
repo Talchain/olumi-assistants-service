@@ -176,3 +176,20 @@ describe("R5 independent value full-unit writes",()=>{
  if(write){expect(saved.unit).toBe(unit);expect(authorised(pressed!)).toEqual([expect.objectContaining({ok:true,mutated:true})]);}
  });
 });
+
+/** Codex R6 on #3433 @a3649f14 (held-out, adopted verbatim, minus its console capture): a person head is never a thing, a group or another unlisted head, and where the user's figure counts another thing the Agent is given the quantity-specific ask, never the generic refusal. */
+describe("R6 person and nonperson counted heads",()=>{it.each([["nurses", "nurses", true], ["nurses", "seats", false], ["nurses", "contractors", false], ["nurses", "tickets", false], ["nurses", "teams", false], ["nurses", "accounts", false], ["nurses", "shifts", false], ["nurses", "nurse teams", false], ["nurses", "contractor teams", false], ["nurses", "unknownwidgets", false], ["seats", "nurses", false], ["seats", "seats", true], ["seats", "contractors", true], ["seats", "tickets", false], ["seats", "teams", false], ["seats", "accounts", false], ["seats", "shifts", false], ["seats", "nurse teams", false], ["seats", "contractor teams", false], ["seats", "unknownwidgets", false], ["contractors", "nurses", false], ["contractors", "seats", true], ["contractors", "contractors", true], ["contractors", "tickets", false], ["contractors", "teams", false], ["contractors", "accounts", false], ["contractors", "shifts", false], ["contractors", "nurse teams", false], ["contractors", "contractor teams", false], ["contractors", "unknownwidgets", false], ["hires", "nurses", false], ["hires", "seats", true], ["hires", "contractors", true], ["hires", "tickets", false], ["hires", "teams", false], ["hires", "accounts", false], ["hires", "shifts", false], ["hires", "nurse teams", false], ["hires", "contractor teams", false], ["hires", "unknownwidgets", false], ["hires", "developers", true], ["nurses", "nurses per week", false], ["nurses per week", "nurses", false], ["nurses per week", "nurses per week", true], ["contractors per week", "tickets per week", false], ["hires per week", "contractors per week", true]]) ("%s <- %s; expected write %s",async(unit,noun,write)=>{
+ const {saved,pressed,made}=await valueTurn("Correction: existing team capacity is 70 "+noun+".","Existing team capacity",unit,"Additional specialist capacity",unit);
+ expect(saved.raw_value).toBe(write?70:80);
+ if(write){expect(saved.unit).toBe(unit);expect(authorised(pressed!)).toEqual([expect.objectContaining({ok:true,mutated:true})]);}
+ else {
+ expect(saved.unit).toBe(unit);
+ const sent=vi.mocked(fetch).mock.calls.map(([,init])=>JSON.parse(String((init as {body?:string}|undefined)?.body??'{}')) as Rec);
+ const outputs=sent.flatMap(req=>((req.input??[]) as Rec[]).filter(i=>i.type==='function_call_output').map(i=>JSON.parse(String(i.output)) as Rec));
+ const asks=outputs.filter(o=>'not_this_factors_figure' in o);
+ expect(asks,JSON.stringify(outputs)).toHaveLength(1);
+ expect(asks[0].not_this_factors_figure).toEqual([{label:'Existing team capacity',value:70,written_for:[]}]);
+ expect(asks[0].not_this_factors_figure_note).toBe('Nothing was proposed for these: the user wrote the figure, but their words give it to another quantity (named in written_for), write it in another unit, or turn it down for this one. Never record it as this factor’s value. Ask the user which they mean, naming this factor and, when written_for names one, that quantity too, and quote their words; never just refuse.');
+ expect(made).toEqual(expect.objectContaining({ok:false,refusal:'nothing_to_adopt'}));
+}
+});});

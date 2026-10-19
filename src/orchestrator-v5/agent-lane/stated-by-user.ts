@@ -32,7 +32,7 @@
  */
 import { requestWasTyped } from '../../cee/provenance/provenance-of.js';
 import { launchWindowOf } from '../goal-target/goal-target-basis.js';
-import { findStatedAmounts, findStatedRanges, readCurrencyUnitWithQualifiers, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
+import { findStatedAmounts, findStatedRanges, joinedAsRange, readCurrencyUnitWithQualifiers, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
 import { findLinkEffectAmounts, hasLinkEffectRange, linkEffectSourceLevels } from './link-effect-figures.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
 import { CARDINAL_AMOUNT_SOURCE, CARDINAL_FRACTION_WORDS, CARDINAL_HUNDRED_WORD, CARDINAL_SCALE_MULTIPLIERS, CARDINAL_WORD_VALUES, parseCardinalAmount } from '../../utils/cardinal-words.js';
@@ -74,32 +74,83 @@ export function amountsWrittenIn(text: string | null | undefined): readonly Writ
  *  · A count followed by its COUNTED NOUN PHRASE (`countedPhraseAfter`) counts THAT: where the phrase names something and no word of
  *    the held unit, it is another quantity, in digits as in words ("45 nurses" is no figure of hours, "300 Pro seats" none of £/month;
  *    DL-3 on #3429). A headcount unit counts any phrase; a figure with no noun after it ("45 now", "all 6 on a prototype") reads as before.
- *  · A number in words is credited only as a COMPLETE SPAN (`wordsAmountComplete`): its quantity's word right after it.
+ *  · An amount is credited only as a standalone, complete span (`amountComplete`): never part of a joined expression; in words, its
+ *    quantity's word right after it.
  */
 export function amountTheUserWrote(a: WrittenAmount, value: number, unit: unknown, text: string, names: readonly string[] = []): boolean {
   const end = a.index + a.matchedText.length;
   const counted = countedPhraseAfter(text, end);
   const held = namingWords(unit), said = namingWords(counted);
-  // An amount in words reads the same rule (`countsHeldUnit`) inside its complete-span eligibility (`wordsAmountComplete`).
+  // An amount in words reads the same rule (`countsHeldUnit`) inside the one eligibility (`amountComplete`).
   const another = a.kind === 'plain' && said.length > 0 && !countsHeldUnit(said, held);
-  return amountIs(a, value, unit, unitPhraseFamily(unit), text) && !another && wordsAmountComplete(a, unit, text)
+  return amountIs(a, value, unit, unitPhraseFamily(unit), text) && !another && amountComplete(a, unit, text)
     && !inAnotherSpeakersWords(text, a, names);
 }
 
 /**
- * ⛔ THE ONE COMPLETE-SPAN ELIGIBILITY of an amount in words (DL-3 decision outbox/DL-DECISION-COMPLETE-SPAN on Codex #3438 R4; R5:
- * the verifier's figure list read words past it, so "… and twenty-odd hours" and "… and twenty give or take five hours" credited
- * 120). Its quantity's noun phrase starts IMMEDIATELY after it (`countedPhraseAfter`: a space, no punctuation, cut at a preposition
- * or conjunction), names something ("one OF them", "the one WHO", "forty-five now" and "not twelve." are no figures), holds no other
- * number word ("forty-five extra FIVE hours") and, where `unit` has words, names the held unit (a headcount unit counts any noun).
- * Anything else between the number and its unit, or no unit at all, and it is not credited: an under-claim, never a prefix value.
- * The one check and the verifier's figure list (`figuresWritten`) both read it. Digits keep their own grammar.
+ * ⛔ THE ONE ELIGIBILITY of a written amount (DL-3 decisions on Codex #3438 R4–R6), read by the one check, the verifier's figure list
+ * (`figuresWritten`) and its speaker check. An amount is credited only as a standalone, complete span:
+ *  · never one part of a JOINED EXPRESSION, in digits or words (`joinedToAnother`; R6: "… twenty give or take five hours" credited 5
+ *    as the hours, a tolerance, never the quantity's value);
+ *  · a number in words: its quantity's noun phrase starts IMMEDIATELY after it (`countedPhraseAfter`: a space, no punctuation, cut at a
+ *    preposition or conjunction), names something ("one OF them", "the one WHO", "forty-five now" and "not twelve." are no figures),
+ *    holds no other number word ("forty-five extra FIVE hours") and, where `unit` has words, names the held unit (a headcount unit
+ *    counts any noun; R5: "… and twenty-odd hours" credited 120).
+ * Anything else, and it is not credited: an under-claim, never a prefix value or an operand. Digits otherwise keep their own grammar.
  */
-export function wordsAmountComplete(a: WrittenAmount, unit: unknown, text: string): boolean {
+export function amountComplete(a: WrittenAmount, unit: unknown, text: string): boolean {
+  return !joinedToAnother(a, text) && wordsSpanComplete(a, unit, text);
+}
+
+/** The words half of the one eligibility (`amountComplete`): an amount in words is a complete span naming the held unit. Digits: true. */
+export function wordsSpanComplete(a: WrittenAmount, unit: unknown, text: string): boolean {
   if (a.kind !== 'words') return true;
   const counted = countedPhraseAfter(text, a.index + a.matchedText.length);
   const said = namingWords(counted), held = namingWords(unit);
   return said.length > 0 && !counted.split(/\s+/).some((w) => /\d/.test(w) || COUNTING_WORDS.has(w.toLowerCase())) && countsHeldUnit(said, held);
+}
+
+/**
+ * Whether `a` and the amount right before or after it, in one clause, are ONE JOINED EXPRESSION (DL-3 class rule on Codex #3438 R6):
+ * the first carries no unit of its own and the words between them only join the two: nothing but joining words ("20 plus or minus
+ * 5", "20 ± 5", "5 or 6"), or one word that is no unit followed by a joining word and more words ("twenty give or take five"). Both
+ * are refused. Never joined: a range in digits (`joinedAsRange`, the range grammar's: "10 to 30", "between 10 and 30", "from 400 to 500"), an
+ * amount with its own unit (money, a percentage: "that one £62"; or a unit word after the first: "two engineers or five analysts"),
+ * or across a sentence.
+ */
+function joinedToAnother(a: WrittenAmount, text: string): boolean {
+  // The touching rule's other part (`touchesAnotherNumber`): a number in words joined to plain digits ("ten 5-hour shifts", "twenty
+  // plus 5", "3 and a half") is one expression. The reader refuses the words, and these digits go with them.
+  if (a.kind === 'plain' && (NUMBER_WORD_BEFORE.test(text.slice(0, a.index)) || NUMBER_WORD_AFTER.test(text.slice(a.index + a.matchedText.length)))) return true;
+  const all = writtenAmountsInOrder(text);
+  const i = all.findIndex((x) => x.index === a.index && x.matchedText.length === a.matchedText.length);
+  return i !== -1 && ((i > 0 && joinedPair(all[i - 1]!, a, text)) || (i + 1 < all.length && joinedPair(a, all[i + 1]!, text)));
+}
+
+function joinedPair(p: WrittenAmount, b: WrittenAmount, text: string): boolean {
+  const end = p.index + p.matchedText.length;
+  const between = text.slice(end, b.index);
+  const bare = (x: WrittenAmount): boolean => x.kind === 'plain' || x.kind === 'words';
+  if (end > b.index || /[.;:!?()\n]/.test(between) || !bare(p) || !bare(b)) return false;
+  const asStated = (x: WrittenAmount): StatedAmount => ({ kind: 'plain', magnitude: x.magnitude, index: x.index, matchedText: x.matchedText });
+  // A range in digits keeps its own grammar. A range with an end in words is the range class's to read as its two ends (#3445); until
+  // then neither end is a standalone value ("two to three users": "three users" is a complete span, never the user's 3 alone).
+  if (joinedAsRange(text, asStated(p), asStated(b))) return p.kind === 'words' || b.kind === 'words';
+  const words = between.match(/[A-Za-z][A-Za-z-]*/g) ?? [];
+  const joins = (w: string): boolean => JOINING_WORDS.has(w.toLowerCase());
+  // Nothing between them but joining words, or a plus-minus sign: "5 or 6", "20 plus or minus 5", "20 ± 5", "20 +/- 5". Any other
+  // sign keeps its own grammar (a ratio "4.2/5", a product "2×2", a sum "0.45+0.55").
+  if (words.every(joins) && /^(?:±|\+\/?-)?$/.test(between.replace(/[A-Za-z]+|\s+/g, ''))) return true;
+  const [first, second, ...rest] = words;
+  return first !== undefined && second !== undefined && joins(second) && namingWords(first).length > 0 && unitFamilyOf(first) === null
+    && rest.length > 0 && namingWords(rest.join(' ')).length > 0 && !rest.some((w) => PHRASE_BREAK.has(w.toLowerCase()));
+}
+
+/** Every amount `text` writes, in order (one reading per text: the eligibility asks it once per amount). */
+let amountsMemo: { readonly text: string; readonly amounts: readonly WrittenAmount[] } | undefined;
+function writtenAmountsInOrder(text: string): readonly WrittenAmount[] {
+  if (amountsMemo?.text !== text) amountsMemo = { text, amounts: [...amountsWrittenIn(text)].sort((x, y) => x.index - y.index) };
+  return amountsMemo.amounts;
 }
 
 /**
@@ -391,6 +442,8 @@ const JOIN = `[\\s,\\u2013\\u2014-]+(?:(?:and|plus|minus|point|times|of)[\\s,\\u
 const WORD_END = `(?=$|[^\\p{L}\\d-]|-(?:${NUMBER_WORDS}|and|an?)(?![\\p{L}]))`;
 const NUMBER_AFTER = new RegExp(`^${JOIN}(?:(?:${NUMBER_WORDS})${WORD_END}|\\d)`, 'iu');
 const NUMBER_BEFORE = new RegExp(`(?:(?<![\\p{L}\\d])(?:${NUMBER_WORDS_BEFORE})|\\d)${JOIN}$`, 'iu');
+const NUMBER_WORD_BEFORE = new RegExp(`(?<![\\p{L}\\d])(?:${NUMBER_WORDS_BEFORE})${JOIN}$`, 'iu');
+const NUMBER_WORD_AFTER = new RegExp(`^${JOIN}(?:${NUMBER_WORDS})${WORD_END}`, 'iu');
 /** Whether the words at [start, end) touch another number word or digit through a join: they are part of a longer number. */
 function touchesAnotherNumber(text: string, start: number, end: number): boolean {
   return NUMBER_AFTER.test(text.slice(end)) || NUMBER_BEFORE.test(text.slice(0, start));
@@ -429,9 +482,14 @@ function namingWords(text: unknown): string[] {
 }
 
 /** Words that end the counted noun phrase: what follows them names another quantity ("three engineers FOR enterprise customers"). */
+/**
+ * The words of the phrase breaks that JOIN two amounts into one expression: the touching rule's own (`JOIN`: "and", "plus", "minus",
+ * "times", "of") and "or".
+ */
+const JOINING_WORDS = new Set(['and', 'or', 'plus', 'minus', 'times', 'of']);
 const PHRASE_BREAK = new Set([
-  'for', 'of', 'to', 'in', 'on', 'at', 'with', 'by', 'from', 'into', 'across', 'over', 'under', 'within', 'per', 'than',
-  'and', 'or', 'but', 'while', 'which', 'that', 'who', 'as', 'so', 'if', 'when', 'before', 'after', 'because', 'plus', 'minus', 'times',
+  'for', 'to', 'in', 'on', 'at', 'with', 'by', 'from', 'into', 'across', 'over', 'under', 'within', 'per', 'than',
+  'but', 'while', 'which', 'that', 'who', 'as', 'so', 'if', 'when', 'before', 'after', 'because', ...JOINING_WORDS,
 ]);
 
 /** The COUNTED NOUN PHRASE right after an amount ending at `end`: up to three words, to the first preposition or conjunction. */

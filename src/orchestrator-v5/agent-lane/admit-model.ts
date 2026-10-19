@@ -80,7 +80,7 @@ import {
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
 import { authorshipOf, hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
-import { amountsWrittenIn, figureSource, goalTargetStatements, linkEffectRangeEnd, linkEffectRangeInOtherUnit, linkEffectStatedRange, sourceMapOf, subjectSource, type FigureSource, type StatedWholeRangeOfLink } from './construction-source-map.js';
+import { figureSource, figuresWritten, goalTargetStatements, linkEffectRangeEnd, linkEffectRangeInOtherUnit, linkEffectStatedRange, sourceMapOf, subjectSource, type FigureSource, type StatedWholeRangeOfLink } from './construction-source-map.js';
 import { retainUnsizedOlumiRisks, UNSIZED_OLUMI_RISK_REASON, unsizedOlumiRiskIds } from './unsized-risk.js';
 import { carriesStatements, levelQuotedByBrief, recordedRawLevelQuote, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
@@ -4168,10 +4168,8 @@ function admitOnce(
         // never auto-bound: no target is written, and it is said, so the goal-target card can offer it as Olumi's reading. A figure
         // the user never wrote ("break even" read as 0) is Olumi's reading, as before. A recorded pre-SYSTEM-2 draft is as before.
         const boundStatements = typeof brief === 'string' && typeof raw === 'number' ? goalTargetStatements(model, brief, raw) : undefined;
-        // Every amount the brief writes counts here, complete or not (`amountsWrittenIn`): this guard withholds, so reading more
-        // figures only withholds more (a budget in words with no unit after it stays never auto-bound). Never a credit of the figure.
         const unbound = model.goal.target_stated !== false && typeof raw === 'number' && Number.isFinite(raw) && boundStatements?.length === 0
-          && amountsWrittenIn(brief ?? '').some((a) => a.magnitude === Math.abs(raw));
+          && figuresWritten(brief ?? '').some((f) => f.low === Math.abs(raw));
         if (unbound) {
           loss.push({ field_path: `nodes[${slugId(model.goal.metric)}].goal_target_unbound`,
             before: { value: raw, unit: model.goal.unit ?? null }, after: null, severity: 'warn',

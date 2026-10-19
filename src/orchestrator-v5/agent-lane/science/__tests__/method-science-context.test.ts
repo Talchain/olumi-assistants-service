@@ -168,6 +168,82 @@ describe('DSK-P-001 on the pre-mortem', () => {
     // Only the risk is left to rest a story on.
     expect(ctx.supplied_items.map((i) => i.kind)).toEqual(['risk']);
   });
+
+  // AIE 19 Oct AMEND (prompt/AIE-PREMORTEM-HUMAN-SOURCE-GROUNDING-20261019-v1.json). RED at base: the union below is empty, so the
+  // items were [] and the turn refused `no_grounded_item` for a model the user sized. With nothing else to ground it, the plan's
+  // own USER-sized links ground hypothetical, qualitative stories: story only, never off-plan, and never a citation.
+  /** ROW 6's all-yours D3 with its risk removed (CONSTRUCTED), plus ONE user-sized link only on Phased's path. */
+  const userSizedOnly = (over: Partial<MethodScienceSignals> = {}): MethodScienceSignals => ({
+    ...D3,
+    'model.risk_ids': [],
+    'model.goal_path_links': [
+      ...D3['model.goal_path_links'].map((l) => ({ ...l, link_sizing: 'user' as const })),
+      { link_id: 'phased_only_factor->monthly_spend', from_label: 'Phased only', to_label: 'Monthly spend',
+        link_sizing: 'user', option_ids: ['phased_gcp_migration'], goal_distance: 0 },
+    ],
+    'model.goal_path_factors': D3['model.goal_path_factors'].map((f) => ({ ...f, value_authorship: 'yours' as const })),
+    ...over,
+  });
+  const SWITCH_USER_LINKS = [
+    'monthly_cloud_overspend_during_migration->monthly_spend',
+    'monthly_cloud_savings->monthly_spend',
+    'gcp_workload_share->monthly_cloud_overspend_during_migration',
+    'gcp_workload_share->monthly_cloud_savings',
+    'migration_preparation_effort->monthly_cloud_overspend_during_migration',
+  ];
+
+  it('ROW 6b CONSTRUCTED (every plan-path item the user\'s, nothing else): the plan\'s own user-sized links ground stories, story only; plan and citation unchanged; nothing written', () => {
+    const signals = userSizedOnly();
+    const input = premortem({ signals });
+    const before = structuredClone(input);
+    const ctx = methodScienceContext(input);
+    // Nearest the goal first, by identity; the Phased-only link is another option's, never this plan's.
+    expect(ctx.supplied_items.map((i) => i.id)).toEqual(SWITCH_USER_LINKS);
+    expect(ctx.supplied_items.every((i) => i.kind === 'link' && i.card === null)).toBe(true);
+    // Selection unchanged: the same licensed leader as the served D3 turn.
+    expect(ctx.plan).toEqual(methodScienceContext(premortem()).plan);
+    // Citation unchanged: a human-sized link is no evidence gap, so no DSK-P-001 citation or badge is manufactured.
+    expect(ctx.dsk).toBeNull();
+    expect(ctx.not_cited).toBe('no_evidence_gap');
+    // No write: the input (signals and graph) is untouched.
+    expect(input).toEqual(before);
+  });
+
+  it('ROW 6e PAIR: only a HUMAN-sized link grounds a story; an unmarked link and an accepted Olumi estimate never do', () => {
+    const notHuman = new Map<string, 'unmarked' | 'olumi_accepted'>([
+      ['monthly_cloud_savings->monthly_spend', 'unmarked'],
+      ['gcp_workload_share->monthly_cloud_savings', 'olumi_accepted'],
+    ]);
+    const signals = userSizedOnly();
+    const mixed = methodScienceContext(premortem({ signals: {
+      ...signals,
+      'model.goal_path_links': signals['model.goal_path_links'].map((l) => ({ ...l, link_sizing: notHuman.get(l.link_id) ?? l.link_sizing })),
+    } }));
+    expect(mixed.supplied_items.map((i) => i.id)).toEqual(SWITCH_USER_LINKS.filter((id) => !notHuman.has(id)));
+    expect(mixed.dsk).toBeNull();
+  });
+
+  it('ROW 6c PAIR (decision level): an unlicensed current decision grounds every own option\'s user-sized links; a stale Run grounds none', () => {
+    const unlicensed = { 'run.leader_licensed': false, 'run.leader_option_id': null } as const;
+    const current = methodScienceContext(premortem({ signals: userSizedOnly(unlicensed), decision_level: true }));
+    expect(current.plan).toBeNull();
+    expect(current.decision_level).toBe(true);
+    expect(current.supplied_items.map((i) => i.id).sort()).toEqual([...SWITCH_USER_LINKS, 'phased_only_factor->monthly_spend'].sort());
+    expect(current.supplied_items.every((i) => i.kind === 'link' && i.card === null)).toBe(true);
+    expect(current.dsk).toBeNull();
+    // CONTROL: the decision keeps its current-Run boundary.
+    const stale = methodScienceContext(premortem({
+      signals: userSizedOnly({ ...unlicensed, 'run.kind': 'complete_stale' }), decision_level: true,
+    }));
+    expect(stale.supplied_items).toEqual([]);
+  });
+
+  it('ROW 6d CONTROL: an Olumi-estimated or unmarked plan-path link keeps the original items, with no user-link fallback appended', () => {
+    const ctx = methodScienceContext(premortem({ signals: { ...D3, 'model.risk_ids': [] } }));
+    const reference = FIXTURE.premortem_reference.supplied_items as { kind: string }[];
+    expect(ctx.supplied_items).toEqual(reference.filter((i) => i.kind !== 'risk'));
+    expect(ctx.dsk?.protocol_id).toBe('DSK-P-001');
+  });
 });
 
 describe('items bind by IDENTITY to the plan\'s path', () => {

@@ -7,10 +7,11 @@ import { checkMethodTurn } from '../../../guidance/method-turn-check.js';
 import { POLICY } from '../../../guidance/policy.js';
 import type { MethodInputs, MethodTurnId } from '../../../guidance/types.js';
 import { cardCallFor, fallbackReply, methodDirective, methodTurnForReadback, planPickChipId, PREMORTEM_PRESS_ID,
-  settleMethodTurn, type MethodReadback, type RunMethodTurn } from '../../method-turn.js';
+  settleMethodTurn, type MethodReadback, type MethodTurn, type RunMethodTurn } from '../../method-turn.js';
 import type { SuppliedItem } from '../../../science/method-science-context.js';
 import { capture, draftFor, readback, requireRun, turn } from './w9c-rows.js';
 import { withApprovedMethodWords } from './approved-method-words.js';
+import { assertUserLinkStories } from './user-link-stories.js';
 
 const load = (path: string) => JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8'));
 const base = load('../fixtures/w9c/r2-base-controls.json');
@@ -175,6 +176,14 @@ for (const name of ['w9b-2', 'w9b-3', 'C', 'A-Q-D1-BUILD', 'draw2']) {
       // Science 393023 LICENCE (a)/(b), 7 Oct: C's option-scoped turns also gain their newly unsized path link; all other fields stay pinned.
       const original = name === 'C' ? reclassifiedCPlan(recorded, id) : recorded;
       const scoped = methodTurnForReadback(planPickChipId(id), rb);
+      // ⭐ RE-RULED (AIE 19 Oct AMEND): a pick recorded as "no grounded item" (its path only the user sized) now grounds
+      // story-only stories on its own user-sized links; every other recorded pick stays byte-pinned.
+      const recordedAs = original as MethodTurn | null;
+      if (recordedAs?.kind === 'unavailable' && recordedAs.reason === 'no_grounded_item') {
+        const out = assertUserLinkStories(scoped, rb.graph as never);
+        assert.equal(out.context.plan?.option_id, id, `${name} option ${id}`);
+        continue;
+      }
       assert.equal(JSON.stringify(scoped), JSON.stringify(withApprovedMethodWords(original)), `${name} option ${id}`);
       if (original?.kind !== 'run') continue;
       const expected = original.context.supplied_items.filter(i => (i.kind === 'factor' || i.kind === 'link')
