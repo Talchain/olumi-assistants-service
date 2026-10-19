@@ -3863,9 +3863,11 @@ function retainEventContextForReview(model: AdmittedModel, candidate: CandidateM
 function statedRangeOtherUnitEntry(l: CandidateLink, range: { readonly low: number; readonly high: number; readonly quote: string },
   source: MagnitudeNode, target: MagnitudeNode): RepairEntry {
   const said = range.quote.trim();
-  // The AIE's words (prompt/AIE-UNIT-REFERENCE-WORDING-20261017-v1.json, 16:04Z): never "cannot be converted", never the user's figure.
-  const reason = `"${source.label}" → "${target.label}": "${said}", as stated in the brief. Olumi has not converted this range into `
-    + `"${naturalAmountUnitOf(target)}" for this effect. The model currently holds a separate provisional Olumi estimate, not the stated range.`;
+  // ⛔ SAID AS WHAT IS HELD (DL-3 on C5's rate diagnosis; the AIE's exact words, prompt/AIE-RATE-PLACEHOLDER-WORDING-20261019-v1.json):
+  // the set-aside size leaves the link on its placeholder strength (`olumi_placeholder`), never "a provisional Olumi estimate". Said only
+  // on this branch (the range set aside, the effect still unsized); a link the binder sizes from the user's sentence never reaches it.
+  const reason = `"${source.label}" → "${target.label}": "${said}", as stated in the brief. The stated range has not been applied to this `
+    + 'effect. The link still uses an unsupported starting strength. A chance that depends on this strength is not yet supported.';
   return { code: REPAIR_CODES.NORMALISE_STRENGTH_RANGE, layer: 'cee', field_path: `edges[${l.from}::${l.to}].stated_range_other_unit`,
     before: { low: range.low, high: range.high, effect_amount: l.effect_amount ?? null }, after: null, reason, severity: 'warn' } as RepairEntry;
 }
