@@ -38,6 +38,17 @@ import { goalChanceWithheldForAgent } from '../../../agent-lane/goal-chance-with
 import minimalFixture from '../../../../../tests/fixtures/plot/v2-run-golden-minimal.json';
 import { toTypedRunRows } from '../../../runs/typed-run-rows.js';
 
+/**
+ * ⭐ STEP 8 (AIE `point_uncertainty` 564fe768): a chance resting on a user's size whose spread nobody stated is withheld
+ * (`run-analysis-unsupported-spread.test.ts` pins that rule, its words and every surface). This file tests
+ * the Run's readback of Olumi's settings, not that rule, so the Run's spread selection is held empty here; the rest of the support walk runs as served.
+ */
+vi.mock('../../../agent-lane/goal-certainty.js', async (original) => {
+  const actual = await original<typeof import('../../../agent-lane/goal-certainty.js')>();
+  return { ...actual, chanceSupportGoalPaths: (...args: Parameters<typeof actual.chanceSupportGoalPaths>) =>
+    ({ ...actual.chanceSupportGoalPaths(...args), unsupportedSpread: [] }) };
+});
+
 type Rec = Record<string, any>;
 
 const SCENARIO = 'bc0c0c0c-0c0c-4c0c-8c0c-0c0c0c0c0c0c';
