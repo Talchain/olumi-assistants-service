@@ -118,7 +118,10 @@ describe('a retry RECOVERS the original result', () => {
     expect(retry.proposal_id).toBe(prop.proposal_id);
     // The ORIGINAL receipt, not a fresh one and not an empty one.
     expect(retry.receipts).toEqual(first.receipts);
-    expect(String(retry.detail)).toMatch(/saved as version 2/);
+    // The receipt above carries version 2. A memory replay has no read-back of the model, so its words never claim "saved"
+    // (Codex, #3453/#3456): the version travels in `receipts`, not in a saved claim.
+    expect(retry.saved_state_confirmed).not.toBe(true);
+    expect(String(retry.detail)).toBe('Nothing was written again. Check the current model to confirm whether this change is saved.');
     // Contrast control: exactly ONE write reached the product.
     expect(writes).toHaveLength(1);
   });
@@ -130,7 +133,9 @@ describe('honest when there is no receipt', () => {
     expect(first.ok).toBe(true);
     expect(first.receipts).toEqual([]);
     expect(retry.receipts).toEqual([]);
-    expect(String(retry.detail)).toMatch(/No saved version was recorded/);
+    // No version is invented: none in the receipts, none in the words (Codex, #3453/#3456: no saved claim without a read-back).
+    expect(String(retry.detail)).toBe('Nothing was written again. Check the current model to confirm whether this change is saved.');
+    expect(String(retry.detail)).not.toMatch(/version \d/);
   });
 
   it('flags a receipt that arrived malformed instead of swallowing or throwing', async () => {
