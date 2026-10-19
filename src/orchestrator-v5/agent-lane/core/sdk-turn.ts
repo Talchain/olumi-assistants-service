@@ -25,14 +25,15 @@
  * No local session, no previous_response_id and no transcript of our own: the Conversation is the one state strategy. A store
  * that cannot hold the id stops the turn (`CoreStateUnavailableError`): never a Conversation the next turn could not find.
  */
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
-  Agent, MaxTurnsExceededError, OpenAIResponsesModel, run, setTracingDisabled, startOpenAIConversationsSession, tool, ToolCallError,
-  withTrace, type AgentInputItem,
+  Agent, extractAllTextOutput, MaxTurnsExceededError, OpenAIResponsesModel, run, RunState, setTracingDisabled,
+  startOpenAIConversationsSession, tool, ToolCallError, withTrace, type AgentInputItem, type RunToolApprovalItem, type Tool,
 } from '@openai/agents';
 import { getRuntimeEnv } from '../../../config/env-resolver.js';
 import { ledgeredAgentsClient } from '../../../adapters/llm/openai-agents-client.js';
 import { log } from '../../../utils/telemetry.js';
+import type { OpenAiPausedRun } from '../../session/store.js';
 import { agentRequestIdentity } from '../runtime/prompt-identity.js';
 import { dispatchTool, toolsFor, type AgentCapabilities, type AgentLaneMode, type AgentToolContext, type ToolResult } from '../runtime/agent-tools.js';
 import type { AgentTurnResult } from '../runtime/agent-loop.js';
@@ -63,7 +64,7 @@ if (getRuntimeEnv() === 'test') setTracingDisabled(true);
  */
 export class CoreStateUnavailableError extends Error {
   readonly code = 'CORE_STATE_UNAVAILABLE';
-  constructor(readonly reason: 'store_cannot_hold_id' | 'id_not_saved' | 'store_unreadable', cause?: unknown) {
+  constructor(readonly reason: 'store_cannot_hold_id' | 'id_not_saved' | 'store_unreadable' | 'pause_not_resumable', cause?: unknown) {
     super(`core conversation state unavailable: ${reason}`, cause === undefined ? undefined : { cause });
     this.name = 'CoreStateUnavailableError';
   }
@@ -75,6 +76,24 @@ export interface ConversationIdStore {
   /** Save `id` only if the scenario has none (one conditional write); returns the scenario's id after it (a race's winner). */
   claim(scenarioId: string, id: string): Promise<string | null | undefined>;
 }
+
+/**
+ * Where the scenario's ONE run paused for the person's approval is kept (`scenarios.openai_paused_run`). A tool with
+ * `needsApproval` pauses the SDK run; its `RunState` is saved here, and the press that answers the card resumes that same
+ * state. `take` is one conditional write, so a duplicate press finds nothing to resume and nothing is applied twice.
+ */
+export interface PausedRunStore {
+  read(scenarioId: string): Promise<OpenAiPausedRun | null | undefined>;
+  save(scenarioId: string, run: OpenAiPausedRun): Promise<boolean | undefined>;
+  take(scenarioId: string, pauseId: string): Promise<boolean | undefined>;
+}
+
+/** What the model is told when the person declines the paused change on its card. */
+export const PAUSE_DECLINED = 'Not applied: the person declined this change on its card. Nothing was changed.';
+/** What the model is told when the person writes instead of answering the card; their new message follows it. */
+export const PAUSE_SUPERSEDED = 'Not applied: the person has not approved this change; they wrote a new message instead, which follows. Nothing was changed.';
+/** What the model is told when the pause itself could not be kept; it ends this turn's run with nothing applied. */
+export const PAUSE_NOT_KEPT = 'Not applied: Olumi could not hold this change for the person\'s approval. Nothing was changed; say so, and that they can ask again.';
 
 /**
  * The scenario's ONE Conversation, read from the store on every turn (no process copy): the saved one, else a new one
@@ -94,6 +113,17 @@ async function scenarioConversation(scenarioId: string, store: ConversationIdSto
   // A concurrent first turn saved its own Conversation first: continue that one (ours is left unused).
   return { id: winner, created: winner === created };
 }
+
+const callIdOf = (item: RunToolApprovalItem): string | undefined => {
+  const id = (item.rawItem as { callId?: unknown }).callId;
+  return typeof id === 'string' ? id : undefined;
+};
+const argsOf = (item: RunToolApprovalItem): Record<string, unknown> => {
+  try {
+    const parsed: unknown = JSON.parse(item.arguments ?? '{}');
+    return parsed !== null && typeof parsed === 'object' ? parsed as Record<string, unknown> : {};
+  } catch { return {}; }
+};
 
 /**
  * The JSON schema object a function tool declares, sent as the existing loop sends it: NOT strict (the SDK's
@@ -115,6 +145,14 @@ export interface CoreTurnInput {
   readonly userId: string | null;
   /** Where the scenario's Conversation id is saved (the session store); absent → the turn stops (CoreStateUnavailableError). */
   readonly conversationStore?: ConversationIdStore;
+  /** Where a run paused for approval is kept; absent → a tool that needs approval ends the run with nothing applied. */
+  readonly pausedRunStore?: PausedRunStore;
+  /** The person's press on the card of the paused run's proposal. Absent = a typed turn (any paused run is declined first). */
+  readonly press?: { readonly decision: 'approve' | 'decline'; readonly proposal_id: string };
+  /** The agent's tools (the typed adapters). Absent → the existing capabilities, declared with their JSON schemas. */
+  readonly tools?: readonly Tool[];
+  /** The model revision and selected Run this turn began on, carried on the SDK trace with the prompt, model and Conversation. */
+  readonly traceMeta?: { readonly revision?: string; readonly run_id?: string };
   readonly signal?: AbortSignal;
   readonly now?: () => number;
 }
@@ -128,6 +166,10 @@ export interface CoreTurnSdk {
   /** This turn created the Conversation (the scenario's first `core` turn, or the first since its id was lost). */
   readonly conversation_created: boolean;
   readonly compact_threshold: number;
+  /** This turn's run paused for the person's approval on this proposal's card (its state saved on the scenario). */
+  readonly paused?: { readonly pause_id: string; readonly proposal_id: string | null; readonly tool: string };
+  /** This turn resumed the scenario's paused run, with the person's answer. */
+  readonly resumed?: { readonly pause_id: string; readonly answer: 'approved' | 'declined' | 'superseded' };
 }
 
 /** One ordinary `core` turn: the agent, its tools and its memory, run by the SDK. Returns the loop's result shape. */
@@ -182,7 +224,7 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
     return JSON.stringify(runFactsContext(modelFacingToolResult(name, result)).facts);
   };
 
-  const tools = toolsFor(input.mode).filter((def) => !withheld.has(def.name)).map((def) => tool({
+  const tools = input.tools ?? toolsFor(input.mode).filter((def) => !withheld.has(def.name)).map((def) => tool({
     name: def.name,
     description: def.description,
     parameters: def.parameters as ToolParameters,
@@ -205,7 +247,7 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
       // Native server-side compaction of the Conversation as it grows: no transcript trim of our own.
       contextManagement: [{ type: 'compaction', compactThreshold: CORE_COMPACT_THRESHOLD }],
     },
-    tools,
+    tools: [...tools],
   });
 
   /**
@@ -220,8 +262,33 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
   }).map(turnContextText).filter((t) => t !== '');
   const conversation = await scenarioConversation(input.ctx.scenario_id, input.conversationStore, () => startOpenAIConversationsSession(client));
   const brief = typeof input.briefText === 'string' ? input.briefText.trim() : '';
-  const turnInput: string | AgentInputItem[] = conversation.created && brief !== '' && brief !== input.message.trim()
+  let turnInput: string | AgentInputItem[] | RunState<unknown, Agent> = conversation.created && brief !== '' && brief !== input.message.trim()
     ? [{ role: 'user', content: `${BRIEF_LABEL}\n${brief}` }, { role: 'user', content: input.message }] : input.message;
+
+  /**
+   * A run paused for approval is answered before anything else, from its own saved state (the Conversation holds its tool
+   * call and needs its answer first): a press on its card approves or declines it; a typed message declines it, and the
+   * message goes to the model right after that answer, so the turn still has ONE reply.
+   */
+  let carried: string | undefined;
+  let resumed: CoreTurnSdk['resumed'];
+  const held = await input.pausedRunStore?.read(input.ctx.scenario_id);
+  if (held != null) {
+    if ((await input.pausedRunStore!.take(input.ctx.scenario_id, held.pause_id)) !== true) {
+      throw new CoreStateUnavailableError('pause_not_resumable');
+    }
+    const state = await RunState.fromString(agent, held.state);
+    const item = state.getInterruptions().find((i) => callIdOf(i) === held.call_id);
+    if (item === undefined) throw new CoreStateUnavailableError('pause_not_resumable');
+    const onCard = input.press !== undefined && input.press.proposal_id === held.proposal_id;
+    const answer = onCard ? (input.press!.decision === 'approve' ? 'approved' : 'declined') : 'superseded';
+    if (answer === 'approved') state.approve(item);
+    else state.reject(item, { message: answer === 'declined' ? PAUSE_DECLINED : PAUSE_SUPERSEDED });
+    if (answer === 'superseded') carried = input.message;
+    turnInput = state;
+    resumed = { pause_id: held.pause_id, answer };
+  }
+  let paused: CoreTurnSdk['paused'];
 
   let traceId = `trace_${randomUUID().replace(/-/g, '')}`;
   const finish = (text: string, stopped: AgentTurnResult['stopped_reason'], calls: number, author: 'ai' | 'host'): AgentTurnResult & { sdk: CoreTurnSdk } => {
@@ -232,25 +299,56 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
       timing: { total_ms: total, provider_ms: Math.max(0, total - toolMs), tool_ms: toolMs, tool_provider_ms: 0, overhead_ms: 0,
         provider_calls: calls, tool_calls: toolCalls.length, hops: calls },
       sdk: { runtime: AGENTS_SDK, trace_id: traceId, state: 'openai_conversation', conversation_id: conversation.id,
-        conversation_created: conversation.created, compact_threshold: CORE_COMPACT_THRESHOLD },
+        conversation_created: conversation.created, compact_threshold: CORE_COMPACT_THRESHOLD,
+        ...(paused !== undefined ? { paused } : {}), ...(resumed !== undefined ? { resumed } : {}) },
     };
   };
   try {
     return await withTrace('Olumi core turn', async (trace) => {
       traceId = trace.traceId;
-      const result = await run(agent, turnInput, {
+      const options = {
         conversationId: conversation.id,
         maxTurns: CORE_MAX_MODEL_CALLS,
         ...(input.signal !== undefined ? { signal: input.signal } : {}),
-        // This turn's facts ride the instructions of every call; the input stays exactly what the SDK sends.
-        callModelInputFilter: ({ modelData }) => ({
-          ...modelData,
-          instructions: [modelData.instructions ?? '', ...turnFacts].filter((t) => t !== '').join('\n\n'),
-        }),
-      });
+        // This turn's facts ride the instructions of every call. The input is what the SDK sends, plus, once, a typed
+        // message that declined a paused run (it follows that run's answer).
+        callModelInputFilter: ({ modelData }: { modelData: { input: AgentInputItem[]; instructions?: string } }) => {
+          const extra: AgentInputItem[] = carried === undefined ? [] : [{ role: 'user', content: carried }];
+          carried = undefined;
+          return { ...modelData, input: [...modelData.input, ...extra],
+            instructions: [modelData.instructions ?? '', ...turnFacts].filter((t) => t !== '').join('\n\n') };
+        },
+      };
+      let result = await run(agent, turnInput, options);
+      let calls = result.rawResponses.length;
+      const pause = result.interruptions[0];
+      if (pause !== undefined) {
+        const args = argsOf(pause);
+        const run0: OpenAiPausedRun = { pause_id: randomUUID(), proposal_id: typeof args['proposal_id'] === 'string' ? args['proposal_id'] : null,
+          call_id: callIdOf(pause) ?? '', tool: pause.name ?? '', state: result.state.toString() };
+        const kept = await input.pausedRunStore?.save(input.ctx.scenario_id, run0).catch(() => undefined);
+        if (kept === true) {
+          paused = { pause_id: run0.pause_id, proposal_id: run0.proposal_id, tool: run0.tool };
+          toolCalls.push({ name: run0.tool, ok: true, mutated: false, outcome: 'awaiting_approval',
+            ...(run0.proposal_id !== null ? { proposal_id: run0.proposal_id } : {}) });
+          toolResults.push({ ok: true, mutated: false, outcome: 'awaiting_approval', ...(run0.proposal_id !== null ? { proposal_id: run0.proposal_id } : {}) });
+          // The AI's own words this turn, written with the call it paused on (the card shows the change).
+          const words = extractAllTextOutput(result.newItems);
+          return finish(words, words.trim() === '' ? 'incomplete' : 'answered', calls, words.trim() === '' ? 'host' : 'ai');
+        }
+        // The pause cannot be kept, so the Conversation gets its answer now: nothing applied, said by the AI.
+        for (const item of result.interruptions) result.state.reject(item, { message: PAUSE_NOT_KEPT });
+        result = await run(agent, result.state, options);
+        calls += result.rawResponses.length;
+      }
       const text = typeof result.finalOutput === 'string' ? result.finalOutput : '';
-      return finish(text, text.trim() === '' ? 'incomplete' : 'answered', result.rawResponses.length, text.trim() === '' ? 'host' : 'ai');
-    }, { groupId: input.ctx.scenario_id, metadata: { request_id: String(input.ctx.request_id ?? ''), turn_id: String(input.ctx.turn_id ?? '') } });
+      return finish(text, text.trim() === '' ? 'incomplete' : 'answered', calls, text.trim() === '' ? 'host' : 'ai');
+    }, { groupId: input.ctx.scenario_id, metadata: {
+      // The SDK's own trace (tool spans are native) carries what this turn ran on: prompt, model, state, revision and Run.
+      request_id: String(input.ctx.request_id ?? ''), turn_id: String(input.ctx.turn_id ?? ''),
+      prompt_sha256: createHash('sha256').update(input.instructions, 'utf8').digest('hex'), model: input.budget.model,
+      conversation_id: conversation.id, revision: input.traceMeta?.revision ?? '', run_id: input.traceMeta?.run_id ?? '',
+    } });
   } catch (err) {
     if (err instanceof MaxTurnsExceededError) return finish('', 'hop_limit', CORE_MAX_MODEL_CALLS, 'host');
     // The capability's own error, unwrapped, so the route's existing handlers see the same error the loop would raise.

@@ -59,6 +59,7 @@ import {
   type GraphWriteFailureDisclosure,
   type PendingActionReadOptions,
   type SessionAppendOutcome,
+  type OpenAiPausedRun,
   type SessionStore,
   type ScenarioRunAnalysisFactReadOptions,
   type ScenarioRunAnalysisFactPage,
@@ -3166,6 +3167,41 @@ export class SupabaseSessionStore implements SessionStore {
       throw new SessionReadError(`claimOpenAiConversationId failed for scenario ${scenarioId}: ${errMsg(error)}`, { cause: error, code: errCode(error) });
     }
     return this.readOpenAiConversationId(scenarioId);
+  }
+
+  /** PATH-B `core`: the run paused for approval; `undefined` when the column is not migrated yet. */
+  async readOpenAiPausedRun(scenarioId: string): Promise<OpenAiPausedRun | null | undefined> {
+    const { data, error } = await this.client.from('scenarios').select('openai_paused_run').eq('id', scenarioId).maybeSingle();
+    if (error) {
+      if (OPENAI_CONVERSATION_COLUMN_ABSENT.has(errCode(error) ?? '')) return undefined;
+      throw new SessionReadError(`readOpenAiPausedRun failed for scenario ${scenarioId}: ${errMsg(error)}`, { cause: error, code: errCode(error) });
+    }
+    const run = (data as { openai_paused_run?: unknown } | null)?.openai_paused_run as Partial<OpenAiPausedRun> | null | undefined;
+    return run != null && typeof run.pause_id === 'string' && typeof run.state === 'string' && typeof run.call_id === 'string'
+      && typeof run.tool === 'string' ? { pause_id: run.pause_id, proposal_id: typeof run.proposal_id === 'string' ? run.proposal_id : null,
+        call_id: run.call_id, tool: run.tool, state: run.state } : null;
+  }
+
+  /** Save the paused run only where none is held (one conditional write); true when this write saved it. */
+  async saveOpenAiPausedRun(scenarioId: string, run: OpenAiPausedRun): Promise<boolean | undefined> {
+    const { data, error } = await this.client.from('scenarios').update({ openai_paused_run: run })
+      .eq('id', scenarioId).is('openai_paused_run', null).select('id');
+    if (error) {
+      if (OPENAI_CONVERSATION_COLUMN_ABSENT.has(errCode(error) ?? '')) return undefined;
+      throw new SessionReadError(`saveOpenAiPausedRun failed for scenario ${scenarioId}: ${errMsg(error)}`, { cause: error, code: errCode(error) });
+    }
+    return Array.isArray(data) && data.length === 1;
+  }
+
+  /** Clear the paused run `pauseId` only while it is the one held (one conditional write); true when this write took it. */
+  async takeOpenAiPausedRun(scenarioId: string, pauseId: string): Promise<boolean | undefined> {
+    const { data, error } = await this.client.from('scenarios').update({ openai_paused_run: null })
+      .eq('id', scenarioId).eq('openai_paused_run->>pause_id', pauseId).select('id');
+    if (error) {
+      if (OPENAI_CONVERSATION_COLUMN_ABSENT.has(errCode(error) ?? '')) return undefined;
+      throw new SessionReadError(`takeOpenAiPausedRun failed for scenario ${scenarioId}: ${errMsg(error)}`, { cause: error, code: errCode(error) });
+    }
+    return Array.isArray(data) && data.length === 1;
   }
 
   async readAnalysisInvalidatedAt(scenarioId: string): Promise<string | null> {
