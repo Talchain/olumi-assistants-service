@@ -132,6 +132,13 @@ const argsOf = (item: RunToolApprovalItem): Record<string, unknown> => {
  */
 type ToolParameters = { type: 'object'; properties: Record<string, never>; required: never[]; additionalProperties: true };
 
+/** A typed adapter's record of one call: its kit row (`traceRow`) and its result, as the route reads results. */
+export type CoreToolRecorder = (
+  row: { readonly name: string; readonly ok: boolean; readonly mutated: boolean | null; readonly outcome: string;
+    readonly refusal: string | null; readonly ran: true | null },
+  result: ToolResult,
+) => void;
+
 export interface CoreTurnInput {
   readonly ctx: AgentToolContext;
   readonly caps: AgentCapabilities;
@@ -150,8 +157,11 @@ export interface CoreTurnInput {
   readonly pausedRunStore?: PausedRunStore;
   /** The person's press on the card of the paused run's proposal. Absent = a typed turn (any paused run is declined first). */
   readonly press?: { readonly decision: 'approve' | 'decline'; readonly proposal_id: string };
-  /** The agent's tools (the typed adapters). Absent → the existing capabilities, declared with their JSON schemas. */
-  readonly tools?: readonly Tool[];
+  /**
+   * The agent's tools: the typed adapters (`path-b/tools` `pathBTools`), given the recorder each tool calls once with its
+   * kit row and result. Absent → the existing capabilities, declared with their JSON schemas.
+   */
+  readonly tools?: (onCall: CoreToolRecorder) => readonly Tool[];
   /** The model revision and selected Run this turn began on, carried on the SDK trace with the prompt, model and Conversation. */
   readonly traceMeta?: { readonly revision?: string; readonly run_id?: string };
   readonly signal?: AbortSignal;
@@ -178,7 +188,7 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
   const now = input.now ?? (() => Date.now());
   const startedAt = now();
   const withheld = new Set(input.withheldTools ?? []);
-  const toolCalls: { name: string; ok: boolean; mutated: boolean; proposal_id?: string; outcome?: string; refusal?: string }[] = [];
+  const toolCalls: { name: string; ok: boolean; mutated: boolean; proposal_id?: string; outcome?: string; refusal?: string; ran?: true }[] = [];
   const toolResults: ToolResult[] = [];
   let toolMs = 0;
   /** Proposals this turn made that still wait for the user's yes, by id → tool. */
@@ -225,7 +235,14 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
     return JSON.stringify(runFactsContext(modelFacingToolResult(name, result)).facts);
   };
 
-  const tools = input.tools ?? toolsFor(input.mode).filter((def) => !withheld.has(def.name)).map((def) => tool({
+  // A typed adapter's row goes on the wire as the kit reads it; an unknown write (`mutated: null`) is never a claimed one.
+  const record: CoreToolRecorder = (row, result) => {
+    toolCalls.push({ name: row.name, ok: row.ok, mutated: row.mutated === true, outcome: row.outcome,
+      ...(row.refusal !== null ? { refusal: row.refusal } : {}), ...(row.ran === true ? { ran: true as const } : {}),
+      ...(typeof result['proposal_id'] === 'string' ? { proposal_id: result['proposal_id'] } : {}) });
+    toolResults.push(result);
+  };
+  const tools = input.tools?.(record) ?? toolsFor(input.mode).filter((def) => !withheld.has(def.name)).map((def) => tool({
     name: def.name,
     description: def.description,
     parameters: def.parameters as ToolParameters,
