@@ -65,7 +65,7 @@ import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
 import { CONSTRUCTION_TAIL_RESERVE_MS } from '../orchestrator-v5/agent-lane/runtime/construction-deadline.js';
 export { CONSTRUCTION_TAIL_RESERVE_MS } from '../orchestrator-v5/agent-lane/runtime/construction-deadline.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
-import { answerRunNarrationOf, type CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
+import { answerRunNarrationOf, type CommittedTurnRecord, type OpenAiPausedRun } from '../orchestrator-v5/session/store.js';
 import { ModelReadFailedError, isRevisionConflict, promoteRevisionConflictResponse } from '../orchestrator-v5/graph-revision-conflict.js';
 import { toErrorV1 } from '../utils/errors.js';
 import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
@@ -3528,7 +3528,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * this exact press does, through the same withdraw the Agent uses, and Olumi says so.
      */
     const declinedHold = declinedProposalOf((body['chip'] as { id?: unknown } | undefined)?.id);
-    if (declinedHold !== undefined && result === undefined) {
+    /**
+     * ⭐ PATH-B: in `core`, a press on the card of the scenario's paused SDK run answers THAT run: the SDK resumes its saved
+     * state, and the tool's own approval path (authorise, write, readback) runs under it. Every other press keeps its path.
+     */
+    const corePaused = mode === 'core' && result === undefined && (approvedProposal !== undefined || declinedHold !== undefined)
+      ? await store.readOpenAiPausedRun?.(scenarioId).catch(() => undefined) : undefined;
+    const corePress = corePaused == null ? undefined
+      : approvedProposal !== undefined && approvedProposal === corePaused.proposal_id ? { decision: 'approve' as const, proposal_id: approvedProposal }
+      : declinedHold !== undefined && declinedHold === corePaused.proposal_id ? { decision: 'decline' as const, proposal_id: declinedHold }
+      : undefined;
+    if (declinedHold !== undefined && result === undefined && corePress === undefined) {
       const started = Date.now();
       const named = heldAtStart.find((p) => heldProposalId(p) === declinedHold);
       const withdrawn = await dispatchTool(WITHDRAW_PROPOSAL, JSON.stringify({ proposal_id: declinedHold }), toolCtx, capabilities, mode);
@@ -3549,7 +3559,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * proposal that takes none in slice 1) apply nothing: the proposal stays held, and the reply says why. Valid edits
      * ride the SAME approval below (the tool context's `proposal_edits`) to the existing door, which applies them in one commit.
      */
-    if (approvedProposal !== undefined && result === undefined && proposalEdits !== undefined && editsForThisCard === undefined) {
+    if (approvedProposal !== undefined && result === undefined && corePress === undefined && proposalEdits !== undefined && editsForThisCard === undefined) {
       const said = editsRefusedSentence('malformed');
       result = {
         assistant_text: said,
@@ -3559,7 +3569,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 },
       };
     }
-    if (approvedProposal !== undefined && result === undefined) {
+    if (approvedProposal !== undefined && result === undefined && corePress === undefined) {
       const fastStartedAt = Date.now();
       let edited: ReturnType<typeof amendAgentProposal> | undefined;
       let editsFailure: 'stale' | 'not_held' | 'refused' | undefined;
@@ -4344,8 +4354,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           items: [], tool_calls: [], tool_results: [], mutated: false, hops: 0, stopped_reason: 'answered',
           timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0,
             provider_calls: 0, tool_calls: 0, hops: 0 } };
-      } else if (mode === 'core' && !runPress && methodTurn === null && widenRun === undefined && risksRun === undefined
-        && (body['chip'] === undefined || body['chip'] === null)) {
+      } else if (mode === 'core' && (corePress !== undefined || (!runPress && methodTurn === null && widenRun === undefined
+        && risksRun === undefined && (body['chip'] === undefined || body['chip'] === null)))) {
         // ⭐ PATH-B: an ordinary typed `core` turn runs on the OpenAI Agents SDK (`core/sdk-turn.ts`): its runner, its session
         // memory and its trace, with Olumi's capabilities as the tools. Presses and method turns keep their existing paths.
         const core = await runCoreTurn({
@@ -4357,6 +4367,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             .then(read => read.status === 200 ? read.json.brief_text : undefined).catch(() => undefined),
           canonicalState: canonicalContext?.packet?.state,
           withheldTools: withheldToolsOf(body),
+          ...(corePress !== undefined ? { press: corePress } : {}),
+          ...(canonicalContext?.packet?.graph_revision !== undefined ? { traceMeta: { revision: canonicalContext.packet.graph_revision } } : {}),
+          // A run paused for the person's approval is saved on the scenario, so the press (any later request) resumes it.
+          ...(typeof store.readOpenAiPausedRun === 'function' && typeof store.saveOpenAiPausedRun === 'function'
+            && typeof store.takeOpenAiPausedRun === 'function' ? {
+            pausedRunStore: {
+              read: (sid: string) => store.readOpenAiPausedRun!(sid),
+              save: (sid: string, run: OpenAiPausedRun) => store.saveOpenAiPausedRun!(sid, run),
+              take: (sid: string, id: string) => store.takeOpenAiPausedRun!(sid, id),
+            } } : {}),
           // The scenario's ONE OpenAI Conversation id is saved on the scenario, so a reopen continues it. A store without it
           // stops the turn (CoreStateUnavailableError → 503 below): never a Conversation the next turn could not find.
           ...(typeof store.readOpenAiConversationId === 'function' && typeof store.claimOpenAiConversationId === 'function' ? {

@@ -174,10 +174,13 @@ export function createMockSessionStore(
     // the pre-C8 behaviour every existing suite was written against. A suite
     // exercising the post-restore staleness path overrides it with a timestamp.
     readAnalysisInvalidatedAt: async () => null,
-    // PATH-B (the `core` lane's OpenAI Conversation): the drift alarm fired here, as designed. Benign default =
-    // `undefined`, "this store cannot hold the id", so a core turn keeps it in process memory; no other lane reads it.
+    // PATH-B (the `core` lane's Conversation id and paused run): the drift alarm fired here, as designed. Benign default =
+    // `undefined`, "this store cannot hold it", so a core turn stops with 503 CORE_STATE_UNAVAILABLE; no other lane reads them.
     readOpenAiConversationId: async () => undefined,
     claimOpenAiConversationId: async () => undefined,
+    readOpenAiPausedRun: async () => undefined,
+    saveOpenAiPausedRun: async () => undefined,
+    takeOpenAiPausedRun: async () => undefined,
     ensureScenarioExists: async (_scenarioId, userId) => ({ user_id: userId }),
     getScenarioOwner: async () => null,
     readMostRecentPendingActions: async () => [],
