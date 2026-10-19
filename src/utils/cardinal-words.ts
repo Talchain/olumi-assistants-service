@@ -218,10 +218,19 @@ const BARE_END = `(?:${SMALL_ALTERNATION})(?:[\\s-]+(?:${SMALL_ALTERNATION}))*(?
 
 /**
  * A bare number is never the high end of a range whose low end carries the only scale, where that low end is no number this
- * grammar reads whole ("a million to seven", "two and a half million to three": never 7 or 3). After "and" (`between a million
- * and seven`) `START_GUARD` already refuses it.
+ * grammar reads whole ("a million to seven", "a hundred and twenty to three", "two and a half million to three": never 7 or 3).
+ * After "and" (`between a million and seven`) `START_GUARD` already refuses it.
  */
-const NOT_A_BARE_HIGH_END = `(?!(?<=\\b(?:${MULTIPLIER_ALTERNATION})${RANGE_JOIN})${BARE_END}${WHOLE})`;
+const NOT_A_BARE_HIGH_END = `(?!(?<=\\b(?:${MULTIPLIER_ALTERNATION})(?:(?:\\s+and\\s+|\\s+point\\s+|[\\s-]+)(?:${TOKEN_ALTERNATION}|zero))*${RANGE_JOIN})${BARE_END}${WHOLE})`;
+/**
+ * The same range-end refusals for a pattern that reads number words beyond this grammar (an article: "a million", "a hundred and
+ * twenty"), around its own capture. BEFORE: never right after "between" (a range this grammar does not read whole), nor after a
+ * digits end and its joiner. AFTER: nothing that continues the number follows (so no refusal shortens the capture into a
+ * fragment), no digits end, and no bare number its scale would have to reach ("a million to seven").
+ */
+export const CARDINAL_RANGE_END_GUARD_BEFORE = `(?<!\\bbetween\\s+)(?<!${DIGIT_AMOUNT_END}${DIGIT_RANGE_JOIN})`;
+export const CARDINAL_RANGE_END_GUARD_AFTER = `(?![\\s,]+and\\s+(?:${TOKEN_ALTERNATION})\\b|[\\s-]+(?:${TOKEN_ALTERNATION})\\b)`
+  + `${NOT_BEFORE_A_DIGIT_END}(?!${RANGE_JOIN}${BARE_END}${WHOLE})`;
 /**
  * ONE number in free text. `WHOLE` keeps a refusal after it from shortening the capture into a fragment ("two hundred to 3": never
  * "two").

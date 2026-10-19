@@ -78,6 +78,8 @@ const NO_ONE_SHARED_SCALE = [
   'We expect 3 to a million users.',
   'We expect between a million and seven users.',
   'We expect a hundred to 3 hundred users.',
+  'We expect a hundred and twenty to three users.',
+  'We expect two thousand five to seven users.',
   'We need half a million to 7.',
 ];
 
