@@ -1,6 +1,6 @@
 /** Deterministic number readings for link sizing; offsets always refer to the user's original words. */
 import { findStatedAmounts, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
-import { CARDINAL_AMOUNT_SOURCE, parseCardinalAmount } from '../../utils/cardinal-words.js';
+import { CARDINAL_AMOUNT_SOURCE, cardinalReadings } from '../../utils/cardinal-words.js';
 
 function normalised(quote: string): { text: string; starts: number[]; ends: number[] } {
   const re = new RegExp(`\\b(?:${CARDINAL_AMOUNT_SOURCE})(?:\\s+and\\s+a\\s+half)?\\b|\\bhalf(?:\\s+a)?(?=\\s+(?:percentage\\s+)?points?\\b)|\\ba(?=\\s+(?:percentage\\s+)?points?\\b)`, 'giu');
@@ -15,10 +15,20 @@ function normalised(quote: string): { text: string; starts: number[]; ends: numb
     append(quote.slice(at, start), at, start, true);
     const half = /\s+and\s+a\s+half$/i.test(m[0]);
     const base = half ? m[0].replace(/\s+and\s+a\s+half$/i, '') : m[0];
-    const value = /^half(?:\s+a)?$/i.test(base) ? 0.5 : base.toLowerCase() === 'a' ? 1 : parseCardinalAmount(base);
+    // A range written in words is written back as its two ends in digits, as the user joined them (a shared scale applied to
+    // both; "between … and …" kept), never as one figure (`cardinalReadings`).
+    const readings = /^half(?:\s+a)?$/i.test(base) || base.toLowerCase() === 'a' ? [] : cardinalReadings(base, start);
+    if (readings.length === 2) {
+      const joiner = /^between\s/i.test(base) ? null : (/\s(to|or)\s/i.exec(base)?.[1] ?? 'to');
+      append(joiner === null ? `between ${readings[0]!.magnitude} and ${readings[1]!.magnitude}` : `${readings[0]!.magnitude} ${joiner} ${readings[1]!.magnitude}`,
+        start, start + m[0].length);
+      at = start + m[0].length;
+      continue;
+    }
+    const value = /^half(?:\s+a)?$/i.test(base) ? 0.5 : base.toLowerCase() === 'a' ? 1 : readings[0]?.magnitude ?? null;
     // Unknown fractions are never admitted as the integer fragment ("one and a quarter").
     const unclear = !half && /^\s+and\s+(?:a\s+)?(?:half|quarter|third)\b/i.test(quote.slice(start + m[0].length));
-    append(value === null || value === undefined || unclear ? m[0] : String(value + (half ? 0.5 : 0)), start, start + m[0].length);
+    append(value === null || unclear ? m[0] : String(value + (half ? 0.5 : 0)), start, start + m[0].length);
     at = start + m[0].length;
   }
   append(quote.slice(at), at, quote.length, true);
@@ -90,6 +100,8 @@ export function hasLinkEffectRange(quote: string): boolean {
   return amounts.some((a, i) => {
     const b = amounts[i + 1];
     if (b === undefined) return false;
+    // The two ends of one range written in words share its capture (`cardinalReadings`).
+    if (a.index === b.index && a.matchedText === b.matchedText) return true;
     const between = quote.slice(a.index + a.matchedText.length, b.index);
     return /^\s*(?:,?\s*(?:maybe|or)|[-–—]|to)\s*$/i.test(between) && !/\bfrom\s*$/i.test(quote.slice(0, a.index))
       || /^\s*and\s*$/i.test(between) && /\bbetween\s*$/i.test(quote.slice(0, a.index));
