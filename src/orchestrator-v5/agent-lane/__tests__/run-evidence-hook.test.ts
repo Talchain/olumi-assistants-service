@@ -114,7 +114,11 @@ describe('§9: the selected Run’s own evidence reaches runFactsOf as state.run
     const { default: minimal } = await import('../../../../tests/fixtures/plot/v2-run-golden-minimal.json');
     const { createRunAnalysisHandler } = await import('../../tools/handlers/run-analysis.js');
     const { loadScenarioSnapshotForRunAnalysis } = await import('../../build-turn-context.js');
-    const graph = structuredClone(capacity.graph);
+    const { withStatedSd } = await import('../../__tests__/support/supported-spread.support.js');
+    // ⭐ STEP 8 (Codex R2 #3443): the captured "between 10 and 30" alone withholds the chance (screen-lines route, "STEP 8 truthful").
+    // This row's subject is the evidenced basis, so it reads a SUPPORTED control: the user also states that contribution's
+    // standard deviation, recorded by the actual chat writer.
+    const graph = await withStatedSd(structuredClone(capacity.graph), SCENARIO, 'additional_specialists', 'additional_specialist_capacity') as typeof capacity.graph;
     graph.nodes.find(n => n.id === 'weekly_support_capacity')!.goal_threshold_raw = rawTarget;
     const snapshot = await loadScenarioSnapshotForRunAnalysis(SCENARIO, 'basis-run', {
       loadGraphAndBriefText: vi.fn(async () => ({ graph, briefText: capacity.brief, revision: 47 })),

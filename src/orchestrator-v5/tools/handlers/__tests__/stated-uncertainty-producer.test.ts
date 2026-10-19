@@ -25,7 +25,7 @@ import { applyEdgeStrengthEdit } from '../../../system-events/edge-strength-edit
 import { linkEffectConversionFrames } from '../../../system-events/link-effect-edit.js';
 import { clampForPersist, refitFramesForStatedEffects } from '../../../agent-lane/refit-frames.js';
 import { convertLinkEffect } from '../../../../cee/magnitude/link-effect.js';
-import { normalQuantilesSd, statedUncertaintyAttested, UNCERTAINTY_SAVE_BUTTON, UNSUPPORTED_UNCERTAINTY_WORDS } from '../../../../cee/magnitude/stated-uncertainty.js';
+import { currentUserSize, linkSpreadOf, normalQuantilesSd, statedUncertaintyAttested, UNCERTAINTY_SAVE_BUTTON, UNSUPPORTED_UNCERTAINTY_WORDS } from '../../../../cee/magnitude/stated-uncertainty.js';
 import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 import type { HandlerInvocation } from '../../registry.js';
@@ -264,6 +264,24 @@ describe('NEGATIVES: nothing is prepared or saved, the size stays, and the AIE\'
     const words = 'From our shift data, the standard deviation is 900 orders per day.';
     const r = await press(words, { ...SD, sd: 900, from_words: 'the standard deviation is 900 orders per day', basis_words: 'From our shift data' });
     nothing(r);
+    expect(r.card.detail).toContain(UNSUPPORTED_UNCERTAINTY_WORDS);
+  });
+  it('A LINK HELD STRONGER THAN ONE EDIT CAN SAY (|strength| > 1): refused at the door, never a card that cannot be saved', async () => {
+    // A saved graph from before frames were fitted (as served c96fc4bb holds £49 per subscriber at 4.6): the packers on a frame of
+    // 10, so the user's 15 orders per day per packer is a strength of 15 / 87.5 × 10 ≈ 1.71, size and frames still agreeing.
+    const strong = clone(BUILT);
+    (strong.nodes as Json[]).find((n) => n.id === FROM)!.observed_state.cap = 10;
+    const beta = (15 / 87.5) * 10;
+    link(strong).strength.mean = beta;
+    link(strong).provenance.natural_effect.strength_mean = beta;
+    expect(Math.abs(link(strong).strength.mean), 'premise: a strength above 1').toBeGreaterThan(1);
+    expect(linkSpreadOf(1, currentUserSize(link(strong))!, linkEffectConversionFrames(strong, FROM, TO), convertLinkEffect), 'premise: the spread itself is representable')
+      .toBeCloseTo(beta / 15, 9);
+    const words = 'From our shift data, the standard deviation is 1 order per day.';
+    const r = await press(words, { ...SD, sd: 1, unit: 'orders per day', from_words: 'the standard deviation is 1 order per day', basis_words: 'From our shift data' }, strong);
+    expect(r.card.ok).toBe(false);
+    expect(r.w.sent).toEqual([]);
+    expect(link(r.w.graph())).toEqual(link(strong));
     expect(r.card.detail).toContain(UNSUPPORTED_UNCERTAINTY_WORDS);
   });
   it('A FIGURE THE USER DID NOT WRITE is never recorded', async () => {

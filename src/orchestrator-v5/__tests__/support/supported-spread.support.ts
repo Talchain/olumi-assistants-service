@@ -27,8 +27,11 @@ const edgeOf = (g: Rec, from: string, to: string): Rec => {
   return e;
 };
 
-/** The user names `band` for the chat strength on `from → to`; the actual writer records it as theirs, attested. */
-export async function withNamedBand(graph: Rec, from: string, to: string, band: InfluenceBand): Promise<Rec> {
+/**
+ * The user names `band` for the chat strength on `from → to`; the actual writer records it as theirs, attested. On a link holding
+ * the user's own figure, `replacesUserFigure` is their explicit "replace my figure with …" (F1), without which the writer refuses.
+ */
+export async function withNamedBand(graph: Rec, from: string, to: string, band: InfluenceBand, o: { replacesUserFigure?: true } = {}): Promise<Rec> {
   const edge = edgeOf(graph, from, to);
   if (EDGE_STRENGTH_MIDPOINTS[band] === Math.abs(edge.strength.mean)) throw new Error('naming the band a link sits in is a review: pick another band');
   const value = (edge.strength.mean < 0 ? -1 : 1) * EDGE_STRENGTH_MIDPOINTS[band];
@@ -40,6 +43,7 @@ export async function withNamedBand(graph: Rec, from: string, to: string, band: 
       entity: { id: `${from}→${to}`, kind: 'edge', resolution_status: 'resolved', resolution_method: 'id_match' },
       parameters: [{ name: 'strength', value, operator: 'set', source: 'user_explicit' }] },
     edgeStrengthBandAuthority: band,
+    ...(o.replacesUserFigure === true ? { edgeStrengthReplacesUserFigureAuthority: true } : {}),
   } as unknown as HandlerInvocation);
   const out = clone(outcome.mutated_graph) as Rec;
   if (edgeOf(out, from, to).std_defaulted !== false) throw new Error('the writer did not attest the band');
@@ -57,14 +61,15 @@ export async function withNamedBands(graph: Rec, links: ReadonlyArray<readonly [
 }
 
 /**
- * The user states the standard deviation of their own physical size on `from → to` (equal to the spread the link already
- * carries, so no engine input moves), with a basis; recorded through the actual adapter and chat writer (the STEP 8 producer).
+ * The user states the standard deviation of their own physical size on `from → to`, with a basis; recorded through the actual
+ * adapter and chat writer (the STEP 8 producer). By default the SD the link's spread already maps to, so no engine input moves;
+ * `statedSd` (in the size's own unit) where that spread is beyond what the writer records.
  */
-export async function withStatedSd(graph: Rec, scenarioId: string, from: string, to: string): Promise<Rec> {
+export async function withStatedSd(graph: Rec, scenarioId: string, from: string, to: string, statedSd?: number): Promise<Rec> {
   const edge = edgeOf(graph, from, to);
   const ne = edge.provenance?.natural_effect as Rec | undefined;
   if (ne === undefined) throw new Error(`${from} -> ${to} holds no physical size`);
-  const sd = edge.strength.std * Math.abs(ne.amount / ne.strength_mean);
+  const sd = statedSd ?? edge.strength.std * Math.abs(ne.amount / ne.strength_mean);
   const uncertainty = { stated_as: 'standard_deviation' as const, sd, distribution: 'normal' as const, distribution_origin: 'olumi_provisional' as const,
     assessor: 'you', basis: 'our last eight weeks of records', source_quote: `the standard deviation is ${sd} ${String(ne.amount_unit)}` };
   const event = { kind: 'edge_strength_edit' as const, from, to, intent: 'set' as const, direction_intent: 'preserve' as const,

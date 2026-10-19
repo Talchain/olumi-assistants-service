@@ -58,10 +58,19 @@ const SCENARIO = 'c96fc4bb-ccd1-4615-a6d9-52c652e3e0e4';
 const served = JSON.parse(readFileSync(new URL('../agent-lane/__tests__/fixtures/served-c96fc4bb-registered-graph-77afc7b.json', import.meta.url), 'utf8')) as { graph: Rec };
 const happy = JSON.parse(readFileSync('tests/fixtures/plot/v2-run-golden-happy.json', 'utf8')) as V2RunResponseEnvelope;
 const DRAW_KEY = 'd'.repeat(64);
+/**
+ * ⭐ STEP 8 (Codex R2 #3443): the served "£49 per subscriber" carries no supported spread alone, so the leader resting on it is
+ * withheld and no first-analysis coaching can fire, which would make B13's negative vacuous. Its stated spread cannot be saved
+ * either: the link is held at a strength of 4.6, beyond what one edit can say (the producer refuses that card). So the B13 pair
+ * reads a SUPPORTED control through the actual writer: the user replaces that figure with a named band ("very strong", F1).
+ */
+const { withNamedBand } = await import('./support/supported-spread.support.js');
+const SUPPORTED_SERVED = await withNamedBand(structuredClone(served.graph), 'paying_subscribers', 'mrr', 'very strong', { replacesUserFigure: true });
 
-function harness(opts: { goalLevelOlumis?: boolean; asServed?: boolean } = {}) {
+function harness(opts: { goalLevelOlumis?: boolean; asServed?: boolean; supported?: boolean } = {}) {
+  const base = opts.supported === true ? SUPPORTED_SERVED : served.graph;
   // Science 393023 LICENCE (a)/(b), 7 Oct: std 0.125 → 0.1 on a clone preserves this independent claim; captured bytes stay unchanged.
-  const graph = opts.goalLevelOlumis === true && opts.asServed !== true ? legacyDoorGraph(served.graph) : structuredClone(served.graph);
+  const graph = opts.goalLevelOlumis === true && opts.asServed !== true ? legacyDoorGraph(base) : structuredClone(base);
   // MC D1 (b): the served goal level is the USER's, so Gate 5 withholds every comparison on this graph (no leader, so no
   // "explore the leading option"). The first-analysis rows need a Run whose leader CAN be named: the same graph with the
   // goal's level Olumi's, which Gate 5 does not read as the user's product.
@@ -341,7 +350,7 @@ describe('C1 durable history — a Run that aged out of the hot window still len
   });
 
   it('B13 (CODEX P2-4): the prior SHOWN Run aged out → no "first analysis" coaching on the Run that pairs with it', async () => {
-    const h = harness({ goalLevelOlumis: true });
+    const h = harness({ goalLevelOlumis: true, supported: true });
     await h.run('turn-a');
     await new Promise((r) => setTimeout(r, 5));
     h.setPrice(60);
@@ -352,7 +361,7 @@ describe('C1 durable history — a Run that aged out of the hot window still len
   });
 
   it('B13c (control): a genuinely first Run → FIRST_ANALYSIS_COMPLETE as today', async () => {
-    const h = harness({ goalLevelOlumis: true });
+    const h = harness({ goalLevelOlumis: true, supported: true });
     const a = await h.run('turn-a');
     expect(JSON.stringify(a)).toContain('FIRST_ANALYSIS_COMPLETE');
   });

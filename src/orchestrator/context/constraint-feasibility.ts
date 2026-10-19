@@ -243,7 +243,7 @@ export function withholdOptionLimitScores<E>(envelope: E, byLimit: ReadonlyMap<s
  * `conditional_probability`, `marginal_probability`) without every row that names a condition in `conditions`. Any other shape,
  * and a carrier with no such row, is returned as it is. Pure.
  */
-export function withholdConditionalRows(carrier: unknown, conditions: ReadonlySet<string>): unknown {
+function withholdConditionalRows(carrier: unknown, conditions: ReadonlySet<string>): unknown {
   if (!Array.isArray(carrier) || conditions.size === 0) return carrier;
   const names = (row: unknown): boolean => {
     const r = readRecord(row);

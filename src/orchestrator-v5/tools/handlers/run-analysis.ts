@@ -80,7 +80,6 @@ import {
   collectLeaderEstimatedTargetIds,
   collectLimitLevelOwners,
   withholdOptionGoalFigures,
-  withholdConditionalRows,
   withholdOptionLimitScores,
   deriveConstraintVerdict,
   readRatifiedConstraints,
@@ -2019,12 +2018,11 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         evaluatedBeforeSupport ??= structuredClone(response);
         response = withholdOptionGoalFigures(response, new Set(support.unsupportedSpread.map((p) => p.option_id)),
           unsupportedSpreadWarning(graphForAnalysis, support.unsupportedSpread), { keepOutcome: true });
-        // The pooled conditional rows that name the goal's own conditions rest on those withheld chances (Codex R2 P1).
-        const goalConditions = new Set(ratifiedForSupport.filter((c) => c.node_id === snapshot.goal_node_id).map((c) => c.constraint_id));
-        const conditional = withholdConditionalRows((response as Record<string, unknown>).conditional_probabilities, goalConditions);
-        if (conditional !== (response as Record<string, unknown>).conditional_probabilities) {
-          response = { ...response, conditional_probabilities: conditional } as typeof response;
-        }
+        // The goal's own conditions rest on those withheld chances (Codex R2 P1): each withheld option's P for them, their precision
+        // and every pooled conditional row naming one go with it (`withholdOptionLimitScores`, the one per-condition withhold).
+        const withheldIds = new Set(support.unsupportedSpread.map((p) => p.option_id));
+        const goalConditions = ratifiedForSupport.filter((c) => c.node_id === snapshot.goal_node_id).map((c) => c.constraint_id);
+        if (goalConditions.length > 0) response = withholdOptionLimitScores(response, new Map(goalConditions.map((id) => [id, withheldIds])));
         log.info(
           {
             event: 'run_analysis.goal_figures_withheld_for_unsupported_spread',

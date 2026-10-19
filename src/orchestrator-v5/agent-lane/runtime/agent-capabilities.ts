@@ -5364,11 +5364,12 @@ export function createAgentCapabilities(
     } else {
       return tell('uncertainty_not_representable', UNSUPPORTED_UNCERTAINTY_WORDS);
     }
-    // Dry run: the spread the writer will store, through the size's own conversion frames, inside what the engine holds.
-    if (linkSpreadOf(record.sd, size, linkEffectConversionFrames(g.raw, from.id, to.id), convertLinkEffect) === undefined) {
+    // Dry run: the spread the writer will store, through the size's own conversion frames, inside what the engine holds. The save
+    // is ONE `edge_strength_edit`, whose strength is in [0, 1]: a link held stronger cannot be saved with its size kept, so no card.
+    const mean = (edge.strength as { mean: number }).mean;
+    if (Math.abs(mean) > 1 || linkSpreadOf(record.sd, size, linkEffectConversionFrames(g.raw, from.id, to.id), convertLinkEffect) === undefined) {
       return tell('uncertainty_not_representable', UNSUPPORTED_UNCERTAINTY_WORDS);
     }
-    const mean = (edge.strength as { mean: number }).mean;
     const current: 'positive' | 'negative' = edge.effect_direction === 'negative' || edge.effect_direction === 'positive'
       ? edge.effect_direction : (mean < 0 ? 'negative' : 'positive');
     const effect = `‘${from.label}’ → ‘${to.label}’`;
