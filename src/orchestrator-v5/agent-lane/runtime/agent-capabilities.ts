@@ -278,7 +278,7 @@ function leftOutClause(notAFactor: readonly { label: string; kind: string }[]): 
 }
 
 /**
- * The words the AI quotes as the user's CURRENT request (`explicit_rebuild_request`, `explicit_draft_request`) are a WHOLE
+ * The words the AI quotes as the user's CURRENT request (`explicit_rebuild_request`) are a WHOLE
  * statement of this turn's verified typed message, never a fragment, an earlier message or a card press. No word list:
  * the AI reads the request; the host checks only that it quotes the user. The failed checks (none: verified).
  */

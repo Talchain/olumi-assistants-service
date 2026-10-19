@@ -107,6 +107,26 @@ describe('K6: a brief with no stated aim gets a labelled provisional draft', () 
 });
 
 /**
+ * ⛔ Codex R1 on #3460 (probes `saved-authority.test.ts`, adopted verbatim; RED on 0520351a and 10a04939): ANOTHER event sentence
+ * in the brief ("launch the website by December") made the brief-wide `event_by_date_prompted` true, which skipped this goal's
+ * own attestation, so "Open a second café" was saved as the user's event goal. Attestation is now the drafted goal's own.
+ */
+describe('an aim the brief attests outranks a different drafted event (attestation is goal-bound)', () => {
+  it.each(['Our goal is to launch the website by December.', 'Our aim is to grow weekend sales by 10%. We launch the website by December.'])(
+    '⭐ RED→GREEN: %s', async (aim) => {
+      const { briefAttestsEventByDate } = await import('../../goal-target/event-by-date-model.js');
+      const d = cafeDraft();
+      const brief = `${aim} Should we open a second café in Bristol next spring?`;
+      expect(briefAttestsEventByDate(brief, d.goal as never), 'PRECONDITION: the brief does not attest THIS event').toBe(false);
+      expect(briefAttestsEventByDate(brief), 'PRECONDITION: the brief states another event by a date').toBe(true);
+      const { graph, result } = await construct([JSON.stringify(d), JSON.stringify(d)], brief);
+      expect(graph?.nodes.find((n: Rec) => n.kind === 'goal')?.label).not.toBe(EVENT);
+      expect(result, JSON.stringify(result).slice(0, 400)).toMatchObject({ ok: true, open_aim: true });
+      expect((graph!.nodes as Rec[]).filter((n) => n.kind === 'goal')).toEqual([expect.objectContaining({ label: OPEN_AIM_GOAL_LABEL, provenance: 'ai_inferred' })]);
+    }, 60_000);
+});
+
+/**
  * ⭐ Paul's live test (scenario dd904404, CEE cae490f4, 13:01Z): a dilemma about a dated release, stated with two durations and
  * two courses of action, no aim. The drafter took the release as an inferred event goal twice (the retry under kind null),
  * #3026 refused both and the K6 path was skipped (no "draft it now"; the brief states figures), so nothing was shown. SYNTHETIC
