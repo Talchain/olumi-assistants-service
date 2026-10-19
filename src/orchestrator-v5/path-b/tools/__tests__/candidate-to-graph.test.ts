@@ -108,7 +108,7 @@ const edge = (g: Rec, from: string, to: string): Rec | undefined =>
 describe('candidateToGraph: conversion + science only', () => {
   it('⭐ the dated-dilemma draft → a valid graph with the aim open, every drafted claim kept with the origin the AI declared', () => {
     const draft = dilemmaDraft();
-    const { graph, declared } = converted(draft);
+    const { graph, declared, loss } = converted(draft);
     expect(GraphV3.safeParse(graph).success).toBe(true);
     // The aim is open: the goal the AI declared, as Olumi's reading, with no figure invented for it.
     const goals = ofKind(graph, 'goal');
@@ -138,6 +138,8 @@ describe('candidateToGraph: conversion + science only', () => {
     expect(byLabel(graph, 'Ship with the old card stock').is_baseline).toBe(true);
     expect(declared).toEqual(draft);
     expect(declared).not.toBe(draft);
+    // What is declared but not converted yet (the deadline forecast) is said, never dropped silently.
+    expect(loss.map((l) => l.reason)).toContain('This draft does not include a forecast for the deadline of "board game shipment" yet; Olumi kept it as drafted.');
   });
 
   it('⛔ CONTRAST: A (admitCandidateModel) on the same draft still applies its gates (demotes the figures and the risks)', () => {
