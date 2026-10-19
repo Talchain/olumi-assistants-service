@@ -12,7 +12,7 @@
  *  · is OLUMI'S, by positive evidence only (`authorshipOf({ nodeTag })` is `ai`, i.e. the drafter's own `ai_inferred` label, or
  *    admission's `proposed_by: 'olumi'` stamp, `nodeIntroductionOf`). A risk the user stated or added, one from the brief's words,
  *    and one of unknown origin keep today's path and still ask (AIE: a missing or unknown stamp never enters this exception);
- *  · nobody has sized: no level by readiness's own rule (`riskHoldsALevel`) and no occurrence block at all;
+ *  · nobody has sized: no level by readiness's own rule (`riskHoldsALevel`; with no occurrence block it is `riskHoldsAPlainLevel`);
  *  · is still provisional (no participation choice, or an unsized omission already retained; an adopted `included` risk asks);
  *  · is a ROOT on the goal's path, in the graph the Run sends: no cause drawn into it, and a directed path to a goal;
  *    ⭐ OR is an UNLINKED CONCERN construction kept out: no link at all, in or out, and the persisted `retained_excluded` mark that
@@ -25,11 +25,24 @@
  */
 import { authorshipOf, nodeIntroductionOf } from '../../cee/provenance/provenance-of.js';
 import { limitNodeIds } from '../../graph/retained-limit.js';
-import { riskHoldsALevel } from './risk-occurrence.js';
 import { preconditionRiskIds } from '../../graph/inert-risk.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
+const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+
+/**
+ * The part of readiness's level rule that needs no occurrence block (`risk-occurrence.ts` `riskHoldsALevel` composes it with the
+ * block rule): a stored level (`observed_state`, the V1 `data`) or a sampled uniform prior with a real range. One definition; it
+ * lives here so the occurrence writer can reconcile this rule's marks without an import cycle.
+ */
+export function riskHoldsAPlainLevel(node: Rec): boolean {
+  if (finite(isRec(node.observed_state) ? node.observed_state.value : undefined)) return true;
+  if (finite(isRec(node.data) ? node.data.value : undefined)) return true;
+  const prior = isRec(node.prior) ? node.prior : undefined;
+  return prior !== undefined && prior.distribution === 'uniform' && finite(prior.range_min) && finite(prior.range_max)
+    && prior.range_min !== prior.range_max;
+}
 
 /** Olumi's suggestion by positive evidence: the drafter's own label, or admission's stamp. Never by a missing stamp. */
 const olumiSuggested = (n: Rec): boolean => {
@@ -45,7 +58,7 @@ export function unsizedOlumiRiskIds(graph: unknown): ReadonlySet<string> {
   const kindOf = new Map(nodes.map((n) => [n.id, n.kind]));
   const candidates = nodes.filter(n => n.kind === 'risk' && olumiSuggested(n)
     && (n.analysis_participation === undefined || n.analysis_participation === 'retained_excluded')
-    && (n.event_risk === undefined || n.event_risk === null) && !riskHoldsALevel(n, graph));
+    && (n.event_risk === undefined || n.event_risk === null) && !riskHoldsAPlainLevel(n));
   const candidateIds = new Set(candidates.map(n => n.id));
   // A persisted omission is still checked on its retained causal path, so every reader can disclose it.
   const keptOut = new Set(nodes.filter(n => n.analysis_participation === 'retained_excluded' && !candidateIds.has(n.id)).map(n => n.id));

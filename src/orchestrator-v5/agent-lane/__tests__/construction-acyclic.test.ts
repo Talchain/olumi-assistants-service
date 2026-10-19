@@ -48,6 +48,7 @@ import type { HandlerInvocation } from '../../tools/registry.js';
 import type { SessionStore } from '../../session/store.js';
 import { subtractMagnitudeDelta } from './magnitude-delta.js';
 import { runOmittedRisks, unsizedOlumiRiskIds } from '../unsized-risk.js';
+import { applyRiskOccurrenceEdit, olumiOccurrenceBlock, riskOccurrencePostimageNode, riskOccurrenceSubject } from '../risk-occurrence.js';
 import { applyPatchOperations } from '../../../orchestrator/patch-applier.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
 import { compactGraph } from '../../../orchestrator/context/graph-compact.js';
@@ -728,6 +729,31 @@ describe('NO PLACEHOLDER LINK FOR AN UNLINKED CONCERN: never wired into the goal
     const fact = ((out as { handler_facts?: { fact_type: string; result: unknown }[] }).handler_facts ?? []).find((f) => f.fact_type === 'run_analysis');
     expect((runOmittedRisks(fact?.result) ?? []).map((r) => r.node_id)).not.toContain(CONCERN);
     expect(participation(await reopen(saved))).toBeUndefined();
+  });
+
+  // ⭐ DL-3 (handoff of `applyRiskOccurrenceEdit` for #3441): the occurrence card's writer sizes the risk, so the SAME saved write
+  // reconciles the unsized-risk mark, and its read-back and retry recognise exactly that postimage.
+  it('RED (sized through the occurrence writer): Olumi’s linked concern, still excluded, is sized by its occurrence card → the same write includes it → the Run sends it with its sign → a cold reopen keeps it', async () => {
+    const { body, graph } = await build(withConcern('inferred'));
+    const linked = projectGraphForPersistence({ ...body, ...applyPatchOperations(GraphV3.parse(graph), [userLink(CONCERN, -0.3)] as never) }) as unknown as Graph;
+    expect(participation(linked), 'PRECONDITION: linked but unsized, still excluded').toBe('retained_excluded');
+    const subject = riskOccurrenceSubject(linked, CONCERN);
+    if (subject.kind !== 'eligible') throw new Error(`PRECONDITION: the occurrence card is offered (${subject.reason})`);
+    const approved = { risk_id: CONCERN, event_risk: olumiOccurrenceBlock(10, 30, subject.window_months)!, expected_node: structuredClone(subject.node),
+      goal_id: subject.goal_id, expected_goal: subject.goal };
+    const written = applyRiskOccurrenceEdit(linked, approved);
+    if (written.kind !== 'mutated') throw new Error(`the occurrence write landed: ${JSON.stringify(written)}`);
+    const saved = projectGraphForPersistence(written.mutatedGraph) as unknown as Graph;
+    expect(participation(saved), 'included in the same saved write').toBeUndefined();
+    // The read-back and the retry recognise exactly this postimage (no false "not confirmed", no refused retry).
+    expect(saved.nodes.find((n) => n.id === CONCERN)).toEqual(riskOccurrencePostimageNode(approved, saved));
+    expect(applyRiskOccurrenceEdit(saved, { ...approved, own_write_landed: true } as never).kind).toBe('unchanged');
+    const { plotCalls, error } = await runAnalysis(saved);
+    expect(error).toBeNull();
+    expect(sentEdges(plotCalls).filter((e) => e.from === CONCERN).map((e) => [e.to, e.effect_direction, e.strength?.mean])).toEqual([[GOAL, 'negative', -0.3]]);
+    const back = await reopen(saved);
+    expect(participation(back)).toBeUndefined();
+    expect(back.edges.filter((e) => e.from === CONCERN).map((e) => [e.to, e.effect_direction])).toEqual([[GOAL, 'negative']]);
   });
 
   it('CONTROL (never cleared merely because an edge appeared): Olumi’s concern linked but still unsized keeps its mark and stays out', async () => {
