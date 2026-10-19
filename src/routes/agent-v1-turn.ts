@@ -3595,7 +3595,18 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const coreOwns = coreCardOnly || (corePaused != null && result === undefined
       && ((approvedProposal !== undefined && approvedProposal === corePaused.proposal_id) || (declinedHold !== undefined && declinedHold === corePaused.proposal_id)));
     const sentEdits = coreOwns && approvedProposal !== undefined ? parseProposalEdits(body['proposal_edits']) : undefined;
-    if (coreOwns && sentEdits !== undefined) {
+    /**
+     * P0 (served efa5c543: K5-LOOP turn 3, browser K5 21:40Z): the UI's ordinary press carries the issued card's own envelope
+     * with NO fields. That is the UNEDITED press of THIS card (its id, revision and digest exactly as issued on this model), so
+     * it is the press, never an edit. A non-empty, malformed, foreign or no-longer-matching envelope is still refused below.
+     */
+    let uneditedPress = false;
+    if (sentEdits != null && sentEdits.fields.length === 0 && sentEdits.proposal_id === approvedProposal) {
+      const issued = heldAtStart.find((h) => heldProposalId(h) === approvedProposal);
+      const record = issued === undefined ? undefined : proposalRecord(issued, (await readBackState(dispatch, scenarioId)).graph);
+      uneditedPress = record !== undefined && record.revision === sentEdits.revision && record.digest === sentEdits.digest;
+    }
+    if (coreOwns && sentEdits !== undefined && !uneditedPress) {
       const said = editsRefusedSentence(sentEdits === null ? 'malformed' : 'refused');
       result = {
         assistant_text: said,

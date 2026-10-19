@@ -272,6 +272,39 @@ describe('PATH-B: a core correction shows its card in THAT turn; a press on it c
     expect(queueRaw()).toBe(30);
   });
 
+  /** The UI's ordinary press, as served (browser K5-LOOP 21:40Z ROWS.json): source `chip`, the card's own id and words, and
+   * `proposal_edits` carrying the issued id, revision, digest and graph hash with NO fields. */
+  const servedPress = (rec: Json, graphHash: string, over: Json = {}) => {
+    outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply_call' }], [{ type: 'message', text: SAVED_WORDS }]];
+    return post({ turn_id: randomUUID(), message: rec.approve_action.message, source: 'chip', chip: { id: rec.approve_action.id },
+      proposal_edits: { proposal_id: rec.proposal_id, revision: rec.revision, digest: rec.digest, graph_hash: graphHash, fields: [], ...over } });
+  };
+
+  it('⭐ RED→GREEN (P0, served efa5c543 browser K5): the UI\'s normal press with the issued envelope and NO fields saves ONCE', async () => {
+    const { j, rec } = await corrected();
+    calls = [];
+    const r = await servedPress(rec, j._proposal_fields.graph_hash);
+    expect(r.statusCode, r.body).toBe(200);
+    const t2 = r.json() as Json;
+    expect(t2.assistant_text, 'never "Those values could not be applied"').toBe(SAVED_WORDS);
+    expect(outputOf('apply_call')).toMatchObject({ status: 'ok', mutated: true, data: { saved: true } });
+    expect(commits(), 'ONE commit').toHaveLength(1);
+    expect(queueRaw()).toBe(20);
+  });
+
+  it('⛔ (P0 negatives) an envelope that is not THIS card as issued is still refused before anything runs: nothing is committed', async () => {
+    const { j, rec } = await corrected();
+    for (const over of [{ digest: 'not-the-issued-digest' }, { revision: 'not-the-issued-revision' }, { fields: [{ field_id: `factor_value:queue`, value: 25 }] }]) {
+      calls = [];
+      const r = await servedPress(rec, j._proposal_fields.graph_hash, over);
+      expect(r.statusCode, r.body).toBe(200);
+      expect((r.json() as Json).assistant_text, JSON.stringify(over)).toMatch(/could not be applied/);
+      expect(calls.length, `no model call: ${JSON.stringify(over)}`).toBe(0);
+    }
+    expect(commits()).toHaveLength(0);
+    expect(queueRaw()).toBe(30);
+  });
+
   it('⛔ a press carrying edits is refused before anything runs; nothing is committed', async () => {
     const { card, rec } = await corrected();
     calls = [];
