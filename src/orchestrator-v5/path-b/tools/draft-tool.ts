@@ -18,7 +18,7 @@ import { inTheUsersWords, type TypedWords } from './user-words.js';
 export const BUILD_MODEL_FROM_BRIEF = 'build_model_from_brief';
 export const BuildModelParams = z.object({
   /** The user's brief, copied verbatim from their own messages. */
-  brief: z.string().min(1).max(20_000),
+  brief: z.string(),
 }).strict();
 export type BuildModelArgs = z.infer<typeof BuildModelParams>;
 

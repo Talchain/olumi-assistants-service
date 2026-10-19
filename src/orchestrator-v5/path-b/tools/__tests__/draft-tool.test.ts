@@ -47,8 +47,8 @@ describe('Olumi\'s provisional first model, confirmed by its own receipt and a f
   });
 
   it.each([
-    ['no version of this construction on record', () => bridge.version.mockResolvedValue(null), [EMPTY, MODEL]],
-    ['a read that holds no model', () => undefined, [EMPTY, EMPTY]],
+    ['no version of this construction on record', (): void => { bridge.version.mockResolvedValue(null); }, [EMPTY, MODEL]],
+    ['a read that holds no model', (): void => {}, [EMPTY, EMPTY]],
   ] as const)('the bridge said saved, but %s: an unknown write, and no GRAPH_READY', async (_name, arrange, reads) => {
     arrange();
     const p = product(reads);
@@ -106,8 +106,8 @@ describe('refusals and unknowns, said as such', () => {
     expect(await buildModel(product([EMPTY]), ctx, { brief: BRIEF })).toEqual({ status: 'unavailable', reason: 'not_confirmed', write: 'unknown' });
   });
 
-  it('the parameters take the brief only', () => {
+  it('the parameters take the brief only; an empty brief is not the user\'s words', async () => {
     expect(BuildModelParams.safeParse({ brief: BRIEF, explicit_rebuild_request: 'yes' }).success).toBe(false);
-    expect(BuildModelParams.safeParse({ brief: '' }).success).toBe(false);
+    expect(await buildModel(product([]), ctx, { brief: '' })).toEqual({ status: 'refused', reason: 'brief_not_users_words' });
   });
 });
