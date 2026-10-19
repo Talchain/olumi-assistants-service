@@ -209,11 +209,21 @@ export function figuresWritten(quote: string): readonly { readonly low: number; 
  * ("A colleague said: “we lose 5% a month”"): the figure is that speaker's, never the user's, though the user typed the report.
  */
 function figureOnlyInSpeech(quote: string, figure: number): boolean {
-  const { text, inSpeech } = speechReading(quote);
-  const spelled = [...text.matchAll(new RegExp(`\\b(?:${CARDINAL_AMOUNT_SOURCE})\\b`, 'gi'))].flatMap((m) =>
+  const at = figureOccurrences(quote, figure);
+  return at.length > 0 && at.every((o) => o.inSpeech);
+}
+
+/**
+ * ⭐ QBC PR-B (Codex #3415 r1 SIMPLER-ALTERNATIVE): every place `text` writes `figure`, in digits or in words (the one cardinal reader),
+ * in the one speech reader's coordinates (`speechReading(text).text`), each with whether it sits inside another speaker's quotation.
+ * The one occurrence list: the speech check above, and the writers that must credit only an occurrence outside a quotation.
+ */
+export function figureOccurrences(text: string, figure: number): { readonly index: number; readonly inSpeech: boolean }[] {
+  const { text: plain, inSpeech } = speechReading(text);
+  const spelled = [...plain.matchAll(new RegExp(`\\b(?:${CARDINAL_AMOUNT_SOURCE})\\b`, 'gi'))].flatMap((m) =>
     (parseCardinalAmount(m[0]) === Math.abs(figure) ? [m.index!] : []));
-  const at = [...findStatedAmounts(text).filter((a) => Math.abs(a.magnitude) === Math.abs(figure)).map((a) => a.index), ...spelled];
-  return at.length > 0 && at.every(inSpeech);
+  const at = [...findStatedAmounts(plain).filter((a) => Math.abs(a.magnitude) === Math.abs(figure)).map((a) => a.index), ...spelled];
+  return [...new Set(at)].sort((a, b) => a - b).map((index) => ({ index, inSpeech: inSpeech(index) }));
 }
 
 
@@ -399,7 +409,8 @@ export function verifyStatement(given: StatementArgs | null | undefined, texts: 
     if (low === undefined || high === undefined || !(low < high)) return malformed(`A range needs low below high, as “${quote}” states them. Nothing was prepared.`);
     const read = stated.find((r) => r.low < r.high && same(quote, low, r.low) && same(quote, high, r.high));
     if (read === undefined) return { kind: 'refused', refusal: 'figure_not_in_quote', detail: `“${quote}” does not state ${low}–${high} ${rules.unit}. Quote the words that state it. Nothing was prepared.` };
-    if (figureOnlyInSpeech(quote, read.high)) return anotherSpeaker(`${low}–${high}`);
+    // Both ends: a range one of whose ends is written only inside another speaker's quotation is not the user's (Codex #3415 r1 P1).
+    if (figureOnlyInSpeech(quote, read.low) || figureOnlyInSpeech(quote, read.high)) return anotherSpeaker(`${low}–${high}`);
     if (dropsBound(read.low) || dropsBound(read.high)) return boundDropped(`${low}–${high}`);
     if (givenUnit !== undefined && !unitWrittenAfter(quote, read.high, givenUnit)) return unitRefused(`${low}–${high}`);
     return { kind: 'verified', statement: { ...base, low: read.low, high: read.high } };

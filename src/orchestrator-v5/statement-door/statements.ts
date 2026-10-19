@@ -52,8 +52,9 @@ export function statementBoundTo(graph: unknown, subject: DoorSubject, quote: st
         ...recordsWithUnknownSpeakerOn(n).flatMap(r => r.statements.map(s => s.quote)),
         ...[legacyOf(n, 'already_true_quote'), legacyOf(n, 'dependency')].filter((s): s is string => typeof s === 'string'),
       ].some(held => quoteSpansIn(speechReading(held).text, retired).length > 0)) : [];
-      named = labelled.length > 0 ? labelled : cited ? holders.length === 1 ? holders.filter(n => n.kind === subject.kind) : []
-        : same.filter(n => isFactorNamedByUser(String(n.label), speech.text));
+      // ⭐ QBC row 12 (#3400 RES1): a label inside quoted words never NAMES the item being corrected (another item's held words may
+      // contain it); quoted words only subtract. Outside them, or the cited bytes' one holder; else nothing is named here.
+      named = labelled.length > 0 ? labelled : cited && holders.length === 1 ? holders.filter(n => n.kind === subject.kind) : [];
     }
     if (named.length === 1) {
       if (found !== undefined) found.subject = { ...subject, id: String(named[0]!.id) };

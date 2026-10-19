@@ -4,7 +4,7 @@
  * goal's target is the user's (`threshold_source: 'brief_extraction'`) only where it binds. Each RED row is RED at staging 4dd7c21b
  * and runs the real path: scripted drafter → `buildModelFromBrief` → `/graph/register` (the registered graph is the cold read's input).
  * PR-A rows: 1 (#3399 D4 ×2), 2 (#3399 D2), 3 (#3401 re-choice), 4 (#3401 retry, rows reused from codex-r3-probes), 11 (P05).
- * Row 5 (pair brief, per-occurrence ownership) is PR-B's. Synthetic briefs, except the persisted unattested-event fixture the
+ * PR-B row 5 (pair brief, per-occurrence ownership): OWED (`it.fails`). Synthetic briefs, except the persisted unattested-event fixture the
  * existing suite already uses.
  */
 import { readFileSync } from 'node:fs';
@@ -175,6 +175,21 @@ describe('row 3 (#3401): a re-chosen goal never overwrites the user\'s verified 
     const { graph, inputs } = await construct([firstDraft(), withStatement(redraft(), 'goal')], FX.brief);
     expect(inputs).toHaveLength(2);
     expect(goalOf(graph), JSON.stringify(goalOf(graph))).toMatchObject({ goal_threshold_raw: 10, goal_threshold_unit: '%', threshold_source: 'brief_extraction' });
+  });
+});
+
+describe('row 5: two equal targets in one sentence each bind to their own quantity, by occurrence', () => {
+  const PAIR = 'Should I hire a Tech lead or two developers to increase productivity by at least 10% and code quality by at least 10%?';
+  const withQuality = (d: Rec): Rec => ({ ...d, decision_question: PAIR, constraints: [...(d.constraints as Rec[]),
+    { metric: 'Code quality score', operator: '>=', value: 10, unit: '%', provenance: 'explicit', frame: 'change_abs', role: 'target' }] });
+  // OWED (DL-3 ruling, PR-B): the clause names productivity AND code quality, so it licenses neither today (the safe failure). No
+  // general conjunction cut: it would change the central reader on every non-strict door. Flips with per-occurrence ownership.
+  it.fails('OWED: the re-chosen productivity goal\'s 10% is attributed to the user, not saved unattributed', async () => {
+    const r = withQuality(redraft());
+    r.goal.source_quote = PAIR;
+    const { graph, result } = await construct([withQuality(first()), r], FX.brief.replace(GOVERNING, PAIR));
+    expect(result.ok, JSON.stringify(result).slice(0, 600)).toBe(true);
+    expect(goalOf(graph), JSON.stringify(goalOf(graph))).toMatchObject({ goal_threshold_raw: 10, threshold_source: 'brief_extraction' });
   });
 });
 
