@@ -8,7 +8,7 @@
  * An outcome is evidence of what happened, never of what the adapter attempted. `traceRow` is the row the runner records in
  * `_agent.tool_calls`, the shape the VERIFIER kit reads (`redteam/core-accept/check-core.mjs`).
  */
-import { z } from 'zod/v4';
+import { z } from 'zod-v4';
 
 const reason = z.string().regex(/^[a-z][a-z0-9_]*$/);
 

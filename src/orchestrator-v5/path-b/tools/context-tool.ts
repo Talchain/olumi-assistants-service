@@ -12,7 +12,7 @@
  *  · the selected Run: its id, the hash it ran on, its currency and leader permission, and the licensed Run facts
  *    (`runFactsOf`, the packet every AI call after a Run reads).
  */
-import { z } from 'zod/v4';
+import { z } from 'zod-v4';
 import type { AgentToolContext } from '../../agent-lane/runtime/agent-tools.js';
 import type { InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
 import { FRESH_READ } from '../../agent-lane/turn-read-cache.js';

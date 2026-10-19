@@ -10,7 +10,7 @@
  *  · `unavailable` when the Run turn failed or nothing new is on record: nothing is claimed.
  */
 import { randomUUID } from 'node:crypto';
-import { z } from 'zod/v4';
+import { z } from 'zod-v4';
 import type { AgentToolContext } from '../../agent-lane/runtime/agent-tools.js';
 import type { InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
 import { AGENT_RUN_ANALYSIS_CHIP_ID } from '../../handlers/agent-chip-ids.js';
