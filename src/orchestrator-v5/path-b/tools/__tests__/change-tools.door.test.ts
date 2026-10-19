@@ -156,6 +156,14 @@ describe('ROW 2: exactly once across a lost response and a restart', () => {
     expect(rows.size).toBe(1);
   });
 
+  it('an id the store does not hold: refused, nothing read or written', async () => {
+    const d = door();
+    expect(await applyChange({ dispatch, proposals: new ProposalStore(), commitOptionLevels: d }, ctx, { proposal_id: 'prop_not_one' }))
+      .toEqual({ status: 'refused', reason: 'unknown_proposal' });
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(d).not.toHaveBeenCalled();
+  });
+
   it('a model that moved since the proposal (not by this proposal): superseded, nothing written', async () => {
     const { proposals, id } = await proposed([queueTo('user', 'about 20 minutes')]);
     persisted = projectGraphForPersistence({ ...GraphV3.parse({ ...(stored() as Rec), nodes: (stored() as { nodes: Rec[] }).nodes
