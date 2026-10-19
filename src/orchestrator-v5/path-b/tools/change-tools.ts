@@ -22,7 +22,9 @@
  *    literal match proves the bytes, never the speaker (PL 3b), so it is never "the user's, verified". Not kept: the words,
  *    and for a third party that it was someone else, and their name. An unknown speaker: BLOCKED-SCHEMA (it would read human).
  *  · option setting — Olumi's: `cee_hypothesis` (ai). Not kept: the user's approval (a cell holds no acceptance marker). Any
- *    other source: BLOCKED-SCHEMA — the level writer stamps only the user's verified figure or Olumi's.
+ *    other source, with the words literally the user's: ORIGIN UNKNOWN (R3: `cee_hypothesis` beside `user_material_unverified`,
+ *    the add-option pairing), never Olumi's and never the user's verified figure. Not kept: the declared origin, a third
+ *    party's name, the words.
  *  · stance (AIE 15:24/15:54, separate from source): a value holds a current level, a setting a what-if. A target or a
  *    supposition is never saved as a value; a stance the carrier does not mean is saved with the stance named as not kept.
  * Changes this path does not make yet (the goal's target, a link's strength, add, remove, rename) come back `unavailable`,
@@ -132,21 +134,26 @@ function holdingOf(kind: Op['kind'] | 'target', s: DeclaredSource, stance: Decla
     return { stored: { origin: 'ai' }, not_kept: s.origin === 'olumi' ? [{ what: 'approval', declared: 'adopted_by_the_press' }]
       : [{ what: 'origin', declared: s.origin }, ...(s.origin === 'third_party' && s.named_source !== null ? [{ what: 'name' as const, declared: s.named_source }] : [])] };
   }
-  if (kind === 'setting' && s.origin !== 'olumi') return { blocked: 'an option\'s setting can be saved only as Olumi\'s own estimate on this path yet' };
   if (kind === 'value' && s.origin === 'unknown') return { blocked: 'a figure whose speaker is not known cannot be saved as unknown on this path yet; it would read as a person\'s figure' };
   if (stance === 'target') return { blocked: kind === 'value' ? 'a target would become this factor\'s current level; setting a target isn\'t available on this path yet' : 'a target is not an option\'s setting' };
   if (kind === 'value' && stance === 'hypothetical') return { blocked: 'a supposed figure would become this factor\'s current level; it cannot be kept as a supposition on this path yet' };
   // What the carrier means for this source: Olumi's figure is held as Olumi's estimate; a person's value as a stated level;
   // an option's setting as a what-if. Any other declared stance is saved with its stance named as not kept.
-  const held: readonly DeclaredStance[] = s.origin === 'olumi' ? (kind === 'value' ? ['estimate'] : ['estimate', 'hypothetical']) : ['stated_current'];
+  const held: readonly DeclaredStance[] = s.origin === 'olumi' ? (kind === 'value' ? ['estimate'] : ['estimate', 'hypothetical'])
+    : kind === 'value' ? ['stated_current'] : ['stated_current', 'hypothetical'];
   const stanceLost: NotKept[] = held.includes(stance) ? [] : [{ what: 'stance', declared: stance }];
+  const words: NotKept = { what: 'words', declared: s.quote ?? '' };
+  const name: NotKept[] = s.origin === 'third_party' && s.named_source !== null ? [{ what: 'name', declared: s.named_source }] : [];
+  // R3: a person's setting is held as origin unknown — the cell keeps the figure, never whose words they were.
+  if (kind === 'setting' && s.origin !== 'olumi') {
+    return { stored: { origin: 'unknown' }, not_kept: [...stanceLost, ...(s.origin === 'unknown' ? [] : [{ what: 'origin' as const, declared: s.origin }]), ...name, words] };
+  }
   if (s.origin === 'olumi') {
     return kind === 'value' ? { stored: { origin: 'ai', accepted: true }, not_kept: stanceLost }
       : { stored: { origin: 'ai' }, not_kept: [...stanceLost, { what: 'approval', declared: 'adopted_by_the_press' }] };
   }
-  const words: NotKept = { what: 'words', declared: s.quote ?? '' };
   return { stored: { origin: 'human', role: 'unverified' }, not_kept: [...stanceLost, ...(s.origin === 'user' ? [words]
-    : [{ what: 'speaker' as const, declared: 'third_party' }, ...(s.named_source === null ? [] : [{ what: 'name' as const, declared: s.named_source }]), words])] };
+    : [{ what: 'speaker' as const, declared: 'third_party' }, ...name, words])] };
 }
 const isBlocked = (h: Holding): h is Extract<Holding, { blocked: string }> => 'blocked' in h;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -199,8 +206,9 @@ function planOf(scenarioId: string, proposalId: string, ops: readonly Op[], grap
     // #3461 R1: only a unitless share may take the model's 0–1 scale on a factor with no range. A figure with a unit (or above 1)
     // would lose its figure and unit there, so it is not proposed at all (`needs_range`), never written and found short after.
     if (frame === null && (o.unit !== null || Math.abs(o.value) > 1)) return { refusal: 'needs_range', op: i };
-    plan.levels.push(frame === null ? { option_id: o.option_id!, factor_id: o.factor_id, value: o.value, author: 'model_proposed' }
-      : { option_id: o.option_id!, factor_id: o.factor_id, value: o.value / frame, raw_value: o.value, cap: frame, ...(o.unit === null ? {} : { unit: o.unit }), author: 'model_proposed' });
+    const author = olumi ? 'model_proposed' as const : 'unverified' as const;
+    plan.levels.push(frame === null ? { option_id: o.option_id!, factor_id: o.factor_id, value: o.value, author }
+      : { option_id: o.option_id!, factor_id: o.factor_id, value: o.value / frame, raw_value: o.value, cap: frame, ...(o.unit === null ? {} : { unit: o.unit }), author });
     if (!edges.some((e) => e.from === o.option_id && e.to === o.factor_id)) plan.links.push({ option_id: o.option_id!, factor_id: o.factor_id });
   }
   return plan;
