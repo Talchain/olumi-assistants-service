@@ -466,7 +466,7 @@ const levelSourceFor = (provenance: string): ConstructedLevelSource =>
  * ⚠ AND ONLY THEN, DELIBERATELY: an UNFRAMED level (no range; the level is its own figure) keeps
  * `{ value, source, target_match }` — `InterventionV3`: "value = raw_value (or raw_value omitted)".
  */
-function constructedLevel(
+export function constructedLevel(
   factorId: string,
   figure: number,
   cap: number | undefined,
@@ -703,7 +703,7 @@ export function decisionEntityFor(
  * The merge condition is deliberately narrow: identical words, ignoring case
  * and spacing. It never merges two different names.
  */
-function assignIds(labels: readonly string[]): Map<string, string> {
+export function assignIds(labels: readonly string[]): Map<string, string> {
   const out = new Map<string, string>();
   const byCanonical = new Map<string, string>();
   const used = new Set<string>();
@@ -739,7 +739,7 @@ function assignIds(labels: readonly string[]): Map<string, string> {
  */
 
 /** The node display vocabulary. `user_set` is reserved for a direct user edit. */
-const displayProvenanceFor = (provenance: string): 'from_brief' | 'ai_inferred' =>
+export const displayProvenanceFor = (provenance: string): 'from_brief' | 'ai_inferred' =>
   provenance === 'explicit' ? 'from_brief' : 'ai_inferred';
 
 /**
@@ -1431,7 +1431,7 @@ const ISL_IDENTITY_RECONCILIATION_TOLERANCE = 0.05;
  * No declaration means no declared sum. Any failure writes nothing: the links stay as drafted, and the refusal is said once
  * (`nonlinear_identity_rejected`). Pure.
  */
-function checkDeclaredSums(
+export function checkDeclaredSums(
   allDeclared: readonly CandidateIdentity[],
   resolve: (label: string) => string | undefined,
   nodes: readonly AdmittedNode[],
