@@ -259,8 +259,12 @@ export function figureSource(model: unknown, brief: string | undefined, subject:
     && (typeof st.low === 'number' && typeof st.high === 'number' ? st.low === st.high && st.low === value
       : typeof st.low === 'number' ? st.low === value : typeof st.high === 'number' && st.high === value);
   const map = sourceMapOf(drafted, brief);
-  return (map.verified.get(key) ?? []).some((st) => states(st)
-    && ![...map.verified.entries()].some(([other, said]) => other !== key && said.some((o) => o.quote === st.quote && states(o))))
+  // ⭐ ONE QUANTITY READ TWICE IS NO RIVAL (PROMPT-INT first-loss trace; DL-3; Codex pair AMEND): an option's setting and the link FROM
+  // the factor it sets, stated in the setting's own unit, are one quantity ("hiring a contractor would add 60 tickets a week" is the
+  // setting and what it adds), so that link never contests the setting. In another unit ("60 tickets a week per contractor") it does.
+  const carried = subject.kind === 'option' && subject.factor_label !== undefined ? `link|${norm(subject.factor_label)}|` : undefined;
+  return (map.verified.get(key) ?? []).some((st) => states(st) && [...map.verified.entries()].every(([other, said]) => other === key
+    || !said.some((o) => o.quote === st.quote && states(o) && !(carried !== undefined && other.startsWith(carried) && sameUnit(o.unit, st.unit)))))
     ? 'user' : 'unverified';
 }
 
