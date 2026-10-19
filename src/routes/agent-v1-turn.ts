@@ -4370,7 +4370,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const core = await runCoreTurn({
           ctx: coreCtx, message, budget, userId,
           tools: (onCall) => pathBTools({ dispatch: capDispatch, proposals, callStructured: capCallStructured, onAnalysis: onCapAnalysis,
-            commitOptionLevels: commitOptionLevelsDoor, onModelRegistered: (raw) => emitGraphReady(raw) }, coreCtx, mode, onCall),
+            commitOptionLevels: commitOptionLevelsDoor, onModelRegistered: (raw) => emitGraphReady(raw) }, coreCtx, mode,
+            (row, result) => onCall(row, { ...result })),
           instructions: instructionsForMode(mode, eligibleIntervention === undefined ? AGENT_TOOL_INSTRUCTIONS : `${AGENT_TOOL_INSTRUCTIONS}\n\n${ELIGIBLE_INTERVENTION_INSTRUCTION}`),
           briefText: await readingDispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {})
             .then(read => read.status === 200 ? read.json.brief_text : undefined).catch(() => undefined),
