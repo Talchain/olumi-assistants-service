@@ -272,7 +272,11 @@ describe('STEP 8 Route A — a validated definition into the goal is worked out 
     node(g, 'widgets_per_hour_today')!.observed_state = { ...os, raw_value: 41, value: 41 / os.cap, baseline: 41 / os.cap };
     return g;
   };
-  const confirm = (outcome: Rec): string => HANDLER_VALIDATION_REGISTRY.run_analysis!.confirmation_template!(outcome as never);
+  const confirm = (outcome: Rec): string => {
+    const template = HANDLER_VALIDATION_REGISTRY.run_analysis?.confirmation_template;
+    if (typeof template !== 'function') throw new Error('run_analysis confirms through a function');
+    return template(outcome);
+  };
   it('RED (Codex R3 probe): a canvas-stored 41 is said with the Run, and the reply the user receives carries it', async () => {
     const outcome = await runOn(await at41(), 'r3-composed');
     expect(String(outcome.handler_facts[0].result.summary).endsWith(` ${NOTE41}`)).toBe(true);
