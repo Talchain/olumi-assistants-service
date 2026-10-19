@@ -82,7 +82,7 @@ import {
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
 import { authorshipOf, hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
-import { figureSource, figuresWritten, goalTargetStatements, linkEffectRangeEnd, linkEffectRangeInOtherUnit, linkEffectStatedRange, sourceMapOf, subjectSource, type FigureSource, type StatedWholeRangeOfLink } from './construction-source-map.js';
+import { figureSource, figuresWritten, goalTargetStatements, linkEffectRangeEnd, linkEffectRangeInOtherUnit, linkEffectStatedRange, sourceMapOf, subjectSource, withClaimLinkSizes, type FigureSource, type StatedWholeRangeOfLink } from './construction-source-map.js';
 import { retainUnsizedOlumiRisks } from './unsized-risk.js';
 import { carriesStatements, levelQuotedByBrief, recordedRawLevelQuote, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
@@ -3918,7 +3918,9 @@ function admitOnce(
   const { model: draftedModel, found: extraParentsOfProductGoal } = rerouteExtraParentsOfProductGoal(foldedModel, brief);
   // Authenticate before framing or writing levels: an estimate never competes with the user's current figure.
   // The total of the user's own sum is the user's level today (`goalLevelOfStatedSum`), read on the verified factors.
-  const model = goalLevelOfStatedSum({ ...draftedModel, factors: draftedModel.factors.map(f => verifiedFactorLevelValue(draftedModel, f, brief) ?? f) }, brief);
+  // ⭐ v6.0 PR-2: a link's size is derived from its current claim (`withClaimLinkSizes`) before the one sizing path reads it.
+  const model = goalLevelOfStatedSum({ ...draftedModel, links: withClaimLinkSizes(draftedModel, brief),
+    factors: draftedModel.factors.map(f => verifiedFactorLevelValue(draftedModel, f, brief) ?? f) }, brief);
   const levelReading = { value: null as BriefGoalLevel | null };
   // ⭐ QBC row 2 (D2, proof 1: "at least 20 new customers" saved as Olumi's): the goal is the user's when the AI's own statement
   // of its target BINDS (`goalTargetStatements`: verified, signed, in the goal's comparator, at this goal's own occurrence), never

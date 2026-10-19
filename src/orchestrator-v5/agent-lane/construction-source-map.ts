@@ -511,6 +511,60 @@ export function withConstructionStatements<G extends { nodes: unknown[] }>(graph
   return out;
 }
 
+/** A drafted link, as admission reads it (labels, the drafted size and its provenance). */
+interface DraftedLink {
+  readonly from: string;
+  readonly to: string;
+  readonly direction: string;
+  readonly effect_amount?: number | null;
+  readonly effect_per_source_change?: number | null;
+  readonly effect_provenance?: string | null;
+}
+
+/**
+ * ⭐ v6.0 PR-2 (served G2 1253187a: the user's "about 20 … between 10 and 30" per specialist was held on the link's statement while
+ * the link itself stayed unsized): a link's size is DERIVED from its current claim. A link the draft leaves unsized, whose effect
+ * the USER's verified statement gives as a point, or as a range around a central figure the quote itself writes ("about A, between
+ * L and H"), takes that figure per ONE of its source (the claim's unit is per the source's own noun), as an explicit size. The ONE
+ * existing sizing path (the binder, the centre reader, `userSizeEarned`) then decides authorship and stamps it exactly as it does a
+ * drafted size. Never an end or a midpoint (AIE A3); never another speaker's or a refused statement (the verified map only); a
+ * link that already has a size, or any other link, is returned as the same object. Pure.
+ */
+export function withClaimLinkSizes<L extends DraftedLink>(model: { readonly links: readonly L[]; readonly statements?: unknown;
+  readonly factors?: readonly { readonly label: string; readonly unit?: string | null }[];
+  readonly outcomes?: readonly { readonly label: string; readonly unit?: string | null }[] }, brief: string | undefined): L[] {
+  if (typeof brief !== 'string' || !Array.isArray(model.statements)) return [...model.links];
+  const entries = draftStatements(model) as unknown[];
+  const unitOf = (label: string): string | undefined => [...(model.factors ?? []), ...(model.outcomes ?? [])]
+    .find((n) => norm(n.label) === norm(label))?.unit ?? undefined;
+  return model.links.map((l) => {
+    if (typeof l.effect_amount === 'number' || (l.direction !== 'positive' && l.direction !== 'negative')) return l;
+    const key = subjectKey({ kind: 'link', label: l.from, to_label: l.to }, 'effect');
+    const figures = entries.flatMap((entry) => {
+      const r = entry !== null && typeof entry === 'object' && !Array.isArray(entry) ? entry as Record<string, unknown> : {};
+      const subject = subjectOf(r['subject']);
+      if (subject === undefined || r['field'] !== 'effect' || subjectKey(subject, 'effect') !== key) return [];
+      const said = sourceMapOf([entry], brief).verified.get(key) ?? [];
+      const value = typeof r['value'] === 'number' && Number.isFinite(r['value']) ? Math.abs(r['value']) : undefined;
+      return said.flatMap((st) => {
+        if (st.speaker !== 'user' || st.negated === true || typeof st.low !== 'number' || typeof st.high !== 'number') return [];
+        const [lo, hi] = [Math.min(Math.abs(st.low), Math.abs(st.high)), Math.max(Math.abs(st.low), Math.abs(st.high))];
+        const central = lo === hi ? lo : value !== undefined && value > lo && value < hi ? value : undefined;
+        // The central figure is one the quote itself writes, never the drafter's own number.
+        if (central === undefined || !figuresWritten(st.quote).some((w) => w.low === w.high && Math.abs(w.low) === central)) return [];
+        // Per ONE of the source's own unit: Olumi's reading of the claim's unit is per the source's own noun ("tickets per week per
+        // specialist"). The record keeps no unit the high end does not write (`withOwnRangeUnit`), so the reading's own unit is read.
+        const per = readUnitParts(typeof r['unit'] === 'string' ? r['unit'] : undefined)?.per;
+        const source = readUnitParts(unitOf(l.from));
+        return per != null && per.length > 0 && source?.kind === 'count' && source.noun !== null && per.join(' ') === source.noun.join(' ')
+          ? [central] : [];
+      });
+    });
+    if (figures.length !== 1) return l;
+    return { ...l, effect_amount: l.direction === 'negative' ? -figures[0]! : figures[0]!, effect_per_source_change: 1, effect_provenance: 'explicit' };
+  });
+}
+
 const BOUND_FORM: Readonly<Record<string, StatementForm>> = { '<=': 'upper_bound', '<': 'upper_bound', '>=': 'lower_bound', '>': 'lower_bound' };
 /**
  * ⭐ A draft's statements, as every reader takes them (DL 15 Oct, marketing e2e S4): a statement the drafter filed as a POINT level
