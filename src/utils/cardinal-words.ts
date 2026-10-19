@@ -134,7 +134,9 @@ export const CARDINAL_NUMBER_SOURCE =
   `(?:(?:\\s+and\\s+|[\\s-]+)(?:${TOKEN_ALTERNATION}))*` +
   `(?:\\s+point(?:\\s+(?:${DECIMAL_DIGIT_ALTERNATION}))+(?:[\\s-]+(?:${MULTIPLIER_ALTERNATION}))*)?`;
 const NUMBER_CORE = CARDINAL_NUMBER_SOURCE;
-const START_GUARD = `(?<!\\b(?:${MULTIPLIER_ALTERNATION})(?:\\s+and)?[\\s-]+)(?<!\\bpoint\\s+)`;
+/** A number never starts inside another: right after a number word ("and" between them or not), or after "point" and its
+ * digits ("seven point twenty FIVE", "a hundred and ONE"). */
+const START_GUARD = `(?<!\\b(?:${TOKEN_ALTERNATION})(?:\\s+and)?[\\s-]+)(?<!\\bpoint(?:[\\s-]+(?:${TOKEN_ALTERNATION}))*[\\s-]+)`;
 /**
  * In free text, a number is never the start of a longer amount it cannot read whole: a decimal whose digits are not read one
  * by one ("seven point twenty five"), or the whole part of a fraction written with a numeral ("two thirds", "forty five AND TWO

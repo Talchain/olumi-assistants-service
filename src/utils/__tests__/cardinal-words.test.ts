@@ -222,6 +222,10 @@ describe("the range class: two ends or nothing", () => {
     ["between twenty and two hundred and fifty thousand (a shared scale read two ways)", "Between twenty and two hundred and fifty thousand.", []],
     ["between three and two (low not below high)", "Between three and two bakers.", []],
     ["between three and two thousand (a shared scale that would make no range)", "Between three and two thousand bakers.", [3, 2_000]],
+    ["two and twenty (one capture that reads no number)", "We need two and twenty hours.", []],
+    ["forty five and two thirds (no part of a numeral fraction)", "We need forty five and two thirds hours.", []],
+    ["two thirds (no whole part)", "Two thirds of orders are late.", []],
+    ["seven point twenty five (a decimal not read digit by digit: nothing)", "We waited seven point twenty five weeks.", []],
     ["CONTROL a compound with and", "We sell two hundred and fifty loaves.", [250]],
     ["CONTROL two numbers in two clauses", "We have two ovens and three mixers.", [2, 3]],
   ])("%s", (_case, text, expected) => { expect(readAll(text)).toEqual(expected); });
