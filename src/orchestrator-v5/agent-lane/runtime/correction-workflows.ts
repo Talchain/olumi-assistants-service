@@ -41,8 +41,26 @@ export function proposeStatementCorrection(ctx: AgentToolContext, graph: unknown
     provenance: { authored_by: 'model_proposed', basis: prepared.correction.source.source },
     validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: prepared.words });
   proposals.put(proposal);
+  retireSupersededCards(ctx, proposals, proposal.proposal_id, prepared.correction.edits.map(e => e.subject));
   return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label,
     base_revision: baseHash, note: 'Show the complete correction card before its own approval. Source, interpretation and approval remain separate.' };
+}
+
+/**
+ * ⭐ A CORRECTION RETIRES THE CARDS IT SUPERSEDES (DL-3 19 Oct; verifier joined diagnosis R07/C3, a stale result). An older card the
+ * user has not approved that writes a subject this correction corrects was built on the source the correction retires ("30 minutes
+ * per night" after the user said it is per block), so it is never offered again, beside or after the correction card. Exact subject
+ * paths only (a node, or a link as `from->to`); cards on any other subject, applied or partly applied cards and the correction card
+ * itself are untouched.
+ */
+function retireSupersededCards(ctx: AgentToolContext, proposals: ProposalStore, keep: string,
+  subjects: readonly { readonly id: string; readonly to_id?: string }[]): void {
+  const paths = new Set(subjects.map(s => (s.to_id === undefined ? s.id : `${s.id}->${s.to_id}`)));
+  for (const o of proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id)) {
+    const p = o.proposal_id === keep ? undefined : proposals.get(o.proposal_id);
+    if (p === undefined || proposals.isApplied(p.proposal_id) || proposals.partialProgressOf(p.proposal_id) !== undefined) continue;
+    if (p.operations.some(op => typeof op.path === 'string' && paths.has(op.path))) proposals.discard(p.proposal_id);
+  }
 }
 
 /** The existing statement operation's scoped correction is one complete native CAS registration. */

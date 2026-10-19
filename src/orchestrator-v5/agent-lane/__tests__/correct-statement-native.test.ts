@@ -65,6 +65,39 @@ describe.each(cases)('$name: sourced reading and subject review are separate', r
     expect(w.writes).toHaveLength(1);
   });
 
+  // ⭐ DL-3 19 Oct (verifier joined diagnosis R07/C3, a stale result): a correction retires the cards it supersedes. RED before this change:
+  // the older card that records the corrected-away source stayed awaiting approval beside the correction card, and was offered again.
+  it('a correction card retires the older unapproved card that writes the corrected subject; a card on another subject stays', async () => {
+    const f = fixture(row), w = await correctionWorld(f.graph, f.message);
+    const older = (path: string): string => {
+      const p = createProposal({ scenario_id: w.ctx.scenario_id, user_id: null, base_graph_identity_hash: 'earlier',
+        operations: [{ op: 'set_factor_value', path, value: { value: 70, unit: '%', authored_by: 'user_stated' } }],
+        provenance: { authored_by: 'model_proposed', basis: 'an earlier turn' }, validation: { admitted: true, loss_count: 0, refusals: [] },
+        public_label: `Record 1 figure you gave: ${path}` });
+      w.proposals.put(p);
+      return p.proposal_id;
+    };
+    const stale = older('report'), unrelated = older('dissent');
+    const card = await w.offer('propose_statement', { correction: f.request });
+    expect(card).toMatchObject({ ok: true, mutated: false });
+    const awaiting = w.proposals.outstanding(w.ctx.scenario_id, null).map(o => o.proposal_id);
+    expect(awaiting).toContain(String(card.proposal_id));
+    expect(awaiting).not.toContain(stale);
+    expect(awaiting).toContain(unrelated);
+  });
+  it('CONTROL: a refused correction retires nothing', async () => {
+    const f = fixture(row), w = await correctionWorld(f.graph, f.message);
+    const p = createProposal({ scenario_id: w.ctx.scenario_id, user_id: null, base_graph_identity_hash: 'earlier',
+      operations: [{ op: 'set_factor_value', path: 'report', value: { value: 70, unit: '%', authored_by: 'user_stated' } }],
+      provenance: { authored_by: 'model_proposed', basis: 'an earlier turn' }, validation: { admitted: true, loss_count: 0, refusals: [] },
+      public_label: 'Record 1 figure you gave: report' });
+    w.proposals.put(p);
+    const refused = await w.offer('propose_statement', { correction: { ...f.request, edits: [{ ...f.request.edits[0]!,
+      subject: { ...f.request.edits[0]!.subject, id: 'no_such_subject' } }] } });
+    expect(refused).toMatchObject({ ok: false });
+    expect(w.proposals.outstanding(w.ctx.scenario_id, null).map(o => o.proposal_id)).toContain(p.proposal_id);
+  });
+
   it.each(['legacy', 'incomplete'] as const)('%s persisted wording still requires the complete own card', async form => {
     const f = fixture(row), w = await correctionWorld(f.graph, f.message);
     const card = await w.offer('propose_statement', { correction: f.request });
