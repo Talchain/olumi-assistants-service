@@ -3539,7 +3539,20 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      */
     const corePaused = mode === 'core' && result === undefined && (approvedProposal !== undefined || declinedHold !== undefined)
       ? await store.readOpenAiPausedRun?.(scenarioId).catch(() => undefined) : undefined;
-    const corePress = corePaused == null ? undefined
+    // ⛔ A paused SDK run takes no edits: an approval of it that carries any (malformed or not) is refused with the existing
+    // sentence, and nothing resumes or is written (Codex #3461 R1). The change stays waiting for the person.
+    if (corePaused != null && result === undefined && approvedProposal !== undefined && approvedProposal === corePaused.proposal_id
+      && proposalEdits !== undefined) {
+      const said = editsRefusedSentence(proposalEdits === null ? 'malformed' : 'refused');
+      result = {
+        assistant_text: said,
+        items: [...(history ?? []), { role: 'user', content: [{ type: 'input_text', text: message }] },
+          { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: said }] }],
+        tool_calls: [], tool_results: [], mutated: false, hops: 0, stopped_reason: 'answered',
+        timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 },
+      };
+    }
+    const corePress = corePaused == null || result !== undefined ? undefined
       : approvedProposal !== undefined && approvedProposal === corePaused.proposal_id ? { decision: 'approve' as const, proposal_id: approvedProposal }
       : declinedHold !== undefined && declinedHold === corePaused.proposal_id ? { decision: 'decline' as const, proposal_id: declinedHold }
       : undefined;
