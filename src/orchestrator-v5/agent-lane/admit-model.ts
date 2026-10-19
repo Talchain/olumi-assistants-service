@@ -83,7 +83,7 @@ import { authorshipOf, hasUserStatedSize, settingProvenanceOf } from '../../cee/
 import { figureSource, goalTargetStatements, linkEffectRangeEnd, linkEffectRangeInOtherUnit, linkEffectStatedRange, sourceMapOf, subjectSource, type FigureSource, type StatedWholeRangeOfLink } from './construction-source-map.js';
 import { retainUnsizedOlumiRisks, UNSIZED_OLUMI_RISK_REASON, unsizedOlumiRiskIds } from './unsized-risk.js';
 import { amountsWrittenIn } from './stated-by-user.js';
-import { carriesStatements, levelQuotedByBrief, recordedRawLevelQuote, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
+import { carriesStatements, levelQuotedByBrief, recordedRawLevelQuote, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, briefSentencesRead, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 import { labelHoldsQuantity } from '../goal-target/held-user-links.js';
 import { goalDefinitionSum } from './goal-definition-sum.js';
@@ -142,8 +142,6 @@ export interface CandidateModel {
   readonly goal: {
     metric: string; operator: string; unit: string; horizon_months: number | null; provenance: string;
     kind?: 'event_by_date' | null;
-    /** HOST-WRITTEN, never drafted: the goal's level today is DERIVED from the user's figures (`goalLevelOfStatedSum`). */
-    level_derivation?: { readonly quote: string; readonly lead: string };
     deliverable?: string | null;
     /**
      * `false` means the brief named a DIRECTION and no number. Optional because the
@@ -1423,10 +1421,15 @@ const ISL_IDENTITY_RECONCILIATION_TOLERANCE = 0.05;
  *  · the total and every part have a scale and a level today, and today's levels add up within ISL's own reconciliation
  *    (|total − Σ parts| ≤ 5% × max(|total|, Σ |parts|)), so a stated sum is never one ISL would refuse the Run over. A
  *    constant is only ever a part with its own level: the candidate has no other place for one.
- * DL L3b ruling: an explicit declaration with located, bound brief evidence retains original user authorship.
- * This trusts the drafter's relation reading: a falsely declared denial can pass (accepted AI-misreading residual).
- * No declaration means no declared sum. A quote CEE cannot locate or bind is rejected as before. Any failure writes
- * nothing: the links stay as drafted, and the refusal is said once (`nonlinear_identity_rejected`). Pure.
+ * ⛔ USER-DECLARED EXACT SUMS: A CAPABILITY STILL OWED, TEMPORARILY FAIL-CLOSED (Codex #3440 R1–R3; DL-3, PL 11:05). A sum
+ * read from a sentence of the brief (the drafter's quote) would be the USER's definition, and no finite reading of a sentence
+ * establishes that it asserts the sum rather than supposing it ("In a world where …", "Let's say …"). So a quoted declaration is
+ * never taken, as the user's or relabelled as Olumi's: the links stay as drafted (base) and the reason is said once. Olumi's own
+ * reading (a declaration with no quote) and Route A (`goal-definition-sum.ts`, Olumi-read) are unchanged.
+ * A brief sentence naming the total and every part that DENIES it is a contradictory source: it withholds the sum on every path,
+ * Olumi's reading included (AIE L2-RELATION 18bf4f8c), read whole by the existing context reader (`briefSentencesRead`).
+ * No declaration means no declared sum. Any failure writes nothing: the links stay as drafted, and the refusal is said once
+ * (`nonlinear_identity_rejected`). Pure.
  */
 function checkDeclaredSums(
   allDeclared: readonly CandidateIdentity[],
@@ -1439,6 +1442,7 @@ function checkDeclaredSums(
   const accepted: AcceptedDeclaredSum[] = [];
   const loss: RepairEntry[] = [];
   const declared = allDeclared.filter((d) => d?.operation === 'sum');
+  const read = declared.length === 0 || typeof brief !== 'string' ? [] : briefSentencesRead(brief);
   if (declared.length === 0) return { accepted, loss };
   const nodeOf = new Map(nodes.map((n) => [n.id, n] as const));
   const unitOf = nodeUnitOf(nodes);
@@ -1481,6 +1485,11 @@ function checkDeclaredSums(
     if (why !== null) { reject(why); continue; }
     const totalLabel = nodeOf.get(totalId)!.label;
     const labelOf = (id: string): string => nodeOf.get(id)?.label ?? id;
+    // A sentence names the total and every part: each by its quantity words, a part also by its own figure today.
+    const namesEach = (s: string | null): boolean => s !== null && [totalId, ...partIds].every((id) => labelHoldsQuantity(s, labelOf(id))
+      || (id !== totalId && findStatedAmounts(s).some((a) => a.magnitude === Math.abs(todayRaw(id) ?? Number.NaN))));
+    // The brief's denial comes first: whatever else holds, a sum the user's own sentence denies is never taken (AIE L2-RELATION).
+    if (read.some((s) => s.miss === 'denied' && namesEach(s.text))) { reject('your brief says that is not so'); continue; }
     const definitional = edges.filter((e) => e.to === totalId && holdsByDefinition(e as Record<string, unknown>, unitOf));
     const plusOne = (id: string): boolean => {
       const links = edges.filter((e) => e.from === id && e.to === totalId);
@@ -1504,21 +1513,17 @@ function checkDeclaredSums(
       reject(`today "${totalLabel}" is ${sayFigure(total, '')} while those parts add up to ${sayFigure(sum, '')}`);
       continue;
     }
-    // Bind the drafter's declaration to its source; relation polarity remains the drafter's responsibility (DL L3b).
     const quoted = d.evidence?.quote;
     if (quoted === undefined || quoted === null) {
       accepted.push({ outcome_id: totalId, factor_ids: [...partIds], stated_in_brief: false });
       continue;
     }
     const sentence = locatedBriefSentence(brief, quoted);
-    const figures = sentence === null ? [] : findStatedAmounts(sentence).map((a) => a.magnitude);
-    const names = (id: string): boolean => sentence !== null && (labelHoldsQuantity(sentence, labelOf(id))
-      || (id !== totalId && figures.includes(Math.abs(todayRaw(id)!))));
-    if (sentence === null || ![totalId, ...partIds].every(names)) {
+    if (sentence === null || !namesEach(sentence)) {
       reject('the sentence it was read from is not one Olumi can find in your brief naming each of them');
       continue;
     }
-    accepted.push({ outcome_id: totalId, factor_ids: [...partIds], stated_in_brief: d.provenance === 'explicit', quote: sentence });
+    reject('Olumi can’t yet take a sum from your own words');
   }
   return { accepted, loss };
 }
@@ -2984,81 +2989,13 @@ function goalLevelIsEstimated(goal: CandidateModel['goal']): boolean {
 }
 
 /**
- * ⭐⭐ The goal's level as the total of the user's OWN declared sum (the checks below, whoever flagged the level): ONE sum on the
- * goal bound to a sentence of the brief, every part in the goal's unit with a known level, every non-zero part's level the
- * user's, and the parts adding up to the level. `null` otherwise. The ONE AUTHORSHIP OWNER reads it as proof of a goal level
- * the AI made no statement about (`goalLevelOwner`); `goalLevelOfStatedSum` types the level by it.
- */
-function statedSumOfGoal(model: CandidateModel, brief: string | undefined): { readonly parts: readonly CandidateModel['factors'][number][]; readonly zeroParts: ReadonlySet<string>; readonly quote: string } | null {
-  const goal = model.goal;
-  const level = goal.baseline_value;
-  if (goal.baseline_known !== true || typeof level !== 'number' || !Number.isFinite(level)) return null;
-  const sums = (model.identities ?? []).filter((d) => d?.operation === 'sum' && d.outcome === goal.metric);
-  const quote = sums.length === 1 ? sums[0]!.evidence?.quote : undefined;
-  if (typeof quote !== 'string' || locatedBriefSentence(brief, quote) === null) return null;
-  const unitOf = (u: unknown): string => String(u ?? '').trim().toLowerCase();
-  // ⭐ SYSTEM 2 step 2 (DL 15 Oct; AIE 6181498097): a part may be an OUTCOME the user's own definition names as ADDITIONAL
-  // ("the existing 80 tickets per week plus the additional specialist capacity"): by that definition it counts only what is
-  // added, so it is absent at today's reference: 0 today. Never read from an option's setting, and no default 0.
-  const definition = quote.toLowerCase();
-  const additionalToday = (label: string): boolean => /^additional\s/iu.test(label.trim()) && model.outcomes.some((o) => o.label === label)
-    && definition.includes(label.trim().toLowerCase());
-  const zeroParts = new Set<string>();
-  const matches = sums[0]!.factors.map((label) => {
-    const own = model.factors.filter((f) => f.label === label);
-    if (own.length !== 0 || !additionalToday(label)) return own;
-    zeroParts.add(label);
-    return [{ label, role: 'observable' as const, baseline_known: true, baseline_value: 0, unit: goal.unit, provenance: 'explicit' }];
-  });
-  if (matches.length < 2 || matches.some((m) => m.length !== 1)) return null;
-  const parts = matches.map((m) => m[0]!);
-  if (parts.some((f) => unitOf(f.unit) !== unitOf(goal.unit) || f.baseline_known !== true
-    || typeof f.baseline_value !== 'number' || !Number.isFinite(f.baseline_value))) return null;
-  const stated = parts.filter((f) => f.baseline_value !== 0);
-  if (stated.length === 0 || !stated.every((f) => verifiedFactorLevel(model, f, brief))) return null;
-  const total = parts.reduce((sum, f) => sum + (f.baseline_value as number), 0);
-  if (!(Math.abs(total - level) <= 1e-9 * Math.max(1, Math.abs(level)))) return null;
-  return { parts, zeroParts, quote };
-}
-
-/**
  * ⭐⭐ THE ONE AUTHORSHIP OWNER, FOR A GOAL'S CURRENT LEVEL (TL 11:51Z; BUDDY-A #3290 r1+r2; TL 13:18Z fail-safe). `figureSource` on
- * the goal's own level statement; where the AI made none, the level is the user's only as the total of their own declared sum
- * (`statedSumOfGoal`). Nothing else, and never the draft's `explicit` / `baseline_known` flags. `undefined`: a legacy draft.
+ * the goal's own level statement. Nothing else, and never the draft's `explicit` / `baseline_known` flags. `undefined`: a legacy
+ * draft. ⛔ A level derived from a sum the drafter quoted is not the user's (Codex #3440 R3: "In a world where …" made the goal's
+ * 80 theirs): user-declared exact sums are a capability still owed, so that derivation is fail-closed and readiness asks instead.
  */
 export function goalLevelOwner(model: CandidateModel, brief: string | undefined, value: number): FigureSource | undefined {
-  const own = figureSource(model, brief, { kind: 'goal', label: model.goal.metric }, 'level', value);
-  if (own !== 'unclaimed') return own;
-  return model.goal.baseline_value === value && statedSumOfGoal(model, brief) !== null ? 'user' : 'unclaimed';
-}
-
-/**
- * ⭐ THE TOTAL OF THE USER'S OWN SUM IS THE USER'S LEVEL TODAY (DL 13:36Z 14 Oct; served capacity 13:28Z, CEE cbcefb47,
- * drafter row 7b90af18). Since #2981's sum text, the drafter types a total's level today `inferred` when the brief DEFINES
- * that total as a sum of quantities it states ("Total weekly support capacity is defined as the existing 80 tickets per week
- * plus the additional specialist capacity": goal baseline 80 `inferred`). So the goal's level was withheld
- * (`goalLevelIsEstimated`), its sum was then refused for want of a level on its total, and capacity lost the chance it had
- * shown. The level is the user's when the user's own words fix it: ONE declared sum on the goal, bound to a sentence of the
- * brief; every part a factor in the goal's unit with a known level today; every non-zero part's level the user's
- * (`verifiedFactorLevel`), and at least one such part; and the parts adding up to the drafter's level. Then the goal's level
- * is typed `explicit`, and every later check still applies (the brief writes the figure, the subject rule, its scale).
- * Anything else is unchanged: a zero part adds nothing to the user's figures, and any non-zero estimate keeps it Olumi's.
- */
-export function goalLevelOfStatedSum(model: CandidateModel, brief: string | undefined): CandidateModel {
-  const goal = model.goal;
-  if (!goalLevelIsEstimated(goal)) return model;
-  const sum = statedSumOfGoal(model, brief);
-  if (sum === null) return model;
-  const { parts, zeroParts, quote } = sum;
-  if (zeroParts.size === 0) return { ...model, goal: { ...goal, baseline_provenance: 'explicit' } };
-  // ⭐ AIE 6181498097: the total is DERIVED from the user's figures, never an explicitly measured total. It is carried as the
-  // goal's level reading (its derived flag set), which the Run's reply and the licence's readings say; the level itself keeps
-  // only the brief's stamp, never the explicit one.
-  const said = (f: CandidateModel['factors'][number]): string => (zeroParts.has(f.label)
-    ? `‘${f.label}’ is none today, because it counts only what is added` : `‘${f.label}’ is ${f.baseline_value} ${goal.unit}`);
-  const lead = `Today’s level of ‘${goal.metric}’ is derived from your figures, by your definition: ${parts.map(said).join('; ')}`;
-  return lead.length > 300 || quote.trim().length > 160 ? model
-    : { ...model, goal: { ...goal, baseline_provenance: 'explicit', level_derivation: { quote: quote.trim(), lead } } };
+  return figureSource(model, brief, { kind: 'goal', label: model.goal.metric }, 'level', value);
 }
 
 /**
@@ -3921,8 +3858,7 @@ function admitOnce(
   // through the volume operand; an addend is left as drafted (`product-goal-extra-parent.ts`, R3 5902616543, C46 rule 7).
   const { model: draftedModel, found: extraParentsOfProductGoal } = rerouteExtraParentsOfProductGoal(foldedModel, brief);
   // Authenticate before framing or writing levels: an estimate never competes with the user's current figure.
-  // The total of the user's own sum is the user's level today (`goalLevelOfStatedSum`), read on the verified factors.
-  const model = goalLevelOfStatedSum({ ...draftedModel, factors: draftedModel.factors.map(f => verifiedFactorLevelValue(draftedModel, f, brief) ?? f) }, brief);
+  const model = { ...draftedModel, factors: draftedModel.factors.map(f => verifiedFactorLevelValue(draftedModel, f, brief) ?? f) };
   const levelReading = { value: null as BriefGoalLevel | null };
   // ⭐ QBC row 2 (D2, proof 1: "at least 20 new customers" saved as Olumi's): the goal is the user's when the AI's own statement
   // of its target BINDS (`goalTargetStatements`: verified, signed, in the goal's comparator, at this goal's own occurrence), never
@@ -4257,7 +4193,6 @@ function admitOnce(
          */
         const baselineRaw = model.goal.baseline_value;
         let observed_state: AdmittedNode['observed_state'];
-        let derivedReading: { level: number; level_unit: string; quote: string; lead: string; derived: true } | undefined;
         const withheld = (reason: string): void => {
           loss.push({
             field_path: `nodes[${slugId(model.goal.metric)}].observed_state.baseline`,
@@ -4328,10 +4263,7 @@ function admitOnce(
           });
           if (verdict.admitted) {
             // Only the user's stated level reaches here (see `estimated` above).
-            observed_state = briefGoalObservedState(verdict.normalised, model.goal.unit, baselineRaw, resolved.cap,
-              model.goal.level_derivation === undefined && verifiedGoalLevel(model, brief));
-            derivedReading = model.goal.level_derivation === undefined ? undefined
-              : { level: baselineRaw, level_unit: model.goal.unit ?? '', quote: model.goal.level_derivation.quote, lead: model.goal.level_derivation.lead, derived: true };
+            observed_state = briefGoalObservedState(verdict.normalised, model.goal.unit, baselineRaw, resolved.cap, verifiedGoalLevel(model, brief));
           } else {
             withheld(verdict.reason);
           }
@@ -4371,7 +4303,6 @@ function admitOnce(
               }
             : {}),
           ...(observed_state !== undefined ? { observed_state } : {}),
-          ...(observed_state !== undefined && derivedReading !== undefined ? { goal_level_reading: derivedReading } : {}),
           ...('basis' in levelBasis && levelBasis.basis !== null ? { goal_target_basis: levelBasis.basis }
             : awaiting !== undefined ? { goal_target_basis: awaiting }
             : levelRefusal !== undefined ? { goal_target_basis: levelRefusal } : {}),

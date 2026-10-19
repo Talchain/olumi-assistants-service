@@ -1,6 +1,8 @@
 /**
  * ⭐ L2 (DL brief "BRIEF-L2-declared-sum-identity", 12 Oct; AIE #94 6134029017 Q1) — A SUM THE DRAFTER DECLARES IS CARRIED
- * ON ITS TOTAL THROUGH R3-2's EXISTING CARRIER, CHECKED WHOLE. DL L3b: BOUND EXPLICIT SUMS RETAIN USER AUTHORSHIP.
+ * ON ITS TOTAL THROUGH R3-2's EXISTING CARRIER, CHECKED WHOLE.
+ * ⛔ USER-DECLARED EXACT SUMS: A CAPABILITY STILL OWED, TEMPORARILY FAIL-CLOSED (Codex #3440 R3; DL-3, PL 11:05). A sum read from a
+ * sentence of the brief is never taken, as the user's or as Olumi's: the links stay as drafted and the reason is said once.
  *
  * Run 5 (served CEE 551258bb, capacity brief): "Total weekly support capacity is defined as the existing 80 tickets per week
  * plus the additional specialist capacity" reached the engine as two uncertain links (exists 0.8, ±0.5), and the reply
@@ -28,8 +30,8 @@ import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
 import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
-import { currentDefinitionalCarrier } from '../../goal-target/held-user-links.js';
-import { LLM_STRENGTH_STD_FLOOR } from '../../../cee/constants.js';
+import { linkEffectQuoteContextMiss } from '../stated-by-user.js';
+import { targetTestabilityOf } from '../../admission/target-testability.js';
 
 type Rec = Record<string, any>;
 
@@ -41,10 +43,30 @@ const SENTENCE = 'Total weekly support capacity is defined as the existing 80 ti
 const GOAL = 'weekly_support_capacity';
 const EXISTING = 'existing_team_capacity';
 const PART = 'additional_specialist_capacity';
-const RATE_LINK = `additional_specialists→${PART}`;
 const OPERANDS = [`${EXISTING}→${GOAL}`, `${PART}→${GOAL}`];
 const SUM = { operation: 'sum', factor_ids: [EXISTING, PART] };
 const STRUCTURAL = new Set(['option', 'decision']);
+/**
+ * ⭐ THE SERVED SYSTEM 2 DRAFT FOR THIS VERY BRIEF (cfa31dfb, drafter raw 5d0a23b7): it declares the user's sum with its quote AND
+ * states the relation (`field: 'relation'`) on the defining sentence, with its levels, settings, effect and target as statements.
+ * The genuine affirmative: while the capability is owed, even it is not taken (the links stay as drafted).
+ */
+const SYS2 = JSON.parse(readFileSync(new URL('../../../routes/__tests__/fixtures/capacity-cfa31dfb-first-draft.json', import.meta.url), 'utf8')) as {
+  source: string; brief: string; raw_text: string;
+};
+const EXISTING2 = 'existing_team_support_capacity';
+const OPERANDS2 = [`${EXISTING2}→${GOAL}`, `${PART}→${GOAL}`];
+/** That draft with the defining sentence replaced in the brief and wherever the drafter quoted it (its relation statement too). */
+const sys2 = (sentence = SENTENCE, o: { declared?: boolean; relation?: boolean } = {}): { raw: Rec; brief: string } => {
+  const raw = JSON.parse(SYS2.raw_text.split(SENTENCE).join(sentence)) as Rec;
+  if (o.declared === false) raw.identities = raw.identities.filter((i: Rec) => i.operation !== 'sum');
+  if (o.relation === false) raw.statements = raw.statements.filter((x: Rec) => x.field !== 'relation');
+  return { raw, brief: SYS2.brief.split(SENTENCE).join(sentence) };
+};
+/** The one reason a quoted (user-declared) sum is not taken while that capability is owed. */
+const OWED = 'Olumi can’t yet take a sum from your own words';
+const refused2 = (why: string): string => 'Olumi read "Weekly support capacity" as "Existing team support capacity" and "Additional specialist capacity" '
+  + `added together, but ${why}, so that was not used and nothing about it is assumed.`;
 
 /** The words a refused declaration is said in (admission's ledger, read back through `not_represented`). */
 const refused = (why: string): string => 'Olumi read "Weekly support capacity" as "Existing team capacity" and "Additional specialist capacity" '
@@ -57,6 +79,16 @@ const served = (): Rec => JSON.parse(FX.raw_text);
 const declare = (c: Rec, evidence?: Rec | null): Rec => ({ ...c, identities: [...c.identities, {
   outcome: 'Weekly support capacity', operation: 'sum', factors: ['Existing team capacity', 'Additional specialist capacity'],
   provenance: 'explicit', reading: null, ...(evidence === undefined ? {} : { evidence }) }] });
+/** One drafter statement, as the SYSTEM 2 drafter writes it. */
+const said = (quote: string, subject: Rec, field: string, form: string, value: number | null, unit: string | null): Rec => ({ quote,
+  subject: { to_label: null, factor_label: null, ...subject }, field, form, value, low: null, high: null, unit, qualifier: null, conditions: null });
+/**
+ * The goal's level today stated in its own sentence, apart from any sum, with the drafter's statement of it: the sum is then
+ * judged at its own quote, past "has no figure today" (a level is no longer derived from a quoted sum: Codex #3440 R3).
+ */
+const TODAY = 'Weekly support capacity today is 80 tickets per week.';
+const withLevel = ({ raw, brief }: { raw: Rec; brief: string }): { raw: Rec; brief: string } => ({ brief: `${brief} ${TODAY}`,
+  raw: { ...raw, statements: [...raw.statements, said(TODAY, { kind: 'goal', label: 'Weekly support capacity' }, 'level', 'point', 80, 'tickets per week')] } });
 /** Run 5 held the brief's 80 as the goal's level (`brief_extraction`); the served c85817f2 draft typed it "inferred". */
 const goalLevelAsRun5 = (c: Rec): Rec => ({ ...c, goal: { ...c.goal, baseline_provenance: 'explicit' } });
 /** The approved text's part: a quantity with its level today (0: no specialist is added today), in the total's unit. */
@@ -120,11 +152,6 @@ function frameHere(n: Rec | undefined): number | undefined {
   if (typeof os.raw_value === 'number' && typeof os.value === 'number' && os.value !== 0) return os.raw_value / os.value;
   return 1;
 }
-/** Today's level in the node's own units: baseline (else value) on its frame. */
-const rawToday = (g: Rec, id: string): number => {
-  const n = node(g, id);
-  return (n.observed_state.baseline ?? n.observed_state.value) * frameHere(n)!;
-};
 /** Every causal link in NATURAL units (β·F_to/F_from), with its existence and who drew and sized it. */
 function naturalLinks(g: Rec): Map<string, Rec> {
   const byId = new Map((g.nodes as Rec[]).map((n) => [n.id, n]));
@@ -137,7 +164,6 @@ function naturalLinks(g: Rec): Map<string, Rec> {
   }
   return out;
 }
-const without = (m: Map<string, Rec>, keys: readonly string[]): Map<string, Rec> => new Map([...m].filter(([k]) => !keys.includes(k)));
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 describe('PRECONDITIONS: the served draft, and the approved text now sent', () => {
@@ -178,40 +204,41 @@ describe('PRECONDITIONS: the served draft, and the approved text now sent', () =
   });
 });
 
-describe('GREEN — the run-5 shape: the user\'s declared sum is an identity of its parts on the PLoT request', () => {
-  it('construction carries the user\'s sum and shows its bound quote; its part links are the definition, at existence 1 and the floor', async () => {
-    const { graph, result } = await construct(declare(run5Shape(), { quote: SENTENCE }));
-    expect(result.open_questions[0]).toBe('"Weekly support capacity" is worked out as "Existing team capacity" + "Additional specialist capacity", the definition your brief gives. Brief quote: “' + SENTENCE + '”');
-    expect(node(graph, GOAL).nonlinear_identity).toEqual({ ...SUM, stated_in_brief: true });
-    for (const [from, to] of [[EXISTING, GOAL], [PART, GOAL]] as const) {
-      const e = edge(graph, from, to);
-      expect(e.exists_probability, `${from}→${to}`).toBe(1);
-      expect(e.defaulted, `${from}→${to}`).toBeUndefined();
-      expect(e.strength.std, `${from}→${to}`).toBeLessThanOrEqual(LLM_STRENGTH_STD_FLOOR);
-      expect(e.provenance, `${from}→${to}`).toMatchObject({ source: 'brief_extraction', source_quote: SENTENCE, magnitude: 'user_stated', definitional: true,
-        natural_effect: { amount: 1, per_source_change: 1, amount_unit: 'tickets per week', per_source_change_unit: 'tickets per week' } });
-      // Still a CURRENT definitional carrier after construction's frame fit (the held-link readers read exactly this).
-      expect(currentDefinitionalCarrier(e), `${from}→${to}`).toBe('tickets per week');
-    }
+describe('⛔ OWED (temporarily fail-closed) — the served SYSTEM 2 draft (cfa31dfb): the user\'s declared and stated sum is not taken', () => {
+  it('PRECONDITION: the same brief; the draft declares the sum with the defining sentence and states that relation on it', () => {
+    expect(SYS2.brief).toBe(FX.brief);
+    const raw = JSON.parse(SYS2.raw_text) as Rec;
+    expect(raw.identities.find((i: Rec) => i.operation === 'sum')).toMatchObject({ outcome: 'Weekly support capacity', provenance: 'explicit', evidence: { quote: SENTENCE } });
+    expect(raw.statements.filter((x: Rec) => x.field === 'relation')).toEqual([expect.objectContaining({ quote: SENTENCE, form: 'describes',
+      subject: expect.objectContaining({ kind: 'goal', label: 'Weekly support capacity' }) })]);
   });
 
-  it('the Run request: the total is its parts (80 = 80 + 0 today); the specialist-rate uncertainty is KEPT, unchanged in natural units', async () => {
-    const { graph: stored } = await construct(declare(run5Shape(), { quote: SENTENCE }));
+  it('the genuine affirmative is not taken while the capability is owed: no identity, the links exactly as drafted, the reason said once', async () => {
+    const { graph, result } = await construct(withLevel(sys2()).raw, withLevel(sys2()).brief);
+    const { graph: drafted } = await construct(withLevel(sys2(SENTENCE, { declared: false })).raw, withLevel(sys2()).brief);
+    expect(node(graph, GOAL).observed_state, 'the goal\'s own stated level stays the user\'s').toMatchObject({ raw_value: 80, source: 'brief_extraction' });
+    expect(node(graph, GOAL).nonlinear_identity).toBeUndefined();
+    expect(naturalLinks(graph)).toEqual(naturalLinks(drafted));
+    for (const k of OPERANDS2) expect(naturalLinks(graph).get(k)?.magnitude, k).not.toBe('user_stated');
+    expect((result.not_represented as string[]).filter((x) => x.includes('added together'))).toEqual([refused2(OWED)]);
+    expect((result.open_questions ?? []).join(' ')).not.toContain('the definition your brief gives');
+  });
+
+  it('the goal\'s level today is not derived from the quoted sum: no level, readiness asks for it, and the sum is refused on that', async () => {
+    const { graph, result } = await construct(sys2().raw, sys2().brief);
+    expect(node(graph, GOAL).observed_state ?? null).toBeNull();
+    expect(JSON.stringify(targetTestabilityOf(graph))).toContain('missing_goal_baseline');
+    expect((result.not_represented as string[]).filter((x) => x.includes('added together'))).toEqual([refused2('"Weekly support capacity" has no figure today')]);
+  });
+
+  it('the Run request carries no sum: every link is sent exactly as the same draft with no sum declared', async () => {
+    const { graph: stored } = await construct(sys2().raw, sys2().brief);
     const declared = (await runRequest(stored)).graph as Rec;
-    const plain = (await runRequest((await construct(run5Shape())).graph)).graph as Rec;
-    // The identity rides the goal node to PLoT, over exactly the two parts, as the user's definition.
-    expect(node(declared, GOAL).nonlinear_identity).toEqual({ ...SUM, stated_in_brief: true });
-    expect(node(plain, GOAL).nonlinear_identity).toBeUndefined();
-    // Today's levels in natural units reconcile exactly: the stated 80 is the existing 80 plus no specialist capacity.
-    expect([rawToday(declared, GOAL), rawToday(declared, EXISTING), rawToday(declared, PART)].map((x) => Number(x.toPrecision(12)))).toEqual([80, 80, 0]);
-    // The two definition links go certain; every other link — the user's 20 ± 10 per specialist above all — is untouched.
-    const [d, p] = [naturalLinks(declared), naturalLinks(plain)];
-    for (const k of OPERANDS) expect(d.get(k), k).toMatchObject({ exists: 1, mean: 1, source: 'brief_extraction', magnitude: 'user_stated' });
-    for (const k of OPERANDS) expect(p.get(k), k).toMatchObject({ mean: 1, std: 0.5, magnitude: 'olumi_estimate' });
-    expect(without(d, OPERANDS)).toEqual(without(p, OPERANDS));
-    expect(d.get(RATE_LINK)).toEqual({ mean: 20, std: 10, exists: 0.8, source: 'brief_extraction', magnitude: 'user_stated' });
+    const plain = (await runRequest((await construct(sys2(SENTENCE, { declared: false }).raw, SYS2.brief)).graph)).graph as Rec;
+    expect(node(declared, GOAL).nonlinear_identity).toBeUndefined();
+    expect(naturalLinks(declared)).toEqual(naturalLinks(plain));
     // The user's 10–30 stays held, verbatim, on the stored model (the wire copy drops level ranges: `withoutStatedLevelRanges`).
-    expect(node(stored, 'tickets_per_specialist_per_week').observed_state.range).toMatchObject({ low: 10, high: 30, meaning: 'min_max',
+    expect(node(stored, 'tickets_resolved_per_additional_specialist').observed_state.range).toMatchObject({ low: 10, high: 30, meaning: 'min_max',
       source_quote: 'Each additional specialist resolves about 20 tickets per week, between 10 and 30.' });
   });
 });
@@ -232,23 +259,93 @@ describe('CONTRASTS', () => {
     expect((result.open_questions ?? []).join(' ')).not.toContain('the definition your brief gives');
   });
 
-  it.each(DENIALS)('accepted AI-misreading residual: false declaration from a denial is operative, quote visible: %s', async (quote) => {
-    const brief = FX.brief.replace(SENTENCE, quote);
-    const { graph, result: acceptedResult } = await construct(declare(run5Shape(), { quote }), brief);
-    expect(node(graph, GOAL).nonlinear_identity).toEqual({ ...SUM, stated_in_brief: true });
-    for (const from of [EXISTING, PART]) {
-      expect(edge(graph, from, GOAL).provenance).toMatchObject({
-        source: 'brief_extraction', magnitude: 'user_stated', source_quote: quote, definitional: true,
-      });
-    }
-    expect(acceptedResult.open_questions[0]).toContain(`Brief quote: “${quote}”`);
-    for (const k of OPERANDS) expect(naturalLinks(graph).get(k), k).toMatchObject({ exists: 1, mean: 1 });
+  /**
+   * ⭐ CHANGED, NOT LOOSENED (Codex #3440 BLOCK; AIE L2-RELATION 18bf4f8c): this row pinned the "accepted AI-misreading residual",
+   * a declaration read from a DENIAL made operative as the user's sum. The AIE ruled it out: a denied identity gets no licence from
+   * a declaration, a co-mention or reconciliation, and it is not relabelled as Olumi's. It now asserts the base: no identity, the
+   * links exactly as drafted, the reason said once. Worst case, as Codex scripted it: the drafter ALSO states the relation on the
+   * denial, so the polarity is read from the user's whole sentence by the existing context reader. The reconciliation refusal
+   * below is unchanged.
+   */
+  const SYS2_DENIALS = [
+    'Weekly support capacity is not Existing team support capacity plus Additional specialist capacity.',
+    'Total weekly support capacity is not the existing 80 tickets per week plus the additional specialist capacity.',
+  ];
+  it.each(SYS2_DENIALS)('a declaration read from a denial is NOT operative, nor relabelled as Olumi\'s: the links stay as drafted, said once: %s', async (quote) => {
+    const { raw, brief } = sys2(quote);
+    const { graph, result: refusedResult } = await construct(raw, brief);
+    const { graph: drafted } = await construct(sys2(quote, { declared: false }).raw, brief);
+    expect(node(graph, GOAL).nonlinear_identity).toBeUndefined();
+    expect(naturalLinks(graph)).toEqual(naturalLinks(drafted));
+    expect(refusedResult.not_represented).toContain(refused2('your brief says that is not so'));
+    // The denial is said first and once, whatever else fails: on parts that also do not add up (80 ≠ 80 + 15), in the older shape.
+    const denial = DENIALS[SYS2_DENIALS.indexOf(quote)]!;
     const inconsistent = partWithLevel(goalLevelAsRun5(served()), 15);
-    const { graph: rejected, result } = await construct(declare(inconsistent, { quote }), brief);
-    const { graph: plain } = await construct(inconsistent, brief);
+    const { graph: rejected, result } = await construct(declare(inconsistent, { quote: denial }), FX.brief.replace(SENTENCE, denial));
+    const { graph: plain } = await construct(inconsistent, FX.brief.replace(SENTENCE, denial));
     expect(node(rejected, GOAL).nonlinear_identity).toBeUndefined();
     expect(naturalLinks(rejected)).toEqual(naturalLinks(plain));
-    expect(result.not_represented).toContain(refused('today "Weekly support capacity" is 80 while those parts add up to 95'));
+    expect((result.not_represented as string[]).filter((x) => x.includes('added together'))).toEqual([refused('your brief says that is not so')]);
+  });
+
+  it.each(DENIALS)('Olumi\'s reading (no quote) cannot override the brief\'s denial: no sum, the links as drafted, said: %s', async (quote) => {
+    const brief = FX.brief.replace(SENTENCE, quote);
+    const { graph, result } = await construct(declare(run5Shape(), null), brief);
+    const { graph: drafted } = await construct(run5Shape(), brief);
+    expect(node(graph, GOAL).nonlinear_identity).toBeUndefined();
+    expect(naturalLinks(graph)).toEqual(naturalLinks(drafted));
+    expect(result.not_represented).toContain(refused('your brief says that is not so'));
+  });
+
+  it('a QUESTION is no statement of the sum, even with the drafter\'s relation statement on it: no sum, the links as drafted, said', async () => {
+    const question = 'Is total weekly support capacity the existing 80 tickets per week plus the additional specialist capacity?';
+    const { raw, brief } = withLevel(sys2(question));
+    const { graph, result } = await construct(raw, brief);
+    const { graph: drafted } = await construct(withLevel(sys2(question, { declared: false })).raw, brief);
+    expect(node(graph, GOAL).nonlinear_identity).toBeUndefined();
+    expect(naturalLinks(graph)).toEqual(naturalLinks(drafted));
+    expect(result.not_represented).toContain(refused2(OWED));
+  });
+
+  /**
+   * ⭐ Codex R2/R3 #3440 BLOCK: a sum the user only SUPPOSES is not stated, and no finite matcher establishes an assertion. Codex's
+   * own probes, R3's two witnesses included: the defining sentence a supposition, the drafter's relation statement on it, and the
+   * goal's level today stated separately (so no earlier check masks it). Fail-closed, none reaches the Run as anyone's sum.
+   */
+  const HYPOTHETICALS = [
+    'If total weekly support capacity were the existing 80 tickets per week plus the additional specialist capacity, we could compare the options.',
+    'Suppose total weekly support capacity is the existing 80 tickets per week plus the additional specialist capacity.',
+    'Total weekly support capacity is the existing 80 tickets per week plus the additional specialist capacity, assuming we hire one.',
+    'In a world where total weekly support capacity is the existing 80 tickets per week plus the additional specialist capacity, we could compare the options.',
+    'Let\'s say total weekly support capacity is the existing 80 tickets per week plus the additional specialist capacity.',
+  ];
+  it.each(HYPOTHETICALS)('⭐ RED→GREEN: a supposed sum is no one\'s sum, even with the drafter\'s relation statement and the level stated apart: %s', async (hypothetical) => {
+    const { raw, brief } = withLevel(sys2(hypothetical));
+    const { graph, result } = await construct(raw, brief);
+    const { graph: drafted } = await construct(withLevel(sys2(hypothetical, { declared: false })).raw, brief);
+    expect(node(graph, GOAL).nonlinear_identity).toBeUndefined();
+    expect(naturalLinks(graph)).toEqual(naturalLinks(drafted));
+    const wire = (await runRequest(graph)).graph as Rec;
+    expect(node(wire, GOAL).nonlinear_identity).toBeUndefined();
+    expect(naturalLinks(wire)).toEqual(naturalLinks((await runRequest(drafted)).graph as Rec));
+    expect(result.not_represented).toContain(refused2(OWED));
+  });
+  it('CONTRAST (the shared effect reader, unchanged): a conditional is how a causal EFFECT is stated; a question or denial is not a statement', () => {
+    const effect = 'If we add one packer, daily order throughput rises by 15 orders per day.';
+    expect(linkEffectQuoteContextMiss(effect, effect)).toBeNull();
+    const denial = 'Adding one packer does not raise daily order throughput.';
+    expect(linkEffectQuoteContextMiss(denial, denial)).toBe('denied');
+    const question = 'Does adding one packer raise daily order throughput?';
+    expect(linkEffectQuoteContextMiss(question, question)).toBe('question');
+  });
+
+  it('the drafter\'s relation statement grants nothing: with or without it, the quoted sum is not taken, said once', async () => {
+    for (const relation of [true, false]) {
+      const { raw, brief } = withLevel(sys2(SENTENCE, { relation }));
+      const { graph, result } = await construct(raw, brief);
+      expect(node(graph, GOAL).nonlinear_identity, `relation=${relation}`).toBeUndefined();
+      expect((result.not_represented as string[]).filter((x) => x.includes('added together')), `relation=${relation}`).toEqual([refused2(OWED)]);
+    }
   });
 
   it('Olumi\'s reading: a declared sum with NO brief quote is carried, still Olumi\'s, whatever provenance the drafter typed', async () => {
@@ -327,10 +424,21 @@ describe('⭐ SERVED cbcefb47: the total of the user\'s own sum is the user\'s l
     expect(part(c, 'Additional specialist capacity')).toMatchObject({ baseline_value: 0, provenance: 'inferred', baseline_evidence: null });
   });
 
-  it('⭐ RED→GREEN: the goal holds the user\'s 80 today, and the user\'s sum is held on it', async () => {
-    const { graph } = await construct(draft13(), SERVED13.brief);
-    expect(node(graph, GOAL).observed_state, 'the goal\'s level today').toMatchObject({ raw_value: 80, source: 'brief_extraction' });
-    expect(node(graph, GOAL).nonlinear_identity).toMatchObject(SUM);
+  /**
+   * ⛔ CHANGED (Codex #3440 R3; DL-3 ruling by measurement): this row held the goal's 80 as the user's, derived from their quoted sum.
+   * Measured, Codex's witnesses "In a world where …" and "Let's say …" made it the user's too: the same hole. While user-declared
+   * sums are owed, no level is derived from a quoted sum; the goal's level today is withheld and readiness asks for it instead.
+   */
+  const SUPPOSED = [
+    'In a world where total weekly support capacity is the existing 80 tickets per week plus the additional specialist capacity, we could compare the options.',
+    'Let\'s say total weekly support capacity is the existing 80 tickets per week plus the additional specialist capacity.',
+  ];
+  it.each([SENTENCE, ...SUPPOSED])('⭐ no goal level from a quoted sum (the affirmative and Codex\'s witnesses alike): withheld, readiness asks: %s', async (sentence) => {
+    const swap = (x: string): string => x.split(SENTENCE).join(sentence);
+    const { graph } = await construct(JSON.parse(swap(SERVED13.raw_text)), swap(SERVED13.brief));
+    expect(node(graph, GOAL).observed_state ?? null).toBeNull();
+    expect(node(graph, GOAL).goal_level_reading).toBeUndefined();
+    expect(JSON.stringify(targetTestabilityOf(graph))).toContain('missing_goal_baseline');
   });
 
   it('ADVERSARIAL: the non-zero part is Olumi\'s (no sentence states it) → the goal\'s level stays Olumi\'s, withheld', async () => {
