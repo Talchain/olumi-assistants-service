@@ -5,11 +5,11 @@
  * The SDK owns the tool loop (`run`) and the trace (its built-in tracing, one trace per turn, grouped by scenario). The
  * conversation lives in ONE durable OpenAI Conversation per scenario (Paul via AIE 14:10Z): created on the first `core` turn,
  * its id saved on the scenario (`scenarios.openai_conversation_id`) and reused on reopen. Each turn sends only the new user
- * input and that turn's tool outcomes (the SDK's `conversationId`), and the server compacts the window as it grows. ONE agent owns the reply, on the existing
- * role models (`model-budgets.ts`). Olumi's existing capabilities are its tools: `toolsFor(mode)` declares them with their
- * existing JSON schemas, and `dispatchTool` runs them, so construction (drafter → registration), proposals, approval with
- * digest, CAS and readback, the Run (PLoT/ISL) and the canonical read are the same code the product uses. Each tool's typed
- * result goes back to the model as its own licensed view (`modelFacingToolResult`): real outcomes, and refusals as refusals.
+ * input and that turn's tool outcomes (the SDK's `conversationId`), and the server compacts the window as it grows. ONE agent
+ * owns the reply, on the existing role models (`model-budgets.ts`). Its tools are the typed adapters (`path-b/tools`
+ * `pathBTools`): the canonical read, the draft, propose/apply (apply needs the person's approval: the SDK pauses and the
+ * press resumes the same saved RunState) and the Run, each over the product's own protocol-safe primitives, each returning
+ * ONE typed outcome that it records once (`onCall`).
  *
  * The Conversation holds only the conversation. The model, its proposals and its Runs stay in Olumi's stores. Every model
  * call is given today's date and the CURRENT model state afresh (`turnContextItems`), in its instructions, which the
@@ -18,9 +18,8 @@
  * The SDK's Responses model runs on the SDK's own client (`ledgeredAgentsClient`: native retries), whose fetch writes each
  * attempt to this request's `_provider_calls` with the returned model, the tool names sent and a digest of the input sent.
  *
- * Retained bridge, for a requirement the SDK does not meet on its own:
- *   CONSENT. Three protocol checks on a tool call, as the existing loop makes them: a change proposed this turn is never
- *      approved by the AI in the same turn; one approval carries one change; only this turn's own card may be withdrawn.
+ * Consent is the SDK's: `apply_change` needs approval, so the AI can never approve its own change; only the person's
+ * press resumes it. No consent orchestration of our own.
  *
  * No local session, no previous_response_id and no transcript of our own: the Conversation is the one state strategy. A store
  * that cannot hold the id stops the turn (`CoreStateUnavailableError`): never a Conversation the next turn could not find.
@@ -28,7 +27,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
   Agent, extractAllTextOutput, MaxTurnsExceededError, OpenAIResponsesModel, run, RunState, setTracingDisabled,
-  startOpenAIConversationsSession, tool, ToolCallError, withTrace, type AgentInputItem, type RunToolApprovalItem, type Tool,
+  startOpenAIConversationsSession, ToolCallError, withTrace, type AgentInputItem, type RunToolApprovalItem, type Tool,
 } from '@openai/agents';
 import { getRuntimeEnv } from '../../../config/env-resolver.js';
 import { ledgeredAgentsClient } from '../../../adapters/llm/openai-agents-client.js';
@@ -36,15 +35,10 @@ import { currentStageEmitter, emitAgentPhase } from '../../../cee/unified-pipeli
 import { log } from '../../../utils/telemetry.js';
 import type { OpenAiPausedRun } from '../../session/store.js';
 import { agentRequestIdentity } from '../runtime/prompt-identity.js';
-import { dispatchTool, toolsFor, type AgentCapabilities, type AgentLaneMode, type AgentToolContext, type ToolResult } from '../runtime/agent-tools.js';
+import type { AgentToolContext, ToolResult } from '../runtime/agent-tools.js';
 import type { AgentTurnResult } from '../runtime/agent-loop.js';
 import type { CallBudget } from '../model-budgets.js';
 import { BRIEF_LABEL, runFactsContext, turnContextItems, turnContextText } from '../turn-context.js';
-import { modelFacingToolResult } from '../licensed-run-view.js';
-import {
-  earlierTurnWithdrawal, isProposingTool, NOT_ON_NARRATION, NOT_PROPOSED_THIS_TURN, ONE_CHANGE_PER_APPROVAL,
-  ONE_CHANGE_PER_APPROVAL_DETAIL, WITHDRAW_PROPOSAL,
-} from '../approval-chips.js';
 
 /** The exact SDK release this path runs (package.json pins it). */
 export const AGENTS_SDK = '@openai/agents@0.18.0';
@@ -52,8 +46,6 @@ export const AGENTS_SDK = '@openai/agents@0.18.0';
 export const CORE_MAX_MODEL_CALLS = 8;
 /** Rendered tokens past which the server compacts the Conversation (native compaction; the window grows every turn). */
 export const CORE_COMPACT_THRESHOLD = 100_000;
-const LIMIT_CHANGE_TOOL = 'propose_limit_change';
-const AUTHORISE_CHANGE = 'authorise_change';
 
 // Tests never export traces; a deployed runtime uses the SDK's built-in exporter, which reads the lane's OPENAI_API_KEY.
 if (getRuntimeEnv() === 'test') setTracingDisabled(true);
@@ -126,11 +118,6 @@ const argsOf = (item: RunToolApprovalItem): Record<string, unknown> => {
   } catch { return {}; }
 };
 
-/**
- * The JSON schema object a function tool declares, sent as the existing loop sends it: NOT strict (the SDK's
- * `JsonObjectSchemaNonStrict`). Several existing schemas use `oneOf`, which strict mode cannot express.
- */
-type ToolParameters = { type: 'object'; properties: Record<string, never>; required: never[]; additionalProperties: true };
 
 /** A typed adapter's record of one call: its kit row (`traceRow`) and its result, as the route reads results. */
 export type CoreToolRecorder = (
@@ -141,8 +128,6 @@ export type CoreToolRecorder = (
 
 export interface CoreTurnInput {
   readonly ctx: AgentToolContext;
-  readonly caps: AgentCapabilities;
-  readonly mode: AgentLaneMode;
   readonly message: string;
   readonly instructions: string;
   readonly budget: CallBudget;
@@ -159,9 +144,9 @@ export interface CoreTurnInput {
   readonly press?: { readonly decision: 'approve' | 'decline'; readonly proposal_id: string };
   /**
    * The agent's tools: the typed adapters (`path-b/tools` `pathBTools`), given the recorder each tool calls once with its
-   * kit row and result. Absent → the existing capabilities, declared with their JSON schemas.
+   * kit row and result.
    */
-  readonly tools?: (onCall: CoreToolRecorder) => readonly Tool[];
+  readonly tools: (onCall: CoreToolRecorder) => readonly Tool[];
   /** The model revision and selected Run this turn began on, carried on the SDK trace with the prompt, model and Conversation. */
   readonly traceMeta?: { readonly revision?: string; readonly run_id?: string };
   readonly signal?: AbortSignal;
@@ -191,49 +176,6 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
   const toolCalls: { name: string; ok: boolean; mutated: boolean; proposal_id?: string; outcome?: string; refusal?: string; ran?: true }[] = [];
   const toolResults: ToolResult[] = [];
   let toolMs = 0;
-  /** Proposals this turn made that still wait for the user's yes, by id → tool. */
-  const awaiting = new Map<string, string>();
-
-  // Bridge 2: the consent checks the existing loop makes before a tool runs.
-  const consentRefusal = (name: string, args: Record<string, unknown>): ToolResult | null => {
-    const id = typeof args['proposal_id'] === 'string' ? args['proposal_id'] : '';
-    if (name === AUTHORISE_CHANGE && awaiting.has(id)) {
-      return { ok: false, mutated: false, refusal: NOT_ON_NARRATION,
-        detail: 'The change you just prepared is waiting for the user’s yes. Show it and ask; nothing was approved or changed.' };
-    }
-    if (isProposingTool(name) && [...awaiting.values()].some((t) => t !== LIMIT_CHANGE_TOOL && name !== LIMIT_CHANGE_TOOL)) {
-      return { ok: false, mutated: false, refusal: ONE_CHANGE_PER_APPROVAL, detail: ONE_CHANGE_PER_APPROVAL_DETAIL };
-    }
-    if (withheld.has(name)) {
-      return { ok: false, mutated: false, refusal: 'withheld_on_chip_turn', detail: 'Not offered on this turn. Nothing was changed.' };
-    }
-    return null;
-  };
-  const call = async (name: string, args: Record<string, unknown>): Promise<string> => {
-    const t0 = now();
-    const id = typeof args['proposal_id'] === 'string' ? args['proposal_id'] : '';
-    const result: ToolResult = consentRefusal(name, args)
-      ?? (name === WITHDRAW_PROPOSAL && !awaiting.has(id) && !id.startsWith('goal-scope:')
-        ? await (async (): Promise<ToolResult> => {
-            const own = /^prop_[0-9a-f]{32}$/.test(id) && input.caps.withdrawProposal !== undefined
-              ? await input.caps.withdrawProposal(input.ctx, earlierTurnWithdrawal(id)) : undefined;
-            return own?.ok === true ? own : { ok: false, mutated: false, refusal: NOT_PROPOSED_THIS_TURN,
-              detail: 'Nothing was withdrawn. This card is not eligible for withdrawal by Olumi; it remains unchanged.' };
-          })()
-        : await dispatchTool(name, JSON.stringify(args), input.ctx, input.caps, input.mode));
-    toolMs += Math.max(0, now() - t0);
-    if (typeof result.proposal_id === 'string' && result.ok === true && isProposingTool(name)) awaiting.set(result.proposal_id, name);
-    if (name === WITHDRAW_PROPOSAL && result.ok === true) awaiting.delete(id);
-    toolCalls.push({
-      name, ok: result.ok, mutated: result.mutated,
-      ...(typeof result.proposal_id === 'string' ? { proposal_id: result.proposal_id } : {}),
-      ...(typeof result.outcome === 'string' ? { outcome: result.outcome } : {}),
-      ...(typeof result.refusal === 'string' ? { refusal: result.refusal } : {}),
-    });
-    toolResults.push(result);
-    // The model reads the LICENSED view of a Run (no unlicensed leader); the route keeps the raw result.
-    return JSON.stringify(runFactsContext(modelFacingToolResult(name, result)).facts);
-  };
 
   // A typed adapter's row goes on the wire as the kit reads it; an unknown write (`mutated: null`) is never a claimed one.
   const record: CoreToolRecorder = (row, result) => {
@@ -242,16 +184,9 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
       ...(typeof result['proposal_id'] === 'string' ? { proposal_id: result['proposal_id'] } : {}) });
     toolResults.push(result);
   };
-  const tools = input.tools?.(record) ?? toolsFor(input.mode).filter((def) => !withheld.has(def.name)).map((def) => tool({
-    name: def.name,
-    description: def.description,
-    parameters: def.parameters as ToolParameters,
-    strict: false,
-    execute: async (args: unknown) => call(def.name, (args !== null && typeof args === 'object' ? args : {}) as Record<string, unknown>),
-    // A capability that THROWS (an ownership refusal, a revision conflict, an unreadable model) ends the turn exactly as it
-    // does on the existing loop: the route's own handlers answer it. Never turned into text for the model.
-    errorFunction: null,
-  }));
+  // The typed adapters (`path-b/tools`), less any the route withholds on this turn. Approval is theirs to require
+  // (`needsApproval`) and the SDK's to pause on: no consent orchestration of our own.
+  const tools = input.tools(record).filter((t) => !('name' in t) || !withheld.has(t.name));
   const pendingRows: Promise<void>[] = [];
   const client = ledgeredAgentsClient({ site: 'agent-core.sdk', pending: pendingRows,
     detailOf: (body) => ({ model: input.budget.model, purpose: 'conversation', ...agentRequestIdentity('agent.converse', body) }) });
@@ -268,6 +203,10 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
     },
     tools: [...tools],
   });
+  // Tool time, from the SDK's own lifecycle events (the calls run one at a time: `parallelToolCalls: false`).
+  let toolStartedAt: number | undefined;
+  agent.on('agent_tool_start', () => { toolStartedAt = now(); });
+  agent.on('agent_tool_end', () => { if (toolStartedAt !== undefined) toolMs += Math.max(0, now() - toolStartedAt); toolStartedAt = undefined; });
 
   /**
    * Olumi's own facts for THIS turn, given fresh on every model call in its instructions (never stored in the Conversation):

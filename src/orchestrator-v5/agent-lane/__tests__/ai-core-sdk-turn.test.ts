@@ -1,8 +1,9 @@
 /**
  * ⭐ PATH-B: an ordinary `core` turn on the OpenAI Agents SDK (`core/sdk-turn.ts`). The SDK runs the loop; these rows pin
- * what Olumi keeps around it: the consent check on a tool call, the witness on every provider row (returned model, tools
- * sent, input digest), ONE durable OpenAI Conversation per scenario as the conversation state, and the turn's state given
- * fresh on every call, never stored. Scripted provider (global fetch), fake capabilities; SYNTHETIC wording; 0 provider calls.
+ * what Olumi keeps around it: the witness on every provider row (returned model, tools sent, input digest), ONE durable
+ * OpenAI Conversation per scenario, the turn's state given fresh on every call (never stored), the approval pause and its
+ * resume from the saved RunState, streaming and the trace. Scripted provider (global fetch), fake adapters; SYNTHETIC
+ * wording; 0 provider calls.
  */
 import { createRequire } from 'node:module';
 import { setTraceProcessors, setTracingDisabled, tool, type Span, type Trace } from '@openai/agents';
@@ -11,10 +12,10 @@ import { z as z4 } from 'zod-v4';
 import { ForbiddenProviderError, OPENAI_ONLY, recordedProviderCalls, runWithProviderPolicy } from '../../../adapters/llm/provider-policy.js';
 import { ledgeredAgentsClient } from '../../../adapters/llm/openai-agents-client.js';
 import { runWithStageStream } from '../../../cee/unified-pipeline/stage-stream-context.js';
-import { AGENTS_SDK, CORE_COMPACT_THRESHOLD, CoreStateUnavailableError, PAUSE_DECLINED, PAUSE_SUPERSEDED, runCoreTurn, type ConversationIdStore, type PausedRunStore } from '../core/sdk-turn.js';
+import { AGENTS_SDK, CORE_COMPACT_THRESHOLD, CoreStateUnavailableError, PAUSE_DECLINED, PAUSE_SUPERSEDED, runCoreTurn, type ConversationIdStore, type CoreToolRecorder, type PausedRunStore } from '../core/sdk-turn.js';
 import type { OpenAiPausedRun } from '../../session/store.js';
 import { budgetFor } from '../model-budgets.js';
-import type { AgentCapabilities, AgentToolContext } from '../runtime/agent-tools.js';
+import type { AgentToolContext } from '../runtime/agent-tools.js';
 
 type Json = Record<string, any>;
 const PID = `prop_${'a'.repeat(32)}`;
@@ -58,45 +59,32 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllGlobals(); });
 
-const caps = () => ({
-  getCanonicalState: vi.fn(async () => ({ ok: true, mutated: false, empty: true, entities: [] })),
-  proposeOptionStatus: vi.fn(async () => ({ ok: true, mutated: false, proposal_id: PID, public_label: 'Take option B out of the comparison' })),
-  authoriseChange: vi.fn(async () => ({ ok: true, mutated: true, applied: true })),
-});
+/** A fake adapter set: the canonical read only, which records its own row once as the typed adapters do. */
+const caps = () => ({ read: vi.fn(async (): Promise<string> => JSON.stringify({ status: 'ok', mutated: false, ran: false, data: { empty: true } })) });
+const readTools = (c: ReturnType<typeof caps>) => (onCall: CoreToolRecorder) => [tool({
+  name: 'read_canonical_context', description: 'Read the saved scenario as it stands now.', parameters: z4.object({}),
+  execute: async () => {
+    const out = await c.read();
+    onCall({ name: 'read_canonical_context', ok: true, mutated: false, outcome: 'ok', refusal: null, ran: null }, { ok: true, mutated: false });
+    return out;
+  },
+  errorFunction: null,
+})];
 type Extra = { briefText?: string; conversationStore?: ConversationIdStore; state?: unknown; tools?: Parameters<typeof runCoreTurn>[0]['tools'];
   pausedRunStore?: PausedRunStore; press?: { decision: 'approve' | 'decline'; proposal_id: string } };
 const turn = (message: string, c: ReturnType<typeof caps>, extra: Extra & { traceMeta?: { revision?: string; run_id?: string } } = {}) =>
   runWithProviderPolicy(OPENAI_ONLY('agent_v1_turn'), async () => {
-  const result = await runCoreTurn({ ctx: ctx(message), caps: c as unknown as AgentCapabilities, mode: 'core', message,
+  const result = await runCoreTurn({ ctx: ctx(message), message, tools: extra.tools ?? readTools(c),
     instructions: 'Synthetic instructions.', budget: budgetFor('gpt-6.1-sol', 'conversation'), userId: null,
     canonicalState: extra.state ?? { empty: true, entities: [] }, briefText: extra.briefText, conversationStore: 'conversationStore' in extra ? extra.conversationStore : columnStore(),
-    ...(extra.tools !== undefined ? { tools: extra.tools } : {}), ...(extra.pausedRunStore !== undefined ? { pausedRunStore: extra.pausedRunStore } : {}),
+    ...(extra.pausedRunStore !== undefined ? { pausedRunStore: extra.pausedRunStore } : {}),
     ...(extra.press !== undefined ? { press: extra.press } : {}), ...(extra.traceMeta !== undefined ? { traceMeta: extra.traceMeta } : {}) });
   return { result, calls: recordedProviderCalls() };
 });
 
 describe('PATH-B core turn on the Agents SDK', () => {
-  it('⛔ CONSENT: the AI cannot approve the change it proposed in the same turn; the proposal still waits for the user', async () => {
-    scripted = [
-      [{ type: 'function_call', name: 'propose_option_status', args: { option_label: 'Option B', status: 'removed', rationale: 'They said drop it.' } }],
-      [{ type: 'function_call', name: 'authorise_change', args: { proposal_id: PID } }],
-      [{ type: 'message', text: 'I have prepared that change for you to approve.' }],
-    ];
-    const c = caps();
-    const { result } = await turn('Please drop option B.', c);
-    expect(c.proposeOptionStatus).toHaveBeenCalledTimes(1);
-    expect(c.authoriseChange, 'the approval never reached the capability').not.toHaveBeenCalled();
-    expect(result.tool_calls.map((t) => [t.name, t.ok, t.refusal ?? null])).toEqual([
-      ['propose_option_status', true, null], ['authorise_change', false, 'not_on_narration']]);
-    expect(result.mutated).toBe(false);
-    expect(result.assistant_text).toBe('I have prepared that change for you to approve.');
-    expect(result.reply_author).toBe('ai');
-    // The refusal reached the model as the tool's typed result (the SDK fed it back on the next call).
-    expect(JSON.stringify(sent[2]!.input)).toContain('not_on_narration');
-  });
-
   it('WITNESS: each provider row carries the returned model, the tools sent and an input digest; the turn names its SDK and trace', async () => {
-    scripted = [[{ type: 'function_call', name: 'get_canonical_state', args: {} }], [{ type: 'message', text: 'The model is empty.' }]];
+    scripted = [[{ type: 'function_call', name: 'read_canonical_context', args: {} }], [{ type: 'message', text: 'The model is empty.' }]];
     const { result, calls } = await turn('What is in my model?', caps());
     expect(result.sdk.runtime).toBe(AGENTS_SDK);
     expect(result.sdk.state).toBe('openai_conversation');
@@ -110,7 +98,7 @@ describe('PATH-B core turn on the Agents SDK', () => {
       expect(row.site).toBe('agent-core.sdk');
       expect(row.model, 'requested').toBe('gpt-6.1-sol');
       expect(row.returned_model, 'returned').toBe(RETURNED_MODEL);
-      expect(row.tool_names).toEqual(expect.arrayContaining(['get_canonical_state', 'build_model_from_brief', 'authorise_change']));
+      expect(row.tool_names, 'the adapters are the tools sent').toEqual(['read_canonical_context']);
       expect(row.input_sha256).toMatch(/^[0-9a-f]{64}$/);
     }
     expect(calls[0]!.input_sha256, 'the second call sent more (the tool result)').not.toBe(calls[1]!.input_sha256);
@@ -140,12 +128,12 @@ describe('PATH-B core turn on the Agents SDK', () => {
         ? new Response(sse(resp), { status: 200, headers: { 'content-type': 'text/event-stream' } })
         : new Response(JSON.stringify(resp), { status: 200, headers: { 'content-type': 'application/json' } });
     }));
-    scripted = [[{ type: 'function_call', name: 'get_canonical_state', args: {} }], [{ type: 'message', text: 'The model is empty.' }]];
+    scripted = [[{ type: 'function_call', name: 'read_canonical_context', args: {} }], [{ type: 'message', text: 'The model is empty.' }]];
     const frames: Json[] = [];
     const { result, calls } = await runWithStageStream((e) => { frames.push(e as Json); }, () => turn('What is in my model?', caps()));
     expect(sent.map((b) => b.stream), 'every model call streamed').toEqual([true, true]);
     expect(result.assistant_text).toBe('The model is empty.');
-    expect(result.tool_calls.map((t) => t.name)).toEqual(['get_canonical_state']);
+    expect(result.tool_calls.map((t) => t.name)).toEqual(['read_canonical_context']);
     expect(frames.filter((f) => f.kind === 'PROGRESS').map((f) => f.phase), 'writing once, when the words arrive').toEqual(['writing']);
     expect(calls.map((c) => [c.attempt?.outcome, c.returned_model])).toEqual([['success', RETURNED_MODEL], ['success', RETURNED_MODEL]]);
     // Contrast: the buffered entry runs the same turn unstreamed and shows no frame.
@@ -160,25 +148,25 @@ describe('PATH-B core turn on the Agents SDK', () => {
       onSpanEnd: async (sp) => { spans.push(sp); }, shutdown: async () => {}, forceFlush: async () => {} }]);
     setTracingDisabled(false);
     try {
-      scripted = [[{ type: 'function_call', name: 'get_canonical_state', args: {} }], [{ type: 'message', text: 'The model is empty.' }]];
+      scripted = [[{ type: 'function_call', name: 'read_canonical_context', args: {} }], [{ type: 'message', text: 'The model is empty.' }]];
       const { result } = await turn('What is in my model?', caps(), { traceMeta: { revision: 'rev_7', run_id: 'run_3' } });
       expect(traces).toHaveLength(1);
       expect(result.sdk.trace_id).toBe(traces[0]!.traceId);
       expect(traces[0]!.groupId).toBe(SCENARIO);
       expect(traces[0]!.metadata).toMatchObject({ model: 'gpt-6.1-sol', conversation_id: 'conv_1', revision: 'rev_7', run_id: 'run_3',
         prompt_sha256: expect.stringMatching(/^[0-9a-f]{64}$/) });
-      expect(spans.map((sp) => sp.spanData).filter((d) => d.type === 'function').map((d) => (d as { name: string }).name)).toEqual(['get_canonical_state']);
+      expect(spans.map((sp) => sp.spanData).filter((d) => d.type === 'function').map((d) => (d as { name: string }).name)).toEqual(['read_canonical_context']);
     } finally {
       setTraceProcessors([]);
       setTracingDisabled(true);
     }
   });
 
-  it('⛔ A capability that throws ends the turn with ITS error (the route answers ownership and conflicts as today), never a string to the model', async () => {
+  it('⛔ An adapter that throws ends the turn with ITS error (the route answers ownership and conflicts as today), never a string to the model', async () => {
     class OwnershipRefused extends Error {}
     const refusal = new OwnershipRefused('not your scenario');
-    const c = { ...caps(), getCanonicalState: vi.fn(async () => { throw refusal; }) };
-    scripted = [[{ type: 'function_call', name: 'get_canonical_state', args: {} }], [{ type: 'message', text: 'Should never be asked.' }]];
+    const c = { read: vi.fn(async (): Promise<string> => { throw refusal; }) };
+    scripted = [[{ type: 'function_call', name: 'read_canonical_context', args: {} }], [{ type: 'message', text: 'Should never be asked.' }]];
     await expect(turn('What is in my model?', c)).rejects.toBe(refusal);
     expect(sent, 'no further model call after the throw').toHaveLength(1);
   });
@@ -278,7 +266,7 @@ describe('PATH-B core turn on the Agents SDK', () => {
   });
 
   it('a typed adapter records its own row: the kit\'s fields reach `tool_calls`, its result reaches `tool_results`, an unknown write is no claim', async () => {
-    const adapters = (onCall: Parameters<NonNullable<Parameters<typeof runCoreTurn>[0]['tools']>>[0]) => [
+    const adapters = (onCall: CoreToolRecorder) => [
       tool({ name: 'run_analysis', description: 'Run the analysis.', parameters: z4.object({ reason: z4.string() }),
         execute: async () => { onCall({ name: 'run_analysis', ok: true, mutated: false, outcome: 'ok', refusal: null, ran: true }, { ok: true, mutated: false, ran: true }); return '{"ran":true}'; } }),
       tool({ name: 'apply_change', description: 'Apply.', parameters: z4.object({ proposal_id: z4.string() }),
