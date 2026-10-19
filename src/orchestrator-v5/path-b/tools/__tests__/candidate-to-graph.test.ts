@@ -1039,6 +1039,29 @@ describe('candidateToGraph: conversion + science only', () => {
     expect(byLabel(converted({ ...salesDraft(), statements: [range()] }).graph, 'Double the ad spend').interventions[byLabel(converted(salesDraft()).graph, 'Ad spend').id].range).toBeUndefined();
   });
 
+  // ⭐ A FACTOR'S OWN LEVEL TODAY (DL 19 Oct, the gap after K2): the user's recorded range rides the existing level carrier.
+  it('⭐ LEVEL RANGE ON B: the user\'s recorded range for a factor\'s level today rides observed_state.range; nothing else does', () => {
+    const LEVEL = 'We spend between £1,800 and £2,200 a month on ads.';
+    const levelOf = (statements: Rec[], words = `${SALES_WORDS} ${LEVEL}`): Rec => {
+      const out = candidateToGraph({ ...salesDraft(), statements }, { words, recorded_at: AT });
+      if ('refused' in out) throw new Error(out.refused);
+      return byLabel(out.graph as Rec, 'Ad spend');
+    };
+    const level = (over: Rec = {}, speaker: string | null = 'user'): Rec =>
+      said(LEVEL, { kind: 'factor', label: 'Ad spend' }, 'level', 'range', { low: 1800, high: 2200, unit: '£', ...over }, speaker);
+    const kept = levelOf([level()]);
+    expect(kept.observed_state).toMatchObject({ raw_value: 2000, range: { low: 1800, high: 2200, meaning: 'min_max', source: 'brief_extraction', source_quote: LEVEL } });
+    // The level's own figure and author are unchanged; the analysis copy drops the range (nothing samples a level range).
+    const bare = byLabel(converted(salesDraft()).graph, 'Ad spend');
+    const { range: _range, ...withoutRange } = kept.observed_state;
+    expect(withoutRange).toEqual(bare.observed_state);
+    // Not carried: another person's or an unclear range, one that does not contain today's figure, two ranges, and with no words.
+    for (const statements of [[level({}, 'other')], [level({}, null)], [level({ low: 2100, high: 2500 })], [level(), level({ low: 1900 })]]) {
+      expect(levelOf(statements).observed_state.range).toBeUndefined();
+    }
+    expect(byLabel(converted({ ...salesDraft(), statements: [level()] }).graph, 'Ad spend').observed_state.range).toBeUndefined();
+  });
+
   it('STATEMENTS CARRIED (contrast): without the user\'s words nothing is recorded, and the rest of the model is the same', () => {
     const bare = converted(carriedDraft());
     expect((bare.graph.nodes as Rec[]).filter((n) => n.user_statements !== undefined)).toEqual([]);
