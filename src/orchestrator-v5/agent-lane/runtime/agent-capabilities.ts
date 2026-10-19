@@ -8895,7 +8895,7 @@ export function createAgentCapabilities(
           // spread it maps to: the user's own with its attestation (`statedUncertaintyAttested`), Olumi's reading with none.
           const readBack = recordedSpreadOf(x);
           const uncertaintyHeld = statedUncertainty === undefined || (readBack !== undefined
-            && (readBack.read_by === 'olumi' ? x.std_defaulted !== false : statedUncertaintyAttested(x))
+            && (readBack.read_by === 'olumi' ? (x as { std_defaulted?: unknown }).std_defaulted !== false : statedUncertaintyAttested(x))
             && isDeepStrictEqual((p as { natural_effect?: { uncertainty?: unknown } } | undefined)?.natural_effect?.uncertainty, statedUncertainty));
           return typeof mean === 'number' && Math.abs(mean - want) < 1e-9 && recorded && uncertaintyHeld
             // B1: a same-band confirm reviews the unchanged mean; it may still be an unsized placeholder.
