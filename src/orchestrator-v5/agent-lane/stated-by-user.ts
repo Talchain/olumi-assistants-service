@@ -74,16 +74,30 @@ export function amountsWrittenIn(text: string | null | undefined): readonly Writ
  *  · A count followed by its COUNTED NOUN PHRASE (`countedPhraseAfter`) counts THAT: where the phrase names something and no word of
  *    the held unit, it is another quantity, in digits as in words ("45 nurses" is no figure of hours, "300 Pro seats" none of £/month;
  *    DL-3 on #3429). A headcount unit counts any phrase; a figure with no noun after it ("45 now", "all 6 on a prototype") reads as before.
- *  · A word is a figure only where it counts something: "one OF them", "the one WHO" and "not twelve." are no figures.
+ *  · A number in words is credited only as a COMPLETE SPAN (`wordsSpanComplete`): its quantity's word right after it.
  */
 export function amountTheUserWrote(a: WrittenAmount, value: number, unit: unknown, text: string): boolean {
-  const counted = countedPhraseAfter(text, a.index + a.matchedText.length);
+  const end = a.index + a.matchedText.length;
+  const counted = countedPhraseAfter(text, end);
   const held = namingWords(unit), said = namingWords(counted);
   // A headcount unit (`unitFamilyOf` 'count': people, hires, FTE, seats…) counts whatever its phrase names ("300 subscribers" are people).
   const another = (a.kind === 'plain' || a.kind === 'words') && held.length > 0 && !held.some((h) => unitFamilyOf(h) === 'count')
     && said.length > 0 && !namesHeldUnit(said, held);
-  return amountIs(a, value, unit, unitPhraseFamily(unit), text) && !another && (a.kind !== 'words' || counted !== '')
+  return amountIs(a, value, unit, unitPhraseFamily(unit), text) && !another && (a.kind !== 'words' || wordsSpanComplete(text, end))
     && !inAnotherSpeakersWords(text, a);
+}
+
+/**
+ * ⛔ A NUMBER IN WORDS IS CREDITED ONLY AS A COMPLETE SPAN (DL-3 decision on Codex #3438 R4, outbox/DL-DECISION-COMPLETE-SPAN):
+ * its quantity's noun phrase starts IMMEDIATELY after it (`countedPhraseAfter`: a space, no punctuation, cut at a preposition or
+ * conjunction), names something ("one OF them", "the one WHO", "forty-five now" and "not twelve." are no figures) and holds no other
+ * number word ("forty-five extra FIVE hours"); the one check then requires that noun to be the held unit's (`another`). Anything else
+ * between the number and its unit, or no unit at all, and it is not credited: an under-claim, never a prefix value. Digits keep
+ * their own grammar.
+ */
+function wordsSpanComplete(text: string, end: number): boolean {
+  const counted = countedPhraseAfter(text, end);
+  return namingWords(counted).length > 0 && !counted.split(/\s+/).some((w) => /\d/.test(w) || COUNTING_WORDS.has(w.toLowerCase()));
 }
 
 /**
@@ -332,6 +346,8 @@ function wordsAmount(phrase: string): number | null {
  */
 const NUMBER_WORDS_BEFORE = [...Object.keys(CARDINAL_WORD_VALUES), ...SCALE_WORDS, ...CARDINAL_FRACTION_WORDS].join('|');
 const NUMBER_WORDS = `${NUMBER_WORDS_BEFORE}|${ORDINAL_WORDS.join('|')}`;
+/** The words that count (a cardinal or a scale word): another of them inside a counted noun phrase starts another amount. */
+const COUNTING_WORDS = new Set([...Object.keys(CARDINAL_WORD_VALUES), ...SCALE_WORDS]);
 /** What joins two parts of ONE written number: a dash, a comma or a space, then at most one joining word, then an article. */
 const JOIN = `[\\s,\\u2013\\u2014-]+(?:(?:and|plus|minus|point|times|of)[\\s,\\u2013\\u2014-]+)?(?:an?[\\s-]+)?`;
 // A word ends at anything but a letter or digit, or at a hyphen into another number word ("twenty-five"; never "second-hand").
@@ -378,7 +394,7 @@ function namingWords(text: unknown): string[] {
 /** Words that end the counted noun phrase: what follows them names another quantity ("three engineers FOR enterprise customers"). */
 const PHRASE_BREAK = new Set([
   'for', 'of', 'to', 'in', 'on', 'at', 'with', 'by', 'from', 'into', 'across', 'over', 'under', 'within', 'per', 'than',
-  'and', 'or', 'but', 'while', 'which', 'that', 'who', 'as', 'so', 'if', 'when', 'before', 'after', 'because',
+  'and', 'or', 'but', 'while', 'which', 'that', 'who', 'as', 'so', 'if', 'when', 'before', 'after', 'because', 'plus', 'minus', 'times',
 ]);
 
 /** The COUNTED NOUN PHRASE right after an amount ending at `end`: up to three words, to the first preposition or conjunction. */

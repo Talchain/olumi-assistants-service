@@ -1,12 +1,15 @@
 /**
  * ⛔ A NUMBER IN WORDS IS READ WHOLE OR NOT AT ALL (Codex #3438 R2/R3; DL-3 fail-safe ruling, 19 Oct). The ONE located-amount reader
  * reads a count in words, an article before a scale word ("a million", "a hundred and twenty") and decimals ("seven point five"). A fraction is no figure (an
- * under-claim, never a wrong number), and every capture takes its whole continuation with it, so a prefix of a longer amount, or a part
- * left over after one, is never a figure: R3 credited 120 from "a hundred and twenty and a half hours" and 2.5 from "the two and a half
- * millionth ticket". Generated: every amount phrase × every continuation gives the complete value or nothing. SYNTHETIC wording.
+ * under-claim, never a wrong number), a number word touching another one is part of a longer number and refused, and a number in words
+ * is credited only as a complete span (its unit right after it), so a prefix of a longer amount, or a part left over after one, is
+ * never a figure: R3 credited 120 from "a hundred and twenty and a half hours" and 2.5 from "the two and a half
+ * millionth ticket"; Codex R4 found "plus five", ", and a quarter" and "-and-a-half". Generated: an ADJACENCY property (a number in
+ * words is credited only with its unit right after it). SYNTHETIC wording.
  */
 import { describe, expect, it } from 'vitest';
-import { amountsWrittenIn, figureTheUserWrote } from '../stated-by-user.js';
+import { amountsWrittenIn, figureTheUserWrote, figureTheUserWroteFor } from '../stated-by-user.js';
+import { CARDINAL_FRACTION_WORDS, CARDINAL_WORD_VALUES } from '../../../utils/cardinal-words.js';
 import { figuresWritten } from '../user-statements.js';
 
 const inWords = (text: string) => amountsWrittenIn(text).filter((a) => a.kind === 'words');
@@ -47,40 +50,51 @@ describe('the located-amount reader: articles read, fractions refused (C5\'s row
   });
 });
 
-describe('the complete value or nothing, never a prefix: every amount phrase × every continuation', () => {
-  const PHRASES: [string, number][] = [
-    ['two', 2], ['forty five', 45], ['twenty-five', 25], ['two hundred', 200], ['one hundred and five thousand', 105000],
-    ['three thousand', 3000], ['two million', 2000000], ['a hundred', 100], ['a hundred and twenty', 120], ['a million', 1000000],
-  ];
-  const CONTINUATIONS: [string, 'refused' | 'whole or nothing'][] = [
-    [' and a half', 'refused'], [' and a quarter', 'refused'], [' and two thirds', 'refused'], ['-thirds', 'refused'],
-    [' point five', 'whole or nothing'], [' point two five', 'whole or nothing'],
-    // Codex R4: what joins a number's parts is a class, not a list of tails ("plus", a comma, a hyphenated "and").
-    [' plus five', 'refused'], [', and a quarter', 'refused'], ['-and-a-half', 'refused'], [' minus two', 'refused'], [' times three', 'refused'],
-    [', and a half million', 'refused'], [' and a half-millionth', 'refused'],
-    [' millionth', 'refused'], ['-millionth', 'refused'], [' thousandth', 'refused'], ['-fifth', 'refused'], [' and fifth', 'refused'],
-    [' and a half million', 'refused'], [' and a half million and fifty thousand', 'refused'], [' quarters of a million', 'refused'],
-    [' and twenty', 'whole or nothing'], [' and three', 'whole or nothing'], [' and fifty thousand', 'whole or nothing'],
-  ];
-  it('the reader, the verifier\'s figure list and the shared check never read the phrase\'s own value out of a longer amount', () => {
-    let rows = 0;
-    for (const [phrase, value] of PHRASES) for (const [cont, verdict] of CONTINUATIONS) {
-      const amount = `${phrase}${cont}`, text = `We need ${amount} hours this week.`;
-      const read = inWords(text);
-      if (verdict === 'refused') expect(read.map((a) => a.matchedText), text).toEqual([]);
-      else expect(read.length === 0 || (read.length === 1 && read[0]!.matchedText === amount), `${text} → ${JSON.stringify(read)}`).toBe(true);
-      expect(figuresWritten(text).some((f) => f.low === value && f.high === value), `${text} figuresWritten`).toBe(false);
-      expect(figureTheUserWrote(value, 'hours', text), `${text} shared check`).toBe(false);
-      rows += 1;
+/**
+ * ⭐ ADJACENCY PROPERTY (DL-3 decision on Codex R4, outbox/DL-DECISION-COMPLETE-SPAN): a number in words is credited only as a complete
+ * span, its quantity's noun right after it. Generated: amount × unit × an inserted token X drawn from broad word sets (every preposition
+ * and conjunction, every number word of the one cardinal vocabulary, fractions, ordinals, digits, punctuation), never a list of the
+ * continuations found so far. Adjacent: credited. X between: never credited, at the shared check and at the binder.
+ */
+describe('adjacency property: a number in words is credited only with its unit right after it', () => {
+  const AMOUNTS: [string, number][] = [['two', 2], ['forty-five', 45], ['twenty five', 25], ['one hundred and five', 105],
+    ['a hundred and twenty', 120], ['three thousand', 3000], ['seven point five', 7.5]];
+  const UNITS: [string, string][] = [['hours per week', 'hours'], ['tickets per week', 'tickets'], ['minutes', 'minutes'], ['engineers', 'engineers']];
+  const BREAKS = ['for', 'of', 'to', 'in', 'on', 'at', 'with', 'by', 'from', 'into', 'across', 'over', 'under', 'within', 'per', 'than', 'and',
+    'or', 'but', 'while', 'which', 'that', 'who', 'as', 'so', 'if', 'when', 'before', 'after', 'because', 'plus', 'minus', 'times'];
+  const NUMBERS = [...Object.keys(CARDINAL_WORD_VALUES), ...CARDINAL_FRACTION_WORDS, 'first', 'second', 'third', 'fifth', 'twentieth',
+    'hundredth', 'millionth', '5', '12', '3.5', 'and a half', 'and a quarter', 'plus five', 'point two'];
+  const PUNCTUATION = [',', ';', ':', ' -', '.', ' (', ', and', ', and a quarter', '-and-a-half'];
+  const X = [...BREAKS.map((w) => ` ${w}`), ...NUMBERS.map((w) => ` ${w}`), ...PUNCTUATION];
+  const scope = (label: string) => ({ target: [label], others: ['Day shift load'] });
+  it('adjacent: credited; any inserted token: never credited, at the shared check and the binder', () => {
+    let credited = 0, refused = 0;
+    for (const [amount, value] of AMOUNTS) for (const [unit, noun] of UNITS) {
+      const own = `Night shift load is ${amount} ${noun} this week.`;
+      expect(figureTheUserWrote(value, unit, own), own).toBe(true);
+      expect(figureTheUserWroteFor(value, unit, own, scope('Night shift load')), own).toBe(true);
+      credited += 1;
+      for (const x of X) {
+        const text = `Night shift load is ${amount}${x} ${noun} this week.`;
+        expect(figureTheUserWrote(value, unit, text), text).toBe(false);
+        expect(figureTheUserWroteFor(value, unit, text, scope('Night shift load')), text).toBe(false);
+        refused += 1;
+      }
     }
-    expect(rows).toBe(PHRASES.length * CONTINUATIONS.length);
+    expect({ credited, refused }).toEqual({ credited: AMOUNTS.length * UNITS.length, refused: AMOUNTS.length * UNITS.length * X.length });
   });
-  it('CONTROL each phrase alone is read, at its own value, by all three', () => {
-    for (const [phrase, value] of PHRASES) {
-      const text = `We need ${phrase} hours this week.`;
-      expect(inWords(text).map((a) => a.magnitude), text).toEqual([value]);
-      expect(figuresWritten(text).some((f) => f.low === value && f.high === value), `${text} figuresWritten`).toBe(true);
-      expect(figureTheUserWrote(value, 'hours', text), `${text} shared check`).toBe(true);
+  it('no unit at all, or another number word inside the noun phrase: never credited (digits keep their own grammar)', () => {
+    expect(figureTheUserWrote(45, 'hours per week', 'Night shifts are forty-five now.')).toBe(false);
+    expect(figureTheUserWrote(45, 'hours per week', 'Night shifts are forty-five.')).toBe(false);
+    expect(figureTheUserWrote(45, 'hours per week', 'Night shift load is forty-five extra five hours.')).toBe(false);
+    expect(figureTheUserWrote(45, 'hours per week', 'Night shifts are forty-five hours now.'), 'CONTROL the unit right after it').toBe(true);
+    expect(figureTheUserWrote(45, 'hours per week', 'Night shifts are 45 now.'), 'CONTROL digits read as before').toBe(true);
+  });
+  it('CODEX R4: neither the amount before the inserted words nor a number inside them is credited', () => {
+    for (const text of ['It takes a hundred and twenty plus five hours.', 'It takes a hundred and twenty, and a quarter hours.',
+      'It takes a hundred and twenty-and-a-half hours.']) {
+      for (const v of [120, 5, 125]) expect(figureTheUserWrote(v, 'hours', text), `${text} ${v}`).toBe(false);
+      expect(figuresWritten(text).some((f) => f.low === 120 && f.high === 120), `${text} figuresWritten`).toBe(false);
     }
   });
 });
