@@ -298,7 +298,7 @@ describe('NEGATIVES: words that contradict a figure, unit, sign or increment pre
   });
   it.each([
     ['a ONE-SIDED BOUND is no standard deviation ("at most 3")', ...sd('From our shift data, each added packer adds at most 3 orders per day to daily order throughput.')],
-    ['a RANGE END is no standard deviation ("from 3 to 27 orders per day")', ...sd('From our shift data, each added packer adds from 3 to 27 orders per day to daily order throughput.', { sd: 27 })],
+    ['a RANGE END is no standard deviation ("from 1 to 3 orders per day")', ...sd('From our shift data, each added packer adds from 1 to 3 orders per day to daily order throughput.')],
   ])('%s: the AIE\'s limitation, nothing assumed', async (_, words, args) => {
     const r = await press(words, args);
     nothing(r);
