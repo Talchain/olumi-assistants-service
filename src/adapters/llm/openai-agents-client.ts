@@ -3,7 +3,9 @@
  * resolves, with its native retries and Conversations API). Olumi adds one thing, its `fetch`, which writes each physical
  * model attempt to the request's provider ledger (`_provider_calls`):
  * - each row carries the requested and the RETURNED model, the tool names sent and a digest of the input sent;
- * - a resend of the same input after a failed attempt marks that attempt as retried.
+ * - a resend of the same input after a failed attempt marks that attempt as retried;
+ * - a STREAMED attempt is recorded from its terminal event when the stream ends; the caller awaits `pending` before it
+ *   reads the ledger.
  * The request's provider policy is checked when the client is made, so a route that does not allow OpenAI never gets one
  * (a refusal thrown inside `fetch` would be retried and re-labelled by the client). Calls that are not model calls
  * (creating the scenario's Conversation) take no row.
@@ -30,6 +32,21 @@ export interface AgentsClientLedger {
   readonly site: string;
   /** The row's identity fields for one request body (prompt identity, purpose), from the caller's own identity rule. */
   readonly detailOf: (body: Readonly<Record<string, unknown>>) => ProviderCallDetail;
+  /** Each streamed attempt's recording, settled when its stream ends (await all before reading `_provider_calls`). */
+  readonly pending?: Promise<void>[];
+}
+
+/** The terminal response of a Responses SSE stream (`response.completed`, `.incomplete` or `.failed`), if it has one. */
+function streamTerminal(text: string): { usage?: unknown; model?: unknown; status?: unknown } | undefined {
+  for (const block of text.split('\n\n').reverse()) {
+    const data = block.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trim()).join('');
+    if (data === '') continue;
+    try {
+      const event = JSON.parse(data) as { type?: unknown; response?: { usage?: unknown; model?: unknown; status?: unknown } };
+      if (typeof event.type === 'string' && /^response\.(completed|incomplete|failed)$/.test(event.type) && event.response) return event.response;
+    } catch { /* not a JSON event */ }
+  }
+  return undefined;
 }
 
 /** The SDK's client with the ledger on its fetch. Make one per turn: the ledger is the request's. */
@@ -59,6 +76,24 @@ export function ledgeredAgentsClient(ledger: AgentsClientLedger): OpenAI {
     }
     if (!r.ok) {
       recordProviderAttempt(handle, { transport_status: r.status, result: 'http_error', outcome: r.status === 429 ? 'rate_limited' : 'http_error', retry: false });
+      return r;
+    }
+    if (body['stream'] === true) {
+      // The SDK reads the stream as it arrives; the copy is read to its end in the background and recorded then.
+      ledger.pending?.push(r.clone().text().then((text) => {
+        const done = streamTerminal(text);
+        if (done === undefined) {
+          recordProviderAttempt(handle, { transport_status: r.status, result: 'stream_without_terminal_event', outcome: 'invalid_response', retry: false });
+          return;
+        }
+        recordProviderUsage(handle, done.usage);
+        recordProviderReturnedModel(handle, done.model);
+        recordProviderAttempt(handle, { transport_status: r.status, result: typeof done.status === 'string' ? done.status : 'response',
+          outcome: 'success', retry: false, response_sha256: sha256(text) });
+        attempt.ok = true;
+      }, (err: unknown) => {
+        recordProviderAttempt(handle, { transport_status: r.status, result: err instanceof Error ? err.name : 'stream_failure', outcome: 'transport_error', retry: false });
+      }));
       return r;
     }
     const bytes = await r.clone().text();

@@ -32,6 +32,7 @@ import {
 } from '@openai/agents';
 import { getRuntimeEnv } from '../../../config/env-resolver.js';
 import { ledgeredAgentsClient } from '../../../adapters/llm/openai-agents-client.js';
+import { currentStageEmitter, emitAgentPhase } from '../../../cee/unified-pipeline/stage-stream-context.js';
 import { log } from '../../../utils/telemetry.js';
 import type { OpenAiPausedRun } from '../../session/store.js';
 import { agentRequestIdentity } from '../runtime/prompt-identity.js';
@@ -234,7 +235,8 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
     // does on the existing loop: the route's own handlers answer it. Never turned into text for the model.
     errorFunction: null,
   }));
-  const client = ledgeredAgentsClient({ site: 'agent-core.sdk',
+  const pendingRows: Promise<void>[] = [];
+  const client = ledgeredAgentsClient({ site: 'agent-core.sdk', pending: pendingRows,
     detailOf: (body) => ({ model: input.budget.model, purpose: 'conversation', ...agentRequestIdentity('agent.converse', body) }) });
   const agent = new Agent({
     name: 'Olumi',
@@ -319,7 +321,26 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
             instructions: [modelData.instructions ?? '', ...turnFacts].filter((t) => t !== '').join('\n\n') };
         },
       };
-      let result = await run(agent, turnInput, options);
+      /**
+       * On the streamed entry (`/proxy/v5/turn/stream` installs a stage emitter) the SDK streams: the person sees "writing"
+       * only once the AI's first words arrive. The buffered entry runs the same turn unstreamed. Either way the reply,
+       * the tool outcomes and the saved state are the final JSON's.
+       */
+      const streamed = currentStageEmitter() !== undefined;
+      const go = async (from: string | AgentInputItem[] | RunState<unknown, Agent>) => {
+        if (!streamed) return run(agent, from, options);
+        const live = await run(agent, from, { ...options, stream: true });
+        let writing = false;
+        for await (const event of live) {
+          if (!writing && event.type === 'raw_model_stream_event' && event.data.type === 'output_text_delta') {
+            writing = true;
+            emitAgentPhase('writing');
+          }
+        }
+        await live.completed;
+        return live;
+      };
+      let result = await go(turnInput);
       let calls = result.rawResponses.length;
       const pause = result.interruptions[0];
       if (pause !== undefined) {
@@ -338,7 +359,7 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
         }
         // The pause cannot be kept, so the Conversation gets its answer now: nothing applied, said by the AI.
         for (const item of result.interruptions) result.state.reject(item, { message: PAUSE_NOT_KEPT });
-        result = await run(agent, result.state, options);
+        result = await go(result.state);
         calls += result.rawResponses.length;
       }
       const text = typeof result.finalOutput === 'string' ? result.finalOutput : '';
@@ -356,5 +377,8 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
     log.warn({ event: 'agent_core.turn_failed', scenario_id: input.ctx.scenario_id, request_id: input.ctx.request_id, err: String(err).slice(0, 300) },
       'agent-core: the SDK run did not finish');
     throw err;
+  } finally {
+    // A streamed attempt's ledger row is written when its stream ends: complete before anyone reads `_provider_calls`.
+    await Promise.allSettled(pendingRows);
   }
 }
