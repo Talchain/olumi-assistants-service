@@ -156,6 +156,8 @@ const definitionDraft = (): Rec => ({
 const admitA = (c: Rec): Rec => {
   try { return admitCandidateModel(c as never, {}, undefined) as never; } catch { return admitOrdinaryCandidateModel(c as never, {}, undefined) as never; }
 };
+/** A on the DRAFTED names (what B does not take where A reads a name): the contrast for the label-blind rows. */
+const aOnDraftedNames = (draft: Rec): Rec => admitA(prepareProvisionalCandidate(draft as never).candidate as never);
 const converted = (draft: Rec): { graph: Rec; declared: Rec; loss: Rec[]; blocked_schema: Rec[] } => {
   const out = candidateToGraph(draft);
   if ('refused' in out) throw new Error(`refused: ${out.refused}`);
@@ -174,20 +176,110 @@ const declaredWho = (draft: Rec, kind: string, label: string, provenance: unknow
 };
 
 /**
+ * ⛔ LABEL-BLINDNESS (#3464 R2, DL 19 Oct: no verdict B takes from A may read a name or the brief's words). The draft with every
+ * name, quote and free-text field renamed to a neutral word — the same canonical name → the same word, so every identity A and B
+ * bind by name still holds. Written here, apart from the converter's own `labelBlind`. `back` reads a line back in the draft's names.
+ */
+function renamed(d: Rec): { draft: Rec; back: (line: string) => string } {
+  const map = new Map<string, string>();
+  const word = (text: unknown): unknown => {
+    if (typeof text !== 'string' || text.trim() === '') return text;
+    if (!map.has(canonicalLabel(text))) {
+      let letters = ''; for (let i = 0, x = map.size; i < 4; i++, x = Math.floor(x / 26)) letters = String.fromCharCode(97 + (x % 26)) + letters;
+      map.set(canonicalLabel(text), `Qzv${letters}`);
+    }
+    return map.get(canonicalLabel(text));
+  };
+  const words = (v: unknown): unknown => (Array.isArray(v) ? v.map(word) : v);
+  const ev = (e: Rec | null | undefined): Rec | null | undefined => (e ? { ...e, ...('quote' in e ? { quote: word(e.quote) } : {}), ...('option_quote' in e ? { option_quote: word(e.option_quote) } : {}) } : e);
+  [d.goal?.metric, ...['factors', 'options', 'risks', 'outcomes'].flatMap((k) => ((d[k] ?? []) as Rec[]).map((x) => x?.label))].forEach(word);
+  const r: Rec = structuredClone(d);
+  if (r.goal) {
+    for (const k of ['metric', 'deliverable', 'source_quote', 'deadline_words']) if (k in r.goal) r.goal[k] = word(r.goal[k]);
+    if (r.goal.basis) r.goal.basis = { ...r.goal.basis, denominator: word(r.goal.basis.denominator), open_question: word(r.goal.basis.open_question), also_required: words(r.goal.basis.also_required) };
+    if (r.goal.scope) r.goal.scope = { ...r.goal.scope, modelled: word(r.goal.scope.modelled), alternative: word(r.goal.scope.alternative) };
+  }
+  r.constraints = (r.constraints ?? []).map((c: Rec) => ({ ...c, metric: word(c.metric) }));
+  r.factors = (r.factors ?? []).map((f: Rec) => ({ ...f, label: word(f.label), baseline_evidence: ev(f.baseline_evidence) }));
+  r.risks = (r.risks ?? []).map((x: Rec) => ({ ...x, label: word(x.label), already_true_evidence: ev(x.already_true_evidence) }));
+  r.outcomes = (r.outcomes ?? []).map((x: Rec) => ({ ...x, label: word(x.label) }));
+  r.options = (r.options ?? []).map((o: Rec) => ({ ...o, label: word(o.label), changes: words(o.changes),
+    interventions: Array.isArray(o.interventions) ? o.interventions.map((iv: Rec) => ({ ...iv, factor_label: word(iv.factor_label), stated_evidence: ev(iv.stated_evidence) })) : o.interventions }));
+  r.links = (r.links ?? []).map((l: Rec) => ({ ...l, from: word(l.from), to: word(l.to), source_quote: word(l.source_quote), ...('basis' in l ? { basis: word(l.basis) } : {}) }));
+  r.identities = (r.identities ?? []).map((i: Rec) => ({ ...i, outcome: word(i.outcome), factors: words(i.factors), evidence: ev(i.evidence) }));
+  if (Array.isArray(r.statements)) r.statements = r.statements.map((st: Rec) => ({ ...st, quote: word(st.quote), conditions: word(st.conditions),
+    subject: st.subject ? { ...st.subject, label: word(st.subject.label), to_label: word(st.subject.to_label), factor_label: word(st.subject.factor_label) } : st.subject }));
+  if (Array.isArray(r.unknown_concerns)) r.unknown_concerns = r.unknown_concerns.map((u: Rec) => ({ ...u, unknown: word(u.unknown), concerns: words(u.concerns) }));
+  if (Array.isArray(r.unknowns)) r.unknowns = r.unknowns.map(word);
+  if ('decision_question' in r) r.decision_question = word(r.decision_question);
+  const nameOf = new Map([...map].map(([name, w]) => [canonicalLabel(w), name] as const));
+  return { draft: r, back: (line) => line.replace(/qzv[a-z]{4}/gi, (m) => nameOf.get(m.toLowerCase()) ?? m) };
+}
+
+/** B's converted graph as flat `field → value` lines, each node named by `nameOf` (the same lines for the same model under any names). */
+function graphLines(out: Rec, nameOf: (canonical: string) => string): Map<string, string> {
+  const m = new Map<string, string>();
+  if ('refused' in out) return new Map([['refused', String(out.refused)]]);
+  const g = out.graph as Rec;
+  const idName = new Map<string, string>((g.nodes as Rec[]).map((n) => [n.id, n.kind === 'decision' ? 'decision' : nameOf(canonicalLabel(String(n.description ?? n.label)))]));
+  const put = (k: string, v: unknown): void => { if (v !== undefined && v !== null) m.set(k, typeof v === 'number' ? String(Number(v.toPrecision(10))) : JSON.stringify(v)); };
+  for (const n of g.nodes as Rec[]) {
+    const k = `node ${idName.get(n.id)}`;
+    for (const f of ['kind', 'category', 'analysis_participation', 'analysis_participation_reason', 'is_baseline', 'scale_frame', 'goal_threshold', 'goal_threshold_raw',
+      'goal_threshold_cap', 'goal_threshold_unit', 'goal_threshold_frame', 'goal_direction', 'goal_horizon_months', 'quantity_frame', 'goal_target_basis', 'goal_level_reading']) put(`${k} ${f}`, n[f]);
+    for (const [f, v] of Object.entries((n.observed_state ?? {}) as Rec)) put(`${k} observed_state.${f}`, v);
+    for (const [fid, lv] of Object.entries((n.interventions ?? {}) as Rec)) for (const [f, v] of Object.entries(lv as Rec)) if (f !== 'target_match') put(`${k} setting ${idName.get(fid)} ${f}`, v);
+    if (n.nonlinear_identity) put(`${k} identity`, `${n.nonlinear_identity.operation}:${[...n.nonlinear_identity.factor_ids].map((x: string) => idName.get(x)).sort().join(',')}`);
+  }
+  for (const e of g.edges as Rec[]) {
+    const k = `edge ${idName.get(e.from)} → ${idName.get(e.to)}`;
+    for (const f of ['exists_probability', 'effect_direction', 'origin', 'strength']) put(`${k} ${f}`, e[f]);
+    for (const [f, v] of Object.entries((e.provenance ?? {}) as Rec)) if (f !== 'source_quote') put(`${k} provenance.${f}`, v);
+  }
+  for (const c of (g.goal_constraints ?? []) as Rec[]) for (const f of ['value', 'unit', 'value_frame']) put(`limit ${idName.get(c.node_id)} ${c.operator} ${f}`, c[f]);
+  const counted = (xs: string[]): Map<string, number> => xs.reduce((t, x) => t.set(x, (t.get(x) ?? 0) + 1), new Map<string, number>());
+  for (const [t, c] of counted((out.loss as Rec[]).map((l) => `loss ${String(l.field_path).replace(/(nodes|edges)\[[^\]]*\]/g, '$1[]').replace(/\.interventions\.[^.]+/g, '.interventions.#')}`))) m.set(t, String(c));
+  for (const [t, c] of counted((out.blocked_schema as Rec[]).map((b) => `blocked ${b.missing}/${b.declared}`))) m.set(t, String(c));
+  return m;
+}
+
+/** Every line on which B's graph for the draft differs from B's graph for the same draft with every name renamed: none may. */
+function blindness(draft: Rec): string[] {
+  const { draft: other, back } = renamed(draft);
+  const outs = [candidateToGraph(draft) as Rec, candidateToGraph(other) as Rec];
+  // The converter's own neutral words never reach its output.
+  const leaked = outs.flatMap((o, i) => (/qzx[a-z]{5}/i.test(JSON.stringify(o)) ? [`${i === 0 ? 'drafted' : 'renamed'}: a neutral word reached the output`] : []));
+  const mine = graphLines(outs[0]!, (c) => c);
+  const theirs = graphLines(outs[1]!, back);
+  const same = (k: string): boolean => (mine.get(k) === undefined || theirs.get(k) === undefined ? mine.get(k) === theirs.get(k)
+    : canonicalLabel(mine.get(k)!) === canonicalLabel(back(theirs.get(k)!)));
+  return [...leaked, ...[...new Set([...mine.keys(), ...theirs.keys()])].filter((k) => !same(k)).map((k) => `${k}: ${mine.get(k)} | ${theirs.get(k)}`)];
+}
+
+/**
  * The differential: A's own admission of the draft (the build's preparation + admission, no brief) against B's converted
  * graph before the refit chain.
  *  · FIGURES: for every figure A admits — a value, a level, a goal threshold, a limit, a link size — B's number, unit, frame
  *    and sign must equal A's.
  *  · STRUCTURE (DL 19 Oct, the science/gate test): every node and link A keeps, B keeps, and no other; each node's kind,
  *    category, Run participation, identity carrier and held status quo equal A's.
+ * ⛔ BOTH RUN ON THE LABEL-BLIND DRAFT (`renamed`, #3464 R2): what A reads from a name or a quote is not A's science for B, so the
+ * figures compared are A's on the declared fields only; `blindness` pins that B's graph is the same under any names, and the
+ * label-blind rows show what A reads by name and B does not take.
  * Counted apart, never as equal, each by its rule: a person's link size (ruling (a)); a level in another unit than its factor
  * or set on something that is not a factor (B says so); and A's GATES, which B reads by the declared origin instead — an
  * unsized risk the AI declared another person's or of unclear origin stays in the Run; a double route the AI declared another person's
- * is folded where A keeps it as the user's; A's label reading of an option as the status quo is not taken; a declared sum A refuses
+ * is folded where A keeps it as the user's; a declared sum A refuses
  * only for its quote is kept; a reference A on the raw draft leaves unresolved only for its case is bound. A draft B refuses as
  * unreadable is reported with A's figures it does not carry.
  */
-function differential(draft: Rec): { compared: number; equal: number; mismatches: string[]; not_used: string[]; a_created: string[]; refused?: { reason: string; figures: number } } {
+function differential(asDrafted: Rec): { compared: number; equal: number; mismatches: string[]; not_used: string[]; a_created: string[]; refused?: { reason: string; figures: number } } {
+  const { draft, back } = renamed(asDrafted);
+  const result = differentialOf(draft);
+  const said = (xs: string[]): string[] => xs.map(back);
+  return { ...result, mismatches: said(result.mismatches), not_used: said(result.not_used), a_created: said(result.a_created) };
+}
+function differentialOf(draft: Rec): ReturnType<typeof differential> {
   const prepared = prepareProvisionalCandidate(draft as never).candidate as Rec;
   const a: Rec = admitA(prepared);
   const converted = candidateToAdmittedGraph(draft);
@@ -234,12 +326,6 @@ function differential(draft: Rec): { compared: number; equal: number; mismatches
     if (same(av, bv)) equal += 1; else mismatches.push(`${where}: A ${JSON.stringify(av)} B ${JSON.stringify(bv)}`);
   };
   const draftRisk = (n: Rec): Rec | undefined => ((draft.risks ?? []) as Rec[]).find((r) => canonicalLabel(String(r.label)) === key(n));
-  const declaredSq = ((draft.options ?? []) as Rec[]).filter((o) => o.is_status_quo === true).map((o) => canonicalLabel(String(o.label)));
-  const aIsLabelHeld = (optionId: string): boolean => {
-    const o = (a.nodes as Rec[]).find((n) => n.id === optionId);
-    const acts = (a.edges as Rec[]).some((e) => e.from === optionId && e.origin !== 'repair');
-    return o === undefined || declaredSq.length !== 1 || declaredSq[0] !== key(o) || acts;
-  };
   const identity = (carrier: Rec | undefined, idOf: (id: string) => string | undefined): unknown => (carrier === undefined ? undefined
     : { operation: carrier.operation, stated_in_brief: carrier.stated_in_brief, factor_ids: [...carrier.factor_ids].map((f: string) => idOf(f) ?? `A:${f}`).sort() });
 
@@ -249,8 +335,7 @@ function differential(draft: Rec): { compared: number; equal: number; mismatches
     const bn = bNodeFor(n);
     if (bn === undefined) { mismatches.push(`node ${key(n)} (${n.kind}): in A, not in B`); continue; }
     if (n.kind === 'option') {
-      if (n.is_baseline === true && bn.is_baseline !== true && aIsLabelHeld(n.id)) not_used.push(`gate_label_status_quo: option ${key(n)}`);
-      else checkBoth(`option ${key(n)}.is_baseline`, n.is_baseline, bn.is_baseline);
+      checkBoth(`option ${key(n)}.is_baseline`, n.is_baseline, bn.is_baseline);
       continue;
     }
     check(`node ${key(n)}`, n, bn, ['scale_frame', 'goal_threshold', 'goal_threshold_raw', 'goal_threshold_cap', 'goal_threshold_unit', 'goal_threshold_frame', 'quantity_frame']);
@@ -293,7 +378,6 @@ function differential(draft: Rec): { compared: number; equal: number; mismatches
     const where = `edge ${aKey.get(e.from)} → ${aKey.get(e.to)}`;
     if (aCreated.has(e.from) || aCreated.has(e.to)) { a_created.push(where); continue; }
     const be = (bg.edges as Rec[]).find((x) => x.from === bIdFor(e.from) && x.to === bIdFor(e.to));
-    if (be === undefined && e.origin === 'repair' && aIsLabelHeld(e.from)) { not_used.push(`gate_label_status_quo: ${where}`); continue; }
     // A keeps a double route as the user's link (`explicit`); the AI declared it another person's or of unclear origin, so B folds it.
     if (be === undefined && b.loss.some((x) => x.field_path === `edges[${bIdFor(e.from)}::${bIdFor(e.to)}].one_route`)) { not_used.push(`gate_link_origin: ${where}`); continue; }
     compared += 1;
@@ -615,6 +699,7 @@ describe('candidateToGraph: conversion + science only', () => {
   const STORED = process.env.C2G_DIFFERENTIAL_DRAFTS;
   it.runIf(STORED !== undefined && existsSync(STORED))('⭐ DIFFERENTIAL (stored drafts): every figure A admits, B carries equal', () => {
     const lines = readFileSync(STORED!, 'utf8').split('\n').filter((l) => l.trim() !== '');
+    const blind = lines.flatMap((l, i) => { try { const d = blindness(JSON.parse(l)); return d.length > 0 ? [`#${i} ${d.slice(0, 6).join(' ;; ')}`] : []; } catch (e) { return [`#${i} error ${String(e).slice(0, 120)}`]; } });
     const results: (ReturnType<typeof differential> & { error?: string })[] = lines.map((l) => {
       try { return differential(JSON.parse(l)); } catch (e) { return { compared: 0, equal: 0, mismatches: [], not_used: [], a_created: [], error: String(e) }; }
     });
@@ -625,9 +710,10 @@ describe('candidateToGraph: conversion + science only', () => {
       refused: results.flatMap((r, i) => (r.refused ? [`#${i} ${r.refused.reason}: ${r.refused.figures} of A's figures not carried`] : [])),
       not_used_detail: results.flatMap((r, i) => r.not_used.filter((x) => !x.startsWith('person_size')).map((x) => `#${i} ${x}`)),
       a_created_entities: results.reduce((n, r) => n + r.a_created.length, 0), errors_detail: results.flatMap((r, i) => (r.error !== undefined ? [`#${i} ${r.error.slice(0, 160)}`] : [])),
-      mismatches: results.flatMap((r, i) => r.mismatches.map((m) => `#${i} ${m}`)) };
+      mismatches: results.flatMap((r, i) => r.mismatches.map((m) => `#${i} ${m}`)), label_blind_differing: blind };
     if (process.env.C2G_DIFFERENTIAL_OUT) writeFileSync(process.env.C2G_DIFFERENTIAL_OUT, JSON.stringify(summary, null, 1));
     expect(summary.mismatches).toEqual([]);
+    expect(summary.label_blind_differing).toEqual([]);
   }, 600_000);
 
   it('⭐ STRUCTURE SCIENCE (DL 19 Oct): a declared product, a lever no option reaches, an unsized Olumi risk, a double route and an option alike as drafted follow A, in A\'s words', () => {
@@ -685,19 +771,102 @@ describe('candidateToGraph: conversion + science only', () => {
     const { graph } = converted(undeclared);
     expect(byLabel(graph, 'Status quo').is_baseline).toBeUndefined();
     expect(['Price', 'Customers'].map((f) => edge(graph, 'Status quo', f))).toEqual([undefined, undefined]);
-    expect(differential(undeclared).mismatches).toEqual([]);
-    expect(differential(undeclared).not_used).toEqual(['gate_label_status_quo: edge status quo → price', 'gate_label_status_quo: edge status quo → customers']);
+    expect(differential(undeclared)).toMatchObject({ mismatches: [], not_used: [] });
+    expect(blindness(undeclared)).toEqual([]);
+    // Contrast: A, on the drafted names, holds it by its name.
+    const aDrafted = aOnDraftedNames(undeclared);
+    const sqId = (aDrafted.nodes as Rec[]).find((n) => n.label === 'Status quo')!.id;
+    expect((aDrafted.edges as Rec[]).filter((e) => e.from === sqId && e.origin === 'repair')).toHaveLength(2);
   });
 
-  it('⭐ ROUTE A from A: a validated definition into the goal is worked out exactly — the goal\'s own level today as a part, plus the change', () => {
-    const { graph, loss } = converted(definitionDraft());
-    const goal = ofKind(graph, 'goal')[0]!;
-    const part = byLabel(graph, 'Orders per day today');
-    expect(part).toMatchObject({ kind: 'factor', observed_state: { raw_value: 80, source: 'brief_extraction' } });
-    expect(goal.nonlinear_identity).toEqual({ operation: 'sum', factor_ids: [part.id, byLabel(graph, 'Net change in orders per day').id], stated_in_brief: false });
-    expect(edge(graph, 'Orders per day today', 'Orders per day')).toBeDefined();
-    expect(loss.some((l) => String(l.reason).startsWith('Olumi reads "Orders per day" as "Orders per day today" + "Net change in orders per day"'))).toBe(true);
-    expect(differential(definitionDraft())).toMatchObject({ mismatches: [], a_created: [] });
+  it('⛔ OPTION IDENTITY by the DECLARED status quo only (#3464 R2, Codex probe 1): an Olumi twin is left out whatever it is called', () => {
+    // Codex probe 1. With ordinary names, Olumi's two options alike as drafted are left out (A and B agree).
+    const regular = scienceDraft(); regular.options = regular.options.slice(0, 4);
+    expect(ofKind(converted(regular).graph, 'option').map((o) => o.label)).toEqual(['Raise the price', 'Run a referral scheme']);
+    expect(differential(regular)).toMatchObject({ mismatches: [], not_used: [] });
+    // The same Olumi twin renamed "Status quo", with no status quo declared: A exempts it by its label; here it is the twin it is.
+    const named = structuredClone(regular); named.options[3].label = 'Status quo';
+    const out = converted(named);
+    expect(out.declared.options[3].is_status_quo).toBeNull();
+    expect(ofKind(out.graph, 'option').map((o) => o.label)).toEqual(['Raise the price', 'Run a referral scheme']);
+    expect(out.loss.some((l) => String(l.field_path).endsWith('.option_indistinct') && String(l.reason).startsWith('I left out "Status quo" as a separate option'))).toBe(true);
+    expect(differential(named).mismatches).toEqual([]);
+    expect(differential(named).not_used).toEqual([]);
+    expect(blindness(named)).toEqual([]);
+    // Contrast: A, on the drafted names, exempts it by its name.
+    expect(ofKind(aOnDraftedNames(named), 'option').map((o) => o.label)).toContain('Status quo');
+  });
+
+  it('⛔ OPTION IDENTITY by the DECLARED status quo only (#3464 R2, Codex probe 2): another domain, a duplicate setting gains no exemption from its name', () => {
+    const sales = salesDraft();
+    sales.options = [sales.options[0], { ...structuredClone(sales.options[0]), label: 'Plan Beta', provenance: 'inferred', is_status_quo: null }];
+    expect(ofKind(converted(sales).graph, 'option').map((o) => o.label)).toEqual(['Double the ad spend']);
+    sales.options[1].label = 'Status quo';
+    expect(differential(sales).mismatches).toEqual([]);
+    expect(ofKind(converted(sales).graph, 'option').map((o) => o.label)).toEqual(['Double the ad spend']);
+    expect(differential(sales).not_used).toEqual([]);
+    expect(blindness(sales)).toEqual([]);
+    expect(ofKind(aOnDraftedNames(sales), 'option').map((o) => o.label)).toContain('Status quo');
+  });
+
+  it('OPTION IDENTITY controls (#3464 R2): a twin DECLARED the status quo, or stated by the user, stays whatever it is called; ordinary names are unchanged', () => {
+    const sales = salesDraft();
+    sales.options = [sales.options[0], { ...structuredClone(sales.options[0]), label: 'Plan Beta', provenance: 'inferred', is_status_quo: null }];
+    expect(differential(sales)).toMatchObject({ mismatches: [], not_used: [] });
+    // Controls, by the declared field: the same twin DECLARED the status quo stays, whatever it is called (A agrees).
+    for (const label of ['Plan Beta', 'Status quo']) {
+      const declared = structuredClone(sales); declared.options[1] = { ...declared.options[1], label, is_status_quo: true };
+      expect(ofKind(converted(declared).graph, 'option').map((o) => o.label)).toEqual(['Double the ad spend', label]);
+      expect(differential(declared)).toMatchObject({ mismatches: [], not_used: [] });
+      expect(blindness(declared)).toEqual([]);
+    }
+    // A twin the user stated is never left out, whatever it is called (A agrees).
+    const stated = structuredClone(sales); stated.options[1] = { ...stated.options[1], label: 'Status quo', provenance: 'explicit' };
+    expect(ofKind(converted(stated).graph, 'option').map((o) => o.label)).toEqual(['Double the ad spend', 'Status quo']);
+    expect(differential(stated)).toMatchObject({ mismatches: [] });
+    expect(blindness(stated)).toEqual([]);
+  });
+
+  it('⛔ LABEL-BLIND (#3464 R2): A\'s Route A binds a definition by the goal\'s quantity words in a name, so B does not take it; the declared link stays as drafted', () => {
+    const draft = definitionDraft();
+    // Contrast: A, on the drafted names, compiles the definition into the goal's sum with a "today" part.
+    const aDrafted = aOnDraftedNames(draft);
+    expect((aDrafted.nodes as Rec[]).map((n) => n.label)).toContain('Orders per day today');
+    const { graph } = converted(draft);
+    expect((graph.nodes as Rec[]).map((n) => n.label)).not.toContain('Orders per day today');
+    expect(ofKind(graph, 'goal')[0]!.nonlinear_identity).toBeUndefined();
+    expect(edge(graph, 'Net change in orders per day', 'Orders per day')).toBeDefined();
+    expect(differential(draft)).toMatchObject({ mismatches: [], a_created: [] });
+    expect(blindness(draft)).toEqual([]);
+  });
+
+  it('⛔ LABEL-BLIND (#3464 R2): a part an option\'s NAME "creates" gets no 0 level here, never one shown as the person\'s; Olumi\'s product over it is A\'s refusal', () => {
+    // SYNTHETIC: Olumi's product over a part the user named with no figure, and an option whose name opens with a creation verb.
+    const draft: Rec = {
+      goal: { kind: null, deliverable: null, metric: 'Weekly takings', operator: '>=', target_stated: true, value: 5000, unit: '£', horizon_months: 6,
+        provenance: 'explicit', frame: 'level', baseline_known: false, baseline_value: null, baseline_provenance: 'inferred', scope: null, quantity_frame: 'level', basis: null },
+      constraints: [], identities: [{ operation: 'product', outcome: 'Weekly takings', factors: ['Stall visitors', 'Spend per visitor'], provenance: 'inferred', evidence: null }],
+      options: [sciOption('Launch a weekend stall', 'explicit', [], ['Stall visitors']), sciOption('Keep trading as now', 'ai_proposed', [], [], true)],
+      factors: [{ ...factor('Stall visitors', null, 'visitors', 'explicit'), role: 'controllable' }, factor('Spend per visitor', 12, '£', 'explicit')],
+      risks: [], outcomes: [], links: [link('Stall visitors', 'Weekly takings', 'positive'), link('Spend per visitor', 'Weekly takings', 'positive')],
+      unknowns: [], decision_question: 'Should we add a weekend stall?', unknown_concerns: [], statements: [],
+    };
+    // Contrast: A, on the drafted names, reads "Launch" as creating the part, holds it at 0 as Olumi's reading, and keeps the product.
+    const aDrafted = aOnDraftedNames(draft);
+    expect((aDrafted.nodes as Rec[]).find((n) => n.label === 'Stall visitors')!.observed_state).toEqual({ value: 0, source: 'cee_inference' });
+    expect((aDrafted.nodes as Rec[]).find((n) => n.kind === 'goal')!.nonlinear_identity?.operation).toBe('product');
+    const { graph, loss } = converted(draft);
+    expect(byLabel(graph, 'Stall visitors').observed_state).toBeUndefined();
+    expect(ofKind(graph, 'goal')[0]!.nonlinear_identity).toBeUndefined();
+    expect(loss.some((l) => String(l.field_path).endsWith('.nonlinear_identity_rejected') && String(l.reason).includes('"Stall visitors" has no figure yet'))).toBe(true);
+    expect(differential(draft)).toMatchObject({ mismatches: [] });
+    expect(blindness(draft)).toEqual([]);
+  });
+
+  it('⛔ LABEL-BLIND (#3464 R2): B\'s graph is the same under any names, for every synthetic draft', () => {
+    const drafts = [dilemmaDraft(), salesDraft(), salesDraft('user'), sumDraft(400), sumDraft(500), sumDraft(400, 'user'), structureDraft(),
+      scienceDraft(), scienceDraft({ userFold: true }), scienceDraft({ otherFold: true }), scienceDraft({ undeclaredStatusQuo: true }), scienceDraft({ otherRisk: true })];
+    expect(drafts.flatMap(blindness)).toEqual([]);
   });
 
   it('protocol only: a draft with no goal is refused as unreadable; nothing is refused for what it means', () => {

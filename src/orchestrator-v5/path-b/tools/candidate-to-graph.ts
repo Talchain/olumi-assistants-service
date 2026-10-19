@@ -4,7 +4,8 @@
  *  · EVERY NUMBER IS A's (DL, 19 Oct, after four red rounds: "the converter must NOT re-implement number, frame or unit
  *    conversion"). The draft runs through A's own conversion — the build's preparation (`prepareProvisionalCandidate`) and
  *    A's admission through the ONE named path-B door (`admitWithoutBrief`; S7 lock, DL 19 Oct: brief pinned `undefined`) —
- *    so no reading of the brief runs. Each value, level, frame, unit,
+ *    so no reading of the brief runs, on a label-blind copy (`labelBlind`), so no reading of a name or a quote runs either
+ *    (#3464 R2): what A decides from a name alone is not taken. Each value, level, frame, unit,
  *    goal threshold, limit and Olumi-sized link is copied from what A admitted for the same entity (A's `canonicalLabel`
  *    identity). A figure A did not convert is said and kept in `declared`, never computed here. A setting in another unit
  *    than its factor (`sameUnit`), or on something that is not a factor, is not used, and said. Placeholders for unsized
@@ -33,7 +34,7 @@ import { admitAccumulationIdentities, withAdmittedAccumulations } from '../../ag
 import { clampForPersist, refitFramesForOlumiEstimates, refitFramesForStatedEffects } from '../../agent-lane/refit-frames.js';
 import { resolveMagnitudeFrame, sizeLink, type LinkSizing } from '../../../cee/magnitude/link-effect.js';
 import { magnitudeNodes, percentLevelIds } from '../../../cee/magnitude/frame-defaulted-links.js';
-import { isPersonsOwnValue, nodeProvenanceDisplay } from '../../../cee/provenance/provenance-of.js';
+import { nodeProvenanceDisplay } from '../../../cee/provenance/provenance-of.js';
 import { UNSIZED_OLUMI_RISK_REASON } from '../../agent-lane/unsized-risk.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../../orchestrator/context/constants.js';
 import { REPAIR_AUTHORED_ORIGIN } from '../../../graph/repair-authored-edge.js';
@@ -101,11 +102,80 @@ function admitWithoutBrief(prepared: CandidateModel): AdmittedModel {
   try { return admitCandidateModel(prepared, {}, undefined); } catch { return admitOrdinaryCandidateModel(prepared, {}, undefined); }
 }
 
-/** A's own conversion of the draft, with no brief: the numbers and the structure science this converter copies. */
-function convertedByA(c: CandidateModel): { a: AdmittedModel; prepared: CandidateModel } | null {
+/**
+ * ⛔ A READS NO LABEL AND NO QUOTE FOR B (#3464 R2, DL 19 Oct: "every A verdict B copies that reads a label or brief text →
+ * declared field only"). A reads some names for their meaning: an option named like "carrying on" is the status quo (and is
+ * exempt from the option-identity judge), an option named with a creation verb creates its part at 0, a factor named like a
+ * rate or a price takes Olumi's convention range, a link's source named with the goal's quantity words is a definition. So A
+ * converts a copy of the draft in which every name and every quoted or free-text field is a neutral token — one per distinct
+ * name (`canonicalLabel`), so A binds entities exactly as before — and its model is read back through the same tokens. Every
+ * verdict this converter takes from A then rests on the DECLARED fields only (structure, units, numbers, types, the declared
+ * flags and origins), whatever A reads now or later. Measured on the 2,332 stored drafts: the same output with every name
+ * renamed (`candidate-to-graph.test.ts`, label-blindness rows).
+ */
+function labelBlind(c: CandidateModel): { readonly candidate: CandidateModel; readonly readBack: <T>(v: T) => T } {
+  const tokenOf = new Map<string, string>();
+  const originalOf = new Map<string, string>();
+  const token = (text: unknown): unknown => {
+    if (typeof text !== 'string' || text.trim() === '') return text;
+    const k = canonicalLabel(text);
+    let t = tokenOf.get(k);
+    if (t === undefined) {
+      let letters = '';
+      for (let i = 0, x = tokenOf.size; i < 5; i++, x = Math.floor(x / 26)) letters = String.fromCharCode(97 + (x % 26)) + letters;
+      t = `Qzx${letters}`;
+      tokenOf.set(k, t);
+      originalOf.set(letters, text);
+    }
+    return t;
+  };
+  const tokens = (v: unknown): unknown => (Array.isArray(v) ? v.map(token) : v);
+  /** `o` with each of `fields` that it HAS mapped (no key is added, so A reads the same shape). */
+  const mapped = (o: unknown, fields: Readonly<Record<string, (v: unknown) => unknown>>): unknown => {
+    if (o === null || typeof o !== 'object' || Array.isArray(o)) return o;
+    const out: Rec = { ...(o as Rec) };
+    for (const [k, f] of Object.entries(fields)) if (k in out) out[k] = f(out[k]);
+    return out;
+  };
+  const each = (f: (v: unknown) => unknown) => (v: unknown): unknown => (Array.isArray(v) ? v.map(f) : v);
+  const quoted = (e: unknown): unknown => mapped(e, { quote: token, option_quote: token });
+  const x = c as Rec;
+  // Names first, in declaration order, so each entity's token (and its id read back) is fixed before any other text.
+  [x.goal.metric, ...[...list<Rec>(x.factors), ...list<Rec>(x.options), ...list<Rec>(x.risks), ...list<Rec>(x.outcomes)].map((n) => n?.label)].forEach(token);
+  const blind = mapped(x, {
+    goal: (g) => mapped(g, { metric: token, deliverable: token, source_quote: token, deadline_words: token,
+      basis: (b) => mapped(b, { denominator: token, open_question: token, also_required: tokens }),
+      scope: (sc) => mapped(sc, { modelled: token, alternative: token }) }),
+    constraints: each((k) => mapped(k, { metric: token })),
+    factors: each((f) => mapped(f, { label: token, baseline_evidence: quoted })),
+    options: each((o) => mapped(o, { label: token, changes: tokens,
+      interventions: each((iv) => mapped(iv, { factor_label: token, stated_evidence: quoted })) })),
+    risks: each((r) => mapped(r, { label: token, already_true_evidence: quoted })),
+    outcomes: each((o) => mapped(o, { label: token })),
+    links: each((l) => mapped(l, { from: token, to: token, basis: token, source_quote: token })),
+    identities: each((d) => mapped(d, { outcome: token, factors: tokens, evidence: quoted })),
+    decision_question: token,
+    unknowns: tokens,
+    unknown_concerns: each((u) => mapped(u, { unknown: token, concerns: tokens })),
+    statements: each((st) => mapped(st, { quote: token, conditions: token,
+      subject: (sub) => mapped(sub, { label: token, to_label: token, factor_label: token }) })),
+  });
+  // One word per name, so no two names share a word A could read. A writes a name as given ("Qzxabcde") and its id as the slug
+  // ("qzxabcde"); the id is read back as the name's own id (`assignIds`, names first, so two names sharing a slug stay apart).
+  const ids = assignIds([...originalOf.values()]);
+  const idOf = new Map([...originalOf].map(([letters, text]) => [letters, ids.get(text)!] as const));
+  const back = (v: string): string => v.replace(/qzx([a-z]{5})/g, (m, l: string) => idOf.get(l) ?? m)
+    .replace(/Qzx([a-z]{5})/g, (m, l: string) => originalOf.get(l) ?? m);
+  const readBack = <T>(v: T): T => (typeof v === 'string' ? back(v) as T : Array.isArray(v) ? v.map(readBack) as T
+    : v !== null && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, w]) => [back(k), readBack(w)])) as T : v);
+  return { candidate: blind as CandidateModel, readBack };
+}
+
+/** A's own conversion of the draft, with no brief and no names (`labelBlind`): the numbers and structure science this converter copies. */
+function convertedByA(c: CandidateModel): { a: AdmittedModel } | null {
   try {
-    const prepared = prepareProvisionalCandidate(c).candidate;
-    return { a: admitWithoutBrief(prepared), prepared };
+    const { candidate, readBack } = labelBlind(c);
+    return { a: readBack(admitWithoutBrief(prepareProvisionalCandidate(candidate).candidate)) };
   } catch { return null; }
 }
 
@@ -132,8 +202,9 @@ export function candidateToAdmittedGraph(input: unknown): Converted | { readonly
     : provenance === 'explicit' ? 'user' : 'olumi');
   // A's own sentences, by the field they are about: a science decision this converter takes from A is said in A's words.
   const aSaid = (path: string): RepairEntry[] => a.loss.filter((l) => l.field_path === path);
-  // SCIENCE (structure): an option A leaves out because it sets nothing the model can hold that another option does not is
-  // left out here too, said in A's words; it stays in `declared`.
+  // SCIENCE (structure: what each option sets and acts on): an Olumi option that sets nothing the model can hold that another
+  // option does not is left out here too, said in A's words; it stays in `declared`. A judged it on the label-blind draft
+  // (`labelBlind`), so the only status quo it exempts is the one the AI declared (`is_status_quo`), never one its label reads as.
   const options = c.options.filter((o) => aSaid(`nodes[${slugId(o.label)}].option_indistinct`).length === 0);
   for (const o of c.options) if (!options.includes(o)) loss.push(...aSaid(`nodes[${slugId(o.label)}].option_indistinct`));
 
@@ -380,22 +451,14 @@ export function candidateToAdmittedGraph(input: unknown): Converted | { readonly
     loss.push(note(`nodes[${s.outcome_id}].sum_identity`, null, declaredSumSentence(named(s.outcome_id), s.factor_ids.map(named), false) + arithmetic));
   }
   // SCIENCE (structure, units): A's identity carriers on the same nodes — a declared product A checked on the structure
-  // (`markProductIdentities`; whose reading it is follows the declaration's own provenance), a limited tally of same-unit
-  // levers (`findSumTallies`), a validated definition into the goal (Route A, `goal-definition-sum.ts`, with A's "today"
-  // part: a copy of the goal's own level today, taken when that level is the person's own figure by the declared origin) —
-  // said in A's words.
+  // (`markProductIdentities`; whose reading it is follows the declaration's own provenance) and a limited tally of same-unit
+  // levers (`findSumTallies`) — said in A's words. A carrier over a part this draft does not declare is not taken (A's Route A
+  // binds a definition by the goal's quantity words in a name, so label-blind it is never compiled).
   for (const an of a.nodes) {
     const id = bIdOfA.get(an.id);
     const carrier = an.nonlinear_identity;
     if (id === undefined || carrier === undefined || nodeById.get(id)!.nonlinear_identity !== undefined) continue;
-    const made = a.nodes.filter((n) => carrier.factor_ids.includes(n.id) && !bIdOfA.has(n.id));
-    const today = nodeById.get(id)!.observed_state;
-    const madeLinks = made.map((p) => a.edges.find((e) => e.from === p.id && e.to === an.id));
-    if (made.length > 0 && (id !== goalId || !isPersonsOwnValue(today) || madeLinks.some((l) => l === undefined))) continue;
-    made.forEach((p, i) => {
-      const part = { ...p, observed_state: { ...(today as Rec) } } as AdmittedNode & Rec;
-      nodes.push(part); nodeById.set(p.id, part); bIdOfA.set(p.id, p.id); edges.push({ ...madeLinks[i]!, to: id });
-    });
+    if (carrier.factor_ids.some((f) => !bIdOfA.has(f))) continue;
     nodeById.get(id)!.nonlinear_identity = { ...carrier, factor_ids: carrier.factor_ids.map((f) => bIdOfA.get(f)!) };
     loss.push(...aSaid(`nodes[${an.id}].nonlinear_identity`), ...aSaid(`nodes[${an.id}].sum_identity`));
   }
