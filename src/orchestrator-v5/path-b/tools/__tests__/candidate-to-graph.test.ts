@@ -948,11 +948,13 @@ describe('candidateToGraph: conversion + science only', () => {
       return g.observed_state === undefined && loss.some((l) => String(l.field_path).startsWith(`nodes[${g.id}].observed_state`));
     };
     expect(notCarried({ baseline_value: 250 })).toBe(true);
-    expect(notCarried({ baseline_provenance: 'ai_proposed' })).toBe(true);
-    expect(notCarried({ baseline_provenance: 'inferred' })).toBe(true);
-    expect(notCarried({ baseline_known: false })).toBe(true);
+    // On a level that fits the target's own scale (350 of a 375 cap), only its author decides: an estimate is withheld, as A
+    // withholds a ">=" goal's estimated level.
+    expect(notCarried({ baseline_value: 350, baseline_provenance: 'ai_proposed' })).toBe(true);
+    expect(notCarried({ baseline_value: 350, baseline_provenance: 'inferred' })).toBe(true);
+    expect(notCarried({ baseline_value: 350, baseline_known: false })).toBe(true);
     expect(notCarried({ operator: '<' })).toBe(true);
-    expect(notCarried({})).toBe(false);
+    expect([notCarried({}), notCarried({ baseline_value: 350 })]).toEqual([false, false]);
   });
 
   // ⭐ THE DRAFT'S STATEMENTS ARE CARRIED, AS DATA (DL 19 Oct, gap 3 loss table: the bridge recorded 828 statements in 141 stored drafts
