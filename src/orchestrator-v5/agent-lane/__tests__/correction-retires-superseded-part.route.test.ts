@@ -100,13 +100,26 @@ describe('a correction retires only the part of a shown card it replaces, visibl
     expect(w.graphWrites(), 'no write from the replaced card').toBe(writes);
     expect(node(w.read(), 'night').observed_state).toMatchObject({ raw_value: 40, source: 'brief_extraction' });
     expect(node(w.read(), 'day').observed_state).toMatchObject({ raw_value: 60, source: 'brief_extraction' });
-    // Typed words never bind it either.
+    expect(String(pressed.assistant_text), 'the press is answered with what happened to it').toMatch(SAID);
+    // Typed words never bind it either, and the reply says what happened, never the Agent's "Applied." (Codex R1 on #3463).
     const typed = await turn({ message: 'Yes, apply the night and day shift values.', source: 'composer', agent_session_id: session },
       [call('authorise_change', { proposal_id: old }), say('Applied.')]);
     expect(authorised(typed)).toEqual([expect.objectContaining({ ok: false, mutated: false })]);
     expect(w.graphWrites()).toBe(writes);
-    expect(String(typed.assistant_text), 'said once').not.toMatch(SAID);
-  }, 150_000);
+    expect(String(typed.assistant_text), 'no save claim without a write').not.toMatch(/\bApplied\b/);
+    expect(String(typed.assistant_text)).toMatch(SAID);
+    // A turn that does not touch it does not say it again.
+    const other = await turn({ message: 'Where are we?', source: 'composer', agent_session_id: session }, [say('Here is where things stand.')]);
+    expect(String(other.assistant_text), 'said once').not.toMatch(SAID);
+    // Cold: a fresh session, the OLD button's exact words typed, the Agent's "Applied.": nothing written, nothing claimed.
+    const cold = await turn({ message: button.message, source: 'composer', agent_session_id: randomUUID() },
+      [call('authorise_change', { proposal_id: old }), say('Applied.')]);
+    expect(authorised(cold).filter((c) => c.ok === true || c.mutated === true)).toEqual([]);
+    expect(w.graphWrites()).toBe(writes);
+    expect(node(w.read(), 'night').observed_state).toMatchObject({ raw_value: 40, source: 'brief_extraction' });
+    expect(String(cold.assistant_text), 'no save claim without a write').not.toMatch(/\bApplied\b/);
+    expect(String(cold.assistant_text)).toMatch(SAID);
+  }, 200_000);
 
   it('⭐ the journey: correction approved → saved and read back → the old card under review → cold reopen → only the kept part is prepared again, and saves', async () => {
     const { w, turn, offered, old, fix, session } = await mixedThenCorrection();

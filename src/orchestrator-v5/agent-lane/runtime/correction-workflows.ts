@@ -108,12 +108,7 @@ export function correctedSubjectsOf(p: StructuredProposal | undefined): readonly
  */
 export function retireCorrectedHolds(holds: readonly PendingAction[], corrected: ReadonlySet<string>, graph: unknown, graphHash: string | undefined)
   : { holds: PendingAction[]; gone: string[]; said: string[] } {
-  const nodes = isPlainRecord(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isPlainRecord) : [];
-  const labelOf = (id: string): string | undefined => { const n = nodes.find(x => x.id === id); return typeof n?.label === 'string' ? n.label : undefined; };
-  const nameOf = (subject: string): string => {
-    const [from, to] = subject.split('->');
-    return to === undefined ? labelOf(from!) ?? 'one item' : `${labelOf(from!) ?? 'one item'} → ${labelOf(to) ?? 'one item'}`;
-  };
+  const nameOf = subjectNamer(graph);
   const out: PendingAction[] = [], gone: string[] = [], said: string[] = [];
   for (const h of holds) {
     const card = agentProposalOf(h);
@@ -130,6 +125,26 @@ export function retireCorrectedHolds(holds: readonly PendingAction[], corrected:
     said.push(heldCorrectedSentence(heldChangeLabel(h), now.map(nameOf), writes.filter(s => !before.has(s) && !corrected.has(s)).map(nameOf)));
   }
   return { holds: out, gone, said };
+}
+
+/** A subject's name as the user reads it: the node's label, a link as "A → B"; never an id. */
+function subjectNamer(graph: unknown): (subject: string) => string {
+  const nodes = isPlainRecord(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isPlainRecord) : [];
+  const labelOf = (id: string): string => { const n = nodes.find(x => x.id === id); return typeof n?.label === 'string' ? n.label : 'one item'; };
+  return (subject) => { const [from, to] = subject.split('->'); return to === undefined ? labelOf(from!) : `${labelOf(from!)} → ${labelOf(to)}`; };
+}
+
+/**
+ * What a card a correction partly replaced says when it is pressed or approved in words again (Codex R1 on #3463: "Applied." with
+ * nothing saved): the same words as when it was retired, never "the model changed" while the correction is only offered.
+ * Undefined for any other card.
+ */
+export function correctedReviewLine(h: PendingAction, graph: unknown): string | undefined {
+  const replaced = heldCardReplaced(h), card = agentProposalOf(h);
+  if (replaced.length === 0 || card === undefined) return undefined;
+  const gone = new Set(replaced.map(r => r.subject)), nameOf = subjectNamer(graph);
+  const kept = [...new Set(card.operations.flatMap(writtenSubjects))].filter(s => !gone.has(s)).map(nameOf);
+  return heldCorrectedSentence(heldChangeLabel(h), replaced.map(r => r.name), kept);
 }
 
 /** The existing statement operation's scoped correction is one complete native CAS registration. */

@@ -100,7 +100,7 @@ import { declinedProposalOf, declineChipIdFor, displayedProposalsOf, shownAsHeld
 import { amendAgentProposal, parseProposalEdits, proposalEditsDigest, readUserEdits } from '../orchestrator-v5/agent-lane/proposal-object/amend.js';
 import { refreshedHold, reconcileHeldProposals } from '../orchestrator-v5/agent-lane/proposal-object/lifecycle.js';
 import { heldCardReplaced, heldCardStillApplies, heldCardSubjectMoved, heldCardUnderReview } from '../orchestrator-v5/agent-lane/proposal-object/still-applies.js';
-import { correctedSubjectsOf, retireCorrectedHolds, writtenSubjects } from '../orchestrator-v5/agent-lane/runtime/correction-workflows.js';
+import { correctedReviewLine, correctedSubjectsOf, retireCorrectedHolds, writtenSubjects } from '../orchestrator-v5/agent-lane/runtime/correction-workflows.js';
 import { editsRefusedSentence, heldDeclineSentence, heldLapseSentence, heldReviewSentence, reviewChipFor, reviewedProposalOf, userEditsReceipt, PLAIN_APPROVAL_SUPERSEDED } from '../orchestrator-v5/agent-lane/proposal-object/reply.js';
 import { CONVERSATION_ROWS_READ } from './assist.v1.scenario-graph.js';
 import { commitOlumiOptionAdoptionInProcess } from '../orchestrator-v5/system-events/olumi-option-adoption.js';
@@ -4724,7 +4724,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const pressedForReview = staleReviewPress === undefined || reconciled.review.some((h) => heldProposalId(h) === staleReviewPress) ? []
           : reconciled.carried.filter((h) => heldProposalId(h) === staleReviewPress && heldCardUnderReview(h));
         heldLapseLines = [...takeOwedHeldLapses(scenarioId), ...reconciled.lapsed.map((l) => heldLapseSentence(heldChangeName(l.hold), l.reason)),
-          ...[...reconciled.review, ...pressedForReview].map((h) => heldReviewSentence(heldChangeName(h))), ...(retired?.said ?? [])];
+          ...reconciled.review.map((h) => heldReviewSentence(heldChangeName(h))),
+          ...pressedForReview.map((h) => correctedReviewLine(h, readbackGraph) ?? heldReviewSentence(heldChangeName(h))), ...(retired?.said ?? [])];
         // An earlier turn's held proposal the Agent set aside on the user's typed decline is SAID (the press says its own).
         if (declinedHold === undefined) {
           const setAside = heldAtStart.filter((h) => withdrawn.has(heldProposalId(h)));
@@ -5146,8 +5147,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(heldCards.some((r) => !underReview.has(r.proposal_id)) ? [AMEND_CHIP] : []),
         ...heldCards.map((r) => r.decline_action as OfferedAction)] : [];
     const meantHold = waitingIds.size > 1 && meantId !== undefined ? heldAtStart.find((h) => heldProposalId(h) === meantId) : undefined;
-    const approvalWords = waitingIds.size > 1
-      ? approvalChoiceWords(waitingIds.size, meantHold === undefined ? undefined : heldChangeLabel(meantHold)) : APPROVAL_REQUIRED_WORDS;
+    // ⛔ Codex R1 on #3463: an approval of a card kept for review is answered with what happened to it (its review line), never
+    // "press the approval button" (it has none) beside the Agent's own "Applied.".
+    const refusedCards = result.tool_calls.filter((c) => c.name === 'authorise_change' && c.refusal === 'approval_required').map((c) => c.proposal_id);
+    const reviewedHold = refusedCards.length === 0 ? undefined : liveHolds.find((h) => heldCardUnderReview(h) && refusedCards.every((id) => id === heldProposalId(h)));
+    const approvalWords = reviewedHold !== undefined ? correctedReviewLine(reviewedHold, readbackGraph) ?? heldReviewSentence(heldChangeName(reviewedHold))
+      : waitingIds.size > 1
+        ? approvalChoiceWords(waitingIds.size, meantHold === undefined ? undefined : heldChangeLabel(meantHold)) : APPROVAL_REQUIRED_WORDS;
     // A resolved construction card, whatever it confirms. The complete stored window must attest both the first
     // public user answer and its exact-brief construction registration; neither a later card nor unknown history qualifies.
     const constructionConfirmResolved = await (async (): Promise<boolean> => {

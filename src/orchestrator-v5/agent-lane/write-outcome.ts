@@ -38,8 +38,9 @@ export const WRITE_TOOLS: readonly string[] = ['authorise_change', 'build_model_
 /** AIE packet AIE-ORIGIN-REFUSAL-AND-CORRECTION-AMENDMENT-20261018-v1 (`K6_reply_line`, sha256 bb91dcdd…), byte for byte; said only after a confirmed save. */
 export const OPEN_AIM_SAVED_LINE = 'I have saved a provisional Living Model using the assumptions shown. Your aim still needs defining, so this is a starting point for reasoning rather than a calculated forecast.';
 
+// The claim word alone is a claim too ("Applied.", "Saved!"; Codex R1 on #3463: kept before a refusal receipt, a false save).
 const CLAIM_OPENER =
-  /^(?:[-•*>#\s]*)(?:\*\*)?(?:Applied|Added|Updated|Saved|Recorded|Adopted|Linked)(?:\*\*)?(?:\s*:|\s+(?:(?:the|all|a|an|your|this|that|these|those|both|every|each|proposal|assumptions?|levels?|values?|it|them)\b|\*\*|`|\d))/i;
+  /^(?:[-•*>#\s]*)(?:\*\*)?(?:Applied|Added|Updated|Saved|Recorded|Adopted|Linked)(?:\*\*)?(?:\s*:|\s*[.!](?:\*\*)?\s*$|\s+(?:(?:the|all|a|an|your|this|that|these|those|both|every|each|proposal|assumptions?|levels?|values?|it|them)\b|\*\*|`|\d))/i;
 const NOW_EFFECT = /\b(?:is|are)\s+now\s+(?:recorded|represented|saved|applied|in the model)\b|\b(?:was|were)\s+(?:recorded|applied|saved|added|adopted)\b/i;
 const I_DID = /\bI(?:'|’)?(?:ve| have)\s+(?:applied|added|saved|recorded|updated|linked|adopted)\b/i;
 const NEGATION = /\b(?:not|no|nothing|never|yet|haven(?:'|’)t|hasn(?:'|’)t|didn(?:'|’)t|won(?:'|’)t|cannot|can(?:'|’)t|once|if|until|when)\b|n(?:'|’)t\b/i;

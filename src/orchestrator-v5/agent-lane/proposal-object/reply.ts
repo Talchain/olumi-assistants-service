@@ -80,8 +80,8 @@ export function reviewChipFor(proposalId: string, change: string | undefined, re
 export function heldCorrectedSentence(change: string | undefined, replaced: readonly string[], kept: readonly string[]): string {
   const what = change?.trim().replace(/\.$/, '');
   const card = what !== undefined && what !== '' ? `the held change "${what}"` : 'a held change';
-  return `Your correction replaces ${namesSaid(replaced)} in ${card}, so that change waits for your review; nothing was applied. `
-    + `Its other part (${namesSaid(kept)}) can be prepared again with ${REVIEW_THIS_CHANGE}.`;
+  return `Your correction replaces ${namesSaid(replaced)} in ${card}, so that change waits for your review; nothing was applied.`
+    + (kept.length > 0 ? ` Its other part (${namesSaid(kept)}) can be prepared again with ${REVIEW_THIS_CHANGE}.` : '');
 }
 
 /**
