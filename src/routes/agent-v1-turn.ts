@@ -2762,7 +2762,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const historicalDecisions = stillValid.filter(action => typedApprovalOf({ chip: { id: action.id } }) !== undefined
         || action.id === AMEND_CHIP.id || declinedProposalOf(action.id) !== undefined);
       const replayActions = firstOfEachId([...(historicalLoopReplay ? historicalDecisions : stillValid), ...boundControl]);
-      const replayGuidedDraft = replayNarration?.status === 'pending' || replayNarration?.status === 'ready' || replayLoopRunCurrent
+      // PATH-B core (#3487's rule, PL 00:18): a replayed core turn carries no host sizing chips or panel either.
+      const replayGuidedDraft = mode !== 'core' && (replayNarration?.status === 'pending' || replayNarration?.status === 'ready' || replayLoopRunCurrent)
         ? replayScopedDraftForRun : undefined;
       const replayGuidedActions = guidedSizingActions(replayGuidedDraft, state.graph,
         await guidedSizingHistory(historyReader, scenarioId, turnId));
@@ -5363,8 +5364,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       text = text.replace(/\s*\d+ more to go(?:; with 1 left, Olumi can show a range)?\./gu, '').trim();
       if (guidedReplyText.progress !== null) text = `${text} ${guidedReplyText.progress}`;
     }
-    const guidedDraft = sizingProgress?.draft ?? guidedDraftForRun;
-    const guidedActions = !hostCards ? [] : guidedSizingActions(guidedDraft, readbackGraph,
+    const guidedDraft = !hostCards ? undefined : sizingProgress?.draft ?? guidedDraftForRun;
+    const guidedActions = guidedSizingActions(guidedDraft, readbackGraph,
       guidedDraft === undefined ? [] : await guidedSizingHistory(historyReader, scenarioId, undefined));
     offeredNow.push(...guidedActions);
     const guidedSizing = bindGuidedSizing(guidedDraft, guidedActions, {
