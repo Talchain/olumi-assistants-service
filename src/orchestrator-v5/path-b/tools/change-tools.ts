@@ -179,7 +179,9 @@ function planOf(scenarioId: string, proposalId: string, ops: readonly Op[], grap
     }
     if (byId.get(o.option_id)?.kind !== 'option') return { refusal: 'not_an_option', op: i };
     const frame = frameOf(factor) ?? plan.frames.find((f) => f.factor_id === o.factor_id)?.cap ?? null;
-    if (frame === null && Math.abs(o.value) > 1) return { refusal: 'factor_has_no_range', op: i };
+    // #3461 R1: only a unitless share may take the model's 0–1 scale on a factor with no range. A figure with a unit (or above 1)
+    // would lose its figure and unit there, so it is not proposed at all (`needs_range`), never written and found short after.
+    if (frame === null && (o.unit !== null || Math.abs(o.value) > 1)) return { refusal: 'needs_range', op: i };
     plan.levels.push(frame === null ? { option_id: o.option_id!, factor_id: o.factor_id, value: o.value, author: 'model_proposed' }
       : { option_id: o.option_id!, factor_id: o.factor_id, value: o.value / frame, raw_value: o.value, cap: frame, ...(o.unit === null ? {} : { unit: o.unit }), author: 'model_proposed' });
     if (!edges.some((e) => e.from === o.option_id && e.to === o.factor_id)) plan.links.push({ option_id: o.option_id!, factor_id: o.factor_id });
@@ -229,6 +231,14 @@ async function ownReceipt(dispatch: InternalDispatch, scenarioId: string, turnId
   return null;
 }
 
+/** A plan that stopped: a figure no carrier can take as given is unavailable with the figure kept; anything else is refused. */
+function stopped(plan: Stop, ops: readonly Op[]): ToolOutcome {
+  if (plan.refusal !== 'needs_range') return refused(plan.refusal, undefined, { op: plan.op });
+  const o = ops[plan.op]!;
+  return unavailable('needs_range', 'none', `Change ${plan.op + 1}: this factor has no range yet, so this figure cannot be saved with its unit; nothing was proposed or saved.`,
+    { op: plan.op, not_kept: [{ what: 'figure', declared: o.unit === null ? String(o.value) : `${o.value} ${o.unit}` }] });
+}
+
 /** BLOCKED-SCHEMA, said with the change it stopped: nothing is proposed or saved. */
 const blockedSaid = (i: number, why: string): string => `Change ${i + 1}: ${why}, so nothing was proposed or saved.`;
 
@@ -254,8 +264,9 @@ export async function proposeChange(deps: Pick<ChangeDeps, 'dispatch' | 'proposa
     operations: ops.map(operationOf), provenance: { authored_by: 'model_proposed' as const, basis: args.basis },
     validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: args.public_label };
   const p = createProposal(content);
-  const plan = planOf(ctx.scenario_id, p.proposal_id, declaredOf(p) ?? [], read.graph);
-  if ('refusal' in plan) return refused(plan.refusal, undefined, { op: plan.op });
+  const declared = declaredOf(p) ?? [];
+  const plan = planOf(ctx.scenario_id, p.proposal_id, declared, read.graph);
+  if ('refusal' in plan) return stopped(plan, declared);
   deps.proposals.put(p);
   return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: read.identity });
 }
@@ -284,7 +295,7 @@ export async function applyChange(deps: ChangeDeps, ctx: ChangeCtx, args: ApplyC
   if (decision.status === 'already_applied') return alreadySaved(decision.receipts[0] ?? null);
   if (decision.status !== 'execute') return refused(decision.status);
   const plan = planOf(ctx.scenario_id, p.proposal_id, ops, before.graph);
-  if ('refusal' in plan) return refused(plan.refusal, undefined, { op: plan.op });
+  if ('refusal' in plan) return stopped(plan, ops);
   const input: CommitOptionLevelsInput = { scenario_id: ctx.scenario_id, base_graph_hash: before.graphHash, turn_id: turnId,
     links: plan.links, levels: plan.levels, ...(plan.values!.length > 0 ? { values: plan.values } : {}), ...(plan.frames!.length > 0 ? { frames: plan.frames } : {}) };
 

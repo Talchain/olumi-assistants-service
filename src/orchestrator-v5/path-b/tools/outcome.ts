@@ -15,7 +15,7 @@ const reason = z.string().regex(/^[a-z][a-z0-9_]*$/);
 export const ToolOutcomeSchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('ok'), mutated: z.boolean(), ran: z.boolean(), data: z.record(z.string(), z.unknown()) }),
   z.object({ status: z.literal('refused'), reason, detail: z.string().optional(), data: z.record(z.string(), z.unknown()).optional() }),
-  z.object({ status: z.literal('unavailable'), reason, write: z.enum(['none', 'unknown']), detail: z.string().optional() }),
+  z.object({ status: z.literal('unavailable'), reason, write: z.enum(['none', 'unknown']), detail: z.string().optional(), data: z.record(z.string(), z.unknown()).optional() }),
 ]);
 export type ToolOutcome = z.infer<typeof ToolOutcomeSchema>;
 
@@ -24,8 +24,9 @@ export const ok = (data: Record<string, unknown>, effect: { readonly mutated?: b
 /** `data`: the typed facts the refusal rests on (e.g. readiness codes), never words composed for the user. */
 export const refused = (code: string, detail?: string, data?: Record<string, unknown>): ToolOutcome =>
   ({ status: 'refused', reason: code, ...(detail === undefined ? {} : { detail }), ...(data === undefined ? {} : { data }) });
-export const unavailable = (code: string, write: 'none' | 'unknown' = 'none', detail?: string): ToolOutcome =>
-  ({ status: 'unavailable', reason: code, write, ...(detail === undefined ? {} : { detail }) });
+/** `data`: the typed facts of what could not be done (e.g. the figure a carrier could not take), never words for the user. */
+export const unavailable = (code: string, write: 'none' | 'unknown' = 'none', detail?: string, data?: Record<string, unknown>): ToolOutcome =>
+  ({ status: 'unavailable', reason: code, write, ...(detail === undefined ? {} : { detail }), ...(data === undefined ? {} : { data }) });
 
 /** The kit's `_agent.tool_calls` row. `mutated: null` is an UNKNOWN write (never a claimed one); `ran: null` is no Run. */
 export interface TraceRow {
