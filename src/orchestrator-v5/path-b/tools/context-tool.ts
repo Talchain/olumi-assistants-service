@@ -33,7 +33,10 @@ const str = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? 
 const int = (v: unknown): number | null => (typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? v : null);
 const bool = (v: unknown): boolean | null => (typeof v === 'boolean' ? v : null);
 /** The stored fields a figure is read from, copied as stored (never converted here). */
-const pick = (o: Rec, keys: readonly string[]): Rec => Object.fromEntries(keys.filter((k) => o[k] !== undefined).map((k) => [k, o[k]]));
+const pick = (o: object, keys: readonly string[]): Rec => {
+  const r = o as Rec;
+  return Object.fromEntries(keys.filter((k) => r[k] !== undefined).map((k) => [k, r[k]]));
+};
 
 function nodeOf(n: Rec, byId: ReadonlyMap<string, Rec>): Rec {
   const observed = isRec(n.observed_state) ? n.observed_state : undefined;
@@ -41,7 +44,7 @@ function nodeOf(n: Rec, byId: ReadonlyMap<string, Rec>): Rec {
     factor_id: factorId, cell, source: provenanceOf({ setting: cell, target: byId.get(factorId) }),
   })) : [];
   const statements = recordsWithUnknownSpeakerOn(n).map((r) => ({ subject_key: r.subject_key, field: r.field,
-    statements: r.statements.map((s) => pick(s as unknown as Rec, ['speaker', 'quote', 'form', 'low', 'high', 'unit', 'period', 'conditions', 'qualifier', 'negated'])) }));
+    statements: r.statements.map((s) => pick(s, ['speaker', 'quote', 'form', 'low', 'high', 'unit', 'period', 'conditions', 'qualifier', 'negated'])) }));
   return {
     ...pick(n, ['id', 'kind', 'label', 'description', 'proposed_by', 'analysis_participation', 'option_status']),
     ...(n.provenance === undefined ? {} : { added_by: authorshipOf({ nodeTag: n.provenance }) }),
@@ -79,11 +82,19 @@ function selectedRunOf(json: Rec, graph: Rec): Rec | null {
   };
 }
 
-/** The ONE reader: a fresh read of the saved scenario, as typed facts. Mutates nothing. */
-export async function readCanonicalContext(deps: { readonly dispatch: InternalDispatch }, ctx: Pick<AgentToolContext, 'scenario_id'>): Promise<ToolOutcome> {
+/** The saved scenario as the product's graph route returns it: the FULL graph, for mutation and readback. */
+export interface SavedRead {
+  readonly json: Rec;
+  readonly graph: Rec;
+  readonly graphHash: string;
+  readonly identity: string | null;
+}
+
+/** ONE fresh read of the saved scenario. The full graph stays internal; `readCanonicalContext` is the AI's view of it. */
+export async function readSaved(deps: { readonly dispatch: InternalDispatch }, scenarioId: string): Promise<SavedRead | ToolOutcome> {
   let r: Awaited<ReturnType<InternalDispatch>>;
   try {
-    r = await deps.dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph`, { ...FRESH_READ });
+    r = await deps.dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, { ...FRESH_READ });
   } catch {
     return unavailable('read_failed');
   }
@@ -91,11 +102,19 @@ export async function readCanonicalContext(deps: { readonly dispatch: InternalDi
   if (r.status !== 200) return unavailable('read_failed', 'none', `HTTP ${r.status}`);
   const graphHash = str(r.json.graph_hash);
   if (graphHash === null || !isRec(r.json.graph)) return unavailable('read_malformed');
-  const graph = r.json.graph;
+  const identity = isRec(r.json.graph_identity_hash) ? str(r.json.graph_identity_hash.value) : str(r.json.graph_identity_hash);
+  return { json: r.json, graph: r.json.graph, graphHash, identity };
+}
+export const isSavedRead = (v: SavedRead | ToolOutcome): v is SavedRead => 'graphHash' in v;
+
+/** The ONE reader's AI view: a fresh read of the saved scenario, as typed facts. Mutates nothing. */
+export async function readCanonicalContext(deps: { readonly dispatch: InternalDispatch }, ctx: Pick<AgentToolContext, 'scenario_id'>): Promise<ToolOutcome> {
+  const saved = await readSaved(deps, ctx.scenario_id);
+  if (!isSavedRead(saved)) return saved;
+  const { json, graph, graphHash, identity } = saved;
   const nodes = recs(graph.nodes);
   const byId = new Map(nodes.filter((n) => typeof n.id === 'string').map((n) => [n.id as string, n]));
-  const identity = isRec(r.json.graph_identity_hash) ? str(r.json.graph_identity_hash.value) : str(r.json.graph_identity_hash);
-  const view = isRec(r.json.canonical_analysis_view) ? r.json.canonical_analysis_view : {};
+  const view = isRec(json.canonical_analysis_view) ? json.canonical_analysis_view : {};
   const admission = resolveRunAdmission(graph);
   return ok({
     scenario_id: ctx.scenario_id,
@@ -108,8 +127,8 @@ export async function readCanonicalContext(deps: { readonly dispatch: InternalDi
       will_run: admission.willProceed,
       safe_to_analyse: admission.assessment.safeToAnalyse,
       blocking: admission.assessment.blockingIssues.map((i) =>
-        pick(i as unknown as Rec, ['code', 'category', 'repairability', 'factor_id', 'option_id', 'obligation'])),
+        pick(i, ['code', 'category', 'repairability', 'factor_id', 'option_id', 'obligation'])),
     },
-    selected_run: selectedRunOf(r.json, graph),
+    selected_run: selectedRunOf(json, graph),
   });
 }
