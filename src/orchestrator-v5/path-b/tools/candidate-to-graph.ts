@@ -26,6 +26,7 @@ import {
 import { prepareProvisionalCandidate } from '../../agent-lane/runtime/build-model.js';
 import { admitCandidateLinks, type CandidateLink } from '../../agent-lane/admit-candidate.js';
 import { sameUnit } from '../../agent-lane/same-unit.js';
+import { sayFigure } from '../../agent-lane/say-figure.js';
 import { admitAccumulationIdentities, withAdmittedAccumulations } from '../../agent-lane/accumulation-identity.js';
 import { clampForPersist, refitFramesForOlumiEstimates, refitFramesForStatedEffects } from '../../agent-lane/refit-frames.js';
 import { resolveMagnitudeFrame, sizeLink, type LinkSizing } from '../../../cee/magnitude/link-effect.js';
@@ -225,7 +226,7 @@ export function candidateToAdmittedGraph(input: unknown, admit: AdmitDraft): Con
       const who: Who = computed ? 'olumi' : setBy;
       if (computed) {
         const unit = iv.unit ?? '';
-        const say = (v: unknown): string => (finite(v) ? (/^[£$€]$/.test(unit) ? `${unit}${v.toLocaleString('en-GB')}` : `${v.toLocaleString('en-GB')}${unit ? ` ${unit}` : ''}`) : String(v));
+        const say = (v: unknown): string => (finite(v) ? sayFigure(v, unit) : String(v));
         loss.push(note(`${path}.derived_total`, { today: declaredFactor?.baseline_value, added: iv.value },
           `"${o.label}" sets "${factorLabel}" to ${say(aLevel.raw_value ?? aLevel.value)}, Olumi's derived figure: ${derivation(say(aLevel.raw_value ?? aLevel.value),
             [{ by: factorWho.get(canonicalLabel(factorLabel)) ?? 'unknown', amount: say(declaredFactor?.baseline_value) }, { by: setBy, amount: say(iv.value) }])}.`));
