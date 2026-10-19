@@ -115,7 +115,7 @@ const beside = (out: { loss: readonly Rec[] }): Rec | undefined => out.loss.find
 const otherUnit = (out: { loss: readonly Rec[] }): Rec | undefined => out.loss.find((l) => l.field_path.endsWith('.stated_range_other_unit'));
 // The AIE's words (prompt/AIE-UNIT-REFERENCE-WORDING-20261017-v1.json, 16:04Z).
 const otherUnitWords = (quote: string, unit: string): string => `"${PRE}" → "${WASTE}": "${quote}", as stated in the brief. Olumi has not `
-  + `converted this range into "${unit}" for this effect. The model currently holds a separate provisional Olumi estimate, not the stated range.`;
+  + `converted this range into "${unit}" for this effect. Olumi uses a placeholder strength for this link, not an estimate and not the stated range.`;
 const recordOn = (graph: Rec): Rec | undefined => {
   const pre = graph.nodes.find((n: Rec) => n.label === PRE);
   const waste = graph.nodes.find((n: Rec) => n.label === WASTE);
