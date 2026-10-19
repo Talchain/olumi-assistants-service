@@ -134,17 +134,16 @@ describe('a figure written in words is written, exactly as its digits are (deplo
     }
   }, 4 * ROUTE_MS);
 
-  it('= a name (Codex R2; the same with digits): the same card and save in both forms, its binding labelled Olumi’s reading', async () => {
+  // DL-3 ruling on Codex R3 (#3433 @d3bcc80e): a labelled card that still WRITES a figure the user gave to something else (here
+  // a company's name) is a wrong write. The one quantity-identity rule now governs the write: nothing is proposed for the team.
+  it('= a name (Codex R2; the same with digits): never written as the team\'s figure, the same refusal in both forms', async () => {
     const digits = await correct('We signed with 70 TICKETS LTD this week.', teamLevel(70));
     const words = await correct('We signed with SEVENTY TICKETS LTD this week.', teamLevel(70));
     for (const r of [digits, words]) {
-      expect(String(r.chip?.detail)).toContain('(figure from the quoted message; field binding unverified)');
-      expect(String(r.chip?.detail)).toContain('these field bindings are Olumi’s reading, including after approval');
-      expect(String(r.chip?.detail)).not.toMatch(/your figure|you said/i);
-      expect(nodeOf(r.w.graph(), TEAM).observed_state).toMatchObject({ raw_value: 70, user_material_unverified: true });
+      expect(r.result, JSON.stringify(r.result)).toMatchObject({ ok: false, mutated: false, refusal: 'nothing_to_adopt' });
+      expect(r.chip).toBeUndefined();
+      expect(nodeOf(r.w.graph(), TEAM)).toEqual(nodeOf(SERVED.graph, TEAM));
     }
-    expect(words.chip?.label).toBe(digits.chip?.label);
-    expect(nodeOf(words.w.graph(), TEAM)).toEqual(nodeOf(digits.w.graph(), TEAM));
   }, 4 * ROUTE_MS);
 
   it.each([
