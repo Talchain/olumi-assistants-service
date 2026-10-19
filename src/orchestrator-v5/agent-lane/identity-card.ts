@@ -19,8 +19,7 @@ import type { StructuredProposal } from './proposal.js';
 import { isPendingActionExpired, type PendingAction } from '../session/pending-action.js';
 import { agentProposalOf, isHeldProposal } from './proposal-object/record.js';
 import { identityPartsWithoutLevel } from '../system-events/identity-confirm-edit.js';
-import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
-import { countsInWords, figureTheUserWroteForSpan, moneyUnitScale } from './stated-by-user.js';
+import { amountsWrittenIn, amountTheUserWrote, figureTheUserWroteForSpan, moneyUnitScale } from './stated-by-user.js';
 import { countedNoun } from './counted-nouns.js';
 import { CeilingStockPendingSchema } from './ceiling-stock.js';
 
@@ -136,7 +135,8 @@ export function identityPartFiguresToIssue(p: {
   const graph = p.graph as { nodes?: unknown[] };
   const isNode = (n: unknown): n is Record<string, unknown> => typeof n === 'object' && n !== null && !Array.isArray(n);
   const nodes = Array.isArray(graph.nodes) ? graph.nodes.filter(isNode) : [];
-  const amounts = [...findStatedAmounts(p.userText), ...countsInWords(p.userText)];
+  // THE ONE READER AND CHECK (#3429): source, speaker and quantity are read once for every door, never re-scanned here.
+  const userText = p.userText, amounts = amountsWrittenIn(userText);
   type Figure = { part_label: string; value: number; unit: string; start: number; end: number };
   const candidates: Figure[][] = [];
   for (const part of missing) {
@@ -150,8 +150,8 @@ export function identityPartFiguresToIssue(p: {
       .flatMap(n => typeof n.label === 'string' && n.label !== part.label ? [n.label] : []);
     const figures = amounts.flatMap(a => {
       const value = a.magnitude / moneyUnitScale(unit);
-      if (!Number.isFinite(value) || value <= 0) return [];
-      const span = figureTheUserWroteForSpan(value, unit, p.userText, { target: [part.label], others, exactFigure: true, at: a.index });
+      if (!Number.isFinite(value) || value <= 0 || !amountTheUserWrote(a, value, unit, userText)) return [];
+      const span = figureTheUserWroteForSpan(value, unit, userText, { target: [part.label], others, exactFigure: true, at: a.index });
       return span === null ? [] : [{ part_label: part.id, value, unit, ...span }];
     });
     if (figures.length === 0) return undefined;

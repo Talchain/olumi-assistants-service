@@ -26,6 +26,7 @@ import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import type { CommittedTurnLedger } from '../../session/store.js';
 import type { SessionTurnWithContent } from '../../session/conversation-content.js';
+import { identityPartFiguresToIssue } from '../identity-card.js';
 import { comparatorTheUserWrote, comparatorTheUserWroteFor, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteSpan, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 
 type Rec = Record<string, any>;
@@ -138,6 +139,8 @@ describe('a figure written in words is written, exactly as its digits are (deplo
     const words = await correct('We signed with SEVENTY TICKETS LTD this week.', teamLevel(70));
     for (const r of [digits, words]) {
       expect(String(r.chip?.detail)).toContain('(figure from the quoted message; field binding unverified)');
+      expect(String(r.chip?.detail)).toContain('these field bindings are Olumi’s reading, including after approval');
+      expect(String(r.chip?.detail)).not.toMatch(/your figure|you said/i);
       expect(nodeOf(r.w.graph(), TEAM).observed_state).toMatchObject({ raw_value: 70, user_material_unverified: true });
     }
     expect(words.chip?.label).toBe(digits.chip?.label);
@@ -298,6 +301,45 @@ describe('the bound-figure reader keeps the one speaker rule', () => {
     ['the same words quoted', 'Our manager said: \u201CWe have seventy paying subscribers today\u201D.', false],
   ] as const)('%s', (_n, text, bound) => {
     expect(figureTheUserWroteFor(70, 'subscribers', text, scope)).toBe(bound);
+  });
+});
+
+/**
+ * ⛔ SPEAKER OWNERSHIP, EVERY QUOTE STYLE, BOTH FORMS (Codex #3429 R3: "Our lead said: '70 tickets per week'" saved 70 while its word
+ * twin refused). Generated: quote style × attribution × number, words and digits, quoted never the user's; the same words unquoted are.
+ */
+describe('parity by property: another speaker’s quoted figure is never the user’s, in any quote style or form', () => {
+  const NUMBERS: [number, string][] = [[2, 'two'], [15, 'fifteen'], [70, 'seventy'], [120, 'one hundred and twenty']];
+  const QUOTES: [string, string][] = [['"', '"'], ['\u201C', '\u201D'], ["'", "'"], ['\u2018', '\u2019']];
+  const LEADS = ['Our lead said: ', 'Our lead said ', 'The report says: '];
+  it('quoted: never written; unquoted: written; for every combination', () => {
+    for (const [v, w] of NUMBERS) for (const [open, close] of QUOTES) for (const lead of LEADS) for (const f of [w, String(v)]) {
+      const said = `we resolve ${f} tickets per week`;
+      const quoted = `${lead}${open}${said}${close}; I have not checked it.`;
+      expect(figureTheUserWrote(v, 'tickets per week', quoted), quoted).toBe(false);
+      expect(figureTheUserWrote(v, 'tickets per week', `I checked: ${said}.`), said).toBe(true);
+    }
+  });
+});
+
+/**
+ * ⛔ THE IDENTITY CARD READS THROUGH THE ONE READER AND CHECK (Codex #3429 R3: identity-card.ts:139 scanned for itself and saved a
+ * manager's quoted figure as "your figure"). Served 828d87ac graph; the part figure is issued only from the user's own words. (A spelled
+ * count here is held back by the bound reader's own word rule, a label word within two words, unchanged: this part's unit IS its label.)
+ */
+describe('identity part figures: the one reader and check, both forms', () => {
+  type Graph = { nodes: Record<string, any>[] };
+  const raw: Graph = JSON.parse(readFileSync(new URL('../../system-events/__tests__/fixtures/b1-828d87ac-stored-graph.json', import.meta.url), 'utf8'));
+  const graph = structuredClone(raw);
+  graph.nodes.find((n) => n.id === 'mrr')!.nonlinear_identity.stated_in_brief = false;
+  const answer = (userText: string) => identityPartFiguresToIssue({ graph, userText, toolCalls: [], mutated: false, proposalOffered: false, pending: [] });
+  const COUNT = { part_label: 'pro_paying_subscribers', value: 300, unit: 'Pro paying subscribers' };
+  it.each([
+    ['digits, the user’s own', 'We have 300 Pro subscribers', { parts: [COUNT] }],
+    ['digits, a manager’s quoted words', 'Our manager said: \u201CWe have 300 Pro subscribers\u201D.', undefined],
+    ['digits, single quotes', "Our manager said: 'We have 300 Pro subscribers'.", undefined],
+  ] as const)('%s', (_n, text, issued) => {
+    expect(answer(text)).toEqual(issued);
   });
 });
 

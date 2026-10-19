@@ -85,9 +85,14 @@ export function amountTheUserWrote(a: WrittenAmount, value: number, unit: unknow
     && !inAnotherSpeakersWords(text, a);
 }
 
-/** The ONE speaker rule for every amount reader: `a` lies inside another speaker's quoted words (`speechReading`). */
+/**
+ * The ONE speaker rule for every amount reader: `a` lies inside another speaker's quoted words (`speechReading`), in any quote style
+ * and either form. The speech reader opens a single mark only before a word, so the amount is read AS a word there (its characters,
+ * same length): "'70 tickets per week'" is quoted speech exactly as "'seventy tickets per week'" is (Codex #3429 R3).
+ */
 function inAnotherSpeakersWords(text: string, a: WrittenAmount): boolean {
-  return speechReading(text).inSpeech(speechReading(text.slice(0, a.index)).text.length);
+  const asWord = text.slice(0, a.index) + 'n'.repeat(a.matchedText.length) + text.slice(a.index + a.matchedText.length);
+  return speechReading(asWord).inSpeech(speechReading(asWord.slice(0, a.index)).text.length);
 }
 
 /** Whether `value`, in `unit`, is a figure written in `userText`. No text (or none bound) proves nothing: false. */
