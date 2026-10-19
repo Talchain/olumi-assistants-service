@@ -14,15 +14,16 @@ const reason = z.string().regex(/^[a-z][a-z0-9_]*$/);
 
 export const ToolOutcomeSchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('ok'), mutated: z.boolean(), ran: z.boolean(), data: z.record(z.string(), z.unknown()) }),
-  z.object({ status: z.literal('refused'), reason, detail: z.string().optional() }),
+  z.object({ status: z.literal('refused'), reason, detail: z.string().optional(), data: z.record(z.string(), z.unknown()).optional() }),
   z.object({ status: z.literal('unavailable'), reason, write: z.enum(['none', 'unknown']), detail: z.string().optional() }),
 ]);
 export type ToolOutcome = z.infer<typeof ToolOutcomeSchema>;
 
 export const ok = (data: Record<string, unknown>, effect: { readonly mutated?: boolean; readonly ran?: boolean } = {}): ToolOutcome =>
   ({ status: 'ok', mutated: effect.mutated === true, ran: effect.ran === true, data });
-export const refused = (code: string, detail?: string): ToolOutcome =>
-  ({ status: 'refused', reason: code, ...(detail === undefined ? {} : { detail }) });
+/** `data`: the typed facts the refusal rests on (e.g. readiness codes), never words composed for the user. */
+export const refused = (code: string, detail?: string, data?: Record<string, unknown>): ToolOutcome =>
+  ({ status: 'refused', reason: code, ...(detail === undefined ? {} : { detail }), ...(data === undefined ? {} : { data }) });
 export const unavailable = (code: string, write: 'none' | 'unknown' = 'none', detail?: string): ToolOutcome =>
   ({ status: 'unavailable', reason: code, write, ...(detail === undefined ? {} : { detail }) });
 
