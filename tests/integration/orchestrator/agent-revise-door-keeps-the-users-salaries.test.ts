@@ -194,10 +194,25 @@ describe('journey E: the user\'s salaries, through the real door, are stored as 
     expect(provenanceOf({ value: os('junior_engineer_annual_salary') })).toMatchObject({ origin: 'human', role: 'unverified' });
   });
 
+  // DL-3 ruling on Codex R3 (#3433 @d3bcc80e): the user's words give £36k to the goal ("monthly cloud spend", a ceiling), so it is
+  // never written as today's baseline spend, labelled or not: nothing is proposed for it and the Agent asks (one identity rule).
+  it('B1: a ceiling is not today’s spend: never written as the baseline, nothing proposed for it', async () => {
+    const held = JSON.parse(readFileSync(new URL('../../../src/orchestrator-v5/agent-lane/__tests__/fixtures/served-share-unit-r2-20260930.json', import.meta.url), 'utf8')) as { graph: { nodes: Array<Record<string, unknown>>; edges: unknown[] } };
+    persisted = projectGraphForPersistence({ ...GraphV3.parse(structuredClone(held.graph)), options: [] });
+    const before = JSON.stringify(persisted);
+    const text = 'Keep monthly cloud spend under £36k.';
+    const a = agent(text);
+    const ctx = { ...a.ctx, user_turn_text: text, verified_user_messages: [text] };
+    const p = await a.caps.proposeAssumptions(ctx, { assumptions: [{ factor_label: 'Baseline monthly cloud spend', value: 36000, unit: 'GBP/month', user_stated: true, revise: true, basis: 'Olumi’s proposed field reading' }] });
+    expect(p, JSON.stringify(p)).toMatchObject({ ok: false, mutated: false, refusal: 'nothing_to_adopt',
+      not_this_factors_figure: [{ label: 'Baseline monthly cloud spend', value: 36000 }] });
+    expect(rows.size).toBe(0);
+    expect(JSON.stringify(persisted)).toBe(before);
+  });
+
   it.each([
     ['workload is not a saving', 'Move 25% of our workloads to GCP first.', 'GCP unit-cost saving', 25, '%'],
     ['a goal reduction is not the saving input', 'We want to cut costs by 20%.', 'GCP unit-cost saving', 20, '%'],
-    ['a ceiling is not today’s spend', 'Keep monthly cloud spend under £36k.', 'Baseline monthly cloud spend', 36000, 'GBP/month'],
     ['a reported account-manager figure keeps its attribution', 'Our Google account manager says GCP would be about 25% cheaper than AWS for our workload.', 'GCP unit-cost saving', 25, '%'],
   ] as const)('B1: %s remains human/unverified after its own cold press and reopen', async (_name, text, label, value, unit) => {
     const held = JSON.parse(readFileSync(new URL('../../../src/orchestrator-v5/agent-lane/__tests__/fixtures/served-share-unit-r2-20260930.json', import.meta.url), 'utf8')) as { graph: { nodes: Array<Record<string, unknown>>; edges: unknown[] } };

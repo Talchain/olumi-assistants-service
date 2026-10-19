@@ -161,3 +161,59 @@ describe('delta held-out quantity and affirmative-source contract',()=>{
   await refuse(targetTurn('90 requests arrived yesterday. The remote-village constraint should be at least 85%, not 90%.',g=>{remoteSetup(g);g.goal_constraints[0].value=95},REMOTE.label,90,'>=','%'));
  });
 });
+
+/**
+ * Codex R3 on #3433 @d3bcc80e, held-out limit rows adopted verbatim: three were wrong writes there (a headcount written into a
+ * rate limit, a rate into a headcount limit, specialists into a tickets-a-week limit); the written unit is now read whole.
+ */
+const pair=(a:string,b:string,unit='ovens',held=3)=>(g:Rec)=>{
+ g.nodes.find((n:Rec)=>n.id==='oven_capacity').label=a;
+ g.nodes.push({...structuredClone(SHELF_NODE),label:b});
+ g.goal_constraints=[{...OVENS,label:a,unit,value:held,operator:unit==='%'?'>=':'<='},{...SHELVES,label:b,unit,value:held,operator:unit==='%'?'>=':'<='}];
+};
+const singleRate=(unit:string)=>(g:Rec)=>{
+ const n=g.nodes.find((n:Rec)=>n.id==='oven_capacity');n.label='Team capacity';n.observed_state.unit=unit;
+ g.goal_constraints=[{...OVENS,label:'Team capacity',unit}];
+};
+describe('R3 independent limit-door heldout',()=>{
+ it('shared fragment cannot select Weekly from Monthly',async()=>{
+  await refuse(targetTurn('The engineer capacity limit should be at most 2 engineers per week.',pair('Weekly engineer capacity','Monthly engineer capacity','engineers per week'),'Weekly engineer capacity',2,'<=','engineers per week'));
+ });
+ it.each([
+ ['Annual £ ceiling','£ ceiling','The £ ceiling should be at most £2.','GBP',2,'<='],
+ ['Annual % allowance','% allowance','The % allowance should be at least 85%.','%',85,'>='],
+ ])('whole symbol label %s cannot steal %s',async(a,b,text,unit,value,op)=>{
+  await refuse(targetTurn(text,pair(a,b,unit,95),a,Number(value),op,unit));
+ });
+ it('cross-occurrence rejected own and affirmed rival cannot transfer',async()=>{
+  await refuse(targetTurn('The oven capacity limit stays at 3 ovens, not 2 ovens; shelf capacity is 2 ovens.',pair('Oven capacity','Shelf capacity'),'Oven capacity',2));
+ });
+ it('cross-occurrence affirmed own remains valid despite rival rejection',async()=>{
+  await press(targetTurn('The shelf capacity limit stays at 3 ovens, not 2 ovens; the oven capacity limit is at most 2 ovens.',pair('Oven capacity','Shelf capacity'),'Oven capacity',2),[2,3]);
+ });
+ it('goal row figure cannot become separate limit row',async()=>{
+  await refuse(targetTurn('Orders delivered on time target is at least 85%; support coverage limit is unchanged.',g=>{
+   g.nodes.find((n:Rec)=>n.id==='oven_capacity').label='Support coverage';
+   g.goal_constraints=[{...OVENS,label:'Support coverage',unit:'%',operator:'>=',value:95},{...OVENS,constraint_id:'gc-goal',node_id:'orders_on_time',label:'Orders delivered on time',unit:'%',operator:'>=',value:90}];
+  },'Support coverage',85,'>=','%'));
+ });
+ it('goal row does not prevent own limit positive',async()=>{
+  await press(targetTurn('The support coverage limit is at least 85%; orders delivered on time target is unchanged.',g=>{
+   g.nodes.find((n:Rec)=>n.id==='oven_capacity').label='Support coverage';
+   g.goal_constraints=[{...OVENS,label:'Support coverage',unit:'%',operator:'>=',value:95},{...OVENS,constraint_id:'gc-goal',node_id:'orders_on_time',label:'Orders delivered on time',unit:'%',operator:'>=',value:90}];
+  },'Support coverage',85,'>=','%'),[85,90]);
+ });
+ it.each([
+ ['engineers per week','The team capacity limit should be at most 2 engineers.'],
+ ['engineers','The team capacity limit should be at most 2 engineers per week.'],
+ ['tickets per week','The team capacity limit should be at most 2 specialists.'],
+ ])('headcount/rate must not cross %s <- %s',async(unit,text)=>{
+  await refuse(targetTurn(text,singleRate(unit),'Team capacity',2,'<=',unit));
+ });
+ it('own rate positive saves',async()=>{
+  await press(targetTurn('The team capacity limit should be at most 2 engineers per week.',singleRate('engineers per week'),'Team capacity',2,'<=','engineers per week'),[2]);
+ });
+ it('disclosed oven-mixer pairing words count ovens: own card press saves',async()=>{
+  await press(targetTurn('The oven-mixer pairing should be at most 2 ovens now, not 3.',g=>{g.goal_constraints=[structuredClone(OVENS)]},'Oven capacity',2),[2]);
+ });
+});

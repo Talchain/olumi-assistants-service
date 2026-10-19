@@ -167,6 +167,11 @@ const SCALE_AMBIGUOUS_NOTE =
   'Nothing was proposed for these: the figure was given in percent for a factor measured as a share from 0 to 1, and a figure '
   + 'of 1 or less could mean either reading (0.5% is 0.005; 0.5 as a share is 50%). Ask the user which they mean, quoting both.';
 
+/** A figure the user wrote, but never for this factor (`figureIsThisQuantitys`): nothing proposed for it; the user is asked. */
+const NOT_THIS_FACTORS_FIGURE_NOTE =
+  'Nothing was proposed for these: the user wrote the figure, but their words give it to another quantity, in another unit, or '
+  + 'turn it down for this one. Never record it as this factor\u2019s value; ask the user which figure they mean for it.';
+
 /** A figure compared the other way from what the factor measures (`relative-figure.ts`, AIQ 5907227964 B). */
 const DIRECTION_CONFLICT_NOTE =
   'Nothing was proposed for these: the user compared the figure the other way from what the factor measures (for example '
@@ -340,7 +345,7 @@ import type { RunDelta } from '@talchain/schemas/boundary';
 import { optionNameAliases } from '../option-name-truth.js';
 import { appliedDeadlineHolds, deadlineCardSubjectOf, deadlineSubjectHolds, heldCardStillApplies, runApplyingHeldCard } from '../proposal-object/still-applies.js';
 import { bandTheUserWrote, comparatorTheUserWrote, comparatorTheUserWroteFor, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteForSpan, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
-import { figureIsThisQuantitys } from '../quantity-identity.js';
+import { figureIsThisQuantitys, type Candidate } from '../quantity-identity.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { KEEP_PROPOSAL_BASIS, isKeepProposal, figureInUserUnits, figureApprovalWords, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval, isEarlierTurnWithdrawal } from '../approval-chips.js';
 import { formatEdgeStrengthConfirmed, formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
@@ -482,17 +487,17 @@ export function limitScopeIn(g: { readonly nodes: readonly { readonly label?: un
 }
 
 /**
- * The OTHER limits a figure in `unit` could be written into: the limit door's candidates for `figureIsThisQuantitys`. The goal's
- * own row is its target, which this door never writes (`goal_target_not_a_limit`), so it competes with no limit.
+ * The OTHER limits a figure in `unit` could be written into, each with its unit: the limit door's candidates for
+ * `figureIsThisQuantitys`. The goal's own row is its target, which this door never writes (`goal_target_not_a_limit`).
  */
 function otherLimitsThatCouldHold(
   g: { readonly raw: { readonly goal_constraints?: unknown }; readonly nodes: readonly { readonly id?: unknown; readonly label?: unknown; readonly kind?: unknown }[] },
   limitNodeId: string, unit: unknown,
-): string[] {
+): Candidate[] {
   const limitable = new Map(g.nodes.filter((n) => n.kind !== 'goal').map((n) => [n.id, typeof n.label === 'string' ? n.label : '']));
   return (Array.isArray(g.raw.goal_constraints) ? g.raw.goal_constraints as Record<string, unknown>[] : [])
     .filter((r) => r !== null && typeof r === 'object' && r['node_id'] !== limitNodeId && unitsConflict(r['unit'], unit) === null)
-    .map((r) => limitable.get(r['node_id']) ?? '').filter((l) => l !== '');
+    .map((r) => ({ label: limitable.get(r['node_id']) ?? '', unit: r['unit'] })).filter((c) => c.label !== '');
 }
 
 /** `goal_chance` beside a run's result when the run withheld the goal's chance (PLoT #416); nothing otherwise. */
@@ -7375,6 +7380,7 @@ export function createAgentCapabilities(
       const unitMismatch: { label: string; value: unknown; unit: string; factor_unit: string }[] = [];
       const scaleAmbiguous: { label: string; value: number; as_percent: number; as_share: number }[] = [];
       const directionConflict: { label: string }[] = [];
+      const notThisFactors: { label: string; value: number }[] = [];
       const seen = new Set<string>();
       const adopted: { id: string; label: string; value: number; unit: string; basis: string; replaces?: number; userWrote: boolean; quote?: string; bindingUnverified?: true; asPercent?: true; kept?: true;
         confirmed?: { source: string; quote: string }; described?: { source: string; quote: string } }[] = [];
@@ -7505,6 +7511,8 @@ export function createAgentCapabilities(
          */
         const shareFactor = isShareFactor(nodeUnit, node.observed_state);
         const frame = inShareFrame(Number(a?.value), a?.unit, nodeUnit, node.observed_state);
+        // The figure as the user wrote it, in the quantity's own unit (a percentage for a share, before it is read in its frame).
+        const asWritten = frame.kind === 'converted' ? { value: Number(a?.value), unit: a?.unit } : null;
         if (frame.kind === 'ambiguous') {
           scaleAmbiguous.push({ label: node.label, value: Number(a?.value), as_percent: frame.asPercent, as_share: frame.asShare });
           continue;
@@ -7563,7 +7571,10 @@ export function createAgentCapabilities(
         // A comparison whose direction or concept cannot be read needs an explicit Olumi-binding disclosure.
         const bindingWords = ctx.user_turn_text ?? ctx.user_text;
         const readable = !shareFactor || relativeFigureAgainst(node.label, bindingWords, Number(a.value) * 100) !== 'unknown';
-        const writtenAbout = readable && figureIsThisQuantitys(bindingWords, Number(a.value), a?.unit ?? nodeUnit, ownerScope, ownerScope.rivals ?? ownerScope.others);
+        const rivalUnit = (label: string): unknown => factorUnitOf(g.raw, g.nodes.find((n) => n.label === label) as never);
+        const identity = readable ? figureIsThisQuantitys(bindingWords, asWritten?.value ?? Number(a.value), asWritten?.unit ?? nodeUnit ?? a?.unit,
+          ownerScope, (ownerScope.rivals ?? ownerScope.others).map((label) => ({ label, unit: rivalUnit(label) }))) : null;
+        const writtenAbout = identity === 'this';
         // TL11:51: source belongs to each figure, never to the number of figures or the field-binding matcher.
         // Verified human evidence wins over a tool flag; a new estimate without that evidence stays Olumi's.
         const turnWords = ctx.user_turn_text ?? ctx.user_text;
@@ -7573,6 +7584,9 @@ export function createAgentCapabilities(
           figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, ctx.unverified_user_text)
           || figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, g.brief_text), ctx.user_text_complete, explicitEstimate);
         if (origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
+        // ⛔ The user wrote this figure, but their words give it to another quantity, in another unit, or turn it down for this
+        // one (`figureIsThisQuantitys`, Codex R3 on #3433): this factor is never written with it, labelled or not.
+        if (origin === 'human' && identity === 'not_this') { notThisFactors.push({ label: node.label, value: Number(a.value) }); continue; }
         // ⭐ LEAN CORE P2 (Codex B2 on #3395): a figure claimed as the user's WITH its statement is theirs only through the ONE statement
         // verifier (`verifyStatements`: the literal span, the AI's own speaker reading, reported speech), never by the figure search alone.
         if (a.user_stated === true && Array.isArray(a?.statements) && origin === 'human') {
@@ -7665,6 +7679,7 @@ export function createAgentCapabilities(
           ...(unitMismatch.length > 0 ? { unit_mismatch: unitMismatch, unit_mismatch_note: UNIT_MISMATCH_NOTE } : {}),
           ...(scaleAmbiguous.length > 0 ? { scale_ambiguous: scaleAmbiguous, scale_ambiguous_note: SCALE_AMBIGUOUS_NOTE } : {}),
           ...(directionConflict.length > 0 ? { direction_conflict: directionConflict, direction_conflict_note: DIRECTION_CONFLICT_NOTE } : {}),
+          ...(notThisFactors.length > 0 ? { not_this_factors_figure: notThisFactors, not_this_factors_figure_note: NOT_THIS_FACTORS_FIGURE_NOTE } : {}),
           detail:
             'None of those could be adopted. Read the state again and use the labels exactly as they appear; ' +
             'factors that already hold a value are left alone.',
@@ -7791,6 +7806,7 @@ export function createAgentCapabilities(
         ...(unitMismatch.length > 0 ? { unit_mismatch: unitMismatch, unit_mismatch_note: UNIT_MISMATCH_NOTE } : {}),
         ...(scaleAmbiguous.length > 0 ? { scale_ambiguous: scaleAmbiguous, scale_ambiguous_note: SCALE_AMBIGUOUS_NOTE } : {}),
         ...(directionConflict.length > 0 ? { direction_conflict: directionConflict, direction_conflict_note: DIRECTION_CONFLICT_NOTE } : {}),
+        ...(notThisFactors.length > 0 ? { not_this_factors_figure: notThisFactors, not_this_factors_figure_note: NOT_THIS_FACTORS_FIGURE_NOTE } : {}),
         ...(notWritten.length > 0 ? {
           not_the_users_figure: notWritten.map((a) => ({ factor: a.label, value: a.value })),
           not_the_users_figure_note: NOT_THE_USERS_FIGURE_NOTE,
@@ -12136,8 +12152,8 @@ export function createAgentCapabilities(
       }
       // ⛔ Recorded as the user's own figure, so it must be one the user wrote, ABOUT this limit's quantity (DL #72
       // 5862394804): "300 Pro paying subscribers" is never a £300 limit on the price.
-      if (interpretation === null && !figureIsThisQuantitys(ctx.user_text, value, unit, limitScopeIn(g, node.label),
-        otherLimitsThatCouldHold(g, node.id, unit))) {
+      if (interpretation === null && figureIsThisQuantitys(ctx.user_text, value, unit, limitScopeIn(g, node.label),
+        otherLimitsThatCouldHold(g, node.id, unit)) !== 'this') {
         return { ok: false, mutated: false, refusal: 'figure_not_stated',
           detail: `${figureOf(value)} is not a figure the user wrote, so nothing was prepared: it would be recorded as their limit. `
             + 'Ask them what the new limit is, in their own words, and never offer a figure of your own as theirs.' };
