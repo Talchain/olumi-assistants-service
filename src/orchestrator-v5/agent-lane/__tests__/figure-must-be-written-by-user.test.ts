@@ -262,7 +262,10 @@ describe('the Agent route binds the user\'s words to every tool it runs', () => 
     // grounded selection, as the existing loop's tool context is.
     expect(route).toContain('const coreCtx = { ...toolCtx, ...(selectionContext != null');
     // Paul #94 6166259456: the route's automatic Run after a committed change is a dispatch site on the SAME typed carrier.
-    expect(route).toContain('autoRun = await capabilities.runAnalysis(toolCtx, ');
+    // PATH-B gap 4: it is asked for once per request (`analyseCommittedChange`), by the committing core tool or the turn's end.
+    expect(route).toContain("return { run: await capabilities.runAnalysis(toolCtx, { reason: 'Analyse the model as just saved.',");
+    // …and the core SDK turn's Run is the press-guarded pipeline on the SAME carrier (a Run press spends its ONE Run there).
+    expect(route).toContain(': loopCapabilities.runAnalysis(toolCtx, args),');
     // S2 one-press card the route issues after the Run (#3129, the user's own figure): a dispatch site on the SAME typed carrier.
     expect(route).toContain("dispatchTool('propose_assumptions', JSON.stringify(heldConfirm), toolCtx, capabilities, mode)");
     // SYSTEM 1 M1: the ONE door issuer (a risk's chance from THIS turn's typed words, else the brief's holds-now sentence) replaces
@@ -272,6 +275,6 @@ describe('the Agent route binds the user\'s words to every tool it runs', () => 
     // Recorded-Run answer recovery uses the SAME verified context and capability permission gate.
     expect(route).toContain('await capabilities.runAnalysis(toolCtx,');
     // S1 Explain adds two reads of the SAME verified context: verified_user_messages and unverified_user_text.
-    expect(route.match(/\btoolCtx\b/g)?.length, 'declared once, used at the dispatch sites (the approve and widen-Add sites twice; GOAL-REACH confirm_reading press is the eleventh), the state read and two typed-words reads and Explain read, and the route-issued deadline card (its issuer read and its ONE dispatch, both on this same typed carrier), the typed-history completeness read (recordTyped … toolCtx.user_text_complete, A2i), the automatic Run after a committed change, and the three S2 one-press cards the route issues (the held figure, holds now, the user’s own risk chance), plus recorded-Run answer recovery, plus PATH-B core: the SDK turn’s typed adapters on this SAME carrier (coreCtx)').toBe(28);
+    expect(route.match(/\btoolCtx\b/g)?.length, 'declared once, used at the dispatch sites (the approve and widen-Add sites twice; GOAL-REACH confirm_reading press is the eleventh), the state read and two typed-words reads and Explain read, and the route-issued deadline card (its issuer read and its ONE dispatch, both on this same typed carrier), the typed-history completeness read (recordTyped … toolCtx.user_text_complete, A2i), the automatic Run after a committed change, and the three S2 one-press cards the route issues (the held figure, holds now, the user’s own risk chance), plus recorded-Run answer recovery, plus PATH-B core: the SDK turn’s typed adapters on this SAME carrier (coreCtx) and its Run, the press-guarded pipeline (gap 4)').toBe(29);
   });
 });

@@ -91,7 +91,13 @@ describe('PATH-B core: the AI\'s own words are the reply; protocol, cards, resul
     vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
       // The core lane's one OpenAI Conversation per scenario (`core/sdk-turn.ts`).
       if (String(url).endsWith('/v1/conversations')) return new Response(JSON.stringify({ id: 'conv_route', object: 'conversation' }), { status: 200, headers: { 'content-type': 'application/json' } });
-      const runCall = runPressToolResponse(JSON.parse(String(init?.body ?? '{}')));
+      const body = JSON.parse(String(init?.body ?? '{}')) as Json;
+      // A `core` Run press runs on the SDK (gap 4): its forced first call gets a whole Responses body calling run_analysis.
+      if (body.conversation !== undefined && (body.tool_choice as Json | undefined)?.name === 'run_analysis') {
+        return new Response(JSON.stringify(responsesBody([{ type: 'function_call', name: 'run_analysis', call_id: 'core_run_press',
+          arguments: JSON.stringify({ reason: 'The user pressed Run.', effects_timing: null }) }])), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      const runCall = runPressToolResponse(body);
       if (runCall) return runCall;
       sent.push(typeof init?.body === 'string' ? init.body : '');
       const output = outputs.shift() ?? [{ type: 'message', content: [{ type: 'output_text', text: AI_WORDS }] }];
