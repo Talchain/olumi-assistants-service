@@ -291,6 +291,18 @@ export function figureSource(model: unknown, brief: string | undefined, subject:
 }
 
 /**
+ * ⭐ STANCE (AIE 543db8bb): the drafter's own verified statements write this figure as the subject's level, and none declares it
+ * current (a supposition, a target, an estimate, or no declaration). A reader that finds the figure in the brief by its own words
+ * (the change goal's base) does not credit it as today's level then; with no such statement it keeps its legacy reading.
+ */
+export function levelDeclaredNotCurrent(model: unknown, brief: string | undefined, subject: DraftedSubject, value: number): boolean {
+  if (typeof brief !== 'string' || !Number.isFinite(value)) return false;
+  const said = (sourceMapOf(draftStatements(model), brief).verified.get(subjectKey(subject, 'level')) ?? [])
+    .filter((st) => st.negated !== true && (st.low === value || st.high === value));
+  return said.length > 0 && !said.some(declaresCurrent);
+}
+
+/**
  * ⭐ G3 (TL 10:49Z: ranges are a kept protection; unseen 1663fe34): the range the AI's own VERIFIED statement gives a directed
  * link's effect ("…reckons it would cut scrap by 1.5 to 2.5 percentage points"), when the link's size is one of its ends, so
  * the size is said WITH that range (A4: one end, read as a floor or ceiling), never as a single figure. The host's range
