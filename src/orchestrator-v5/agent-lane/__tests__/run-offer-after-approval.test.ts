@@ -12,6 +12,7 @@ import { isForeignExplanation, namesALatestRun, type TurnNarration } from '../..
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
+import { shownBy } from './fixtures/displayed.js';
 
 // A fresh scenario per case: proposals are identified per scenario, and a re-proposed link
 // on the same one would replay as already applied.
@@ -277,7 +278,8 @@ describe('the explicit Run is offered after a change the canonical readiness adm
       { type: 'function_call', name: 'propose_model_change', call_id: 'p2', arguments: JSON.stringify({ from_label: 'Tooling', to_label: 'Velocity', direction: 'positive', strength: 'moderate', rationale: 'Better tools speed delivery.' }) },
       { type: 'message', content: [{ type: 'output_text', text: 'Applied the first link; the second is ready for your approval.' }] },
     ];
-    const t2 = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'Yes, apply that. Tooling moderately drives velocity too, so connect it.' } });
+    // The client sends the cards it shows (Codex BLOCK 18 Oct): typed words bind only to a card in that set.
+    const t2 = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'Yes, apply that. Tooling moderately drives velocity too, so connect it.', displayed_proposals: shownBy(t1.json()) } });
     const b = t2.json() as { suggested_actions: Chip[]; _agent: { tool_calls: { name: string; mutated: boolean }[] } };
     expect(b._agent.tool_calls.find((c) => c.name === 'authorise_change')?.mutated, 'PRECONDITION: the first approval applied').toBe(true);
     expect(b.suggested_actions.some((c) => c.id.startsWith('agent-approve-proposal:')), 'PRECONDITION: the second proposal is waiting').toBe(true);

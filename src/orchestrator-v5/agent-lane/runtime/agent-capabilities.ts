@@ -338,7 +338,7 @@ import { runExplanationContextFacts, savedRunContextFacts, type SavedRunContextF
 import { selectedRunDeltaForModel, SELECTED_RUN_DELTA_DEADLINE_MS } from '../selected-run-delta-for-model.js';
 import type { RunDelta } from '@talchain/schemas/boundary';
 import { optionNameAliases } from '../option-name-truth.js';
-import { appliedDeadlineHolds, deadlineCardSubjectOf, deadlineSubjectHolds, heldCardStillApplies } from '../proposal-object/still-applies.js';
+import { appliedDeadlineHolds, deadlineCardSubjectOf, deadlineSubjectHolds, heldCardStillApplies, runApplyingHeldCard } from '../proposal-object/still-applies.js';
 import { bandTheUserWrote, comparatorTheUserWrote, comparatorTheUserWroteFor, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteForSpan, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { KEEP_PROPOSAL_BASIS, isKeepProposal, figureInUserUnits, figureApprovalWords, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval, isEarlierTurnWithdrawal } from '../approval-chips.js';
@@ -392,7 +392,7 @@ import { sayFigureExactly, sayFigureRead, sayFigureWithoutRounding } from '../sa
 import { rangeApproximationWords, rangeLawAdopted } from '../../intervention-range.js';
 import { authorshipOf, heldFigureOwnerOf, isHumanStatementSource, isUnverifiedUserMaterial, linkDrawnByOf, provenanceOf, settingDisplayOf, settingProvenanceOf, whoseOf } from '../../../cee/provenance/provenance-of.js';
 import { isPercentScaledUnit } from '../../../cee/draft/records/projector.js';
-import { DRAWN_LINK_ESTIMATE_CONFLICT_MESSAGE, PARTIAL_WRITE_MESSAGES, partialRangeLevelsWarning, quoteLabelForUser, type NotSavedValue } from '../write-outcome.js';
+import { DRAWN_LINK_ESTIMATE_CONFLICT_MESSAGE, PARTIAL_WRITE_MESSAGES, partialRangeLevelsWarning, quoteLabelForUser, TYPED_APPROVAL_READ_BY_OLUMI, type NotSavedValue } from '../write-outcome.js';
 import { isChangeFrame, sayGoalChange, sayLimitInFrame } from '../limit-frame.js';
 import { runOutcomeOf } from '../run-outcome.js';
 import { checkProvisionalView, type LeaderStanding } from '../provisional-view.js';
@@ -3153,8 +3153,10 @@ export function createAgentCapabilities(
       ok: false, mutated: false, applied: false, proposal_id: parent.proposal_id,
       refusal: 'not_applied', reason, detail, parts: [], receipts: [], ...extra,
     });
-    // (1) The carried revision starts at what the user approved.
-    if (approvedRead.graph_hash !== parent.base_graph_identity_hash) {
+    // (1) The carried revision starts at what the user approved — or, on a model moved since, at the current one while the
+    // card's own field-scoped rule still holds (`heldCardStillApplies`: the rule its press and its lapse read; a new link
+    // with its level is untouched by Olumi's starting value for that factor, assessment 18 Oct K5 T4).
+    if (approvedRead.graph_hash !== parent.base_graph_identity_hash && !heldCardStillApplies(parent, approvedRead.raw)) {
       return { ok: false as const, result: notApplied('model_changed_since_approval', 'The model changed after this was approved, so nothing was written. Read it again and propose afresh.') };
     }
     const valueOps = parent.operations.filter((o) => o.op === 'set_factor_value');
@@ -3333,7 +3335,7 @@ export function createAgentCapabilities(
       .map((n) => [n.id, (n.observed_state as { value?: unknown } | undefined)?.value]));
     const levels = levelInputs.map(l => levelOnFinalFrame({ ...l, value: l.value as number }, frameOf(workingNodes.find(n => n.id === l.factor_id))));
     const input: CommitOptionLevelsInput = {
-      scenario_id: ctx.scenario_id, base_graph_hash: parent.base_graph_identity_hash,
+      scenario_id: ctx.scenario_id, base_graph_hash: approvedRead.graph_hash,
       turn_id: authorisationTurnId(`${parent.proposal_id}#levels`), links: linkOps.map(o => pairOf(o.path)), levels,
       ...(optionGaps.length > 0 ? { option_gaps: optionGaps.map(d => ({ option_id: d.optionId, mechanisms: d.mechanisms, operands: optionGapOperands(approvedRead.raw, d.optionId)! })) } : {}),
       ...(values.length > 0 ? { values } : {}), ...(frames.length > 0 ? { frames } : {}),
@@ -3363,7 +3365,7 @@ export function createAgentCapabilities(
     const receipts: ReceiptSummary[] = [];
     const reencodedSiblings: ReencodedSibling[] = [];
     let valuesLanded = false;
-    let carried = parent.base_graph_identity_hash;
+    let carried = approvedRead.graph_hash;
 
     // (3) ⭐ THE LINKS AND LEVELS AS ONE COMMIT (Canonical #70 5847348206): the product's N-ary level writer commits the
     // whole approved scope on the revision our values write produced (or the approved one) — any pair refused means
@@ -8528,7 +8530,9 @@ export function createAgentCapabilities(
         };
       }
       if (decision.status !== 'execute') {
-        return { ok: false, mutated: false, refusal: decision.status, ...(decision.status === 'superseded' ? { expected: decision.expected, actual: decision.actual } : {}) };
+        return { ok: false, mutated: false, refusal: decision.status, ...(decision.status === 'superseded' ? { expected: decision.expected, actual: decision.actual } : {}),
+          // The card it waits on is named, so the reply can offer that card's button first (one approval action).
+          ...(decision.status === 'approval_required' ? { proposal_id: args.proposal_id } : {}) };
       }
       if (correctionSaved) {
         proposals.markApplied(decision.proposal.proposal_id, []);
@@ -8622,7 +8626,7 @@ export function createAgentCapabilities(
       if (opts.turnAuthority === true && ctx.typed_approval_of !== args.proposal_id) {
         if (ops.some(o => o.op === 'set_link_effect')) return applyLinkEffect(ctx, decision.proposal, before);
         if (ops.some(o => o.op === CONFIRM_IDENTITY_OP)) return applyIdentityConfirm(ctx, decision.proposal, before);
-        return { ok: false, mutated: false, refusal: 'approval_required' };
+        return { ok: false, mutated: false, refusal: 'approval_required', proposal_id: args.proposal_id };
       }
 
       /**
@@ -9049,8 +9053,10 @@ export function createAgentCapabilities(
             detail: 'This limit cannot be changed here, so nothing was written. Tell the user plainly.' };
         }
         const operationId = authorisationTurnId(pid);
+        // On the model as read now: the card passed `authorise` on its own base, or on a moved model while its row still reads
+        // as it did (`heldCardStillApplies`, verifier F1); the door's CAS still fences this read against the write.
         const res = await opts.commitLimitEdit({
-          scenario_id: ctx.scenario_id, turn_id: operationId, base_graph_hash: decision.proposal.base_graph_identity_hash,
+          scenario_id: ctx.scenario_id, turn_id: operationId, base_graph_hash: before.graph_hash,
           node_id: op.path, operator: v.operator, raw_value: approvedValue,
           ...(v.stated_operator !== undefined ? { stated_operator: v.stated_operator } : {}),
           ...(v.source_quote !== undefined ? { source_quote: v.source_quote } : {}),
@@ -12161,6 +12167,8 @@ export function createAgentCapabilities(
         base_graph_identity_hash: g.graph_hash,
         operations: [{ op: 'set_limit', path: node.id, value: { ...(interpretation ?? {}),
           operator, raw_value: value, unit, constraint_id: String(row['constraint_id'] ?? ''), before,
+          // The whole row as this card shows it: its field-scoped rule holds only while the row still reads exactly so.
+          row_as_made: JSON.parse(JSON.stringify(row)) as Record<string, unknown>,
           ...(stated !== undefined ? { stated_operator: stated } : {}),
           ...(isTarget ? { role: 'goal_target' } : {}),
         } }],
@@ -12452,7 +12460,12 @@ export function createAgentCapabilities(
       } catch { return undefined; }
     },
     // The approval guard's writer: every return path of `authoriseChange`, one place.
-    async authoriseChange(ctx, args): Promise<ToolResult> {
+    async authoriseChange(ctxIn, args): Promise<ToolResult> {
+      // ⭐ An explicit typed selection among several DISPLAYED cards (PL amendment, 18 Oct): the id the Agent names binds only
+      // when it is one of the cards the user was shown at the start of this turn, with that card's own button words.
+      const shown = ctxIn.typed_approval_of === undefined && typeof args?.proposal_id === 'string'
+        && Object.hasOwn(ctxIn.typed_assent_cards ?? {}, args.proposal_id) ? ctxIn.typed_assent_cards![args.proposal_id] : undefined;
+      const ctx = shown === undefined ? ctxIn : { ...ctxIn, typed_approval_of: args.proposal_id, typed_approval_words: shown };
       // Run existing validation and card-specific refusals unchanged. The inner writer's
       // consent fence refuses an otherwise executable ordinary proposal before any write.
       if (opts.turnAuthority === true && ctx.typed_approval_of !== args.proposal_id) {
@@ -12500,7 +12513,8 @@ export function createAgentCapabilities(
         }
         return { ok: false, mutated: false, refusal: 'not_confirmed', outcome: 'outcome_unknown', proposal_id: args.proposal_id };
       };
-      const execute = () => caps.authoriseChange(ctx, args);
+      // Its own write is never marked as a change to review on its own card (`runApplyingHeldCard`, PR-2).
+      const execute = () => runApplyingHeldCard(ctx.scenario_id, args.proposal_id, () => caps.authoriseChange(ctx, args));
       const r = opts.turnAuthority === true && p !== undefined
         ? await proposals.executeApproved(p, ctx.turn_id ?? ctx.request_id, execute,
             result => result.applied === true && proposals.isApplied(p.proposal_id) ? 'applied'
@@ -12515,7 +12529,10 @@ export function createAgentCapabilities(
         let after: GraphRead | null = null;
         try { after = await readGraph(ctx.scenario_id); } catch { after = null; }
         // A result that set its own readiness keeps it (an unconfirmed save says "not checked", never the stored graph's `may_run`).
-        return { ...r, readiness_after: 'readiness_after' in r ? r.readiness_after : readinessViewOf(after?.raw), ...nextStepFactOf(after) };
+        return { ...r, readiness_after: 'readiness_after' in r ? r.readiness_after : readinessViewOf(after?.raw), ...nextStepFactOf(after),
+          // ⭐ CONSENT PROVENANCE (DL-3 ruling A): a write on the user's typed words, read by Olumi, says so, apart from a press.
+          ...(ctx.typed_assent !== undefined && ctx.typed_approval_of === args.proposal_id
+            ? { approval: { kind: TYPED_APPROVAL_READ_BY_OLUMI, words: ctx.typed_assent } } : {}) };
       }
       return r;
     },

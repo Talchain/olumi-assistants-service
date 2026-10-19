@@ -101,7 +101,10 @@ describe('a link\'s stated effect is recorded only from its card, on the real ro
 
     // Words, not the card: the Agent calls authorise_change on the same proposal → refused, nothing written.
     script.push({ output: [{ type: 'function_call', name: 'authorise_change', call_id: 'c2', arguments: JSON.stringify({ proposal_id: proposalId }) }] });
-    const t2 = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'Yes, record that.' } });
+    // ⛔ CHANGED CONTRACT (DL-3 ruling A, 18 Oct): with ONE card waiting, the user's TYPED words reach the Agent bound to it and its
+    // reading is the consent (held to account by approval-consent-gate.replay.test.ts; the write quotes the words). What this row
+    // still pins: a model-only approval on words the user did NOT type (a control's words) never writes.
+    const t2 = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'Yes, record that.', source: 'chip_click' } });
     const b2 = t2.json() as { suggested_actions: { id: string; detail?: string }[]; _agent: { tool_calls: { name: string; ok: boolean; proposal_id?: string }[] } };
     expect(b2._agent.tool_calls).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'authorise_change', ok: false, proposal_id: proposalId })]));
     expect(doorCalls, 'nothing recorded from words').toHaveLength(0);

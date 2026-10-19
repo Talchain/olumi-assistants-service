@@ -516,11 +516,21 @@ export function targetsHeldBy(candidate: unknown): { node_id: string; quantity: 
  * route may only ADD fields of its own (its stable `ref` on each node: measured on the REAL route for Paul's L20 candidate,
  * `assist.v1.scenario-graph-register.revised-draft-held.test.ts`). A component omitted or changed BEFORE the
  * acknowledgement fails here even when the read-back agrees with that acknowledgement.
+ *
+ * ⛔ A NODE'S DISPLAY `ref` IS THE ROUTE'S OWN, ADDED OR RE-ASSIGNED, NEVER THE APPROVED MEANING (P11, proof 2, 18 Oct,
+ * scenario 75bc9a57: the reframe landed — revision 2→3, a new hash — and the receipt said "could not be confirmed"; the only
+ * difference was the demoted goal's "G1", re-assigned to the new aim). Compared without it; every other field still counts.
  */
 export function approvedGraphHeld(candidate: unknown, stored: unknown): boolean {
-  const a = normaliseGraphForIdentity(candidate as never)?.graph;
-  const b = normaliseGraphForIdentity(stored as never)?.graph;
+  const a = withoutDisplayRefs(normaliseGraphForIdentity(candidate as never)?.graph);
+  const b = withoutDisplayRefs(normaliseGraphForIdentity(stored as never)?.graph);
   return a !== undefined && b !== undefined && heldUnchanged(a, b);
+}
+
+function withoutDisplayRefs<G>(graph: G | undefined): G | undefined {
+  const nodes = (graph as { nodes?: unknown } | undefined)?.nodes;
+  if (graph === undefined || !Array.isArray(nodes)) return graph;
+  return { ...graph, nodes: nodes.map((n) => { if (rec(n) === undefined) return n; const { ref: _ref, ...rest } = n as Record<string, unknown>; return rest; }) };
 }
 
 const entityKey = (x: unknown): string | undefined => {

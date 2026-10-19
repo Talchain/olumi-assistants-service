@@ -18,6 +18,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { narrateWriteOutcome, withWriteOutcome } from '../write-outcome.js';
+import { shownBy } from './fixtures/displayed.js';
 
 /** The follow_up the user read at step f2, verbatim from the served witness (the assistant_text before Olumi's status). */
 const SERVED_F2_FOLLOW_UP = 'Recorded as the user\'s own estimate: "Pro plan price" → "MRR" as strong (0.825 on Olumi\'s 0–1 scale), as your own estimate. Offer to run the analysis again so they can see what it changes.';
@@ -134,6 +135,8 @@ describe('a link-strength approval through the REAL route: the user reads what w
     return r.json() as Body;
   };
   /** Turn f1 of the served journey: "record that link as strong, as my own estimate" → ONE proposal and its button. */
+  /** The cards the client shows after the offer: a typed approval binds only to one of them (`shownBy`). */
+  let shown: Record<string, unknown>[] = [];
   const proposeStrong = async (): Promise<{ approve: Chip; proposalId: string }> => {
     script = [
       () => fnCall('propose_link_strength', { from_label: 'Pro plan price', to_label: 'MRR', strength: 'strong', rationale: 'The user said its effect is strong.' }),
@@ -142,6 +145,7 @@ describe('a link-strength approval through the REAL route: the user reads what w
     const t1 = await turn({ message: 'Its effect is strong. Please record that link as strong, as my own estimate.' });
     const approve = t1.suggested_actions.find((c) => c.id.startsWith('agent-approve-proposal:'));
     expect(approve, `the control: a real link-strength proposal was offered ${JSON.stringify(t1._agent.tool_calls)}`).toBeDefined();
+    shown = shownBy(t1);
     return { approve: approve!, proposalId: approve!.id.slice('agent-approve-proposal:'.length) };
   };
 
@@ -209,7 +213,7 @@ describe('a link-strength approval through the REAL route: the user reads what w
       () => fnCall('authorise_change', { proposal_id: proposalId }),
       (body) => { seenByModel = JSON.stringify(body['input']); return say('That link is now recorded as strong, as your own estimate.'); },
     ];
-    const t2 = await turn({ message: 'Yes, record it.' });
+    const t2 = await turn({ message: 'Yes, record it.', displayed_proposals: shown });
     expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
     expect(seenByModel, seenByModel.slice(-1200)).toMatch(/Offer to run the analysis again/);
   }, 120_000);

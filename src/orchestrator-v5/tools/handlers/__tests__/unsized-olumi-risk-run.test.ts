@@ -20,6 +20,9 @@ import { resolveRunAdmission } from '../analysis-ready-core.js';
 import { runOmittedRisks, unsizedOlumiRiskIds, unsizedOlumiRiskLine, UNSIZED_OLUMI_RISK_OMITTED } from '../../../agent-lane/unsized-risk.js';
 import { decisionInputLines } from '../../../agent-lane/decision-input-ask.js';
 import { risksSaidLeftOutOfTheChance } from '../../../agent-lane/decision-input-ask.js';
+import { retainUnsizedOlumiRisks, withoutUnsizedOlumiRisksRecorded } from '../../../agent-lane/unsized-risk.js';
+import { readScenarioAnalysis } from '../../../../routes/scenario-graph-analysis-read.js';
+import { RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
 
 type Json = Record<string, any>;
 const FX = JSON.parse(readFileSync(new URL('../../../agent-lane/__tests__/fixtures/capacity-358132d8-unsized-olumi-risk-graph-20261014.json',
@@ -65,6 +68,11 @@ async function sentGraph(g: Json): Promise<Json | null> {
  * Run fact it stores: what every later reader reads.
  */
 async function completedRun(g: Json): Promise<Json> {
+  return (await completedRunFact(g)).result as Json;
+}
+
+/** The same Run's whole stored fact (what the store persists and a cold read reads back). */
+async function completedRunFact(g: Json): Promise<Json> {
   savedGraph = g;
   const snapshot = await loadScenarioSnapshotForRunAnalysis(FX.scenario_id, 'unsized-load', store);
   const run = vi.fn(async (payload: { options: { option_id?: string; id?: string }[] }) => ({ analysis_status: 'computed',
@@ -85,7 +93,7 @@ async function completedRun(g: Json): Promise<Json> {
   } as unknown as HandlerInvocation)) as Json;
   const fact = (out.handler_facts as Json[] | undefined)?.find((f) => f.fact_type === 'run_analysis');
   if (fact === undefined) throw new Error(`no Run fact: ${JSON.stringify(out).slice(0, 400)}`);
-  return fact.result as Json;
+  return fact;
 }
 
 const OMISSION = 'This calculation covers the modelled effects only. ‘Specialist availability risk’ is Olumi’s unsized risk suggestion and is '
@@ -182,5 +190,86 @@ describe('#3167 fix-forward: THIS Run\'s omission is recorded with it, and read 
   it('⛔ CONTRAST: a Run with nothing to leave out records nothing', async () => {
     const result = await completedRun(withRisk({ observed_state: { value: 0.3, raw_value: 30, unit: '%', source: 'user' } }));
     expect(runOmittedRisks(result)).toBeUndefined();
+  });
+});
+
+/**
+ * ⭐ STEP 8b (DL-3, 18 Oct; AIE R2 `step8_science.unfigured_risk`: "this Run omission IDs/reasons/scope retained and shown").
+ * Since #3351 admission PERSISTS the omission on the saved model (`retainUnsizedOlumiRisks`). The Run's participation guard then
+ * drops that risk BEFORE the recorded projection (`analysable-option-gate.ts`), which saw nothing to remove, so the stored Run
+ * kept only a count ("N parts … kept out") and every `runOmittedRisks` reader saw none (served 9d17caa6, outbox/step8b-probes).
+ * Real path: the admission writer marks the saved model → the production snapshot loader → the real Run handler → its stored
+ * fact through the store's own contract → a COLD read (`readScenarioAnalysis`, the scenario-graph route's leg).
+ */
+describe('STEP 8b: a risk admission already kept out is still recorded with THIS Run, and read back cold', () => {
+  const RECORD = [{ node_id: RISK, label: 'Specialist availability risk', reason: 'unsized_olumi_risk' }];
+  const marked = (g: Json = graph()): Json => retainUnsizedOlumiRisks(g as { nodes: unknown[] }) as Json;
+  const omissionWarnings = (result: Json): Json[] =>
+    (((result.enrichment as Json).inference_warnings ?? []) as Json[]).filter((x) => x.code === UNSIZED_OLUMI_RISK_OMITTED);
+
+  it('PRECONDITION: the admission writer persists the omission on this risk alone, and PLoT receives neither it nor its link', async () => {
+    const g = marked();
+    expect(g.nodes.filter((n: Json) => n.analysis_participation === 'retained_excluded').map((n: Json) => n.id).sort())
+      .toEqual([RISK, 'specialist_productivity_shortfall']);
+    expect(graph().nodes.find((n: Json) => n.id === RISK).analysis_participation, 'the served model predates the mark').toBeUndefined();
+    const sent = await sentGraph(g);
+    expect(sent, 'the Run is admitted and calls PLoT').not.toBeNull();
+    expect((sent!.nodes as Json[]).map((n) => n.id)).not.toContain(RISK);
+    expect((sent!.edges as Json[]).filter((e) => e.from === RISK || e.to === RISK)).toEqual([]);
+  });
+
+  it('⭐ RED: the stored Run fact records that risk (id, label then, reason, scope), exactly as an unmarked one', async () => {
+    // The reason is the risk's CLASS (Olumi's unsized suggestion), never who kept it out: the mark reads the same whoever set it.
+    const result = await completedRun(marked());
+    const w = omissionWarnings(result);
+    expect(w).toHaveLength(1);
+    expect(w[0]).toMatchObject({ source: 'cee', scope: 'modelled_effects_only', node_ids: [RISK] });
+    expect(runOmittedRisks(result)).toEqual(RECORD);
+    // One record, whichever step kept it out: the unmarked model's Run records the same thing.
+    expect(runOmittedRisks(await completedRun(graph()))).toEqual(RECORD);
+  });
+
+  it('⭐ RED (cold readback): the omission survives the store contract and the scenario read, by id and reason', async () => {
+    const g = marked();
+    const fact = RunAnalysisHandlerFactSchema.parse(JSON.parse(JSON.stringify(await completedRunFact(g))));
+    const saved = { ...store };
+    Object.assign(store, createNoopSessionStore({ facts: [fact as never], priorTurns: [{ id: 'unsized-run-row' } as never] }),
+      { loadGraph: saved.loadGraph, loadGraphAndBriefText: saved.loadGraphAndBriefText });
+    try {
+      const read = await readScenarioAnalysis({ scenarioId: FX.scenario_id, graph: structuredClone(g), requestId: 'unsized-cold-read' });
+      expect(read.analysis_state?.run_state, 'a current read of THIS Run').toMatchObject({ kind: 'complete_current' });
+      expect(runOmittedRisks(read.analysis_result)).toEqual(RECORD);
+    } finally {
+      Object.assign(store, saved);
+    }
+  });
+
+  it('⭐ RED (identity): of everything the guard keeps out, only the unsized Olumi risk is recorded, never the user\'s factor', async () => {
+    // The guard drops three nodes here: Olumi's unlinked suggestion, the user's own factor, and the unsized Olumi risk root.
+    const g = marked();
+    for (const n of g.nodes as Json[]) if (n.id === 'existing_team_capacity') n.analysis_participation = 'retained_excluded';
+    expect(runOmittedRisks(await completedRun(g))).toEqual(RECORD);
+  });
+
+  it('⛔ CONTRAST (pair, Codex): sized since it was marked, the risk is not recorded as unsized, though it stays kept out', async () => {
+    const g = marked();
+    Object.assign(g.nodes.find((n: Json) => n.id === RISK), { observed_state: { value: 0.3, raw_value: 30, unit: '%', source: 'user' } });
+    expect(unsizedOlumiRiskIds(g).size).toBe(0);
+    expect(runOmittedRisks(await completedRun(g))).toBeUndefined();
+  });
+
+  it('⛔ CONTRAST (pair, Codex): a refused Run records nothing; a duplicated id is never recorded', async () => {
+    const g = marked();
+    g.nodes.find((n: Json) => n.kind === 'goal').analysis_participation = 'retained_excluded';
+    // The goal kept out: the Run is refused (readiness says so first), so no Run fact and no omission record exist.
+    await expect(completedRunFact(g)).rejects.toThrow(/not analysis-ready|no Run fact/);
+    const twice = marked(); twice.nodes.push({ ...twice.nodes.find((n: Json) => n.id === RISK) });
+    expect(withoutUnsizedOlumiRisksRecorded({ nodes: [], edges: [] }, twice, [RISK]).omitted).toEqual([]);
+  });
+
+  it('⛔ CONTRAST: a risk the user stated and kept out is never recorded as Olumi’s omission', async () => {
+    const users = withRisk({ provenance: 'user_set', analysis_participation: 'retained_excluded' });
+    expect(unsizedOlumiRiskIds(users).size).toBe(0);
+    expect(runOmittedRisks(await completedRun(users))).toBeUndefined();
   });
 });
