@@ -299,8 +299,6 @@ describe('ROW 3: each declared source, through the real writers, read back by th
 
   it.each([
     ['add_to_model', 'Adding a factor or an option'],
-    ['remove_from_model', 'Removing something'],
-    ['rename', 'Renaming'],
   ])('%s is not on this path yet: unavailable, named, and nothing is read, proposed or saved', async (op, named) => {
     const proposals = new ProposalStore();
     const out = await proposeChange({ dispatch, proposals }, ctx, { public_label: 'A change', basis: 'b',
@@ -309,6 +307,17 @@ describe('ROW 3: each declared source, through the real writers, read back by th
     expect((out as { detail: string }).detail).toContain(named);
     expect(proposals.size()).toBe(0);
     expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['rename', { op: 'rename', kind: 'factor', target_id: 'price', new_label: 'Entry price', quote: 'Rename Ticket price to Entry price.' }],
+    ['remove_from_model', { op: 'remove_from_model', kind: 'factor', target_id: 'price', to_id: null, quote: 'Take Ticket price out of the model.' }],
+  ])('a %s the user did not ask for in this message: the existing proposer\u2019s own refusal, nothing proposed or saved', async (_op, op) => {
+    const proposals = new ProposalStore();
+    const out = await proposeChange({ dispatch, proposals }, ctx, { public_label: 'A change', basis: 'b', ops: [op] } as never);
+    expect(out).toMatchObject({ status: 'refused', reason: 'not_asked', data: { op: 0 } });
+    expect(proposals.size()).toBe(0);
+    expect(rows.size).toBe(0);
   });
 
   it.each([
@@ -536,11 +545,12 @@ describe('LINK STRENGTH: Olumi\u2019s band for a link, as its own candidate, rea
     expect(proposals0.size()).toBe(0);
   });
 
-  it('a link beside a figure is never one commit: unavailable before any card, named', async () => {
+  it('GAP 2: a link beside a figure is ONE card for ONE commit (change-tools.compound.test.ts), never two', async () => {
     const deps = linkDeps();
     const out = await propose(deps, [link('moderate'), queueTo('user', 'about 20 minutes')]);
-    expect(out).toMatchObject({ status: 'unavailable', reason: 'mixed_change_not_available', write: 'none' });
-    expect(proposals0.size()).toBe(0);
+    expect(out, JSON.stringify(out)).toMatchObject({ status: 'ok', data: { proposal_id: expect.any(String) } });
+    expect(proposals0.size()).toBe(1);
+    expect(proposals0.get(String((out as { data: Rec }).data.proposal_id))!.operations.map((o) => o.op)).toEqual(['set_factor_value', 'set_link_strength']);
   });
 
   it('no such link: the capability\u2019s own refusal, nothing proposed', async () => {

@@ -70,7 +70,7 @@ import { AnalysisReadDeadlineError, withAnalysisReadDeadline } from '../session/
 import { TurnFenceRejectedError } from '../session/turn-fence.js';
 import { isRevisionConflict, readRevisionConflictDetails, rethrowRevisionConflict, REVISION_CONFLICT_MESSAGE } from '../graph-revision-conflict.js';
 import { createHash } from 'node:crypto';
-import { executeOptionInterventionBatch, executeOptionInterventionEdit, type ApprovedFactorFrame, type ApprovedFactorValue, type ApprovedIdentityConfirm, type ApprovedLinkEffect, type ApprovedLinkStrength } from './option-intervention-edit.js';
+import { executeOptionInterventionBatch, executeOptionInterventionEdit, type ApprovedFactorFrame, type ApprovedFactorValue, type ApprovedIdentityConfirm, type ApprovedLinkEffect, type ApprovedLinkStrength, type CompoundChange } from './option-intervention-edit.js';
 import type { ApprovedGoalSteady } from '../goal-target/goal-steady-write.js';
 import { goalHorizonVerdict } from '../goal-target/goal-horizon-verdict.js';
 import type { ApprovedGoalHorizon } from '../goal-target/goal-horizon-write.js';
@@ -3075,6 +3075,8 @@ export async function dispatchOptionLevelsBatch(
      * (no inferred figure) also reached this one-target form. Approval batches still infer nothing.
      */
     readonly canvasEdit?: true;
+    /** ⭐ GAP 2: the typed core caller's compound change (PATH-B only; `CompoundChange`). */
+    readonly compound?: CompoundChange;
   },
   requestId: string,
 ): Promise<DispatchSystemEventResult> {
@@ -3145,6 +3147,7 @@ export async function dispatchOptionLevelsBatch(
     && (batch.values ?? []).length + (batch.frames ?? []).length + linkStrengths.length === 0 && batch.linkEffect === undefined
     && (batch.linkEffects?.length ?? 0) === 0
     && batch.identityConfirm === undefined && batch.goalHorizon === undefined && batch.goalReading === undefined && batch.riskOccurrence === undefined && batch.cohortForecast === undefined && batch.statementRecord === undefined && (batch.rangeLaws?.length ?? 0) === 0 && batch.goalSteady === undefined && batch.teamTime === undefined && (batch.optionGaps?.length ?? 0) === 0
+    && batch.compound === undefined
     ? batch.targets[0]! : undefined;
   const outcome: Awaited<ReturnType<typeof executeOptionInterventionBatch>> = only !== undefined
     ? await executeOptionInterventionEdit({ ...common, inferFactorFigure: batch.canvasEdit === true, optionId: only.optionId, factorId: only.factorId, modelValue: only.modelValue, ...(only.figure !== undefined ? { figure: only.figure } : {}) },
@@ -3165,7 +3168,8 @@ export async function dispatchOptionLevelsBatch(
       ...(batch.statementRecord !== undefined ? { statementRecord: batch.statementRecord } : {}),
       ...((batch.rangeLaws?.length ?? 0) > 0 ? { rangeLaws: batch.rangeLaws } : {}),
       ...(batch.goalSteady !== undefined ? { goalSteady: batch.goalSteady } : {}),
-      ...(batch.teamTime !== undefined ? { teamTime: batch.teamTime } : {}) }, getSessionStore());
+      ...(batch.teamTime !== undefined ? { teamTime: batch.teamTime } : {}),
+      ...(batch.compound !== undefined ? { compound: batch.compound } : {}) }, getSessionStore());
 
   if (outcome.kind === 'committed') {
     // ⚠ THE GRAPH FIELD IS A VALIDATED VIEW, AND IT IS NOT THE AUTHORITY.
@@ -3518,7 +3522,16 @@ export type CommitOptionLevelsInput = {
   readonly statement_record?: ApprovedStatementRecord | readonly ApprovedStatementRecord[];
   readonly goal_steady?: ApprovedGoalSteady;
   readonly team_time?: ApprovedTeamTime;
+  /**
+   * ⭐ GAP 2 (DL ruling B, 19 Oct): set ONLY by the typed core caller (PATH-B). Its link strengths ride WITH its links, levels,
+   * values and ranges (written on their postimage), and its renames and removals (prepared by the existing proposers, carried
+   * literally) are applied in memory on the SAME candidate: ONE commit, one receipt, all or nothing. Absent, a link set stays
+   * alone (`link_strengths_not_alone`), as for every other caller.
+   */
+  readonly compound?: CompoundChange;
 };
+/** The door's own conflict rule and member shape, for the typed core caller (one seam onto the writer: this door). */
+export { compoundMembersConflict, type CompoundStructuralMember } from './option-intervention-edit.js';
 export type CommitOptionLevelsResult =
   | { readonly status: 'committed'; readonly graph_hash: string;
       /**
@@ -3591,6 +3604,7 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       ...(input.statement_record !== undefined ? { statement_record: input.statement_record } : {}),
       ...(input.goal_steady !== undefined ? { goal_steady: input.goal_steady } : {}),
       ...(input.team_time !== undefined ? { team_time: input.team_time } : {}),
+      ...(input.compound !== undefined ? { compound: input.compound } : {}),
       base_graph_hash: input.base_graph_hash } }))
     .digest('hex').slice(0, 32)}`;
   const payload = { scenario_id: input.scenario_id, turn_id: input.turn_id, stage: 'frame' as const, requestHash };
@@ -3648,6 +3662,7 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
     ...(input.statement_record !== undefined && !('node_id' in input.statement_record) && input.statement_record.length > 0
       ? { rangeLaws: input.statement_record } : {}),
     ...(input.team_time !== undefined ? { teamTime: input.team_time } : {}),
+    ...(input.compound !== undefined ? { compound: input.compound } : {}),
     // The approved horizon whole (its type is exactly the writer's fields, `answers_question` included), plus the card's bound goal.
     ...(input.goal_horizon !== undefined ? { goalHorizon: { ...input.goal_horizon,
       ...(input.deadline_card !== undefined ? { expected_goal: input.deadline_card.expected_goal, own_write_landed: input.deadline_card.own_write_landed } : {}) } } : {}),
