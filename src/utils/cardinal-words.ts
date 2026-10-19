@@ -477,7 +477,7 @@ export function cardinalEndStandsAlone(text: string, start: number, end: number)
   const after = text.slice(end, end + WINDOW);
   if (INSIDE_A_NUMBER.test(before) || A_LONGER_AMOUNT.test(after) || A_PLURAL_COMPOUNDER.test(after)) return true;
   if (DIGITS_END_AFTER.test(after) || DIGITS_END_BEFORE.test(before) || UNREAD_END_AFTER.test(after) || UNREAD_END_BEFORE.test(before)) return true;
-  if (BETWEEN_OPEN.test(before) || INSIDE_A_BETWEEN.test(before)) return true;
+  if (INSIDE_A_BETWEEN.test(before)) return true;
   const range = A_RANGE_INSIDE.test(matched);
   if (!range && (tokensOf(matched).some(isMultiplier) ? A_BARE_END_AFTER.test(after) : A_SCALED_END_BEFORE.test(before))) return true;
   const anEnd = range || AN_END_BEFORE.test(before) || AN_END_AFTER.test(after);
