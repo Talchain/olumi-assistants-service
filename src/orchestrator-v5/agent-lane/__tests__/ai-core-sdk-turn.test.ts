@@ -4,9 +4,13 @@
  * sent, input digest), ONE durable OpenAI Conversation per scenario as the conversation state, and the turn's state given
  * fresh on every call, never stored. Scripted provider (global fetch), fake capabilities; SYNTHETIC wording; 0 provider calls.
  */
+import { createRequire } from 'node:module';
+import { tool } from '@openai/agents';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { OPENAI_ONLY, recordedProviderCalls, runWithProviderPolicy } from '../../../adapters/llm/provider-policy.js';
-import { AGENTS_SDK, CORE_COMPACT_THRESHOLD, resetCoreConversationsForTests, runCoreTurn, type ConversationIdStore } from '../core/sdk-turn.js';
+import { z as z4 } from 'zod/v4';
+import { ForbiddenProviderError, OPENAI_ONLY, recordedProviderCalls, runWithProviderPolicy } from '../../../adapters/llm/provider-policy.js';
+import { createOpenAiConversation } from '../../../adapters/llm/openai-conversations.js';
+import { AGENTS_SDK, CORE_COMPACT_THRESHOLD, CoreStateUnavailableError, runCoreTurn, type ConversationIdStore } from '../core/sdk-turn.js';
 import { budgetFor } from '../model-budgets.js';
 import type { AgentCapabilities, AgentToolContext } from '../runtime/agent-tools.js';
 
@@ -23,6 +27,12 @@ const sent: Json[] = [];
 /** Every Conversation the code created (request bodies). */
 const created: Json[] = [];
 let served = 0;
+/** The scenario store's saved Conversation ids (the `scenarios.openai_conversation_id` column), fresh per test. */
+let column = new Map<string, string>();
+const columnStore = (): ConversationIdStore => ({
+  read: async (sid) => column.get(sid) ?? null,
+  claim: async (sid, id) => { if (!column.has(sid)) column.set(sid, id); return column.get(sid)!; },
+});
 const body = (output: Json[]): Json => {
   served += 1;
   return {
@@ -34,7 +44,7 @@ const body = (output: Json[]): Json => {
   };
 };
 beforeEach(() => {
-  scripted = []; sent.length = 0; created.length = 0; resetCoreConversationsForTests();
+  scripted = []; sent.length = 0; created.length = 0; column = new Map();
   vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
     if (String(url).endsWith('/v1/conversations')) {
       created.push(JSON.parse(String(init?.body ?? '{}')) as Json);
@@ -55,7 +65,7 @@ const turn = (message: string, c: ReturnType<typeof caps>, extra: { briefText?: 
   runWithProviderPolicy(OPENAI_ONLY('agent_v1_turn'), async () => {
   const result = await runCoreTurn({ ctx: ctx(message), caps: c as unknown as AgentCapabilities, mode: 'core', message,
     instructions: 'Synthetic instructions.', budget: budgetFor('gpt-6.1-sol', 'conversation'), userId: null,
-    canonicalState: extra.state ?? { empty: true, entities: [] }, briefText: extra.briefText, conversationStore: extra.conversationStore });
+    canonicalState: extra.state ?? { empty: true, entities: [] }, briefText: extra.briefText, conversationStore: 'conversationStore' in extra ? extra.conversationStore : columnStore() });
   return { result, calls: recordedProviderCalls() };
 });
 
@@ -111,24 +121,20 @@ describe('PATH-B core turn on the Agents SDK', () => {
   });
 
   it('CONVERSATION: ONE OpenAI Conversation per scenario; each turn sends only its new input; the state rides the instructions', async () => {
-    const saved = new Map<string, string>();
-    const store: ConversationIdStore = {
-      read: async (sid) => saved.get(sid) ?? null,
-      claim: async (sid, id) => { if (!saved.has(sid)) saved.set(sid, id); return saved.get(sid)!; },
-    };
+    const store = columnStore();
     scripted = [[{ type: 'message', text: 'First answer.' }]];
     const one = await turn('First synthetic question.', caps(), { conversationStore: store, briefText: 'A synthetic brief, written apart.', state: { revision: 1 } });
-    expect(one.result.sdk).toMatchObject({ conversation_id: 'conv_1', conversation_created: true, conversation_saved: true });
+    expect(one.result.sdk).toMatchObject({ conversation_id: 'conv_1', conversation_created: true });
     expect(created).toHaveLength(1);
     // The brief written apart from the message is the Conversation's first item, once, as the user's words.
     expect(JSON.stringify(created[0]!.items)).toContain('A synthetic brief, written apart.');
     expect(created[0]!.items[0].role).toBe('user');
-    expect(saved.get(SCENARIO)).toBe('conv_1');
+    expect(column.get(SCENARIO), 'saved on the scenario before the turn used it').toBe('conv_1');
 
-    resetCoreConversationsForTests(); // a restart: the process forgets; the scenario remembers
+    // No process copy: the next turn (or a restarted process) finds the Conversation only on the scenario.
     scripted = [[{ type: 'message', text: 'Second answer.' }]];
     const two = await turn('Second synthetic question.', caps(), { conversationStore: store, briefText: 'A synthetic brief, written apart.', state: { revision: 2 } });
-    expect(two.result.sdk).toMatchObject({ conversation_id: 'conv_1', conversation_created: false, conversation_saved: true });
+    expect(two.result.sdk).toMatchObject({ conversation_id: 'conv_1', conversation_created: false });
     expect(created, 'a reopen reuses the saved Conversation').toHaveLength(1);
     const second = sent[1]!;
     expect(second.conversation).toBe('conv_1');
@@ -145,11 +151,39 @@ describe('PATH-B core turn on the Agents SDK', () => {
     expect(second.instructions.split('TODAY, from Olumi').length - 1).toBe(1);
   });
 
-  it('a store that cannot hold the id yet keeps it in process memory, and says so', async () => {
-    const store: ConversationIdStore = { read: async () => undefined, claim: async () => undefined };
-    const { result } = await turn('A synthetic question.', caps(), { conversationStore: store });
-    expect(result.sdk).toMatchObject({ conversation_id: 'conv_1', conversation_created: true, conversation_saved: false });
-    await turn('Another synthetic question.', caps(), { conversationStore: store });
-    expect(created, 'reused within the process').toHaveLength(1);
+  it('⛔ the Conversation create obeys the request policy: a route that does not allow OpenAI never reaches the provider', async () => {
+    const refused = runWithProviderPolicy({ ...OPENAI_ONLY('refused'), allowed: new Set() }, () =>
+      createOpenAiConversation({ olumi_lane: 'core' }, [], undefined));
+    await expect(refused).rejects.toBeInstanceOf(ForbiddenProviderError);
+    expect(created, 'nothing left the process').toHaveLength(0);
+    // Contrast: the same call under OPENAI_ONLY creates one.
+    await expect(runWithProviderPolicy(OPENAI_ONLY('allowed'), () => createOpenAiConversation({ olumi_lane: 'core' }, [], undefined))).resolves.toBe('conv_1');
+  });
+
+  it('zod isolation: the SDK runs on its own zod 4, the service stays on zod 3, and a `zod/v4` adapter schema is the tool\'s schema', () => {
+    const service = createRequire(`${process.cwd()}/package.json`);
+    const sdkCore = createRequire(createRequire(service.resolve('@openai/agents')).resolve('@openai/agents-core'));
+    expect((sdkCore('zod/package.json') as { version: string }).version).toMatch(/^4\./);
+    expect((service('zod/package.json') as { version: string }).version).toMatch(/^3\./);
+    const probe = tool({ name: 'probe', description: 'A synthetic probe.', parameters: z4.object({ reason: z4.string() }), execute: async () => 'ok' });
+    expect(probe.parameters).toMatchObject({ type: 'object', properties: { reason: { type: 'string' } }, required: ['reason'] });
+  });
+
+  it('⛔ NO FALLBACK: a store that cannot hold the id, or a save that fails, stops the turn before any model call', async () => {
+    const cannotHold: ConversationIdStore = { read: async () => undefined, claim: async () => undefined };
+    await expect(turn('A synthetic question.', caps(), { conversationStore: cannotHold })).rejects.toMatchObject({ reason: 'store_cannot_hold_id' });
+    expect(created, 'no Conversation the next turn could not find').toHaveLength(0);
+    await expect(turn('A synthetic question.', caps(), { conversationStore: undefined })).rejects.toBeInstanceOf(CoreStateUnavailableError);
+    const saveFails: ConversationIdStore = { read: async () => null, claim: async () => { throw new Error('write refused'); } };
+    await expect(turn('A synthetic question.', caps(), { conversationStore: saveFails })).rejects.toMatchObject({ reason: 'id_not_saved' });
+    expect(sent, 'no model call on any of them').toHaveLength(0);
+  });
+
+  it('a race on the first turn continues the Conversation the scenario saved first', async () => {
+    column.set(SCENARIO, 'conv_winner');
+    const lateRead: ConversationIdStore = { read: async () => null, claim: async (sid) => column.get(sid)! };
+    const { result } = await turn('A synthetic question.', caps(), { conversationStore: lateRead });
+    expect(result.sdk).toMatchObject({ conversation_id: 'conv_winner', conversation_created: false });
+    expect(sent[0]!.conversation).toBe('conv_winner');
   });
 });
