@@ -20,6 +20,9 @@ import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
 import { STATIC_MODEL_SCOPE_NOTE } from '../../goal-target/goal-chance-licence.js';
 import { goalChanceFactsForAgent } from '../../goal-target/goal-chance-range-agent.js';
+import { withStatedSd } from '../../__tests__/support/supported-spread.support.js';
+import { RUN_EVALUATED_BEFORE_SUPPORT_KEY } from '../../context/analysis-projection-policy.js';
+import { buildAnalysisResultBlock } from '../../compose.js';
 
 type Json = Record<string, any>;
 const READ_B3 = (JSON.parse(readFileSync(new URL('./fixtures/waveB3-unseen2-7addf05-readback-run1.json', import.meta.url), 'utf8')) as { j: Json }).j;
@@ -255,7 +258,10 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     ...['absent', 'stale', 'foreign', 'moved', 'card_only'].map(mode => ({ ...G2_CAPTURED[0], mode }))])('G2 $turn $mode: actual Run producer and route keep the figure/qualification while owning removed formatting', async captured => {
     // Script a NEW native Run over the captured saved graph. Missing old private snapshots are never reconstructed.
     // Its input reply below is synthetic: the served capture did not retain raw provider text.
-    const graph = structuredClone(captured.read.graph);
+    // ⭐ STEP 8 (Codex R2 #3443): the captured "between 10 and 30" is a bare range, so the captured graph WITHHOLDS the chance
+    // (the truthful row is below). These rows' subject is the figure's formatting, so they read a SUPPORTED control: the user
+    // then states the standard deviation of that contribution, recorded by the actual chat writer (`withStatedSd`).
+    const graph = await withStatedSd(structuredClone(captured.read.graph), SCENARIO, 'number_of_additional_specialists', 'additional_specialist_capacity');
     const snapshot = await loadScenarioSnapshotForRunAnalysis(SCENARIO, `g2-${captured.turn}`, {
       loadGraphAndBriefText: vi.fn(async () => ({ graph, briefText: captured.read.brief_text, revision: 1 })),
       readMostRecentPendingActions: vi.fn(async () => []),
@@ -340,11 +346,47 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     expect(summary, 'the unique model exclusion remains in the fallback block').toContain('kept out of the calculation');
   }, 60000);
 
+  it('STEP 8 truthful (G2 02 as captured): a bare range withholds the chance on the card, the block and the AI input; the saved Run keeps the raw result', async () => {
+    const captured = G2_CAPTURED[0]!;
+    const graph = structuredClone(captured.read.graph);
+    const snapshot = await loadScenarioSnapshotForRunAnalysis(SCENARIO, 'g2-truthful', {
+      loadGraphAndBriefText: vi.fn(async () => ({ graph, briefText: captured.read.brief_text, revision: 1 })),
+      readMostRecentPendingActions: vi.fn(async () => []),
+    } as never);
+    const outcome = await createRunAnalysisHandler({ scenarioReader: async () => snapshot,
+      plotClient: { run: vi.fn(async () => ({ ...structuredClone(minimal),
+        option_comparison: structuredClone(captured.read.analysis_result.enrichment.option_comparison) })), validatePatch: vi.fn() } as never })({
+      payload: { scenario_id: SCENARIO, turn_id: 'g2-truthful' }, requestId: 'g2-truthful',
+      context: {}, signal: new AbortController().signal, orientationText: '',
+    } as never);
+    const fact = outcome.handler_facts.find(f => f.fact_type === 'run_analysis');
+    if (fact?.fact_type !== 'run_analysis' || fact.noop) throw new Error('Expected actual native Run producer');
+    const raw = (fact.result.enrichment as Json)[RUN_EVALUATED_BEFORE_SUPPORT_KEY] as Json | undefined;
+    expect(raw?.option_comparison.find((r: Json) => r.option_id === 'add_one_specialist')?.probability_of_goal, 'the saved Run keeps what the engine evaluated').toBe(0.3982);
+    READ = { graph, graph_hash: fact.result.graph_hash_at_run, analysis_ready: captured.read.current_read.analysis_ready,
+      analysis_state: { ...structuredClone(captured.read.analysis_state), run_state: { kind: 'complete_current', computed_at: fact.result.computed_at } } };
+    analysisResult = { type: 'analysis_result', ...fact.result, computed_against_hash: fact.result.graph_hash_at_run };
+    nb1SavedBasis = true;
+    const { turn_id: _recordedTurn, scenario_id: _recordedScenario, ...request } = captured.request;
+    const b = await turn(run('Done.'), request.message, request);
+    expect(b.canonical_analysis_view?.options.find(row => row.option_id === 'add_one_specialist')?.cell).toMatchObject({ kind: 'withheld' });
+    expect(b.blocks?.find(x => x.type === 'analysis_result')?.summary).not.toContain('about 40%');
+    // The harness relays the fact as the turn's block; production's ONE block builder (turn and reopen) is the public wire.
+    const wire = JSON.stringify(buildAnalysisResultBlock(fact));
+    for (const engineFigure of ['0.3982', '0.88245', RUN_EVALUATED_BEFORE_SUPPORT_KEY]) expect(wire, engineFigure).not.toContain(engineFigure);
+    const interpretation = sentBodies.find(body => body.tool_choice === 'none' && body.tools?.length === 0);
+    const packet = String(interpretation?.input.at(-1).content[0].text);
+    expect(packet).toContain('canonical_state');
+    for (const engineFigure of ['0.3982', '0.88245', '40%', RUN_EVALUATED_BEFORE_SUPPORT_KEY]) expect(packet, engineFigure).not.toContain(engineFigure);
+  }, 60000);
+
   it.each(['bound', 'absent', 'stale', 'foreign', 'explain'] as const)(
     'C3: the static scope is said once, only on the bound current card (%s)', async mode => {
       // Replay the captured engine rows through the real producer. No engine/provider is contacted.
+      // ⭐ STEP 8: the same SUPPORTED control as G2 (the captured range alone withholds the chance).
+      const capacityGraph = await withStatedSd(structuredClone(capacity.graph), SCENARIO, 'additional_specialists', 'additional_specialist_capacity');
       const snapshot = await loadScenarioSnapshotForRunAnalysis(SCENARIO, 'c3-capacity', {
-        loadGraphAndBriefText: vi.fn(async () => ({ graph: structuredClone(capacity.graph), briefText: capacity.brief, revision: 2 })),
+        loadGraphAndBriefText: vi.fn(async () => ({ graph: structuredClone(capacityGraph), briefText: capacity.brief, revision: 2 })),
         readMostRecentPendingActions: vi.fn(async () => []),
       } as never);
       const handler = createRunAnalysisHandler({ scenarioReader: async () => snapshot,
@@ -354,7 +396,7 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
         context: {}, signal: new AbortController().signal, orientationText: '' } as never);
       const fact = outcome.handler_facts.find(f => f.fact_type === 'run_analysis');
       if (fact?.fact_type !== 'run_analysis' || fact.noop) throw new Error('Expected the real producer Run');
-      READ = { graph: structuredClone(capacity.graph), graph_hash: fact.result.graph_hash_at_run,
+      READ = { graph: structuredClone(capacityGraph), graph_hash: fact.result.graph_hash_at_run,
         analysis_state: { ...structuredClone(READ_T1B.analysis_state),
           run_state: { kind: 'complete_current', computed_at: fact.result.computed_at } } };
       analysisResult = { type: 'analysis_result', ...fact.result, computed_against_hash: fact.result.graph_hash_at_run };

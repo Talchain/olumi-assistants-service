@@ -22,6 +22,7 @@ import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answe
 import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import type { HandlerInvocation } from '../../tools/registry.js';
 import minimalFixture from '../../../../tests/fixtures/plot/v2-run-golden-minimal.json';
+import { withNamedBands } from '../../__tests__/support/supported-spread.support.js';
 
 type Rec = Record<string, any>;
 const fixture = (path: string): Rec => JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8'));
@@ -78,8 +79,20 @@ function b1Carrier(months: number, carrierMonths = months): Rec {
   return g;
 }
 
+/**
+ * ⭐ STEP 8 (Codex R2 #3443): a chat strength the user gave carries no supported spread, so the shares and chances resting on it
+ * are withheld. The sized controls' subject is §(ad), so each factor link is a SUPPORTED control: the user names its band
+ * through the actual writer (`withNamedBands`), which attests its spread.
+ */
+const namedFactorLinks = (g: Rec): Promise<Rec> => {
+  // A link an identity defines draws no spread of its own (and the writer refuses a band for it), so it is left as it is.
+  const skip = new Set(g.nodes.filter((n: Rec) => ['decision', 'option'].includes(n.kind)).map((n: Rec) => n.id));
+  const defined = new Set(g.nodes.filter((n: Rec) => n.nonlinear_identity !== undefined).map((n: Rec) => n.id));
+  return withNamedBands(g, g.edges.filter((e: Rec) => !skip.has(e.from) && !defined.has(e.to)).map((e: Rec) => [e.from, e.to] as const));
+};
+
 /** A fully sized B1 control isolates §(ad) from the served graph's separate target/path refusals. */
-function sizedB1Carrier(months: number): Rec {
+async function sizedB1Carrier(months: number): Promise<Rec> {
   const g = b1Carrier(months);
   const keepIds = new Set(['mrr', 'pro_plan_price', 'pro_paying_subscribers', 's0', 'monthly_churn', 'new_pro_subscribers_per_month',
     ...g.nodes.filter((n: Rec) => ['decision', 'option'].includes(n.kind)).map((n: Rec) => n.id)]);
@@ -91,18 +104,18 @@ function sizedB1Carrier(months: number): Rec {
   Object.assign(goal(g), { goal_direction: '>=', observed_state: {
     value: 0.84, baseline: 0.84, raw_value: 21000, cap: 25000, unit: '£/month', source: 'user_confirmed',
   } });
-  return g;
+  return namedFactorLinks(g);
 }
 
 /** Same explicit sizing as the B1 6/12/24 controls; B2 topology and options, no time carrier. */
-function sizedB2(): Rec {
+async function sizedB2(): Promise<Rec> {
   const g = clone(B2_GRAPH);
   g.edges = g.edges.map((e: Rec) => ({ ...e, defaulted: false, exists_probability: 1,
     provenance: { source: 'user_specified', magnitude: 'user_stated' } }));
   Object.assign(goal(g), { goal_horizon_months: 9, goal_threshold_raw: 400, observed_state: {
     value: 0.5, baseline: 0.5, raw_value: 500, cap: 1000, unit: 'cancellations/month', source: 'user_confirmed',
   } });
-  return g;
+  return namedFactorLinks(g);
 }
 
 async function realRun(graph: Rec): Promise<Rec> {
@@ -221,7 +234,7 @@ describe('Science §(ad) through the producer and reply route', () => {
     distinctWins = false; });
 
   it('by March, no month or carrier: producer and canonical reload withhold every goal chance and retain Q-a ordering', async () => {
-    graph = sizedB2(); distinctWins = true;
+    graph = await sizedB2(); distinctWins = true;
     delete goal(graph).goal_horizon_months;
     const deadline = '2027-03-31';
     goal(graph).goal_horizon = { deadline };
@@ -284,7 +297,7 @@ describe('Science §(ad) through the producer and reply route', () => {
   });
 
   it('CONTROL: no deadline and no months is no_horizon', async () => {
-    graph = sizedB2();
+    graph = await sizedB2();
     delete goal(graph).goal_horizon_months;
     delete goal(graph).goal_horizon;
     expect(goalHorizonVerdict(graph)).toBe('no_horizon');
@@ -293,8 +306,9 @@ describe('Science §(ad) through the producer and reply route', () => {
   });
 
   it('Q-a B2: withheld goal chances retain the leader and win shares without horizon claims, narrator included', async () => {
-    graph = sizedB2(); distinctWins = true;
-    expect(graph.edges.every((e: Rec) => e.provenance.magnitude === 'user_stated')).toBe(true);
+    graph = await sizedB2(); distinctWins = true;
+    // Every link is the user's; each factor link's band was named through the writer (STEP 8 supported control).
+    expect(graph.edges.every((e: Rec) => e.provenance.source === 'user_specified')).toBe(true);
     expect(graph.nodes.every((n: Rec) => n.nonlinear_identity === undefined)).toBe(true);
     currentResult = { type: 'analysis_result', summary: 'Awaiting this Run.', enrichment: { option_comparison: [], inference_warnings: [] } };
     const body = await turn('Your results are ready. The leading option is on track by month 9, in time and within 9 months.');
@@ -351,7 +365,7 @@ describe('Science §(ad) through the producer and reply route', () => {
     ]),
   ];
   it.each(cases)('$name: producer → stored Run → conversation → UI', async ({ make, verdict, ...control }) => {
-    graph = make();
+    graph = await make();
     currentResult = { type: 'analysis_result', summary: 'Awaiting this Run.', enrichment: { option_comparison: [], inference_warnings: [] } };
     expect(goalHorizonVerdict(graph), 'fixture horizon verdict').toBe(verdict);
     const body = await turn();

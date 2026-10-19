@@ -12,6 +12,7 @@ import type { HandlerInvocation } from '../../registry.js';
 import type { PLoTClient } from '../../../../orchestrator/plot-client.js';
 import { buildAnalysisResultHeadlineParts } from '../../../coaching/analysis-result-headline.js';
 import { boundRunLeaderClaim } from '../../../model-management/version-result-binding.js';
+import { withNamedBand } from '../../../__tests__/support/supported-spread.support.js';
 
 const scenario = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const invocation = { context: { stage: 'analyse', entity_registry: { option_ids: [], goal_id: null }, capabilities: {},
@@ -33,13 +34,17 @@ describe('fresh Run headline consumes its own canonical licence', () => {
   it.each(['Revenue', 'Delivery capacity'].flatMap(label => [true, false].flatMap(separated =>
     [false, true].map(directional => ({ label, separated, directional })))))(
     '$label / licensed=$separated / directional=$directional: exact summary bytes and no borrowed permission', async ({ label, separated, directional }) => {
-      const graph = graphFor(label);
+      const drawn = graphFor(label);
       if (directional) {
-        graph.nodes.find(n => n.id === 'g')!.label = `Increase ${label}`;
-        graph.nodes.find(n => n.id === 'f')!.label = label;
-        graph.nodes.find(n => n.id === 'a')!.interventions = { f: 0 };
-        graph.nodes.find(n => n.id === 'b')!.interventions = { f: 1 };
+        drawn.nodes.find(n => n.id === 'g')!.label = `Increase ${label}`;
+        drawn.nodes.find(n => n.id === 'f')!.label = label;
+        drawn.nodes.find(n => n.id === 'a')!.interventions = { f: 0 };
+        drawn.nodes.find(n => n.id === 'b')!.interventions = { f: 1 };
       }
+      // ⭐ STEP 8 (Codex R2 #3443): the user's Effort → goal link carries no supported spread, so its shares and leader are withheld.
+      // This file's subject is the headline licence, so it reads a SUPPORTED control: the user names that link "very strong"
+      // through the actual writer (`withNamedBand`), which attests its spread.
+      const graph = await withNamedBand(drawn, 'f', 'g', 'very strong') as typeof drawn;
       const response = { analysis_status: 'completed', response_hash: 'own', meta: { seed_used: 42, n_samples: 1000, response_hash: 'own' },
         option_comparison: [{ option_id: 'a', option_label: 'Plan A', win_probability: 0.65 },
           { option_id: 'b', option_label: 'Plan B', win_probability: 0.35 }],
@@ -81,7 +86,7 @@ const QUALIFIER = 'These are conditional model results, not one overall chance o
 
 describe('real range Run writer keeps its recorded target before any cold projection', () => {
   it.each([false, true])('point licence=%s: writer and card name the same target and say the conditional sentence once', async withPoint => {
-    const graph = structuredClone(RANGE_CAPTURE.graph);
+    let graph = structuredClone(RANGE_CAPTURE.graph);
     for (const edge of graph.edges) {
       if (edge.to === 'monthly_churn_rate' || edge.to === 'paying_subscribers_at_12_months') {
         edge.provenance = { ...edge.provenance, source: 'user_specified' };
@@ -94,6 +99,10 @@ describe('real range Run writer keeps its recorded target before any cold projec
       delete node.goal_horizon_months;
       delete node.goal_deadline_as_stated;
     }
+    // ⭐ STEP 8 (Codex R2 #3443): the user's churn → subscribers link on the £59 path carries no supported spread, which withholds
+    // the range. This row's subject is the range writer's target, so it reads a SUPPORTED control: the user names that link
+    // "strong" through the actual writer (`withNamedBand`).
+    graph = await withNamedBand(graph, 'monthly_churn_rate', 'paying_subscribers_at_12_months', 'strong');
     const body = structuredClone(RANGE_CAPTURE.plot_body);
     const option = body.option_comparison.find((row: Record<string, any>) => row.option_id === '59_price');
     option.probability_of_goal_drivers = { drivers: [{ kind: 'link_strength', status: 'resolved', spread: 0.4,

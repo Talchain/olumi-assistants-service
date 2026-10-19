@@ -37,6 +37,7 @@ import { projectCanonicalAnalysisCells } from '../../../../routes/canonical-anal
 import { goalChanceWithheldForAgent } from '../../../agent-lane/goal-chance-withheld.js';
 import minimalFixture from '../../../../../tests/fixtures/plot/v2-run-golden-minimal.json';
 import { toTypedRunRows } from '../../../runs/typed-run-rows.js';
+import { withStatedSds } from '../../../__tests__/support/supported-spread.support.js';
 
 type Rec = Record<string, any>;
 
@@ -835,9 +836,16 @@ const allTheirs = (g: Rec): Rec => {
   return g;
 };
 
+/**
+ * ⭐ STEP 8 (Codex R2 #3443): every link made the person's size carries no supported spread alone, which withholds the chance. The
+ * single-target rows' subject is the setting's attribution, so they read a SUPPORTED control: the user also states each size's
+ * standard deviation, recorded by the actual chat writer (`withStatedSds`).
+ */
+const supportedTheirs = (g: Rec): Promise<Rec> => withStatedSds(g, '0c0c0c0c-5ad5-4c0c-8c0c-0c0c0c0c0c0c');
+
 describe('RE-SCOPE 2 R5-1 — the checker\'s case: Olumi\'s setting on the SCORED GOAL reaches the Run and is said', () => {
   it('RED on e58b8dbd (single): hiring — ‘Hire two developers’ sets ‘Productivity’ with Olumi\'s +8; its 31% says so, the other\'s does not', async () => {
-    const g = allTheirs(JSON.parse(store(hiringSized())) as Rec);
+    const g = await supportedTheirs(allTheirs(JSON.parse(store(hiringSized())) as Rec));
     node(g, 'hire_two_developers').interventions.productivity = { value: 0.08, raw_value: 8, source: 'cee_hypothesis', target_match: { node_id: 'productivity' } };
     const { payload, view, reloaded } = await runAndRead(JSON.stringify(GraphV3.parse(g)), hiringAnswer);
     expect(optionWire(payload, 'Hire two developers').interventions).toMatchObject({ productivity: 8 });
@@ -850,7 +858,7 @@ describe('RE-SCOPE 2 R5-1 — the checker\'s case: Olumi\'s setting on the SCORE
   });
 
   it('CONTROL (single): the same graph with that setting the person\'s — the chance is not provisional and names no estimate', async () => {
-    const g = allTheirs(JSON.parse(store(hiringSized())) as Rec);
+    const g = await supportedTheirs(allTheirs(JSON.parse(store(hiringSized())) as Rec));
     node(g, 'hire_two_developers').interventions.productivity = { value: 0.08, raw_value: 8, source: 'user_specified', target_match: { node_id: 'productivity' } };
     const { view, reloaded } = await runAndRead(JSON.stringify(GraphV3.parse(g)), hiringAnswer);
     expect(goalChanceLicenceForAgent(view)!.provisional).toBeUndefined();

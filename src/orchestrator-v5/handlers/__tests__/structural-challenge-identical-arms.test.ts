@@ -26,6 +26,7 @@ import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 import type { HandlerInvocation } from '../../tools/registry.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import { createNoopSessionStore } from '../../session/__tests__/fixtures.js';
+import { withNamedBand } from '../../__tests__/support/supported-spread.support.js';
 
 vi.mock('../../../utils/telemetry.js', () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -57,7 +58,15 @@ import { goalChanceDisplayForAgent } from '../../goal-target/goal-chance-licence
 
 type Rec = Record<string, any>;
 const SCENARIO = 'fa027cf5-c5c9-4021-9578-ee79b15c6eb8';
-const servedGraph = JSON.parse(readFileSync(new URL('./fixtures/sci-deep-fa027cf5-graph.json', import.meta.url), 'utf8')) as Rec;
+/**
+ * ⭐ STEP 8 (AIE 764e9c72 / cc9fbadf; Codex R2 #3443): the served graph's one chat-strength link (the user's exact 0.1 for AI
+ * module availability → signing likelihood) carries no supported spread, so its leader and shares are now withheld. This file
+ * tests the structural challenge, so its leader comes from a SUPPORTED control: the user names that link "moderate" through
+ * the actual writer (`withNamedBand`), which attests the band's spread. The engine rows here are the served Run's own and
+ * SYNTHETIC; the link's stored strength moves to the band, no engine input is read from it.
+ */
+const servedGraph = await withNamedBand(JSON.parse(readFileSync(new URL('./fixtures/sci-deep-fa027cf5-graph.json', import.meta.url), 'utf8')) as Rec,
+  'ai_reporting_module_availability', 'enterprise_prospect_signing_likelihood', 'moderate');
 const happy = JSON.parse(readFileSync('tests/fixtures/plot/v2-run-golden-happy.json', 'utf8')) as V2RunResponseEnvelope;
 
 const LEAD_LINK = { from_id: 'enterprise_prospect_signing_likelihood', to_id: 'quarterly_revenue' };

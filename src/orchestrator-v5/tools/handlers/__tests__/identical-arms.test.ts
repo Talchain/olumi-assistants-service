@@ -14,6 +14,7 @@ import { TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS } from '../../../coaching/analysis-
 import { detectIdenticalArms } from '../identical-arms.js';
 import { createRunAnalysisHandler } from '../run-analysis.js';
 import { ANY_LEAD_CLAUSE_RE } from '../../../__tests__/support/lead-clause.support.js';
+import { withNamedBand } from '../../../__tests__/support/supported-spread.support.js';
 
 /**
  * DL GATE 1 v2 (5 Oct 2026): two arms the Run could not tell apart split each other's wins, so the comparison is withheld
@@ -252,6 +253,18 @@ const graphOf = (options: Rec[], hireEdge?: Rec): Rec => ({
   ],
 });
 
+/**
+ * ⭐ STEP 8 (Codex R2 #3443): the user's flat 0.8 on capacity → goal carries no supported spread, so a DISTINCT Run withholds its
+ * shares for that reason. A distinct-Run contrast reads a SUPPORTED control instead: the user names that link "strong" through the
+ * actual writer (`withNamedBand`), which attests its spread. The identical-arms withhold is the subject, not the spread rule.
+ */
+const supportedGraphOf = async (options: Rec[]): Promise<Rec> => {
+  const g = graphOf(options);
+  const edges = (g.edges as Rec[]).map((e) => ({ from: e.from, to: e.to, strength: { mean: e.strength, std: e.strength_std },
+    exists_probability: e.confidence, effect_direction: 'positive', provenance: e.provenance }));
+  return withNamedBand({ ...g, edges }, 'fac_capacity', 'g', 'strong');
+};
+
 describe('gate 1 v2 — run_analysis path', () => {
   it('(a)+(e) identical arms: every arm stays, every share and the leader are withheld, outcomes kept, said once', async () => {
     const { outcome, fact, enrichment } = await runHandler(graphOf(OPTIONS), OPTIONS, threeArm());
@@ -274,12 +287,12 @@ describe('gate 1 v2 — run_analysis path', () => {
     const { enrichment } = await runHandler(graphOf(OPTIONS), OPTIONS, withRobustness(threeArm()));
     expect(enrichment.robustness_synthesis).toBeUndefined();
     expect(readOptionResultSources(enrichment)[0]!.every((r) => r.robustness === undefined)).toBe(true);
-    const contrast = await runHandler(graphOf(OPTIONS), OPTIONS, withRobustness(threeArm(nudged('mean', 1e-6))));
+    const contrast = await runHandler(await supportedGraphOf(OPTIONS), OPTIONS, withRobustness(threeArm(nudged('mean', 1e-6))));
     expect(contrast.enrichment.robustness_synthesis).toEqual({ overall_assessment: 'high' });
   });
 
   it('DL contrast on the run path: a distinct arm (relative 1e-6) keeps every share and the leader', async () => {
-    const { outcome, fact, enrichment } = await runHandler(graphOf(OPTIONS), OPTIONS, threeArm(nudged('mean', 1e-6)));
+    const { outcome, fact, enrichment } = await runHandler(await supportedGraphOf(OPTIONS), OPTIONS, threeArm(nudged('mean', 1e-6)));
     const rows = readOptionResultSources(enrichment)[0]!;
     expect(rows.every((r) => typeof r.win_probability === 'number')).toBe(true);
     expect((enrichment.inference_warnings as Rec[] | undefined ?? []).some((w) => w.code === GOAL_FIGURES_OPTIONS_IDENTICAL)).toBe(false);

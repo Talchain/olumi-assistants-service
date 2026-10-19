@@ -30,6 +30,7 @@ import type { PLoTClient } from '../../../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../../../orchestrator/types.js';
 import type { HandlerInvocation } from '../../registry.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
+import { withStatedSd } from '../../../__tests__/support/supported-spread.support.js';
 
 type Rec = Record<string, unknown>;
 const U2 = readFileSync('tests/fixtures/cross-service/c50-level-demo/U2.plot-response.json', 'utf8');
@@ -45,6 +46,19 @@ const { operator_as_stated: _strict, ...atMostRow } = strictRow;
 
 type Pin = { readonly option: 'opt_raise' | 'opt_hold'; readonly level: number };
 
+// Sized in churn's unit BY THE USER, so neither R-c (AI Quality 5882087383) nor B6 (AIQ 5916187873: an Olumi size is its guess)
+// touches this row's subject, the strict pin. STEP 8: 3 points per £10 is the 0.3 the link holds on these frames (churn and price
+// both on 100), so the writer can convert the user's stated spread the same way.
+const PRICE_CHURN_AS_SIZED: Rec = { from: 'fac_price', to: 'fac_churn', strength: { mean: 0.3, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive', provenance: { source: 'user_specified', magnitude: 'user_stated', natural_effect: { amount: 3, amount_unit: 'percentage points', per_source_change: 10, per_source_change_unit: 'GBP per month', strength_mean: 0.3, strength_mean_frame: 'edge_strength' } } };
+let priceChurn: Rec = PRICE_CHURN_AS_SIZED;
+/**
+ * ⭐ STEP 8 (Codex R2 #3443): a size alone carries no supported spread, so every chance resting on price → churn is withheld.
+ * This file's subject is the strict pin, so it reads a SUPPORTED control: the user also states the standard deviation of their
+ * size, recorded by the actual chat writer (`withStatedSd`).
+ */
+priceChurn = ((await withStatedSd(graphWith(strictRow, undefined), SCENARIO_ID, 'fac_price', 'fac_churn')).edges as Rec[])
+  .find((e) => e.from === 'fac_price' && e.to === 'fac_churn')!;
+
 function graphWith(row: Rec, pin: Pin | undefined, today = 0.04): Rec {
   // The pin is the USER's figure (`user_specified`), so rule (d) — a leader setting the target at Olumi's estimate —
   // never fires here: the only question left is the threshold.
@@ -53,7 +67,8 @@ function graphWith(row: Rec, pin: Pin | undefined, today = 0.04): Rec {
   return {
     nodes: [
       { id: 'goal', kind: 'goal', label: 'MRR' },
-      { id: 'fac_price', kind: 'factor', label: 'Pro plan price' },
+      // ⭐ STEP 8: the price in its own unit (£49 today, framed on 100), so the user's size per £10 converts for the stated spread.
+      { id: 'fac_price', kind: 'factor', label: 'Pro plan price', scale_frame: 100 },
       // The user's own current churn (4%), framed on 100: PLoT reads "10 %" on this node's level (0.10).
       { id: 'fac_churn', kind: 'factor', label: 'Monthly churn', observed_state: { value: today, raw_value: today * 100, cap: 100, unit: '%', source: 'brief_extraction' } },
       { id: 'opt_hold', kind: 'option', label: 'Keep £49', interventions: { fac_price: { value: 0.49, source: 'user_specified' }, ...churnOn('opt_hold') } },
@@ -61,9 +76,7 @@ function graphWith(row: Rec, pin: Pin | undefined, today = 0.04): Rec {
     ],
     edges: [
       { from: 'fac_price', to: 'goal', strength: { mean: 0.6, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' },
-      // Sized in churn's unit BY THE USER, so neither R-c (AI Quality 5882087383) nor B6 (AIQ 5916187873: an Olumi size is
-      // its guess) touches this row's subject, the strict pin.
-      { from: 'fac_price', to: 'fac_churn', strength: { mean: 0.3, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive', provenance: { source: 'user_specified', magnitude: 'user_stated', natural_effect: { amount: 1, amount_unit: 'percentage points', per_source_change: 10, per_source_change_unit: 'GBP per month', strength_mean: 0.3, strength_mean_frame: 'edge_strength' } } },
+      structuredClone(priceChurn),
       { from: 'fac_churn', to: 'goal', strength: { mean: -0.5, std: 0.1 }, exists_probability: 0.9, effect_direction: 'negative' },
     ],
     goal_constraints: [row],
