@@ -274,12 +274,27 @@ describe('S5t: the chat writer refits the frame a stated size needs, exactly as 
         node('b', 'factor', 'Reporting switch', { value: 0, unit: '0-1', source: 'user_override' })],
       edges: [ph('x', 'g', 0.2), userStated('b', 'g', 0.5, { amount: 50, amount_unit: '£', per_source_change: 1, per_source_change_unit: 'switch' })] };
   }
-  it('r2 P1-c IMPLICIT FRAME: a refit of the goal is refused while a sized link from a frameless node points at it', () => {
+  /**
+   * ⭐ STEP 8 (capacity, served 19ce8e4a) — WHY THIS ROW CHANGED, NOT LOOSENED. It refused the goal refit only because the
+   * switch had "no frame to compare on" (`refitKeepsOtherLinks`, conservative). A switch held at 0 with no spread now reads
+   * on the frame its £50 was sized on (`resolveMagnitudeFrame`: 1, `frameOf`), so the comparison is exact: the refit is
+   * allowed ONLY because the switch's link keeps its £50 per switch in natural units, which this row now asserts, and the
+   * user's £2 per customer is carried instead of refused. The switch itself is never widened.
+   */
+  it('r2 P1-c IMPLICIT FRAME: a goal refit keeps the switch\'s £50 per switch exactly (its implicit frame is 1), so the user\'s £2 per customer is carried', () => {
     const g = implicitSibling();
     const before = JSON.stringify(g);
-    expect(sized(g, 'x', 'g', 2, '£', 'customers', 'Every 1 more customer adds £2 of revenue.'))
-      .toMatchObject({ kind: 'refused', reason: 'not_representable' });
+    const r = sized(g, 'x', 'g', 2, '£', 'customers', 'Every 1 more customer adds £2 of revenue.');
+    expect(r.kind, JSON.stringify(r)).toBe('mutated');
     expect(JSON.stringify(g)).toBe(before);
+    if (r.kind === 'mutated') {
+      const out = r.mutatedGraph as Rec;
+      const cap = (id: string) => out.nodes.find((n: Rec) => n.id === id).observed_state.cap as number;
+      expect(cap('g')).toBe(200);
+      expect(edge2(out, 'b', 'g').strength.mean * cap('g') / 1).toBeCloseTo(50, 9); // £50 per switch, as before (0.5 × 100)
+      expect(edge2(out, 'x', 'g').strength.mean * cap('g') / cap('x')).toBeCloseTo(2, 9); // the user's £2 per customer
+      expect(out.nodes.find((n: Rec) => n.id === 'b').scale_frame).toBeUndefined();
+    }
     const ok = sized(implicitSibling(), 'x', 'g', 0.5, '£', 'customers', 'Every 1 more customer adds £0.50 of revenue.');
     expect(ok.kind, JSON.stringify(ok)).toBe('mutated');
     if (ok.kind === 'mutated') expect(JSON.stringify(edge2(ok.mutatedGraph as Rec, 'b', 'g'))).toBe(JSON.stringify(edge2(implicitSibling(), 'b', 'g')));
