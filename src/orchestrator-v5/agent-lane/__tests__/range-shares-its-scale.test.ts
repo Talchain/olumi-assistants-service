@@ -122,6 +122,8 @@ const AN_END_NOT_READ = [
   'We expect a hundred to 200 users.', 'We expect a million or two million users.', 'We expect twenty to a hundred users.',
   'We expect several hundred to 2,000 users.', 'We expect several hundred to three thousand users.', 'We expect a few hundred – twenty users.',
   'We expect 20 to a few hundred users.', 'We expect between 20 and a dozen users.', 'We expect between two and a dozen users.',
+  // An amount opened by an article is read on its own only ("a hundred and one" is 101), never as one end of a range.
+  'We expect a hundred to two hundred users.',
 ];
 
 describe('⛔ a range is found by its connector: an end the grammar does not read means the range gives nothing (Codex R3 on #3445)', () => {

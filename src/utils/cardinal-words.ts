@@ -387,8 +387,7 @@ const NUMBER_WORD = `(?:${TOKEN_ALTERNATION}|${FRACTION_ALTERNATION})`;
  * "plus" or "ish" after it. A connector into a new clause ("20 to 30 and keep churn low", "by June") is no continuation. A scalar's
  * own completeness in words is the complete-span rule (`wordsAmountComplete`, #3438); this is the one rule for a range's ends.
  */
-const ENDPOINT_CONTINUATION = `(?:[-–](?!(?:${NUMBER_WORD})\\b)[a-z]+|\\s+or\\s+(?!(?:${NUMBER_WORD})\\b|an?\\s)[a-z]+`
-  + `|\\s+(?:plus|ish)\\b(?!\\s+(?:${NUMBER_WORD})\\b|\\s*\\d))`;
+const ENDPOINT_CONTINUATION = `(?:[-–]|\\s+or\\s+|\\s+(?=(?:plus|ish)\\b))(?!(?:${NUMBER_WORD})\\b|an?\\s)[a-z]+`;
 /** Another end starts here: a number in words or digits, an article before a number word included. */
 const AN_END_STARTS = `(?:an?\\s+)?(?:${NUMBER_WORD}\\b|${DIGIT_AMOUNT_START})`;
 /**
@@ -410,14 +409,14 @@ const BARE_END = `(?:${SMALL_ALTERNATION})(?:[\\s-]+(?:${SMALL_ALTERNATION}))*(?
  * the article is ONE there (`readingsOf`). Never after a fraction word ("half a dozen" is no dozen).
  */
 const ARTICLE_LOW_END = `(?<!\\b(?:${FRACTION_ALTERNATION})\\s+)\\ban?\\s+(?:${MULTIPLIER_ALTERNATION})\\b(?:(?:\\s+and\\s+|[\\s-]+)(?:${TOKEN_ALTERNATION})\\b)*`;
-/** Not started inside another number: right after a number word ("and" between them or not), or after "point" and its digits. */
-const NOT_INSIDE_A_NUMBER = `(?<!\\b(?:${TOKEN_ALTERNATION})(?:\\s+and)?[\\s-]+)(?<!\\bpoint(?:[\\s-]+(?:${TOKEN_ALTERNATION}))*[\\s-]+)`;
 
 // The range a capture opens or closes (`rangeAround`).
 const BETWEEN_OPEN = /\bbetween\s+$/i;
 const BETWEEN_AN_ARTICLE_AND = W(`\\bbetween\\s+${ARTICLE_LOW_END}\\s+and\\s+$`);
 const AN_ARTICLE_END_BEFORE = W(`${ARTICLE_LOW_END}${RANGE_JOIN}$`);
-const A_NUMBER_END_BEFORE = W(`${NOT_INSIDE_A_NUMBER}\\b(${CARDINAL_AMOUNT_SOURCE})${CARDINAL_FRACTION_CONTINUATION}${RANGE_JOIN}$`);
+// The leftmost number reaching the connector, as a reader captures it ("a hundred and FIVE to six million" holds "five", which no
+// reader reads: so neither end is read).
+const A_NUMBER_END_BEFORE = W(`\\b(${CARDINAL_AMOUNT_SOURCE})${CARDINAL_FRACTION_CONTINUATION}${RANGE_JOIN}$`);
 const A_NUMBER_END_AFTER = W(`^${RANGE_JOIN}(${CARDINAL_AMOUNT_SOURCE})\\b`);
 
 // What `cardinalEndStandsAlone` refuses.
@@ -435,9 +434,7 @@ const A_BARE_END_AFTER = W(`^${RANGE_JOIN}${BARE_END}\\b(?![\\s-]+(?:${TOKEN_ALT
 const CONTINUES = W(`^${ENDPOINT_CONTINUATION}`);
 const AN_END_BEFORE = W(`(?:\\b${NUMBER_WORD}|${DIGIT_AMOUNT_END})${DIGIT_RANGE_JOIN}$`);
 const AN_END_AFTER = W(`^${DIGIT_RANGE_JOIN}${AN_END_STARTS}`);
-const ITS_PAIR_CONTINUES = W(`^${RANGE_JOIN}${CARDINAL_AMOUNT_SOURCE}${ENDPOINT_CONTINUATION}`);
 const AFTER_AN_END_THAT_CONTINUES = W(`(?:\\b${NUMBER_WORD}|\\d)${ENDPOINT_CONTINUATION}${DIGIT_RANGE_JOIN}$`);
-const CONTINUES_TO_ANOTHER_END = W(`^${ENDPOINT_CONTINUATION}${DIGIT_RANGE_JOIN}${AN_END_STARTS}`);
 
 /**
  * The text the capture at `[start, end)` is read as: itself, or the range it opens or closes (`cardinalReadings`); null where that
@@ -484,8 +481,10 @@ export function cardinalEndStandsAlone(text: string, start: number, end: number)
   const range = A_RANGE_INSIDE.test(matched);
   if (!range && (tokensOf(matched).some(isMultiplier) ? A_BARE_END_AFTER.test(after) : A_SCALED_END_BEFORE.test(before))) return true;
   const anEnd = range || AN_END_BEFORE.test(before) || AN_END_AFTER.test(after);
-  return (anEnd && CONTINUES.test(after)) || CONTINUES_TO_ANOTHER_END.test(after) || AFTER_AN_END_THAT_CONTINUES.test(before)
-    || ITS_PAIR_CONTINUES.test(after);
+  const continues = CONTINUES.exec(after);
+  const pair = A_NUMBER_END_AFTER.exec(after);
+  return (continues !== null && (anEnd || AN_END_AFTER.test(after.slice(continues[0].length))))
+    || (pair !== null && CONTINUES.test(after.slice(pair[0].length))) || AFTER_AN_END_THAT_CONTINUES.test(before);
 }
 
 /**
