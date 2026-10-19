@@ -198,6 +198,14 @@ export const CARDINAL_FRACTION_CONTINUATION =
  * (group × scale). "two hundred and fifty thousand" → ((2×100)+50)×1,000 =
  * 250,000. A `hundred` or scale word with NOTHING accumulated ("thousand
  * thousand") returns null — fail closed, never guess.
+ *
+ * ⛔ A RANGE IS NEVER SUMMED (8b on #3438: "between two and three" read 5). Only
+ * an English compound accumulates: a small cardinal opens a group, follows
+ * `hundred` or a scale word, or is a unit after a ten ("twenty five"); `hundred`
+ * compounds a group once; scale words only fall ("one million two hundred
+ * thousand"). Anything else is two numbers, not one ("two and three", "two
+ * hundred and three hundred", "two thousand and three thousand"), and the
+ * phrase refuses: a range gives its two ends or nothing, never their sum.
  */
 export function parseCardinalAmount(phrase: string | undefined): number | null {
   if (phrase === undefined) return null;
@@ -209,22 +217,34 @@ export function parseCardinalAmount(phrase: string | undefined): number | null {
 
   let total = 0;
   let group = 0;
+  let last: "start" | "ten" | "small" | "hundred" | "scale" = "start";
+  let hundredSeen = false;
+  let lastScale = Infinity;
   for (const token of tokens) {
     const small = CARDINAL_WORD_VALUES[token];
     if (small !== undefined) {
+      // A small cardinal opens a group, follows "hundred" or a scale word, or is
+      // a unit after a ten; any other small after a small is a second number.
+      if (last === "small" || (last === "ten" && small >= 10)) return null;
       group += small;
+      last = small >= 20 ? "ten" : "small";
       continue;
     }
     if (token === CARDINAL_HUNDRED_WORD) {
-      if (group === 0) return null;
+      if (group === 0 || hundredSeen) return null;
       group *= 100;
+      hundredSeen = true;
+      last = "hundred";
       continue;
     }
     const scale = CARDINAL_SCALE_MULTIPLIERS[token];
     if (scale !== undefined) {
-      if (group === 0) return null;
+      if (group === 0 || scale >= lastScale) return null;
       total += group * scale;
       group = 0;
+      hundredSeen = false;
+      lastScale = scale;
+      last = "scale";
       continue;
     }
     return null; // a token outside the vocabulary — fail closed

@@ -106,6 +106,13 @@ describe("L67 — the hand-written cardinal corpus", () => {
     ["eighteen", 18],
     ["ninety", 90], // longest-first: "nine" must not shadow it
     ["seventeen", 17], // nor "seven" shadow this
+    // Still compounds after the range rule: a unit after a ten, a ten after
+    // "hundred", hundreds of a teen, a falling scale.
+    ["twenty five", 25],
+    ["two hundred twenty five", 225],
+    ["fifteen hundred", 1_500],
+    ["one thousand two hundred", 1_200],
+    ["two thousand and fifty", 2_050],
   ];
   for (const [phrase, value] of CORPUS) {
     it(`"${phrase}" → ${value}`, () => {
@@ -141,6 +148,17 @@ describe("L67 — the parser fails closed", () => {
     ["a hundred", "'a' is an article, not a count"],
     ["two point five million", "'point' decimals are not folded"],
     ["banana", "not a number at all"],
+    // ⛔ A range is never summed (8b on #3438: "between two and three" read 5).
+    // Two numbers are never one: the phrase refuses, never their sum.
+    ["two and three", "a range — never 5"],
+    ["twenty and thirty", "a range — never 50"],
+    ["two three", "two numbers side by side — never 5"],
+    ["nineteen ninety", "two numbers — never 109"],
+    ["twenty fifteen", "a ten then a teen — never 35"],
+    ["two and three million", "a range with a scale — never 5,000,000"],
+    ["two hundred and three hundred", "a range of hundreds — never 20,300"],
+    ["two thousand and three thousand", "a range of thousands — never 5,000"],
+    ["three thousand two million", "a scale that rises is a second number"],
   ];
   for (const [phrase, why] of REFUSED) {
     it(`"${phrase}" → null (${why})`, () => {
