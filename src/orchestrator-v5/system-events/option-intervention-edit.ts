@@ -79,7 +79,7 @@ import { interventionKeysFollowInterventions } from '../reindex-intervention-key
 import { reconcileTopLevelOptionsFromNodes } from '../reconcile-top-level-options.js';
 import { applyOptionGapDeclarations, optionGapFields, optionGapCardWords, optionGapsHeld,
   optionGapPostimageIsScoped, optionGapOperands, parseOptionGapDeclarations, type ApprovedOptionGap } from '../agent-lane/unmodelled-mechanisms.js';
-import { APPROVED_LEVEL_ADOPTION_SOURCE, approvedLevelSourceFor, runWithApprovedAdoption, runWithApprovedLinkAdoptions } from '../agent-lane/approved-adoption-context.js';
+import { APPROVED_LEVEL_ADOPTION_SOURCE, approvedLevelStampFor, runWithApprovedAdoption, runWithApprovedLinkAdoptions } from '../agent-lane/approved-adoption-context.js';
 import { runWithStatedLinkBand } from '../agent-lane/stated-link-band-context.js';
 import { factorUnitOf, unitPhraseFamily, unitsConflict } from '../agent-lane/unit-conflict.js';
 import { readUnitParts } from '../agent-lane/same-unit.js';
@@ -123,10 +123,12 @@ export interface OptionInterventionEditInput {
   readonly expectedGraphHash: string;
   /**
    * The cell's stamp when it is NOT the user's own level: an approved adoption of Olumi's
-   * proposed level (`approvedLevelSourceFor`). Absent → `user_specified`, the inspector's
+   * proposed level (`approvedLevelStampFor`). Absent → `user_specified`, the inspector's
    * stamp. Never from a wire field: `executeOptionInterventionEdit` derives it server-side.
    */
   readonly source?: typeof APPROVED_LEVEL_ADOPTION_SOURCE;
+  /** R3: only beside `source` — words of unestablished origin, stored as origin unknown (`user_material_unverified`). */
+  readonly unverified?: true;
   /** Canvas edits may derive display coordinates; explicit approval batches may not. */
   readonly inferFactorFigure?: boolean;
   /**
@@ -154,7 +156,7 @@ export interface OptionInterventionTransactionInput extends OptionInterventionEd
 type OptionInterventionStore = NonNullable<Parameters<typeof commitDirectAnswer>[2]>;
 
 /** One (option, factor) level this commit writes, with the cell's stamp when it is not the user's own. */
-export type OptionLevelTarget = Pick<OptionInterventionEditInput, 'optionId' | 'factorId' | 'modelValue' | 'source' | 'figure'>;
+export type OptionLevelTarget = Pick<OptionInterventionEditInput, 'optionId' | 'factorId' | 'modelValue' | 'source' | 'unverified' | 'figure'>;
 
 /**
  * Compare to the original persisted bytes, not two independently normalised
@@ -200,7 +202,8 @@ export function optionInterventionBatchPostimageIsScoped(
     const newNode = newNodes[0]!;
     const entry = InterventionV3.safeParse(newNode.interventions?.[target.factorId]);
     if (!entry.success || entry.data.value !== target.modelValue
-      || entry.data.source !== (target.source ?? 'user_specified') || entry.data.target_match.node_id !== target.factorId) return false;
+      || entry.data.source !== (target.source ?? 'user_specified') || entry.data.target_match.node_id !== target.factorId
+      || entry.data.user_material_unverified !== (target.source !== undefined && target.unverified === true ? true : undefined)) return false;
     const approved = target.figure?.likely_range;
     if (approved !== undefined && !isDeepStrictEqual(entry.data.range,
       { low: approved.low, high: approved.high, meaning: 'likely_range', source: 'user_specified' })) return false;
@@ -304,6 +307,7 @@ export function applyOptionInterventionBatch(input: OptionInterventionBatchTrans
     const prepared = prepareOptionInterventionEdit({ persistedGraph: input.persistedGraph, inferFactorFigure: input.inferFactorFigure,
       optionId: target.optionId, factorId: target.factorId, modelValue: target.modelValue,
       expectedGraphHash: input.expectedGraphHash, ...(target.source !== undefined ? { source: target.source } : {}),
+      ...(target.source !== undefined && target.unverified === true ? { unverified: true as const } : {}),
       ...(target.figure !== undefined ? { figure: target.figure } : {}) });
     if (prepared.kind === 'refused') return refuse(prepared.reason, i);
     if (prepared.kind === 'unchanged') continue;
@@ -1061,8 +1065,8 @@ export async function prepareOptionInterventionBatchExecution(
   // proposal names (same scenario, option, factor, value); otherwise the inspector's `user_specified`.
   // Set LAST and unconditionally: a `source` a caller slipped onto the input is overwritten, never kept.
   let targets: OptionLevelTarget[] = input.targets.map(t => {
-    const source = approvedLevelSourceFor(input.scenarioId, t.optionId, t.factorId, t.modelValue);
-    return { optionId: t.optionId, factorId: t.factorId, modelValue: t.modelValue, ...(source !== undefined ? { source } : {}),
+    const stamp = approvedLevelStampFor(input.scenarioId, t.optionId, t.factorId, t.modelValue);
+    return { optionId: t.optionId, factorId: t.factorId, modelValue: t.modelValue, ...(stamp ?? {}),
       ...(t.figure !== undefined ? { figure: t.figure } : {}) };
   });
   // Decide value-only no-ops on the original graph, before attaching any range.
@@ -1884,6 +1888,10 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
       && (cell.unit === undefined || finalFigure.unit === undefined || cell.unit === finalFigure.unit.trim());
     const sameCoordinate = entry.data.value === input.modelValue
       && (finalFigure === undefined || sameFigure || sameNativePoint);
+    // R3 (PL 16:05): an equal figure never erases a source-only change. Words of unestablished origin on a cell that does not
+    // already say exactly that are refused, never reported "unchanged" while the cell still names another author.
+    if (sameCoordinate && !likelyMoves && input.source !== undefined && input.unverified === true
+      && !(cell.source === input.source && cell.user_material_unverified === true)) return refuse('same_figure_other_source');
     if (sameCoordinate && !likelyMoves) return { kind: 'unchanged' };
   }
   const built = buildOptionEffectRawOperation({
@@ -1912,8 +1920,11 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
     kind: 'prepared',
     operation: {
       ...operation,
-      value: { ...(operation.value as Record<string, unknown>), source: input.source },
-      rationale: `Records the level Olumi proposed, and the user approved, for ${option.label} on ${factor.label}.`,
+      value: { ...(operation.value as Record<string, unknown>), source: input.source,
+        ...(input.unverified === true ? { user_material_unverified: true } : {}) },
+      rationale: input.unverified === true
+        ? `Records the level the user approved for ${option.label} on ${factor.label}, from words whose source is not recorded.`
+        : `Records the level Olumi proposed, and the user approved, for ${option.label} on ${factor.label}.`,
     },
     ...withLink,
   };

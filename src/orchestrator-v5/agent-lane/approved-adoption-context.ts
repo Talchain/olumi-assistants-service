@@ -94,6 +94,12 @@ export interface ApprovedLevelAdoption {
   readonly factorId: string;
   /** The approved level on the model scale — exactly what the write sends. */
   readonly modelValue: number;
+  /**
+   * R3 (C5, DL lease 19 Oct): the level came from someone's words whose speaker or binding is not established. Stored as
+   * origin UNKNOWN — `cee_hypothesis` beside `user_material_unverified`, the pairing the add-option path already writes and
+   * `settingProvenanceOf` reads as unknown — never as Olumi's estimate, never as the user's verified figure.
+   */
+  readonly unverified?: true;
 }
 
 /** Olumi's own level, adopted: the contract's model-authored member. */
@@ -117,18 +123,20 @@ export function runWithApprovedLevelAdoptions<T>(adoptions: readonly ApprovedLev
 /**
  * The stamp for THIS level write if — and only if — it is the approved adoption the context
  * names: same scenario, option, factor and value. Otherwise `undefined` (the writer keeps its own).
+ * ONE matched record carries the source AND the unverified marker together (PL 16:05: one provenance replacement).
  */
-export function approvedLevelSourceFor(
+export function approvedLevelStampFor(
   scenarioId: string,
   optionId: string,
   factorId: string,
   modelValue: unknown,
-): typeof APPROVED_LEVEL_ADOPTION_SOURCE | undefined {
+): { readonly source: typeof APPROVED_LEVEL_ADOPTION_SOURCE; readonly unverified?: true } | undefined {
   const adoptions = levelStore.getStore();
   if (adoptions === undefined) return undefined;
   if (typeof modelValue !== 'number' || !Number.isFinite(modelValue)) return undefined;
-  return adoptions.some(a => a.scenarioId === scenarioId && a.optionId === optionId && a.factorId === factorId
-    && a.modelValue === modelValue) ? APPROVED_LEVEL_ADOPTION_SOURCE : undefined;
+  const a = adoptions.find(x => x.scenarioId === scenarioId && x.optionId === optionId && x.factorId === factorId
+    && x.modelValue === modelValue);
+  return a === undefined ? undefined : { source: APPROVED_LEVEL_ADOPTION_SOURCE, ...(a.unverified === true ? { unverified: true as const } : {}) };
 }
 
 /**
