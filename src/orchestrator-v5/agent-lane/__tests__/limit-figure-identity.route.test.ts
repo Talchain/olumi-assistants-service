@@ -217,3 +217,20 @@ describe('R3 independent limit-door heldout',()=>{
   await press(targetTurn('The oven-mixer pairing should be at most 2 ovens now, not 3.',g=>{g.goal_constraints=[structuredClone(OVENS)]},'Oven capacity',2),[2]);
  });
 });
+
+/** Codex R4 on #3433 @20a65841 (held-out, adopted verbatim): a denominator's MODIFIER is not its head, and a unit that states two periods is no unstated unit. */
+describe('R4 independent limit denominator class',()=>{
+ it.each([
+ ['tickets per customer','The team capacity limit should be at most 2 tickets per customer account.'],
+ ['tickets per engineer','The team capacity limit should be at most 2 tickets per engineer team.'],
+ ['tickets per week','The team capacity limit should be at most 2 tickets per week per month.'],
+ ])('no wrong limit %s <- %s',async(unit,text)=>{
+  await refuse(targetTurn(text,singleRate(unit),'Team capacity',2,'<=',unit));
+ });
+ it.each([
+ ['tickets per engineer','The team capacity limit should be at most 2 tickets per senior engineer.'],
+ ['tickets per week','The team capacity limit should be at most 2 support tickets per week.'],
+ ])('own head noun %s <- %s saves',async(unit,text)=>{
+  await press(targetTurn(text,singleRate(unit),'Team capacity',2,'<=',unit),[2]);
+ });
+});

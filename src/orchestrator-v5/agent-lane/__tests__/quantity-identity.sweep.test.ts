@@ -86,6 +86,14 @@ describe('the full written unit: the same sentence names the quantity, and only 
     ['BASE: a headcount unit counts the people its phrase names', 'The team capacity limit should be at most 2 developers.', 'hires', true],
     ['FLIP the same phrase into a unit that counts a thing', 'The team capacity limit should be at most 2 developers.', 'tickets', false],
     ['FLIP the same people, as a rate, into a headcount', 'The team capacity limit should be at most 2 developers per week.', 'hires', false],
+    // Each part by its HEAD noun, never a word inside it; a unit that states two periods is no unstated unit (Codex R4 on #3433).
+    ['BASE: a modifier before the denominator\'s head', 'The team capacity limit should be at most £2 per senior engineer.', '£ per engineer', true],
+    ['FLIP the denominator\'s word is only its modifier', 'The team capacity limit should be at most £2 per engineer team.', '£ per engineer', false],
+    ['BASE: a modifier before the counted head', 'The team capacity limit should be at most 2 support tickets.', 'tickets', true],
+    ['FLIP the counted word is only a modifier', 'The team capacity limit should be at most 2 ticket buyers.', 'tickets', false],
+    ['BASE: prose after the counted noun is no part of it', 'The team capacity limit should be at most 2 tickets next year.', 'tickets', true],
+    ['FLIP two periods (a count)', 'The team capacity limit should be at most 2 tickets per week per month.', 'tickets per week', false],
+    ['FLIP two periods (money)', 'The team capacity limit should be at most £2 a month per year.', '£ per month', false],
   ])('%s: "%s" into "%s" → %s', (_case, text, unit, expected) => { expect(is(text, unit)).toBe(expected); });
 });
 

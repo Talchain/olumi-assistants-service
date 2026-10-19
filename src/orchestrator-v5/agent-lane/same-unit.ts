@@ -401,6 +401,16 @@ export function nounUnitsAt(tail: string): readonly string[] {
  * that is none of these. Null when the literal names no unit at all.
  */
 export function statedTailParts(text: string, literal: { index: number; matchedText: string; kind: string }): UnitParts | null {
+  const read = statedTailReading(text, literal);
+  return read === 'conflict' ? null : read;
+}
+
+/**
+ * `statedTailParts`, keeping why it read nothing: `'conflict'` when the words after the literal state two periods or two
+ * denominators ("70 tickets per week per month"), null when they state no unit. A unit that cannot be read is never an
+ * absent one (Codex R4 on #3433: a conflicting unit was taken as unstated, so the quantity's own unit was written).
+ */
+export function statedTailReading(text: string, literal: { index: number; matchedText: string; kind: string }): UnitParts | 'conflict' | null {
   // The clause after the figure, to the first punctuation or digit; "/" and "-" are their own breaks ("client-month").
   const clause = text.slice(literal.index + literal.matchedText.length).replace(/p\.a\./giu, ' pa ').split(/[.,;:!?()\n]/u)[0] ?? '';
   const toks = clause.replace(/\//g, ' / ').replace(/-/g, ' ').trim().toLowerCase().split(/\s+/u)
@@ -450,7 +460,7 @@ export function statedTailParts(text: string, literal: { index: number; matchedT
     const token = literal.matchedText.match(CURRENCY_TOKEN)?.[0];
     const cur = token === undefined ? null : currencyOf(token);
     if (cur === null) return null;
-    if (!readRateParts()) return null;
+    if (!readRateParts()) return 'conflict';
     return { kind: 'currency', code: cur.code, scale: 1, noun: null, per, base: null, qualifiers: null, period };
   }
   // A share: the literal itself ("18%") or a %/pp phrase right after a plain number ("3 percentage points").
@@ -479,7 +489,7 @@ export function statedTailParts(text: string, literal: { index: number; matchedT
     noun.push(singular(toks[k]!)); k += 1;
   }
   if (noun.length === 0) return null;
-  if (!readRateParts()) return null;
+  if (!readRateParts()) return 'conflict';
   return { kind: 'count', code: null, scale: 1, noun, per, base: null, qualifiers: null, period };
 }
 

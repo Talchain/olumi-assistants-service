@@ -10,9 +10,11 @@
  * quantity are always the same occurrence:
  * - **Turned down.** An occurrence the user turned down ("not 90%", "rather than", "instead of") is never theirs, and once they
  *   turned a figure down, another occurrence of it is theirs only where their words name this quantity, never by default.
- * - **Its unit.** The unit written after the figure, read whole by the shared unit reader (`statedTailParts`), must be this
- *   quantity's (`readUnitParts`): the same kind, the same counted thing, the same denominator, and for a count the same period
- *   (2 engineers is a headcount, never 2 engineers a week). Money or a percentage that names no period keeps the quantity's.
+ * - **Its unit.** The unit written after the figure, read whole by the shared unit reader (`statedTailReading`), must be this
+ *   quantity's (`readUnitParts`): the same kind, the same counted thing and the same denominator, each by its HEAD noun, and for
+ *   a count the same period (2 engineers is a headcount, never 2 engineers a week). Money or a percentage that names no period
+ *   keeps the quantity's. A headcount unit counts whatever its phrase names. A unit that cannot be read (two periods) is no
+ *   quantity's, never an unstated one.
  * - **Names.** Its phrase runs from a clause break or conjunction to the next; the quantity's own unit words after the figure
  *   name nothing. It names a quantity by the label's whole phrase (longest labels first, symbols included: "%", "£"), or by a
  *   word only that label has.
@@ -28,7 +30,7 @@
  */
 import { isProseAfterValue, unitFamilyOf } from '../routing/value-unit-resolution.js';
 import { isProportionScaledFactor } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
-import { readUnitParts, statedTailParts, type UnitParts } from './same-unit.js';
+import { readUnitParts, statedTailReading, type UnitParts } from './same-unit.js';
 import { amountsWrittenIn, amountTheUserWrote, figureTheUserWroteForSpan, sameWord, wordsOf, type EntityScope } from './stated-by-user.js';
 
 /**
@@ -57,9 +59,10 @@ const tokensOf = (s: string): string[] => s.toLowerCase().match(/[\p{L}\p{N}]+|[
 function writtenInItsUnit(stated: UnitParts | null, own: UnitParts | null, share = false): boolean {
   if (stated === null || own === null || (share && stated.kind === 'percent')) return true;
   if (stated.kind !== own.kind) return false;
-  // A denominator fits by its head noun ("per senior engineer" is per engineer); "each" names an unnamed one, which fits any.
+  // A denominator is its HEAD noun, never a word inside it: "per senior engineer" is per engineer, "per customer ACCOUNT" is
+  // per account (Codex R4 on #3433). "each" names an unnamed one, which fits any.
   const perFits = stated.per === null ? own.per === null
-    : stated.per.length === 0 || (own.per !== null && own.per.length > 0 && stated.per.includes(own.per[own.per.length - 1]!));
+    : stated.per.length === 0 || (own.per !== null && own.per.length > 0 && headOf(stated.per) === headOf(own.per));
   if (stated.kind === 'count' ? stated.period !== own.period || !perFits
     : (stated.period !== null && stated.period !== own.period) || (stated.per !== null && !perFits)) return false;
   if (stated.code !== null && own.code !== null && stated.code !== own.code) return false;
@@ -67,8 +70,17 @@ function writtenInItsUnit(stated: UnitParts | null, own: UnitParts | null, share
   // `unitFamilyOf` 'count') counts whatever its phrase names, as the ONE reader reads it (`amountTheUserWrote`): "3 developers"
   // are 3 hires. A share's base is not compared: the reader keeps one word of it ("80% of MY time" against "% of founder
   // working time").
-  const counted = own.noun?.[own.noun.length - 1];
-  return counted === undefined || unitFamilyOf(counted) === 'count' || (stated.noun ?? []).includes(counted);
+  const counted = own.noun === null ? undefined : headOf(own.noun);
+  return counted === undefined || unitFamilyOf(counted) === 'count' || (stated.noun !== null && headOf(stated.noun) === counted);
+}
+
+/**
+ * A unit part's head: its last word before any prose ("2 ovens NEXT year" counts ovens; "70 ticket BUYERS" counts buyers). The
+ * reader keeps parts singular ("this" → "thi"), so a word is prose as written or with its "s" back.
+ */
+function headOf(ws: readonly string[]): string | undefined {
+  const cut = ws.findIndex((w) => isProseAfterValue(w) || isProseAfterValue(`${w}s`));
+  return (cut < 0 ? ws : ws.slice(0, cut)).at(-1);
 }
 
 /** The labels a phrase NAMES: a label's whole phrase, longest labels first ("Annual oven capacity" keeps its words from "Oven capacity"), or a word only that label has. */
@@ -119,7 +131,10 @@ export function figureIsThisQuantitys(
   const givenTo = new Set<string>();
   for (const { a, lead, phrase, tail } of written.filter((w) => !w.turnedDown)) {
     const next = /^\s*([A-Za-z][A-Za-z'-]*)/.exec(phrase.slice(a.index + a.matchedText.length))?.[1];
-    const stated = a.kind !== 'currency' && a.kind !== 'percent' && next !== undefined && isProseAfterValue(next) ? null : statedTailParts(phrase, a);
+    const read = a.kind !== 'currency' && a.kind !== 'percent' && next !== undefined && isProseAfterValue(next) ? null : statedTailReading(phrase, a);
+    // A unit the user wrote that cannot be read ("70 tickets per week per month") is no quantity's, and never an unstated one.
+    if (read === 'conflict') continue;
+    const stated = read;
     if (!writtenInItsUnit(stated, own, share)) {
       // Written in another unit: the quantities that unit fits are the ones to ask about ("70 specialists": Additional specialists).
       for (const c of candidates) if (c.label !== target && ((p) => p !== null && writtenInItsUnit(stated, p))(readUnitParts(c.unit))) givenTo.add(c.label);

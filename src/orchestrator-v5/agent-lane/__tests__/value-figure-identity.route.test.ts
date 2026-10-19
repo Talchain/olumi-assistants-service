@@ -90,3 +90,80 @@ describe('R3 independent value-door exact-write contract',()=>{
   expect(authorised(pressed!)).toEqual([expect.objectContaining({ok:true,mutated:true})]);expect(chip?.detail).not.toContain('field binding unverified');
  });
 });
+
+/** Codex R4 on #3433 @20a65841 (held-out, adopted verbatim, minus its console capture): a denominator's MODIFIER is not its head ("per customer ACCOUNT" counts accounts), a unit stating two periods is no unstated unit, and the unclear path keeps its labelled card. */
+describe('R4 independent full-unit class',()=>{
+ it.each([
+ ['tickets per customer','Correction: existing team capacity is 70 tickets per customer account.'],
+ ['tickets per engineer','Correction: existing team capacity is 70 tickets per engineer team.'],
+ ['tickets per week','Correction: existing team capacity is 70 tickets per week per month.'],
+ ['tickets per week','We now have 70 customers per week; the existing team capacity is unchanged.'],
+ ])('no wrong value %s <- %s',async(unit,text)=>{
+  const {saved}=await valueTurn(text,'Existing team capacity',unit,'Additional specialist capacity',unit);
+  expect(saved.raw_value).toBe(80);
+ });
+ it.each([
+ ['tickets per engineer','Correction: existing team capacity is 70 tickets per senior engineer.'],
+ ['tickets per week','Correction: existing team capacity is 70 support tickets per week.'],
+ ])('own head noun %s <- %s saves',async(unit,text)=>{
+  const {saved,pressed}=await valueTurn(text,'Existing team capacity',unit,'Additional specialist capacity',unit);
+  expect(saved.raw_value).toBe(70);expect(saved.unit).toBe(unit);
+  expect(authorised(pressed!)).toEqual([expect.objectContaining({ok:true,mutated:true})]);
+ });
+ it('unclear has a labelled card, press and human-unverified save',async()=>{
+  const {saved,chip,pressed}=await valueTurn('The figure is 70 tickets per week.');
+  expect(chip?.detail).toContain('field binding unverified');expect(saved.raw_value).toBe(70);
+  expect(saved.user_material_unverified).toBe(true);expect(authorised(pressed!)).toEqual([expect.objectContaining({ok:true,mutated:true})]);
+ });
+ it('REAL-path positive on unedited canonical graph returns a true receipt and exact saved figure',async()=>{
+  const w=world(),turn=await route(w);
+  const r=await turn({message:'Correction: oven capacity is 2 ovens, not 1.',source:'composer'},[call('propose_assumptions',{assumptions:[{factor_label:'Oven capacity',value:2,unit:'ovens',user_stated:true,revise:true,basis:'User correction'}]}),say('Review the change.')]);
+  const chip=chipFor(r,idOf(r,'propose_assumptions'));
+  const pressed=await turn({message:chip.message,source:'chip_click',chip:{id:chip.id},agent_session_id:r._agent.session_id});
+  expect(authorised(pressed)).toEqual([expect.objectContaining({ok:true,mutated:true})]);
+  expect(node(w.read(),'oven_capacity').observed_state).toMatchObject({raw_value:2,unit:'ovens',source:'user_override'});
+ });
+});
+
+/**
+ * THE ASK, AS THE AGENT RECEIVES IT (DL-3 condition on the converted rows; Codex R4 on #3433: "the candidate-naming ask is
+ * unproved"). Scripted Agent prose proves nothing, so these rows read the Agent's NEXT model input (the request the route sends
+ * after `propose_assumptions` ran) and find, by identity, the tool result it reads: the factor, the user's figure, the quantity
+ * their words gave it to, and the instruction to ask naming both and quoting them. The words the Agent then writes are the
+ * model's; what it is given to write them from is proved here. 0 provider calls.
+ */
+describe('the ask the Agent is given names both quantities',()=>{
+ const NOTE='Nothing was proposed for these: the user wrote the figure, but their words give it to another quantity (named in written_for), '
+  +'write it in another unit, or turn it down for this one. Never record it as this factor’s value. Ask the user which they '
+  +'mean, naming this factor and, when written_for names one, that quantity too, and quote their words; never just refuse.';
+ /** The propose_assumptions result as the Agent's next request carried it. */
+ const resultTheAgentRead=():Rec=>{
+  const sent=vi.mocked(fetch).mock.calls.map(([,init])=>JSON.parse(String((init as {body?:string}|undefined)?.body??'{}')) as Rec);
+  const outputs=sent.flatMap(req=>((req.input??[]) as Rec[]).filter(i=>i.type==='function_call_output').map(i=>JSON.parse(String(i.output)) as Rec));
+  const read=outputs.filter(o=>'not_this_factors_figure' in o);
+  expect(read,JSON.stringify(outputs).slice(0,3000)).toHaveLength(1);
+  return read[0]!;
+ };
+ it('a figure the user gave to another quantity: the Agent reads that quantity\'s name and the instruction to ask about both',async()=>{
+  await valueTurn('Additional specialist capacity is 70 tickets per week; the existing team stays as before.');
+  const read=resultTheAgentRead();
+  expect(read.not_this_factors_figure).toEqual([{label:'Existing team capacity',value:70,written_for:['Additional specialist capacity']}]);
+  expect(read.not_this_factors_figure_note).toBe(NOTE);
+ });
+ it('a figure written in another unit: the Agent reads the quantity that unit fits',async()=>{
+  await valueTurn('Correction: existing team capacity is 70 tickets per month.','Existing team capacity','tickets per week','Additional specialist capacity','tickets per month');
+  expect(resultTheAgentRead().not_this_factors_figure).toEqual([{label:'Existing team capacity',value:70,written_for:['Additional specialist capacity']}]);
+ });
+ it('a unit no quantity holds: the Agent reads this factor alone, still to be asked about, never refused',async()=>{
+  await valueTurn('Correction: existing team capacity is 70 tickets per week per month.');
+  const read=resultTheAgentRead();
+  expect(read.not_this_factors_figure).toEqual([{label:'Existing team capacity',value:70,written_for:[]}]);
+  expect(read.not_this_factors_figure_note).toBe(NOTE);
+ });
+ it('CONTROL: the user\'s own clause, in its own unit, carries no ask',async()=>{
+  await valueTurn('Correction: existing team capacity is 70 tickets per week, not 80.');
+  const sent=vi.mocked(fetch).mock.calls.map(([,init])=>String((init as {body?:string}|undefined)?.body??''));
+  expect(sent.some(b=>b.includes('not_this_factors_figure'))).toBe(false);
+  expect(sent.some(b=>b.includes('function_call_output'))).toBe(true);
+ });
+});
