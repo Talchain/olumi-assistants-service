@@ -8,6 +8,12 @@ describe('thin core diff: exactly what a proposed model changes', () => {
     expect(diffLivingModels(KNOWN_ANSWER, structuredClone(KNOWN_ANSWER))).toEqual([]);
   });
 
+  it('key order is not a change (a saved model is re-parsed in its schema\'s key order)', () => {
+    const reordered = structuredClone(KNOWN_ANSWER);
+    reordered.aims = reordered.aims.map(({ target, ...rest }) => ({ target, ...rest }));
+    expect(diffLivingModels(KNOWN_ANSWER, reordered)).toEqual([]);
+  });
+
   it('a corrected figure, a new factor, a removed option and a new view are each one item, matched by id or content', () => {
     const next: LivingModelT = structuredClone(KNOWN_ANSWER);
     next.factors[0]!.value = 0.6;

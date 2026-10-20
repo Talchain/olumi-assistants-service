@@ -5,7 +5,9 @@
  * (`approvedGraphHeld`). A lost response or a concurrent copy is recovered as the operation's own version, never a second
  * write. Matching values never count as proof; an unverifiable save stays UNKNOWN.
  */
+import { createHash } from 'node:crypto';
 import type { InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
+import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { approvedGraphHeld } from '../../agent-lane/runtime/draft-replacement.js';
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { computeAnalysisAffectingGraphHashSha256 } from '../../context/graph-hash.js';
@@ -84,4 +86,33 @@ export async function writeCorePostimage(deps: { readonly dispatch: InternalDisp
   });
   if (reg.json.replayed === true) return { status: 'already_saved', receipt };
   return { status: 'saved', receipt, after };
+}
+
+/** A stable UUID-shaped operation id for one prepared change: a retry of the same approval is the same operation. */
+export function changeOperationId(scenarioId: string, proposalId: string): string {
+  const b = Buffer.from(createHash('sha256').update(`living_change:${scenarioId}:${proposalId}`).digest().subarray(0, 16));
+  b[6] = (b[6]! & 0x0f) | 0x40;
+  b[8] = (b[8]! & 0x3f) | 0x80;
+  const x = b.toString('hex');
+  return `${x.slice(0, 8)}-${x.slice(8, 12)}-${x.slice(12, 16)}-${x.slice(16, 20)}-${x.slice(20)}`;
+}
+
+/** The version this operation committed, if any: found by its own registration turn id in the newest-first history. */
+export async function findOperationVersion(dispatch: InternalDispatch, scenarioId: string, operationId: string): Promise<Rec | null> {
+  const turnId = registrationTurnId(scenarioId, operationId);
+  let cursor: string | undefined;
+  for (let page = 0; page < 5; page += 1) {
+    const r = await dispatch(`/assist/v1/scenarios/${scenarioId}/versions`, { limit: 200, ...(cursor === undefined ? {} : { cursor }) });
+    if (r.status !== 200) return null;
+    const versions = Array.isArray(r.json.versions) ? (r.json.versions as Rec[]) : [];
+    const hit = versions.find((v) => (v.creation as { source_turn_id?: unknown } | undefined)?.source_turn_id === turnId);
+    if (hit !== undefined) {
+      const creation = hit.creation as { kind?: unknown; mutation_id?: unknown; source_turn_id?: unknown };
+      return { version_id: String(hit.version_id), version_number: Number(hit.sequence),
+        mutation_id: typeof creation.mutation_id === 'string' ? creation.mutation_id : null, source_turn_id: String(creation.source_turn_id) };
+    }
+    cursor = typeof r.json.next_cursor === 'string' ? r.json.next_cursor : undefined;
+    if (cursor === undefined) return null;
+  }
+  return null;
 }

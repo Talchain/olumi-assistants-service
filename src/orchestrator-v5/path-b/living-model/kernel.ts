@@ -3,6 +3,8 @@
  *  · ATTRIBUTION ONLY. A user or party item keeps its source when its quote is found verbatim in the person's verified
  *    words; otherwise it is `unverified`, never Olumi's (a missing quote does not make Olumi the author). A quote that is
  *    found proves only who said it, not that the figure, sign or certainty follows from it: those stay with the model.
+ *    An item carried over from the SAVED model with the same id and the same attribution keeps it: it was checked when it
+ *    was saved, and words that have since left the conversation window never downgrade it.
  *  · IDS. A living-model id is the node id it compiles to, so it is made canonical (`CANONICAL_ID_REGEX`) and unique, and
  *    every reference to it is rewritten with it. Formatting, not meaning.
  */
@@ -40,11 +42,27 @@ function canonicalIds(model: LivingModelT): LivingModelT {
   };
 }
 
-export function applyKernel(model: LivingModelT, verifiedWords: readonly string[]): Kernelled {
+type Attributed = { source: LivingSourceT; party: string | null; quote: string | null };
+const attributionKey = (id: string, item: Attributed): string => JSON.stringify([id, item.source, item.party, item.quote]);
+
+/** Every attribution the saved model holds, keyed by item id, as the kernel names them. */
+function savedAttributions(saved: LivingModelT): Set<string> {
+  return new Set([
+    ...saved.aims.map((a) => attributionKey(a.id, a)),
+    ...saved.factors.map((f) => attributionKey(f.id, f)),
+    ...saved.options.flatMap((o) => [attributionKey(o.id, o), ...o.settings.map((x) => attributionKey(`${o.id}:${x.factor_id}`, x))]),
+    ...saved.links.map((l) => attributionKey(l.id, l)),
+    ...saved.conditions.map((c) => attributionKey(`condition:${c.text}`, c)),
+  ]);
+}
+
+export function applyKernel(model: LivingModelT, verifiedWords: readonly string[], saved?: LivingModelT): Kernelled {
   const words = verifiedWords.map(plain).filter((w) => w.length > 0);
+  const kept = saved === undefined ? new Set<string>() : savedAttributions(saved);
   const relabelled: Relabelled[] = [];
-  const attribute = <T extends { source: LivingSourceT; quote: string | null }>(id: string, item: T): T => {
+  const attribute = <T extends Attributed>(id: string, item: T): T => {
     if (item.source !== 'user' && item.source !== 'party') return item;
+    if (kept.has(attributionKey(id, item))) return item;
     const quote = item.quote === null ? '' : plain(item.quote);
     if (quote.length > 0 && words.some((w) => w.includes(quote))) return item;
     relabelled.push({ id, was: item.source });
@@ -58,7 +76,7 @@ export function applyKernel(model: LivingModelT, verifiedWords: readonly string[
       factors: m.factors.map((f) => attribute(f.id, f)),
       options: m.options.map((o) => ({ ...attribute(o.id, o), settings: o.settings.map((s) => attribute(`${o.id}:${s.factor_id}`, s)) })),
       links: m.links.map((l) => attribute(l.id, l)),
-      conditions: m.conditions.map((c, i) => attribute(`condition_${i + 1}`, c)),
+      conditions: m.conditions.map((c) => attribute(`condition:${c.text}`, c)),
     },
     relabelled,
   };

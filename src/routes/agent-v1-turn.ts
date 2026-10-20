@@ -4447,6 +4447,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const coreSaved = await readingDispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {})
           .then((read) => read.status === 200 ? read.json : undefined).catch(() => undefined);
         const livingView = livingViewOf(coreSaved?.graph);
+        // A scenario with no model yet, or whose meaning is its living model, changes through the living model only.
+        const coreScenario = coreSaved !== undefined && (coreSaved.graph == null || livingView !== undefined);
         const core = await runCoreTurn({
           ctx: coreCtx, message, budget, userId,
           tools: (onCall) => pathBTools({ dispatch: capDispatch, proposals,
@@ -4459,7 +4461,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
               // Only the adapter's own receipt AND successful postimage readback establish a saved change.
               if (result.ok && result.mutated && (result.receipts?.length ?? 0) > 0) verifiedSave = true;
               onCall(row, { ...result });
-            }),
+            }, coreScenario ? 'core' : 'legacy'),
           instructions: instructionsForMode(mode, eligibleIntervention === undefined ? AGENT_TOOL_INSTRUCTIONS : `${AGENT_TOOL_INSTRUCTIONS}\n\n${ELIGIBLE_INTERVENTION_INSTRUCTION}`),
           briefText: coreSaved?.brief_text,
           canonicalState: livingView === undefined ? canonicalContext?.packet?.state

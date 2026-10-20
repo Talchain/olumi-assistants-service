@@ -15,7 +15,13 @@ export interface LivingChange {
   readonly after?: unknown;
 }
 
-const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
+/** Content, never key order: a saved model comes back from its schema's parse in the schema's key order. */
+function stable(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(stable).join(',')}]`;
+  if (v === null || typeof v !== 'object') return JSON.stringify(v) ?? 'null';
+  return `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${stable((v as Record<string, unknown>)[k])}`).join(',')}}`;
+}
+const same = (a: unknown, b: unknown): boolean => stable(a) === stable(b);
 
 function byId<T extends { id: string }>(kind: LivingItemKind, before: readonly T[], after: readonly T[]): LivingChange[] {
   const was = new Map(before.map((x) => [x.id, x]));
@@ -31,7 +37,7 @@ function byId<T extends { id: string }>(kind: LivingItemKind, before: readonly T
 }
 
 function byContent(kind: LivingItemKind, before: readonly unknown[], after: readonly unknown[]): LivingChange[] {
-  const key = (x: unknown) => JSON.stringify(x);
+  const key = stable;
   const was = new Set(before.map(key));
   const now = new Set(after.map(key));
   return [

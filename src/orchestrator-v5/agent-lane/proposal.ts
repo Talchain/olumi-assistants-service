@@ -209,6 +209,11 @@ export interface StructuredProposal {
    * the approve button can show the reading, and the approval is of that reading. Part of the id when present.
    */
   readonly interpretation?: ProposalInterpretation;
+  /**
+   * THIN CORE (20 Oct 2026): the complete proposed living model of a core scenario. `operations` are its per-item diff, which
+   * the card shows; the commit writes this model and the graph regenerated from it. Part of the id when present.
+   */
+  readonly living_model?: unknown;
 }
 
 /** A typed value read from the user's own phrase, as the approve button shows it. */
@@ -260,6 +265,7 @@ export function computeProposalId(c: ProposalContent): string {
     // Appended only when present, so every proposal without a reading keeps the id it always had.
     ...(c.interpretation === undefined ? [] : [c.interpretation]),
     ...(c.base_model_identity === undefined ? [] : [['base_model_identity', c.base_model_identity]]),
+    ...(c.living_model === undefined ? [] : [['living_model', c.living_model]]),
   ]));
   return 'prop_' + createHash('sha256').update(canonical).digest('hex').slice(0, 32);
 }
