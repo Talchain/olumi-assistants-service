@@ -95,6 +95,26 @@ describe('thin core mapper: living model → GraphV3', () => {
     expect(linkDefaultAssumptionsOf(p).map((r) => r.code)).toEqual(['CLAMP_STD_MINIMUM', 'DEFAULT_EXISTS_PROBABILITY']);
   });
 
+  it('Lenses 20 Oct (capacity): the person\'s own figure inside their range sizes the link as their point; the range is kept and said', () => {
+    const edge = (g: { edges: Record<string, unknown>[] }) => g.edges.find((e) => e.from === 'f' && e.to === 'g') as Record<string, any>;
+    const centred: LivingModelT = structuredClone(KNOWN_ANSWER);
+    centred.links[0]!.effect = { form: 'range', value: 50, low: 30, high: 70, sd: null, unit: 'units', sign: '+' };
+    const c = mapLivingModel(centred);
+    expect(c.withheld.filter((w) => w.id === 'f_g')).toEqual([]);
+    expect(edge(c.graph)).toMatchObject({ provenance: { magnitude: 'user_stated', natural_effect: { amount: 50, amount_unit: 'units' } } });
+    expect(edge(c.graph).strength.mean).toBeCloseTo(0.4, 10);
+    expect(edge(c.graph).strength.std).toBeCloseTo(0.2, 10);
+    expect(linkDefaultAssumptionsOf(edge(c.graph)).find((r) => r.code === 'CLAMP_STD_MINIMUM')!.reason).toContain('30 to 70');
+    // CONTROLS: a bare range, or a figure outside the person's range, sizes nothing.
+    for (const value of [null, 80, 30]) {
+      const m: LivingModelT = structuredClone(centred);
+      m.links[0]!.effect.value = value;
+      const r = mapLivingModel(m);
+      expect(r.withheld, String(value)).toContainEqual({ id: 'f_g', reason: 'link_range_no_law' });
+      expect(edge(r.graph).provenance.magnitude, String(value)).toBe('olumi_placeholder');
+    }
+  });
+
   it('R1 20 Oct: the goal is always drawn; "exactly N" and an undeclared % change on a % quantity keep it with no threshold, so no chance', () => {
     for (const comparator of ['=', 'increase'] as const) {
       const m: LivingModelT = structuredClone(KNOWN_ANSWER);

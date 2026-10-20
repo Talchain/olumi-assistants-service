@@ -9,7 +9,8 @@
  *  · a link's β = (change in `to` per +1 of `from`) × cap_from / cap_to, its σ scaled by the same ratio (AIE, 20 Oct):
  *    a stated point gives the central coefficient only, and σ = |β|/2 is Olumi's illustrative convention (D3), never the
  *    user's spread; an explicitly stated Normal law gives both; an ordinary range is not a law, so it stays in the living
- *    model and its dependent chance is withheld;
+ *    model and its dependent chance is withheld, unless the person gave their own figure inside it, which sizes the link
+ *    as their point (AIE range disposition, 16 Oct: `centre`), the range kept beside it;
  *  · existence 1 for a stated link is the assumption of conditioning on it; Olumi's 0.8 is an untested convention;
  *  · an unsized link is Olumi's placeholder, which the chance licence withholds; an unknown sign is never drawn positive;
  *  · unknown is never 0: a level, setting or link this slice cannot convert is WITHHELD with its reason, never dropped
@@ -220,7 +221,9 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     // The exact sum's change is read on the goal's own frame, so the goal is its parts added in the goal's units.
     const cap = exactSum !== undefined && f.id === exactSum.lever ? goal!.cap : capFor(levels, f.unit, goal);
     if (cap !== undefined) caps.set(f.id, cap);
-    const node: Rec = { id: f.id, kind: 'factor', label: f.label, category: setsFactor.has(f.id) ? 'controllable' : 'observable' };
+    const node: Rec = { id: f.id, kind: 'factor', label: f.label, category: setsFactor.has(f.id) ? 'controllable' : 'observable',
+      // The exact sum's change: 0 today by definition (the contract's marker), so the engine holds it exact.
+      ...(f.id === exactSum?.lever ? { quantity_frame: 'change' } : {}) };
     if (f.value !== null && cap !== undefined) {
       current.set(f.id, f.value);
       node.observed_state = withSource({ value: f.value / cap, raw_value: f.value, cap, unit: f.unit ?? '' }, f);
@@ -278,7 +281,10 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     const to = frameOf(l.to);
     const unitMismatch = to !== undefined && e.unit !== null && to.unit !== null && e.unit !== to.unit;
     const ratio = from !== undefined && to !== undefined ? from.cap / to.cap : undefined;
-    const sized = ratio === undefined ? undefined : (e.form === 'point' && e.value !== null)
+    // The person's own figure inside their range ("about 20, between 10 and 30") sizes the link as their point, with the
+    // range kept beside it in the living model (AIE range disposition, 16 Oct: `centre`). A bare range sizes nothing.
+    const centred = e.form === 'range' && e.value !== null && e.low !== null && e.high !== null && e.low < e.value && e.value < e.high;
+    const sized = ratio === undefined ? undefined : ((e.form === 'point' || centred) && e.value !== null)
       ? { mean: sign * Math.abs(e.value) * ratio, std: Math.abs(e.value) * ratio / 2 }
       : (e.form === 'normal' && e.value !== null && e.sd !== null && e.sd > 0)
         ? { mean: sign * Math.abs(e.value) * ratio, std: e.sd * ratio }
@@ -287,9 +293,9 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
         // one exact route.
         : (e.form === 'exact' && e.value !== null) ? { mean: sign * Math.abs(e.value) * ratio, std: LLM_STRENGTH_STD_FLOOR }
         : undefined;
-    if (ratio === undefined && (e.form === 'point' || e.form === 'normal' || e.form === 'exact')) hold(l.id, 'link_frame_unknown');
+    if (ratio === undefined && (e.form === 'point' || e.form === 'normal' || e.form === 'exact' || centred)) hold(l.id, 'link_frame_unknown');
     if (e.form === 'exact') hold(l.id, 'exact_not_drawable');
-    if (e.form === 'range') hold(l.id, 'link_range_no_law');
+    if (e.form === 'range' && !centred) hold(l.id, 'link_range_no_law');
     if (unitMismatch) hold(l.id, 'link_unit_mismatch');
     if (sized === undefined || unitMismatch) {
       // Unsized (or not convertible): Olumi's placeholder, which the chance licence withholds.
@@ -302,9 +308,11 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     // left to a comment: a point's spread, and whether the link exists at all.
     const path = `edges[${l.from}::${l.to}]`;
     const assumed: RepairEntry[] = [
-      ...(e.form === 'point' ? [{ code: REPAIR_CODES.CLAMP_STD_MINIMUM, layer: 'cee' as const, field_path: `${path}.strength.std`, before: null,
+      ...(e.form === 'point' || centred ? [{ code: REPAIR_CODES.CLAMP_STD_MINIMUM, layer: 'cee' as const, field_path: `${path}.strength.std`, before: null,
         after: sized.std, severity: 'info' as const,
-        reason: 'Nobody stated how uncertain this strength is. Applied Olumi\'s illustrative spread (half the stated effect). It is not a measurement of anyone\'s confidence.' }] : []),
+        reason: centred
+          ? `The calculation uses the stated ${Math.abs(e.value!)} with Olumi's illustrative spread (half the stated effect). The stated range, ${e.low} to ${e.high}, is kept with the model but is not used as a spread.`
+          : 'Nobody stated how uncertain this strength is. Applied Olumi\'s illustrative spread (half the stated effect). It is not a measurement of anyone\'s confidence.' }] : []),
       { code: REPAIR_CODES.DEFAULT_EXISTS_PROBABILITY, layer: 'cee', field_path: `${path}.exists_probability`, before: null, after: exists, severity: 'info',
         reason: stated(l.source) ? 'Nobody stated how likely this link is to exist. The calculation assumes it exists, as stated.'
           : 'Nobody stated how likely this link is to exist. Applied Olumi\'s untested default.' },
