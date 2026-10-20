@@ -3,12 +3,13 @@
  *  · ATTRIBUTION ONLY. A user or party item keeps its source when its quote is found verbatim in the person's verified
  *    words; otherwise it is `unverified`, never Olumi's (a missing quote does not make Olumi the author). A quote that is
  *    found proves only who said it, not that the figure, sign or certainty follows from it: those stay with the model.
- *    An item carried over from the SAVED model with the same id and the same attribution keeps it: it was checked when it
- *    was saved, and words that have since left the conversation window never downgrade it.
+ *    An item carried over from the SAVED model UNCHANGED (same id, same content, same attribution) keeps it: it was checked
+ *    when it was saved, and words that have since left the conversation window never downgrade it. A changed item is new.
  *  · IDS. A living-model id is the node id it compiles to, so it is made canonical (`CANONICAL_ID_REGEX`) and unique, and
  *    every reference to it is rewritten with it. Formatting, not meaning.
  */
 import type { LivingModelT, LivingSourceT } from '../../../schemas/living-model.js';
+import { stable } from './diff.js';
 
 export interface Relabelled { readonly id: string; readonly was: LivingSourceT }
 export interface Kernelled { readonly model: LivingModelT; readonly relabelled: readonly Relabelled[] }
@@ -43,7 +44,8 @@ function canonicalIds(model: LivingModelT): LivingModelT {
 }
 
 type Attributed = { source: LivingSourceT; party: string | null; quote: string | null };
-const attributionKey = (id: string, item: Attributed): string => JSON.stringify([id, item.source, item.party, item.quote]);
+/** An item's identity and its WHOLE content, attribution included (key order never counts). */
+const attributionKey = (id: string, item: Attributed): string => `${id}\u0000${stable(item)}`;
 
 /** Every attribution the saved model holds, keyed by item id, as the kernel names them. */
 function savedAttributions(saved: LivingModelT): Set<string> {

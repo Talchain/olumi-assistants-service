@@ -31,8 +31,8 @@ export type EditOutcome = { readonly model: LivingModelT } | { readonly refused:
 const theirs = { source: 'user', party: null, quote: null } as const;
 const noRange = { low: null, high: null } as const;
 
-export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit): EditOutcome {
-  const frames = mapLivingModel(model).frames;
+export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?: string): EditOutcome {
+  const frames = mapLivingModel(model, goal === undefined ? {} : { goal }).frames;
   const m: LivingModelT = structuredClone(model);
   const factor = (id: string) => m.factors.find((f) => f.id === id);
   const aim = (id: string) => m.aims.find((a) => a.id === id);
@@ -69,9 +69,19 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit): Edit
       const a = aim(edit.goal_node_id);
       if (a === undefined) return { refused: 'not_in_model' };
       if (edit.constraint_type === 'at_least' && edit.raw_value === 0) return { refused: 'target_zero' };
-      a.target = { quantity: a.target?.quantity ?? a.text, comparator: edit.constraint_type === 'at_least' ? '>=' : '<=',
-        value: edit.raw_value, ...noRange, unit: edit.unit, by_when: a.target?.by_when ?? null,
-        baseline: a.target?.baseline ?? null, current: a.target?.current ?? null };
+      const prior = a.target;
+      // A target in another unit would silently relabel the starting level's unit.
+      if (prior !== null && prior.current !== null && prior.unit !== null && prior.unit !== edit.unit) return { refused: 'unit_mismatch' };
+      // The edit makes the aim the person's. A starting level they never gave is not carried as theirs: it is kept in the
+      // history, and Olumi asks for today's level instead.
+      const keepCurrent = a.source === 'user';
+      if (!keepCurrent && prior?.current != null) {
+        m.history.push({ id: a.id, change: 'superseded', quote: null,
+          old: `starting level ${prior.current}${prior.unit === null ? '' : ` ${prior.unit}`} (${a.source === 'olumi' ? 'Olumi\u2019s estimate' : 'not confirmed by you'})` });
+      }
+      a.target = { quantity: prior?.quantity ?? a.text, comparator: edit.constraint_type === 'at_least' ? '>=' : '<=',
+        value: edit.raw_value, ...noRange, unit: edit.unit, by_when: prior?.by_when ?? null,
+        baseline: prior?.baseline ?? null, current: keepCurrent ? prior?.current ?? null : null };
       Object.assign(a, theirs);
       return { model: m };
     }

@@ -14,7 +14,7 @@ import type { InternalDispatch } from '../../agent-lane/runtime/agent-capabiliti
 import { createProposal, type ProposalOperation, type ProposalStore, type StructuredProposal } from '../../agent-lane/proposal.js';
 import { LivingModel, type LivingModelT } from '../../../schemas/living-model.js';
 import { applyKernel } from '../living-model/kernel.js';
-import { mapLivingModel } from '../living-model/mapper.js';
+import { mapLivingModel, savedGoal } from '../living-model/mapper.js';
 import { diffLivingModels, type LivingChange } from '../living-model/diff.js';
 import { livingViewOf } from '../living-model/view.js';
 import { isNoModelYet, isSavedRead, readSaved } from './context-tool.js';
@@ -68,7 +68,7 @@ export async function proposeLivingChange(deps: Deps, ctx: Ctx, args: LivingChan
   if (unnamed.length > 0) return refused('removal_not_named', undefined, { left_out: unnamed });
   const kept = args.remove.filter((id) => !removed.some((c) => c.id === id));
   if (kept.length > 0) return refused('removal_not_applied', undefined, { still_present: kept });
-  const mapped = mapLivingModel(kernelled.model);
+  const mapped = mapLivingModel(kernelled.model, savedGoal(base.saved.graph));
   if (!mapped.graph.nodes.some((n) => n.kind !== 'decision')) return refused('model_empty');
   const p = deps.proposals.put(createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
     base_graph_identity_hash: base.saved.graphHash, base_model_identity: base.saved.identity!, operations: operationsOf(changes),
@@ -102,7 +102,7 @@ export async function applyLivingChange(deps: Deps, ctx: Ctx, proposalId: string
   if (decision.status !== 'execute') return refused(decision.status);
   // The model's FULL identity when it was prepared: any change since, wording included, supersedes the proposal.
   if (p.base_model_identity !== before.identity) return refused('superseded');
-  const mapped = mapLivingModel(p.living_model);
+  const mapped = mapLivingModel(p.living_model, savedGoal(before.graph));
   const graph: Rec = { ...mapped.graph, living_model: p.living_model };
   const commit = async (): Promise<ToolOutcome> => {
     const w = await writeCorePostimage(deps, { scenarioId: ctx.scenario_id, graph, operationId, expectedIdentity: before.identity, ownVersion });

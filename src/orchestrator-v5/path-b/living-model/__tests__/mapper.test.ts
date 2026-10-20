@@ -124,6 +124,26 @@ describe('thin core mapper: living model → GraphV3', () => {
     expect(st.withheld).toContainEqual({ id: 'g', reason: 'chance_rests_on_withheld' });
   });
 
+  it('R1 6b148af5: the saved goal is kept when aims are reordered; a condition on its path withholds the chance', () => {
+    const two: LivingModelT = structuredClone(KNOWN_ANSWER);
+    two.aims.push({ ...structuredClone(KNOWN_ANSWER.aims[0]!), id: 'g2', text: 'Reach 200 units', target: { ...KNOWN_ANSWER.aims[0]!.target!, value: 200 } });
+    two.links.push({ ...structuredClone(KNOWN_ANSWER.links[0]!), id: 'f_g2', to: 'g2' });
+    const reversed: LivingModelT = { ...structuredClone(two), aims: [...structuredClone(two).aims].reverse() };
+    const thresholdOn = (m: ReturnType<typeof mapLivingModel>) => m.graph.nodes.find((n) => n.goal_threshold !== undefined)?.id;
+    expect(thresholdOn(mapLivingModel(reversed, { goal: 'g' }))).toBe('g');
+    expect(thresholdOn(mapLivingModel(reversed)), 'CONTRAST: without the saved goal, order decides').toBe('g2');
+
+    const conditioned: LivingModelT = structuredClone(KNOWN_ANSWER);
+    conditioned.conditions.push({ text: 'The f→g effect requires supplier approval, which remains unresolved', applies_to: ['f_g'],
+      source: 'user', party: null, quote: 'Supplier approval remains unresolved' });
+    const c = mapLivingModel(conditioned);
+    expect(c.withheld).toContainEqual({ id: 'g', reason: 'chance_rests_on_withheld' });
+    expect(node(c.graph, 'g')).not.toHaveProperty('goal_threshold');
+    const offPath: LivingModelT = structuredClone(KNOWN_ANSWER);
+    offPath.conditions.push({ text: 'Only if the room is free', applies_to: ['elsewhere'], source: 'user', party: null, quote: null });
+    expect(node(mapLivingModel(offPath).graph, 'g')).toMatchObject({ goal_threshold: 0.8 });
+  });
+
   it('attribution is a label: an unverified figure gets no stamp, Olumi\'s gets its own, a user\'s is the brief\'s', () => {
     const model: LivingModelT = structuredClone(KNOWN_ANSWER);
     model.factors[0]!.source = 'unverified';

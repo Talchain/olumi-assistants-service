@@ -83,7 +83,7 @@ import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
 import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
 import { livingViewOf } from '../path-b/living-model/view.js';
 import { applyExplicitEdit, EXPLICIT_EDIT_KINDS, type ExplicitEdit } from '../path-b/living-model/edit.js';
-import { mapLivingModel } from '../path-b/living-model/mapper.js';
+import { goalIdOf, mapLivingModel, savedGoal } from '../path-b/living-model/mapper.js';
 import type { LivingModelT } from '../../schemas/living-model.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import {
@@ -1255,9 +1255,9 @@ async function dispatchCoreCanvasEdit(
     graphConflict: { recovery_action: 'refresh_and_reconfirm', conflict_category: 'stale_base',
       expected_base_graph_hash: await readClientRecoverableBaseHash(payload.scenario_id) } as never });
   if (typeof base === 'string' && base !== cas.expectedGraphAnalysisHash) return conflict();
-  const edited = applyExplicitEdit(view.living_model as LivingModelT, payload.event as unknown as ExplicitEdit);
+  const edited = applyExplicitEdit(view.living_model as LivingModelT, payload.event as unknown as ExplicitEdit, goalIdOf(stored));
   if (!('model' in edited)) return refuse(edited.refused);
-  const postimage = { ...mapLivingModel(edited.model).graph, living_model: edited.model };
+  const postimage = { ...mapLivingModel(edited.model, savedGoal(stored)).graph, living_model: edited.model };
   try {
     const commit = await commitDirectAnswer(buildAcknowledgementResponse(payload), {
       scenario_id: payload.scenario_id, turn_id: payload.turn_id, turn_class: 'direct_answer', handler_id: null,

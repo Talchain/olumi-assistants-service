@@ -21,7 +21,7 @@ import { admitGoalBaseline } from '../../../cee/factor-extraction/goal-baseline-
 
 export type WithheldReason =
   | 'no_level_target' | 'aim_not_in_slice' | 'change_target_not_in_slice' | 'exact_target_not_in_slice' | 'target_range_not_in_slice'
-  | 'goal_level_unknown' | 'link_frame_unknown' | 'chance_rests_on_withheld'
+  | 'goal_level_unknown' | 'link_frame_unknown' | 'chance_rests_on_withheld' | 'condition_not_in_slice'
   | 'goal_level_not_admitted' | 'factor_level_unknown' | 'level_range_not_in_slice' | 'setting_not_convertible'
   | 'link_endpoint_unknown' | 'link_unit_mismatch' | 'link_range_no_law' | 'link_sign_unknown' | 'no_single_status_quo';
 
@@ -62,7 +62,17 @@ function capFor(levels: readonly number[], unit: string | null, goal: { cap: num
   return top > 0 ? top * 1.25 : undefined;
 }
 
-export function mapLivingModel(model: LivingModelT): Mapped {
+/** The goal a saved graph was compiled with: a regeneration keeps it unless its aim is no longer current. */
+export function goalIdOf(graph: unknown): string | undefined {
+  const nodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
+  const goal = Array.isArray(nodes) ? nodes.find((n) => (n as { kind?: unknown } | null)?.kind === 'goal') as { id?: unknown } | undefined : undefined;
+  return typeof goal?.id === 'string' ? goal.id : undefined;
+}
+
+/** The options that keep a saved graph's goal (none when it has none). */
+export const savedGoal = (graph: unknown): { goal?: string } => { const goal = goalIdOf(graph); return goal === undefined ? {} : { goal }; };
+
+export function mapLivingModel(model: LivingModelT, opts: { readonly goal?: string } = {}): Mapped {
   const withheld: Withheld[] = [];
   const nodes: Rec[] = [];
   const edges: Rec[] = [];
@@ -70,9 +80,11 @@ export function mapLivingModel(model: LivingModelT): Mapped {
   /** The factors some option sets that this slice could not convert (the setting is left out of the engine graph). */
   const droppedSettings = new Set<string>();
 
-  // ── The goal: the first current aim with a target. It is always on the graph; it has a threshold (so a chance) only
-  // where this slice supports its target.
-  const aim = model.aims.find((a) => a.status === 'current' && a.target !== null) ?? model.aims.find((a) => a.status === 'current');
+  // ── The goal: the saved graph's goal while its aim is current (so reordering aims never swaps it unseen), else the
+  // first current aim with a target. It is always on the graph; it has a threshold (so a chance) only where this slice
+  // supports its target.
+  const aim = (opts.goal === undefined ? undefined : model.aims.find((a) => a.id === opts.goal && a.status === 'current'))
+    ?? model.aims.find((a) => a.status === 'current' && a.target !== null) ?? model.aims.find((a) => a.status === 'current');
   let goal: { id: string; cap: number; unit: string } | undefined;
   let goalNode: Rec | undefined;
   if (aim === undefined) hold('goal', 'no_level_target');
@@ -207,7 +219,11 @@ export function mapLivingModel(model: LivingModelT): Mapped {
     }
     const leftOut = withheld.some((w) => (w.reason === 'link_sign_unknown' || w.reason === 'link_endpoint_unknown')
       && onPath.has(model.links.find((l) => l.id === w.id)?.to ?? '')) || [...droppedSettings].some((id) => onPath.has(id));
-    if (leftOut) {
+    // A condition on anything the chance rests on (a prerequisite the engine cannot hold) changes it too.
+    const pathLinks = new Set(model.links.filter((l) => onPath.has(l.to)).map((l) => l.id));
+    const conditioned = model.conditions.filter((c) => c.applies_to.some((id) => onPath.has(id) || pathLinks.has(id)));
+    for (const c of conditioned) hold(`condition:${c.text}`, 'condition_not_in_slice');
+    if (leftOut || conditioned.length > 0) {
       for (const k of Object.keys(goalNode)) if (k.startsWith('goal_threshold') || k === 'goal_direction' || k === 'goal_deadline_as_stated') delete goalNode[k];
       hold(goal.id, 'chance_rests_on_withheld');
     }

@@ -35,6 +35,20 @@ describe('thin core explicit edit: a canvas gesture applied to the living model,
     expect(edge.provenance).toEqual({ source: 'user_specified', magnitude: 'user_stated' });
   });
 
+  it('R1 6b148af5: a target edit never claims an inherited starting level, nor relabels its unit', () => {
+    const olumis: LivingModelT = structuredClone(KNOWN_ANSWER);
+    olumis.aims[0] = { ...olumis.aims[0]!, source: 'olumi', quote: null };
+    const out = applyExplicitEdit(olumis, { kind: 'goal_target_edit', goal_node_id: 'g', constraint_type: 'at_least', raw_value: 110, unit: 'units' });
+    const m = (out as { model: LivingModelT }).model;
+    expect(m.aims[0]).toMatchObject({ source: 'user', target: { value: 110, current: null } });
+    expect(m.history).toContainEqual(expect.objectContaining({ id: 'g', change: 'superseded' }));
+    expect(node(m, 'g').observed_state).toBeUndefined();
+    // CONTROL: the person's own starting level stays theirs.
+    expect(apply({ kind: 'goal_target_edit', goal_node_id: 'g', constraint_type: 'at_least', raw_value: 110, unit: 'units' }).aims[0]!.target!.current).toBe(70);
+    expect(applyExplicitEdit(KNOWN_ANSWER, { kind: 'goal_target_edit', goal_node_id: 'g', constraint_type: 'at_least', raw_value: 80, unit: '%' }))
+      .toEqual({ refused: 'unit_mismatch' });
+  });
+
   it('rename, delete and add keep every reference whole', () => {
     expect(apply({ kind: 'structural_rename', node_id: 'f', label: 'Effort', expected_label: 'f' }).factors[0]!.label).toBe('Effort');
     const deleted = apply({ kind: 'structural_delete', removed_node_ids: ['f'], removed_edges: [] });

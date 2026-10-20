@@ -16,7 +16,7 @@ export interface LivingChange {
 }
 
 /** Content, never key order: a saved model comes back from its schema's parse in the schema's key order. */
-function stable(v: unknown): string {
+export function stable(v: unknown): string {
   if (Array.isArray(v)) return `[${v.map(stable).join(',')}]`;
   if (v === null || typeof v !== 'object') return JSON.stringify(v) ?? 'null';
   return `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${stable((v as Record<string, unknown>)[k])}`).join(',')}}`;

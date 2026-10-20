@@ -4,7 +4,7 @@
  * re-derived from the graph. A present model that does not parse is reported as such, never replaced by the graph's.
  */
 import { LivingModel } from '../../../schemas/living-model.js';
-import { mapLivingModel, type Withheld } from './mapper.js';
+import { mapLivingModel, savedGoal, type Withheld } from './mapper.js';
 
 export type LivingView =
   | { readonly living_model: unknown; readonly withheld: readonly Withheld[] }
@@ -17,6 +17,6 @@ export function livingViewOf(graph: unknown): LivingView | undefined {
   if (living === undefined) return undefined;
   const parsed = LivingModel.safeParse(living);
   return parsed.success
-    ? { living_model: parsed.data, withheld: mapLivingModel(parsed.data).withheld }
+    ? { living_model: parsed.data, withheld: mapLivingModel(parsed.data, savedGoal(graph)).withheld }
     : { living_model: living, living_model_invalid: true };
 }
