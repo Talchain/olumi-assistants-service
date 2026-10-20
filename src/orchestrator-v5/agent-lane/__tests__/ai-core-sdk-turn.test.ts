@@ -12,9 +12,9 @@ import { z as z4 } from 'zod-v4';
 import { ForbiddenProviderError, OPENAI_ONLY, recordedProviderCalls, runWithProviderPolicy } from '../../../adapters/llm/provider-policy.js';
 import { ledgeredAgentsClient } from '../../../adapters/llm/openai-agents-client.js';
 import { runWithStageStream } from '../../../cee/unified-pipeline/stage-stream-context.js';
-import { AGENTS_SDK, CORE_COMPACT_THRESHOLD, CoreStateUnavailableError, PAUSE_DECLINED, PAUSE_SUPERSEDED, runCoreTurn, type ConversationIdStore, type CoreToolRecorder, type PausedRunStore } from '../core/sdk-turn.js';
+import { AGENTS_SDK, CORE_COMPACT_THRESHOLD, CoreStateUnavailableError, PAUSE_DECLINED, PAUSE_SUPERSEDED, replyOnlyTurn, runCoreTurn, type ConversationIdStore, type CoreToolRecorder, type PausedRunStore } from '../core/sdk-turn.js';
 import type { OpenAiPausedRun } from '../../session/store.js';
-import { budgetFor } from '../model-budgets.js';
+import { budgetFor, type CallBudget } from '../model-budgets.js';
 import type { AgentToolContext } from '../runtime/agent-tools.js';
 
 type Json = Record<string, any>;
@@ -71,14 +71,15 @@ const readTools = (c: ReturnType<typeof caps>) => (onCall: CoreToolRecorder) => 
   errorFunction: null,
 })];
 type Extra = { briefText?: string; conversationStore?: ConversationIdStore; state?: unknown; tools?: Parameters<typeof runCoreTurn>[0]['tools'];
-  pausedRunStore?: PausedRunStore; press?: { decision: 'approve' | 'decline'; proposal_id: string } };
+  pausedRunStore?: PausedRunStore; press?: { decision: 'approve' | 'decline'; proposal_id: string }; replyBudget?: CallBudget; firstTool?: string };
 const turn = (message: string, c: ReturnType<typeof caps>, extra: Extra & { traceMeta?: { revision?: string; run_id?: string } } = {}) =>
   runWithProviderPolicy(OPENAI_ONLY('agent_v1_turn'), async () => {
   const result = await runCoreTurn({ ctx: ctx(message), message, tools: extra.tools ?? readTools(c),
     instructions: 'Synthetic instructions.', budget: budgetFor('gpt-6.1-sol', 'conversation'), userId: null,
     canonicalState: extra.state ?? { empty: true, entities: [] }, briefText: extra.briefText, conversationStore: 'conversationStore' in extra ? extra.conversationStore : columnStore(),
     ...(extra.pausedRunStore !== undefined ? { pausedRunStore: extra.pausedRunStore } : {}),
-    ...(extra.press !== undefined ? { press: extra.press } : {}), ...(extra.traceMeta !== undefined ? { traceMeta: extra.traceMeta } : {}) });
+    ...(extra.press !== undefined ? { press: extra.press } : {}), ...(extra.traceMeta !== undefined ? { traceMeta: extra.traceMeta } : {}),
+    ...(extra.replyBudget !== undefined ? { replyBudget: extra.replyBudget } : {}), ...(extra.firstTool !== undefined ? { firstTool: extra.firstTool } : {}) });
   return { result, calls: recordedProviderCalls() };
 });
 
@@ -404,6 +405,51 @@ describe('PATH-B core turn on the Agents SDK', () => {
       expect(result.assistant_text).toBe('I could not hold that change for your approval; nothing changed.');
       expect(JSON.stringify(sent[1]!.input)).toContain('could not hold this change');
       expect(pausedColumn).toBeNull();
+    });
+  });
+
+  describe('MULTI-MODEL (Paul, 20 Oct): a turn that only reads, runs and explains is answered on the fast model', () => {
+    const REPLY = budgetFor('gpt-5.6-terra', 'conversation');
+    const BUILDER = budgetFor('gpt-6.1-sol', 'conversation');
+    const WRITERS = ['build_model_from_brief', 'propose_change'];
+    /** The read adapter plus synthetic stand-ins named as the Run, apply and the two model writers. */
+    const namedTools = (c: ReturnType<typeof caps>) => (onCall: CoreToolRecorder) => [...readTools(c)(onCall),
+      ...['run_analysis', 'apply_change', ...WRITERS].map((name) => tool({ name, description: `Synthetic ${name}.`, parameters: z4.object({}),
+        execute: async () => '{}', errorFunction: null }))];
+    const toolNames = (b: Json): string[] => (b.tools as Json[] ?? []).map((t) => String(t.name)).sort();
+    it('a Run-opened turn goes to the reply model, at its own effort, with no model writer on the wire', async () => {
+      scripted = [[{ type: 'message', text: 'Synthetic answer.' }]];
+      const c = caps();
+      await turn('Run it.', c, { replyBudget: REPLY, firstTool: 'run_analysis', tools: namedTools(c) });
+      expect(sent.map((b) => b.model)).toEqual([REPLY.model]);
+      expect(sent[0]!.reasoning?.effort).toBe(REPLY.reasoning_effort);
+      expect(toolNames(sent[0]!)).toEqual(['apply_change', 'read_canonical_context', 'run_analysis']);
+    });
+    it('buddy #3526 R1: a press resumes on the reply model with no model writer, so no continuation can write the model fast', async () => {
+      scripted = [[{ type: 'message', text: 'Synthetic answer.' }]];
+      const c = caps();
+      await turn('', c, { replyBudget: REPLY, press: { decision: 'decline', proposal_id: PID }, tools: namedTools(c) });
+      expect(sent.length).toBeGreaterThan(0);
+      for (const b of sent) {
+        expect(b.model).toBe(REPLY.model);
+        expect(toolNames(b)).not.toEqual(expect.arrayContaining([expect.stringMatching(/^(build_model_from_brief|propose_change)$/)]));
+      }
+    });
+    it('CONTROL: a typed message, which may change the model, stays on the builder with every writer', async () => {
+      scripted = [[{ type: 'message', text: 'Synthetic answer.' }]];
+      const c = caps();
+      await turn('Change the target to 120.', c, { replyBudget: REPLY, tools: namedTools(c) });
+      expect(sent.map((b) => b.model)).toEqual([BUILDER.model]);
+      expect(toolNames(sent[0]!)).toEqual(['apply_change', 'build_model_from_brief', 'propose_change', 'read_canonical_context', 'run_analysis']);
+    });
+    it('the routing: presses and Run/apply-opened turns reply fast; drafting, changing and typed turns stay on the builder', () => {
+      expect(replyOnlyTurn({ press: { decision: 'approve', proposal_id: PID } })).toBe(true);
+      expect(replyOnlyTurn({ firstTool: 'run_analysis' })).toBe(true);
+      expect(replyOnlyTurn({ firstTool: 'apply_change' })).toBe(true);
+      expect(replyOnlyTurn({ firstTool: 'build_model_from_brief' })).toBe(false);
+      expect(replyOnlyTurn({ firstTool: 'propose_change' })).toBe(false);
+      expect(replyOnlyTurn({ firstTool: 'read_canonical_context' }), 'only the known reply entries, never any other tool').toBe(false);
+      expect(replyOnlyTurn({})).toBe(false);
     });
   });
 });
