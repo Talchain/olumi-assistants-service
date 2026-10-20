@@ -371,6 +371,46 @@ describe('L12: joint targets through the real route and SDK approval', () => {
     expect(card.approve_action.detail).toBe('Olumi’s reading: Weekly orders above 150 orders a week AND Vans on the road at most 6 vans; over the first three months from today.');
   });
 
+  it.each([false, true])('L12E every added quantity uses the authority (first linked=%s)', async (linked) => {
+    const authority = await import('../../../routing/add-factor-transaction.js');
+    const build = vi.spyOn(authority, 'buildAddFactorTransaction');
+    try {
+      const words = 'We need at least 12 enquiries AND at most 4 refunds over three months. Revenue was 2m as of 2026-09-01.';
+      const args = joint(words) as Json;
+      Object.assign(args.ops[0].conditions[0], { node_id: 'enquiries', quantity: 'Enquiries', value: 12, unit: 'enquiries' });
+      Object.assign(args.ops[0].conditions[1], { node_id: 'refunds', quantity: 'Refunds', value: 4, unit: 'refunds' });
+      if (linked) args.ops[0].links = [{ from: 'enquiries', to: 'orders', sign: 'negative' }];
+      const { body, card } = await prepare(args, words);
+      expect(build).toHaveBeenCalledWith({ factors: [
+        { id: 'enquiries', label: 'Enquiries', link: linked ? { to_id: 'orders', effect_direction: 'negative' } : null },
+        { id: 'refunds', label: 'Refunds', link: null },
+      ] }, expect.any(Object));
+      expect(card).toBeDefined();
+      await approve(card, body);
+      expect(outputOf('apply_call')).toMatchObject({ status: 'ok', data: { saved: true } });
+      expect(registered).toHaveLength(1);
+      expect(persisted.nodes.filter((n: Json) => ['enquiries', 'refunds'].includes(n.id)).map((n: Json) => n.observed_state)).toEqual([undefined, undefined]);
+      expect(persisted.edges.filter((e: Json) => ['enquiries', 'refunds'].includes(e.from)).map((e: Json) => [e.from, e.to, e.effect_direction]))
+        .toEqual(linked ? [['enquiries', 'orders', 'negative']] : []);
+    } finally { build.mockRestore(); }
+  });
+
+  it.each([false, true])('L12E any authority refusal stops the whole card (linked=%s)', async (linked) => {
+    const authority = await import('../../../routing/add-factor-transaction.js');
+    const build = vi.spyOn(authority, 'buildAddFactorTransaction').mockReturnValue({ matched: false, reason: 'factor_id_collision' });
+    try {
+      const words = 'We need over 150 weekly orders AND at most 6 reserve vans over three months.';
+      const args = joint(words) as Json;
+      Object.assign(args.ops[0].conditions[1], { node_id: 'reserve_vans', quantity: 'Reserve vans' });
+      if (linked) args.ops[0].links = [{ from: 'reserve_vans', to: 'orders', sign: 'positive' }];
+      const before = structuredClone(persisted);
+      const { card } = await prepare(args, words);
+      expect(build).toHaveBeenCalled();
+      expect(card).toBeUndefined();
+      expect(registered).toHaveLength(0); expect(graphWrites).toHaveLength(0); expect(persisted).toEqual(before);
+    } finally { build.mockRestore(); }
+  });
+
   it.each([
     ['vans_duplicate', 'Vans on the road', false, 'We need over 150 weekly orders AND at most 6 vans over three months.'],
     ['vehicles_duplicate', '  VANS   ON THE ROAD  ', false, 'Our depot pilot needs over 150 weekly deliveries AND at most 6 vehicles over three months. Revenue was 2m as of 2026-09-01.'],

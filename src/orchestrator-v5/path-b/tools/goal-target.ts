@@ -10,8 +10,7 @@
  */
 import { isDeepStrictEqual } from 'node:util';
 import { PatchOperationsArraySchema } from '../../../orchestrator/patch-validation.js';
-import { buildAddFactorTransaction, MAX_FACTORS_PER_ADD } from '../../routing/add-factor-transaction.js';
-import { sameLabel } from '../../routing/add-option-transaction.js';
+import { buildAddFactorTransaction } from '../../routing/add-factor-transaction.js';
 import { executeGmHeldResume } from '../../handlers/gm-held-execute.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
@@ -123,23 +122,16 @@ export async function targetCandidate(scenarioId: string, operationId: string, r
   if (new Set(ids).size !== ids.length) return { refusal: 'target_not_prepared' };
   let candidate = structuredClone(graph);
   const missing = t.conditions.filter(c => !nodesOf(graph).some(n => n.id === c.goal_id));
-  // The add-factor door's name identity applies to every addition, including unlinked conditions.
-  // A new id for a taken name is ambiguous: preserve the existing quantity and refuse before approval.
-  if (missing.some((c, i) => nodesOf(graph).some(n => sameLabel(String(n.label ?? ''), c.quantity))
-    || missing.slice(0, i).some(n => sameLabel(n.quantity, c.quantity)))) return { refusal: 'target_not_prepared' };
   const links = t.links ?? [];
-  if (missing.length > MAX_FACTORS_PER_ADD || new Set(links.map(l => l.from)).size !== links.length
+  if (new Set(links.map(l => l.from)).size !== links.length
     || links.some(l => !missing.some(c => c.goal_id === l.from))) return { refusal: 'target_not_prepared' };
   if (missing.length > 0) {
-    // Only declared causal links use the compound add-factor builder. Conditions alone add unlinked quantities.
-    const built = links.length === 0 ? null : buildAddFactorTransaction({ factors: links.map(l => ({ id: l.from,
-      label: missing.find(c => c.goal_id === l.from)!.quantity, link: { to_id: l.to, effect_direction: l.sign } })) }, GraphV3.parse(graph));
-    if (built !== null && !built.matched) return { refusal: built.reason };
-    const operations = PatchOperationsArraySchema.safeParse([
-      ...missing.filter(c => !links.some(l => l.from === c.goal_id)).map(c => ({ op: 'add_node', path: c.goal_id,
-        value: { id: c.goal_id, kind: 'factor', label: c.quantity, category: 'external' } })),
-      ...(built?.matched ? built.proposal.operations : []),
-    ]);
+    const built = buildAddFactorTransaction({ factors: missing.map(c => {
+      const link = links.find(l => l.from === c.goal_id);
+      return { id: c.goal_id, label: c.quantity, link: link === undefined ? null : { to_id: link.to, effect_direction: link.sign } };
+    }) }, GraphV3.parse(graph));
+    if (!built.matched) return { refusal: built.reason };
+    const operations = PatchOperationsArraySchema.safeParse(built.proposal.operations);
     if (!operations.success) return { refusal: 'target_not_prepared' };
     // The compound add's pure executor; no userToday member means no invented current value. No write occurs here.
     const added = executeGmHeldResume({ operations: operations.data, currentGraph: graph, currentGraphHash: graphHash,
