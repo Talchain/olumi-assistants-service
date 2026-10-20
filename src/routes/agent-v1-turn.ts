@@ -1896,6 +1896,12 @@ export function sameAgentTurnRequest(stored: string, requested: string, chipless
   return chiplessRetry && !requested.includes(CHIP_HASH_SEP) && stored.startsWith(`${requested}${CHIP_HASH_SEP}`);
 }
 
+/** Only the AI narrates a core turn. Run data stays intact; stored/tool reads retain their original summary. */
+function turnAnalysisData<T extends { blocks?: unknown }>(response: T, mode: AgentLaneMode): T {
+  return mode !== 'core' || !Array.isArray(response.blocks) ? response : { ...response,
+    blocks: response.blocks.map(block => block?.type === 'analysis_result' ? { ...block, summary: '' } : block) };
+}
+
 export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
   // Active requests only: no result/model cache. The existing durable answer floor still decides the one stored reply.
   const activeRunTurns = new Set<string>();
@@ -2903,7 +2909,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (replayMethod !== null) Object.assign(gatedReplay, { _method_result: replayMethod });
       // ⛔ The shape rides only while it still derives the words that ship, AFTER the final gates (Codex r2 on #2783: the
       // leader egress can edit `_answer_shape` alone). Otherwise the replay ships its text whole.
-      return withShapeOnlyIfItDerives(gatedReplay);
+      return withShapeOnlyIfItDerives(turnAnalysisData(gatedReplay, mode));
     };
     /**
      * ⛔ A RESTART MUST NOT FORGET WHAT THE USER IS ABOUT TO APPROVE (#63 5811981438: three redeploys inside
@@ -6352,6 +6358,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(composedReply.measure ?? {}),
       }, 'agent-lane: the reply passed the one composer');
     }
+    wireBody = turnAnalysisData(wireBody, mode);
     // History and the durable answer row below remember the same FINAL SENT text, after every gate.
     // Ordinary turns keep their reasoning and tool pairs; only their trailing assistant messages are replaced.
     // Every retained Run output becomes a neutral marker; superseded pairs leave with their reasoning as before.
