@@ -121,7 +121,8 @@ export const LivingCondition = z.object({
   // A model saved before roles were declared reads every condition as a prerequisite (it withheld then, and still does).
   role: z.enum(['prerequisite', 'assumption']).default('prerequisite').describe(
     'prerequisite: something that must hold or be resolved before the listed items apply ("only after supplier approval"), so a result resting on them cannot be computed yet; '
-    + 'assumption: a premise the result is worked out under and must be said beside it ("assuming the full effect arrives by the deadline").'),
+    + 'assumption: a premise the result is worked out under and must be said beside it ("assuming the full effect arrives by the deadline"). '
+    + 'Olumi\'s own assumption is not used until the person confirms it, so ask them once.'),
   ...attribution,
 }).strict().describe('A prerequisite or an assumption that qualifies the listed items, with who raised it.');
 

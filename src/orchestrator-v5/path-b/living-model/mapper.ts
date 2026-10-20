@@ -293,13 +293,17 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
       grew = false;
       for (const l of allLinks) if (onPath.has(l.to) && !onPath.has(l.from)) { onPath.add(l.from); grew = true; }
     }
+    // An option moves the goal through what it sets, so it is on the path too (science check 5bbceeec, point 5).
+    for (const o of model.options) if (o.settings.some((s) => onPath.has(s.factor_id))) onPath.add(o.id);
     const leftOut = withheld.some((w) => (w.reason === 'link_sign_unknown' || w.reason === 'link_endpoint_unknown')
       && onPath.has(model.links.find((l) => l.id === w.id)?.to ?? '')) || [...droppedSettings].some((id) => onPath.has(id));
     // A PREREQUISITE on anything the chance rests on (the engine cannot hold one) withholds it, whoever raised it. An
-    // ASSUMPTION is a premise the result is worked out under: it is said beside the result (Batch 0 ruling 14), never a
-    // reason to withhold. The AI declares which a condition is; the source never decides it.
+    // ASSUMPTION carries the result only once it is verified: stated by the person (or someone they report) it is said
+    // beside the result (Batch 0 rulings 12 and 14); raised by Olumi, or unverified, it withholds until the person
+    // confirms it, so Olumi asks rather than computing on its own premise.
     const pathLinks = new Set(allLinks.filter((l) => onPath.has(l.to)).map((l) => l.id));
-    const conditioned = model.conditions.filter((c) => c.role === 'prerequisite' && c.applies_to.some((id) => onPath.has(id) || pathLinks.has(id)));
+    const verified = (c: LivingModelT['conditions'][number]) => c.role === 'assumption' && stated(c.source);
+    const conditioned = model.conditions.filter((c) => !verified(c) && c.applies_to.some((id) => onPath.has(id) || pathLinks.has(id)));
     for (const c of conditioned) hold(`condition:${c.text}`, 'condition_not_in_slice');
     if (leftOut || conditioned.length > 0) {
       for (const k of Object.keys(goalNode)) if (k.startsWith('goal_threshold') || k === 'goal_direction' || k === 'goal_deadline_as_stated') delete goalNode[k];

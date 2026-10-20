@@ -202,17 +202,19 @@ describe('thin core mapper: living model → GraphV3', () => {
     expect((mapLivingModel(OPTION_EFFECTS).graph.nodes as Rec[]).find((n) => n.id === 'w'), 'CONTRAST: unconditioned').toHaveProperty('goal_threshold');
   });
 
-  it('served KA1 3254d202: an assumption on the path is said beside the chance; a prerequisite withholds it; the source never decides', () => {
-    const withCondition = (role: 'assumption' | 'prerequisite', source: 'olumi' | 'user'): LivingModelT => {
+  it('science check 5bbceeec: only a verified assumption (the person\'s) carries the chance; Olumi\'s or an unverified one, and any prerequisite, withhold', () => {
+    const withCondition = (role: 'assumption' | 'prerequisite', source: 'olumi' | 'user' | 'unverified', on = ['f_g', 'g']): LivingModelT => {
       const m: LivingModelT = structuredClone(KNOWN_ANSWER);
-      m.conditions.push({ text: 'Assuming the full effect arrives by the deadline', applies_to: ['f_g', 'g'], role, source, party: null, quote: null });
+      m.conditions.push({ text: 'Assuming the full effect arrives by the deadline', applies_to: on, role, source, party: null, quote: null });
       return m;
     };
     const goal = (m: LivingModelT) => (mapLivingModel(m).graph.nodes as Rec[]).find((n) => n.id === 'g');
-    for (const s of ['olumi', 'user'] as const) {
-      expect(goal(withCondition('assumption', s)), `assumption, ${s}`).toMatchObject({ goal_threshold: 0.8 });
-      expect(goal(withCondition('prerequisite', s)), `prerequisite, ${s}`).not.toHaveProperty('goal_threshold');
-    }
+    expect(goal(withCondition('assumption', 'user'))).toMatchObject({ goal_threshold: 0.8 });
+    for (const s of ['olumi', 'unverified'] as const) expect(goal(withCondition('assumption', s)), `assumption, ${s}`).not.toHaveProperty('goal_threshold');
+    for (const s of ['olumi', 'user'] as const) expect(goal(withCondition('prerequisite', s)), `prerequisite, ${s}`).not.toHaveProperty('goal_threshold');
+    // A prerequisite on an option reaches the goal through what the option sets.
+    expect(goal(withCondition('prerequisite', 'user', ['push'])), 'prerequisite on an option').not.toHaveProperty('goal_threshold');
+    expect(goal(withCondition('prerequisite', 'user', ['elsewhere'])), 'CONTROL: off the path').toMatchObject({ goal_threshold: 0.8 });
   });
 
   it('a model saved before roles were declared reads each condition as a prerequisite (it withheld then, and still does)', () => {
