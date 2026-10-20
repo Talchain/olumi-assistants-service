@@ -1,0 +1,142 @@
+
+ RUN  v4.1.10 /private/tmp/cx-l2
+
+{"level":"info","time":1792458185099,"pid":38733,"hostname":"Mac.net","event":"agent_lane.route_mounted","msg":"POST /agent/v1/turn mounted"}
+{"level":"info","time":1792458185104,"pid":38733,"hostname":"Mac.net","event":"v5.graph_persist.options_reconciled","mirrored_count":2,"node_ids":["add_vans","carry_on"],"propagated_count":0,"propagated_node_ids":[],"msg":"[commit] reconciled option-nodes into top-level options[] (mirrored missing + propagated interventions)"}
+{"level":"info","time":1792458185152,"pid":38733,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"orders","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792458185243,"pid":38733,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"2cbe1888-8e28-4084-aaae-894b4348313b","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792458185253,"pid":38733,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"2cbe1888-8e28-4084-aaae-894b4348313b","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792458185288,"pid":38733,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"orders","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792458185317,"pid":38733,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"2cbe1888-8e28-4084-aaae-894b4348313b","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792458185330,"pid":38733,"hostname":"Mac.net","event":"v5.graph_persist.options_reconciled","mirrored_count":2,"node_ids":["add_vans","carry_on"],"propagated_count":0,"propagated_node_ids":[],"msg":"[commit] reconciled option-nodes into top-level options[] (mirrored missing + propagated interventions)"}
+{"level":"info","time":1792458185320,"pid":38733,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"orders","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792458185325,"pid":38733,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"orders","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792458185326,"pid":38733,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"2cbe1888-8e28-4084-aaae-894b4348313b","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792458185335,"pid":38733,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"orders","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792458185350,"pid":38733,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"dffc6083-52f8-4309-99e7-b26d1aa68c8b","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792458185352,"pid":38733,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"dffc6083-52f8-4309-99e7-b26d1aa68c8b","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792458185358,"pid":38733,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"orders","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792458185376,"pid":38733,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"dffc6083-52f8-4309-99e7-b26d1aa68c8b","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792458185386,"pid":38733,"hostname":"Mac.net","event":"v5.graph_persist.options_reconciled","mirrored_count":2,"node_ids":["add_vans","carry_on"],"propagated_count":0,"propagated_node_ids":[],"msg":"[commit] reconciled option-nodes into top-level options[] (mirrored missing + propagated interventions)"}
+{"level":"info","time":1792458185378,"pid":38733,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"orders","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792458185381,"pid":38733,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"orders","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792458185383,"pid":38733,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"dffc6083-52f8-4309-99e7-b26d1aa68c8b","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792458185390,"pid":38733,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"needs_user_mapping","userQuestionCount":1,"goalNodeId":"orders","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792458185417,"pid":38733,"hostname":"Mac.net","event":"v5.graph_persist.options_reconciled","mirrored_count":2,"node_ids":["add_vans","carry_on"],"propagated_count":0,"propagated_node_ids":[],"msg":"[commit] reconciled option-nodes into top-level options[] (mirrored missing + propagated interventions)"}
+{"level":"warn","time":1792458185405,"pid":38733,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"77d4ef80-8cbf-4760-baba-97fe3cf5f631","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792458185407,"pid":38733,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"needs_user_mapping","userQuestionCount":1,"goalNodeId":"orders","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792458185410,"pid":38733,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"77d4ef80-8cbf-4760-baba-97fe3cf5f631","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792458185421,"pid":38733,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"needs_user_mapping","userQuestionCount":1,"goalNodeId":"orders","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792458185441,"pid":38733,"hostname":"Mac.net","event":"v5.graph_persist.options_reconciled","mirrored_count":2,"node_ids":["add_vans","carry_on"],"propagated_count":0,"propagated_node_ids":[],"msg":"[commit] reconciled option-nodes into top-level options[] (mirrored missing + propagated interventions)"}
+{"level":"warn","time":1792458185434,"pid":38733,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"f5ceed1f-907e-4882-bbf5-0972beb268e2","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792458185436,"pid":38733,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"needs_user_mapping","userQuestionCount":1,"goalNodeId":"orders","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792458185438,"pid":38733,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"f5ceed1f-907e-4882-bbf5-0972beb268e2","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792458185444,"pid":38733,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"orders","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792458185458,"pid":38733,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"07f59703-6313-4e1a-8644-5113f41531de","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792458185459,"pid":38733,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"07f59703-6313-4e1a-8644-5113f41531de","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792458185465,"pid":38733,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"orders","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792458185483,"pid":38733,"hostname":"Mac.net","event":"agent_core.turn_failed","scenario_id":"07f59703-6313-4e1a-8644-5113f41531de","request_id":"req-t","err":"Error: 400 Scripted continuation failed","msg":"agent-core: the SDK run did not finish"}
+{"level":"info","time":1792458185485,"pid":38733,"hostname":"Mac.net","event":"v5.graph_persist.options_reconciled","mirrored_count":2,"node_ids":["add_vans","carry_on"],"propagated_count":0,"propagated_node_ids":[],"msg":"[commit] reconciled option-nodes into top-level options[] (mirrored missing + propagated interventions)"}
+{"level":"error","time":1792458185483,"pid":38733,"hostname":"Mac.net","err":"Error: 400 Scripted continuation failed","scenario_id":"07f59703-6313-4e1a-8644-5113f41531de","msg":"agent-lane turn failed"}
+{"level":"info","time":1792458185487,"pid":38733,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"orders","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792458185500,"pid":38733,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"34251f5c-9b87-48e0-8512-bf0931dcb60f","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792458185501,"pid":38733,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"34251f5c-9b87-48e0-8512-bf0931dcb60f","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792458185508,"pid":38733,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"orders","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792458185521,"pid":38733,"hostname":"Mac.net","event":"agent_core.turn_failed","scenario_id":"34251f5c-9b87-48e0-8512-bf0931dcb60f","request_id":"req-14","err":"Error: 400 Scripted continuation failed","msg":"agent-core: the SDK run did not finish"}
+{"level":"info","time":1792458185523,"pid":38733,"hostname":"Mac.net","event":"v5.graph_persist.options_reconciled","mirrored_count":2,"node_ids":["add_vans","carry_on"],"propagated_count":0,"propagated_node_ids":[],"msg":"[commit] reconciled option-nodes into top-level options[] (mirrored missing + propagated interventions)"}
+{"level":"error","time":1792458185521,"pid":38733,"hostname":"Mac.net","err":"Error: 400 Scripted continuation failed","scenario_id":"34251f5c-9b87-48e0-8512-bf0931dcb60f","msg":"agent-lane turn failed"}
+{"level":"info","time":1792458185525,"pid":38733,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"orders","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792458185539,"pid":38733,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"34929768-d209-4cdb-b235-ea1f62cf12da","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792458185540,"pid":38733,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"34929768-d209-4cdb-b235-ea1f62cf12da","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792458185545,"pid":38733,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"orders","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792458185561,"pid":38733,"hostname":"Mac.net","event":"agent_core.turn_failed","scenario_id":"34929768-d209-4cdb-b235-ea1f62cf12da","request_id":"req-1f","err":"Error: 400 Scripted continuation failed","msg":"agent-core: the SDK run did not finish"}
+{"level":"error","time":1792458185561,"pid":38733,"hostname":"Mac.net","err":"Error: 400 Scripted continuation failed","scenario_id":"34929768-d209-4cdb-b235-ea1f62cf12da","msg":"agent-lane turn failed"}
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/goal-level-card.route.test.ts (7 tests | 5 failed) 3698ms
+     × L2 declared-sum baseline: Correction: about 110 a week, not 120. → one mixed card, one save, own receipt, full pair readback 32ms
+     × L2 declared-sum baseline: Revenue was 2m on 2026-09-01. Our delivery baseline is about 105 a month, not 120; the deadline is June. → one mixed card, one save, own receipt, full pair readback 24ms
+     × L2 save-outcome: Correction: about 110 a week, not 120. → save → failed continuation → immediate same-turn replay, with held cards retained 43ms
+     × L2 save-outcome: Revenue was 2m on 2026-09-01. Our delivery baseline is about 105 a month, not 120; the deadline is June. → save → failed continuation → immediate same-turn replay, with held cards retained 38ms
+     × L2 unknown save: dispatched registration without its receipt never becomes verified saved on failure or replay 39ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/goal-level-card.route.test.ts > PATH-B: the goal’s current level, typed as a correction, shows its card in THAT turn; a press saves it ONCE with its own receipt > L2 declared-sum baseline: Correction: about 110 a week, not 120. → one mixed card, one save, own receipt, full pair readback
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/goal-level-card.route.test.ts > PATH-B: the goal’s current level, typed as a correction, shows its card in THAT turn; a press saves it ONCE with its own receipt > L2 declared-sum baseline: Revenue was 2m on 2026-09-01. Our delivery baseline is about 105 a month, not 120; the deadline is June. → one mixed card, one save, own receipt, full pair readback
+AssertionError: expected { status: 'unavailable', …(3) } to match object { status: 'ok', data: { …(1) } }
+(3 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "data": {
+-     "proposal_id": Any<String>,
+-   },
+-   "status": "ok",
++   "status": "unavailable",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/goal-level-card.route.test.ts:239:35
+    237|     const first = await post({ turn_id: randomUUID(), message: words, …
+    238|     expect(first.statusCode, first.body).toBe(200);
+    239|     expect(outputOf('prop_call')).toMatchObject({ status: 'ok', data: …
+       |                                   ^
+    240|     const t1 = first.json() as Json;
+    241|     expect(t1._proposal_fields.proposals).toHaveLength(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/goal-level-card.route.test.ts > PATH-B: the goal’s current level, typed as a correction, shows its card in THAT turn; a press saves it ONCE with its own receipt > L2 save-outcome: Correction: about 110 a week, not 120. → save → failed continuation → immediate same-turn replay, with held cards retained
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/goal-level-card.route.test.ts > PATH-B: the goal’s current level, typed as a correction, shows its card in THAT turn; a press saves it ONCE with its own receipt > L2 save-outcome: Revenue was 2m on 2026-09-01. Our delivery baseline is about 105 a month, not 120; the deadline is June. → save → failed continuation → immediate same-turn replay, with held cards retained
+AssertionError: expected { error: 'UPSTREAM_ERROR', …(4) } to match object { error: 'UPSTREAM_ERROR', …(3) }
+(2 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "error": "UPSTREAM_ERROR",
+    "nothing_saved": false,
+    "retry_safe": false,
+-   "save_outcome": "VERIFIED_SAVED",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/goal-level-card.route.test.ts:301:27
+    299|     const failed = await post(payload);
+    300|     expect(failed.statusCode, failed.body).toBe(502);
+    301|     expect(failed.json()).toMatchObject({ error: 'UPSTREAM_ERROR', not…
+       |                           ^
+    302|     expect(registered).toHaveLength(1);
+    303|     expect(goalRaw()).toBe(value);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/goal-level-card.route.test.ts > PATH-B: the goal’s current level, typed as a correction, shows its card in THAT turn; a press saves it ONCE with its own receipt > L2 unknown save: dispatched registration without its receipt never becomes verified saved on failure or replay
+AssertionError: expected { error: 'UPSTREAM_ERROR', …(4) } to match object { save_outcome: 'UNKNOWN', …(2) }
+(3 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "nothing_saved": false,
+    "retry_safe": false,
+-   "save_outcome": "UNKNOWN",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/goal-level-card.route.test.ts:337:27
+    335|     const failed = await post(payload);
+    336|     expect(failed.statusCode).toBe(502);
+    337|     expect(failed.json()).toMatchObject({ save_outcome: 'UNKNOWN', not…
+       |                           ^
+    338|     const answer = turnRows.get(payload.turn_id);
+    339|     expect(answer.assistant_message).toBe('The reply didn’t arrive. An…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  5 failed | 2 passed (7)
+   Start at  02:02:55
+   Duration  10.45s (transform 7.17s, setup 179ms, import 6.37s, tests 3.70s, environment 0ms)
+

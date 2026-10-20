@@ -1,0 +1,258 @@
+
+ RUN  v4.1.10 /private/tmp/cx-l2
+
+{"level":"info","time":1792457702855,"pid":16545,"hostname":"Mac.net","event":"agent_lane.route_mounted","msg":"POST /agent/v1/turn mounted"}
+{"level":"info","time":1792457702860,"pid":16545,"hostname":"Mac.net","event":"v5.graph_persist.options_reconciled","mirrored_count":2,"node_ids":["add_vans","carry_on"],"propagated_count":0,"propagated_node_ids":[],"msg":"[commit] reconciled option-nodes into top-level options[] (mirrored missing + propagated interventions)"}
+{"level":"info","time":1792457702902,"pid":16545,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"orders","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792457702982,"pid":16545,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"bdae2a25-f815-4b02-a3f5-35e2ec244769","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792457702991,"pid":16545,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"bdae2a25-f815-4b02-a3f5-35e2ec244769","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792457703027,"pid":16545,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"orders","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792457703059,"pid":16545,"hostname":"Mac.net","event":"agent_core.turn_failed","scenario_id":"bdae2a25-f815-4b02-a3f5-35e2ec244769","request_id":"req-4","err":"Error: 400 Scripted continuation failed","msg":"agent-core: the SDK run did not finish"}
+{"level":"info","time":1792457703067,"pid":16545,"hostname":"Mac.net","event":"v5.graph_persist.options_reconciled","mirrored_count":2,"node_ids":["add_vans","carry_on"],"propagated_count":0,"propagated_node_ids":[],"msg":"[commit] reconciled option-nodes into top-level options[] (mirrored missing + propagated interventions)"}
+{"level":"error","time":1792457703060,"pid":16545,"hostname":"Mac.net","err":"Error: 400 Scripted continuation failed","scenario_id":"bdae2a25-f815-4b02-a3f5-35e2ec244769","msg":"agent-lane turn failed"}
+{"level":"info","time":1792457703072,"pid":16545,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"orders","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792457703093,"pid":16545,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"027f6d2b-033a-4b8c-91e3-a7cae7e718c9","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792457703095,"pid":16545,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"027f6d2b-033a-4b8c-91e3-a7cae7e718c9","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792457703103,"pid":16545,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"orders","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792457703123,"pid":16545,"hostname":"Mac.net","event":"agent_core.turn_failed","scenario_id":"027f6d2b-033a-4b8c-91e3-a7cae7e718c9","request_id":"req-f","err":"Error: 400 Scripted continuation failed","msg":"agent-core: the SDK run did not finish"}
+{"level":"error","time":1792457703124,"pid":16545,"hostname":"Mac.net","err":"Error: 400 Scripted continuation failed","scenario_id":"027f6d2b-033a-4b8c-91e3-a7cae7e718c9","msg":"agent-lane turn failed"}
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/goal-level-card.route.test.ts (5 tests | 2 failed | 3 skipped) 3475ms
+     × L2 save-outcome: Correction: about 110 a week, not 120. → save → failed continuation → immediate same-turn replay, with held cards retained 209ms
+     × L2 save-outcome: Revenue was 2m on 2026-09-01. Our delivery baseline is about 105 a month, not 120; the deadline is June. → save → failed continuation → immediate same-turn replay, with held cards retained 59ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/goal-level-card.route.test.ts > PATH-B: the goal’s current level, typed as a correction, shows its card in THAT turn; a press saves it ONCE with its own receipt > L2 save-outcome: Correction: about 110 a week, not 120. → save → failed continuation → immediate same-turn replay, with held cards retained
+AssertionError: the latest durable holds survive the answer append: expected undefined to deeply equal [ { …(8) }, { …(8) } ]
+
+- Expected:
+[
+  {
+    "action": {
+      "inline_patch": {
+        "agent_proposal": {
+          "base_graph_identity_hash": "31f2f3ed0cfadadb",
+          "base_model_identity": "6b5cbe59ed9ef059aeb7a279ac622382aacc440a78a99cd71d22e21096c2d898",
+          "operations": [
+            {
+              "op": "update_node",
+              "path": "orders",
+              "value": {
+                "against": [Object],
+                "declared": [Object],
+                "goal_current_level": [Object],
+              },
+            },
+          ],
+          "proposal_id": "prop_7a911324ad70b57c088b694e0a2f05a0",
+          "provenance": {
+            "authored_by": "user_stated",
+            "basis": "about 110 a week",
+          },
+          "public_label": "Record the current level of \"Weekly orders\" as your figure: 120 orders a week → 110 orders a week (target 150 orders a week)",
+          "scenario_id": "bdae2a25-f815-4b02-a3f5-35e2ec244769",
+          "user_id": null,
+          "validation": {
+            "admitted": true,
+            "loss_count": 0,
+            "refusals": [],
+          },
+        },
+        "offered_on_this_row": true,
+      },
+      "kind": "apply_proposed_change",
+      "proposal_ref": "agent-approve-proposal:prop_7a911324ad70b57c088b694e0a2f05a0",
+      "public_label": "Make this change",
+      "public_message": "Yes, make that change.",
+    },
+    "chip_id": "agent-approve-proposal:prop_7a911324ad70b57c088b694e0a2f05a0",
+    "emitted_at_iso": "2026-10-20T00:55:02.988Z",
+    "expires_at_iso": "2026-10-21T00:55:02.988Z",
+    "expires_at_turn_count": 24,
+    "id": "636a395e-75b0-4c3e-881c-7e14cad853ba",
+    "preconditions": {
+      "graph_hash": "31f2f3ed0cfadadb",
+    },
+    "scenario_id": "bdae2a25-f815-4b02-a3f5-35e2ec244769",
+  },
+  {
+    "action": {
+      "inline_patch": {
+        "agent_proposal": {
+          "base_graph_identity_hash": "31f2f3ed0cfadadb",
+          "base_model_identity": "6b5cbe59ed9ef059aeb7a279ac622382aacc440a78a99cd71d22e21096c2d898",
+          "operations": [
+            {
+              "op": "update_node",
+              "path": "vans",
+              "value": {
+                "label": "Fleet vans",
+              },
+            },
+          ],
+          "proposal_id": "prop_3162ce59eb686fdcaca1ff507d0c68a0",
+          "provenance": {
+            "authored_by": "model_proposed",
+            "basis": "A clearer label.",
+          },
+          "public_label": "Rename Vans on the road to Fleet vans",
+          "scenario_id": "bdae2a25-f815-4b02-a3f5-35e2ec244769",
+          "user_id": null,
+          "validation": {
+            "admitted": true,
+            "loss_count": 0,
+            "refusals": [],
+          },
+        },
+        "offered_on_this_row": true,
+      },
+      "kind": "apply_proposed_change",
+      "proposal_ref": "agent-approve-proposal:prop_3162ce59eb686fdcaca1ff507d0c68a0",
+      "public_label": "Make this change",
+      "public_message": "Yes, rename it.",
+    },
+    "chip_id": "agent-approve-proposal:prop_3162ce59eb686fdcaca1ff507d0c68a0",
+    "emitted_at_iso": "2026-10-20T00:55:03.021Z",
+    "expires_at_iso": "2026-10-21T00:55:03.021Z",
+    "expires_at_turn_count": 24,
+    "id": "a5b5b3ed-f0cb-4532-b9a3-b9f8a3844d6e",
+    "preconditions": {
+      "graph_hash": "31f2f3ed0cfadadb",
+    },
+    "scenario_id": "bdae2a25-f815-4b02-a3f5-35e2ec244769",
+  },
+]
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/goal-level-card.route.test.ts:284:90
+    282|     expect(answer.user_message).toBe(payload.message);
+    283|     expect(answer.assistant_message).toBe('The reply didn’t arrive. An…
+    284|     expect(answer.pending_actions, 'the latest durable holds survive t…
+       |                                                                                          ^
+    285|     const claimedCalls = calls.length;
+    286|     const rowCount = turnRows.size;
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/goal-level-card.route.test.ts > PATH-B: the goal’s current level, typed as a correction, shows its card in THAT turn; a press saves it ONCE with its own receipt > L2 save-outcome: Revenue was 2m on 2026-09-01. Our delivery baseline is about 105 a month, not 120; the deadline is June. → save → failed continuation → immediate same-turn replay, with held cards retained
+AssertionError: the latest durable holds survive the answer append: expected undefined to deeply equal [ { …(8) }, { …(8) } ]
+
+- Expected:
+[
+  {
+    "action": {
+      "inline_patch": {
+        "agent_proposal": {
+          "base_graph_identity_hash": "4607d0beecec76aa",
+          "base_model_identity": "6a0b16a90039aa4dd37384f02ab37ab9366a681ef0e750e2505b827134bc5a44",
+          "operations": [
+            {
+              "op": "update_node",
+              "path": "orders",
+              "value": {
+                "against": [Object],
+                "declared": [Object],
+                "goal_current_level": [Object],
+              },
+            },
+          ],
+          "proposal_id": "prop_4e625f8e5665fc665f7f873f34a464cd",
+          "provenance": {
+            "authored_by": "user_stated",
+            "basis": "about 105 a month",
+          },
+          "public_label": "Record the current level of \"Monthly deliveries\" as your figure: 120 deliveries a month → 105 deliveries a month (target 150 deliveries a month)",
+          "scenario_id": "027f6d2b-033a-4b8c-91e3-a7cae7e718c9",
+          "user_id": null,
+          "validation": {
+            "admitted": true,
+            "loss_count": 0,
+            "refusals": [],
+          },
+        },
+        "offered_on_this_row": true,
+      },
+      "kind": "apply_proposed_change",
+      "proposal_ref": "agent-approve-proposal:prop_4e625f8e5665fc665f7f873f34a464cd",
+      "public_label": "Make this change",
+      "public_message": "Yes, make that change.",
+    },
+    "chip_id": "agent-approve-proposal:prop_4e625f8e5665fc665f7f873f34a464cd",
+    "emitted_at_iso": "2026-10-20T00:55:03.094Z",
+    "expires_at_iso": "2026-10-21T00:55:03.094Z",
+    "expires_at_turn_count": 24,
+    "id": "2e9d85fe-ac3f-44b6-8ca0-203cdb374ada",
+    "preconditions": {
+      "graph_hash": "4607d0beecec76aa",
+    },
+    "scenario_id": "027f6d2b-033a-4b8c-91e3-a7cae7e718c9",
+  },
+  {
+    "action": {
+      "inline_patch": {
+        "agent_proposal": {
+          "base_graph_identity_hash": "4607d0beecec76aa",
+          "base_model_identity": "6a0b16a90039aa4dd37384f02ab37ab9366a681ef0e750e2505b827134bc5a44",
+          "operations": [
+            {
+              "op": "update_node",
+              "path": "vans",
+              "value": {
+                "label": "Fleet vans",
+              },
+            },
+          ],
+          "proposal_id": "prop_58884dbecbc984e123ce07aa1aedfcf2",
+          "provenance": {
+            "authored_by": "model_proposed",
+            "basis": "A clearer label.",
+          },
+          "public_label": "Rename Vans on the road to Fleet vans",
+          "scenario_id": "027f6d2b-033a-4b8c-91e3-a7cae7e718c9",
+          "user_id": null,
+          "validation": {
+            "admitted": true,
+            "loss_count": 0,
+            "refusals": [],
+          },
+        },
+        "offered_on_this_row": true,
+      },
+      "kind": "apply_proposed_change",
+      "proposal_ref": "agent-approve-proposal:prop_58884dbecbc984e123ce07aa1aedfcf2",
+      "public_label": "Make this change",
+      "public_message": "Yes, rename it.",
+    },
+    "chip_id": "agent-approve-proposal:prop_58884dbecbc984e123ce07aa1aedfcf2",
+    "emitted_at_iso": "2026-10-20T00:55:03.098Z",
+    "expires_at_iso": "2026-10-21T00:55:03.098Z",
+    "expires_at_turn_count": 24,
+    "id": "70984758-4569-4161-9a23-7207039b6492",
+    "preconditions": {
+      "graph_hash": "4607d0beecec76aa",
+    },
+    "scenario_id": "027f6d2b-033a-4b8c-91e3-a7cae7e718c9",
+  },
+]
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/goal-level-card.route.test.ts:284:90
+    282|     expect(answer.user_message).toBe(payload.message);
+    283|     expect(answer.assistant_message).toBe('The reply didn’t arrive. An…
+    284|     expect(answer.pending_actions, 'the latest durable holds survive t…
+       |                                                                                          ^
+    285|     const claimedCalls = calls.length;
+    286|     const rowCount = turnRows.size;
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 3 skipped (5)
+   Start at  01:54:54
+   Duration  8.83s (transform 6.10s, setup 130ms, import 5.11s, tests 3.47s, environment 0ms)
+

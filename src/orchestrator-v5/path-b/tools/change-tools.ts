@@ -413,7 +413,7 @@ const levelCtx = (ctx: ChangeCtx): AgentToolContext => {
  * The goal's current level (DL-3 ruling (a), bounded): only the user's own current figure in their typed words, by the existing
  * goal-level door on this read in a private store; its prepared operation and card are carried literally onto ONE proposal.
  */
-async function proposeGoalLevel(deps: Pick<ChangeDeps, 'dispatch' | 'proposals'>, ctx: ChangeCtx, o: GoalLevelArgs): Promise<ToolOutcome> {
+async function proposeGoalLevel(deps: Pick<ChangeDeps, 'dispatch' | 'proposals'>, ctx: ChangeCtx, o: GoalLevelArgs, members: ProposeChangeArgs['ops']): Promise<ToolOutcome> {
   if (o.source.origin !== 'user' || o.stance !== 'stated_current') return unavailable('goal_level_unverified', 'none', GOAL_LEVEL_UNVERIFIED);
   // B's rule (DL-3 AMEND 20:01Z; bytes and sign, #3471 R2): the quote is a byte-exact span of the typed words and holds the figure
   // with its sign, by its digits only; the words are not re-parsed for meaning.
@@ -424,6 +424,17 @@ async function proposeGoalLevel(deps: Pick<ChangeDeps, 'dispatch' | 'proposals'>
   if (read.identity === null) return unavailable('read_malformed');
   const goal = nodesOf(read.graph).find((n) => n.id === o.goal_id);
   if (goal?.kind !== 'goal') return refused('not_a_goal', undefined, { op: 0 });
+  // The AI declares which sum operand IS this current level by pairing its value operation with the goal's.
+  // Membership and identical declarations are literal checks; labels and coincident stored figures bind nothing.
+  const operand = members.find((m): m is Extract<FigureOp, { op: 'set_factor_value' }> => m.op === 'set_factor_value');
+  const operandNode = operand === undefined ? undefined : nodesOf(read.graph).find((n) => n.id === operand.factor_id && n.kind === 'factor');
+  if (members.length > 1 && (members.length !== 2 || operand === undefined
+    || !isRec(goal.nonlinear_identity) || goal.nonlinear_identity.operation !== 'sum'
+    || !Array.isArray(goal.nonlinear_identity.factor_ids) || !goal.nonlinear_identity.factor_ids.includes(operand.factor_id)
+    || operandNode === undefined
+    || operand.value !== o.value || operand.unit !== o.unit || operand.stance !== o.stance || !isDeepStrictEqual(operand.source, o.source))) {
+    return unavailable('mixed_change_not_available', 'none', MIXED_GOAL_LEVEL);
+  }
   const held = new ProposalStore();
   const offered = await proposeGoalCurrentLevel({ readGraph: async () => goalLevelReadOf(read), proposals: held, typedQuote: o.source.quote }, levelCtx(ctx),
     { goal_label: goal.label, value: o.value, ...(o.unit === null ? {} : { unit: o.unit }), user_stated: true });
@@ -431,13 +442,17 @@ async function proposeGoalLevel(deps: Pick<ChangeDeps, 'dispatch' | 'proposals'>
   if (prepared === undefined) {
     return refused(codeOf(typeof offered.refusal === 'string' ? offered.refusal : 'goal_level_refused'), typeof offered.detail === 'string' ? offered.detail : undefined, { op: 0 });
   }
+  const todayPart = isRec(prepared.operations[0]?.value) ? prepared.operations[0].value.today_part : undefined;
+  if (operand !== undefined && todayPart !== undefined && todayPart !== operand.factor_id) return unavailable('mixed_change_not_available', 'none', MIXED_GOAL_LEVEL);
   // The same base as every core proposer and the card machinery (#3472, K7/K9): the graph hash, plus the model's full identity.
   const p = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: read.graphHash,
     base_model_identity: read.identity, provenance: { authored_by: 'user_stated', basis: o.source.quote },
     // The person's declaration rides on the door's operation (hashed into the id): their claim is written in the same save.
-    operations: prepared.operations.map((op) => ({ ...op, value: { ...(isRec(op.value) ? op.value : {}), declared: operationOf({ op: 'set_factor_value',
+    operations: prepared.operations.map((op) => ({ ...op, value: { ...(isRec(op.value) ? op.value : {}),
+      ...(operand === undefined ? {} : { current_level_operand: operand.factor_id }), declared: operationOf({ op: 'set_factor_value',
       factor_id: o.goal_id, value: o.value, unit: o.unit, stance: o.stance, source: o.source }, ctx, new Date().toISOString()).value } })),
-    validation: prepared.validation, public_label: prepared.public_label });
+    validation: prepared.validation, public_label: operand === undefined ? prepared.public_label
+      : `${prepared.public_label} "${operandNode!.label}" records the same current level in this save.` });
   deps.proposals.put(p);
   return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: read.graphHash });
 }
@@ -458,10 +473,14 @@ function goalLevelRead(read: SavedRead, p: StructuredProposal): { holds: boolean
   const declared = goalDeclaredOf(p);
   const claim = declared === null ? null : claimOf(declared, 'goal');
   const kept = claim !== null && claimHeld(read.graph, claim);
+  const operand = isRec(op.value) ? op.value.current_level_operand : undefined;
+  const operandState = nodesOf(read.graph).find((n) => n.id === operand)?.observed_state;
   const holds = held !== undefined && close(held.raw_value, Number(want.raw_value)) && held.source === want.source
-    && (want.unit === undefined || held.unit === want.unit) && (claim === null || kept);
+    && (want.unit === undefined || held.unit === want.unit) && (claim === null || kept)
+    && (operand === undefined || isDeepStrictEqual(operandState, held));
   const notKept: NotKept[] = kept ? [] : [{ what: 'words', declared: String(p.provenance.basis) }];
   return { holds, faithful: notKept.length === 0, written: [{ op: 'set_goal_current_level', goal_id: op.path, figure: held?.raw_value ?? null, unit: held?.unit ?? null,
+    ...(operand === undefined ? {} : { current_level_operand: { factor_id: operand, observed_state: operandState ?? null } }),
     declared: { origin: 'user', quote: p.provenance.basis, stance: 'stated_current' }, stored_as: provenanceOf({ value: held }),
     ...(kept ? { claim: { said_by: saidByOf(claim!.statement) } } : {}), not_kept: notKept }] };
 }
@@ -488,7 +507,15 @@ function goalLevelApplier(deps: ChangeDeps, ctx: ChangeCtx, p: StructuredProposa
       held.put(p);
       let r: ToolResult;
       try {
-        r = await applyGoalCurrentLevel({ dispatch: deps.dispatch, proposals: held, operationId: authorisationTurnId,
+        // Extend the existing writer's complete postimage BEFORE its one CAS registration, never with a second write.
+        const operand = isRec(p.operations[0]?.value) ? p.operations[0].value.current_level_operand : undefined;
+        const dispatch: InternalDispatch = (path, body) => {
+          if (operand === undefined || !isRec(body) || !isRec(body.graph)) return deps.dispatch(path, body);
+          const graph = body.graph;
+          const level = nodesOf(graph).find((n) => n.id === p.operations[0]!.path)?.observed_state;
+          return deps.dispatch(path, { ...body, graph: { ...graph, nodes: nodesOf(graph).map((n) => n.id === operand ? { ...n, observed_state: level } : n) } });
+        };
+        r = await applyGoalCurrentLevel({ dispatch, proposals: held, operationId: authorisationTurnId,
           readGraph: async () => { const now = await readSaved(deps, ctx.scenario_id); return isSavedRead(now) ? goalLevelReadOf(now) : null; } },
         levelCtx(ctx), p, approved);
       } catch {
@@ -930,7 +957,7 @@ export async function proposeChange(deps: Pick<ChangeDeps, 'dispatch' | 'proposa
   const target = args.ops.find((o): o is TargetArgs => o.op === 'set_goal_target');
   if (target !== undefined) return args.ops.length > 1 ? unavailable('mixed_change_not_available', 'none', MIXED_TARGET) : proposeTarget(deps, ctx, args, target);
   const level = args.ops.find((o): o is GoalLevelArgs => o.op === 'set_goal_current_level');
-  if (level !== undefined) return args.ops.length > 1 ? unavailable('mixed_change_not_available', 'none', MIXED_GOAL_LEVEL) : proposeGoalLevel(deps, ctx, level);
+  if (level !== undefined) return proposeGoalLevel(deps, ctx, level, args.ops);
   const links = args.ops.filter((o): o is LinkArgs => o.op === 'set_link_strength');
   const structural = args.ops.filter((o): o is StructuralArgs => o.op === 'rename' || o.op === 'remove_from_model');
   const ops = args.ops.filter((o): o is FigureOp => o.op === 'set_factor_value' || o.op === 'set_option_setting');

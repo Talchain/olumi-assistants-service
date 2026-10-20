@@ -29,17 +29,20 @@ export async function onceMoreOnTransportFailure<T>(
 }
 
 
-/** The provider's own type and code for a capacity or credit refusal (OpenAI's error body, as served 18 and 19 Oct). */
-const PROVIDER_CAPACITY = new Set(['insufficient_quota', 'credit_balance_exhausted', 'rate_limit_exceeded']);
-
-/**
- * The provider refused this turn for capacity or credits, so a retry now cannot help (DL-3 20 Oct: Paul was told "Please
- * retry" three times on an account with no credits). Read from the provider's typed refusal only: HTTP 429 on a call the
- * route made itself (the `openai_` status above), or the SDK error's `type`/`code` (a streamed `error` event has no status).
- */
-export function isProviderCapacityRefusal(err: unknown): boolean {
-  if (String(err).startsWith('Error: openai_429')) return true;
-  if (!(err instanceof Error)) return false;
-  const { code, type } = err as Error & { code?: unknown; type?: unknown };
-  return PROVIDER_CAPACITY.has(String(code)) || PROVIDER_CAPACITY.has(String(type));
+/** Read the provider's typed reason, never infer billing from HTTP 429 or its prose. */
+export function providerFailureOf(err: unknown): Record<string, unknown> {
+  const e = err as { code?: unknown; type?: unknown; status?: unknown; headers?: Headers } | null | undefined;
+  const capacity = [e?.code, e?.type].some(x => x === 'insufficient_quota' || x === 'credit_balance_exhausted');
+  const limited = [e?.code, e?.type].some(x => x === 'rate_limit_exceeded');
+  const retryAfter = e?.headers?.get('retry-after');
+  const retryAfterMs = e?.headers?.get('retry-after-ms');
+  return {
+    error: capacity ? 'PROVIDER_CAPACITY' : 'UPSTREAM_ERROR',
+    ...(capacity ? { retryable: false } : limited ? { retryable: true } : {}),
+    ...(e?.code !== undefined || e?.type !== undefined || e?.status !== undefined ? {
+      provider_error: { code: e.code ?? null, type: e.type ?? null, status: e.status ?? null },
+    } : {}),
+    ...(retryAfter == null ? {} : { retry_after: retryAfter }),
+    ...(retryAfterMs == null ? {} : { retry_after_ms: retryAfterMs }),
+  };
 }

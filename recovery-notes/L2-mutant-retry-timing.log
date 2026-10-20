@@ -1,0 +1,56 @@
+
+ RUN  v4.1.10 /private/tmp/cx-l2
+
+{"level":"info","time":1792458311786,"pid":44530,"hostname":"Mac.net","event":"agent_lane.route_mounted","msg":"POST /agent/v1/turn mounted"}
+{"level":"info","time":1792458311842,"pid":44530,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":4,"status":"ready","userQuestionCount":0,"goalNodeId":"monthly_profit","readyOptionsCount":4,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792458311890,"pid":44530,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":4,"status":"ready","userQuestionCount":0,"goalNodeId":"monthly_profit","readyOptionsCount":4,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792458311935,"pid":44530,"hostname":"Mac.net","event":"agent_core.turn_failed","scenario_id":"5c4b3a2f-1e0d-4c9b-8a7f-6e5d4c3b2a19","request_id":"req-1","err":"Error: 429 Recorded provider refusal.","msg":"agent-core: the SDK run did not finish"}
+{"level":"error","time":1792458311935,"pid":44530,"hostname":"Mac.net","err":"Error: 429 Recorded provider refusal.","scenario_id":"5c4b3a2f-1e0d-4c9b-8a7f-6e5d4c3b2a19","msg":"agent-lane turn failed"}
+{"level":"info","time":1792458311950,"pid":44530,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":4,"status":"ready","userQuestionCount":0,"goalNodeId":"monthly_profit","readyOptionsCount":4,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792458311972,"pid":44530,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":4,"status":"ready","userQuestionCount":0,"goalNodeId":"monthly_profit","readyOptionsCount":4,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792458311986,"pid":44530,"hostname":"Mac.net","event":"agent_core.turn_failed","scenario_id":"5c4b3a2f-1e0d-4c9b-8a7f-6e5d4c3b2a19","request_id":"req-3","err":"Error: 429 Recorded provider refusal.","msg":"agent-core: the SDK run did not finish"}
+{"level":"error","time":1792458311987,"pid":44530,"hostname":"Mac.net","err":"Error: 429 Recorded provider refusal.","scenario_id":"5c4b3a2f-1e0d-4c9b-8a7f-6e5d4c3b2a19","msg":"agent-lane turn failed"}
+{"level":"info","time":1792458311997,"pid":44530,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":4,"status":"ready","userQuestionCount":0,"goalNodeId":"monthly_profit","readyOptionsCount":4,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792458312015,"pid":44530,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":4,"status":"ready","userQuestionCount":0,"goalNodeId":"monthly_profit","readyOptionsCount":4,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792458312026,"pid":44530,"hostname":"Mac.net","event":"agent_core.turn_failed","scenario_id":"5c4b3a2f-1e0d-4c9b-8a7f-6e5d4c3b2a19","request_id":"req-5","err":"Error: 429 Recorded provider refusal.","msg":"agent-core: the SDK run did not finish"}
+{"level":"error","time":1792458312026,"pid":44530,"hostname":"Mac.net","err":"Error: 429 Recorded provider refusal.","scenario_id":"5c4b3a2f-1e0d-4c9b-8a7f-6e5d4c3b2a19","msg":"agent-lane turn failed"}
+{"level":"info","time":1792458312036,"pid":44530,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":4,"status":"ready","userQuestionCount":0,"goalNodeId":"monthly_profit","readyOptionsCount":4,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792458312054,"pid":44530,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":4,"status":"ready","userQuestionCount":0,"goalNodeId":"monthly_profit","readyOptionsCount":4,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792458312064,"pid":44530,"hostname":"Mac.net","event":"agent_core.turn_failed","scenario_id":"5c4b3a2f-1e0d-4c9b-8a7f-6e5d4c3b2a19","request_id":"req-7","err":"Error: 429 Recorded provider refusal.","msg":"agent-core: the SDK run did not finish"}
+{"level":"error","time":1792458312065,"pid":44530,"hostname":"Mac.net","err":"Error: 429 Recorded provider refusal.","scenario_id":"5c4b3a2f-1e0d-4c9b-8a7f-6e5d4c3b2a19","msg":"agent-lane turn failed"}
+ ❯ src/orchestrator-v5/agent-lane/__tests__/ai-core-provider-capacity.route.test.ts (7 tests | 4 failed | 3 skipped) 5389ms
+     × L2 recorded contrast on both HTTP producers: exhausted credits preserves typed reason and retry-after 151ms
+     × L2 recorded contrast on both HTTP producers: quota exhausted preserves typed reason and retry-after 49ms
+     × L2 recorded contrast on both HTTP producers: transient rate limit preserves typed reason and retry-after 39ms
+     × L2 recorded contrast on both HTTP producers: unclassified 429 preserves typed reason and retry-after 38ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/ai-core-provider-capacity.route.test.ts > A provider capacity or credit refusal is PROVIDER_CAPACITY at the route's one 502 producer, on both lanes > L2 recorded contrast on both HTTP producers: exhausted credits preserves typed reason and retry-after
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/ai-core-provider-capacity.route.test.ts > A provider capacity or credit refusal is PROVIDER_CAPACITY at the route's one 502 producer, on both lanes > L2 recorded contrast on both HTTP producers: quota exhausted preserves typed reason and retry-after
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/ai-core-provider-capacity.route.test.ts > A provider capacity or credit refusal is PROVIDER_CAPACITY at the route's one 502 producer, on both lanes > L2 recorded contrast on both HTTP producers: transient rate limit preserves typed reason and retry-after
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/ai-core-provider-capacity.route.test.ts > A provider capacity or credit refusal is PROVIDER_CAPACITY at the route's one 502 producer, on both lanes > L2 recorded contrast on both HTTP producers: unclassified 429 preserves typed reason and retry-after
+AssertionError: expected undefined to be '17' // Object.is equality
+
+- Expected:
+"17"
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/ai-core-provider-capacity.route.test.ts:151:32
+    149|       expect(body.retryable).toBe(retryable);
+    150|       expect(body.provider_error).toEqual({ code, type, status: 429 });
+    151|       expect(body.retry_after).toBe('17');
+       |                                ^
+    152|       expect(body.retry_after_ms).toBe('17000');
+    153|       expect(body.nothing_saved).toBe(true);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 3 skipped (7)
+   Start at  02:05:04
+   Duration  7.99s (transform 5.57s, setup 137ms, import 2.35s, tests 5.39s, environment 0ms)
+

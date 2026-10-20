@@ -25,6 +25,7 @@ let persisted: Rec;
 const registered: Rec[] = [];
 /** A registration that answers with no version of its own (no receipt to read). */
 let noVersion = false;
+let loseOperand = false;
 const identityOf = (g: unknown): string => {
   const h = computeGraphIdentityHash(g as never) as unknown;
   return typeof h === 'string' ? h : String((h as { value?: unknown })?.value ?? '');
@@ -40,7 +41,8 @@ const dispatch = vi.fn(async (path: string, body?: unknown): Promise<{ status: n
       return { status: 409, json: { details: { code: 'GRAPH_STALE' } } };
     }
     registered.push(b);
-    persisted = structuredClone(b.graph) as Rec;
+    persisted = JSON.parse(JSON.stringify(b.graph)) as Rec;
+    if (loseOperand) ((persisted.nodes as Rec[]).find(n => n.id === 'declared_baseline')!.observed_state as Rec).raw_value = 120;
     return { status: 200, json: { graph_hash: computeAnalysisAffectingGraphHash(persisted as never), ...(noVersion ? {} : {
       model_version: { version_number: 100 + registered.length, version_id: `v_reg_${registered.length}`, mutation_id: `m_reg_${registered.length}` } }) } };
   }
@@ -88,11 +90,51 @@ const propose = (d: ReturnType<typeof deps>, ops: readonly unknown[], words = SA
 beforeEach(() => {
   persisted = stored();
   registered.length = 0;
-  noVersion = false;
+  noVersion = false; loseOperand = false;
   dispatch.mockClear();
 });
 
 describe('the goal’s current level: the existing goal-level door, ONE registration, PATH-B’s own receipt and readback', () => {
+  const sum = () => {
+    goal().nonlinear_identity = { operation: 'sum', factor_ids: ['declared_baseline', 'additional'], stated_in_brief: false };
+    (persisted.nodes as Rec[]).push({ id: 'declared_baseline', kind: 'factor', label: 'Baseline quantity', observed_state: structuredClone(goal().observed_state) },
+      { id: 'additional', kind: 'factor', label: 'Additional quantity', observed_state: { value: 0, raw_value: 0, cap: 187.5, unit: 'orders a week' } });
+    const { goal_id: _goal, ...declared } = level('user', 'stated_current', 'about 110 a week');
+    return [level('user', 'stated_current', 'about 110 a week'), { ...declared, op: 'set_factor_value', factor_id: 'declared_baseline' }];
+  };
+
+  it.each(['not_sum', 'outside_sum', 'different_value', 'different_unit', 'different_source', 'different_stance', 'extra_member'])(
+    'L2 unsupported mixed change (%s): no card and no save', async (contrast) => {
+      const ops = sum();
+      if (contrast === 'not_sum') delete goal().nonlinear_identity;
+      if (contrast === 'outside_sum') ops[1] = { ...ops[1], factor_id: 'vans' };
+      if (contrast === 'different_value') ops[1] = { ...ops[1], value: 111 };
+      if (contrast === 'different_unit') ops[1] = { ...ops[1], unit: 'orders a month' };
+      if (contrast === 'different_source') ops[1] = { ...ops[1], source: { origin: 'olumi', quote: null, named_source: null } };
+      if (contrast === 'different_stance') ops[1] = { ...ops[1], stance: 'estimate' };
+      if (contrast === 'extra_member') ops.push({ ...ops[1], factor_id: 'additional' });
+      const d = deps();
+      expect(await propose(d, ops)).toMatchObject({ status: 'unavailable', reason: 'mixed_change_not_available' });
+      expect(d.proposals.size()).toBe(0);
+      expect(registered).toHaveLength(0);
+      expect((goal().observed_state as Rec).raw_value).toBe(120);
+    });
+
+  it.each(['no_receipt', 'operand_lost'])('L2 sum save lacks confirmation when %s: own receipt and current readback stay distinct', async (contrast) => {
+    const d = deps();
+    const out = await propose(d, sum());
+    expect(out).toMatchObject({ status: 'ok' });
+    const id = String((out as { data: Rec }).data.proposal_id);
+    noVersion = contrast === 'no_receipt'; loseOperand = contrast === 'operand_lost';
+    expect(await applyChange(d, ctxSaying(SAID), { proposal_id: id })).toEqual({ status: 'unavailable', reason: 'not_verified', write: 'unknown' });
+    expect(d.proposals.isApplied(id)).toBe(false);
+    const retry = await applyChange(d, { ...ctxSaying(SAID), turn_id: 'retry-sum' }, { proposal_id: id });
+    // The existing receipt contract distinguishes an earlier commit from what the model holds now.
+    expect(retry).toMatchObject(contrast === 'no_receipt' ? { status: 'unavailable', write: 'unknown' }
+      : { status: 'ok', mutated: false, data: { already_saved: true, holds_now: false } });
+    expect(registered).toHaveLength(1);
+  });
+
   it('RED (the VERIFIER loss): the user’s typed correction of the baseline → ONE card, ONE save, read back as their figure', async () => {
     const d = deps();
     const out = await propose(d, [level('user', 'stated_current', 'about 110 a week')]);

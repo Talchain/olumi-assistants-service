@@ -133,4 +133,28 @@ describe('A provider capacity or credit refusal is PROVIDER_CAPACITY at the rout
     expect(body.nothing_saved).toBe(true);
     expect(body.retry_safe).toBe(true);
   });
+  it.each([
+    ['exhausted credits', 'credit_balance_exhausted', 'insufficient_quota', 'PROVIDER_CAPACITY', false],
+    ['quota exhausted', 'insufficient_quota', 'insufficient_quota', 'PROVIDER_CAPACITY', false],
+    ['transient rate limit', 'rate_limit_exceeded', 'rate_limit_error', 'UPSTREAM_ERROR', true],
+    ['unclassified 429', null, null, 'UPSTREAM_ERROR', undefined],
+  ])('L2 recorded contrast on both HTTP producers: %s preserves typed reason and retry-after', async (_name, code, type, error, retryable) => {
+    provider = () => new Response(JSON.stringify({ error: { message: 'Recorded provider refusal.', code, type } }),
+      { status: 429, headers: { 'content-type': 'application/json', 'retry-after': '17', 'retry-after-ms': '17000', 'x-should-retry': 'false' } });
+    for (const headers of [CORE, {}]) {
+      providerCalls = 0;
+      const { status, body } = await turn(headers, false);
+      expect(status).toBe(502);
+      expect(body.error).toBe(error);
+      expect(body.retryable).toBe(retryable);
+      expect(body.provider_error).toEqual({ code, type, status: 429 });
+      expect(body.retry_after).toBe('17');
+      expect(body.retry_after_ms).toBe('17000');
+      expect(body.nothing_saved).toBe(true);
+      expect(body.save_outcome).toBe('VERIFIED_NO_WRITE');
+      expect(body.retry_safe).toBe(true);
+      expect(providerCalls, 'one scripted response, no automatic HTTP retry').toBe(1);
+    }
+  });
+
 });

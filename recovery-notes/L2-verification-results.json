@@ -1,0 +1,127 @@
+[
+  {
+    "spec": "src/orchestrator-v5/path-b/tools/__tests__/goal-level-card.route.test.ts",
+    "exit": 0,
+    "counts": "Test Files  1 passed (1) | Tests  7 passed (7)"
+  },
+  {
+    "spec": "src/orchestrator-v5/path-b/tools/__tests__/change-tools.goal-level.test.ts",
+    "exit": 0,
+    "counts": "Test Files  1 passed (1) | Tests  32 passed (32)"
+  },
+  {
+    "spec": "src/orchestrator-v5/agent-lane/__tests__/ai-core-provider-capacity.route.test.ts",
+    "exit": 0,
+    "counts": "Test Files  1 passed (1) | Tests  7 passed (7)"
+  },
+  {
+    "spec": "src/orchestrator-v5/path-b/tools/__tests__/change-tools.compound.test.ts",
+    "exit": 0,
+    "counts": "Test Files  1 passed (1) | Tests  7 passed (7)"
+  },
+  {
+    "spec": "src/orchestrator-v5/path-b/tools/__tests__/change-tools.goal-target.test.ts",
+    "exit": 0,
+    "counts": "Test Files  1 passed (1) | Tests  12 passed (12)"
+  },
+  {
+    "spec": "src/orchestrator-v5/path-b/tools/__tests__/change-tools.claims.test.ts",
+    "exit": 0,
+    "counts": "Test Files  1 passed (1) | Tests  7 passed (7)"
+  },
+  {
+    "spec": "src/orchestrator-v5/path-b/tools/__tests__/change-tools.door.test.ts",
+    "exit": 0,
+    "counts": "Test Files  1 passed (1) | Tests  48 passed (48)"
+  },
+  {
+    "spec": "src/orchestrator-v5/path-b/tools/__tests__/index.test.ts",
+    "exit": 0,
+    "counts": "Test Files  1 passed (1) | Tests  9 passed (9)"
+  },
+  {
+    "spec": "src/orchestrator-v5/agent-lane/__tests__/ai-core-correction-card.route.test.ts",
+    "exit": 0,
+    "counts": "Test Files  1 passed (1) | Tests  11 passed (11)"
+  },
+  {
+    "spec": "src/orchestrator-v5/agent-lane/__tests__/ai-core-auto-run.route.test.ts",
+    "exit": 0,
+    "counts": "Test Files  1 passed (1) | Tests  13 passed (13)"
+  },
+  {
+    "spec": "src/orchestrator-v5/agent-lane/__tests__/ai-core-consent.route.test.ts",
+    "exit": 0,
+    "counts": "Test Files  1 passed (1) | Tests  8 passed (8)"
+  },
+  {
+    "spec": "src/orchestrator-v5/agent-lane/__tests__/ai-core-proposal-restart.test.ts",
+    "exit": 0,
+    "counts": "Test Files  1 passed (1) | Tests  1 passed (1)"
+  },
+  {
+    "spec": "src/orchestrator-v5/agent-lane/__tests__/ai-core-add-option.route.test.ts",
+    "exit": 0,
+    "counts": "Test Files  1 passed (1) | Tests  9 passed (9)"
+  },
+  {
+    "spec": "src/orchestrator-v5/agent-lane/__tests__/ai-core-add-to-model.route.test.ts",
+    "exit": 0,
+    "counts": "Test Files  1 passed (1) | Tests  7 passed (7)"
+  },
+  {
+    "spec": "src/orchestrator-v5/agent-lane/__tests__/transport-retry.test.ts",
+    "exit": 0,
+    "counts": "Test Files  1 passed (1) | Tests  5 passed (5)"
+  },
+  {
+    "spec": "src/orchestrator-v5/agent-lane/__tests__/instructions-breakpoint-refusal.test.ts",
+    "exit": 0,
+    "counts": "Test Files  1 passed (1) | Tests  5 passed (5)"
+  },
+  {
+    "spec": "src/orchestrator-v5/agent-lane/__tests__/run-keeps-reasoning-item.test.ts",
+    "exit": 0,
+    "counts": "Test Files  1 passed (1) | Tests  1 passed (1)"
+  },
+  {
+    "spec": "src/orchestrator-v5/agent-lane/__tests__/public-research-route.test.ts",
+    "exit": 0,
+    "counts": "Test Files  1 passed (1) | Tests  7 passed (7)"
+  },
+  {
+    "spec": "src/orchestrator-v5/agent-lane/__tests__/figure-must-be-written-by-user.test.ts",
+    "exit": 0,
+    "counts": "Test Files  1 passed (1) | Tests  20 passed (20)"
+  },
+  {
+    "spec": "tests/contract/context-summary-diagnostic-only.guard.test.ts",
+    "exit": 0,
+    "counts": "Test Files  1 passed (1) | Tests  6 passed (6)"
+  },
+  {
+    "spec": "tests/contract/run-delta-flip-thresholds-single-site.guard.test.ts",
+    "exit": 0,
+    "counts": "Test Files  1 passed (1) | Tests  5 passed (5)"
+  },
+  {
+    "spec": "tests/contract/run-delta-pack-parity.guard.test.ts",
+    "exit": 0,
+    "counts": "Test Files  1 passed (1) | Tests  5 passed (5)"
+  },
+  {
+    "spec": "tests/contract/run-delta-prior-facts-no-default.guard.test.ts",
+    "exit": 0,
+    "counts": "Test Files  1 passed (1) | Tests  10 passed (10)"
+  },
+  {
+    "spec": "tests/contract/tier3-leak-guard.runtime.test.ts",
+    "exit": 0,
+    "counts": "Test Files  1 passed (1) | Tests  16 passed (16)"
+  },
+  {
+    "spec": "tests/contract/tier3-leak-guard.static.guard.test.ts",
+    "exit": 0,
+    "counts": "Test Files  1 passed (1) | Tests  3 passed (3)"
+  }
+]

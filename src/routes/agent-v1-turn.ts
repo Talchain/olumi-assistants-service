@@ -5,6 +5,7 @@ import { RUN_FACTS_USE } from '../orchestrator-v5/agent-lane/run-facts.js';
 import { buildBaselineHoldSuffix } from '../orchestrator-v5/coaching/scaffold-disclosure.js';
 import { figuresIn } from '../orchestrator-v5/agent-lane/licensed-chance-lines.js';
 import { postResponses } from '../adapters/llm/openai.js';
+import { APIError } from 'openai';
 import { type DeadlineTurnStart } from '../orchestrator-v5/agent-lane/deadline-card.js';
 import { projectStatedObjections, STATED_OBJECTIONS_CAP } from '../orchestrator-v5/context/stated-objections.js';
 /** Hard cap on dissent facts read per turn; paging stops earlier once STATED_OBJECTIONS_CAP different findings are covered. */
@@ -110,7 +111,7 @@ import { readinessSentence, readinessSentenceOnce, readinessViewOf, stillNeededL
 import { treatedAsZeroReplyLine } from '../orchestrator-v5/agent-lane/root-line.js';
 import { strictForTheDrafter, type CallStructuredModel, type ConstructionTrace } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
 import { widenedLine, widenedRiskNote, widenedRiskMarker, type WidenCounts } from '../orchestrator-v5/agent-lane/runtime/widen-draft.js';
-import { isProviderCapacityRefusal, onceMoreOnTransportFailure } from '../orchestrator-v5/agent-lane/runtime/transport-retry.js';
+import { providerFailureOf, onceMoreOnTransportFailure } from '../orchestrator-v5/agent-lane/runtime/transport-retry.js';
 import { agentProposals as proposals, executableWaitingProposal, identityProposalOfferable, stillValidApprovalOffers } from '../orchestrator-v5/agent-lane/held-approval-offers.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
@@ -1955,6 +1956,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const deadline = (req as { deadline_ms?: unknown } | null | undefined)?.deadline_ms;
     return typeof deadline === 'number' && deadline > 0 ? call() : onceMoreOnTransportFailure('conversation', call);
   };
+  // Use OpenAI's native typed error carrier at the first HTTP error producer; keep the legacy diagnostic bytes.
+  const providerHttpError = (response: Response, text = ''): APIError => {
+    let body: object | undefined;
+    try { body = JSON.parse(text) as object; } catch { /* An unclassified response stays unknown. */ }
+    const error = APIError.generate(response.status, body, text, response.headers);
+    error.message = `openai_${response.status}${text === '' ? '' : `: ${text.slice(0, 300)}`}`;
+    return error;
+  };
   const callModelFor = (budget: CallBudget): CallModel => async (req) => {
     let transportAttempt = 0;
     let lastHandle: ProviderCallHandle;
@@ -2029,12 +2038,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // ledger and `llm_calls_used` are written — a call the turn never counts. The latch alone is its job.
         // ⛔ NOR IS A DEADLINED CALL: its deadline is its whole budget, made once (`withTransportRetry`; CODEX CEE BUDDY pre-read).
         const deadlined = typeof deadlineMs === 'number' && deadlineMs > 0;
-        if (!refused || req.purpose === 'prewarm' || deadlined) throw new Error(`openai_${r.status}: ${text.slice(0, 300)}`);
+        if (!refused || req.purpose === 'prewarm' || deadlined) throw providerHttpError(r, text);
         recordProviderRetry(usageHandle, 'instructions_carrier_fallback');
         ({ r, usageHandle } = await post(plainBody, 'instructions'));
         if (!r.ok) {
           const retryText = await r.text();
-          throw new Error(`openai_${r.status}: ${retryText.slice(0, 300)}`);
+          throw providerHttpError(r, retryText);
         }
       }
       const j = (await r.json()) as { output: Record<string, unknown>[]; usage?: unknown; status?: unknown; incomplete_details?: { reason?: unknown } | null };
@@ -2069,7 +2078,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     });
     if (!r.ok) {
       const text = await r.text();
-      throw new Error(`openai_${r.status}: ${text.slice(0, 300)}`);
+      throw providerHttpError(r, text);
     }
     const j = (await r.json()) as { usage?: unknown };
     recordProviderUsage(usageHandle, j.usage);
@@ -2155,7 +2164,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         usageHandle = response.usageHandle;
         if (!r.ok) {
           const text = await r.text();
-          throw new Error(`openai_${r.status}: ${text.slice(0, 300)}`);
+          throw providerHttpError(r, text);
         }
         j = (await r.json()) as typeof j;
       } catch (err) {
@@ -2206,7 +2215,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       readHttpErrorBody: false,
       signal: AbortSignal.timeout(BRIEF_READING_TIMEOUT_MS),
     });
-    if (!r.ok) throw new Error(`openai_${r.status}`);
+    if (!r.ok) throw providerHttpError(r);
     const j = (await r.json()) as { output?: { type?: string; content?: { type?: string; text?: string }[] }[]; usage?: unknown };
     recordProviderUsage(usageHandle, j.usage);
     let text = '';
@@ -3062,6 +3071,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // revision refusal proves it wrote nothing; earlier writes and unknown
     // outcomes must keep the claim.
     let writesDispatched = 0;
+    let verifiedSave = false;
     const undoRefusedWrite = async <T>(write: () => Promise<T>): Promise<T> => {
       try { return await write(); }
       catch (err) {
@@ -4456,7 +4466,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             runAnalysis: (args) => restoreRun === undefined ? Promise.resolve({ ok: false, mutated: false, ran: false, refusal: 'run_failed' })
               : loopCapabilities.runAnalysis(toolCtx, args),
             analyseAfterCommit: () => { analysisToCore = true; return analyseCommittedChange(); } }, coreCtx, mode,
-            (row, result) => onCall(row, { ...result })),
+            (row, result) => {
+              // Only the adapter's own receipt AND successful postimage readback establish a saved change.
+              if (result.ok && result.mutated && (result.receipts?.length ?? 0) > 0) verifiedSave = true;
+              onCall(row, { ...result });
+            }),
           instructions: instructionsForMode(mode, eligibleIntervention === undefined ? AGENT_TOOL_INSTRUCTIONS : `${AGENT_TOOL_INSTRUCTIONS}\n\n${ELIGIBLE_INTERVENTION_INSTRUCTION}`),
           briefText: await readingDispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {})
             .then(read => read.status === 200 ? read.json.brief_text : undefined).catch(() => undefined),
@@ -4576,6 +4590,26 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // No possible writes remain: release the claim, so a retry of the SAME
         // turn_id can run. Earlier writes or unknown outcomes keep the claim.
         const released = await releaseUnwrittenTurnClaim();
+        // A possible save keeps its claim. Record the failed continuation as an ordinary answer so a resend
+        // reads current state immediately; the persistence floor carries the latest held cards, including concurrent offers.
+        if (!released && writesDispatched > 0 && claimAppendSucceeded && turnId !== undefined) {
+          try {
+            await appendCheckedGraphWrite({
+              store, writesGraph: false, source: 'agent_turn',
+              heldProposals: { isHeld: isHeldProposal, seenByThisRequest: new Set<string>() },
+              write: {
+                scenario_id: scenarioId, turn_id: turnId, turn_class: 'direct_answer', handler_id: null,
+                request_hash: requestHash, response_emitted: false,
+                llm_calls_used: providerCallsMade() ?? 0, duration_ms: Date.now() - startedAt, handler_facts: [],
+                userMessage: message,
+                assistantMessage: verifiedSave ? 'The saved change is kept, but the reply didn’t arrive. Send a new message to continue.'
+                  : 'The reply didn’t arrive. Any changes already saved are kept. Send a new message to continue.',
+              },
+            });
+          } catch (recordErr) {
+            log.warn({ err: String(recordErr), scenario_id: scenarioId, turn_id: turnId }, 'agent-lane: failed continuation answer could not be recorded');
+          }
+        }
         if (err instanceof ModelReadFailedError) {
           const refusal = { error: toErrorV1(err, req) };
           return reply.code(503).send(refusal.error);
@@ -4592,11 +4626,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           return reply.code(503).send({ error: err.code, detail: err.reason, _agent: { mode },
             _provider_calls: recordedProviderCalls(), ...(turnId !== undefined ? { retry_safe: released } : {}) });
         }
-        // Whether this turn dispatched any write before it failed; a capacity or credit refusal is ONE typed code, never retried.
-        const capacity = isProviderCapacityRefusal(err);
+        // A dispatched write is a possible effect, never positive readback proof; provider retryability is separate.
         return reply.code(502).send({
-          error: capacity ? 'PROVIDER_CAPACITY' : 'UPSTREAM_ERROR', detail: String(err).slice(0, 300),
-          nothing_saved: writesDispatched === 0, ...(capacity ? { retryable: false } : {}),
+          ...providerFailureOf(err), detail: String(err).slice(0, 300),
+          nothing_saved: writesDispatched === 0,
+          save_outcome: verifiedSave ? 'VERIFIED_SAVED' : writesDispatched === 0 ? 'VERIFIED_NO_WRITE' : 'UNKNOWN',
           _provider_calls: recordedProviderCalls(),
           ...(providerLedgerTruncated() ? { _provider_calls_truncated: true } : {}),
           ...(turnId !== undefined ? { retry_safe: released } : {}),

@@ -13,6 +13,9 @@ import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import { projectGraphForPersistence } from '../../../persisted-graph-projection.js';
 import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
 import { registrationTurnId } from '../../../graph-registration/registration-identity.js';
+import { createProposal } from '../../../agent-lane/proposal.js';
+import { proposalPendingAction } from '../../../agent-lane/durable-proposal.js';
+import { approvalChipIdFor } from '../../../agent-lane/approval-chips.js';
 
 type Json = Record<string, any>;
 let SCENARIO = '';
@@ -25,6 +28,8 @@ const PREPARED_WORDS = 'I have prepared your correction to 110 a week; press its
 const SAVED_WORDS = 'Saved: weekly orders are now 110.';
 
 let persisted: Json;
+let concurrentHold: Json | undefined;
+let noReceipt = false;
 const registered: Json[] = [];
 const graphWrites: Json[] = [];
 const turnRows = new Map<string, any>();
@@ -113,7 +118,9 @@ describe('PATH-B: the goal’s current level, typed as a correction, shows its c
     vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
       if (String(url).endsWith('/v1/conversations')) return json({ id: 'conv_level', object: 'conversation' });
       calls.push(JSON.parse(String(init?.body ?? '{}')) as Json);
-      return json(responsesBody(outputs.shift() ?? [{ type: 'message', text: 'Done.' }]));
+      const output = outputs.shift() ?? [{ type: 'message', text: 'Done.' }];
+      if (output[0]?.type === 'provider_failure') return json({ error: { message: 'Scripted continuation failed', type: 'invalid_request_error' } }, 400);
+      return json(responsesBody(output));
     }));
     vi.resetModules();
     process.env.AGENT_LANE_ENABLED = 'true';
@@ -131,10 +138,15 @@ describe('PATH-B: the goal’s current level, typed as a correction, shows its c
       }
       registered.push(b);
       persisted = structuredClone(b.graph) as Json;
-      return { graph_hash: hashOf(persisted), model_version: { version_number: 100 + registered.length, version_id: `v_reg_${registered.length}`,
-        mutation_id: `m_reg_${registered.length}` } };
+      if (concurrentHold !== undefined) {
+        const pending = await store.readMostRecentPendingActions();
+        turnRows.set('concurrent-offer', { id: 'row-concurrent', turn_id: 'concurrent-offer', request_hash: 'concurrent',
+          pending_actions: [...pending, concurrentHold], created_at: new Date().toISOString() });
+      }
+      return { graph_hash: hashOf(persisted), ...(noReceipt ? {} : { model_version: { version_number: 100 + registered.length, version_id: `v_reg_${registered.length}`,
+        mutation_id: `m_reg_${registered.length}` } }) };
     });
-    app.post('/assist/v1/scenarios/:id/versions', async () => ({ versions: registered.map((b, i) => ({ version_id: `v_reg_${i + 1}`, sequence: 101 + i,
+    app.post('/assist/v1/scenarios/:id/versions', async () => ({ versions: (noReceipt ? [] : registered).map((b, i) => ({ version_id: `v_reg_${i + 1}`, sequence: 101 + i,
       creation: { kind: 'committed_mutation', mutation_id: `m_reg_${i + 1}`, source_turn_id: registrationTurnId(SCENARIO, String(b.operation_id)) } })).reverse() }));
     app.post('/orchestrate/v2/turn', async () => ({ response_version: 2, assistant_text: '', suggested_actions: [], insights: [], blocks: [] }));
     await app.register(route.agentV1TurnRoute);
@@ -143,7 +155,7 @@ describe('PATH-B: the goal’s current level, typed as a correction, shows its c
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   beforeEach(() => {
     SCENARIO = randomUUID(); persisted = stored(); registered.length = 0; graphWrites.length = 0; turnRows.clear(); conversationIds.clear();
-    pausedRun = null; calls = []; outputs = []; preparedId = '';
+    pausedRun = null; calls = []; outputs = []; preparedId = ''; concurrentHold = undefined; noReceipt = false;
   });
   const post = (payload: Json) => app.inject({ method: 'POST', url: '/agent/v1/turn', headers: CORE,
     payload: { kind: 'message', scenario_id: SCENARIO, stage: 'analyse', turn_class: 'frame', ...payload } });
@@ -220,4 +232,137 @@ describe('PATH-B: the goal’s current level, typed as a correction, shows its c
     expect(registered, 'nothing registered').toHaveLength(0);
     expect(goalRaw(), 'the goal keeps its level').toBe(120);
   });
+
+  it.each([
+    [SAID, 110, 'orders a week', 'about 110 a week'],
+    ['Revenue was 2m on 2026-09-01. Our delivery baseline is about 105 a month, not 120; the deadline is June.', 105, 'deliveries a month', 'about 105 a month'],
+  ])('L2 declared-sum baseline: %s → one mixed card, one save, own receipt, full pair readback', async (words, value, unit, quote) => {
+    const goal = (persisted.nodes as Json[]).find(n => n.id === 'orders')!;
+    goal.goal_threshold_unit = unit; goal.observed_state.unit = unit;
+    goal.nonlinear_identity = { operation: 'sum', factor_ids: ['current_orders', 'extra_orders'], stated_in_brief: false };
+    persisted.nodes.push({ id: 'current_orders', kind: 'factor', label: 'Current weekly orders', observed_state: structuredClone(goal.observed_state) },
+      { id: 'extra_orders', kind: 'factor', label: 'Additional weekly orders', observed_state: { value: 0, raw_value: 0, cap: 187.5, unit: 'orders a week' } });
+    // A coincident label/number on a different factor must not bind or move with this declared quantity.
+    persisted.nodes.push({ id: 'coincidence', kind: 'factor', label: 'Current weekly orders', observed_state: structuredClone(goal.observed_state) });
+    const untouched = structuredClone(persisted.nodes.filter((n: Json) => n.id !== 'orders' && n.id !== 'current_orders'));
+    const declared = { ...CORRECTION.ops[0], value, unit, source: { origin: 'user', quote, named_source: null } };
+    const correction = { ...CORRECTION, ops: [declared,
+      { ...declared, op: 'set_factor_value', goal_id: undefined, factor_id: 'current_orders' }] };
+    delete correction.ops[1]!.goal_id;
+    if (value === 105) correction.ops.reverse();
+    outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop_call', args: correction }], [{ type: 'message', text: PREPARED_WORDS }]];
+    const first = await post({ turn_id: randomUUID(), message: words, source: 'composer' });
+    expect(first.statusCode, first.body).toBe(200);
+    expect(outputOf('prop_call')).toMatchObject({ status: 'ok', data: { proposal_id: expect.any(String) } });
+    const t1 = first.json() as Json;
+    expect(t1._proposal_fields.proposals).toHaveLength(1);
+    expect(outputOf('prop_call')!.data.public_label).toContain('Current weekly orders');
+    const rec = t1._proposal_fields.proposals[0];
+    preparedId = rec.proposal_id;
+    outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply_call' }], [{ type: 'message', text: SAVED_WORDS }]];
+    const saveTurnId = randomUUID();
+    const saved = await post({ turn_id: saveTurnId, message: rec.approve_action.message, source: 'chip', chip: { id: rec.approve_action.id },
+      proposal_edits: { proposal_id: rec.proposal_id, revision: rec.revision, digest: rec.digest, graph_hash: t1._proposal_fields.graph_hash, fields: [] } });
+    expect(saved.statusCode, saved.body).toBe(200);
+    expect(outputOf('apply_call')).toMatchObject({ status: 'ok', mutated: true, data: { saved: true } });
+    expect(registered).toHaveLength(1);
+    const operand = (persisted.nodes as Json[]).find(n => n.id === 'current_orders')!;
+    const afterGoal = (persisted.nodes as Json[]).find(n => n.id === 'orders')!;
+    expect(afterGoal.observed_state.raw_value).toBe(value);
+    expect(operand.observed_state).toEqual(afterGoal.observed_state);
+    const claims = (persisted.nodes as Json[]).flatMap(n => (n.user_statements ?? []).flatMap((r: Json) => r.statements));
+    expect(claims.filter((s: Json) => s.quote === quote)).toHaveLength(1);
+    expect(claims.find((s: Json) => s.quote === quote)).toMatchObject({ said_by: 'user', low: value, high: value, source: words });
+    expect(persisted.nodes.filter((n: Json) => n.id !== 'orders' && n.id !== 'current_orders')).toEqual(untouched);
+    const applied = outputOf('apply_call')!;
+    expect(applied.data.written[0].current_level_operand).toEqual({ factor_id: 'current_orders', observed_state: afterGoal.observed_state });
+    expect(saved.json()._agent.receipts).toContainEqual(applied.data.receipt);
+    expect(applied.data.receipt.source_turn_id).toBe(registrationTurnId(SCENARIO, registered[0]!.operation_id));
+    const count = calls.length;
+    const replay = await post({ turn_id: saveTurnId,
+      message: rec.approve_action.message, source: 'chip', chip: { id: rec.approve_action.id },
+      proposal_edits: { proposal_id: rec.proposal_id, revision: rec.revision, digest: rec.digest, graph_hash: t1._proposal_fields.graph_hash, fields: [] } });
+    expect(replay.statusCode, replay.body).toBe(200);
+    expect(replay.json()._agent.replayed).toBe(true);
+    expect(calls).toHaveLength(count);
+    expect(registered).toHaveLength(1);
+  });
+
+  it.each([
+    ['Correction: about 110 a week, not 120.', 110, 'orders a week', 'about 110 a week', 'Weekly orders'],
+    ['Revenue was 2m on 2026-09-01. Our delivery baseline is about 105 a month, not 120; the deadline is June.', 105, 'deliveries a month', 'about 105 a month', 'Monthly deliveries'],
+  ])('L2 save-outcome: %s → save → failed continuation → immediate same-turn replay, with held cards retained', async (words, value, unit, quote, label) => {
+    const goal = (persisted.nodes as Json[]).find(n => n.id === 'orders')!;
+    goal.label = label; goal.goal_threshold_unit = unit; goal.observed_state.unit = unit;
+    const correction = { ...CORRECTION, ops: [{ ...CORRECTION.ops[0], value, unit,
+      source: { origin: 'user', quote, named_source: null } }] };
+    outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop_call', args: correction }], [{ type: 'message', text: PREPARED_WORDS }]];
+    const t1 = (await post({ turn_id: randomUUID(), message: words, source: 'composer' })).json() as Json;
+    const rec = t1._proposal_fields?.proposals?.[0];
+    expect(rec, JSON.stringify(t1)).toBeDefined();
+    preparedId = rec.proposal_id;
+    const heldBefore = structuredClone(await store.readMostRecentPendingActions());
+    expect(heldBefore.length).toBeGreaterThan(0);
+    // An unrelated, still-held card arrives DURING the save, after the route read its initial pending set.
+    const other = createProposal({ scenario_id: SCENARIO, user_id: null, base_graph_identity_hash: hashOf(persisted),
+      base_model_identity: identityOf(persisted), operations: [{ op: 'update_node', path: 'vans', value: { label: 'Fleet vans' } }],
+      provenance: { authored_by: 'model_proposed', basis: 'A clearer label.' }, validation: { admitted: true, loss_count: 0, refusals: [] },
+      public_label: 'Rename Vans on the road to Fleet vans' });
+    concurrentHold = proposalPendingAction(other, { id: approvalChipIdFor(other.proposal_id), label: 'Make this change', message: 'Yes, rename it.' },
+      { scenario_id: SCENARIO, emitted_at_iso: new Date().toISOString() });
+    const turnId = randomUUID();
+    const payload = { turn_id: turnId, message: rec.approve_action.message, source: 'chip', chip: { id: rec.approve_action.id },
+      proposal_edits: { proposal_id: rec.proposal_id, revision: rec.revision, digest: rec.digest, graph_hash: t1._proposal_fields.graph_hash, fields: [] } };
+    outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply_call' }], [{ type: 'provider_failure' }]];
+    const failed = await post(payload);
+    expect(failed.statusCode, failed.body).toBe(502);
+    expect(failed.json()).toMatchObject({ error: 'UPSTREAM_ERROR', nothing_saved: false, retry_safe: false, save_outcome: 'VERIFIED_SAVED' });
+    expect(registered).toHaveLength(1);
+    expect(goalRaw()).toBe(value);
+    const answer = turnRows.get(turnId);
+    expect(answer, 'the catch records the answer BEFORE a retry, avoiding the 151s claim wait').toBeDefined();
+    expect(answer.user_message).toBe(payload.message);
+    expect(answer.assistant_message).toBe('The saved change is kept, but the reply didn’t arrive. Send a new message to continue.');
+    expect(answer.pending_actions, 'the latest durable holds survive the answer append').toEqual([...heldBefore, concurrentHold]);
+    const claimedCalls = calls.length;
+    const rowCount = turnRows.size;
+    const replay = await post(payload);
+    expect(replay.statusCode, replay.body).toBe(200);
+    const body = replay.json() as Json;
+    expect(body.assistant_text).toBe(answer.assistant_message);
+    expect(body._agent).toMatchObject({ replayed: true, tool_calls: [] });
+    expect(body.graph_hash).toBe(hashOf(persisted));
+    expect(body.draft_graph.nodes.find((n: Json) => n.id === 'orders').observed_state.raw_value).toBe(value);
+    expect(calls).toHaveLength(claimedCalls);
+    expect(turnRows.size).toBe(rowCount);
+    expect(registered).toHaveLength(1);
+    expect(goalRaw()).toBe(value);
+    const claims = (persisted.nodes as Json[]).find(n => n.id === 'orders')!.user_statements.flatMap((r: Json) => r.statements);
+    expect(claims.filter((s: Json) => s.quote === quote)).toHaveLength(1);
+    expect(claims.find((s: Json) => s.quote === quote)).toMatchObject({ said_by: 'user', low: value, high: value, source: words });
+  });
+
+  it('L2 unknown save: dispatched registration without its receipt never becomes verified saved on failure or replay', async () => {
+    outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop_call', args: CORRECTION }], [{ type: 'message', text: PREPARED_WORDS }]];
+    const t1 = (await post({ turn_id: randomUUID(), message: SAID, source: 'composer' })).json() as Json;
+    const rec = t1._proposal_fields.proposals[0]; preparedId = rec.proposal_id;
+    noReceipt = true;
+    const payload = { turn_id: randomUUID(), message: rec.approve_action.message, source: 'chip', chip: { id: rec.approve_action.id },
+      proposal_edits: { proposal_id: rec.proposal_id, revision: rec.revision, digest: rec.digest, graph_hash: t1._proposal_fields.graph_hash, fields: [] } };
+    outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply_call' }], [{ type: 'provider_failure' }]];
+    const failed = await post(payload);
+    expect(failed.statusCode).toBe(502);
+    expect(failed.json()).toMatchObject({ save_outcome: 'UNKNOWN', nothing_saved: false, retry_safe: false });
+    const answer = turnRows.get(payload.turn_id);
+    expect(answer.assistant_message).toBe('The reply didn’t arrive. Any changes already saved are kept. Send a new message to continue.');
+    const callsBefore = calls.length;
+    const replay = await post(payload);
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json().assistant_text).toBe(answer.assistant_message);
+    expect(replay.json()._agent.replayed).toBe(true);
+    expect(replay.json().draft_graph.nodes.find((n: Json) => n.id === 'orders').observed_state.raw_value).toBe(110);
+    expect(calls).toHaveLength(callsBefore);
+    expect(registered).toHaveLength(1);
+  });
+
 });
