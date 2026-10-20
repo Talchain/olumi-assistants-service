@@ -474,12 +474,19 @@ export function candidateToAdmittedGraph(input: unknown, usersWords?: string): C
   }
   const drawn = admitCandidateLinks(causal.map((l) => (placeholder.has(l) ? { ...l, effect_amount: null, effect_per_source_change: null } : l)), sizing);
   loss.push(...drawn.withheld.map((w) => note(`edges[${w.from}::${w.to}]`, { from: w.from, to: w.to }, w.detail, 'warn')));
-  const linkEdges = drawn.edges.map((e) => {
+  const linkEdges = drawn.edges.map((e): Rec => {
     const l = causal.find((x) => x.from === e.from && x.to === e.to)!;
     const aEdge = placeholder.has(l) || personSized.has(l) ? undefined : aEdgeOf.get(aPair(e.from, e.to));
     const quote = (l as Rec).source_quote;
     const sized: Rec = aEdge === undefined ? e : { ...aEdge, from: e.from, to: e.to };
-    return typeof quote === 'string' && quote.trim() !== '' ? { ...sized, provenance: { ...(sized.provenance ?? {}), source_quote: quote } } : sized;
+    // The selected A edge keeps A's science; only this admission's selected edges carry its ledger.
+    const linkLoss = aEdge === undefined ? drawn.loss.filter(row => row.field_path.startsWith(`edges[${e.from}::${e.to}].`)) : [];
+    loss.push(...linkLoss);
+    const defaults = linkLoss.filter(row => (drawn.projected_fields[`${e.from}::${e.to}`] ?? [])
+      .some(field => row.field_path === `edges[${e.from}::${e.to}].${field}`));
+    return { ...sized, provenance: { ...(sized.provenance ?? {}),
+      ...(defaults.length === 0 ? {} : { uncertainty_defaults: defaults }),
+      ...(typeof quote === 'string' && quote.trim() !== '' ? { source_quote: quote } : {}) } };
   });
 
   const topo = (from: string, to: string): { from: string; to: string } & Rec => ({ from, to, strength: { ...STRUCTURAL_EDGE_DEFAULTS.strength },

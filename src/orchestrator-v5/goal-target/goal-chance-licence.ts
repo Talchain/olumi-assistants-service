@@ -1,3 +1,4 @@
+import { linkDefaultAssumptionsOf, readLinkDefaultAssumptions, type LinkDefaultAssumptions } from '../../cee/magnitude/link-default-assumptions.js';
 import { readRecordedRunQuestion, RUN_QUESTION_EVIDENCE_KEY } from '../tools/handlers/run-input-snapshot.js';
 import { goalHorizonVerdict, withholdGoalFiguresForUntestedHorizon, withholdOptionsNotInPlaceAtPeriodEnd, withChanceReadbackWithheld } from './goal-horizon-verdict.js';
 import { readDispatchedGoalThreshold, recordedStaticScopeDeclared, recordedStaticLevelEvidence, hasRecordedLevelCalculation, STATIC_MODEL_SCOPE_NOTE } from './static-run-evidence.js';
@@ -212,6 +213,7 @@ export interface GoalChanceLicence {
     /** The target's frame as Olumi's VALIDATED reading holds it (`goalTargetBasisOf`): a change from today, or 'level'. Absent
      *  when there is no validated reading — never defaulted (R5 meaning at the producer, DL 12 Oct). */
     readonly frame?: 'level' | 'change_abs' | 'change_rel' };
+  readonly default_assumptions?: LinkDefaultAssumptions;
   /**
    * ⭐ D3 cut 5 (DL 0df0e1; Science d5 #87 6008242694 / 6008252938): present iff a USER-STATED link on a licensed option's
    * path to the goal carries an existence probability below 1 — the chances then also count Olumi's own assumption that
@@ -1589,7 +1591,20 @@ export function withGoalChanceLicence<E>(
   // #3167 fix-forward (AIE 6180618773 T9): the canonical licence carries what THIS Run recorded leaving out and the narrower
   // scope its chances cover (typed; the reply says it once in the AIE's words). A Run that recorded none carries nothing.
   const omitted = runOmittedRisks({ inference_warnings: warnings });
+  const sentGraph = isRec(constraints.sentRun?.graph) ? constraints.sentRun.graph : undefined;
+  const sentEdges = Array.isArray(sentGraph?.edges) ? sentGraph.edges.filter(isRec) : [];
+  const defaults = goalPathEdges(graph, goalId, Object.keys(licence.pct_by_option)).flatMap(edge => {
+    const sent = sentEdges.filter(e => e.from === edge.from && e.to === edge.to);
+    const loss = sent.length === 1 ? linkDefaultAssumptionsOf(edge, sent[0]) : [];
+    return loss.length === 0 ? [] : [{ from: String(edge.from), to: String(edge.to), loss }];
+  });
+  const assumptions: LinkDefaultAssumptions | undefined = defaults.length === 0 ? undefined : {
+    status: 'Illustrative calculation — uses untested Olumi assumptions.', origin: 'olumi',
+    coefficient_distribution: 'unbounded_normal', stated_range_use: 'recorded_not_sampled_or_tail_bounds', links: defaults,
+  };
   return { ...shown, inference_warnings: [...warnings, { ...licence, ...goalChanceHorizonOf(checked),
+    ...(assumptions === undefined ? {} : { default_assumptions: assumptions,
+      notes: [...new Set([...(licence.notes ?? []), assumptions.status])] }),
     ...(readings.length > 0 ? { goal_reading: { origin: 'olumi' as const, readings } } : {}),
     ...(omitted !== undefined ? { omitted_from_calculation: { scope: 'modelled_effects_only' as const, risks: omitted } } : {}) }] } as E;
 }
@@ -1728,6 +1743,7 @@ export function goalChanceLicenceForAgent(result: unknown): {
   /** Recovery Batch C: the stored sentence parts, read only when well formed (a record at odds with itself speaks for nothing). */
   chance_words?: string; notes?: readonly string[]; status_quo?: { option_id: string; line: string };
   estimate_only?: { base: number; unit: string }; provisional?: true; targets?: GoalTargetsBlock;
+  default_assumptions?: LinkDefaultAssumptions;
   period_end_assumption?: GoalChanceLicence['period_end_assumption'];
   /** G (AIE #94 6133027121): the licensed target itself, read only when well formed. */
   target?: GoalChanceLicence['target'];
@@ -1833,6 +1849,7 @@ export function goalChanceLicenceForAgent(result: unknown): {
     ...(withheld !== undefined ? { withheld_option_ids: withheld } : {}),
     ...(Object.keys(zeroSpreadReasons).length > 0 ? { withheld_reason_by_option: zeroSpreadReasons } : {}),
     ...batchCPartsOf(r, optionIds, withheld ?? []),
+    ...((assumptions) => assumptions === undefined ? {} : { default_assumptions: assumptions })(readLinkDefaultAssumptions(r.default_assumptions)),
     ...(licensedTargetOf(r.target) !== undefined ? { target: licensedTargetOf(r.target)! } : {}),
     ...((omission) => omission === undefined ? {} : { omitted_from_calculation: omission })(readRunOmissionScope(result)),
   };
