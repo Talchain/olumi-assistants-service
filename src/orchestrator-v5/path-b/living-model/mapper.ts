@@ -268,7 +268,11 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     ];
     const who = stated(l.source) ? { source: edited(l) ? 'user_specified' : 'brief_extraction', magnitude: 'user_stated' }
       : l.source === 'olumi' ? { source: 'cee_hypothesis', magnitude: 'olumi_estimate' } : {};
-    edges.push({ ...base, strength: sized, exists_probability: exists, provenance: { ...who, uncertainty_defaults: assumed } });
+    // The size in the person's own units, as every existing reader of a sized link reads it (`natural_effect`: the target's
+    // testability, the chance licence, the canvas): the change in `to` per +1 of `from`, and the β it was written for.
+    const natural_effect = { amount: sign * Math.abs(e.value!), amount_unit: to!.unit ?? '', per_source_change: 1,
+      per_source_change_unit: from!.unit ?? '', strength_mean: sized.mean, strength_mean_frame: 'edge_strength' as const };
+    edges.push({ ...base, strength: sized, exists_probability: exists, provenance: { ...who, natural_effect, uncertainty_defaults: assumed } });
   }
 
   // The exact sum: the goal's level today and the options' change, each one +1 definitional part (ISL adds them in the
