@@ -171,9 +171,10 @@ describe('PATH-B core: the AI\'s own words are the reply; protocol, cards, resul
     const coreCalls = sent.filter((b) => b.includes(CORE_RULE));
     expect(coreCalls.length).toBeGreaterThan(0);
     for (const b of coreCalls) expect((JSON.parse(b) as Json).instructions as string).toContain(AIE_SCOPE);
-    // Protocol and data are unchanged: the same readback, readiness and result block ride the wire.
+    // The graph readback is unchanged; core readiness stays in AI context rather than a host panel.
     expect(core.graph_hash).toBe(full.graph_hash);
-    expect(core.analysis_ready).toEqual(full.analysis_ready);
+    expect(full.analysis_ready).toBeDefined();
+    expect(core.analysis_ready).toBeUndefined();
   });
 
   it('⛔ a core turn whose scenario cannot hold its Conversation id stops before any model call, with a typed 503', async () => {

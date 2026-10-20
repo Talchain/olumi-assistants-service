@@ -201,11 +201,12 @@ async function buildApp(): Promise<FastifyInstance> {
   return app;
 }
 
-async function read(app: FastifyInstance) {
+async function read(app: FastifyInstance, headers: Record<string, string> = {}) {
   return await app.inject({
     method: "POST",
     url: `/assist/v1/scenarios/${SCENARIO}/graph`,
     payload: {},
+    headers,
   });
 }
 
@@ -1086,5 +1087,35 @@ describe("0.79 Slice R — current_read.delivered_record from the Run's run_deli
     readNewestRunDeliveryFor.mockResolvedValue(delivery(neutral));
     const body = await readOnce(runFact(GRAPH_HASH, false));
     expect(body.current_read.delivered_record).toStrictEqual(neutral);
+  });
+});
+
+
+// L4b R1: exercise the REAL cold reader, not the turn harness's stubbed graph route.
+describe('core cold Run data has one narrator', () => {
+  it.each(['Weekly orders', 'Weekly releases'])('L4b cold authority: %s keeps all data and withholding; A/conventional keep exact bytes', async (label) => {
+    const graph = { ...ADMITTED_GRAPH, nodes: ADMITTED_GRAPH.nodes.map(node =>
+      node.id === 'goal_growth' ? { ...node, label } : node) };
+    loadGraphAndBriefText.mockResolvedValue({ graph, briefText: `Compare ways to increase ${label}.` });
+    const fact = runAnalysisFact({ graphHash: computeAnalysisAffectingGraphHash(graph)!, mayName: true });
+    readFactsFor.mockResolvedValue([fact]);
+    const storedBytes = JSON.stringify(fact);
+    const app = await buildApp();
+    try {
+      type Cold = { analysis_result: Record<string, unknown>; canonical_analysis_view: unknown; request_id: string };
+      const a = await read(app, { 'x-olumi-ai-mode': 'openai' });
+      const conventional = await read(app, { 'x-olumi-ai-mode': 'conventional' });
+      const core = await read(app, { 'x-olumi-ai-mode': 'core' });
+      expect([a.statusCode, conventional.statusCode, core.statusCode]).toEqual([200, 200, 200]);
+      const { request_id: _a, ...aBody } = a.json<Cold>();
+      const { request_id: _conventional, ...conventionalBody } = conventional.json<Cold>();
+      const { request_id: _core, ...coreBody } = core.json<Cold>();
+      expect(aBody.analysis_result.summary).toBeTruthy();
+      expect(conventionalBody).toEqual(aBody);
+      expect(JSON.stringify(conventionalBody)).toBe(JSON.stringify(aBody));
+      expect(coreBody, 'only the host summary changes; all figures, canonical facts and withheld reasons survive')
+        .toEqual({ ...aBody, analysis_result: { ...aBody.analysis_result, summary: '' } });
+      expect(JSON.stringify(fact), 'reader projection never rewrites the stored Run').toBe(storedBytes);
+    } finally { await app.close(); }
   });
 });

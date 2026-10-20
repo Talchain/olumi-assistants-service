@@ -8,6 +8,8 @@
 import { randomUUID, createHash } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readCanonicalContext } from '../context-tool.js';
+import { withCanonicalAnalysisView } from '../../../agent-lane/__tests__/fixtures/canonical-analysis-read.js';
 import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import { projectGraphForPersistence } from '../../../persisted-graph-projection.js';
 import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
@@ -22,6 +24,12 @@ const CORRECTION = { public_label: 'Record today’s weekly orders', basis: 'The
 const PREPARED_WORDS = 'I have prepared your correction to 110 a week; press its card to save it.';
 
 let persisted: Json;
+let readiness: Json;
+let carriedResult: Json | undefined;
+let engineResult: Json | undefined;
+let runState: Json | undefined;
+let runCount = 0;
+const runFacts = new Map<string, Json>();
 const registered: Json[] = [];
 const graphWrites: Json[] = [];
 const turnRows = new Map<string, any>();
@@ -63,13 +71,13 @@ const store = {
   claimOpenAiConversationId: vi.fn(async (sid: string, id: string) => { if (!conversationIds.has(sid)) conversationIds.set(sid, id); return conversationIds.get(sid); }),
   loadGraph: async () => persisted,
   loadGraphAndBriefText: async () => ({ graph: persisted, briefText: null }),
-  readFactsFor: vi.fn(async () => []),
+  readFactsFor: vi.fn(async (ids: string[], kind?: string) => kind === 'run_analysis' ? ids.flatMap(id => runFacts.has(id) ? [runFacts.get(id)] : []) : []),
   readRecent: vi.fn(async () => []),
   readFactsWithTurnFor: async () => [],
   readCommittedTurn: vi.fn(async (_sid: string, id: string) => turnRows.get(id) ?? null),
   readMostRecentPendingActions: vi.fn(async () => [...turnRows.values()].filter((r) => !String(r.turn_id).endsWith(':claim')).at(-1)?.pending_actions ?? []),
   readAnalysisInvalidatedAt: vi.fn(async () => null),
-  readExistingScenario: vi.fn(async () => null),
+  readExistingScenario: vi.fn(async () => engineResult === undefined ? null : { graph: persisted }),
   append: vi.fn(async (write: Json) => {
     if (write.graph !== undefined) { graphWrites.push(write); return { id: `graph-${graphWrites.length}` }; }
     const key = String(write.turn_id);
@@ -134,17 +142,29 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
     process.env.AGENT_LANE_PREVIEW = 'false';
     const route = await import('../../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
-    app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: persisted, graph_hash: hashOf(persisted),
+    app.post('/assist/v1/scenarios/:id/graph', async () => withCanonicalAnalysisView({ graph: persisted, graph_hash: hashOf(persisted),
       graph_identity_hash: { kind: 'graph_identity', value: identityOf(persisted), algorithm: 'sha256' },
-      analysis_ready: { status: 'blocked', options: [], blockers: [] } }));
+      analysis_ready: readiness, ...(runState === undefined ? {} : { analysis_state: runState }),
+      ...(carriedResult === undefined ? {} : { analysis_result: carriedResult }) }, SCENARIO));
     app.post('/assist/v1/scenarios/:id/versions', async () => ({ versions: [] }));
-    app.post('/orchestrate/v2/turn', async () => ({ response_version: 2, assistant_text: '', suggested_actions: [], insights: [], blocks: [] }));
+    app.post('/orchestrate/v2/turn', async (req) => {
+      if (engineResult === undefined) return { response_version: 2, assistant_text: '', suggested_actions: [], insights: [], blocks: [] };
+      runCount += 1; carriedResult = structuredClone(engineResult);
+      runState = { run_state: { kind: 'complete_current', computed_at: '2026-10-20T03:00:00.000Z' }, leader_claim: { permitted: true, separation: 'separated' } };
+      const id = `engine-row-${runCount}`;
+      turnRows.set(String((req.body as Json).turn_id), { id, turn_id: (req.body as Json).turn_id, llm_calls_used: 0 });
+      runFacts.set(id, { fact_type: 'run_analysis', fact_version: 1, noop: false, result: {
+        scenario_id: SCENARIO, run_id: 'fixture-read-run', graph_hash_at_run: hashOf(persisted), computed_at: runState.run_state.computed_at } });
+      return { response_version: 2, assistant_text: 'Ran analysis.', suggested_actions: [], insights: [],
+        blocks: [carriedResult], analysis_state: runState, analysis_ready: readiness, graph_hash: hashOf(persisted) };
+    });
     await app.register(route.agentV1TurnRoute);
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   beforeEach(() => {
     SCENARIO = randomUUID(); persisted = stored(); registered.length = 0; graphWrites.length = 0; turnRows.clear(); conversationIds.clear();
+    readiness = { status: 'blocked', options: [], blockers: [] }; carriedResult = undefined; engineResult = undefined; runState = undefined; runCount = 0; runFacts.clear();
     pausedRun = null; calls = []; outputs = []; preparedId = ''; offeredCard = GIVE_YOUR_ESTIMATE;
   });
   const post = (payload: Json, headers: Record<string, string> = CORE) => app.inject({ method: 'POST', url: '/agent/v1/turn', headers,
@@ -188,4 +208,119 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
     expect(j.model_gap).toMatchObject({ kind: 'goal_target_missing' });
     expect(j.action_bar).toBeDefined();
   });
+
+  it.each(['delivery', 'staffing'])('L4 readiness producer: %s core omits the host list; A keeps its exact bytes; the AI keeps its facts', async (subject) => {
+    const label = subject === 'delivery' ? 'Vans on the road' : 'Engineers available';
+    readiness = { status: 'needs_user_input', options: [], user_questions: [`What is "${label}" today?`], blockers: [
+      { blocker_type: 'missing_value', factor_id: 'vans', factor_label: label, option_id: 'add_vans',
+        message: `Factor "${label}" needs a numeric value for option "Lease two more vans"`, suggested_action: 'add_value' },
+      { blocker_type: 'missing_value', factor_id: 'vans', factor_label: label,
+        message: `What is "${label}" today, before any option changes it? Without a current level the analysis would treat it as zero.`, suggested_action: 'add_value' },
+    ] };
+    const factor = persisted.nodes.find((n: Json) => n.id === 'vans');
+    factor.label = label;
+    delete factor.observed_state;
+    delete persisted.nodes.find((n: Json) => n.id === 'add_vans').interventions.vans;
+    const expectedContext = await readCanonicalContext({ dispatch: async () => ({ status: 200, json: {
+      graph: persisted, graph_hash: hashOf(persisted), graph_identity_hash: { value: identityOf(persisted) },
+    } }) }, { scenario_id: SCENARIO });
+    expect(expectedContext.status).toBe('ok');
+    if (expectedContext.status !== 'ok') throw new Error('synthetic context unavailable');
+    expect(expectedContext.data.readiness, 'the AI has real missing-input facts').toMatchObject({
+      blocking: expect.arrayContaining([expect.anything()]),
+    });
+    const original = structuredClone(readiness);
+    outputs = [[{ type: 'function_call', name: 'read_canonical_context', call_id: 'context_call', args: {} }], [{ type: 'message', text: ANSWER }]];
+    const turn = { turn_id: randomUUID(), message: QUESTION, source: 'composer' };
+    const core = await post(turn);
+    expect(core.statusCode, core.body).toBe(200);
+    expect(core.json().analysis_ready).toBeUndefined();
+    const output = calls.flatMap((c) => c.input ?? []).find((i: Json) => i.type === 'function_call_output' && i.call_id === 'context_call');
+    expect(JSON.parse(output.output), 'the AI keeps the exact canonical facts').toEqual(expectedContext);
+    expect(readiness, 'UI suppression never mutates tool context').toEqual(original);
+    const count = calls.length;
+    const replay = await post(turn);
+    expect(replay.json()._agent.replayed).toBe(true);
+    expect(replay.json().analysis_ready, 'replay is a producer too').toBeUndefined();
+    expect(calls).toHaveLength(count);
+    const a = await post({ ...turn, turn_id: randomUUID() }, {});
+    expect(a.statusCode, a.body).toBe(200);
+    const { computed_at: _at, freshness: _fresh, freshness_reason: _reason, current_graph_hash: _hash, ...aReady } = a.json().analysis_ready;
+    expect(aReady).toEqual(original);
+    const aReplay = await post({ ...turn, turn_id: a.json()._agent.turn_id }, {});
+    expect(aReplay.json()._agent.replayed).toBe(true);
+    expect(aReplay.json().analysis_ready).toEqual(a.json().analysis_ready);
+  });
+
+  it('L4 carried-result producer: no Run in core means no carried result; A keeps the exact result', async () => {
+    carriedResult = { type: 'analysis_result', summary: 'Ran analysis on the earlier saved model.', leading_option_id: null };
+    const original = structuredClone(carriedResult);
+    const reply = 'The earlier analysis used 120 orders a week; our deadline is 2026-12-01. I am only explaining it now.';
+    outputs = [[{ type: 'message', text: reply }]];
+    const turn = { turn_id: randomUUID(), message: QUESTION, source: 'composer' };
+    const core = await post(turn);
+    expect(core.statusCode, core.body).toBe(200);
+    expect(core.json()._agent.tool_calls).toEqual([]);
+    expect(core.json().assistant_text).toBe(reply);
+    expect(graphWrites).toEqual([]);
+    expect(core.json().blocks.filter((b: Json) => b.type === 'analysis_result')).toEqual([]);
+    const a = await post({ ...turn, turn_id: randomUUID() }, {});
+    expect(a.statusCode, a.body).toBe(200);
+    expect(a.json().blocks.find((b: Json) => b.type === 'analysis_result')).toEqual(original);
+    expect(carriedResult).toEqual(original);
+  });
+
+  it.each(['delivery', 'staffing'])('L4b real Run: %s core retains exact result data and AI facts, with no host summary; A retains exact bytes', async (subject) => {
+    const label = subject === 'delivery' ? 'Weekly orders' : 'Weekly releases';
+    persisted.nodes.find((n: Json) => n.id === 'orders').label = label;
+    readiness = { status: 'ready', options: [], blockers: [], analysis_admission: {
+      permitted_analysis_mode: 'quantified_provisional', reasons: [{ field: 'semantic_quality_sufficient', code: 'USER_STATED_PARAMETERS_NOT_MATERIAL' }],
+    } };
+    engineResult = { type: 'analysis_result', computed_against_hash: hashOf(persisted), leading_option_id: null,
+      summary: `Host narration for ${label}: none of your estimates sits on the comparison path.`,
+      win_probabilities: { 'Lease two more vans': 0.6, 'Carry on as now': 0.4 }, enrichment: {
+        option_comparison: [{ option_id: 'add_vans', option_label: 'Lease two more vans', win_probability: 0.6, outcome: { mean: 130 } },
+          { option_id: 'carry_on', option_label: 'Carry on as now', win_probability: 0.4, outcome: { mean: 110 } }],
+        inference_warnings: [{ code: 'GOAL_CHANCE_LICENSED', form: 'each', pct_by_option: {}, withheld_option_ids: ['add_vans', 'carry_on'],
+          withheld_reason_by_option: { add_vans: { reason: 'zero_spread', line: 'The spread is not established.' },
+            carry_on: { reason: 'zero_spread', line: 'The spread is not established.' } } }],
+      } };
+    const original = structuredClone(engineResult);
+    const reply = `${label}: the current model uses your settings. Our deadline is 2026-12-01; no chance is established.`;
+    outputs = [[{ type: 'function_call', name: 'run_analysis', call_id: 'voice_run', args: { reason: 'Run the saved model.', effects_timing: 'not_stated' } }],
+      [{ type: 'message', text: reply }]];
+    const turn = { turn_id: randomUUID(), message: 'Run analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } };
+    const core = await post(turn);
+    expect(core.statusCode, core.body).toBe(200);
+    const j = core.json() as Json;
+    expect(j._agent.tool_calls).toEqual([expect.objectContaining({ name: 'run_analysis', ok: true, ran: true })]);
+    expect(runCount).toBe(1);
+    expect(j.assistant_text).toBe(reply);
+    const aiOutput = calls.flatMap(c => c.input ?? []).find((i: Json) => i.type === 'function_call_output' && i.call_id === 'voice_run');
+    expect(JSON.parse(aiOutput.output)).toMatchObject({ status: 'ok', ran: true, data: { result: { enrichment: {
+      option_comparison: original.enrichment.option_comparison,
+    } } } });
+    expect(JSON.parse(aiOutput.output).data.result, 'core tool continuation keeps data and withholding, never host narration')
+      .toEqual({ ...original, summary: '', decision_sensitivity: { status: 'not_measured' }, tipping_point: { status: 'not_evaluated' } });
+    const block = j.blocks.find((b: Json) => b.type === 'analysis_result');
+    expect(block, 'only narration is retired; numbers and every withheld reason stay').toEqual({ ...original, summary: '' });
+    expect(j.canonical_analysis_view, 'typed canonical facts still ship').toBeDefined();
+    const cold = await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph`, payload: {} });
+    expect(cold.json().analysis_result, 'the A read fixture remains unmodified; the real core cold route has its own authority rows').toEqual(original);
+    expect(j.canonical_analysis_view, 'turn and cold reader retain identical canonical facts').toEqual(cold.json().canonical_analysis_view);
+    const count = calls.length;
+    const replay = await post(turn);
+    expect(replay.statusCode, replay.body).toBe(200);
+    expect(replay.json()._agent.replayed).toBe(true);
+    expect(replay.json().blocks.find((b: Json) => b.type === 'analysis_result')).toEqual(block);
+    expect(calls).toHaveLength(count);
+    expect(runCount).toBe(1);
+    const a = await post({ turn_id: randomUUID(), message: QUESTION, source: 'composer' }, {});
+    expect(a.statusCode, a.body).toBe(200);
+    expect(a.json().blocks.find((b: Json) => b.type === 'analysis_result')).toEqual({ ...original,
+      summary: 'Your own estimates are in the model, but none of them sits on the path that decides this comparison, so these figures are still provisional. '
+        + 'A share of runs in which an option fitted your goal better than the others is not the chance of reaching your target.\n\n' + original.summary });
+    expect(engineResult).toEqual(original);
+  });
+
 });
