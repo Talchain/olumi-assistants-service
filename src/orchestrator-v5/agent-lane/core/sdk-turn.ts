@@ -189,29 +189,29 @@ export interface CoreTurnSdk {
  * The scenario's core turns still running. A Conversation cannot take a new turn while a tool call in it is unanswered:
  * a turn that outlives its stream budget keeps running and committing (`streamed-turn-sse.ts`), and a turn sent meanwhile
  * was refused by the provider ("No tool output found for function call", R1 run 20261020T220553Z). So the scenario's
- * turns run one after another, in arrival order.
+ * turns run one after another, in arrival order. The route takes the slot BEFORE its first read of the model, so a turn
+ * that waited starts from what the turn before it saved, never from the model as it was when it arrived.
  */
 const turnsInFlight = new Map<string, Promise<void>>();
 
-/** One ordinary `core` turn: the agent, its tools and its memory, run by the SDK. Returns the loop's result shape. */
-export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult & { readonly sdk: CoreTurnSdk }> {
-  const key = input.ctx.scenario_id;
-  if (typeof key !== 'string' || key === '') return runOneCoreTurn(input);
-  const prior = turnsInFlight.get(key);
+/** Waits for the scenario's earlier core turns, then holds its slot until `release`; `waited` says an earlier turn was running. */
+export async function acquireCoreTurnSlot(scenarioId: string): Promise<{ readonly release: () => void; readonly waited: boolean }> {
+  const prior = turnsInFlight.get(scenarioId);
   let done!: () => void;
   const mine = (prior ?? Promise.resolve()).then(() => new Promise<void>((resolve) => { done = resolve; }));
-  turnsInFlight.set(key, mine);
-  try {
-    await prior;
-    return await runOneCoreTurn(input);
-  } finally {
-    // Released whether this turn answered or threw, so the next one never waits on a failure.
+  turnsInFlight.set(scenarioId, mine);
+  await prior;
+  let released = false;
+  return { waited: prior !== undefined, release: () => {
+    if (released) return;
+    released = true;
     done?.();
-    if (turnsInFlight.get(key) === mine) turnsInFlight.delete(key);
-  }
+    if (turnsInFlight.get(scenarioId) === mine) turnsInFlight.delete(scenarioId);
+  } };
 }
 
-async function runOneCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult & { readonly sdk: CoreTurnSdk }> {
+/** One ordinary `core` turn: the agent, its tools and its memory, run by the SDK. Returns the loop's result shape. */
+export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult & { readonly sdk: CoreTurnSdk }> {
   const now = input.now ?? (() => Date.now());
   const startedAt = now();
   const withheld = new Set(input.withheldTools ?? []);
