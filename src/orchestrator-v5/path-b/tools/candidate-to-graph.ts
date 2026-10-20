@@ -37,7 +37,7 @@ import { prepareProvisionalCandidate } from '../../agent-lane/runtime/build-mode
 import { admitCandidateLinks, type CandidateLink } from '../../agent-lane/admit-candidate.js';
 import { readUnitParts, sameUnit } from '../../agent-lane/same-unit.js';
 import { oneRoutePerEffect } from '../../agent-lane/one-route-per-effect.js';
-import { sayFigure } from '../../agent-lane/say-figure.js';
+import { isTwoStateSource, sayFigure } from '../../agent-lane/say-figure.js';
 import { admitAccumulationIdentities, withAdmittedAccumulations } from '../../agent-lane/accumulation-identity.js';
 import { clampForPersist, refitFramesForOlumiEstimates, refitFramesForStatedEffects } from '../../agent-lane/refit-frames.js';
 import { naturalAmountUnitOf, resolveMagnitudeFrame, sizeLink, unitOf, type LinkSizing, type StatedRangeEnd } from '../../../cee/magnitude/link-effect.js';
@@ -323,6 +323,9 @@ export function candidateToAdmittedGraph(input: unknown, usersWords?: string): C
   const goalNumbers: Rec = Object.fromEntries(Object.entries(aGoal ?? {}).filter(([k]) => k.startsWith('goal_threshold') || k === 'quantity_frame'
     || k === 'scale_frame' || k === 'goal_target_basis' || k === 'goal_level_reading'));
   const goalNode: Rec = { ...goalNumbers,
+    // A drafter reading the brief is not user approval; whoOf checks the declared origin and literal warrant.
+    ...(threshold && targetWho === 'user' ? { threshold_source: 'brief_extraction' }
+      : threshold && targetWho === 'olumi' ? { threshold_source: 'cee_inference' } : {}),
     ...(goalLevel !== undefined ? { observed_state: { ...goalLevel, ...valueStamp(goalWho) } } : {}),
     ...(threshold && ['>=', '<=', '>', '<'].includes(g.operator) ? { goal_direction: g.operator } : {}),
     ...(finite(g.horizon_months) && g.horizon_months > 0 ? { goal_horizon_months: g.horizon_months } : {}),
@@ -355,6 +358,8 @@ export function candidateToAdmittedGraph(input: unknown, usersWords?: string): C
       // readiness reads; said in A's words.
       if (an?.category !== undefined && an.category !== f.role) loss.push(...aSaid(`nodes[${an.label}].category`));
       return { label: f.label, kind: 'factor' as const, provenance: f.provenance, node: {
+        // Read only the AI's declared unit; no option endpoints or labels may declare a state or today's baseline.
+        ...(isTwoStateSource([], undefined, f.unit) ? { factor_type: 'boolean' } : {}),
         category: an?.category ?? f.role, ...(an?.scale_frame !== undefined ? { scale_frame: an.scale_frame } : {}), ...outOfRun(an, 'factor', who),
         ...(level !== undefined ? { observed_state: { ...numbersOf(level), ...valueStamp(who) },
           ...(typeof f.baseline_evidence?.quote === 'string' ? { source_quote: f.baseline_evidence.quote } : {}) } : {}),
