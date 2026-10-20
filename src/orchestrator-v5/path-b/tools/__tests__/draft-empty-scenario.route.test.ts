@@ -15,7 +15,8 @@ import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.j
 import { registrationTurnId } from '../../../graph-registration/registration-identity.js';
 import { candidateToGraph } from '../candidate-to-graph.js';
 import { readCanonicalContext } from '../context-tool.js';
-import { valueProvenanceOf } from '../../../../cee/provenance/provenance-of.js';
+import { resolveRunAdmission } from '../../../tools/handlers/analysis-ready-core.js';
+import { settingProvenanceOf, valueProvenanceOf } from '../../../../cee/provenance/provenance-of.js';
 import { placeholderGoalPaths, unsizedLeaderGoalPaths } from '../../../agent-lane/goal-certainty.js';
 
 type Json = Record<string, any>;
@@ -74,6 +75,7 @@ const SUM_DRAFT: Json = {
 let drafterAnswer: Json = DRAFT;
 let draftSchema: Json = {};
 let draftInstructions = '';
+const ACTION_TIMING_SENTENCE = 'Declare stated additions in interventions with value_kind=additional, leaving unknown current levels as questions, and stated goal time limits in horizon_months and verbatim deadline_words, keeping relative periods relative without inventing dates.';
 const ESTIMATE_SENTENCE = 'Where the brief does not state a level, setting or size the model needs, propose a defensible Olumi starting estimate with origin=olumi and stance=estimate, explaining its basis, unit and period for the person to approve through the existing card, never presenting it as theirs; if no defensible estimate is possible, state the limitation and ask for the missing input rather than silently leaving the model unrunnable; in every draft with a supported additive goal, declare the sum identity with the separate current-level factor and every distinct addition as bound operands under the rules above.';
 
 const rows = new Map<string, { id: string; turn_id: string; request_hash: string }>();
@@ -189,7 +191,7 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
   ])('L5 sent bytes: estimates and every supported sum, on the real route (%s)', async (brief) => {
     briefArg = brief;
     await turn();
-    const addition = draftInstructions.slice(-(ESTIMATE_SENTENCE.length));
+    const addition = draftInstructions.slice(0, -(ACTION_TIMING_SENTENCE.length + 1)).slice(-ESTIMATE_SENTENCE.length);
     expect(addition).toBe(ESTIMATE_SENTENCE);
     expect(createHash('sha256').update(addition, 'utf8').digest('hex')).toBe('15c1eae82146b2ef05b6e3a78af3a9568af58643e41472fcee15410a628c9085');
   });
@@ -300,6 +302,56 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
     const factor = (saved!.nodes as Json[]).find((n) => n.label === 'Evening slots')!;
     expect(valueProvenanceOf(factor.observed_state).origin).toBe('unknown');
     expect(factor.user_statements ?? []).toEqual([]);
+  });
+
+
+  // Replayed strict output, not simulated model intelligence: the sent-text assertion proves the prompt change separately.
+  it.each(([
+    ['library', 'Librarians on shift'], ['workshop', 'Workshop technicians'],
+  ] as const).flatMap(([domain, label]) => [true, false].flatMap((known) => [true, false].map((timed) => ({ domain, label, known, timed })))))('L14 real route: $domain known=$known timed=$timed', async ({ domain, label, known, timed }) => {
+    const aim = `We want to serve 300 customers${timed ? ' in the next three months' : ''}.`;
+    const today = known ? `Our ${domain} has six people today.` : `We have not counted our ${domain} team.`;
+    const action = 'We could add two people.';
+    // Another entity's number and date cannot become this team's level or the goal's deadline.
+    briefArg = `${aim} ${today} ${action} The other branch has eight people as of 2026-09-01.`;
+    const subject = (kind: string, name: string, factor_label: string | null = null) => ({ kind, label: name, factor_label, to_label: null });
+    const statement = (quote: string, kind: string, name: string, value: number, factor_label: string | null = null) => ({
+      quote, subject: subject(kind, name, factor_label), field: 'level', form: 'point', value, low: null, high: null, unit: 'people',
+      qualifier: null, conditions: null, speaker: 'user', stance: kind === 'option' ? 'hypothetical' : 'stated_current',
+    });
+    drafterAnswer = { ...DRAFT,
+      goal: { ...DRAFT.goal, source_quote: aim, horizon_months: timed ? 3 : null, deadline_words: timed ? 'in the next three months' : null },
+      factors: [{ ...DRAFT.factors[0], label, baseline_known: known, baseline_value: known ? 6 : null, plausible_max: 12,
+        unit: 'people', provenance: known ? 'explicit' : 'inferred', origin: known ? 'user' : 'unknown', stance: 'stated_current' }],
+      options: [DRAFT.options[0], { ...DRAFT.options[1], label: 'Add two people', interventions: [
+        { factor_label: label, value: 2, value_kind: 'additional', unit: 'people', provenance: 'explicit', origin: 'user', stance: 'hypothetical' },
+      ] }],
+      links: [{ ...DRAFT.links[0], from: label }],
+      statements: [...(known ? [statement(today, 'factor', label, 6)] : []), statement(action, 'option', 'Add two people', 2, label)],
+    };
+    const body = await turn();
+    expect(draftCall(body)).toMatchObject({ ok: true, mutated: true });
+    expect(registered).toHaveLength(1);
+    const graph = JSON.parse(JSON.stringify(saved)) as Json;
+    const factor = (graph.nodes as Json[]).find((n) => n.label === label)!;
+    const option = (graph.nodes as Json[]).find((n) => n.label === 'Add two people')!;
+    const goal = (graph.nodes as Json[]).find((n) => n.kind === 'goal')!;
+    const gaps = resolveRunAdmission(graph).assessment.blockingIssues.filter((i) => i.factor_id === factor.id);
+    if (known) {
+      expect(option.interventions[factor.id].raw_value).toBe(8);
+      expect(settingProvenanceOf(option.interventions[factor.id]).origin).toBe('ai');
+      expect(gaps.filter((i) => i.code === 'MISSING_OPTION_VALUE')).toEqual([]);
+      expect(factor.observed_state.raw_value).toBe(6);
+    } else {
+      expect(option.interventions?.[factor.id]).toBeUndefined();
+      expect(factor.observed_state).toBeUndefined();
+      expect(gaps.map((i) => i.code)).toContain('MISSING_FACTOR_LEVEL');
+    }
+    expect(goal.goal_horizon_months).toBe(timed ? 3 : undefined);
+    expect(goal.goal_deadline_as_stated).toBe(timed ? 'in the next three months' : undefined);
+    expect(goal.source_quote).toBe(aim);
+    expect(goal.goal_horizon?.deadline).toBeUndefined();
+    expect(draftInstructions.slice(-ACTION_TIMING_SENTENCE.length)).toBe(ACTION_TIMING_SENTENCE);
   });
 
   it('CONTRAST: a non-null read that is not a graph is still malformed: refused, nothing registered', async () => {
