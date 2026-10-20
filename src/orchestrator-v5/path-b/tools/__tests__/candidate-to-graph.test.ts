@@ -1174,6 +1174,38 @@ describe('candidateToGraph: conversion + science only', () => {
     expect(blocked).toContainEqual({ field_path: 'edges[late_shift::extra_loaves_from_the_late_shift]', declared: 'user', missing: 'link_size_origin' });
   });
 
+  // ⭐ GAP 1 (K5 loop, VERIFIER 23:47Z on 4d8080ea; DL 20 Oct): an added part's level of 0 that the AI declared `inferred`, with no statement of
+  // it, read as a figure of unknown origin (`unverified_brief`). Zero by construction is Olumi's reading.
+  const k5Level = (edit: (d: Rec) => void = () => {}): Rec => {
+    const draft = k5Draft();
+    edit(draft);
+    const out = candidateToGraph(draft, { words: `${K5_AIM} ${K5_SAID}`, recorded_at: AT });
+    if ('refused' in out) throw new Error(out.refused);
+    return byLabel(out.graph as Rec, 'Extra loaves from the late shift');
+  };
+  it('⭐ GAP 1: an added part\'s 0 today that nobody is recorded saying is Olumi\'s reading, never a figure of unknown origin', () => {
+    const n = k5Level();
+    expect(n.observed_state).toMatchObject({ value: 0, source: 'cee_inference' });
+    expect(valueProvenanceOf(n.observed_state).origin).toBe('ai');
+    expect(n.provenance).not.toBe('unverified_brief');
+  });
+  it.each([
+    ['a figure other than 0', (d: Rec) => { (d.factors as Rec[])[1]!.baseline_value = 5; }, 'unknown'],
+    ['a 0 with a recorded statement of it', (d: Rec) => { (d.statements as Rec[]).push(said('A late shift would add about 12 loaves a day (anywhere from 8 to 16).',
+      { kind: 'factor', label: 'Extra loaves from the late shift' }, 'level', 'point', { value: 0, unit: 'loaves a day' }, 'user')); }, 'unknown'],
+    ['a 0 the AI declared the user\'s', (d: Rec) => { (d.factors as Rec[])[1]!.provenance = 'explicit'; }, 'human'],
+  ] as const)('⛔ GAP 1 contrast: %s keeps its declared origin', (_name, edit, origin) => {
+    expect(valueProvenanceOf(k5Level(edit).observed_state).origin).toBe(origin);
+  });
+  // ⛔ No words, no claim: a size with no quote is never said as the user's or the brief's words ("Your brief says "1 per 1"").
+  it('⛔ K5 LOOP: a declared size with no quote is said as drafted, never as the brief\'s or the user\'s words', () => {
+    const out = candidateToGraph(k5Draft(), { words: `${K5_AIM} ${K5_SAID}`, recorded_at: AT });
+    if ('refused' in out) throw new Error(out.refused);
+    const note = (out.loss as unknown as Rec[]).find((l) => l.field_path === 'edges[extra_loaves_from_the_late_shift::loaves_a_day].link_size_not_used');
+    expect(note?.reason).toBe('This link was drafted at 1 per 1; this path doesn\'t use that size in the calculation yet, so the link '
+      + 'from "Extra loaves from the late shift" to "Loaves a day" keeps Olumi\'s placeholder size.');
+  });
+
   it('STATEMENTS CARRIED (contrast): without the user\'s words nothing is recorded, and the rest of the model is the same', () => {
     const bare = converted(carriedDraft());
     expect((bare.graph.nodes as Rec[]).filter((n) => n.user_statements !== undefined)).toEqual([]);

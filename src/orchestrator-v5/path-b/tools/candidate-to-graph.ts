@@ -235,8 +235,9 @@ export function candidateToAdmittedGraph(input: unknown, usersWords?: string): C
     }
     return undefined;
   };
-  const speakerOf = (kind: string, label: string, extra: (s: Rec) => boolean = () => true): unknown =>
-    statements.find((s) => s?.subject?.kind === kind && canonicalLabel(String(s.subject.label ?? '')) === canonicalLabel(label) && extra(s))?.speaker;
+  const statementOf = (kind: string, label: string, extra: (s: Rec) => boolean = () => true): Rec | undefined =>
+    statements.find((s) => s?.subject?.kind === kind && canonicalLabel(String(s.subject.label ?? '')) === canonicalLabel(label) && extra(s));
+  const speakerOf = (kind: string, label: string, extra?: (s: Rec) => boolean): unknown => statementOf(kind, label, extra)?.speaker;
   // ⛔ THE DRAFTER'S OWN CONTRACT (runtime/build-model.ts `introducedBy`; DL 19 Oct, gap 3 swap): `explicit` is supplied in the
   // retained source, `ai_proposed` is Olumi's own addition, and `inferred` is "an interpretation or reformulation of a supplied item,
   // or genuinely unresolved introduction … never ai_proposed by default". So `inferred`, or anything else, is UNKNOWN: never the
@@ -301,8 +302,13 @@ export function candidateToAdmittedGraph(input: unknown, usersWords?: string): C
       const an = aFor(f.label);
       // A factor's `provenance` says who introduced the ITEM; its level's own declared field is `baseline_known` ("true only for a
       // baseline supplied by the user or supported evidence; a provisional AI estimate keeps this false").
-      const levelSpeaker = speakerOf('factor', f.label, (s) => s.field === 'level');
-      const who = levelSpeaker === 'other' || levelSpeaker === 'unknown' || f.baseline_known === true ? whoOf(f.provenance, levelSpeaker) : 'olumi';
+      const levelStatement = statementOf('factor', f.label, (s) => s.field === 'level');
+      const levelSpeaker = levelStatement?.speaker;
+      // ⭐ GAP 1 (K5 loop, DL 20 Oct): a level of 0 the AI declared `inferred` that no statement records anyone saying (an increment
+      // zero by construction, the AIE's sentence) is Olumi's reading, never a figure of unknown origin the person is shown as giving.
+      const zeroByConstruction = levelStatement === undefined && f.provenance === 'inferred' && f.baseline_value === 0;
+      const who = zeroByConstruction ? 'olumi'
+        : levelSpeaker === 'other' || levelSpeaker === 'unknown' || f.baseline_known === true ? whoOf(f.provenance, levelSpeaker) : 'olumi';
       factorWho.set(canonicalLabel(f.label), who);
       if (who === 'other' && an?.observed_state !== undefined) blocked.push({ field_path: `nodes[${slugId(f.label)}].observed_state`, declared: 'other', missing: 'speaker_name' });
       if (finite(f.baseline_value) && an?.observed_state === undefined) loss.push(notConverted(a, `nodes[${slugId(f.label)}].observed_state`, f.label, "Today's level", f.baseline_value));
@@ -441,9 +447,12 @@ export function candidateToAdmittedGraph(input: unknown, usersWords?: string): C
       sizing.set(`${from}::${to}`, theirs);
     } else if (sized) {
       const quoted = (l as Rec).source_quote;
-      const words = typeof quoted === 'string' && quoted.trim() !== '' ? quoted.trim() : `${l.effect_amount} per ${l.effect_per_source_change}`;
+      // ⛔ No words, no claim (K5 loop, DL 20 Oct): a size with no quote was never "said" by the user or the brief.
+      const sizeWords = typeof quoted === 'string' && quoted.trim() !== ''
+        ? `${sizeBy === 'user' ? 'You said' : 'Your brief says'} "${quoted.trim()}"; this path doesn't use ${sizeBy === 'user' ? 'your link sizes' : 'link sizes from your brief'}`
+        : `This link was drafted at ${l.effect_amount} per ${l.effect_per_source_change}; this path doesn't use that size`;
       loss.push(note(`edges[${from}::${to}].link_size_not_used`, { effect_amount: l.effect_amount, effect_per_source_change: l.effect_per_source_change },
-        `${sizeBy === 'user' ? 'You said' : 'Your brief says'} "${words}"; this path doesn't use ${sizeBy === 'user' ? 'your link sizes' : 'link sizes from your brief'} in the calculation yet, so the link `
+        `${sizeWords} in the calculation yet, so the link `
         + `from "${nodeById.get(from)?.label}" to "${nodeById.get(to)?.label}" keeps Olumi's placeholder size.`, 'warn'));
       blocked.push({ field_path: `edges[${from}::${to}]`, declared: sizeBy as BlockedSchema['declared'], missing: 'link_size_origin' });
       placeholder.add(link);

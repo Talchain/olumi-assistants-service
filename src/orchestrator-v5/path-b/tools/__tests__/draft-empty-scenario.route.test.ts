@@ -44,6 +44,18 @@ const DRAFT = (() => {
   };
 })();
 
+/**
+ * ⭐ K5 LOOP SHAPE (VERIFIER 23:47Z on 4d8080ea), synthetic: an added part at 0 today the AI declared `inferred` with no statement of it, and
+ * its one-for-one definition into the goal declared `inferred` with no quote.
+ */
+const ADDED = 'Extra bookings from evening slots';
+const ADDED_DRAFT: Json = {
+  ...DRAFT,
+  factors: [...DRAFT.factors, { label: ADDED, role: 'observable', baseline_known: true, baseline_value: 0, unit: 'bookings a week', provenance: 'inferred', plausible_max: null }],
+  links: [{ ...DRAFT.links[0], to: ADDED }, { ...DRAFT.links[0], from: ADDED, effect_amount: 1, effect_per_source_change: 1, effect_provenance: 'inferred', definitional: true }],
+};
+let drafterAnswer: Json = DRAFT;
+
 const rows = new Map<string, { id: string; turn_id: string; request_hash: string }>();
 const conversationIds = new Map<string, string>();
 const store = {
@@ -108,7 +120,7 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
       const ok = (output: Record<string, unknown>[]) => new Response(JSON.stringify(responsesBody(output)), { status: 200, headers: { 'content-type': 'application/json' } });
       // The construction's structured calls: the whole candidate gets the drafter's answer; any other structured step answers nothing.
       if (body.text?.format?.type === 'json_schema') {
-        return ok(body.text.format.name === 'whole_candidate' ? [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(DRAFT) }] }] : []);
+        return ok(body.text.format.name === 'whole_candidate' ? [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(drafterAnswer) }] }] : []);
       }
       // The core agent: first the draft call, then its words.
       const input = Array.isArray(body.input) ? body.input as Json[] : [];
@@ -140,7 +152,7 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { SCENARIO = randomUUID(); rows.clear(); conversationIds.clear(); saved = null; registered = []; read = EMPTY_READ; toolOutputs.length = 0; });
+  beforeEach(() => { SCENARIO = randomUUID(); rows.clear(); conversationIds.clear(); saved = null; registered = []; read = EMPTY_READ; toolOutputs.length = 0; drafterAnswer = DRAFT; });
 
   const turn = async (): Promise<Json> => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', headers: { 'x-olumi-ai-mode': 'core' }, payload: {
@@ -175,6 +187,17 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
     const answer = JSON.parse(String(toolOutputs.find((o) => o.call_id === 'draft_call')?.output ?? '{}')) as Json;
     expect(answer).toMatchObject({ status: 'ok', mutated: true, data: { provisional: 'olumi', draft: { declared: DRAFT, not_expressible: converted.blocked_schema } } });
     expect(answer.data.draft.said).toEqual([...new Set(converted.loss.map((l) => l.reason))]);
+  });
+
+  it('⭐ GAP 1 + K5 LOOP (real path): the added part\'s 0 is saved as Olumi\'s, and a size with no quote is never said as the brief\'s', async () => {
+    drafterAnswer = ADDED_DRAFT;
+    const body = await turn();
+    expect(draftCall(body), JSON.stringify(body._agent)).toMatchObject({ ok: true, mutated: true, outcome: 'ok' });
+    const part = (registered[0]!.graph.nodes as Json[]).find((n) => n.label === ADDED)!;
+    expect(part.observed_state).toMatchObject({ value: 0, source: 'cee_inference' });
+    const said = (JSON.parse(String(toolOutputs.find((o) => o.call_id === 'draft_call')?.output ?? '{}')) as Json).data.draft.said as string[];
+    expect(said).toContain(`This link was drafted at 1 per 1; this path doesn't use that size in the calculation yet, so the link from "${ADDED}" to "${GOAL}" keeps Olumi's placeholder size.`);
+    expect(said.filter((x) => x.includes('says "1 per 1"'))).toEqual([]);
   });
 
   it('CONTRAST: a non-null read that is not a graph is still malformed: refused, nothing registered', async () => {
