@@ -254,4 +254,26 @@ describe('thin core mapper: living model → GraphV3', () => {
     delete saved.aims[0].target.change_kind;
     expect(LivingModel.parse(saved).aims[0]!.target).toMatchObject({ current_unit: null, change_kind: null });
   });
+
+  it('science check 5bbceeec, point 6: a ceiling below today keeps today on its frame; Olumi\'s base is not used for a change; the from-today premise is said', () => {
+    const target = (t: Partial<NonNullable<LivingModelT['aims'][number]['target']>>, aim: Partial<LivingModelT['aims'][number]> = {}) => {
+      const m: LivingModelT = structuredClone(KNOWN_ANSWER);
+      m.aims[0] = { ...m.aims[0]!, ...aim, target: { ...m.aims[0]!.target!, ...t } };
+      return mapLivingModel(m);
+    };
+    const goal = (out: ReturnType<typeof mapLivingModel>) => (out.graph.nodes as Rec[]).find((n) => n.id === 'g')!;
+    // Cut by 20 from 70 → no more than 50, with today (70) admitted on the goal's level frame.
+    const cut = target({ comparator: 'decrease', value: 20 });
+    expect(goal(cut)).toMatchObject({ goal_threshold_raw: 50, goal_threshold_cap_provenance: 'level_frame', observed_state: { raw_value: 70 } });
+    expect(cut.withheld.filter((w) => w.id === 'g')).toEqual([]);
+    expect(cut.assumed).toEqual([{ id: 'g', text: "Carrying on as now leaves units at today's 70 units; the change is measured from that." }]);
+    // A level ceiling below today (no more than 60, today 180): the same frame keeps today on its scale.
+    expect(goal(target({ comparator: '<=', value: 60, current: 180 }))).toMatchObject({ goal_threshold_raw: 60, observed_state: { raw_value: 180 } });
+    // A change on Olumi's base: withheld, never computed as a plain level target.
+    const olumis = target({ comparator: 'increase', value: 10, unit: '%', current_unit: 'units' }, { source: 'olumi', quote: null });
+    expect(olumis.withheld).toContainEqual({ id: 'g', reason: 'change_base_not_theirs' });
+    expect(goal(olumis)).not.toHaveProperty('goal_threshold');
+    // CONTROL: a level target says no from-today premise.
+    expect(mapLivingModel(KNOWN_ANSWER).assumed).toEqual([]);
+  });
 });
