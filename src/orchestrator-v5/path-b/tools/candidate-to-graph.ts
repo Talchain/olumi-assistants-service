@@ -35,12 +35,13 @@ import {
 } from '../../agent-lane/admit-model.js';
 import { prepareProvisionalCandidate } from '../../agent-lane/runtime/build-model.js';
 import { admitCandidateLinks, type CandidateLink } from '../../agent-lane/admit-candidate.js';
-import { sameUnit } from '../../agent-lane/same-unit.js';
+import { readUnitParts, sameUnit } from '../../agent-lane/same-unit.js';
 import { oneRoutePerEffect } from '../../agent-lane/one-route-per-effect.js';
 import { sayFigure } from '../../agent-lane/say-figure.js';
 import { admitAccumulationIdentities, withAdmittedAccumulations } from '../../agent-lane/accumulation-identity.js';
 import { clampForPersist, refitFramesForOlumiEstimates, refitFramesForStatedEffects } from '../../agent-lane/refit-frames.js';
-import { naturalAmountUnitOf, resolveMagnitudeFrame, sizeLink, type LinkSizing, type StatedRangeEnd } from '../../../cee/magnitude/link-effect.js';
+import { naturalAmountUnitOf, resolveMagnitudeFrame, sizeLink, unitOf, type LinkSizing, type StatedRangeEnd } from '../../../cee/magnitude/link-effect.js';
+import { linkDefaultAssumptionsOf } from '../../../cee/magnitude/link-default-assumptions.js';
 import { magnitudeNodes, percentLevelIds } from '../../../cee/magnitude/frame-defaulted-links.js';
 import { nodeProvenanceDisplay } from '../../../cee/provenance/provenance-of.js';
 import { UNSIZED_OLUMI_RISK_REASON } from '../../agent-lane/unsized-risk.js';
@@ -218,17 +219,20 @@ export function candidateToAdmittedGraph(input: unknown, usersWords?: string): C
   /**
    * ⭐ K5 P0 (DL ruling (a) + #3485 R1, 19 Oct): the user's own statement of exactly this link's effect that backs a person's
    * declared size: speaker user; its quote a byte substring of the user's words that WRITES the figure with its sign (#3475's literal
-   * check, `quoteHoldsFigure`); its point that figure; its unit the link's natural unit (`sameUnit`: a weekly figure never sizes a
-   * daily link). A stated range rides on A's existing carrier (`stated_range`, the point inside, both ends written); a range with
-   * no stated point backs nothing (no invented midpoint). `undefined` when nothing backs it.
+   * check, `quoteHoldsFigure`); its point that figure; its unit the target's natural unit or a rate with that numerator and the driver's
+   * unit as denominator (the existing unit grammar: a weekly figure never sizes a daily link). A stated range rides on A's
+   * existing carrier (`stated_range`, the point inside, both ends written); a range with no stated point backs nothing (no invented midpoint). `undefined` when nothing backs it.
    */
-  const userRecordOf = (l: CandidateLink, naturalUnit: string): { readonly range?: StatedRangeEnd } | undefined => {
+  const userRecordOf = (l: CandidateLink, naturalUnit: string, sourceUnit: string | undefined): { readonly range?: StatedRangeEnd } | undefined => {
     const amount = l.effect_amount;
     if (usersWords === undefined || !finite(amount)) return undefined;
     for (const st of statements) {
+      const rate = readUnitParts(st?.unit);
+      const rateAgrees = rate?.per != null && sameUnit(rate.per.join(' '), sourceUnit)
+        && JSON.stringify({ ...rate, per: null }) === JSON.stringify(readUnitParts(naturalUnit));
       if (st?.subject?.kind !== 'link' || st.field !== 'effect' || st.speaker !== 'user' || typeof st.quote !== 'string' || !usersWords.includes(st.quote)
         || canonicalLabel(String(st.subject.label ?? '')) !== canonicalLabel(l.from) || canonicalLabel(String(st.subject.to_label ?? '')) !== canonicalLabel(l.to)
-        || st.value !== amount || !quoteHoldsFigure(st.quote, amount) || !sameUnit(st.unit, naturalUnit)) continue;
+        || st.value !== amount || !quoteHoldsFigure(st.quote, amount) || !(sameUnit(st.unit, naturalUnit) || rateAgrees)) continue;
       if (!finite(st.low) && !finite(st.high)) return {};
       if (finite(st.low) && finite(st.high) && st.low < Math.abs(amount) && Math.abs(amount) < st.high
         && quoteHoldsFigure(st.quote, st.low) && quoteHoldsFigure(st.quote, st.high)) return { range: { low: st.low, high: st.high, text: st.quote, end: 'centre' } };
@@ -443,7 +447,7 @@ export function candidateToAdmittedGraph(input: unknown, usersWords?: string): C
     const sized = finite(l.effect_amount) && finite(l.effect_per_source_change) && l.effect_per_source_change !== 0 && sizeBy !== 'olumi';
     // The person's record-backed size, through A's own sizing as theirs (Science census exception, DL ruling (a)); used only
     // where A's sizing holds it as theirs, else it keeps the placeholder below, said and listed.
-    const record = sized && sizeBy === 'user' ? userRecordOf(l, naturalAmountUnitOf(view.get(to)!)) : undefined;
+    const record = sized && sizeBy === 'user' ? userRecordOf(l, naturalAmountUnitOf(view.get(to)!), unitOf(view.get(from)!)) : undefined;
     const theirs = record === undefined || link.direction === 'unknown' ? undefined : sizeLink({ direction: link.direction, effect_amount: link.effect_amount,
       effect_per_source_change: link.effect_per_source_change, user_stated: true, ...(record.range !== undefined ? { stated_range: record.range } : {}) },
     view.get(from)!, view.get(to)!);
@@ -722,6 +726,19 @@ export function candidateToGraph(input: unknown, carry?: StatementCarry): Candid
   }
   const stated = refitFramesForStatedEffects(graph0, { goalOwnRows: true }).graph;
   const refit = clampForPersist(refitFramesForOlumiEstimates(stated as never).graph as never) as Record<string, unknown>;
+  // A frame change rescales the admitted default; carry its existing attribution, never infer one from its new number.
+  for (const edge of list<Rec>(graph0.edges)) {
+    const fitted = list<Rec>(refit.edges).find(e => e.from === edge.from && e.to === edge.to);
+    const defaults = linkDefaultAssumptionsOf(edge);
+    if (fitted === undefined || defaults.length === 0) continue;
+    fitted.provenance.uncertainty_defaults = list<RepairEntry>(edge.provenance.uncertainty_defaults).map(row => {
+      if (!defaults.some(d => d.field_path === row.field_path) || !row.field_path.endsWith('.strength.std')) return row;
+      const carried = { ...row, after: fitted.strength.std };
+      const at = loss.findIndex(d => d.field_path === row.field_path && d.after === row.after);
+      if (at !== -1) loss[at] = carried;
+      return carried;
+    });
+  }
   const blocked_schema = [...converted.blocked_schema];
   const graph = carry === undefined ? refit : withDeclaredStatements(refit, input, carry, blocked_schema);
   return GraphV3.safeParse(graph).success ? { ...converted, graph, loss, blocked_schema } : { refused: 'graph_invalid' };
