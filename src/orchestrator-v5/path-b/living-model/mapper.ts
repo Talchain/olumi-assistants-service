@@ -30,7 +30,8 @@ export type WithheldReason =
   | 'no_level_target' | 'aim_not_in_slice' | 'change_target_not_in_slice' | 'exact_target_not_in_slice' | 'target_range_not_in_slice'
   | 'goal_level_unknown' | 'link_frame_unknown' | 'chance_rests_on_withheld' | 'condition_not_in_slice'
   | 'goal_level_not_admitted' | 'factor_level_unknown' | 'level_range_not_in_slice' | 'setting_not_convertible'
-  | 'link_endpoint_unknown' | 'link_unit_mismatch' | 'link_range_no_law' | 'link_sign_unknown' | 'no_single_status_quo';
+  | 'link_endpoint_unknown' | 'link_unit_mismatch' | 'link_range_no_law' | 'link_sign_unknown' | 'no_single_status_quo'
+  | 'exact_not_drawable';
 
 export interface Withheld { readonly id: string; readonly reason: WithheldReason }
 
@@ -238,10 +239,13 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
       ? { mean: sign * Math.abs(e.value) * ratio, std: Math.abs(e.value) * ratio / 2 }
       : (e.form === 'normal' && e.value !== null && e.sd !== null && e.sd > 0)
         ? { mean: sign * Math.abs(e.value) * ratio, std: e.sd * ratio }
-        // Stated exact: no spread of Olumi's. The engine's own minimum spread still applies to a drawn link.
+        // Stated exact, but on a drawn link: kept at the floor spread so the model still runs, while its chance is withheld,
+        // since any drawn spread can turn a deterministic "meets" into about 50% (AIE 17:59, point 4). The exact sum is the
+        // one exact route.
         : (e.form === 'exact' && e.value !== null) ? { mean: sign * Math.abs(e.value) * ratio, std: LLM_STRENGTH_STD_FLOOR }
         : undefined;
     if (ratio === undefined && (e.form === 'point' || e.form === 'normal' || e.form === 'exact')) hold(l.id, 'link_frame_unknown');
+    if (e.form === 'exact') hold(l.id, 'exact_not_drawable');
     if (e.form === 'range') hold(l.id, 'link_range_no_law');
     if (unitMismatch) hold(l.id, 'link_unit_mismatch');
     if (sized === undefined || unitMismatch) {
@@ -295,15 +299,13 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     }
     // An option moves the goal through what it sets, so it is on the path too (science check 5bbceeec, point 5).
     for (const o of model.options) if (o.settings.some((s) => onPath.has(s.factor_id))) onPath.add(o.id);
-    const leftOut = withheld.some((w) => (w.reason === 'link_sign_unknown' || w.reason === 'link_endpoint_unknown')
+    const leftOut = withheld.some((w) => (w.reason === 'link_sign_unknown' || w.reason === 'link_endpoint_unknown' || w.reason === 'exact_not_drawable')
       && onPath.has(model.links.find((l) => l.id === w.id)?.to ?? '')) || [...droppedSettings].some((id) => onPath.has(id));
-    // A PREREQUISITE on anything the chance rests on (the engine cannot hold one) withholds it, whoever raised it. An
-    // ASSUMPTION carries the result only once it is verified: stated by the person (or someone they report) it is said
-    // beside the result (Batch 0 rulings 12 and 14); raised by Olumi, or unverified, it withholds until the person
-    // confirms it, so Olumi asks rather than computing on its own premise.
+    // An unresolved PREREQUISITE on anything the chance rests on (the engine cannot hold one) withholds it, whoever raised it.
+    // An applied ASSUMPTION carries a CONDITIONAL result, kept in the living model the AI reads and said with the result; a
+    // CHALLENGE is said beside it. The AI declares the role; the source never decides it (AIE, 17:59 20 Oct).
     const pathLinks = new Set(allLinks.filter((l) => onPath.has(l.to)).map((l) => l.id));
-    const verified = (c: LivingModelT['conditions'][number]) => c.role === 'assumption' && stated(c.source);
-    const conditioned = model.conditions.filter((c) => !verified(c) && c.applies_to.some((id) => onPath.has(id) || pathLinks.has(id)));
+    const conditioned = model.conditions.filter((c) => c.role === 'prerequisite' && c.applies_to.some((id) => onPath.has(id) || pathLinks.has(id)));
     for (const c of conditioned) hold(`condition:${c.text}`, 'condition_not_in_slice');
     if (leftOut || conditioned.length > 0) {
       for (const k of Object.keys(goalNode)) if (k.startsWith('goal_threshold') || k === 'goal_direction' || k === 'goal_deadline_as_stated') delete goalNode[k];

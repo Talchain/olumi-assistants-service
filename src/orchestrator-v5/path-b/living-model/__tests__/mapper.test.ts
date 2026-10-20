@@ -179,7 +179,7 @@ describe('thin core mapper: living model → GraphV3', () => {
 
   it('CONTROL: a stated but not exact effect, or a level today that is not the person\'s, is an on/off factor per option, sized like any link', () => {
     const about: LivingModelT = structuredClone(OPTION_EFFECTS);
-    about.links[0]!.effect.form = 'point';
+    for (const l of about.links) l.effect.form = 'point';
     const { graph } = mapLivingModel(about);
     const n = (id: string) => (graph.nodes as Rec[]).find((x) => x.id === id)!;
     expect(n('w').nonlinear_identity).toBeUndefined();
@@ -202,19 +202,31 @@ describe('thin core mapper: living model → GraphV3', () => {
     expect((mapLivingModel(OPTION_EFFECTS).graph.nodes as Rec[]).find((n) => n.id === 'w'), 'CONTRAST: unconditioned').toHaveProperty('goal_threshold');
   });
 
-  it('science check 5bbceeec: only a verified assumption (the person\'s) carries the chance; Olumi\'s or an unverified one, and any prerequisite, withhold', () => {
-    const withCondition = (role: 'assumption' | 'prerequisite', source: 'olumi' | 'user' | 'unverified', on = ['f_g', 'g']): LivingModelT => {
+  it('AIE 17:59: an applied assumption carries a conditional chance and a challenge sits beside it; an unresolved prerequisite withholds; the source never decides', () => {
+    const withCondition = (role: 'challenge' | 'assumption' | 'prerequisite', source: 'olumi' | 'user', on = ['f_g', 'g']): LivingModelT => {
       const m: LivingModelT = structuredClone(KNOWN_ANSWER);
-      m.conditions.push({ text: 'Assuming the full effect arrives by the deadline', applies_to: on, role, source, party: null, quote: null });
+      m.conditions.push({ text: 'Assuming the trial effect is fully realised by the end of the quarter', applies_to: on, role, source, party: null, quote: null });
       return m;
     };
     const goal = (m: LivingModelT) => (mapLivingModel(m).graph.nodes as Rec[]).find((n) => n.id === 'g');
-    expect(goal(withCondition('assumption', 'user'))).toMatchObject({ goal_threshold: 0.8 });
-    for (const s of ['olumi', 'unverified'] as const) expect(goal(withCondition('assumption', s)), `assumption, ${s}`).not.toHaveProperty('goal_threshold');
-    for (const s of ['olumi', 'user'] as const) expect(goal(withCondition('prerequisite', s)), `prerequisite, ${s}`).not.toHaveProperty('goal_threshold');
+    for (const s of ['olumi', 'user'] as const) {
+      expect(goal(withCondition('assumption', s)), `assumption, ${s}`).toMatchObject({ goal_threshold: 0.8 });
+      expect(goal(withCondition('challenge', s)), `challenge, ${s}`).toMatchObject({ goal_threshold: 0.8 });
+      expect(goal(withCondition('prerequisite', s)), `prerequisite, ${s}`).not.toHaveProperty('goal_threshold');
+    }
     // A prerequisite on an option reaches the goal through what the option sets.
     expect(goal(withCondition('prerequisite', 'user', ['push'])), 'prerequisite on an option').not.toHaveProperty('goal_threshold');
     expect(goal(withCondition('prerequisite', 'user', ['elsewhere'])), 'CONTROL: off the path').toMatchObject({ goal_threshold: 0.8 });
+  });
+
+  it('AIE 17:59 point 4: an exact effect on a drawn link keeps its content but its chance is withheld; the exact sum stays the exact route', () => {
+    const m: LivingModelT = structuredClone(KNOWN_ANSWER);
+    m.links[0]!.effect = { form: 'exact', value: 60, sd: null, low: null, high: null, unit: 'units', sign: '+' };
+    const out = mapLivingModel(m);
+    expect(out.withheld).toContainEqual({ id: 'f_g', reason: 'exact_not_drawable' });
+    expect((out.graph.nodes as Rec[]).find((n) => n.id === 'g')).not.toHaveProperty('goal_threshold');
+    expect(m.links[0]!.effect.value, 'the exact content is kept').toBe(60);
+    expect((mapLivingModel(OPTION_EFFECTS).graph.nodes as Rec[]).find((n) => n.id === 'w'), 'CONTROL: the exact sum').toHaveProperty('goal_threshold');
   });
 
   it('a model saved before roles were declared reads each condition as a prerequisite (it withheld then, and still does)', () => {

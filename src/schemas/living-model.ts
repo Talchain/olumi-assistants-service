@@ -115,16 +115,18 @@ export const LivingCondition = z.object({
   text: z.string(),
   applies_to: z.array(z.string()).describe('The ids of the items (aims, options, factors, links) this condition qualifies.'),
   /**
-   * What the condition does to a result that rests on these items, declared by the AI (meaning), applied by the mapper (rule):
-   * a prerequisite withholds it until resolved; an assumption is said beside it.
+   * What the condition does to a result that rests on these items (AIE 17:59 20 Oct), declared by the AI (meaning), applied by
+   * the mapper (rule), never decided by source: a challenge is said beside it; an applied assumption carries a CONDITIONAL
+   * result shown with it; an unresolved prerequisite withholds it. A model saved before roles reads every condition as unresolved.
    */
-  // A model saved before roles were declared reads every condition as a prerequisite (it withheld then, and still does).
-  role: z.enum(['prerequisite', 'assumption']).default('prerequisite').describe(
-    'prerequisite: something that must hold or be resolved before the listed items apply ("only after supplier approval"), so a result resting on them cannot be computed yet; '
-    + 'assumption: a premise the result is worked out under and must be said beside it ("assuming the full effect arrives by the deadline"). '
-    + 'Olumi\'s own assumption is not used until the person confirms it, so ask them once.'),
+  role: z.enum(['challenge', 'assumption', 'prerequisite']).default('prerequisite').describe(
+    'challenge: a question or doubt worth raising, said beside a result without changing it; '
+    + 'assumption: a concrete modelling premise the result is actually worked out under, compatible with the stated figures, quantity and '
+    + 'window, and said with the result ("assuming the trial effect is fully realised by the end of the quarter"); '
+    + 'prerequisite: something unresolved that must hold first ("only after supplier approval"), so a result resting on it cannot be computed yet. '
+    + 'Decide by what it does to the calculation, never by who raised it.'),
   ...attribution,
-}).strict().describe('A prerequisite or an assumption that qualifies the listed items, with who raised it.');
+}).strict().describe('A challenge, an applied assumption or an unresolved prerequisite about the listed items, with who raised it.');
 
 export const LivingView = z.object({
   holder: z.string(),
