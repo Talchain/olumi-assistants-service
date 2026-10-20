@@ -66,7 +66,8 @@ export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLa
     const receipt = outcome.status === 'ok' ? outcome.data.receipt : undefined;
     try {
       onCall(row, { ok: row.ok, mutated: row.mutated === true, ...(row.ran === true ? { ran: true as const } : {}),
-        ...(pid === undefined ? {} : { proposal_id: pid }), outcome: row.outcome, ...(row.refusal === null ? {} : { refusal: row.refusal }),
+        ...(pid === undefined ? {} : { proposal_id: pid }),
+        ...(outcome.status === 'ok' && typeof outcome.data.public_label === 'string' ? { public_label: outcome.data.public_label } : {}), outcome: row.outcome, ...(row.refusal === null ? {} : { refusal: row.refusal }),
         ...(receipt !== null && typeof receipt === 'object' ? { receipts: [receipt as Record<string, unknown>] } : {}) });
     } catch { /* a recorder never decides the outcome */ }
     return JSON.stringify(outcome);

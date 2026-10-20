@@ -15,7 +15,7 @@ import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.j
 import { registrationTurnId } from '../../../graph-registration/registration-identity.js';
 import { targetReadback } from '../goal-target.js';
 import { goalTargetsBlockOf } from '../../../goal-target/goal-targets-joint.js';
-import { userStatementsOn } from '../../../statement-door/statements.js';
+import { claimRecordsOn, userStatementsOn } from '../../../statement-door/statements.js';
 
 type Json = Record<string, any>;
 let SCENARIO = '';
@@ -240,7 +240,7 @@ describe('L12: joint targets through the real route and SDK approval', () => {
   });
   it('one malformed member: no card and no write, including a valid first member', async () => {
     const words = 'Over 150 orders and at most 6 vans within 3 months. Revenue was 2m as of 2026-09-01.';
-    const args = joint(words); args.ops[0]!.conditions[1]!.node_id = 'missing';
+    const args = joint(words); args.ops[0]!.conditions[1]!.node_id = 'decision';
     const before = structuredClone(persisted);
     const { card } = await prepare(args, words);
     expect(card).toBeUndefined(); expect(registered).toHaveLength(0); expect(persisted).toEqual(before);
@@ -274,27 +274,95 @@ describe('L12: joint targets through the real route and SDK approval', () => {
     expect(card).toBeUndefined(); expect(registered).toHaveLength(0);
   });
 
-  it('a joint goal on two other quantities keeps no scalar surrogate on the parent', async () => {
-    const words = 'Launch success requires conversion above 15% AND at least 20 customers over the first 3 months after launch.';
-    persisted.nodes.push(
+  it.each([
+    [true, 'Launch success requires conversion above 15% AND at least 20 customers over the first 3 months after launch.'],
+    [false, 'Launch success requires conversion above 15% AND at least 20 customers over the first 3 months after launch.'],
+    [false, 'Our service pilot requires conversion above 15% AND at least 20 customers over the first 3 months after launch. Revenue was 2m as of 2026-09-01.'],
+  ] as const)('complete joint action; quantities already present=%s; one card/save/cold readback: %s', async (present, words) => {
+    if (present) persisted.nodes.push(
       { id: 'conversion', kind: 'factor', label: 'Conversion rate', category: 'observable', observed_state: { value: 0.1, raw_value: 10, unit: '%', cap: 100 } },
       { id: 'customers', kind: 'factor', label: 'New customers', category: 'observable', observed_state: { value: 0.05, raw_value: 5, unit: 'customers', cap: 100 } });
     const args = { public_label: 'Record both launch success conditions', basis: 'Olumi’s reading.', ops: [{ op: 'set_goal_target', goal_id: 'orders',
       conditions: [
-        { node_id: 'conversion', comparator: '>', value: 15, unit: '%', quantity: 'Conversion rate', frame: 'level', stance: 'target', source: source(words) },
-        { node_id: 'customers', comparator: '>=', value: 20, unit: 'customers', quantity: 'New customers', frame: 'level', stance: 'target', source: source(words) },
+        { node_id: 'conversion', comparator: '>' as const, value: 15, unit: '%', quantity: 'Conversion rate', frame: 'level', stance: 'target', source: source(words) },
+        { node_id: 'customers', comparator: '>=' as const, value: 20, unit: 'customers', quantity: 'New customers', frame: 'level', stance: 'target', source: source(words) },
       ], timing: { months: 3, reference: 'launch', period_kind: 'over_period', deadline: null } }] };
     const { body, card } = await prepare(args, words);
-    expect(card, JSON.stringify(body._agent?.tool_calls)).toBeDefined(); await approve(card, body);
+    expect(card, JSON.stringify(body._agent?.tool_calls)).toBeDefined();
+    expect(body._proposal_fields.proposals).toHaveLength(1);
+    expect(card.approve_action.detail).toBe('Olumi’s reading: Conversion rate above 15% AND New customers at least 20 customers; over the first three months after launch.');
+    expect(registered).toHaveLength(0);
+    await approve(card, body);
     expect(outputOf('apply_call'), JSON.stringify(outputOf('apply_call'))).toMatchObject({ status: 'ok', data: { saved: true } });
     expect(registered).toHaveLength(1);
+    expect(graphWrites).toHaveLength(0);
+    expect(persisted.nodes).toHaveLength(7);
+    expect(persisted.edges).toHaveLength(present ? 5 : 7);
     const goal = persisted.nodes.find((n: Json) => n.id === 'orders');
     expect(goal.goal_threshold).toBeUndefined(); expect(goal.goal_threshold_raw).toBeUndefined();
     expect(persisted.goal_constraints.map((r: Json) => [r.node_id, r.value, r.role])).toEqual([['conversion', 15, 'goal_target'], ['customers', 20, 'goal_target']]);
     expect(goal.goal_horizon_months).toBe(3);
+    const cold = projectGraphForPersistence({ ...structuredClone(persisted), ...GraphV3.parse(structuredClone(persisted)) }) as Json;
+    for (const [id, label, baseline] of [['conversion', 'Conversion rate', 10], ['customers', 'New customers', 5]] as const) {
+      const nodes = cold.nodes.filter((n: Json) => n.id === id);
+      expect(nodes).toHaveLength(1);
+      expect(nodes[0]).toMatchObject({ kind: 'factor', label });
+      expect(nodes[0].observed_state?.raw_value).toBe(present ? baseline : undefined);
+      if (!present) {
+        expect(nodes[0].observed_state).toBeUndefined();
+        expect(cold.edges.filter((e: Json) => e.from === id && e.to === 'orders')).toHaveLength(1);
+        expect(nodes[0].provenance).toBe('user_set');
+      }
+      expect(userStatementsOn(nodes[0]).flatMap(r => r.statements)).toEqual([expect.objectContaining({ speaker: 'user', quote: words,
+        subject: { quantity: label, node_id: id }, reference: 'launch', period: 'over the first three months after launch', stance: 'target' })]);
+    }
+    const declared = { goal_id: 'orders', conditions: args.ops[0]!.conditions.map(c => ({ ...c, goal_id: c.node_id, origin: c.source.origin,
+      quote: c.source.quote, said_in: words, recorded_at: '' })), timing: { ...args.ops[0]!.timing, reference: 'launch' as const, period_kind: 'over_period' as const }, new_quantities: present ? [] : ['conversion', 'customers'] };
+    expect(targetReadback(cold, declared).holds).toBe(true);
+    if (!present) for (const mutate of [
+      (g: Json) => { g.nodes = g.nodes.filter((n: Json) => n.id !== 'customers'); },
+      (g: Json) => { g.nodes.find((n: Json) => n.id === 'conversion').observed_state = { value: 0.15, raw_value: 15 }; },
+      (g: Json) => { g.nodes.find((n: Json) => n.id === 'conversion').provenance = 'ai_inferred'; },
+      (g: Json) => { g.edges = g.edges.filter((e: Json) => e.from !== 'customers'); },
+      (g: Json) => { g.nodes.find((n: Json) => n.id === 'conversion').user_statements[0].statements[0].speaker = 'unknown'; },
+      (g: Json) => { g.nodes.find((n: Json) => n.id === 'conversion').user_statements[0].statements[0].quote = 'The CFO said 2m'; },
+    ]) { const mutant = structuredClone(cold); mutate(mutant); expect(targetReadback(mutant, declared).holds).toBe(false); }
+    await approve(card, body);
+    expect(registered).toHaveLength(1);
   });
 
-  it('BLOCKED-LEASE: the one card visibly shows every condition and the timing', async () => {
+  it.each(['third_party', 'olumi', 'unknown'] as const)('new quantities preserve per-condition source; second=%s never borrows the first author', async (origin) => {
+    const words = 'We require at least 12 enquiries; the CFO wants at most 4 refunds within 3 months. Revenue was 2m as of 2026-09-01.';
+    const args = { public_label: 'Review the pilot targets', basis: 'Olumi’s reading.', ops: [{ op: 'set_goal_target', goal_id: 'orders', conditions: [
+      { node_id: 'enquiries', quantity: 'Enquiries', comparator: '>=', value: 12, unit: 'enquiries', frame: 'level', stance: 'target', source: source('We require at least 12 enquiries') },
+      { node_id: 'refunds', quantity: 'Refunds', comparator: '<=', value: 4, unit: 'refunds', frame: 'level', stance: 'target',
+        source: { origin, quote: origin === 'olumi' ? null : 'the CFO wants at most 4 refunds within 3 months', named_source: origin === 'third_party' ? 'CFO' : null } },
+    ], timing: { months: 3, reference: 'today', period_kind: 'over_period', deadline: null } }] };
+    const { body, card } = await prepare(args, words);
+    expect(card, JSON.stringify(body._agent?.tool_calls)).toBeDefined();
+    await approve(card, body);
+    expect(outputOf('apply_call')).toMatchObject({ status: 'ok', data: { saved: true } });
+    expect(registered).toHaveLength(1);
+    const cold = projectGraphForPersistence({ ...structuredClone(persisted), ...GraphV3.parse(structuredClone(persisted)) }) as Json;
+    const node = cold.nodes.find((n: Json) => n.id === 'refunds');
+    expect(node.observed_state).toBeUndefined();
+    expect(node.provenance).not.toBe('user_set');
+    expect(claimRecordsOn(node).flatMap(r => r.statements)).toEqual([expect.objectContaining({ said_by: origin === 'third_party' ? 'party' : origin,
+      ...(origin === 'third_party' ? { party: 'CFO', relayed_by: 'user' } : {}), subject: { quantity: 'Refunds', node_id: 'refunds' },
+      quote: origin === 'olumi' ? 'Refunds' : 'the CFO wants at most 4 refunds within 3 months' })]);
+  });
+
+  it('a malformed new quantity makes the complete addition/target/timing action write nothing', async () => {
+    const words = 'At least 12 enquiries AND at most 4 refunds over three months.';
+    const args = joint(words);
+    args.ops[0]!.conditions[0]!.node_id = 'enquiries'; args.ops[0]!.conditions[0]!.quantity = 'Enquiries';
+    args.ops[0]!.conditions[1]!.node_id = 'not a canonical id';
+    const before = structuredClone(persisted);
+    const { card } = await prepare(args, words);
+    expect(card).toBeUndefined(); expect(registered).toHaveLength(0); expect(persisted).toEqual(before);
+  });
+
+  it('the one card visibly shows every condition and the timing', async () => {
     const words = 'We need over 150 weekly orders AND at most 6 vans over the next 3 months.';
     const { card } = await prepare(joint(words), words);
     expect(card).toBeDefined();

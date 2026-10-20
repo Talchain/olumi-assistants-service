@@ -9,6 +9,9 @@
  * The registration of this ONE candidate is the save; `change-tools.ts` owns approval, exactly-once and the receipt.
  */
 import { isDeepStrictEqual } from 'node:util';
+import { PatchOperationsArraySchema } from '../../../orchestrator/patch-validation.js';
+import { buildAddFactorTransaction } from '../../routing/add-factor-transaction.js';
+import { executeGmHeldResume } from '../../handlers/gm-held-execute.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { applyGoalHorizonEdit } from '../../goal-target/goal-horizon-write.js';
@@ -18,7 +21,7 @@ import { GOAL_TARGET_ROLE } from '../../goal-target/goal-targets-joint.js';
 import { applyConstraintEditThroughAddConstraint, applyGoalTargetEdit } from '../../system-events/goal-target-edit.js';
 import { runWithStatedGoalOperator } from '../../agent-lane/stated-goal-operator-context.js';
 import { statedOperatorOf } from '../../agent-lane/limit-operator-words.js';
-import { userStatementRecord, userStatementsOn, withUserStatement } from '../../statement-door/statements.js';
+import { claimRecordsOn, userStatementRecord, userStatementsOn, withUserStatement } from '../../statement-door/statements.js';
 import type { UserStatement } from '../../agent-lane/user-statements.js';
 import { isOlumiSourceStamp } from '../../../cee/provenance/provenance-of.js';
 
@@ -43,6 +46,8 @@ export interface TargetDeclaration {
 
 export interface JointTargetDeclaration {
   readonly goal_id: string;
+  /** Missing on the approved base: these factors must retain unknown baselines on readback. */
+  readonly new_quantities?: readonly string[];
   readonly conditions: readonly (TargetDeclaration & { readonly quantity: string; readonly source: { readonly origin: TargetDeclaration['origin']; readonly named_source: string | null } })[];
   readonly timing: { readonly months: number | null; readonly reference: 'today' | 'launch'; readonly period_kind: 'at_end' | 'over_period'; readonly deadline: string | null } | null;
 }
@@ -115,6 +120,20 @@ export async function targetCandidate(scenarioId: string, operationId: string, r
   const ids = t.conditions.map(c => c.goal_id);
   if (new Set(ids).size !== ids.length) return { refusal: 'target_not_prepared' };
   let candidate = structuredClone(graph);
+  const missing = t.conditions.filter(c => !nodesOf(graph).some(n => n.id === c.goal_id));
+  if (missing.length > 0) {
+    const built = buildAddFactorTransaction({ factors: missing.map(c => ({ id: c.goal_id, label: c.quantity,
+      link: { to_id: t.goal_id, effect_direction: inclusiveOf(c.comparator) === '>=' ? 'positive' : 'negative' } })) }, GraphV3.parse(graph));
+    if (!built.matched) return { refusal: built.reason };
+    const operations = PatchOperationsArraySchema.safeParse(built.proposal.operations);
+    if (!operations.success) return { refusal: 'target_not_prepared' };
+    // The compound add's pure executor; no userToday member means no invented current value. No write occurs here.
+    const added = executeGmHeldResume({ operations: operations.data, currentGraph: graph, currentGraphHash: graphHash,
+      userStatedNodeIds: missing.filter(c => c.origin === 'user').map(c => c.goal_id), freshness: 'none', hasExistingAnalysis: false,
+      scenarioId, turnId: operationId, requestId });
+    if (added.status !== 'executed') return { refusal: 'target_not_prepared' };
+    candidate = added.mutatedGraph as Rec;
+  }
   // Replacing the goal's targets retires those targets only. Independent limits keep their identity and bytes.
   candidate.goal_constraints = rowsOf(candidate).filter(r => r.role !== GOAL_TARGET_ROLE
     && !(r.node_id === t.goal_id && r.deadline_metadata === undefined && (r.value_frame === undefined || r.value_frame === 'level')));
@@ -190,8 +209,11 @@ export function targetReadback(graph: Rec, t: TargetDeclaration | JointTargetDec
     const matches = rowsOf(graph).filter(r => r.node_id === c.goal_id && r.operator === inclusiveOf(c.comparator));
     const row = matches.length === 1 ? matches[0] : undefined;
     const node = nodesOf(graph).find(n => n.id === c.goal_id);
-    const words = userStatementsOn(node).filter(r => r.field === 'target').flatMap(r => r.statements);
-    const holds = row?.role === GOAL_TARGET_ROLE && row.provenance === 'inferred' && row.value === c.value && row.unit === c.unit
+    const words = claimRecordsOn(node).filter(r => r.field === 'target').flatMap(r => r.statements);
+    const addedHolds = !t.new_quantities?.includes(c.goal_id) || (node?.kind === 'factor' && node.label === c.quantity
+      && node.observed_state === undefined && (c.origin !== 'user' || node.provenance === 'user_set')
+      && Array.isArray(graph.edges) && graph.edges.some(e => isRec(e) && e.from === c.goal_id && e.to === t.goal_id));
+    const holds = addedHolds && row?.role === GOAL_TARGET_ROLE && row.provenance === 'inferred' && row.value === c.value && row.unit === c.unit
       && statedOperatorOf(row) === c.comparator && words.some(s => isDeepStrictEqual(s, jointStatement(c, t.timing)));
     return { node_id: c.goal_id, holds, comparator: row === undefined ? null : statedOperatorOf(row), figure: row?.value ?? null, unit: row?.unit ?? null };
   });
