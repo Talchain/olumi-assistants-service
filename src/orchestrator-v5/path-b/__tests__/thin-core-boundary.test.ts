@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 const SRC = resolve(__dirname, '../../..');
 
 /** The thin core's own files. A file joins this list in the commit that moves it onto the living model. */
-const THIN_CORE_ROOTS = ['schemas/living-model.ts', 'orchestrator-v5/path-b/living-model'];
+const THIN_CORE_ROOTS = ['schemas/living-model.ts', 'orchestrator-v5/path-b/living-model', 'orchestrator-v5/path-b/tools/draft-tool.ts'];
 
 /** The legacy meaning/admission layer (module basenames). */
 const FORBIDDEN = [

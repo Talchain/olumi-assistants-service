@@ -23,7 +23,7 @@ import { eventRiskIngressIssues } from "../schemas/event-risk.js";
 import type { GraphStateIngress } from "../orchestrator-v5/boundary/request-extensions.js";
 import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-identity.js";
 import { computeExpectedGraphCasHashes } from "../orchestrator-v5/context/graph-cas-conflict.js";
-import { projectGraphForPersistence } from "../orchestrator-v5/persisted-graph-projection.js";
+import { projectCorePostimageForPersistence, projectGraphForPersistence } from "../orchestrator-v5/persisted-graph-projection.js";
 import { clearInheritedInterventionSourceQuotes, hasNewInterventionRanges } from "../orchestrator/tools/encode-option-interventions.js";
 import { admitInterventionRange, interventionPoint } from "../orchestrator-v5/intervention-range.js";
 import { statedCountInterventionRange } from "../orchestrator-v5/agent-lane/stated-by-user.js";
@@ -524,6 +524,11 @@ export default async function route(app: FastifyInstance) {
       }
 
       const body = (req.body ?? {}) as Record<string, unknown>;
+      // THIN CORE (20 Oct 2026): CEE's own core postimage, a complete graph regenerated from its living model, is stored as
+      // given: no stored-fact carry-forward, no derived parts, only the identity/format projection. Honoured only for the
+      // Agent's in-process dispatch for THIS scenario, which nothing outside the process can forge.
+      const corePostimage = body.thin_core === true && isAgentSubturnFor(scenarioId);
+      const project = corePostimage ? projectCorePostimageForPersistence : projectGraphForPersistence;
       // Additive initial-context contract: string or absent/null. Reuse the
       // canonical brief bound, but reject truncation instead of losing words.
       // This is outside the graph/hash and uses the SAME atomic append below:
@@ -782,7 +787,7 @@ export default async function route(app: FastifyInstance) {
       // server read as the CAS base above.
       let graphToRegister: typeof parsed.data;
       try {
-        graphToRegister = withStoredPreconditionRiskStamps(withStoredOptionGapsWhenUnstated(withStoredEdgeFactsWhenUnstated(
+        graphToRegister = corePostimage ? parsed.data : withStoredPreconditionRiskStamps(withStoredOptionGapsWhenUnstated(withStoredEdgeFactsWhenUnstated(
           withStoredGoalScopeWhenUnstated(withStoredLimitsWhenUnstated(parsed.data, submittedRecord, baseGraphForInvariants), baseGraphForInvariants),
           baseGraphForInvariants,
         ), baseGraphForInvariants), baseGraphForInvariants);
@@ -790,7 +795,7 @@ export default async function route(app: FastifyInstance) {
         assertShareByDatePreserved(baseGraphForInvariants, graphToRegister);
         // ⭐ STEP 8: a goal's compiled today part IS that goal's level today, on every write by every writer (the goal is the one
         // authority; `set_factor_value` refuses to set the part on its own and says where to change it).
-        graphToRegister = withTodayPartsAtGoalLevel(graphToRegister);
+        if (!corePostimage) graphToRegister = withTodayPartsAtGoalLevel(graphToRegister);
       } catch (err) {
         if (err instanceof PreconditionStampApprovalRequiredError) {
           return invalid('PRECONDITION_STAMP_SERVER_OWNED',
@@ -834,7 +839,7 @@ export default async function route(app: FastifyInstance) {
         try {
           const committed = await store.readCommittedTurn(scenarioId, registrationTurnId(scenarioId, operationId));
           if (committed === null) return false;
-          const bytes = withEntityRefs(projectGraphForPersistence(graphToRegister, {
+          const bytes = withEntityRefs(project(graphToRegister, {
             scenarioId,
             turnClass: "direct_answer",
             source: "graph_registration",
@@ -1106,7 +1111,7 @@ export default async function route(app: FastifyInstance) {
         log.warn({ event: 'v5.scenario_graph_register.pending_wipe_risk', request_id: requestId, scenario_id: scenarioId }, 'Graph registration refused because the authoritative reconciliation read failed');
         return unavailable();
       }
-      const projected = projectGraphForPersistence(graphToRegister, {
+      const projected = project(graphToRegister, {
         scenarioId,
         turnClass: "direct_answer",
         source: "graph_registration",
@@ -1117,7 +1122,7 @@ export default async function route(app: FastifyInstance) {
           'A new or changed likely range needs approval on its stored change card. Nothing was written.',
           { code: 'INTERVENTION_RANGE_APPROVAL_REQUIRED' }, requestId));
       }
-      const graphForStore = withEntityRefs(projectGraphForPersistence(
+      const graphForStore = withEntityRefs(project(
         clearInheritedInterventionSourceQuotes(baseGraphForInvariants, projected), {
           scenarioId, turnClass: "direct_answer", source: "graph_registration",
         }));

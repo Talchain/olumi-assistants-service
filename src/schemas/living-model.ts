@@ -10,14 +10,17 @@
  * a user or party item. A user or party item whose quote is not found verbatim is saved as `unverified`, never as
  * Olumi's. Every field is present (null when not stated) so the schema is valid as OpenAI strict tool arguments.
  */
-import { z } from 'zod';
+import { z } from 'zod-v4';
 
 export const LIVING_MODEL_SOURCES = ['user', 'party', 'olumi', 'unverified'] as const;
 export const LivingSource = z.enum(LIVING_MODEL_SOURCES);
 export type LivingSourceT = z.infer<typeof LivingSource>;
 
-/** Graph ids are canonical (`CANONICAL_ID_REGEX`), so a living-model id IS the node or edge id it compiles to. */
-const id = z.string().regex(/^[a-z0-9_:-]+$/);
+/**
+ * A living-model id IS the node or edge id it compiles to; the kernel makes it canonical (`CANONICAL_ID_REGEX`). Strict tool
+ * schemas carry no string patterns, so the id is normalised there, not checked here.
+ */
+const id = z.string();
 
 const attribution = {
   source: LivingSource,

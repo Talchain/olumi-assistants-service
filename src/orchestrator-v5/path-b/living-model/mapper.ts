@@ -58,7 +58,7 @@ export function mapLivingModel(model: LivingModelT): Mapped {
   const hold = (id: string, reason: WithheldReason) => { withheld.push({ id, reason }); };
 
   // ── The goal: the first current aim with a level target.
-  const aim = model.aims.find((a) => a.status === 'current' && a.target !== null);
+  const aim = model.aims.find((a) => a.status === 'current' && a.target !== null) ?? model.aims.find((a) => a.status === 'current');
   let goal: { id: string; cap: number; unit: string } | undefined;
   if (aim === undefined || aim.target === null) hold(aim?.id ?? 'goal', 'no_level_target');
   else {

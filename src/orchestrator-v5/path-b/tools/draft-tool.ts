@@ -1,36 +1,28 @@
 /**
- * ⭐ PATH-B: THE DRAFT ADAPTER (C5, 19 Oct 2026; Step 8 gap 3, DL 19 Oct). Olumi's PROVISIONAL first model from the user's brief.
+ * ⭐ THIN CORE: THE DRAFT ADAPTER (20 Oct 2026). Olumi's PROVISIONAL first model, written by the AI itself.
  *  1. literal check only: the brief is in the user's own typed words (`inTheUsersWords`);
- *  2. ONE drafter call with the construction's model and strict schema, its STATIC instructions (`BUILD_INSTRUCTIONS` plus the
- *     AIE's one B-only sentence, `B_DRAFTER_SENTENCE`; A's instructions are untouched) and the
- *     literal brief in the shared turn context (`turnContextItems`): no host reading of the brief changes what the AI is told
- *     (#3473 R1: no event-by-date attestation, no range notes). The drafter's JSON becomes the model through Step 8's pure `candidateToGraph`:
- *     A's numbers and structure science on a label-blind copy, each figure with the origin the AI declared, no reading of the
- *     brief. It replaces the named bridge (`buildModelFromBrief`, DL-3 ruling 6), which path B no longer calls. The draft's
- *     statements are recorded on their subjects from the brief's own words (`candidateToGraph`'s carry);
- *  3. CREATE-ONLY registration under the construction's own operation id (`constructionOperationId`), so a lost response or a
- *     concurrent copy is recovered as this construction's own version, never a second one;
+ *  2. the AI supplies its COMPLETE living model as strict tool arguments (`LivingModel`; the 18 Oct bake-off design). There is
+ *     no second drafter call and no host reading of the brief: the ONE kernel labels attribution (a quote not found in the
+ *     person's words is `unverified`, never Olumi's), and the pure mapper compiles the engine graph (`mapLivingModel`), saying
+ *     each level, setting or link it cannot yet convert (`withheld`) instead of guessing;
+ *  3. CREATE-ONLY registration of `{...graph, living_model}` as a core postimage (`thin_core`: identity/format projection only)
+ *     under the construction's own operation id (`constructionOperationId`), so a lost response or a concurrent copy is
+ *     recovered as this construction's own version, never a second one;
  *  4. an INDEPENDENT readback: `mutated` only when THIS registration's own receipt and CAS hashes match a fresh read AND
- *     that read holds the complete converted postimage (`approvedGraphHeld`), not merely an existing model.
- * The draft travels beside the receipt (DL carrier ruling: the CONVERSATION route): `declared` is the drafter's JSON verbatim,
- * `said` what the conversion did not carry or changed, in its own sentences, and `not_expressible` each declared origin GraphV3
- * cannot hold. A retry of a construction that already committed reports "already saved", never a second write or "model exists".
+ *     that read holds the complete postimage, living model included (`approvedGraphHeld`), not merely an existing model.
+ * A retry of a construction that already committed reports "already saved", never a second write or "model exists".
  */
 import { z } from 'zod-v4';
 import type { AgentToolContext } from '../../agent-lane/runtime/agent-tools.js';
 import type { InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
-import {
-  BUILD_INSTRUCTIONS, buildCandidateSchema, constructionOperationId, findConstructionVersion, strictForTheDrafter, type CallStructuredModel,
-} from '../../agent-lane/runtime/build-model.js';
+import { constructionOperationId, findConstructionVersion } from '../../agent-lane/runtime/build-model.js';
 import { approvedGraphHeld } from '../../agent-lane/runtime/draft-replacement.js';
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { computeAnalysisAffectingGraphHashSha256 } from '../../context/graph-hash.js';
 import type { AtomicCommittedModelVersionReceipt } from '../../session/store.js';
-import { turnContextItems, turnContextText } from '../../agent-lane/turn-context.js';
-import { budgetFor } from '../../agent-lane/model-budgets.js';
-import { buildWithDrafterRawRecord } from '../../drafter-raw/index.js';
-import { candidateToGraph } from './candidate-to-graph.js';
-import { STANCE_DESCRIPTION } from './change-tools.js';
+import { LivingModel } from '../../../schemas/living-model.js';
+import { applyKernel } from '../living-model/kernel.js';
+import { mapLivingModel } from '../living-model/mapper.js';
 import { isNoModelYet, isSavedRead, readSaved } from './context-tool.js';
 import { ok, refused, unavailable, OUTCOME_TRACE, type DraftVerification, type ToolOutcome } from './outcome.js';
 import { inTheUsersWords, type TypedWords } from './user-words.js';
@@ -39,67 +31,18 @@ export const BUILD_MODEL_FROM_BRIEF = 'build_model_from_brief';
 export const BuildModelParams = z.object({
   /** The user's brief, copied verbatim from their own messages. */
   brief: z.string(),
+  /** The complete living model of the brief: every aim, option, factor, link, condition and view, with who said it. */
+  model: LivingModel,
 }).strict();
 export type BuildModelArgs = z.infer<typeof BuildModelParams>;
 
 export interface DraftDeps {
   readonly dispatch: InternalDispatch;
-  readonly callStructured?: CallStructuredModel;
   /** The route's GRAPH_READY observer: told once, with the graph as read back. */
   readonly onModelRegistered?: (graph: Record<string, unknown>) => void;
 }
 
 const nodesIn = (graph: Record<string, unknown>): number => (Array.isArray(graph.nodes) ? graph.nodes.length : 0);
-
-/**
- * ⭐ B-ONLY DRAFTER TEXT, sent on B's request only (A's BUILD_INSTRUCTIONS are untouched), verbatim, one space between:
- *  1. the AIE's sentence (19 Oct 2026; sha256 cfbe03aa8d84e1ed6452817987d331bbf15596be25487da26b93978316d95f49): an option's stated
- *     effect is a setting on the factor it changes, and an additive goal is a declared sum;
- *  2. the K5 P0 ruling's sentence (fresh Codex under §7.2, AIE silent; DL 20 Oct; sha256
- *     9111ed60fb9c8e4048118f3d49c6409ba98c59b2a39c2c0bcc90235faf9436ee): the goal's current level is its own fixed factor, a sum operand.
- *  3. Codex's corrected ONE-change sentence (20 Oct), sha256 96074041c73386e9e0a1e930dd4745ac422577aa91a40ceeedf28277508cb781.
- */
-export const B_DRAFTER_SENTENCE = 'Represent each option\'s stated effect as a setting on the factor it changes rather than a sized link from the option, retaining every supplied point and complete range with the literal words, named speaker, source, stance, units, period and conditions; where the source meaning establishes that the goal quantity equals its current level plus additions, declare a sum in identities with bound current-level and addition operands and supported current levels for every operand and the total in the same quantity, units, period and reference; keep derived arithmetic visibly Olumi\'s, use zero only for a structurally defined increment at its stated reference, and leave unsupported levels or probability laws unknown.'
-  + ' Where the source supports the goal level as its current level plus additions, represent that current level as a separate fixed factor carrying the supported goal baseline and its actual source, declare an entry in identities with operation sum, the goal as outcome and that factor plus every distinct addition as operands, and link each operand to the goal one for one in the same quantity, units, period and reference, retaining supported current levels, structural increment zeroes, effects, ranges and authorship while identifying the sum as Olumi’s interpretation and leaving unsupported probability laws unknown.'
-  + ' For every figure, declare origin (user, third_party, olumi or unknown) and stance (stated_current, hypothetical, target or estimate) from its full source context; retain its literal source words where available, named source, sign, unit, period and conditions; identify your estimates and derivations as Olumi’s, preserve unresolved origin as unknown, and never promote a supposition to a stated current fact.'
-  + ' Where the brief does not state a level, setting or size the model needs, propose a defensible Olumi starting estimate with origin=olumi and stance=estimate, explaining its basis, unit and period for the person to approve through the existing card, never presenting it as theirs; if no defensible estimate is possible, state the limitation and ask for the missing input rather than silently leaving the model unrunnable; in every draft with a supported additive goal, declare the sum identity with the separate current-level factor and every distinct addition as bound operands under the rules above.'
-  + ' Declare stated additions in interventions with value_kind=additional, leaving unknown current levels as questions, and stated goal time limits in horizon_months and verbatim deadline_words, keeping relative periods relative without inventing dates.';
-
-/** B declares meaning in the existing strict structured output; A's candidate schema stays unchanged. */
-function bCandidateSchema(): Record<string, unknown> {
-  const schema = buildCandidateSchema() as Record<string, any>;
-  const origin = { type: 'string', enum: ['user', 'third_party', 'olumi', 'unknown'] };
-  const stance = { type: 'string', enum: ['stated_current', 'hypothetical', 'target', 'estimate'], description: STANCE_DESCRIPTION };
-  const pair = { origin, stance };
-  const p = schema.properties;
-  // B declares relative or calendar timing; A retains its calendar-clarification description.
-  delete p.goal.properties.deadline_words.description;
-  Object.assign(p.goal.properties, { target_origin: origin, target_stance: stance, baseline_origin: origin, baseline_stance: stance });
-  for (const key of ['factors', 'risks', 'outcomes', 'links']) Object.assign(p[key].items.properties, pair);
-  Object.assign(p.options.items.properties.interventions.items.properties, pair);
-  return strictForTheDrafter(schema, { providerBoundary: false });
-}
-
-/** The ONE drafter call, on the static instructions and the literal brief: the draft, or why there is none. Nothing is written. */
-async function drafted(callStructured: CallStructuredModel, brief: string): Promise<{ readonly draft: unknown } | { readonly outcome: ToolOutcome }> {
-  const budget = budgetFor('gpt-5.6-terra', 'whole');
-  let out: Awaited<ReturnType<CallStructuredModel>>;
-  try {
-    out = await callStructured({
-      model: budget.model,
-      instructions: `${BUILD_INSTRUCTIONS} ${B_DRAFTER_SENTENCE}`,
-      input: turnContextItems({ now: new Date(), briefText: brief, conversation: [], construction: {} }).map(turnContextText).join('\n\n'),
-      max_output_tokens: budget.max_output_tokens,
-      reasoning_effort: budget.reasoning_effort,
-      schema: bCandidateSchema(),
-    });
-  } catch {
-    return { outcome: unavailable('construction_failed') };
-  }
-  // No answer, or one cut off before it closed: said as no structured output, never as the parse error it causes.
-  if (out.text.length === 0) return { outcome: unavailable('no_structured_output') };
-  try { return { draft: JSON.parse(out.text) as unknown }; } catch { return { outcome: unavailable('no_structured_output') }; }
-}
 
 type DraftContext = Pick<AgentToolContext, 'scenario_id'> & Partial<Pick<AgentToolContext, 'request_id'>> & TypedWords;
 
@@ -118,21 +61,12 @@ const unknownSave = (reason: string, diagnostic: DraftVerification): ToolOutcome
   unavailable(reason, 'unknown'), OUTCOME_TRACE, { value: { draft_verification: diagnostic } },
 );
 
-/** Reuse A's diagnostic recorder; only a served request has an identity to record. */
 async function construct(deps: DraftDeps, ctx: DraftContext, args: BuildModelArgs): Promise<ToolOutcome> {
-  if (deps.callStructured === undefined || ctx.request_id === undefined) return constructUnrecorded(deps, ctx, args);
-  const recorded = await buildWithDrafterRawRecord({ scenario_id: ctx.scenario_id, request_id: ctx.request_id }, args.brief,
-    constructionOperationId(ctx.scenario_id, args.brief), deps.callStructured, async (drafter) => {
-      const outcome = await constructUnrecorded({ ...deps, callStructured: drafter }, ctx, args);
-      return { ok: outcome.status === 'ok', ...outcome.data,
-        replayed: outcome.data?.already_saved === true, refusal: outcome.status === 'ok' ? undefined : outcome.reason, outcome };
-    });
-  return recorded.outcome;
+  return constructUnrecorded(deps, ctx, args);
 }
 
 async function constructUnrecorded(deps: DraftDeps, ctx: DraftContext, args: BuildModelArgs): Promise<ToolOutcome> {
   if (!inTheUsersWords(args.brief, ctx)) return refused('brief_not_users_words');
-  if (deps.callStructured === undefined) return unavailable('drafter_unavailable');
   const before = await readSaved(deps, ctx.scenario_id);
   // A new scenario has no model yet (`graph: null`, `graph_present: false`): that is where a first draft starts.
   if (!isSavedRead(before) && !isNoModelYet(before)) return before;
@@ -142,15 +76,16 @@ async function constructUnrecorded(deps: DraftDeps, ctx: DraftContext, args: Bui
     return prior === null ? refused('model_exists') : ok({ already_saved: true, model_version: prior }, { mutated: false });
   }
 
-  const draft = await drafted(deps.callStructured, args.brief);
-  if ('outcome' in draft) return draft.outcome;
-  const converted = candidateToGraph(draft.draft, { words: args.brief, recorded_at: new Date().toISOString() });
-  if ('refused' in converted) return refused(converted.refused);
+  const kernelled = applyKernel(args.model, [args.brief, ...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text === undefined ? [] : [ctx.user_turn_text])]);
+  const mapped = mapLivingModel(kernelled.model);
+  if (!mapped.graph.nodes.some((n) => n.kind !== 'decision')) return refused('model_empty');
+  const graph: Record<string, unknown> = { ...mapped.graph, living_model: kernelled.model };
 
   let reg: Awaited<ReturnType<InternalDispatch>>;
   try {
     reg = await deps.dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
-      graph: converted.graph,
+      graph,
+      thin_core: true,
       brief_text: args.brief,
       operation_id: constructionOperationId(ctx.scenario_id, args.brief),
       // Create-only: the route refuses `GRAPH_STALE` if a model appeared since the read above (`buildModelFromBrief`'s contract).
@@ -188,17 +123,13 @@ async function constructUnrecorded(deps: DraftDeps, ctx: DraftContext, args: Bui
   if (reg.json.graph_hash !== after.graphHash) return unknownSave('not_verified', { check: 'revision_mismatch', field: 'graph_hash', expected: hashPrefix(reg.json.graph_hash), actual: hashPrefix(after.graphHash) });
   const analysisHash = computeAnalysisAffectingGraphHashSha256(after.graph as never);
   if (receipt.analysis_affecting_hash !== analysisHash) return unknownSave('not_verified', { check: 'hash_mismatch', field: 'analysis_hash', expected: hashPrefix(analysisHash), actual: hashPrefix(receipt.analysis_affecting_hash) });
-  if (!approvedGraphHeld(converted.graph, after.graph)) return unknownSave('not_verified', { check: 'postimage_diff',
-    keys: Object.keys(converted.graph).filter((key) => !approvedGraphHeld(converted.graph, { ...converted.graph, [key]: after.graph[key] })).slice(0, 8),
+  if (!approvedGraphHeld(graph, after.graph)) return unknownSave('not_verified', { check: 'postimage_diff',
+    keys: Object.keys(graph).filter((key) => !approvedGraphHeld(graph, { ...graph, [key]: after.graph[key] })).slice(0, 8),
   });
   if (reg.json.replayed === true) return ok({ already_saved: true, model_version: receipt }, { mutated: false });
   try { deps.onModelRegistered?.(after.graph); } catch { /* an observer never decides the outcome */ }
   return ok({
     provisional: 'olumi', model_version: receipt, revision: { graph_hash: after.graphHash, graph_identity_hash: after.identity },
-    draft: {
-      declared: converted.declared,
-      said: [...new Set(converted.loss.map((l) => l.reason).filter((r): r is string => typeof r === 'string' && r.trim() !== ''))],
-      not_expressible: converted.blocked_schema,
-    },
+    draft: { withheld: mapped.withheld, relabelled: kernelled.relabelled },
   }, { mutated: true });
 }
