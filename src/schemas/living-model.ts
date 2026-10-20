@@ -94,9 +94,15 @@ export const LivingLink = z.object({
      */
     form: z.enum(['point', 'range', 'normal', 'direction_only', 'unknown']),
     ...figure,
+    /**
+     * The link's unit is the `to` item's own unit, exactly as that item writes it; "per +1 of `from`" is implied, so it is
+     * never written here. The AI reads this description (the strict tool schema carries it), so it is the instruction.
+     */
+    unit: z.string().nullable().describe(
+      "The unit of the `to` item's quantity, written exactly as that item writes its own unit (e.g. \"units\", \"£\"). The effect is always per +1 of `from`, so never add \"per …\". Null when `to` has no unit."),
     sd: z.number().nullable(),
     sign: z.enum(['+', '-']).nullable(),
-  }).strict(),
+  }).strict().describe('The change in `to` for each +1 of `from`, in the unit of `to`.'),
   ...attribution,
 }).strict();
 
