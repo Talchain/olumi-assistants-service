@@ -149,6 +149,8 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
   let proofFault = '';
   let toolBrief: string | undefined;
   let toolModel: LivingModelT | undefined;
+  /** The instructions each core agent call was given (the turn's own facts ride there). */
+  const instructionsSeen: string[] = [];
   let drafterCalls = 0;
   let cutShortAfterRun = false;
   let runFails = false;
@@ -167,6 +169,7 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
         return ok(body.text.format.name === 'whole_candidate' ? [{ type: 'message', content: [{ type: 'output_text', text: rawDraftText() }] }] : []);
       }
       // The core agent: first the draft call, then its words.
+      instructionsSeen.push(String(body.instructions ?? ''));
       const input = Array.isArray(body.input) ? body.input as Json[] : [];
       toolOutputs.push(...input.filter((i) => i.type === 'function_call_output'));
       if (!input.some((i) => i.type === 'function_call_output')) {
@@ -439,6 +442,20 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
     const reloaded = await coldReload();
     expect(((reloaded.living_model as Json).factors as Json[])[0]).toMatchObject({ source: 'unverified' });
     expect((reloaded.nodes as Json[]).find((n) => n.id === 'level')!.observed_state?.source).toBeUndefined();
+  });
+
+  it('THIN CORE context (real route): the next turn starts from the saved living model, with its labels and quotes', async () => {
+    const model = livingFor(BRIEF);
+    model.factors[0] = { ...model.factors[0]!, source: 'user', quote: 'Bookings are 180 a week today.' };
+    toolModel = model;
+    instructionsSeen.length = 0;
+    expect(draftCall(await turn())).toMatchObject({ ok: true, mutated: true });
+    expect(instructionsSeen.length).toBeGreaterThan(0);
+    expect(instructionsSeen.some((t) => t.includes('living_model')), 'CONTRAST: an empty scenario has none').toBe(false);
+    instructionsSeen.length = 0;
+    await turn();
+    expect(instructionsSeen[0]).toContain('living_model');
+    expect(instructionsSeen[0]).toContain('Bookings are 180 a week today.');
   });
 
   it('CONTRAST: a non-null read that is not a graph is still malformed: refused, nothing registered', async () => {

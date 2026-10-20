@@ -87,6 +87,7 @@ import { answerIsIncomplete, heldChangeSentence, runAgentTurn, WITHHELD_ON_CHIP_
 import { CoreStateUnavailableError, runCoreTurn, type CoreTurnSdk } from '../orchestrator-v5/agent-lane/core/sdk-turn.js';
 import { pathBTools } from '../orchestrator-v5/path-b/tools/index.js';
 import { APPLY_CHANGE, isChangeProposal } from '../orchestrator-v5/path-b/tools/change-tools.js';
+import { livingViewOf } from '../orchestrator-v5/path-b/living-model/view.js';
 import { parseSelectedElements } from '../orchestrator-v5/boundary/request-extensions.js';
 import { agentSelectionContext, type AgentSelectionContext } from '../orchestrator-v5/agent-lane/selection-context.js';
 import type { AgentLaneMode, AgentToolContext, ToolResult } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
@@ -4442,6 +4443,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // capabilities above run on (dispatch, proposals, the drafter call, the fenced levels door and both observers).
         const coreCtx = { ...toolCtx, ...(selectionContext != null ? { grounded_selection: selectionContext.grounded,
           ...(selectionContext.links !== undefined ? { grounded_links: selectionContext.links } : {}) } : {}) };
+        // THIN CORE: one read gives the brief and, for a core scenario, the living model the turn starts from.
+        const coreSaved = await readingDispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {})
+          .then((read) => read.status === 200 ? read.json : undefined).catch(() => undefined);
+        const livingView = livingViewOf(coreSaved?.graph);
         const core = await runCoreTurn({
           ctx: coreCtx, message, budget, userId,
           tools: (onCall) => pathBTools({ dispatch: capDispatch, proposals,
@@ -4456,9 +4461,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
               onCall(row, { ...result });
             }),
           instructions: instructionsForMode(mode, eligibleIntervention === undefined ? AGENT_TOOL_INSTRUCTIONS : `${AGENT_TOOL_INSTRUCTIONS}\n\n${ELIGIBLE_INTERVENTION_INSTRUCTION}`),
-          briefText: await readingDispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {})
-            .then(read => read.status === 200 ? read.json.brief_text : undefined).catch(() => undefined),
-          canonicalState: canonicalContext?.packet?.state,
+          briefText: coreSaved?.brief_text,
+          canonicalState: livingView === undefined ? canonicalContext?.packet?.state
+            : { ...(canonicalContext?.packet?.state as Record<string, unknown> | undefined), ...livingView },
           // A Run press permits calculation and reading only (`withheldToolsOf`), on this lane's own tool names.
           withheldTools: runPress ? CORE_RUN_PRESS_WITHHELD : withheldToolsOf(body),
           ...(runPress ? { firstTool: 'run_analysis' } : coreCardOnly && corePress !== undefined ? { firstTool: APPLY_CHANGE } : {}),
