@@ -122,7 +122,7 @@ const argsOf = (item: RunToolApprovalItem): Record<string, unknown> => {
 /** A typed adapter's record of one call: its kit row (`traceRow`) and its result, as the route reads results. */
 export type CoreToolRecorder = (
   row: { readonly name: string; readonly ok: boolean; readonly mutated: boolean | null; readonly outcome: string;
-    readonly refusal: string | null; readonly ran: true | null },
+    readonly refusal: string | null; readonly ran: true | null; readonly args?: Readonly<Record<string, unknown>> },
   result: ToolResult,
 ) => void;
 
@@ -175,13 +175,13 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
   const now = input.now ?? (() => Date.now());
   const startedAt = now();
   const withheld = new Set(input.withheldTools ?? []);
-  const toolCalls: { name: string; ok: boolean; mutated: boolean; proposal_id?: string; outcome?: string; refusal?: string; ran?: true }[] = [];
+  const toolCalls: (AgentTurnResult['tool_calls'][number] & { readonly args?: Readonly<Record<string, unknown>> })[] = [];
   const toolResults: ToolResult[] = [];
   let toolMs = 0;
 
   // A typed adapter's row goes on the wire as the kit reads it; an unknown write (`mutated: null`) is never a claimed one.
   const record: CoreToolRecorder = (row, result) => {
-    toolCalls.push({ name: row.name, ok: row.ok, mutated: row.mutated === true, outcome: row.outcome,
+    toolCalls.push({ name: row.name, args: row.args, ok: row.ok, mutated: row.mutated === true, outcome: row.outcome,
       ...(row.refusal !== null ? { refusal: row.refusal } : {}), ...(row.ran === true ? { ran: true as const } : {}),
       ...(typeof result['proposal_id'] === 'string' ? { proposal_id: result['proposal_id'] } : {}) });
     toolResults.push(result);

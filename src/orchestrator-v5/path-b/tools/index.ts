@@ -13,6 +13,7 @@
  * a defect) ends the turn with the route's own handlers, as on the existing loop (`errorFunction: null`).
  */
 import { tool, type Tool } from '@openai/agents';
+import { toolArgumentsAsSent } from '../../agent-lane/runtime/agent-loop.js';
 import type { AgentLaneMode, AgentToolContext } from '../../agent-lane/runtime/agent-tools.js';
 import { READ_CANONICAL_CONTEXT, ReadCanonicalContextParams, readCanonicalContext } from './context-tool.js';
 import { BUILD_MODEL_FROM_BRIEF, BuildModelParams, buildModel, type DraftDeps } from './draft-tool.js';
@@ -47,6 +48,8 @@ export type PathBToolDeps = ChangeDeps & DraftDeps & RunDeps & {
 export type PathBContext = Pick<AgentToolContext, 'scenario_id' | 'authenticated_user_id' | 'turn_id' | 'verified_user_messages' | 'user_turn_text'>;
 /** The route's tool result for one call: what `tool_results[i]` reads. `mutated` is false for an unknown write (the row says null). */
 export interface ToolCallResult {
+  /** The AI's parsed declaration, with the same bounds and redaction as A's trace. */
+  readonly args?: Readonly<Record<string, unknown>>;
   readonly ok: boolean;
   readonly mutated: boolean;
   readonly ran?: true;
@@ -60,12 +63,13 @@ export type OnToolCall = (row: TraceRow, result: ToolCallResult) => void;
 
 export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLaneMode, onCall: OnToolCall = () => {}): Tool[] {
   let approvalApplied = false;
-  const record = (name: string, outcome: ToolOutcome, proposalId?: string): string => {
-    const row = traceRow(name, outcome);
+  const record = (name: string, input: Record<string, unknown>, outcome: ToolOutcome, proposalId?: string): string => {
+    const args = toolArgumentsAsSent(name, JSON.stringify(input), [ctx.user_turn_text ?? '', ...(ctx.verified_user_messages ?? [])]).arguments;
+    const row = { ...traceRow(name, outcome), args };
     const pid = outcome.status === 'ok' && typeof outcome.data.proposal_id === 'string' ? outcome.data.proposal_id : proposalId;
     const receipt = outcome.status === 'ok' ? outcome.data.receipt : undefined;
     try {
-      onCall(row, { ok: row.ok, mutated: row.mutated === true, ...(row.ran === true ? { ran: true as const } : {}),
+      onCall(row, { args, ok: row.ok, mutated: row.mutated === true, ...(row.ran === true ? { ran: true as const } : {}),
         ...(pid === undefined ? {} : { proposal_id: pid }),
         ...(outcome.status === 'ok' && typeof outcome.data.public_label === 'string' ? { public_label: outcome.data.public_label } : {}), outcome: row.outcome, ...(row.refusal === null ? {} : { refusal: row.refusal }),
         ...(receipt !== null && typeof receipt === 'object' ? { receipts: [receipt as Record<string, unknown>] } : {}) });
@@ -77,7 +81,7 @@ export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLa
     name: READ_CANONICAL_CONTEXT,
     description: TOOL_DESCRIPTIONS.read_canonical_context,
     parameters: ReadCanonicalContextParams,
-    execute: async () => record(READ_CANONICAL_CONTEXT, await readCanonicalContext(deps, ctx)),
+    execute: async (args) => record(READ_CANONICAL_CONTEXT, args, await readCanonicalContext(deps, ctx)),
     errorFunction: null,
   });
   if (mode === 'preview') return [read];
@@ -88,14 +92,14 @@ export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLa
       name: BUILD_MODEL_FROM_BRIEF,
       description: TOOL_DESCRIPTIONS.build_model_from_brief,
       parameters: BuildModelParams,
-      execute: async (args) => record(BUILD_MODEL_FROM_BRIEF, await buildModel(deps, ctx, args)),
+      execute: async (args) => record(BUILD_MODEL_FROM_BRIEF, args, await buildModel(deps, ctx, args)),
       errorFunction: null,
     }),
     tool({
       name: PROPOSE_CHANGE,
       description: TOOL_DESCRIPTIONS.propose_change,
       parameters: ProposeChangeParams,
-      execute: async (args) => record(PROPOSE_CHANGE, await proposeChange(deps, ctx, args)),
+      execute: async (args) => record(PROPOSE_CHANGE, args, await proposeChange(deps, ctx, args)),
       errorFunction: null,
     }),
     tool({
@@ -106,11 +110,11 @@ export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLa
       execute: async (args) => {
         const outcome = await applyChange(deps, ctx, args);
         if (outcome.status === 'ok') approvalApplied = true;
-        if (outcome.status !== 'ok' || !outcome.mutated || deps.analyseAfterCommit === undefined) return record(APPLY_CHANGE, outcome, args.proposal_id);
+        if (outcome.status !== 'ok' || !outcome.mutated || deps.analyseAfterCommit === undefined) return record(APPLY_CHANGE, args, outcome, args.proposal_id);
         const auto = await deps.analyseAfterCommit();
         const analysis = auto.run === undefined ? refused('run_not_ready', undefined, { analysis_ready: auto.ready ?? null })
           : await recordedRun(deps, ctx, auto.run);
-        return record(APPLY_CHANGE, { ...outcome, data: { analysis, ...outcome.data } }, args.proposal_id);
+        return record(APPLY_CHANGE, args, { ...outcome, data: { analysis, ...outcome.data } }, args.proposal_id);
       },
       errorFunction: null,
     }),
@@ -118,7 +122,7 @@ export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLa
       name: RUN_ANALYSIS,
       description: TOOL_DESCRIPTIONS.run_analysis,
       parameters: RunAnalysisParams,
-      execute: async (args) => record(RUN_ANALYSIS, await runAnalysis(deps, ctx, args, { approvalApplied })),
+      execute: async (args) => record(RUN_ANALYSIS, args, await runAnalysis(deps, ctx, args, { approvalApplied })),
       errorFunction: null,
     }),
   ];

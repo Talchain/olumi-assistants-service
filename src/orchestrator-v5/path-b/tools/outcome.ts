@@ -30,6 +30,7 @@ export const unavailable = (code: string, write: 'none' | 'unknown' = 'none', de
 
 /** The kit's `_agent.tool_calls` row. `mutated: null` is an UNKNOWN write (never a claimed one); `ran: null` is no Run. */
 export interface TraceRow {
+  readonly args?: Readonly<Record<string, unknown>>;
   readonly name: string;
   readonly ok: boolean;
   readonly mutated: boolean | null;
