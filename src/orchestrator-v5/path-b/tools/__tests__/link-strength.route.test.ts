@@ -6,7 +6,7 @@
  */
 import { withCanonicalAnalysisView } from '../../../agent-lane/__tests__/fixtures/canonical-analysis-read.js';
 import { runPressToolResponse } from '../../../agent-lane/__tests__/fixtures/run-press-model.js';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -79,6 +79,7 @@ describe('LINK STRENGTH: a core turn’s band for a link reaches the existing ca
     app = Fastify({ logger: false });
     app.post('/assist/v1/scenarios/:id/graph', async () => withCanonicalAnalysisView({
       graph: READ.graph, graph_hash: READ.graph_hash, analysis_state: READ.analysis_state,
+      graph_identity_hash: { kind: 'graph_identity', value: createHash('sha256').update(JSON.stringify(READ.graph)).digest('hex'), algorithm: 'sha256' },
       analysis_ready: READ.analysis_ready, analysis_result: READ.analysis_result,
     }, SCENARIO));
     await app.register(agentV1TurnRoute);
@@ -99,5 +100,21 @@ describe('LINK STRENGTH: a core turn’s band for a link reaches the existing ca
     expect(back, sent.join('\n')).toBeDefined();
     const outcome = JSON.parse(String(back!.output)) as Json;
     expect(outcome, String(back!.output)).toMatchObject({ status: 'ok', data: { proposal_id: expect.any(String) } });
+  });
+
+  it('L1b RED: an Olumi-authored supposition reaches a card through the real core route', async () => {
+    sent.length = 0;
+    outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'supposition_call', arguments: JSON.stringify({
+      public_label: 'Explore an Olumi assumption', basis: 'A conditional Olumi figure, not today’s level.',
+      ops: [{ op: 'set_factor_value', factor_id: 'wholesale_salespeople', value: 3, unit: 'part-time salespeople', stance: 'hypothetical',
+        source: { origin: 'olumi', quote: null, named_source: null } }] }) }]];
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', headers: { 'x-olumi-ai-mode': 'core' }, payload: {
+      kind: 'message', turn_id: randomUUID(), scenario_id: SCENARIO, stage: 'analyse', turn_class: 'frame',
+      message: 'Explore a conditional starting assumption; I have not stated a current figure.', source: 'composer' } });
+    expect(r.statusCode, r.body).toBe(200);
+    const back = sent.map((b) => JSON.parse(b) as Json).flatMap((b) => Array.isArray(b.input) ? b.input as Json[] : [])
+      .find((i) => i.type === 'function_call_output' && i.call_id === 'supposition_call');
+    expect(back).toBeDefined();
+    expect(JSON.parse(String(back!.output)), String(back!.output)).toMatchObject({ status: 'ok', data: { proposal_id: expect.any(String) } });
   });
 });
