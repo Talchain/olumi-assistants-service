@@ -17,7 +17,18 @@ export const ToolOutcomeSchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('refused'), reason, detail: z.string().optional(), data: z.record(z.string(), z.unknown()).optional() }),
   z.object({ status: z.literal('unavailable'), reason, write: z.enum(['none', 'unknown']), detail: z.string().optional(), data: z.record(z.string(), z.unknown()).optional() }),
 ]);
-export type ToolOutcome = z.infer<typeof ToolOutcomeSchema>;
+/** Internal metadata is carried separately from the SDK result JSON. */
+export const OUTCOME_TRACE = Symbol('outcome_trace');
+export type DraftVerification =
+  | { readonly check: 'receipt_absent' }
+  | { readonly check: 'receipt_invalid'; readonly field: 'version_id' | 'mutation_id' }
+  | { readonly check: 'ack_status'; readonly status: number | null }
+  | { readonly check: 'hash_mismatch'; readonly field: 'ack_identity' | 'receipt_identity' | 'read_identity' | 'analysis_hash'; readonly expected: string | null; readonly actual: string | null }
+  | { readonly check: 'revision_mismatch'; readonly field: 'version_number' }
+  | { readonly check: 'revision_mismatch'; readonly field: 'graph_hash'; readonly expected: string | null; readonly actual: string | null }
+  | { readonly check: 'postimage_diff'; readonly keys: readonly string[] }
+  | { readonly check: 'readback_unavailable'; readonly code: string };
+export type ToolOutcome = z.infer<typeof ToolOutcomeSchema> & { readonly [OUTCOME_TRACE]?: Pick<TraceRow, 'draft_verification'> };
 
 export const ok = (data: Record<string, unknown>, effect: { readonly mutated?: boolean; readonly ran?: boolean } = {}): ToolOutcome =>
   ({ status: 'ok', mutated: effect.mutated === true, ran: effect.ran === true, data });
@@ -31,6 +42,7 @@ export const unavailable = (code: string, write: 'none' | 'unknown' = 'none', de
 /** The kit's `_agent.tool_calls` row. `mutated: null` is an UNKNOWN write (never a claimed one); `ran: null` is no Run. */
 export interface TraceRow {
   readonly args?: Readonly<Record<string, unknown>>;
+  readonly draft_verification?: DraftVerification;
   readonly name: string;
   readonly ok: boolean;
   readonly mutated: boolean | null;
@@ -42,6 +54,7 @@ export interface TraceRow {
 export function traceRow(name: string, outcome: ToolOutcome): TraceRow {
   return {
     name,
+    ...outcome[OUTCOME_TRACE],
     ok: outcome.status === 'ok',
     mutated: outcome.status === 'ok' ? outcome.mutated : outcome.status === 'unavailable' && outcome.write === 'unknown' ? null : false,
     outcome: outcome.status,
