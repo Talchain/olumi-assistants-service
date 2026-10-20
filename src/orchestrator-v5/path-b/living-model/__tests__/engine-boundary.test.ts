@@ -11,6 +11,7 @@ import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.
 import { createRunAnalysisHandler } from '../../../tools/handlers/run-analysis.js';
 import { mapLivingModel } from '../mapper.js';
 import { resolveRunAdmission } from '../../../tools/handlers/analysis-ready-core.js';
+import { targetTestabilityOf } from '../../../admission/target-testability.js';
 import { KNOWN_ANSWER, OPTION_EFFECTS } from './fixtures.js';
 
 type Rec = Record<string, any>;
@@ -71,5 +72,13 @@ describe('thin core: the known-answer living model reaches the engine unchanged'
     for (const part of ['w_today', 'w__change']) {
       expect((request!.graph.edges as Rec[]).find((e) => e.from === part && e.to === 'w')).toMatchObject({ exists_probability: 1, provenance: { definitional: true } });
     }
+  });
+
+  it('served KA1 bcf2818c: a stated link carries its size in the person\'s units, so the target is testable (not "needs a size for the link")', () => {
+    expect(targetTestabilityOf(stored())).toEqual({ kind: 'testable', goal_id: 'g' });
+    const link = (stored().edges as Rec[]).find((e) => e.from === 'f' && e.to === 'g')!;
+    expect(link.provenance.natural_effect).toEqual({ amount: 50, amount_unit: 'units', per_source_change: 1, per_source_change_unit: '',
+      strength_mean: link.strength.mean, strength_mean_frame: 'edge_strength' });
+    expect(targetTestabilityOf(stored(OPTION_EFFECTS))).toEqual({ kind: 'testable', goal_id: 'w' });
   });
 });
