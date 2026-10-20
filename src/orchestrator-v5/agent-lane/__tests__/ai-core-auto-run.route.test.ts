@@ -185,10 +185,10 @@ describe('PATH-B gap 4: commit and Undo each run the existing Run pipeline once;
       runFacts.set(`run-row-${runTurns}`, { fact_type: 'run_analysis', fact_version: 1, noop: false, result: { scenario_id: SCENARIO,
         run_id: 'fixture-read-run', graph_hash_at_run: world.hash, computed_at: RUN_AT, leading_option_id: null, summary: RESULT.summary } });
       return { response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [], graph_hash: world.hash,
-        blocks: [RESULT], analysis_state: STATE, analysis_ready: READY, ...(world.delta ? { run_delta: DELTA } : {}) };
+        blocks: [{ ...RESULT, computed_against_hash: world.hash }], analysis_state: STATE, analysis_ready: READY, ...(world.delta ? { run_delta: DELTA } : {}) };
     });
     app.post('/assist/v1/scenarios/:id/graph', async () => world.ranOnSaved
-      ? withCanonicalAnalysisView({ graph: world.graph, graph_hash: world.hash, analysis_ready: READY, analysis_state: STATE, analysis_result: RESULT,
+      ? withCanonicalAnalysisView({ graph: world.graph, graph_hash: world.hash, analysis_ready: READY, analysis_state: STATE, analysis_result: { ...RESULT, computed_against_hash: world.hash },
           current_read: { run_state: STATE.run_state, run_id: 'fixture-read-run', computed_against_hash: world.hash, ...(world.delta ? { run_delta: DELTA } : {}) } }, SCENARIO)
       : { graph: world.graph, graph_hash: world.hash, analysis_ready: READY,
           ...(world.prior ? { analysis_state: PRIOR_STATE, analysis_result: PRIOR_RESULT } : {}) });
@@ -421,5 +421,38 @@ describe('PATH-B gap 4: commit and Undo each run the existing Run pipeline once;
     expect([200, 409], again.body).toContain(again.statusCode);
     expect(runTurns, 'no second Run').toBe(1);
     expect(calls.length, 'no model call on the resend').toBe(before);
+  });
+
+  it('⭐ THE CORE LOOP (PL 15:40 contract): press → save → ONE automatic Run → Undo → the canvas\'s ONE automatic Run on the RESTORED revision → the same SDK run coaches on it, holding the restored figure', async () => {
+    // Press → save → the automatic Run on the saved model (Capacity 4 → 2).
+    const card = await prepared();
+    outputs = [[{ type: 'message', text: COACHED }]];
+    const saved = await press(card);
+    expect(saved.statusCode, saved.body).toBe(200);
+    expect(probe.applied, 'ONE save').toBe(1);
+    expect(runTurns, 'ONE automatic Run after the save').toBe(1);
+    expect([...runFacts.values()].map((f: any) => f.result.graph_hash_at_run), 'it ran on the saved model').toEqual([HASH_2]);
+    expect((saved.json() as Json).assistant_text).toBe(COACHED);
+    // Undo: the canvas restores the earlier version (ONE restore: the model is back at 4), then presses Run automatically.
+    Object.assign(world, { graph: GRAPH_AT_4, hash: HASH_4, ranOnSaved: false });
+    head = { status: 'ok', value: versionRow({ graph: GRAPH_AT_4 }) };
+    calls = [];
+    const RESTORED = 'After the Undo, Capacity is back at 4, so in this model the comparison returns to where it was.';
+    outputs = [[{ type: 'function_call', name: 'run_analysis', call_id: 'run_call', args: { reason: 'Run after Undo', effects_timing: null } }], [{ type: 'message', text: RESTORED }]];
+    const undone = await runPress();
+    expect(undone.statusCode, undone.body).toBe(200);
+    expect(runTurns, 'ONE more Run for the ONE restore').toBe(2);
+    expect([...runFacts.values()].map((f: any) => f.result.graph_hash_at_run), 'the second Run analysed the RESTORED revision').toEqual([HASH_2, HASH_4]);
+    const ran = outputOf('run_call');
+    expect(ran?.status, JSON.stringify(ran)).toBe('ok');
+    expect(ran?.data?.run_comparison?.restore_between_runs, 'it knows a restore came between the Runs').toMatchObject({ version_id: RESTORE_V, restored_version_id: EARLIER_V, label: 'Undo: Edit Capacity' });
+    // The coaching call holds the restored figure, by its factor's identity, on the restored revision.
+    const seen = JSON.stringify(calls[calls.length - 1]);
+    expect(seen, 'the restored revision').toContain(`_revision\\":\\"${HASH_4}`);
+    expect(seen, 'Capacity at its restored figure').toContain('\\"id\\":\\"f\\",\\"label\\":\\"Capacity\\",\\"kind\\":\\"factor\\",\\"value\\":4');
+    expect(calls.length, 'the call that runs it and the call that coaches on it; no interpreting call').toBe(2);
+    expect(interpreterCalls()).toBe(0);
+    expect((undone.json() as Json).assistant_text, 'the AI\'s own coaching on that same Run').toBe(RESTORED);
+    expect(probe.applied, 'the Undo wrote nothing through the change door').toBe(1);
   });
 });
