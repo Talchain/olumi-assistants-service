@@ -174,14 +174,18 @@ describe('Run loop and the retained read-only Explain follow-up', () => {
     const { createHash } = await import('node:crypto');
     // ⛔ CHANGED EXPECTATION (C0, AIE packet AIE-GENERATION-COACHING-CANDIDATE-20261015-v1, ADOPTED by the DL 15 Oct 00:34Z after
     // the operator comparison): the whole banked block is the packet's replacement, verbatim. The old text hashed 272fbbd1fcbe6b2c.
-    expect(createHash('sha256').update(INTERPRETER_V02_BANKED, 'utf8').digest('hex').slice(0, 16), 'the banked text, byte for byte (C0 replacement)').toBe('fd7cc4e0de0c65a5');
+    // ⛔ CHANGED EXPECTATION (DL-3, 20 Oct): RUN_FACTS_USE was changed by approved prompt merges after this pin (#3347, #3362,
+    // 1253187a "Explain: AI robustness claims follow the Run (AIE, exact)", 18 Oct) and the pin was never moved; fd7cc4e0de0c65a5
+    // was the 15 Oct C0 text. The content assertions below are unchanged.
+    expect(createHash('sha256').update(INTERPRETER_V02_BANKED, 'utf8').digest('hex').slice(0, 16), 'the banked text, byte for byte (C0 replacement + approved 17–18 Oct changes)').toBe('06ca06ffb180edf5');
     // S2i (DL P6, 7 Oct): one clause differs from blob 344896ef ("say investigation priority is not established" → the DL's
     // words below); every other byte is the banked text (base hash 3d979e8406693be4 with that clause back).
     // ⛔ CHANGED EXPECTATION (prompt P17, AIE one-pass packet 94ad9c8f…): the screen-driver deferral is replaced by the packet's
     // driver sentence; the investigation-priority prohibition stays. Restoring that one clause reproduces d13dd401219ddcb7.
     // C0 keeps the investigation-priority prohibition in its own words, and the no-recommendation rule.
     expect(INTERPRETER_V02_BANKED).toContain('Do not call an unmeasured link the main driver, diagnose bias or rank investigations merely because the link is close to the goal or first tested.');
-    expect(INTERPRETER_V02_BANKED).toContain('Never choose for the user or use best, winner, go with, recommend or recommendation.');
+    // The no-recommendation rule, in its current approved wording (reworded by the 17–18 Oct prompt merges; same rule).
+    expect(INTERPRETER_V02_BANKED).toContain('never choose for the user or call it best, a winner or recommended, or say “go with”.');
     expect(INTERPRETER_V02_BANKED).not.toContain("beyond the screen's own driver lines");
     expect(INTERPRETER_V02_BANKED).not.toContain('say investigation priority is not established.');
     const first = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
