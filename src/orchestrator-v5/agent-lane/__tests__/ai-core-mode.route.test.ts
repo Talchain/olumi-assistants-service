@@ -177,6 +177,26 @@ describe('PATH-B core: the AI\'s own words are the reply; protocol, cards, resul
     expect(core.analysis_ready).toBeUndefined();
   });
 
+  it('prompt arm B (programme-docs #94): the header swaps the core-aligned instructions onto the provider call; without it the default is byte-unchanged', async () => {
+    const instructionsSent = (): string[] => sent.filter((b) => b.includes(CORE_RULE)).map((b) => (JSON.parse(b) as Json).instructions as string);
+    await typed('What does the model say now?', { ...CORE, 'x-olumi-prompt-arm': 'B' });
+    const armB = instructionsSent();
+    expect(armB.length).toBeGreaterThan(0);
+    for (const i of armB) {
+      expect(i).toContain("Do not treat a typed yes or your own interpretation as the card's approval.");
+      expect(i).not.toContain('propose_starting_point');
+    }
+    // CONTROL: the same core turn without the header is the default arm, legacy routing and all (Paul's test sees this).
+    sent.length = 0;
+    await typed('What does the model say now?', CORE);
+    const armA = instructionsSent();
+    expect(armA.length).toBeGreaterThan(0);
+    for (const i of armA) {
+      expect(i).toContain('propose_starting_point');
+      expect(i).not.toContain("Do not treat a typed yes or your own interpretation as the card's approval.");
+    }
+  });
+
   it('⛔ a core turn whose scenario cannot hold its Conversation id stops before any model call, with a typed 503', async () => {
     store.readOpenAiConversationId.mockImplementationOnce(async () => undefined);
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', headers: CORE, payload: {

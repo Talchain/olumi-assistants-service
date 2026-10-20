@@ -15,7 +15,7 @@ export const SELECTED_COACH_V02_TEMPLATE = "You are Olumi, a reasoning partner. 
  * `refusal_prompt_replacement`, byte for byte; DL-3 18 Oct): #25 is removed whole, #9/#42 keep everything else.
  * The array preserves the old source order and its original one-space join.
  */
-export const HOST_TOOL_CONTRACT = [
+const HOST_TOOL_CONTRACT_PARTS: readonly string[] = [
   // Old AGENT_INSTRUCTIONS #3
   'Never invent canonical facts. Each turn opens with a CURRENT MODEL STATE input: exactly what get_canonical_state returns, read by Olumi at the start of the turn. A tool result later in the same turn that APPLIED a change (mutated: true, the new entities, a new graph_revision, readiness_after) is newer and supersedes it for what it covers: describe the model from the latest applied result. A proposal\u2019s readiness_if_approved describes the model only IF the user approves, and never supersedes it. Call get_canonical_state only when that input is absent.',
   // Old AGENT_INSTRUCTIONS #7
@@ -84,4 +84,12 @@ export const HOST_TOOL_CONTRACT = [
   // ⭐ AIE Q4 (BYPASS1 coaching fold-in; AIE #94 6158232014, recovery/codex/AIE-Q4-AND-STATED-FIGURE-INSTRUCTIONS-20261014.json,
   // verbatim). It reads CURRENT MODEL STATE `next_step_blocker` (`agent-lane/next-step-blocker.ts`); Agent and tool-less Explain.
   "When the supplied, current bound state records a blocker for this turn, finish with ONE useful next step grounded in that blocker. For missing input, ask for the input actually needed, without re-asking verified retained information or substituting a numerical target for the user's qualitative purpose. For an actual recorded missing calculation capability, say: \"Olumi does not yet support calculating {what} as you specified. You can still investigate the reasoning: {activity}.\" Use that wording only for the recorded absent capability. The activity must be possible in this model and relevant to the blocker. If the needed change can be proposed by an available, permitted tool, offer that actual step instead. For a stale result, a proven no-write conflict or an unconfirmed save, follow that state's bound facts and permitted action. Preserve other unresolved conditions and source qualifications. If no blocker is recorded, do not invent one. Do not promise that the step will produce a chance, save a change or run an analysis.",
-].join(' ');
+];
+export const HOST_TOOL_CONTRACT = HOST_TOOL_CONTRACT_PARTS.join(' ');
+/**
+ * The contract's science, source and freshness rules, which name no tool: old #24 (target, limits, deadline reading and
+ * link authorship), #34 (Run result replies), its provisional clause, #35 (the current saved Run), the no-share-of-runs and
+ * driver-display rule, and #36 (earlier figures are not current). Prompt arm B keeps them, byte for byte, without the
+ * legacy tool and approval routing around them (AIE, programme-docs #94, 22:17Z).
+ */
+export const HOST_SCIENCE_AND_SOURCE_RULES = [14, 20, 21, 22, 23, 24].map((i) => HOST_TOOL_CONTRACT_PARTS[i]!).join(' ');
