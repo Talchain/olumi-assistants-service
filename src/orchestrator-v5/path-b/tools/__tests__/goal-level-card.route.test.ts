@@ -17,6 +17,9 @@ import { createProposal } from '../../../agent-lane/proposal.js';
 import { proposalPendingAction } from '../../../agent-lane/durable-proposal.js';
 import { candidateToGraph } from '../candidate-to-graph.js';
 import { valueProvenanceOf } from '../../../../cee/provenance/provenance-of.js';
+import { userStatementOf } from '../../../agent-lane/user-statements.js';
+import { claimRecordFor, CONSTRUCTION_ATTEST, userStatementRecord } from '../../../statement-door/statements.js';
+import { subjectKey, type DoorSubject } from '../../../statement-door/subject.js';
 import { approvalChipIdFor } from '../../../agent-lane/approval-chips.js';
 
 type Json = Record<string, any>;
@@ -32,6 +35,7 @@ const SAVED_WORDS = 'Saved: weekly orders are now 110.';
 let persisted: Json;
 let concurrentHold: Json | undefined;
 let noReceipt = false;
+let loseOperandClaim = false;
 const registered: Json[] = [];
 const graphWrites: Json[] = [];
 const turnRows = new Map<string, any>();
@@ -148,8 +152,10 @@ describe('PATH-B: the goal’s current level, typed as a correction, shows its c
       if (b.expected_graph_hash !== hashOf(persisted) || b.expected_graph_identity_hash !== identityOf(persisted)) {
         return reply.code(409).send({ details: { code: 'GRAPH_STALE' } });
       }
+      const oldClaims = structuredClone(persisted.nodes.find((n: Json) => n.id === 'current_orders')?.user_statements);
       registered.push(b);
       persisted = structuredClone(b.graph) as Json;
+      if (loseOperandClaim) persisted.nodes.find((n: Json) => n.id === 'current_orders').user_statements = oldClaims;
       if (concurrentHold !== undefined) {
         const pending = await store.readMostRecentPendingActions();
         turnRows.set('concurrent-offer', { id: 'row-concurrent', turn_id: 'concurrent-offer', request_hash: 'concurrent',
@@ -167,7 +173,7 @@ describe('PATH-B: the goal’s current level, typed as a correction, shows its c
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   beforeEach(() => {
     SCENARIO = randomUUID(); persisted = stored(); registered.length = 0; graphWrites.length = 0; turnRows.clear(); conversationIds.clear();
-    pausedRun = null; calls = []; outputs = []; preparedId = ''; concurrentHold = undefined; noReceipt = false;
+    pausedRun = null; calls = []; outputs = []; preparedId = ''; concurrentHold = undefined; noReceipt = false; loseOperandClaim = false;
   });
   const post = (payload: Json) => app.inject({ method: 'POST', url: '/agent/v1/turn', headers: CORE,
     payload: { kind: 'message', scenario_id: SCENARIO, stage: 'analyse', turn_class: 'frame', ...payload } });
@@ -319,10 +325,29 @@ describe('PATH-B: the goal’s current level, typed as a correction, shows its c
     expect(goalRaw(), 'the goal keeps its level').toBe(120);
   });
 
+  it.each(['openai', 'conventional'])('L2c parity: %s keeps its base reply and model bytes', async (mode) => {
+    SCENARIO = '5c5c5c5c-0000-4000-8000-000000000039';
+    const before = JSON.stringify(persisted);
+    outputs = [[{ type: 'message', text: 'The current baseline is 120 a week.' }]];
+    const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', headers: { 'x-olumi-ai-mode': mode },
+      payload: { kind: 'message', scenario_id: SCENARIO, stage: 'analyse', turn_class: 'frame',
+        turn_id: '5c5c5c5c-0000-4000-8000-000000000040', message: SAID, source: 'composer' } });
+    expect(response.statusCode, response.body).toBe(200);
+    const body = response.json() as Json;
+    expect(JSON.stringify(persisted)).toBe(before);
+    expect(registered).toHaveLength(0);
+    expect(graphWrites).toHaveLength(0);
+    // Captured on a202a4dd: reply bytes and stable protocol fields; volatile telemetry is excluded.
+    const bytes = JSON.stringify({ reply: body.assistant_text, actions: body.suggested_actions, graph: body.draft_graph,
+      mode: body._agent.mode, tools: body._agent.tool_calls });
+    expect(createHash('sha256').update(bytes).digest('hex')).toBe('4c91beefa9681a5ebf3fd09241d48ee567d8c67c71c140cbfb8fa11ab7b1856c');
+  });
+
   it.each([
-    [SAID, 110, 'orders a week', 'about 110 a week'],
-    ['Revenue was 2m on 2026-09-01. Our delivery baseline is about 105 a month, not 120; the deadline is June.', 105, 'deliveries a month', 'about 105 a month'],
-  ])('L2 declared-sum baseline: %s → one mixed card, one save, own receipt, full pair readback', async (words, value, unit, quote) => {
+    [SAID, 110, 'orders a week', 'about 110 a week', false],
+    ['Revenue was 2m on 2026-09-01. Our delivery baseline is about 105 a month, not 120; the deadline is June.', 105, 'deliveries a month', 'about 105 a month', false],
+    [SAID, 110, 'orders a week', 'about 110 a week', true],
+  ] as const)('L2c declared-sum baseline: %s → %s %s (%s), lost operand claim=%s', async (words, value, unit, quote, lostClaim) => {
     const goal = (persisted.nodes as Json[]).find(n => n.id === 'orders')!;
     goal.goal_threshold_unit = unit; goal.observed_state.unit = unit;
     goal.nonlinear_identity = { operation: 'sum', factor_ids: ['current_orders', 'extra_orders'], stated_in_brief: false };
@@ -330,6 +355,15 @@ describe('PATH-B: the goal’s current level, typed as a correction, shows its c
       { id: 'extra_orders', kind: 'factor', label: 'Additional weekly orders', observed_state: { value: 0, raw_value: 0, cap: 187.5, unit: 'orders a week' } });
     // A coincident label/number on a different factor must not bind or move with this declared quantity.
     persisted.nodes.push({ id: 'coincidence', kind: 'factor', label: 'Current weekly orders', observed_state: structuredClone(goal.observed_state) });
+    const subject = (id: string): DoorSubject => ({ kind: id === 'orders' ? 'goal' : 'factor', id, field: 'level' });
+    for (const id of ['orders', 'current_orders', 'coincidence']) {
+      const old = userStatementOf({ said_by: 'user', quote: '120', source: 'Our current baseline is 120.',
+        subject: { quantity: subjectKey(subject(id)), node_id: id }, form: 'point', low: 120, high: 120, unit,
+        reading: 'olumi', stance: 'stated_current', claim_id: `old-${id}` })!;
+      const other = { ...old, said_by: 'party' as const, party: 'area lead', relayed_by: 'user' as const, claim_id: `party-${id}` };
+      persisted.nodes.find((n: Json) => n.id === id).user_statements = [userStatementRecord(subject(id), [old, other], '2026-10-19T12:00:00.000Z', CONSTRUCTION_ATTEST)];
+    }
+    const beforeRecords = new Map(['orders', 'current_orders'].map(id => [id, claimRecordFor(persisted, subject(id))!]));
     const untouched = structuredClone(persisted.nodes.filter((n: Json) => n.id !== 'orders' && n.id !== 'current_orders'));
     const declared = { ...CORRECTION.ops[0], value, unit, source: { origin: 'user', quote, named_source: null } };
     const correction = { ...CORRECTION, ops: [declared,
@@ -350,22 +384,34 @@ describe('PATH-B: the goal’s current level, typed as a correction, shows its c
     preparedId = rec.proposal_id;
     outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply_call' }], [{ type: 'message', text: SAVED_WORDS }]];
     const saveTurnId = randomUUID();
+    loseOperandClaim = lostClaim;
     const saved = await post({ turn_id: saveTurnId, message: rec.approve_action.message, source: 'chip', chip: { id: rec.approve_action.id },
       proposal_edits: { proposal_id: rec.proposal_id, revision: rec.revision, digest: rec.digest, graph_hash: t1._proposal_fields.graph_hash, fields: [] } });
     expect(saved.statusCode, saved.body).toBe(200);
-    expect(outputOf('apply_call')).toMatchObject({ status: 'ok', mutated: true, data: { saved: true } });
     expect(registered).toHaveLength(1);
+    if (lostClaim) {
+      expect(persisted.nodes.filter((n: Json) => n.id === 'orders' || n.id === 'current_orders').map((n: Json) => n.observed_state.raw_value)).toEqual([value, value]);
+      expect(claimRecordFor(persisted, subject('current_orders'))).toEqual(beforeRecords.get('current_orders'));
+      expect(outputOf('apply_call')).toEqual({ status: 'unavailable', reason: 'not_verified', write: 'unknown' });
+      return;
+    }
+    expect(outputOf('apply_call')).toMatchObject({ status: 'ok', mutated: true, data: { saved: true, faithful: true } });
     const operand = (persisted.nodes as Json[]).find(n => n.id === 'current_orders')!;
     const afterGoal = (persisted.nodes as Json[]).find(n => n.id === 'orders')!;
     expect(afterGoal.observed_state.raw_value).toBe(value);
     expect(operand.observed_state).toEqual(afterGoal.observed_state);
-    const claims = (persisted.nodes as Json[]).flatMap(n => (n.user_statements ?? []).flatMap((r: Json) => r.statements));
-    expect(claims.filter((s: Json) => s.quote === quote)).toHaveLength(1);
-    expect(claims.find((s: Json) => s.quote === quote)).toMatchObject({ said_by: 'user', low: value, high: value, source: words });
+    for (const id of ['orders', 'current_orders']) {
+      const record = claimRecordFor(persisted, subject(id))!;
+      const old = beforeRecords.get(id)!;
+      expect(record.statements).toEqual([{ ...old.statements[1], status: 'proposed' }, expect.objectContaining({ said_by: 'user', low: value, high: value,
+        quote, source: words, stance: 'stated_current', unit, subject: { quantity: subjectKey(subject(id)), node_id: id }, supersedes: [`old-${id}`] })]);
+      expect(record.history).toEqual([{ ...old.statements[0], status: 'superseded' }]);
+      expect(registered[0]!.graph.nodes.find((n: Json) => n.id === id).user_statements).toEqual(persisted.nodes.find((n: Json) => n.id === id).user_statements);
+    }
     expect(persisted.nodes.filter((n: Json) => n.id !== 'orders' && n.id !== 'current_orders')).toEqual(untouched);
     const applied = outputOf('apply_call')!;
-    expect(applied.data.written[0].current_level_operand).toEqual({ factor_id: 'current_orders', observed_state: afterGoal.observed_state });
-    expect(saved.json()._agent.receipts).toContainEqual(applied.data.receipt);
+    expect(applied.data.written[0].current_level_operand).toEqual({ factor_id: 'current_orders', observed_state: afterGoal.observed_state, claim: { said_by: 'user' } });
+    expect(saved.json()._agent.receipts).toEqual([applied.data.receipt]);
     expect(applied.data.receipt.source_turn_id).toBe(registrationTurnId(SCENARIO, registered[0]!.operation_id));
     const count = calls.length;
     const replay = await post({ turn_id: saveTurnId,
@@ -375,6 +421,14 @@ describe('PATH-B: the goal’s current level, typed as a correction, shows its c
     expect(replay.json()._agent.replayed).toBe(true);
     expect(calls).toHaveLength(count);
     expect(registered).toHaveLength(1);
+    for (const id of ['orders', 'current_orders']) {
+      const reopened = replay.json().draft_graph.nodes.find((n: Json) => n.id === id);
+      const savedNode = persisted.nodes.find((n: Json) => n.id === id);
+      expect(reopened.observed_state).toEqual(savedNode.observed_state);
+      expect(reopened.user_statements).toEqual(savedNode.user_statements);
+      expect(claimRecordFor(persisted, subject(id))!.statements).toHaveLength(2);
+      expect(claimRecordFor(persisted, subject(id))!.history).toHaveLength(1);
+    }
   });
 
   it.each([
