@@ -34,6 +34,7 @@ import { ledgeredAgentsClient } from '../../../adapters/llm/openai-agents-client
 import { currentStageEmitter, emitAgentPhase } from '../../../cee/unified-pipeline/stage-stream-context.js';
 import { log } from '../../../utils/telemetry.js';
 import type { OpenAiPausedRun } from '../../session/store.js';
+import type { DraftVerification } from '../../path-b/tools/outcome.js';
 import { agentRequestIdentity } from '../runtime/prompt-identity.js';
 import type { AgentToolContext, ToolResult } from '../runtime/agent-tools.js';
 import type { AgentTurnResult } from '../runtime/agent-loop.js';
@@ -122,7 +123,8 @@ const argsOf = (item: RunToolApprovalItem): Record<string, unknown> => {
 /** A typed adapter's record of one call: its kit row (`traceRow`) and its result, as the route reads results. */
 export type CoreToolRecorder = (
   row: { readonly name: string; readonly ok: boolean; readonly mutated: boolean | null; readonly outcome: string;
-    readonly refusal: string | null; readonly ran: true | null; readonly args?: Readonly<Record<string, unknown>> },
+    readonly refusal: string | null; readonly ran: true | null; readonly args?: Readonly<Record<string, unknown>>;
+    readonly draft_verification?: DraftVerification },
   result: ToolResult,
 ) => void;
 
@@ -175,13 +177,15 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
   const now = input.now ?? (() => Date.now());
   const startedAt = now();
   const withheld = new Set(input.withheldTools ?? []);
-  const toolCalls: (AgentTurnResult['tool_calls'][number] & { readonly args?: Readonly<Record<string, unknown>> })[] = [];
+  const toolCalls: (AgentTurnResult['tool_calls'][number] & { readonly args?: Readonly<Record<string, unknown>>;
+    readonly draft_verification?: DraftVerification })[] = [];
   const toolResults: ToolResult[] = [];
   let toolMs = 0;
 
   // A typed adapter's row goes on the wire as the kit reads it; an unknown write (`mutated: null`) is never a claimed one.
   const record: CoreToolRecorder = (row, result) => {
     toolCalls.push({ name: row.name, args: row.args, ok: row.ok, mutated: row.mutated === true, outcome: row.outcome,
+      ...(row.draft_verification === undefined ? {} : { draft_verification: row.draft_verification }),
       ...(row.refusal !== null ? { refusal: row.refusal } : {}), ...(row.ran === true ? { ran: true as const } : {}),
       ...(typeof result['proposal_id'] === 'string' ? { proposal_id: result['proposal_id'] } : {}) });
     toolResults.push(result);
