@@ -2857,7 +2857,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(resultFirstReplay && state.goalCertainty !== undefined ? { goal_certainty: state.goalCertainty } : {}),
         ...(resultFirstReplay && state.optionParticipation !== undefined ? { option_participation: state.optionParticipation } : {}),
         ...(state.graphHash !== undefined ? { graph_hash: state.graphHash } : {}),
-        ...(state.analysisReady !== undefined ? { analysis_ready: state.analysisReady } : {}),
+        ...(mode !== 'core' && state.analysisReady !== undefined ? { analysis_ready: state.analysisReady } : {}),
         ...(state.analysisState !== undefined ? { analysis_state: state.analysisState } : {}),
         ...(state.draftGraph !== undefined ? { draft_graph: state.draftGraph } : {}),
         _diagnostic_trace: { exit_path: 'agent_lane_v1', agent_mode: mode, hops: 0, stopped_reason: 'replayed', tools_called: [], replayed: true },
@@ -5211,8 +5211,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * a host card asked "Give your estimate" on the link the AI's reply had just said could not hold it. Every other lane: unchanged.
      */
     const hostCards = mode !== 'core';
+    const runCompletedThisTurn = resultFirstRunCompleted
+      || result.tool_calls.some((c, i) => c.name === 'run_analysis' && result.tool_results[i]?.ran === true);
     const steadyCard = !hostCards ? null : steadyHorizonCard({ graph: readbackGraph, graphHash, scenarioId, userId, brief: identityOfferBrief,
-      runReply: resultFirstRunCompleted || result.tool_calls.some((c, i) => c.name === 'run_analysis' && result.tool_results[i]?.ran === true),
+      runReply: runCompletedThisTurn,
       runResult: analysisResult,
       approvalHeld: approvals.length + carriedApproval.length + liveHolds.length + proposals.outstanding(scenarioId, userId).length > 0 });
     if (steadyCard !== null) proposals.put(steadyCard.proposal);
@@ -5735,10 +5737,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // The FINAL readback's bound result block — never the tool run's own blocks. See
       // `analysisResult` in readBackState. The Agent's text still reports what its run
       // found and, if the model has since changed, that it has.
-      ...(analysisResult !== undefined ? { blocks: [analysisResult, ...existingBlocks] } : {}),
+      ...(analysisResult !== undefined && (mode !== 'core' || runCompletedThisTurn || fa?.ran === true) ? { blocks: [analysisResult, ...existingBlocks] } : {}),
       ...(graphHash !== undefined ? { graph_hash: graphHash } : {}),
       // Readiness of the graph this response returns — the final readback's only.
-      ...(analysisReady !== undefined ? { analysis_ready: analysisReady } : {}),
+      ...(mode !== 'core' && analysisReady !== undefined ? { analysis_ready: analysisReady } : {}),
       // The scenario-bound verdict from the FINAL readback governs; otherwise the
       // finaliser's own honest no-context verdict stays (present, never deleted).
       ...(analysisState !== undefined ? { analysis_state: analysisState } : {}),

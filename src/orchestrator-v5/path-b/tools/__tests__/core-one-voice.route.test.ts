@@ -8,6 +8,7 @@
 import { randomUUID, createHash } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readCanonicalContext } from '../context-tool.js';
 import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import { projectGraphForPersistence } from '../../../persisted-graph-projection.js';
 import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
@@ -22,6 +23,8 @@ const CORRECTION = { public_label: 'Record today’s weekly orders', basis: 'The
 const PREPARED_WORDS = 'I have prepared your correction to 110 a week; press its card to save it.';
 
 let persisted: Json;
+let readiness: Json;
+let carriedResult: Json | undefined;
 const registered: Json[] = [];
 const graphWrites: Json[] = [];
 const turnRows = new Map<string, any>();
@@ -136,7 +139,7 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
     app = Fastify({ logger: false });
     app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: persisted, graph_hash: hashOf(persisted),
       graph_identity_hash: { kind: 'graph_identity', value: identityOf(persisted), algorithm: 'sha256' },
-      analysis_ready: { status: 'blocked', options: [], blockers: [] } }));
+      analysis_ready: readiness, ...(carriedResult === undefined ? {} : { analysis_result: carriedResult }) }));
     app.post('/assist/v1/scenarios/:id/versions', async () => ({ versions: [] }));
     app.post('/orchestrate/v2/turn', async () => ({ response_version: 2, assistant_text: '', suggested_actions: [], insights: [], blocks: [] }));
     await app.register(route.agentV1TurnRoute);
@@ -145,6 +148,7 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   beforeEach(() => {
     SCENARIO = randomUUID(); persisted = stored(); registered.length = 0; graphWrites.length = 0; turnRows.clear(); conversationIds.clear();
+    readiness = { status: 'blocked', options: [], blockers: [] }; carriedResult = undefined;
     pausedRun = null; calls = []; outputs = []; preparedId = ''; offeredCard = GIVE_YOUR_ESTIMATE;
   });
   const post = (payload: Json, headers: Record<string, string> = CORE) => app.inject({ method: 'POST', url: '/agent/v1/turn', headers,
@@ -188,4 +192,64 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
     expect(j.model_gap).toMatchObject({ kind: 'goal_target_missing' });
     expect(j.action_bar).toBeDefined();
   });
+
+  it.each(['delivery', 'staffing'])('L4 readiness producer: %s core omits the host list; A keeps its exact bytes; the AI keeps its facts', async (subject) => {
+    const label = subject === 'delivery' ? 'Vans on the road' : 'Engineers available';
+    readiness = { status: 'needs_user_input', options: [], user_questions: [`What is "${label}" today?`], blockers: [
+      { blocker_type: 'missing_value', factor_id: 'vans', factor_label: label, option_id: 'add_vans',
+        message: `Factor "${label}" needs a numeric value for option "Lease two more vans"`, suggested_action: 'add_value' },
+      { blocker_type: 'missing_value', factor_id: 'vans', factor_label: label,
+        message: `What is "${label}" today, before any option changes it? Without a current level the analysis would treat it as zero.`, suggested_action: 'add_value' },
+    ] };
+    const factor = persisted.nodes.find((n: Json) => n.id === 'vans');
+    factor.label = label;
+    delete factor.observed_state;
+    delete persisted.nodes.find((n: Json) => n.id === 'add_vans').interventions.vans;
+    const expectedContext = await readCanonicalContext({ dispatch: async () => ({ status: 200, json: {
+      graph: persisted, graph_hash: hashOf(persisted), graph_identity_hash: { value: identityOf(persisted) },
+    } }) }, { scenario_id: SCENARIO });
+    expect(expectedContext.status).toBe('ok');
+    if (expectedContext.status !== 'ok') throw new Error('synthetic context unavailable');
+    expect(expectedContext.data.readiness.blocking.length, 'the AI has real missing-input facts').toBeGreaterThan(0);
+    const original = structuredClone(readiness);
+    outputs = [[{ type: 'function_call', name: 'read_canonical_context', call_id: 'context_call', args: {} }], [{ type: 'message', text: ANSWER }]];
+    const turn = { turn_id: randomUUID(), message: QUESTION, source: 'composer' };
+    const core = await post(turn);
+    expect(core.statusCode, core.body).toBe(200);
+    expect(core.json().analysis_ready).toBeUndefined();
+    const output = calls.flatMap((c) => c.input ?? []).find((i: Json) => i.type === 'function_call_output' && i.call_id === 'context_call');
+    expect(JSON.parse(output.output), 'the AI keeps the exact canonical facts').toEqual(expectedContext);
+    expect(readiness, 'UI suppression never mutates tool context').toEqual(original);
+    const count = calls.length;
+    const replay = await post(turn);
+    expect(replay.json()._agent.replayed).toBe(true);
+    expect(replay.json().analysis_ready, 'replay is a producer too').toBeUndefined();
+    expect(calls).toHaveLength(count);
+    const a = await post({ ...turn, turn_id: randomUUID() }, {});
+    expect(a.statusCode, a.body).toBe(200);
+    const { computed_at: _at, freshness: _fresh, freshness_reason: _reason, current_graph_hash: _hash, ...aReady } = a.json().analysis_ready;
+    expect(aReady).toEqual(original);
+    const aReplay = await post({ ...turn, turn_id: a.json()._agent.turn_id }, {});
+    expect(aReplay.json()._agent.replayed).toBe(true);
+    expect(aReplay.json().analysis_ready).toEqual(a.json().analysis_ready);
+  });
+
+  it('L4 carried-result producer: no Run in core means no carried result; A keeps the exact result', async () => {
+    carriedResult = { type: 'analysis_result', summary: 'Ran analysis on the earlier saved model.', leading_option_id: null };
+    const original = structuredClone(carriedResult);
+    const reply = 'The earlier analysis used 120 orders a week; our deadline is 2026-12-01. I am only explaining it now.';
+    outputs = [[{ type: 'message', text: reply }]];
+    const turn = { turn_id: randomUUID(), message: QUESTION, source: 'composer' };
+    const core = await post(turn);
+    expect(core.statusCode, core.body).toBe(200);
+    expect(core.json()._agent.tool_calls).toEqual([]);
+    expect(core.json().assistant_text).toBe(reply);
+    expect(graphWrites).toEqual([]);
+    expect(core.json().blocks.filter((b: Json) => b.type === 'analysis_result')).toEqual([]);
+    const a = await post({ ...turn, turn_id: randomUUID() }, {});
+    expect(a.statusCode, a.body).toBe(200);
+    expect(a.json().blocks.find((b: Json) => b.type === 'analysis_result')).toEqual(original);
+    expect(carriedResult).toEqual(original);
+  });
+
 });
