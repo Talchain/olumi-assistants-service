@@ -10,7 +10,8 @@ export const KNOWN_ANSWER: LivingModelT = {
       settings: [{ factor_id: 'f', value: 1, low: null, high: null, unit: null, source: 'user', party: null, quote: 'push f to 1' }] },
   ],
   factors: [{ id: 'f', label: 'f', value: 0.5, low: null, high: null, unit: null, source: 'user', party: null, quote: 'f is at 0.5' }],
-  links: [{ id: 'f_g', from: 'f', to: 'g', source: 'user', party: null, quote: 'each +1 in f adds about 50 units, somewhere between 33.55 and 66.45',
-    effect: { form: 'range', value: null, low: 33.55, high: 66.45, unit: 'units', sign: '+' } }],
+  // The control's explicitly specified law (AIE, 20 Oct): Normal, mean 50 and SD 10 goal units per +1 of f, existence 1.
+  links: [{ id: 'f_g', from: 'f', to: 'g', source: 'user', party: null, quote: 'each +1 in f adds 50 units on average, with a standard deviation of 10',
+    effect: { form: 'normal', value: 50, sd: 10, low: null, high: null, unit: 'units', sign: '+' } }],
   conditions: [], views: [{ holder: 'Sam', position: 'thinks push is too risky', quote: 'Sam disagrees' }], history: [],
 };

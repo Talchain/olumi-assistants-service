@@ -86,8 +86,13 @@ export const LivingLink = z.object({
   /** A factor id or an aim id. */
   to: id,
   effect: z.object({
-    form: z.enum(['point', 'range', 'direction_only', 'unknown']),
+    /**
+     * `normal`: an explicitly stated law, `value` its mean and `sd` its standard deviation, per +1 of `from`. An ordinary
+     * range is not a law (AIE, 20 Oct): it stays a `range`.
+     */
+    form: z.enum(['point', 'range', 'normal', 'direction_only', 'unknown']),
     ...figure,
+    sd: z.number().nullable(),
     sign: z.enum(['+', '-']).nullable(),
   }).strict(),
   ...attribution,

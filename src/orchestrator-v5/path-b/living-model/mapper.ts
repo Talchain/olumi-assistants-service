@@ -6,9 +6,12 @@
  * Slice 1 handles LEVEL targets. The science conventions are the existing ones, re-stated here because the kept
  * sizers (`link-effect.ts`, `refit-frames.ts`, `same-unit.ts`) import the legacy meaning layer:
  *  · a level is `raw / cap`; the goal's cap is `resolveGoalThresholdCapWithProvenance`, its level `admitGoalBaseline`;
- *  · a link's β = (change in `to` per +1 of `from`) × cap_from / cap_to; a point keeps the sizer's σ = |β|/2, a range
- *    is read as a central 90 % interval (AIE sign-off pending);
- *  · an unsized link is Olumi's placeholder, which the chance licence withholds;
+ *  · a link's β = (change in `to` per +1 of `from`) × cap_from / cap_to, its σ scaled by the same ratio (AIE, 20 Oct):
+ *    a stated point gives the central coefficient only, and σ = |β|/2 is Olumi's illustrative convention (D3), never the
+ *    user's spread; an explicitly stated Normal law gives both; an ordinary range is not a law, so it stays in the living
+ *    model and its dependent chance is withheld;
+ *  · existence 1 for a stated link is the assumption of conditioning on it; Olumi's 0.8 is an untested convention;
+ *  · an unsized link is Olumi's placeholder, which the chance licence withholds; an unknown sign is never drawn positive;
  *  · unknown is never 0: a level, setting or link this slice cannot convert is WITHHELD with its reason, never dropped
  *    silently and never guessed.
  */
@@ -19,7 +22,7 @@ import { admitGoalBaseline } from '../../../cee/factor-extraction/goal-baseline-
 export type WithheldReason =
   | 'no_level_target' | 'change_target_not_in_slice' | 'target_range_not_in_slice' | 'goal_level_unknown'
   | 'goal_level_not_admitted' | 'factor_level_unknown' | 'level_range_not_in_slice' | 'setting_not_convertible'
-  | 'link_endpoint_unknown' | 'link_unit_mismatch' | 'no_single_status_quo';
+  | 'link_endpoint_unknown' | 'link_unit_mismatch' | 'link_range_no_law' | 'link_sign_unknown' | 'no_single_status_quo';
 
 export interface Withheld { readonly id: string; readonly reason: WithheldReason }
 
@@ -27,8 +30,6 @@ type Rec = Record<string, unknown>;
 export interface Mapped { readonly graph: { nodes: Rec[]; edges: Rec[] }; readonly withheld: readonly Withheld[] }
 
 const STRUCTURAL = { strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' } as const;
-/** Central 90 % interval → σ (AIE sign-off pending). */
-const Z90 = 1.645;
 const OLUMI_EXISTS = 0.8;
 
 const stated = (s: LivingSourceT): boolean => s === 'user' || s === 'party';
@@ -147,15 +148,19 @@ export function mapLivingModel(model: LivingModelT): Mapped {
     const from = frameOf(l.from);
     const to = frameOf(l.to);
     if (from === undefined || to === undefined) { hold(l.id, 'link_endpoint_unknown'); continue; }
+    // The engine has no "unknown" direction, so an unsigned link stays in the living model only.
+    if (l.effect.sign === null) { hold(l.id, 'link_sign_unknown'); continue; }
     const sign = l.effect.sign === '-' ? -1 : 1;
     const base: Rec = { id: l.id, from: l.from, to: l.to, effect_direction: sign < 0 ? 'negative' : 'positive' };
-    const unitMismatch = l.effect.unit !== null && to.unit !== null && l.effect.unit !== to.unit;
-    const beta = (amount: number) => sign * Math.abs(amount) * from.cap / to.cap;
-    const sized = (l.effect.form === 'point' && l.effect.value !== null)
-      ? { mean: beta(l.effect.value), std: Math.abs(beta(l.effect.value)) / 2 }
-      : (l.effect.form === 'range' && l.effect.low !== null && l.effect.high !== null)
-        ? { mean: beta((l.effect.low + l.effect.high) / 2), std: Math.abs(beta(l.effect.high) - beta(l.effect.low)) / (2 * Z90) }
+    const e = l.effect;
+    const unitMismatch = e.unit !== null && to.unit !== null && e.unit !== to.unit;
+    const ratio = from.cap / to.cap;
+    const sized = (e.form === 'point' && e.value !== null)
+      ? { mean: sign * Math.abs(e.value) * ratio, std: Math.abs(e.value) * ratio / 2 }
+      : (e.form === 'normal' && e.value !== null && e.sd !== null && e.sd > 0)
+        ? { mean: sign * Math.abs(e.value) * ratio, std: e.sd * ratio }
         : undefined;
+    if (e.form === 'range') hold(l.id, 'link_range_no_law');
     if (unitMismatch) hold(l.id, 'link_unit_mismatch');
     if (sized === undefined || unitMismatch) {
       // Unsized (or not convertible): Olumi's placeholder, which the chance licence withholds.

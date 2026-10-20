@@ -50,7 +50,7 @@ describe('thin core mapper: living model → GraphV3', () => {
   it('unknown is never 0: an unstated level, a change target and an unsized link are withheld or placeholder, each with its reason', () => {
     const model: LivingModelT = structuredClone(KNOWN_ANSWER);
     model.factors[0]!.value = null;
-    model.links[0]!.effect = { form: 'direction_only', value: null, low: null, high: null, unit: null, sign: '+' };
+    model.links[0]!.effect = { form: 'direction_only', value: null, low: null, high: null, sd: null, unit: null, sign: '+' };
     const { graph, withheld } = mapLivingModel(model);
     expect(withheld).toContainEqual({ id: 'f', reason: 'factor_level_unknown' });
     expect(node(graph, 'f').observed_state).toBeUndefined();
@@ -60,6 +60,28 @@ describe('thin core mapper: living model → GraphV3', () => {
     const change: LivingModelT = structuredClone(KNOWN_ANSWER);
     change.aims[0]!.target!.comparator = 'increase';
     expect(mapLivingModel(change).withheld).toContainEqual({ id: 'g', reason: 'change_target_not_in_slice' });
+  });
+
+  it('AIE 20 Oct: an ordinary range is kept but not read as a law; an unknown sign is never drawn positive; a point\'s σ is |β|/2', () => {
+    const edge = (g: { edges: Record<string, unknown>[] }) => g.edges.find((e) => e.from === 'f' && e.to === 'g') as Record<string, any> | undefined;
+    const range: LivingModelT = structuredClone(KNOWN_ANSWER);
+    range.links[0]!.effect = { form: 'range', value: null, low: 33.55, high: 66.45, sd: null, unit: 'units', sign: '+' };
+    const r = mapLivingModel(range);
+    expect(r.withheld).toContainEqual({ id: 'f_g', reason: 'link_range_no_law' });
+    expect(edge(r.graph)!.provenance.magnitude).toBe('olumi_placeholder');
+
+    const unsigned: LivingModelT = structuredClone(KNOWN_ANSWER);
+    unsigned.links[0]!.effect.sign = null;
+    const u = mapLivingModel(unsigned);
+    expect(u.withheld).toContainEqual({ id: 'f_g', reason: 'link_sign_unknown' });
+    expect(edge(u.graph)).toBeUndefined();
+
+    const point: LivingModelT = structuredClone(KNOWN_ANSWER);
+    point.links[0]!.effect = { form: 'point', value: 50, low: null, high: null, sd: null, unit: 'units', sign: '-' };
+    const p = edge(mapLivingModel(point).graph)!;
+    expect(p).toMatchObject({ effect_direction: 'negative', provenance: { magnitude: 'user_stated' } });
+    expect(p.strength.mean).toBeCloseTo(-0.4, 10);
+    expect(p.strength.std).toBeCloseTo(0.2, 10);
   });
 
   it('attribution is a label: an unverified figure gets no stamp, Olumi\'s gets its own, a user\'s is the brief\'s', () => {

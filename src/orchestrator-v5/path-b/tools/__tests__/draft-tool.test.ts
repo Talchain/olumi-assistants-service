@@ -28,7 +28,7 @@ const LIVING: LivingModelT = {
   ],
   factors: [{ id: 'assistants_on_shift', label: 'Assistants on shift', value: 1, low: null, high: null, unit: 'people', source: 'olumi', party: null, quote: null }],
   links: [{ id: 'assistants_visitors', from: 'assistants_on_shift', to: 'visitors_served', source: 'olumi', party: null, quote: null,
-    effect: { form: 'direction_only', value: null, low: null, high: null, unit: null, sign: '+' } }],
+    effect: { form: 'direction_only', value: null, low: null, high: null, sd: null, unit: null, sign: '+' } }],
   conditions: [], views: [{ holder: 'us', position: 'walk-ins swing a lot', quote: 'walk-ins swing a lot' }], history: [],
 };
 type Reply = { status: number; json: Rec };
