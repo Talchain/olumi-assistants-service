@@ -1,7 +1,7 @@
 /**
  * PATH-B DRAFT ADAPTER: the brief must literally be the user's words; ONE drafter call, the drafter's JSON converted by Step 8's
  * pure `candidateToGraph` and registered create-only under the construction's own operation id; `mutated` only when THIS
- * construction's own version is on record and a fresh read holds a model; a retry of a committed construction is "already
+ * registration's own receipt and hashes match a fresh read of the complete postimage; a retry of a committed construction is "already
  * saved"; an unknown write is said as unknown. The drafter and the routes are scripted (no module mock: the conversion and the
  * construction's own helpers are real). SYNTHETIC brief.
  */
@@ -13,7 +13,9 @@ import { BUILD_INSTRUCTIONS, buildCandidateSchema, constructionOperationId, type
 import { registrationTurnId } from '../../../graph-registration/registration-identity.js';
 import { traceRow } from '../outcome.js';
 import { STANCE_DESCRIPTION } from '../change-tools.js';
-import { read, type Rec } from './fixtures.js';
+import type { Rec } from './fixtures.js';
+import { computeGraphIdentityHash } from '../../../context/graph-identity.js';
+import { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha256 } from '../../../context/graph-hash.js';
 
 const ACTION_TIMING_SENTENCE = 'Declare stated additions in interventions with value_kind=additional, leaving unknown current levels as questions, and stated goal time limits in horizon_months and verbatim deadline_words, keeping relative periods relative without inventing dates.';
 
@@ -36,8 +38,16 @@ const DRAFT: Rec = {
 };
 type Reply = { status: number; json: Rec };
 const EMPTY: Reply = { status: 200, json: { graph: null, graph_present: false, graph_hash: null, graph_identity_hash: null } };
-const MODEL: Reply = { status: 200, json: read({ graph_hash: 'h_new' }) };
-const SAVED: Reply = { status: 200, json: { model_version: { version_id: 'v_1', version_number: 1 } } };
+const convertedDraft = candidateToGraph(DRAFT);
+if ('refused' in convertedDraft) throw new Error(convertedDraft.refused);
+const MODEL: Reply = { status: 200, json: { graph: convertedDraft.graph, graph_hash: computeAnalysisAffectingGraphHash(convertedDraft.graph as never),
+  graph_identity_hash: computeGraphIdentityHash(convertedDraft.graph as never) } };
+const SAVED: Reply = { status: 200, json: { graph_identity_hash: MODEL.json.graph_identity_hash, graph_hash: MODEL.json.graph_hash,
+  model_version: { version_id: 'v_1', version_number: 1, mutation_id: 'm_1', creation_kind: 'initial',
+    graph_identity_hash: (MODEL.json.graph_identity_hash as Rec).value, analysis_affecting_hash: computeAnalysisAffectingGraphHashSha256(convertedDraft.graph as never) } } };
+const UNKNOWN = { data: { save_outcome: 'UNKNOWN' },
+  detail: 'The construction was dispatched, but its save could not be verified. It may already be saved. Do not say nothing was saved, and do not repeat a write or Run to repair the reply.' };
+const NO_WRITE = { data: { save_outcome: 'VERIFIED_NO_WRITE' } };
 /** The versions read, holding this construction's own version (or not). */
 const VERSIONS = (ours: boolean): Reply => ({ status: 200, json: { versions: [{ version_id: 'v_1', sequence: 1, created_at: '2026-10-19T18:00:00.000Z',
   creation: { kind: 'committed_mutation', mutation_id: 'm_1', source_turn_id: ours ? registrationTurnId(SID, constructionOperationId(SID, BRIEF)) : 'someone_else' } }] } });
@@ -73,7 +83,7 @@ describe('Olumi\'s provisional first model: ONE draft, converted by candidateToG
     if ('refused' in converted) throw new Error(converted.refused);
     expect(registerCalls(p)).toEqual([{ path: `/assist/v1/scenarios/${SID}/graph/register`, body: {
       graph: converted.graph, brief_text: BRIEF, operation_id: constructionOperationId(SID, BRIEF), expected_graph_identity_hash: null } }]);
-    expect(out).toMatchObject({ status: 'ok', mutated: true, data: { provisional: 'olumi', model_version: OURS, revision: { graph_hash: 'h_new' },
+    expect(out).toMatchObject({ status: 'ok', mutated: true, data: { provisional: 'olumi', save_outcome: 'VERIFIED_SAVED', model_version: SAVED.json.model_version, revision: { graph_hash: MODEL.json.graph_hash },
       draft: { declared: DRAFT, said: [...new Set(converted.loss.map((l) => l.reason))], not_expressible: converted.blocked_schema } } });
     expect(traceRow('build_model_from_brief', out)).toEqual({ name: 'build_model_from_brief', ok: true, mutated: true, outcome: 'ok', refusal: null, ran: null });
     expect(p.callStructured).toHaveBeenCalledTimes(1);
@@ -81,12 +91,12 @@ describe('Olumi\'s provisional first model: ONE draft, converted by candidateToG
   });
 
   it.each([
-    ['no version of this construction on record', { graph: [EMPTY, MODEL], register: [SAVED], versions: [VERSIONS(false)] }],
+    ['no receipt of this construction on record', { graph: [EMPTY, MODEL], register: [{ status: 200, json: {} }], versions: [VERSIONS(false)] }],
     ['a read that holds no model', { graph: [EMPTY, EMPTY], register: [SAVED], versions: [VERSIONS(true)] }],
   ] as const)('the route said saved, but %s: an unknown write, and no GRAPH_READY', async (_name, routes) => {
     const p = product({ graph: [...routes.graph], register: [...routes.register], versions: [...routes.versions] });
     const out = await buildModel(p, ctx, { brief: BRIEF });
-    expect(out).toEqual({ status: 'unavailable', reason: 'not_verified', write: 'unknown' });
+    expect(out).toEqual({ status: 'unavailable', reason: 'not_verified', write: 'unknown', ...UNKNOWN });
     expect(traceRow('build_model_from_brief', out).mutated).toBeNull();
     expect(p.onModelRegistered).not.toHaveBeenCalled();
   });
@@ -157,23 +167,23 @@ it('ONE declared pair: B strict output requires origin/stance on every figure; A
 describe('exactly once: a retry of a committed construction is "already saved"', () => {
   it('the model exists because THIS construction committed (lost response, restart): already saved, no new draft', async () => {
     const p = product({ graph: [MODEL], versions: [VERSIONS(true)] });
-    expect(await buildModel(p, ctx, { brief: BRIEF })).toEqual({ status: 'ok', mutated: false, ran: false, data: { already_saved: true, model_version: OURS } });
+    expect(await buildModel(p, ctx, { brief: BRIEF })).toEqual({ status: 'ok', mutated: false, ran: false, data: { already_saved: true, model_version: OURS, save_outcome: 'VERIFIED_SAVED' } });
     expect(p.callStructured).not.toHaveBeenCalled();
   });
 
   it('the route replayed this construction: already saved, no second "saved"', async () => {
-    const p = product({ graph: [EMPTY, MODEL], register: [{ status: 200, json: { replayed: true } }], versions: [VERSIONS(true)] });
+    const p = product({ graph: [EMPTY, MODEL], register: [{ ...SAVED, json: { ...SAVED.json, replayed: true } }], versions: [VERSIONS(true)] });
     expect(await buildModel(p, ctx, { brief: BRIEF })).toMatchObject({ status: 'ok', mutated: false, data: { already_saved: true } });
   });
 
   it.each(['GRAPH_STALE', 'OPERATION_ID_REUSED'])('the register refuses %s and THIS construction is on record: already saved', async (code) => {
     const p = product({ graph: [EMPTY], register: [{ status: 409, json: { details: { code } } }], versions: [VERSIONS(true)] });
-    expect(await buildModel(p, ctx, { brief: BRIEF })).toEqual({ status: 'ok', mutated: false, ran: false, data: { already_saved: true, model_version: OURS } });
+    expect(await buildModel(p, ctx, { brief: BRIEF })).toEqual({ status: 'ok', mutated: false, ran: false, data: { already_saved: true, model_version: OURS, save_outcome: 'VERIFIED_SAVED' } });
   });
 
   it('a model that is not this construction\'s is never redrafted', async () => {
     const p = product({ graph: [MODEL], versions: [VERSIONS(false)] });
-    expect(await buildModel(p, ctx, { brief: BRIEF })).toEqual({ status: 'refused', reason: 'model_exists' });
+    expect(await buildModel(p, ctx, { brief: BRIEF })).toEqual({ status: 'refused', reason: 'model_exists', ...NO_WRITE });
     expect(p.callStructured).not.toHaveBeenCalled();
   });
 });
@@ -181,27 +191,27 @@ describe('exactly once: a retry of a committed construction is "already saved"',
 describe('refusals and unknowns, said as such', () => {
   it('a brief that is not literally the user\'s words: nothing is read, drafted or written', async () => {
     const p = product({});
-    expect(await buildModel(p, ctx, { brief: 'We run a large museum.' })).toEqual({ status: 'refused', reason: 'brief_not_users_words' });
+    expect(await buildModel(p, ctx, { brief: 'We run a large museum.' })).toEqual({ status: 'refused', reason: 'brief_not_users_words', ...NO_WRITE });
     expect(p.dispatch).not.toHaveBeenCalled();
     expect(p.callStructured).not.toHaveBeenCalled();
   });
 
   it('CONTRAST: a read with no graph flag and no graph is still malformed: nothing is drafted', async () => {
     const p = product({ graph: [{ status: 200, json: { graph: null, graph_hash: null } }] });
-    expect(await buildModel(p, ctx, { brief: BRIEF })).toEqual({ status: 'unavailable', reason: 'read_malformed', write: 'none' });
+    expect(await buildModel(p, ctx, { brief: BRIEF })).toEqual({ status: 'unavailable', reason: 'read_malformed', write: 'none', ...NO_WRITE });
     expect(p.callStructured).not.toHaveBeenCalled();
   });
 
   it('no drafter: unavailable', async () => {
     expect(await buildModel({ ...product({ graph: [EMPTY] }), callStructured: undefined }, ctx, { brief: BRIEF }))
-      .toEqual({ status: 'unavailable', reason: 'drafter_unavailable', write: 'none' });
+      .toEqual({ status: 'unavailable', reason: 'drafter_unavailable', write: 'none', ...NO_WRITE });
   });
 
   it.each([
-    ['no answer from the drafter', '', { status: 'unavailable', reason: 'no_structured_output', write: 'none' }],
-    ['an answer cut off before it closed', JSON.stringify(DRAFT).slice(0, 200), { status: 'unavailable', reason: 'no_structured_output', write: 'none' }],
-    ['a drafter that throws', new Error('socket'), { status: 'unavailable', reason: 'construction_failed', write: 'none' }],
-    ['a draft with no goal (unreadable, never refused for what it means)', JSON.stringify({ ...DRAFT, goal: { metric: ' ' } }), { status: 'refused', reason: 'candidate_invalid' }],
+    ['no answer from the drafter', '', { status: 'unavailable', reason: 'no_structured_output', write: 'none', ...NO_WRITE }],
+    ['an answer cut off before it closed', JSON.stringify(DRAFT).slice(0, 200), { status: 'unavailable', reason: 'no_structured_output', write: 'none', ...NO_WRITE }],
+    ['a drafter that throws', new Error('socket'), { status: 'unavailable', reason: 'construction_failed', write: 'none', ...NO_WRITE }],
+    ['a draft with no goal (unreadable, never refused for what it means)', JSON.stringify({ ...DRAFT, goal: { metric: ' ' } }), { status: 'refused', reason: 'candidate_invalid', ...NO_WRITE }],
   ] as const)('%s: nothing is written', async (_name, text, outcome) => {
     const p = product({ graph: [EMPTY] }, text);
     expect(await buildModel(p, ctx, { brief: BRIEF })).toEqual(outcome);
@@ -209,10 +219,12 @@ describe('refusals and unknowns, said as such', () => {
   });
 
   it.each([
-    ['a model that appeared meanwhile (not ours)', { status: 409, json: { details: { code: 'GRAPH_STALE' } } }, [VERSIONS(false)], { status: 'refused', reason: 'model_exists' }],
-    ['a registration the route refused', { status: 422, json: { message: 'bad graph' } }, [], { status: 'refused', reason: 'registration_refused' }],
-    ['a registration that failed on the server', { status: 500, json: {} }, [], { status: 'unavailable', reason: 'not_confirmed', write: 'unknown' }],
-    ['a registration whose answer was lost', new Error('socket'), [], { status: 'unavailable', reason: 'not_confirmed', write: 'unknown' }],
+    ['a model that appeared meanwhile (not ours)', { status: 409, json: { details: { code: 'GRAPH_STALE' } } }, [VERSIONS(false)], { status: 'refused', reason: 'model_exists', ...NO_WRITE }],
+    ['a registration the route refused', { status: 422, json: { message: 'bad graph' } }, [], { status: 'refused', reason: 'registration_refused', ...NO_WRITE }],
+    ['a dispatched registration without a completed acknowledgement', { status: 202, json: {} }, [], { status: 'unavailable', reason: 'not_confirmed', write: 'unknown', ...UNKNOWN }],
+    ['an operation already used but its receipt unavailable', { status: 409, json: { details: { code: 'OPERATION_ID_REUSED' } } }, [], { status: 'unavailable', reason: 'not_confirmed', write: 'unknown', ...UNKNOWN }],
+    ['a registration that failed on the server', { status: 500, json: {} }, [], { status: 'unavailable', reason: 'not_confirmed', write: 'unknown', ...UNKNOWN }],
+    ['a registration whose answer was lost', new Error('socket'), [], { status: 'unavailable', reason: 'not_confirmed', write: 'unknown', ...UNKNOWN }],
   ] as const)('%s', async (_name, reply, versions, outcome) => {
     const p = product({ graph: [EMPTY], register: [reply], versions: [...versions] });
     expect(await buildModel(p, ctx, { brief: BRIEF })).toEqual(outcome);
@@ -221,6 +233,6 @@ describe('refusals and unknowns, said as such', () => {
 
   it('the parameters take the brief only; an empty brief is not the user\'s words', async () => {
     expect(BuildModelParams.safeParse({ brief: BRIEF, explicit_rebuild_request: 'yes' }).success).toBe(false);
-    expect(await buildModel(product({}), ctx, { brief: '' })).toEqual({ status: 'refused', reason: 'brief_not_users_words' });
+    expect(await buildModel(product({}), ctx, { brief: '' })).toEqual({ status: 'refused', reason: 'brief_not_users_words', ...NO_WRITE });
   });
 });

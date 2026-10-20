@@ -10,8 +10,8 @@
  *     statements are recorded on their subjects from the brief's own words (`candidateToGraph`'s carry);
  *  3. CREATE-ONLY registration under the construction's own operation id (`constructionOperationId`), so a lost response or a
  *     concurrent copy is recovered as this construction's own version, never a second one;
- *  4. an INDEPENDENT readback: `mutated` only when THIS construction's own version (`findConstructionVersion`) is on record AND
- *     a fresh read holds a model.
+ *  4. an INDEPENDENT readback: `mutated` only when THIS registration's own receipt and CAS hashes match a fresh read AND
+ *     that read holds the complete converted postimage (`approvedGraphHeld`), not merely an existing model.
  * The draft travels beside the receipt (DL carrier ruling: the CONVERSATION route): `declared` is the drafter's JSON verbatim,
  * `said` what the conversion did not carry or changed, in its own sentences, and `not_expressible` each declared origin GraphV3
  * cannot hold. A retry of a construction that already committed reports "already saved", never a second write or "model exists".
@@ -22,6 +22,10 @@ import type { InternalDispatch } from '../../agent-lane/runtime/agent-capabiliti
 import {
   BUILD_INSTRUCTIONS, buildCandidateSchema, constructionOperationId, findConstructionVersion, strictForTheDrafter, type CallStructuredModel,
 } from '../../agent-lane/runtime/build-model.js';
+import { approvedGraphHeld } from '../../agent-lane/runtime/draft-replacement.js';
+import { computeGraphIdentityHash } from '../../context/graph-identity.js';
+import { computeAnalysisAffectingGraphHashSha256 } from '../../context/graph-hash.js';
+import type { AtomicCommittedModelVersionReceipt } from '../../session/store.js';
 import { turnContextItems, turnContextText } from '../../agent-lane/turn-context.js';
 import { budgetFor } from '../../agent-lane/model-budgets.js';
 import { candidateToGraph } from './candidate-to-graph.js';
@@ -97,6 +101,15 @@ async function drafted(callStructured: CallStructuredModel, brief: string): Prom
 }
 
 export async function buildModel(deps: DraftDeps, ctx: Pick<AgentToolContext, 'scenario_id'> & TypedWords, args: BuildModelArgs): Promise<ToolOutcome> {
+  const outcome = await construct(deps, ctx, args);
+  const save_outcome = outcome.status === 'ok' ? 'VERIFIED_SAVED'
+    : outcome.status === 'unavailable' && outcome.write === 'unknown' ? 'UNKNOWN' : 'VERIFIED_NO_WRITE';
+  return { ...outcome, data: { ...outcome.data, save_outcome }, ...(save_outcome === 'UNKNOWN' ? {
+    detail: 'The construction was dispatched, but its save could not be verified. It may already be saved. Do not say nothing was saved, and do not repeat a write or Run to repair the reply.',
+  } : {}) };
+}
+
+async function construct(deps: DraftDeps, ctx: Pick<AgentToolContext, 'scenario_id'> & TypedWords, args: BuildModelArgs): Promise<ToolOutcome> {
   if (!inTheUsersWords(args.brief, ctx)) return refused('brief_not_users_words');
   if (deps.callStructured === undefined) return unavailable('drafter_unavailable');
   const before = await readSaved(deps, ctx.scenario_id);
@@ -131,12 +144,23 @@ export async function buildModel(deps: DraftDeps, ctx: Pick<AgentToolContext, 's
     const prior = await ownVersion();
     if (prior !== null) return ok({ already_saved: true, model_version: prior }, { mutated: false });
     if (code === 'GRAPH_STALE') return refused('model_exists');
+    return unavailable('not_confirmed', 'unknown');
   }
-  if (reg.status >= 500) return unavailable('not_confirmed', 'unknown');
-  if (reg.status !== 200) return refused('registration_refused');
+  if (reg.status >= 400 && reg.status < 500) return refused('registration_refused');
+  if (reg.status !== 200) return unavailable('not_confirmed', 'unknown');
 
-  const [receipt, after] = await Promise.all([ownVersion(), readSaved(deps, ctx.scenario_id)]);
-  if (receipt === null || !isSavedRead(after) || nodesIn(after.graph) === 0) return unavailable('not_verified', 'unknown');
+  // The response is THIS create-only registration's receipt; history availability is not save verification.
+  const receipt = reg.json.model_version as Partial<AtomicCommittedModelVersionReceipt> | undefined;
+  const ack = typeof reg.json.graph_identity_hash === 'string' ? reg.json.graph_identity_hash
+    : (reg.json.graph_identity_hash as { value?: unknown } | undefined)?.value;
+  const after = await readSaved(deps, ctx.scenario_id);
+  if (receipt == null || typeof receipt.version_id !== 'string' || receipt.version_id === ''
+    || !Number.isSafeInteger(receipt.version_number) || Number(receipt.version_number) < 1
+    || typeof receipt.mutation_id !== 'string' || receipt.mutation_id === ''
+    || !isSavedRead(after) || typeof ack !== 'string' || ack !== after.identity
+    || receipt.graph_identity_hash !== ack || computeGraphIdentityHash(after.graph as never)?.value !== ack
+    || reg.json.graph_hash !== after.graphHash || receipt.analysis_affecting_hash !== computeAnalysisAffectingGraphHashSha256(after.graph as never)
+    || !approvedGraphHeld(converted.graph, after.graph)) return unavailable('not_verified', 'unknown');
   if (reg.json.replayed === true) return ok({ already_saved: true, model_version: receipt }, { mutated: false });
   try { deps.onModelRegistered?.(after.graph); } catch { /* an observer never decides the outcome */ }
   return ok({
