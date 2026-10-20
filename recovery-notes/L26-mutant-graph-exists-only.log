@@ -1,0 +1,76 @@
+ WARN  Issue while reading "/private/tmp/cx-l26/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+ WARN  Issue while reading "/private/tmp/cx-l26/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+
+ RUN  v4.1.10 /private/tmp/cx-l26
+
+{"level":"info","time":1792487979958,"pid":47130,"hostname":"Mac.net","event":"v5.scenario_graph_register.registered","request_id":"req-1","scenario_id":"75041055-2807-4a58-9aba-d01afca8de36","node_count":11,"edge_count":18,"kind_fields_normalised":0,"msg":"Graph registration — imported graph is now the persisted graph"}
+{"level":"info","time":1792487979958,"pid":47130,"hostname":"Mac.net","event":"v5.scenario_graph_register.registered","request_id":"req-1","scenario_id":"75041055-2807-4a58-9aba-d01afca8de36","node_count":11,"edge_count":18,"kind_fields_normalised":0,"msg":"Graph registration — imported graph is now the persisted graph"}
+{"level":"info","time":1792487979958,"pid":47130,"hostname":"Mac.net","event":"v5.scenario_graph_register.registered","request_id":"req-1","scenario_id":"75041055-2807-4a58-9aba-d01afca8de36","node_count":11,"edge_count":18,"kind_fields_normalised":0,"msg":"Graph registration — imported graph is now the persisted graph"}
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-save-truth.route.test.ts (3 tests | 2 failed) 447ms
+     × recorded live shape through the real register: missing-receipt 132ms
+     × recorded live shape through the real register: changed-postimage 58ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-save-truth.route.test.ts > L26 own saved draft truth > recorded live shape through the real register: missing-receipt
+AssertionError: expected { status: 'ok', mutated: true, …(2) } to match object { status: 'unavailable', …(3) }
+(11 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "data": {
+-     "save_outcome": "UNKNOWN",
++     "save_outcome": "VERIFIED_SAVED",
+    },
+-   "reason": "not_verified",
+-   "status": "unavailable",
+-   "write": "unknown",
++   "status": "ok",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-save-truth.route.test.ts:82:19
+     80|       expect(approvedGraphHeld(converted.graph, live.read.graph)).toBe…
+     81|       expect(saved).toEqual(live.read.graph);
+     82|       expect(out).toMatchObject(fault === 'saved'
+       |                   ^
+     83|         ? { status: 'ok', mutated: true, data: { save_outcome: 'VERIFI…
+     84|         : { status: 'unavailable', reason: 'not_verified', write: 'unk…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-save-truth.route.test.ts > L26 own saved draft truth > recorded live shape through the real register: changed-postimage
+AssertionError: expected { status: 'ok', mutated: true, …(2) } to match object { status: 'unavailable', …(3) }
+(17 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "data": {
+-     "save_outcome": "UNKNOWN",
++     "save_outcome": "VERIFIED_SAVED",
+    },
+-   "reason": "not_verified",
+-   "status": "unavailable",
+-   "write": "unknown",
++   "status": "ok",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-save-truth.route.test.ts:82:19
+     80|       expect(approvedGraphHeld(converted.graph, live.read.graph)).toBe…
+     81|       expect(saved).toEqual(live.read.graph);
+     82|       expect(out).toMatchObject(fault === 'saved'
+       |                   ^
+     83|         ? { status: 'ok', mutated: true, data: { save_outcome: 'VERIFI…
+     84|         : { status: 'unavailable', reason: 'not_verified', write: 'unk…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 1 passed (3)
+   Start at  10:37:28
+   Duration  12.76s (transform 9.31s, setup 223ms, import 11.91s, tests 447ms, environment 0ms)
+

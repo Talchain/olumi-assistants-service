@@ -1,0 +1,1170 @@
+{
+  "scenario_id": "75041055-2807-4a58-9aba-d01afca8de36",
+  "brief": "Should I hire a marketing manager, or use an AI tool to plan the campaign for the next product feature launch, and use the money I'd save to spend more on advertising? Our budget for the year is £100,000. I can't spend more than 25% of my time on this, and I'm not that experienced with marketing.",
+  "draft": {
+    "goal": {
+      "kind": null,
+      "deliverable": null,
+      "metric": "Product feature launch campaign effectiveness",
+      "operator": ">=",
+      "target_stated": false,
+      "value": null,
+      "unit": "",
+      "horizon_months": null,
+      "provenance": "inferred",
+      "frame": "level",
+      "baseline_known": false,
+      "baseline_value": null,
+      "baseline_provenance": "inferred",
+      "scope": null,
+      "quantity_frame": "level",
+      "basis": null,
+      "source_quote": null,
+      "deadline_words": "for the next product feature launch",
+      "target_origin": "unknown",
+      "target_stance": "estimate",
+      "baseline_origin": "unknown",
+      "baseline_stance": "estimate"
+    },
+    "constraints": [
+      {
+        "metric": "Total annual campaign spend",
+        "operator": "<=",
+        "value": 100000,
+        "unit": "GBP/year",
+        "provenance": "explicit",
+        "frame": "level",
+        "role": "limit"
+      },
+      {
+        "metric": "User time on campaign work",
+        "operator": "<=",
+        "value": 25,
+        "unit": "%",
+        "provenance": "explicit",
+        "frame": "level",
+        "role": "limit"
+      }
+    ],
+    "options": [
+      {
+        "label": "Hire marketing manager",
+        "provenance": "explicit",
+        "changes": [
+          "User time on campaign work",
+          "Total annual campaign spend"
+        ],
+        "interventions": [
+          {
+            "factor_label": "Marketing manager employed",
+            "value": 1,
+            "value_kind": "absolute",
+            "unit": "yes/no",
+            "provenance": "explicit",
+            "origin": "user",
+            "stance": "hypothetical"
+          }
+        ],
+        "added_capacity": null,
+        "is_status_quo": null
+      },
+      {
+        "label": "Use AI planning tool",
+        "provenance": "explicit",
+        "changes": [
+          "Advertising spend",
+          "Total annual campaign spend",
+          "User time on campaign work"
+        ],
+        "interventions": [
+          {
+            "factor_label": "AI campaign planning tool adopted",
+            "value": 1,
+            "value_kind": "absolute",
+            "unit": "yes/no",
+            "provenance": "explicit",
+            "origin": "user",
+            "stance": "hypothetical"
+          }
+        ],
+        "added_capacity": null,
+        "is_status_quo": null
+      },
+      {
+        "label": "Keep current approach",
+        "provenance": "ai_proposed",
+        "changes": [],
+        "interventions": [],
+        "added_capacity": null,
+        "is_status_quo": true
+      }
+    ],
+    "factors": [
+      {
+        "label": "Marketing manager employed",
+        "role": "controllable",
+        "baseline_known": false,
+        "baseline_value": null,
+        "unit": "yes/no",
+        "provenance": "inferred",
+        "plausible_max": null,
+        "origin": "unknown",
+        "stance": "estimate"
+      },
+      {
+        "label": "AI campaign planning tool adopted",
+        "role": "controllable",
+        "baseline_known": false,
+        "baseline_value": null,
+        "unit": "yes/no",
+        "provenance": "inferred",
+        "plausible_max": null,
+        "origin": "unknown",
+        "stance": "estimate"
+      },
+      {
+        "label": "Advertising spend",
+        "role": "controllable",
+        "baseline_known": false,
+        "baseline_value": null,
+        "unit": "GBP/year",
+        "provenance": "inferred",
+        "plausible_max": null,
+        "origin": "unknown",
+        "stance": "estimate"
+      },
+      {
+        "label": "Total annual campaign spend",
+        "role": "controllable",
+        "baseline_known": false,
+        "baseline_value": null,
+        "unit": "GBP/year",
+        "provenance": "inferred",
+        "plausible_max": null,
+        "origin": "unknown",
+        "stance": "estimate"
+      },
+      {
+        "label": "User time on campaign work",
+        "role": "controllable",
+        "baseline_known": false,
+        "baseline_value": null,
+        "unit": "%",
+        "provenance": "inferred",
+        "plausible_max": null,
+        "origin": "unknown",
+        "stance": "estimate"
+      }
+    ],
+    "risks": [
+      {
+        "label": "Limited marketing experience",
+        "provenance": "explicit",
+        "unit": null,
+        "plausible_max": null,
+        "already_true_evidence": {
+          "quote": "I'm not that experienced with marketing."
+        },
+        "origin": "user",
+        "stance": "stated_current"
+      }
+    ],
+    "outcomes": [],
+    "links": [
+      {
+        "from": "Marketing manager employed",
+        "to": "Product feature launch campaign effectiveness",
+        "direction": "positive",
+        "provenance": "inferred",
+        "effect_amount": null,
+        "effect_per_source_change": null,
+        "effect_provenance": null,
+        "definitional": null,
+        "basis": null,
+        "source_quote": null,
+        "origin": "olumi",
+        "stance": "estimate"
+      },
+      {
+        "from": "AI campaign planning tool adopted",
+        "to": "Product feature launch campaign effectiveness",
+        "direction": "positive",
+        "provenance": "inferred",
+        "effect_amount": null,
+        "effect_per_source_change": null,
+        "effect_provenance": null,
+        "definitional": null,
+        "basis": null,
+        "source_quote": null,
+        "origin": "olumi",
+        "stance": "estimate"
+      },
+      {
+        "from": "Advertising spend",
+        "to": "Product feature launch campaign effectiveness",
+        "direction": "positive",
+        "provenance": "inferred",
+        "effect_amount": null,
+        "effect_per_source_change": null,
+        "effect_provenance": null,
+        "definitional": null,
+        "basis": null,
+        "source_quote": null,
+        "origin": "olumi",
+        "stance": "estimate"
+      },
+      {
+        "from": "Advertising spend",
+        "to": "Total annual campaign spend",
+        "direction": "positive",
+        "provenance": "inferred",
+        "effect_amount": null,
+        "effect_per_source_change": null,
+        "effect_provenance": null,
+        "definitional": null,
+        "basis": null,
+        "source_quote": null,
+        "origin": "olumi",
+        "stance": "estimate"
+      },
+      {
+        "from": "User time on campaign work",
+        "to": "Product feature launch campaign effectiveness",
+        "direction": "positive",
+        "provenance": "ai_proposed",
+        "effect_amount": null,
+        "effect_per_source_change": null,
+        "effect_provenance": null,
+        "definitional": null,
+        "basis": null,
+        "source_quote": null,
+        "origin": "olumi",
+        "stance": "estimate"
+      },
+      {
+        "from": "Limited marketing experience",
+        "to": "Product feature launch campaign effectiveness",
+        "direction": "negative",
+        "provenance": "inferred",
+        "effect_amount": null,
+        "effect_per_source_change": null,
+        "effect_provenance": null,
+        "definitional": null,
+        "basis": null,
+        "source_quote": null,
+        "origin": "olumi",
+        "stance": "estimate"
+      }
+    ],
+    "identities": [],
+    "unknowns": [
+      "What outcome should define campaign effectiveness for this launch—for example qualified leads, product adoption, revenue, or another measure?",
+      "When is the next product feature launch, and is campaign effectiveness assessed at launch or over a stated period after it?",
+      "Does the £100,000 annual budget include the marketing manager, the AI tool, advertising, and any other launch costs?",
+      "What is currently spent per year on this campaign or on comparable launch marketing?",
+      "What would the manager, AI tool, and additional advertising each cost over the relevant period?",
+      "How much of your time does campaign work take now, and how would each option change it?",
+      "What level of advertising spend would the savings from the AI-tool option make available?",
+      "Does a marketing manager or the AI tool provide the campaign-planning support you need given your current marketing experience?"
+    ],
+    "decision_question": "Should I hire a marketing manager, or use an AI tool to plan the campaign for the next product feature launch, and use the money I'd save to spend more on advertising?",
+    "unknown_concerns": [
+      {
+        "unknown": "What outcome should define campaign effectiveness for this launch—for example qualified leads, product adoption, revenue, or another measure?",
+        "concerns": [
+          "Product feature launch campaign effectiveness"
+        ]
+      },
+      {
+        "unknown": "When is the next product feature launch, and is campaign effectiveness assessed at launch or over a stated period after it?",
+        "concerns": [
+          "Product feature launch campaign effectiveness"
+        ]
+      },
+      {
+        "unknown": "Does the £100,000 annual budget include the marketing manager, the AI tool, advertising, and any other launch costs?",
+        "concerns": [
+          "Total annual campaign spend",
+          "Marketing manager employed",
+          "AI campaign planning tool adopted",
+          "Advertising spend"
+        ]
+      },
+      {
+        "unknown": "What is currently spent per year on this campaign or on comparable launch marketing?",
+        "concerns": [
+          "Total annual campaign spend"
+        ]
+      },
+      {
+        "unknown": "What would the manager, AI tool, and additional advertising each cost over the relevant period?",
+        "concerns": [
+          "Marketing manager employed",
+          "AI campaign planning tool adopted",
+          "Advertising spend",
+          "Total annual campaign spend"
+        ]
+      },
+      {
+        "unknown": "How much of your time does campaign work take now, and how would each option change it?",
+        "concerns": [
+          "User time on campaign work",
+          "Hire marketing manager → User time on campaign work",
+          "Use AI planning tool → User time on campaign work"
+        ]
+      },
+      {
+        "unknown": "What level of advertising spend would the savings from the AI-tool option make available?",
+        "concerns": [
+          "Use AI planning tool → Advertising spend",
+          "Advertising spend",
+          "Total annual campaign spend"
+        ]
+      },
+      {
+        "unknown": "Does a marketing manager or the AI tool provide the campaign-planning support you need given your current marketing experience?",
+        "concerns": [
+          "Marketing manager employed → Product feature launch campaign effectiveness",
+          "AI campaign planning tool adopted → Product feature launch campaign effectiveness",
+          "Limited marketing experience → Product feature launch campaign effectiveness"
+        ]
+      }
+    ],
+    "statements": [
+      {
+        "quote": "Should I hire a marketing manager, or use an AI tool to plan the campaign for the next product feature launch, and use the money I'd save to spend more on advertising?",
+        "subject": {
+          "kind": "goal",
+          "label": "Product feature launch campaign effectiveness",
+          "to_label": null,
+          "factor_label": null
+        },
+        "field": "measure",
+        "form": "describes",
+        "value": null,
+        "low": null,
+        "high": null,
+        "unit": null,
+        "qualifier": null,
+        "conditions": "The decision contrasts hiring a marketing manager with using an AI tool and redirecting savings to advertising.",
+        "speaker": "user"
+      },
+      {
+        "quote": "Our budget for the year is £100,000.",
+        "subject": {
+          "kind": "factor",
+          "label": "Total annual campaign spend",
+          "to_label": null,
+          "factor_label": null
+        },
+        "field": "target",
+        "form": "upper_bound",
+        "value": 100000,
+        "low": null,
+        "high": null,
+        "unit": "GBP/year",
+        "qualifier": null,
+        "conditions": "Whether this annual budget covers all decision-option costs is not stated.",
+        "speaker": "user"
+      },
+      {
+        "quote": "I can't spend more than 25% of my time on this, and I'm not that experienced with marketing.",
+        "subject": {
+          "kind": "factor",
+          "label": "User time on campaign work",
+          "to_label": null,
+          "factor_label": null
+        },
+        "field": "target",
+        "form": "upper_bound",
+        "value": 25,
+        "low": null,
+        "high": null,
+        "unit": "%",
+        "qualifier": null,
+        "conditions": "“this” is read provisionally as campaign work.",
+        "speaker": "user"
+      },
+      {
+        "quote": "I'm not that experienced with marketing.",
+        "subject": {
+          "kind": "risk",
+          "label": "Limited marketing experience",
+          "to_label": null,
+          "factor_label": null
+        },
+        "field": "holds_now",
+        "form": "holds_now",
+        "value": null,
+        "low": null,
+        "high": null,
+        "unit": null,
+        "qualifier": "not that experienced",
+        "conditions": null,
+        "speaker": "user"
+      },
+      {
+        "quote": "Should I hire a marketing manager, or use an AI tool to plan the campaign for the next product feature launch, and use the money I'd save to spend more on advertising?",
+        "subject": {
+          "kind": "option",
+          "label": "Hire marketing manager",
+          "to_label": null,
+          "factor_label": "Marketing manager employed"
+        },
+        "field": "level",
+        "form": "point",
+        "value": 1,
+        "low": null,
+        "high": null,
+        "unit": "yes/no",
+        "qualifier": "Should I",
+        "conditions": "A hypothetical decision alternative, not a stated current condition.",
+        "speaker": "user"
+      },
+      {
+        "quote": "Should I hire a marketing manager, or use an AI tool to plan the campaign for the next product feature launch, and use the money I'd save to spend more on advertising?",
+        "subject": {
+          "kind": "option",
+          "label": "Use AI planning tool",
+          "to_label": null,
+          "factor_label": "AI campaign planning tool adopted"
+        },
+        "field": "level",
+        "form": "point",
+        "value": 1,
+        "low": null,
+        "high": null,
+        "unit": "yes/no",
+        "qualifier": "Should I",
+        "conditions": "A hypothetical decision alternative; the stated intent is to use savings for more advertising.",
+        "speaker": "user"
+      }
+    ]
+  },
+  "read": {
+    "graph": {
+      "edges": [
+        {
+          "to": "hire_marketing_manager",
+          "from": "should_i_hire_a_marketing_manager_or_use_an_ai_tool_to_plan_the_campaign_for_the_next_product_featur",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "use_ai_planning_tool",
+          "from": "should_i_hire_a_marketing_manager_or_use_an_ai_tool_to_plan_the_campaign_for_the_next_product_featur",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "keep_current_approach",
+          "from": "should_i_hire_a_marketing_manager_or_use_an_ai_tool_to_plan_the_campaign_for_the_next_product_featur",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "user_time_on_campaign_work",
+          "from": "hire_marketing_manager",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "total_annual_campaign_spend",
+          "from": "hire_marketing_manager",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "marketing_manager_employed",
+          "from": "hire_marketing_manager",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "advertising_spend",
+          "from": "use_ai_planning_tool",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "total_annual_campaign_spend",
+          "from": "use_ai_planning_tool",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "user_time_on_campaign_work",
+          "from": "use_ai_planning_tool",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "ai_campaign_planning_tool_adopted",
+          "from": "use_ai_planning_tool",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "marketing_manager_employed",
+          "from": "keep_current_approach",
+          "origin": "repair",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "ai_campaign_planning_tool_adopted",
+          "from": "keep_current_approach",
+          "origin": "repair",
+          "strength": {
+            "std": 0.01,
+            "mean": 1
+          },
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "product_feature_launch_campaign_effectiveness",
+          "from": "marketing_manager_employed",
+          "strength": {
+            "std": 0.125,
+            "mean": 0.5
+          },
+          "defaulted": true,
+          "provenance": {
+            "source": "cee_hypothesis",
+            "magnitude": "olumi_placeholder",
+            "mean_projected": true,
+            "uncertainty_defaults": [
+              {
+                "code": "CLAMP_STD_MINIMUM",
+                "after": 0.125,
+                "layer": "cee",
+                "before": null,
+                "reason": "Nobody stated how uncertain this strength is. Applied the recognised default spread. It is not a measurement of anyone's confidence.",
+                "severity": "info",
+                "field_path": "edges[marketing_manager_employed::product_feature_launch_campaign_effectiveness].strength.std"
+              },
+              {
+                "code": "APPLY_SIGN_FROM_DIRECTION",
+                "after": 0.5,
+                "layer": "cee",
+                "before": null,
+                "reason": "Direction was authored but magnitude was not. Applied the recognised default-magnitude signature as an ANALYSIS PROJECTION, marked `defaulted`. This is not a measurement and must never be presented as user- or evidence-authored.",
+                "severity": "warn",
+                "field_path": "edges[marketing_manager_employed::product_feature_launch_campaign_effectiveness].strength.mean"
+              },
+              {
+                "code": "DEFAULT_EXISTS_PROBABILITY",
+                "after": 0.8,
+                "layer": "cee",
+                "before": null,
+                "reason": "Nobody stated how likely this link is to exist. Applied the canonical default. A defaulted value and an elicited value are the same number, so the ledger is the only place the difference survives.",
+                "severity": "info",
+                "field_path": "edges[marketing_manager_employed::product_feature_launch_campaign_effectiveness].exists_probability"
+              }
+            ]
+          },
+          "effect_direction": "positive",
+          "exists_probability": 0.8
+        },
+        {
+          "to": "product_feature_launch_campaign_effectiveness",
+          "from": "ai_campaign_planning_tool_adopted",
+          "strength": {
+            "std": 0.125,
+            "mean": 0.5
+          },
+          "defaulted": true,
+          "provenance": {
+            "source": "cee_hypothesis",
+            "magnitude": "olumi_placeholder",
+            "mean_projected": true,
+            "uncertainty_defaults": [
+              {
+                "code": "CLAMP_STD_MINIMUM",
+                "after": 0.125,
+                "layer": "cee",
+                "before": null,
+                "reason": "Nobody stated how uncertain this strength is. Applied the recognised default spread. It is not a measurement of anyone's confidence.",
+                "severity": "info",
+                "field_path": "edges[ai_campaign_planning_tool_adopted::product_feature_launch_campaign_effectiveness].strength.std"
+              },
+              {
+                "code": "APPLY_SIGN_FROM_DIRECTION",
+                "after": 0.5,
+                "layer": "cee",
+                "before": null,
+                "reason": "Direction was authored but magnitude was not. Applied the recognised default-magnitude signature as an ANALYSIS PROJECTION, marked `defaulted`. This is not a measurement and must never be presented as user- or evidence-authored.",
+                "severity": "warn",
+                "field_path": "edges[ai_campaign_planning_tool_adopted::product_feature_launch_campaign_effectiveness].strength.mean"
+              },
+              {
+                "code": "DEFAULT_EXISTS_PROBABILITY",
+                "after": 0.8,
+                "layer": "cee",
+                "before": null,
+                "reason": "Nobody stated how likely this link is to exist. Applied the canonical default. A defaulted value and an elicited value are the same number, so the ledger is the only place the difference survives.",
+                "severity": "info",
+                "field_path": "edges[ai_campaign_planning_tool_adopted::product_feature_launch_campaign_effectiveness].exists_probability"
+              }
+            ]
+          },
+          "effect_direction": "positive",
+          "exists_probability": 0.8
+        },
+        {
+          "to": "product_feature_launch_campaign_effectiveness",
+          "from": "advertising_spend",
+          "strength": {
+            "std": 0.125,
+            "mean": 0.5
+          },
+          "defaulted": true,
+          "provenance": {
+            "source": "cee_hypothesis",
+            "magnitude": "olumi_placeholder",
+            "mean_projected": true,
+            "uncertainty_defaults": [
+              {
+                "code": "CLAMP_STD_MINIMUM",
+                "after": 0.125,
+                "layer": "cee",
+                "before": null,
+                "reason": "Nobody stated how uncertain this strength is. Applied the recognised default spread. It is not a measurement of anyone's confidence.",
+                "severity": "info",
+                "field_path": "edges[advertising_spend::product_feature_launch_campaign_effectiveness].strength.std"
+              },
+              {
+                "code": "APPLY_SIGN_FROM_DIRECTION",
+                "after": 0.5,
+                "layer": "cee",
+                "before": null,
+                "reason": "Direction was authored but magnitude was not. Applied the recognised default-magnitude signature as an ANALYSIS PROJECTION, marked `defaulted`. This is not a measurement and must never be presented as user- or evidence-authored.",
+                "severity": "warn",
+                "field_path": "edges[advertising_spend::product_feature_launch_campaign_effectiveness].strength.mean"
+              },
+              {
+                "code": "DEFAULT_EXISTS_PROBABILITY",
+                "after": 0.8,
+                "layer": "cee",
+                "before": null,
+                "reason": "Nobody stated how likely this link is to exist. Applied the canonical default. A defaulted value and an elicited value are the same number, so the ledger is the only place the difference survives.",
+                "severity": "info",
+                "field_path": "edges[advertising_spend::product_feature_launch_campaign_effectiveness].exists_probability"
+              }
+            ]
+          },
+          "effect_direction": "positive",
+          "exists_probability": 0.8
+        },
+        {
+          "to": "total_annual_campaign_spend",
+          "from": "advertising_spend",
+          "strength": {
+            "std": 0.125,
+            "mean": 0.5
+          },
+          "defaulted": true,
+          "provenance": {
+            "source": "cee_hypothesis",
+            "magnitude": "olumi_placeholder",
+            "mean_projected": true,
+            "uncertainty_defaults": [
+              {
+                "code": "CLAMP_STD_MINIMUM",
+                "after": 0.125,
+                "layer": "cee",
+                "before": null,
+                "reason": "Nobody stated how uncertain this strength is. Applied the recognised default spread. It is not a measurement of anyone's confidence.",
+                "severity": "info",
+                "field_path": "edges[advertising_spend::total_annual_campaign_spend].strength.std"
+              },
+              {
+                "code": "APPLY_SIGN_FROM_DIRECTION",
+                "after": 0.5,
+                "layer": "cee",
+                "before": null,
+                "reason": "Direction was authored but magnitude was not. Applied the recognised default-magnitude signature as an ANALYSIS PROJECTION, marked `defaulted`. This is not a measurement and must never be presented as user- or evidence-authored.",
+                "severity": "warn",
+                "field_path": "edges[advertising_spend::total_annual_campaign_spend].strength.mean"
+              },
+              {
+                "code": "DEFAULT_EXISTS_PROBABILITY",
+                "after": 0.8,
+                "layer": "cee",
+                "before": null,
+                "reason": "Nobody stated how likely this link is to exist. Applied the canonical default. A defaulted value and an elicited value are the same number, so the ledger is the only place the difference survives.",
+                "severity": "info",
+                "field_path": "edges[advertising_spend::total_annual_campaign_spend].exists_probability"
+              }
+            ]
+          },
+          "effect_direction": "positive",
+          "exists_probability": 0.8
+        },
+        {
+          "to": "product_feature_launch_campaign_effectiveness",
+          "from": "user_time_on_campaign_work",
+          "strength": {
+            "std": 0.125,
+            "mean": 0.5
+          },
+          "defaulted": true,
+          "provenance": {
+            "source": "cee_hypothesis",
+            "magnitude": "olumi_placeholder",
+            "mean_projected": true,
+            "uncertainty_defaults": [
+              {
+                "code": "CLAMP_STD_MINIMUM",
+                "after": 0.125,
+                "layer": "cee",
+                "before": null,
+                "reason": "Nobody stated how uncertain this strength is. Applied the recognised default spread. It is not a measurement of anyone's confidence.",
+                "severity": "info",
+                "field_path": "edges[user_time_on_campaign_work::product_feature_launch_campaign_effectiveness].strength.std"
+              },
+              {
+                "code": "APPLY_SIGN_FROM_DIRECTION",
+                "after": 0.5,
+                "layer": "cee",
+                "before": null,
+                "reason": "Direction was authored but magnitude was not. Applied the recognised default-magnitude signature as an ANALYSIS PROJECTION, marked `defaulted`. This is not a measurement and must never be presented as user- or evidence-authored.",
+                "severity": "warn",
+                "field_path": "edges[user_time_on_campaign_work::product_feature_launch_campaign_effectiveness].strength.mean"
+              },
+              {
+                "code": "DEFAULT_EXISTS_PROBABILITY",
+                "after": 0.8,
+                "layer": "cee",
+                "before": null,
+                "reason": "Nobody stated how likely this link is to exist. Applied the canonical default. A defaulted value and an elicited value are the same number, so the ledger is the only place the difference survives.",
+                "severity": "info",
+                "field_path": "edges[user_time_on_campaign_work::product_feature_launch_campaign_effectiveness].exists_probability"
+              }
+            ]
+          },
+          "effect_direction": "positive",
+          "exists_probability": 0.8
+        },
+        {
+          "to": "product_feature_launch_campaign_effectiveness",
+          "from": "limited_marketing_experience",
+          "strength": {
+            "std": 0.125,
+            "mean": -0.5
+          },
+          "defaulted": true,
+          "provenance": {
+            "source": "cee_hypothesis",
+            "magnitude": "olumi_placeholder",
+            "mean_projected": true,
+            "uncertainty_defaults": [
+              {
+                "code": "CLAMP_STD_MINIMUM",
+                "after": 0.125,
+                "layer": "cee",
+                "before": null,
+                "reason": "Nobody stated how uncertain this strength is. Applied the recognised default spread. It is not a measurement of anyone's confidence.",
+                "severity": "info",
+                "field_path": "edges[limited_marketing_experience::product_feature_launch_campaign_effectiveness].strength.std"
+              },
+              {
+                "code": "APPLY_SIGN_FROM_DIRECTION",
+                "after": -0.5,
+                "layer": "cee",
+                "before": null,
+                "reason": "Direction was authored but magnitude was not. Applied the recognised default-magnitude signature as an ANALYSIS PROJECTION, marked `defaulted`. This is not a measurement and must never be presented as user- or evidence-authored.",
+                "severity": "warn",
+                "field_path": "edges[limited_marketing_experience::product_feature_launch_campaign_effectiveness].strength.mean"
+              },
+              {
+                "code": "DEFAULT_EXISTS_PROBABILITY",
+                "after": 0.8,
+                "layer": "cee",
+                "before": null,
+                "reason": "Nobody stated how likely this link is to exist. Applied the canonical default. A defaulted value and an elicited value are the same number, so the ledger is the only place the difference survives.",
+                "severity": "info",
+                "field_path": "edges[limited_marketing_experience::product_feature_launch_campaign_effectiveness].exists_probability"
+              }
+            ]
+          },
+          "effect_direction": "negative",
+          "exists_probability": 0.8
+        }
+      ],
+      "nodes": [
+        {
+          "id": "should_i_hire_a_marketing_manager_or_use_an_ai_tool_to_plan_the_campaign_for_the_next_product_featur",
+          "ref": "D1",
+          "kind": "decision",
+          "label": "Should I hire a marketing manager, or use an AI tool to plan the campaign for…",
+          "provenance": "from_brief",
+          "description": "Should I hire a marketing manager, or use an AI tool to plan the campaign for the next product feature launch, and use the money I'd save to spend more on advertising?"
+        },
+        {
+          "id": "product_feature_launch_campaign_effectiveness",
+          "ref": "G1",
+          "kind": "goal",
+          "label": "Product feature launch campaign effectiveness",
+          "provenance": "ai_inferred",
+          "user_statements": [
+            {
+              "field": "measure",
+              "attest": {
+                "recorded_by": "construction"
+              },
+              "statements": [
+                {
+                  "form": "describes",
+                  "quote": "Should I hire a marketing manager, or use an AI tool to plan the campaign for the next product feature launch, and use the money I'd save to spend more on advertising?",
+                  "source": "Should I hire a marketing manager, or use an AI tool to plan the campaign for the next product feature launch, and use the money I'd save to spend more on advertising? Our budget for the year is £100,000. I can't spend more than 25% of my time on this, and I'm not that experienced with marketing.",
+                  "stance": "estimate",
+                  "reading": "olumi",
+                  "speaker": "user",
+                  "subject": {
+                    "node_id": "product_feature_launch_campaign_effectiveness",
+                    "quantity": "goal|product_feature_launch_campaign_effectiveness|||measure"
+                  },
+                  "conditions": "The decision contrasts hiring a marketing manager with using an AI tool and redirecting savings to advertising."
+                }
+              ],
+              "recorded_at": "2026-10-20T09:19:39.958Z",
+              "subject_key": "goal|product_feature_launch_campaign_effectiveness|||measure"
+            }
+          ],
+          "goal_threshold_frame": "level",
+          "goal_deadline_as_stated": "for the next product feature launch"
+        },
+        {
+          "id": "hire_marketing_manager",
+          "ref": "O1",
+          "kind": "option",
+          "label": "Hire marketing manager",
+          "provenance": "from_brief",
+          "interventions": {
+            "marketing_manager_employed": {
+              "value": 1,
+              "source": "brief_extraction",
+              "target_match": {
+                "node_id": "marketing_manager_employed",
+                "confidence": "high",
+                "match_type": "exact_id"
+              },
+              "user_material_unverified": true
+            }
+          }
+        },
+        {
+          "id": "use_ai_planning_tool",
+          "ref": "O2",
+          "kind": "option",
+          "label": "Use AI planning tool",
+          "provenance": "from_brief",
+          "interventions": {
+            "ai_campaign_planning_tool_adopted": {
+              "value": 1,
+              "source": "brief_extraction",
+              "target_match": {
+                "node_id": "ai_campaign_planning_tool_adopted",
+                "confidence": "high",
+                "match_type": "exact_id"
+              },
+              "user_material_unverified": true
+            }
+          }
+        },
+        {
+          "id": "keep_current_approach",
+          "ref": "O3",
+          "kind": "option",
+          "label": "Keep current approach",
+          "provenance": "ai_inferred",
+          "is_baseline": true
+        },
+        {
+          "id": "marketing_manager_employed",
+          "ref": "F1",
+          "kind": "factor",
+          "label": "Marketing manager employed",
+          "category": "controllable",
+          "provenance": "ai_inferred",
+          "user_statements": [
+            {
+              "field": "level",
+              "attest": {
+                "recorded_by": "construction"
+              },
+              "statements": [
+                {
+                  "low": 1,
+                  "form": "point",
+                  "high": 1,
+                  "unit": "yes/no",
+                  "quote": "Should I hire a marketing manager, or use an AI tool to plan the campaign for the next product feature launch, and use the money I'd save to spend more on advertising?",
+                  "source": "Should I hire a marketing manager, or use an AI tool to plan the campaign for the next product feature launch, and use the money I'd save to spend more on advertising? Our budget for the year is £100,000. I can't spend more than 25% of my time on this, and I'm not that experienced with marketing.",
+                  "stance": "hypothetical",
+                  "reading": "olumi",
+                  "speaker": "user",
+                  "subject": {
+                    "node_id": "marketing_manager_employed",
+                    "quantity": "factor|marketing_manager_employed||hire_marketing_manager|level",
+                    "option_id": "hire_marketing_manager"
+                  },
+                  "qualifier": "Should I",
+                  "conditions": "A hypothetical decision alternative, not a stated current condition."
+                }
+              ],
+              "recorded_at": "2026-10-20T09:19:39.958Z",
+              "subject_key": "factor|marketing_manager_employed||hire_marketing_manager|level"
+            }
+          ]
+        },
+        {
+          "id": "ai_campaign_planning_tool_adopted",
+          "ref": "F2",
+          "kind": "factor",
+          "label": "AI campaign planning tool adopted",
+          "category": "controllable",
+          "provenance": "ai_inferred",
+          "user_statements": [
+            {
+              "field": "level",
+              "attest": {
+                "recorded_by": "construction"
+              },
+              "statements": [
+                {
+                  "low": 1,
+                  "form": "point",
+                  "high": 1,
+                  "unit": "yes/no",
+                  "quote": "Should I hire a marketing manager, or use an AI tool to plan the campaign for the next product feature launch, and use the money I'd save to spend more on advertising?",
+                  "source": "Should I hire a marketing manager, or use an AI tool to plan the campaign for the next product feature launch, and use the money I'd save to spend more on advertising? Our budget for the year is £100,000. I can't spend more than 25% of my time on this, and I'm not that experienced with marketing.",
+                  "stance": "hypothetical",
+                  "reading": "olumi",
+                  "speaker": "user",
+                  "subject": {
+                    "node_id": "ai_campaign_planning_tool_adopted",
+                    "quantity": "factor|ai_campaign_planning_tool_adopted||use_ai_planning_tool|level",
+                    "option_id": "use_ai_planning_tool"
+                  },
+                  "qualifier": "Should I",
+                  "conditions": "A hypothetical decision alternative; the stated intent is to use savings for more advertising."
+                }
+              ],
+              "recorded_at": "2026-10-20T09:19:39.958Z",
+              "subject_key": "factor|ai_campaign_planning_tool_adopted||use_ai_planning_tool|level"
+            }
+          ]
+        },
+        {
+          "id": "advertising_spend",
+          "ref": "F3",
+          "kind": "factor",
+          "label": "Advertising spend",
+          "category": "controllable",
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "total_annual_campaign_spend",
+          "ref": "F4",
+          "kind": "factor",
+          "label": "Total annual campaign spend",
+          "category": "controllable",
+          "provenance": "ai_inferred",
+          "user_statements": [
+            {
+              "field": "target",
+              "attest": {
+                "recorded_by": "construction"
+              },
+              "statements": [
+                {
+                  "form": "upper_bound",
+                  "high": 100000,
+                  "unit": "GBP/year",
+                  "quote": "Our budget for the year is £100,000.",
+                  "source": "Should I hire a marketing manager, or use an AI tool to plan the campaign for the next product feature launch, and use the money I'd save to spend more on advertising? Our budget for the year is £100,000. I can't spend more than 25% of my time on this, and I'm not that experienced with marketing.",
+                  "stance": "estimate",
+                  "reading": "olumi",
+                  "speaker": "user",
+                  "subject": {
+                    "node_id": "total_annual_campaign_spend",
+                    "quantity": "factor|total_annual_campaign_spend|||target"
+                  },
+                  "conditions": "Whether this annual budget covers all decision-option costs is not stated."
+                }
+              ],
+              "recorded_at": "2026-10-20T09:19:39.958Z",
+              "subject_key": "factor|total_annual_campaign_spend|||target"
+            }
+          ]
+        },
+        {
+          "id": "user_time_on_campaign_work",
+          "ref": "F5",
+          "kind": "factor",
+          "label": "User time on campaign work",
+          "category": "controllable",
+          "provenance": "ai_inferred",
+          "user_statements": [
+            {
+              "field": "target",
+              "attest": {
+                "recorded_by": "construction"
+              },
+              "statements": [
+                {
+                  "form": "upper_bound",
+                  "high": 25,
+                  "unit": "%",
+                  "quote": "I can't spend more than 25% of my time on this, and I'm not that experienced with marketing.",
+                  "source": "Should I hire a marketing manager, or use an AI tool to plan the campaign for the next product feature launch, and use the money I'd save to spend more on advertising? Our budget for the year is £100,000. I can't spend more than 25% of my time on this, and I'm not that experienced with marketing.",
+                  "stance": "estimate",
+                  "reading": "olumi",
+                  "speaker": "user",
+                  "subject": {
+                    "node_id": "user_time_on_campaign_work",
+                    "quantity": "factor|user_time_on_campaign_work|||target"
+                  },
+                  "conditions": "“this” is read provisionally as campaign work."
+                }
+              ],
+              "recorded_at": "2026-10-20T09:19:39.958Z",
+              "subject_key": "factor|user_time_on_campaign_work|||target"
+            }
+          ]
+        },
+        {
+          "id": "limited_marketing_experience",
+          "ref": "R1",
+          "kind": "risk",
+          "label": "Limited marketing experience",
+          "provenance": "from_brief"
+        }
+      ],
+      "ref_high_water": {
+        "D": 1,
+        "F": 5,
+        "G": 1,
+        "O": 3,
+        "R": 1
+      },
+      "goal_constraints": [
+        {
+          "unit": "GBP/year",
+          "label": "Total annual campaign spend",
+          "value": 100000,
+          "node_id": "total_annual_campaign_spend",
+          "operator": "<=",
+          "provenance": "explicit",
+          "value_frame": "level",
+          "constraint_id": "agent-lane:total_annual_campaign_spend:<="
+        },
+        {
+          "unit": "%",
+          "label": "User time on campaign work",
+          "value": 25,
+          "node_id": "user_time_on_campaign_work",
+          "operator": "<=",
+          "provenance": "explicit",
+          "value_frame": "level",
+          "constraint_id": "agent-lane:user_time_on_campaign_work:<="
+        }
+      ]
+    },
+    "graph_present": true,
+    "graph_hash": "e5542490277b7c3d",
+    "graph_identity_hash": {
+      "kind": "graph_identity_hash",
+      "value": "a629796ee47185abe6159244b35820ecb792e1b9af751f11fd02ce5e8960f801",
+      "algorithm": "sha256",
+      "projection_version": "identity.v1",
+      "graph_schema_version": "graph_v3",
+      "normaliser_version": "1"
+    }
+  }
+}

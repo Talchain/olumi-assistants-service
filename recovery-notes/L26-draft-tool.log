@@ -1,0 +1,11 @@
+ WARN  Issue while reading "/private/tmp/cx-l26/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+ WARN  Issue while reading "/private/tmp/cx-l26/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+
+ RUN  v4.1.10 /private/tmp/cx-l26
+
+
+ Test Files  1 passed (1)
+      Tests  26 passed (26)
+   Start at  10:36:17
+   Duration  14.40s (transform 10.91s, setup 242ms, import 13.84s, tests 146ms, environment 0ms)
+

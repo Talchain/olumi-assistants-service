@@ -1,0 +1,12 @@
+ WARN  Issue while reading "/private/tmp/cx-l26/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+ WARN  Issue while reading "/private/tmp/cx-l26/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+
+ RUN  v4.1.10 /private/tmp/cx-l26
+
+{"level":"info","time":1792487979958,"pid":37135,"hostname":"Mac.net","event":"v5.scenario_graph_register.registered","request_id":"req-1","scenario_id":"75041055-2807-4a58-9aba-d01afca8de36","node_count":11,"edge_count":18,"kind_fields_normalised":0,"msg":"Graph registration — imported graph is now the persisted graph"}
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  10:34:55
+   Duration  7.46s (transform 5.43s, setup 133ms, import 7.08s, tests 136ms, environment 0ms)
+

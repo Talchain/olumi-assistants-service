@@ -1,0 +1,6 @@
+pr-shape.sh formatter; local test/fixture diff, no PR/network. Notes excluded.
+PR #uncommitted-L26 shape
+  source   +0 / -0 (net +0) in 0 files
+  tests    +1259 / -0 in 2 files
+  fixtures +0 / -0 in 0 files
+  added to the estate: 0 refusal/reason codes, 0 regex literals, 0 exports, 0 new if-branches

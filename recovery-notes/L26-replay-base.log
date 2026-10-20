@@ -1,0 +1,14 @@
+ WARN  Issue while reading "/private/tmp/cx-l26/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+ WARN  Issue while reading "/private/tmp/cx-l26/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+
+ RUN  v4.1.10 /private/tmp/cx-l26
+
+{"level":"info","time":1792487979958,"pid":41266,"hostname":"Mac.net","event":"v5.scenario_graph_register.registered","request_id":"req-1","scenario_id":"75041055-2807-4a58-9aba-d01afca8de36","node_count":11,"edge_count":18,"kind_fields_normalised":0,"msg":"Graph registration — imported graph is now the persisted graph"}
+{"level":"info","time":1792487979958,"pid":41266,"hostname":"Mac.net","event":"v5.scenario_graph_register.registered","request_id":"req-1","scenario_id":"75041055-2807-4a58-9aba-d01afca8de36","node_count":11,"edge_count":18,"kind_fields_normalised":0,"msg":"Graph registration — imported graph is now the persisted graph"}
+{"level":"info","time":1792487979958,"pid":41266,"hostname":"Mac.net","event":"v5.scenario_graph_register.registered","request_id":"req-1","scenario_id":"75041055-2807-4a58-9aba-d01afca8de36","node_count":11,"edge_count":18,"kind_fields_normalised":0,"msg":"Graph registration — imported graph is now the persisted graph"}
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  10:36:04
+   Duration  11.25s (transform 8.21s, setup 162ms, import 10.58s, tests 370ms, environment 0ms)
+
