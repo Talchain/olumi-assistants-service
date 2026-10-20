@@ -383,3 +383,26 @@ it.each([
   expect(liveGoal(graph).observed_state).toBeUndefined();
   expect(liveGoal(graph).nonlinear_identity).toBeUndefined();
 });
+
+// L24: exact captured provider output, not reconstructed from draft_graph.
+it('L24 recorded capacity drafter: per specialist stays a count through save and the Run request', async () => {
+  const graph = await replay(liveRows[0]!.calls[0]!.raw_text, LIVE_BRIEF);
+  const rate = graph.edges.find((e: Rec) => e.from === 'additional_specialists' && e.to === 'additional_specialist_capacity');
+  expect(rate.provenance.natural_effect).toMatchObject({ amount: 20, per_source_change: 1,
+    per_source_change_unit: 'specialist', stated_range: { low: 10, high: 30 } });
+  const request = await runRequest(graph, LIVE_BRIEF);
+  const driver = request.graph.nodes.find((n: Rec) => n.id === 'additional_specialists');
+  expect(driver.observed_state).toMatchObject({ value: 0, unit: 'specialists', source: 'cee_inference' });
+  expect(driver.observed_state).toEqual(graph.nodes.find((n: Rec) => n.id === driver.id).observed_state);
+  expect(driver.observed_state.std).toBeUndefined();
+  expect(request.graph.edges.find((e: Rec) => e.from === rate.from && e.to === rate.to)).toEqual(rate);
+});
+it.each(['tickets', 'parcels'])('L24 %s: the declared count keeps its rate, sum and spread with 0/1 options', async quantity => {
+  const raw = JSON.parse(JSON.stringify(draft()).replaceAll('tickets', quantity));
+  const graph = await replay(raw, BRIEF.replaceAll('tickets', quantity));
+  expect(effectOf(graph).provenance.natural_effect).toMatchObject({ amount: 20, per_source_change: 1, per_source_change_unit: 'specialist' });
+  const request = await runRequest(graph, BRIEF.replaceAll('tickets', quantity));
+  expect(request.graph.nodes.find((n: Rec) => n.id === 'extra_specialists').observed_state.std).toBeUndefined();
+  expect(request.graph.nodes.find((n: Rec) => n.id === 'total_capacity').nonlinear_identity)
+    .toEqual({ operation: 'sum', factor_ids: ['existing_capacity', 'extra_capacity'], stated_in_brief: false });
+});

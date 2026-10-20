@@ -16,6 +16,7 @@ import { computeGraphIdentityHash } from '../../../context/graph-identity.js';
 import { computeAnalysisAffectingGraphHashSha256, computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
 import { registrationTurnId } from '../../../graph-registration/registration-identity.js';
 import { candidateToGraph } from '../candidate-to-graph.js';
+import liveRows from './fixtures/l23-live-drafter-raw-5203fed5.json';
 import { readCanonicalContext } from '../context-tool.js';
 import { resolveRunAdmission } from '../../../tools/handlers/analysis-ready-core.js';
 import { settingProvenanceOf, valueProvenanceOf } from '../../../../cee/provenance/provenance-of.js';
@@ -309,6 +310,17 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
     expect(draftCall(body)).toMatchObject({ ok: false, refusal: 'brief_not_users_words' });
     expect(rawRecorder.rows).toEqual([]);
     expect(drafterCalls).toBe(0);
+  });
+
+  it('L24 recorded capacity through POST /agent/v1/turn retains the per-specialist rate', async () => {
+    drafterAnswer = liveRows[0]!.calls[0]!.raw_text;
+    briefArg = 'We are comparing two staffing options, labelled exactly "Keep current staffing" and "Add one specialist". Use the exact goal label "Weekly support capacity". Our existing team resolves 80 tickets per week. Keep current staffing adds no specialist. Add one specialist adds one specialist. Each additional specialist resolves about 20 tickets per week, between 10 and 30. Total weekly support capacity is defined as the existing 80 tickets per week plus the additional specialist capacity. Goal: weekly support capacity of at least 100 tickets per week. This target is an absolute level, with no deadline.';
+    await turn();
+    expect(draftOutcome()).toMatchObject({ status: 'ok', mutated: true });
+    expect(registered).toHaveLength(1);
+    expect(saved!.edges.find((e: Json) => e.from === 'additional_specialists' && e.to === 'additional_specialist_capacity')
+      .provenance.natural_effect).toMatchObject({ amount: 20, per_source_change: 1, per_source_change_unit: 'specialist',
+        stated_range: { low: 10, high: 30 } });
   });
 
   it.each([BRIEF, OTHER_BRIEF])(

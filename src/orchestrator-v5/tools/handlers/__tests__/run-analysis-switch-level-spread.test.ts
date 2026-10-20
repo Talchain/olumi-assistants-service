@@ -134,3 +134,14 @@ describe('WIRE: a 0/1 switch an option sets is held at its state, not sampled as
     expect(osOf(await wire(), 'pro_paying_subscribers').std).toBeUndefined();
   });
 });
+
+it.each(['specialists', 'people', 'vans', 'packers'])('L24 Run: an Olumi count in %s at 0/1 keeps its spread; neighbouring switch cannot lend its unit', async unit => {
+  const nodes = await wire(s => {
+    Object.assign(nodeOf(s, AI).observed_state as Record<string, unknown>, { unit, source: 'cee_inference', extractionType: 'inferred' });
+    (s.graph.nodes as Array<Record<string, unknown>>).push({ id: 'unrelated_switch', kind: 'factor', label: 'Unrelated on/off switch',
+      observed_state: { value: 0, raw_value: 0, unit: 'on/off', source: 'cee_inference', extractionType: 'inferred' } });
+  });
+  expect(osOf(nodes, AI).std).toBeUndefined();
+  expect(osOf(nodes, AI).value).toBe(0);
+  expect(osOf(nodes, AI).unit).toBe(unit);
+});

@@ -34,7 +34,8 @@ import { classifyUnitScaleClass, unitPinnedScaleFrame } from '../draft/records/u
 import { readCurrencyUnitWithQualifiers } from '../provenance/stated-amounts.js';
 import { recoverScaleFrame } from '../../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js';
 import { isPercentOfPopulation, isPercentWithPeriod } from '../../orchestrator-v5/agent-lane/admit-constraint.js';
-import { sayFigure, sayFigureExactly } from '../../orchestrator-v5/agent-lane/say-figure.js';
+import { readUnitParts } from '../../orchestrator-v5/agent-lane/same-unit.js';
+import { isTwoStateSource, sayFigure, sayFigureExactly } from '../../orchestrator-v5/agent-lane/say-figure.js';
 import { isUsersLevelOrApproved } from '../provenance/provenance-of.js';
 
 /** Who sized a link (D9). Declared once, on `EdgeProvenanceV3.magnitude`. */
@@ -348,9 +349,10 @@ export interface LinkSizing {
 
 const fmt = (x: number): string => String(Number(x.toPrecision(6)));
 
-/** A 0/1 switch: frame 1, and the level held and every option level are exactly 0 or 1. */
+/** A unit-aware 0/1 switch: frame 1 and binary held/option levels; a declared quantity stays a count. */
 export function isSwitch(node: MagnitudeNode, frame: number | undefined): boolean {
-  if (frame !== 1) return false;
+  const unit = unitOf(node);
+  if (frame !== 1 || (readUnitParts(unit)?.kind === 'count' && !isTwoStateSource([], undefined, unit))) return false;
   const os = node.observed_state ?? {};
   const levels = [...(finite(os.value) ? [os.value] : []), ...node.option_levels.filter(finite)];
   return levels.length > 0 && levels.every((v) => v === 0 || v === 1);
@@ -470,7 +472,8 @@ export function naturalEffectOf(
     amount: round6(amount),
     amount_unit: targetUnitWords(target, targetFrame),
     per_source_change: round6(per),
-    per_source_change_unit: sourceUnitWords(source, sourceFrame),
+    per_source_change_unit: per === 1 && sourceFrame === 1
+      ? unitAfterOne(sourceUnitWords(source, sourceFrame)) : sourceUnitWords(source, sourceFrame),
     strength_mean: beta,
     strength_mean_frame: 'edge_strength',
   };
