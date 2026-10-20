@@ -8,7 +8,7 @@
  * of the user's words, as on base.)
  */
 import { runPressToolResponse } from '../../../agent-lane/__tests__/fixtures/run-press-model.js';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
@@ -73,6 +73,8 @@ const SUM_DRAFT: Json = {
 };
 let drafterAnswer: Json = DRAFT;
 let draftSchema: Json = {};
+let draftInstructions = '';
+const ESTIMATE_SENTENCE = 'Where the brief does not state a level, setting or size the model needs, propose a defensible Olumi starting estimate with origin=olumi and stance=estimate, explaining its basis, unit and period for the person to approve through the existing card, never presenting it as theirs; if no defensible estimate is possible, state the limitation and ask for the missing input rather than silently leaving the model unrunnable; in every draft with a supported additive goal, declare the sum identity with the separate current-level factor and every distinct addition as bound operands under the rules above.';
 
 const rows = new Map<string, { id: string; turn_id: string; request_hash: string }>();
 const conversationIds = new Map<string, string>();
@@ -138,7 +140,7 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
       const ok = (output: Record<string, unknown>[]) => new Response(JSON.stringify(responsesBody(output)), { status: 200, headers: { 'content-type': 'application/json' } });
       // The construction's structured calls: the whole candidate gets the drafter's answer; any other structured step answers nothing.
       if (body.text?.format?.type === 'json_schema') {
-        if (body.text.format.name === 'whole_candidate') draftSchema = body.text.format.schema;
+        if (body.text.format.name === 'whole_candidate') { draftSchema = body.text.format.schema; draftInstructions = body.instructions; }
         return ok(body.text.format.name === 'whole_candidate' ? [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(drafterAnswer) }] }] : []);
       }
       // The core agent: first the draft call, then its words.
@@ -180,6 +182,17 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
     return r.json() as Json;
   };
   const draftCall = (body: Json): Json => (body._agent?.tool_calls as Json[] | undefined)?.find((c) => c.name === 'build_model_from_brief') ?? {};
+
+  it.each([
+    BRIEF,
+    'We run a repair workshop and want to serve more customers; we could add a technician or extend opening hours.',
+  ])('L5 sent bytes: estimates and every supported sum, on the real route (%s)', async (brief) => {
+    briefArg = brief;
+    await turn();
+    const addition = draftInstructions.slice(-(ESTIMATE_SENTENCE.length));
+    expect(addition).toBe(ESTIMATE_SENTENCE);
+    expect(createHash('sha256').update(addition, 'utf8').digest('hex')).toBe('15c1eae82146b2ef05b6e3a78af3a9568af58643e41472fcee15410a628c9085');
+  });
 
   it('RED: a NEW scenario (graph null) → ONE draft saved, by its own receipt and a model read back', async () => {
     const body = await turn();

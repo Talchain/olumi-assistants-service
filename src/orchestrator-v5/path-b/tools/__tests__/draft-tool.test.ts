@@ -116,10 +116,13 @@ describe('B\'s drafter request carries the AIE\'s sentence and the K5 P0 ruling\
     const sent = String(p.callStructured.mock.calls[0]![0].instructions);
     expect(sent.startsWith(`${BUILD_INSTRUCTIONS} `)).toBe(true);
     const extra = 'For every figure, declare origin (user, third_party, olumi or unknown) and stance (stated_current, hypothetical, target or estimate) from its full source context; retain its literal source words where available, named source, sign, unit, period and conditions; identify your estimates and derivations as Olumi’s, preserve unresolved origin as unknown, and never promote a supposition to a stated current fact.';
-    const b = sent.slice(BUILD_INSTRUCTIONS.length + 1);
+    const addition = 'Where the brief does not state a level, setting or size the model needs, propose a defensible Olumi starting estimate with origin=olumi and stance=estimate, explaining its basis, unit and period for the person to approve through the existing card, never presenting it as theirs; if no defensible estimate is possible, state the limitation and ask for the missing input rather than silently leaving the model unrunnable; in every draft with a supported additive goal, declare the sum identity with the separate current-level factor and every distinct addition as bound operands under the rules above.';
+    const b = sent.slice(BUILD_INSTRUCTIONS.length + 1, -(addition.length + 1));
     const [aie, ruling] = [b.slice(0, 715), b.slice(716, -(extra.length + 1))];
-    expect(sent).toBe(`${BUILD_INSTRUCTIONS} ${aie} ${ruling} ${extra}`);
+    expect(sent).toBe(`${BUILD_INSTRUCTIONS} ${aie} ${ruling} ${extra} ${addition}`);
     const sha = (text: string): string => createHash('sha256').update(Buffer.from(text, 'utf8')).digest('hex');
+    expect(sha(addition)).toBe('15c1eae82146b2ef05b6e3a78af3a9568af58643e41472fcee15410a628c9085');
+    expect(BUILD_INSTRUCTIONS).not.toContain(addition);
     expect(sha(extra)).toBe('96074041c73386e9e0a1e930dd4745ac422577aa91a40ceeedf28277508cb781');
     expect([sha(aie), sha(ruling)]).toEqual(['cfbe03aa8d84e1ed6452817987d331bbf15596be25487da26b93978316d95f49',
       '9111ed60fb9c8e4048118f3d49c6409ba98c59b2a39c2c0bcc90235faf9436ee']);
