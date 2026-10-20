@@ -106,16 +106,21 @@ describe('the drafter is told the static instructions and the literal brief, not
   });
 });
 
-// ⭐ THE AIE'S B-ONLY DRAFTER SENTENCE (DL 19 Oct): the sent bytes after A's static instructions are exactly the AIE's sentence.
-describe('B\'s drafter request carries the AIE\'s one sentence verbatim; A\'s instructions do not', () => {
-  it('the sent instructions are A\'s static instructions, one space, then bytes whose sha256 is the AIE\'s', async () => {
+// ⭐ B-ONLY DRAFTER TEXT (DL 19 Oct; K5 P0 ruling 20 Oct): the sent bytes after A's static instructions are exactly the AIE's sentence, one
+// space, then the K5 P0 ruling's sentence, each by its own sha256.
+describe('B\'s drafter request carries the AIE\'s sentence and the K5 P0 ruling\'s sentence verbatim; A\'s instructions carry neither', () => {
+  it('the sent instructions are A\'s static instructions, one space, the AIE\'s bytes, one space, the ruling\'s bytes', async () => {
     const p = product({ graph: [EMPTY], register: [{ status: 422, json: {} }] });
     await buildModel(p, ctx, { brief: BRIEF });
     const sent = String(p.callStructured.mock.calls[0]![0].instructions);
     expect(sent.startsWith(`${BUILD_INSTRUCTIONS} `)).toBe(true);
-    expect(createHash('sha256').update(Buffer.from(sent.slice(BUILD_INSTRUCTIONS.length + 1), 'utf8')).digest('hex'))
-      .toBe('cfbe03aa8d84e1ed6452817987d331bbf15596be25487da26b93978316d95f49');
-    expect(BUILD_INSTRUCTIONS).not.toContain(B_DRAFTER_SENTENCE.slice(0, 60));
+    const [aie, ruling] = [sent.slice(BUILD_INSTRUCTIONS.length + 1, BUILD_INSTRUCTIONS.length + 1 + 715), sent.slice(BUILD_INSTRUCTIONS.length + 1 + 715 + 1)];
+    expect(sent).toBe(`${BUILD_INSTRUCTIONS} ${aie} ${ruling}`);
+    const sha = (text: string): string => createHash('sha256').update(Buffer.from(text, 'utf8')).digest('hex');
+    expect([sha(aie), sha(ruling)]).toEqual(['cfbe03aa8d84e1ed6452817987d331bbf15596be25487da26b93978316d95f49',
+      '9111ed60fb9c8e4048118f3d49c6409ba98c59b2a39c2c0bcc90235faf9436ee']);
+    expect(BUILD_INSTRUCTIONS).not.toContain(aie.slice(0, 60));
+    expect(BUILD_INSTRUCTIONS).not.toContain(ruling.slice(0, 60));
   });
 });
 
