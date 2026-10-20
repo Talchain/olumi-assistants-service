@@ -10,6 +10,7 @@ import { projectCorePostimageForPersistence } from '../../../persisted-graph-pro
 import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.js';
 import { createRunAnalysisHandler } from '../../../tools/handlers/run-analysis.js';
 import { mapLivingModel } from '../mapper.js';
+import { resolveRunAdmission } from '../../../tools/handlers/analysis-ready-core.js';
 import { KNOWN_ANSWER } from './fixtures.js';
 
 type Rec = Record<string, any>;
@@ -36,6 +37,9 @@ describe('thin core: the known-answer living model reaches the engine unchanged'
   it('the Run sends the goal, both options and the sized link as mapped, and never the living model', async () => {
     const graph = stored();
     expect(graph.living_model, 'PRECONDITION: the stored graph carries the living model').toEqual(KNOWN_ANSWER);
+    // The core Run tool's own gate (`run-tool.ts`) admits it: nothing is missing that the engine needs.
+    const admission = resolveRunAdmission(graph);
+    expect(admission.willProceed, JSON.stringify(admission.assessment.blockingIssues)).toBe(true);
     const { request, outcome } = await requestTheRunSends(graph);
     expect(request, JSON.stringify(outcome)).toBeDefined();
     expect(request!.graph).not.toHaveProperty('living_model');
