@@ -195,7 +195,23 @@ function convertedByA(c: CandidateModel): { a: AdmittedModel } | null {
     // Olumi's reading, so no quote reaches A's check either (A takes no sum from a quote, and B has no brief to find one in).
     const unquoted = { ...c, identities: (c.identities ?? []).map((d) => (d?.operation === 'sum' ? { ...d, evidence: null } : d)) };
     const { candidate, readBack } = labelBlind(unquoted);
-    return { a: readBack(admitWithoutBrief(prepareProvisionalCandidate(candidate).candidate)) };
+    const prepared = prepareProvisionalCandidate(candidate).candidate;
+    const admitted = admitWithoutBrief(prepared);
+    const goal = admitted.nodes.find(n => n.kind === 'goal');
+    const view = magnitudeNodes(admitted.nodes.map(n => ({ ...n })), percentLevelIds({ goal_constraints: admitted.goal_constraints }));
+    const total = goal === undefined ? undefined : view.get(goal.id);
+    const frame = total === undefined ? undefined : resolveMagnitudeFrame(total);
+    // A zero has no recoverable raw/value ratio. An accepted same-unit sum supplies a shared coordinate mapping,
+    // not a bound or an uncertainty estimate. Reuse A's conversion so EVERY affected level and link uses that mapping.
+    const unframed = new Set(goal?.nonlinear_identity?.operation !== 'sum' || !finite(frame) || frame <= 1 ? []
+      : goal.nonlinear_identity.factor_ids.filter(id => {
+        const part = view.get(id);
+        return part !== undefined && part.scale_frame === undefined && part.observed_state?.cap === undefined
+          && sameUnit(unitOf(part), unitOf(total!));
+      }).map(id => canonicalLabel(admitted.nodes.find(n => n.id === id)!.label)));
+    return { a: readBack(unframed.size === 0 ? admitted : admitWithoutBrief({ ...prepared,
+      factors: prepared.factors.map(f => unframed.has(canonicalLabel(f.label)) ? { ...f, scale_frame: frame } : f),
+    })) };
   } catch { return null; }
 }
 

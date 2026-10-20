@@ -4357,23 +4357,22 @@ function admitOnce(
         // framed factor with no baseline (`records/projector.ts`), and what
         // the value writer reads (`normalise-factor-value.ts`, "FRAMED").
         //
-        // Written only when there is NO baseline. A baselined factor carries
-        // its frame inside `observed_state` (above), and a second carrier
-        // there could disagree with an unframed pair.
-        //
-        // ⛔⛔ AND ALSO WHEN A BASELINE IS KNOWN BUT `framedObservedState` COULD NOT
-        // FRAME IT. The condition used to be "no baseline", which left a whole class
-        // of factor with NEITHER carrier — a known baseline the framer rejected
-        // (negative, or above the cap) got no `observed_state.cap` and no
-        // `scale_frame`, so the Run refused it forever and no later edit could
-        // repair it. #63 item 1.
-        //
-        // The invariant the old comment was protecting still holds and is now
-        // enforced rather than approximated: `scale_frame` is written ONLY when the
-        // observed state does not already carry a frame, so the two carriers can
-        // never disagree. It is derived from the SAME cap the framer was given, so
-        // nothing new is invented here.
-        ...((): Record<string, number> => {
+        // An explicit capless frame is a coordinate mapping, never a bound. Keep
+        // the existing source/range formatter, then express the level on that frame.
+        // Drafted caps retain the existing path and precedence below.
+        ...((): Record<string, unknown> => {
+          const frame = 'scale_frame' in f ? f.scale_frame : undefined;
+          if (!unscaled.has(f.label) && f.plausible_max == null && typeof frame === 'number' && Number.isFinite(frame) && frame > 0) {
+            const known = f.baseline_known || verifiedLevels.has(f) || quotesBrief(f);
+            const raw = f.baseline_value;
+            return { scale_frame: frame, ...(typeof raw !== 'number' || !Number.isFinite(raw) ? {} : {
+              observed_state: withStatedLevelRange({
+                ...framedObservedState(known ? f : { ...f, provenance: 'inferred' }, verifiedLevels.has(f),
+                  known && !verifiedLevels.has(f) && (f.provenance === 'explicit' || f.provenance === 'from_brief' || quotesBrief(f))),
+                value: raw / frame, raw_value: raw,
+              }, f),
+            }) };
+          }
           const c = unscaled.has(f.label) ? undefined : capFor(f.label) ?? f.plausible_max;
           if (!(typeof c === 'number' && Number.isFinite(c) && c > 1)) return {};
           if ((f.baseline_known || verifiedLevels.has(f) || quotesBrief(f)) && typeof f.baseline_value === 'number') {

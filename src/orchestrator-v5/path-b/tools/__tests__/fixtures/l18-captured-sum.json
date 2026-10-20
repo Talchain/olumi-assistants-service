@@ -1,0 +1,74 @@
+{
+  "source": "capacity/turns/01.json response_body.draft_graph; strict drafter JSON unavailable (drafter-raw-rows-EMPTY.json = [])",
+  "brief": "We are comparing two staffing options, labelled exactly \"Keep current staffing\" and \"Add one specialist\". Use the exact goal label \"Weekly support capacity\". Our existing team resolves 80 tickets per week. Keep current staffing adds no specialist. Add one specialist adds one specialist. Each additional specialist resolves about 20 tickets per week, between 10 and 30. Total weekly support capacity is defined as the existing 80 tickets per week plus the additional specialist capacity. Goal: weekly support capacity of at least 100 tickets per week. This target is an absolute level, with no deadline.",
+  "goal": {
+    "id": "weekly_support_capacity",
+    "label": "Weekly support capacity",
+    "goal_threshold_raw": 100,
+    "goal_threshold_cap": 125,
+    "goal_threshold_unit": "tickets per week"
+  },
+  "goal_level": {
+    "cap": 125,
+    "unit": "tickets per week",
+    "value": 0.64,
+    "raw_value": 80
+  },
+  "factors": [
+    {
+      "id": "existing_team_capacity",
+      "label": "Existing team capacity",
+      "observed_state": {
+        "cap": 100,
+        "unit": "tickets per week",
+        "value": 0.8,
+        "source": "brief_extraction",
+        "raw_value": 80,
+        "declared_scale": "unit_interval"
+      }
+    },
+    {
+      "id": "additional_specialists",
+      "label": "Additional specialists",
+      "observed_state": {
+        "unit": "specialists",
+        "value": 0
+      }
+    },
+    {
+      "id": "additional_specialist_capacity",
+      "label": "Additional specialist capacity",
+      "observed_state": {
+        "unit": "tickets per week",
+        "value": 0,
+        "source": "cee_inference",
+        "extractionType": "inferred"
+      }
+    }
+  ],
+  "options": [
+    {
+      "id": "keep_current_staffing",
+      "label": "Keep current staffing"
+    },
+    {
+      "id": "add_one_specialist",
+      "label": "Add one specialist"
+    }
+  ],
+  "rate": {
+    "quote": "Each additional specialist resolves about 20 tickets per week, between 10 and 30.",
+    "value": 20,
+    "low": 10,
+    "high": 30,
+    "unit": "tickets per week per specialist"
+  },
+  "identity": {
+    "operation": "sum",
+    "factor_ids": [
+      "existing_team_capacity",
+      "additional_specialist_capacity"
+    ],
+    "stated_in_brief": false
+  }
+}
