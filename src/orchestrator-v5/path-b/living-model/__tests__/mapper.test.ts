@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import { LivingModel, type LivingModelT } from '../../../../schemas/living-model.js';
 import { mapLivingModel } from '../mapper.js';
+import { linkDefaultAssumptionsOf } from '../../../../cee/magnitude/link-default-assumptions.js';
 import { KNOWN_ANSWER } from './fixtures.js';
 
 const node = (g: { nodes: Record<string, unknown>[] }, id: string) => g.nodes.find((n) => n.id === id) as Record<string, any>;
@@ -26,7 +27,9 @@ describe('thin core mapper: living model → GraphV3', () => {
     const link = graph.edges.find((e) => e.from === 'f' && e.to === 'g') as Record<string, any>;
     expect(link.strength.mean).toBeCloseTo(0.4, 10);
     expect(link.strength.std).toBeCloseTo(0.08, 4);
-    expect(link.provenance).toEqual({ source: 'brief_extraction', magnitude: 'user_stated' });
+    expect(link.provenance).toMatchObject({ source: 'brief_extraction', magnitude: 'user_stated' });
+    // The stated law's spread is the person's; only the existence assumption is Olumi's, and the existing reader says so.
+    expect(linkDefaultAssumptionsOf(link).map((r) => r.code)).toEqual(['DEFAULT_EXISTS_PROBABILITY']);
     // A linear Gaussian reading of the mapped graph reproduces the control's answers.
     const meetChance = (fTo: number) => {
       const mean = goal.observed_state.baseline + (fTo - 0.5) * link.strength.mean;
@@ -86,6 +89,8 @@ describe('thin core mapper: living model → GraphV3', () => {
     expect(p).toMatchObject({ effect_direction: 'negative', provenance: { magnitude: 'user_stated' } });
     expect(p.strength.mean).toBeCloseTo(-0.4, 10);
     expect(p.strength.std).toBeCloseTo(0.2, 10);
+    // Buddy R1: the default spread and the existence assumption reach the person through the existing ledger.
+    expect(linkDefaultAssumptionsOf(p).map((r) => r.code)).toEqual(['CLAMP_STD_MINIMUM', 'DEFAULT_EXISTS_PROBABILITY']);
   });
 
   it('R1 20 Oct: the goal is always drawn; "exactly N" and a change target keep it with no threshold, so no chance', () => {
@@ -151,7 +156,7 @@ describe('thin core mapper: living model → GraphV3', () => {
     const { graph } = mapLivingModel(model);
     expect(node(graph, 'f').observed_state.source).toBeUndefined();
     const link = graph.edges.find((e) => e.from === 'f' && e.to === 'g') as Record<string, any>;
-    expect(link.provenance).toEqual({ source: 'cee_hypothesis', magnitude: 'olumi_estimate' });
+    expect(link.provenance).toMatchObject({ source: 'cee_hypothesis', magnitude: 'olumi_estimate' });
     expect(link.exists_probability).toBe(0.8);
   });
 });

@@ -21,6 +21,7 @@ vi.mock('../../session/index.js', async (importOriginal) => ({
 }));
 
 import { dispatchSystemEvent } from '../dispatch.js';
+import { commitDirectAnswer } from '../../commit.js';
 
 type Rec = Record<string, any>;
 const SCENARIO = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -77,5 +78,15 @@ describe('a canvas gesture on a core scenario', () => {
     const out = await send({ kind: 'structural_add', node_id: 'r', node_kind: 'risk', label: 'Supplier delay', base_graph_hash: BASE });
     expect(JSON.stringify(out.response)).not.toContain('core_kind_not_in_slice');
     if (append.mock.calls.length > 0) expect(written().living_model).toBeUndefined();
+  });
+
+  it('Buddy R1: a legacy replacement with no caller baseline still meets the one-write rule (the commit\'s own stored read)', async () => {
+    const legacy = mapLivingModel(KNOWN_ANSWER).graph;
+    const err = await commitDirectAnswer({ response_version: 2, assistant_text: '', blocks: [], suggested_actions: [], insights: [], stage_indicator: 'evaluate' } as never, {
+      scenario_id: SCENARIO, turn_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', turn_class: 'direct_answer', handler_id: null, request_hash: 'h',
+      llm_calls_used: 0, duration_ms: 0, handler_facts: [], graph: legacy,
+    } as never, withScenarioRevision(store) as never).then(() => null, (e: unknown) => e);
+    expect(String((err as { message?: unknown } | null)?.message)).toContain('CORE_SCENARIO_LEGACY_WRITE');
+    expect(append).not.toHaveBeenCalled();
   });
 });

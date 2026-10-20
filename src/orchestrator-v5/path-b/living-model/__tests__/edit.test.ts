@@ -32,7 +32,7 @@ describe('thin core explicit edit: a canvas gesture applied to the living model,
     expect(link.links[0]!.effect).toEqual({ form: 'point', value: 25, low: null, high: null, sd: null, unit: 'units', sign: '+' });
     const edge = mapLivingModel(link).graph.edges.find((e) => e.from === 'f' && e.to === 'g') as Record<string, any>;
     expect(edge.strength.mean).toBeCloseTo(0.2, 10);
-    expect(edge.provenance).toEqual({ source: 'user_specified', magnitude: 'user_stated' });
+    expect(edge.provenance).toMatchObject({ source: 'user_specified', magnitude: 'user_stated' });
   });
 
   it('R1 6b148af5: a target edit never claims an inherited starting level, nor relabels its unit', () => {

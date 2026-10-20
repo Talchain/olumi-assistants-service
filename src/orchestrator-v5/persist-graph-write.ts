@@ -74,6 +74,8 @@ export interface CheckedGraphAppendParams {
    * other graph write: one would leave the graph and its meaning apart, or drop the meaning.
    */
   readonly coreWrite?: boolean;
+  /** THIN CORE: the authoritative stored graph this write replaces (the commit's own read), for the one-write rule. */
+  readonly coreClassificationBase?: unknown;
   /**
    * The graph as it stood BEFORE this write. Violations already present in it
    * are ABSORBED, never refused — only what this write INTRODUCES can fail it.
@@ -316,7 +318,8 @@ export async function appendCheckedGraphWrite(
   // THIN CORE: one write rule per scenario. A writer that merges onto the stored graph carries its living model forward;
   // one that rebuilds the graph drops it, so the base is checked too.
   const carriesLivingModel = (g: unknown): boolean => g !== null && typeof g === 'object' && (g as { living_model?: unknown }).living_model !== undefined;
-  if (writesGraph && params.coreWrite !== true && (carriesLivingModel(params.write.graph) || carriesLivingModel(params.baseGraphForInvariants))) {
+  if (writesGraph && params.coreWrite !== true && (carriesLivingModel(params.write.graph) || carriesLivingModel(params.baseGraphForInvariants)
+    || carriesLivingModel(params.coreClassificationBase))) {
     throw new PersistedGraphInvariantError([{ code: 'CORE_SCENARIO_LEGACY_WRITE', entity_ids: [], count: 1 }]);
   }
   for (let attempt = 0; ; attempt += 1) {

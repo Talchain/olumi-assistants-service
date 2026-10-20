@@ -15,6 +15,7 @@
  *  · unknown is never 0: a level, setting or link this slice cannot convert is WITHHELD with its reason, never dropped
  *    silently and never guessed.
  */
+import { REPAIR_CODES, type RepairEntry } from '@talchain/schemas';
 import type { LivingModelT, LivingSourceT } from '../../../schemas/living-model.js';
 import { resolveGoalThresholdCapWithProvenance } from '../../../utils/goal-threshold-cap.js';
 import { admitGoalBaseline } from '../../../cee/factor-extraction/goal-baseline-admissibility.js';
@@ -202,9 +203,21 @@ export function mapLivingModel(model: LivingModelT, opts: { readonly goal?: stri
         provenance: { source: 'cee_hypothesis', magnitude: 'olumi_placeholder' } });
       continue;
     }
-    edges.push({ ...base, strength: sized, exists_probability: stated(l.source) ? 1 : OLUMI_EXISTS,
-      provenance: stated(l.source) ? { source: edited(l) ? 'user_specified' : 'brief_extraction', magnitude: 'user_stated' }
-        : l.source === 'olumi' ? { source: 'cee_hypothesis', magnitude: 'olumi_estimate' } : {} });
+    const exists = stated(l.source) ? 1 : OLUMI_EXISTS;
+    // What nobody stated is Olumi's assumption, said through the existing ledger (`link-default-assumptions.ts`), never
+    // left to a comment: a point's spread, and whether the link exists at all.
+    const path = `edges[${l.from}::${l.to}]`;
+    const assumed: RepairEntry[] = [
+      ...(e.form === 'point' ? [{ code: REPAIR_CODES.CLAMP_STD_MINIMUM, layer: 'cee' as const, field_path: `${path}.strength.std`, before: null,
+        after: sized.std, severity: 'info' as const,
+        reason: 'Nobody stated how uncertain this strength is. Applied Olumi\'s illustrative spread (half the stated effect). It is not a measurement of anyone\'s confidence.' }] : []),
+      { code: REPAIR_CODES.DEFAULT_EXISTS_PROBABILITY, layer: 'cee', field_path: `${path}.exists_probability`, before: null, after: exists, severity: 'info',
+        reason: stated(l.source) ? 'Nobody stated how likely this link is to exist. The calculation assumes it exists, as stated.'
+          : 'Nobody stated how likely this link is to exist. Applied Olumi\'s untested default.' },
+    ];
+    const who = stated(l.source) ? { source: edited(l) ? 'user_specified' : 'brief_extraction', magnitude: 'user_stated' }
+      : l.source === 'olumi' ? { source: 'cee_hypothesis', magnitude: 'olumi_estimate' } : {};
+    edges.push({ ...base, strength: sized, exists_probability: exists, provenance: { ...who, uncertainty_defaults: assumed } });
   }
 
   // A chance rests on everything on the goal's path. Anything there that this slice left out of the engine graph (an

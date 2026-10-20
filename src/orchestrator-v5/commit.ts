@@ -1675,7 +1675,7 @@ export async function commitDirectAnswer(
   const appendOutcome = await appendCheckedGraphWrite({
     store,
     writesGraph,
-    ...(metadata.coreWrite === true ? { coreWrite: true } : {}),
+    ...(metadata.coreWrite === true ? { coreWrite: true } : { coreClassificationBase: baseForWrite }),
     baseGraphForInvariants: metadata.baseGraphForInvariants,
     // Keep a known-empty server read distinct from the structural ingress fallback at the door.
     storedGraphForHorizonBasis: storedBasisBase ?? { nodes: [], edges: [] },
