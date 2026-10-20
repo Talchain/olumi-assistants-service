@@ -102,6 +102,85 @@ describe('Olumi\'s provisional first model: ONE draft, converted by candidateToG
   });
 });
 
+describe('L26B verifier diagnostics never change the outcome bytes or effects', () => {
+  const cases = [
+    ['receipt', { check: 'receipt_absent' }],
+    ['version_id', { check: 'receipt_invalid', field: 'version_id' }],
+    ['version_number', { check: 'revision_mismatch', field: 'version_number' }],
+    ['mutation_id', { check: 'receipt_invalid', field: 'mutation_id' }],
+    ['ack-missing', { check: 'ack_status', status: 200 }],
+    ['ack-identity', { check: 'hash_mismatch', field: 'ack_identity' }],
+    ['receipt-identity', { check: 'hash_mismatch', field: 'receipt_identity' }],
+    ['read-identity', { check: 'hash_mismatch', field: 'read_identity' }],
+    ['revision', { check: 'revision_mismatch', field: 'graph_hash' }],
+    ['analysis', { check: 'hash_mismatch', field: 'analysis_hash' }],
+    ['postimage', { check: 'postimage_diff', keys: ['nodes'] }],
+    ['readback', { check: 'readback_unavailable', code: 'read_failed' }],
+  ] as const;
+  it.each(cases)('%s: first failed check, exact original JSON', async (fault, diagnostic) => {
+    const reg = structuredClone(SAVED);
+    const read = structuredClone(MODEL);
+    const receipt = reg.json.model_version as Rec;
+    const originalIdentity = (read.json.graph_identity_hash as Rec).value as string;
+    const graph = read.json.graph as Rec;
+    const hash = (x: unknown): string => String(x).slice(0, 12);
+    let extra: Rec = {};
+    if (fault === 'receipt') delete reg.json.model_version;
+    if (fault === 'version_id' || fault === 'mutation_id') receipt[fault] = '';
+    if (fault === 'version_number') receipt.version_number = 0;
+    if (fault === 'ack-missing') reg.json.graph_identity_hash = null;
+    if (fault === 'ack-identity') {
+      reg.json.graph_identity_hash = { value: 'Bearer synthetic-secret' };
+      extra = { expected: null, actual: hash(originalIdentity) };
+    }
+    if (fault === 'receipt-identity') {
+      receipt.graph_identity_hash = 'a'.repeat(64);
+      extra = { expected: hash(originalIdentity), actual: 'a'.repeat(12) };
+    }
+    if (fault === 'read-identity') {
+      reg.json.graph_identity_hash = read.json.graph_identity_hash = { value: 'a'.repeat(64) };
+      receipt.graph_identity_hash = 'a'.repeat(64);
+      extra = { expected: 'a'.repeat(12), actual: hash(originalIdentity) };
+    }
+    if (fault === 'revision') {
+      reg.json.graph_hash = 'a'.repeat(16);
+      extra = { expected: 'a'.repeat(12), actual: hash(read.json.graph_hash) };
+    }
+    if (fault === 'analysis') {
+      receipt.analysis_affecting_hash = 'a'.repeat(64);
+      extra = { expected: hash(computeAnalysisAffectingGraphHashSha256(graph as never)), actual: 'a'.repeat(12) };
+    }
+    if (fault === 'postimage') {
+      (graph.nodes as Rec[])[0]!.label = 'Unrelated private content';
+      reg.json.graph_identity_hash = read.json.graph_identity_hash = computeGraphIdentityHash(graph as never);
+      receipt.graph_identity_hash = (read.json.graph_identity_hash as Rec).value;
+      reg.json.graph_hash = read.json.graph_hash = computeAnalysisAffectingGraphHash(graph as never);
+      receipt.analysis_affecting_hash = computeAnalysisAffectingGraphHashSha256(graph as never);
+    }
+    if (fault === 'readback') { read.status = 503; read.json = {}; }
+    const p = product({ graph: [EMPTY, read], register: [reg] });
+    const out = await buildModel(p, ctx, { brief: BRIEF });
+    expect(out).toEqual({ status: 'unavailable', reason: 'not_verified', write: 'unknown', ...UNKNOWN });
+    expect(JSON.stringify(out)).toBe(JSON.stringify({ status: 'unavailable', reason: 'not_verified', write: 'unknown', ...UNKNOWN }));
+    const detail = traceRow('build_model_from_brief', out).draft_verification;
+    expect(detail).toEqual({ ...diagnostic, ...extra });
+    expect(JSON.stringify(detail)).not.toMatch(/Bearer|synthetic-secret|Unrelated private content/);
+    expect(registerCalls(p)).toHaveLength(1);
+    expect(p.callStructured).toHaveBeenCalledTimes(1);
+    expect(p.onModelRegistered).not.toHaveBeenCalled();
+  });
+
+  it.each([202, 409, 500, null])('ACK %s retains its UNKNOWN bytes', async (status) => {
+    const reply = status === null ? new Error('Bearer secret must never enter a diagnostic')
+      : { status, json: status === 409 ? { details: { code: 'OPERATION_ID_REUSED' } } : {} };
+    const p = product({ graph: [EMPTY], register: [reply] });
+    const out = await buildModel(p, ctx, { brief: BRIEF });
+    expect(out).toEqual({ status: 'unavailable', reason: 'not_confirmed', write: 'unknown', ...UNKNOWN });
+    expect(traceRow('build_model_from_brief', out).draft_verification).toEqual({ check: 'ack_status', status });
+    expect(registerCalls(p)).toHaveLength(1);
+  });
+});
+
 // ⛔ #3473 R1 (Codex's two probes): no host reading of the brief changes what the AI is told before it declares anything.
 describe('the drafter is told the static instructions and the literal brief, nothing a host reader added', () => {
   it.each([

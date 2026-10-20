@@ -1,0 +1,5 @@
+PR #L26B-local shape
+  source   +42 / -14 (net +28) in 2 files
+  tests    +146 / -4 in 2 files
+  fixtures +0 / -0 in 0 files
+  added to the estate: 0 refusal/reason codes, 1 regex literals, 3 exports, 13 new if-branches

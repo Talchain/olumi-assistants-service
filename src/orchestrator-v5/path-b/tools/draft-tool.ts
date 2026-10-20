@@ -32,7 +32,7 @@ import { buildWithDrafterRawRecord } from '../../drafter-raw/index.js';
 import { candidateToGraph } from './candidate-to-graph.js';
 import { STANCE_DESCRIPTION } from './change-tools.js';
 import { isNoModelYet, isSavedRead, readSaved } from './context-tool.js';
-import { ok, refused, unavailable, type ToolOutcome } from './outcome.js';
+import { ok, refused, unavailable, OUTCOME_TRACE, type DraftVerification, type ToolOutcome } from './outcome.js';
 import { inTheUsersWords, type TypedWords } from './user-words.js';
 
 export const BUILD_MODEL_FROM_BRIEF = 'build_model_from_brief';
@@ -107,10 +107,16 @@ export async function buildModel(deps: DraftDeps, ctx: DraftContext, args: Build
   const outcome = await construct(deps, ctx, args);
   const save_outcome = outcome.status === 'ok' ? 'VERIFIED_SAVED'
     : outcome.status === 'unavailable' && outcome.write === 'unknown' ? 'UNKNOWN' : 'VERIFIED_NO_WRITE';
-  return { ...outcome, data: { ...outcome.data, save_outcome }, ...(save_outcome === 'UNKNOWN' ? {
+  return Object.defineProperty({ ...outcome, data: { ...outcome.data, save_outcome }, ...(save_outcome === 'UNKNOWN' ? {
     detail: 'The construction was dispatched, but its save could not be verified. It may already be saved. Do not say nothing was saved, and do not repeat a write or Run to repair the reply.',
-  } : {}) };
+  } : {}) }, OUTCOME_TRACE, { value: outcome[OUTCOME_TRACE] });
 }
+
+/** Only verifier-owned enums and hash prefixes enter the existing diagnostic row. */
+const hashPrefix = (value: unknown): string | null => typeof value === 'string' && /^[a-f0-9]{12,64}$/i.test(value) ? value.slice(0, 12) : null;
+const unknownSave = (reason: string, diagnostic: DraftVerification): ToolOutcome => Object.defineProperty(
+  unavailable(reason, 'unknown'), OUTCOME_TRACE, { value: { draft_verification: diagnostic } },
+);
 
 /** Reuse A's diagnostic recorder; only a served request has an identity to record. */
 async function construct(deps: DraftDeps, ctx: DraftContext, args: BuildModelArgs): Promise<ToolOutcome> {
@@ -151,7 +157,7 @@ async function constructUnrecorded(deps: DraftDeps, ctx: DraftContext, args: Bui
       expected_graph_identity_hash: null,
     });
   } catch {
-    return unavailable('not_confirmed', 'unknown');
+    return unknownSave('not_confirmed', { check: 'ack_status', status: null });
   }
   const code = (reg.json.details as { code?: unknown } | undefined)?.code;
   if (reg.status === 409 && (code === 'GRAPH_STALE' || code === 'OPERATION_ID_REUSED')) {
@@ -159,23 +165,32 @@ async function constructUnrecorded(deps: DraftDeps, ctx: DraftContext, args: Bui
     const prior = await ownVersion();
     if (prior !== null) return ok({ already_saved: true, model_version: prior }, { mutated: false });
     if (code === 'GRAPH_STALE') return refused('model_exists');
-    return unavailable('not_confirmed', 'unknown');
+    return unknownSave('not_confirmed', { check: 'ack_status', status: reg.status });
   }
   if (reg.status >= 400 && reg.status < 500) return refused('registration_refused');
-  if (reg.status !== 200) return unavailable('not_confirmed', 'unknown');
+  if (reg.status !== 200) return unknownSave('not_confirmed', { check: 'ack_status', status: reg.status });
 
   // The response is THIS create-only registration's receipt; history availability is not save verification.
   const receipt = reg.json.model_version as Partial<AtomicCommittedModelVersionReceipt> | undefined;
   const ack = typeof reg.json.graph_identity_hash === 'string' ? reg.json.graph_identity_hash
     : (reg.json.graph_identity_hash as { value?: unknown } | undefined)?.value;
   const after = await readSaved(deps, ctx.scenario_id);
-  if (receipt == null || typeof receipt.version_id !== 'string' || receipt.version_id === ''
-    || !Number.isSafeInteger(receipt.version_number) || Number(receipt.version_number) < 1
-    || typeof receipt.mutation_id !== 'string' || receipt.mutation_id === ''
-    || !isSavedRead(after) || typeof ack !== 'string' || ack !== after.identity
-    || receipt.graph_identity_hash !== ack || computeGraphIdentityHash(after.graph as never)?.value !== ack
-    || reg.json.graph_hash !== after.graphHash || receipt.analysis_affecting_hash !== computeAnalysisAffectingGraphHashSha256(after.graph as never)
-    || !approvedGraphHeld(converted.graph, after.graph)) return unavailable('not_verified', 'unknown');
+  if (receipt == null) return unknownSave('not_verified', { check: 'receipt_absent' });
+  if (typeof receipt.version_id !== 'string' || receipt.version_id === '') return unknownSave('not_verified', { check: 'receipt_invalid', field: 'version_id' });
+  if (!Number.isSafeInteger(receipt.version_number) || Number(receipt.version_number) < 1) return unknownSave('not_verified', { check: 'revision_mismatch', field: 'version_number' });
+  if (typeof receipt.mutation_id !== 'string' || receipt.mutation_id === '') return unknownSave('not_verified', { check: 'receipt_invalid', field: 'mutation_id' });
+  if (!isSavedRead(after)) return unknownSave('not_verified', { check: 'readback_unavailable', code: after.status === 'ok' ? 'read_malformed' : after.reason });
+  if (typeof ack !== 'string') return unknownSave('not_verified', { check: 'ack_status', status: reg.status });
+  if (ack !== after.identity) return unknownSave('not_verified', { check: 'hash_mismatch', field: 'ack_identity', expected: hashPrefix(ack), actual: hashPrefix(after.identity) });
+  if (receipt.graph_identity_hash !== ack) return unknownSave('not_verified', { check: 'hash_mismatch', field: 'receipt_identity', expected: hashPrefix(ack), actual: hashPrefix(receipt.graph_identity_hash) });
+  const identity = computeGraphIdentityHash(after.graph as never)?.value;
+  if (identity !== ack) return unknownSave('not_verified', { check: 'hash_mismatch', field: 'read_identity', expected: hashPrefix(ack), actual: hashPrefix(identity) });
+  if (reg.json.graph_hash !== after.graphHash) return unknownSave('not_verified', { check: 'revision_mismatch', field: 'graph_hash', expected: hashPrefix(reg.json.graph_hash), actual: hashPrefix(after.graphHash) });
+  const analysisHash = computeAnalysisAffectingGraphHashSha256(after.graph as never);
+  if (receipt.analysis_affecting_hash !== analysisHash) return unknownSave('not_verified', { check: 'hash_mismatch', field: 'analysis_hash', expected: hashPrefix(analysisHash), actual: hashPrefix(receipt.analysis_affecting_hash) });
+  if (!approvedGraphHeld(converted.graph, after.graph)) return unknownSave('not_verified', { check: 'postimage_diff',
+    keys: Object.keys(converted.graph).filter((key) => !approvedGraphHeld(converted.graph, { ...converted.graph, [key]: after.graph[key] })).slice(0, 8),
+  });
   if (reg.json.replayed === true) return ok({ already_saved: true, model_version: receipt }, { mutated: false });
   try { deps.onModelRegistered?.(after.graph); } catch { /* an observer never decides the outcome */ }
   return ok({
