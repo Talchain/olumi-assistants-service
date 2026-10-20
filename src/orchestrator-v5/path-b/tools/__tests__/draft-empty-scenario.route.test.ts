@@ -16,6 +16,12 @@ import { computeGraphIdentityHash } from '../../../context/graph-identity.js';
 import { computeAnalysisAffectingGraphHashSha256, computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
 import { registrationTurnId } from '../../../graph-registration/registration-identity.js';
 import { candidateToGraph } from '../candidate-to-graph.js';
+import { GraphV3 } from '../../../../schemas/cee-v3.js';
+import { GraphStateIngressSchema } from '../../../boundary/request-extensions.js';
+import { projectGraphForPersistence } from '../../../persisted-graph-projection.js';
+import { toOutboundGraph } from '../../../goal-target/outbound-graph.js';
+import { readGoalRecord } from '../../../goal-target/goal-record.js';
+import { isOlumiSourceStamp } from '../../../../cee/provenance/provenance-of.js';
 import { readCanonicalContext } from '../context-tool.js';
 import { resolveRunAdmission } from '../../../tools/handlers/analysis-ready-core.js';
 import { settingProvenanceOf, valueProvenanceOf } from '../../../../cee/provenance/provenance-of.js';
@@ -45,6 +51,8 @@ const AIM = 'We want to grow weekly bookings to at least 300 within 12 months.';
 const BRIEF = [AIM, 'Bookings are 180 a week today.', 'We could add evening slots or run a referral offer.'].join('\n');
 const GOAL = 'Weekly bookings';
 const OTHER_BRIEF = 'We run a repair workshop and could add a technician or extend opening hours.';
+
+const CAPACITY_BRIEF = "We are comparing two staffing options, labelled exactly \"Keep current staffing\" and \"Add one specialist\". Use the exact goal label \"Weekly support capacity\". Our existing team resolves 80 tickets per week. Keep current staffing adds no specialist. Add one specialist adds one specialist. Each additional specialist resolves about 20 tickets per week, between 10 and 30. Total weekly support capacity is defined as the existing 80 tickets per week plus the additional specialist capacity. Goal: weekly support capacity of at least 100 tickets per week. This target is an absolute level, with no deadline.";
 
 /** The drafter's answer (the lean-core real-path draft shape, lean-core-authorship.route.test.ts). */
 const DRAFT = (() => {
@@ -533,9 +541,9 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
     expect(said.filter((x) => x.includes('says "1 per 1"'))).toEqual([]);
   });
 
-  it('L23 real core route: the exact recorded drafter output registers its Olumi-derived total and complete sum', async () => {
+  it('L23/L27 real core route: the exact recorded drafter output registers its Olumi-derived total and complete sum', async () => {
     drafterAnswer = liveRows[0]!.calls[0]!.raw_text;
-    briefArg = "We are comparing two staffing options, labelled exactly \"Keep current staffing\" and \"Add one specialist\". Use the exact goal label \"Weekly support capacity\". Our existing team resolves 80 tickets per week. Keep current staffing adds no specialist. Add one specialist adds one specialist. Each additional specialist resolves about 20 tickets per week, between 10 and 30. Total weekly support capacity is defined as the existing 80 tickets per week plus the additional specialist capacity. Goal: weekly support capacity of at least 100 tickets per week. This target is an absolute level, with no deadline.";
+    briefArg = CAPACITY_BRIEF;
     const body = await turn();
     expect(draftCall(body), JSON.stringify(body._agent)).toMatchObject({ ok: true, mutated: true, outcome: 'ok' });
     expect(registered).toHaveLength(1);
@@ -546,8 +554,103 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
       factor_ids: ['existing_team_capacity', 'additional_specialist_capacity'], stated_in_brief: false });
     expect(graph.nodes.find((n: Json) => n.id === 'additional_specialist_capacity').scale_frame).toBe(125);
     expect(saved).toEqual(graph);
+    const reopened = (await coldReload()).nodes.find((n: Json) => n.id === 'weekly_support_capacity');
+    expect(reopened.threshold_source).toBe('brief_extraction');
+    expect(reopened.goal_threshold_raw).toBe(100);
+    expect(reopened).not.toHaveProperty('success_threshold');
     expect(drafterCalls).toBe(1);
   });
+
+  // These rows replay recorded drafter bytes, then exercise the real ingress/persisted-form,
+  // strict admission reparse and public graph projection without carrying any turn history.
+  const coldReload = async (): Promise<Json> => {
+    const ingress = GraphStateIngressSchema.parse(saved);
+    const persisted = projectGraphForPersistence(ingress);
+    saved = JSON.parse(JSON.stringify(persisted)) as Json;
+    saved = GraphV3.parse(saved);
+    const response = await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph`, payload: {} });
+    expect(response.statusCode).toBe(200);
+    return toOutboundGraph(response.json<Json>().graph);
+  };
+  const targetRows = [
+    ['user', 'brief_extraction'], ['unknown', undefined], ['third_party', undefined], ['olumi', 'cee_inference'],
+    ['wrong figure', undefined], ['wrong unit', undefined], ['neighbour', undefined], ['unknown speaker', undefined],
+  ] as const;
+  it.each(([['capacity', CAPACITY_BRIEF], ['bookings', BRIEF]] as const).flatMap(([brief, words]) =>
+    targetRows.map(([origin, stamp]) => ({ brief, words, origin, stamp }))))(
+    'L27 target contract: $brief / $origin survives cold reload', async ({ brief, words, origin, stamp }) => {
+      SCENARIO = randomUUID(); saved = null; registered = []; read = EMPTY_READ; briefArg = words;
+      const draft: Json = brief === 'capacity' ? JSON.parse(liveRows[0]!.calls[0]!.raw_text) : structuredClone(DRAFT);
+      if (brief === 'bookings') draft.statements = [{ ...draft.statements[0], speaker: 'user' }];
+      const target = draft.statements.find((st: Json) => st.field === 'target');
+      draft.goal.target_origin = ['wrong figure', 'wrong unit', 'neighbour', 'unknown speaker'].includes(origin) ? 'user' : origin;
+      if (origin === 'wrong figure') draft.goal.value += 17;
+      if (origin === 'wrong unit') target.unit = 'rooms';
+      if (origin === 'neighbour') target.subject.label = 'Unrelated quantity';
+      if (origin === 'unknown speaker') target.speaker = 'unknown';
+      // Untrusted raw stamps must never become an authority alongside the declared origin.
+      draft.goal.threshold_source = 'user';
+      drafterAnswer = draft;
+      const body = await turn();
+      expect(draftCall(body), `${brief}/${origin}`).toMatchObject({ ok: true, mutated: true, outcome: 'ok' });
+      const registeredGoal = registered[0]!.graph.nodes.find((n: Json) => n.kind === 'goal');
+      const cold = await coldReload();
+      const goal = cold.nodes.find((n: Json) => n.id === registeredGoal.id);
+      expect(goal.threshold_source, `${brief}/${origin}`).toBe(stamp);
+      expect(goal.threshold_source).toBe(registeredGoal.threshold_source);
+      expect(readGoalRecord(cold, goal.id)?.target?.source).toBe(stamp);
+      expect(goal).not.toHaveProperty('success_threshold');
+      if (stamp === 'cee_inference') {
+        expect(isOlumiSourceStamp(goal.threshold_source)).toBe(true);
+        expect(goal.threshold_source).not.toBe('user');
+      }
+      if (stamp === undefined) expect(goal).not.toHaveProperty('threshold_source');
+    });
+
+  it.each([['capacity', CAPACITY_BRIEF], ['bookings', BRIEF]] as const)(
+    'L27B negative: %s brief extraction never implies user approval', async (brief, words) => {
+      SCENARIO = randomUUID(); saved = null; registered = []; read = EMPTY_READ; briefArg = words;
+      const draft: Json = brief === 'capacity' ? JSON.parse(liveRows[0]!.calls[0]!.raw_text) : structuredClone(DRAFT);
+      draft.goal.target_origin = 'user';
+      draft.statements.find((st: Json) => st.field === 'target').speaker = 'user';
+      draft.goal.threshold_source = 'user';
+      draft.goal.success_threshold = draft.goal.value;
+      drafterAnswer = draft;
+      expect(draftCall(await turn())).toMatchObject({ ok: true, mutated: true, outcome: 'ok' });
+      const initial = registered[0]!.graph.nodes.find((n: Json) => n.kind === 'goal');
+      const reopened = (await coldReload()).nodes.find((n: Json) => n.id === initial.id);
+      for (const goal of [initial, reopened]) {
+        expect(goal.threshold_source).toBe('brief_extraction');
+        expect(goal.threshold_source).not.toBe('user');
+        expect(goal).not.toHaveProperty('success_threshold');
+      }
+    });
+
+  it.each(['Weekly bookings', 'Workshop output'].flatMap(metric =>
+    (['yes/no', 'boolean', 'binary', null, 'specialists'] as const).map(unit => ({ metric, unit }))))(
+    'L27 factor contract: $metric / $unit survives cold reload without inventing a baseline', async ({ metric, unit }) => {
+      SCENARIO = randomUUID(); saved = null; registered = []; read = EMPTY_READ;
+      const label = 'Marketing manager employed — yes/no';
+      briefArg = `We want ${metric} to reach 300. If we hire, the manager is in use.`;
+      drafterAnswer = { ...DRAFT, goal: { ...DRAFT.goal, metric },
+        factors: [{ ...DRAFT.factors[0], label, unit, baseline_known: false, baseline_value: null, origin: 'user', stance: 'hypothetical' }],
+        options: [{ ...DRAFT.options[0] }, { ...DRAFT.options[1], interventions: [
+          { factor_label: label, value: 1, value_kind: 'absolute', unit, provenance: 'ai_proposed', origin: 'olumi', stance: 'estimate' },
+        ] }],
+        links: [{ ...DRAFT.links[0], from: label, to: metric }],
+        statements: [{ quote: 'If we hire, the manager is in use.', subject: { kind: 'factor', label, to_label: null, factor_label: null },
+          field: 'level', form: 'point', value: 1, low: null, high: null, unit, speaker: 'user', conditions: 'if we hire' }],
+      };
+      const body = await turn();
+      expect(draftCall(body), `${metric}/${unit}`).toMatchObject({ ok: true, mutated: true, outcome: 'ok' });
+      const cold = await coldReload();
+      const factor = cold.nodes.find((n: Json) => n.label === label);
+      expect(factor.factor_type, `${metric}/${unit}`).toBe(unit !== null && unit !== 'specialists' ? 'boolean' : undefined);
+      if (unit === null || unit === 'specialists') expect(factor).not.toHaveProperty('factor_type');
+      expect(factor).not.toHaveProperty('observed_state');
+      const setting = cold.nodes.find((n: Json) => n.kind === 'option' && n.interventions?.[factor.id])!.interventions[factor.id];
+      expect(setting.raw_value ?? setting.value).toBe(1);
+    });
 
   it('L18 real route: a zero indirect sum operand is registered on the goal coordinate frame', async () => {
     drafterAnswer = { ...SUM_DRAFT, options: DRAFT.options,
