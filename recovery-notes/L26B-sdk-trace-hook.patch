@@ -1,0 +1,23 @@
+diff --git a/src/orchestrator-v5/agent-lane/core/sdk-turn.ts b/src/orchestrator-v5/agent-lane/core/sdk-turn.ts
+--- a/src/orchestrator-v5/agent-lane/core/sdk-turn.ts
++++ b/src/orchestrator-v5/agent-lane/core/sdk-turn.ts
+@@ -123,7 +123,8 @@
+ export type CoreToolRecorder = (
+   row: { readonly name: string; readonly ok: boolean; readonly mutated: boolean | null; readonly outcome: string;
+-    readonly refusal: string | null; readonly ran: true | null; readonly args?: Readonly<Record<string, unknown>> },
++    readonly refusal: string | null; readonly ran: true | null; readonly args?: Readonly<Record<string, unknown>>;
++    readonly draft_verification?: import('../../path-b/tools/outcome.js').DraftVerification },
+   result: ToolResult,
+ ) => void;
+@@ -175,7 +176,8 @@
+   const now = input.now ?? (() => Date.now());
+   const startedAt = now();
+   const withheld = new Set(input.withheldTools ?? []);
+-  const toolCalls: (AgentTurnResult['tool_calls'][number] & { readonly args?: Readonly<Record<string, unknown>> })[] = [];
++  const toolCalls: (AgentTurnResult['tool_calls'][number] & { readonly args?: Readonly<Record<string, unknown>>;
++    readonly draft_verification?: import('../../path-b/tools/outcome.js').DraftVerification })[] = [];
+   const toolResults: ToolResult[] = [];
+@@ -184,2 +186,3 @@
+     toolCalls.push({ name: row.name, args: row.args, ok: row.ok, mutated: row.mutated === true, outcome: row.outcome,
++      ...(row.draft_verification === undefined ? {} : { draft_verification: row.draft_verification }),
+       ...(row.refusal !== null ? { refusal: row.refusal } : {}), ...(row.ran === true ? { ran: true as const } : {}),

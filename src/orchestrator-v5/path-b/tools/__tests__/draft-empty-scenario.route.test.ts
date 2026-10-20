@@ -208,7 +208,7 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
       if (saved !== null && readUnavailable) return reply.code(503).send({});
       return read();
     });
-    app.post('/assist/v1/scenarios/:id/graph/register', async (req) => {
+    app.post('/assist/v1/scenarios/:id/graph/register', async (req, reply) => {
       const b = req.body as Json;
       registered.push(b);
       saved = b.graph as Json;
@@ -219,9 +219,24 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
         graph_identity_hash: identity, graph_hash: graphHash });
       const receipt = { version_id: 'v_1', version_number: 1, mutation_id: 'm_1', creation_kind: 'initial',
         graph_identity_hash: identity.value, analysis_affecting_hash: computeAnalysisAffectingGraphHashSha256(saved as never) };
-      return { registered: true, graph_identity_hash: identity, graph_hash: graphHash,
+      if (proofFault === 'ack-status') return reply.code(503).send({});
+      if (proofFault === 'operation-reused') return reply.code(409).send({ details: { code: 'OPERATION_ID_REUSED' } });
+      if (proofFault === 'receipt-invalid') receipt.version_id = '';
+      if (proofFault === 'revision-invalid') receipt.version_number = 0;
+      if (proofFault === 'mutation-invalid') receipt.mutation_id = '';
+      if (proofFault === 'receipt-hash') receipt.graph_identity_hash = 'a'.repeat(64);
+      if (proofFault === 'analysis-hash') receipt.analysis_affecting_hash = 'a'.repeat(64);
+      if (proofFault === 'read-identity') {
+        const normalRead = read;
+        read = () => ({ ...normalRead(), graph_identity_hash: { value: 'a'.repeat(64) } });
+      }
+      if (proofFault === 'recomputed-identity') {
+        identity.value = 'a'.repeat(64); receipt.graph_identity_hash = identity.value;
+      }
+      return { registered: true, graph_identity_hash: identity, graph_hash: proofFault === 'revision' ? 'a'.repeat(16) : graphHash,
         ...(proofFault === 'receipt' ? {} : { model_version: receipt }),
-        ...(proofFault === 'ack' ? { graph_identity_hash: { ...identity, value: 'foreign' } } : {}) };
+        ...(proofFault === 'ack' ? { graph_identity_hash: { ...identity, value: 'foreign' } } : {}),
+        ...(proofFault === 'ack-missing' ? { graph_identity_hash: null } : {}) };
     });
     app.post('/assist/v1/scenarios/:id/versions', async (req, reply) => versionsUnavailable ? reply.code(503).send({}) : ({ versions: registered.map((b, i) => ({
       version_id: `v_${i + 1}`, sequence: i + 1, created_at: '2026-10-19T18:00:00.000Z',
@@ -319,6 +334,7 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
       expect(body.assistant_text).toBe('Here is the first model I built.');
       expect(registered).toHaveLength(1);
       expect(draftCall(body)).toMatchObject({ ok: true, mutated: true });
+      expect(draftCall(body)).not.toHaveProperty('draft_verification');
     });
 
   it.each([BRIEF, OTHER_BRIEF])('L13 unavailable readback is UNKNOWN; retry does not write or Run: %s', async (brief) => {
@@ -402,11 +418,58 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
     expect(registered).toHaveLength(1);
   });
 
+  it.each([BRIEF, OTHER_BRIEF].flatMap((brief) => [
+    ['receipt', { check: 'receipt_absent' }],
+    ['receipt-invalid', { check: 'receipt_invalid', field: 'version_id' }],
+    ['revision-invalid', { check: 'revision_mismatch', field: 'version_number' }],
+    ['mutation-invalid', { check: 'receipt_invalid', field: 'mutation_id' }],
+    ['ack-status', { check: 'ack_status', status: 503 }],
+    ['operation-reused', { check: 'ack_status', status: 409 }],
+    ['ack-missing', { check: 'ack_status', status: 200 }],
+    ['ack', { check: 'hash_mismatch', field: 'ack_identity', expected: null }],
+    ['receipt-hash', { check: 'hash_mismatch', field: 'receipt_identity', actual: 'a'.repeat(12) }],
+    ['read-identity', { check: 'hash_mismatch', field: 'ack_identity', actual: 'a'.repeat(12) }],
+    ['recomputed-identity', { check: 'hash_mismatch', field: 'read_identity', expected: 'a'.repeat(12) }],
+    ['revision', { check: 'revision_mismatch', field: 'graph_hash', expected: 'a'.repeat(12) }],
+    ['analysis-hash', { check: 'hash_mismatch', field: 'analysis_hash', actual: 'a'.repeat(12) }],
+    ['postimage', { check: 'postimage_diff', keys: ['nodes'] }],
+    ['readback', { check: 'readback_unavailable', code: 'read_failed' }],
+  ].map(([fault, diagnostic]) => ({ brief, fault: String(fault), diagnostic: diagnostic as Json }))))(
+    'L26B first failed check $fault is trace-only ($brief)', async ({ brief, fault, diagnostic }) => {
+      briefArg = brief; proofFault = fault; readUnavailable = fault === 'readback'; versionsUnavailable = true;
+      const body = await turn();
+      const identity = computeGraphIdentityHash(saved as never)!.value.slice(0, 12);
+      const analysis = computeAnalysisAffectingGraphHashSha256(saved as never).slice(0, 12);
+      const revision = computeAnalysisAffectingGraphHash(saved as never).slice(0, 12);
+      const defaults = fault === 'receipt-hash' || fault === 'read-identity' ? { expected: identity }
+        : fault === 'ack' || fault === 'recomputed-identity' ? { actual: identity }
+        : fault === 'revision' ? { actual: revision }
+        : fault === 'analysis-hash' ? { expected: analysis } : {};
+      expect(draftCall(body).draft_verification).toEqual({ ...defaults, ...diagnostic });
+      const reason = ['ack-status', 'operation-reused'].includes(fault) ? 'not_confirmed' : 'not_verified';
+      // Lane-base SDK output and reply bytes; diagnostics may not change either.
+      expect(toolOutputs.find((o) => o.call_id === 'draft_call')?.output).toBe(JSON.stringify({
+        status: 'unavailable', reason, write: 'unknown', data: { save_outcome: 'UNKNOWN' },
+        detail: 'The construction was dispatched, but its save could not be verified. It may already be saved. Do not say nothing was saved, and do not repeat a write or Run to repair the reply.',
+      }));
+      expect(body.assistant_text).toBe('I could not verify whether the model was saved. Any saved work is kept.');
+      expect(registered).toHaveLength(1); expect(drafterCalls).toBe(1); expect(runs).toBe(0);
+      expect(body._agent.receipts).toEqual([]);
+    });
+
+  it('L26B first failure wins; a later unrelated mismatch cannot replace it or leak content', async () => {
+    proofFault = 'receipt'; readUnavailable = true;
+    const body = await turn();
+    expect(draftCall(body).draft_verification).toEqual({ check: 'receipt_absent' });
+    expect(JSON.stringify(draftCall(body).draft_verification)).not.toContain(BRIEF);
+  });
+
   it('L13 refusal before dispatch is VERIFIED_NO_WRITE', async () => {
     toolBrief = 'Someone else asked for a different model.';
     const body = await turn();
     expect(draftOutcome()).toMatchObject({ status: 'refused', reason: 'brief_not_users_words', data: { save_outcome: 'VERIFIED_NO_WRITE' } });
     expect(body.assistant_text).toBe('Nothing was saved.');
+    expect(draftCall(body)).not.toHaveProperty('draft_verification');
     expect(registered).toHaveLength(0);
   });
 
