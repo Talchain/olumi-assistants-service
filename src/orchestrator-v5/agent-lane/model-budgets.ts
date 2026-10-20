@@ -12,7 +12,7 @@
 
 export interface CallBudget {
   readonly model: string;
-  readonly role: 'faithful' | 'widening' | 'whole' | 'conversation' | 'interpret' | 'narrate';
+  readonly role: 'faithful' | 'widening' | 'whole' | 'conversation' | 'interpret' | 'narrate' | 'core';
   readonly max_output_tokens: number;
   /** Omitted means "model default", which is what the banked sessions used. */
   readonly reasoning_effort?: 'low' | 'medium' | 'high';
@@ -22,6 +22,19 @@ export interface CallBudget {
 }
 
 export const BANKED_BUDGETS: readonly CallBudget[] = [
+  {
+    model: 'gpt-6.1-sol',
+    role: 'core',
+    // THIN CORE (20 Oct 2026): the core lane's every call, drafting included, emits the COMPLETE living model as strict tool
+    // arguments, so it runs at the configuration the 18 Oct bake-off measured, and with room for a whole model.
+    max_output_tokens: 12000,
+    reasoning_effort: 'high',
+    evidence:
+      'Bake-off 18 Oct (outbox/HEAD-TO-HEAD-R1-RESULT.md; redteam/armB/run_armB.py: gpt-6.1-sol, model_reasoning_effort=high, ' +
+      'no output cap): the living-model arm kept 99-100% of facts and saved 10/10 corrections, against 59-72% and 0/10 for ' +
+      'the served lane at low effort. 12000 is the largest ceiling measured to finish inside the browser proxy budget (the ' +
+      'gpt-5.6-terra whole entry). Effort is re-measured on R2 (low/medium/high) once the lane is served; latency is reported.',
+  },
   {
     model: 'gpt-4.1',
     role: 'faithful',
@@ -204,6 +217,11 @@ export function narrateEffortFor(budget: CallBudget): CallBudget['reasoning_effo
 /** The effort one call is sent at: `narrateEffortFor` when the loop tags it `reasoning_role: 'narrate'`, else the budget's. */
 export function callEffortFor(budget: CallBudget, req: { readonly reasoning_role?: 'narrate' }): CallBudget['reasoning_effort'] {
   return req.reasoning_role === 'narrate' ? narrateEffortFor(budget) : budget.reasoning_effort;
+}
+
+/** THIN CORE: the core lane's one budget (every turn emits or edits the complete living model). */
+export function coreBudget(): CallBudget {
+  return budgetFor('gpt-6.1-sol', 'core');
 }
 
 /** The Run button's one interpreting call (fast path 3, and the result-first follow-up that explains a Run). */

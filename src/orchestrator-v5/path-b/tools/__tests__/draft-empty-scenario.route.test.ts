@@ -151,6 +151,7 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
   let toolModel: LivingModelT | undefined;
   /** The instructions each core agent call was given (the turn's own facts ride there). */
   const instructionsSeen: string[] = [];
+  const bodiesSeen: Json[] = [];
   let drafterCalls = 0;
   let cutShortAfterRun = false;
   let runFails = false;
@@ -170,6 +171,7 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
       }
       // The core agent: first the draft call, then its words.
       instructionsSeen.push(String(body.instructions ?? ''));
+      bodiesSeen.push(body);
       const input = Array.isArray(body.input) ? body.input as Json[] : [];
       toolOutputs.push(...input.filter((i) => i.type === 'function_call_output'));
       if (!input.some((i) => i.type === 'function_call_output')) {
@@ -442,6 +444,13 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
     const reloaded = await coldReload();
     expect(((reloaded.living_model as Json).factors as Json[])[0]).toMatchObject({ source: 'unverified' });
     expect((reloaded.nodes as Json[]).find((n) => n.id === 'level')!.observed_state?.source).toBeUndefined();
+  });
+
+  it('THIN CORE budget (real route): every core call runs at the bake-off configuration, with room for a whole model', async () => {
+    bodiesSeen.length = 0;
+    expect(draftCall(await turn())).toMatchObject({ ok: true, mutated: true });
+    expect(bodiesSeen.length).toBeGreaterThan(0);
+    for (const b of bodiesSeen) expect({ model: b.model, effort: b.reasoning?.effort, max: b.max_output_tokens }).toEqual({ model: 'gpt-6.1-sol', effort: 'high', max: 12000 });
   });
 
   it('THIN CORE context (real route): the next turn starts from the saved living model, with its labels and quotes', async () => {

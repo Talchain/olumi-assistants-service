@@ -116,7 +116,7 @@ import { providerFailureOf, onceMoreOnTransportFailure } from '../orchestrator-v
 import { agentProposals as proposals, executableWaitingProposal, identityProposalOfferable, stillValidApprovalOffers } from '../orchestrator-v5/agent-lane/held-approval-offers.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
-import { budgetFor, callEffortFor, conversationBudgetFor, type CallBudget, INTERPRET_DEADLINE, interpretBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
+import { budgetFor, callEffortFor, conversationBudgetFor, coreBudget, type CallBudget, INTERPRET_DEADLINE, interpretBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../orchestrator-v5/agent-lane/coach-route-v0_2.js';
 import { agentFactorEnrichments } from '../orchestrator-v5/agent-lane/factor-review.js';
 import { OLUMI_PURPOSE_INSTRUCTION } from '../orchestrator-v5/agent-lane/olumi-purpose.js';
@@ -4452,7 +4452,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // A scenario with no model yet, or whose meaning is its living model, changes through the living model only.
         const coreScenario = coreSaved !== undefined && (coreSaved.graph == null || livingView !== undefined);
         const core = await runCoreTurn({
-          ctx: coreCtx, message, budget, userId,
+          ctx: coreCtx, message, budget: coreBudget(), userId,
           tools: (onCall) => pathBTools({ dispatch: capDispatch, proposals,
             proposeLinkStrengths: (c, a) => dispatchTool('propose_link_strengths', JSON.stringify(a), { ...coreCtx, ...c }, capabilities, mode),
             commitOptionLevels: commitOptionLevelsDoor, onModelRegistered: (raw) => emitGraphReady(raw),
