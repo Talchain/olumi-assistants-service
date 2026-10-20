@@ -20,7 +20,8 @@ import { resolveGoalThresholdCapWithProvenance } from '../../../utils/goal-thres
 import { admitGoalBaseline } from '../../../cee/factor-extraction/goal-baseline-admissibility.js';
 
 export type WithheldReason =
-  | 'no_level_target' | 'aim_not_in_slice' | 'change_target_not_in_slice' | 'target_range_not_in_slice' | 'goal_level_unknown'
+  | 'no_level_target' | 'aim_not_in_slice' | 'change_target_not_in_slice' | 'exact_target_not_in_slice' | 'target_range_not_in_slice'
+  | 'goal_level_unknown' | 'link_frame_unknown' | 'chance_rests_on_withheld'
   | 'goal_level_not_admitted' | 'factor_level_unknown' | 'level_range_not_in_slice' | 'setting_not_convertible'
   | 'link_endpoint_unknown' | 'link_unit_mismatch' | 'link_range_no_law' | 'link_sign_unknown' | 'no_single_status_quo';
 
@@ -66,35 +67,41 @@ export function mapLivingModel(model: LivingModelT): Mapped {
   const nodes: Rec[] = [];
   const edges: Rec[] = [];
   const hold = (id: string, reason: WithheldReason) => { withheld.push({ id, reason }); };
+  /** The factors some option sets that this slice could not convert (the setting is left out of the engine graph). */
+  const droppedSettings = new Set<string>();
 
-  // ── The goal: the first current aim with a level target.
+  // ── The goal: the first current aim with a target. It is always on the graph; it has a threshold (so a chance) only
+  // where this slice supports its target.
   const aim = model.aims.find((a) => a.status === 'current' && a.target !== null) ?? model.aims.find((a) => a.status === 'current');
   let goal: { id: string; cap: number; unit: string } | undefined;
-  if (aim === undefined || aim.target === null) hold(aim?.id ?? 'goal', 'no_level_target');
+  let goalNode: Rec | undefined;
+  if (aim === undefined) hold('goal', 'no_level_target');
   else {
+    goalNode = { id: aim.id, kind: 'goal', label: aim.text, ...(aim.quote !== null ? { source_quote: aim.quote } : {}) };
+    nodes.push(goalNode);
     const t = aim.target;
-    if (t.comparator === 'increase' || t.comparator === 'decrease') hold(aim.id, 'change_target_not_in_slice');
+    if (t === null) hold(aim.id, 'no_level_target');
+    else if (t.comparator === 'increase' || t.comparator === 'decrease') hold(aim.id, 'change_target_not_in_slice');
+    // "Exactly N" is never read as "at least N".
+    else if (t.comparator === '=') hold(aim.id, 'exact_target_not_in_slice');
     else if (t.value === null) hold(aim.id, t.low !== null || t.high !== null ? 'target_range_not_in_slice' : 'no_level_target');
     else {
       const resolved = resolveGoalThresholdCapWithProvenance(undefined, t.value, t.unit ?? undefined, undefined);
       if (resolved === null) hold(aim.id, 'goal_level_not_admitted');
       else {
         goal = { id: aim.id, cap: resolved.cap, unit: t.unit ?? '' };
-        const node: Rec = {
-          id: aim.id, kind: 'goal', label: aim.text,
-          goal_direction: t.comparator === '<=' ? '<=' : '>=',
+        Object.assign(goalNode, {
+          goal_direction: t.comparator,
           goal_threshold_raw: t.value, goal_threshold_unit: t.unit ?? '', goal_threshold_cap: resolved.cap,
           goal_threshold_cap_provenance: resolved.provenance, goal_threshold: t.value / resolved.cap, goal_threshold_frame: 'level',
           ...(t.by_when !== null ? { goal_deadline_as_stated: t.by_when } : {}),
-          ...(aim.quote !== null ? { source_quote: aim.quote } : {}),
-        };
+        });
         if (t.current === null) hold(aim.id, 'goal_level_unknown');
         else {
           const level = admitGoalBaseline({ rawTarget: t.value, rawBaseline: t.current, cap: resolved.cap, ...(t.comparator === '<=' ? { ceiling: true } : {}) });
           if (!level.admitted) hold(aim.id, 'goal_level_not_admitted');
-          else node.observed_state = withSource({ value: level.normalised, baseline: level.normalised, raw_value: t.current, cap: resolved.cap, unit: t.unit ?? '' }, aim);
+          else goalNode.observed_state = withSource({ value: level.normalised, baseline: level.normalised, raw_value: t.current, cap: resolved.cap, unit: t.unit ?? '' }, aim);
         }
-        nodes.push(node);
       }
     }
   }
@@ -130,7 +137,7 @@ export function mapLivingModel(model: LivingModelT): Mapped {
     const interventions: Rec = {};
     const set = (factorId: string, raw: number, unit: string | null, source: { source: LivingSourceT; quote: string | null }) => {
       const cap = caps.get(factorId);
-      if (cap === undefined) return hold(`${o.id}:${factorId}`, 'setting_not_convertible');
+      if (cap === undefined) { droppedSettings.add(factorId); return hold(`${o.id}:${factorId}`, 'setting_not_convertible'); }
       interventions[factorId] = {
         value: raw / cap, raw_value: raw, unit: unit ?? '', ...(levelSource(source) !== undefined ? { source: levelSource(source) } : {}),
         target_match: { node_id: factorId, match_type: 'exact_id', confidence: 'high' },
@@ -139,6 +146,7 @@ export function mapLivingModel(model: LivingModelT): Mapped {
     for (const s of o.settings) {
       const factor = model.factors.find((f) => f.id === s.factor_id);
       if (factor === undefined || s.value === null || (s.unit !== null && factor.unit !== null && s.unit !== factor.unit)) {
+        droppedSettings.add(s.factor_id);
         hold(`${o.id}:${s.factor_id}`, 'setting_not_convertible');
       } else set(s.factor_id, s.value, s.unit ?? factor.unit, s);
     }
@@ -156,22 +164,24 @@ export function mapLivingModel(model: LivingModelT): Mapped {
     const cap = caps.get(id);
     return f !== undefined && cap !== undefined ? { cap, unit: f.unit } : undefined;
   };
+  const causal = new Set([...model.factors.map((f) => f.id), ...(goalNode === undefined ? [] : [String(goalNode.id)])]);
   for (const l of model.links) {
-    const from = frameOf(l.from);
-    const to = frameOf(l.to);
-    if (from === undefined || to === undefined) { hold(l.id, 'link_endpoint_unknown'); continue; }
+    if (!causal.has(l.from) || !causal.has(l.to)) { hold(l.id, 'link_endpoint_unknown'); continue; }
     // The engine has no "unknown" direction, so an unsigned link stays in the living model only.
     if (l.effect.sign === null) { hold(l.id, 'link_sign_unknown'); continue; }
     const sign = l.effect.sign === '-' ? -1 : 1;
     const base: Rec = { id: l.id, from: l.from, to: l.to, effect_direction: sign < 0 ? 'negative' : 'positive' };
     const e = l.effect;
-    const unitMismatch = e.unit !== null && to.unit !== null && e.unit !== to.unit;
-    const ratio = from.cap / to.cap;
-    const sized = (e.form === 'point' && e.value !== null)
+    const from = frameOf(l.from);
+    const to = frameOf(l.to);
+    const unitMismatch = to !== undefined && e.unit !== null && to.unit !== null && e.unit !== to.unit;
+    const ratio = from !== undefined && to !== undefined ? from.cap / to.cap : undefined;
+    const sized = ratio === undefined ? undefined : (e.form === 'point' && e.value !== null)
       ? { mean: sign * Math.abs(e.value) * ratio, std: Math.abs(e.value) * ratio / 2 }
       : (e.form === 'normal' && e.value !== null && e.sd !== null && e.sd > 0)
         ? { mean: sign * Math.abs(e.value) * ratio, std: e.sd * ratio }
         : undefined;
+    if (ratio === undefined && (e.form === 'point' || e.form === 'normal')) hold(l.id, 'link_frame_unknown');
     if (e.form === 'range') hold(l.id, 'link_range_no_law');
     if (unitMismatch) hold(l.id, 'link_unit_mismatch');
     if (sized === undefined || unitMismatch) {
@@ -183,6 +193,24 @@ export function mapLivingModel(model: LivingModelT): Mapped {
     edges.push({ ...base, strength: sized, exists_probability: stated(l.source) ? 1 : OLUMI_EXISTS,
       provenance: stated(l.source) ? { source: edited(l) ? 'user_specified' : 'brief_extraction', magnitude: 'user_stated' }
         : l.source === 'olumi' ? { source: 'cee_hypothesis', magnitude: 'olumi_estimate' } : {} });
+  }
+
+  // A chance rests on everything on the goal's path. Anything there that this slice left out of the engine graph (an
+  // unsigned or unplaceable link, an option setting it could not convert) would change the calculation, so the chance is
+  // withheld: the goal keeps no threshold, and says why (AIE, 20 Oct: withhold the dependent calculation, never compute it
+  // on less). A placeholder link needs no such rule: the chance licence already withholds through it.
+  if (goal !== undefined && goalNode !== undefined) {
+    const onPath = new Set([goal.id]);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const l of model.links) if (onPath.has(l.to) && !onPath.has(l.from)) { onPath.add(l.from); grew = true; }
+    }
+    const leftOut = withheld.some((w) => (w.reason === 'link_sign_unknown' || w.reason === 'link_endpoint_unknown')
+      && onPath.has(model.links.find((l) => l.id === w.id)?.to ?? '')) || [...droppedSettings].some((id) => onPath.has(id));
+    if (leftOut) {
+      for (const k of Object.keys(goalNode)) if (k.startsWith('goal_threshold') || k === 'goal_direction' || k === 'goal_deadline_as_stated') delete goalNode[k];
+      hold(goal.id, 'chance_rests_on_withheld');
+    }
   }
 
   const frames = new Map<string, Frame>(model.factors.flatMap((f) => (caps.has(f.id) ? [[f.id, { cap: caps.get(f.id)!, unit: f.unit }] as const] : [])));

@@ -88,6 +88,42 @@ describe('thin core mapper: living model → GraphV3', () => {
     expect(p.strength.std).toBeCloseTo(0.2, 10);
   });
 
+  it('R1 20 Oct: the goal is always drawn; "exactly N" and a change target keep it with no threshold, so no chance', () => {
+    for (const comparator of ['=', 'increase'] as const) {
+      const m: LivingModelT = structuredClone(KNOWN_ANSWER);
+      m.aims[0]!.target!.comparator = comparator;
+      const out = mapLivingModel(m);
+      expect(out.withheld).toContainEqual({ id: 'g', reason: comparator === '=' ? 'exact_target_not_in_slice' : 'change_target_not_in_slice' });
+      expect(node(out.graph, 'g')).toMatchObject({ kind: 'goal', label: 'Reach 100 units' });
+      expect(node(out.graph, 'g')).not.toHaveProperty('goal_threshold');
+      expect(node(out.graph, 'g')).not.toHaveProperty('goal_direction');
+    }
+  });
+
+  it('R1 20 Oct: anything left out of the engine graph on the goal\'s path withholds the chance; off the path it does not', () => {
+    const unsigned: LivingModelT = structuredClone(KNOWN_ANSWER);
+    unsigned.links[0]!.effect.sign = null;
+    const u = mapLivingModel(unsigned);
+    expect(u.withheld).toContainEqual({ id: 'g', reason: 'chance_rests_on_withheld' });
+    expect(node(u.graph, 'g')).not.toHaveProperty('goal_threshold');
+    expect(node(u.graph, 'g').observed_state, 'the goal\'s level stays a fact').toMatchObject({ raw_value: 70 });
+
+    const offPath: LivingModelT = structuredClone(KNOWN_ANSWER);
+    offPath.factors.push({ id: 'h', label: 'h', value: 2, low: null, high: null, unit: null, source: 'user', party: null, quote: 'h is 2' });
+    offPath.links.push({ id: 'f_h', from: 'f', to: 'h', source: 'olumi', party: null, quote: null,
+      effect: { form: 'point', value: 1, low: null, high: null, sd: null, unit: null, sign: null } });
+    const o = mapLivingModel(offPath);
+    expect(o.withheld).toContainEqual({ id: 'f_h', reason: 'link_sign_unknown' });
+    expect(node(o.graph, 'g')).toMatchObject({ goal_threshold: 0.8 });
+
+    const setting: LivingModelT = structuredClone(KNOWN_ANSWER);
+    setting.options[1]!.settings[0]!.unit = 'kg';
+    setting.factors[0]!.unit = 'units';
+    const st = mapLivingModel(setting);
+    expect(st.withheld).toContainEqual({ id: 'push:f', reason: 'setting_not_convertible' });
+    expect(st.withheld).toContainEqual({ id: 'g', reason: 'chance_rests_on_withheld' });
+  });
+
   it('attribution is a label: an unverified figure gets no stamp, Olumi\'s gets its own, a user\'s is the brief\'s', () => {
     const model: LivingModelT = structuredClone(KNOWN_ANSWER);
     model.factors[0]!.source = 'unverified';
