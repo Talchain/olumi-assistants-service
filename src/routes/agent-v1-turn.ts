@@ -1324,7 +1324,7 @@ export function interpretationUnavailableText(ran: { ok?: unknown; ran?: unknown
     return 'The analysis finished, but I couldn’t explain it this time. You can ask me to explain the result.';
   }
   // The run itself failed (not refused): say only what is true (served 319dde1, 01:42Z — never an invented cause).
-  if (ran.refusal === 'run_failed') return RUN_FAILED_TEXT;
+  if (ran.refusal === 'run_failed') return `The analysis could not start.${modelChangedThisTurn ? ' Your model was updated this turn.' : ''} Please try again in a moment.`;
   const missing = typeof ran.what_is_missing === 'string' ? ran.what_is_missing.trim() : '';
   if (missing !== '') return `The analysis didn’t run. ${missing}`;
   const code = typeof ran.refusal === 'string' && ran.refusal !== ''
@@ -1333,7 +1333,7 @@ export function interpretationUnavailableText(ran: { ok?: unknown; ran?: unknown
   const why = code !== '' ? ` (${code.replace(/_/g, ' ')})` : '';
   return modelChangedThisTurn
     ? `The analysis didn’t run this time${why}. Your model was updated this turn — ask me what changed and what the analysis still needs.`
-    : `The analysis didn’t run this time${why}. Nothing in the model was changed — ask me what it still needs.`;
+    : `The analysis didn’t run this time${why}. Ask me what it still needs.`;
 }
 
 /**

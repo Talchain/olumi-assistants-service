@@ -261,8 +261,8 @@ describe('Run loop and the retained read-only Explain follow-up', () => {
     const { interpretationUnavailableText } = await import('../../../routes/agent-v1-turn.js');
     expect(interpretationUnavailableText({ ok: true, ran: true })).toBe('The analysis finished, but I couldn’t explain it this time. You can ask me to explain the result.');
     expect(interpretationUnavailableText({ ok: true, ran: true }), 'no visibility claim it cannot back').not.toMatch(/shown/);
-    expect(interpretationUnavailableText({ ok: true, ran: false, status: 'blocked', what_is_missing: '' })).toBe('The analysis didn’t run this time (blocked). Nothing in the model was changed — ask me what it still needs.');
-    expect(interpretationUnavailableText({ ok: false, refusal: 'analysis_not_ready' })).toBe('The analysis didn’t run this time (analysis not ready). Nothing in the model was changed — ask me what it still needs.');
+    expect(interpretationUnavailableText({ ok: true, ran: false, status: 'blocked', what_is_missing: '' })).toBe('The analysis didn’t run this time (blocked). Ask me what it still needs.');
+    expect(interpretationUnavailableText({ ok: false, refusal: 'analysis_not_ready' })).toBe('The analysis didn’t run this time (analysis not ready). Ask me what it still needs.');
   });
 
   /**
@@ -327,10 +327,10 @@ describe('Run loop and the retained read-only Explain follow-up', () => {
     expect(r.statusCode).toBe(200);
     const b = r.json() as { assistant_text: string; suggested_actions: { action_type?: string }[]; _agent: { tool_calls: { name: string; ok: boolean; refusal?: string }[] } };
     expect(modelBodies, 'the model reads the failed Run outcome').toHaveLength(2);
-    expect(b.assistant_text, b.assistant_text).toMatch(/couldn\u2019t run the analysis/);
-    expect(b.assistant_text).toMatch(/Nothing in your model changed/);
+    expect(b.assistant_text, b.assistant_text).toMatch(/The analysis could not start/);
+    expect(b.assistant_text).not.toMatch(/Nothing in your model changed/);
     expect(b.assistant_text, 'no invented cause').not.toMatch(/graph has changed|historical|stale/i);
-    expect(b.assistant_text).toBe((await import('../../../routes/agent-v1-turn.js')).RUN_FAILED_TEXT);
+    expect(b.assistant_text).toBe('The analysis could not start. Please try again in a moment.');
     expect(b._agent.tool_calls).toEqual([expect.objectContaining({ name: 'run_analysis', ok: false, refusal: 'run_failed' })]);
     expect(b.suggested_actions).toContainEqual(expect.objectContaining({ action_type: 'run_analysis' }));
   });

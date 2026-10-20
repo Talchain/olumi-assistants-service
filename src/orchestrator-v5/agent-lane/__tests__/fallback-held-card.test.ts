@@ -6,7 +6,7 @@
  * ("Saved 1 of 1 option levels"). The tool results below are arranged in that turn's shape; the served words are quoted.
  */
 import { describe, expect, it } from 'vitest';
-import { hopLimitText, unfinishedAnswerText } from '../../../routes/agent-v1-turn.js';
+import { hopLimitText, unfinishedAnswerText, interpretationUnavailableText } from '../../../routes/agent-v1-turn.js';
 
 const SERVED_FALLBACK = 'I could not settle that within this turn, and nothing in your model was changed. Try asking for one change at a time.';
 const HELD = { ok: true, mutated: false, proposal_id: '264047b9-a5d2-4ea9-8136-e4a193c45532', public_label: 'Record this level', base_revision: 'h1',
@@ -54,7 +54,7 @@ it('CONTROL: with no held card the hop limit keeps its honest served sentence', 
 it('a run’s own sentence still comes FIRST on a cut-short answer; the card it ships with is described after it', () => {
   const t = unfinishedAnswerText({ tool_calls: [heldCall, { name: 'run_analysis', ok: false, mutated: false }],
     tool_results: [HELD, { ok: false, mutated: false, refusal: 'not_ready' }], mutated: false });
-  expect(t).toBe(`The analysis didn’t run this time (not ready). Nothing in the model was changed — ask me what it still needs.\n\n${TYPED}`);
+  expect(t).toBe(`The analysis didn’t run this time (not ready). Ask me what it still needs.\n\n${TYPED}`);
 });
 
 describe('Codex r1 on #2820', () => {
@@ -74,9 +74,28 @@ describe('Codex r1 on #2820', () => {
       + `\n\n${TYPED}`);
   });
 
-  it('CONTROL: an unchanged turn keeps today’s run sentence byte for byte', () => {
+  it('a false diagnostic makes no unverifiable negative save claim', () => {
     expect(unfinishedAnswerText({ tool_calls: [{ name: 'run_analysis', ok: false, mutated: false }],
       tool_results: [{ ok: false, mutated: false, refusal: 'run_not_requested' }], mutated: false }))
-      .toBe('The analysis didn’t run this time (run not requested). Nothing in the model was changed — ask me what it still needs.');
+      .toBe('The analysis didn’t run this time (run not requested). Ask me what it still needs.');
   });
+});
+
+// UNKNOWN is reduced to false by the existing diagnostic carrier; omitted likewise proves no save outcome.
+it.each([false, undefined])('L13C fallback with mutation diagnostic %s makes no save claim', (mutated) => {
+  const text = interpretationUnavailableText({ ran: false, status: 'unknown' }, mutated);
+  expect(text).toBe('The analysis didn’t run this time. Ask me what it still needs.');
+  expect(text).not.toContain('Nothing in the model was changed');
+});
+
+it.each([false, true])('L13C missing-input branch stays unchanged for mutation %s', (mutated) => {
+  expect(interpretationUnavailableText({ what_is_missing: 'Capacity is still unknown.' }, mutated))
+    .toBe('The analysis didn’t run. Capacity is still unknown.');
+});
+
+it.each([false, true, undefined])('L13C failed Run preserves only a verified save for mutation %s', (mutated) => {
+  const text = unfinishedAnswerText({ tool_calls: [{ name: 'run_analysis', ok: false, mutated: false }],
+    tool_results: [{ ok: false, ran: false, refusal: 'run_failed' }], mutated: mutated ?? false });
+  expect(text).toBe(`The analysis could not start.${mutated ? ' Your model was updated this turn.' : ''} Please try again in a moment.`);
+  expect(text).not.toContain('Nothing in your model changed');
 });
