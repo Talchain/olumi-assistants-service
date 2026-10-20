@@ -295,4 +295,19 @@ describe('thin core mapper: living model → GraphV3', () => {
     // CONTROL: a level target says no from-today premise.
     expect(mapLivingModel(KNOWN_ANSWER).assumed).toEqual([]);
   });
+
+  it('R2 on ab30449f: with no status quo among exact options, Olumi adds the labelled reference that holds the change exact (PLoT pins it)', () => {
+    const { graph, assumed } = mapLivingModel(OPTION_EFFECTS);
+    const ref = (graph.nodes as Rec[]).find((n) => n.id === 'w__carry_on')!;
+    expect(ref).toMatchObject({ kind: 'option', label: "Carry on as now (Olumi's reference)", is_baseline: true });
+    // PLoT's pinning rule: some option sets the lever to today's level (0), so the reference draw holds it exact.
+    expect(ref.interventions.w__change).toMatchObject({ value: 0, raw_value: 0 });
+    expect(assumed.map((a) => a.id)).toContain('w__carry_on');
+    // CONTROL: a stated option with no change of its own is already the reference; nothing is added.
+    const withStatusQuo: LivingModelT = structuredClone(OPTION_EFFECTS);
+    withStatusQuo.options.push({ id: 'none', label: 'Do nothing', settings: [], source: 'user', party: null, quote: 'or do nothing' });
+    const g2 = mapLivingModel(withStatusQuo).graph.nodes as Rec[];
+    expect(g2.some((n) => n.id === 'w__carry_on')).toBe(false);
+    expect(g2.find((n) => n.id === 'none')).toMatchObject({ is_baseline: true, interventions: { w__change: { value: 0 } } });
+  });
 });
