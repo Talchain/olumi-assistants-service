@@ -13,6 +13,7 @@
  *  · the selected Run: its id, the hash it ran on, its currency and leader permission, and the licensed Run facts
  *    (`runFactsOf`, the packet every AI call after a Run reads).
  */
+import { linkDefaultAssumptionsOf } from '../../../cee/magnitude/link-default-assumptions.js';
 import { z } from 'zod-v4';
 import type { AgentToolContext } from '../../agent-lane/runtime/agent-tools.js';
 import type { InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
@@ -60,8 +61,11 @@ function nodeOf(n: Rec, byId: ReadonlyMap<string, Rec>): Rec {
 }
 
 function linkOf(e: Rec, byId: ReadonlyMap<string, Rec>): Rec {
+  const defaults = linkDefaultAssumptionsOf(e);
   return {
     ...pick(e, ['from', 'to', 'effect_direction', 'strength', 'exists_probability']),
+    ...(defaults.length === 0 ? {} : { default_assumptions: defaults }),
+    ...(isRec(e.provenance) ? { point_source: pick(e.provenance, ['source_quote', 'natural_effect']) } : {}),
     source: provenanceOf({ link: e, context: { fromKind: byId.get(String(e.from))?.kind } }),
   };
 }

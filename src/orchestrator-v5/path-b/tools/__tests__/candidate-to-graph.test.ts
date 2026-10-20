@@ -247,7 +247,13 @@ function graphLines(out: Rec, nameOf: (canonical: string) => string): Map<string
   for (const e of g.edges as Rec[]) {
     const k = `edge ${idName.get(e.from)} → ${idName.get(e.to)}`;
     for (const f of ['exists_probability', 'effect_direction', 'origin', 'strength']) put(`${k} ${f}`, e[f]);
-    for (const [f, v] of Object.entries((e.provenance ?? {}) as Rec)) if (f !== 'source_quote') put(`${k} provenance.${f}`, v);
+    for (const [f, v] of Object.entries((e.provenance ?? {}) as Rec)) if (f !== 'source_quote') {
+      // The new ledger's subject IDs resolve through the same map as its owning edge. Every other byte stays compared.
+      const value = f === 'uncertainty_defaults' ? (v as Rec[]).map(row => ({ ...row,
+        field_path: String(row.field_path).replace(`edges[${e.from}::${e.to}]`, `edges[${idName.get(e.from)}::${idName.get(e.to)}]`),
+      })) : v;
+      put(`${k} provenance.${f}`, value);
+    }
   }
   for (const c of (g.goal_constraints ?? []) as Rec[]) for (const f of ['value', 'unit', 'value_frame']) put(`limit ${idName.get(c.node_id)} ${c.operator} ${f}`, c[f]);
   const counted = (xs: string[]): Map<string, number> => xs.reduce((t, x) => t.set(x, (t.get(x) ?? 0) + 1), new Map<string, number>());

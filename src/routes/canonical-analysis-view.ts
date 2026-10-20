@@ -132,6 +132,7 @@ export interface CanonicalAnalysisView {
 }
 
 export interface CanonicalGoalChanceDetail {
+  readonly default_assumptions?: NonNullable<ReturnType<typeof goalChanceLicenceForAgent>>['default_assumptions'];
   /** "chance of ‘productivity’ being at least 10% higher than today at three months". */
   readonly chance_words?: string;
   /** Disclosures, in order: reference/status quo assumption, effect timing, partial goal, estimate_only, provisional. */
@@ -321,6 +322,7 @@ export function projectCanonicalAnalysisView(input: CanonicalAnalysisViewInput):
 function canonicalGoalChanceDetail(facts: ReturnType<typeof goalChanceFactsForAgent>, saidOnCard: readonly string[]): CanonicalGoalChanceDetail | undefined {
   const targets = facts.goal_targets;
   const detail: CanonicalGoalChanceDetail = {
+    ...(facts.goal_chance_licence?.default_assumptions === undefined ? {} : { default_assumptions: facts.goal_chance_licence.default_assumptions }),
     ...(facts.goal_chance_words !== undefined ? { chance_words: facts.goal_chance_words } : {}),
     // Reply-face P2: each cause once on the card, never the card's own summary again (`notesAsShown`).
     ...((): { notes?: string[] } => {

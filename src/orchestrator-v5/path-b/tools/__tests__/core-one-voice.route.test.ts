@@ -8,6 +8,7 @@
 import { randomUUID, createHash } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { d3Run, ILLUSTRATIVE } from './d3-defaults-fixture.js';
 import { readCanonicalContext } from '../context-tool.js';
 import { withCanonicalAnalysisView } from '../../../agent-lane/__tests__/fixtures/canonical-analysis-read.js';
 import { GraphV3 } from '../../../../schemas/cee-v3.js';
@@ -341,6 +342,58 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
       summary: 'Your own estimates are in the model, but none of them sits on the path that decides this comparison, so these figures are still provisional. '
         + 'A share of runs in which an option fitted your goal better than the others is not the chance of reaching your target.\n\n' + original.summary });
     expect(engineResult).toEqual(original);
+  });
+
+  it.each(['orders', 'repairs'] as const)('L7: %s conditional effects retain separate D3 defaults in Run, AI and cold projections', async subject => {
+    const fixture = d3Run(subject);
+    persisted = fixture.graph;
+    engineResult = { ...fixture.result, computed_against_hash: hashOf(persisted) };
+    const licence = engineResult!.enrichment.inference_warnings.find((w: Json) => w.code === 'GOAL_CHANCE_LICENSED');
+    expect(licence.pct_by_option).toEqual(Object.fromEntries(persisted.nodes.filter((n: Json) => n.kind === 'option')
+      .map((n: Json, i: number) => [n.id, i ? 27 : 13])));
+    readiness = { status: 'ready', options: [], blockers: [] };
+    const reply = 'These are illustrative calculations using untested Olumi assumptions.';
+    outputs = [[{ type: 'function_call', name: 'run_analysis', call_id: 'd3_run', args: { reason: 'Run the saved model.', effects_timing: 'not_stated' } }],
+      [{ type: 'message', text: reply }]];
+    const r = await post({ turn_id: randomUUID(), message: 'Run analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } });
+    expect(r.statusCode, r.body).toBe(200);
+    expect(licence.default_assumptions?.status).toBe(ILLUSTRATIVE);
+    const ledger = licence.default_assumptions.links;
+    expect(ledger).toHaveLength(2);
+    for (const [i, link] of ledger.entries()) {
+      expect(link.loss.map((l: Json) => l.after)).toEqual([Math.abs((i ? 25 : 20) / 187.5) / 2, 0.8]);
+      expect(link.loss[0].reason).toContain('half its size');
+      expect(link.loss[1].reason).toContain('Nobody stated how likely');
+      const edge = persisted.edges.find((e: Json) => e.from === link.from && e.to === link.to);
+      expect(edge.provenance.natural_effect).toMatchObject({ amount: i ? 25 : 20,
+        stated_range: { low: i ? 5 : 10, high: i ? 45 : 30, end: 'centre', text: fixture.quotes[i] } });
+      expect(edge.provenance.source_quote).toBe(fixture.quotes[i]);
+      expect(edge.provenance.magnitude).toBe('user_stated');
+    }
+    const tool = calls.flatMap(c => c.input ?? []).find((i: Json) => i.type === 'function_call_output' && i.call_id === 'd3_run');
+    expect(JSON.parse(tool.output), tool.output).toMatchObject({ status: 'ok', ran: true });
+    const data = JSON.parse(tool.output).data;
+    expect(data.result.enrichment.inference_warnings.find((w: Json) => w.code === 'GOAL_CHANCE_LICENSED').default_assumptions)
+      .toEqual(licence.default_assumptions);
+    const context = await readCanonicalContext({ dispatch: async () => ({ status: 200, json: withCanonicalAnalysisView({
+      graph: persisted, graph_hash: hashOf(persisted), analysis_state: runState, analysis_result: carriedResult,
+    }, SCENARIO) }) }, { scenario_id: SCENARIO });
+    expect(context.status).toBe('ok');
+    if (context.status !== 'ok') throw new Error('context unavailable');
+    const selected = context.data.selected_run as Json;
+    expect(selected.facts.current).toBe(true);
+    expect(selected.facts.chances.goal_chance_licence.default_assumptions).toEqual(licence.default_assumptions);
+    expect(selected.facts.must_say.filter((s: string) => s === ILLUSTRATIVE)).toEqual([ILLUSTRATIVE]);
+    const human = selected.facts.user_statements.flatMap((r: Json) => r.record.statements).filter((st: Json) => fixture.quotes.includes(st.quote));
+    expect(human.map((st: Json) => ({ speaker: st.speaker, low: st.low, high: st.high, conditions: st.conditions }))).toEqual([
+      { speaker: 'user', low: 10, high: 30, conditions: 'If Weekend opening is introduced.' },
+      { speaker: 'user', low: 5, high: 45, conditions: 'If Online bookings is introduced.' },
+    ]);
+    expect((context.data.links as Json[]).filter(l => l.default_assumptions).map(l => l.default_assumptions)).toEqual(ledger.map((l: Json) => l.loss));
+    const cold = (await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph`, payload: {} })).json();
+    expect(cold.canonical_analysis_view.goal_chance.default_assumptions).toEqual(licence.default_assumptions);
+    expect(cold.canonical_analysis_view).toEqual(r.json().canonical_analysis_view);
+    expect(runCount).toBe(1);
   });
 
 });
