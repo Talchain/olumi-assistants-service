@@ -34,6 +34,9 @@ export interface WireInterventionRange {
   low: number;
   high: number;
   meaning: StoredInterventionRangeT['meaning'];
+  law?: StoredInterventionRangeT['law'];
+  source?: string;
+  source_quote?: string;
 }
 
 export type InterventionRangeRefusal = 'malformed' | 'no_point' | 'value_outside_range';
@@ -151,8 +154,8 @@ export function wireInterventionRangePlan(
     const wire = wireInterventions[factorId];
     if (wire === undefined) continue;
     if (wire !== interventionPoint(sourceInterventions[factorId])) { notForwarded.push(factorId); continue; }
-    const { low, high, meaning } = verdict.range;
-    (ranges ??= {})[factorId] = { low, high, meaning };
+    const { low, high, meaning, law } = verdict.range;
+    (ranges ??= {})[factorId] = law === undefined ? { low, high, meaning } : verdict.range;
   }
   return { ranges, notForwarded };
 }
@@ -199,7 +202,7 @@ export const rangeLawWithheldWords = (factorLabel: string, optionLabel: string):
 /** The admitted `likely_range` an option's cell carries for a factor, or `undefined` (none, another meaning, or refused). */
 export function likelyRangeUseOf(factorId: string, cell: unknown): LikelyRangeUse | undefined {
   const verdict = admitInterventionRange(cell);
-  if (verdict === undefined || 'refused' in verdict || verdict.range.meaning !== 'likely_range') return undefined;
+  if (verdict === undefined || 'refused' in verdict || (verdict.range.meaning !== 'likely_range' || verdict.range.law !== undefined)) return undefined;
   const unit = isRec(cell) && typeof cell.unit === 'string' && cell.unit.trim() !== '' ? cell.unit.trim() : undefined;
   return { factor_id: factorId, low: verdict.range.low, high: verdict.range.high, ...(unit !== undefined ? { unit } : {}),
     persons_own: isPersonsOwnSetting(verdict.range),

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { linkDefaultAssumptionsOf, readLinkDefaultAssumptions } from '../link-default-assumptions.js';
 import { d3Run, ILLUSTRATIVE } from '../../../orchestrator-v5/path-b/tools/__tests__/d3-defaults-fixture.js';
-import { withGoalChanceLicence } from '../../../orchestrator-v5/goal-target/goal-chance-licence.js';
+import { goalChanceLicenceForAgent, withGoalChanceLicence } from '../../../orchestrator-v5/goal-target/goal-chance-licence.js';
 import { runFactsOf } from '../../../orchestrator-v5/agent-lane/run-facts.js';
 
 type Json = Record<string, any>;
@@ -50,4 +50,35 @@ describe('evaluated default ledger, independent of point authorship', () => {
     expect(runFactsOf(f.result, g, false).chances).toEqual({});
     expect(readLinkDefaultAssumptions(licence.default_assumptions)).toEqual(licence.default_assumptions);
   });
+});
+
+// L3C: the existing illustrative ledger also describes a declared law on THIS Run's dispatched range.
+it.each(['orders', 'repairs'] as const)('illustrative outcome law is retained on result and cold readers: %s', subject => {
+  const f = d3Run(subject), g = structuredClone(f.graph);
+  const option = g.nodes.find((n: Json) => n.kind === 'option');
+  const factor = Object.keys(option.interventions)[0]!;
+  const range = { low: 0.5, high: 1.5, meaning: 'likely_range', source: 'brief_extraction',
+    source_quote: 'The effect could be between 0.5 and 1.5.', law: { family: 'uniform', role: 'uncertain_outcome',
+      origin: 'olumi_illustrative', basis: 'illustrative, untested', quantity: subject, reference: 'Extra throughput',
+      period: 'One week', conditions: ['During opening'], independent_of_model: true } };
+  option.interventions[factor].range = range;
+  const sent = { ...f.sent, options: f.sent.options.map((o: Json) => ({ ...o,
+    ...(o.option_id === option.id ? { intervention_ranges: { [factor]: range } } : {}) })) };
+  const input = { ...f.result.enrichment, inference_warnings: [] };
+  const goal = g.nodes.find((n: Json) => n.kind === 'goal').id;
+  const evaluated = withGoalChanceLicence(input, g, goal, undefined, undefined, g, { sentRun: sent });
+  const licence = licenceOf(evaluated);
+  expect(licence.default_assumptions.outcome_laws).toEqual([{ option_id: option.id, factor_id: factor, range }]);
+  expect(licence.notes).toContain(ILLUSTRATIVE);
+  expect(licence.notes.join(' ')).toContain('uniform');
+  expect(licence.notes.join(' ')).toContain('illustrative, untested');
+  expect(licence.notes.join(' ')).toContain(range.source_quote);
+  const cold = JSON.parse(JSON.stringify({ enrichment: evaluated }));
+  expect(goalChanceLicenceForAgent(cold)?.default_assumptions).toEqual(licence.default_assumptions);
+  expect(goalChanceLicenceForAgent(cold)?.notes).toEqual(licence.notes);
+  // Neither an unsent law nor the same law on an unrelated factor earns an illustrative-law claim.
+  const unsent = withGoalChanceLicence(input, g, goal, undefined, undefined, g, { sentRun: f.sent });
+  expect(licenceOf(unsent).default_assumptions?.outcome_laws).toBeUndefined();
+  const wrong = { ...sent, options: sent.options.map((o: Json) => ({ ...o, intervention_ranges: { unrelated: range } })) };
+  expect(licenceOf(withGoalChanceLicence(input, g, goal, undefined, undefined, g, { sentRun: wrong })).default_assumptions?.outcome_laws).toBeUndefined();
 });

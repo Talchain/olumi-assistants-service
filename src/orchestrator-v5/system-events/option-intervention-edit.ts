@@ -6,7 +6,7 @@ import { CANONICAL_ID_REGEX } from '../../cee/utils/id-normalizer.js';
 import { isDeepStrictEqual } from 'node:util';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import { z } from 'zod';
-import { InterventionV3, NodeV3, TargetMatch } from '../../schemas/cee-v3.js';
+import { InterventionV3, NodeV3, TargetMatch, type InterventionRangeV3T } from '../../schemas/cee-v3.js';
 
 /**
  * ⭐⭐ WHAT THIS WRITER NEEDS TO READ OFF AN EXISTING ENTRY — deliberately NOT
@@ -144,7 +144,12 @@ export interface OptionInterventionEditInput {
    */
   readonly figure?: { readonly raw_value?: number; readonly unit?: string; readonly cap?: number;
     /** TEMPORAL: the user's likely range for this level, raw units (`intervention-range.ts` gates it at persist). */
-    readonly likely_range?: { readonly low: number; readonly high: number } };
+    readonly likely_range?: Pick<InterventionRangeV3T, 'low' | 'high'> & Partial<Pick<InterventionRangeV3T, 'law' | 'source' | 'source_quote'>> };
+}
+
+/** The approved range keeps its own source and optional law, separately from the approved point. */
+function approvedRange(range: NonNullable<NonNullable<OptionInterventionEditInput['figure']>['likely_range']>): InterventionRangeV3T {
+  return { meaning: 'likely_range', source: 'user_specified', ...range };
 }
 
 /** Internal server invocation only: no member is added to the .50 wire union. */
@@ -212,7 +217,7 @@ export function optionInterventionBatchPostimageIsScoped(
       || entry.data.user_material_unverified !== (target.source !== undefined && target.unverified === true ? true : undefined)) return false;
     const approved = target.figure?.likely_range;
     if (approved !== undefined && !isDeepStrictEqual(entry.data.range,
-      { low: approved.low, high: approved.high, meaning: 'likely_range', source: 'user_specified' })) return false;
+      approvedRange(approved))) return false;
     const restoredNode = restored.nodes.find(node => node.id === target.optionId)!;
     if (oldNode.interventions === undefined) {
       // A new container may hold only this batch's cells, never unrelated invented cells (checked once all are removed).
@@ -2032,8 +2037,7 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
     // author, are a change, never a repeat.
     const storedRange = (existing as { range?: Record<string, unknown> } | undefined)?.range;
     const likelyMoves = figure?.likely_range !== undefined
-      && !(storedRange?.low === figure.likely_range.low && storedRange?.high === figure.likely_range.high
-        && storedRange?.meaning === 'likely_range' && storedRange?.source === 'user_specified');
+      && !isDeepStrictEqual(storedRange, approvedRange(figure.likely_range));
     const finalFigure = figure?.raw_value !== undefined ? figure : undefined;
     const cell = existing as Record<string, unknown>;
     const factorCap = (factor.observed_state as { cap?: number } | undefined)?.cap
@@ -2073,7 +2077,7 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
   const operation = levelFigure === undefined && likely === undefined ? built : { ...built, value: { ...(built.value as Record<string, unknown>),
     ...(levelFigure !== undefined ? { raw_value: levelFigure.raw_value, ...(levelFigure.cap !== undefined ? { cap: levelFigure.cap } : {}),
       ...(levelFigure.unit !== undefined ? { unit: levelFigure.unit.trim() } : {}) } : {}),
-    ...(likely !== undefined ? { range: { low: likely.low, high: likely.high, meaning: 'likely_range', source: 'user_specified' } } : {}) } };
+    ...(likely !== undefined ? { range: approvedRange(likely) } : {}) } };
   if (input.source === undefined) return { kind: 'prepared', operation, ...withLink };
   // An adopted Olumi level: the encoder PRESERVES this member (`PRESERVED_INTERVENTION_SOURCES`)
   // instead of defaulting the cell to `user_specified`, and the rationale says whose it is.

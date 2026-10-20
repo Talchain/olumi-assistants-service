@@ -269,3 +269,29 @@ describe('approved capless figures preserve their actual frame', () => {
     expect(prepare(graph(), { modelValue: 0.3, figure })).toEqual({ kind: 'refused', reason: 'level_frame_mismatch' });
   });
 });
+
+it('L3C: the existing approved writer preserves law, raw range and its own source on only the approved cell', () => {
+  const range = { low: 0.1, high: 0.5, source: 'brief_extraction', source_quote: 'Between 0.1 and 0.5 hours.',
+    law: { family: 'uniform', role: 'uncertain_outcome' as const, origin: 'olumi_illustrative' as const, basis: 'illustrative, untested',
+      quantity: 'Coverage hours', reference: 'Pilot', period: 'One shift', conditions: [], independent_of_model: true } };
+  const before = graph();
+  const prepared = prepare(before, { figure: { raw_value: 0.3, unit: 'hours', likely_range: range } });
+  expect(prepared.kind).toBe('prepared');
+  if (prepared.kind !== 'prepared') throw new Error(JSON.stringify(prepared));
+  const operation = prepared.operation.value as Record<string, any>;
+  expect(operation.range).toEqual({ meaning: 'likely_range', ...range });
+  const ops = parseEditGraphResponse(JSON.stringify({ operations: [prepared.operation], removed_edges: [], warnings: [], coaching: null })).operations as PatchOperation[];
+  const applied = applyPatchOperations(before, ops);
+  const encoded = encodeOptionInterventionsForEdit(applied, new Set(['option']));
+  const merged = mergeAppliedGraphForPersistence({ appliedGraph: encoded.graph, persistedBase: before, ingressBase: before, scenarioId: 'scenario', requestId: 'l3c' });
+  const after = GraphV3.parse(clone(projectGraphForPersistence(merged)));
+  expect(after.nodes.find(n => n.id === 'option')!.interventions!.factor!.range).toEqual({ meaning: 'likely_range', ...range });
+  expect(after.nodes.find(n => n.id === 'other_option')).toEqual(before.nodes.find(n => n.id === 'other_option'));
+  const target = { optionId: 'option', factorId: 'factor', modelValue: 0.3, figure: { raw_value: 0.3, unit: 'hours', likely_range: range } };
+  expect(optionInterventionPostimageIsScoped(before, after, target)).toBe(true);
+  for (const mutation of [{ source: 'user_specified' }, { law: { ...range.law, origin: 'declared' } }]) {
+    const wrong = clone(after);
+    Object.assign(wrong.nodes.find(n => n.id === 'option')!.interventions!.factor!.range!, mutation);
+    expect(optionInterventionPostimageIsScoped(before, wrong, target)).toBe(false);
+  }
+});

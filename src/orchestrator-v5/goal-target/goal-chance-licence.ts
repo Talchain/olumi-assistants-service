@@ -1,3 +1,4 @@
+import { InterventionRangeSchema } from '@talchain/schemas';
 import { linkDefaultAssumptionsOf, readLinkDefaultAssumptions, type LinkDefaultAssumptions } from '../../cee/magnitude/link-default-assumptions.js';
 import { readRecordedRunQuestion, RUN_QUESTION_EVIDENCE_KEY } from '../tools/handlers/run-input-snapshot.js';
 import { goalHorizonVerdict, withholdGoalFiguresForUntestedHorizon, withholdOptionsNotInPlaceAtPeriodEnd, withChanceReadbackWithheld } from './goal-horizon-verdict.js';
@@ -1537,7 +1538,7 @@ const belowOne = (e: Rec): boolean =>
  * The directed, non-identity links on the options' paths to THE SCORED goal: reached from an option's intervened factors
  * or out-links, and reaching the goal. An IDENTITY edge is fixed by ISL, never Bernoulli-gated (Codex r1 #2637).
  */
-function goalPathEdges(graph: unknown, goalId: unknown, optionIds: readonly string[]): Rec[] {
+function goalPathEdges(graph: unknown, goalId: unknown, optionIds: readonly string[], includeIdentities = false): Rec[] {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
   const goal = nodes.find((n) => n.id === goalId && n.kind === 'goal');
@@ -1569,7 +1570,7 @@ function goalPathEdges(graph: unknown, goalId: unknown, optionIds: readonly stri
     return isRec(id) && Array.isArray(id.factor_ids) && id.factor_ids.includes(e.from);
   };
   // ⭐ Hold-at-1.0 (d5 #87 6008807178): a held link is not Olumi's doubt; callers filter with the SAME `heldLinkOf`.
-  return directed.filter((e) => reached.has(e.from) && toGoal.has(e.to) && !identityEdge(e));
+  return directed.filter((e) => reached.has(e.from) && toGoal.has(e.to) && (includeIdentities || !identityEdge(e)));
 }
 
 /** Appends the licence to the Run's `inference_warnings` when there is one; otherwise the envelope itself. Pure. */
@@ -1598,13 +1599,28 @@ export function withGoalChanceLicence<E>(
     const loss = sent.length === 1 ? linkDefaultAssumptionsOf(edge, sent[0]) : [];
     return loss.length === 0 ? [] : [{ from: String(edge.from), to: String(edge.to), loss }];
   });
-  const assumptions: LinkDefaultAssumptions | undefined = defaults.length === 0 ? undefined : {
+  const sentOptions = constraints.sentRun?.options;
+  const outcomeLaws = (Array.isArray(sentOptions) ? sentOptions : []).filter(isRec).flatMap(option => {
+    const id = String(option.option_id ?? option.id);
+    if (!Object.hasOwn(licence.pct_by_option, id) || !isRec(option.intervention_ranges)) return [];
+    const ranges = Object.entries(option.intervention_ranges);
+    if (ranges.length !== 1) return []; // ISL supports one independent marginal per option.
+    const [factorId, value] = ranges[0]!;
+    const range = InterventionRangeSchema.safeParse(value);
+    const onPath = factorId === goalId || goalPathEdges(graph, goalId, [id], true).some(e => e.from === factorId);
+    if (!onPath || !range.success || range.data.law?.origin !== 'olumi_illustrative'
+      || range.data.law.family !== 'uniform' || range.data.law.role !== 'uncertain_outcome' || !range.data.law.independent_of_model) return [];
+    return [{ option_id: id, factor_id: factorId, range: range.data }];
+  });
+  const assumptions: LinkDefaultAssumptions | undefined = defaults.length === 0 && outcomeLaws.length === 0 ? undefined : {
     status: 'Illustrative calculation — uses untested Olumi assumptions.', origin: 'olumi',
-    coefficient_distribution: 'unbounded_normal', stated_range_use: 'recorded_not_sampled_or_tail_bounds', links: defaults,
+    ...(defaults.length === 0 ? {} : { coefficient_distribution: 'unbounded_normal', stated_range_use: 'recorded_not_sampled_or_tail_bounds' }),
+    links: defaults, ...(outcomeLaws.length === 0 ? {} : { outcome_laws: outcomeLaws }),
   };
   return { ...shown, inference_warnings: [...warnings, { ...licence, ...goalChanceHorizonOf(checked),
     ...(assumptions === undefined ? {} : { default_assumptions: assumptions,
-      notes: [...new Set([...(licence.notes ?? []), assumptions.status])] }),
+      notes: [...new Set([...(licence.notes ?? []), assumptions.status, ...outcomeLaws.map(({ option_id, range }) =>
+        `${licence.option_labels_by_option?.[option_id] ?? 'This option'}: Olumi assumes a uniform uncertain outcome for ${range.law!.quantity} between ${range.low} and ${range.high}; ${range.law!.basis}. Quantity: ${range.law!.quantity}; reference: ${range.law!.reference}; period: ${range.law!.period}; conditions: ${range.law!.conditions.join('; ') || 'none declared'}; independent of other model inputs. Source words: ${range.source_quote ?? 'quote not recorded'}.`)])] }),
     ...(readings.length > 0 ? { goal_reading: { origin: 'olumi' as const, readings } } : {}),
     ...(omitted !== undefined ? { omitted_from_calculation: { scope: 'modelled_effects_only' as const, risks: omitted } } : {}) }] } as E;
 }

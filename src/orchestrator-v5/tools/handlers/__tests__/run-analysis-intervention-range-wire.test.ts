@@ -90,6 +90,22 @@ async function runOnce(range?: Rec): Promise<{ options: Rec[]; fact: Fact }> {
 }
 
 describe('WIRE: run_analysis forwards an option\'s stated range to PLoT', () => {
+  it('L3b RED: a declared uncertainty law and its separate raw source reach only their own option', async () => {
+    const law = {
+      family: 'uniform', role: 'uncertain_outcome', origin: 'declared',
+      basis: 'I model migration downtime as uniform between these bounds, independently of other model inputs.',
+      quantity: 'Migration downtime in days', reference: 'Lift-and-shift migration', period: 'Migration window',
+      conditions: ['During the migration'], independent_of_model: true,
+    };
+    const { options, fact } = await runOnce({ ...RANGE, law });
+    expect(options.find((o) => o.id === 'opt_lift')!.intervention_ranges).toEqual({
+      fac_downtime: { ...RANGE, law },
+    });
+    const cold = JSON.parse(JSON.stringify(fact));
+    expect(cold.result.input_snapshot.options.find((o: Rec) => o.option_id === 'opt_lift').settings[0].range).toEqual({ ...RANGE, law });
+    expect(options.find((o) => o.id === 'opt_stay')!.intervention_ranges).toBeUndefined();
+  });
+
   it('RED: the lift-and-shift option carries {low, high, meaning} beside its raw 10 days — no author, no quote', async () => {
     const options = await wireOptions(RANGE);
     const lift = options.find((o) => o.id === 'opt_lift')!;
