@@ -141,7 +141,7 @@ type AddArgs = Extract<z.infer<typeof ChangeOp>, { op: 'add_to_model' }>;
 type AddOptionArgs = Extract<z.infer<typeof ChangeOp>, { op: 'add_option' }>;
 /** A target as stored on the proposal: the declaration plus the literal source line and when it was proposed (hashed). */
 const SingleTargetStored = z.object({ value: z.number(), unit: z.string(), comparator: z.enum(['<', '<=', '>', '>=']), quantity: z.string(),
-  frame: z.literal('level'), stance: Stance, source: Source, said_in: z.string().nullable(), recorded_at: z.string() }).strict();
+  frame: z.enum(['level', 'change']), stance: Stance, source: Source, said_in: z.string().nullable(), recorded_at: z.string() }).strict();
 const TargetStored = z.union([SingleTargetStored, z.object({ conditions: z.array(SingleTargetStored.extend({ node_id: id })).min(2).max(12), timing: TargetTiming.nullable(), links: z.array(TargetLink).max(3).optional(), new_quantities: z.array(id).optional() }).strict()]);
 export const ProposeChangeParams = z.object({
   /** What the approval card says, in a few plain words. */
@@ -591,7 +591,7 @@ function targetRead(read: SavedRead, t: NonNullable<ReturnType<typeof targetOf>>
 async function proposeTarget(deps: Pick<ChangeDeps, 'dispatch' | 'proposals'>, ctx: ChangeCtx, args: ProposeChangeArgs, t: TargetArgs): Promise<ToolOutcome> {
   const members = 'conditions' in t ? t.conditions : [t];
   for (const [i, c] of members.entries()) {
-    if (c.frame === 'change') return unavailable('change_target_not_available', 'none', CHANGE_TARGET);
+    if (c.frame === 'change' && (!('conditions' in t) || t.timing?.months == null)) return unavailable('change_target_not_available', 'none', CHANGE_TARGET);
     const holding = holdingOf('target', c.source, c.stance);
     if (isBlocked(holding)) return unavailable('blocked_schema', 'none', blockedSaid(i, holding.blocked));
     if (c.source.origin !== 'olumi' && (c.source.quote === null || !inTheUsersWords(c.source.quote, ctx))) return refused('quote_not_in_users_words', undefined, { op: i });
@@ -600,7 +600,7 @@ async function proposeTarget(deps: Pick<ChangeDeps, 'dispatch' | 'proposals'>, c
   if (!isSavedRead(read)) return read;
   if (read.identity === null) return unavailable('read_malformed');
   if (nodesOf(read.graph).find((n) => n.id === t.goal_id)?.kind !== 'goal') return refused('not_a_goal', undefined, { op: 0 });
-  const record = (c: typeof members[number]): z.infer<typeof SingleTargetStored> => ({ value: c.value, unit: c.unit, comparator: c.comparator, quantity: c.quantity, frame: 'level',
+  const record = (c: typeof members[number]): z.infer<typeof SingleTargetStored> => ({ value: c.value, unit: c.unit, comparator: c.comparator, quantity: c.quantity, frame: c.frame,
     stance: c.stance, source: c.source, said_in: c.source.quote === null ? null : verbatimSourceLine({ now: ctx.user_turn_text ?? null,
       conversation: (ctx.verified_user_messages ?? []).join('\n') }, c.source.quote) ?? null, recorded_at: new Date().toISOString() });
   const stored: z.infer<typeof TargetStored> = 'conditions' in t
