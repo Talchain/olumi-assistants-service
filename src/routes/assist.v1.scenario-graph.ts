@@ -619,7 +619,9 @@ export default async function route(app: FastifyInstance) {
         ...(scopePermissions.total_goal_claims_allowed === false ? {
           goal_scope_claim_permissions: { total_goal_claims_allowed: false, exploratory_work_allowed: true },
         } : {}),
-        analysis_result: analysis.analysis_result,
+        analysis_result: laneModeFor('full', req.headers['x-olumi-ai-mode'], getRuntimeEnv()) === 'core'
+          && analysis.analysis_result?.type === 'analysis_result'
+          ? { ...analysis.analysis_result, summary: '' } : analysis.analysis_result,
         canonical_analysis_view: analysis.canonical_analysis_view,
         ...(analysis.run_recording === undefined ? {} : { run_recording: analysis.run_recording }),
         // CURRENT-READ-v1: one selected Run's canonical freshness and typed

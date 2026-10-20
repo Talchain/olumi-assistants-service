@@ -300,11 +300,13 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
     expect(JSON.parse(aiOutput.output)).toMatchObject({ status: 'ok', ran: true, data: { result: { enrichment: {
       option_comparison: original.enrichment.option_comparison,
     } } } });
+    expect(JSON.parse(aiOutput.output).data.result, 'core tool continuation keeps data and withholding, never host narration')
+      .toEqual({ ...original, summary: '', decision_sensitivity: { status: 'not_measured' }, tipping_point: { status: 'not_evaluated' } });
     const block = j.blocks.find((b: Json) => b.type === 'analysis_result');
     expect(block, 'only narration is retired; numbers and every withheld reason stay').toEqual({ ...original, summary: '' });
     expect(j.canonical_analysis_view, 'typed canonical facts still ship').toBeDefined();
     const cold = await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph`, payload: {} });
-    expect(cold.json().analysis_result, 'the saved result is untouched for cold readers and tools').toEqual(original);
+    expect(cold.json().analysis_result, 'the A read fixture remains unmodified; the real core cold route has its own authority rows').toEqual(original);
     expect(j.canonical_analysis_view, 'turn and cold reader retain identical canonical facts').toEqual(cold.json().canonical_analysis_view);
     const count = calls.length;
     const replay = await post(turn);

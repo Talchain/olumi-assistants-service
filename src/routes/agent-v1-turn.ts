@@ -1896,7 +1896,7 @@ export function sameAgentTurnRequest(stored: string, requested: string, chipless
   return chiplessRetry && !requested.includes(CHIP_HASH_SEP) && stored.startsWith(`${requested}${CHIP_HASH_SEP}`);
 }
 
-/** Only the AI narrates a core turn. Run data stays intact; stored/tool reads retain their original summary. */
+/** Only the AI narrates a core turn. Run data stays intact; the stored Run retains its original summary. */
 function turnAnalysisData<T extends { blocks?: unknown }>(response: T, mode: AgentLaneMode): T {
   return mode !== 'core' || !Array.isArray(response.blocks) ? response : { ...response,
     blocks: response.blocks.map(block => block?.type === 'analysis_result' ? { ...block, summary: '' } : block) };

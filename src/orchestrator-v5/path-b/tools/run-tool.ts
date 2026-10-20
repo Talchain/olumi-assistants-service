@@ -52,6 +52,8 @@ export async function runAnalysis(deps: RunDeps, ctx: Pick<AgentToolContext, 'sc
 export async function recordedRun(deps: { readonly dispatch: InternalDispatch }, ctx: Pick<AgentToolContext, 'scenario_id'>,
   r: Rec): Promise<ToolOutcome> {
   const { ok: _ok, mutated: _mutated, ...facts } = r;
+  // B's SDK continuation reads Run data; the AI authors the narration. Never rewrite the stored result.
+  if (isRec(facts.result)) facts.result = { ...facts.result, summary: '' };
   const code = typeof r.refusal === 'string' && CODE.test(r.refusal) ? r.refusal : undefined;
   if (r.ran !== true) {
     if (code === 'run_failed' || (code === undefined && r.ok !== true)) return unavailable('run_failed', 'none', undefined, facts);
