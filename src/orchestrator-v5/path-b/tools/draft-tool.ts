@@ -46,10 +46,14 @@ export interface DraftDeps {
 const nodesIn = (graph: Record<string, unknown>): number => (Array.isArray(graph.nodes) ? graph.nodes.length : 0);
 
 /**
- * ⭐ THE AIE'S B-ONLY DRAFTER SENTENCE (19 Oct 2026, verbatim; sha256 cfbe03aa8d84e1ed6452817987d331bbf15596be25487da26b93978316d95f49):
- * an option's stated effect is a setting on the factor it changes, and an additive goal is a declared sum. Sent on B's request only.
+ * ⭐ B-ONLY DRAFTER TEXT, sent on B's request only (A's BUILD_INSTRUCTIONS are untouched), verbatim, one space between:
+ *  1. the AIE's sentence (19 Oct 2026; sha256 cfbe03aa8d84e1ed6452817987d331bbf15596be25487da26b93978316d95f49): an option's stated
+ *     effect is a setting on the factor it changes, and an additive goal is a declared sum;
+ *  2. the K5 P0 ruling's sentence (fresh Codex under §7.2, AIE silent; DL 20 Oct; sha256
+ *     9111ed60fb9c8e4048118f3d49c6409ba98c59b2a39c2c0bcc90235faf9436ee): the goal's current level is its own fixed factor, a sum operand.
  */
-export const B_DRAFTER_SENTENCE = 'Represent each option\'s stated effect as a setting on the factor it changes rather than a sized link from the option, retaining every supplied point and complete range with the literal words, named speaker, source, stance, units, period and conditions; where the source meaning establishes that the goal quantity equals its current level plus additions, declare a sum in identities with bound current-level and addition operands and supported current levels for every operand and the total in the same quantity, units, period and reference; keep derived arithmetic visibly Olumi\'s, use zero only for a structurally defined increment at its stated reference, and leave unsupported levels or probability laws unknown.';
+export const B_DRAFTER_SENTENCE = 'Represent each option\'s stated effect as a setting on the factor it changes rather than a sized link from the option, retaining every supplied point and complete range with the literal words, named speaker, source, stance, units, period and conditions; where the source meaning establishes that the goal quantity equals its current level plus additions, declare a sum in identities with bound current-level and addition operands and supported current levels for every operand and the total in the same quantity, units, period and reference; keep derived arithmetic visibly Olumi\'s, use zero only for a structurally defined increment at its stated reference, and leave unsupported levels or probability laws unknown.'
+  + ' Where the source supports the goal level as its current level plus additions, represent that current level as a separate fixed factor carrying the supported goal baseline and its actual source, declare an entry in identities with operation sum, the goal as outcome and that factor plus every distinct addition as operands, and link each operand to the goal one for one in the same quantity, units, period and reference, retaining supported current levels, structural increment zeroes, effects, ranges and authorship while identifying the sum as Olumi’s interpretation and leaving unsupported probability laws unknown.';
 
 /** The ONE drafter call, on the static instructions and the literal brief: the draft, or why there is none. Nothing is written. */
 async function drafted(callStructured: CallStructuredModel, brief: string): Promise<{ readonly draft: unknown } | { readonly outcome: ToolOutcome }> {

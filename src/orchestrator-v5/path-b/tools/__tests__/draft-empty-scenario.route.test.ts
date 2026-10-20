@@ -14,6 +14,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
 import { registrationTurnId } from '../../../graph-registration/registration-identity.js';
 import { candidateToGraph } from '../candidate-to-graph.js';
+import { placeholderGoalPaths, unsizedLeaderGoalPaths } from '../../../agent-lane/goal-certainty.js';
 
 type Json = Record<string, any>;
 /** A NEW scenario per row: the route keeps each scenario's verified typed messages for the process. */
@@ -53,6 +54,20 @@ const ADDED_DRAFT: Json = {
   ...DRAFT,
   factors: [...DRAFT.factors, { label: ADDED, role: 'observable', baseline_known: true, baseline_value: 0, unit: 'bookings a week', provenance: 'inferred', plausible_max: null }],
   links: [{ ...DRAFT.links[0], to: ADDED }, { ...DRAFT.links[0], from: ADDED, effect_amount: 1, effect_per_source_change: 1, effect_provenance: 'inferred', definitional: true }],
+};
+/**
+ * ⭐ K5 P0 RULING SHAPE (option 2, 20 Oct), synthetic: what B's drafter text asks for. The goal's current level is its own fixed factor
+ * carrying the goal baseline; the option's effect is a setting on the addition; the goal is declared as their sum, each operand linked one
+ * for one in the same unit.
+ */
+const CURRENT = 'Current weekly bookings';
+const SUM_DRAFT: Json = {
+  ...DRAFT,
+  options: [DRAFT.options[0], { ...DRAFT.options[1], interventions: [{ factor_label: ADDED, value: 20, value_kind: 'absolute', unit: 'bookings a week', provenance: 'explicit' }] }],
+  factors: [{ label: CURRENT, role: 'observable', baseline_known: true, baseline_value: 180, unit: 'bookings a week', provenance: 'explicit', plausible_max: null },
+    { label: ADDED, role: 'controllable', baseline_known: true, baseline_value: 0, unit: 'bookings a week', provenance: 'inferred', plausible_max: 60 }],
+  links: [CURRENT, ADDED].map((from) => ({ ...DRAFT.links[0], from, effect_amount: 1, effect_per_source_change: 1, effect_provenance: 'inferred', definitional: true })),
+  identities: [{ operation: 'sum', outcome: GOAL, factors: [CURRENT, ADDED], provenance: 'inferred', evidence: null }],
 };
 let drafterAnswer: Json = DRAFT;
 
@@ -198,6 +213,32 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
     const said = (JSON.parse(String(toolOutputs.find((o) => o.call_id === 'draft_call')?.output ?? '{}')) as Json).data.draft.said as string[];
     expect(said).toContain(`This link was drafted at 1 per 1; this path doesn't use that size in the calculation yet, so the link from "${ADDED}" to "${GOAL}" keeps Olumi's placeholder size.`);
     expect(said.filter((x) => x.includes('says "1 per 1"'))).toEqual([]);
+  });
+
+  it('⭐ K5 P0 RULING (real path): the sum the drafter text asks for is carried exact, and no placeholder stands between the option and the goal', async () => {
+    const savedFor = async (answer: Json): Promise<Json> => {
+      SCENARIO = randomUUID(); registered = []; saved = null; read = EMPTY_READ; drafterAnswer = answer;
+      const body = await turn();
+      expect(draftCall(body), JSON.stringify(body._agent)).toMatchObject({ ok: true, mutated: true, outcome: 'ok' });
+      return registered[0]!.graph as Json;
+    };
+    const g = await savedFor(SUM_DRAFT);
+    const id = (label: string): string => (g.nodes as Json[]).find((n) => n.label === label)!.id;
+    const goal = (g.nodes as Json[]).find((n) => n.kind === 'goal')!;
+    expect(goal.nonlinear_identity).toMatchObject({ operation: 'sum', factor_ids: [id(CURRENT), id(ADDED)] });
+    // Exact: each operand is the sum's definition (existence 1, Olumi's, never the person's); the Run evaluates the identity itself.
+    for (const from of [CURRENT, ADDED]) {
+      expect((g.edges as Json[]).find((e) => e.from === id(from) && e.to === goal.id)).toMatchObject({ exists_probability: 1, provenance: { definitional: true, magnitude: 'olumi_estimate' } });
+    }
+    const optionsOf = (graph: Json): string[] => (graph.nodes as Json[]).filter((n) => n.kind === 'option').map((n) => n.id as string);
+    const options = optionsOf(g);
+    expect((g.nodes as Json[]).find((n) => n.label === 'Add evening slots')!.interventions[id(ADDED)]).toMatchObject({ raw_value: 20 });
+    // The goal chance is computable: no placeholder link on any option's path to the goal (the gate that withheld it in the K5 loop) …
+    expect(placeholderGoalPaths(g, options)).toEqual([]);
+    expect(unsizedLeaderGoalPaths(g, options)).toEqual([]);
+    // … while the K5 loop's served shape (no declared sum) still has one, so the gate is not vacuous.
+    const loop = await savedFor(ADDED_DRAFT);
+    expect(placeholderGoalPaths(loop, optionsOf(loop))).not.toEqual([]);
   });
 
   it('CONTRAST: a non-null read that is not a graph is still malformed: refused, nothing registered', async () => {
