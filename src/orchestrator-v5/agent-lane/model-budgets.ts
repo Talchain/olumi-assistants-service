@@ -219,9 +219,17 @@ export function callEffortFor(budget: CallBudget, req: { readonly reasoning_role
   return req.reasoning_role === 'narrate' ? narrateEffortFor(budget) : budget.reasoning_effort;
 }
 
-/** THIN CORE: the core lane's one budget (every turn emits or edits the complete living model). */
+/** THIN CORE: the model builder's budget (it drafts or edits the complete living model). */
 export function coreBudget(): CallBudget {
   return budgetFor('gpt-6.1-sol', 'core');
+}
+
+/**
+ * THIN CORE MULTI-MODEL (Paul, 20 Oct): the reply agent's budget, the measured conversation entry (Sol low: the same judged
+ * score as high on served coach bodies, median 14.0 → 6.4 s). It hands drafting and changes to the builder (`coreBudget`).
+ */
+export function coreReplyBudget(): CallBudget {
+  return budgetFor('gpt-6.1-sol', 'conversation');
 }
 
 /** The Run button's one interpreting call (fast path 3, and the result-first follow-up that explains a Run). */

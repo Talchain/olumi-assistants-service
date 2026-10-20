@@ -47,6 +47,14 @@ export const AGENTS_SDK = '@openai/agents@0.18.0';
 export const CORE_MAX_MODEL_CALLS = 8;
 /** Rendered tokens past which the server compacts the Conversation (native compaction; the window grows every turn). */
 export const CORE_COMPACT_THRESHOLD = 100_000;
+/** The tools that draft or change the model: only the builder holds them when the turn has a reply agent. */
+export const MODEL_WRITING_TOOLS: ReadonlySet<string> = new Set(['build_model_from_brief', 'propose_change']);
+export const CORE_BUILDER_NAME = 'Olumi model builder';
+/** The reply agent's one extra rule: what it hands on (the SDK names the handoff tool after the builder). */
+export const CORE_HANDOFF_RULE =
+  'You answer this turn yourself unless the model must be drafted or changed. When the person gives a brief to draft, or '
+  + 'anything that would change what the model holds (a correction, a new or edited option, factor, link, figure, goal or '
+  + 'condition), hand the turn to the model builder straight away, without answering first.';
 
 // Tests never export traces; a deployed runtime uses the SDK's built-in exporter, which reads the lane's OPENAI_API_KEY.
 if (getRuntimeEnv() === 'test') setTracingDisabled(true);
@@ -133,6 +141,12 @@ export interface CoreTurnInput {
   readonly message: string;
   readonly instructions: string;
   readonly budget: CallBudget;
+  /**
+   * MULTI-MODEL (Paul, 20 Oct): when given, a fast agent on this budget answers the turn, and hands the turn (the SDK's own
+   * handoff: the whole Conversation goes with it) to the `budget` agent whenever the model must be drafted or changed.
+   * Absent: the `budget` agent answers every turn, as before.
+   */
+  readonly replyBudget?: CallBudget;
   readonly briefText?: unknown;
   /** The model state as this turn began (the route's canonical packet state), given to the agent, never stored. */
   readonly canonicalState?: unknown;
@@ -195,25 +209,44 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
   const tools = input.tools(record).filter((t) => !('name' in t) || !withheld.has(t.name));
   const pendingRows: Promise<void>[] = [];
   const client = ledgeredAgentsClient({ site: 'agent-core.sdk', pending: pendingRows,
-    detailOf: (body) => ({ model: input.budget.model, purpose: 'conversation', ...agentRequestIdentity('agent.converse', body) }) });
-  const agent = new Agent({
-    name: 'Olumi',
+    detailOf: (body) => ({ model: typeof body?.model === 'string' ? body.model : input.budget.model, purpose: 'conversation',
+      ...agentRequestIdentity('agent.converse', body) }) });
+  const settings = (budget: CallBudget, firstTool: string | undefined) => ({
+    maxTokens: budget.max_output_tokens,
+    ...(budget.reasoning_effort !== undefined ? { reasoning: { effort: budget.reasoning_effort } } : {}),
+    parallelToolCalls: false,
+    ...(firstTool !== undefined ? { toolChoice: firstTool } : {}),
+    // Native server-side compaction of the Conversation as it grows: no transcript trim of our own.
+    contextManagement: [{ type: 'compaction' as const, compactThreshold: CORE_COMPACT_THRESHOLD }],
+  });
+  const reply = input.replyBudget;
+  // A turn the route opens on a model-writing tool goes straight to the builder; any other starts with the reply agent.
+  const startsWithBuilder = reply === undefined || (input.firstTool !== undefined && MODEL_WRITING_TOOLS.has(input.firstTool));
+  const builder = new Agent({
+    name: reply === undefined ? 'Olumi' : CORE_BUILDER_NAME,
+    handoffDescription: 'Drafts or changes the model: a brief to draft, or any correction or new item, figure, link, goal or condition.',
     instructions: input.instructions,
     model: new OpenAIResponsesModel(client, input.budget.model),
-    modelSettings: {
-      maxTokens: input.budget.max_output_tokens,
-      ...(input.budget.reasoning_effort !== undefined ? { reasoning: { effort: input.budget.reasoning_effort } } : {}),
-      parallelToolCalls: false,
-      ...(input.firstTool !== undefined ? { toolChoice: input.firstTool } : {}),
-      // Native server-side compaction of the Conversation as it grows: no transcript trim of our own.
-      contextManagement: [{ type: 'compaction', compactThreshold: CORE_COMPACT_THRESHOLD }],
-    },
+    modelSettings: settings(input.budget, startsWithBuilder ? input.firstTool : undefined),
     tools: [...tools],
   });
+  const front = reply === undefined ? undefined : new Agent({
+    name: 'Olumi',
+    instructions: `${input.instructions}\n\n${CORE_HANDOFF_RULE}`,
+    model: new OpenAIResponsesModel(client, reply.model),
+    modelSettings: settings(reply, startsWithBuilder ? undefined : input.firstTool),
+    tools: tools.filter((t) => !('name' in t) || !MODEL_WRITING_TOOLS.has(t.name)),
+    handoffs: [builder],
+  });
+  // The root of the agent graph (a saved pause is restored from it, whichever agent held it); the turn's first agent.
+  const agent = front ?? builder;
+  const entry = startsWithBuilder ? builder : agent;
   // Tool time, from the SDK's own lifecycle events (the calls run one at a time: `parallelToolCalls: false`).
   let toolStartedAt: number | undefined;
-  agent.on('agent_tool_start', () => { toolStartedAt = now(); });
-  agent.on('agent_tool_end', () => { if (toolStartedAt !== undefined) toolMs += Math.max(0, now() - toolStartedAt); toolStartedAt = undefined; });
+  for (const a of front === undefined ? [builder] : [front, builder]) {
+    a.on('agent_tool_start', () => { toolStartedAt = now(); });
+    a.on('agent_tool_end', () => { if (toolStartedAt !== undefined) toolMs += Math.max(0, now() - toolStartedAt); toolStartedAt = undefined; });
+  }
 
   /**
    * Olumi's own facts for THIS turn, given fresh on every model call in its instructions (never stored in the Conversation):
@@ -296,8 +329,8 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
        */
       const streamed = currentStageEmitter() !== undefined;
       const go = async (from: string | AgentInputItem[] | RunState<unknown, Agent>) => {
-        if (!streamed) return run(agent, from, options);
-        const live = await run(agent, from, { ...options, stream: true });
+        if (!streamed) return run(entry, from, options);
+        const live = await run(entry, from, { ...options, stream: true });
         let writing = false;
         for await (const event of live) {
           if (!writing && event.type === 'raw_model_stream_event' && event.data.type === 'output_text_delta') {

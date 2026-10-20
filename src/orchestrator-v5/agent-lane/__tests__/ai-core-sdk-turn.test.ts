@@ -14,7 +14,7 @@ import { ledgeredAgentsClient } from '../../../adapters/llm/openai-agents-client
 import { runWithStageStream } from '../../../cee/unified-pipeline/stage-stream-context.js';
 import { AGENTS_SDK, CORE_COMPACT_THRESHOLD, CoreStateUnavailableError, PAUSE_DECLINED, PAUSE_SUPERSEDED, runCoreTurn, type ConversationIdStore, type CoreToolRecorder, type PausedRunStore } from '../core/sdk-turn.js';
 import type { OpenAiPausedRun } from '../../session/store.js';
-import { budgetFor } from '../model-budgets.js';
+import { budgetFor, type CallBudget } from '../model-budgets.js';
 import type { AgentToolContext } from '../runtime/agent-tools.js';
 
 type Json = Record<string, any>;
@@ -71,14 +71,15 @@ const readTools = (c: ReturnType<typeof caps>) => (onCall: CoreToolRecorder) => 
   errorFunction: null,
 })];
 type Extra = { briefText?: string; conversationStore?: ConversationIdStore; state?: unknown; tools?: Parameters<typeof runCoreTurn>[0]['tools'];
-  pausedRunStore?: PausedRunStore; press?: { decision: 'approve' | 'decline'; proposal_id: string } };
+  pausedRunStore?: PausedRunStore; press?: { decision: 'approve' | 'decline'; proposal_id: string }; replyBudget?: CallBudget };
 const turn = (message: string, c: ReturnType<typeof caps>, extra: Extra & { traceMeta?: { revision?: string; run_id?: string } } = {}) =>
   runWithProviderPolicy(OPENAI_ONLY('agent_v1_turn'), async () => {
   const result = await runCoreTurn({ ctx: ctx(message), message, tools: extra.tools ?? readTools(c),
     instructions: 'Synthetic instructions.', budget: budgetFor('gpt-6.1-sol', 'conversation'), userId: null,
     canonicalState: extra.state ?? { empty: true, entities: [] }, briefText: extra.briefText, conversationStore: 'conversationStore' in extra ? extra.conversationStore : columnStore(),
     ...(extra.pausedRunStore !== undefined ? { pausedRunStore: extra.pausedRunStore } : {}),
-    ...(extra.press !== undefined ? { press: extra.press } : {}), ...(extra.traceMeta !== undefined ? { traceMeta: extra.traceMeta } : {}) });
+    ...(extra.press !== undefined ? { press: extra.press } : {}), ...(extra.traceMeta !== undefined ? { traceMeta: extra.traceMeta } : {}),
+    ...(extra.replyBudget !== undefined ? { replyBudget: extra.replyBudget } : {}) });
   return { result, calls: recordedProviderCalls() };
 });
 
@@ -404,6 +405,44 @@ describe('PATH-B core turn on the Agents SDK', () => {
       expect(result.assistant_text).toBe('I could not hold that change for your approval; nothing changed.');
       expect(JSON.stringify(sent[1]!.input)).toContain('could not hold this change');
       expect(pausedColumn).toBeNull();
+    });
+  });
+
+  describe('MULTI-MODEL (Paul, 20 Oct): a fast reply agent hands model drafting and changes to the high-effort builder', () => {
+    const REPLY = budgetFor('gpt-5.6-terra', 'conversation');
+    const BUILDER = budgetFor('gpt-6.1-sol', 'conversation');
+    /** The read tool plus a stand-in model-writing tool, so the split of tools between the two agents is visible. */
+    const withWriter = (c: ReturnType<typeof caps>) => (onCall: CoreToolRecorder) => [...readTools(c)(onCall), tool({
+      name: 'propose_change', description: 'Prepare a change to the model.', parameters: z4.object({}), errorFunction: null,
+      execute: async () => { onCall({ name: 'propose_change', ok: true, mutated: false, outcome: 'ok', refusal: null, ran: null }, { ok: true, mutated: false }); return '{}'; },
+    })];
+    const toolNames = (b: Json): string[] => (b.tools ?? []).map((t: Json) => t.name);
+
+    it('a question is answered on the reply model alone; the reply agent never holds a model-writing tool', async () => {
+      scripted = [[{ type: 'message', text: 'Synthetic answer.' }]];
+      const { result } = await turn('What does the model say?', caps(), { tools: withWriter(caps()), replyBudget: REPLY });
+      expect(result.assistant_text).toBe('Synthetic answer.');
+      expect(sent.map((b) => b.model)).toEqual([REPLY.model]);
+      expect(toolNames(sent[0]!)).toContain('read_canonical_context');
+      expect(toolNames(sent[0]!)).not.toContain('propose_change');
+      expect(toolNames(sent[0]!).some((n) => n.startsWith('transfer_to_'))).toBe(true);
+    });
+
+    it('a change is handed to the builder model with the Conversation, and the builder writes it', async () => {
+      scripted = [[{ type: 'function_call', name: 'transfer_to_Olumi_model_builder', args: {} }],
+        [{ type: 'function_call', name: 'propose_change', args: {} }], [{ type: 'message', text: 'Prepared for your approval.' }]];
+      const { result } = await turn('Change the target to 120.', caps(), { tools: withWriter(caps()), replyBudget: REPLY });
+      expect(sent.map((b) => b.model)).toEqual([REPLY.model, BUILDER.model, BUILDER.model]);
+      expect(toolNames(sent[1]!)).toContain('propose_change');
+      expect(result.tool_calls.map((t) => t.name)).toContain('propose_change');
+      expect(result.assistant_text).toBe('Prepared for your approval.');
+    });
+
+    it('CONTROL: with no reply budget every call is the builder\'s, as before', async () => {
+      scripted = [[{ type: 'message', text: 'Synthetic answer.' }]];
+      await turn('What does the model say?', caps(), { tools: withWriter(caps()) });
+      expect(sent.map((b) => b.model)).toEqual([BUILDER.model]);
+      expect(toolNames(sent[0]!)).toContain('propose_change');
     });
   });
 });
