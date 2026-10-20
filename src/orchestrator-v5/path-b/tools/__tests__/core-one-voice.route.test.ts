@@ -114,6 +114,8 @@ vi.mock('../../../../orchestrator/user-identity.js', async (original) => ({
 }));
 
 let served = 0;
+/** When set, the next provider call waits for it: a turn still running while another is sent. */
+let holdProvider: Promise<void> | undefined;
 let preparedId = '';
 const responsesBody = (output: Json[]): Json => {
   served += 1;
@@ -141,6 +143,7 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
     vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
       if (String(url).endsWith('/v1/conversations')) return json({ id: 'conv_voice', object: 'conversation' });
       calls.push(JSON.parse(String(init?.body ?? '{}')) as Json);
+      if (holdProvider !== undefined) { const hold = holdProvider; holdProvider = undefined; await hold; }
       return json(responsesBody(outputs.shift() ?? [{ type: 'message', text: ANSWER }]));
     }));
     vi.resetModules();
@@ -470,4 +473,28 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
     }
   });
 
+  describe('one core turn at a time per scenario (buddy BLOCK on #3529: the waiting turn read the model it arrived to)', () => {
+    it('⭐ RED→GREEN: a turn sent while another is running starts from the model that turn saved', async () => {
+      let release!: () => void;
+      holdProvider = new Promise<void>((resolve) => { release = resolve; });
+      outputs = [[{ type: 'message', text: 'First answer.' }], [{ type: 'message', text: 'Second answer.' }]];
+      const first = post({ turn_id: randomUUID(), message: 'First question.', source: 'composer' });
+      await vi.waitFor(() => expect(calls.length).toBe(1));
+      const second = post({ turn_id: randomUUID(), message: 'Second question.', source: 'composer' });
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(calls.length, 'the second turn sends nothing while the first is running').toBe(1);
+      // The first turn saves meanwhile: today's vans move from 2 to 3 in the stored model (a new revision).
+      persisted = { ...persisted, nodes: (persisted.nodes as Json[]).map((n) => n.id === 'vans'
+        ? { ...n, observed_state: { ...n.observed_state, value: 0.375, raw_value: 3 } } : n) };
+      release();
+      const [a, b] = await Promise.all([first, second]);
+      expect(a.statusCode, a.body).toBe(200);
+      expect(b.statusCode, b.body).toBe(200);
+      expect(calls).toHaveLength(2);
+      const vans = (c: Json): unknown => (JSON.parse(String(c.instructions).split('As the turn began: ')[1]!.split('\n')[0]!) as Json)
+        .entities.find((e: Json) => e.id === 'vans').raw_value;
+      expect(vans(calls[0]!), 'CONTROL: the first turn read the model before the save').toBe(2);
+      expect(vans(calls[1]!), 'the waiting turn reads the model the first turn saved').toBe(3);
+    });
+  });
 });

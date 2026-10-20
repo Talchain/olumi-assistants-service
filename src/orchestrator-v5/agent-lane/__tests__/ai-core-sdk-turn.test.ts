@@ -12,7 +12,7 @@ import { z as z4 } from 'zod-v4';
 import { ForbiddenProviderError, OPENAI_ONLY, recordedProviderCalls, runWithProviderPolicy } from '../../../adapters/llm/provider-policy.js';
 import { ledgeredAgentsClient } from '../../../adapters/llm/openai-agents-client.js';
 import { runWithStageStream } from '../../../cee/unified-pipeline/stage-stream-context.js';
-import { AGENTS_SDK, CORE_COMPACT_THRESHOLD, CoreStateUnavailableError, PAUSE_DECLINED, PAUSE_SUPERSEDED, replyOnlyTurn, runCoreTurn, type ConversationIdStore, type CoreToolRecorder, type PausedRunStore } from '../core/sdk-turn.js';
+import { acquireCoreTurnSlot, AGENTS_SDK, CORE_COMPACT_THRESHOLD, CoreStateUnavailableError, PAUSE_DECLINED, PAUSE_SUPERSEDED, replyOnlyTurn, runCoreTurn, type ConversationIdStore, type CoreToolRecorder, type PausedRunStore } from '../core/sdk-turn.js';
 import type { OpenAiPausedRun } from '../../session/store.js';
 import { budgetFor, type CallBudget } from '../model-budgets.js';
 import type { AgentToolContext } from '../runtime/agent-tools.js';
@@ -30,8 +30,6 @@ const sent: Json[] = [];
 /** Every Conversation the code created (request bodies). */
 const created: Json[] = [];
 let served = 0;
-/** When set, the next Responses request waits on it (a turn still running when the next one arrives). */
-let holdNext: Promise<void> | undefined;
 /** The scenario store's saved Conversation ids (the `scenarios.openai_conversation_id` column), fresh per test. */
 let column = new Map<string, string>();
 const columnStore = (): ConversationIdStore => ({
@@ -49,14 +47,13 @@ const body = (output: Json[]): Json => {
   };
 };
 beforeEach(() => {
-  scripted = []; sent.length = 0; created.length = 0; column = new Map(); holdNext = undefined;
+  scripted = []; sent.length = 0; created.length = 0; column = new Map();
   vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
     if (String(url).endsWith('/v1/conversations')) {
       created.push(JSON.parse(String(init?.body ?? '{}')) as Json);
       return new Response(JSON.stringify({ id: `conv_${created.length}`, object: 'conversation' }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
     sent.push(JSON.parse(String(init?.body ?? '{}')) as Json);
-    if (holdNext !== undefined) { const hold = holdNext; holdNext = undefined; await hold; }
     return new Response(JSON.stringify(body(scripted.shift() ?? [{ type: 'message', text: 'Noted.' }])), { status: 200, headers: { 'content-type': 'application/json' } });
   }));
 });
@@ -412,20 +409,23 @@ describe('PATH-B core turn on the Agents SDK', () => {
   });
 
   describe('one turn at a time per scenario (R1 run 20261020T220553Z: "No tool output found for function call")', () => {
-    it('a turn sent while another is still running on the same scenario sends nothing until that one has finished', async () => {
-      let release!: () => void;
-      holdNext = new Promise<void>((resolve) => { release = resolve; });
-      scripted = [[{ type: 'message', text: 'First answer.' }], [{ type: 'message', text: 'Second answer.' }]];
-      const c = caps();
-      const first = turn('First question.', c);
-      await vi.waitFor(() => expect(sent.length).toBe(1));
-      const second = turn('Second question.', c);
+    it('a second slot on the same scenario is granted only after the first is released; another scenario never waits', async () => {
+      const first = await acquireCoreTurnSlot('scenario-a');
+      let granted = false;
+      const second = acquireCoreTurnSlot('scenario-a').then((slot) => { granted = true; return slot; });
+      const other = await acquireCoreTurnSlot('scenario-b');
       await new Promise((resolve) => setTimeout(resolve, 25));
-      expect(sent.length, 'the second turn waits while the first holds the Conversation').toBe(1);
-      release();
-      await Promise.all([first, second]);
-      expect(sent.length).toBe(2);
-      expect(JSON.stringify(sent[1]!.input)).toContain('Second question.');
+      expect(granted, 'the second turn waits while the first holds the scenario').toBe(false);
+      expect([first.waited, other.waited]).toEqual([false, false]);
+      first.release();
+      first.release();
+      const next = await second;
+      expect(next.waited, 'the turn that waited knows an earlier turn may have saved').toBe(true);
+      next.release();
+      other.release();
+      const again = await acquireCoreTurnSlot('scenario-a');
+      expect(again.waited).toBe(false);
+      again.release();
     });
   });
 

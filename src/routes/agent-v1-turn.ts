@@ -84,7 +84,7 @@ import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { runOmittedRisks, type RunOmittedRisk } from '../orchestrator-v5/agent-lane/unsized-risk.js';
 import { drawnLinkPress, isDrawnLinkPress } from '../orchestrator-v5/agent-lane/drawn-link-press.js';
 import { answerIsIncomplete, heldChangeSentence, runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
-import { CoreStateUnavailableError, runCoreTurn, type CoreTurnSdk } from '../orchestrator-v5/agent-lane/core/sdk-turn.js';
+import { acquireCoreTurnSlot, CoreStateUnavailableError, runCoreTurn, type CoreTurnSdk } from '../orchestrator-v5/agent-lane/core/sdk-turn.js';
 import { pathBTools } from '../orchestrator-v5/path-b/tools/index.js';
 import { APPLY_CHANGE, isChangeProposal } from '../orchestrator-v5/path-b/tools/change-tools.js';
 import { livingViewOf } from '../orchestrator-v5/path-b/living-model/view.js';
@@ -4349,7 +4349,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         timing: { total_ms: ms, provider_ms: 0, tool_ms: ms, overhead_ms: 0, tool_provider_ms: 0,
           provider_calls: 0, tool_calls: 1, hops: 1 } };
     }
+    // A core turn waits for the scenario's earlier core turn BEFORE it reads the model (`acquireCoreTurnSlot`). That turn
+    // may have saved, so a turn that waited ends its read epoch: the model read on arrival is never its starting state.
+    let releaseCoreSlot: (() => void) | undefined;
     if (result === undefined) try {
+      if (mode === 'core') {
+        const slot = await acquireCoreTurnSlot(scenarioId);
+        releaseCoreSlot = slot.release;
+        if (slot.waited) await readCache.around(async () => undefined);
+      }
       /**
        * ⭐ THE SERVER READS THE MODEL ONCE AND GIVES IT (slice C1). The same `get_canonical_state` result the Agent
        * would ask for, read in-process before the first model call and minted into a packet only this server can
@@ -4656,6 +4664,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       }
     } finally {
       briefReadingOpen = false;
+      releaseCoreSlot?.();
     }
 
     /**
