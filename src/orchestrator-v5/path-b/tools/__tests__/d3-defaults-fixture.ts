@@ -6,7 +6,7 @@ import { withGoalChanceLicence } from '../../../goal-target/goal-chance-licence.
 type Json = Record<string, any>;
 export const ILLUSTRATIVE = 'Illustrative calculation — uses untested Olumi assumptions.';
 /** Two small synthetic briefs share the conditional-point/range class, with different subjects and units. */
-export function d3Run(subject: 'orders' | 'repairs'): { graph: Json; result: Json; loss: readonly Json[]; quotes: string[]; sent: Json } {
+export function d3Run(subject: 'orders' | 'repairs', mode: 'conditional' | 'placeholder' | 'stated' = 'conditional'): { graph: Json; result: Json; loss: readonly Json[]; quotes: string[]; sent: Json } {
   const unit = `${subject} per week`, metric = `Weekly ${subject}`;
   const factors = ['Weekend opening', 'Online bookings'];
   const quotes = factors.map((f, i) => `${f} could add about ${i ? 25 : 20} ${unit} (${i ? '5 to 45' : '10 to 30'}).`);
@@ -20,7 +20,7 @@ export function d3Run(subject: 'orders' | 'repairs'): { graph: Json; result: Jso
     options: factors.map(label => ({ label: `Try ${label}`, provenance: 'explicit', changes: [], added_capacity: null, is_status_quo: null,
       interventions: [{ factor_label: label, value: 1, value_kind: 'absolute', unit: '0/1', origin: 'olumi', stance: 'estimate', provenance: 'ai_proposed' }] })),
     links: factors.map((from, i) => ({ from, to: metric, direction: 'positive', origin: 'user', stance: 'estimate', provenance: 'explicit',
-      effect_amount: i ? 25 : 20, effect_per_source_change: 1, effect_provenance: 'explicit', source_quote: quotes[i], definitional: false })),
+      effect_amount: mode === 'placeholder' ? null : i ? 25 : 20, effect_per_source_change: mode === 'placeholder' ? null : 1, effect_provenance: 'explicit', source_quote: quotes[i], definitional: false })),
     statements: factors.map((label, i) => ({ subject: { kind: 'link', label, to_label: metric, factor_label: null }, field: 'effect',
       speaker: 'user', stance: 'estimate', quote: quotes[i], form: 'range', value: i ? 25 : 20, low: i ? 5 : 10, high: i ? 45 : 30,
       unit, conditions: `If ${label} is introduced.`, qualifier: 'about' })),
@@ -29,6 +29,10 @@ export function d3Run(subject: 'orders' | 'repairs'): { graph: Json; result: Jso
   const converted = candidateToGraph(candidate, { words: quotes.join(' '), recorded_at: '2026-10-20T04:00:00.000Z' });
   if ('refused' in converted) throw new Error(converted.refused);
   const graph = projectGraphForPersistence({ ...GraphV3.parse(converted.graph), options: [] }) as Json;
+  if (mode === 'stated') for (const edge of graph.edges) {
+    // Fully elicited coefficient, spread and existence; equal numbers do not make them defaults.
+    if (edge.provenance) delete edge.provenance.uncertainty_defaults;
+  }
   const goal = graph.nodes.find((n: Json) => n.kind === 'goal');
   const options = graph.nodes.filter((n: Json) => n.kind === 'option');
   const sent = { graph, goal_node_id: goal.id, options: options.map((o: Json) => ({ option_id: o.id, interventions: o.interventions })) };

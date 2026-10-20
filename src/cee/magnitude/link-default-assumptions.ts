@@ -35,10 +35,11 @@ export function readLinkDefaultAssumptions(value: unknown): LinkDefaultAssumptio
   if (r?.status !== 'Illustrative calculation — uses untested Olumi assumptions.' || r.origin !== 'olumi'
     || r.coefficient_distribution !== 'unbounded_normal' || r.stated_range_use !== 'recorded_not_sampled_or_tail_bounds'
     || !Array.isArray(r.links) || r.links.length === 0) return undefined;
-  const valid = r.links.every(link => {
+  if (!r.links.every((link): link is LinkDefaultAssumptions['links'][number] => {
     const l = rec(link);
     return typeof l?.from === 'string' && typeof l.to === 'string' && Array.isArray(l.loss) && l.loss.length > 0
       && l.loss.every(entry => RepairEntrySchema.safeParse(entry).success);
-  });
-  return valid ? r as unknown as LinkDefaultAssumptions : undefined;
+  })) return undefined;
+  return { status: r.status, origin: r.origin, coefficient_distribution: r.coefficient_distribution,
+    stated_range_use: r.stated_range_use, links: r.links };
 }

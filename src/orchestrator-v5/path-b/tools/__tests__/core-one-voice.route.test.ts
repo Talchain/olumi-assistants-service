@@ -8,6 +8,7 @@
 import { randomUUID, createHash } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { buildRunInputSnapshot } from '../../../tools/handlers/run-input-snapshot.js';
 import { d3Run, ILLUSTRATIVE } from './d3-defaults-fixture.js';
 import { readCanonicalContext } from '../context-tool.js';
 import { withCanonicalAnalysisView } from '../../../agent-lane/__tests__/fixtures/canonical-analysis-read.js';
@@ -30,6 +31,7 @@ let carriedResult: Json | undefined;
 let engineResult: Json | undefined;
 let runState: Json | undefined;
 let runCount = 0;
+let inputsUsed: unknown;
 const runFacts = new Map<string, Json>();
 const registered: Json[] = [];
 const graphWrites: Json[] = [];
@@ -128,8 +130,8 @@ const PROPOSAL_CONTROL = /^(agent-approve-proposal:|agent-amend-proposal$|agent-
 const QUESTION = 'What does the model hold for weekly orders today?';
 const ANSWER = 'The model holds 120 orders a week today, from your brief.';
 // L8 sign-off text: independent of the production constant, tested at the SDK HTTP boundary.
-const COHERENT_REPLY = 'Write one coherent reply in a single voice: give the explanation first, mention what changed since the last Run only when it matters, and weave at most one next step from the current readiness facts into the prose, never as a separate bullet or receipt line and never asking for something the user has already said.';
-const COHERENT_REPLY_SHA = '5addb0bb9d128eec61aa8a71e8fb522d9591edb46286f20220e8b1387baf631d';
+const COHERENT_REPLY = 'Write one coherent reply in a single voice: give the explanation first, mention what changed since the last Run only when it matters, and weave at most one next step from the current readiness facts into the prose, never as a separate bullet or receipt line and never asking for something the user has already said; ask at most one question per reply.';
+const COHERENT_REPLY_SHA = '3be8d67e53696147c1b12cc8384416de7dfb9854a7e98c91e3913609bb9a9f4b';
 
 describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host guidance or advice', () => {
   let app: FastifyInstance;
@@ -148,7 +150,7 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
     app = Fastify({ logger: false });
     app.post('/assist/v1/scenarios/:id/graph', async () => withCanonicalAnalysisView({ graph: persisted, graph_hash: hashOf(persisted),
       graph_identity_hash: { kind: 'graph_identity', value: identityOf(persisted), algorithm: 'sha256' },
-      analysis_ready: readiness, ...(runState === undefined ? {} : { analysis_state: runState }),
+      analysis_ready: readiness, ...(inputsUsed === undefined ? {} : { analysis_run_evidence: { run_id: 'fixture-read-run', input_snapshot: inputsUsed } }), ...(runState === undefined ? {} : { analysis_state: runState }),
       ...(carriedResult === undefined ? {} : { analysis_result: carriedResult }) }, SCENARIO));
     app.post('/assist/v1/scenarios/:id/versions', async () => ({ versions: [] }));
     app.post('/orchestrate/v2/turn', async (req) => {
@@ -169,7 +171,7 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
   beforeEach(() => {
     SCENARIO = randomUUID(); persisted = stored(); registered.length = 0; graphWrites.length = 0; turnRows.clear(); conversationIds.clear();
     readiness = { status: 'blocked', options: [], blockers: [] }; carriedResult = undefined; engineResult = undefined; runState = undefined; runCount = 0; runFacts.clear();
-    pausedRun = null; calls = []; outputs = []; preparedId = ''; offeredCard = GIVE_YOUR_ESTIMATE;
+    inputsUsed = undefined; pausedRun = null; calls = []; outputs = []; preparedId = ''; offeredCard = GIVE_YOUR_ESTIMATE;
   });
   const post = (payload: Json, headers: Record<string, string> = CORE) => app.inject({ method: 'POST', url: '/agent/v1/turn', headers,
     payload: { kind: 'message', scenario_id: SCENARIO, stage: 'analyse', turn_class: 'frame', ...payload } });
@@ -394,6 +396,78 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
     expect(cold.canonical_analysis_view.goal_chance.default_assumptions).toEqual(licence.default_assumptions);
     expect(cold.canonical_analysis_view).toEqual(r.json().canonical_analysis_view);
     expect(runCount).toBe(1);
+  });
+
+  it.each([['orders', 'placeholder'], ['repairs', 'placeholder'], ['orders', 'stated'], ['repairs', 'stated']] as const)('L11: %s %s strengths disclose the actual Run assumptions and inputs on every reader', async (subject, mode) => {
+    const fixture = d3Run(subject, mode);
+    persisted = fixture.graph;
+    inputsUsed = buildRunInputSnapshot({ submittedOptions: fixture.sent.options,
+      rawObjectsPerOption: fixture.sent.options.map((o: Json) => o.interventions),
+      wirePerOption: fixture.sent.options.map((o: Json) => Object.fromEntries(Object.entries(o.interventions).map(([id, cell]) => [id, (cell as Json).value]))),
+      heldFactorIdsByOptionId: new Map(), optionsNotSent: [], wireGraph: fixture.sent.graph, plotPayload: fixture.sent });
+    expect(inputsUsed).not.toBeNull();
+    engineResult = { ...fixture.result, computed_against_hash: hashOf(persisted) };
+    readiness = { status: 'ready', options: [], blockers: [] };
+    outputs = [[{ type: 'function_call', name: 'run_analysis', call_id: 'l11_run', args: { reason: 'Run.', effects_timing: 'not_stated' } }],
+      [{ type: 'message', text: mode === 'stated' ? 'The Run uses the stated strengths.' : ILLUSTRATIVE }]];
+    const r = await post({ turn_id: randomUUID(), message: 'Run analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } });
+    expect(r.statusCode, r.body).toBe(200);
+    const tool = calls.flatMap(c => c.input ?? []).find((i: Json) => i.type === 'function_call_output' && i.call_id === 'l11_run');
+    const data = JSON.parse(tool.output).data;
+    const assumptions = data.result.enrichment.inference_warnings.find((w: Json) => w.code === 'GOAL_CHANCE_LICENSED').default_assumptions;
+    expect(data.inputs_used).toEqual(inputsUsed);
+    if (mode === 'stated') {
+      expect(assumptions).toBeUndefined();
+    } else {
+      expect(assumptions?.status).toBe(ILLUSTRATIVE);
+      expect(assumptions.links).toHaveLength(2);
+      for (const link of assumptions.links) {
+        const edge = persisted.edges.find((e: Json) => e.from === link.from && e.to === link.to);
+        expect(edge.provenance.uncertainty_defaults).toEqual(expect.arrayContaining([expect.objectContaining({
+          field_path: `edges[${edge.from}::${edge.to}].strength.mean`, after: edge.strength.mean,
+        })]));
+        expect(link.loss.map((row: Json) => [row.field_path.split('].')[1], row.after]).sort()).toEqual([
+          ['exists_probability', edge.exists_probability], ['strength.std', edge.strength.std],
+        ]);
+      }
+    }
+    const cold = (await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph`, payload: {} })).json();
+    expect(cold.analysis_result.enrichment.inference_warnings.find((w: Json) => w.code === 'GOAL_CHANCE_LICENSED').default_assumptions).toEqual(assumptions);
+    expect(cold.canonical_analysis_view.goal_chance.default_assumptions).toEqual(assumptions);
+    expect(r.json().canonical_analysis_view).toEqual(cold.canonical_analysis_view);
+    expect(runCount).toBe(1);
+  });
+
+  it('L11: SDK science and question instructions are B-only and sent once', async () => {
+    await post({ turn_id: randomUUID(), message: 'Separately, how can we improve staff training?', source: 'composer' });
+    expect(calls.length).toBeGreaterThan(0);
+    for (const c of calls) {
+      expect(c.instructions.split('Illustrative calculation — uses untested Olumi assumptions.')).toHaveLength(2);
+      expect(c.instructions).toContain('with the material assumptions and exact inputs used');
+      expect(c.instructions).toContain('ask at most one question per reply');
+      expect(c.instructions).toContain('never attribute spread to a stated range the Run did not use');
+    }
+    const count = calls.length;
+    await post({ turn_id: randomUUID(), message: QUESTION, source: 'composer' }, {});
+    for (const c of calls.slice(count)) {
+      expect(JSON.stringify(c)).not.toContain('ask at most one question per reply');
+      expect(JSON.stringify(c)).not.toContain('never attribute spread to a stated range the Run did not use');
+    }
+  });
+
+  it('L11B: SDK receives the adopted conditional scope instruction without a mandatory handling question', async () => {
+    const scope = "Keep a clearly separate situation out of the current scenario's Living Model. If the relationship to the current scenario is unclear, ask one brief scope question before building or changing the model, while continuing useful discussion. Do not ask again when the person has already made the scope clear. Ordinary expansion and what-ifs within this scenario remain allowed.";
+    const r = await post({ turn_id: randomUUID(), message: 'Keep staff training separate; discuss it here without changing this model.', source: 'composer' });
+    expect(r.statusCode, r.body).toBe(200);
+    expectCoherentInstructions(r.json());
+    const { CORE_REPLY_INSTRUCTION } = await import('../../../../routes/agent-v1-turn.js');
+    expect(createHash('sha256').update(CORE_REPLY_INSTRUCTION, 'utf8').digest('hex')).toBe('60809c1bbc40c732fb73b683bfebf6035be2b767a39c17f39f8662e7e0144d9a');
+    for (const c of calls) {
+      expect(c.instructions).toContain(CORE_REPLY_INSTRUCTION);
+      expect(c.instructions.split(scope)).toHaveLength(2);
+      expect(c.instructions).not.toContain("Keep a clearly separate situation out of the current scenario's Living Model and ask once how they want to handle it, for example as its own scenario.");
+      expect(c.instructions).not.toContain('Do not ask again once the person has said how to handle the separate situation.');
+    }
   });
 
 });
