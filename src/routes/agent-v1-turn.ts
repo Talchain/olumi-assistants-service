@@ -4592,7 +4592,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const released = await releaseUnwrittenTurnClaim();
         // A possible save keeps its claim. Record the failed continuation as an ordinary answer so a resend
         // reads current state immediately; the persistence floor carries the latest held cards, including concurrent offers.
-        if (!released && writesDispatched > 0 && claimAppendSucceeded && turnId !== undefined) {
+        if (mode === 'core' && !released && writesDispatched > 0 && claimAppendSucceeded && turnId !== undefined) {
           try {
             await appendCheckedGraphWrite({
               store, writesGraph: false, source: 'agent_turn',
@@ -4628,9 +4628,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         }
         // A dispatched write is a possible effect, never positive readback proof; provider retryability is separate.
         return reply.code(502).send({
-          ...providerFailureOf(err), detail: String(err).slice(0, 300),
-          nothing_saved: writesDispatched === 0,
-          save_outcome: verifiedSave ? 'VERIFIED_SAVED' : writesDispatched === 0 ? 'VERIFIED_NO_WRITE' : 'UNKNOWN',
+          ...(mode === 'core' ? {
+            ...providerFailureOf(err), nothing_saved: writesDispatched === 0,
+            save_outcome: verifiedSave ? 'VERIFIED_SAVED' : writesDispatched === 0 ? 'VERIFIED_NO_WRITE' : 'UNKNOWN',
+          } : { error: 'UPSTREAM_ERROR' }),
+          detail: String(err).slice(0, 300),
           _provider_calls: recordedProviderCalls(),
           ...(providerLedgerTruncated() ? { _provider_calls_truncated: true } : {}),
           ...(turnId !== undefined ? { retry_safe: released } : {}),

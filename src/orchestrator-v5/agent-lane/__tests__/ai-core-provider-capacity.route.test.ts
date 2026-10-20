@@ -4,8 +4,8 @@
  * Served 19 Oct 23:40Z (staging CEE 4d8080ea, `core`, streamed): OpenAI refused for credits and the route answered
  * 502 `UPSTREAM_ERROR` with the raw provider sentence. The UI filed it as a generic server fault and offered "Please retry";
  * Paul retried three times on an account with no credits. The rule under test: at the route's one 502 producer, a capacity or
- * credit refusal is `PROVIDER_CAPACITY`, never offered as a retry (`retryable: false`). Every 502 says `nothing_saved` from the
- * turn's own write count and keeps the computed `retry_safe`; any other upstream failure keeps its code.
+ * credit refusal in core is `PROVIDER_CAPACITY`, never offered as a retry (`retryable: false`). Core failures say `nothing_saved`
+ * from the turn's own write count and keep the computed `retry_safe`; A keeps its exact legacy error response.
  *
  * The real route over a scripted provider: the captured error bodies are the fixture, and no provider is contacted.
  */
@@ -61,7 +61,7 @@ const credits429 = () => new Response(JSON.stringify(CAPTURED.provider_error_bod
 const serverErrorStream = () => new Response(`event: error\ndata: ${JSON.stringify({ error: { message: 'The server had an error while processing your request.', type: 'server_error', param: null, code: 'server_error' } })}\n\n`,
   { status: 200, headers: { 'content-type': 'text/event-stream' } });
 
-describe('A provider capacity or credit refusal is PROVIDER_CAPACITY at the route\'s one 502 producer, on both lanes', () => {
+describe('A provider capacity or credit refusal is PROVIDER_CAPACITY at the route\'s one 502 producer, in core; A keeps its legacy response', () => {
   let app: FastifyInstance;
   let runWithStageStream: typeof import('../../../cee/unified-pipeline/stage-stream-context.js').runWithStageStream;
   let providerCalls = 0;
@@ -112,15 +112,13 @@ describe('A provider capacity or credit refusal is PROVIDER_CAPACITY at the rout
     expect(body.retry_safe).toBe(CAPTURED.core_response.retry_safe);
   });
 
-  it('⭐ RED→GREEN openai lane (the captured 18 Oct turn): the HTTP 429 credit refusal is the same one code', async () => {
+  it('R1 unchanged A (captured 18 Oct turn): the HTTP 429 credit refusal keeps its exact legacy response', async () => {
     provider = () => credits429();
     const { status, body } = await turn({}, false);
     expect(status).toBe(502);
     expect(body.detail, 'the same provider refusal the served turn carried').toBe(CAPTURED.openai_lane_response.detail);
-    expect(body.error, `served as ${CAPTURED.openai_lane_response.error}`).toBe('PROVIDER_CAPACITY');
-    expect(body.retryable).toBe(false);
-    expect(body.nothing_saved).toBe(true);
-    expect(body.retry_safe).toBe(true);
+    expect(body).toEqual({ error: 'UPSTREAM_ERROR', detail: CAPTURED.openai_lane_response.detail,
+      _provider_calls: expect.any(Array), retry_safe: true });
   });
 
   it('⛔ CONTRAST: a provider fault that is not capacity stays UPSTREAM_ERROR and keeps the UI\'s own retry rule', async () => {
@@ -138,13 +136,20 @@ describe('A provider capacity or credit refusal is PROVIDER_CAPACITY at the rout
     ['quota exhausted', 'insufficient_quota', 'insufficient_quota', 'PROVIDER_CAPACITY', false],
     ['transient rate limit', 'rate_limit_exceeded', 'rate_limit_error', 'UPSTREAM_ERROR', true],
     ['unclassified 429', null, null, 'UPSTREAM_ERROR', undefined],
-  ])('L2 recorded contrast on both HTTP producers: %s preserves typed reason and retry-after', async (_name, code, type, error, retryable) => {
+  ])('L2 recorded contrast: %s keeps core typed reason/retry-after and A’s exact legacy response', async (_name, code, type, error, retryable) => {
     provider = () => new Response(JSON.stringify({ error: { message: 'Recorded provider refusal.', code, type } }),
       { status: 429, headers: { 'content-type': 'application/json', 'retry-after': '17', 'retry-after-ms': '17000', 'x-should-retry': 'false' } });
     for (const headers of [CORE, {}]) {
       providerCalls = 0;
       const { status, body } = await turn(headers, false);
       expect(status).toBe(502);
+      if (headers !== CORE) {
+        expect(body).toEqual({ error: 'UPSTREAM_ERROR',
+          detail: `Error: openai_429: ${JSON.stringify({ error: { message: 'Recorded provider refusal.', code, type } })}`,
+          _provider_calls: expect.any(Array), retry_safe: true });
+        expect(providerCalls).toBe(1);
+        continue;
+      }
       expect(body.error).toBe(error);
       expect(body.retryable).toBe(retryable);
       expect(body.provider_error).toEqual({ code, type, status: 429 });
