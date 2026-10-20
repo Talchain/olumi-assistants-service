@@ -7,6 +7,7 @@
  * routes as doubles that answer in the served shapes. SYNTHETIC wording; no journey brief. (The brief stays the AI's literal copy
  * of the user's words, as on base.)
  */
+import liveRows from './fixtures/l23-live-drafter-raw-5203fed5.json';
 import { runPressToolResponse } from '../../../agent-lane/__tests__/fixtures/run-press-model.js';
 import { randomUUID, createHash } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -91,10 +92,10 @@ const SUM_DRAFT: Json = {
   links: [CURRENT, ADDED].map((from) => ({ ...DRAFT.links[0], from, effect_amount: 1, effect_per_source_change: 1, effect_provenance: 'inferred', definitional: true })),
   identities: [{ operation: 'sum', outcome: GOAL, factors: [CURRENT, ADDED], provenance: 'inferred', evidence: null }],
 };
-let drafterAnswer: Json = DRAFT;
+let drafterAnswer: Json | string = DRAFT;
 let draftSchema: Json = {};
 let draftInstructions = '';
-const rawDraftText = (): string => `\n${JSON.stringify(drafterAnswer, null, 2)}\n`;
+const rawDraftText = (): string => typeof drafterAnswer === 'string' ? drafterAnswer : `\n${JSON.stringify(drafterAnswer, null, 2)}\n`;
 const ACTION_TIMING_SENTENCE = 'Declare stated additions in interventions with value_kind=additional, leaving unknown current levels as questions, and stated goal time limits in horizon_months and verbatim deadline_words, keeping relative periods relative without inventing dates.';
 const ESTIMATE_SENTENCE = 'Where the brief does not state a level, setting or size the model needs, propose a defensible Olumi starting estimate with origin=olumi and stance=estimate, explaining its basis, unit and period for the person to approve through the existing card, never presenting it as theirs; if no defensible estimate is possible, state the limitation and ask for the missing input rather than silently leaving the model unrunnable; in every draft with a supported additive goal, declare the sum identity with the separate current-level factor and every distinct addition as bound operands under the rules above.';
 
@@ -456,6 +457,22 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
     const said = (JSON.parse(String(toolOutputs.find((o) => o.call_id === 'draft_call')?.output ?? '{}')) as Json).data.draft.said as string[];
     expect(said).toContain(`This link was drafted at 1 per 1; this path doesn't use that size in the calculation yet, so the link from "${ADDED}" to "${GOAL}" keeps Olumi's placeholder size.`);
     expect(said.filter((x) => x.includes('says "1 per 1"'))).toEqual([]);
+  });
+
+  it('L23 real core route: the exact recorded drafter output registers its Olumi-derived total and complete sum', async () => {
+    drafterAnswer = liveRows[0]!.calls[0]!.raw_text;
+    briefArg = "We are comparing two staffing options, labelled exactly \"Keep current staffing\" and \"Add one specialist\". Use the exact goal label \"Weekly support capacity\". Our existing team resolves 80 tickets per week. Keep current staffing adds no specialist. Add one specialist adds one specialist. Each additional specialist resolves about 20 tickets per week, between 10 and 30. Total weekly support capacity is defined as the existing 80 tickets per week plus the additional specialist capacity. Goal: weekly support capacity of at least 100 tickets per week. This target is an absolute level, with no deadline.";
+    const body = await turn();
+    expect(draftCall(body), JSON.stringify(body._agent)).toMatchObject({ ok: true, mutated: true, outcome: 'ok' });
+    expect(registered).toHaveLength(1);
+    const graph = registered[0]!.graph as Json;
+    const goal = graph.nodes.find((n: Json) => n.id === 'weekly_support_capacity');
+    expect(goal.observed_state).toMatchObject({ raw_value: 80, baseline: 80 / 125, source: 'cee_inference', extractionType: 'inferred' });
+    expect(goal.nonlinear_identity).toEqual({ operation: 'sum',
+      factor_ids: ['existing_team_capacity', 'additional_specialist_capacity'], stated_in_brief: false });
+    expect(graph.nodes.find((n: Json) => n.id === 'additional_specialist_capacity').scale_frame).toBe(125);
+    expect(saved).toEqual(graph);
+    expect(drafterCalls).toBe(1);
   });
 
   it('L18 real route: a zero indirect sum operand is registered on the goal coordinate frame', async () => {

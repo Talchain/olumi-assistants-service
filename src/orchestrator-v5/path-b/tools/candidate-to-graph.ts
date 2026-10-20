@@ -193,10 +193,20 @@ function convertedByA(c: CandidateModel): { a: AdmittedModel } | null {
   try {
     // A declared sum is judged as B judges it (`checkDeclaredSums` below): on its operands, units, frames and today's arithmetic, as
     // Olumi's reading, so no quote reaches A's check either (A takes no sum from a quote, and B has no brief to find one in).
-    const unquoted = { ...c, identities: (c.identities ?? []).map((d) => (d?.operation === 'sum' ? { ...d, evidence: null } : d)) };
+    // A's legacy authorship gate withholds an Olumi total before checking its declared sum. On this numeric-only
+    // projection, let A check the sum; B stamps the ORIGINAL declared author. No checked sum means no derived level.
+    const derivedGoal = (c.goal as Rec).baseline_origin === 'olumi' && (c.goal as Rec).baseline_stance === 'estimate'
+      && (c.identities ?? []).some(d => d.operation === 'sum' && canonicalLabel(d.outcome) === canonicalLabel(c.goal.metric));
+    const unquoted = { ...c, ...(derivedGoal ? { goal: { ...c.goal, baseline_provenance: 'explicit' } } : {}), identities: (c.identities ?? []).map((d) => (d?.operation === 'sum' ? { ...d, evidence: null } : d)) };
     const { candidate, readBack } = labelBlind(unquoted);
     const prepared = prepareProvisionalCandidate(candidate).candidate;
-    const admitted = admitWithoutBrief(prepared);
+    const projected = admitWithoutBrief(prepared);
+    const admitted = !derivedGoal || projected.nodes.some(n => n.kind === 'goal' && n.nonlinear_identity?.operation === 'sum')
+      ? projected : { ...projected, nodes: projected.nodes.map(n => {
+        if (n.kind !== 'goal') return n;
+        const { observed_state: _level, ...withoutDerivedLevel } = n;
+        return withoutDerivedLevel;
+      }) };
     const goal = admitted.nodes.find(n => n.kind === 'goal');
     const view = magnitudeNodes(admitted.nodes.map(n => ({ ...n })), percentLevelIds({ goal_constraints: admitted.goal_constraints }));
     const total = goal === undefined ? undefined : view.get(goal.id);
