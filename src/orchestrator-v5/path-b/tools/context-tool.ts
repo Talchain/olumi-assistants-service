@@ -47,7 +47,8 @@ function nodeOf(n: Rec, byId: ReadonlyMap<string, Rec>): Rec {
   })) : [];
   const observedSource = observed === undefined ? undefined : provenanceOf({ value: observed });
   const statements = claimRecordsOn(n).map((r) => ({ subject_key: r.subject_key, field: r.field,
-    statements: r.statements.map((s) => pick(s, ['speaker', 'said_by', 'party', 'relayed_by', 'quote', 'form', 'low', 'high', 'unit', 'period', 'conditions', 'qualifier', 'negated', 'stance', 'status'])) }));
+    ...(r.history?.some((s) => s.form === 'range') ? { history: r.history } : {}),
+    statements: r.statements.map((s) => s.form === 'range' ? s : pick(s, ['speaker', 'said_by', 'party', 'relayed_by', 'quote', 'form', 'low', 'high', 'unit', 'period', 'conditions', 'qualifier', 'negated', 'stance', 'status'])) }));
   return {
     ...pick(n, ['id', 'kind', 'label', 'description', 'proposed_by', 'analysis_participation', 'option_status']),
     ...(n.provenance === undefined ? {} : { added_by: authorshipOf({ nodeTag: n.provenance }) }),

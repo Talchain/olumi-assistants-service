@@ -36,6 +36,7 @@ let persisted: Json;
 let concurrentHold: Json | undefined;
 let noReceipt = false;
 let loseOperandClaim = false;
+let loseRangeField: string | undefined;
 const registered: Json[] = [];
 const graphWrites: Json[] = [];
 const turnRows = new Map<string, any>();
@@ -88,6 +89,8 @@ const store = {
   append: vi.fn(async (write: Json) => {
     if (write.graph !== undefined) {
       graphWrites.push(write); persisted = structuredClone(write.graph) as Json;
+      if (loseRangeField !== undefined) for (const node of persisted.nodes) for (const record of node.user_statements ?? [])
+        for (const statement of record.statements) if (statement.form === 'range') delete statement[loseRangeField];
       const id = `graph-${graphWrites.length}`;
       turnRows.set(String(write.turn_id), { ...write, id, created_at: new Date().toISOString() });
       return { id, modelVersionReceipt: {
@@ -173,7 +176,7 @@ describe('PATH-B: the goal’s current level, typed as a correction, shows its c
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   beforeEach(() => {
     SCENARIO = randomUUID(); persisted = stored(); registered.length = 0; graphWrites.length = 0; turnRows.clear(); conversationIds.clear();
-    pausedRun = null; calls = []; outputs = []; preparedId = ''; concurrentHold = undefined; noReceipt = false; loseOperandClaim = false;
+    pausedRun = null; calls = []; outputs = []; preparedId = ''; concurrentHold = undefined; noReceipt = false; loseOperandClaim = false; loseRangeField = undefined;
   });
   const post = (payload: Json) => app.inject({ method: 'POST', url: '/agent/v1/turn', headers: CORE,
     payload: { kind: 'message', scenario_id: SCENARIO, stage: 'analyse', turn_class: 'frame', ...payload } });
@@ -181,6 +184,137 @@ describe('PATH-B: the goal’s current level, typed as a correction, shows its c
     const item = calls.flatMap((b) => (Array.isArray(b.input) ? b.input : [])).find((i: Json) => i.type === 'function_call_output' && i.call_id === callId);
     return item === undefined ? undefined : JSON.parse(String(item.output)) as Json;
   };
+
+  // L19: two independent synthetic briefs, through the strict SDK input and real atomic batch writer.
+  it.each<[string, string, string, string | undefined, (string | null)?]>([
+    ['set_factor_value', 'Our studio capacity grows 20–30% a month if evening sessions continue.', 'user', undefined],
+    ['add_to_model', 'Workshop capacity grows 20–30% a month if evening sessions continue.', 'user', undefined],
+    ['set_factor_value', 'Our area lead says capacity grows 20–30% a month if evening sessions continue.', 'third_party', undefined],
+    ['set_factor_value', 'Capacity grows 20–30% a month.', 'user', undefined, null],
+    ...['high', 'period', 'conditions', 'source', 'said_by'].map((field): [string, string, string, string] =>
+      ['set_factor_value', 'Our studio capacity grows 20–30% a month if evening sessions continue.', 'user', field]),
+  ])('L19 range-only %s: one card, one save, exact postimage and cold reopen (%s, %s, loss=%s)', async (op, words, origin, lost, conditions = 'if evening sessions continue') => {
+    persisted.nodes.push({ id: 'capacity', kind: 'factor', label: 'Capacity growth' });
+    persisted.edges.push({ from: 'capacity', to: 'orders', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' });
+    const before = structuredClone(persisted);
+    const range = { form: 'range', low: 20, high: 30, period: 'a month', conditions };
+    const source = { origin, quote: words, named_source: origin === 'third_party' ? 'area lead' : null };
+    const declared = op === 'set_factor_value' ? { op, factor_id: 'capacity', value: range, unit: '%', stance: 'estimate', source }
+      : { op, kind: 'factor', label: 'Monthly capacity growth', acts_on: 'orders', direction: 'positive', value: range, unit: '%', stance: 'estimate', source };
+    outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'range_propose', args: {
+      public_label: 'Record capacity', basis: 'Keep the person’s range as stated.', ops: [declared] } }], [{ type: 'message', text: 'Review your range.' }]];
+    const first = await post({ turn_id: randomUUID(), message: String(words), source: 'composer' });
+    expect(first.statusCode, first.body).toBe(200);
+    expect(outputOf('range_propose')).toMatchObject({ status: 'ok', data: { public_label: `Record capacity\n20–30% a month${conditions === null ? '' : `; ${conditions}`}` } });
+    const t1 = first.json() as Json;
+    expect(t1._proposal_fields.proposals).toHaveLength(1);
+    const card = t1._proposal_fields.proposals[0];
+    expect(t1.suggested_actions.filter((c: Json) => c.id === card.approve_action.id)).toHaveLength(1);
+    expect(JSON.stringify(t1.suggested_actions)).toContain('20–30% a month');
+    expect(persisted).toEqual(before);
+    expect(graphWrites).toHaveLength(0);
+    preparedId = card.proposal_id;
+    outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'range_apply' }], [{ type: 'message', text: 'Recorded your range.' }]];
+    const press = { turn_id: randomUUID(), message: card.approve_action.message, source: 'chip', chip: { id: card.approve_action.id },
+      proposal_edits: { proposal_id: card.proposal_id, revision: card.revision, digest: card.digest, graph_hash: t1._proposal_fields.graph_hash, fields: [] } };
+    loseRangeField = lost;
+    const saved = await post(press);
+    expect(saved.statusCode, saved.body).toBe(200);
+    if (lost !== undefined) {
+      expect(outputOf('range_apply')).toEqual({ status: 'unavailable', reason: 'not_confirmed', write: 'unknown' });
+      expect(graphWrites).toHaveLength(1);
+      return;
+    }
+    expect(outputOf('range_apply')).toMatchObject({ status: 'ok', mutated: true, data: { saved: true, faithful: true,
+      receipt: { version_id: 'dddddddd-dddd-4ddd-8ddd-000000000001' } } });
+    expect(graphWrites).toHaveLength(1);
+    expect(outputOf('range_apply')!.data.receipt.source_turn_id).toBe(graphWrites[0]!.turn_id);
+    expect(registered).toHaveLength(0);
+    const id = op === 'set_factor_value' ? 'capacity' : persisted.nodes.find((n: Json) => n.label === 'Monthly capacity growth').id;
+    const subject: DoorSubject = { kind: 'factor', id, field: 'level' };
+    const statement = { said_by: origin === 'third_party' ? 'party' : 'user', ...(origin === 'third_party' ? { party: 'area lead', relayed_by: 'user' } : {}), quote: words, source: words, subject: { quantity: subjectKey(subject), node_id: id },
+      form: 'range', low: 20, high: 30, unit: '%', period: 'a month', ...(conditions === null ? {} : { conditions }), reading: 'olumi', stance: 'estimate' };
+    const record = claimRecordFor(persisted, subject)!;
+    expect(record.statements).toEqual([statement]);
+    expect(record.attest).toBeUndefined();
+    const after = persisted.nodes.find((n: Json) => n.id === id);
+    expect(after.observed_state).toBeUndefined();
+    expect(graphWrites[0]!.graph).toEqual(persisted);
+    // Normal route replay of the same press cannot duplicate a committed effect.
+    const replay = await post(press);
+    expect(replay.statusCode, replay.body).toBe(200);
+    expect(graphWrites).toHaveLength(1);
+    // Cold transport: JSON rehydration, fresh turn, read through the actual canonical-context tool.
+    persisted = JSON.parse(JSON.stringify(persisted)) as Json;
+    outputs = [[{ type: 'function_call', name: 'read_canonical_context', call_id: 'cold_read' }], [{ type: 'message', text: 'Your recorded range remains available.' }]];
+    const cold = await post({ turn_id: randomUUID(), message: 'Reopen the saved scenario.', source: 'composer' });
+    expect(cold.statusCode, cold.body).toBe(200);
+    const read = outputOf('cold_read')!;
+    expect(read.status).toBe('ok');
+    const reopened = read.data.nodes.find((n: Json) => n.id === id);
+    expect(reopened.statements.flatMap((r: Json) => r.statements)).toEqual([statement]);
+    expect(reopened).not.toHaveProperty('value');
+    const pointWords = 'I now state 25% for capacity.';
+    outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'later_propose', args: {
+      public_label: 'Record the later point', basis: 'A distinct later source.', ops: [{ op: 'set_factor_value', factor_id: id,
+        value: 25, unit: '%', stance: 'stated_current', source: { origin: 'user', quote: pointWords, named_source: null } }] } }], [{ type: 'message', text: 'Review the later point.' }]];
+    const later = (await post({ turn_id: randomUUID(), message: pointWords, source: 'composer' })).json() as Json;
+    const pointCard = later._proposal_fields.proposals[0];
+    preparedId = pointCard.proposal_id;
+    outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'later_apply' }], [{ type: 'message', text: 'Recorded the later point.' }]];
+    await post({ turn_id: randomUUID(), message: pointCard.approve_action.message, source: 'chip', chip: { id: pointCard.approve_action.id },
+      proposal_edits: { proposal_id: pointCard.proposal_id, revision: pointCard.revision, digest: pointCard.digest, graph_hash: later._proposal_fields.graph_hash, fields: [] } });
+    expect(outputOf('later_apply'), JSON.stringify(outputOf('later_apply'))).toMatchObject({ status: 'ok', data: { saved: true } });
+    expect(graphWrites).toHaveLength(2);
+    const laterClaims = claimRecordFor(persisted, subject)!;
+    const point = { said_by: 'user', quote: pointWords, source: pointWords,
+      subject: statement.subject, form: 'point', low: 25, high: 25, unit: '%', reading: 'olumi', stance: 'stated_current' };
+    expect(laterClaims.statements).toEqual(conditions === null ? [point] : [statement, point]);
+    expect(laterClaims.history ?? []).toEqual(conditions === null ? [{ ...statement, status: 'superseded' }] : []);
+    outputs = [[{ type: 'function_call', name: 'read_canonical_context', call_id: 'later_cold' }], [{ type: 'message', text: 'The sources remain distinct.' }]];
+    await post({ turn_id: randomUUID(), message: 'Read the saved sources again.', source: 'composer' });
+    const coldRecord = outputOf('later_cold')!.data.nodes.find((n: Json) => n.id === id).statements[0];
+    expect(coldRecord.history ?? []).toEqual(conditions === null ? [{ ...statement, status: 'superseded' }] : []);
+  });
+
+  it.each([
+    ['reversed ends', { form: 'range', low: 30, high: 20, period: 'a month', conditions: null }, '%', 'Capacity is 20–30% a month.', 'statement_malformed'],
+    ['missing unit', { form: 'range', low: 20, high: 30, period: 'a month', conditions: null }, null, 'Capacity is 20–30% a month.', 'statement_malformed'],
+    ['borrowed endpoint', { form: 'range', low: 20, high: 30, period: 'a month', conditions: null }, '%', 'Capacity is at least 20%.', 'quote_not_in_users_words'],
+  ])('L19 malformed/source negative: %s refuses before a card', async (_label, value, unit, quote, reason) => {
+    persisted.nodes.push({ id: 'capacity', kind: 'factor', label: 'Capacity growth' });
+    const before = JSON.stringify(persisted);
+    const words = `${quote} Revenue was 30m as of 2026-09-01.`;
+    outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'bad_range', args: {
+      public_label: 'Record capacity', basis: 'Declared range.', ops: [{ op: 'set_factor_value', factor_id: 'capacity', value, unit,
+        stance: 'estimate', source: { origin: 'user', quote, named_source: null } }] } }], [{ type: 'message', text: 'The declaration could not be prepared.' }]];
+    const response = await post({ turn_id: randomUUID(), message: words, source: 'composer' });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(outputOf('bad_range')).toEqual({ status: 'refused', reason, data: { op: 0 } });
+    const result = response.json() as Json;
+    expect(result._proposal_fields?.proposals ?? []).toEqual([]);
+    expect(result.suggested_actions.filter((c: Json) => c.id.startsWith('agent-approve-proposal:'))).toEqual([]);
+    expect(JSON.stringify(persisted)).toBe(before);
+    expect(graphWrites).toHaveLength(0);
+  });
+
+  it('L19 point contrast: baseline graph bytes', async () => {
+    const words = 'We have 3 vans.';
+    outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'point_propose', args: {
+      public_label: 'Record 3 vans', basis: 'The person’s point.', ops: [{ op: 'set_factor_value', factor_id: 'vans', value: 3,
+        unit: 'vans', stance: 'stated_current', source: { origin: 'user', quote: words, named_source: null } }] } }], [{ type: 'message', text: 'Review the point.' }]];
+    const first = (await post({ turn_id: randomUUID(), message: words, source: 'composer' })).json() as Json;
+    const card = first._proposal_fields.proposals[0];
+    preparedId = card.proposal_id;
+    // Exclude only the volatile record timestamp from the baseline graph comparison.
+    outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'point_apply' }], [{ type: 'message', text: 'Recorded.' }]];
+    await post({ turn_id: randomUUID(), message: card.approve_action.message, source: 'chip', chip: { id: card.approve_action.id },
+      proposal_edits: { proposal_id: card.proposal_id, revision: card.revision, digest: card.digest, graph_hash: first._proposal_fields.graph_hash, fields: [] } });
+    expect(outputOf('point_apply')).toMatchObject({ status: 'ok', data: { saved: true } });
+    const graph = structuredClone(persisted);
+    for (const node of graph.nodes) for (const record of node.user_statements ?? []) delete record.recorded_at;
+    expect(createHash('sha256').update(JSON.stringify(graph)).digest('hex')).toBe('55ee874696fbf1f6eddf32349ccaf3ec06c9895515330b6ef8d3b5e66182ebb2');
+  });
 
   it.each([
     ['We run a studio and could add evening sessions; we have 6 rooms.', 'Weekly sessions', 'sessions a week'],

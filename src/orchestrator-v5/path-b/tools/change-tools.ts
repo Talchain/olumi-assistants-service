@@ -91,7 +91,10 @@ const unit = z.string().nullable();
 export const STANCE_DESCRIPTION =
   'How this particular figure is put forward in its full source context, not whether it is true and not who authored it. hypothetical: a supposition, conditional scenario or what-if, including numbers embedded inside that assumed situation. target: a desired or required outcome or threshold, rather than an observed level. estimate: a tentative assessment, approximation or prediction offered as such, rather than an asserted current fact. stated_current: the speaker asserts an actual current or already observed level for this subject at the relevant time, outside a supposition, target or estimate. Read the whole proposition and its conditions: indicative wording inside a supposition does not make its embedded figure stated_current. Classify each figure by its own proposition; one statement\'s status must not transfer to a different quantity or subject. Preserve the original source, wording, sign, units, period and conditions. stated_current describes the assertion; it does not mean verified, accurate or adopted.';
 const Stance = z.enum(['stated_current', 'hypothetical', 'target', 'estimate']).describe(STANCE_DESCRIPTION);
-const Declared = z.object({ value: z.number(), unit, stance: Stance, source: Source }).strict();
+// A range is a recorded claim, never a scalar or a probability law. Its meaning is declared by the AI.
+const Figure = z.union([z.number(), z.object({ form: z.literal('range'), low: z.number(), high: z.number(),
+  period: z.string().nullable(), conditions: z.string().nullable() }).strict()]);
+const Declared = z.object({ value: Figure, unit, stance: Stance, source: Source }).strict();
 /** A figure as stored on the proposal: the declaration, plus (a person's figure only) the line it was said in and when (hashed). */
 const StoredFigure = Declared.extend({ said_in: z.string().nullable().optional(), recorded_at: z.string().optional() }).strict();
 const TargetLink = z.object({ from: id, to: id, sign: z.enum(['positive', 'negative']) }).strict();
@@ -100,7 +103,7 @@ const TargetCondition = z.object({ node_id: id, comparator: z.enum(['<', '<=', '
 const TargetTiming = z.object({ months: z.number().int().min(1).max(120).nullable(), reference: z.enum(['today', 'launch']),
   period_kind: z.enum(['at_end', 'over_period']), deadline: z.string().nullable() }).strict();
 export const ChangeOp = z.union([
-  z.object({ op: z.literal('set_factor_value'), factor_id: id, value: z.number(), unit, stance: Stance, source: Source }).strict(),
+  z.object({ op: z.literal('set_factor_value'), factor_id: id, value: Figure, unit, stance: Stance, source: Source }).strict(),
   z.object({ op: z.literal('set_option_setting'), option_id: id, factor_id: id, value: z.number(), unit, stance: Stance, source: Source }).strict(),
   /** An existing link's strength band. Its direction is kept; a reversal or a new link is not this change. */
   z.object({ op: z.literal('set_link_strength'), from: id, to: id, band: z.enum(['weak', 'moderate', 'strong', 'very strong']), stance: Stance, source: Source }).strict(),
@@ -121,7 +124,7 @@ export const ChangeOp = z.union([
    * declared source (the add-factor door: its id, name and target rules; Olumi's placeholder strength for the link).
    */
   z.object({ op: z.literal('add_to_model'), kind: z.literal('factor'), label: z.string(), acts_on: id, direction: z.enum(['positive', 'negative']),
-    value: z.number(), unit, stance: Stance, source: Source }).strict(),
+    value: Figure, unit, stance: Stance, source: Source }).strict(),
   /**
    * A NEW option for the model's decision: its name and each setting it puts a factor at, with that figure's declared source
    * (the add-option door: its id, decision and same-settings rules; each setting held as an option's setting is).
@@ -250,7 +253,8 @@ function claimOf(o: Op, kind: 'factor' | 'goal' = 'factor'): { readonly subject:
   const statement = userStatementOf({ said_by: o.source.origin === 'olumi' ? 'olumi' : o.source.origin === 'user' ? 'user' : party !== undefined ? 'party' : 'unknown',
     ...(party !== undefined ? { party, relayed_by: 'user' } : {}), quote: o.source.quote ?? '', source: o.said_in ?? o.source.quote ?? '',
     subject: { quantity: subjectKey(subject), node_id: o.factor_id, ...(o.option_id === undefined ? {} : { option_id: o.option_id }) },
-    form: 'point', low: o.value, high: o.value, ...(o.unit === null ? {} : { unit: o.unit }), reading: 'olumi', stance: o.stance });
+    ...(typeof o.value === 'number' ? { form: 'point', low: o.value, high: o.value } : { form: 'range', low: o.value.low, high: o.value.high,
+      ...(o.value.period === null ? {} : { period: o.value.period }), ...(o.value.conditions === null ? {} : { conditions: o.value.conditions }) }), ...(o.unit === null ? {} : { unit: o.unit }), reading: 'olumi', stance: o.stance });
   return statement === undefined ? null : { subject, statement };
 }
 /** A record holding an adoption or a law (anything construction did not write) is never rewritten beside a figure here. */
@@ -303,6 +307,11 @@ function planOf(scenarioId: string, proposalId: string, ops: readonly Op[], grap
   for (const [i, o] of ops.entries()) {
     const factor = byId.get(o.factor_id);
     if (factor?.kind !== 'factor') return { refusal: 'not_a_factor', op: i };
+    if (typeof o.value !== 'number') {
+      const factorUnit = factorUnitOf(graph, factor);
+      if (factorUnit !== undefined && unitComparisonKey(o.unit ?? '') !== unitComparisonKey(factorUnit)) return { refusal: 'unit_mismatch', op: i };
+      continue; // Range-only claim: the existing statement door writes no operative scalar.
+    }
     if (isBlocked(holdingOf(o.kind, o.source, o.stance))) return { refusal: 'blocked_schema', op: i };
     const olumi = o.source.origin === 'olumi';
     if (o.kind === 'value') {
@@ -340,6 +349,12 @@ function planOf(scenarioId: string, proposalId: string, ops: readonly Op[], grap
 function readbackOf(read: SavedRead, ops: readonly Op[]): { holds: boolean; faithful: boolean; written: Rec[] } {
   const byId = new Map(nodesOf(read.graph).map((n) => [n.id, n]));
   const written = ops.map((o) => {
+    if (typeof o.value !== 'number') {
+      const claim = claimOf(o);
+      const held = claim !== null && claimHeld(read.graph, claim);
+      return { holds: held, notKept: [], row: { op: 'set_factor_value', factor_id: o.factor_id, figure: o.value, unit: o.unit,
+        declared: { ...o.source, stance: o.stance }, ...(held ? { claim: claim!.statement } : {}), not_kept: [] } };
+    }
     const holding = holdingOf(o.kind, o.source, o.stance);
     const factor = byId.get(o.factor_id);
     const conditional = o.kind === 'value' && o.stance === 'hypothetical';
@@ -758,9 +773,14 @@ function compoundRead(read: SavedRead, c: Compound): { holds: boolean; faithful:
 /** The figures' table and literal-quote check, before any read. */
 function figuresAllowed(ops: readonly FigureOp[], ctx: ChangeCtx, at: (i: number) => number = (i) => i): ToolOutcome | null {
   for (const [i, o] of ops.entries()) {
-    const holding = holdingOf(o.op === 'set_factor_value' ? 'value' : 'setting', o.source, o.stance);
+    if (typeof o.value !== 'number') {
+      if (!(o.value.low < o.value.high) || o.unit === null || o.unit.trim() === '') return refused('statement_malformed', undefined, { op: at(i) });
+      if (o.source.origin === 'olumi') return unavailable('blocked_schema');
+    }
+    const holding = typeof o.value !== 'number' ? { stored: { origin: 'unknown' as const }, not_kept: [] }
+      : holdingOf(o.op === 'set_factor_value' ? 'value' : 'setting', o.source, o.stance);
     if (isBlocked(holding)) return unavailable('blocked_schema', 'none', blockedSaid(at(i), holding.blocked));
-    if (o.source.origin !== 'olumi' && (o.source.quote === null || !inTheUsersWords(o.source.quote, ctx) || !quoteHoldsFigure(o.source.quote, o.value))) return refused('quote_not_in_users_words', undefined, { op: at(i) });
+    if (o.source.origin !== 'olumi' && (o.source.quote === null || !inTheUsersWords(o.source.quote, ctx) || !(typeof o.value === 'number' ? [o.value] : [o.value.low, o.value.high]).every((v) => quoteHoldsFigure(o.source.quote!, v)))) return refused('quote_not_in_users_words', undefined, { op: at(i) });
   }
   return null;
 }
@@ -787,6 +807,8 @@ function newFactorsOf(adds: readonly AddArgs[], read: SavedRead, ctx: ChangeCtx,
   const built = buildAddFactorTransaction({ factors: adds.map((a) => ({ label: a.label, link: { to_id: a.acts_on, effect_direction: a.direction } })) }, graphViewOf(read.graph));
   if (!built.matched) return refused(codeOf(`add_${built.reason}`), undefined, { op: at(0) });
   return adds.map((a, i) => {
+    if (typeof a.value !== 'number') return { id: built.proposal.factors[i]!.id, label: built.proposal.factors[i]!.label,
+      link: { to_id: a.acts_on, effect_direction: a.direction }, ...(a.source.quote === null ? {} : { quote: a.source.quote }) };
     const person = a.source.origin === 'user';
     const { source: _source, extractionType: _type, ...numbers } = framedObservedState({ baseline_value: a.value, unit: a.unit,
       provenance: person ? 'explicit' : 'inferred', plausible_max: a.value > 1 ? defaultFrameFor(Math.abs(a.value)) : null }) as Rec;
@@ -882,7 +904,7 @@ function addsOf(operations: readonly ProposalOperation[]): CompoundAddFactor[] |
     const v = isRec(o.value) ? o.value : {};
     const link = isRec(v.link) ? v.link : {};
     if (v.id !== o.path || typeof v.label !== 'string' || typeof link.to_id !== 'string' || (link.effect_direction !== 'positive' && link.effect_direction !== 'negative')
-      || !isRec(v.observed_state) || (v.basis !== undefined && v.basis !== 'written_about' && v.basis !== 'olumi_estimate') || (v.quote !== undefined && typeof v.quote !== 'string')) return null;
+      || (v.observed_state !== undefined && !isRec(v.observed_state)) || (v.basis !== undefined && v.basis !== 'written_about' && v.basis !== 'olumi_estimate') || (v.quote !== undefined && typeof v.quote !== 'string')) return null;
     out.push({ id: o.path, label: v.label, link: { to_id: link.to_id, effect_direction: link.effect_direction }, observed_state: v.observed_state, basis: v.basis,
       ...(typeof v.quote === 'string' ? { quote: v.quote } : {}) });
   }
@@ -896,6 +918,15 @@ function addsRead(read: SavedRead, adds: readonly CompoundAddFactor[], figures: 
   const figureOf = (os: unknown): unknown => (isRec(os) ? (typeof os.raw_value === 'number' ? os.raw_value : os.value) : undefined);
   const written = adds.map((a) => {
     const node = nodes.find((n) => n.id === a.id);
+    if (a.observed_state === undefined) {
+      const declared = figures.find((f) => f.factor_id === a.id);
+      const claim = declared === undefined ? null : claimOf(declared);
+      const held = claim !== null && claimHeld(read.graph, claim);
+      return { holds: node?.kind === 'factor' && node.label === a.label && node.observed_state === undefined && held
+        && edges.some((e) => e.from === a.id && e.to === a.link.to_id), notKept: [],
+        row: { op: 'add_to_model', id: a.id, label: node?.label ?? null, acts_on: a.link.to_id, figure: declared?.value ?? null,
+          unit: declared?.unit ?? null, ...(held ? { claim: claim!.statement } : {}), not_kept: [] } };
+    }
     const conditional = a.observed_state.stance === 'hypothetical';
     const figure = conditional ? figureOf(a.observed_state) : figureOf(node?.observed_state);
     // The person's figure is approved WITH their claim (GAP 1): required, and it keeps their words.
@@ -937,7 +968,7 @@ async function proposeCompound(deps: Pick<ChangeDeps, 'dispatch' | 'proposals' |
   const plan = planOf(ctx.scenario_id, '', declared, read.graph);
   if ('refusal' in plan) return stopped(plan, declared, at(figures));
   const prepared: ProposalOperation[] = [];
-  const cards: string[] = figures.length + adds.length + addOptions.length > 0 ? [args.public_label] : [];
+  const cards: string[] = figures.length + adds.length + addOptions.length > 0 ? [changeLabel(args)] : [];
   for (const [i, m] of structural.entries()) {
     const raw = m.op === 'rename' ? { op: 'rename', kind: m.kind, id: m.target_id, new_label: m.new_label, quote: m.quote }
       : { op: 'remove', kind: m.kind, id: m.target_id, ...(m.to_id === null ? {} : { to_id: m.to_id }), quote: m.quote };
@@ -985,6 +1016,13 @@ async function proposeCompound(deps: Pick<ChangeDeps, 'dispatch' | 'proposals' |
   return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: read.graphHash });
 }
 
+/** Consent always displays the declared endpoints and period, even when the AI gives the card a short title. */
+function changeLabel(args: ProposeChangeArgs): string {
+  const ranges = args.ops.flatMap((o) => (o.op === 'set_factor_value' || o.op === 'add_to_model') && typeof o.value !== 'number'
+    ? [`${o.value.low}–${o.value.high}${o.unit === '%' ? '' : ' '}${o.unit}${o.value.period === null ? '' : ` ${o.value.period}`}${o.value.conditions === null ? '' : `; ${o.value.conditions}`}`] : []);
+  return [args.public_label, ...ranges].join('\n');
+}
+
 export async function proposeChange(deps: Pick<ChangeDeps, 'dispatch' | 'proposals' | 'proposeLinkStrengths'>, ctx: ChangeCtx, args: ProposeChangeArgs): Promise<ToolOutcome> {
   if (args.public_label.trim() === '') return refused('label_empty');
   const target = args.ops.find((o): o is TargetArgs => o.op === 'set_goal_target');
@@ -1008,7 +1046,7 @@ export async function proposeChange(deps: Pick<ChangeDeps, 'dispatch' | 'proposa
   const recordedAt = new Date().toISOString();
   const content = { scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: read.graphHash, base_model_identity: read.identity,
     operations: ops.map((o) => operationOf(o, ctx, recordedAt)), provenance: { authored_by: 'model_proposed' as const, basis: args.basis },
-    validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: args.public_label };
+    validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: changeLabel(args) };
   const p = createProposal(content);
   const declared = declaredOf(p.operations) ?? [];
   const plan = planOf(ctx.scenario_id, p.proposal_id, declared, read.graph);

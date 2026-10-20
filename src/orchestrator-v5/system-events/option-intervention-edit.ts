@@ -975,7 +975,7 @@ export type CompoundStructuralMember =
  */
 export type CompoundAddFactor = {
   readonly id: string; readonly label: string; readonly link: { readonly to_id: string; readonly effect_direction: 'positive' | 'negative' };
-  readonly observed_state: Readonly<Record<string, unknown>>; readonly basis?: UserTodayBasis; readonly quote?: string;
+  readonly observed_state?: Readonly<Record<string, unknown>>; readonly basis?: UserTodayBasis; readonly quote?: string;
 };
 /**
  * ⭐ add_to_model, options (PATH-B): a NEW option exactly as the add-option door takes one (`buildAddOptionTransaction`'s
@@ -1682,7 +1682,8 @@ export async function prepareOptionInterventionBatchExecution(
     const built = buildAddFactorTransaction({ factors: adds.map(a => ({ id: a.id, label: a.label, link: a.link })) }, plan.graph);
     if (!built.matched) return { kind: 'refused', reason: `add_${built.reason}` };
     const refused = applyAdded(built.proposal.operations,
-      adds.map(a => ({ factor_id: a.id, observed_state: a.observed_state, basis: a.basis, ...(a.quote !== undefined ? { quote: a.quote } : {}) })));
+      adds.flatMap(a => a.observed_state === undefined ? []
+        : [{ factor_id: a.id, observed_state: a.observed_state, basis: a.basis, ...(a.quote !== undefined ? { quote: a.quote } : {}) }]));
     if (refused !== undefined) return refused;
   }
   for (const o of addOptions) {
