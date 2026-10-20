@@ -2,8 +2,12 @@
  * The user owns the central effect/raw range; existing D3 defaults remain Olumi illustrative assumptions.
  */
 import { describe, expect, it, vi } from 'vitest';
+import captured from './fixtures/l18-captured-sum.json';
+import { candidateToGraph } from '../candidate-to-graph.js';
 import { buildModel, type DraftDeps } from '../draft-tool.js';
 import { constructionOperationId, type CallStructuredModel } from '../../../agent-lane/runtime/build-model.js';
+import { computeGraphIdentityHash } from '../../../context/graph-identity.js';
+import { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha256 } from '../../../context/graph-hash.js';
 import { registrationTurnId } from '../../../graph-registration/registration-identity.js';
 import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.js';
@@ -67,15 +71,19 @@ async function replay(raw: Rec, brief = BRIEF): Promise<Rec> {
   const dispatch: DraftDeps['dispatch'] = async (path, body) => {
     if (path.endsWith('/graph/register')) {
       stored = GraphV3.parse((body as Rec).graph);
-      return { status: 200, json: {} };
+      const identity = computeGraphIdentityHash(stored as never)!;
+      return { status: 200, json: { graph_identity_hash: identity, graph_hash: computeAnalysisAffectingGraphHash(stored as never),
+        model_version: { version_id: 'v15', version_number: 1, mutation_id: 'm15', creation_kind: 'initial',
+          graph_identity_hash: identity.value, analysis_affecting_hash: computeAnalysisAffectingGraphHashSha256(stored as never) } } };
     }
     if (path.endsWith('/versions')) return { status: 200, json: { versions: [{ version_id: 'v15', sequence: 1,
       created_at: '2026-10-20T08:00:00.000Z', creation: { kind: 'committed_mutation', mutation_id: 'm15', source_turn_id: sourceTurn } }] } };
-    return { status: 200, json: { graph: stored ?? null, graph_present: stored !== undefined, graph_hash: stored ? 'h15' : null } };
+    return { status: 200, json: { graph: stored ?? null, graph_present: stored !== undefined, graph_hash: stored ? computeAnalysisAffectingGraphHash(stored as never) : null,
+      graph_identity_hash: stored ? computeGraphIdentityHash(stored as never) : null } };
   };
   const callStructured = vi.fn<CallStructuredModel>(async () => ({ text: JSON.stringify(raw), status: 'completed' }));
   const out = await buildModel({ dispatch, callStructured }, { scenario_id: SID, verified_user_messages: [brief], user_turn_text: brief }, { brief });
-  expect(out.status).toBe('ok');
+  expect(out.status, JSON.stringify(out)).toBe('ok');
   expect(callStructured).toHaveBeenCalledTimes(1);
   expect(stored).toBeDefined();
   return stored!;
@@ -99,6 +107,88 @@ async function runRequest(graph: Rec, brief: string): Promise<Rec> {
 }
 
 describe('current level plus a stated per-unit addition', () => {
+  it('L18 capture: the captured draft-graph quantities survive reconstructed B draft/save/Run conversion', async () => {
+    // The capture has draft_graph, not raw strict drafter bytes. Reconstruct ONLY its declared numeric/identity shape.
+    const renames = [['Total capacity', captured.goal.label], ['Existing capacity', captured.factors[0].label],
+      ['Extra specialists', captured.factors[1].label], ['Extra capacity', captured.factors[2].label],
+      ['Hold', captured.options[0].label], ['Grow', captured.options[1].label]];
+    let rawText = JSON.stringify(draft());
+    for (const [before, after] of renames) rawText = rawText.replaceAll(before!, after!);
+    const raw = JSON.parse(rawText);
+    raw.statements = [];
+    raw.factors.forEach((f: Rec, index: number) => {
+      const os: Rec = captured.factors[index]!.observed_state;
+      Object.assign(f, { baseline_value: os.raw_value ?? os.value, unit: os.unit, plausible_max: os.cap ?? null });
+    });
+    raw.links[1].effect_amount = captured.rate.value;
+    raw.links[1].source_quote = captured.rate.quote;
+    const graph = await replay(raw, captured.brief);
+    const request = await runRequest(graph, captured.brief);
+    const goal = request.graph.nodes.find((n: Rec) => n.id === captured.goal.id);
+    const zero = request.graph.nodes.find((n: Rec) => n.id === captured.factors[2].id);
+    expect(goal.nonlinear_identity).toEqual(captured.identity);
+    expect(goal.goal_threshold_cap).toBe(captured.goal.goal_threshold_cap);
+    expect(zero.scale_frame ?? zero.observed_state.cap).toBe(captured.goal.goal_threshold_cap);
+    expect(zero.observed_state.value).toBe(captured.factors[2].observed_state.value);
+    expect(zero.observed_state.source).toBe(captured.factors[2].observed_state.source);
+    expect(zero.observed_state.std).toBeUndefined();
+    for (const id of captured.identity.factor_ids) {
+      const operand = request.graph.nodes.find((n: Rec) => n.id === id);
+      expect(operand.scale_frame ?? operand.observed_state.cap).toBeGreaterThan(0);
+    }
+  });
+
+  it.each(['tickets', 'parcels'])('L18 %s: every sum operand has an explicit frame in the saved Run request', async quantity => {
+    const raw = JSON.parse(JSON.stringify(draft()).replaceAll('tickets', quantity));
+    const brief = BRIEF.replaceAll('tickets', quantity);
+    const graph = await replay(raw, brief);
+    const request = await runRequest(graph, brief);
+    const goal = request.graph.nodes.find((n: Rec) => n.kind === 'goal');
+    const zero = request.graph.nodes.find((n: Rec) => n.id === 'extra_capacity');
+    expect(goal.nonlinear_identity).toEqual({ operation: 'sum', factor_ids: ['existing_capacity', 'extra_capacity'], stated_in_brief: false });
+    // PLoT resolveNodeFrame: positive explicit cap/scale_frame; a zero cannot recover raw/value.
+    for (const id of goal.nonlinear_identity.factor_ids) {
+      const node = request.graph.nodes.find((n: Rec) => n.id === id);
+      const frame = node.scale_frame ?? node.observed_state?.cap;
+      expect(Number.isFinite(frame) && frame > 0).toBe(true);
+    }
+    expect(zero.scale_frame ?? zero.observed_state.cap).toBe(goal.goal_threshold_cap);
+    expect(zero.observed_state).toMatchObject({ value: 0, source: 'cee_inference', extractionType: 'inferred' });
+    expect(zero.observed_state.std).toBeUndefined();
+    expect(graph.nodes.find((n: Rec) => n.id === 'existing_capacity').observed_state.raw_value).toBe(80);
+    expect(graph.edges.filter((e: Rec) => e.to === goal.id).map((e: Rec) => e.exists_probability)).toEqual([1, 1]);
+    expect(effectOf(graph).provenance.natural_effect.amount).toBe(20);
+  });
+
+  it.each(['parcels per week', 'tickets per day', null])('L18 negative: an operand in %s inherits no goal frame or neighbouring frame', async unit => {
+    const raw = draft();
+    raw.factors[2].unit = unit;
+    raw.factors.push(factor('Unrelated queue', 0, UNIT));
+    const graph = await replay(raw);
+    const zero = graph.nodes.find((n: Rec) => n.id === 'extra_capacity');
+    expect(zero.scale_frame).toBeUndefined();
+    expect(zero.observed_state.cap).toBeUndefined();
+    const unrelated = graph.nodes.find((n: Rec) => n.id === 'unrelated_queue');
+    expect(unrelated.scale_frame).toBeUndefined();
+    expect(unrelated.observed_state.cap).toBeUndefined();
+    expect(graph.nodes.find((n: Rec) => n.kind === 'goal').nonlinear_identity).toBeUndefined();
+    const converted = candidateToGraph(raw, { words: BRIEF, recorded_at: '2026-10-20T08:00:00.000Z' });
+    if ('refused' in converted) throw new Error(converted.refused);
+    expect(converted.loss.some(row => row.field_path === 'nodes[total_capacity].nonlinear_identity_rejected' && row.severity === 'warn')).toBe(true);
+  });
+
+  it('L18 preserves an existing operand frame rather than replacing it with the goal frame', async () => {
+    const raw = draft();
+    raw.factors[2].plausible_max = 50;
+    raw.factors.push(factor('Unrelated queue', 0, UNIT));
+    const graph = await replay(raw);
+    const zero = graph.nodes.find((n: Rec) => n.id === 'extra_capacity');
+    expect(zero.scale_frame ?? zero.observed_state.cap).toBe(50);
+    const unrelated = graph.nodes.find((n: Rec) => n.id === 'unrelated_queue');
+    expect(unrelated.scale_frame ?? unrelated.observed_state.cap).toBeUndefined();
+    expect(zero.observed_state.value).toBe(0);
+  });
+
   it.each([
     ['support', BRIEF, draft()],
     ['packing', BRIEF.replaceAll('tickets', 'parcels').replaceAll('specialist', 'packer'),

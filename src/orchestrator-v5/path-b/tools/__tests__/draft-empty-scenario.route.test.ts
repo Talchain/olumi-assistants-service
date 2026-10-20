@@ -458,6 +458,23 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
     expect(said.filter((x) => x.includes('says "1 per 1"'))).toEqual([]);
   });
 
+  it('L18 real route: a zero indirect sum operand is registered on the goal coordinate frame', async () => {
+    drafterAnswer = { ...SUM_DRAFT, options: DRAFT.options,
+      factors: [DRAFT.factors[0], { ...SUM_DRAFT.factors[0], plausible_max: 300 }, { ...SUM_DRAFT.factors[1], role: 'observable', plausible_max: null }],
+      links: [{ ...DRAFT.links[0], to: ADDED }, ...SUM_DRAFT.links] };
+    const body = await turn();
+    expect(draftCall(body), JSON.stringify(body._agent)).toMatchObject({ ok: true, mutated: true, outcome: 'ok' });
+    expect(registered).toHaveLength(1);
+    const graph = registered[0]!.graph as Json;
+    const goal = graph.nodes.find((n: Json) => n.kind === 'goal');
+    const zero = graph.nodes.find((n: Json) => n.label === ADDED);
+    expect(zero.scale_frame ?? zero.observed_state.cap).toBe(goal.goal_threshold_cap);
+    expect(zero.observed_state.value).toBe(0);
+    expect(goal.nonlinear_identity).toEqual({ operation: 'sum',
+      factor_ids: [graph.nodes.find((n: Json) => n.label === CURRENT).id, zero.id], stated_in_brief: false });
+    expect(drafterCalls).toBe(1);
+  });
+
   it('⭐ K5 P0 RULING (real path): the sum the drafter text asks for is carried exact, and no placeholder stands between the option and the goal', async () => {
     const savedFor = async (answer: Json): Promise<Json> => {
       SCENARIO = randomUUID(); registered = []; saved = null; read = EMPTY_READ; drafterAnswer = answer;
