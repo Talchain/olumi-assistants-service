@@ -126,6 +126,9 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 const PROPOSAL_CONTROL = /^(agent-approve-proposal:|agent-amend-proposal$|agent-decline-proposal:|agent-review-proposal:)/;
 const QUESTION = 'What does the model hold for weekly orders today?';
 const ANSWER = 'The model holds 120 orders a week today, from your brief.';
+// L8 sign-off text: independent of the production constant, tested at the SDK HTTP boundary.
+const COHERENT_REPLY = 'Write one coherent reply in a single voice: give the explanation first, mention what changed since the last Run only when it matters, and weave at most one next step from the current readiness facts into the prose, never as a separate bullet or receipt line and never asking for something the user has already said.';
+const COHERENT_REPLY_SHA = '5addb0bb9d128eec61aa8a71e8fb522d9591edb46286f20220e8b1387baf631d';
 
 describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host guidance or advice', () => {
   let app: FastifyInstance;
@@ -172,6 +175,17 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
   const hostCards = (j: Json): Json => ({ guidance: j.guidance, action_bar: j.action_bar, model_gap: j.model_gap, guided_sizing: j.guided_sizing,
     other_actions: ((j.suggested_actions ?? []) as Json[]).map((a) => String(a.id)).filter((id) => !PROPOSAL_CONTROL.test(id)) });
   const NONE = { guidance: undefined, action_bar: undefined, model_gap: undefined, guided_sizing: undefined, other_actions: [] };
+  const expectCoherentInstructions = (j: Json): void => {
+    expect(calls.length).toBeGreaterThan(0);
+    for (const c of calls) {
+      expect(typeof c.instructions).toBe('string');
+      expect(c.instructions.split(COHERENT_REPLY), 'the signed sentence rides every call exactly once').toHaveLength(2);
+      const at = c.instructions.indexOf(COHERENT_REPLY);
+      expect(createHash('sha256').update(c.instructions.slice(at, at + COHERENT_REPLY.length), 'utf8').digest('hex')).toBe(COHERENT_REPLY_SHA);
+    }
+    expect(j._provider_calls.filter((c: Json) => c.site === 'agent-core.sdk').map((c: Json) => c.prompt_sha256))
+      .toEqual(calls.map((c) => createHash('sha256').update(c.instructions, 'utf8').digest('hex')));
+  };
 
   it('⭐ RED→GREEN: a core correction turn carries its own card and nothing a host composed beside the AI\u2019s reply', async () => {
     outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop_call', args: CORRECTION }], [{ type: 'message', text: PREPARED_WORDS }]];
@@ -190,6 +204,7 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
     const j = r.json() as Json;
     expect(j.assistant_text).toBe(ANSWER);
     expect(hostCards(j)).toEqual(NONE);
+    expectCoherentInstructions(j);
   });
 
   it('⭐ RED→GREEN: a goal with no target: no host gap question beside the AI\u2019s answer', async () => {
@@ -207,6 +222,8 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
     expect(j.guidance, 'the A lane is unchanged').toEqual(GIVE_YOUR_ESTIMATE);
     expect(j.model_gap).toMatchObject({ kind: 'goal_target_missing' });
     expect(j.action_bar).toBeDefined();
+    expect(calls.length).toBeGreaterThan(0);
+    for (const c of calls) expect(JSON.stringify(c)).not.toContain(COHERENT_REPLY);
   });
 
   it.each(['delivery', 'staffing'])('L4 readiness producer: %s core omits the host list; A keeps its exact bytes; the AI keeps its facts', async (subject) => {
@@ -296,6 +313,7 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
     expect(j._agent.tool_calls).toEqual([expect.objectContaining({ name: 'run_analysis', ok: true, ran: true })]);
     expect(runCount).toBe(1);
     expect(j.assistant_text).toBe(reply);
+    expectCoherentInstructions(j);
     const aiOutput = calls.flatMap(c => c.input ?? []).find((i: Json) => i.type === 'function_call_output' && i.call_id === 'voice_run');
     expect(JSON.parse(aiOutput.output)).toMatchObject({ status: 'ok', ran: true, data: { result: { enrichment: {
       option_comparison: original.enrichment.option_comparison,
@@ -317,6 +335,8 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
     expect(runCount).toBe(1);
     const a = await post({ turn_id: randomUUID(), message: QUESTION, source: 'composer' }, {});
     expect(a.statusCode, a.body).toBe(200);
+    expect(calls.length).toBeGreaterThan(count);
+    for (const c of calls.slice(count)) expect(JSON.stringify(c)).not.toContain(COHERENT_REPLY);
     expect(a.json().blocks.find((b: Json) => b.type === 'analysis_result')).toEqual({ ...original,
       summary: 'Your own estimates are in the model, but none of them sits on the path that decides this comparison, so these figures are still provisional. '
         + 'A share of runs in which an option fitted your goal better than the others is not the chance of reaching your target.\n\n' + original.summary });
