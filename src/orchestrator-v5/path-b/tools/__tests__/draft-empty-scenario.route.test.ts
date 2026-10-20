@@ -16,7 +16,6 @@ import { computeGraphIdentityHash } from '../../../context/graph-identity.js';
 import { computeAnalysisAffectingGraphHashSha256, computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
 import { registrationTurnId } from '../../../graph-registration/registration-identity.js';
 import { candidateToGraph } from '../candidate-to-graph.js';
-import liveRows from './fixtures/l23-live-drafter-raw-5203fed5.json';
 import { readCanonicalContext } from '../context-tool.js';
 import { resolveRunAdmission } from '../../../tools/handlers/analysis-ready-core.js';
 import { settingProvenanceOf, valueProvenanceOf } from '../../../../cee/provenance/provenance-of.js';
