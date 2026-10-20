@@ -1,0 +1,10 @@
+[
+  {
+    "mutant": "stamp-removed",
+    "exit": 1
+  },
+  {
+    "mutant": "stamp-overcredited",
+    "exit": 1
+  }
+]

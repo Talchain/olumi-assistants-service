@@ -1,0 +1,30 @@
+[
+  {
+    "file": "tests/contract/context-summary-diagnostic-only.guard.test.ts",
+    "exit": 0
+  },
+  {
+    "file": "tests/contract/run-delta-flip-thresholds-single-site.guard.test.ts",
+    "exit": 0
+  },
+  {
+    "file": "tests/contract/run-delta-pack-parity.guard.test.ts",
+    "exit": 0
+  },
+  {
+    "file": "tests/contract/run-delta-prior-facts-no-default.guard.test.ts",
+    "exit": 0
+  },
+  {
+    "file": "tests/contract/tier3-leak-guard.runtime.test.ts",
+    "exit": 0
+  },
+  {
+    "file": "tests/contract/tier3-leak-guard.static.guard.test.ts",
+    "exit": 0
+  },
+  {
+    "file": "src/orchestrator-v5/graph-management/__tests__/threshold-source-j2.test.ts",
+    "exit": 0
+  }
+]

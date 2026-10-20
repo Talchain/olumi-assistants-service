@@ -1,0 +1,11 @@
+
+ RUN  v4.1.10 /private/tmp/cx-l27
+
+{"level":"info","time":1792491567412,"pid":6208,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"g-profit","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792491567418,"pid":6208,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"g-profit","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+
+ Test Files  1 passed (1)
+      Tests  12 passed (12)
+   Start at  11:19:25
+   Duration  1.78s (transform 1.24s, setup 130ms, import 1.50s, tests 39ms, environment 0ms)
+

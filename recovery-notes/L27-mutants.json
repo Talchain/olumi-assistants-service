@@ -1,0 +1,26 @@
+[
+  {
+    "name": "stamp-removed",
+    "exit": 1
+  },
+  {
+    "name": "stamp-overcredited",
+    "exit": 1
+  },
+  {
+    "name": "user-binding-removed",
+    "exit": 1
+  },
+  {
+    "name": "user-binding-normalised",
+    "exit": 1
+  },
+  {
+    "name": "factor-type-removed",
+    "exit": 1
+  },
+  {
+    "name": "factor-type-from-endpoints",
+    "exit": 1
+  }
+]

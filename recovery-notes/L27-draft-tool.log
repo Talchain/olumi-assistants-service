@@ -1,0 +1,9 @@
+
+ RUN  v4.1.10 /private/tmp/cx-l27
+
+
+ Test Files  1 passed (1)
+      Tests  26 passed (26)
+   Start at  11:21:23
+   Duration  7.27s (transform 5.35s, setup 132ms, import 6.95s, tests 82ms, environment 0ms)
+

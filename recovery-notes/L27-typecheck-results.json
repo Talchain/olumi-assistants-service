@@ -1,0 +1,9 @@
+{
+  "total_diagnostics": 208,
+  "diagnostic_files": 89,
+  "changed_files": {
+    "src/orchestrator-v5/path-b/tools/candidate-to-graph.ts": 0,
+    "src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts": 0
+  },
+  "exit": 2
+}

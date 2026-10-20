@@ -1,0 +1,46 @@
+
+ RUN  v4.1.10 /private/tmp/cx-l27
+
+ ❯ recovery-notes/L27-ui.probe.ts (3 tests | 1 failed) 88ms
+     × BLOCKER: an Olumi target must reach the DGAI target source reader as Olumi 16ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  recovery-notes/L27-ui.probe.ts > L27 external readers (read-only trees) > BLOCKER: an Olumi target must reach the DGAI target source reader as Olumi
+AssertionError: expected 'unrecorded' to be 'olumi' // Object.is equality
+
+Expected: "olumi"
+Received: "unrecorded"
+
+ ❯ recovery-notes/L27-ui.probe.ts:39:57
+     37|     const canvas = mapDraftNodeToCanvas(goal);
+     38|     expect(canvas.data.threshold_source).toBe('cee_inference');
+     39|     expect.soft(resolveGoalTarget(canvas.data)?.source).toBe('olumi');
+       |                                                         ^
+     40|     expect(goalTargetSourceMark(canvas.data).kind).toBe('olumi');
+     41|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  recovery-notes/L27-ui.probe.ts > L27 external readers (read-only trees) > BLOCKER: an Olumi target must reach the DGAI target source reader as Olumi
+AssertionError: expected 'unknown' to be 'olumi' // Object.is equality
+
+Expected: "olumi"
+Received: "unknown"
+
+ ❯ recovery-notes/L27-ui.probe.ts:40:52
+     38|     expect(canvas.data.threshold_source).toBe('cee_inference');
+     39|     expect.soft(resolveGoalTarget(canvas.data)?.source).toBe('olumi');
+     40|     expect(goalTargetSourceMark(canvas.data).kind).toBe('olumi');
+       |                                                    ^
+     41|   });
+     42|   it('declared state metadata survives actual DGAI projection and read…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 passed (3)
+   Start at  11:20:04
+   Duration  8.44s (transform 6.24s, setup 0ms, import 8.23s, tests 88ms, environment 0ms)
+
