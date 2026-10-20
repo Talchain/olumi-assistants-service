@@ -261,12 +261,13 @@ export type StatementRecordEditResult =
  * ⭐ GAP 1 (DL-3 GO, 19 Oct): a person's own figure for a factor's level, or for an option's setting of it (PATH-B's
  * `propose_change`), kept as THEIR claim beside the figure the SAME commit writes: who said it, a party's name, their words, its
  * conditions and stance. It carries no attest (no adoption, no law), so it is never read as a range, an adoption or a size; other
- * sources' claims on the subject stay beside it (`withClaimsKept`).
+ * sources' claims on the subject stay beside it (`withClaimsKept`). Olumi's hypothetical point uses this same conditional
+ * carrier; it changes no operative level or forecast and grants no adoption.
  */
 export function isFigureClaimRecord(subject: DoorSubject, record: UserStatementRecord): boolean {
   return (subject.kind === 'factor' || (subject.kind === 'goal' && subject.option_id === undefined)) && subject.field === 'level'
     && subject.to_id === undefined && record.attest === undefined
-    && record.statements.some((st) => st.form === 'point' && saidByOf(st) !== 'olumi' && st.low !== undefined && st.low === st.high);
+    && record.statements.some((st) => st.form === 'point' && (saidByOf(st) !== 'olumi' || st.stance === 'hypothetical') && st.low !== undefined && st.low === st.high);
 }
 
 /** The subjects this member records, each with the statements it holds: never a figure-bearing record in place of its own carrier. */

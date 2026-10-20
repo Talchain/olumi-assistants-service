@@ -182,7 +182,7 @@ function holdingOf(kind: Op['kind'] | 'target' | 'link', s: DeclaredSource, stan
       : [{ what: 'origin', declared: s.origin }, ...(s.origin === 'third_party' && s.named_source !== null ? [{ what: 'name' as const, declared: s.named_source }] : [])] };
   }
   if (stance === 'target') return { blocked: kind === 'value' ? 'a target would become this factor\'s current level; setting a target isn\'t available on this path yet' : 'a target is not an option\'s setting' };
-  if (kind === 'value' && stance === 'hypothetical') return s.origin === 'olumi' || s.quote === null
+  if (kind === 'value' && stance === 'hypothetical') return s.origin !== 'olumi' && s.quote === null
     ? { blocked: 'a supposition needs its source words to be kept as a conditional claim' }
     : { stored: { origin: 'unknown' }, not_kept: [] };
   if (kind === 'value' && s.origin === 'unknown') return { stored: { origin: 'unknown' }, not_kept: [] };
@@ -229,14 +229,15 @@ const operationOf = (o: FigureOp, ctx: TypedWords, recordedAt: string): Proposal
 /**
  * ⭐ GAP 1 (DL-3 GO, 19 Oct): a person's figure as THEIR claim in the existing claim record (`isFigureClaimRecord`), built from the
  * stored declaration alone: who said it (the user; a party by the name they gave, relayed by the user; else unresolved), their
- * words and the line they are in, the figure and unit, and its stance. Olumi's own figure is no one's claim: none.
+ * words and the line they are in, the figure and unit, and its stance. Olumi's hypothetical stays its conditional claim;
+ * its operative estimates continue through the value/setting writers without a claim.
  */
 function claimOf(o: Op, kind: 'factor' | 'goal' = 'factor'): { readonly subject: DoorSubject; readonly statement: UserStatement } | null {
-  if (o.source.origin === 'olumi' || o.source.quote === null) return null;
+  if (o.source.origin === 'olumi' ? o.kind !== 'value' || o.stance !== 'hypothetical' : o.source.quote === null) return null;
   const subject: DoorSubject = { kind, id: o.factor_id, field: 'level', ...(o.option_id === undefined ? {} : { option_id: o.option_id }) };
   const party = o.source.origin === 'third_party' ? o.source.named_source?.trim() || undefined : undefined;
-  const statement = userStatementOf({ said_by: o.source.origin === 'user' ? 'user' : party !== undefined ? 'party' : 'unknown',
-    ...(party !== undefined ? { party, relayed_by: 'user' } : {}), quote: o.source.quote, source: o.said_in ?? o.source.quote,
+  const statement = userStatementOf({ said_by: o.source.origin === 'olumi' ? 'olumi' : o.source.origin === 'user' ? 'user' : party !== undefined ? 'party' : 'unknown',
+    ...(party !== undefined ? { party, relayed_by: 'user' } : {}), quote: o.source.quote ?? '', source: o.said_in ?? o.source.quote ?? '',
     subject: { quantity: subjectKey(subject), node_id: o.factor_id, ...(o.option_id === undefined ? {} : { option_id: o.option_id }) },
     form: 'point', low: o.value, high: o.value, ...(o.unit === null ? {} : { unit: o.unit }), reading: 'olumi', stance: o.stance });
   return statement === undefined ? null : { subject, statement };

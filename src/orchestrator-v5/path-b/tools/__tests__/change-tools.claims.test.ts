@@ -3,10 +3,12 @@
  * someone they name gives a figure for a factor's level or an option's setting, the SAME door commit that writes the figure also
  * writes their claim in the existing claim record (`user_statements`): who said it (a party by the name given, relayed by the
  * user), their words and the line they are in, the figure, unit and stance. A cold read (`read_canonical_context`) returns it.
- * Other sources' claims on the subject stay beside it. Olumi's own figure is no one's claim. Degrading to "not kept" is only
+ * Other sources' claims on the subject stay beside it. Olumi's estimates use the operative writer; its hypotheticals remain claims. Degrading to "not kept" is only
  * what the record truly cannot say (an unnamed party's identity). SYNTHETIC wording; the door and its writers are real.
  */
 import { createHash } from 'node:crypto';
+import type { UserStatement } from '../../../agent-lane/user-statements.js';
+import type { StatementAttest } from '../../../statement-door/statements.js';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import { projectGraphForPersistence } from '../../../persisted-graph-projection.js';
@@ -186,6 +188,65 @@ describe('GAP 1: a person\u2019s figure is kept as THEIR claim, in the same comm
 
 // Declared origin and stance survive the real batch writer and a cold canonical read.
 describe('ONE declared pair edit writer', () => {
+  it('L1b RED: the existing claim writer admits a conditional Olumi figure without a human claim beside it', async () => {
+    const { applyStatementRecordEdit } = await import('../../../goal-target/cohort-forecast-write.js');
+    const { userStatementRecord } = await import('../../../statement-door/statements.js');
+    const { subjectKey } = await import('../../../statement-door/subject.js');
+    const subject = { kind: 'factor', id: 'queue', field: 'level' } as const;
+    const record = userStatementRecord(subject, [{ said_by: 'olumi', quote: '', source: '',
+      subject: { quantity: subjectKey(subject), node_id: 'queue' }, form: 'point', low: 20, high: 20,
+      unit: 'minutes', reading: 'olumi', stance: 'hypothetical' }], '2026-10-20T04:00:00.000Z');
+    const out = applyStatementRecordEdit(persisted, { node_id: 'queue', expected_node: structuredClone(nodeOf('queue')),
+      user_statement: { subject, record } });
+    expect(out).toMatchObject({ kind: 'mutated' });
+  });
+
+  it('adjacent user words and an unrelated 3 never give the user credit for Olumi’s staffing assumption', async () => {
+    const words = 'The queue is 20 minutes, and our review is on day 3.';
+    const before = structuredClone(nodeOf('staff').observed_state);
+    await saved([queue20('user', 'The queue is 20 minutes'),
+      fig({ op: 'set_factor_value', factor_id: 'staff', value: 3, unit: 'people', stance: 'hypothetical' }, 'olumi', null)],
+    { ...ctx, user_turn_text: words, verified_user_messages: [words] });
+    expect((await coldClaims('queue')).map((s) => s.said_by)).toEqual(['user']);
+    expect((await coldClaims('staff')).map((s) => s.said_by)).toEqual(['olumi']);
+    expect(nodeOf('staff').observed_state).toEqual(before);
+  });
+
+  it.each<Partial<UserStatement> & { attest?: StatementAttest }>([
+    { stance: 'estimate' }, { stance: 'stated_current' }, { stance: 'target' },
+    { form: 'range', high: 25 }, { form: 'lower_bound', high: undefined },
+    { attest: { recorded_by: 'construction' } },
+  ])('the conditional writer still rejects an Olumi point as an operative, range or adoption record: %j', async ({ attest, ...patch }) => {
+    const { applyStatementRecordEdit } = await import('../../../goal-target/cohort-forecast-write.js');
+    const { userStatementRecord } = await import('../../../statement-door/statements.js');
+    const { subjectKey } = await import('../../../statement-door/subject.js');
+    const subject = { kind: 'factor', id: 'queue', field: 'level' } as const;
+    const record = userStatementRecord(subject, [{ said_by: 'olumi', quote: '', source: '',
+      subject: { quantity: subjectKey(subject), node_id: 'queue' }, form: 'point', low: 20, high: 20,
+      unit: 'minutes', reading: 'olumi', stance: 'hypothetical', ...patch }], '2026-10-20T04:00:00.000Z');
+    const out = applyStatementRecordEdit(persisted, { node_id: 'queue', expected_node: structuredClone(nodeOf('queue')),
+      user_statement: { subject, record: { ...record, ...(attest === undefined ? {} : { attest }) } } });
+    expect(out).toEqual({ kind: 'refused', reason: 'invalid_statement' });
+  });
+
+  it.each([
+    ['queue', 20, 'minutes', null], ['staff', 3, 'people', 'If weekend cover is available, suppose there are 3 people.'],
+  ] as const)('L1b RED: Olumi’s hypothetical %s is saved and read cold as conditional, never today’s or the person’s', async (factorId, value, unit, quote) => {
+    const before = structuredClone(nodeOf(factorId));
+    const data = await saved([fig({ op: 'set_factor_value', factor_id: factorId, value, unit, stance: 'hypothetical' }, 'olumi', quote)]);
+    expect(data).toMatchObject({ faithful: true, written: [{ figure: value, declared: { origin: 'olumi', stance: 'hypothetical' },
+      claim: { said_by: 'olumi' }, not_kept: [] }] });
+    persisted = JSON.parse(JSON.stringify(persisted));
+    const { user_statements: _beforeClaims, ...beforeOperative } = before;
+    const { user_statements: _afterClaims, ...afterOperative } = nodeOf(factorId);
+    expect(afterOperative).toEqual(beforeOperative);
+    const claims = await coldClaims(factorId);
+    expect(claims).toContainEqual(expect.objectContaining({ said_by: 'olumi', stance: 'hypothetical', low: value, high: value, unit, quote: quote ?? '' }));
+    expect(claimsOn(factorId)).toContainEqual(expect.objectContaining({ said_by: 'olumi', source: quote ?? '', stance: 'hypothetical' }));
+    expect(claims.filter((s) => s.low === value && s.stance === 'hypothetical').every((s) => s.said_by === 'olumi' && s.speaker === undefined)).toBe(true);
+    expect(nodeOf('visits')).toEqual((stored() as { nodes: Rec[] }).nodes.find((n) => n.id === 'visits'));
+  });
+
   it.each([
     ['user', 'stated_current', 'human'],
     ['olumi', 'estimate', 'ai'],
