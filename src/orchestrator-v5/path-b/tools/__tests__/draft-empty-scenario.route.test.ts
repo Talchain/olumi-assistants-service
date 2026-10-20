@@ -14,6 +14,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
 import { registrationTurnId } from '../../../graph-registration/registration-identity.js';
 import { candidateToGraph } from '../candidate-to-graph.js';
+import { readCanonicalContext } from '../context-tool.js';
+import { valueProvenanceOf } from '../../../../cee/provenance/provenance-of.js';
 import { placeholderGoalPaths, unsizedLeaderGoalPaths } from '../../../agent-lane/goal-certainty.js';
 
 type Json = Record<string, any>;
@@ -52,7 +54,7 @@ const DRAFT = (() => {
 const ADDED = 'Extra bookings from evening slots';
 const ADDED_DRAFT: Json = {
   ...DRAFT,
-  factors: [...DRAFT.factors, { label: ADDED, role: 'observable', baseline_known: true, baseline_value: 0, unit: 'bookings a week', provenance: 'inferred', plausible_max: null }],
+  factors: [...DRAFT.factors, { label: ADDED, role: 'observable', baseline_known: true, baseline_value: 0, unit: 'bookings a week', provenance: 'inferred', origin: 'olumi', stance: 'estimate', plausible_max: null }],
   links: [{ ...DRAFT.links[0], to: ADDED }, { ...DRAFT.links[0], from: ADDED, effect_amount: 1, effect_per_source_change: 1, effect_provenance: 'inferred', definitional: true }],
 };
 /**
@@ -70,6 +72,7 @@ const SUM_DRAFT: Json = {
   identities: [{ operation: 'sum', outcome: GOAL, factors: [CURRENT, ADDED], provenance: 'inferred', evidence: null }],
 };
 let drafterAnswer: Json = DRAFT;
+let draftSchema: Json = {};
 
 const rows = new Map<string, { id: string; turn_id: string; request_hash: string }>();
 const conversationIds = new Map<string, string>();
@@ -125,7 +128,7 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
   let saved: Json | null = null;
   let registered: Json[] = [];
   let read: () => Json = EMPTY_READ;
-  const briefArg = BRIEF;
+  let briefArg = BRIEF;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
       if (String(url).endsWith('/v1/conversations')) return new Response(JSON.stringify({ id: 'conv_draft', object: 'conversation' }), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -135,6 +138,7 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
       const ok = (output: Record<string, unknown>[]) => new Response(JSON.stringify(responsesBody(output)), { status: 200, headers: { 'content-type': 'application/json' } });
       // The construction's structured calls: the whole candidate gets the drafter's answer; any other structured step answers nothing.
       if (body.text?.format?.type === 'json_schema') {
+        if (body.text.format.name === 'whole_candidate') draftSchema = body.text.format.schema;
         return ok(body.text.format.name === 'whole_candidate' ? [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(drafterAnswer) }] }] : []);
       }
       // The core agent: first the draft call, then its words.
@@ -167,11 +171,11 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { SCENARIO = randomUUID(); rows.clear(); conversationIds.clear(); saved = null; registered = []; read = EMPTY_READ; toolOutputs.length = 0; drafterAnswer = DRAFT; });
+  beforeEach(() => { SCENARIO = randomUUID(); rows.clear(); conversationIds.clear(); saved = null; registered = []; read = EMPTY_READ; toolOutputs.length = 0; drafterAnswer = DRAFT; briefArg = BRIEF; draftSchema = {}; });
 
   const turn = async (): Promise<Json> => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', headers: { 'x-olumi-ai-mode': 'core' }, payload: {
-      kind: 'message', turn_id: randomUUID(), scenario_id: SCENARIO, stage: 'frame', turn_class: 'frame', message: BRIEF, source: 'composer' } });
+      kind: 'message', turn_id: randomUUID(), scenario_id: SCENARIO, stage: 'frame', turn_class: 'frame', message: briefArg, source: 'composer' } });
     expect(r.statusCode, r.body).toBe(200);
     return r.json() as Json;
   };
@@ -239,6 +243,50 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
     // … while the K5 loop's served shape (no declared sum) still has one, so the gate is not vacuous.
     const loop = await savedFor(ADDED_DRAFT);
     expect(placeholderGoalPaths(loop, optionsOf(loop))).not.toEqual([]);
+  });
+
+  it.each([
+    ['user', 'stated_current', 'We run 6 evening slots today.', 'human'],
+    ['olumi', 'estimate', 'We are exploring evening opening.', 'ai'],
+    ['unknown', 'estimate', 'Someone mentioned 6 evening slots.', 'unknown'],
+    ['user', 'hypothetical', 'Suppose we run 6 evening slots if the trial starts.', null],
+  ] as const)('ONE declared pair (real route): %s/%s survives registration and a cold canonical read', async (origin, stance, words, expected) => {
+    briefArg = `${BRIEF}\n${words}`;
+    drafterAnswer = { ...DRAFT, factors: [{ ...DRAFT.factors[0], baseline_known: true, baseline_value: 6, origin, stance }],
+      statements: origin === 'olumi' ? [] : [{ quote: words, subject: { kind: 'factor', label: 'Evening slots', to_label: null, factor_label: null },
+        field: 'level', form: 'point', value: 6, low: null, high: null, unit: 'slots a week', qualifier: null,
+        conditions: stance === 'hypothetical' ? 'if the trial starts' : null, speaker: origin === 'user' ? 'user' : 'unknown' }] };
+    const body = await turn();
+    expect(draftCall(body)).toMatchObject({ ok: true, mutated: true, outcome: 'ok' });
+    expect(registered).toHaveLength(1);
+    expect(draftSchema.properties.factors.items.required).toEqual(expect.arrayContaining(['origin', 'stance']));
+    // Serialise the store then read it through a fresh canonical reader, with no turn history.
+    saved = JSON.parse(JSON.stringify(saved)) as Json;
+    const factor = (saved!.nodes as Json[]).find((n) => n.label === 'Evening slots')!;
+    if (expected === null) expect(factor.observed_state).toBeUndefined();
+    else expect(valueProvenanceOf(factor.observed_state).origin).toBe(expected);
+    const cold = await readCanonicalContext({ dispatch: async () => ({ status: 200, json: read() }) }, { scenario_id: SCENARIO });
+    expect(cold.status).toBe('ok');
+    const node = ((cold as { data: Json }).data.nodes as Json[]).find((n) => n.id === factor.id)!;
+    if (origin === 'olumi') expect(node.statements ?? []).toEqual([]);
+    else expect(node.statements[0].statements).toEqual([expect.objectContaining({
+      ...(origin === 'user' ? { speaker: 'user' } : { said_by: 'unknown' }), quote: words, low: 6, high: 6, stance,
+      ...(stance === 'hypothetical' ? { conditions: 'if the trial starts' } : {}),
+    })]);
+    if (expected === null) expect(node).not.toHaveProperty('observed');
+    else expect(node.observed_source.origin).toBe(expected);
+  });
+
+  it('ONE declared pair negative (real route): another subject\'s literal figure never credits this factor as the user\'s', async () => {
+    briefArg = `${BRIEF}\nWe run 6 evening slots; the studio has 9 rooms.`;
+    drafterAnswer = { ...DRAFT, factors: [{ ...DRAFT.factors[0], baseline_known: true, baseline_value: 9, origin: 'user', stance: 'stated_current' }],
+      statements: [{ quote: 'the studio has 9 rooms', subject: { kind: 'factor', label: 'Studio rooms', to_label: null, factor_label: null },
+        field: 'level', form: 'point', value: 9, low: null, high: null, unit: 'slots a week', speaker: 'user' }] };
+    const body = await turn();
+    expect(draftCall(body)).toMatchObject({ ok: true, mutated: true });
+    const factor = (saved!.nodes as Json[]).find((n) => n.label === 'Evening slots')!;
+    expect(valueProvenanceOf(factor.observed_state).origin).toBe('unknown');
+    expect(factor.user_statements ?? []).toEqual([]);
   });
 
   it('CONTRAST: a non-null read that is not a graph is still malformed: refused, nothing registered', async () => {

@@ -596,7 +596,7 @@ export function createSetFactorValueHandler(): HandlerFn {
       ? approvedBindingFor(invocation.context.session_id, targetId, normalised.raw_value) : undefined;
 
     const after: ObservedSnapshot = {
-      ...(unverifiedBinding !== undefined ? { user_material_unverified: true as const } : {}),
+      ...(unverifiedBinding !== undefined && unverifiedBinding.origin !== 'unknown' ? { user_material_unverified: true as const } : {}),
       value: normalised.value,
       raw_value: normalised.raw_value,
       // The SAME provenance the merged node is stamped with below, so the wire
@@ -890,7 +890,11 @@ export function createSetFactorValueHandler(): HandlerFn {
       // ⭐ S2 (DL 14 Oct; pricing r2 judge finding 5): `user_material_unverified` says a human-written figure's ROLE was never
       // verified (Paul's brief "from £49 to £59 per month", held as today's price). The user's OWN authoring write settles
       // exactly that, so it is cleared by the same rule; an adoption of Olumi's figure (`adoptedSource`) is not that act.
-      if (unverifiedBinding !== undefined) merged.user_material_unverified = true;
+      if (unverifiedBinding?.origin === 'unknown') {
+        delete (merged as { source?: unknown }).source;
+        delete (merged as { user_material_unverified?: unknown }).user_material_unverified;
+      }
+      else if (unverifiedBinding !== undefined) merged.user_material_unverified = true;
       else if (adoptedSource === undefined || existing.kind !== 'resolved' || existing.raw !== normalised.raw_value) {
         delete (merged as { user_material_unverified?: unknown }).user_material_unverified;
       }
@@ -965,7 +969,7 @@ export function createSetFactorValueHandler(): HandlerFn {
       // approval rides `reviewed_by_user` above. `user_set` here made every reader of `node.provenance`
       // (the Agent's `projectEntity`, the served read) tell the user they set a figure Olumi proposed —
       // served `5479e15e`, guest `c708fca5`, #75 5921124922.
-      node.provenance = adoptedSource !== undefined ? 'ai_inferred' : 'user_set';
+      node.provenance = unverifiedBinding?.origin === 'unknown' ? 'unverified_brief' : adoptedSource !== undefined ? 'ai_inferred' : 'user_set';
       // The second carrier of the same producer claim. Repair stages promote
       // `extractionType` to the node (`NodeV3.extractionType`), and both the UI
       // predicate (`d?.extractionType`) and `readFactorValueView` (observed_state

@@ -235,15 +235,27 @@ export function candidateToAdmittedGraph(input: unknown, usersWords?: string): C
     }
     return undefined;
   };
-  const statementOf = (kind: string, label: string, extra: (s: Rec) => boolean = () => true): Rec | undefined =>
-    statements.find((s) => s?.subject?.kind === kind && canonicalLabel(String(s.subject.label ?? '')) === canonicalLabel(label) && extra(s));
-  const speakerOf = (kind: string, label: string, extra?: (s: Rec) => boolean): unknown => statementOf(kind, label, extra)?.speaker;
-  // ⛔ THE DRAFTER'S OWN CONTRACT (runtime/build-model.ts `introducedBy`; DL 19 Oct, gap 3 swap): `explicit` is supplied in the
-  // retained source, `ai_proposed` is Olumi's own addition, and `inferred` is "an interpretation or reformulation of a supplied item,
-  // or genuinely unresolved introduction … never ai_proposed by default". So `inferred`, or anything else, is UNKNOWN: never the
-  // user's and never Olumi's (TL 14:17Z G3 #4). A declared speaker of another person or an unknown one wins, as before.
-  const whoOf = (provenance: unknown, speaker: unknown): Who => (speaker === 'other' ? 'other' : speaker === 'unknown' ? 'unknown'
-    : provenance === 'explicit' ? 'user' : provenance === 'ai_proposed' ? 'olumi' : 'unknown');
+  /**
+   * ⭐ THE AI DECLARES WHO, PER FIGURE (B's ONE change, DL 20 Oct; Codex AMEND): each figure's `origin` (user | third_party | olumi |
+   * unknown) is read as declared, with no host reading of whose words they are. The host keeps only the literal and unit check: a
+   * person's figure is credited as theirs only where their own statement of that subject is a byte substring of their words that
+   * writes the figure (sign included) in its unit; otherwise it is held as of unknown origin, never as the person's or Olumi's.
+   */
+  const unitAgrees = (said: unknown, unit: unknown): boolean => (typeof unit === 'string' && unit.trim() !== ''
+    ? typeof said === 'string' && sameUnit(said, unit) : said === null || said === undefined || said === '');
+  const writes = (subject: (st: Rec) => boolean, figure: unknown, unit: unknown): boolean => usersWords !== undefined && finite(figure)
+    && statements.some((st) => st?.speaker === 'user' && typeof st.quote === 'string' && usersWords.includes(st.quote) && subject(st)
+      && quoteHoldsFigure(st.quote, figure) && unitAgrees(st.unit, unit));
+  const about = (kind: string, label: string, field: string) => (st: Rec): boolean => st.subject?.kind === kind && st.field === field
+    && canonicalLabel(String(st.subject.label ?? '')) === canonicalLabel(label);
+  const whoOf = (origin: unknown, figure?: unknown, unit?: unknown, subject?: (st: Rec) => boolean): Who => {
+    const who: Who = origin === 'user' ? 'user' : origin === 'olumi' ? 'olumi' : origin === 'third_party' ? 'other' : 'unknown';
+    return who === 'user' && (subject === undefined || !writes(subject, figure, unit)) ? 'unknown' : who;
+  };
+  /** A supposition or a target is never held as a current level (Codex AMEND): it stays in its record and `declared`, as said. */
+  const notALevel = (stance: unknown): boolean => stance === 'hypothetical' || stance === 'target';
+  const notALevelSaid = (path: string, label: string, value: unknown, stance: unknown): RepairEntry => note(path, value,
+    `"${label}" at ${String(value)} is put forward as ${stance === 'target' ? 'a target' : 'a supposition'}, so it is kept as said, not as today's level.`, 'warn');
   // A's own sentences, by the field they are about: a science decision this converter takes from A is said in A's words.
   const aSaid = (path: string): RepairEntry[] => a.loss.filter((l) => l.field_path === path);
   // SCIENCE (structure: what each option sets and acts on): an Olumi option that sets nothing the model can hold that another
@@ -254,8 +266,8 @@ export function candidateToAdmittedGraph(input: unknown, usersWords?: string): C
 
   // The goal: A's threshold, cap, frame and today's level; the AI's declared comparator, horizon and words beside them.
   const aGoal = [aFor(g.metric)].find((n) => n?.kind === 'goal') ?? a.nodes.find((n) => n.kind === 'goal');
-  const goalWho = whoOf(g.baseline_provenance ?? g.provenance, speakerOf('goal', g.metric, (s) => s.field === 'level'));
-  const targetWho = whoOf(g.provenance, speakerOf('goal', g.metric, (s) => s.field === 'target'));
+  const goalWho = whoOf((g as Rec).baseline_origin, g.baseline_value, g.unit, about('goal', g.metric, 'level'));
+  const targetWho = whoOf((g as Rec).target_origin, g.value, g.unit, about('goal', g.metric, 'target'));
   const goalPath = `nodes[${slugId(g.metric)}]`;
   const threshold = finite(aGoal?.goal_threshold_raw);
   if (threshold && (targetWho === 'other' || targetWho === 'unknown')) blocked.push({ field_path: `${goalPath}.goal_threshold_raw`, declared: targetWho, missing: 'target_origin' });
@@ -267,15 +279,16 @@ export function candidateToAdmittedGraph(input: unknown, usersWords?: string): C
     const ag = aGoal as Rec | undefined;
     const target = ag?.goal_threshold_raw, cap = ag?.goal_threshold_cap, unit = ag?.goal_threshold_unit ?? g.unit;
     if (ag === undefined || ag.observed_state !== undefined || g.operator !== '<=' || g.baseline_known !== true
-      || (g.baseline_provenance ?? g.provenance) !== 'explicit' || !finite(g.baseline_value) || !finite(target) || !finite(cap)
+      || goalWho !== 'user' || !finite(g.baseline_value) || !finite(target) || !finite(cap)
       || !(ceilingTargetUnitMayBeALevel(unit) || targetTypedAsALevel(ag.goal_threshold_frame ?? (g as Rec).frame, unit))) return undefined;
     const level = admitGoalBaseline({ rawTarget: target, rawBaseline: g.baseline_value, cap, ceiling: true });
     return level.admitted ? { value: level.normalised, baseline: level.normalised, ...(typeof unit === 'string' && unit.trim() !== '' ? { unit } : {}),
       raw_value: g.baseline_value, cap } : undefined;
   })();
-  const goalLevel = aGoal?.observed_state !== undefined ? numbersOf(aGoal.observed_state) : ceilingLevel;
+  const goalLevel = notALevel((g as Rec).baseline_stance) ? undefined : aGoal?.observed_state !== undefined ? numbersOf(aGoal.observed_state) : ceilingLevel;
+  if (notALevel((g as Rec).baseline_stance) && finite(g.baseline_value)) loss.push(notALevelSaid(`${goalPath}.observed_state`, g.metric, g.baseline_value, (g as Rec).baseline_stance));
   if (goalWho === 'other' && goalLevel !== undefined) blocked.push({ field_path: `${goalPath}.observed_state`, declared: 'other', missing: 'speaker_name' });
-  if (finite(g.baseline_value) && goalLevel === undefined) loss.push(notConverted(a, `${goalPath}.observed_state`, g.metric, "Today's level", g.baseline_value));
+  if (finite(g.baseline_value) && goalLevel === undefined && !notALevel((g as Rec).baseline_stance)) loss.push(notConverted(a, `${goalPath}.observed_state`, g.metric, "Today's level", g.baseline_value));
   if (g.target_stated !== false && finite(g.value) && !threshold) loss.push(notConverted(a, `${goalPath}.goal_threshold_raw`, g.metric, 'The target', g.value));
   const goalNumbers: Rec = Object.fromEntries(Object.entries(aGoal ?? {}).filter(([k]) => k.startsWith('goal_threshold') || k === 'quantity_frame'
     || k === 'scale_frame' || k === 'goal_target_basis' || k === 'goal_level_reading'));
@@ -300,30 +313,25 @@ export function candidateToAdmittedGraph(input: unknown, usersWords?: string): C
     ...options.map((o) => ({ label: o.label, kind: 'option' as const, provenance: o.provenance, node: {} })),
     ...c.factors.map((f) => {
       const an = aFor(f.label);
-      // A factor's `provenance` says who introduced the ITEM; its level's own declared field is `baseline_known` ("true only for a
-      // baseline supplied by the user or supported evidence; a provisional AI estimate keeps this false").
-      const levelStatement = statementOf('factor', f.label, (s) => s.field === 'level');
-      const levelSpeaker = levelStatement?.speaker;
-      // ⭐ GAP 1 (K5 loop, DL 20 Oct): a level of 0 the AI declared `inferred` that no statement records anyone saying (an increment
-      // zero by construction, the AIE's sentence) is Olumi's reading, never a figure of unknown origin the person is shown as giving.
-      const zeroByConstruction = levelStatement === undefined && f.provenance === 'inferred' && f.baseline_value === 0;
-      const who = zeroByConstruction ? 'olumi'
-        : levelSpeaker === 'other' || levelSpeaker === 'unknown' || f.baseline_known === true ? whoOf(f.provenance, levelSpeaker) : 'olumi';
+      // A factor's `provenance` says who introduced the ITEM; its level's own author and stance are the AI's declaration.
+      const who = whoOf((f as Rec).origin, f.baseline_value, f.unit, about('factor', f.label, 'level'));
+      const level = notALevel((f as Rec).stance) ? undefined : an?.observed_state;
       factorWho.set(canonicalLabel(f.label), who);
-      if (who === 'other' && an?.observed_state !== undefined) blocked.push({ field_path: `nodes[${slugId(f.label)}].observed_state`, declared: 'other', missing: 'speaker_name' });
-      if (finite(f.baseline_value) && an?.observed_state === undefined) loss.push(notConverted(a, `nodes[${slugId(f.label)}].observed_state`, f.label, "Today's level", f.baseline_value));
+      if (who === 'other' && level !== undefined) blocked.push({ field_path: `nodes[${slugId(f.label)}].observed_state`, declared: 'other', missing: 'speaker_name' });
+      if (finite(f.baseline_value) && level === undefined) loss.push(notALevel((f as Rec).stance) ? notALevelSaid(`nodes[${slugId(f.label)}].observed_state`, f.label, f.baseline_value, (f as Rec).stance)
+        : notConverted(a, `nodes[${slugId(f.label)}].observed_state`, f.label, "Today's level", f.baseline_value));
       // SCIENCE (structure): A's category — a lever no option reaches is held as context (`demoteUnreachedLevers`), which
       // readiness reads; said in A's words.
       if (an?.category !== undefined && an.category !== f.role) loss.push(...aSaid(`nodes[${an.label}].category`));
       return { label: f.label, kind: 'factor' as const, provenance: f.provenance, node: {
         category: an?.category ?? f.role, ...(an?.scale_frame !== undefined ? { scale_frame: an.scale_frame } : {}), ...outOfRun(an, 'factor', who),
-        ...(an?.observed_state !== undefined ? { observed_state: { ...numbersOf(an.observed_state), ...valueStamp(who) },
+        ...(level !== undefined ? { observed_state: { ...numbersOf(level), ...valueStamp(who) },
           ...(typeof f.baseline_evidence?.quote === 'string' ? { source_quote: f.baseline_evidence.quote } : {}) } : {}),
       } };
     }),
     ...[...c.risks.map((r) => ({ ...r, kind: 'risk' as const })), ...c.outcomes.map((o) => ({ ...o, kind: 'outcome' as const }))].map((n) => {
       const an = aFor(n.label);
-      const who = whoOf(n.provenance, speakerOf(n.kind, n.label, (s) => s.field === 'level'));
+      const who = whoOf((n as Rec).origin, (n as Rec).baseline_value, (n as Rec).unit, about(n.kind, n.label, 'level'));
       // SCIENCE (units, constraints): an outcome a limit holds at a percentage level is a factor that can hold it (A's re-kind).
       const kind = n.kind === 'outcome' && an?.kind === 'factor' ? 'factor' as const : n.kind;
       return { label: n.label, kind, provenance: n.provenance, node: { ...(an?.scale_frame !== undefined ? { scale_frame: an.scale_frame } : {}),
@@ -381,8 +389,8 @@ export function candidateToAdmittedGraph(input: unknown, usersWords?: string): C
         continue;
       }
       if (aLevel === undefined) { loss.push(notConverted(a, path, factorLabel, `The level "${o.label}" sets`, iv.value)); continue; }
-      const setBy = whoOf(iv.provenance, speakerOf('option', o.label, (s) => s.field === 'level'
-        && canonicalLabel(String(s.subject.factor_label ?? '')) === canonicalLabel(iv.factor_label)));
+      const setBy = whoOf((iv as Rec).origin, iv.value, iv.unit ?? declaredFactor?.unit, (st) => about('option', o.label, 'level')(st)
+        && canonicalLabel(String(st.subject.factor_label ?? '')) === canonicalLabel(iv.factor_label));
       const computed = (iv as Rec).value_kind === 'additional';
       const who: Who = computed ? 'olumi' : setBy;
       if (computed) {
@@ -425,13 +433,12 @@ export function candidateToAdmittedGraph(input: unknown, usersWords?: string): C
       continue;
     }
     if (kindOf(from) === 'option') continue;
-    const said = (field: string) => (st: Rec): boolean => st.field === field && canonicalLabel(String(st.subject.to_label ?? '')) === canonicalLabel(l.to);
-    const drawnBy = whoOf(l.provenance, speakerOf('link', l.from, said('relation')));
+    const drawnBy = whoOf((l as Rec).origin === 'user' ? 'unknown' : (l as Rec).origin);
     drawnByPair.set(`${from}::${to}`, drawnBy);
     if (drawnBy === 'other' || drawnBy === 'unknown') blocked.push({ field_path: `edges[${from}::${to}]`, declared: drawnBy, missing: 'link_origin' });
     const { strength_mean: _mean, strength_std: _std, ...drafted } = l;
     const link: CandidateLink = { ...drafted, from, to };
-    const sizeBy = whoOf(l.effect_provenance ?? l.provenance, speakerOf('link', l.from, said('effect')));
+    const sizeBy: Who = (l as Rec).origin === 'user' ? 'user' : whoOf((l as Rec).origin);
     const sized = finite(l.effect_amount) && finite(l.effect_per_source_change) && l.effect_per_source_change !== 0 && sizeBy !== 'olumi';
     // The person's record-backed size, through A's own sizing as theirs (Science census exception, DL ruling (a)); used only
     // where A's sizing holds it as theirs, else it keeps the placeholder below, said and listed.
@@ -597,6 +604,18 @@ function withDeclaredStatements(graph: Rec, input: unknown, carry: StatementCarr
     return id === undefined ? undefined : { kind: s.kind as DoorSubject['kind'], id, field };
   };
   const text = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() !== '' ? v : undefined);
+  // Stance belongs to this declared figure, never a neighbouring statement or the item's introduction tag.
+  const declaredStance = (st: Rec): unknown => {
+    const draft = input as Rec, subject = st.subject;
+    const named = (items: unknown, label: unknown): Rec | undefined => list<Rec>(items)
+      .find((n) => canonicalLabel(String(n.label ?? '')) === canonicalLabel(String(label ?? '')));
+    if (subject.kind === 'goal') return draft.goal?.[st.field === 'target' ? 'target_stance' : 'baseline_stance'];
+    if (subject.kind === 'option') return list<Rec>(named(draft.options, subject.label)?.interventions)
+      .find((iv) => canonicalLabel(String(iv.factor_label)) === canonicalLabel(String(subject.factor_label)))?.stance;
+    if (subject.kind === 'link') return list<Rec>(draft.links).find((l) => canonicalLabel(String(l.from)) === canonicalLabel(String(subject.label))
+      && canonicalLabel(String(l.to)) === canonicalLabel(String(subject.to_label)))?.stance;
+    return named(draft[`${subject.kind}s`], subject.label)?.stance;
+  };
   const groups = new Map<string, { subject: DoorSubject; statements: UserStatement[] }>();
   for (const st of list<Rec>((input as Rec).statements)) {
     const s = st?.subject;
@@ -614,7 +633,7 @@ function withDeclaredStatements(graph: Rec, input: unknown, carry: StatementCarr
     const statement = figures === undefined ? undefined : userStatementOf({ ...(st.speaker === 'user' ? { speaker: 'user' } : { said_by: 'unknown' }),
       quote: st.quote, source, subject: { quantity: subjectKey(subject), node_id: subject.id, ...(subject.option_id !== undefined ? { option_id: subject.option_id } : {}) },
       form: st.form, ...figures, ...(text(st.unit) !== undefined ? { unit: st.unit } : {}), ...(text(st.qualifier) !== undefined ? { qualifier: st.qualifier } : {}),
-      ...(text(st.conditions) !== undefined ? { conditions: st.conditions } : {}), reading: 'olumi' });
+      ...(text(st.conditions) !== undefined ? { conditions: st.conditions } : {}), reading: 'olumi', stance: declaredStance(st) });
     if (statement === undefined) continue;
     if (st.speaker === 'other') blocked.push({ field_path: `nodes[${subject.id}].user_statements`, declared: 'other', missing: 'speaker_name' });
     const group = groups.get(subjectKey(subject)) ?? { subject, statements: [] };

@@ -20,13 +20,15 @@
  *  · factor value — Olumi's: adopted by the press (`user_assumption` + review → ai, accepted). The user's or a third party's,
  *    with the words literally the user's: an unverified binding (`user_material_unverified` → human, role unverified). A
  *    literal match proves the bytes, never the speaker (PL 3b), so it is never "the user's, verified". Not kept: the words,
- *    and for a third party that it was someone else, and their name. An unknown speaker: BLOCKED-SCHEMA (it would read human).
+ *    and for a third party that it was someone else, and their name. An unknown speaker retains no source stamp
+ *    and reads unknown; its claim keeps the declaration.
  *  · option setting — Olumi's: `cee_hypothesis` (ai). Not kept: the user's approval (a cell holds no acceptance marker). Any
  *    other source, with the words literally the user's: ORIGIN UNKNOWN (R3: `cee_hypothesis` beside `user_material_unverified`,
  *    the add-option pairing), never Olumi's and never the user's verified figure. Not kept: the declared origin, a third
  *    party's name, the words.
- *  · stance (AIE 15:24/15:54, separate from source): a value holds a current level, a setting a what-if. A target or a
- *    supposition is never saved as a value; a stance the carrier does not mean is saved with the stance named as not kept.
+ *  · stance (AIE 15:24/15:54, separate from source): a value holds a current level, a setting a what-if. A target is never
+ *    saved as a value; a supposition writes only its conditional claim beside today's unchanged level. Other unsupported
+ *    stances are named as not kept.
  *  · link strength (candidate 2, outbox/C5-PATHB-LINK-STRENGTH-DESIGN.md v2) — Olumi's band only, through the existing
  *    capability's ONE rule set (`proposeLinkStrengths`: midpoint or review, placeholders, definitional links and the user's own
  *    figures left out, "already") and the SAME door. A person's band: BLOCKED-SCHEMA — no link carrier holds "human,
@@ -179,9 +181,11 @@ function holdingOf(kind: Op['kind'] | 'target' | 'link', s: DeclaredSource, stan
     return { stored: { origin: 'ai' }, not_kept: s.origin === 'olumi' ? [{ what: 'approval', declared: 'adopted_by_the_press' }]
       : [{ what: 'origin', declared: s.origin }, ...(s.origin === 'third_party' && s.named_source !== null ? [{ what: 'name' as const, declared: s.named_source }] : [])] };
   }
-  if (kind === 'value' && s.origin === 'unknown') return { blocked: 'a figure whose speaker is not known cannot be saved as unknown on this path yet; it would read as a person\'s figure' };
   if (stance === 'target') return { blocked: kind === 'value' ? 'a target would become this factor\'s current level; setting a target isn\'t available on this path yet' : 'a target is not an option\'s setting' };
-  if (kind === 'value' && stance === 'hypothetical') return { blocked: 'a supposed figure would become this factor\'s current level; it cannot be kept as a supposition on this path yet' };
+  if (kind === 'value' && stance === 'hypothetical') return s.origin === 'olumi' || s.quote === null
+    ? { blocked: 'a supposition needs its source words to be kept as a conditional claim' }
+    : { stored: { origin: 'unknown' }, not_kept: [] };
+  if (kind === 'value' && s.origin === 'unknown') return { stored: { origin: 'unknown' }, not_kept: [] };
   // What the carrier means for this source: Olumi's figure is held as Olumi's estimate; a person's value as a stated level;
   // an option's setting as a what-if. Any other declared stance is saved with its stance named as not kept.
   const held: readonly DeclaredStance[] = s.origin === 'olumi' ? (kind === 'value' ? ['estimate'] : ['estimate', 'hypothetical'])
@@ -290,8 +294,13 @@ function planOf(scenarioId: string, proposalId: string, ops: readonly Op[], grap
     if (isBlocked(holdingOf(o.kind, o.source, o.stance))) return { refusal: 'blocked_schema', op: i };
     const olumi = o.source.origin === 'olumi';
     if (o.kind === 'value') {
+      if (o.stance === 'hypothetical') {
+        const factorUnit = factorUnitOf(graph, factor);
+        if (o.unit !== null && factorUnit !== undefined && unitComparisonKey(o.unit) !== unitComparisonKey(factorUnit)) return { refusal: 'unit_mismatch', op: i };
+        continue; // The existing claim is the conditional carrier; today's level stays intact.
+      }
       plan.values.push({ factor_id: o.factor_id, value: o.value, ...(o.unit === null ? {} : { unit: o.unit }), author: olumi ? 'model_proposed' : 'user_specified' });
-      if (!olumi) plan.bindings.push({ scenarioId, proposalId, targetId: o.factor_id, rawValue: o.value, unverifiedBinding: { source: o.source.quote ?? '', quote: o.source.quote ?? '' } });
+      if (!olumi) plan.bindings.push({ scenarioId, proposalId, targetId: o.factor_id, rawValue: o.value, unverifiedBinding: { source: o.source.quote ?? '', quote: o.source.quote ?? '', ...(o.source.origin === 'unknown' ? { origin: 'unknown' as const } : {}) } });
       if (frameOf(factor) === null && Math.abs(o.value) > 1) plan.frames.push({ factor_id: o.factor_id, cap: defaultFrameFor(o.value) });
       continue;
     }
@@ -321,7 +330,10 @@ function readbackOf(read: SavedRead, ops: readonly Op[]): { holds: boolean; fait
   const written = ops.map((o) => {
     const holding = holdingOf(o.kind, o.source, o.stance);
     const factor = byId.get(o.factor_id);
-    const carrier = o.kind === 'value' ? factor?.observed_state : cellOf(byId.get(o.option_id), o.factor_id);
+    const conditional = o.kind === 'value' && o.stance === 'hypothetical';
+    const claim = claimOf(o);
+    const carrier = conditional ? (claim !== null && claimHeld(read.graph, claim) ? { value: claim.statement.low, unit: claim.statement.unit } : undefined)
+      : o.kind === 'value' ? factor?.observed_state : cellOf(byId.get(o.option_id), o.factor_id);
     const figure = typeof carrier === 'number' ? carrier : isRec(carrier) ? (typeof carrier.raw_value === 'number' ? carrier.raw_value : carrier.value) : undefined;
     const source: Provenance = o.kind === 'value' ? provenanceOf({ value: carrier }) : provenanceOf({ setting: carrier, target: factor });
     const storedUnit = isRec(carrier) && typeof carrier.unit === 'string' ? carrier.unit : null;
@@ -330,7 +342,6 @@ function readbackOf(read: SavedRead, ops: readonly Op[]): { holds: boolean; fait
       && (holding.stored.accepted !== true || source.accepted);
     const holds = close(figure, o.value) && asHeld && (o.unit === null || storedUnit?.trim().toLowerCase() === o.unit.trim().toLowerCase());
     // GAP 1: a person's figure is approved WITH its claim; what the claim holds is kept, there, through every cold reader.
-    const claim = claimOf(o);
     const expected = claim !== null && !attested(read.graph, claim.subject);
     const held = expected && claimHeld(read.graph, claim);
     const notKept = isBlocked(holding) ? [] : held ? holding.not_kept.filter((k) => !keptByClaim(claim!.statement)(k)) : holding.not_kept;
@@ -689,7 +700,7 @@ function figuresAllowed(ops: readonly FigureOp[], ctx: ChangeCtx, at: (i: number
   for (const [i, o] of ops.entries()) {
     const holding = holdingOf(o.op === 'set_factor_value' ? 'value' : 'setting', o.source, o.stance);
     if (isBlocked(holding)) return unavailable('blocked_schema', 'none', blockedSaid(at(i), holding.blocked));
-    if (o.source.origin !== 'olumi' && (o.source.quote === null || !inTheUsersWords(o.source.quote, ctx))) return refused('quote_not_in_users_words', undefined, { op: at(i) });
+    if (o.source.origin !== 'olumi' && (o.source.quote === null || !inTheUsersWords(o.source.quote, ctx) || !quoteHoldsFigure(o.source.quote, o.value))) return refused('quote_not_in_users_words', undefined, { op: at(i) });
   }
   return null;
 }
@@ -697,20 +708,14 @@ function figuresAllowed(ops: readonly FigureOp[], ctx: ChangeCtx, at: (i: number
 /**
  * add_to_model: each new factor as the add-factor door holds one. Its id, name and link come from that door's own builder on this
  * read (name taken, target kind, reaches the goal); its figure is framed by the ONE framing rule and stamped as the declared
- * source's: the person's figure when their own words hold it, or Olumi's estimate. Any other source or stance is BLOCKED, never
- * relabelled (the door holds a new factor's figure as the person's or Olumi's only).
+ * source's: the person's literal figure, Olumi's estimate, or unresolved origin. A hypothetical writes only its claim.
  */
 /**
  * add_to_model's ONE who-rule, for every new part's figure (a new factor's level, a new option's setting): held only as the
- * person's stated figure in their own words, or as Olumi's estimate. Any other declared source or stance is BLOCKED.
+ * declared origin and stance, with literal figures checked in their source words.
  */
-function newFigureAllowed(f: { readonly source: DeclaredSource; readonly stance: DeclaredStance }, ctx: ChangeCtx, op: number): ToolOutcome | null {
-  const person = f.source.origin === 'user' && f.stance === 'stated_current';
-  if (!person && !(f.source.origin === 'olumi' && f.stance === 'estimate')) {
-    return unavailable('blocked_schema', 'none', blockedSaid(op, 'a new part\'s figure is held only as the person\'s stated figure or as Olumi\'s estimate; put forward as anything else it would be relabelled'));
-  }
-  if (person && (f.source.quote === null || !inTheUsersWords(f.source.quote, ctx))) return refused('quote_not_in_users_words', undefined, { op });
-  return null;
+function newFigureAllowed(f: Pick<Op, 'value' | 'unit' | 'source' | 'stance'>, ctx: ChangeCtx, op: number): ToolOutcome | null {
+  return figuresAllowed([{ op: 'set_factor_value', factor_id: '', ...f }], ctx, () => op);
 }
 
 function newFactorsOf(adds: readonly AddArgs[], read: SavedRead, ctx: ChangeCtx, at: (i: number) => number): CompoundAddFactor[] | ToolOutcome {
@@ -723,11 +728,14 @@ function newFactorsOf(adds: readonly AddArgs[], read: SavedRead, ctx: ChangeCtx,
   if (!built.matched) return refused(codeOf(`add_${built.reason}`), undefined, { op: at(0) });
   return adds.map((a, i) => {
     const person = a.source.origin === 'user';
-    const observed = { ...framedObservedState({ baseline_value: a.value, unit: a.unit, provenance: person ? 'explicit' : 'inferred',
-      plausible_max: a.value > 1 ? defaultFrameFor(Math.abs(a.value)) : null }), source: person ? USER_TODAY_SOURCE : 'cee_inference',
-      extractionType: person ? 'explicit' : 'inferred' };
+    const { source: _source, extractionType: _type, ...numbers } = framedObservedState({ baseline_value: a.value, unit: a.unit,
+      provenance: person ? 'explicit' : 'inferred', plausible_max: a.value > 1 ? defaultFrameFor(Math.abs(a.value)) : null }) as Rec;
+    const observed = { ...numbers, ...(person ? { source: USER_TODAY_SOURCE, extractionType: 'explicit' }
+      : a.source.origin === 'olumi' ? { source: 'cee_inference', extractionType: 'inferred' } : { origin: 'unknown' }),
+      ...(a.stance === 'hypothetical' ? { stance: a.stance } : {}) };
     return { id: built.proposal.factors[i]!.id, label: built.proposal.factors[i]!.label, link: { to_id: a.acts_on, effect_direction: a.direction },
-      observed_state: observed, basis: person ? 'written_about' : 'olumi_estimate', ...(person ? { quote: a.source.quote! } : {}) };
+      observed_state: observed, ...(person ? { basis: 'written_about' as const } : a.source.origin === 'olumi' ? { basis: 'olumi_estimate' as const } : {}),
+      ...(a.source.quote !== null ? { quote: a.source.quote } : {}) };
   });
 }
 
@@ -814,7 +822,7 @@ function addsOf(operations: readonly ProposalOperation[]): CompoundAddFactor[] |
     const v = isRec(o.value) ? o.value : {};
     const link = isRec(v.link) ? v.link : {};
     if (v.id !== o.path || typeof v.label !== 'string' || typeof link.to_id !== 'string' || (link.effect_direction !== 'positive' && link.effect_direction !== 'negative')
-      || !isRec(v.observed_state) || (v.basis !== 'written_about' && v.basis !== 'olumi_estimate') || (v.quote !== undefined && typeof v.quote !== 'string')) return null;
+      || !isRec(v.observed_state) || (v.basis !== undefined && v.basis !== 'written_about' && v.basis !== 'olumi_estimate') || (v.quote !== undefined && typeof v.quote !== 'string')) return null;
     out.push({ id: o.path, label: v.label, link: { to_id: link.to_id, effect_direction: link.effect_direction }, observed_state: v.observed_state, basis: v.basis,
       ...(typeof v.quote === 'string' ? { quote: v.quote } : {}) });
   }
@@ -828,16 +836,18 @@ function addsRead(read: SavedRead, adds: readonly CompoundAddFactor[], figures: 
   const figureOf = (os: unknown): unknown => (isRec(os) ? (typeof os.raw_value === 'number' ? os.raw_value : os.value) : undefined);
   const written = adds.map((a) => {
     const node = nodes.find((n) => n.id === a.id);
-    const figure = figureOf(node?.observed_state);
+    const conditional = a.observed_state.stance === 'hypothetical';
+    const figure = conditional ? figureOf(a.observed_state) : figureOf(node?.observed_state);
     // The person's figure is approved WITH their claim (GAP 1): required, and it keeps their words.
     const declared = figures.find((f) => f.factor_id === a.id);
     const claim = declared === undefined ? null : claimOf(declared);
     const held = claim !== null && claimHeld(read.graph, claim);
     const holds = node !== undefined && node.kind === 'factor' && node.label === a.label && close(figure, Number(figureOf(a.observed_state)))
-      && edges.some((e) => e.from === a.id && e.to === a.link.to_id) && (claim === null || held);
+      && edges.some((e) => e.from === a.id && e.to === a.link.to_id) && (claim === null || held) && (!conditional || node.observed_state === undefined)
+      && provenanceOf({ value: node.observed_state }).origin === provenanceOf({ value: conditional ? undefined : a.observed_state }).origin;
     const notKept: NotKept[] = (a.quote === undefined ? [] : [{ what: 'words' as const, declared: a.quote }]).filter((k) => !held || !keptByClaim(claim!.statement)(k));
     return { holds, notKept, row: { op: 'add_to_model', id: a.id, label: node?.label ?? null, acts_on: a.link.to_id, figure: figure ?? null,
-      unit: isRec(node?.observed_state) && typeof node.observed_state.unit === 'string' ? node.observed_state.unit : null,
+      unit: conditional ? declared?.unit ?? null : isRec(node?.observed_state) && typeof node.observed_state.unit === 'string' ? node.observed_state.unit : null,
       stored_as: node === undefined ? null : provenanceOf({ value: node.observed_state }),
       ...(held ? { claim: { said_by: saidByOf(claim!.statement) } } : {}), not_kept: notKept } };
   });

@@ -217,9 +217,11 @@ const isOlumiToday = (os: unknown): boolean => olumiTodayStamp.safeParse(os).suc
  */
 export function isUserTodayObservedState(os: unknown): boolean {
   if (os === null || typeof os !== 'object' || Array.isArray(os)) return false;
-  const { range, ...o } = os as Record<string, unknown>;
-  if (o.source !== USER_TODAY_SOURCE && !isOlumiToday(o)) return false;
-  if (!isOlumiToday(o) && !userTodayStamp.safeParse(o).success) return false;
+  const { range, origin, stance, ...o } = os as Record<string, unknown>;
+  if ((origin !== undefined && origin !== 'unknown') || (stance !== undefined && stance !== 'hypothetical')) return false;
+  const unknown = origin === 'unknown' && o.source === undefined && o.extractionType === undefined;
+  if (origin === 'unknown' && !unknown) return false;
+  if (!unknown && !isOlumiToday(o) && !userTodayStamp.safeParse(o).success) return false;
   // Recovery Batch B (L6): a range rides only beside the user's own figure, and only as `isStatedLevelRange` admits it.
   if (range !== undefined && !isStatedLevelRange(range, o)) return false;
   // The shape rule is the stated-baseline one, verbatim: only the source differs.
@@ -357,7 +359,8 @@ export function stampNewUserTodayLevels<T extends PatchOperation>(
     const confirmedPairing = l.basis === 'confirmed_by_approval' && typeof l.quote === 'string'
       ? { reviewed_by_user: { intent: 'confirm_pairing', quote: l.quote } }
       : {};
-    out[at[0]!] = { ...out[at[0]!]!, value: { ...node, observed_state: { ...l.observed_state, ...confirmedPairing } } };
+    const { origin: _origin, ...observed } = l.observed_state; // The held declaration validates the write; stored origin is read from its stamps.
+    out[at[0]!] = { ...out[at[0]!]!, value: { ...node, ...(l.observed_state.stance === 'hypothetical' ? {} : { observed_state: { ...observed, ...confirmedPairing } }) } };
   }
   return { ok: true, operations: out };
 }
