@@ -8,23 +8,20 @@
  *  3. CREATE-ONLY registration of `{...graph, living_model}` as a core postimage (`thin_core`: identity/format projection only)
  *     under the construction's own operation id (`constructionOperationId`), so a lost response or a concurrent copy is
  *     recovered as this construction's own version, never a second one;
- *  4. an INDEPENDENT readback: `mutated` only when THIS registration's own receipt and CAS hashes match a fresh read AND
- *     that read holds the complete postimage, living model included (`approvedGraphHeld`), not merely an existing model.
+ *  4. an INDEPENDENT readback (`writeCorePostimage`, the one core write): `mutated` only when THIS registration's own receipt
+ *     and CAS hashes match a fresh read AND that read holds the complete postimage, living model included.
  * A retry of a construction that already committed reports "already saved", never a second write or "model exists".
  */
 import { z } from 'zod-v4';
 import type { AgentToolContext } from '../../agent-lane/runtime/agent-tools.js';
 import type { InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
 import { constructionOperationId, findConstructionVersion } from '../../agent-lane/runtime/build-model.js';
-import { approvedGraphHeld } from '../../agent-lane/runtime/draft-replacement.js';
-import { computeGraphIdentityHash } from '../../context/graph-identity.js';
-import { computeAnalysisAffectingGraphHashSha256 } from '../../context/graph-hash.js';
-import type { AtomicCommittedModelVersionReceipt } from '../../session/store.js';
 import { LivingModel } from '../../../schemas/living-model.js';
 import { applyKernel } from '../living-model/kernel.js';
 import { mapLivingModel } from '../living-model/mapper.js';
 import { isNoModelYet, isSavedRead, readSaved } from './context-tool.js';
-import { ok, refused, unavailable, OUTCOME_TRACE, type DraftVerification, type ToolOutcome } from './outcome.js';
+import { ok, refused, OUTCOME_TRACE, type ToolOutcome } from './outcome.js';
+import { writeCorePostimage } from './core-write.js';
 import { inTheUsersWords, type TypedWords } from './user-words.js';
 
 export const BUILD_MODEL_FROM_BRIEF = 'build_model_from_brief';
@@ -55,11 +52,6 @@ export async function buildModel(deps: DraftDeps, ctx: DraftContext, args: Build
   } : {}) }, OUTCOME_TRACE, { value: outcome[OUTCOME_TRACE] });
 }
 
-/** Only verifier-owned enums and hash prefixes enter the existing diagnostic row. */
-const hashPrefix = (value: unknown): string | null => typeof value === 'string' && /^[a-f0-9]{12,64}$/i.test(value) ? value.slice(0, 12) : null;
-const unknownSave = (reason: string, diagnostic: DraftVerification): ToolOutcome => Object.defineProperty(
-  unavailable(reason, 'unknown'), OUTCOME_TRACE, { value: { draft_verification: diagnostic } },
-);
 
 async function construct(deps: DraftDeps, ctx: DraftContext, args: BuildModelArgs): Promise<ToolOutcome> {
   return constructUnrecorded(deps, ctx, args);
@@ -81,52 +73,15 @@ async function constructUnrecorded(deps: DraftDeps, ctx: DraftContext, args: Bui
   if (!mapped.graph.nodes.some((n) => n.kind !== 'decision')) return refused('model_empty');
   const graph: Record<string, unknown> = { ...mapped.graph, living_model: kernelled.model };
 
-  let reg: Awaited<ReturnType<InternalDispatch>>;
-  try {
-    reg = await deps.dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
-      graph,
-      thin_core: true,
-      brief_text: args.brief,
-      operation_id: constructionOperationId(ctx.scenario_id, args.brief),
-      // Create-only: the route refuses `GRAPH_STALE` if a model appeared since the read above (`buildModelFromBrief`'s contract).
-      expected_graph_identity_hash: null,
-    });
-  } catch {
-    return unknownSave('not_confirmed', { check: 'ack_status', status: null });
-  }
-  const code = (reg.json.details as { code?: unknown } | undefined)?.code;
-  if (reg.status === 409 && (code === 'GRAPH_STALE' || code === 'OPERATION_ID_REUSED')) {
-    // This construction already committed (a lost response, or a concurrent copy won): its own version, or not ours.
-    const prior = await ownVersion();
-    if (prior !== null) return ok({ already_saved: true, model_version: prior }, { mutated: false });
-    if (code === 'GRAPH_STALE') return refused('model_exists');
-    return unknownSave('not_confirmed', { check: 'ack_status', status: reg.status });
-  }
-  if (reg.status >= 400 && reg.status < 500) return refused('registration_refused');
-  if (reg.status !== 200) return unknownSave('not_confirmed', { check: 'ack_status', status: reg.status });
-
-  // The response is THIS create-only registration's receipt; history availability is not save verification.
-  const receipt = reg.json.model_version as Partial<AtomicCommittedModelVersionReceipt> | undefined;
-  const ack = typeof reg.json.graph_identity_hash === 'string' ? reg.json.graph_identity_hash
-    : (reg.json.graph_identity_hash as { value?: unknown } | undefined)?.value;
-  const after = await readSaved(deps, ctx.scenario_id);
-  if (receipt == null) return unknownSave('not_verified', { check: 'receipt_absent' });
-  if (typeof receipt.version_id !== 'string' || receipt.version_id === '') return unknownSave('not_verified', { check: 'receipt_invalid', field: 'version_id' });
-  if (!Number.isSafeInteger(receipt.version_number) || Number(receipt.version_number) < 1) return unknownSave('not_verified', { check: 'revision_mismatch', field: 'version_number' });
-  if (typeof receipt.mutation_id !== 'string' || receipt.mutation_id === '') return unknownSave('not_verified', { check: 'receipt_invalid', field: 'mutation_id' });
-  if (!isSavedRead(after)) return unknownSave('not_verified', { check: 'readback_unavailable', code: after.status === 'ok' ? 'read_malformed' : after.reason });
-  if (typeof ack !== 'string') return unknownSave('not_verified', { check: 'ack_status', status: reg.status });
-  if (ack !== after.identity) return unknownSave('not_verified', { check: 'hash_mismatch', field: 'ack_identity', expected: hashPrefix(ack), actual: hashPrefix(after.identity) });
-  if (receipt.graph_identity_hash !== ack) return unknownSave('not_verified', { check: 'hash_mismatch', field: 'receipt_identity', expected: hashPrefix(ack), actual: hashPrefix(receipt.graph_identity_hash) });
-  const identity = computeGraphIdentityHash(after.graph as never)?.value;
-  if (identity !== ack) return unknownSave('not_verified', { check: 'hash_mismatch', field: 'read_identity', expected: hashPrefix(ack), actual: hashPrefix(identity) });
-  if (reg.json.graph_hash !== after.graphHash) return unknownSave('not_verified', { check: 'revision_mismatch', field: 'graph_hash', expected: hashPrefix(reg.json.graph_hash), actual: hashPrefix(after.graphHash) });
-  const analysisHash = computeAnalysisAffectingGraphHashSha256(after.graph as never);
-  if (receipt.analysis_affecting_hash !== analysisHash) return unknownSave('not_verified', { check: 'hash_mismatch', field: 'analysis_hash', expected: hashPrefix(analysisHash), actual: hashPrefix(receipt.analysis_affecting_hash) });
-  if (!approvedGraphHeld(graph, after.graph)) return unknownSave('not_verified', { check: 'postimage_diff',
-    keys: Object.keys(graph).filter((key) => !approvedGraphHeld(graph, { ...graph, [key]: after.graph[key] })).slice(0, 8),
-  });
-  if (reg.json.replayed === true) return ok({ already_saved: true, model_version: receipt }, { mutated: false });
+  const write = await writeCorePostimage(deps, { scenarioId: ctx.scenario_id, graph, briefText: args.brief,
+    operationId: constructionOperationId(ctx.scenario_id, args.brief),
+    // Create-only: the route refuses `GRAPH_STALE` if a model appeared since the read above (`buildModelFromBrief`'s contract).
+    expectedIdentity: null, ownVersion });
+  if (write.status === 'unknown') return write.outcome;
+  if (write.status === 'stale') return refused('model_exists');
+  if (write.status === 'refused') return refused('registration_refused');
+  if (write.status === 'already_saved') return ok({ already_saved: true, model_version: write.receipt }, { mutated: false });
+  const { receipt, after } = write;
   try { deps.onModelRegistered?.(after.graph); } catch { /* an observer never decides the outcome */ }
   return ok({
     provisional: 'olumi', model_version: receipt, revision: { graph_hash: after.graphHash, graph_identity_hash: after.identity },
