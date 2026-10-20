@@ -82,6 +82,13 @@ describe('thin core: the known-answer living model reaches the engine unchanged'
     expect(targetTestabilityOf(stored(OPTION_EFFECTS))).toEqual({ kind: 'testable', goal_id: 'w' });
   });
 
+  it('R2 P07/P08: the exact sum\'s change reaches the stored graph declared a change (0 today by definition, which PLoT holds exact)', () => {
+    const nodes = stored(OPTION_EFFECTS).nodes as Rec[];
+    expect(nodes.find((n) => n.id === 'w__change')).toMatchObject({ category: 'controllable', quantity_frame: 'change', observed_state: { value: 0 } });
+    // CONTROL: the goal's level today is a level, never declared a change.
+    expect(nodes.find((n) => n.id === 'w_today')!.quantity_frame).toBeUndefined();
+  });
+
   it('served capacity 20 Oct (Lenses): "about 20, between 10 and 30" keeps the target testable, never "needs a size for the link"', () => {
     const centred = structuredClone(KNOWN_ANSWER);
     centred.links[0]!.effect = { form: 'range', value: 50, low: 30, high: 70, sd: null, unit: 'units', sign: '+' };

@@ -221,7 +221,9 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     // The exact sum's change is read on the goal's own frame, so the goal is its parts added in the goal's units.
     const cap = exactSum !== undefined && f.id === exactSum.lever ? goal!.cap : capFor(levels, f.unit, goal);
     if (cap !== undefined) caps.set(f.id, cap);
-    const node: Rec = { id: f.id, kind: 'factor', label: f.label, category: setsFactor.has(f.id) ? 'controllable' : 'observable' };
+    const node: Rec = { id: f.id, kind: 'factor', label: f.label, category: setsFactor.has(f.id) ? 'controllable' : 'observable',
+      // The exact sum's change: 0 today by definition (the contract's marker), so the engine holds it exact.
+      ...(f.id === exactSum?.lever ? { quantity_frame: 'change' } : {}) };
     if (f.value !== null && cap !== undefined) {
       current.set(f.id, f.value);
       node.observed_state = withSource({ value: f.value / cap, raw_value: f.value, cap, unit: f.unit ?? '' }, f);
