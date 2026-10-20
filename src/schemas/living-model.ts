@@ -95,7 +95,7 @@ export const LivingLink = z.object({
   /** A factor id (or an option id for an option's direct effect). */
   from: id.describe('A factor id, or an option id when the person states that option\'s own effect on `to` ("Option A adds 30").'),
   /** A factor id or an aim id. */
-  to: id.describe('A factor id or an aim id.'),
+  to: id.describe('A factor id or an aim id. An effect on the quantity an aim measures goes to that aim\'s id, never to a factor that restates the aim\'s own quantity.'),
   effect: z.object({
     /**
      * `normal`: an explicitly stated law, `value` its mean and `sd` its standard deviation, per +1 of `from`. An ordinary
