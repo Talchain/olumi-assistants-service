@@ -286,11 +286,13 @@ describe('L12: joint targets through the real route and SDK approval', () => {
       conditions: [
         { node_id: 'conversion', comparator: '>' as const, value: 15, unit: '%', quantity: 'Conversion rate', frame: 'level', stance: 'target', source: source(words) },
         { node_id: 'customers', comparator: '>=' as const, value: 20, unit: 'customers', quantity: 'New customers', frame: 'level', stance: 'target', source: source(words) },
-      ], timing: { months: 3, reference: 'launch', period_kind: 'over_period', deadline: null } }] };
+      ], timing: { months: 3, reference: 'launch', period_kind: 'over_period', deadline: null },
+      links: present ? [] : [{ from: 'conversion', to: 'orders', sign: 'positive' as const }, { from: 'customers', to: 'orders', sign: 'positive' as const }] }] };
     const { body, card } = await prepare(args, words);
     expect(card, JSON.stringify(body._agent?.tool_calls)).toBeDefined();
     expect(body._proposal_fields.proposals).toHaveLength(1);
-    expect(card.approve_action.detail).toBe('Olumi’s reading: Conversion rate above 15% AND New customers at least 20 customers; over the first three months after launch.');
+    expect(card.approve_action.detail).toBe('Olumi’s reading: Conversion rate above 15% AND New customers at least 20 customers; over the first three months after launch.'
+      + (present ? '' : ' Olumi’s provisional links: Conversion rate → Weekly orders (positive); New customers → Weekly orders (positive).'));
     expect(registered).toHaveLength(0);
     await approve(card, body);
     expect(outputOf('apply_call'), JSON.stringify(outputOf('apply_call'))).toMatchObject({ status: 'ok', data: { saved: true } });
@@ -317,7 +319,7 @@ describe('L12: joint targets through the real route and SDK approval', () => {
         subject: { quantity: label, node_id: id }, reference: 'launch', period: 'over the first three months after launch', stance: 'target' })]);
     }
     const declared = { goal_id: 'orders', conditions: args.ops[0]!.conditions.map(c => ({ ...c, goal_id: c.node_id, origin: c.source.origin,
-      quote: c.source.quote, said_in: words, recorded_at: '' })), timing: { ...args.ops[0]!.timing, reference: 'launch' as const, period_kind: 'over_period' as const }, new_quantities: present ? [] : ['conversion', 'customers'] };
+      quote: c.source.quote, said_in: words, recorded_at: '' })), timing: { ...args.ops[0]!.timing, reference: 'launch' as const, period_kind: 'over_period' as const }, new_quantities: present ? [] : ['conversion', 'customers'], links: args.ops[0]!.links };
     expect(targetReadback(cold, declared).holds).toBe(true);
     if (!present) for (const mutate of [
       (g: Json) => { g.nodes = g.nodes.filter((n: Json) => n.id !== 'customers'); },
@@ -367,6 +369,64 @@ describe('L12: joint targets through the real route and SDK approval', () => {
     const { card } = await prepare(joint(words), words);
     expect(card).toBeDefined();
     expect(card.approve_action.detail).toBe('Olumi’s reading: Weekly orders above 150 orders a week AND Vans on the road at most 6 vans; over the first three months from today.');
+  });
+
+  it.each([
+    ['drivers', 'Drivers on the road', 'drivers'],
+    ['marketing_staff', 'Marketing staff', 'people'],
+  ])('L12C no declared link: a resource cap saves only its condition (%s)', async (id, quantity, unit) => {
+    const words = `We need over 150 weekly orders AND no more than 6 ${unit} over the next 3 months. More ${quantity} increase weekly orders. Revenue was 2m as of 2026-09-01.`;
+    const args = joint(words) as Json;
+    Object.assign(args.ops[0].conditions[1], { node_id: id, quantity, unit });
+    const beforeEdges = structuredClone(persisted.edges);
+    const { body, card } = await prepare(args, words);
+    expect(card, JSON.stringify(body._agent?.tool_calls)).toBeDefined();
+    await approve(card, body);
+    expect(outputOf('apply_call')).toMatchObject({ status: 'ok', data: { saved: true } });
+    expect(registered).toHaveLength(1);
+    const cold = projectGraphForPersistence({ ...structuredClone(persisted), ...GraphV3.parse(persisted) }) as Json;
+    expect(cold.edges).toEqual(beforeEdges);
+    expect(cold.nodes.find((n: Json) => n.id === id).observed_state).toBeUndefined();
+    expect(cold.goal_constraints.find((r: Json) => r.node_id === id)).toMatchObject({ role: 'goal_target', operator: '<=', value: 6, unit });
+    const declared = { goal_id: 'orders', conditions: args.ops[0].conditions.map((c: Json) => ({ ...c, goal_id: c.node_id, origin: c.source.origin,
+      quote: c.source.quote, said_in: words, recorded_at: '' })), timing: args.ops[0].timing, new_quantities: [id] };
+    expect(targetReadback(cold, declared).holds).toBe(true);
+    for (const sign of ['positive', 'negative']) {
+      const mutant = structuredClone(cold);
+      mutant.edges.push({ from: id, to: 'orders', effect_direction: sign, strength: { mean: sign === 'positive' ? 0.5 : -0.5, std: 0.1 }, exists_probability: 0.8 });
+      expect(targetReadback(mutant, declared).holds).toBe(false);
+    }
+  });
+
+  it.each([
+    ['drivers', 'Drivers on the road', 'drivers', 'positive'],
+    ['marketing_staff', 'Marketing staff', 'people', 'positive'],
+    ['delays', 'Delivery delays', 'delays', 'negative'],
+  ] as const)('L12C declared link: shown, saved and fully read back (%s, %s, %s, %s)', async (id, quantity, unit, sign) => {
+    const words = `We need over 150 weekly orders AND no more than 6 ${unit} over the next 3 months. Revenue was 2m as of 2026-09-01.`;
+    const args = joint(words) as Json;
+    Object.assign(args.ops[0].conditions[1], { node_id: id, quantity, unit });
+    args.ops[0].links = [{ from: id, to: 'orders', sign }];
+    const { body, card } = await prepare(args, words);
+    expect(card, JSON.stringify(body._agent?.tool_calls)).toBeDefined();
+    expect(card.approve_action.detail).toBe(`Olumi’s reading: Weekly orders above 150 orders a week AND ${quantity} at most 6 ${unit}; over the first three months from today. Olumi’s provisional links: ${quantity} → Weekly orders (${sign}).`);
+    expect(registered).toHaveLength(0);
+    await approve(card, body);
+    expect(outputOf('apply_call')).toMatchObject({ status: 'ok', data: { saved: true } });
+    expect(registered).toHaveLength(1);
+    const cold = projectGraphForPersistence({ ...structuredClone(persisted), ...GraphV3.parse(persisted) }) as Json;
+    const edge = cold.edges.find((e: Json) => e.from === id && e.to === 'orders');
+    expect(edge.effect_direction).toBe(sign);
+    expect(Math.sign(edge.strength.mean)).toBe(sign === 'positive' ? 1 : -1);
+    expect(cold.nodes.find((n: Json) => n.id === id).observed_state).toBeUndefined();
+    const declared = { goal_id: 'orders', conditions: args.ops[0].conditions.map((c: Json) => ({ ...c, goal_id: c.node_id, origin: c.source.origin,
+      quote: c.source.quote, said_in: words, recorded_at: '' })), timing: args.ops[0].timing, new_quantities: [id], links: args.ops[0].links };
+    expect(targetReadback(cold, declared).holds).toBe(true);
+    for (const mutate of [
+      (g: Json) => { g.edges = g.edges.filter((e: Json) => e.from !== id); },
+      (g: Json) => { g.edges.find((e: Json) => e.from === id).effect_direction = sign === 'positive' ? 'negative' : 'positive'; },
+      (g: Json) => { g.edges.find((e: Json) => e.from === id).strength.mean *= -1; },
+    ]) { const mutant = structuredClone(cold); mutate(mutant); expect(targetReadback(mutant, declared).holds).toBe(false); }
   });
 
 });

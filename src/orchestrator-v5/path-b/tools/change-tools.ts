@@ -94,6 +94,7 @@ const Stance = z.enum(['stated_current', 'hypothetical', 'target', 'estimate']).
 const Declared = z.object({ value: z.number(), unit, stance: Stance, source: Source }).strict();
 /** A figure as stored on the proposal: the declaration, plus (a person's figure only) the line it was said in and when (hashed). */
 const StoredFigure = Declared.extend({ said_in: z.string().nullable().optional(), recorded_at: z.string().optional() }).strict();
+const TargetLink = z.object({ from: id, to: id, sign: z.enum(['positive', 'negative']) }).strict();
 const TargetCondition = z.object({ node_id: id, comparator: z.enum(['<', '<=', '>', '>=']), value: z.number().finite(), unit: z.string(),
   quantity: z.string(), frame: z.enum(['level', 'change']), stance: Stance, source: Source }).strict();
 const TargetTiming = z.object({ months: z.number().int().min(1).max(120).nullable(), reference: z.enum(['today', 'launch']),
@@ -107,7 +108,8 @@ export const ChangeOp = z.union([
   z.object({ op: z.literal('set_goal_target'), goal_id: id, comparator: z.enum(['<', '<=', '>', '>=']), value: z.number(), unit: z.string(),
     quantity: z.string(), frame: z.enum(['level', 'change']), stance: Stance, source: Source }).strict(),
   /** Every declared condition is required (AND); one approval and one atomic registration. */
-  z.object({ op: z.literal('set_goal_target'), goal_id: id, conditions: z.array(TargetCondition).min(2).max(12), timing: TargetTiming.nullable() }).strict(),
+  z.object({ op: z.literal('set_goal_target'), goal_id: id, conditions: z.array(TargetCondition).min(2).max(12), timing: TargetTiming.nullable(),
+    links: z.array(TargetLink).max(3).optional().describe('Only explicitly declared causal links from new quantities; a goal condition alone needs no link.') }).strict(),
   /** The goal's current level (today's figure), in the user's own words. Alone. */
   z.object({ op: z.literal('set_goal_current_level'), goal_id: id, value: z.number(), unit: z.string().nullable(), stance: Stance, source: Source }).strict(),
   /** Rename an option, a factor or a risk: the user's own request in this message, quoted exactly, holding the new name. */
@@ -137,7 +139,7 @@ type AddOptionArgs = Extract<z.infer<typeof ChangeOp>, { op: 'add_option' }>;
 /** A target as stored on the proposal: the declaration plus the literal source line and when it was proposed (hashed). */
 const SingleTargetStored = z.object({ value: z.number(), unit: z.string(), comparator: z.enum(['<', '<=', '>', '>=']), quantity: z.string(),
   frame: z.literal('level'), stance: Stance, source: Source, said_in: z.string().nullable(), recorded_at: z.string() }).strict();
-const TargetStored = z.union([SingleTargetStored, z.object({ conditions: z.array(SingleTargetStored.extend({ node_id: id })).min(2).max(12), timing: TargetTiming.nullable(), new_quantities: z.array(id).optional() }).strict()]);
+const TargetStored = z.union([SingleTargetStored, z.object({ conditions: z.array(SingleTargetStored.extend({ node_id: id })).min(2).max(12), timing: TargetTiming.nullable(), links: z.array(TargetLink).max(3).optional(), new_quantities: z.array(id).optional() }).strict()]);
 export const ProposeChangeParams = z.object({
   /** What the approval card says, in a few plain words. */
   public_label: z.string(),
@@ -556,7 +558,7 @@ function targetOf(p: StructuredProposal): ((TargetDeclaration | JointTargetDecla
   const v = op === undefined ? undefined : TargetStored.safeParse(op.value);
   if (op === undefined || v === undefined || !v.success) return null;
   if ('conditions' in v.data) return { goal_id: op.path, conditions: v.data.conditions.map(c => ({ ...c, goal_id: c.node_id, origin: c.source.origin, quote: c.source.quote })),
-    timing: v.data.timing, new_quantities: v.data.new_quantities, stored: v.data };
+    timing: v.data.timing, links: v.data.links, new_quantities: v.data.new_quantities, stored: v.data };
   return { goal_id: op.path, comparator: v.data.comparator, value: v.data.value, unit: v.data.unit, origin: v.data.source.origin,
     quote: v.data.source.quote, said_in: v.data.said_in, recorded_at: v.data.recorded_at, stored: v.data };
 }
@@ -587,12 +589,14 @@ async function proposeTarget(deps: Pick<ChangeDeps, 'dispatch' | 'proposals'>, c
     stance: c.stance, source: c.source, said_in: c.source.quote === null ? null : verbatimSourceLine({ now: ctx.user_turn_text ?? null,
       conversation: (ctx.verified_user_messages ?? []).join('\n') }, c.source.quote) ?? null, recorded_at: new Date().toISOString() });
   const stored: z.infer<typeof TargetStored> = 'conditions' in t
-    ? { conditions: t.conditions.map(c => ({ ...record(c), node_id: c.node_id })), timing: t.timing,
+    ? { conditions: t.conditions.map(c => ({ ...record(c), node_id: c.node_id })), timing: t.timing, ...(t.links === undefined ? {} : { links: t.links }),
       new_quantities: t.conditions.filter(c => !nodesOf(read.graph).some(n => n.id === c.node_id)).map(c => c.node_id) } : record(t);
   const timing = 'conditions' in stored ? stored.timing : null;
   const when = timing === null ? '' : [timing.months === null ? '' : `${periodWords({ ...timing, period_months: timing.months })}${timing.reference === 'today' ? ' from today' : ''}`,
     timing.deadline === null ? '' : `by ${timing.deadline}`].filter(Boolean).join('; ');
-  const label = 'conditions' in stored ? `Olumi’s reading: ${stored.conditions.map(c => `${c.quantity} ${comparatorWords(c.comparator)} ${sayFigureAsWritten(c.value, c.unit)}`).join(' AND ')}${when === '' ? '' : `; ${when}`}.` : args.public_label;
+  const nameOf = (id: string) => members.find(c => 'node_id' in c && c.node_id === id)?.quantity ?? String(nodesOf(read.graph).find(n => n.id === id)?.label ?? id);
+  const linksLabel = 'conditions' in stored && stored.links?.length ? ` Olumi’s provisional links: ${stored.links.map(l => `${nameOf(l.from)} → ${nameOf(l.to)} (${l.sign})`).join('; ')}.` : '';
+  const label = 'conditions' in stored ? `Olumi’s reading: ${stored.conditions.map(c => `${c.quantity} ${comparatorWords(c.comparator)} ${sayFigureAsWritten(c.value, c.unit)}`).join(' AND ')}${when === '' ? '' : `; ${when}`}.${linksLabel}` : args.public_label;
   const p = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: read.graphHash, base_model_identity: read.identity,
     operations: [{ op: 'set_goal_target', path: t.goal_id, value: stored }], provenance: { authored_by: 'model_proposed', basis: args.basis },
     validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: label });

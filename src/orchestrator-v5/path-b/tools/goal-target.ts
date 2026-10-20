@@ -10,7 +10,7 @@
  */
 import { isDeepStrictEqual } from 'node:util';
 import { PatchOperationsArraySchema } from '../../../orchestrator/patch-validation.js';
-import { buildAddFactorTransaction } from '../../routing/add-factor-transaction.js';
+import { buildAddFactorTransaction, MAX_FACTORS_PER_ADD } from '../../routing/add-factor-transaction.js';
 import { executeGmHeldResume } from '../../handlers/gm-held-execute.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
@@ -48,6 +48,7 @@ export interface JointTargetDeclaration {
   readonly goal_id: string;
   /** Missing on the approved base: these factors must retain unknown baselines on readback. */
   readonly new_quantities?: readonly string[];
+  readonly links?: readonly { readonly from: string; readonly to: string; readonly sign: 'positive' | 'negative' }[];
   readonly conditions: readonly (TargetDeclaration & { readonly quantity: string; readonly source: { readonly origin: TargetDeclaration['origin']; readonly named_source: string | null } })[];
   readonly timing: { readonly months: number | null; readonly reference: 'today' | 'launch'; readonly period_kind: 'at_end' | 'over_period'; readonly deadline: string | null } | null;
 }
@@ -121,11 +122,19 @@ export async function targetCandidate(scenarioId: string, operationId: string, r
   if (new Set(ids).size !== ids.length) return { refusal: 'target_not_prepared' };
   let candidate = structuredClone(graph);
   const missing = t.conditions.filter(c => !nodesOf(graph).some(n => n.id === c.goal_id));
+  const links = t.links ?? [];
+  if (missing.length > MAX_FACTORS_PER_ADD || new Set(links.map(l => l.from)).size !== links.length
+    || links.some(l => !missing.some(c => c.goal_id === l.from))) return { refusal: 'target_not_prepared' };
   if (missing.length > 0) {
-    const built = buildAddFactorTransaction({ factors: missing.map(c => ({ id: c.goal_id, label: c.quantity,
-      link: { to_id: t.goal_id, effect_direction: inclusiveOf(c.comparator) === '>=' ? 'positive' : 'negative' } })) }, GraphV3.parse(graph));
-    if (!built.matched) return { refusal: built.reason };
-    const operations = PatchOperationsArraySchema.safeParse(built.proposal.operations);
+    // Only declared causal links use the compound add-factor builder. Conditions alone add unlinked quantities.
+    const built = links.length === 0 ? null : buildAddFactorTransaction({ factors: links.map(l => ({ id: l.from,
+      label: missing.find(c => c.goal_id === l.from)!.quantity, link: { to_id: l.to, effect_direction: l.sign } })) }, GraphV3.parse(graph));
+    if (built !== null && !built.matched) return { refusal: built.reason };
+    const operations = PatchOperationsArraySchema.safeParse([
+      ...missing.filter(c => !links.some(l => l.from === c.goal_id)).map(c => ({ op: 'add_node', path: c.goal_id,
+        value: { id: c.goal_id, kind: 'factor', label: c.quantity, category: 'external' } })),
+      ...(built?.matched ? built.proposal.operations : []),
+    ]);
     if (!operations.success) return { refusal: 'target_not_prepared' };
     // The compound add's pure executor; no userToday member means no invented current value. No write occurs here.
     const added = executeGmHeldResume({ operations: operations.data, currentGraph: graph, currentGraphHash: graphHash,
@@ -210,9 +219,13 @@ export function targetReadback(graph: Rec, t: TargetDeclaration | JointTargetDec
     const row = matches.length === 1 ? matches[0] : undefined;
     const node = nodesOf(graph).find(n => n.id === c.goal_id);
     const words = claimRecordsOn(node).filter(r => r.field === 'target').flatMap(r => r.statements);
+    const declaredLinks = (t.links ?? []).filter(l => l.from === c.goal_id);
+    const addedLinks = Array.isArray(graph.edges) ? graph.edges.filter((e): e is Rec => isRec(e) && (e.from === c.goal_id || e.to === c.goal_id)) : [];
     const addedHolds = !t.new_quantities?.includes(c.goal_id) || (node?.kind === 'factor' && node.label === c.quantity
       && node.observed_state === undefined && (c.origin !== 'user' || node.provenance === 'user_set')
-      && Array.isArray(graph.edges) && graph.edges.some(e => isRec(e) && e.from === c.goal_id && e.to === t.goal_id));
+      && addedLinks.length === declaredLinks.length && declaredLinks.every(l => addedLinks.some(e => e.from === l.from && e.to === l.to
+        && e.effect_direction === l.sign && isRec(e.strength) && typeof e.strength.mean === 'number'
+        && Math.sign(e.strength.mean) === (l.sign === 'positive' ? 1 : -1))));
     const holds = addedHolds && row?.role === GOAL_TARGET_ROLE && row.provenance === 'inferred' && row.value === c.value && row.unit === c.unit
       && statedOperatorOf(row) === c.comparator && words.some(s => isDeepStrictEqual(s, jointStatement(c, t.timing)));
     return { node_id: c.goal_id, holds, comparator: row === undefined ? null : statedOperatorOf(row), figure: row?.value ?? null, unit: row?.unit ?? null };
