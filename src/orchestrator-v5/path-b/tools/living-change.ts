@@ -75,7 +75,7 @@ export async function proposeLivingChange(deps: Deps, ctx: Ctx, args: LivingChan
     provenance: { authored_by: 'model_proposed', basis: args.basis }, validation: { admitted: true, loss_count: 0, refusals: [] },
     public_label: args.public_label, living_model: kernelled.model }));
   return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: base.saved.graphHash,
-    changes, withheld: mapped.withheld, relabelled: kernelled.relabelled });
+    changes, withheld: mapped.withheld, assumed: mapped.assumed, relabelled: kernelled.relabelled });
 }
 
 /** A proposal this module prepared: it carries the complete living model it would write. */
@@ -112,7 +112,7 @@ export async function applyLivingChange(deps: Deps, ctx: Ctx, proposalId: string
     if (w.status === 'already_saved') return alreadySaved(w.receipt);
     deps.proposals.markApplied(p.proposal_id, [w.receipt as never]);
     return ok({ saved: true, receipt: w.receipt, revision: { graph_hash: w.after.graphHash, graph_identity_hash: w.after.identity },
-      withheld: mapped.withheld }, { mutated: true });
+      withheld: mapped.withheld, assumed: mapped.assumed }, { mutated: true });
   };
   const reconcile = async (): Promise<ToolOutcome> => {
     const own = await ownVersion().catch(() => null);

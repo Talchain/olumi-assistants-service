@@ -67,8 +67,8 @@ describe('thin core mapper: living model → GraphV3', () => {
     expect(mapLivingModel(joint).withheld).toEqual([{ id: 'g2', reason: 'aim_not_in_slice' }]);
 
     const change: LivingModelT = structuredClone(KNOWN_ANSWER);
-    change.aims[0]!.target!.comparator = 'increase';
-    expect(mapLivingModel(change).withheld).toContainEqual({ id: 'g', reason: 'change_target_not_in_slice' });
+    change.aims[0]!.target = { ...change.aims[0]!.target!, comparator: 'increase', value: 30, current: null };
+    expect(mapLivingModel(change).withheld, 'a change with no level today: never read from 0').toContainEqual({ id: 'g', reason: 'goal_level_unknown' });
   });
 
   it('AIE 20 Oct: an ordinary range is kept but not read as a law; an unknown sign is never drawn positive; a point\'s σ is |β|/2', () => {
@@ -95,12 +95,13 @@ describe('thin core mapper: living model → GraphV3', () => {
     expect(linkDefaultAssumptionsOf(p).map((r) => r.code)).toEqual(['CLAMP_STD_MINIMUM', 'DEFAULT_EXISTS_PROBABILITY']);
   });
 
-  it('R1 20 Oct: the goal is always drawn; "exactly N" and a change target keep it with no threshold, so no chance', () => {
+  it('R1 20 Oct: the goal is always drawn; "exactly N" and an undeclared % change on a % quantity keep it with no threshold, so no chance', () => {
     for (const comparator of ['=', 'increase'] as const) {
       const m: LivingModelT = structuredClone(KNOWN_ANSWER);
-      m.aims[0]!.target!.comparator = comparator;
+      // "+3%" on a rate that is itself a percentage reads two ways (amendment 3): never picked.
+      m.aims[0]!.target = { ...m.aims[0]!.target!, comparator, ...(comparator === 'increase' ? { value: 3, unit: '%', current_unit: '%', current: 12 } : {}) };
       const out = mapLivingModel(m);
-      expect(out.withheld).toContainEqual({ id: 'g', reason: comparator === '=' ? 'exact_target_not_in_slice' : 'change_target_not_in_slice' });
+      expect(out.withheld).toContainEqual({ id: 'g', reason: comparator === '=' ? 'exact_target_not_in_slice' : 'change_kind_unknown' });
       expect(node(out.graph, 'g')).toMatchObject({ kind: 'goal', label: 'Reach 100 units' });
       expect(node(out.graph, 'g')).not.toHaveProperty('goal_threshold');
       expect(node(out.graph, 'g')).not.toHaveProperty('goal_direction');
@@ -235,5 +236,63 @@ describe('thin core mapper: living model → GraphV3', () => {
     const parsed = LivingModel.parse(saved);
     expect(parsed.conditions[0]!.role).toBe('prerequisite');
     expect((mapLivingModel(parsed).graph.nodes as Rec[]).find((n) => n.id === 'g')).not.toHaveProperty('goal_threshold');
+  });
+
+  it('a change goal is read on today\'s level: absolute B + C, relative B × (1 + r), points on a percentage; never from an unknown or zero base', () => {
+    const target = (t: Partial<NonNullable<LivingModelT['aims'][number]['target']>>) => {
+      const m: LivingModelT = structuredClone(KNOWN_ANSWER);
+      m.aims[0]!.target = { ...m.aims[0]!.target!, ...t };
+      return mapLivingModel(m);
+    };
+    const goal = (out: ReturnType<typeof mapLivingModel>) => (out.graph.nodes as Rec[]).find((n) => n.id === 'g')!;
+    // +30 units from 70 → at least 100: the known-answer control's own target, so the same graph.
+    expect(goal(target({ comparator: 'increase', value: 30 }))).toMatchObject({ goal_direction: '>=', goal_threshold_raw: 100, goal_threshold: 0.8 });
+    expect(goal(target({ comparator: 'increase', value: 30 })).observed_state).toMatchObject({ raw_value: 70 });
+    // +10% of 70 → at least 77, read in units (the level's own unit), not in %.
+    const rel = goal(target({ comparator: 'increase', value: 10, unit: '%', current_unit: 'units' }));
+    expect(rel.goal_threshold_raw).toBeCloseTo(77, 10);
+    expect(rel.goal_threshold_unit).toBe('units');
+    // Cut by 20 units from 70 → no more than 50.
+    expect(goal(target({ comparator: 'decrease', value: 20 }))).toMatchObject({ goal_direction: '<=', goal_threshold_raw: 50 });
+    // +3 points on a 12% rate, declared → at least 15%.
+    expect(goal(target({ comparator: 'increase', value: 3, unit: '%', current_unit: '%', current: 12, change_kind: 'points' }))).toMatchObject({ goal_threshold_raw: 15 });
+    expect(target({ comparator: 'increase', value: 10, unit: '%', current_unit: 'units', current: 0 }).withheld).toContainEqual({ id: 'g', reason: 'change_base_invalid' });
+    expect(target({ comparator: 'increase', value: 10, unit: 'hours', current_unit: 'units' }).withheld, 'a change in another unit').toContainEqual({ id: 'g', reason: 'change_kind_unknown' });
+    // Buddy R1 on #3525: a declared unit is never dropped or relabelled.
+    expect(target({ comparator: 'increase', value: 3, change_kind: 'points', unit: 'hours', current_unit: '%', current: 12 }).withheld, 'points in hours')
+      .toContainEqual({ id: 'g', reason: 'change_kind_unknown' });
+    expect(target({ comparator: '>=', value: 80, unit: '%', current_unit: 'seats', current: 40 }).withheld, 'a level target over today in another unit')
+      .toContainEqual({ id: 'g', reason: 'current_unit_mismatch' });
+    expect(goal(target({ comparator: '>=', value: 80, unit: '%', current_unit: 'seats', current: 40 }))).not.toHaveProperty('goal_threshold');
+    expect(goal(target({ comparator: '>=', value: 100, current_unit: 'units' })), 'CONTROL: the same unit declared').toMatchObject({ goal_threshold_raw: 100 });
+  });
+
+  it('a model saved before change goals reads the new target fields as null', () => {
+    const saved = JSON.parse(JSON.stringify(KNOWN_ANSWER));
+    delete saved.aims[0].target.current_unit;
+    delete saved.aims[0].target.change_kind;
+    expect(LivingModel.parse(saved).aims[0]!.target).toMatchObject({ current_unit: null, change_kind: null });
+  });
+
+  it('science check 5bbceeec, point 6: a ceiling below today keeps today on its frame; Olumi\'s base is not used for a change; the from-today premise is said', () => {
+    const target = (t: Partial<NonNullable<LivingModelT['aims'][number]['target']>>, aim: Partial<LivingModelT['aims'][number]> = {}) => {
+      const m: LivingModelT = structuredClone(KNOWN_ANSWER);
+      m.aims[0] = { ...m.aims[0]!, ...aim, target: { ...m.aims[0]!.target!, ...t } };
+      return mapLivingModel(m);
+    };
+    const goal = (out: ReturnType<typeof mapLivingModel>) => (out.graph.nodes as Rec[]).find((n) => n.id === 'g')!;
+    // Cut by 20 from 70 → no more than 50, with today (70) admitted on the goal's level frame.
+    const cut = target({ comparator: 'decrease', value: 20 });
+    expect(goal(cut)).toMatchObject({ goal_threshold_raw: 50, goal_threshold_cap_provenance: 'level_frame', observed_state: { raw_value: 70 } });
+    expect(cut.withheld.filter((w) => w.id === 'g')).toEqual([]);
+    expect(cut.assumed).toEqual([{ id: 'g', text: "Carrying on as now leaves units at today's 70 units; the change is measured from that." }]);
+    // A level ceiling below today (no more than 60, today 180): the same frame keeps today on its scale.
+    expect(goal(target({ comparator: '<=', value: 60, current: 180 }))).toMatchObject({ goal_threshold_raw: 60, observed_state: { raw_value: 180 } });
+    // A change on Olumi's base: withheld, never computed as a plain level target.
+    const olumis = target({ comparator: 'increase', value: 10, unit: '%', current_unit: 'units' }, { source: 'olumi', quote: null });
+    expect(olumis.withheld).toContainEqual({ id: 'g', reason: 'change_base_not_theirs' });
+    expect(goal(olumis)).not.toHaveProperty('goal_threshold');
+    // CONTROL: a level target says no from-today premise.
+    expect(mapLivingModel(KNOWN_ANSWER).assumed).toEqual([]);
   });
 });

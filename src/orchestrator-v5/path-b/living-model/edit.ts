@@ -49,7 +49,7 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       const f = factor(edit.target_id);
       const a = f === undefined ? aim(edit.target_id) : undefined;
       if (f === undefined && a === undefined) return { refused: 'not_in_model' };
-      const unit = f?.unit ?? a?.target?.unit ?? null;
+      const unit = f?.unit ?? a?.target?.current_unit ?? a?.target?.unit ?? null;
       if (edit.unit !== undefined && unit !== null && edit.unit !== unit) return { refused: 'unit_mismatch' };
       const raw = edit.raw_value ?? toRaw(edit.target_id, edit.value);
       if (raw === undefined) return { refused: 'no_frame' };
@@ -74,7 +74,8 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       if (edit.constraint_type === 'at_least' && edit.raw_value === 0) return { refused: 'target_zero' };
       const prior = a.target;
       // A target in another unit would silently relabel the starting level's unit.
-      if (prior !== null && prior.current !== null && prior.unit !== null && prior.unit !== edit.unit) return { refused: 'unit_mismatch' };
+      const levelUnit = prior === null ? null : prior.current_unit ?? prior.unit;
+      if (prior !== null && prior.current !== null && levelUnit !== null && levelUnit !== edit.unit) return { refused: 'unit_mismatch' };
       // The edit makes the aim the person's. A starting level they never gave is not carried as theirs: it is kept in the
       // history, and Olumi asks for today's level instead.
       const keepCurrent = a.source === 'user' || prior?.current_source === 'user';
@@ -85,7 +86,7 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       a.target = { quantity: prior?.quantity ?? a.text, comparator: edit.constraint_type === 'at_least' ? '>=' : '<=',
         value: edit.raw_value, ...noRange, unit: edit.unit, by_when: prior?.by_when ?? null,
         baseline: prior?.baseline ?? null, current: keepCurrent ? prior?.current ?? null : null,
-        current_source: keepCurrent ? prior?.current_source ?? null : null };
+        current_source: keepCurrent ? prior?.current_source ?? null : null, current_unit: null, change_kind: null };
       Object.assign(a, theirs);
       return { model: m };
     }
