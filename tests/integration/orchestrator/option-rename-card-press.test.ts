@@ -50,25 +50,26 @@ describe('the rename card\'s press renames through the ONE label writer, and onl
     createAgentCapabilities: typeof import('../../../src/orchestrator-v5/agent-lane/runtime/agent-capabilities.js').createAgentCapabilities;
     ProposalStore: typeof import('../../../src/orchestrator-v5/agent-lane/proposal.js').ProposalStore;
     createProposal: typeof import('../../../src/orchestrator-v5/agent-lane/proposal.js').createProposal;
-    optionRenameCardOf: typeof import('../../../src/orchestrator-v5/agent-lane/option-label-count.js').optionRenameCardOf;
   };
   beforeAll(async () => {
     const d = await import('../../../src/orchestrator-v5/system-events/dispatch.js');
     const c = await import('../../../src/orchestrator-v5/agent-lane/runtime/agent-capabilities.js');
     const p = await import('../../../src/orchestrator-v5/agent-lane/proposal.js');
-    const o = await import('../../../src/orchestrator-v5/agent-lane/option-label-count.js');
     mods = { commitOptionRenameInProcess: d.commitOptionRenameInProcess, createAgentCapabilities: c.createAgentCapabilities,
-      ProposalStore: p.ProposalStore, createProposal: p.createProposal, optionRenameCardOf: o.optionRenameCardOf };
+      ProposalStore: p.ProposalStore, createProposal: p.createProposal };
   });
   beforeEach(() => { persisted = structuredClone(FX.after_edit); rows.clear(); });
 
-  /** The card exactly as the route mints it on the receipt, then the press (typed approval of that card). */
+  // Explicit AI-declared rename: level edits no longer mint a replacement name or card.
+  const card = { option_id: 'hire_two_developers', expected_label: 'Hire two developers', label: 'Hire three developers',
+    words: 'Olumi proposes renaming ‘Hire two developers’ to ‘Hire three developers’. Rename it?' };
+
+  /** The declared card, then its press (typed approval of that card). */
   async function press(typed = true) {
-    const card = mods.optionRenameCardOf(persisted, 'hire_two_developers', 'developer_hires_from_today')!;
     const store = new mods.ProposalStore();
     const proposal = store.put(mods.createProposal({ scenario_id: SCENARIO_ID, user_id: 'user-a', base_graph_identity_hash: hash(),
       operations: [{ op: 'rename_option', path: card.option_id, value: { expected_label: card.expected_label, label: card.label } }],
-      provenance: { authored_by: 'model_proposed', basis: 'the option’s name counts what its level no longer holds' },
+      provenance: { authored_by: 'model_proposed', basis: 'AI-declared rename' },
       validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: card.words }));
     const read = async () => ({ status: 200, json: { graph: persisted, graph_hash: hash() } });
     const caps = mods.createAgentCapabilities(read as never, store, undefined, 'full', undefined, {
@@ -98,7 +99,6 @@ describe('the rename card\'s press renames through the ONE label writer, and onl
   });
 
   it('CONTRAST: a name the user changed after the card was offered is never overwritten', async () => {
-    const card = mods.optionRenameCardOf(persisted, 'hire_two_developers', 'developer_hires_from_today')!;
     expect(card.expected_label).toBe('Hire two developers');
     // Another write renames the option before the press (a label-only edit moves no analysis hash).
     (persisted as Rec).nodes.find((n: Rec) => n.id === 'hire_two_developers').label = 'Hire a pair of developers';

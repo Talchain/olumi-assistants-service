@@ -177,11 +177,6 @@ export const AMEND_CHIP: SuggestedAction = {
   message: 'Before you apply it, I want to change some of it.',
 };
 
-/**
- * ⭐ S5 (DL 15 Oct): the ONE rename card a committed edit's receipt offers when the option's name counts what its level no
- * longer holds (`optionRenameCardOf`). Minted by the route, not by a tool call, so its chip is built here, card-only: only its
- * press renames. Its words ride in `detail`.
- */
 export const OPTION_RENAME_APPROVE = { label: 'Rename it', message: 'Yes, rename it.' } as const;
 /** ⭐ S5: propose_change's ONE card takes the button of what its press does (its op). */
 const CHANGE_APPROVE: Readonly<Record<string, { readonly label: string; readonly message: string }>> = {
@@ -199,8 +194,6 @@ const changeApproveOf = (tool: string, proposal: { readonly operations: readonly
   }
   return tool === 'propose_change' && op !== undefined ? CHANGE_APPROVE[op.op] : undefined;
 };
-export const optionRenameChipsFor = (proposalId: string, words: string): SuggestedAction[] =>
-  [{ id: approvalChipIdFor(proposalId), ...OPTION_RENAME_APPROVE, detail: words }, AMEND_CHIP];
 
 /**
  * The proposals a turn's own tool calls leave awaiting the user's yes, each with the tool that made it —
