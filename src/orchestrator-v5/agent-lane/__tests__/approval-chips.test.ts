@@ -19,6 +19,20 @@ describe('approval chips', () => {
     for (const c of chips) expect((c as { action_type?: unknown }).action_type).toBeUndefined();
   });
 
+  it('Path B complete detail is bound to the successful result and that exact proposal', () => {
+    const proposal = createProposal({ scenario_id: 'scenario-joint', user_id: 'user-joint', base_graph_identity_hash: 'base-joint',
+      operations: [{ op: 'set_goal_target', path: 'goal', value: { conditions: [] } }], provenance: { authored_by: 'model_proposed' },
+      validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: 'Both declared conditions and the three-month horizon.' });
+    const calls = [{ name: 'propose_change', ok: true, mutated: false, proposal_id: proposal.proposal_id }];
+    const result = { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label };
+    expect(approvalChipsFor(calls, () => ({ proposal, result }))[0]?.detail).toBe(proposal.public_label);
+    for (const changed of [{ ...result, public_label: 'Another card' }, { ...result, proposal_id: 'prop_other' }, { ...result, ok: false }]) {
+      expect(approvalChipsFor(calls, () => ({ proposal, result: changed }))[0]?.detail).toBeUndefined();
+    }
+    expect(approvalChipsFor(calls, () => ({ proposal: { ...proposal, proposal_id: 'prop_other' }, result }))[0]?.detail).toBeUndefined();
+    expect(approvalChipsFor([{ ...calls[0]!, name: 'propose_goal_target' }], () => ({ proposal, result }))[0]?.detail).toBeUndefined();
+  });
+
   it('the temporal card uses B3 exact stored detail and refuses a substituted reading', () => {
     const proposal = createProposal({ scenario_id: 'scenario-range', user_id: 'user-range', base_graph_identity_hash: 'base-range',
       operations: [{ op: 'set_option_intervention', path: 'opt_lift::fac_downtime', value: {

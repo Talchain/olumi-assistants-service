@@ -12,7 +12,7 @@
  *     or a source on an add). The first factor's node is op 0, so the hold's handle is
  *     `gmHeldProposalRef(scenario, 'node:<first factor id>')`. `external`: no option sets it — a `controllable` factor no
  *     option reaches is a readiness blocker ("not connected to any option").
- *   · then ONE `add_edge` per factor, new factor → its target, Olumi's PLACEHOLDER (`hypothesisEdgeValue`: default
+ *   · then ONE `add_edge` per declared link, new factor → its target, Olumi's PLACEHOLDER (`hypothesisEdgeValue`: default
  *     strength, `defaulted`, `cee_hypothesis`) — never `user_specified`: nobody sized the link.
  *
  * ⛔ THE TARGET KINDS ARE DECIDED HERE. A new factor links to the goal, an outcome or a non-lever factor (one no option
@@ -47,8 +47,8 @@ const AddFactorParamsSchema = z
           .object({
             id: z.string().min(1).optional(),
             label: z.string().trim().min(1),
-            /** The ONE existing node the new factor drives (new factor → target). */
-            link: z.object({ to_id: z.string().min(1), effect_direction: z.enum(['positive', 'negative']) }).strict(),
+            /** The AI-declared link; explicit null adds an unlinked quantity. Missing link remains invalid. */
+            link: z.object({ to_id: z.string().min(1), effect_direction: z.enum(['positive', 'negative']) }).strict().nullable(),
           })
           .strict(),
       )
@@ -73,8 +73,8 @@ export type AddFactorSkipReason =
 
 export interface AddFactorProposal {
   readonly operations: PatchOperation[];
-  /** The new factors in request order: id, label and the one link each. */
-  readonly factors: readonly { readonly id: string; readonly label: string; readonly to: string; readonly effect_direction: 'positive' | 'negative' }[];
+  /** The new factors in request order; null endpoints/signs carry an explicitly unlinked quantity. */
+  readonly factors: readonly { readonly id: string; readonly label: string; readonly to: string | null; readonly effect_direction: 'positive' | 'negative' | null }[];
 }
 
 export type AddFactorBuildResult =
@@ -105,7 +105,7 @@ export function buildAddFactorTransaction(params: unknown, graph: AddOptionGraph
   const parsed = AddFactorParamsSchema.safeParse(params);
   if (!parsed.success) return fail('parameters_invalid');
   const taken = new Set(graph.nodes.map((n) => n.id));
-  const factors: { id: string; label: string; to: string; effect_direction: 'positive' | 'negative' }[] = [];
+  const factors: AddFactorProposal['factors'][number][] = [];
   for (const f of parsed.data.factors) {
     const label = f.label.trim();
     // A second node by the same name is not a new factor: the user could not tell the two apart.
@@ -122,17 +122,18 @@ export function buildAddFactorTransaction(params: unknown, graph: AddOptionGraph
       for (let k = 2; taken.has(id); k += 1) id = `${base}_${k}`;
     }
     taken.add(id);
-    const target = graph.nodes.find((n) => n.id === f.link.to_id);
-    if (target === undefined) return fail('node_not_found');
-    if (!isNewFactorTarget(target)) return fail('target_not_allowed');
-    // A factor whose target never reaches the goal cannot change the comparison.
-    if (!reachesGoal(graph, target.id)) return fail('new_factor_unreachable');
-    factors.push({ id, label, to: target.id, effect_direction: f.link.effect_direction });
+    if (f.link !== null) {
+      const target = graph.nodes.find((n) => n.id === f.link?.to_id);
+      if (target === undefined) return fail('node_not_found');
+      if (!isNewFactorTarget(target)) return fail('target_not_allowed');
+      if (!reachesGoal(graph, target.id)) return fail('new_factor_unreachable');
+    }
+    factors.push({ id, label, to: f.link?.to_id ?? null, effect_direction: f.link?.effect_direction ?? null });
   }
   if (factors.length * 2 > TYPED_TRANSACTION_ENVELOPE_CAP) return fail('too_many_ops');
   const operations: PatchOperation[] = [
     ...factors.map((f): PatchOperation => ({ op: 'add_node', path: f.id, value: { id: f.id, kind: 'factor', label: f.label, category: 'external' } })),
-    ...factors.map((f): PatchOperation => ({ op: 'add_edge', path: `${f.id}::${f.to}`, value: hypothesisEdgeValue(f.id, f.to, f.effect_direction) })),
+    ...factors.flatMap((f): PatchOperation[] => f.to === null || f.effect_direction === null ? [] : [{ op: 'add_edge', path: `${f.id}::${f.to}`, value: hypothesisEdgeValue(f.id, f.to, f.effect_direction) }]),
   ];
   return { matched: true, proposal: { operations, factors } };
 }

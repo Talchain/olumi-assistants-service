@@ -20,6 +20,7 @@ import { authorisationTurnId } from '../../../agent-lane/runtime/agent-capabilit
 import { ProposalStore } from '../../../agent-lane/proposal.js';
 import { targetNounOf } from '../../../admission/target-testability.js';
 import { userStatementsOn } from '../../../statement-door/statements.js';
+import { targetCandidate } from '../goal-target.js';
 import { applyChange, proposeChange } from '../change-tools.js';
 import { graph as fixtureGraph, type Rec } from './fixtures.js';
 
@@ -168,5 +169,40 @@ describe('what this path cannot hold as declared is said, never saved as somethi
     const out = await proposeChange({ dispatch, proposals: new ProposalStore() }, ctx, { public_label: 'x', basis: 'b',
       ops: [target({ source: { origin: 'user', quote: 'at least 99%', named_source: null } })] } as never);
     expect(out).toMatchObject({ status: 'refused', reason: 'quote_not_in_users_words' });
+  });
+});
+
+describe('single-target byte compatibility', () => {
+  it('the exact candidate bytes equal the lane-base scalar writer', async () => {
+    const graph = stored();
+    graph.goal_constraints = [{ constraint_id: 'fixed-existing-target', node_id: 'goal', operator: '>=', value: 90, unit: '%', value_frame: 'level' }];
+    const built = await targetCandidate(SCN, 'fixed-operation', 'fixed-request', { goal_id: 'goal', comparator: '>=', value: 95, unit: '%',
+      origin: 'user', quote: 'at least 95% of visitors', said_in: SAID, recorded_at: '2026-10-20T06:00:00.000Z' }, graph, hashOf(graph));
+    expect('candidate' in built).toBe(true);
+    if ('candidate' in built) expect(identityOf(built.candidate)).toBe('b55f7149aad3eaf2e5b32299b40fd5428f495134090331de00138b4ded005102');
+  });
+});
+
+
+describe('joint-target receipt recovery', () => {
+  it('a lost response and cold proposal store recover the same receipt without another registration', async () => {
+    const words = 'Serve over 95% of visitors AND keep queue time below 30 minutes over three months.';
+    const context = { ...ctx, user_turn_text: words, verified_user_messages: [words] };
+    const store = new ProposalStore();
+    const source = { origin: 'user', quote: words, named_source: null };
+    const proposed = await proposeChange({ dispatch, proposals: store }, context, { public_label: 'Review both conditions', basis: 'Olumi’s reading.', ops: [{
+      op: 'set_goal_target', goal_id: 'goal', conditions: [
+        { node_id: 'goal', comparator: '>', value: 95, unit: '%', quantity: 'Visitors served', frame: 'level', stance: 'target', source },
+        { node_id: 'queue', comparator: '<', value: 30, unit: 'minutes', quantity: 'Queue time', frame: 'level', stance: 'target', source },
+      ], timing: { months: 3, reference: 'today', period_kind: 'over_period', deadline: null } }] } as never);
+    expect(proposed.status, JSON.stringify(proposed)).toBe('ok');
+    if (proposed.status !== 'ok') throw new Error('No proposal');
+    const id = String(proposed.data.proposal_id);
+    failNextResponse = true;
+    expect(await applyChange({ dispatch, proposals: store }, context, { proposal_id: id })).toEqual({ status: 'unavailable', reason: 'not_confirmed', write: 'unknown' });
+    const restarted = new ProposalStore(); restarted.put(store.get(id)!);
+    expect(await applyChange({ dispatch, proposals: restarted }, context, { proposal_id: id })).toMatchObject({ status: 'ok', mutated: false,
+      data: { already_saved: true, holds_now: true, receipt: { version_id: 'ver_2' }, written: [{ conditions: [{ figure: 95 }, { figure: 30 }], timing_kept: true }] } });
+    expect(registered).toHaveLength(1);
   });
 });
