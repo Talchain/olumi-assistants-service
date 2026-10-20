@@ -110,7 +110,7 @@ import { readinessSentence, readinessSentenceOnce, readinessViewOf, stillNeededL
 import { treatedAsZeroReplyLine } from '../orchestrator-v5/agent-lane/root-line.js';
 import { strictForTheDrafter, type CallStructuredModel, type ConstructionTrace } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
 import { widenedLine, widenedRiskNote, widenedRiskMarker, type WidenCounts } from '../orchestrator-v5/agent-lane/runtime/widen-draft.js';
-import { onceMoreOnTransportFailure } from '../orchestrator-v5/agent-lane/runtime/transport-retry.js';
+import { isProviderCapacityRefusal, onceMoreOnTransportFailure } from '../orchestrator-v5/agent-lane/runtime/transport-retry.js';
 import { agentProposals as proposals, executableWaitingProposal, identityProposalOfferable, stillValidApprovalOffers } from '../orchestrator-v5/agent-lane/held-approval-offers.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
@@ -4592,8 +4592,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           return reply.code(503).send({ error: err.code, detail: err.reason, _agent: { mode },
             _provider_calls: recordedProviderCalls(), ...(turnId !== undefined ? { retry_safe: released } : {}) });
         }
+        // Whether this turn dispatched any write before it failed; a capacity or credit refusal is ONE typed code, never retried.
+        const capacity = isProviderCapacityRefusal(err);
         return reply.code(502).send({
-          error: 'UPSTREAM_ERROR', detail: String(err).slice(0, 300),
+          error: capacity ? 'PROVIDER_CAPACITY' : 'UPSTREAM_ERROR', detail: String(err).slice(0, 300),
+          nothing_saved: writesDispatched === 0, ...(capacity ? { retryable: false } : {}),
           _provider_calls: recordedProviderCalls(),
           ...(providerLedgerTruncated() ? { _provider_calls_truncated: true } : {}),
           ...(turnId !== undefined ? { retry_safe: released } : {}),

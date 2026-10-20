@@ -28,3 +28,18 @@ export async function onceMoreOnTransportFailure<T>(
   }
 }
 
+
+/** The provider's own type and code for a capacity or credit refusal (OpenAI's error body, as served 18 and 19 Oct). */
+const PROVIDER_CAPACITY = new Set(['insufficient_quota', 'credit_balance_exhausted', 'rate_limit_exceeded']);
+
+/**
+ * The provider refused this turn for capacity or credits, so a retry now cannot help (DL-3 20 Oct: Paul was told "Please
+ * retry" three times on an account with no credits). Read from the provider's typed refusal only: HTTP 429 on a call the
+ * route made itself (the `openai_` status above), or the SDK error's `type`/`code` (a streamed `error` event has no status).
+ */
+export function isProviderCapacityRefusal(err: unknown): boolean {
+  if (String(err).startsWith('Error: openai_429')) return true;
+  if (!(err instanceof Error)) return false;
+  const { code, type } = err as Error & { code?: unknown; type?: unknown };
+  return PROVIDER_CAPACITY.has(String(code)) || PROVIDER_CAPACITY.has(String(type));
+}
