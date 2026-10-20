@@ -48,8 +48,40 @@ describe('the adapters as SDK function tools', () => {
     const { tools, calls } = setup();
     const out = JSON.parse(String(await named(tools, 'read_canonical_context').invoke(new RunContext(), '{}'))) as { status: string };
     expect(out.status).toBe('ok');
-    expect(calls).toEqual([[{ name: 'read_canonical_context', ok: true, mutated: false, outcome: 'ok', refusal: null, ran: null },
-      { ok: true, mutated: false, outcome: 'ok' }]]);
+    expect(calls).toEqual([[{ name: 'read_canonical_context', args: {}, ok: true, mutated: false, outcome: 'ok', refusal: null, ran: null },
+      { args: {}, ok: true, mutated: false, outcome: 'ok' }]]);
+  });
+
+  it.each([
+    ['read_canonical_context', {}],
+    ['build_model_from_brief', { brief: '' }],
+    ['apply_change', { proposal_id: PROPOSAL }],
+    ['run_analysis', { reason: 'Run it.', effects_timing: null }],
+  ])('%s records its SDK-parsed declaration on both carriers', async (name, args) => {
+    const { tools, calls } = setup();
+    await named(tools, name).invoke(new RunContext(), JSON.stringify(args));
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.[0]).toHaveProperty('args', args);
+    expect(calls[0]?.[1]).toHaveProperty('args', args);
+  });
+
+  it('bounds and redacts propose_change args on both carriers without changing the declared tool input', async () => {
+    const { tools, calls } = setup();
+    const args = { public_label: 'Long label. '.repeat(50), basis: 'Bearer synthetic-credential-for-test',
+      ops: Array.from({ length: 9 }, (_, i) => ({ op: 'set_factor_value', factor_id: `missing_${i}`, value: i,
+        unit: 'people', stance: 'estimate', source: { origin: 'olumi', quote: null, named_source: null } })) };
+    const original = structuredClone(args);
+    const outcome = await named(tools, 'propose_change').invoke(new RunContext(), JSON.stringify(args));
+    expect(outcome).toBe('{"status":"refused","reason":"not_a_factor","data":{"op":0}}');
+    expect(args).toEqual(original);
+    expect(calls).toHaveLength(1);
+    for (const carrier of calls[0]!) {
+      const recorded = (carrier as { args?: Record<string, unknown> }).args;
+      expect(recorded).toEqual({ public_label: `${args.public_label.slice(0, 160)}…(+${args.public_label.length - 160})`,
+        basis: '[redacted]', ops: [...args.ops.slice(0, 6), '…+3 more'] });
+      expect(JSON.stringify(recorded).length).toBeLessThanOrEqual(1500);
+      expect(JSON.stringify(carrier)).not.toContain('synthetic-credential-for-test');
+    }
   });
 
   it('the schema the SDK sends carries every check it parses with (a dropped check would end the turn on a parse failure)', () => {
@@ -59,7 +91,7 @@ describe('the adapters as SDK function tools', () => {
   it('after an applied approval, a Run in the same turn is refused; the approved proposal\'s id is on its result', async () => {
     const { tools, calls, dispatch, runAnalysis } = setup();
     await named(tools, 'apply_change').invoke(new RunContext(), JSON.stringify({ proposal_id: PROPOSAL }));
-    expect(calls[0]?.[1]).toEqual({ ok: true, mutated: true, proposal_id: PROPOSAL, outcome: 'ok' });
+    expect(calls[0]?.[1]).toEqual({ args: { proposal_id: PROPOSAL }, ok: true, mutated: true, proposal_id: PROPOSAL, outcome: 'ok' });
     const run = await named(tools, 'run_analysis').invoke(new RunContext(), JSON.stringify({ reason: 'Run it.', effects_timing: null }));
     expect(JSON.parse(String(run))).toEqual({ status: 'refused', reason: 'run_not_requested' });
     expect(dispatch).not.toHaveBeenCalled();
