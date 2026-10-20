@@ -27,18 +27,27 @@ export type WithheldReason =
 export interface Withheld { readonly id: string; readonly reason: WithheldReason }
 
 type Rec = Record<string, unknown>;
-export interface Mapped { readonly graph: { nodes: Rec[]; edges: Rec[] }; readonly withheld: readonly Withheld[] }
+/** The scale an item's levels are read on: `value = raw / cap`. */
+export interface Frame { readonly cap: number; readonly unit: string | null }
+export interface Mapped {
+  readonly graph: { nodes: Rec[]; edges: Rec[] };
+  readonly withheld: readonly Withheld[];
+  /** Each goal's and factor's frame, so a value on the model scale converts back to the person's units. */
+  readonly frames: ReadonlyMap<string, Frame>;
+}
 
 const STRUCTURAL = { strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' } as const;
 const OLUMI_EXISTS = 0.8;
 
 const stated = (s: LivingSourceT): boolean => s === 'user' || s === 'party';
-/** user/party → the brief's words (never "set by you"); Olumi → its inference; unverified → no stamp (unknown). */
-const levelSource = (s: LivingSourceT): string | undefined =>
-  stated(s) ? 'brief_extraction' : s === 'olumi' ? 'cee_inference' : undefined;
-const withSource = (o: Rec, s: LivingSourceT): Rec => {
-  const source = levelSource(s);
-  return source === undefined ? o : { ...o, source, ...(stated(s) ? { extractionType: 'explicit' } : {}) };
+/** An item the person set themselves on the canvas: theirs, with no words to quote (`edit.ts`). */
+const edited = (a: { source: LivingSourceT; quote: string | null }): boolean => a.source === 'user' && a.quote === null;
+/** user/party → their words (or their own edit); Olumi → its inference; unverified → no stamp (unknown). */
+const levelSource = (a: { source: LivingSourceT; quote: string | null }): string | undefined =>
+  edited(a) ? 'user_edited' : stated(a.source) ? 'brief_extraction' : a.source === 'olumi' ? 'cee_inference' : undefined;
+const withSource = (o: Rec, a: { source: LivingSourceT; quote: string | null }): Rec => {
+  const source = levelSource(a);
+  return source === undefined ? o : { ...o, source, ...(stated(a.source) ? { extractionType: 'explicit' } : {}) };
 };
 
 /** The frame a factor's levels are read on: '%' → 100, unitless [0,1] → 1, the goal's when the unit matches, else headroom. */
@@ -83,7 +92,7 @@ export function mapLivingModel(model: LivingModelT): Mapped {
         else {
           const level = admitGoalBaseline({ rawTarget: t.value, rawBaseline: t.current, cap: resolved.cap, ...(t.comparator === '<=' ? { ceiling: true } : {}) });
           if (!level.admitted) hold(aim.id, 'goal_level_not_admitted');
-          else node.observed_state = withSource({ value: level.normalised, baseline: level.normalised, raw_value: t.current, cap: resolved.cap, unit: t.unit ?? '' }, aim.source);
+          else node.observed_state = withSource({ value: level.normalised, baseline: level.normalised, raw_value: t.current, cap: resolved.cap, unit: t.unit ?? '' }, aim);
         }
         nodes.push(node);
       }
@@ -105,7 +114,7 @@ export function mapLivingModel(model: LivingModelT): Mapped {
     const node: Rec = { id: f.id, kind: 'factor', label: f.label, category: setsFactor.has(f.id) ? 'controllable' : 'observable' };
     if (f.value !== null && cap !== undefined) {
       current.set(f.id, f.value);
-      node.observed_state = withSource({ value: f.value / cap, raw_value: f.value, cap, unit: f.unit ?? '' }, f.source);
+      node.observed_state = withSource({ value: f.value / cap, raw_value: f.value, cap, unit: f.unit ?? '' }, f);
     } else hold(f.id, f.low !== null || f.high !== null ? 'level_range_not_in_slice' : 'factor_level_unknown');
     nodes.push(node);
   }
@@ -119,7 +128,7 @@ export function mapLivingModel(model: LivingModelT): Mapped {
   for (const o of model.options) {
     const isBaseline = statusQuo.length === 1 && statusQuo[0] === o;
     const interventions: Rec = {};
-    const set = (factorId: string, raw: number, unit: string | null, source: LivingSourceT) => {
+    const set = (factorId: string, raw: number, unit: string | null, source: { source: LivingSourceT; quote: string | null }) => {
       const cap = caps.get(factorId);
       if (cap === undefined) return hold(`${o.id}:${factorId}`, 'setting_not_convertible');
       interventions[factorId] = {
@@ -131,10 +140,10 @@ export function mapLivingModel(model: LivingModelT): Mapped {
       const factor = model.factors.find((f) => f.id === s.factor_id);
       if (factor === undefined || s.value === null || (s.unit !== null && factor.unit !== null && s.unit !== factor.unit)) {
         hold(`${o.id}:${s.factor_id}`, 'setting_not_convertible');
-      } else set(s.factor_id, s.value, s.unit ?? factor.unit, s.source);
+      } else set(s.factor_id, s.value, s.unit ?? factor.unit, s);
     }
     // The status quo holds every controllable factor at its current level, explicitly.
-    if (isBaseline) for (const id of setsFactor) if (interventions[id] === undefined && current.has(id)) set(id, current.get(id)!, model.factors.find((f) => f.id === id)!.unit, 'olumi');
+    if (isBaseline) for (const id of setsFactor) if (interventions[id] === undefined && current.has(id)) set(id, current.get(id)!, model.factors.find((f) => f.id === id)!.unit, { source: 'olumi', quote: null });
     nodes.push({ id: o.id, kind: 'option', label: o.label, ...(isBaseline ? { is_baseline: true } : {}), ...(Object.keys(interventions).length > 0 ? { interventions } : {}) });
     edges.push({ from: decisionId, to: o.id, ...STRUCTURAL, provenance: { source: 'cee_hypothesis' } });
     for (const id of Object.keys(interventions)) edges.push({ from: o.id, to: id, ...STRUCTURAL, provenance: { source: 'cee_hypothesis' } });
@@ -172,9 +181,11 @@ export function mapLivingModel(model: LivingModelT): Mapped {
       continue;
     }
     edges.push({ ...base, strength: sized, exists_probability: stated(l.source) ? 1 : OLUMI_EXISTS,
-      provenance: stated(l.source) ? { source: 'brief_extraction', magnitude: 'user_stated' }
+      provenance: stated(l.source) ? { source: edited(l) ? 'user_specified' : 'brief_extraction', magnitude: 'user_stated' }
         : l.source === 'olumi' ? { source: 'cee_hypothesis', magnitude: 'olumi_estimate' } : {} });
   }
 
-  return { graph: { nodes, edges }, withheld };
+  const frames = new Map<string, Frame>(model.factors.flatMap((f) => (caps.has(f.id) ? [[f.id, { cap: caps.get(f.id)!, unit: f.unit }] as const] : [])));
+  if (goal !== undefined) frames.set(goal.id, { cap: goal.cap, unit: goal.unit === '' ? null : goal.unit });
+  return { graph: { nodes, edges }, withheld, frames };
 }

@@ -106,7 +106,7 @@ describe('a core scenario changes through its living model', () => {
     expect(await proposeLivingChange({ dispatch: p.dispatch, proposals: new ProposalStore() }, ctx, args(structuredClone(KNOWN_ANSWER))))
       .toMatchObject({ status: 'refused', reason: 'no_change' });
     const legacy = product(KNOWN_ANSWER);
-    legacy.dispatch.mockImplementation(async () => ({ status: 200, json: { graph: mapLivingModel(KNOWN_ANSWER).graph, graph_hash: 'h', graph_identity_hash: 'i' } }));
+    legacy.dispatch.mockImplementation((async () => ({ status: 200, json: { graph: mapLivingModel(KNOWN_ANSWER).graph, graph_hash: 'h', graph_identity_hash: 'i' } })) as never);
     expect(await proposeLivingChange({ dispatch: legacy.dispatch, proposals: new ProposalStore() }, ctx, args(corrected())))
       .toMatchObject({ status: 'refused', reason: 'not_a_core_scenario' });
   });
