@@ -28,3 +28,21 @@ export async function onceMoreOnTransportFailure<T>(
   }
 }
 
+
+/** Read the provider's typed reason, never infer billing from HTTP 429 or its prose. */
+export function providerFailureOf(err: unknown): Record<string, unknown> {
+  const e = err as { code?: unknown; type?: unknown; status?: unknown; headers?: Headers } | null | undefined;
+  const capacity = [e?.code, e?.type].some(x => x === 'insufficient_quota' || x === 'credit_balance_exhausted');
+  const limited = [e?.code, e?.type].some(x => x === 'rate_limit_exceeded');
+  const retryAfter = e?.headers?.get('retry-after');
+  const retryAfterMs = e?.headers?.get('retry-after-ms');
+  return {
+    error: capacity ? 'PROVIDER_CAPACITY' : 'UPSTREAM_ERROR',
+    ...(capacity ? { retryable: false } : limited ? { retryable: true } : {}),
+    ...(e?.code !== undefined || e?.type !== undefined || e?.status !== undefined ? {
+      provider_error: { code: e.code ?? null, type: e.type ?? null, status: e.status ?? null },
+    } : {}),
+    ...(retryAfter == null ? {} : { retry_after: retryAfter }),
+    ...(retryAfterMs == null ? {} : { retry_after_ms: retryAfterMs }),
+  };
+}

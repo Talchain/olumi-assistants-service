@@ -1,0 +1,24 @@
+{
+  "_source": {
+    "core": "redteam/core-accept/runs/browser-K5-LOOP-20261019T233639Z/correction/turns/02.json (staging CEE 4d8080ea, 19 Oct 23:40Z, x-olumi-ai-mode core, streamed)",
+    "openai_lane": "redteam/r1/runs/20261018T183230Z-live-baseline-9d17caa6-rerun/R08/steps/02-t2-correction.json (staging CEE 9d17caa, 18 Oct, A lane)"
+  },
+  "core_response": {
+    "status_code": 502,
+    "error": "UPSTREAM_ERROR",
+    "detail": "Error: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.",
+    "retry_safe": true
+  },
+  "openai_lane_response": {
+    "error": "UPSTREAM_ERROR",
+    "detail": "Error: openai_429: {\n  \"error\": {\n    \"message\": \"You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.\",\n    \"type\": \"insufficient_quota\",\n    \"param\": null,\n    \"code\": \"credit_balance_exhausted\"\n  }\n}"
+  },
+  "provider_error_body": {
+    "error": {
+      "message": "You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.",
+      "type": "insufficient_quota",
+      "param": null,
+      "code": "credit_balance_exhausted"
+    }
+  }
+}
