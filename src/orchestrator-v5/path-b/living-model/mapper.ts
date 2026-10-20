@@ -27,7 +27,7 @@ import { admitGoalBaseline } from '../../../cee/factor-extraction/goal-baseline-
 import { LLM_STRENGTH_STD_FLOOR } from '../../../cee/constants.js';
 
 export type WithheldReason =
-  | 'no_level_target' | 'aim_not_in_slice' | 'change_target_not_in_slice' | 'exact_target_not_in_slice' | 'target_range_not_in_slice'
+  | 'no_level_target' | 'aim_not_in_slice' | 'change_kind_unknown' | 'change_base_invalid' | 'exact_target_not_in_slice' | 'target_range_not_in_slice'
   | 'goal_level_unknown' | 'link_frame_unknown' | 'chance_rests_on_withheld' | 'condition_not_in_slice'
   | 'goal_level_not_admitted' | 'factor_level_unknown' | 'level_range_not_in_slice' | 'setting_not_convertible'
   | 'link_endpoint_unknown' | 'link_unit_mismatch' | 'link_range_no_law' | 'link_sign_unknown' | 'no_single_status_quo';
@@ -69,6 +69,30 @@ function capFor(levels: readonly number[], unit: string | null, goal: { cap: num
   return top > 0 ? top * 1.25 : undefined;
 }
 
+type Target = NonNullable<LivingModelT['aims'][number]['target']>;
+interface LevelTarget { readonly comparator: '>=' | '<='; readonly value: number; readonly unit: string | null }
+
+/**
+ * The level a target asks for. A change from today ("raise it by 10%") is read on today's level, in that level's own unit
+ * (Batch 0 rulings 19 and 21; amendment 1: carrying on as now leaves the quantity unchanged, so the status quo is today):
+ * absolute B ± C, relative B × (1 ± r/100), points B ± C on a quantity that is itself a percentage. What a percentage change
+ * means on a percentage is never picked (amendment 3): it needs the AI's declared `change_kind`.
+ */
+function levelTargetOf(t: Target): LevelTarget | WithheldReason {
+  if (t.comparator === '=') return 'exact_target_not_in_slice';
+  if (t.value === null) return t.low !== null || t.high !== null ? 'target_range_not_in_slice' : 'no_level_target';
+  if (t.comparator === '>=' || t.comparator === '<=') return { comparator: t.comparator, value: t.value, unit: t.unit };
+  if (t.current === null) return 'goal_level_unknown';
+  const levelUnit = t.current_unit ?? t.unit;
+  const kind = t.change_kind ?? (levelUnit === '%' ? null : t.unit === levelUnit ? 'absolute' : t.unit === '%' ? 'relative' : null);
+  const fits = kind === 'absolute' ? t.unit === levelUnit : kind === 'relative' ? t.unit === '%' : kind === 'points' ? levelUnit === '%' : false;
+  if (kind === null || !fits) return 'change_kind_unknown';
+  if (kind === 'relative' && !(t.current > 0)) return 'change_base_invalid';
+  const sign = t.comparator === 'increase' ? 1 : -1;
+  const by = Math.abs(t.value);
+  return { comparator: sign > 0 ? '>=' : '<=', value: kind === 'relative' ? t.current * (1 + (sign * by) / 100) : t.current + sign * by, unit: levelUnit };
+}
+
 /** The goal a saved graph was compiled with: a regeneration keeps it unless its aim is no longer current. */
 export function goalIdOf(graph: unknown): string | undefined {
   const nodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
@@ -100,28 +124,26 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     goalNode = { id: aim.id, kind: 'goal', label: aim.text, ...(aim.quote !== null ? { source_quote: aim.quote } : {}) };
     nodes.push(goalNode);
     const t = aim.target;
-    if (t === null) hold(aim.id, 'no_level_target');
-    else if (t.comparator === 'increase' || t.comparator === 'decrease') hold(aim.id, 'change_target_not_in_slice');
-    // "Exactly N" is never read as "at least N".
-    else if (t.comparator === '=') hold(aim.id, 'exact_target_not_in_slice');
-    else if (t.value === null) hold(aim.id, t.low !== null || t.high !== null ? 'target_range_not_in_slice' : 'no_level_target');
+    // "Exactly N" is never read as "at least N"; a change is read on today's level (`levelTargetOf`).
+    const lt = t === null ? 'no_level_target' as const : levelTargetOf(t);
+    if (typeof lt === 'string') hold(aim.id, lt);
     else {
-      const resolved = resolveGoalThresholdCapWithProvenance(undefined, t.value, t.unit ?? undefined, undefined);
+      const resolved = resolveGoalThresholdCapWithProvenance(undefined, lt.value, lt.unit ?? undefined, undefined);
       if (resolved === null) hold(aim.id, 'goal_level_not_admitted');
       else {
-        goal = { id: aim.id, cap: resolved.cap, unit: t.unit ?? '' };
+        goal = { id: aim.id, cap: resolved.cap, unit: lt.unit ?? '' };
         Object.assign(goalNode, {
-          goal_direction: t.comparator,
-          goal_threshold_raw: t.value, goal_threshold_unit: t.unit ?? '', goal_threshold_cap: resolved.cap,
-          goal_threshold_cap_provenance: resolved.provenance, goal_threshold: t.value / resolved.cap, goal_threshold_frame: 'level',
-          ...(t.by_when !== null ? { goal_deadline_as_stated: t.by_when } : {}),
+          goal_direction: lt.comparator,
+          goal_threshold_raw: lt.value, goal_threshold_unit: lt.unit ?? '', goal_threshold_cap: resolved.cap,
+          goal_threshold_cap_provenance: resolved.provenance, goal_threshold: lt.value / resolved.cap, goal_threshold_frame: 'level',
+          ...(t!.by_when !== null ? { goal_deadline_as_stated: t!.by_when } : {}),
         });
-        if (t.current === null) hold(aim.id, 'goal_level_unknown');
+        if (t!.current === null) hold(aim.id, 'goal_level_unknown');
         else {
-          const level = admitGoalBaseline({ rawTarget: t.value, rawBaseline: t.current, cap: resolved.cap, ...(t.comparator === '<=' ? { ceiling: true } : {}) });
+          const level = admitGoalBaseline({ rawTarget: lt.value, rawBaseline: t!.current, cap: resolved.cap, ...(lt.comparator === '<=' ? { ceiling: true } : {}) });
           if (!level.admitted) hold(aim.id, 'goal_level_not_admitted');
-          else goalNode.observed_state = withSource({ value: level.normalised, baseline: level.normalised, raw_value: t.current, cap: resolved.cap, unit: t.unit ?? '' },
-            t.current_source === 'user' ? { source: 'user', quote: null } : aim);
+          else goalNode.observed_state = withSource({ value: level.normalised, baseline: level.normalised, raw_value: t!.current, cap: resolved.cap, unit: lt.unit ?? '' },
+            t!.current_source === 'user' ? { source: 'user', quote: null } : aim);
         }
       }
     }
