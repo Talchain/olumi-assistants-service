@@ -206,7 +206,7 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
       const b = req.body as Json;
       registered.push(b);
       saved = b.graph as Json;
-      if (proofFault === 'postimage') saved = { ...saved, nodes: (saved.nodes as Json[]).map((n, i) => i === 0 ? { ...n, label: 'A different framing' } : n) };
+      if (proofFault === 'postimage' || proofFault === 'receipt-postimage') saved = { ...saved, nodes: (saved.nodes as Json[]).map((n, i) => i === 0 ? { ...n, label: 'A different framing' } : n) };
       const graphHash = computeAnalysisAffectingGraphHash(saved as never);
       let identity = computeGraphIdentityHash(saved as never)!;
       read = () => ({ scenario_id: SCENARIO, graph: saved, graph_present: true, brief_text: b.brief_text ?? null,
@@ -228,7 +228,7 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
         identity = { ...identity, value: 'a'.repeat(64) }; receipt.graph_identity_hash = identity.value;
       }
       return { registered: true, graph_identity_hash: identity, graph_hash: proofFault === 'revision' ? 'a'.repeat(16) : graphHash,
-        ...(proofFault === 'receipt' ? {} : { model_version: receipt }),
+        ...(proofFault === 'receipt' || proofFault === 'receipt-postimage' ? {} : { model_version: receipt }),
         ...(proofFault === 'ack' ? { graph_identity_hash: { ...identity, value: 'foreign' } } : {}),
         ...(proofFault === 'ack-missing' ? { graph_identity_hash: null } : {}) };
     });
@@ -341,7 +341,7 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
     expect(runs).toBe(1);
   });
 
-  it.each(['receipt', 'ack', 'postimage'])('L13 proof negative: %s is missing or mismatched despite a nonempty graph', async (fault) => {
+  it.each(['ack', 'postimage', 'receipt-postimage'])('L13 proof negative: %s is missing or mismatched despite a nonempty graph', async (fault) => {
     proofFault = fault;
     await turn();
     expect(draftOutcome()).toMatchObject({ status: 'unavailable', write: 'unknown', data: { save_outcome: 'UNKNOWN' } });
@@ -349,7 +349,7 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
   });
 
   it.each([BRIEF, OTHER_BRIEF].flatMap((brief) => [
-    ['receipt', { check: 'receipt_absent' }],
+    ['receipt-postimage', { check: 'postimage_diff', keys: ['nodes'] }],
     ['receipt-invalid', { check: 'receipt_invalid', field: 'version_id' }],
     ['revision-invalid', { check: 'revision_mismatch', field: 'version_number' }],
     ['mutation-invalid', { check: 'receipt_invalid', field: 'mutation_id' }],
@@ -388,10 +388,18 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
     });
 
   it('L26B first failure wins; a later unrelated mismatch cannot replace it or leak content', async () => {
-    proofFault = 'receipt'; readUnavailable = true;
+    proofFault = 'receipt-invalid'; readUnavailable = true;
     const body = await turn();
-    expect(draftCall(body).draft_verification).toEqual({ check: 'receipt_absent' });
+    expect(draftCall(body).draft_verification).toEqual({ check: 'receipt_invalid', field: 'version_id' });
     expect(JSON.stringify(draftCall(body).draft_verification)).not.toContain(BRIEF);
+  });
+
+  it('a guest\u2019s write mints no version: saved on this registration\u2019s acknowledgement and an exact read of the model', async () => {
+    proofFault = 'receipt';
+    const body = await turn();
+    expect(draftCall(body), JSON.stringify(body._agent)).toMatchObject({ ok: true, mutated: true, outcome: 'ok' });
+    expect(draftCall(body)).not.toHaveProperty('draft_verification');
+    expect(registered).toHaveLength(1);
   });
 
   it('L13 refusal before dispatch is VERIFIED_NO_WRITE', async () => {
