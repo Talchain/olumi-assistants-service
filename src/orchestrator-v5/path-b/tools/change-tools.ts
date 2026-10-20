@@ -411,7 +411,7 @@ const levelCtx = (ctx: ChangeCtx): AgentToolContext => {
 
 /**
  * The goal's current level (DL-3 ruling (a), bounded): only the user's own current figure in their typed words, by the existing
- * goal-level door on this read in a private store; its prepared operation and card are carried literally onto ONE proposal.
+ * goal-level door on this read in a private store; ONE proposal carries its prepared operation and names the declared places.
  */
 async function proposeGoalLevel(deps: Pick<ChangeDeps, 'dispatch' | 'proposals'>, ctx: ChangeCtx, o: GoalLevelArgs, members: ProposeChangeArgs['ops']): Promise<ToolOutcome> {
   if (o.source.origin !== 'user' || o.stance !== 'stated_current') return unavailable('goal_level_unverified', 'none', GOAL_LEVEL_UNVERIFIED);
@@ -452,7 +452,7 @@ async function proposeGoalLevel(deps: Pick<ChangeDeps, 'dispatch' | 'proposals'>
       ...(operand === undefined ? {} : { current_level_operand: operand.factor_id }), declared: operationOf({ op: 'set_factor_value',
       factor_id: o.goal_id, value: o.value, unit: o.unit, stance: o.stance, source: o.source }, ctx, new Date().toISOString()).value } })),
     validation: prepared.validation, public_label: operand === undefined ? prepared.public_label
-      : `${prepared.public_label} "${operandNode!.label}" records the same current level in this save.` });
+      : `Record today's level of "${goal.label}" and "${operandNode!.label}" as your figure: ${o.value}${o.unit === null ? '' : ` ${o.unit}`} in the same save.` });
   deps.proposals.put(p);
   return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: read.graphHash });
 }

@@ -256,8 +256,11 @@ describe('PATH-B: the goal’s current level, typed as a correction, shows its c
     expect(outputOf('prop_call')).toMatchObject({ status: 'ok', data: { proposal_id: expect.any(String) } });
     const t1 = first.json() as Json;
     expect(t1._proposal_fields.proposals).toHaveLength(1);
-    expect(outputOf('prop_call')!.data.public_label).toContain('Current weekly orders');
+    const cardWords = `Record today's level of "${goal.label}" and "Current weekly orders" as your figure: ${value} ${unit} in the same save.`;
+    expect(outputOf('prop_call')!.data.public_label).toBe(cardWords);
     const rec = t1._proposal_fields.proposals[0];
+    const held = (await store.readMostRecentPendingActions()).find((h: Json) => h.chip_id === rec.approve_action.id);
+    expect(held.action.inline_patch.agent_proposal.public_label).toBe(cardWords);
     preparedId = rec.proposal_id;
     outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply_call' }], [{ type: 'message', text: SAVED_WORDS }]];
     const saveTurnId = randomUUID();
