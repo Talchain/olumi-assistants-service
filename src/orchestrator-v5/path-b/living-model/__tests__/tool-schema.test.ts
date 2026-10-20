@@ -14,4 +14,10 @@ describe('thin core: the link-unit convention reaches the AI in the tool schema 
   it('an exact effect is told apart from a stated figure, in the schema the AI is sent', () => {
     expect(sent).toContain('exact: the person says it is exactly this, with no variation');
   });
+
+  it('R2 on 6e4d2305: an option\'s own effect is a link from the option; a party is named word for word; a condition is someone\'s prerequisite', () => {
+    expect(sent).toContain('or an option id when the person states that option');
+    expect(sent).toContain('exactly as the user names them, word for word');
+    expect(sent).toContain('A prerequisite or qualification someone states for the listed items');
+  });
 });

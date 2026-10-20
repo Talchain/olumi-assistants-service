@@ -23,11 +23,12 @@ export type LivingSourceT = z.infer<typeof LivingSource>;
 const id = z.string();
 
 const attribution = {
-  source: LivingSource,
+  source: LivingSource.describe(
+    "Who asserted this: user = the person's own statement; party = someone the person reports (named in `party`); olumi = Olumi's own addition or estimate; unverified = said to be someone's, without their exact words."),
   /** For `party`: the person or body the user reports, as written. Null otherwise. */
-  party: z.string().nullable(),
+  party: z.string().nullable().describe('For party: the person or body exactly as the user names them, word for word. Null otherwise.'),
   /** The person's exact words for a user or party item. Null for Olumi's own items. */
-  quote: z.string().nullable(),
+  quote: z.string().nullable().describe("The person's exact words that state this item, copied verbatim. Null for Olumi's own items."),
 };
 
 /** A figure as stated: a point (`value`) or a range (`low`/`high`), never a range collapsed to its midpoint. */
@@ -46,13 +47,14 @@ export const LivingAim = z.object({
   target: z.object({
     /** The quantity the aim is about, as written. */
     quantity: z.string(),
-    comparator: z.enum(['>=', '<=', '=', 'increase', 'decrease']),
+    comparator: z.enum(['>=', '<=', '=', 'increase', 'decrease']).describe(
+      ">= or <= for a level to reach; = for exactly; increase or decrease for a change from the baseline, `value` being the size of the change."),
     ...figure,
     by_when: z.string().nullable(),
     /** The reference the target is measured from, as written ("today", "last quarter"); null when none. */
     baseline: z.string().nullable(),
     /** The quantity's current level, in the target's unit, when stated. Unknown is null, never 0. */
-    current: z.number().nullable(),
+    current: z.number().nullable().describe("Today's level of the quantity, in the target's unit, when stated. Unknown is null, never 0."),
     /** 'user' only when the person set today's level themselves (a canvas edit); otherwise null: the aim's attribution covers it. */
     current_source: z.enum(['user']).nullable(),
   }).strict().nullable(),
@@ -77,16 +79,17 @@ export const LivingOption = z.object({
   id,
   label: z.string(),
   /** What the option sets each factor to. An option with no settings changes nothing (the status quo). */
-  settings: z.array(LivingSetting),
+  settings: z.array(LivingSetting).describe(
+    "The level the option sets each factor to, in the factor's unit. An option's own effect on a quantity (\"adds 30\") is a link from the option instead. An option with neither changes nothing (the status quo)."),
   ...attribution,
 }).strict();
 
 export const LivingLink = z.object({
   id,
   /** A factor id (or an option id for an option's direct effect). */
-  from: id,
+  from: id.describe('A factor id, or an option id when the person states that option\'s own effect on `to` ("Option A adds 30").'),
   /** A factor id or an aim id. */
-  to: id,
+  to: id.describe('A factor id or an aim id.'),
   effect: z.object({
     /**
      * `normal`: an explicitly stated law, `value` its mean and `sd` its standard deviation, per +1 of `from`. An ordinary
@@ -110,9 +113,10 @@ export const LivingLink = z.object({
 
 export const LivingCondition = z.object({
   text: z.string(),
-  applies_to: z.array(z.string()),
+  applies_to: z.array(z.string()).describe('The ids of the items (aims, options, factors, links) this condition qualifies.'),
   ...attribution,
-}).strict();
+}).strict().describe(
+  'A prerequisite or qualification someone states for the listed items ("only after supplier approval"). Olumi\'s own caveat is recorded with source olumi and is said beside a result, never treated as a prerequisite.');
 
 export const LivingView = z.object({
   holder: z.string(),
