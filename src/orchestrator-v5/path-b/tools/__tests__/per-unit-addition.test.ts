@@ -3,6 +3,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import captured from './fixtures/l18-captured-sum.json';
+import liveRows from './fixtures/l23-live-drafter-raw-5203fed5.json';
 import { normaliseFactorValue } from '../../../tools/handlers/d1-shared/normalise-factor-value.js';
 import { candidateToGraph } from '../candidate-to-graph.js';
 import { admitCandidateModel, type CandidateModel } from '../../../agent-lane/admit-model.js';
@@ -67,7 +68,7 @@ function draft(statementUnit = `${UNIT} per specialist`): Rec {
         { form: 'range', low: 10, high: 30, qualifier: 'about' })],
   };
 }
-async function replay(raw: Rec, brief = BRIEF): Promise<Rec> {
+async function replay(raw: Rec | string, brief = BRIEF): Promise<Rec> {
   let stored: Rec | undefined;
   const sourceTurn = registrationTurnId(SID, constructionOperationId(SID, brief));
   const dispatch: DraftDeps['dispatch'] = async (path, body) => {
@@ -83,7 +84,7 @@ async function replay(raw: Rec, brief = BRIEF): Promise<Rec> {
     return { status: 200, json: { graph: stored ?? null, graph_present: stored !== undefined, graph_hash: stored ? computeAnalysisAffectingGraphHash(stored as never) : null,
       graph_identity_hash: stored ? computeGraphIdentityHash(stored as never) : null } };
   };
-  const callStructured = vi.fn<CallStructuredModel>(async () => ({ text: JSON.stringify(raw), status: 'completed' }));
+  const callStructured = vi.fn<CallStructuredModel>(async () => ({ text: typeof raw === 'string' ? raw : JSON.stringify(raw), status: 'completed' }));
   const out = await buildModel({ dispatch, callStructured }, { scenario_id: SID, verified_user_messages: [brief], user_turn_text: brief }, { brief });
   expect(out.status, JSON.stringify(out)).toBe('ok');
   expect(callStructured).toHaveBeenCalledTimes(1);
@@ -321,4 +322,64 @@ it('L18C admission: an explicit capless frame maps known and estimated levels wi
         unit: UNIT, source: 'cee_inference', extractionType: 'inferred' });
     }
   }
+});
+
+// L23: untouched raw_text from #3509's actual provider record, never reconstructed from draft_graph.
+const LIVE_RAW = liveRows[0]!.calls[0]!.raw_text;
+const LIVE_BRIEF = "We are comparing two staffing options, labelled exactly \"Keep current staffing\" and \"Add one specialist\". Use the exact goal label \"Weekly support capacity\". Our existing team resolves 80 tickets per week. Keep current staffing adds no specialist. Add one specialist adds one specialist. Each additional specialist resolves about 20 tickets per week, between 10 and 30. Total weekly support capacity is defined as the existing 80 tickets per week plus the additional specialist capacity. Goal: weekly support capacity of at least 100 tickets per week. This target is an absolute level, with no deadline.";
+const liveGoal = (graph: Rec): Rec => graph.nodes.find((n: Rec) => n.id === 'weekly_support_capacity');
+it('L23 exact recorded drafter bytes: declared sum total survives conversion, save/readback and the Run request', async () => {
+  const raw = JSON.parse(LIVE_RAW);
+  expect(raw.goal).toMatchObject({ baseline_value: 80, baseline_origin: 'olumi', baseline_stance: 'estimate' });
+  const graph = await replay(LIVE_RAW, LIVE_BRIEF);
+  const request = await runRequest(graph, LIVE_BRIEF);
+  for (const sent of [graph, request.graph]) {
+    const goal = liveGoal(sent);
+    expect(goal.observed_state).toMatchObject({ raw_value: 80, baseline: 80 / 125, value: 80 / 125,
+      cap: 125, unit: 'tickets per week', source: 'cee_inference', extractionType: 'inferred' });
+    expect(goal.nonlinear_identity).toEqual({ operation: 'sum',
+      factor_ids: ['existing_team_capacity', 'additional_specialist_capacity'], stated_in_brief: false });
+    const zero = sent.nodes.find((n: Rec) => n.id === 'additional_specialist_capacity');
+    expect(zero.scale_frame).toBe(125);
+    expect(zero.observed_state).toMatchObject({ raw_value: 0, value: 0, source: 'cee_inference' });
+    expect(zero.observed_state.cap).toBeUndefined();
+    for (const from of goal.nonlinear_identity.factor_ids) {
+      const edge = sent.edges.find((e: Rec) => e.from === from && e.to === goal.id);
+      expect(edge.provenance.definitional).toBe(true);
+      expect(edge.exists_probability).toBe(1);
+      expect(linkDefaultAssumptionsOf(edge)).toEqual([]);
+    }
+    const rate = sent.edges.find((e: Rec) => e.from === 'additional_specialists' && e.to === 'additional_specialist_capacity');
+    expect(rate.provenance.magnitude).toBe('user_stated');
+    expect(rate.provenance.natural_effect.amount).toBe(20);
+    expect(rate.provenance.natural_effect.stated_range).toEqual({ low: 10, high: 30,
+      text: 'Each additional specialist resolves about 20 tickets per week, between 10 and 30.', end: 'centre' });
+  }
+});
+
+it.each(['tickets', 'parcels'])('L23 %s: an Olumi-derived total keeps its author while the sum is structurally checked', async quantity => {
+  const raw = JSON.parse(LIVE_RAW.replaceAll('tickets', quantity));
+  const brief = LIVE_BRIEF.replaceAll('tickets', quantity);
+  const graph = await replay(raw, brief);
+  expect(liveGoal(graph).observed_state.raw_value).toBe(80);
+  expect(liveGoal(graph).observed_state.source).toBe('cee_inference');
+  expect(liveGoal(graph).nonlinear_identity.operation).toBe('sum');
+});
+
+it.each([
+  ['unknown level', (raw: Rec) => { raw.goal.baseline_known = false; }],
+  ['no identity', (raw: Rec) => { raw.identities = []; }],
+  ['unknown origin', (raw: Rec) => { raw.goal.baseline_origin = 'unknown'; }],
+  ['hypothetical total', (raw: Rec) => { raw.goal.baseline_stance = 'hypothetical'; }],
+  ['target total', (raw: Rec) => { raw.goal.baseline_stance = 'target'; }],
+  ['wrong arithmetic', (raw: Rec) => { raw.goal.baseline_value = 60; }],
+  ['different operand unit', (raw: Rec) => { raw.factors[2].unit = 'parcels per week'; }],
+  ['different total', (raw: Rec) => { raw.identities[0].outcome = 'Additional specialist capacity'; }],
+])('L23 negative: %s cannot supply a supported derived total', async (_name, edit) => {
+  const raw = JSON.parse(LIVE_RAW);
+  (edit as (raw: Rec) => void)(raw);
+  // An unrelated user number must never supply this goal's authorship or a missing sum.
+  const graph = await replay(raw, `${LIVE_BRIEF} An unrelated queue has 80 tickets per week.`);
+  expect(liveGoal(graph).observed_state).toBeUndefined();
+  expect(liveGoal(graph).nonlinear_identity).toBeUndefined();
 });
