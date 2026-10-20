@@ -1,6 +1,0 @@
-PR #L2 shape
-  source   +19 / -0 (net +19) in 1 files
-  tests    +98 / -2 in 1 files
-  fixtures +0 / -0 in 0 files
-  added to the estate: 0 refusal/reason codes, 0 regex literals, 0 exports, 1 new if-branches
-  RETIRED: nothing (no source line removed) — reviewer: what does this supersede?

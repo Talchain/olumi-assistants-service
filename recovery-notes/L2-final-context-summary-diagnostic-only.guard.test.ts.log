@@ -1,9 +1,0 @@
-
- RUN  v4.1.10 /private/tmp/cx-l2
-
-
- Test Files  1 passed (1)
-      Tests  6 passed (6)
-   Start at  02:08:32
-   Duration  1.77s (transform 111ms, setup 121ms, import 17ms, tests 1.52s, environment 0ms)
-

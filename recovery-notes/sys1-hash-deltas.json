@@ -1,8 +1,0 @@
-{
-  "before_body": "3c2757824ea1e0ca6deca25fea4185f7c8ae11163cff31783b9a72c939e295ab",
-  "after_body": "7a67aefc183f87a22e748ea0c37db56a9ac58930a11ca5f02c2166b8a06b9012",
-  "before_tools": "356b3df46b8a70736d752521600b892f07efcd764516c752c73568260ea6b4f0",
-  "after_tools": "f0f4fb0895b416587fc1ad54c8c0e14c372f7e98a3c4344d87a5cbfb4036ec4b",
-  "byte_delta": 1767,
-  "unchanged": "all non-tool request fields including instructions and schema"
-}

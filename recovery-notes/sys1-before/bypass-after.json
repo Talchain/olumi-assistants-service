@@ -1,5 +1,0 @@
-[
-  "src/routes/admin.testing.ts:callAnthropicWithPrompt",
-  "src/routes/admin.testing.ts:callOpenAIWithPrompt",
-  "src/services/model-availability.ts:fetchOpenAIModels"
-]
