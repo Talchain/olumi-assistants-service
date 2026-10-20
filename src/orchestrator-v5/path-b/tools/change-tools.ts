@@ -1161,7 +1161,8 @@ function targetApplier(deps: ChangeDeps, ctx: ChangeCtx, p: StructuredProposal, 
 
 /** A change this path prepared (the goal's level or target, or figures, links and structural members): `apply_change` commits it. */
 export const isChangeProposal = (p: StructuredProposal | undefined): boolean =>
-  p !== undefined && (isGoalCurrentLevelProposal(p) || targetOf(p) !== null || compoundOf(p) !== null);
+  // THIN CORE: a living-model proposal (`living-change.ts`) is applied by this path's apply_change too, never the full lane.
+  p !== undefined && (p.living_model !== undefined || isGoalCurrentLevelProposal(p) || targetOf(p) !== null || compoundOf(p) !== null);
 
 export async function applyChange(deps: ChangeDeps, ctx: ChangeCtx, args: ApplyChangeArgs): Promise<ToolOutcome> {
   const p = deps.proposals.get(args.proposal_id);

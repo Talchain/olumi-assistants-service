@@ -14,6 +14,7 @@ import { mapLivingModel } from '../../living-model/mapper.js';
 import { KNOWN_ANSWER } from '../../living-model/__tests__/fixtures.js';
 import { changeOperationId } from '../core-write.js';
 import { applyLivingChange, proposeLivingChange } from '../living-change.js';
+import { isChangeProposal } from '../change-tools.js';
 import type { Rec } from './fixtures.js';
 
 const SID = 'scn_1';
@@ -61,6 +62,8 @@ describe('a core scenario changes through its living model', () => {
     const data = (out as { data: Rec }).data;
     expect(data.changes).toEqual([{ kind: 'factor', id: 'f', change: 'change', before: KNOWN_ANSWER.factors[0], after: corrected().factors[0] }]);
     expect(p.registered).toHaveLength(0);
+    // Its card's press is this path's apply_change (the route's core card fast path), never the full lane's writer.
+    expect(isChangeProposal(proposals.get(String(data.proposal_id)))).toBe(true);
 
     const base = computeGraphIdentityHash(p.saved() as never)!.value;
     const applied = await applyLivingChange({ dispatch: p.dispatch, proposals }, ctx, String(data.proposal_id));
