@@ -7,26 +7,19 @@
  * routes as doubles that answer in the served shapes. SYNTHETIC wording; no journey brief. (The brief stays the AI's literal copy
  * of the user's words, as on base.)
  */
-import liveRows from './fixtures/l23-live-drafter-raw-5203fed5.json';
 import { runPressToolResponse } from '../../../agent-lane/__tests__/fixtures/run-press-model.js';
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { computeGraphIdentityHash } from '../../../context/graph-identity.js';
 import { computeAnalysisAffectingGraphHashSha256, computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
 import { registrationTurnId } from '../../../graph-registration/registration-identity.js';
-import { candidateToGraph } from '../candidate-to-graph.js';
 import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import { GraphStateIngressSchema } from '../../../boundary/request-extensions.js';
-import { projectGraphForPersistence } from '../../../persisted-graph-projection.js';
+import { projectCorePostimageForPersistence } from '../../../persisted-graph-projection.js';
 import { toOutboundGraph } from '../../../goal-target/outbound-graph.js';
-import { readGoalRecord } from '../../../goal-target/goal-record.js';
-import { isOlumiSourceStamp } from '../../../../cee/provenance/provenance-of.js';
-import { readCanonicalContext } from '../context-tool.js';
-import { resolveRunAdmission } from '../../../tools/handlers/analysis-ready-core.js';
-import { settingProvenanceOf, valueProvenanceOf } from '../../../../cee/provenance/provenance-of.js';
-import { placeholderGoalPaths, unsizedLeaderGoalPaths } from '../../../agent-lane/goal-certainty.js';
 import type { DrafterRawRow } from '../../../drafter-raw/index.js';
+import type { LivingModelT } from '../../../../schemas/living-model.js';
 
 const rawRecorder = vi.hoisted(() => ({
   rows: [] as DrafterRawRow[], mode: 'ok' as 'ok' | 'throws' | 'failed' | 'pending',
@@ -52,7 +45,22 @@ const BRIEF = [AIM, 'Bookings are 180 a week today.', 'We could add evening slot
 const GOAL = 'Weekly bookings';
 const OTHER_BRIEF = 'We run a repair workshop and could add a technician or extend opening hours.';
 
-const CAPACITY_BRIEF = "We are comparing two staffing options, labelled exactly \"Keep current staffing\" and \"Add one specialist\". Use the exact goal label \"Weekly support capacity\". Our existing team resolves 80 tickets per week. Keep current staffing adds no specialist. Add one specialist adds one specialist. Each additional specialist resolves about 20 tickets per week, between 10 and 30. Total weekly support capacity is defined as the existing 80 tickets per week plus the additional specialist capacity. Goal: weekly support capacity of at least 100 tickets per week. This target is an absolute level, with no deadline.";
+
+/** THIN CORE: the AI's complete living model of a brief (the build tool's strict arguments). Generic and protocol-shaped: the
+ * science of real briefs is the mapper's own tests'; here the save, receipt, readback and narration protocol is under test. */
+const livingFor = (brief: string): LivingModelT => {
+  const first = brief.split(/(?<=[.?!])\s+/)[0] ?? brief;
+  return {
+    aims: [{ id: 'aim', text: first, status: 'current', target: null, source: 'user', party: null, quote: first }],
+    options: [
+      { id: 'carry_on', label: 'Carry on as now', settings: [], source: 'olumi', party: null, quote: null },
+      { id: 'change', label: 'Make the change', source: 'olumi', party: null, quote: null,
+        settings: [{ factor_id: 'level', value: 2, low: null, high: null, unit: null, source: 'olumi', party: null, quote: null }] },
+    ],
+    factors: [{ id: 'level', label: 'Current level', value: 1, low: null, high: null, unit: null, source: 'olumi', party: null, quote: null }],
+    links: [], conditions: [], views: [], history: [],
+  };
+};
 
 /** The drafter's answer (the lean-core real-path draft shape, lean-core-authorship.route.test.ts). */
 const DRAFT = (() => {
@@ -76,36 +84,8 @@ const DRAFT = (() => {
   };
 })();
 
-/**
- * ⭐ K5 LOOP SHAPE (VERIFIER 23:47Z on 4d8080ea), synthetic: an added part at 0 today the AI declared `inferred` with no statement of it, and
- * its one-for-one definition into the goal declared `inferred` with no quote.
- */
-const ADDED = 'Extra bookings from evening slots';
-const ADDED_DRAFT: Json = {
-  ...DRAFT,
-  factors: [...DRAFT.factors, { label: ADDED, role: 'observable', baseline_known: true, baseline_value: 0, unit: 'bookings a week', provenance: 'inferred', origin: 'olumi', stance: 'estimate', plausible_max: null }],
-  links: [{ ...DRAFT.links[0], to: ADDED }, { ...DRAFT.links[0], from: ADDED, effect_amount: 1, effect_per_source_change: 1, effect_provenance: 'inferred', definitional: true }],
-};
-/**
- * ⭐ K5 P0 RULING SHAPE (option 2, 20 Oct), synthetic: what B's drafter text asks for. The goal's current level is its own fixed factor
- * carrying the goal baseline; the option's effect is a setting on the addition; the goal is declared as their sum, each operand linked one
- * for one in the same unit.
- */
-const CURRENT = 'Current weekly bookings';
-const SUM_DRAFT: Json = {
-  ...DRAFT,
-  options: [DRAFT.options[0], { ...DRAFT.options[1], interventions: [{ factor_label: ADDED, value: 20, value_kind: 'absolute', unit: 'bookings a week', provenance: 'explicit' }] }],
-  factors: [{ label: CURRENT, role: 'observable', baseline_known: true, baseline_value: 180, unit: 'bookings a week', provenance: 'explicit', plausible_max: null },
-    { label: ADDED, role: 'controllable', baseline_known: true, baseline_value: 0, unit: 'bookings a week', provenance: 'inferred', plausible_max: 60 }],
-  links: [CURRENT, ADDED].map((from) => ({ ...DRAFT.links[0], from, effect_amount: 1, effect_per_source_change: 1, effect_provenance: 'inferred', definitional: true })),
-  identities: [{ operation: 'sum', outcome: GOAL, factors: [CURRENT, ADDED], provenance: 'inferred', evidence: null }],
-};
 let drafterAnswer: Json | string = DRAFT;
-let draftSchema: Json = {};
-let draftInstructions = '';
 const rawDraftText = (): string => typeof drafterAnswer === 'string' ? drafterAnswer : `\n${JSON.stringify(drafterAnswer, null, 2)}\n`;
-const ACTION_TIMING_SENTENCE = 'Declare stated additions in interventions with value_kind=additional, leaving unknown current levels as questions, and stated goal time limits in horizon_months and verbatim deadline_words, keeping relative periods relative without inventing dates.';
-const ESTIMATE_SENTENCE = 'Where the brief does not state a level, setting or size the model needs, propose a defensible Olumi starting estimate with origin=olumi and stance=estimate, explaining its basis, unit and period for the person to approve through the existing card, never presenting it as theirs; if no defensible estimate is possible, state the limitation and ask for the missing input rather than silently leaving the model unrunnable; in every draft with a supported additive goal, declare the sum identity with the separate current-level factor and every distinct addition as bound operands under the rules above.';
 
 const rows = new Map<string, { id: string; turn_id: string; request_hash: string }>();
 const conversationIds = new Map<string, string>();
@@ -168,6 +148,10 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
   let readUnavailable = false;
   let proofFault = '';
   let toolBrief: string | undefined;
+  let toolModel: LivingModelT | undefined;
+  /** The instructions each core agent call was given (the turn's own facts ride there). */
+  const instructionsSeen: string[] = [];
+  const bodiesSeen: Json[] = [];
   let drafterCalls = 0;
   let cutShortAfterRun = false;
   let runFails = false;
@@ -182,16 +166,18 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
       const ok = (output: Record<string, unknown>[]) => new Response(JSON.stringify(responsesBody(output)), { status: 200, headers: { 'content-type': 'application/json' } });
       // The construction's structured calls: the whole candidate gets the drafter's answer; any other structured step answers nothing.
       if (body.text?.format?.type === 'json_schema') {
-        if (body.text.format.name === 'whole_candidate') { draftSchema = body.text.format.schema; draftInstructions = body.instructions; drafterCalls += 1; }
+        if (body.text.format.name === 'whole_candidate') drafterCalls += 1;
         return ok(body.text.format.name === 'whole_candidate' ? [{ type: 'message', content: [{ type: 'output_text', text: rawDraftText() }] }] : []);
       }
       // The core agent: first the draft call, then its words.
+      instructionsSeen.push(String(body.instructions ?? ''));
+      bodiesSeen.push(body);
       const input = Array.isArray(body.input) ? body.input as Json[] : [];
       toolOutputs.push(...input.filter((i) => i.type === 'function_call_output'));
       if (!input.some((i) => i.type === 'function_call_output')) {
         if (skipDraft) return ok([{ type: 'function_call', name: 'run_analysis', call_id: 'refused_run',
           arguments: JSON.stringify({ reason: 'Check the model.', effects_timing: null }) }]);
-        return ok([{ type: 'function_call', name: 'build_model_from_brief', call_id: 'draft_call', arguments: JSON.stringify({ brief: toolBrief ?? briefArg }) }]);
+        return ok([{ type: 'function_call', name: 'build_model_from_brief', call_id: 'draft_call', arguments: JSON.stringify({ brief: toolBrief ?? briefArg, model: toolModel ?? livingFor(toolBrief ?? briefArg) }) }]);
       }
       if (cutShortAfterRun) {
         if (!input.some((i) => i.call_id === 'refused_run')) return ok([{ type: 'function_call', name: 'run_analysis',
@@ -260,7 +246,7 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
     await app.ready();
   }, 60_000);
   afterAll(async () => { await rawStore.settleDrafterRawWritesForTests(); await app.close(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { rawRecorder.rows.length = 0; rawRecorder.mode = 'ok'; rawRecorder.release = undefined; SCENARIO = randomUUID(); rows.clear(); conversationIds.clear(); saved = null; registered = []; read = EMPTY_READ; toolOutputs.length = 0; drafterAnswer = DRAFT; briefArg = BRIEF; draftSchema = {}; versionsUnavailable = false; readUnavailable = false; proofFault = ''; toolBrief = undefined; drafterCalls = 0; cutShortAfterRun = false; runFails = false; runs = 0; skipDraft = false; });
+  beforeEach(() => { rawRecorder.rows.length = 0; rawRecorder.mode = 'ok'; rawRecorder.release = undefined; SCENARIO = randomUUID(); rows.clear(); conversationIds.clear(); saved = null; registered = []; read = EMPTY_READ; toolOutputs.length = 0; drafterAnswer = DRAFT; briefArg = BRIEF; versionsUnavailable = false; readUnavailable = false; proofFault = ''; toolBrief = undefined; toolModel = undefined; drafterCalls = 0; cutShortAfterRun = false; runFails = false; runs = 0; skipDraft = false; });
 
   const turn = async (): Promise<Json> => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', headers: { 'x-olumi-ai-mode': 'core', 'x-request-id': REQUEST_ID }, payload: {
@@ -271,79 +257,6 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
   const draftCall = (body: Json): Json => (body._agent?.tool_calls as Json[] | undefined)?.find((c) => c.name === 'build_model_from_brief') ?? {};
 
   const draftOutcome = (): Json => JSON.parse(String(toolOutputs.find((o) => o.call_id === 'draft_call')?.output ?? '{}')) as Json;
-
-  it.each([BRIEF, OTHER_BRIEF])('L17 records exactly one raw B draft with its own scenario and request: %s', async (brief) => {
-    briefArg = brief;
-    const body = await turn();
-    await rawStore.settleDrafterRawWritesForTests();
-    expect(rawRecorder.rows).toHaveLength(1);
-    const row = rawRecorder.rows[0]!;
-    expect(row.scenario_id).toBe(SCENARIO);
-    expect(row.request_id).toBe(REQUEST_ID);
-    expect(row.operation_id).toBe(registered[0]!.operation_id);
-    expect(row.brief_sha256).toBe(createHash('sha256').update(brief).digest('hex'));
-    expect(row.outcome).toBe('registered');
-    expect(row.calls).toHaveLength(1);
-    expect(row.calls[0]!.raw_text).toBe(rawDraftText());
-    expect(row.calls[0]!.threw).toBe(false);
-    expect(draftCall(body)).toMatchObject({ ok: true, mutated: true });
-    expect(body.assistant_text).toBe('Here is the first model I built.');
-    expect(drafterCalls).toBe(1);
-    // A new request for the saved construction makes no second draft or diagnostic write.
-    await turn();
-    await rawStore.settleDrafterRawWritesForTests();
-    expect(rawRecorder.rows).toHaveLength(1);
-    expect(registered).toHaveLength(1);
-    expect(drafterCalls).toBe(1);
-  });
-
-  it.each(['throws', 'failed', 'pending'] as const)('L17 recorder %s preserves the exact draft outcome without blocking or retrying', async (mode) => {
-    vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(new Date('2026-10-20T01:00:00Z'));
-    await turn();
-    const baseline = draftOutcome();
-    const baselineGraph = registered[0]!.graph;
-    SCENARIO = randomUUID(); rows.clear(); saved = null; registered = []; read = EMPTY_READ; toolOutputs.length = 0;
-    rawRecorder.rows.length = 0; rawRecorder.mode = mode;
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-    const pendingTurn = turn();
-    try {
-      const body = await Promise.race([pendingTurn, new Promise<never>((_resolve, reject) => {
-        timeout = setTimeout(() => reject(new Error('diagnostic write blocked the turn')), 2_000);
-      })]);
-      expect(draftOutcome()).toEqual(baseline);
-      expect(registered[0]!.graph).toEqual(baselineGraph);
-      expect(body.assistant_text).toBe('Here is the first model I built.');
-      expect(rawRecorder.rows).toHaveLength(1);
-    } finally {
-      clearTimeout(timeout);
-      rawRecorder.release?.();
-      await pendingTurn;
-      await rawStore.settleDrafterRawWritesForTests();
-      vi.useRealTimers();
-    }
-    expect(rawRecorder.rows).toHaveLength(1);
-    expect(registered).toHaveLength(1);
-  });
-
-  it('L17 no-draft negative: another scenario and unrelated brief cannot create a raw record', async () => {
-    toolBrief = OTHER_BRIEF;
-    const body = await turn();
-    expect(draftCall(body)).toMatchObject({ ok: false, refusal: 'brief_not_users_words' });
-    expect(rawRecorder.rows).toEqual([]);
-    expect(drafterCalls).toBe(0);
-  });
-
-  it('L24 recorded capacity through POST /agent/v1/turn retains the per-specialist rate', async () => {
-    drafterAnswer = liveRows[0]!.calls[0]!.raw_text;
-    briefArg = 'We are comparing two staffing options, labelled exactly "Keep current staffing" and "Add one specialist". Use the exact goal label "Weekly support capacity". Our existing team resolves 80 tickets per week. Keep current staffing adds no specialist. Add one specialist adds one specialist. Each additional specialist resolves about 20 tickets per week, between 10 and 30. Total weekly support capacity is defined as the existing 80 tickets per week plus the additional specialist capacity. Goal: weekly support capacity of at least 100 tickets per week. This target is an absolute level, with no deadline.';
-    await turn();
-    expect(draftOutcome()).toMatchObject({ status: 'ok', mutated: true });
-    expect(registered).toHaveLength(1);
-    expect(saved!.edges.find((e: Json) => e.from === 'additional_specialists' && e.to === 'additional_specialist_capacity')
-      .provenance.natural_effect).toMatchObject({ amount: 20, per_source_change: 1, per_source_change_unit: 'specialist',
-        stated_range: { low: 10, high: 30 } });
-  });
 
   it.each([BRIEF, OTHER_BRIEF])(
     'L13 own registration receipt verifies the full postimage without history availability: %s', async (brief) => {
@@ -368,7 +281,7 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
     const lastOutcome = JSON.parse(String(toolOutputs.at(-1)?.output)) as Json;
     expect(lastOutcome).toMatchObject({ status: 'ok', mutated: false, data: { already_saved: true, save_outcome: 'VERIFIED_SAVED' } });
     expect(registered).toHaveLength(1);
-    expect(drafterCalls).toBe(1);
+    expect(drafterCalls).toBe(0);
     expect([body, retry].flatMap((b) => b._agent.tool_calls).map((c) => c.name)).toEqual(['build_model_from_brief', 'build_model_from_brief']);
     expect(toolOutputs.map((o) => JSON.parse(String(o.output))).filter((o) => o.ran === true)).toEqual([]);
   });
@@ -384,7 +297,7 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
       + '\n\nThe change was sent, but it could not be confirmed: the model may have changed again straight afterwards, so Olumi cannot yet say what it now holds. Look at the model, or ask me to check it.');
     expect(body.assistant_text).not.toContain('Nothing in the model was changed');
     expect(registered).toHaveLength(1);
-    expect(drafterCalls).toBe(1);
+    expect(drafterCalls).toBe(0);
   });
 
   it.each([BRIEF, OTHER_BRIEF])('L13C a saved model and cut-short failed Run keep the save: %s', async (brief) => {
@@ -394,14 +307,12 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
     expect(draftCall(body).mutated).toBe(true);
     expect(body._agent.tool_calls.map((c: Json) => c.name)).toEqual(['build_model_from_brief', 'run_analysis']);
     expect(body._agent.tool_calls[1].refusal).toBe('run_failed');
-    expect(body.assistant_text).toBe('The analysis could not start.'
-      + '\n\n• Roughly how much Weekly bookings in bookings a week does a change in Evening slots bring?'
-      + '\n\nYour model was updated this turn. Please try again in a moment.'
-      + "\n\nThis model doesn't yet say whether any option gets there within 12 months."
-      + "\n\nOlumi can compare your options, but can't yet test them against your target (at least 300 bookings a week), because it needs a size for the link from Evening slots to Weekly bookings.");
+    // The save is kept and said; the readiness lines that follow depend on the model's content, not on this protocol.
+    expect(body.assistant_text).toMatch(/^The analysis could not start\./);
+    expect(body.assistant_text).toContain('Your model was updated this turn. Please try again in a moment.');
     expect(body.assistant_text).not.toContain('Nothing in your model changed');
     expect(registered).toHaveLength(1);
-    expect(drafterCalls).toBe(1);
+    expect(drafterCalls).toBe(0);
     expect(runs).toBe(1);
   });
 
@@ -416,7 +327,7 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
       + '\n\nThe change was sent, but it could not be confirmed: the model may have changed again straight afterwards, so Olumi cannot yet say what it now holds. Look at the model, or ask me to check it.');
     expect(body.assistant_text).not.toContain('Nothing in your model changed');
     expect(registered).toHaveLength(1);
-    expect(drafterCalls).toBe(1);
+    expect(drafterCalls).toBe(0);
     expect(runs).toBe(1);
   });
 
@@ -471,7 +382,7 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
         detail: 'The construction was dispatched, but its save could not be verified. It may already be saved. Do not say nothing was saved, and do not repeat a write or Run to repair the reply.',
       }));
       expect(body.assistant_text).toBe('I could not verify whether the model was saved. Any saved work is kept.');
-      expect(registered).toHaveLength(1); expect(drafterCalls).toBe(1); expect(runs).toBe(0);
+      expect(registered).toHaveLength(1); expect(drafterCalls).toBe(0); expect(runs).toBe(0);
       expect(body._agent.receipts).toEqual([]);
       expect(draftCall(body).draft_verification).toEqual({ ...defaults, ...diagnostic });
     });
@@ -492,17 +403,6 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
     expect(registered).toHaveLength(0);
   });
 
-  it.each([
-    BRIEF,
-    'We run a repair workshop and want to serve more customers; we could add a technician or extend opening hours.',
-  ])('L5 sent bytes: estimates and every supported sum, on the real route (%s)', async (brief) => {
-    briefArg = brief;
-    await turn();
-    const addition = draftInstructions.slice(0, -(ACTION_TIMING_SENTENCE.length + 1)).slice(-ESTIMATE_SENTENCE.length);
-    expect(addition).toBe(ESTIMATE_SENTENCE);
-    expect(createHash('sha256').update(addition, 'utf8').digest('hex')).toBe('15c1eae82146b2ef05b6e3a78af3a9568af58643e41472fcee15410a628c9085');
-  });
-
   it('RED: a NEW scenario (graph null) → ONE draft saved, by its own receipt and a model read back', async () => {
     const body = await turn();
     expect(draftCall(body), JSON.stringify(body._agent)).toMatchObject({ ok: true, mutated: true, outcome: 'ok' });
@@ -511,283 +411,60 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
     expect((saved?.nodes as Json[]).length).toBeGreaterThan(0);
   });
 
-  it('⭐ STEP 8 gap 3 (RED on the bridge): the model saved is candidateToGraph\'s conversion of the ONE draft, and the draft travels to the AI beside the receipt', async () => {
-    const body = await turn();
-    expect(draftCall(body), JSON.stringify(body._agent)).toMatchObject({ ok: true, mutated: true, outcome: 'ok' });
-    expect(registered).toHaveLength(1);
-    // ⭐ The draft's statements are recorded on their subjects from the brief's own words (gap 3 carry): the aim, on the goal's target.
-    const goal = (registered[0]!.graph.nodes as Json[]).find((n) => n.kind === 'goal')!;
-    expect(goal.user_statements).toEqual([{ subject_key: `goal|${goal.id}|||target`, field: 'target', recorded_at: expect.any(String),
-      attest: { recorded_by: 'construction' }, statements: [{ said_by: 'unknown', quote: AIM, source: AIM, form: 'lower_bound', low: 300,
-        unit: 'bookings a week', reading: 'olumi', subject: { quantity: `goal|${goal.id}|||target`, node_id: goal.id } }] }]);
-    const converted = candidateToGraph(DRAFT, { words: BRIEF, recorded_at: goal.user_statements[0].recorded_at });
-    if ('refused' in converted) throw new Error(converted.refused);
-    // The registered bytes are the conversion's: A's numbers on a label-blind copy, each figure with the origin the AI declared.
-    expect(registered[0]!.graph).toEqual(converted.graph);
-    // The AI reads the drafter's JSON verbatim, and what the conversion said, in the tool's answer (the conversation keeps them).
-    const answer = JSON.parse(String(toolOutputs.find((o) => o.call_id === 'draft_call')?.output ?? '{}')) as Json;
-    expect(answer).toMatchObject({ status: 'ok', mutated: true, data: { provisional: 'olumi', draft: { declared: DRAFT, not_expressible: converted.blocked_schema } } });
-    expect(answer.data.draft.said).toEqual([...new Set(converted.loss.map((l) => l.reason))]);
-  });
-
-  it('⭐ GAP 1 + K5 LOOP (real path): the added part\'s 0 is saved as Olumi\'s, and a size with no quote is never said as the brief\'s', async () => {
-    drafterAnswer = ADDED_DRAFT;
-    const body = await turn();
-    expect(draftCall(body), JSON.stringify(body._agent)).toMatchObject({ ok: true, mutated: true, outcome: 'ok' });
-    const part = (registered[0]!.graph.nodes as Json[]).find((n) => n.label === ADDED)!;
-    expect(part.observed_state).toMatchObject({ value: 0, source: 'cee_inference' });
-    const said = (JSON.parse(String(toolOutputs.find((o) => o.call_id === 'draft_call')?.output ?? '{}')) as Json).data.draft.said as string[];
-    expect(said).toContain(`This link was drafted at 1 per 1; this path doesn't use that size in the calculation yet, so the link from "${ADDED}" to "${GOAL}" keeps Olumi's placeholder size.`);
-    expect(said.filter((x) => x.includes('says "1 per 1"'))).toEqual([]);
-  });
-
-  it('L23/L27 real core route: the exact recorded drafter output registers its Olumi-derived total and complete sum', async () => {
-    drafterAnswer = liveRows[0]!.calls[0]!.raw_text;
-    briefArg = CAPACITY_BRIEF;
-    const body = await turn();
-    expect(draftCall(body), JSON.stringify(body._agent)).toMatchObject({ ok: true, mutated: true, outcome: 'ok' });
-    expect(registered).toHaveLength(1);
-    const graph = registered[0]!.graph as Json;
-    const goal = graph.nodes.find((n: Json) => n.id === 'weekly_support_capacity');
-    expect(goal.observed_state).toMatchObject({ raw_value: 80, baseline: 80 / 125, source: 'cee_inference', extractionType: 'inferred' });
-    expect(goal.nonlinear_identity).toEqual({ operation: 'sum',
-      factor_ids: ['existing_team_capacity', 'additional_specialist_capacity'], stated_in_brief: false });
-    expect(graph.nodes.find((n: Json) => n.id === 'additional_specialist_capacity').scale_frame).toBe(125);
-    expect(saved).toEqual(graph);
-    const reopened = (await coldReload()).nodes.find((n: Json) => n.id === 'weekly_support_capacity');
-    expect(reopened.threshold_source).toBe('brief_extraction');
-    expect(reopened.goal_threshold_raw).toBe(100);
-    expect(reopened).not.toHaveProperty('success_threshold');
-    expect(drafterCalls).toBe(1);
-  });
-
-  // These rows replay recorded drafter bytes, then exercise the real ingress/persisted-form,
-  // strict admission reparse and public graph projection without carrying any turn history.
+  // A core postimage through the real ingress, the core persisted form, the strict reparse and the public projection,
+  // without carrying any turn history.
   const coldReload = async (): Promise<Json> => {
     const ingress = GraphStateIngressSchema.parse(saved);
-    const persisted = projectGraphForPersistence(ingress);
+    const persisted = projectCorePostimageForPersistence(ingress);
     saved = JSON.parse(JSON.stringify(persisted)) as Json;
     saved = GraphV3.parse(saved);
     const response = await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph`, payload: {} });
     expect(response.statusCode).toBe(200);
     return toOutboundGraph(response.json<Json>().graph);
   };
-  const targetRows = [
-    ['user', 'brief_extraction'], ['unknown', undefined], ['third_party', undefined], ['olumi', 'cee_inference'],
-    ['wrong figure', undefined], ['wrong unit', undefined], ['neighbour', undefined], ['unknown speaker', undefined],
-  ] as const;
-  it.each(([['capacity', CAPACITY_BRIEF], ['bookings', BRIEF]] as const).flatMap(([brief, words]) =>
-    targetRows.map(([origin, stamp]) => ({ brief, words, origin, stamp }))))(
-    'L27 target contract: $brief / $origin survives cold reload', async ({ brief, words, origin, stamp }) => {
-      SCENARIO = randomUUID(); saved = null; registered = []; read = EMPTY_READ; briefArg = words;
-      const draft: Json = brief === 'capacity' ? JSON.parse(liveRows[0]!.calls[0]!.raw_text) : structuredClone(DRAFT);
-      if (brief === 'bookings') draft.statements = [{ ...draft.statements[0], speaker: 'user' }];
-      const target = draft.statements.find((st: Json) => st.field === 'target');
-      draft.goal.target_origin = ['wrong figure', 'wrong unit', 'neighbour', 'unknown speaker'].includes(origin) ? 'user' : origin;
-      if (origin === 'wrong figure') draft.goal.value += 17;
-      if (origin === 'wrong unit') target.unit = 'rooms';
-      if (origin === 'neighbour') target.subject.label = 'Unrelated quantity';
-      if (origin === 'unknown speaker') target.speaker = 'unknown';
-      // Untrusted raw stamps must never become an authority alongside the declared origin.
-      draft.goal.threshold_source = 'user';
-      drafterAnswer = draft;
-      const body = await turn();
-      expect(draftCall(body), `${brief}/${origin}`).toMatchObject({ ok: true, mutated: true, outcome: 'ok' });
-      const registeredGoal = registered[0]!.graph.nodes.find((n: Json) => n.kind === 'goal');
-      const cold = await coldReload();
-      const goal = cold.nodes.find((n: Json) => n.id === registeredGoal.id);
-      expect(goal.threshold_source, `${brief}/${origin}`).toBe(stamp);
-      expect(goal.threshold_source).toBe(registeredGoal.threshold_source);
-      expect(readGoalRecord(cold, goal.id)?.target?.source).toBe(stamp);
-      expect(goal).not.toHaveProperty('success_threshold');
-      if (stamp === 'cee_inference') {
-        expect(isOlumiSourceStamp(goal.threshold_source)).toBe(true);
-        expect(goal.threshold_source).not.toBe('user');
-      }
-      if (stamp === undefined) expect(goal).not.toHaveProperty('threshold_source');
-    });
-
-  it.each([['capacity', CAPACITY_BRIEF], ['bookings', BRIEF]] as const)(
-    'L27B negative: %s brief extraction never implies user approval', async (brief, words) => {
-      SCENARIO = randomUUID(); saved = null; registered = []; read = EMPTY_READ; briefArg = words;
-      const draft: Json = brief === 'capacity' ? JSON.parse(liveRows[0]!.calls[0]!.raw_text) : structuredClone(DRAFT);
-      draft.goal.target_origin = 'user';
-      draft.statements.find((st: Json) => st.field === 'target').speaker = 'user';
-      draft.goal.threshold_source = 'user';
-      draft.goal.success_threshold = draft.goal.value;
-      drafterAnswer = draft;
-      expect(draftCall(await turn())).toMatchObject({ ok: true, mutated: true, outcome: 'ok' });
-      const initial = registered[0]!.graph.nodes.find((n: Json) => n.kind === 'goal');
-      const reopened = (await coldReload()).nodes.find((n: Json) => n.id === initial.id);
-      for (const goal of [initial, reopened]) {
-        expect(goal.threshold_source).toBe('brief_extraction');
-        expect(goal.threshold_source).not.toBe('user');
-        expect(goal).not.toHaveProperty('success_threshold');
-      }
-    });
-
-  it.each(['Weekly bookings', 'Workshop output'].flatMap(metric =>
-    (['yes/no', 'boolean', 'binary', null, 'specialists'] as const).map(unit => ({ metric, unit }))))(
-    'L27 factor contract: $metric / $unit survives cold reload without inventing a baseline', async ({ metric, unit }) => {
-      SCENARIO = randomUUID(); saved = null; registered = []; read = EMPTY_READ;
-      const label = 'Marketing manager employed — yes/no';
-      briefArg = `We want ${metric} to reach 300. If we hire, the manager is in use.`;
-      drafterAnswer = { ...DRAFT, goal: { ...DRAFT.goal, metric },
-        factors: [{ ...DRAFT.factors[0], label, unit, baseline_known: false, baseline_value: null, origin: 'user', stance: 'hypothetical' }],
-        options: [{ ...DRAFT.options[0] }, { ...DRAFT.options[1], interventions: [
-          { factor_label: label, value: 1, value_kind: 'absolute', unit, provenance: 'ai_proposed', origin: 'olumi', stance: 'estimate' },
-        ] }],
-        links: [{ ...DRAFT.links[0], from: label, to: metric }],
-        statements: [{ quote: 'If we hire, the manager is in use.', subject: { kind: 'factor', label, to_label: null, factor_label: null },
-          field: 'level', form: 'point', value: 1, low: null, high: null, unit, speaker: 'user', conditions: 'if we hire' }],
-      };
-      const body = await turn();
-      expect(draftCall(body), `${metric}/${unit}`).toMatchObject({ ok: true, mutated: true, outcome: 'ok' });
-      const cold = await coldReload();
-      const factor = cold.nodes.find((n: Json) => n.label === label);
-      expect(factor.factor_type, `${metric}/${unit}`).toBe(unit !== null && unit !== 'specialists' ? 'boolean' : undefined);
-      if (unit === null || unit === 'specialists') expect(factor).not.toHaveProperty('factor_type');
-      expect(factor).not.toHaveProperty('observed_state');
-      const setting = cold.nodes.find((n: Json) => n.kind === 'option' && n.interventions?.[factor.id])!.interventions[factor.id];
-      expect(setting.raw_value ?? setting.value).toBe(1);
-    });
-
-  it('L18 real route: a zero indirect sum operand is registered on the goal coordinate frame', async () => {
-    drafterAnswer = { ...SUM_DRAFT, options: DRAFT.options,
-      factors: [DRAFT.factors[0], { ...SUM_DRAFT.factors[0], plausible_max: 300 }, { ...SUM_DRAFT.factors[1], role: 'observable', plausible_max: null }],
-      links: [{ ...DRAFT.links[0], to: ADDED }, ...SUM_DRAFT.links] };
-    const body = await turn();
-    expect(draftCall(body), JSON.stringify(body._agent)).toMatchObject({ ok: true, mutated: true, outcome: 'ok' });
-    expect(registered).toHaveLength(1);
-    const graph = registered[0]!.graph as Json;
-    const goal = graph.nodes.find((n: Json) => n.kind === 'goal');
-    const zero = graph.nodes.find((n: Json) => n.label === ADDED);
-    expect(zero.observed_state.cap).toBeUndefined();
-    expect(zero.scale_frame).toBe(goal.goal_threshold_cap);
-    expect(zero.observed_state.value).toBe(0);
-    expect(goal.nonlinear_identity).toEqual({ operation: 'sum',
-      factor_ids: [graph.nodes.find((n: Json) => n.label === CURRENT).id, zero.id], stated_in_brief: false });
-    expect(drafterCalls).toBe(1);
-  });
-
-  it('⭐ K5 P0 RULING (real path): the sum the drafter text asks for is carried exact, and no placeholder stands between the option and the goal', async () => {
-    const savedFor = async (answer: Json): Promise<Json> => {
-      SCENARIO = randomUUID(); registered = []; saved = null; read = EMPTY_READ; drafterAnswer = answer;
-      const body = await turn();
-      expect(draftCall(body), JSON.stringify(body._agent)).toMatchObject({ ok: true, mutated: true, outcome: 'ok' });
-      return registered[0]!.graph as Json;
-    };
-    const g = await savedFor(SUM_DRAFT);
-    const id = (label: string): string => (g.nodes as Json[]).find((n) => n.label === label)!.id;
-    const goal = (g.nodes as Json[]).find((n) => n.kind === 'goal')!;
-    expect(goal.nonlinear_identity).toMatchObject({ operation: 'sum', factor_ids: [id(CURRENT), id(ADDED)] });
-    // Exact: each operand is the sum's definition (existence 1, Olumi's, never the person's); the Run evaluates the identity itself.
-    for (const from of [CURRENT, ADDED]) {
-      expect((g.edges as Json[]).find((e) => e.from === id(from) && e.to === goal.id)).toMatchObject({ exists_probability: 1, provenance: { definitional: true, magnitude: 'olumi_estimate' } });
-    }
-    const optionsOf = (graph: Json): string[] => (graph.nodes as Json[]).filter((n) => n.kind === 'option').map((n) => n.id as string);
-    const options = optionsOf(g);
-    expect((g.nodes as Json[]).find((n) => n.label === 'Add evening slots')!.interventions[id(ADDED)]).toMatchObject({ raw_value: 20 });
-    // The goal chance is computable: no placeholder link on any option's path to the goal (the gate that withheld it in the K5 loop) …
-    expect(placeholderGoalPaths(g, options)).toEqual([]);
-    expect(unsizedLeaderGoalPaths(g, options)).toEqual([]);
-    // … while the K5 loop's served shape (no declared sum) still has one, so the gate is not vacuous.
-    const loop = await savedFor(ADDED_DRAFT);
-    expect(placeholderGoalPaths(loop, optionsOf(loop))).not.toEqual([]);
-  });
-
-  it.each([
-    ['user', 'stated_current', 'We run 6 evening slots today.', 'human'],
-    ['olumi', 'estimate', 'We are exploring evening opening.', 'ai'],
-    ['unknown', 'estimate', 'Someone mentioned 6 evening slots.', 'unknown'],
-    ['user', 'hypothetical', 'Suppose we run 6 evening slots if the trial starts.', null],
-  ] as const)('ONE declared pair (real route): %s/%s survives registration and a cold canonical read', async (origin, stance, words, expected) => {
-    briefArg = `${BRIEF}\n${words}`;
-    drafterAnswer = { ...DRAFT, factors: [{ ...DRAFT.factors[0], baseline_known: true, baseline_value: 6, origin, stance }],
-      statements: origin === 'olumi' ? [] : [{ quote: words, subject: { kind: 'factor', label: 'Evening slots', to_label: null, factor_label: null },
-        field: 'level', form: 'point', value: 6, low: null, high: null, unit: 'slots a week', qualifier: null,
-        conditions: stance === 'hypothetical' ? 'if the trial starts' : null, speaker: origin === 'user' ? 'user' : 'unknown' }] };
-    const body = await turn();
-    expect(draftCall(body)).toMatchObject({ ok: true, mutated: true, outcome: 'ok' });
-    expect(registered).toHaveLength(1);
-    expect(draftSchema.properties.factors.items.required).toEqual(expect.arrayContaining(['origin', 'stance']));
-    // Serialise the store then read it through a fresh canonical reader, with no turn history.
-    saved = JSON.parse(JSON.stringify(saved)) as Json;
-    const factor = (saved!.nodes as Json[]).find((n) => n.label === 'Evening slots')!;
-    if (expected === null) expect(factor.observed_state).toBeUndefined();
-    else expect(valueProvenanceOf(factor.observed_state).origin).toBe(expected);
-    const cold = await readCanonicalContext({ dispatch: async () => ({ status: 200, json: read() }) }, { scenario_id: SCENARIO });
-    expect(cold.status).toBe('ok');
-    const node = ((cold as { data: Json }).data.nodes as Json[]).find((n) => n.id === factor.id)!;
-    if (origin === 'olumi') expect(node.statements ?? []).toEqual([]);
-    else expect(node.statements[0].statements).toEqual([expect.objectContaining({
-      ...(origin === 'user' ? { speaker: 'user' } : { said_by: 'unknown' }), quote: words, low: 6, high: 6, stance,
-      ...(stance === 'hypothetical' ? { conditions: 'if the trial starts' } : {}),
-    })]);
-    if (expected === null) expect(node).not.toHaveProperty('observed');
-    else expect(node.observed_source.origin).toBe(expected);
-  });
-
-  it('ONE declared pair negative (real route): another subject\'s literal figure never credits this factor as the user\'s', async () => {
-    briefArg = `${BRIEF}\nWe run 6 evening slots; the studio has 9 rooms.`;
-    drafterAnswer = { ...DRAFT, factors: [{ ...DRAFT.factors[0], baseline_known: true, baseline_value: 9, origin: 'user', stance: 'stated_current' }],
-      statements: [{ quote: 'the studio has 9 rooms', subject: { kind: 'factor', label: 'Studio rooms', to_label: null, factor_label: null },
-        field: 'level', form: 'point', value: 9, low: null, high: null, unit: 'slots a week', speaker: 'user' }] };
+  it.each(['user', 'party', 'olumi', 'unverified'] as const)('THIN CORE labels (real route): a %s figure keeps its label through registration and a cold reload', async (source) => {
+    const quote = source === 'user' || source === 'party' ? 'Bookings are 180 a week today.' : null;
+    const model = livingFor(BRIEF);
+    model.factors[0] = { ...model.factors[0]!, source, party: source === 'party' ? 'our manager' : null, quote };
+    toolModel = model;
     const body = await turn();
     expect(draftCall(body)).toMatchObject({ ok: true, mutated: true });
-    const factor = (saved!.nodes as Json[]).find((n) => n.label === 'Evening slots')!;
-    expect(valueProvenanceOf(factor.observed_state).origin).toBe('unknown');
-    expect(factor.user_statements ?? []).toEqual([]);
+    const reloaded = await coldReload();
+    expect(((reloaded.living_model as Json).factors as Json[])[0]).toMatchObject({ source, quote });
+    const node = (reloaded.nodes as Json[]).find((n) => n.id === 'level')!;
+    expect(node.observed_state?.source).toBe(source === 'olumi' ? 'cee_inference' : source === 'unverified' ? undefined : 'brief_extraction');
   });
 
-
-  // Replayed strict output, not simulated model intelligence: the sent-text assertion proves the prompt change separately.
-  it.each(([
-    ['library', 'Librarians on shift'], ['workshop', 'Workshop technicians'],
-  ] as const).flatMap(([domain, label]) => [true, false].flatMap((known) => [true, false].map((timed) => ({ domain, label, known, timed })))))('L14 real route: $domain known=$known timed=$timed', async ({ domain, label, known, timed }) => {
-    const aim = `We want to serve 300 customers${timed ? ' in the next three months' : ''}.`;
-    const today = known ? `Our ${domain} has six people today.` : `We have not counted our ${domain} team.`;
-    const action = 'We could add two people.';
-    // Another entity's number and date cannot become this team's level or the goal's deadline.
-    briefArg = `${aim} ${today} ${action} The other branch has eight people as of 2026-09-01.`;
-    const subject = (kind: string, name: string, factor_label: string | null = null) => ({ kind, label: name, factor_label, to_label: null });
-    const statement = (quote: string, kind: string, name: string, value: number, factor_label: string | null = null) => ({
-      quote, subject: subject(kind, name, factor_label), field: 'level', form: 'point', value, low: null, high: null, unit: 'people',
-      qualifier: null, conditions: null, speaker: 'user', stance: kind === 'option' ? 'hypothetical' : 'stated_current',
-    });
-    drafterAnswer = { ...DRAFT,
-      goal: { ...DRAFT.goal, source_quote: aim, horizon_months: timed ? 3 : null, deadline_words: timed ? 'in the next three months' : null },
-      factors: [{ ...DRAFT.factors[0], label, baseline_known: known, baseline_value: known ? 6 : null, plausible_max: 12,
-        unit: 'people', provenance: known ? 'explicit' : 'inferred', origin: known ? 'user' : 'unknown', stance: 'stated_current' }],
-      options: [DRAFT.options[0], { ...DRAFT.options[1], label: 'Add two people', interventions: [
-        { factor_label: label, value: 2, value_kind: 'additional', unit: 'people', provenance: 'explicit', origin: 'user', stance: 'hypothetical' },
-      ] }],
-      links: [{ ...DRAFT.links[0], from: label }],
-      statements: [...(known ? [statement(today, 'factor', label, 6)] : []), statement(action, 'option', 'Add two people', 2, label)],
-    };
+  it('THIN CORE labels negative (real route): a "user" figure whose words the person never wrote is saved unverified, never as theirs or Olumi\'s', async () => {
+    const model = livingFor(BRIEF);
+    model.factors[0] = { ...model.factors[0]!, source: 'user', quote: 'Bookings were 250 a week last year.' };
+    toolModel = model;
     const body = await turn();
     expect(draftCall(body)).toMatchObject({ ok: true, mutated: true });
-    expect(registered).toHaveLength(1);
-    const graph = JSON.parse(JSON.stringify(saved)) as Json;
-    const factor = (graph.nodes as Json[]).find((n) => n.label === label)!;
-    const option = (graph.nodes as Json[]).find((n) => n.label === 'Add two people')!;
-    const goal = (graph.nodes as Json[]).find((n) => n.kind === 'goal')!;
-    const gaps = resolveRunAdmission(graph).assessment.blockingIssues.filter((i) => i.factor_id === factor.id);
-    if (known) {
-      expect(option.interventions[factor.id].raw_value).toBe(8);
-      expect(settingProvenanceOf(option.interventions[factor.id]).origin).toBe('ai');
-      expect(gaps.filter((i) => i.code === 'MISSING_OPTION_VALUE')).toEqual([]);
-      expect(factor.observed_state.raw_value).toBe(6);
-    } else {
-      expect(option.interventions?.[factor.id]).toBeUndefined();
-      expect(factor.observed_state).toBeUndefined();
-      expect(gaps.map((i) => i.code)).toContain('MISSING_FACTOR_LEVEL');
-    }
-    expect(goal.goal_horizon_months).toBe(timed ? 3 : undefined);
-    expect(goal.goal_deadline_as_stated).toBe(timed ? 'in the next three months' : undefined);
-    expect(goal.source_quote).toBe(aim);
-    expect(goal.goal_horizon?.deadline).toBeUndefined();
-    expect(draftInstructions.slice(-ACTION_TIMING_SENTENCE.length)).toBe(ACTION_TIMING_SENTENCE);
+    const reloaded = await coldReload();
+    expect(((reloaded.living_model as Json).factors as Json[])[0]).toMatchObject({ source: 'unverified' });
+    expect((reloaded.nodes as Json[]).find((n) => n.id === 'level')!.observed_state?.source).toBeUndefined();
+  });
+
+  it('THIN CORE budget (real route): every core call runs at the bake-off configuration, with room for a whole model', async () => {
+    bodiesSeen.length = 0;
+    expect(draftCall(await turn())).toMatchObject({ ok: true, mutated: true });
+    expect(bodiesSeen.length).toBeGreaterThan(0);
+    for (const b of bodiesSeen) expect({ model: b.model, effort: b.reasoning?.effort, max: b.max_output_tokens }).toEqual({ model: 'gpt-6.1-sol', effort: 'high', max: 12000 });
+  });
+
+  it('THIN CORE context (real route): the next turn starts from the saved living model, with its labels and quotes', async () => {
+    const model = livingFor(BRIEF);
+    model.factors[0] = { ...model.factors[0]!, source: 'user', quote: 'Bookings are 180 a week today.' };
+    toolModel = model;
+    instructionsSeen.length = 0;
+    expect(draftCall(await turn())).toMatchObject({ ok: true, mutated: true });
+    expect(instructionsSeen.length).toBeGreaterThan(0);
+    expect(instructionsSeen.some((t) => t.includes('living_model')), 'CONTRAST: an empty scenario has none').toBe(false);
+    instructionsSeen.length = 0;
+    await turn();
+    expect(instructionsSeen[0]).toContain('living_model');
+    expect(instructionsSeen[0]).toContain('Bookings are 180 a week today.');
   });
 
   it('CONTRAST: a non-null read that is not a graph is still malformed: refused, nothing registered', async () => {

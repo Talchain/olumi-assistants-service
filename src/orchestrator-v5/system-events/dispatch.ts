@@ -81,6 +81,10 @@ import { runWithApprovedLevelAdoptions } from '../agent-lane/approved-adoption-c
 import type { FrameFreshness } from '../graph-management/types.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
 import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
+import { livingViewOf } from '../path-b/living-model/view.js';
+import { applyExplicitEdit, isExplicitEdit } from '../path-b/living-model/edit.js';
+import { goalIdOf, mapLivingModel, savedGoal } from '../path-b/living-model/mapper.js';
+import type { LivingModelT } from '../../schemas/living-model.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import {
   deriveAnalysisFreshness,
@@ -718,6 +722,12 @@ function replyForAttemptThatWroteNothing(args: {
 export interface DispatchSystemEventParams {
   readonly payload: SystemEventTurnPayload;
   readonly requestId: string;
+  /**
+   * THIN CORE: the request came through the core lane (`x-olumi-ai-mode: core`), the only lane that makes core scenarios,
+   * so a gesture may be one on a core scenario and is checked for it first (`dispatchCoreCanvasEdit`). Other requests read
+   * exactly as before; a gesture on a core scenario from them meets the one-write rule at the door instead.
+   */
+  readonly coreScenarioCheck?: boolean;
 }
 
 /**
@@ -1210,6 +1220,63 @@ export async function dispatchSystemEvent(
   }
 }
 
+/**
+ * THIN CORE (20 Oct 2026): A CANVAS GESTURE ON A CORE SCENARIO. Its meaning is its living model, so the gesture is applied
+ * there as a typed edit (`applyExplicitEdit`), the graph is regenerated from the edited model, and both are committed
+ * together as the one write a core scenario takes (`coreWrite`). A gesture this slice cannot apply is refused, the model
+ * unchanged; no legacy writer runs on a core scenario. `null`: not a core scenario, so the existing writers run.
+ */
+async function dispatchCoreCanvasEdit(
+  payload: SystemEventTurnPayload,
+  requestId: string,
+  startedAt: number,
+): Promise<DispatchSystemEventResult | null> {
+  let stored: unknown;
+  let revision: number | undefined;
+  try {
+    ({ graph: stored, revision } = await loadPersistedScenarioStateStrict(payload.scenario_id));
+  } catch {
+    return null; // the existing writer reads again and fails closed on its own terms
+  }
+  const view = livingViewOf(stored);
+  if (view === undefined) return null;
+  const refuse = (reason: string): DispatchSystemEventResult => {
+    log.info({ request_id: requestId, scenario_id: payload.scenario_id, event_kind: payload.event.kind, reason }, 'V5 core canvas edit refused; model unchanged');
+    return { response: { response_version: 2,
+      assistant_text: "I can't apply that change from the canvas on this scenario yet, so I haven't changed the model. Tell me the change in the chat and I'll prepare it for you to approve.",
+      blocks: [{ type: 'error', error_code: 'FEATURE_NOT_ENABLED', severity: 'warn', details: { reason: `core_${reason}`, retryable: false } }],
+      suggested_actions: [], insights: [], stage_indicator: payload.stage }, commitPerformed: false, graph: null };
+  };
+  if (!('withheld' in view)) return refuse('living_model_invalid');
+  const event = payload.event;
+  if (!isExplicitEdit(event)) return refuse('gesture_not_in_slice');
+  const cas = computeExpectedGraphCasHashes(stored);
+  const base = (payload.event as { base_graph_hash?: unknown }).base_graph_hash;
+  const conflict = async (): Promise<DispatchSystemEventResult> => ({ response: buildAcknowledgementResponse(payload), commitPerformed: false, graph: null,
+    graphConflict: { recovery_action: 'refresh_and_reconfirm', conflict_category: 'stale_base',
+      expected_base_graph_hash: await readClientRecoverableBaseHash(payload.scenario_id) } as never });
+  if (typeof base === 'string' && base !== cas.expectedGraphAnalysisHash) return conflict();
+  const edited = applyExplicitEdit(view.living_model as LivingModelT, event, goalIdOf(stored));
+  if (!('model' in edited)) return refuse(edited.refused);
+  const postimage = { ...mapLivingModel(edited.model, savedGoal(stored)).graph, living_model: edited.model };
+  try {
+    const commit = await commitDirectAnswer(buildAcknowledgementResponse(payload), {
+      scenario_id: payload.scenario_id, turn_id: payload.turn_id, turn_class: 'direct_answer', handler_id: null,
+      request_hash: computeRequestHash(payload), llm_calls_used: 0, duration_ms: Date.now() - startedAt, handler_facts: [],
+      graph: postimage, baseGraphForInvariants: stored, coreWrite: true, ...cas,
+      ...(revision !== undefined ? { expectedRevision: revision } : {}), coaching_state: null,
+    });
+    const committed = GraphV3.safeParse(commit.persistedGraph);
+    return { response: { ...commit.response,
+      ...(commit.persistedAnalysisGraphHash !== null ? { graph_hash: commit.persistedAnalysisGraphHash } : {}),
+      ...(committed.success ? { draft_graph: buildAppliedGraphWireField(committed.data) } : {}) },
+    commitPerformed: true, graph: commit.persistedGraph as GraphV3T };
+  } catch (err) {
+    if (err instanceof GraphStaleWriteError) return conflict();
+    throw err;
+  }
+}
+
 async function dispatchSystemEventOperation(
   params: DispatchSystemEventParams,
 ): Promise<DispatchSystemEventResult> {
@@ -1247,6 +1314,12 @@ async function dispatchSystemEventOperation(
       commitSkippedReason: 'client_only_event',
       graph: null,
     };
+  }
+
+  // THIN CORE: a core scenario's gestures change its living model; the writers below never run on it.
+  if (handling === 'mutating' && params.coreScenarioCheck === true) {
+    const core = await dispatchCoreCanvasEdit(payload, requestId, startedAt);
+    if (core !== null) return core;
   }
 
   // ── VALUE-CARRYING writers ────────────────────────────────────────────────

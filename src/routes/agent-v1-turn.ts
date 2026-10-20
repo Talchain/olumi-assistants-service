@@ -87,6 +87,7 @@ import { answerIsIncomplete, heldChangeSentence, runAgentTurn, WITHHELD_ON_CHIP_
 import { CoreStateUnavailableError, runCoreTurn, type CoreTurnSdk } from '../orchestrator-v5/agent-lane/core/sdk-turn.js';
 import { pathBTools } from '../orchestrator-v5/path-b/tools/index.js';
 import { APPLY_CHANGE, isChangeProposal } from '../orchestrator-v5/path-b/tools/change-tools.js';
+import { livingViewOf } from '../orchestrator-v5/path-b/living-model/view.js';
 import { parseSelectedElements } from '../orchestrator-v5/boundary/request-extensions.js';
 import { agentSelectionContext, type AgentSelectionContext } from '../orchestrator-v5/agent-lane/selection-context.js';
 import type { AgentLaneMode, AgentToolContext, ToolResult } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
@@ -115,7 +116,7 @@ import { providerFailureOf, onceMoreOnTransportFailure } from '../orchestrator-v
 import { agentProposals as proposals, executableWaitingProposal, identityProposalOfferable, stillValidApprovalOffers } from '../orchestrator-v5/agent-lane/held-approval-offers.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
-import { budgetFor, callEffortFor, conversationBudgetFor, type CallBudget, INTERPRET_DEADLINE, interpretBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
+import { budgetFor, callEffortFor, conversationBudgetFor, coreBudget, type CallBudget, INTERPRET_DEADLINE, interpretBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../orchestrator-v5/agent-lane/coach-route-v0_2.js';
 import { agentFactorEnrichments } from '../orchestrator-v5/agent-lane/factor-review.js';
 import { OLUMI_PURPOSE_INSTRUCTION } from '../orchestrator-v5/agent-lane/olumi-purpose.js';
@@ -1937,12 +1938,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
    * it is the caller's own token, and the ownership pre-flight above has
    * already refused anyone who is not entitled to this scenario.
    */
-  const dispatchFor = (authorization: string | undefined): InternalDispatch =>
+  const dispatchFor = (authorization: string | undefined, extraHeaders?: Record<string, string>): InternalDispatch =>
     async (path, body) => {
       const res = await app.inject({
         method: 'POST',
         url: path,
-        headers: internalHeaders(config.auth.assistApiKey ?? config.auth.assistApiKeys?.[0] ?? '', authorization),
+        headers: { ...internalHeaders(config.auth.assistApiKey ?? config.auth.assistApiKeys?.[0] ?? '', authorization), ...extraHeaders },
         payload: body as Record<string, unknown>,
       });
       let json: Record<string, unknown> = {};
@@ -2315,8 +2316,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         });
       }
 
+      // THIN CORE: the core lane's gestures are checked for a core scenario, whose living model they change.
       const forwarded = await dispatchFor(
         typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined,
+        mode === 'core' ? { 'x-olumi-ai-mode': 'core' } : undefined,
       )('/orchestrate/v2/turn', body);
       // Forwarded board replies use the same current Run boundary before both history and user-visible egress.
       const forwardedState = forwarded.status === 200 && typeof forwarded.json.assistant_text === 'string'
@@ -4442,9 +4445,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // capabilities above run on (dispatch, proposals, the drafter call, the fenced levels door and both observers).
         const coreCtx = { ...toolCtx, ...(selectionContext != null ? { grounded_selection: selectionContext.grounded,
           ...(selectionContext.links !== undefined ? { grounded_links: selectionContext.links } : {}) } : {}) };
+        // THIN CORE: one read gives the brief and, for a core scenario, the living model the turn starts from.
+        const coreSaved = await readingDispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {})
+          .then((read) => read.status === 200 ? read.json : undefined).catch(() => undefined);
+        const livingView = livingViewOf(coreSaved?.graph);
+        // A scenario with no model yet, or whose meaning is its living model, changes through the living model only.
+        const coreScenario = coreSaved !== undefined && (coreSaved.graph == null || livingView !== undefined);
         const core = await runCoreTurn({
-          ctx: coreCtx, message, budget, userId,
-          tools: (onCall) => pathBTools({ dispatch: capDispatch, proposals, callStructured: capCallStructured,
+          ctx: coreCtx, message, budget: coreBudget(), userId,
+          tools: (onCall) => pathBTools({ dispatch: capDispatch, proposals,
             proposeLinkStrengths: (c, a) => dispatchTool('propose_link_strengths', JSON.stringify(a), { ...coreCtx, ...c }, capabilities, mode),
             commitOptionLevels: commitOptionLevelsDoor, onModelRegistered: (raw) => emitGraphReady(raw),
             runAnalysis: (args) => restoreRun === undefined ? Promise.resolve({ ok: false, mutated: false, ran: false, refusal: 'run_failed' })
@@ -4454,11 +4463,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
               // Only the adapter's own receipt AND successful postimage readback establish a saved change.
               if (result.ok && result.mutated && (result.receipts?.length ?? 0) > 0) verifiedSave = true;
               onCall(row, { ...result });
-            }),
+            }, coreScenario ? 'core' : 'legacy'),
           instructions: instructionsForMode(mode, eligibleIntervention === undefined ? AGENT_TOOL_INSTRUCTIONS : `${AGENT_TOOL_INSTRUCTIONS}\n\n${ELIGIBLE_INTERVENTION_INSTRUCTION}`),
-          briefText: await readingDispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {})
-            .then(read => read.status === 200 ? read.json.brief_text : undefined).catch(() => undefined),
-          canonicalState: canonicalContext?.packet?.state,
+          briefText: coreSaved?.brief_text,
+          canonicalState: livingView === undefined ? canonicalContext?.packet?.state
+            : { ...(canonicalContext?.packet?.state as Record<string, unknown> | undefined), ...livingView },
           // A Run press permits calculation and reading only (`withheldToolsOf`), on this lane's own tool names.
           withheldTools: runPress ? CORE_RUN_PRESS_WITHHELD : withheldToolsOf(body),
           ...(runPress ? { firstTool: 'run_analysis' } : coreCardOnly && corePress !== undefined ? { firstTool: APPLY_CHANGE } : {}),

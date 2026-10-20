@@ -1,4 +1,4 @@
-/** L15: synthetic strict-output replays, real B conversion/save and Run request, no provider or PLoT calls.
+/** L15: synthetic strict-output replays through the legacy B conversion and the real Run request, no provider or PLoT calls.
  * The user owns the central effect/raw range; existing D3 defaults remain Olumi illustrative assumptions.
  */
 import { describe, expect, it, vi } from 'vitest';
@@ -7,11 +7,6 @@ import liveRows from './fixtures/l23-live-drafter-raw-5203fed5.json';
 import { normaliseFactorValue } from '../../../tools/handlers/d1-shared/normalise-factor-value.js';
 import { candidateToGraph } from '../candidate-to-graph.js';
 import { admitCandidateModel, type CandidateModel } from '../../../agent-lane/admit-model.js';
-import { buildModel, type DraftDeps } from '../draft-tool.js';
-import { constructionOperationId, type CallStructuredModel } from '../../../agent-lane/runtime/build-model.js';
-import { computeGraphIdentityHash } from '../../../context/graph-identity.js';
-import { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha256 } from '../../../context/graph-hash.js';
-import { registrationTurnId } from '../../../graph-registration/registration-identity.js';
 import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.js';
 import { createRunAnalysisHandler } from '../../../tools/handlers/run-analysis.js';
@@ -68,28 +63,11 @@ function draft(statementUnit = `${UNIT} per specialist`): Rec {
         { form: 'range', low: 10, high: 30, qualifier: 'about' })],
   };
 }
+/** The drafter bytes through the legacy B converter, kept as the spec the thin-core mapper must reach (sums, per-unit additions). */
 async function replay(raw: Rec | string, brief = BRIEF): Promise<Rec> {
-  let stored: Rec | undefined;
-  const sourceTurn = registrationTurnId(SID, constructionOperationId(SID, brief));
-  const dispatch: DraftDeps['dispatch'] = async (path, body) => {
-    if (path.endsWith('/graph/register')) {
-      stored = GraphV3.parse((body as Rec).graph);
-      const identity = computeGraphIdentityHash(stored as never)!;
-      return { status: 200, json: { graph_identity_hash: identity, graph_hash: computeAnalysisAffectingGraphHash(stored as never),
-        model_version: { version_id: 'v15', version_number: 1, mutation_id: 'm15', creation_kind: 'initial',
-          graph_identity_hash: identity.value, analysis_affecting_hash: computeAnalysisAffectingGraphHashSha256(stored as never) } } };
-    }
-    if (path.endsWith('/versions')) return { status: 200, json: { versions: [{ version_id: 'v15', sequence: 1,
-      created_at: '2026-10-20T08:00:00.000Z', creation: { kind: 'committed_mutation', mutation_id: 'm15', source_turn_id: sourceTurn } }] } };
-    return { status: 200, json: { graph: stored ?? null, graph_present: stored !== undefined, graph_hash: stored ? computeAnalysisAffectingGraphHash(stored as never) : null,
-      graph_identity_hash: stored ? computeGraphIdentityHash(stored as never) : null } };
-  };
-  const callStructured = vi.fn<CallStructuredModel>(async () => ({ text: typeof raw === 'string' ? raw : JSON.stringify(raw), status: 'completed' }));
-  const out = await buildModel({ dispatch, callStructured }, { scenario_id: SID, verified_user_messages: [brief], user_turn_text: brief }, { brief });
-  expect(out.status, JSON.stringify(out)).toBe('ok');
-  expect(callStructured).toHaveBeenCalledTimes(1);
-  expect(stored).toBeDefined();
-  return stored!;
+  const converted = candidateToGraph(typeof raw === 'string' ? JSON.parse(raw) : raw, { words: brief, recorded_at: '2026-10-20T08:00:00.000Z' });
+  expect('refused' in converted, JSON.stringify(converted)).toBe(false);
+  return GraphV3.parse((converted as { graph: Rec }).graph) as Rec;
 }
 const effectOf = (g: Rec): Rec => g.edges.find((e: Rec) => e.from === 'extra_specialists' && e.to === 'extra_capacity');
 async function runRequest(graph: Rec, brief: string): Promise<Rec> {

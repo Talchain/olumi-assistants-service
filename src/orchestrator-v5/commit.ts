@@ -46,7 +46,7 @@ import type {
   VersionAuthoredBy,
 } from './session/store.js';
 import { StateCommitFailedError } from './session/store.js';
-import { projectGraphForPersistence } from './persisted-graph-projection.js';
+import { projectCorePostimageForPersistence, projectGraphForPersistence } from './persisted-graph-projection.js';
 import { assignEntityRefs } from './graph/entity-refs.js';
 import { checkPersistedGraphInvariants } from './persisted-graph-invariants.js';
 import type { HorizonBasisWrite } from './goal-target/goal-steady-write.js';
@@ -265,6 +265,12 @@ export interface CommitMetadata {
   readonly versionActor?:
     | { readonly kind: 'known'; readonly authored_by: VersionAuthoredBy }
     | { readonly kind: 'system' };
+  /**
+   * THIN CORE (20 Oct 2026): `graph` is a core postimage, regenerated from its living model by CEE's own writer (a canvas
+   * gesture on a core scenario, `system-events/core-canvas-edit.ts`). It is stored with the identity/format projection
+   * only, and is the one graph write a core scenario takes (`appendCheckedGraphWrite`).
+   */
+  readonly coreWrite?: boolean;
 }
 
 /**
@@ -1296,13 +1302,19 @@ export async function commitDirectAnswer(
     assertNoPendingScopeAmendment(metadata.graph, baseForWrite, priorForScope);
   }
   if (graphWasProvided(metadata.graph)) assertShareByDatePreserved(baseForWrite, metadata.graph);
-  const projectedGraphForStore = assignEntityRefs(projectGraphForPersistence(metadata.graph, {
+  const projection = metadata.coreWrite === true ? projectCorePostimageForPersistence : projectGraphForPersistence;
+  const projectedGraphForStore = assignEntityRefs(projection(metadata.graph, {
     scenarioId: metadata.scenario_id,
     turnId: metadata.turn_id,
     turnClass: metadata.turn_class,
     source: metadata.handler_id ?? undefined,
   }), baseForWrite).graph;
   if (graphWasProvided(metadata.graph)) assertShareByDatePreserved(baseForWrite, projectedGraphForStore);
+  // THIN CORE one-write rule: a graph write that could not read what it replaces cannot tell a core scenario from a
+  // legacy one, so it is refused as an outage (the register route's rule), never written over a living model unseen.
+  if (graphWasProvided(metadata.graph) && metadata.coreWrite !== true && baseForWrite === undefined) {
+    throw new StateCommitFailedError('the stored graph this write replaces could not be read, so the write cannot be classified (core or legacy)');
+  }
   if (graphWasProvided(metadata.graph)) {
     prepareHorizonBasisForWrite(projectedGraphForStore, storedBasisBase, metadata.scenario_id, metadata.horizonBasisWrite);
   }
@@ -1668,6 +1680,7 @@ export async function commitDirectAnswer(
   const appendOutcome = await appendCheckedGraphWrite({
     store,
     writesGraph,
+    ...(metadata.coreWrite === true ? { coreWrite: true } : { coreClassificationBase: baseForWrite }),
     baseGraphForInvariants: metadata.baseGraphForInvariants,
     // Keep a known-empty server read distinct from the structural ingress fallback at the door.
     storedGraphForHorizonBasis: storedBasisBase ?? { nodes: [], edges: [] },

@@ -8,6 +8,9 @@
  *    commits is analysed at once by the route's automatic Run (`analyseAfterCommit`, at most once per request), and that
  *    Run's outcome rides `apply_change`'s own: the SDK continues with it, so the AI that writes the reply has the results.
  *    A Run asked for after that in the same turn is refused (`run_not_requested`).
+ *  · THIN CORE: on a scenario whose meaning is its living model (or that has no model yet), `propose_change` carries the
+ *    complete proposed living model (`living-change.ts`); a living proposal is applied as one core write. A legacy scenario
+ *    keeps the existing change adapter.
  *  · A `preview` lane reads only.
  * The adapters return outcomes and do not throw; anything that does throw (arguments a strict schema should have stopped,
  * a defect) ends the turn with the route's own handlers, as on the existing loop (`errorFunction: null`).
@@ -19,6 +22,7 @@ import { READ_CANONICAL_CONTEXT, ReadCanonicalContextParams, readCanonicalContex
 import { BUILD_MODEL_FROM_BRIEF, BuildModelParams, buildModel, type DraftDeps } from './draft-tool.js';
 import { RUN_ANALYSIS, RunAnalysisParams, recordedRun, runAnalysis, type RunDeps } from './run-tool.js';
 import { APPLY_CHANGE, ApplyChangeParams, PROPOSE_CHANGE, ProposeChangeParams, applyChange, proposeChange, type ChangeDeps } from './change-tools.js';
+import { LivingChangeParams, applyLivingChange, isLivingProposal, proposeLivingChange } from './living-change.js';
 import { refused, traceRow, type ToolOutcome, type TraceRow } from './outcome.js';
 
 export { traceRow, type TraceRow, type ToolOutcome } from './outcome.js';
@@ -61,7 +65,8 @@ export interface ToolCallResult {
 }
 export type OnToolCall = (row: TraceRow, result: ToolCallResult) => void;
 
-export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLaneMode, onCall: OnToolCall = () => {}): Tool[] {
+export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLaneMode, onCall: OnToolCall = () => {},
+  scenario: 'core' | 'legacy' = 'legacy'): Tool[] {
   let approvalApplied = false;
   const record = (name: string, input: Record<string, unknown>, outcome: ToolOutcome, proposalId?: string): string => {
     const args = toolArgumentsAsSent(name, JSON.stringify(input), [ctx.user_turn_text ?? '', ...(ctx.verified_user_messages ?? [])]).arguments;
@@ -95,7 +100,13 @@ export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLa
       execute: async (args) => record(BUILD_MODEL_FROM_BRIEF, args, await buildModel(deps, ctx, args)),
       errorFunction: null,
     }),
-    tool({
+    scenario === 'core' ? tool({
+      name: PROPOSE_CHANGE,
+      description: TOOL_DESCRIPTIONS.propose_change,
+      parameters: LivingChangeParams,
+      execute: async (args) => record(PROPOSE_CHANGE, args, await proposeLivingChange(deps, ctx, args)),
+      errorFunction: null,
+    }) : tool({
       name: PROPOSE_CHANGE,
       description: TOOL_DESCRIPTIONS.propose_change,
       parameters: ProposeChangeParams,
@@ -108,7 +119,8 @@ export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLa
       parameters: ApplyChangeParams,
       needsApproval: true,
       execute: async (args) => {
-        const outcome = await applyChange(deps, ctx, args);
+        const outcome = isLivingProposal(deps.proposals.get(args.proposal_id))
+          ? await applyLivingChange(deps, ctx, args.proposal_id) : await applyChange(deps, ctx, args);
         if (outcome.status === 'ok') approvalApplied = true;
         if (outcome.status !== 'ok' || !outcome.mutated || deps.analyseAfterCommit === undefined) return record(APPLY_CHANGE, args, outcome, args.proposal_id);
         const auto = await deps.analyseAfterCommit();

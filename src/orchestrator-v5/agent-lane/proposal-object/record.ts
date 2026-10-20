@@ -118,6 +118,7 @@ export const FIELD_CLASS_BY_OP: Readonly<Record<PatchOperation['op'] | ProposalO
   replace_draft: 'none', // a whole revised draft, approved as one act; nothing in it is a figure this card edits
   repoint_goal: 'none', // a complete governing-outcome interpretation, approved as one act
   apply_saved_correction: 'none', // canonical targeted edits prepared together; no estimate field on this card
+  living_change: 'none', // thin core: a living-model change approved as one act; this legacy card edits none of it
 };
 
 export interface LinkStrengthField {

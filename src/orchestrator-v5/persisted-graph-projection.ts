@@ -115,6 +115,18 @@ function admitInterventionRanges<T>(graph: T, ctx: PersistedGraphProjectionConte
   return admitted;
 }
 
+/**
+ * THIN CORE (20 Oct 2026): the persisted form of a CORE POSTIMAGE, a complete graph regenerated from its living model
+ * (`path-b/living-model/mapper.ts`). Only the identity and format steps run; the legacy meaning steps (repair, range
+ * admission, risk marks, capacity ratios) never adapt it back to superseded rules. Legacy callers keep
+ * {@link projectGraphForPersistence} unchanged.
+ */
+export function projectCorePostimageForPersistence<T>(graph: T, ctx: PersistedGraphProjectionContext = {}): T {
+  if (graph === undefined || graph === null) return graph;
+  assertNoScopedIdentityConflict(graph);
+  return dropNullOptionalGraphFields(reindexInterventionKeys(reconcileTopLevelOptionsFromNodes(graph, ctx)), ctx);
+}
+
 export function projectGraphForPersistence<T>(
   graph: T,
   ctx: PersistedGraphProjectionContext = {},

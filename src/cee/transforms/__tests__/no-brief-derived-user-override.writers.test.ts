@@ -337,6 +337,7 @@ describe("2.714 revert — the user_override writer set is DERIVED and pinned", 
 // Derive actual object writes and sizeLink call sites with TypeScript's AST,
 // including shorthand user_stated. Comments and schema declarations are not writes.
 const REVIEWED_EDGE_SIZE_WRITERS: Readonly<Record<string, string>> = {
+  'orchestrator-v5/path-b/living-model/mapper.ts': 'THIN CORE mapper (20 Oct 2026): user_stated only for a link the living model attributes to the user or a party, which the kernel keeps only when its quote is verbatim in the person\'s words or the person set it on the canvas; Olumi\'s sizes are olumi_estimate, unsized links olumi_placeholder; assumed spread and existence are disclosed in uncertainty_defaults',
   'cee/draft/records/projector.ts': 'existing records projector: effectForEdge requires a grounded stated quantity and unambiguous endpoint units/roles before sizeLink receives user_stated true; an existing independent writer, not changed by Fi',
   'cee/magnitude/link-effect.ts': 'existing converter: emits user_stated magnitude only for its caller-earned user_stated size, preserving the natural effect',
   'cee/magnitude/frame-defaulted-links.ts': 'existing converter caller: explicitly passes user_stated false; only projects Olumi sizes',

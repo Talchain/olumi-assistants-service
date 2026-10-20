@@ -1211,6 +1211,13 @@ export const GraphV3 = z.object({
    * reissued. A counter, not content: excluded from the identity hash and absent from the analysis projection.
    */
   ref_high_water: z.record(z.string(), z.number().int().nonnegative().max(999_999_999)).optional().catch(undefined),
+  /**
+   * THIN CORE (20 Oct 2026): the AI's complete model of the person's reasoning (`living-model.ts`), from which `nodes`/`edges`
+   * are regenerated on every core revision. Declared so a re-parse never strips it (the `threshold_source` lesson above).
+   * Covered by the identity hash (so CAS applies), absent from the analysis hash (so it never makes a Run stale). Opaque
+   * here: its one schema is `LivingModel` (zod-v4, also the strict tool arguments), checked at the write.
+   */
+  living_model: z.record(z.string(), z.unknown()).optional().catch(undefined),
 });
 export type GraphV3T = z.infer<typeof GraphV3>;
 

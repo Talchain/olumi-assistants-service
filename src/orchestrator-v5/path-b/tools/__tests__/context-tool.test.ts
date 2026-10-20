@@ -134,3 +134,28 @@ describe('truthful outcomes when the read fails', () => {
     expect(out).toEqual({ status: 'unavailable', reason: 'read_failed', write: 'none' });
   });
 });
+
+describe('THIN CORE: a core scenario is read as its living model', () => {
+  it('gives the saved living model and what the engine graph withholds, never the legacy readers\' view', async () => {
+    const { mapLivingModel } = await import('../../living-model/mapper.js');
+    const { KNOWN_ANSWER } = await import('../../living-model/__tests__/fixtures.js');
+    const joint = structuredClone(KNOWN_ANSWER);
+    joint.aims.push({ ...structuredClone(KNOWN_ANSWER.aims[0]!), id: 'g2', text: 'Keep cost under 40' });
+    const core = { ...read(), graph: { ...mapLivingModel(joint).graph, living_model: joint } };
+    const d = await data(core);
+    expect(d.living_model).toEqual(joint);
+    expect(d.withheld).toEqual([{ id: 'g2', reason: 'aim_not_in_slice' }]);
+    expect(d).not.toHaveProperty('nodes');
+    expect(d).toHaveProperty('readiness');
+    // CONTROL: the same graph without its living model is read by the legacy readers.
+    const legacy = await data({ ...read(), graph: mapLivingModel(joint).graph });
+    expect(legacy).toHaveProperty('nodes');
+    expect(legacy).not.toHaveProperty('living_model');
+  });
+
+  it('a present living model that does not parse is reported, never replaced by the graph\'s meaning', async () => {
+    const d = await data({ ...read(), graph: { ...graph(), living_model: { aims: 'not a list' } } });
+    expect(d).toMatchObject({ living_model: { aims: 'not a list' }, living_model_invalid: true });
+    expect(d).not.toHaveProperty('nodes');
+  });
+});

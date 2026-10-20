@@ -59,7 +59,8 @@ function versionedRpcCalls(file: ts.SourceFile): Array<{ path: string; rpc: stri
 describe('versioned graph writer revision propagation', () => {
   it('collects the real producer population, including the forwarding and registration doors', () => {
     // C1: delete draft/apply/executor producers, retain the extracted held writer; the deleted edit dispatcher leaves thirteen actual producers.
-    expect(DOORS.length).toBe(13);
+    // Thin core (20 Oct): the core canvas edit (dispatch.ts) is the fourteenth.
+    expect(DOORS.length).toBe(14);
     expect(new Set(DOORS.map((door) => door.path))).toEqual(new Set([
       'orchestrator-v5/commit.ts',
       'orchestrator-v5/handlers/approve-held-proposal.ts',

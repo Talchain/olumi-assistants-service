@@ -2236,6 +2236,7 @@ export async function ceeOrchestratorRouteV2(
         const rawSysResult = await dispatchSystemEvent({
           payload: ingress,
           requestId,
+          coreScenarioCheck: req.headers['x-olumi-ai-mode'] === 'core',
         });
 
         // ═══════════════════════════════════════════════════════════════════

@@ -1,0 +1,78 @@
+import { describe, expect, it } from 'vitest';
+import type { LivingModelT } from '../../../../schemas/living-model.js';
+import { applyExplicitEdit, type ExplicitEdit } from '../edit.js';
+import { mapLivingModel } from '../mapper.js';
+import { KNOWN_ANSWER } from './fixtures.js';
+
+const apply = (edit: ExplicitEdit): LivingModelT => {
+  const out = applyExplicitEdit(KNOWN_ANSWER, edit);
+  if (!('model' in out)) throw new Error(`refused: ${out.refused}`);
+  return out.model;
+};
+const node = (m: LivingModelT, id: string) => mapLivingModel(m).graph.nodes.find((n) => n.id === id) as Record<string, any>;
+
+describe('thin core explicit edit: a canvas gesture applied to the living model, then regenerated', () => {
+  it('a factor value the person types becomes theirs, in their units, and the graph says they set it', () => {
+    const m = apply({ kind: 'factor_value_edit', target_id: 'f', value: 0.7, raw_value: 0.7 });
+    expect(m.factors[0]).toMatchObject({ value: 0.7, source: 'user', quote: null });
+    expect(node(m, 'f').observed_state).toMatchObject({ value: 0.7, raw_value: 0.7, source: 'user_edited' });
+    expect(KNOWN_ANSWER.factors[0]!.value, 'the saved model is never mutated').toBe(0.5);
+  });
+
+  it('a goal\'s current level is set on the goal; a model-scale option setting converts on the factor\'s own frame', () => {
+    expect(apply({ kind: 'factor_value_edit', target_id: 'g', value: 0.6, raw_value: 75 }).aims[0]!.target!.current).toBe(75);
+    const push = apply({ kind: 'option_intervention_edit', option_id: 'push', factor_id: 'f', value: 0.8 }).options.find((o) => o.id === 'push')!;
+    expect(push.settings).toEqual([{ factor_id: 'f', value: 0.8, low: null, high: null, unit: null, source: 'user', party: null, quote: null }]);
+  });
+
+  it('a goal target and a link strength are kept in the person\'s units; the regenerated engine values match the gesture', () => {
+    const target = apply({ kind: 'goal_target_edit', goal_node_id: 'g', constraint_type: 'at_least', raw_value: 110, unit: 'units' });
+    expect(target.aims[0]!.target).toMatchObject({ comparator: '>=', value: 110, unit: 'units', current: 70 });
+    const link = apply({ kind: 'edge_strength_edit', from: 'f', to: 'g', magnitude: 0.2, direction_intent: 'preserve' });
+    expect(link.links[0]!.effect).toEqual({ form: 'point', value: 25, low: null, high: null, sd: null, unit: 'units', sign: '+' });
+    const edge = mapLivingModel(link).graph.edges.find((e) => e.from === 'f' && e.to === 'g') as Record<string, any>;
+    expect(edge.strength.mean).toBeCloseTo(0.2, 10);
+    expect(edge.provenance).toMatchObject({ source: 'user_specified', magnitude: 'user_stated' });
+  });
+
+  it('R1 6b148af5: a target edit never claims an inherited starting level, nor relabels its unit', () => {
+    const olumis: LivingModelT = structuredClone(KNOWN_ANSWER);
+    olumis.aims[0] = { ...olumis.aims[0]!, source: 'olumi', quote: null };
+    const out = applyExplicitEdit(olumis, { kind: 'goal_target_edit', goal_node_id: 'g', constraint_type: 'at_least', raw_value: 110, unit: 'units' });
+    const m = (out as { model: LivingModelT }).model;
+    expect(m.aims[0]).toMatchObject({ source: 'user', target: { value: 110, current: null } });
+    expect(m.history).toContainEqual(expect.objectContaining({ id: 'g', change: 'superseded' }));
+    expect(node(m, 'g').observed_state).toBeUndefined();
+    // CONTROL: the person's own starting level stays theirs.
+    expect(apply({ kind: 'goal_target_edit', goal_node_id: 'g', constraint_type: 'at_least', raw_value: 110, unit: 'units' }).aims[0]!.target!.current).toBe(70);
+    expect(applyExplicitEdit(KNOWN_ANSWER, { kind: 'goal_target_edit', goal_node_id: 'g', constraint_type: 'at_least', raw_value: 80, unit: '%' }))
+      .toEqual({ refused: 'unit_mismatch' });
+  });
+
+  it('R1 round 2: today\'s level the person set stays theirs when they then edit the target', () => {
+    const olumis: LivingModelT = structuredClone(KNOWN_ANSWER);
+    olumis.aims[0] = { ...olumis.aims[0]!, source: 'olumi', quote: null };
+    const level = (applyExplicitEdit(olumis, { kind: 'factor_value_edit', target_id: 'g', value: 0.6, raw_value: 75, unit: 'units' }) as { model: LivingModelT }).model;
+    expect(level.aims[0]!.target).toMatchObject({ current: 75, current_source: 'user' });
+    expect(node(level, 'g').observed_state).toMatchObject({ raw_value: 75, source: 'user_edited' });
+    const target = (applyExplicitEdit(level, { kind: 'goal_target_edit', goal_node_id: 'g', constraint_type: 'at_least', raw_value: 110, unit: 'units' }) as { model: LivingModelT }).model;
+    expect(target.aims[0]!.target).toMatchObject({ value: 110, current: 75, current_source: 'user' });
+    expect(target.history).toEqual([]);
+  });
+
+  it('rename, delete and add keep every reference whole', () => {
+    expect(apply({ kind: 'structural_rename', node_id: 'f', label: 'Effort', expected_label: 'f' }).factors[0]!.label).toBe('Effort');
+    const deleted = apply({ kind: 'structural_delete', removed_node_ids: ['f'], removed_edges: [] });
+    expect(deleted.factors).toEqual([]);
+    expect(deleted.links).toEqual([]);
+    expect(deleted.options.find((o) => o.id === 'push')!.settings).toEqual([]);
+    expect(apply({ kind: 'structural_add', node_id: 'h', node_kind: 'factor', label: 'Hours' }).factors.map((f) => f.id)).toEqual(['f', 'h']);
+  });
+
+  it('refuses, changing nothing: another unit, a label that moved, an unknown item, a kind not in this slice', () => {
+    expect(applyExplicitEdit(KNOWN_ANSWER, { kind: 'factor_value_edit', target_id: 'g', value: 0.6, raw_value: 75, unit: '%' })).toEqual({ refused: 'unit_mismatch' });
+    expect(applyExplicitEdit(KNOWN_ANSWER, { kind: 'structural_rename', node_id: 'f', label: 'x', expected_label: 'old' })).toEqual({ refused: 'label_moved' });
+    expect(applyExplicitEdit(KNOWN_ANSWER, { kind: 'factor_value_edit', target_id: 'nope', value: 1 })).toEqual({ refused: 'not_in_model' });
+    expect(applyExplicitEdit(KNOWN_ANSWER, { kind: 'structural_add', node_id: 'r', node_kind: 'risk', label: 'Risk' })).toEqual({ refused: 'kind_not_in_slice' });
+  });
+});

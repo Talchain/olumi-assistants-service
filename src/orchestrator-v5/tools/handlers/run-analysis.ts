@@ -465,6 +465,16 @@ function readOptionEntriesForCostAsk(
   return [];
 }
 
+/**
+ * THIN CORE (20 Oct 2026): the wire copy without the living model. It is CEE's record of meaning (quotes, views,
+ * history); the engine reads only the graph regenerated from it. Identity when absent; the stored graph is never touched.
+ */
+function withoutLivingModel<G>(graph: G): G {
+  if (graph === null || typeof graph !== 'object' || !Object.hasOwn(graph, 'living_model')) return graph;
+  const { living_model: _livingModel, ...wire } = graph as Record<string, unknown>;
+  return wire as G;
+}
+
 export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerFn {
   return async function runAnalysisHandler(
     invocation: HandlerInvocation,
@@ -1000,7 +1010,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     }
     const plotPayload: Record<string, unknown> = {
       // Recovery Batch B (L6): a stated level range changes no compute; the wire copy drops it (`withoutStatedLevelRanges`).
-      graph: toOutboundGraph(withoutStatedLevelRanges(withShareByDateFrame(rateSpreadWireGraph, snapshot.rawPersistedGraph ?? snapshot.graph))),
+      graph: withoutLivingModel(toOutboundGraph(withoutStatedLevelRanges(withShareByDateFrame(rateSpreadWireGraph, snapshot.rawPersistedGraph ?? snapshot.graph)))),
       // No-rank ruling (2026-08-14): the GATED submission set — identical to
       // snapshot.options unless the gate held the status quo at its observed
       // position, or EXCLUDED an option with no values set (disclosed below).

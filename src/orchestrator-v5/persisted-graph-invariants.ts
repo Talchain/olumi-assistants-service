@@ -93,7 +93,9 @@ export type PersistedGraphInvariantCode =
   | 'DUPLICATE_OPTION_ID'
   | 'untouched_level_rescaled'
   /** A goal's compiled today part not at that goal's level today, set by an option, or with a link into it (STEP 8). */
-  | 'GOAL_TODAY_PART_NOT_GOAL_LEVEL';
+  | 'GOAL_TODAY_PART_NOT_GOAL_LEVEL'
+  /** THIN CORE: a graph write to a scenario whose meaning is its living model, by a writer other than the core write. */
+  | 'CORE_SCENARIO_LEGACY_WRITE';
 
 /**
  * Codes that are REPORTED but do NOT refuse. Kept separate on purpose: the

@@ -5,6 +5,8 @@
  *
  * It carries typed facts only, never host words:
  *  · revision: the read's analysis hash, identity hash and scenario revision;
+ *  · a core scenario's living model as saved, with what its engine graph withholds and why (`livingViewOf`); it IS the
+ *    meaning, so the readers below are not run on it. Otherwise:
  *  · the model as stored (nodes, option settings, links) with each figure's source as the ONE authority answers it
  *    (`provenanceOf` / `authorshipOf`: origin human | ai | unknown, `accepted` kept apart from origin, the role) and each
  *    node's kept claims (who said it and the verbatim quote, `claimRecordsOn`, the one claim reader since #3427). Unknown stays unknown; a person's
@@ -24,6 +26,7 @@ import { claimRecordsOn } from '../../statement-door/statements.js';
 import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js';
 import { authorshipOf, provenanceOf } from '../../../cee/provenance/provenance-of.js';
 import { ok, refused, unavailable, type ToolOutcome } from './outcome.js';
+import { livingViewOf } from '../living-model/view.js';
 
 export const READ_CANONICAL_CONTEXT = 'read_canonical_context';
 export const ReadCanonicalContextParams = z.object({}).strict();
@@ -135,13 +138,13 @@ export async function readCanonicalContext(deps: { readonly dispatch: InternalDi
   const byId = new Map(nodes.filter((n) => typeof n.id === 'string').map((n) => [n.id as string, n]));
   const view = isRec(json.canonical_analysis_view) ? json.canonical_analysis_view : {};
   const admission = resolveRunAdmission(graph);
+  const living = livingViewOf(graph);
   return ok({
     scenario_id: ctx.scenario_id,
     revision: { graph_hash: graphHash, graph_identity_hash: identity,
       scenario_revision: int(isRec(view.staleness) ? view.staleness.revision : undefined) },
     empty: nodes.length === 0,
-    nodes: nodes.map((n) => nodeOf(n, byId)),
-    links: recs(graph.edges).map((e) => linkOf(e, byId)),
+    ...(living ?? { nodes: nodes.map((n) => nodeOf(n, byId)), links: recs(graph.edges).map((e) => linkOf(e, byId)) }),
     readiness: {
       will_run: admission.willProceed,
       safe_to_analyse: admission.assessment.safeToAnalyse,
