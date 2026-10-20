@@ -28,6 +28,7 @@ import { computeAnalysisAffectingGraphHashSha256 } from '../../context/graph-has
 import type { AtomicCommittedModelVersionReceipt } from '../../session/store.js';
 import { turnContextItems, turnContextText } from '../../agent-lane/turn-context.js';
 import { budgetFor } from '../../agent-lane/model-budgets.js';
+import { buildWithDrafterRawRecord } from '../../drafter-raw/index.js';
 import { candidateToGraph } from './candidate-to-graph.js';
 import { STANCE_DESCRIPTION } from './change-tools.js';
 import { isNoModelYet, isSavedRead, readSaved } from './context-tool.js';
@@ -100,7 +101,9 @@ async function drafted(callStructured: CallStructuredModel, brief: string): Prom
   try { return { draft: JSON.parse(out.text) as unknown }; } catch { return { outcome: unavailable('no_structured_output') }; }
 }
 
-export async function buildModel(deps: DraftDeps, ctx: Pick<AgentToolContext, 'scenario_id'> & TypedWords, args: BuildModelArgs): Promise<ToolOutcome> {
+type DraftContext = Pick<AgentToolContext, 'scenario_id'> & Partial<Pick<AgentToolContext, 'request_id'>> & TypedWords;
+
+export async function buildModel(deps: DraftDeps, ctx: DraftContext, args: BuildModelArgs): Promise<ToolOutcome> {
   const outcome = await construct(deps, ctx, args);
   const save_outcome = outcome.status === 'ok' ? 'VERIFIED_SAVED'
     : outcome.status === 'unavailable' && outcome.write === 'unknown' ? 'UNKNOWN' : 'VERIFIED_NO_WRITE';
@@ -109,7 +112,19 @@ export async function buildModel(deps: DraftDeps, ctx: Pick<AgentToolContext, 's
   } : {}) };
 }
 
-async function construct(deps: DraftDeps, ctx: Pick<AgentToolContext, 'scenario_id'> & TypedWords, args: BuildModelArgs): Promise<ToolOutcome> {
+/** Reuse A's diagnostic recorder; only a served request has an identity to record. */
+async function construct(deps: DraftDeps, ctx: DraftContext, args: BuildModelArgs): Promise<ToolOutcome> {
+  if (deps.callStructured === undefined || ctx.request_id === undefined) return constructUnrecorded(deps, ctx, args);
+  const recorded = await buildWithDrafterRawRecord({ scenario_id: ctx.scenario_id, request_id: ctx.request_id }, args.brief,
+    constructionOperationId(ctx.scenario_id, args.brief), deps.callStructured, async (drafter) => {
+      const outcome = await constructUnrecorded({ ...deps, callStructured: drafter }, ctx, args);
+      return { ok: outcome.status === 'ok', ...outcome.data,
+        replayed: outcome.data?.already_saved === true, refusal: outcome.status === 'ok' ? undefined : outcome.reason, outcome };
+    });
+  return recorded.outcome;
+}
+
+async function constructUnrecorded(deps: DraftDeps, ctx: DraftContext, args: BuildModelArgs): Promise<ToolOutcome> {
   if (!inTheUsersWords(args.brief, ctx)) return refused('brief_not_users_words');
   if (deps.callStructured === undefined) return unavailable('drafter_unavailable');
   const before = await readSaved(deps, ctx.scenario_id);
