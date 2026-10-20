@@ -117,7 +117,7 @@ import { agentProposals as proposals, executableWaitingProposal, identityProposa
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
 import { budgetFor, callEffortFor, conversationBudgetFor, coreBudget, coreReplyBudget, type CallBudget, INTERPRET_DEADLINE, interpretBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
-import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../orchestrator-v5/agent-lane/coach-route-v0_2.js';
+import { HOST_SCIENCE_AND_SOURCE_RULES, HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../orchestrator-v5/agent-lane/coach-route-v0_2.js';
 import { agentFactorEnrichments } from '../orchestrator-v5/agent-lane/factor-review.js';
 import { OLUMI_PURPOSE_INSTRUCTION } from '../orchestrator-v5/agent-lane/olumi-purpose.js';
 import { APPROVAL_REQUIRED_WORDS, approvalChoiceWords, narrateWriteOutcome, TYPED_APPROVAL_READ_BY_OLUMI, notAdoptedLine, openQuestionsForReply, staleOnlyByRangeReading, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
@@ -927,6 +927,29 @@ const AGENT_INSTRUCTIONS = SELECTED_COACH_V02_TEMPLATE.replace(
 );
 /** The Agent's call that offers its proposing tools: the shared instructions, then the stated-figure rule. */
 const AGENT_TOOL_INSTRUCTIONS = `${AGENT_INSTRUCTIONS}\n\n${STATED_FIGURE_INSTRUCTION}`;
+
+/**
+ * PROMPT ARM B (programme-docs #94 6302769609): AIE-CORE-TOOL-ALIGNMENT-v1, verbatim (#3523 comment 6298433275, packet
+ * 4ea5e3ce…). The core agent's own authority, naming only the five tools it has, in place of the legacy mutation, host
+ * and stated-figure routing (tools it does not have, another approval and Run flow). Every other section is kept, and so
+ * are the host contract's science, source and freshness rules (`HOST_SCIENCE_AND_SOURCE_RULES`, which already carry the
+ * model-relative naming rule, P13).
+ */
+const CORE_AUTHORITY_INSTRUCTION = [
+  'Use only the tools declared for this turn and follow their descriptions and returned outcomes. Use the current saved Living Model and its revision as the operative state; keep proposed changes and hypothetical alternatives separate. A later confirmed tool result supersedes the turn-start snapshot only for what that result covers.',
+  "For a first model, use build_model_from_brief with the user's actual brief and the complete Living Model. For a requested revision, use propose_change with the complete proposed model. Copy unaffected saved items unchanged, including their ids, wording, sources, party names and quotes; preserve conditions, dissent and required history. Do not preserve an item that the requested correction actually supersedes.",
+  "For a prepared revision, apply_change requests commitment and the SDK requires the person's approval of that proposal on its card. Do not treat a typed yes or your own interpretation as the card's approval. Confirm a save only from the operation's own confirmed outcome; a lost or unknown outcome is not proof of either success or failure.",
+  "Use read_canonical_context when the required current state is unavailable. Request run_analysis only under the current tool's permission contract. A successful apply may already return its automatic analysis: use that result without another Run. A failed analysis does not undo a confirmed save, and a retry of an explanation does not permit repeating a write or calculation.",
+].join('\n\n');
+/** The shared coach's starting-input paragraph (legacy proposing tools) and the core copy's replacement (AIE, verbatim). */
+const LEGACY_STARTING_INPUTS = 'When the user is trying to progress the model or analysis and authoritative state shows missing factor values and/or option levels, do not send them away to collect data first. Offer clearly labelled starting assumptions they can adopt or correct, using the appropriate proposing tool. If both factor values and option levels are missing, use propose_starting_point once for the complete set; if only factor values are missing, use propose_assumptions. A proposal changes nothing until the user explicitly approves it.';
+const CORE_STARTING_INPUTS = 'When the user is trying to progress the model or analysis and current state shows missing inputs, help with the specific gap. Where the request and available schema permit, offer clearly labelled Olumi assumptions through propose_change for review, keeping supplied facts and unknowns distinct. Otherwise explain the missing capability or ask only for the necessary input. A proposal changes nothing until its own approval and confirmed save.';
+export const CORE_ALIGNED_INSTRUCTIONS = SELECTED_COACH_V02_TEMPLATE.replace(
+  '{{MODE_AND_AUTHORITY}}',
+  `${OLUMI_PURPOSE_INSTRUCTION}\n\n${[CORE_AUTHORITY_INSTRUCTION, HOST_SCIENCE_AND_SOURCE_RULES, REPLY_LENGTH_INSTRUCTION, REPLY_SHAPE_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION].join(' ')}`,
+).replace(LEGACY_STARTING_INPUTS, CORE_STARTING_INPUTS);
+/** The comparison's arm for one request: B only on a core turn that asks for it. Removed, with the losing arm, when it closes. */
+export const promptArmOf = (mode: AgentLaneMode, header: unknown): 'A' | 'B' => (mode === 'core' && header === 'B' ? 'B' : 'A');
 
 /**
  * ⭐ PATH-B `core` (agent-tools.ts `AgentLaneMode`): Olumi appends and rewrites nothing after the AI's reply, so the reply
@@ -4464,7 +4487,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
               if (result.ok && result.mutated && (result.receipts?.length ?? 0) > 0) verifiedSave = true;
               onCall(row, { ...result });
             }, coreScenario ? 'core' : 'legacy'),
-          instructions: instructionsForMode(mode, eligibleIntervention === undefined ? AGENT_TOOL_INSTRUCTIONS : `${AGENT_TOOL_INSTRUCTIONS}\n\n${ELIGIBLE_INTERVENTION_INSTRUCTION}`),
+          instructions: instructionsForMode(mode, `${promptArmOf(mode, req.headers['x-olumi-prompt-arm']) === 'B' ? CORE_ALIGNED_INSTRUCTIONS : AGENT_TOOL_INSTRUCTIONS}${eligibleIntervention === undefined ? '' : `\n\n${ELIGIBLE_INTERVENTION_INSTRUCTION}`}`),
           briefText: coreSaved?.brief_text,
           canonicalState: livingView === undefined ? canonicalContext?.packet?.state
             : { ...(canonicalContext?.packet?.state as Record<string, unknown> | undefined), ...livingView },
