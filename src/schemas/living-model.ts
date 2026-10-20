@@ -92,7 +92,9 @@ export const LivingLink = z.object({
      * `normal`: an explicitly stated law, `value` its mean and `sd` its standard deviation, per +1 of `from`. An ordinary
      * range is not a law (AIE, 20 Oct): it stays a `range`.
      */
-    form: z.enum(['point', 'range', 'normal', 'direction_only', 'unknown']),
+    form: z.enum(['point', 'exact', 'range', 'normal', 'direction_only', 'unknown']).describe(
+      'point: a stated figure ("adds about 50"); exact: the person says it is exactly this, with no variation ("adds exactly 50"); '
+      + 'normal: a stated Normal law, value its mean and sd its standard deviation; range: low to high; direction_only: a sign with no size; unknown.'),
     ...figure,
     /**
      * The link's unit is the `to` item's own unit, exactly as that item writes it; "per +1 of `from`" is implied, so it is

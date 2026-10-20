@@ -3,7 +3,9 @@ import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import { LivingModel, type LivingModelT } from '../../../../schemas/living-model.js';
 import { mapLivingModel } from '../mapper.js';
 import { linkDefaultAssumptionsOf } from '../../../../cee/magnitude/link-default-assumptions.js';
-import { KNOWN_ANSWER } from './fixtures.js';
+import { KNOWN_ANSWER, OPTION_EFFECTS } from './fixtures.js';
+
+type Rec = Record<string, any>;
 
 const node = (g: { nodes: Record<string, unknown>[] }, id: string) => g.nodes.find((n) => n.id === id) as Record<string, any>;
 /** Standard normal CDF (Abramowitz–Stegun 7.1.26), enough for a 1e-4 check. */
@@ -158,5 +160,36 @@ describe('thin core mapper: living model → GraphV3', () => {
     const link = graph.edges.find((e) => e.from === 'f' && e.to === 'g') as Record<string, any>;
     expect(link.provenance).toMatchObject({ source: 'cee_hypothesis', magnitude: 'olumi_estimate' });
     expect(link.exists_probability).toBe(0.8);
+  });
+
+  it('an option\'s own exact effect on the goal is worked out exactly: goal = its level today + the option\'s change, nothing drawn', () => {
+    const { graph, withheld } = mapLivingModel(OPTION_EFFECTS);
+    const n = (id: string) => (graph.nodes as Rec[]).find((x) => x.id === id)!;
+    expect(withheld.filter((w) => w.id !== 'options')).toEqual([]);
+    expect(n('w')).toMatchObject({ goal_threshold_raw: 60, nonlinear_identity: { operation: 'sum', factor_ids: ['w_today', 'w__change'], stated_in_brief: false } });
+    expect(n('w_today').observed_state).toEqual(n('w').observed_state);
+    expect(n('w__change')).toMatchObject({ category: 'controllable', observed_state: { raw_value: 0, cap: n('w').goal_threshold_cap } });
+    expect(n('a').interventions.w__change).toMatchObject({ raw_value: 30, source: 'brief_extraction' });
+    expect(n('b').interventions.w__change).toMatchObject({ raw_value: 19.9 });
+    for (const part of ['w_today', 'w__change']) {
+      expect((graph.edges as Rec[]).find((e) => e.from === part && e.to === 'w')).toMatchObject({ strength: { mean: 1 }, exists_probability: 1, provenance: { definitional: true } });
+    }
+    expect((graph.edges as Rec[]).some((e) => (e.from === 'a' || e.from === 'b') && e.to === 'w'), 'no option→goal edge reaches the engine').toBe(false);
+  });
+
+  it('CONTROL: a stated but not exact effect, or a level today that is not the person\'s, is an on/off factor per option, sized like any link', () => {
+    const about: LivingModelT = structuredClone(OPTION_EFFECTS);
+    about.links[0]!.effect.form = 'point';
+    const { graph } = mapLivingModel(about);
+    const n = (id: string) => (graph.nodes as Rec[]).find((x) => x.id === id)!;
+    expect(n('w').nonlinear_identity).toBeUndefined();
+    expect(n('a').interventions.a__on).toMatchObject({ value: 1 });
+    const cap = n('w').goal_threshold_cap as number;
+    const edge = (graph.edges as Rec[]).find((e) => e.from === 'a__on' && e.to === 'w')!;
+    expect(edge.strength.mean).toBeCloseTo(30 / cap, 10);
+    expect(edge.strength.std).toBeCloseTo(15 / cap, 10);
+    const olumis: LivingModelT = structuredClone(OPTION_EFFECTS);
+    olumis.aims[0] = { ...olumis.aims[0]!, source: 'olumi', quote: null };
+    expect((mapLivingModel(olumis).graph.nodes as Rec[]).find((x) => x.id === 'w')!.nonlinear_identity).toBeUndefined();
   });
 });

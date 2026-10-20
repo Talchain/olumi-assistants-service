@@ -13,12 +13,18 @@
  *  · existence 1 for a stated link is the assumption of conditioning on it; Olumi's 0.8 is an untested convention;
  *  · an unsized link is Olumi's placeholder, which the chance licence withholds; an unknown sign is never drawn positive;
  *  · unknown is never 0: a level, setting or link this slice cannot convert is WITHHELD with its reason, never dropped
- *    silently and never guessed.
+ *    silently and never guessed;
+ *  · an option's own effect on the goal ("adds 260 metres") reaches the engine through a factor the options set, because
+ *    the engine reads effects only through factors. Where every such effect is stated EXACT and the goal's level today is
+ *    the person's own, it is worked out exactly as a sum (the existing STEP 8 Route A shape: goal = its level today + the
+ *    option's change; ISL never draws an identity's parts), since any drawn link is floored to a spread by PLoT. Otherwise
+ *    each option gets an on/off factor whose link is sized like any other.
  */
 import { REPAIR_CODES, type RepairEntry } from '@talchain/schemas';
 import type { LivingModelT, LivingSourceT } from '../../../schemas/living-model.js';
 import { resolveGoalThresholdCapWithProvenance } from '../../../utils/goal-threshold-cap.js';
 import { admitGoalBaseline } from '../../../cee/factor-extraction/goal-baseline-admissibility.js';
+import { LLM_STRENGTH_STD_FLOOR } from '../../../cee/constants.js';
 
 export type WithheldReason =
   | 'no_level_target' | 'aim_not_in_slice' | 'change_target_not_in_slice' | 'exact_target_not_in_slice' | 'target_range_not_in_slice'
@@ -73,7 +79,8 @@ export function goalIdOf(graph: unknown): string | undefined {
 /** The options that keep a saved graph's goal (none when it has none). */
 export const savedGoal = (graph: unknown): { goal?: string } => { const goal = goalIdOf(graph); return goal === undefined ? {} : { goal }; };
 
-export function mapLivingModel(model: LivingModelT, opts: { readonly goal?: string } = {}): Mapped {
+export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: string } = {}): Mapped {
+  let model = living;
   const withheld: Withheld[] = [];
   const nodes: Rec[] = [];
   const edges: Rec[] = [];
@@ -123,6 +130,42 @@ export function mapLivingModel(model: LivingModelT, opts: { readonly goal?: stri
   // Joint goals are not in this slice: every other current aim with a target is kept in the living model, withheld here.
   for (const a of model.aims) if (a !== aim && a.status === 'current' && a.target !== null) hold(a.id, 'aim_not_in_slice');
 
+  // ── An option's own effect on the goal becomes a factor the options set (see the header). Same ids, same attribution.
+  const optionIds = new Set(model.options.map((o) => o.id));
+  const direct = goal === undefined ? [] : model.links.filter((l) => optionIds.has(l.from) && l.to === goal!.id);
+  let exactSum: { readonly lever: string; readonly today: string } | undefined;
+  if (direct.length > 0 && goal !== undefined && goalNode?.observed_state !== undefined) {
+    const g = goal;
+    const todayIsTheirs = aim!.target!.current_source === 'user' || stated(aim!.source);
+    const exact = todayIsTheirs && new Set(direct.map((l) => l.from)).size === direct.length
+      && model.links.every((l) => l.to !== g.id || optionIds.has(l.from))
+      && direct.every((l) => l.effect.form === 'exact' && l.effect.value !== null && l.effect.sign !== null
+        && (l.effect.unit === null || l.effect.unit === g.unit));
+    if (exact) {
+      exactSum = { lever: `${g.id}__change`, today: `${g.id}_today` };
+      const lever = exactSum.lever;
+      model = { ...model,
+        factors: [...model.factors, { id: lever, label: `Change in ${aim!.target!.quantity}`, value: 0, low: null, high: null,
+          unit: g.unit === '' ? null : g.unit, source: 'olumi', party: null, quote: null }],
+        options: model.options.map((o) => {
+          const l = direct.find((d) => d.from === o.id);
+          return l === undefined ? o : { ...o, settings: [...o.settings, { factor_id: lever, value: (l.effect.sign === '-' ? -1 : 1) * Math.abs(l.effect.value!),
+            low: null, high: null, unit: g.unit === '' ? null : g.unit, source: l.source, party: l.party, quote: l.quote }] };
+        }),
+        links: model.links.filter((l) => !direct.includes(l)) };
+    } else {
+      const on = (optionId: string) => `${optionId}__on`;
+      model = { ...model,
+        factors: [...model.factors, ...[...new Set(direct.map((l) => l.from))].map((id) => ({ id: on(id),
+          label: `${model.options.find((o) => o.id === id)!.label} in place`, value: 0, low: null, high: null, unit: null, source: 'olumi' as const, party: null, quote: null }))],
+        options: model.options.map((o) => {
+          const l = direct.find((d) => d.from === o.id);
+          return l === undefined ? o : { ...o, settings: [...o.settings, { factor_id: on(o.id), value: 1, low: null, high: null, unit: null, source: l.source, party: l.party, quote: l.quote }] };
+        }),
+        links: model.links.map((l) => (direct.includes(l) ? { ...l, from: on(l.from) } : l)) };
+    }
+  }
+
   // ── Factors, each on its own frame.
   const setsFactor = new Set(model.options.flatMap((o) => o.settings.map((s) => s.factor_id)));
   const caps = new Map<string, number>();
@@ -130,7 +173,8 @@ export function mapLivingModel(model: LivingModelT, opts: { readonly goal?: stri
   for (const f of model.factors) {
     const levels = [f.value, ...model.options.flatMap((o) => o.settings.filter((s) => s.factor_id === f.id).map((s) => s.value))]
       .filter((v): v is number => v !== null);
-    const cap = capFor(levels, f.unit, goal);
+    // The exact sum's change is read on the goal's own frame, so the goal is its parts added in the goal's units.
+    const cap = exactSum !== undefined && f.id === exactSum.lever ? goal!.cap : capFor(levels, f.unit, goal);
     if (cap !== undefined) caps.set(f.id, cap);
     const node: Rec = { id: f.id, kind: 'factor', label: f.label, category: setsFactor.has(f.id) ? 'controllable' : 'observable' };
     if (f.value !== null && cap !== undefined) {
@@ -194,8 +238,10 @@ export function mapLivingModel(model: LivingModelT, opts: { readonly goal?: stri
       ? { mean: sign * Math.abs(e.value) * ratio, std: Math.abs(e.value) * ratio / 2 }
       : (e.form === 'normal' && e.value !== null && e.sd !== null && e.sd > 0)
         ? { mean: sign * Math.abs(e.value) * ratio, std: e.sd * ratio }
+        // Stated exact: no spread of Olumi's. The engine's own minimum spread still applies to a drawn link.
+        : (e.form === 'exact' && e.value !== null) ? { mean: sign * Math.abs(e.value) * ratio, std: LLM_STRENGTH_STD_FLOOR }
         : undefined;
-    if (ratio === undefined && (e.form === 'point' || e.form === 'normal')) hold(l.id, 'link_frame_unknown');
+    if (ratio === undefined && (e.form === 'point' || e.form === 'normal' || e.form === 'exact')) hold(l.id, 'link_frame_unknown');
     if (e.form === 'range') hold(l.id, 'link_range_no_law');
     if (unitMismatch) hold(l.id, 'link_unit_mismatch');
     if (sized === undefined || unitMismatch) {
@@ -219,6 +265,19 @@ export function mapLivingModel(model: LivingModelT, opts: { readonly goal?: stri
     const who = stated(l.source) ? { source: edited(l) ? 'user_specified' : 'brief_extraction', magnitude: 'user_stated' }
       : l.source === 'olumi' ? { source: 'cee_hypothesis', magnitude: 'olumi_estimate' } : {};
     edges.push({ ...base, strength: sized, exists_probability: exists, provenance: { ...who, uncertainty_defaults: assumed } });
+  }
+
+  // The exact sum: the goal's level today and the options' change, each one +1 definitional part (ISL adds them in the
+  // goal's units and never draws them). The today part IS the goal's level today, copied, never a new figure.
+  if (exactSum !== undefined && goalNode !== undefined) {
+    const unit = goal!.unit;
+    nodes.push({ id: exactSum.today, kind: 'factor', label: `${String(goalNode.label)} today`, category: 'observable', observed_state: { ...(goalNode.observed_state as Rec) } });
+    for (const part of [exactSum.today, exactSum.lever]) {
+      edges.push({ id: `${part}__${goal!.id}`, from: part, to: goal!.id, strength: { mean: 1, std: LLM_STRENGTH_STD_FLOOR }, exists_probability: 1,
+        effect_direction: 'positive', provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate', definitional: true, natural_effect: {
+          amount: 1, amount_unit: unit, per_source_change: 1, per_source_change_unit: unit, strength_mean: 1, strength_mean_frame: 'edge_strength' } } });
+    }
+    goalNode.nonlinear_identity = { operation: 'sum', factor_ids: [exactSum.today, exactSum.lever], stated_in_brief: false };
   }
 
   // A chance rests on everything on the goal's path. Anything there that this slice left out of the engine graph (an

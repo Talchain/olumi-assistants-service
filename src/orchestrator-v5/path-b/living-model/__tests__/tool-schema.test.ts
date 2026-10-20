@@ -10,4 +10,8 @@ describe('thin core: the link-unit convention reaches the AI in the tool schema 
     expect(sent).toContain('never add \\"per …\\"');
     expect(sent).toContain('The change in `to` for each +1 of `from`, in the unit of `to`.');
   });
+
+  it('an exact effect is told apart from a stated figure, in the schema the AI is sent', () => {
+    expect(sent).toContain('exact: the person says it is exactly this, with no variation');
+  });
 });

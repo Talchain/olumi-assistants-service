@@ -11,13 +11,13 @@ import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.
 import { createRunAnalysisHandler } from '../../../tools/handlers/run-analysis.js';
 import { mapLivingModel } from '../mapper.js';
 import { resolveRunAdmission } from '../../../tools/handlers/analysis-ready-core.js';
-import { KNOWN_ANSWER } from './fixtures.js';
+import { KNOWN_ANSWER, OPTION_EFFECTS } from './fixtures.js';
 
 type Rec = Record<string, any>;
 const SCENARIO = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
 /** The stored core postimage, exactly as the register route writes it. */
-const stored = (): Rec => projectCorePostimageForPersistence(GraphV3.parse({ ...mapLivingModel(KNOWN_ANSWER).graph, living_model: KNOWN_ANSWER })) as Rec;
+const stored = (model = KNOWN_ANSWER): Rec => projectCorePostimageForPersistence(GraphV3.parse({ ...mapLivingModel(model).graph, living_model: model })) as Rec;
 
 /** The real Run's PLoT request (the snapshot loader, then the handler up to the network), or its outcome when it sends none. */
 async function requestTheRunSends(graph: Rec): Promise<{ request: Rec | undefined; outcome: unknown }> {
@@ -53,5 +53,23 @@ describe('thin core: the known-answer living model reaches the engine unchanged'
     const link = (request!.graph.edges as Rec[]).find((e) => e.from === 'f' && e.to === 'g')!;
     expect(link.strength.mean).toBeCloseTo(0.4, 10);
     expect(link.strength.std).toBeCloseTo(0.08, 4);
+  });
+
+  it('options that state their own exact effect reach the engine as the goal\'s exact sum: today + each option\'s change', async () => {
+    const graph = stored(OPTION_EFFECTS);
+    expect(resolveRunAdmission(graph).willProceed).toBe(true);
+    const { request, outcome } = await requestTheRunSends(graph);
+    expect(request, JSON.stringify(outcome)).toBeDefined();
+    const nodes = request!.graph.nodes as Rec[];
+    const goal = nodes.find((n) => n.id === 'w')!;
+    expect(goal.nonlinear_identity).toEqual({ operation: 'sum', factor_ids: ['w_today', 'w__change'], stated_in_brief: false });
+    expect(nodes.find((n) => n.id === 'w_today')!.observed_state).toMatchObject({ raw_value: 40 });
+    const options = Object.fromEntries((request!.options as Rec[]).map((o) => [o.option_id ?? o.id, JSON.stringify(o.interventions)]));
+    // The sum is added in the goal's own units, so each option sends its change as stated.
+    expect(options.a).toContain('"w__change":30');
+    expect(options.b).toContain('"w__change":19.9');
+    for (const part of ['w_today', 'w__change']) {
+      expect((request!.graph.edges as Rec[]).find((e) => e.from === part && e.to === 'w')).toMatchObject({ exists_probability: 1, provenance: { definitional: true } });
+    }
   });
 });
