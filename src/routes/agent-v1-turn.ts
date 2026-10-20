@@ -946,7 +946,7 @@ const LEGACY_STARTING_INPUTS = 'When the user is trying to progress the model or
 const CORE_STARTING_INPUTS = 'When the user is trying to progress the model or analysis and current state shows missing inputs, help with the specific gap. Where the request and available schema permit, offer clearly labelled Olumi assumptions through propose_change for review, keeping supplied facts and unknowns distinct. Otherwise explain the missing capability or ask only for the necessary input. A proposal changes nothing until its own approval and confirmed save.';
 export const CORE_ALIGNED_INSTRUCTIONS = SELECTED_COACH_V02_TEMPLATE.replace(
   '{{MODE_AND_AUTHORITY}}',
-  `${OLUMI_PURPOSE_INSTRUCTION}\n\n${CORE_AUTHORITY_INSTRUCTION}\n\n${[HOST_SCIENCE_AND_SOURCE_RULES, REPLY_LENGTH_INSTRUCTION, REPLY_SHAPE_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION].join(' ')}`,
+  `${OLUMI_PURPOSE_INSTRUCTION}\n\n${[CORE_AUTHORITY_INSTRUCTION, HOST_SCIENCE_AND_SOURCE_RULES, REPLY_LENGTH_INSTRUCTION, REPLY_SHAPE_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION].join(' ')}`,
 ).replace(LEGACY_STARTING_INPUTS, CORE_STARTING_INPUTS);
 /** The comparison's arm for one request: B only on a core turn that asks for it. Removed, with the losing arm, when it closes. */
 export const promptArmOf = (mode: AgentLaneMode, header: unknown): 'A' | 'B' => (mode === 'core' && header === 'B' ? 'B' : 'A');

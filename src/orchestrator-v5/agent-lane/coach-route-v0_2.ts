@@ -87,9 +87,10 @@ const HOST_TOOL_CONTRACT_PARTS: readonly string[] = [
 ];
 export const HOST_TOOL_CONTRACT = HOST_TOOL_CONTRACT_PARTS.join(' ');
 /**
- * The contract's science, source and freshness rules, which name no tool: old #24 (target, limits, deadline reading and
- * link authorship), #34 (Run result replies), its provisional clause, #35 (the current saved Run), the no-share-of-runs and
- * driver-display rule, and #36 (earlier figures are not current). Prompt arm B keeps them, byte for byte, without the
- * legacy tool and approval routing around them (AIE, programme-docs #94, 22:17Z).
+ * The contract's science, source and freshness rules, which name no tool: old #9 (say what a save confirmed), #13 (Olumi's
+ * options stay Olumi's), #22 (a Run's display wording), #24 (target, limits, deadline reading, link authorship), #34 (Run
+ * result replies) and its provisional clause, #35 (the current saved Run), the no-share-of-runs and driver-display rule,
+ * and #36 (earlier figures are not current). Prompt arm B keeps them, byte for byte, without the legacy tool and approval
+ * routing around them (AIE's assembled reference, programme-docs #94 6303242136, static text sha256 7b6145d4…).
  */
-export const HOST_SCIENCE_AND_SOURCE_RULES = [14, 20, 21, 22, 23, 24].map((i) => HOST_TOOL_CONTRACT_PARTS[i]!).join(' ');
+export const HOST_SCIENCE_AND_SOURCE_RULES = [2, 6, 13, 14, 20, 21, 22, 23, 24].map((i) => HOST_TOOL_CONTRACT_PARTS[i]!).join(' ');

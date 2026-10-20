@@ -32,6 +32,10 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(b.endsWith(CORE_REPLY_INSTRUCTION)).toBe(true);
   });
 
+  it('arm B is the AIE\'s assembled reference, byte for byte (programme-docs #94 6303242136, static text sha256 7b6145d4…)', () => {
+    expect(createHash('sha256').update(b, 'utf8').digest('hex')).toBe('7b6145d42064bc345cfa3c59e0ea6b4434f6f64f3640b41c262274e558fd300c');
+  });
+
   it('arm A is untouched: the legacy host contract is byte-identical to staging b76bc42c', () => {
     expect(createHash('sha256').update(HOST_TOOL_CONTRACT, 'utf8').digest('hex')).toBe('a118a398d9e214017df46195c40ece2105d70d8343577ed14521b10736edf64d');
   });
