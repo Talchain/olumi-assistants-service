@@ -21,6 +21,7 @@ import { GoalThresholdCapProvenanceSchema } from "../utils/goal-threshold-cap.js
 import { ValidationWarningSchema as SharedValidationWarningSchema, CIL_WARNING_CODES, GoalThresholdFrame, QuantityFrame, OBSERVED_STATE_SOURCE_LITERALS, GoalPeriod, GoalHorizonSchema, GoalStatedAsSchema, OptionStatus, CountNounSchema, InterventionRangeSchema, InterventionRangeMeaning } from "@talchain/schemas";
 import { CAUSAL_CLAIMS_WARNING_CODES } from "./causal-claims.js";
 import { EventRiskV1 } from "./event-risk.js";
+import { LivingModel } from "./living-model.js";
 import { CANONICAL_ID_REGEX } from "../cee/utils/id-normalizer.js";
 import { OBSERVED_STATE_STATED_ROLES } from "../cee/context-integrity/stated-role-vocabulary.js";
 
@@ -1211,6 +1212,12 @@ export const GraphV3 = z.object({
    * reissued. A counter, not content: excluded from the identity hash and absent from the analysis projection.
    */
   ref_high_water: z.record(z.string(), z.number().int().nonnegative().max(999_999_999)).optional().catch(undefined),
+  /**
+   * THIN CORE (20 Oct 2026): the AI's complete model of the person's reasoning (`living-model.ts`), from which `nodes`/`edges`
+   * are regenerated on every core revision. Declared so a re-parse never strips it (the `threshold_source` lesson above).
+   * Covered by the identity hash (so CAS applies), absent from the analysis hash (so it never makes a Run stale).
+   */
+  living_model: LivingModel.optional().catch(undefined),
 });
 export type GraphV3T = z.infer<typeof GraphV3>;
 
