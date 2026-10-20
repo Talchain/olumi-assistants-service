@@ -197,14 +197,6 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
             low: null, high: null, unit: g.unit === '' ? null : g.unit, source: l.source, party: l.party, quote: l.quote }] };
         }),
         links: model.links.filter((l) => !direct.includes(l)) };
-      // The status quo is the reference the change is measured from (amendment 1: "no change, by assumption"). With every
-      // option stating its own change there is none, and PLoT holds the change exact only where an option sets it to today
-      // (`pinnedLeverIds`), so a 0.2 margin read ~50%. Olumi adds the reference, labelled as its own, and says why.
-      if (model.options.every((o) => o.settings.some((s) => s.factor_id === lever && s.value !== 0))) {
-        model = { ...model, options: [...model.options, { id: `${g.id}__carry_on`, label: 'Carry on as now (Olumi\'s reference)',
-          settings: [], source: 'olumi', party: null, quote: null }] };
-        assumed.push({ id: `${g.id}__carry_on`, text: `Olumi adds "carry on as now" as the reference: it leaves ${aim!.target!.quantity} at today's ${aim!.target!.current}${g.unit ? ` ${g.unit}` : ''}, and each option's stated change is measured from that.` });
-      }
     } else {
       const on = (optionId: string) => `${optionId}__on`;
       model = { ...model,
