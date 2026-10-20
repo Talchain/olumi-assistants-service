@@ -204,4 +204,20 @@ describe('PATH-B: the goal’s current level, typed as a correction, shows its c
     expect(registered, 'ONE registration').toHaveLength(1);
     expect(goalRaw()).toBe(110);
   });
+
+  it.each([
+    ['a minus before the figure', 'Correction: net, we sit at -110 a week now, not 120.', '-110 a week', 'figure_not_in_quote'],
+    ['a quote that is not the typed bytes', 'Correction: about 110  a week, not 120.', 'about 110 a week', 'quote_not_in_users_words'],
+  ])('⭐ (Codex #3471 R2, KNOWN GAP 1) on core, %s: the AI\'s +110 is refused in THAT turn; no card, nothing saved, the goal stays 120', async (_, words, quote, reason) => {
+    const declared = { ...CORRECTION, ops: [{ ...CORRECTION.ops[0], source: { ...CORRECTION.ops[0].source, quote } }] };
+    outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop_call', args: declared }], [{ type: 'message', text: 'I could not prepare that.' }]];
+    const r = await post({ turn_id: randomUUID(), message: words, source: 'composer' });
+    expect(r.statusCode, r.body).toBe(200);
+    const t = r.json() as Json;
+    expect(outputOf('prop_call'), 'the AI is told why, by its code').toMatchObject({ status: 'refused', reason });
+    expect((t.suggested_actions as Json[]).filter((c) => String(c.id).startsWith('agent-approve-proposal:')), 'no card to press').toEqual([]);
+    expect(t._proposal_fields?.proposals ?? [], 'no proposal issued').toEqual([]);
+    expect(registered, 'nothing registered').toHaveLength(0);
+    expect(goalRaw(), 'the goal keeps its level').toBe(120);
+  });
 });
