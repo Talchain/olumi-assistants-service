@@ -27,7 +27,7 @@ import { admitGoalBaseline } from '../../../cee/factor-extraction/goal-baseline-
 import { LLM_STRENGTH_STD_FLOOR } from '../../../cee/constants.js';
 
 export type WithheldReason =
-  | 'no_level_target' | 'aim_not_in_slice' | 'change_kind_unknown' | 'change_base_invalid' | 'exact_target_not_in_slice' | 'target_range_not_in_slice'
+  | 'no_level_target' | 'aim_not_in_slice' | 'change_kind_unknown' | 'change_base_invalid' | 'change_base_not_theirs' | 'exact_target_not_in_slice' | 'target_range_not_in_slice'
   | 'goal_level_unknown' | 'link_frame_unknown' | 'chance_rests_on_withheld' | 'condition_not_in_slice'
   | 'goal_level_not_admitted' | 'factor_level_unknown' | 'level_range_not_in_slice' | 'setting_not_convertible'
   | 'link_endpoint_unknown' | 'link_unit_mismatch' | 'link_range_no_law' | 'link_sign_unknown' | 'no_single_status_quo'
@@ -43,6 +43,8 @@ export interface Mapped {
   readonly withheld: readonly Withheld[];
   /** Each goal's and factor's frame, so a value on the model scale converts back to the person's units. */
   readonly frames: ReadonlyMap<string, Frame>;
+  /** Premises the result is worked out under that nobody stated, said beside it (amendment 1: "carrying on leaves X unchanged"). */
+  readonly assumed: readonly { readonly id: string; readonly text: string }[];
 }
 
 const STRUCTURAL = { strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' } as const;
@@ -110,6 +112,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   const nodes: Rec[] = [];
   const edges: Rec[] = [];
   const hold = (id: string, reason: WithheldReason) => { withheld.push({ id, reason }); };
+  const assumed: { id: string; text: string }[] = [];
   /** The factors some option sets that this slice could not convert (the setting is left out of the engine graph). */
   const droppedSettings = new Set<string>();
 
@@ -125,11 +128,18 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     goalNode = { id: aim.id, kind: 'goal', label: aim.text, ...(aim.quote !== null ? { source_quote: aim.quote } : {}) };
     nodes.push(goalNode);
     const t = aim.target;
-    // "Exactly N" is never read as "at least N"; a change is read on today's level (`levelTargetOf`).
-    const lt = t === null ? 'no_level_target' as const : levelTargetOf(t);
+    const isChange = t !== null && (t.comparator === 'increase' || t.comparator === 'decrease');
+    // "Exactly N" is never read as "at least N"; a change is read on today's level (`levelTargetOf`), and only on the
+    // person's own: a change on Olumi's estimated base would need the provisional estimate_only treatment (rulings 9/10),
+    // which this slice does not carry, so it is withheld and Olumi asks for today's level.
+    const lt = t === null ? 'no_level_target' as const
+      : isChange && t.current !== null && !(t.current_source === 'user' || stated(aim.source)) ? 'change_base_not_theirs' as const : levelTargetOf(t);
     if (typeof lt === 'string') hold(aim.id, lt);
     else {
-      const resolved = resolveGoalThresholdCapWithProvenance(undefined, lt.value, lt.unit ?? undefined, undefined);
+      const fromTarget = resolveGoalThresholdCapWithProvenance(undefined, lt.value, lt.unit ?? undefined, undefined);
+      // The goal's frame holds today's level too: a ceiling below today would put today off its own scale ('level_frame').
+      const resolved = fromTarget !== null && fromTarget.provenance !== 'metric_scale' && t!.current !== null && t!.current * 1.25 > fromTarget.cap
+        ? { cap: t!.current * 1.25, provenance: 'level_frame' as const } : fromTarget;
       if (resolved === null) hold(aim.id, 'goal_level_not_admitted');
       else {
         goal = { id: aim.id, cap: resolved.cap, unit: lt.unit ?? '' };
@@ -143,8 +153,12 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
         else {
           const level = admitGoalBaseline({ rawTarget: lt.value, rawBaseline: t!.current, cap: resolved.cap, ...(lt.comparator === '<=' ? { ceiling: true } : {}) });
           if (!level.admitted) hold(aim.id, 'goal_level_not_admitted');
-          else goalNode.observed_state = withSource({ value: level.normalised, baseline: level.normalised, raw_value: t!.current, cap: resolved.cap, unit: lt.unit ?? '' },
-            t!.current_source === 'user' ? { source: 'user', quote: null } : aim);
+          else {
+            goalNode.observed_state = withSource({ value: level.normalised, baseline: level.normalised, raw_value: t!.current, cap: resolved.cap, unit: lt.unit ?? '' },
+              t!.current_source === 'user' ? { source: 'user', quote: null } : aim);
+            // A change is measured from today only if carrying on as now leaves the quantity there (amendment 1): said beside it.
+            if (isChange) assumed.push({ id: aim.id, text: `Carrying on as now leaves ${t!.quantity} at today's ${t!.current}${lt.unit ? ` ${lt.unit}` : ''}; the change is measured from that.` });
+          }
         }
       }
     }
@@ -337,5 +351,5 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
 
   const frames = new Map<string, Frame>(model.factors.flatMap((f) => (caps.has(f.id) ? [[f.id, { cap: caps.get(f.id)!, unit: f.unit }] as const] : [])));
   if (goal !== undefined) frames.set(goal.id, { cap: goal.cap, unit: goal.unit === '' ? null : goal.unit });
-  return { graph: { nodes, edges }, withheld, frames };
+  return { graph: { nodes, edges }, withheld, frames, assumed };
 }

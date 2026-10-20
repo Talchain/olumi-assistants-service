@@ -85,6 +85,6 @@ async function constructUnrecorded(deps: DraftDeps, ctx: DraftContext, args: Bui
   try { deps.onModelRegistered?.(after.graph); } catch { /* an observer never decides the outcome */ }
   return ok({
     provisional: 'olumi', model_version: receipt, revision: { graph_hash: after.graphHash, graph_identity_hash: after.identity },
-    draft: { withheld: mapped.withheld, relabelled: kernelled.relabelled },
+    draft: { withheld: mapped.withheld, assumed: mapped.assumed, relabelled: kernelled.relabelled },
   }, { mutated: true });
 }
