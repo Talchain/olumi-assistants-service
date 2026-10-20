@@ -22,8 +22,13 @@ describe('laneModeFor: the per-request lane mode', () => {
     expect(laneModeFor('preview', 'openai', 'staging')).toBe('preview');
   });
 
-  it('any other value keeps the base mode (contrast: only the exact value selects core)', () => {
-    for (const value of [undefined, 'openai', 'conventional', 'CORE', ['core'], 'core ']) {
+  it('THIN CORE FLIP: the UI\'s staging default (`openai`) is the core lane on staging, local and test; never in production', () => {
+    for (const env of ['staging', 'local', 'test']) expect(laneModeFor('full', 'openai', env), env).toBe('core');
+    expect(laneModeFor('full', 'openai', 'prod')).toBe('full');
+  });
+
+  it('any other value keeps the base mode (contrast: only the exact values select core)', () => {
+    for (const value of [undefined, 'conventional', 'CORE', 'OPENAI', ['core'], 'core ']) {
       expect(laneModeFor('full', value, 'staging'), String(value)).toBe('full');
     }
   });
