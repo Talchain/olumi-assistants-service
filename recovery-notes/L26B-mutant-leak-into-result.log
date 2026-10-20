@@ -1,0 +1,705 @@
+
+ RUN  v4.1.10 /private/tmp/cx-l26b
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts (42 tests | 22 failed) 182ms
+     × the route said saved, but no receipt of this construction on record: an unknown write, and no GRAPH_READY 12ms
+     × the route said saved, but a read that holds no model: an unknown write, and no GRAPH_READY 7ms
+     × receipt: first failed check, exact original JSON 5ms
+     × version_id: first failed check, exact original JSON 4ms
+     × version_number: first failed check, exact original JSON 6ms
+     × mutation_id: first failed check, exact original JSON 5ms
+     × ack-missing: first failed check, exact original JSON 5ms
+     × ack-identity: first failed check, exact original JSON 6ms
+     × receipt-identity: first failed check, exact original JSON 7ms
+     × read-identity: first failed check, exact original JSON 4ms
+     × revision: first failed check, exact original JSON 8ms
+     × analysis: first failed check, exact original JSON 5ms
+     × postimage: first failed check, exact original JSON 7ms
+     × readback: first failed check, exact original JSON 3ms
+     × ACK 202 retains its UNKNOWN bytes 3ms
+     × ACK 409 retains its UNKNOWN bytes 3ms
+     × ACK 500 retains its UNKNOWN bytes 2ms
+     × ACK null retains its UNKNOWN bytes 4ms
+     × a dispatched registration without a completed acknowledgement 3ms
+     × an operation already used but its receipt unavailable 2ms
+     × a registration that failed on the server 2ms
+     × a registration whose answer was lost 3ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 22 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > Olumi's provisional first model: ONE draft, converted by candidateToGraph, confirmed by its own receipt and a fresh read > the route said saved, but no receipt of this construction on record: an unknown write, and no GRAPH_READY
+AssertionError: expected { status: 'unavailable', …(5), …(1) } to deeply equal { status: 'unavailable', …(4) }
+
+- Expected
++ Received
+
+  {
+    "data": {
+      "save_outcome": "UNKNOWN",
+    },
+    "detail": "The construction was dispatched, but its save could not be verified. It may already be saved. Do not say nothing was saved, and do not repeat a write or Run to repair the reply.",
++   "diagnostic": {
++     "check": "receipt_absent",
++   },
+    "reason": "not_verified",
+    "status": "unavailable",
+    "write": "unknown",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:99:17
+     97|     const p = product({ graph: [...routes.graph], register: [...routes…
+     98|     const out = await buildModel(p, ctx, { brief: BRIEF });
+     99|     expect(out).toEqual({ status: 'unavailable', reason: 'not_verified…
+       |                 ^
+    100|     expect(traceRow('build_model_from_brief', out).mutated).toBeNull();
+    101|     expect(p.onModelRegistered).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/22]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > Olumi's provisional first model: ONE draft, converted by candidateToGraph, confirmed by its own receipt and a fresh read > the route said saved, but a read that holds no model: an unknown write, and no GRAPH_READY
+AssertionError: expected { status: 'unavailable', …(5), …(1) } to deeply equal { status: 'unavailable', …(4) }
+
+- Expected
++ Received
+
+  {
+    "data": {
+      "save_outcome": "UNKNOWN",
+    },
+    "detail": "The construction was dispatched, but its save could not be verified. It may already be saved. Do not say nothing was saved, and do not repeat a write or Run to repair the reply.",
++   "diagnostic": {
++     "check": "readback_unavailable",
++     "code": "no_model_yet",
++   },
+    "reason": "not_verified",
+    "status": "unavailable",
+    "write": "unknown",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:99:17
+     97|     const p = product({ graph: [...routes.graph], register: [...routes…
+     98|     const out = await buildModel(p, ctx, { brief: BRIEF });
+     99|     expect(out).toEqual({ status: 'unavailable', reason: 'not_verified…
+       |                 ^
+    100|     expect(traceRow('build_model_from_brief', out).mutated).toBeNull();
+    101|     expect(p.onModelRegistered).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/22]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > L26B verifier diagnostics never change the outcome bytes or effects > receipt: first failed check, exact original JSON
+AssertionError: expected { status: 'unavailable', …(5), …(1) } to deeply equal { status: 'unavailable', …(4) }
+
+- Expected
++ Received
+
+  {
+    "data": {
+      "save_outcome": "UNKNOWN",
+    },
+    "detail": "The construction was dispatched, but its save could not be verified. It may already be saved. Do not say nothing was saved, and do not repeat a write or Run to repair the reply.",
++   "diagnostic": {
++     "check": "receipt_absent",
++   },
+    "reason": "not_verified",
+    "status": "unavailable",
+    "write": "unknown",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:163:17
+    161|     const p = product({ graph: [EMPTY, read], register: [reg] });
+    162|     const out = await buildModel(p, ctx, { brief: BRIEF });
+    163|     expect(out).toEqual({ status: 'unavailable', reason: 'not_verified…
+       |                 ^
+    164|     expect(JSON.stringify(out)).toBe(JSON.stringify({ status: 'unavail…
+    165|     const detail = traceRow('build_model_from_brief', out).draft_verif…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/22]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > L26B verifier diagnostics never change the outcome bytes or effects > version_id: first failed check, exact original JSON
+AssertionError: expected { status: 'unavailable', …(5), …(1) } to deeply equal { status: 'unavailable', …(4) }
+
+- Expected
++ Received
+
+  {
+    "data": {
+      "save_outcome": "UNKNOWN",
+    },
+    "detail": "The construction was dispatched, but its save could not be verified. It may already be saved. Do not say nothing was saved, and do not repeat a write or Run to repair the reply.",
++   "diagnostic": {
++     "check": "receipt_invalid",
++     "field": "version_id",
++   },
+    "reason": "not_verified",
+    "status": "unavailable",
+    "write": "unknown",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:163:17
+    161|     const p = product({ graph: [EMPTY, read], register: [reg] });
+    162|     const out = await buildModel(p, ctx, { brief: BRIEF });
+    163|     expect(out).toEqual({ status: 'unavailable', reason: 'not_verified…
+       |                 ^
+    164|     expect(JSON.stringify(out)).toBe(JSON.stringify({ status: 'unavail…
+    165|     const detail = traceRow('build_model_from_brief', out).draft_verif…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/22]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > L26B verifier diagnostics never change the outcome bytes or effects > version_number: first failed check, exact original JSON
+AssertionError: expected { status: 'unavailable', …(5), …(1) } to deeply equal { status: 'unavailable', …(4) }
+
+- Expected
++ Received
+
+  {
+    "data": {
+      "save_outcome": "UNKNOWN",
+    },
+    "detail": "The construction was dispatched, but its save could not be verified. It may already be saved. Do not say nothing was saved, and do not repeat a write or Run to repair the reply.",
++   "diagnostic": {
++     "check": "revision_mismatch",
++     "field": "version_number",
++   },
+    "reason": "not_verified",
+    "status": "unavailable",
+    "write": "unknown",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:163:17
+    161|     const p = product({ graph: [EMPTY, read], register: [reg] });
+    162|     const out = await buildModel(p, ctx, { brief: BRIEF });
+    163|     expect(out).toEqual({ status: 'unavailable', reason: 'not_verified…
+       |                 ^
+    164|     expect(JSON.stringify(out)).toBe(JSON.stringify({ status: 'unavail…
+    165|     const detail = traceRow('build_model_from_brief', out).draft_verif…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/22]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > L26B verifier diagnostics never change the outcome bytes or effects > mutation_id: first failed check, exact original JSON
+AssertionError: expected { status: 'unavailable', …(5), …(1) } to deeply equal { status: 'unavailable', …(4) }
+
+- Expected
++ Received
+
+  {
+    "data": {
+      "save_outcome": "UNKNOWN",
+    },
+    "detail": "The construction was dispatched, but its save could not be verified. It may already be saved. Do not say nothing was saved, and do not repeat a write or Run to repair the reply.",
++   "diagnostic": {
++     "check": "receipt_invalid",
++     "field": "mutation_id",
++   },
+    "reason": "not_verified",
+    "status": "unavailable",
+    "write": "unknown",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:163:17
+    161|     const p = product({ graph: [EMPTY, read], register: [reg] });
+    162|     const out = await buildModel(p, ctx, { brief: BRIEF });
+    163|     expect(out).toEqual({ status: 'unavailable', reason: 'not_verified…
+       |                 ^
+    164|     expect(JSON.stringify(out)).toBe(JSON.stringify({ status: 'unavail…
+    165|     const detail = traceRow('build_model_from_brief', out).draft_verif…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/22]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > L26B verifier diagnostics never change the outcome bytes or effects > ack-missing: first failed check, exact original JSON
+AssertionError: expected { status: 'unavailable', …(5), …(1) } to deeply equal { status: 'unavailable', …(4) }
+
+- Expected
++ Received
+
+  {
+    "data": {
+      "save_outcome": "UNKNOWN",
+    },
+    "detail": "The construction was dispatched, but its save could not be verified. It may already be saved. Do not say nothing was saved, and do not repeat a write or Run to repair the reply.",
++   "diagnostic": {
++     "check": "ack_status",
++     "status": 200,
++   },
+    "reason": "not_verified",
+    "status": "unavailable",
+    "write": "unknown",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:163:17
+    161|     const p = product({ graph: [EMPTY, read], register: [reg] });
+    162|     const out = await buildModel(p, ctx, { brief: BRIEF });
+    163|     expect(out).toEqual({ status: 'unavailable', reason: 'not_verified…
+       |                 ^
+    164|     expect(JSON.stringify(out)).toBe(JSON.stringify({ status: 'unavail…
+    165|     const detail = traceRow('build_model_from_brief', out).draft_verif…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/22]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > L26B verifier diagnostics never change the outcome bytes or effects > ack-identity: first failed check, exact original JSON
+AssertionError: expected { status: 'unavailable', …(5), …(1) } to deeply equal { status: 'unavailable', …(4) }
+
+- Expected
++ Received
+
+  {
+    "data": {
+      "save_outcome": "UNKNOWN",
+    },
+    "detail": "The construction was dispatched, but its save could not be verified. It may already be saved. Do not say nothing was saved, and do not repeat a write or Run to repair the reply.",
++   "diagnostic": {
++     "actual": "56672d9826c7",
++     "check": "hash_mismatch",
++     "expected": null,
++     "field": "ack_identity",
++   },
+    "reason": "not_verified",
+    "status": "unavailable",
+    "write": "unknown",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:163:17
+    161|     const p = product({ graph: [EMPTY, read], register: [reg] });
+    162|     const out = await buildModel(p, ctx, { brief: BRIEF });
+    163|     expect(out).toEqual({ status: 'unavailable', reason: 'not_verified…
+       |                 ^
+    164|     expect(JSON.stringify(out)).toBe(JSON.stringify({ status: 'unavail…
+    165|     const detail = traceRow('build_model_from_brief', out).draft_verif…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/22]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > L26B verifier diagnostics never change the outcome bytes or effects > receipt-identity: first failed check, exact original JSON
+AssertionError: expected { status: 'unavailable', …(5), …(1) } to deeply equal { status: 'unavailable', …(4) }
+
+- Expected
++ Received
+
+  {
+    "data": {
+      "save_outcome": "UNKNOWN",
+    },
+    "detail": "The construction was dispatched, but its save could not be verified. It may already be saved. Do not say nothing was saved, and do not repeat a write or Run to repair the reply.",
++   "diagnostic": {
++     "actual": "aaaaaaaaaaaa",
++     "check": "hash_mismatch",
++     "expected": "56672d9826c7",
++     "field": "receipt_identity",
++   },
+    "reason": "not_verified",
+    "status": "unavailable",
+    "write": "unknown",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:163:17
+    161|     const p = product({ graph: [EMPTY, read], register: [reg] });
+    162|     const out = await buildModel(p, ctx, { brief: BRIEF });
+    163|     expect(out).toEqual({ status: 'unavailable', reason: 'not_verified…
+       |                 ^
+    164|     expect(JSON.stringify(out)).toBe(JSON.stringify({ status: 'unavail…
+    165|     const detail = traceRow('build_model_from_brief', out).draft_verif…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/22]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > L26B verifier diagnostics never change the outcome bytes or effects > read-identity: first failed check, exact original JSON
+AssertionError: expected { status: 'unavailable', …(5), …(1) } to deeply equal { status: 'unavailable', …(4) }
+
+- Expected
++ Received
+
+  {
+    "data": {
+      "save_outcome": "UNKNOWN",
+    },
+    "detail": "The construction was dispatched, but its save could not be verified. It may already be saved. Do not say nothing was saved, and do not repeat a write or Run to repair the reply.",
++   "diagnostic": {
++     "actual": "56672d9826c7",
++     "check": "hash_mismatch",
++     "expected": "aaaaaaaaaaaa",
++     "field": "read_identity",
++   },
+    "reason": "not_verified",
+    "status": "unavailable",
+    "write": "unknown",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:163:17
+    161|     const p = product({ graph: [EMPTY, read], register: [reg] });
+    162|     const out = await buildModel(p, ctx, { brief: BRIEF });
+    163|     expect(out).toEqual({ status: 'unavailable', reason: 'not_verified…
+       |                 ^
+    164|     expect(JSON.stringify(out)).toBe(JSON.stringify({ status: 'unavail…
+    165|     const detail = traceRow('build_model_from_brief', out).draft_verif…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/22]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > L26B verifier diagnostics never change the outcome bytes or effects > revision: first failed check, exact original JSON
+AssertionError: expected { status: 'unavailable', …(5), …(1) } to deeply equal { status: 'unavailable', …(4) }
+
+- Expected
++ Received
+
+  {
+    "data": {
+      "save_outcome": "UNKNOWN",
+    },
+    "detail": "The construction was dispatched, but its save could not be verified. It may already be saved. Do not say nothing was saved, and do not repeat a write or Run to repair the reply.",
++   "diagnostic": {
++     "actual": "d4b3875bfd84",
++     "check": "revision_mismatch",
++     "expected": "aaaaaaaaaaaa",
++     "field": "graph_hash",
++   },
+    "reason": "not_verified",
+    "status": "unavailable",
+    "write": "unknown",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:163:17
+    161|     const p = product({ graph: [EMPTY, read], register: [reg] });
+    162|     const out = await buildModel(p, ctx, { brief: BRIEF });
+    163|     expect(out).toEqual({ status: 'unavailable', reason: 'not_verified…
+       |                 ^
+    164|     expect(JSON.stringify(out)).toBe(JSON.stringify({ status: 'unavail…
+    165|     const detail = traceRow('build_model_from_brief', out).draft_verif…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/22]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > L26B verifier diagnostics never change the outcome bytes or effects > analysis: first failed check, exact original JSON
+AssertionError: expected { status: 'unavailable', …(5), …(1) } to deeply equal { status: 'unavailable', …(4) }
+
+- Expected
++ Received
+
+  {
+    "data": {
+      "save_outcome": "UNKNOWN",
+    },
+    "detail": "The construction was dispatched, but its save could not be verified. It may already be saved. Do not say nothing was saved, and do not repeat a write or Run to repair the reply.",
++   "diagnostic": {
++     "actual": "aaaaaaaaaaaa",
++     "check": "hash_mismatch",
++     "expected": "d4b3875bfd84",
++     "field": "analysis_hash",
++   },
+    "reason": "not_verified",
+    "status": "unavailable",
+    "write": "unknown",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:163:17
+    161|     const p = product({ graph: [EMPTY, read], register: [reg] });
+    162|     const out = await buildModel(p, ctx, { brief: BRIEF });
+    163|     expect(out).toEqual({ status: 'unavailable', reason: 'not_verified…
+       |                 ^
+    164|     expect(JSON.stringify(out)).toBe(JSON.stringify({ status: 'unavail…
+    165|     const detail = traceRow('build_model_from_brief', out).draft_verif…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/22]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > L26B verifier diagnostics never change the outcome bytes or effects > postimage: first failed check, exact original JSON
+AssertionError: expected { status: 'unavailable', …(5), …(1) } to deeply equal { status: 'unavailable', …(4) }
+
+- Expected
++ Received
+
+  {
+    "data": {
+      "save_outcome": "UNKNOWN",
+    },
+    "detail": "The construction was dispatched, but its save could not be verified. It may already be saved. Do not say nothing was saved, and do not repeat a write or Run to repair the reply.",
++   "diagnostic": {
++     "check": "postimage_diff",
++     "keys": [
++       "nodes",
++     ],
++   },
+    "reason": "not_verified",
+    "status": "unavailable",
+    "write": "unknown",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:163:17
+    161|     const p = product({ graph: [EMPTY, read], register: [reg] });
+    162|     const out = await buildModel(p, ctx, { brief: BRIEF });
+    163|     expect(out).toEqual({ status: 'unavailable', reason: 'not_verified…
+       |                 ^
+    164|     expect(JSON.stringify(out)).toBe(JSON.stringify({ status: 'unavail…
+    165|     const detail = traceRow('build_model_from_brief', out).draft_verif…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/22]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > L26B verifier diagnostics never change the outcome bytes or effects > readback: first failed check, exact original JSON
+AssertionError: expected { status: 'unavailable', …(5), …(1) } to deeply equal { status: 'unavailable', …(4) }
+
+- Expected
++ Received
+
+  {
+    "data": {
+      "save_outcome": "UNKNOWN",
+    },
+    "detail": "The construction was dispatched, but its save could not be verified. It may already be saved. Do not say nothing was saved, and do not repeat a write or Run to repair the reply.",
++   "diagnostic": {
++     "check": "readback_unavailable",
++     "code": "read_failed",
++   },
+    "reason": "not_verified",
+    "status": "unavailable",
+    "write": "unknown",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:163:17
+    161|     const p = product({ graph: [EMPTY, read], register: [reg] });
+    162|     const out = await buildModel(p, ctx, { brief: BRIEF });
+    163|     expect(out).toEqual({ status: 'unavailable', reason: 'not_verified…
+       |                 ^
+    164|     expect(JSON.stringify(out)).toBe(JSON.stringify({ status: 'unavail…
+    165|     const detail = traceRow('build_model_from_brief', out).draft_verif…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/22]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > L26B verifier diagnostics never change the outcome bytes or effects > ACK 202 retains its UNKNOWN bytes
+AssertionError: expected { status: 'unavailable', …(5), …(1) } to deeply equal { status: 'unavailable', …(4) }
+
+- Expected
++ Received
+
+  {
+    "data": {
+      "save_outcome": "UNKNOWN",
+    },
+    "detail": "The construction was dispatched, but its save could not be verified. It may already be saved. Do not say nothing was saved, and do not repeat a write or Run to repair the reply.",
++   "diagnostic": {
++     "check": "ack_status",
++     "status": 202,
++   },
+    "reason": "not_confirmed",
+    "status": "unavailable",
+    "write": "unknown",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:178:17
+    176|     const p = product({ graph: [EMPTY], register: [reply] });
+    177|     const out = await buildModel(p, ctx, { brief: BRIEF });
+    178|     expect(out).toEqual({ status: 'unavailable', reason: 'not_confirme…
+       |                 ^
+    179|     expect(traceRow('build_model_from_brief', out).draft_verification)…
+    180|     expect(registerCalls(p)).toHaveLength(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/22]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > L26B verifier diagnostics never change the outcome bytes or effects > ACK 409 retains its UNKNOWN bytes
+AssertionError: expected { status: 'unavailable', …(5), …(1) } to deeply equal { status: 'unavailable', …(4) }
+
+- Expected
++ Received
+
+  {
+    "data": {
+      "save_outcome": "UNKNOWN",
+    },
+    "detail": "The construction was dispatched, but its save could not be verified. It may already be saved. Do not say nothing was saved, and do not repeat a write or Run to repair the reply.",
++   "diagnostic": {
++     "check": "ack_status",
++     "status": 409,
++   },
+    "reason": "not_confirmed",
+    "status": "unavailable",
+    "write": "unknown",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:178:17
+    176|     const p = product({ graph: [EMPTY], register: [reply] });
+    177|     const out = await buildModel(p, ctx, { brief: BRIEF });
+    178|     expect(out).toEqual({ status: 'unavailable', reason: 'not_confirme…
+       |                 ^
+    179|     expect(traceRow('build_model_from_brief', out).draft_verification)…
+    180|     expect(registerCalls(p)).toHaveLength(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/22]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > L26B verifier diagnostics never change the outcome bytes or effects > ACK 500 retains its UNKNOWN bytes
+AssertionError: expected { status: 'unavailable', …(5), …(1) } to deeply equal { status: 'unavailable', …(4) }
+
+- Expected
++ Received
+
+  {
+    "data": {
+      "save_outcome": "UNKNOWN",
+    },
+    "detail": "The construction was dispatched, but its save could not be verified. It may already be saved. Do not say nothing was saved, and do not repeat a write or Run to repair the reply.",
++   "diagnostic": {
++     "check": "ack_status",
++     "status": 500,
++   },
+    "reason": "not_confirmed",
+    "status": "unavailable",
+    "write": "unknown",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:178:17
+    176|     const p = product({ graph: [EMPTY], register: [reply] });
+    177|     const out = await buildModel(p, ctx, { brief: BRIEF });
+    178|     expect(out).toEqual({ status: 'unavailable', reason: 'not_confirme…
+       |                 ^
+    179|     expect(traceRow('build_model_from_brief', out).draft_verification)…
+    180|     expect(registerCalls(p)).toHaveLength(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[17/22]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > L26B verifier diagnostics never change the outcome bytes or effects > ACK null retains its UNKNOWN bytes
+AssertionError: expected { status: 'unavailable', …(5), …(1) } to deeply equal { status: 'unavailable', …(4) }
+
+- Expected
++ Received
+
+  {
+    "data": {
+      "save_outcome": "UNKNOWN",
+    },
+    "detail": "The construction was dispatched, but its save could not be verified. It may already be saved. Do not say nothing was saved, and do not repeat a write or Run to repair the reply.",
++   "diagnostic": {
++     "check": "ack_status",
++     "status": null,
++   },
+    "reason": "not_confirmed",
+    "status": "unavailable",
+    "write": "unknown",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:178:17
+    176|     const p = product({ graph: [EMPTY], register: [reply] });
+    177|     const out = await buildModel(p, ctx, { brief: BRIEF });
+    178|     expect(out).toEqual({ status: 'unavailable', reason: 'not_confirme…
+       |                 ^
+    179|     expect(traceRow('build_model_from_brief', out).draft_verification)…
+    180|     expect(registerCalls(p)).toHaveLength(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[18/22]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > refusals and unknowns, said as such > a dispatched registration without a completed acknowledgement
+AssertionError: expected { status: 'unavailable', …(5), …(1) } to deeply equal { status: 'unavailable', …(4) }
+
+- Expected
++ Received
+
+  {
+    "data": {
+      "save_outcome": "UNKNOWN",
+    },
+    "detail": "The construction was dispatched, but its save could not be verified. It may already be saved. Do not say nothing was saved, and do not repeat a write or Run to repair the reply.",
++   "diagnostic": {
++     "check": "ack_status",
++     "status": 202,
++   },
+    "reason": "not_confirmed",
+    "status": "unavailable",
+    "write": "unknown",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:309:56
+    307|   ] as const)('%s', async (_name, reply, versions, outcome) => {
+    308|     const p = product({ graph: [EMPTY], register: [reply], versions: […
+    309|     expect(await buildModel(p, ctx, { brief: BRIEF })).toEqual(outcome…
+       |                                                        ^
+    310|     expect(p.onModelRegistered).not.toHaveBeenCalled();
+    311|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[19/22]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > refusals and unknowns, said as such > an operation already used but its receipt unavailable
+AssertionError: expected { status: 'unavailable', …(5), …(1) } to deeply equal { status: 'unavailable', …(4) }
+
+- Expected
++ Received
+
+  {
+    "data": {
+      "save_outcome": "UNKNOWN",
+    },
+    "detail": "The construction was dispatched, but its save could not be verified. It may already be saved. Do not say nothing was saved, and do not repeat a write or Run to repair the reply.",
++   "diagnostic": {
++     "check": "ack_status",
++     "status": 409,
++   },
+    "reason": "not_confirmed",
+    "status": "unavailable",
+    "write": "unknown",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:309:56
+    307|   ] as const)('%s', async (_name, reply, versions, outcome) => {
+    308|     const p = product({ graph: [EMPTY], register: [reply], versions: […
+    309|     expect(await buildModel(p, ctx, { brief: BRIEF })).toEqual(outcome…
+       |                                                        ^
+    310|     expect(p.onModelRegistered).not.toHaveBeenCalled();
+    311|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[20/22]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > refusals and unknowns, said as such > a registration that failed on the server
+AssertionError: expected { status: 'unavailable', …(5), …(1) } to deeply equal { status: 'unavailable', …(4) }
+
+- Expected
++ Received
+
+  {
+    "data": {
+      "save_outcome": "UNKNOWN",
+    },
+    "detail": "The construction was dispatched, but its save could not be verified. It may already be saved. Do not say nothing was saved, and do not repeat a write or Run to repair the reply.",
++   "diagnostic": {
++     "check": "ack_status",
++     "status": 500,
++   },
+    "reason": "not_confirmed",
+    "status": "unavailable",
+    "write": "unknown",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:309:56
+    307|   ] as const)('%s', async (_name, reply, versions, outcome) => {
+    308|     const p = product({ graph: [EMPTY], register: [reply], versions: […
+    309|     expect(await buildModel(p, ctx, { brief: BRIEF })).toEqual(outcome…
+       |                                                        ^
+    310|     expect(p.onModelRegistered).not.toHaveBeenCalled();
+    311|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[21/22]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > refusals and unknowns, said as such > a registration whose answer was lost
+AssertionError: expected { status: 'unavailable', …(5), …(1) } to deeply equal { status: 'unavailable', …(4) }
+
+- Expected
++ Received
+
+  {
+    "data": {
+      "save_outcome": "UNKNOWN",
+    },
+    "detail": "The construction was dispatched, but its save could not be verified. It may already be saved. Do not say nothing was saved, and do not repeat a write or Run to repair the reply.",
++   "diagnostic": {
++     "check": "ack_status",
++     "status": null,
++   },
+    "reason": "not_confirmed",
+    "status": "unavailable",
+    "write": "unknown",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:309:56
+    307|   ] as const)('%s', async (_name, reply, versions, outcome) => {
+    308|     const p = product({ graph: [EMPTY], register: [reply], versions: […
+    309|     expect(await buildModel(p, ctx, { brief: BRIEF })).toEqual(outcome…
+       |                                                        ^
+    310|     expect(p.onModelRegistered).not.toHaveBeenCalled();
+    311|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[22/22]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  22 failed | 20 passed (42)
+   Start at  10:47:53
+   Duration  12.55s (transform 9.15s, setup 159ms, import 12.06s, tests 182ms, environment 0ms)
+

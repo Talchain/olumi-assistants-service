@@ -1,0 +1,392 @@
+
+ RUN  v4.1.10 /private/tmp/cx-l26b
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts (42 tests | 16 failed) 203ms
+     × receipt: first failed check, exact original JSON 13ms
+     × version_id: first failed check, exact original JSON 6ms
+     × version_number: first failed check, exact original JSON 7ms
+     × mutation_id: first failed check, exact original JSON 4ms
+     × ack-missing: first failed check, exact original JSON 6ms
+     × ack-identity: first failed check, exact original JSON 6ms
+     × receipt-identity: first failed check, exact original JSON 5ms
+     × read-identity: first failed check, exact original JSON 5ms
+     × revision: first failed check, exact original JSON 8ms
+     × analysis: first failed check, exact original JSON 7ms
+     × postimage: first failed check, exact original JSON 10ms
+     × readback: first failed check, exact original JSON 5ms
+     × ACK 202 retains its UNKNOWN bytes 4ms
+     × ACK 409 retains its UNKNOWN bytes 4ms
+     × ACK 500 retains its UNKNOWN bytes 4ms
+     × ACK null retains its UNKNOWN bytes 3ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 16 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > L26B verifier diagnostics never change the outcome bytes or effects > receipt: first failed check, exact original JSON
+AssertionError: expected { check: 'wrong_check' } to deeply equal { check: 'receipt_absent' }
+
+- Expected
++ Received
+
+  {
+-   "check": "receipt_absent",
++   "check": "wrong_check",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:166:20
+    164|     expect(JSON.stringify(out)).toBe(JSON.stringify({ status: 'unavail…
+    165|     const detail = traceRow('build_model_from_brief', out).draft_verif…
+    166|     expect(detail).toEqual({ ...diagnostic, ...extra });
+       |                    ^
+    167|     expect(JSON.stringify(detail)).not.toMatch(/Bearer|synthetic-secre…
+    168|     expect(registerCalls(p)).toHaveLength(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/16]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > L26B verifier diagnostics never change the outcome bytes or effects > version_id: first failed check, exact original JSON
+AssertionError: expected { check: 'wrong_check' } to deeply equal { check: 'receipt_invalid', …(1) }
+
+- Expected
++ Received
+
+  {
+-   "check": "receipt_invalid",
+-   "field": "version_id",
++   "check": "wrong_check",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:166:20
+    164|     expect(JSON.stringify(out)).toBe(JSON.stringify({ status: 'unavail…
+    165|     const detail = traceRow('build_model_from_brief', out).draft_verif…
+    166|     expect(detail).toEqual({ ...diagnostic, ...extra });
+       |                    ^
+    167|     expect(JSON.stringify(detail)).not.toMatch(/Bearer|synthetic-secre…
+    168|     expect(registerCalls(p)).toHaveLength(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/16]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > L26B verifier diagnostics never change the outcome bytes or effects > version_number: first failed check, exact original JSON
+AssertionError: expected { check: 'wrong_check' } to deeply equal { check: 'revision_mismatch', …(1) }
+
+- Expected
++ Received
+
+  {
+-   "check": "revision_mismatch",
+-   "field": "version_number",
++   "check": "wrong_check",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:166:20
+    164|     expect(JSON.stringify(out)).toBe(JSON.stringify({ status: 'unavail…
+    165|     const detail = traceRow('build_model_from_brief', out).draft_verif…
+    166|     expect(detail).toEqual({ ...diagnostic, ...extra });
+       |                    ^
+    167|     expect(JSON.stringify(detail)).not.toMatch(/Bearer|synthetic-secre…
+    168|     expect(registerCalls(p)).toHaveLength(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/16]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > L26B verifier diagnostics never change the outcome bytes or effects > mutation_id: first failed check, exact original JSON
+AssertionError: expected { check: 'wrong_check' } to deeply equal { check: 'receipt_invalid', …(1) }
+
+- Expected
++ Received
+
+  {
+-   "check": "receipt_invalid",
+-   "field": "mutation_id",
++   "check": "wrong_check",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:166:20
+    164|     expect(JSON.stringify(out)).toBe(JSON.stringify({ status: 'unavail…
+    165|     const detail = traceRow('build_model_from_brief', out).draft_verif…
+    166|     expect(detail).toEqual({ ...diagnostic, ...extra });
+       |                    ^
+    167|     expect(JSON.stringify(detail)).not.toMatch(/Bearer|synthetic-secre…
+    168|     expect(registerCalls(p)).toHaveLength(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/16]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > L26B verifier diagnostics never change the outcome bytes or effects > ack-missing: first failed check, exact original JSON
+AssertionError: expected { check: 'wrong_check' } to deeply equal { check: 'ack_status', status: 200 }
+
+- Expected
++ Received
+
+  {
+-   "check": "ack_status",
+-   "status": 200,
++   "check": "wrong_check",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:166:20
+    164|     expect(JSON.stringify(out)).toBe(JSON.stringify({ status: 'unavail…
+    165|     const detail = traceRow('build_model_from_brief', out).draft_verif…
+    166|     expect(detail).toEqual({ ...diagnostic, ...extra });
+       |                    ^
+    167|     expect(JSON.stringify(detail)).not.toMatch(/Bearer|synthetic-secre…
+    168|     expect(registerCalls(p)).toHaveLength(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/16]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > L26B verifier diagnostics never change the outcome bytes or effects > ack-identity: first failed check, exact original JSON
+AssertionError: expected { check: 'wrong_check' } to deeply equal { check: 'hash_mismatch', …(3) }
+
+- Expected
++ Received
+
+  {
+-   "actual": "56672d9826c7",
+-   "check": "hash_mismatch",
+-   "expected": null,
+-   "field": "ack_identity",
++   "check": "wrong_check",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:166:20
+    164|     expect(JSON.stringify(out)).toBe(JSON.stringify({ status: 'unavail…
+    165|     const detail = traceRow('build_model_from_brief', out).draft_verif…
+    166|     expect(detail).toEqual({ ...diagnostic, ...extra });
+       |                    ^
+    167|     expect(JSON.stringify(detail)).not.toMatch(/Bearer|synthetic-secre…
+    168|     expect(registerCalls(p)).toHaveLength(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/16]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > L26B verifier diagnostics never change the outcome bytes or effects > receipt-identity: first failed check, exact original JSON
+AssertionError: expected { check: 'wrong_check' } to deeply equal { check: 'hash_mismatch', …(3) }
+
+- Expected
++ Received
+
+  {
+-   "actual": "aaaaaaaaaaaa",
+-   "check": "hash_mismatch",
+-   "expected": "56672d9826c7",
+-   "field": "receipt_identity",
++   "check": "wrong_check",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:166:20
+    164|     expect(JSON.stringify(out)).toBe(JSON.stringify({ status: 'unavail…
+    165|     const detail = traceRow('build_model_from_brief', out).draft_verif…
+    166|     expect(detail).toEqual({ ...diagnostic, ...extra });
+       |                    ^
+    167|     expect(JSON.stringify(detail)).not.toMatch(/Bearer|synthetic-secre…
+    168|     expect(registerCalls(p)).toHaveLength(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/16]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > L26B verifier diagnostics never change the outcome bytes or effects > read-identity: first failed check, exact original JSON
+AssertionError: expected { check: 'wrong_check' } to deeply equal { check: 'hash_mismatch', …(3) }
+
+- Expected
++ Received
+
+  {
+-   "actual": "56672d9826c7",
+-   "check": "hash_mismatch",
+-   "expected": "aaaaaaaaaaaa",
+-   "field": "read_identity",
++   "check": "wrong_check",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:166:20
+    164|     expect(JSON.stringify(out)).toBe(JSON.stringify({ status: 'unavail…
+    165|     const detail = traceRow('build_model_from_brief', out).draft_verif…
+    166|     expect(detail).toEqual({ ...diagnostic, ...extra });
+       |                    ^
+    167|     expect(JSON.stringify(detail)).not.toMatch(/Bearer|synthetic-secre…
+    168|     expect(registerCalls(p)).toHaveLength(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/16]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > L26B verifier diagnostics never change the outcome bytes or effects > revision: first failed check, exact original JSON
+AssertionError: expected { check: 'wrong_check' } to deeply equal { check: 'revision_mismatch', …(3) }
+
+- Expected
++ Received
+
+  {
+-   "actual": "d4b3875bfd84",
+-   "check": "revision_mismatch",
+-   "expected": "aaaaaaaaaaaa",
+-   "field": "graph_hash",
++   "check": "wrong_check",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:166:20
+    164|     expect(JSON.stringify(out)).toBe(JSON.stringify({ status: 'unavail…
+    165|     const detail = traceRow('build_model_from_brief', out).draft_verif…
+    166|     expect(detail).toEqual({ ...diagnostic, ...extra });
+       |                    ^
+    167|     expect(JSON.stringify(detail)).not.toMatch(/Bearer|synthetic-secre…
+    168|     expect(registerCalls(p)).toHaveLength(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/16]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > L26B verifier diagnostics never change the outcome bytes or effects > analysis: first failed check, exact original JSON
+AssertionError: expected { check: 'wrong_check' } to deeply equal { check: 'hash_mismatch', …(3) }
+
+- Expected
++ Received
+
+  {
+-   "actual": "aaaaaaaaaaaa",
+-   "check": "hash_mismatch",
+-   "expected": "d4b3875bfd84",
+-   "field": "analysis_hash",
++   "check": "wrong_check",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:166:20
+    164|     expect(JSON.stringify(out)).toBe(JSON.stringify({ status: 'unavail…
+    165|     const detail = traceRow('build_model_from_brief', out).draft_verif…
+    166|     expect(detail).toEqual({ ...diagnostic, ...extra });
+       |                    ^
+    167|     expect(JSON.stringify(detail)).not.toMatch(/Bearer|synthetic-secre…
+    168|     expect(registerCalls(p)).toHaveLength(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/16]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > L26B verifier diagnostics never change the outcome bytes or effects > postimage: first failed check, exact original JSON
+AssertionError: expected { check: 'wrong_check' } to deeply equal { check: 'postimage_diff', …(1) }
+
+- Expected
++ Received
+
+  {
+-   "check": "postimage_diff",
+-   "keys": [
+-     "nodes",
+-   ],
++   "check": "wrong_check",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:166:20
+    164|     expect(JSON.stringify(out)).toBe(JSON.stringify({ status: 'unavail…
+    165|     const detail = traceRow('build_model_from_brief', out).draft_verif…
+    166|     expect(detail).toEqual({ ...diagnostic, ...extra });
+       |                    ^
+    167|     expect(JSON.stringify(detail)).not.toMatch(/Bearer|synthetic-secre…
+    168|     expect(registerCalls(p)).toHaveLength(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/16]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > L26B verifier diagnostics never change the outcome bytes or effects > readback: first failed check, exact original JSON
+AssertionError: expected { check: 'wrong_check' } to deeply equal { check: 'readback_unavailable', …(1) }
+
+- Expected
++ Received
+
+  {
+-   "check": "readback_unavailable",
+-   "code": "read_failed",
++   "check": "wrong_check",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:166:20
+    164|     expect(JSON.stringify(out)).toBe(JSON.stringify({ status: 'unavail…
+    165|     const detail = traceRow('build_model_from_brief', out).draft_verif…
+    166|     expect(detail).toEqual({ ...diagnostic, ...extra });
+       |                    ^
+    167|     expect(JSON.stringify(detail)).not.toMatch(/Bearer|synthetic-secre…
+    168|     expect(registerCalls(p)).toHaveLength(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/16]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > L26B verifier diagnostics never change the outcome bytes or effects > ACK 202 retains its UNKNOWN bytes
+AssertionError: expected { check: 'wrong_check' } to deeply equal { check: 'ack_status', status: 202 }
+
+- Expected
++ Received
+
+  {
+-   "check": "ack_status",
+-   "status": 202,
++   "check": "wrong_check",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:179:72
+    177|     const out = await buildModel(p, ctx, { brief: BRIEF });
+    178|     expect(out).toEqual({ status: 'unavailable', reason: 'not_confirme…
+    179|     expect(traceRow('build_model_from_brief', out).draft_verification)…
+       |                                                                        ^
+    180|     expect(registerCalls(p)).toHaveLength(1);
+    181|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/16]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > L26B verifier diagnostics never change the outcome bytes or effects > ACK 409 retains its UNKNOWN bytes
+AssertionError: expected { check: 'wrong_check' } to deeply equal { check: 'ack_status', status: 409 }
+
+- Expected
++ Received
+
+  {
+-   "check": "ack_status",
+-   "status": 409,
++   "check": "wrong_check",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:179:72
+    177|     const out = await buildModel(p, ctx, { brief: BRIEF });
+    178|     expect(out).toEqual({ status: 'unavailable', reason: 'not_confirme…
+    179|     expect(traceRow('build_model_from_brief', out).draft_verification)…
+       |                                                                        ^
+    180|     expect(registerCalls(p)).toHaveLength(1);
+    181|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/16]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > L26B verifier diagnostics never change the outcome bytes or effects > ACK 500 retains its UNKNOWN bytes
+AssertionError: expected { check: 'wrong_check' } to deeply equal { check: 'ack_status', status: 500 }
+
+- Expected
++ Received
+
+  {
+-   "check": "ack_status",
+-   "status": 500,
++   "check": "wrong_check",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:179:72
+    177|     const out = await buildModel(p, ctx, { brief: BRIEF });
+    178|     expect(out).toEqual({ status: 'unavailable', reason: 'not_confirme…
+    179|     expect(traceRow('build_model_from_brief', out).draft_verification)…
+       |                                                                        ^
+    180|     expect(registerCalls(p)).toHaveLength(1);
+    181|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/16]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts > L26B verifier diagnostics never change the outcome bytes or effects > ACK null retains its UNKNOWN bytes
+AssertionError: expected { check: 'wrong_check' } to deeply equal { check: 'ack_status', status: null }
+
+- Expected
++ Received
+
+  {
+-   "check": "ack_status",
+-   "status": null,
++   "check": "wrong_check",
+  }
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-tool.test.ts:179:72
+    177|     const out = await buildModel(p, ctx, { brief: BRIEF });
+    178|     expect(out).toEqual({ status: 'unavailable', reason: 'not_confirme…
+    179|     expect(traceRow('build_model_from_brief', out).draft_verification)…
+       |                                                                        ^
+    180|     expect(registerCalls(p)).toHaveLength(1);
+    181|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/16]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  16 failed | 26 passed (42)
+   Start at  10:47:37
+   Duration  14.94s (transform 10.97s, setup 147ms, import 14.44s, tests 203ms, environment 0ms)
+

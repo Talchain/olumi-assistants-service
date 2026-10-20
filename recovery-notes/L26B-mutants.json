@@ -1,0 +1,45 @@
+{
+  "results": [
+    {
+      "name": "drop-detail",
+      "exit": 1,
+      "summary": [
+        "\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 16 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
+        "Test Files  1 failed (1)",
+        "Tests  16 failed | 26 passed (42)"
+      ]
+    },
+    {
+      "name": "mislabel-detail",
+      "exit": 1,
+      "summary": [
+        "\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 16 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
+        "Test Files  1 failed (1)",
+        "Tests  16 failed | 26 passed (42)"
+      ]
+    },
+    {
+      "name": "leak-into-result",
+      "exit": 1,
+      "summary": [
+        "\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 22 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
+        "Test Files  1 failed (1)",
+        "Tests  22 failed | 20 passed (42)"
+      ]
+    },
+    {
+      "name": "alter-result-bytes",
+      "exit": 1,
+      "summary": [
+        "\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 22 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
+        "Test Files  1 failed (1)",
+        "Tests  22 failed | 20 passed (42)"
+      ]
+    }
+  ],
+  "restored": true,
+  "sha256": {
+    "src/orchestrator-v5/path-b/tools/outcome.ts": "95a9fbf89e1739fc6ea6d440171a65f661df3e0f66a4c7eef4673f3f5e5b28bb",
+    "src/orchestrator-v5/path-b/tools/draft-tool.ts": "3a849f43cd24d1077f04aeb08c98db216f8a93802217637976ec3f355b7aa063"
+  }
+}

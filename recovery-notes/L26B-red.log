@@ -1,0 +1,862 @@
+
+ RUN  v4.1.10 /private/tmp/cx-l26b
+
+{"level":"info","time":1792489380951,"pid":68268,"hostname":"Mac.net","event":"agent_lane.route_mounted","msg":"POST /agent/v1/turn mounted"}
+{"level":"info","time":1792489381214,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489381231,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"f7b1477d-174a-4db7-ad69-ec3b5bd08720","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489381248,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489381257,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489381263,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"f7b1477d-174a-4db7-ad69-ec3b5bd08720","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489381309,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489381317,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489381346,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489381349,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"f7b1477d-174a-4db7-ad69-ec3b5bd08720","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489381352,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"f7b1477d-174a-4db7-ad69-ec3b5bd08720","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489381413,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489381421,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"33e04cc0-cbc2-4693-ac31-e274cee5da95","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489381426,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489381433,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489381436,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"33e04cc0-cbc2-4693-ac31-e274cee5da95","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489381452,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489381456,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489381475,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489381477,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"33e04cc0-cbc2-4693-ac31-e274cee5da95","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489381478,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"33e04cc0-cbc2-4693-ac31-e274cee5da95","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792458000000,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792458000000,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"954ebad0-82ca-4673-8fa5-24212dae0f27","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792458000000,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792458000000,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792458000000,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"954ebad0-82ca-4673-8fa5-24212dae0f27","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"warn","time":1792458000000,"pid":68268,"hostname":"Mac.net","site":"drafter-raw.persist","err":"Error: diagnostic write failed","msg":"drafter-raw: write failed; skipped"}
+{"level":"info","time":1792458000000,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792458000000,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"3962bdbe-3770-4ffd-8ef2-6a0c6c932569","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792458000000,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792458000000,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792458000000,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"3962bdbe-3770-4ffd-8ef2-6a0c6c932569","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792458000000,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792458000000,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"3fe82781-c979-4605-a45e-4957ccca803c","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792458000000,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792458000000,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792458000000,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"3fe82781-c979-4605-a45e-4957ccca803c","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"warn","time":1792458000000,"pid":68268,"hostname":"Mac.net","site":"drafter-raw.insert","code":"23503","message":"refused","msg":"drafter-raw: insert refused; skipped"}
+{"level":"info","time":1792458000000,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792458000000,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"f9233865-eae6-483a-b2f0-4e1607d6a115","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792458000000,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792458000000,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792458000000,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"f9233865-eae6-483a-b2f0-4e1607d6a115","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792458000000,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792458000000,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"3f83e484-fe3f-4832-b787-ed8400ba8ec6","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792458000000,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792458000000,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792458000000,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"3f83e484-fe3f-4832-b787-ed8400ba8ec6","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792458000000,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792458000000,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"b1e765a5-0156-432e-9791-2d71879cd047","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792458000000,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792458000000,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792458000000,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"b1e765a5-0156-432e-9791-2d71879cd047","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"warn","time":1792489381721,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"461cab69-68cc-4acb-89e6-31fe585e85a3","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489381722,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"461cab69-68cc-4acb-89e6-31fe585e85a3","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489381742,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489381743,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"5ac0aca3-6542-4ead-a075-e459470755c5","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489381745,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489381747,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489381749,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"5ac0aca3-6542-4ead-a075-e459470755c5","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489381771,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489381773,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"e0a521b0-5d30-48ce-baad-a0ef41d03a1e","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489381774,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489381776,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489381778,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"e0a521b0-5d30-48ce-baad-a0ef41d03a1e","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"warn","time":1792489381799,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"f0c12e4b-44e1-487e-95fc-d1c8d3c552f7","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489381800,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"f0c12e4b-44e1-487e-95fc-d1c8d3c552f7","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489381804,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489381807,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489381821,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489381822,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"f0c12e4b-44e1-487e-95fc-d1c8d3c552f7","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489381824,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"f0c12e4b-44e1-487e-95fc-d1c8d3c552f7","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"warn","time":1792489381846,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"39356085-70e7-4d6d-ba9e-c2179e78f2fd","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489381846,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"39356085-70e7-4d6d-ba9e-c2179e78f2fd","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489381850,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489381853,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489381868,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489381870,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"39356085-70e7-4d6d-ba9e-c2179e78f2fd","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489381872,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"39356085-70e7-4d6d-ba9e-c2179e78f2fd","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"warn","time":1792489381905,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"28d96f2d-bfe9-446f-ab2a-4911362be758","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489381907,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"28d96f2d-bfe9-446f-ab2a-4911362be758","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489381921,"pid":68268,"hostname":"Mac.net","event":"agent_lane.reply_shaped","request_id":"diagnostic-request-not-the-turn-id","turn_id":"579996d5-3655-41cf-8a11-ea781241a70d","outcome":"already_in_shape","fast_path":"agent","profile":"coaching","narrator_model":"gpt-5.6-terra","obligations":1,"words_in":52,"units_in":3,"bullets_in":0,"questions_in":0,"face_bullets":1,"detail_units":1,"restatements_to_detail":0,"face_words":15,"face_bullets_over_word_bar":0,"obligations_on_face":0,"face_over_cap":false,"face_over_word_budget":false,"open_questions_segment":false,"said_once_dropped":[],"msg":"agent-lane: the reply passed the one composer"}
+{"level":"warn","time":1792489381952,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"eeea330c-2cf1-4145-a1b9-4e9c6a54eb9e","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489381952,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"eeea330c-2cf1-4145-a1b9-4e9c6a54eb9e","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489381955,"pid":68268,"hostname":"Mac.net","event":"agent_lane.reply_shaped","request_id":"diagnostic-request-not-the-turn-id","turn_id":"a170b38b-f473-4339-a033-70db9feea938","outcome":"already_in_shape","fast_path":"agent","profile":"coaching","narrator_model":"gpt-5.6-terra","obligations":1,"words_in":52,"units_in":3,"bullets_in":0,"questions_in":0,"face_bullets":1,"detail_units":1,"restatements_to_detail":0,"face_words":15,"face_bullets_over_word_bar":0,"obligations_on_face":0,"face_over_cap":false,"face_over_word_budget":false,"open_questions_segment":false,"said_once_dropped":[],"msg":"agent-lane: the reply passed the one composer"}
+{"level":"info","time":1792489381981,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489381983,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"68f36798-c0e1-4a1c-8bb1-da004e8acbce","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489381985,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489381987,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489381990,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"68f36798-c0e1-4a1c-8bb1-da004e8acbce","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382000,"pid":68268,"hostname":"Mac.net","event":"agent_lane.reply_shaped","request_id":"diagnostic-request-not-the-turn-id","turn_id":"7657177e-0d55-4976-95fe-becf3e441e0e","outcome":"shaped","fast_path":"agent","profile":"coaching","narrator_model":"gpt-5.6-terra","obligations":1,"words_in":79,"units_in":6,"bullets_in":0,"questions_in":1,"face_bullets":1,"detail_units":4,"restatements_to_detail":0,"face_words":21,"face_bullets_over_word_bar":0,"obligations_on_face":1,"face_over_cap":false,"face_over_word_budget":false,"open_questions_segment":false,"said_once_dropped":[],"msg":"agent-lane: the reply passed the one composer"}
+{"level":"info","time":1792489382025,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489382027,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"5067ab9d-674a-4fae-8013-a46f200d4cfa","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382029,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489382033,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489382035,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"5067ab9d-674a-4fae-8013-a46f200d4cfa","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382040,"pid":68268,"hostname":"Mac.net","event":"agent_lane.reply_shaped","request_id":"diagnostic-request-not-the-turn-id","turn_id":"ae24bbb8-b390-4ebb-aba0-4fa6124567b5","outcome":"shaped","fast_path":"agent","profile":"coaching","narrator_model":"gpt-5.6-terra","obligations":1,"words_in":79,"units_in":6,"bullets_in":0,"questions_in":1,"face_bullets":1,"detail_units":4,"restatements_to_detail":0,"face_words":21,"face_bullets_over_word_bar":0,"obligations_on_face":1,"face_over_cap":false,"face_over_word_budget":false,"open_questions_segment":false,"said_once_dropped":[],"msg":"agent-lane: the reply passed the one composer"}
+{"level":"warn","time":1792489382067,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"d3c9a1b2-47c5-4a98-9a55-c4602bba41ed","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382068,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"d3c9a1b2-47c5-4a98-9a55-c4602bba41ed","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382070,"pid":68268,"hostname":"Mac.net","event":"agent_lane.reply_shaped","request_id":"diagnostic-request-not-the-turn-id","turn_id":"4c231f4d-f12a-482c-8b49-cd4218ae25e2","outcome":"already_in_shape","fast_path":"agent","profile":"coaching","narrator_model":"gpt-5.6-terra","obligations":1,"words_in":48,"units_in":3,"bullets_in":0,"questions_in":0,"face_bullets":1,"detail_units":1,"restatements_to_detail":0,"face_words":11,"face_bullets_over_word_bar":0,"obligations_on_face":0,"face_over_cap":false,"face_over_word_budget":false,"open_questions_segment":false,"said_once_dropped":[],"msg":"agent-lane: the reply passed the one composer"}
+{"level":"warn","time":1792489382093,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"6f198f87-9356-438d-8a2a-cde3dab47d26","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382093,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"6f198f87-9356-438d-8a2a-cde3dab47d26","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382095,"pid":68268,"hostname":"Mac.net","event":"agent_lane.reply_shaped","request_id":"diagnostic-request-not-the-turn-id","turn_id":"a0ccd42e-66a9-4f53-83e5-788fca0ddf6b","outcome":"already_in_shape","fast_path":"agent","profile":"coaching","narrator_model":"gpt-5.6-terra","obligations":1,"words_in":48,"units_in":3,"bullets_in":0,"questions_in":0,"face_bullets":1,"detail_units":1,"restatements_to_detail":0,"face_words":11,"face_bullets_over_word_bar":0,"obligations_on_face":0,"face_over_cap":false,"face_over_word_budget":false,"open_questions_segment":false,"said_once_dropped":[],"msg":"agent-lane: the reply passed the one composer"}
+{"level":"warn","time":1792489382109,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"e0f777e8-3ba5-4b48-92c9-06c2461a5068","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382110,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"e0f777e8-3ba5-4b48-92c9-06c2461a5068","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382111,"pid":68268,"hostname":"Mac.net","event":"agent_lane.reply_shaped","request_id":"diagnostic-request-not-the-turn-id","turn_id":"05e5bcda-52a6-4e0f-a49c-8e94c1548ba9","outcome":"already_in_shape","fast_path":"agent","profile":"coaching","narrator_model":"gpt-5.6-terra","obligations":0,"words_in":11,"units_in":2,"bullets_in":0,"questions_in":0,"face_bullets":1,"detail_units":0,"restatements_to_detail":0,"face_words":11,"face_bullets_over_word_bar":0,"obligations_on_face":0,"face_over_cap":false,"face_over_word_budget":false,"open_questions_segment":false,"said_once_dropped":[],"msg":"agent-lane: the reply passed the one composer"}
+{"level":"info","time":1792489382129,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489382133,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"7761d129-47b5-44af-aee6-e667790683ff","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382134,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"7761d129-47b5-44af-aee6-e667790683ff","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382150,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489382152,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"d0d3bdfe-e516-4cb5-bb32-241584d18402","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382153,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"d0d3bdfe-e516-4cb5-bb32-241584d18402","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382176,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489382177,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"39b02338-450c-46d8-8d7b-e76d5807321c","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382179,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"39b02338-450c-46d8-8d7b-e76d5807321c","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382207,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489382208,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"51a9b7a5-9dec-437b-8410-501d48436321","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382211,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"51a9b7a5-9dec-437b-8410-501d48436321","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382241,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489382242,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"be5d917d-9b05-4553-9d29-10d94ffe8097","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382245,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"be5d917d-9b05-4553-9d29-10d94ffe8097","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382272,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489382273,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"32e33cf4-1986-428a-8fbd-173672385f26","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382276,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"32e33cf4-1986-428a-8fbd-173672385f26","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382296,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489382298,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"89d8d3fe-1517-4367-ada5-a468a952e097","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382300,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"89d8d3fe-1517-4367-ada5-a468a952e097","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382320,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489382322,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"3a1ec15e-4c62-4d7c-a548-f9bf2127c928","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382324,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"3a1ec15e-4c62-4d7c-a548-f9bf2127c928","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382343,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489382345,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"0b78cb4f-5f1f-4e11-a62b-008aea6038e6","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382348,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"0b78cb4f-5f1f-4e11-a62b-008aea6038e6","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382367,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489382368,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"72b70d06-6711-44a4-8005-9cd6d168671b","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382371,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"72b70d06-6711-44a4-8005-9cd6d168671b","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382391,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489382393,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"3aff7e5a-f9ad-4efb-81bb-9955178d5806","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382395,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"3aff7e5a-f9ad-4efb-81bb-9955178d5806","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382416,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489382418,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"d942239d-38c5-4596-a854-29b07feb78da","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382420,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"d942239d-38c5-4596-a854-29b07feb78da","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382441,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489382442,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"ce0bc644-5357-4e55-9e7d-b77660800dc7","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382444,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"ce0bc644-5357-4e55-9e7d-b77660800dc7","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382463,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489382464,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"b1e0d0b0-1f61-4285-9e19-f5ce49c8846e","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382467,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"b1e0d0b0-1f61-4285-9e19-f5ce49c8846e","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382484,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489382486,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"328ae4f7-80eb-4aff-b52f-c4bcc5547cd6","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382489,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"328ae4f7-80eb-4aff-b52f-c4bcc5547cd6","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382507,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489382508,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"8c5cb1d3-6710-4828-96f3-3d5693662083","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382510,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"8c5cb1d3-6710-4828-96f3-3d5693662083","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382529,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489382530,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"e522b881-399f-4526-958e-d5cdc03d8bbd","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382532,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"e522b881-399f-4526-958e-d5cdc03d8bbd","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"warn","time":1792489382551,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"2ed8e18a-9d9c-4a78-bd07-1fe7a703708f","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382551,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"2ed8e18a-9d9c-4a78-bd07-1fe7a703708f","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382569,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489382570,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"b44933bb-5ff0-4565-94f4-0fc9a41bb0dd","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382572,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"b44933bb-5ff0-4565-94f4-0fc9a41bb0dd","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382589,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489382593,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"5d2cd597-b6f4-4816-b13c-f9b1c22dbf6d","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382597,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"5d2cd597-b6f4-4816-b13c-f9b1c22dbf6d","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382619,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489382621,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"b2730178-75fa-4112-ab82-a60a7fa30b3d","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382623,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"b2730178-75fa-4112-ab82-a60a7fa30b3d","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382642,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489382643,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"e60b8225-f80b-4c15-8a81-d81239053394","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382645,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"e60b8225-f80b-4c15-8a81-d81239053394","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382664,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489382665,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"00f04392-78e7-4375-a1f1-710d0d7a6231","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382667,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"00f04392-78e7-4375-a1f1-710d0d7a6231","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382686,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489382688,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"84090244-3020-47f8-bb2e-66963d06b62e","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382690,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"84090244-3020-47f8-bb2e-66963d06b62e","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382708,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489382709,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"c58ba18e-063c-4a6e-8ba1-512622662d31","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382711,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"c58ba18e-063c-4a6e-8ba1-512622662d31","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382728,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489382731,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"b01b3518-c10a-4bc5-9217-fa004dcfb21a","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382733,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"b01b3518-c10a-4bc5-9217-fa004dcfb21a","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382749,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489382750,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"62b865a1-9302-4a7c-bfe4-dfc816bbcacc","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382752,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"62b865a1-9302-4a7c-bfe4-dfc816bbcacc","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382771,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489382773,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"708849f8-97f1-4c36-ab12-0ce0a7680532","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382776,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"708849f8-97f1-4c36-ab12-0ce0a7680532","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382797,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489382798,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"2039eba3-db33-4b98-9538-47988eac4d91","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382800,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"2039eba3-db33-4b98-9538-47988eac4d91","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382822,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489382823,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"91c32611-b867-4bc0-be07-09b741120c56","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382825,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"91c32611-b867-4bc0-be07-09b741120c56","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382844,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489382845,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"e98421fb-89f3-44e0-8d49-5c44304525ca","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382847,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"e98421fb-89f3-44e0-8d49-5c44304525ca","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382865,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489382867,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"d507fd7e-7cbc-4931-8ea2-04e82e30c18e","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382869,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"d507fd7e-7cbc-4931-8ea2-04e82e30c18e","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"warn","time":1792489382886,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"68977117-b633-485e-be28-35dfbe45f152","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382886,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"68977117-b633-485e-be28-35dfbe45f152","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"warn","time":1792489382904,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"686a7507-8b27-4229-913e-62fca7c5aa08","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382904,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"686a7507-8b27-4229-913e-62fca7c5aa08","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"warn","time":1792489382914,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"868b44ba-dafd-4bfe-80bb-590ade600124","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382914,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"868b44ba-dafd-4bfe-80bb-590ade600124","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382932,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489382933,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"a36954c9-402c-4cbc-b5f6-f0312d7dc74c","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382935,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489382938,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489382941,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"a36954c9-402c-4cbc-b5f6-f0312d7dc74c","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382960,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489382962,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"0c17e069-5c85-45ca-b8e6-b7715f187af3","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382964,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489382968,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489382970,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"0c17e069-5c85-45ca-b8e6-b7715f187af3","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489382993,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489382994,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"5f9524ba-6458-4257-814a-290bf2394ca2","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489382998,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383000,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383003,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"5f9524ba-6458-4257-814a-290bf2394ca2","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489383023,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489383025,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"1494f954-1b8e-40d4-904a-4cfa18e0afee","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489383028,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383030,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383032,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"1494f954-1b8e-40d4-904a-4cfa18e0afee","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489383069,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489383071,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"b2423321-7c78-422f-98fe-508d5acf5ce8","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489383075,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383078,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383081,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"b2423321-7c78-422f-98fe-508d5acf5ce8","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489383118,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_support_capacity","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489383121,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"cc905cfe-6eed-40bf-b09a-37f6cea2c390","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489383127,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_support_capacity","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383131,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_support_capacity","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383134,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"cc905cfe-6eed-40bf-b09a-37f6cea2c390","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489383169,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489383171,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"0cf7c33f-bc2d-4073-8127-bceecd638032","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489383174,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383178,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383181,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"0cf7c33f-bc2d-4073-8127-bceecd638032","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489383208,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489383210,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"d26494dd-da22-48b4-973e-dc7c42dd78cc","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489383214,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383217,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383220,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"d26494dd-da22-48b4-973e-dc7c42dd78cc","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489383244,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489383245,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"cca615ef-3612-4ca1-8bae-e47e94997d63","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489383250,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383254,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383256,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"cca615ef-3612-4ca1-8bae-e47e94997d63","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489383278,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383297,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489383281,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"5e811dd1-cd59-471b-92b0-e8f652f6bb94","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489383285,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383288,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383292,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"5e811dd1-cd59-471b-92b0-e8f652f6bb94","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489383319,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383332,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489383320,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"41b75e1c-12ec-4745-9beb-1036a6757f46","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489383323,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383326,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383328,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"41b75e1c-12ec-4745-9beb-1036a6757f46","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489383351,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383364,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489383353,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"91b3c2a0-39c4-4f3d-a8dc-897c2bc24e7e","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489383355,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383358,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383361,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"91b3c2a0-39c4-4f3d-a8dc-897c2bc24e7e","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489383382,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383396,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489383384,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"4111530d-c261-4209-991e-174379e8df9c","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489383387,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383390,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383392,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"4111530d-c261-4209-991e-174379e8df9c","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489383412,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489383414,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"c5b47578-6412-444a-830d-21d58e7b1ec6","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489383416,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383419,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383421,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"c5b47578-6412-444a-830d-21d58e7b1ec6","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489383442,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383458,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489383444,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"245f805e-f5da-4e52-ba62-4d4c0415b5ae","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489383447,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383450,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383452,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"245f805e-f5da-4e52-ba62-4d4c0415b5ae","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489383475,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383489,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489383477,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"c336f0e3-d717-460e-9046-9140a9f4c002","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489383479,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383482,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383485,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"c336f0e3-d717-460e-9046-9140a9f4c002","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489383505,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.fallback_declined","declined_count":0,"blocker_count":1,"declined_sources":[],"msg":"analysis-ready: declined 0 factor-level substitution(s) rather than invent an option's lever, 1 blocker(s)"}
+{"level":"info","time":1792489383518,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.fallback_declined","declined_count":0,"blocker_count":1,"declined_sources":[],"msg":"analysis-ready: declined 0 factor-level substitution(s) rather than invent an option's lever, 1 blocker(s)"}
+{"level":"info","time":1792489383505,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"needs_user_input","userQuestionCount":1,"goalNodeId":"weekly_bookings","readyOptionsCount":1,"optionsNeedingEncoding":1,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":1}
+{"level":"warn","time":1792489383508,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"d9eaf67d-5421-4cff-a9bb-f2de766c17ee","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489383510,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.fallback_declined","declined_count":0,"blocker_count":1,"declined_sources":[],"msg":"analysis-ready: declined 0 factor-level substitution(s) rather than invent an option's lever, 1 blocker(s)"}
+{"level":"info","time":1792489383510,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"needs_user_input","userQuestionCount":1,"goalNodeId":"weekly_bookings","readyOptionsCount":1,"optionsNeedingEncoding":1,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":1}
+{"level":"info","time":1792489383512,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.fallback_declined","declined_count":0,"blocker_count":1,"declined_sources":[],"msg":"analysis-ready: declined 0 factor-level substitution(s) rather than invent an option's lever, 1 blocker(s)"}
+{"level":"info","time":1792489383513,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"needs_user_input","userQuestionCount":1,"goalNodeId":"weekly_bookings","readyOptionsCount":1,"optionsNeedingEncoding":1,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":1}
+{"level":"info","time":1792489383515,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"d9eaf67d-5421-4cff-a9bb-f2de766c17ee","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489383519,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"needs_user_input","userQuestionCount":1,"goalNodeId":"weekly_bookings","readyOptionsCount":1,"optionsNeedingEncoding":1,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":1}
+{"level":"info","time":1792489383535,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.fallback_declined","declined_count":0,"blocker_count":1,"declined_sources":[],"msg":"analysis-ready: declined 0 factor-level substitution(s) rather than invent an option's lever, 1 blocker(s)"}
+{"level":"info","time":1792489383548,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.fallback_declined","declined_count":0,"blocker_count":1,"declined_sources":[],"msg":"analysis-ready: declined 0 factor-level substitution(s) rather than invent an option's lever, 1 blocker(s)"}
+{"level":"info","time":1792489383535,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"needs_user_input","userQuestionCount":1,"goalNodeId":"weekly_bookings","readyOptionsCount":1,"optionsNeedingEncoding":1,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":1}
+{"level":"warn","time":1792489383537,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"2f33e9ba-f171-41c2-9641-163afef1e3c4","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489383539,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.fallback_declined","declined_count":0,"blocker_count":1,"declined_sources":[],"msg":"analysis-ready: declined 0 factor-level substitution(s) rather than invent an option's lever, 1 blocker(s)"}
+{"level":"info","time":1792489383539,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"needs_user_input","userQuestionCount":1,"goalNodeId":"weekly_bookings","readyOptionsCount":1,"optionsNeedingEncoding":1,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":1}
+{"level":"info","time":1792489383541,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.fallback_declined","declined_count":0,"blocker_count":1,"declined_sources":[],"msg":"analysis-ready: declined 0 factor-level substitution(s) rather than invent an option's lever, 1 blocker(s)"}
+{"level":"info","time":1792489383542,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"needs_user_input","userQuestionCount":1,"goalNodeId":"weekly_bookings","readyOptionsCount":1,"optionsNeedingEncoding":1,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":1}
+{"level":"info","time":1792489383544,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"2f33e9ba-f171-41c2-9641-163afef1e3c4","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489383549,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"needs_user_input","userQuestionCount":1,"goalNodeId":"weekly_bookings","readyOptionsCount":1,"optionsNeedingEncoding":1,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":1}
+{"level":"info","time":1792489383565,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383578,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489383567,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"7a03fc6d-c162-44de-ad43-beb3a94b4ebb","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489383569,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383573,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383575,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"7a03fc6d-c162-44de-ad43-beb3a94b4ebb","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489383595,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383607,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"warn","time":1792489383597,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"9d306ba4-1f48-4e7e-bd36-d76b0d367e99","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489383599,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383601,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_bookings","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792489383603,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"9d306ba4-1f48-4e7e-bd36-d76b0d367e99","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489383624,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.fallback_declined","declined_count":0,"blocker_count":1,"declined_sources":[],"msg":"analysis-ready: declined 0 factor-level substitution(s) rather than invent an option's lever, 1 blocker(s)"}
+{"level":"info","time":1792489383637,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.fallback_declined","declined_count":0,"blocker_count":1,"declined_sources":[],"msg":"analysis-ready: declined 0 factor-level substitution(s) rather than invent an option's lever, 1 blocker(s)"}
+{"level":"info","time":1792489383624,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"needs_user_input","userQuestionCount":1,"goalNodeId":"weekly_bookings","readyOptionsCount":1,"optionsNeedingEncoding":1,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":1}
+{"level":"warn","time":1792489383626,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"1804a8b2-2b84-4de5-addb-97a575f04415","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489383628,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.fallback_declined","declined_count":0,"blocker_count":1,"declined_sources":[],"msg":"analysis-ready: declined 0 factor-level substitution(s) rather than invent an option's lever, 1 blocker(s)"}
+{"level":"info","time":1792489383628,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"needs_user_input","userQuestionCount":1,"goalNodeId":"weekly_bookings","readyOptionsCount":1,"optionsNeedingEncoding":1,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":1}
+{"level":"info","time":1792489383630,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.fallback_declined","declined_count":0,"blocker_count":1,"declined_sources":[],"msg":"analysis-ready: declined 0 factor-level substitution(s) rather than invent an option's lever, 1 blocker(s)"}
+{"level":"info","time":1792489383631,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"needs_user_input","userQuestionCount":1,"goalNodeId":"weekly_bookings","readyOptionsCount":1,"optionsNeedingEncoding":1,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":1}
+{"level":"info","time":1792489383634,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"1804a8b2-2b84-4de5-addb-97a575f04415","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489383638,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"needs_user_input","userQuestionCount":1,"goalNodeId":"weekly_bookings","readyOptionsCount":1,"optionsNeedingEncoding":1,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":1}
+{"level":"info","time":1792489383655,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.fallback_declined","declined_count":0,"blocker_count":1,"declined_sources":[],"msg":"analysis-ready: declined 0 factor-level substitution(s) rather than invent an option's lever, 1 blocker(s)"}
+{"level":"info","time":1792489383670,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.fallback_declined","declined_count":0,"blocker_count":1,"declined_sources":[],"msg":"analysis-ready: declined 0 factor-level substitution(s) rather than invent an option's lever, 1 blocker(s)"}
+{"level":"info","time":1792489383655,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"needs_user_input","userQuestionCount":1,"goalNodeId":"weekly_bookings","readyOptionsCount":1,"optionsNeedingEncoding":1,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":1}
+{"level":"warn","time":1792489383658,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"fd39d04a-a216-4e64-9034-cd16546d573c","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489383660,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.fallback_declined","declined_count":0,"blocker_count":1,"declined_sources":[],"msg":"analysis-ready: declined 0 factor-level substitution(s) rather than invent an option's lever, 1 blocker(s)"}
+{"level":"info","time":1792489383660,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"needs_user_input","userQuestionCount":1,"goalNodeId":"weekly_bookings","readyOptionsCount":1,"optionsNeedingEncoding":1,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":1}
+{"level":"info","time":1792489383663,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.fallback_declined","declined_count":0,"blocker_count":1,"declined_sources":[],"msg":"analysis-ready: declined 0 factor-level substitution(s) rather than invent an option's lever, 1 blocker(s)"}
+{"level":"info","time":1792489383664,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"needs_user_input","userQuestionCount":1,"goalNodeId":"weekly_bookings","readyOptionsCount":1,"optionsNeedingEncoding":1,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":1}
+{"level":"info","time":1792489383666,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"fd39d04a-a216-4e64-9034-cd16546d573c","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+{"level":"info","time":1792489383670,"pid":68268,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"needs_user_input","userQuestionCount":1,"goalNodeId":"weekly_bookings","readyOptionsCount":1,"optionsNeedingEncoding":1,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":1}
+{"level":"warn","time":1792489383683,"pid":68268,"hostname":"Mac.net","event":"agent_lane.canonical_analysis_view_unavailable","scenario_id":"128492ab-bc33-4829-90af-73d6c9f0d570","msg":"agent-lane: final scenario read has no valid canonical analysis cells"}
+{"level":"info","time":1792489383683,"pid":68268,"hostname":"Mac.net","event":"v5.coaching.run_delta_outcome","scenario_id":"128492ab-bc33-4829-90af-73d6c9f0d570","outcome":"skipped","reason":"caller_binds_run_delta","prior_facts_count":null,"run_analysis_facts_count":null,"wire_reason_carried":null}
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts (74 tests | 31 failed) 4768ms
+     × L26B first failed check 'receipt' is trace-only ('We want to grow weekly bookings to at…') 39ms
+     × L26B first failed check 'receipt-invalid' is trace-only ('We want to grow weekly bookings to at…') 28ms
+     × L26B first failed check 'revision-invalid' is trace-only ('We want to grow weekly bookings to at…') 30ms
+     × L26B first failed check 'mutation-invalid' is trace-only ('We want to grow weekly bookings to at…') 24ms
+     × L26B first failed check 'ack-status' is trace-only ('We want to grow weekly bookings to at…') 23ms
+     × L26B first failed check 'operation-reused' is trace-only ('We want to grow weekly bookings to at…') 25ms
+     × L26B first failed check 'ack-missing' is trace-only ('We want to grow weekly bookings to at…') 22ms
+     × L26B first failed check 'ack' is trace-only ('We want to grow weekly bookings to at…') 25ms
+     × L26B first failed check 'receipt-hash' is trace-only ('We want to grow weekly bookings to at…') 25ms
+     × L26B first failed check 'read-identity' is trace-only ('We want to grow weekly bookings to at…') 24ms
+     × L26B first failed check 'recomputed-identity' is trace-only ('We want to grow weekly bookings to at…') 22ms
+     × L26B first failed check 'revision' is trace-only ('We want to grow weekly bookings to at…') 22ms
+     × L26B first failed check 'analysis-hash' is trace-only ('We want to grow weekly bookings to at…') 23ms
+     × L26B first failed check 'postimage' is trace-only ('We want to grow weekly bookings to at…') 21ms
+     × L26B first failed check 'readback' is trace-only ('We want to grow weekly bookings to at…') 18ms
+     × L26B first failed check 'receipt' is trace-only ('We run a repair workshop and could ad…') 21ms
+     × L26B first failed check 'receipt-invalid' is trace-only ('We run a repair workshop and could ad…') 26ms
+     × L26B first failed check 'revision-invalid' is trace-only ('We run a repair workshop and could ad…') 26ms
+     × L26B first failed check 'mutation-invalid' is trace-only ('We run a repair workshop and could ad…') 21ms
+     × L26B first failed check 'ack-status' is trace-only ('We run a repair workshop and could ad…') 22ms
+     × L26B first failed check 'operation-reused' is trace-only ('We run a repair workshop and could ad…') 23ms
+     × L26B first failed check 'ack-missing' is trace-only ('We run a repair workshop and could ad…') 21ms
+     × L26B first failed check 'ack' is trace-only ('We run a repair workshop and could ad…') 22ms
+     × L26B first failed check 'receipt-hash' is trace-only ('We run a repair workshop and could ad…') 19ms
+     × L26B first failed check 'read-identity' is trace-only ('We run a repair workshop and could ad…') 24ms
+     × L26B first failed check 'recomputed-identity' is trace-only ('We run a repair workshop and could ad…') 24ms
+     × L26B first failed check 'revision' is trace-only ('We run a repair workshop and could ad…') 24ms
+     × L26B first failed check 'analysis-hash' is trace-only ('We run a repair workshop and could ad…') 22ms
+     × L26B first failed check 'postimage' is trace-only ('We run a repair workshop and could ad…') 22ms
+     × L26B first failed check 'readback' is trace-only ('We run a repair workshop and could ad…') 16ms
+     × L26B first failure wins; a later unrelated mismatch cannot replace it or leak content 18ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 31 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts > core drafts the FIRST model of a new scenario (graph null is a valid empty state) > L26B first failed check 'receipt' is trace-only ('We want to grow weekly bookings to at…')
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts > core drafts the FIRST model of a new scenario (graph null is a valid empty state) > L26B first failed check 'receipt' is trace-only ('We run a repair workshop and could ad…')
+AssertionError: expected undefined to deeply equal { check: 'receipt_absent' }
+
+- Expected:
+{
+  "check": "receipt_absent",
+}
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts:448:50
+    446|         : fault === 'revision' ? { actual: revision }
+    447|         : fault === 'analysis-hash' ? { expected: analysis } : {};
+    448|       expect(draftCall(body).draft_verification).toEqual({ ...defaults…
+       |                                                  ^
+    449|       const reason = ['ack-status', 'operation-reused'].includes(fault…
+    450|       // Lane-base SDK output and reply bytes; diagnostics may not cha…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/31]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts > core drafts the FIRST model of a new scenario (graph null is a valid empty state) > L26B first failed check 'receipt-invalid' is trace-only ('We want to grow weekly bookings to at…')
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts > core drafts the FIRST model of a new scenario (graph null is a valid empty state) > L26B first failed check 'receipt-invalid' is trace-only ('We run a repair workshop and could ad…')
+AssertionError: expected undefined to deeply equal { check: 'receipt_invalid', …(1) }
+
+- Expected:
+{
+  "check": "receipt_invalid",
+  "field": "version_id",
+}
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts:448:50
+    446|         : fault === 'revision' ? { actual: revision }
+    447|         : fault === 'analysis-hash' ? { expected: analysis } : {};
+    448|       expect(draftCall(body).draft_verification).toEqual({ ...defaults…
+       |                                                  ^
+    449|       const reason = ['ack-status', 'operation-reused'].includes(fault…
+    450|       // Lane-base SDK output and reply bytes; diagnostics may not cha…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/31]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts > core drafts the FIRST model of a new scenario (graph null is a valid empty state) > L26B first failed check 'revision-invalid' is trace-only ('We want to grow weekly bookings to at…')
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts > core drafts the FIRST model of a new scenario (graph null is a valid empty state) > L26B first failed check 'revision-invalid' is trace-only ('We run a repair workshop and could ad…')
+AssertionError: expected undefined to deeply equal { check: 'revision_mismatch', …(1) }
+
+- Expected:
+{
+  "check": "revision_mismatch",
+  "field": "version_number",
+}
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts:448:50
+    446|         : fault === 'revision' ? { actual: revision }
+    447|         : fault === 'analysis-hash' ? { expected: analysis } : {};
+    448|       expect(draftCall(body).draft_verification).toEqual({ ...defaults…
+       |                                                  ^
+    449|       const reason = ['ack-status', 'operation-reused'].includes(fault…
+    450|       // Lane-base SDK output and reply bytes; diagnostics may not cha…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/31]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts > core drafts the FIRST model of a new scenario (graph null is a valid empty state) > L26B first failed check 'mutation-invalid' is trace-only ('We want to grow weekly bookings to at…')
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts > core drafts the FIRST model of a new scenario (graph null is a valid empty state) > L26B first failed check 'mutation-invalid' is trace-only ('We run a repair workshop and could ad…')
+AssertionError: expected undefined to deeply equal { check: 'receipt_invalid', …(1) }
+
+- Expected:
+{
+  "check": "receipt_invalid",
+  "field": "mutation_id",
+}
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts:448:50
+    446|         : fault === 'revision' ? { actual: revision }
+    447|         : fault === 'analysis-hash' ? { expected: analysis } : {};
+    448|       expect(draftCall(body).draft_verification).toEqual({ ...defaults…
+       |                                                  ^
+    449|       const reason = ['ack-status', 'operation-reused'].includes(fault…
+    450|       // Lane-base SDK output and reply bytes; diagnostics may not cha…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/31]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts > core drafts the FIRST model of a new scenario (graph null is a valid empty state) > L26B first failed check 'ack-status' is trace-only ('We want to grow weekly bookings to at…')
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts > core drafts the FIRST model of a new scenario (graph null is a valid empty state) > L26B first failed check 'ack-status' is trace-only ('We run a repair workshop and could ad…')
+AssertionError: expected undefined to deeply equal { check: 'ack_status', status: 503 }
+
+- Expected:
+{
+  "check": "ack_status",
+  "status": 503,
+}
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts:448:50
+    446|         : fault === 'revision' ? { actual: revision }
+    447|         : fault === 'analysis-hash' ? { expected: analysis } : {};
+    448|       expect(draftCall(body).draft_verification).toEqual({ ...defaults…
+       |                                                  ^
+    449|       const reason = ['ack-status', 'operation-reused'].includes(fault…
+    450|       // Lane-base SDK output and reply bytes; diagnostics may not cha…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/31]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts > core drafts the FIRST model of a new scenario (graph null is a valid empty state) > L26B first failed check 'operation-reused' is trace-only ('We want to grow weekly bookings to at…')
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts > core drafts the FIRST model of a new scenario (graph null is a valid empty state) > L26B first failed check 'operation-reused' is trace-only ('We run a repair workshop and could ad…')
+AssertionError: expected undefined to deeply equal { check: 'ack_status', status: 409 }
+
+- Expected:
+{
+  "check": "ack_status",
+  "status": 409,
+}
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts:448:50
+    446|         : fault === 'revision' ? { actual: revision }
+    447|         : fault === 'analysis-hash' ? { expected: analysis } : {};
+    448|       expect(draftCall(body).draft_verification).toEqual({ ...defaults…
+       |                                                  ^
+    449|       const reason = ['ack-status', 'operation-reused'].includes(fault…
+    450|       // Lane-base SDK output and reply bytes; diagnostics may not cha…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/31]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts > core drafts the FIRST model of a new scenario (graph null is a valid empty state) > L26B first failed check 'ack-missing' is trace-only ('We want to grow weekly bookings to at…')
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts > core drafts the FIRST model of a new scenario (graph null is a valid empty state) > L26B first failed check 'ack-missing' is trace-only ('We run a repair workshop and could ad…')
+AssertionError: expected undefined to deeply equal { check: 'ack_status', status: 200 }
+
+- Expected:
+{
+  "check": "ack_status",
+  "status": 200,
+}
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts:448:50
+    446|         : fault === 'revision' ? { actual: revision }
+    447|         : fault === 'analysis-hash' ? { expected: analysis } : {};
+    448|       expect(draftCall(body).draft_verification).toEqual({ ...defaults…
+       |                                                  ^
+    449|       const reason = ['ack-status', 'operation-reused'].includes(fault…
+    450|       // Lane-base SDK output and reply bytes; diagnostics may not cha…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/31]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts > core drafts the FIRST model of a new scenario (graph null is a valid empty state) > L26B first failed check 'ack' is trace-only ('We want to grow weekly bookings to at…')
+AssertionError: expected undefined to deeply equal { actual: '378b9a1b12f2', …(3) }
+
+- Expected:
+{
+  "actual": "378b9a1b12f2",
+  "check": "hash_mismatch",
+  "expected": null,
+  "field": "ack_identity",
+}
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts:448:50
+    446|         : fault === 'revision' ? { actual: revision }
+    447|         : fault === 'analysis-hash' ? { expected: analysis } : {};
+    448|       expect(draftCall(body).draft_verification).toEqual({ ...defaults…
+       |                                                  ^
+    449|       const reason = ['ack-status', 'operation-reused'].includes(fault…
+    450|       // Lane-base SDK output and reply bytes; diagnostics may not cha…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/31]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts > core drafts the FIRST model of a new scenario (graph null is a valid empty state) > L26B first failed check 'receipt-hash' is trace-only ('We want to grow weekly bookings to at…')
+AssertionError: expected undefined to deeply equal { expected: '6f4892342ff5', …(3) }
+
+- Expected:
+{
+  "actual": "aaaaaaaaaaaa",
+  "check": "hash_mismatch",
+  "expected": "6f4892342ff5",
+  "field": "receipt_identity",
+}
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts:448:50
+    446|         : fault === 'revision' ? { actual: revision }
+    447|         : fault === 'analysis-hash' ? { expected: analysis } : {};
+    448|       expect(draftCall(body).draft_verification).toEqual({ ...defaults…
+       |                                                  ^
+    449|       const reason = ['ack-status', 'operation-reused'].includes(fault…
+    450|       // Lane-base SDK output and reply bytes; diagnostics may not cha…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/31]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts > core drafts the FIRST model of a new scenario (graph null is a valid empty state) > L26B first failed check 'read-identity' is trace-only ('We want to grow weekly bookings to at…')
+AssertionError: expected undefined to deeply equal { expected: '95015d37a3e0', …(3) }
+
+- Expected:
+{
+  "actual": "aaaaaaaaaaaa",
+  "check": "hash_mismatch",
+  "expected": "95015d37a3e0",
+  "field": "ack_identity",
+}
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts:448:50
+    446|         : fault === 'revision' ? { actual: revision }
+    447|         : fault === 'analysis-hash' ? { expected: analysis } : {};
+    448|       expect(draftCall(body).draft_verification).toEqual({ ...defaults…
+       |                                                  ^
+    449|       const reason = ['ack-status', 'operation-reused'].includes(fault…
+    450|       // Lane-base SDK output and reply bytes; diagnostics may not cha…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/31]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts > core drafts the FIRST model of a new scenario (graph null is a valid empty state) > L26B first failed check 'recomputed-identity' is trace-only ('We want to grow weekly bookings to at…')
+AssertionError: expected undefined to deeply equal { actual: '7fbe0beb1080', …(3) }
+
+- Expected:
+{
+  "actual": "7fbe0beb1080",
+  "check": "hash_mismatch",
+  "expected": "aaaaaaaaaaaa",
+  "field": "read_identity",
+}
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts:448:50
+    446|         : fault === 'revision' ? { actual: revision }
+    447|         : fault === 'analysis-hash' ? { expected: analysis } : {};
+    448|       expect(draftCall(body).draft_verification).toEqual({ ...defaults…
+       |                                                  ^
+    449|       const reason = ['ack-status', 'operation-reused'].includes(fault…
+    450|       // Lane-base SDK output and reply bytes; diagnostics may not cha…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/31]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts > core drafts the FIRST model of a new scenario (graph null is a valid empty state) > L26B first failed check 'revision' is trace-only ('We want to grow weekly bookings to at…')
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts > core drafts the FIRST model of a new scenario (graph null is a valid empty state) > L26B first failed check 'revision' is trace-only ('We run a repair workshop and could ad…')
+AssertionError: expected undefined to deeply equal { actual: '6ad79c4f9d7a', …(3) }
+
+- Expected:
+{
+  "actual": "6ad79c4f9d7a",
+  "check": "revision_mismatch",
+  "expected": "aaaaaaaaaaaa",
+  "field": "graph_hash",
+}
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts:448:50
+    446|         : fault === 'revision' ? { actual: revision }
+    447|         : fault === 'analysis-hash' ? { expected: analysis } : {};
+    448|       expect(draftCall(body).draft_verification).toEqual({ ...defaults…
+       |                                                  ^
+    449|       const reason = ['ack-status', 'operation-reused'].includes(fault…
+    450|       // Lane-base SDK output and reply bytes; diagnostics may not cha…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/31]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts > core drafts the FIRST model of a new scenario (graph null is a valid empty state) > L26B first failed check 'analysis-hash' is trace-only ('We want to grow weekly bookings to at…')
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts > core drafts the FIRST model of a new scenario (graph null is a valid empty state) > L26B first failed check 'analysis-hash' is trace-only ('We run a repair workshop and could ad…')
+AssertionError: expected undefined to deeply equal { expected: '6ad79c4f9d7a', …(3) }
+
+- Expected:
+{
+  "actual": "aaaaaaaaaaaa",
+  "check": "hash_mismatch",
+  "expected": "6ad79c4f9d7a",
+  "field": "analysis_hash",
+}
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts:448:50
+    446|         : fault === 'revision' ? { actual: revision }
+    447|         : fault === 'analysis-hash' ? { expected: analysis } : {};
+    448|       expect(draftCall(body).draft_verification).toEqual({ ...defaults…
+       |                                                  ^
+    449|       const reason = ['ack-status', 'operation-reused'].includes(fault…
+    450|       // Lane-base SDK output and reply bytes; diagnostics may not cha…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/31]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts > core drafts the FIRST model of a new scenario (graph null is a valid empty state) > L26B first failed check 'postimage' is trace-only ('We want to grow weekly bookings to at…')
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts > core drafts the FIRST model of a new scenario (graph null is a valid empty state) > L26B first failed check 'postimage' is trace-only ('We run a repair workshop and could ad…')
+AssertionError: expected undefined to deeply equal { check: 'postimage_diff', …(1) }
+
+- Expected:
+{
+  "check": "postimage_diff",
+  "keys": [
+    "nodes",
+  ],
+}
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts:448:50
+    446|         : fault === 'revision' ? { actual: revision }
+    447|         : fault === 'analysis-hash' ? { expected: analysis } : {};
+    448|       expect(draftCall(body).draft_verification).toEqual({ ...defaults…
+       |                                                  ^
+    449|       const reason = ['ack-status', 'operation-reused'].includes(fault…
+    450|       // Lane-base SDK output and reply bytes; diagnostics may not cha…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/31]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts > core drafts the FIRST model of a new scenario (graph null is a valid empty state) > L26B first failed check 'readback' is trace-only ('We want to grow weekly bookings to at…')
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts > core drafts the FIRST model of a new scenario (graph null is a valid empty state) > L26B first failed check 'readback' is trace-only ('We run a repair workshop and could ad…')
+AssertionError: expected undefined to deeply equal { check: 'readback_unavailable', …(1) }
+
+- Expected:
+{
+  "check": "readback_unavailable",
+  "code": "read_failed",
+}
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts:448:50
+    446|         : fault === 'revision' ? { actual: revision }
+    447|         : fault === 'analysis-hash' ? { expected: analysis } : {};
+    448|       expect(draftCall(body).draft_verification).toEqual({ ...defaults…
+       |                                                  ^
+    449|       const reason = ['ack-status', 'operation-reused'].includes(fault…
+    450|       // Lane-base SDK output and reply bytes; diagnostics may not cha…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/31]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts > core drafts the FIRST model of a new scenario (graph null is a valid empty state) > L26B first failed check 'ack' is trace-only ('We run a repair workshop and could ad…')
+AssertionError: expected undefined to deeply equal { actual: 'b735df9dec42', …(3) }
+
+- Expected:
+{
+  "actual": "b735df9dec42",
+  "check": "hash_mismatch",
+  "expected": null,
+  "field": "ack_identity",
+}
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts:448:50
+    446|         : fault === 'revision' ? { actual: revision }
+    447|         : fault === 'analysis-hash' ? { expected: analysis } : {};
+    448|       expect(draftCall(body).draft_verification).toEqual({ ...defaults…
+       |                                                  ^
+    449|       const reason = ['ack-status', 'operation-reused'].includes(fault…
+    450|       // Lane-base SDK output and reply bytes; diagnostics may not cha…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/31]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts > core drafts the FIRST model of a new scenario (graph null is a valid empty state) > L26B first failed check 'receipt-hash' is trace-only ('We run a repair workshop and could ad…')
+AssertionError: expected undefined to deeply equal { expected: 'b735df9dec42', …(3) }
+
+- Expected:
+{
+  "actual": "aaaaaaaaaaaa",
+  "check": "hash_mismatch",
+  "expected": "b735df9dec42",
+  "field": "receipt_identity",
+}
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts:448:50
+    446|         : fault === 'revision' ? { actual: revision }
+    447|         : fault === 'analysis-hash' ? { expected: analysis } : {};
+    448|       expect(draftCall(body).draft_verification).toEqual({ ...defaults…
+       |                                                  ^
+    449|       const reason = ['ack-status', 'operation-reused'].includes(fault…
+    450|       // Lane-base SDK output and reply bytes; diagnostics may not cha…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[17/31]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts > core drafts the FIRST model of a new scenario (graph null is a valid empty state) > L26B first failed check 'read-identity' is trace-only ('We run a repair workshop and could ad…')
+AssertionError: expected undefined to deeply equal { expected: 'b735df9dec42', …(3) }
+
+- Expected:
+{
+  "actual": "aaaaaaaaaaaa",
+  "check": "hash_mismatch",
+  "expected": "b735df9dec42",
+  "field": "ack_identity",
+}
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts:448:50
+    446|         : fault === 'revision' ? { actual: revision }
+    447|         : fault === 'analysis-hash' ? { expected: analysis } : {};
+    448|       expect(draftCall(body).draft_verification).toEqual({ ...defaults…
+       |                                                  ^
+    449|       const reason = ['ack-status', 'operation-reused'].includes(fault…
+    450|       // Lane-base SDK output and reply bytes; diagnostics may not cha…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[18/31]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts > core drafts the FIRST model of a new scenario (graph null is a valid empty state) > L26B first failed check 'recomputed-identity' is trace-only ('We run a repair workshop and could ad…')
+AssertionError: expected undefined to deeply equal { actual: 'b735df9dec42', …(3) }
+
+- Expected:
+{
+  "actual": "b735df9dec42",
+  "check": "hash_mismatch",
+  "expected": "aaaaaaaaaaaa",
+  "field": "read_identity",
+}
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts:448:50
+    446|         : fault === 'revision' ? { actual: revision }
+    447|         : fault === 'analysis-hash' ? { expected: analysis } : {};
+    448|       expect(draftCall(body).draft_verification).toEqual({ ...defaults…
+       |                                                  ^
+    449|       const reason = ['ack-status', 'operation-reused'].includes(fault…
+    450|       // Lane-base SDK output and reply bytes; diagnostics may not cha…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[19/31]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts > core drafts the FIRST model of a new scenario (graph null is a valid empty state) > L26B first failure wins; a later unrelated mismatch cannot replace it or leak content
+AssertionError: expected undefined to deeply equal { check: 'receipt_absent' }
+
+- Expected:
+{
+  "check": "receipt_absent",
+}
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/draft-empty-scenario.route.test.ts:463:48
+    461|     proofFault = 'receipt'; readUnavailable = true;
+    462|     const body = await turn();
+    463|     expect(draftCall(body).draft_verification).toEqual({ check: 'recei…
+       |                                                ^
+    464|     expect(JSON.stringify(draftCall(body).draft_verification)).not.toC…
+    465|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[20/31]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  31 failed | 43 passed (74)
+   Start at  10:42:51
+   Duration  12.41s (transform 6.76s, setup 136ms, import 7.39s, tests 4.77s, environment 0ms)
+

@@ -1,0 +1,9 @@
+
+ RUN  v4.1.10 /private/tmp/cx-l26b
+
+
+ Test Files  1 passed (1)
+      Tests  11 passed (11)
+   Start at  10:50:06
+   Duration  312ms (transform 115ms, setup 134ms, import 47ms, tests 8ms, environment 0ms)
+
