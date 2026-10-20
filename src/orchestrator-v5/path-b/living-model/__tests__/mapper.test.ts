@@ -192,4 +192,26 @@ describe('thin core mapper: living model → GraphV3', () => {
     olumis.aims[0] = { ...olumis.aims[0]!, source: 'olumi', quote: null };
     expect((mapLivingModel(olumis).graph.nodes as Rec[]).find((x) => x.id === 'w')!.nonlinear_identity).toBeUndefined();
   });
+
+  it('buddy R1 #3523: a prerequisite stated on an option\'s exact effect still withholds the chance after it is lowered to the sum', () => {
+    const conditioned: LivingModelT = structuredClone(OPTION_EFFECTS);
+    conditioned.conditions.push({ text: 'A adds this only after supplier approval', applies_to: ['a_w'], source: 'user', party: null, quote: 'only after supplier approval' });
+    const c = mapLivingModel(conditioned);
+    expect(c.withheld).toContainEqual({ id: 'w', reason: 'chance_rests_on_withheld' });
+    expect((c.graph.nodes as Rec[]).find((n) => n.id === 'w')).not.toHaveProperty('goal_threshold');
+    expect((mapLivingModel(OPTION_EFFECTS).graph.nodes as Rec[]).find((n) => n.id === 'w'), 'CONTRAST: unconditioned').toHaveProperty('goal_threshold');
+  });
+
+  it('served KA1 3254d202: Olumi\'s own caveat on the path is an assumption said beside the chance, never a withhold; a stated one withholds', () => {
+    const caveat = (source: 'olumi' | 'user' | 'unverified'): LivingModelT => {
+      const m: LivingModelT = structuredClone(KNOWN_ANSWER);
+      m.conditions.push({ text: 'Whether the effect is fully realised by the deadline is not stated', applies_to: ['f_g', 'g'], source, party: null, quote: null });
+      return m;
+    };
+    expect((mapLivingModel(caveat('olumi')).graph.nodes as Rec[]).find((n) => n.id === 'g')).toMatchObject({ goal_threshold: 0.8 });
+    expect(mapLivingModel(caveat('olumi')).withheld.some((w) => w.reason === 'condition_not_in_slice')).toBe(false);
+    for (const s of ['user', 'unverified'] as const) {
+      expect((mapLivingModel(caveat(s)).graph.nodes as Rec[]).find((n) => n.id === 'g'), s).not.toHaveProperty('goal_threshold');
+    }
+  });
 });
