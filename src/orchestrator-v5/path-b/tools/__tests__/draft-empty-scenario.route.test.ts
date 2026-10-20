@@ -19,6 +19,23 @@ import { readCanonicalContext } from '../context-tool.js';
 import { resolveRunAdmission } from '../../../tools/handlers/analysis-ready-core.js';
 import { settingProvenanceOf, valueProvenanceOf } from '../../../../cee/provenance/provenance-of.js';
 import { placeholderGoalPaths, unsizedLeaderGoalPaths } from '../../../agent-lane/goal-certainty.js';
+import type { DrafterRawRow } from '../../../drafter-raw/index.js';
+
+const rawRecorder = vi.hoisted(() => ({
+  rows: [] as DrafterRawRow[], mode: 'ok' as 'ok' | 'throws' | 'failed' | 'pending',
+  release: undefined as (() => void) | undefined,
+}));
+vi.mock('@supabase/supabase-js', async (original) => ({
+  ...await original<Record<string, unknown>>(),
+  createClient: () => ({ from: (table: string) => ({ insert: (row: DrafterRawRow) => {
+    expect(table).toBe('cee_drafter_raw_responses');
+    rawRecorder.rows.push(row);
+    if (rawRecorder.mode === 'throws') throw new Error('diagnostic write failed');
+    return { abortSignal: () => rawRecorder.mode === 'pending'
+      ? new Promise((resolve) => { rawRecorder.release = () => resolve({ error: null }); })
+      : Promise.resolve({ error: rawRecorder.mode === 'failed' ? { code: '23503', message: 'refused' } : null }) };
+  } }) }),
+}));
 
 type Json = Record<string, any>;
 /** A NEW scenario per row: the route keeps each scenario's verified typed messages for the process. */
@@ -77,6 +94,7 @@ const SUM_DRAFT: Json = {
 let drafterAnswer: Json = DRAFT;
 let draftSchema: Json = {};
 let draftInstructions = '';
+const rawDraftText = (): string => `\n${JSON.stringify(drafterAnswer, null, 2)}\n`;
 const ACTION_TIMING_SENTENCE = 'Declare stated additions in interventions with value_kind=additional, leaving unknown current levels as questions, and stated goal time limits in horizon_months and verbatim deadline_words, keeping relative periods relative without inventing dates.';
 const ESTIMATE_SENTENCE = 'Where the brief does not state a level, setting or size the model needs, propose a defensible Olumi starting estimate with origin=olumi and stance=estimate, explaining its basis, unit and period for the person to approve through the existing card, never presenting it as theirs; if no defensible estimate is possible, state the limitation and ask for the missing input rather than silently leaving the model unrunnable; in every draft with a supported additive goal, declare the sum identity with the separate current-level factor and every distinct addition as bound operands under the rules above.';
 
@@ -131,6 +149,8 @@ const EMPTY_READ = (): Json => ({ scenario_id: SCENARIO, graph: null, graph_pres
 
 describe('core drafts the FIRST model of a new scenario (graph null is a valid empty state)', () => {
   let app: FastifyInstance;
+  let rawStore: typeof import('../../../drafter-raw/index.js');
+  const REQUEST_ID = 'diagnostic-request-not-the-turn-id';
   let saved: Json | null = null;
   let registered: Json[] = [];
   let read: () => Json = EMPTY_READ;
@@ -154,7 +174,7 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
       // The construction's structured calls: the whole candidate gets the drafter's answer; any other structured step answers nothing.
       if (body.text?.format?.type === 'json_schema') {
         if (body.text.format.name === 'whole_candidate') { draftSchema = body.text.format.schema; draftInstructions = body.instructions; drafterCalls += 1; }
-        return ok(body.text.format.name === 'whole_candidate' ? [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(drafterAnswer) }] }] : []);
+        return ok(body.text.format.name === 'whole_candidate' ? [{ type: 'message', content: [{ type: 'output_text', text: rawDraftText() }] }] : []);
       }
       // The core agent: first the draft call, then its words.
       const input = Array.isArray(body.input) ? body.input as Json[] : [];
@@ -176,10 +196,13 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
       return ok([{ type: 'message', content: [{ type: 'output_text', text }] }]);
     }));
     vi.resetModules();
+    vi.stubEnv('SUPABASE_URL', 'http://localhost:54321');
+    vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'test-service-key');
     process.env.AGENT_LANE_ENABLED = 'true';
     process.env.AGENT_LANE_PREVIEW = 'false';
     const { agentV1TurnRoute } = await import('../../../../routes/agent-v1-turn.js');
-    app = Fastify({ logger: false });
+    rawStore = await import('../../../drafter-raw/index.js');
+    app = Fastify({ logger: false, requestIdHeader: 'x-request-id' });
     app.post('/assist/v1/scenarios/:id/graph', async (_req, reply) => {
       if (saved !== null && readUnavailable) return reply.code(503).send({});
       return read();
@@ -212,11 +235,11 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 60_000);
-  afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { SCENARIO = randomUUID(); rows.clear(); conversationIds.clear(); saved = null; registered = []; read = EMPTY_READ; toolOutputs.length = 0; drafterAnswer = DRAFT; briefArg = BRIEF; draftSchema = {}; versionsUnavailable = false; readUnavailable = false; proofFault = ''; toolBrief = undefined; drafterCalls = 0; cutShortAfterRun = false; runFails = false; runs = 0; skipDraft = false; });
+  afterAll(async () => { await rawStore.settleDrafterRawWritesForTests(); await app.close(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
+  beforeEach(() => { rawRecorder.rows.length = 0; rawRecorder.mode = 'ok'; rawRecorder.release = undefined; SCENARIO = randomUUID(); rows.clear(); conversationIds.clear(); saved = null; registered = []; read = EMPTY_READ; toolOutputs.length = 0; drafterAnswer = DRAFT; briefArg = BRIEF; draftSchema = {}; versionsUnavailable = false; readUnavailable = false; proofFault = ''; toolBrief = undefined; drafterCalls = 0; cutShortAfterRun = false; runFails = false; runs = 0; skipDraft = false; });
 
   const turn = async (): Promise<Json> => {
-    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', headers: { 'x-olumi-ai-mode': 'core' }, payload: {
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', headers: { 'x-olumi-ai-mode': 'core', 'x-request-id': REQUEST_ID }, payload: {
       kind: 'message', turn_id: randomUUID(), scenario_id: SCENARIO, stage: 'frame', turn_class: 'frame', message: briefArg, source: 'composer' } });
     expect(r.statusCode, r.body).toBe(200);
     return r.json() as Json;
@@ -224,6 +247,68 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
   const draftCall = (body: Json): Json => (body._agent?.tool_calls as Json[] | undefined)?.find((c) => c.name === 'build_model_from_brief') ?? {};
 
   const draftOutcome = (): Json => JSON.parse(String(toolOutputs.find((o) => o.call_id === 'draft_call')?.output ?? '{}')) as Json;
+
+  it.each([BRIEF, OTHER_BRIEF])('L17 records exactly one raw B draft with its own scenario and request: %s', async (brief) => {
+    briefArg = brief;
+    const body = await turn();
+    await rawStore.settleDrafterRawWritesForTests();
+    expect(rawRecorder.rows).toHaveLength(1);
+    const row = rawRecorder.rows[0]!;
+    expect(row.scenario_id).toBe(SCENARIO);
+    expect(row.request_id).toBe(REQUEST_ID);
+    expect(row.operation_id).toBe(registered[0]!.operation_id);
+    expect(row.brief_sha256).toBe(createHash('sha256').update(brief).digest('hex'));
+    expect(row.outcome).toBe('registered');
+    expect(row.calls).toHaveLength(1);
+    expect(row.calls[0]!.raw_text).toBe(rawDraftText());
+    expect(row.calls[0]!.threw).toBe(false);
+    expect(draftCall(body)).toMatchObject({ ok: true, mutated: true });
+    expect(body.assistant_text).toBe('Here is the first model I built.');
+    expect(drafterCalls).toBe(1);
+    // A new request for the saved construction makes no second draft or diagnostic write.
+    await turn();
+    await rawStore.settleDrafterRawWritesForTests();
+    expect(rawRecorder.rows).toHaveLength(1);
+    expect(registered).toHaveLength(1);
+    expect(drafterCalls).toBe(1);
+  });
+
+  it.each(['throws', 'failed', 'pending'] as const)('L17 recorder %s preserves the exact draft outcome without blocking or retrying', async (mode) => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-20T01:00:00Z'));
+    await turn();
+    const baseline = draftOutcome();
+    const baselineGraph = registered[0]!.graph;
+    SCENARIO = randomUUID(); rows.clear(); saved = null; registered = []; read = EMPTY_READ; toolOutputs.length = 0;
+    rawRecorder.rows.length = 0; rawRecorder.mode = mode;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const pendingTurn = turn();
+    try {
+      const body = await Promise.race([pendingTurn, new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => reject(new Error('diagnostic write blocked the turn')), 2_000);
+      })]);
+      expect(draftOutcome()).toEqual(baseline);
+      expect(registered[0]!.graph).toEqual(baselineGraph);
+      expect(body.assistant_text).toBe('Here is the first model I built.');
+      expect(rawRecorder.rows).toHaveLength(1);
+    } finally {
+      clearTimeout(timeout);
+      rawRecorder.release?.();
+      await pendingTurn;
+      await rawStore.settleDrafterRawWritesForTests();
+      vi.useRealTimers();
+    }
+    expect(rawRecorder.rows).toHaveLength(1);
+    expect(registered).toHaveLength(1);
+  });
+
+  it('L17 no-draft negative: another scenario and unrelated brief cannot create a raw record', async () => {
+    toolBrief = OTHER_BRIEF;
+    const body = await turn();
+    expect(draftCall(body)).toMatchObject({ ok: false, refusal: 'brief_not_users_words' });
+    expect(rawRecorder.rows).toEqual([]);
+    expect(drafterCalls).toBe(0);
+  });
 
   it.each([BRIEF, OTHER_BRIEF])(
     'L13 own registration receipt verifies the full postimage without history availability: %s', async (brief) => {
