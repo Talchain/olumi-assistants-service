@@ -1,7 +1,9 @@
 /**
  * THIN CORE: CHANGING A CORE SCENARIO (20 Oct 2026). On a scenario whose meaning is its living model:
  *  · `propose_change` carries the COMPLETE proposed living model. Olumi labels its attribution (the kernel), says exactly
- *    what it changes, item by item (`diffLivingModels`), and what the engine graph would withhold, and changes nothing;
+ *    what it changes, item by item (`diffLivingModels`), and what the engine graph would withhold, and changes nothing.
+ *    A removal is never implied by an omission: every removed item must be named in `remove` (the card shows only its
+ *    label, so an unnamed removal would be approved unseen), and a condition, view or history entry is never removed here;
  *  · `apply_change`, on the person's approval of THAT proposal, writes the model and the graph regenerated from it as ONE
  *    core write on the proposal's base (CAS). A model that moved since is `superseded`, never overwritten; this operation's
  *    own earlier save is reported as already saved, never repeated; an unverifiable save stays UNKNOWN.
@@ -26,6 +28,8 @@ export const LivingChangeParams = z.object({
   basis: z.string(),
   /** The complete living model as it would be after the change: every item, changed or not, with who said it. */
   model: LivingModel,
+  /** The ids of the aims, options, factors and links this change removes. Anything else left out is not a removal. */
+  remove: z.array(z.string()),
 }).strict();
 export type LivingChangeArgs = z.infer<typeof LivingChangeParams>;
 
@@ -57,6 +61,13 @@ export async function proposeLivingChange(deps: Deps, ctx: Ctx, args: LivingChan
   const kernelled = applyKernel(args.model, [...brief, ...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])], base.model);
   const changes = diffLivingModels(base.model, kernelled.model);
   if (changes.length === 0) return refused('no_change');
+  const removed = changes.filter((c) => c.change === 'remove');
+  const dropped = removed.filter((c) => c.kind === 'condition' || c.kind === 'view' || c.kind === 'history');
+  if (dropped.length > 0) return refused('cannot_remove_here', undefined, { kinds: [...new Set(dropped.map((c) => c.kind))] });
+  const unnamed = removed.filter((c) => !args.remove.includes(c.id)).map((c) => c.id);
+  if (unnamed.length > 0) return refused('removal_not_named', undefined, { left_out: unnamed });
+  const kept = args.remove.filter((id) => !removed.some((c) => c.id === id));
+  if (kept.length > 0) return refused('removal_not_applied', undefined, { still_present: kept });
   const mapped = mapLivingModel(kernelled.model);
   if (!mapped.graph.nodes.some((n) => n.kind !== 'decision')) return refused('model_empty');
   const p = deps.proposals.put(createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,

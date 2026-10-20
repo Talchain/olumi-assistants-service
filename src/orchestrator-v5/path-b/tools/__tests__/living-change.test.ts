@@ -51,7 +51,7 @@ const corrected = (): LivingModelT => {
   m.factors[0] = { ...m.factors[0]!, value: 0.6, quote: 'Actually f is at 0.6 now.' };
   return m;
 };
-const args = (model: LivingModelT) => ({ public_label: 'Set f to 0.6, as you said', basis: 'The person corrected f.', model });
+const args = (model: LivingModelT, remove: string[] = []) => ({ public_label: 'Set f to 0.6, as you said', basis: 'The person corrected f.', model, remove });
 
 describe('a core scenario changes through its living model', () => {
   it('the proposal writes nothing and shows exactly the one changed item; the approval writes it once on its base', async () => {
@@ -102,6 +102,23 @@ describe('a core scenario changes through its living model', () => {
     expect(after.find((c) => c.id === 'h')).toMatchObject({ change: 'add', after: { source: 'unverified' } });
     expect(after.find((c) => c.id === 'f')).toMatchObject({ after: { source: 'user', value: 0.6 } });
     expect(after.some((c) => c.id === 'g' || c.id === 'push' || c.id === 'f_g')).toBe(false);
+  });
+
+  it('an item left out is never removed unseen: a removal must be named, and a view is never removed here', async () => {
+    const p = product(KNOWN_ANSWER);
+    const proposals = new ProposalStore();
+    const omits = corrected();
+    omits.options = omits.options.filter((o) => o.id !== 'hold');
+    expect(await proposeLivingChange({ dispatch: p.dispatch, proposals }, ctx, args(omits)))
+      .toMatchObject({ status: 'refused', reason: 'removal_not_named', data: { left_out: ['hold'] } });
+    expect(await proposeLivingChange({ dispatch: p.dispatch, proposals }, ctx, args(corrected(), ['hold'])))
+      .toMatchObject({ status: 'refused', reason: 'removal_not_applied', data: { still_present: ['hold'] } });
+    const named = await proposeLivingChange({ dispatch: p.dispatch, proposals }, ctx, args(omits, ['hold']));
+    expect(named).toMatchObject({ status: 'ok' });
+    const noView = corrected();
+    noView.views = [];
+    expect(await proposeLivingChange({ dispatch: p.dispatch, proposals }, ctx, args(noView)))
+      .toMatchObject({ status: 'refused', reason: 'cannot_remove_here', data: { kinds: ['view'] } });
   });
 
   it('no change, or a scenario without a living model, prepares nothing', async () => {
