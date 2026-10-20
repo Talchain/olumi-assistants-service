@@ -23,11 +23,12 @@ export type LivingSourceT = z.infer<typeof LivingSource>;
 const id = z.string();
 
 const attribution = {
-  source: LivingSource,
+  source: LivingSource.describe(
+    "Who asserted this: user = the person's own statement; party = someone the person reports (named in `party`); olumi = Olumi's own addition or estimate; unverified = said to be someone's, without their exact words."),
   /** For `party`: the person or body the user reports, as written. Null otherwise. */
-  party: z.string().nullable(),
+  party: z.string().nullable().describe('For party: the person or body exactly as the user names them, word for word. Null otherwise.'),
   /** The person's exact words for a user or party item. Null for Olumi's own items. */
-  quote: z.string().nullable(),
+  quote: z.string().nullable().describe("The person's exact words that state this item, copied verbatim. Null for Olumi's own items."),
 };
 
 /** A figure as stated: a point (`value`) or a range (`low`/`high`), never a range collapsed to its midpoint. */
@@ -46,13 +47,14 @@ export const LivingAim = z.object({
   target: z.object({
     /** The quantity the aim is about, as written. */
     quantity: z.string(),
-    comparator: z.enum(['>=', '<=', '=', 'increase', 'decrease']),
+    comparator: z.enum(['>=', '<=', '=', 'increase', 'decrease']).describe(
+      ">= or <= for a level to reach; = for exactly; increase or decrease for a change from the baseline, `value` being the size of the change."),
     ...figure,
     by_when: z.string().nullable(),
     /** The reference the target is measured from, as written ("today", "last quarter"); null when none. */
     baseline: z.string().nullable(),
     /** The quantity's current level, in the target's unit, when stated. Unknown is null, never 0. */
-    current: z.number().nullable(),
+    current: z.number().nullable().describe("Today's level of the quantity, in the target's unit, when stated. Unknown is null, never 0."),
     /** 'user' only when the person set today's level themselves (a canvas edit); otherwise null: the aim's attribution covers it. */
     current_source: z.enum(['user']).nullable(),
   }).strict().nullable(),
@@ -77,22 +79,25 @@ export const LivingOption = z.object({
   id,
   label: z.string(),
   /** What the option sets each factor to. An option with no settings changes nothing (the status quo). */
-  settings: z.array(LivingSetting),
+  settings: z.array(LivingSetting).describe(
+    "The level the option sets each factor to, in the factor's unit. An option's own effect on a quantity (\"adds 30\") is a link from the option instead. An option with neither changes nothing (the status quo)."),
   ...attribution,
 }).strict();
 
 export const LivingLink = z.object({
   id,
   /** A factor id (or an option id for an option's direct effect). */
-  from: id,
+  from: id.describe('A factor id, or an option id when the person states that option\'s own effect on `to` ("Option A adds 30").'),
   /** A factor id or an aim id. */
-  to: id,
+  to: id.describe('A factor id or an aim id.'),
   effect: z.object({
     /**
      * `normal`: an explicitly stated law, `value` its mean and `sd` its standard deviation, per +1 of `from`. An ordinary
      * range is not a law (AIE, 20 Oct): it stays a `range`.
      */
-    form: z.enum(['point', 'range', 'normal', 'direction_only', 'unknown']),
+    form: z.enum(['point', 'exact', 'range', 'normal', 'direction_only', 'unknown']).describe(
+      'point: a stated figure ("adds about 50"); exact: the person says it is exactly this, with no variation ("adds exactly 50"); '
+      + 'normal: a stated Normal law, value its mean and sd its standard deviation; range: low to high; direction_only: a sign with no size; unknown.'),
     ...figure,
     /**
      * The link's unit is the `to` item's own unit, exactly as that item writes it; "per +1 of `from`" is implied, so it is
@@ -108,9 +113,20 @@ export const LivingLink = z.object({
 
 export const LivingCondition = z.object({
   text: z.string(),
-  applies_to: z.array(z.string()),
+  applies_to: z.array(z.string()).describe('The ids of the items (aims, options, factors, links) this condition qualifies.'),
+  /**
+   * What the condition does to a result that rests on these items (AIE 17:59 20 Oct), declared by the AI (meaning), applied by
+   * the mapper (rule), never decided by source: a challenge is said beside it; an applied assumption carries a CONDITIONAL
+   * result shown with it; an unresolved prerequisite withholds it. A model saved before roles reads every condition as unresolved.
+   */
+  role: z.enum(['challenge', 'assumption', 'prerequisite']).default('prerequisite').describe(
+    'challenge: a question or doubt worth raising, said beside a result without changing it; '
+    + 'assumption: a concrete modelling premise the result is actually worked out under, compatible with the stated figures, quantity and '
+    + 'window, and said with the result ("assuming the trial effect is fully realised by the end of the quarter"); '
+    + 'prerequisite: something unresolved that must hold first ("only after supplier approval"), so a result resting on it cannot be computed yet. '
+    + 'Decide by what it does to the calculation, never by who raised it.'),
   ...attribution,
-}).strict();
+}).strict().describe('A challenge, an applied assumption or an unresolved prerequisite about the listed items, with who raised it.');
 
 export const LivingView = z.object({
   holder: z.string(),

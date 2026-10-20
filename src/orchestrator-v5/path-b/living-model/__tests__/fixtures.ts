@@ -15,3 +15,19 @@ export const KNOWN_ANSWER: LivingModelT = {
     effect: { form: 'normal', value: 50, sd: 10, low: null, high: null, unit: 'units', sign: '+' } }],
   conditions: [], views: [{ holder: 'Sam', position: 'thinks push is too risky', quote: 'Sam disagrees' }], history: [],
 };
+
+/** A synthetic brief where each option states its own exact effect on the goal: today 40, at least 60, A +30, B +19.9. */
+export const OPTION_EFFECTS: LivingModelT = {
+  aims: [{ id: 'w', text: 'Widgets per hour', status: 'current', source: 'user', party: null, quote: 'at least 60 widgets per hour; today 40',
+    target: { quantity: 'widgets per hour', comparator: '>=', value: 60, low: null, high: null, unit: 'widgets per hour', by_when: null, baseline: 'today', current: 40, current_source: null } }],
+  options: [
+    { id: 'a', label: 'Option A', settings: [], source: 'user', party: null, quote: 'option A' },
+    { id: 'b', label: 'Option B', settings: [], source: 'user', party: null, quote: 'option B' },
+  ],
+  factors: [],
+  links: [
+    { id: 'a_w', from: 'a', to: 'w', source: 'user', party: null, quote: 'A adds exactly 30', effect: { form: 'exact', value: 30, sd: null, low: null, high: null, unit: 'widgets per hour', sign: '+' } },
+    { id: 'b_w', from: 'b', to: 'w', source: 'user', party: null, quote: 'B adds exactly 19.9', effect: { form: 'exact', value: 19.9, sd: null, low: null, high: null, unit: 'widgets per hour', sign: '+' } },
+  ],
+  conditions: [], views: [], history: [],
+};

@@ -3,7 +3,9 @@ import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import { LivingModel, type LivingModelT } from '../../../../schemas/living-model.js';
 import { mapLivingModel } from '../mapper.js';
 import { linkDefaultAssumptionsOf } from '../../../../cee/magnitude/link-default-assumptions.js';
-import { KNOWN_ANSWER } from './fixtures.js';
+import { KNOWN_ANSWER, OPTION_EFFECTS } from './fixtures.js';
+
+type Rec = Record<string, any>;
 
 const node = (g: { nodes: Record<string, unknown>[] }, id: string) => g.nodes.find((n) => n.id === id) as Record<string, any>;
 /** Standard normal CDF (Abramowitz–Stegun 7.1.26), enough for a 1e-4 check. */
@@ -139,13 +141,13 @@ describe('thin core mapper: living model → GraphV3', () => {
     expect(thresholdOn(mapLivingModel(reversed)), 'CONTRAST: without the saved goal, order decides').toBe('g2');
 
     const conditioned: LivingModelT = structuredClone(KNOWN_ANSWER);
-    conditioned.conditions.push({ text: 'The f→g effect requires supplier approval, which remains unresolved', applies_to: ['f_g'],
+    conditioned.conditions.push({ text: 'The f→g effect requires supplier approval, which remains unresolved', applies_to: ['f_g'], role: 'prerequisite',
       source: 'user', party: null, quote: 'Supplier approval remains unresolved' });
     const c = mapLivingModel(conditioned);
     expect(c.withheld).toContainEqual({ id: 'g', reason: 'chance_rests_on_withheld' });
     expect(node(c.graph, 'g')).not.toHaveProperty('goal_threshold');
     const offPath: LivingModelT = structuredClone(KNOWN_ANSWER);
-    offPath.conditions.push({ text: 'Only if the room is free', applies_to: ['elsewhere'], source: 'user', party: null, quote: null });
+    offPath.conditions.push({ text: 'Only if the room is free', applies_to: ['elsewhere'], role: 'prerequisite', source: 'user', party: null, quote: null });
     expect(node(mapLivingModel(offPath).graph, 'g')).toMatchObject({ goal_threshold: 0.8 });
   });
 
@@ -158,5 +160,80 @@ describe('thin core mapper: living model → GraphV3', () => {
     const link = graph.edges.find((e) => e.from === 'f' && e.to === 'g') as Record<string, any>;
     expect(link.provenance).toMatchObject({ source: 'cee_hypothesis', magnitude: 'olumi_estimate' });
     expect(link.exists_probability).toBe(0.8);
+  });
+
+  it('an option\'s own exact effect on the goal is worked out exactly: goal = its level today + the option\'s change, nothing drawn', () => {
+    const { graph, withheld } = mapLivingModel(OPTION_EFFECTS);
+    const n = (id: string) => (graph.nodes as Rec[]).find((x) => x.id === id)!;
+    expect(withheld.filter((w) => w.id !== 'options')).toEqual([]);
+    expect(n('w')).toMatchObject({ goal_threshold_raw: 60, nonlinear_identity: { operation: 'sum', factor_ids: ['w_today', 'w__change'], stated_in_brief: false } });
+    expect(n('w_today').observed_state).toEqual(n('w').observed_state);
+    expect(n('w__change')).toMatchObject({ category: 'controllable', observed_state: { raw_value: 0, cap: n('w').goal_threshold_cap } });
+    expect(n('a').interventions.w__change).toMatchObject({ raw_value: 30, source: 'brief_extraction' });
+    expect(n('b').interventions.w__change).toMatchObject({ raw_value: 19.9 });
+    for (const part of ['w_today', 'w__change']) {
+      expect((graph.edges as Rec[]).find((e) => e.from === part && e.to === 'w')).toMatchObject({ strength: { mean: 1 }, exists_probability: 1, provenance: { definitional: true } });
+    }
+    expect((graph.edges as Rec[]).some((e) => (e.from === 'a' || e.from === 'b') && e.to === 'w'), 'no option→goal edge reaches the engine').toBe(false);
+  });
+
+  it('CONTROL: a stated but not exact effect, or a level today that is not the person\'s, is an on/off factor per option, sized like any link', () => {
+    const about: LivingModelT = structuredClone(OPTION_EFFECTS);
+    for (const l of about.links) l.effect.form = 'point';
+    const { graph } = mapLivingModel(about);
+    const n = (id: string) => (graph.nodes as Rec[]).find((x) => x.id === id)!;
+    expect(n('w').nonlinear_identity).toBeUndefined();
+    expect(n('a').interventions.a__on).toMatchObject({ value: 1 });
+    const cap = n('w').goal_threshold_cap as number;
+    const edge = (graph.edges as Rec[]).find((e) => e.from === 'a__on' && e.to === 'w')!;
+    expect(edge.strength.mean).toBeCloseTo(30 / cap, 10);
+    expect(edge.strength.std).toBeCloseTo(15 / cap, 10);
+    const olumis: LivingModelT = structuredClone(OPTION_EFFECTS);
+    olumis.aims[0] = { ...olumis.aims[0]!, source: 'olumi', quote: null };
+    expect((mapLivingModel(olumis).graph.nodes as Rec[]).find((x) => x.id === 'w')!.nonlinear_identity).toBeUndefined();
+  });
+
+  it('buddy R1 #3523: a prerequisite stated on an option\'s exact effect still withholds the chance after it is lowered to the sum', () => {
+    const conditioned: LivingModelT = structuredClone(OPTION_EFFECTS);
+    conditioned.conditions.push({ text: 'A adds this only after supplier approval', applies_to: ['a_w'], role: 'prerequisite', source: 'user', party: null, quote: 'only after supplier approval' });
+    const c = mapLivingModel(conditioned);
+    expect(c.withheld).toContainEqual({ id: 'w', reason: 'chance_rests_on_withheld' });
+    expect((c.graph.nodes as Rec[]).find((n) => n.id === 'w')).not.toHaveProperty('goal_threshold');
+    expect((mapLivingModel(OPTION_EFFECTS).graph.nodes as Rec[]).find((n) => n.id === 'w'), 'CONTRAST: unconditioned').toHaveProperty('goal_threshold');
+  });
+
+  it('AIE 17:59: an applied assumption carries a conditional chance and a challenge sits beside it; an unresolved prerequisite withholds; the source never decides', () => {
+    const withCondition = (role: 'challenge' | 'assumption' | 'prerequisite', source: 'olumi' | 'user', on = ['f_g', 'g']): LivingModelT => {
+      const m: LivingModelT = structuredClone(KNOWN_ANSWER);
+      m.conditions.push({ text: 'Assuming the trial effect is fully realised by the end of the quarter', applies_to: on, role, source, party: null, quote: null });
+      return m;
+    };
+    const goal = (m: LivingModelT) => (mapLivingModel(m).graph.nodes as Rec[]).find((n) => n.id === 'g');
+    for (const s of ['olumi', 'user'] as const) {
+      expect(goal(withCondition('assumption', s)), `assumption, ${s}`).toMatchObject({ goal_threshold: 0.8 });
+      expect(goal(withCondition('challenge', s)), `challenge, ${s}`).toMatchObject({ goal_threshold: 0.8 });
+      expect(goal(withCondition('prerequisite', s)), `prerequisite, ${s}`).not.toHaveProperty('goal_threshold');
+    }
+    // A prerequisite on an option reaches the goal through what the option sets.
+    expect(goal(withCondition('prerequisite', 'user', ['push'])), 'prerequisite on an option').not.toHaveProperty('goal_threshold');
+    expect(goal(withCondition('prerequisite', 'user', ['elsewhere'])), 'CONTROL: off the path').toMatchObject({ goal_threshold: 0.8 });
+  });
+
+  it('AIE 17:59 point 4: an exact effect on a drawn link keeps its content but its chance is withheld; the exact sum stays the exact route', () => {
+    const m: LivingModelT = structuredClone(KNOWN_ANSWER);
+    m.links[0]!.effect = { form: 'exact', value: 60, sd: null, low: null, high: null, unit: 'units', sign: '+' };
+    const out = mapLivingModel(m);
+    expect(out.withheld).toContainEqual({ id: 'f_g', reason: 'exact_not_drawable' });
+    expect((out.graph.nodes as Rec[]).find((n) => n.id === 'g')).not.toHaveProperty('goal_threshold');
+    expect(m.links[0]!.effect.value, 'the exact content is kept').toBe(60);
+    expect((mapLivingModel(OPTION_EFFECTS).graph.nodes as Rec[]).find((n) => n.id === 'w'), 'CONTROL: the exact sum').toHaveProperty('goal_threshold');
+  });
+
+  it('a model saved before roles were declared reads each condition as a prerequisite (it withheld then, and still does)', () => {
+    const saved = JSON.parse(JSON.stringify(KNOWN_ANSWER));
+    saved.conditions = [{ text: 'Supplier approval', applies_to: ['f_g'], source: 'user', party: null, quote: null }];
+    const parsed = LivingModel.parse(saved);
+    expect(parsed.conditions[0]!.role).toBe('prerequisite');
+    expect((mapLivingModel(parsed).graph.nodes as Rec[]).find((n) => n.id === 'g')).not.toHaveProperty('goal_threshold');
   });
 });

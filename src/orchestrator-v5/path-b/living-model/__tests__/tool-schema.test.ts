@@ -10,4 +10,16 @@ describe('thin core: the link-unit convention reaches the AI in the tool schema 
     expect(sent).toContain('never add \\"per …\\"');
     expect(sent).toContain('The change in `to` for each +1 of `from`, in the unit of `to`.');
   });
+
+  it('an exact effect is told apart from a stated figure, in the schema the AI is sent', () => {
+    expect(sent).toContain('exact: the person says it is exactly this, with no variation');
+  });
+
+  it('R2 on 6e4d2305: an option\'s own effect is a link from the option; a party is named word for word; a condition is someone\'s prerequisite', () => {
+    expect(sent).toContain('or an option id when the person states that option');
+    expect(sent).toContain('exactly as the user names them, word for word');
+    expect(sent).toContain('prerequisite: something unresolved that must hold first');
+    expect(sent).toContain('assumption: a concrete modelling premise the result is actually worked out under');
+    expect(sent).toContain('Decide by what it does to the calculation, never by who raised it.');
+  });
 });
