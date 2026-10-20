@@ -193,6 +193,76 @@ describe('L12: joint targets through the real route and SDK approval', () => {
       proposal_edits: { proposal_id: card.proposal_id, revision: card.revision, digest: card.digest, graph_hash: body._proposal_fields.graph_hash, fields: [] } });
   }
   it.each([
+    ['Productivity', 'Quality', 'Productivity must rise at least 10% and quality at least 5% from today at three months.'],
+    ['Output', 'Reliability', 'Output must rise at least 10% and reliability at least 5% from today at three months. Revenue was 2m as of 2026-09-01.'],
+  ])('L21 bank: two declared changes → one approval/save → complete cold readback (%s, %s)', async (first, second, words) => {
+    const conditions = [first, second].map((quantity, i) => ({ node_id: i === 0 ? 'change_one' : 'change_two', quantity,
+      comparator: '>=' as const, value: i === 0 ? 10 : 5, unit: '%', frame: 'change', target_frame: 'change_abs', quantity_frame: 'change',
+      stance: 'target', source: source(words), basis: { reference: 'today', denominator: `today’s ${quantity.toLowerCase()}`,
+        period_months: 3, period_kind: 'at_end', effect_unit: null, effects_at_period_end: false, also_required: null, open_question: null } }));
+    const timing = { months: 3, reference: 'today', period_kind: 'at_end', deadline: null };
+    const { body, card } = await prepare({ public_label: 'Record both changes', basis: 'Olumi’s reading for approval.',
+      ops: [{ op: 'set_goal_target', goal_id: 'orders', conditions, timing }] }, words);
+    expect(card, JSON.stringify(body._agent?.tool_calls)).toBeDefined();
+    expect(body._proposal_fields.proposals).toHaveLength(1);
+    expect(card.approve_action.detail).toContain(`${first}`);
+    expect(card.approve_action.detail).toContain(`${second}`);
+    expect(card.approve_action.detail).toContain('from today');
+    expect(registered).toHaveLength(0);
+    await approve(card, body);
+    expect(outputOf('apply_call')).toMatchObject({ status: 'ok', data: { saved: true, receipt: { version_id: 'v_reg_1' } } });
+    expect(registered).toHaveLength(1);
+    expect(graphWrites).toHaveLength(0);
+    const cold = projectGraphForPersistence({ ...structuredClone(persisted), ...GraphV3.parse(persisted) }) as Json;
+    const declared = { goal_id: 'orders', conditions: conditions.map(c => ({ ...c, goal_id: c.node_id, origin: c.source.origin,
+      quote: c.source.quote, said_in: words, recorded_at: '' })), timing, new_quantities: conditions.map(c => c.node_id) };
+    const reading = declared as unknown as Parameters<typeof targetReadback>[1];
+    expect(targetReadback(cold, reading).holds).toBe(true);
+    for (const c of conditions) {
+      const node = cold.nodes.find((n: Json) => n.id === c.node_id);
+      expect(node.observed_state).toBeUndefined();
+      expect(node.goal_target_basis).toMatchObject({ quantity_frame: 'change', target_frame: 'change_abs', target_raw: c.value,
+        reference: 'today', denominator: c.basis.denominator, period_months: 3, period_kind: 'at_end' });
+      expect(cold.goal_constraints.find((r: Json) => r.node_id === c.node_id)).toMatchObject({ value: c.value, value_frame: 'change_abs', role: 'goal_target' });
+      // Mutant pair per condition: reference/denominator meaning must be checked, not merely its numeric threshold.
+      for (const [field, value] of [['reference', 'launch'], ['denominator', 'an unrelated revenue figure']]) {
+        const mutant = structuredClone(cold);
+        mutant.nodes.find((n: Json) => n.id === c.node_id).goal_target_basis[field!] = value;
+        expect(targetReadback(mutant, reading).holds).toBe(false);
+      }
+    }
+    await approve(card, body);
+    expect(registered).toHaveLength(1);
+  });
+
+  it('L21 bank: conversion is a LEVEL over the launch window AND new customers accumulate from launch', async () => {
+    const words = 'Conversion must be strictly above 15% over the first 3 months after launch AND we need at least 20 new customers in that window.';
+    const conditions = [
+      { node_id: 'conversion', quantity: 'Conversion rate', comparator: '>', value: 15, unit: '%', frame: 'level', stance: 'target', source: source(words) },
+      { node_id: 'new_customers', quantity: 'Cumulative new customers since launch', comparator: '>=', value: 20, unit: 'customers',
+        frame: 'change', target_frame: 'change_abs', quantity_frame: 'change', stance: 'target', source: source(words),
+        basis: { reference: 'launch', denominator: null, period_months: 3, period_kind: 'over_period', effect_unit: null,
+          effects_at_period_end: false, also_required: null, open_question: null } },
+    ];
+    const timing = { months: 3, reference: 'launch', period_kind: 'over_period', deadline: null };
+    const { body, card } = await prepare({ public_label: 'Record both launch conditions', basis: 'Olumi’s at-least reading for approval.',
+      ops: [{ op: 'set_goal_target', goal_id: 'orders', conditions, timing }] }, words);
+    expect(card, JSON.stringify(body._agent?.tool_calls)).toBeDefined();
+    expect(body._proposal_fields.proposals).toHaveLength(1);
+    expect(card.approve_action.detail).toContain('Conversion rate above 15%');
+    expect(card.approve_action.detail).toContain('after launch');
+    expect(card.approve_action.detail).not.toContain('from today');
+    await approve(card, body);
+    expect(outputOf('apply_call')).toMatchObject({ status: 'ok', data: { saved: true, receipt: { version_id: 'v_reg_1' } } });
+    expect(registered).toHaveLength(1);
+    const cold = projectGraphForPersistence({ ...structuredClone(persisted), ...GraphV3.parse(persisted) }) as Json;
+    expect(cold.goal_constraints.find((r: Json) => r.node_id === 'conversion')).toMatchObject({ value: 15, operator_as_stated: '>', value_frame: 'level' });
+    expect(cold.goal_constraints.find((r: Json) => r.node_id === 'new_customers')).toMatchObject({ value: 20, value_frame: 'change_abs' });
+    const count = cold.nodes.find((n: Json) => n.id === 'new_customers');
+    expect(count.observed_state).toBeUndefined();
+    expect(count.goal_target_basis).toMatchObject({ reference: 'launch', period_months: 3, period_kind: 'over_period' });
+  });
+  it.each([
     'We need over 150 weekly orders AND no more than 6 vans over the next 3 months.',
     'Our regional rollout needs over 150 weekly deliveries AND at most 6 vehicles over the next 3 months.',
     'Revenue was 2m as of 2026-09-01; we need over 150 weekly orders AND at most 6 vans over the next 3 months.',
