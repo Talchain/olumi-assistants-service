@@ -47,11 +47,13 @@ export const AGENTS_SDK = '@openai/agents@0.18.0';
 export const CORE_MAX_MODEL_CALLS = 8;
 /** Rendered tokens past which the server compacts the Conversation (native compaction; the window grows every turn). */
 export const CORE_COMPACT_THRESHOLD = 100_000;
-/** The tools that draft or change the model: a turn the route opens on one of them is never a reply-only turn. */
+/** The tools that draft or change the living model: never offered on a reply-only turn, so its fast budget writes no model. */
 const MODEL_WRITING_TOOLS: ReadonlySet<string> = new Set(['build_model_from_brief', 'propose_change']);
+/** The tools the route opens a reply-only turn on: the Run, and applying a change the person approved. */
+const REPLY_ENTRY_TOOLS: ReadonlySet<string> = new Set(['run_analysis', 'apply_change']);
 /** A turn that reads, runs and explains only: a press, or a turn the route opens on applying a change or a Run. */
 export const replyOnlyTurn = (input: Pick<CoreTurnInput, 'press' | 'firstTool'>): boolean =>
-  input.press !== undefined || (input.firstTool !== undefined && !MODEL_WRITING_TOOLS.has(input.firstTool));
+  input.press !== undefined || (input.firstTool !== undefined && REPLY_ENTRY_TOOLS.has(input.firstTool));
 
 // Tests never export traces; a deployed runtime uses the SDK's built-in exporter, which reads the lane's OPENAI_API_KEY.
 if (getRuntimeEnv() === 'test') setTracingDisabled(true);
@@ -203,9 +205,11 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
   };
   // The typed adapters (`path-b/tools`), less any the route withholds on this turn. Approval is theirs to require
   // (`needsApproval`) and the SDK's to pause on: no consent orchestration of our own.
-  const tools = input.tools(record).filter((t) => !('name' in t) || !withheld.has(t.name));
+  // A reply-only turn runs on the fast budget without the model writers, so drafting and changes stay on the builder.
+  const fast = input.replyBudget !== undefined && replyOnlyTurn(input);
+  const budget = fast ? input.replyBudget! : input.budget;
+  const tools = input.tools(record).filter((t) => !('name' in t) || !(withheld.has(t.name) || (fast && MODEL_WRITING_TOOLS.has(t.name))));
   const pendingRows: Promise<void>[] = [];
-  const budget = input.replyBudget !== undefined && replyOnlyTurn(input) ? input.replyBudget : input.budget;
   const client = ledgeredAgentsClient({ site: 'agent-core.sdk', pending: pendingRows,
     detailOf: (body) => ({ model: budget.model, purpose: 'conversation', ...agentRequestIdentity('agent.converse', body) }) });
   const agent = new Agent({
