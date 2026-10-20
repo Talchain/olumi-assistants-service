@@ -49,5 +49,8 @@ describe('evaluated default ledger, independent of point authorship', () => {
     expect(result.option_comparison).toEqual(unchanged.option_comparison);
     expect(runFactsOf(f.result, g, false).chances).toEqual({});
     expect(readLinkDefaultAssumptions(licence.default_assumptions)).toEqual(licence.default_assumptions);
+    const projection = licence.default_assumptions;
+    expect(readLinkDefaultAssumptions({ ...projection, links: [{ ...projection.links[0], from: 42 }] })).toBeUndefined();
+    expect(readLinkDefaultAssumptions({ ...projection, links: [{ ...projection.links[0], loss: [{ reason: 'unverified' }] }] })).toBeUndefined();
   });
 });

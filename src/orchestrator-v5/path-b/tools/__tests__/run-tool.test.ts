@@ -43,6 +43,29 @@ describe('a Run is claimed only when the read selects that Run on the current mo
     expect(p.runAnalysis).toHaveBeenCalledWith(ARGS);
   });
 
+  it.each(['parcels', 'repairs'])('L11: %s exact dispatched inputs reach the Run tool, never substituted from today’s model', async subject => {
+    const snapshot = { options: [
+      { option_id: 'evening', settings: [{ factor_id: 'capacity', raw: 300, encoded: 0.3, unit: `${subject} per day` }] },
+      { option_id: 'equipment', settings: [{ factor_id: 'capacity', raw: 250, encoded: 0.25, unit: `${subject} per day` }] },
+    ] };
+    const after = graphRead('run_2') as { status: number; json: Rec };
+    after.json.analysis_run_evidence = { run_id: 'run_2', input_snapshot: snapshot };
+    const out = await runAnalysis(product(RAN, [after]), ctx, ARGS, FREE);
+    expect(out.status).toBe('ok');
+    if (out.status !== 'ok') throw new Error('not recorded');
+    expect(out.data.inputs_used).toEqual(snapshot);
+    expect(out.data.inputs_used).not.toEqual(after.json.graph);
+  });
+
+  it.each(['missing', 'foreign'] as const)('L11: %s input evidence never borrows the saved model’s values', async kind => {
+    const after = graphRead('run_2') as { status: number; json: Rec };
+    if (kind === 'foreign') after.json.analysis_run_evidence = { run_id: 'run_1', input_snapshot: { options: [{ raw: 999 }] } };
+    const out = await runAnalysis(product(RAN, [after]), ctx, ARGS, FREE);
+    expect(out.status).toBe('ok');
+    if (out.status !== 'ok') throw new Error('not recorded');
+    expect(out.data.inputs_used).toBeNull();
+  });
+
   it.each([
     ['the read selects another Run (another time)', graphRead('run_1', 'h_one', 'h_one', '2026-10-19T09:00:00.000Z')],
     ['the model has moved since the Run', graphRead('run_2', 'h_one', 'h_two')],

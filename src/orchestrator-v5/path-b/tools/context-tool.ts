@@ -82,6 +82,7 @@ function selectedRunOf(json: Rec, graph: Rec): Rec | null {
   const analysisReady = isRec(json.current_read) ? json.current_read.analysis_ready : undefined;
   return {
     run_id: runId,
+    inputs_used: evidence?.runId === runId ? evidence?.inputSnapshot ?? null : null,
     graph_hash_at_run: str(run.graph_hash_at_run),
     stale: bool(isRec(view.staleness) ? view.staleness.stale : undefined),
     run_state: runState ?? null,

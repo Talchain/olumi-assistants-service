@@ -480,7 +480,9 @@ export function candidateToAdmittedGraph(input: unknown, usersWords?: string): C
     const quote = (l as Rec).source_quote;
     const sized: Rec = aEdge === undefined ? e : { ...aEdge, from: e.from, to: e.to };
     // The selected A edge keeps A's science; only this admission's selected edges carry its ledger.
-    const linkLoss = aEdge === undefined ? drawn.loss.filter(row => row.field_path.startsWith(`edges[${e.from}::${e.to}].`)) : [];
+    const sourcePath = aEdge === undefined ? `edges[${e.from}::${e.to}].` : `edges[${aPair(e.from, e.to)}].`;
+    const linkLoss = (aEdge === undefined ? drawn.loss : a.loss).filter(row => row.field_path.startsWith(sourcePath))
+      .map(row => ({ ...row, field_path: row.field_path.replace(sourcePath, `edges[${e.from}::${e.to}].`) }));
     loss.push(...linkLoss);
     const defaults = linkLoss.filter(row => (drawn.projected_fields[`${e.from}::${e.to}`] ?? [])
       .some(field => row.field_path === `edges[${e.from}::${e.to}].${field}`));
