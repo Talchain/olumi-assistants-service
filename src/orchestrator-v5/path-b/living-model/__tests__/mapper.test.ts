@@ -258,6 +258,13 @@ describe('thin core mapper: living model → GraphV3', () => {
     expect(goal(target({ comparator: 'increase', value: 3, unit: '%', current_unit: '%', current: 12, change_kind: 'points' }))).toMatchObject({ goal_threshold_raw: 15 });
     expect(target({ comparator: 'increase', value: 10, unit: '%', current_unit: 'units', current: 0 }).withheld).toContainEqual({ id: 'g', reason: 'change_base_invalid' });
     expect(target({ comparator: 'increase', value: 10, unit: 'hours', current_unit: 'units' }).withheld, 'a change in another unit').toContainEqual({ id: 'g', reason: 'change_kind_unknown' });
+    // Buddy R1 on #3525: a declared unit is never dropped or relabelled.
+    expect(target({ comparator: 'increase', value: 3, change_kind: 'points', unit: 'hours', current_unit: '%', current: 12 }).withheld, 'points in hours')
+      .toContainEqual({ id: 'g', reason: 'change_kind_unknown' });
+    expect(target({ comparator: '>=', value: 80, unit: '%', current_unit: 'seats', current: 40 }).withheld, 'a level target over today in another unit')
+      .toContainEqual({ id: 'g', reason: 'current_unit_mismatch' });
+    expect(goal(target({ comparator: '>=', value: 80, unit: '%', current_unit: 'seats', current: 40 }))).not.toHaveProperty('goal_threshold');
+    expect(goal(target({ comparator: '>=', value: 100, current_unit: 'units' })), 'CONTROL: the same unit declared').toMatchObject({ goal_threshold_raw: 100 });
   });
 
   it('a model saved before change goals reads the new target fields as null', () => {

@@ -27,7 +27,7 @@ import { admitGoalBaseline } from '../../../cee/factor-extraction/goal-baseline-
 import { LLM_STRENGTH_STD_FLOOR } from '../../../cee/constants.js';
 
 export type WithheldReason =
-  | 'no_level_target' | 'aim_not_in_slice' | 'change_kind_unknown' | 'change_base_invalid' | 'change_base_not_theirs' | 'exact_target_not_in_slice' | 'target_range_not_in_slice'
+  | 'no_level_target' | 'aim_not_in_slice' | 'change_kind_unknown' | 'change_base_invalid' | 'change_base_not_theirs' | 'current_unit_mismatch' | 'exact_target_not_in_slice' | 'target_range_not_in_slice'
   | 'goal_level_unknown' | 'link_frame_unknown' | 'chance_rests_on_withheld' | 'condition_not_in_slice'
   | 'goal_level_not_admitted' | 'factor_level_unknown' | 'level_range_not_in_slice' | 'setting_not_convertible'
   | 'link_endpoint_unknown' | 'link_unit_mismatch' | 'link_range_no_law' | 'link_sign_unknown' | 'no_single_status_quo'
@@ -84,11 +84,18 @@ interface LevelTarget { readonly comparator: '>=' | '<='; readonly value: number
 function levelTargetOf(t: Target): LevelTarget | WithheldReason {
   if (t.comparator === '=') return 'exact_target_not_in_slice';
   if (t.value === null) return t.low !== null || t.high !== null ? 'target_range_not_in_slice' : 'no_level_target';
-  if (t.comparator === '>=' || t.comparator === '<=') return { comparator: t.comparator, value: t.value, unit: t.unit };
+  // A declared unit is model content, never relabelled by another field (buddy R1 on #3525): today's level in another unit
+  // than a level target has no supported conversion here, so the dependent calculation is withheld.
+  if (t.comparator === '>=' || t.comparator === '<=') {
+    if (t.current !== null && t.current_unit !== null && t.current_unit !== t.unit) return 'current_unit_mismatch';
+    return { comparator: t.comparator, value: t.value, unit: t.unit };
+  }
   if (t.current === null) return 'goal_level_unknown';
   const levelUnit = t.current_unit ?? t.unit;
   const kind = t.change_kind ?? (levelUnit === '%' ? null : t.unit === levelUnit ? 'absolute' : t.unit === '%' ? 'relative' : null);
-  const fits = kind === 'absolute' ? t.unit === levelUnit : kind === 'relative' ? t.unit === '%' : kind === 'points' ? levelUnit === '%' : false;
+  // Points are percentage points of a percentage quantity: both units are '%', or nothing is dropped silently.
+  const fits = kind === 'absolute' ? t.unit === levelUnit : kind === 'relative' ? t.unit === '%'
+    : kind === 'points' ? levelUnit === '%' && t.unit === '%' : false;
   if (kind === null || !fits) return 'change_kind_unknown';
   if (kind === 'relative' && !(t.current > 0)) return 'change_base_invalid';
   const sign = t.comparator === 'increase' ? 1 : -1;

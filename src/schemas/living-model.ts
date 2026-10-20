@@ -62,7 +62,7 @@ export const LivingAim = z.object({
       "The unit today's level is in, when it differs from `unit` (a change of \"10 %\" on revenue in \"£ per month\" has unit \"%\" and current_unit \"£ per month\"). Null when they are the same."),
     /** For increase/decrease: what the change's figure means. Declared, never guessed; a model saved before reads null. */
     change_kind: z.enum(['absolute', 'relative', 'points']).nullable().default(null).describe(
-      'For increase or decrease only: absolute = the change in the quantity\'s own unit; relative = a percentage of today\'s level; points = percentage points of a quantity that is itself a percentage. Null for a level target.'),
+      'For increase or decrease only: absolute = the change in the quantity\'s own unit; relative = a percentage of today\'s level; points = percentage points of a quantity that is itself a percentage (its unit is \"%\"). Null for a level target.'),
   }).strict().nullable(),
   ...attribution,
 }).strict();
