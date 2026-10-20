@@ -76,8 +76,11 @@ describe('Olumi\'s provisional first model: the AI\'s living model, compiled by 
       graph: POSTIMAGE, thin_core: true, brief_text: BRIEF, operation_id: constructionOperationId(SID, BRIEF), expected_graph_identity_hash: null } }]);
     expect(out).toMatchObject({ status: 'ok', mutated: true, data: { provisional: 'olumi', save_outcome: 'VERIFIED_SAVED', model_version: SAVED.json.model_version,
       revision: { graph_hash: MODEL.json.graph_hash }, draft: { withheld: mapped.withheld, relabelled: [] } } });
-    // What this slice cannot yet convert is said, never guessed: no level target, so the link to it has no endpoint.
-    expect(mapped.withheld).toEqual([{ id: 'visitors_served', reason: 'no_level_target' }, { id: 'assistants_visitors', reason: 'link_endpoint_unknown' }]);
+    // What this slice cannot yet convert is said, never guessed: no level target, so no chance.
+    expect(mapped.withheld).toEqual([{ id: 'visitors_served', reason: 'no_level_target' }]);
+    // The goal is still drawn, and the unsized link to it is Olumi's placeholder (the licence withholds the chance).
+    expect(mapped.graph.nodes.find((n) => n.id === 'visitors_served')).toMatchObject({ kind: 'goal' });
+    expect(mapped.graph.edges.find((e) => e.id === 'assistants_visitors')).toMatchObject({ provenance: { magnitude: 'olumi_placeholder' } });
     expect(traceRow('build_model_from_brief', out)).toEqual({ name: 'build_model_from_brief', ok: true, mutated: true, outcome: 'ok', refusal: null, ran: null });
     expect(p.onModelRegistered).toHaveBeenCalledTimes(1);
   });
