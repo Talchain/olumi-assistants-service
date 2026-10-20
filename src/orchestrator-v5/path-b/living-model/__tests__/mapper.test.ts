@@ -229,6 +229,28 @@ describe('thin core mapper: living model → GraphV3', () => {
     expect((mapLivingModel(olumis).graph.nodes as Rec[]).find((x) => x.id === 'w')!.nonlinear_identity).toBeUndefined();
   });
 
+  it('Paul 21 Oct (f46a14e3): an option\'s effect on a FACTOR reaches the engine through its switch, so the option drives that factor', () => {
+    const viaFactor: LivingModelT = structuredClone(OPTION_EFFECTS);
+    viaFactor.factors = [{ id: 'k', label: 'Customer understanding', value: null, low: null, high: null, unit: null, source: 'olumi', party: null, quote: null }];
+    viaFactor.options.push({ id: 'c', label: 'Carry on as now', settings: [], source: 'olumi', party: null, quote: null });
+    viaFactor.links = [
+      { id: 'a_k', from: 'a', to: 'k', source: 'olumi', party: null, quote: null, effect: { form: 'direction_only', value: null, sd: null, low: null, high: null, unit: null, sign: '+' } },
+      { id: 'b_k', from: 'b', to: 'k', source: 'olumi', party: null, quote: null, effect: { form: 'direction_only', value: null, sd: null, low: null, high: null, unit: null, sign: '-' } },
+      { id: 'k_w', from: 'k', to: 'w', source: 'olumi', party: null, quote: null, effect: { form: 'direction_only', value: null, sd: null, low: null, high: null, unit: null, sign: '+' } },
+    ];
+    const m = mapLivingModel(viaFactor);
+    const n = (id: string) => (m.graph.nodes as Rec[]).find((x) => x.id === id)!;
+    expect(n('a').interventions.a__on).toMatchObject({ value: 1 });
+    expect(n('b').interventions.b__on).toMatchObject({ value: 1 });
+    expect(n('c')).toMatchObject({ is_baseline: true, interventions: { a__on: { value: 0 }, b__on: { value: 0 } } });
+    const edge = (from: string, to: string) => (m.graph.edges as Rec[]).find((e) => e.from === from && e.to === to);
+    expect(edge('a__on', 'k')).toMatchObject({ effect_direction: 'positive' });
+    expect(edge('b__on', 'k')).toMatchObject({ effect_direction: 'negative' });
+    expect(edge('k', 'w')).toBeDefined();
+    expect(m.withheld.filter((w) => w.reason === 'link_endpoint_unknown')).toEqual([]);
+    expect(m.withheld.some((w) => w.id === 'options'), 'one status quo').toBe(false);
+  });
+
   it('buddy R1 #3523: a prerequisite stated on an option\'s exact effect still withholds the chance after it is lowered to the sum', () => {
     const conditioned: LivingModelT = structuredClone(OPTION_EFFECTS);
     conditioned.conditions.push({ text: 'A adds this only after supplier approval', applies_to: ['a_w'], role: 'prerequisite', source: 'user', party: null, quote: 'only after supplier approval' });
