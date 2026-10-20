@@ -1938,12 +1938,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
    * it is the caller's own token, and the ownership pre-flight above has
    * already refused anyone who is not entitled to this scenario.
    */
-  const dispatchFor = (authorization: string | undefined): InternalDispatch =>
+  const dispatchFor = (authorization: string | undefined, extraHeaders?: Record<string, string>): InternalDispatch =>
     async (path, body) => {
       const res = await app.inject({
         method: 'POST',
         url: path,
-        headers: internalHeaders(config.auth.assistApiKey ?? config.auth.assistApiKeys?.[0] ?? '', authorization),
+        headers: { ...internalHeaders(config.auth.assistApiKey ?? config.auth.assistApiKeys?.[0] ?? '', authorization), ...extraHeaders },
         payload: body as Record<string, unknown>,
       });
       let json: Record<string, unknown> = {};
@@ -2316,8 +2316,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         });
       }
 
+      // THIN CORE: the core lane's gestures are checked for a core scenario, whose living model they change.
       const forwarded = await dispatchFor(
         typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined,
+        mode === 'core' ? { 'x-olumi-ai-mode': 'core' } : undefined,
       )('/orchestrate/v2/turn', body);
       // Forwarded board replies use the same current Run boundary before both history and user-visible egress.
       const forwardedState = forwarded.status === 200 && typeof forwarded.json.assistant_text === 'string'

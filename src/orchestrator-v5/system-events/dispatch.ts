@@ -722,6 +722,12 @@ function replyForAttemptThatWroteNothing(args: {
 export interface DispatchSystemEventParams {
   readonly payload: SystemEventTurnPayload;
   readonly requestId: string;
+  /**
+   * THIN CORE: the request came through the core lane (`x-olumi-ai-mode: core`), the only lane that makes core scenarios,
+   * so a gesture may be one on a core scenario and is checked for it first (`dispatchCoreCanvasEdit`). Other requests read
+   * exactly as before; a gesture on a core scenario from them meets the one-write rule at the door instead.
+   */
+  readonly coreScenarioCheck?: boolean;
 }
 
 /**
@@ -1310,7 +1316,7 @@ async function dispatchSystemEventOperation(
   }
 
   // THIN CORE: a core scenario's gestures change its living model; the writers below never run on it.
-  if (handling === 'mutating') {
+  if (handling === 'mutating' && params.coreScenarioCheck === true) {
     const core = await dispatchCoreCanvasEdit(payload, requestId, startedAt);
     if (core !== null) return core;
   }

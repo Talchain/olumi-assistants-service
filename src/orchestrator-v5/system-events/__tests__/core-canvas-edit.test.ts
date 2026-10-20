@@ -26,7 +26,7 @@ type Rec = Record<string, any>;
 const SCENARIO = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const CORE: Rec = { ...mapLivingModel(KNOWN_ANSWER).graph, living_model: KNOWN_ANSWER };
 const BASE = computeExpectedGraphCasHashes(CORE).expectedGraphAnalysisHash!;
-const send = (event: Rec) => dispatchSystemEvent({ requestId: 'req-1', payload: {
+const send = (event: Rec, coreScenarioCheck = true) => dispatchSystemEvent({ requestId: 'req-1', coreScenarioCheck, payload: {
   turn_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', scenario_id: SCENARIO, stage: 'evaluate', kind: 'system_event', event,
 } as unknown as SystemEventTurnPayload });
 const written = (): Rec => (append.mock.calls[0]![0] as Rec).graph;
@@ -62,6 +62,13 @@ describe('a canvas gesture on a core scenario', () => {
     const out = await send({ kind: 'option_intervention_edit', option_id: 'push', factor_id: 'f', value: 0.8, base_graph_hash: 'f'.repeat(16) });
     expect(out.commitPerformed).toBe(false);
     expect(out.graphConflict).toMatchObject({ recovery_action: 'refresh_and_reconfirm' });
+    expect(append).not.toHaveBeenCalled();
+  });
+
+  it('from outside the core lane, a gesture on a core scenario meets the one-write rule: nothing is written', async () => {
+    const out = await send({ kind: 'option_intervention_edit', option_id: 'push', factor_id: 'f', value: 0.8, base_graph_hash: BASE }, false)
+      .catch((err: unknown) => ({ thrown: String(err) }));
+    expect(JSON.stringify(out)).not.toContain('"commitPerformed":true');
     expect(append).not.toHaveBeenCalled();
   });
 
