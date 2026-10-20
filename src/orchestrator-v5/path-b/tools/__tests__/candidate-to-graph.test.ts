@@ -1225,7 +1225,8 @@ describe('candidateToGraph: conversion + science only', () => {
   it('STATEMENTS CARRIED (contrast): without the user\'s words nothing is recorded, and the rest of the model is the same', () => {
     const draft = carriedDraft(); draft.goal.baseline_origin = 'unknown'; draft.goal.target_origin = 'unknown';
     draft.factors[0].origin = 'unknown'; draft.options[0].interventions[0].origin = 'unknown';
-    const bare = candidateToGraph(draft) as ReturnType<typeof converted>;
+    const bare = candidateToGraph(draft);
+    if ('refused' in bare) throw new Error(bare.refused);
     expect((bare.graph.nodes as Rec[]).filter((n) => n.user_statements !== undefined)).toEqual([]);
     const out = candidateToGraph(draft, { words: SALES_WORDS, recorded_at: AT });
     if ('refused' in out) throw new Error(out.refused);

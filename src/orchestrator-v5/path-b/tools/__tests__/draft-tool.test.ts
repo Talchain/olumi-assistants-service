@@ -132,18 +132,17 @@ it('ONE declared pair: B strict output requires origin/stance on every figure; A
   const before = buildCandidateSchema();
   const p = product({ graph: [EMPTY], register: [{ status: 422, json: {} }] });
   await buildModel(p, ctx, { brief: BRIEF });
-  const schema = p.callStructured.mock.calls[0]![0].schema as Rec;
-  const props = schema.properties;
-  const pair = (node: Rec, prefix = '') => {
-    expect(node.properties[`${prefix}origin`]).toEqual({ type: 'string', enum: ['user', 'third_party', 'olumi', 'unknown'] });
-    expect(node.properties[`${prefix}stance`]).toEqual({ type: 'string', enum: ['stated_current', 'hypothetical', 'target', 'estimate'], description: STANCE_DESCRIPTION });
-    expect(node.required).toEqual(expect.arrayContaining([`${prefix}origin`, `${prefix}stance`]));
+  const schema = p.callStructured.mock.calls[0]![0].schema;
+  const pair = (path: string, prefix = '') => {
+    expect(schema).toHaveProperty(`${path}.properties.${prefix}origin`, { type: 'string', enum: ['user', 'third_party', 'olumi', 'unknown'] });
+    expect(schema).toHaveProperty(`${path}.properties.${prefix}stance`, { type: 'string', enum: ['stated_current', 'hypothetical', 'target', 'estimate'], description: STANCE_DESCRIPTION });
+    expect(schema).toHaveProperty(`${path}.required`, expect.arrayContaining([`${prefix}origin`, `${prefix}stance`]));
   };
-  pair(props.goal, 'target_'); pair(props.goal, 'baseline_');
-  for (const key of ['factors', 'risks', 'outcomes', 'links']) pair(props[key].items);
-  pair(props.options.items.properties.interventions.items);
+  pair('properties.goal', 'target_'); pair('properties.goal', 'baseline_');
+  for (const key of ['factors', 'risks', 'outcomes', 'links']) pair(`properties.${key}.items`);
+  pair('properties.options.items.properties.interventions.items');
   expect(buildCandidateSchema()).toEqual(before);
-  expect((before as Rec).properties.factors.items.properties).not.toHaveProperty('origin');
+  expect(before).not.toHaveProperty('properties.factors.items.properties.origin');
 });
 
 describe('exactly once: a retry of a committed construction is "already saved"', () => {

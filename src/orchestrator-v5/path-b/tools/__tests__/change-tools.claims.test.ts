@@ -195,7 +195,7 @@ describe('ONE declared pair edit writer', () => {
     const data = await saved([queue20(origin, origin === 'olumi' ? null : 'about 20 minutes on a Saturday, if the weather holds', null, stance)]);
     expect(data.written).toEqual([expect.objectContaining({ declared: expect.objectContaining({ origin, stance }) })]);
     if (expectedOrigin === null) expect(nodeOf('queue').observed_state).toEqual((stored() as { nodes: Rec[] }).nodes.find((n) => n.id === 'queue')!.observed_state);
-    else expect((data.written as Rec[])[0]!.stored_as.origin).toBe(expectedOrigin);
+    else expect((data.written as Rec[])[0]!.stored_as).toHaveProperty('origin', expectedOrigin);
     if (origin === 'unknown') expect(nodeOf('queue').provenance).toBe('unverified_brief');
     if (origin !== 'olumi') expect(await coldClaims('queue')).toContainEqual(expect.objectContaining({ stance, low: 20, said_by: origin === 'unknown' ? 'unknown' : 'user' }));
     persisted = JSON.parse(JSON.stringify(persisted));
@@ -216,7 +216,7 @@ describe('ONE declared pair new-factor writer, second brief', () => {
     { ...ctx, user_turn_text: words, verified_user_messages: [words] });
     persisted = JSON.parse(JSON.stringify(persisted));
     const row = (data.written as Rec[])[0]!;
-    expect(row.stored_as.origin).toBe(expectedOrigin);
+    expect(row.stored_as).toHaveProperty('origin', expectedOrigin);
     expect(row.figure).toBe(4);
     const added = nodeOf(String(row.id));
     if (stance === 'hypothetical') expect(added.observed_state).toBeUndefined();

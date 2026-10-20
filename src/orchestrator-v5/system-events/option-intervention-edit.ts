@@ -975,7 +975,7 @@ export type CompoundStructuralMember =
  */
 export type CompoundAddFactor = {
   readonly id: string; readonly label: string; readonly link: { readonly to_id: string; readonly effect_direction: 'positive' | 'negative' };
-  readonly observed_state: Readonly<Record<string, unknown>>; readonly basis: UserTodayBasis; readonly quote?: string;
+  readonly observed_state: Readonly<Record<string, unknown>>; readonly basis?: UserTodayBasis; readonly quote?: string;
 };
 /**
  * ⭐ add_to_model, options (PATH-B): a NEW option exactly as the add-option door takes one (`buildAddOptionTransaction`'s
