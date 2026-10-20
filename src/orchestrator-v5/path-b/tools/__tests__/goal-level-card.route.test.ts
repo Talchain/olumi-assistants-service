@@ -15,6 +15,8 @@ import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.j
 import { registrationTurnId } from '../../../graph-registration/registration-identity.js';
 import { createProposal } from '../../../agent-lane/proposal.js';
 import { proposalPendingAction } from '../../../agent-lane/durable-proposal.js';
+import { candidateToGraph } from '../candidate-to-graph.js';
+import { valueProvenanceOf } from '../../../../cee/provenance/provenance-of.js';
 import { approvalChipIdFor } from '../../../agent-lane/approval-chips.js';
 
 type Json = Record<string, any>;
@@ -72,14 +74,24 @@ const store = {
   loadGraph: async () => persisted,
   loadGraphAndBriefText: async () => ({ graph: persisted, briefText: null }),
   readFactsFor: vi.fn(async () => []),
-  readRecent: vi.fn(async () => []),
-  readFactsWithTurnFor: async () => [],
+  readRecent: vi.fn(async () => [...turnRows.values()].reverse()),
+  readFactsWithTurnFor: async (ids: string[]) => [...turnRows.values()].filter(r => ids.includes(r.id)).flatMap(r =>
+    (r.handler_facts ?? []).map((fact: unknown) => ({ turn_id: r.id, fact_created_at: r.created_at, fact }))),
   readCommittedTurn: vi.fn(async (_sid: string, id: string) => turnRows.get(id) ?? null),
   readMostRecentPendingActions: vi.fn(async () => [...turnRows.values()].filter((r) => !String(r.turn_id).endsWith(':claim')).at(-1)?.pending_actions ?? []),
   readAnalysisInvalidatedAt: vi.fn(async () => null),
   readExistingScenario: vi.fn(async () => null),
   append: vi.fn(async (write: Json) => {
-    if (write.graph !== undefined) { graphWrites.push(write); return { id: `graph-${graphWrites.length}` }; }
+    if (write.graph !== undefined) {
+      graphWrites.push(write); persisted = structuredClone(write.graph) as Json;
+      const id = `graph-${graphWrites.length}`;
+      turnRows.set(String(write.turn_id), { ...write, id, created_at: new Date().toISOString() });
+      return { id, modelVersionReceipt: {
+        version_id: `dddddddd-dddd-4ddd-8ddd-${String(graphWrites.length).padStart(12, '0')}`, version_number: 200 + graphWrites.length, mutation_id: write.turn_id, source_turn_id: write.turn_id,
+        ...write.modelVersion, graph: persisted, created_at: new Date().toISOString(), parent_version_id: null, root_version_id: null,
+        undo_version_id: null, event_id: `event-${graphWrites.length}`,
+      } };
+    }
     const key = String(write.turn_id);
     const prior = turnRows.get(key);
     if (prior !== undefined) return prior.request_hash === write.request_hash ? { id: prior.id, replayedPriorTurn: true as const } : { id: prior.id, priorTurnConflict: true as const };
@@ -163,6 +175,80 @@ describe('PATH-B: the goal’s current level, typed as a correction, shows its c
     const item = calls.flatMap((b) => (Array.isArray(b.input) ? b.input : [])).find((i: Json) => i.type === 'function_call_output' && i.call_id === callId);
     return item === undefined ? undefined : JSON.parse(String(item.output)) as Json;
   };
+
+  it.each([
+    ['We run a studio and could add evening sessions; we have 6 rooms.', 'Weekly sessions', 'sessions a week'],
+    ['We run a workshop and could extend opening hours; there are 6 service bays.', 'Weekly repairs', 'repairs a week'],
+  ])('L5 draft estimates convert as Olumi’s; the existing card fills an unsized model (%s)', async (brief, metric, unit) => {
+    // Scripted drafter output: no estimated number was supplied by the person; the unrelated 6 is never a staffing source.
+    const estimates = [
+      { label: 'People on shift', unit: 'people', baseline: 3, setting: 4 },
+      { label: 'Overtime per week', unit: 'hours a week', baseline: 5, setting: 6 },
+      { label: 'Ramp-up time', unit: 'months', baseline: 2, setting: 1 },
+    ];
+    const pair = { origin: 'olumi', stance: 'estimate', provenance: 'ai_proposed' };
+    const draft = {
+      goal: { metric, operator: '>=', target_stated: false, value: null, unit, horizon_months: null,
+        baseline_known: false, baseline_value: null, provenance: 'inferred', frame: 'level', quantity_frame: 'level' },
+      options: [{ label: 'Extend hours', provenance: 'ai_proposed', changes: [], is_status_quo: false, interventions: estimates.map(e => ({
+        factor_label: e.label, value: e.setting, value_kind: 'absolute', unit: e.unit, ...pair, stated_evidence: null })) }],
+      factors: estimates.map(e => ({ label: e.label, role: 'controllable', baseline_known: false, baseline_value: e.baseline,
+        unit: e.unit, plausible_max: null, baseline_evidence: null, ...pair })),
+      links: estimates.map(e => ({ from: e.label, to: metric, direction: 'positive', ...pair, effect_amount: null,
+        effect_per_source_change: null, effect_provenance: null, definitional: false, source_quote: null, basis: 'Illustrative staffing and timing assumptions for review.' })),
+      constraints: [], risks: [], outcomes: [], identities: [], statements: [], unknowns: [], unknown_concerns: [], decision_question: null,
+    };
+    const converted = candidateToGraph(draft, { words: brief, recorded_at: new Date().toISOString() });
+    if ('refused' in converted) throw new Error(converted.refused);
+    persisted = JSON.parse(JSON.stringify(converted.graph)) as Json;
+    const node = (label: string): Json => (persisted.nodes as Json[]).find(n => n.label === label)!;
+    const option = node('Extend hours');
+    for (const e of estimates) {
+      expect(node(e.label).observed_state?.raw_value ?? node(e.label).observed_state?.value).toBe(e.baseline);
+      expect(valueProvenanceOf(node(e.label).observed_state).origin).toBe('ai');
+      expect(node(e.label).observed_state.unit).toBe(e.unit);
+      expect(option.interventions[node(e.label).id].unit).toBe(e.unit);
+      expect(option.interventions[node(e.label).id].raw_value ?? option.interventions[node(e.label).id].value).toBe(e.setting);
+      expect(valueProvenanceOf(option.interventions[node(e.label).id]).origin).toBe('ai');
+      expect(node(e.label).user_statements ?? []).toEqual([]);
+    }
+    // Independently test the existing approval seam on the same model with the RC4 gaps: no operative levels/settings yet.
+    // Re-approving identical operative settings is a no-op; this row proves proposed figures can fill missing inputs by press.
+    for (const e of estimates) delete node(e.label).observed_state;
+    delete option.interventions;
+    const source = { origin: 'olumi', quote: null, named_source: null };
+    const ops = estimates.flatMap(e => [
+      { op: 'set_factor_value', factor_id: node(e.label).id, value: e.baseline, unit: e.unit, stance: 'estimate', source },
+      { op: 'set_option_setting', option_id: option.id, factor_id: node(e.label).id, value: e.setting, unit: e.unit, stance: 'estimate', source },
+    ]);
+    outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop_call', args: {
+      public_label: 'Approve Olumi’s starting estimates', basis: 'Illustrative staffing and timing assumptions for review.', ops } }],
+      [{ type: 'message', text: 'These are Olumi’s provisional estimates; review their units and periods before approving.' }]];
+    const first = await post({ turn_id: randomUUID(), message: brief, source: 'composer' });
+    expect(first.statusCode, first.body).toBe(200);
+    const t1 = first.json() as Json;
+    const rec = t1._proposal_fields?.proposals?.[0];
+    expect(rec, JSON.stringify(t1._agent.tool_calls)).toBeDefined();
+    expect(graphWrites).toHaveLength(0);
+    expect(rec.fields.map((f: Json) => f.current)).toEqual(estimates.map(e => ({ value: e.baseline, unit: e.unit, source: 'estimate' })));
+    preparedId = rec.proposal_id;
+    outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply_call' }], [{ type: 'message', text: 'Saved as Olumi’s estimates.' }]];
+    const second = await post({ turn_id: randomUUID(), message: rec.approve_action.message, source: 'chip', chip: { id: rec.approve_action.id },
+      proposal_edits: { proposal_id: rec.proposal_id, revision: rec.revision, digest: rec.digest, graph_hash: t1._proposal_fields.graph_hash, fields: [] } });
+    expect(second.statusCode, second.body).toBe(200);
+    expect(outputOf('apply_call'), JSON.stringify(outputOf('apply_call'))).toMatchObject({ status: 'ok', mutated: true, data: { saved: true, receipt: { version_id: 'dddddddd-dddd-4ddd-8ddd-000000000001' } } });
+    expect(graphWrites).toHaveLength(1);
+    expect(registered).toHaveLength(0);
+    for (const e of estimates) {
+      expect(node(e.label).observed_state.raw_value ?? node(e.label).observed_state.value).toBe(e.baseline);
+      expect(node('Extend hours').interventions[node(e.label).id].raw_value).toBe(e.setting);
+      expect(valueProvenanceOf(node(e.label).observed_state)).toMatchObject({ origin: 'ai', accepted: true });
+      expect(node(e.label).observed_state.unit).toBe(e.unit);
+      expect(node('Extend hours').interventions[node(e.label).id].unit).toBe(e.unit);
+      expect(valueProvenanceOf(node('Extend hours').interventions[node(e.label).id]).origin).toBe('ai');
+      expect(node(e.label).user_statements ?? []).toEqual([]);
+    }
+  });
 
   it('⭐ RED→GREEN: "about 110 a week, not 120" → its card in THAT turn → the press → ONE registration, its own receipt, the goal holds 110', async () => {
     // Turn 1: the typed correction; the AI prepares it (propose_change) and says so. Nothing is written.
