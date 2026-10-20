@@ -458,11 +458,15 @@ async function proposeGoalLevel(deps: Pick<ChangeDeps, 'dispatch' | 'proposals'>
   return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: read.graphHash });
 }
 
-/** The person's declared figure stored on a goal-level proposal (its claim's only source); `null` on a proposal without one. */
-function goalDeclaredOf(p: StructuredProposal): Op | null {
+/** The approved figure at each declared place, each with its own claim subject and superseded history. */
+function goalDeclarationsOf(p: StructuredProposal): (Op & { subject_kind: 'goal' | 'factor' })[] {
   const op = p.operations[0];
   const d = StoredFigure.safeParse(isRec(op?.value) ? op.value.declared : undefined);
-  return op === undefined || !d.success ? null : { kind: 'value', factor_id: op.path, ...d.data };
+  if (op === undefined || !d.success) return [];
+  const operand = isRec(op.value) ? op.value.current_level_operand : undefined;
+  const places: { factor_id: string; subject_kind: 'goal' | 'factor' }[] = [{ factor_id: op.path, subject_kind: 'goal' },
+    ...(typeof operand === 'string' ? [{ factor_id: operand, subject_kind: 'factor' as const }] : [])];
+  return places.map((place) => ({ kind: 'value', ...d.data, ...place }));
 }
 
 /** The goal's level as the model now holds it: the approved figure, unit and source on the goal, and the person's claim beside it. */
@@ -471,19 +475,19 @@ function goalLevelRead(read: SavedRead, p: StructuredProposal): { holds: boolean
   const want = isRec(op.value) && isRec(op.value.goal_current_level) ? op.value.goal_current_level : {};
   const os = nodesOf(read.graph).find((n) => n.id === op.path)?.observed_state;
   const held = isRec(os) ? os : undefined;
-  const declared = goalDeclaredOf(p);
-  const claim = declared === null ? null : claimOf(declared, 'goal');
-  const kept = claim !== null && claimHeld(read.graph, claim);
+  const claims = goalDeclarationsOf(p).map((declared) => claimOf(declared, declared.subject_kind));
+  const kept = claims.length > 0 && claims.every((claim) => claim !== null && claimHeld(read.graph, claim));
   const operand = isRec(op.value) ? op.value.current_level_operand : undefined;
   const operandState = nodesOf(read.graph).find((n) => n.id === operand)?.observed_state;
   const holds = held !== undefined && close(held.raw_value, Number(want.raw_value)) && held.source === want.source
-    && (want.unit === undefined || held.unit === want.unit) && (claim === null || kept)
+    && (want.unit === undefined || held.unit === want.unit) && (claims.length === 0 || kept)
     && (operand === undefined || isDeepStrictEqual(operandState, held));
   const notKept: NotKept[] = kept ? [] : [{ what: 'words', declared: String(p.provenance.basis) }];
   return { holds, faithful: notKept.length === 0, written: [{ op: 'set_goal_current_level', goal_id: op.path, figure: held?.raw_value ?? null, unit: held?.unit ?? null,
-    ...(operand === undefined ? {} : { current_level_operand: { factor_id: operand, observed_state: operandState ?? null } }),
+    ...(operand === undefined ? {} : { current_level_operand: { factor_id: operand, observed_state: operandState ?? null,
+      ...(kept ? { claim: { said_by: saidByOf(claims[1]!.statement) } } : {}) } }),
     declared: { origin: 'user', quote: p.provenance.basis, stance: 'stated_current' }, stored_as: provenanceOf({ value: held }),
-    ...(kept ? { claim: { said_by: saidByOf(claim!.statement) } } : {}), not_kept: notKept }] };
+    ...(kept ? { claim: { said_by: saidByOf(claims[0]!.statement) } } : {}), not_kept: notKept }] };
 }
 
 /** The goal's level: the goal-level door's own writer (ONE registration, its operation id), then PATH-B's receipt and readback. */
@@ -496,11 +500,14 @@ function goalLevelApplier(deps: ChangeDeps, ctx: ChangeCtx, p: StructuredProposa
     commit: async (before) => {
       // The person's claim, by the ONE claim-record writer, on the read the door's writer registers: the level and the claim
       // land in its ONE registration (CAS on this read's hashes).
-      const declared = goalDeclaredOf(p);
-      const record = declared === null ? undefined : claimsFor(before.graph, [declared], new Set(), 'goal')[0];
-      const written = record === undefined ? undefined : applyStatementRecordEdit(before.graph, record);
-      if (written?.kind === 'refused') return refused(codeOf(`claim_${written.reason}`));
-      const approved = goalLevelReadOf(written?.kind === 'mutated' ? { ...before, graph: written.mutatedGraph } : before);
+      let graph = before.graph;
+      for (const declared of goalDeclarationsOf(p)) {
+        const record = claimsFor(graph, [declared], new Set(), declared.subject_kind)[0];
+        const written = record === undefined ? undefined : applyStatementRecordEdit(graph, record);
+        if (written?.kind === 'refused') return refused(codeOf(`claim_${written.reason}`));
+        if (written?.kind === 'mutated') graph = written.mutatedGraph;
+      }
+      const approved = goalLevelReadOf({ ...before, graph });
       if (approved === null) return unavailable('read_malformed');
       // ONE applied-state authority (#3467 R1): the writer marks its own private copy; the shared store is marked applied only
       // below, with THIS registration's own receipt. A save with none stays unknown, never "already saved" on a retry.
