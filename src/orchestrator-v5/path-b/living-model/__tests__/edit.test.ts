@@ -49,6 +49,17 @@ describe('thin core explicit edit: a canvas gesture applied to the living model,
       .toEqual({ refused: 'unit_mismatch' });
   });
 
+  it('R1 round 2: today\'s level the person set stays theirs when they then edit the target', () => {
+    const olumis: LivingModelT = structuredClone(KNOWN_ANSWER);
+    olumis.aims[0] = { ...olumis.aims[0]!, source: 'olumi', quote: null };
+    const level = (applyExplicitEdit(olumis, { kind: 'factor_value_edit', target_id: 'g', value: 0.6, raw_value: 75, unit: 'units' }) as { model: LivingModelT }).model;
+    expect(level.aims[0]!.target).toMatchObject({ current: 75, current_source: 'user' });
+    expect(node(level, 'g').observed_state).toMatchObject({ raw_value: 75, source: 'user_edited' });
+    const target = (applyExplicitEdit(level, { kind: 'goal_target_edit', goal_node_id: 'g', constraint_type: 'at_least', raw_value: 110, unit: 'units' }) as { model: LivingModelT }).model;
+    expect(target.aims[0]!.target).toMatchObject({ value: 110, current: 75, current_source: 'user' });
+    expect(target.history).toEqual([]);
+  });
+
   it('rename, delete and add keep every reference whole', () => {
     expect(apply({ kind: 'structural_rename', node_id: 'f', label: 'Effort', expected_label: 'f' }).factors[0]!.label).toBe('Effort');
     const deleted = apply({ kind: 'structural_delete', removed_node_ids: ['f'], removed_edges: [] });

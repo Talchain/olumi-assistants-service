@@ -53,6 +53,8 @@ export const LivingAim = z.object({
     baseline: z.string().nullable(),
     /** The quantity's current level, in the target's unit, when stated. Unknown is null, never 0. */
     current: z.number().nullable(),
+    /** 'user' only when the person set today's level themselves (a canvas edit); otherwise null: the aim's attribution covers it. */
+    current_source: z.enum(['user']).nullable(),
   }).strict().nullable(),
   ...attribution,
 }).strict();

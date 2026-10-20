@@ -18,4 +18,14 @@ describe('thin core kernel: a saved attribution is kept only for an unchanged it
   it('CONTROL: carried over unchanged, it keeps its label without any words in the window', () => {
     expect(applyKernel(structuredClone(saved), [], saved).model.factors[0]).toMatchObject({ value: 0.5, source: 'user' });
   });
+
+  it('R1 round 2: a "user" current level the AI asserts is theirs only while it is the saved one, unchanged', () => {
+    const savedLevel: LivingModelT = structuredClone(KNOWN_ANSWER);
+    savedLevel.aims[0]!.target = { ...savedLevel.aims[0]!.target!, current: 75, current_source: 'user' };
+    expect(applyKernel(structuredClone(savedLevel), [], savedLevel).model.aims[0]!.target!.current_source).toBe('user');
+    const changed: LivingModelT = structuredClone(savedLevel);
+    changed.aims[0]!.target!.current = 80;
+    expect(applyKernel(changed, [], savedLevel).model.aims[0]!.target!.current_source).toBeNull();
+  });
 });
+

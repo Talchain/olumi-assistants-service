@@ -113,7 +113,8 @@ export function mapLivingModel(model: LivingModelT, opts: { readonly goal?: stri
         else {
           const level = admitGoalBaseline({ rawTarget: t.value, rawBaseline: t.current, cap: resolved.cap, ...(t.comparator === '<=' ? { ceiling: true } : {}) });
           if (!level.admitted) hold(aim.id, 'goal_level_not_admitted');
-          else goalNode.observed_state = withSource({ value: level.normalised, baseline: level.normalised, raw_value: t.current, cap: resolved.cap, unit: t.unit ?? '' }, aim);
+          else goalNode.observed_state = withSource({ value: level.normalised, baseline: level.normalised, raw_value: t.current, cap: resolved.cap, unit: t.unit ?? '' },
+            t.current_source === 'user' ? { source: 'user', quote: null } : aim);
         }
       }
     }

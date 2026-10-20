@@ -61,6 +61,10 @@ function savedAttributions(saved: LivingModelT): Set<string> {
 export function applyKernel(model: LivingModelT, verifiedWords: readonly string[], saved?: LivingModelT): Kernelled {
   const words = verifiedWords.map(plain).filter((w) => w.length > 0);
   const kept = saved === undefined ? new Set<string>() : savedAttributions(saved);
+  const keptCurrent = (id: string, current: number | null): boolean => {
+    const t = saved?.aims.find((a) => a.id === id)?.target;
+    return t?.current_source === 'user' && t.current === current;
+  };
   const relabelled: Relabelled[] = [];
   const attribute = <T extends Attributed>(id: string, item: T): T => {
     if (item.source !== 'user' && item.source !== 'party') return item;
@@ -74,7 +78,15 @@ export function applyKernel(model: LivingModelT, verifiedWords: readonly string[
   return {
     model: {
       ...m,
-      aims: m.aims.map((a) => attribute(a.id, a)),
+      aims: m.aims.map((a) => {
+        const out = attribute(a.id, a);
+        // Today's level set by the person on the canvas: theirs only while it is the saved one, unchanged.
+        if (out.target?.current_source === 'user' && !keptCurrent(a.id, out.target.current)) {
+          relabelled.push({ id: `${a.id}:current`, was: 'user' });
+          return { ...out, target: { ...out.target, current_source: null } };
+        }
+        return out;
+      }),
       factors: m.factors.map((f) => attribute(f.id, f)),
       options: m.options.map((o) => ({ ...attribute(o.id, o), settings: o.settings.map((s) => attribute(`${o.id}:${s.factor_id}`, s)) })),
       links: m.links.map((l) => attribute(l.id, l)),

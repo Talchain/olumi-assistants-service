@@ -52,7 +52,7 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       if (raw === undefined) return { refused: 'no_frame' };
       if (f !== undefined) Object.assign(f, { value: raw, ...noRange, unit: unit ?? edit.unit ?? null, ...theirs });
       else if (a!.target === null) return { refused: 'no_target' };
-      else a!.target = { ...a!.target, current: raw };
+      else a!.target = { ...a!.target, current: raw, current_source: 'user' };
       return { model: m };
     }
     case 'option_intervention_edit': {
@@ -74,14 +74,15 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       if (prior !== null && prior.current !== null && prior.unit !== null && prior.unit !== edit.unit) return { refused: 'unit_mismatch' };
       // The edit makes the aim the person's. A starting level they never gave is not carried as theirs: it is kept in the
       // history, and Olumi asks for today's level instead.
-      const keepCurrent = a.source === 'user';
+      const keepCurrent = a.source === 'user' || prior?.current_source === 'user';
       if (!keepCurrent && prior?.current != null) {
         m.history.push({ id: a.id, change: 'superseded', quote: null,
           old: `starting level ${prior.current}${prior.unit === null ? '' : ` ${prior.unit}`} (${a.source === 'olumi' ? 'Olumi\u2019s estimate' : 'not confirmed by you'})` });
       }
       a.target = { quantity: prior?.quantity ?? a.text, comparator: edit.constraint_type === 'at_least' ? '>=' : '<=',
         value: edit.raw_value, ...noRange, unit: edit.unit, by_when: prior?.by_when ?? null,
-        baseline: prior?.baseline ?? null, current: keepCurrent ? prior?.current ?? null : null };
+        baseline: prior?.baseline ?? null, current: keepCurrent ? prior?.current ?? null : null,
+        current_source: keepCurrent ? prior?.current_source ?? null : null };
       Object.assign(a, theirs);
       return { model: m };
     }
