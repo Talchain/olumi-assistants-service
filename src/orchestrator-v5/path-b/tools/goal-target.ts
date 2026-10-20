@@ -11,6 +11,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import { PatchOperationsArraySchema } from '../../../orchestrator/patch-validation.js';
 import { buildAddFactorTransaction, MAX_FACTORS_PER_ADD } from '../../routing/add-factor-transaction.js';
+import { sameLabel } from '../../routing/add-option-transaction.js';
 import { executeGmHeldResume } from '../../handlers/gm-held-execute.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
@@ -122,6 +123,10 @@ export async function targetCandidate(scenarioId: string, operationId: string, r
   if (new Set(ids).size !== ids.length) return { refusal: 'target_not_prepared' };
   let candidate = structuredClone(graph);
   const missing = t.conditions.filter(c => !nodesOf(graph).some(n => n.id === c.goal_id));
+  // The add-factor door's name identity applies to every addition, including unlinked conditions.
+  // A new id for a taken name is ambiguous: preserve the existing quantity and refuse before approval.
+  if (missing.some((c, i) => nodesOf(graph).some(n => sameLabel(String(n.label ?? ''), c.quantity))
+    || missing.slice(0, i).some(n => sameLabel(n.quantity, c.quantity)))) return { refusal: 'target_not_prepared' };
   const links = t.links ?? [];
   if (missing.length > MAX_FACTORS_PER_ADD || new Set(links.map(l => l.from)).size !== links.length
     || links.some(l => !missing.some(c => c.goal_id === l.from))) return { refusal: 'target_not_prepared' };

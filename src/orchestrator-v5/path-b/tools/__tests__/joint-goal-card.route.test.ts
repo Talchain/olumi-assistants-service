@@ -372,6 +372,59 @@ describe('L12: joint targets through the real route and SDK approval', () => {
   });
 
   it.each([
+    ['vans_duplicate', 'Vans on the road', false, 'We need over 150 weekly orders AND at most 6 vans over three months.'],
+    ['vehicles_duplicate', '  VANS   ON THE ROAD  ', false, 'Our depot pilot needs over 150 weekly deliveries AND at most 6 vehicles over three months. Revenue was 2m as of 2026-09-01.'],
+    ['vans_duplicate', 'Vans on the road', true, 'We need over 150 weekly orders AND at most 6 vans over three months.'],
+  ] as const)('L12D colliding added identity refuses the whole card (%s, %s, linked=%s)', async (id, quantity, linked, words) => {
+    const args = joint(words) as Json;
+    Object.assign(args.ops[0].conditions[1], { node_id: id, quantity });
+    if (linked) args.ops[0].links = [{ from: id, to: 'orders', sign: 'positive' }];
+    const before = structuredClone(persisted);
+    const { card } = await prepare(args, words);
+    expect(card).toBeUndefined();
+    expect(registered).toHaveLength(0);
+    expect(graphWrites).toHaveLength(0);
+    expect(persisted).toEqual(before);
+  });
+
+  it.each([false, true])('L12D repeated new quantity names refuse the whole card (linked=%s)', async (linked) => {
+    const words = 'The CFO wants at least 12 enquiries AND at most 4 refunds over three months. Revenue was 2m as of 2026-09-01.';
+    const args = joint(words) as Json;
+    Object.assign(args.ops[0].conditions[0], { node_id: 'enquiries', quantity: 'Enquiries', value: 12, unit: 'enquiries' });
+    Object.assign(args.ops[0].conditions[1], { node_id: 'enquiries_duplicate', quantity: '  ENQUIRIES  ', value: 4, unit: 'refunds',
+      source: { origin: 'third_party', quote: words, named_source: 'CFO' } });
+    if (linked) args.ops[0].links = [{ from: 'enquiries', to: 'orders', sign: 'positive' }];
+    const before = structuredClone(persisted);
+    const { card } = await prepare(args, words);
+    expect(card).toBeUndefined();
+    expect(registered).toHaveLength(0);
+    expect(graphWrites).toHaveLength(0);
+    expect(persisted).toEqual(before);
+  });
+
+  it('L12D a distinct new name remains unlinked and unknown without borrowing baseline or authorship', async () => {
+    const words = 'The CFO wants over 150 weekly orders AND at most 6 reserve vans over three months. Revenue was 2m as of 2026-09-01.';
+    const args = joint(words) as Json;
+    Object.assign(args.ops[0].conditions[1], { node_id: 'reserve_vans', quantity: 'Reserve vans on the road',
+      source: { origin: 'third_party', quote: words, named_source: 'CFO' } });
+    const before = structuredClone(persisted);
+    const { body, card } = await prepare(args, words);
+    expect(card).toBeDefined();
+    await approve(card, body);
+    expect(outputOf('apply_call')).toMatchObject({ status: 'ok', data: { saved: true } });
+    expect(registered).toHaveLength(1);
+    const cold = projectGraphForPersistence({ ...structuredClone(persisted), ...GraphV3.parse(persisted) }) as Json;
+    const added = cold.nodes.filter((n: Json) => n.id === 'reserve_vans');
+    expect(added).toHaveLength(1);
+    expect(added[0].observed_state).toBeUndefined();
+    expect(added[0].provenance).not.toBe('user_set');
+    expect(claimRecordsOn(added[0]).flatMap(r => r.statements)).toEqual([expect.objectContaining({ said_by: 'party', party: 'CFO', relayed_by: 'user' })]);
+    expect(cold.nodes.find((n: Json) => n.id === 'vans')).toEqual(before.nodes.find((n: Json) => n.id === 'vans'));
+    expect(cold.edges).toEqual(before.edges);
+    expect(cold.goal_constraints.find((r: Json) => r.node_id === 'reserve_vans')).toMatchObject({ role: 'goal_target', value: 6, unit: 'vans' });
+  });
+
+  it.each([
     ['drivers', 'Drivers on the road', 'drivers'],
     ['marketing_staff', 'Marketing staff', 'people'],
   ])('L12C no declared link: a resource cap saves only its condition (%s)', async (id, quantity, unit) => {
