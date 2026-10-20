@@ -1,0 +1,32 @@
+[
+  {
+    "mutant": "rate-rejected",
+    "exit": 1,
+    "killed": true
+  },
+  {
+    "mutant": "wrong-driver-accepted",
+    "exit": 1,
+    "killed": true
+  },
+  {
+    "mutant": "wrong-speaker-accepted",
+    "exit": 1,
+    "killed": true
+  },
+  {
+    "mutant": "wrong-directed-subject-accepted",
+    "exit": 1,
+    "killed": true
+  },
+  {
+    "mutant": "definition-existence",
+    "exit": 1,
+    "killed": true
+  },
+  {
+    "mutant": "definition-not-one-for-one",
+    "exit": 1,
+    "killed": true
+  }
+]

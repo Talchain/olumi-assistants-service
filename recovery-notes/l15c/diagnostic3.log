@@ -1,0 +1,30 @@
+
+ RUN  v4.1.10 /private/tmp/cx-l15c
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts (9 tests | 1 failed | 8 skipped) 97ms
+     × L15C diagnostic live variants 95ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts > current level plus a stated per-unit addition > L15C diagnostic live variants
+AssertionError: no declared denominator{"from":"extra_specialists","to":"extra_capacity","strength":{"mean":0.25,"std":0.125},"exists_probability":0.8,"effect_direction":"positive","provenance":{"source":"cee_hypothesis","magnitude":"olumi_placeholder","natural_effect":{"amount":0.25,"amount_unit":"tickets per week","per_source_change":1,"per_source_change_unit":"switch","strength_mean":0.25,"strength_mean_frame":"edge_strength"},"uncertainty_defaults":[{"code":"CLAMP_STD_MINIMUM","layer":"cee","field_path":"edges[extra_specialists::extra_capacity].strength.std","before":null,"after":0.125,"reason":"Nobody stated how uncertain this strength is. Olumi uses half its size as the spread. It is not a measurement of anyone's confidence.","severity":"info"},{"code":"APPLY_SIGN_FROM_DIRECTION","layer":"cee","field_path":"edges[extra_specialists::extra_capacity].strength.mean","before":null,"after":0.25,"reason":"Direction was authored but no size Olumi could use. Applied Olumi's placeholder, sized to keep the target within its range across the options, as an ANALYSIS PROJECTION, marked `defaulted`. This is not a measurement and must never be presented as user- or evidence-authored.","severity":"warn"},{"code":"DEFAULT_EXISTS_PROBABILITY","layer":"cee","field_path":"edges[extra_specialists::extra_capacity].exists_probability","before":null,"after":0.8,"reason":"Nobody stated how likely this link is to exist. Applied the canonical default. A defaulted value and an elicited value are the same number, so the ledger is the only place the difference survives.","severity":"info"}],"source_quote":"Each extra specialist clears about 20 tickets per week, between 10 and 30."},"defaulted":true}: expected 'olumi_placeholder' to be 'user_stated' // Object.is equality
+
+Expected: "user_stated"
+Received: "olumi_placeholder"
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts:149:64
+    147|       const d = draft(); edit(d);
+    148|       const e = effectOf(await replay(d));
+    149|       expect(e.provenance.magnitude, name + JSON.stringify(e)).toBe('u…
+       |                                                                ^
+    150|       // Diagnostic only: assertions are added after the first loss is…
+    151|     }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 8 skipped (9)
+   Start at  08:49:26
+   Duration  7.00s (transform 5.13s, setup 134ms, import 6.66s, tests 97ms, environment 0ms)
+

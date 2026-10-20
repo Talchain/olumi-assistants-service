@@ -1,0 +1,9 @@
+
+ RUN  v4.1.10 /private/tmp/cx-l15c
+
+
+ Test Files  1 passed (1)
+      Tests  81 passed | 1 skipped (82)
+   Start at  08:53:38
+   Duration  7.25s (transform 4.98s, setup 121ms, import 6.44s, tests 574ms, environment 0ms)
+

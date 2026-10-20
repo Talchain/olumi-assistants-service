@@ -1,0 +1,26 @@
+[
+  {
+    "name": "definition-existence",
+    "result": "4 failed | 10 passed (14)"
+  },
+  {
+    "name": "definition-not-one-for-one",
+    "result": "2 failed | 12 passed (14)"
+  },
+  {
+    "name": "rate-rejected",
+    "result": "5 failed | 9 passed (14)"
+  },
+  {
+    "name": "wrong-directed-subject-accepted",
+    "result": "1 failed | 13 passed (14)"
+  },
+  {
+    "name": "wrong-driver-accepted",
+    "result": "1 failed | 13 passed (14)"
+  },
+  {
+    "name": "wrong-speaker-accepted",
+    "result": "2 failed | 12 passed (14)"
+  }
+]

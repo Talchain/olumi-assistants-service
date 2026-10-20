@@ -3,14 +3,18 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import { buildModel, type DraftDeps } from '../draft-tool.js';
-import { constructionOperationId, type CallStructuredModel } from '../../../agent-lane/runtime/build-model.js';
-import { registrationTurnId } from '../../../graph-registration/registration-identity.js';
+import { candidateToAdmittedGraph } from '../candidate-to-graph.js';
+import type { CallStructuredModel } from '../../../agent-lane/runtime/build-model.js';
+import { computeGraphIdentityHash } from '../../../context/graph-identity.js';
+import { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha256 } from '../../../context/graph-hash.js';
 import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.js';
 import { createRunAnalysisHandler } from '../../../tools/handlers/run-analysis.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 import { linkProvenanceOf } from '../../../../cee/provenance/provenance-of.js';
 import { linkDefaultAssumptionsOf } from '../../../../cee/magnitude/link-default-assumptions.js';
+import { magnitudeNodes } from '../../../../cee/magnitude/frame-defaulted-links.js';
+import { resolveMagnitudeFrame } from '../../../../cee/magnitude/link-effect.js';
 
 type Rec = Record<string, any>;
 const SID = 'c1c1c1c1-0000-4000-8000-000000000015';
@@ -63,15 +67,18 @@ function draft(statementUnit = `${UNIT} per specialist`): Rec {
 }
 async function replay(raw: Rec, brief = BRIEF): Promise<Rec> {
   let stored: Rec | undefined;
-  const sourceTurn = registrationTurnId(SID, constructionOperationId(SID, brief));
   const dispatch: DraftDeps['dispatch'] = async (path, body) => {
     if (path.endsWith('/graph/register')) {
       stored = GraphV3.parse((body as Rec).graph);
-      return { status: 200, json: {} };
+      return { status: 200, json: { graph_hash: computeAnalysisAffectingGraphHash(stored as never),
+        graph_identity_hash: computeGraphIdentityHash(stored as never),
+        model_version: { version_id: 'v15', version_number: 1, mutation_id: 'm15', creation_kind: 'initial',
+          graph_identity_hash: computeGraphIdentityHash(stored as never)!.value,
+          analysis_affecting_hash: computeAnalysisAffectingGraphHashSha256(stored as never) } } };
     }
-    if (path.endsWith('/versions')) return { status: 200, json: { versions: [{ version_id: 'v15', sequence: 1,
-      created_at: '2026-10-20T08:00:00.000Z', creation: { kind: 'committed_mutation', mutation_id: 'm15', source_turn_id: sourceTurn } }] } };
-    return { status: 200, json: { graph: stored ?? null, graph_present: stored !== undefined, graph_hash: stored ? 'h15' : null } };
+    return { status: 200, json: { graph: stored ?? null, graph_present: stored !== undefined,
+      graph_hash: stored ? computeAnalysisAffectingGraphHash(stored as never) : null,
+      graph_identity_hash: stored ? computeGraphIdentityHash(stored as never) : null } };
   };
   const callStructured = vi.fn<CallStructuredModel>(async () => ({ text: JSON.stringify(raw), status: 'completed' }));
   const out = await buildModel({ dispatch, callStructured }, { scenario_id: SID, verified_user_messages: [brief], user_turn_text: brief }, { brief });
@@ -131,6 +138,52 @@ describe('current level plus a stated per-unit addition', () => {
       expect(linkDefaultAssumptionsOf(part)).toEqual([]);
     }
     expect(request.graph.edges.find((e: Rec) => e.from === rate.from && e.to === rate.to).strength).toEqual(rate.strength);
+  });
+
+  // L15C: reconstruct the declared 20-per-one shape from the captured graph. Historical raw
+  // drafter JSON is absent: this rules out unit/subject mismatch, not other missing draft fields.
+  it.each(['specialist', 'specialists'])('L15C: %s denominator and the live directed subject admit the recorded 20', async denominator => {
+    const raw = JSON.parse(JSON.stringify(draft(`${UNIT} per ${denominator}`))
+      .replaceAll('Total capacity', 'Weekly support capacity')
+      .replaceAll('Existing capacity', 'Existing team capacity')
+      .replaceAll('Extra specialists', 'Additional specialists')
+      .replaceAll('Extra capacity', 'Additional specialist capacity'));
+    Object.assign(raw.factors[1], { origin: 'unknown', provenance: 'explicit' });
+    const admitted = candidateToAdmittedGraph(raw, BRIEF);
+    if ('refused' in admitted) throw new Error(admitted.refused);
+    const graph = await replay(raw);
+    const rate = graph.edges.find((e: Rec) => e.from === 'additional_specialists' && e.to === 'additional_specialist_capacity');
+    expect(rate.provenance.magnitude).toBe('user_stated');
+    expect(linkProvenanceOf(rate).origin).toBe('human');
+    expect(rate.provenance.natural_effect.amount).toBe(20);
+    const frames = magnitudeNodes(graph.nodes, new Set());
+    expect(rate.strength.mean * resolveMagnitudeFrame(frames.get(rate.to)!)! / resolveMagnitudeFrame(frames.get(rate.from)!)!).toBe(20);
+    expect(rate.strength.std).toBe(Math.abs(rate.strength.mean) / 2);
+    expect(linkDefaultAssumptionsOf(rate).map(d => d.after)).toEqual([rate.strength.std, 0.8]);
+    const request = await runRequest(graph, BRIEF);
+    expect(request.graph.edges.find((e: Rec) => e.from === rate.from && e.to === rate.to).strength).toEqual(rate.strength);
+    for (const from of ['existing_team_capacity', 'additional_specialist_capacity']) {
+      const part = graph.edges.find((e: Rec) => e.from === from && e.to === 'weekly_support_capacity');
+      expect(part.provenance.natural_effect).toMatchObject({ amount: 1, per_source_change: 1,
+        amount_unit: UNIT, per_source_change_unit: UNIT });
+      expect(part.exists_probability).toBe(1);
+      expect(part.provenance.definitional).toBe(true);
+      const before = (admitted.graph as Rec).edges.find((e: Rec) => e.from === from && e.to === part.to);
+      expect(before.strength.std).toBe(0.001);
+      // Coordinate changes rescale the existing floor along with beta; no new spread is introduced.
+      expect(part.strength.std).toBe(before.strength.std * (part.strength.mean / before.strength.mean));
+      expect(linkDefaultAssumptionsOf(part)).toEqual([]);
+    }
+  });
+
+  it.each(['other', null])('negative: an effect attributed to %s stays a placeholder', async speaker => {
+    const raw = draft(); raw.statements.at(-1).speaker = speaker;
+    expect(effectOf(await replay(raw)).provenance.magnitude).toBe('olumi_placeholder');
+  });
+
+  it.each(['effect_amount', 'effect_per_source_change'])('negative: a missing declared %s is not reconstructed from a statement', async field => {
+    const raw = draft(); raw.links[1][field] = null;
+    expect(effectOf(await replay(raw)).provenance.magnitude).toBe('olumi_placeholder');
   });
 
   it('absolute additions retain D3 defaults; GraphV3 still rejects zero-std causal carriers', async () => {

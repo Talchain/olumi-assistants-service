@@ -1,0 +1,12 @@
+
+ RUN  v4.1.10 /private/tmp/cx-l15c
+
+{"level":"info","time":1792482950027,"pid":87991,"hostname":"Mac.net","event":"v5.graph_persist.options_reconciled","mirrored_count":2,"node_ids":["try_weekend_opening","try_online_bookings"],"propagated_count":0,"propagated_node_ids":[],"msg":"[commit] reconciled option-nodes into top-level options[] (mirrored missing + propagated interventions)"}
+{"level":"info","time":1792482950055,"pid":87991,"hostname":"Mac.net","event":"v5.graph_persist.options_reconciled","mirrored_count":2,"node_ids":["try_weekend_opening","try_online_bookings"],"propagated_count":0,"propagated_node_ids":[],"msg":"[commit] reconciled option-nodes into top-level options[] (mirrored missing + propagated interventions)"}
+{"level":"info","time":1792482950063,"pid":87991,"hostname":"Mac.net","event":"v5.graph_persist.options_reconciled","mirrored_count":2,"node_ids":["try_weekend_opening","try_online_bookings"],"propagated_count":0,"propagated_node_ids":[],"msg":"[commit] reconciled option-nodes into top-level options[] (mirrored missing + propagated interventions)"}
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  08:55:42
+   Duration  7.26s (transform 5.39s, setup 127ms, import 6.94s, tests 84ms, environment 0ms)
+

@@ -1,0 +1,82 @@
+
+ RUN  v4.1.10 /private/tmp/cx-l15c
+
+{"level":"info","time":1792482871249,"pid":83111,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"total_capacity","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792482871255,"pid":83111,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"total_capacity","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792482871264,"pid":83111,"hostname":"Mac.net","event":"v5.run_analysis.options_scaffolded","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","scaffolded_option_ids":["hold"],"scaffolded_factor_counts":[1],"excluded_option_ids":[],"option_count":2}
+{"level":"info","time":1792482871266,"pid":83111,"hostname":"Mac.net","event":"run_analysis.stated_level_spread_carried","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","node_ids":["existing_capacity"],"msg":"run_analysis sent user-stated factor levels at the minimum spread (wire copy only; no magnitudes)"}
+{"level":"info","time":1792482871267,"pid":83111,"hostname":"Mac.net","event":"run_analysis.switch_level_spread_carried","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","node_ids":["extra_specialists"],"msg":"run_analysis sent option-set 0/1 switch levels at the minimum spread (wire copy only; no magnitudes)"}
+{"level":"info","time":1792482871277,"pid":83111,"hostname":"Mac.net","event":"run_analysis.seed_reuse","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","reason":"no_prior_run","msg":"run_analysis seed decision"}
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts (14 tests | 5 failed) 252ms
+     × support retains the user central rate/raw range, Olumi D3 defaults and exact sum 65ms
+     × packing retains the user central rate/raw range, Olumi D3 defaults and exact sum 24ms
+     × L15C: specialist denominator and the live directed subject admit the recorded 20 15ms
+     × L15C: specialists denominator and the live directed subject admit the recorded 20 13ms
+     × the recorded range is independent of the D3 spread and existence assumptions 18ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts > current level plus a stated per-unit addition > support retains the user central rate/raw range, Olumi D3 defaults and exact sum
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts > current level plus a stated per-unit addition > packing retains the user central rate/raw range, Olumi D3 defaults and exact sum
+AssertionError: expected 'olumi_placeholder' to be 'user_stated' // Object.is equality
+
+Expected: "user_stated"
+Received: "olumi_placeholder"
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts:116:39
+    114|     const graph = await replay(raw as Rec, brief as string);
+    115|     const rate = graph.edges.find((e: Rec) => e.to === 'extra_capacity…
+    116|     expect(rate.provenance.magnitude).toBe('user_stated');
+       |                                       ^
+    117|     expect(linkProvenanceOf(rate).origin).toBe('human');
+    118|     expect(rate.provenance.natural_effect.amount).toBe(20);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts > current level plus a stated per-unit addition > L15C: specialist denominator and the live directed subject admit the recorded 20
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts > current level plus a stated per-unit addition > L15C: specialists denominator and the live directed subject admit the recorded 20
+AssertionError: expected 'olumi_placeholder' to be 'user_stated' // Object.is equality
+
+Expected: "user_stated"
+Received: "olumi_placeholder"
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts:156:39
+    154|     const graph = await replay(raw);
+    155|     const rate = graph.edges.find((e: Rec) => e.from === 'additional_s…
+    156|     expect(rate.provenance.magnitude).toBe('user_stated');
+       |                                       ^
+    157|     expect(linkProvenanceOf(rate).origin).toBe('human');
+    158|     expect(rate.provenance.natural_effect.amount).toBe(20);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts > current level plus a stated per-unit addition > the recorded range is independent of the D3 spread and existence assumptions
+AssertionError: expected undefined to deeply equal { low: 5, high: 35, …(2) }
+
+- Expected:
+{
+  "end": "centre",
+  "high": 35,
+  "low": 5,
+  "text": "Each extra specialist clears about 20 tickets per week, between 5 and 35.",
+}
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts:232:60
+    230|     Object.assign(raw.statements.at(-1), { low: 5, high: 35, quote: EF…
+    231|     const changed = effectOf(await replay(raw, brief));
+    232|     expect(changed.provenance.natural_effect.stated_range).toEqual({ l…
+       |                                                            ^
+    233|       text: raw.statements.at(-1).quote, end: 'centre' });
+    234|     expect(changed.strength).toEqual(original.strength);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  5 failed | 9 passed (14)
+   Start at  08:54:24
+   Duration  7.03s (transform 5.02s, setup 122ms, import 6.55s, tests 252ms, environment 0ms)
+

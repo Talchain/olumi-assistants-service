@@ -1,0 +1,143 @@
+
+ RUN  v4.1.10 /private/tmp/cx-l15c
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts (9 tests | 9 failed) 119ms
+     × support retains the user central rate/raw range, Olumi D3 defaults and exact sum 55ms
+     × packing retains the user central rate/raw range, Olumi D3 defaults and exact sum 20ms
+     × L15C diagnostic live variants 7ms
+     × absolute additions retain D3 defaults; GraphV3 still rejects zero-std causal carriers 7ms
+     × negative: a neighbouring link with the same number cannot supply this link’s authorship 6ms
+     × negative: a rate with a different driver denominator stays a placeholder 5ms
+     × negative: a different target numerator (parcels per week per specialist) stays a placeholder 6ms
+     × negative: a different target numerator (tickets per day per specialist) stays a placeholder 6ms
+     × the recorded range is independent of the D3 spread and existence assumptions 5ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 9 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts > current level plus a stated per-unit addition > support retains the user central rate/raw range, Olumi D3 defaults and exact sum
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts > current level plus a stated per-unit addition > packing retains the user central rate/raw range, Olumi D3 defaults and exact sum
+AssertionError: expected 'unavailable' to be 'ok' // Object.is equality
+
+Expected: "ok"
+Received: "unavailable"
+
+ ❯ replay src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts:78:22
+     76|   const callStructured = vi.fn<CallStructuredModel>(async () => ({ tex…
+     77|   const out = await buildModel({ dispatch, callStructured }, { scenari…
+     78|   expect(out.status).toBe('ok');
+       |                      ^
+     79|   expect(callStructured).toHaveBeenCalledTimes(1);
+     80|   expect(stored).toBeDefined();
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts:107:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/9]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts > current level plus a stated per-unit addition > L15C diagnostic live variants
+AssertionError: expected 'unavailable' to be 'ok' // Object.is equality
+
+Expected: "ok"
+Received: "unavailable"
+
+ ❯ replay src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts:78:22
+     76|   const callStructured = vi.fn<CallStructuredModel>(async () => ({ tex…
+     77|   const out = await buildModel({ dispatch, callStructured }, { scenari…
+     78|   expect(out.status).toBe('ok');
+       |                      ^
+     79|   expect(callStructured).toHaveBeenCalledTimes(1);
+     80|   expect(stored).toBeDefined();
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts:144:26
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/9]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts > current level plus a stated per-unit addition > absolute additions retain D3 defaults; GraphV3 still rejects zero-std causal carriers
+AssertionError: expected 'unavailable' to be 'ok' // Object.is equality
+
+Expected: "ok"
+Received: "unavailable"
+
+ ❯ replay src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts:78:22
+     76|   const callStructured = vi.fn<CallStructuredModel>(async () => ({ tex…
+     77|   const out = await buildModel({ dispatch, callStructured }, { scenari…
+     78|   expect(out.status).toBe('ok');
+       |                      ^
+     79|   expect(callStructured).toHaveBeenCalledTimes(1);
+     80|   expect(stored).toBeDefined();
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts:151:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/9]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts > current level plus a stated per-unit addition > negative: a neighbouring link with the same number cannot supply this link’s authorship
+AssertionError: expected 'unavailable' to be 'ok' // Object.is equality
+
+Expected: "ok"
+Received: "unavailable"
+
+ ❯ replay src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts:78:22
+     76|   const callStructured = vi.fn<CallStructuredModel>(async () => ({ tex…
+     77|   const out = await buildModel({ dispatch, callStructured }, { scenari…
+     78|   expect(out.status).toBe('ok');
+       |                      ^
+     79|   expect(callStructured).toHaveBeenCalledTimes(1);
+     80|   expect(stored).toBeDefined();
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts:173:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/9]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts > current level plus a stated per-unit addition > negative: a rate with a different driver denominator stays a placeholder
+AssertionError: expected 'unavailable' to be 'ok' // Object.is equality
+
+Expected: "ok"
+Received: "unavailable"
+
+ ❯ replay src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts:78:22
+     76|   const callStructured = vi.fn<CallStructuredModel>(async () => ({ tex…
+     77|   const out = await buildModel({ dispatch, callStructured }, { scenari…
+     78|   expect(out.status).toBe('ok');
+       |                      ^
+     79|   expect(callStructured).toHaveBeenCalledTimes(1);
+     80|   expect(stored).toBeDefined();
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts:178:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/9]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts > current level plus a stated per-unit addition > negative: a different target numerator (parcels per week per specialist) stays a placeholder
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts > current level plus a stated per-unit addition > negative: a different target numerator (tickets per day per specialist) stays a placeholder
+AssertionError: expected 'unavailable' to be 'ok' // Object.is equality
+
+Expected: "ok"
+Received: "unavailable"
+
+ ❯ replay src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts:78:22
+     76|   const callStructured = vi.fn<CallStructuredModel>(async () => ({ tex…
+     77|   const out = await buildModel({ dispatch, callStructured }, { scenari…
+     78|   expect(out.status).toBe('ok');
+       |                      ^
+     79|   expect(callStructured).toHaveBeenCalledTimes(1);
+     80|   expect(stored).toBeDefined();
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts:183:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/9]⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts > current level plus a stated per-unit addition > the recorded range is independent of the D3 spread and existence assumptions
+AssertionError: expected 'unavailable' to be 'ok' // Object.is equality
+
+Expected: "ok"
+Received: "unavailable"
+
+ ❯ replay src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts:78:22
+     76|   const callStructured = vi.fn<CallStructuredModel>(async () => ({ tex…
+     77|   const out = await buildModel({ dispatch, callStructured }, { scenari…
+     78|   expect(out.status).toBe('ok');
+       |                      ^
+     79|   expect(callStructured).toHaveBeenCalledTimes(1);
+     80|   expect(stored).toBeDefined();
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts:188:31
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/9]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  9 failed (9)
+   Start at  08:48:31
+   Duration  7.46s (transform 5.47s, setup 121ms, import 7.10s, tests 119ms, environment 0ms)
+

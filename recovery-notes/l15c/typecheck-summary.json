@@ -1,0 +1,29 @@
+{
+  "exit": 2,
+  "errors": 208,
+  "changed_file_errors": 0,
+  "baseline_count": 283,
+  "new_error_files": [
+    "sdk/typescript/src/applyGraphPatch.ts",
+    "sdk/typescript/src/ceeTypes.ts",
+    "sdk/typescript/src/graphTypes.ts",
+    "src/cee/archetypes/index.ts",
+    "src/cee/bias/causal-enrichment.ts",
+    "src/cee/bias/detectors.ts",
+    "src/cee/bias/index.ts",
+    "src/cee/bias/library.ts",
+    "src/cee/guidance/index.ts",
+    "src/cee/quality/index.ts",
+    "src/cee/structure/index.ts",
+    "src/cee/unified-pipeline/types.ts",
+    "src/cee/validation/classifier.ts",
+    "src/cee/validation/pipeline.ts",
+    "src/contracts/plot/engine.ts",
+    "src/services/review/decisionQuality.ts",
+    "src/services/review/improvementGuidance.ts",
+    "src/services/review/insights.ts",
+    "tests/unit/cee.bias-causal-enrichment.test.ts",
+    "tests/unit/isl-circuit-breaker.test.ts",
+    "tests/utils/cee-calibration.ts"
+  ]
+}

@@ -1,0 +1,62 @@
+
+ RUN  v4.1.10 /private/tmp/cx-l15c
+
+{"level":"info","time":1792482888549,"pid":84093,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"total_capacity","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792482888557,"pid":84093,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"total_capacity","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792482888565,"pid":84093,"hostname":"Mac.net","event":"v5.run_analysis.options_scaffolded","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","scaffolded_option_ids":["hold"],"scaffolded_factor_counts":[1],"excluded_option_ids":[],"option_count":2}
+{"level":"info","time":1792482888566,"pid":84093,"hostname":"Mac.net","event":"run_analysis.stated_level_spread_carried","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","node_ids":["existing_capacity"],"msg":"run_analysis sent user-stated factor levels at the minimum spread (wire copy only; no magnitudes)"}
+{"level":"info","time":1792482888567,"pid":84093,"hostname":"Mac.net","event":"run_analysis.switch_level_spread_carried","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","node_ids":["extra_specialists"],"msg":"run_analysis sent option-set 0/1 switch levels at the minimum spread (wire copy only; no magnitudes)"}
+{"level":"info","time":1792482888578,"pid":84093,"hostname":"Mac.net","event":"run_analysis.seed_reuse","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","reason":"no_prior_run","msg":"run_analysis seed decision"}
+{"level":"info","time":1792482888609,"pid":84093,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"total_capacity","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792482888619,"pid":84093,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"total_capacity","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792482888624,"pid":84093,"hostname":"Mac.net","event":"v5.run_analysis.options_scaffolded","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","scaffolded_option_ids":["hold"],"scaffolded_factor_counts":[1],"excluded_option_ids":[],"option_count":2}
+{"level":"info","time":1792482888625,"pid":84093,"hostname":"Mac.net","event":"run_analysis.stated_level_spread_carried","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","node_ids":["existing_capacity"],"msg":"run_analysis sent user-stated factor levels at the minimum spread (wire copy only; no magnitudes)"}
+{"level":"info","time":1792482888625,"pid":84093,"hostname":"Mac.net","event":"run_analysis.switch_level_spread_carried","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","node_ids":["extra_packers"],"msg":"run_analysis sent option-set 0/1 switch levels at the minimum spread (wire copy only; no magnitudes)"}
+{"level":"info","time":1792482888630,"pid":84093,"hostname":"Mac.net","event":"run_analysis.seed_reuse","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","reason":"no_prior_run","msg":"run_analysis seed decision"}
+{"level":"info","time":1792482888658,"pid":84093,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_support_capacity","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792482888662,"pid":84093,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_support_capacity","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792482888667,"pid":84093,"hostname":"Mac.net","event":"v5.run_analysis.options_scaffolded","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","scaffolded_option_ids":["hold"],"scaffolded_factor_counts":[1],"excluded_option_ids":[],"option_count":2}
+{"level":"info","time":1792482888668,"pid":84093,"hostname":"Mac.net","event":"run_analysis.stated_level_spread_carried","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","node_ids":["existing_team_capacity"],"msg":"run_analysis sent user-stated factor levels at the minimum spread (wire copy only; no magnitudes)"}
+{"level":"info","time":1792482888668,"pid":84093,"hostname":"Mac.net","event":"run_analysis.switch_level_spread_carried","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","node_ids":["additional_specialists"],"msg":"run_analysis sent option-set 0/1 switch levels at the minimum spread (wire copy only; no magnitudes)"}
+{"level":"info","time":1792482888676,"pid":84093,"hostname":"Mac.net","event":"run_analysis.seed_reuse","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","reason":"no_prior_run","msg":"run_analysis seed decision"}
+{"level":"info","time":1792482888702,"pid":84093,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_support_capacity","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792482888707,"pid":84093,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_support_capacity","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792482888712,"pid":84093,"hostname":"Mac.net","event":"v5.run_analysis.options_scaffolded","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","scaffolded_option_ids":["hold"],"scaffolded_factor_counts":[1],"excluded_option_ids":[],"option_count":2}
+{"level":"info","time":1792482888713,"pid":84093,"hostname":"Mac.net","event":"run_analysis.stated_level_spread_carried","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","node_ids":["existing_team_capacity"],"msg":"run_analysis sent user-stated factor levels at the minimum spread (wire copy only; no magnitudes)"}
+{"level":"info","time":1792482888713,"pid":84093,"hostname":"Mac.net","event":"run_analysis.switch_level_spread_carried","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","node_ids":["additional_specialists"],"msg":"run_analysis sent option-set 0/1 switch levels at the minimum spread (wire copy only; no magnitudes)"}
+{"level":"info","time":1792482888719,"pid":84093,"hostname":"Mac.net","event":"run_analysis.seed_reuse","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","reason":"no_prior_run","msg":"run_analysis seed decision"}
+{"level":"info","time":1792482888797,"pid":84093,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"total_capacity","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792482888802,"pid":84093,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"total_capacity","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792482888806,"pid":84093,"hostname":"Mac.net","event":"v5.run_analysis.options_scaffolded","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","scaffolded_option_ids":["hold"],"scaffolded_factor_counts":[1],"excluded_option_ids":[],"option_count":2}
+{"level":"info","time":1792482888807,"pid":84093,"hostname":"Mac.net","event":"run_analysis.stated_level_spread_carried","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","node_ids":["existing_capacity"],"msg":"run_analysis sent user-stated factor levels at the minimum spread (wire copy only; no magnitudes)"}
+{"level":"info","time":1792482888807,"pid":84093,"hostname":"Mac.net","event":"run_analysis.switch_level_spread_carried","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","node_ids":["extra_specialists"],"msg":"run_analysis sent option-set 0/1 switch levels at the minimum spread (wire copy only; no magnitudes)"}
+{"level":"info","time":1792482888811,"pid":84093,"hostname":"Mac.net","event":"run_analysis.seed_reuse","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","reason":"no_prior_run","msg":"run_analysis seed decision"}
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts (14 tests | 2 failed) 405ms
+     × negative: an effect attributed to other stays a placeholder 19ms
+     × negative: an effect attributed to null stays a placeholder 12ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts > current level plus a stated per-unit addition > negative: an effect attributed to other stays a placeholder
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts > current level plus a stated per-unit addition > negative: an effect attributed to null stays a placeholder
+AssertionError: expected 'user_stated' to be 'olumi_placeholder' // Object.is equality
+
+Expected: "olumi_placeholder"
+Received: "user_stated"
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts:181:62
+    179|   it.each(['other', null])('negative: an effect attributed to %s stays…
+    180|     const raw = draft(); raw.statements.at(-1).speaker = speaker;
+    181|     expect(effectOf(await replay(raw)).provenance.magnitude).toBe('olu…
+       |                                                              ^
+    182|   });
+    183|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 12 passed (14)
+   Start at  08:54:40
+   Duration  8.39s (transform 5.95s, setup 121ms, import 7.75s, tests 405ms, environment 0ms)
+

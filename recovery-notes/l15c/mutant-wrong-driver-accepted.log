@@ -1,0 +1,60 @@
+
+ RUN  v4.1.10 /private/tmp/cx-l15c
+
+{"level":"info","time":1792482879586,"pid":83751,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"total_capacity","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792482879594,"pid":83751,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"total_capacity","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792482879602,"pid":83751,"hostname":"Mac.net","event":"v5.run_analysis.options_scaffolded","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","scaffolded_option_ids":["hold"],"scaffolded_factor_counts":[1],"excluded_option_ids":[],"option_count":2}
+{"level":"info","time":1792482879604,"pid":83751,"hostname":"Mac.net","event":"run_analysis.stated_level_spread_carried","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","node_ids":["existing_capacity"],"msg":"run_analysis sent user-stated factor levels at the minimum spread (wire copy only; no magnitudes)"}
+{"level":"info","time":1792482879605,"pid":83751,"hostname":"Mac.net","event":"run_analysis.switch_level_spread_carried","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","node_ids":["extra_specialists"],"msg":"run_analysis sent option-set 0/1 switch levels at the minimum spread (wire copy only; no magnitudes)"}
+{"level":"info","time":1792482879616,"pid":83751,"hostname":"Mac.net","event":"run_analysis.seed_reuse","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","reason":"no_prior_run","msg":"run_analysis seed decision"}
+{"level":"info","time":1792482879642,"pid":83751,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"total_capacity","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792482879646,"pid":83751,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"total_capacity","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792482879651,"pid":83751,"hostname":"Mac.net","event":"v5.run_analysis.options_scaffolded","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","scaffolded_option_ids":["hold"],"scaffolded_factor_counts":[1],"excluded_option_ids":[],"option_count":2}
+{"level":"info","time":1792482879651,"pid":83751,"hostname":"Mac.net","event":"run_analysis.stated_level_spread_carried","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","node_ids":["existing_capacity"],"msg":"run_analysis sent user-stated factor levels at the minimum spread (wire copy only; no magnitudes)"}
+{"level":"info","time":1792482879652,"pid":83751,"hostname":"Mac.net","event":"run_analysis.switch_level_spread_carried","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","node_ids":["extra_packers"],"msg":"run_analysis sent option-set 0/1 switch levels at the minimum spread (wire copy only; no magnitudes)"}
+{"level":"info","time":1792482879656,"pid":83751,"hostname":"Mac.net","event":"run_analysis.seed_reuse","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","reason":"no_prior_run","msg":"run_analysis seed decision"}
+{"level":"info","time":1792482879672,"pid":83751,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_support_capacity","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792482879675,"pid":83751,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_support_capacity","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792482879678,"pid":83751,"hostname":"Mac.net","event":"v5.run_analysis.options_scaffolded","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","scaffolded_option_ids":["hold"],"scaffolded_factor_counts":[1],"excluded_option_ids":[],"option_count":2}
+{"level":"info","time":1792482879679,"pid":83751,"hostname":"Mac.net","event":"run_analysis.stated_level_spread_carried","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","node_ids":["existing_team_capacity"],"msg":"run_analysis sent user-stated factor levels at the minimum spread (wire copy only; no magnitudes)"}
+{"level":"info","time":1792482879679,"pid":83751,"hostname":"Mac.net","event":"run_analysis.switch_level_spread_carried","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","node_ids":["additional_specialists"],"msg":"run_analysis sent option-set 0/1 switch levels at the minimum spread (wire copy only; no magnitudes)"}
+{"level":"info","time":1792482879684,"pid":83751,"hostname":"Mac.net","event":"run_analysis.seed_reuse","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","reason":"no_prior_run","msg":"run_analysis seed decision"}
+{"level":"info","time":1792482879699,"pid":83751,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_support_capacity","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792482879702,"pid":83751,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"weekly_support_capacity","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792482879706,"pid":83751,"hostname":"Mac.net","event":"v5.run_analysis.options_scaffolded","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","scaffolded_option_ids":["hold"],"scaffolded_factor_counts":[1],"excluded_option_ids":[],"option_count":2}
+{"level":"info","time":1792482879706,"pid":83751,"hostname":"Mac.net","event":"run_analysis.stated_level_spread_carried","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","node_ids":["existing_team_capacity"],"msg":"run_analysis sent user-stated factor levels at the minimum spread (wire copy only; no magnitudes)"}
+{"level":"info","time":1792482879707,"pid":83751,"hostname":"Mac.net","event":"run_analysis.switch_level_spread_carried","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","node_ids":["additional_specialists"],"msg":"run_analysis sent option-set 0/1 switch levels at the minimum spread (wire copy only; no magnitudes)"}
+{"level":"info","time":1792482879712,"pid":83751,"hostname":"Mac.net","event":"run_analysis.seed_reuse","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","reason":"no_prior_run","msg":"run_analysis seed decision"}
+{"level":"info","time":1792482879767,"pid":83751,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"total_capacity","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792482879772,"pid":83751,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":2,"status":"ready","userQuestionCount":0,"goalNodeId":"total_capacity","readyOptionsCount":2,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1792482879774,"pid":83751,"hostname":"Mac.net","event":"v5.run_analysis.options_scaffolded","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","scaffolded_option_ids":["hold"],"scaffolded_factor_counts":[1],"excluded_option_ids":[],"option_count":2}
+{"level":"info","time":1792482879775,"pid":83751,"hostname":"Mac.net","event":"run_analysis.stated_level_spread_carried","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","node_ids":["existing_capacity"],"msg":"run_analysis sent user-stated factor levels at the minimum spread (wire copy only; no magnitudes)"}
+{"level":"info","time":1792482879775,"pid":83751,"hostname":"Mac.net","event":"run_analysis.switch_level_spread_carried","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","node_ids":["extra_specialists"],"msg":"run_analysis sent option-set 0/1 switch levels at the minimum spread (wire copy only; no magnitudes)"}
+{"level":"info","time":1792482879779,"pid":83751,"hostname":"Mac.net","event":"run_analysis.seed_reuse","request_id":"req-l15","scenario_id":"c1c1c1c1-0000-4000-8000-000000000015","reason":"no_prior_run","msg":"run_analysis seed decision"}
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts (14 tests | 1 failed) 315ms
+     × negative: a rate with a different driver denominator stays a placeholder 12ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts > current level plus a stated per-unit addition > negative: a rate with a different driver denominator stays a placeholder
+AssertionError: expected 'user_stated' to be 'olumi_placeholder' // Object.is equality
+
+Expected: "olumi_placeholder"
+Received: "user_stated"
+
+ ❯ src/orchestrator-v5/path-b/tools/__tests__/per-unit-addition.test.ts:218:50
+    216|   it('negative: a rate with a different driver denominator stays a pla…
+    217|     const graph = await replay(draft(`${UNIT} per machine`));
+    218|     expect(effectOf(graph).provenance.magnitude).toBe('olumi_placehold…
+       |                                                  ^
+    219|   });
+    220|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 13 passed (14)
+   Start at  08:54:32
+   Duration  7.83s (transform 5.58s, setup 133ms, import 7.26s, tests 315ms, environment 0ms)
+
