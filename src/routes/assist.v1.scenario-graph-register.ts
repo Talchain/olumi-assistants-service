@@ -1239,6 +1239,7 @@ export default async function route(app: FastifyInstance) {
           return appendCheckedGraphWrite({
           store,
           writesGraph: true,
+          coreWrite: corePostimage,
           // Only what THIS registration introduces can refuse it — a scenario
           // whose stored graph is already invalid stays registrable.
           //

@@ -41,6 +41,7 @@ vi.mock('../../orchestrator/user-identity.js', async (importOriginal) => {
 });
 
 import registerRoute from '../assist.v1.scenario-graph-register.js';
+import { computeGraphIdentityHash } from '../../orchestrator-v5/context/graph-identity.js';
 
 type Rec = Record<string, unknown>;
 const RISK = 'risk_supplier_delay';
@@ -111,5 +112,32 @@ describe('/graph/register stores a core postimage as given, and only for CEE\'s 
     const res = await register({ graph: stored(SIZED), thin_core: true }, false);
     expect(res.statusCode, res.body).toBe(200);
     expect(risk(written()).analysis_participation).toBeUndefined();
+  });
+});
+
+describe('one write rule per scenario (THIN CORE): a scenario whose meaning is its living model takes only the core write', () => {
+  const core = (): Rec => ({ ...stored(SIZED), living_model: LIVING });
+
+  it('a CEE write without thin_core onto a core scenario is refused, and nothing is written', async () => {
+    loadGraph.mockResolvedValue(core());
+    const res = await register({ graph: stored(SIZED) }, true);
+    expect(res.statusCode, res.body).toBe(422);
+    expect(res.body).toContain('CORE_SCENARIO_LEGACY_WRITE');
+    expect(append).not.toHaveBeenCalled();
+  });
+
+  it('the core write replaces a core scenario on its base', async () => {
+    loadGraph.mockResolvedValue(core());
+    const next = { ...core(), living_model: { ...LIVING, views: [] } };
+    const res = await register({ graph: next, thin_core: true, expected_graph_identity_hash: computeGraphIdentityHash(core() as never)!.value,
+      operation_id: '0b6f2a9c-1d3e-4f5a-8b7c-9d0e1f2a3b4c' }, true);
+    expect(res.statusCode, res.body).toBe(200);
+    expect(written().living_model).toEqual(next.living_model);
+  });
+
+  it('CONTROL: a legacy scenario still takes the same legacy write', async () => {
+    loadGraph.mockResolvedValue(stored());
+    const res = await register({ graph: stored(SIZED) }, true);
+    expect(res.statusCode, res.body).toBe(200);
   });
 });

@@ -69,6 +69,12 @@ export interface CheckedGraphAppendParams {
    */
   readonly writesGraph: boolean;
   /**
+   * THIN CORE (20 Oct 2026): this write is a core postimage (a living model and the graph regenerated from it, together),
+   * set only by the register route for CEE's own `thin_core` writer. A scenario whose meaning is its living model takes no
+   * other graph write: one would leave the graph and its meaning apart, or drop the meaning.
+   */
+  readonly coreWrite?: boolean;
+  /**
    * The graph as it stood BEFORE this write. Violations already present in it
    * are ABSORBED, never refused — only what this write INTRODUCES can fail it.
    *
@@ -307,6 +313,12 @@ export async function appendCheckedGraphWrite(
     log.warn({ event: 'door.untouched_level_check_skipped', reason: 'no_base_supplied', source });
   }
   await assertDoorOwnership(store, params.write.scenario_id, source);
+  // THIN CORE: one write rule per scenario. A writer that merges onto the stored graph carries its living model forward;
+  // one that rebuilds the graph drops it, so the base is checked too.
+  const carriesLivingModel = (g: unknown): boolean => g !== null && typeof g === 'object' && (g as { living_model?: unknown }).living_model !== undefined;
+  if (writesGraph && params.coreWrite !== true && (carriesLivingModel(params.write.graph) || carriesLivingModel(params.baseGraphForInvariants))) {
+    throw new PersistedGraphInvariantError([{ code: 'CORE_SCENARIO_LEGACY_WRITE', entity_ids: [], count: 1 }]);
+  }
   for (let attempt = 0; ; attempt += 1) {
     // Always reconcile the ORIGINAL request against each fresh row. Reusing the
     // previous attempt would retain obsolete scope issues or permanently drop holds.
