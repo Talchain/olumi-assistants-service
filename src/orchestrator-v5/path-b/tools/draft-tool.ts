@@ -17,6 +17,8 @@
  * cannot hold. A retry of a construction that already committed reports "already saved", never a second write or "model exists".
  */
 import { z } from 'zod-v4';
+import { InterventionRangeSchema } from '@talchain/schemas';
+import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { AgentToolContext } from '../../agent-lane/runtime/agent-tools.js';
 import type { InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
 import {
@@ -57,7 +59,8 @@ const nodesIn = (graph: Record<string, unknown>): number => (Array.isArray(graph
 export const B_DRAFTER_SENTENCE = 'Represent each option\'s stated effect as a setting on the factor it changes rather than a sized link from the option, retaining every supplied point and complete range with the literal words, named speaker, source, stance, units, period and conditions; where the source meaning establishes that the goal quantity equals its current level plus additions, declare a sum in identities with bound current-level and addition operands and supported current levels for every operand and the total in the same quantity, units, period and reference; keep derived arithmetic visibly Olumi\'s, use zero only for a structurally defined increment at its stated reference, and leave unsupported levels or probability laws unknown.'
   + ' Where the source supports the goal level as its current level plus additions, represent that current level as a separate fixed factor carrying the supported goal baseline and its actual source, declare an entry in identities with operation sum, the goal as outcome and that factor plus every distinct addition as operands, and link each operand to the goal one for one in the same quantity, units, period and reference, retaining supported current levels, structural increment zeroes, effects, ranges and authorship while identifying the sum as Olumi’s interpretation and leaving unsupported probability laws unknown.'
   + ' For every figure, declare origin (user, third_party, olumi or unknown) and stance (stated_current, hypothetical, target or estimate) from its full source context; retain its literal source words where available, named source, sign, unit, period and conditions; identify your estimates and derivations as Olumi’s, preserve unresolved origin as unknown, and never promote a supposition to a stated current fact.'
-  + ' Where the brief does not state a level, setting or size the model needs, propose a defensible Olumi starting estimate with origin=olumi and stance=estimate, explaining its basis, unit and period for the person to approve through the existing card, never presenting it as theirs; if no defensible estimate is possible, state the limitation and ask for the missing input rather than silently leaving the model unrunnable; in every draft with a supported additive goal, declare the sum identity with the separate current-level factor and every distinct addition as bound operands under the rules above.';
+  + ' Where the brief does not state a level, setting or size the model needs, propose a defensible Olumi starting estimate with origin=olumi and stance=estimate, explaining its basis, unit and period for the person to approve through the existing card, never presenting it as theirs; if no defensible estimate is possible, state the limitation and ask for the missing input rather than silently leaving the model unrunnable; in every draft with a supported additive goal, declare the sum identity with the separate current-level factor and every distinct addition as bound operands under the rules above.'
+  + ' For one uncertain outcome per option with a source-stated range, you may declare range.law as uniform, role=uncertain_outcome, origin=olumi_illustrative, basis="illustrative, untested" and independent_of_model=true when compatible with its quantity, reference, period and conditions, retaining exactly its bounds and raw source words separately; never do so for controllable settings, targets or unstated ranges.';
 
 /** B declares meaning in the existing strict structured output; A's candidate schema stays unchanged. */
 function bCandidateSchema(): Record<string, unknown> {
@@ -68,7 +71,11 @@ function bCandidateSchema(): Record<string, unknown> {
   const p = schema.properties;
   Object.assign(p.goal.properties, { target_origin: origin, target_stance: stance, baseline_origin: origin, baseline_stance: stance });
   for (const key of ['factors', 'risks', 'outcomes', 'links']) Object.assign(p[key].items.properties, pair);
-  Object.assign(p.options.items.properties.interventions.items.properties, pair);
+  const range = zodToJsonSchema(InterventionRangeSchema, { $refStrategy: 'none' }) as Record<string, any>;
+  delete range.$schema;
+  range.properties.law = { anyOf: [{ type: 'null' }, range.properties.law] };
+  range.required = Object.keys(range.properties);
+  Object.assign(p.options.items.properties.interventions.items.properties, pair, { range: { anyOf: [{ type: 'null' }, range] } });
   return strictForTheDrafter(schema, { providerBoundary: false });
 }
 

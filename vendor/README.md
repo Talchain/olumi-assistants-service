@@ -7,7 +7,17 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.83.0.tgz`: THE CURRENT PIN (recovery Batch C: strict goal comparators, joint goal chance and precision; DL, 12 Oct)
+### `talchain-schemas-0.84.0.tgz`: PRE-PUBLISH RE-PACK — REPLACE BEFORE MERGE (DL-3, 20 Oct 2026)
+
+**Provenance: a local `npm pack` of olumi-schemas branch `dl/l3s-outcome-law` at 38219a68 (schemas #97, unmerged).** It is NOT the
+registry artefact. This PR stays unarmed until Paul merges and publishes #97; the DL then replaces this file with the published
+0.84.0 registry download and records its shasum, integrity and gitHead here, in the 0.83.0 format below. 880,306 bytes;
+sha256 a30a5c627fd898af48e3c8a672903d7eaa7bcb48da865b0e08587b03c4a11bb9.
+
+0.84.0 adds the optional `law` (InterventionOutcomeLaw: ISL #235's explicit outcome-law declaration, with its own origin/basis) to
+InterventionRangeSchema, and RunInputSnapshotSchema records it unchanged. A range with no `law` is unchanged.
+
+### `talchain-schemas-0.83.0.tgz` (historical — superseded by 0.84.0 on this branch) (recovery Batch C: strict goal comparators, joint goal chance and precision; DL, 12 Oct)
 
 **Provenance: THE PUBLISHED REGISTRY ARTEFACT ITSELF, not a local re-pack.** Downloaded from
 `https://npm.pkg.github.com/download/@talchain/schemas/0.83.0/f3930713b0cac6d86264d895020a112643ac0293`. Registry gitHead

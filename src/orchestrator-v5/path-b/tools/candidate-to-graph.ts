@@ -79,7 +79,7 @@ const valueStamp = (who: Who): Rec => (who === 'user' ? { source: 'brief_extract
   : who === 'olumi' ? { source: 'cee_inference', extractionType: 'inferred' } : {});
 /** A's numbers without A's authorship stamps (A ran with no brief, so its stamps say nothing about who said what). */
 const numbersOf = ({ source: _s, extractionType: _e, user_material_unverified: _u, ...numbers }: Rec): Rec => numbers;
-const levelNumbersOf = ({ source: _s, user_material_unverified: _u, value_confidence: _c, target_match: _t, ...numbers }: Rec): Rec => numbers;
+const levelNumbersOf = ({ source: _s, user_material_unverified: _u, value_confidence: _c, target_match: _t, range: _r, ...numbers }: Rec): Rec => numbers;
 /**
  * ⭐ A DERIVED FIGURE IS OLUMI'S (signed plan, ARGUMENT-RECONCILED-20261018 item 7): "a derived figure is Olumi's derivation
  * from the user's operands, shown with its arithmetic; it is never credited as the user's." Each operand keeps its origin.
@@ -689,11 +689,15 @@ function withRecordedRanges(graph: Rec & { nodes: unknown[] }, input: unknown, w
     const { low, high, quote, unit } = ranges[0]!;
     if (!words.includes(quote) || (typeof unit === 'string' && typeof cell.unit === 'string' && !sameUnit(unit, cell.unit))) continue;
     const declared = list<Rec>((input as Rec).options).find((o) => canonicalLabel(String(o?.label)) === nameOf(option!.id as string));
-    const addition = list<Rec>(declared?.interventions).find((iv) => canonicalLabel(String(iv?.factor_label)) === nameOf(subject.id) && iv.value_kind === 'additional');
+    const setting = list<Rec>(declared?.interventions).find((iv) => canonicalLabel(String(iv?.factor_label)) === nameOf(subject.id));
+    const addition = setting?.value_kind === 'additional' ? setting : undefined;
     const today = addition === undefined ? undefined : list<Rec>((input as Rec).factors).find((f) => canonicalLabel(String(f?.label)) === nameOf(subject.id))?.baseline_value;
     const within = (at: number): boolean => low! <= at && at <= high!;
     if (!within(point) || (finite(today) && today !== 0 && within(point - today))) continue;
-    const range = { low, high, meaning: 'likely_range', source: 'brief_extraction', source_quote: quote };
+    const proposed = StoredInterventionRange.safeParse(setting?.range);
+    const law = proposed.success && proposed.data.low === low && proposed.data.high === high && proposed.data.source_quote === quote
+      ? proposed.data.law : undefined;
+    const range = { low, high, meaning: 'likely_range', source: 'brief_extraction', source_quote: quote, ...(law === undefined ? {} : { law }) };
     const admitted = admitInterventionRange({ ...cell, range });
     if (admitted !== undefined && 'range' in admitted) option!.interventions = { ...(option!.interventions as Rec), [subject.id]: { ...cell, range: admitted.range } };
   }

@@ -99,7 +99,8 @@ function onlyRecordedSettingRanges(graph: GraphStateIngress, brief: string | und
     if (cell?.range === undefined) return true;
     const record = claimRecordFor(graph, { kind: 'factor', id: factorId, option_id: String(row.id), field: 'level' });
     const said = record?.attest?.recorded_by === 'construction' ? record.statements.filter((st) => st.form === 'range' && saidByOf(st) === 'user') : [];
-    return said.length === 1 && brief.includes(said[0]!.quote) && isDeepStrictEqual(cell.range,
+    const { law: _law, ...rawRange } = cell.range as Record<string, unknown>;
+    return said.length === 1 && brief.includes(said[0]!.quote) && isDeepStrictEqual(rawRange,
       { low: said[0]!.low, high: said[0]!.high, meaning: 'likely_range', source: 'brief_extraction', source_quote: said[0]!.quote });
   }));
 }

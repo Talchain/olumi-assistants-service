@@ -117,10 +117,14 @@ describe('B\'s drafter request carries the AIE\'s sentence and the K5 P0 ruling\
     expect(sent.startsWith(`${BUILD_INSTRUCTIONS} `)).toBe(true);
     const extra = 'For every figure, declare origin (user, third_party, olumi or unknown) and stance (stated_current, hypothetical, target or estimate) from its full source context; retain its literal source words where available, named source, sign, unit, period and conditions; identify your estimates and derivations as Olumi’s, preserve unresolved origin as unknown, and never promote a supposition to a stated current fact.';
     const addition = 'Where the brief does not state a level, setting or size the model needs, propose a defensible Olumi starting estimate with origin=olumi and stance=estimate, explaining its basis, unit and period for the person to approve through the existing card, never presenting it as theirs; if no defensible estimate is possible, state the limitation and ask for the missing input rather than silently leaving the model unrunnable; in every draft with a supported additive goal, declare the sum identity with the separate current-level factor and every distinct addition as bound operands under the rules above.';
-    const b = sent.slice(BUILD_INSTRUCTIONS.length + 1, -(addition.length + 1));
+    const law = 'For one uncertain outcome per option with a source-stated range, you may declare range.law as uniform, role=uncertain_outcome, origin=olumi_illustrative, basis="illustrative, untested" and independent_of_model=true when compatible with its quantity, reference, period and conditions, retaining exactly its bounds and raw source words separately; never do so for controllable settings, targets or unstated ranges.';
+    const prior = sent.slice(0, -(law.length + 1));
+    const b = prior.slice(BUILD_INSTRUCTIONS.length + 1, -(addition.length + 1));
     const [aie, ruling] = [b.slice(0, 715), b.slice(716, -(extra.length + 1))];
-    expect(sent).toBe(`${BUILD_INSTRUCTIONS} ${aie} ${ruling} ${extra} ${addition}`);
+    expect(sent).toBe(`${BUILD_INSTRUCTIONS} ${aie} ${ruling} ${extra} ${addition} ${law}`);
     const sha = (text: string): string => createHash('sha256').update(Buffer.from(text, 'utf8')).digest('hex');
+    expect(sha(law)).toBe('fa930069ea85079de098d9b05738b43b0e0f41aff3cc882b024ae3dc7663a887');
+    expect(BUILD_INSTRUCTIONS).not.toContain(law);
     expect(sha(addition)).toBe('15c1eae82146b2ef05b6e3a78af3a9568af58643e41472fcee15410a628c9085');
     expect(BUILD_INSTRUCTIONS).not.toContain(addition);
     expect(sha(extra)).toBe('96074041c73386e9e0a1e930dd4745ac422577aa91a40ceeedf28277508cb781');
@@ -144,6 +148,11 @@ it('ONE declared pair: B strict output requires origin/stance on every figure; A
   pair('properties.goal', 'target_'); pair('properties.goal', 'baseline_');
   for (const key of ['factors', 'risks', 'outcomes', 'links']) pair(`properties.${key}.items`);
   pair('properties.options.items.properties.interventions.items');
+  const range = (schema as Record<string, any>).properties.options.items.properties.interventions.items.properties.range.anyOf[1];
+  expect(range.required).toEqual(['low', 'high', 'meaning', 'source', 'source_quote', 'law']);
+  expect(range.properties.law.anyOf[0]).toEqual({ type: 'null' });
+  expect(range.properties.law.anyOf[1].required).toEqual(['family', 'role', 'origin', 'basis', 'quantity', 'reference', 'period', 'conditions', 'independent_of_model']);
+  expect(before).not.toHaveProperty('properties.options.items.properties.interventions.items.properties.range');
   expect(buildCandidateSchema()).toEqual(before);
   expect(before).not.toHaveProperty('properties.factors.items.properties.origin');
 });
