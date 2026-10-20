@@ -30,7 +30,7 @@ export interface ApprovedAdoption {
   /** The approved figure, in the factor's own units — what the proposal stored. */
   readonly rawValue: number;
   /** Human words whose proposed field binding remains unverified after this approval. */
-  readonly unverifiedBinding?: import('./quote-confirmation.js').QuoteConfirmation;
+  readonly unverifiedBinding?: import('./quote-confirmation.js').QuoteConfirmation & { readonly origin?: 'unknown' };
 }
 
 /** The contract's literal for a value the user adopted rather than authored (0.55 `OBSERVED_STATE_SOURCE_LITERALS`). */

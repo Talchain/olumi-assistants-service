@@ -9,9 +9,10 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { BuildModelParams, B_DRAFTER_SENTENCE, buildModel, type DraftDeps } from '../draft-tool.js';
 import { candidateToGraph } from '../candidate-to-graph.js';
-import { BUILD_INSTRUCTIONS, constructionOperationId, type CallStructuredModel } from '../../../agent-lane/runtime/build-model.js';
+import { BUILD_INSTRUCTIONS, buildCandidateSchema, constructionOperationId, type CallStructuredModel } from '../../../agent-lane/runtime/build-model.js';
 import { registrationTurnId } from '../../../graph-registration/registration-identity.js';
 import { traceRow } from '../outcome.js';
+import { STANCE_DESCRIPTION } from '../change-tools.js';
 import { read, type Rec } from './fixtures.js';
 
 const BRIEF = 'We run a small library and walk-ins swing a lot; should we add a second assistant on Saturdays?';
@@ -114,14 +115,35 @@ describe('B\'s drafter request carries the AIE\'s sentence and the K5 P0 ruling\
     await buildModel(p, ctx, { brief: BRIEF });
     const sent = String(p.callStructured.mock.calls[0]![0].instructions);
     expect(sent.startsWith(`${BUILD_INSTRUCTIONS} `)).toBe(true);
-    const [aie, ruling] = [sent.slice(BUILD_INSTRUCTIONS.length + 1, BUILD_INSTRUCTIONS.length + 1 + 715), sent.slice(BUILD_INSTRUCTIONS.length + 1 + 715 + 1)];
-    expect(sent).toBe(`${BUILD_INSTRUCTIONS} ${aie} ${ruling}`);
+    const extra = 'For every figure, declare origin (user, third_party, olumi or unknown) and stance (stated_current, hypothetical, target or estimate) from its full source context; retain its literal source words where available, named source, sign, unit, period and conditions; identify your estimates and derivations as Olumi’s, preserve unresolved origin as unknown, and never promote a supposition to a stated current fact.';
+    const b = sent.slice(BUILD_INSTRUCTIONS.length + 1);
+    const [aie, ruling] = [b.slice(0, 715), b.slice(716, -(extra.length + 1))];
+    expect(sent).toBe(`${BUILD_INSTRUCTIONS} ${aie} ${ruling} ${extra}`);
     const sha = (text: string): string => createHash('sha256').update(Buffer.from(text, 'utf8')).digest('hex');
+    expect(sha(extra)).toBe('96074041c73386e9e0a1e930dd4745ac422577aa91a40ceeedf28277508cb781');
     expect([sha(aie), sha(ruling)]).toEqual(['cfbe03aa8d84e1ed6452817987d331bbf15596be25487da26b93978316d95f49',
       '9111ed60fb9c8e4048118f3d49c6409ba98c59b2a39c2c0bcc90235faf9436ee']);
     expect(BUILD_INSTRUCTIONS).not.toContain(aie.slice(0, 60));
     expect(BUILD_INSTRUCTIONS).not.toContain(ruling.slice(0, 60));
   });
+});
+
+it('ONE declared pair: B strict output requires origin/stance on every figure; A stays byte-equal', async () => {
+  const before = buildCandidateSchema();
+  const p = product({ graph: [EMPTY], register: [{ status: 422, json: {} }] });
+  await buildModel(p, ctx, { brief: BRIEF });
+  const schema = p.callStructured.mock.calls[0]![0].schema as Rec;
+  const props = schema.properties;
+  const pair = (node: Rec, prefix = '') => {
+    expect(node.properties[`${prefix}origin`]).toEqual({ type: 'string', enum: ['user', 'third_party', 'olumi', 'unknown'] });
+    expect(node.properties[`${prefix}stance`]).toEqual({ type: 'string', enum: ['stated_current', 'hypothetical', 'target', 'estimate'], description: STANCE_DESCRIPTION });
+    expect(node.required).toEqual(expect.arrayContaining([`${prefix}origin`, `${prefix}stance`]));
+  };
+  pair(props.goal, 'target_'); pair(props.goal, 'baseline_');
+  for (const key of ['factors', 'risks', 'outcomes', 'links']) pair(props[key].items);
+  pair(props.options.items.properties.interventions.items);
+  expect(buildCandidateSchema()).toEqual(before);
+  expect((before as Rec).properties.factors.items.properties).not.toHaveProperty('origin');
 });
 
 describe('exactly once: a retry of a committed construction is "already saved"', () => {

@@ -228,13 +228,16 @@ describe('ROW 3: each declared source, through the real writers, read back by th
     expect(provenanceOf({ setting: cellOf('add_staff', 'staff'), target: nodeOf('staff') })).toMatchObject({ origin: 'ai' });
   });
 
-  it('BLOCKED-SCHEMA: a factor value from an unknown speaker would read as a person\'s figure: unavailable, nothing proposed', async () => {
-    for (const quote of ['about 20 minutes', null]) {
-      const proposals = new ProposalStore();
-      const out = await proposeChange({ dispatch, proposals }, ctx, { public_label: 'Record the queue time', basis: 'b', ops: [queueTo('unknown', quote)] } as never);
-      expect(out).toMatchObject({ status: 'unavailable', reason: 'blocked_schema', write: 'none' });
-      expect(proposals.size()).toBe(0);
-    }
+  it('an unknown figure saves as unknown; a missing source quote still refuses before the card', async () => {
+    const proposals = new ProposalStore();
+    const malformed = await proposeChange({ dispatch, proposals }, ctx, { public_label: 'Record the queue time', basis: 'b', ops: [queueTo('unknown', null)] } as never);
+    expect(malformed).toMatchObject({ status: 'refused', reason: 'quote_not_in_users_words' });
+    expect(proposals.size()).toBe(0);
+    const { id } = await proposed([queueTo('unknown', 'about 20 minutes')], proposals);
+    const out = await applyChange({ dispatch, proposals, commitOptionLevels: door() }, ctx, { proposal_id: id });
+    expect(out).toMatchObject({ status: 'ok', data: { saved: true, faithful: true,
+      written: [{ figure: 20, declared: { origin: 'unknown' }, stored_as: { origin: 'unknown' } }] } });
+    expect(provenanceOf({ value: nodeOf('queue').observed_state }).origin).toBe('unknown');
   });
 
   it('a write the authority reads as another source is never reported saved: Olumi\'s setting stored as the user\'s → not verified', async () => {
@@ -403,7 +406,6 @@ describe('WITNESS: a mixed user + third-party change is saved whole or not at al
  */
 describe('STANCE: carried with each figure, never promoted to an operative current level', () => {
   it.each([
-    ['a supposition', 'hypothetical'],
     ['a target', 'target'],
   ])('%s as a factor value would become its current level: unavailable, nothing proposed', async (_name, stance) => {
     const proposals = new ProposalStore();
@@ -412,6 +414,15 @@ describe('STANCE: carried with each figure, never promoted to an operative curre
     expect(out).toMatchObject({ status: 'unavailable', reason: 'blocked_schema', write: 'none' });
     expect(proposals.size()).toBe(0);
     expect(rows.size).toBe(0);
+  });
+
+  it('a supposition is saved as a conditional claim beside the unchanged current level', async () => {
+    const before = structuredClone(nodeOf('queue').observed_state);
+    const { proposals, id } = await proposed([queueTo('user', 'about 20 minutes', null, 'hypothetical')]);
+    const out = await applyChange({ dispatch, proposals, commitOptionLevels: door() }, ctx, { proposal_id: id });
+    expect(out).toMatchObject({ status: 'ok', data: { saved: true, faithful: true,
+      written: [{ figure: 20, declared: { stance: 'hypothetical' }, claim: { said_by: 'user' } }] } });
+    expect(nodeOf('queue').observed_state).toEqual(before);
   });
 
   it('a person\'s estimate is saved, with its stance kept in their claim beside the value (GAP 1)', async () => {

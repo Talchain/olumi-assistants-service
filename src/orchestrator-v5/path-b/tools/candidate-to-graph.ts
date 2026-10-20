@@ -604,6 +604,18 @@ function withDeclaredStatements(graph: Rec, input: unknown, carry: StatementCarr
     return id === undefined ? undefined : { kind: s.kind as DoorSubject['kind'], id, field };
   };
   const text = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() !== '' ? v : undefined);
+  // Stance belongs to this declared figure, never a neighbouring statement or the item's introduction tag.
+  const declaredStance = (st: Rec): unknown => {
+    const draft = input as Rec, subject = st.subject;
+    const named = (items: unknown, label: unknown): Rec | undefined => list<Rec>(items)
+      .find((n) => canonicalLabel(String(n.label ?? '')) === canonicalLabel(String(label ?? '')));
+    if (subject.kind === 'goal') return draft.goal?.[st.field === 'target' ? 'target_stance' : 'baseline_stance'];
+    if (subject.kind === 'option') return list<Rec>(named(draft.options, subject.label)?.interventions)
+      .find((iv) => canonicalLabel(String(iv.factor_label)) === canonicalLabel(String(subject.factor_label)))?.stance;
+    if (subject.kind === 'link') return list<Rec>(draft.links).find((l) => canonicalLabel(String(l.from)) === canonicalLabel(String(subject.label))
+      && canonicalLabel(String(l.to)) === canonicalLabel(String(subject.to_label)))?.stance;
+    return named(draft[`${subject.kind}s`], subject.label)?.stance;
+  };
   const groups = new Map<string, { subject: DoorSubject; statements: UserStatement[] }>();
   for (const st of list<Rec>((input as Rec).statements)) {
     const s = st?.subject;
@@ -621,7 +633,7 @@ function withDeclaredStatements(graph: Rec, input: unknown, carry: StatementCarr
     const statement = figures === undefined ? undefined : userStatementOf({ ...(st.speaker === 'user' ? { speaker: 'user' } : { said_by: 'unknown' }),
       quote: st.quote, source, subject: { quantity: subjectKey(subject), node_id: subject.id, ...(subject.option_id !== undefined ? { option_id: subject.option_id } : {}) },
       form: st.form, ...figures, ...(text(st.unit) !== undefined ? { unit: st.unit } : {}), ...(text(st.qualifier) !== undefined ? { qualifier: st.qualifier } : {}),
-      ...(text(st.conditions) !== undefined ? { conditions: st.conditions } : {}), reading: 'olumi' });
+      ...(text(st.conditions) !== undefined ? { conditions: st.conditions } : {}), reading: 'olumi', stance: declaredStance(st) });
     if (statement === undefined) continue;
     if (st.speaker === 'other') blocked.push({ field_path: `nodes[${subject.id}].user_statements`, declared: 'other', missing: 'speaker_name' });
     const group = groups.get(subjectKey(subject)) ?? { subject, statements: [] };

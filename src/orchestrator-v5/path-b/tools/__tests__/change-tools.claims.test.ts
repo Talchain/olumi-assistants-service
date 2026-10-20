@@ -183,3 +183,72 @@ describe('GAP 1: a person\u2019s figure is kept as THEIR claim, in the same comm
     expect(JSON.stringify(nodeOf('queue').user_statements ?? null)).toBe(before);
   });
 });
+
+// Declared origin and stance survive the real batch writer and a cold canonical read.
+describe('ONE declared pair edit writer', () => {
+  it.each([
+    ['user', 'stated_current', 'human'],
+    ['olumi', 'estimate', 'ai'],
+    ['unknown', 'estimate', 'unknown'],
+    ['user', 'hypothetical', null],
+  ] as const)('RED: %s/%s is carried without refusal or promotion to today', async (origin, stance, expectedOrigin) => {
+    const data = await saved([queue20(origin, origin === 'olumi' ? null : 'about 20 minutes on a Saturday, if the weather holds', null, stance)]);
+    expect(data.written).toEqual([expect.objectContaining({ declared: expect.objectContaining({ origin, stance }) })]);
+    if (expectedOrigin === null) expect(nodeOf('queue').observed_state).toEqual((stored() as { nodes: Rec[] }).nodes.find((n) => n.id === 'queue')!.observed_state);
+    else expect((data.written as Rec[])[0]!.stored_as.origin).toBe(expectedOrigin);
+    if (origin === 'unknown') expect(nodeOf('queue').provenance).toBe('unverified_brief');
+    if (origin !== 'olumi') expect(await coldClaims('queue')).toContainEqual(expect.objectContaining({ stance, low: 20, said_by: origin === 'unknown' ? 'unknown' : 'user' }));
+    persisted = JSON.parse(JSON.stringify(persisted));
+    expect(nodeOf('visits')).toEqual((stored() as { nodes: Rec[] }).nodes.find((n) => n.id === 'visits'));
+    expect((await readCanonicalContext({ dispatch }, ctx)).status).toBe('ok');
+  });
+});
+
+
+describe('ONE declared pair new-factor writer, second brief', () => {
+  const words = 'There are 4 people on weekend cover; suppose we had 4 people on the rota.';
+  it.each([
+    ['user', 'stated_current', 'human'], ['olumi', 'estimate', 'ai'],
+    ['unknown', 'estimate', 'unknown'], ['user', 'hypothetical', 'unknown'],
+  ] as const)('RED: adding %s/%s keeps source and stance through the real door', async (origin, stance, expectedOrigin) => {
+    const data = await saved([{ op: 'add_to_model', kind: 'factor', label: 'Weekend cover', acts_on: 'queue', direction: 'negative',
+      value: 4, unit: 'people', stance, source: { origin, quote: origin === 'olumi' ? null : words, named_source: null } }],
+    { ...ctx, user_turn_text: words, verified_user_messages: [words] });
+    persisted = JSON.parse(JSON.stringify(persisted));
+    const row = (data.written as Rec[])[0]!;
+    expect(row.stored_as.origin).toBe(expectedOrigin);
+    expect(row.figure).toBe(4);
+    const added = nodeOf(String(row.id));
+    if (stance === 'hypothetical') expect(added.observed_state).toBeUndefined();
+    else expect((added.observed_state as Rec).raw_value).toBe(4);
+    if (origin !== 'olumi') expect(await coldClaims(String(row.id))).toContainEqual(expect.objectContaining({
+      stance, low: 4, high: 4, unit: 'people', said_by: origin === 'unknown' ? 'unknown' : 'user' }));
+  });
+
+  it.each([
+    ['missing literal', 4, 'There are people on weekend cover.'],
+    ['opposite sign', 4, 'There are -4 people on weekend cover.'],
+  ])('a user credit needs its own literal figure: %s', async (_label, value, quote) => {
+    const proposals = new ProposalStore();
+    const out = await proposeChange({ dispatch, proposals }, { ...ctx, user_turn_text: String(quote), verified_user_messages: [String(quote)] }, {
+      public_label: 'Add cover', basis: 'Typed figure', ops: [{ op: 'add_to_model', kind: 'factor', label: 'Weekend cover', acts_on: 'queue',
+        direction: 'negative', value, unit: 'people', stance: 'stated_current', source: { origin: 'user', quote, named_source: null } }],
+    } as never);
+    expect(out.status).toBe('refused');
+    expect(rows.size).toBe(0);
+  });
+});
+
+
+it('a hypothetical cannot give a user credit in another unit, and a quote cannot borrow a number from another message', async () => {
+  for (const op of [
+    { ...queue20('user', 'about 20 minutes on a Saturday, if the weather holds', null, 'hypothetical'), unit: 'people' },
+    queue20('user', 'The queue is about', null, 'stated_current'),
+    queue20('user', 'We use 20 minutes at noon', null, 'stated_current'),
+  ]) {
+    const proposals = new ProposalStore();
+    const out = await proposeChange({ dispatch, proposals }, ctx, { public_label: 'Record it', basis: 'Typed', ops: [op] } as never);
+    expect(out.status).toBe('refused');
+    expect(rows.size).toBe(0);
+  }
+});

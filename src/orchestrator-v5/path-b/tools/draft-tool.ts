@@ -25,6 +25,7 @@ import {
 import { turnContextItems, turnContextText } from '../../agent-lane/turn-context.js';
 import { budgetFor } from '../../agent-lane/model-budgets.js';
 import { candidateToGraph } from './candidate-to-graph.js';
+import { STANCE_DESCRIPTION } from './change-tools.js';
 import { isNoModelYet, isSavedRead, readSaved } from './context-tool.js';
 import { ok, refused, unavailable, type ToolOutcome } from './outcome.js';
 import { inTheUsersWords, type TypedWords } from './user-words.js';
@@ -51,9 +52,24 @@ const nodesIn = (graph: Record<string, unknown>): number => (Array.isArray(graph
  *     effect is a setting on the factor it changes, and an additive goal is a declared sum;
  *  2. the K5 P0 ruling's sentence (fresh Codex under §7.2, AIE silent; DL 20 Oct; sha256
  *     9111ed60fb9c8e4048118f3d49c6409ba98c59b2a39c2c0bcc90235faf9436ee): the goal's current level is its own fixed factor, a sum operand.
+ *  3. Codex's corrected ONE-change sentence (20 Oct), sha256 96074041c73386e9e0a1e930dd4745ac422577aa91a40ceeedf28277508cb781.
  */
 export const B_DRAFTER_SENTENCE = 'Represent each option\'s stated effect as a setting on the factor it changes rather than a sized link from the option, retaining every supplied point and complete range with the literal words, named speaker, source, stance, units, period and conditions; where the source meaning establishes that the goal quantity equals its current level plus additions, declare a sum in identities with bound current-level and addition operands and supported current levels for every operand and the total in the same quantity, units, period and reference; keep derived arithmetic visibly Olumi\'s, use zero only for a structurally defined increment at its stated reference, and leave unsupported levels or probability laws unknown.'
-  + ' Where the source supports the goal level as its current level plus additions, represent that current level as a separate fixed factor carrying the supported goal baseline and its actual source, declare an entry in identities with operation sum, the goal as outcome and that factor plus every distinct addition as operands, and link each operand to the goal one for one in the same quantity, units, period and reference, retaining supported current levels, structural increment zeroes, effects, ranges and authorship while identifying the sum as Olumi’s interpretation and leaving unsupported probability laws unknown.';
+  + ' Where the source supports the goal level as its current level plus additions, represent that current level as a separate fixed factor carrying the supported goal baseline and its actual source, declare an entry in identities with operation sum, the goal as outcome and that factor plus every distinct addition as operands, and link each operand to the goal one for one in the same quantity, units, period and reference, retaining supported current levels, structural increment zeroes, effects, ranges and authorship while identifying the sum as Olumi’s interpretation and leaving unsupported probability laws unknown.'
+  + ' For every figure, declare origin (user, third_party, olumi or unknown) and stance (stated_current, hypothetical, target or estimate) from its full source context; retain its literal source words where available, named source, sign, unit, period and conditions; identify your estimates and derivations as Olumi’s, preserve unresolved origin as unknown, and never promote a supposition to a stated current fact.';
+
+/** B declares meaning in the existing strict structured output; A's candidate schema stays unchanged. */
+function bCandidateSchema(): Record<string, unknown> {
+  const schema = buildCandidateSchema() as Record<string, any>;
+  const origin = { type: 'string', enum: ['user', 'third_party', 'olumi', 'unknown'] };
+  const stance = { type: 'string', enum: ['stated_current', 'hypothetical', 'target', 'estimate'], description: STANCE_DESCRIPTION };
+  const pair = { origin, stance };
+  const p = schema.properties;
+  Object.assign(p.goal.properties, { target_origin: origin, target_stance: stance, baseline_origin: origin, baseline_stance: stance });
+  for (const key of ['factors', 'risks', 'outcomes', 'links']) Object.assign(p[key].items.properties, pair);
+  Object.assign(p.options.items.properties.interventions.items.properties, pair);
+  return strictForTheDrafter(schema, { providerBoundary: false });
+}
 
 /** The ONE drafter call, on the static instructions and the literal brief: the draft, or why there is none. Nothing is written. */
 async function drafted(callStructured: CallStructuredModel, brief: string): Promise<{ readonly draft: unknown } | { readonly outcome: ToolOutcome }> {
@@ -66,7 +82,7 @@ async function drafted(callStructured: CallStructuredModel, brief: string): Prom
       input: turnContextItems({ now: new Date(), briefText: brief, conversation: [], construction: {} }).map(turnContextText).join('\n\n'),
       max_output_tokens: budget.max_output_tokens,
       reasoning_effort: budget.reasoning_effort,
-      schema: strictForTheDrafter(buildCandidateSchema(), { providerBoundary: false }),
+      schema: bCandidateSchema(),
     });
   } catch {
     return { outcome: unavailable('construction_failed') };
