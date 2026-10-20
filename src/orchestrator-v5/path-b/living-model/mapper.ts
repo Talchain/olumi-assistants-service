@@ -185,7 +185,11 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     const exact = todayIsTheirs && new Set(direct.map((l) => l.from)).size === direct.length
       && model.links.every((l) => l.to !== g.id || optionIds.has(l.from))
       && direct.every((l) => l.effect.form === 'exact' && l.effect.value !== null && l.effect.sign !== null
-        && (l.effect.unit === null || l.effect.unit === g.unit));
+        && (l.effect.unit === null || l.effect.unit === g.unit))
+      // The engine holds a factor's level on [0, its cap], so a change below today cannot be a part of the sum (R2 P04: PLoT
+      // withheld both options, `intervention_clamped`, and the Run failed). Such effects take the per-option route below,
+      // whose signed links run, with the exact chance withheld for its reason (`exact_not_drawable`).
+      && direct.every((l) => l.effect.sign === '+' || l.effect.value === 0);
     if (exact) {
       exactSum = { lever: `${g.id}__change`, today: `${g.id}_today` };
       const lever = exactSum.lever;

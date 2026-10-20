@@ -198,6 +198,21 @@ describe('thin core mapper: living model → GraphV3', () => {
     expect((graph.edges as Rec[]).some((e) => (e.from === 'a' || e.from === 'b') && e.to === 'w'), 'no option→goal edge reaches the engine').toBe(false);
   });
 
+  it('R2 P04: an exact change BELOW today is never a part of the sum (the engine holds levels on [0, cap]); it runs on signed links, its chance withheld', () => {
+    const lower: LivingModelT = structuredClone(OPTION_EFFECTS);
+    lower.aims[0]!.target = { ...lower.aims[0]!.target!, comparator: '<=', value: 20 };
+    lower.links = lower.links.map((l) => ({ ...l, effect: { ...l.effect, sign: '-' as const } }));
+    const m = mapLivingModel(lower);
+    expect(m.graph.nodes.some((n) => n.id === 'w__change')).toBe(false);
+    expect(node(m.graph, 'w').nonlinear_identity).toBeUndefined();
+    const signed = m.graph.edges.filter((e) => String(e.from).endsWith('__on') && e.to === 'w');
+    expect(signed.length).toBe(2);
+    expect(signed.every((e) => e.effect_direction === 'negative')).toBe(true);
+    expect(m.withheld.filter((w) => w.reason === 'exact_not_drawable').length).toBe(2);
+    // CONTROL: the same exact changes upward still form the exact sum.
+    expect(mapLivingModel(OPTION_EFFECTS).graph.nodes.some((n) => n.id === 'w__change')).toBe(true);
+  });
+
   it('CONTROL: a stated but not exact effect, or a level today that is not the person\'s, is an on/off factor per option, sized like any link', () => {
     const about: LivingModelT = structuredClone(OPTION_EFFECTS);
     for (const l of about.links) l.effect.form = 'point';
