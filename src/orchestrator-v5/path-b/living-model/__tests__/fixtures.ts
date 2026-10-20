@@ -31,3 +31,13 @@ export const OPTION_EFFECTS: LivingModelT = {
   ],
   conditions: [], views: [], history: [],
 };
+
+/** The served P04 shape, synthetic: a factor restating the aim's own quantity, each option's exact effect linked to that factor. */
+export const RESTATED: LivingModelT = { ...OPTION_EFFECTS,
+  factors: [{ id: 'w_level', label: 'Widgets per hour', value: 40, low: null, high: null, unit: 'widgets per hour', source: 'user', party: null, quote: 'today 40' }],
+  links: [
+    { ...OPTION_EFFECTS.links[0]!, id: 'a_level', to: 'w_level' },
+    { ...OPTION_EFFECTS.links[1]!, id: 'b_level', to: 'w_level' },
+    { id: 'level_w', from: 'w_level', to: 'w', source: 'olumi', party: null, quote: null,
+      effect: { form: 'exact', value: 1, sd: null, low: null, high: null, unit: 'widgets per hour', sign: '+' } },
+  ] };

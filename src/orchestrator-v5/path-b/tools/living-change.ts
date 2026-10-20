@@ -15,11 +15,13 @@ import { createProposal, type ProposalOperation, type ProposalStore, type Struct
 import { LivingModel, type LivingModelT } from '../../../schemas/living-model.js';
 import { applyKernel } from '../living-model/kernel.js';
 import { mapLivingModel, savedGoal } from '../living-model/mapper.js';
+import { RESTRUCTURE_DETAIL, structureFeedback } from '../living-model/structure.js';
 import { diffLivingModels, type LivingChange } from '../living-model/diff.js';
 import { livingViewOf } from '../living-model/view.js';
 import { isNoModelYet, isSavedRead, readSaved } from './context-tool.js';
 import { changeOperationId, findOperationVersion, writeCorePostimage } from './core-write.js';
 import { ok, refused, unavailable, type ToolOutcome } from './outcome.js';
+import type { WriteOpts } from './draft-tool.js';
 
 export const LivingChangeParams = z.object({
   /** What the person is asked to approve, in plain words. */
@@ -54,7 +56,7 @@ async function savedLiving(deps: Deps, ctx: Ctx) {
   return { saved, model: view.living_model as LivingModelT };
 }
 
-export async function proposeLivingChange(deps: Deps, ctx: Ctx, args: LivingChangeArgs): Promise<ToolOutcome> {
+export async function proposeLivingChange(deps: Deps, ctx: Ctx, args: LivingChangeArgs, opts: WriteOpts = {}): Promise<ToolOutcome> {
   const base = await savedLiving(deps, ctx);
   if ('status' in base) return base;
   const brief = typeof base.saved.json.brief_text === 'string' ? [base.saved.json.brief_text] : [];
@@ -70,6 +72,9 @@ export async function proposeLivingChange(deps: Deps, ctx: Ctx, args: LivingChan
   if (kept.length > 0) return refused('removal_not_applied', undefined, { still_present: kept });
   const mapped = mapLivingModel(kernelled.model, savedGoal(base.saved.graph));
   if (!mapped.graph.nodes.some((n) => n.kind !== 'decision')) return refused('model_empty');
+  // As for the first model: a fixable encoding this change writes goes back to the AI before a card is prepared.
+  const feedback = opts.restructure === true ? structureFeedback(kernelled.model, mapped, mapLivingModel(base.model, savedGoal(base.saved.graph)).withheld) : [];
+  if (feedback.length > 0) return refused('restructure', RESTRUCTURE_DETAIL, { feedback });
   const p = deps.proposals.put(createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
     base_graph_identity_hash: base.saved.graphHash, base_model_identity: base.saved.identity!, operations: operationsOf(changes),
     provenance: { authored_by: 'model_proposed', basis: args.basis }, validation: { admitted: true, loss_count: 0, refusals: [] },

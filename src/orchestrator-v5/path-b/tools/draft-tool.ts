@@ -19,6 +19,7 @@ import { constructionOperationId, findConstructionVersion } from '../../agent-la
 import { LivingModel } from '../../../schemas/living-model.js';
 import { applyKernel } from '../living-model/kernel.js';
 import { mapLivingModel } from '../living-model/mapper.js';
+import { RESTRUCTURE_DETAIL, structureFeedback } from '../living-model/structure.js';
 import { isNoModelYet, isSavedRead, readSaved } from './context-tool.js';
 import { ok, refused, OUTCOME_TRACE, type ToolOutcome } from './outcome.js';
 import { writeCorePostimage } from './core-write.js';
@@ -43,8 +44,11 @@ const nodesIn = (graph: Record<string, unknown>): number => (Array.isArray(graph
 
 type DraftContext = Pick<AgentToolContext, 'scenario_id'> & Partial<Pick<AgentToolContext, 'request_id'>> & TypedWords;
 
-export async function buildModel(deps: DraftDeps, ctx: DraftContext, args: BuildModelArgs): Promise<ToolOutcome> {
-  const outcome = await construct(deps, ctx, args);
+/** `restructure`: this call may return structure feedback instead of saving (once per turn, `pathBTools`). */
+export interface WriteOpts { readonly restructure?: boolean }
+
+export async function buildModel(deps: DraftDeps, ctx: DraftContext, args: BuildModelArgs, opts: WriteOpts = {}): Promise<ToolOutcome> {
+  const outcome = await construct(deps, ctx, args, opts);
   const save_outcome = outcome.status === 'ok' ? 'VERIFIED_SAVED'
     : outcome.status === 'unavailable' && outcome.write === 'unknown' ? 'UNKNOWN' : 'VERIFIED_NO_WRITE';
   return Object.defineProperty({ ...outcome, data: { ...outcome.data, save_outcome }, ...(save_outcome === 'UNKNOWN' ? {
@@ -53,11 +57,11 @@ export async function buildModel(deps: DraftDeps, ctx: DraftContext, args: Build
 }
 
 
-async function construct(deps: DraftDeps, ctx: DraftContext, args: BuildModelArgs): Promise<ToolOutcome> {
-  return constructUnrecorded(deps, ctx, args);
+async function construct(deps: DraftDeps, ctx: DraftContext, args: BuildModelArgs, opts: WriteOpts): Promise<ToolOutcome> {
+  return constructUnrecorded(deps, ctx, args, opts);
 }
 
-async function constructUnrecorded(deps: DraftDeps, ctx: DraftContext, args: BuildModelArgs): Promise<ToolOutcome> {
+async function constructUnrecorded(deps: DraftDeps, ctx: DraftContext, args: BuildModelArgs, opts: WriteOpts): Promise<ToolOutcome> {
   if (!inTheUsersWords(args.brief, ctx)) return refused('brief_not_users_words');
   const before = await readSaved(deps, ctx.scenario_id);
   // A new scenario has no model yet (`graph: null`, `graph_present: false`): that is where a first draft starts.
@@ -71,6 +75,9 @@ async function constructUnrecorded(deps: DraftDeps, ctx: DraftContext, args: Bui
   const kernelled = applyKernel(args.model, [args.brief, ...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text === undefined ? [] : [ctx.user_turn_text])]);
   const mapped = mapLivingModel(kernelled.model);
   if (!mapped.graph.nodes.some((n) => n.kind !== 'decision')) return refused('model_empty');
+  // An encoding the calculation cannot read, though its meaning is clear, goes back to the AI before anything is saved.
+  const feedback = opts.restructure === true ? structureFeedback(kernelled.model, mapped) : [];
+  if (feedback.length > 0) return refused('restructure', RESTRUCTURE_DETAIL, { feedback });
   const graph: Record<string, unknown> = { ...mapped.graph, living_model: kernelled.model };
 
   const write = await writeCorePostimage(deps, { scenarioId: ctx.scenario_id, graph, briefText: args.brief,

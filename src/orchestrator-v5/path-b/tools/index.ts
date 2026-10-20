@@ -11,6 +11,8 @@
  *  · THIN CORE: on a scenario whose meaning is its living model (or that has no model yet), `propose_change` carries the
  *    complete proposed living model (`living-change.ts`); a living proposal is applied as one core write. A legacy scenario
  *    keeps the existing change adapter.
+ *  · THIN CORE: a writing tool's first call in a turn whose model the calculation cannot read as written, though its meaning
+ *    is clear, returns that structure feedback (`living-model/structure.ts`) and changes nothing; its next call is taken as it is.
  *  · A `preview` lane reads only.
  * The adapters return outcomes and do not throw; anything that does throw (arguments a strict schema should have stopped,
  * a defect) ends the turn with the route's own handlers, as on the existing loop (`errorFunction: null`).
@@ -68,6 +70,13 @@ export type OnToolCall = (row: TraceRow, result: ToolCallResult) => void;
 export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLaneMode, onCall: OnToolCall = () => {},
   scenario: 'core' | 'legacy' = 'legacy'): Tool[] {
   let approvalApplied = false;
+  /** Structure feedback is returned at most once per writing tool per turn; that tool's next call is taken as it is. */
+  const fedBack = new Set<string>();
+  const once = (name: string, outcome: ToolOutcome): ToolOutcome => {
+    if (outcome.status === 'refused' && outcome.reason === 'restructure') fedBack.add(name);
+    return outcome;
+  };
+  const restructure = (name: string) => ({ restructure: !fedBack.has(name) });
   const record = (name: string, input: Record<string, unknown>, outcome: ToolOutcome, proposalId?: string): string => {
     const args = toolArgumentsAsSent(name, JSON.stringify(input), [ctx.user_turn_text ?? '', ...(ctx.verified_user_messages ?? [])]).arguments;
     const row = { ...traceRow(name, outcome), args };
@@ -97,14 +106,14 @@ export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLa
       name: BUILD_MODEL_FROM_BRIEF,
       description: TOOL_DESCRIPTIONS.build_model_from_brief,
       parameters: BuildModelParams,
-      execute: async (args) => record(BUILD_MODEL_FROM_BRIEF, args, await buildModel(deps, ctx, args)),
+      execute: async (args) => record(BUILD_MODEL_FROM_BRIEF, args, once(BUILD_MODEL_FROM_BRIEF, await buildModel(deps, ctx, args, restructure(BUILD_MODEL_FROM_BRIEF)))),
       errorFunction: null,
     }),
     scenario === 'core' ? tool({
       name: PROPOSE_CHANGE,
       description: TOOL_DESCRIPTIONS.propose_change,
       parameters: LivingChangeParams,
-      execute: async (args) => record(PROPOSE_CHANGE, args, await proposeLivingChange(deps, ctx, args)),
+      execute: async (args) => record(PROPOSE_CHANGE, args, once(PROPOSE_CHANGE, await proposeLivingChange(deps, ctx, args, restructure(PROPOSE_CHANGE)))),
       errorFunction: null,
     }) : tool({
       name: PROPOSE_CHANGE,
