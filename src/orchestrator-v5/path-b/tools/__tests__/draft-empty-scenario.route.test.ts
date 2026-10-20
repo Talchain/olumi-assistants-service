@@ -468,7 +468,8 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
     const graph = registered[0]!.graph as Json;
     const goal = graph.nodes.find((n: Json) => n.kind === 'goal');
     const zero = graph.nodes.find((n: Json) => n.label === ADDED);
-    expect(zero.scale_frame ?? zero.observed_state.cap).toBe(goal.goal_threshold_cap);
+    expect(zero.observed_state.cap).toBeUndefined();
+    expect(zero.scale_frame).toBe(goal.goal_threshold_cap);
     expect(zero.observed_state.value).toBe(0);
     expect(goal.nonlinear_identity).toEqual({ operation: 'sum',
       factor_ids: [graph.nodes.find((n: Json) => n.label === CURRENT).id, zero.id], stated_in_brief: false });

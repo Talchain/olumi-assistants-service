@@ -210,7 +210,7 @@ function convertedByA(c: CandidateModel): { a: AdmittedModel } | null {
           && sameUnit(unitOf(part), unitOf(total!));
       }).map(id => canonicalLabel(admitted.nodes.find(n => n.id === id)!.label)));
     return { a: readBack(unframed.size === 0 ? admitted : admitWithoutBrief({ ...prepared,
-      factors: prepared.factors.map(f => unframed.has(canonicalLabel(f.label)) ? { ...f, plausible_max: frame } : f),
+      factors: prepared.factors.map(f => unframed.has(canonicalLabel(f.label)) ? { ...f, scale_frame: frame } : f),
     })) };
   } catch { return null; }
 }

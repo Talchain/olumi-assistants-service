@@ -3,7 +3,9 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import captured from './fixtures/l18-captured-sum.json';
+import { normaliseFactorValue } from '../../../tools/handlers/d1-shared/normalise-factor-value.js';
 import { candidateToGraph } from '../candidate-to-graph.js';
+import { admitCandidateModel, type CandidateModel } from '../../../agent-lane/admit-model.js';
 import { buildModel, type DraftDeps } from '../draft-tool.js';
 import { constructionOperationId, type CallStructuredModel } from '../../../agent-lane/runtime/build-model.js';
 import { computeGraphIdentityHash } from '../../../context/graph-identity.js';
@@ -272,4 +274,51 @@ describe('current level plus a stated per-unit addition', () => {
     expect(changed.exists_probability).toBe(original.exists_probability);
   });
 
+});
+
+it.each(['tickets', 'parcels'])('L18C %s: coordinate frame is not a cap', async quantity => {
+  const raw = JSON.parse(JSON.stringify(draft()).replaceAll('tickets', quantity));
+  const graph = await replay(raw, BRIEF.replaceAll('tickets', quantity));
+  const zero = graph.nodes.find((n: Rec) => n.id === 'extra_capacity');
+  expect(zero.observed_state.cap).toBeUndefined();
+  expect(zero.scale_frame).toBe(125);
+});
+it.each(['tickets', 'parcels'])('L18C %s: the operand accepts 150 on the saved coordinate frame', async quantity => {
+  const graph = await replay(JSON.parse(JSON.stringify(draft()).replaceAll('tickets', quantity)), BRIEF.replaceAll('tickets', quantity));
+  const zero = graph.nodes.find((n: Rec) => n.id === 'extra_capacity');
+  expect(normaliseFactorValue({ rawInput: 150, unit: zero.observed_state.unit, factorUnit: zero.observed_state.unit,
+    factorCap: zero.observed_state.cap, factorScaleFrame: zero.scale_frame,
+    factorObservedValue: zero.observed_state.value, factorObservedRawValue: zero.observed_state.raw_value, inputHasUnit: true }))
+    .toEqual({ raw_value: 150, value: 1.2 });
+});
+it('L18C R1 contract: exact zero, natural values, coefficient and actual ledger retained', async () => {
+  const graph = await replay(draft());
+  const request = await runRequest(graph, BRIEF);
+  const zero = request.graph.nodes.find((n: Rec) => n.id === 'extra_capacity');
+  expect(zero.observed_state.value).toBe(0);
+  expect(zero.observed_state.raw_value).toBe(0);
+  expect(zero.observed_state.std).toBeUndefined();
+  expect(request.graph.nodes.find((n: Rec) => n.id === 'existing_capacity').observed_state.raw_value).toBe(80);
+  const sum = request.graph.edges.find((e: Rec) => e.from === zero.id && e.to === 'total_capacity');
+  expect(sum.strength.mean).toBe(1);
+  expect(sum.provenance.natural_effect.strength_mean).toBe(1);
+  expect(sum.provenance.natural_effect.amount).toBe(1);
+  expect(sum.provenance.natural_effect.per_source_change).toBe(1);
+  expect(sum.provenance.uncertainty_defaults.find((x: Rec) => x.code === 'NORMALISE_STRENGTH_RANGE').after).toBe(1);
+  expect(effectOf(request.graph).provenance.natural_effect.amount).toBe(20);
+  expect(effectOf(request.graph).strength.mean).toBeCloseTo(20 / 125);
+});
+
+it('L18C admission: an explicit capless frame maps known and estimated levels without enforcing a limit', () => {
+  for (const baseline_known of [true, false]) {
+    for (const baseline_value of [0, 80, 150]) {
+      const raw = draft();
+      Object.assign(raw.factors[2], { baseline_known, baseline_value, scale_frame: 125 });
+      const admitted = admitCandidateModel(raw as CandidateModel, {});
+      const operand = admitted.nodes.find(n => n.label === 'Extra capacity')!;
+      expect(operand.scale_frame).toBe(125);
+      expect(operand.observed_state).toEqual({ value: baseline_value / 125, raw_value: baseline_value,
+        unit: UNIT, source: 'cee_inference', extractionType: 'inferred' });
+    }
+  }
 });
