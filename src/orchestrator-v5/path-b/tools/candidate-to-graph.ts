@@ -296,6 +296,7 @@ export function candidateToAdmittedGraph(input: unknown, usersWords?: string): C
     ...(goalLevel !== undefined ? { observed_state: { ...goalLevel, ...valueStamp(goalWho) } } : {}),
     ...(threshold && ['>=', '<=', '>', '<'].includes(g.operator) ? { goal_direction: g.operator } : {}),
     ...(finite(g.horizon_months) && g.horizon_months > 0 ? { goal_horizon_months: g.horizon_months } : {}),
+    ...(typeof (g as Rec).deadline_words === 'string' ? { goal_deadline_as_stated: (g as Rec).deadline_words } : {}),
     ...(typeof (g as Rec).source_quote === 'string' ? { source_quote: (g as Rec).source_quote } : {}) };
 
   // SCIENCE with an authorship input, read by the DECLARED origin: A leaves out of the Run what has no size or is a later aim.
