@@ -1310,6 +1310,11 @@ export async function commitDirectAnswer(
     source: metadata.handler_id ?? undefined,
   }), baseForWrite).graph;
   if (graphWasProvided(metadata.graph)) assertShareByDatePreserved(baseForWrite, projectedGraphForStore);
+  // THIN CORE one-write rule: a graph write that could not read what it replaces cannot tell a core scenario from a
+  // legacy one, so it is refused as an outage (the register route's rule), never written over a living model unseen.
+  if (graphWasProvided(metadata.graph) && metadata.coreWrite !== true && baseForWrite === undefined) {
+    throw new StateCommitFailedError('the stored graph this write replaces could not be read, so the write cannot be classified (core or legacy)');
+  }
   if (graphWasProvided(metadata.graph)) {
     prepareHorizonBasisForWrite(projectedGraphForStore, storedBasisBase, metadata.scenario_id, metadata.horizonBasisWrite);
   }

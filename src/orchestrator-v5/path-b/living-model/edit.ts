@@ -21,10 +21,13 @@ export type ExplicitEdit =
   | { readonly kind: 'structural_add'; readonly node_id: string; readonly node_kind: string; readonly label: string }
   | { readonly kind: 'structural_add_edge'; readonly from: string; readonly to: string; readonly magnitude: number; readonly effect_direction: 'positive' | 'negative' };
 
-export const EXPLICIT_EDIT_KINDS: ReadonlySet<string> = new Set([
+const EXPLICIT_EDIT_KINDS: ReadonlySet<string> = new Set([
   'factor_value_edit', 'option_intervention_edit', 'goal_target_edit', 'edge_strength_edit',
   'structural_rename', 'structural_delete', 'structural_add', 'structural_add_edge',
 ]);
+
+/** A gesture this slice applies. The event's shape is the wire's own for its kind, already checked at ingress. */
+export const isExplicitEdit = (event: { readonly kind: string }): event is ExplicitEdit => EXPLICIT_EDIT_KINDS.has(event.kind);
 
 export type EditOutcome = { readonly model: LivingModelT } | { readonly refused: string };
 

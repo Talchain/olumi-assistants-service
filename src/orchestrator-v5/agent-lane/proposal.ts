@@ -171,7 +171,9 @@ export interface ProposalOperation {
      */
     | 'replace_draft'
     /** Existing canonical adapters composed on the saved model; one candidate, one card, one register. */
-    | 'apply_saved_correction';
+    | 'apply_saved_correction'
+    /** THIN CORE: one changed living-model item; `path` is `kind:id`, `value` its change with before/after. */
+    | 'living_change';
   /** Node id, or `from::to` for an edge. */
   readonly path: string;
   readonly value?: unknown;

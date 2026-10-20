@@ -89,4 +89,14 @@ describe('a canvas gesture on a core scenario', () => {
     expect(String((err as { message?: unknown } | null)?.message)).toContain('CORE_SCENARIO_LEGACY_WRITE');
     expect(append).not.toHaveBeenCalled();
   });
+
+  it('Buddy R1: when that stored read fails, the write is unclassified and refused, never written as legacy', async () => {
+    loadGraph.mockRejectedValue(new Error('db blip'));
+    const err = await commitDirectAnswer({ response_version: 2, assistant_text: '', blocks: [], suggested_actions: [], insights: [], stage_indicator: 'evaluate' } as never, {
+      scenario_id: SCENARIO, turn_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', turn_class: 'direct_answer', handler_id: null, request_hash: 'h',
+      llm_calls_used: 0, duration_ms: 0, handler_facts: [], graph: mapLivingModel(KNOWN_ANSWER).graph,
+    } as never, withScenarioRevision(store) as never).then(() => null, (e: unknown) => e);
+    expect((err as { name?: unknown } | null)?.name).toBe('StateCommitFailedError');
+    expect(append).not.toHaveBeenCalled();
+  });
 });

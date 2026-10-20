@@ -39,8 +39,8 @@ type Rec = Record<string, unknown>;
 
 /** The card's rows: one operation per changed item, on the item's own id. */
 function operationsOf(changes: readonly LivingChange[]): ProposalOperation[] {
-  return changes.map((c) => ({ op: 'living_change', path: `${c.kind}:${c.id}`,
-    value: { change: c.change, ...(c.before === undefined ? {} : { before: c.before }), ...(c.after === undefined ? {} : { after: c.after }) } }) as unknown as ProposalOperation);
+  return changes.map((c): ProposalOperation => ({ op: 'living_change', path: `${c.kind}:${c.id}`,
+    value: { change: c.change, ...(c.before === undefined ? {} : { before: c.before }), ...(c.after === undefined ? {} : { after: c.after }) } }));
 }
 
 /** The saved living model of a core scenario, or the outcome that says why there is none to change. */

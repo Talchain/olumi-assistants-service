@@ -107,10 +107,10 @@ describe('a graph write with no base still never reissues a ref (DL CR B1 on #23
     expect(s.loadGraph).not.toHaveBeenCalled();
   });
 
-  it('CONTROL: when the stored graph cannot be read, nothing is assigned (rule 6) and the write still lands', async () => {
+  it('CONTROL: when the stored graph cannot be read, no ref is guessed: the write is refused as an outage (thin core: it cannot be classified)', async () => {
     const s = storeHolding(STORED, { readFails: true });
-    await commitDirectAnswer(response(), meta(REDRAFT), s.store);
-    expect(Object.values(refs(written(s.writes))).every((r) => r === undefined)).toBe(true);
+    await expect(commitDirectAnswer(response(), meta(REDRAFT), s.store)).rejects.toMatchObject({ name: 'StateCommitFailedError' });
+    expect(s.writes).toEqual([]);
   });
 
   it('CONTROL: a turn that writes no graph reads nothing for refs', async () => {

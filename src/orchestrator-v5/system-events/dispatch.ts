@@ -82,7 +82,7 @@ import type { FrameFreshness } from '../graph-management/types.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
 import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
 import { livingViewOf } from '../path-b/living-model/view.js';
-import { applyExplicitEdit, EXPLICIT_EDIT_KINDS, type ExplicitEdit } from '../path-b/living-model/edit.js';
+import { applyExplicitEdit, isExplicitEdit } from '../path-b/living-model/edit.js';
 import { goalIdOf, mapLivingModel, savedGoal } from '../path-b/living-model/mapper.js';
 import type { LivingModelT } from '../../schemas/living-model.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
@@ -1248,14 +1248,15 @@ async function dispatchCoreCanvasEdit(
       suggested_actions: [], insights: [], stage_indicator: payload.stage }, commitPerformed: false, graph: null };
   };
   if (!('withheld' in view)) return refuse('living_model_invalid');
-  if (!EXPLICIT_EDIT_KINDS.has(payload.event.kind)) return refuse('gesture_not_in_slice');
+  const event = payload.event;
+  if (!isExplicitEdit(event)) return refuse('gesture_not_in_slice');
   const cas = computeExpectedGraphCasHashes(stored);
   const base = (payload.event as { base_graph_hash?: unknown }).base_graph_hash;
   const conflict = async (): Promise<DispatchSystemEventResult> => ({ response: buildAcknowledgementResponse(payload), commitPerformed: false, graph: null,
     graphConflict: { recovery_action: 'refresh_and_reconfirm', conflict_category: 'stale_base',
       expected_base_graph_hash: await readClientRecoverableBaseHash(payload.scenario_id) } as never });
   if (typeof base === 'string' && base !== cas.expectedGraphAnalysisHash) return conflict();
-  const edited = applyExplicitEdit(view.living_model as LivingModelT, payload.event as unknown as ExplicitEdit, goalIdOf(stored));
+  const edited = applyExplicitEdit(view.living_model as LivingModelT, event, goalIdOf(stored));
   if (!('model' in edited)) return refuse(edited.refused);
   const postimage = { ...mapLivingModel(edited.model, savedGoal(stored)).graph, living_model: edited.model };
   try {
