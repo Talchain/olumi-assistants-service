@@ -12,9 +12,9 @@ import { z as z4 } from 'zod-v4';
 import { ForbiddenProviderError, OPENAI_ONLY, recordedProviderCalls, runWithProviderPolicy } from '../../../adapters/llm/provider-policy.js';
 import { ledgeredAgentsClient } from '../../../adapters/llm/openai-agents-client.js';
 import { runWithStageStream } from '../../../cee/unified-pipeline/stage-stream-context.js';
-import { AGENTS_SDK, CORE_COMPACT_THRESHOLD, CoreStateUnavailableError, PAUSE_DECLINED, PAUSE_SUPERSEDED, runCoreTurn, type ConversationIdStore, type CoreToolRecorder, type PausedRunStore } from '../core/sdk-turn.js';
+import { AGENTS_SDK, CORE_COMPACT_THRESHOLD, CoreStateUnavailableError, PAUSE_DECLINED, PAUSE_SUPERSEDED, replyOnlyTurn, runCoreTurn, type ConversationIdStore, type CoreToolRecorder, type PausedRunStore } from '../core/sdk-turn.js';
 import type { OpenAiPausedRun } from '../../session/store.js';
-import { budgetFor } from '../model-budgets.js';
+import { budgetFor, type CallBudget } from '../model-budgets.js';
 import type { AgentToolContext } from '../runtime/agent-tools.js';
 
 type Json = Record<string, any>;
@@ -71,14 +71,15 @@ const readTools = (c: ReturnType<typeof caps>) => (onCall: CoreToolRecorder) => 
   errorFunction: null,
 })];
 type Extra = { briefText?: string; conversationStore?: ConversationIdStore; state?: unknown; tools?: Parameters<typeof runCoreTurn>[0]['tools'];
-  pausedRunStore?: PausedRunStore; press?: { decision: 'approve' | 'decline'; proposal_id: string } };
+  pausedRunStore?: PausedRunStore; press?: { decision: 'approve' | 'decline'; proposal_id: string }; replyBudget?: CallBudget; firstTool?: string };
 const turn = (message: string, c: ReturnType<typeof caps>, extra: Extra & { traceMeta?: { revision?: string; run_id?: string } } = {}) =>
   runWithProviderPolicy(OPENAI_ONLY('agent_v1_turn'), async () => {
   const result = await runCoreTurn({ ctx: ctx(message), message, tools: extra.tools ?? readTools(c),
     instructions: 'Synthetic instructions.', budget: budgetFor('gpt-6.1-sol', 'conversation'), userId: null,
     canonicalState: extra.state ?? { empty: true, entities: [] }, briefText: extra.briefText, conversationStore: 'conversationStore' in extra ? extra.conversationStore : columnStore(),
     ...(extra.pausedRunStore !== undefined ? { pausedRunStore: extra.pausedRunStore } : {}),
-    ...(extra.press !== undefined ? { press: extra.press } : {}), ...(extra.traceMeta !== undefined ? { traceMeta: extra.traceMeta } : {}) });
+    ...(extra.press !== undefined ? { press: extra.press } : {}), ...(extra.traceMeta !== undefined ? { traceMeta: extra.traceMeta } : {}),
+    ...(extra.replyBudget !== undefined ? { replyBudget: extra.replyBudget } : {}), ...(extra.firstTool !== undefined ? { firstTool: extra.firstTool } : {}) });
   return { result, calls: recordedProviderCalls() };
 });
 
@@ -404,6 +405,30 @@ describe('PATH-B core turn on the Agents SDK', () => {
       expect(result.assistant_text).toBe('I could not hold that change for your approval; nothing changed.');
       expect(JSON.stringify(sent[1]!.input)).toContain('could not hold this change');
       expect(pausedColumn).toBeNull();
+    });
+  });
+
+  describe('MULTI-MODEL (Paul, 20 Oct): a turn that only reads, runs and explains is answered on the fast model', () => {
+    const REPLY = budgetFor('gpt-5.6-terra', 'conversation');
+    const BUILDER = budgetFor('gpt-6.1-sol', 'conversation');
+    it('a Run-opened turn goes to the reply model, at its own effort', async () => {
+      scripted = [[{ type: 'message', text: 'Synthetic answer.' }]];
+      await turn('Run it.', caps(), { replyBudget: REPLY, firstTool: 'read_canonical_context' });
+      expect(sent.map((b) => b.model)).toEqual([REPLY.model]);
+      expect(sent[0]!.reasoning?.effort).toBe(REPLY.reasoning_effort);
+    });
+    it('a typed message, which may change the model, stays on the builder', async () => {
+      scripted = [[{ type: 'message', text: 'Synthetic answer.' }]];
+      await turn('Change the target to 120.', caps(), { replyBudget: REPLY });
+      expect(sent.map((b) => b.model)).toEqual([BUILDER.model]);
+    });
+    it('the routing: presses and Run/apply-opened turns reply fast; drafting, changing and typed turns stay on the builder', () => {
+      expect(replyOnlyTurn({ press: { decision: 'approve', proposal_id: PID } })).toBe(true);
+      expect(replyOnlyTurn({ firstTool: 'run_analysis' })).toBe(true);
+      expect(replyOnlyTurn({ firstTool: 'apply_change' })).toBe(true);
+      expect(replyOnlyTurn({ firstTool: 'build_model_from_brief' })).toBe(false);
+      expect(replyOnlyTurn({ firstTool: 'propose_change' })).toBe(false);
+      expect(replyOnlyTurn({})).toBe(false);
     });
   });
 });

@@ -47,6 +47,11 @@ export const AGENTS_SDK = '@openai/agents@0.18.0';
 export const CORE_MAX_MODEL_CALLS = 8;
 /** Rendered tokens past which the server compacts the Conversation (native compaction; the window grows every turn). */
 export const CORE_COMPACT_THRESHOLD = 100_000;
+/** The tools that draft or change the model: a turn the route opens on one of them is never a reply-only turn. */
+const MODEL_WRITING_TOOLS: ReadonlySet<string> = new Set(['build_model_from_brief', 'propose_change']);
+/** A turn that reads, runs and explains only: a press, or a turn the route opens on applying a change or a Run. */
+export const replyOnlyTurn = (input: Pick<CoreTurnInput, 'press' | 'firstTool'>): boolean =>
+  input.press !== undefined || (input.firstTool !== undefined && !MODEL_WRITING_TOOLS.has(input.firstTool));
 
 // Tests never export traces; a deployed runtime uses the SDK's built-in exporter, which reads the lane's OPENAI_API_KEY.
 if (getRuntimeEnv() === 'test') setTracingDisabled(true);
@@ -133,6 +138,12 @@ export interface CoreTurnInput {
   readonly message: string;
   readonly instructions: string;
   readonly budget: CallBudget;
+  /**
+   * MULTI-MODEL (Paul, 20 Oct): the fast budget for a turn that only reads, runs and explains: a press on a card or the Run
+   * button, or a turn the route opens on applying an approved change or a Run. A typed message, which may draft or change
+   * the model, keeps `budget` (the high-effort builder). Absent: `budget` answers every turn, as before.
+   */
+  readonly replyBudget?: CallBudget;
   readonly briefText?: unknown;
   /** The model state as this turn began (the route's canonical packet state), given to the agent, never stored. */
   readonly canonicalState?: unknown;
@@ -194,15 +205,16 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
   // (`needsApproval`) and the SDK's to pause on: no consent orchestration of our own.
   const tools = input.tools(record).filter((t) => !('name' in t) || !withheld.has(t.name));
   const pendingRows: Promise<void>[] = [];
+  const budget = input.replyBudget !== undefined && replyOnlyTurn(input) ? input.replyBudget : input.budget;
   const client = ledgeredAgentsClient({ site: 'agent-core.sdk', pending: pendingRows,
-    detailOf: (body) => ({ model: input.budget.model, purpose: 'conversation', ...agentRequestIdentity('agent.converse', body) }) });
+    detailOf: (body) => ({ model: budget.model, purpose: 'conversation', ...agentRequestIdentity('agent.converse', body) }) });
   const agent = new Agent({
     name: 'Olumi',
     instructions: input.instructions,
-    model: new OpenAIResponsesModel(client, input.budget.model),
+    model: new OpenAIResponsesModel(client, budget.model),
     modelSettings: {
-      maxTokens: input.budget.max_output_tokens,
-      ...(input.budget.reasoning_effort !== undefined ? { reasoning: { effort: input.budget.reasoning_effort } } : {}),
+      maxTokens: budget.max_output_tokens,
+      ...(budget.reasoning_effort !== undefined ? { reasoning: { effort: budget.reasoning_effort } } : {}),
       parallelToolCalls: false,
       ...(input.firstTool !== undefined ? { toolChoice: input.firstTool } : {}),
       // Native server-side compaction of the Conversation as it grows: no transcript trim of our own.
@@ -342,7 +354,7 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
     }, { groupId: input.ctx.scenario_id, metadata: {
       // The SDK's own trace (tool spans are native) carries what this turn ran on: prompt, model, state, revision and Run.
       request_id: String(input.ctx.request_id ?? ''), turn_id: String(input.ctx.turn_id ?? ''),
-      prompt_sha256: createHash('sha256').update(input.instructions, 'utf8').digest('hex'), model: input.budget.model,
+      prompt_sha256: createHash('sha256').update(input.instructions, 'utf8').digest('hex'), model: budget.model,
       conversation_id: conversation.id, revision: input.traceMeta?.revision ?? '', run_id: input.traceMeta?.run_id ?? '',
     } });
   } catch (err) {
