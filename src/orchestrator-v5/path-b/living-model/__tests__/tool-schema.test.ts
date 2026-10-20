@@ -18,6 +18,7 @@ describe('thin core: the link-unit convention reaches the AI in the tool schema 
   it('R2 on 6e4d2305: an option\'s own effect is a link from the option; a party is named word for word; a condition is someone\'s prerequisite', () => {
     expect(sent).toContain('or an option id when the person states that option');
     expect(sent).toContain('exactly as the user names them, word for word');
-    expect(sent).toContain('A prerequisite or qualification someone states for the listed items');
+    expect(sent).toContain('prerequisite: something that must hold or be resolved before the listed items apply');
+    expect(sent).toContain('assumption: a premise the result is worked out under and must be said beside it');
   });
 });

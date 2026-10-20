@@ -295,11 +295,11 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     }
     const leftOut = withheld.some((w) => (w.reason === 'link_sign_unknown' || w.reason === 'link_endpoint_unknown')
       && onPath.has(model.links.find((l) => l.id === w.id)?.to ?? '')) || [...droppedSettings].some((id) => onPath.has(id));
-    // A condition on anything the chance rests on (a prerequisite the engine cannot hold) changes it too. Olumi's own caveat
-    // (a question it raises, which nobody stated) is said beside the result as an assumption (Batch 0 ruling 14), never a
-    // reason to withhold the person's own calculation; a stated or unverified one withholds.
+    // A PREREQUISITE on anything the chance rests on (the engine cannot hold one) withholds it, whoever raised it. An
+    // ASSUMPTION is a premise the result is worked out under: it is said beside the result (Batch 0 ruling 14), never a
+    // reason to withhold. The AI declares which a condition is; the source never decides it.
     const pathLinks = new Set(allLinks.filter((l) => onPath.has(l.to)).map((l) => l.id));
-    const conditioned = model.conditions.filter((c) => c.source !== 'olumi' && c.applies_to.some((id) => onPath.has(id) || pathLinks.has(id)));
+    const conditioned = model.conditions.filter((c) => c.role === 'prerequisite' && c.applies_to.some((id) => onPath.has(id) || pathLinks.has(id)));
     for (const c of conditioned) hold(`condition:${c.text}`, 'condition_not_in_slice');
     if (leftOut || conditioned.length > 0) {
       for (const k of Object.keys(goalNode)) if (k.startsWith('goal_threshold') || k === 'goal_direction' || k === 'goal_deadline_as_stated') delete goalNode[k];

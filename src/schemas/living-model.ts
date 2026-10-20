@@ -114,9 +114,16 @@ export const LivingLink = z.object({
 export const LivingCondition = z.object({
   text: z.string(),
   applies_to: z.array(z.string()).describe('The ids of the items (aims, options, factors, links) this condition qualifies.'),
+  /**
+   * What the condition does to a result that rests on these items, declared by the AI (meaning), applied by the mapper (rule):
+   * a prerequisite withholds it until resolved; an assumption is said beside it.
+   */
+  // A model saved before roles were declared reads every condition as a prerequisite (it withheld then, and still does).
+  role: z.enum(['prerequisite', 'assumption']).default('prerequisite').describe(
+    'prerequisite: something that must hold or be resolved before the listed items apply ("only after supplier approval"), so a result resting on them cannot be computed yet; '
+    + 'assumption: a premise the result is worked out under and must be said beside it ("assuming the full effect arrives by the deadline").'),
   ...attribution,
-}).strict().describe(
-  'A prerequisite or qualification someone states for the listed items ("only after supplier approval"). Olumi\'s own caveat is recorded with source olumi and is said beside a result, never treated as a prerequisite.');
+}).strict().describe('A prerequisite or an assumption that qualifies the listed items, with who raised it.');
 
 export const LivingView = z.object({
   holder: z.string(),

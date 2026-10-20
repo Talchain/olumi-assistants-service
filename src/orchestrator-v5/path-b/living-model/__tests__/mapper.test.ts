@@ -141,13 +141,13 @@ describe('thin core mapper: living model → GraphV3', () => {
     expect(thresholdOn(mapLivingModel(reversed)), 'CONTRAST: without the saved goal, order decides').toBe('g2');
 
     const conditioned: LivingModelT = structuredClone(KNOWN_ANSWER);
-    conditioned.conditions.push({ text: 'The f→g effect requires supplier approval, which remains unresolved', applies_to: ['f_g'],
+    conditioned.conditions.push({ text: 'The f→g effect requires supplier approval, which remains unresolved', applies_to: ['f_g'], role: 'prerequisite',
       source: 'user', party: null, quote: 'Supplier approval remains unresolved' });
     const c = mapLivingModel(conditioned);
     expect(c.withheld).toContainEqual({ id: 'g', reason: 'chance_rests_on_withheld' });
     expect(node(c.graph, 'g')).not.toHaveProperty('goal_threshold');
     const offPath: LivingModelT = structuredClone(KNOWN_ANSWER);
-    offPath.conditions.push({ text: 'Only if the room is free', applies_to: ['elsewhere'], source: 'user', party: null, quote: null });
+    offPath.conditions.push({ text: 'Only if the room is free', applies_to: ['elsewhere'], role: 'prerequisite', source: 'user', party: null, quote: null });
     expect(node(mapLivingModel(offPath).graph, 'g')).toMatchObject({ goal_threshold: 0.8 });
   });
 
@@ -195,23 +195,31 @@ describe('thin core mapper: living model → GraphV3', () => {
 
   it('buddy R1 #3523: a prerequisite stated on an option\'s exact effect still withholds the chance after it is lowered to the sum', () => {
     const conditioned: LivingModelT = structuredClone(OPTION_EFFECTS);
-    conditioned.conditions.push({ text: 'A adds this only after supplier approval', applies_to: ['a_w'], source: 'user', party: null, quote: 'only after supplier approval' });
+    conditioned.conditions.push({ text: 'A adds this only after supplier approval', applies_to: ['a_w'], role: 'prerequisite', source: 'user', party: null, quote: 'only after supplier approval' });
     const c = mapLivingModel(conditioned);
     expect(c.withheld).toContainEqual({ id: 'w', reason: 'chance_rests_on_withheld' });
     expect((c.graph.nodes as Rec[]).find((n) => n.id === 'w')).not.toHaveProperty('goal_threshold');
     expect((mapLivingModel(OPTION_EFFECTS).graph.nodes as Rec[]).find((n) => n.id === 'w'), 'CONTRAST: unconditioned').toHaveProperty('goal_threshold');
   });
 
-  it('served KA1 3254d202: Olumi\'s own caveat on the path is an assumption said beside the chance, never a withhold; a stated one withholds', () => {
-    const caveat = (source: 'olumi' | 'user' | 'unverified'): LivingModelT => {
+  it('served KA1 3254d202: an assumption on the path is said beside the chance; a prerequisite withholds it; the source never decides', () => {
+    const withCondition = (role: 'assumption' | 'prerequisite', source: 'olumi' | 'user'): LivingModelT => {
       const m: LivingModelT = structuredClone(KNOWN_ANSWER);
-      m.conditions.push({ text: 'Whether the effect is fully realised by the deadline is not stated', applies_to: ['f_g', 'g'], source, party: null, quote: null });
+      m.conditions.push({ text: 'Assuming the full effect arrives by the deadline', applies_to: ['f_g', 'g'], role, source, party: null, quote: null });
       return m;
     };
-    expect((mapLivingModel(caveat('olumi')).graph.nodes as Rec[]).find((n) => n.id === 'g')).toMatchObject({ goal_threshold: 0.8 });
-    expect(mapLivingModel(caveat('olumi')).withheld.some((w) => w.reason === 'condition_not_in_slice')).toBe(false);
-    for (const s of ['user', 'unverified'] as const) {
-      expect((mapLivingModel(caveat(s)).graph.nodes as Rec[]).find((n) => n.id === 'g'), s).not.toHaveProperty('goal_threshold');
+    const goal = (m: LivingModelT) => (mapLivingModel(m).graph.nodes as Rec[]).find((n) => n.id === 'g');
+    for (const s of ['olumi', 'user'] as const) {
+      expect(goal(withCondition('assumption', s)), `assumption, ${s}`).toMatchObject({ goal_threshold: 0.8 });
+      expect(goal(withCondition('prerequisite', s)), `prerequisite, ${s}`).not.toHaveProperty('goal_threshold');
     }
+  });
+
+  it('a model saved before roles were declared reads each condition as a prerequisite (it withheld then, and still does)', () => {
+    const saved = JSON.parse(JSON.stringify(KNOWN_ANSWER));
+    saved.conditions = [{ text: 'Supplier approval', applies_to: ['f_g'], source: 'user', party: null, quote: null }];
+    const parsed = LivingModel.parse(saved);
+    expect(parsed.conditions[0]!.role).toBe('prerequisite');
+    expect((mapLivingModel(parsed).graph.nodes as Rec[]).find((n) => n.id === 'g')).not.toHaveProperty('goal_threshold');
   });
 });
