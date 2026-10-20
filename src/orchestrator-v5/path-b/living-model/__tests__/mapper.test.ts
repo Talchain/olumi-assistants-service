@@ -57,6 +57,10 @@ describe('thin core mapper: living model → GraphV3', () => {
     const link = graph.edges.find((e) => e.from === 'f' && e.to === 'g') as Record<string, any>;
     expect(link.provenance.magnitude).toBe('olumi_placeholder');
 
+    const joint: LivingModelT = structuredClone(KNOWN_ANSWER);
+    joint.aims.push({ ...structuredClone(KNOWN_ANSWER.aims[0]!), id: 'g2', text: 'Keep cost under 40' });
+    expect(mapLivingModel(joint).withheld).toEqual([{ id: 'g2', reason: 'aim_not_in_slice' }]);
+
     const change: LivingModelT = structuredClone(KNOWN_ANSWER);
     change.aims[0]!.target!.comparator = 'increase';
     expect(mapLivingModel(change).withheld).toContainEqual({ id: 'g', reason: 'change_target_not_in_slice' });

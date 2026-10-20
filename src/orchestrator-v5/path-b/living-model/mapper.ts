@@ -20,7 +20,7 @@ import { resolveGoalThresholdCapWithProvenance } from '../../../utils/goal-thres
 import { admitGoalBaseline } from '../../../cee/factor-extraction/goal-baseline-admissibility.js';
 
 export type WithheldReason =
-  | 'no_level_target' | 'change_target_not_in_slice' | 'target_range_not_in_slice' | 'goal_level_unknown'
+  | 'no_level_target' | 'aim_not_in_slice' | 'change_target_not_in_slice' | 'target_range_not_in_slice' | 'goal_level_unknown'
   | 'goal_level_not_admitted' | 'factor_level_unknown' | 'level_range_not_in_slice' | 'setting_not_convertible'
   | 'link_endpoint_unknown' | 'link_unit_mismatch' | 'link_range_no_law' | 'link_sign_unknown' | 'no_single_status_quo';
 
@@ -89,6 +89,9 @@ export function mapLivingModel(model: LivingModelT): Mapped {
       }
     }
   }
+
+  // Joint goals are not in this slice: every other current aim with a target is kept in the living model, withheld here.
+  for (const a of model.aims) if (a !== aim && a.status === 'current' && a.target !== null) hold(a.id, 'aim_not_in_slice');
 
   // ── Factors, each on its own frame.
   const setsFactor = new Set(model.options.flatMap((o) => o.settings.map((s) => s.factor_id)));
