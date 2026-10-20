@@ -57,6 +57,12 @@ export const LivingAim = z.object({
     current: z.number().nullable().describe("Today's level of the quantity, in the target's unit, when stated. Unknown is null, never 0."),
     /** 'user' only when the person set today's level themselves (a canvas edit); otherwise null: the aim's attribution covers it. */
     current_source: z.enum(['user']).nullable(),
+    /** Today's level's own unit when it differs from the target's ("+10%" on "£ per month"). A model saved before reads null. */
+    current_unit: z.string().nullable().default(null).describe(
+      "The unit today's level is in, when it differs from `unit` (a change of \"10 %\" on revenue in \"£ per month\" has unit \"%\" and current_unit \"£ per month\"). Null when they are the same."),
+    /** For increase/decrease: what the change's figure means. Declared, never guessed; a model saved before reads null. */
+    change_kind: z.enum(['absolute', 'relative', 'points']).nullable().default(null).describe(
+      'For increase or decrease only: absolute = the change in the quantity\'s own unit; relative = a percentage of today\'s level; points = percentage points of a quantity that is itself a percentage. Null for a level target.'),
   }).strict().nullable(),
   ...attribution,
 }).strict();
