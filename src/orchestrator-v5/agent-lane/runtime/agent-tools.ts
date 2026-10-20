@@ -1036,6 +1036,11 @@ export type AgentLaneMode = 'full' | 'preview' | 'core';
 
 /** The request's `x-olumi-ai-mode` value that selects {@link AgentLaneMode} `core`. */
 export const AI_CORE_MODE = 'core';
+/**
+ * THIN CORE FLIP (A1): the UI's staging default lane (`aiComparisonMode.ts`: staging sends `openai` unless `?ai=` says
+ * otherwise). On staging it is the core lane too, so the default typed turn runs on the OpenAI-native core.
+ */
+export const AI_OPENAI_MODE = 'openai';
 
 /**
  * The lane mode for ONE request. A read-only preview stays read-only whatever the request says; `core` is honoured only on a
@@ -1043,7 +1048,8 @@ export const AI_CORE_MODE = 'core';
  */
 export function laneModeFor(base: AgentLaneMode, aiModeHeader: unknown, runtimeEnv: string): AgentLaneMode {
   if (base === 'preview') return 'preview';
-  return aiModeHeader === AI_CORE_MODE && (runtimeEnv === 'staging' || runtimeEnv === 'local' || runtimeEnv === 'test') ? 'core' : base;
+  const coreRuntime = runtimeEnv === 'staging' || runtimeEnv === 'local' || runtimeEnv === 'test';
+  return coreRuntime && (aiModeHeader === AI_CORE_MODE || aiModeHeader === AI_OPENAI_MODE) ? 'core' : base;
 }
 
 export function toolsFor(mode: AgentLaneMode): readonly ToolDefinition[] {
