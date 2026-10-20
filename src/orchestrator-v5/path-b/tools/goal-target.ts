@@ -49,7 +49,7 @@ export interface JointTargetDeclaration {
   /** Missing on the approved base: these factors must retain unknown baselines on readback. */
   readonly new_quantities?: readonly string[];
   readonly links?: readonly { readonly from: string; readonly to: string; readonly sign: 'positive' | 'negative' }[];
-  readonly conditions: readonly (TargetDeclaration & { readonly quantity: string; readonly source: { readonly origin: TargetDeclaration['origin']; readonly named_source: string | null } })[];
+  readonly conditions: readonly (TargetDeclaration & { readonly quantity: string; readonly frame?: string; readonly source: { readonly origin: TargetDeclaration['origin']; readonly named_source: string | null } })[];
   readonly timing: { readonly months: number | null; readonly reference: 'today' | 'launch'; readonly period_kind: 'at_end' | 'over_period'; readonly deadline: string | null } | null;
 }
 
@@ -149,6 +149,8 @@ export async function targetCandidate(scenarioId: string, operationId: string, r
     const hash = computeAnalysisAffectingGraphHash(candidate as never);
     if (hash === null) return { refusal: 'target_not_prepared' };
     if (node.kind === 'goal') {
+      // The public goal door attests a level; a declared change must never pass through it as a level.
+      if (c.frame === 'change') return { refusal: 'goal_is_a_change' };
       const built = await singleTargetCandidate(scenarioId, operationId, requestId, c, candidate, hash);
       if ('refusal' in built) return built;
       candidate = built.candidate;
@@ -157,7 +159,7 @@ export async function targetCandidate(scenarioId: string, operationId: string, r
       const res = await applyConstraintEditThroughAddConstraint({ payload: { scenario_id: scenarioId, turn_id: operationId, stage: 'frame' },
         requestId, persistedGraph: candidate, graph: GraphV3.parse(candidate), priorFacts: [], targetId: c.goal_id,
         constraintType: inclusiveOf(c.comparator) === '>=' ? 'at_least' : 'at_most', rawValue: c.value, unit: c.unit,
-        label: c.quantity, confirmedConstraintValueFrame: 'level', statedConstraintOperator: c.comparator,
+        label: c.quantity, confirmedConstraintValueFrame: c.frame === 'change' ? 'change_abs' : 'level', statedConstraintOperator: c.comparator,
         eventName: 'goal_target_edit', logBase: { scenario_id: scenarioId } });
       if (res.kind !== 'mutated') return { refusal: res.kind === 'refused' ? res.reason : 'target_not_prepared' };
       candidate = res.mutatedGraph as Rec;
@@ -168,7 +170,7 @@ export async function targetCandidate(scenarioId: string, operationId: string, r
     row.provenance = 'inferred';
     const subject = { kind: node.kind === 'goal' ? 'goal' as const : 'factor' as const, id: c.goal_id, field: 'target' as const };
     const statement = jointStatement(c, t.timing);
-    const withWords = withUserStatement({ ...candidate, nodes: nodesOf(candidate) }, userStatementRecord(subject, [statement], c.recorded_at), subject);
+    const withWords = withUserStatement({ ...candidate, nodes: nodesOf(candidate) }, userStatementRecord(subject, [statement], c.recorded_at, jointAttest(c, t.timing)), subject);
     if (withWords === undefined) return { refusal: 'target_not_prepared' };
     candidate = withWords;
   }
@@ -197,6 +199,13 @@ export async function targetCandidate(scenarioId: string, operationId: string, r
   return targetReadback(candidate, t).holds ? { candidate } : { refusal: 'target_not_prepared' };
 }
 
+/** A declared change's intent, independent of the scientific basis needed to compute its chance. */
+function jointAttest(c: JointTargetDeclaration['conditions'][number], timing: JointTargetDeclaration['timing']) {
+  return c.frame !== 'change' ? undefined : { frame: c.frame, comparator: c.comparator,
+    ...(timing === null ? {} : { reference: timing.reference, period_kind: timing.period_kind,
+      ...(timing.months === null ? {} : { period_months: timing.months }) }), scientific_basis: 'unknown' };
+}
+
 function jointStatement(c: JointTargetDeclaration['conditions'][number], timing: JointTargetDeclaration['timing']): UserStatement {
   return { ...(c.origin === 'user' ? { speaker: 'user' as const } : { said_by: c.origin === 'third_party' ? 'party' as const : c.origin }),
     ...(c.origin === 'third_party' && c.source.named_source !== null ? { party: c.source.named_source, relayed_by: 'user' as const } : {}),
@@ -215,7 +224,7 @@ export function targetReadback(graph: Rec, t: TargetDeclaration | JointTargetDec
     const matches = rowsOf(graph).filter(r => r.node_id === c.goal_id && r.operator === inclusiveOf(c.comparator));
     const row = matches.length === 1 ? matches[0] : undefined;
     const node = nodesOf(graph).find(n => n.id === c.goal_id);
-    const words = claimRecordsOn(node).filter(r => r.field === 'target').flatMap(r => r.statements);
+    const records = claimRecordsOn(node).filter(r => r.field === 'target');
     const declaredLinks = (t.links ?? []).filter(l => l.from === c.goal_id);
     const addedLinks = Array.isArray(graph.edges) ? graph.edges.filter((e): e is Rec => isRec(e) && (e.from === c.goal_id || e.to === c.goal_id)) : [];
     const addedHolds = !t.new_quantities?.includes(c.goal_id) || (node?.kind === 'factor' && node.label === c.quantity
@@ -224,7 +233,8 @@ export function targetReadback(graph: Rec, t: TargetDeclaration | JointTargetDec
         && e.effect_direction === l.sign && isRec(e.strength) && typeof e.strength.mean === 'number'
         && Math.sign(e.strength.mean) === (l.sign === 'positive' ? 1 : -1))));
     const holds = addedHolds && row?.role === GOAL_TARGET_ROLE && row.provenance === 'inferred' && row.value === c.value && row.unit === c.unit
-      && statedOperatorOf(row) === c.comparator && words.some(s => isDeepStrictEqual(s, jointStatement(c, t.timing)));
+      && row.value_frame === (c.frame === 'change' ? 'change_abs' : 'level') && statedOperatorOf(row) === c.comparator
+      && records.some(r => isDeepStrictEqual(r.attest, jointAttest(c, t.timing)) && r.statements.some(s => isDeepStrictEqual(s, jointStatement(c, t.timing))));
     return { node_id: c.goal_id, holds, comparator: row === undefined ? null : statedOperatorOf(row), figure: row?.value ?? null, unit: row?.unit ?? null };
   });
   const goal = nodesOf(graph).find(n => n.id === t.goal_id);

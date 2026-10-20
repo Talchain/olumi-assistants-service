@@ -197,9 +197,8 @@ describe('L12: joint targets through the real route and SDK approval', () => {
     ['Output', 'Reliability', 'Output must rise at least 10% and reliability at least 5% from today at three months. Revenue was 2m as of 2026-09-01.'],
   ])('L21 bank: two declared changes → one approval/save → complete cold readback (%s, %s)', async (first, second, words) => {
     const conditions = [first, second].map((quantity, i) => ({ node_id: i === 0 ? 'change_one' : 'change_two', quantity,
-      comparator: '>=' as const, value: i === 0 ? 10 : 5, unit: '%', frame: 'change', target_frame: 'change_abs', quantity_frame: 'change',
-      stance: 'target', source: source(words), basis: { reference: 'today', denominator: `today’s ${quantity.toLowerCase()}`,
-        period_months: 3, period_kind: 'at_end', effect_unit: null, effects_at_period_end: false, also_required: null, open_question: null } }));
+      comparator: '>=' as const, value: i === 0 ? 10 : 5, unit: '%', frame: 'change',
+      stance: 'target', source: source(words) }));
     const timing = { months: 3, reference: 'today', period_kind: 'at_end', deadline: null };
     const { body, card } = await prepare({ public_label: 'Record both changes', basis: 'Olumi’s reading for approval.',
       ops: [{ op: 'set_goal_target', goal_id: 'orders', conditions, timing }] }, words);
@@ -221,13 +220,14 @@ describe('L12: joint targets through the real route and SDK approval', () => {
     for (const c of conditions) {
       const node = cold.nodes.find((n: Json) => n.id === c.node_id);
       expect(node.observed_state).toBeUndefined();
-      expect(node.goal_target_basis).toMatchObject({ quantity_frame: 'change', target_frame: 'change_abs', target_raw: c.value,
-        reference: 'today', denominator: c.basis.denominator, period_months: 3, period_kind: 'at_end' });
+      expect(node.goal_target_basis).toBeUndefined();
+      expect(claimRecordsOn(node)[0]?.attest).toEqual({ frame: 'change', comparator: c.comparator,
+        reference: 'today', period_months: 3, period_kind: 'at_end', scientific_basis: 'unknown' });
       expect(cold.goal_constraints.find((r: Json) => r.node_id === c.node_id)).toMatchObject({ value: c.value, value_frame: 'change_abs', role: 'goal_target' });
-      // Mutant pair per condition: reference/denominator meaning must be checked, not merely its numeric threshold.
-      for (const [field, value] of [['reference', 'launch'], ['denominator', 'an unrelated revenue figure']]) {
+      // Each member's reference and frame are independently checked on cold readback.
+      for (const [field, value] of [['reference', 'launch'], ['frame', 'level']]) {
         const mutant = structuredClone(cold);
-        mutant.nodes.find((n: Json) => n.id === c.node_id).goal_target_basis[field!] = value;
+        mutant.nodes.find((n: Json) => n.id === c.node_id).user_statements[0].attest[field!] = value;
         expect(targetReadback(mutant, reading).holds).toBe(false);
       }
     }
@@ -235,32 +235,114 @@ describe('L12: joint targets through the real route and SDK approval', () => {
     expect(registered).toHaveLength(1);
   });
 
-  it('L21 bank: conversion is a LEVEL over the launch window AND new customers accumulate from launch', async () => {
-    const words = 'Conversion must be strictly above 15% over the first 3 months after launch AND we need at least 20 new customers in that window.';
-    const conditions = [
-      { node_id: 'conversion', quantity: 'Conversion rate', comparator: '>', value: 15, unit: '%', frame: 'level', stance: 'target', source: source(words) },
-      { node_id: 'new_customers', quantity: 'Cumulative new customers since launch', comparator: '>=', value: 20, unit: 'customers',
-        frame: 'change', target_frame: 'change_abs', quantity_frame: 'change', stance: 'target', source: source(words),
-        basis: { reference: 'launch', denominator: null, period_months: 3, period_kind: 'over_period', effect_unit: null,
-          effects_at_period_end: false, also_required: null, open_question: null } },
-    ];
-    const timing = { months: 3, reference: 'launch', period_kind: 'over_period', deadline: null };
-    const { body, card } = await prepare({ public_label: 'Record both launch conditions', basis: 'Olumi’s at-least reading for approval.',
-      ops: [{ op: 'set_goal_target', goal_id: 'orders', conditions, timing }] }, words);
+  it('L21C recorded args → one card → one save/own receipt → literal readback → cold reopen', async () => {
+    const args = {
+  "public_label": "Define launch success: conversion and new customers",
+  "basis": "The user defines success as both a conversion rate over 15% and securing 20 new customers within the first 3 months. Interpret securing 20 as at least 20, and f…(+78)",
+  "ops": [
+    {
+      "op": "set_goal_target",
+      "goal_id": "product_feature_launch_campaign_effectiveness",
+      "conditions": [
+        {
+          "node_id": "conversion_rate",
+          "comparator": ">",
+          "value": 15,
+          "unit": "%",
+          "quantity": "conversion rate",
+          "frame": "level",
+          "stance": "target",
+          "source": {
+            "origin": "user",
+            "quote": "For our new feature launch to be successful, we need to have a conversion rate of over 15% and secure 20 new customers within the first 3 months.",
+            "named_source": null
+          }
+        },
+        {
+          "node_id": "new_customers",
+          "comparator": ">=",
+          "value": 20,
+          "unit": "customers",
+          "quantity": "new customers secured",
+          "frame": "change",
+          "stance": "target",
+          "source": {
+            "origin": "user",
+            "quote": "For our new feature launch to be successful, we need to have a conversion rate of over 15% and secure 20 new customers within the first 3 months.",
+            "named_source": null
+          }
+        }
+      ],
+      "timing": {
+        "months": 3,
+        "reference": "launch",
+        "period_kind": "over_period",
+        "deadline": null
+      }
+    }
+  ]
+};
+    const op = args.ops[0]!;
+    const words = op.conditions[0]!.source.quote;
+    persisted.nodes.find((n: Json) => n.id === 'orders').id = op.goal_id;
+    persisted.edges.forEach((e: Json) => { if (e.to === 'orders') e.to = op.goal_id; });
+    const { body, card } = await prepare(args, words);
     expect(card, JSON.stringify(body._agent?.tool_calls)).toBeDefined();
     expect(body._proposal_fields.proposals).toHaveLength(1);
-    expect(card.approve_action.detail).toContain('Conversion rate above 15%');
-    expect(card.approve_action.detail).toContain('after launch');
-    expect(card.approve_action.detail).not.toContain('from today');
+    expect(card.approve_action.detail).toBe('Olumi’s reading: conversion rate above 15% AND new customers secured at least 20 customers; over the first three months after launch.');
+    expect(registered).toHaveLength(0);
     await approve(card, body);
     expect(outputOf('apply_call')).toMatchObject({ status: 'ok', data: { saved: true, receipt: { version_id: 'v_reg_1' } } });
     expect(registered).toHaveLength(1);
+    expect(graphWrites).toHaveLength(0);
     const cold = projectGraphForPersistence({ ...structuredClone(persisted), ...GraphV3.parse(persisted) }) as Json;
-    expect(cold.goal_constraints.find((r: Json) => r.node_id === 'conversion')).toMatchObject({ value: 15, operator_as_stated: '>', value_frame: 'level' });
-    expect(cold.goal_constraints.find((r: Json) => r.node_id === 'new_customers')).toMatchObject({ value: 20, value_frame: 'change_abs' });
-    const count = cold.nodes.find((n: Json) => n.id === 'new_customers');
-    expect(count.observed_state).toBeUndefined();
-    expect(count.goal_target_basis).toMatchObject({ reference: 'launch', period_months: 3, period_kind: 'over_period' });
+    const declared = { goal_id: op.goal_id, conditions: op.conditions.map(c => ({ ...c, goal_id: c.node_id,
+      origin: c.source.origin, quote: c.source.quote, said_in: words, recorded_at: '' })), timing: op.timing,
+      new_quantities: op.conditions.map(c => c.node_id) } as unknown as Parameters<typeof targetReadback>[1];
+    expect(targetReadback(cold, declared).holds).toBe(true);
+    for (const c of op.conditions) {
+      const node = cold.nodes.find((n: Json) => n.id === c.node_id);
+      const row = cold.goal_constraints.find((r: Json) => r.node_id === c.node_id);
+      expect(row.operator_as_stated ?? row.operator).toBe(c.comparator);
+      expect(row).toMatchObject({ value: c.value, unit: c.unit,
+        value_frame: c.frame === 'change' ? 'change_abs' : 'level', role: 'goal_target' });
+      expect(node.observed_state).toBeUndefined();
+      expect(node.goal_target_basis).toBeUndefined();
+      const records = claimRecordsOn(node);
+      expect(records[0]?.statements).toEqual([{ speaker: 'user', quote: c.source.quote, source: words,
+        subject: { quantity: c.quantity, node_id: c.node_id }, form: 'lower_bound', low: c.value, unit: c.unit,
+        stance: 'target', reading: 'olumi', reference: 'launch', period: 'over the first three months after launch' }]);
+      if (c.frame === 'change') expect(records[0]?.attest).toEqual({ frame: c.frame, comparator: c.comparator,
+        reference: 'launch', period_months: 3, period_kind: 'over_period', scientific_basis: 'unknown' });
+      // Mutant pair for EACH claim, plus the shared timing and change-frame attestations.
+      for (const mutate of [
+        (g: Json) => { g.goal_constraints.find((r: Json) => r.node_id === c.node_id).value += 1; },
+        (g: Json) => { g.goal_constraints.find((r: Json) => r.node_id === c.node_id).value_frame = c.frame === 'change' ? 'level' : 'change_abs'; },
+        (g: Json) => { g.nodes.find((n: Json) => n.id === c.node_id).user_statements[0].statements[0].reference = 'today'; },
+        (g: Json) => { g.nodes.find((n: Json) => n.id === c.node_id).user_statements[0].statements[0].stance = 'stated_current'; },
+        (g: Json) => { g.nodes.find((n: Json) => n.id === c.node_id).user_statements[0].statements[0].speaker = 'unknown'; },
+      ]) { const mutant = structuredClone(cold); mutate(mutant); expect(targetReadback(mutant, declared).holds).toBe(false); }
+    }
+    for (const [field, value] of [['frame', 'level'], ['reference', 'today'], ['period_months', 4], ['period_kind', 'at_end']]) {
+      const mutant = structuredClone(cold);
+      mutant.nodes.find((n: Json) => n.id === 'new_customers').user_statements[0].attest[field!] = value;
+      expect(targetReadback(mutant, declared).holds).toBe(false);
+    }
+    pausedRun = null; turnRows.clear(); conversationIds.clear();
+    persisted = cold;
+    const reopened = await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph` });
+    expect(targetReadback(reopened.json().graph, declared).holds).toBe(true);
+    await approve(card, body);
+    expect(registered).toHaveLength(1);
+  });
+  it('an unwindowed compound change remains typed-refused, with unrelated revenue/date providing no authority', async () => {
+    const words = 'We need 10% more output from today and quality at least 5%. Revenue was 2m as of 2026-09-01.';
+    const args = joint(words) as Json; args.ops[0].conditions[0].frame = 'change'; args.ops[0].timing = null;
+    const before = structuredClone(persisted);
+    const { card } = await prepare(args, words);
+    expect(card).toBeUndefined();
+    expect(outputOf('prop_call')).toMatchObject({ status: 'unavailable', reason: 'change_target_not_available', write: 'none' });
+    expect(persisted).toEqual(before); expect(registered).toHaveLength(0);
   });
   it.each([
     'We need over 150 weekly orders AND no more than 6 vans over the next 3 months.',
