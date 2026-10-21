@@ -192,7 +192,7 @@ export const LivingLink = z.object({
      */
     form: z.enum(['point', 'exact', 'range', 'normal', 'direction_only', 'unknown']).describe(
       'point: a stated figure ("adds about 50"); exact: the person says it is exactly this, with no variation ("adds exactly 50"); '
-      + 'normal: a stated Normal law, value its mean and sd its standard deviation; range: low to high, with value the source\'s own central figure: the person\'s when they give one, Olumi\'s for Olumi\'s own estimate ("about 20, between 10 and 30"), else null; direction_only: a sign with no size, only when an end has no unit or the source gave a direction only; unknown: direction is unstated or unresolved, with sign null.'),
+      + 'normal: a stated Normal law, value its mean and sd its standard deviation; range: low to high, with value the source\'s own central figure: the person\'s when they give one, Olumi\'s for Olumi\'s own estimate ("about 20, between 10 and 30"), else null; direction_only: a sign with no size, only when `to` has no unit, `from` is a quantity with no unit, or the source gave a direction only (an option or a step simply on or off is +1 when in place, so its link has a size); unknown: direction is unstated or unresolved, with sign null.'),
     ...estimable,
     /**
      * The link's unit is the `to` item's own unit, exactly as that item writes it; "per +1 of `from`" is implied, so it is
@@ -207,8 +207,8 @@ export const LivingLink = z.object({
      * the goal off from its factors and left Run disabled. The AI reads this description, so it is the instruction.
      */
     sign: z.enum(['+', '-']).nullable().describe(
-      "Which way `to` moves for each +1 of `from`: '+' raises it, '-' lowers it. For source olumi, give your provisional judgement of direction; use form direction_only only when an end has no unit, else give its size. For source user, party or unverified, preserve only the direction that source supplied. If none was supplied, use sign null and form unknown, then ask. Never put an Olumi-inferred direction under another source."),
-  }).strict().describe("The change in `to` for each +1 of `from`, in the unit of `to`. For Olumi's own link (source olumi), when both ends have a unit, give form range with Olumi's central estimate in value and low and high around it; else direction_only with its sign. For the person's or a party's link they gave no size, Olumi's provisional size the same way, with estimate_by olumi; its sign stays the one they gave."),
+      "Which way `to` moves for each +1 of `from`: '+' raises it, '-' lowers it. For source olumi, give your provisional judgement of direction; use form direction_only only when `to` has no unit or `from` is a quantity with no unit (an option or an on-or-off step is +1 when in place), else give its size. For source user, party or unverified, preserve only the direction that source supplied. If none was supplied, use sign null and form unknown, then ask. Never put an Olumi-inferred direction under another source."),
+  }).strict().describe("The change in `to` for each +1 of `from`, in the unit of `to`. For Olumi's own link (source olumi), when `to` has a unit and `from` has one or is an option or an on-or-off step (+1 when in place), give form range with Olumi's central estimate in value and low and high around it; else direction_only with its sign. For the person's or a party's link they gave no size, Olumi's provisional size the same way, with estimate_by olumi; its sign stays the one they gave."),
   ...attribution,
 }).strict();
 

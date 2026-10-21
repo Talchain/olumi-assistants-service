@@ -472,7 +472,7 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
       const build = JSON.stringify((b.tools as Json[]).find((t) => t.name === 'build_model_from_brief')?.parameters ?? null);
       expect(build).toContain("For Olumi's own factor (source olumi), give Olumi's central estimate in value, with low and high around it");
       expect(build).toContain("For Olumi's own risk (source olumi), Olumi's provisional range");
-      expect(build).toContain("For Olumi's own link (source olumi), when both ends have a unit, give form range with Olumi's central estimate in value");
+      expect(build).toContain("For Olumi's own link (source olumi), when `to` has a unit and `from` has one or is an option or an on-or-off step (+1 when in place), give form range with Olumi's central estimate in value");
       expect(build, 'the old blanket rule is gone').not.toContain('never guessed');
     }
   });
