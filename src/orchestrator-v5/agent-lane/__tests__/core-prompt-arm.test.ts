@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { CORE_ALIGNED_INSTRUCTIONS, CORE_REPLY_INSTRUCTION, NOTE_ON_ITEM_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION, instructionsForMode, MODEL_RELATIVE_NAMING_INSTRUCTION,
   promptArmOf, coreEffortArmOf } from '../../../routes/agent-v1-turn.js';
@@ -35,9 +36,10 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
 
   it('arm B is the AIE\'s assembled reference, byte for byte (programme-docs #94 6303242136, static text sha256 7b6145d4…), plus the canvas-coaching sentence', () => {
     expect(b.split(NOTE_ON_ITEM_INSTRUCTION)).toHaveLength(2);
-    // 7b6145d4… until 21 Oct; arm C's adoption changed only the closing core reply rule (see its row), then 56625e00…. NO WIN
-    // SHARE (Paul 21 Oct; Codex #3572 r1): the host's three share/leader edits only: 26,484 → 25,874 bytes (−610), base sha reproduced.
-    expect(createHash('sha256').update(b.replace(`${NOTE_ON_ITEM_INSTRUCTION}\n\n`, ''), 'utf8').digest('hex')).toBe('835579b290ab2b0185ae6a965bc9bf9ed520ec0edb0447517ed5ce6d089b3819');
+    // 7b6145d4… until 21 Oct; arm C's adoption changed only the closing core reply rule (see its row), then 56625e00…, then
+    // 8039876b… (bullets-first discipline). NO WIN SHARE (Paul 21 Oct; Codex #3572): the host's three share/leader edits only,
+    // 28,001 → 27,391 bytes (−610); staging's 8039876b… reproduced on its own tip.
+    expect(createHash('sha256').update(b.replace(`${NOTE_ON_ITEM_INSTRUCTION}\n\n`, ''), 'utf8').digest('hex')).toBe('d1a56e272544784cb2b7157be9b44b30c22e4df8f86ea54e7eb54bcf5a827fc7');
   });
 
   it('arm A is untouched except the NO WIN SHARE removal (Paul 21 Oct): the legacy host contract less its permitted-share sentence', () => {
@@ -63,7 +65,12 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
   it('arm C ADOPTED (Paul 21 Oct, long replies narrating the tools; R2 100 % at 90 words median): the core reply rule speaks in the user\u2019s terms with a length bound', () => {
     expect(CORE_REPLY_INSTRUCTION).not.toContain('from this turn\u2019s tool results');
     expect(CORE_REPLY_INSTRUCTION).toContain('never your tools or what a tool response did or did not contain');
-    expect(CORE_REPLY_INSTRUCTION).toContain('usually under 100 words');
+    // Paul, 21 Oct (standing): bullets first, detail on request: the approved discipline from the served routing prompt, verbatim.
+    const routing = readFileSync(new URL('../../../../Prompts/canonical/routing.txt', import.meta.url), 'utf8');
+    const discipline = routing.slice(routing.indexOf('<RESPONSE_DISCIPLINE>'), routing.indexOf('</RESPONSE_DISCIPLINE>') + '</RESPONSE_DISCIPLINE>'.length);
+    expect(discipline.length).toBeGreaterThan(500);
+    expect(CORE_REPLY_INSTRUCTION).toContain(discipline);
+    expect(CORE_REPLY_INSTRUCTION).not.toContain('weave at most one next step');
     // The licences, attribution and Run-coaching rules are kept.
     for (const rule of ['never call a win share a chance', 'never call an option best, a winner or recommended',
       'approving a reading adopts it but does not make the user its author', 'A Run that did not complete leaves a saved change saved'])

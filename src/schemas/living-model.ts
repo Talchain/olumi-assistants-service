@@ -89,9 +89,19 @@ export const LivingAim = z.object({
 export const LivingFactor = z.object({
   id,
   label: z.string(),
+  /** TRACK 2 (21 Oct): a result other factors lead to, drawn as an outcome on the goal's path. A model saved before reads factor. */
+  kind: z.enum(['factor', 'outcome']).default('factor').describe(
+    'outcome for a result that other factors lead to and that in turn moves the aim ("customer satisfaction", "staff turnover"); factor for everything else, including anything an option sets.'),
   /** The factor's current level, when known. */
   ...figure,
   defined_as: definedAs,
+  /** TRACK 2 (21 Oct): a limit beside the aim, sent as the legacy lane's limit row (one per quantity). Saved before: null. */
+  limit: z.object({
+    comparator: z.enum(['<=', '>=', '<', '>']),
+    value: z.number(),
+    ...attribution,
+  }).strict().nullable().default(null).describe(
+    'A limit the person must stay within on this quantity, beside the aim ("we cannot spend more than £30,000" on total cost is <= 30000), in this factor\'s unit, with who stated it. Never the aim itself. Null when there is none.'),
   ...attribution,
 }).strict();
 
@@ -106,7 +116,10 @@ export const LivingOption = z.object({
   label: z.string(),
   /** What the option sets each factor to. An option with no settings changes nothing (the status quo). */
   settings: z.array(LivingSetting).describe(
-    "The level the option sets each factor to, in the factor's unit. An option's own effect on a quantity (\"adds 30\") is a link from the option instead. An option with neither changes nothing (the status quo)."),
+    "The level the option sets each real quantity to, in that factor's unit (\"price to £12\"). Never a factor for the option itself being taken: choosing the option already says that, and its own effect on a quantity (\"adds 30\") is a link from the option. The only on or off setting is a step a risk's mitigation names, set to 1. An option with neither changes nothing (the status quo)."),
+  /** TRACK 2 (21 Oct): the legacy option status. A ruled-out option stays in view and is not compared. Saved before: feasible. */
+  status: z.enum(['feasible', 'infeasible', 'removed']).default('feasible').describe(
+    'infeasible when the person rules the option out but keeps it in view ("B is not possible"); removed when they take it out of the comparison; feasible otherwise. Only feasible options are compared.'),
   /** TRACK 2 lineage (21 Oct): where the option came from. A record, never a cause: the engine never sees it. Saved before: null. */
   developed_from: id.nullable().default(null).describe(
     'The id of the option this one was developed from, when it is a variant or development of it ("a cheaper version of A"). A record of where it came from, not a cause: it changes no figure. Null otherwise.'),

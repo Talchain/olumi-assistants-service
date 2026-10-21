@@ -19,6 +19,8 @@ import { constructionOperationId, findConstructionVersion } from '../../agent-la
 import { LivingModel } from '../../../schemas/living-model.js';
 import { applyKernel } from '../living-model/kernel.js';
 import { mapLivingModel } from '../living-model/mapper.js';
+import { hasGaps, structureGaps } from '../living-model/structure.js';
+import type { CritiqueT } from '../../agent-lane/core/model-critic.js';
 import { isNoModelYet, isSavedRead, readSaved } from './context-tool.js';
 import { ok, refused, OUTCOME_TRACE, type ToolOutcome } from './outcome.js';
 import { writeCorePostimage } from './core-write.js';
@@ -37,7 +39,22 @@ export interface DraftDeps {
   readonly dispatch: InternalDispatch;
   /** The route's GRAPH_READY observer: told once, with the graph as read back. */
   readonly onModelRegistered?: (graph: Record<string, unknown>) => void;
+  /** One review per turn (`pathBTools` makes it per turn): only the turn's first draft goes to the critic. */
+  readonly review?: { done: boolean };
+  /**
+   * The second model's review of a first draft (`model-critic.ts`; Paul, 21 Oct: a multi-model architecture that checks and
+   * enhances the model). Read once, beside the structure check; undefined when unavailable, so a draft never waits on it.
+   */
+  readonly critique?: (input: string) => Promise<CritiqueT | undefined>;
 }
+
+/** What the AI is told when a reviewer read its first draft. Nothing is saved; the drafter decides what to adopt. */
+export const REVIEW_FIRST = 'Nothing was saved yet: a second reviewer read your first draft (critique; gaps are structural facts). '
+  + 'Revise once, then call build_model_from_brief again with the complete model. Adopt only what helps the person reason; a genuinely '
+  + 'new inference of yours is Olumi\'s (source olumi, quote null), while every item the person or another party stated keeps its source, '
+  + 'quote and uncertainty unchanged. Connect an item to the goal only where there is a real causal relationship; context may stay '
+  + 'unconnected. Never invent a chance, a strength or a target figure to complete the model: ask for it instead. In your reply, '
+  + 'say which items are Olumi\'s suggestions, and ask the critique\'s question if it is still open.';
 
 const nodesIn = (graph: Record<string, unknown>): number => (Array.isArray(graph.nodes) ? graph.nodes.length : 0);
 
@@ -71,6 +88,12 @@ async function constructUnrecorded(deps: DraftDeps, ctx: DraftContext, args: Bui
   const kernelled = applyKernel(args.model, [args.brief, ...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text === undefined ? [] : [ctx.user_turn_text])]);
   const mapped = mapLivingModel(kernelled.model);
   if (!mapped.graph.nodes.some((n) => n.kind !== 'decision')) return refused('model_empty');
+  const gaps = structureGaps(kernelled.model);
+  if (deps.review !== undefined && !deps.review.done) {
+    deps.review.done = true;
+    const critique = await deps.critique?.(JSON.stringify({ brief: args.brief, draft: kernelled.model, gaps }));
+    if (critique !== undefined) return refused('review_first', REVIEW_FIRST, { gaps, critique });
+  }
   const graph: Record<string, unknown> = { ...mapped.graph, living_model: kernelled.model };
 
   const write = await writeCorePostimage(deps, { scenarioId: ctx.scenario_id, graph, briefText: args.brief,
@@ -85,6 +108,6 @@ async function constructUnrecorded(deps: DraftDeps, ctx: DraftContext, args: Bui
   try { deps.onModelRegistered?.(after.graph); } catch { /* an observer never decides the outcome */ }
   return ok({
     provisional: 'olumi', model_version: receipt, revision: { graph_hash: after.graphHash, graph_identity_hash: after.identity },
-    draft: { withheld: mapped.withheld, assumed: mapped.assumed, relabelled: kernelled.relabelled },
+    draft: { withheld: mapped.withheld, assumed: mapped.assumed, relabelled: kernelled.relabelled, ...(hasGaps(gaps) ? { gaps } : {}) },
   }, { mutated: true });
 }

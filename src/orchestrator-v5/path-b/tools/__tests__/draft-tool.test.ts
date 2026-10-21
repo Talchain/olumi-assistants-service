@@ -22,11 +22,11 @@ const SID = 'scn_1';
 const LIVING: LivingModelT = {
   aims: [{ id: 'visitors_served', text: 'Visitors served on Saturdays', status: 'current', target: null, defined_as: null, source: 'olumi', party: null, quote: null }],
   options: [
-    { id: 'carry_on', label: 'Carry on as now', settings: [], developed_from: null, source: 'olumi', party: null, quote: null },
-    { id: 'add_assistant', label: 'Add a second assistant on Saturdays', developed_from: null, source: 'user', party: null, quote: 'add a second assistant on Saturdays',
+    { status: 'feasible', id: 'carry_on', label: 'Carry on as now', settings: [], developed_from: null, source: 'olumi', party: null, quote: null },
+    { status: 'feasible', id: 'add_assistant', label: 'Add a second assistant on Saturdays', developed_from: null, source: 'user', party: null, quote: 'add a second assistant on Saturdays',
       settings: [{ factor_id: 'assistants_on_shift', value: 2, low: null, high: null, unit: 'people', source: 'user', party: null, quote: 'add a second assistant on Saturdays' }] },
   ],
-  factors: [{ id: 'assistants_on_shift', label: 'Assistants on shift', value: 1, low: null, high: null, unit: 'people', defined_as: null, source: 'olumi', party: null, quote: null }],
+  factors: [{ kind: 'factor', limit: null, id: 'assistants_on_shift', label: 'Assistants on shift', value: 1, low: null, high: null, unit: 'people', defined_as: null, source: 'olumi', party: null, quote: null }],
   links: [{ id: 'assistants_visitors', from: 'assistants_on_shift', to: 'visitors_served', source: 'olumi', party: null, quote: null,
     effect: { form: 'direction_only', value: null, low: null, high: null, sd: null, unit: null, sign: '+' } }],
   risks: [], conditions: [], views: [{ holder: 'us', position: 'walk-ins swing a lot', quote: 'walk-ins swing a lot' }], history: [],
@@ -268,5 +268,37 @@ describe('refusals and unknowns, said as such', () => {
     // Codex #3551 R1: every other source (user, party, unverified) keeps only the direction it supplied; else null and ask.
     expect(link.description).toMatch(/For source user, party or unverified, preserve only the direction that source supplied\. If none was supplied, use sign null and form unknown, then ask\./);
     expect(link.description).toMatch(/Never put an Olumi-inferred direction under another source\./);
+  });
+});
+
+describe('the structure facts (21 Oct, advisory): never a refusal; said with the saved draft', () => {
+  it('a draft with gaps and no critic is saved at once, its gaps said with it', async () => {
+    const p = product({ graph: [EMPTY, MODEL], register: [SAVED], versions: [VERSIONS(true)] });
+    const out = await buildModel({ ...p, review: { done: false } }, ctx, ARGS);
+    expect(out).toMatchObject({ status: 'ok', mutated: true, data: { draft: { gaps: { goal_not_measurable: true, unreachable: [], risk_without_chance: [] } } } });
+  });
+});
+
+describe('the critic (21 Oct): a second model reviews the first draft of the turn, beside the structure check', () => {
+  const CRITIQUE = { measurable_goal: { quantity: 'visitors served', unit: 'visitors', horizon: 'per Saturday', why: 'the aim has no target' },
+    missing: [{ kind: 'risk' as const, label: 'Assistant calls in sick', reaches_goal_via: 'lowers assistants on shift', why_it_matters: 'one absence undoes the option' }],
+    connect: [], question: 'How many visitors do you need to serve on a Saturday?' };
+  it('first draft: refused with the critique and the gaps, nothing written, the critic read the brief and the draft; second: saved', async () => {
+    const review = { done: false };
+    const critique = vi.fn(async (_input: string) => CRITIQUE);
+    const p = product({ graph: [EMPTY, EMPTY, MODEL], register: [SAVED], versions: [VERSIONS(true)] });
+    const first = await buildModel({ ...p, review, critique }, ctx, ARGS);
+    expect(first).toMatchObject({ status: 'refused', reason: 'review_first', data: { critique: CRITIQUE, gaps: { goal_not_measurable: true } } });
+    expect(JSON.parse(critique.mock.calls[0]![0])).toMatchObject({ brief: BRIEF, draft: { aims: [{ id: 'visitors_served' }] } });
+    expect(registerCalls(p)).toEqual([]);
+    const second = await buildModel({ ...p, review, critique }, ctx, ARGS);
+    expect(second).toMatchObject({ status: 'ok', mutated: true });
+    expect(critique, 'the critic reads the first draft of the turn only').toHaveBeenCalledTimes(1);
+  });
+
+  it('CONTRAST: an unavailable critic never blocks the draft: it is saved at once', async () => {
+    const p = product({ graph: [EMPTY, MODEL], register: [SAVED], versions: [VERSIONS(true)] });
+    const out = await buildModel({ ...p, review: { done: false }, critique: async () => undefined }, ctx, ARGS);
+    expect(out).toMatchObject({ status: 'ok', mutated: true });
   });
 });

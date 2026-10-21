@@ -111,7 +111,7 @@ describe('Track 2 F1: a defined quantity reaches the engine as its definition, w
     await noChanceSent('missing-part-level', noEu, 'ORPHAN_NODE,NO_PATH_TO_GOAL');
     // A definition that leaves a part out: 20 customers elsewhere, total stated 170, but defined as UK + EU (150).
     const leftOut: LivingModelT = { ...F1_DEFINED, factors: [...F1_DEFINED.factors.map((f) => (f.id === 'total' ? { ...f, value: 170 } : f)),
-      { id: 'row', label: 'Customers elsewhere', value: 20, low: null, high: null, unit: 'customers', defined_as: null, source: 'user', party: null, quote: '20 elsewhere' }] };
+      { kind: 'factor', limit: null, id: 'row', label: 'Customers elsewhere', value: 20, low: null, high: null, unit: 'customers', defined_as: null, source: 'user', party: null, quote: '20 elsewhere' }] };
     expect(reasons(leftOut)).toEqual(expect.arrayContaining(['total:identity_inconsistent', 'rev:chance_rests_on_withheld']));
     await noChanceSent('missing-part', leftOut, 'ORPHAN_NODE,NO_PATH_TO_GOAL');
   });

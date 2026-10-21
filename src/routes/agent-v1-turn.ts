@@ -88,6 +88,7 @@ import { acquireCoreTurnSlot, CoreStateUnavailableError, runCoreTurn, type CoreT
 import { pathBTools } from '../orchestrator-v5/path-b/tools/index.js';
 import { APPLY_CHANGE, isChangeProposal } from '../orchestrator-v5/path-b/tools/change-tools.js';
 import { livingViewOf } from '../orchestrator-v5/path-b/living-model/view.js';
+import { modelCritic } from '../orchestrator-v5/agent-lane/core/model-critic.js';
 import { parseSelectedElements } from '../orchestrator-v5/boundary/request-extensions.js';
 import { agentSelectionContext, type AgentSelectionContext } from '../orchestrator-v5/agent-lane/selection-context.js';
 import type { AgentLaneMode, AgentToolContext, ToolResult } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
@@ -986,9 +987,17 @@ export const NOTE_ON_ITEM_INSTRUCTION = "When one item in the model most deserve
  * (p90 111) against arm A's 127 (p90 202).
  */
 const CORE_REPLY_SAVE_SENTENCE = 'So say, from this turn\u2019s tool results, what was saved, what was not saved and why, and any proposal that is waiting for the user\u2019s approval on its card. ';
+/**
+ * BULLETS FIRST, DETAIL ON REQUEST (Paul, 21 Oct, standing: "concise, action-oriented bullets as the first response, and then any
+ * additional context or guidance that is valuable under progressive disclosure"). The core reply takes Olumi's approved reply
+ * discipline VERBATIM from the served routing prompt (`Prompts/canonical/routing.txt`, <RESPONSE_DISCIPLINE>; pinned equal by
+ * core-prompt-arm.test.ts), in place of the prose-only sentence it replaces: a headline, at most three bold-led insight bullets,
+ * at most one question, about 130 words, and more detail offered in one clause, never unloaded unasked.
+ */
+export const CORE_RESPONSE_DISCIPLINE = "<RESPONSE_DISCIPLINE>\nTwo shapes; choose by turn type.\n\nSHARP SHAPE (factual lookup, state query, pre-action orientation): answer or orientation in plain language; the evidence that matters; at most one focused question or concrete next step. Lookups and state queries: 1 to 3 sentences. Pre-action orientation: 2 to 4 sentences.\n\nCOACHING SHAPE (explaining results, including every explanation answer sent alongside a tool call; challenging a choice, handling contradiction, surfacing risk, improving the model; the shape that defines Olumi quality):\n1. HEADLINE: one plain-language sentence naming the key finding. No raw numbers. Lead with the insight.\n2. AT MOST THREE INSIGHT BULLETS, each a single sentence: \"- **Bold lead phrase.** Observation in plain language, then the specific action the user can take.\" Every bullet pairs insight with a concrete, decision-specific action; never a second sentence inside a bullet;\n3. QUESTIONS: zero to three, most turns zero or one. Only what would change the next step, woven where each does its work, never stacked into a list.\n\nCoaching-shape rules: substantive coaching turns use bullets, not prose paragraphs; the whole response stays under about 130 words unless the user asks for depth; very short clarifications or simple answers stay concise. Bold each lead phrase. Plain language only; raw decimals and precise terminology stay out (see TERMINOLOGY_MAP). Possessive framing: \"your model\", \"your estimate\", \"your assumptions\". Pair every risk with what to do about it.\n\nDETAIL BEHIND THE SUMMARY: when materially more sits in view than the shape admits (full driver list, per-option figures, method), end by naming that more detail is available and offer it in one clause; never unload it unasked.\n\nAvoid: long introductions, generic frameworks, repeating the question, stacked or decorative questions, unactionable advice.\n</RESPONSE_DISCIPLINE>";
 export const CORE_REPLY_INSTRUCTION = CORE_REPLY_BEFORE_C.replace(CORE_REPLY_SAVE_SENTENCE,
-  'So say plainly what changed in their model, what was not saved and why, and any proposal that is waiting for the user\u2019s approval on its card, in the user\u2019s terms (their model, its items and its Run), never your tools or what a tool response did or did not contain. '
-  + 'Keep the whole reply short, usually under 100 words, in plain sentences without tables or headings, unless the user asks for more detail. ');
+  'So say plainly what changed in their model, what was not saved and why, and any proposal that is waiting for the user\u2019s approval on its card, in the user\u2019s terms (their model, its items and its Run), never your tools or what a tool response did or did not contain. ')
+  .replace('Write one coherent reply in a single voice: give the explanation first, mention what changed since the last Run only when it matters, and weave at most one next step from the current readiness facts into the prose, never as a separate bullet or receipt line and never asking for something the user has already said; ask at most one question per reply. ', `${CORE_RESPONSE_DISCIPLINE}\nIn this lane, ask at most one question per reply, and never ask for something the user has already said. `);
 /** The instructions for one call in this lane mode: unchanged outside `core`. */
 export function instructionsForMode(mode: AgentLaneMode, instructions: string, reply: string = CORE_REPLY_INSTRUCTION): string {
   return mode === 'core' ? `${instructions}\n\n${NOTE_ON_ITEM_INSTRUCTION}\n\n${reply}` : instructions;
@@ -4501,7 +4510,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const coreScenario = coreSaved !== undefined && (coreSaved.graph == null || livingView !== undefined);
         const core = await runCoreTurn({
           ctx: coreCtx, message, budget: coreBudget(coreEffortArmOf(mode, req.headers['x-olumi-core-effort'])), replyBudget: coreReplyBudget(), userId,
-          tools: (onCall) => pathBTools({ dispatch: capDispatch, proposals,
+          tools: (onCall) => pathBTools({ dispatch: capDispatch, proposals, critique: modelCritic(coreBudget()),
             proposeLinkStrengths: (c, a) => dispatchTool('propose_link_strengths', JSON.stringify(a), { ...coreCtx, ...c }, capabilities, mode),
             commitOptionLevels: commitOptionLevelsDoor, onModelRegistered: (raw) => emitGraphReady(raw),
             runAnalysis: (args) => restoreRun === undefined ? Promise.resolve({ ok: false, mutated: false, ran: false, refusal: 'run_failed' })

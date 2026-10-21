@@ -82,6 +82,7 @@ export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLa
   scenario: 'core' | 'legacy' = 'legacy'): Tool[] {
   let approvalApplied = false;
   const notes = { notes: 0 };
+  const review = { done: false };
   const record = (name: string, input: Record<string, unknown>, outcome: ToolOutcome, proposalId?: string): string => {
     const args = toolArgumentsAsSent(name, JSON.stringify(input), [ctx.user_turn_text ?? '', ...(ctx.verified_user_messages ?? [])]).arguments;
     const row = { ...traceRow(name, outcome), args };
@@ -114,7 +115,7 @@ export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLa
       name: BUILD_MODEL_FROM_BRIEF,
       description: TOOL_DESCRIPTIONS.build_model_from_brief,
       parameters: BuildModelParams,
-      execute: async (args) => record(BUILD_MODEL_FROM_BRIEF, args, await buildModel(deps, ctx, args)),
+      execute: async (args) => record(BUILD_MODEL_FROM_BRIEF, args, await buildModel({ ...deps, review }, ctx, args)),
       errorFunction: null,
     }),
     scenario === 'core' ? tool({

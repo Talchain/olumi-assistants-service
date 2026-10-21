@@ -19,11 +19,13 @@ export type ExplicitEdit =
   | { readonly kind: 'structural_rename'; readonly node_id: string; readonly label: string; readonly expected_label: string }
   | { readonly kind: 'structural_delete'; readonly removed_node_ids: readonly string[]; readonly removed_edges: readonly { readonly from: string; readonly to: string }[] }
   | { readonly kind: 'structural_add'; readonly node_id: string; readonly node_kind: string; readonly label: string }
-  | { readonly kind: 'structural_add_edge'; readonly from: string; readonly to: string; readonly magnitude: number; readonly effect_direction: 'positive' | 'negative' };
+  | { readonly kind: 'structural_add_edge'; readonly from: string; readonly to: string; readonly magnitude: number; readonly effect_direction: 'positive' | 'negative' }
+  | { readonly kind: 'prior_range_edit'; readonly target_id: string; readonly range_min: number; readonly range_max: number; readonly distribution?: string }
+  | { readonly kind: 'option_status_edit'; readonly option_node_id: string; readonly expected_status: 'feasible' | 'infeasible' | 'removed'; readonly status: 'feasible' | 'infeasible' | 'removed' };
 
 const EXPLICIT_EDIT_KINDS: ReadonlySet<string> = new Set([
   'factor_value_edit', 'option_intervention_edit', 'goal_target_edit', 'edge_strength_edit',
-  'structural_rename', 'structural_delete', 'structural_add', 'structural_add_edge',
+  'structural_rename', 'structural_delete', 'structural_add', 'structural_add_edge', 'prior_range_edit', 'option_status_edit',
 ]);
 
 /** A gesture this slice applies. The event's shape is the wire's own for its kind, already checked at ingress. */
@@ -66,7 +68,25 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       if (raw === undefined) return { refused: 'no_frame' };
       if (f !== undefined) Object.assign(f, { value: raw, ...noRange, unit: unit ?? edit.unit ?? null, ...theirs });
       else if (a!.target === null) return { refused: 'no_target' };
-      else a!.target = { ...a!.target, current: raw, current_source: 'user' };
+      else {
+        // Today's level keeps the unit the person gave it (Track 3 Q2-02: "30 %" on a goal with no target unit saved as a bare 30):
+        // `current_unit` when it differs from the target's unit, null when it is the same (the schema's own rule).
+        const levelUnit = edit.unit ?? a!.target.current_unit;
+        a!.target = { ...a!.target, current: raw, current_source: 'user', current_unit: levelUnit === a!.target.unit ? null : levelUnit };
+      }
+      return { model: m };
+    }
+    case 'prior_range_edit': {
+      // A range on the model scale (the canvas's quick-set and Min/Max), kept as the factor's own low and high in the person's
+      // units; it replaces a single figure (a range was given, not a figure). Only a plain range: no other distribution.
+      const f = factor(edit.target_id);
+      if (f === undefined) return { refused: 'not_in_model' };
+      if (edit.distribution !== undefined && edit.distribution !== 'uniform') return { refused: 'distribution_not_in_slice' };
+      if (!(edit.range_min <= edit.range_max)) return { refused: 'range_inverted' };
+      const low = toRaw(f.id, edit.range_min);
+      const high = toRaw(f.id, edit.range_max);
+      if (low === undefined || high === undefined) return { refused: 'no_frame' };
+      Object.assign(f, { value: null, low, high, ...theirs });
       return { model: m };
     }
     case 'option_intervention_edit': {
@@ -121,18 +141,31 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       else m.links.push({ id: `${edit.from}__${edit.to}`, from: edit.from, to: edit.to, effect, ...theirs });
       return { model: m };
     }
+    case 'option_status_edit': {
+      // In or out of the comparison: a ruled-out option stays in the model and on the board (mapper: `retained_excluded`).
+      const o = m.options.find((x) => x.id === edit.option_node_id);
+      if (o === undefined) return { refused: 'not_in_model' };
+      // `infeasible` ↔ `removed` moves no analysis hash, so the status the person last saw is checked like a rename's label.
+      if (o.status !== edit.expected_status) return { refused: 'status_moved' };
+      if (o.status === edit.status) return { refused: 'no_change' };
+      // ⛔ No re-stamp: `source` also says whose the option's settings are (as for a rename).
+      o.status = edit.status;
+      return { model: m };
+    }
     case 'structural_rename': {
-      const item = aim(edit.node_id) ?? factor(edit.node_id) ?? m.options.find((o) => o.id === edit.node_id);
+      const item = aim(edit.node_id) ?? factor(edit.node_id) ?? m.options.find((o) => o.id === edit.node_id) ?? m.risks.find((r) => r.id === edit.node_id);
       if (item === undefined) return { refused: 'not_in_model' };
       const current = 'text' in item ? item.text : item.label;
       if (current !== edit.expected_label) return { refused: 'label_moved' };
       if ('text' in item) item.text = edit.label;
       else item.label = edit.label;
+      // ⛔ The author is NOT re-stamped: `source` also says whose FIGURES these are (a goal's starting level, a factor's value,
+      // a risk's chance), so a rename must never pass Olumi's estimate off as the person's (Codex R2 on the core-edit PR).
       return { model: m };
     }
     case 'structural_delete': {
       const gone = new Set(edit.removed_node_ids);
-      const known = new Set([...m.aims, ...m.options, ...m.factors].map((x) => x.id));
+      const known = new Set([...m.aims, ...m.options, ...m.factors, ...m.risks].map((x) => x.id));
       // The decision node is the mapper's own, redrawn on every regeneration: a delete of it was acknowledged, then redrawn (a
       // false "saved", Codex), so it is refused by name like any other edge or node Olumi draws.
       if ([...gone].some((id) => id.startsWith('decision_') && !known.has(id))) return { refused: 'node_is_generated' };
@@ -151,16 +184,25 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       if (edit.removed_edges.some(generated)) return { refused: 'link_is_generated' };
       m.aims = m.aims.filter((a) => !gone.has(a.id));
       m.factors = m.factors.filter((f) => !gone.has(f.id));
+      // A risk goes like a factor; a mitigation through a removed factor goes with that factor.
+      m.risks = m.risks.filter((r) => !gone.has(r.id)).map((r) => ({ ...r, mitigations: r.mitigations.filter((x) => !gone.has(x.factor_id)) }));
       m.options = m.options.filter((o) => !gone.has(o.id)).map((o) => ({ ...o, settings: o.settings.filter((s) => !gone.has(s.factor_id)) }));
       const drawnGone = new Set(edit.removed_edges.flatMap((e) => ownersOf(e.from, e.to)));
-      m.links = m.links.filter((l) => !gone.has(l.from) && !gone.has(l.to) && !pairGone(l) && !drawnGone.has(l));
-      m.conditions = m.conditions.map((c) => ({ ...c, applies_to: c.applies_to.filter((id) => !gone.has(id)) }));
+      const kept = m.links.filter((l) => !gone.has(l.from) && !gone.has(l.to) && !pairGone(l) && !drawnGone.has(l));
+      // A condition on a removed link goes with it, as one on a removed item does (Codex: no dangling reference).
+      const linkGone = new Set(m.links.filter((l) => !kept.includes(l)).map((l) => l.id));
+      m.links = kept;
+      m.conditions = m.conditions.map((c) => ({ ...c, applies_to: c.applies_to.filter((id) => !gone.has(id) && !linkGone.has(id)) }));
       return { model: m };
     }
     case 'structural_add': {
-      if ([...m.aims, ...m.options, ...m.factors].some((x) => x.id === edit.node_id)) return { refused: 'id_exists' };
-      if (edit.node_kind === 'factor') m.factors.push({ id: edit.node_id, label: edit.label, value: null, ...noRange, unit: null, defined_as: null, ...theirs });
-      else if (edit.node_kind === 'option') m.options.push({ id: edit.node_id, label: edit.label, settings: [], developed_from: null, ...theirs });
+      // Any id already in use: an item, a link, or a node the mapper draws (`decision_…`, a switch) (Codex).
+      if ([...m.aims, ...m.options, ...m.factors, ...m.risks, ...m.links].some((x) => x.id === edit.node_id)
+        || mapped.graph.nodes.some((n) => n.id === edit.node_id)) return { refused: 'id_exists' };
+      if (edit.node_kind === 'factor') m.factors.push({ id: edit.node_id, label: edit.label, kind: 'factor', value: null, ...noRange, unit: null, defined_as: null, limit: null, ...theirs });
+      else if (edit.node_kind === 'option') m.options.push({ id: edit.node_id, label: edit.label, settings: [], status: 'feasible', developed_from: null, ...theirs });
+      // A new risk has no chance yet: never guessed, so it is drawn and the analysis asks for one (mapper: risk_occurrence_unknown).
+      else if (edit.node_kind === 'risk') m.risks.push({ id: edit.node_id, label: edit.label, occurrence: { low: null, high: null }, horizon_months: null, mitigations: [], ...theirs });
       else return { refused: 'kind_not_in_slice' };
       return { model: m };
     }

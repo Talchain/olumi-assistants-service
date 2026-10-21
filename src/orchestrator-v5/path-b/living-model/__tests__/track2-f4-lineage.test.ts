@@ -24,7 +24,7 @@ const SCENARIO = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 
 /** The known-answer model plus "Push lite", a cheaper version of Push (f to 0.8), with or without its lineage. */
 const withLite = (developed_from: string | null, level = 0.8): LivingModelT => ({ ...KNOWN_ANSWER,
-  options: [...KNOWN_ANSWER.options, { id: 'push_lite', label: 'Push lite', developed_from, source: 'user', party: null, quote: 'a lighter push, f to 0.8',
+  options: [...KNOWN_ANSWER.options, { status: 'feasible', id: 'push_lite', label: 'Push lite', developed_from, source: 'user', party: null, quote: 'a lighter push, f to 0.8',
     settings: [{ factor_id: 'f', value: level, low: null, high: null, unit: null, source: 'user', party: null, quote: 'a lighter push, f to 0.8' }] }] });
 const PLAIN = withLite(null);
 const DEVELOPED = withLite('push');
