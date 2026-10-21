@@ -171,17 +171,6 @@ export const AMBIGUOUS_LABEL: unique symbol = Symbol('AMBIGUOUS_LABEL');
 export type LabelIndex = ReadonlyMap<string, string | typeof AMBIGUOUS_LABEL>;
 
 /**
- * Narrow override for a caller that already carries a typed canonical-identity
- * warrant. Generic single-word labels stay blocked by default because ordinary
- * prose cannot establish that a word such as "cost" names a model element.
- */
-export interface ProseEntityReferenceOptions {
-  readonly allowGenericSingleWordLabels?: boolean;
-  readonly genericAllowedIds?: ReadonlySet<string>;
-  readonly preferLongestMention?: boolean;
-}
-
-/**
  * Build the reverse `label → id` index from a forward `GraphNodeLookup`.
  * Duplicate normalised label → `AMBIGUOUS_LABEL`. Pure + deterministic.
  *
@@ -227,32 +216,21 @@ export function resolveLabelToId(index: LabelIndex, rawLabel: string): string | 
  * Uses the exact same normalisation, whole-phrase and over-match rails as the
  * resolver. It does not create a second label-matching authority.
  */
-export function hasAmbiguousProseEntityReferenceWithOptions(
+export function hasAmbiguousProseEntityReference(
   index: LabelIndex,
   prose: string,
-  options: ProseEntityReferenceOptions = {},
 ): boolean {
   const hay = normaliseForPhraseMatch(prose);
   if (hay.length === 0) return false;
   for (const [needle, resolved] of index) {
     if (resolved !== AMBIGUOUS_LABEL) continue;
     if (needle.length < LEVER_LABEL_MIN_LEN) continue;
-    if (
-      options.allowGenericSingleWordLabels !== true &&
-      !needle.includes(' ') &&
-      GENERIC_LEVER_TOKENS.has(needle)
-    ) continue;
+    if (!needle.includes(' ') && GENERIC_LEVER_TOKENS.has(needle)) continue;
     if (firstBoundedPhraseAt(hay, needle) >= 0) return true;
   }
   return false;
 }
 
-export function hasAmbiguousProseEntityReference(
-  index: LabelIndex,
-  prose: string,
-): boolean {
-  return hasAmbiguousProseEntityReferenceWithOptions(index, prose);
-}
 
 /**
  * 1.135 — scan LLM-authored prose for the graph node labels it NAMES and return
@@ -296,11 +274,10 @@ export function hasAmbiguousProseEntityReference(
  * Final tie-break is the original lookup order, so the result stays TOTAL and
  * DETERMINISTIC (never dependent on `Array.prototype.sort` stability).
  */
-export function resolveProseEntityRefsWithOptions(
+export function resolveProseEntityRefs(
   lookup: GraphNodeLookup,
   index: LabelIndex,
   prose: string,
-  options: ProseEntityReferenceOptions = {},
 ): readonly TargetRef[] {
   const hay = normaliseForPhraseMatch(prose);
   if (hay.length === 0) return [];
@@ -319,15 +296,8 @@ export function resolveProseEntityRefsWithOptions(
     // A bare generic single word ("cost") over-matches ordinary decision prose —
     // require a distinctive single word or a multi-word phrase (same rule as the
     // lever-naming guard's Finding-5 tempering).
-    if (
-      !needle.includes(' ') &&
-      GENERIC_LEVER_TOKENS.has(needle) &&
-      !(
-        options.allowGenericSingleWordLabels === true &&
-        options.genericAllowedIds?.has(ref.id) === true
-      )
-    ) continue;
-    let at = firstBoundedPhraseAt(hay, needle);
+    if (!needle.includes(' ') && GENERIC_LEVER_TOKENS.has(needle)) continue;
+    const at = firstBoundedPhraseAt(hay, needle);
     if (at < 0) continue;
     // Fail-closed on ambiguity: a duplicate normalised label resolves to
     // AMBIGUOUS_LABEL → link to neither node.
@@ -335,45 +305,19 @@ export function resolveProseEntityRefsWithOptions(
     if (resolved === undefined || resolved === AMBIGUOUS_LABEL) continue;
     if (seen.has(resolved)) continue;
     seen.add(resolved);
-    do {
-      matched.push({
-        ref: { id: ref.id, label: ref.label, kind: ref.kind },
-        at,
-        len: needle.length,
-        ordinal,
-      });
-      // A second standalone "Cost" must remain visible even when its first
-      // occurrence was nested inside "Engineering Build Cost".
-      at = options.preferLongestMention === true
-        ? firstBoundedPhraseAt(hay, needle, at + needle.length)
-        : -1;
-    } while (at >= 0);
+    matched.push({
+      ref: { id: ref.id, label: ref.label, kind: ref.kind },
+      at,
+      len: needle.length,
+      ordinal,
+    });
   }
   matched.sort(
     (a, b) => a.at - b.at || b.len - a.len || a.ordinal - b.ordinal,
   );
-  if (options.preferLongestMention !== true) return matched.map((m) => m.ref);
-  let coveredUntil = -1;
-  const visibleIds = new Set<string>();
-  const visible: TargetRef[] = [];
-  for (const match of matched) {
-    const end = match.at + match.len;
-    if (end <= coveredUntil) continue;
-    coveredUntil = end;
-    if (visibleIds.has(match.ref.id)) continue;
-    visibleIds.add(match.ref.id);
-    visible.push(match.ref);
-  }
-  return visible;
+  return matched.map((m) => m.ref);
 }
 
-export function resolveProseEntityRefs(
-  lookup: GraphNodeLookup,
-  index: LabelIndex,
-  prose: string,
-): readonly TargetRef[] {
-  return resolveProseEntityRefsWithOptions(lookup, index, prose);
-}
 
 // ============================================================================
 // ⭐⭐ THE THREE-STATE ANSWER — the load-bearing addition.

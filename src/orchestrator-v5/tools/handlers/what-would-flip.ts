@@ -61,7 +61,6 @@ import {
   resolveOptionCount,
 } from './no-op-helpers.js';
 import { composeWhatWouldFlipFallback } from './explanation-fallback.js';
-import { mapFallbackReason } from './diagnostics.js';
 import { runCounterfactualLens } from './whatif/run-counterfactual-lens.js';
 import { composeOptionTargetedFlipAnswer } from './whatif/compose-option-targeted-flip.js';
 import type { CounterfactualClient } from '../../../adapters/isl/counterfactual-client.js';
@@ -139,9 +138,6 @@ export function createWhatWouldFlipHandler(deps?: WhatWouldFlipHandlerDeps): Han
     // `buildBoundedFallbackCopyAndChips`; callers without a raw signal may
     // omit it (undefined → composer treats as "no raw signal" and falls
     // back to projected-band copy).
-    const explanation = invocation.explanation;
-    const sonnetValid = !!(explanation && explanation.answer_text_valid);
-
     // M1 (finish-line criterion 7) — OPTION-TARGETED ANSWER.
     //
     // When the current words name ONE option, or one canonical selected option
@@ -180,9 +176,7 @@ export function createWhatWouldFlipHandler(deps?: WhatWouldFlipHandlerDeps): Han
     const rawText =
       targeted !== null
         ? targeted.text
-        : sonnetValid
-          ? explanation!.answer_text
-          : composeWhatWouldFlipFallback(
+        : composeWhatWouldFlipFallback(
               invocation.analysisProjection,
               invocation.rawRobustness ?? null,
               invocation.flipSummary ?? null,
@@ -274,14 +268,11 @@ export function createWhatWouldFlipHandler(deps?: WhatWouldFlipHandlerDeps): Han
         // enum in `@talchain/schemas`; a dedicated `option_targeted` source
         // would be a cross-repo contract change, and `deterministic_fallback` is
         // already the true statement about who composed this string.)
-        answer_source:
-          targeted !== null || !sonnetValid ? 'deterministic_fallback' : 'sonnet',
+        answer_source: 'deterministic_fallback',
         // Unchanged: a fallback REASON only exists when Sonnet's text failed
         // validation. A targeted answer that displaced a VALID Sonnet answer has
         // no failure to report, and must not invent one.
-        fallback_reason: sonnetValid
-          ? null
-          : mapFallbackReason(explanation?.answer_validation_error),
+        fallback_reason: 'missing',
         answer_text_length: assistantText.length,
         // DERIVED from the same call that produced the text, never hand-set.
         // Carries `caveated`, not `stalenessPrefixed` — see the full note at the

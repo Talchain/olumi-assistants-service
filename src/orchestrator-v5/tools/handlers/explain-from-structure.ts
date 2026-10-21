@@ -48,7 +48,6 @@ import type {
 import { HandlerResultInvalidError } from '../handler-errors.js';
 import { resolveOptionCount } from './no-op-helpers.js';
 import { composeExplainFromStructureFallback } from './explanation-fallback.js';
-import { mapFallbackReason } from './diagnostics.js';
 
 export function createExplainFromStructureHandler(): HandlerFn {
   return async function explainFromStructureHandler(
@@ -67,21 +66,10 @@ export function createExplainFromStructureHandler(): HandlerFn {
     // populates answer_text for them). Pass `canRunAnalysis` so the
     // composer's next-step nudge stays grounded in the structural-
     // readiness signal — no nudge when the graph cannot yet support a run.
-    const explanation = invocation.explanation;
-    const sonnetValid = !!(explanation && explanation.answer_text_valid);
     const canRunAnalysis = invocation.analysisReady?.status === 'ready';
-    // A valid authored answer is licensed only when the router explicitly
-    // classified the question as the open-ended `general` arm; every other kind
-    // fails weak to the deterministic projection, so absence never bypasses the
-    // topology authority.
-    const mayUseAuthoredGeneralAnswer =
-      invocation.proposal?.structure_query?.kind === 'general';
-    const useSonnetAnswer = sonnetValid && mayUseAuthoredGeneralAnswer;
-    const assistantText = useSonnetAnswer
-      ? explanation!.answer_text
-      : composeExplainFromStructureFallback(invocation.structureProjection, {
-          canRunAnalysis,
-        });
+    const assistantText = composeExplainFromStructureFallback(invocation.structureProjection, {
+      canRunAnalysis,
+    });
 
     const fact: ExplainFromStructureHandlerFact = {
       fact_type: 'explain_from_structure',
@@ -89,10 +77,8 @@ export function createExplainFromStructureHandler(): HandlerFn {
       noop: true,
       result: {
         option_count: optionCount,
-        answer_source: useSonnetAnswer ? 'sonnet' : 'deterministic_fallback',
-        fallback_reason: useSonnetAnswer
-          ? null
-          : mapFallbackReason(explanation?.answer_validation_error),
+        answer_source: 'deterministic_fallback',
+        fallback_reason: 'missing',
         answer_text_length: assistantText.length,
       },
     };

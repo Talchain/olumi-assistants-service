@@ -73,11 +73,9 @@ import {
   resolveOptionCount,
 } from './no-op-helpers.js';
 import { composeExplainResultsFallback } from './explanation-fallback.js';
-import { mapFallbackReason } from './diagnostics.js';
 import { selectFragilityPriorityRow } from '../../../orchestrator/shared/fragile-edge-authority.js';
 import {
   composeStandaloneValidationPriority,
-  decideValidationBeat,
   isCleanDisplayLabel,
   type ValidationBeatDecision,
   type ValidationFragileEdge,
@@ -156,58 +154,29 @@ export function createExplainResultsHandler(): HandlerFn {
       };
     }
 
-    // Answer-carrying contract (post-Commit-3): the side-band validator's
-    // verdict drives whether to use Sonnet's answer_text or compose a
-    // deterministic fallback. The handler ALWAYS owns the entire
-    // user-visible string; the turn-executor forces suppress_orientation
-    // for explanation handlers, so any orientation Sonnet produced is
-    // ignored on the user side.
-    const explanation = invocation.explanation;
-    const sonnetValid = !!(explanation && explanation.answer_text_valid);
-
-    // V5-LANE-B-STRUCTURAL-01 — the "what to validate" beat (J1 hybrid).
-    // On the Sonnet-valid path the standalone beat is appended as a final
-    // paragraph, subject to the dedup guard (the free narrative may already
-    // state the validation priority). On the fallback path the beat is
-    // composed directly (no dedup — the deterministic narrative never
-    // states one) and placed by the composer before its closing nudge.
-    // Execute-verdict turns only; precondition/stale/missing/degraded copy
-    // above is untouched.
+    // The handler owns the whole user-visible string: the deterministic answer from the analysis projection.
+    // V5-LANE-B-STRUCTURAL-01: the "what to validate" beat is composed directly and placed by the composer before its
+    // closing nudge. Execute-verdict turns only; precondition/stale/missing/degraded copy above is untouched.
     const { fragileEdge, topDriverLabel } = selectValidationSignals(
       invocation.analysisProjection,
     );
-    let validationBeat: ValidationBeatDecision;
-    let rawText: string;
-    if (sonnetValid) {
-      const answerText = explanation!.answer_text;
-      validationBeat = decideValidationBeat({
-        answerText,
-        fragileEdge,
-        topDriverLabel,
-      });
-      rawText =
-        validationBeat.mechanism === 'appended'
-          ? `${answerText}\n\n${validationBeat.beat.text}`
-          : answerText;
-    } else {
-      const beat = composeStandaloneValidationPriority(fragileEdge, topDriverLabel);
-      validationBeat = beat
-        ? { mechanism: 'appended', beat }
-        : { mechanism: 'omitted', reason: 'no_renderable_signal' };
-      rawText = composeExplainResultsFallback(
-        invocation.analysisProjection,
-        beat?.text ?? null,
-        // Same robustness signal the what_would_flip fallback receives, so the
-        // two composers derive the near-tie verdict (incl. the raw
-        // `near_tie.is_tie` override) from identical inputs and never
-        // contradict. Populated for explanation handlers when the projection is
-        // prior-fact-sourced (turn-executor same-run guard); routed/request
-        // paths pass null and both composers fall back to margin-only.
-        invocation.rawRobustness ?? null,
-        // Same fact, same same-run guard as `rawRobustness` above.
-        invocation.defaultedAssumptions ?? null,
-      );
-    }
+    const beat = composeStandaloneValidationPriority(fragileEdge, topDriverLabel);
+    const validationBeat: ValidationBeatDecision = beat
+      ? { mechanism: 'appended', beat }
+      : { mechanism: 'omitted', reason: 'no_renderable_signal' };
+    const rawText = composeExplainResultsFallback(
+      invocation.analysisProjection,
+      beat?.text ?? null,
+      // Same robustness signal the what_would_flip fallback receives, so the
+      // two composers derive the near-tie verdict (incl. the raw
+      // `near_tie.is_tie` override) from identical inputs and never
+      // contradict. Populated for explanation handlers when the projection is
+      // prior-fact-sourced (turn-executor same-run guard); routed/request
+      // paths pass null and both composers fall back to margin-only.
+      invocation.rawRobustness ?? null,
+      // Same fact, same same-run guard as `rawRobustness` above.
+      invocation.defaultedAssumptions ?? null,
+    );
 
     // ⚠⚠ THIS COMMENT PREVIOUSLY ASSERTED THE OPPOSITE, AND THE NARROWING
     // FALSIFIED ITS PREMISE. It read: "When we reach THIS branch — verdict ===
@@ -237,10 +206,8 @@ export function createExplainResultsHandler(): HandlerFn {
       result: {
         precondition_unmet: false,
         option_count: optionCount,
-        answer_source: sonnetValid ? 'sonnet' : 'deterministic_fallback',
-        fallback_reason: sonnetValid
-          ? null
-          : mapFallbackReason(explanation?.answer_validation_error),
+        answer_source: 'deterministic_fallback',
+        fallback_reason: 'missing',
         answer_text_length: assistantText.length,
         // DERIVED from the same call that produced the text, never hand-set.
         //
