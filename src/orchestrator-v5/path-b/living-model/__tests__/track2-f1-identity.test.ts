@@ -237,6 +237,9 @@ describe('Track 2 F1: a defined quantity reaches the engine as its definition, w
     const del = (removed_node_ids: string[], removed_edges: { from: string; to: string }[]) =>
       applyExplicitEdit(F1_DEFINED, { kind: 'structural_delete', removed_node_ids, removed_edges }, 'rev');
     expect(del([], [{ from: 'uk', to: 'total' }])).toEqual({ refused: 'link_is_definition' });
+    // Codex: a stored link restating the definition removes only itself; the definition redraws the edge, so it is refused too.
+    expect(applyExplicitEdit(F1_RESTATED, { kind: 'structural_delete', removed_node_ids: [], removed_edges: [{ from: 'uk', to: 'total' }] }, 'rev'))
+      .toEqual({ refused: 'link_is_definition' });
     // CONTROL: an ordinary stated link is deleted as before.
     const plain = applyExplicitEdit(KNOWN_ANSWER, { kind: 'structural_delete', removed_node_ids: [], removed_edges: [{ from: 'f', to: 'g' }] });
     expect('model' in plain && plain.model.links.map((l) => l.id)).toEqual([]);

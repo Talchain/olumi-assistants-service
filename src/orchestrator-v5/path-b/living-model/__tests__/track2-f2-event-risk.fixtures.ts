@@ -89,3 +89,6 @@ export const PERCENT_PREVENTER: LivingModelT = { ...supplier('point'),
   factors: [{ ...supplier('point').factors[0]!, unit: '%' }],
   options: [supplier('point').options[0]!, { ...supplier('point').options[1]!,
     settings: [{ factor_id: 'dual_sourcing', value: 1, low: null, high: null, unit: '%', ...who('dual-source the part') }] }] };
+/** NEGATIVE (served F2, CEE f51249ba): any unit says a quantity, even one whose frame happens to be 1, so the switch is refused. */
+export const UNIT_TEXT_PREVENTER: LivingModelT = { ...supplier('point'),
+  factors: [{ ...supplier('point').factors[0]!, unit: '0 = not in place; 1 = in place' }] };

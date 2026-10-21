@@ -23,7 +23,7 @@ import { mapLivingModel } from '../mapper.js';
 import { KNOWN_ANSWER } from './fixtures.js';
 import {
   CASCADE, CERTAIN_WITHIN_WINDOW, COSTED_HALF_SWITCH, COSTED_SWITCH, COSTED_SWITCH_IN_PLACE, COSTED_SWITCH_TWO_OPTIONS, HALF_MITIGATION, NO_CHANCE, NO_WINDOW, OLUMI_CHANCE, OLUMI_MITIGATION,
-  PERCENT_PREVENTER, SHARED_PREVENTER, UNATTRIBUTED, UNVERIFIED_MITIGATION, supplier,
+  PERCENT_PREVENTER, SHARED_PREVENTER, UNATTRIBUTED, UNIT_TEXT_PREVENTER, UNVERIFIED_MITIGATION, supplier,
 } from './track2-f2-event-risk.fixtures.js';
 
 type Rec = Record<string, any>;
@@ -132,6 +132,7 @@ describe('Track 2 F2: an event risk reaches the engine as event_risk.v1, with it
   it('NEGATIVE (buddy r1): a switch preventing two risks, or a switch in %, is refused by name before ISL sees it', async () => {
     expect(reasons(SHARED_PREVENTER)).toEqual(expect.arrayContaining(['supplier_fails:risk_not_in_slice', 'port_strike:risk_not_in_slice']));
     expect(reasons(PERCENT_PREVENTER)).toEqual(expect.arrayContaining(['supplier_fails:risk_not_in_slice', 'gp:chance_rests_on_withheld']));
+    expect(reasons(UNIT_TEXT_PREVENTER)).toEqual(expect.arrayContaining(['supplier_fails:risk_not_in_slice', 'gp:chance_rests_on_withheld']));
     await noChanceSent('shared-preventer', SHARED_PREVENTER, 'NO_PATH_TO_GOAL');
     await noChanceSent('percent-preventer', PERCENT_PREVENTER, 'NO_PATH_TO_GOAL');
   });
@@ -265,6 +266,12 @@ describe('Track 2 F2: an event risk reaches the engine as event_risk.v1, with it
   });
   it('a canvas delete of a mitigation\'s edge is refused by name, never acknowledged and redrawn', () => {
     expect(applyExplicitEdit(supplier('point'), { kind: 'structural_delete', removed_node_ids: [],
+      removed_edges: [{ from: 'dual_sourcing', to: 'supplier_fails' }] })).toEqual({ refused: 'link_is_mitigation' });
+    // Codex: a stored link on the same edge removes only itself; the mitigation redraws the edge, so it is refused too.
+    const restated: LivingModelT = { ...supplier('point'), links: [...supplier('point').links,
+      { id: 'ds_fails', from: 'dual_sourcing', to: 'supplier_fails', source: 'user', party: null, quote: 'dual-sourcing makes failure less likely',
+        effect: { form: 'direction_only', value: null, low: null, high: null, sd: null, unit: null, sign: '-' } }] };
+    expect(applyExplicitEdit(restated, { kind: 'structural_delete', removed_node_ids: [],
       removed_edges: [{ from: 'dual_sourcing', to: 'supplier_fails' }] })).toEqual({ refused: 'link_is_mitigation' });
     // CONTROL: what the event does if it happens is an ordinary stated link, deleted as before.
     const sev = applyExplicitEdit(supplier('point'), { kind: 'structural_delete', removed_node_ids: [], removed_edges: [{ from: 'supplier_fails', to: 'gp' }] });
