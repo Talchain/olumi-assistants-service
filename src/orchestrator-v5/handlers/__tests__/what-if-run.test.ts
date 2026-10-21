@@ -121,12 +121,12 @@ describe('the real variant path: a what-if draws the saved Run\'s samples and wr
 const stored = () => ({ ...mapLivingModel(structuredClone(KNOWN_ANSWER)).graph, living_model: structuredClone(KNOWN_ANSWER) });
 const BASE = computeExpectedGraphCasHashes(stored()).expectedGraphAnalysisHash as string;
 it('PRECONDITION: the saved fixture has an analysis hash, so the stale rows test a real comparison', () => expect(BASE).toMatch(/\S/));
-const chance = (display: string, pct: number | null = 42): StressChance => ({ display, pct, provisional: false, not_shown: null });
+const chance = (display: string): StressChance => ({ display, pct: 42, provisional: false, not_shown: null });
 const VALUE = { kind: 'factor_value_edit', target_id: 'f', value: 0.7, raw_value: 0.7 };
 const LINK = { kind: 'edge_strength_edit', from: 'f', to: 'g', magnitude: 0.2, direction_intent: 'preserve', base_graph_hash: BASE };
 
 /** A fake PLoT run: each call's graph is recorded; `f`'s value decides the display, so a change is visible by identity. */
-function fakeRun(seeds: (string | null)[] = [], opts: { pushPct?: (number | null)[]; n?: number | null } = {}) {
+function fakeRun(seeds: (string | null)[] = []) {
   const calls: { graph: Rec; seed: unknown }[] = [];
   const run = vi.fn(async (p: { variantGraph: Rec; seed?: number }) => {
     calls.push({ graph: p.variantGraph, seed: p.seed });
@@ -134,9 +134,8 @@ function fakeRun(seeds: (string | null)[] = [], opts: { pushPct?: (number | null
     // graph under an edited living model must not pass).
     const f = (p.variantGraph.nodes as Rec[]).find((n) => n.id === 'f')!.observed_state.value;
     const strength = Math.round((p.variantGraph.edges as Rec[]).find((e) => e.from === 'f' && e.to === 'g')!.strength.mean * 100) / 100;
-    const pushPct = opts.pushPct === undefined ? 42 : opts.pushPct[calls.length - 1] ?? null;
-    return { kind: 'rows' as const, seedUsed: calls.length <= seeds.length ? seeds[calls.length - 1]! : 'seed-a', nSamples: opts.n === undefined ? 10000 : opts.n,
-      rows: new Map([['push', chance(`push f=${f} s=${strength}`, pushPct)], ['hold', chance('hold')]]) };
+    return { kind: 'rows' as const, seedUsed: calls.length <= seeds.length ? seeds[calls.length - 1]! : 'seed-a',
+      rows: new Map([['push', chance(`push f=${f} s=${strength}`)], ['hold', chance('hold')]]) };
   });
   return { run, calls };
 }
@@ -161,7 +160,6 @@ describe('runWhatIf: the canvas gestures, held, applied to a COPY and run beside
     expect(v).toMatchObject({ change_index: 'all', paired: true });
     expect(v.options.find((o: Rec) => o.option_id === 'push')).toEqual({
       option_id: 'push', saved: { display: 'push f=0.5 s=0.4', provisional: false, not_shown: null }, what_if: { display: 'push f=0.7 s=0.4', provisional: false, not_shown: null },
-      variation: 'within_ordinary_variation',
     });
     expect(JSON.stringify(out)).not.toContain('"pct"');
     expect(row, 'the saved row is never mutated').toEqual(before);
@@ -205,7 +203,7 @@ describe('runWhatIf: the canvas gestures, held, applied to a COPY and run beside
 
   it('a cell with neither a figure nor the Run\'s reason says why; an option missing from one run says so (Codex #3591)', async () => {
     const run = vi.fn(async (p: { variantGraph: Rec }) => ({
-      kind: 'rows' as const, seedUsed: 's', nSamples: 10000,
+      kind: 'rows' as const, seedUsed: 's',
       rows: (p.variantGraph.nodes as Rec[]).find((n) => n.id === 'f')!.observed_state.value === 0.5
         ? new Map([['push', { display: null, pct: null, provisional: false, not_shown: null }], ['hold', chance('hold')]])
         : new Map([['push', chance('push')]]),
@@ -228,25 +226,5 @@ describe('runWhatIf: the canvas gestures, held, applied to a COPY and run beside
     const out = await runWhatIf(ask([{ kind: 'factor_value_edit', target_id: 'nope', value: 0.3 }, VALUE]), { loadSaved: async () => ({ graph: stored() }), run: run as never });
     expect(out).toMatchObject({ kind: 'ran', changes_applied: [{ index: 1 }] });
     expect((out as Rec).changes_refused).toEqual([{ index: 0, reason: expect.any(String) }]);
-  });
-});
-
-describe('beyond ordinary variation: CEE judges it on the figures the user sees, allowing for their rounding', () => {
-  const variation = async (pushPct: (number | null)[], n: number | null = 10000) => {
-    const { run } = fakeRun([], { pushPct, n });
-    const out = await runWhatIf(ask([VALUE]), { loadSaved: async () => ({ graph: stored() }), run: run as never });
-    return (out as Rec).variants[0].options.find((o: Rec) => o.option_id === 'push').variation;
-  };
-  it.each([
-    ['40% → 60% on 10,000 draws', [40, 60], 10000, 'beyond_ordinary_variation'],
-    ['60% → 40% (a fall is judged the same way)', [60, 40], 10000, 'beyond_ordinary_variation'],
-    ['50% → 50%', [50, 50], 10000, 'within_ordinary_variation'],
-    ['50% → 51%: beyond or not depends on the rounding, so not judged', [50, 51], 10000, 'not_judged'],
-    ['40% → 60% on only 40 draws: two standard errors (0.22) cover the move', [40, 60], 40, 'within_ordinary_variation'],
-    ['40% → 60% on 10 draws: too few events for the test at all', [40, 60], 10, 'not_judged'],
-    ['a withheld chance on one side', [40, null], 10000, 'not_judged'],
-    ['no sample count from PLoT', [40, 60], null, 'not_judged'],
-  ])('%s → %s', async (_, pcts, n, expected) => {
-    expect(await variation(pcts as (number | null)[], n as number | null)).toBe(expected);
   });
 });

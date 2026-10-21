@@ -23,7 +23,6 @@ import { applyExplicitEdit, type ExplicitEdit } from '../path-b/living-model/edi
 import { goalIdOf, mapLivingModel, savedGoal } from '../path-b/living-model/mapper.js';
 import { livingViewOf } from '../path-b/living-model/view.js';
 import type { StressChance } from '../path-b/tools/stress-tool.js';
-import { noiseVerdictForProportions } from '../coaching/win-probability-noise-band.js';
 import { runVariant, type StressVariantParams, type VariantRun } from './stress-variant-run.js';
 
 /** The value gestures a what-if holds. Structural edits, renames, goal and status changes are not what-ifs. */
@@ -34,14 +33,11 @@ const isWhatIf = (c: Rec): c is Rec & ExplicitEdit => typeof c.kind === 'string'
 type Cell = Omit<StressChance, 'pct'>;
 export type WhatIfTarget = { readonly node_id: string } | { readonly from: string; readonly to: string };
 
-/** Whether an option's chance moved beyond ordinary run-to-run variation, judged by CEE so the UI never works it out. */
-export type WhatIfVariation = 'beyond_ordinary_variation' | 'within_ordinary_variation' | 'not_judged';
-
 export interface WhatIfVariant {
   readonly change_index: number | 'all';
   /** The what-if and the saved model drew the same samples (PLoT's seed echoes are equal). Else not like-for-like. */
   readonly paired: boolean;
-  readonly options: readonly { readonly option_id: string; readonly saved: Cell; readonly what_if: Cell; readonly variation: WhatIfVariation }[];
+  readonly options: readonly { readonly option_id: string; readonly saved: Cell; readonly what_if: Cell }[];
 }
 
 export type WhatIfResult =
@@ -72,23 +68,6 @@ function targetOf(edit: ExplicitEdit): WhatIfTarget {
 /** A cell with neither a figure nor the Run's reason says why itself: never a blank the user must interpret (Codex #3591). */
 const cellOf = ({ pct: _figure, ...shown }: StressChance): Cell =>
   shown.display === null && shown.not_shown === null ? { ...shown, not_shown: 'no_result_for_this_option' } : shown;
-
-/**
- * The Run-delta noise test (`noiseVerdictForProportions`: two proportions, 2 standard errors), on the figures the user SEES
- * (the licence's whole percentages, never a re-derived probability). A shown figure is rounded, so the verdict must hold at
- * both ends of the rounding: beyond only if still beyond with the two pulled half a point together, within only if still
- * within with them pushed half a point apart; else not judged. It treats the runs as independent samples; on paired draws
- * that is conservative (a "beyond" stands; a small real change may read as within). No shown chance on either side, or no
- * sample count, is not judged.
- */
-function variationOf(saved: StressChance | undefined, whatIf: StressChance | undefined, nSaved: number | null, nWhatIf: number | null): WhatIfVariation {
-  if (saved?.pct == null || whatIf?.pct == null || nSaved === null || nWhatIf === null) return 'not_judged';
-  const [a, b] = [saved.pct / 100, whatIf.pct / 100];
-  const half = 0.005 * (Math.sign(b - a) || 1);
-  const clamp = (v: number) => Math.min(1, Math.max(0, v));
-  if (Math.abs(b - a) > 0.01 && noiseVerdictForProportions(a + half, b - half, nSaved, nWhatIf) === 'signal') return 'beyond_ordinary_variation';
-  return noiseVerdictForProportions(clamp(a - half), clamp(b + half), nSaved, nWhatIf) === 'within_noise' ? 'within_ordinary_variation' : 'not_judged';
-}
 const NOT_SHOWN: Cell = { display: null, provisional: false, not_shown: 'not_in_this_run' };
 
 export async function runWhatIf(
@@ -152,7 +131,6 @@ export async function runWhatIf(
         option_id,
         saved: baseline.rows.has(option_id) ? cellOf(baseline.rows.get(option_id)!) : NOT_SHOWN,
         what_if: result.rows.has(option_id) ? cellOf(result.rows.get(option_id)!) : NOT_SHOWN,
-        variation: variationOf(baseline.rows.get(option_id), result.rows.get(option_id), baseline.nSamples, result.nSamples),
       })),
     });
   }
