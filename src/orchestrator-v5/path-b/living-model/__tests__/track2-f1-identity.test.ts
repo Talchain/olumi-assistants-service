@@ -18,6 +18,7 @@ import { createRunAnalysisHandler } from '../../../tools/handlers/run-analysis.j
 import { BuildModelParams } from '../../tools/draft-tool.js';
 import { linkDefaultAssumptionsOf } from '../../../../cee/magnitude/link-default-assumptions.js';
 import { goalChanceEstimateCounts } from '../../../agent-lane/goal-chance-estimate-attribution.js';
+import { applyExplicitEdit } from '../edit.js';
 import { applyKernel } from '../kernel.js';
 import { mapLivingModel } from '../mapper.js';
 import { KNOWN_ANSWER } from './fixtures.js';
@@ -219,5 +220,19 @@ describe('Track 2 F1: a defined quantity reaches the engine as its definition, w
     const olumis = parts(F1_OLUMI_READING).filter((e) => e.to === 'rev');
     expect(olumis.map((e) => [e.exists_probability, e.provenance.magnitude])).toEqual([[1, 'olumi_estimate'], [1, 'olumi_estimate']]);
     expect((mapLivingModel(F1_OLUMI_READING).graph.nodes as Rec[]).find((n) => n.id === 'rev')!.nonlinear_identity.stated_in_brief).toBe(false);
+  });
+  // Codex integration review (21 Oct), item 2: the canvas delete of a definition's edge was acknowledged, then redrawn
+  // from `defined_as` on regeneration: a false "saved". It is refused by name; the model is unchanged.
+  it('a canvas delete of a definition\'s edge is refused by name, never acknowledged and redrawn', () => {
+    const del = (removed_node_ids: string[], removed_edges: { from: string; to: string }[]) =>
+      applyExplicitEdit(F1_DEFINED, { kind: 'structural_delete', removed_node_ids, removed_edges }, 'rev');
+    expect(del([], [{ from: 'uk', to: 'total' }])).toEqual({ refused: 'link_is_definition' });
+    // CONTROL: an ordinary stated link is deleted as before.
+    const plain = applyExplicitEdit(KNOWN_ANSWER, { kind: 'structural_delete', removed_node_ids: [], removed_edges: [{ from: 'f', to: 'g' }] });
+    expect('model' in plain && plain.model.links.map((l) => l.id)).toEqual([]);
+    // CONTROL: deleting the part itself applies, and the definition that names it is then refused by name, never redrawn.
+    const noEu = del(['eu'], [{ from: 'eu', to: 'total' }]);
+    expect('model' in noEu).toBe(true);
+    if ('model' in noEu) expect(mapLivingModel(noEu.model, { goal: 'rev' }).withheld).toContainEqual({ id: 'total', reason: 'identity_not_in_slice' });
   });
 });

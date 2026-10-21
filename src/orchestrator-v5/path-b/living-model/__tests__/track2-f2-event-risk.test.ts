@@ -17,6 +17,7 @@ import { BuildModelParams } from '../../tools/draft-tool.js';
 import { diffLivingModels } from '../diff.js';
 import { linkDefaultAssumptionsOf } from '../../../../cee/magnitude/link-default-assumptions.js';
 import { goalChanceEstimateCounts } from '../../../agent-lane/goal-chance-estimate-attribution.js';
+import { applyExplicitEdit } from '../edit.js';
 import { applyKernel } from '../kernel.js';
 import { mapLivingModel } from '../mapper.js';
 import { KNOWN_ANSWER } from './fixtures.js';
@@ -195,5 +196,12 @@ describe('Track 2 F2: an event risk reaches the engine as event_risk.v1, with it
     expect(relabelled).toContainEqual({ id: 'supplier_fails:dual_sourcing', was: 'user' });
     // CONTROL: words the brief does hold keep the reduction the person's.
     expect(applyKernel(supplier('point'), [RISK_WORDS_FOR_KERNEL]).model.risks[0]!.mitigations[0]!.source).toBe('user');
+  });
+  it('a canvas delete of a mitigation\'s edge is refused by name, never acknowledged and redrawn', () => {
+    expect(applyExplicitEdit(supplier('point'), { kind: 'structural_delete', removed_node_ids: [],
+      removed_edges: [{ from: 'dual_sourcing', to: 'supplier_fails' }] })).toEqual({ refused: 'link_is_mitigation' });
+    // CONTROL: what the event does if it happens is an ordinary stated link, deleted as before.
+    const sev = applyExplicitEdit(supplier('point'), { kind: 'structural_delete', removed_node_ids: [], removed_edges: [{ from: 'supplier_fails', to: 'gp' }] });
+    expect('model' in sev && sev.model.links.map((l) => l.id)).toEqual(['cost_gp']);
   });
 });

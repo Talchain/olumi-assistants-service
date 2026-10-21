@@ -122,6 +122,12 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       // The decision node is the mapper's own; removing it alone changes nothing the model holds.
       if ([...gone].some((id) => !known.has(id) && !id.startsWith('decision_'))) return { refused: 'not_in_model' };
       const pairGone = (l: { from: string; to: string }) => edit.removed_edges.some((e) => e.from === l.from && e.to === l.to);
+      // A definition's parts and a risk's mitigations are drawn from the item itself, not from a link: deleting that edge
+      // alone would be acknowledged, then redrawn on regeneration (a false "saved"). Removing a part changes what the
+      // quantity IS, which an edge delete does not say, so it is refused by name (codex integration review, 21 Oct).
+      const standing = (e: { from: string; to: string }) => !gone.has(e.from) && !gone.has(e.to) && pairGone(e);
+      if ([...m.aims, ...m.factors].some((x) => (x.defined_as?.of ?? []).some((p) => standing({ from: p, to: x.id })))) return { refused: 'link_is_definition' };
+      if (m.risks.some((r) => r.mitigations.some((x) => standing({ from: x.factor_id, to: r.id })))) return { refused: 'link_is_mitigation' };
       m.aims = m.aims.filter((a) => !gone.has(a.id));
       m.factors = m.factors.filter((f) => !gone.has(f.id));
       m.options = m.options.filter((o) => !gone.has(o.id)).map((o) => ({ ...o, settings: o.settings.filter((s) => !gone.has(s.factor_id)) }));
