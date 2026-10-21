@@ -35,16 +35,23 @@ export const CRITIC_INSTRUCTIONS = [
   'Never give a figure or a chance, never credit anything to the person they did not say, and never repeat what the draft already holds.',
 ].join(' ');
 
-/** The critic for one turn: undefined when the call fails, so a draft is never blocked by its reviewer. */
-export function modelCritic(budget: CallBudget): (input: string) => Promise<CritiqueT | undefined> {
+/** Bounded (Codex + buddy SIMPLER, #3567): one model call, a short structured answer, and a deadline, so a stalled reviewer
+ *  never delays the first model by more than this. */
+export const CRITIC_DEADLINE_MS = 45_000;
+export const CRITIC_MAX_OUTPUT_TOKENS = 2_000;
+
+/** The critic for one turn: undefined when the call fails or runs out of time, so a draft is never blocked by its reviewer. */
+export function modelCritic(budget: CallBudget, signal?: AbortSignal): (input: string) => Promise<CritiqueT | undefined> {
   return async (input) => {
     try {
       const client = ledgeredAgentsClient({ site: 'agent-core.critic', pending: [],
         detailOf: (body) => ({ model: budget.model, purpose: 'model_critique', ...agentRequestIdentity('agent.critique', body) }) });
       const critic = new Agent({ name: 'model_critic', instructions: CRITIC_INSTRUCTIONS, outputType: Critique,
         model: new OpenAIResponsesModel(client, budget.model),
-        modelSettings: { maxTokens: budget.max_output_tokens, reasoning: { effort: 'medium' } } });
-      const parsed = Critique.safeParse((await run(critic, input)).finalOutput);
+        modelSettings: { maxTokens: CRITIC_MAX_OUTPUT_TOKENS, reasoning: { effort: 'medium' } } });
+      const deadline = AbortSignal.timeout(CRITIC_DEADLINE_MS);
+      const result = await run(critic, input, { maxTurns: 1, signal: signal === undefined ? deadline : AbortSignal.any([signal, deadline]) });
+      const parsed = Critique.safeParse(result.finalOutput);
       return parsed.success ? parsed.data : undefined;
     } catch {
       return undefined;
