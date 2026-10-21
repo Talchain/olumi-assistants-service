@@ -174,7 +174,7 @@ describe('a condition is corrected through a proposal the person approves, and k
     expect(goal(p.saved())).not.toHaveProperty('goal_threshold_raw');
     const id = String((out as { data: Rec }).data.proposal_id);
     // Codex r1 on #3576: this turn's words do not state the change, so the kept condition carries no one's words.
-    expect(proposals.get(id)!.living_model!.history).toEqual([{ id: 'condition', change: 'superseded', old: JSON.stringify(gated().conditions[0]), quote: null }]);
+    expect((proposals.get(id)!.living_model as LivingModelT).history).toEqual([{ id: 'condition', change: 'superseded', old: JSON.stringify(gated().conditions[0]), quote: null }]);
     expect(await applyLivingChange({ dispatch: p.dispatch, proposals }, { ...said, authenticated_user_id: 'user-b' }, id))
       .toMatchObject({ status: 'refused', reason: 'not_authorised' });
     expect(p.registered).toHaveLength(0);
@@ -187,7 +187,7 @@ describe('a condition is corrected through a proposal the person approves, and k
     const forged = { ...resolved(), history: [{ id: 'condition', change: 'superseded' as const, old: JSON.stringify(gated().conditions[0]),
       quote: 'I withdraw the supplier prerequisite.' }] };
     const out = await proposeLivingChange({ dispatch: p.dispatch, proposals }, said, args(forged));
-    const history = proposals.get(String((out as { data: Rec }).data.proposal_id))!.living_model!.history;
+    const history = (proposals.get(String((out as { data: Rec }).data.proposal_id))!.living_model as LivingModelT).history;
     expect(history).toEqual([{ id: 'condition', change: 'superseded', old: JSON.stringify(gated().conditions[0]), quote: OBTAINED }]);
   });
 });
