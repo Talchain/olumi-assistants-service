@@ -15,7 +15,7 @@ export interface Relabelled { readonly id: string; readonly was: LivingSourceT }
 export interface Kernelled { readonly model: LivingModelT; readonly relabelled: readonly Relabelled[] }
 
 /** Whitespace, case and typographic quote marks never decide whether words are the person's own. */
-const plain = (s: string): string => s.replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/\s+/g, ' ').trim().toLowerCase();
+export const plain = (s: string): string => s.replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/\s+/g, ' ').trim().toLowerCase();
 
 function canonicalIds(model: LivingModelT): LivingModelT {
   const seen = new Set<string>();

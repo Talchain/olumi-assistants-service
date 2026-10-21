@@ -3,8 +3,8 @@
  *  · `propose_change` carries the COMPLETE proposed living model. Olumi labels its attribution (the kernel), says exactly
  *    what it changes, item by item (`diffLivingModels`), and what the engine graph would withhold, and changes nothing.
  *    A removal is never implied by an omission: every removed item must be named in `remove` (the card shows only its
- *    label, so an unnamed removal would be approved unseen); a removed condition is kept in history, and a view or
- *    history entry is never removed here;
+ *    label, so an unnamed removal would be approved unseen); a removed condition, or a view replaced by its
+ *    holder's new one, is kept in history; any other view, and a history entry, is never removed here;
  *  · `apply_change`, on the person's approval of THAT proposal, writes the model and the graph regenerated from it as ONE
  *    core write on the proposal's base (CAS). A model that moved since is `superseded`, never overwritten; this operation's
  *    own earlier save is reported as already saved, never repeated; an unverifiable save stays UNKNOWN.
@@ -14,7 +14,7 @@ import type { AgentToolContext } from '../../agent-lane/runtime/agent-tools.js';
 import type { InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
 import { createProposal, type ProposalOperation, type ProposalStore, type StructuredProposal } from '../../agent-lane/proposal.js';
 import { LivingModel, type LivingModelT } from '../../../schemas/living-model.js';
-import { applyKernel } from '../living-model/kernel.js';
+import { applyKernel, plain } from '../living-model/kernel.js';
 import { mapLivingModel, savedGoal } from '../living-model/mapper.js';
 import { diffLivingModels, stable, type LivingChange } from '../living-model/diff.js';
 import { livingViewOf } from '../living-model/view.js';
@@ -64,20 +64,36 @@ export async function proposeLivingChange(deps: Deps, ctx: Ctx, args: LivingChan
   // r6 on #3522): its removal is a row on the card the person approves, and the host keeps it in history. The quote is the
   // person's own words for the change: a replacement THEY stated (kernel-verified) on the same items, else null. Never this
   // turn's other words, and never a history entry the AI wrote for it (Codex r1 on #3576).
-  const proposed = diffLivingModels(base.model, kernelled.model).filter((c) => c.kind === 'condition');
-  const gone = proposed.filter((c) => c.change === 'remove').map((c) => c.before as LivingModelT['conditions'][number]);
-  const added = proposed.filter((c) => c.change === 'add').map((c) => c.after as LivingModelT['conditions'][number]);
+  const proposed = diffLivingModels(base.model, kernelled.model);
+  const of = (kind: 'condition' | 'view', change: 'add' | 'remove') => proposed.filter((c) => c.kind === kind && c.change === change)
+    .map((c) => (change === 'add' ? c.after : c.before));
+  const gone = of('condition', 'remove') as LivingModelT['conditions'];
+  const added = of('condition', 'add') as LivingModelT['conditions'];
   const wordsFor = (c: LivingModelT['conditions'][number]): string | null => added.find((a) => (a.source === 'user' || a.source === 'party')
     && a.quote !== null && a.applies_to.some((id) => c.applies_to.includes(id)))?.quote ?? null;
-  const olds = new Set(gone.map(stable));
+  // A view is corrected by its holder's new view ("Sam thinks Push is too risky" → "Sam now supports Push"; Codex r7 on #3522),
+  // kept in history the same way. Only ONE gone view and ONE new view of that holder pair: a holder names a person, not a view,
+  // so two of Sam's views and one new one is ambiguous and refused (Codex r1 on #3579). The quote is the new view's only where
+  // THIS turn's words hold it: a correction is said now, never in the brief. A view dropped with no replacement is still
+  // refused: dissent is never removed here.
+  const newViews = of('view', 'add') as LivingModelT['views'];
+  const oldViews = of('view', 'remove') as LivingModelT['views'];
+  const holders = (vs: LivingModelT['views'], v: LivingModelT['views'][number]) => vs.filter((n) => plain(n.holder) === plain(v.holder));
+  const successor = (v: LivingModelT['views'][number]) => (holders(oldViews, v).length === 1 && holders(newViews, v).length === 1 ? holders(newViews, v)[0] : undefined);
+  const goneViews = oldViews.filter((v) => successor(v) !== undefined);
+  const turn = plain(ctx.user_turn_text ?? '');
+  const said = (q: string | null): string | null => (q !== null && plain(q).length > 0 && turn.includes(plain(q)) ? q : null);
+  const olds = new Set([...gone, ...goneViews].map(stable));
   const recordsGone = (old: string): boolean => { try { return olds.has(stable(JSON.parse(old))); } catch { return false; } };
   const saved = new Set(base.model.history.map(stable));
-  const next: LivingModelT = gone.length === 0 ? kernelled.model : { ...kernelled.model, history: [
+  const next: LivingModelT = olds.size === 0 ? kernelled.model : { ...kernelled.model, history: [
     ...kernelled.model.history.filter((h) => saved.has(stable(h)) || !recordsGone(h.old)),
-    ...gone.map((c) => ({ id: 'condition', change: 'superseded' as const, old: JSON.stringify(c), quote: wordsFor(c) }))] };
+    ...gone.map((c) => ({ id: 'condition', change: 'superseded' as const, old: JSON.stringify(c), quote: wordsFor(c) })),
+    ...goneViews.map((v) => ({ id: 'view', change: 'superseded' as const, old: JSON.stringify(v), quote: said(successor(v)!.quote) }))] };
   const changes = diffLivingModels(base.model, next);
   if (changes.length === 0) return refused('no_change');
-  const removed = changes.filter((c) => c.change === 'remove' && c.kind !== 'condition');
+  const superseded = new Set(goneViews.map(stable));
+  const removed = changes.filter((c) => c.change === 'remove' && c.kind !== 'condition' && !(c.kind === 'view' && superseded.has(stable(c.before))));
   const dropped = removed.filter((c) => c.kind === 'view' || c.kind === 'history');
   if (dropped.length > 0) return refused('cannot_remove_here', undefined, { kinds: [...new Set(dropped.map((c) => c.kind))] });
   const unnamed = removed.filter((c) => !args.remove.includes(c.id)).map((c) => c.id);
