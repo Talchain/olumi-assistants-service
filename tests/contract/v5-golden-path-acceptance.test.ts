@@ -435,7 +435,6 @@ describe('Acceptance Gate — handler preconditions (Wave 1)', () => {
       makeInvocation({
         priorFacts: [makeRunAnalysisFactWithStatus('partial')],
         analysisProjection: ANALYSIS_PROJECTION,
-        explanation: { answer_text: 'A confident sounding line.', answer_text_valid: true },
       }),
     )
     // Must not surface the projection's leading option as fact.
@@ -452,7 +451,6 @@ describe('Acceptance Gate — handler preconditions (Wave 1)', () => {
         priorFacts: [makeRunAnalysisFactWithStatus('computed')],
         analysisProjection: ANALYSIS_PROJECTION,
         analysisFreshness: makeFreshness('stale'),
-        explanation: { answer_text: 'A stale answer.', answer_text_valid: true },
       }),
     )
     expect(outcome.assistant_text).toMatch(/model has changed/i)

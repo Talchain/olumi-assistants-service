@@ -2,8 +2,9 @@
  * M1 — the option-targeted counterfactual, at the HANDLER seam.
  *
  * Proves the wiring, not just the composers: which answer the handler actually
- * returns, on both the Sonnet path and the deterministic path, and that turns
- * with no named option are left exactly as they were.
+ * returns (the targeted answer or the generic deterministic one; the authored
+ * Sonnet answer was never fed at runtime and is gone), and that turns with no
+ * named option are left exactly as they were.
  */
 import { describe, it, expect } from 'vitest';
 
@@ -63,13 +64,9 @@ const FLIPS_TO_HIRE: FlipSummary = {
   entries: [flipEntry()],
 };
 
-const SONNET_ANSWER =
-  'Sonnet wrote this answer about whatever it felt like, at sufficient length to pass the side-band validator without difficulty.';
-
 function makeInvocation(over: {
   flipTargetOption?: TargetOption | null;
   flipSummary?: FlipSummary | null;
-  sonnetValid?: boolean;
   message?: string;
   /** Defaults to a PERMITTING verdict with a leader that is neither target. */
   mayNameLeadingOption?: boolean;
@@ -109,9 +106,6 @@ function makeInvocation(over: {
       goal_node_id: GOAL_ID,
       status: 'ready',
     } as unknown as HandlerInvocation['analysisReady'],
-    explanation: over.sonnetValid
-      ? { answer_text: SONNET_ANSWER, answer_text_valid: true }
-      : { answer_text: '', answer_text_valid: false, answer_validation_error: 'too_short' },
     analysisProjection: PROJECTION,
     flipSummary: over.flipSummary === undefined ? FLIPS_TO_HIRE : over.flipSummary,
     flipTargetOption: over.flipTargetOption ?? null,
@@ -141,28 +135,14 @@ describe('what_would_flip — the answer addresses the option the user named', (
     expect(out.assistant_text).toContain('Engineering Capacity');
   });
 
-  it('the targeted answer OUTRANKS a valid Sonnet answer', async () => {
-    // This is the safety-bearing case: asked "what would make X win?" when
-    // nothing does, free prose invents a threshold. The deterministic refusal
-    // owns the turn.
-    const out = await handler(
-      makeInvocation({ flipTargetOption: OFFSHORE, sonnetValid: true }),
-    );
-    expect(out.assistant_text).not.toContain('Sonnet wrote this answer');
-    expect(out.assistant_text).toContain('Engage Offshore Partner');
-    const fact = out.handler_facts[0] as { result: Record<string, unknown> };
-    // Honest provenance: a deterministic string, and no invented failure reason.
-    expect(fact.result.answer_source).toBe('deterministic_fallback');
-    expect(fact.result.fallback_reason).toBeNull();
-  });
-
-  it('a genuine Sonnet FAILURE still reports its reason when targeted', async () => {
-    const out = await handler(
-      makeInvocation({ flipTargetOption: OFFSHORE, sonnetValid: false }),
-    );
+  // REBOUND (was "a genuine Sonnet FAILURE still reports its reason when targeted"): the validator
+  // verdict is gone; the targeted turn's own provenance stays pinned.
+  it('the targeted answer is attributed as deterministic, with the fixed missing reason', async () => {
+    const out = await handler(makeInvocation({ flipTargetOption: OFFSHORE }));
     const fact = out.handler_facts[0] as { result: Record<string, unknown> };
     expect(fact.result.answer_source).toBe('deterministic_fallback');
-    expect(fact.result.fallback_reason).not.toBeNull();
+    expect(fact.result.fallback_reason).toBe('missing');
+    expect(fact.result.answer_text_length).toBe(out.assistant_text.length);
     expect(out.assistant_text).toContain('Engage Offshore Partner');
   });
 });
@@ -177,7 +157,6 @@ describe('F1 at the HANDLER — the target may be the option that already won', 
         flipSummary: { ...FLIPS_TO_HIRE, entries: [] as FlipSummary['entries'] },
         leadingOptionId: HIRE.id,
         mayNameLeadingOption: true,
-        sonnetValid: true,
       }),
     );
     expect(out.assistant_text).toContain('is already the most-supported option');
@@ -192,7 +171,6 @@ describe('F1 at the HANDLER — the target may be the option that already won', 
         flipSummary: { ...FLIPS_TO_HIRE, entries: [] as FlipSummary['entries'] },
         leadingOptionId: HIRE.id,
         mayNameLeadingOption: false,
-        sonnetValid: true,
       }),
     );
     // Neither asserts it trails …
@@ -227,15 +205,8 @@ describe('F1 at the HANDLER — the target may be the option that already won', 
 });
 
 describe('NO named option ⇒ existing behaviour, untouched', () => {
-  it('Sonnet keeps the answer verbatim', async () => {
-    const out = await handler(makeInvocation({ flipTargetOption: null, sonnetValid: true }));
-    expect(out.assistant_text).toContain('Sonnet wrote this answer');
-    const fact = out.handler_facts[0] as { result: Record<string, unknown> };
-    expect(fact.result.answer_source).toBe('sonnet');
-  });
-
   it('the deterministic composer keeps the generic prose', async () => {
-    const out = await handler(makeInvocation({ flipTargetOption: null, sonnetValid: false }));
+    const out = await handler(makeInvocation({ flipTargetOption: null }));
     expect(out.assistant_text).toMatch(/In this model, .+ was supported by \d{1,3}% of runs\./);
     expect(out.assistant_text).toContain('would lead instead');
   });
@@ -244,12 +215,14 @@ describe('NO named option ⇒ existing behaviour, untouched', () => {
 describe('NO flip evidence ⇒ existing behaviour, even with a named option', () => {
   it('a named option with no flip data does not manufacture an answer', async () => {
     const withTarget = await handler(
-      makeInvocation({ flipTargetOption: OFFSHORE, flipSummary: null, sonnetValid: true }),
+      makeInvocation({ flipTargetOption: OFFSHORE, flipSummary: null }),
     );
     const without = await handler(
-      makeInvocation({ flipTargetOption: null, flipSummary: null, sonnetValid: true }),
+      makeInvocation({ flipTargetOption: null, flipSummary: null }),
     );
     expect(withTarget.assistant_text).toBe(without.assistant_text);
-    expect(withTarget.assistant_text).toContain('Sonnet wrote this answer');
+    // The generic deterministic prose, not a targeted refusal about the named option.
+    expect(withTarget.assistant_text).toMatch(/In this model, .+ was supported by \d{1,3}% of runs\./);
+    expect(withTarget.assistant_text).not.toContain('in favour of Engage Offshore Partner');
   });
 });

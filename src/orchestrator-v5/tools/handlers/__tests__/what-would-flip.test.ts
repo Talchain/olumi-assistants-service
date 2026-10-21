@@ -1,9 +1,10 @@
 /**
  * Unit tests for the V5 `what_would_flip` answer-carrying handler.
  *
- * Mirrors `explain-results.test.ts` — same precondition + answer-carrying
- * pattern, same accepted_entity_kinds — but asserts against the
- * handler-specific fact_type and fallback content.
+ * Mirrors `explain-results.test.ts` — same precondition + deterministic
+ * answer pattern, same accepted_entity_kinds — but asserts against the
+ * handler-specific fact_type and fallback content. (The authored-explanation
+ * input was never fed at runtime and is gone.)
  */
 
 import { describe, it, expect } from 'vitest';
@@ -79,7 +80,6 @@ function makeInvocation(
   overrides?: {
     priorFacts?: readonly HandlerFact[];
     optionCount?: number;
-    explanation?: HandlerInvocation['explanation'];
     analysisProjection?: AnalysisProjectionSummary;
     analysisFreshness?: HandlerInvocation['analysisFreshness'];
   },
@@ -110,7 +110,6 @@ function makeInvocation(
     signal: new AbortController().signal,
     orientationText: '',
     analysisReady: makeAnalysisReady(optionCount),
-    explanation: overrides?.explanation,
     analysisProjection: overrides?.analysisProjection,
     analysisFreshness: overrides?.analysisFreshness,
   };
@@ -132,8 +131,6 @@ function buildProposal(overrides?: Partial<ProposalAction>): ProposalAction {
   };
 }
 
-const VALID_ANSWER_TEXT =
-  'For Hire Two Mid-Level to overtake the leader, Engineering Capacity would need to drop materially given the current 35 percentage point margin and stable robustness.';
 
 describe('what_would_flip — registration', () => {
   it('is registered in the default V5 handler registry', () => {
@@ -268,27 +265,13 @@ describe('what_would_flip — precondition (analysis fact)', () => {
   });
 });
 
-describe('what_would_flip — answer-carrying contract', () => {
-  it('happy path: uses Sonnet answer_text when answer_text_valid is true', async () => {
-    const handler = createWhatWouldFlipHandler();
-    const outcome = await handler(
-      makeInvocation({
-        priorFacts: [makeRunAnalysisFact(false)],
-        explanation: { answer_text: VALID_ANSWER_TEXT, answer_text_valid: true },
-        analysisProjection: ANALYSIS_PROJECTION,
-      }),
-    );
-    expect(outcome.assistant_text).toBe(VALID_ANSWER_TEXT);
-    expect(outcome.suppress_orientation).toBe(true);
-  });
-
-  it('bare tool_use regression: missing explanation → fallback contains margin and driver', async () => {
+describe('what_would_flip — answer contract (deterministic, from the analysis projection)', () => {
+  it('bare tool_use regression: deterministic answer contains margin and driver', async () => {
     // Reproduces the v40 staging Test F failure shape.
     const handler = createWhatWouldFlipHandler();
     const outcome = await handler(
       makeInvocation({
         priorFacts: [makeRunAnalysisFact(false)],
-        explanation: undefined,
         analysisProjection: ANALYSIS_PROJECTION,
       }),
     );
@@ -298,29 +281,11 @@ describe('what_would_flip — answer-carrying contract', () => {
     expect(outcome.assistant_text).not.toBe('Here is what could change the outcome.');
   });
 
-  it('answer_text containing mutation language → fallback used', async () => {
-    const handler = createWhatWouldFlipHandler();
-    const outcome = await handler(
-      makeInvocation({
-        priorFacts: [makeRunAnalysisFact(false)],
-        explanation: {
-          answer_text: 'Proposing to add a new factor would shift the outcome significantly across the model.',
-          answer_text_valid: false,
-          answer_validation_error: 'mutation_language_detected',
-        },
-        analysisProjection: ANALYSIS_PROJECTION,
-      }),
-    );
-    expect(outcome.assistant_text).not.toContain('Proposing to add');
-    expect(outcome.assistant_text).toContain('Hire Senior Engineer');
-  });
-
   it("fallback cites the runner-up and its OWN win share from the projection", async () => {
     const handler = createWhatWouldFlipHandler();
     const outcome = await handler(
       makeInvocation({
         priorFacts: [makeRunAnalysisFact(false)],
-        explanation: undefined,
         analysisProjection: ANALYSIS_PROJECTION,
       }),
     );
@@ -335,12 +300,11 @@ describe('what_would_flip — answer-carrying contract', () => {
     expect(outcome.assistant_text).not.toMatch(/percentage points?/i);
   });
 
-  it('persists a fact that round-trips through the schema on the happy path', async () => {
+  it('persists a fact that round-trips through the schema on the execute path', async () => {
     const handler = createWhatWouldFlipHandler();
     const outcome = await handler(
       makeInvocation({
         priorFacts: [makeRunAnalysisFact(false)],
-        explanation: { answer_text: VALID_ANSWER_TEXT, answer_text_valid: true },
         analysisProjection: ANALYSIS_PROJECTION,
       }),
     );
@@ -353,7 +317,6 @@ describe('what_would_flip — answer-carrying contract', () => {
     const outcome = await handler(
       makeInvocation({
         priorFacts: [makeRunAnalysisFact(false)],
-        explanation: undefined,
         analysisProjection: ANALYSIS_PROJECTION,
       }),
     );
@@ -362,41 +325,24 @@ describe('what_would_flip — answer-carrying contract', () => {
 });
 
 describe('what_would_flip — diagnostic fields', () => {
-  it('Sonnet valid → answer_source=sonnet', async () => {
+  // REBOUND (was "Sonnet invalid (forbidden_internal_term) → fallback_reason=forbidden_internal_term"):
+  // the validator verdict is gone; the execute path's own attribution stays pinned.
+  it('execute path → answer_source=deterministic_fallback, fallback_reason=missing, length matches text', async () => {
     const handler = createWhatWouldFlipHandler();
     const outcome = await handler(
       makeInvocation({
         priorFacts: [makeRunAnalysisFact(false)],
-        explanation: { answer_text: VALID_ANSWER_TEXT, answer_text_valid: true },
         analysisProjection: ANALYSIS_PROJECTION,
       }),
     );
-    const fact = outcome.handler_facts[0];
-    if (fact.fact_type === 'what_would_flip') {
-      expect(fact.result.answer_source).toBe('sonnet');
-      expect(fact.result.fallback_reason).toBeNull();
-      expect(fact.result.answer_text_length).toBe(VALID_ANSWER_TEXT.length);
-    }
-  });
-
-  it('Sonnet invalid (forbidden_internal_term) → fallback_reason=forbidden_internal_term', async () => {
-    const handler = createWhatWouldFlipHandler();
-    const outcome = await handler(
-      makeInvocation({
-        priorFacts: [makeRunAnalysisFact(false)],
-        explanation: {
-          answer_text: 'leaks internal term',
-          answer_text_valid: false,
-          answer_validation_error: 'forbidden_internal_term',
-        },
-        analysisProjection: ANALYSIS_PROJECTION,
-      }),
-    );
-    const fact = outcome.handler_facts[0];
-    if (fact.fact_type === 'what_would_flip') {
-      expect(fact.result.answer_source).toBe('deterministic_fallback');
-      expect(fact.result.fallback_reason).toBe('forbidden_internal_term');
-    }
+    expect(outcome.handler_facts[0]).toMatchObject({
+      fact_type: 'what_would_flip',
+      result: {
+        answer_source: 'deterministic_fallback',
+        fallback_reason: 'missing',
+        answer_text_length: outcome.assistant_text.length,
+      },
+    });
   });
 
   it('precondition fail → answer_source=precondition_template, fallback_reason explicitly null', async () => {
@@ -448,16 +394,14 @@ function makeFreshness(
   };
 }
 
-const VALID_WWF_ANSWER =
-  'A swing of around eight percentage points in Engineering Capacity would flip the leading option, given the current robustness band.';
-
 describe('what_would_flip — P0 combined precondition (missing / degraded / stale)', () => {
   it('degraded: status="partial" → degraded template, never a confident flip explanation', async () => {
     const handler = createWhatWouldFlipHandler();
     const outcome = await handler(
       makeInvocation({
         priorFacts: [makeRunAnalysisFactWithStatus('partial')],
-        explanation: { answer_text: VALID_WWF_ANSWER, answer_text_valid: true },
+        // A projection IS present: the degraded status alone must stop the
+        // handler composing a confident answer from it.
         analysisProjection: ANALYSIS_PROJECTION,
       }),
     );
@@ -471,7 +415,6 @@ describe('what_would_flip — P0 combined precondition (missing / degraded / sta
     const outcome = await handler(
       makeInvocation({
         priorFacts: [makeRunAnalysisFactWithStatus('computed')],
-        explanation: { answer_text: VALID_WWF_ANSWER, answer_text_valid: true },
         analysisProjection: ANALYSIS_PROJECTION,
         analysisFreshness: makeFreshness('stale', 'graph_hash_diverged'),
       }),
@@ -493,7 +436,6 @@ describe('what_would_flip — P0 combined precondition (missing / degraded / sta
     const outcome = await handler(
       makeInvocation({
         priorFacts: [makeRunAnalysisFactWithStatus('completed')],
-        explanation: { answer_text: VALID_WWF_ANSWER, answer_text_valid: true },
         analysisProjection: undefined,
         analysisFreshness: makeFreshness('fresh', 'graph_hash_match'),
       }),
@@ -507,11 +449,13 @@ describe('what_would_flip — P0 combined precondition (missing / degraded / sta
     const outcome = await handler(
       makeInvocation({
         priorFacts: [makeRunAnalysisFactWithStatus('computed')],
-        explanation: { answer_text: VALID_WWF_ANSWER, answer_text_valid: true },
         analysisProjection: ANALYSIS_PROJECTION,
         analysisFreshness: makeFreshness('fresh', 'graph_hash_match'),
       }),
     );
-    expect(outcome.assistant_text).toBe(VALID_WWF_ANSWER);
+    // No caveat: the answer opens on the result itself.
+    expect(outcome.assistant_text).toMatch(/^In this model, 'Hire Senior Engineer'/);
+    expect(outcome.assistant_text).not.toMatch(/out of date|can'?t confirm/i);
+    expect(outcome.assistant_text).toContain('Engineering Capacity');
   });
 });

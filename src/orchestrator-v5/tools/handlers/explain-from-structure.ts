@@ -6,14 +6,9 @@
  * might X be the leading option?"). The handler does not call PLoT or ISL,
  * does not compute anything, and does not mutate state.
  *
- * Answer-carrying contract (post-v40 fix): Sonnet writes the complete
- * user-facing answer inside `invocation.explanation.answer_text`. When the
- * side-band validator marks it valid, the handler uses it verbatim;
- * otherwise it composes a deterministic fallback from
- * `invocation.structureProjection` (top causal links, named-factor
- * pathways, goal label, factor / option counts). The turn-executor forces
- * `suppress_orientation: true` for explanation handlers; the handler also
- * sets the flag on its outcome as defence-in-depth.
+ * The handler composes the whole answer deterministically from `invocation.structureProjection` (top causal links,
+ * named-factor pathways, goal label, factor / option counts) and sets `suppress_orientation: true` on its outcome.
+ * (The authored-answer side-band, `invocation.explanation`, was never fed at runtime and was removed on 22 Oct 2026.)
  *
  * Accepted entity kinds (validation-registry.ts):
  *   `['goal', 'option', 'node']` — the wire entity-kind enum's `node` literal

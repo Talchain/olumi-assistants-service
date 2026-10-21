@@ -401,10 +401,9 @@ export interface DispatchChipClickRunAnalysisParams {
  *      `tools/registry.ts`'s `createRegistry`). Aliases like the
  *      singular `'explain_result'` are NOT included — chip-emitter
  *      surfaces the registered ID directly.
- *   2. The handler can produce a useful answer without Sonnet's
- *      pre-classified `explanation.answer_text`. The V5 explanation
- *      handlers fall back to a deterministic projection-based composer
- *      when `invocation.explanation` is absent — so they qualify.
+ *   2. The handler can produce a useful answer from its own inputs. The V5
+ *      explanation handlers compose a deterministic projection-based answer,
+ *      so they qualify.
  *      Mutation handlers (set_factor_value, etc.) require validated
  *      proposal parameters from the routing layer and must NOT be
  *      whitelisted here.

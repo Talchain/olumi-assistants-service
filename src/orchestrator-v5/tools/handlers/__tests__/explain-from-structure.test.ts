@@ -1,12 +1,12 @@
 /**
  * Unit tests for the V5 `explain_from_structure` no-op handler.
  *
- * Covers the registration-level invariants alongside the four core
- * behaviours the brief specifies: validator acceptance, validator rejection,
- * fact persistence, and orientation pass-through. Includes the
- * decision-node misroute test (D7), the empty-orientation guard (D8), and
- * the wire entity-kind enum coverage so the validator's accepted-kinds set
- * stays in sync with the proposal schema.
+ * Covers the registration-level invariants alongside the core behaviours:
+ * validator acceptance, validator rejection, fact persistence, and the
+ * deterministic structure answer (the authored-explanation input was never
+ * fed at runtime and is gone). Includes the decision-node misroute test (D7)
+ * and the wire entity-kind enum coverage so the validator's accepted-kinds
+ * set stays in sync with the proposal schema.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -228,84 +228,46 @@ const STRUCTURE_PROJECTION: StructureProjectionSummary = {
   option_count: 2,
 };
 
-const VALID_ANSWER_TEXT =
-  'Engineering Capacity is the strongest direct driver of Q3 Throughput at 0.65 strength, well ahead of any other factor influencing your goal.';
-
-describe('explain_from_structure — answer-carrying contract', () => {
-  it('happy path: uses Sonnet answer_text when answer_text_valid is true', async () => {
+describe('explain_from_structure — answer contract (deterministic, from the structure projection)', () => {
+  // REBOUND (consolidates "a dependencies / outgoing_influence query never uses valid authored prose",
+  // "legacy omission cannot let an authored relationship claim bypass typed authority" and "a
+  // direct_relationship / reachability query never uses valid authored prose"): the authored answer was
+  // never fed at runtime and is gone, so the kind gate's negatives now hold structurally. The live claim
+  // kept: every structure_query kind, and none, composes the deterministic projection.
+  it('every structure_query kind (and none) composes the deterministic projection answer', async () => {
     const handler = createExplainFromStructureHandler();
-    const outcome = await handler({
-      ...makeInvocation({ optionCount: 2 }),
-      explanation: { answer_text: VALID_ANSWER_TEXT, answer_text_valid: true },
-      structureProjection: STRUCTURE_PROJECTION,
-    });
-    expect(outcome.assistant_text).toBe(VALID_ANSWER_TEXT);
-    expect(outcome.suppress_orientation).toBe(true);
-  });
-
-  // REBOUND from "selected canonical neighbourhood outranks valid prose that invents an
-  // unlisted relationship": the typed evidence carriers that used to supply that precedence
-  // were never fed at runtime and are gone. The live guard is the licence itself — a
-  // non-`general` structure_query kind never uses the authored answer, however valid.
-  it('a dependencies / outgoing_influence query never uses valid authored prose that invents an unlisted relationship', async () => {
-    const handler = createExplainFromStructureHandler();
-    const invented =
-      'Sales rep time depends on automation, and the phased pilot directly feeds into automation before it reaches the outcome.';
-    const queries: StructureQuery[] = [
+    const queries: Array<StructureQuery | undefined> = [
+      { kind: 'general' },
       { kind: 'dependencies', element_id: 'node_sales_rep_time' },
       { kind: 'outgoing_influence', element_id: 'node_sales_rep_time' },
+      { kind: 'direct_relationship', element_ids: ['node_integration', 'node_flexibility'] },
+      {
+        kind: 'reachability',
+        source_element_id: 'node_integration',
+        target_element_id: 'node_flexibility',
+      },
+      undefined,
     ];
     for (const structure_query of queries) {
+      const label = structure_query?.kind ?? 'none';
       const outcome = await handler({
         ...makeInvocation({ optionCount: 4, proposal: buildProposal({ structure_query }) }),
-        explanation: { answer_text: invented, answer_text_valid: true },
         structureProjection: STRUCTURE_PROJECTION,
       });
-      expect(outcome.assistant_text, structure_query.kind).not.toBe(invented);
-      expect(outcome.assistant_text, structure_query.kind).not.toContain('phased pilot');
-      // It gets the deterministic projection instead.
-      expect(outcome.assistant_text, structure_query.kind).toContain('Engineering Capacity');
-      expect(outcome.handler_facts[0], structure_query.kind).toMatchObject({
+      expect(outcome.assistant_text, label).toContain('Engineering Capacity');
+      expect(outcome.assistant_text, label).toContain('Q3 Throughput');
+      expect(outcome.handler_facts[0], label).toMatchObject({
         result: { answer_source: 'deterministic_fallback', fallback_reason: 'missing' },
       });
     }
-    // CONTRAST: the same valid prose under `general` IS used, so the refusal above is the kind gate.
-    const general = await handler({
-      ...makeInvocation({ optionCount: 4 }),
-      explanation: { answer_text: invented, answer_text_valid: true },
-      structureProjection: STRUCTURE_PROJECTION,
-    });
-    expect(general.assistant_text).toBe(invented);
   });
 
-  it('legacy omission cannot let an authored relationship claim bypass typed authority', async () => {
-    const handler = createExplainFromStructureHandler();
-    const outcome = await handler({
-      ...makeInvocation({
-        optionCount: 2,
-        proposal: buildProposal({ structure_query: undefined }),
-      }),
-      explanation: { answer_text: VALID_ANSWER_TEXT, answer_text_valid: true },
-      structureProjection: STRUCTURE_PROJECTION,
-    });
-
-    expect(outcome.assistant_text).not.toBe(VALID_ANSWER_TEXT);
-    expect(outcome.assistant_text).toContain('Engineering Capacity');
-    expect(outcome.handler_facts[0]).toMatchObject({
-      result: {
-        answer_source: 'deterministic_fallback',
-        fallback_reason: 'missing',
-      },
-    });
-  });
-
-  it('bare tool_use regression: missing explanation → fallback contains causal links and factor labels', async () => {
+  it('bare tool_use regression: fallback contains causal links and factor labels', async () => {
     // Reproduces v40 staging Test E shape (factor-named structural question
     // returned the 39-char SAFE_FALLBACK stub).
     const handler = createExplainFromStructureHandler();
     const outcome = await handler({
       ...makeInvocation({ optionCount: 2 }),
-      explanation: undefined,
       structureProjection: STRUCTURE_PROJECTION,
     });
     expect(outcome.assistant_text.length).toBeGreaterThan(80);
@@ -314,25 +276,10 @@ describe('explain_from_structure — answer-carrying contract', () => {
     expect(outcome.assistant_text).not.toBe('Here is what the model structure shows.');
   });
 
-  it('answer_text < 80 chars → fallback used', async () => {
-    const handler = createExplainFromStructureHandler();
-    const outcome = await handler({
-      ...makeInvocation({ optionCount: 2 }),
-      explanation: {
-        answer_text: 'Too short.',
-        answer_text_valid: false,
-        answer_validation_error: 'too_short',
-      },
-      structureProjection: STRUCTURE_PROJECTION,
-    });
-    expect(outcome.assistant_text).toContain('Engineering Capacity');
-  });
-
   it('named factor pathway included when structureProjection has named_factor_label', async () => {
     const handler = createExplainFromStructureHandler();
     const outcome = await handler({
       ...makeInvocation({ optionCount: 2 }),
-      explanation: undefined,
       structureProjection: {
         ...STRUCTURE_PROJECTION,
         named_factor_label: 'Engineering Capacity',
@@ -354,7 +301,6 @@ describe('explain_from_structure — answer-carrying contract', () => {
     const handler = createExplainFromStructureHandler();
     const outcome = await handler({
       ...makeInvocation(),
-      explanation: { answer_text: VALID_ANSWER_TEXT, answer_text_valid: true },
       structureProjection: STRUCTURE_PROJECTION,
     });
     const parsed = ExplainFromStructureHandlerFactSchema.safeParse(
@@ -367,150 +313,42 @@ describe('explain_from_structure — answer-carrying contract', () => {
     const handler = createExplainFromStructureHandler();
     const outcome = await handler({
       ...makeInvocation(),
-      explanation: undefined,
       structureProjection: STRUCTURE_PROJECTION,
     });
     expect(outcome.suppress_orientation).toBe(true);
   });
-
-  // REBOUND from "canonical pair evidence outranks a form-valid Sonnet answer that invents a
-  // path": the pair carrier was never fed at runtime and is gone; the live guard is that a
-  // two-element query kind never licenses the authored answer.
-  it('a direct_relationship / reachability query never uses valid authored prose that invents a path', async () => {
-    const handler = createExplainFromStructureHandler();
-    const invented =
-      'Enterprise Integration Investment reaches Preserve Strategic Flexibility through Enterprise Revenue Expansion, so the saved model establishes a two-step path between them.';
-    const queries: StructureQuery[] = [
-      { kind: 'direct_relationship', element_ids: ['node_integration', 'node_flexibility'] },
-      {
-        kind: 'reachability',
-        source_element_id: 'node_integration',
-        target_element_id: 'node_flexibility',
-      },
-    ];
-    for (const structure_query of queries) {
-      const outcome = await handler({
-        ...makeInvocation({ proposal: buildProposal({ structure_query }) }),
-        explanation: { answer_text: invented, answer_text_valid: true },
-        structureProjection: STRUCTURE_PROJECTION,
-      });
-      expect(outcome.assistant_text, structure_query.kind).not.toBe(invented);
-      expect(outcome.assistant_text, structure_query.kind).not.toContain('Enterprise Revenue Expansion');
-      expect(outcome.assistant_text, structure_query.kind).not.toContain('two-step');
-      expect(outcome.assistant_text, structure_query.kind).toContain('Engineering Capacity');
-      expect(outcome.handler_facts[0], structure_query.kind).toMatchObject({
-        result: { answer_source: 'deterministic_fallback', fallback_reason: 'missing' },
-      });
-    }
-    // CONTRAST: the same valid prose under `general` IS used.
-    const general = await handler({
-      ...makeInvocation(),
-      explanation: { answer_text: invented, answer_text_valid: true },
-      structureProjection: STRUCTURE_PROJECTION,
-    });
-    expect(general.assistant_text).toBe(invented);
-  });
 });
 
 describe('explain_from_structure — diagnostic fields', () => {
-  it('Sonnet valid → answer_source=sonnet', async () => {
+  it('answer_source=deterministic_fallback, fallback_reason=missing, length matches text', async () => {
     const handler = createExplainFromStructureHandler();
     const outcome = await handler({
       ...makeInvocation(),
-      explanation: { answer_text: VALID_ANSWER_TEXT, answer_text_valid: true },
       structureProjection: STRUCTURE_PROJECTION,
     });
-    const fact = outcome.handler_facts[0];
-    if (fact.fact_type === 'explain_from_structure') {
-      expect(fact.result.answer_source).toBe('sonnet');
-      expect(fact.result.fallback_reason).toBeNull();
-      expect(fact.result.answer_text_length).toBe(VALID_ANSWER_TEXT.length);
-    }
-  });
-
-  it('fallback (too_short) → answer_source=deterministic_fallback, fallback_reason=too_short', async () => {
-    const handler = createExplainFromStructureHandler();
-    const outcome = await handler({
-      ...makeInvocation(),
-      explanation: {
-        answer_text: 'too short',
-        answer_text_valid: false,
-        answer_validation_error: 'too_short',
+    expect(outcome.handler_facts[0]).toMatchObject({
+      fact_type: 'explain_from_structure',
+      result: {
+        answer_source: 'deterministic_fallback',
+        fallback_reason: 'missing',
+        answer_text_length: outcome.assistant_text.length,
       },
-      structureProjection: STRUCTURE_PROJECTION,
     });
-    const fact = outcome.handler_facts[0];
-    if (fact.fact_type === 'explain_from_structure') {
-      expect(fact.result.answer_source).toBe('deterministic_fallback');
-      expect(fact.result.fallback_reason).toBe('too_short');
-      expect(fact.result.answer_text_length).toBe(outcome.assistant_text.length);
-    }
-  });
-
-  it('explanation absent → answer_source=deterministic_fallback, fallback_reason=missing', async () => {
-    const handler = createExplainFromStructureHandler();
-    const outcome = await handler({
-      ...makeInvocation(),
-      explanation: undefined,
-      structureProjection: STRUCTURE_PROJECTION,
-    });
-    const fact = outcome.handler_facts[0];
-    if (fact.fact_type === 'explain_from_structure') {
-      expect(fact.result.answer_source).toBe('deterministic_fallback');
-      expect(fact.result.fallback_reason).toBe('missing');
-    }
   });
 });
 
-describe('explain_from_structure — Test A calibration (validator-rejection failure modes)', () => {
-  // Brief task 1: pin the deterministic-fallback behaviour for each of the
-  // validator-rejection paths Sonnet can land on for a Test-A-shaped pre-
-  // analysis question. The schema-description fix raises Sonnet's compliance
-  // floor; these tests guarantee the user sees a non-stub response on the
-  // residual failure cases.
+describe('explain_from_structure — Test A calibration (deterministic projection prose)', () => {
+  // Pins the deterministic answer for a Test-A-shaped pre-analysis question:
+  // non-stub, bucketed strength words, no internal vocabulary, no proposal
+  // verbs. (The rows that fed a rejected authored answer first went with the
+  // never-fed explanation path; their assertions on the projection prose are
+  // kept here.)
 
-  it('200-char clean structural answer → uses Sonnet text verbatim (positive control)', async () => {
-    const handler = createExplainFromStructureHandler();
-    const longClean =
-      'Looking at the model structure, Engineering Capacity is the strongest direct driver of Q3 Throughput, with a causal link strength of 0.65. Hiring Cost contributes a secondary pathway at -0.42 strength.';
-    expect(longClean.length).toBeGreaterThanOrEqual(200);
-    const outcome = await handler({
-      ...makeInvocation(),
-      explanation: { answer_text: longClean, answer_text_valid: true },
-      structureProjection: STRUCTURE_PROJECTION,
-    });
-    expect(outcome.assistant_text).toBe(longClean);
-  });
-
-  it('60-char too_short answer → falls back to projection prose with strength values', async () => {
+  // REBOUND (was "forbidden_internal_term → falls back without leaking internal vocabulary").
+  it('projection prose never says "edge" or "node"', async () => {
     const handler = createExplainFromStructureHandler();
     const outcome = await handler({
       ...makeInvocation(),
-      explanation: {
-        answer_text: 'Engineering Capacity is the most influential factor here.',
-        answer_text_valid: false,
-        answer_validation_error: 'too_short',
-      },
-      structureProjection: STRUCTURE_PROJECTION,
-    });
-    expect(outcome.assistant_text).toContain('Engineering Capacity');
-    // Wave 4: edge strength rendered as bucketed magnitude word, not
-    // a raw decimal. 0.65 → "very strong link".
-    expect(outcome.assistant_text).toMatch(/(weak|moderate|strong|very strong) (direct )?link/);
-    expect(outcome.assistant_text).not.toMatch(/-?\d+\.\d/);
-    expect(outcome.assistant_text.length).toBeGreaterThan(80);
-  });
-
-  it('forbidden_internal_term ("edge"/"node") → falls back without leaking internal vocabulary', async () => {
-    const handler = createExplainFromStructureHandler();
-    const outcome = await handler({
-      ...makeInvocation(),
-      explanation: {
-        answer_text:
-          'The edge from Engineering Capacity to the goal node has strength 1.0, making it the most influential factor.',
-        answer_text_valid: false,
-        answer_validation_error: 'forbidden_internal_term',
-      },
       structureProjection: STRUCTURE_PROJECTION,
     });
     expect(outcome.assistant_text).toContain('Engineering Capacity');
@@ -521,16 +359,11 @@ describe('explain_from_structure — Test A calibration (validator-rejection fai
     expect(outcome.assistant_text).toMatch(/direct (influence|link)/);
   });
 
-  it('mutation_language_detected ("Proposing to add") → falls back with no proposal verbs', async () => {
+  // REBOUND (was "mutation_language_detected → falls back with no proposal verbs").
+  it('projection prose carries no proposal verbs', async () => {
     const handler = createExplainFromStructureHandler();
     const outcome = await handler({
       ...makeInvocation(),
-      explanation: {
-        answer_text:
-          "I'd propose adding a Capacity factor to make this clearer; for now Engineering Capacity is the strongest causal driver in the model.",
-        answer_text_valid: false,
-        answer_validation_error: 'mutation_language_detected',
-      },
       structureProjection: STRUCTURE_PROJECTION,
     });
     expect(outcome.assistant_text).toContain('Engineering Capacity');
@@ -538,11 +371,10 @@ describe('explain_from_structure — Test A calibration (validator-rejection fai
     expect(outcome.assistant_text.toLowerCase()).not.toContain('would add');
   });
 
-  it('missing explanation payload → falls back to projection prose (matches Test A staging shape)', async () => {
+  it('projection prose renders strength as bucketed words, no raw decimals (matches Test A staging shape)', async () => {
     const handler = createExplainFromStructureHandler();
     const outcome = await handler({
       ...makeInvocation(),
-      explanation: undefined,
       structureProjection: STRUCTURE_PROJECTION,
     });
     expect(outcome.assistant_text).toContain('Engineering Capacity');

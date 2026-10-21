@@ -15,6 +15,7 @@
 import { describe, it, expect, vi } from 'vitest';
 
 import { createWhatWouldFlipHandler } from '../what-would-flip.js';
+import { composeWhatWouldFlipFallback } from '../explanation-fallback.js';
 import type { HandlerInvocation } from '../../registry.js';
 import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 import type { AnalysisProjectionSummary } from '../../../context/projection-summaries.js';
@@ -27,9 +28,6 @@ import type {
 
 const SCENARIO_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const GOAL_ID = 'goal_fit';
-
-const VALID_ANSWER =
-  'For the runner-up to overtake the leader, the strongest driver would need to move materially given the current margin.';
 
 const PROJECTION: AnalysisProjectionSummary = {
   status: 'complete',
@@ -48,6 +46,14 @@ const CONCRETE_FLIP: FlipSummary = {
   margin_supports_flip: true,
   entries: [{ factor_id: 'factor_capacity', factor_label: 'Engineering capacity', flip_value: 18 }],
 };
+
+/**
+ * The BASE flip answer for `makeInvocation(true)`, composed independently by the
+ * same exported composer the handler uses (the authored answer that used to be
+ * the base was never fed at runtime and is gone). The card must only ever APPEND
+ * to this; the degraded and latent arms must return it byte-identical.
+ */
+const BASE_ANSWER = composeWhatWouldFlipFallback(PROJECTION, FRAGILE, CONCRETE_FLIP, null);
 
 function successFact(): RunAnalysisHandlerFact {
   return {
@@ -124,7 +130,6 @@ function makeInvocation(withLensSignals: boolean): HandlerInvocation {
     signal: new AbortController().signal,
     orientationText: '',
     analysisReady: { options: [], goal_node_id: GOAL_ID, status: 'ready' } as HandlerInvocation['analysisReady'],
-    explanation: { answer_text: VALID_ANSWER, answer_text_valid: true },
     analysisProjection: PROJECTION,
     analysisFreshness: { freshness: 'fresh', reason: 'graph_hash_match' } as unknown as HandlerInvocation['analysisFreshness'],
     graphForTurn: withLensSignals ? mappableGraph() : undefined,
@@ -138,18 +143,23 @@ describe('what_would_flip — counterfactual extension', () => {
     const handler = createWhatWouldFlipHandler({ counterfactualClient: fakeClient(okResult()) });
     const outcome = await handler(makeInvocation(true));
 
+    // The base never carries the card itself, so the append below is the lens's.
+    expect(BASE_ANSWER).not.toContain('One further what-if worth exploring');
     // Base answer preserved verbatim as the prefix.
-    expect(outcome.assistant_text.startsWith(VALID_ANSWER)).toBe(true);
+    expect(outcome.assistant_text.startsWith(BASE_ANSWER)).toBe(true);
     // The card is appended.
     expect(outcome.assistant_text).toContain('One further what-if worth exploring');
     expect(outcome.assistant_text).toContain('20 engineers');
-    expect(outcome.assistant_text.length).toBeGreaterThan(VALID_ANSWER.length);
+    expect(outcome.assistant_text.length).toBeGreaterThan(BASE_ANSWER.length);
     // The fact's length reflects the full assistant_text.
-    const fact = outcome.handler_facts[0];
-    if (fact.fact_type === 'what_would_flip') {
-      expect(fact.result.answer_text_length).toBe(outcome.assistant_text.length);
-      expect(fact.result.answer_source).toBe('sonnet');
-    }
+    expect(outcome.handler_facts[0]).toMatchObject({
+      fact_type: 'what_would_flip',
+      result: {
+        answer_text_length: outcome.assistant_text.length,
+        answer_source: 'deterministic_fallback',
+        fallback_reason: 'missing',
+      },
+    });
     expect(outcome.suppress_orientation).toBe(true);
   });
 
@@ -158,17 +168,17 @@ describe('what_would_flip — counterfactual extension', () => {
       counterfactualClient: fakeClient({ ok: false, reason: 'non_2xx', status: 500 }),
     });
     const outcome = await handler(makeInvocation(true));
-    expect(outcome.assistant_text).toBe(VALID_ANSWER);
+    expect(outcome.assistant_text).toBe(BASE_ANSWER);
   });
 
   it('single-factor regression: no injected client (latent) → base answer byte-identical', async () => {
     // Even WITH a probe + mappable graph present, the latent lens never fires.
     const handler = createWhatWouldFlipHandler();
     const outcome = await handler(makeInvocation(true));
-    expect(outcome.assistant_text).toBe(VALID_ANSWER);
+    expect(outcome.assistant_text).toBe(BASE_ANSWER);
     const fact = outcome.handler_facts[0];
     if (fact.fact_type === 'what_would_flip') {
-      expect(fact.result.answer_text_length).toBe(VALID_ANSWER.length);
+      expect(fact.result.answer_text_length).toBe(BASE_ANSWER.length);
     }
   });
 });

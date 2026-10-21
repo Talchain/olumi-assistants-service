@@ -2,15 +2,9 @@
  * V5 `explain_results` answer-carrying handler for post-analysis explanation
  * questions ("why did X win?", "explain the analysis results").
  *
- * Answer-carrying contract (post-v40 fix): the handler always owns the
- * entire user-visible string. Sonnet's `answer_text` (carried inside the
- * tool-call payload via `invocation.explanation`) is used verbatim when the
- * side-band validator marked it valid; otherwise the deterministic
- * fallback in `explanation-fallback.ts` composes a response from the
- * pre-built `analysisProjection` summary. The turn-executor forces
- * `suppress_orientation: true` for explanation handlers, so Sonnet's
- * pre-tool-call orientation never reaches the user; the handler also sets
- * the flag on its outcome as defence-in-depth.
+ * The handler owns the whole user-visible string: the deterministic composer in `explanation-fallback.ts` builds it
+ * from the pre-built `analysisProjection`, and the outcome sets `suppress_orientation: true`.
+ * (The authored-answer side-band, `invocation.explanation`, was never fed at runtime and was removed on 22 Oct 2026.)
  *
  * Precondition (P0 V5 golden-path repair): the handler combines
  * "successful prior analysis exists" AND "current graph still matches
