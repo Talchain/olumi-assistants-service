@@ -88,6 +88,7 @@ import { acquireCoreTurnSlot, CoreDeliveryUnknownError, CoreStateUnavailableErro
 import { pathBTools } from '../orchestrator-v5/path-b/tools/index.js';
 import { APPLY_CHANGE, isChangeProposal } from '../orchestrator-v5/path-b/tools/change-tools.js';
 import { legacyFromRead, livingViewOf } from '../orchestrator-v5/path-b/living-model/view.js';
+import { CORE_DRAFTING_GUIDANCE } from '../orchestrator-v5/path-b/drafting-guidance.js';
 import { modelCritic } from '../orchestrator-v5/agent-lane/core/model-critic.js';
 import { parseSelectedElements } from '../orchestrator-v5/boundary/request-extensions.js';
 import { agentSelectionContext, type AgentSelectionContext } from '../orchestrator-v5/agent-lane/selection-context.js';
@@ -968,6 +969,12 @@ export const promptArmOf = (mode: AgentLaneMode, _header?: unknown): 'A' | 'B' =
 /** The builder's effort for the configuration comparison (#94): `x-olumi-core-effort` on a core turn, else the banked high. */
 export const coreEffortArmOf = (mode: AgentLaneMode, header: unknown): 'low' | 'medium' | undefined =>
   (mode === 'core' && (header === 'medium' || header === 'low') ? header : undefined);
+/**
+ * The drafting guidance's arm (Paul 21 Oct: port the benchmarked drafting prompt, A/B it once): a core turn on a scenario
+ * with no saved model gets it unless `x-olumi-draft-arm: off`; a saved model is 'n/a'. Echoed as `_agent.draft_arm`.
+ */
+export const draftArmOf = (mode: AgentLaneMode, noSavedModel: boolean, header: unknown): 'on' | 'off' | 'n/a' | undefined =>
+  (mode !== 'core' ? undefined : !noSavedModel ? 'n/a' : header === 'off' ? 'off' : 'on');
 
 /**
  * ⭐ PATH-B `core` (agent-tools.ts `AgentLaneMode`): Olumi appends and rewrites nothing after the AI's reply, so the reply
@@ -3652,6 +3659,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let result: AgentTurnResult | undefined;
     /** PATH-B: the SDK runtime and trace of a `core` turn the Agents SDK ran (`_agent.sdk`); undefined on every other turn. */
     let coreSdk: CoreTurnSdk | undefined;
+    /** Whether this core turn's instructions carried the drafting guidance (`_agent.draft_arm`); undefined off core. */
+    let coreDraftArm: ReturnType<typeof draftArmOf>;
     if (isDrawnLinkPress((body['chip'] as { id?: unknown } | undefined)?.id)) {
       result = await drawnLinkPress(
         (body['chip'] as { id: string }).id, { ctx: toolCtx, history, message, instructions: AGENT_INSTRUCTIONS, maxOutputTokens: budget.max_output_tokens, mode },
@@ -4579,6 +4588,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const livingView = livingViewOf(coreSaved?.graph);
         // A scenario with no model yet, or whose meaning is its living model, changes through the living model only.
         const coreScenario = coreSaved !== undefined && (coreSaved.graph == null || livingView !== undefined);
+        coreDraftArm = draftArmOf(mode, coreSaved !== undefined && coreSaved.graph == null, req.headers['x-olumi-draft-arm']);
         const core = await runCoreTurn({
           ctx: coreCtx, message, budget: coreBudget(coreEffortArmOf(mode, req.headers['x-olumi-core-effort'])), replyBudget: coreReplyBudget(), userId,
           tools: (onCall) => pathBTools({ dispatch: capDispatch, proposals, critique: modelCritic(coreBudget()), deadlineAt: constructionDeadlineAt,
@@ -4597,7 +4607,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
               if (result.ok && result.mutated && (result.receipts?.length ?? 0) > 0) verifiedSave = true;
               onCall(row, { ...result });
             }, coreScenario ? 'core' : 'legacy'),
-          instructions: instructionsForMode(mode, `${promptArmOf(mode, req.headers['x-olumi-prompt-arm']) === 'B' ? CORE_ALIGNED_INSTRUCTIONS : AGENT_TOOL_INSTRUCTIONS}${eligibleIntervention === undefined ? '' : `\n\n${ELIGIBLE_INTERVENTION_INSTRUCTION}`}`),
+          instructions: instructionsForMode(mode, `${promptArmOf(mode, req.headers['x-olumi-prompt-arm']) === 'B' ? CORE_ALIGNED_INSTRUCTIONS : AGENT_TOOL_INSTRUCTIONS}${eligibleIntervention === undefined ? '' : `\n\n${ELIGIBLE_INTERVENTION_INSTRUCTION}`}${coreDraftArm === 'on' ? `\n\n${CORE_DRAFTING_GUIDANCE}` : ''}`),
           briefText: coreSaved?.brief_text,
           canonicalState: livingView === undefined ? canonicalContext?.packet?.state
             : { ...(canonicalContext?.packet?.state as Record<string, unknown> | undefined), ...livingView },
@@ -6972,6 +6982,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         session_id: sessionId,
         mode,
         ...(coreSdk !== undefined ? { sdk: coreSdk } : {}),
+        ...(coreDraftArm !== undefined ? { draft_arm: coreDraftArm } : {}),
         tool_calls: result.tool_calls,
         mutated: result.mutated,
         hops: result.hops,

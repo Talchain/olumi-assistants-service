@@ -235,6 +235,30 @@ describe('PATH-B core: the AI\'s own words are the reply; protocol, cards, resul
     }
   });
 
+  it('drafting guidance (Paul 21 Oct, the benchmarked drafting prompt): a core turn with no saved model sends it and says so; the off arm withholds it; a saved model is n/a', async () => {
+    // Copied from the guidance's opening, never imported: a change to either side turns the row RED.
+    const DRAFTING = 'DRAFTING THE FIRST MODEL. Build the leanest model that captures what decides this situation';
+    const instructionsSent = (): string[] => sent.filter((b) => b.includes(CORE_RULE)).map((b) => (JSON.parse(b) as Json).instructions as string);
+    graph = null as never;
+    const on = await typed('We are weighing two ways to grow next year.', CORE);
+    expect(on._agent.draft_arm).toBe('on');
+    expect(instructionsSent().length, 'a core provider call was captured').toBeGreaterThan(0);
+    for (const i of instructionsSent()) expect(i).toContain(DRAFTING);
+    sent.length = 0;
+    const off = await typed('We are weighing two ways to grow next year.', { ...CORE, 'x-olumi-draft-arm': 'off' });
+    expect(off._agent.draft_arm).toBe('off');
+    expect(instructionsSent().length).toBeGreaterThan(0);
+    for (const i of instructionsSent()) expect(i).not.toContain(DRAFTING);
+    // CONTROL: a saved model never takes it; outside core no arm is said.
+    sent.length = 0;
+    graph = READ.graph;
+    const saved = await typed('What does the model say now?', CORE);
+    expect(saved._agent.draft_arm).toBe('n/a');
+    expect(instructionsSent().length).toBeGreaterThan(0);
+    for (const i of instructionsSent()) expect(i).not.toContain(DRAFTING);
+    expect((await typed('What does the model say now?'))._agent.draft_arm).toBeUndefined();
+  });
+
   it('effort arm (programme-docs #94): the header lowers the builder\u2019s effort on the provider call; without it the call keeps high', async () => {
     const effortsSent = (): unknown[] => sent.filter((b) => b.includes(CORE_RULE)).map((b) => (JSON.parse(b) as Json).reasoning?.effort);
     await typed('What does the model say now?', { ...CORE, 'x-olumi-core-effort': 'medium' });
