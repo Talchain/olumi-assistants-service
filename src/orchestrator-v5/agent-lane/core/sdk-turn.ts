@@ -33,6 +33,7 @@ import { getRuntimeEnv } from '../../../config/env-resolver.js';
 import { ledgeredAgentsClient } from '../../../adapters/llm/openai-agents-client.js';
 import { currentStageEmitter, emitAgentPhase } from '../../../cee/unified-pipeline/stage-stream-context.js';
 import { log } from '../../../utils/telemetry.js';
+import { recordedProviderCalls } from '../../../adapters/llm/provider-policy.js';
 import type { OpenAiPausedRun } from '../../session/store.js';
 import type { DraftVerification } from '../../path-b/tools/outcome.js';
 import { agentRequestIdentity } from '../runtime/prompt-identity.js';
@@ -390,7 +391,15 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
     if (err instanceof MaxTurnsExceededError) return finish('', 'hop_limit', CORE_MAX_MODEL_CALLS, 'host');
     // The capability's own error, unwrapped, so the route's existing handlers see the same error the loop would raise.
     if (err instanceof ToolCallError && err.error !== undefined) throw err.error;
-    log.warn({ event: 'agent_core.turn_failed', scenario_id: input.ctx.scenario_id, request_id: input.ctx.request_id, err: String(err).slice(0, 300) },
+    // Paul's served test (21 Oct, 31711a9): a revision turn failed after 120 s with OpenAI's "Another process is currently
+    // operating on this conversation", and nothing said which call held it. The failure now carries this turn's own provider
+    // ledger (each call's status, outcome and time) and the provider's own error identity, so the next one is measured.
+    const e = err as { status?: unknown; code?: unknown; requestID?: unknown; request_id?: unknown };
+    log.warn({ event: 'agent_core.turn_failed', scenario_id: input.ctx.scenario_id, request_id: input.ctx.request_id, err: String(err).slice(0, 300),
+      provider_status: e.status ?? null, provider_code: e.code ?? null, provider_request_id: e.requestID ?? e.request_id ?? null,
+      conversation_id: conversation.id, elapsed_ms: Math.max(0, now() - startedAt),
+      provider_calls: recordedProviderCalls().map((c) => ({ site: c.site, model: c.model, purpose: c.purpose, ms: c.duration_ms ?? null,
+        status: c.attempt?.transport_status ?? null, outcome: c.attempt?.outcome ?? null, result: c.attempt?.result ?? null, retry: c.attempt?.retry ?? null })) },
       'agent-core: the SDK run did not finish');
     throw err;
   } finally {

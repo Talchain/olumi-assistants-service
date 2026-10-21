@@ -236,6 +236,22 @@ describe('PATH-B core turn on the Agents SDK', () => {
     expect(calls[0]!.input_sha256).toBe(calls[1]!.input_sha256);
   });
 
+  it("Paul's served test (21 Oct): a turn the provider refuses (conversation busy) is logged with its own ledger and the provider's error, so the next one is measured", async () => {
+    const { log } = await import('../../../utils/telemetry.js');
+    const warn = vi.spyOn(log, 'warn');
+    vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
+      if (String(url).endsWith('/v1/conversations')) return new Response(JSON.stringify({ id: 'conv_busy', object: 'conversation' }), { status: 200, headers: { 'content-type': 'application/json' } });
+      return new Response(JSON.stringify({ error: { message: 'Another process is currently operating on this conversation. Please retry in a few seconds.', code: 'conversation_locked' } }),
+        { status: 400, headers: { 'content-type': 'application/json', 'x-request-id': 'req_synthetic' } });
+    }));
+    await expect(turn('A synthetic question.', caps())).rejects.toMatchObject({ status: 400 });
+    const row = warn.mock.calls.map((c) => c[0] as Json).find((o) => o.event === 'agent_core.turn_failed');
+    expect(row, 'the failure is logged').toBeDefined();
+    expect(row).toMatchObject({ provider_status: 400, provider_request_id: 'req_synthetic', conversation_id: 'conv_busy' });
+    expect(row!.provider_calls).toEqual([expect.objectContaining({ status: 400, outcome: 'http_error' })]);
+    warn.mockRestore();
+  });
+
   it('zod isolation: the SDK and the adapters share ONE zod 4 (`zod-v4`); the service stays on zod 3; a zod schema is the tool\'s schema', () => {
     const service = createRequire(`${process.cwd()}/package.json`);
     const sdkCore = createRequire(createRequire(service.resolve('@openai/agents')).resolve('@openai/agents-core'));
