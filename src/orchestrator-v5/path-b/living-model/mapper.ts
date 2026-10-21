@@ -32,7 +32,7 @@ export type WithheldReason =
   | 'goal_level_unknown' | 'link_frame_unknown' | 'chance_rests_on_withheld' | 'condition_not_in_slice'
   | 'goal_level_not_admitted' | 'factor_level_unknown' | 'level_range_not_in_slice' | 'setting_not_convertible'
   | 'link_endpoint_unknown' | 'link_unit_mismatch' | 'link_range_no_law' | 'link_sign_unknown'
-  | 'exact_not_drawable';
+  | 'exact_not_drawable' | 'stay_within_base_not_theirs' | 'stay_within_unconfirmed';
 
 export interface Withheld { readonly id: string; readonly reason: WithheldReason }
 
@@ -52,6 +52,8 @@ const STRUCTURAL = { strength: { mean: 1, std: 0.01 }, exists_probability: 1, ef
 const OLUMI_EXISTS = 0.8;
 
 const stated = (s: LivingSourceT): boolean => s === 'user' || s === 'party';
+/** The person's own words for keeping a level where it is (Science, 21 Oct). The cue only skips the question; it never sets the comparator or the number. */
+const STAY_CUE = { '>=': /\b(keep|keeps|keeping|stay|stays|staying|at least|no less than|minimum)\b/i, '<=': /\b(keep|keeps|keeping|stay|stays|staying|at most|no more than|cap|capped)\b/i } as const;
 /** An item the person set themselves on the canvas: theirs, with no words to quote (`edit.ts`). */
 const edited = (a: { source: LivingSourceT; quote: string | null }): boolean => a.source === 'user' && a.quote === null;
 /** user/party → their words (or their own edit); Olumi → its inference; unverified → no stamp (unknown). */
@@ -159,12 +161,24 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
         });
         if (t!.current === null) hold(aim.id, 'goal_level_unknown');
         else {
-          const level = admitGoalBaseline({ rawTarget: lt.value, rawBaseline: t!.current, cap: resolved.cap, ...(lt.comparator === '<=' ? { ceiling: true } : {}) });
-          if (!level.admitted) hold(aim.id, 'goal_level_not_admitted');
+          // "Stay within" (Science, 21 Oct): a floor today already clears, or a ceiling today already sits under, is a valid
+          // goal, scored on the level at the end of the horizon (not along the way). Only on the person's own level today
+          // (an Olumi estimate is asked for), and read silently only when their words say so; otherwise Olumi asks once.
+          const stays = lt.comparator === '<=' ? t!.current <= lt.value : t!.current > lt.value;
+          const level = stays && !(t!.current_source === 'user' || stated(aim.source)) ? 'stay_within_base_not_theirs' as const
+            : stays && !STAY_CUE[lt.comparator].test(aim.quote ?? '') ? 'stay_within_unconfirmed' as const
+            : admitGoalBaseline({ rawTarget: lt.value, rawBaseline: t!.current, cap: resolved.cap, ...(lt.comparator === '<=' ? { ceiling: true } : {}),
+              ...(stays ? { stayWithin: true } : {}) });
+          if (typeof level === 'string') hold(aim.id, level);
+          else if (!level.admitted) hold(aim.id, 'goal_level_not_admitted');
           else {
             goalNode.observed_state = withSource({ value: level.normalised, baseline: level.normalised, raw_value: t!.current, cap: resolved.cap, unit: lt.unit ?? '' },
               t!.current_source === 'user' ? { source: 'user', quote: null } : aim);
             // A change is measured from today only if carrying on as now leaves the quantity there (amendment 1): said beside it.
+            if (stays) {
+              const say = (v: number) => `${v}${lt.unit ? ` ${lt.unit}` : ''}`;
+              assumed.push({ id: aim.id, text: `Keep ${t!.quantity} at or ${lt.comparator === '<=' ? 'below' : 'above'} ${say(lt.value)} (today ${say(t!.current)}). The chance is for its level at the end of ${t!.by_when ?? 'the period'}, not along the way.` });
+            }
             if (isChange) assumed.push({ id: aim.id, text: `Carrying on as now leaves ${t!.quantity} at today's ${t!.current}${lt.unit ? ` ${lt.unit}` : ''}; the change is measured from that.` });
           }
         }

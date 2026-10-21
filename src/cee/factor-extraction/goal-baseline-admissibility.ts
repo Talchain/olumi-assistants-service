@@ -99,6 +99,12 @@ export function admitGoalBaseline(args: {
    * `level_frame`) is admitted at −1 on the floor reading. Absent ⇒ the [0, 1] rule, byte for byte.
    */
   readonly signedLevel?: true;
+  /**
+   * "Stay within" (Science, 21 Oct): a level that ALREADY meets its floor or ceiling is a valid goal — keep it there — once
+   * the engine scores the goal's own direction. The caller (the core mapper) checks the level is the person's own and their
+   * words say so; rule 1 is then skipped, rule 2 is unchanged. Absent ⇒ both rules, byte for byte.
+   */
+  readonly stayWithin?: true;
 }): GoalBaselineAdmission {
   const { rawTarget, rawBaseline, cap } = args;
 
@@ -111,7 +117,7 @@ export function admitGoalBaseline(args: {
     return { admitted: false, reason: 'baseline_off_cap_scale' };
   }
 
-  if (args.ceiling === true ? !statedLevelExceedsTarget(rawTarget, rawBaseline) : statedLevelExceedsTarget(rawTarget, rawBaseline)) {
+  if (args.stayWithin !== true && (args.ceiling === true ? !statedLevelExceedsTarget(rawTarget, rawBaseline) : statedLevelExceedsTarget(rawTarget, rawBaseline))) {
     return { admitted: false, reason: 'direction_unsupported' };
   }
 

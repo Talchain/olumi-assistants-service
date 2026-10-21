@@ -360,4 +360,40 @@ describe('thin core mapper: living model → GraphV3', () => {
     // CONTROL: a level target says no from-today premise.
     expect(mapLivingModel(KNOWN_ANSWER).assumed).toEqual([]);
   });
+
+  it('Science 21 Oct, "stay within": a level that already meets its floor or ceiling is a goal, on their own level and words, scored at the end', () => {
+    const target = (t: Partial<NonNullable<LivingModelT['aims'][number]['target']>>, aim: Partial<LivingModelT['aims'][number]> = {}) => {
+      const m: LivingModelT = structuredClone(KNOWN_ANSWER);
+      m.aims[0] = { ...m.aims[0]!, ...aim, target: { ...m.aims[0]!.target!, ...t } };
+      return mapLivingModel(m);
+    };
+    const goal = (out: ReturnType<typeof mapLivingModel>) => (out.graph.nodes as Rec[]).find((n) => n.id === 'g')!;
+    // A floor today already clears ("keep … at or above 50", today 70): admitted, with the end-of-horizon reading said beside it.
+    const floor = target({ comparator: '>=', value: 50, by_when: 'next quarter' }, { quote: 'keep units at or above 50; today we are at 70' });
+    expect(floor.withheld.filter((w) => w.id === 'g')).toEqual([]);
+    expect(goal(floor)).toMatchObject({ goal_direction: '>=', goal_threshold_raw: 50, observed_state: { raw_value: 70 } });
+    expect(floor.assumed).toEqual([{ id: 'g', text: 'Keep units at or above 50 units (today 70 units). The chance is for its level at the end of next quarter, not along the way.' }]);
+    // A ceiling today already sits under ("at most 90", today 70): the same, read as a ceiling.
+    const ceiling = target({ comparator: '<=', value: 90 }, { quote: 'at most 90 units; today we are at 70' });
+    expect(goal(ceiling)).toMatchObject({ goal_direction: '<=', goal_threshold_raw: 90, observed_state: { raw_value: 70 } });
+    expect(ceiling.assumed.map((a) => a.text)).toEqual(['Keep units at or below 90 units (today 70 units). The chance is for its level at the end of the period, not along the way.']);
+    // Olumi's estimate of today is asked for, never used (condition 1); the person's own canvas edit of today is theirs.
+    const olumis = target({ comparator: '>=', value: 50 }, { source: 'olumi', quote: null });
+    expect(olumis.withheld).toContainEqual({ id: 'g', reason: 'stay_within_base_not_theirs' });
+    expect(goal(olumis)).not.toHaveProperty('observed_state');
+    expect(target({ comparator: '>=', value: 50, current_source: 'user' }, { source: 'olumi', quote: null }).withheld.filter((w) => w.id === 'g'))
+      .toContainEqual({ id: 'g', reason: 'stay_within_unconfirmed' });
+    // No cue in their words → Olumi asks once; a cue for the other direction is no cue (the comparator may be misread).
+    for (const quote of ['units should be 50 or more; today we are at 70', 'at most 50 units; today we are at 70']) {
+      const asked = target({ comparator: '>=', value: 50 }, { quote });
+      expect(asked.withheld, quote).toContainEqual({ id: 'g', reason: 'stay_within_unconfirmed' });
+      expect(asked.assumed, quote).toEqual([]);
+    }
+    // CONTROLS: a ceiling below today is an ordinary reach goal, and a floor equal to today holds the line, each as before.
+    for (const [t, quote] of [[{ comparator: '<=', value: 60, current: 180 }, 'no more than 60 units; today 180'], [{ comparator: '>=', value: 70 }, 'reach 70 units; today 70']] as const) {
+      const out = target(t, { quote });
+      expect(out.withheld.filter((w) => w.id === 'g'), quote).toEqual([]);
+      expect(out.assumed, quote).toEqual([]);
+    }
+  });
 });
