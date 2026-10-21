@@ -118,7 +118,7 @@ export const FIELD_CLASS_BY_OP: Readonly<Record<PatchOperation['op'] | ProposalO
   replace_draft: 'none', // a whole revised draft, approved as one act; nothing in it is a figure this card edits
   repoint_goal: 'none', // a complete governing-outcome interpretation, approved as one act
   apply_saved_correction: 'none', // canonical targeted edits prepared together; no estimate field on this card
-  living_change: 'none', // thin core: a living-model change approved as one act; this legacy card edits none of it
+  living_change: 'none', // thin core: a living-model change approved as one act; this legacy card edits none of it (a factor's new point value is SHOWN, never editable)
 };
 
 export interface LinkStrengthField {
@@ -398,6 +398,21 @@ export function agentProposalRecord(pa: PendingAction, graph: unknown, nowMs = D
         from_label: labelOf(from), to_label: labelOf(to), direction: expected['effect_direction'] === 'negative' ? 'negative' : 'positive',
         current: { band: strengthBandFromEdgeBand(v['band'] as InfluenceBand), source: yours ? 'yours' : 'estimate' },
         allowed_bands: STRENGTH_BANDS, editable: !yours });
+    } else if (o.op === 'living_change' && o.path.startsWith('factor:') && v['change'] === 'change' && isRec(v['after'])) {
+      // A core proposal (path-b `living_change`, the whole proposed model diffed item by item): a factor whose point value
+      // changes is projected so the canvas can show it on the card it changes (Lenses #2880, 21 Oct: core cards had no
+      // fields). A range stays a range (not projected); a party's or unverified figure is never shown as Olumi's estimate;
+      // never editable, because a core approval writes the proposed model exactly as prepared.
+      const a = v['after'];
+      const b = isRec(v['before']) ? v['before'] : {};
+      const id = o.path.slice('factor:'.length);
+      if (typeof a['value'] !== 'number' || !Number.isFinite(a['value']) || a['low'] != null || a['high'] != null
+        || typeof a['unit'] !== 'string' || a['unit'] === '' || a['value'] === b['value']
+        || (a['source'] !== 'user' && a['source'] !== 'olumi')) continue;
+      fields.push({ field_id: `factor_value:${id}`, kind: 'factor_value', node_id: id,
+        label: typeof a['label'] === 'string' ? a['label'] : labelOf(id), unit: a['unit'],
+        current: { value: a['value'], unit: a['unit'], source: a['source'] === 'user' ? 'yours' : 'estimate' },
+        filled_missing: typeof b['value'] !== 'number', editable: false });
     }
   }
   const decline: CardAction = { id: declineChipIdFor(p.proposal_id), label: 'Not now', message: 'Not now.' };

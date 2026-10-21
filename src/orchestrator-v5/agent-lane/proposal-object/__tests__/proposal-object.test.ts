@@ -426,6 +426,31 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
     const g = { nodes: [{ id: 'fac_hours', label: 'Hours' }, { id: 'fac_cost', label: 'Cost' }, { id: 'fac_own', label: 'Own', observed_state: { value: 3 } }], edges: [] };
     return { p, carrier, g, record: agentProposalRecord(carrier, g)! };
   };
+  it('core living_change (Lenses #2880, 21 Oct: core cards carried no fields): a factor\'s new point value is a field, in the person\'s or Olumi\'s name, never editable', async () => {
+    const { createProposal } = await import('../../proposal.js');
+    const { proposalPendingAction } = await import('../../durable-proposal.js');
+    const { agentProposalRecord } = await import('../record.js');
+    const f = (id: string, value: number | null, source: string, more: Record<string, unknown> = {}) =>
+      ({ id, label: id.toUpperCase(), value, low: null, high: null, unit: 'hours', defined_as: null, source, party: null, quote: null, ...more });
+    const lc = (id: string, before: unknown, after: unknown) => ({ op: 'living_change' as const, path: `factor:${id}`, value: { change: 'change', before, after } });
+    const p = createProposal({ scenario_id: SID, user_id: null, base_graph_identity_hash: 'pin', operations: [
+      lc('f_olumi', f('f_olumi', null, 'olumi'), f('f_olumi', 24, 'olumi')),
+      lc('f_user', f('f_user', 10, 'user'), f('f_user', 12, 'user')),
+      lc('f_party', f('f_party', 5, 'party'), f('f_party', 6, 'party')),
+      lc('f_range', f('f_range', 5, 'user'), f('f_range', null, 'user', { low: 4, high: 8 })),
+      lc('f_label', f('f_label', 7, 'user'), f('f_label', 7, 'user', { label: 'Renamed' })),
+      { op: 'living_change' as const, path: 'link:l1', value: { change: 'change', before: {}, after: {} } },
+    ], provenance: { authored_by: 'model_proposed' }, validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: 'Core change' });
+    const carrier = proposalPendingAction(p, { id: `agent-approve-proposal:${p.proposal_id}`, label: p.public_label, message: 'Apply.' },
+      { scenario_id: SID, emitted_at_iso: new Date().toISOString() });
+    const record = agentProposalRecord(carrier, { nodes: [], edges: [] })!;
+    expect(record.fields).toEqual([
+      { field_id: 'factor_value:f_olumi', kind: 'factor_value', node_id: 'f_olumi', label: 'F_OLUMI', unit: 'hours',
+        current: { value: 24, unit: 'hours', source: 'estimate' }, filled_missing: true, editable: false },
+      { field_id: 'factor_value:f_user', kind: 'factor_value', node_id: 'f_user', label: 'F_USER', unit: 'hours',
+        current: { value: 12, unit: 'hours', source: 'yours' }, filled_missing: false, editable: false },
+    ]);
+  });
   it('RED classifier assigns Agent factor and link kinds exhaustively', () => {
     expect(FIELD_CLASS_BY_OP.set_factor_value).toBe('factor_value');
     expect(FIELD_CLASS_BY_OP.set_link_strength).toBe('link_strength');
