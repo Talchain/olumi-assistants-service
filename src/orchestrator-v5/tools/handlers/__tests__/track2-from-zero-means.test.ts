@@ -35,7 +35,7 @@ const on = (factor_id: string, quote: string) => ({ factor_id, value: 1, low: nu
 
 /** `today`: the goal's level today in £, or null when nobody said it (the mapper holds it, `goal_level_unknown`). */
 export const pricingAndReferral = (today: number | null): LivingModelT => ({
-  aims: [{ id: 'gp', text: 'Monthly gross profit of at least £12,000', status: 'current',
+  aims: [{ id: 'gp', text: 'Monthly gross profit of at least £12,000', status: 'current', defined_as: null,
     ...who(today === null ? 'we need at least £12k a month' : `we need at least £12k a month; today it is £${today / 1000}k`),
     target: { quantity: 'monthly gross profit', comparator: '>=', value: 12000, low: null, high: null, unit: '£', by_when: null,
       baseline: 'today', current: today, current_source: null, current_unit: null, change_kind: null } }],
@@ -45,8 +45,8 @@ export const pricingAndReferral = (today: number | null): LivingModelT => ({
     { id: 'referral', label: 'Referral scheme', settings: [on('referral_running', 'start a referral scheme')], ...who('start a referral scheme') },
   ],
   factors: [
-    { id: 'pricing_page', label: 'New pricing page live', value: 0, low: null, high: null, unit: null, ...who('we have no pricing page') },
-    { id: 'referral_running', label: 'Referral scheme running', value: 0, low: null, high: null, unit: null, ...who('we have no referral scheme') },
+    { id: 'pricing_page', label: 'New pricing page live', value: 0, low: null, high: null, unit: null, defined_as: null, ...who('we have no pricing page') },
+    { id: 'referral_running', label: 'Referral scheme running', value: 0, low: null, high: null, unit: null, defined_as: null, ...who('we have no referral scheme') },
   ],
   links: [
     // Olumi's guess that a pricing page helps, with no size: the placeholder the earlier withhold reads.

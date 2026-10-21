@@ -27,13 +27,19 @@ import { resolveGoalThresholdCapWithProvenance } from '../../../utils/goal-thres
 import { admitGoalBaseline } from '../../../cee/factor-extraction/goal-baseline-admissibility.js';
 import { sayFigureAsWritten } from '../../agent-lane/say-figure.js';
 import { LLM_STRENGTH_STD_FLOOR } from '../../../cee/constants.js';
+import { sameUnit, unitsCompose } from '../../agent-lane/same-unit.js';
 
 export type WithheldReason =
   | 'no_level_target' | 'aim_not_in_slice' | 'change_kind_unknown' | 'change_base_invalid' | 'change_base_not_theirs' | 'current_unit_mismatch' | 'exact_target_not_in_slice' | 'target_range_not_in_slice'
   | 'goal_level_unknown' | 'link_frame_unknown' | 'chance_rests_on_withheld' | 'condition_not_in_slice'
   | 'goal_level_not_admitted' | 'factor_level_unknown' | 'level_range_not_in_slice' | 'setting_not_convertible'
   | 'link_endpoint_unknown' | 'link_unit_mismatch' | 'link_range_no_law' | 'link_sign_unknown'
-  | 'exact_not_drawable' | 'stay_within_base_not_theirs' | 'stay_within_unconfirmed';
+  | 'exact_not_drawable' | 'stay_within_base_not_theirs' | 'stay_within_unconfirmed'
+  | 'identity_not_in_slice' | 'identity_part_unknown' | 'identity_unit_mismatch' | 'identity_inconsistent'
+  | 'identity_other_cause' | 'identity_contradicted' | 'identity_restated';
+
+/** A definition that withholds the chance when its carrier is on the goal's path (it cannot be worked out as stated). */
+const IDENTITY_REFUSED: ReadonlySet<WithheldReason> = new Set(['identity_not_in_slice', 'identity_part_unknown', 'identity_unit_mismatch', 'identity_inconsistent']);
 
 export interface Withheld { readonly id: string; readonly reason: WithheldReason }
 
@@ -194,7 +200,8 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   const optionIds = new Set(model.options.map((o) => o.id));
   const direct = goal === undefined ? [] : model.links.filter((l) => optionIds.has(l.from) && l.to === goal!.id);
   let exactSum: { readonly lever: string; readonly today: string } | undefined;
-  if (direct.length > 0 && goal !== undefined && goalNode?.observed_state !== undefined) {
+  // A goal the person defines (Track 2) is worked out from its definition, so an option's own effect on it is another cause.
+  if (direct.length > 0 && goal !== undefined && goalNode?.observed_state !== undefined && !aim!.defined_as) {
     const g = goal;
     const todayIsTheirs = aim!.target!.current_source === 'user' || stated(aim!.source);
     const exact = todayIsTheirs && new Set(direct.map((l) => l.from)).size === direct.length
@@ -208,7 +215,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
       const lever = exactSum.lever;
       model = { ...model,
         factors: [...model.factors, { id: lever, label: `Change in ${aim!.target!.quantity}`, value: 0, low: null, high: null,
-          unit: g.unit === '' ? null : g.unit, source: 'olumi', party: null, quote: null }],
+          unit: g.unit === '' ? null : g.unit, defined_as: null, source: 'olumi', party: null, quote: null }],
         options: model.options.map((o) => {
           const l = direct.find((d) => d.from === o.id);
           return l === undefined ? o : { ...o, settings: [...o.settings, { factor_id: lever, value: (l.effect.sign === '-' ? -1 : 1) * Math.abs(l.effect.value!),
@@ -228,7 +235,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     const on = (optionId: string) => `${optionId}__on`;
     model = { ...model,
       factors: [...model.factors, ...[...new Set(fromOption.map((l) => l.from))].map((id) => ({ id: on(id),
-        label: `${model.options.find((o) => o.id === id)!.label} in place`, value: 0, low: null, high: null, unit: null, source: 'olumi' as const, party: null, quote: null }))],
+        label: `${model.options.find((o) => o.id === id)!.label} in place`, value: 0, low: null, high: null, unit: null, defined_as: null, source: 'olumi' as const, party: null, quote: null }))],
       options: model.options.map((o) => {
         const l = fromOption.find((d) => d.from === o.id);
         return l === undefined ? o : { ...o, settings: [...o.settings, { factor_id: on(o.id), value: 1, low: null, high: null, unit: null, source: l.source, party: l.party, quote: l.quote }] };
@@ -291,6 +298,62 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     for (const id of Object.keys(interventions)) edges.push({ from: o.id, to: id, ...STRUCTURAL, provenance: { source: 'cee_hypothesis' } });
   }
 
+  // ── Identities (Track 2): what a quantity IS, defined as the sum or product of factors. ISL works it out exactly from
+  // its parts' levels and never draws them, so the parts' edges are definitional, held at 1 with no existence doubt. A
+  // definition that cannot be worked out as stated (a part unknown, units that do not compose, a stated level its parts
+  // do not make, definitions defined by each other) is refused by name, and a chance resting on it is withheld below;
+  // it is never filled in, rescaled or approximated by a drawn link.
+  const declared = [
+    ...model.factors.map((f) => ({ item: f, carrier: nodes.find((n) => n.id === f.id), unit: f.unit, label: f.label, level: f.value })),
+    ...(aim === undefined ? [] : [{ item: aim, carrier: goalNode, unit: aim.target?.unit ?? null, label: aim.target?.quantity ?? aim.text,
+      level: aim.target?.current ?? null }]),
+  ].filter((d) => d.item.defined_as);
+  const partsOf = new Map(declared.map((d) => [d.item.id, d.item.defined_as!.of] as const));
+  const inCycle = (id: string, seen: ReadonlySet<string> = new Set()): boolean =>
+    seen.has(id) || (partsOf.get(id) ?? []).some((p) => partsOf.has(p) && inCycle(p, new Set([...seen, id])));
+  const identities = new Map<string, { readonly op: 'sum' | 'product'; readonly of: readonly string[]; readonly unit: string | null }>();
+  for (const { item, carrier, unit, label, level } of declared) {
+    const def = item.defined_as!;
+    const { op, of } = def;
+    const parts = of.map((id) => model.factors.find((f) => f.id === id));
+    const values = parts.map((p) => p?.value ?? null);
+    // Exact: a definition's stated level is what its parts make. The engine would rescale a product to fit (ISL's k).
+    const made = op === 'sum' ? values.reduce<number>((a, v) => a + (v ?? 0), 0) : values.reduce<number>((a, v) => a * (v ?? 0), 1);
+    const reason: WithheldReason | undefined = carrier === undefined || of.length < 2 || new Set(of).size !== of.length || of.includes(item.id)
+      || parts.some((p) => p === undefined) || (op === 'product' && of.length !== 2) || inCycle(item.id) ? 'identity_not_in_slice'
+      : values.some((v) => v === null) ? 'identity_part_unknown'
+        : (op === 'sum' ? !parts.every((p) => sameUnit(p!.unit, unit))
+          : unitsCompose(unit, label, { unit: parts[0]!.unit, label: parts[0]!.label }, { unit: parts[1]!.unit, label: parts[1]!.label }).kind !== 'proof')
+          ? 'identity_unit_mismatch'
+          : level !== null && Math.abs(level - made) > 1e-9 * Math.max(1, Math.abs(level)) ? 'identity_inconsistent' : undefined;
+    if (reason !== undefined) { hold(item.id, reason); continue; }
+    identities.set(item.id, { op, of, unit });
+    // Who stated the DEFINITION (its own attribution), never who stated the quantity: an unverified one is no one's yet.
+    carrier!.nonlinear_identity = { operation: op, factor_ids: [...of], stated_in_brief: stated(def.source) };
+    const who = stated(def.source) ? { source: edited(def) ? 'user_specified' : 'brief_extraction', magnitude: 'user_stated' }
+      : def.source === 'olumi' ? { source: 'cee_hypothesis', magnitude: 'olumi_estimate' } : {};
+    for (const part of of) {
+      edges.push({ id: `${part}__${item.id}`, from: part, to: item.id, strength: { mean: 1, std: LLM_STRENGTH_STD_FLOOR }, exists_probability: 1,
+        effect_direction: 'positive', provenance: { ...who, definitional: true } });
+    }
+  }
+  /**
+   * A link from a part into its defined quantity restates the definition when it says nothing else: a positive sign and,
+   * if sized, the definition's own coefficient (1 for a sum; the other part's level for a product, at today's levels).
+   * Anything else (a negative sign, another size) contradicts it, so the chance on it is withheld: never silently dropped.
+   */
+  const restates = (l: LivingModelT['links'][number], d: { op: 'sum' | 'product'; of: readonly string[]; unit: string | null }): boolean => {
+    const e = l.effect;
+    if (e.sign === '-') return false;
+    const coefficient = d.op === 'sum' ? 1 : d.of.filter((p) => p !== l.from).reduce((a, p) => a * (model.factors.find((f) => f.id === p)?.value ?? NaN), 1);
+    const same = (v: number | null) => v !== null && Math.abs(Math.abs(v) - coefficient) <= 1e-9 * Math.max(1, Math.abs(coefficient));
+    // A spread the person stated (a Normal law, a range) says the link is uncertain; a definition is exact (buddy r2).
+    if (e.form === 'normal' && e.sd !== null && e.sd > 0) return false;
+    if (e.form === 'range' && (e.low !== null || e.high !== null) && !(same(e.low) && same(e.high))) return false;
+    const size = e.form === 'point' || e.form === 'exact' || e.form === 'normal' || e.form === 'range' ? e.value : null;
+    return (size === null || same(size)) && (e.unit === null || d.unit === null || sameUnit(e.unit, d.unit));
+  };
+
   // ── Causal links, sized on their endpoints' frames.
   const frameOf = (id: string): { cap: number; unit: string | null } | undefined => {
     if (goal !== undefined && id === goal.id) return { cap: goal.cap, unit: goal.unit === '' ? null : goal.unit };
@@ -302,6 +365,13 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   const hedged = new Set(model.conditions.filter((c) => c.role === 'assumption').flatMap((c) => c.applies_to));
   for (const l of model.links) {
     if (!causal.has(l.from) || !causal.has(l.to)) { hold(l.id, 'link_endpoint_unknown'); continue; }
+    // A defined quantity is its definition: a link from one of its parts restates it (kept in the living model, never
+    // counted twice); a link from anything else is a cause the definition leaves out, so the chance on it is withheld.
+    const definition = identities.get(l.to);
+    if (definition !== undefined) {
+      hold(l.id, !definition.of.includes(l.from) ? 'identity_other_cause' : restates(l, definition) ? 'identity_restated' : 'identity_contradicted');
+      continue;
+    }
     // The engine has no "unknown" direction, so an unsigned link stays in the living model only.
     if (l.effect.sign === null) { hold(l.id, 'link_sign_unknown'); continue; }
     const sign = l.effect.sign === '-' ? -1 : 1;
@@ -379,7 +449,8 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   if (goal !== undefined && goalNode !== undefined) {
     // The path is read on the person's own links as well as the engine's, so an option effect lowered to a factor or to the
     // exact sum keeps everything stated about it (buddy R1 on #3523).
-    const allLinks = [...living.links, ...model.links];
+    const allLinks = [...living.links, ...model.links,
+      ...declared.flatMap(({ item }) => item.defined_as!.of.map((part) => ({ id: `${part}__${item.id}`, from: part, to: item.id })))];
     const onPath = new Set([goal.id]);
     for (let grew = true; grew;) {
       grew = false;
@@ -387,8 +458,9 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     }
     // An option moves the goal through what it sets, so it is on the path too (science check 5bbceeec, point 5).
     for (const o of model.options) if (o.settings.some((s) => onPath.has(s.factor_id))) onPath.add(o.id);
-    const leftOut = withheld.some((w) => (w.reason === 'link_sign_unknown' || w.reason === 'link_endpoint_unknown' || w.reason === 'exact_not_drawable')
-      && onPath.has(model.links.find((l) => l.id === w.id)?.to ?? '')) || [...droppedSettings].some((id) => onPath.has(id));
+    const leftOut = withheld.some((w) => (w.reason === 'link_sign_unknown' || w.reason === 'link_endpoint_unknown' || w.reason === 'exact_not_drawable'
+      || w.reason === 'identity_other_cause' || w.reason === 'identity_contradicted') && onPath.has(model.links.find((l) => l.id === w.id)?.to ?? ''))
+      || withheld.some((w) => IDENTITY_REFUSED.has(w.reason) && onPath.has(w.id)) || [...droppedSettings].some((id) => onPath.has(id));
     // An unresolved PREREQUISITE on anything the chance rests on (the engine cannot hold one) withholds it, whoever raised it.
     // An applied ASSUMPTION carries a CONDITIONAL result, kept in the living model the AI reads and said with the result; a
     // CHALLENGE is said beside it. The AI declares the role; the source never decides it (AIE, 17:59 20 Oct).
