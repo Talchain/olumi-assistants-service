@@ -6,8 +6,8 @@
  * alternative link. The caller maps it with the core mapper; this module reads it through the Run's OWN snapshot loader
  * (an in-memory store holding only the variant graph, beside the scenario's real pending actions), so every rule a Run
  * applies to its wire copy applies here. The `run_analysis` handler computes it with one PLoT call (no retry). Its fact is
- * read for the licensed per-option rows and DISCARDED: no `commitDirectAnswer`, no turn row, no Run fact, no scenario
- * write, no new selected Run, no version.
+ * read for each option's chance exactly as the result would show it (ST1, 21 Oct: never PLoT's untyped `outcome.mean`) and
+ * DISCARDED: no `commitDirectAnswer`, no turn row, no Run fact, no scenario write, no new selected Run, no version.
  *
  * Every refusal is typed; none is turned into a figure.
  */
@@ -15,7 +15,9 @@ import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 
 import { buildTurnContext, loadScenarioSnapshotForRunAnalysis } from '../build-turn-context.js';
 import { priorRunForSeed, seedHistoryFacts } from '../coaching/seed-reuse.js';
-import { licensedOptionRows, type OptionRow } from '../coaching/structural-challenge-compare.js';
+import { projectCanonicalAnalysisCells } from '../../routes/canonical-analysis-view.js';
+import { agentLicenceRecordOf, goalChanceLicenceForAgent } from '../goal-target/goal-chance-licence.js';
+import type { StressChance, StressVariantRows } from '../path-b/tools/stress-tool.js';
 import { AnalysisSnapshotDivergedError, NO_CLAIM, runWithBoundAnalysisSnapshot } from '../run-analysis-snapshot-binding.js';
 import { getSessionStore } from '../session/index.js';
 import type { SessionStore } from '../session/store.js';
@@ -30,20 +32,24 @@ export interface StressVariantParams {
   readonly variantGraph: Record<string, unknown>;
   /** One seed for every variant of a stress run, so variants of the same structure share their draws. */
   readonly seed: number;
-  readonly goalNodeId: string;
-  /** The stated target in the goal's own units, or null when the model states none. */
-  readonly goalLevelTarget: number | null;
   readonly signal?: AbortSignal;
   /** Test seams; production omits them. */
   readonly plotClient?: PLoTClient;
   readonly pendingStore?: Pick<SessionStore, 'readMostRecentPendingActions'>;
 }
 
-export type StressVariantResult =
-  | { readonly kind: 'rows'; readonly rows: ReadonlyMap<string, OptionRow>; readonly targetLicensed: boolean }
-  | { readonly kind: 'refused'; readonly reason: 'timed_out' | 'unsupported' | 'stale' | 'failed' };
+/** Each option's chance in one variant's Run, as the read shows it: its own cell, and the licence's figure where it is one. */
+export function stressChancesOf(result: Record<string, unknown>, graph: unknown): ReadonlyMap<string, StressChance> {
+  const block = { ...result, type: 'analysis_result' };
+  const licence = goalChanceLicenceForAgent(block);
+  const pct = (agentLicenceRecordOf(block)?.pct_by_option ?? {}) as Record<string, number>;
+  return new Map(projectCanonicalAnalysisCells(block as never, graph, result.goal_certainty).map(({ option_id, cell }) => [option_id,
+    cell.kind === 'figure' || cell.kind === 'range'
+      ? { display: cell.display, pct: cell.kind === 'figure' && Object.hasOwn(pct, option_id) ? pct[option_id]! : null, provisional: licence?.provisional === true, not_shown: null }
+      : { display: null, pct: null, provisional: false, not_shown: cell.kind === 'withheld' ? cell.why : null }]));
+}
 
-export async function runStressVariant(p: StressVariantParams): Promise<StressVariantResult> {
+export async function runStressVariant(p: StressVariantParams): Promise<StressVariantRows> {
   const context = await buildTurnContext(p.payload, p.requestId);
   const history = seedHistoryFacts({ scenarioId: context.session_id, hotWindow: context.prior_facts, durable: context.scenario_analysis_fact_set });
   const pending = p.pendingStore ?? getSessionStore();
@@ -71,14 +77,13 @@ export async function runStressVariant(p: StressVariantParams): Promise<StressVa
       () => handlerFn({ context, payload: p.payload, requestId: p.requestId, signal: p.signal ?? new AbortController().signal, orientationText: '' }),
     );
     const fact = outcome.handler_facts.find((f) => f.fact_type === 'run_analysis');
-    const read = fact === undefined ? null : licensedOptionRows(fact, edited.graph, p.goalNodeId, p.goalLevelTarget);
-    return read === null ? { kind: 'refused', reason: 'failed' } : { kind: 'rows', ...read };
+    return fact?.fact_type !== 'run_analysis' ? { kind: 'refused', reason: 'failed' } : { kind: 'rows', rows: stressChancesOf(fact.result, edited.graph) };
   } catch (err) {
     return refusal(err);
   }
 }
 
-function refusal(err: unknown): StressVariantResult {
+function refusal(err: unknown): StressVariantRows {
   if (err instanceof PLoTTimeoutError || (err instanceof HandlerInvocationFailedError && err.cause_kind === 'plot_timeout')) {
     return { kind: 'refused', reason: 'timed_out' };
   }
