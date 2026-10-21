@@ -1,0 +1,29 @@
+// Track 2 (21 Oct 2026): the PLoT half of a recording, kept as .tmpl so CEE never collects or typechecks it. `record-from-zero.sh` copies this file into a PLoT checkout as
+// tests/track2-record.test.ts (never committed there). It posts every CEE-written request in F1_OUT to PLoT's real
+// POST /v2/run, with PLoT's real ISL client pointed at a local ISL, and saves each response beside its request.
+// Nothing is mocked.
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import type { FastifyInstance } from 'fastify';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+const OUT = process.env.F1_OUT ?? '';
+process.env.ISL_ENABLE = '1';
+process.env.ISL_BASE_URL = process.env.F1_ISL_URL ?? '';
+process.env.ISL_API_KEY = 'local-track2';
+const { createServer } = await import('../src/createServer.js');
+
+describe('record', () => {
+  let app: FastifyInstance;
+  beforeAll(async () => { expect(process.env.ISL_BASE_URL).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/); app = await createServer({ logger: false } as never) as FastifyInstance; await app.ready(); });
+  afterAll(async () => { await app?.close(); });
+  it('posts each request', async () => {
+    const files = readdirSync(OUT).filter((f) => f.endsWith('.cee-to-plot.json'));
+    expect(files.length).toBeGreaterThan(0);
+    for (const f of files) {
+      const res = await app.inject({ method: 'POST', url: '/v2/run', payload: JSON.parse(readFileSync(join(OUT, f), 'utf8')) });
+      writeFileSync(join(OUT, f.replace('.cee-to-plot.json', '.plot-response.json')), res.body);
+      expect(res.statusCode, `${f}: ${res.body.slice(0, 300)}`).toBe(200);
+    }
+  });
+});
