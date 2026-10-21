@@ -940,6 +940,11 @@ const AGENT_TOOL_INSTRUCTIONS = `${AGENT_INSTRUCTIONS}\n\n${STATED_FIGURE_INSTRU
  */
 const CORE_AUTHORITY_INSTRUCTION = [
   'Use only the tools declared for this turn and follow their descriptions and returned outcomes. Use the current saved Living Model and its revision as the operative state; keep proposed changes and hypothetical alternatives separate. A later confirmed tool result supersedes the turn-start snapshot only for what that result covers.',
+  // Candidate-3 witnesses (21 Oct, 16d96c79): a marketing brief with no saved model got advice and no model (Run 0/3), and
+  // "What else could you do?" got a list in the reply and no card. The instruction said how to build, never when.
+  // Codex r1: building waits for a clear scope (the scope rule below), and what is missing is asked as the other rules say.
+  "When there is no saved model, the scope is clear, and the person describes a situation they are reasoning about (a choice between options, a goal or a plan), build the first model from their brief in that same turn, even when figures are still missing, and answer their question alongside it. "
+  + "When the person asks what else could be added (other options, factors, risks or links), prepare Olumi's suggested additions with propose_change, each visibly Olumi's, so they can approve, change or decline them on its card; a list in your reply adds nothing to their model.",
   "For a first model, use build_model_from_brief with the user's actual brief and the complete Living Model. For a requested revision, use propose_change with the complete proposed model. Copy unaffected saved items unchanged, including their ids, wording, sources, party names and quotes; preserve conditions, dissent and required history. Do not preserve an item that the requested correction actually supersedes.",
   "For a prepared revision, apply_change requests commitment and the SDK requires the person's approval of that proposal on its card. Do not treat a typed yes or your own interpretation as the card's approval. Confirm a save only from the operation's own confirmed outcome; a lost or unknown outcome is not proof of either success or failure.",
   // Paul's served test (21 Oct, 31711a9): the draft held Olumi's factors with no level, its links unsigned and no risk, so
