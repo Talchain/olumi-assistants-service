@@ -164,7 +164,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
           // "Stay within" (Science, 21 Oct): a floor today already clears, or a ceiling today already sits under, is a valid
           // goal, scored on the level at the end of the horizon (not along the way). Only on the person's own level today
           // (an Olumi estimate is asked for), and read silently only when their words say so; otherwise Olumi asks once.
-          const stays = lt.comparator === '<=' ? t!.current <= lt.value : t!.current > lt.value;
+          const stays = lt.comparator === '<=' ? t!.current <= lt.value : t!.current >= lt.value;
           const level = stays && !(t!.current_source === 'user' || stated(aim.source)) ? 'stay_within_base_not_theirs' as const
             : stays && !STAY_CUE[lt.comparator].test(aim.quote ?? '') ? 'stay_within_unconfirmed' as const
             : admitGoalBaseline({ rawTarget: lt.value, rawBaseline: t!.current, cap: resolved.cap, ...(lt.comparator === '<=' ? { ceiling: true } : {}),

@@ -389,8 +389,12 @@ describe('thin core mapper: living model → GraphV3', () => {
       expect(asked.withheld, quote).toContainEqual({ id: 'g', reason: 'stay_within_unconfirmed' });
       expect(asked.assumed, quote).toEqual([]);
     }
-    // CONTROLS: a ceiling below today is an ordinary reach goal, and a floor equal to today holds the line, each as before.
-    for (const [t, quote] of [[{ comparator: '<=', value: 60, current: 180 }, 'no more than 60 units; today 180'], [{ comparator: '>=', value: 70 }, 'reach 70 units; today 70']] as const) {
+    // Today exactly at the floor already meets it (codex #3540 R1): the same conditions, never a silent admission.
+    expect(target({ comparator: '>=', value: 70 }, { quote: 'reach 70 units; today 70' }).withheld).toContainEqual({ id: 'g', reason: 'stay_within_unconfirmed' });
+    expect(target({ comparator: '>=', value: 70 }, { quote: 'keep units at least 70; today 70' }).assumed.map((a) => a.text))
+      .toEqual(['Keep units at or above 70 units (today 70 units). The chance is for its level at the end of the period, not along the way.']);
+    // CONTROLS: a ceiling below today and a floor above today are ordinary reach goals, unchanged.
+    for (const [t, quote] of [[{ comparator: '<=', value: 60, current: 180 }, 'no more than 60 units; today 180'], [{ comparator: '>=', value: 100 }, 'we need at least 100 units; today we are at 70']] as const) {
       const out = target(t, { quote });
       expect(out.withheld.filter((w) => w.id === 'g'), quote).toEqual([]);
       expect(out.assumed, quote).toEqual([]);
