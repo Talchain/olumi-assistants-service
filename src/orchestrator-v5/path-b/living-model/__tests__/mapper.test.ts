@@ -3,6 +3,7 @@ import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import { LivingModel, type LivingModelT } from '../../../../schemas/living-model.js';
 import { mapLivingModel } from '../mapper.js';
 import { linkDefaultAssumptionsOf } from '../../../../cee/magnitude/link-default-assumptions.js';
+import { goalChanceEstimateCounts } from '../../../agent-lane/goal-chance-estimate-attribution.js';
 import { KNOWN_ANSWER, OPTION_EFFECTS } from './fixtures.js';
 
 type Rec = Record<string, any>;
@@ -30,8 +31,8 @@ describe('thin core mapper: living model → GraphV3', () => {
     expect(link.strength.mean).toBeCloseTo(0.4, 10);
     expect(link.strength.std).toBeCloseTo(0.08, 4);
     expect(link.provenance).toMatchObject({ source: 'brief_extraction', magnitude: 'user_stated' });
-    // The stated law's spread is the person's; only the existence assumption is Olumi's, and the existing reader says so.
-    expect(linkDefaultAssumptionsOf(link).map((r) => r.code)).toEqual(['DEFAULT_EXISTS_PROBABILITY']);
+    // The stated law is the person's, its existence included (Science, 21 Oct): no Olumi default, so no "Illustrative" label.
+    expect(linkDefaultAssumptionsOf(link)).toEqual([]);
     // A linear Gaussian reading of the mapped graph reproduces the control's answers.
     const meetChance = (fTo: number) => {
       const mean = goal.observed_state.baseline + (fTo - 0.5) * link.strength.mean;
@@ -91,8 +92,9 @@ describe('thin core mapper: living model → GraphV3', () => {
     expect(p).toMatchObject({ effect_direction: 'negative', provenance: { magnitude: 'user_stated' } });
     expect(p.strength.mean).toBeCloseTo(-0.4, 10);
     expect(p.strength.std).toBeCloseTo(0.2, 10);
-    // Buddy R1: the default spread and the existence assumption reach the person through the existing ledger.
-    expect(linkDefaultAssumptionsOf(p).map((r) => r.code)).toEqual(['CLAMP_STD_MINIMUM', 'DEFAULT_EXISTS_PROBABILITY']);
+    // Buddy R1: Olumi's default spread reaches the person through the existing ledger (so the result stays illustrative). The
+    // link's existence is the person's stated claim, not a default (Science, 21 Oct).
+    expect(linkDefaultAssumptionsOf(p).map((r) => r.code)).toEqual(['CLAMP_STD_MINIMUM']);
   });
 
   it('Lenses 20 Oct (capacity): the person\'s own figure inside their range sizes the link as their point; the range is kept and said', () => {
@@ -336,6 +338,40 @@ describe('thin core mapper: living model → GraphV3', () => {
     expect(goal(target({ comparator: '>=', value: 100, current_unit: 'units' })), 'CONTROL: the same unit declared').toMatchObject({ goal_threshold_raw: 100 });
   });
 
+  it('Science 21 Oct: a stated effect asserts its link exists (no Olumi default); Olumi\'s own link, or one stated under an assumption, keeps it', () => {
+    const existenceDefaults = (m: LivingModelT) => {
+      const e = mapLivingModel(m).graph.edges.find((x) => x.from === 'f' && x.to === 'g') as Record<string, any>;
+      return linkDefaultAssumptionsOf(e).map((r) => r.code);
+    };
+    const withLink = (link: Partial<LivingModelT['links'][number]>, conditions: LivingModelT['conditions'] = []): LivingModelT => {
+      const m: LivingModelT = structuredClone(KNOWN_ANSWER);
+      m.links[0] = { ...m.links[0]!, ...link };
+      m.conditions = conditions;
+      return m;
+    };
+    expect(existenceDefaults(KNOWN_ANSWER)).toEqual([]);
+    expect(existenceDefaults(withLink({ source: 'party', party: 'Sam' }))).toEqual([]);
+    expect(existenceDefaults(withLink({ source: 'olumi', quote: null }))).toEqual(['DEFAULT_EXISTS_PROBABILITY']);
+    const on = (role: 'assumption' | 'challenge') => [{ text: 'if the trial effect holds at scale', applies_to: ['f_g'], role, source: 'user' as const, party: null, quote: null }];
+    expect(existenceDefaults(withLink({}, on('assumption')))).toEqual(['DEFAULT_EXISTS_PROBABILITY']);
+    // A challenge is said beside the result and never changes the calculation or its labels.
+    expect(existenceDefaults(withLink({}, on('challenge')))).toEqual([]);
+  });
+
+  it('KA1 21 Oct: the person\'s own option setting is attested as theirs, so the chance never says "could not confirm where some figures came from"', () => {
+    const census = (m: LivingModelT) => goalChanceEstimateCounts(mapLivingModel(m).graph, ['push', 'hold'], 'g');
+    expect(node(mapLivingModel(KNOWN_ANSWER).graph, 'push').interventions.f).toMatchObject({ source: 'brief_extraction', extractionType: 'explicit' });
+    expect(census(KNOWN_ANSWER)).toMatchObject({ unverifiedSettingsByOption: {}, unverifiedValues: 0, unverifiedLinks: 0, unread: false });
+    // CONTROLS: Olumi's setting is Olumi's estimate (never attested), and an unverified one stays unverified.
+    const whose = (source: 'olumi' | 'unverified') => {
+      const m: LivingModelT = structuredClone(KNOWN_ANSWER);
+      m.options[1]!.settings[0] = { ...m.options[1]!.settings[0]!, source, quote: null };
+      return m;
+    };
+    expect(node(mapLivingModel(whose('olumi')).graph, 'push').interventions.f).not.toHaveProperty('extractionType');
+    expect(census(whose('unverified')).unverifiedSettingsByOption).toEqual({ push: 1 });
+  });
+
   it('a model saved before change goals reads the new target fields as null', () => {
     const saved = JSON.parse(JSON.stringify(KNOWN_ANSWER));
     delete saved.aims[0].target.current_unit;
@@ -380,6 +416,11 @@ describe('thin core mapper: living model → GraphV3', () => {
     // Money is said as the person writes it (Track 2, F2 on 27bdb81c read "12000 £ (today 16000 £)"): one figure rule.
     expect(target({ comparator: '>=', value: 12000, current: 16000, unit: '£' }, { quote: 'keep monthly profit at least £12,000; today £16,000' }).assumed.map((a) => a.text))
       .toEqual(['Keep units at or above £12,000 (today £16,000). The chance is for its level at the end of the period, not along the way.']);
+    // A horizon already said as an end ("the end of the quarter") is not doubled (Track 3, KA2 on 50ecd29a).
+    for (const by_when of ['the end of the quarter', 'end of the quarter', 'by the end of the quarter']) {
+      expect(target({ comparator: '>=', value: 50, by_when }, { quote: 'keep units at or above 50; today we are at 70' }).assumed[0]!.text, by_when)
+        .toBe('Keep units at or above 50 units (today 70 units). The chance is for its level at the end of the quarter, not along the way.');
+    }
     // A ceiling today already sits under ("at most 90", today 70): the same, read as a ceiling.
     const ceiling = target({ comparator: '<=', value: 90 }, { quote: 'at most 90 units; today we are at 70' });
     expect(goal(ceiling)).toMatchObject({ goal_direction: '<=', goal_threshold_raw: 90, observed_state: { raw_value: 70 } });
