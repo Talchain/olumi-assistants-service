@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { AI_CORE_MODE, laneModeFor, toolsFor } from '../runtime/agent-tools.js';
-import { legacyFromRead } from '../../path-b/living-model/view.js';
+import { canvasEditChecksScenario, legacyFromRead } from '../../path-b/living-model/view.js';
 
 describe('laneModeFor: the per-request lane mode', () => {
   it('core on staging, local and test; the full tool surface either way', () => {
@@ -48,5 +48,13 @@ describe('laneModeFor: the per-request lane mode', () => {
     for (const value of [undefined, 'conventional', 'CORE', 'OPENAI', ['core'], 'core ']) {
       expect(laneModeFor('full', value, 'staging'), String(value)).toBe('full');
     }
+  });
+});
+
+describe('canvas gestures read their scenario wherever the lane selector can run core (#3522 CI: 14 route-v2 writer races)', () => {
+  it('the UI default (openai) and core check the scenario; the explicit legacy override and headerless callers keep one read', () => {
+    expect(canvasEditChecksScenario('openai')).toBe(true);
+    expect(canvasEditChecksScenario(AI_CORE_MODE)).toBe(true);
+    for (const header of [undefined, 'conventional', 'OPENAI', ['openai']]) expect(canvasEditChecksScenario(header)).toBe(false);
   });
 });

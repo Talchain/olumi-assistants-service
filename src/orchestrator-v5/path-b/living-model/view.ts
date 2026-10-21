@@ -36,3 +36,10 @@ export function livingViewOf(graph: unknown): LivingView | undefined {
     ? { living_model: parsed.data, withheld: mapped.withheld, assumed: mapped.assumed }
     : { living_model: living, living_model_invalid: true };
 }
+
+/**
+ * A canvas gesture reads its scenario first, and edits a core one through its living model, wherever the lane selector can run
+ * core: the UI's default header (openai) and core (#3522; data-layer audit: a core scenario opened from "My scenarios" carries the
+ * default header). The explicit legacy override and headerless internal callers keep the legacy writer's own single read.
+ */
+export const canvasEditChecksScenario = (aiModeHeader: unknown): boolean => aiModeHeader === 'core' || aiModeHeader === 'openai';

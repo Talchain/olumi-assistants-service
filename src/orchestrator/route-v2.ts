@@ -182,6 +182,7 @@ import {
   dispatchSystemEvent,
   type DispatchSystemEventResult,
 } from '../orchestrator-v5/system-events/dispatch.js';
+import { canvasEditChecksScenario } from '../orchestrator-v5/path-b/living-model/view.js';
 
 import {
   modelReadFailedWire,
@@ -2236,9 +2237,11 @@ export async function ceeOrchestratorRouteV2(
         const rawSysResult = await dispatchSystemEvent({
           payload: ingress,
           requestId,
-          // The SCENARIO decides, never the header (#3522; data-layer audit 21 Oct: a core scenario opened from "My scenarios"
-          // carries the default header): the core edit reads the scenario and declines one with no living model.
-          coreScenarioCheck: true,
+          // The SCENARIO decides wherever the lane selector can run core (#3522; data-layer audit 21 Oct: a core scenario opened
+          // from "My scenarios" carries the UI's default header, openai): the core edit reads the scenario and declines one with
+          // no living model. The explicit legacy override (conventional) and headerless internal callers keep the legacy
+          // writer's own single read (14 route-v2 writer races, #3522 CI).
+          coreScenarioCheck: canvasEditChecksScenario(req.headers['x-olumi-ai-mode']),
         });
 
         // ═══════════════════════════════════════════════════════════════════
