@@ -19,7 +19,6 @@ import { detectLabelValueDivergences, buildLabelValueDivergenceDescription, type
 import { detectStatedLevelDivergences, buildStatedLevelDivergenceDescription, type StatedLevelDivergence } from "../../orchestrator-v5/stated-level-divergence.js";
 import { TOKEN_OVERLAP_STOPWORDS, hasTokenOverlap } from "./token-overlap.js";
 import { STRUCTURAL_EDGE_DEFAULTS } from "../context/constants.js";
-import { type EditRejectionReason } from "../../orchestrator-v5/handlers/edit-rejection-text.js";
 
 
 // ============================================================================
@@ -1456,130 +1455,6 @@ export function classifyPlotFailureCode(plotError: unknown): EditRejectionCode {
   if (plotError instanceof PLoTTimeoutError) return 'PLOT_UNAVAILABLE';
   if (plotError instanceof PLoTError && plotError.status >= 500) return 'PLOT_UNAVAILABLE';
   return 'PLOT_REQUEST_FAILED';
-}
-
-
-/**
- * An unmapped code is an UNKNOWN failure, and the honest copy for an unknown
- * failure is not a specific accusation.
- *
- * ⚠ WHY THIS RETURNS RATHER THAN THROWS — the choice was deliberate. A throw
- * here converts a rejection the user could recover from into a 500 they
- * cannot, so fail-loud in the RUNTIME direction would harm exactly the person
- * this fix is for. The loudness is therefore placed where it costs the user
- * nothing and catches the mistake earlier: the `never` parameter makes an
- * unmapped code a COMPILE error, and `log.error` makes one that somehow
- * defeats the type a searchable operational signal. The user still gets copy
- * that is true.
- */
-function reasonForUnmappedCode(code: never): EditRejectionReason {
-  log.error(
-    { rejection_code: String(code) },
-    'edit_graph — rejection code has no copy mapping; falling back to unknown-failure copy',
-  );
-  return 'unknown_failure';
-}
-
-
-/**
- * ⚠⚠ REACHABILITY OF THE PLoT-GUARDED CODES — STATE THE RUNG, DO NOT INHERIT
- * THIS PARAGRAPH (derived at `eedbff59`, re-derived 2026-09-07).
- *
- * `PLOT_UNAVAILABLE`, `PLOT_REQUEST_FAILED`, `PLOT_SEMANTIC_REJECTED` (both
- * sites) and `PLOT_APPLIED_GRAPH_OMITTED_WITH_REPAIRS` are assignable ONLY
- * inside `if (plotClient) { … }`, over `opts?.plotClient ?? null`.
- * `handleEditGraph` has exactly TWO executable call sites, both in
- * `orchestrator-v5/handlers/edit-graph-dispatch.ts` (`:1153`, `:2491`), and
- * NEITHER passes `plotClient` — both pass an explicit object literal with no
- * spread. `grep -a 'plotClient'` over that file returns ZERO, with
- * `handleEditGraph` at 24 hits in the same sweep as a contrast control, so the
- * probe is not blind. The repo says so itself at `:3526-3529` and at
- * `graph-structure-validator.ts:53-54`, both citing a staging replay
- * (`plot_outcome: "skipped"` on every edit turn).
- *
- * SO: on the deployed V5 path these arms are DARK, and `case undefined` is dark
- * too (every call site passes a code). The live-reachable improvement in this
- * area is the OTHER arms — `SYNTHESIZED_GRAPH_INVALID`,
- * `APPLIED_GRAPH_UNAVAILABLE`, `OPERATION_DID_NOT_LAND` and
- * `OPTION_INTERVENTIONS_UNRESOLVABLE` — which is where the user-visible benefit
- * actually is. The PLoT arms are kept correct rather than deleted because the
- * gate is a live `if` over a caller-supplied option: the day a caller passes a
- * client, this mapping is what the user reads.
- *
- * Rung: CODE-DERIVED at this tip, plus two in-repo corroborations citing a
- * runtime witness. NOT re-witnessed on staging by this change.
- */
-export function mapCodeToRejectionReason(code?: EditRejectionCode): EditRejectionReason {
-  switch (code) {
-    // ── The user's request genuinely was the problem. Naming it is honest. ──
-    case 'MAX_OPERATIONS_EXCEEDED':
-      return 'too_many_operations';
-    case 'STRUCTURAL_VALIDATION_FAILED':
-    case 'PLOT_SEMANTIC_REJECTED':
-      return 'structural_validation';
-
-    // ── The analysis service gave us no usable answer, and may on a retry. ──
-    // NARROWED — this arm is reached only via `classifyPlotFailureCode`, which
-    // admits a timeout or a 5xx. Every other PLoT-region throwable now takes
-    // `PLOT_REQUEST_FAILED` below. Before that classifier existed this arm
-    // served the whole `catch`, so the sentence "I couldn't reach the analysis
-    // service" was shipped over a domain in which PLoT had usually answered.
-    case 'PLOT_UNAVAILABLE':
-      return 'service_unavailable';
-
-    // ── PLoT answered, or we never sent, or the cause is not established. ──
-    // Deliberately neutral: see `classifyPlotFailureCode`'s unprovable bucket.
-    case 'PLOT_REQUEST_FAILED':
-      return 'unknown_failure';
-
-    // ── Our own side broke after the change was understood. Also not theirs. ──
-    // Note each of these call sites already passes an honest human-readable
-    // string as `reason` (e.g. "the system could not capture the final applied
-    // state"); that sentence survives only in `rejection.reason` for the turn
-    // trace. Before this mapping existed the arm below was `default`, so the
-    // user saw the structural accusation instead — honest copy was written and
-    // then thrown away.
-    case 'PLOT_APPLIED_GRAPH_OMITTED_WITH_REPAIRS':
-    case 'SYNTHESIZED_GRAPH_INVALID':
-    case 'APPLIED_GRAPH_UNAVAILABLE':
-      return 'internal_failure';
-
-    // ⭐ A SECOND MIXED DOMAIN, and the one with a dated live witness.
-    // `route-v2.ts:5345` and `telemetry.ts:2065` both record the 3 Aug 2026
-    // staging walk (`9a0541b`): a bare "Configure {option}" turn where the edit
-    // LLM invents an operation that does not survive canonicalisation. The
-    // proximate cause is ours; the distal cause is an under-specified user turn.
-    // So `internal_failure` fails the PR's own mixed-domain test — it takes the
-    // blame outright AND leads the user to the retry that this repo's own 2.11
-    // diagnosis calls a loop. `unknown_failure` attributes nothing and offers
-    // the rephrase alongside the retry.
-    case 'OPERATION_DID_NOT_LAND':
-      return 'unknown_failure';
-
-    // ⭐ A MIXED DOMAIN — one code, two opposite causes, so NEITHER specific
-    // copy is true across it. Derived from the producer
-    // (`encode-option-interventions.ts`), not from the code's name:
-    // `deriveValue` returns the defer signal both when the USER'S OWN VALUE is
-    // rejected by the canonical guards (`:161` — "unit mismatch / range /
-    // ambiguous", e.g. a headcount given for a £ factor) and when OUR side
-    // cannot proceed (target factor unresolvable, no cap available, ambiguous
-    // factor edges, encoder threw).
-    //
-    // `internal_failure` would take the blame for a guard working correctly AND
-    // prescribe a futile "try again"; `structural_validation` would blame the
-    // user for the system-side half. `unknown_failure` is the honest answer: it
-    // attributes nothing and offers BOTH routes forward. Splitting the code at
-    // the producer would let each half get specific copy — rowed, not done here.
-    case 'OPTION_INTERVENTIONS_UNRESOLVABLE':
-      return 'unknown_failure';
-
-    // ── No code supplied: cause not established, so claim nothing. ──
-    case undefined:
-      return 'unknown_failure';
-
-    default:
-      return reasonForUnmappedCode(code);
-  }
 }
 
 

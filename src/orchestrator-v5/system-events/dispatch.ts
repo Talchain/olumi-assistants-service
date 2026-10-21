@@ -126,7 +126,6 @@ import { applyStructuralRename, findStaleRenamedLabel } from './structural-renam
 import { applyOptionStatusEdit, optionStatusHolds, type OptionStatusEditEvent, type OptionStatusEditResult } from './option-status-edit.js';
 // TYPE-ONLY — binds READER_ONLY_CHAT_ROUTE_OPS to the canonical structural-edit
 // grammar at typecheck time without adding a runtime edge into the tools layer.
-import type { StructuralEditOp } from '../tools/propose-structural-edit.js';
 
 /**
  * ⭐ ONE FRESHNESS DERIVATION FOR EVERY WRITER'S REPLY.
@@ -1086,6 +1085,17 @@ const READER_ONLY_REFUSAL_COPY: Partial<
   // it (see `reader-only-refusal-capability-honesty.test.ts`).
 };
 
+/** The canonical structural edits a chat turn can make (moved here from the retired structural-edit tool). */
+export const STRUCTURAL_EDIT_OPS = [
+  'add_node',
+  'remove_node',
+  'update_node',
+  'add_edge',
+  'remove_edge',
+  'update_edge',
+] as const;
+export type StructuralEditOp = (typeof STRUCTURAL_EDIT_OPS)[number];
+
 /**
  * The CHAT route that realises each canvas gesture this deployment cannot apply.
  *
@@ -1095,7 +1105,7 @@ const READER_ONLY_REFUSAL_COPY: Partial<
  * *does a route exist?* — instead of pattern-matching the sentence.
  *
  * ⚠ HAND-WRITTEN, therefore the part that can go short (CLAUDE.md trap 12d).
- * `StructuralEditOp` is imported as a TYPE, so a typo or a retired op fails
+ * `StructuralEditOp` types this table, so a typo or a retired op fails
  * TYPECHECK here; the test then pins the pair BOTH WAYS at runtime:
  *   · every op named here is really in `STRUCTURAL_EDIT_OPS` — if chat LOSES
  *     `add_node`, this stops being a route and the copy must go back to a flat
@@ -1104,8 +1114,8 @@ const READER_ONLY_REFUSAL_COPY: Partial<
  *     gains a server-side writer the kind becomes 'mutating', the refusal is
  *     dead copy, and the guard REDs rather than keeping an unreachable branch.
  *
- * A type-only import keeps this binding free of a runtime edge into the tools
- * layer; the test imports the value and does the derivation.
+ * The op list lives here (moved from the retired structural-edit tool, 21 Oct 2026):
+ * the canonical graph edits a chat turn can make; the test imports it.
  *
  * ⭐ RE-SURFACE TRIGGER for this whole block: **the UI re-vendors to schemas
  * ≥0.50.0**. That is the single event that gives these three kinds a live
