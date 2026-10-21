@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CORE_ALIGNED_INSTRUCTIONS, CORE_REPLY_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION, instructionsForMode, MODEL_RELATIVE_NAMING_INSTRUCTION,
-  promptArmOf } from '../../../routes/agent-v1-turn.js';
+  promptArmOf, coreEffortArmOf } from '../../../routes/agent-v1-turn.js';
+import { coreBudget } from '../model-budgets.js';
 import { OLUMI_PURPOSE_INSTRUCTION } from '../olumi-purpose.js';
 import { HOST_SCIENCE_AND_SOURCE_RULES, HOST_TOOL_CONTRACT } from '../coach-route-v0_2.js';
 import { createHash } from 'node:crypto';
@@ -44,5 +45,14 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(promptArmOf('core', 'B')).toBe('B');
     for (const header of [undefined, 'A', 'b', ['B']]) expect(promptArmOf('core', header)).toBe('A');
     expect(promptArmOf('full', 'B')).toBe('A');
+  });
+
+  it('the builder\u2019s effort arm is lowered only on a core turn that asks for it; the default stays the banked high', () => {
+    expect(coreEffortArmOf('core', 'medium')).toBe('medium');
+    expect(coreEffortArmOf('core', 'low')).toBe('low');
+    for (const header of [undefined, 'high', 'Medium', ['medium']]) expect(coreEffortArmOf('core', header)).toBeUndefined();
+    expect(coreEffortArmOf('full', 'medium')).toBeUndefined();
+    expect(coreBudget().reasoning_effort).toBe('high');
+    expect(coreBudget('medium')).toEqual({ ...coreBudget(), reasoning_effort: 'medium' });
   });
 });

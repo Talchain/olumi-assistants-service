@@ -197,6 +197,17 @@ describe('PATH-B core: the AI\'s own words are the reply; protocol, cards, resul
     }
   });
 
+  it('effort arm (programme-docs #94): the header lowers the builder\u2019s effort on the provider call; without it the call keeps high', async () => {
+    const effortsSent = (): unknown[] => sent.filter((b) => b.includes(CORE_RULE)).map((b) => (JSON.parse(b) as Json).reasoning?.effort);
+    await typed('What does the model say now?', { ...CORE, 'x-olumi-core-effort': 'medium' });
+    expect(effortsSent().length).toBeGreaterThan(0);
+    expect(new Set(effortsSent())).toEqual(new Set(['medium']));
+    // CONTROL: the same core turn without the header keeps the banked effort.
+    sent.length = 0;
+    await typed('What does the model say now?', CORE);
+    expect(new Set(effortsSent())).toEqual(new Set(['high']));
+  });
+
   it('⛔ a core turn whose scenario cannot hold its Conversation id stops before any model call, with a typed 503', async () => {
     store.readOpenAiConversationId.mockImplementationOnce(async () => undefined);
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', headers: CORE, payload: {
