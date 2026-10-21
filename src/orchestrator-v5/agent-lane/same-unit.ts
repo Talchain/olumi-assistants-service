@@ -518,3 +518,40 @@ export function unitsAt(text: string, literal: { index: number; matchedText: str
   }
   return nounUnitsAt(tail);
 }
+
+// Moved verbatim out of `reconciling-product.ts` (Track 2, 21 Oct): the thin-core mapper reads the ONE composition rule.
+/**
+ * ⛔ AIQ 5886846493 + 5886967509 (HARD): (money per <unit> per period) × (count of that <unit>) = money per period, in the
+ * goal's OWN currency and period. The rate's per-unit denominator MUST name the count ("£/subscriber/month" ×
+ * "subscribers"): it is what makes a product the only dimensionally valid reading. No denominator ("GBP/month"),
+ * another count, anything unknown or scaled (£k) → no mint. "3 engineers × £25k budget ≈ £75k MRR" fails on the period.
+ */
+export function unitsCompose(goalUnit: unknown, goalLabel: string, a: { unit: unknown; label: string }, b: { unit: unknown; label: string }): Composition {
+  const goal = readMoney(goalUnit, goalLabel);
+  // The goal is money per period itself: a goal per subscriber (ARPU) is not price × subscribers.
+  if (goal === null || goal.per !== null) return NO;
+  let confirm: Composition = NO;
+  for (const [m, c] of [[a, b], [b, a]] as const) {
+    const money = readMoney(m.unit, '');
+    // DL #2802 P0: the FULL reader decides it is a count; readCount alone takes 'percent'/'pp' as nouns (sameUnit needs that).
+    const count = readUnitParts(c.unit)?.kind === 'count' ? readCount(c.unit) : null;
+    if (money === null || count === null) continue;
+    if (money.code !== goal.code || money.period !== goal.period) continue;
+    // AIQ 5886967509: the DENOMINATOR is the dimensional proof. A rate with none ("GBP/month") could be summed as easily
+    // as multiplied, so it is a CONFIRMATION for the user, never a silent mint. It must be the count's own noun (its last
+    // word: "subscriber seats" counts seats), and every word of it must be in the count.
+    const per = money.per;
+    if (per === null) { confirm = { kind: 'confirm', rate: m.label, count: c.label, code: goal.code }; continue; }
+    if (per[per.length - 1] !== count[count.length - 1] || !per.every((w) => count.includes(w))) continue;
+    // A per-N-month rate composes but is never the parser's proof (AIQ 5891385320 (3)): the card.
+    if (money.mixed === true) { confirm = { kind: 'confirm', rate: m.label, count: c.label, code: goal.code }; continue; }
+    return { kind: 'proof', rate: m.label, count: c.label, code: goal.code };
+  }
+  return confirm;
+}
+
+
+export type Composition =
+  | { readonly kind: 'proof' | 'confirm'; readonly rate: string; readonly count: string; readonly code: string }
+  | { readonly kind: 'no' };
+const NO: Composition = { kind: 'no' };

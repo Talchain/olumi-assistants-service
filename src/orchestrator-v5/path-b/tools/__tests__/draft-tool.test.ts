@@ -20,16 +20,16 @@ import { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha
 const BRIEF = 'We run a small library and walk-ins swing a lot; should we add a second assistant on Saturdays?';
 const SID = 'scn_1';
 const LIVING: LivingModelT = {
-  aims: [{ id: 'visitors_served', text: 'Visitors served on Saturdays', status: 'current', target: null, source: 'olumi', party: null, quote: null }],
+  aims: [{ id: 'visitors_served', text: 'Visitors served on Saturdays', status: 'current', target: null, defined_as: null, source: 'olumi', party: null, quote: null }],
   options: [
-    { id: 'carry_on', label: 'Carry on as now', settings: [], source: 'olumi', party: null, quote: null },
-    { id: 'add_assistant', label: 'Add a second assistant on Saturdays', source: 'user', party: null, quote: 'add a second assistant on Saturdays',
+    { id: 'carry_on', label: 'Carry on as now', settings: [], developed_from: null, source: 'olumi', party: null, quote: null },
+    { id: 'add_assistant', label: 'Add a second assistant on Saturdays', developed_from: null, source: 'user', party: null, quote: 'add a second assistant on Saturdays',
       settings: [{ factor_id: 'assistants_on_shift', value: 2, low: null, high: null, unit: 'people', source: 'user', party: null, quote: 'add a second assistant on Saturdays' }] },
   ],
-  factors: [{ id: 'assistants_on_shift', label: 'Assistants on shift', value: 1, low: null, high: null, unit: 'people', source: 'olumi', party: null, quote: null }],
+  factors: [{ id: 'assistants_on_shift', label: 'Assistants on shift', value: 1, low: null, high: null, unit: 'people', defined_as: null, source: 'olumi', party: null, quote: null }],
   links: [{ id: 'assistants_visitors', from: 'assistants_on_shift', to: 'visitors_served', source: 'olumi', party: null, quote: null,
     effect: { form: 'direction_only', value: null, low: null, high: null, sd: null, unit: null, sign: '+' } }],
-  conditions: [], views: [{ holder: 'us', position: 'walk-ins swing a lot', quote: 'walk-ins swing a lot' }], history: [],
+  risks: [], conditions: [], views: [{ holder: 'us', position: 'walk-ins swing a lot', quote: 'walk-ins swing a lot' }], history: [],
 };
 type Reply = { status: number; json: Rec };
 const EMPTY: Reply = { status: 200, json: { graph: null, graph_present: false, graph_hash: null, graph_identity_hash: null } };
@@ -235,7 +235,7 @@ describe('refusals and unknowns, said as such', () => {
   });
 
   it('a model with nothing in it: nothing is written', async () => {
-    const empty: LivingModelT = { aims: [], options: [], factors: [], links: [], conditions: [], views: [], history: [] };
+    const empty: LivingModelT = { aims: [], options: [], factors: [], links: [], risks: [], conditions: [], views: [], history: [] };
     const p = product({ graph: [EMPTY] });
     expect(await buildModel(p, ctx, { brief: BRIEF, model: empty })).toEqual({ status: 'refused', reason: 'model_empty', ...NO_WRITE });
     expect(registerCalls(p)).toEqual([]);

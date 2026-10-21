@@ -122,6 +122,12 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       // The decision node is the mapper's own; removing it alone changes nothing the model holds.
       if ([...gone].some((id) => !known.has(id) && !id.startsWith('decision_'))) return { refused: 'not_in_model' };
       const pairGone = (l: { from: string; to: string }) => edit.removed_edges.some((e) => e.from === l.from && e.to === l.to);
+      // A definition's parts and a risk's mitigations are drawn from the item itself, not from a link: deleting that edge
+      // alone would be acknowledged, then redrawn on regeneration (a false "saved"). Removing a part changes what the
+      // quantity IS, which an edge delete does not say, so it is refused by name (codex integration review, 21 Oct).
+      const standing = (e: { from: string; to: string }) => !gone.has(e.from) && !gone.has(e.to) && pairGone(e);
+      if ([...m.aims, ...m.factors].some((x) => (x.defined_as?.of ?? []).some((p) => standing({ from: p, to: x.id })))) return { refused: 'link_is_definition' };
+      if (m.risks.some((r) => r.mitigations.some((x) => standing({ from: x.factor_id, to: r.id })))) return { refused: 'link_is_mitigation' };
       m.aims = m.aims.filter((a) => !gone.has(a.id));
       m.factors = m.factors.filter((f) => !gone.has(f.id));
       m.options = m.options.filter((o) => !gone.has(o.id)).map((o) => ({ ...o, settings: o.settings.filter((s) => !gone.has(s.factor_id)) }));
@@ -131,8 +137,8 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
     }
     case 'structural_add': {
       if ([...m.aims, ...m.options, ...m.factors].some((x) => x.id === edit.node_id)) return { refused: 'id_exists' };
-      if (edit.node_kind === 'factor') m.factors.push({ id: edit.node_id, label: edit.label, value: null, ...noRange, unit: null, ...theirs });
-      else if (edit.node_kind === 'option') m.options.push({ id: edit.node_id, label: edit.label, settings: [], ...theirs });
+      if (edit.node_kind === 'factor') m.factors.push({ id: edit.node_id, label: edit.label, value: null, ...noRange, unit: null, defined_as: null, ...theirs });
+      else if (edit.node_kind === 'option') m.options.push({ id: edit.node_id, label: edit.label, settings: [], developed_from: null, ...theirs });
       else return { refused: 'kind_not_in_slice' };
       return { model: m };
     }

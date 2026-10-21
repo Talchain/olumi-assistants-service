@@ -40,6 +40,23 @@ const figure = {
   unit: z.string().nullable(),
 };
 
+/**
+ * TRACK 2 identity (21 Oct): what a quantity IS, when it is defined as the sum or product of factors. A definition, not a
+ * cause: the engine works it out exactly and never draws its parts. A model saved before reads null.
+ */
+const definedAs = z.object({
+  op: z.enum(['sum', 'product']),
+  of: z.array(id),
+  /**
+   * Who stated the definition itself, which can differ from who stated the quantity ("we need £6,500" vs "revenue is
+   * customers × price"). A definition saved without it reads as unverified: said, but with no one's words for it.
+   */
+  source: attribution.source.default('unverified'),
+  party: attribution.party.default(null),
+  quote: attribution.quote.default(null),
+}).strict().nullable().default(null).describe(
+  'When this quantity IS the sum or product of factors ("total customers = UK + EU"; "revenue = customers × price per customer"): op, the factor ids, and who stated the definition (its quote is their words for the definition itself). A definition, not a cause, so add no links from those factors to it. Null otherwise.');
+
 export const LivingAim = z.object({
   id,
   text: z.string(),
@@ -64,6 +81,7 @@ export const LivingAim = z.object({
     change_kind: z.enum(['absolute', 'relative', 'points']).nullable().default(null).describe(
       'For increase or decrease only: absolute = the change in the quantity\'s own unit; relative = a percentage of today\'s level; points = percentage points of a quantity that is itself a percentage (its unit is "%"). Null for a level target.'),
   }).strict().nullable(),
+  defined_as: definedAs,
   ...attribution,
 }).strict();
 
@@ -72,6 +90,7 @@ export const LivingFactor = z.object({
   label: z.string(),
   /** The factor's current level, when known. */
   ...figure,
+  defined_as: definedAs,
   ...attribution,
 }).strict();
 
@@ -87,8 +106,30 @@ export const LivingOption = z.object({
   /** What the option sets each factor to. An option with no settings changes nothing (the status quo). */
   settings: z.array(LivingSetting).describe(
     "The level the option sets each factor to, in the factor's unit. An option's own effect on a quantity (\"adds 30\") is a link from the option instead. An option with neither changes nothing (the status quo)."),
+  /** TRACK 2 lineage (21 Oct): where the option came from. A record, never a cause: the engine never sees it. Saved before: null. */
+  developed_from: id.nullable().default(null).describe(
+    'The id of the option this one was developed from, when it is a variant or development of it ("a cheaper version of A"). A record of where it came from, not a cause: it changes no figure. Null otherwise.'),
   ...attribution,
 }).strict();
+
+/**
+ * TRACK 2 event risk (21 Oct): an EVENT that may or may not happen within a window. What it does if it happens is an
+ * ordinary link FROM it (per +1: it happening). Its chance and window are the item's own figures, attributed like any other.
+ */
+export const LivingRisk = z.object({
+  id,
+  label: z.string(),
+  occurrence: z.object({ low: z.number().nullable(), high: z.number().nullable() }).strict().describe(
+    'The chance it happens at least once within the window, from 0 to 1 ("5–15%" is low 0.05, high 0.15; one figure is low = high). Null when nobody gave one: never guessed.'),
+  horizon_months: z.number().nullable().describe('The window that chance is over, in months ("within a year" is 12). Null when not stated.'),
+  mitigations: z.array(z.object({
+    factor_id: id,
+    reduction: z.number(),
+    ...attribution,
+  }).strict()).describe('Steps that make it less likely: the factor an option switches on (0 = not in place, 1 = in place) and the share of the chance it removes ("cuts it by 70%" is 0.7), with who said that share (its own words: the person may state the risk while Olumi proposes the step).'),
+  ...attribution,
+}).strict().describe(
+  'An event that may or may not happen within a window ("our key supplier may fail within 12 months"). Never something already true: a present condition ("we lack marketing experience") is a factor at its current level, never a risk. What it does if it happens is a link from it.');
 
 export const LivingLink = z.object({
   id,
@@ -155,6 +196,8 @@ export const LivingModel = z.object({
   options: z.array(LivingOption),
   factors: z.array(LivingFactor),
   links: z.array(LivingLink),
+  /** A model saved before risks reads none. */
+  risks: z.array(LivingRisk).default([]),
   conditions: z.array(LivingCondition),
   views: z.array(LivingView),
   history: z.array(LivingHistoryEntry),

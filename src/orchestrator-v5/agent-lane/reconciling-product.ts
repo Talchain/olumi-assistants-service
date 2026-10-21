@@ -19,7 +19,7 @@ import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/pro
 import { CURRENCY_SYMBOL_TO_CODE } from '../../cee/extraction/numeric-parser.js';
 import { figureTheUserWrote, levelWrittenApartFromTarget } from './stated-by-user.js';
 import { sayFigure } from './say-figure.js';
-import { readCount, readMoney, readMoneyTotal, readUnitParts } from './same-unit.js';
+import { readCount, readMoney, readMoneyTotal, unitsCompose } from './same-unit.js';
 
 export { periodIn, readMoneyTotal, sameUnit } from './same-unit.js';
 
@@ -48,41 +48,8 @@ function reconciliationFactor(candidate: CandidateModel, label: string) {
 }
 
 
-/**
- * ⛔ AIQ 5886846493 + 5886967509 (HARD): (money per <unit> per period) × (count of that <unit>) = money per period, in the
- * goal's OWN currency and period. The rate's per-unit denominator MUST name the count ("£/subscriber/month" ×
- * "subscribers"): it is what makes a product the only dimensionally valid reading. No denominator ("GBP/month"),
- * another count, anything unknown or scaled (£k) → no mint. "3 engineers × £25k budget ≈ £75k MRR" fails on the period.
- */
-export function unitsCompose(goalUnit: unknown, goalLabel: string, a: { unit: unknown; label: string }, b: { unit: unknown; label: string }): Composition {
-  const goal = readMoney(goalUnit, goalLabel);
-  // The goal is money per period itself: a goal per subscriber (ARPU) is not price × subscribers.
-  if (goal === null || goal.per !== null) return NO;
-  let confirm: Composition = NO;
-  for (const [m, c] of [[a, b], [b, a]] as const) {
-    const money = readMoney(m.unit, '');
-    // DL #2802 P0: the FULL reader decides it is a count; readCount alone takes 'percent'/'pp' as nouns (sameUnit needs that).
-    const count = readUnitParts(c.unit)?.kind === 'count' ? readCount(c.unit) : null;
-    if (money === null || count === null) continue;
-    if (money.code !== goal.code || money.period !== goal.period) continue;
-    // AIQ 5886967509: the DENOMINATOR is the dimensional proof. A rate with none ("GBP/month") could be summed as easily
-    // as multiplied, so it is a CONFIRMATION for the user, never a silent mint. It must be the count's own noun (its last
-    // word: "subscriber seats" counts seats), and every word of it must be in the count.
-    const per = money.per;
-    if (per === null) { confirm = { kind: 'confirm', rate: m.label, count: c.label, code: goal.code }; continue; }
-    if (per[per.length - 1] !== count[count.length - 1] || !per.every((w) => count.includes(w))) continue;
-    // A per-N-month rate composes but is never the parser's proof (AIQ 5891385320 (3)): the card.
-    if (money.mixed === true) { confirm = { kind: 'confirm', rate: m.label, count: c.label, code: goal.code }; continue; }
-    return { kind: 'proof', rate: m.label, count: c.label, code: goal.code };
-  }
-  return confirm;
-}
-
-
-export type Composition =
-  | { readonly kind: 'proof' | 'confirm'; readonly rate: string; readonly count: string; readonly code: string }
-  | { readonly kind: 'no' };
-const NO: Composition = { kind: 'no' };
+/** `unitsCompose` and `Composition` live in `same-unit.ts` (one authority, no admission imports); re-exported for every caller. */
+export { unitsCompose, type Composition } from './same-unit.js';
 
 /** The two parents that are the user's own levels, when every OTHER parent is a link #2328 re-points; else null. */
 function twoUserPartsBesideRepointable(candidate: CandidateModel, metric: string, sources: readonly string[]): string[] | null {

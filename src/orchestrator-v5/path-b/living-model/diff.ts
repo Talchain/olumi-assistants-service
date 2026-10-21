@@ -5,7 +5,7 @@
  */
 import type { LivingModelT } from '../../../schemas/living-model.js';
 
-export type LivingItemKind = 'aim' | 'option' | 'factor' | 'link' | 'condition' | 'view' | 'history';
+export type LivingItemKind = 'aim' | 'option' | 'factor' | 'link' | 'risk' | 'condition' | 'view' | 'history';
 export interface LivingChange {
   readonly kind: LivingItemKind;
   /** The item's id, or its position in the proposed (added) or saved (removed) list for an item without one. */
@@ -53,6 +53,7 @@ export function diffLivingModels(before: LivingModelT, after: LivingModelT): Liv
     ...byId('option', before.options, after.options),
     ...byId('factor', before.factors, after.factors),
     ...byId('link', before.links, after.links),
+    ...byId('risk', before.risks, after.risks),
     ...byContent('condition', before.conditions, after.conditions),
     ...byContent('view', before.views, after.views),
     ...byContent('history', before.history, after.history),

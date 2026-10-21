@@ -51,14 +51,14 @@ const OTHER_BRIEF = 'We run a repair workshop and could add a technician or exte
 const livingFor = (brief: string): LivingModelT => {
   const first = brief.split(/(?<=[.?!])\s+/)[0] ?? brief;
   return {
-    aims: [{ id: 'aim', text: first, status: 'current', target: null, source: 'user', party: null, quote: first }],
+    aims: [{ id: 'aim', text: first, status: 'current', target: null, defined_as: null, source: 'user', party: null, quote: first }],
     options: [
-      { id: 'carry_on', label: 'Carry on as now', settings: [], source: 'olumi', party: null, quote: null },
-      { id: 'change', label: 'Make the change', source: 'olumi', party: null, quote: null,
+      { id: 'carry_on', label: 'Carry on as now', settings: [], developed_from: null, source: 'olumi', party: null, quote: null },
+      { id: 'change', label: 'Make the change', developed_from: null, source: 'olumi', party: null, quote: null,
         settings: [{ factor_id: 'level', value: 2, low: null, high: null, unit: null, source: 'olumi', party: null, quote: null }] },
     ],
-    factors: [{ id: 'level', label: 'Current level', value: 1, low: null, high: null, unit: null, source: 'olumi', party: null, quote: null }],
-    links: [], conditions: [], views: [], history: [],
+    factors: [{ id: 'level', label: 'Current level', value: 1, low: null, high: null, unit: null, defined_as: null, source: 'olumi', party: null, quote: null }],
+    links: [], risks: [], conditions: [], views: [], history: [],
   };
 };
 
