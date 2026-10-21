@@ -47,7 +47,9 @@ warnOnInvalid=0
 # `reconcileAnalysisSummaryWithEnrichment`. This edit FOLLOWS a genuine cleanup —
 # it is not a ratchet loosening. The gate requires current == baseline, so a real
 # removal fails the gate until the floor is lowered in the same PR.
-as_unknown_as=43
+# Lowered 43 -> 31 by deletion 8 (22 Oct 2026): the context-pack assembler family
+# (unreachable) carried 12 of these casts and was deleted. A cleanup, not a loosening.
+as_unknown_as=31
 
 # Exact ratchet: constant fallback on a science field — `field ?? null|0|0.x`
 # or `field || null|0|0.x`. HIGH-SIGNAL (catches fabricated defaults like
