@@ -974,9 +974,11 @@ export const CORE_REPLY_INSTRUCTION = 'In this mode Olumi adds nothing to your r
   + 'If the available tools cannot create or work in a separate scenario, say so; do not claim it was created or put its facts into this model instead.';
 /** A `core` Run press permits calculation and reading only: every tool but the reader and the Run (`withheldToolsOf`). */
 export const CORE_RUN_PRESS_WITHHELD: readonly string[] = ['build_model_from_brief', 'propose_change', 'apply_change'];
+/** Coaching on the canvas (Lenses, #3535 `note_on_item`): one question or challenge beside the item that most deserves attention. */
+export const NOTE_ON_ITEM_INSTRUCTION = "When one item in the model most deserves the person's attention (an untested assumption a result rests on, a missing cost or risk, or a link nobody has sized), use note_on_item once to put one short question or challenge beside it, in your own words; ask, do not answer or choose for them.";
 /** The instructions for one call in this lane mode: unchanged outside `core`. */
 export function instructionsForMode(mode: AgentLaneMode, instructions: string): string {
-  return mode === 'core' ? `${instructions}\n\n${CORE_REPLY_INSTRUCTION}` : instructions;
+  return mode === 'core' ? `${instructions}\n\n${NOTE_ON_ITEM_INSTRUCTION}\n\n${CORE_REPLY_INSTRUCTION}` : instructions;
 }
 
 /**
