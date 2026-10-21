@@ -20,7 +20,7 @@ const RISK_WORDS = 'a 5–15% chance our key supplier fails within 12 months; du
 export const supplier = (form: 'point' | 'exact'): LivingModelT => ({
   aims: [{ id: 'gp', text: 'Monthly gross profit of at least £12,000', status: 'current', defined_as: null, ...who('we need at least £12k a month; today it is £16k'),
     target: { quantity: 'monthly gross profit', comparator: '>=', value: 12000, low: null, high: null, unit: '£', by_when: null, baseline: 'today',
-      current: 16000, current_source: null, current_unit: null, change_kind: null } }],
+      current: 16000, current_source: null, current_unit: null, change_kind: null, source: null } }],
   options: [
     { status: 'feasible', id: 'status_quo', label: 'Carry on', settings: [], developed_from: null, ...who('or we carry on as now') },
     { status: 'feasible', id: 'dual_source', label: 'Dual-source', developed_from: null, ...who('dual-source the part'),

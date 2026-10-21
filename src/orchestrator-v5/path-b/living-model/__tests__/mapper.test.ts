@@ -423,7 +423,7 @@ describe('thin core mapper: living model → GraphV3', () => {
     const saved = JSON.parse(JSON.stringify(KNOWN_ANSWER));
     delete saved.aims[0].target.current_unit;
     delete saved.aims[0].target.change_kind;
-    expect(LivingModel.parse(saved).aims[0]!.target).toMatchObject({ current_unit: null, change_kind: null });
+    expect(LivingModel.parse(saved).aims[0]!.target).toMatchObject({ current_unit: null, change_kind: null, source: null });
   });
 
   it('science check 5bbceeec, point 6: a ceiling below today keeps today on its frame; Olumi\'s base is not used for a change; the from-today premise is said', () => {

@@ -26,7 +26,7 @@ const user = { source: 'user' as const, party: null, quote: 'stated' };
 const lvl = (factor_id: string, value: number) => ({ factor_id, value, low: null, high: null, unit: null, ...user });
 const G2: LivingModelT = LivingModel.parse({
   aims: [{ id: 'c', text: '12-month net contribution', status: 'current', ...user,
-    target: { quantity: 'net contribution', comparator: '>=', value: 90, low: null, high: null, unit: '£k', by_when: null, baseline: 'today', current: 95, current_source: 'user', current_unit: null, change_kind: null } }],
+    target: { quantity: 'net contribution', comparator: '>=', value: 90, low: null, high: null, unit: '£k', by_when: null, baseline: 'today', current: 95, current_source: 'user', current_unit: null, change_kind: null, source: null } }],
   options: [
     { id: 'A', label: 'Growth-first', ...user, settings: [lvl('uplift', 25), lvl('dexp', 20), lvl('cexp', 20), lvl('growth', 1)] },
     { id: 'B', label: 'Balanced rollout', ...user, settings: [lvl('uplift', 10), lvl('dexp', 10), lvl('cexp', 5), lvl('growth', 0)] },
@@ -262,7 +262,7 @@ describe('stress_test on a G2-shaped living model', () => {
  *  option's setting on the exact sum's `<goal>__change`, not as an edge. SYNTHETIC wording. */
 const SUM: LivingModelT = LivingModel.parse({
   aims: [{ id: 'w', text: 'Widgets per week', status: 'current', ...user,
-    target: { quantity: 'widgets', comparator: '>=', value: 100, low: null, high: null, unit: 'widgets', by_when: null, baseline: 'today', current: 80, current_source: null, current_unit: null, change_kind: null } }],
+    target: { quantity: 'widgets', comparator: '>=', value: 100, low: null, high: null, unit: 'widgets', by_when: null, baseline: 'today', current: 80, current_source: null, current_unit: null, change_kind: null, source: null } }],
   options: [{ id: 'X', label: 'Second shift', ...user, settings: [] }, { id: 'Y', label: 'Faster jig', ...user, settings: [] }],
   factors: [],
   links: [
