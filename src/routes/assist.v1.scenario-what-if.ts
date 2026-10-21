@@ -38,11 +38,17 @@ export default async function route(app: FastifyInstance) {
 
   app.post<{ Params: { scenario_id: string } }>(
     "/assist/v1/scenarios/:scenario_id/what-if",
-    { config: { scenarioId: { from: "params", key: "scenario_id" }, rateLimit: { max: RATE_LIMIT_MAX, timeWindow: "1 minute" } } },
+    {
+      config: { scenarioId: { from: "params", key: "scenario_id" }, rateLimit: { max: RATE_LIMIT_MAX, timeWindow: "1 minute" } },
+      // Before the body is parsed: a malformed id gets the family's 404 even with a malformed body (Codex #3591).
+      onRequest: async (req, reply) => {
+        const id = (req.params as { scenario_id?: string }).scenario_id ?? "";
+        if (!UUID_PATTERN.test(id)) return reply.status(404).send(buildErrorV1("NOT_FOUND", "No scenario to run a what-if on.", {}, getRequestId(req)));
+      },
+    },
     async (req, reply) => {
       const requestId = getRequestId(req);
       const scenarioId = req.params.scenario_id;
-      if (!UUID_PATTERN.test(scenarioId)) return reply.status(404).send(buildErrorV1("NOT_FOUND", "No scenario to run a what-if on.", {}, requestId));
       const parsed = BodySchema.safeParse(req.body ?? {});
       if (!parsed.success || parsed.data.changes.some((c) => !WHAT_IF_KINDS.has(c.kind))) {
         return reply.status(400).send(buildErrorV1("BAD_INPUT",

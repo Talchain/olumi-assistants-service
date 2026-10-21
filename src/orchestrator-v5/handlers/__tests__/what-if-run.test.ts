@@ -130,8 +130,10 @@ function fakeRun(seeds: (string | null)[] = [], opts: { pushPct?: (number | null
   const calls: { graph: Rec; seed: unknown }[] = [];
   const run = vi.fn(async (p: { variantGraph: Rec; seed?: number }) => {
     calls.push({ graph: p.variantGraph, seed: p.seed });
-    const f = (p.variantGraph.living_model as typeof KNOWN_ANSWER).factors[0]!.value;
-    const strength = (p.variantGraph.living_model as typeof KNOWN_ANSWER).links[0]!.effect.value;
+    // Read from the MAPPED graph PLoT receives, never the living model beside it (Codex #3591: a variant that sent the saved
+    // graph under an edited living model must not pass).
+    const f = (p.variantGraph.nodes as Rec[]).find((n) => n.id === 'f')!.observed_state.value;
+    const strength = Math.round((p.variantGraph.edges as Rec[]).find((e) => e.from === 'f' && e.to === 'g')!.strength.mean * 100) / 100;
     const pushPct = opts.pushPct === undefined ? 42 : opts.pushPct[calls.length - 1] ?? null;
     return { kind: 'rows' as const, seedUsed: calls.length <= seeds.length ? seeds[calls.length - 1]! : 'seed-a', nSamples: opts.n === undefined ? 10000 : opts.n,
       rows: new Map([['push', chance(`push f=${f} s=${strength}`, pushPct)], ['hold', chance('hold')]]) };
@@ -158,7 +160,7 @@ describe('runWhatIf: the canvas gestures, held, applied to a COPY and run beside
     const v = (out as Rec).variants[0];
     expect(v).toMatchObject({ change_index: 'all', paired: true });
     expect(v.options.find((o: Rec) => o.option_id === 'push')).toEqual({
-      option_id: 'push', saved: { display: 'push f=0.5 s=50', provisional: false, not_shown: null }, what_if: { display: 'push f=0.7 s=50', provisional: false, not_shown: null },
+      option_id: 'push', saved: { display: 'push f=0.5 s=0.4', provisional: false, not_shown: null }, what_if: { display: 'push f=0.7 s=0.4', provisional: false, not_shown: null },
       variation: 'within_ordinary_variation',
     });
     expect(JSON.stringify(out)).not.toContain('"pct"');
@@ -180,9 +182,9 @@ describe('runWhatIf: the canvas gestures, held, applied to a COPY and run beside
     expect(calls).toHaveLength(4);
     expect((out as Rec).changes_applied).toEqual([{ index: 0, target: { node_id: 'f' } }, { index: 1, target: { from: 'f', to: 'g' } }]);
     const push = (i: number | 'all') => (out as Rec).variants.find((v: Rec) => v.change_index === i).options.find((o: Rec) => o.option_id === 'push').what_if.display;
-    expect(push('all')).toBe('push f=0.7 s=25');
-    expect(push(0), 'the value change alone keeps the saved link').toBe('push f=0.7 s=50');
-    expect(push(1), 'the link change alone keeps the saved value').toBe('push f=0.5 s=25');
+    expect(push('all')).toBe('push f=0.7 s=0.2');
+    expect(push(0), 'the value change alone keeps the saved link').toBe('push f=0.7 s=0.4');
+    expect(push(1), 'the link change alone keeps the saved value').toBe('push f=0.5 s=0.2');
     // CONTROL: without crux, one what-if run only.
     const { run: one, calls: oneCalls } = fakeRun();
     await runWhatIf(ask([VALUE, LINK]), { loadSaved: async () => ({ graph: stored() }), run: one as never });
@@ -199,6 +201,21 @@ describe('runWhatIf: the canvas gestures, held, applied to a COPY and run beside
     const out = await runWhatIf({ ...ask(changes), ...(baseGraphHash === undefined ? {} : { baseGraphHash }) }, { loadSaved: async () => ({ graph: stored() }), run: run as never });
     expect(out).toMatchObject({ kind: 'refused', reason });
     expect(calls).toHaveLength(0);
+  });
+
+  it('a cell with neither a figure nor the Run\'s reason says why; an option missing from one run says so (Codex #3591)', async () => {
+    const run = vi.fn(async (p: { variantGraph: Rec }) => ({
+      kind: 'rows' as const, seedUsed: 's', nSamples: 10000,
+      rows: (p.variantGraph.nodes as Rec[]).find((n) => n.id === 'f')!.observed_state.value === 0.5
+        ? new Map([['push', { display: null, pct: null, provisional: false, not_shown: null }], ['hold', chance('hold')]])
+        : new Map([['push', chance('push')]]),
+    }));
+    const out = await runWhatIf(ask([VALUE]), { loadSaved: async () => ({ graph: stored() }), run: run as never });
+    const opts = (out as Rec).variants[0].options as Rec[];
+    expect(opts.find((o) => o.option_id === 'push')!.saved.not_shown).toBe('no_result_for_this_option');
+    expect(opts.find((o) => o.option_id === 'hold')!.what_if.not_shown).toBe('not_in_this_run');
+    // CONTROL: a shown figure keeps not_shown null.
+    expect(opts.find((o) => o.option_id === 'push')!.what_if).toEqual({ display: 'push', provisional: false, not_shown: null });
   });
 
   it('a scenario with no living model is refused (contrast: the core one above runs)', async () => {

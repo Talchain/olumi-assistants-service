@@ -69,7 +69,9 @@ function targetOf(edit: ExplicitEdit): WhatIfTarget {
   }
 }
 
-const cellOf = ({ pct: _figure, ...shown }: StressChance): Cell => shown;
+/** A cell with neither a figure nor the Run's reason says why itself: never a blank the user must interpret (Codex #3591). */
+const cellOf = ({ pct: _figure, ...shown }: StressChance): Cell =>
+  shown.display === null && shown.not_shown === null ? { ...shown, not_shown: 'no_result_for_this_option' } : shown;
 
 /**
  * The Run-delta noise test (`noiseVerdictForProportions`: two proportions, 2 standard errors), on the figures the user SEES
@@ -87,7 +89,7 @@ function variationOf(saved: StressChance | undefined, whatIf: StressChance | und
   if (Math.abs(b - a) > 0.01 && noiseVerdictForProportions(a + half, b - half, nSaved, nWhatIf) === 'signal') return 'beyond_ordinary_variation';
   return noiseVerdictForProportions(clamp(a - half), clamp(b + half), nSaved, nWhatIf) === 'within_noise' ? 'within_ordinary_variation' : 'not_judged';
 }
-const NOT_SHOWN: Cell = { display: null, provisional: false, not_shown: null };
+const NOT_SHOWN: Cell = { display: null, provisional: false, not_shown: 'not_in_this_run' };
 
 export async function runWhatIf(
   p: {

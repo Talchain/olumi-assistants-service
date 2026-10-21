@@ -53,6 +53,19 @@ describe('the what-if route', () => {
     expect(ran.calls).toHaveLength(0);
   });
 
+  it('a non-UUID id with a MALFORMED JSON body → still the 404, never the parser\'s 400 (Codex #3591)', async () => {
+    const app = Fastify();
+    await route(app);
+    const r = await app.inject({ method: 'POST', url: '/assist/v1/scenarios/not-a-uuid/what-if', headers: { 'content-type': 'application/json' }, payload: '{' });
+    await app.close();
+    expect(r.statusCode).toBe(404);
+    // CONTROL: the same malformed body on a well-formed id is the parser's 400.
+    const ok = Fastify(); await route(ok);
+    const r2 = await ok.inject({ method: 'POST', url: `/assist/v1/scenarios/${SID}/what-if`, headers: { 'content-type': 'application/json' }, payload: '{' });
+    await ok.close();
+    expect(r2.statusCode).toBe(400);
+  });
+
   it('a non-UUID scenario id → the family\'s 404 before the body is read', async () => {
     ran.calls = [];
     expect((await post({ changes: [VALUE] }, 'not-a-uuid')).statusCode).toBe(404);
