@@ -7,13 +7,26 @@
 
 import { Buffer } from "node:buffer";
 import { log } from "../utils/telemetry.js";
-import { type DocPreview } from "../services/docProcessing.js";
 import {
   extractTextFromPdf,
   extractTextFromTxtMd,
   summarizeCsv,
   type CsvSummary as _CsvSummary,
 } from "./index.js";
+
+/** One attachment as the drafter sees it: capped text with citation markers. */
+export type DocPreview = {
+  source: string;
+  type: "pdf" | "csv" | "txt" | "md";
+  preview: string;
+  locationHint?: string; // Human-readable hint for LLM (e.g., "page refs required")
+  locationMetadata?: {
+    // For structured citations
+    totalPages?: number; // PDF: total pages
+    totalRows?: number; // CSV: total rows
+    totalLines?: number; // TXT/MD: total lines
+  };
+};
 
 export type AttachmentInput = {
   id: string;

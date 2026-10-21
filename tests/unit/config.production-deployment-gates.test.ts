@@ -11,7 +11,6 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { isProductionDeployment } from "../../src/config/env-resolver.js";
 import { config, _resetConfigCache } from "../../src/config/index.js";
 import { promptCaptureMayRideTheWire } from "../../src/orchestrator-v5/debug/turn-debug-store.js";
-import { createObservabilityCollector } from "../../src/cee/observability/collector.js";
 import { isRawOutputPermitted } from "../../src/routes/assist.v1.draft-graph.js";
 import { runConnectivity } from "../../src/cee/unified-pipeline/stages/repair/connectivity.js";
 import type { StageContext } from "../../src/cee/unified-pipeline/types.js";
@@ -70,15 +69,6 @@ describe("gates close on a declared production deployment, and only there", () =
   ])("env-enforced raw IO flag set true — %s", (_name, env, want) => {
     setEnv({ ...env, CEE_OBSERVABILITY_RAW_IO: "true" });
     expect(config.cee.observabilityRawIO).toBe(want);
-  });
-
-  it.each([
-    ["declared", DECLARED, false],
-    ["undeclared (control)", UNDECLARED, true],
-  ])("observability collector raw IO (capture requested) — %s", (_name, env, want) => {
-    setEnv({ ...env });
-    const collector = createObservabilityCollector({ requestId: "req-gate", captureRawIO: true } as any);
-    expect((collector.build() as { raw_io_included: boolean }).raw_io_included).toBe(want);
   });
 
   it.each([

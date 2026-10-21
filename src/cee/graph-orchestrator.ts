@@ -47,7 +47,6 @@ import type { ValidationIssue } from "../validators/graph-validator.types.js";
 import { zodToValidationErrors } from "../validators/zod-error-mapper.js";
 import { extractZodIssues } from "../schemas/llmExtraction.js";
 import { log } from "../utils/telemetry.js";
-import type { ObservabilityCollector } from "./observability/collector.js";
 import { normaliseStructuralEdges } from "./structural-edge-normaliser.js";
 
 // =============================================================================
@@ -144,8 +143,6 @@ export interface ValidateAndRepairInput {
   brief: string;
   /** Request ID for tracing */
   requestId?: string;
-  /** Optional observability collector for recording validation attempts */
-  collector?: ObservabilityCollector;
   /** v0.11.0 schema amendment: optional coaching block to enable
    *  referential-integrity warnings (WIDENING_LOG_INVALID_REF). */
   coaching?: unknown;
@@ -188,7 +185,7 @@ export interface ValidateAndRepairResult {
 export async function validateAndRepairGraph(
   input: ValidateAndRepairInput
 ): Promise<ValidateAndRepairResult> {
-  const { graph: rawGraph, requestId, collector: _collector, coaching, causalClaims } = input;
+  const { graph: rawGraph, requestId, coaching, causalClaims } = input;
 
   let currentGraph: GraphT | undefined;
   let lastErrors: ValidationIssue[] = [];

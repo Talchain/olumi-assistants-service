@@ -4,7 +4,7 @@ import { HTTP_CLIENT_TIMEOUT_MS, DRAFT_LLM_TIMEOUT_MS, UNDICI_CONNECT_TIMEOUT_MS
 import { config } from "../../config/index.js";
 import { GIT_COMMIT_SHA } from "../../version.js";
 import { captureDraftLineage, draftRequestIdentity, type DraftRequestIdentity } from "../../cee/draft/records/lineage.js";
-import type { DocPreview } from "../../services/docProcessing.js";
+import type { DocPreview } from "../../grounding/process-attachments.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
 import { anthropicTemperatureFor } from "../../config/models.js";
