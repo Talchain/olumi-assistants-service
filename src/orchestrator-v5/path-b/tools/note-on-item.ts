@@ -8,6 +8,7 @@
  *  · `refused('item_not_in_model')` — the id is neither a card nor a living-model link of the saved model (the decision has
  *    no card note). A link's note sits on the card where the link starts (or ends), the only place the canvas can show it;
  *  · `refused('note_empty' | 'note_too_long')` — strict schemas carry no length limits, so the adapter keeps the contract's;
+ *  · `refused('item_id_ambiguous')` — the id names both a card and a link of the saved model;
  *  · `refused('note_ranks_options')` — "best", "recommend", "winner", "go with": Olumi never chooses for the person;
  *  · `refused('note_names_an_id')` — an item's id in the note (egress would rewrite it to its label, past the limit);
  *  · `refused('one_note_per_turn')` — the canvas shows one directive per turn;
@@ -55,6 +56,8 @@ export async function noteOnItem(deps: Pick<RunDeps, 'dispatch'>, ctx: Pick<Agen
   // A living-model link (`a link nobody has sized`) has no card of its own: its note sits on the card where it starts
   // (or, if that is not a card, where it ends), so the canvas can show it. An edge-only note would render nowhere.
   const link = isRec(saved.graph.living_model) ? recs(saved.graph.living_model.links).find((l) => l.id === args.item_id) : undefined;
+  // One raw id can name both a card and a link: which one the AI meant is not ours to guess, so it is told and picks.
+  if (link !== undefined && nodes.some((n) => n.id === args.item_id)) return refused('item_id_ambiguous');
   const node = card(args.item_id) ?? (link === undefined ? undefined : card(link.from) ?? card(link.to));
   if (node === undefined) return refused('item_not_in_model');
   const label = String(node.label).trim();
@@ -64,5 +67,5 @@ export async function noteOnItem(deps: Pick<RunDeps, 'dispatch'>, ctx: Pick<Agen
     note, source: 'composer' });
   if (!block.success) return refused('item_not_in_model');
   turn.notes += 1;
-  return ok({ ui_directive: block.data, graph_identity: saved.identity, ...(link !== undefined && card(args.item_id) === undefined ? { anchored_on: String(node.id), for_link: args.item_id } : {}) });
+  return ok({ ui_directive: block.data, graph_identity: saved.identity, ...(link !== undefined ? { anchored_on: String(node.id), for_link: args.item_id } : {}) });
 }

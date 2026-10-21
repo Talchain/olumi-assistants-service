@@ -52,6 +52,13 @@ describe('note_on_item', () => {
     expect(await noteOnItem({ dispatch }, ctx, { item_id: 'nowhere', note: NOTE }, { notes: 0 })).toMatchObject({ status: 'refused', reason: 'item_not_in_model' });
   });
 
+  it('⭐ Codex (fresh, #3548): an id naming BOTH a card and a link is refused as ambiguous, never placed on the card', async () => {
+    const living = { ...graph(), living_model: { links: [{ id: 'queue', from: 'staff', to: 'goal' }] } };
+    const { dispatch, turn } = setup(read({ graph: living }));
+    expect(await noteOnItem({ dispatch }, ctx, { item_id: 'queue', note: NOTE }, turn)).toMatchObject({ status: 'refused', reason: 'item_id_ambiguous' });
+    expect(turn.notes).toBe(0);
+  });
+
   it('CONTRAST: a card id keeps its own target and carries no link fields', async () => {
     const living = { ...graph(), living_model: { links: [{ id: 'f_g', from: 'staff', to: 'goal' }] } };
     const { dispatch, turn } = setup(read({ graph: living }));
