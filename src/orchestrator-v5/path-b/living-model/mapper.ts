@@ -27,6 +27,7 @@ import { resolveGoalThresholdCapWithProvenance } from '../../../utils/goal-thres
 import { admitGoalBaseline } from '../../../cee/factor-extraction/goal-baseline-admissibility.js';
 import { sayFigureAsWritten } from '../../agent-lane/say-figure.js';
 import { LLM_STRENGTH_STD_FLOOR } from '../../../cee/constants.js';
+import { halfMeanSpread } from '../../../cee/magnitude/olumi-spread.js';
 import { sameUnit, unitsCompose } from '../../agent-lane/same-unit.js';
 import { EventRiskV1 } from '../../../schemas/event-risk.js';
 
@@ -462,7 +463,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     // range kept beside it in the living model (AIE range disposition, 16 Oct: `centre`). A bare range sizes nothing.
     const centred = e.form === 'range' && e.value !== null && e.low !== null && e.high !== null && e.low < e.value && e.value < e.high;
     const sized = ratio === undefined ? undefined : ((e.form === 'point' || centred) && e.value !== null)
-      ? { mean: sign * Math.abs(e.value) * ratio, std: Math.abs(e.value) * ratio / 2 }
+      ? { mean: sign * Math.abs(e.value) * ratio, std: halfMeanSpread(e.value * ratio) }
       : (e.form === 'normal' && e.value !== null && e.sd !== null && e.sd > 0)
         ? { mean: sign * Math.abs(e.value) * ratio, std: e.sd * ratio }
         // Stated exact, but on a drawn link: kept at the floor spread so the model still runs, while its chance is withheld,

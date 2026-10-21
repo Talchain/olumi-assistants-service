@@ -40,3 +40,12 @@ export function olumiSpreadForMean(args: {
   }
   return DEFAULT_STRENGTH_STD;
 }
+
+/**
+ * Olumi's illustrative spread for a stated point size nobody gave a range for: half the size (the `CLAMP_STD_MINIMUM`
+ * assumption both link writers record). One definition, so the Run-pair diff (`coaching/run-input-changes.ts`) can tell
+ * this default from a spread someone chose without a second copy of the rule.
+ */
+export function halfMeanSpread(mean: number): number {
+  return Math.abs(mean) / 2;
+}

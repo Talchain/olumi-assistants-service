@@ -37,6 +37,7 @@ import { isPercentOfPopulation, isPercentWithPeriod } from '../../orchestrator-v
 import { readUnitParts } from '../../orchestrator-v5/agent-lane/same-unit.js';
 import { isTwoStateSource, sayFigure, sayFigureExactly } from '../../orchestrator-v5/agent-lane/say-figure.js';
 import { isUsersLevelOrApproved } from '../provenance/provenance-of.js';
+import { halfMeanSpread } from './olumi-spread.js';
 
 /** Who sized a link (D9). Declared once, on `EdgeProvenanceV3.magnitude`. */
 export type MagnitudeAuthor = NonNullable<EdgeProvenanceV3T['magnitude']>;
@@ -552,7 +553,7 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
     // frame reads as a 0–1 switch (`isSwitch`), and "per switch" failed the one-unit check that keeps a declared sum.
     const n = natural(beta, per).natural_effect;
     return {
-      outcome: link.user_stated ? 'user_stated' : 'estimate', mean: beta, std: Math.abs(beta) / 2,
+      outcome: link.user_stated ? 'user_stated' : 'estimate', mean: beta, std: halfMeanSpread(beta),
       magnitude: link.user_stated ? 'user_stated' : 'olumi_estimate', statement, stated_strength: beta,
       ...(n === undefined ? {} : { natural_effect: { ...n, per_source_change_unit: unitOf(source)! } }),
     };
@@ -563,7 +564,7 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
   else if (beta !== null && (beta === 0 || Math.sign(beta) !== sign)) problem = 'sign_conflict';
 
   if (beta !== null && problem === undefined) {
-    const sigma = Math.abs(beta) / 2;
+    const sigma = halfMeanSpread(beta);
     const outOfDomain = judge !== null && !withinDomain(domainBand(judge.baseline, beta, sigma, judge.swing), judge.domain);
     const issue: LinkSizeProblem | undefined = outOfDomain ? 'out_of_domain' : Math.abs(beta) > 1 ? 'not_representable' : undefined;
     if (link.user_stated) {
@@ -656,11 +657,11 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
     ...(question !== undefined ? { question } : {}),
     ...(stated && problem !== undefined && !link.user_stated ? { set_aside: true as const } : {}),
     ...(!link.user_stated && problem === 'not_representable' && beta !== null
-      ? { fit_candidate: { strength_mean: beta, strength_std: Math.abs(beta) / 2, ...natural(beta, per as number) } } : {}),
+      ? { fit_candidate: { strength_mean: beta, strength_std: halfMeanSpread(beta), ...natural(beta, per as number) } } : {}),
   };
 
   if (sized) {
-    return { outcome: 'placeholder', mean: placeholder, std: Math.abs(placeholder) / 2, magnitude: 'olumi_placeholder', ...said, ...natural(placeholder, undefined) };
+    return { outcome: 'placeholder', mean: placeholder, std: halfMeanSpread(placeholder), magnitude: 'olumi_placeholder', ...said, ...natural(placeholder, undefined) };
   }
   return { outcome: 'unchanged', mean: sign * STRENGTH_DEFAULT_SIGNATURE.mean, std: STRENGTH_DEFAULT_SIGNATURE.std, ...said };
 }
