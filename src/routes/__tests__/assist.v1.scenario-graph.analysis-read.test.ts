@@ -1093,7 +1093,7 @@ describe("0.79 Slice R — current_read.delivered_record from the Run's run_deli
 
 // L4b R1: exercise the REAL cold reader, not the turn harness's stubbed graph route.
 describe('core cold Run data has one narrator', () => {
-  it.each(['Weekly orders', 'Weekly releases'])('L4b cold authority: %s keeps all data and withholding; A/conventional keep exact bytes', async (label) => {
+  it.each(['Weekly orders', 'Weekly releases'])('L4b cold authority: %s keeps all data and withholding; the staging default (openai) reads as core', async (label) => {
     const graph = { ...ADMITTED_GRAPH, nodes: ADMITTED_GRAPH.nodes.map(node =>
       node.id === 'goal_growth' ? { ...node, label } : node) };
     loadGraphAndBriefText.mockResolvedValue({ graph, briefText: `Compare ways to increase ${label}.` });
@@ -1110,11 +1110,12 @@ describe('core cold Run data has one narrator', () => {
       const { request_id: _a, ...aBody } = a.json<Cold>();
       const { request_id: _conventional, ...conventionalBody } = conventional.json<Cold>();
       const { request_id: _core, ...coreBody } = core.json<Cold>();
-      expect(aBody.analysis_result.summary).toBeTruthy();
-      expect(conventionalBody).toEqual(aBody);
-      expect(JSON.stringify(conventionalBody)).toBe(JSON.stringify(aBody));
+      // THIN CORE FLIP (A1, #3522): off production, `openai` (the UI's staging default) selects the core lane, so it reads
+      // exactly as core does; `conventional` keeps the legacy lane and its host summary.
+      expect(conventionalBody.analysis_result.summary).toBeTruthy();
+      expect(JSON.stringify(aBody)).toBe(JSON.stringify(coreBody));
       expect(coreBody, 'only the host summary changes; all figures, canonical facts and withheld reasons survive')
-        .toEqual({ ...aBody, analysis_result: { ...aBody.analysis_result, summary: '' } });
+        .toEqual({ ...conventionalBody, analysis_result: { ...conventionalBody.analysis_result, summary: '' } });
       expect(JSON.stringify(fact), 'reader projection never rewrites the stored Run').toBe(storedBytes);
     } finally { await app.close(); }
   });
