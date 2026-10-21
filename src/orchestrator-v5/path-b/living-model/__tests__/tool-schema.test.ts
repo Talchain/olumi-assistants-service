@@ -23,4 +23,12 @@ describe('thin core: the link-unit convention reaches the AI in the tool schema 
     expect(sent).toContain('assumption: a concrete modelling premise the result is actually worked out under');
     expect(sent).toContain('Decide by what it does to the calculation, never by who raised it.');
   });
+
+  // Served F2 (CEE f51249ba, 21 Oct): the drafter copied the mitigation's "0 = not in place, 1 = in place" into the switch's
+  // unit, so the mapper rightly refused the switch (a unit says a quantity) and the whole risk was lost.
+  it('a step an option switches on has no unit, told plainly, with no "0 = … 1 = …" text the AI could copy into one', () => {
+    expect(sent).toContain('Always null for something that is simply on or off');
+    expect(sent).toContain('The step is on or off, so its factor has no unit (null)');
+    expect(sent).not.toMatch(/\d\s*=\s*not in place|\d\s*=\s*in place/);
+  });
 });

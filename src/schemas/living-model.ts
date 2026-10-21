@@ -36,8 +36,9 @@ const figure = {
   value: z.number().nullable(),
   low: z.number().nullable(),
   high: z.number().nullable(),
-  /** The unit as written ("tickets per week", "£", "%"); null when none was given. */
-  unit: z.string().nullable(),
+  /** The unit as written ("tickets per week", "£", "%"); null when none was given, and for anything simply on or off. */
+  unit: z.string().nullable().describe(
+    'The unit as written ("tickets per week", "£", "%"). Null when none was given. Always null for something that is simply on or off, such as a step an option takes or not ("dual-sourcing in place"): it has no unit.'),
 };
 
 /**
@@ -126,7 +127,7 @@ export const LivingRisk = z.object({
     factor_id: id,
     reduction: z.number(),
     ...attribution,
-  }).strict()).describe('Steps that make it less likely: the factor an option switches on (0 = not in place, 1 = in place) and the share of the chance it removes ("cuts it by 70%" is 0.7), with who said that share (its own words: the person may state the risk while Olumi proposes the step).'),
+  }).strict()).describe('Steps that make it less likely: the factor an option switches on, and the share of the chance it removes ("cuts it by 70%" is 0.7), with who said that share (its own words: the person may state the risk while Olumi proposes the step). The step is on or off, so its factor has no unit (null): its value is 0 today and 1 under an option that takes the step.'),
   ...attribution,
 }).strict().describe(
   'An event that may or may not happen within a window ("our key supplier may fail within 12 months"). Never something already true: a present condition ("we lack marketing experience") is a factor at its current level, never a risk. What it does if it happens is a link from it.');
