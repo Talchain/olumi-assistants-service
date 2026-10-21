@@ -363,6 +363,45 @@ function pairedLevelFacts(graph: unknown, node: Rec, basis: Pick<GoalTargetBasis
 }
 
 /**
+ * ⭐ DL lease 22 Oct (served F2): whether an EVENT risk moves carrying on off today's level. ISL's `event_risk.v1` holds
+ * every event at 0 in today's reference and draws it for every option, the status quo included, so the same draw does
+ * NOT cancel it the way it cancels a link's spread. It moves carrying on exactly when it can occur there: the expected
+ * occurrence `p_mid × Π(1 − m·clamp(x, 0, 1)) > 0`, x being each named preventer's value under carrying on (its setting
+ * there, else today's value; an unset preventer reads 0, as ISL reads it). An event with no chance, fully prevented under carrying on, set by an option, or
+ * not upstream of the goal leaves the same-draw reading untouched; so does a risk node without an occurrence (linear).
+ * Single-goal reading only: the joint and limit readings keep `pairedLevelFacts` as it was.
+ */
+function eventRiskMovesStatusQuo(graph: unknown, node: Rec, statusQuoId: string | undefined): boolean {
+  if (!isRec(graph) || typeof node.id !== 'string' || statusQuoId === undefined) return false;
+  const nodes = Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const edges = Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
+  const interventionsOf = (n: Rec): Rec[] => [n.interventions, isRec(n.data) ? n.data.interventions : undefined].filter(isRec);
+  const setByOption = (id: string): boolean => nodes.some((n) => n.kind === 'option' && interventionsOf(n).some((iv) => Object.hasOwn(iv, id)));
+  const sq = nodes.find((n) => n.id === statusQuoId);
+  // The preventer's value under carrying on: its setting there, else the value it holds today, else 0 (not in place).
+  const sqValue = (id: string): number => {
+    const set = sq === undefined ? undefined : interventionsOf(sq).map((iv) => iv[id]).find(isRec);
+    if (set !== undefined && finite(set.value)) return set.value;
+    const today = nodes.find((n) => n.id === id)?.observed_state;
+    return isRec(today) && finite(today.value) ? today.value : 0;
+  };
+  const upstream = new Set<unknown>([node.id]);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const e of edges) if (upstream.has(e.to) && !upstream.has(e.from)) { upstream.add(e.from); grew = true; }
+  }
+  return nodes.some((n) => {
+    if (n.kind !== 'risk' || typeof n.id !== 'string' || !upstream.has(n.id) || setByOption(n.id)) return false;
+    const occurrence = isRec(n.event_risk) && isRec(n.event_risk.occurrence) ? n.event_risk.occurrence : undefined;
+    if (occurrence === undefined || !finite(occurrence.p_low) || !finite(occurrence.p_high)) return false;
+    const mitigations = isRec(n.event_risk) && Array.isArray(n.event_risk.mitigations) ? n.event_risk.mitigations.filter(isRec) : [];
+    const level = mitigations.reduce((l, m) => typeof m.factor_id === 'string' && finite(m.occurrence_reduction)
+      ? l * (1 - m.occurrence_reduction * Math.min(1, Math.max(0, sqValue(m.factor_id)))) : l, (occurrence.p_low + occurrence.p_high) / 2);
+    return level > 0;
+  });
+}
+
+/**
  * The checked facts decide; the Run's status-quo row only CHECKS them, and never stands in for them (DL re-scope after
  * independent check r2, BLOCKING 3: no "no change" from summary statistics — the equal-decile / zero-spread reading is not
  * used here at all). First check the exact probability side against the held target. Then check std and every recorded
@@ -743,9 +782,12 @@ export function goalChanceLicenceOf(
   // paired change, and that sent goal is the held one — never because the goal's target says change.
   const pairedChange = changeQuantity && sentRunPairsChange(constraints.sentRun, goalId)
     && sentRunScoresHeldChange(constraints.sentRun, graph, goalId, held);
-  const sqReading: StatusQuoReading = share !== null || statusQuoId === undefined || goal === undefined ? 'unknown'
+  // ⭐ DL lease 22 Oct (Codex r1/r2 on #3610): the event-risk reading is the SINGLE goal's only. Every joint, marginal and
+  // limit reading keeps the reading as it was (`jointSqReading`), so an un-paired goal never lets an exact 0/1 into a joint.
+  const readStatusQuo = (eventAware: boolean): StatusQuoReading => share !== null || statusQuoId === undefined || goal === undefined ? 'unknown'
     : statusQuoReadingOf({
-      paired: timing.ordinary && (changeQuantity ? pairedChange : pairedLevelFacts(graph, goal, basis)),
+      paired: timing.ordinary && (changeQuantity ? pairedChange
+        : pairedLevelFacts(graph, goal, basis) && !(eventAware && eventRiskMovesStatusQuo(graph, goal, statusQuoId))),
       forecast: timing.forecast,
       row: sqRow,
       // A quantity measured AS a change is 0 today by construction; a level's reference is its held level today (D2: in
@@ -762,6 +804,8 @@ export function goalChanceLicenceOf(
       // G: D2 in the change frame — what a zero change scores against the held target (a level goal: unchanged, undefined).
       ...(changeQuantity ? { zeroChange: zeroChangeMeets(held, target.value) ? 1 as const : 0 as const } : {}),
     });
+  const sqReading = readStatusQuo(true);
+  const jointSqReading = readStatusQuo(false);
   const sqByAssumption = sqReading === 'assumed';
   const sqP = sqRow?.probability_of_goal;
   const goalLabel = typeof goal?.label === 'string' && goal.label.trim() !== '' && !/[\r\n]/.test(goal.label) ? goal.label.trim() : undefined;
@@ -956,7 +1000,7 @@ export function goalChanceLicenceOf(
   const worded = withBatchCWords(single, {
     envelope, graph, goal, goalLabel, basis, staticLevel, changeFrame, comparatorHeld: held, target, base, estimateOnly, statusQuoId,
     periodEndNote: conditional?.note,
-    sqByAssumption, sqReading, timingOrdinary: timing.ordinary,
+    sqByAssumption, sqReading, jointSqReading, timingOrdinary: timing.ordinary,
     statusQuoLabel: statusQuoId === undefined ? undefined : labelOfNode(nodes, statusQuoId),
     // Acceptance is not authorship (DL 12 Oct, BLOCKING 3): an accepted Olumi value or link is still Olumi's — provisional.
     quantityFrame: readingFrame, olumiInputs: estimates.links + estimates.values + Object.keys(settingsByOption).length
@@ -992,6 +1036,8 @@ function withBatchCWords(unframed: GoalChanceLicence, c: {
   /** R5-2: an input on this figure's paths whose origin is unverified (never "zero estimates", never Olumi's). */
   readonly unverifiedInputs: boolean;
   readonly sqReading: StatusQuoReading; readonly timingOrdinary: boolean; readonly statusQuoLabel: string | undefined;
+  /** The status-quo reading every joint, marginal and limit reading uses: without the single goal's event-risk rule. */
+  readonly jointSqReading: StatusQuoReading;
   readonly constraints: GoalChanceConstraintInputs; readonly option_ids: readonly string[];
   readonly estimates: GoalChanceEstimates; readonly jointEstimates: GoalChanceEstimates | undefined;
   /** G: the AIE's note, present only on the conditional reading ({@link periodEndConditionalOf}). */
@@ -1051,7 +1097,7 @@ function withBatchCWords(unframed: GoalChanceLicence, c: {
       ...(assumed.length + plainCovers.length + unverified.length > 0 ? { notes: [...assumed, ...plainCovers, ...unverified] } : {}),
       ...statusQuo,
       ...(provisional ? { provisional: true as const } : {}),
-    }, { ...c, basis, alsoRequired });
+    }, { ...c, basis, alsoRequired, sqReading: c.jointSqReading });
   }
   // Independent check r1 item 1: the goal's quantity frame as the validated reading holds it (admission stores a level with
   // no frame on the node; its reading says "level"). No reading → no frame → a % change is never given a default wording.
@@ -1064,7 +1110,7 @@ function withBatchCWords(unframed: GoalChanceLicence, c: {
   if (words === undefined) {
     return withSeveralTargets({ ...single, ...(assumed.length + plainCovers.length + unverified.length > 0
       ? { notes: [...assumed, ...plainCovers, ...unverified] } : {}), ...statusQuo,
-      ...(provisional ? { provisional: true as const } : {}) }, { ...c, basis, alsoRequired });
+      ...(provisional ? { provisional: true as const } : {}) }, { ...c, basis, alsoRequired, sqReading: c.jointSqReading });
   }
   const notes: string[] = [];
   // Ruling 21: the base a relative change is read from is said; on Olumi's value, as Olumi's (amendments 7, 10).
@@ -1097,7 +1143,7 @@ function withBatchCWords(unframed: GoalChanceLicence, c: {
     ...(c.estimateOnly && c.base !== undefined ? { estimate_only: { base: c.base, unit: c.target.unit ?? '' } } : {}),
     ...(provisional ? { provisional: true as const } : {}),
   };
-  return withSeveralTargets(out, { ...c, basis, alsoRequired });
+  return withSeveralTargets(out, { ...c, basis, alsoRequired, sqReading: c.jointSqReading });
 }
 
 /** The one census's counts (`goalChanceEstimateCounts`) over every target of this Run's event; settings unfiltered. */
