@@ -38,7 +38,7 @@ const figure = {
   high: z.number().nullable(),
   /** The unit as written ("tickets per week", "£", "%"); null when none was given, and for anything simply on or off. */
   unit: z.string().nullable().describe(
-    'The unit as written ("tickets per week", "£", "%"). Null when none was given. Always null for something that is simply on or off, such as a step an option takes or not ("dual-sourcing in place"): it has no unit.'),
+    'The unit as written ("tickets per week", "£", "%"). Null when none was given, except that Olumi\'s own estimate states its unit. Always null for something that is simply on or off, such as a step an option takes or not ("dual-sourcing in place"): it has no unit.'),
 };
 
 /**
@@ -103,6 +103,14 @@ export const LivingFactor = z.object({
     'outcome for a result that other factors lead to and that in turn moves the aim ("customer satisfaction", "staff turnover"); factor for everything else, including anything an option sets.'),
   /** The factor's current level, when known. */
   ...figure,
+  /**
+   * Paul's served test (21 Oct, 31711a9): with no rule here, every Olumi factor came back with no level, so nothing could be
+   * worked out. Olumi completes its OWN items, labelled as its own; a person's missing figure stays null and is asked for.
+   */
+  value: figure.value.describe(
+    "Today's level of this factor, in its unit: one figure here, or a range in low and high (value then null unless a central figure was given). "
+    + "For the person's or a party's factor, only the figures they gave; a level they did not give stays null and is asked for. "
+    + "For Olumi's own factor (source olumi), give Olumi's central estimate in value, with low and high around it as wide as what is genuinely unknown, in a stated unit."),
   defined_as: definedAs,
   /** TRACK 2 (21 Oct): a limit beside the aim, sent as the legacy lane's limit row (one per quantity). Saved before: null. */
   limit: z.object({
@@ -143,8 +151,8 @@ export const LivingRisk = z.object({
   id,
   label: z.string(),
   occurrence: z.object({ low: z.number().nullable(), high: z.number().nullable() }).strict().describe(
-    'The chance it happens at least once within the window, from 0 to 1 ("5–15%" is low 0.05, high 0.15; one figure is low = high). Null when nobody gave one: never guessed.'),
-  horizon_months: z.number().nullable().describe('The window that chance is over, in months ("within a year" is 12). Null when not stated.'),
+    'The chance it happens at least once within the window, from 0 to 1 ("5–15%" is low 0.05, high 0.15; one figure is low = high). For a risk the person or a party raised, only the chance they gave, else null and asked for. For Olumi\'s own risk (source olumi), Olumi\'s provisional range, as wide as what is genuinely unknown.'),
+  horizon_months: z.number().nullable().describe('The window that chance is over, in months ("within a year" is 12). Null when not stated, except Olumi\'s own window for Olumi\'s own risk with a chance.'),
   mitigations: z.array(z.object({
     factor_id: id,
     reduction: z.number(),
@@ -183,7 +191,7 @@ export const LivingLink = z.object({
      */
     sign: z.enum(['+', '-']).nullable().describe(
       "Which way `to` moves for each +1 of `from`: '+' raises it, '-' lowers it. For source olumi, give your provisional judgement of direction; when unsized, use form direction_only. For source user, party or unverified, preserve only the direction that source supplied. If none was supplied, use sign null and form unknown, then ask. Never put an Olumi-inferred direction under another source."),
-  }).strict().describe('The change in `to` for each +1 of `from`, in the unit of `to`.'),
+  }).strict().describe("The change in `to` for each +1 of `from`, in the unit of `to`. For Olumi's own link (source olumi), when both ends have a unit, give form range with Olumi's central estimate in value and low and high around it; else direction_only with its sign."),
   ...attribution,
 }).strict();
 

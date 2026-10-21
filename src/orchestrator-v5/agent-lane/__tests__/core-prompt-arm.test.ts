@@ -37,7 +37,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
   it('arm B is the AIE\'s assembled reference, byte for byte (programme-docs #94 6303242136, static text sha256 7b6145d4…), plus the canvas-coaching sentence', () => {
     expect(b.split(NOTE_ON_ITEM_INSTRUCTION)).toHaveLength(2);
     // 7b6145d4… until 21 Oct; arm C's adoption changed only the closing core reply rule (see its row), now 56625e00….
-    expect(createHash('sha256').update(b.replace(`${NOTE_ON_ITEM_INSTRUCTION}\n\n`, ''), 'utf8').digest('hex')).toBe('6f62a08f80497b9a392fe87f0d5c64b3fd0f8f439c2b89061d32223d4d2e9b75'); // + CORE_NEXT_STEP decisive question (Track 3 Q2 v2 + buddy AMEND, 21 Oct; was a605c43f…)
+    expect(createHash('sha256').update(b.replace(`${NOTE_ON_ITEM_INSTRUCTION}\n\n`, ''), 'utf8').digest('hex')).toBe('95f3a6bceb0200a4db4c11f8ef71ce2a9830b6cb70b63fd0bfd576f42b178d5b'); // 21 Oct: + Olumi completes its own items, centred (Paul's served test, 31711a9; Codex #3590); + CORE_NEXT_STEP decisive question (Track 3 Q2 v2 + buddy AMEND, 21 Oct; was a605c43f…)
   });
 
   it('arm A is untouched: the legacy host contract is byte-identical to staging b76bc42c', () => {

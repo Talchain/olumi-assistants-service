@@ -231,6 +231,28 @@ describe('thin core mapper: living model → GraphV3', () => {
     expect(node(mapLivingModel(offPath).graph, 'g')).toMatchObject({ goal_threshold: 0.8 });
   });
 
+  it("Codex BLOCK on #3590: Olumi's own centred estimates reach the calculation as Olumi's, and are never called stated; a bare range does not", () => {
+    const edge = (g: { edges: Record<string, unknown>[] }) => g.edges.find((e) => e.from === 'f' && e.to === 'g') as Record<string, any>;
+    const olumi: LivingModelT = structuredClone(KNOWN_ANSWER);
+    olumi.factors[0] = { ...olumi.factors[0]!, value: 0.5, low: 0.3, high: 0.7, source: 'olumi', quote: null };
+    olumi.links[0] = { ...olumi.links[0]!, source: 'olumi', quote: null, effect: { form: 'range', value: 50, low: 30, high: 70, sd: null, unit: 'units', sign: '+' } };
+    const r = mapLivingModel(olumi);
+    expect(r.withheld.filter((w) => w.id === 'f' || w.id === 'f_g')).toEqual([]);
+    expect(node(r.graph, 'f').observed_state).toMatchObject({ raw_value: 0.5, source: 'cee_inference' });
+    expect(edge(r.graph).provenance).toMatchObject({ source: 'cee_hypothesis', magnitude: 'olumi_estimate', natural_effect: { amount: 50, amount_unit: 'units' } });
+    const said = linkDefaultAssumptionsOf(edge(r.graph)).find((x) => x.code === 'CLAMP_STD_MINIMUM')!.reason;
+    expect(said).toContain("Olumi's estimated 50");
+    expect(said).toContain("Olumi's range, 30 to 70");
+    expect(said).not.toContain('stated');
+    // CONTROL: a bare range (no central figure) on Olumi's own items reaches nothing: the level is held, the link a placeholder.
+    const bare: LivingModelT = structuredClone(olumi);
+    bare.factors[0]!.value = null;
+    bare.links[0]!.effect.value = null;
+    const b = mapLivingModel(bare);
+    expect(b.withheld).toContainEqual({ id: 'f', reason: 'level_range_not_in_slice' });
+    expect(edge(b.graph).provenance.magnitude).toBe('olumi_placeholder');
+  });
+
   it('attribution is a label: an unverified figure gets no stamp, Olumi\'s gets its own, a user\'s is the brief\'s', () => {
     const model: LivingModelT = structuredClone(KNOWN_ANSWER);
     model.factors[0]!.source = 'unverified';
