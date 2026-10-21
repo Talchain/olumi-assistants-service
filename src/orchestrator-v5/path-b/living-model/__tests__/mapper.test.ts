@@ -198,19 +198,23 @@ describe('thin core mapper: living model → GraphV3', () => {
     expect((graph.edges as Rec[]).some((e) => (e.from === 'a' || e.from === 'b') && e.to === 'w'), 'no option→goal edge reaches the engine').toBe(false);
   });
 
-  it('R2 P04: an exact change BELOW today is never a part of the sum (the engine holds levels on [0, cap]); it runs on signed links, its chance withheld', () => {
+  it('R2 P04: an exact change BELOW today is a part of the sum too, signed on the goal\'s cap (PLoT #454); nothing is drawn or withheld', () => {
     const lower: LivingModelT = structuredClone(OPTION_EFFECTS);
     lower.aims[0]!.target = { ...lower.aims[0]!.target!, comparator: '<=', value: 20 };
     lower.links = lower.links.map((l) => ({ ...l, effect: { ...l.effect, sign: '-' as const } }));
     const m = mapLivingModel(lower);
-    expect(m.graph.nodes.some((n) => n.id === 'w__change')).toBe(false);
-    expect(node(m.graph, 'w').nonlinear_identity).toBeUndefined();
-    const signed = m.graph.edges.filter((e) => String(e.from).endsWith('__on') && e.to === 'w');
-    expect(signed.length).toBe(2);
-    expect(signed.every((e) => e.effect_direction === 'negative')).toBe(true);
-    expect(m.withheld.filter((w) => w.reason === 'exact_not_drawable').length).toBe(2);
-    // CONTROL: the same exact changes upward still form the exact sum.
-    expect(mapLivingModel(OPTION_EFFECTS).graph.nodes.some((n) => n.id === 'w__change')).toBe(true);
+    const n = (id: string) => node(m.graph, id);
+    expect(n('w')).toMatchObject({ goal_direction: '<=', goal_threshold_raw: 20, nonlinear_identity: { operation: 'sum', factor_ids: ['w_today', 'w__change'] } });
+    const cap = n('w').goal_threshold_cap;
+    expect(n('w__change')).toMatchObject({ quantity_frame: 'change', observed_state: { raw_value: 0, cap } });
+    // 40 − 30 = 10 (meets ≤ 20) and 40 − 19.9 = 20.1 (falls short): each option's change is its own signed figure.
+    expect(n('a').interventions.w__change).toMatchObject({ raw_value: -30 });
+    expect(n('a').interventions.w__change.value).toBeCloseTo(-30 / cap, 12);
+    expect(n('b').interventions.w__change).toMatchObject({ raw_value: -19.9 });
+    expect(m.withheld).toEqual([]);
+    expect(m.graph.edges.some((e) => String(e.from).endsWith('__on') && e.to === 'w'), 'no drawn option link reaches the goal').toBe(false);
+    // CONTROL: the same exact changes upward still form the exact sum, positive.
+    expect(node(mapLivingModel(OPTION_EFFECTS).graph, 'a').interventions.w__change).toMatchObject({ raw_value: 30 });
   });
 
   it('CONTROL: a stated but not exact effect, or a level today that is not the person\'s, is an on/off factor per option, sized like any link', () => {
