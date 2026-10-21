@@ -20,11 +20,12 @@ export type ExplicitEdit =
   | { readonly kind: 'structural_delete'; readonly removed_node_ids: readonly string[]; readonly removed_edges: readonly { readonly from: string; readonly to: string }[] }
   | { readonly kind: 'structural_add'; readonly node_id: string; readonly node_kind: string; readonly label: string }
   | { readonly kind: 'structural_add_edge'; readonly from: string; readonly to: string; readonly magnitude: number; readonly effect_direction: 'positive' | 'negative' }
-  | { readonly kind: 'prior_range_edit'; readonly target_id: string; readonly range_min: number; readonly range_max: number; readonly distribution?: string };
+  | { readonly kind: 'prior_range_edit'; readonly target_id: string; readonly range_min: number; readonly range_max: number; readonly distribution?: string }
+  | { readonly kind: 'option_status_edit'; readonly option_node_id: string; readonly expected_status: 'feasible' | 'infeasible' | 'removed'; readonly status: 'feasible' | 'infeasible' | 'removed' };
 
 const EXPLICIT_EDIT_KINDS: ReadonlySet<string> = new Set([
   'factor_value_edit', 'option_intervention_edit', 'goal_target_edit', 'edge_strength_edit',
-  'structural_rename', 'structural_delete', 'structural_add', 'structural_add_edge', 'prior_range_edit',
+  'structural_rename', 'structural_delete', 'structural_add', 'structural_add_edge', 'prior_range_edit', 'option_status_edit',
 ]);
 
 /** A gesture this slice applies. The event's shape is the wire's own for its kind, already checked at ingress. */
@@ -138,6 +139,17 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       const effect = { form: 'point' as const, value: edit.magnitude * to.cap / from.cap, ...noRange, sd: null, unit: to.unit, sign };
       if (existing !== undefined) Object.assign(existing, { effect, ...theirs });
       else m.links.push({ id: `${edit.from}__${edit.to}`, from: edit.from, to: edit.to, effect, ...theirs });
+      return { model: m };
+    }
+    case 'option_status_edit': {
+      // In or out of the comparison: a ruled-out option stays in the model and on the board (mapper: `retained_excluded`).
+      const o = m.options.find((x) => x.id === edit.option_node_id);
+      if (o === undefined) return { refused: 'not_in_model' };
+      // `infeasible` ↔ `removed` moves no analysis hash, so the status the person last saw is checked like a rename's label.
+      if (o.status !== edit.expected_status) return { refused: 'status_moved' };
+      if (o.status === edit.status) return { refused: 'no_change' };
+      // ⛔ No re-stamp: `source` also says whose the option's settings are (as for a rename).
+      o.status = edit.status;
       return { model: m };
     }
     case 'structural_rename': {

@@ -102,6 +102,35 @@ describe('a canvas gesture on a core scenario', () => {
     expect(append).not.toHaveBeenCalled();
   });
 
+  it('⭐ an option taken out of the comparison stays in the model and on the board, theirs as before; out → removed moves no hash but is written', async () => {
+    const out = await send({ kind: 'option_status_edit', option_node_id: 'push', expected_status: 'feasible', status: 'infeasible', base_graph_hash: BASE });
+    expect(out.commitPerformed, JSON.stringify(out.response)).toBe(true);
+    expect(append).toHaveBeenCalledTimes(1);
+    const excluded = written();
+    expect((excluded.living_model as typeof KNOWN_ANSWER).options.find((o) => o.id === 'push')).toMatchObject({ status: 'infeasible', source: 'user', quote: 'push f to 1' });
+    expect((excluded.nodes as Rec[]).find((n) => n.id === 'push')).toMatchObject({ option_status: 'infeasible', analysis_participation: 'retained_excluded' });
+    const base = computeExpectedGraphCasHashes(excluded).expectedGraphAnalysisHash!;
+    expect(base).not.toBe(BASE);
+    loadGraph.mockResolvedValue(excluded);
+    append.mockClear();
+    const removed = await send({ kind: 'option_status_edit', option_node_id: 'push', expected_status: 'infeasible', status: 'removed', base_graph_hash: base });
+    expect(removed.commitPerformed, JSON.stringify(removed.response)).toBe(true);
+    expect((written().living_model as typeof KNOWN_ANSWER).options.find((o) => o.id === 'push')!.status).toBe('removed');
+    expect(computeExpectedGraphCasHashes(written()).expectedGraphAnalysisHash).toBe(base);
+  });
+
+  it('NEGATIVE: a status that moved since it was read, a status it already has, or an item that is not an option changes nothing', async () => {
+    for (const [event, reason] of [
+      [{ option_node_id: 'push', expected_status: 'infeasible', status: 'removed' }, 'core_status_moved'],
+      [{ option_node_id: 'push', expected_status: 'feasible', status: 'feasible' }, 'core_no_change'],
+      [{ option_node_id: 'f', expected_status: 'feasible', status: 'infeasible' }, 'core_not_in_model'],
+    ] as const) {
+      const out = await send({ kind: 'option_status_edit', ...event, base_graph_hash: BASE });
+      expect(out.response.blocks, reason).toEqual([expect.objectContaining({ details: { reason, retryable: false } })]);
+    }
+    expect(append).not.toHaveBeenCalled();
+  });
+
   it('⭐ a risk is added (no chance yet, never guessed), renamed and deleted like a factor, each written once', async () => {
     const added = await send({ kind: 'structural_add', node_id: 'r', node_kind: 'risk', label: 'Supplier delay', base_graph_hash: BASE });
     expect(added.commitPerformed, JSON.stringify(added.response)).toBe(true);
