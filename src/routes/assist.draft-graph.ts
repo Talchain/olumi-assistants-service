@@ -2,7 +2,7 @@ import { Buffer } from "node:buffer";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { DraftGraphOutput, ErrorV1, type DraftGraphInputT } from "../schemas/assist.js";
 import { shouldClarify } from "../utils/confidence.js";
-import { type DocPreview } from "../services/docProcessing.js";
+import type { DocPreview } from "../grounding/process-attachments.js";
 import { processAttachments, type AttachmentInput, type GroundingStats } from "../grounding/process-attachments.js";
 import { log } from "../utils/telemetry.js";
 import type { GraphT } from "../schemas/graph.js";

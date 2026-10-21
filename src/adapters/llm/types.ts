@@ -6,9 +6,8 @@
  */
 
 import type { GraphT } from "../../schemas/graph.js";
-import type { DocPreview } from "../../services/docProcessing.js";
+import type { DocPreview } from "../../grounding/process-attachments.js";
 import type { CorrectionCollector } from "../../cee/corrections.js";
-import type { ObservabilityCollector } from "../../cee/observability/index.js";
 import type { SystemPromptMeta } from "./prompt-loader.js";
 import type { RecordConstraintCandidate } from "../../cee/draft/records/projector.js";
 import type { DraftLineageReceipt } from "../../cee/draft/records/lineage.js";
@@ -488,7 +487,6 @@ export interface CallOpts {
    */
   maxTokensCeiling?: number;
   collector?: CorrectionCollector; // Graph corrections tracking
-  observabilityCollector?: ObservabilityCollector; // LLM call observability tracking
   /**
    * ROADMAP 1.204 M1 — mid-draft progress from the streaming accumulator.
    *

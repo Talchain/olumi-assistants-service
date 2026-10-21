@@ -7,7 +7,7 @@
 
 import type { StageContext, DraftInputWithCeeExtras } from "../types.js";
 import type { DraftGraphResult } from "../../../adapters/llm/types.js";
-import type { DocPreview } from "../../../services/docProcessing.js";
+import type { DocPreview } from "../../../grounding/process-attachments.js";
 import type { GraphT } from "../../../schemas/graph.js";
 import { groundAttachments, buildRefinementBrief } from "../../../routes/assist.draft-graph.js";
 import {
