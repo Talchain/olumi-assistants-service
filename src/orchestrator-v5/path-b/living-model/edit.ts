@@ -72,7 +72,8 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
         // Today's level keeps the unit the person gave it (Track 3 Q2-02: "30 %" on a goal with no target unit saved as a bare 30):
         // `current_unit` when it differs from the target's unit, null when it is the same (the schema's own rule).
         const levelUnit = edit.unit ?? a!.target.current_unit;
-        a!.target = { ...a!.target, current: raw, current_source: 'user', current_unit: levelUnit === a!.target.unit ? null : levelUnit };
+        // A figure the person sets makes the measure theirs (`target.source`), as their own words would.
+        a!.target = { ...a!.target, current: raw, current_source: 'user', current_unit: levelUnit === a!.target.unit ? null : levelUnit, source: null };
       }
       return { model: m };
     }
@@ -126,7 +127,7 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       a.target = { quantity: prior?.quantity ?? a.text, comparator: edit.constraint_type === 'at_least' ? '>=' : '<=',
         value: edit.raw_value, ...noRange, unit: edit.unit, by_when: prior?.by_when ?? null,
         baseline: prior?.baseline ?? null, current: keepCurrent ? prior?.current ?? null : null,
-        current_source: keepCurrent ? prior?.current_source ?? null : null, current_unit: null, change_kind: null };
+        current_source: keepCurrent ? prior?.current_source ?? null : null, current_unit: null, change_kind: null, source: null };
       Object.assign(a, theirs);
       return { model: m };
     }

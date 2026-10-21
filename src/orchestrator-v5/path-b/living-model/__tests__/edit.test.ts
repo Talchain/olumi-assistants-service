@@ -50,6 +50,16 @@ describe('thin core explicit edit: a canvas gesture applied to the living model,
       .toEqual({ refused: 'unit_mismatch' });
   });
 
+  it('s1: a figure the person sets on the canvas makes Olumi\'s suggested measure theirs, so it is read as their target', () => {
+    const suggested: LivingModelT = structuredClone(KNOWN_ANSWER);
+    suggested.aims[0] = { ...suggested.aims[0]!, target: { ...suggested.aims[0]!.target!, value: null, current: null, source: 'olumi' } };
+    const target = (applyExplicitEdit(suggested, { kind: 'goal_target_edit', goal_node_id: 'g', constraint_type: 'at_least', raw_value: 110, unit: 'units' }) as { model: LivingModelT }).model;
+    expect(target.aims[0]!.target!.source).toBeNull();
+    expect(mapLivingModel(target).withheld.map((w) => w.reason)).not.toContain('target_not_theirs');
+    const level = (applyExplicitEdit(suggested, { kind: 'factor_value_edit', target_id: 'g', value: 0.6, raw_value: 75, unit: 'units' }) as { model: LivingModelT }).model;
+    expect(level.aims[0]!.target).toMatchObject({ current: 75, current_source: 'user', source: null });
+  });
+
   it('R1 round 2: today\'s level the person set stays theirs when they then edit the target', () => {
     const olumis: LivingModelT = structuredClone(KNOWN_ANSWER);
     olumis.aims[0] = { ...olumis.aims[0]!, source: 'olumi', quote: null };
