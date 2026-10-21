@@ -9,6 +9,7 @@ import {
 } from '../../cee/provenance/provenance-of.js';
 import { olumiEstimatesFeedingResult, type OlumiEstimates } from './olumi-estimates-feeding-result.js';
 import { EventRiskV1 } from '../../schemas/event-risk.js';
+import { LivingModel } from '../../schemas/living-model.js';
 import { computeResponseHash } from '../../utils/response-hash.js';
 import { likelyRangeUseOf, rangeLawAdopted, type LikelyRangeUse } from '../intervention-range.js';
 
@@ -88,6 +89,19 @@ const cellFigure = (cell: unknown): number | undefined => {
   return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
 };
 
+/**
+ * The nodes the core mapper builds that the scenario's own living model does not hold (`mapper.ts`): an option's switch
+ * (`<option>__on`) and the exact sum's change lever (`<goal>__change`), each 0 today by definition ("not taken yet", "no
+ * change yet"), never anyone's estimate (DL, served F2 L2, 21 Oct). Bound to the saved living model, never to a marker a
+ * graph could carry (Codex r1 on #3581): a legacy graph has none, and an item the model holds under such an id is its own.
+ */
+function mapperConstructions(stored: Rec): ReadonlySet<string> {
+  const lm = LivingModel.safeParse(stored.living_model);
+  if (!lm.success) return new Set();
+  const own = new Set([...lm.data.aims, ...lm.data.options, ...lm.data.factors, ...lm.data.links, ...lm.data.risks].map((x) => x.id));
+  return new Set([...lm.data.options.map((o) => `${o.id}__on`), ...lm.data.aims.map((a) => `${a.id}__change`)].filter((id) => !own.has(id)));
+}
+
 const NONE: GoalChanceEstimateCounts = { links: 0, values: 0, settingsByOption: {}, unverifiedValues: 0, unverifiedSettingsByOption: {}, unread: false,
   acceptedValues: 0, unverifiedLinks: 0, acceptedLinks: 0 };
 const UNREAD: GoalChanceEstimateCounts = { ...NONE, unread: true };
@@ -140,7 +154,10 @@ export function goalChanceEstimateCensus(graph: unknown, optionIds?: readonly st
   const originOf = new Map(upstream.map(id => [id, inputOriginOf(byId.get(id)!.observed_state)] as const));
   const relativeChange = readGoalRecord(stored, scored.id as string)?.target?.frame === 'change_rel';
   const baseSaidApart = (id: string): boolean => id === scored.id && relativeChange && originOf.get(id) !== 'unverified';
-  const valued = upstream.filter(id => !baseSaidApart(id) && !isEventByDateSwitchValue(byId.get(id))
+  // The mapper's own switch or lever, still at the 0 it was built with: a definition, never an estimate.
+  const constructed = mapperConstructions(stored);
+  const definition = (id: string): boolean => constructed.has(id) && rec(byId.get(id)!.observed_state)?.value === 0;
+  const valued = upstream.filter(id => !baseSaidApart(id) && !isEventByDateSwitchValue(byId.get(id)) && !definition(id)
     && typeof rec(byId.get(id)!.observed_state)?.value === 'number'
     && Number.isFinite(rec(byId.get(id)!.observed_state)!.value));
   const RC4_AUTHORSHIP = { human: 'yours', ai: 'olumi_estimate', ai_accepted: 'olumi_accepted', unverified: 'unknown' } as const;
