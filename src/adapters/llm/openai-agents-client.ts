@@ -1,6 +1,7 @@
 /**
  * PATH-B: the OpenAI client the Agents SDK runs on. It is the SDK's own client (openai v7, the same instance the SDK
- * resolves, with its native retries and Conversations API). Olumi adds one thing, its `fetch`, which writes each physical
+ * resolves, with its Conversations API). Stateless calls keep native retries; a client bound to a Conversation never
+ * resends a Responses call whose acceptance may be unknown. Its `fetch` writes each physical
  * model attempt to the request's provider ledger (`_provider_calls`):
  * - each row carries the requested and the RETURNED model, the tool names sent and a digest of the input sent;
  * - a resend of the same input after a failed attempt marks that attempt as retried;
@@ -34,6 +35,10 @@ export interface AgentsClientLedger {
   readonly detailOf: (body: Readonly<Record<string, unknown>>) => ProviderCallDetail;
   /** Each streamed attempt's recording, settled when its stream ends (await all before reading `_provider_calls`). */
   readonly pending?: Promise<void>[];
+  /** A Conversation can accept a request before its transport fails: never replay that client's calls automatically. */
+  readonly conversationBound?: boolean;
+  /** A Conversation response was lost or ended without a terminal event; this does not describe Olumi's saved writes. */
+  readonly onDeliveryUnknown?: (cause: unknown) => void;
 }
 
 /** The terminal response of a Responses SSE stream (`response.completed`, `.incomplete` or `.failed`), if it has one. */
@@ -72,6 +77,7 @@ export function ledgeredAgentsClient(ledger: AgentsClientLedger): OpenAI {
       const name = err instanceof Error ? err.name : '';
       recordProviderAttempt(handle, { transport_status: null, result: name || 'transport_failure',
         outcome: name === 'TimeoutError' ? 'timeout' : name === 'AbortError' ? 'cancelled' : 'transport_error', retry: false });
+      if (ledger.conversationBound) ledger.onDeliveryUnknown?.(err);
       throw err;
     }
     if (!r.ok) {
@@ -84,6 +90,7 @@ export function ledgeredAgentsClient(ledger: AgentsClientLedger): OpenAI {
         const done = streamTerminal(text);
         if (done === undefined) {
           recordProviderAttempt(handle, { transport_status: r.status, result: 'stream_without_terminal_event', outcome: 'invalid_response', retry: false });
+          if (ledger.conversationBound) ledger.onDeliveryUnknown?.(new Error('Conversation response ended without a terminal event'));
           return;
         }
         recordProviderUsage(handle, done.usage);
@@ -93,6 +100,7 @@ export function ledgeredAgentsClient(ledger: AgentsClientLedger): OpenAI {
         attempt.ok = true;
       }, (err: unknown) => {
         recordProviderAttempt(handle, { transport_status: r.status, result: err instanceof Error ? err.name : 'stream_failure', outcome: 'transport_error', retry: false });
+        if (ledger.conversationBound) ledger.onDeliveryUnknown?.(err);
       }));
       return r;
     }
@@ -112,5 +120,5 @@ export function ledgeredAgentsClient(ledger: AgentsClientLedger): OpenAI {
   // No key configured: the request still goes, and OpenAI's 401 becomes an `http_error` row, as `postResponses` does with
   // an empty bearer (the client itself refuses to start without one).
   const apiKey = config.llm.openaiApiKey || 'no-openai-api-key-configured';
-  return new OpenAI({ apiKey, fetch: ledgerFetch, maxRetries: AGENTS_CLIENT_MAX_RETRIES });
+  return new OpenAI({ apiKey, fetch: ledgerFetch, maxRetries: ledger.conversationBound ? 0 : AGENTS_CLIENT_MAX_RETRIES });
 }
