@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { buildRunInputSnapshot, recordRunQuestion, readRecordedRunQuestion, runIdFor, sentDigest } from '../run-input-snapshot.js';
 import { factorAuthorshipDigest, linkAuthorshipDigest } from '../run-input-residual.js';
 import { normalizeRunGoalUnit } from '../../../context/run-goal-unit.js';
+import { diffRunInputSnapshots } from '../../../coaching/run-input-changes.js';
 
 const graph = {
   nodes: [
@@ -248,5 +249,36 @@ describe('runIdFor — one id per turn that ran, the same on a replay', () => {
     expect(buildRunInputSnapshot(input())!.options[0]!.settings[0]).not.toHaveProperty('range');
     // A range PLoT received whose author the option does not carry: no snapshot (never a silently dropped range).
     expect(buildRunInputSnapshot(ranged(undefined))).toBeNull();
+  });
+});
+
+
+describe('0.78.0 natural_effect on a link (Compare\'s served C1 witness, 21 Oct: an approved edit 20 → 35 read as an unexplained "partial")', () => {
+  const withEffect = (amount: number, over: Record<string, unknown> = {}) => {
+    const g = structuredClone(graph) as typeof graph & { edges: Record<string, unknown>[] };
+    g.edges = [{ from: 'fac_price', to: 'fac_churn', strength: { mean: 0.4, std: 0.1 }, exists_probability: 0.9,
+      provenance: { source: 'brief_extraction', natural_effect: { amount, amount_unit: '%', per_source_change: 1, per_source_change_unit: 'GBP',
+        strength_mean: 0.4, strength_mean_frame: 'edge_strength', ...over } } }];
+    return buildRunInputSnapshot(input({ wireGraph: g, plotPayload: payload({ graph: g }) }))!;
+  };
+  const linkOf = (snap: ReturnType<typeof withEffect>) => snap.links.find((l) => l.from === 'fac_price' && l.to === 'fac_churn')!;
+
+  it('a current point size is recorded in the user\'s terms, exactly the four contract fields', () => {
+    expect(linkOf(withEffect(20)).natural_effect).toEqual({ amount: 20, amount_unit: '%', per_source_change: 1, per_source_change_unit: 'GBP' });
+  });
+
+  it('CONTROLS: a size written for another mean, or one end of a stated range, is never recorded; the person\'s point inside it is', () => {
+    expect(linkOf(withEffect(20, { strength_mean: 0.5 }))).not.toHaveProperty('natural_effect');
+    expect(linkOf(withEffect(20, { stated_range: { low: 20, high: 40, text: '20 to 40', end: 'low' } }))).not.toHaveProperty('natural_effect');
+    expect(linkOf(withEffect(30, { stated_range: { low: 20, high: 40, text: 'about 30, 20 to 40', end: 'centre' } })).natural_effect).toMatchObject({ amount: 30 });
+    expect(linkOf(buildRunInputSnapshot(input())!)).not.toHaveProperty('natural_effect');
+  });
+
+  it('two Runs, 20 then 35, name the edit as an effect row with both figures in the person\'s units', () => {
+    const rows = diffRunInputSnapshots(withEffect(20), withEffect(35));
+    expect(rows).toContainEqual(expect.objectContaining({ entity_kind: 'link', field: 'effect', change: 'changed',
+      before: expect.objectContaining({ raw: 20, unit: '%' }), after: expect.objectContaining({ raw: 35, unit: '%' }) }));
+    // CONTROL: the same size on both Runs is no row.
+    expect(diffRunInputSnapshots(withEffect(20), withEffect(20)).filter((r) => r.field === 'effect')).toEqual([]);
   });
 });

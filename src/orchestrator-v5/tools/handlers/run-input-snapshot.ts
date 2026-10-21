@@ -244,6 +244,17 @@ export function buildRunInputSnapshot(input: RunInputSnapshotInput): RunInputSna
     if (from === undefined || to === undefined || mean === undefined) return [];
     const p = effectiveLinkExistenceProbability(e);
     const persisted = input.persistedEdges === undefined ? undefined : persistedByPair.get(`${from}\u0000${to}`) ?? undefined;
+    // 0.78.0 (SD-1 cut 6): the link's size in the user's terms, copied from the edge's own `provenance.natural_effect`
+    // ONLY while it is current (its `strength_mean` is the mean sent) and a point size (never one end of a written range).
+    // Never inferred from `mean`. Without it the diff could not name an edited effect ("20 → 35"), so an approved edit
+    // read as an unexplained `partial` (Compare's served C1 witness, 21 Oct).
+    const ne = isRec(e.provenance) && isRec(e.provenance.natural_effect) ? e.provenance.natural_effect : undefined;
+    const range = ne !== undefined && isRec(ne.stated_range) ? ne.stated_range : undefined;
+    const natural = ne !== undefined && finite(ne.amount) !== undefined && typeof ne.amount_unit === 'string'
+      && finite(ne.per_source_change) !== undefined && finite(ne.per_source_change)! > 0 && typeof ne.per_source_change_unit === 'string'
+      && finite(ne.strength_mean) === mean && (range === undefined || range.end === 'centre')
+      ? { amount: finite(ne.amount)!, amount_unit: ne.amount_unit, per_source_change: finite(ne.per_source_change)!, per_source_change_unit: ne.per_source_change_unit }
+      : undefined;
     return [{
       from,
       to,
@@ -255,6 +266,7 @@ export function buildRunInputSnapshot(input: RunInputSnapshotInput): RunInputSna
       // 0.72.0 (DL ruling #2482 r3): the link's authorship as the request carried it, so the diff can tell pairwise
       // whether an authorship change is the one a `sizing` row states (`run-input-residual.ts`).
       authorship_digest: linkAuthorshipDigest(e),
+      ...(natural !== undefined ? { natural_effect: natural } : {}),
     }];
   });
 
