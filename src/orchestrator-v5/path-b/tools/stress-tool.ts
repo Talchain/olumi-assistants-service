@@ -5,13 +5,18 @@
  *  · STRESSES ARE ASSUMPTIONS, NOT ACTIONS. Each stress is an item already in the living model — a link's effect or a
  *    factor's level — set to values the person (or Olumi, said so) wants tested. Options stay the person's interventions.
  *    The grid is every combination of each item's saved value and its tested values: a numerical design, never a belief
- *    that its points are equally likely, so a count is "met at k of n tested settings", never a chance.
- *  · ONE NAMED ALTERNATIVE EXPLANATION. At most one added link, labelled, with its author. No probability is placed on
- *    either explanation and they are never averaged; where they disagree the disagreement is the finding.
+ *    that its points are equally likely, so a count is "met at k of n tested settings", never a chance. A tested value never
+ *    relabels its item: the item's attribution is also its existence belief in the mapper (stated → 1, Olumi's → 0.8,
+ *    `mapper.ts` `OLUMI_EXISTS`), so relabelling would change what is computed. Whose value it is: `coordinates[].values_source`.
+ *  · ONE NAMED ALTERNATIVE EXPLANATION. At most one added link from a factor, labelled, with its author, and under H1 it
+ *    HOLDS (exists with probability 1: the hypothesis is "suppose this is so"). No probability is placed on either
+ *    explanation and they are never averaged; where they disagree the disagreement is the finding.
  *  · THE ONE RUN PATH, NOTHING PERSISTED. Each variant is the saved living model with those values, mapped by the core
  *    mapper and computed by `deps.runStressVariant` (the `run_analysis` handler on an in-memory snapshot, discarded:
- *    `handlers/stress-variant-run.ts`). Its rows are the licensed rows the structural challenge reads.
- *  · HONEST LIMITS. At most 16 variants and 60 s; what did not run is `not_run`, never a pass. A level within 4 standard
+ *    `handlers/stress-variant-run.ts`). Its rows are the licensed rows the structural challenge reads. The saved model must
+ *    remap to exactly what is saved (analysis-affecting hash), or H0 would not be the saved model: otherwise refused.
+ *  · HONEST LIMITS. At most 16 variants and 60 s, one deadline that aborts a variant in flight; what did not run is
+ *    `not_run`, never a pass. A level within 4 standard
  *    errors of the target, or a target this Run does not license, is `unresolved`, never met. A model changed during the
  *    test is `unavailable`, with no rows. Model-relative wording only: no best, winner or recommendation.
  */
@@ -20,6 +25,7 @@ import { z } from 'zod-v4';
 import type { AgentToolContext } from '../../agent-lane/runtime/agent-tools.js';
 import type { InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
 import { LivingModel, type LivingModelT } from '../../../schemas/living-model.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { mapLivingModel, savedGoal } from '../living-model/mapper.js';
 import { livingViewOf } from '../living-model/view.js';
 import { isNoModelYet, isSavedRead, readSaved } from './context-tool.js';
@@ -41,7 +47,7 @@ export const StressTestParams = z.object({
   }).strict()).describe('One to three assumptions already in the model, each with the values to test together.'),
   alternative: z.object({
     label: z.string().describe('The alternative explanation in a few plain words, e.g. "growth-first loses repeat customers".'),
-    from: z.string().describe('A factor id or an option id.'),
+    from: z.string().describe('A factor id (an option acts through the factors it sets).'),
     to: z.string().describe("A factor id, or the goal aim's id."),
     value: z.number().describe("The proposed effect per +1 of `from`, in `to`'s unit."),
     sign: z.enum(['+', '-']),
@@ -62,7 +68,7 @@ export type StressVariantRows =
 export interface StressDeps {
   readonly dispatch: InternalDispatch;
   readonly runStressVariant?: (v: { readonly variantGraph: Rec; readonly seed: number; readonly goalNodeId: string;
-    readonly goalLevelTarget: number | null }) => Promise<StressVariantRows>;
+    readonly goalLevelTarget: number | null; readonly signal: AbortSignal }) => Promise<StressVariantRows>;
   readonly now?: () => number;
 }
 
@@ -74,7 +80,7 @@ export interface Hypothesis { readonly id: 'H0' | 'H1'; readonly label: string; 
 export interface Variant { readonly hypothesis: 'H0' | 'H1'; readonly setting: Readonly<Record<string, number>>; readonly living: LivingModelT }
 export interface Cell {
   readonly hypothesis: 'H0' | 'H1'; readonly setting: Readonly<Record<string, number>>; readonly option_id: string;
-  readonly level: number | null; readonly sd: number | null; readonly n: number | null; readonly goal_chance: number | null;
+  readonly level: number | null; readonly sd: number | null; readonly n: number | null;
   readonly side: Side; readonly margin: number | null; readonly reason: string | null;
 }
 
@@ -104,7 +110,8 @@ export function planStress(living: LivingModelT, args: StressTestArgs):
   const hypotheses: Hypothesis[] = [{ id: 'H0', label: 'The saved model', source: 'saved' }];
   const alt = args.alternative;
   if (alt !== null) {
-    const fromOk = living.factors.some((f) => f.id === alt.from) || living.options.some((o) => o.id === alt.from);
+    // The mapper draws links between factors and the goal only (`mapper.ts` `causal`): a link from an option is held.
+    const fromOk = living.factors.some((f) => f.id === alt.from);
     const toFactor = living.factors.find((f) => f.id === alt.to);
     const toAim = living.aims.find((a) => a.id === alt.to && a.target !== null);
     if (!fromOk || (toFactor === undefined && toAim === undefined)) return { refusal: 'alternative_endpoint_unknown', data: { from: alt.from, to: alt.to } };
@@ -123,15 +130,14 @@ export function planStress(living: LivingModelT, args: StressTestArgs):
       for (const c of coordinates) {
         const value = setting[c.item_id];
         if (value === c.saved) continue;
-        const theirs = c.values_source === 'user';
-        const by = theirs ? {} : { source: 'olumi' as const, party: null, quote: null };
+        // Attribution kept (it is the existence belief); the quote stated the saved figure, so it no longer applies.
         if (c.kind === 'link_effect') {
-          v.links = v.links.map((l) => (l.id !== c.item_id ? l : { ...l, ...by,
+          v.links = v.links.map((l) => (l.id !== c.item_id ? l : { ...l, quote: null,
             // A tested value is a point: a range link is tested at each value as a point (Olumi's illustrative spread, said).
             effect: { ...l.effect, form: l.effect.form === 'range' ? 'point' : l.effect.form, value: Math.abs(value),
               sign: value < 0 ? '-' : value > 0 ? '+' : l.effect.sign, low: null, high: null } }));
         } else {
-          v.factors = v.factors.map((f) => (f.id !== c.item_id ? f : { ...f, ...by, value, low: null, high: null }));
+          v.factors = v.factors.map((f) => (f.id !== c.item_id ? f : { ...f, quote: null, value, low: null, high: null }));
         }
       }
       if (h.id === 'H1' && alt !== null) {
@@ -224,10 +230,33 @@ function goalOf(graph: unknown): { id: string; target: number | null; comparator
   return { id: goal.id, target, comparator };
 }
 
+/** The mapped variant as a Run would read it; under H1 the alternative HOLDS (the mapper gives Olumi's own link 0.8). */
+function variantGraph(v: Variant, saved: unknown): { graph: Rec; edges: ReadonlySet<string> } {
+  const mapped = mapLivingModel(v.living, savedGoal(saved));
+  const edges = Array.isArray(mapped.graph.edges) ? (mapped.graph.edges as Rec[]) : [];
+  const held = v.hypothesis === 'H1' ? edges.map((e) => (e.id === 'stress_alternative' ? { ...e, exists_probability: 1 } : e)) : edges;
+  return { graph: { ...mapped.graph, edges: held, living_model: v.living }, edges: new Set(edges.map((e) => String(e.id))) };
+}
+
+/** One variant inside the time left: past it the variant is aborted (PLoT through the handler's turn signal) and not run. */
+async function withinTime(ms: number, run: (signal: AbortSignal) => Promise<StressVariantRows>): Promise<StressVariantRows> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<StressVariantRows>((resolve) => {
+    timer = setTimeout(() => { controller.abort(); resolve({ kind: 'refused', reason: 'time_limit' }); }, ms);
+  });
+  try {
+    return await Promise.race([run(controller.signal).catch((): StressVariantRows => ({ kind: 'refused', reason: 'failed' })), late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function stressTest(deps: StressDeps, ctx: Pick<AgentToolContext, 'scenario_id'>, args: StressTestArgs): Promise<ToolOutcome> {
-  if (deps.runStressVariant === undefined) return unavailable('stress_unavailable');
+  const runVariant = deps.runStressVariant;
+  if (runVariant === undefined) return unavailable('stress_unavailable');
   const now = deps.now ?? (() => Date.now());
-  const started = now();
+  const deadline = now() + STRESS_MAX_WALL_MS;
   const saved = await readSaved(deps, ctx.scenario_id);
   if (!isSavedRead(saved)) return isNoModelYet(saved) ? refused('no_model_yet') : saved;
   if (saved.identity === null) return unavailable('read_malformed');
@@ -236,24 +265,36 @@ export async function stressTest(deps: StressDeps, ctx: Pick<AgentToolContext, '
   const living = view.living_model as LivingModelT;
   const plan = planStress(living, args);
   if ('refusal' in plan) return refused(plan.refusal, undefined, plan.data);
-  const goal = goalOf(mapLivingModel(living, savedGoal(saved.graph)).graph);
+  // Every variant is remapped by today's mapper, so the saved model must remap to what is saved: else H0 is not it.
+  const remapped = mapLivingModel(living, savedGoal(saved.graph));
+  const savedHash = computeAnalysisAffectingGraphHash(saved.graph as never);
+  if (savedHash === null || computeAnalysisAffectingGraphHash({ ...remapped.graph, living_model: living } as never) !== savedHash) {
+    return refused('saved_graph_not_reproducible');
+  }
+  const goal = goalOf(remapped.graph);
   if (goal === undefined) return refused('no_goal');
+  const variants = plan.variants.map((v) => ({ v, ...variantGraph(v, saved.graph) }));
+  // A tested link or the alternative the mapper holds back would test nothing: refused, never a silent no-op.
+  const notMapped = variants.flatMap(({ v, edges }) => [
+    ...plan.coordinates.filter((c) => c.kind === 'link_effect' && !edges.has(c.item_id)).map((c) => c.item_id),
+    ...(v.hypothesis === 'H1' && !edges.has('stress_alternative') ? ['stress_alternative'] : []),
+  ]);
+  if (notMapped.length > 0) return refused('stress_item_not_mapped', undefined, { item_ids: [...new Set(notMapped)] });
   const seed = parseInt(createHash('sha256').update(saved.identity).digest('hex').slice(0, 7), 16);
   const optionIds = living.options.map((o) => o.id);
   const cells: Cell[] = [];
-  for (const v of plan.variants) {
+  for (const { v, graph } of variants) {
     const blank = (side: Side, reason: string) => optionIds.forEach((o) => cells.push({ hypothesis: v.hypothesis, setting: v.setting,
-      option_id: o, level: null, sd: null, n: null, goal_chance: null, side, margin: null, reason }));
-    if (now() - started > STRESS_MAX_WALL_MS) { blank('not_run', 'time_limit'); continue; }
-    const mapped = mapLivingModel(v.living, savedGoal(saved.graph));
-    const variantGoal = goalOf(mapped.graph);
-    const target = variantGoal?.target ?? null;
-    const result = await deps.runStressVariant({ variantGraph: { ...mapped.graph, living_model: v.living }, seed, goalNodeId: goal.id, goalLevelTarget: target });
-    if (result.kind !== 'rows') { blank('not_run', `variant_${result.reason}`); continue; }
+      option_id: o, level: null, sd: null, n: null, side, margin: null, reason }));
+    const left = deadline - now();
+    if (left <= 0) { blank('not_run', 'time_limit'); continue; }
+    const target = goalOf(graph)?.target ?? null;
+    const result = await withinTime(left, (signal) => runVariant({ variantGraph: graph, seed, goalNodeId: goal.id, goalLevelTarget: target, signal }));
+    if (result.kind !== 'rows') { blank('not_run', result.reason === 'time_limit' ? 'time_limit' : `variant_${result.reason}`); continue; }
     for (const o of optionIds) {
       const row = result.rows.get(o);
       cells.push({ hypothesis: v.hypothesis, setting: v.setting, option_id: o, level: row?.mean ?? null, sd: row?.sd ?? null, n: row?.n ?? null,
-        goal_chance: row?.goal ?? null, ...sideOf(row, target, goal.comparator, result.targetLicensed) });
+        ...sideOf(row, target, goal.comparator, result.targetLicensed) });
     }
   }
   const after = await readSaved(deps, ctx.scenario_id);
@@ -268,6 +309,6 @@ export async function stressTest(deps: StressDeps, ctx: Pick<AgentToolContext, '
     incomplete: cells.some((c) => c.side === 'not_run'),
     cells, ...summary,
     reading_rule: 'Each count is tested settings, not a chance. Unresolved is never met. No option is ranked across settings, '
-      + 'the explanations are never averaged, and nothing was saved.',
+      + 'the explanations are never averaged, and nothing was saved. Whose tested values these are: coordinates.values_source.',
   });
 }
