@@ -178,7 +178,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
             // A change is measured from today only if carrying on as now leaves the quantity there (amendment 1): said beside it.
             if (stays) {
               const say = (v: number) => sayFigureAsWritten(v, lt.unit ?? '');
-              assumed.push({ id: aim.id, text: `Keep ${t!.quantity} at or ${lt.comparator === '<=' ? 'below' : 'above'} ${say(lt.value)} (today ${say(t!.current)}). The chance is for its level at the end of ${t!.by_when ?? 'the period'}, not along the way.` });
+              assumed.push({ id: aim.id, text: `Keep ${t!.quantity} at or ${lt.comparator === '<=' ? 'below' : 'above'} ${say(lt.value)} (today ${say(t!.current)}). The chance is for its level at the end of ${(t!.by_when ?? 'the period').replace(/^(at |by )?(the )?end of /i, '')}, not along the way.` });
             }
             if (isChange) assumed.push({ id: aim.id, text: `Carrying on as now leaves ${t!.quantity} at today's ${sayFigureAsWritten(t!.current, lt.unit ?? '')}; the change is measured from that.` });
           }
@@ -271,6 +271,9 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
       if (cap === undefined) { droppedSettings.add(factorId); return hold(`${o.id}:${factorId}`, 'setting_not_convertible'); }
       interventions[factorId] = {
         value: raw / cap, raw_value: raw, unit: unit ?? '', ...(levelSource(source) !== undefined ? { source: levelSource(source) } : {}),
+        // The person's stated setting is attested as theirs, exactly as `withSource` attests a stated level (else every core
+        // Run said "could not confirm where some figures came from" about the person's own option, KA1 21 Oct).
+        ...(stated(source.source) && !edited(source) ? { extractionType: 'explicit' } : {}),
         target_match: { node_id: factorId, match_type: 'exact_id', confidence: 'high' },
       };
     };
@@ -296,6 +299,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     return f !== undefined && cap !== undefined ? { cap, unit: f.unit } : undefined;
   };
   const causal = new Set([...model.factors.map((f) => f.id), ...(goalNode === undefined ? [] : [String(goalNode.id)])]);
+  const hedged = new Set(model.conditions.filter((c) => c.role === 'assumption').flatMap((c) => c.applies_to));
   for (const l of model.links) {
     if (!causal.has(l.from) || !causal.has(l.to)) { hold(l.id, 'link_endpoint_unknown'); continue; }
     // The engine has no "unknown" direction, so an unsigned link stays in the living model only.
@@ -339,9 +343,12 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
         reason: centred
           ? `The calculation uses the stated ${Math.abs(e.value!)} with Olumi's illustrative spread (half the stated effect). The stated range, ${e.low} to ${e.high}, is kept with the model but is not used as a spread.`
           : 'Nobody stated how uncertain this strength is. Applied Olumi\'s illustrative spread (half the stated effect). It is not a measurement of anyone\'s confidence.' }] : []),
-      { code: REPAIR_CODES.DEFAULT_EXISTS_PROBABILITY, layer: 'cee', field_path: `${path}.exists_probability`, before: null, after: exists, severity: 'info',
-        reason: stated(l.source) ? 'Nobody stated how likely this link is to exist. The calculation assumes it exists, as stated.'
-          : 'Nobody stated how likely this link is to exist. Applied Olumi\'s untested default.' },
+      // A stated effect asserts that the link exists: existence 1 is the stater's claim, never an Olumi default (Science,
+      // 21 Oct). Olumi's own link, or one the person hedged (an assumption on it), keeps the default and says so.
+      ...(stated(l.source) && !hedged.has(l.id) ? [] : [{ code: REPAIR_CODES.DEFAULT_EXISTS_PROBABILITY, layer: 'cee' as const,
+        field_path: `${path}.exists_probability`, before: null, after: exists, severity: 'info' as const,
+        reason: stated(l.source) ? 'The link was stated under an assumption. The calculation assumes it exists, as stated.'
+          : 'Nobody stated how likely this link is to exist. Applied Olumi\'s untested default.' }]),
     ];
     const who = stated(l.source) ? { source: edited(l) ? 'user_specified' : 'brief_extraction', magnitude: 'user_stated' }
       : l.source === 'olumi' ? { source: 'cee_hypothesis', magnitude: 'olumi_estimate' } : {};
