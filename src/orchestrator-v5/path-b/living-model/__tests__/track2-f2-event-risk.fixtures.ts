@@ -62,6 +62,23 @@ export const HALF_MITIGATION: LivingModelT = { ...supplier('point'),
   options: [supplier('point').options[0]!, { ...supplier('point').options[1]!,
     settings: [{ factor_id: 'dual_sourcing', value: 0.5, low: null, high: null, unit: null, ...who('half dual-source') }] }] };
 
+/**
+ * The served re-run's shape (CEE 997f7a15, 21 Oct): the £1k cost said of the mitigation itself ("dual-sourcing … costs £1k a
+ * month"), not of the option. ISL's preventer is a switch for its risk only, so the cost reaches the engine through the option.
+ */
+const costOnSwitch = (m: LivingModelT): LivingModelT => ({ ...m, links: m.links.map((l) => (l.id === 'cost_gp' ? { ...l, from: 'dual_sourcing' } : l)) });
+export const COSTED_SWITCH = costOnSwitch(supplier('point'));
+/** CONTROL: the same cost on a switch that is not a clean 0/1 step keeps its link, and its risk is refused by name. */
+export const COSTED_HALF_SWITCH = costOnSwitch(HALF_MITIGATION);
+/** CONTROL: already in place today, its cost is paid under carrying on too, so it is never moved onto the option alone. */
+export const COSTED_SWITCH_IN_PLACE: LivingModelT = { ...COSTED_SWITCH, factors: [{ ...COSTED_SWITCH.factors[0]!, value: 1 }] };
+/**
+ * NEGATIVE (codex r1): two options switch the same costed mitigation on. Said per option, the one cost would be drawn
+ * separately for each, changing their comparison, so the switch keeps its link and its risk is refused by name.
+ */
+export const COSTED_SWITCH_TWO_OPTIONS: LivingModelT = { ...COSTED_SWITCH,
+  options: [...COSTED_SWITCH.options, { ...COSTED_SWITCH.options[1]!, id: 'dual_source_fast', label: 'Dual-source this month' }] };
+
 /** NEGATIVE (buddy r1): one switch preventing two risks has two children; ISL refuses that preventer, so CEE does first. */
 export const SHARED_PREVENTER: LivingModelT = { ...supplier('point'),
   risks: [...supplier('point').risks, { ...risk, id: 'port_strike', label: 'Port strike', occurrence: { low: 0.02, high: 0.04 } }],
