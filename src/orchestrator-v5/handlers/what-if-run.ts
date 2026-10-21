@@ -24,6 +24,7 @@ import { goalIdOf, mapLivingModel, savedGoal } from '../path-b/living-model/mapp
 import { livingViewOf } from '../path-b/living-model/view.js';
 import type { StressChance } from '../path-b/tools/stress-tool.js';
 import { NOISE_BAND_SE_MULTIPLE } from '../coaching/win-probability-noise-band.js';
+import { displayedPctAt, type GoalChanceDisplayRounding } from '../goal-target/goal-chance-display.js';
 import { runVariant, type StressVariantParams, type VariantRun } from './stress-variant-run.js';
 
 /** The value gestures a what-if holds. Structural edits, renames, goal and status changes are not what-ifs. */
@@ -86,26 +87,42 @@ const cellOf = ({ pct: _figure, ...shown }: StressChance): Cell =>
   shown.display === null && shown.not_shown === null ? { ...shown, not_shown: NO_RESULT_WORDS } : shown;
 const NOT_SHOWN: Cell = { display: null, provisional: false, not_shown: NOT_IN_RUN_WORDS };
 
+/** Every true chance the display could have shown as `pct` at `step`, read off `displayedPctAt` itself (its clamps
+ *  included: a coarse step shows a small positive chance as 5%), widened by the scan's resolution. Null if none. */
+const SCAN = 10_000;
+const intervals = new Map<string, readonly [number, number] | null>();
+function shownInterval(pct: number, step: GoalChanceDisplayRounding): readonly [number, number] | null {
+  const key = `${step}:${pct}`;
+  if (!intervals.has(key)) {
+    let lo = Infinity; let hi = -Infinity;
+    for (let i = 0; i <= SCAN; i++) if (displayedPctAt(i / SCAN, step) === pct) { lo = Math.min(lo, i / SCAN); hi = Math.max(hi, i / SCAN); }
+    intervals.set(key, lo > hi ? null : [Math.max(0, lo - 1 / SCAN), Math.min(1, hi + 1 / SCAN)]);
+  }
+  return intervals.get(key)!;
+}
+
 /**
- * BEYOND ORDINARY VARIATION, claimed only when it holds whatever the two runs share (Codex #3591 r2):
- *  · on the figures the user SEES (the licence's `pct_by_option`), widened by each figure's own display step: half a point
- *    for a whole figure, two and a half for `nearest_5` (`display_rounding_by_option`);
- *  · against a standard error that holds for ANY covariance between the runs: sd(A − B) ≤ sd(A) + sd(B) (worst case, the
- *    runs move oppositely), each sd at the most variable proportion inside its rounding interval;
- *  · 2 standard errors, as the Run delta's own noise test (`NOISE_BAND_SE_MULTIPLE`).
+ * BEYOND ORDINARY VARIATION, claimed only when it holds for ANY true values the shown figures allow and ANY covariance
+ * between the runs (Codex #3591 r2, #3602 r1):
+ *  · each shown figure (the licence's `pct_by_option`) stands for the whole interval of chances its display step could have
+ *    shown as it (`shownInterval`, from `displayedPctAt`, so the 5%/95% clamps are included);
+ *  · the gap is the smallest distance between the two intervals;
+ *  · the band is 2 × (sd A + sd B): sd A + sd B bounds sd(A − B) for any covariance (the runs may move oppositely), each sd
+ *    at the most variable proportion inside its interval, n from PLoT's n_samples; 2 SE as the Run delta (`NOISE_BAND_SE_MULTIPLE`).
  * Anything else is `not_judged`: on paired draws a "within" can never be claimed safely, so it is not offered.
  */
-function variationOf(saved: StressChance | undefined, whatIf: StressChance | undefined, sSaved: 'whole' | 'nearest_5' | undefined,
-  sWhatIf: 'whole' | 'nearest_5' | undefined, nSaved: number | null, nWhatIf: number | null): WhatIfVariation {
+function variationOf(saved: StressChance | undefined, whatIf: StressChance | undefined, sSaved: GoalChanceDisplayRounding | undefined,
+  sWhatIf: GoalChanceDisplayRounding | undefined, nSaved: number | null, nWhatIf: number | null): WhatIfVariation {
   if (saved?.pct == null || whatIf?.pct == null || nSaved === null || nWhatIf === null || nSaved <= 0 || nWhatIf <= 0) return 'not_judged';
-  const half = (step: 'whole' | 'nearest_5' | undefined) => (step === 'nearest_5' ? 0.025 : 0.005);
-  const [a, b, ha, hb] = [saved.pct / 100, whatIf.pct / 100, half(sSaved), half(sWhatIf)];
-  const sd = (p: number, h: number, n: number) => {
-    const worst = Math.min(Math.max(0.5, p - h), p + h);
+  const ia = shownInterval(saved.pct, sSaved ?? 'whole');
+  const ib = shownInterval(whatIf.pct, sWhatIf ?? 'whole');
+  if (ia === null || ib === null) return 'not_judged';
+  const sd = ([lo, hi]: readonly [number, number], n: number) => {
+    const worst = Math.min(Math.max(0.5, lo), hi);
     return Math.sqrt((worst * (1 - worst)) / n);
   };
-  const gap = Math.abs(b - a) - ha - hb;
-  return gap > NOISE_BAND_SE_MULTIPLE * (sd(a, ha, nSaved) + sd(b, hb, nWhatIf)) ? 'beyond_ordinary_variation' : 'not_judged';
+  const gap = Math.max(0, Math.max(ia[0], ib[0]) - Math.min(ia[1], ib[1]));
+  return gap > NOISE_BAND_SE_MULTIPLE * (sd(ia, nSaved) + sd(ib, nWhatIf)) ? 'beyond_ordinary_variation' : 'not_judged';
 }
 
 export async function runWhatIf(

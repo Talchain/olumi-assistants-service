@@ -126,7 +126,8 @@ const VALUE = { kind: 'factor_value_edit', target_id: 'f', value: 0.7, raw_value
 const LINK = { kind: 'edge_strength_edit', from: 'f', to: 'g', magnitude: 0.2, direction_intent: 'preserve', base_graph_hash: BASE };
 
 /** A fake PLoT run: each call's graph is recorded; `f`'s value decides the display, so a change is visible by identity. */
-type FakeOpts = { pushPct?: (number | null)[]; n?: number | null; step?: 'whole' | 'nearest_5' };
+type Step = 'whole' | 'nearest_5';
+type FakeOpts = { pushPct?: (number | null)[]; n?: number | null; step?: Step | Step[] };
 function fakeRun(seeds: (string | null)[] = [], opts: FakeOpts = {}) {
   const calls: { graph: Rec; seed: unknown }[] = [];
   const run = vi.fn(async (p: { variantGraph: Rec; seed?: number }) => {
@@ -137,7 +138,8 @@ function fakeRun(seeds: (string | null)[] = [], opts: FakeOpts = {}) {
     const strength = Math.round((p.variantGraph.edges as Rec[]).find((e) => e.from === 'f' && e.to === 'g')!.strength.mean * 100) / 100;
     const pushPct = opts.pushPct === undefined ? 42 : opts.pushPct[calls.length - 1] ?? null;
     return { kind: 'rows' as const, seedUsed: calls.length <= seeds.length ? seeds[calls.length - 1]! : 'seed-a',
-      nSamples: opts.n === undefined ? 10000 : opts.n, displayStep: new Map([['push', opts.step ?? 'whole']]),
+      nSamples: opts.n === undefined ? 10000 : opts.n,
+      displayStep: new Map([['push', (Array.isArray(opts.step) ? opts.step[calls.length - 1] : opts.step) ?? 'whole']]),
       rows: new Map([['push', chance(`push f=${f} s=${strength}`, pushPct)], ['hold', chance('hold')]]) };
   });
   return { run, calls };
@@ -269,6 +271,15 @@ describe('beyond ordinary variation: claimed only when it holds for any covarian
     expect((await judge([2, 5], { n: 1400 })).variation).toBe('not_judged');
     // CONTROL: 2% → 6% clears it.
     expect((await judge([2, 6], { n: 1400 })).variation).toBe('beyond_ordinary_variation');
+  });
+
+  it('CODEX #3602 r1: the 5% clamp. "Less than 1%" (whole) → "about 5%" (nearest 5) on 1,500 draws is not judged', async () => {
+    // A positive chance under 2.5% shows as 5% at the nearest-5 step, so "5%" can be 7/1500 → 15/1500: noise.
+    expect((await judge([0, 5], { n: 1500, step: ['whole', 'nearest_5'] })).variation).toBe('not_judged');
+    // The mirrored 95% clamp.
+    expect((await judge([100, 95], { n: 1500, step: ['whole', 'nearest_5'] })).variation).toBe('not_judged');
+    // CONTROL: well clear of the clamp, the same steps can still say beyond.
+    expect((await judge([0, 30], { n: 1500, step: ['whole', 'nearest_5'] })).variation).toBe('beyond_ordinary_variation');
   });
 
   it('the words never rank, recommend or say "significant"', () => {
