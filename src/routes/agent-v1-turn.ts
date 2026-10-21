@@ -976,7 +976,7 @@ const CORE_REPLY_BEFORE_C = 'In this mode Olumi adds nothing to your reply and r
   + 'If the available tools cannot create or work in a separate scenario, say so; do not claim it was created or put its facts into this model instead.';
 /** A `core` Run press permits calculation and reading only: every tool but the reader and the Run (`withheldToolsOf`). The
  *  stress test is withheld too (DL 21 Oct): a press runs and reads; typed turns still offer it, where the person asks. */
-export const CORE_RUN_PRESS_WITHHELD: readonly string[] = ['build_model_from_brief', 'propose_change', 'apply_change', 'stress_test'];
+export const CORE_RUN_PRESS_WITHHELD: readonly string[] = ['build_model_from_brief', 'propose_change', 'apply_change', 'stress_test', 'offer_public_research'];
 /** Coaching on the canvas (Lenses, #3535 `note_on_item`): one question or challenge beside the item that most deserves attention. */
 export const NOTE_ON_ITEM_INSTRUCTION = "When one item in the model most deserves the person's attention (an untested assumption a result rests on, a missing cost or risk, or a link nobody has sized), use note_on_item once to put one short question or challenge beside it, in your own words; ask, do not answer or choose for them.";
 /**
@@ -4522,6 +4522,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
               : loopCapabilities.runAnalysis(toolCtx, args),
             analyseAfterCommit: () => { analysisToCore = true; return analyseCommittedChange(); },
             // TRACK 3: each stress variant on the one Run path, in memory, discarded (`handlers/stress-variant-run.ts`).
+            // The research offer's gate: the final egress's own chip rule on this route's readback (fail closed).
+            researchShowable: (query) => researchControlShowableNow(readingDispatch, scenarioId, query),
             runStressVariant: (v) => runStressVariant({ ...v, requestId: `${String(req.id)}:stress`,
               payload: { kind: 'message', scenario_id: scenarioId, turn_id: randomUUID(), stage: 'analyse', turn_class: 'decide', source: 'composer', message } }) }, coreCtx, mode,
             (row, result) => {
@@ -6256,6 +6258,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // A replacement by the AI's own words (nothing appended): every host line above is dropped, not added to.
       const aiOwnWords = withoutProposalIds(narratorWords ?? text);
       wireBody = { ...unshaped, assistant_text: aiOwnWords } as OlumiResponse & Record<string, unknown>;
+      // The AI's words replace the reconciled text above, so the search controls' truth is settled again on them (Codex #3558
+      // R1): a control the final read withdrew is never left promised by the AI's own "press the control below".
+      if (!leaderFreeEnvelope) wireBody = withResearchControlTruth(wireBody, researchOffered, (chip) => controlSurvivesLeaderGate(chip, leaderGate));
     } else if (aiWroteReply && noDirectLink === null && fastPath !== 'method') {
       const checked = withEstimateGoalPointsAtEgress(wireBody, {
         analysisResult, graph: readbackGraph ?? null, current: selectedRunCurrent,

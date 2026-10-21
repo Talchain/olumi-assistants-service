@@ -25,6 +25,7 @@ import { APPLY_CHANGE, ApplyChangeParams, PROPOSE_CHANGE, ProposeChangeParams, a
 import { LivingChangeParams, applyLivingChange, isLivingProposal, proposeLivingChange } from './living-change.js';
 import { NOTE_ON_ITEM, NoteOnItemParams, noteOnItem } from './note-on-item.js';
 import { STRESS_TEST, StressTestParams, stressTest, type StressDeps } from './stress-tool.js';
+import { OFFER_PUBLIC_RESEARCH, OFFER_PUBLIC_RESEARCH_DESCRIPTION, OfferResearchParams, offerResearch, type ResearchDeps } from './research-tool.js';
 import { refused, traceRow, type ToolOutcome, type TraceRow } from './outcome.js';
 
 export { traceRow, type TraceRow, type ToolOutcome } from './outcome.js';
@@ -49,7 +50,7 @@ export const TOOL_DESCRIPTIONS = {
     'Test where the saved model’s options fall short on average when stated assumptions change together, and whether one named alternative explanation changes that. Name one to three links or factors from read_canonical_context with the values to test, in their own units, and say whether the person gave those values. Nothing is saved. Every result compares an option’s AVERAGE level with the target: report each option at each tested setting as “average clears the target”, “average short of the target” or “too close to call”, and counts as “the average clears the target at k of n tested settings”. Never say an option meets the goal from this test, and never call a count a chance. Say where the two explanations disagree; never combine them, never call an option best and never recommend one.',
 } as const;
 
-export type PathBToolDeps = ChangeDeps & DraftDeps & RunDeps & Pick<StressDeps, 'runStressVariant'> & {
+export type PathBToolDeps = ChangeDeps & DraftDeps & RunDeps & Pick<StressDeps, 'runStressVariant'> & ResearchDeps & {
   /**
    * The route's automatic Run after a committed change (the existing pipeline, at most once per request): the pipeline's
    * outcome, or none with the saved model's readiness when that readiness admits no Run.
@@ -72,6 +73,8 @@ export interface ToolCallResult {
   /** `note_on_item`'s block, for the route to ship beside the reply, and the model identity it was read on (`note_basis`). */
   readonly ui_directive?: Record<string, unknown>;
   readonly note_basis?: string;
+  /** `offer_public_research`'s accepted query: the route ships the one control that can send it (`researchChipFor`). */
+  readonly offered_query?: string;
 }
 export type OnToolCall = (row: TraceRow, result: ToolCallResult) => void;
 
@@ -90,7 +93,8 @@ export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLa
         ...(outcome.status === 'ok' && typeof outcome.data.public_label === 'string' ? { public_label: outcome.data.public_label } : {}), outcome: row.outcome, ...(row.refusal === null ? {} : { refusal: row.refusal }),
         ...(receipt !== null && typeof receipt === 'object' ? { receipts: [receipt as Record<string, unknown>] } : {}),
         ...(outcome.status === 'ok' && outcome.data.ui_directive !== null && typeof outcome.data.ui_directive === 'object'
-          ? { ui_directive: outcome.data.ui_directive as Record<string, unknown>, note_basis: String(outcome.data.graph_identity) } : {}) });
+          ? { ui_directive: outcome.data.ui_directive as Record<string, unknown>, note_basis: String(outcome.data.graph_identity) } : {}),
+        ...(outcome.status === 'ok' && typeof outcome.data.offered_query === 'string' ? { offered_query: outcome.data.offered_query } : {}) });
     } catch { /* a recorder never decides the outcome */ }
     return JSON.stringify(outcome);
   };
@@ -163,6 +167,14 @@ export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLa
       description: TOOL_DESCRIPTIONS.note_on_item,
       parameters: NoteOnItemParams,
       execute: async (args) => record(NOTE_ON_ITEM, args, await noteOnItem(deps, ctx, args, notes)),
+      errorFunction: null,
+    }),
+    // The legacy research offer on the core lane: it searches nothing and saves nothing (`research-tool.ts`).
+    tool({
+      name: OFFER_PUBLIC_RESEARCH,
+      description: OFFER_PUBLIC_RESEARCH_DESCRIPTION,
+      parameters: OfferResearchParams,
+      execute: async (args) => record(OFFER_PUBLIC_RESEARCH, args, await offerResearch(deps, args)),
       errorFunction: null,
     }),
   ];

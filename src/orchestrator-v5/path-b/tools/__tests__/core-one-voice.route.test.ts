@@ -108,6 +108,14 @@ const GIVE_YOUR_ESTIMATE = { slot1: { policy_id: 'RC-STRENGTHEN-ITEM', priority:
   primary_action: { label: 'Give your estimate', action_kind: 'edit_inline', target: 'vans->orders' }, state_key_hash: 'aaaaaaaaaaaa',
   copy: { title: 'A link on the path to your goal has no size yet.', why: 'This link connects vans on the road to weekly orders.',
     question: 'How much do vans on the road change weekly orders?' }, item_ref: { kind: 'link', from_id: 'vans', to_id: 'orders' } } };
+/** When set, the final egress gate passes the FIRST research control it sees (the offer's own check) and withdraws every later one. */
+let withdrawAfterOffer = false;
+let gateCalls = 0;
+vi.mock('../../../agent-lane/leader-final-egress.js', async (original) => {
+  const m = await original<typeof import('../../../agent-lane/leader-final-egress.js')>();
+  return { ...m, controlSurvivesLeaderGate: (...args: Parameters<typeof m.controlSurvivesLeaderGate>) =>
+    (withdrawAfterOffer && gateCalls++ > 0 ? false : m.controlSurvivesLeaderGate(...args)) };
+});
 vi.mock('../../../session/index.js', () => ({ getSessionStore: () => store, resetSessionStoreForTests: () => {}, SessionReadError: class SessionReadError extends Error {} }));
 vi.mock('../../../../orchestrator/user-identity.js', async (original) => ({
   ...await original<Record<string, unknown>>(), resolveUserIdentity: async () => ({ mode: 'off' }),
@@ -211,6 +219,37 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
     expect(j.assistant_text).toBe(ANSWER);
     expect(hostCards(j)).toEqual(NONE);
     expectCoherentInstructions(j);
+  });
+
+  it('⭐ RED→GREEN (#3522 review BLOCK, 21 Oct): a core turn can offer ONE public search; the reply ships its control, nothing is searched', async () => {
+    const QUERY = 'typical weekly order growth after a loyalty scheme in small food businesses';
+    outputs = [[{ type: 'function_call', name: 'offer_public_research', call_id: 'research_call', args: { query: QUERY } }],
+      [{ type: 'message', text: 'A search is on offer below; it runs only if you press it.' }]];
+    const r = await post({ turn_id: randomUUID(), message: 'Is there any published evidence on how much loyalty schemes help?', source: 'composer' });
+    expect(r.statusCode, r.body).toBe(200);
+    const j = r.json() as Json;
+    expect((j._agent.tool_calls as Json[]).find((c) => c.name === 'offer_public_research')).toMatchObject({ ok: true });
+    const chips = ((j.suggested_actions ?? []) as Json[]).filter((a) => String(a.id).startsWith('agent-public-research:'));
+    expect(chips, 'exactly the one control that can send the query').toHaveLength(1);
+    expect(JSON.stringify(chips[0])).toContain(QUERY);
+    // CONTROL: a query that is not one sendable line is refused, and no control ships.
+    outputs = [[{ type: 'function_call', name: 'offer_public_research', call_id: 'research_bad', args: { query: 'x'.repeat(201) } }],
+      [{ type: 'message', text: 'No search is on offer.' }]];
+    const bad = (await post({ turn_id: randomUUID(), message: 'Search for something very long.', source: 'composer' })).json() as Json;
+    expect((bad._agent.tool_calls as Json[]).find((c) => c.name === 'offer_public_research')).toMatchObject({ ok: false });
+    expect(((bad.suggested_actions ?? []) as Json[]).filter((a) => String(a.id).startsWith('agent-public-research:'))).toEqual([]);
+  });
+
+  it('⭐ RED→GREEN (Codex #3558 R1): an offer accepted, then withdrawn on the final read, ships no control, and the AI\u2019s "press it" is corrected in fixed words', async () => {
+    withdrawAfterOffer = true; gateCalls = 0;
+    try {
+      outputs = [[{ type: 'function_call', name: 'offer_public_research', call_id: 'research_withdrawn', args: { query: 'published evidence on weekend opening and library visits' } }],
+        [{ type: 'message', text: 'Press the search control below to look this up.' }]];
+      const j = (await post({ turn_id: randomUUID(), message: 'Is there published evidence on this?', source: 'composer' })).json() as Json;
+      expect((j._agent.tool_calls as Json[]).find((c) => c.name === 'offer_public_research')).toMatchObject({ ok: true });
+      expect(((j.suggested_actions ?? []) as Json[]).filter((a) => String(a.id).startsWith('agent-public-research:'))).toEqual([]);
+      expect(String(j.assistant_text)).toContain('No web search is on offer with this reply.');
+    } finally { withdrawAfterOffer = false; }
   });
 
   it('⭐ RED→GREEN: a goal with no target: no host gap question beside the AI\u2019s answer', async () => {
