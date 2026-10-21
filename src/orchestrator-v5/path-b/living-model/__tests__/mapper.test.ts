@@ -66,6 +66,41 @@ describe('thin core mapper: living model → GraphV3', () => {
     expect(meetChance(node(graph, 'hold').interventions.f.value)).toBe(0);
   });
 
+  it('⭐ RED→GREEN (A5 served 37b5fc4b): the person\'s mean and SD with no shape stated keep THEIR SD, under Olumi\'s disclosed bell-shape assumption', () => {
+    // Saved on served: form point, value 50, sd 10 ("50 on average, standard deviation 10"; no distribution named). The SD was
+    // replaced by half the effect (25), so push read 35% instead of the Normal-conditional 15.87%.
+    const edge = (g: { edges: Record<string, unknown>[] }) => g.edges.find((e) => e.from === 'f' && e.to === 'g') as Record<string, any> | undefined;
+    const meanSd: LivingModelT = structuredClone(KNOWN_ANSWER);
+    meanSd.links[0]!.effect = { ...meanSd.links[0]!.effect, form: 'point' };
+    const { graph } = mapLivingModel(meanSd);
+    const goal = node(graph, 'g');
+    const link = edge(graph)!;
+    expect(link.strength.mean).toBeCloseTo(0.4, 10);
+    expect(link.strength.std).toBeCloseTo(0.08, 10);
+    expect(link.provenance).toMatchObject({ source: 'brief_extraction', magnitude: 'user_stated' });
+    const z = (goal.goal_threshold - (goal.observed_state.baseline + 0.5 * link.strength.mean)) / (0.5 * link.strength.std);
+    expect(1 - phi(z)).toBeCloseTo(0.1587, 3);
+    // Whose is what: the SD is the person's; the bell shape is Olumi's assumption, said; never "Nobody stated how uncertain".
+    const said = linkDefaultAssumptionsOf(link).find((r) => r.code === 'CLAMP_STD_MINIMUM')!.reason;
+    expect(said).toContain('the stated standard deviation, 10');
+    expect(said).toContain('Olumi assumes a bell shape (Normal)');
+    expect(said).not.toContain('Nobody stated how uncertain');
+    // ⛔ Codex r1 #3606: an SD whose source is unconfirmed is never Olumi's; Olumi's own estimate says so.
+    const sdSaid = (m: LivingModelT) => linkDefaultAssumptionsOf(edge(mapLivingModel(m).graph)!).find((r) => r.code === 'CLAMP_STD_MINIMUM')!.reason;
+    const unconfirmed: LivingModelT = structuredClone(meanSd);
+    unconfirmed.links[0] = { ...unconfirmed.links[0]!, source: 'unverified', quote: null };
+    expect(sdSaid(unconfirmed)).toContain('the given (its source is not confirmed) standard deviation, 10');
+    expect(sdSaid(unconfirmed)).not.toContain('Olumi\'s estimated');
+    const olumis: LivingModelT = structuredClone(meanSd);
+    olumis.links[0]!.effect.estimate_by = 'olumi';
+    expect(sdSaid(olumis)).toContain('Olumi\'s estimated standard deviation, 10');
+    // CONTRAST: the same point with no SD keeps Olumi's illustrative half-effect spread, and says so.
+    meanSd.links[0]!.effect.sd = null;
+    const bare = edge(mapLivingModel(meanSd).graph)!;
+    expect(bare.strength.std).toBeCloseTo(0.2, 10);
+    expect(linkDefaultAssumptionsOf(bare).find((r) => r.code === 'CLAMP_STD_MINIMUM')!.reason).toContain('Nobody stated how uncertain');
+  });
+
   it('the stored graph keeps the living model through a GraphV3 re-parse (never stripped)', () => {
     const { graph } = mapLivingModel(KNOWN_ANSWER);
     const parsed = GraphV3.safeParse({ ...graph, living_model: KNOWN_ANSWER });

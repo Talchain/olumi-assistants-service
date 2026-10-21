@@ -417,7 +417,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     const coefficient = d.op === 'sum' ? 1 : d.of.filter((p) => p !== l.from).reduce((a, p) => a * (model.factors.find((f) => f.id === p)?.value ?? NaN), 1);
     const same = (v: number | null) => v !== null && Math.abs(Math.abs(v) - coefficient) <= 1e-9 * Math.max(1, Math.abs(coefficient));
     // A spread the person stated (a Normal law, a range) says the link is uncertain; a definition is exact (buddy r2).
-    if (e.form === 'normal' && e.sd !== null && e.sd > 0) return false;
+    if ((e.form === 'normal' || e.form === 'point') && e.sd !== null && e.sd > 0) return false;
     if (e.form === 'range' && (e.low !== null || e.high !== null) && !(same(e.low) && same(e.high))) return false;
     const size = e.form === 'point' || e.form === 'exact' || e.form === 'normal' || e.form === 'range' ? e.value : null;
     return (size === null || same(size)) && (e.unit === null || d.unit === null || sameUnit(e.unit, d.unit));
@@ -495,8 +495,14 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     // The person's own figure inside their range ("about 20, between 10 and 30") sizes the link as their point, with the
     // range kept beside it in the living model (AIE range disposition, 16 Oct: `centre`). A bare range sizes nothing.
     const centred = e.form === 'range' && e.value !== null && e.low !== null && e.high !== null && e.low < e.value && e.value < e.high;
+    // A point with the source's own standard deviation ("50 on average, standard deviation 10") keeps that SD (A5, 21 Oct:
+    // the SD was saved and then replaced by half the effect). Its shape was not stated, so the Normal draw is Olumi's
+    // assumption, said in the ledger below; the person's link is never promoted to a Normal law they stated (buddy 21:28Z).
+    const statedSd = e.form === 'point' && e.value !== null && e.sd !== null && e.sd > 0 ? e.sd : null;
+    // Whose SD it is, as for any figure: an unconfirmed source is never Olumi's (Codex r1 on #3606).
+    const sdBy = (s: LivingSourceT): string => (s === 'olumi' ? 'Olumi\'s estimated' : stated(s) ? 'the stated' : 'the given (its source is not confirmed)');
     const sized = ratio === undefined ? undefined : ((e.form === 'point' || centred) && e.value !== null)
-      ? { mean: sign * Math.abs(e.value) * ratio, std: Math.abs(e.value) * ratio / 2 }
+      ? { mean: sign * Math.abs(e.value) * ratio, std: (statedSd ?? Math.abs(e.value) / 2) * ratio }
       : (e.form === 'normal' && e.value !== null && e.sd !== null && e.sd > 0)
         ? { mean: sign * Math.abs(e.value) * ratio, std: e.sd * ratio }
         // Stated exact, but on a drawn link: kept at the floor spread so the model still runs, while its chance is withheld,
@@ -526,7 +532,9 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
           ? (figureBy(e, l).source === 'olumi'
             ? `The calculation uses Olumi's estimated ${Math.abs(e.value!)} with Olumi's illustrative spread (half the estimated effect). Olumi's range, ${e.low} to ${e.high}, is kept with the model but is not used as a spread.`
             : `The calculation uses the stated ${Math.abs(e.value!)} with Olumi's illustrative spread (half the stated effect). The stated range, ${e.low} to ${e.high}, is kept with the model but is not used as a spread.`)
-          : 'Nobody stated how uncertain this strength is. Applied Olumi\'s illustrative spread (half the stated effect). It is not a measurement of anyone\'s confidence.' }] : []),
+          : statedSd !== null
+            ? `The calculation uses ${sdBy(figureBy(e, l).source)} standard deviation, ${statedSd}. Nobody stated the shape of the spread, so Olumi assumes a bell shape (Normal) around ${Math.abs(e.value!)}.`
+            : 'Nobody stated how uncertain this strength is. Applied Olumi\'s illustrative spread (half the stated effect). It is not a measurement of anyone\'s confidence.' }] : []),
       // A stated effect asserts that the link exists: existence 1 is the stater's claim, never an Olumi default (Science,
       // 21 Oct). Olumi's own link, or one the person hedged (an assumption on it), keeps the default and says so.
       ...(stated(l.source) && !hedged.has(l.id) ? [] : [{ code: REPAIR_CODES.DEFAULT_EXISTS_PROBABILITY, layer: 'cee' as const,
