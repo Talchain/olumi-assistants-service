@@ -94,6 +94,13 @@ describe('carrying on as now, facing a risk the person stated, has an earned cha
     expect(sqOf(lic(f2(), env))).toEqual(MOVED);
     const unframed = goalChanceLicenceOf(structuredClone(ENGINE), f2(), 'gp');
     expect(unframed?.withheld_reason_by_option?.status_quo).toMatchObject({ reason: 'reference_moved' });
+    // Codex r2 on #3582: a row mixing frames (a raw £ figure beside the encoded median) is not the Run's own reading.
+    for (const mixed of [{ p10: 8000 }, { mean: 15200 }, { p90: 16000 }]) {
+      const env2 = structuredClone(ENGINE);
+      const row = (env2.option_comparison as Rec[]).find((o) => o.option_id === 'status_quo')!;
+      row.outcome = { ...row.outcome, ...mixed };
+      expect(sqOf(lic(f2(), env2)), JSON.stringify(mixed)).toEqual(MOVED);
+    }
   });
 
   it('NEGATIVE: a path carrying on cuts earns nothing, whether its setting is held in interventions or in data.interventions', () => {
@@ -141,7 +148,8 @@ describe('carrying on as now, facing a risk the person stated, has an earned cha
 
   it('NEGATIVE: a risk earns nothing on a change frame, on an unsupported reference, for an exact chance on the wrong side, or past a half', () => {
     const row = { probability_of_goal: 0.9, outcome: { p50: 16000, n_samples: 10000 } };
-    const at = (x: Record<string, unknown>) => statusQuoReadingOf({ paired: true, forecast: false, row, reference: 16000, referenceChance: 1, riskChance: 0.15, ...x });
+    const at = (x: Record<string, unknown>) => statusQuoReadingOf({ paired: true, forecast: false, row, reference: 16000, referenceChance: 1, riskChance: 0.15,
+      frameRatio: 0.8 / 16000, ...x });
     expect(at({})).toBe('at_risk');
     expect(at({ riskChance: undefined })).toBe('moved');
     expect(at({ referenceChance: undefined })).toBe('moved');
@@ -149,5 +157,8 @@ describe('carrying on as now, facing a risk the person stated, has an earned cha
     expect(at({ row: { probability_of_goal: 0 } })).toBe('moved');
     expect(at({ riskChance: 0.6 })).toBe('moved');
     expect(at({ row: { probability_of_goal: 0.9, outcome: { p50: 16000 } } })).toBe('moved');
+    expect(at({ frameRatio: undefined })).toBe('moved');
+    expect(at({ row: { probability_of_goal: 0.9, outcome: { p50: 16000, p10: 0.7, n_samples: 10000 } } })).toBe('moved');
+    expect(at({ row: { probability_of_goal: 0.9, outcome: { p50: 16000, p10: 8000, n_samples: 10000 } } })).toBe('at_risk');
   });
 });

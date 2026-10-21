@@ -336,7 +336,7 @@ function labelOfNode(nodes: readonly Rec[], id: string): string | undefined {
  * (`event_risk`, the person's or Olumi's labelled), named, that can still happen under the status quo (its highest stated
  * chance, less the mitigations the status quo has in place, above 0) and reaches the goal by a path through quantities the
  * status quo leaves open (a node it sets cuts the path; an option or decision is never a path). `chance` is the most that
- * at least one of them happens: 1 − Π(1 − highest). Codex r1 on #3582.
+ * at least one of them happens, whatever their dependence: min(1, Σ highest). Codex r1/r2 on #3582.
  */
 function risksFacingStatusQuo(graph: unknown, goalId: unknown, statusQuoId: string | undefined): { labels: string[]; chance: number } {
   const none = { labels: [], chance: 0 };
@@ -370,25 +370,29 @@ function risksFacingStatusQuo(graph: unknown, goalId: unknown, statusQuoId: stri
     }
     return [];
   });
-  return { labels: facing.map((f) => f.label), chance: 1 - facing.reduce((q, f) => q * (1 - f.high), 1) };
+  return { labels: facing.map((f) => f.label), chance: Math.min(1, facing.reduce((q, f) => q + f.high, 0)) };
 }
 
 /**
  * Whether the risks carrying on faces explain its chance (Codex r1 on #3582). Same-draw cancellation leaves every draw in which
  * none of them happens at today's level exactly, so the chance differs from today's side by at most the chance one happens
  * (within four standard errors of the Run's own sample), and, while that is under a half, the median sits at today's level in
- * the Run's own frame. Anything else (a larger move, another frame, no sample size, a change frame) is not explained.
+ * the Run's own frame. Every other recorded centre reads nearer today in that frame than it would in the goal's other known
+ * frame (Codex r2 on #3582: a raw p10 beside an encoded p50 is a mixed row). Anything else (a larger move, another or a mixed
+ * frame, no sample size, a change frame) is not explained.
  */
-function riskExplains(a: { readonly row: Rec | undefined; readonly reference: number | 'unknown' | undefined; readonly rawReference?: number;
-  readonly referenceChance?: 0 | 1; readonly riskChance?: number }, p: number): boolean {
+function riskExplains(a: { readonly row: Rec | undefined; readonly reference: number | 'unknown' | undefined;
+  readonly referenceChance?: 0 | 1; readonly riskChance?: number; readonly frameRatio?: number }, p: number): boolean {
   const q = a.riskChance;
   const o = isRec(a.row?.outcome) ? a.row!.outcome as Rec : undefined;
   const n = finite(o?.n_valid_samples) ? o!.n_valid_samples : o?.n_samples;
   // A change frame carries no `referenceChance` (only `zeroChange`), so it is never explained here.
   if (q === undefined || !(q > 0) || q >= 0.5 || a.referenceChance === undefined || !finite(n) || n < 1) return false;
-  const atToday = [a.reference, a.rawReference].some((ref) => finite(ref) && finite(o?.p50)
-    && sameFrameArithmeticAgreement(o!.p50 as number, ref, ref, PAIRED_REFERENCE_PRECISION));
-  return atToday && Math.abs(p - a.referenceChance) <= q + 4 * Math.sqrt(q * (1 - q) / n);
+  const ref = a.reference;
+  const k = a.frameRatio;
+  if (!finite(ref) || !finite(k) || k <= 0 || k === 1 || !finite(o?.p50) || !sameFrameArithmeticAgreement(o!.p50 as number, ref, ref, PAIRED_REFERENCE_PRECISION)) return false;
+  const inFrame = ['p10', 'p90', 'mean'].every((key) => !finite(o![key]) || Math.abs((o![key] as number) - ref) <= Math.abs((o![key] as number) / k - ref));
+  return inFrame && Math.abs(p - a.referenceChance) <= q + 4 * Math.sqrt(q * (1 - q) / n);
 }
 
 /**
@@ -442,6 +446,8 @@ export function statusQuoReadingOf(a: {
   readonly zeroChange?: 0 | 1;
   /** The most the risks carrying on still faces can happen (`risksFacingStatusQuo`); absent when it faces none. */
   readonly riskChance?: number;
+  /** How much larger a figure in the goal's other known frame is than in the reference's (raw ÷ encoded, or its inverse). */
+  readonly frameRatio?: number;
 }): StatusQuoReading {
   if (!a.paired) return a.forecast ? 'projection' : 'unknown';
   // A paired reference never establishes the target's side when its unit/frame evidence is unsupported, even with exact centres.
@@ -810,6 +816,10 @@ export function goalChanceLicenceOf(
   // paired change, and that sent goal is the held one — never because the goal's target says change.
   const pairedChange = changeQuantity && sentRunPairsChange(constraints.sentRun, goalId)
     && sentRunScoresHeldChange(constraints.sentRun, graph, goalId, held);
+  // The goal's two known frames (encoded and raw), so a row can be read in one of them only (Codex r2 on #3582).
+  const enc = goalState?.value, raw = goalState?.raw_value;
+  const frameRatio = finite(enc) && finite(raw) && enc !== 0 && raw !== 0 && enc !== raw && finite(levelToday)
+    ? (Math.abs(levelToday - enc) <= Math.abs(levelToday - raw) ? raw / enc : enc / raw) : undefined;
   // Earned only where the line can name carrying on and the risk (`risksFacingStatusQuo` names each one).
   const sqRisks = statusQuoId !== undefined && labelOfNode(nodes, statusQuoId) !== undefined ? risksFacingStatusQuo(graph, goalId, statusQuoId) : { labels: [], chance: 0 };
   const sqReading: StatusQuoReading = share !== null || statusQuoId === undefined || goal === undefined ? 'unknown'
@@ -818,7 +828,7 @@ export function goalChanceLicenceOf(
       forecast: timing.forecast,
       row: sqRow,
       // The single goal's chance only: with several targets sent, the joint reads carrying on as before (Codex r1 on #3582).
-      ...(sqRisks.labels.length > 0 && !sentTargetRows(constraints) ? { riskChance: sqRisks.chance } : {}),
+      ...(sqRisks.labels.length > 0 && !sentTargetRows(constraints) ? { riskChance: sqRisks.chance, ...(frameRatio === undefined ? {} : { frameRatio }) } : {}),
       // A quantity measured AS a change is 0 today by construction; a level's reference is its held level today (D2: in
       // the Run's own frame).
       reference: changeQuantity ? 0 : levelToday,
