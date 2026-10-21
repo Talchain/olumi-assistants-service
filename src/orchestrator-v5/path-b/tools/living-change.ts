@@ -59,8 +59,7 @@ export async function proposeLivingChange(deps: Deps, ctx: Ctx, args: LivingChan
   const base = await savedLiving(deps, ctx);
   if ('status' in base) return base;
   const brief = typeof base.saved.json.brief_text === 'string' ? [base.saved.json.brief_text] : [];
-  const words = [...brief, ...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])];
-  const kernelled = applyKernel(args.model, words, base.model);
+  const kernelled = applyKernel(args.model, [...brief, ...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])], base.model);
   // A condition is corrected or resolved by replacing it ("only after supplier approval" → "supplier approval obtained"; Codex
   // r6 on #3522): its removal is a row on the card the person approves, and the host keeps it in history. The quote is the
   // person's own words for the change: a replacement THEY stated (kernel-verified) on the same items, else null. Never this
@@ -72,13 +71,18 @@ export async function proposeLivingChange(deps: Deps, ctx: Ctx, args: LivingChan
   const added = of('condition', 'add') as LivingModelT['conditions'];
   const wordsFor = (c: LivingModelT['conditions'][number]): string | null => added.find((a) => (a.source === 'user' || a.source === 'party')
     && a.quote !== null && a.applies_to.some((id) => c.applies_to.includes(id)))?.quote ?? null;
-  // A view is corrected only by the same holder's new view ("Sam thinks Push is too risky" → "Sam now supports Push"; Codex r7
-  // on #3522), kept in history the same way, with the new view's quote only where the person's words hold it. A view dropped
-  // with no replacement is still refused: dissent is never removed here.
+  // A view is corrected by its holder's new view ("Sam thinks Push is too risky" → "Sam now supports Push"; Codex r7 on #3522),
+  // kept in history the same way. Only ONE gone view and ONE new view of that holder pair: a holder names a person, not a view,
+  // so two of Sam's views and one new one is ambiguous and refused (Codex r1 on #3579). The quote is the new view's only where
+  // THIS turn's words hold it: a correction is said now, never in the brief. A view dropped with no replacement is still
+  // refused: dissent is never removed here.
   const newViews = of('view', 'add') as LivingModelT['views'];
-  const successor = (v: LivingModelT['views'][number]) => newViews.find((n) => plain(n.holder) === plain(v.holder));
-  const goneViews = (of('view', 'remove') as LivingModelT['views']).filter((v) => successor(v) !== undefined);
-  const said = (q: string | null): string | null => (q !== null && plain(q).length > 0 && words.some((w) => plain(w).includes(plain(q))) ? q : null);
+  const oldViews = of('view', 'remove') as LivingModelT['views'];
+  const holders = (vs: LivingModelT['views'], v: LivingModelT['views'][number]) => vs.filter((n) => plain(n.holder) === plain(v.holder));
+  const successor = (v: LivingModelT['views'][number]) => (holders(oldViews, v).length === 1 && holders(newViews, v).length === 1 ? holders(newViews, v)[0] : undefined);
+  const goneViews = oldViews.filter((v) => successor(v) !== undefined);
+  const turn = plain(ctx.user_turn_text ?? '');
+  const said = (q: string | null): string | null => (q !== null && plain(q).length > 0 && turn.includes(plain(q)) ? q : null);
   const olds = new Set([...gone, ...goneViews].map(stable));
   const recordsGone = (old: string): boolean => { try { return olds.has(stable(JSON.parse(old))); } catch { return false; } };
   const saved = new Set(base.model.history.map(stable));

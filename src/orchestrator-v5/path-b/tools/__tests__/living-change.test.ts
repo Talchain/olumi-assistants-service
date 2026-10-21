@@ -227,11 +227,28 @@ describe('a view is corrected by its holder\'s new view, and kept in history', (
       .toMatchObject({ status: 'refused', reason: 'cannot_remove_here', data: { kinds: ['view'] } });
   });
 
-  it('NEGATIVE: a new view in words the person never said is kept in history with no one\'s words', async () => {
+  it('NEGATIVE: a new view whose words this turn does not hold, the brief\'s included, is kept in history with no one\'s words', async () => {
+    for (const [turn, quote] of [['Run it again.', NOW], [NOW, 'we need at least 100 units']]) {
+      const proposals = new ProposalStore();
+      const model = { ...supports(), views: [{ holder: 'Sam', position: 'now supports push', quote }] };
+      const out = await proposeLivingChange({ dispatch: product(KNOWN_ANSWER).dispatch, proposals }, { ...said, user_turn_text: turn }, args(model));
+      expect(out, quote).toMatchObject({ status: 'ok' });
+      expect(proposed(proposals, out).history, quote).toEqual([{ id: 'view', change: 'superseded', old: JSON.stringify(RISKY), quote: null }]);
+    }
+  });
+
+  // Codex r1 on #3579: a holder names a person, not a view.
+  it('NEGATIVE: one new view of Sam\'s never replaces two; the one Sam changed pairs once the other is kept', async () => {
+    const OUTSOURCE = { holder: 'Sam', position: 'thinks outsourcing is too risky', quote: 'Sam disagrees' };
+    const twoViews = { ...structuredClone(KNOWN_ANSWER), views: [RISKY, OUTSOURCE] };
+    const p = product(twoViews);
+    expect(await proposeLivingChange({ dispatch: p.dispatch, proposals: new ProposalStore() }, said, args(supports())))
+      .toMatchObject({ status: 'refused', reason: 'cannot_remove_here', data: { kinds: ['view'] } });
     const proposals = new ProposalStore();
-    const out = await proposeLivingChange({ dispatch: product(KNOWN_ANSWER).dispatch, proposals }, { ...said, user_turn_text: 'Run it again.' }, args(supports()));
-    expect(out).toMatchObject({ status: 'ok' });
-    expect(proposed(proposals, out).history).toEqual([{ id: 'view', change: 'superseded', old: JSON.stringify(RISKY), quote: null }]);
+    const keeps = { ...supports(), views: [{ holder: ' sam ', position: 'now supports push', quote: NOW }, OUTSOURCE] };
+    const out = await proposeLivingChange({ dispatch: p.dispatch, proposals }, said, args(keeps));
+    expect(out.status, JSON.stringify(out)).toBe('ok');
+    expect(proposed(proposals, out).history).toEqual([{ id: 'view', change: 'superseded', old: JSON.stringify(RISKY), quote: NOW }]);
   });
 
   it('NEGATIVE: a history entry the AI writes for the replaced view is the host\'s instead, and saved history is never removed', async () => {
