@@ -178,10 +178,10 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
   afterAll(async () => { await app?.close(); vi.unstubAllGlobals(); vi.useRealTimers(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   beforeEach(() => { vi.setSystemTime(Date.UTC(2026, 9, 8, 12)); nextScenario(); script = []; constructionCandidate = undefined; wideningAnswer = undefined; openAiCalls = 0; inner = []; onInner = undefined; onInnerSent = undefined; routerCalls.length = 0; extraRead = {}; });
 
-  const turn = async (payload: Record<string, unknown>): Promise<Body> => {
+  const turn = async (payload: Record<string, unknown>, headers: Record<string, string> = {}): Promise<Body> => {
     // Issuance allows 2 seconds of clock skew; separate public turns so the preceding answer cannot be the issuer.
     vi.setSystemTime(Date.now() + 3000);
-    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), ...payload } });
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', headers, payload: { kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), ...payload } });
     expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
     return r.json() as Body;
   };
@@ -651,6 +651,31 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     expect(t1._agent.tool_calls).toEqual([]);
     expect(await heldOnLatestRow()).toEqual([]);
     expect(nodeLabels(), 'nothing is written by the suggestion').toEqual(before);
+  }, 120_000);
+
+  it('THIN CORE (Lenses\u2019 chip check, core 9e113412): on core the risks press offers no legacy Add, whose card could never be saved there, and says how to add one; a stale Add press holds nothing and says so', async () => {
+    paulV1();
+    const { CORE_RISK_ADD_REPLY, RISKS_ADD_IN_CHAT_LINE, RISKS_ADD_LINE } = await import('../method-turn/widen-turn.js');
+    const CORE = { 'x-olumi-ai-mode': 'core' };
+    script = [() => candidates(TURN2)];
+    const t1 = await turn({ message: RISKS.message, source: 'chip', chip: { id: RISKS.id } }, CORE);
+    expect(addChips(t1), JSON.stringify(t1.suggested_actions)).toEqual([]);
+    expect(t1.assistant_text).toContain(RISKS_ADD_IN_CHAT_LINE);
+    expect(t1.assistant_text).not.toContain(RISKS_ADD_LINE);
+    // CONTRAST: the same press on the legacy lane offers the Add presses (SR-1), and one is pressed on core below.
+    script = [() => candidates(TURN2)];
+    const legacy = await turn({ message: RISKS.message, source: 'chip', chip: { id: RISKS.id } });
+    const add = addChips(legacy)[0]!;
+    expect(add, JSON.stringify(legacy.suggested_actions)).toBeDefined();
+    const before = nodeLabels();
+    const calls = openAiCalls;
+    const t2 = await turn({ message: add.message, source: 'chip', chip: { id: add.id } }, CORE);
+    expect(openAiCalls, 'no model call').toBe(calls);
+    expect(t2._agent.tool_calls).toEqual([]);
+    expect(t2.assistant_text).toBe(CORE_RISK_ADD_REPLY);
+    expect(approveChipOf(t2)).toBeUndefined();
+    expect(await heldOnLatestRow()).toEqual([]);
+    expect(nodeLabels(), 'nothing is written').toEqual(before);
   }, 120_000);
 
   it('SR-2: Add → NO model call → ONE held card → approve → stamped timing risk has zero edges', async () => {
