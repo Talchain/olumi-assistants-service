@@ -150,6 +150,34 @@ export interface FactorValueField {
 }
 export type ProposalField = LinkStrengthField | FactorValueField;
 
+/**
+ * A core proposal's NEW factor or link (`living_change` add), shown so the canvas can draw it where it would land. Never
+ * editable, and never a `ProposalField`: an amend names editable fields only, so an edit naming one is `unknown_field`.
+ */
+export interface FactorAddField {
+  readonly field_id: string;
+  readonly kind: 'factor_add';
+  readonly node_id: string;
+  readonly label: string;
+  /** Its point level, when it has one (a range or no unit: null). */
+  readonly value: { readonly value: number; readonly unit: string } | null;
+  readonly source: 'estimate' | 'yours';
+  readonly editable: false;
+}
+export interface LinkAddField {
+  readonly field_id: string;
+  readonly kind: 'link_add';
+  readonly link_id: string;
+  readonly from_id: string;
+  readonly to_id: string;
+  readonly from_label: string;
+  readonly to_label: string;
+  readonly direction: 'positive' | 'negative';
+  readonly source: 'estimate' | 'yours';
+  readonly editable: false;
+}
+export type AddField = FactorAddField | LinkAddField;
+
 export interface MissingDatum {
   readonly node_id: string;
   readonly label: string;
@@ -181,6 +209,8 @@ export interface ProposalRecord<F extends ProposalField = ProposalField> {
   readonly decline_action: CardAction;
   readonly operations: readonly HeldOp[];
   readonly fields: readonly F[];
+  /** A core proposal's new factors and links, shown (never edited); absent when it adds none. In the digest when present. */
+  readonly adds?: readonly AddField[];
   readonly missing: readonly MissingDatum[];
   /**
    * ⭐ NO SILENT LAPSE (PR-2): a card kept for review carries its "Review this change" action. It is projected beside its
@@ -418,10 +448,63 @@ export function agentProposalRecord(pa: PendingAction, graph: unknown, nowMs = D
         filled_missing: typeof b['value'] !== 'number', editable: false });
     }
   }
+  const adds = coreAdds(p.operations, labelOf);
   const decline: CardAction = { id: declineChipIdFor(p.proposal_id), label: 'Not now', message: 'Not now.' };
-  const digest = projectionDigest({ p: p.proposal_id, r: pa.id, g: p.base_graph_identity_hash, approve, decline, fields, missing: [] });
+  // A card that adds nothing keeps its digest byte-identical (a card issued before this projection still binds).
+  const digest = projectionDigest({ p: p.proposal_id, r: pa.id, g: p.base_graph_identity_hash, approve, decline, fields, missing: [],
+    ...(adds.length > 0 ? { adds } : {}) });
   return { proposal_id: p.proposal_id, revision: pa.id, digest, dialect: 'agent', base_graph_hash: p.base_graph_identity_hash,
-    approve_action: approve, decline_action: decline, operations: p.operations, fields, missing: [] };
+    approve_action: approve, decline_action: decline, operations: p.operations, fields, ...(adds.length > 0 ? { adds } : {}), missing: [] };
+}
+
+/**
+ * A core proposal's new factors and links (path-b `living_change` adds), for the canvas to draw where they would land
+ * (DL lease, 21 Oct). Same author rule as a changed figure: Olumi's own item is its estimate; the person's only with their
+ * words; a party's or unverified item is not shown. A link with no sign is not shown (its direction is unstated). Labels
+ * come from the proposed model's own items, else the saved graph; an item with no label anywhere is not shown.
+ */
+const CARD_KINDS: ReadonlySet<string> = new Set(['aim', 'option', 'factor', 'risk']);
+function coreAdds(operations: readonly HeldOp[], savedLabel: (id: string) => string): AddField[] {
+  const after = (o: HeldOp): Rec | undefined => (o.op === 'living_change' && isRec(o.value) && isRec(o.value['after']) ? o.value['after'] : undefined);
+  // Only items that are cards: a condition, view or history entry has a POSITIONAL id that may equal a card's (Codex R1).
+  const proposed = new Map<string, string>();
+  for (const o of operations) {
+    const a = after(o);
+    const words = a?.['label'] ?? a?.['text'];
+    const sep = o.path.indexOf(':');
+    if (a !== undefined && CARD_KINDS.has(o.path.slice(0, sep)) && typeof words === 'string' && words.trim() !== '') proposed.set(o.path.slice(sep + 1), words);
+  }
+  const labelOf = (id: unknown): string | undefined => {
+    if (typeof id !== 'string') return undefined;
+    const saved = savedLabel(id);
+    return proposed.get(id) ?? (saved !== id ? saved : undefined);
+  };
+  const source = (a: Rec): 'estimate' | 'yours' | undefined =>
+    a['source'] === 'olumi' ? 'estimate' : a['source'] === 'user' && typeof a['quote'] === 'string' && a['quote'] !== '' ? 'yours' : undefined;
+  const adds: AddField[] = [];
+  for (const o of operations) {
+    const a = after(o);
+    if (a === undefined || (o.value as Rec)['change'] !== 'add') continue;
+    const by = source(a);
+    if (by === undefined) continue;
+    const id = o.path.slice(o.path.indexOf(':') + 1);
+    if (o.path.startsWith('factor:')) {
+      const label = labelOf(id);
+      if (label === undefined) continue;
+      const point = typeof a['value'] === 'number' && Number.isFinite(a['value']) && a['low'] == null && a['high'] == null
+        && typeof a['unit'] === 'string' && a['unit'] !== '';
+      adds.push({ field_id: `factor_add:${id}`, kind: 'factor_add', node_id: id, label,
+        value: point ? { value: a['value'] as number, unit: a['unit'] as string } : null, source: by, editable: false });
+    } else if (o.path.startsWith('link:')) {
+      const sign = isRec(a['effect']) ? a['effect']['sign'] : null;
+      const from = labelOf(a['from']);
+      const to = labelOf(a['to']);
+      if ((sign !== '+' && sign !== '-') || from === undefined || to === undefined) continue;
+      adds.push({ field_id: `link_add:${id}`, kind: 'link_add', link_id: id, from_id: String(a['from']), to_id: String(a['to']),
+        from_label: from, to_label: to, direction: sign === '-' ? 'negative' : 'positive', source: by, editable: false });
+    }
+  }
+  return adds;
 }
 /** One envelope, with a reader for each stored dialect. */
 export function proposalRecord(pa: PendingAction, graph: unknown, nowMs = Date.now()): ProposalRecord | undefined {
@@ -570,6 +653,8 @@ export interface ProposalFieldsWire {
     readonly decline_action: CardAction;
     readonly review_action?: CardAction;
     readonly fields: readonly ProposalField[];
+    /** A core proposal's new factors and links (display only); absent when it adds none. */
+    readonly adds?: readonly AddField[];
     readonly missing: readonly MissingDatum[];
   }[];
 }
@@ -611,7 +696,7 @@ export function proposalFieldsWire(
       // Wire-only context: issuing a card never changes the digest of what that card showed.
       issued_turn_id: issuedTurnIds.get(r.revision) ?? null,
       ...(r.review_action !== undefined ? { review_action: r.review_action } : {}),
-      fields: r.fields, missing: r.missing,
+      fields: r.fields, ...(r.adds !== undefined ? { adds: r.adds } : {}), missing: r.missing,
     })),
   };
 }

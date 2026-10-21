@@ -5,6 +5,7 @@ import { timingGated } from '../../../../../tests/helpers/scaling-ratio.js';
  * Fixtures are the add-risk door's REAL batch shape (`add-risk-transaction.ts` + `hypothesisEdgeValue`).
  */
 import { describe,expect,it,vi } from 'vitest';
+import { createHash } from 'node:crypto';
 
 import { findForbiddenPhraseHit } from '../../../compose/forbidden-user-facing-phrases.js';
 import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
@@ -453,6 +454,60 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
       { field_id: 'factor_value:f_user', kind: 'factor_value', node_id: 'f_user', label: 'F_USER', unit: 'hours',
         current: { value: 12, unit: 'hours', source: 'yours' }, filled_missing: false, editable: false },
     ]);
+  });
+  it('core living_change ADDS (DL lease, 21 Oct): a new factor or signed link is shown as Olumi\'s or the person\'s, never edited; a card adding nothing keeps its digest', async () => {
+    const { createProposal } = await import('../../proposal.js');
+    const { proposalPendingAction } = await import('../../durable-proposal.js');
+    const { agentProposalRecord } = await import('../record.js');
+    const { amendAgentProposal } = await import('../amend.js');
+    const fac = (id: string, label: string, source: string, more: Record<string, unknown> = {}) =>
+      ({ id, label, value: null, low: null, high: null, unit: 'tickets', defined_as: null, source, party: null, quote: null, ...more });
+    const lnk = (id: string, from: string, to: string, sign: string | null, source: string, quote: string | null = null) =>
+      ({ id, from, to, effect: { form: 'direction_only', value: null, sign }, source, party: null, quote });
+    const add = (path: string, after: unknown) => ({ op: 'living_change' as const, path, value: { change: 'add', after } });
+    const card = (operations: unknown[]) => {
+      const p = createProposal({ scenario_id: SID, user_id: null, base_graph_identity_hash: 'pin', operations: operations as never,
+        provenance: { authored_by: 'model_proposed' }, validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: 'Core change' });
+      const carrier = proposalPendingAction(p, { id: `agent-approve-proposal:${p.proposal_id}`, label: p.public_label, message: 'Apply.' },
+        { scenario_id: SID, emitted_at_iso: new Date().toISOString() });
+      return { p, record: agentProposalRecord(carrier, { nodes: [{ id: 'capacity', label: 'Weekly support capacity' }], edges: [] })! };
+    };
+    const { p, record } = card([
+      add('factor:sickness', fac('sickness', 'Capacity lost to sickness', 'olumi', { value: 5 })),
+      add('factor:mine', fac('mine', 'Overtime hours', 'user', { quote: 'We do some overtime.' })),
+      add('factor:range', fac('range', 'Backlog', 'olumi', { value: null, low: 10, high: 20 })),
+      add('factor:noquote', fac('noquote', 'Morale', 'user')),
+      add('factor:party', fac('party', 'Vendor delay', 'party', { party: 'Acme', quote: 'two weeks' })),
+      add('link:l_sick', lnk('l_sick', 'sickness', 'capacity', '-', 'olumi')),
+      add('link:l_mine', lnk('l_mine', 'mine', 'capacity', '+', 'user', 'overtime helps')),
+      add('link:l_unsigned', lnk('l_unsigned', 'sickness', 'capacity', null, 'olumi')),
+      add('link:l_ghostend', lnk('l_ghostend', 'nowhere', 'capacity', '+', 'olumi')),
+    ]);
+    expect(record.fields).toEqual([]);
+    expect(record.adds).toEqual([
+      { field_id: 'factor_add:sickness', kind: 'factor_add', node_id: 'sickness', label: 'Capacity lost to sickness', value: { value: 5, unit: 'tickets' }, source: 'estimate', editable: false },
+      { field_id: 'factor_add:mine', kind: 'factor_add', node_id: 'mine', label: 'Overtime hours', value: null, source: 'yours', editable: false },
+      { field_id: 'factor_add:range', kind: 'factor_add', node_id: 'range', label: 'Backlog', value: null, source: 'estimate', editable: false },
+      { field_id: 'link_add:l_sick', kind: 'link_add', link_id: 'l_sick', from_id: 'sickness', to_id: 'capacity', from_label: 'Capacity lost to sickness',
+        to_label: 'Weekly support capacity', direction: 'negative', source: 'estimate', editable: false },
+      { field_id: 'link_add:l_mine', kind: 'link_add', link_id: 'l_mine', from_id: 'mine', to_id: 'capacity', from_label: 'Overtime hours',
+        to_label: 'Weekly support capacity', direction: 'positive', source: 'yours', editable: false },
+    ]);
+    // On the wire under its own key (the editable `fields` keep their shape); an edit naming one is refused, never applied.
+    const wire = proposalFieldsWire([record], 'pin')!.proposals[0];
+    expect([wire.fields, wire.adds]).toEqual([[], record.adds]);
+    expect(amendAgentProposal(record, p, [{ field_id: 'factor_add:sickness', value: 9 }])).toEqual({ ok: false, reason: 'unknown_field' });
+    // ⛔ Codex R1: a condition's POSITIONAL id ('0') never lends its words to a card with that id.
+    const positional = card([
+      add('factor:0', fac('0', 'Queue length', 'olumi')),
+      { op: 'living_change', path: 'condition:0', value: { change: 'add', after: { text: 'Only if the vendor agrees', applies_to: [], source: 'party' } } },
+    ]).record;
+    expect(positional.adds?.map((f) => f.kind === 'factor_add' && f.label)).toEqual(['Queue length']);
+    // A card that adds nothing has no `adds` and the digest it always had.
+    const plain = card([{ op: 'living_change', path: 'factor:x', value: { change: 'remove', before: fac('x', 'X', 'olumi') } }]).record;
+    expect(plain.adds).toBeUndefined();
+    expect(plain.digest).toBe(createHash('sha256').update(JSON.stringify({ approve: plain.approve_action, decline: plain.decline_action, fields: [], g: 'pin', missing: [], p: plain.proposal_id, r: plain.revision },
+      (_k, v: unknown) => (v !== null && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, (v as Record<string, unknown>)[k]])) : v))).digest('hex').slice(0, 32));
   });
   it('RED classifier assigns Agent factor and link kinds exhaustively', () => {
     expect(FIELD_CLASS_BY_OP.set_factor_value).toBe('factor_value');
