@@ -51,11 +51,19 @@ async function requestTheRunSends(name: string, model: LivingModelT): Promise<Re
   return request!;
 }
 
-/** A negative row: the Run is refused (nothing reaches PLoT), or it reaches PLoT with no threshold. Never a chance. */
-async function noChanceSent(name: string, model: LivingModelT): Promise<void> {
-  const sent = await requestTheRunSends(name, model).catch((e: Error) => e);
-  if (sent instanceof Error) expect(sent.message).toMatch(/not analysis-ready/);
-  else expect(goalOf(sent).goal_threshold_raw).toBeUndefined();
+/**
+ * A negative row, checked at both ends (the twin of F2's, codex integration review 3: accepting any readiness error never
+ * reached the threshold). At the source, the mapper's goal carries no threshold. At the Run, the outcome is exactly the
+ * one named: refused with those readiness codes, or sent with no threshold.
+ */
+async function noChanceSent(name: string, model: LivingModelT, run: 'sent' | 'ORPHAN_NODE,NO_PATH_TO_GOAL' | 'NO_PATH_TO_GOAL'): Promise<void> {
+  const goal = (mapLivingModel(model).graph.nodes as Rec[]).find((n) => n.kind === 'goal')!;
+  expect(goal, name).not.toHaveProperty('goal_threshold_raw');
+  expect(goal, name).not.toHaveProperty('goal_threshold');
+  const sent = await requestTheRunSends(name, model).then((r) => r, (e: Error) => e.message);
+  if (run !== 'sent') expect(sent, name).toBe(`Persisted graph is not analysis-ready: ${run}`);
+  else if (typeof sent === 'string') expect.fail(`${name}: expected the Run to reach PLoT, got "${sent}"`);
+  else expect(goalOf(sent), name).not.toHaveProperty('goal_threshold_raw');
 }
 
 const node = (r: Rec, id: string) => (r.graph.nodes as Rec[]).find((n) => n.id === id)!;
@@ -100,23 +108,23 @@ describe('Track 2 F1: a defined quantity reaches the engine as its definition, w
   it('NEGATIVE: a missing component is refused by name, never filled: a part with no level, or a definition that leaves one out', async () => {
     const noEu: LivingModelT = { ...F1_DEFINED, factors: F1_DEFINED.factors.map((f) => (f.id === 'eu' ? { ...f, value: null } : f)) };
     expect(reasons(noEu)).toEqual(expect.arrayContaining(['total:identity_part_unknown', 'rev:chance_rests_on_withheld']));
-    await noChanceSent('missing-part-level', noEu);
+    await noChanceSent('missing-part-level', noEu, 'ORPHAN_NODE,NO_PATH_TO_GOAL');
     // A definition that leaves a part out: 20 customers elsewhere, total stated 170, but defined as UK + EU (150).
     const leftOut: LivingModelT = { ...F1_DEFINED, factors: [...F1_DEFINED.factors.map((f) => (f.id === 'total' ? { ...f, value: 170 } : f)),
       { id: 'row', label: 'Customers elsewhere', value: 20, low: null, high: null, unit: 'customers', defined_as: null, source: 'user', party: null, quote: '20 elsewhere' }] };
     expect(reasons(leftOut)).toEqual(expect.arrayContaining(['total:identity_inconsistent', 'rev:chance_rests_on_withheld']));
-    await noChanceSent('missing-part', leftOut);
+    await noChanceSent('missing-part', leftOut, 'ORPHAN_NODE,NO_PATH_TO_GOAL');
   });
 
   it('NEGATIVE: £ per ORDER × customers is not £, so the definition is refused by name and the chance withheld', async () => {
     expect(reasons(F1_UNIT_MISMATCH)).toEqual(['rev:identity_unit_mismatch', 'rev:chance_rests_on_withheld']);
     expect(mapLivingModel(F1_UNIT_MISMATCH).graph.nodes.find((n) => n.id === 'rev')!.nonlinear_identity).toBeUndefined();
-    await noChanceSent('unit-mismatch', F1_UNIT_MISMATCH);
+    await noChanceSent('unit-mismatch', F1_UNIT_MISMATCH, 'ORPHAN_NODE,NO_PATH_TO_GOAL');
   });
 
   it('NEGATIVE: a cause into the defined total itself is one the definition leaves out, so the chance is withheld', async () => {
     expect(reasons(F1_OTHER_CAUSE)).toContain('mkt_total:identity_other_cause');
-    await noChanceSent('other-cause', F1_OTHER_CAUSE);
+    await noChanceSent('other-cause', F1_OTHER_CAUSE, 'NO_PATH_TO_GOAL');
   });
 
   it('NEGATIVE CONTROL: a stated point cause into a PART keeps its drawn spread; only the definition is exact', async () => {
@@ -129,14 +137,14 @@ describe('Track 2 F1: a defined quantity reaches the engine as its definition, w
 
   it('NEGATIVE: a stated level its parts do not make is refused by name (160 ≠ UK + EU; £6,100 ≠ 150 × £40), never rescaled', async () => {
     expect(reasons(F1_INCONSISTENT)).toContain('total:identity_inconsistent');
-    await noChanceSent('inconsistent', F1_INCONSISTENT);
+    await noChanceSent('inconsistent', F1_INCONSISTENT, 'ORPHAN_NODE,NO_PATH_TO_GOAL');
     expect(reasons(F1_LEVEL_NOT_MADE)).toEqual(['rev:identity_inconsistent', 'rev:chance_rests_on_withheld']);
-    await noChanceSent('level-not-made', F1_LEVEL_NOT_MADE);
+    await noChanceSent('level-not-made', F1_LEVEL_NOT_MADE, 'ORPHAN_NODE,NO_PATH_TO_GOAL');
   });
 
   it('NEGATIVE: a person\'s link that contradicts the definition (UK → total at −2) withholds the chance; it is never dropped', async () => {
     expect(reasons(F1_CONTRADICTED)).toEqual(['uk_total:identity_contradicted', 'rev:chance_rests_on_withheld']);
-    await noChanceSent('contradicted', F1_CONTRADICTED);
+    await noChanceSent('contradicted', F1_CONTRADICTED, 'sent');
   });
 
   it('NEGATIVE (buddy r2): a part\'s link with its OWN stated spread (Normal σ 0.2; a range 0.8–1.2) contradicts an exact definition', () => {
@@ -161,7 +169,7 @@ describe('Track 2 F1: a defined quantity reaches the engine as its definition, w
 
   it('NEGATIVE: definitions defined by each other are refused, never sent', async () => {
     expect(reasons(F1_CYCLE)).toEqual(expect.arrayContaining(['total:identity_not_in_slice', 'rest:identity_not_in_slice', 'rev:chance_rests_on_withheld']));
-    await noChanceSent('cycle', F1_CYCLE);
+    await noChanceSent('cycle', F1_CYCLE, 'ORPHAN_NODE,NO_PATH_TO_GOAL');
   });
 
   it('AUTHOR: a definition is the brief\'s only when the person stated the DEFINITION; Olumi\'s reading and an unverified one are not', async () => {
@@ -171,6 +179,8 @@ describe('Track 2 F1: a defined quantity reaches the engine as its definition, w
     expect(goal(F1_OLUMI_READING).nonlinear_identity.stated_in_brief).toBe(false);
     expect(parts(F1_OLUMI_READING)).toEqual([{ source: 'cee_hypothesis', magnitude: 'olumi_estimate', definitional: true },
       { source: 'cee_hypothesis', magnitude: 'olumi_estimate', definitional: true }]);
+    // Sent as Olumi's reading (F1_OUT: PLoT withdraws an inferred goal product, and its parts must not stay pinned).
+    expect(goalOf(await requestTheRunSends('olumi-reading', F1_OLUMI_READING)).nonlinear_identity.stated_in_brief).toBe(false);
     // The kernel: the goal's words are found, the definition's are not, so the DEFINITION alone is unverified (no one's yet).
     const { model, relabelled } = applyKernel(F1_DEFINED, ['we need at least £6,500 a month; today it is £6,000', 'we have 100 UK customers',
       'and 50 in the EU', 'each pays £40 a month', 'so 150 customers in total', 'total customers is UK plus EU', 'grow the UK to 120 customers', 'or we carry on as now']);
