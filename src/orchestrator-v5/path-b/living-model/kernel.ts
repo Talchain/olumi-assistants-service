@@ -35,7 +35,8 @@ function canonicalIds(model: LivingModelT): LivingModelT {
   return {
     aims: model.aims.map((a) => ({ ...a, id: ref(a.id) })),
     factors: model.factors.map((f) => ({ ...f, id: ref(f.id) })),
-    options: model.options.map((o) => ({ ...o, id: ref(o.id), settings: o.settings.map((s) => ({ ...s, factor_id: ref(s.factor_id) })) })),
+    options: model.options.map((o) => ({ ...o, id: ref(o.id), settings: o.settings.map((s) => ({ ...s, factor_id: ref(s.factor_id) })),
+      ...(o.developed_from ? { developed_from: ref(o.developed_from) } : {}) })),
     links: model.links.map((l) => ({ ...l, id: ref(l.id), from: ref(l.from), to: ref(l.to) })),
     conditions: model.conditions.map((c) => ({ ...c, applies_to: c.applies_to.map(ref) })),
     views: model.views,

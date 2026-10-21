@@ -87,6 +87,9 @@ export const LivingOption = z.object({
   /** What the option sets each factor to. An option with no settings changes nothing (the status quo). */
   settings: z.array(LivingSetting).describe(
     "The level the option sets each factor to, in the factor's unit. An option's own effect on a quantity (\"adds 30\") is a link from the option instead. An option with neither changes nothing (the status quo)."),
+  /** TRACK 2 lineage (21 Oct): where the option came from. A record, never a cause: the engine never sees it. Saved before: null. */
+  developed_from: id.nullable().default(null).describe(
+    'The id of the option this one was developed from, when it is a variant or development of it ("a cheaper version of A"). A record of where it came from, not a cause: it changes no figure. Null otherwise.'),
   ...attribution,
 }).strict();
 

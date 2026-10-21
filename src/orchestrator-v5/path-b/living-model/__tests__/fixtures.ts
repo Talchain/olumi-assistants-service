@@ -5,8 +5,8 @@ export const KNOWN_ANSWER: LivingModelT = {
   aims: [{ id: 'g', text: 'Reach 100 units', status: 'current', source: 'user', party: null, quote: 'we need at least 100 units; today we are at 70',
     target: { quantity: 'units', comparator: '>=', value: 100, low: null, high: null, unit: 'units', by_when: null, baseline: 'today', current: 70, current_source: null, current_unit: null, change_kind: null } }],
   options: [
-    { id: 'hold', label: 'Hold', settings: [], source: 'user', party: null, quote: 'or we hold' },
-    { id: 'push', label: 'Push', source: 'user', party: null, quote: 'push f to 1',
+    { id: 'hold', label: 'Hold', settings: [], developed_from: null, source: 'user', party: null, quote: 'or we hold' },
+    { id: 'push', label: 'Push', developed_from: null, source: 'user', party: null, quote: 'push f to 1',
       settings: [{ factor_id: 'f', value: 1, low: null, high: null, unit: null, source: 'user', party: null, quote: 'push f to 1' }] },
   ],
   factors: [{ id: 'f', label: 'f', value: 0.5, low: null, high: null, unit: null, source: 'user', party: null, quote: 'f is at 0.5' }],
@@ -21,8 +21,8 @@ export const OPTION_EFFECTS: LivingModelT = {
   aims: [{ id: 'w', text: 'Widgets per hour', status: 'current', source: 'user', party: null, quote: 'at least 60 widgets per hour; today 40',
     target: { quantity: 'widgets per hour', comparator: '>=', value: 60, low: null, high: null, unit: 'widgets per hour', by_when: null, baseline: 'today', current: 40, current_source: null, current_unit: null, change_kind: null } }],
   options: [
-    { id: 'a', label: 'Option A', settings: [], source: 'user', party: null, quote: 'option A' },
-    { id: 'b', label: 'Option B', settings: [], source: 'user', party: null, quote: 'option B' },
+    { id: 'a', label: 'Option A', settings: [], developed_from: null, source: 'user', party: null, quote: 'option A' },
+    { id: 'b', label: 'Option B', settings: [], developed_from: null, source: 'user', party: null, quote: 'option B' },
   ],
   factors: [],
   links: [

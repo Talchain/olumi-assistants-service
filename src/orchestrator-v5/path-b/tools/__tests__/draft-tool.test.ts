@@ -22,8 +22,8 @@ const SID = 'scn_1';
 const LIVING: LivingModelT = {
   aims: [{ id: 'visitors_served', text: 'Visitors served on Saturdays', status: 'current', target: null, source: 'olumi', party: null, quote: null }],
   options: [
-    { id: 'carry_on', label: 'Carry on as now', settings: [], source: 'olumi', party: null, quote: null },
-    { id: 'add_assistant', label: 'Add a second assistant on Saturdays', source: 'user', party: null, quote: 'add a second assistant on Saturdays',
+    { id: 'carry_on', label: 'Carry on as now', settings: [], developed_from: null, source: 'olumi', party: null, quote: null },
+    { id: 'add_assistant', label: 'Add a second assistant on Saturdays', developed_from: null, source: 'user', party: null, quote: 'add a second assistant on Saturdays',
       settings: [{ factor_id: 'assistants_on_shift', value: 2, low: null, high: null, unit: 'people', source: 'user', party: null, quote: 'add a second assistant on Saturdays' }] },
   ],
   factors: [{ id: 'assistants_on_shift', label: 'Assistants on shift', value: 1, low: null, high: null, unit: 'people', source: 'olumi', party: null, quote: null }],

@@ -240,7 +240,7 @@ describe('thin core mapper: living model → GraphV3', () => {
   it('Paul 21 Oct (f46a14e3): an option\'s effect on a FACTOR reaches the engine through its switch, so the option drives that factor', () => {
     const viaFactor: LivingModelT = structuredClone(OPTION_EFFECTS);
     viaFactor.factors = [{ id: 'k', label: 'Customer understanding', value: null, low: null, high: null, unit: null, source: 'olumi', party: null, quote: null }];
-    viaFactor.options.push({ id: 'c', label: 'Carry on as now', settings: [], source: 'olumi', party: null, quote: null });
+    viaFactor.options.push({ id: 'c', label: 'Carry on as now', settings: [], developed_from: null, source: 'olumi', party: null, quote: null });
     viaFactor.links = [
       { id: 'a_k', from: 'a', to: 'k', source: 'olumi', party: null, quote: null, effect: { form: 'direction_only', value: null, sd: null, low: null, high: null, unit: null, sign: '+' } },
       { id: 'b_k', from: 'b', to: 'k', source: 'olumi', party: null, quote: null, effect: { form: 'direction_only', value: null, sd: null, low: null, high: null, unit: null, sign: '-' } },
