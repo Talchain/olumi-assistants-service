@@ -99,6 +99,18 @@ describe('context: an item with no path to the goal is kept, said, and never blo
     expect(codes(g)).not.toContain('NO_PATH_TO_GOAL');
   });
 
+  it('Codex r2 on #3584: a set-aside item is context unless an option the Run SUBMITS still sets it (a removed option does not count)', () => {
+    const graph = (status: string | undefined) => ({ nodes: [
+      { id: 'g', kind: 'goal', label: 'Goal' }, { id: 'd', kind: 'decision', label: 'D' },
+      { id: 'f', kind: 'factor', label: 'F' }, { id: 'c', kind: 'factor', label: 'C', analysis_participation: 'retained_excluded' },
+      { id: 'a', kind: 'option', label: 'A', interventions: { f: 1 } },
+      { id: 'x', kind: 'option', label: 'X', interventions: { c: 1 }, ...(status ? { option_status: status } : {}) },
+    ], edges: [{ from: 'd', to: 'a' }, { from: 'd', to: 'x' }, { from: 'a', to: 'f' }, { from: 'f', to: 'g' }, { from: 'x', to: 'c' }] });
+    expect(contextNodeIds(graph(undefined) as never).has('c'), 'an active option still sets it: the participation refusal').toBe(false);
+    expect(contextNodeIds(graph('removed') as never).has('c'), 'only a removed option sets it').toBe(true);
+    expect(contextNodeIds(graph('infeasible') as never).has('c')).toBe(true);
+  });
+
   it('CONTRAST A: a factor that IS on a path to the goal but has no level still blocks as a missing level', async () => {
     const g = await gesture(KNOWN_ANSWER, { kind: 'structural_add', node_id: 'office', node_kind: 'factor', label: 'Office move' });
     const lm = structuredClone(g.living_model as LM);
