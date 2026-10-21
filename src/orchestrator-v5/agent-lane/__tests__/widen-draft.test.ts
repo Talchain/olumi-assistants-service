@@ -43,7 +43,7 @@ const PREAMBLE = `${PURPOSE_CORE}\n` + "This is Olumi's own check of a first dra
 // prompt constant, directive or instruction line changed; staging's a486c4de… is reproduced by removing those 3 lines.
 // Re-pinned for OLUMI'S PURPOSE (DL 14 Oct, principle review E contradiction 4): the only change is the two `rationale`
 // directive lines ("how each option would move the goal …" for "why each option might do better"); 2 lines, nothing else.
-const WIDEN_TURN_SHA256 = 'f887528dba9590e4807930efcac716af8c3125d76a2a674299668644027e660e'; // 21 Oct: re-pinned for the core risks turn's reply constants; no directive text changed
+const WIDEN_TURN_SHA256 = '8f567a394bee83eefef29bebd3912630209e3e815032fdc3d5886ebc5795ea07'; // 21 Oct: re-pinned for the core risks turn's reply constants; no directive text changed
 const B1_GRAPH = (JSON.parse(readFileSync(new URL('./fixtures/b1-two-state/turn-004-WIDEN-1791343253849.json', import.meta.url), 'utf8')) as { draft_graph: Rec }).draft_graph;
 const ADMIT = admission.admitCandidateModel;
 // Unit-only injection; the served builder supplies its own construction-aware admission closure.
