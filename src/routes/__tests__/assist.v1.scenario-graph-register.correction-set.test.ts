@@ -569,6 +569,9 @@ describe('one native governing-outcome correction', () => {
     // Kept: an option that sets the earlier aim is still refused — by the Run's own admission (the participation guard
     // keeps a targeted node in), never by calling it unconnected.
     expect(resolveRunAdmission(changed)).toMatchObject({ willProceed: false, submission: { eligible: false } });
+    // …and readiness agrees: a set-aside item an option still sets is never context (Codex delta on #3584).
+    expect(assessCanonicalAnalysisReadiness(changed).safeToAnalyse).toBe(false);
+    expect(contextNodeIds(GraphV3.parse(changed) as never).has('large_fund')).toBe(false);
     const limited = structuredClone(after); limited.goal_constraints.push({ constraint_id: 'held-limit', node_id: 'large_fund', operator: '<=', value: 2000000, unit: '£', provenance: 'explicit' });
     limited.edges = limited.edges.filter((e: Rec) => e.from !== 'large_fund' && e.to !== 'large_fund');
     expect(assessCanonicalAnalysisReadiness(limited).safeToAnalyse).toBe(false);

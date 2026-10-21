@@ -234,8 +234,7 @@ function leftOutRiskLines(graph: unknown, goalLabel: string, cells: readonly Opt
  */
 function contextLines(nodes: readonly Rec[], edges: readonly { from: string; to: string; edge_type?: unknown }[], g: Rec | undefined,
   leftOut: ReadonlySet<string>, goalLabel: string, labelOf: (n: Rec) => string): LeftOutRiskLine[] {
-  const context = contextNodeIds({ nodes: nodes.map((n) => ({ id: n.id as string, kind: String(n.kind ?? ''), label: labelOf(n),
-    ...(n.category !== undefined ? { category: n.category } : {}), ...(n.relies_on !== undefined ? { relies_on: n.relies_on } : {}) })),
+  const context = contextNodeIds({ nodes: nodes.map((n) => ({ ...n, id: n.id as string, kind: String(n.kind ?? ''), label: labelOf(n) })),
     edges: edges.map((e) => ({ from: e.from, to: e.to, ...(typeof e.edge_type === 'string' ? { edge_type: e.edge_type } : {}) })),
     goal_constraints: (Array.isArray(g?.goal_constraints) ? g.goal_constraints : []).map(recordOf)
       .flatMap((k) => (typeof k?.node_id === 'string' ? [{ node_id: k.node_id }] : [])), living_model: g?.living_model });

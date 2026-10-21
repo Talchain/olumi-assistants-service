@@ -639,8 +639,13 @@ export function contextNodeIds(graph: GoalPathGraph): Set<string> {
   const reach = reachesGoalInPersonsModel(graph);
   const limits = limitIdsOf(graph);
   const sink = limitSinkBranch(graph.nodes, graph.edges.filter(isDirected), limits);
+  // An item set aside from the calculation but still set by an option is the participation guard's refusal (the Run
+  // refuses it too), never context (Codex delta on #3584).
+  const set = new Set(graph.nodes.filter((n) => n.kind === 'option')
+    .flatMap((n) => Object.keys((n as { interventions?: Record<string, unknown> }).interventions ?? {})));
+  const setAside = (n: GoalPathGraph['nodes'][number]) => (n as { analysis_participation?: unknown }).analysis_participation === 'retained_excluded';
   return new Set(graph.nodes.filter((n) => !['goal', 'decision', 'option'].includes(n.kind)
-    && !reach.has(n.id) && !limits.has(n.id) && !sink.has(n.id)).map((n) => n.id));
+    && !reach.has(n.id) && !limits.has(n.id) && !sink.has(n.id) && !(setAside(n) && set.has(n.id))).map((n) => n.id));
 }
 
 /**

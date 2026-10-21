@@ -14,7 +14,7 @@ import { narrateWriteOutcome } from '../../agent-lane/write-outcome.js';
 import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js';
 import { guardAnalysisParticipation } from '../../tools/handlers/run-analysis-participation-guard.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
-import { validateGraphStructure, contextNodeIds } from '../../../orchestrator/graph-structure-validator.js';
+import { validateGraphStructure } from '../../../orchestrator/graph-structure-validator.js';
 import * as EventModel from '../event-by-date-model.js';
 import { valueAuthorshipOf } from '../../agent-lane/turn-context/guidance-signals.js';
 import { nodeProvenanceDisplay } from '../../../cee/transforms/provenance-display.js';
@@ -406,16 +406,13 @@ describe('event-by-date typed prompt verdict (B3 086e4624; base 81b77b9f)', () =
     }
   });
 
-  // ⭐ DL ruling 21 Oct (structure class) supersedes the NO_PATH_TO_GOAL half: the targeted node has no path to the goal, so
-  // it is context, never a structural block. Kept: an active option target is still refused, by the participation guard.
-  it('readiness excludes only marked event context; an active option target is still refused by the participation guard', () => {
+  it('readiness excludes only marked event context; an active option target remains a structural blocker', () => {
     const c = b3(), graph = GraphV3.parse(flagged({ ...c, factors: c.factors.slice(0, 2), constraints: [], links: [] }));
     const context = graph.nodes.find(n => n.id.startsWith('event_context_'))!;
     const option = graph.nodes.find(n => n.id === 'event_option_2')!;
     option.interventions = { ...option.interventions, [context.id]: { value: 1 } };
     expect(validateGraphStructure(graph, { leaveOutInertRisks: true }).violations)
-      .not.toContainEqual(expect.objectContaining({ code: 'NO_PATH_TO_GOAL', factor_id: context.id }));
-    expect(contextNodeIds(graph as never).has(context.id)).toBe(true);
+      .toContainEqual(expect.objectContaining({ code: 'NO_PATH_TO_GOAL', factor_id: context.id }));
     expect(guardAnalysisParticipation(graph, { optionInterventionTargetIds: [context.id] }).refusals)
       .toContainEqual({ node_id: context.id, reason: 'option_intervention_target' });
   });
