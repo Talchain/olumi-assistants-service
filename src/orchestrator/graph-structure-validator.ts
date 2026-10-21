@@ -415,8 +415,7 @@ export function validateGraphStructure(
   checkOrphanNodes(graph, violations, leftOut);
   checkOptionFactorEdges(graph, violations);
   checkOptionDecisionEdges(graph, violations);
-  // …and an option with no path is left out of the comparison by the Run's gate with its own reason, not a block.
-  optionsWithoutGoalPath(graph, leftOut, violations, { optionsToGate: opts.leaveOutInertRisks === true });
+  optionsWithoutGoalPath(graph, leftOut, violations);
   // ⭐ DL ruling (A), 15 Oct: an event-forecast option linked only to the kept-aside sketch is UNSIZED, not unconnected, so it
   // is no structural defect: readiness asks how much it changes the work (`assessCanonicalAnalysisReadiness`). While EVERY
   // option is unsized, the goal is unreachable from the decision for that same reason. A really unconnected option keeps
@@ -693,7 +692,6 @@ export function optionsWithoutGoalPath(
   graph: GoalPathGraph,
   leftOut: ReadonlySet<string> = inertRiskBranch(graph.nodes, graph.edges, limitIdsOf(graph)),
   violations: StructuralViolation[] = [],
-  opts: { readonly optionsToGate?: boolean } = {},
 ): Set<string> {
   const refusedOptions = new Set<string>();
   const goalNodes = graph.nodes.filter((n) => n.kind === 'goal');
@@ -786,7 +784,6 @@ export function optionsWithoutGoalPath(
   // and every ancestor of it. Any other dead end — one reaching no limit, a limited node with an onward edge that misses
   // the goal, or a limited island no lever reaches — is still refused. Journey C's all-lever parents is a case of this;
   // an exogenous cause of a limited quantity is part of its branch (this supersedes #2129's parents-only contrast).
-  let personsReach: Set<string> | undefined;
   const limitTargetIds = limitIdsOf(graph);
   const limitSinkBranchIds = limitSinkBranch(graph.nodes, graph.edges.filter(isDirected), limitTargetIds);
 
@@ -803,7 +800,6 @@ export function optionsWithoutGoalPath(
     const hasAnyEdge = graph.edges.some((e) => e.from === node.id || e.to === node.id);
     if (hasAnyEdge) {
       if (node.kind === 'option') refusedOptions.add(node.id);
-      if (node.kind === 'option' && opts.optionsToGate === true && !(personsReach ??= reachesGoalInPersonsModel(graph)).has(node.id)) continue;
       violations.push({
         code: 'NO_PATH_TO_GOAL',
         detail: `Node "${node.id}" (${node.label}) cannot reach the goal via directed paths`,

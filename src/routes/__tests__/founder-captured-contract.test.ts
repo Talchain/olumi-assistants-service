@@ -158,8 +158,14 @@ describe('captured G1 whole goal-change scope', () => {
     }
     expect(v.candidate.edges).toEqual(w.original.edges);
     expect(r.public_label).not.toContain('its words and links also stay visible');
-    // Recording a goal waives nothing: the earlier goal's branch is said as context, never silently dropped from the model.
-    expect(contextNodeIds(GraphV3.parse(v.candidate) as never).size).toBeGreaterThan(0);
+    // Recording a goal waives nothing (Codex on #3584: bound by identity). A protected LIMIT's own node is never context,
+    // so it still refuses by name; elsewhere the earlier goal's branch is context — kept and said, never dropped.
+    const scoped = (g: Rec) => {
+      expect(noPath(g).map(i => i.detail)).toEqual(kind === 'limit' ? [expect.stringContaining('"larger_fund_secured"')] : []);
+      expect([...contextNodeIds(GraphV3.parse(g) as never)].sort()).toEqual(kind === 'limit' ? ['funding_secured']
+        : kind === 'option' ? ['funding_secured', 'larger_fund_secured'] : ['founder_time_on_angel_outreach', 'funding_secured', 'larger_fund_secured']);
+    };
+    scoped(v.candidate);
     const held = w.proposals.get(String(r.proposal_id))!, operations = structuredClone(held.operations);
     const forged = operations[0]!.value as Rec;
     forged.scope_excluded = ['larger_fund_secured'];
@@ -176,7 +182,7 @@ describe('captured G1 whole goal-change scope', () => {
     for (const n of w.original.nodes.filter((n: Rec) => !['funding_secured', 'angel_funding_secured'].includes(n.id))) {
       expect(w.graph().nodes.find((x: Rec) => x.id === n.id)).toEqual(n);
     }
-    expect(contextNodeIds(GraphV3.parse(w.graph()) as never).size).toBeGreaterThan(0);
+    scoped(w.graph());
   });
   it('reads FINAL removals and rejects forged scope ids or changed retained reasoning at approval', async () => {
     const quote = 'Remove the link from Larger fund secured to Angel funding secured.';

@@ -12,7 +12,6 @@ import { mapLivingModel } from '../../path-b/living-model/mapper.js';
 import { KNOWN_ANSWER } from '../../path-b/living-model/__tests__/fixtures.js';
 import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { decisionInputLines } from '../../agent-lane/decision-input-ask.js';
-import { buildAnalysisSubmissionDisclosure } from '../../coaching/scaffold-disclosure.js';
 import { contextNodeIds } from '../../../orchestrator/graph-structure-validator.js';
 import { NO_CHANCE } from '../../path-b/living-model/__tests__/track2-f2-event-risk.fixtures.js';
 
@@ -84,7 +83,6 @@ describe('context: an item with no path to the goal is kept, said, and never blo
     const g = stored(NO_CHANCE);
     expect(mapLivingModel(NO_CHANCE).withheld.map((w) => w.reason)).toContain('risk_occurrence_unknown');
     expect(codes(g)).toContain('NO_PATH_TO_GOAL');
-    expect(assessCanonicalAnalysisReadiness(g).submission!.gate.excluded.filter((e) => e.reason === 'no_path_to_goal')).toEqual([]);
     expect(decisionInputLines(g, AT, { onlyRiskKind: ['inert', 'context'] }).filter((l) => l.includes('isn\'t connected'))).toEqual([]);
   });
 
@@ -110,24 +108,15 @@ describe('context: an item with no path to the goal is kept, said, and never blo
   });
 });
 
-describe('an option nothing links to the goal is left out of the comparison, never a block on the whole Run', () => {
-  it('CONTRAST B (three options): the pathless one is withheld with its own reason and next step; the other two are compared', () => {
+// ⭐ DL ruling on #3584 (split): an OPTION with no path to the goal is not context. It keeps today's honest whole-Run
+// refusal, named, with its coaching; only items that are not options become context.
+describe('CONTRAST B: an option nothing links to the goal still refuses, as before', () => {
+  it('three options, one pathless (it sets only "Office move"): readiness names it NO_PATH_TO_GOAL; "Office move" itself is context', () => {
     const g = stored(withPathlessOption(KNOWN_ANSWER));
-    expect(codes(g)).toEqual([]);
-    expect(submitted(g)).toEqual(['hold', 'push']);
-    expect(excluded(g)).toEqual([['pivot', 'no_path_to_goal']]);
-    // The Run's reply says why, with the next step — never "it has no values set".
     const ready = assessCanonicalAnalysisReadiness(g);
-    expect(buildAnalysisSubmissionDisclosure({ analysed: [], omitted: [] } as never, ready.submission!.gate.excluded)).toBe(
-      ' \'Pivot\' was left out of this comparison because nothing links it to \'Reach 100 units\'. Say what \'Pivot\' changes that affects \'Reach 100 units\'.');
-  });
-
-  it('CONTRAST B (two options): with one left out, fewer than two remain, so the Run\'s existing comparison coaching names the next step', () => {
-    const lm = withPathlessOption({ ...KNOWN_ANSWER, options: KNOWN_ANSWER.options.filter((o) => o.id === 'push') });
-    const ready = assessCanonicalAnalysisReadiness(stored(lm));
-    expect(ready.submission!.gate.excluded.map((e) => [e.option_id, e.reason])).toEqual([['pivot', 'no_path_to_goal']]);
-    // The Run's own comparison floor (as for an option with no values set), not a readiness block on the model.
-    expect(ready.submission!.comparisonRefusal?.nextStep).toBe('I\'ve left out options that nothing links to the goal, and that '
-      + 'leaves fewer than two options, so there\'s nothing to compare yet. Say what \'Pivot\' changes that affects \'Reach 100 units\'.');
+    expect(ready.safeToAnalyse).toBe(false);
+    expect(ready.blockingIssues.filter((i) => i.code === 'NO_PATH_TO_GOAL').map((i) => i.option_id)).toEqual(['pivot']);
+    expect(contextNodeIds(g as never).has('office')).toBe(true);
+    expect(ready.blockingIssues.filter((i) => i.factor_id === 'office')).toEqual([]);
   });
 });

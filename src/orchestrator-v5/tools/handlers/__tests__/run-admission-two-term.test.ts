@@ -150,14 +150,13 @@ describe('resolveRunAdmission — the mixed arm is the P0', () => {
 
 describe('resolveRunAdmission — a blocker the exclusion cannot answer keeps the refusal', () => {
   /**
-   * The mixed graph with a link from the goal back into its own cause, a cycle. That is a `graph_structure` blocker:
-   * dropping the unconfigured options cannot fix it, so admitting would hand PLoT a run that fails.
-   * (⭐ DL ruling 21 Oct, structure class: this used to remove the factor→goal edge, but an option with no path to the
-   * goal is now left out of the comparison rather than a structural block, so the structural blocker is a cycle.)
+   * The mixed graph with the factor→goal edge removed, so the model has NO path
+   * to its goal. That is a `graph_structure` blocker: dropping the unconfigured
+   * options cannot fix it, so admitting would hand PLoT a run that fails.
    */
   const STRUCTURALLY_BROKEN = {
     ...MIXED,
-    edges: [...MIXED.edges, v3Edge('ecycle', 'goal', 'fac_velocity')],
+    edges: MIXED.edges.filter((e) => e.id !== 'eg'),
   };
 
   it('refuses when a structural blocker co-exists with a waivable one', () => {

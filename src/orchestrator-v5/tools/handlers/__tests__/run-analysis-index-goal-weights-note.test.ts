@@ -96,10 +96,6 @@ function indexFixture(): Fixture {
   f.graph.edges.splice(0, f.graph.edges.length, ...retained);
   f.graph.edges.push(...['A', 'B'].map((from) => ({ from, to: 'mrr', strength: { mean: 0.5, std: 0.1 },
     provenance: { magnitude: 'olumi_estimate' } })));
-  // ⭐ DL ruling 21 Oct (structure class): with A and B fed by nothing, no option reaches the goal, and the Run now says so
-  // (fewer than two options with a path) instead of reaching PLoT, whose preflight refuses them all. Pro MRR feeds A, so
-  // the options reach the index; the two index links this row is about are unchanged.
-  f.graph.edges.push({ from: 'pro_mrr_at_month_12', to: 'A', strength: { mean: 0.5, std: 0.1 }, provenance: { magnitude: 'olumi_estimate' } });
   return f;
 }
 describe('index weights note on the real Run handler fact', () => {

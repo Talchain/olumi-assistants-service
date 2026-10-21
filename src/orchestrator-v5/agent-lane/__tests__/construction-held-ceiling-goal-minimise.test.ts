@@ -379,12 +379,6 @@ describe('CONTROLS — what the user did not write a ceiling for is exactly as b
   it('row 7: no held comparator, a label that reads REDUCE → the label classifier still sends minimise, logged as derived_from_goal_label (authored label on the real cloud-1 draft)', async () => {
     const { graph, goal } = await build(CLOUD, withGoal('cloud-1', { metric: 'Reduce monthly cloud spend' }));
     expect(Object.hasOwn(goal, 'goal_direction')).toBe(false);
-    // ⭐ DL ruling 21 Oct (structure class): the cloud-1 draft draws NO link into the goal, so no option can change it and
-    // the Run now says so (fewer than two options with a path) instead of reaching PLoT, whose preflight refuses every
-    // option NO_PATH_TO_GOAL. This row's own claim is the direction label, so the saving's link to the goal is drawn in.
-    const saving = graph.edges.find((e) => e.from === 'gcp_workload_share' && e.to === 'gcp_monthly_cost_saving')!;
-    const { id: _sameId, ...link } = structuredClone(saving) as typeof saving & { id?: string };
-    graph.edges.push({ ...link, from: 'gcp_monthly_cost_saving', to: goal.id as string } as typeof saving);
     const req = await plotRequestFor(graph);
     expect(req.goal_direction).toBe('minimise');
     expect(directionLogs()).toEqual([expect.objectContaining({ provenance: 'derived_from_goal_label' })]);
