@@ -82,7 +82,7 @@ import { asVerdictState, readLimitVerdicts, type StoredLimitVerdicts } from '../
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { runOmittedRisks, type RunOmittedRisk } from '../orchestrator-v5/agent-lane/unsized-risk.js';
-import { drawnLinkPress, isDrawnLinkPress } from '../orchestrator-v5/agent-lane/drawn-link-press.js';
+import { drawnLinkPress, isDrawnLinkPress, parseDrawnLinkPress } from '../orchestrator-v5/agent-lane/drawn-link-press.js';
 import { answerIsIncomplete, heldChangeSentence, runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import { acquireCoreTurnSlot, CoreDeliveryUnknownError, CoreStateUnavailableError, runCoreTurn, type CoreTurnSdk } from '../orchestrator-v5/agent-lane/core/sdk-turn.js';
 import { pathBTools } from '../orchestrator-v5/path-b/tools/index.js';
@@ -185,7 +185,7 @@ import { premortemProducerDirective, readPremortemProduction, premortemWorksheet
 import {
   CANVAS_OPTIONS_PRESS_ID, CANVAS_RISKS_PRESS_ID, CORE_RISK_ADD_REPLY, isWidenAddPressId, keptProposalOf, modelGapOf, RISK_ADD_REFUSED_REPLY, RISKS_ADD_IN_CHAT_LINE, RISKS_ADD_LINE, riskHeldReply, risksTurnForReadback,
   constructionRegistrationTurnId, settleRisksTurn, settleWidenTurn, SUGGEST_RISKS_CHIP as RISKS_PRESS, thinDraftOffer, widenAddCallOf, widenGate, widenNotAdded, widenOffered,
-  widenPassingArgs, widenTargetOf, WIDEN_GATE_REFUSAL, WIDEN_PRESS_ID, WIDEN_TOOL, type RunRisksWidenTurn,
+  isWidenPress, widenPassingArgs, widenTargetOf, WIDEN_GATE_REFUSAL, WIDEN_PRESS_ID, WIDEN_TOOL, type RunRisksWidenTurn,
   type WidenGateResult, type WidenTurn, type WidenUnavailableTurn,
 } from '../orchestrator-v5/agent-lane/method-turn/widen-turn.js';
 import { widenTurnForReadback } from '../orchestrator-v5/agent-lane/method-turn/guidance-widen-turn.js';
@@ -2334,6 +2334,21 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // ⭐ Lane A recovery seam (`recovery-fault-seam.ts`): staging-only, off by default, armed by THIS request for its own scenario.
     const recoveryFault = armedRecoveryFault(body, scenarioId);
     if (recoveryFault !== undefined) log.warn({ event: 'v5.recovery_fault.armed', request_id: String(req.id), scenario_id: scenarioId, point: recoveryFault }, 'agent-lane: recovery fault seam armed for this turn');
+    /**
+     * ⭐ THIN CORE (Lenses step 0, 21 Oct, served d96a687f): in `core` these presses held legacy cards that can never be saved
+     * there (`persist-graph-write.ts` CORE_SCENARIO_LEGACY_WRITE): Olumi's options, a link's strength, starting assumptions, a
+     * drawn link's size, the goal's reading. Each goes to the core turn as the press's own words (the UI sends them in
+     * `message`, labels included), so its propose_change holds a card that does save. Still a press: never typed, so nothing
+     * in it reads as the person's words, and it carries no consent to Run.
+     */
+    const pressChip = body['chip'] as { id?: unknown } | null | undefined;
+    const pressToCore = mode === 'core' && pressChip != null && typeof body.message === 'string' && body.message.trim() !== ''
+      && (isWidenPress(pressChip.id) || pressChip.id === STRENGTHEN_PRESS_CHIP_ID || pressChip.id === SUGGEST_STARTING_ASSUMPTIONS_CHIP.id
+        || parseDrawnLinkPress(pressChip.id) !== null || actionPressOf(pressChip, body.message)?.action === 'confirm_reading');
+    if (pressToCore) {
+      log.info({ event: 'agent_lane.press_to_core', scenario_id: scenarioId, chip_id: pressChip!.id }, 'agent-lane: a legacy-card press goes to the core turn');
+      body = { ...body, chip: null, source: 'chip' };
+    }
     const message = typeof body.message === 'string' ? body.message : '';
     /** RT-1: what the user had selected on the canvas (`selection-context.ts`); resolved below against the turn's state. */
     const guidedPress = parseGuidedSizingPress(body['chip']);
@@ -4541,11 +4556,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0,
             provider_calls: 0, tool_calls: 0, hops: 0 } };
       } else if (mode === 'core' && (corePress !== undefined || coreOwns || runPress || (methodTurn === null && widenRun === undefined
-        && risksRun === undefined && (body['chip'] === undefined || body['chip'] === null)))) {
+        && risksRun === undefined))) {
         // ⭐ PATH-B: an ordinary typed `core` turn runs on the OpenAI Agents SDK (`core/sdk-turn.ts`): its runner, its session
         // memory and its trace, with Olumi's capabilities as the tools. So does the Run press (the canvas's Run after an edit
-        // or Undo): its first call spends the press's ONE Run on `run_analysis` and the same run narrates it (gap 4). Other
-        // presses and method turns keep their existing paths.
+        // or Undo): its first call spends the press's ONE Run on `run_analysis` and the same run narrates it (gap 4). So does
+        // any press no handler above answered ("What else drives this?"; Lenses step 0): the legacy loop's cards never save
+        // on core. Method and risks turns keep their existing paths.
         // The SDK turn's tools are the typed adapters, on the SAME verified typed-words carrier and the same primitives the
         // capabilities above run on (dispatch, proposals, the drafter call, the fenced levels door and both observers).
         const coreCtx = { ...toolCtx, ...(selectionContext != null ? { grounded_selection: selectionContext.grounded,
@@ -4579,7 +4595,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           canonicalState: livingView === undefined ? canonicalContext?.packet?.state
             : { ...(canonicalContext?.packet?.state as Record<string, unknown> | undefined), ...livingView },
           // A Run press permits calculation and reading only (`withheldToolsOf`), on this lane's own tool names.
-          withheldTools: runPress ? CORE_RUN_PRESS_WITHHELD : withheldToolsOf(body),
+          withheldTools: runPress ? CORE_RUN_PRESS_WITHHELD : pressToCore ? CHIP_TURN_WITHHELD_TOOLS : withheldToolsOf(body),
           ...(runPress ? { firstTool: 'run_analysis' } : coreCardOnly && corePress !== undefined ? { firstTool: APPLY_CHANGE } : {}),
           ...(corePress !== undefined ? { press: corePress } : {}),
           ...(canonicalContext?.packet?.graph_revision !== undefined ? { traceMeta: { revision: canonicalContext.packet.graph_revision } } : {}),
