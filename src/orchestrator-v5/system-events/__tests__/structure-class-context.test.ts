@@ -89,7 +89,7 @@ describe('context: an item with no path to the goal is kept, said, and never blo
   it('buddy SIMPLER on #3584: an item linked only to ANOTHER aim (not the goal this Run evaluates) is context for this Run', () => {
     const lm: LM = structuredClone(KNOWN_ANSWER);
     lm.aims.push({ ...structuredClone(lm.aims[0]!), id: 'g2', text: 'Keep the team happy', target: null, quote: null });
-    lm.factors.push({ kind: 'factor', limit: null, id: 'office', label: 'Office move', value: 0.5, low: null, high: null, unit: null, defined_as: null, source: 'user', party: null, quote: null });
+    lm.factors.push({ kind: 'factor', limit: null, id: 'office', label: 'Office move', estimate_by: null, value: 0.5, low: null, high: null, unit: null, defined_as: null, source: 'user', party: null, quote: null });
     lm.links.push({ id: 'office_g2', from: 'office', to: 'g2', source: 'user', party: null, quote: null,
       effect: { estimate_by: null, form: 'normal', value: 1, sd: 0.5, low: null, high: null, unit: null, sign: '+' } });
     const g = stored(lm);
