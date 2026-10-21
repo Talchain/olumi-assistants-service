@@ -830,7 +830,7 @@ export function goalChanceLicenceOf(
   // (served guest core run, 21 Oct: A ≈ 69 %, B ≈ 16 %, carry on unchanged in every draw). A determined MEETS still blocks.
   const determinedMiss = (id: string): boolean => zeroSpreadSide[id] === 'falls_short'
     || (sqByAssumption && id === statusQuoId && sqP === 0);
-  const complete = withheld.every(determinedMiss);
+  const complete = licensed.length > 0 && withheld.every(determinedMiss);
   const ranked = [...licensed].sort((a, b) => pct[b]! - pct[a]!);
   const [leader, next] = ranked as [string, string];
   // ⭐ Ruling 6 (S1): once the records carry their precision, the leader's Wilson interval must also be DISTINCT from every
