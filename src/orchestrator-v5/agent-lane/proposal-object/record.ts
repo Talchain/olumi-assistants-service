@@ -463,13 +463,16 @@ export function agentProposalRecord(pa: PendingAction, graph: unknown, nowMs = D
  * words; a party's or unverified item is not shown. A link with no sign is not shown (its direction is unstated). Labels
  * come from the proposed model's own items, else the saved graph; an item with no label anywhere is not shown.
  */
+const CARD_KINDS: ReadonlySet<string> = new Set(['aim', 'option', 'factor', 'risk']);
 function coreAdds(operations: readonly HeldOp[], savedLabel: (id: string) => string): AddField[] {
   const after = (o: HeldOp): Rec | undefined => (o.op === 'living_change' && isRec(o.value) && isRec(o.value['after']) ? o.value['after'] : undefined);
+  // Only items that are cards: a condition, view or history entry has a POSITIONAL id that may equal a card's (Codex R1).
   const proposed = new Map<string, string>();
   for (const o of operations) {
     const a = after(o);
     const words = a?.['label'] ?? a?.['text'];
-    if (a !== undefined && typeof words === 'string' && words.trim() !== '') proposed.set(o.path.slice(o.path.indexOf(':') + 1), words);
+    const sep = o.path.indexOf(':');
+    if (a !== undefined && CARD_KINDS.has(o.path.slice(0, sep)) && typeof words === 'string' && words.trim() !== '') proposed.set(o.path.slice(sep + 1), words);
   }
   const labelOf = (id: unknown): string | undefined => {
     if (typeof id !== 'string') return undefined;

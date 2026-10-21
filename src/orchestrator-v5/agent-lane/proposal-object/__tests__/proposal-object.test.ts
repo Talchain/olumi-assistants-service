@@ -497,6 +497,12 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
     const wire = proposalFieldsWire([record], 'pin')!.proposals[0];
     expect([wire.fields, wire.adds]).toEqual([[], record.adds]);
     expect(amendAgentProposal(record, p, [{ field_id: 'factor_add:sickness', value: 9 }])).toEqual({ ok: false, reason: 'unknown_field' });
+    // ⛔ Codex R1: a condition's POSITIONAL id ('0') never lends its words to a card with that id.
+    const positional = card([
+      add('factor:0', fac('0', 'Queue length', 'olumi')),
+      { op: 'living_change', path: 'condition:0', value: { change: 'add', after: { text: 'Only if the vendor agrees', applies_to: [], source: 'party' } } },
+    ]).record;
+    expect(positional.adds?.map((f) => f.kind === 'factor_add' && f.label)).toEqual(['Queue length']);
     // A card that adds nothing has no `adds` and the digest it always had.
     const plain = card([{ op: 'living_change', path: 'factor:x', value: { change: 'remove', before: fac('x', 'X', 'olumi') } }]).record;
     expect(plain.adds).toBeUndefined();
