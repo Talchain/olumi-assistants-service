@@ -48,11 +48,18 @@ async function requestTheRunSends(name: string, model: LivingModelT): Promise<Re
   return request!;
 }
 
-/** A negative row: the Run is refused (nothing reaches PLoT), or it reaches PLoT with no threshold. Never a chance. */
-async function noChanceSent(name: string, model: LivingModelT): Promise<void> {
-  const sent = await requestTheRunSends(name, model).catch((e: Error) => e);
-  if (sent instanceof Error) expect(sent.message).toMatch(/not analysis-ready|valid living model/);
-  else expect((sent.graph.nodes as Rec[]).find((n) => n.id === sent.goal_node_id)!.goal_threshold_raw).toBeUndefined();
+/**
+ * A negative row, checked at both ends (codex integration review, 21 Oct, item 3: the old helper accepted any error and so
+ * never reached the threshold). At the source, the mapper's goal carries no threshold, whatever the Run then does. At
+ * the Run, the refusal is exactly the readiness code named, never any error; a Run that is sent instead fails the row.
+ */
+async function noChanceSent(name: string, model: LivingModelT, readiness: 'NO_PATH_TO_GOAL' | 'ORPHAN_NODE'): Promise<void> {
+  expect(LivingModel.safeParse(model).success, `${name} is a valid living model`).toBe(true);
+  const goal = (mapLivingModel(model).graph.nodes as Rec[]).find((n) => n.kind === 'goal')!;
+  expect(goal, name).not.toHaveProperty('goal_threshold_raw');
+  expect(goal, name).not.toHaveProperty('goal_threshold');
+  const sent = await requestTheRunSends(name, model).then(() => undefined, (e: Error) => e.message);
+  expect(sent, name).toBe(`Persisted graph is not analysis-ready: ${readiness}`);
 }
 
 /** The brief, as the person wrote it: every quote the supplier fixture attributes to them. */
@@ -119,22 +126,22 @@ describe('Track 2 F2: an event risk reaches the engine as event_risk.v1, with it
   it('NEGATIVE (buddy r1): a switch preventing two risks, or a switch in %, is refused by name before ISL sees it', async () => {
     expect(reasons(SHARED_PREVENTER)).toEqual(expect.arrayContaining(['supplier_fails:risk_not_in_slice', 'port_strike:risk_not_in_slice']));
     expect(reasons(PERCENT_PREVENTER)).toEqual(expect.arrayContaining(['supplier_fails:risk_not_in_slice', 'gp:chance_rests_on_withheld']));
-    await noChanceSent('shared-preventer', SHARED_PREVENTER);
-    await noChanceSent('percent-preventer', PERCENT_PREVENTER);
+    await noChanceSent('shared-preventer', SHARED_PREVENTER, 'NO_PATH_TO_GOAL');
+    await noChanceSent('percent-preventer', PERCENT_PREVENTER, 'NO_PATH_TO_GOAL');
   });
 
   it('NEGATIVE: an unstated chance or window is never guessed; unverified words are no one\'s', async () => {
     expect(reasons(NO_CHANCE)).toEqual(['supplier_fails:risk_occurrence_unknown', 'gp:chance_rests_on_withheld']);
     expect(reasons(NO_WINDOW)).toEqual(['supplier_fails:risk_occurrence_unknown', 'gp:chance_rests_on_withheld']);
     expect(reasons(UNATTRIBUTED)).toEqual(['supplier_fails:risk_unattributed', 'gp:chance_rests_on_withheld']);
-    for (const [name, m] of [['no-chance', NO_CHANCE], ['no-window', NO_WINDOW], ['unattributed', UNATTRIBUTED]] as const) await noChanceSent(name, m);
+    for (const [name, m] of [['no-chance', NO_CHANCE], ['no-window', NO_WINDOW], ['unattributed', UNATTRIBUTED]] as const) await noChanceSent(name, m, 'NO_PATH_TO_GOAL');
   });
 
   it('NEGATIVE (§9): a cause into the event (a cascade) and a half-measure mitigation are not in this slice', async () => {
     expect(reasons(CASCADE)).toEqual(expect.arrayContaining(['demand_fails:risk_not_in_slice', 'gp:chance_rests_on_withheld']));
     expect(reasons(HALF_MITIGATION)).toEqual(expect.arrayContaining(['supplier_fails:risk_not_in_slice', 'gp:chance_rests_on_withheld']));
-    await noChanceSent('cascade', CASCADE);
-    await noChanceSent('half-mitigation', HALF_MITIGATION);
+    await noChanceSent('cascade', CASCADE, 'ORPHAN_NODE');
+    await noChanceSent('half-mitigation', HALF_MITIGATION, 'NO_PATH_TO_GOAL');
   });
 
   it('POSITIVE CONTROL: the Batch 0 known answer, with no risks, keeps its threshold (the chain can show a chance)', async () => {
