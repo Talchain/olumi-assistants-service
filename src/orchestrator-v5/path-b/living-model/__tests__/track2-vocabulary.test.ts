@@ -84,12 +84,23 @@ describe('Track 2: a limit beside the aim is the legacy limit row', () => {
     expect(node(request.graph, 'profit')).toMatchObject({ goal_threshold_raw: 2000, goal_threshold_unit: '£' });
   });
 
-  it('NEGATIVE: a limit on a quantity with no known level is held, never sent unscaled', () => {
+  // Codex r1: widening the factor's frame to fit a limit rescales its links (PLoT then clamps them), so the frame never moves.
+  it('a limit never moves the factor\'s frame: the graph is the one without it, plus the row', () => {
     const m = deliveries('factor');
-    m.factors[2] = { ...m.factors[2]!, value: null };
-    const mapped = mapLivingModel(m);
-    expect(mapped.graph).not.toHaveProperty('goal_constraints');
-    expect(mapped.withheld.map((w) => `${w.id}:${w.reason}`)).toContain('monthly_cost:limit_not_in_slice');
+    const without: LivingModelT = { ...m, factors: m.factors.map((f) => ({ ...f, limit: null })) };
+    const { goal_constraints, ...rest } = mapLivingModel(m).graph as Rec;
+    expect(goal_constraints).toHaveLength(1);
+    expect(rest).toEqual(mapLivingModel(without).graph);
+  });
+
+  it('NEGATIVE: a limit with no known level, or off the factor\'s frame, is held with its reason, never sent unscaled or clamped', () => {
+    for (const patch of [{ value: null }, { limit: { comparator: '<=' as const, value: 20000, ...who(LIMIT_WORDS) } }]) {
+      const m = deliveries('factor');
+      m.factors[2] = { ...m.factors[2]!, ...patch };
+      const mapped = mapLivingModel(m);
+      expect(mapped.graph, JSON.stringify(patch)).not.toHaveProperty('goal_constraints');
+      expect(mapped.withheld.map((w) => `${w.id}:${w.reason}`)).toContain('monthly_cost:limit_not_in_slice');
+    }
   });
 });
 
@@ -121,13 +132,18 @@ describe('Track 2: the model has outcomes', () => {
     expect(same).toEqual({ ...asFactor, request_id: asOutcome.request_id });
   });
 
-  it('NEGATIVE: an "outcome" an option sets is a lever, and one off the goal path is not drawn as an outcome', () => {
+  it('NEGATIVE: an "outcome" an option sets, one with a limit, and one off the goal path are not drawn as outcomes', () => {
     const set = deliveries('factor');
     set.factors[0] = { ...set.factors[0]!, kind: 'outcome' };
     expect(node(mapLivingModel(set).graph, 'couriers')).toMatchObject({ kind: 'factor', category: 'controllable' });
     const off = deliveries('outcome');
     off.links = off.links.filter((l) => l.id !== 'on_time_profit');
     expect(node(mapLivingModel(off).graph, 'on_time')!.kind).toBe('factor');
+    // PLoT drops a time limit on an outcome node, so a limited quantity stays a factor and its limit is scored.
+    const limited = deliveries('outcome');
+    limited.factors[1] = { ...limited.factors[1]!, limit: { comparator: '>=', value: 70, ...who('on-time must stay at 70% or more') } };
+    expect(node(mapLivingModel(limited).graph, 'on_time')!.kind).toBe('factor');
+    expect((mapLivingModel(limited).graph as Rec).goal_constraints.map((c: Rec) => c.node_id)).toContain('on_time');
   });
 });
 

@@ -275,8 +275,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   const caps = new Map<string, number>();
   const current = new Map<string, number>();
   for (const f of model.factors) {
-    // A limit is a level of the quantity too, so the frame covers it (PLoT reads the limit on this frame, never clamped).
-    const levels = [f.value, f.limit?.value ?? null, ...model.options.flatMap((o) => o.settings.filter((s) => s.factor_id === f.id).map((s) => s.value))]
+    const levels = [f.value, ...model.options.flatMap((o) => o.settings.filter((s) => s.factor_id === f.id).map((s) => s.value))]
       .filter((v): v is number => v !== null);
     // The exact sum's change is read on the goal's own frame, so the goal is its parts added in the goal's units.
     const cap = exactSum !== undefined && f.id === exactSum.lever ? goal!.cap : capFor(levels, f.unit, goal);
@@ -292,10 +291,11 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   }
 
   // ── Limits (Track 2): a bound beside the aim, as the legacy lane's limit row (`add_constraint`), read on the factor's frame.
+  // Never widened to fit (that rescales the factor's links, Codex r1): a limit off the frame is held, as add_constraint refuses it.
   const goal_constraints = model.factors.flatMap((f) => {
     const l = f.limit ?? null;
     if (l === null) return [];
-    if (!current.has(f.id) || l.value < 0) { hold(f.id, 'limit_not_in_slice'); return []; }
+    if (!current.has(f.id) || l.value < 0 || l.value > caps.get(f.id)!) { hold(f.id, 'limit_not_in_slice'); return []; }
     const strict = l.comparator === '<' || l.comparator === '>';
     return [{ constraint_id: `limit_${f.id}`, node_id: f.id, operator: l.comparator.startsWith('<') ? '<=' : '>=',
       ...(strict ? { operator_as_stated: l.comparator } : {}), value: l.value, label: f.label, provenance: stated(l.source) ? 'explicit' : 'inferred',
@@ -542,8 +542,9 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     }
     // An option moves the goal through what it sets, so it is on the path too (science check 5bbceeec, point 5).
     for (const o of model.options) if (o.settings.some((s) => onPath.has(s.factor_id))) onPath.add(o.id);
-    // An outcome other factors lead to is drawn as one on the goal's path; one an option sets is a lever, so a factor.
-    for (const f of model.factors) if (f.kind === 'outcome' && onPath.has(f.id) && !setsFactor.has(f.id)) {
+    // An outcome other factors lead to is drawn as one on the goal's path. One an option sets is a lever, and one with a limit
+    // is scored on its level (PLoT drops a time limit on an outcome), so each stays a factor.
+    for (const f of model.factors) if (f.kind === 'outcome' && onPath.has(f.id) && !setsFactor.has(f.id) && (f.limit ?? null) === null) {
       const node = nodes.find((n) => n.id === f.id)!;
       node.kind = 'outcome';
       delete node.category;
