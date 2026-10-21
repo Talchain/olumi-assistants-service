@@ -3,7 +3,8 @@
  *  · `propose_change` carries the COMPLETE proposed living model. Olumi labels its attribution (the kernel), says exactly
  *    what it changes, item by item (`diffLivingModels`), and what the engine graph would withhold, and changes nothing.
  *    A removal is never implied by an omission: every removed item must be named in `remove` (the card shows only its
- *    label, so an unnamed removal would be approved unseen), and a condition, view or history entry is never removed here;
+ *    label, so an unnamed removal would be approved unseen); a removed condition is kept in history, and a view or
+ *    history entry is never removed here;
  *  · `apply_change`, on the person's approval of THAT proposal, writes the model and the graph regenerated from it as ONE
  *    core write on the proposal's base (CAS). A model that moved since is `superseded`, never overwritten; this operation's
  *    own earlier save is reported as already saved, never repeated; an unverifiable save stays UNKNOWN.
@@ -59,21 +60,28 @@ export async function proposeLivingChange(deps: Deps, ctx: Ctx, args: LivingChan
   if ('status' in base) return base;
   const brief = typeof base.saved.json.brief_text === 'string' ? [base.saved.json.brief_text] : [];
   const kernelled = applyKernel(args.model, [...brief, ...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])], base.model);
-  const changes = diffLivingModels(base.model, kernelled.model);
+  // A condition is corrected or resolved by replacing it ("only after supplier approval" → "supplier approval obtained"; Codex
+  // r6 on #3522): its removal is a row on the card the person approves, and the condition itself goes to history with the
+  // person's words this turn, so a correction never loses what it replaced.
+  const goneConditions = diffLivingModels(base.model, kernelled.model).filter((c) => c.kind === 'condition' && c.change === 'remove'
+    && !kernelled.model.history.some((h) => h.old === JSON.stringify(c.before)));
+  const next: LivingModelT = goneConditions.length === 0 ? kernelled.model : { ...kernelled.model, history: [...kernelled.model.history,
+    ...goneConditions.map((c) => ({ id: 'condition', change: 'superseded' as const, old: JSON.stringify(c.before), quote: ctx.user_turn_text || null }))] };
+  const changes = diffLivingModels(base.model, next);
   if (changes.length === 0) return refused('no_change');
-  const removed = changes.filter((c) => c.change === 'remove');
-  const dropped = removed.filter((c) => c.kind === 'condition' || c.kind === 'view' || c.kind === 'history');
+  const removed = changes.filter((c) => c.change === 'remove' && c.kind !== 'condition');
+  const dropped = removed.filter((c) => c.kind === 'view' || c.kind === 'history');
   if (dropped.length > 0) return refused('cannot_remove_here', undefined, { kinds: [...new Set(dropped.map((c) => c.kind))] });
   const unnamed = removed.filter((c) => !args.remove.includes(c.id)).map((c) => c.id);
   if (unnamed.length > 0) return refused('removal_not_named', undefined, { left_out: unnamed });
   const kept = args.remove.filter((id) => !removed.some((c) => c.id === id));
   if (kept.length > 0) return refused('removal_not_applied', undefined, { still_present: kept });
-  const mapped = mapLivingModel(kernelled.model, savedGoal(base.saved.graph));
+  const mapped = mapLivingModel(next, savedGoal(base.saved.graph));
   if (!mapped.graph.nodes.some((n) => n.kind !== 'decision')) return refused('model_empty');
   const p = deps.proposals.put(createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
     base_graph_identity_hash: base.saved.graphHash, base_model_identity: base.saved.identity!, operations: operationsOf(changes),
     provenance: { authored_by: 'model_proposed', basis: args.basis }, validation: { admitted: true, loss_count: 0, refusals: [] },
-    public_label: args.public_label, living_model: kernelled.model }));
+    public_label: args.public_label, living_model: next }));
   return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: base.saved.graphHash,
     changes, withheld: mapped.withheld, assumed: mapped.assumed, relabelled: kernelled.relabelled });
 }
