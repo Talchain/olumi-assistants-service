@@ -25,7 +25,7 @@ export const responsesSse = (resp: Json): string => {
 export const sseResponse = (text: string, init?: { signal?: AbortSignal | null }): Response => {
   const bytes = new TextEncoder().encode(text);
   const completes = text.includes('"type":"response.completed"');
-  const stream = new ReadableStream<Uint8Array>({
+  const stream = new globalThis.ReadableStream<Uint8Array>({
     start(controller) {
       controller.enqueue(bytes);
       if (completes) { controller.close(); return; }
