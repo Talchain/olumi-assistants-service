@@ -188,7 +188,7 @@ describe('the model reasons with the existence the Run USES (d5: every reader th
     { id: 'price', kind: 'factor', label: 'Price' }, { id: 'subs', kind: 'factor', label: 'Subscribers' }, { id: 'office', kind: 'factor', label: 'Office' },
     { id: 'mrr', kind: 'goal', label: 'MRR' }],
   edges: [userLink('price', 'subs', ranged(20, 40)), userLink('office', 'mrr', undefined)] });
-  it('⛔ C1 graph-compact (decision-continuity reads it): the ranged link keeps 0.8, as the Run now sends it', async () => {
+  it('⛔ C1 graph-compact: the ranged link keeps 0.8, as the Run now sends it', async () => {
     const { compactGraph } = await import('../../../orchestrator/context/graph-compact.js');
     const edges = (compactGraph(g() as never).edges as Rec[]);
     expect(edges.find((e) => e.from === 'price')?.exists).toBe(0.8);

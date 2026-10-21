@@ -1279,9 +1279,8 @@ const ConfigSchema = z.object({
     // coaching turns, pinned to the live `deriveAnalysisFreshness` verdict,
     // plus the deterministic stale/unsafe-state prose post-check) is now
     // UNCONDITIONAL in turn-executor.ts. Distinct from
-    // CEE_COACHING_CONTEXT_ENABLED (the always-on coaching policy engine) and
     // CEE_COACHING_STATE_PACK_ENABLED (the diagnostic-only `_context_summary`
-    // sub-block), both of which remain.
+    // sub-block), which remains.
     // CEE_COACHING_TIER2_ENABLED deleted 2026-07-20 (O-7 wave 2 — Appendix
     // A4: no production caller of `isClaimUsable`, and its Lock 2
     // TIER2_COACHING_ALLOWLIST (compose/claim-safety-cage.ts) ships EMPTY).
@@ -1363,7 +1362,6 @@ const ConfigSchema = z.object({
     // Post-assembly Zod schema verification pipeline (CEE_VERIFICATION_PIPELINE_ENABLED)
     verificationPipelineEnabled: booleanString.default(true),
     // Coaching architecture kill switches
-    coachingContextEnabled: booleanString.default(true), // CEE_COACHING_CONTEXT_ENABLED — coaching policy engine + dynamic block enrichment (WS1 + WS8)
     chipEngineEnabled: booleanString.default(true), // CEE_CHIP_ENGINE_ENABLED — typed chip engine (WS5)
     // CEE_ACTION_POLICY_ENABLED (WS4), CEE_POST_FLIGHT_VALIDATOR_ENABLED (WS7)
     // and CEE_GUIDED_INTAKE_ENABLED (WS3) deleted 2026-07-20 (O-7 wave 2 —
@@ -1821,7 +1819,6 @@ function parseConfig(): Config {
       validationPipelineEnabled: env.CEE_VALIDATION_PIPELINE_ENABLED,
       verificationPipelineEnabled: env.CEE_VERIFICATION_PIPELINE_ENABLED,
       // Coaching architecture kill switches
-      coachingContextEnabled: env.CEE_COACHING_CONTEXT_ENABLED,
       chipEngineEnabled: env.CEE_CHIP_ENGINE_ENABLED,
       modelVersionsEnabled: env.CEE_MODEL_VERSIONS_ENABLED,
       decisionReviewDecompose: env.CEE_DECISION_REVIEW_DECOMPOSE,
