@@ -59,6 +59,16 @@ describe('a canvas gesture on a core scenario', () => {
     expect(append).not.toHaveBeenCalled();
   });
 
+  // A delete of an edge Olumi draws from no stored link (here the option's setting) was acknowledged and committed, then the
+  // edge was redrawn on regeneration: a false "saved". It is refused by name, and nothing is written.
+  it('deleting an edge Olumi draws from no stored link is refused by name, and nothing is written', async () => {
+    const out = await send({ kind: 'structural_delete', removed_node_ids: [], removed_edges: [{ from: 'push', to: 'f' }], base_graph_hash: BASE });
+    expect(out.commitPerformed).toBe(false);
+    expect(out.response.blocks).toEqual([expect.objectContaining({ details: { reason: 'core_link_is_generated', retryable: false } })]);
+    expect(out.response.assistant_text).toContain("haven't changed the model");
+    expect(append).not.toHaveBeenCalled();
+  });
+
   it('a gesture made on a model that has since moved is a conflict: refresh, nothing written', async () => {
     const out = await send({ kind: 'option_intervention_edit', option_id: 'push', factor_id: 'f', value: 0.8, base_graph_hash: 'f'.repeat(16) });
     expect(out.commitPerformed).toBe(false);

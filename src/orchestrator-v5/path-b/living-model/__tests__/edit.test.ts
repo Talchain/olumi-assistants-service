@@ -104,8 +104,8 @@ describe('thin core explicit edit: a canvas gesture applied to the living model,
     for (const [name, m] of [['shared id', shared], ['alone', alone]] as const) {
       expect(mapLivingModel(m).graph.edges.some((e) => e.from === drawn.from && e.to === drawn.to), name).toBe(true);
       expect(applyExplicitEdit(m, { kind: 'edge_strength_edit', ...drawn, magnitude: 0.1, direction_intent: 'preserve' }), name).toEqual({ refused: 'not_in_model' });
-      const del = applyExplicitEdit(m, { kind: 'structural_delete', removed_node_ids: [], removed_edges: [drawn] });
-      expect('model' in del && del.model.links, name).toEqual(m.links);
+      // Nothing is written either way: the delete is refused by name (below), never acknowledged as a no-op.
+      expect(applyExplicitEdit(m, { kind: 'structural_delete', removed_node_ids: [], removed_edges: [drawn] }), name).toEqual({ refused: 'link_is_generated' });
     }
   });
 
@@ -125,5 +125,27 @@ describe('thin core explicit edit: a canvas gesture applied to the living model,
     expect(applyExplicitEdit(KNOWN_ANSWER, { kind: 'edge_strength_edit', from: 'g', to: 'f', magnitude: 0.2, direction_intent: 'preserve' }))
       .toEqual({ refused: 'not_in_model' });
     expect(apply({ kind: 'structural_delete', removed_node_ids: [], removed_edges: [{ from: 'nope', to: 'g' }] }).links).toEqual(KNOWN_ANSWER.links);
+  });
+
+  // An edge Olumi draws from no stored link (an option's setting, the decision's choice, an exact sum's lever, a goal's level
+  // today) has nothing to remove: the delete was acknowledged, then the edge was redrawn on regeneration (a false "saved").
+  it('a delete of an edge Olumi draws from no stored link is refused by name, never acknowledged', () => {
+    for (const [m, from, to] of [[KNOWN_ANSWER, 'push', 'f'], [KNOWN_ANSWER, 'decision_g', 'push'], [OPTION_EFFECTS, 'w_today', 'w']] as const) {
+      expect(mapLivingModel(m).graph.edges.some((e) => e.from === from && e.to === to), `${from} → ${to} is drawn`).toBe(true);
+      expect(applyExplicitEdit(m, { kind: 'structural_delete', removed_node_ids: [], removed_edges: [{ from, to }] }), `${from} → ${to}`)
+        .toEqual({ refused: 'link_is_generated' });
+    }
+    // Codex: naming the decision node (Olumi's own, redrawn every time) must not let it, or its edges, through as "saved".
+    for (const removed_edges of [[], [{ from: 'decision_g', to: 'push' }]]) {
+      expect(applyExplicitEdit(KNOWN_ANSWER, { kind: 'structural_delete', removed_node_ids: ['decision_g'], removed_edges }))
+        .toEqual({ refused: 'node_is_generated' });
+    }
+  });
+
+  it('CONTROL: deleting an item takes the edges drawn to it along, as before', () => {
+    const deleted = apply({ kind: 'structural_delete', removed_node_ids: ['f'],
+      removed_edges: [{ from: 'push', to: 'f' }, { from: 'hold', to: 'f' }, { from: 'f', to: 'g' }] });
+    expect(deleted.factors).toEqual([]);
+    expect(deleted.links).toEqual([]);
   });
 });
