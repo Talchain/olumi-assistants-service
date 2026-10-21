@@ -951,8 +951,12 @@ export const CORE_ALIGNED_INSTRUCTIONS = SELECTED_COACH_V02_TEMPLATE.replace(
   '{{MODE_AND_AUTHORITY}}',
   `${OLUMI_PURPOSE_INSTRUCTION}\n\n${[CORE_AUTHORITY_INSTRUCTION, HOST_SCIENCE_AND_SOURCE_RULES, REPLY_LENGTH_INSTRUCTION, REPLY_SHAPE_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION].join(' ')}`,
 ).replace(LEGACY_STARTING_INPUTS, CORE_STARTING_INPUTS);
-/** The comparison's arm for one request: B only on a core turn that asks for it. Removed, with the losing arm, when it closes. */
-export const promptArmOf = (mode: AgentLaneMode, header: unknown): 'A' | 'B' => (mode === 'core' && header === 'B' ? 'B' : 'A');
+/**
+ * The core agent's instructions: arm B, the AIE-aligned authority naming only the tools core has, on EVERY core turn
+ * (buddy SIMPLER on #3571: the default arm A told core about legacy writers it does not have; R2 04:29Z: every arm 100 %).
+ * The header no longer selects anything; every other mode keeps arm A.
+ */
+export const promptArmOf = (mode: AgentLaneMode, _header?: unknown): 'A' | 'B' => (mode === 'core' ? 'B' : 'A');
 /** The builder's effort for the configuration comparison (#94): `x-olumi-core-effort` on a core turn, else the banked high. */
 export const coreEffortArmOf = (mode: AgentLaneMode, header: unknown): 'low' | 'medium' | undefined =>
   (mode === 'core' && (header === 'medium' || header === 'low') ? header : undefined);

@@ -177,23 +177,18 @@ describe('PATH-B core: the AI\'s own words are the reply; protocol, cards, resul
     expect(core.analysis_ready).toBeUndefined();
   });
 
-  it('prompt arm B (programme-docs #94): the header swaps the core-aligned instructions onto the provider call; without it the default is byte-unchanged', async () => {
+  it('every core turn takes the core-aligned instructions (buddy SIMPLER on #3571): never the legacy writers core does not have, with or without the old arm header', async () => {
     const instructionsSent = (): string[] => sent.filter((b) => b.includes(CORE_RULE)).map((b) => (JSON.parse(b) as Json).instructions as string);
-    await typed('What does the model say now?', { ...CORE, 'x-olumi-prompt-arm': 'B' });
-    const armB = instructionsSent();
-    expect(armB.length).toBeGreaterThan(0);
-    for (const i of armB) {
-      expect(i).toContain("Do not treat a typed yes or your own interpretation as the card's approval.");
-      expect(i).not.toContain('propose_starting_point');
-    }
-    // CONTROL: the same core turn without the header is the default arm, legacy routing and all (Paul's test sees this).
-    sent.length = 0;
-    await typed('What does the model say now?', CORE);
-    const armA = instructionsSent();
-    expect(armA.length).toBeGreaterThan(0);
-    for (const i of armA) {
-      expect(i).toContain('propose_starting_point');
-      expect(i).not.toContain("Do not treat a typed yes or your own interpretation as the card's approval.");
+    for (const headers of [CORE, { ...CORE, 'x-olumi-prompt-arm': 'B' }, { ...CORE, 'x-olumi-prompt-arm': 'A' }]) {
+      sent.length = 0;
+      await typed('What does the model say now?', headers);
+      const calls = instructionsSent();
+      expect(calls.length, 'a core provider call was captured').toBeGreaterThan(0);
+      for (const i of calls) {
+        expect(i).toContain("Do not treat a typed yes or your own interpretation as the card's approval.");
+        // The legacy proposing writers are not core tools: the default arm A named them (propose_starting_point).
+        expect(i).not.toContain('propose_starting_point');
+      }
     }
   });
 

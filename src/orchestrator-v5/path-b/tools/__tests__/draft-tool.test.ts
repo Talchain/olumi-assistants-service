@@ -291,7 +291,7 @@ describe('the critic (21 Oct): a second model reviews the first draft of the tur
     expect(first).toMatchObject({ status: 'refused', reason: 'review_first', data: { critique: CRITIQUE, gaps: { goal_not_measurable: true } } });
     // Track 3 E2E (served dce1b50a, 21 Oct): 2 of 8 first drafts left options with no path to the goal after the review.
     expect((first as { detail?: string }).detail).toBe(REVIEW_FIRST);
-    expect(REVIEW_FIRST).toContain('Every option reaches the goal through what it changes');
+    expect(REVIEW_FIRST).toContain('Every option except the status quo (which changes nothing) reaches the goal through what it changes');
     expect(REVIEW_FIRST).toContain('else form unknown with sign null so the person can say which way');
     expect(JSON.parse(critique.mock.calls[0]![0])).toMatchObject({ brief: BRIEF, draft: { aims: [{ id: 'visitors_served' }] } });
     expect(registerCalls(p)).toEqual([]);

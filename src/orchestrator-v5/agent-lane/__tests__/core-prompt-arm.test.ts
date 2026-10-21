@@ -53,10 +53,10 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(instructionsForMode('full', 'legacy arm A text')).not.toContain('note_on_item');
   });
 
-  it('the arm is B only on a core turn that asks for it; every other turn keeps the default', () => {
-    expect(promptArmOf('core', 'B')).toBe('B');
-    // Arm C was adopted as the core reply rule (21 Oct), so its header no longer selects anything.
-    for (const header of [undefined, 'A', 'C', 'b', 'c', ['B'], ['C']]) expect(promptArmOf('core', header)).toBe('A');
+  it('every core turn takes arm B, whatever the header; every other mode keeps arm A', () => {
+    // Buddy SIMPLER on #3571 (21 Oct): arm B, which names only the tools core has, is every core turn's authority; no header
+    // selects anything. Every other mode keeps arm A.
+    for (const header of [undefined, 'A', 'B', 'C', 'b', ['B']]) expect(promptArmOf('core', header)).toBe('B');
     expect(promptArmOf('full', 'B')).toBe('A');
   });
 

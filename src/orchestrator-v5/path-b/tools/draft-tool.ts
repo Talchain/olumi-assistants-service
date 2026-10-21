@@ -52,7 +52,7 @@ export interface DraftDeps {
 export const REVIEW_FIRST = 'Nothing was saved yet: a second reviewer read your first draft (critique; gaps are structural facts). '
   + 'Revise once, then call build_model_from_brief again with the complete model. Adopt only what helps the person reason; a genuinely '
   + 'new inference of yours is Olumi\'s (source olumi, quote null), while every item the person or another party stated keeps its source, '
-  + 'quote and uncertainty unchanged. Every option reaches the goal through what it changes: give its link a direction when you can '
+  + 'quote and uncertainty unchanged. Every option except the status quo (which changes nothing) reaches the goal through what it changes: give its link a direction when you can '
   + 'judge one, else form unknown with sign null so the person can say which way. Connect other items only where there is a real '
   + 'causal relationship; context may stay unconnected. Never invent a chance, a strength or a target figure to complete the model: ask for it instead. In your reply, '
   + 'say which items are Olumi\'s suggestions, and ask the critique\'s question if it is still open.';
