@@ -158,6 +158,8 @@ describe('carrying on as now, facing a risk the person stated, has an earned cha
     expect(at({ riskChance: 0.6 })).toBe('moved');
     expect(at({ row: { probability_of_goal: 0.9, outcome: { p50: 16000 } } })).toBe('moved');
     expect(at({ frameRatio: undefined })).toBe('moved');
+    // No-event draws sit at today's level, so a median away from it is a status quo that moved for another reason.
+    expect(at({ row: { probability_of_goal: 0.9, outcome: { p50: 15000, n_samples: 10000 } } })).toBe('moved');
     expect(at({ row: { probability_of_goal: 0.9, outcome: { p50: 16000, p10: 0.7, n_samples: 10000 } } })).toBe('moved');
     expect(at({ row: { probability_of_goal: 0.9, outcome: { p50: 16000, p10: 8000, n_samples: 10000 } } })).toBe('at_risk');
   });
