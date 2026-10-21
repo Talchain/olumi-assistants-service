@@ -31,4 +31,17 @@ describe('thin core: the link-unit convention reaches the AI in the tool schema 
     expect(sent).toContain('The step is on or off, so its factor has no unit (null)');
     expect(sent).not.toMatch(/\d\s*=\s*not in place|\d\s*=\s*in place/);
   });
+
+  // DL 21 Oct (Codex r4 on #3522): a limit, an option's status and an outcome had no words in the core model; and a served
+  // brief authored a factor for an option itself being taken.
+  it('a limit, a ruled-out option and an outcome are told to the AI; an option itself being taken is never a factor', () => {
+    expect(sent).toContain('A limit the person must stay within on this quantity, beside the aim');
+    expect(sent).toContain('"enum":["<=",">=","<",">"]');
+    expect(sent).toContain('infeasible when the person rules the option out but keeps it in view');
+    expect(sent).toContain('"enum":["feasible","infeasible","removed"]');
+    expect(sent).toContain('outcome for a result that other factors lead to and that in turn moves the aim');
+    expect(sent).toContain('"enum":["factor","outcome"]');
+    expect(sent).toContain('Never a factor for the option itself being taken');
+    expect(sent).toContain('The only on or off setting is a step a risk\'s mitigation names, set to 1.');
+  });
 });

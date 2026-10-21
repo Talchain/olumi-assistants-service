@@ -22,11 +22,11 @@ export const supplier = (form: 'point' | 'exact'): LivingModelT => ({
     target: { quantity: 'monthly gross profit', comparator: '>=', value: 12000, low: null, high: null, unit: '£', by_when: null, baseline: 'today',
       current: 16000, current_source: null, current_unit: null, change_kind: null } }],
   options: [
-    { id: 'status_quo', label: 'Carry on', settings: [], developed_from: null, ...who('or we carry on as now') },
-    { id: 'dual_source', label: 'Dual-source', developed_from: null, ...who('dual-source the part'),
+    { status: 'feasible', id: 'status_quo', label: 'Carry on', settings: [], developed_from: null, ...who('or we carry on as now') },
+    { status: 'feasible', id: 'dual_source', label: 'Dual-source', developed_from: null, ...who('dual-source the part'),
       settings: [{ factor_id: 'dual_sourcing', value: 1, low: null, high: null, unit: null, ...who('dual-source the part') }] },
   ],
-  factors: [{ id: 'dual_sourcing', label: 'Dual sourcing in place', value: 0, low: null, high: null, unit: null, defined_as: null, ...who('we single-source today') }],
+  factors: [{ kind: 'factor', limit: null, id: 'dual_sourcing', label: 'Dual sourcing in place', value: 0, low: null, high: null, unit: null, defined_as: null, ...who('we single-source today') }],
   risks: [{ id: 'supplier_fails', label: 'Key supplier fails', occurrence: { low: 0.05, high: 0.15 }, horizon_months: 12,
     mitigations: [{ factor_id: 'dual_sourcing', reduction: 0.7, ...who('dual-sourcing would cut that by 70%') }], ...who(RISK_WORDS) }],
   links: [
@@ -54,7 +54,7 @@ export const NO_WINDOW = withRisk({ horizon_months: null });
 export const UNATTRIBUTED = withRisk({ source: 'unverified' });
 /** NEGATIVE (§9: no shared-cause cascades): a cause INTO the event is not in this slice. */
 export const CASCADE: LivingModelT = { ...supplier('point'),
-  factors: [...supplier('point').factors, { id: 'demand', label: 'Demand', value: 1, low: null, high: null, unit: null, defined_as: null, ...who('demand is high') }],
+  factors: [...supplier('point').factors, { kind: 'factor', limit: null, id: 'demand', label: 'Demand', value: 1, low: null, high: null, unit: null, defined_as: null, ...who('demand is high') }],
   links: [...supplier('point').links, { id: 'demand_fails', from: 'demand', to: 'supplier_fails', ...who('high demand strains the supplier'),
     effect: { form: 'point', value: 0.1, sd: null, low: null, high: null, unit: null, sign: '+' } }] };
 /** NEGATIVE: a mitigation must be a 0/1 step an option switches on; a half-measure level is not in this slice. */

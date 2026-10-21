@@ -3,7 +3,7 @@ import type { LivingModelT } from '../../../../schemas/living-model.js';
 import { hasGaps, structureGaps } from '../structure.js';
 import { KNOWN_ANSWER, OPTION_EFFECTS } from './fixtures.js';
 
-const orphan = { id: 'runway', label: 'Remaining cash runway', value: null, low: null, high: null, unit: 'months', defined_as: null,
+const orphan = { id: 'runway', label: 'Remaining cash runway', kind: 'factor' as const, value: null, low: null, high: null, unit: 'months', defined_as: null, limit: null,
   source: 'user' as const, party: null, quote: 'we will run out of money soon' };
 const risk = (id: string, low: number | null, high: number | null, horizon: number | null) => ({ id, label: 'Supplier fails',
   occurrence: { low, high }, horizon_months: horizon, mitigations: [], source: 'user' as const, party: null, quote: 'our supplier may fail' });
@@ -21,7 +21,7 @@ describe('the draft structure check (structure only, never meaning)', () => {
 
   it('a factor, an option or a risk with no path to the goal is unreachable; a path through a definition or a setting reaches it', () => {
     const m: LivingModelT = { ...KNOWN_ANSWER, factors: [...KNOWN_ANSWER.factors, orphan],
-      options: [...KNOWN_ANSWER.options, { id: 'cut', label: 'Cut spending', developed_from: null, source: 'olumi', party: null, quote: null,
+      options: [...KNOWN_ANSWER.options, { id: 'cut', label: 'Cut spending', status: 'feasible', developed_from: null, source: 'olumi', party: null, quote: null,
         settings: [{ factor_id: 'runway', value: 9, low: null, high: null, unit: 'months', source: 'olumi', party: null, quote: null }] }] };
     expect(structureGaps(m).unreachable).toEqual(['runway', 'cut']);
     const linked: LivingModelT = { ...m, links: [...m.links, { id: 'runway_g', from: 'runway', to: 'g', source: 'olumi', party: null, quote: null,

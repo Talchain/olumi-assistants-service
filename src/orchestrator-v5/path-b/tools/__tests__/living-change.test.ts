@@ -93,7 +93,7 @@ describe('a core scenario changes through its living model', () => {
   it('a saved person\'s item carried over unchanged keeps its label; a new "user" item whose words they never wrote is unverified', async () => {
     const p = product(KNOWN_ANSWER);
     const next = corrected();
-    next.factors.push({ id: 'h', label: 'h', value: 3, low: null, high: null, unit: null, defined_as: null, source: 'user', party: null, quote: 'h is about 3' });
+    next.factors.push({ id: 'h', label: 'h', kind: 'factor', value: 3, low: null, high: null, unit: null, defined_as: null, limit: null, source: 'user', party: null, quote: 'h is about 3' });
     // The brief's words are gone from this turn's window: only the saved model vouches for the carried-over items.
     const out = await proposeLivingChange({ dispatch: p.dispatch, proposals: new ProposalStore() }, { ...ctx, verified_user_messages: [] }, args(next));
     const data = (out as { data: Rec }).data;

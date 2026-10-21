@@ -9,14 +9,14 @@ import type { LivingModelT } from '../../../../schemas/living-model.js';
 const who = (quote: string) => ({ source: 'user' as const, party: null, quote });
 const exact = (value: number, unit: string) => ({ form: 'exact' as const, value, sd: null, low: null, high: null, unit, sign: '+' as const });
 const level = (id: string, label: string, value: number, unit: string, quote: string) =>
-  ({ id, label, value, low: null, high: null, unit, defined_as: null, ...who(quote) });
+  ({ id, label, kind: 'factor' as const, value, low: null, high: null, unit, defined_as: null, limit: null, ...who(quote) });
 
 const AIM = { id: 'rev', text: 'Monthly revenue of at least £6,500', status: 'current' as const, ...who('we need at least £6,500 a month; today it is £6,000'),
   target: { quantity: 'monthly revenue', comparator: '>=' as const, value: 6500, low: null, high: null, unit: '£', by_when: null, baseline: 'today',
     current: 6000, current_source: null, current_unit: null, change_kind: null } };
 const OPTIONS: LivingModelT['options'] = [
-  { id: 'hold', label: 'Carry on', settings: [], developed_from: null, ...who('or we carry on as now') },
-  { id: 'grow_uk', label: 'Grow the UK', developed_from: null, ...who('grow the UK to 120 customers'),
+  { status: 'feasible', id: 'hold', label: 'Carry on', settings: [], developed_from: null, ...who('or we carry on as now') },
+  { status: 'feasible', id: 'grow_uk', label: 'Grow the UK', developed_from: null, ...who('grow the UK to 120 customers'),
     settings: [{ factor_id: 'uk', value: 120, low: null, high: null, unit: 'customers', ...who('grow the UK to 120 customers') }] },
 ];
 const UK = level('uk', 'UK customers', 100, 'customers', 'we have 100 UK customers');
@@ -86,7 +86,7 @@ export const F1_CYCLE: LivingModelT = { ...F1_DEFINED, factors: [UK, EU,
   { ...level('rest', 'Other customers', 50, 'customers', 'the rest'), defined_as: { op: 'sum', of: ['total', 'eu'], ...who('the rest') } }, PRICE] };
 
 const MKT = level('mkt', 'UK marketing spend', 0, '£k', 'we spend nothing on UK marketing');
-const SPEND: LivingModelT['options'] = [OPTIONS[0]!, { id: 'spend', label: 'Spend on UK marketing', developed_from: null, ...who('spend £2k a month on UK marketing'),
+const SPEND: LivingModelT['options'] = [OPTIONS[0]!, { status: 'feasible', id: 'spend', label: 'Spend on UK marketing', developed_from: null, ...who('spend £2k a month on UK marketing'),
   settings: [{ factor_id: 'mkt', value: 2, low: null, high: null, unit: '£k', ...who('spend £2k a month on UK marketing') }] }];
 const ABOUT_10 = { form: 'point' as const, value: 10, sd: null, low: null, high: null, unit: 'customers', sign: '+' as const };
 
