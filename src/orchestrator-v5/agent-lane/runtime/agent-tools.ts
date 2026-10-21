@@ -1036,14 +1036,23 @@ export type AgentLaneMode = 'full' | 'preview' | 'core';
 
 /** The request's `x-olumi-ai-mode` value that selects {@link AgentLaneMode} `core`. */
 export const AI_CORE_MODE = 'core';
+/**
+ * THIN CORE FLIP (A1): the UI's staging default lane (`aiComparisonMode.ts`: staging sends `openai` unless `?ai=` says
+ * otherwise). On staging it is the core lane too, so the default typed turn runs on the OpenAI-native core.
+ */
+export const AI_OPENAI_MODE = 'openai';
 
 /**
  * The lane mode for ONE request. A read-only preview stays read-only whatever the request says; `core` is honoured only on a
  * staging, local or test runtime, so a header can never select it in production (or on a runtime whose class is unknown).
+ * THE NAMED BRIDGE (Codex #3522 r3): on the default header, a scenario saved before the core lane (`legacyScenario`: a graph
+ * with no living model) keeps its full legacy lane, because core changes such a graph through only part of the legacy tools
+ * (no risk, deadline, limit or option-status proposals). An explicit `core` request is unchanged.
  */
-export function laneModeFor(base: AgentLaneMode, aiModeHeader: unknown, runtimeEnv: string): AgentLaneMode {
+export function laneModeFor(base: AgentLaneMode, aiModeHeader: unknown, runtimeEnv: string, legacyScenario = false): AgentLaneMode {
   if (base === 'preview') return 'preview';
-  return aiModeHeader === AI_CORE_MODE && (runtimeEnv === 'staging' || runtimeEnv === 'local' || runtimeEnv === 'test') ? 'core' : base;
+  const coreRuntime = runtimeEnv === 'staging' || runtimeEnv === 'local' || runtimeEnv === 'test';
+  return coreRuntime && (aiModeHeader === AI_CORE_MODE || (aiModeHeader === AI_OPENAI_MODE && !legacyScenario)) ? 'core' : base;
 }
 
 export function toolsFor(mode: AgentLaneMode): readonly ToolDefinition[] {

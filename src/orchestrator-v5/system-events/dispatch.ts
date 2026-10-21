@@ -723,9 +723,8 @@ export interface DispatchSystemEventParams {
   readonly payload: SystemEventTurnPayload;
   readonly requestId: string;
   /**
-   * THIN CORE: the request came through the core lane (`x-olumi-ai-mode: core`), the only lane that makes core scenarios,
-   * so a gesture may be one on a core scenario and is checked for it first (`dispatchCoreCanvasEdit`). Other requests read
-   * exactly as before; a gesture on a core scenario from them meets the one-write rule at the door instead.
+   * THIN CORE: check whether the gesture is on a core scenario first (`dispatchCoreCanvasEdit` reads the scenario and declines
+   * one with no living model). The route sets it for every canvas gesture: the scenario decides, never the request's header.
    */
   readonly coreScenarioCheck?: boolean;
 }

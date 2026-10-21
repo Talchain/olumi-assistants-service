@@ -5,6 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { AI_CORE_MODE, laneModeFor, toolsFor } from '../runtime/agent-tools.js';
+import { canvasEditChecksScenario, legacyFromRead } from '../../path-b/living-model/view.js';
 
 describe('laneModeFor: the per-request lane mode', () => {
   it('core on staging, local and test; the full tool surface either way', () => {
@@ -22,9 +23,38 @@ describe('laneModeFor: the per-request lane mode', () => {
     expect(laneModeFor('preview', 'openai', 'staging')).toBe('preview');
   });
 
-  it('any other value keeps the base mode (contrast: only the exact value selects core)', () => {
-    for (const value of [undefined, 'openai', 'conventional', 'CORE', ['core'], 'core ']) {
+  it('THIN CORE FLIP: the UI\'s staging default (`openai`) is the core lane on staging, local and test; never in production', () => {
+    for (const env of ['staging', 'local', 'test']) expect(laneModeFor('full', 'openai', env), env).toBe('core');
+    expect(laneModeFor('full', 'openai', 'prod')).toBe('full');
+  });
+
+  it('THE NAMED BRIDGE (Codex #3522 r3): on the default header, a scenario saved before the core lane keeps its legacy lane', () => {
+    expect(laneModeFor('full', 'openai', 'staging', true)).toBe('full');
+    expect(laneModeFor('full', 'openai', 'staging', false), 'CONTRAST: a core or new scenario').toBe('core');
+    expect(laneModeFor('full', 'core', 'staging', true), 'an explicit core request is unchanged').toBe('core');
+    expect(laneModeFor('preview', 'openai', 'staging', false)).toBe('preview');
+  });
+
+  it('THE BRIDGE\'S READ (Codex #3522 r4): only a read that shows the scenario or proves it absent can select core', () => {
+    expect(legacyFromRead({ status: 200, json: { graph: { nodes: [], edges: [] } } }), 'a saved graph with no living model').toBe(true);
+    expect(legacyFromRead({ status: 200, json: { graph: { nodes: [], edges: [], living_model: {} } } }), 'a core scenario').toBe(false);
+    expect(legacyFromRead({ status: 200, json: { graph: null } }), 'a new scenario').toBe(false);
+    expect(legacyFromRead({ status: 404 }), 'absent').toBe(false);
+    for (const status of [500, 503, 401, 403]) expect(legacyFromRead({ status }), `a failed read (${status}) keeps the full lane`).toBe(true);
+    expect(legacyFromRead(undefined), 'a thrown read keeps the full lane').toBe(true);
+  });
+
+  it('any other value keeps the base mode (contrast: only the exact values select core)', () => {
+    for (const value of [undefined, 'conventional', 'CORE', 'OPENAI', ['core'], 'core ']) {
       expect(laneModeFor('full', value, 'staging'), String(value)).toBe('full');
     }
+  });
+});
+
+describe('canvas gestures read their scenario wherever the lane selector can run core (#3522 CI: 14 route-v2 writer races)', () => {
+  it('the UI default (openai) and core check the scenario; the explicit legacy override and headerless callers keep one read', () => {
+    expect(canvasEditChecksScenario('openai')).toBe(true);
+    expect(canvasEditChecksScenario(AI_CORE_MODE)).toBe(true);
+    for (const header of [undefined, 'conventional', 'OPENAI', ['openai']]) expect(canvasEditChecksScenario(header)).toBe(false);
   });
 });

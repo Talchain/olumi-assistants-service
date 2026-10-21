@@ -10,6 +10,21 @@ export type LivingView =
   | { readonly living_model: unknown; readonly withheld: readonly Withheld[]; readonly assumed: readonly { readonly id: string; readonly text: string }[] }
   | { readonly living_model: unknown; readonly living_model_invalid: true };
 
+/** A scenario saved before the core lane: a saved graph with no living model (the flip's named bridge, `laneModeFor`). */
+export function isLegacyGraph(graph: unknown): boolean {
+  return graph !== null && typeof graph === 'object' && (graph as Record<string, unknown>).living_model === undefined;
+}
+
+/**
+ * The bridge's reading of one graph read. Only a read that SHOWS the scenario (200) or proves it absent (404) can select core;
+ * any other answer keeps the full legacy lane, whose tools cover every scenario (Codex #3522 r4: a failed read never narrows them).
+ */
+export function legacyFromRead(read: { readonly status: number; readonly json?: unknown } | undefined): boolean {
+  if (read === undefined) return true;
+  if (read.status === 404) return false;
+  return read.status === 200 ? isLegacyGraph((read.json as Record<string, unknown> | undefined)?.['graph']) : true;
+}
+
 /** The core view of a saved graph, or `undefined` when the scenario is not a core one (it has no living model). */
 export function livingViewOf(graph: unknown): LivingView | undefined {
   if (graph === null || typeof graph !== 'object') return undefined;
@@ -21,3 +36,10 @@ export function livingViewOf(graph: unknown): LivingView | undefined {
     ? { living_model: parsed.data, withheld: mapped.withheld, assumed: mapped.assumed }
     : { living_model: living, living_model_invalid: true };
 }
+
+/**
+ * A canvas gesture reads its scenario first, and edits a core one through its living model, wherever the lane selector can run
+ * core: the UI's default header (openai) and core (#3522; data-layer audit: a core scenario opened from "My scenarios" carries the
+ * default header). The explicit legacy override and headerless internal callers keep the legacy writer's own single read.
+ */
+export const canvasEditChecksScenario = (aiModeHeader: unknown): boolean => aiModeHeader === 'core' || aiModeHeader === 'openai';

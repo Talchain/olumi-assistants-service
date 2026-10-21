@@ -1118,4 +1118,20 @@ describe('core cold Run data has one narrator', () => {
       expect(JSON.stringify(fact), 'reader projection never rewrites the stored Run').toBe(storedBytes);
     } finally { await app.close(); }
   });
+
+  it('THIN CORE FLIP: on a core scenario (it has a living model) the default `openai` reads exactly as core; a legacy one keeps its summary (above)', async () => {
+    const graph = { ...ADMITTED_GRAPH, living_model: { aims: [], options: [], factors: [], links: [], conditions: [], views: [], history: [] } };
+    loadGraphAndBriefText.mockResolvedValue({ graph, briefText: 'Compare ways to increase Weekly orders.' });
+    readFactsFor.mockResolvedValue([runAnalysisFact({ graphHash: computeAnalysisAffectingGraphHash(graph as never)!, mayName: true })]);
+    const app = await buildApp();
+    try {
+      type Cold = { analysis_result: Record<string, unknown>; request_id: string };
+      const { request_id: _a, ...aBody } = (await read(app, { 'x-olumi-ai-mode': 'openai' })).json<Cold>();
+      const { request_id: _core, ...coreBody } = (await read(app, { 'x-olumi-ai-mode': 'core' })).json<Cold>();
+      const { request_id: _c, ...conventionalBody } = (await read(app, { 'x-olumi-ai-mode': 'conventional' })).json<Cold>();
+      expect(JSON.stringify(aBody)).toBe(JSON.stringify(coreBody));
+      expect(coreBody.analysis_result.summary).toBe('');
+      expect(conventionalBody.analysis_result.summary, 'CONTRAST: the legacy lane keeps its host summary').toBeTruthy();
+    } finally { await app.close(); }
+  });
 });
