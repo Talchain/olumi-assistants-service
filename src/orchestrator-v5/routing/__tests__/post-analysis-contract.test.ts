@@ -1,19 +1,16 @@
 /**
- * V5 post-analysis interaction contract v1 — contract spec tests.
+ * V5 post-analysis interaction contract v1 — classifier-side contract tests.
  *
- * Closes the row-4 gap from the workstream brief: typed "Tell me what
- * to change" and close variants must route deterministically to the
- * post-analysis advice gate (no broad LLM, no edit_graph), with the
- * existing `what_would_flip` chip.
- *
- * Also locks:
- *   - mutation-precedence negatives — concrete edits embedded in advice
- *     phrasing still fall through to value-update / edit_graph
- *   - false-positive negatives — off-topic "tell me" / "show me"
- *     messages do NOT match the advice gate
- *   - the existing PR #173 / PR #190 paths the brief's rows 5–9 rely on
- *     (regression locks)
- *   - the evidence_gap composer's honest no-anchor branch (row 6)
+ * The deterministic post-analysis advice gate these tests once drove was
+ * unreachable from `src/server.ts` and has been deleted (it composed answers
+ * on the host, contrary to the product rules). What remains here is the LIVE
+ * half of the contract:
+ *   - `hasMutationSignal` on post-analysis advice phrasings — bare advice
+ *     carries NO mutation signal; concrete edits embedded in advice phrasing
+ *     DO, so they still reach value-update / edit_graph;
+ *   - `classifyAnalyticalIntent` / `isAnalyticalQuestion` on the
+ *     what-would-flip and "what should I change?" phrase families, with their
+ *     false-positive negative controls.
  *
  * Companion stale-path coverage for Issue #195 lives in the
  * `Issue #195 — stale free-text what-would-flip` describe block below;
@@ -24,78 +21,15 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { tryPostAnalysisAdviceGate, type AdviceClass, type AdviceGateAnalysis } from '../post-analysis-advice-gate.js';
 import { classifyAnalyticalIntent, hasMutationSignal } from '../analytical-intent.js';
 import { isAnalyticalQuestion } from '../analytical-question-guard.js';
-import type { GraphPatchBlockData } from '../../../orchestrator/types.js';
-
-type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
-
-const FIXTURE_ANALYSIS: AdviceGateAnalysis = {
-  status: 'success',
-  leading_option: { label: 'Hire two senior engineers locally' },
-  runner_up: { label: 'Hire one senior engineer overseas' },
-  top_drivers: [
-    { factor_label: 'Delivery risk' },
-    { factor_label: 'Cost overrun risk' },
-  ],
-  fragile_edges: [
-    { from_label: 'Delivery risk', to_label: 'Successful launch' },
-  ],
-};
-
-const READY_PAYLOAD_OPEN: AnalysisReadyPayload = {
-  goal_node_id: 'goal_1',
-  status: 'needs_user_mapping',
-  options: [
-    { option_id: 'opt_a', label: 'Hire two senior engineers locally', status: 'needs_user_mapping', interventions: {} },
-    { option_id: 'opt_b', label: 'Hire one senior engineer overseas', status: 'needs_encoding', interventions: {} },
-  ],
-};
 
 // =========================================================================
-// Row 4 — "Tell me what to change" deterministic routing
+// Row 4 — "Tell me what to change" family carries no mutation signal
 //
-// The exact gap the workstream closes. Without these patterns the message
-// falls through to the broad routing LLM and risks an `edit_graph` call
-// on the bare verb "change".
+// Without a concrete value these are advice questions, never edits.
 // =========================================================================
 describe('post-analysis contract — row 4: "Tell me what to change" family', () => {
-  const updateAdviceCases: ReadonlyArray<{ readonly message: string; readonly label: string }> = [
-    { message: 'Tell me what to change.', label: 'tell me what to change' },
-    { message: 'Tell me what I should change.', label: 'tell me what I should change' },
-    { message: 'Tell me what I need to change.', label: 'tell me what I need to change' },
-    { message: 'Tell me what I can update.', label: 'tell me what I can update' },
-    { message: 'Tell me what to adjust.', label: 'tell me what to adjust' },
-    { message: 'Tell me what to fix.', label: 'tell me what to fix' },
-    { message: 'Tell me what to improve.', label: 'tell me what to improve' },
-    { message: 'Show me what to change.', label: 'show me what to change' },
-    { message: 'Show me what I should update.', label: 'show me what I should update' },
-  ];
-
-  for (const { message, label } of updateAdviceCases) {
-    it(`routes to update_advice (deterministic, no LLM): ${label}`, () => {
-      const out = tryPostAnalysisAdviceGate({
-        message,
-        analysis: FIXTURE_ANALYSIS,
-        analysisReady: READY_PAYLOAD_OPEN,
-        freshness: 'fresh',
-      });
-      expect(out.matched).toBe(true);
-      if (out.matched) {
-        expect(out.advice_class).toBe<AdviceClass>('update_advice');
-        expect(out.assistant_text.length).toBeGreaterThan(0);
-        // what_would_flip chip is the canonical follow-up for update_advice
-        expect(out.suggested_actions).toHaveLength(1);
-        expect(out.suggested_actions[0]!.action_type).toBe('what_would_flip');
-        // Forbidden-phrase invariants from PR #173 composer contract
-        expect(out.assistant_text.toLowerCase()).not.toContain('recommendation');
-        expect(out.assistant_text.toLowerCase()).not.toMatch(/\bthe\s+winners?\b/);
-        expect(out.assistant_text).not.toMatch(/\boption_\w+\b/);
-      }
-    });
-  }
-
   const adviceCases: ReadonlyArray<{ readonly message: string; readonly label: string }> = [
     { message: 'What do I change?', label: 'what do I change' },
     { message: 'What do we update?', label: 'what do we update' },
@@ -111,56 +45,18 @@ describe('post-analysis contract — row 4: "Tell me what to change" family', ()
   ];
 
   for (const { message, label } of adviceCases) {
-    it(`declines generic change-advice; specific composition remains available: ${label}`, () => {
-      const out = tryPostAnalysisAdviceGate({
-        message,
-        analysis: FIXTURE_ANALYSIS,
-        analysisReady: READY_PAYLOAD_OPEN,
-        freshness: 'fresh',
-      });
-      expect(out).toEqual({ matched: false, reason: 'reasoning_request' });
+    it(`generic change-advice carries no mutation signal: ${label}`, () => {
       // This predicate check does not prove downstream mutation consent.
       expect(hasMutationSignal(message)).toBe(false);
-      // Keep the original nonempty-copy/chip checks on the same composeAdvice
-      // implementation, which remains reachable via a specific next-step ask.
-      const specific = tryPostAnalysisAdviceGate({
-        message: 'What is the next step?',
-        analysis: FIXTURE_ANALYSIS,
-        analysisReady: READY_PAYLOAD_OPEN,
-        freshness: 'fresh',
-      });
-      expect(specific.matched).toBe(true);
-      if (specific.matched) {
-        expect(specific.advice_class).toBe<AdviceClass>('next_step');
-        expect(specific.assistant_text.length).toBeGreaterThan(0);
-        expect(specific.suggested_actions).toHaveLength(1);
-        expect(specific.suggested_actions[0]!.action_type).toBe('what_would_flip');
-      }
     });
   }
-
-  it('emits the what_would_flip chip with the canonical label/message', () => {
-    const out = tryPostAnalysisAdviceGate({
-      message: 'Tell me what to change.',
-      analysis: FIXTURE_ANALYSIS,
-      analysisReady: READY_PAYLOAD_OPEN,
-      freshness: 'fresh',
-    });
-    expect(out.matched).toBe(true);
-    if (out.matched) {
-      const chip = out.suggested_actions[0]!;
-      expect(chip.label).toBe('What could change the outcome?');
-      expect(chip.message).toBe('What could change the outcome of this analysis?');
-      expect(chip.action_type).toBe('what_would_flip');
-    }
-  });
 });
 
 // =========================================================================
-// Mutation-precedence negatives
+// Mutation precedence
 //
-// Concrete edits embedded in advice phrasing MUST fall through to
-// mutation_signal so the value-update / edit_graph dispatch path runs.
+// Concrete edits embedded in advice phrasing MUST carry a mutation signal
+// so the value-update / edit_graph dispatch path runs.
 // =========================================================================
 describe('post-analysis contract — mutation precedence', () => {
   const mutations: ReadonlyArray<{ readonly message: string; readonly label: string }> = [
@@ -173,17 +69,9 @@ describe('post-analysis contract — mutation precedence', () => {
   ];
 
   for (const { message, label } of mutations) {
-    it(`falls through (mutation_signal): ${label}`, () => {
-      // Sanity: hasMutationSignal should fire on the concrete edit clause.
+    it(`carries a mutation signal: ${label}`, () => {
+      // hasMutationSignal should fire on the concrete edit clause.
       expect(hasMutationSignal(message)).toBe(true);
-      const out = tryPostAnalysisAdviceGate({
-        message,
-        analysis: FIXTURE_ANALYSIS,
-        analysisReady: READY_PAYLOAD_OPEN,
-        freshness: 'fresh',
-      });
-      expect(out.matched).toBe(false);
-      if (!out.matched) expect(out.reason).toBe('mutation_signal');
     });
   }
 
@@ -193,157 +81,6 @@ describe('post-analysis contract — mutation precedence', () => {
     expect(hasMutationSignal('Tell me what to change.')).toBe(false);
     expect(hasMutationSignal('What needs to change?')).toBe(false);
     expect(hasMutationSignal('Show me what to update.')).toBe(false);
-  });
-});
-
-// =========================================================================
-// False-positive negatives
-//
-// Phrases that share the "tell me" / "show me" lead but are NOT
-// change-advice requests must not match the new patterns.
-// =========================================================================
-describe('post-analysis contract — false-positive guard', () => {
-  const offTopic: ReadonlyArray<{ readonly message: string; readonly label: string }> = [
-    { message: 'Tell me about Apple pricing.', label: 'off-topic "tell me about"' },
-    { message: 'Tell me a joke.', label: 'off-topic "tell me a"' },
-    { message: 'Tell me your name.', label: 'off-topic personal question' },
-    { message: 'Show me the picture.', label: 'off-topic "show me the"' },
-    { message: 'Tell me when to start.', label: '"tell me when" (no change verb)' },
-    { message: 'Show me how this works.', label: '"show me how" (explanation, not change-advice)' },
-  ];
-
-  for (const { message, label } of offTopic) {
-    it(`does NOT match new advice/update_advice patterns: ${label}`, () => {
-      const out = tryPostAnalysisAdviceGate({
-        message,
-        analysis: FIXTURE_ANALYSIS,
-        analysisReady: READY_PAYLOAD_OPEN,
-        freshness: 'fresh',
-      });
-      // Either no match at all, OR matched a different class — but never
-      // `update_advice`/`advice` from the new patterns.
-      if (out.matched) {
-        // Defensive: even if matched (e.g. "Show me how this works" might
-        // hit a meaning pattern), it must not be update_advice from the
-        // imperative-change patterns we added.
-        const allowedFallbackClasses: ReadonlyArray<AdviceClass> = ['meaning', 'explain_results_free_text'];
-        expect(allowedFallbackClasses).toContain(out.advice_class);
-      }
-    });
-  }
-
-  it('"tell me the result" routes to explain_results_free_text (existing pattern, not new)', () => {
-    const out = tryPostAnalysisAdviceGate({
-      message: 'Tell me about these results.',
-      analysis: FIXTURE_ANALYSIS,
-      analysisReady: READY_PAYLOAD_OPEN,
-      freshness: 'fresh',
-    });
-    expect(out.matched).toBe(true);
-    if (out.matched) expect(out.advice_class).toBe<AdviceClass>('explain_results_free_text');
-  });
-});
-
-// =========================================================================
-// Freshness gating — stale / unknown / none MUST fall through
-// =========================================================================
-describe('post-analysis contract — freshness gating', () => {
-  for (const freshness of ['stale', 'unknown', 'none'] as const) {
-    it(`falls through (not_fresh) for ${freshness} freshness`, () => {
-      const out = tryPostAnalysisAdviceGate({
-        message: 'Tell me what to change.',
-        analysis: FIXTURE_ANALYSIS,
-        analysisReady: READY_PAYLOAD_OPEN,
-        freshness,
-      });
-      expect(out.matched).toBe(false);
-      if (!out.matched) expect(out.reason).toBe('not_fresh');
-    });
-  }
-});
-
-// =========================================================================
-// Row 5 regression — "What should I change?" continues to work
-// =========================================================================
-describe('post-analysis contract — row 5 regression: "What should I change?"', () => {
-  it('declines the generic question while specific advice retains its chip', () => {
-    const out = tryPostAnalysisAdviceGate({
-      message: 'What should I change?',
-      analysis: FIXTURE_ANALYSIS,
-      analysisReady: READY_PAYLOAD_OPEN,
-      freshness: 'fresh',
-    });
-    expect(out).toEqual({ matched: false, reason: 'reasoning_request' });
-    expect(hasMutationSignal('What should I change?')).toBe(false);
-    const specific = tryPostAnalysisAdviceGate({
-      message: 'What is the next step?',
-      analysis: FIXTURE_ANALYSIS,
-      analysisReady: READY_PAYLOAD_OPEN,
-      freshness: 'fresh',
-    });
-    expect(specific.matched).toBe(true);
-    if (specific.matched) {
-      expect(specific.advice_class).toBe<AdviceClass>('next_step');
-      expect(specific.suggested_actions[0]?.action_type).toBe('what_would_flip');
-    }
-  });
-});
-
-// =========================================================================
-// Row 6 — "What should we validate?" no-anchor honesty
-//
-// The evidence_gap composer must NOT invent anchors when there is no
-// decision_review enrichment, no analysisReady payload, and no top
-// drivers. The honest copy says "no obvious structural gaps; share what
-// you've already considered." This is a test-lock on existing behaviour
-// (verified at post-analysis-advice-gate.ts:1124–1126).
-// =========================================================================
-describe('post-analysis contract — row 6: evidence_gap no-anchor honesty', () => {
-  it('produces honest no-anchor copy when no anchors are available', () => {
-    const out = tryPostAnalysisAdviceGate({
-      message: 'What should we validate?',
-      // Analysis with no fragile edges and no top drivers — the only
-      // remaining anchor sources are decision_review (absent) and
-      // analysisReady (also absent below).
-      analysis: { ...FIXTURE_ANALYSIS, top_drivers: [], fragile_edges: [] },
-      analysisReady: null,
-      decisionReview: null,
-      freshness: 'fresh',
-    });
-    // evidence_gap requires EITHER analysisReady OR top_drivers; with
-    // neither, it falls through to data_unavailable_for_class.
-    // ⚠ ROADMAP 2.229 — the sentence here used to continue "...so the caller
-    // (turn-executor) reaches the fresh-analysis-followup-guard which emits
-    // the honest recap". That guard is RETIRED (founder ruling) and its
-    // module deleted; the caller now reaches `routeWithToolUse`. The property
-    // THIS test asserts is unchanged and is about the gate alone: it refuses
-    // to invent advice it has no data for.
-    expect(out.matched).toBe(false);
-    if (!out.matched) {
-      expect(out.reason).toBe('data_unavailable_for_class');
-      expect(out.advice_class).toBe('evidence_gap');
-    }
-  });
-
-  it('produces grounded copy when fragile edges anchor evidence advice', () => {
-    const out = tryPostAnalysisAdviceGate({
-      message: 'What should we validate?',
-      analysis: FIXTURE_ANALYSIS, // has 1 fragile edge + 2 top drivers
-      analysisReady: null,
-      decisionReview: null,
-      freshness: 'fresh',
-    });
-    expect(out.matched).toBe(true);
-    if (out.matched) {
-      expect(out.advice_class).toBe<AdviceClass>('evidence_gap');
-      // The fragile-edge anchor surfaces as a concrete gap mention.
-      expect(out.assistant_text).toMatch(/fragile/i);
-      // No invented evidence anchors — no "studies show" / "research
-      // indicates" / "data confirms" boilerplate.
-      expect(out.assistant_text.toLowerCase()).not.toMatch(/\bstudies\s+show\b/);
-      expect(out.assistant_text.toLowerCase()).not.toMatch(/\bresearch\s+(?:shows|indicates|confirms|proves)\b/);
-      expect(out.assistant_text.toLowerCase()).not.toMatch(/\bscientifically\s+(?:proven|validated)\b/);
-    }
   });
 });
 
@@ -408,15 +145,9 @@ describe('Issue #195 — stale free-text what-would-flip', () => {
 // matched `what would …`, while `analytical-question-guard.ts` had a
 // separate `\bwhat\s+could\s+change\s+…` pattern. Result: stale + typed
 // "What could change the outcome?" returned no_analytical_signal from
-// stale-rerun-guard and fell through to the V5 broad routing LLM. V4
-// route-v2 caught it because it delegates to isAnalyticalQuestion which
-// runs both the classifier AND the guard's additional patterns; V5
-// turn-executor's guards only consult classifyAnalyticalIntent.
+// stale-rerun-guard and fell through to the V5 broad routing LLM.
 //
-// Fix: lift the could/might/how modal cousins into the classifier and
-// the post-analysis-advice-gate `what_would_flip_free_text` class, plus
-// extend WHAT_WOULD_FLIP_STRIP_PATTERNS so the strip-and-recheck
-// mutation-precedence exception stays symmetric.
+// Fix: lift the could/might/how modal cousins into the classifier.
 // =========================================================================
 describe('Review round-2 — could/might modal cousins of what would change', () => {
   const modalCousins: ReadonlyArray<{ readonly message: string; readonly label: string }> = [
@@ -433,24 +164,6 @@ describe('Review round-2 — could/might modal cousins of what would change', ()
     { message: 'How can the ranking flip?', label: 'how can the ranking flip' },
   ];
 
-  // ── Fresh path: post-analysis-advice-gate must match what_would_flip_free_text
-  for (const { message, label } of modalCousins) {
-    it(`fresh + ${label} → advice gate matches what_would_flip_free_text`, () => {
-      const out = tryPostAnalysisAdviceGate({
-        message,
-        analysis: FIXTURE_ANALYSIS,
-        analysisReady: READY_PAYLOAD_OPEN,
-        freshness: 'fresh',
-      });
-      expect(out.matched).toBe(true);
-      if (out.matched) {
-        expect(out.advice_class).toBe<AdviceClass>('what_would_flip_free_text');
-        // PR #173/#178 contract: what_would_flip_free_text emits no chip
-        expect(out.suggested_actions).toHaveLength(0);
-      }
-    });
-  }
-
   // ── Classifier: classifyAnalyticalIntent must return what_would_flip
   for (const { message, label } of modalCousins) {
     it(`classifyAnalyticalIntent returns what_would_flip: ${label}`, () => {
@@ -459,17 +172,9 @@ describe('Review round-2 — could/might modal cousins of what would change', ()
   }
 
   // ── Mutation precedence stays intact: "What could change Pricing to 100" mutates
-  it('"What could change Pricing to 100" → mutation precedence wins (advice gate rejects)', () => {
+  it('"What could change Pricing to 100" carries a mutation signal (mutation precedence)', () => {
     const message = 'What could change Pricing to 100';
     expect(hasMutationSignal(message)).toBe(true);
-    const out = tryPostAnalysisAdviceGate({
-      message,
-      analysis: FIXTURE_ANALYSIS,
-      analysisReady: READY_PAYLOAD_OPEN,
-      freshness: 'fresh',
-    });
-    expect(out.matched).toBe(false);
-    if (!out.matched) expect(out.reason).toBe('mutation_signal');
   });
 
   // ── False-positive guards: outcome-noun anchor must hold
@@ -507,11 +212,8 @@ describe('Review round-2 — could/might modal cousins of what would change', ()
 //   - `what would (shift|move|alter|affect|tip) [outcome]`  (any verb)
 //   - `how would [outcome] (change|shift|move|flip|differ)` (how-shape)
 //
-// Both shapes lived in analytical-question-guard.ts's
-// ADDITIONAL_ANALYTICAL_QUESTION_PATTERNS, so V4 route-v2 caught them
-// but V5 stale-rerun-guard / no-analysis-guard / V5 routeWithToolUse
-// missed them. Round-3 widens every modal alternation in the round-2
-// patterns to include `would` so the classifier is the genuine SSOT.
+// Round-3 widens every modal alternation in the round-2 patterns to
+// include `would` so the classifier is the genuine SSOT.
 // =========================================================================
 describe('Review round-3 — would parity for shift/move/alter and how-would-outcome', () => {
   const wouldCousins: ReadonlyArray<{ readonly message: string; readonly label: string }> = [
@@ -528,23 +230,6 @@ describe('Review round-3 — would parity for shift/move/alter and how-would-out
     { message: 'How would the verdict flip?', label: 'how would the verdict flip' },
   ];
 
-  // ── Fresh path: advice gate matches what_would_flip_free_text
-  for (const { message, label } of wouldCousins) {
-    it(`fresh + ${label} → advice gate matches what_would_flip_free_text`, () => {
-      const out = tryPostAnalysisAdviceGate({
-        message,
-        analysis: FIXTURE_ANALYSIS,
-        analysisReady: READY_PAYLOAD_OPEN,
-        freshness: 'fresh',
-      });
-      expect(out.matched).toBe(true);
-      if (out.matched) {
-        expect(out.advice_class).toBe<AdviceClass>('what_would_flip_free_text');
-        expect(out.suggested_actions).toHaveLength(0);
-      }
-    });
-  }
-
   // ── Classifier returns what_would_flip
   for (const { message, label } of wouldCousins) {
     it(`classifyAnalyticalIntent returns what_would_flip: ${label}`, () => {
@@ -552,10 +237,10 @@ describe('Review round-3 — would parity for shift/move/alter and how-would-out
     });
   }
 
-  // ── Mutation precedence still wins on these forms too
+  // ── Mutation precedence still holds on these forms too
   // (Note: the mutation verb list is `set|change|update|adjust|modify|
   // raise|lower|increase|decrease|bump` — verbs like `move`, `shift`,
-  // `alter`, `affect`, `tip` only appear in the new analytical-intent
+  // `alter`, `affect`, `tip` only appear in the analytical-intent
   // patterns, not the mutation patterns, so they cannot trigger
   // mutation precedence on their own. Concrete edits must use one of
   // the mutation-verb anchors.)
@@ -565,48 +250,10 @@ describe('Review round-3 — would parity for shift/move/alter and how-would-out
     { message: 'How would the outcome change if I set risk to 0.7?', label: 'how-would + concrete set' },
   ];
   for (const { message, label } of wouldMutations) {
-    it(`mutation precedence: ${label} → fresh advice gate rejects with mutation_signal`, () => {
+    it(`mutation precedence: ${label} carries a mutation signal`, () => {
       expect(hasMutationSignal(message)).toBe(true);
-      const out = tryPostAnalysisAdviceGate({
-        message,
-        analysis: FIXTURE_ANALYSIS,
-        analysisReady: READY_PAYLOAD_OPEN,
-        freshness: 'fresh',
-      });
-      // Mutation precedence runs AFTER class match but BEFORE composition;
-      // what_would_flip_free_text has the strip-and-recheck exception, but
-      // "change the result to a draw" / "move the result by 10" / "set
-      // risk to 0.7" all produce independent mutation clauses that survive
-      // the strip. Some of these are explicit hasIndependentMutationSignal
-      // mutations (numeric), which trigger ALWAYS_INDEPENDENT — out is
-      // either mutation_signal or matched what_would_flip_free_text via
-      // the exception. Assert at minimum that no other class is reached.
-      if (!out.matched) {
-        expect(out.reason).toBe('mutation_signal');
-      } else {
-        expect(out.advice_class).toBe('what_would_flip_free_text');
-      }
     });
   }
-
-  // ── #195 parity lock: the one wouldMutations phrase whose mutation
-  // signal is PURE flip-overlap ("change the result to a draw" — no
-  // independent edit clause survives the strip) must now be treated
-  // identically by both guards: advice gate (fresh) matches via the
-  // exception, stale guard (stale) matches via the exception. Before
-  // Mission 1 the stale guard declined it `mutation_signal` and the
-  // question fell through to broad LLM routing with no staleness cue.
-  it('flip-overlap parity: "What would change the result to a draw?" matches the retained fresh advice gate', () => {
-    const message = 'What would change the result to a draw?';
-    const gate = tryPostAnalysisAdviceGate({
-      message,
-      analysis: FIXTURE_ANALYSIS,
-      analysisReady: READY_PAYLOAD_OPEN,
-      freshness: 'fresh',
-    });
-    expect(gate.matched).toBe(true);
-    if (gate.matched) expect(gate.advice_class).toBe<AdviceClass>('what_would_flip_free_text');
-  });
 
   // ── isAnalyticalQuestion delegation lock
   it('isAnalyticalQuestion inherits would-parity patterns via classifier delegation', () => {
@@ -633,19 +280,10 @@ describe('Review round-3 — would parity for shift/move/alter and how-would-out
 // =========================================================================
 // Review round-4 — broader (would|does|might) (need|have) shape
 //
-// Round-3 widened the modal axis for shift/move/alter and how-would, but
-// left the narrow `what would need to change` classifier entry intact
-// even though the advice gate's matching entry was already broader:
-//   /\bwhat\s+(?:would|do(?:es)?|might)\s+(?:need|have)\s+to\s+(?:change|happen|move|shift|differ)\b/i
-//
-// So phrases like "What might need to change?" / "What does need to
-// happen?" / "What would have to change?" hit the advice gate on the
-// fresh path but slipped the classifier on the stale path — exactly
-// the same drift class as rounds 2 + 3.
-//
-// Round-4 replaces the narrow classifier entry with the broader shape
-// so the advice gate and classifier are byte-equivalent for this
-// pattern.
+// Round-4 replaced the narrow `what would need to change` classifier entry
+// with the broader shape, so phrases like "What might need to change?" /
+// "What does need to happen?" / "What would have to change?" classify on
+// the stale path too.
 // =========================================================================
 describe('Review round-4 — broader (would|does|might) (need|have) shape', () => {
   const needHaveCousins: ReadonlyArray<{ readonly message: string; readonly label: string }> = [
@@ -658,20 +296,6 @@ describe('Review round-4 — broader (would|does|might) (need|have) shape', () =
     { message: 'What does need to shift?', label: 'does need to shift' },
     { message: 'What might have to happen?', label: 'might have to happen' },
   ];
-
-  // Fresh path
-  for (const { message, label } of needHaveCousins) {
-    it(`fresh + ${label} → advice gate matches what_would_flip_free_text`, () => {
-      const out = tryPostAnalysisAdviceGate({
-        message,
-        analysis: FIXTURE_ANALYSIS,
-        analysisReady: READY_PAYLOAD_OPEN,
-        freshness: 'fresh',
-      });
-      expect(out.matched).toBe(true);
-      if (out.matched) expect(out.advice_class).toBe<AdviceClass>('what_would_flip_free_text');
-    });
-  }
 
   // Classifier
   for (const { message, label } of needHaveCousins) {
@@ -688,41 +312,9 @@ describe('Review round-4 — broader (would|does|might) (need|have) shape', () =
 });
 
 // =========================================================================
-// Review round-4 — `how (another) option (win|look better|come ahead)`
-// advice-gate mirror (fresh-path asymmetry fix)
-//
-// Pre-round-4: classifier-only pattern; fresh path missed
-// what_would_flip_free_text and routed via fresh-followup-guard's
-// catch-net (thinner recap copy). Round-4 mirrors the pattern into
-// the advice gate so fresh and stale paths produce symmetric copy.
-// =========================================================================
-describe('Review round-4 — how-option-win advice-gate mirror', () => {
-  const phrases: ReadonlyArray<{ readonly message: string; readonly label: string }> = [
-    { message: 'How could another option win?', label: 'how could another option win' },
-    { message: 'How can option look better?', label: 'how can option look better' },
-    { message: 'How would another option come ahead?', label: 'how would another option come ahead' },
-    { message: 'How could another option come out ahead?', label: 'how could another option come out ahead' },
-  ];
-
-  for (const { message, label } of phrases) {
-    it(`fresh + ${label} → advice gate matches what_would_flip_free_text (no catch-net detour)`, () => {
-      const out = tryPostAnalysisAdviceGate({
-        message,
-        analysis: FIXTURE_ANALYSIS,
-        analysisReady: READY_PAYLOAD_OPEN,
-        freshness: 'fresh',
-      });
-      expect(out.matched).toBe(true);
-      if (out.matched) expect(out.advice_class).toBe<AdviceClass>('what_would_flip_free_text');
-    });
-  }
-});
-
-// =========================================================================
 // Review round-4 — stale "What should I change?" coverage
 //
-// Brief row 5 ("What should I change?") was deterministic on fresh via
-// the advice gate's `advice` class but slipped the classifier on the
+// Brief row 5 ("What should I change?") slipped the classifier on the
 // stale path → fell through to broad LLM. Round-4 adds a narrow
 // stale-path classifier pattern anchored on change-advice verbs
 // (change|update|adjust|fix|improve|edit) — deliberately excluding
@@ -731,12 +323,6 @@ describe('Review round-4 — how-option-win advice-gate mirror', () => {
 // `what should i/we/you` shape.
 // =========================================================================
 describe('Review round-4 — stale "What should I change?" coverage', () => {
-  // Verbs deliberately exclude `improve` — that one is owned by the
-  // `improvement` class (existing `\bwhat\s+(?:should|can|could|might|would)\s+(?:we|i|you)\s+improve\b`),
-  // not the broad `advice` class. The classifier still includes
-  // `improve` in its round-4 pattern so the STALE path catches it too;
-  // a single-line stale-only check at the bottom of this describe
-  // block locks that.
   const shouldChangePhrases: ReadonlyArray<{ readonly message: string; readonly label: string }> = [
     { message: 'What should I change?', label: 'brief row 5 canonical' },
     { message: 'What should we update?', label: 'what should we update' },
@@ -745,22 +331,14 @@ describe('Review round-4 — stale "What should I change?" coverage', () => {
     { message: 'What should we edit?', label: 'what should we edit' },
   ];
 
-  // Fresh generic questions delegate to contextual reasoning. The classifier,
-  // stale-rerun and concrete-mutation controls below retain their contracts.
+  // Generic change-advice questions are not edits.
   for (const { message, label } of shouldChangePhrases) {
-    it(`fresh + ${label} → generic advice declines for reasoning`, () => {
-      const out = tryPostAnalysisAdviceGate({
-        message,
-        analysis: FIXTURE_ANALYSIS,
-        analysisReady: READY_PAYLOAD_OPEN,
-        freshness: 'fresh',
-      });
-      expect(out).toEqual({ matched: false, reason: 'reasoning_request' });
+    it(`${label} carries no mutation signal`, () => {
       expect(hasMutationSignal(message)).toBe(false);
     });
   }
 
-  // Classifier — new round-4 pattern in `explain` class so stale-path
+  // Classifier — round-4 pattern in `explain` class so stale-path
   // analytical-intent precondition fires.
   for (const { message, label } of shouldChangePhrases) {
     it(`classifyAnalyticalIntent returns explain: ${label}`, () => {
@@ -775,16 +353,8 @@ describe('Review round-4 — stale "What should I change?" coverage', () => {
     { message: 'What should I adjust by 5%?', label: 'adjust-by-percentage' },
   ];
   for (const { message, label } of valueEdits) {
-    it(`mutation precedence: ${label} → fresh advice gate rejects mutation_signal`, () => {
+    it(`mutation precedence: ${label} carries a mutation signal`, () => {
       expect(hasMutationSignal(message)).toBe(true);
-      const out = tryPostAnalysisAdviceGate({
-        message,
-        analysis: FIXTURE_ANALYSIS,
-        analysisReady: READY_PAYLOAD_OPEN,
-        freshness: 'fresh',
-      });
-      expect(out.matched).toBe(false);
-      if (!out.matched) expect(out.reason).toBe('mutation_signal');
     });
   }
 
@@ -835,22 +405,18 @@ describe('Review round-4 — stale "What should I change?" coverage', () => {
   });
 
   // The classifier pattern includes `improve` so the stale path is
-  // covered too (advice-gate fresh path routes "What should I improve?"
-  // to the more specific `improvement` class — distinct from `advice`,
-  // but both deterministic). Lock the classifier + stale-guard side here.
+  // covered too. Lock the classifier side here.
   it('the retained classifier covers the improve verb', () => {
     expect(classifyAnalyticalIntent('What should I improve?')).toBe('explain');
   });
 });
 
 // =========================================================================
-// Parity invariant — classifier ↔ advice gate alignment
+// Classifier invariant — the what_would_flip phrase set (classifier only)
 //
-// Three review rounds for the same drift class. This test is the
-// permanent fix: a curated list of fixed phrases that MUST be
-// classified by both surfaces, and a negative-control list that MUST
-// NOT be classified by either. Adding a new what-would-flip pattern
-// to one surface without the other now fails a concrete test.
+// A curated list of fixed phrases that MUST classify as what_would_flip,
+// and a negative-control list that MUST NOT. Adding or removing a
+// what-would-flip pattern now fails a concrete test.
 //
 // Coverage requirements (all listed by the reviewer):
 //   - modal axis: could, might, would, can
@@ -858,7 +424,7 @@ describe('Review round-4 — stale "What should I change?" coverage', () => {
 //   - verb axis: change, shift, move, flip, differ, happen, alter,
 //     affect, tip, win, look better, come ahead
 // =========================================================================
-describe('Parity invariant — classifier ↔ advice gate alignment for what_would_flip', () => {
+describe('Classifier invariant — what_would_flip phrase set (classifier only)', () => {
   const FLIP_PARITY_PHRASES: readonly string[] = [
     // Original 'would' patterns
     'What would flip this?',
@@ -905,29 +471,14 @@ describe('Parity invariant — classifier ↔ advice gate alignment for what_wou
 
   // The invariant: for every phrase in the curated list,
   //   classifyAnalyticalIntent === 'what_would_flip'
-  // AND
-  //   tryPostAnalysisAdviceGate(... freshness: 'fresh') matches with
-  //     advice_class === 'what_would_flip_free_text'
   for (const phrase of FLIP_PARITY_PHRASES) {
     it(`classifier matches ${JSON.stringify(phrase)}`, () => {
       expect(classifyAnalyticalIntent(phrase)).toBe('what_would_flip');
     });
-    it(`advice gate matches ${JSON.stringify(phrase)}`, () => {
-      const out = tryPostAnalysisAdviceGate({
-        message: phrase,
-        analysis: FIXTURE_ANALYSIS,
-        analysisReady: READY_PAYLOAD_OPEN,
-        freshness: 'fresh',
-      });
-      expect(out.matched).toBe(true);
-      if (out.matched) expect(out.advice_class).toBe<AdviceClass>('what_would_flip_free_text');
-    });
   }
 
-  // Negative controls — must NOT classify as what_would_flip AND
-  // must NOT match the advice gate as what_would_flip_free_text.
-  // (They may match other classes — e.g. mutation_signal or off-topic
-  // null — but never what_would_flip / what_would_flip_free_text.)
+  // Negative controls — must NOT classify as what_would_flip.
+  // (They may classify as another class, or null — but never what_would_flip.)
   const FLIP_NEGATIVE_CONTROLS: readonly string[] = [
     // Reviewer's explicit list
     'What would move Apple?',
@@ -956,17 +507,6 @@ describe('Parity invariant — classifier ↔ advice gate alignment for what_wou
     it(`classifier does NOT return what_would_flip: ${JSON.stringify(phrase)}`, () => {
       const c = classifyAnalyticalIntent(phrase);
       if (c !== null) expect(c).not.toBe('what_would_flip');
-    });
-    it(`advice gate does NOT match what_would_flip_free_text: ${JSON.stringify(phrase)}`, () => {
-      const out = tryPostAnalysisAdviceGate({
-        message: phrase,
-        analysis: FIXTURE_ANALYSIS,
-        analysisReady: READY_PAYLOAD_OPEN,
-        freshness: 'fresh',
-      });
-      if (out.matched) {
-        expect(out.advice_class).not.toBe('what_would_flip_free_text');
-      }
     });
   }
 });

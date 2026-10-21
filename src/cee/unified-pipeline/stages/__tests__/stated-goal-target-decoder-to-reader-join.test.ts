@@ -12,9 +12,9 @@
  *     validates the wire shape and rebuilds value/unit/role field-by-field;
  *   · `runStageEnrich` then `runStageThresholdSweep` — the real stages, in the
  *     order `unified-pipeline/index.ts:1272` runs them;
- *   · reader `compose/goal-target-receipt-guard.ts::extractPersistedGoalTarget`
- *     — the persisted-target view, deliberately NOT telemetry `has_goal_target`
- *     and not readiness, which its own source distinguishes.
+ *   · reader `goal-target/stated-goal-target.ts::statedGoalTargetOf` — the ONE
+ *     target reader (the first goal node stating a target), deliberately NOT
+ *     telemetry `has_goal_target` and not readiness.
  *
  * ⚠⚠ STILL NOT A NATIVE CAUSE. The raw draft-record preimage for request
  *    `3d5ce286…` is absent, so final target absence cannot distinguish an
@@ -30,7 +30,18 @@ import { describe, expect, it } from "vitest";
 import { projectDraftRecords } from "../../../draft/records/seam.js";
 import { runStageEnrich } from "../enrich.js";
 import { runStageThresholdSweep } from "../threshold-sweep.js";
-import { extractPersistedGoalTarget } from "../../../../orchestrator-v5/compose/goal-target-receipt-guard.js";
+import { statedGoalTargetOf } from "../../../../orchestrator-v5/goal-target/stated-goal-target.js";
+
+/** The stated target of the first goal node that states one, else null. */
+const readTarget = (g: any) => {
+  for (const n of g?.nodes ?? []) {
+    if (n?.kind === "goal") {
+      const s = statedGoalTargetOf(g, n);
+      if (s) return s;
+    }
+  }
+  return null;
+};
 
 const BRIEF =
   "Given our goal of reaching £20k MRR within 12 months while keeping monthly churn under 4%, should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?";
@@ -108,8 +119,8 @@ describe("a stated goal target, from the decoder to the persisted-target reader"
     const sweptGoal = (ctx.graph as any).nodes.find((n: any) => n.kind === "goal");
     const codes = (ctx.deterministicRepairs ?? []).map((r: any) => r.code);
 
-    // HOP 3 — the actual persisted-target reader, not telemetry, not readiness.
-    const read = extractPersistedGoalTarget(ctx.graph);
+    // HOP 3 — the one target reader, not telemetry, not readiness.
+    const read = readTarget(ctx.graph);
 
     // ⚠ The assertion is the JOIN, and its message carries the evidence for
     //   whichever way it lands, so a failure names the hop rather than needing a
@@ -149,7 +160,7 @@ describe("a stated goal target, from the decoder to the persisted-target reader"
     // swept, which is the heuristic behaving exactly as its own contract says.
     expect(attested).toBe(0);
     expect(codes).toContain("GOAL_THRESHOLD_STRIPPED_NO_DIGITS");
-    expect(extractPersistedGoalTarget(ctx.graph)).toBeNull();
+    expect(readTarget(ctx.graph)).toBeNull();
   });
 
   it("CONTRAST — the decoder does not manufacture a target from a valueless record", async () => {

@@ -9,23 +9,22 @@
  * PR #906 retired "{label} currently leads by {N} percentage points" from the
  * deterministic run_analysis HEADLINE, and `runner-up-gap-statistic.ts` became
  * the second line of defence over LLM decision-review prose. Neither reached
- * the six DETERMINISTIC composers below, and the reason is structural rather
+ * the DETERMINISTIC composers below, and the reason is structural rather
  * than lexical: `leader-vocabulary-producer-control.test.ts` — the file that
  * exists precisely so a producer in this repo cannot emit prose a guard cannot
  * see — drives `composeExplainResultsFallback`, `composeWhatWouldFlipFallback`
  * and `composeComparison`, and asks them ONE question: *does the leader scanner
- * see this?* It never asks *does this state the size of the lead as a gap?*,
- * and it never drives the advice gate at all.
+ * see this?* It never asks *does this state the size of the lead as a gap?*
  *
- * So the frozen probe of 11 Aug 2026 measured, at `8e3ad916`, six live emitters
- * of the banned class on the ordinary permitted turn path — verbatim:
+ * The frozen probe of 11 Aug 2026 measured, at `8e3ad916`, six emitters of the
+ * banned class. Four lived in the post-analysis advice gate, which has since
+ * been deleted as unreachable; the TWO live sites this file drives are:
  *
- *   post-analysis-advice-gate.ts:1620  " It sits ahead of {runner} by {N} percentage points."
- *   post-analysis-advice-gate.ts:1736  " It sits ahead of "{runner}" by {N} percentage points."
- *   post-analysis-advice-gate.ts:1977  "That sits ahead of "{runner}" by {N} percentage points, so the lead is meaningful rather than marginal."
- *   post-analysis-advice-gate.ts:2184  "For "{runner}" to overtake it, the lead of {N} percentage points would need to close."
  *   explanation-fallback.ts:239        "That is ahead of {runner} by {N} percentage points, so the lead is meaningful rather than marginal."
  *   explanation-fallback.ts:240        "For "{runner}" to overtake it, the lead of {N} percentage points would need to close."
+ *
+ * The four retired gate sentences stay in the detector controls below as
+ * literal strings: they still prove what `findRunnerUpGapCodes` can see.
  *
  * ═══════════════════════════════════════════════════════════════════════════
  * THE MECHANISM, NOT THE INSTANCE (CLAUDE.md trap #12).
@@ -46,7 +45,7 @@
  * before the absence:
  *
  *   (a) the shared verdict is on the CLEAR-margin arm with a runner-up present
- *       — the exact three-conjunct condition all six banned branches carry;
+ *       — the exact three-conjunct condition both banned branches carry;
  *   (b) the emitted prose NAMES the runner-up by its exact injected label, so
  *       the comparison the sentence was about is demonstrably still being made;
  *   (c) the PRE-FIX sentence rebuilt from THIS fixture's own margin IS SEEN by
@@ -63,15 +62,10 @@ import {
   composeRobustnessVerdict,
 } from '../../tools/handlers/explanation-fallback.js';
 import type { AnalysisProjectionSummary } from '../../context/projection-summaries.js';
-import {
-  tryPostAnalysisAdviceGate,
-  type AdviceClass,
-  type AdviceGateAnalysis,
-} from '../../routing/post-analysis-advice-gate.js';
 import { formatPercentagePoints } from '../../format/format-analysis-value.js';
 
 // ============================================================================
-// The fixture — ONE analysis, driven through all six producers
+// The fixture — ONE analysis, driven through both live producers
 // ============================================================================
 
 const LEADING_LABEL = 'Standardise on MacBook Pro';
@@ -93,23 +87,6 @@ const MARGIN_PP = 34;
  */
 const BANDS = ['fragile', 'stable', 'highly_stable', 'moderate', null] as const;
 
-function gateAnalysis(band: string | null): AdviceGateAnalysis {
-  return {
-    status: 'success',
-    leading_option: { label: LEADING_LABEL, probability: 0.61 },
-    runner_up: { label: RUNNER_LABEL, probability: 0.27 },
-    margin_pp: MARGIN_PP,
-    robustness_band: band,
-    top_drivers: [
-      { factor_label: 'Engineering team size', sensitivity_value: 0.42 },
-      { factor_label: 'Toolchain compatibility', sensitivity_value: -0.18 },
-    ],
-    fragile_edges: [
-      { from_label: 'Toolchain compatibility', to_label: 'Team effectiveness' },
-    ],
-  };
-}
-
 function projection(band: string | null): AnalysisProjectionSummary {
   return {
     status: 'completed',
@@ -122,37 +99,6 @@ function projection(band: string | null): AnalysisProjectionSummary {
       { from_label: 'Toolchain compatibility', to_label: 'Team effectiveness' },
     ],
   } as unknown as AnalysisProjectionSummary;
-}
-
-/**
- * The advice-gate composers are module-private by design, so each is reached
- * through the LIVE public entry with the message that classifies to its class —
- * the same corridor `turn-executor.ts:6617` uses. Binding to the entry rather
- * than to an exported internal is deliberate: it is the only way this control
- * can claim anything about what a user receives (CLAUDE.md trap 16).
- */
-function driveGate(cls: AdviceClass, message: string, band: string | null): string {
-  const out = tryPostAnalysisAdviceGate({
-    message,
-    analysis: gateAnalysis(band),
-    freshness: 'fresh',
-  });
-  // THROW, not `expect`: this runs inside the sample builder, and a fixture
-  // that stopped matching would otherwise make every assertion below pass on an
-  // empty list (CLAUDE.md trap 2b / 13).
-  if (!out.matched) {
-    throw new Error(
-      `advice gate stopped matching for ${cls} (band=${String(band)}): reason=${out.reason}. ` +
-        'Every assertion in this file would be vacuous.',
-    );
-  }
-  if (out.advice_class !== cls) {
-    throw new Error(
-      `message "${message}" now classifies as ${out.advice_class}, not ${cls} — ` +
-        'this control would be measuring the wrong composer.',
-    );
-  }
-  return out.assistant_text;
 }
 
 interface Site {
@@ -175,39 +121,6 @@ function everySite(): Site[] {
   for (const band of BANDS) {
     const qty = formatPercentagePoints(MARGIN_PP);
     out.push({
-      producer: 'composeAdvice',
-      probeSite: 'post-analysis-advice-gate.ts:1620',
-      mode: 'explain',
-      band,
-      // Same composeAdvice producer; generic recommendations now delegate.
-      text: driveGate('next_step', 'What is the next step?', band),
-      preFixSentence: `It sits ahead of ${RUNNER_LABEL} by ${qty}.`,
-    });
-    out.push({
-      producer: 'composeMeaning',
-      probeSite: 'post-analysis-advice-gate.ts:1736',
-      mode: 'explain',
-      band,
-      text: driveGate('meaning', 'What does this mean?', band),
-      preFixSentence: `It sits ahead of "${RUNNER_LABEL}" by ${qty}.`,
-    });
-    out.push({
-      producer: 'composeExplainResults',
-      probeSite: 'post-analysis-advice-gate.ts:1977',
-      mode: 'explain',
-      band,
-      text: driveGate('explain_results_free_text', 'Explain the results.', band),
-      preFixSentence: `That sits ahead of "${RUNNER_LABEL}" by ${qty}, so the lead is meaningful rather than marginal.`,
-    });
-    out.push({
-      producer: 'composeWhatWouldFlip',
-      probeSite: 'post-analysis-advice-gate.ts:2184',
-      mode: 'flip',
-      band,
-      text: driveGate('what_would_flip_free_text', 'What would flip this?', band),
-      preFixSentence: `For "${RUNNER_LABEL}" to overtake it, the lead of ${qty} would need to close.`,
-    });
-    out.push({
       producer: 'composeRobustnessVerdict/explain (composeExplainResultsFallback)',
       probeSite: 'explanation-fallback.ts:239',
       mode: 'explain',
@@ -227,22 +140,12 @@ function everySite(): Site[] {
   return out;
 }
 
-const SITE_COUNT = 6;
-
-describe('generic recommendation gate handoff', () => {
-  it.each(BANDS)('declines with robustness band %s', (band) => {
-    expect(tryPostAnalysisAdviceGate({
-      message: 'What would you recommend?',
-      analysis: gateAnalysis(band),
-      freshness: 'fresh',
-    })).toEqual({ matched: false, reason: 'reasoning_request' });
-  });
-});
+const SITE_COUNT = 2;
 
 describe('PRODUCER CONTROL — no post-analysis surface states the lead as a gap between options', () => {
   const samples = everySite();
 
-  it('drives all SIX emitters across the full robustness-band space', () => {
+  it('drives both live emitters across the full robustness-band space', () => {
     // Non-vacuity for the enumeration itself.
     expect(samples).toHaveLength(BANDS.length * SITE_COUNT);
     for (const s of samples) {
@@ -251,7 +154,7 @@ describe('PRODUCER CONTROL — no post-analysis surface states the lead as a gap
         `${s.producer} @ band=${String(s.band)} produced empty prose`,
       ).toBeGreaterThan(40);
     }
-    // Every one of the six producers is represented — a refactor that collapsed
+    // Every one of the live producers is represented — a refactor that collapsed
     // two sites into one must not silently shrink this control.
     expect(new Set(samples.map((s) => s.producer)).size).toBe(SITE_COUNT);
   });
