@@ -1,35 +1,21 @@
 /**
  * Context-audit #1 (CONTEXT-SYSTEM-AUDIT-2026-07-22) — conformance for the
- * enrichment→LLM silent-drop seam (keep-list inventory row #2) and the
- * projection-cap parity mirror (row #6).
+ * enrichment→LLM silent-drop seam (keep-list inventory row #2).
  *
- * The "derived" read-set is NOT hand-listed here (that would be the very
- * mirror the estate keeps paying for). It is OBSERVED AT RUNTIME: every
- * analysis→LLM enrichment reader is run against a `Proxy` over an EMPTY
- * enrichment, so each reader touches its top-level key(s) then bails, and the
- * union of the recorded property accesses is the true read-set — immune to
- * comment drift and impossible to forget to update.
+ * ⚠ DELETION 10 (track2, 22 Oct 2026): the "derived" read-set used to be
+ * OBSERVED AT RUNTIME by running every analysis→LLM enrichment reader against
+ * a `Proxy`. Those readers (the prior-facts summary builder and its derivers)
+ * were deleted — their only caller discarded the summary — so there is nothing
+ * left to observe: every manifest key is now in the skip map with a reason, and
+ * the probe, its defensive-read rows and the projection-cap parity row went
+ * with them (copy in `evidence/track2-deletion10-20261022/deleted/`).
  */
 
 import { describe,expect,it } from 'vitest';
 
-import type { AnalysisResponseSummary } from '../../../orchestrator/context/analysis-compact.js';
-import { reconcileAnalysisSummaryWithEnrichment } from '../analysis-fallback.js';
-import {
-deriveConfidenceTierFromEnrichment,
-deriveEvidenceGapsFromEnrichment,
-deriveGoalFitFromEnrichment,
-deriveOptionGoalFitsFromEnrichment,
-deriveOptionOutcomesFromEnrichment,
-deriveTippingPointsFromTopLevel,
-OPTION_GOAL_FIT_SIGNAL_CAP,
-OPTION_OUTCOME_SIGNAL_CAP,
-} from '../analysis-signals.js';
-import { POLICY_MAX_PROJECTED_OPTIONS } from '../context-policy.js';
 import {
 emitUnknownEnrichmentKeyTelemetry,
 ENRICHMENT_ANALYSIS_LLM_SKIP,
-ENRICHMENT_DEFENSIVE_NON_EMITTED_READS,
 ENRICHMENT_PRODUCER_MANIFEST,
 findUnknownEnrichmentKeys,
 MAX_LOGGED_ENRICHMENT_KEY_LENGTH,
@@ -43,93 +29,28 @@ buildAutoRunProvenance,
 buildConstructionAutoRunProvenance,
 RUN_PROVENANCE_ENRICHMENT_KEY,
 } from '../run-initiator.js';
-// Test-side import ONLY (does not couple the src modules): pins the local
-// sanitiser replica to the routing/tool-schema original it mirrors (F3).
 
 
 const sorted = (values: Iterable<string>): string[] => [...values].sort();
 
-const MINIMAL_SUMMARY: AnalysisResponseSummary = {
-  winner: { option_id: '', option_label: '', win_probability: 0 },
-  options: [],
-  top_drivers: [],
-  robustness_level: 'unknown',
-  fragile_edge_count: 0,
-  margin: null,
-  margin_pp: null,
-  analysis_status: 'computed',
-};
-
-/**
- * Run every analysis→LLM enrichment reader against a Proxy over `backing` and
- * return the set of top-level property names each one accessed. This is the
- * runtime-DERIVED read-set (row #2), not a hand-maintained list.
- */
-function observeTopLevelReads(backing: Record<string, unknown>): Set<string> {
-  const reads = new Set<string>();
-  const probe = new Proxy(backing, {
-    get(target, prop, receiver) {
-      if (typeof prop === 'string') reads.add(prop);
-      return Reflect.get(target, prop, receiver);
-    },
-    has(target, prop) {
-      if (typeof prop === 'string') reads.add(prop);
-      return Reflect.has(target, prop);
-    },
-  });
-  // The individual derivers (analysis-signals.ts)…
-  deriveTippingPointsFromTopLevel(probe);
-  deriveEvidenceGapsFromEnrichment(probe);
-  deriveGoalFitFromEnrichment(probe);
-  deriveOptionGoalFitsFromEnrichment(probe);
-  deriveOptionOutcomesFromEnrichment(probe);
-  deriveConfidenceTierFromEnrichment(probe);
-  // …plus the composite reconcile seam, which additionally exercises the
-  // applyTopLevel{Drivers,FragileEdge}Override reads (factor_sensitivity,
-  // robustness) in analysis-fallback.ts.
-  reconcileAnalysisSummaryWithEnrichment(MINIMAL_SUMMARY, probe);
-  return reads;
-}
-
-// Two probes (F2 — a single empty probe was blind to conditional reads):
-//   • EMPTY — catches every unconditional top-level read.
-//   • POPULATED (non-empty robustness.fragile_edges) — drives the conditional
-//     readGraph(enrichment) path in deriveTopFragileEdgesFromTopLevel, so the
-//     `graph` read (gated on populated fragile edges — the live staging shape)
-//     is observed instead of escaping as an undetected phantom.
-const observed = new Set<string>([
-  ...observeTopLevelReads({}),
-  ...observeTopLevelReads({ robustness: { fragile_edges: [{}] } }),
-]);
-const derivedReal = [...observed].filter((k) => ENRICHMENT_PRODUCER_MANIFEST.has(k));
-const defensiveObserved = [...observed].filter((k) => !ENRICHMENT_PRODUCER_MANIFEST.has(k));
+/** The nine keys the deleted summary builder and its derivers used to read. */
+const FORMER_DERIVED_KEYS = [
+  'confidence_tier',
+  'critiques',
+  'factor_evppi',
+  'factor_sensitivity',
+  'flip_thresholds',
+  'inference_warnings',
+  'm1_coaching',
+  'option_comparison',
+  'robustness',
+] as const;
 
 describe('enrichment producer manifest — conformance (context-audit #1 row #2)', () => {
-  it('runtime-observed reads are only manifest fields or documented defensive reads', () => {
-    // Direction 2: a deriver reading a field that is neither a known producer
-    // field nor a documented defensive read goes RED.
-    const undocumented = defensiveObserved.filter(
-      (k) => !ENRICHMENT_DEFENSIVE_NON_EMITTED_READS.has(k),
-    );
-    expect(undocumented).toEqual([]);
-  });
-
-  it('every documented defensive read is actually read (no stale allowlist entry)', () => {
-    for (const key of ENRICHMENT_DEFENSIVE_NON_EMITTED_READS) {
-      expect(observed.has(key), `${key} is documented defensive but never read`).toBe(true);
-    }
-  });
-
-  it('manifest is fully classified: derived reads ∪ skip == manifest, EXACTLY', () => {
-    // Direction 1 (silent-drop guard): a new PLoT field that is neither
-    // derived nor skipped goes RED.
-    const classified = new Set<string>([...derivedReal, ...ENRICHMENT_ANALYSIS_LLM_SKIP.keys()]);
-    expect(sorted(classified)).toEqual(sorted(ENRICHMENT_PRODUCER_MANIFEST));
-  });
-
-  it('a field is never both derived (projected) and skipped', () => {
-    const both = derivedReal.filter((k) => ENRICHMENT_ANALYSIS_LLM_SKIP.has(k));
-    expect(both).toEqual([]);
+  it('manifest is fully classified: skip == manifest, EXACTLY', () => {
+    // Direction 1 (silent-drop guard): a new PLoT field that is not skipped with
+    // a reason goes RED. Since deletion 10 there is no derived read set to union in.
+    expect(sorted(ENRICHMENT_ANALYSIS_LLM_SKIP.keys())).toEqual(sorted(ENRICHMENT_PRODUCER_MANIFEST));
   });
 
   it('every skip entry is a manifest field with a non-empty reason', () => {
@@ -140,14 +61,29 @@ describe('enrichment producer manifest — conformance (context-audit #1 row #2)
   });
 
   it('POSITIVE CONTROL — the classification checker SEES a dropped field', () => {
-    // Simulate a deriver being silently removed: drop one real derived field
-    // from the classified union and prove the equality assertion detects the
-    // now-unclassified manifest field (doctrine trap #13).
-    const broken = new Set<string>([...derivedReal, ...ENRICHMENT_ANALYSIS_LLM_SKIP.keys()]);
+    // Simulate a skip row being silently removed: drop one key from the skip
+    // map's key set and prove the equality assertion detects the now-
+    // unclassified manifest field (doctrine trap #13).
+    const broken = new Set<string>(ENRICHMENT_ANALYSIS_LLM_SKIP.keys());
     broken.delete('flip_thresholds');
     expect(sorted(broken)).not.toEqual(sorted(ENRICHMENT_PRODUCER_MANIFEST));
     const unclassified = [...ENRICHMENT_PRODUCER_MANIFEST].filter((k) => !broken.has(k));
-    expect(unclassified).toContain('flip_thresholds');
+    expect(unclassified).toEqual(['flip_thresholds']);
+  });
+
+  it('DELETION 10 — flip_thresholds is skipped with the deletion-10 reason, and is still manifested, emitted and stored', () => {
+    const reason = ENRICHMENT_ANALYSIS_LLM_SKIP.get('flip_thresholds');
+    expect(reason).toContain('deletion 10');
+    expect(reason).toContain('its other CEE readers and its storage on the run_analysis fact are unchanged');
+    // The same reason, by identity, on exactly the nine former derived keys.
+    const withReason = [...ENRICHMENT_ANALYSIS_LLM_SKIP].filter(([, r]) => r === reason).map(([k]) => k);
+    expect(sorted(withReason)).toEqual([...FORMER_DERIVED_KEYS]);
+    // Reclassified for the analysis→LLM projection only: still a manifested
+    // producer key, still in PLoT's pinned RunResponseV3 set, and a stored body
+    // carrying it stays silent on the tripwire (kept, not dropped).
+    expect(ENRICHMENT_PRODUCER_MANIFEST.has('flip_thresholds')).toBe(true);
+    expect(PLOT_RUN_RESPONSE_V3_TOPLEVEL_KEYS.has('flip_thresholds')).toBe(true);
+    expect(findUnknownEnrichmentKeys({ flip_thresholds: [{ factor_id: 'f', flip_value: 2 }] })).toEqual([]);
   });
 });
 
@@ -348,17 +284,6 @@ describe('runtime tripwire — findUnknownEnrichmentKeys / emit (context-audit #
 });
 
 
-
-describe('projection cap parity (context-audit #1 row #6 — was comment-only)', () => {
-  it('OPTION_GOAL_FIT_SIGNAL_CAP === OPTION_OUTCOME_SIGNAL_CAP === POLICY_MAX_PROJECTED_OPTIONS', () => {
-    // Fail-loud pin: the per-option annotation caps must never silently fall
-    // below the option list they annotate. If POLICY_MAX_PROJECTED_OPTIONS (the
-    // option cap; the assembler's MAX_PROJECTED_OPTIONS was deleted in deletion
-    // 8) moves, both caps must move with it or this goes RED.
-    expect(OPTION_GOAL_FIT_SIGNAL_CAP).toBe(POLICY_MAX_PROJECTED_OPTIONS);
-    expect(OPTION_OUTCOME_SIGNAL_CAP).toBe(POLICY_MAX_PROJECTED_OPTIONS);
-  });
-});
 
 // ============================================================================
 // The auto-run provenance stamp is a CEE-injected key on the SAME persisted

@@ -25,7 +25,6 @@ import { goalChanceFactsForAgent, goalChanceRangeDisplayForAgent } from '../../o
 import { goalChanceScreenLinesForAgent } from '../../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { goalChanceWithheldForAgent } from '../../orchestrator-v5/agent-lane/goal-chance-withheld.js';
 import { analysisResultForAgent } from '../../orchestrator-v5/agent-lane/decision-sensitivity.js';
-import { buildAnalysisFromPriorFacts } from '../../orchestrator-v5/context/analysis-fallback.js';
 import { buildAnalysisResultBlock, composeToolCallResponse } from '../../orchestrator-v5/compose.js';
 import rs3 from '../../orchestrator-v5/agent-lane/__tests__/fixtures/rs3-conditional-dependence-8e9132fc.json';
 import { runChanceHeadline } from '../../orchestrator-v5/coaching/run-chance-headline.js';
@@ -196,9 +195,6 @@ describe('stored supported chance re-licensed against the current graph', () => 
     expect(goalChanceWithheldForAgent(held, g)).toBeDefined();
     expect(projectCanonicalAnalysisCells(held, g).every(row => row.cell.kind === 'withheld')).toBe(true);
     expect(JSON.stringify(analysisResultForAgent(held, undefined, true, g))).not.toContain('probability_of_goal');
-    const fallback = buildAnalysisFromPriorFacts([run], undefined, g);
-    expect(fallback?.options).toHaveLength(2);
-    expect(fallback?.options.every(row => row.probability_of_goal === undefined)).toBe(true);
   });
   it('H removed after a withheld Run stays withheld on reload and for Agent until a new Run', async () => {
     const g = graph(); g.nodes.find((n: Rec) => n.kind === 'goal').goal_horizon_months = 12;

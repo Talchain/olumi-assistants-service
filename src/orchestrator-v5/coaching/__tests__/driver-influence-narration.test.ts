@@ -33,9 +33,6 @@ import {
   isAllowedRunAnalysisAssistantText,
 } from '../analysis-result-headline.js';
 import {
-  applyTopLevelDriversOverride,
-} from '../../context/analysis-fallback.js';
-import {
   composeExplainResultsFallback,
   composeWhatWouldFlipFallback,
 } from '../../tools/handlers/explanation-fallback.js';
@@ -43,10 +40,7 @@ import type {
   AnalysisProjectionDriver,
   AnalysisProjectionSummary,
 } from '../../context/projection-summaries.js';
-import {
-  compactAnalysis,
-  type AnalysisResponseSummary,
-} from '../../../orchestrator/context/analysis-compact.js';
+import { compactAnalysis } from '../../../orchestrator/context/analysis-compact.js';
 import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 
 // ============================================================================
@@ -118,21 +112,6 @@ const ENRICHMENT_341: Record<string, unknown> = {
     },
   ],
   factor_sensitivity: FACTOR_SENSITIVITY_341.map((f) => ({ ...f })),
-};
-
-const EMPTY_SUMMARY: AnalysisResponseSummary = {
-  winner: {
-    option_id: 'opt_cofounder',
-    option_label: 'Bring On Technical Co-Founder',
-    win_probability: 0.86,
-  },
-  options: [],
-  top_drivers: [],
-  robustness_level: 'unknown',
-  fragile_edge_count: 0,
-  margin: 0.72,
-  margin_pp: 72,
-  analysis_status: 'complete',
 };
 
 /**
@@ -261,46 +240,10 @@ describe('DGAI #341 — headline driver claim derives from influence_score', () 
 });
 
 // ============================================================================
-// 2. top_drivers derivation — top-level (staging-live) shape
+// 2. (deleted in deletion 10, 22 Oct 2026) top_drivers derivation — top-level
+// shape: `applyTopLevelDriversOverride` fed only the prior-facts summary, which
+// nothing read, and was deleted with it.
 // ============================================================================
-
-describe('DGAI #341 — top_drivers rank by influence_score (top-level shape)', () => {
-  it('orders the #341 board by influence_score, carrying the influence magnitude', () => {
-    const { summary, source } = applyTopLevelDriversOverride(
-      EMPTY_SUMMARY,
-      ENRICHMENT_341,
-    );
-    expect(source).toBe('top_level');
-    expect(summary.top_drivers.map((d) => d.factor_label)).toEqual([
-      'Technical Leadership Capacity',
-      'Founder Equity Dilution',
-      'Market Timing Pressure',
-    ]);
-    expect(summary.top_drivers.map((d) => d.sensitivity)).toEqual([
-      1.0, 0.379, 0.039,
-    ]);
-  });
-
-  it('drops entries without a usable influence_score instead of ranking them by elasticity', () => {
-    const enrichment = {
-      factor_sensitivity: [
-        // No influence_score at all — the pre-fix code ranked this top by
-        // elasticity; it must now not be a driver candidate.
-        { factor_id: 'fac_e', factor_label: 'Elasticity Only', elasticity: 0.9 },
-        {
-          factor_id: 'fac_i',
-          factor_label: 'Influence Carrier',
-          influence_score: 0.5,
-          elasticity: 0.1,
-        },
-      ],
-    };
-    const { summary } = applyTopLevelDriversOverride(EMPTY_SUMMARY, enrichment);
-    expect(summary.top_drivers.map((d) => d.factor_label)).toEqual([
-      'Influence Carrier',
-    ]);
-  });
-});
 
 // ============================================================================
 // 3. top_drivers derivation — per-option shape (compactAnalysis)

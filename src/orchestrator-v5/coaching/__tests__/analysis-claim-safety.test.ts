@@ -16,94 +16,11 @@
  * they get regression COVERAGE here, not a code change.
  */
 import { describe, expect, it } from 'vitest';
-import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
-
-import { buildAnalysisFromPriorFacts } from '../../context/analysis-fallback.js';
 import { buildAnalysisResultHeadline } from '../analysis-result-headline.js';
 
-const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-
-function mkFact(enrichment: Record<string, unknown>, opts: {
-  leading?: string | null;
-  winProbabilities?: Record<string, number>;
-} = {}): RunAnalysisHandlerFact {
-  const result: Record<string, unknown> = {
-    scenario_id: SCENARIO_ID,
-    leading_option_id: opts.leading ?? 'opt_a',
-    summary: 'Ran analysis.',
-    enrichment,
-  };
-  if (opts.winProbabilities !== undefined) result.win_probabilities = opts.winProbabilities;
-  return {
-    fact_type: 'run_analysis',
-    fact_version: 1,
-    noop: false,
-    result,
-  } as unknown as RunAnalysisHandlerFact;
-}
-
-describe('claim-safety — missing optional analysis fields stay missing (not zero)', () => {
-  it('projection with no drivers/robustness/2nd-option → [] / unknown / null margin, NOT zero', () => {
-    // Minimal enrichment: a single option, no factor_sensitivity, no robustness.
-    const fact = mkFact(
-      {},
-      { leading: 'opt_a', winProbabilities: { opt_a: 0.62 } },
-    );
-    const summary = buildAnalysisFromPriorFacts([fact as HandlerFact]);
-    expect(summary).not.toBeNull();
-    // Drivers absent → empty array, NOT a fabricated driver.
-    expect(summary!.top_drivers).toEqual([]);
-    // Robustness absent → honest 'unknown', NOT a fabricated band.
-    expect(summary!.robustness_level).toBe('unknown');
-    // Single option → margin is null (missing), NOT 0.
-    expect(summary!.margin).toBeNull();
-    expect(summary!.margin_pp).toBeNull();
-  });
-
-  it('margin is a real null for a single-option result (missing ≠ 0pp lead)', () => {
-    const fact = mkFact({}, { leading: 'opt_only', winProbabilities: { opt_only: 0.9 } });
-    const summary = buildAnalysisFromPriorFacts([fact as HandlerFact]);
-    expect(summary!.margin_pp).toBeNull();
-    expect(summary!.margin_pp).not.toBe(0);
-  });
-});
-
-describe('claim-safety — no rehydration from internal carriers', () => {
-  it('does NOT rehydrate drivers/robustness from a stripped _meta carrier', () => {
-    // Top-level science fields are absent/empty, but populated copies are buried
-    // in the internal `_meta` carrier (which egress strips). The projection must
-    // NOT pull them up — drivers stay [], robustness stays 'unknown'.
-    const fact = mkFact(
-      {
-        // empty top-level — nothing claim-usable here
-        factor_sensitivity: [],
-        robustness: {},
-        edge_e_values: [],
-        inference_warnings: [],
-        _meta: {
-          payloads: {
-            isl_response: {
-              factor_sensitivity: [{ factor_id: 'fac_secret', confidence: 0.9 }],
-              robustness: { robustness_level: 'high', fragile_edges: [{ edge_id: 'e1', switch_probability: 0.8 }] },
-              edge_e_values: [{ edge_id: 'e1', e_value: 3.2 }],
-              inference_warnings: [{ code: 'below_resolution', text: 'secret warning' }],
-            },
-          },
-        },
-      },
-      { leading: 'opt_a', winProbabilities: { opt_a: 0.55, opt_b: 0.45 } },
-    );
-    const summary = buildAnalysisFromPriorFacts([fact as HandlerFact]);
-    expect(summary).not.toBeNull();
-    // The internal _meta copies are NOT surfaced.
-    expect(summary!.top_drivers).toEqual([]);
-    expect(summary!.robustness_level).toBe('unknown');
-    const json = JSON.stringify(summary);
-    expect(json).not.toContain('fac_secret');
-    expect(json).not.toContain('secret warning');
-    expect(json).not.toContain('e_value');
-  });
-});
+// Deletion 10 (22 Oct 2026): the two describes that pinned the prior-facts
+// summary builder (`buildAnalysisFromPriorFacts`: missing fields stay missing,
+// no rehydration from `_meta`) were deleted with it — nothing read its summary.
 
 describe('claim-safety — the `?? 0` audit sites do not fabricate a surfaced claim', () => {
   it('headline: a fragile edge missing switch_probability does not crash or fabricate a "0" claim', () => {

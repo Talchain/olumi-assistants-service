@@ -39,6 +39,16 @@ describe('typed tipping-point fact from the served corpus', () => {
     expect(tippingPointOf(withRows([{ ...rows[0]!, value_scale: undefined, current_value: 0.49, flip_value: 0.5576 }])))
       .toEqual({ status: 'unresolved' });
   });
+  // Moved from `context/__tests__/flip-point-display-licence.test.ts` (:244, :250) in deletion 10: the licence path they
+  // ran on was deleted, and this is the live path that reads `value_scale` (`readRowValueScale` → `flipRowScaleIsDisplaySafe`).
+  it('an UNRECOGNISED value_scale token is REFUSED (never guessed), even on user-scale values', () => {
+    expect(tippingPointOf(withRows([{ ...rows[0]!, value_scale: 'normalised' }]))).toEqual({ status: 'unresolved' });
+  });
+  it('CONTROL: an explicit value_scale of "display" nested under margin_sensitivity is honoured', () => {
+    const nested = { ...rows[0]!, value_scale: undefined, current_value: 0.49, flip_value: 0.5576,
+      margin_sensitivity: { movement: 'weakened', value_scale: 'display' } };
+    expect(tippingPointOf(withRows([nested]))).toMatchObject({ status: 'found', factor_id: 'pro_plan_price', threshold: 0.5576 });
+  });
   it('does not round a distinguishable threshold into today’s value', () => {
     expect(tippingPointOf(withRows([{ ...rows[0]!, current_value: 100.2, flip_value: 100.4 }]))).toMatchObject({
       status: 'found', current_display: '100.2 GBP/month', threshold_display: '100.4 GBP/month',

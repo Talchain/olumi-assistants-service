@@ -8,7 +8,9 @@
  * them read the shape PLoT actually emits:
  *
  *   • the COACH context pack — `./analysis-signals.ts`
- *     (`deriveTippingPointsFromTopLevel`) — reads the top-level array. LIVE.
+ *     (`deriveTippingPointsFromTopLevel`) — read the top-level array (deleted
+ *     in deletion 10, 22 Oct 2026: its summary was never read; the Agent's
+ *     tipping point, `tippingPointOf`, reads these rows now).
  *   • the DECISION REVIEW prompt input —
  *     `../coaching/decision-review-enricher.ts` (`readFlipThresholdData`) —
  *     derived its rows from `results[].factor_sensitivity[].flip_threshold`,

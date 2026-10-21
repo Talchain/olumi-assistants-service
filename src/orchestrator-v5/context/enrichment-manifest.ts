@@ -6,8 +6,10 @@
  * `z.record` passthrough that the run-analysis handler persists BYTE-FOR-BYTE
  * as `result.enrichment` (run-analysis.ts §6). The analysis→LLM projection
  * (`./analysis-signals.ts` derivers + the `applyTopLevel*` overrides in
- * `./analysis-fallback.ts`) then reads a HAND-PICKED subset of that record's
- * top-level keys. A key PLoT emits but no deriver reads is invisible to the
+ * `./analysis-fallback.ts`) used to read a HAND-PICKED subset of that record's
+ * top-level keys; deletion 10 (22 Oct 2026) deleted it, because its only caller
+ * discarded the summary, so no CEE summary projects any key now (see
+ * {@link R_NO_CEE_SUMMARY_PROJECTION}). A key PLoT emits but no deriver reads is invisible to the
  * coach — this exact class already produced a live false claim (scenario
  * 90385279: win% narrated as target-fit before `probability_of_joint_goal`
  * was projected). Full derivation is impossible (the seam is untyped), so this
@@ -29,8 +31,9 @@
  *   2. {@link ENRICHMENT_ANALYSIS_LLM_SKIP} — every manifest field the
  *      analysis→LLM projection deliberately does NOT read, each with a reason.
  *      The conformance test (see `__tests__/enrichment-manifest.conformance
- *      .test.ts`) asserts runtime-observed-reads ∪ skip == manifest EXACTLY,
- *      so a new PLoT field that is neither derived nor skipped goes RED.
+ *      .test.ts`) asserts skip == manifest EXACTLY (since deletion 10 there are
+ *      no derived reads to union in), so a new PLoT field that is not skipped
+ *      with a reason goes RED.
  *   3. {@link emitUnknownEnrichmentKeyTelemetry} — the RUNTIME tripwire. When a
  *      persisted enrichment carries a top-level key not in the manifest, emit
  *      loud structured telemetry (key name sanitised + capped, never values).
@@ -244,7 +247,7 @@ const R_STATUS_SPINE =
 const R_UI_SCIENCE =
   'UI Results-panel science array — rendered by DGAI, not narrated by the coach; the coach sees banded influence/robustness via the projected drivers/robustness, not these raw arrays.';
 const R_FLIP_SIDECAR =
-  'Flip-threshold display-classification sidecar — the flip CONTENT is projected via flip_thresholds→tipping_points; these status/margin classifiers are UI-only.';
+  'Flip-threshold display-classification sidecar — the flip CONTENT is the flip_thresholds rows themselves (read by flip-threshold-rows.ts); these status/margin classifiers are UI-only.';
 const R_THRESHOLD =
   'Request-gated ISL native threshold endpoint output — not part of the coaching surface.';
 const R_AUTONOISE =
@@ -343,6 +346,12 @@ const R_INTERNAL =
  * So this is a skip with a stated boundary, not a gap: adding a deriver here
  * is a doctrine decision (and a Paul ruling), not a wiring task.
  *
+ * ⚠ DELETION 10 (22 Oct 2026): the verdict reader described below
+ * (`coaching/investigation-priority.ts`) and the derived set it put
+ * `factor_evppi` and `inference_warnings` in were deleted with the unread
+ * prior-facts summary; both keys now carry {@link R_NO_CEE_SUMMARY_PROJECTION}.
+ * The text below is the record of why they had moved.
+ *
  * ⚠⚠ AMENDED — `factor_evppi` MOVED OUT OF THE SKIP SET, AND THE BOUNDARY THAT
  * MOVED WITH IT IS NARROWER THAN THE ONE ABOVE, NOT ABSENT. STATED IN FULL
  * BECAUSE THIS IS THE DOCTRINE LINE AND THE NEXT READER INHERITS IT.
@@ -413,13 +422,29 @@ const R_RUN_PROVENANCE =
   'CEE-injected run-initiation marker (context/run-initiator.ts) — provenance, not analysis content. Its readers are the initiation/delivery predicates in run-initiator.ts (coaching first-vs-rerun, unrequested-analysis confinement), never the analysis→LLM derivers; it is also transported to the UI (P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP, schemas 0.57.0) for the provisional label.';
 const R_LEGACY_COMPACT =
   'Legacy V1 inbound-tolerance array — not emitted by the live /v2/run producer; consumed by the shared compactAnalysis projection (results[].factor_sensitivity / results[].robustness), not the row-#2 enrichment derivers.';
+/**
+ * ⚠ DELETION 10 (track2, 22 Oct 2026). These nine keys were the DERIVED set:
+ * the prior-facts summary builder (`buildAnalysisFromPriorFacts`), its
+ * top-level driver / fragile-edge overrides and the `./analysis-signals.ts`
+ * derivers read them. The builder's only served caller (`chip-generator.ts`)
+ * compared its result with null and discarded it, so the builder and its
+ * derivers were deleted and no CEE summary projects these keys now.
+ *
+ * NOT "stored-only": every one of them still has other CEE readers, which are
+ * unchanged (`flip_thresholds`, for example, is read by `flip-threshold-rows.ts`
+ * for the Agent's tipping point, the phase 3 cards, the lens selector and the
+ * headline). Storage is unchanged too: the run_analysis fact still persists the
+ * enrichment byte-for-byte, and the transport keep-list is untouched.
+ */
+const R_NO_CEE_SUMMARY_PROJECTION =
+  'No CEE summary projects this key since deletion 10 (22 Oct 2026) deleted the unread prior-facts summary builder and its derivers; its other CEE readers and its storage on the run_analysis fact are unchanged.';
 
 /**
  * Manifest fields the analysis→LLM projection deliberately does NOT read, each
- * with a reason. Its keys ∪ the runtime-observed derived reads MUST equal
- * {@link ENRICHMENT_PRODUCER_MANIFEST} exactly (conformance test). Adding a
- * deriver for one of these ⇒ remove it here; a new PLoT field ⇒ add a deriver
- * or add it here with a reason.
+ * with a reason. Its keys MUST equal {@link ENRICHMENT_PRODUCER_MANIFEST}
+ * exactly (conformance test): since deletion 10 there is no derived read set.
+ * Adding a deriver for one of these ⇒ remove it here and restore the observed-
+ * read probe; a new PLoT field ⇒ add it here with a reason.
  */
 export const ENRICHMENT_ANALYSIS_LLM_SKIP: ReadonlyMap<string, string> = new Map<string, string>([
   ['request_schema_version', R_STATUS_SPINE],
@@ -494,6 +519,16 @@ export const ENRICHMENT_ANALYSIS_LLM_SKIP: ReadonlyMap<string, string> = new Map
   ['p_win_sensitivity', R_VOI_NOT_COACH_NARRATED],
   // The fifth key of the same PLoT window — see its manifest entry.
   ['driver_order', R_NO_CONSUMER_YET_S1D],
+  // Deletion 10 — the former derived set; see R_NO_CEE_SUMMARY_PROJECTION.
+  ['critiques', R_NO_CEE_SUMMARY_PROJECTION],
+  ['option_comparison', R_NO_CEE_SUMMARY_PROJECTION],
+  ['factor_sensitivity', R_NO_CEE_SUMMARY_PROJECTION],
+  ['inference_warnings', R_NO_CEE_SUMMARY_PROJECTION],
+  ['m1_coaching', R_NO_CEE_SUMMARY_PROJECTION],
+  ['confidence_tier', R_NO_CEE_SUMMARY_PROJECTION],
+  ['flip_thresholds', R_NO_CEE_SUMMARY_PROJECTION],
+  ['robustness', R_NO_CEE_SUMMARY_PROJECTION],
+  ['factor_evppi', R_NO_CEE_SUMMARY_PROJECTION],
 ]);
 
 /**
@@ -548,35 +583,14 @@ export const PLOT_RUN_RESPONSE_V3_TOPLEVEL_KEYS: ReadonlySet<string> = new Set<s
 
 /**
  * Top-level enrichment keys the derivers TOLERATE defensively but the current
- * PLoT producer does NOT emit at top level (so they are not in the manifest):
+ * PLoT producer does NOT emit at top level (so they are not in the manifest).
  *
- *   - `goal_fit_basis` — `deriveGoalFitFromEnrichment` reads a top-level
- *     `goal_fit_basis` first; PLoT delivers it PER-OPTION inside
- *     `option_comparison[]` (the deriver's second source). The top-level read
- *     is forward-tolerance, not a live source.
- *   - `notes` — `deriveGoalFitFromEnrichment` scans `notes` OR `critiques` for
- *     the goal-fit basis code; PLoT emits `critiques` (in the manifest), never
- *     top-level `notes`. Defensive alias.
- *   - `graph` — `deriveTopFragileEdgesFromTopLevel` (analysis-fallback.ts)
- *     reads `enrichment.graph` via `readGraph()` to label fragile edges, but
- *     ONLY when `robustness.fragile_edges` is non-empty (a CONDITIONAL read).
- *     PLoT emits no top-level `graph` (fixture-confirmed absent; it appears
- *     only NESTED, where compose's INTERNAL_ENRICHMENT_KEYS strips it), so
- *     this is a defensive read, not a live source.
- *
- * SCOPE of the conformance check (honest limitation): the observed read-set is
- * derived by running the derivers over TWO probes — an EMPTY enrichment
- * (catches unconditional reads) and a POPULATED fixture-shaped enrichment
- * (catches reads gated on populated staging shapes, e.g. `graph`). It asserts
- * (observed-reads − manifest) ⊆ this set, so a phantom read on those paths
- * goes RED. A read gated on a shape NEITHER probe carries could still escape;
- * the runtime tripwire is the backstop for anything that reaches production.
+ * EMPTY since deletion 10 (22 Oct 2026). Its three members — `goal_fit_basis`
+ * and `notes` (read by `deriveGoalFitFromEnrichment`) and `graph` (read by
+ * `deriveTopFragileEdgesFromTopLevel`) — were read only by the deleted
+ * prior-facts summary builder and its derivers.
  */
-export const ENRICHMENT_DEFENSIVE_NON_EMITTED_READS: ReadonlySet<string> = new Set<string>([
-  'goal_fit_basis',
-  'notes',
-  'graph',
-]);
+export const ENRICHMENT_DEFENSIVE_NON_EMITTED_READS: ReadonlySet<string> = new Set<string>([]);
 
 /**
  * Max length of a logged enrichment key name. Mirrors
