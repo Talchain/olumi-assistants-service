@@ -12,6 +12,7 @@ vi.mock('../change-tools.js', async (original) => ({
 }));
 
 import { pathBTools, type OnToolCall } from '../index.js';
+import { toolsFor } from '../../../agent-lane/runtime/agent-tools.js';
 import { ProposalStore } from '../../../agent-lane/proposal.js';
 import { read } from './fixtures.js';
 
@@ -28,9 +29,9 @@ function setup(mode: 'core' | 'preview' = 'core', analyseAfterCommit?: () => Pro
 const named = (tools: Tool[], name: string): FunctionTool => tools.find((t) => t.name === name) as FunctionTool;
 
 describe('the adapters as SDK function tools', () => {
-  it('core: the six tools, strict, with no string limits a strict schema cannot carry; only apply_change asks for approval', async () => {
+  it('core: the seven tools, strict, with no string limits a strict schema cannot carry; only apply_change asks for approval', async () => {
     const { tools } = setup();
-    expect(tools.map((t) => t.name)).toEqual(['read_canonical_context', 'build_model_from_brief', 'propose_change', 'apply_change', 'run_analysis', 'note_on_item']);
+    expect(tools.map((t) => t.name)).toEqual(['read_canonical_context', 'build_model_from_brief', 'propose_change', 'apply_change', 'run_analysis', 'note_on_item', 'offer_public_research']);
     for (const t of tools as FunctionTool[]) {
       expect(t.type).toBe('function');
       expect(t.strict, t.name).toBe(true);
@@ -153,8 +154,14 @@ const AIE_STANCE = 'How this particular figure is put forward in its full source
 
 describe('the AIE\'s signed words', () => {
   it('each tool\'s description is the AIE\'s, byte for byte, replacing the old text', () => {
-    for (const t of (setup().tools as FunctionTool[]).filter((t) => t.name !== 'note_on_item')) expect(t.description, t.name).toBe(AIE_DESCRIPTIONS[t.name]);
+    for (const t of (setup().tools as FunctionTool[]).filter((t) => t.name !== 'note_on_item' && t.name !== 'offer_public_research')) expect(t.description, t.name).toBe(AIE_DESCRIPTIONS[t.name]);
     expect(Object.keys(AIE_DESCRIPTIONS)).toHaveLength(5);
+  });
+
+  it('offer_public_research keeps the legacy tool\'s own words, byte for byte (#3558: ported, never reworded)', () => {
+    const legacy = toolsFor('full').find((t) => t.name === 'offer_public_research');
+    expect(legacy?.description).toBeTruthy();
+    expect(named(setup().tools, 'offer_public_research').description).toBe(legacy!.description);
   });
 
   it('note_on_item (DL ruling 21 Oct): its description says it writes nothing, allows one note per turn, and never ranks an option', () => {
