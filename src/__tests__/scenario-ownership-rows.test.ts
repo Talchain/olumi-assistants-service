@@ -60,7 +60,7 @@ const routes = [
   ['POST', '/assist/v1/scenarios/:scenario_id/graph', 404], ['POST', '/assist/v1/scenarios/:scenario_id/graph/register', 404],
   ['POST', '/assist/v1/scenarios/:scenario_id/versions', 404], ['POST', '/assist/v1/scenarios/:scenario_id/versions/compare', 404],
   ['POST', '/assist/v1/scenarios/:scenario_id/versions/save', 404], ['POST', '/assist/v1/scenarios/:scenario_id/versions/restore', 404],
-  ['POST', '/assist/v1/scenarios/:scenario_id/copy', 404], ['POST', '/assist/v1/decision-records/commit', 403],
+  ['POST', '/assist/v1/scenarios/:scenario_id/copy', 404], ['POST', '/assist/v1/scenarios/:scenario_id/what-if', 404], ['POST', '/assist/v1/decision-records/commit', 403],
   ['POST', '/assist/v1/decision-records/:record_id/outcome', 403], ['POST', '/assist/v1/decision-records/list', 404],
   ['POST', '/collab/v1/rounds', 403], ['POST', '/collab/v1/rounds/:round_id/close', 403],
   ['GET', '/collab/v1/rounds/:round_id/preview', 403], ['GET', '/collab/v1/rounds/:round_id/reveal', 403], ['GET', '/collab/v1/rounds/:round_id/disagreement', 403],
@@ -79,7 +79,7 @@ async function ownership(app: FastifyInstance) {
   }
 }
 async function mount(app: FastifyInstance) {
-  const files = ['assist.v1.scenario-graph', 'assist.v1.scenario-graph-register', 'assist.v1.scenario-versions', 'assist.v1.scenario-copy', 'assist.v1.decision-records', 'collab.v1.rounds', 'proxy-v5-turn', 'proxy-v5-turn-stream', 'agent-v1-turn'];
+  const files = ['assist.v1.scenario-graph', 'assist.v1.scenario-graph-register', 'assist.v1.scenario-versions', 'assist.v1.scenario-copy', 'assist.v1.scenario-what-if', 'assist.v1.decision-records', 'collab.v1.rounds', 'proxy-v5-turn', 'proxy-v5-turn-stream', 'agent-v1-turn'];
   for (const name of files) { const mod = await import(`../routes/${name}.ts`); await (mod.default ?? mod.agentV1TurnRoute ?? mod.proxyV5TurnRoute)(app); }
   const { ceeOrchestratorRouteV2 } = await import('../orchestrator/route-v2.js');
   await ceeOrchestratorRouteV2(app);
@@ -116,7 +116,7 @@ beforeAll(async () => {
 afterAll(async () => { await app?.close(); await jwks?.close(); vi.unstubAllGlobals(); });
 beforeEach(() => { state.owner = A; state.member = false; state.memberThrows = false; state.absent = false; state.oracleThrows = false; state.entityAbsent = false; state.existenceThrows = false; state.admitted = false; state.persisted = false; vi.clearAllMocks(); session.markTurnStopped.mockClear(); state.members.mockClear(); state.writes.mockClear(); });
 
-describe('22 real registrations: ownership admission (terminal hook, business handlers excluded)', () => {
+describe('23 real registrations: ownership admission (terminal hook, business handlers excluded)', () => {
   for (const [method, path, refusal] of routes) {
     it(`${method} ${path} id=${SID} owner=A caller=B valid JWT -> ${refusal}`, async () => {
       const r = await request(path, tokenB, method); expect(r.statusCode).toBe(refusal); expect(r.payload).not.toContain('"admitted":true');

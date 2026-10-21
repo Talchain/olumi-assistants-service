@@ -14,6 +14,7 @@
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 
 import { buildTurnContext, loadScenarioSnapshotForRunAnalysis } from '../build-turn-context.js';
+import { runSeedEcho } from '../coaching/build-run-delta.js';
 import { priorRunForSeed, seedHistoryFacts } from '../coaching/seed-reuse.js';
 import { projectCanonicalAnalysisCells } from '../../routes/canonical-analysis-view.js';
 import { agentLicenceRecordOf, goalChanceLicenceForAgent } from '../goal-target/goal-chance-licence.js';
@@ -30,8 +31,9 @@ export interface StressVariantParams {
   readonly requestId: string;
   /** The mapped variant graph with its `living_model`, as a core save would store it. */
   readonly variantGraph: Record<string, unknown>;
-  /** One seed for every variant of a stress run, so variants of the same structure share their draws. */
-  readonly seed: number;
+  /** One seed for every variant of a stress run, so variants of the same structure share their draws. Omitted (a what-if,
+   *  `what-if-run.ts`): the Run's own seed reuse lends the saved Run's seed where the draw structure matches. */
+  readonly seed?: number;
   readonly signal?: AbortSignal;
   /** Test seams; production omits them. */
   readonly plotClient?: PLoTClient;
@@ -50,6 +52,14 @@ export function stressChancesOf(result: Record<string, unknown>, graph: unknown)
 }
 
 export async function runStressVariant(p: StressVariantParams): Promise<StressVariantRows> {
+  const run = await runVariant(p);
+  return run.kind === 'rows' ? { kind: 'rows', rows: run.rows } : run;
+}
+
+/** One variant's rows and the seed PLoT echoed for it (`meta.seed_used`), so a caller can prove two Runs drew the same. */
+export type VariantRun = Exclude<StressVariantRows, { kind: 'rows' }> | { readonly kind: 'rows'; readonly rows: ReadonlyMap<string, StressChance>; readonly seedUsed: string | null };
+
+export async function runVariant(p: StressVariantParams): Promise<VariantRun> {
   const context = await buildTurnContext(p.payload, p.requestId);
   const history = seedHistoryFacts({ scenarioId: context.session_id, hotWindow: context.prior_facts, durable: context.scenario_analysis_fact_set });
   const pending = p.pendingStore ?? getSessionStore();
@@ -63,7 +73,7 @@ export async function runStressVariant(p: StressVariantParams): Promise<StressVa
   } catch (err) {
     return refusal(err);
   }
-  const edited: RunAnalysisScenarioSnapshot = { ...snapshot, briefText: undefined, seed: p.seed };
+  const edited: RunAnalysisScenarioSnapshot = { ...snapshot, briefText: undefined, ...(p.seed === undefined ? {} : { seed: p.seed }) };
   const plotClient = p.plotClient ?? getDefaultPlotClient();
   const once: PLoTClient = {
     run: (body, id, opts) => plotClient.run(body, id, { ...opts, retryPolicy: 'no_retry' }),
@@ -77,13 +87,14 @@ export async function runStressVariant(p: StressVariantParams): Promise<StressVa
       () => handlerFn({ context, payload: p.payload, requestId: p.requestId, signal: p.signal ?? new AbortController().signal, orientationText: '' }),
     );
     const fact = outcome.handler_facts.find((f) => f.fact_type === 'run_analysis');
-    return fact?.fact_type !== 'run_analysis' ? { kind: 'refused', reason: 'failed' } : { kind: 'rows', rows: stressChancesOf(fact.result, edited.graph) };
+    return fact?.fact_type !== 'run_analysis' ? { kind: 'refused', reason: 'failed' }
+      : { kind: 'rows', rows: stressChancesOf(fact.result, edited.graph), seedUsed: runSeedEcho(fact) };
   } catch (err) {
     return refusal(err);
   }
 }
 
-function refusal(err: unknown): StressVariantRows {
+function refusal(err: unknown): Exclude<StressVariantRows, { kind: 'rows' }> {
   if (err instanceof PLoTTimeoutError || (err instanceof HandlerInvocationFailedError && err.cause_kind === 'plot_timeout')) {
     return { kind: 'refused', reason: 'timed_out' };
   }
