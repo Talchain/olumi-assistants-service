@@ -202,17 +202,25 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
             low: null, high: null, unit: g.unit === '' ? null : g.unit, source: l.source, party: l.party, quote: l.quote }] };
         }),
         links: model.links.filter((l) => !direct.includes(l)) };
-    } else {
-      const on = (optionId: string) => `${optionId}__on`;
-      model = { ...model,
-        factors: [...model.factors, ...[...new Set(direct.map((l) => l.from))].map((id) => ({ id: on(id),
-          label: `${model.options.find((o) => o.id === id)!.label} in place`, value: 0, low: null, high: null, unit: null, source: 'olumi' as const, party: null, quote: null }))],
-        options: model.options.map((o) => {
-          const l = direct.find((d) => d.from === o.id);
-          return l === undefined ? o : { ...o, settings: [...o.settings, { factor_id: on(o.id), value: 1, low: null, high: null, unit: null, source: l.source, party: l.party, quote: l.quote }] };
-        }),
-        links: model.links.map((l) => (direct.includes(l) ? { ...l, from: on(l.from) } : l)) };
     }
+  }
+  /**
+   * Any other effect an option has, on a factor or on the goal ("emailing customers improves how well they understand
+   * the delay"): the option switches its action on (`<option>__on`, 0 today, 1 under the option), and the link runs from
+   * that switch, so it reaches the engine as the person or Olumi gave it, sized or not. Without this, a link from an
+   * option to a factor had no engine endpoint and was held (`link_endpoint_unknown`), leaving the option driving nothing.
+   */
+  const fromOption = model.links.filter((l) => optionIds.has(l.from));
+  if (fromOption.length > 0) {
+    const on = (optionId: string) => `${optionId}__on`;
+    model = { ...model,
+      factors: [...model.factors, ...[...new Set(fromOption.map((l) => l.from))].map((id) => ({ id: on(id),
+        label: `${model.options.find((o) => o.id === id)!.label} in place`, value: 0, low: null, high: null, unit: null, source: 'olumi' as const, party: null, quote: null }))],
+      options: model.options.map((o) => {
+        const l = fromOption.find((d) => d.from === o.id);
+        return l === undefined ? o : { ...o, settings: [...o.settings, { factor_id: on(o.id), value: 1, low: null, high: null, unit: null, source: l.source, party: l.party, quote: l.quote }] };
+      }),
+      links: model.links.map((l) => (fromOption.includes(l) ? { ...l, from: on(l.from) } : l)) };
   }
 
   // ── Factors, each on its own frame.
