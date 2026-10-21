@@ -50,6 +50,37 @@ describe('thin core explicit edit: a canvas gesture applied to the living model,
       .toEqual({ refused: 'unit_mismatch' });
   });
 
+  it('s1: a figure the person sets on the canvas makes Olumi\'s suggested measure theirs, so it is read as their target', () => {
+    const suggested: LivingModelT = structuredClone(KNOWN_ANSWER);
+    suggested.aims[0] = { ...suggested.aims[0]!, target: { ...suggested.aims[0]!.target!, value: null, current: null, source: 'olumi' } };
+    const target = (applyExplicitEdit(suggested, { kind: 'goal_target_edit', goal_node_id: 'g', constraint_type: 'at_least', raw_value: 110, unit: 'units' }) as { model: LivingModelT }).model;
+    expect(target.aims[0]!.target!.source).toBeNull();
+    expect(mapLivingModel(target).withheld.map((w) => w.reason)).not.toContain('target_not_theirs');
+    const level = (applyExplicitEdit(suggested, { kind: 'factor_value_edit', target_id: 'g', value: 0.6, raw_value: 75, unit: 'units' }) as { model: LivingModelT }).model;
+    expect(level.aims[0]!.target).toMatchObject({ current: 75, current_source: 'user', source: null });
+  });
+
+  it('Codex #3585 P1: on Olumi\'s measure only the figure the person sets is adopted; Olumi\'s figures go to history, never to the engine as theirs', () => {
+    const olumiMeasure = (target: Record<string, unknown>): LivingModelT => {
+      const x: LivingModelT = structuredClone(KNOWN_ANSWER);
+      x.aims[0] = { ...x.aims[0]!, target: { ...x.aims[0]!.target!, source: 'olumi', ...target } };
+      return x;
+    };
+    // (1) Olumi left a target figure (100); the person sets only today's level (75): the 100 is never their target.
+    const level = (applyExplicitEdit(olumiMeasure({ current: null }), { kind: 'factor_value_edit', target_id: 'g', value: 0.6, raw_value: 75, unit: 'units' }) as { model: LivingModelT }).model;
+    expect(level.aims[0]!.target).toMatchObject({ value: null, low: null, high: null, current: 75, current_source: 'user', source: null });
+    expect(level.history.map((h) => h.old)).toContain('target 100 units (Olumi\u2019s figure, not confirmed by you)');
+    expect(node(level, 'g').goal_threshold_raw).toBeUndefined();
+    // (2) The person's aim, Olumi's measure with a level (70); the person sets only the target (110): the 70 is never theirs.
+    const target = (applyExplicitEdit(olumiMeasure({ value: null }), { kind: 'goal_target_edit', goal_node_id: 'g', constraint_type: 'at_least', raw_value: 110, unit: 'units' }) as { model: LivingModelT }).model;
+    expect(target.aims[0]!.target).toMatchObject({ value: 110, current: null, source: null });
+    expect(target.history.map((h) => h.old)).toContain('starting level 70 units (Olumi\u2019s estimate)');
+    expect(node(target, 'g').observed_state?.raw_value).not.toBe(70);
+    // CONTRAST: on the person's own measure their saved level stays theirs when they set the target (unchanged rule).
+    const own = (applyExplicitEdit(KNOWN_ANSWER, { kind: 'goal_target_edit', goal_node_id: 'g', constraint_type: 'at_least', raw_value: 110, unit: 'units' }) as { model: LivingModelT }).model;
+    expect(own.aims[0]!.target!.current).toBe(70);
+  });
+
   it('R1 round 2: today\'s level the person set stays theirs when they then edit the target', () => {
     const olumis: LivingModelT = structuredClone(KNOWN_ANSWER);
     olumis.aims[0] = { ...olumis.aims[0]!, source: 'olumi', quote: null };

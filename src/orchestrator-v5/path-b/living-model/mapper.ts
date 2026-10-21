@@ -39,7 +39,7 @@ export type WithheldReason =
   | 'exact_not_drawable' | 'stay_within_base_not_theirs' | 'stay_within_unconfirmed'
   | 'identity_not_in_slice' | 'identity_part_unknown' | 'identity_unit_mismatch' | 'identity_inconsistent'
   | 'identity_other_cause' | 'identity_contradicted' | 'identity_restated'
-  | 'risk_occurrence_unknown' | 'risk_unattributed' | 'risk_not_in_slice' | 'limit_not_in_slice';
+  | 'risk_occurrence_unknown' | 'risk_unattributed' | 'risk_not_in_slice' | 'limit_not_in_slice' | 'target_not_theirs';
 
 /** A definition that withholds the chance when its carrier is on the goal's path (it cannot be worked out as stated). */
 const IDENTITY_REFUSED: ReadonlySet<WithheldReason> = new Set(['identity_not_in_slice', 'identity_part_unknown', 'identity_unit_mismatch', 'identity_inconsistent']);
@@ -170,7 +170,9 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     // "Exactly N" is never read as "at least N"; a change is read on today's level (`levelTargetOf`), and only on the
     // person's own: a change on Olumi's estimated base would need the provisional estimate_only treatment (rulings 9/10),
     // which this slice does not carry, so it is withheld and Olumi asks for today's level.
+    // Olumi's suggested measure (`target.source`) carries no figure of its own: one there is never read as the person's target.
     const lt = t === null ? 'no_level_target' as const
+      : t.source === 'olumi' && [t.value, t.low, t.high, t.current].some((v) => v !== null) ? 'target_not_theirs' as const
       : isChange && t.current !== null && !(t.current_source === 'user' || stated(aim.source)) ? 'change_base_not_theirs' as const : levelTargetOf(t);
     if (typeof lt === 'string') hold(aim.id, lt);
     else {
