@@ -101,7 +101,10 @@ async function constructUnrecorded(deps: DraftDeps, ctx: DraftContext, args: Bui
   }
 
   const words = [args.brief, ...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text === undefined ? [] : [ctx.user_turn_text])];
-  const drafted = 'model' in args ? args.model : await deps.draft?.(JSON.stringify({ brief: args.brief }));
+  // The construction role reads what the person has said in this conversation too (buddy BLOCK on #3574): verified messages,
+  // oldest first, so a later correction governs. The kernel checks every quote against the same words.
+  const said = words.slice(1);
+  const drafted = 'model' in args ? args.model : await deps.draft?.(JSON.stringify({ brief: args.brief, said }));
   if (drafted === undefined) return unavailable('draft_failed');
   let kernelled = applyKernel(drafted, words);
   let mapped = mapLivingModel(kernelled.model);
@@ -109,11 +112,11 @@ async function constructUnrecorded(deps: DraftDeps, ctx: DraftContext, args: Bui
   let gaps = structureGaps(kernelled.model);
   if (deps.review !== undefined && !deps.review.done) {
     deps.review.done = true;
-    const critique = await deps.critique?.(JSON.stringify({ brief: args.brief, draft: kernelled.model, gaps }));
+    const critique = await deps.critique?.(JSON.stringify({ brief: args.brief, ...('model' in args ? {} : { said }), draft: kernelled.model, gaps }));
     if (critique !== undefined && deps.draft === undefined) return refused('review_first', REVIEW_FIRST, { gaps, critique });
     // The construction role revises its own draft here, once; a failed revision keeps the first draft.
     const revised = critique === undefined ? undefined
-      : await deps.draft?.(JSON.stringify({ brief: args.brief, draft: kernelled.model, gaps, critique, instruction: REVISE_ONCE }));
+      : await deps.draft?.(JSON.stringify({ brief: args.brief, said, draft: kernelled.model, gaps, critique, instruction: REVISE_ONCE }));
     if (revised !== undefined) {
       const k = applyKernel(revised, words);
       const m = mapLivingModel(k.model);

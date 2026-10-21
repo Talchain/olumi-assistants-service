@@ -30,10 +30,16 @@ describe('the construction role (21 Oct): one bounded call whose strict output i
   });
 
   it('the instruction carries the construction rules, and never an Olumi estimate under a relabelled factor or a reply', () => {
-    for (const rule of ['EVERY OPTION MUST SAY WHAT IT DOES', 'PRESERVE EVERY RISK THE USER NAMED', 'A TARGET THE BRIEF DOES NOT STATE STAYS UNSTATED',
+    for (const rule of ['EVERY OPTION SAYS WHAT IT DOES WHERE IT CAN', 'PRESERVE EVERY RISK THE USER NAMED', 'A TARGET THE BRIEF DOES NOT STATE STAYS UNSTATED',
       'its value stays null: the analysis asks the person for it', 'never relabel it as Olumi’s to hold an estimate'.replace('’', "'")])
       expect(DRAFTER_INSTRUCTIONS, rule).toContain(rule);
     expect(DRAFTER_INSTRUCTIONS).not.toContain('your reply');
+    // Buddy on #3574: the conversation is read (a later correction governs); counts are a guide; no invented level or size to connect an option.
+    expect(DRAFTER_INSTRUCTIONS).toContain('a later correction governs');
+    expect(DRAFTER_INSTRUCTIONS).toContain('a guide, never a quota');
+    expect(DRAFTER_INSTRUCTIONS).toContain('Never invent a level or a size to connect it.');
+    expect(DRAFTER_INSTRUCTIONS).not.toContain('Give its level as Olumi');
+    expect(DRAFTER_INSTRUCTIONS).not.toContain("or is Olumi's estimate");
     // Codex BLOCK on #3574: a product's parts keep their own units (customers × £ per customer per month), only a sum's share one.
     expect(DRAFTER_INSTRUCTIONS).toContain("In a sum, each part is in the defined quantity's unit; in a product, each part keeps its own unit and the units compose");
     expect(DRAFTER_INSTRUCTIONS).not.toContain("Every part needs its level today in the defined quantity's unit.");

@@ -319,12 +319,32 @@ describe('the construction role (21 Oct, buddy AMEND/PROCEED): Olumi\'s drafter 
     const out = await buildModel({ ...p, review: { done: false }, critique, draft }, ctx, BRIEF_ONLY);
     expect(out, 'never handed back to the conversation agent as review_first').toMatchObject({ status: 'ok', mutated: true });
     expect(draft).toHaveBeenCalledTimes(2);
-    expect(JSON.parse(draft.mock.calls[0]![0])).toEqual({ brief: BRIEF });
+    expect(JSON.parse(draft.mock.calls[0]![0])).toEqual({ brief: BRIEF, said: [BRIEF, BRIEF] });
     expect(JSON.parse(critique.mock.calls[0]![0])).toMatchObject({ brief: BRIEF, draft: { aims: [{ text: 'Saturday visitors, first draft' }] } });
     expect(JSON.parse(draft.mock.calls[1]![0])).toMatchObject({ brief: BRIEF, critique: CRITIQUE, instruction: REVISE_ONCE });
     const saved = JSON.stringify(registerCalls(p).map((c) => c.body));
     expect(saved).toContain('Visitors served on Saturdays');
     expect(saved, 'the first draft is never what is saved once a revision exists').not.toContain('first draft');
+  });
+
+  it('buddy BLOCK on #3574: what the person said later in the conversation reaches the draft, the critic and the revision, oldest first', async () => {
+    const CORRECTION = 'Actually the second assistant would only work mornings.';
+    const said = { ...ctx, verified_user_messages: [BRIEF, CORRECTION], user_turn_text: 'Please build the model.' };
+    const draft = vi.fn(async (input: string) => (JSON.parse(input).critique === undefined ? FIRST : LIVING));
+    const critique = vi.fn(async (_input: string) => CRITIQUE);
+    const p = product({ graph: [EMPTY, MODEL], register: [SAVED], versions: [VERSIONS(true)] });
+    await buildModel({ ...p, review: { done: false }, critique, draft }, said, BRIEF_ONLY);
+    const heard = [BRIEF, CORRECTION, 'Please build the model.'];
+    expect(JSON.parse(draft.mock.calls[0]![0]).said).toEqual(heard);
+    expect(JSON.parse(critique.mock.calls[0]![0]).said).toEqual(heard);
+    expect(JSON.parse(draft.mock.calls[1]![0]).said).toEqual(heard);
+  });
+
+  it('CONTRAST: the default path\'s critic input is unchanged (no `said`)', async () => {
+    const critique = vi.fn(async (_input: string) => CRITIQUE);
+    const p = product({ graph: [EMPTY, EMPTY, MODEL], register: [SAVED], versions: [VERSIONS(true)] });
+    await buildModel({ ...p, review: { done: false }, critique }, ctx, ARGS);
+    expect(Object.keys(JSON.parse(critique.mock.calls[0]![0]))).toEqual(['brief', 'draft', 'gaps']);
   });
 
   it('a failed draft writes nothing and is said as a failed draft; a failed revision keeps the first draft', async () => {
