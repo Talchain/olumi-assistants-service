@@ -392,13 +392,6 @@ export interface ActionResult {
    */
   failure?: ActionFailure;
   /**
-   * WS2: Structured fact emitted by handlers for the response composer.
-   * When present, pipeline-v4 calls composeResponse(fact, coachingContext)
-   * to generate assistantText, replacing the handler's legacy string output.
-   * When absent, the handler's assistantText is used as-is (legacy path).
-   */
-  fact?: import("./response-composer.js").HandlerFact;
-  /**
    * Optional override for the envelope's suggested_actions array. When
    * populated, the V4 envelope assembler uses these chips instead of the
    * chip engine output. Used by action handlers that need to surface

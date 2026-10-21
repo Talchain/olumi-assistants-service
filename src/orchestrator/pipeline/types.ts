@@ -31,8 +31,6 @@ import type {
 import type { PLoTClient } from "../plot-client.js";
 import type { GraphV3Compact } from "../context/graph-compact.js";
 import type { AnalysisResponseSummary } from "../context/analysis-compact.js";
-import type { DecisionContinuity } from "../context/decision-continuity.js";
-import type { ToolInvocation, ParsedLLMResponse, ExtractedBlock } from "../response-parser.js";
 import type { PLoTClientRunOpts } from "../plot-client.js";
 import type { ChatWithToolsResult, ChatWithToolsArgs, ChatWithToolsStreamEvent, CallOpts } from "../../adapters/llm/types.js";
 import type { GuidanceItem } from "../types/guidance-item.js";
@@ -352,8 +350,6 @@ export interface EnrichedContext {
   selected_edge_ids?: string[];                // from selected_elements (edge IDs)
   context_hash?: string;                       // from computeContextHash
   analysis_inputs?: AnalysisInputs | null;     // passed through from request for run_analysis tool
-  /** Decision continuity summary — populated by Phase 1 after compaction. */
-  decision_continuity?: DecisionContinuity;
   /** Entity-aware detail blocks — populated by Phase 1 when message references graph entities. */
   referenced_entities?: ReferencedEntityDetail[];
   /** Zone 2 blocks that activated but rendered empty — populated by Phase 3 prompt assembly. */
@@ -420,12 +416,9 @@ export interface SpecialistResult {
 
 export interface LLMResult {
   assistant_text: string | null;
-  tool_invocations: ToolInvocation[];
   science_annotations: ScienceAnnotation[];
   raw_response: string;
   suggested_actions: SuggestedAction[];
-  /** AI-authored blocks extracted from XML <blocks> (commentary, review_card, artefact). */
-  extracted_blocks: ExtractedBlock[];
   diagnostics: string | null;
   parse_warnings: string[];
   route_metadata?: RouteMetadata;
@@ -698,8 +691,6 @@ export type {
   OrchestratorError,
   TurnPlan,
   GraphV3T,
-  ToolInvocation,
-  ParsedLLMResponse,
   PLoTClientRunOpts,
   FastifyRequest,
   ChatWithToolsResult,
@@ -709,5 +700,4 @@ export type {
   GraphV3Compact,
   AnalysisResponseSummary,
   GuidanceItem,
-  DecisionContinuity,
 };

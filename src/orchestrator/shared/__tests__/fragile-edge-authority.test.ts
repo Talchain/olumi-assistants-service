@@ -79,7 +79,6 @@ describe('fragile-edge authority', () => {
     const consumers = [
       '../../../orchestrator-v5/coaching/grounded-counter-case.ts',
       '../../../orchestrator-v5/coaching/select-fragile-edge.ts',
-      '../../deterministic/coaching-context-builder.ts',
       '../../../orchestrator-v5/tools/handlers/explain-results.ts',
       '../../../orchestrator-v5/coaching/analysis-result-headline.ts',
     ] as const;
@@ -121,7 +120,6 @@ describe('fragile-edge authority', () => {
       '../fragile-edge-authority.ts',
       '../../../orchestrator-v5/coaching/grounded-counter-case.ts',
       '../../../orchestrator-v5/coaching/select-fragile-edge.ts',
-      '../../deterministic/coaching-context-builder.ts',
       '../../../orchestrator-v5/tools/handlers/explain-results.ts',
       '../../../orchestrator-v5/coaching/analysis-result-headline.ts',
     ] as const;

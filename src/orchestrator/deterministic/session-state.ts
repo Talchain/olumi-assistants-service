@@ -5,8 +5,6 @@
  * lives in the turn request payload, passed from UI. The UI stores the
  * updated_session_state from the response envelope and echoes it back on
  * the next turn request.
- *
- * Feature flag: CEE_COACHING_CONTEXT_ENABLED (shared with WS1/WS8)
  */
 
 import type { ActionName } from "./actions/types.js";
