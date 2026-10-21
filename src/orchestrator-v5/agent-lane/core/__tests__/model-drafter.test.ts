@@ -34,6 +34,9 @@ describe('the construction role (21 Oct): one bounded call whose strict output i
       'its value stays null: the analysis asks the person for it', 'never relabel it as Olumi’s to hold an estimate'.replace('’', "'")])
       expect(DRAFTER_INSTRUCTIONS, rule).toContain(rule);
     expect(DRAFTER_INSTRUCTIONS).not.toContain('your reply');
+    // Codex BLOCK on #3574: a product's parts keep their own units (customers × £ per customer per month), only a sum's share one.
+    expect(DRAFTER_INSTRUCTIONS).toContain("In a sum, each part is in the defined quantity's unit; in a product, each part keeps its own unit and the units compose");
+    expect(DRAFTER_INSTRUCTIONS).not.toContain("Every part needs its level today in the defined quantity's unit.");
     expect(DRAFTER_INSTRUCTIONS).not.toContain('give a defensible starting level only as Olumi');
   });
 
