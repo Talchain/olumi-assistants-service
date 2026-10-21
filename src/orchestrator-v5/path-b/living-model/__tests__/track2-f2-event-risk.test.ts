@@ -51,15 +51,21 @@ async function requestTheRunSends(name: string, model: LivingModelT): Promise<Re
 /**
  * A negative row, checked at both ends (codex integration review, 21 Oct, item 3: the old helper accepted any error and so
  * never reached the threshold). At the source, the mapper's goal carries no threshold, whatever the Run then does. At
- * the Run, the refusal is exactly the readiness code named, never any error; a Run that is sent instead fails the row.
+ * the Run, the outcome is exactly the one named: refused with that readiness code (never any error), or sent with no
+ * threshold in the payload.
  */
-async function noChanceSent(name: string, model: LivingModelT, readiness: 'NO_PATH_TO_GOAL' | 'ORPHAN_NODE'): Promise<void> {
+async function noChanceSent(name: string, model: LivingModelT, run: 'NO_PATH_TO_GOAL' | 'ORPHAN_NODE' | 'sent'): Promise<void> {
   expect(LivingModel.safeParse(model).success, `${name} is a valid living model`).toBe(true);
   const goal = (mapLivingModel(model).graph.nodes as Rec[]).find((n) => n.kind === 'goal')!;
   expect(goal, name).not.toHaveProperty('goal_threshold_raw');
   expect(goal, name).not.toHaveProperty('goal_threshold');
-  const sent = await requestTheRunSends(name, model).then(() => undefined, (e: Error) => e.message);
-  expect(sent, name).toBe(`Persisted graph is not analysis-ready: ${readiness}`);
+  const sent = await requestTheRunSends(name, model).then((r) => r, (e: Error) => e.message);
+  if (run !== 'sent') expect(sent, name).toBe(`Persisted graph is not analysis-ready: ${run}`);
+  else if (typeof sent === 'string') expect.fail(`${name}: expected the Run to reach PLoT, got "${sent}"`);
+  else {
+    expect(node(sent, sent.goal_node_id), name).not.toHaveProperty('goal_threshold_raw');
+    expect(node(sent, sent.goal_node_id), name).not.toHaveProperty('goal_threshold');
+  }
 }
 
 /** The brief, as the person wrote it: every quote the supplier fixture attributes to them. */
@@ -105,7 +111,7 @@ describe('Track 2 F2: an event risk reaches the engine as event_risk.v1, with it
 
   it('exact statements: written for the chain (the DL\'s 0.900 / 0.970 row); today\'s rule withholds an exact drawn link', async () => {
     expect(reasons(supplier('exact'))).toEqual(expect.arrayContaining(['fails_gp:exact_not_drawable', 'cost_gp:exact_not_drawable']));
-    await requestTheRunSends('exact', supplier('exact')).catch(() => undefined);
+    await noChanceSent('exact', supplier('exact'), 'sent');
   });
 
   it('certain within its window (p = 1) is an event ISL evaluates: sent as stated, never refused', async () => {
