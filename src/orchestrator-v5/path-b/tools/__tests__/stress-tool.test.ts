@@ -232,6 +232,44 @@ describe('stress_test on a G2-shaped living model', () => {
   });
 });
 
+/** The served core shape (R2, 21 Oct): every effect is an option's own exact link to the goal, which the mapper sends as that
+ *  option's setting on the exact sum's `<goal>__change`, not as an edge. SYNTHETIC wording. */
+const SUM: LivingModelT = {
+  aims: [{ id: 'w', text: 'Widgets per week', status: 'current', ...user,
+    target: { quantity: 'widgets', comparator: '>=', value: 100, low: null, high: null, unit: 'widgets', by_when: null, baseline: 'today', current: 80, current_source: null, current_unit: null, change_kind: null } }],
+  options: [{ id: 'X', label: 'Second shift', ...user, settings: [] }, { id: 'Y', label: 'Faster jig', ...user, settings: [] }],
+  factors: [],
+  links: [
+    { id: 'x_w', from: 'X', to: 'w', ...user, effect: { form: 'exact', value: 25, sd: null, low: null, high: null, unit: 'widgets', sign: '+' } },
+    { id: 'y_w', from: 'Y', to: 'w', ...user, effect: { form: 'exact', value: 15, sd: null, low: null, high: null, unit: 'widgets', sign: '+' } },
+  ],
+  conditions: [], views: [], history: [],
+};
+/** Independent read of the mapped wire: today + each option's raw setting on the exact sum's change part; exact (sd 0). */
+const sumDouble = () => vi.fn(async (v: RunArgs): Promise<StressVariantRows> => {
+  const m = v.variantGraph.living_model as LivingModelT;
+  const nodes = v.variantGraph.nodes as Rec[];
+  const rows = new Map(m.options.map((o) => {
+    const set = (nodes.find((n) => n.id === o.id)?.interventions ?? {}) as Record<string, { raw_value?: number }>;
+    const change = Object.entries(set).filter(([k]) => k.endsWith('__change')).reduce((a, [, x]) => a + (x.raw_value ?? 0), 0);
+    return [o.id, { goal: null, mean: m.aims[0]!.target!.current! + change, sd: 0, n: 2000 } satisfies StressRow];
+  }));
+  return { kind: 'rows', targetLicensed: true, rows };
+});
+
+describe('stress_test on the served exact-sum shape (an option\'s own link to the goal)', () => {
+  it('the tested value reaches the Run as the option\'s setting and is compared exactly: a tie at the target clears it', async () => {
+    const run = sumDouble();
+    const out = await stressTest({ dispatch: product(SUM).dispatch, runStressVariant: run }, ctx,
+      { reason: 'what if the second shift adds less?', stresses: [{ item_id: 'x_w', values: [10, 20], values_source: 'user' }], alternative: null });
+    expect(out.status).toBe('ok');
+    const d = dataOf(out);
+    expect(run).toHaveBeenCalledTimes(3);
+    expect(d.options.X).toMatchObject({ average_clears: 2, average_short: 1, too_close_to_call: 0, worst_tested_average: 90 });
+    expect(d.options.Y).toMatchObject({ average_clears: 0, average_short: 3, worst_tested_average: 95 });
+  });
+});
+
 describe('planStress refuses what it cannot test as asked', () => {
   it('an unknown item, an unsized link, too many combinations, an alternative from an option, a duplicated alternative', () => {
     expect(planStress(G2, { ...ARGS, stresses: [{ item_id: 'nope', values: [1], values_source: 'user' }] })).toMatchObject({ refusal: 'stress_item_unknown' });
