@@ -29,6 +29,8 @@ const UNKNOWN_RUN_FIGURES = 'This earlier Run may be out of date. Run the analys
 const OPTION_CHANCE_WITHHELD = 'Olumi can’t yet say its chance of meeting your goal, in this model.';
 
 const OPTION_CHANCE_NOT_SHOWN = 'Chance not shown yet';
+/** F1 (Paul, 21 Oct): a result worked out exactly from the person's own figures is a finding, never "not shown". */
+const EXACT_FIGURES_FACE = 'Worked out from your exact figures';
 /** Recovery Batch C, amendment 1: the status quo row's face — no figure, no interval. */
 const STATUS_QUO_FACE = 'No change, by assumption';
 /** C1: with no goal target, no option can have a chance of meeting it. */
@@ -229,7 +231,8 @@ export function projectCanonicalAnalysisCells(
     const cell: CanonicalAnalysisCell = range !== undefined ? { kind: 'range', display: range.range, detail: range, ...(face === undefined ? {} : { face }) }
       : display !== undefined ? { kind: 'figure', display, ...(face === undefined ? {} : { face }) }
         : reasons.length > 0 ? { kind: 'withheld', reasons,
-          face: targetMissing !== undefined ? GOAL_TARGET_MISSING_FACE : horizonReason !== undefined ? ZERO_SPREAD_NEEDS_MONTHLY_CHANGES : byAssumption !== undefined ? STATUS_QUO_FACE : OPTION_CHANCE_NOT_SHOWN,
+          face: targetMissing !== undefined ? GOAL_TARGET_MISSING_FACE : horizonReason !== undefined ? ZERO_SPREAD_NEEDS_MONTHLY_CHANGES : byAssumption !== undefined ? STATUS_QUO_FACE
+            : withheldWhy === reasonLine && licence?.withheld_reason_by_option?.[option_id]?.basis === 'exact_own_figures' ? EXACT_FIGURES_FACE : OPTION_CHANCE_NOT_SHOWN,
           why: withheldWhy } : { kind: 'none' };
     return { option_id, cell };
   });

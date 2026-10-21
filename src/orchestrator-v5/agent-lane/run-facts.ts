@@ -104,10 +104,11 @@ export interface RunFacts {
   /**
    * ⭐ S7 B2 (capacity e2e c1e944a4 judge item 3): each option whose chance is not shown because its result has no spread, typed:
    * `fixed_baseline` where it is the status quo holding every factor at today's value (nothing in it varies), else
+   * `exact_own_figures` where it is the person's own exact arithmetic (F1: a finding, never a measurement problem), else
    * `measured_spread` (only the recorded spread is known). The licence's own line says it; the AI never words it as a
    * measurement problem on a fixed option. Absent when no option is withheld for zero spread.
    */
-  readonly zero_spread?: readonly { readonly option_id: string; readonly basis: 'fixed_baseline' | 'measured_spread' }[];
+  readonly zero_spread?: readonly { readonly option_id: string; readonly basis: 'fixed_baseline' | 'exact_own_figures' | 'measured_spread' }[];
   readonly sensitivity: { readonly measured: boolean; readonly most_sensitive?: string };
   /** How many of THIS Run's inputs on the goal's paths are Olumi's estimates. */
   readonly olumi_inputs?: { readonly links: number; readonly values: number; readonly settings_by_option: Readonly<Record<string, number>> };
@@ -159,7 +160,7 @@ export function runFactsOf(analysisResult: unknown, graph: unknown, current: boo
         ...(typeof detail?.reason === 'string' ? { reason: detail.reason } : {}), ...(claims.length > 0 ? { withheld_claims: claims } : {}) };
     }) : [];
   const zeroSpread = Object.entries(licence?.withheld_reason_by_option ?? {}).flatMap(([option_id, r]) => r.reason !== 'zero_spread' ? []
-    : [{ option_id, basis: r.basis === 'fixed_baseline' ? 'fixed_baseline' as const : 'measured_spread' as const }]);
+    : [{ option_id, basis: r.basis ?? 'measured_spread' as const }]);
   const enrichment = isRec(analysisResult) ? analysisResult.enrichment : undefined;
   const s = current ? decisionSensitivityOf(enrichment) : { status: 'not_measured' as const };
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];

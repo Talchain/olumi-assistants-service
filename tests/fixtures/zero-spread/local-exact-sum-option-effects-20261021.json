@@ -1,5 +1,5 @@
 {
- "_meta": "Track 3 F1, 21 Oct 2026: OPTION_EFFECTS (path-b/living-model/__tests__/fixtures.ts) mapped by the core mapper and stored as a first core save stores it, then the REAL snapshot loader and run_analysis handler against a local PLoT b60fe4fb4ae5422dd9da21891b7f9ff5a0e5065e -> ISL 8d862f5a752c2c3259721d8e102455e7fa22294c (0 AI calls). CEE wip/track3-f1-exact-side on f51249ba. graph = the stored graph; analysis_result = the Run fact's result as stored.",
+ "_meta": "Track 3 F1 v2, 21 Oct 2026: OPTION_EFFECTS (path-b/living-model/__tests__/fixtures.ts) mapped by the core mapper and stored as a first core save stores it, then the REAL snapshot loader and run_analysis handler against a local PLoT b60fe4fb4ae5422dd9da21891b7f9ff5a0e5065e -> ISL 8d862f5a752c2c3259721d8e102455e7fa22294c (0 AI calls), CEE wip/track3-f1-exact-side (F1 v2). graph = the stored graph; analysis_result = the Run fact's result as stored.",
  "graph": {
   "nodes": [
    {
@@ -341,7 +341,7 @@
    "isl_analysis_status": "computed",
    "critiques": [
     {
-     "id": "cd962375-a0d1-46aa-9bbc-883946ce31a7",
+     "id": "35f08b64-1871-4931-bf9c-08554e0f2682",
      "code": "NORMALIZATION_WARNING",
      "severity": "info",
      "message": "Node 'a' has kind='option'. Option nodes are filtered before analysis.",
@@ -350,7 +350,7 @@
      "user_message": "An option was excluded from factor analysis. This is expected."
     },
     {
-     "id": "7b8c4fa0-4448-49ed-a243-5ee0c7922493",
+     "id": "7509c5a1-ffc6-4207-96cf-876a66ed2a6f",
      "code": "NORMALIZATION_WARNING",
      "severity": "info",
      "message": "Node 'b' has kind='option'. Option nodes are filtered before analysis.",
@@ -706,13 +706,13 @@
       "a": {
        "reason": "zero_spread",
        "side": "meets",
-       "line": "With your exact figures, the model’s result for ‘Option A’ is at or above the target. It can’t say how likely that is: add a range to the figures you’re least sure of.",
+       "line": "With your figures, ‘Option A’ reaches 70 widgets per hour, 10 above your target of 60. It still gets there as long as it adds at least 20; you said it adds 30. How sure are you of the 30?",
        "basis": "exact_own_figures"
       },
       "b": {
        "reason": "zero_spread",
        "side": "falls_short",
-       "line": "With your exact figures, the model’s result for ‘Option B’ is below the target. It can’t say how likely that is: add a range to the figures you’re least sure of.",
+       "line": "With your figures, ‘Option B’ reaches 59.9 widgets per hour, 0.1 below your target of 60. It would get there if it adds at least 20; you said it adds 19.9. How sure are you of the 19.9?",
        "basis": "exact_own_figures"
       }
      },
@@ -930,7 +930,7 @@
      "TOP_DRIVER_UNMEASURED"
     ],
     "coaching_version": "1.2.0",
-    "computed_at": "2026-10-21T08:47:03.664Z"
+    "computed_at": "2026-10-21T09:10:22.351Z"
    },
    "confidence_tier": "needs_work",
    "flip_thresholds": [
@@ -998,18 +998,18 @@
    "ceeTrace": {
     "requestId": "turn-ka2",
     "degraded": false,
-    "timestamp": "2026-10-21T08:47:03.663Z",
+    "timestamp": "2026-10-21T09:10:22.350Z",
     "source": "orchestrator",
     "reason": "CEE feature disabled"
    },
-   "processing_time_ms": 3281.6624169999996,
+   "processing_time_ms": 3691.3696670001373,
    "response_hash": "a60974553b9e9de6",
    "decision_brief": {
     "brief_id": "c1d6b6fc-6bc0-4456-8413-2b3c79413444",
     "version": "1",
     "graph_hash": "a60974553b9e9de6",
     "seed": 995549085,
-    "created_at": "2026-10-21T08:47:03.665Z",
+    "created_at": "2026-10-21T09:10:22.352Z",
     "headline": "Option A currently leads by 100 points on the current model. The decision framing should be reconsidered before proceeding. Reconsider the decision framing and alternatives.",
     "options": [
      {
@@ -1174,7 +1174,7 @@
       ]
      },
      "isl_response_digest": {
-      "sha256": "f3c2675250752afa3048b36fe85b524bf91ccecbaeb3e300190672e80fc0f750",
+      "sha256": "f000d67280f395a07adef6f776db2df2bfdf6ccf478339f803023c9f21a0d056",
       "bytes": 8247,
       "key_manifest": [
        "analysis_status",
@@ -1266,9 +1266,9 @@
       "service": "isl",
       "endpoint": "/api/v1/robustness/analyze/v2",
       "status": 200,
-      "elapsed_ms": 3269,
+      "elapsed_ms": 3640,
       "payload_hash": "ed3fcae8d4d2",
-      "response_hash": "9d153dee2141",
+      "response_hash": "7faf9c6e2dcb",
       "request_id": "turn-ka2",
       "request_payload": {
        "request_id": "sha8:7d5939fa",
@@ -1409,7 +1409,7 @@
        "endpoint_version": "sha8:1ca658de",
        "sha8:c37c43e6": "sha8:099c018a",
        "build": "dev",
-       "timestamp": "sha8:4a5c837b",
+       "timestamp": "sha8:c391e7ea",
        "analysis_status": "sha8:30ac692c",
        "robustness_status": "sha8:30ac692c",
        "sha8:1bc647f6": "sha8:30ac692c",
@@ -1769,7 +1769,7 @@
         "sha8:52be438a": []
        },
        "request_id": "sha8:7d5939fa",
-       "processing_time_ms": "sha8:5c449e71",
+       "processing_time_ms": "sha8:fef3a2f1",
        "seed_used": "sha8:b67fddac",
        "seed_source": "sha8:782a2997"
       },
@@ -1793,7 +1793,7 @@
        ]
       },
       "response_digest": {
-       "sha256": "f3c2675250752afa3048b36fe85b524bf91ccecbaeb3e300190672e80fc0f750",
+       "sha256": "f000d67280f395a07adef6f776db2df2bfdf6ccf478339f803023c9f21a0d056",
        "bytes": 8247,
        "key_manifest": [
         "analysis_status",
@@ -1836,13 +1836,13 @@
     "seed_source": "server_generated",
     "n_samples": 10000,
     "detail_level": "standard",
-    "latency_ms": 3281.6624169999996,
-    "normalization_ms": 3.144292000004498,
-    "validation_ms": 0.5528750000012224,
-    "isl_ms": 3272.406332999999,
+    "latency_ms": 3691.3696670001373,
+    "normalization_ms": 2.3298750000540167,
+    "validation_ms": 0.40712499991059303,
+    "isl_ms": 3643.7341660000384,
     "cee_ms": 0,
     "build": "b60fe4f",
-    "computed_at": "2026-10-21T08:47:03.647069Z",
+    "computed_at": "2026-10-21T09:10:22.334615Z",
     "request_id_chain": {
      "ui": "turn-ka2",
      "plot": "turn-ka2",
@@ -1939,7 +1939,7 @@
    }
   },
   "graph_hash_at_run": "4aed3664237b5ac2",
-  "computed_at": "2026-10-21T08:47:00.322Z",
+  "computed_at": "2026-10-21T09:10:18.634Z",
   "constraint_verdict": {
    "may_name_leading_option": true,
    "constraint_verdict_state": "not_applicable"

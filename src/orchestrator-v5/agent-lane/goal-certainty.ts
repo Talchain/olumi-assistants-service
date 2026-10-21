@@ -263,9 +263,9 @@ function linkExactness(graph: Rec, nodes: Rec[], edges: Rec[], identityEvaluatio
 }
 
 /**
- * ⭐ F1 (Track 3, DL lease 21 Oct): is a zero-spread result for this option the person's own exact arithmetic? Only then may
- * its side be said ("With your exact figures, …"); otherwise #3017's line stays. Earned when everything the goal's result
- * rests on is exact and the person's own:
+ * ⭐ F1 (Track 3, DL lease 21 Oct): is a zero-spread result for this option the person's own exact arithmetic? Only then is it
+ * said as a finding (`exactFinding`); otherwise #3017's line stays. Earned when everything the goal's result rests on is
+ * exact and the person's own:
  *   · every link into the goal's ancestry (through factors, outcomes and risks) passes the walk's own test (`exact`) and,
  *     unless it is an operand's link into an identity THIS run evaluated, is sized by the person or is Olumi's size they
  *     approved;
@@ -330,6 +330,19 @@ function breakEvenOf(
   const today = levelOf(goal).raw;
   const threshold = num(goal.goal_threshold_raw);
   if (today === undefined || threshold === undefined) return undefined;
+  const projected = projectedIfHeld(op, today, operands, byId, iv);
+  if (projected === undefined) return undefined;
+  if (op === 'sum') return { kind: 'sum', projected_if_held: projected, threshold, margin: Math.abs(projected - threshold), operand_id: through };
+  if (projected === 0) return undefined;
+  const fraction = Math.abs(threshold / projected - 1);
+  const operand = levelOf(byId.get(through));
+  const count = operand.raw !== undefined && userOwns(operand.observed) ? Math.round(fraction * operand.raw) : undefined;
+  return { kind: 'product', projected_if_held: projected, threshold, fraction, operand_id: through, ...(count !== undefined ? { operand_count: count } : {}) };
+}
+
+/** The goal's level with every part the option does not set held: today, moved by each part it sets (ISL's sum or product). */
+function projectedIfHeld(op: 'sum' | 'product', today: number, operands: ReadonlySet<string>, byId: ReadonlyMap<unknown, Rec>,
+  iv: Record<string, unknown>): number | undefined {
   let projected = today;
   for (const id of operands) {
     if (!(id in iv)) continue;
@@ -338,12 +351,34 @@ function breakEvenOf(
     if (was === undefined || now === undefined || (op === 'product' && was === 0)) return undefined;
     projected = op === 'product' ? projected * (now / was) : projected + (now - was);
   }
-  if (op === 'sum') return { kind: 'sum', projected_if_held: projected, threshold, margin: Math.abs(projected - threshold), operand_id: through };
-  if (projected === 0) return undefined;
-  const fraction = Math.abs(threshold / projected - 1);
-  const operand = levelOf(byId.get(through));
-  const count = operand.raw !== undefined && userOwns(operand.observed) ? Math.round(fraction * operand.raw) : undefined;
-  return { kind: 'product', projected_if_held: projected, threshold, fraction, operand_id: through, ...(count !== undefined ? { operand_count: count } : {}) };
+  return projected;
+}
+
+/**
+ * ⭐ F1 v2 (Paul, 21 Oct: exact figures are a positive): where `exactnessEarned` holds and the goal is a sum or product THIS
+ * Run evaluated, the level the option reaches (the break-even's own arithmetic) against the target; and, where it sets one
+ * part of a sum, that setting and the value that would put the result exactly on the target. Undefined otherwise. Pure.
+ */
+export function exactFinding(graph: unknown, optionId: string, identityEvaluations?: ReadonlyArray<unknown>):
+  { readonly projected: number; readonly threshold: number; readonly setting?: { readonly value: number; readonly tipping: number } } | undefined {
+  if (!exactnessEarned(graph, optionId, identityEvaluations)) return undefined;
+  const nodes = ((graph as Rec).nodes as unknown[]).filter(isRec);
+  const edges = Array.isArray((graph as Rec).edges) ? ((graph as Rec).edges as unknown[]).filter(isRec) : [];
+  const byId = new Map(nodes.map((n) => [n.id, n] as const));
+  const goal = nodes.find((n) => n.kind === 'goal')!;
+  const identity = isRec(goal.nonlinear_identity) ? goal.nonlinear_identity : undefined;
+  const op = identity?.operation;
+  const today = levelOf(goal).raw;
+  const threshold = num(goal.goal_threshold_raw);
+  if ((op !== 'sum' && op !== 'product') || today === undefined || threshold === undefined
+    || !linkExactness(graph as Rec, nodes, edges, identityEvaluations).evaluated(goal.id)) return undefined;
+  const operands = new Set(Array.isArray(identity!.factor_ids) ? identity!.factor_ids.filter((x): x is string => typeof x === 'string') : []);
+  const iv = mergeInterventionSourceObjects(byId.get(optionId)!);
+  const projected = projectedIfHeld(op, today, operands, byId, iv);
+  if (projected === undefined) return undefined;
+  const set = [...operands].filter((id) => id in iv);
+  const value = op === 'sum' && set.length === 1 ? interventionLevel(iv[set[0]!]).raw : undefined;
+  return { projected, threshold, ...(value !== undefined ? { setting: { value, tipping: value - (projected - threshold) } } : {}) };
 }
 
 /** The sentence when the goal's parents are not exactly its operands: the model cannot follow the option through it. */

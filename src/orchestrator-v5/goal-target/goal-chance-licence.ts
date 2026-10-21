@@ -53,7 +53,7 @@ import { classifyUnitScaleClass, UNIT_SCALE_CLASS_TOKENS } from '../../cee/draft
 import { recordedMeasureOf } from '../statement-door/fields/measure.js';
 import { goalTargetBasisIn, humanEffectsTimingOf, laterTimingWords, timingBasisNote } from '../statement-door/fields/goal-timing.js';
 import { sayGoalChange } from '../agent-lane/limit-frame.js';
-import { exactnessEarned, zeroSpread, sameFrameArithmeticAgreement, PAIRED_REFERENCE_PRECISION } from '../agent-lane/goal-certainty.js';
+import { exactFinding, zeroSpread, sameFrameArithmeticAgreement, PAIRED_REFERENCE_PRECISION, REPORTED_SPREAD_PRECISION } from '../agent-lane/goal-certainty.js';
 import { goalTargetRow, statedGoalTargetOf } from './stated-goal-target.js';
 import { readGoalRecord, type GoalRecord } from './goal-record.js';
 import { goalChanceTargetCause } from './goal-chance-gate.js';
@@ -459,35 +459,47 @@ function fixedBaselineOf(sentRun: unknown, graph: unknown): { readonly id: strin
 }
 
 /**
- * ⭐ F1 (Track 3; DL lease 21 Oct; wording with Paul): the zero-spread line for an option whose result is the person's own exact
- * arithmetic. It says which side of the target the model's result is on, worded by the goal's comparator, and never a chance.
+ * ⭐ F1 (Track 3; Paul 21 Oct: exact figures are a positive, never a refusal): an option whose result is the person's own exact
+ * arithmetic (`exactFinding`). The level it reaches and its margin; where it sets one part of a sum, the value that keeps it
+ * there and theirs; then one question on that figure. Never a chance.
  */
-export const zeroSpreadExactLine = (option: string, where: string): string =>
-  `With your exact figures, the model’s result for ‘${option}’ is ${where} the target. It can’t say how likely that is: add a range to the figures you’re least sure of.`;
+export function zeroSpreadExactLine(option: string, f: NonNullable<ReturnType<typeof exactFinding>>, comparator: '>=' | '<=', unit: string): string {
+  const n = (x: number) => sayFigure(x, '');
+  const margin = f.projected - f.threshold;
+  const where = margin === 0 ? `exactly your target of ${n(f.threshold)}` : `${n(Math.abs(margin))} ${margin > 0 ? 'above' : 'below'} your target of ${n(f.threshold)}`;
+  const finding = `With your figures, ‘${option}’ reaches ${sayFigure(f.projected, unit)}, ${where}.`;
+  if (f.setting === undefined) return finding;
+  const { value, tipping } = f.setting;
+  const higher = comparator === '>=';
+  const keeps = tipping >= 0 ? `adds ${higher ? 'at least' : 'no more than'} ${n(tipping)}` : `removes ${higher ? 'no more than' : 'at least'} ${n(-tipping)}`;
+  const meets = higher ? margin >= 0 : margin <= 0;
+  return `${finding} It ${meets ? 'still gets there as long as' : 'would get there if'} it ${keeps}; you said it ${value >= 0 ? 'adds' : 'removes'} ${n(Math.abs(value))}. `
+    + `How sure are you of the ${n(Math.abs(value))}?`;
+}
 /** That line's shape, for the stored-licence reader (no other line carries the basis). */
-const EXACT_OWN_FIGURES_LINE = /^With your exact figures, the model’s result for ‘[^‘’\r\n]+’ is (?:at or above|at or below|above|below) the target\. It can’t say how likely that is: add a range to the figures you’re least sure of\.$/u;
-/** Where the result sits, by the goal's comparator and the Run's side; none for a comparator it cannot word. */
-const EXACT_SIDE_WORDS: Readonly<Record<string, Readonly<Record<'meets' | 'falls_short', string>>>> = {
-  '>=': { meets: 'at or above', falls_short: 'below' }, '>': { meets: 'above', falls_short: 'at or below' },
-  '<=': { meets: 'at or below', falls_short: 'above' }, '<': { meets: 'below', falls_short: 'at or above' },
-};
+const EXACT_OWN_FIGURES_LINE = /^With your figures, ‘[^‘’\r\n]+’ reaches /u;
 
 /**
- * F1: each zero-spread option whose result `exactnessEarned` finds is the person's own exact arithmetic, on THIS Run's own
- * identity evaluations, with its line. An option without a sayable label, or a goal without a comparator, gets none.
+ * F1: each zero-spread option `exactFinding` finds, bound to THIS Run: its single value is the arithmetic's, and its side the
+ * same. An option without a sayable label, or a goal without a ≥/≤ comparator, gets none (#3017's line stays).
  */
 function exactOwnFiguresLines(
   sides: Readonly<Record<string, 'meets' | 'falls_short'>>, graph: unknown, goal: Rec | undefined, envelope: unknown,
+  recordOf: ReadonlyMap<string, Rec>, unit: string,
 ): Record<string, string> {
-  const words = typeof goal?.goal_direction === 'string' && Object.hasOwn(EXACT_SIDE_WORDS, goal.goal_direction)
-    ? EXACT_SIDE_WORDS[goal.goal_direction] : undefined;
+  const comparator = goal?.goal_direction === '>=' || goal?.goal_direction === '<=' ? goal.goal_direction : undefined;
   const evaluations = isRec(envelope) && Array.isArray(envelope.identity_evaluations) ? envelope.identity_evaluations : undefined;
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const out: Record<string, string> = {};
   for (const [id, side] of Object.entries(sides)) {
     const node = nodes.find((n) => n.id === id && n.kind === 'option');
     const label = typeof node?.label === 'string' && node.label.trim() !== '' && !/[\r\n‘’]/.test(node.label) ? node.label.trim() : undefined;
-    if (words !== undefined && label !== undefined && exactnessEarned(graph, id, evaluations)) out[id] = zeroSpreadExactLine(label, words[side]);
+    const f = comparator === undefined || label === undefined ? undefined : exactFinding(graph, id, evaluations);
+    const p50 = recordOf.get(id)?.outcome;
+    if (f === undefined || !isRec(p50) || !finite(p50.p50)
+      || !sameFrameArithmeticAgreement(p50.p50, f.projected, f.projected, REPORTED_SPREAD_PRECISION)
+      || (side === 'meets') !== (comparator === '>=' ? f.projected >= f.threshold : f.projected <= f.threshold)) continue;
+    out[id] = zeroSpreadExactLine(label!, f, comparator!, unit);
   }
   return out;
 }
@@ -944,7 +956,7 @@ export function goalChanceLicenceOf(
   // reference: withheld with that reason, never relabelled.
   const withheldReasons: Record<string, GoalChanceWithheldReason> = {
     ...(Object.keys(zeroSpreadSide).length > 0 ? zeroSpreadReasons(zeroSpreadSide, horizonGraph, envelope, constraints.sentRun, goalLabel,
-      exactOwnFiguresLines(zeroSpreadSide, graph, goal, envelope)) : {}),
+      exactOwnFiguresLines(zeroSpreadSide, graph, goal, envelope, recordOf, target.unit ?? '')) : {}),
     ...Object.fromEntries(Object.entries(unearnedSide).flatMap(([id, side]) => {
       const line = shareUnearnedCertaintyLine(graph, id, side);
       return line === undefined ? [] : [[id, { reason: 'unearned_certainty' as const, side, line }]];
