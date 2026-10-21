@@ -30,6 +30,23 @@ describe('the model critic is bounded: one call, a short answer, a deadline (#35
     expect(await modelCritic(coreBudget())('{}')).toBeUndefined();
   });
 
+  it('HARD DEADLINE: a reviewer that never answers (retry backoff, a hung stream) releases the draft on time, and is aborted', async () => {
+    let seen: AbortSignal | undefined;
+    sdk.impl = (_agent: unknown, _input: unknown, options: { signal: AbortSignal }) => { seen = options.signal; return new Promise(() => {}); };
+    const started = Date.now();
+    expect(await modelCritic(coreBudget(), undefined, 30)('{}')).toBeUndefined();
+    expect(Date.now() - started, 'released at the deadline, not when the call gives up').toBeLessThan(2_000);
+    expect(seen?.aborted, 'the request is aborted at the deadline').toBe(true);
+  });
+
+  it('the caller\'s cancellation reaches the reviewer\'s request', async () => {
+    let seen: AbortSignal | undefined;
+    sdk.impl = async (_agent: unknown, _input: unknown, options: { signal: AbortSignal }) => { seen = options.signal; return { finalOutput: CRITIQUE }; };
+    const caller = new AbortController(); caller.abort();
+    await modelCritic(coreBudget(), caller.signal)('{}');
+    expect(seen?.aborted).toBe(true);
+  });
+
   it('CONTRAST: an answer that is not a critique is dropped, never passed on', async () => {
     sdk.impl = async () => ({ finalOutput: { missing: 'everything' } });
     expect(await modelCritic(coreBudget())('{}')).toBeUndefined();

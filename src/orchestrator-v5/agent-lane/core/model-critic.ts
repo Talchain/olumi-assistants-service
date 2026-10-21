@@ -40,21 +40,35 @@ export const CRITIC_INSTRUCTIONS = [
 export const CRITIC_DEADLINE_MS = 45_000;
 export const CRITIC_MAX_OUTPUT_TOKENS = 2_000;
 
-/** The critic for one turn: undefined when the call fails or runs out of time, so a draft is never blocked by its reviewer. */
-export function modelCritic(budget: CallBudget, signal?: AbortSignal): (input: string) => Promise<CritiqueT | undefined> {
+/**
+ * The critic for one turn: undefined when the call fails or runs out of time, so a draft is never blocked by its reviewer.
+ * The deadline is HARD (Codex delta on #3567): the answer races the clock, so SDK retry backoff can never hold the draft
+ * past it; the request is then aborted.
+ */
+export function modelCritic(budget: CallBudget, signal?: AbortSignal, deadlineMs = CRITIC_DEADLINE_MS): (input: string) => Promise<CritiqueT | undefined> {
   return async (input) => {
+    const abort = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const clock = new Promise<undefined>((resolve) => { timer = setTimeout(() => { abort.abort(); resolve(undefined); }, deadlineMs); });
     try {
-      const client = ledgeredAgentsClient({ site: 'agent-core.critic', pending: [],
-        detailOf: (body) => ({ model: budget.model, purpose: 'model_critique', ...agentRequestIdentity('agent.critique', body) }) });
-      const critic = new Agent({ name: 'model_critic', instructions: CRITIC_INSTRUCTIONS, outputType: Critique,
-        model: new OpenAIResponsesModel(client, budget.model),
-        modelSettings: { maxTokens: CRITIC_MAX_OUTPUT_TOKENS, reasoning: { effort: 'medium' } } });
-      const deadline = AbortSignal.timeout(CRITIC_DEADLINE_MS);
-      const result = await run(critic, input, { maxTurns: 1, signal: signal === undefined ? deadline : AbortSignal.any([signal, deadline]) });
-      const parsed = Critique.safeParse(result.finalOutput);
-      return parsed.success ? parsed.data : undefined;
-    } catch {
-      return undefined;
+      return await Promise.race([critique(budget, input, signal === undefined ? abort.signal : AbortSignal.any([signal, abort.signal])), clock]);
+    } finally {
+      clearTimeout(timer);
     }
   };
+}
+
+async function critique(budget: CallBudget, input: string, signal: AbortSignal): Promise<CritiqueT | undefined> {
+  try {
+    const client = ledgeredAgentsClient({ site: 'agent-core.critic', pending: [],
+      detailOf: (body) => ({ model: budget.model, purpose: 'model_critique', ...agentRequestIdentity('agent.critique', body) }) });
+    const critic = new Agent({ name: 'model_critic', instructions: CRITIC_INSTRUCTIONS, outputType: Critique,
+      model: new OpenAIResponsesModel(client, budget.model),
+      modelSettings: { maxTokens: CRITIC_MAX_OUTPUT_TOKENS, reasoning: { effort: 'medium' } } });
+    const result = await run(critic, input, { maxTurns: 1, signal });
+    const parsed = Critique.safeParse(result.finalOutput);
+    return parsed.success ? parsed.data : undefined;
+  } catch {
+    return undefined;
+  }
 }
