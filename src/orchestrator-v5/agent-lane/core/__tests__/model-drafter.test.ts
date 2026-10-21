@@ -62,4 +62,16 @@ describe('the construction role (21 Oct): one bounded call whose strict output i
     sdk.impl = async () => ({ finalOutput: { aims: 'everything' } });
     expect(await modelDrafter(coreBudget())('{}')).toBeUndefined();
   });
+
+  it('buddy served BLOCK on #3574: what is left of the turn bounds the call (the smaller clock wins), and nothing left makes no call', async () => {
+    let seen: AbortSignal | undefined;
+    sdk.impl = (_agent: unknown, _input: unknown, options: { signal: AbortSignal }) => { seen = options.signal; return new Promise(() => {}); };
+    const started = Date.now();
+    expect(await modelDrafter(coreBudget())('{}', 30)).toBeUndefined();
+    expect(Date.now() - started, 'aborted at the 30 ms left, not at its own 150 s').toBeLessThan(2_000);
+    expect(seen?.aborted).toBe(true);
+    sdk.calls.length = 0;
+    expect(await modelDrafter(coreBudget())('{}', 0)).toBeUndefined();
+    expect(sdk.calls, 'no time left: no paid call is started').toHaveLength(0);
+  });
 });

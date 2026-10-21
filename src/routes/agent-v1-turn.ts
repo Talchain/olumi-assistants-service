@@ -4543,7 +4543,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const coreScenario = coreSaved !== undefined && (coreSaved.graph == null || livingView !== undefined);
         const core = await runCoreTurn({
           ctx: coreCtx, message, budget: coreBudget(coreEffortArmOf(mode, req.headers['x-olumi-core-effort'])), replyBudget: coreReplyBudget(), userId,
-          tools: (onCall) => pathBTools({ dispatch: capDispatch, proposals, critique: modelCritic(coreBudget()),
+          tools: (onCall) => pathBTools({ dispatch: capDispatch, proposals, critique: modelCritic(coreBudget()), deadlineAt: constructionDeadlineAt,
             ...(drafterArmOf(mode, req.headers['x-olumi-prompt-arm']) ? { draft: modelDrafter(coreBudget()) } : {}),
             proposeLinkStrengths: (c, a) => dispatchTool('propose_link_strengths', JSON.stringify(a), { ...coreCtx, ...c }, capabilities, mode),
             commitOptionLevels: commitOptionLevelsDoor, onModelRegistered: (raw) => emitGraphReady(raw),
