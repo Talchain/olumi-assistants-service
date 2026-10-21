@@ -284,6 +284,17 @@ describe('marketing — the same-draw joint is the headline, each target below (
     expect(l.targets?.joint.status).toBe('licensed');
   });
 
+  it('Lenses #3584: an option left out for having no path to the goal keeps its own reason beside the joint', () => {
+    const g = marketingGraph();
+    const l = goalChanceLicenceOf(marketingRun(), g, 'new_customers', () => false, undefined, g, { storedConstraints: g.goal_constraints,
+      sentConstraints: wireGoalConstraints(g.goal_constraints),
+      excludedOptions: [{ option_id: 'office_move', label: 'Office move', reason: 'no_path_to_goal', goal_label: 'New customers' }] })!;
+    expect(l.pct_by_option).toEqual({ hire_manager: 35, ai_plus_ads: 48 });
+    expect(l.withheld_option_ids).toContain('office_move');
+    expect(l.withheld_reason_by_option?.office_move).toEqual({ reason: 'no_path_to_goal',
+      line: '\'Office move\' was left out of this comparison because nothing links it to \'New customers\'. Say what \'Office move\' changes that affects \'New customers\'.' });
+  });
+
   it('RED: each target separately, with its own chance and label', () => {
     const l = licenceFor(marketingRun())!;
     expect(l.targets!.per_target).toEqual([

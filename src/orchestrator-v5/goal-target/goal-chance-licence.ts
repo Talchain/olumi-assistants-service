@@ -11,6 +11,7 @@ export { deriveRunQuestion, type RunQuestion, type RunQuestionScope, type Select
 export { STATIC_MODEL_SCOPE_NOTE, STATIC_INPUTS_NOT_RECORDED } from './static-run-evidence.js';
 import { runOmittedRisks } from '../agent-lane/unsized-risk.js';
 import { shareGoalChanceWords } from './share-goal-chance-words.js';
+import { pathlessOptionSentence } from '../coaching/scaffold-disclosure.js';
 import { zeroSpreadNoCarrierHorizonLine } from './zero-spread-horizon-line.js';
 export { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from './zero-spread-horizon-line.js';
 /**
@@ -177,7 +178,14 @@ export interface GoalChanceRangeLawUnadopted {
   readonly line: string;
 }
 
-export type GoalChanceWithheldReason = GoalChanceZeroSpread | GoalChanceReferenceMoved | GoalChanceUnearnedCertainty | GoalChanceRangeLawUnadopted;
+/** DL ruling 21 Oct (Lenses #3584): an option nothing links to the goal was left out of this Run; its cell says why and what next. */
+export interface GoalChanceNoPathToGoal {
+  readonly reason: 'no_path_to_goal';
+  readonly line: string;
+}
+
+export type GoalChanceWithheldReason = GoalChanceZeroSpread | GoalChanceReferenceMoved | GoalChanceUnearnedCertainty | GoalChanceRangeLawUnadopted
+  | GoalChanceNoPathToGoal;
 
 export interface GoalChanceLicence {
   readonly code: typeof GOAL_CHANCE_LICENSED;
@@ -286,6 +294,8 @@ export interface GoalChanceLicence {
 
 /** What a Run SENT and STORED for its limits and targets, so the several-targets block names exactly the engine's conditions. */
 export interface GoalChanceConstraintInputs {
+  /** The options the Run's gate left out (`ExcludedOptionRecord`): only a `no_path_to_goal` one is given a cell here. */
+  readonly excludedOptions?: readonly { readonly option_id: string; readonly label: string | null; readonly reason: string; readonly goal_label?: string | null }[];
   /** The handler’s one evaluation, bound to the final request; never persisted or borrowed across requests. */
   readonly evaluatedScope?: RunQuestionScope;
   readonly perLimit?: readonly PerLimitVerdict[];
@@ -820,6 +830,10 @@ export function goalChanceLicenceOf(
     && typeof sqP === 'number' && goalLabel !== undefined;
   if (option_ids.length < 2 || (licensed.length === 0 && Object.keys(zeroSpreadSide).length === 0
     && Object.keys(unearnedSide).length === 0 && Object.keys(rangeLawWithheld).length === 0 && !sqSaid)) return null;
+  // DL ruling 21 Oct (Lenses #3584): an option nothing links to the goal was left out of the comparison, so it has no row; it
+  // still has a cell, withheld with its own reason and next step (and, being withheld, no superlative is said beside it).
+  const pathless = (constraints.excludedOptions ?? []).filter((e) => e.reason === 'no_path_to_goal' && !option_ids.includes(e.option_id));
+  for (const e of pathless) { option_ids.push(e.option_id); withheld.push(e.option_id); }
 
   // Only the superlative and every-option forms need every option (d5 6007421281): any withheld option ⇒ `each`.
   // A status quo withheld by assumption counts as withheld here too, exactly as a change target's always has: no superlative
@@ -910,6 +924,8 @@ export function goalChanceLicenceOf(
     })),
     ...(sqReading === 'moved' && statusQuoId !== undefined && withheld.includes(statusQuoId) && goalLabel !== undefined
       ? { [statusQuoId]: { reason: 'reference_moved' as const, line: statusQuoMovedWords([goalLabel]) } } : {}),
+    ...Object.fromEntries(pathless.map((e) => [e.option_id, { reason: 'no_path_to_goal' as const,
+      line: pathlessOptionSentence(e.label, e.goal_label ?? null, e.option_id) }])),
     ...Object.fromEntries(Object.entries(rangeLawWithheld).map(([id, u]) => [id, { reason: 'range_law_unadopted' as const,
       line: rangeLawWithheldWords(labelOfNode(nodes, u.factor_id) ?? u.factor_id, labelOfNode(nodes, id) ?? id) }])),
   };
@@ -1232,7 +1248,7 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
   const {
     leader_option_id: _leader, next_option_id: _next, similar_option_ids: _similar, spread_note_by_option: _spread,
     shortfall_note_by_option: _shortfall, driver_by_option: _drivers, no_driver_by_option: _noDrivers, sent_threshold: _sent,
-    summary_withheld: _summary, display_rounding_by_option: _rounding, withheld_reason_by_option: _zero, user_link_existence: _exists,
+    summary_withheld: _summary, display_rounding_by_option: _rounding, withheld_reason_by_option: singleReasons, user_link_existence: _exists,
     status_quo: _singleStatusQuo, notes: _singleNotes, resolved_withheld_option_ids: _resolved,
     ...kept
   } = l;
@@ -1297,8 +1313,12 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
         : `${targetLabels.slice(0, -1).join(', ')} and ${targetLabels[targetLabels.length - 1]}`} as unchanged from today. Worth checking: how ${
         targetLabels.length === 1 ? 'it' : 'they'} could change over the goal period if nothing is done.` } }
     : {};
-  const moved = sqId !== undefined && movedNames.length > 0
-    ? { withheld_reason_by_option: { [sqId]: { reason: 'reference_moved' as const, line: statusQuoMovedWords(movedNames) } } } : {};
+  // A pathless option's own reason (Lenses #3584) is not a single-target figure: it is kept beside the joint too.
+  const reasons: Record<string, GoalChanceWithheldReason> = {
+    ...Object.fromEntries(Object.entries(singleReasons ?? {}).filter(([, r]) => r.reason === 'no_path_to_goal')),
+    ...(sqId !== undefined && movedNames.length > 0 ? { [sqId]: { reason: 'reference_moved' as const, line: statusQuoMovedWords(movedNames) } } : {}),
+  };
+  const moved = Object.keys(reasons).length > 0 ? { withheld_reason_by_option: reasons } : {};
   // ⛔ RE-SCOPE 2 (DL ruling on marginals, (B)): each target's OWN chance rests on its own condition's upstream inputs (its
   // own census: three provenance states, each option's own settings) and says so — ONE note per marginal resting on any Olumi
   // estimate, in the points' count words (`olumiEstimateWords`); the options are named only where their counts differ. The
@@ -1812,6 +1832,9 @@ export function goalChanceLicenceForAgent(result: unknown): {
     } else if (reason.reason === 'range_law_unadopted' && reason.side === undefined) {
       // AIE 6184726873: the stored Run's own words for a chance resting on an unadopted equal-tail approximation.
       zeroSpreadReasons[id] = { reason: 'range_law_unadopted', line: reason.line };
+    } else if (reason.reason === 'no_path_to_goal' && reason.side === undefined) {
+      // DL ruling 21 Oct (Lenses #3584): the stored Run's own words for an option it left out, having no path to the goal.
+      zeroSpreadReasons[id] = { reason: 'no_path_to_goal', line: reason.line };
     }
   }
   const sent = isRec(r.sent_threshold) ? r.sent_threshold : undefined;

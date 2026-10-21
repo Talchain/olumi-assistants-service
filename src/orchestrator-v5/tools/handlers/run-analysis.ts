@@ -2755,6 +2755,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // so a several-targets joint names exactly the conditions ISL counted on each draw.
       // G: the persisted brief as this Run read it (absent → null: an unread source is never "no contradiction").
       { storedConstraints: storedGoalRows, sentConstraints: plotPayload.goal_constraints, sentRun, evaluatedScope: evaluated.scope, perLimit: constraintVerdict.perLimit,
+        excludedOptions: gate.excluded,
         brief: snapshot.briefText ?? null, effects_timing: effectsTiming });
     // The stored fact and its readers share the same verdict when the dispatched snapshot was not retained.
     response = withGoalChanceReadback(response, { ...response, run_id: runId, input_snapshot: runInputSnapshot });
