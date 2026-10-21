@@ -964,6 +964,13 @@ export const promptArmOf = (mode: AgentLaneMode, _header?: unknown): 'A' | 'B' =
  * losing path is deleted.
  */
 export const drafterArmOf = (mode: AgentLaneMode, header: unknown): boolean => mode === 'core' && header === 'D';
+/**
+ * The conversation agent's budget on a core turn. On the construction arm's FIRST build (no model yet) it only hands the brief
+ * to Olumi's drafter and narrates the outcome, so it runs on the fast conversation budget WITH its tools; the drafter keeps the
+ * builder's (buddy SIMPLER, served ST1 D 00d6bf37: GRAPH_READY 149 s, then a high-effort reply ran past the 170 s stream).
+ */
+export const coreConversationBudgetOf = (mode: AgentLaneMode, promptArm: unknown, effortHeader: unknown, firstBuild: boolean): CallBudget =>
+  drafterArmOf(mode, promptArm) && firstBuild ? coreReplyBudget() : coreBudget(coreEffortArmOf(mode, effortHeader));
 /** The builder's effort for the configuration comparison (#94): `x-olumi-core-effort` on a core turn, else the banked high. */
 export const coreEffortArmOf = (mode: AgentLaneMode, header: unknown): 'low' | 'medium' | undefined =>
   (mode === 'core' && (header === 'medium' || header === 'low') ? header : undefined);
@@ -4552,7 +4559,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // A scenario with no model yet, or whose meaning is its living model, changes through the living model only.
         const coreScenario = coreSaved !== undefined && (coreSaved.graph == null || livingView !== undefined);
         const core = await runCoreTurn({
-          ctx: coreCtx, message, budget: coreBudget(coreEffortArmOf(mode, req.headers['x-olumi-core-effort'])), replyBudget: coreReplyBudget(), userId,
+          ctx: coreCtx, message, budget: coreConversationBudgetOf(mode, req.headers['x-olumi-prompt-arm'], req.headers['x-olumi-core-effort'],
+            coreSaved !== undefined && coreSaved.graph == null), replyBudget: coreReplyBudget(), userId,
           tools: (onCall) => pathBTools({ dispatch: capDispatch, proposals, critique: modelCritic(coreBudget()), deadlineAt: constructionDeadlineAt,
             ...(drafterArmOf(mode, req.headers['x-olumi-prompt-arm']) ? { draft: modelDrafter(coreBudget()) } : {}),
             proposeLinkStrengths: (c, a) => dispatchTool('propose_link_strengths', JSON.stringify(a), { ...coreCtx, ...c }, capabilities, mode),

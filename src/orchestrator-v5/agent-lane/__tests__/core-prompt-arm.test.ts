@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { CORE_ALIGNED_INSTRUCTIONS, CORE_NEXT_STEP, CORE_REPLY_INSTRUCTION, NOTE_ON_ITEM_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION, instructionsForMode, MODEL_RELATIVE_NAMING_INSTRUCTION,
-  promptArmOf, coreEffortArmOf, drafterArmOf } from '../../../routes/agent-v1-turn.js';
-import { coreBudget } from '../model-budgets.js';
+  promptArmOf, coreEffortArmOf, drafterArmOf, coreConversationBudgetOf } from '../../../routes/agent-v1-turn.js';
+import { coreBudget, coreReplyBudget } from '../model-budgets.js';
 import { OLUMI_PURPOSE_INSTRUCTION } from '../olumi-purpose.js';
 import { HOST_SCIENCE_AND_SOURCE_RULES, HOST_TOOL_CONTRACT } from '../coach-route-v0_2.js';
 import { createHash } from 'node:crypto';
@@ -62,6 +62,15 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(drafterArmOf('core', 'D')).toBe(true);
     for (const header of [undefined, 'B', 'd', ['D']]) expect(drafterArmOf('core', header)).toBe(false);
     expect(drafterArmOf('full', 'D')).toBe(false);
+  });
+
+  it('buddy SIMPLER (served ST1 D 00d6bf37: reply ran past the stream): the construction arm\'s FIRST build runs the conversation on the fast budget; nothing else changes', () => {
+    expect(coreConversationBudgetOf('core', 'D', undefined, true)).toEqual(coreReplyBudget());
+    // CONTRAST: a later D turn (a model exists), the default arm's first build, and an effort arm keep the builder's budget.
+    expect(coreConversationBudgetOf('core', 'D', undefined, false)).toEqual(coreBudget());
+    expect(coreConversationBudgetOf('core', undefined, undefined, true)).toEqual(coreBudget());
+    expect(coreConversationBudgetOf('core', 'B', 'medium', true)).toEqual(coreBudget('medium'));
+    expect(coreReplyBudget()).not.toEqual(coreBudget());
   });
 
   it('arm C ADOPTED (Paul 21 Oct, long replies narrating the tools; R2 100 % at 90 words median): the core reply rule speaks in the user\u2019s terms with a length bound', () => {
