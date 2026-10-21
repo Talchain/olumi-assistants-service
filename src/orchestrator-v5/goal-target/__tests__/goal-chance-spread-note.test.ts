@@ -6,8 +6,6 @@ import {
 } from '../goal-chance-licence.js';
 import { goalChanceScreenLinesForAgent } from '../../agent-lane/goal-chance-screen-lines.js';
 import { analysisResultForAgent } from '../../agent-lane/decision-sensitivity.js';
-import { ContextPackRunDeltaSchema } from '../../context/context-pack-schema.js';
-import { RunDeltaSchema } from '@talchain/schemas/boundary';
 import { applyStatementRecordEdit } from '../cohort-forecast-write.js';
 import { rangeLawAdoption, rangeLawStatementOf } from '../../statement-door/fields/range-law.js';
 
@@ -268,10 +266,6 @@ describe('spread-driven chance note — recorded scoring frame, point licence on
     const malformed = clone(result) as Json;
     malformed.inference_warnings[0].spread_note_by_option[B] = B;
     expect(goalChanceLicenceForAgent(malformed)).not.toHaveProperty('spread_note_by_option');
-  });
-  it('run-delta projection guard: additions to the warning carrier do not alter its permitted key set', () => {
-    const omitted = new Set(['flip_thresholds', 'endpoints', 'input_changes', 'input_coverage', 'win_probabilities_unavailable', 'goal_chances']);
-    expect(Object.keys(ContextPackRunDeltaSchema.shape).sort()).toEqual(Object.keys(RunDeltaSchema.innerType().shape).filter(k => !omitted.has(k)).sort());
   });
 });
 

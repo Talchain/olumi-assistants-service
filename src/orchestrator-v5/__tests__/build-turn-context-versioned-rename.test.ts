@@ -5,8 +5,7 @@ import { config } from '../../config/index.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import { buildTurnContext,type BuildTurnContextOptions } from '../build-turn-context.js';
 import { readRecentMutationHistoryFromPriorFacts } from '../context/reconcile-recent-mutation-facts.js';
-import { projectRecentChanges } from '../context/recent-changes.js';
-import { RecentMutationSchema } from '../context/context-pack-schema.js';
+import { projectRecentChanges, RECENT_CHANGES_SUMMARY_MAX_CHARS } from '../context/recent-changes.js';
 import { computeGraphIdentityHash,computeVersionAnalysisAffectingHashRecord } from '../context/graph-identity.js';
 import type { ModelVersionRecord } from '../model-management/types.js';
 import type { IdentifiedHandlerFact } from '../types/handler-fact.js';
@@ -135,7 +134,9 @@ describe('durable versioned rename -> continuing reasoning', () => {
       summary: 'Renamed a model element; its exact labels are withheld from this summary.',
       target_label: '',
     });
-    expect(RecentMutationSchema.safeParse(pack.recent_changes[0]).success).toBe(true);
+    // Rebound from the deleted RecentMutationSchema: the exact object above pins
+    // the strict key set and action; this keeps the summary length bound.
+    expect(pack.recent_changes[0]!.summary.length).toBeLessThanOrEqual(RECENT_CHANGES_SUMMARY_MAX_CHARS);
     if (!answer.matched) throw new Error('expected admitted effect question');
     expect(answer.assistant_text).not.toContain('Previous label');
     expect(answer.assistant_text).toContain('withheld');

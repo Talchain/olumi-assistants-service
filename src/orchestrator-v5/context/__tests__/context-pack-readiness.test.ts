@@ -13,18 +13,16 @@
  *
  * CANONICAL OWNER: `summariseReadiness` (routing/readiness-summary.ts), which
  * itself delegates to `projectReadinessRecovery`. This suite asserts what
- * `projectContextPackReadiness` emits from it; it never re-derives readiness.
+ * `summariseReadiness` emits; it never re-derives readiness.
  *
  * Deletion 8: the pack-level rows (the assembler carrying the projection, and
- * the assembler omitting the key) went with `context-pack-assembler.ts`. The
- * identity row is rebound to `projectContextPackReadiness` directly.
+ * the assembler omitting the key) went with `context-pack-assembler.ts`.
+ * Deletion 9: `projectContextPackReadiness` was deleted; its own dedupe and cap
+ * rows went with it, and the open-item rows are rebound to `summariseReadiness`.
  */
 import { describe, it, expect } from 'vitest';
 
-import {
-  projectContextPackReadiness,
-  READINESS_MAX_OPEN_ITEMS,
-} from '../../routing/readiness-summary.js';
+import { summariseReadiness } from '../../routing/readiness-summary.js';
 
 /**
  * Canonical `analysis_ready` payload with TWO human-input blockers — the
@@ -50,32 +48,28 @@ const READINESS_TWO_BLOCKERS = {
       option_label: 'Onboarding time',
     },
   ],
-} as unknown as Parameters<typeof projectContextPackReadiness>[0];
+} as unknown as Parameters<typeof summariseReadiness>[0];
 
 describe('ContextPack readiness — the blocker identity reaches the pack', () => {
   it('carries each canonical blocker BY IDENTITY, not merely a count', () => {
-    const readiness = projectContextPackReadiness(READINESS_TWO_BLOCKERS);
+    const { open_items } = summariseReadiness(READINESS_TWO_BLOCKERS);
 
-    // null is projectContextPackReadiness's "no canonical payload" — must not pass here.
-    expect(readiness).not.toBeNull();
-    expect(readiness!.status).toBe('needs_user_input');
     // BY IDENTITY: the option labels, not the prose.
-    expect(readiness!.open_items.map((i) => i.option_label)).toEqual([
+    expect(open_items.map((i) => i.option_label)).toEqual([
       'Churn rate',
       'Onboarding time',
     ]);
-    expect(readiness!.open_items.map((i) => i.kind)).toEqual([
+    expect(open_items.map((i) => i.kind)).toEqual([
       'option_needs_encoding',
       'option_needs_encoding',
     ]);
     // The ROUTE out is carried, not just the fact of being blocked.
-    expect(readiness!.open_items[0].description.length).toBeGreaterThan(0);
+    expect(open_items[0].description.length).toBeGreaterThan(0);
   });
 
-  it('a non-ready status with ZERO open items still carries the status (empty ≠ unblocked)', () => {
+  it('auto-repairable issues project ZERO open items on a non-ready status (empty ≠ unblocked)', () => {
     // Auto-repairable issues are filtered out of `open_items` by the canonical
-    // projection, so an EMPTY list can coexist with a non-ready status. The
-    // pack must carry `status` so a consumer cannot read [] as "may run".
+    // projection, so an EMPTY list can coexist with a non-ready status.
     const autoRepairable = {
       status: 'needs_encoding',
       options: [],
@@ -84,49 +78,9 @@ describe('ContextPack readiness — the blocker identity reaches the pack', () =
         { code: 'X', category: 'other', repairability: 'auto_repairable', message: 'a' },
         { code: 'Y', category: 'other', repairability: 'auto_repairable', message: 'b' },
       ],
-    } as unknown as Parameters<typeof projectContextPackReadiness>[0];
-    const projected = projectContextPackReadiness(autoRepairable)!;
-    expect(projected.open_items).toHaveLength(0);
-    expect(projected.status).toBe('needs_encoding');
-  });
-
-  it('DEDUPES byte-identical items, and does NOT count them as omissions', () => {
-    // The measured live case: 49 items of which 24 were exact duplicates
-    // carrying no identity. A copy loses no fact, so it is removed SILENTLY —
-    // disclosing it as withheld would overstate the loss.
-    const dupes = {
-      status: 'blocked',
-      options: [],
-      readiness_issues: [
-        { code: 'ORPHAN_NODE', category: 'graph_structure', repairability: 'human_input_required', message: 'This change would leave a node with no connections' },
-        { code: 'ORPHAN_NODE', category: 'graph_structure', repairability: 'human_input_required', message: 'This change would leave a node with no connections' },
-        { code: 'NO_GOAL', category: 'graph_structure', repairability: 'human_input_required', message: 'The model would have no goal' },
-      ],
-    } as unknown as Parameters<typeof projectContextPackReadiness>[0];
-    const projected = projectContextPackReadiness(dupes)!;
-    const ids = projected.open_items.map((i) => `${i.kind}|${i.description}|${i.option_label ?? ''}`);
-    expect(new Set(ids).size).toBe(ids.length);
-    expect(projected.open_items).toHaveLength(2);
-    expect(projected.items_omitted).toBeUndefined();
-  });
-
-  it('DISTINCT items beyond the cap are dropped WITH disclosure', () => {
-    const many = {
-      status: 'blocked',
-      options: [],
-      readiness_issues: Array.from({ length: READINESS_MAX_OPEN_ITEMS + 5 }, (_, i) => ({
-        code: 'NO_GOAL',
-        category: 'graph_structure',
-        repairability: 'human_input_required',
-        // DISTINCT text, so dedupe cannot absorb these — the cap must.
-        message: `Distinct open item number ${i}`,
-      })),
-    } as unknown as Parameters<typeof projectContextPackReadiness>[0];
-    const projected = projectContextPackReadiness(many)!;
-    expect(projected.open_items).toHaveLength(READINESS_MAX_OPEN_ITEMS);
-    expect(projected.items_omitted).toBe(5);
-    // Canonical order preserved — first occurrences win, never a reorder.
-    expect(projected.open_items[0].description).toContain('number 0');
+    } as unknown as Parameters<typeof summariseReadiness>[0];
+    expect(autoRepairable.status).toBe('needs_encoding');
+    expect(summariseReadiness(autoRepairable).open_items).toHaveLength(0);
   });
 
   it('exact status "ready" projects no open items', () => {
@@ -135,9 +89,7 @@ describe('ContextPack readiness — the blocker identity reaches the pack', () =
       may_run: true, // R2: this projection consumes an already-admitted payload.
       options: [],
       readiness_issues: [],
-    } as unknown as Parameters<typeof projectContextPackReadiness>[0];
-    const projected = projectContextPackReadiness(ready)!;
-    expect(projected.status).toBe('ready');
-    expect(projected.open_items).toHaveLength(0);
+    } as unknown as Parameters<typeof summariseReadiness>[0];
+    expect(summariseReadiness(ready).open_items).toHaveLength(0);
   });
 });

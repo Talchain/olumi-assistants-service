@@ -21,7 +21,6 @@ import {
   projectFactorValueRecord,
   FACTOR_VALUE_RECORD_CAP,
 } from '../../../../src/orchestrator-v5/context/factor-value-record.js';
-import { ContextPackFactorValuesSchema } from '../../../../src/orchestrator-v5/context/context-pack-schema.js';
 import { factorHasExtractedValue } from '../../../../src/cee/provenance/factor-value-provenance.js';
 import { structureProvenance } from '../../../../src/cee/graph-readiness/obligation-provenance.js';
 import { CONTEXT_POLICY } from '../../../../src/orchestrator-v5/context/context-policy.js';
@@ -169,13 +168,6 @@ describe('factor value-state record', () => {
 
   it('omits the truncation marker when nothing was dropped', () => {
     expect(projectFactorValueRecord(MIXED_GRAPH)!.factors_omitted).toBeUndefined();
-  });
-
-  it('validates against the published ContextPack schema', () => {
-    for (const graph of [MIXED_GRAPH, FULLY_VALUED_GRAPH]) {
-      const parsed = ContextPackFactorValuesSchema.safeParse(projectFactorValueRecord(graph));
-      expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
-    }
   });
 
   /**

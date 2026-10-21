@@ -257,7 +257,7 @@ export interface ContextSectionPolicy {
    */
   readonly serialised_as?: string;
   readonly source: ContextSource;
-  /** How the section is projected (formatAnalysisForContext, projectConversation…). */
+  /** How the section is projected (projectConversation, formatGraphForContext…). */
   readonly projection?: string;
   /**
    * Char budget. DERIVED from an enforcement constant where one exists (import
@@ -413,7 +413,7 @@ const COACH_CONVERSE: ContextPolicy = {
     // and no readiness kind names it, so before this the model had no
     // statement in either direction and answered from the transcript.
     { name: 'goal_target', source: 'graph', projection: 'projectGoalTargetRecord → extractPersistedGoalTarget (single authority, shared with the receipt guard; emitted only for graph_context canonical; key ABSENT for provisional/absent/unavailable — absence means UNKNOWN, never "unset")', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
-    { name: 'readiness', source: 'readiness', projection: 'projectContextPackReadiness → summariseReadiness (canonical analysis_ready projection; key ABSENT when no canonical payload was derived — absence means UNKNOWN, never "unblocked")', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
+    { name: 'readiness', source: 'readiness', projection: 'summariseReadiness (canonical analysis_ready projection; key ABSENT when no canonical payload was derived — absence means UNKNOWN, never "unblocked")', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     // Factor value state — the ONLY section answering "which factors still have
     // no value?". `readiness` cannot: it answers CAN THE ANALYSIS RUN, and on a
     // ready payload it projects nothing at all, which is how the model came to
@@ -423,7 +423,7 @@ const COACH_CONVERSE: ContextPolicy = {
     { name: 'factor_values', source: 'graph', projection: 'projectFactorValueRecord → factorHasExtractedValue (value presence) + structureProvenance → classifyValueSource (authorship); emitted only for graph_context canonical; key ABSENT for provisional/absent/unavailable — absence means UNKNOWN, never "nothing missing"; a fully-valued canonical graph is PRESENT with without_value_count: 0; truncation disclosed via factors_omitted', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     // display_analysis serialises under the `analysis` key; display_graph under `graph`.
     { name: 'analysis_context', source: 'claim_safety', projection: 'fail_closed_unavailable only (absence makes no analysis-existence claim)', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
-    { name: 'display_analysis', serialised_as: 'analysis', source: 'analysis_enrichment', projection: `formatAnalysisForContext (disclosed truncation: ${DISPLAY_ANALYSIS_TRUNCATION_ORDER.join('→')})`, char_budget: DISPLAY_ANALYSIS_CHAR_BUDGET, enforcement: 'enforced', cut_rank: null, model_facing: true },
+    { name: 'display_analysis', serialised_as: 'analysis', source: 'analysis_enrichment', projection: `display-safe analysis projection (its formatter was deleted; declared truncation order: ${DISPLAY_ANALYSIS_TRUNCATION_ORDER.join('→')})`, char_budget: DISPLAY_ANALYSIS_CHAR_BUDGET, enforcement: 'enforced', cut_rank: null, model_facing: true },
     { name: 'graph_context', source: 'graph_authority', projection: 'selectContextGraphSnapshot (canonical|provisional|absent|unavailable; omission fails weak to unavailable)', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true, always_expected: true },
     { name: 'display_graph', serialised_as: 'graph', source: 'graph', projection: 'formatGraphForContext', char_budget: T_ROUTING_DISPLAY_GRAPH, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     { name: 'conversation_summary', source: 'rolling_summary', char_budget: T_ROUTING_CONVERSATION_SUMMARY, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },

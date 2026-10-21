@@ -137,7 +137,8 @@ export const TIER2_ACTIVATION_ENABLED = true;
  *     shipped. Trace + fail-closed rules:
  *     `../context/analysis-signals.ts` → `deriveFlipDisplayLicences`;
  *     float cage + the emitted string:
- *     `../format/format-analysis-for-context.ts` → `formatFlipPointDisplay`.
+ *     `../format/format-analysis-for-context.ts` → `formatFlipPointDisplay`
+ *     (that formatter was deleted, Track 2 deletion 9).
  *   - The two OTHER quantities the un-banding brief proposed did NOT qualify
  *     and stay banded: the sensitivity magnitude (no CEE surface renders it —
  *     compose reads only `factor_sensitivity[].confidence`, banded, and

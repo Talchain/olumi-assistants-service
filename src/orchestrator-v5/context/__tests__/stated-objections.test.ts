@@ -21,7 +21,6 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { describe,expect,it } from 'vitest';
 
 import { isDecisionContentField } from '../../../utils/logger-config.js';
-import { StatedObjectionSchema } from '../context-pack-schema.js';
 import {
 projectStatedObjections,
 STATED_OBJECTIONS_CAP,
@@ -180,10 +179,17 @@ describe('projectStatedObjections', () => {
     expect(projectStatedObjections([])).toEqual([]);
   });
 
-  it('the projection validates against the schema the ContextPack actually uses', () => {
+  it('the projection carries EXACTLY the three non-empty keys, nothing else (provenance is not passed through)', () => {
+    // Rebound from the deleted `StatedObjectionSchema` (strict; three non-empty
+    // strings) to a direct assertion on the live projector's output.
     const out = projectStatedObjections([dissent('strengthen:robustness', SALARY_REASON)]);
     expect(out).toHaveLength(1);
-    expect(StatedObjectionSchema.safeParse(out[0]).success).toBe(true);
+    expect(Object.keys(out[0]!).sort()).toEqual(['analysis_id', 'finding_id', 'statement']);
+    expect(out[0]).toEqual({
+      finding_id: 'strengthen:robustness',
+      analysis_id: 'sha256:run-b',
+      statement: SALARY_REASON,
+    });
   });
 });
 

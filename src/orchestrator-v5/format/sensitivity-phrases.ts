@@ -21,8 +21,8 @@
  *   |v| in [0.7, 0.95) → "strongly ..."
  *   |v| ≥ 0.95         → "very strongly ..."
  *
- * Vocabulary differs from `influencePhrase` by design: that helper
- * composes nouns ("moderate positive influence") for the display-safe
+ * Vocabulary differs from the (now deleted) `influencePhrase` by design: that
+ * helper composed nouns ("moderate positive influence") for the display-safe
  * projection, while this fragment composes adverbs paired with the
  * lead-framing verbs the surrounding prose uses ("moderately
  * strengthens the lead"). The lowest band uses "slightly" rather than

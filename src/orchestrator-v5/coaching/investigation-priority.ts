@@ -35,11 +35,12 @@
  * a guard aimed at the wrong bytes is CLAUDE.md trap 22(b) and it reads green
  * for ever.
  *
- *   · `format-analysis-for-context.ts`'s `value_of_information` section reads
+ *   · `format-analysis-for-context.ts`'s `value_of_information` section read
  *     `enrichment.m1_coaching.evidence_gaps[]` (via
  *     `deriveEvidenceGapsFromEnrichment`). The debug bundle's own shape
  *     validator records `presence.m1_coaching = false` for this run, so that
- *     channel was EMPTY and the pack fell to `VOI_NOT_SCORED_NOTE` — "no
+ *     channel was EMPTY and the pack fell to `VOI_NOT_SCORED_NOTE` (both since
+ *     deleted, Track 2 deletion 9) — "no
  *     value-of-information scores are available for this analysis".
  *     That sentence is FALSE about the analysis: `factor_evppi` and
  *     `decision_evpi` were both present. It is true only about the one channel
@@ -56,6 +57,9 @@
  * missing consumer. It adds no new science and re-derives nothing: it is a
  * projection of the SAME `select-factor-evppi` authority into the one surface
  * that could not see it.
+ * The model-facing notes this module once rendered were deleted with that
+ * formatter (Track 2 deletion 9); the licence itself stays live through
+ * `../context/analysis-fallback.ts`.
  *
  * ── WHY A LICENCE AND NOT A POSTCHECK ──────────────────────────────────────
  * The obvious alternative is a phrase filter over the model's prose. It was
@@ -119,64 +123,6 @@ export type InvestigationPriorityLicence =
     };
 
 /**
- * The prohibition, shared by the three states that cannot name a priority.
- *
- * It names the CONFUSION rather than banning a vocabulary, because banning
- * words leaves the same claim reachable through synonyms — the founder's
- * session said "highest-value check", which no ban on "value of information"
- * would have caught.
- */
-const INFLUENCE_IS_NOT_INFORMATION_VALUE =
-  'Influence is how much a factor moves the result; information value is how much ' +
-  'resolving it would be worth. They are different questions. You may still say which ' +
-  'factors influence the result most — you may not turn that into an investigation ' +
-  'ranking or a highest-value check on the basis of influence alone.';
-
-/**
- * The model-facing notes.
- *
- * There is deliberately NO note for `not_assessed`: see
- * {@link investigationPriorityNote} for why that state adds nothing, and note
- * that a constant defined for an unreachable state is a guard that cannot
- * fire — the shape this estate keeps shipping.
- *
- * No EVPPI magnitude is emitted (the optional evidence action may use counts),
- * and each one states what the science DID, not merely what the product will
- * not say — a bare prohibition leaves the model with an unanswered question and
- * the influence ranking as the only ranking in the pack, which is precisely how
- * the 3 Sep session went wrong.
- */
-export const INVESTIGATION_PRIORITY_BELOW_RESOLUTION_NOTE =
-  'The per-factor EVPPI channel DID estimate information value for the assessed factors; ' +
-  'none of those estimates cleared the resolution of the run. This channel therefore ' +
-  'does not name a priority. This is not a verdict on unassessed factors or other ' +
-  'evidence-gap guidance. ' +
-  INFLUENCE_IS_NOT_INFORMATION_VALUE;
-
-export const INVESTIGATION_PRIORITY_INCOMPLETE_NOTE =
-  'The per-factor EVPPI channel cannot license a current investigable factor: its ' +
-  'ranking, identity, or eligibility is incomplete. Do not promote a surviving entry ' +
-  'or substitute another factor. This does not invalidate separate evidence-gap guidance. ' +
-  INFLUENCE_IS_NOT_INFORMATION_VALUE;
-
-/**
- * The one state that GRANTS the claim. It is narrow on purpose: the producer
- * named exactly one factor, so the product may name exactly that one.
- */
-export function investigationPriorityNamedNote(factorLabel: string, specificAction: string | null = null): string {
-  return (
-    `The per-factor EVPPI estimate ranks "${factorLabel}" first among its assessed factors. ` +
-    'When describing this channel\'s priority, name that factor ' +
-    'and no other — in particular do not substitute whichever factor has the largest ' +
-    'influence on the result, which is a different question.' +
-    // The verdict is never budget-dropped. An optional long action is omitted,
-    // not truncated into different advice, so it cannot exhaust that budget.
-    (specificAction === null || specificAction.length > 512
-      ? '' : ` Suggested evidence action for this factor: ${specificAction}`)
-  );
-}
-
-/**
  * Translate the EVPPI authority's decision into the licence.
  *
  * Every refusal reason is enumerated rather than defaulted, so a new reason
@@ -214,43 +160,6 @@ export function licenceFromEvppiGuidance(
       return { kind: 'incomplete' };
     }
   }
-}
-
-/**
- * The model-facing sentence for a licence, or `null` when there is nothing
- * this module can honestly add.
- *
- * No EVPPI channel adds no EVPPI note. Evidence-gap and factor-sensitivity
- * signals retain their own, independently scoped disclosures.
- */
-export function investigationPriorityNote(
-  licence: InvestigationPriorityLicence,
-): string | null {
-  switch (licence.kind) {
-    case 'named':
-      return investigationPriorityNamedNote(licence.factorLabel, licence.specificAction);
-    case 'below_resolution':
-      return INVESTIGATION_PRIORITY_BELOW_RESOLUTION_NOTE;
-    case 'incomplete':
-      return INVESTIGATION_PRIORITY_INCOMPLETE_NOTE;
-    case 'not_assessed':
-      return null;
-    default: {
-      const exhaustive: never = licence;
-      void exhaustive;
-      return null;
-    }
-  }
-}
-
-/**
- * Has the per-factor EVPPI channel supplied a verdict? Not a statement about
- * every information-value channel in the analysis.
- */
-export function hasFactorEvppiAssessment(
-  licence: InvestigationPriorityLicence | null | undefined,
-): boolean {
-  return licence != null && licence.kind !== 'not_assessed';
 }
 
 /** Retain the producer's first selection or withhold it; never rerank survivors. */
