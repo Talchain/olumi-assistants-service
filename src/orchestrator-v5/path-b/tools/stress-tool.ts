@@ -17,7 +17,9 @@
  *    mapper and computed by `deps.runStressVariant` (the `run_analysis` handler on an in-memory snapshot, discarded:
  *    `handlers/stress-variant-run.ts`). Its rows are the licensed rows the structural challenge reads. The saved model must
  *    remap to exactly the saved graph (every Run input, e.g. a goal's deadline; display refs carried as the register route
- *    carries them), or H0 would not be the saved model: refused.
+ *    carries them), or H0 would not be the saved model: refused. The one tolerance is a named allow-list of attestation and
+ *    display fields that change no number (`ATTESTATION_ONLY`, DL ruling 21 Oct): never a general "additive" rule, which
+ *    would let a meaning change through (a goal threshold today's mapper admits that an older save lacks).
  *  · HONEST LIMITS. At most 16 variants and 60 s, one deadline that aborts a variant in flight; what did not run is
  *    `not_run`, never counted. An average within 4 standard errors of the target, or a target this Run does not license,
  *    is `too_close_to_call`, never counted as clearing. A model changed during the test is `unavailable`, with no rows.
@@ -255,6 +257,29 @@ function variantGraph(v: Variant, saved: unknown, alternativeLinkId: string | nu
 /** A write as the register route stores it: the saved graph's display refs carried (`entity-refs.ts`: identity only). */
 const asStored = (graph: Rec, saved: unknown): Rec => assignEntityRefs(graph, saved).graph;
 
+/**
+ * Attestation and display fields that change no number (DL ruling 21 Oct): a save that differs from today's reading of
+ * its model ONLY in these still runs (e.g. a save from before #3544 labelled the person's settings `extractionType`).
+ * Named paths only; any other added, missing or different field refuses.
+ */
+const ATTESTATION_ONLY = { graph: ['ref_high_water'], node: ['ref'], observedState: ['extractionType'], intervention: ['extractionType'] } as const;
+
+function withoutAttestation(inputs: Rec): Rec {
+  const drop = (o: Rec, keys: readonly string[]): Rec => Object.fromEntries(Object.entries(o).filter(([k]) => !keys.includes(k)));
+  const isRec = (x: unknown): x is Rec => x !== null && typeof x === 'object' && !Array.isArray(x);
+  const out = drop(inputs, ATTESTATION_ONLY.graph);
+  if (!Array.isArray(out.nodes)) return out;
+  return { ...out, nodes: (out.nodes as unknown[]).map((n) => {
+    if (!isRec(n)) return n;
+    const node = drop(n, ATTESTATION_ONLY.node);
+    if (isRec(node.observed_state)) node.observed_state = drop(node.observed_state, ATTESTATION_ONLY.observedState);
+    if (isRec(node.interventions)) {
+      node.interventions = Object.fromEntries(Object.entries(node.interventions).map(([id, x]) => [id, isRec(x) ? drop(x, ATTESTATION_ONLY.intervention) : x]));
+    }
+    return node;
+  }) };
+}
+
 /** Every Run input of a saved graph, the living model aside (it is compared through its own mapping). */
 function runInputs(graph: unknown): Rec {
   const inputs: Rec = { ...(graph as Rec) };
@@ -291,20 +316,21 @@ export async function stressTest(deps: StressDeps, ctx: Pick<AgentToolContext, '
   if ('refusal' in plan) return refused(plan.refusal, undefined, plan.data);
   // Every variant is remapped by today's mapper, so the saved model must remap to what is saved: else H0 is not it.
   const remapped = mapLivingModel(living, savedGoal(saved.graph));
-  if (!isDeepStrictEqual(runInputs(saved.graph), runInputs(asStored(remapped.graph, saved.graph)))) return refused('saved_graph_not_reproducible');
+  const todays = withoutAttestation(runInputs(asStored(remapped.graph, saved.graph)));
+  if (!isDeepStrictEqual(withoutAttestation(runInputs(saved.graph)), todays)) return refused('saved_graph_not_reproducible');
   const goal = goalOf(remapped.graph);
   if (goal === undefined) return refused('no_goal');
   const variants = plan.variants.map((v) => ({ v, ...variantGraph(v, saved.graph, plan.alternativeLinkId) }));
   // Each tested item must REACH the Run, never a silent no-op: the mapper withholds it in no variant, and the variant that
   // changes it alone differs from the saved graph (an option's own link reaches it as that option's setting, e.g. the
   // exact sum's `<goal>__change`; a held link or a placeholder ignores the value). The alternative must be drawn as stated.
-  const savedInputs = runInputs(saved.graph);
+  // Compared with TODAY's reading of the saved model, so an older save's missing labels never pass for a change.
   const alone = (c: Coordinate) => variants.find(({ v }) => v.hypothesis === 'H0'
     && plan.coordinates.every((d) => (d.item_id === c.item_id ? v.setting[d.item_id] !== d.saved : v.setting[d.item_id] === d.saved)));
   const notMapped = [
     ...plan.coordinates.filter((c) => {
       const only = alone(c);
-      return only === undefined || variants.some(({ withheld }) => withheld.has(c.item_id)) || isDeepStrictEqual(runInputs(only.graph), savedInputs);
+      return only === undefined || variants.some(({ withheld }) => withheld.has(c.item_id)) || isDeepStrictEqual(withoutAttestation(runInputs(only.graph)), todays);
     }).map((c) => c.item_id),
     ...(variants.some(({ v, withheld, drawn }) => v.hypothesis === 'H1' && plan.alternativeLinkId !== null
       && (withheld.has(plan.alternativeLinkId) || !drawn.has(plan.alternativeLinkId))) ? ['alternative'] : []),
