@@ -89,7 +89,6 @@ import { pathBTools } from '../orchestrator-v5/path-b/tools/index.js';
 import { APPLY_CHANGE, isChangeProposal } from '../orchestrator-v5/path-b/tools/change-tools.js';
 import { legacyFromRead, livingViewOf } from '../orchestrator-v5/path-b/living-model/view.js';
 import { modelCritic } from '../orchestrator-v5/agent-lane/core/model-critic.js';
-import { modelDrafter } from '../orchestrator-v5/agent-lane/core/model-drafter.js';
 import { parseSelectedElements } from '../orchestrator-v5/boundary/request-extensions.js';
 import { agentSelectionContext, type AgentSelectionContext } from '../orchestrator-v5/agent-lane/selection-context.js';
 import type { AgentLaneMode, AgentToolContext, ToolResult } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
@@ -958,19 +957,6 @@ export const CORE_ALIGNED_INSTRUCTIONS = SELECTED_COACH_V02_TEMPLATE.replace(
  * The header no longer selects anything; every other mode keeps arm A.
  */
 export const promptArmOf = (mode: AgentLaneMode, _header?: unknown): 'A' | 'B' => (mode === 'core' ? 'B' : 'A');
-/**
- * The construction-role arm (buddy AMEND/PROCEED, 21 Oct): `x-olumi-prompt-arm: D` on a core turn drafts through Olumi's
- * construction role (`model-drafter.ts`) instead of the conversation agent. Measured against today's default on Q2 + R2; the
- * losing path is deleted.
- */
-export const drafterArmOf = (mode: AgentLaneMode, header: unknown): boolean => mode === 'core' && header === 'D';
-/**
- * The conversation agent's budget on a core turn. On the construction arm's FIRST build (no model yet) it only hands the brief
- * to Olumi's drafter and narrates the outcome, so it runs on the fast conversation budget WITH its tools; the drafter keeps the
- * builder's (buddy SIMPLER, served ST1 D 00d6bf37: GRAPH_READY 149 s, then a high-effort reply ran past the 170 s stream).
- */
-export const coreConversationBudgetOf = (mode: AgentLaneMode, promptArm: unknown, effortHeader: unknown, firstBuild: boolean): CallBudget =>
-  drafterArmOf(mode, promptArm) && firstBuild ? coreReplyBudget() : coreBudget(coreEffortArmOf(mode, effortHeader));
 /** The builder's effort for the configuration comparison (#94): `x-olumi-core-effort` on a core turn, else the banked high. */
 export const coreEffortArmOf = (mode: AgentLaneMode, header: unknown): 'low' | 'medium' | undefined =>
   (mode === 'core' && (header === 'medium' || header === 'low') ? header : undefined);
@@ -4559,10 +4545,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // A scenario with no model yet, or whose meaning is its living model, changes through the living model only.
         const coreScenario = coreSaved !== undefined && (coreSaved.graph == null || livingView !== undefined);
         const core = await runCoreTurn({
-          ctx: coreCtx, message, budget: coreConversationBudgetOf(mode, req.headers['x-olumi-prompt-arm'], req.headers['x-olumi-core-effort'],
-            coreSaved !== undefined && coreSaved.graph == null), replyBudget: coreReplyBudget(), userId,
+          ctx: coreCtx, message, budget: coreBudget(coreEffortArmOf(mode, req.headers['x-olumi-core-effort'])), replyBudget: coreReplyBudget(), userId,
           tools: (onCall) => pathBTools({ dispatch: capDispatch, proposals, critique: modelCritic(coreBudget()), deadlineAt: constructionDeadlineAt,
-            ...(drafterArmOf(mode, req.headers['x-olumi-prompt-arm']) ? { draft: modelDrafter(coreBudget()) } : {}),
             proposeLinkStrengths: (c, a) => dispatchTool('propose_link_strengths', JSON.stringify(a), { ...coreCtx, ...c }, capabilities, mode),
             commitOptionLevels: commitOptionLevelsDoor, onModelRegistered: (raw) => emitGraphReady(raw),
             runAnalysis: (args) => restoreRun === undefined ? Promise.resolve({ ok: false, mutated: false, ran: false, refusal: 'run_failed' })

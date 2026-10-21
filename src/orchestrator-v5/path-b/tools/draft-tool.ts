@@ -16,13 +16,13 @@ import { z } from 'zod-v4';
 import type { AgentToolContext } from '../../agent-lane/runtime/agent-tools.js';
 import type { InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
 import { constructionOperationId, findConstructionVersion } from '../../agent-lane/runtime/build-model.js';
-import { LivingModel, type LivingModelT } from '../../../schemas/living-model.js';
+import { LivingModel } from '../../../schemas/living-model.js';
 import { applyKernel } from '../living-model/kernel.js';
 import { mapLivingModel } from '../living-model/mapper.js';
 import { hasGaps, structureGaps } from '../living-model/structure.js';
 import type { CritiqueT } from '../../agent-lane/core/model-critic.js';
 import { isNoModelYet, isSavedRead, readSaved } from './context-tool.js';
-import { ok, refused, unavailable, OUTCOME_TRACE, type ToolOutcome } from './outcome.js';
+import { ok, refused, OUTCOME_TRACE, type ToolOutcome } from './outcome.js';
 import { writeCorePostimage } from './core-write.js';
 import { inTheUsersWords, type TypedWords } from './user-words.js';
 
@@ -33,12 +33,7 @@ export const BuildModelParams = z.object({
   /** The complete living model of the brief: every aim, option, factor, link, condition and view, with who said it. */
   model: LivingModel,
 }).strict();
-/** The construction role's arm (`model-drafter.ts`): the conversation agent supplies only the brief; Olumi's drafter writes the model. */
-export const BuildFromBriefParams = z.object({
-  /** The user's brief, copied verbatim from their own messages. */
-  brief: z.string(),
-}).strict();
-export type BuildModelArgs = z.infer<typeof BuildModelParams> | z.infer<typeof BuildFromBriefParams>;
+export type BuildModelArgs = z.infer<typeof BuildModelParams>;
 
 export interface DraftDeps {
   readonly dispatch: InternalDispatch;
@@ -52,14 +47,8 @@ export interface DraftDeps {
    */
   readonly critique?: (input: string, msLeft?: number) => Promise<CritiqueT | undefined>;
   /**
-   * The construction role (`model-drafter.ts`; buddy AMEND/PROCEED 21 Oct). When present, the model is drafted HERE from the
-   * brief, and revised here once after the critic, so the conversation agent never authors a competing draft.
-   */
-  readonly draft?: (input: string, msLeft?: number) => Promise<LivingModelT | undefined>;
-  /**
-   * When the construction must have ended (`constructionDeadline`: the stream budget less the save and the reply). The draft,
-   * the review and the revision each get only what is left of it, so an optional review never takes the save's time and a
-   * revision that cannot finish keeps the first draft (buddy served BLOCK on #3574: 217 s turn, 170 s stream).
+   * When the construction must have ended (`constructionDeadline`: the stream budget less the save and the reply). The review
+   * gets only what is left of it, so it never takes the save's time (buddy served BLOCK on #3574: 217 s turn, 170 s stream).
    */
   readonly deadlineAt?: number;
 }
@@ -72,10 +61,6 @@ export const REVIEW_FIRST = 'Nothing was saved yet: a second reviewer read your 
   + 'judge one, else form unknown with sign null so the person can say which way. Connect other items only where there is a real '
   + 'causal relationship; context may stay unconnected. Never invent a chance, a strength or a target figure to complete the model: ask for it instead. In your reply, '
   + 'say which items are Olumi\'s suggestions, and ask the critique\'s question if it is still open.';
-
-/** What the construction role is told when it revises its own first draft after the critic (the same rules as REVIEW_FIRST). */
-export const REVISE_ONCE = 'Revise your draft once in light of the critique and the structural gaps, and return the complete model. '
-  + REVIEW_FIRST.slice(REVIEW_FIRST.indexOf('Adopt only what helps'), REVIEW_FIRST.indexOf(' In your reply,'));
 
 const nodesIn = (graph: Record<string, unknown>): number => (Array.isArray(graph.nodes) ? graph.nodes.length : 0);
 
@@ -107,28 +92,15 @@ async function constructUnrecorded(deps: DraftDeps, ctx: DraftContext, args: Bui
   }
 
   const words = [args.brief, ...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text === undefined ? [] : [ctx.user_turn_text])];
-  // The construction role reads what the person has said in this conversation too (buddy BLOCK on #3574): verified messages,
-  // oldest first, so a later correction governs. The kernel checks every quote against the same words.
-  const said = words.slice(1);
   const msLeft = (): number | undefined => (deps.deadlineAt === undefined ? undefined : deps.deadlineAt - Date.now());
-  const drafted = 'model' in args ? args.model : await deps.draft?.(JSON.stringify({ brief: args.brief, said }), msLeft());
-  if (drafted === undefined) return unavailable('draft_failed');
-  let kernelled = applyKernel(drafted, words);
-  let mapped = mapLivingModel(kernelled.model);
+  const kernelled = applyKernel(args.model, words);
+  const mapped = mapLivingModel(kernelled.model);
   if (!mapped.graph.nodes.some((n) => n.kind !== 'decision')) return refused('model_empty');
-  let gaps = structureGaps(kernelled.model);
+  const gaps = structureGaps(kernelled.model);
   if (deps.review !== undefined && !deps.review.done) {
     deps.review.done = true;
-    const critique = await deps.critique?.(JSON.stringify({ brief: args.brief, ...('model' in args ? {} : { said }), draft: kernelled.model, gaps }), msLeft());
-    if (critique !== undefined && deps.draft === undefined) return refused('review_first', REVIEW_FIRST, { gaps, critique });
-    // The construction role revises its own draft here, once; a failed revision keeps the first draft.
-    const revised = critique === undefined ? undefined
-      : await deps.draft?.(JSON.stringify({ brief: args.brief, said, draft: kernelled.model, gaps, critique, instruction: REVISE_ONCE }), msLeft());
-    if (revised !== undefined) {
-      const k = applyKernel(revised, words);
-      const m = mapLivingModel(k.model);
-      if (m.graph.nodes.some((n) => n.kind !== 'decision')) { kernelled = k; mapped = m; gaps = structureGaps(k.model); }
-    }
+    const critique = await deps.critique?.(JSON.stringify({ brief: args.brief, draft: kernelled.model, gaps }), msLeft());
+    if (critique !== undefined) return refused('review_first', REVIEW_FIRST, { gaps, critique });
   }
   const graph: Record<string, unknown> = { ...mapped.graph, living_model: kernelled.model };
 
