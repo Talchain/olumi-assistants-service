@@ -81,7 +81,6 @@ describe('fragile-edge authority', () => {
       '../../../orchestrator-v5/coaching/select-fragile-edge.ts',
       '../../deterministic/coaching-context-builder.ts',
       '../../../orchestrator-v5/tools/handlers/explain-results.ts',
-      '../../../orchestrator-v5/routing/post-analysis-advice-gate.ts',
       '../../../orchestrator-v5/coaching/analysis-result-headline.ts',
     ] as const;
 
@@ -96,7 +95,6 @@ describe('fragile-edge authority', () => {
       '../../../orchestrator-v5/coaching/grounded-counter-case.ts',
       '../../../orchestrator-v5/coaching/fragile-edge-offer-text.ts',
       '../../../orchestrator-v5/coaching/validation-priority.ts',
-      '../../../orchestrator-v5/routing/post-analysis-advice-gate.ts',
     ] as const;
     const unsupportedClaims = [
       'the relationship the result leans on most',
@@ -125,7 +123,6 @@ describe('fragile-edge authority', () => {
       '../../../orchestrator-v5/coaching/select-fragile-edge.ts',
       '../../deterministic/coaching-context-builder.ts',
       '../../../orchestrator-v5/tools/handlers/explain-results.ts',
-      '../../../orchestrator-v5/routing/post-analysis-advice-gate.ts',
       '../../../orchestrator-v5/coaching/analysis-result-headline.ts',
     ] as const;
     const semanticAliases = [

@@ -49,7 +49,6 @@ import type { ReadinessOpenItem } from '../routing/readiness-summary.js';
 // Type-only, exactly like `ReadinessOpenItem` above: the gate owns the vocabulary
 // for what it named, this module owns the mapping to a UI surface. A type import
 // cannot create a runtime cycle between routing and compose.
-import type { AdviceGateFlipFocusSection } from '../routing/post-analysis-advice-gate.js';
 import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
 import {
@@ -789,6 +788,12 @@ export function buildGateRemedySectionDirective(
  * row 4's standing false negative survive.
  */
 const GATE_FLIP_FACT_TAG = 'advice_gate_what_would_flip';
+
+/**
+ * The Model-tab sections a flip answer may open: a strict subset of the contract's `UiDirectiveModelSectionId` (moved here
+ * from the retired advice gate, its only other user).
+ */
+export type AdviceGateFlipFocusSection = 'relationships' | 'factors';
 
 /**
  * Open the Model-tab section the deterministic flip answer is ABOUT.
