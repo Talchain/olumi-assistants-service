@@ -83,11 +83,33 @@ describe('a canvas gesture on a core scenario', () => {
 
   // ⭐ Codex r5 on #3522 (A1): a range the canvas sets, and a risk added, renamed or deleted, were refused on core. Each now
   // changes the living model through the same one-write door, in the person's name.
-  it('⭐ a range the person sets is the factor\'s own low and high (a range, not a figure), theirs, written once', async () => {
+  it('⭐ DL ruling 21 Oct: a range around the person\'s own figure keeps it (a central figure with a range); the Run still has its level, and Olumi says the range is not a spread', async () => {
     const out = await send({ kind: 'prior_range_edit', target_id: 'f', range_min: 0.2, range_max: 0.8, distribution: 'uniform', base_graph_hash: BASE });
     expect(out.commitPerformed, JSON.stringify(out.response)).toBe(true);
     expect(append).toHaveBeenCalledTimes(1);
-    expect((written().living_model as typeof KNOWN_ANSWER).factors.find((f) => f.id === 'f')).toMatchObject({ value: null, low: 0.2, high: 0.8, source: 'user', quote: null });
+    const g = written();
+    expect((g.living_model as typeof KNOWN_ANSWER).factors.find((f) => f.id === 'f')).toMatchObject({ value: 0.5, low: 0.2, high: 0.8, source: 'user', quote: null });
+    expect((g.nodes as Rec[]).find((n) => n.id === 'f')!.observed_state).toMatchObject({ raw_value: 0.5 });
+    // Codex probe on #3522: the range used to drop the level, withholding f and with it the status quo's only factor edge.
+    const mapped = mapLivingModel(g.living_model as typeof KNOWN_ANSWER);
+    expect(mapped.withheld.filter((w) => w.id === 'f')).toEqual([]);
+    expect((g.edges as Rec[]).some((e) => e.from === 'hold' && e.to === 'f')).toBe(true);
+    expect(mapped.assumed).toContainEqual({ id: 'f', text: expect.stringMatching(/uses the stated 0\.5 for f\. The stated range, 0\.2 to 0\.8, is kept with the model but is not used as a spread\./) });
+  });
+
+  it('NEGATIVE: a range that leaves the figure out, or one around Olumi\'s estimate, replaces it: held and asked, never kept under the person\'s name', async () => {
+    const out = await send({ kind: 'prior_range_edit', target_id: 'f', range_min: 0.6, range_max: 0.9, base_graph_hash: BASE });
+    expect(out.commitPerformed, JSON.stringify(out.response)).toBe(true);
+    expect((written().living_model as typeof KNOWN_ANSWER).factors.find((f) => f.id === 'f')).toMatchObject({ value: null, low: 0.6, high: 0.9, source: 'user' });
+    expect(mapLivingModel(written().living_model as typeof KNOWN_ANSWER).withheld).toContainEqual({ id: 'f', reason: 'level_range_not_in_slice' });
+    const estimated = structuredClone(KNOWN_ANSWER);
+    Object.assign(estimated.factors[0]!, { source: 'olumi', quote: null });
+    const olumis: Rec = { ...mapLivingModel(estimated).graph, living_model: estimated };
+    loadGraph.mockResolvedValue(olumis);
+    append.mockClear();
+    const around = await send({ kind: 'prior_range_edit', target_id: 'f', range_min: 0.2, range_max: 0.8, base_graph_hash: computeExpectedGraphCasHashes(olumis).expectedGraphAnalysisHash! });
+    expect(around.commitPerformed, JSON.stringify(around.response)).toBe(true);
+    expect((written().living_model as typeof KNOWN_ANSWER).factors.find((f) => f.id === 'f')).toMatchObject({ value: null, low: 0.2, high: 0.8, source: 'user' });
   });
 
   it('NEGATIVE: an inverted range, another distribution, or an item that is not a factor changes nothing', async () => {
