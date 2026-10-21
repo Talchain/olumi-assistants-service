@@ -142,6 +142,18 @@ describe('thin core explicit edit: a canvas gesture applied to the living model,
     }
   });
 
+  it('Codex (core edit): a renamed risk is the person\'s; a risk deleted takes its links and the conditions on them; an id in use anywhere is refused', () => {
+    const m: LivingModelT = { ...supplier('point'), conditions: [{ id: 'c1', text: 'only if the supplier is the only source', applies_to: ['fails_gp'],
+      kind: 'assumption', source: 'olumi', party: null, quote: null } as never] };
+    const renamed = (applyExplicitEdit(m, { kind: 'structural_rename', node_id: 'supplier_fails', label: 'Key supplier stops', expected_label: 'Key supplier fails' }) as { model: LivingModelT }).model;
+    expect(renamed.risks[0]).toMatchObject({ label: 'Key supplier stops', source: 'user', party: null, quote: null });
+    const del = (applyExplicitEdit(m, { kind: 'structural_delete', removed_node_ids: ['supplier_fails'], removed_edges: [] }) as { model: LivingModelT }).model;
+    expect([del.risks, del.links.map((l) => l.id), del.conditions[0]!.applies_to]).toEqual([[], ['cost_gp'], []]);
+    for (const id of ['fails_gp', 'decision_gp', 'dual_source__on']) {
+      expect(applyExplicitEdit(m, { kind: 'structural_add', node_id: id, node_kind: 'risk', label: 'X' }), id).toEqual({ refused: 'id_exists' });
+    }
+  });
+
   it('CONTROL: deleting an item takes the edges drawn to it along, as before', () => {
     const deleted = apply({ kind: 'structural_delete', removed_node_ids: ['f'],
       removed_edges: [{ from: 'push', to: 'f' }, { from: 'hold', to: 'f' }, { from: 'f', to: 'g' }] });

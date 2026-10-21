@@ -142,6 +142,8 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       if (current !== edit.expected_label) return { refused: 'label_moved' };
       if ('text' in item) item.text = edit.label;
       else item.label = edit.label;
+      // The words are now the person's: their act, not their earlier quote (Codex: a renamed item kept Olumi's name and quote).
+      Object.assign(item, theirs);
       return { model: m };
     }
     case 'structural_delete': {
@@ -169,12 +171,17 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       m.risks = m.risks.filter((r) => !gone.has(r.id)).map((r) => ({ ...r, mitigations: r.mitigations.filter((x) => !gone.has(x.factor_id)) }));
       m.options = m.options.filter((o) => !gone.has(o.id)).map((o) => ({ ...o, settings: o.settings.filter((s) => !gone.has(s.factor_id)) }));
       const drawnGone = new Set(edit.removed_edges.flatMap((e) => ownersOf(e.from, e.to)));
-      m.links = m.links.filter((l) => !gone.has(l.from) && !gone.has(l.to) && !pairGone(l) && !drawnGone.has(l));
-      m.conditions = m.conditions.map((c) => ({ ...c, applies_to: c.applies_to.filter((id) => !gone.has(id)) }));
+      const kept = m.links.filter((l) => !gone.has(l.from) && !gone.has(l.to) && !pairGone(l) && !drawnGone.has(l));
+      // A condition on a removed link goes with it, as one on a removed item does (Codex: no dangling reference).
+      const linkGone = new Set(m.links.filter((l) => !kept.includes(l)).map((l) => l.id));
+      m.links = kept;
+      m.conditions = m.conditions.map((c) => ({ ...c, applies_to: c.applies_to.filter((id) => !gone.has(id) && !linkGone.has(id)) }));
       return { model: m };
     }
     case 'structural_add': {
-      if ([...m.aims, ...m.options, ...m.factors, ...m.risks].some((x) => x.id === edit.node_id)) return { refused: 'id_exists' };
+      // Any id already in use: an item, a link, or a node the mapper draws (`decision_…`, a switch) (Codex).
+      if ([...m.aims, ...m.options, ...m.factors, ...m.risks, ...m.links].some((x) => x.id === edit.node_id)
+        || mapped.graph.nodes.some((n) => n.id === edit.node_id)) return { refused: 'id_exists' };
       if (edit.node_kind === 'factor') m.factors.push({ id: edit.node_id, label: edit.label, value: null, ...noRange, unit: null, defined_as: null, ...theirs });
       else if (edit.node_kind === 'option') m.options.push({ id: edit.node_id, label: edit.label, settings: [], developed_from: null, ...theirs });
       // A new risk has no chance yet: never guessed, so it is drawn and the analysis asks for one (mapper: risk_occurrence_unknown).
