@@ -2,7 +2,7 @@
  * Regression corpus for the three defects that landed with #1184.
  *
  * ⭐ WHY THIS FILE EXISTS SEPARATELY FROM THE THREE SUITES IT OVERLAPS.
- * Every label in `structural-pair-evidence.test.ts` (16 cases) and in the
+ * Every label in the (since-deleted) structural-pair evidence suite and in the
  * structural half of `explanation-fallback.test.ts` is a MULTI-WORD,
  * non-generic phrase (`Pilot Scope and Commitment`, `Brand Sentiment`,
  * `Enterprise Integration Investment`, …). The resolver those suites exercise
@@ -34,11 +34,7 @@ import {
   buildStructureProjectionSummary,
   type StructureProjectionSummary,
 } from '../../../context/projection-summaries.js';
-import { buildStructuralPairEvidence } from '../../../routing/structural-pair-evidence.js';
-import {
-  composeExplainFromStructureFallback,
-  composeStructuralPairEvidenceAnswer,
-} from '../explanation-fallback.js';
+import { composeExplainFromStructureFallback } from '../explanation-fallback.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -416,30 +412,7 @@ describe('R2 · naming two factors is not an ambiguous reference', () => {
 // ===========================================================================
 
 describe('R4 · refusal copy promises only what the guard can honour', () => {
-  it('GAP · the two-element refusal does not offer selection', () => {
-    // Driven through the real guard rather than a hand-built literal, on
-    // single-word labels, so the copy is bound to a reachable state.
-    const evidence = buildStructuralPairEvidence(SINGLE_WORD_GRAPH, {
-      messageText: 'How do these two things relate?',
-      structureQuery: { kind: 'direct_relationship', element_ids: ['f1', 'g1'] },
-      graphContextStatus: 'canonical',
-      graphAuthority: 'canonical_strict',
-      graphWasTrimmed: false,
-    });
-    expect(evidence).toEqual({ status: 'ambiguous' });
-
-    const text = composeStructuralPairEvidenceAnswer(evidence!);
-    expect(text).not.toContain('or select');
-    expect(text).toContain('Name the two elements more precisely');
-  });
-
-  it('LIE TWIN · that refusal still refuses', () => {
-    const text = composeStructuralPairEvidenceAnswer({ status: 'ambiguous' });
-    expect(text).toContain('cannot establish two unique Living Model elements');
-    expect(text).not.toMatch(/\bdirect\b.*\bconnector\b/i);
-  });
-
-  it('GAP · the named-factor refusal does not offer selection either', () => {
+  it('GAP · the named-factor refusal does not offer selection', () => {
     const duplicateLabel = graph(
       [
         { id: 'f1', kind: 'factor', label: 'Headcount' },
@@ -476,10 +449,10 @@ describe('R4 · refusal copy promises only what the guard can honour', () => {
   });
 
   it('CONTRAST CONTROL · no user-facing refusal in this module still says "or select"', () => {
-    // Same-sweep contrast: `Name` must still appear (the sentences exist and
-    // still invite the user to act), while `or select` must not.
+    // Same-sweep contrast: `Name` must still appear (the sentence exists and
+    // still invites the user to act), while `or select` must not. The module's
+    // only remaining refusal of this kind is the named-factor one.
     const refusals = [
-      composeStructuralPairEvidenceAnswer({ status: 'ambiguous' }),
       composeExplainFromStructureFallback({
         relationship_detail_status: 'canonical_strict',
         goal_label: null,
@@ -490,7 +463,7 @@ describe('R4 · refusal copy promises only what the guard can honour', () => {
         option_count: 0,
       }),
     ];
-    expect(refusals).toHaveLength(2);
+    expect(refusals).toHaveLength(1);
     for (const text of refusals) {
       expect(text).not.toMatch(/\bor select\b/i);
       expect(text).toMatch(/\bName\b/);

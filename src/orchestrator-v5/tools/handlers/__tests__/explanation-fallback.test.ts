@@ -22,10 +22,8 @@ import type { FlipSummary } from '../../../compose/flip-proposal.js';
 import { NEAR_TIE_PP_THRESHOLD } from '../../../coaching/robustness-honesty.js';
 import {
   composeExplainFromStructureFallback,
-  composeSelectedDependenciesEvidenceAnswer,
   composeExplainResultsFallback,
   composeRobustnessVerdict,
-  composeStructuralPairEvidenceAnswer,
   composeWhatWouldFlipFallback,
 } from '../explanation-fallback.js';
 
@@ -869,37 +867,6 @@ describe('composeExplainFromStructureFallback', () => {
     expect(text).not.toContain('strongest visible direct influence');
   });
 
-  // PR #1229 review guard (4). "Name or select one element and ask again" is
-  // false advice for a user who already has exactly one resolved element
-  // selected — the producer marks that turn, and this copy must never reach it.
-  it('never asks a user with one resolved selected element to name or select one', () => {
-    const forbidden = [
-      'Name or select one element',
-      'Select one element',
-      'select one element',
-    ];
-    const marked = composeSelectedDependenciesEvidenceAnswer({
-      status: 'ambiguous', subject_selection: 'single_resolved',
-    });
-    for (const phrase of forbidden) expect(marked).not.toContain(phrase);
-    expect(marked).not.toMatch(/name or select/i);
-    for (const pattern of FORBIDDEN_INTERNAL) expect(marked).not.toMatch(pattern);
-    expect(marked).not.toMatch(/\b(?:updated|changed|applied|wrote|written)\b/i);
-    expect(marked).not.toMatch(/\bI (?:have )?saved\b/i);
-    expect(marked).toBe(
-      'I could not match your question to a single part of your saved model, so I will not guess at what connects to it. ' +
-      'Check that the one you mean appears only once in the model, and ask again.',
-    );
-    // In-suite CONTRAST: the unmarked verdict — no selection, or a selection
-    // that did not resolve to one element — still carries the instruction, so
-    // the assertions above discriminate rather than testing an empty string.
-    const unmarked = composeSelectedDependenciesEvidenceAnswer({ status: 'ambiguous' });
-    expect(unmarked).toContain(
-      'Name that part exactly as it appears in your model, or select it on the canvas, and ask again.',
-    );
-    expect(unmarked).not.toBe(marked);
-  });
-
   it('handles an empty graph gracefully without crashing or leaking internal terms', () => {
     const text = composeExplainFromStructureFallback({
       relationship_detail_status: 'canonical_strict',
@@ -911,129 +878,6 @@ describe('composeExplainFromStructureFallback', () => {
     });
     for (const pattern of FORBIDDEN_INTERNAL) expect(text).not.toMatch(pattern);
     expect(text).toContain('empty');
-  });
-});
-
-describe('composeStructuralPairEvidenceAnswer', () => {
-  it('states a directed relationship in canonical direction with its licensed sign and confidence', () => {
-    const text = composeStructuralPairEvidenceAnswer({
-      status: 'direct',
-      first_label: 'Implementation Quality Failure',
-      second_label: 'Pilot Scope and Commitment',
-      coverage: 'complete',
-      relationships: [
-        {
-          from_label: 'Pilot Scope and Commitment',
-          to_label: 'Implementation Quality Failure',
-          edge_type: 'directed',
-          relationship: 'moderate positive link',
-          coefficient_confidence: 'high',
-        },
-      ],
-    });
-    expect(text).toContain(
-      'from Pilot Scope and Commitment to Implementation Quality Failure, not the reverse',
-    );
-    expect(text).toContain('moderate positive link');
-    expect(text).toContain('strength-confidence band is high');
-  });
-
-  it('keeps a bidirected relationship non-causal', () => {
-    const text = composeStructuralPairEvidenceAnswer({
-      status: 'direct',
-      first_label: 'Brand Sentiment',
-      second_label: 'Quarterly Profit',
-      coverage: 'complete',
-      relationships: [
-        {
-          from_label: 'Brand Sentiment',
-          to_label: 'Quarterly Profit',
-          edge_type: 'bidirected',
-          relationship:
-            'moderate positive co-movement, unmeasured common cause (not a causal route)',
-        },
-      ],
-    });
-    expect(text).toContain('is bidirected');
-    expect(text).toContain('not influence in either direction');
-    expect(text).not.toContain('not the reverse');
-  });
-
-  it('does not compose an unlicensed path when no direct relationship or option reachability is present', () => {
-    const text = composeStructuralPairEvidenceAnswer({
-      status: 'no_direct',
-      first_label: 'Enterprise Integration Investment',
-      second_label: 'Preserve Strategic Flexibility',
-    });
-    expect(text).toContain('lists no direct connector');
-    expect(text).toContain('does not decide the separate reachability question');
-    expect(text).not.toContain('two-step');
-  });
-
-  it('treats missing relationships as unknown when graph coverage was trimmed', () => {
-    const text = composeStructuralPairEvidenceAnswer({
-      status: 'coverage_unavailable',
-      first_label: 'Enterprise Integration Investment',
-      second_label: 'Preserve Strategic Flexibility',
-    });
-    expect(text).toContain('was withheld');
-    expect(text).toContain('cannot safely say');
-    expect(text).not.toContain('lists no direct connector');
-  });
-
-  it('renders retained but incomplete topology without sign or reverse-absence claims', () => {
-    const text = composeStructuralPairEvidenceAnswer({
-      status: 'direct',
-      first_label: 'Demand Signal',
-      second_label: 'Growth Goal',
-      coverage: 'presence_only',
-      relationships: [{
-        from_label: 'Demand Signal',
-        to_label: 'Growth Goal',
-        edge_type: 'directed',
-      }],
-    });
-    expect(text).toContain('directed connector from Demand Signal to Growth Goal');
-    expect(text).toContain('sign, magnitude, confidence');
-    expect(text).not.toContain('not the reverse');
-    expect(text).not.toContain('positive');
-  });
-
-  it('renders reciprocal directed topology without contradictory reverse denials', () => {
-    const text = composeStructuralPairEvidenceAnswer({
-      status: 'direct',
-      first_label: 'Demand Signal',
-      second_label: 'Growth Goal',
-      coverage: 'complete',
-      relationships: [
-        {
-          from_label: 'Demand Signal',
-          to_label: 'Growth Goal',
-          edge_type: 'directed',
-          relationship: 'moderate positive link',
-        },
-        {
-          from_label: 'Growth Goal',
-          to_label: 'Demand Signal',
-          edge_type: 'directed',
-          relationship: 'weak negative link',
-        },
-      ],
-    });
-    expect(text).toContain('from Demand Signal to Growth Goal');
-    expect(text).toContain('from Growth Goal to Demand Signal');
-    expect(text).not.toContain('not the reverse');
-  });
-
-  it('keeps reachability separate from direct connectivity', () => {
-    const text = composeStructuralPairEvidenceAnswer({
-      status: 'reachable',
-      source_label: 'Pilot First',
-      target_label: 'Responsible Market Entry',
-    });
-    expect(text).toContain('can reach Responsible Market Entry');
-    expect(text).toContain('does not state');
-    expect(text).not.toContain('direct connector exists');
   });
 });
 

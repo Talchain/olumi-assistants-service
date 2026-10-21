@@ -17,9 +17,21 @@ import type {
   ExplainAnswerSource,
   ExplainFallbackReason,
 } from '@talchain/schemas/orchestrator';
-import type { ExplanationAnswerErrorReason } from '../../routing/validator-explanation.js';
 
 export type { ExplainAnswerSource, ExplainFallbackReason };
+
+/**
+ * The explanation validator's verdict codes (moved here from the retired `routing/validator-explanation.ts`, whose
+ * validator went with it). `analysis_language_without_analysis_fact` was never emitted; it stays for the `case` below.
+ */
+export type ExplanationAnswerErrorReason =
+  | 'missing'
+  | 'too_short'
+  | 'forbidden_internal_term'
+  | 'mutation_language_detected'
+  | 'analysis_language_without_analysis_fact'
+  | 'fabricated_result_reference'
+  | 'raw_decimal_coefficient';
 
 /**
  * Translate the validator's verdict error code into the schema's
