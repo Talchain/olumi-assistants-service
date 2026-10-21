@@ -14,6 +14,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { streamWhenAsked } from './stream-when-asked.js';
 
 const probe = vi.hoisted(() => ({ enabled: false, applied: 0, proposalId: '' }));
 vi.mock('../../path-b/tools/index.js', async (original) => {
@@ -96,7 +97,7 @@ describe('PATH-B core: the AI\'s own words are the reply; protocol, cards, resul
   const sent: string[] = [];
   let outputs: Record<string, unknown>[][] = [];
   beforeAll(async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
+    vi.stubGlobal('fetch', vi.fn(streamWhenAsked(async (url: unknown, init?: { body?: unknown }) => {
       // The core lane's one OpenAI Conversation per scenario (`core/sdk-turn.ts`).
       if (String(url).endsWith('/v1/conversations')) return new Response(JSON.stringify({ id: 'conv_route', object: 'conversation' }), { status: 200, headers: { 'content-type': 'application/json' } });
       const runCall = runPressToolResponse(JSON.parse(String(init?.body ?? '{}')));
@@ -105,7 +106,7 @@ describe('PATH-B core: the AI\'s own words are the reply; protocol, cards, resul
       const output = outputs.shift() ?? [{ type: 'message', content: [{ type: 'output_text', text: AI_WORDS }] }];
       if (probe.enabled) for (const o of output) if (o.type === 'function_call') o.arguments = JSON.stringify({ proposal_id: probe.proposalId });
       return new Response(JSON.stringify(responsesBody(output)), { status: 200, headers: { 'content-type': 'application/json' } });
-    }));
+    })));
     vi.resetModules();
     process.env.AGENT_LANE_ENABLED = 'true';
     process.env.AGENT_LANE_PREVIEW = 'false';

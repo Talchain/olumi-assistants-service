@@ -19,6 +19,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { buildRunDelta } from '../../coaching/build-run-delta.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
+import { streamWhenAsked } from './stream-when-asked.js';
 
 type Json = Record<string, any>;
 const SCENARIO = '6a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
@@ -163,7 +164,7 @@ describe('PATH-B gap 4: commit and Undo each run the existing Run pipeline once;
   /** A change between the AI's calls (another writer), seen by the model call about to be answered. */
   let beforeModelCall: ((body: Json) => void) | undefined;
   beforeAll(async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
+    vi.stubGlobal('fetch', vi.fn(streamWhenAsked(async (url: unknown, init?: { body?: unknown }) => {
       if (String(url).endsWith('/v1/conversations')) return json({ id: 'conv_gap4', object: 'conversation' });
       const body = JSON.parse(String(init?.body ?? '{}')) as Json;
       calls.push(body);
@@ -171,7 +172,7 @@ describe('PATH-B gap 4: commit and Undo each run the existing Run pipeline once;
       const next = outputs.shift() ?? [{ type: 'message', text: COACHED }];
       if (next === 'fail') return json({ error: { message: 'scripted provider failure', type: 'server_error' } }, 400);
       return json(responsesBody(next));
-    }));
+    })));
     vi.resetModules();
     process.env.AGENT_LANE_ENABLED = 'true';
     process.env.AGENT_LANE_PREVIEW = 'false';

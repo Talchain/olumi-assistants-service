@@ -15,6 +15,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { RUN_EXPLANATION_MESSAGE } from '../run-explanation.js';
 import { approvalChipIdFor } from '../approval-chips.js';
 import { editsRefusedSentence } from '../proposal-object/reply.js';
+import { streamWhenAsked } from './stream-when-asked.js';
 
 type Json = Record<string, any>;
 const READ = (JSON.parse(readFileSync(new URL('./fixtures/waveB9-unseen1-df15c8c-readback-pre-challenge.json', import.meta.url), 'utf8')) as { j: Json }).j;
@@ -93,7 +94,7 @@ describe('PATH-B core: the AI\'s own words are the reply; protocol, cards, resul
   const sent: string[] = [];
   let outputs: Record<string, unknown>[][] = [];
   beforeAll(async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
+    vi.stubGlobal('fetch', vi.fn(streamWhenAsked(async (url: unknown, init?: { body?: unknown }) => {
       // The core lane's one OpenAI Conversation per scenario (`core/sdk-turn.ts`).
       if (String(url).endsWith('/v1/conversations')) return new Response(JSON.stringify({ id: 'conv_route', object: 'conversation' }), { status: 200, headers: { 'content-type': 'application/json' } });
       const body = JSON.parse(String(init?.body ?? '{}')) as Json;
@@ -107,7 +108,7 @@ describe('PATH-B core: the AI\'s own words are the reply; protocol, cards, resul
       sent.push(typeof init?.body === 'string' ? init.body : '');
       const output = outputs.shift() ?? [{ type: 'message', content: [{ type: 'output_text', text: AI_WORDS }] }];
       return new Response(JSON.stringify(responsesBody(output)), { status: 200, headers: { 'content-type': 'application/json' } });
-    }));
+    })));
     vi.resetModules();
     process.env.AGENT_LANE_ENABLED = 'true';
     process.env.AGENT_LANE_PREVIEW = 'false';

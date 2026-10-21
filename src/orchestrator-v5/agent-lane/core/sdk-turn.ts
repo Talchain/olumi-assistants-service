@@ -15,7 +15,7 @@
  * call is given today's date and the CURRENT model state afresh (`turnContextItems`), in its instructions, which the
  * Conversation never stores: conversation history never overrides saved state (after Undo, the restored state is given).
  *
- * The SDK's Responses model runs on the SDK's own client (`ledgeredAgentsClient`: native retries), whose fetch writes each
+ * The SDK's Responses model runs on its Conversation-bound client (`ledgeredAgentsClient`: no automatic replay), whose fetch writes each
  * attempt to this request's `_provider_calls` with the returned model, the tool names sent and a digest of the input sent.
  *
  * Consent is the SDK's: `apply_change` needs approval, so the AI can never approve its own change; only the person's
@@ -68,6 +68,17 @@ export class CoreStateUnavailableError extends Error {
   constructor(readonly reason: 'store_cannot_hold_id' | 'id_not_saved' | 'store_unreadable' | 'pause_not_resumable', cause?: unknown) {
     super(`core conversation state unavailable: ${reason}`, cause === undefined ? undefined : { cause });
     this.name = 'CoreStateUnavailableError';
+  }
+}
+
+/** The provider may have accepted this Conversation call. It must not be replayed as a known-undelivered turn. */
+export class CoreDeliveryUnknownError extends Error {
+  readonly code = 'CORE_DELIVERY_UNKNOWN';
+  readonly delivery_outcome = 'UNKNOWN';
+  readonly retry_safe = false;
+  constructor(cause: unknown) {
+    super('The reply did not arrive. Its delivery is unknown; it was not sent again automatically.', { cause });
+    this.name = 'CoreDeliveryUnknownError';
   }
 }
 
@@ -235,7 +246,9 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
   const budget = fast ? input.replyBudget! : input.budget;
   const tools = input.tools(record).filter((t) => !('name' in t) || !(withheld.has(t.name) || (fast && MODEL_WRITING_TOOLS.has(t.name))));
   const pendingRows: Promise<void>[] = [];
+  let deliveryUnknown: { readonly cause: unknown } | undefined;
   const client = ledgeredAgentsClient({ site: 'agent-core.sdk', pending: pendingRows,
+    conversationBound: true, onDeliveryUnknown: (cause) => { deliveryUnknown = { cause }; },
     detailOf: (body) => ({ model: budget.model, purpose: 'conversation', ...agentRequestIdentity('agent.converse', body) }) });
   const agent = new Agent({
     name: 'Olumi',
@@ -331,22 +344,22 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
         },
       };
       /**
-       * On the streamed entry (`/proxy/v5/turn/stream` installs a stage emitter) the SDK streams: the person sees "writing"
-       * only once the AI's first words arrive. The buffered entry runs the same turn unstreamed. Either way the reply,
-       * the tool outcomes and the saved state are the final JSON's.
+       * Every model call consumes the SDK stream, including buffered HTTP turns and approval resumes. UI transport does
+       * not choose provider transport. A stage emitter is optional; the reply, outcomes and saved state remain final JSON.
        */
-      const streamed = currentStageEmitter() !== undefined;
+      const showProgress = currentStageEmitter() !== undefined;
       const go = async (from: string | AgentInputItem[] | RunState<unknown, Agent>) => {
-        if (!streamed) return run(agent, from, options);
         const live = await run(agent, from, { ...options, stream: true });
         let writing = false;
         for await (const event of live) {
           if (!writing && event.type === 'raw_model_stream_event' && event.data.type === 'output_text_delta') {
             writing = true;
-            emitAgentPhase('writing');
+            if (showProgress) emitAgentPhase('writing');
           }
         }
         await live.completed;
+        await Promise.allSettled(pendingRows);
+        if (deliveryUnknown !== undefined) throw new CoreDeliveryUnknownError(deliveryUnknown.cause);
         return live;
       };
       let result = await go(turnInput);
@@ -387,11 +400,14 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
       conversation_id: conversation.id, revision: input.traceMeta?.revision ?? '', run_id: input.traceMeta?.run_id ?? '',
     } });
   } catch (err) {
-    if (err instanceof MaxTurnsExceededError) return finish('', 'hop_limit', CORE_MAX_MODEL_CALLS, 'host');
+    // The stream's copy records transport loss asynchronously; settle it before classifying the SDK's error.
+    await Promise.allSettled(pendingRows);
+    if (err instanceof MaxTurnsExceededError && deliveryUnknown === undefined) return finish('', 'hop_limit', CORE_MAX_MODEL_CALLS, 'host');
     // The capability's own error, unwrapped, so the route's existing handlers see the same error the loop would raise.
     if (err instanceof ToolCallError && err.error !== undefined) throw err.error;
     log.warn({ event: 'agent_core.turn_failed', scenario_id: input.ctx.scenario_id, request_id: input.ctx.request_id, err: String(err).slice(0, 300) },
       'agent-core: the SDK run did not finish');
+    if (deliveryUnknown !== undefined) throw err instanceof CoreDeliveryUnknownError ? err : new CoreDeliveryUnknownError(err);
     throw err;
   } finally {
     // A streamed attempt's ledger row is written when its stream ends: complete before anyone reads `_provider_calls`.

@@ -84,7 +84,7 @@ import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { runOmittedRisks, type RunOmittedRisk } from '../orchestrator-v5/agent-lane/unsized-risk.js';
 import { drawnLinkPress, isDrawnLinkPress } from '../orchestrator-v5/agent-lane/drawn-link-press.js';
 import { answerIsIncomplete, heldChangeSentence, runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
-import { acquireCoreTurnSlot, CoreStateUnavailableError, runCoreTurn, type CoreTurnSdk } from '../orchestrator-v5/agent-lane/core/sdk-turn.js';
+import { acquireCoreTurnSlot, CoreDeliveryUnknownError, CoreStateUnavailableError, runCoreTurn, type CoreTurnSdk } from '../orchestrator-v5/agent-lane/core/sdk-turn.js';
 import { pathBTools } from '../orchestrator-v5/path-b/tools/index.js';
 import { APPLY_CHANGE, isChangeProposal } from '../orchestrator-v5/path-b/tools/change-tools.js';
 import { legacyFromRead, livingViewOf } from '../orchestrator-v5/path-b/living-model/view.js';
@@ -4692,10 +4692,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       } else {
         // No possible writes remain: release the claim, so a retry of the SAME
         // turn_id can run. Earlier writes or unknown outcomes keep the claim.
-        const released = await releaseUnwrittenTurnClaim();
+        // A core call whose provider delivery is unknown (#3594; Paul's served test, 31711a9: a transport loss, then a resend
+        // into a Conversation the provider still held) keeps it too: Olumi wrote nothing, but the call may still be running.
+        const deliveryUnknown = mode === 'core' && err instanceof CoreDeliveryUnknownError;
+        const released = deliveryUnknown ? false : await releaseUnwrittenTurnClaim();
         // A possible save keeps its claim. Record the failed continuation as an ordinary answer so a resend
         // reads current state immediately; the persistence floor carries the latest held cards, including concurrent offers.
-        if (mode === 'core' && !released && writesDispatched > 0 && claimAppendSucceeded && turnId !== undefined) {
+        if (mode === 'core' && !released && (writesDispatched > 0 || deliveryUnknown) && claimAppendSucceeded && turnId !== undefined) {
           try {
             await appendCheckedGraphWrite({
               store, writesGraph: false, source: 'agent_turn',
@@ -4705,7 +4708,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
                 request_hash: requestHash, response_emitted: false,
                 llm_calls_used: providerCallsMade() ?? 0, duration_ms: Date.now() - startedAt, handler_facts: [],
                 userMessage: message,
+                // A lost delivery may still be running at the provider, so a new message straight away can meet it (fresh Claude E).
                 assistantMessage: verifiedSave ? 'The saved change is kept, but the reply didn’t arrive. Send a new message to continue.'
+                  : deliveryUnknown && writesDispatched === 0 ? 'The reply didn’t arrive and may still be finishing. Nothing in your model was changed. Wait a moment, then send a new message.'
                   : 'The reply didn’t arrive. Any changes already saved are kept. Send a new message to continue.',
               },
             });
@@ -4732,8 +4737,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // A dispatched write is a possible effect, never positive readback proof; provider retryability is separate.
         return reply.code(502).send({
           ...(mode === 'core' ? {
-            ...providerFailureOf(err), nothing_saved: writesDispatched === 0,
+            // A lost delivery is reported with ITS cause, never Olumi's own code as if the provider had sent it (fresh Claude).
+            ...providerFailureOf(deliveryUnknown ? (err as CoreDeliveryUnknownError).cause : err), nothing_saved: writesDispatched === 0,
             save_outcome: verifiedSave ? 'VERIFIED_SAVED' : writesDispatched === 0 ? 'VERIFIED_NO_WRITE' : 'UNKNOWN',
+            // Olumi's writes above are known; whether the provider received the call is not.
+            ...(deliveryUnknown ? { provider_delivery: 'unknown' } : {}),
           } : { error: 'UPSTREAM_ERROR' }),
           detail: String(err).slice(0, 300),
           _provider_calls: recordedProviderCalls(),

@@ -20,6 +20,7 @@ import { projectCorePostimageForPersistence } from '../../../persisted-graph-pro
 import { toOutboundGraph } from '../../../goal-target/outbound-graph.js';
 import type { DrafterRawRow } from '../../../drafter-raw/index.js';
 import type { LivingModelT } from '../../../../schemas/living-model.js';
+import { streamWhenAsked } from '../../../agent-lane/__tests__/stream-when-asked.js';
 
 const rawRecorder = vi.hoisted(() => ({
   rows: [] as DrafterRawRow[], mode: 'ok' as 'ok' | 'throws' | 'failed' | 'pending',
@@ -158,7 +159,7 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
   let runs = 0;
   let skipDraft = false;
   beforeAll(async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
+    vi.stubGlobal('fetch', vi.fn(streamWhenAsked(async (url: unknown, init?: { body?: unknown }) => {
       if (String(url).endsWith('/v1/conversations')) return new Response(JSON.stringify({ id: 'conv_draft', object: 'conversation' }), { status: 200, headers: { 'content-type': 'application/json' } });
       const body = JSON.parse(String(init?.body ?? '{}')) as Json;
       const runCall = runPressToolResponse(body);
@@ -189,7 +190,7 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
       const text = outcome.data?.save_outcome === 'UNKNOWN' ? 'I could not verify whether the model was saved. Any saved work is kept.'
         : outcome.status === 'ok' ? 'Here is the first model I built.' : 'Nothing was saved.';
       return ok([{ type: 'message', content: [{ type: 'output_text', text }] }]);
-    }));
+    })));
     vi.resetModules();
     vi.stubEnv('SUPABASE_URL', 'http://localhost:54321');
     vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'test-service-key');

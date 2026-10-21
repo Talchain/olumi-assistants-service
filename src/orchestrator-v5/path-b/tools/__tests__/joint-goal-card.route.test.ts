@@ -16,6 +16,7 @@ import { registrationTurnId } from '../../../graph-registration/registration-ide
 import { targetReadback } from '../goal-target.js';
 import { goalTargetsBlockOf } from '../../../goal-target/goal-targets-joint.js';
 import { claimRecordsOn, userStatementsOn } from '../../../statement-door/statements.js';
+import { streamWhenAsked } from '../../../agent-lane/__tests__/stream-when-asked.js';
 
 type Json = Record<string, any>;
 let SCENARIO = '';
@@ -119,13 +120,13 @@ describe('L12: joint targets through the real route and SDK approval', () => {
   let calls: Json[] = [];
   let outputs: Json[][] = [];
   beforeAll(async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
+    vi.stubGlobal('fetch', vi.fn(streamWhenAsked(async (url: unknown, init?: { body?: unknown }) => {
       if (String(url).endsWith('/v1/conversations')) return json({ id: 'conv_level', object: 'conversation' });
       calls.push(JSON.parse(String(init?.body ?? '{}')) as Json);
       const output = outputs.shift() ?? [{ type: 'message', text: 'Done.' }];
       if (output[0]?.type === 'provider_failure') return json({ error: { message: 'Scripted continuation failed', type: 'invalid_request_error' } }, 400);
       return json(responsesBody(output));
-    }));
+    })));
     vi.resetModules();
     process.env.AGENT_LANE_ENABLED = 'true';
     process.env.AGENT_LANE_PREVIEW = 'false';
