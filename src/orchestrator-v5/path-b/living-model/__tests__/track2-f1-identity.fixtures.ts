@@ -7,9 +7,9 @@ import type { LivingModelT } from '../../../../schemas/living-model.js';
  * grow UK 170 × £40 = £6,800 (always meets). Nothing here is uncertain, so the chance is 0 and 1, with no spread.
  */
 const who = (quote: string) => ({ source: 'user' as const, party: null, quote });
-const exact = (value: number, unit: string) => ({ form: 'exact' as const, value, sd: null, low: null, high: null, unit, sign: '+' as const });
+const exact = (value: number, unit: string) => ({ form: 'exact' as const, estimate_by: null, value, sd: null, low: null, high: null, unit, sign: '+' as const });
 const level = (id: string, label: string, value: number, unit: string, quote: string) =>
-  ({ id, label, kind: 'factor' as const, value, low: null, high: null, unit, defined_as: null, limit: null, ...who(quote) });
+  ({ id, label, kind: 'factor' as const, estimate_by: null, value, low: null, high: null, unit, defined_as: null, limit: null, ...who(quote) });
 
 const AIM = { id: 'rev', text: 'Monthly revenue of at least £6,500', status: 'current' as const, ...who('we need at least £6,500 a month; today it is £6,000'),
   target: { quantity: 'monthly revenue', comparator: '>=' as const, value: 6500, low: null, high: null, unit: '£', by_when: null, baseline: 'today',
@@ -17,7 +17,7 @@ const AIM = { id: 'rev', text: 'Monthly revenue of at least £6,500', status: 'c
 const OPTIONS: LivingModelT['options'] = [
   { status: 'feasible', id: 'hold', label: 'Carry on', settings: [], developed_from: null, ...who('or we carry on as now') },
   { status: 'feasible', id: 'grow_uk', label: 'Grow the UK', developed_from: null, ...who('grow the UK to 120 customers'),
-    settings: [{ factor_id: 'uk', value: 120, low: null, high: null, unit: 'customers', ...who('grow the UK to 120 customers') }] },
+    settings: [{ factor_id: 'uk', estimate_by: null, value: 120, low: null, high: null, unit: 'customers', ...who('grow the UK to 120 customers') }] },
 ];
 const UK = level('uk', 'UK customers', 100, 'customers', 'we have 100 UK customers');
 const EU = level('eu', 'EU customers', 50, 'customers', 'and 50 in the EU');
@@ -39,7 +39,7 @@ export const F1_AT_LIMIT: LivingModelT = { ...F1_DEFINED,
 /** The same reasoning, coarse: total customers is the lever (150 → 170). An equivalent decomposition must agree with it. */
 export const F1_COARSE: LivingModelT = {
   ...F1_DEFINED,
-  options: [OPTIONS[0]!, { ...OPTIONS[1]!, settings: [{ factor_id: 'total', value: 170, low: null, high: null, unit: 'customers', ...who('grow to 170 customers') }] }],
+  options: [OPTIONS[0]!, { ...OPTIONS[1]!, settings: [{ factor_id: 'total', estimate_by: null, value: 170, low: null, high: null, unit: 'customers', ...who('grow to 170 customers') }] }],
   factors: [{ ...TOTAL, defined_as: null }, PRICE],
 };
 
@@ -74,7 +74,7 @@ export const F1_LEVEL_NOT_MADE: LivingModelT = { ...F1_DEFINED, aims: [{ ...AIM,
 /** NEGATIVE (buddy r1): the person's UK → total at −2 contradicts total = UK + EU; never silently dropped. */
 export const F1_CONTRADICTED: LivingModelT = { ...F1_DEFINED,
   links: [{ id: 'uk_total', from: 'uk', to: 'total', ...who('each UK customer takes two off the total'),
-    effect: { form: 'point', value: 2, sd: null, low: null, high: null, unit: 'customers', sign: '-' } }] };
+    effect: { form: 'point', estimate_by: null, value: 2, sd: null, low: null, high: null, unit: 'customers', sign: '-' } }] };
 
 /** Buddy r1: the person stated the goal, but the DEFINITION of revenue is Olumi's reading, so it is not the brief's. */
 export const F1_OLUMI_READING: LivingModelT = { ...F1_DEFINED,
@@ -87,8 +87,8 @@ export const F1_CYCLE: LivingModelT = { ...F1_DEFINED, factors: [UK, EU,
 
 const MKT = level('mkt', 'UK marketing spend', 0, '£k', 'we spend nothing on UK marketing');
 const SPEND: LivingModelT['options'] = [OPTIONS[0]!, { status: 'feasible', id: 'spend', label: 'Spend on UK marketing', developed_from: null, ...who('spend £2k a month on UK marketing'),
-  settings: [{ factor_id: 'mkt', value: 2, low: null, high: null, unit: '£k', ...who('spend £2k a month on UK marketing') }] }];
-const ABOUT_10 = { form: 'point' as const, value: 10, sd: null, low: null, high: null, unit: 'customers', sign: '+' as const };
+  settings: [{ factor_id: 'mkt', estimate_by: null, value: 2, low: null, high: null, unit: '£k', ...who('spend £2k a month on UK marketing') }] }];
+const ABOUT_10 = { form: 'point' as const, estimate_by: null, value: 10, sd: null, low: null, high: null, unit: 'customers', sign: '+' as const };
 
 /**
  * NEGATIVE CONTROL: a genuinely uncertain cause stays uncertain. "Each £1k of UK marketing adds about 10 UK customers" is a

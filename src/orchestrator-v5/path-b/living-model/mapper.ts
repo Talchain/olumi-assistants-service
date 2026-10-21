@@ -71,6 +71,10 @@ const edited = (a: { source: LivingSourceT; quote: string | null }): boolean => 
 /** user/party → their words (or their own edit); Olumi → its inference; unverified → no stamp (unknown). */
 const levelSource = (a: { source: LivingSourceT; quote: string | null }): string | undefined =>
   edited(a) ? 'user_edited' : stated(a.source) ? 'brief_extraction' : a.source === 'olumi' ? 'cee_inference' : undefined;
+/** Per-figure authorship: a figure Olumi estimated on another's item is Olumi's, whatever the item's source (`estimate_by`). */
+const OLUMI_FIGURE = { source: 'olumi' as LivingSourceT, quote: null };
+const figureBy = (fig: { estimate_by?: 'olumi' | null }, item: { source: LivingSourceT; quote: string | null }) =>
+  (fig.estimate_by === 'olumi' ? OLUMI_FIGURE : item);
 const withSource = (o: Rec, a: { source: LivingSourceT; quote: string | null }): Rec => {
   const source = levelSource(a);
   return source === undefined ? o : { ...o, source, ...(stated(a.source) ? { extractionType: 'explicit' } : {}) };
@@ -258,11 +262,11 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
       exactSum = { lever: `${g.id}__change`, today: `${g.id}_today` };
       const lever = exactSum.lever;
       model = { ...model,
-        factors: [...model.factors, { id: lever, label: `Change in ${aim!.target!.quantity}`, kind: 'factor', value: 0, low: null, high: null,
+        factors: [...model.factors, { id: lever, label: `Change in ${aim!.target!.quantity}`, kind: 'factor', estimate_by: null, value: 0, low: null, high: null,
           unit: g.unit === '' ? null : g.unit, defined_as: null, limit: null, source: 'olumi', party: null, quote: null }],
         options: model.options.map((o) => {
           const l = direct.find((d) => d.from === o.id);
-          return l === undefined ? o : { ...o, settings: [...o.settings, { factor_id: lever, value: (l.effect.sign === '-' ? -1 : 1) * Math.abs(l.effect.value!),
+          return l === undefined ? o : { ...o, settings: [...o.settings, { factor_id: lever, estimate_by: l.effect.estimate_by, value: (l.effect.sign === '-' ? -1 : 1) * Math.abs(l.effect.value!),
             low: null, high: null, unit: g.unit === '' ? null : g.unit, source: l.source, party: l.party, quote: l.quote }] };
         }),
         links: model.links.filter((l) => !direct.includes(l)) };
@@ -282,11 +286,11 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     for (const l of fromOption) switches.add(on(l.from));
     model = { ...model,
       factors: [...model.factors, ...[...new Set(fromOption.map((l) => l.from))].map((id) => ({ id: on(id),
-        label: `${model.options.find((o) => o.id === id)!.label} in place`, kind: 'factor' as const, value: 0, low: null, high: null, unit: null, defined_as: null, limit: null,
+        label: `${model.options.find((o) => o.id === id)!.label} in place`, kind: 'factor' as const, estimate_by: null, value: 0, low: null, high: null, unit: null, defined_as: null, limit: null,
         source: 'olumi' as const, party: null, quote: null }))],
       options: model.options.map((o) => {
         const l = fromOption.find((d) => d.from === o.id);
-        return l === undefined ? o : { ...o, settings: [...o.settings, { factor_id: on(o.id), value: 1, low: null, high: null, unit: null, source: l.source, party: l.party, quote: l.quote }] };
+        return l === undefined ? o : { ...o, settings: [...o.settings, { factor_id: on(o.id), estimate_by: null, value: 1, low: null, high: null, unit: null, source: l.source, party: l.party, quote: l.quote }] };
       }),
       links: model.links.map((l) => (fromOption.includes(l) ? { ...l, from: on(l.from) } : l)) };
   }
@@ -306,7 +310,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
       ...(f.id === exactSum?.lever ? { quantity_frame: 'change' } : {}) };
     if (f.value !== null && cap !== undefined) {
       current.set(f.id, f.value);
-      node.observed_state = withSource({ value: f.value / cap, raw_value: f.value, cap, unit: f.unit ?? '' }, f);
+      node.observed_state = withSource({ value: f.value / cap, raw_value: f.value, cap, unit: f.unit ?? '' }, figureBy(f, f));
       // A central figure with a range (the link's "centred" rule): the figure is used; the range is kept, not used as a spread.
       // Neutral words: the figure may be Olumi's estimate, never called "stated" (Codex); the card says whose it is.
       if (f.low !== null && f.high !== null) assumed.push({ id: f.id, text: `The calculation uses ${sayFigureAsWritten(f.value, f.unit ?? '')} for ${f.label}. The range, ${sayFigureAsWritten(f.low, f.unit ?? '')} to ${sayFigureAsWritten(f.high, f.unit ?? '')}, is kept with the model but is not used as a spread.` });
@@ -352,7 +356,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
       if (factor === undefined || s.value === null || (s.unit !== null && factor.unit !== null && s.unit !== factor.unit)) {
         droppedSettings.add(s.factor_id);
         hold(`${o.id}:${s.factor_id}`, 'setting_not_convertible');
-      } else set(s.factor_id, s.value, s.unit ?? factor.unit, s);
+      } else set(s.factor_id, s.value, s.unit ?? factor.unit, figureBy(s, s));
     }
     // The status quo holds every controllable factor at its current level, explicitly.
     if (isBaseline) for (const id of setsFactor) if (interventions[id] === undefined && current.has(id)) set(id, current.get(id)!, model.factors.find((f) => f.id === id)!.unit, { source: 'olumi', quote: null });
@@ -429,7 +433,9 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   const refusedRisks = new Set<string>();
   for (const r of model.risks) {
     const { low, high } = r.occurrence;
-    const basis = stated(r.source) ? 'user' as const : r.source === 'olumi' ? 'olumi' as const : undefined;
+    // The chance is owned FOR its window: Olumi's estimate of either makes the chance Olumi's (buddy, per-figure authorship).
+    const basis = r.occurrence.estimate_by === 'olumi' || r.horizon_by === 'olumi' ? 'olumi' as const
+      : stated(r.source) ? 'user' as const : r.source === 'olumi' ? 'olumi' as const : undefined;
     // A mitigation reaches ISL as a root switch whose only child is this risk. A switch has no unit, so its frame is 1 and
     // "in place" reaches the engine as 1, never 0.01 of a % (`capFor`).
     const switchOk = (id: string) => isSwitch(id) && !model.links.some((l) => l.from === id && l.to !== r.id);
@@ -517,7 +523,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
         after: sized.std, severity: 'info' as const,
         reason: centred
           // Olumi's own centred link is never called "stated" (Codex on #3590): its figure and range are Olumi's estimate.
-          ? (l.source === 'olumi'
+          ? (figureBy(e, l).source === 'olumi'
             ? `The calculation uses Olumi's estimated ${Math.abs(e.value!)} with Olumi's illustrative spread (half the estimated effect). Olumi's range, ${e.low} to ${e.high}, is kept with the model but is not used as a spread.`
             : `The calculation uses the stated ${Math.abs(e.value!)} with Olumi's illustrative spread (half the stated effect). The stated range, ${e.low} to ${e.high}, is kept with the model but is not used as a spread.`)
           : 'Nobody stated how uncertain this strength is. Applied Olumi\'s illustrative spread (half the stated effect). It is not a measurement of anyone\'s confidence.' }] : []),
@@ -528,8 +534,11 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
         reason: stated(l.source) ? 'The link was stated under an assumption. The calculation assumes it exists, as stated.'
           : 'Nobody stated how likely this link is to exist. Applied Olumi\'s untested default.' }]),
     ];
-    const who = stated(l.source) ? { source: edited(l) ? 'user_specified' : 'brief_extraction', magnitude: 'user_stated' }
-      : l.source === 'olumi' ? { source: 'cee_hypothesis', magnitude: 'olumi_estimate' } : {};
+    // Whose SIZE this is (per figure): the person's link with Olumi's estimated size is an Olumi estimate; its existence
+    // above stays the link's own claim.
+    const sizedBy = figureBy(e, l);
+    const who = stated(sizedBy.source) ? { source: edited(sizedBy) ? 'user_specified' : 'brief_extraction', magnitude: 'user_stated' }
+      : sizedBy.source === 'olumi' ? { source: 'cee_hypothesis', magnitude: 'olumi_estimate' } : {};
     // The size in the person's own units, as every existing reader of a sized link reads it (`natural_effect`: the target's
     // testability, the chance licence, the canvas): the change in `to` per +1 of `from`, and the β it was written for.
     // An option's own switch (`<option>__on`) has no unit; its change is said per 'switch', as legacy link-effect.ts says it.

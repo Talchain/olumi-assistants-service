@@ -24,11 +24,11 @@ const LIVING: LivingModelT = {
   options: [
     { status: 'feasible', id: 'carry_on', label: 'Carry on as now', settings: [], developed_from: null, source: 'olumi', party: null, quote: null },
     { status: 'feasible', id: 'add_assistant', label: 'Add a second assistant on Saturdays', developed_from: null, source: 'user', party: null, quote: 'add a second assistant on Saturdays',
-      settings: [{ factor_id: 'assistants_on_shift', value: 2, low: null, high: null, unit: 'people', source: 'user', party: null, quote: 'add a second assistant on Saturdays' }] },
+      settings: [{ estimate_by: null, factor_id: 'assistants_on_shift', value: 2, low: null, high: null, unit: 'people', source: 'user', party: null, quote: 'add a second assistant on Saturdays' }] },
   ],
-  factors: [{ kind: 'factor', limit: null, id: 'assistants_on_shift', label: 'Assistants on shift', value: 1, low: null, high: null, unit: 'people', defined_as: null, source: 'olumi', party: null, quote: null }],
+  factors: [{ estimate_by: null, kind: 'factor', limit: null, id: 'assistants_on_shift', label: 'Assistants on shift', value: 1, low: null, high: null, unit: 'people', defined_as: null, source: 'olumi', party: null, quote: null }],
   links: [{ id: 'assistants_visitors', from: 'assistants_on_shift', to: 'visitors_served', source: 'olumi', party: null, quote: null,
-    effect: { form: 'direction_only', value: null, low: null, high: null, sd: null, unit: null, sign: '+' } }],
+    effect: { estimate_by: null, form: 'direction_only', value: null, low: null, high: null, sd: null, unit: null, sign: '+' } }],
   risks: [], conditions: [], views: [{ holder: 'us', position: 'walk-ins swing a lot', quote: 'walk-ins swing a lot' }], history: [],
 };
 type Reply = { status: number; json: Rec };
@@ -264,7 +264,7 @@ describe('refusals and unknowns, said as such', () => {
   it('Olumi\'s own link carries its direction (21 Oct: unsigned goal links left Run disabled): the strict tool schema tells the AI so', () => {
     const link = (BuildModelParams.shape.model as unknown as { shape: { links: { element: { shape: { effect: { shape: { sign: { description?: string } } } } } } } })
       .shape.links.element.shape.effect.shape.sign;
-    expect(link.description).toMatch(/For source olumi, give your provisional judgement of direction; use form direction_only only when an end has no unit, else give its size\./);
+    expect(link.description).toMatch(/For source olumi, give your provisional judgement of direction; use form direction_only only when `to` has no unit or `from` is a quantity with no unit \(an option or an on-or-off step is \+1 when in place\), else give its size\./);
     // Codex #3551 R1: every other source (user, party, unverified) keeps only the direction it supplied; else null and ask.
     expect(link.description).toMatch(/For source user, party or unverified, preserve only the direction that source supplied\. If none was supplied, use sign null and form unknown, then ask\./);
     expect(link.description).toMatch(/Never put an Olumi-inferred direction under another source\./);

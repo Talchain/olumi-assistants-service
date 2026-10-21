@@ -31,7 +31,7 @@ const SCENARIO = 'f0f0f0f0-0000-4000-8000-000000000012';
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
 const who = (quote: string) => ({ source: 'user' as const, party: null, quote });
 const olumi = { source: 'olumi' as const, party: null, quote: null };
-const on = (factor_id: string, quote: string) => ({ factor_id, value: 1, low: null, high: null, unit: null, ...who(quote) });
+const on = (factor_id: string, quote: string) => ({ factor_id, estimate_by: null, value: 1, low: null, high: null, unit: null, ...who(quote) });
 
 /** `today`: the goal's level today in £, or null when nobody said it (the mapper holds it, `goal_level_unknown`). */
 export const pricingAndReferral = (today: number | null): LivingModelT => ({
@@ -45,15 +45,15 @@ export const pricingAndReferral = (today: number | null): LivingModelT => ({
     { status: 'feasible', id: 'referral', label: 'Referral scheme', developed_from: null, settings: [on('referral_running', 'start a referral scheme')], ...who('start a referral scheme') },
   ],
   factors: [
-    { kind: 'factor', limit: null, id: 'pricing_page', label: 'New pricing page live', value: 0, low: null, high: null, unit: null, defined_as: null, ...who('we have no pricing page') },
-    { kind: 'factor', limit: null, id: 'referral_running', label: 'Referral scheme running', value: 0, low: null, high: null, unit: null, defined_as: null, ...who('we have no referral scheme') },
+    { estimate_by: null, kind: 'factor', limit: null, id: 'pricing_page', label: 'New pricing page live', value: 0, low: null, high: null, unit: null, defined_as: null, ...who('we have no pricing page') },
+    { estimate_by: null, kind: 'factor', limit: null, id: 'referral_running', label: 'Referral scheme running', value: 0, low: null, high: null, unit: null, defined_as: null, ...who('we have no referral scheme') },
   ],
   links: [
     // Olumi's guess that a pricing page helps, with no size: the placeholder the earlier withhold reads.
     { id: 'pricing_gp', from: 'pricing_page', to: 'gp', ...olumi,
-      effect: { form: 'direction_only', value: null, sd: null, low: null, high: null, unit: null, sign: '+' } },
+      effect: { estimate_by: null, form: 'direction_only', value: null, sd: null, low: null, high: null, unit: null, sign: '+' } },
     { id: 'referral_gp', from: 'referral_running', to: 'gp', ...who('the referral scheme would add about £2k a month'),
-      effect: { form: 'point', value: 2000, sd: null, low: null, high: null, unit: '£', sign: '+' } },
+      effect: { estimate_by: null, form: 'point', value: 2000, sd: null, low: null, high: null, unit: '£', sign: '+' } },
   ],
   risks: [], conditions: [], views: [], history: [],
 });

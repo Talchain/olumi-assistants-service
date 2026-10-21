@@ -216,7 +216,7 @@ describe('Track 2 F2: an event risk reaches the engine as event_risk.v1, with it
     const { model, relabelled } = applyKernel(raw, ['we need at least £12k a month; today it is £16k']);
     expect(model.risks[0]!.mitigations[0]!.factor_id).toBe('dual_sourcing');
     expect(relabelled).toContainEqual({ id: 'supplier_fails', was: 'user' });
-    const lower = { ...supplier('point'), risks: [{ ...supplier('point').risks[0]!, occurrence: { low: 0.05, high: 0.1 } }] };
+    const lower = { ...supplier('point'), risks: [{ ...supplier('point').risks[0]!, occurrence: { estimate_by: null, low: 0.05, high: 0.1 } }] };
     expect(diffLivingModels(supplier('point'), lower).map((c) => `${c.kind}:${c.id}:${c.change}`)).toEqual(['risk:supplier_fails:change']);
   });
 
@@ -270,7 +270,7 @@ describe('Track 2 F2: an event risk reaches the engine as event_risk.v1, with it
     // Codex: a stored link on the same edge removes only itself; the mitigation redraws the edge, so it is refused too.
     const restated: LivingModelT = { ...supplier('point'), links: [...supplier('point').links,
       { id: 'ds_fails', from: 'dual_sourcing', to: 'supplier_fails', source: 'user', party: null, quote: 'dual-sourcing makes failure less likely',
-        effect: { form: 'direction_only', value: null, low: null, high: null, sd: null, unit: null, sign: '-' } }] };
+        effect: { estimate_by: null, form: 'direction_only', value: null, low: null, high: null, sd: null, unit: null, sign: '-' } }] };
     expect(applyExplicitEdit(restated, { kind: 'structural_delete', removed_node_ids: [],
       removed_edges: [{ from: 'dual_sourcing', to: 'supplier_fails' }] })).toEqual({ refused: 'link_is_mitigation' });
     // CONTROL: what the event does if it happens is an ordinary stated link, deleted as before.

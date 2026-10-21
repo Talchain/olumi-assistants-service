@@ -158,7 +158,7 @@ export function planStress(living: LivingModelT, args: StressTestArgs):
       if (h.id === 'H1' && alt !== null) {
         const unit = living.factors.find((f) => f.id === alt.to)?.unit ?? living.aims.find((a) => a.id === alt.to)?.target?.unit ?? null;
         v.links = [...v.links, { id: alternativeLinkId!, from: alt.from, to: alt.to, source: alt.source, party: null, quote: null,
-          effect: { form: 'point', value: Math.abs(alt.value), low: null, high: null, unit, sd: null, sign: alt.sign } }];
+          effect: { form: 'point', estimate_by: null, value: Math.abs(alt.value), low: null, high: null, unit, sd: null, sign: alt.sign } }];
       }
       const parsed = LivingModel.safeParse(v);
       if (!parsed.success) return { refusal: 'variant_invalid', data: { hypothesis: h.id } };

@@ -23,14 +23,14 @@ describe('thin core explicit edit: a canvas gesture applied to the living model,
   it('a goal\'s current level is set on the goal; a model-scale option setting converts on the factor\'s own frame', () => {
     expect(apply({ kind: 'factor_value_edit', target_id: 'g', value: 0.6, raw_value: 75 }).aims[0]!.target!.current).toBe(75);
     const push = apply({ kind: 'option_intervention_edit', option_id: 'push', factor_id: 'f', value: 0.8 }).options.find((o) => o.id === 'push')!;
-    expect(push.settings).toEqual([{ factor_id: 'f', value: 0.8, low: null, high: null, unit: null, source: 'user', party: null, quote: null }]);
+    expect(push.settings).toEqual([{ factor_id: 'f', estimate_by: null, value: 0.8, low: null, high: null, unit: null, source: 'user', party: null, quote: null }]);
   });
 
   it('a goal target and a link strength are kept in the person\'s units; the regenerated engine values match the gesture', () => {
     const target = apply({ kind: 'goal_target_edit', goal_node_id: 'g', constraint_type: 'at_least', raw_value: 110, unit: 'units' });
     expect(target.aims[0]!.target).toMatchObject({ comparator: '>=', value: 110, unit: 'units', current: 70 });
     const link = apply({ kind: 'edge_strength_edit', from: 'f', to: 'g', magnitude: 0.2, direction_intent: 'preserve' });
-    expect(link.links[0]!.effect).toEqual({ form: 'point', value: 25, low: null, high: null, sd: null, unit: 'units', sign: '+' });
+    expect(link.links[0]!.effect).toEqual({ form: 'point', estimate_by: null, value: 25, low: null, high: null, sd: null, unit: 'units', sign: '+' });
     const edge = mapLivingModel(link).graph.edges.find((e) => e.from === 'f' && e.to === 'g') as Record<string, any>;
     expect(edge.strength.mean).toBeCloseTo(0.2, 10);
     expect(edge.provenance).toMatchObject({ source: 'user_specified', magnitude: 'user_stated' });
@@ -217,5 +217,25 @@ describe('thin core explicit edit: a canvas gesture applied to the living model,
     expect(at(1e12, 1e12 + 500, 1e12 + 2000)).toBeNull();
     expect(at(28, 28, 50)).toBe(28);
     expect(at(0.5, 0.2, 0.8)).toBe(0.5);
+  });
+});
+
+describe('per-figure authorship in edits (estimate_by, 21 Oct)', () => {
+  it("a person's value edit replaces Olumi's estimate: the figure is theirs, the label gone", () => {
+    const m: LivingModelT = structuredClone(KNOWN_ANSWER);
+    m.factors[0] = { ...m.factors[0]!, value: 0.4, low: 0.2, high: 0.6, estimate_by: 'olumi' };
+    const out = applyExplicitEdit(m, { kind: 'factor_value_edit', target_id: 'f', value: 0.7, raw_value: 0.7 });
+    expect('model' in out && out.model.factors[0]).toMatchObject({ value: 0.7, estimate_by: null, source: 'user' });
+  });
+  it("a range around Olumi's estimate never keeps the estimate as the person's figure; around their own figure it is kept", () => {
+    const at = (estimate: 'olumi' | null) => {
+      const m: LivingModelT = structuredClone(KNOWN_ANSWER);
+      Object.assign(m.factors[0]!, { value: 28, unit: null, source: 'user', estimate_by: estimate });
+      const cap = mapLivingModel(m).frames.get('f')!.cap;
+      const out = applyExplicitEdit(m, { kind: 'prior_range_edit', target_id: 'f', range_min: 20 / cap, range_max: 40 / cap });
+      return 'model' in out ? out.model.factors[0]! : undefined;
+    };
+    expect(at('olumi')).toMatchObject({ value: null, estimate_by: null });
+    expect(at(null)).toMatchObject({ value: 28, estimate_by: null });
   });
 });

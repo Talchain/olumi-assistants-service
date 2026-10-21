@@ -7,12 +7,12 @@ export const KNOWN_ANSWER: LivingModelT = {
   options: [
     { status: 'feasible', id: 'hold', label: 'Hold', settings: [], developed_from: null, source: 'user', party: null, quote: 'or we hold' },
     { status: 'feasible', id: 'push', label: 'Push', developed_from: null, source: 'user', party: null, quote: 'push f to 1',
-      settings: [{ factor_id: 'f', value: 1, low: null, high: null, unit: null, source: 'user', party: null, quote: 'push f to 1' }] },
+      settings: [{ estimate_by: null, factor_id: 'f', value: 1, low: null, high: null, unit: null, source: 'user', party: null, quote: 'push f to 1' }] },
   ],
-  factors: [{ kind: 'factor', limit: null, id: 'f', label: 'f', value: 0.5, low: null, high: null, unit: null, defined_as: null, source: 'user', party: null, quote: 'f is at 0.5' }],
+  factors: [{ estimate_by: null, kind: 'factor', limit: null, id: 'f', label: 'f', value: 0.5, low: null, high: null, unit: null, defined_as: null, source: 'user', party: null, quote: 'f is at 0.5' }],
   // The control's explicitly specified law (AIE, 20 Oct): Normal, mean 50 and SD 10 goal units per +1 of f, existence 1.
   links: [{ id: 'f_g', from: 'f', to: 'g', source: 'user', party: null, quote: 'each +1 in f adds 50 units on average, with a standard deviation of 10',
-    effect: { form: 'normal', value: 50, sd: 10, low: null, high: null, unit: 'units', sign: '+' } }],
+    effect: { estimate_by: null, form: 'normal', value: 50, sd: 10, low: null, high: null, unit: 'units', sign: '+' } }],
   risks: [], conditions: [], views: [{ holder: 'Sam', position: 'thinks push is too risky', quote: 'Sam disagrees' }], history: [],
 };
 
@@ -26,8 +26,8 @@ export const OPTION_EFFECTS: LivingModelT = {
   ],
   factors: [],
   links: [
-    { id: 'a_w', from: 'a', to: 'w', source: 'user', party: null, quote: 'A adds exactly 30', effect: { form: 'exact', value: 30, sd: null, low: null, high: null, unit: 'widgets per hour', sign: '+' } },
-    { id: 'b_w', from: 'b', to: 'w', source: 'user', party: null, quote: 'B adds exactly 19.9', effect: { form: 'exact', value: 19.9, sd: null, low: null, high: null, unit: 'widgets per hour', sign: '+' } },
+    { id: 'a_w', from: 'a', to: 'w', source: 'user', party: null, quote: 'A adds exactly 30', effect: { estimate_by: null, form: 'exact', value: 30, sd: null, low: null, high: null, unit: 'widgets per hour', sign: '+' } },
+    { id: 'b_w', from: 'b', to: 'w', source: 'user', party: null, quote: 'B adds exactly 19.9', effect: { estimate_by: null, form: 'exact', value: 19.9, sd: null, low: null, high: null, unit: 'widgets per hour', sign: '+' } },
   ],
   risks: [], conditions: [], views: [], history: [],
 };

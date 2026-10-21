@@ -5,6 +5,10 @@
  *    found proves only who said it, not that the figure, sign or certainty follows from it: those stay with the model.
  *    An item carried over from the SAVED model UNCHANGED (same id, same content, same attribution) keeps it: it was checked
  *    when it was saved, and words that have since left the conversation window never downgrade it. A changed item is new.
+ *  · PER-FIGURE AUTHORSHIP (21 Oct, buddy SIMPLER). Olumi's estimate (`estimate_by: 'olumi'`) is only of a WHOLLY missing
+ *    figure: on a saved item whose figure the source gave, it is dropped and the given figure kept, never replaced or mixed.
+ *    Adding only an estimate to a saved, unchanged item keeps that item's attribution: the item is unchanged, the figure is
+ *    labelled Olumi's on its own. A new or otherwise changed item is checked as before.
  *  · IDS. A living-model id is the node id it compiles to, so it is made canonical (`CANONICAL_ID_REGEX`) and unique, and
  *    every reference to it is rewritten with it. Formatting, not meaning.
  */
@@ -56,7 +60,7 @@ function savedAttributions(saved: LivingModelT): Set<string> {
   return new Set([
     ...saved.aims.map((a) => attributionKey(a.id, a)),
     ...saved.factors.map((f) => attributionKey(f.id, f)),
-    ...saved.options.flatMap((o) => [attributionKey(o.id, o), ...o.settings.map((x) => attributionKey(`${o.id}:${x.factor_id}`, x))]),
+    ...saved.options.flatMap((o) => [attributionKey(o.id, optionItself(o)), ...o.settings.map((x) => attributionKey(`${o.id}:${x.factor_id}`, x))]),
     ...saved.links.map((l) => attributionKey(l.id, l)),
     ...saved.risks.flatMap((r) => [attributionKey(r.id, r), ...r.mitigations.map((x) => attributionKey(`${r.id}:${x.factor_id}`, x))]),
     ...saved.conditions.map((c) => attributionKey(`condition:${c.text}`, c)),
@@ -64,9 +68,59 @@ function savedAttributions(saved: LivingModelT): Set<string> {
   ]);
 }
 
+type Fig = Record<string, any>;
+const given = (b: { value?: number | null; low: number | null; high: number | null }): boolean => [b.value, b.low, b.high].some((v) => v != null);
+/** Each figure's own keys: a link's size is its form, spread and sign too. */
+const FIGURE = ['estimate_by', 'value', 'low', 'high', 'unit'] as const;
+const EFFECT = [...FIGURE, 'form', 'sd', 'sign'] as const;
+const OCCURRENCE = ['estimate_by', 'low', 'high'] as const;
+/**
+ * The figure as its source gave it (Codex r1 on #3603). Olumi's estimate never replaces or mixes with a figure the source gave:
+ * the WHOLE saved figure is kept. And Olumi's label never leaves a figure that did not change: a later draft cannot make
+ * Olumi's figure the person's by dropping the label.
+ */
+function guarded<T extends Fig>(next: T, before: Fig | undefined, keys: readonly string[]): T {
+  if (before === undefined) return next;
+  if (next.estimate_by === 'olumi' && before.estimate_by !== 'olumi' && given(before as { low: number | null; high: number | null })) {
+    return { ...next, ...Object.fromEntries(keys.map((k) => [k, before[k] ?? null])) };
+  }
+  const unchanged = keys.every((k) => k === 'estimate_by' || (next[k] ?? null) === (before[k] ?? null));
+  return before.estimate_by === 'olumi' && next.estimate_by !== 'olumi' && unchanged ? { ...next, estimate_by: 'olumi' } : next;
+}
+/** An option's own attribution is its words, not its settings: each setting carries its own (as a figure does). */
+const optionItself = <T extends { settings: unknown }>({ settings: _settings, ...rest }: T): Omit<T, 'settings'> => rest;
+/** The item with its Olumi-estimated figures put back as saved: equal to the saved item when ONLY an estimate was added. */
+function withoutEstimates(item: Record<string, any>, before: Record<string, any> | undefined): Record<string, any> | undefined {
+  if (before === undefined) return undefined;
+  let changed = false;
+  const out: Record<string, any> = { ...item };
+  const restore = (key: 'figure' | 'effect' | 'occurrence') => {
+    const now = key === 'figure' ? item : item[key];
+    const was = key === 'figure' ? before : before[key];
+    // Olumi's estimate where the source gave none, or a revision of Olumi's own earlier estimate: never the item's words.
+    if (now?.estimate_by !== 'olumi' || was === undefined || (given(was) && was.estimate_by !== 'olumi')) return;
+    changed = true;
+    const back = { estimate_by: was.estimate_by ?? null, value: was.value ?? null, low: was.low, high: was.high, unit: was.unit ?? null };
+    if (key === 'figure') Object.assign(out, back);
+    else if (key === 'effect') out.effect = { ...item.effect, ...back, form: was.form, sd: was.sd };
+    else out.occurrence = { ...item.occurrence, estimate_by: was.estimate_by ?? null, low: was.low, high: was.high };
+  };
+  if ('value' in item) restore('figure');
+  if (item.effect !== undefined) restore('effect');
+  if (item.occurrence !== undefined) {
+    restore('occurrence');
+    if (item.horizon_by === 'olumi' && (before.horizon_months === null || before.horizon_by === 'olumi')) { changed = true; out.horizon_months = before.horizon_months; out.horizon_by = before.horizon_by ?? null; }
+  }
+  return changed ? out : undefined;
+}
+
 export function applyKernel(model: LivingModelT, verifiedWords: readonly string[], saved?: LivingModelT): Kernelled {
   const words = verifiedWords.map(plain).filter((w) => w.length > 0);
   const kept = saved === undefined ? new Set<string>() : savedAttributions(saved);
+  const savedItem = new Map<string, Record<string, any>>(saved === undefined ? [] : [
+    ...saved.factors.map((f) => [f.id, f] as const), ...saved.links.map((l) => [l.id, l] as const), ...saved.risks.map((r) => [r.id, r] as const),
+    ...saved.options.flatMap((o) => o.settings.map((x) => [`${o.id}:${x.factor_id}`, x] as const)),
+  ]);
   const keptCurrent = (id: string, current: number | null): boolean => {
     const t = saved?.aims.find((a) => a.id === id)?.target;
     return t?.current_source === 'user' && t.current === current;
@@ -75,6 +129,8 @@ export function applyKernel(model: LivingModelT, verifiedWords: readonly string[
   const attribute = <T extends Attributed>(id: string, item: T): T => {
     if (item.source !== 'user' && item.source !== 'party') return item;
     if (kept.has(attributionKey(id, item))) return item;
+    const bare = withoutEstimates(item, savedItem.get(id));
+    if (bare !== undefined && kept.has(attributionKey(id, bare as T))) return item;
     const quote = item.quote === null ? '' : plain(item.quote);
     if (quote.length > 0 && words.some((w) => w.includes(quote))) return item;
     relabelled.push({ id, was: item.source });
@@ -96,11 +152,21 @@ export function applyKernel(model: LivingModelT, verifiedWords: readonly string[
         }
         return out;
       }),
-      factors: m.factors.map((f) => defined(attribute(f.id, f))),
-      options: m.options.map((o) => ({ ...attribute(o.id, o), settings: o.settings.map((s) => attribute(`${o.id}:${s.factor_id}`, s)) })),
-      links: m.links.map((l) => attribute(l.id, l)),
+      factors: m.factors.map((f) => defined(attribute(f.id, guarded(f, savedItem.get(f.id), FIGURE)))),
+      options: m.options.map((o) => ({ ...attribute(o.id, optionItself(o)),
+        settings: o.settings.map((s) => attribute(`${o.id}:${s.factor_id}`, guarded(s, savedItem.get(`${o.id}:${s.factor_id}`), FIGURE))) })),
+      links: m.links.map((l) => attribute(l.id, { ...l, effect: guarded(l.effect, savedItem.get(l.id)?.effect, EFFECT) })),
       // A mitigation carries its own attribution, as an option's setting does: the person's risk is not their reduction.
-      risks: m.risks.map((r) => ({ ...attribute(r.id, r), mitigations: r.mitigations.map((x) => attribute(`${r.id}:${x.factor_id}`, x)) })),
+      risks: m.risks.map((r) => {
+        // A chance or window the source gave is never replaced by Olumi's (the chance is owned FOR its window); Olumi's stays Olumi's.
+        const before = savedItem.get(r.id);
+        const occurrence = guarded(r.occurrence, before?.occurrence, OCCURRENCE);
+        const window = r.horizon_by === 'olumi' && before !== undefined && before.horizon_by !== 'olumi' && before.horizon_months !== null
+          ? { horizon_months: before.horizon_months, horizon_by: before.horizon_by ?? null }
+          : before?.horizon_by === 'olumi' && r.horizon_by !== 'olumi' && r.horizon_months === before.horizon_months ? { horizon_by: 'olumi' as const } : {};
+        const g = { ...r, occurrence, ...window };
+        return { ...attribute(r.id, g), mitigations: r.mitigations.map((x) => attribute(`${r.id}:${x.factor_id}`, x)) };
+      }),
       conditions: m.conditions.map((c) => attribute(`condition:${c.text}`, c)),
     },
     relabelled,

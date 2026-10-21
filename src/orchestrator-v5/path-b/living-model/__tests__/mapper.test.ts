@@ -79,7 +79,7 @@ describe('thin core mapper: living model → GraphV3', () => {
   it('unknown is never 0: an unstated level, a change target and an unsized link are withheld or placeholder, each with its reason', () => {
     const model: LivingModelT = structuredClone(KNOWN_ANSWER);
     model.factors[0]!.value = null;
-    model.links[0]!.effect = { form: 'direction_only', value: null, low: null, high: null, sd: null, unit: null, sign: '+' };
+    model.links[0]!.effect = { estimate_by: null, form: 'direction_only', value: null, low: null, high: null, sd: null, unit: null, sign: '+' };
     const { graph, withheld } = mapLivingModel(model);
     expect(withheld).toContainEqual({ id: 'f', reason: 'factor_level_unknown' });
     expect(node(graph, 'f').observed_state).toBeUndefined();
@@ -98,7 +98,7 @@ describe('thin core mapper: living model → GraphV3', () => {
   it('AIE 20 Oct: an ordinary range is kept but not read as a law; an unknown sign is never drawn positive; a point\'s σ is |β|/2', () => {
     const edge = (g: { edges: Record<string, unknown>[] }) => g.edges.find((e) => e.from === 'f' && e.to === 'g') as Record<string, any> | undefined;
     const range: LivingModelT = structuredClone(KNOWN_ANSWER);
-    range.links[0]!.effect = { form: 'range', value: null, low: 33.55, high: 66.45, sd: null, unit: 'units', sign: '+' };
+    range.links[0]!.effect = { estimate_by: null, form: 'range', value: null, low: 33.55, high: 66.45, sd: null, unit: 'units', sign: '+' };
     const r = mapLivingModel(range);
     expect(r.withheld).toContainEqual({ id: 'f_g', reason: 'link_range_no_law' });
     expect(edge(r.graph)!.provenance.magnitude).toBe('olumi_placeholder');
@@ -120,7 +120,7 @@ describe('thin core mapper: living model → GraphV3', () => {
     expect(edge(u.graph)).toBeUndefined();
 
     const point: LivingModelT = structuredClone(KNOWN_ANSWER);
-    point.links[0]!.effect = { form: 'point', value: 50, low: null, high: null, sd: null, unit: 'units', sign: '-' };
+    point.links[0]!.effect = { estimate_by: null, form: 'point', value: 50, low: null, high: null, sd: null, unit: 'units', sign: '-' };
     const p = edge(mapLivingModel(point).graph)!;
     expect(p).toMatchObject({ effect_direction: 'negative', provenance: { magnitude: 'user_stated' } });
     expect(p.strength.mean).toBeCloseTo(-0.4, 10);
@@ -157,7 +157,7 @@ describe('thin core mapper: living model → GraphV3', () => {
   it('Lenses 20 Oct (capacity): the person\'s own figure inside their range sizes the link as their point; the range is kept and said', () => {
     const edge = (g: { edges: Record<string, unknown>[] }) => g.edges.find((e) => e.from === 'f' && e.to === 'g') as Record<string, any>;
     const centred: LivingModelT = structuredClone(KNOWN_ANSWER);
-    centred.links[0]!.effect = { form: 'range', value: 50, low: 30, high: 70, sd: null, unit: 'units', sign: '+' };
+    centred.links[0]!.effect = { estimate_by: null, form: 'range', value: 50, low: 30, high: 70, sd: null, unit: 'units', sign: '+' };
     const c = mapLivingModel(centred);
     expect(c.withheld.filter((w) => w.id === 'f_g')).toEqual([]);
     expect(edge(c.graph)).toMatchObject({ provenance: { magnitude: 'user_stated', natural_effect: { amount: 50, amount_unit: 'units' } } });
@@ -196,9 +196,9 @@ describe('thin core mapper: living model → GraphV3', () => {
     expect(node(u.graph, 'g').observed_state, 'the goal\'s level stays a fact').toMatchObject({ raw_value: 70 });
 
     const offPath: LivingModelT = structuredClone(KNOWN_ANSWER);
-    offPath.factors.push({ id: 'h', label: 'h', kind: 'factor', value: 2, low: null, high: null, unit: null, defined_as: null, limit: null, source: 'user', party: null, quote: 'h is 2' });
+    offPath.factors.push({ id: 'h', label: 'h', kind: 'factor', estimate_by: null, value: 2, low: null, high: null, unit: null, defined_as: null, limit: null, source: 'user', party: null, quote: 'h is 2' });
     offPath.links.push({ id: 'f_h', from: 'f', to: 'h', source: 'olumi', party: null, quote: null,
-      effect: { form: 'point', value: 1, low: null, high: null, sd: null, unit: null, sign: null } });
+      effect: { estimate_by: null, form: 'point', value: 1, low: null, high: null, sd: null, unit: null, sign: null } });
     const o = mapLivingModel(offPath);
     expect(o.withheld).toContainEqual({ id: 'f_h', reason: 'link_sign_unknown' });
     expect(node(o.graph, 'g')).toMatchObject({ goal_threshold: 0.8 });
@@ -235,7 +235,7 @@ describe('thin core mapper: living model → GraphV3', () => {
     const edge = (g: { edges: Record<string, unknown>[] }) => g.edges.find((e) => e.from === 'f' && e.to === 'g') as Record<string, any>;
     const olumi: LivingModelT = structuredClone(KNOWN_ANSWER);
     olumi.factors[0] = { ...olumi.factors[0]!, value: 0.5, low: 0.3, high: 0.7, source: 'olumi', quote: null };
-    olumi.links[0] = { ...olumi.links[0]!, source: 'olumi', quote: null, effect: { form: 'range', value: 50, low: 30, high: 70, sd: null, unit: 'units', sign: '+' } };
+    olumi.links[0] = { ...olumi.links[0]!, source: 'olumi', quote: null, effect: { estimate_by: null, form: 'range', value: 50, low: 30, high: 70, sd: null, unit: 'units', sign: '+' } };
     const r = mapLivingModel(olumi);
     expect(r.withheld.filter((w) => w.id === 'f' || w.id === 'f_g')).toEqual([]);
     expect(node(r.graph, 'f').observed_state).toMatchObject({ raw_value: 0.5, source: 'cee_inference' });
@@ -324,12 +324,12 @@ describe('thin core mapper: living model → GraphV3', () => {
 
   it('Paul 21 Oct (f46a14e3): an option\'s effect on a FACTOR reaches the engine through its switch, so the option drives that factor', () => {
     const viaFactor: LivingModelT = structuredClone(OPTION_EFFECTS);
-    viaFactor.factors = [{ kind: 'factor', limit: null, id: 'k', label: 'Customer understanding', value: null, low: null, high: null, unit: null, defined_as: null, source: 'olumi', party: null, quote: null }];
+    viaFactor.factors = [{ estimate_by: null, kind: 'factor', limit: null, id: 'k', label: 'Customer understanding', value: null, low: null, high: null, unit: null, defined_as: null, source: 'olumi', party: null, quote: null }];
     viaFactor.options.push({ id: 'c', label: 'Carry on as now', settings: [], status: 'feasible', developed_from: null, source: 'olumi', party: null, quote: null });
     viaFactor.links = [
-      { id: 'a_k', from: 'a', to: 'k', source: 'olumi', party: null, quote: null, effect: { form: 'direction_only', value: null, sd: null, low: null, high: null, unit: null, sign: '+' } },
-      { id: 'b_k', from: 'b', to: 'k', source: 'olumi', party: null, quote: null, effect: { form: 'direction_only', value: null, sd: null, low: null, high: null, unit: null, sign: '-' } },
-      { id: 'k_w', from: 'k', to: 'w', source: 'olumi', party: null, quote: null, effect: { form: 'direction_only', value: null, sd: null, low: null, high: null, unit: null, sign: '+' } },
+      { id: 'a_k', from: 'a', to: 'k', source: 'olumi', party: null, quote: null, effect: { estimate_by: null, form: 'direction_only', value: null, sd: null, low: null, high: null, unit: null, sign: '+' } },
+      { id: 'b_k', from: 'b', to: 'k', source: 'olumi', party: null, quote: null, effect: { estimate_by: null, form: 'direction_only', value: null, sd: null, low: null, high: null, unit: null, sign: '-' } },
+      { id: 'k_w', from: 'k', to: 'w', source: 'olumi', party: null, quote: null, effect: { estimate_by: null, form: 'direction_only', value: null, sd: null, low: null, high: null, unit: null, sign: '+' } },
     ];
     const m = mapLivingModel(viaFactor);
     const n = (id: string) => (m.graph.nodes as Rec[]).find((x) => x.id === id)!;
@@ -372,7 +372,7 @@ describe('thin core mapper: living model → GraphV3', () => {
 
   it('AIE 17:59 point 4: an exact effect on a drawn link keeps its content but its chance is withheld; the exact sum stays the exact route', () => {
     const m: LivingModelT = structuredClone(KNOWN_ANSWER);
-    m.links[0]!.effect = { form: 'exact', value: 60, sd: null, low: null, high: null, unit: 'units', sign: '+' };
+    m.links[0]!.effect = { estimate_by: null, form: 'exact', value: 60, sd: null, low: null, high: null, unit: 'units', sign: '+' };
     const out = mapLivingModel(m);
     expect(out.withheld).toContainEqual({ id: 'f_g', reason: 'exact_not_drawable' });
     expect((out.graph.nodes as Rec[]).find((n) => n.id === 'g')).not.toHaveProperty('goal_threshold');
@@ -526,5 +526,37 @@ describe('thin core mapper: living model → GraphV3', () => {
       expect(out.withheld.filter((w) => w.id === 'g'), quote).toEqual([]);
       expect(out.assumed, quote).toEqual([]);
     }
+  });
+});
+
+describe('per-figure authorship (estimate_by, 21 Oct): Olumi\'s estimate of a wholly missing figure on another\'s item', () => {
+  it('INVARIANCE FIRST: estimate_by null on every figure maps to the same engine graph as a model saved before the field', () => {
+    const before = structuredClone(KNOWN_ANSWER) as any;
+    for (const f of before.factors) delete f.estimate_by;
+    for (const l of before.links) delete l.effect.estimate_by;
+    for (const o of before.options) for (const s of o.settings) delete s.estimate_by;
+    const withField = structuredClone(KNOWN_ANSWER) as any;
+    for (const f of withField.factors) f.estimate_by = null;
+    for (const l of withField.links) l.effect.estimate_by = null;
+    for (const o of withField.options) for (const s of o.settings) s.estimate_by = null;
+    const a = mapLivingModel(before as LivingModelT); const b = mapLivingModel(withField as LivingModelT);
+    expect(JSON.stringify({ n: b.graph.nodes, e: b.graph.edges, w: b.withheld })).toBe(JSON.stringify({ n: a.graph.nodes, e: a.graph.edges, w: a.withheld }));
+  });
+
+  it("the person's factor and link keep their source; only the figure Olumi estimated reads as Olumi's (cee_inference / olumi_estimate)", () => {
+    const m: LivingModelT = structuredClone(KNOWN_ANSWER);
+    m.factors[0] = { ...m.factors[0]!, value: 0.5, low: 0.3, high: 0.7, estimate_by: 'olumi' };
+    m.links[0] = { ...m.links[0]!, effect: { form: 'range', value: 50, low: 30, high: 70, sd: null, unit: 'units', sign: '+', estimate_by: 'olumi' } };
+    const r = mapLivingModel(m);
+    expect(m.factors[0]!.source).toBe('user');
+    expect(node(r.graph, 'f').observed_state).toMatchObject({ raw_value: 0.5, source: 'cee_inference' });
+    const edge = r.graph.edges.find((e) => e.from === 'f' && e.to === 'g') as Record<string, any>;
+    expect(edge.provenance).toMatchObject({ source: 'cee_hypothesis', magnitude: 'olumi_estimate' });
+    expect(edge.exists_probability, "the link's existence stays the person's claim").toBe(1);
+    // CONTRAST: the same figures with no estimate_by are the person's own.
+    const theirs = mapLivingModel(structuredClone({ ...m, factors: [{ ...m.factors[0]!, estimate_by: null }],
+      links: [{ ...m.links[0]!, effect: { ...m.links[0]!.effect, estimate_by: null } }] }));
+    expect(node(theirs.graph, 'f').observed_state.source).toBe('brief_extraction');
+    expect((theirs.graph.edges.find((e) => e.from === 'f') as Record<string, any>).provenance.magnitude).toBe('user_stated');
   });
 });

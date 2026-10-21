@@ -56,9 +56,9 @@ const livingFor = (brief: string): LivingModelT => {
     options: [
       { status: 'feasible', id: 'carry_on', label: 'Carry on as now', settings: [], developed_from: null, source: 'olumi', party: null, quote: null },
       { status: 'feasible', id: 'change', label: 'Make the change', developed_from: null, source: 'olumi', party: null, quote: null,
-        settings: [{ factor_id: 'level', value: 2, low: null, high: null, unit: null, source: 'olumi', party: null, quote: null }] },
+        settings: [{ estimate_by: null, factor_id: 'level', value: 2, low: null, high: null, unit: null, source: 'olumi', party: null, quote: null }] },
     ],
-    factors: [{ kind: 'factor', limit: null, id: 'level', label: 'Current level', value: 1, low: null, high: null, unit: null, defined_as: null, source: 'olumi', party: null, quote: null }],
+    factors: [{ estimate_by: null, kind: 'factor', limit: null, id: 'level', label: 'Current level', value: 1, low: null, high: null, unit: null, defined_as: null, source: 'olumi', party: null, quote: null }],
     links: [], risks: [], conditions: [], views: [], history: [],
   };
 };
@@ -468,11 +468,11 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
     expect(bodiesSeen.length).toBeGreaterThan(0);
     for (const b of bodiesSeen) {
       expect(String(b.instructions)).toContain("Build a model the analysis can run on. Each item Olumi adds is complete and visibly Olumi's");
-      expect(String(b.instructions)).toContain("Never put Olumi's figure on the person's or a party's item, and never set the goal's target figure");
+      expect(String(b.instructions)).toContain("give Olumi's provisional estimate of it with estimate_by olumi, as wide as what is genuinely unknown; never change or mix with a figure they gave, and never set the goal's target figure");
       const build = JSON.stringify((b.tools as Json[]).find((t) => t.name === 'build_model_from_brief')?.parameters ?? null);
       expect(build).toContain("For Olumi's own factor (source olumi), give Olumi's central estimate in value, with low and high around it");
       expect(build).toContain("For Olumi's own risk (source olumi), Olumi's provisional range");
-      expect(build).toContain("For Olumi's own link (source olumi), when both ends have a unit, give form range with Olumi's central estimate in value");
+      expect(build).toContain("For Olumi's own link (source olumi), when `to` has a unit and `from` has one or is an option or an on-or-off step (+1 when in place), give form range with Olumi's central estimate in value");
       expect(build, 'the old blanket rule is gone').not.toContain('never guessed');
     }
   });
