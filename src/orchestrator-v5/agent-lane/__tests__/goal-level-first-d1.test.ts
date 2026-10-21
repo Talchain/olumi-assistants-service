@@ -493,7 +493,9 @@ describe('(vi) a Run pair across the level card: the re-framed link is never "Yo
 
   it('PRECONDITION: the level moves that link\'s band; its natural size is byte-equal', async () => {
     const { before, after } = await acrossTheLevel();
-    expect(strengthRows(diffRunInputs(snap(before) as never, snap(after) as never).rows)).toEqual([KEY]);
+    // Without each Run's natural size, the band move reads as a strength change.
+    const bare = (g: Graph) => { const s = structuredClone(snap(g)) as Rec; for (const l of s.links as Rec[]) delete l.natural_effect; return s; };
+    expect(strengthRows(diffRunInputs(bare(before) as never, bare(after) as never).rows)).toEqual([KEY]);
     const ne = (g: Graph) => { const n = edgeInto(g, 'new_enterprise_customers').provenance.natural_effect;
       return { amount: n.amount, amount_unit: n.amount_unit, per_source_change: n.per_source_change, per_source_change_unit: n.per_source_change_unit }; };
     expect(ne(after)).toStrictEqual(ne(before));
@@ -511,13 +513,10 @@ describe('(vi) a Run pair across the level card: the re-framed link is never "Yo
 
   it('(2) with each Run\'s natural size recorded (the cut-7 member), the band move is no row at all', async () => {
     const { before, after } = await acrossTheLevel();
-    const withNe = (g: Graph) => {
-      const s = structuredClone(snap(g)) as Rec;
-      const n = edgeInto(g, 'new_enterprise_customers').provenance.natural_effect;
-      const l = (s.links as Rec[]).find((x) => `${x.from}->${x.to}` === KEY)!;
-      l.natural_effect = { amount: n.amount, amount_unit: n.amount_unit, per_source_change: n.per_source_change, per_source_change_unit: n.per_source_change_unit };
-      return s;
-    };
-    expect(strengthRows(diffRunInputs(withNe(before) as never, withNe(after) as never).rows)).toEqual([]);
+    // The snapshot itself records the natural size (0.78.0 links[].natural_effect).
+    const n = edgeInto(after, 'new_enterprise_customers').provenance.natural_effect;
+    expect(((snap(after) as Rec).links as Rec[]).find((x) => `${x.from}->${x.to}` === KEY)!.natural_effect).toStrictEqual(
+      { amount: n.amount, amount_unit: n.amount_unit, per_source_change: n.per_source_change, per_source_change_unit: n.per_source_change_unit });
+    expect(strengthRows(diffRunInputs(snap(before) as never, snap(after) as never).rows)).toEqual([]);
   });
 });
