@@ -135,11 +135,7 @@ export function goalCertaintyDecisions(
   const byId = new Map(nodes.map((n) => [n.id, n] as const));
   const goal = nodes.find((n) => n.kind === 'goal');
   if (goal === undefined || typeof goal.id !== 'string') return [];
-  const evaluations = new Map((identityEvaluations ?? []).filter(isRec)
-    // Retain metadata only from an attestation of THIS declaration, including accumulation's month/input order.
-    .filter((e) => typeof e.node_id === 'string' && evaluatedIdentityCarriers(nodes, [e]).has(e.node_id))
-    .map((e) => [e.node_id as string, e] as const));
-  const evaluated = (id: unknown): boolean => typeof id === 'string' && evaluations.has(id);
+  const { evaluations, evaluated, exact } = linkExactness(graph, nodes, edges, identityEvaluations);
   const declared = isRec(goal.nonlinear_identity) ? goal.nonlinear_identity : undefined;
   const identity = declared !== undefined && evaluated(goal.id) ? declared : undefined;
   const operands = new Set(Array.isArray(identity?.factor_ids) ? identity!.factor_ids.filter((x): x is string => typeof x === 'string') : []);
@@ -159,16 +155,6 @@ export function goalCertaintyDecisions(
           : unlinkedOperand !== undefined ? 'operand_not_parent'
             : extraParent !== undefined ? 'extra_goal_parent'
               : undefined;
-  // #2473 CR P2 (CODEX_CLI_OVERFLOW 5937437431): the same unit-less-limit-node reading as every other sized reader.
-  const sized = sizedLinkTest(nodes, limitUnitsOf(graph.goal_constraints), edges);
-  // ⭐ T1b (Science d5, 6 Oct; Codex r1 on #2648): the user's sizes on both sides of a level-less mediator size that path
-  // here too, by the ONE reader P5 uses, so a certainty through it is never called "isn't sized".
-  const userChain = userSizedLevelLessLinks(graph);
-  const exact = (e: Rec): boolean => {
-    const to = byId.get(e.to);
-    const id = isRec(to?.nonlinear_identity) && evaluated(to!.id) ? to!.nonlinear_identity : undefined;
-    return (Array.isArray(id?.factor_ids) && id!.factor_ids.includes(e.from)) || sized(e) || userChain.has(`${String(e.from)}→${String(e.to)}`);
-  };
   const good = goodSign(goal.goal_direction);
   const out: GoalCertaintyDecision[] = [];
 
@@ -248,6 +234,77 @@ export function goalCertaintyDecisions(
     });
   }
   return out;
+}
+
+/**
+ * The certainty walk's ONE exactness test for a link, shared with {@link exactnessEarned}: a link from an identity operand
+ * INTO its identity, when THIS run evaluated that identity (`operandLink`); a sized link; or the user's sizes on both sides of
+ * a level-less mediator.
+ */
+function linkExactness(graph: Rec, nodes: Rec[], edges: Rec[], identityEvaluations?: ReadonlyArray<unknown>) {
+  const byId = new Map(nodes.map((n) => [n.id, n] as const));
+  const evaluations = new Map((identityEvaluations ?? []).filter(isRec)
+    // Retain metadata only from an attestation of THIS declaration, including accumulation's month/input order.
+    .filter((e) => typeof e.node_id === 'string' && evaluatedIdentityCarriers(nodes, [e]).has(e.node_id))
+    .map((e) => [e.node_id as string, e] as const));
+  const evaluated = (id: unknown): boolean => typeof id === 'string' && evaluations.has(id);
+  // #2473 CR P2 (CODEX_CLI_OVERFLOW 5937437431): the same unit-less-limit-node reading as every other sized reader.
+  const sized = sizedLinkTest(nodes, limitUnitsOf(graph.goal_constraints), edges);
+  // ⭐ T1b (Science d5, 6 Oct; Codex r1 on #2648): the user's sizes on both sides of a level-less mediator size that path
+  // here too, by the ONE reader P5 uses, so a certainty through it is never called "isn't sized".
+  const userChain = userSizedLevelLessLinks(graph);
+  const operandLink = (e: Rec): boolean => {
+    const to = byId.get(e.to);
+    const id = isRec(to?.nonlinear_identity) && evaluated(to!.id) ? to!.nonlinear_identity : undefined;
+    return Array.isArray(id?.factor_ids) && id!.factor_ids.includes(e.from);
+  };
+  const exact = (e: Rec): boolean => operandLink(e) || sized(e) || userChain.has(`${String(e.from)}→${String(e.to)}`);
+  return { evaluations, evaluated, operandLink, exact };
+}
+
+/**
+ * ⭐ F1 (Track 3, DL lease 21 Oct): is a zero-spread result for this option the person's own exact arithmetic? Only then may
+ * its side be said ("With your exact figures, …"); otherwise #3017's line stays. Earned when everything the goal's result
+ * rests on is exact and the person's own:
+ *   · every link into the goal's ancestry (through factors, outcomes and risks) passes the walk's own test (`exact`) and,
+ *     unless it is an operand's link into an identity THIS run evaluated, is sized by the person or is Olumi's size they
+ *     approved;
+ *   · every level on it is theirs (`isUsersLevelOrApproved`), except the exact sum's change, 0 today by definition
+ *     (`quantity_frame: 'change'`); a root with no level fails;
+ *   · every setting the option makes on it is theirs, or holds a factor at its level today (it moves nothing).
+ * The zero spread itself is the caller's test (`zeroSpread`). Pure; anything unreadable fails closed.
+ */
+export function exactnessEarned(graph: unknown, optionId: string, identityEvaluations?: ReadonlyArray<unknown>): boolean {
+  if (!isRec(graph) || !Array.isArray(graph.nodes)) return false;
+  const nodes = graph.nodes.filter(isRec);
+  const edges = Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
+  const byId = new Map(nodes.map((n) => [n.id, n] as const));
+  const goal = nodes.find((n) => n.kind === 'goal');
+  const option = byId.get(optionId);
+  if (goal === undefined || option?.kind !== 'option') return false;
+  const { operandLink, exact } = linkExactness(graph, nodes, edges, identityEvaluations);
+  const walked = (id: unknown): boolean => byId.get(id)?.kind !== 'option' && byId.get(id)?.kind !== 'decision';
+  const ancestry = new Set<unknown>([goal.id]);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const e of edges) if (ancestry.has(e.to) && !ancestry.has(e.from) && walked(e.from)) { ancestry.add(e.from); grew = true; }
+  }
+  const into = edges.filter((e) => ancestry.has(e.to) && walked(e.from));
+  const ownSize = (e: Rec): boolean => linkSizing(e) === 'user' || linkSizing(e) === 'olumi_accepted';
+  if (!into.every((e) => byId.has(e.from) && exact(e) && (operandLink(e) || ownSize(e)))) return false;
+  for (const id of ancestry) {
+    const n = byId.get(id)!;
+    const level = levelOf(n);
+    const figure = level.raw ?? level.value;
+    if (n.quantity_frame === 'change' && figure === 0) continue;
+    if (figure === undefined ? !into.some((e) => e.to === id) : !userOwns(level.observed)) return false;
+  }
+  return Object.entries(mergeInterventionSourceObjects(option)).every(([factorId, set]) => {
+    if (!ancestry.has(factorId)) return true;
+    const to = interventionLevel(set);
+    const now = levelOf(byId.get(factorId));
+    return (to.value !== undefined && to.value === now.value) || userOwns(set);
+  });
 }
 
 /**

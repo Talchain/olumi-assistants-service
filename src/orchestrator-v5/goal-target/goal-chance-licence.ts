@@ -53,7 +53,7 @@ import { classifyUnitScaleClass, UNIT_SCALE_CLASS_TOKENS } from '../../cee/draft
 import { recordedMeasureOf } from '../statement-door/fields/measure.js';
 import { goalTargetBasisIn, humanEffectsTimingOf, laterTimingWords, timingBasisNote } from '../statement-door/fields/goal-timing.js';
 import { sayGoalChange } from '../agent-lane/limit-frame.js';
-import { zeroSpread, sameFrameArithmeticAgreement, PAIRED_REFERENCE_PRECISION } from '../agent-lane/goal-certainty.js';
+import { exactnessEarned, zeroSpread, sameFrameArithmeticAgreement, PAIRED_REFERENCE_PRECISION } from '../agent-lane/goal-certainty.js';
 import { goalTargetRow, statedGoalTargetOf } from './stated-goal-target.js';
 import { readGoalRecord, type GoalRecord } from './goal-record.js';
 import { goalChanceTargetCause } from './goal-chance-gate.js';
@@ -144,8 +144,9 @@ export interface GoalChanceZeroSpread {
   /**
    * ⭐ S7 B2 (capacity e2e c1e944a4 judge item 3): `fixed_baseline` where the option is the status quo holding every factor at
    * today's value (no intervention), so its result has nothing in this model that varies. Absent: only the measured spread.
+   * ⭐ F1 (Track 3): `exact_own_figures` where the result is the person's own exact arithmetic (`exactnessEarned`).
    */
-  readonly basis?: 'fixed_baseline';
+  readonly basis?: 'fixed_baseline' | 'exact_own_figures';
 }
 
 /**
@@ -457,6 +458,40 @@ function fixedBaselineOf(sentRun: unknown, graph: unknown): { readonly id: strin
   return label === undefined ? undefined : { id, label };
 }
 
+/**
+ * ⭐ F1 (Track 3; DL lease 21 Oct; wording with Paul): the zero-spread line for an option whose result is the person's own exact
+ * arithmetic. It says which side of the target the model's result is on, worded by the goal's comparator, and never a chance.
+ */
+export const zeroSpreadExactLine = (option: string, where: string): string =>
+  `With your exact figures, the model’s result for ‘${option}’ is ${where} the target. It can’t say how likely that is: add a range to the figures you’re least sure of.`;
+/** That line's shape, for the stored-licence reader (no other line carries the basis). */
+const EXACT_OWN_FIGURES_LINE = /^With your exact figures, the model’s result for ‘[^‘’\r\n]+’ is (?:at or above|at or below|above|below) the target\. It can’t say how likely that is: add a range to the figures you’re least sure of\.$/u;
+/** Where the result sits, by the goal's comparator and the Run's side; none for a comparator it cannot word. */
+const EXACT_SIDE_WORDS: Readonly<Record<string, Readonly<Record<'meets' | 'falls_short', string>>>> = {
+  '>=': { meets: 'at or above', falls_short: 'below' }, '>': { meets: 'above', falls_short: 'at or below' },
+  '<=': { meets: 'at or below', falls_short: 'above' }, '<': { meets: 'below', falls_short: 'at or above' },
+};
+
+/**
+ * F1: each zero-spread option whose result `exactnessEarned` finds is the person's own exact arithmetic, on THIS Run's own
+ * identity evaluations, with its line. An option without a sayable label, or a goal without a comparator, gets none.
+ */
+function exactOwnFiguresLines(
+  sides: Readonly<Record<string, 'meets' | 'falls_short'>>, graph: unknown, goal: Rec | undefined, envelope: unknown,
+): Record<string, string> {
+  const words = typeof goal?.goal_direction === 'string' && Object.hasOwn(EXACT_SIDE_WORDS, goal.goal_direction)
+    ? EXACT_SIDE_WORDS[goal.goal_direction] : undefined;
+  const evaluations = isRec(envelope) && Array.isArray(envelope.identity_evaluations) ? envelope.identity_evaluations : undefined;
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const out: Record<string, string> = {};
+  for (const [id, side] of Object.entries(sides)) {
+    const node = nodes.find((n) => n.id === id && n.kind === 'option');
+    const label = typeof node?.label === 'string' && node.label.trim() !== '' && !/[\r\n‘’]/.test(node.label) ? node.label.trim() : undefined;
+    if (words !== undefined && label !== undefined && exactnessEarned(graph, id, evaluations)) out[id] = zeroSpreadExactLine(label, words[side]);
+  }
+  return out;
+}
+
 /** The goal's target as the face says it: the shared formatter's rate separator (" / month") is the panel's, the face's is "a month". */
 const zeroSpreadFigure = (value: number, unit: string): string => sayFigureAsWritten(value, unit).replace(/ \/ (day|week|month|quarter|year)$/, ' a $1');
 
@@ -472,6 +507,7 @@ function retiredPlainZeroSpreadLine(side: 'meets' | 'falls_short', value: number
 
 function zeroSpreadReasons(
   sides: Readonly<Record<string, 'meets' | 'falls_short'>>, graph: unknown, envelope: unknown, sentRun?: unknown, goalLabel?: string,
+  exactLines: Readonly<Record<string, string>> = {},
 ): Record<string, GoalChanceZeroSpread> {
   const verdict = goalHorizonVerdict(graph, envelope);
   const out: Record<string, GoalChanceZeroSpread> = {};
@@ -481,6 +517,10 @@ function zeroSpreadReasons(
   for (const [id, side] of Object.entries(sides)) {
     if (verdict !== 'withhold' && fixed !== undefined && id === fixed.id) {
       out[id] = { reason: 'zero_spread', side, line: zeroSpreadFixedBaselineLine(fixed.label, goalLabel!), basis: 'fixed_baseline' };
+      continue;
+    }
+    if (verdict !== 'withhold' && Object.hasOwn(exactLines, id)) {
+      out[id] = { reason: 'zero_spread', side, line: exactLines[id]!, basis: 'exact_own_figures' };
       continue;
     }
     const line = verdict === 'withhold' ? zeroSpreadNoCarrierHorizonLine() : ZERO_SPREAD_LINE;
@@ -903,7 +943,8 @@ export function goalChanceLicenceOf(
   // Science §(ab)(2)'s typed zero-spread reasons, and (AIE disposition) the status quo whose row disagrees with the same-draw
   // reference: withheld with that reason, never relabelled.
   const withheldReasons: Record<string, GoalChanceWithheldReason> = {
-    ...(Object.keys(zeroSpreadSide).length > 0 ? zeroSpreadReasons(zeroSpreadSide, horizonGraph, envelope, constraints.sentRun, goalLabel) : {}),
+    ...(Object.keys(zeroSpreadSide).length > 0 ? zeroSpreadReasons(zeroSpreadSide, horizonGraph, envelope, constraints.sentRun, goalLabel,
+      exactOwnFiguresLines(zeroSpreadSide, graph, goal, envelope)) : {}),
     ...Object.fromEntries(Object.entries(unearnedSide).flatMap(([id, side]) => {
       const line = shareUnearnedCertaintyLine(graph, id, side);
       return line === undefined ? [] : [[id, { reason: 'unearned_certainty' as const, side, line }]];
@@ -1801,7 +1842,8 @@ export function goalChanceLicenceForAgent(result: unknown): {
         && reason.line === retiredPlainZeroSpreadLine(reason.side, storedTarget.value as number, storedTarget.unit as string);
       const line = retired ? ZERO_SPREAD_LINE : reason.line;
       // S7 B2: the stored fixed-baseline basis is kept only beside its own line (a basis never re-labels another line).
-      const basis = reason.basis === 'fixed_baseline' && FIXED_BASELINE_LINE.test(line) ? { basis: 'fixed_baseline' as const } : {};
+      const basis = reason.basis === 'fixed_baseline' && FIXED_BASELINE_LINE.test(line) ? { basis: 'fixed_baseline' as const }
+        : reason.basis === 'exact_own_figures' && EXACT_OWN_FIGURES_LINE.test(line) ? { basis: 'exact_own_figures' as const } : {};
       zeroSpreadReasons[id] = { reason: 'zero_spread', side: reason.side, line, ...basis };
     } else if (reason.reason === 'unearned_certainty' && (reason.side === 'meets' || reason.side === 'falls_short')) {
       // DL (14 Oct): the stored Run's own words for a deadline-forecast certainty it did not earn.
