@@ -216,9 +216,7 @@ export function structuralFacts(
       if (n.id === goal.id) continue;
       const hit = reachable(adjacency, n.id).has(goal.id);
       if (n.kind === 'option') (hit ? reaching : notReaching).push(labelOf(n.id));
-      // ⭐ Context (DL ruling 21 Oct): any other item with no path to the goal is context, said by the host and never a
-      // blocker, so it is not raised to the Agent as "cannot reach the goal". Only a stranded decision still is.
-      else if (!hit && n.kind === 'decision' && touched.has(n.id) && !sinkBranch.has(n.id) && !leftOut.has(n.id)) strandedNonOptions.push(labelOf(n.id));
+      else if (!hit && touched.has(n.id) && !sinkBranch.has(n.id) && !leftOut.has(n.id)) strandedNonOptions.push(labelOf(n.id));
     }
   }
 

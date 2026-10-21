@@ -681,10 +681,11 @@ describe('POST /orchestrate/v2/turn — structural_add under a REUSED turn id an
       ((ar?.[field] ?? []) as Array<{ factor_id?: unknown }>)
         .map((entry) => entry.factor_id)
         .filter((id): id is string => typeof id === 'string');
-    // R5 retires the mapping demand; the stored orphan still blocks under its structural issue.
+    // R5 retires the mapping demand. ⭐ DL ruling 21 Oct (structure class): the stored unlinked X is context, so it is no
+    // longer ORPHAN_NODE; readiness still names X by id (its UNREACHABLE_CONTROLLABLE_FACTOR note), so the control holds.
     expect.soft(factorIdsIn('blockers'), `A: retired mapping demand is absent (${observed})`).toEqual([]);
     expect.soft((ar?.readiness_issues as Array<{ factor_id?: string; code: string }>).filter(i => i.factor_id === X.id).map(i => i.code),
-      `A: present control — readiness names stored X, never candidate Y (${observed})`).toEqual(['ORPHAN_NODE', 'UNREACHABLE_CONTROLLABLE_FACTOR']);
+      `A: present control — readiness names stored X, never candidate Y (${observed})`).toEqual(['UNREACHABLE_CONTROLLABLE_FACTOR']);
     expect.soft(ar?.may_run).toBe(false);
     expect.soft(
       factorIdsIn('blockers'),
