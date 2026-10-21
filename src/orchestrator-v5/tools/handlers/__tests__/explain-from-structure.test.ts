@@ -17,15 +17,11 @@ import {
 } from '@talchain/schemas/orchestrator';
 
 import { createExplainFromStructureHandler } from '../explain-from-structure.js';
-import {
-  composeSelectedDependenciesEvidenceAnswer,
-  composeStructuralPairEvidenceAnswer,
-} from '../explanation-fallback.js';
 import type { HandlerInvocation } from '../../registry.js';
 import type { StructureProjectionSummary } from '../../../context/projection-summaries.js';
 import { validateToolCall } from '../../../routing/validator.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../../../routing/validation-registry.js';
-import type { ProposalAction } from '../../../routing/types.js';
+import type { ProposalAction, StructureQuery } from '../../../routing/types.js';
 import { createRegistry, resolveHandler } from '../../registry.js';
 import type { ScenarioReader } from '../run-analysis.js';
 import type { PLoTClient } from '../../../../orchestrator/plot-client.js';
@@ -247,139 +243,39 @@ describe('explain_from_structure — answer-carrying contract', () => {
     expect(outcome.suppress_orientation).toBe(true);
   });
 
-  it('selected canonical neighbourhood outranks valid prose that invents an unlisted relationship', async () => {
+  // REBOUND from "selected canonical neighbourhood outranks valid prose that invents an
+  // unlisted relationship": the typed evidence carriers that used to supply that precedence
+  // were never fed at runtime and are gone. The live guard is the licence itself — a
+  // non-`general` structure_query kind never uses the authored answer, however valid.
+  it('a dependencies / outgoing_influence query never uses valid authored prose that invents an unlisted relationship', async () => {
     const handler = createExplainFromStructureHandler();
     const invented =
       'Sales rep time depends on automation, and the phased pilot directly feeds into automation before it reaches the outcome.';
-    const outcome = await handler({
+    const queries: StructureQuery[] = [
+      { kind: 'dependencies', element_id: 'node_sales_rep_time' },
+      { kind: 'outgoing_influence', element_id: 'node_sales_rep_time' },
+    ];
+    for (const structure_query of queries) {
+      const outcome = await handler({
+        ...makeInvocation({ optionCount: 4, proposal: buildProposal({ structure_query }) }),
+        explanation: { answer_text: invented, answer_text_valid: true },
+        structureProjection: STRUCTURE_PROJECTION,
+      });
+      expect(outcome.assistant_text, structure_query.kind).not.toBe(invented);
+      expect(outcome.assistant_text, structure_query.kind).not.toContain('phased pilot');
+      // It gets the deterministic projection instead.
+      expect(outcome.assistant_text, structure_query.kind).toContain('Engineering Capacity');
+      expect(outcome.handler_facts[0], structure_query.kind).toMatchObject({
+        result: { answer_source: 'deterministic_fallback', fallback_reason: 'missing' },
+      });
+    }
+    // CONTRAST: the same valid prose under `general` IS used, so the refusal above is the kind gate.
+    const general = await handler({
       ...makeInvocation({ optionCount: 4 }),
       explanation: { answer_text: invented, answer_text_valid: true },
-      selectedDependenciesEvidence: {
-        status: 'resolved',
-        selected_label: 'Sales rep time on selling activities',
-        dependencies: [
-          {
-            from_label: 'Sales process automation level',
-            to_label: 'Sales rep time on selling activities',
-            edge_type: 'directed',
-            relationship: 'moderate positive link',
-          },
-          {
-            from_label: 'CRM adoption and usability',
-            to_label: 'Sales rep time on selling activities',
-            edge_type: 'directed',
-            relationship: 'moderate positive link',
-          },
-        ],
-        bidirected: [],
-      },
+      structureProjection: STRUCTURE_PROJECTION,
     });
-
-    expect(outcome.assistant_text).toContain(
-      'from Sales process automation level to Sales rep time on selling activities',
-    );
-    expect(outcome.assistant_text).toContain(
-      'from CRM adoption and usability to Sales rep time on selling activities',
-    );
-    expect(outcome.assistant_text).not.toContain('phased pilot');
-    expect(outcome.assistant_text).not.toBe(invented);
-    expect(outcome.handler_facts[0]).toMatchObject({
-      result: { answer_source: 'deterministic_fallback', fallback_reason: null },
-    });
-  });
-
-  it('renders zero incoming coverage narrowly and keeps bidirected associations non-causal', async () => {
-    const handler = createExplainFromStructureHandler();
-    const none = await handler({
-      ...makeInvocation(),
-      selectedDependenciesEvidence: {
-        status: 'resolved',
-        selected_label: 'Sales rep time on selling activities',
-        dependencies: [],
-        bidirected: [],
-      },
-    });
-    expect(none.assistant_text).toContain('no direct incoming dependency');
-    expect(none.assistant_text).toContain('does not prove');
-
-    const bidirected = await handler({
-      ...makeInvocation(),
-      selectedDependenciesEvidence: {
-        status: 'resolved',
-        selected_label: 'Sales rep time on selling activities',
-        dependencies: [],
-        bidirected: [{
-          from_label: 'Ramp and disruption time',
-          to_label: 'Sales rep time on selling activities',
-          edge_type: 'bidirected',
-          relationship: 'moderate co-movement',
-        }],
-      },
-    });
-    expect(bidirected.assistant_text).toContain('is bidirected');
-    expect(bidirected.assistant_text).toContain('does not license causal influence');
-    expect(bidirected.assistant_text).not.toContain('direct, directed connector');
-  });
-
-  // PR #1229 review guard (4), at the surface the user actually reads.
-  it('does not tell a user with one resolved selected element to name or select one', async () => {
-    const handler = createExplainFromStructureHandler();
-    const marked = await handler({
-      ...makeInvocation(),
-      selectedDependenciesEvidence: {
-        status: 'ambiguous', subject_selection: 'single_resolved',
-      },
-    });
-    // The unmarked branch's instruction was reworded by the whole-model copy
-    // lane ("name it" → "name that part exactly as it appears in your model").
-    // Both halves of this guard track the CURRENT phrase, so the marked/unmarked
-    // discrimination stays real instead of decaying into a check for a string
-    // that no longer exists anywhere.
-    expect(marked.assistant_text.toLowerCase()).not.toContain('select it on the canvas');
-    expect(marked.assistant_text).toContain('will not guess at what connects to it');
-    // In-suite CONTRAST: the unmarked verdict still carries the instruction.
-    const unmarked = await handler({
-      ...makeInvocation(),
-      selectedDependenciesEvidence: { status: 'ambiguous' },
-    });
-    expect(unmarked.assistant_text).toContain('select it on the canvas');
-  });
-
-  it('selected neighbourhood ambiguity and unavailable coverage fail weak instead of restoring authored prose', async () => {
-    const handler = createExplainFromStructureHandler();
-    const authored =
-      'The selected item definitely has a direct relationship from the phased pilot and no other inputs.';
-    const ambiguous = await handler({
-      ...makeInvocation(),
-      explanation: { answer_text: authored, answer_text_valid: true },
-      selectedDependenciesEvidence: { status: 'ambiguous' },
-    });
-    expect(ambiguous.assistant_text).toContain('will not guess at what connects to it');
-    expect(ambiguous.assistant_text).not.toBe(authored);
-
-    const unavailable = await handler({
-      ...makeInvocation(),
-      explanation: { answer_text: authored, answer_text_valid: true },
-      selectedDependenciesEvidence: {
-        status: 'coverage_unavailable',
-        reason: 'graph_coverage_unavailable',
-      },
-    });
-    expect(unavailable.assistant_text).toContain('was withheld from this turn');
-    expect(unavailable.assistant_text).not.toContain('phased pilot');
-
-    const structural = await handler({
-      ...makeInvocation(),
-      explanation: { answer_text: authored, answer_text_valid: true },
-      selectedDependenciesEvidence: {
-        status: 'coverage_unavailable',
-        reason: 'structural_semantics_unlicensed',
-      },
-    });
-    expect(structural.assistant_text).toContain('structural connector');
-    expect(structural.assistant_text).toContain('cannot safely treat');
-    expect(structural.assistant_text).not.toContain('was withheld');
-    expect(structural.assistant_text).not.toContain('phased pilot');
+    expect(general.assistant_text).toBe(invented);
   });
 
   it('legacy omission cannot let an authored relationship claim bypass typed authority', async () => {
@@ -477,75 +373,42 @@ describe('explain_from_structure — answer-carrying contract', () => {
     expect(outcome.suppress_orientation).toBe(true);
   });
 
-  it('canonical pair evidence outranks a form-valid Sonnet answer that invents a path', async () => {
+  // REBOUND from "canonical pair evidence outranks a form-valid Sonnet answer that invents a
+  // path": the pair carrier was never fed at runtime and is gone; the live guard is that a
+  // two-element query kind never licenses the authored answer.
+  it('a direct_relationship / reachability query never uses valid authored prose that invents a path', async () => {
     const handler = createExplainFromStructureHandler();
-    const outcome = await handler({
-      ...makeInvocation(),
-      explanation: {
-        answer_text:
-          'Enterprise Integration Investment reaches Preserve Strategic Flexibility through Enterprise Revenue Expansion, so the saved model establishes a two-step path between them.',
-        answer_text_valid: true,
+    const invented =
+      'Enterprise Integration Investment reaches Preserve Strategic Flexibility through Enterprise Revenue Expansion, so the saved model establishes a two-step path between them.';
+    const queries: StructureQuery[] = [
+      { kind: 'direct_relationship', element_ids: ['node_integration', 'node_flexibility'] },
+      {
+        kind: 'reachability',
+        source_element_id: 'node_integration',
+        target_element_id: 'node_flexibility',
       },
-      structureProjection: STRUCTURE_PROJECTION,
-      structuralPairEvidence: {
-        status: 'no_direct',
-        first_label: 'Enterprise Integration Investment',
-        second_label: 'Preserve Strategic Flexibility',
-      },
-    });
-    expect(outcome.assistant_text).toContain('lists no direct connector');
-    expect(outcome.assistant_text).toContain(
-      'does not decide the separate reachability question',
-    );
-    expect(outcome.assistant_text).not.toContain('Enterprise Revenue Expansion');
-    const fact = outcome.handler_facts[0];
-    if (fact.fact_type === 'explain_from_structure') {
-      expect(fact.result.answer_source).toBe('deterministic_fallback');
-      expect(fact.result.fallback_reason).toBeNull();
+    ];
+    for (const structure_query of queries) {
+      const outcome = await handler({
+        ...makeInvocation({ proposal: buildProposal({ structure_query }) }),
+        explanation: { answer_text: invented, answer_text_valid: true },
+        structureProjection: STRUCTURE_PROJECTION,
+      });
+      expect(outcome.assistant_text, structure_query.kind).not.toBe(invented);
+      expect(outcome.assistant_text, structure_query.kind).not.toContain('Enterprise Revenue Expansion');
+      expect(outcome.assistant_text, structure_query.kind).not.toContain('two-step');
+      expect(outcome.assistant_text, structure_query.kind).toContain('Engineering Capacity');
+      expect(outcome.handler_facts[0], structure_query.kind).toMatchObject({
+        result: { answer_source: 'deterministic_fallback', fallback_reason: 'missing' },
+      });
     }
-  });
-
-  it('canonical pair evidence also outranks the direction-erasing generic fallback', async () => {
-    const handler = createExplainFromStructureHandler();
-    const outcome = await handler({
+    // CONTRAST: the same valid prose under `general` IS used.
+    const general = await handler({
       ...makeInvocation(),
-      explanation: {
-        answer_text: 'The edge wording is rejected before it can reach the user.',
-        answer_text_valid: false,
-        answer_validation_error: 'forbidden_internal_term',
-      },
-      structureProjection: {
-        ...STRUCTURE_PROJECTION,
-        named_factor_label: 'Enterprise Integration Investment',
-        named_factor_pathways: [
-          {
-            label_from: 'Enterprise Integrations',
-            label_to: 'Enterprise Integration Investment',
-            edge_type: 'directed',
-            strength: 1,
-          },
-        ],
-      },
-      structuralPairEvidence: {
-        status: 'direct',
-        first_label: 'Enterprise Revenue Expansion',
-        second_label: 'Enterprise Integration Investment',
-        coverage: 'complete',
-        relationships: [
-          {
-            from_label: 'Enterprise Integration Investment',
-            to_label: 'Enterprise Revenue Expansion',
-            edge_type: 'directed',
-            relationship: 'moderate positive link',
-            coefficient_confidence: 'moderate',
-          },
-        ],
-      },
+      explanation: { answer_text: invented, answer_text_valid: true },
+      structureProjection: STRUCTURE_PROJECTION,
     });
-    expect(outcome.assistant_text).toContain(
-      'from Enterprise Integration Investment to Enterprise Revenue Expansion, not the reverse',
-    );
-    expect(outcome.assistant_text).not.toContain('Enterprise Integrations');
+    expect(general.assistant_text).toBe(invented);
   });
 });
 
@@ -688,135 +551,5 @@ describe('explain_from_structure — Test A calibration (validator-rejection fai
     expect(outcome.assistant_text).toMatch(/(weak|moderate|strong|very strong) (direct )?link/);
     expect(outcome.assistant_text).not.toMatch(/-?\d+\.\d/);
     expect(outcome.assistant_text.length).toBeGreaterThan(80);
-  });
-});
-
-/**
- * ⭐⭐⭐ THE REFUSAL WAS RIGHT AND ITS WORDS WERE NOT — captured 1 Sep 2026,
- * deployed staging, turn 4 of four.
- *
- *   USER "You only have one factor… explain why you produced this model."
- *   CEE  "I cannot establish one unique Living Model element and matching
- *         dependency question, so I will not guess its relationships. Name or
- *         select one element and ask again."
- *
- * ⚠⚠ A CORRECTED PREMISE, MEASURED RATHER THAN ARGUED. The change this lane was
- * briefed to make — exclude `status === 'ambiguous'` from the handler's evidence
- * gate so the non-verdict stops displacing the deterministic projection — was
- * IMPLEMENTED AND RUN. It turns an honest refusal into a CONFIDENT ANSWER TO A
- * DIFFERENT QUESTION, and four route-level guards in
- * `../../../__tests__/b2-bounded-answer-routing.integration.test.ts` go RED on it:
- *
- *   · does not let another existing canonical object replace the object
- *     explicitly named in the dependency question
- *   · does not let a query/entity identity disagreement replace the object
- *     explicitly named in the dependency question
- *   · does not treat a valid dependency proposal as a referent for an unselected
- *     deictic question
- *   · fails weak when the selected identity conflicts with the model-typed
- *     dependency subject
- *
- * In every one the user named or selected a SPECIFIC element, the identity could
- * not be established, and the projection then described whatever relationships it
- * could see — e.g. *"Replace CRM has the strongest visible direct influence on
- * Sales Rep Adoption Rate…"* in answer to *"What does 'Reach 1,500 paid teams'
- * depend on?"*. That is the inverse defect and the worse one, because it is
- * confident. The verdict therefore stays authoritative and only the WORDS change.
- *
- * ⚠ SO TURN 4 IS NOT FIXED BY THIS COMMIT, and its root cause is named rather
- * than papered over: the router proposed `structure_query.kind: 'dependencies'`
- * for a whole-model question whose correct kind is `general`. A `general` query
- * produces no dependency evidence at all — derived over the whole StructureQuery
- * union in `routing/__tests__/structural-pair-evidence.test.ts` — so with the
- * right kind the user would have received the structural explanation they asked
- * for. That is a ROUTER change, with its own corpus and its own blast radius.
- */
-describe('explain_from_structure — the ambiguous refusal speaks the user’s language', () => {
-  /** OUR words for OUR data structures. None may reach a user. */
-  const INTERNAL_VOCABULARY = [
-    'Living Model element',
-    'dependency question',
-    'subject_selection',
-    'coverage_unavailable',
-    'structure_query',
-  ];
-
-  it('⭐ THE CAPTURED COPY: neither ambiguous flavour leaks internal vocabulary', async () => {
-    const handler = createExplainFromStructureHandler();
-    for (const evidence of [
-      { status: 'ambiguous' } as const,
-      { status: 'ambiguous', subject_selection: 'single_resolved' } as const,
-    ]) {
-      const outcome = await handler({
-        ...makeInvocation(),
-        selectedDependenciesEvidence: evidence,
-        structureProjection: STRUCTURE_PROJECTION,
-      });
-      for (const phrase of INTERNAL_VOCABULARY) {
-        expect(
-          outcome.assistant_text,
-          `internal vocabulary reached the user (${evidence.subject_selection ?? 'unmarked'}): ${phrase}`,
-        ).not.toContain(phrase);
-      }
-      // POSITIVE CONTROL for the probe: the copy IS the ambiguous copy, so the
-      // absences above are about a string that exists rather than about silence.
-      expect(outcome.assistant_text).toContain('will not guess at what connects to it');
-    }
-  });
-
-  it('⭐ THE OPPOSITE DIRECTION: the refusal still REFUSES — it names no relationship', async () => {
-    // The whole reason the verdict was left authoritative. A refusal that
-    // started describing the model would be the inverse defect.
-    const handler = createExplainFromStructureHandler();
-    const outcome = await handler({
-      ...makeInvocation(),
-      explanation: { answer_text: VALID_ANSWER_TEXT, answer_text_valid: true },
-      selectedDependenciesEvidence: { status: 'ambiguous' },
-      structureProjection: STRUCTURE_PROJECTION,
-    });
-    expect(outcome.assistant_text).not.toContain('Engineering Capacity');
-    expect(outcome.assistant_text).not.toContain('Q3 Throughput');
-    expect(outcome.assistant_text).not.toBe(VALID_ANSWER_TEXT);
-    expect(outcome.handler_facts[0]).toMatchObject({
-      result: { answer_source: 'deterministic_fallback', fallback_reason: null },
-    });
-  });
-
-  it('⭐ THE OPPOSITE DIRECTION: an ANSWERING verdict still answers, in full', async () => {
-    // CONTRAST CONTROL for the two cases above: `resolved` and
-    // `coverage_unavailable` are untouched, so the copy change cannot have been
-    // a blanket silencing of this composer.
-    const handler = createExplainFromStructureHandler();
-    const resolved = await handler({
-      ...makeInvocation(),
-      selectedDependenciesEvidence: {
-        status: 'resolved',
-        selected_label: 'Sales rep time on selling activities',
-        dependencies: [],
-        bidirected: [],
-      },
-    });
-    expect(resolved.assistant_text).toContain('no direct incoming dependency');
-    const withheld = await handler({
-      ...makeInvocation(),
-      selectedDependenciesEvidence: {
-        status: 'coverage_unavailable', reason: 'graph_coverage_unavailable',
-      },
-    });
-    expect(withheld.assistant_text).toContain('was withheld from this turn');
-  });
-
-  it('⚠ THE SIBLING PATH IS NOT FIXED, AND THE SUITE SAYS SO RATHER THAN HIDING IT', () => {
-    // Trap 22f's honest-gap protocol: a gap recorded in the suite is honest; a
-    // gap invisible to it is how the next session inherits a false "all clear".
-    // `composeStructuralPairEvidenceAnswer` still leaks the same vocabulary on
-    // `direct_relationship` / `reachability` queries. When it is fixed, this
-    // case REDs and is replaced by its positive twin.
-    expect(composeStructuralPairEvidenceAnswer({ status: 'ambiguous' }))
-      .toContain('two unique Living Model elements');
-    // And the composer this commit DID fix no longer does — the discrimination
-    // that makes the line above a record of a real gap, not of a blind probe.
-    expect(composeSelectedDependenciesEvidenceAnswer({ status: 'ambiguous' }))
-      .not.toContain('Living Model element');
   });
 });
