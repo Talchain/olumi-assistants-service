@@ -111,6 +111,10 @@ export function ledgeredAgentsClient(ledger: AgentsClientLedger): OpenAI {
       const end = (how: 'done' | 'stopped' | 'failed', cause?: unknown): void => {
         if (ended) return;
         ended = true;
+        // An ended call holds nothing: a listener left on the request's signal kept its text, body and turn alive for the
+        // life of the process (Node keeps a composite signal with an abort listener until it aborts; CEE staging heap OOM ×3,
+        // 21 Oct). Removed here, whichever way the stream ends.
+        init?.signal?.removeEventListener('abort', onAbort);
         try {
           const done = streamTerminal(text);
           if (done !== undefined) {
@@ -129,7 +133,8 @@ export function ledgeredAgentsClient(ledger: AgentsClientLedger): OpenAI {
           }
         } finally { settle(); }
       };
-      init?.signal?.addEventListener('abort', () => end('stopped', init.signal?.reason), { once: true });
+      const onAbort = (): void => end('stopped', init?.signal?.reason);
+      init?.signal?.addEventListener('abort', onAbort, { once: true });
       const reader = r.body.getReader();
       const passThrough = new globalThis.ReadableStream<Uint8Array>({
         async pull(controller) {
