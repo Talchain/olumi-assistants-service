@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { CORE_ALIGNED_INSTRUCTIONS, CORE_REPLY_INSTRUCTION, NOTE_ON_ITEM_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION, instructionsForMode, MODEL_RELATIVE_NAMING_INSTRUCTION,
+import { CORE_ALIGNED_INSTRUCTIONS, CORE_NEXT_STEP, CORE_REPLY_INSTRUCTION, NOTE_ON_ITEM_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION, instructionsForMode, MODEL_RELATIVE_NAMING_INSTRUCTION,
   promptArmOf, coreEffortArmOf } from '../../../routes/agent-v1-turn.js';
 import { coreBudget } from '../model-budgets.js';
 import { OLUMI_PURPOSE_INSTRUCTION } from '../olumi-purpose.js';
@@ -37,7 +37,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
   it('arm B is the AIE\'s assembled reference, byte for byte (programme-docs #94 6303242136, static text sha256 7b6145d4…), plus the canvas-coaching sentence', () => {
     expect(b.split(NOTE_ON_ITEM_INSTRUCTION)).toHaveLength(2);
     // 7b6145d4… until 21 Oct; arm C's adoption changed only the closing core reply rule (see its row), now 56625e00….
-    expect(createHash('sha256').update(b.replace(`${NOTE_ON_ITEM_INSTRUCTION}\n\n`, ''), 'utf8').digest('hex')).toBe('8039876b844c5e2eaa368a800849eb4218947a1d96de923d9f2e5e33fc74b303');
+    expect(createHash('sha256').update(b.replace(`${NOTE_ON_ITEM_INSTRUCTION}\n\n`, ''), 'utf8').digest('hex')).toBe('a605c43f4479a524170db09c6c8f239a7dca027bba74a0f6c0b647e47707d660'); // + CORE_NEXT_STEP (Codex #3571 wording), Track 3 E2E 21 Oct (was 8039876b…)
   });
 
   it('arm A is untouched: the legacy host contract is byte-identical to staging b76bc42c', () => {
@@ -53,10 +53,10 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(instructionsForMode('full', 'legacy arm A text')).not.toContain('note_on_item');
   });
 
-  it('the arm is B only on a core turn that asks for it; every other turn keeps the default', () => {
-    expect(promptArmOf('core', 'B')).toBe('B');
-    // Arm C was adopted as the core reply rule (21 Oct), so its header no longer selects anything.
-    for (const header of [undefined, 'A', 'C', 'b', 'c', ['B'], ['C']]) expect(promptArmOf('core', header)).toBe('A');
+  it('every core turn takes arm B, whatever the header; every other mode keeps arm A', () => {
+    // Buddy SIMPLER on #3571 (21 Oct): arm B, which names only the tools core has, is every core turn's authority; no header
+    // selects anything. Every other mode keeps arm A.
+    for (const header of [undefined, 'A', 'B', 'C', 'b', ['B']]) expect(promptArmOf('core', header)).toBe('B');
     expect(promptArmOf('full', 'B')).toBe('A');
   });
 
@@ -69,6 +69,13 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(discipline.length).toBeGreaterThan(500);
     expect(CORE_REPLY_INSTRUCTION).toContain(discipline);
     expect(CORE_REPLY_INSTRUCTION).not.toContain('weave at most one next step');
+    // Track 3 E2E (served dce1b50a, 21 Oct, Q2 0/8 decisive): with no Run result, the one question is the input that decides
+    // between the options, never the readiness list, and never a date the brief already gave.
+    expect(CORE_REPLY_INSTRUCTION.split(CORE_NEXT_STEP)).toHaveLength(2);
+    expect(CORE_REPLY_INSTRUCTION.indexOf(CORE_NEXT_STEP)).toBeGreaterThan(CORE_REPLY_INSTRUCTION.indexOf(discipline));
+    expect(CORE_NEXT_STEP).toContain('the input that would most change how their options compare on their goal');
+    // Codex #3571 BLOCK: a state query ("what is still needed?") is answered in full.
+    expect(CORE_NEXT_STEP).toContain('When they ask what is still needed, give the complete list.');
     // The licences, attribution and Run-coaching rules are kept.
     for (const rule of ['never call a win share a chance', 'never call an option best, a winner or recommended',
       'approving a reading adopts it but does not make the user its author', 'A Run that did not complete leaves a saved change saved'])

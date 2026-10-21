@@ -951,8 +951,12 @@ export const CORE_ALIGNED_INSTRUCTIONS = SELECTED_COACH_V02_TEMPLATE.replace(
   '{{MODE_AND_AUTHORITY}}',
   `${OLUMI_PURPOSE_INSTRUCTION}\n\n${[CORE_AUTHORITY_INSTRUCTION, HOST_SCIENCE_AND_SOURCE_RULES, REPLY_LENGTH_INSTRUCTION, REPLY_SHAPE_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION].join(' ')}`,
 ).replace(LEGACY_STARTING_INPUTS, CORE_STARTING_INPUTS);
-/** The comparison's arm for one request: B only on a core turn that asks for it. Removed, with the losing arm, when it closes. */
-export const promptArmOf = (mode: AgentLaneMode, header: unknown): 'A' | 'B' => (mode === 'core' && header === 'B' ? 'B' : 'A');
+/**
+ * The core agent's instructions: arm B, the AIE-aligned authority naming only the tools core has, on EVERY core turn
+ * (buddy SIMPLER on #3571: the default arm A told core about legacy writers it does not have; R2 04:29Z: every arm 100 %).
+ * The header no longer selects anything; every other mode keeps arm A.
+ */
+export const promptArmOf = (mode: AgentLaneMode, _header?: unknown): 'A' | 'B' => (mode === 'core' ? 'B' : 'A');
 /** The builder's effort for the configuration comparison (#94): `x-olumi-core-effort` on a core turn, else the banked high. */
 export const coreEffortArmOf = (mode: AgentLaneMode, header: unknown): 'low' | 'medium' | undefined =>
   (mode === 'core' && (header === 'medium' || header === 'low') ? header : undefined);
@@ -996,9 +1000,17 @@ const CORE_REPLY_SAVE_SENTENCE = 'So say, from this turn\u2019s tool results, wh
  * at most one question, about 130 words, and more detail offered in one clause, never unloaded unasked.
  */
 export const CORE_RESPONSE_DISCIPLINE = "<RESPONSE_DISCIPLINE>\nTwo shapes; choose by turn type.\n\nSHARP SHAPE (factual lookup, state query, pre-action orientation): answer or orientation in plain language; the evidence that matters; at most one focused question or concrete next step. Lookups and state queries: 1 to 3 sentences. Pre-action orientation: 2 to 4 sentences.\n\nCOACHING SHAPE (explaining results, including every explanation answer sent alongside a tool call; challenging a choice, handling contradiction, surfacing risk, improving the model; the shape that defines Olumi quality):\n1. HEADLINE: one plain-language sentence naming the key finding. No raw numbers. Lead with the insight.\n2. AT MOST THREE INSIGHT BULLETS, each a single sentence: \"- **Bold lead phrase.** Observation in plain language, then the specific action the user can take.\" Every bullet pairs insight with a concrete, decision-specific action; never a second sentence inside a bullet;\n3. QUESTIONS: zero to three, most turns zero or one. Only what would change the next step, woven where each does its work, never stacked into a list.\n\nCoaching-shape rules: substantive coaching turns use bullets, not prose paragraphs; the whole response stays under about 130 words unless the user asks for depth; very short clarifications or simple answers stay concise. Bold each lead phrase. Plain language only; raw decimals and precise terminology stay out (see TERMINOLOGY_MAP). Possessive framing: \"your model\", \"your estimate\", \"your assumptions\". Pair every risk with what to do about it.\n\nDETAIL BEHIND THE SUMMARY: when materially more sits in view than the shape admits (full driver list, per-option figures, method), end by naming that more detail is available and offer it in one clause; never unload it unasked.\n\nAvoid: long introductions, generic frameworks, repeating the question, stacked or decorative questions, unactionable advice.\n</RESPONSE_DISCIPLINE>";
+/** The one question while input is missing: the input that decides between their options, not the readiness list unless asked (Codex #3571). */
+export const CORE_NEXT_STEP = 'When input the analysis needs is missing and they have not asked what is missing, ask one focused question: the '
+  + 'input that would most change how their options compare on their goal (often the goal\u2019s own figure, today\u2019s level of what it '
+  + 'measures, or what an option would deliver), in their own words; a rough range is fine for a quantity. When they ask what is '
+  + 'still needed, give the complete list. Never ask for a date, figure or name their words already give. ';
 export const CORE_REPLY_INSTRUCTION = CORE_REPLY_BEFORE_C.replace(CORE_REPLY_SAVE_SENTENCE,
   'So say plainly what changed in their model, what was not saved and why, and any proposal that is waiting for the user\u2019s approval on its card, in the user\u2019s terms (their model, its items and its Run), never your tools or what a tool response did or did not contain. ')
-  .replace('Write one coherent reply in a single voice: give the explanation first, mention what changed since the last Run only when it matters, and weave at most one next step from the current readiness facts into the prose, never as a separate bullet or receipt line and never asking for something the user has already said; ask at most one question per reply. ', `${CORE_RESPONSE_DISCIPLINE}\nIn this lane, ask at most one question per reply, and never ask for something the user has already said. `);
+  .replace('Write one coherent reply in a single voice: give the explanation first, mention what changed since the last Run only when it matters, and weave at most one next step from the current readiness facts into the prose, never as a separate bullet or receipt line and never asking for something the user has already said; ask at most one question per reply. ', `${CORE_RESPONSE_DISCIPLINE}\nIn this lane, ask at most one question per reply, and never ask for something the user has already said. `)
+  // Track 3 E2E, 21 Oct (served dce1b50a, Q2 0/8 decisive): with no Run result, replies read out the readiness list ("today's
+  // footfall", "by when?" when the brief gave the date) instead of the input that decides between the options.
+  + CORE_NEXT_STEP;
 /** The instructions for one call in this lane mode: unchanged outside `core`. */
 export function instructionsForMode(mode: AgentLaneMode, instructions: string, reply: string = CORE_REPLY_INSTRUCTION): string {
   return mode === 'core' ? `${instructions}\n\n${NOTE_ON_ITEM_INSTRUCTION}\n\n${reply}` : instructions;
