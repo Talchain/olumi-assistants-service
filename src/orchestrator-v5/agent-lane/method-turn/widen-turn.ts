@@ -1203,6 +1203,17 @@ export function riskHeldReply(call: WidenAddCall): string {
     + 'How strongly is not known yet. Nothing is added until you approve it.';
 }
 
+/** The risks turn's closing line when each risk has an Add press. */
+export const RISKS_ADD_LINE = 'Possible risks, not established facts. Nothing is added until you choose one and approve the change.';
+/**
+ * The same line on a core scenario (Lenses' chip check, core 9e113412): the legacy Add card can never be saved onto a living
+ * model, so no Add press is offered: the person describes the risk in their own words (the core Conversation does not hold
+ * this list, Codex on #3589), and the core turn prepares it for their approval.
+ */
+export const RISKS_ADD_IN_CHAT_LINE = 'Possible risks, not established facts. To add one, describe it in your own words and I\u2019ll prepare the change for you to approve.';
+/** A stale Add press on a core scenario: nothing is held, said plainly, with the way that works. */
+export const CORE_RISK_ADD_REPLY = 'That button can\u2019t add a risk to this model, so nothing was added. Describe the risk in your own words and I\u2019ll prepare the change for you to approve.';
+
 /** The Add press refused at the door: said plainly, nothing held, and the way back. */
 export const RISK_ADD_REFUSED_REPLY =
   'I couldn’t prepare that risk as a change, so nothing was added. The model may have changed since I suggested it. Press Suggest risks for a fresh set.';
@@ -1253,7 +1264,7 @@ export function settleRisksTurn(turn: RunRisksWidenTurn, draft: string): Settled
     ...lines,
     ...sharedLines,
     ...disconfirmLines,
-    gate.kept.length > 0 ? 'Possible risks, not established facts. Nothing is added until you choose one and approve the change.'
+    gate.kept.length > 0 ? RISKS_ADD_LINE
       : 'Possible risks, not established facts. Nothing has been added.',
     ...(turn.gap !== null ? [turn.gap.question] : []),
   ].join('\n');

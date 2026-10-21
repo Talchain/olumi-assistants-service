@@ -183,7 +183,7 @@ import { computeGraphIdentityHash } from '../orchestrator-v5/context/graph-ident
 import { cardCallFor, isMethodPress, methodTurnForReadback, methodTurnItems, settleMethodTurn, TALK_IT_THROUGH_CHIP, type MethodTurn } from '../orchestrator-v5/agent-lane/method-turn/method-turn.js';
 import { premortemProducerDirective, readPremortemProduction, premortemWorksheetDiagnosticsFor, methodReplySurvives } from '../orchestrator-v5/agent-lane/runtime/reasoning-artefacts/premortem.js';
 import {
-  CANVAS_OPTIONS_PRESS_ID, CANVAS_RISKS_PRESS_ID, isWidenAddPressId, keptProposalOf, modelGapOf, RISK_ADD_REFUSED_REPLY, riskHeldReply, risksTurnForReadback,
+  CANVAS_OPTIONS_PRESS_ID, CANVAS_RISKS_PRESS_ID, CORE_RISK_ADD_REPLY, isWidenAddPressId, keptProposalOf, modelGapOf, RISK_ADD_REFUSED_REPLY, RISKS_ADD_IN_CHAT_LINE, RISKS_ADD_LINE, riskHeldReply, risksTurnForReadback,
   constructionRegistrationTurnId, settleRisksTurn, settleWidenTurn, SUGGEST_RISKS_CHIP as RISKS_PRESS, thinDraftOffer, widenAddCallOf, widenGate, widenNotAdded, widenOffered,
   widenPassingArgs, widenTargetOf, WIDEN_GATE_REFUSAL, WIDEN_PRESS_ID, WIDEN_TOOL, type RunRisksWidenTurn,
   type WidenGateResult, type WidenTurn, type WidenUnavailableTurn,
@@ -4305,6 +4305,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let widenAdd: { readonly actions: readonly OfferedAction[] } | null = null;
     // An Add press is TERMINAL whatever it carries (Codex r1 P1 on #2744): a stale or edited one is refused in words, with
     // no model call — it never falls through to ordinary generation with every door open.
+    // THIN CORE: on a core scenario the legacy card could never be saved onto its living model (the shared writer refuses a
+    // legacy write there), so an Add press holds nothing and says so, with the way that works (Lenses' chip check, 9e113412).
+    if (result === undefined && approvedProposal === undefined && methodTurn === null && widenTurn === null && isWidenAddPressId(pressedChipId)
+      && mode === 'core') {
+      fastPath = 'method';
+      widenAdd = { actions: [] };
+      result = { assistant_text: CORE_RISK_ADD_REPLY, items: [], tool_calls: [], tool_results: [], mutated: false, hops: 0, stopped_reason: 'answered',
+        timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 } };
+    }
     if (result === undefined && approvedProposal === undefined && methodTurn === null && widenTurn === null && isWidenAddPressId(pressedChipId)) {
       const rb = await readBackState(readingDispatch, scenarioId);
       const call = widenAddCallOf(pressedChipId, message, rb);
@@ -4877,8 +4886,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // S-C risks: the server writes the reply from the gate's typed items; nothing the call produced is sent or stored.
     if (risksRun !== undefined) {
       const settled = settleRisksTurn(risksRun, result.stopped_reason === 'answered' ? text : '');
-      text = settled.reply;
-      widenActions = settled.actions;
+      // On a core scenario no legacy Add press is offered (its card could never be saved there): the person names the risk.
+      text = mode === 'core' ? settled.reply.replace(RISKS_ADD_LINE, RISKS_ADD_IN_CHAT_LINE) : settled.reply;
+      widenActions = mode === 'core' ? settled.actions.filter((a) => !isWidenAddPressId(a.id)) : settled.actions;
       result = { ...result, assistant_text: text, items: [], tool_calls: [], tool_results: [] };
       log.info({
         scenario_id: scenarioId, widen_target: 'risks', offered: settled.offered, gap: risksRun.gap?.kind ?? null,
