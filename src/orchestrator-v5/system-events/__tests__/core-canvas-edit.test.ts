@@ -62,6 +62,17 @@ describe('a canvas gesture on a core scenario', () => {
     expect(mapLivingModel(saved.living_model as typeof KNOWN_ANSWER).graph.nodes).toEqual(saved.nodes);
   });
 
+  it('⭐ Track 3 Q2-02 shape through the door: a goal with no target unit keeps the level\'s "%" (Codex note on #3570)', async () => {
+    const lm: typeof KNOWN_ANSWER = structuredClone(KNOWN_ANSWER);
+    lm.aims[0]!.target = { ...lm.aims[0]!.target!, unit: null, current: null, current_unit: null };
+    const graph: Rec = { ...mapLivingModel(lm).graph, living_model: lm };
+    loadGraph.mockResolvedValue(graph);
+    const out = await send({ kind: 'factor_value_edit', target_id: 'g', value: 0.3, raw_value: 30, unit: '%',
+      base_graph_hash: computeExpectedGraphCasHashes(graph).expectedGraphAnalysisHash! });
+    expect(out.commitPerformed, JSON.stringify(out.response)).toBe(true);
+    expect((written().living_model as typeof KNOWN_ANSWER).aims[0]!.target).toMatchObject({ current: 30, current_source: 'user', current_unit: '%' });
+  });
+
   it('a gesture this slice cannot apply is refused, said plainly, and nothing is written', async () => {
     const out = await send({ kind: 'structural_add', node_id: 'o', node_kind: 'outcome', label: 'Churn', base_graph_hash: BASE });
     expect(out.commitPerformed).toBe(false);
