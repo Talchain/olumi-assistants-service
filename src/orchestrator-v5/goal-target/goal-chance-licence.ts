@@ -10,6 +10,7 @@ import { sentDigest } from '../tools/handlers/run-input-digest.js';
 export { deriveRunQuestion, type RunQuestion, type RunQuestionScope, type SelectedRunEvidence } from './run-question.js';
 export { STATIC_MODEL_SCOPE_NOTE, STATIC_INPUTS_NOT_RECORDED } from './static-run-evidence.js';
 import { runOmittedRisks } from '../agent-lane/unsized-risk.js';
+import { EventRiskV1 } from '../../schemas/event-risk.js';
 import { shareGoalChanceWords } from './share-goal-chance-words.js';
 import { zeroSpreadNoCarrierHorizonLine } from './zero-spread-horizon-line.js';
 export { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from './zero-spread-horizon-line.js';
@@ -70,7 +71,7 @@ import { resolveGoalDirection } from './goal-direction.js';
 import { goalReadingsOf, type GoalReading } from '../coaching/goal-reading-disclosure.js';
 import {
   BASIS_ALSO_REQUIRED_MAX, BASIS_CONDITION_MAX, effectsBasisWords, estimateOnlyWords, goalTargetBasisOf, partialGoalWords, periodEndWords, statusQuoAssumptionWords, statusQuoMovedWords,
-  statusQuoProjectionWords, statusQuoRowWords,
+  statusQuoProjectionWords, statusQuoRiskWords, statusQuoRowWords,
   targetChanceWords, type GoalTargetBasis,
 } from './goal-target-basis.js';
 import { goalTargetsBlockOf, readGoalTargetsBlock, GOAL_TARGET_ROLE, type GoalTargetsBlock } from './goal-targets-joint.js';
@@ -319,14 +320,42 @@ const COMPARATOR: Readonly<Record<string, GoalChanceComparator>> = { '>=': 'at_l
  *  · `assumed` — the same-draw reference (ISL b504df27: `B + (option − SQ)`): no change, by assumption, no interval;
  *  · `moved` — that reference, but the Run's own status-quo row does not sit at it: withheld until checked, never relabelled;
  *  · `projection` — a forecast whose status quo legitimately varies: the Run's own projection, with its real uncertainty;
+ *  · `at_risk` — that reference, with a stated risk carrying on still faces: its chance is earned, said with that risk;
  *  · `unknown` — the checked facts do not say: no assumption is claimed, and the row is the Run's, exactly as before.
  */
-type StatusQuoReading = 'assumed' | 'moved' | 'projection' | 'unknown';
+type StatusQuoReading = 'assumed' | 'moved' | 'projection' | 'at_risk' | 'unknown';
 
 /** A node's own label, sayable on one line; else undefined. */
 function labelOfNode(nodes: readonly Rec[], id: string): string | undefined {
   const label = nodes.find((n) => n.id === id)?.label;
   return typeof label === 'string' && label.trim() !== '' && !/[\r\n]/.test(label) ? label.trim() : undefined;
+}
+
+/**
+ * The risks carrying on as now still faces (DL ruling on served F2, L1, 21 Oct): each risk the Run sends with a chance
+ * (`event_risk`, the person's or Olumi's labelled), named, that reaches the goal by a path the status quo leaves open (no
+ * node on it set by the status quo, which would cut the path). Empty when there is none.
+ */
+function risksFacingStatusQuo(graph: unknown, goalId: unknown, statusQuoId: string | undefined): string[] {
+  if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges) || statusQuoId === undefined) return [];
+  const nodes = graph.nodes.filter(isRec);
+  const edges = graph.edges.filter(isRec);
+  const sq = nodes.find((n) => n.id === statusQuoId);
+  const sets = new Set(Object.keys([sq?.interventions, isRec(sq?.data) ? sq!.data.interventions : undefined].find(isRec) ?? {}));
+  return nodes.filter((n) => n.kind === 'risk' && typeof n.id === 'string' && EventRiskV1.safeParse(n.event_risk).success).flatMap((r) => {
+    const label = labelOfNode(nodes, r.id as string);
+    const seen = new Set<unknown>([r.id]);
+    for (const queue: unknown[] = [r.id]; label !== undefined && queue.length > 0;) {
+      const u = queue.shift();
+      for (const e of edges) {
+        if (e.from !== u || seen.has(e.to) || sets.has(e.to as string)) continue;
+        if (e.to === goalId) return [label];
+        seen.add(e.to);
+        queue.push(e.to);
+      }
+    }
+    return [];
+  });
 }
 
 /**
@@ -378,6 +407,8 @@ export function statusQuoReadingOf(a: {
   readonly referenceChance?: 0 | 1;
   /** A goal measured AS a change: the chance a ZERO change has against the held target (1 meets it, 0 does not). */
   readonly zeroChange?: 0 | 1;
+  /** A named risk with a chance reaches the goal by a path carrying on as now leaves open (`risksFacingStatusQuo`). */
+  readonly riskOnPath?: boolean;
 }): StatusQuoReading {
   if (!a.paired) return a.forecast ? 'projection' : 'unknown';
   // A paired reference never establishes the target's side when its unit/frame evidence is unsupported, even with exact centres.
@@ -385,7 +416,9 @@ export function statusQuoReadingOf(a: {
   const row = a.row;
   if (row === undefined) return 'assumed';
   const p = row.probability_of_goal;
-  if (typeof p === 'number' && p !== 0 && p !== 1) return 'moved';
+  // DL ruling on served F2 (L1, 21 Oct): on a LEVEL, an event carrying on still faces moves it from today legitimately, so a
+  // chance between 0 and 1 is earned and said with that risk. Any other disagreement, and every change frame, stays moved.
+  if (typeof p === 'number' && p !== 0 && p !== 1) return a.riskOnPath === true && a.zeroChange === undefined ? 'at_risk' : 'moved';
   if (typeof p === 'number' && a.referenceChance !== undefined && p !== a.referenceChance) return 'moved';
   // ⭐ G (DL ruling 12 Oct: the AIE's D2 exact equality, applied IN THE RUN'S OWN RECORDED FRAME): a goal measured AS a change is
   // scored as the PAIRED change (each option minus carrying on, on the same draw), so carrying on's change is 0 = the
@@ -743,11 +776,14 @@ export function goalChanceLicenceOf(
   // paired change, and that sent goal is the held one — never because the goal's target says change.
   const pairedChange = changeQuantity && sentRunPairsChange(constraints.sentRun, goalId)
     && sentRunScoresHeldChange(constraints.sentRun, graph, goalId, held);
+  // Earned only where the line can name carrying on and the risk (`risksFacingStatusQuo` names each one).
+  const sqRisks = statusQuoId !== undefined && labelOfNode(nodes, statusQuoId) !== undefined ? risksFacingStatusQuo(graph, goalId, statusQuoId) : [];
   const sqReading: StatusQuoReading = share !== null || statusQuoId === undefined || goal === undefined ? 'unknown'
     : statusQuoReadingOf({
       paired: timing.ordinary && (changeQuantity ? pairedChange : pairedLevelFacts(graph, goal, basis)),
       forecast: timing.forecast,
       row: sqRow,
+      riskOnPath: sqRisks.length > 0,
       // A quantity measured AS a change is 0 today by construction; a level's reference is its held level today (D2: in
       // the Run's own frame).
       reference: changeQuantity ? 0 : levelToday,
@@ -972,7 +1008,11 @@ export function goalChanceLicenceOf(
   // L4 (DL conditions 2–3): a licensed capacity-ratio option says what its chance leaves out, and why no comparison is shown.
   const ratioLicensed = onShare && capacityRatioOptionIds(graph).some(id => licensed.includes(id));
   const rangeLines = rangeUses.flatMap(([id, xs]) => xs.map(u => likelyRangeLawWords(labelOfNode(nodes, id) ?? id, labelOfNode(nodes, u.factor_id) ?? u.factor_id, u)));
-  const notes = [...(staticLevel ? [STATIC_MODEL_SCOPE_NOTE] : []), ...rangeLines, ...(assumedRange === null ? [] : [olumiAssumedRangeLine(assumedRange)]),
+  // DL ruling on served F2 (L1): carrying on's earned chance is said with the risk it still faces.
+  const sqLabel = statusQuoId === undefined ? undefined : labelOfNode(nodes, statusQuoId);
+  const atRisk = sqReading === 'at_risk' && statusQuoId !== undefined && licensed.includes(statusQuoId) && sqLabel !== undefined
+    ? [statusQuoRiskWords(sqLabel, sqRisks)] : [];
+  const notes = [...(staticLevel ? [STATIC_MODEL_SCOPE_NOTE] : []), ...atRisk, ...rangeLines, ...(assumedRange === null ? [] : [olumiAssumedRangeLine(assumedRange)]),
     ...(onShare && hireLinkLimitedFor(graph, licensed) ? [OLUMI_HIRE_LIMIT_NOTE] : []),
     ...(ratioLicensed ? [CAPACITY_RATIO_ASSUMPTION_NOTE, CAPACITY_RATIO_COMPARISON_NOTE] : [])];
   return notes.length === 0 ? worded : { ...worded, notes: [...(worded.notes ?? []), ...notes] };

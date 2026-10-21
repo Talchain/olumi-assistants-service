@@ -398,6 +398,13 @@ export function statusQuoProjectionWords(statusQuoLabel: string): string {
   return `‘${statusQuoLabel}’ is this model’s projection for carrying on as now, with its own uncertainty — not an assumption that nothing changes.`;
 }
 
+/** DL ruling on served F2 (L1, 21 Oct): carrying on still faces a stated risk, so its chance is the model's, with that risk in it. */
+export function statusQuoRiskWords(statusQuoLabel: string, riskLabels: readonly string[]): string {
+  const named = riskLabels.map((l) => `‘${l}’`);
+  const list = named.length <= 1 ? (named[0] ?? '') : `${named.slice(0, -1).join(', ')} and ${named[named.length - 1]}`;
+  return `‘${statusQuoLabel}’ still faces ${list} in this model, so its chance allows for ${named.length <= 1 ? 'that risk' : 'those risks'} — not an assumption that nothing changes.`;
+}
+
 /** Amendment 2 + DL hiring decision: the timing basis and the additive reading, said beside the chance. */
 export function effectsBasisWords(basis: GoalTargetBasis): string | undefined {
   if (!basis.effects_at_period_end) return undefined;
