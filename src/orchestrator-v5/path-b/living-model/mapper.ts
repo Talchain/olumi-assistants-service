@@ -26,13 +26,18 @@ import type { LivingModelT, LivingSourceT } from '../../../schemas/living-model.
 import { resolveGoalThresholdCapWithProvenance } from '../../../utils/goal-threshold-cap.js';
 import { admitGoalBaseline } from '../../../cee/factor-extraction/goal-baseline-admissibility.js';
 import { LLM_STRENGTH_STD_FLOOR } from '../../../cee/constants.js';
+import { EventRiskV1 } from '../../../schemas/event-risk.js';
 
 export type WithheldReason =
   | 'no_level_target' | 'aim_not_in_slice' | 'change_kind_unknown' | 'change_base_invalid' | 'change_base_not_theirs' | 'current_unit_mismatch' | 'exact_target_not_in_slice' | 'target_range_not_in_slice'
   | 'goal_level_unknown' | 'link_frame_unknown' | 'chance_rests_on_withheld' | 'condition_not_in_slice'
   | 'goal_level_not_admitted' | 'factor_level_unknown' | 'level_range_not_in_slice' | 'setting_not_convertible'
   | 'link_endpoint_unknown' | 'link_unit_mismatch' | 'link_range_no_law' | 'link_sign_unknown'
-  | 'exact_not_drawable' | 'stay_within_base_not_theirs' | 'stay_within_unconfirmed';
+  | 'exact_not_drawable' | 'stay_within_base_not_theirs' | 'stay_within_unconfirmed'
+  | 'risk_occurrence_unknown' | 'risk_unattributed' | 'risk_not_in_slice';
+
+/** A risk that cannot be sent as the event the person described withholds the chance when it is on the goal's path. */
+const RISK_REFUSED: ReadonlySet<WithheldReason> = new Set(['risk_occurrence_unknown', 'risk_unattributed', 'risk_not_in_slice']);
 
 export interface Withheld { readonly id: string; readonly reason: WithheldReason }
 
@@ -287,15 +292,60 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     for (const id of Object.keys(interventions)) edges.push({ from: o.id, to: id, ...STRUCTURAL, provenance: { source: 'cee_hypothesis' } });
   }
 
+  // ── Risks (Track 2): an EVENT that may happen within a window, sent as ISL's event_risk.v1 (#228), which owns its
+  // semantics: occurrence drawn once per scenario, the stated chance scaled down while a mitigation is in place, and what
+  // it does if it happens as ordinary links from it (per +1: it happening). Its chance, window and whose figures they are
+  // are the person's or Olumi's as stated, never guessed (an Olumi chance is sent as Olumi's). A present condition is never
+  // an event (Science §3C): the AI is told so, since no rule here can tell one from an event certain within its window
+  // (p = 1, which ISL evaluates). A cause INTO an event (a cascade) is not in this slice (§9). Anything else is refused.
+  const risks = new Set<string>();
+  const refusedRisks = new Set<string>();
+  const settingsOf = (factorId: string) => model.options.flatMap((o) => o.settings.filter((x) => x.factor_id === factorId));
+  for (const r of model.risks) {
+    const { low, high } = r.occurrence;
+    const basis = stated(r.source) ? 'user' as const : r.source === 'olumi' ? 'olumi' as const : undefined;
+    // A mitigation is a step an option switches on: a unitless factor on a frame of 1 (so "in place" reaches the engine as
+    // 1, never 0.01 of a %), not in place today (0), set only to 0 or 1, with no other effect, no cause of its own and no
+    // other risk (ISL: a preventer is a root switch whose only child is this risk).
+    const switchOk = (id: string) => {
+      const f = model.factors.find((x) => x.id === id);
+      return f !== undefined && f.unit === null && caps.get(id) === 1 && f.value === 0
+        && settingsOf(id).every((x) => x.value === 0 || x.value === 1)
+        && !model.links.some((l) => l.to === id || (l.from === id && l.to !== r.id))
+        && !model.risks.some((o) => o.id !== r.id && o.mitigations.some((m) => m.factor_id === id));
+    };
+    const block = basis === undefined || low === null || high === null || r.horizon_months === null ? undefined : {
+      version: 1 as const, occurrence: { p_low: low, p_high: high, basis }, horizon: { months: r.horizon_months },
+      ...(r.mitigations.length > 0 ? { mitigations: r.mitigations.map((m) => ({ factor_id: m.factor_id, occurrence_reduction: m.reduction })) } : {}),
+    };
+    const reason: WithheldReason | undefined = low === null || high === null || r.horizon_months === null ? 'risk_occurrence_unknown'
+      : basis === undefined ? 'risk_unattributed'
+        : !EventRiskV1.safeParse(block).success || !r.mitigations.every((m) => switchOk(m.factor_id)) ? 'risk_not_in_slice' : undefined;
+    if (reason !== undefined) { hold(r.id, reason); refusedRisks.add(r.id); continue; }
+    risks.add(r.id);
+    nodes.push({ id: r.id, kind: 'risk', label: r.label, event_risk: block, ...(r.quote !== null ? { source_quote: r.quote } : {}) });
+    const who = stated(r.source) ? { source: edited(r) ? 'user_specified' : 'brief_extraction', magnitude: 'user_stated' } : { source: 'cee_hypothesis', magnitude: 'olumi_estimate' };
+    // The preventer's link: its strength is not read (the stated reduction is), so it carries no doubt of its own.
+    for (const m of r.mitigations) {
+      edges.push({ id: `${m.factor_id}__${r.id}`, from: m.factor_id, to: r.id, strength: { mean: -1, std: LLM_STRENGTH_STD_FLOOR }, exists_probability: 1,
+        effect_direction: 'negative', provenance: who });
+    }
+  }
+
   // ── Causal links, sized on their endpoints' frames.
   const frameOf = (id: string): { cap: number; unit: string | null } | undefined => {
     if (goal !== undefined && id === goal.id) return { cap: goal.cap, unit: goal.unit === '' ? null : goal.unit };
+    // An event is 0 (it does not happen) or 1 (it happens): what it does is the change per +1, on a frame of 1.
+    if (risks.has(id)) return { cap: 1, unit: null };
     const f = model.factors.find((x) => x.id === id);
     const cap = caps.get(id);
     return f !== undefined && cap !== undefined ? { cap, unit: f.unit } : undefined;
   };
-  const causal = new Set([...model.factors.map((f) => f.id), ...(goalNode === undefined ? [] : [String(goalNode.id)])]);
+  const causal = new Set([...model.factors.map((f) => f.id), ...risks, ...(goalNode === undefined ? [] : [String(goalNode.id)])]);
   for (const l of model.links) {
+    // What a refused risk would do is said once, by the risk's own reason; a cause INTO an event is not in this slice.
+    if (refusedRisks.has(l.from) && !refusedRisks.has(l.to) && !risks.has(l.to)) continue;
+    if (risks.has(l.to) || refusedRisks.has(l.to)) { hold(l.id, 'risk_not_in_slice'); continue; }
     if (!causal.has(l.from) || !causal.has(l.to)) { hold(l.id, 'link_endpoint_unknown'); continue; }
     // The engine has no "unknown" direction, so an unsigned link stays in the living model only.
     if (l.effect.sign === null) { hold(l.id, 'link_sign_unknown'); continue; }
@@ -371,7 +421,8 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   if (goal !== undefined && goalNode !== undefined) {
     // The path is read on the person's own links as well as the engine's, so an option effect lowered to a factor or to the
     // exact sum keeps everything stated about it (buddy R1 on #3523).
-    const allLinks = [...living.links, ...model.links];
+    const allLinks = [...living.links, ...model.links,
+      ...model.risks.flatMap((r) => r.mitigations.map((m) => ({ id: `${m.factor_id}__${r.id}`, from: m.factor_id, to: r.id })))];
     const onPath = new Set([goal.id]);
     for (let grew = true; grew;) {
       grew = false;
@@ -379,8 +430,9 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     }
     // An option moves the goal through what it sets, so it is on the path too (science check 5bbceeec, point 5).
     for (const o of model.options) if (o.settings.some((s) => onPath.has(s.factor_id))) onPath.add(o.id);
-    const leftOut = withheld.some((w) => (w.reason === 'link_sign_unknown' || w.reason === 'link_endpoint_unknown' || w.reason === 'exact_not_drawable')
-      && onPath.has(model.links.find((l) => l.id === w.id)?.to ?? '')) || [...droppedSettings].some((id) => onPath.has(id));
+    const leftOut = withheld.some((w) => (w.reason === 'link_sign_unknown' || w.reason === 'link_endpoint_unknown' || w.reason === 'exact_not_drawable'
+      || w.reason === 'risk_not_in_slice') && onPath.has(model.links.find((l) => l.id === w.id)?.to ?? ''))
+      || withheld.some((w) => RISK_REFUSED.has(w.reason) && onPath.has(w.id)) || [...droppedSettings].some((id) => onPath.has(id));
     // An unresolved PREREQUISITE on anything the chance rests on (the engine cannot hold one) withholds it, whoever raised it.
     // An applied ASSUMPTION carries a CONDITIONAL result, kept in the living model the AI reads and said with the result; a
     // CHALLENGE is said beside it. The AI declares the role; the source never decides it (AIE, 17:59 20 Oct).
