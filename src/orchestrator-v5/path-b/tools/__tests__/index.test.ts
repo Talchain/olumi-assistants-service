@@ -57,15 +57,11 @@ describe('the adapters as SDK function tools', () => {
     expect(calls[0]![1].ui_directive).toBeUndefined();
   });
 
-  it('the construction-role arm (21 Oct): with a drafter, build_model_from_brief takes the brief only, strict; without one, the brief and the model', () => {
+  it('build_model_from_brief takes the brief and the complete model, strict (the construction-role arm was measured and removed, 21 Oct)', () => {
     const { tools } = setup();
-    expect(Object.keys((named(tools, 'build_model_from_brief').parameters as { properties: Record<string, unknown> }).properties)).toEqual(['brief', 'model']);
-    const dispatch = vi.fn(async () => ({ status: 200, json: read() }));
-    const arm = pathBTools({ dispatch, proposals: new ProposalStore(), runAnalysis: vi.fn(), draft: async () => undefined }, ctx, 'core');
-    const build = named(arm, 'build_model_from_brief');
+    const build = named(tools, 'build_model_from_brief');
     expect(build.strict).toBe(true);
-    expect(Object.keys((build.parameters as { properties: Record<string, unknown> }).properties)).toEqual(['brief']);
-    expect(build.description).toContain('Olumi\u2019s model builder drafts the model from the brief; supply the brief only.');
+    expect(Object.keys((build.parameters as { properties: Record<string, unknown> }).properties)).toEqual(['brief', 'model']);
   });
 
   it('preview: the reader only', () => {

@@ -248,8 +248,8 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
   afterAll(async () => { await rawStore.settleDrafterRawWritesForTests(); await app.close(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   beforeEach(() => { rawRecorder.rows.length = 0; rawRecorder.mode = 'ok'; rawRecorder.release = undefined; SCENARIO = randomUUID(); rows.clear(); conversationIds.clear(); saved = null; registered = []; read = EMPTY_READ; toolOutputs.length = 0; drafterAnswer = DRAFT; briefArg = BRIEF; versionsUnavailable = false; readUnavailable = false; proofFault = ''; toolBrief = undefined; toolModel = undefined; drafterCalls = 0; cutShortAfterRun = false; runFails = false; runs = 0; skipDraft = false; });
 
-  const turn = async (): Promise<Json> => {
-    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', headers: { 'x-olumi-ai-mode': 'core', 'x-request-id': REQUEST_ID }, payload: {
+  const turn = async (extra: Record<string, string> = {}): Promise<Json> => {
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', headers: { 'x-olumi-ai-mode': 'core', 'x-request-id': REQUEST_ID, ...extra }, payload: {
       kind: 'message', turn_id: randomUUID(), scenario_id: SCENARIO, stage: 'frame', turn_class: 'frame', message: briefArg, source: 'composer' } });
     expect(r.statusCode, r.body).toBe(200);
     return r.json() as Json;
@@ -459,6 +459,13 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
     expect(draftCall(await turn())).toMatchObject({ ok: true, mutated: true });
     expect(bodiesSeen.length).toBeGreaterThan(0);
     for (const b of bodiesSeen) expect({ model: b.model, effort: b.reasoning?.effort, max: b.max_output_tokens }).toEqual({ model: 'gpt-6.1-sol', effort: 'high', max: 12000 });
+  });
+
+  it('THIN CORE budget (real route, Codex #3587): a first build under the effort arm runs at that effort with the full builder budget, whatever the arm header', async () => {
+    bodiesSeen.length = 0;
+    expect(draftCall(await turn({ 'x-olumi-prompt-arm': 'B', 'x-olumi-core-effort': 'medium' }))).toMatchObject({ ok: true, mutated: true });
+    expect(bodiesSeen.length).toBeGreaterThan(0);
+    for (const b of bodiesSeen) expect({ model: b.model, effort: b.reasoning?.effort, max: b.max_output_tokens }).toEqual({ model: 'gpt-6.1-sol', effort: 'medium', max: 12000 });
   });
 
   it('THIN CORE context (real route): the next turn starts from the saved living model, with its labels and quotes', async () => {
