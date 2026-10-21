@@ -83,7 +83,7 @@ export const LivingAim = z.object({
       'For increase or decrease only: absolute = the change in the quantity\'s own unit; relative = a percentage of today\'s level; points = percentage points of a quantity that is itself a percentage (its unit is "%"). Null for a level target.'),
   }).strict().nullable().describe(
     // Track 3 E2E, 21 Oct: 12 of 13 aims drafted from briefs without figures had no target, so the person's figure had no place to go.
-    'What the aim is measured by. Give it whenever the person names a measurable quantity or a deadline for the aim, even without a figure: value, low and high stay null when they gave none (never invent one), so their figure has a place to go. Null only when nothing measurable is named.'),
+    'For a measurable quantity the person named for this aim, give its target even without a figure: leave every figure they did not state null (never invent one) and keep any deadline they gave. Null when they named no measurable quantity: a deadline alone never makes one.'),
   defined_as: definedAs,
   ...attribution,
 }).strict();
