@@ -191,3 +191,57 @@ describe('a condition is corrected through a proposal the person approves, and k
     expect(history).toEqual([{ id: 'condition', change: 'superseded', old: JSON.stringify(gated().conditions[0]), quote: OBTAINED }]);
   });
 });
+
+/**
+ * Codex r7 on #3522: a view could never be corrected. "Sam thinks push is too risky" → "Sam now supports push" read as a
+ * removal plus an addition, and every view removal was refused, so a changed mind stayed recorded as dissent. SYNTHETIC wording.
+ */
+describe('a view is corrected by its holder\'s new view, and kept in history', () => {
+  const NOW = 'Sam now supports pushing f.';
+  const RISKY = KNOWN_ANSWER.views[0]!;
+  const supports = (holder = 'Sam'): LivingModelT => ({ ...structuredClone(KNOWN_ANSWER), views: [{ holder, position: 'now supports push', quote: NOW }] });
+  const said = { ...ctx, user_turn_text: NOW };
+  const proposed = (proposals: ProposalStore, out: unknown) => proposals.get(String((out as { data: Rec }).data.proposal_id))!.living_model as LivingModelT;
+
+  it('"Sam thinks push is too risky" → "Sam now supports push": the approval saves the new view and keeps the old one in history', async () => {
+    expect(RISKY).toMatchObject({ holder: 'Sam', position: 'thinks push is too risky' });
+    const p = product(KNOWN_ANSWER);
+    const proposals = new ProposalStore();
+    const out = await proposeLivingChange({ dispatch: p.dispatch, proposals }, said, args(supports()));
+    expect(out.status, JSON.stringify(out)).toBe('ok');
+    expect(((out as { data: Rec }).data.changes as Rec[]).map((c) => `${c.kind}:${c.change}`).sort()).toEqual(['history:add', 'view:add', 'view:remove']);
+    expect(p.registered).toHaveLength(0);
+
+    const applied = await applyLivingChange({ dispatch: p.dispatch, proposals }, said, String((out as { data: Rec }).data.proposal_id));
+    expect(applied).toMatchObject({ status: 'ok', mutated: true });
+    const saved = p.saved().living_model as LivingModelT;
+    expect(saved.views).toEqual([{ holder: 'Sam', position: 'now supports push', quote: NOW }]);
+    expect(saved.history).toEqual([{ id: 'view', change: 'superseded', old: JSON.stringify(RISKY), quote: NOW }]);
+  });
+
+  it('CONTRAST: another holder\'s view never replaces Sam\'s, and a view dropped with no replacement is still refused', async () => {
+    const p = product(KNOWN_ANSWER);
+    expect(await proposeLivingChange({ dispatch: p.dispatch, proposals: new ProposalStore() }, said, args(supports('Alex'))))
+      .toMatchObject({ status: 'refused', reason: 'cannot_remove_here', data: { kinds: ['view'] } });
+    expect(await proposeLivingChange({ dispatch: p.dispatch, proposals: new ProposalStore() }, said, args({ ...structuredClone(KNOWN_ANSWER), views: [] })))
+      .toMatchObject({ status: 'refused', reason: 'cannot_remove_here', data: { kinds: ['view'] } });
+  });
+
+  it('NEGATIVE: a new view in words the person never said is kept in history with no one\'s words', async () => {
+    const proposals = new ProposalStore();
+    const out = await proposeLivingChange({ dispatch: product(KNOWN_ANSWER).dispatch, proposals }, { ...said, user_turn_text: 'Run it again.' }, args(supports()));
+    expect(out).toMatchObject({ status: 'ok' });
+    expect(proposed(proposals, out).history).toEqual([{ id: 'view', change: 'superseded', old: JSON.stringify(RISKY), quote: null }]);
+  });
+
+  it('NEGATIVE: a history entry the AI writes for the replaced view is the host\'s instead, and saved history is never removed', async () => {
+    const proposals = new ProposalStore();
+    const forged = { ...supports(), history: [{ id: 'view', change: 'superseded' as const, old: JSON.stringify(RISKY), quote: 'I withdraw my objection.' }] };
+    const out = await proposeLivingChange({ dispatch: product(KNOWN_ANSWER).dispatch, proposals }, said, args(forged));
+    expect(proposed(proposals, out).history).toEqual([{ id: 'view', change: 'superseded', old: JSON.stringify(RISKY), quote: NOW }]);
+
+    const withHistory = { ...supports(), history: [{ id: 'view', change: 'superseded' as const, old: JSON.stringify(RISKY), quote: NOW }] };
+    expect(await proposeLivingChange({ dispatch: product(withHistory).dispatch, proposals: new ProposalStore() }, said, args({ ...withHistory, history: [] })))
+      .toMatchObject({ status: 'refused', reason: 'cannot_remove_here', data: { kinds: ['history'] } });
+  });
+});
