@@ -42,6 +42,14 @@ describe('a stated deadline holds on the core goal as it does on the legacy one'
     expect(reason(stored(byWhen('end of Q2 2027')))).toEqual(reason(legacy('2027-06-30')));
   });
 
+  // Codex r1 on #3577: the stored projection's parse can hide a malformed horizon, so the mapper's own output is read too.
+  it('the mapper itself holds the well-formed date, and never a relative year read against its reference', () => {
+    const raw = (when: string) => (mapLivingModel(byWhen(when)).graph.nodes as Rec[]).find((n) => n.id === 'g')!.goal_horizon;
+    expect(raw('2027-04-12')).toEqual({ deadline: '2027-04-12' });
+    expect(raw('end of Q2 2027')).toEqual({ deadline: '2027-06-30' });
+    for (const when of ['Review 2032-03 plan by March next year', 'Review 2021-12 plan by end of this year']) expect(raw(when), when).toBeUndefined();
+  });
+
   it('CONTRAST: no deadline is no horizon on both lanes', () => {
     expect(reason(stored(byWhen(null)))).toEqual({ verdict: 'no_horizon', detail: null });
   });

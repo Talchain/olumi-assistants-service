@@ -96,8 +96,11 @@ function capFor(levels: readonly number[], unit: string | null, goal: { cap: num
 function statedDeadline(byWhen: string | null): string | undefined {
   if (byWhen === null) return undefined;
   const read = readStatedDeadline(byWhen, '0001-01-01');
-  return read !== null && ['date', 'quarter_end', 'month_end', 'year_end'].includes(read.form) && byWhen.includes(read.date.slice(0, 4))
-    ? read.date : undefined;
+  // Its year is bound by the words themselves: a whole four-digit year in them, never a relative year read against the reference
+  // (Codex r1 on #3577: "Review 2032-03 plan by March next year" made "2-03-31", which a substring check let through).
+  const year = /^(\d{4})-\d{2}-\d{2}$/.exec(read?.date ?? '')?.[1];
+  return read !== null && year !== undefined && Number(year) >= 1000 && new RegExp(`\\b${year}\\b`).test(byWhen)
+    && ['date', 'quarter_end', 'month_end', 'year_end'].includes(read.form) ? read.date : undefined;
 }
 
 type Target = NonNullable<LivingModelT['aims'][number]['target']>;
