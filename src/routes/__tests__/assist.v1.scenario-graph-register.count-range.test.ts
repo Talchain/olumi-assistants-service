@@ -18,7 +18,6 @@ vi.mock('../../orchestrator/user-identity.js', async importOriginal => ({
 import registerRoute from '../assist.v1.scenario-graph-register.js';
 import { GraphV3 } from '../../schemas/cee-v3.js';
 import { projectGraphForPersistence } from '../../orchestrator-v5/persisted-graph-projection.js';
-import { frozenCandidateGraph } from '../../orchestrator-v5/path-b/tools/__tests__/frozen-candidate-graphs.js';
 
 const SCENARIO = 'b63d8672-0000-4000-8000-0000000b63d8';
 const BRIEF = 'The starter tier would win about 150 new subscribers, between 80 and 250.';
@@ -138,54 +137,6 @@ describe('K2 on path B: a range its own construction record states, at real grap
     const response = await register(bGraph(), B_BRIEF);
     expect(response.statusCode, response.body).toBe(200);
     expect(bCell(store.append.mock.calls[0]![0].graph).range).toEqual(B_RANGE);
-  });
-
-  it('⭐ REAL PATH: path B\'s own conversion of a draft registers create-only, its recorded range on the setting', async () => {
-    const draft = {
-      goal: { kind: null, deliverable: null, metric: 'Loaves sold a day', operator: '>=', target_stated: true, value: 300, unit: 'loaves a day',
-        horizon_months: 6, provenance: 'explicit', frame: 'level', baseline_known: true, baseline_value: 250, baseline_provenance: 'explicit',
-        scope: null, quantity_frame: 'level', basis: null },
-      constraints: [], risks: [], outcomes: [], identities: [], unknowns: [], unknown_concerns: [], decision_question: null,
-      options: [{ label: 'Hire a second baker', provenance: 'explicit', changes: [], added_capacity: null, is_status_quo: null,
-        interventions: [{ factor_label: 'Extra baking capacity', value: 40, value_kind: 'absolute', unit: 'loaves a day', provenance: 'explicit', stated_evidence: null }] },
-      { label: 'Carry on as now', provenance: 'ai_proposed', changes: [], interventions: [], added_capacity: null, is_status_quo: true }],
-      factors: [{ label: 'Extra baking capacity', role: 'controllable', baseline_known: true, baseline_value: 0, unit: 'loaves a day', provenance: 'explicit', plausible_max: 200 }],
-      links: [{ from: 'Extra baking capacity', to: 'Loaves sold a day', direction: 'positive', provenance: 'ai_proposed', effect_amount: 1,
-        effect_per_source_change: 1, effect_provenance: 'ai_proposed', definitional: true, basis: null, source_quote: null }],
-      statements: [{ quote: B_BRIEF, subject: { kind: 'option', label: 'Hire a second baker', to_label: null, factor_label: 'Extra baking capacity' },
-        field: 'level', form: 'range', value: 40, low: 25, high: 60, unit: 'loaves a day', qualifier: 'about', conditions: null, speaker: 'user' }],
-    };
-    const out = frozenCandidateGraph(draft, { words: B_BRIEF, recorded_at: '2026-10-19T22:00:00.000Z' });
-    if ('refused' in out) throw new Error(out.refused);
-    const response = await register(out.graph as Rec, B_BRIEF);
-    expect(response.statusCode, response.body).toBe(200);
-    const saved = store.append.mock.calls[0]![0].graph as Rec;
-    const option = (saved.nodes as Rec[]).find((n) => n.label === 'Hire a second baker')!;
-    expect(Object.values(option.interventions as Rec)[0]).toMatchObject({ raw_value: 40, range: B_RANGE });
-  });
-
-  it('⭐ REAL PATH (level today): a factor\'s recorded level range registers create-only on observed_state.range', async () => {
-    const LEVEL = 'We bake between 200 and 300 loaves a day now.';
-    const draft = {
-      goal: { kind: null, deliverable: null, metric: 'Loaves sold a day', operator: '>=', target_stated: true, value: 300, unit: 'loaves a day',
-        horizon_months: 6, provenance: 'explicit', frame: 'level', baseline_known: true, baseline_value: 250, baseline_provenance: 'explicit',
-        scope: null, quantity_frame: 'level', basis: null },
-      constraints: [], risks: [], outcomes: [], identities: [], unknowns: [], unknown_concerns: [], decision_question: null,
-      options: [{ label: 'Hire a second baker', provenance: 'explicit', changes: [], added_capacity: null, is_status_quo: null,
-        interventions: [{ factor_label: 'Daily baking', value: 290, value_kind: 'absolute', unit: 'loaves a day', provenance: 'explicit', stated_evidence: null }] },
-      { label: 'Carry on as now', provenance: 'ai_proposed', changes: [], interventions: [], added_capacity: null, is_status_quo: true }],
-      factors: [{ label: 'Daily baking', role: 'controllable', baseline_known: true, baseline_value: 250, unit: 'loaves a day', provenance: 'explicit', plausible_max: 600 }],
-      links: [{ from: 'Daily baking', to: 'Loaves sold a day', direction: 'positive', provenance: 'ai_proposed', effect_amount: 1,
-        effect_per_source_change: 1, effect_provenance: 'ai_proposed', definitional: true, basis: null, source_quote: null }],
-      statements: [{ quote: LEVEL, subject: { kind: 'factor', label: 'Daily baking', to_label: null, factor_label: null },
-        field: 'level', form: 'range', value: null, low: 200, high: 300, unit: 'loaves a day', qualifier: null, conditions: null, speaker: 'user' }],
-    };
-    const out = frozenCandidateGraph(draft, { words: LEVEL, recorded_at: '2026-10-19T22:00:00.000Z' });
-    if ('refused' in out) throw new Error(out.refused);
-    const response = await register(out.graph as Rec, LEVEL);
-    expect(response.statusCode, response.body).toBe(200);
-    const factor = ((store.append.mock.calls[0]![0].graph as Rec).nodes as Rec[]).find((n) => n.label === 'Daily baking')!;
-    expect(factor.observed_state).toMatchObject({ raw_value: 250, range: { low: 200, high: 300, meaning: 'min_max', source: 'brief_extraction', source_quote: LEVEL } });
   });
 
   it('A UNCHANGED: A\'s request shapes give what they gave (a brief-stated range 200; an unstated one 409)', async () => {

@@ -9,16 +9,16 @@ const licenceOf = (result: Json): Json => result.inference_warnings.find((w: Jso
 
 describe('evaluated default ledger, independent of point authorship', () => {
   it('carries each original admission entry once, including its explicit field source', () => {
-    const f = d3Run('orders');
-    for (const edge of f.graph.edges.filter((e: Json) => e.provenance?.uncertainty_defaults)) {
-      for (const row of edge.provenance.uncertainty_defaults) expect(f.loss.filter(l => l.field_path === row.field_path)).toEqual([row]);
-      expect(linkDefaultAssumptionsOf(edge)).toEqual(edge.provenance.uncertainty_defaults);
-    }
+    const f = d3Run('orders', 'olumi');
+    const ledgered = f.graph.edges.filter((e: Json) => e.provenance?.uncertainty_defaults?.length);
+    expect(ledgered.map((e: Json) => e.provenance.uncertainty_defaults.map((r: Json) => r.field_path.split('].')[1]))).toEqual([
+      ['strength.std', 'exists_probability'], ['strength.std', 'exists_probability']]);
+    for (const edge of ledgered) expect(linkDefaultAssumptionsOf(edge)).toEqual(edge.provenance.uncertainty_defaults);
   });
 
   it('coincident defaults, a different entity, superseded values and malformed ledgers grant no attribution', () => {
-    const f = d3Run('orders');
-    const edge = f.graph.edges.find((e: Json) => e.provenance?.uncertainty_defaults)!;
+    const f = d3Run('orders', 'olumi');
+    const edge = f.graph.edges.find((e: Json) => e.provenance?.uncertainty_defaults?.length)!;
     expect(edge, 'fixture must exercise an actual ledger').toBeDefined();
     expect(linkDefaultAssumptionsOf({ ...edge, provenance: { magnitude: 'user_stated' }, defaulted: true })).toEqual([]);
     expect(linkDefaultAssumptionsOf({ ...edge, from: 'unrelated_factor' })).toEqual([]);
@@ -31,7 +31,7 @@ describe('evaluated default ledger, independent of point authorship', () => {
 
   it('only the evaluated goal path is disclosed; other links and the human source stay separate; numbers are byte-equal', () => {
     const f = d3Run('repairs'), g = structuredClone(f.graph);
-    const edge = g.edges.find((e: Json) => e.provenance?.uncertainty_defaults)!;
+    const edge = g.edges.find((e: Json) => e.provenance?.uncertainty_defaults?.length)!;
     g.edges.push({ ...edge, from: 'not_in_this_run', to: 'another_goal' });
     const input = { ...f.result.enrichment, inference_warnings: [] };
     const goal = g.nodes.find((n: Json) => n.kind === 'goal').id;
@@ -45,7 +45,9 @@ describe('evaluated default ledger, independent of point authorship', () => {
     for (const e of plain.edges) if (e.provenance) delete e.provenance.uncertainty_defaults;
     const unchanged = withGoalChanceLicence(input, plain, goal, undefined, undefined, plain, { sentRun: { ...f.sent, graph: plain } });
     const { default_assumptions: _assumptions, notes, ...data } = licence;
-    expect({ ...data, notes: notes.filter((n: string) => n !== ILLUSTRATIVE) }).toEqual(licenceOf(unchanged));
+    const otherNotes = notes.filter((n: string) => n !== ILLUSTRATIVE);
+    expect(notes.filter((n: string) => n === ILLUSTRATIVE)).toEqual([ILLUSTRATIVE]);
+    expect({ ...data, ...(otherNotes.length > 0 ? { notes: otherNotes } : {}) }).toEqual(licenceOf(unchanged));
     expect(result.option_comparison).toEqual(unchanged.option_comparison);
     expect(runFactsOf(f.result, g, false).chances).toEqual({});
     expect(readLinkDefaultAssumptions(licence.default_assumptions)).toEqual(licence.default_assumptions);
