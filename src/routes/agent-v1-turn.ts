@@ -191,6 +191,7 @@ import { widenTurnForReadback } from '../orchestrator-v5/agent-lane/method-turn/
 import { isWhatChangesPress, whatChangesTurnFor, type WhatChangesTurn } from '../orchestrator-v5/agent-lane/method-turn/what-changes-turn.js';
 import { dispatchDecisionFlip } from '../orchestrator-v5/handlers/decision-flip-dispatch.js';
 import { dispatchStructuralChallenge, readStructuralChallengeReceipt } from '../orchestrator-v5/handlers/structural-challenge-dispatch.js';
+import { runStressVariant } from '../orchestrator-v5/handlers/stress-variant-run.js';
 import { STRUCTURAL_CHALLENGE_PRESS_PREFIX, parseStructuralChallengePress, structuralChallengePressId, structuralChallengeRefusal, structuralChallengeReplay, structuralChallengeTurnFor, structuralChallengeTurnUnderLicence, type StructuralChallengePressResolution, type StructuralChallengeTurn } from '../orchestrator-v5/agent-lane/method-turn/structural-challenge-turn.js';
 import { methodResultForEgress, testLinkMethodResult, whatChangesMethodResult, type MethodResultV1 } from '../orchestrator-v5/agent-lane/actions/method-result.js';
 import { readStructuralChallengeEdge } from '../orchestrator-v5/coaching/structural-challenge-eligibility.js';
@@ -973,8 +974,9 @@ export const CORE_REPLY_INSTRUCTION = 'In this mode Olumi adds nothing to your r
   + "Keep a clearly separate situation out of the current scenario's Living Model. If the relationship to the current scenario is unclear, ask one brief scope question before building or changing the model, while continuing useful discussion. "
   + 'Do not ask again when the person has already made the scope clear. Ordinary expansion and what-ifs within this scenario remain allowed. '
   + 'If the available tools cannot create or work in a separate scenario, say so; do not claim it was created or put its facts into this model instead.';
-/** A `core` Run press permits calculation and reading only: every tool but the reader and the Run (`withheldToolsOf`). */
-export const CORE_RUN_PRESS_WITHHELD: readonly string[] = ['build_model_from_brief', 'propose_change', 'apply_change'];
+/** A `core` Run press permits calculation and reading only: every tool but the reader and the Run (`withheldToolsOf`). The
+ *  stress test is withheld too (DL 21 Oct): a press runs and reads; typed turns still offer it, where the person asks. */
+export const CORE_RUN_PRESS_WITHHELD: readonly string[] = ['build_model_from_brief', 'propose_change', 'apply_change', 'stress_test'];
 /** Coaching on the canvas (Lenses, #3535 `note_on_item`): one question or challenge beside the item that most deserves attention. */
 export const NOTE_ON_ITEM_INSTRUCTION = "When one item in the model most deserves the person's attention (an untested assumption a result rests on, a missing cost or risk, or a link nobody has sized), use note_on_item once to put one short question or challenge beside it, in your own words; ask, do not answer or choose for them.";
 /**
@@ -4519,7 +4521,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             commitOptionLevels: commitOptionLevelsDoor, onModelRegistered: (raw) => emitGraphReady(raw),
             runAnalysis: (args) => restoreRun === undefined ? Promise.resolve({ ok: false, mutated: false, ran: false, refusal: 'run_failed' })
               : loopCapabilities.runAnalysis(toolCtx, args),
-            analyseAfterCommit: () => { analysisToCore = true; return analyseCommittedChange(); } }, coreCtx, mode,
+            analyseAfterCommit: () => { analysisToCore = true; return analyseCommittedChange(); },
+            // TRACK 3: each stress variant on the one Run path, in memory, discarded (`handlers/stress-variant-run.ts`).
+            runStressVariant: (v) => runStressVariant({ ...v, requestId: `${String(req.id)}:stress`,
+              payload: { kind: 'message', scenario_id: scenarioId, turn_id: randomUUID(), stage: 'analyse', turn_class: 'decide', source: 'composer', message } }) }, coreCtx, mode,
             (row, result) => {
               // Only the adapter's own receipt AND successful postimage readback establish a saved change.
               if (result.ok && result.mutated && (result.receipts?.length ?? 0) > 0) verifiedSave = true;

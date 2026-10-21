@@ -2879,7 +2879,7 @@ export async function loadPersistedGraphStrict(
  */
 export async function loadPersistedScenarioStateStrict(
   scenarioId: string,
-  sessionStore?: SessionStore,
+  sessionStore?: Pick<SessionStore, 'loadGraphAndBriefText'>,
 ): Promise<{ readonly graph: unknown | null; readonly briefText: string | null; readonly revision?: number }> {
   const store = sessionStore ?? getSessionStore();
   return await store.loadGraphAndBriefText(scenarioId);
@@ -2888,7 +2888,8 @@ export async function loadPersistedScenarioStateStrict(
 export async function loadScenarioSnapshotForRunAnalysis(
   scenarioId: string,
   requestId: string,
-  sessionStore?: SessionStore,
+  // The two reads the loader makes. A stress variant passes its graph here and the scenario's own pending actions.
+  sessionStore?: Pick<SessionStore, 'loadGraphAndBriefText' | 'readMostRecentPendingActions'>,
 ): Promise<RunAnalysisScenarioSnapshot> {
   // STRICT read: a store/RPC failure must PROPAGATE (→ the handler's retryable
   // `scenario_read_failed`), NOT be swallowed to null. The non-strict

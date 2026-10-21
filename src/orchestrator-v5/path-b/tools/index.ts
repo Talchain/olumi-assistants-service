@@ -24,6 +24,7 @@ import { RUN_ANALYSIS, RunAnalysisParams, recordedRun, runAnalysis, type RunDeps
 import { APPLY_CHANGE, ApplyChangeParams, PROPOSE_CHANGE, ProposeChangeParams, applyChange, proposeChange, type ChangeDeps } from './change-tools.js';
 import { LivingChangeParams, applyLivingChange, isLivingProposal, proposeLivingChange } from './living-change.js';
 import { NOTE_ON_ITEM, NoteOnItemParams, noteOnItem } from './note-on-item.js';
+import { STRESS_TEST, StressTestParams, stressTest, type StressDeps } from './stress-tool.js';
 import { refused, traceRow, type ToolOutcome, type TraceRow } from './outcome.js';
 
 export { traceRow, type TraceRow, type ToolOutcome } from './outcome.js';
@@ -43,9 +44,12 @@ export const TOOL_DESCRIPTIONS = {
     'Request a fresh scientific Run of the current saved model. Eligible committed changes and Undo use the existing automatic analysis and coaching path; do not issue a duplicate Run after them. Read actual readiness and the recorded Run, then explain only what its results support. Report refusal or unavailability honestly. Do not rerun analysis merely to retry an explanation.',
   note_on_item:
     'Show one short note beside one item of the saved model, labelled as Olumi’s: a question to test it, a challenge to an assumption, or what seems missing. At most one per turn; it changes nothing in the model. Use the item’s id from read_canonical_context. Never call an option best and never recommend one.',
+  // TRACK 3: prompt text routed to Science by the DL (inform-only, 21 Oct); the averages wording is Science's objection.
+  stress_test:
+    'Test where the saved model’s options fall short on average when stated assumptions change together, and whether one named alternative explanation changes that. Name one to three links or factors from read_canonical_context with the values to test, in their own units, and say whether the person gave those values. Nothing is saved. Every result compares an option’s AVERAGE level with the target: report each option at each tested setting as “average clears the target”, “average short of the target” or “too close to call”, and counts as “the average clears the target at k of n tested settings”. Never say an option meets the goal from this test, and never call a count a chance. Say where the two explanations disagree; never combine them, never call an option best and never recommend one.',
 } as const;
 
-export type PathBToolDeps = ChangeDeps & DraftDeps & RunDeps & {
+export type PathBToolDeps = ChangeDeps & DraftDeps & RunDeps & Pick<StressDeps, 'runStressVariant'> & {
   /**
    * The route's automatic Run after a committed change (the existing pipeline, at most once per request): the pipeline's
    * outcome, or none with the saved model's readiness when that readiness admits no Run.
@@ -146,6 +150,14 @@ export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLa
       execute: async (args) => record(RUN_ANALYSIS, args, await runAnalysis(deps, ctx, args, { approvalApplied })),
       errorFunction: null,
     }),
+    // TRACK 3: offered only where the route wires the variant Run; it reads and computes, and saves nothing.
+    ...(deps.runStressVariant === undefined ? [] : [tool({
+      name: STRESS_TEST,
+      description: TOOL_DESCRIPTIONS.stress_test,
+      parameters: StressTestParams,
+      execute: async (args) => record(STRESS_TEST, args, await stressTest(deps, ctx, args)),
+      errorFunction: null,
+    })]),
     tool({
       name: NOTE_ON_ITEM,
       description: TOOL_DESCRIPTIONS.note_on_item,
