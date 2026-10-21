@@ -379,6 +379,15 @@ describe('PATH-B gap 4: commit and Undo each run the existing Run pipeline once;
     expect((j.blocks as Json[]).some((b) => b.type === 'analysis_result')).toBe(true);
   });
 
+  it('CONTRAST (DL 21 Oct): a typed core turn still offers stress_test; only a Run press withholds it', async () => {
+    outputs = [[{ type: 'message', text: 'Capacity is the one factor here.' }]];
+    const r = await post({ turn_id: randomUUID(), message: 'What if Capacity were lower than we think?', source: 'composer' });
+    expect(r.statusCode, r.body).toBe(200);
+    const offered = (calls[0]!.tools as Json[]).map((t) => t.name);
+    expect(offered, 'the person can ask to stress their assumptions').toContain('stress_test');
+    expect(offered).toContain('run_analysis');
+  });
+
   it('⭐ RED→GREEN (Codex R1): ONE restore = ONE Run. The same Undo\'s Run re-pressed with a fresh turn id recovers that Run; no second engine call', async () => {
     Object.assign(world, { graph: GRAPH_AT_2, hash: HASH_2 });
     head = { status: 'ok', value: versionRow() };
