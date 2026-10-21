@@ -94,7 +94,29 @@ describe('a canvas gesture on a core scenario', () => {
     const mapped = mapLivingModel(g.living_model as typeof KNOWN_ANSWER);
     expect(mapped.withheld.filter((w) => w.id === 'f')).toEqual([]);
     expect((g.edges as Rec[]).some((e) => e.from === 'hold' && e.to === 'f')).toBe(true);
-    expect(mapped.assumed).toContainEqual({ id: 'f', text: expect.stringMatching(/uses the stated 0\.5 for f\. The stated range, 0\.2 to 0\.8, is kept with the model but is not used as a spread\./) });
+    expect(mapped.assumed).toContainEqual({ id: 'f', text: expect.stringMatching(/uses 0\.5 for f\. The range, 0\.2 to 0\.8, is kept with the model but is not used as a spread\./) });
+  });
+
+  it('⛔ Codex on #3575: a range from the figure itself (28 % to 50 %) keeps it, though the frame reads 28.000000000000004', async () => {
+    const pct = structuredClone(KNOWN_ANSWER);
+    Object.assign(pct.factors[0]!, { value: 28, unit: '%' });
+    Object.assign(pct.options.find((o) => o.id === 'push')!.settings[0]!, { value: 50, unit: '%' });
+    const cap = mapLivingModel(pct).frames.get('f')!.cap;
+    const stored: Rec = { ...mapLivingModel(pct).graph, living_model: pct };
+    loadGraph.mockResolvedValue(stored);
+    const out = await send({ kind: 'prior_range_edit', target_id: 'f', range_min: 28 / cap, range_max: 50 / cap,
+      base_graph_hash: computeExpectedGraphCasHashes(stored).expectedGraphAnalysisHash! });
+    expect(out.commitPerformed, JSON.stringify(out.response)).toBe(true);
+    expect((written().living_model as typeof KNOWN_ANSWER).factors.find((f) => f.id === 'f')!.value).toBe(28);
+    expect(mapLivingModel(written().living_model as typeof KNOWN_ANSWER).withheld.filter((w) => w.id === 'f')).toEqual([]);
+  });
+
+  it('⛔ Codex on #3575: Olumi\'s own figure with a range is never called "stated"', () => {
+    const est = structuredClone(KNOWN_ANSWER);
+    Object.assign(est.factors[0]!, { source: 'olumi', quote: null, low: 0.2, high: 0.8 });
+    const line = mapLivingModel(est).assumed.find((a) => a.id === 'f');
+    expect(line?.text).toMatch(/uses 0\.5 for f\. The range, 0\.2 to 0\.8/);
+    expect(line?.text).not.toMatch(/stated/);
   });
 
   it('NEGATIVE: a range that leaves the figure out, or one around Olumi\'s estimate, replaces it: held and asked, never kept under the person\'s name', async () => {

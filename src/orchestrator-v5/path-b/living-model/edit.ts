@@ -89,7 +89,10 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       // A range around the person's own figure keeps it: a central figure with a range, so more information never costs
       // the Run (DL ruling 21 Oct, as a link's "centred" range). Olumi's estimate is never kept under the person's name: the
       // factor has one author, so a range that excludes the figure, or one around an estimate, replaces it (held and asked).
-      const keep = f.value !== null && f.source === 'user' && low <= f.value && f.value <= high;
+      // The bounds come through the frame (`toRaw`), so 28 % against a range from 28 % reads 28.000000000000004 (Codex):
+      // a range from the figure itself still holds it.
+      const eps = 1e-9 * Math.max(1, Math.abs(f.value ?? 0));
+      const keep = f.value !== null && f.source === 'user' && low - eps <= f.value && f.value <= high + eps;
       Object.assign(f, { value: keep ? f.value : null, low, high, ...theirs });
       return { model: m };
     }
