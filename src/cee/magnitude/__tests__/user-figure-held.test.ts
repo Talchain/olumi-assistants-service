@@ -30,6 +30,11 @@ describe('userFigureHeld — the user’s own figure, as words they recognise', 
     expect(userFigureHeld(edge({ source: 'user_specified', magnitude: 'user_stated', natural_effect: NATURAL })))
       .toEqual({ quote: '49 GBP/month per 1 subscriber' });
   });
+  it('an option\'s own switch is the option\'s own effect: no "per 1 switch" (Codex #3556 R1)', () => {
+    const SWITCH = { ...NATURAL, amount: 30, amount_unit: 'widgets per hour', per_source_change_unit: 'switch' };
+    expect(userFigureHeld(edge({ source: 'user_specified', magnitude: 'user_stated', natural_effect: SWITCH })))
+      .toEqual({ quote: '30 widgets per hour' });
+  });
   it.each([
     ['Olumi’s estimate', { source: 'cee_hypothesis', magnitude: 'olumi_estimate', natural_effect: NATURAL }],
     ['a placeholder', { source: 'cee_hypothesis', magnitude: 'olumi_placeholder' }],

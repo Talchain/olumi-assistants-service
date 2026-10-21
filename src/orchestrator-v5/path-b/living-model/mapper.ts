@@ -235,8 +235,11 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
    * option to a factor had no engine endpoint and was held (`link_endpoint_unknown`), leaving the option driving nothing.
    */
   const fromOption = model.links.filter((l) => optionIds.has(l.from));
+  /** The switches made here, exactly: never a person's own factor whose id happens to look like one (Codex #3556 R1). */
+  const switches = new Set<string>();
   if (fromOption.length > 0) {
     const on = (optionId: string) => `${optionId}__on`;
+    for (const l of fromOption) switches.add(on(l.from));
     model = { ...model,
       factors: [...model.factors, ...[...new Set(fromOption.map((l) => l.from))].map((id) => ({ id: on(id),
         label: `${model.options.find((o) => o.id === id)!.label} in place`, value: 0, low: null, high: null, unit: null, defined_as: null, source: 'olumi' as const, party: null, quote: null }))],
@@ -476,8 +479,10 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
       : l.source === 'olumi' ? { source: 'cee_hypothesis', magnitude: 'olumi_estimate' } : {};
     // The size in the person's own units, as every existing reader of a sized link reads it (`natural_effect`: the target's
     // testability, the chance licence, the canvas): the change in `to` per +1 of `from`, and the β it was written for.
+    // An option's own switch (`<option>__on`) has no unit; its change is said per 'switch', as legacy link-effect.ts says it.
+    // An empty unit breaks the run-input contract, so the snapshot left the size out and no edit could be named (Compare C1).
     const natural_effect = { amount: sign * Math.abs(e.value!), amount_unit: to!.unit ?? '', per_source_change: 1,
-      per_source_change_unit: from!.unit ?? '', strength_mean: sized.mean, strength_mean_frame: 'edge_strength' as const };
+      per_source_change_unit: from!.unit ?? (switches.has(l.from) ? 'switch' : ''), strength_mean: sized.mean, strength_mean_frame: 'edge_strength' as const };
     edges.push({ ...base, strength: sized, exists_probability: exists, provenance: { ...who, natural_effect, uncertainty_defaults: assumed } });
   }
 
