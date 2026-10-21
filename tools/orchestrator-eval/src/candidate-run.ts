@@ -18,10 +18,11 @@
  *        a FAILED turn — see applyExtractionContract)
  *     -> candidates RANKED on identical scenarios.
  *
- * SCOPE (deliberate, documented): the turn context here is the ASSEMBLED
- * analysis (production formatAnalysisForContext output) + the user message —
- * the same projection stage the floor pack grounds on. The full context-pack
- * -> system-prompt compose stays deferred (README "Deliberately deferred"),
+ * SCOPE (deliberate, documented): the turn context here is the user message
+ * only. It once also carried the assembled analysis (production
+ * formatAnalysisForContext output); that formatter was deleted (Track 2
+ * deletion 9), and retiring this routing task is a DL follow-up. The full
+ * context-pack -> system-prompt compose stays deferred (README "Deliberately deferred"),
  * and eligible-actions shaping is omitted because the eval fixtures carry
  * none. Rankings are therefore comparable BETWEEN candidates (same shaping
  * for both arms), not absolute predictions of staging behaviour.
@@ -34,7 +35,6 @@
  */
 
 import { createHash } from 'node:crypto';
-import { assembleAnalysis } from './assemble.js';
 import { scoreCandidate } from './scorer.js';
 import { enforceTurnCap, resolveLiveGate, type LiveGateInput, type LiveGateResult } from './live-gate.js';
 import { resolvePmsPromptText, type CandidatePromptSpec } from './prompt-source.js';
@@ -149,8 +149,7 @@ export interface CandidateEvalReport {
 /**
  * Build the request for one fixture, shaped per SEAM-1's documented reuse of
  * the graph-evaluator orchestrator adapter (prompt + <TURN_CONTEXT> + JSON
- * forcing). The turn context carries the ASSEMBLED analysis — the exact
- * display-safe projection the runtime grounds the prompt on.
+ * forcing). The turn context carries the user message only (see SCOPE above).
  */
 export function buildCandidateRequest(
   fixture: OrchestratorEvalFixture,
@@ -158,7 +157,6 @@ export function buildCandidateRequest(
 ): { system: string; user: string } {
   const turnContext = {
     user_message: fixture.user_message,
-    analysis: assembleAnalysis(fixture.analysis),
   };
   const system = [
     promptText,

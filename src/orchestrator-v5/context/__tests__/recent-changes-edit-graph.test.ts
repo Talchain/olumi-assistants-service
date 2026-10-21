@@ -18,6 +18,8 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import {
   RECENT_CHANGES_SUMMARY_MAX_CHARS,
   projectRecentChanges,
+  type RecentChangeAction,
+  type RecentMutation,
 } from '../recent-changes.js';
 
 function makeEditGraphFact(overrides: {
@@ -156,26 +158,45 @@ describe('projectRecentChanges — edit_graph branch', () => {
 });
 
 // ---------------------------------------------------------------------------
-// V5 stale-aware explain recovery — projection ↔ schema drift guard.
+// V5 stale-aware explain recovery — the projection's output shape.
 //
-// `recent-changes.ts` emits `RecentMutation` objects that flow into the
-// ContextPack and MUST validate against `RecentMutationSchema` defined
-// in `context-pack-schema.ts`. DL-7 PR B added `'graph_edited'` to the
-// projection's `RecentChangeAction` union but left the ContextPack
-// schema's enum at the original three values; an `edit_graph` fact
-// then failed ContextPack validation at orient and surfaced in
-// production as the V5 Golden Journey dl7-edit-graph denial-of-edit
-// symptom. The fix (this workstream) adds `'graph_edited'` to the
-// schema enum. This test pins the projection↔schema agreement so the
-// drift cannot recur for any future RecentChangeAction value.
+// These rows once validated each projection against `RecentMutationSchema`
+// (`context-pack-schema.ts`). That schema was deleted with the rest of the
+// ContextPack schema (Track 2 deletion 9), so the same three properties are
+// now asserted DIRECTLY on the live projector's output: the action enum, the
+// summary/target_label length bound and a strict key set.
 // ---------------------------------------------------------------------------
 
-import type { z } from 'zod';
-import { RecentMutationSchema } from '../context-pack-schema.js';
+/**
+ * The action enum, DERIVED from the live union: adding a member to
+ * `RecentChangeAction` without listing it here fails typecheck.
+ */
+const RECENT_CHANGE_ACTIONS = Object.keys({
+  constraint_added: true,
+  factor_value_updated: true,
+  link_strength_updated: true,
+  graph_edited: true,
+} satisfies Record<RecentChangeAction, true>) as readonly RecentChangeAction[];
 
-type RecentMutationFromSchema = z.infer<typeof RecentMutationSchema>;
+/** Every key a `RecentMutation` may carry; anything else is a leak. */
+const RECENT_MUTATION_KEYS: ReadonlySet<string> = new Set([
+  'action',
+  'summary',
+  'target_label',
+  'transition',
+  'constraint_not_checkable',
+]);
 
-describe('projection ↔ ContextPack schema agreement', () => {
+function expectLiveRecentMutationShape(m: RecentMutation): void {
+  expect(Object.keys(m).filter((k) => !RECENT_MUTATION_KEYS.has(k))).toEqual([]);
+  expect(RECENT_CHANGE_ACTIONS).toContain(m.action);
+  expect(typeof m.summary).toBe('string');
+  expect(m.summary.length).toBeLessThanOrEqual(RECENT_CHANGES_SUMMARY_MAX_CHARS);
+  expect(typeof m.target_label).toBe('string');
+  expect(m.target_label.length).toBeLessThanOrEqual(RECENT_CHANGES_SUMMARY_MAX_CHARS);
+}
+
+describe('projection output shape (rebound from the deleted RecentMutationSchema)', () => {
   // Fact builders for each `RecentChangeAction` the projection can emit.
   function makeAddConstraintFact(): HandlerFact {
     return {
@@ -237,52 +258,26 @@ describe('projection ↔ ContextPack schema agreement', () => {
     ['adjust_edge_strength', makeAdjustEdgeStrengthFact, 'link_strength_updated' as const],
     ['edit_graph', makeEditGraphFactDefault, 'graph_edited' as const],
   ])(
-    'projection of a %s fact (action=%s) validates against RecentMutationSchema',
+    'projection of a %s fact (action=%s) has the strict RecentMutation shape',
     (_factType, build, expectedAction) => {
       const projection = projectRecentChanges([build()]);
       expect(projection).toHaveLength(1);
       expect(projection[0].action).toBe(expectedAction);
-      // Validate each projection element directly against the same
-      // RecentMutationSchema the ContextPack uses. If this fails on
-      // 'graph_edited' the schema enum is missing the value (drift) —
-      // the exact regression class this guard pins.
-      const parsed = RecentMutationSchema.safeParse(projection[0]);
-      if (!parsed.success) {
-        throw new Error(
-          `RecentMutationSchema rejected projection for ${expectedAction}: ` +
-            JSON.stringify(parsed.error.issues, null, 2),
-        );
-      }
-      expect(parsed.success).toBe(true);
+      expect(Object.keys(projection[0]).sort()).toEqual(['action', 'summary', 'target_label']);
+      expectLiveRecentMutationShape(projection[0]);
     },
   );
 
-  it('drift guard: every action emitted by recent-changes.ts is accepted by RecentMutationSchema', () => {
-    // Drift signal: if a future commit adds a value to the projection's
-    // RecentChangeAction union without updating the schema enum, OR vice
-    // versa, this test fails. Keep both sides in lockstep — the V5
-    // Golden Journey dl7-edit-graph failure was exactly this drift
-    // (DL-7 PR B added 'graph_edited' to the projection but not the
-    // schema).
-    //
-    // The known-produced set is the runtime contract. Update both sides
-    // together when a new RecentChangeAction is introduced.
-    const KNOWN_PRODUCED_ACTIONS: ReadonlyArray<RecentMutationFromSchema['action']> = [
-      'constraint_added',
-      'factor_value_updated',
-      'link_strength_updated',
-      'graph_edited',
-    ];
-    for (const action of KNOWN_PRODUCED_ACTIONS) {
-      const parsed = RecentMutationSchema.safeParse({
-        action,
-        summary: 'probe',
-        target_label: 'probe target',
-      });
-      expect(
-        parsed.success,
-        `RecentMutationSchema must accept the action value ${action}`,
-      ).toBe(true);
-    }
+  it('drift guard: the four fact builders emit EXACTLY the RecentChangeAction enum', () => {
+    // Drift signal: a new RecentChangeAction member fails typecheck at
+    // RECENT_CHANGE_ACTIONS; a projector that stops emitting one of them, or
+    // emits a value outside the union, REDs here.
+    const emitted = [
+      makeAddConstraintFact,
+      makeSetFactorValueFact,
+      makeAdjustEdgeStrengthFact,
+      makeEditGraphFactDefault,
+    ].map((build) => projectRecentChanges([build()])[0]!.action);
+    expect([...emitted].sort()).toEqual([...RECENT_CHANGE_ACTIONS].sort());
   });
 });

@@ -10,12 +10,10 @@ seams a fuller eval plugs into.
 
 For each fixture it:
 
-1. **Runs the fixture's raw analysis through the REAL production assembly**
-   (`src/orchestrator-v5/format/format-analysis-for-context.ts`). This is the
-   exact stage the goal-fit fix lives in — it keeps `win_probability` and
-   `target_fit` as two distinct percent vocabularies. The eval uses the runtime
-   formatter itself, not a re-specified copy, so it cannot drift from what the
-   prompt is actually grounded on.
+1. (Retired.) The chassis used to run the fixture's raw analysis through the
+   production display formatter (`formatAnalysisForContext`). That formatter
+   was deleted (Track 2 deletion 9) once nothing served reached it, and the
+   assembly step went with it.
 2. **Scores each candidate response deterministically** on six dimensions:
    - `no_forbidden_terms` — the runtime's `findForbiddenMatches` (forbidden
      user-facing phrases + raw-id / graph-hash / dev-phrase leaks).
@@ -75,9 +73,7 @@ The fixture ships four recorded candidate responses:
 | `regression` | FAIL | "89% chance of reaching your target" — the exact defect. |
 | `regression_subtle` | FAIL | "89% likely to meet your target" — same conflation, no "chance". |
 
-If a future edit regresses the production formatter (drops `target_fit` or the
-`TARGET_FIT_DEFINITION` disclosure), the assembly-fidelity test fails; if a
-candidate prompt starts conflating the two numbers, the gate fails it.
+If a candidate prompt starts conflating the two numbers, the gate fails it.
 
 ## D5 — held-science vocabulary / D6 — false-success claim (rubric expansion)
 
@@ -130,7 +126,7 @@ during this lane.
 
 ```bash
 pnpm eval:orchestrator             # run the chassis over every fixture (offline, deterministic)
-pnpm eval:orchestrator:test        # run the vitest suite (assembly fidelity + gate + guard wiring + SEAM-1)
+pnpm eval:orchestrator:test        # run the vitest suite (gate + guard wiring + SEAM-1)
 pnpm eval:orchestrator:candidates  # rank prompt CANDIDATES (SEAM-1) — see "Candidate A/B" below
 pnpm eval:orchestrator:typecheck   # tool-local tsc (tools/ is outside tsconfig.build.json's scope)
 ```
@@ -143,8 +139,8 @@ double opt-in described under "Candidate A/B".
 1. Create `fixtures/<name>.json`:
    - `id`, `description`, `user_message`.
    - `analysis` — a raw `ContextPackAnalysis` (see the type in
-     `src/orchestrator-v5/context/context-pack-assembler.ts`). The chassis runs
-     it through the production formatter.
+     `src/orchestrator-v5/context/context-pack-types.ts`). The scorer grounds
+     its checks on it.
    - `candidates[]` — each `{ label, note, source: "recorded", text }`.
    - `expected` — `{ "<label>": true | false }` (true = should pass the gate).
 2. `pnpm eval:orchestrator:test`.
@@ -265,8 +261,8 @@ advisory output, not a gate.
 
 Requests are shaped per the seam's documented reuse of the graph-evaluator
 orchestrator adapter: `system` = candidate prompt + `<TURN_CONTEXT>` carrying
-the **assembled** analysis (production `formatAnalysisForContext` output — the
-same projection stage the floor pack grounds on), `user` = the fixture's user
+the user message (the assembled analysis it once carried went with the deleted
+`formatAnalysisForContext`, Track 2 deletion 9), `user` = the fixture's user
 message + the v30.3 JSON-forcing suffix. The user-facing prose is extracted
 from the `text` field of the JSON envelope; when the envelope does not parse,
 the RAW output is scored and flagged `raw_unparsed` — visible, never silent,
@@ -305,12 +301,11 @@ tools/orchestrator-eval/
 │   └── false-success-claim.json          # D6
 ├── src/
 │   ├── types.ts                 # fixture + result types
-│   ├── assemble.ts              # REAL assembly via production formatAnalysisForContext
 │   ├── guards.ts                # re-exports of PRODUCTION guards (never re-specified)
 │   ├── goal-fit-conflation.ts   # the worked win%-vs-target-fit assertion (D3)
 │   ├── held-science.ts          # the worked held-science eval-assertion (D5)
 │   ├── scorer.ts                # deterministic scorer wrapper (6 dimensions)
-│   ├── run.ts                   # the chassis: load → assemble → score → agree
+│   ├── run.ts                   # the chassis: load → score → agree
 │   ├── judge-seam.ts            # seam docs: SEAM-1 wired ↓, SEAM-2 (paid judge) still open
 │   ├── live-gate.ts             # SEAM-1: fail-closed double opt-in + hard turn cap
 │   ├── prompt-source.ts         # SEAM-1: candidate refs (file | pms:<version> | mock:<label>)
@@ -344,7 +339,7 @@ the runtime actually serves for that task.
 
 | task | fixtures | request assembly | dimensions |
 |---|---|---|---|
-| `routing` (default) | `fixtures/` | candidate prompt + `<TURN_CONTEXT>` carrying the assembled analysis | 6 prose dimensions + extraction contract |
+| `routing` (default) | `fixtures/` | candidate prompt + `<TURN_CONTEXT>` carrying the user message | 6 prose dimensions + extraction contract |
 | `decision_review` | `fixtures/decision-review/` | candidate prompt as SYSTEM, production `buildDecisionReviewUserMessage` output as USER | 19 dimensions + extraction contract |
 
 ```bash

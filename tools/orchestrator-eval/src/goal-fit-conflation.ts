@@ -5,9 +5,9 @@
  * probability narrated as target attainment when the scored target-fit was
  * 29.3%. House doctrine: `win_probability` ("wins most often — beats the
  * alternatives") is NOT `target_fit` ("meets your target — the modelled
- * probability of goal attainment"). The producer keeps them apart
- * (`format-analysis-for-context.ts`: TARGET_FIT_DEFINITION); the UI/LLM must
- * not re-fuse them in prose.
+ * probability of goal attainment"). The producer kept them apart
+ * (`format-analysis-for-context.ts`: TARGET_FIT_DEFINITION, deleted in Track 2
+ * deletion 9); the UI/LLM must not re-fuse them in prose.
  *
  * This detector is NOT a re-specified copy of a runtime banned-term list — the
  * runtime guards (forbidden phrases, mutation language) are imported wholesale

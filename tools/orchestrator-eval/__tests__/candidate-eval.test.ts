@@ -135,15 +135,17 @@ describe('prompt refs', () => {
 });
 
 describe('request shaping + extraction (the SEAM-1 wire shape)', () => {
-  it('system = candidate prompt + TURN_CONTEXT with the ASSEMBLED analysis', () => {
-    const { system, user } = buildCandidateRequest(goalFitFixture(), 'CANDIDATE PROMPT TEXT');
+  it('system = candidate prompt + TURN_CONTEXT carrying the user message', () => {
+    // The assembled analysis this context once carried went with the deleted
+    // `formatAnalysisForContext` (Track 2 deletion 9).
+    const fixture = goalFitFixture();
+    const { system, user } = buildCandidateRequest(fixture, 'CANDIDATE PROMPT TEXT');
     expect(system.startsWith('CANDIDATE PROMPT TEXT')).toBe(true);
-    expect(system).toContain('<TURN_CONTEXT>');
-    // Assembled (production-formatter) values, not raw probabilities: the
-    // prompt is grounded on the same projection the runtime uses.
-    expect(system).toContain('"win_probability": "89%"');
-    expect(system).toContain('"target_fit": "29%"');
-    expect(user).toContain('Respond with valid JSON only.');
+    const turnContext = JSON.parse(
+      system.slice(system.indexOf('<TURN_CONTEXT>') + '<TURN_CONTEXT>'.length, system.indexOf('</TURN_CONTEXT>')),
+    );
+    expect(turnContext).toEqual({ user_message: fixture.user_message });
+    expect(user).toBe(fixture.user_message + '\n\nRespond with valid JSON only.');
   });
 
   it('extracts `text` from the v30.3 envelope, fenced or bare', () => {

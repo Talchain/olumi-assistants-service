@@ -262,33 +262,6 @@ export const STRUCTURE_PROVENANCE_VALUES = Object.keys({
   unattributed: true,
 } satisfies Record<StructureProvenance, true>) as readonly StructureProvenance[];
 
-/**
- * ⛔⛔ THE SAME LIST, TYPED AS THE NON-EMPTY TUPLE `z.enum` DEMANDS.
- *
- * WHY THIS EXISTS. `STRUCTURE_PROVENANCE_VALUES` above is derived and therefore
- * safe; `z.enum` will not accept `readonly StructureProvenance[]`, and the
- * convenient way past that is to hand-list the members beside the schema. That
- * is exactly what `context/context-pack-schema.ts` did, and **the compiler
- * could not see it**: measured at `31d5b81e`, there are ZERO exhaustive
- * switches over this union repo-wide, so widening it breaks nothing at build
- * time — while the hand-listed Zod enum would have **REJECTED the new member at
- * RUNTIME**, inside the context pack, on a real turn. A green build and a
- * throwing parse.
- *
- * So the tuple is published HERE, once, cast only in its TYPE and never in its
- * CONTENT — the `satisfies Record<StructureProvenance, true>` above is what
- * keeps it honest, and it is why widening the union still fails typecheck at
- * the object literal rather than silently shipping a short list.
- *
- * Pinned both ways (and round-tripped through the schema, which is the actual
- * failure mode) by
- * `orchestrator-v5/context/__tests__/context-pack-provenance-vocabulary-parity.test.ts`.
- */
-export const STRUCTURE_PROVENANCE_ENUM_VALUES = STRUCTURE_PROVENANCE_VALUES as readonly [
-  StructureProvenance,
-  ...StructureProvenance[],
-];
-
 export const OBLIGATION_CLASS_VALUES = Object.keys({
   required: true,
   offered: true,

@@ -55,7 +55,6 @@ import {
 import type { DriverSummary } from '../../src/orchestrator/context/analysis-compact.js'
 import { EMPTY_DECISION_CONTEXT } from '@talchain/schemas/orchestrator'
 import { OlumiResponseSchema } from '@talchain/schemas/boundary'
-import { ContextPackSchema } from '../../src/orchestrator-v5/context/context-pack-schema.js'
 import { EMPTY_COACHING_STATE } from '../../src/orchestrator-v5/coaching/coaching-state.js'
 import { EMPTY_COACHING_LIFECYCLE } from '../../src/orchestrator-v5/coaching/coaching-lifecycle.js'
 
@@ -209,10 +208,6 @@ const POPULATED_DECISION_CONTEXT = {
 }
 
 describe('Acceptance Gate — decision_context boundary (Stage 1)', () => {
-  it('is NOT a declared field on the LLM-facing ContextPack (off-prompt)', () => {
-    expect(Object.keys(ContextPackSchema.shape)).not.toContain('decision_context')
-  })
-
   it('adds no decision_context field to the OlumiResponse wire schema', () => {
     const shape = (OlumiResponseSchema as { shape?: Record<string, unknown> }).shape
     expect(shape).toBeDefined()
@@ -273,10 +268,6 @@ const POPULATED_COACHING_STATE = {
 }
 
 describe('Acceptance Gate — coaching_state boundary (Stage 2A)', () => {
-  it('is NOT a declared field on the LLM-facing ContextPack (off-prompt)', () => {
-    expect(Object.keys(ContextPackSchema.shape)).not.toContain('coaching_state')
-  })
-
   it('adds no coaching_state field to the OlumiResponse wire schema', () => {
     const shape = (OlumiResponseSchema as { shape?: Record<string, unknown> }).shape
     expect(shape).toBeDefined()
@@ -322,10 +313,6 @@ const PRIOR_COACHING_SNAPSHOT = {
 }
 
 describe('Acceptance Gate — prior_coaching_state boundary (Stage 2B-1b)', () => {
-  it('is NOT a declared field on the LLM-facing ContextPack (off-prompt)', () => {
-    expect(Object.keys(ContextPackSchema.shape)).not.toContain('prior_coaching_state')
-  })
-
   it('adds no prior_coaching_state field to the OlumiResponse wire schema', () => {
     const shape = (OlumiResponseSchema as { shape?: Record<string, unknown> }).shape
     expect(shape).toBeDefined()
@@ -387,10 +374,6 @@ const COACHING_LIFECYCLE_SAMPLE = {
 }
 
 describe('Acceptance Gate — coaching_lifecycle boundary (Stage 2B-2)', () => {
-  it('is NOT a declared field on the LLM-facing ContextPack (off-prompt)', () => {
-    expect(Object.keys(ContextPackSchema.shape)).not.toContain('coaching_lifecycle')
-  })
-
   it('adds no coaching_lifecycle field to the OlumiResponse wire schema (off wire / DGAI)', () => {
     const shape = (OlumiResponseSchema as { shape?: Record<string, unknown> }).shape
     expect(shape).toBeDefined()

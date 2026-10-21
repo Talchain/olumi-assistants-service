@@ -24,10 +24,10 @@
  * are dropped.
  *
  * ⭐ AND THE TRUNCATION IS SILENT BECAUSE THE COLLAPSE HAPPENS *BEFORE* THE CAP
- * THAT WOULD HAVE DISCLOSED IT. `items_omitted` exists and is correct; it never
- * fires, because the loss is upstream of the cap it guards. Disclosure
- * machinery downstream of a silent loss discloses nothing — that is the
- * reusable part.
+ * THAT WOULD HAVE DISCLOSED IT. `items_omitted` (on the since-deleted
+ * `projectContextPackReadiness`) was correct; it never fired, because the
+ * loss is upstream of the cap it guarded. Disclosure machinery downstream of a
+ * silent loss discloses nothing — that is the reusable part.
  *
  * ── WHY NOT A SECOND COUNTER (the fix's whole shape) ────────────────────────
  * The correct count is ALREADY in the payload the pack receives: `blockers`
@@ -66,7 +66,7 @@ vi.mock("../../../config/index.js", () => ({
 import { buildAnalysisReadyPayload } from "../../../cee/transforms/analysis-ready.js";
 import { buildCanonicalAnalysisReadyFromGraph } from "../../../orchestrator/tools/analysis-ready-helper.js";
 import { GraphV3 } from "../../../schemas/cee-v3.js";
-import { projectContextPackReadiness, summariseReadiness } from "../readiness-summary.js";
+import { summariseReadiness } from "../readiness-summary.js";
 
 /** The four factors from the witnessed session, by identity — never by count alone. */
 const VALUELESS = [
@@ -192,10 +192,10 @@ describe("readiness open items — the pipeline-shaped payload must not collapse
   it("names ALL FOUR valueless factors on the pipeline-shaped payload", () => {
     const graph = graphWithFourValuelessFactors(false);
     const payload: any = buildAnalysisReadyPayload(pipelineOptions(false) as any, "goal_1", graph as any);
-    const pack = projectContextPackReadiness(payload);
+    const { open_items } = summariseReadiness(payload);
 
     // Bound by IDENTITY: which factors are named, not how many items exist.
-    expect(factorsNamed(pack?.open_items ?? []).sort()).toEqual([...VALUELESS].sort());
+    expect(factorsNamed(open_items).sort()).toEqual([...VALUELESS].sort());
   });
 
   it("keeps the CANONICAL-shaped payload correct — the good shape must not change", () => {
@@ -207,7 +207,7 @@ describe("readiness open items — the pipeline-shaped payload must not collapse
     expect((payload.readiness_issues ?? []).length).toBeGreaterThanOrEqual(2);
     expect(payload.repair_proposal ?? null).not.toBeNull();
 
-    expect(factorsNamed(projectContextPackReadiness(payload)?.open_items ?? []).sort()).toEqual(
+    expect(factorsNamed(summariseReadiness(payload).open_items).sort()).toEqual(
       [...VALUELESS].sort(),
     );
   });
@@ -236,7 +236,7 @@ describe("readiness open items — the pipeline-shaped payload must not collapse
     expect((canonical.blockers ?? []).length).toBeGreaterThanOrEqual(2);
 
     const starved = { ...canonical, blockers: [] };
-    expect(factorsNamed(projectContextPackReadiness(starved)?.open_items ?? []).sort()).toEqual(
+    expect(factorsNamed(summariseReadiness(starved).open_items).sort()).toEqual(
       [...VALUELESS].sort(),
     );
   });
@@ -250,7 +250,6 @@ describe("readiness open items — the pipeline-shaped payload must not collapse
     expect(payload.status).toBe("ready");
 
     expect(summariseReadiness(payload).open_items).toHaveLength(0);
-    expect(projectContextPackReadiness(payload)?.open_items ?? []).toHaveLength(0);
   });
 
   /**
@@ -286,6 +285,5 @@ describe("readiness open items — the pipeline-shaped payload must not collapse
     expect((readyWithBlockers.blockers ?? []).length).toBeGreaterThanOrEqual(2);
 
     expect(summariseReadiness(readyWithBlockers).open_items).toHaveLength(0);
-    expect(projectContextPackReadiness(readyWithBlockers)?.open_items ?? []).toHaveLength(0);
   });
 });

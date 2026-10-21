@@ -3,8 +3,8 @@
  *
  * A decision_review fixture differs from a routing fixture in both halves:
  *
- *   INPUT   a routing fixture carries a `ContextPackAnalysis` that the chassis
- *           runs through `formatAnalysisForContext`. A decision_review fixture
+ *   INPUT   a routing fixture carries a raw `ContextPackAnalysis` (the
+ *           scorer's grounding numbers). A decision_review fixture
  *           carries the REVIEW INVOCATION INPUT — the same object the runtime
  *           hands `buildDecisionReviewUserMessage` — so the eval assembles the
  *           user message through the production function rather than a copy.

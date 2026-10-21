@@ -2,7 +2,7 @@
  * orchestrator-eval — shared types.
  *
  * The FOUNDATION slice of the orchestrator eval-pack. A fixture pairs a raw
- * analysis projection (fed through the REAL production assembly path) with one
+ * analysis projection (the scorer's grounding numbers) with one
  * or more candidate orchestrator responses to score. In the default path the
  * candidate responses are RECORDED (checked into the fixture) — the eval makes
  * NO paid LLM call. The seam where a live model produces the candidate, and
@@ -38,17 +38,16 @@ export interface CandidateResponse {
  * One orchestrator-eval fixture.
  *
  * `analysis` is a raw {@link ContextPackAnalysis} — the post-projection,
- * pre-display-format handoff. The chassis runs it through the PRODUCTION
- * display formatter (`formatAnalysisForContext`), which is the exact assembly
- * stage the goal-fit fix lives in. This is the "real assembly path" the
- * candidate prompt is grounded on.
+ * pre-display-format handoff. The scorer grounds its checks on these numbers.
+ * (The chassis once also ran it through the production display formatter,
+ * `formatAnalysisForContext`; that formatter was deleted, Track 2 deletion 9.)
  */
 export interface OrchestratorEvalFixture {
   readonly id: string;
   readonly description: string;
   /** The user turn that would drive the orchestrator (context/provenance only in the foundation). */
   readonly user_message: string;
-  /** Raw analysis projection — fed through the REAL production assembly. */
+  /** Raw analysis projection — the scorer's grounding numbers. */
   readonly analysis: ContextPackAnalysis;
   /** Candidate responses to score. */
   readonly candidates: readonly CandidateResponse[];
@@ -203,21 +202,9 @@ export function finaliseScore(
   };
 }
 
-/** The result of evaluating one fixture (assembly + every candidate scored). */
+/** The result of evaluating one fixture (every candidate scored). */
 export interface FixtureReport {
   readonly fixtureId: string;
-  /**
-   * Assembly-fidelity summary: what the PRODUCTION formatter emitted for the
-   * leading option's win% vs target-fit, proving the two are kept distinct in
-   * the context the prompt actually sees.
-   */
-  readonly assembly: {
-    readonly leadingWinProbability: string | null;
-    readonly leadingTargetFit: string | null;
-    readonly goalFitProse: string | null;
-    /** True when win% and target-fit are rendered as distinct values (the fix). */
-    readonly distinguishesWinFromTargetFit: boolean;
-  };
   readonly scores: readonly ScoreResult[];
   /**
    * Per-candidate agreement between the gate's verdict and the fixture's

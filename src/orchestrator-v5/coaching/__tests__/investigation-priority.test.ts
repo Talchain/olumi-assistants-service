@@ -16,17 +16,15 @@
  *      `below_resolution` are different claims about the science and must never
  *      collapse into one another — that collapse is the defect one level up.
  *
- * Binding is by exact `kind` and exact note identity throughout.
+ * Binding is by exact `kind` throughout. The model-facing notes and the
+ * `hasFactorEvppiAssessment` predicate were deleted with their only consumer,
+ * `formatAnalysisForContext` (Track 2 deletion 9); their rows went with them.
  */
 
 import { describe, expect, it } from 'vitest';
 
 import {
-  INVESTIGATION_PRIORITY_BELOW_RESOLUTION_NOTE,
-  INVESTIGATION_PRIORITY_INCOMPLETE_NOTE,
-  hasFactorEvppiAssessment,
   investigationPriorityFromEnrichment,
-  investigationPriorityNote,
   licenceFromEvppiGuidance,
   type InvestigationPriorityLicence,
 } from '../investigation-priority.js';
@@ -71,39 +69,6 @@ describe('the 3 Sep founder enrichment — the capture this module exists for', 
     const licence = investigationPriorityFromEnrichment(FOUNDER_SESSION_ENRICHMENT);
     expect(licence).toEqual<InvestigationPriorityLicence>({ kind: 'below_resolution' });
   });
-
-  it('the note the model receives says the science looked and found nothing separable', () => {
-    const note = investigationPriorityNote(
-      investigationPriorityFromEnrichment(FOUNDER_SESSION_ENRICHMENT),
-    );
-    expect(note).toBe(INVESTIGATION_PRIORITY_BELOW_RESOLUTION_NOTE);
-    // The note must state what the analysis DID, or the model is left with the
-    // influence ranking as the only ranking in the pack — which is how the
-    // session actually went wrong. A bare prohibition is not enough.
-    expect(note).toContain('DID estimate');
-    expect(note).toContain('cleared the resolution of the run');
-  });
-
-  it('the note forbids the exact substitution the session made', () => {
-    const note = INVESTIGATION_PRIORITY_BELOW_RESOLUTION_NOTE;
-    expect(note).toContain('you may not turn that into an investigation ranking');
-    expect(note).toContain('highest-value');
-    // ...while still permitting the true half. Influence is a real fact the
-    // user is entitled to; a note that banned it would be over-suppression and
-    // would make the product less useful, not more honest.
-    expect(note).toContain('You may still say which factors influence the result most');
-  });
-
-  it('the capture is treated as having assessed information value', () => {
-    // The predicate the display formatter reads. `VOI_NOT_SCORED_NOTE` claims
-    // "no value-of-information scores are available for this analysis"; on this
-    // capture that sentence is false, and this is the boolean that says so.
-    expect(
-      hasFactorEvppiAssessment(
-        investigationPriorityFromEnrichment(FOUNDER_SESSION_ENRICHMENT),
-      ),
-    ).toBe(true);
-  });
 });
 
 describe('licenceFromEvppiGuidance — every producer verdict maps by identity', () => {
@@ -120,13 +85,6 @@ describe('licenceFromEvppiGuidance — every producer verdict maps by identity',
       factorLabel: 'Trial-to-paid conversion',
       specificAction: null,
     });
-    const note = investigationPriorityNote(licenceFromEvppiGuidance(decision));
-    expect(note).toContain('"Trial-to-paid conversion"');
-    expect(note).toContain('name that factor and no other');
-    // The granted state must ALSO forbid the substitution, because "name the
-    // priority" and "do not name the biggest influence instead" are different
-    // instructions and only the second closes the observed defect.
-    expect(note).toContain('do not substitute whichever factor has the largest influence');
   });
 
   it('"absent" is NOT_ASSESSED and stays apart from below_resolution', () => {
@@ -139,8 +97,6 @@ describe('licenceFromEvppiGuidance — every producer verdict maps by identity',
     expect(
       licenceFromEvppiGuidance({ outcome: 'not_selected', reason: 'all_below_resolution' }),
     ).toEqual<InvestigationPriorityLicence>({ kind: 'below_resolution' });
-    expect(hasFactorEvppiAssessment({ kind: 'not_assessed' })).toBe(false);
-    expect(hasFactorEvppiAssessment({ kind: 'below_resolution' })).toBe(true);
   });
 
   it('every UNTRUSTWORTHY-ranking reason resolves to incomplete, and none grants', () => {
@@ -160,9 +116,6 @@ describe('licenceFromEvppiGuidance — every producer verdict maps by identity',
     for (const reason of untrustworthy) {
       const licence = licenceFromEvppiGuidance({ outcome: 'not_selected', reason });
       expect(licence, reason).toEqual<InvestigationPriorityLicence>({ kind: 'incomplete' });
-      expect(investigationPriorityNote(licence), reason).toBe(
-        INVESTIGATION_PRIORITY_INCOMPLETE_NOTE,
-      );
     }
     expect(untrustworthy.length).toBe(9);
   });
@@ -181,37 +134,5 @@ describe('licenceFromEvppiGuidance — every producer verdict maps by identity',
       ].map((l) => l.kind),
     );
     expect(kinds).toEqual(new Set(['named', 'below_resolution', 'not_assessed', 'incomplete']));
-  });
-});
-
-describe('investigationPriorityNote — not_assessed adds nothing, on purpose', () => {
-  it('returns null rather than inventing an EVPPI verdict for other channels', () => {
-    expect(investigationPriorityNote({ kind: 'not_assessed' })).toBeNull();
-  });
-
-  it('an ABSENT licence is not the same as a licence saying nothing was assessed', () => {
-    expect(hasFactorEvppiAssessment(null)).toBe(false);
-    expect(hasFactorEvppiAssessment(undefined)).toBe(false);
-  });
-});
-
-describe('the notes carry no digits — the display projection admits none', () => {
-  it('no note leaks a raw number', () => {
-    const notes = [
-      INVESTIGATION_PRIORITY_BELOW_RESOLUTION_NOTE,
-      INVESTIGATION_PRIORITY_INCOMPLETE_NOTE,
-      investigationPriorityNote({ kind: 'named', factorId: 'churn', factorLabel: 'Churn rate', specificAction: null }) as string,
-    ];
-    for (const note of notes) {
-      expect(note, note.slice(0, 40)).not.toMatch(/\d/);
-    }
-    // POSITIVE CONTROL for the digit probe: it must be able to SEE a digit,
-    // otherwise the three assertions above pass by testing nothing (trap 13).
-    expect('a note carrying 0.42').toMatch(/\d/);
-  });
-
-  it('fixed refusal notes stay within their explicit character allowance', () => {
-    expect(INVESTIGATION_PRIORITY_BELOW_RESOLUTION_NOTE.length).toBeLessThanOrEqual(800);
-    expect(INVESTIGATION_PRIORITY_INCOMPLETE_NOTE.length).toBeLessThanOrEqual(800);
   });
 });

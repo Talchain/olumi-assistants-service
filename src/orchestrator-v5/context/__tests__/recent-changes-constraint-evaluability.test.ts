@@ -36,7 +36,6 @@ import {
   projectRecentChanges,
   RECENT_CHANGES_SUMMARY_MAX_CHARS,
 } from '../recent-changes.js';
-import { RecentMutationSchema } from '../context-pack-schema.js';
 
 /** The limit whose target records nothing — the 44e349fa shape. */
 const UNCHECKABLE_CONSTRAINT_ID = 'gc-11111111-1111-4111-8111-111111111111';
@@ -160,9 +159,10 @@ describe('recent_changes carries the constraint evaluability verdict', () => {
     expect(marked.summary.length).toBeLessThanOrEqual(RECENT_CHANGES_SUMMARY_MAX_CHARS);
   });
 
-  it('is accepted by the ContextPack schema in both states', () => {
-    // The pack schema is `.strict()`, so an unregistered field would fail the
-    // assembler's non-prod runtime gate rather than reaching the model.
+  it('carries a strict key set in both states (only the registered verdict key is added)', () => {
+    // Rebound from the deleted strict `RecentMutationSchema` (Track 2 deletion
+    // 9): the same properties asserted directly on the live projection — the
+    // action, the registered verdict literal, the length bound, no other key.
     const marked = projectRecentChanges(
       [UNCHECKABLE_FACT],
       undefined,
@@ -170,8 +170,20 @@ describe('recent_changes carries the constraint evaluability verdict', () => {
     )[0]!;
     const unmarked = projectRecentChanges([CHECKABLE_FACT])[0]!;
 
-    expect(RecentMutationSchema.safeParse(marked).success).toBe(true);
-    expect(RecentMutationSchema.safeParse(unmarked).success).toBe(true);
+    expect(Object.keys(marked).sort()).toEqual([
+      'action',
+      'constraint_not_checkable',
+      'summary',
+      'target_label',
+    ]);
+    expect(Object.keys(unmarked).sort()).toEqual(['action', 'summary', 'target_label']);
+    expect(marked.action).toBe('constraint_added');
+    expect(unmarked.action).toBe('constraint_added');
+    expect(marked.constraint_not_checkable).toBe('target_records_no_value');
+    for (const m of [marked, unmarked]) {
+      expect(m.summary.length).toBeLessThanOrEqual(RECENT_CHANGES_SUMMARY_MAX_CHARS);
+      expect(m.target_label.length).toBeLessThanOrEqual(RECENT_CHANGES_SUMMARY_MAX_CHARS);
+    }
   });
 });
 

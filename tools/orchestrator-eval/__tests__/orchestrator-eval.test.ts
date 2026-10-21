@@ -2,9 +2,8 @@
  * orchestrator-eval — foundation test suite.
  *
  * Proves the gate catches the exact drift it exists for:
- *   1. ASSEMBLY FIDELITY — the production formatter keeps win% and target-fit
- *      distinct and emits the TARGET_FIT_DEFINITION disclosure (guards the fix
- *      at its source: format-analysis-for-context.ts).
+ *   1. (Retired) ASSEMBLY FIDELITY — the production formatter it pinned,
+ *      `formatAnalysisForContext`, was deleted (Track 2 deletion 9).
  *   2. THE GATE — the recorded good candidates PASS and the recorded regression
  *      candidates FAIL, and the chassis agrees with the fixture's expectations.
  *   3. GUARD WIRING — the imported PRODUCTION guards (forbidden phrases,
@@ -14,11 +13,6 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import {
-  formatAnalysisForContext,
-  TARGET_FIT_DEFINITION,
-} from '../../../src/orchestrator-v5/format/format-analysis-for-context.js';
-import { assembleAnalysis } from '../src/assemble.js';
 import { detectGoalFitConflation } from '../src/goal-fit-conflation.js';
 import { findSuccessClaimHit } from '../src/guards.js';
 import { detectHeldScience } from '../src/held-science.js';
@@ -35,27 +29,6 @@ function fixtureById(id: string): OrchestratorEvalFixture {
 function goalFitFixture(): OrchestratorEvalFixture {
   return fixtureById('goal-fit-conflation');
 }
-
-describe('assembly fidelity (production formatAnalysisForContext)', () => {
-  it('renders win% and target-fit as DISTINCT values for the leading option', () => {
-    const assembled = assembleAnalysis(goalFitFixture().analysis);
-    expect(assembled?.leading_option?.win_probability).toBe('89%');
-    expect(assembled?.leading_option?.target_fit).toBe('29%');
-    expect(assembled?.leading_option?.win_probability).not.toBe(
-      assembled?.leading_option?.target_fit,
-    );
-  });
-
-  it('emits the win%-vs-target-fit disclosure so the LLM cannot silently conflate them', () => {
-    const assembled = assembleAnalysis(goalFitFixture().analysis);
-    expect(assembled?.goal_fit).toContain(TARGET_FIT_DEFINITION);
-  });
-
-  it('uses the SAME formatter the runtime uses (assembleAnalysis === formatAnalysisForContext)', () => {
-    const raw = goalFitFixture().analysis;
-    expect(assembleAnalysis(raw)).toEqual(formatAnalysisForContext(raw));
-  });
-});
 
 describe('goal-fit conflation detector (grounded in assembled numbers)', () => {
   const raw = () => goalFitFixture().analysis;
@@ -97,7 +70,6 @@ describe('the gate — recorded candidates score as the fixture expects', () => 
   it('chassis agreement: every candidate verdict matches its expectation', () => {
     const report = runFixture(fixture);
     expect(report.ok).toBe(true);
-    expect(report.assembly.distinguishesWinFromTargetFit).toBe(true);
   });
 });
 

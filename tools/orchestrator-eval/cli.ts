@@ -17,16 +17,7 @@ import { loadFixtures, runFixture } from './src/run.js';
 import type { FixtureReport } from './src/types.js';
 
 function printReport(report: FixtureReport): void {
-  const a = report.assembly;
   console.log(`\n━━ fixture: ${report.fixtureId} ━━`);
-  console.log('  real assembly (production formatAnalysisForContext):');
-  console.log(`    leading win_probability : ${a.leadingWinProbability ?? '(none)'}`);
-  console.log(`    leading target_fit      : ${a.leadingTargetFit ?? '(none)'}`);
-  console.log(
-    `    win% vs target-fit kept distinct: ${a.distinguishesWinFromTargetFit ? 'YES' : 'NO'}`,
-  );
-  if (a.goalFitProse) console.log(`    goal_fit disclosure     : ${a.goalFitProse}`);
-
   console.log('  candidates:');
   for (const s of report.scores) {
     const agree = report.agreement[s.candidate];
