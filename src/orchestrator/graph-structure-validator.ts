@@ -410,7 +410,7 @@ export function validateGraphStructure(
   for (const id of retainedLimitOnlyNodeIds(graph)) leftOut.add(id);
   // ⭐ DL ruling 21 Oct (structure class): an item with no path to the goal cannot change the result. In readiness it is
   // context: kept in the model, on the canvas and in the Run (the engine ignores a dead end), said, never a block.
-  // Core's construction is told "context may stay unconnected" (draft-tool.ts REVIEW_FIRST); legacy wired or pruned it.
+  // Core's construction is told "context may stay unconnected" (draft-tool.ts's review instruction until 21 Oct); legacy wired or pruned it.
   if (opts.leaveOutInertRisks === true) for (const id of contextNodeIds(graph)) leftOut.add(id);
   checkOrphanNodes(graph, violations, leftOut);
   checkOptionFactorEdges(graph, violations);
