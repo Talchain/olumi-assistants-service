@@ -191,6 +191,7 @@ import { widenTurnForReadback } from '../orchestrator-v5/agent-lane/method-turn/
 import { isWhatChangesPress, whatChangesTurnFor, type WhatChangesTurn } from '../orchestrator-v5/agent-lane/method-turn/what-changes-turn.js';
 import { dispatchDecisionFlip } from '../orchestrator-v5/handlers/decision-flip-dispatch.js';
 import { dispatchStructuralChallenge, readStructuralChallengeReceipt } from '../orchestrator-v5/handlers/structural-challenge-dispatch.js';
+import { runStressVariant } from '../orchestrator-v5/handlers/stress-variant-run.js';
 import { STRUCTURAL_CHALLENGE_PRESS_PREFIX, parseStructuralChallengePress, structuralChallengePressId, structuralChallengeRefusal, structuralChallengeReplay, structuralChallengeTurnFor, structuralChallengeTurnUnderLicence, type StructuralChallengePressResolution, type StructuralChallengeTurn } from '../orchestrator-v5/agent-lane/method-turn/structural-challenge-turn.js';
 import { methodResultForEgress, testLinkMethodResult, whatChangesMethodResult, type MethodResultV1 } from '../orchestrator-v5/agent-lane/actions/method-result.js';
 import { readStructuralChallengeEdge } from '../orchestrator-v5/coaching/structural-challenge-eligibility.js';
@@ -4519,7 +4520,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             commitOptionLevels: commitOptionLevelsDoor, onModelRegistered: (raw) => emitGraphReady(raw),
             runAnalysis: (args) => restoreRun === undefined ? Promise.resolve({ ok: false, mutated: false, ran: false, refusal: 'run_failed' })
               : loopCapabilities.runAnalysis(toolCtx, args),
-            analyseAfterCommit: () => { analysisToCore = true; return analyseCommittedChange(); } }, coreCtx, mode,
+            analyseAfterCommit: () => { analysisToCore = true; return analyseCommittedChange(); },
+            // TRACK 3: each stress variant on the one Run path, in memory, discarded (`handlers/stress-variant-run.ts`).
+            runStressVariant: (v) => runStressVariant({ ...v, requestId: `${String(req.id)}:stress`,
+              payload: { kind: 'message', scenario_id: scenarioId, turn_id: randomUUID(), stage: 'analyse', turn_class: 'decide', source: 'composer', message } }) }, coreCtx, mode,
             (row, result) => {
               // Only the adapter's own receipt AND successful postimage readback establish a saved change.
               if (result.ok && result.mutated && (result.receipts?.length ?? 0) > 0) verifiedSave = true;
