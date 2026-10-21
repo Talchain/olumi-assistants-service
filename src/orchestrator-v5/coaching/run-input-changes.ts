@@ -27,7 +27,7 @@
 import type { RunDeltaInputChange } from '@talchain/schemas/boundary';
 import type { RunInputSnapshot } from '@talchain/schemas/orchestrator';
 import { routeOnceCoveredSources } from '../goal-target/held-user-links.js';
-import { olumiSpreadForMean } from '../../cee/magnitude/olumi-spread.js';
+import { halfMeanSpread, olumiSpreadForMean } from '../../cee/magnitude/olumi-spread.js';
 import { edgeBandFromStrengthBand, edgeBandStd } from '../format/edge-strength-bands.js';
 import { valueWriteAuthorshipDigests } from '../tools/handlers/run-input-residual.js';
 
@@ -388,14 +388,20 @@ export function diffRunInputs(prior: RunInputSnapshot, current: RunInputSnapshot
     // snapshots' own figures, only when both Runs recorded a current point size per the SAME source change (a size on one
     // Run only, or per a different change, is no pair). Coverage is unchanged by it: whether an effect row states the
     // mean move is Science's ruling, so a mean move inside one band stays partial below.
-    if (pe !== undefined && ce !== undefined
-      && pe.per_source_change === ce.per_source_change && pe.per_source_change_unit === ce.per_source_change_unit) {
+    const effectPaired = pe !== undefined && ce !== undefined
+      && pe.per_source_change === ce.per_source_change && pe.per_source_change_unit === ce.per_source_change_unit;
+    if (effectPaired) {
       const per = { amount: ce.per_source_change, unit: ce.per_source_change_unit };
       push(changeRow({ ...linkBase, field: 'effect' }, { raw: pe.amount, unit: pe.amount_unit, per }, { raw: ce.amount, unit: ce.amount_unit, per }));
     }
+    // DL ruling 21 Oct (Compare's served C1 witness): an effect row that moved states the mean move, and a spread that is
+    // Olumi's default for that mean on BOTH Runs (`halfMeanSpread`, the writers' own rule) is not a separate change, so
+    // neither makes the pair partial. A sign flip, a stated or non-default spread, or an existence move still does.
+    const defaultSpread = (l: typeof pl) => l.std !== undefined && sameNumber(halfMeanSpread(l.mean), l.std);
+    const effectStatesMove = effectPaired && !sameNaturalEffect && defaultSpread(pl) && defaultSpread(cl);
     // A band row states the move of the MEAN and nothing else (DL ruling #2482, P1 #1): the band never absorbs a sign
     // flip or a spread the move does not explain. Either is a change no row states → partial.
-    if (pl.mean !== cl.mean && !bandMoved) complete = false;
+    if (pl.mean !== cl.mean && !bandMoved && !effectStatesMove) complete = false;
     if (Math.sign(pl.mean) !== Math.sign(cl.mean)) complete = false;
     // ⭐ HOLD-AT-1.0 (Science d5 #87 6008807178; Review Desk 6b on #2643): the user's own size with a range that excludes
     // zero holds the link at existence exactly 1 with the range's spread on the Run input. The sizing row that moved TO the
@@ -403,7 +409,7 @@ export function diffRunInputs(prior: RunInputSnapshot, current: RunInputSnapshot
     // existence or spread move stays partial.
     const heldBySizing = pl.sizing !== undefined && pl.sizing !== 'user' && cl.sizing === 'user'
       && cl.exists_probability === 1 && typeof pl.exists_probability === 'number' && pl.exists_probability < 1;
-    if (!(bandMoved ? spreadFollowsBand(pl, cl) : pl.std === cl.std) && !heldBySizing) complete = false;
+    if (!(effectStatesMove || (bandMoved ? spreadFollowsBand(pl, cl) : pl.std === cl.std)) && !heldBySizing) complete = false;
     const doubtMoved = (certain: typeof pl, doubtful: typeof pl, certainCovered: ReadonlySet<string>, doubtfulCovered: ReadonlySet<string>): boolean =>
       certain.exists_probability === 1 && typeof doubtful.exists_probability === 'number'
       && Number.isFinite(doubtful.exists_probability) && doubtful.exists_probability > 0 && doubtful.exists_probability < 1

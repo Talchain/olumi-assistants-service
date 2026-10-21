@@ -33,6 +33,7 @@
  * Pure.
  */
 import { createHash } from 'node:crypto';
+import { REPAIR_CODES } from '@talchain/schemas';
 import { STATED_LEVEL_STD } from './stated-level-spread.js';
 import { APPROVED_ADOPTION_SOURCE } from '../../agent-lane/approved-adoption-context.js';
 import { synthesiseDisplayValue } from '../../../cee/factor-extraction/display-value.js';
@@ -77,12 +78,27 @@ export const LINK_AUTHORSHIP_MEMBERS = ['provenance', 'provenance_display', 'def
 /**
  * 0.72.0 — the canonical digest of a link's authorship as the request carried it: exactly {@link LINK_AUTHORSHIP_MEMBERS},
  * with review metadata (`provenance.reviewed_by_user`) removed, absent members as `null`, keys sorted.
+ * The size figures inside provenance are left out (DL ruling 21 Oct): they are the size, not who sized it, and the
+ * analysis inputs they echo (mean, std) and the natural size are recorded and compared by the diff themselves.
  */
 export function linkAuthorshipDigest(edge: Rec): string {
-  const provenance = isRec(edge.provenance) ? (({ reviewed_by_user: _review, ...rest }) => rest)(edge.provenance) : edge.provenance;
+  const reviewed = isRec(edge.provenance) ? (({ reviewed_by_user: _review, ...rest }) => rest)(edge.provenance) : edge.provenance;
+  const provenance = isRec(reviewed) ? withoutSizeFigures(reviewed) : reviewed;
   const canonical: Rec = {};
   for (const m of LINK_AUTHORSHIP_MEMBERS) canonical[m] = (m === 'provenance' ? provenance : edge[m]) ?? null;
   return createHash('sha256').update(stableStringify(canonical)).digest('hex');
+}
+
+/** The natural size's amount and mean, and the default-spread entry's figure. Everything else stays — a `stated_range`
+ * and that entry's reason (which names a stated range) above all, so a range edit is still an authorship change (partial). */
+function withoutSizeFigures(provenance: Rec): Rec {
+  const out: Rec = { ...provenance };
+  if (isRec(provenance.natural_effect)) out.natural_effect = (({ amount: _a, strength_mean: _m, ...rest }) => rest)(provenance.natural_effect);
+  if (Array.isArray(provenance.uncertainty_defaults)) {
+    out.uncertainty_defaults = provenance.uncertainty_defaults.map((d) =>
+      isRec(d) && d.code === REPAIR_CODES.CLAMP_STD_MINIMUM ? (({ after: _x, ...rest }) => rest)(d) : d);
+  }
+  return out;
 }
 
 /**

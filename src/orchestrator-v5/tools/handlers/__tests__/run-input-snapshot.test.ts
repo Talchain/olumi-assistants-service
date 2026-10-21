@@ -8,7 +8,8 @@ import { describe, expect, it } from 'vitest';
 import { buildRunInputSnapshot, recordRunQuestion, readRecordedRunQuestion, runIdFor, sentDigest } from '../run-input-snapshot.js';
 import { factorAuthorshipDigest, linkAuthorshipDigest } from '../run-input-residual.js';
 import { normalizeRunGoalUnit } from '../../../context/run-goal-unit.js';
-import { diffRunInputSnapshots } from '../../../coaching/run-input-changes.js';
+import { diffRunInputSnapshots, diffRunInputs } from '../../../coaching/run-input-changes.js';
+import { halfMeanSpread } from '../../../../cee/magnitude/olumi-spread.js';
 
 const graph = {
   nodes: [
@@ -291,5 +292,48 @@ describe('0.78.0 natural_effect on a link (Compare\'s served C1 witness, 21 Oct:
     }
     // CONTROL: the boundary unit (64 characters) is kept.
     expect(linkOf(withEffect(20, { amount_unit: 'x'.repeat(64) })).natural_effect).toMatchObject({ amount_unit: 'x'.repeat(64) });
+  });
+});
+
+describe('DL ruling 21 Oct (served C1 pair b5e08181 → eee5c6ef read "partial"): an effect edit on a stated point size with Olumi\'s default spread is the whole change', () => {
+  // The served shape: the person's point size, its mean on the goal's frame, the writers' own default spread
+  // (`halfMeanSpread`, imported), the CLAMP_STD_MINIMUM entry naming that spread, existence 1 (stated).
+  const run = (amount: number, over: { provenance?: Record<string, unknown>; std?: number; exists?: number; centred?: boolean } = {}) => {
+    const mean = amount / 150;
+    const std = over.std ?? halfMeanSpread(mean);
+    const g = structuredClone(graph) as typeof graph & { edges: Record<string, unknown>[] };
+    g.edges = [{ from: 'fac_price', to: 'fac_churn', strength: { mean, std }, exists_probability: over.exists ?? 1,
+      provenance: { source: 'brief_extraction', magnitude: 'user_stated',
+        natural_effect: { amount, amount_unit: 'orders a week', per_source_change: 1, per_source_change_unit: 'switch', strength_mean: mean,
+          strength_mean_frame: 'edge_strength', ...(over.centred ? { stated_range: { low: amount - 5, high: amount + 5, text: `about ${amount}`, end: 'centre' } } : {}) },
+        uncertainty_defaults: [{ code: 'CLAMP_STD_MINIMUM', layer: 'cee', field_path: 'edges[fac_price::fac_churn].strength.std', before: null, after: std, severity: 'info',
+          reason: over.centred ? `The calculation uses the stated ${amount} with Olumi's illustrative spread (half the stated effect). The stated range, ${amount - 5} to ${amount + 5}, is kept with the model but is not used as a spread.`
+            : 'Nobody stated how uncertain this strength is. Applied Olumi\'s illustrative spread (half the stated effect). It is not a measurement of anyone\'s confidence.' }],
+        ...over.provenance } }];
+    return buildRunInputSnapshot(input({ wireGraph: g, plotPayload: payload({ graph: g }) }))!;
+  };
+  const effectRows = (d: ReturnType<typeof diffRunInputs>) => d.rows.filter((r) => r.field === 'effect');
+
+  it('25 → 20 orders a week: one effect row, and the pair is COMPLETE (the mean, spread and size figures in provenance are that row)', () => {
+    const d = diffRunInputs(run(25), run(20));
+    expect(d.complete).toBe(true);
+    expect(d.rows).toEqual([expect.objectContaining({ field: 'effect', before: expect.objectContaining({ raw: 25 }), after: expect.objectContaining({ raw: 20 }) })]);
+  });
+
+  it.each([
+    ['an independent authorship change beside the edit', {}, { provenance: { source: 'user_specified' } }],
+    ['a stated range (its figure and range are part of who sized it)', { centred: true }, { centred: true }],
+    ['a spread someone chose (not the default for the mean)', { std: 0.03 }, { std: 0.03 }],
+    ['an existence move', {}, { exists: 0.9 }],
+  ])('NEGATIVE %s stays partial (the effect row still names the edit)', (_, before, after) => {
+    const d = diffRunInputs(run(25, before), run(20, after));
+    expect(d.complete).toBe(false);
+    expect(effectRows(d)).toHaveLength(1);
+  });
+
+  it('CONTROL: the same size on both Runs is complete with no row', () => {
+    const d = diffRunInputs(run(25), run(25));
+    expect(d.complete).toBe(true);
+    expect(d.rows).toEqual([]);
   });
 });
