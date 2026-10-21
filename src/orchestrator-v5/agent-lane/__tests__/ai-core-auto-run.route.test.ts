@@ -232,6 +232,25 @@ describe('PATH-B gap 4: commit and Undo each run the existing Run pipeline once;
   const outputOf = (callId: string): Json | undefined => calls.flatMap(toolOutputs).find((o) => o.call_id === callId)?.output;
   const interpreterCalls = () => calls.filter((b) => b.tool_choice === 'none').length;
 
+  it('⭐ note_on_item (DL ruling 21 Oct): the AI\'s note on one item ships as the turn\'s first block, Olumi\'s, and nothing is written', async () => {
+    const NOTE = 'What would make Capacity stop driving Velocity?';
+    outputs = [[{ type: 'function_call', name: 'note_on_item', call_id: 'note_call', args: { item_id: 'f', note: NOTE } }], [{ type: 'message', text: 'I have put a question beside Capacity.' }]];
+    const r = await post({ turn_id: randomUUID(), message: 'What should I question here?', source: 'composer' });
+    expect(r.statusCode, r.body).toBe(200);
+    const blocks = (r.json() as Json).blocks as Json[];
+    expect(blocks[0]).toEqual({ type: 'ui_directive', verb: 'highlight', targets: [{ id: 'f', label: 'Capacity', kind: 'factor' }], note: NOTE, source: 'composer' });
+    expect(blocks.filter((b) => b.type === 'ui_directive')).toHaveLength(1);
+    expect(probe.applied, 'a note writes nothing').toBe(0);
+    expect(runTurns).toBe(0);
+  });
+
+  it('CONTRAST: the same turn with no note call ships no directive', async () => {
+    outputs = [[{ type: 'message', text: 'Capacity is the one factor here.' }]];
+    const r = await post({ turn_id: randomUUID(), message: 'What should I question here?', source: 'composer' });
+    expect(r.statusCode, r.body).toBe(200);
+    expect(((r.json() as Json).blocks as Json[] | undefined ?? []).filter((b) => b.type === 'ui_directive')).toHaveLength(0);
+  });
+
   it('⭐ RED→GREEN commit → ONE Run → the SAME SDK run gets its results and coaches; with the preceding Run\'s comparison', async () => {
     const card = await prepared();
     const r = await press(card);
@@ -321,7 +340,7 @@ describe('PATH-B gap 4: commit and Undo each run the existing Run pipeline once;
     expect(j._agent.sdk, 'the SDK run owns this reply').toBeDefined();
     expect(runTurns, 'exactly one Run').toBe(1);
     expect(calls[0]!.tool_choice, 'its first call spends the press on run_analysis').toMatchObject({ type: 'function', name: 'run_analysis' });
-    expect((calls[0]!.tools as Json[]).map((t) => t.name), 'a Run press calculates and reads only').toEqual(['read_canonical_context', 'run_analysis']);
+    expect((calls[0]!.tools as Json[]).map((t) => t.name), 'a Run press calculates and reads only (a note writes nothing)').toEqual(['read_canonical_context', 'run_analysis', 'note_on_item']);
     expect(calls.length, 'the call that runs it and the call that narrates it; no interpreting call').toBe(2);
     expect(interpreterCalls()).toBe(0);
     const ran = outputOf('run_call');

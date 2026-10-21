@@ -23,6 +23,7 @@ import { BUILD_MODEL_FROM_BRIEF, BuildModelParams, buildModel, type DraftDeps } 
 import { RUN_ANALYSIS, RunAnalysisParams, recordedRun, runAnalysis, type RunDeps } from './run-tool.js';
 import { APPLY_CHANGE, ApplyChangeParams, PROPOSE_CHANGE, ProposeChangeParams, applyChange, proposeChange, type ChangeDeps } from './change-tools.js';
 import { LivingChangeParams, applyLivingChange, isLivingProposal, proposeLivingChange } from './living-change.js';
+import { NOTE_ON_ITEM, NoteOnItemParams, noteOnItem } from './note-on-item.js';
 import { refused, traceRow, type ToolOutcome, type TraceRow } from './outcome.js';
 
 export { traceRow, type TraceRow, type ToolOutcome } from './outcome.js';
@@ -40,6 +41,8 @@ export const TOOL_DESCRIPTIONS = {
     'Commit the exact prepared change after the user approves that current proposal. Approval is permission to apply, not proof that a save succeeded or that its claims are verified. Use the operation’s own receipt and approved postimage readback. Distinguish an earlier completed save from a new write, honour stale or conflicting proposals, and report unknown outcomes without repeating a completed effect.',
   run_analysis:
     'Request a fresh scientific Run of the current saved model. Eligible committed changes and Undo use the existing automatic analysis and coaching path; do not issue a duplicate Run after them. Read actual readiness and the recorded Run, then explain only what its results support. Report refusal or unavailability honestly. Do not rerun analysis merely to retry an explanation.',
+  note_on_item:
+    'Show one short note beside one item of the saved model, labelled as Olumi’s: a question to test it, a challenge to an assumption, or what seems missing. At most one per turn; it changes nothing in the model. Use the item’s id from read_canonical_context. Never call an option best and never recommend one.',
 } as const;
 
 export type PathBToolDeps = ChangeDeps & DraftDeps & RunDeps & {
@@ -62,12 +65,15 @@ export interface ToolCallResult {
   readonly refusal?: string;
   /** The commit's own receipt, as every writer reports one (`turn-receipts.ts` lifts it onto `_agent.receipts`). */
   readonly receipts?: readonly Record<string, unknown>[];
+  /** `note_on_item`'s block, for the route to ship beside the reply. */
+  readonly ui_directive?: Record<string, unknown>;
 }
 export type OnToolCall = (row: TraceRow, result: ToolCallResult) => void;
 
 export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLaneMode, onCall: OnToolCall = () => {},
   scenario: 'core' | 'legacy' = 'legacy'): Tool[] {
   let approvalApplied = false;
+  const notes = { notes: 0 };
   const record = (name: string, input: Record<string, unknown>, outcome: ToolOutcome, proposalId?: string): string => {
     const args = toolArgumentsAsSent(name, JSON.stringify(input), [ctx.user_turn_text ?? '', ...(ctx.verified_user_messages ?? [])]).arguments;
     const row = { ...traceRow(name, outcome), args };
@@ -77,7 +83,9 @@ export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLa
       onCall(row, { args, ok: row.ok, mutated: row.mutated === true, ...(row.ran === true ? { ran: true as const } : {}),
         ...(pid === undefined ? {} : { proposal_id: pid }),
         ...(outcome.status === 'ok' && typeof outcome.data.public_label === 'string' ? { public_label: outcome.data.public_label } : {}), outcome: row.outcome, ...(row.refusal === null ? {} : { refusal: row.refusal }),
-        ...(receipt !== null && typeof receipt === 'object' ? { receipts: [receipt as Record<string, unknown>] } : {}) });
+        ...(receipt !== null && typeof receipt === 'object' ? { receipts: [receipt as Record<string, unknown>] } : {}),
+        ...(outcome.status === 'ok' && outcome.data.ui_directive !== null && typeof outcome.data.ui_directive === 'object'
+          ? { ui_directive: outcome.data.ui_directive as Record<string, unknown> } : {}) });
     } catch { /* a recorder never decides the outcome */ }
     return JSON.stringify(outcome);
   };
@@ -135,6 +143,13 @@ export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLa
       description: TOOL_DESCRIPTIONS.run_analysis,
       parameters: RunAnalysisParams,
       execute: async (args) => record(RUN_ANALYSIS, args, await runAnalysis(deps, ctx, args, { approvalApplied })),
+      errorFunction: null,
+    }),
+    tool({
+      name: NOTE_ON_ITEM,
+      description: TOOL_DESCRIPTIONS.note_on_item,
+      parameters: NoteOnItemParams,
+      execute: async (args) => record(NOTE_ON_ITEM, args, await noteOnItem(deps, ctx, args, notes)),
       errorFunction: null,
     }),
   ];

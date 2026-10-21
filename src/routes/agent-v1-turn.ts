@@ -5560,7 +5560,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const runBound = bindRunBlocksToReadback(lastRunBlocks, { graphHash, analysisState, analysisResult, analysisReady });
     // Data blocks stay bound to the current readback. The AI's reply owns the coaching move.
     const runCoaching = runTurnNextMove(lastRun, { scenarioId, graphHash, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, limitVerdicts });
-    const coachingBound = [...runBound, ...runCoaching.blocks.filter(b => !lastRunBlocks.includes(b))]
+    // ⭐ Olumi's note beside one item (`note_on_item`, core): the AI's own directive goes first, so it is the turn's one directive.
+    const itemNote = mode === 'core' ? (result?.tool_results ?? []).map((r) => (r as { ui_directive?: unknown })?.ui_directive)
+      .find((b) => b !== null && typeof b === 'object') : undefined;
+    const coachingBound = [...(itemNote === undefined ? [] : [itemNote]), ...runBound, ...runCoaching.blocks.filter(b => !lastRunBlocks.includes(b))]
       .filter(block => !aiWroteReply || !['coaching', 'exercise'].includes(String((block as { type?: unknown })?.type)));
     // What changed since the last run: the run turn's own block and refusal reason, only beside that same run.
     const runDelta = runDeltaBoundToReadback(lastRun, { scenarioId, graphHash, analysisState, analysisResult });
