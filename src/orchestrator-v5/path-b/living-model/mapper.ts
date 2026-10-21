@@ -29,6 +29,7 @@ import { sayFigureAsWritten } from '../../agent-lane/say-figure.js';
 import { LLM_STRENGTH_STD_FLOOR } from '../../../cee/constants.js';
 import { sameUnit, unitsCompose } from '../../agent-lane/same-unit.js';
 import { EventRiskV1 } from '../../../schemas/event-risk.js';
+import { readStatedDeadline } from '../../goal-target/deadline-date.js';
 
 export type WithheldReason =
   | 'no_level_target' | 'aim_not_in_slice' | 'change_kind_unknown' | 'change_base_invalid' | 'change_base_not_theirs' | 'current_unit_mismatch' | 'exact_target_not_in_slice' | 'target_range_not_in_slice'
@@ -84,6 +85,22 @@ function capFor(levels: readonly number[], unit: string | null, goal: { cap: num
   if (goal !== undefined && unit !== null && unit === goal.unit && goal.cap >= top) return goal.cap;
   if (unit === null && finite.every((v) => v >= 0 && v <= 1)) return 1;
   return top > 0 ? top * 1.25 : undefined;
+}
+
+/**
+ * The deadline as the legacy lane holds it (`goal_horizon.deadline`, `goal-horizon-write.ts`), read by the existing parser, so
+ * the existing licence gives the legacy reason (Codex r6 on #3522). The mapper has no clock and regenerates on every revision,
+ * so only a date its own words fix is held: a calendar date, or a quarter, month or year end, with its year stated. Words that
+ * need today ("in six months", "by March") stay words, as the legacy lane fixes those only on the person's Yes to a date card.
+ */
+function statedDeadline(byWhen: string | null): string | undefined {
+  if (byWhen === null) return undefined;
+  const read = readStatedDeadline(byWhen, '0001-01-01');
+  // Its year is bound by the words themselves: a whole four-digit year in them, never a relative year read against the reference
+  // (Codex r1 on #3577: "Review 2032-03 plan by March next year" made "2-03-31", which a substring check let through).
+  const year = /^(\d{4})-\d{2}-\d{2}$/.exec(read?.date ?? '')?.[1];
+  return read !== null && year !== undefined && Number(year) >= 1000 && new RegExp(`\\b${year}\\b`).test(byWhen)
+    && ['date', 'quarter_end', 'month_end', 'year_end'].includes(read.form) ? read.date : undefined;
 }
 
 type Target = NonNullable<LivingModelT['aims'][number]['target']>;
@@ -164,11 +181,13 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
       if (resolved === null) hold(aim.id, 'goal_level_not_admitted');
       else {
         goal = { id: aim.id, cap: resolved.cap, unit: lt.unit ?? '' };
+        const deadline = statedDeadline(t!.by_when);
         Object.assign(goalNode, {
           goal_direction: lt.comparator,
           goal_threshold_raw: lt.value, goal_threshold_unit: lt.unit ?? '', goal_threshold_cap: resolved.cap,
           goal_threshold_cap_provenance: resolved.provenance, goal_threshold: lt.value / resolved.cap, goal_threshold_frame: 'level',
           ...(t!.by_when !== null ? { goal_deadline_as_stated: t!.by_when } : {}),
+          ...(deadline !== undefined ? { goal_horizon: { deadline } } : {}),
         });
         if (t!.current === null) hold(aim.id, 'goal_level_unknown');
         else {
@@ -566,7 +585,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     const conditioned = model.conditions.filter((c) => c.role === 'prerequisite' && c.applies_to.some((id) => onPath.has(id) || pathLinks.has(id)));
     for (const c of conditioned) hold(`condition:${c.text}`, 'condition_not_in_slice');
     if (leftOut || conditioned.length > 0) {
-      for (const k of Object.keys(goalNode)) if (k.startsWith('goal_threshold') || k === 'goal_direction' || k === 'goal_deadline_as_stated') delete goalNode[k];
+      for (const k of Object.keys(goalNode)) if (k.startsWith('goal_threshold') || k === 'goal_direction' || k === 'goal_deadline_as_stated' || k === 'goal_horizon') delete goalNode[k];
       hold(goal.id, 'chance_rests_on_withheld');
     }
   }
