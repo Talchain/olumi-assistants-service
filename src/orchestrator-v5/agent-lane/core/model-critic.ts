@@ -32,7 +32,8 @@ export const CRITIC_INSTRUCTIONS = [
   'You are advisory: say what a thoughtful, independent expert would raise so the model is complete enough to reason with and to analyse:',
   'a measurable goal when no aim has a target; at most three consequential omissions or contradictions (options, factors, outcomes or risks, including non-obvious ones);',
   'the link that would connect a stranded item where there is a real causal relationship (context may rightly stay unconnected); and the one question whose answer would most change the result.',
-  'Never give a figure or a chance, never credit anything to the person they did not say, and never repeat what the draft already holds.',
+  'Never give a figure or a chance, never credit anything to the person they did not say, and never repeat what the draft already represents adequately.',
+  'A mechanism mentioned only in a condition, caveat or label is not represented: name the factor, outcome or risk it needs and how it connects to the goal.',
 ].join(' ');
 
 /** Bounded (Codex + buddy SIMPLER, #3567): one model call, a short structured answer, and a deadline, so a stalled reviewer
