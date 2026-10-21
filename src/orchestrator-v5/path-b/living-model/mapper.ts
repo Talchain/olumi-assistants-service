@@ -516,7 +516,10 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
       ...(e.form === 'point' || centred ? [{ code: REPAIR_CODES.CLAMP_STD_MINIMUM, layer: 'cee' as const, field_path: `${path}.strength.std`, before: null,
         after: sized.std, severity: 'info' as const,
         reason: centred
-          ? `The calculation uses the stated ${Math.abs(e.value!)} with Olumi's illustrative spread (half the stated effect). The stated range, ${e.low} to ${e.high}, is kept with the model but is not used as a spread.`
+          // Olumi's own centred link is never called "stated" (Codex on #3590): its figure and range are Olumi's estimate.
+          ? (l.source === 'olumi'
+            ? `The calculation uses Olumi's estimated ${Math.abs(e.value!)} with Olumi's illustrative spread (half the estimated effect). Olumi's range, ${e.low} to ${e.high}, is kept with the model but is not used as a spread.`
+            : `The calculation uses the stated ${Math.abs(e.value!)} with Olumi's illustrative spread (half the stated effect). The stated range, ${e.low} to ${e.high}, is kept with the model but is not used as a spread.`)
           : 'Nobody stated how uncertain this strength is. Applied Olumi\'s illustrative spread (half the stated effect). It is not a measurement of anyone\'s confidence.' }] : []),
       // A stated effect asserts that the link exists: existence 1 is the stater's claim, never an Olumi default (Science,
       // 21 Oct). Olumi's own link, or one the person hedged (an assumption on it), keeps the default and says so.

@@ -38,7 +38,7 @@ const figure = {
   high: z.number().nullable(),
   /** The unit as written ("tickets per week", "£", "%"); null when none was given, and for anything simply on or off. */
   unit: z.string().nullable().describe(
-    'The unit as written ("tickets per week", "£", "%"). Null when none was given. Always null for something that is simply on or off, such as a step an option takes or not ("dual-sourcing in place"): it has no unit.'),
+    'The unit as written ("tickets per week", "£", "%"). Null when none was given, except that Olumi\'s own estimate states its unit. Always null for something that is simply on or off, such as a step an option takes or not ("dual-sourcing in place"): it has no unit.'),
 };
 
 /**
@@ -110,7 +110,7 @@ export const LivingFactor = z.object({
   value: figure.value.describe(
     "Today's level of this factor, in its unit: one figure here, or a range in low and high (value then null unless a central figure was given). "
     + "For the person's or a party's factor, only the figures they gave; a level they did not give stays null and is asked for. "
-    + "For Olumi's own factor (source olumi), give Olumi's provisional range in a stated unit, as wide as what is genuinely unknown."),
+    + "For Olumi's own factor (source olumi), give Olumi's central estimate in value, with low and high around it as wide as what is genuinely unknown, in a stated unit."),
   defined_as: definedAs,
   /** TRACK 2 (21 Oct): a limit beside the aim, sent as the legacy lane's limit row (one per quantity). Saved before: null. */
   limit: z.object({
@@ -191,7 +191,7 @@ export const LivingLink = z.object({
      */
     sign: z.enum(['+', '-']).nullable().describe(
       "Which way `to` moves for each +1 of `from`: '+' raises it, '-' lowers it. For source olumi, give your provisional judgement of direction; when unsized, use form direction_only. For source user, party or unverified, preserve only the direction that source supplied. If none was supplied, use sign null and form unknown, then ask. Never put an Olumi-inferred direction under another source."),
-  }).strict().describe("The change in `to` for each +1 of `from`, in the unit of `to`. For Olumi's own link (source olumi), give Olumi's provisional range (form range) when both ends have a unit, else direction_only with its sign."),
+  }).strict().describe("The change in `to` for each +1 of `from`, in the unit of `to`. For Olumi's own link (source olumi), when both ends have a unit, give form range with Olumi's central estimate in value and low and high around it; else direction_only with its sign."),
   ...attribution,
 }).strict();
 
