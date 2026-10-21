@@ -357,9 +357,21 @@ function pairedLevelFacts(graph: unknown, node: Rec, basis: Pick<GoalTargetBasis
   const kindOf = (id: unknown): unknown => nodes.find((n) => n.id === id)?.kind;
   const anchored = isRec(node.observed_state) && finite(node.observed_state.raw_value);
   const reached = edges.some((e) => e.to === node.id && kindOf(e.from) !== undefined && kindOf(e.from) !== 'option' && kindOf(e.from) !== 'decision');
-  const setDirectly = nodes.some((n) => n.kind === 'option'
-    && [n.interventions, isRec(n.data) ? n.data.interventions : undefined].some((iv) => isRec(iv) && Object.hasOwn(iv, node.id as string)));
-  return anchored && reached && !setDirectly && (basis === undefined || basis.reference === 'today');
+  const setByOption = (id: string): boolean => nodes.some((n) => n.kind === 'option'
+    && [n.interventions, isRec(n.data) ? n.data.interventions : undefined].some((iv) => isRec(iv) && Object.hasOwn(iv, id)));
+  const setDirectly = setByOption(node.id);
+  // ⭐ DL lease 22 Oct (served F2): the same draw cancels every link's spread for the status quo, but not a risk EVENT the
+  // engine draws on its own (`event_risk.occurrence`). A goal such an uncontrolled event reaches (no option sets the risk
+  // itself) is not paired: carrying on is a real forecast there, never "the reference moved". A risk node without an
+  // occurrence is an ordinary linear node and still cancels (the batch-D capacity ramp-up risk).
+  const upstream = new Set<unknown>([node.id]);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const e of edges) if (upstream.has(e.to) && !upstream.has(e.from)) { upstream.add(e.from); grew = true; }
+  }
+  const riskReaches = nodes.some((n) => n.kind === 'risk' && isRec(n.event_risk) && isRec(n.event_risk.occurrence)
+    && typeof n.id === 'string' && upstream.has(n.id) && !setByOption(n.id));
+  return anchored && reached && !setDirectly && !riskReaches && (basis === undefined || basis.reference === 'today');
 }
 
 /**
