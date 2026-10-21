@@ -47,12 +47,7 @@ import type {
 } from '../registry.js';
 import { HandlerResultInvalidError } from '../handler-errors.js';
 import { resolveOptionCount } from './no-op-helpers.js';
-import {
-  composeExplainFromStructureFallback,
-  composeSelectedDependenciesEvidenceAnswer,
-  composeSelectedOutgoingInfluenceEvidenceAnswer,
-  composeStructuralPairEvidenceAnswer,
-} from './explanation-fallback.js';
+import { composeExplainFromStructureFallback } from './explanation-fallback.js';
 import { mapFallbackReason } from './diagnostics.js';
 
 export function createExplainFromStructureHandler(): HandlerFn {
@@ -75,55 +70,18 @@ export function createExplainFromStructureHandler(): HandlerFn {
     const explanation = invocation.explanation;
     const sonnetValid = !!(explanation && explanation.answer_text_valid);
     const canRunAnalysis = invocation.analysisReady?.status === 'ready';
-    const hasSelectedDependenciesEvidence =
-      invocation.selectedDependenciesEvidence !== undefined;
-    const hasStructuralPairEvidence = invocation.structuralPairEvidence !== undefined;
-    const hasOutgoingInfluenceEvidence =
-      invocation.outgoingInfluenceEvidence !== undefined;
     // A valid authored answer is licensed only when the router explicitly
-    // classified the question as the open-ended `general` arm. Direct-link and
-    // reachability questions are answered from canonical typed evidence; an
-    // old/malformed omission fails weak to the deterministic projection. This
-    // keeps old wire payloads parseable without allowing absence to bypass the
-    // topology authority introduced for the mounted failure.
+    // classified the question as the open-ended `general` arm; every other kind
+    // fails weak to the deterministic projection, so absence never bypasses the
+    // topology authority.
     const mayUseAuthoredGeneralAnswer =
       invocation.proposal?.structure_query?.kind === 'general';
-    // ⚠ THE AUTHORED-PROSE LICENCE IS NOT WIDENED BY THE NEW KIND, AND THAT IS
-    // THE POINT. `outgoing_influence` is not `general`, so
-    // `mayUseAuthoredGeneralAnswer` is already false for it — a typed
-    // outgoing-influence turn is answered from canonical evidence, exactly like a
-    // dependencies turn. The extra conjunct below is defence-in-depth against a
-    // future change to the licence predicate, not a fix for a live gap; a test
-    // pins BOTH facts separately so neither can be mistaken for the other.
-    //
-    // This is why a new typed kind is the right shape and DEMOTING TO `general`
-    // is not: demotion sets this licence TRUE and re-opens the #1229 seam where
-    // fluent prose invented an unlisted dependency. Adding a kind NARROWS what
-    // the model may assert; widening a demotion predicate widens it.
-    const useSonnetAnswer =
-      sonnetValid &&
-      mayUseAuthoredGeneralAnswer &&
-      !hasSelectedDependenciesEvidence &&
-      !hasOutgoingInfluenceEvidence;
-    // Each carrier renders its OWN predicate. The two are mutually exclusive by
-    // construction (each is keyed to a different `structure_query.kind`), so the
-    // order below is not a precedence rule between two live answers — a guard
-    // asserts they never co-occur.
-    const assistantText = hasSelectedDependenciesEvidence
-      ? composeSelectedDependenciesEvidenceAnswer(
-          invocation.selectedDependenciesEvidence!,
-        )
-      : hasOutgoingInfluenceEvidence
-        ? composeSelectedOutgoingInfluenceEvidenceAnswer(
-            invocation.outgoingInfluenceEvidence!,
-          )
-        : hasStructuralPairEvidence
-          ? composeStructuralPairEvidenceAnswer(invocation.structuralPairEvidence!)
-          : useSonnetAnswer
-            ? explanation!.answer_text
-            : composeExplainFromStructureFallback(invocation.structureProjection, {
-                canRunAnalysis,
-              });
+    const useSonnetAnswer = sonnetValid && mayUseAuthoredGeneralAnswer;
+    const assistantText = useSonnetAnswer
+      ? explanation!.answer_text
+      : composeExplainFromStructureFallback(invocation.structureProjection, {
+          canRunAnalysis,
+        });
 
     const fact: ExplainFromStructureHandlerFact = {
       fact_type: 'explain_from_structure',
@@ -131,19 +89,8 @@ export function createExplainFromStructureHandler(): HandlerFn {
       noop: true,
       result: {
         option_count: optionCount,
-        answer_source:
-          useSonnetAnswer &&
-          !hasStructuralPairEvidence &&
-          !hasSelectedDependenciesEvidence &&
-          !hasOutgoingInfluenceEvidence
-            ? 'sonnet'
-            : 'deterministic_fallback',
-        fallback_reason:
-          hasStructuralPairEvidence ||
-          hasSelectedDependenciesEvidence ||
-          hasOutgoingInfluenceEvidence
-          ? null
-          : useSonnetAnswer
+        answer_source: useSonnetAnswer ? 'sonnet' : 'deterministic_fallback',
+        fallback_reason: useSonnetAnswer
           ? null
           : mapFallbackReason(explanation?.answer_validation_error),
         answer_text_length: assistantText.length,

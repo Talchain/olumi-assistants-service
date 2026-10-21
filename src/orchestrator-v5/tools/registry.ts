@@ -81,12 +81,7 @@ import type {
 } from '@talchain/schemas/orchestrator';
 
 import type { ProposalAction } from '../routing/types.js';
-import type {
-  SelectedDependenciesEvidence,
-  SelectedOutgoingInfluenceEvidence,
-  StructuralPairEvidence,
-} from '../routing/structural-pair-evidence.js';
-import type { ExplanationAnswerErrorReason } from '../routing/validator-explanation.js';
+import type { ExplanationAnswerErrorReason } from './handlers/diagnostics.js';
 import type { EnrichedTurnContext } from '../build-turn-context.js';
 import type { GraphPatchBlockData } from '../../orchestrator/types.js';
 import type {
@@ -407,27 +402,6 @@ export interface HandlerInvocation {
    * top causal links, named-factor pathway entries, goal label.
    */
   readonly structureProjection?: StructureProjectionSummary;
-  /**
-   * Canonical, identity-resolved evidence for an explicit two-element
-   * structural question. When present, `explain_from_structure` renders this
-   * deterministic evidence instead of trusting free-form topology prose.
-   */
-  readonly structuralPairEvidence?: StructuralPairEvidence;
-  /**
-   * Canonical direct-dependency evidence for one selected item. When
-   * present it outranks free-form structural prose, just as the typed
-   * two-element carrier above does for pair questions.
-   */
-  readonly selectedDependenciesEvidence?: SelectedDependenciesEvidence;
-  /**
-   * Canonical direct OUTGOING-INFLUENCE evidence for one identified item —
-   * what it drives. Structurally parallel to the dependencies carrier above and
-   * deliberately a SEPARATE field: the two answer opposite predicates, and a
-   * single field would let one be rendered as the other without a type error.
-   * At most one of the two is ever populated on a turn, because each is keyed to
-   * its own `structure_query.kind`.
-   */
-  readonly outgoingInfluenceEvidence?: SelectedOutgoingInfluenceEvidence;
   /**
    * V5 D1: per-turn graph (post-fallback selection between
    * `options.graphState` and persisted scenarios.graph). Mutation
