@@ -129,7 +129,8 @@ export const LivingCondition = z.object({
     'challenge: a question or doubt worth raising, said beside a result without changing it; '
     + 'assumption: a concrete modelling premise the result is actually worked out under, compatible with the stated figures, quantity and '
     + 'window, and said with the result ("assuming the trial effect is fully realised by the end of the quarter"); '
-    + 'prerequisite: something unresolved that must hold first ("only after supplier approval"), so a result resting on it cannot be computed yet. '
+    + 'prerequisite: a requirement that must actually be met first, such as an approval, event or input ("only after supplier approval"), so a result resting on it cannot be computed yet. '
+    + 'An open question about whether, how fully or how soon an effect happens is a challenge, or an assumption when the result is worked out under it; never a prerequisite. '
     + 'Decide by what it does to the calculation, never by who raised it.'),
   ...attribution,
 }).strict().describe('A challenge, an applied assumption or an unresolved prerequisite about the listed items, with who raised it.');
