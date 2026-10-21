@@ -31,7 +31,7 @@ export type WithheldReason =
   | 'no_level_target' | 'aim_not_in_slice' | 'change_kind_unknown' | 'change_base_invalid' | 'change_base_not_theirs' | 'current_unit_mismatch' | 'exact_target_not_in_slice' | 'target_range_not_in_slice'
   | 'goal_level_unknown' | 'link_frame_unknown' | 'chance_rests_on_withheld' | 'condition_not_in_slice'
   | 'goal_level_not_admitted' | 'factor_level_unknown' | 'level_range_not_in_slice' | 'setting_not_convertible'
-  | 'link_endpoint_unknown' | 'link_unit_mismatch' | 'link_range_no_law' | 'link_sign_unknown' | 'no_single_status_quo'
+  | 'link_endpoint_unknown' | 'link_unit_mismatch' | 'link_range_no_law' | 'link_sign_unknown'
   | 'exact_not_drawable';
 
 export interface Withheld { readonly id: string; readonly reason: WithheldReason }
@@ -248,7 +248,8 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   nodes.unshift({ id: decisionId, kind: 'decision', label: `Decision: ${aim?.text ?? 'options'}` });
   const atCurrent = (o: LivingModelT['options'][number]) => o.settings.every((s) => s.value !== null && s.value === current.get(s.factor_id));
   const statusQuo = model.options.filter(atCurrent);
-  if (statusQuo.length !== 1) hold('options', 'no_single_status_quo');
+  // No single option at today's levels is not a loss: every option is still emitted and compared on its own interventions.
+  // It was reported as withheld, and the AI then said the alternatives were omitted (R2 P01/P07 at 46d30e6e).
   for (const o of model.options) {
     const isBaseline = statusQuo.length === 1 && statusQuo[0] === o;
     const interventions: Rec = {};
