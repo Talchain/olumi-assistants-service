@@ -9,17 +9,18 @@
 import { describe, expect, it, vi } from 'vitest';
 import { computeGraphIdentityHash } from '../../../context/graph-identity.js';
 import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
-import type { LivingModelT } from '../../../../schemas/living-model.js';
+import { LivingModel, type LivingModelT } from '../../../../schemas/living-model.js';
 import { assignEntityRefs } from '../../../graph/entity-refs.js';
 import { mapLivingModel } from '../../living-model/mapper.js';
 import { STRESS_MAX_WALL_MS, planStress, sideOf, stressTest, type StressRow, type StressTestArgs, type StressVariantRows } from '../stress-tool.js';
 import { TOOL_DESCRIPTIONS } from '../index.js';
 import type { Rec } from './fixtures.js';
+import { HALF_MITIGATION } from '../../living-model/__tests__/track2-f2-event-risk.fixtures.js';
 
 const SID = 'scn_stress';
 const user = { source: 'user' as const, party: null, quote: 'stated' };
 const lvl = (factor_id: string, value: number) => ({ factor_id, value, low: null, high: null, unit: null, ...user });
-const G2: LivingModelT = {
+const G2: LivingModelT = LivingModel.parse({
   aims: [{ id: 'c', text: '12-month net contribution', status: 'current', ...user,
     target: { quantity: 'net contribution', comparator: '>=', value: 90, low: null, high: null, unit: '£k', by_when: null, baseline: 'today', current: 95, current_source: 'user', current_unit: null, change_kind: null } }],
   options: [
@@ -39,7 +40,7 @@ const G2: LivingModelT = {
     { id: 'cexp_c', from: 'cexp', to: 'c', ...user, effect: { form: 'point', value: 0, sd: null, low: null, high: null, unit: '£k', sign: '-' } },
   ],
   conditions: [], views: [], history: [],
-};
+});
 const ARGS: StressTestArgs = {
   reason: 'where does growth-first fail?',
   stresses: [{ item_id: 'dexp_c', values: [-1], values_source: 'user' }, { item_id: 'cexp_c', values: [-1], values_source: 'user' }],
@@ -227,6 +228,15 @@ describe('stress_test on a G2-shaped living model', () => {
     }
   });
 
+  it('a link from a risk the mapper holds back (risk_not_in_slice) reaches no Run: refused, though the link itself is not withheld', async () => {
+    const m = LivingModel.parse(HALF_MITIGATION);
+    const run = engineDouble();
+    expect(await stressTest({ dispatch: product(m).dispatch, runStressVariant: run }, ctx,
+      { reason: 'what if a failure costs twice as much?', stresses: [{ item_id: 'fails_gp', values: [-16000], values_source: 'olumi' }], alternative: null }))
+      .toMatchObject({ status: 'refused', reason: 'stress_item_not_mapped', data: { item_ids: ['fails_gp'] } });
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it('is unavailable where the route has not wired the variant Run', async () => {
     expect(await stressTest({ dispatch: product(G2).dispatch }, ctx, ARGS)).toMatchObject({ status: 'unavailable', reason: 'stress_unavailable' });
   });
@@ -234,7 +244,7 @@ describe('stress_test on a G2-shaped living model', () => {
 
 /** The served core shape (R2, 21 Oct): every effect is an option's own exact link to the goal, which the mapper sends as that
  *  option's setting on the exact sum's `<goal>__change`, not as an edge. SYNTHETIC wording. */
-const SUM: LivingModelT = {
+const SUM: LivingModelT = LivingModel.parse({
   aims: [{ id: 'w', text: 'Widgets per week', status: 'current', ...user,
     target: { quantity: 'widgets', comparator: '>=', value: 100, low: null, high: null, unit: 'widgets', by_when: null, baseline: 'today', current: 80, current_source: null, current_unit: null, change_kind: null } }],
   options: [{ id: 'X', label: 'Second shift', ...user, settings: [] }, { id: 'Y', label: 'Faster jig', ...user, settings: [] }],
@@ -244,7 +254,7 @@ const SUM: LivingModelT = {
     { id: 'y_w', from: 'Y', to: 'w', ...user, effect: { form: 'exact', value: 15, sd: null, low: null, high: null, unit: 'widgets', sign: '+' } },
   ],
   conditions: [], views: [], history: [],
-};
+});
 /** Independent read of the mapped wire: today + each option's raw setting on the exact sum's change part; exact (sd 0). */
 const sumDouble = () => vi.fn(async (v: RunArgs): Promise<StressVariantRows> => {
   const m = v.variantGraph.living_model as LivingModelT;
