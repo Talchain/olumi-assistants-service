@@ -542,11 +542,13 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     }
     // An option moves the goal through what it sets, so it is on the path too (science check 5bbceeec, point 5).
     for (const o of model.options) if (o.settings.some((s) => onPath.has(s.factor_id))) onPath.add(o.id);
-    // An outcome is drawn as one on the goal's path only where something leads into it (ISL draws a root's level, never an
-    // outcome's). One an option sets is a lever, and one with a limit sent is scored on its level (PLoT drops a time limit on
-    // an outcome), so each stays a factor.
-    for (const f of model.factors) if (f.kind === 'outcome' && onPath.has(f.id) && edges.some((e) => e.to === f.id) && !setsFactor.has(f.id)
-      && !goal_constraints.some((c) => c.node_id === f.id)) {
+    // An outcome is drawn as one only where that moves no number (DL: a label never moves a number): on the path of a goal
+    // whose level today is someone's (ISL anchors on it, so an outcome's missing base uncertainty cancels), with something
+    // leading into it (ISL draws a root's level, never an outcome's). One an option sets is a lever, and one with a limit sent
+    // is scored on its level (PLoT drops a time limit on an outcome), so each stays a factor; the living model keeps the label.
+    const anchored = (goalNode.observed_state as Rec | undefined)?.source !== undefined;
+    for (const f of model.factors) if (f.kind === 'outcome' && anchored && onPath.has(f.id) && edges.some((e) => e.to === f.id)
+      && !setsFactor.has(f.id) && !goal_constraints.some((c) => c.node_id === f.id)) {
       const node = nodes.find((n) => n.id === f.id)!;
       node.kind = 'outcome';
       delete node.category;

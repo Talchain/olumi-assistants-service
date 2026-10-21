@@ -132,6 +132,20 @@ describe('Track 2: the model has outcomes', () => {
     expect(same).toEqual({ ...asFactor, request_id: asOutcome.request_id });
   });
 
+  // DL ruling: a label never moves a number. On a goal whose level today is no one's, ISL does not anchor, and an outcome's
+  // missing base uncertainty would move the mean (Codex r3, offline 0.70 → 0.30), so it is sent as a factor.
+  it('on a goal with no one\'s level today, an outcome is sent exactly as the factor would be, and keeps its label in the model', async () => {
+    const unanchored = (kind: 'factor' | 'outcome'): LivingModelT => {
+      const m = deliveries(kind);
+      return { ...m, aims: [{ ...m.aims[0]!, source: 'unverified' }] };
+    };
+    expect(node(mapLivingModel(unanchored('outcome')).graph, 'profit')!.observed_state).not.toHaveProperty('source');
+    expect(mapLivingModel(unanchored('outcome')).graph).toEqual(mapLivingModel(unanchored('factor')).graph);
+    const asOutcome = await requestTheRunSends('unanchored-outcome', unanchored('outcome'));
+    expect(asOutcome).toEqual({ ...(await requestTheRunSends('unanchored-factor', unanchored('factor'))), request_id: asOutcome.request_id });
+    expect(stored(unanchored('outcome')).living_model.factors.find((f: Rec) => f.id === 'on_time').kind).toBe('outcome');
+  });
+
   it('NEGATIVE: an "outcome" an option sets, one with a limit sent, one nothing leads into, and one off the goal path stay factors', () => {
     const set = deliveries('factor');
     set.factors[0] = { ...set.factors[0]!, kind: 'outcome' };
