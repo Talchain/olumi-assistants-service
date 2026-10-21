@@ -237,6 +237,44 @@ describe('stress_test on a G2-shaped living model', () => {
     expect(run).not.toHaveBeenCalled();
   });
 
+  /** A save from before #3544: the person's option settings carried no `extractionType` label (it changes no number). */
+  const pre3544 = (g: Rec): Rec => ({ ...g, nodes: (g.nodes as Rec[]).map((n) => (n.interventions === undefined ? n : { ...n,
+    interventions: Object.fromEntries(Object.entries(n.interventions as Rec).map(([id, x]) => { const { extractionType: _label, ...rest } = x as Rec; return [id, rest]; })) })) });
+  const hasInterventionLabel = (m: LivingModelT) => JSON.stringify((mapLivingModel(m).graph.nodes as Rec[]).map((n) => n.interventions ?? {})).includes('extractionType');
+  const goalOfGraph = (g: Rec) => (g.nodes as Rec[]).find((n) => n.kind === 'goal')!;
+
+  it('the remap allow-list (DL 21 Oct): a save from before #3544, differing only by extractionType, runs', async () => {
+    expect(hasInterventionLabel(G2), 'precondition: today\'s mapper labels the settings').toBe(true);
+    const run = engineDouble();
+    expect((await stressTest({ dispatch: product(G2, pre3544).dispatch, runStressVariant: run }, ctx, ARGS)).status).toBe('ok');
+    expect(run).toHaveBeenCalledTimes(8);
+  });
+
+  it('the allow-list is NAMED: an added goal threshold, a changed setting and a missing field still refuse', async () => {
+    expect(goalOfGraph(mapLivingModel(G2).graph).goal_threshold, 'precondition: today\'s mapper admits the threshold').toBeTypeOf('number');
+    const noThreshold = (g: Rec) => ({ ...g, nodes: (g.nodes as Rec[]).map((n) => { if (n.kind !== 'goal') return n; const { goal_threshold: _t, ...rest } = n; return rest; }) });
+    const changedSetting = (g: Rec) => ({ ...g, nodes: (g.nodes as Rec[]).map((n) => (n.id !== 'A' ? n : { ...n,
+      interventions: { ...(n.interventions as Rec), uplift: { ...((n.interventions as Rec).uplift as Rec), raw_value: 26 } } })) });
+    const missingField = (g: Rec) => ({ ...g, nodes: (g.nodes as Rec[]).map((n) => (n.id !== 'dexp' ? n : { ...n,
+      observed_state: Object.fromEntries(Object.entries(n.observed_state as Rec).filter(([k]) => k !== 'raw_value')) })) });
+    for (const [why, tweak] of [['added goal_threshold', noThreshold], ['changed setting', changedSetting], ['missing field', missingField]] as const) {
+      const run = engineDouble();
+      expect(await stressTest({ dispatch: product(G2, tweak).dispatch, runStressVariant: run }, ctx, ARGS), why)
+        .toMatchObject({ status: 'refused', reason: 'saved_graph_not_reproducible' });
+      expect(run, why).not.toHaveBeenCalled();
+    }
+  });
+
+  it('a save from before #3544 still refuses a held risk\'s link: "reaches the Run" is judged on today\'s reading, never the older labels', async () => {
+    const m = LivingModel.parse(HALF_MITIGATION);
+    expect(hasInterventionLabel(m), 'precondition: the older save differs by its labels').toBe(true);
+    const run = engineDouble();
+    expect(await stressTest({ dispatch: product(m, pre3544).dispatch, runStressVariant: run }, ctx,
+      { reason: 'what if a failure costs twice as much?', stresses: [{ item_id: 'fails_gp', values: [-16000], values_source: 'olumi' }], alternative: null }))
+      .toMatchObject({ status: 'refused', reason: 'stress_item_not_mapped' });
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it('is unavailable where the route has not wired the variant Run', async () => {
     expect(await stressTest({ dispatch: product(G2).dispatch }, ctx, ARGS)).toMatchObject({ status: 'unavailable', reason: 'stress_unavailable' });
   });
