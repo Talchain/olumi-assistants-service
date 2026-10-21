@@ -200,6 +200,8 @@ export interface GoalChanceLicence {
   readonly olumi_estimate_settings_by_option?: Readonly<Record<string, number>>;
   /** The options whose chance was withheld for their own path (model order); present only when non-empty. Form is `each`. */
   readonly withheld_option_ids?: readonly string[];
+  /** Science (21 Oct): withheld options whose model-certain side is FALLS SHORT; a non-`each` form may stand beside these only. */
+  readonly resolved_withheld_option_ids?: readonly string[];
   /** `similar` only: the options within 10 displayed points of the top, in the model's order (≥ 2). */
   readonly similar_option_ids?: readonly string[];
   readonly leader_option_id?: string;
@@ -822,7 +824,13 @@ export function goalChanceLicenceOf(
   // Only the superlative and every-option forms need every option (d5 6007421281): any withheld option ⇒ `each`.
   // A status quo withheld by assumption counts as withheld here too, exactly as a change target's always has: no superlative
   // or every-option form is said beside a row that carries no figure (fewer claims, never more).
-  const complete = withheld.length === 0;
+  // A withheld option whose side in this model is DETERMINED to fall short (zero spread at 0, §(ab)(2); or the status quo by
+  // assumption whose own row is 0) cannot lead and is said as "falls short in this model", never as 0 %. So it does not block
+  // the other options' headline: without this, any brief with a "carry on as now" below the target never named a leader
+  // (served guest core run, 21 Oct: A ≈ 69 %, B ≈ 16 %, carry on unchanged in every draw). A determined MEETS still blocks.
+  const determinedMiss = (id: string): boolean => zeroSpreadSide[id] === 'falls_short'
+    || (sqByAssumption && id === statusQuoId && sqP === 0);
+  const complete = withheld.every(determinedMiss);
   const ranked = [...licensed].sort((a, b) => pct[b]! - pct[a]!);
   const [leader, next] = ranked as [string, string];
   // ⭐ Ruling 6 (S1): once the records carry their precision, the leader's Wilson interval must also be DISTINCT from every
@@ -925,6 +933,9 @@ export function goalChanceLicenceOf(
     ...(spread === undefined || Object.keys(spread).length === 0 ? {} : { spread_note_by_option: spread }),
     ...(Object.keys(shortfall).length === 0 ? {} : { shortfall_note_by_option: shortfall }),
     ...(withheld.length > 0 ? { withheld_option_ids: withheld } : {}),
+    // Science (21 Oct): the withheld options a headline form rests on as model-certain misses; readers accept a non-`each`
+    // form beside withheld options only when every one is listed here. Absent on every `each` record (byte-identical).
+    ...(form !== 'each' && withheld.length > 0 ? { resolved_withheld_option_ids: withheld.filter(determinedMiss) } : {}),
     ...(Object.keys(withheldReasons).length > 0 ? { withheld_reason_by_option: withheldReasons } : {}),
     ...(form === 'similar' ? { similar_option_ids: same } : {}),
     ...(form === 'highest' || form === 'highest_all_likely_to_miss' ? { leader_option_id: leader, next_option_id: next } : {}),
@@ -1222,7 +1233,7 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
     leader_option_id: _leader, next_option_id: _next, similar_option_ids: _similar, spread_note_by_option: _spread,
     shortfall_note_by_option: _shortfall, driver_by_option: _drivers, no_driver_by_option: _noDrivers, sent_threshold: _sent,
     summary_withheld: _summary, display_rounding_by_option: _rounding, withheld_reason_by_option: _zero, user_link_existence: _exists,
-    status_quo: _singleStatusQuo, notes: _singleNotes,
+    status_quo: _singleStatusQuo, notes: _singleNotes, resolved_withheld_option_ids: _resolved,
     ...kept
   } = l;
   // ⭐ AIE same-cohort law (science PR-4): a block scored on the options' cohort forecasts carries its own notes (the inputs, the
@@ -1770,8 +1781,12 @@ export function goalChanceLicenceForAgent(result: unknown): {
   if (form === 'similar'
     ? similar === undefined || similar.length < 2 || new Set(similar).size !== similar.length || !similar.every((id) => optionIds.includes(id))
     : r.similar_option_ids !== undefined) return undefined;
+  const resolved = ids(r.resolved_withheld_option_ids);
+  if (r.resolved_withheld_option_ids !== undefined && (form === 'each' || resolved === undefined || withheld === undefined
+    || !resolved.every((id) => withheld.includes(id)))) return undefined;
   if (r.withheld_option_ids !== undefined
-    && (form !== 'each' || withheld === undefined || withheld.length === 0 || !withheld.every((id) => optionIds.includes(id)))) return undefined;
+    && ((form !== 'each' && !(resolved !== undefined && withheld !== undefined && withheld.every((id) => resolved.includes(id))))
+      || withheld === undefined || withheld.length === 0 || !withheld.every((id) => optionIds.includes(id)))) return undefined;
   // This is the producer's stored finding, never reconstructed from a public row whose exact 0/1 was stripped.
   const zeroSpreadReasons: Record<string, GoalChanceWithheldReason> = {};
   for (const [id, reason] of Object.entries(isRec(r.withheld_reason_by_option) ? r.withheld_reason_by_option : {})) {

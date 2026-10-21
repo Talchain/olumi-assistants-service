@@ -6,7 +6,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 
-import { agentLicenceRecordOf, goalChanceLicenceForAgent, goalChanceLicenceOf, goalChancePointForAgent, goalLevelIsOlumisEstimate, nearestFiveGoalChancesForAgent, sentGoalThresholdOf, UNVERIFIED_SOURCES_NOTE, withGoalChanceLicence, withholdForOlumiGoalLevel } from '../goal-chance-licence.js';
+import { agentLicenceRecordOf, GOAL_CHANCE_LICENSED, goalChanceLicenceForAgent, goalChanceLicenceOf, goalChancePointForAgent, goalLevelIsOlumisEstimate, nearestFiveGoalChancesForAgent, sentGoalThresholdOf, UNVERIFIED_SOURCES_NOTE, withGoalChanceLicence, withholdForOlumiGoalLevel } from '../goal-chance-licence.js';
 import { goalChanceFactsForAgent } from '../goal-chance-range-agent.js';
 import { goalHorizonVerdict } from '../goal-horizon-verdict.js';
 import { conditionsRefusedBasis, CONDITIONS_NOT_KEPT, targetChanceWords } from '../goal-target-basis.js';
@@ -395,6 +395,37 @@ describe('the stored licence is read back by the Agent, the chat and the screen 
 });
 
 // ── DL contract rulings from the independent check (12 Oct): precision names, no "±0", no interval on the status quo ──
+describe('Science 21 Oct: a model-certain FALLS SHORT does not block the headline (served guest core: A ≈ 69 %, B ≈ 16 %, carry on unchanged)', () => {
+  const licensedFor = (run: Rec) => {
+    const g = hiringGraph();
+    const enrichment = withGoalChanceLicence(run, g, 'productivity', () => false, undefined, g, hiringConstraints(g));
+    const result = { type: 'analysis_result', enrichment };
+    return { g, result, l: goalChanceLicenceForAgent(result), record: agentLicenceRecordOf(result) };
+  };
+  it('RED: the status quo at 0 on every draw is resolved, the leader is named, and its row keeps its own words, never 0 %', () => {
+    const { g, result, l, record } = licensedFor(hiringRun());
+    expect(l).toMatchObject({ form: 'highest', leader_option_id: 'hire_a_tech_lead' });
+    expect(record!.resolved_withheld_option_ids).toEqual(['carry_on']);
+    expect(record!.pct_by_option).not.toHaveProperty('carry_on');
+    const cell = projectCanonicalAnalysisCells(result as never, g).find((r) => r.option_id === 'carry_on')!.cell as Rec;
+    expect(cell).toMatchObject({ kind: 'withheld', face: 'No change, by assumption' });
+  });
+  it('CONTROL: an option withheld for another reason (no figure) still blocks the headline', () => {
+    const run = hiringRun();
+    (run.option_comparison as Rec[])[1] = { option_id: 'hire_two_developers' };
+    const { l, record } = licensedFor(run);
+    expect(l!.form).toBe('each');
+    expect(record!.resolved_withheld_option_ids).toBeUndefined();
+  });
+  it('a stored record naming a headline beside an unresolved withheld option is refused by the reader (fails closed)', () => {
+    const { result } = licensedFor(hiringRun());
+    const warnings = (result.enrichment as Rec).inference_warnings as Rec[];
+    const rec = warnings.find((w) => w.code === GOAL_CHANCE_LICENSED)!;
+    rec.resolved_withheld_option_ids = [];
+    expect(goalChanceLicenceForAgent(result)).toBeUndefined();
+  });
+});
+
 describe('DL contract rulings (12 Oct): precision names follow PLoT\'s wire; never "±0"; no interval on the status quo', () => {
   it('RED (ruling 1): the joint\'s precision is read ONLY as `probability_of_joint_goal_precision` — no other name is a fallback', () => {
     const l = licenceFor(marketingRun({ probability_of_joint_goal_precision: undefined, joint_probability_precision: PRECISION }))!;
