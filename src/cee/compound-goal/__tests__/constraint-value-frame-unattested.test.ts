@@ -105,6 +105,9 @@ const REGISTERED_STAMPERS = [
   // `goal_threshold_frame` is 'level' and its raw is the stored `goal_threshold_raw` (the goal panel's raw + row pair), so
   // it stamps 'level' only and has no branch that can produce a delta.
   'orchestrator-v5/agent-lane/admit-model.ts',
+  // Track 2 (#3569, DL ruling): the core mapper's limit row. A `LivingFactor.limit` is a level by schema (a comparator and a
+  // value in the factor's own unit, with no change form), so it stamps 'level' only and has no branch that can produce a delta.
+  'orchestrator-v5/path-b/living-model/mapper.ts',
 ] as const;
 
 /**
