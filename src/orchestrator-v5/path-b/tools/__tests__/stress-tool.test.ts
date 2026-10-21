@@ -10,8 +10,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { computeGraphIdentityHash } from '../../../context/graph-identity.js';
 import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
 import type { LivingModelT } from '../../../../schemas/living-model.js';
+import { assignEntityRefs } from '../../../graph/entity-refs.js';
 import { mapLivingModel } from '../../living-model/mapper.js';
 import { STRESS_MAX_WALL_MS, planStress, sideOf, stressTest, type StressRow, type StressTestArgs, type StressVariantRows } from '../stress-tool.js';
+import { TOOL_DESCRIPTIONS } from '../index.js';
 import type { Rec } from './fixtures.js';
 
 const SID = 'scn_stress';
@@ -76,11 +78,11 @@ const engineDouble = (sd = 0.5) => vi.fn(async (v: RunArgs): Promise<StressVaria
   return { kind: 'rows', targetLicensed: true, rows: new Map([...levels].map(([o, mean]) => [o, { goal: null, mean, sd, n: 2000 } satisfies StressRow])) };
 });
 const ctx = { scenario_id: SID };
-type Data = Rec & { options: Record<string, Rec>; cells: Rec[]; joint_failure_witnesses: Rec[]; explanation_disagreements: Rec[]; most_favourable_level_per_setting: { options: string[]; setting: Rec; hypothesis: string }[] };
+type Data = Rec & { options: Record<string, Rec>; cells: Rec[]; joint_shortfall_witnesses: Rec[]; explanation_disagreements: Rec[]; most_favourable_average_per_setting: { options: string[]; setting: Rec; hypothesis: string }[] };
 const dataOf = (o: unknown) => (o as { data: Data }).data;
 
 describe('stress_test on a G2-shaped living model', () => {
-  it('reproduces the brief reference: counts by side, worst tested level, maximum tested regret; ties stay UNRESOLVED', async () => {
+  it('reproduces the brief reference: counts by side of the AVERAGE, worst tested average, maximum tested regret; ties are too close to call', async () => {
     const p = product(G2);
     const run = engineDouble();
     const out = await stressTest({ dispatch: p.dispatch, runStressVariant: run }, ctx, ARGS);
@@ -92,10 +94,19 @@ describe('stress_test on a G2-shaped living model', () => {
     expect(d.persisted).toBe(false);
     expect(p.writes).toEqual([]);
     expect(d.cells.every((c) => !('goal_chance' in c))).toBe(true);
-    expect(d.options.A).toMatchObject({ requested: 8, met: 3, unresolved: 1, fell_short: 4, worst_tested_level: 50 });
-    expect(d.options.B).toMatchObject({ met: 6, unresolved: 2, fell_short: 0, worst_tested_level: 90 });
-    expect(d.options.C).toMatchObject({ met: 8, unresolved: 0, fell_short: 0, worst_tested_level: 91 });
-    expect([d.options.A.max_tested_regret, d.options.B.max_tested_regret, d.options.C.max_tested_regret]).toEqual([41, 15, 25]);
+    expect(d.options.A).toMatchObject({ requested: 8, average_clears: 3, too_close_to_call: 1, average_short: 4, worst_tested_average: 50 });
+    expect(d.options.B).toMatchObject({ average_clears: 6, too_close_to_call: 2, average_short: 0, worst_tested_average: 90 });
+    expect(d.options.C).toMatchObject({ average_clears: 8, too_close_to_call: 0, average_short: 0, worst_tested_average: 91 });
+    expect([d.options.A.max_tested_average_regret, d.options.B.max_tested_average_regret, d.options.C.max_tested_average_regret]).toEqual([41, 15, 25]);
+  });
+
+  it('says AVERAGE, never "meets the goal": every side, the reading rule and the tool description (Science, 21 Oct)', async () => {
+    const d = dataOf(await stressTest({ dispatch: product(G2).dispatch, runStressVariant: engineDouble() }, ctx, ARGS));
+    expect(new Set(d.cells.map((c) => c.side))).toEqual(new Set(['average_clears', 'average_short', 'too_close_to_call']));
+    expect(d.reading_rule).toContain('never means "meets the goal"');
+    expect(TOOL_DESCRIPTIONS.stress_test).toContain('AVERAGE level with the target');
+    expect(TOOL_DESCRIPTIONS.stress_test).toContain('Never say an option meets the goal from this test');
+    expect(TOOL_DESCRIPTIONS.stress_test).not.toMatch(/\bas met\b|met at k of n/);
   });
 
   it('under H1 the alternative HOLDS: Olumi\'s link reaches the Run with existence 1, and only under H1', async () => {
@@ -117,21 +128,21 @@ describe('stress_test on a G2-shaped living model', () => {
       .toEqual([[0.8, 1], [0.8, 1]]);
   });
 
-  it('finds the joint failure (A under the saved model only) and where the explanations disagree', async () => {
+  it('finds the joint shortfall of the average (A under the saved model only) and where the explanations disagree', async () => {
     const d = dataOf(await stressTest({ dispatch: product(G2).dispatch, runStressVariant: engineDouble() }, ctx, ARGS));
-    expect(d.joint_failure_witnesses).toEqual([{ hypothesis: 'H0', option_id: 'A' }]);
-    expect(d.explanation_disagreements.map((x) => [x.option_id, x.saved_model, x.alternative])).toEqual([['A', 'meets', 'falls_short'], ['A', 'meets', 'falls_short']]);
+    expect(d.joint_shortfall_witnesses).toEqual([{ hypothesis: 'H0', option_id: 'A' }]);
+    expect(d.explanation_disagreements.map((x) => [x.option_id, x.saved_model, x.alternative])).toEqual([['A', 'average_clears', 'average_short'], ['A', 'average_clears', 'average_short']]);
   });
 
-  it('a joint failure needs each stress alone to pass: an option already failing on one stress is no witness', async () => {
+  it('a joint shortfall needs the average to clear under each stress alone: an option already failing on one stress is no witness', async () => {
     const args = { ...ARGS, stresses: [{ item_id: 'dexp_c', values: [-2], values_source: 'user' as const }, ARGS.stresses[1]!] };
     const d = dataOf(await stressTest({ dispatch: product(G2).dispatch, runStressVariant: engineDouble() }, ctx, args));
-    expect(d.joint_failure_witnesses).toEqual([{ hypothesis: 'H0', option_id: 'C' }, { hypothesis: 'H1', option_id: 'C' }]);
+    expect(d.joint_shortfall_witnesses).toEqual([{ hypothesis: 'H0', option_id: 'C' }, { hypothesis: 'H1', option_id: 'C' }]);
   });
 
-  it('keeps a tie at the most favourable level as a tie, never one option', async () => {
+  it('keeps a tie at the most favourable average as a tie, never one option', async () => {
     const d = dataOf(await stressTest({ dispatch: product(G2).dispatch, runStressVariant: engineDouble() }, ctx, ARGS));
-    const tie = d.most_favourable_level_per_setting.find((x) => x.hypothesis === 'H0' && x.setting.dexp_c === 0 && x.setting.cexp_c === -1);
+    const tie = d.most_favourable_average_per_setting.find((x) => x.hypothesis === 'H0' && x.setting.dexp_c === 0 && x.setting.cexp_c === -1);
     expect(tie?.options).toEqual(['A', 'B']);
   });
 
@@ -142,7 +153,7 @@ describe('stress_test on a G2-shaped living model', () => {
     expect(d.incomplete).toBe(true);
     expect(d.cells.filter((c) => c.side === 'not_run').every((c) => c.reason === 'variant_timed_out')).toBe(true);
     expect(d.options.A.not_run).toBe(1);
-    expect(d.options.A.max_tested_regret).toBeNull();
+    expect(d.options.A.max_tested_average_regret).toBeNull();
   });
 
   it('stops at the time limit and says so', async () => {
@@ -181,6 +192,20 @@ describe('stress_test on a G2-shaped living model', () => {
     const run = engineDouble();
     expect(await stressTest({ dispatch: product(G2, drift).dispatch, runStressVariant: run }, ctx, ARGS)).toMatchObject({ status: 'refused', reason: 'saved_graph_not_reproducible' });
     expect(run).not.toHaveBeenCalled();
+  });
+
+  it('a served-shape saved graph (display refs and their counter, issued by the register route) passes, and every variant carries them', async () => {
+    const issued = (g: Rec) => assignEntityRefs(g, { nodes: [] }).graph;
+    const p = product(G2, issued);
+    const saved = issued({ ...mapLivingModel(G2).graph, living_model: G2 });
+    const refOf = (g: Rec) => new Map((g.nodes as Rec[]).map((n) => [n.id, n.ref]));
+    expect([...refOf(saved).values()].every((r) => typeof r === 'string')).toBe(true);
+    const run = engineDouble();
+    expect((await stressTest({ dispatch: p.dispatch, runStressVariant: run }, ctx, ARGS)).status).toBe('ok');
+    for (const [v] of run.mock.calls) {
+      expect(v.variantGraph.ref_high_water).toEqual(saved.ref_high_water);
+      for (const [id, ref] of refOf(saved)) expect(refOf(v.variantGraph).get(id)).toBe(ref);
+    }
   });
 
   it('a Run input the mapper does not write (a goal deadline) is refused: the variants would silently drop it', async () => {
@@ -234,12 +259,12 @@ describe('planStress refuses what it cannot test as asked', () => {
 });
 
 describe('sideOf: a side only beyond the precision band; exact levels are exact', () => {
-  it('within 4 SE of the target is unresolved, an exact tie meets an inclusive target, an unlicensed target says so', () => {
-    expect(sideOf({ goal: null, mean: 90.01, sd: 0.5, n: 2000 }, 90, '>=', true).side).toBe('unresolved');
-    expect(sideOf({ goal: null, mean: 91, sd: 0.5, n: 2000 }, 90, '>=', true).side).toBe('meets');
-    expect(sideOf({ goal: null, mean: 90, sd: 0, n: 2000 }, 90, '>=', true).side).toBe('meets');
-    expect(sideOf({ goal: null, mean: 90, sd: 0, n: 2000 }, 90, '>', true).side).toBe('falls_short');
-    expect(sideOf({ goal: null, mean: 80, sd: 0.5, n: 2000 }, 90, '<=', true).side).toBe('meets');
-    expect(sideOf({ goal: null, mean: 95, sd: 0.5, n: 2000 }, 90, '>=', false)).toMatchObject({ side: 'unresolved', reason: 'target_not_licensed' });
+  it('an average within 4 SE of the target is too close to call, an exact tie clears an inclusive target, an unlicensed target says so', () => {
+    expect(sideOf({ goal: null, mean: 90.01, sd: 0.5, n: 2000 }, 90, '>=', true).side).toBe('too_close_to_call');
+    expect(sideOf({ goal: null, mean: 91, sd: 0.5, n: 2000 }, 90, '>=', true).side).toBe('average_clears');
+    expect(sideOf({ goal: null, mean: 90, sd: 0, n: 2000 }, 90, '>=', true).side).toBe('average_clears');
+    expect(sideOf({ goal: null, mean: 90, sd: 0, n: 2000 }, 90, '>', true).side).toBe('average_short');
+    expect(sideOf({ goal: null, mean: 80, sd: 0.5, n: 2000 }, 90, '<=', true).side).toBe('average_clears');
+    expect(sideOf({ goal: null, mean: 95, sd: 0.5, n: 2000 }, 90, '>=', false)).toMatchObject({ side: 'too_close_to_call', reason: 'target_not_licensed' });
   });
 });

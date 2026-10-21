@@ -5,20 +5,23 @@
  *  · STRESSES ARE ASSUMPTIONS, NOT ACTIONS. Each stress is an item already in the living model — a link's effect or a
  *    factor's level — set to values the person (or Olumi, said so) wants tested. Options stay the person's interventions.
  *    The grid is every combination of each item's saved value and its tested values: a numerical design, never a belief
- *    that its points are equally likely, so a count is "met at k of n tested settings", never a chance. A tested value never
+ *    that its points are equally likely, so a count is "the average clears the target at k of n tested settings", never a
+ *    chance. EVERY SIDE IS THE AVERAGE (Science, 21 Oct): a cell compares the option's average level with the target, so
+ *    "average clears the target" is never "meets the goal" (an option can clear on average with a modest goal chance). A tested value never
  *    relabels its item: the item's attribution is also its existence belief in the mapper (stated → 1, Olumi's → 0.8,
  *    `mapper.ts` `OLUMI_EXISTS`), so relabelling would change what is computed. Whose value it is: `coordinates[].values_source`.
  *  · ONE NAMED ALTERNATIVE EXPLANATION. At most one added link from a factor, labelled, with its author, and under H1 it
  *    HOLDS (exists with probability 1: the hypothesis is "suppose this is so"). No probability is placed on either
- *    explanation and they are never averaged; where they disagree the disagreement is the finding.
+ *    explanation and they are never combined; where they disagree the disagreement is the finding.
  *  · THE ONE RUN PATH, NOTHING PERSISTED. Each variant is the saved living model with those values, mapped by the core
  *    mapper and computed by `deps.runStressVariant` (the `run_analysis` handler on an in-memory snapshot, discarded:
  *    `handlers/stress-variant-run.ts`). Its rows are the licensed rows the structural challenge reads. The saved model must
- *    remap to exactly the saved graph (every Run input, e.g. a goal's deadline), or H0 would not be the saved model: refused.
+ *    remap to exactly the saved graph (every Run input, e.g. a goal's deadline; display refs carried as the register route
+ *    carries them), or H0 would not be the saved model: refused.
  *  · HONEST LIMITS. At most 16 variants and 60 s, one deadline that aborts a variant in flight; what did not run is
- *    `not_run`, never a pass. A level within 4 standard
- *    errors of the target, or a target this Run does not license, is `unresolved`, never met. A model changed during the
- *    test is `unavailable`, with no rows. Model-relative wording only: no best, winner or recommendation.
+ *    `not_run`, never counted. An average within 4 standard errors of the target, or a target this Run does not license,
+ *    is `too_close_to_call`, never counted as clearing. A model changed during the test is `unavailable`, with no rows.
+ *    Model-relative wording only: no best, winner or recommendation.
  */
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
@@ -26,6 +29,7 @@ import { z } from 'zod-v4';
 import type { AgentToolContext } from '../../agent-lane/runtime/agent-tools.js';
 import type { InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
 import { LivingModel, type LivingModelT } from '../../../schemas/living-model.js';
+import { assignEntityRefs } from '../../graph/entity-refs.js';
 import { mapLivingModel, savedGoal } from '../living-model/mapper.js';
 import { livingViewOf } from '../living-model/view.js';
 import { isNoModelYet, isSavedRead, readSaved } from './context-tool.js';
@@ -34,7 +38,7 @@ import { ok, refused, unavailable, type ToolOutcome } from './outcome.js';
 export const STRESS_TEST = 'stress_test';
 export const STRESS_MAX_VARIANTS = 16;
 export const STRESS_MAX_WALL_MS = 60_000;
-/** Standard errors a level must clear the target by before its side is stated. Fixed before any run. */
+/** Standard errors an average must clear the target by before its side is stated. Fixed before any run. */
 export const STRESS_Z = 4;
 
 export const StressTestParams = z.object({
@@ -57,7 +61,8 @@ export const StressTestParams = z.object({
 export type StressTestArgs = z.infer<typeof StressTestParams>;
 
 type Rec = Record<string, unknown>;
-type Side = 'meets' | 'falls_short' | 'unresolved' | 'not_run';
+/** The AVERAGE level against the target (never the goal chance): clears it, short of it, too close to call, or not run. */
+type Side = 'average_clears' | 'average_short' | 'too_close_to_call' | 'not_run';
 type Comparator = '>=' | '>' | '<=' | '<';
 
 /** One option's licensed row from one variant, as `licensedOptionRows` reads it (structural-challenge-compare.ts). */
@@ -80,7 +85,7 @@ export interface Hypothesis { readonly id: 'H0' | 'H1'; readonly label: string; 
 export interface Variant { readonly hypothesis: 'H0' | 'H1'; readonly setting: Readonly<Record<string, number>>; readonly living: LivingModelT }
 export interface Cell {
   readonly hypothesis: 'H0' | 'H1'; readonly setting: Readonly<Record<string, number>>; readonly option_id: string;
-  readonly level: number | null; readonly sd: number | null; readonly n: number | null;
+  readonly average_level: number | null; readonly sd: number | null; readonly n: number | null;
   readonly side: Side; readonly margin: number | null; readonly reason: string | null;
 }
 
@@ -159,22 +164,22 @@ export function planStress(living: LivingModelT, args: StressTestArgs):
   return { coordinates, hypotheses, variants, alternativeLinkId };
 }
 
-/** A side only when the level clears the target by more than STRESS_Z standard errors; an exact level (sd 0) is exact. */
+/** The average's side of the target, stated only beyond STRESS_Z standard errors; an exact level (sd 0) is compared exactly. */
 export function sideOf(row: StressRow | undefined, target: number | null, comparator: Comparator, targetLicensed: boolean):
   Pick<Cell, 'side' | 'margin' | 'reason'> {
-  if (row === undefined || row.mean === null || row.sd === null || row.n === null || row.n <= 0) return { side: 'unresolved', margin: null, reason: 'not_computed' };
-  if (target === null || !targetLicensed) return { side: 'unresolved', margin: null, reason: 'target_not_licensed' };
+  if (row === undefined || row.mean === null || row.sd === null || row.n === null || row.n <= 0) return { side: 'too_close_to_call', margin: null, reason: 'not_computed' };
+  if (target === null || !targetLicensed) return { side: 'too_close_to_call', margin: null, reason: 'target_not_licensed' };
   const higher = comparator === '>=' || comparator === '>';
   const margin = higher ? row.mean - target : target - row.mean;
   const se = row.sd / Math.sqrt(row.n);
-  if (se === 0) return { side: (comparator === '>' || comparator === '<' ? margin > 0 : margin >= 0) ? 'meets' : 'falls_short', margin, reason: null };
-  if (Math.abs(margin) <= STRESS_Z * se) return { side: 'unresolved', margin, reason: 'within_precision' };
-  return { side: margin > 0 ? 'meets' : 'falls_short', margin, reason: null };
+  if (se === 0) return { side: (comparator === '>' || comparator === '<' ? margin > 0 : margin >= 0) ? 'average_clears' : 'average_short', margin, reason: null };
+  if (Math.abs(margin) <= STRESS_Z * se) return { side: 'too_close_to_call', margin, reason: 'within_precision' };
+  return { side: margin > 0 ? 'average_clears' : 'average_short', margin, reason: null };
 }
 
 const key = (h: string, s: Readonly<Record<string, number>>) => `${h}|${JSON.stringify(Object.entries(s).sort())}`;
 
-/** Per option over the REQUESTED variants; the highest level per setting; joint-failure witnesses; where explanations differ. */
+/** Per option over the REQUESTED variants; the most favourable average per setting; joint shortfalls; where explanations differ. */
 export function summariseStress(coordinates: readonly Coordinate[], hypotheses: readonly Hypothesis[], optionIds: readonly string[],
   cells: readonly Cell[], comparator: Comparator) {
   const higher = comparator === '>=' || comparator === '>';
@@ -184,26 +189,26 @@ export function summariseStress(coordinates: readonly Coordinate[], hypotheses: 
   const regret = new Map<string, number[]>(optionIds.map((o) => [o, []]));
   const leading: { hypothesis: string; setting: Readonly<Record<string, number>>; options: string[] }[] = [];
   for (const row of byVariant.values()) {
-    const complete = optionIds.every((o) => row.some((c) => c.option_id === o && c.level !== null && c.sd !== null && c.n !== null));
+    const complete = optionIds.every((o) => row.some((c) => c.option_id === o && c.average_level !== null && c.sd !== null && c.n !== null));
     if (!complete) continue;
     const lv = (o: string) => row.find((c) => c.option_id === o)!;
-    const top = optionIds.reduce((a, b) => (better(lv(b).level!, lv(a).level!) ? b : a));
+    const top = optionIds.reduce((a, b) => (better(lv(b).average_level!, lv(a).average_level!) ? b : a));
     const seOf = (c: Cell) => c.sd! / Math.sqrt(c.n!);
     leading.push({ hypothesis: row[0].hypothesis, setting: row[0].setting,
-      options: optionIds.filter((o) => Math.abs(lv(o).level! - lv(top).level!) <= STRESS_Z * Math.hypot(seOf(lv(o)), seOf(lv(top)))) });
-    for (const o of optionIds) regret.get(o)!.push(Math.abs(lv(top).level! - lv(o).level!));
+      options: optionIds.filter((o) => Math.abs(lv(o).average_level! - lv(top).average_level!) <= STRESS_Z * Math.hypot(seOf(lv(o)), seOf(lv(top)))) });
+    for (const o of optionIds) regret.get(o)!.push(Math.abs(lv(top).average_level! - lv(o).average_level!));
   }
   const options = Object.fromEntries(optionIds.map((o) => {
     const mine = cells.filter((c) => c.option_id === o);
-    const levels = mine.flatMap((c) => (c.level === null ? [] : [c.level]));
+    const levels = mine.flatMap((c) => (c.average_level === null ? [] : [c.average_level]));
     return [o, {
       requested: mine.length,
-      met: mine.filter((c) => c.side === 'meets').length,
-      fell_short: mine.filter((c) => c.side === 'falls_short').length,
-      unresolved: mine.filter((c) => c.side === 'unresolved').length,
+      average_clears: mine.filter((c) => c.side === 'average_clears').length,
+      average_short: mine.filter((c) => c.side === 'average_short').length,
+      too_close_to_call: mine.filter((c) => c.side === 'too_close_to_call').length,
       not_run: mine.filter((c) => c.side === 'not_run').length,
-      worst_tested_level: levels.length === 0 ? null : higher ? Math.min(...levels) : Math.max(...levels),
-      max_tested_regret: regret.get(o)!.length === byVariant.size && byVariant.size > 0 ? Math.max(...regret.get(o)!) : null,
+      worst_tested_average: levels.length === 0 ? null : higher ? Math.min(...levels) : Math.max(...levels),
+      max_tested_average_regret: regret.get(o)!.length === byVariant.size && byVariant.size > 0 ? Math.max(...regret.get(o)!) : null,
     }];
   }));
   const saved = Object.fromEntries(coordinates.map((c) => [c.item_id, c.saved]));
@@ -214,17 +219,18 @@ export function summariseStress(coordinates: readonly Coordinate[], hypotheses: 
     for (const h of hypotheses) {
       for (const o of optionIds) {
         const at = (s: Record<string, number>) => byVariant.get(key(h.id, s))?.find((c) => c.option_id === o)?.side;
-        if (at(saved) === 'meets' && single.every((s) => at(s) === 'meets') && at(first) === 'falls_short') witnesses.push({ hypothesis: h.id, option_id: o });
+        // The average clears the target at the saved setting and under each stress alone, and falls short when all hit.
+        if (at(saved) === 'average_clears' && single.every((s) => at(s) === 'average_clears') && at(first) === 'average_short') witnesses.push({ hypothesis: h.id, option_id: o });
       }
     }
   }
   const disagreements = hypotheses.length < 2 ? [] : cells.filter((c) => c.hypothesis === 'H0').flatMap((c0) => {
     const c1 = byVariant.get(key('H1', c0.setting))?.find((c) => c.option_id === c0.option_id);
-    const determinate = (s: Side | undefined) => s === 'meets' || s === 'falls_short';
+    const determinate = (s: Side | undefined) => s === 'average_clears' || s === 'average_short';
     return c1 !== undefined && determinate(c0.side) && determinate(c1.side) && c0.side !== c1.side
       ? [{ option_id: c0.option_id, setting: c0.setting, saved_model: c0.side, alternative: c1.side }] : [];
   });
-  return { options, most_favourable_level_per_setting: leading, joint_failure_witnesses: witnesses, explanation_disagreements: disagreements };
+  return { options, most_favourable_average_per_setting: leading, joint_shortfall_witnesses: witnesses, explanation_disagreements: disagreements };
 }
 
 function goalOf(graph: unknown): { id: string; target: number | null; comparator: Comparator } | undefined {
@@ -236,15 +242,19 @@ function goalOf(graph: unknown): { id: string; target: number | null; comparator
   return { id: goal.id, target, comparator };
 }
 
-/** The mapped variant as a Run would read it; under H1 the added alternative HOLDS (the mapper gives Olumi's own link 0.8).
- *  `testable`: the items the mapper carries as stated, never withheld or replaced by its placeholder. */
+/** The mapped variant as a core save would store it (display refs carried from the saved graph, as the register route
+ *  does: `assist.v1.scenario-graph-register.ts` withEntityRefs); under H1 the added alternative HOLDS (the mapper gives
+ *  Olumi's own link 0.8). `testable`: the items the mapper carries as stated, never withheld or replaced by its placeholder. */
 function variantGraph(v: Variant, saved: unknown, alternativeLinkId: string | null): { graph: Rec; testable: ReadonlySet<string> } {
   const mapped = mapLivingModel(v.living, savedGoal(saved));
   const withheld = new Set(mapped.withheld.map((w) => w.id));
   const edges = mapped.graph.edges.map((e) => (v.hypothesis === 'H1' && e.id === alternativeLinkId ? { ...e, exists_probability: 1 } : e));
   const carried = [...mapped.graph.nodes, ...mapped.graph.edges.filter((e) => e.defaulted !== true)].map((x) => String(x.id));
-  return { graph: { ...mapped.graph, edges, living_model: v.living }, testable: new Set(carried.filter((id) => !withheld.has(id))) };
+  return { graph: asStored({ ...mapped.graph, edges, living_model: v.living }, saved), testable: new Set(carried.filter((id) => !withheld.has(id))) };
 }
+
+/** A write as the register route stores it: the saved graph's display refs carried (`entity-refs.ts`: identity only). */
+const asStored = (graph: Rec, saved: unknown): Rec => assignEntityRefs(graph, saved).graph;
 
 /** Every Run input of a saved graph, the living model aside (it is compared through its own mapping). */
 function runInputs(graph: unknown): Rec {
@@ -282,7 +292,7 @@ export async function stressTest(deps: StressDeps, ctx: Pick<AgentToolContext, '
   if ('refusal' in plan) return refused(plan.refusal, undefined, plan.data);
   // Every variant is remapped by today's mapper, so the saved model must remap to what is saved: else H0 is not it.
   const remapped = mapLivingModel(living, savedGoal(saved.graph));
-  if (!isDeepStrictEqual(runInputs(saved.graph), runInputs(remapped.graph))) return refused('saved_graph_not_reproducible');
+  if (!isDeepStrictEqual(runInputs(saved.graph), runInputs(asStored(remapped.graph, saved.graph)))) return refused('saved_graph_not_reproducible');
   const goal = goalOf(remapped.graph);
   if (goal === undefined) return refused('no_goal');
   const variants = plan.variants.map((v) => ({ v, ...variantGraph(v, saved.graph, plan.alternativeLinkId) }));
@@ -297,7 +307,7 @@ export async function stressTest(deps: StressDeps, ctx: Pick<AgentToolContext, '
   const cells: Cell[] = [];
   for (const { v, graph } of variants) {
     const blank = (side: Side, reason: string) => optionIds.forEach((o) => cells.push({ hypothesis: v.hypothesis, setting: v.setting,
-      option_id: o, level: null, sd: null, n: null, side, margin: null, reason }));
+      option_id: o, average_level: null, sd: null, n: null, side, margin: null, reason }));
     const left = deadline - now();
     if (left <= 0) { blank('not_run', 'time_limit'); continue; }
     const target = goalOf(graph)?.target ?? null;
@@ -307,7 +317,7 @@ export async function stressTest(deps: StressDeps, ctx: Pick<AgentToolContext, '
     if (now() > deadline) { blank('not_run', 'time_limit'); continue; }
     for (const o of optionIds) {
       const row = result.rows.get(o);
-      cells.push({ hypothesis: v.hypothesis, setting: v.setting, option_id: o, level: row?.mean ?? null, sd: row?.sd ?? null, n: row?.n ?? null,
+      cells.push({ hypothesis: v.hypothesis, setting: v.setting, option_id: o, average_level: row?.mean ?? null, sd: row?.sd ?? null, n: row?.n ?? null,
         ...sideOf(row, target, goal.comparator, result.targetLicensed) });
     }
   }
@@ -322,7 +332,9 @@ export async function stressTest(deps: StressDeps, ctx: Pick<AgentToolContext, '
     variants_run: new Set(cells.filter((c) => c.side !== 'not_run').map((c) => key(c.hypothesis, c.setting))).size,
     incomplete: cells.some((c) => c.side === 'not_run'),
     cells, ...summary,
-    reading_rule: 'Each count is tested settings, not a chance. Unresolved is never met. No option is ranked across settings, '
-      + 'the explanations are never averaged, and nothing was saved. Whose tested values these are: coordinates.values_source.',
+    reading_rule: 'Every side compares the option\'s AVERAGE level with the target: "average clears the target" never means '
+      + '"meets the goal" (an option can clear on average with a modest chance of meeting it). Each count is tested settings, '
+      + 'never a chance. Too close to call is never counted as clearing. No option is ranked across settings, the two '
+      + 'explanations are never combined, and nothing was saved. Whose tested values these are: coordinates.values_source.',
   });
 }
