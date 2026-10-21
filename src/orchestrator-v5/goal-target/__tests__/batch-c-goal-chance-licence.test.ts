@@ -423,12 +423,12 @@ describe('Science 21 Oct: a model-certain FALLS SHORT does not block the headlin
     const miss = rows.find((r) => r.option_id === 'carry_on')!;
     run.option_comparison = rows.map((r) => ({ ...structuredClone(miss), option_id: r.option_id }));
     const g = capacityGraph();
-    const l = goalChanceLicenceOf(run, g, 'capacity', () => false, sentGoalThresholdOf(run, g, 'capacity', () => false), g, {})!;
+    const l = goalChanceLicenceOf(run, g, 'capacity', () => false, sentGoalThresholdOf(run, g, 'capacity', () => false), g, {}) as unknown as Rec;
     expect(l).not.toBeNull();
     expect(l.pct_by_option).toEqual({});
     expect(l.form).toBe('each');
     expect(l.resolved_withheld_option_ids).toBeUndefined();
-    expect(Object.values(l.withheld_reason_by_option ?? {}).every((w) => (w as Rec).side === 'falls_short')).toBe(true);
+    expect(Object.values((l.withheld_reason_by_option ?? {}) as Rec).every((w) => (w as Rec).side === 'falls_short')).toBe(true);
   });
   it('a stored record naming a headline beside an unresolved withheld option is refused by the reader (fails closed)', () => {
     const { result } = licensedFor(hiringRun());
