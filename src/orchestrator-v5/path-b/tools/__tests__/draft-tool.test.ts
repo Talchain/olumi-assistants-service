@@ -6,7 +6,7 @@
  * (no module mock: the kernel, the mapper and the construction's own helpers are real). SYNTHETIC brief.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { BuildModelParams, buildModel, type DraftDeps } from '../draft-tool.js';
+import { BuildModelParams, REVIEW_FIRST, buildModel, type DraftDeps } from '../draft-tool.js';
 import { applyKernel } from '../../living-model/kernel.js';
 import { mapLivingModel } from '../../living-model/mapper.js';
 import type { LivingModelT } from '../../../../schemas/living-model.js';
@@ -289,6 +289,10 @@ describe('the critic (21 Oct): a second model reviews the first draft of the tur
     const p = product({ graph: [EMPTY, EMPTY, MODEL], register: [SAVED], versions: [VERSIONS(true)] });
     const first = await buildModel({ ...p, review, critique }, ctx, ARGS);
     expect(first).toMatchObject({ status: 'refused', reason: 'review_first', data: { critique: CRITIQUE, gaps: { goal_not_measurable: true } } });
+    // Track 3 E2E (served dce1b50a, 21 Oct): 2 of 8 first drafts left options with no path to the goal after the review.
+    expect((first as { detail?: string }).detail).toBe(REVIEW_FIRST);
+    expect(REVIEW_FIRST).toContain('Every option reaches the goal through what it changes');
+    expect(REVIEW_FIRST).toContain('else form unknown with sign null so the person can say which way');
     expect(JSON.parse(critique.mock.calls[0]![0])).toMatchObject({ brief: BRIEF, draft: { aims: [{ id: 'visitors_served' }] } });
     expect(registerCalls(p)).toEqual([]);
     const second = await buildModel({ ...p, review, critique }, ctx, ARGS);
