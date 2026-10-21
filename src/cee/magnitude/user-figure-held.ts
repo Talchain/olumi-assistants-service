@@ -55,7 +55,9 @@ export function userFigureHeld(edge: unknown): UserFigureHeld | null {
   const range = isRec(ne.stated_range) ? text(ne.stated_range.text) : undefined;
   // The stored-figure fallback is the display `grouped-link-sizing.ts` already serves for a link's natural size.
   const quote = text(p.source_quote) ?? range
-    ?? `${String(ne.amount)} ${String(ne.amount_unit)} per ${String(ne.per_source_change)} ${String(ne.per_source_change_unit)}`;
+    // An option's own switch is the option's own effect: "30 widgets per hour", never "per 1 switch" (Codex #3556 R1).
+    ?? `${String(ne.amount)} ${String(ne.amount_unit)}${ne.per_source_change === 1 && ne.per_source_change_unit === 'switch' ? ''
+      : ` per ${String(ne.per_source_change)} ${String(ne.per_source_change_unit)}`}`;
   return { quote };
 }
 

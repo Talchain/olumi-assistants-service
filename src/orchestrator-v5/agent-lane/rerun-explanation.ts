@@ -61,13 +61,14 @@ export const WITHIN_BAND_FIGURE_LINES = {
  * One end of an `effect` row, said as the served natural-size display (`grouped-link-sizing.ts`):
  * `{amount} {amount_unit} per {per_source_change} {per_source_change_unit}`. No new number formatting.
  */
-const effectEnd = (v: unknown): string | undefined => {
+export const effectEnd = (v: unknown): string | undefined => {
   const r = rec(v);
   const per = rec(r?.per);
   const unit = text(r?.unit);
   const perUnit = text(per?.unit);
   if (typeof r?.raw !== 'number' || typeof per?.amount !== 'number' || unit === undefined || perUnit === undefined) return undefined;
-  return `${r.raw} ${unit} per ${per.amount} ${perUnit}`;
+  // An option's own switch is the option's own effect: "30 orders a week", never "per 1 switch" (Codex #3556 R1).
+  return `${r.raw} ${unit}${per.amount === 1 && perUnit === 'switch' ? '' : ` per ${per.amount} ${perUnit}`}`;
 };
 
 /** RC's fallback case lines (policy `fallback`); C3–C5 never say "a new draw" (it may be the engine that differed). */

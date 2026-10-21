@@ -6,6 +6,7 @@ import { linkDefaultAssumptionsOf } from '../../../../cee/magnitude/link-default
 import { goalChanceEstimateCounts } from '../../../agent-lane/goal-chance-estimate-attribution.js';
 import { KNOWN_ANSWER, OPTION_EFFECTS } from './fixtures.js';
 import { RunInputLinkSchema } from '@talchain/schemas/orchestrator';
+import { effectEnd } from '../../../agent-lane/rerun-explanation.js';
 
 type Rec = Record<string, any>;
 
@@ -109,6 +110,17 @@ describe('thin core mapper: living model → GraphV3', () => {
     // CONTROL: a factor with its own unit keeps that unit, never 'switch'.
     const { graph: g2 } = mapLivingModel(KNOWN_ANSWER);
     expect((g2.edges.find((e) => e.from === 'f' && e.to === 'g') as Record<string, any>).provenance.natural_effect.per_source_change_unit).not.toBe('switch');
+    // Codex #3556 R1: a person's own factor whose id merely LOOKS like a switch (`a__on`, option `a`, a level 0.5 → 1) is
+    // not one: no switch was made, so its effect is never said "per switch".
+    const look = JSON.parse(JSON.stringify(KNOWN_ANSWER).replaceAll('"push"', '"a"').replaceAll('"f"', '"a__on"').replaceAll('"f_g"', '"a__on_g"')) as LivingModelT;
+    expect(LivingModel.safeParse(look).success).toBe(true);
+    const lookEdge = mapLivingModel(look).graph.edges.find((e) => e.from === 'a__on' && e.to === 'g') as Record<string, any>;
+    expect(lookEdge.provenance.natural_effect.per_source_change_unit).not.toBe('switch');
+  });
+
+  it('Codex #3556 R1: the re-run line says an option\'s own effect without "per 1 switch"; any other source keeps its "per"', () => {
+    expect(effectEnd({ raw: 30, unit: 'orders a week', per: { amount: 1, unit: 'switch' } })).toBe('30 orders a week');
+    expect(effectEnd({ raw: 49, unit: 'GBP', per: { amount: 1, unit: 'subscriber' } })).toBe('49 GBP per 1 subscriber');
   });
 
   it('Lenses 20 Oct (capacity): the person\'s own figure inside their range sizes the link as their point; the range is kept and said', () => {
