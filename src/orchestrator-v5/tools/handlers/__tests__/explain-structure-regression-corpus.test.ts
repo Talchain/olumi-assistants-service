@@ -29,7 +29,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import type { ContextPackGraph } from '../../../context/context-pack-assembler.js';
+import type { ContextPackGraph } from '../../../context/context-pack-types.js';
 import {
   buildStructureProjectionSummary,
   type StructureProjectionSummary,

@@ -4,9 +4,8 @@
 # 1. `validate_skipped_graph_checks` must not appear in production code paths
 #    (comments referencing the old telemetry name ARE allowed — only
 #    string-literal emission is forbidden).
-# 2. No semantic transforms in the ContextPack assembler — Math.round,
-#    .toFixed, parseFloat, Number() on graph/analysis fields all indicate
-#    that F.6 passthrough has been broken.
+#    (Check 2, "no semantic transforms in the ContextPack assembler", retired
+#    with the assembler in deletion 8, 22 Oct 2026.)
 set -euo pipefail
 
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -33,19 +32,6 @@ if [[ -n "$STAGE_LEAKS" ]]; then
   echo "FAIL: 'validate_skipped_graph_checks' string literal found in production code — Phase 1.5 renamed this to 'validate_skipped_no_graph'."
   echo "$STAGE_LEAKS"
   FAIL=1
-fi
-
-# --- 2. No semantic transforms in the assembler ----------------------------
-ASSEMBLER="src/orchestrator-v5/context/context-pack-assembler.ts"
-if [[ -f "$ASSEMBLER" ]]; then
-  # Match Math.round(, .toFixed(, parseFloat(, Number( — which would indicate
-  # that numeric fields are being transformed. F.6 requires passthrough.
-  TRANSFORMS=$(node "$STRIPPER" --scan 'Math\.round\(|\.toFixed\(|parseFloat\(|Number\(' "$ASSEMBLER" 2>/dev/null || true)
-  if [[ -n "$TRANSFORMS" ]]; then
-    echo "FAIL: semantic transforms found in $ASSEMBLER (F.6 passthrough violated):"
-    echo "$TRANSFORMS"
-    FAIL=1
-  fi
 fi
 
 if [[ $FAIL -eq 0 ]]; then

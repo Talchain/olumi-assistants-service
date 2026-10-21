@@ -47,8 +47,11 @@ import { findForbiddenMatches } from '../../tools/v5-journey-replay/forbidden-te
 import type { HandlerInvocation } from '../../src/orchestrator-v5/tools/registry.js'
 import type { AnalysisProjectionSummary } from '../../src/orchestrator-v5/context/projection-summaries.js'
 import { buildAnalysisProjectionSummary } from '../../src/orchestrator-v5/context/projection-summaries.js'
-import { projectTopDrivers, type ContextPackAnalysis } from '../../src/orchestrator-v5/context/context-pack-assembler.js'
-import { collectInterventionControlledFactorIds } from '../../src/orchestrator-v5/context/intervention-controlled-drivers.js'
+import type { ContextPackAnalysis } from '../../src/orchestrator-v5/context/context-pack-types.js'
+import {
+  collectInterventionControlledFactorIds,
+  partitionInterventionControlledDrivers,
+} from '../../src/orchestrator-v5/context/intervention-controlled-drivers.js'
 import type { DriverSummary } from '../../src/orchestrator/context/analysis-compact.js'
 import { EMPTY_DECISION_CONTEXT } from '@talchain/schemas/orchestrator'
 import { OlumiResponseSchema } from '@talchain/schemas/boundary'
@@ -601,7 +604,7 @@ describe('Acceptance Gate — no internal-term leakage in user copy', () => {
 // An option-controlled lever (a factor an option intervenes on) must never be
 // surfaced in user-facing explain_results / what_would_flip prose as a tunable
 // sensitivity driver — that is the lever-as-sensitivity leak. The CEE backstop
-// suppresses it at the projection boundary (`projectTopDrivers`) from the RAW
+// suppresses it (`partitionInterventionControlledDrivers`) from the RAW
 // graph's intervention bundles, keyed on structural factor_id. Genuinely
 // external/tunable drivers still surface. Producer values are preserved (this
 // is a presentation suppression, not the Lane A1 producer fix).
@@ -633,7 +636,11 @@ describe('Acceptance Gate — Spine A option-controlled-driver suppression', () 
       runner_up: { label: 'Hire Two Mid-Level', probability: 0.27 },
       margin_pp: 35,
       robustness_band: 'stable',
-      top_drivers: projectTopDrivers(DRIVERS, CONTROLLED),
+      // Signed as the deleted projectTopDrivers signed it (negative → −magnitude).
+      top_drivers: partitionInterventionControlledDrivers(DRIVERS, CONTROLLED).kept.map((d) => ({
+        factor_label: d.factor_label,
+        sensitivity_value: d.direction === 'negative' ? -d.sensitivity : d.sensitivity,
+      })),
       fragile_edges: [],
     }
     const projection = buildAnalysisProjectionSummary(analysis)

@@ -55,8 +55,8 @@
  * `LEADER_CLAIM_PATTERNS` in `compose/leading-option-egress-guard.ts` is NOT
  * only the observe-only alarm. Its string-level reading `textNamesLeadingOption`
  * is consumed by REAL ENFORCEMENT: `context/withheld-leader-projection.ts:550`
- * and `context/withheld-history-redaction.ts:274` both REDACT on it, and
- * `compose.ts`'s per-field `evidence_gap` projection gates on it.
+ * REDACTS on it (`context/withheld-history-redaction.ts` did too until it was
+ * deleted in deletion 8 as unreachable), and `compose.ts`'s per-field `evidence_gap` projection gates on it.
  *
  * So a rewrite that moves the copy OUT of that vocabulary does not merely blind
  * an alarm — it silently switches off redaction. A withheld turn would then be
@@ -297,9 +297,8 @@ describe('goal-framed outcome vocabulary — the deterministic emitters', () => 
 describe('goal-framed outcome vocabulary — the replacement stays visible to the leader-claim vocabulary', () => {
   /**
    * ⚠⚠ THIS IS THE SAFETY ASSERTION. See the header. `textNamesLeadingOption`
-   * drives REDACTION in `withheld-leader-projection.ts` and
-   * `withheld-history-redaction.ts`. Copy that names a leading option and is
-   * INVISIBLE here does not get redacted on a withheld turn.
+   * drives REDACTION in `withheld-leader-projection.ts`. Copy that names a
+   * leading option and is INVISIBLE here does not get redacted on a withheld turn.
    */
   const REPLACEMENT_SENTENCES: readonly string[] = [
     'Segment scored highest against your goal in 99% of runs of this model.',

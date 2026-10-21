@@ -23,9 +23,6 @@ import { composeToolCallResponse } from '../../compose.js';
 import { composeAnalysisStateV1, projectAnalysisBlocksForRunBinding } from '../../compose/analysis-state-v1.js';
 import { attachComputedAt } from '../../compose/analysis-ready-emit.js';
 import { selectCanonicalAnalysisState } from '../canonical-analysis-state.js';
-import { assembleContextPack } from '../context-pack-assembler.js';
-import { PRESENT_PAIR } from './run-delta-fixtures.js';
-import { makeMessagePayload } from '../../__tests__/fixtures.js';
 
 type Rec = Record<string, any>;
 // The verbatim GRAPH_READY graph of the red team's pre-fix B2 build (staging 91656b1b) — no top-level goal_node_id,
@@ -259,18 +256,5 @@ describe('RT-10 — every goal-snapshot reader treats goal_direction_changed as 
     expect(projectAnalysisBlocksForRunBinding(current, state, 'goal_direction_changed')
       .some((b) => b.type === 'analysis_result')).toBe(false);
     expect(projectAnalysisBlocksForRunBinding(current, state, 'graph_hash_diverged')).toEqual(current);
-  });
-
-  it('the AI prompt context carries no run comparison for it (graph-stale control does)', () => {
-    const canonical = selectCanonicalAnalysisState({ priorFacts: [fact({ goal: snapshotGoal() })],
-      currentGraphHash: HASH, currentGraph: churnGraph() });
-    const pack = (freshness_reason: typeof canonical.freshness_reason) => assembleContextPack({
-      payload: makeMessagePayload({ scenario_id: 'rt10-direction-pack', message: 'What changed?' }),
-      priorTurns: [], priorFacts: PRESENT_PAIR, priorFactsReadOk: true,
-      graphContext: { status: 'canonical' }, mayNameLeadingOption: true,
-      canonicalState: { ...canonical, freshness_reason },
-    });
-    expect(pack('goal_direction_changed').run_delta).toBeUndefined();
-    expect(pack('graph_hash_diverged').run_delta).toBeDefined();
   });
 });

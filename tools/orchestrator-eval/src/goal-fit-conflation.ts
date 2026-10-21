@@ -32,7 +32,7 @@
  * vocabulary is not caught. The follow-up widens the corpus.
  */
 
-import type { ContextPackAnalysis } from '../../../src/orchestrator-v5/context/context-pack-assembler.js';
+import type { ContextPackAnalysis } from '../../../src/orchestrator-v5/context/context-pack-types.js';
 
 /** Verbs that express reaching/meeting a target. */
 const ATTAINMENT_VERB =

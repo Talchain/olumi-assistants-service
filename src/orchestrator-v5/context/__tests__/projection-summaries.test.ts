@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import type {
   ContextPackAnalysis,
   ContextPackGraph,
-} from '../context-pack-assembler.js';
+} from '../context-pack-types.js';
 import {
   buildAnalysisProjectionSummary,
   buildStructureProjectionSummary,

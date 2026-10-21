@@ -4,9 +4,6 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { deriveAnalysisFreshness } from '../freshness.js';
 import { composeToolCallResponse } from '../../compose.js';
 import { composeAnalysisStateV1, projectAnalysisBlocksForRunBinding } from '../../compose/analysis-state-v1.js';
-import { assembleContextPack } from '../context-pack-assembler.js';
-import { PRESENT_PAIR } from './run-delta-fixtures.js';
-import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import { attachComputedAt } from '../../compose/analysis-ready-emit.js';
 import { selectCanonicalAnalysisState } from '../canonical-analysis-state.js';
 
@@ -186,22 +183,5 @@ describe('goal-unit stale current-turn and shared wire egress', () => {
   it('preserves ordinary graph-stale current-turn result behaviour', () => {
     expect(compose({ ...derive(graph('USD/month')), reason: 'graph_hash_diverged' })
       .blocks.some((b) => b.type === 'analysis_result')).toBe(true);
-  });
-});
-
-
-describe('goal-unit stale comparisons cannot return through AI prompt context', () => {
-  it('withholds the same comparison in the pack, with a legacy ordinary-stale control', () => {
-    const canonical = selectCanonicalAnalysisState({ priorFacts: [fact()], currentGraphHash: HASH,
-      currentGraph: graph('USD/month') });
-    const pack = (freshness_reason: typeof canonical.freshness_reason) => assembleContextPack({
-      payload: makeMessagePayload({ scenario_id: 'unit-stale-pack', message: 'What changed?' }),
-      priorTurns: [], priorFacts: PRESENT_PAIR, priorFactsReadOk: true,
-      graphContext: { status: 'canonical' }, mayNameLeadingOption: true,
-      canonicalState: { ...canonical, freshness_reason },
-    });
-    expect(pack('goal_unit_changed').run_delta).toBeUndefined();
-    expect(pack('goal_snapshot_unverified').run_delta).toBeUndefined();
-    expect(pack('graph_hash_diverged').run_delta).toBeDefined();
   });
 });

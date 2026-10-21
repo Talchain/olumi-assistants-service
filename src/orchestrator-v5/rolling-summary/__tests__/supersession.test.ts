@@ -22,8 +22,9 @@
  * ── What this slice does, and its honest bound ──────────────────────────────
  *
  * It makes correction and withdrawal EXPRESSIBLE (summariser.ts prompt rules)
- * and carry-forward VISIBLE (the `carried_forward` stamp + the injected
- * qualifier). It does NOT and cannot force the model to notice a
+ * and carry-forward VISIBLE (the `carried_forward` stamp; the injected
+ * qualifier went with inject.ts in deletion 8, 22 Oct 2026, as unreachable
+ * from src/server.ts). It does NOT and cannot force the model to notice a
  * contradiction, and — because CONSTRAINTS stores at most ONE entry per slot
  * per pass — no code-side check can prove a correction was RECORDED rather
  * than a fact silently DROPPED. The durable fix is per-entry CONSTRAINTS
@@ -37,7 +38,6 @@ import { describe, it, expect, vi } from 'vitest';
 import { assembleSummaryFromParsed } from '../assemble.js';
 import { maintainRollingSummaryForCommit } from '../capture.js';
 import type { ConversationHistoryReader, MaintainerTurn } from '../capture.js';
-import { buildConversationSummarySection, CARRIED_FORWARD_QUALIFIER } from '../inject.js';
 import { parseSummaryOutput } from '../parse-summary.js';
 import { findErasedSlots } from '../retention.js';
 import { SUMMARISER_SYSTEM_PROMPT } from '../summariser.js';
@@ -125,8 +125,8 @@ function assembleFrom(raw: string, prior: RollingSummary | null): RollingSummary
 }
 
 /** The REAL persistence round-trip: the store writes the object to JSONB and
- *  reads it back through `parseStoredRollingSummary`. Every consumer —
- *  inject.ts included — sees the summary through this, and a bare `z.object`
+ *  reads it back through `parseStoredRollingSummary`. Every consumer sees the
+ *  summary through this, and a bare `z.object`
  *  STRIPS undeclared keys silently, so a stamp that is not declared in the
  *  schema would vanish here with no error. Asserting through the round-trip is
  *  what binds the test to the shipped read path rather than to memory. */
@@ -145,7 +145,7 @@ function entryFor(summary: RollingSummary, slot: 'CONSTRAINTS' | 'RESOLVED' | 'O
 // ---------------------------------------------------------------------------
 
 describe('a carried-forward entry cannot masquerade as freshly confirmed', () => {
-  it('stamps the restored entry and renders it QUALIFIED in the injected block, through the store round-trip', () => {
+  it('stamps the restored entry, and the stamp survives the store round-trip', () => {
     // Unguarded (pristine): the restored 500k entry renders byte-identically to
     // one the user restated this turn, so the prompt asserts a possibly
     // withdrawn figure to the coach as current fact.
@@ -162,22 +162,10 @@ describe('a carried-forward entry cannot masquerade as freshly confirmed', () =>
     // the read path keeps it instead of stripping it.
     const stored = throughStore(written);
     expect(entryFor(stored, 'CONSTRAINTS')[0]!.carried_forward).toBe(true);
-
-    // The user-visible half: what the coach is handed on the next turn.
-    const section = buildConversationSummarySection(stored, 0, 8);
-    expect(section.text).toContain(BUDGET_500K);
-    expect(section.text).toContain(CARRIED_FORWARD_QUALIFIER);
-    // The qualifier rides INSIDE the slot line — the four-slot block's line
-    // count is an invariant another module (withheld-history-redaction.ts)
-    // asserts, so a qualifier on its own line would break a guard elsewhere.
-    const constraintLine = section.text
-      .split('\n')
-      .find((l) => l.startsWith('CONSTRAINTS & PREFERENCES: '))!;
-    expect(constraintLine).toContain(CARRIED_FORWARD_QUALIFIER);
-    expect(section.text.split('\n')).toHaveLength(4);
+    expect(entryFor(stored, 'CONSTRAINTS')[0]!.text).toBe(BUDGET_500K);
   });
 
-  it('CONTROL — a freshly-written entry is NOT stamped and NOT qualified', () => {
+  it('CONTROL — a freshly-written entry is NOT stamped, through the store round-trip', () => {
     // The discriminator for the "stamp everything" mutant: if the stamp were
     // unconditional, every entry in every summary would be disclaimed as
     // unconfirmed and the disclosure would carry no information at all.
@@ -186,16 +174,16 @@ describe('a carried-forward entry cannot masquerade as freshly confirmed', () =>
     expect(constraints).toHaveLength(1);
     expect(constraints[0]!.carried_forward).toBeUndefined();
 
-    const section = buildConversationSummarySection(throughStore(written), 0, 8);
-    expect(section.text).toContain('350k');
-    expect(section.text).not.toContain(CARRIED_FORWARD_QUALIFIER);
+    const stored = throughStore(written);
+    expect(entryFor(stored, 'CONSTRAINTS')[0]!.text).toContain('350k');
+    expect(entryFor(stored, 'CONSTRAINTS')[0]!.carried_forward).toBeUndefined();
     // Every other slot on the SAME summary is fresh too — a slot-scoped
     // (rather than entry-scoped) mutant is caught here.
     expect(entryFor(written, 'RESOLVED')[0]!.carried_forward).toBeUndefined();
     expect(entryFor(written, 'OPEN')[0]!.carried_forward).toBeUndefined();
   });
 
-  it('reaches the coach through the real maintainer, not just the pure assembler', async () => {
+  it('is written through the real maintainer, not just the pure assembler', async () => {
     const store = new RecordingStore(priorWithBudget());
     await maintainRollingSummaryForCommit({
       scenarioId: SCENARIO,
@@ -207,9 +195,9 @@ describe('a carried-forward entry cannot masquerade as freshly confirmed', () =>
     });
     expect(store.upsertSummary).toHaveBeenCalledTimes(1);
     const written = store.upsertSummary.mock.calls[0]![1];
-    const section = buildConversationSummarySection(throughStore(written), 0, 8);
-    expect(section.text).toContain(BUDGET_500K);
-    expect(section.text).toContain(CARRIED_FORWARD_QUALIFIER);
+    const stored = throughStore(written);
+    expect(entryFor(stored, 'CONSTRAINTS')[0]!.text).toBe(BUDGET_500K);
+    expect(entryFor(stored, 'CONSTRAINTS')[0]!.carried_forward).toBe(true);
   });
 });
 
@@ -217,7 +205,7 @@ describe('a carried-forward entry cannot masquerade as freshly confirmed', () =>
 // (b) THE MARKER SURVIVES THE PIPELINE — green by construction, stated.
 // ---------------------------------------------------------------------------
 
-describe('a marked correction survives parse → assemble → inject intact', () => {
+describe('a marked correction survives parse → assemble → store intact', () => {
   it('keeps "(was 500k; superseded)" as text while still extracting the citation', () => {
     // GREEN-BY-CONSTRUCTION, and said so deliberately: this required no parser
     // change. PROVENANCE_RE matches only [tN]-shaped SQUARE brackets, so a
@@ -238,11 +226,11 @@ describe('a marked correction survives parse → assemble → inject intact', ()
     expect(entry.text).toContain('(was 500k; superseded)');
     expect(entry.source_turn_ids).toEqual(['turn-9']); // resolved, not dropped
 
-    const section = buildConversationSummarySection(throughStore(written), 0, 8);
-    expect(section.text).toContain('350k');
-    expect(section.text).toContain('(was 500k; superseded)');
+    const stored = entryFor(throughStore(written), 'CONSTRAINTS')[0]!;
+    expect(stored.text).toContain('350k');
+    expect(stored.text).toContain('(was 500k; superseded)');
     // A correction is NOT a carry-forward: it is this pass's own work.
-    expect(section.text).not.toContain(CARRIED_FORWARD_QUALIFIER);
+    expect(stored.carried_forward).toBeUndefined();
   });
 });
 

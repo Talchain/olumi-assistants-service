@@ -25,7 +25,7 @@
  * stands on its own.
  */
 
-import type { ContextPackAnalysis } from '../../../src/orchestrator-v5/context/context-pack-assembler.js';
+import type { ContextPackAnalysis } from '../../../src/orchestrator-v5/context/context-pack-types.js';
 import { findForbiddenMatches, containsMutationLanguage, findSuccessClaimHit } from './guards.js';
 import { detectGoalFitConflation } from './goal-fit-conflation.js';
 import { detectHeldScience } from './held-science.js';

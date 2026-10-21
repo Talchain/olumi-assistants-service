@@ -32,7 +32,7 @@ import {
 CONTEXT_UNCERTAINTY_DRIVER_MAX_CHARS,
 NODE_DESCRIPTION_CONTEXT_MAX_CHARS,
 } from '../../../orchestrator/context/graph-compact.js';
-import type { ContextPackGraph } from '../../context/context-pack-assembler.js';
+import type { ContextPackGraph } from '../../context/context-pack-types.js';
 import { CANVAS_BAND_WORD } from '../edge-strength-bands.js';
 import {
 bidirectedRelationshipPhrase,
@@ -445,7 +445,7 @@ describe('formatGraphForContext — node transformation', () => {
   it('A3.1: canonical observed_state.value is also stripped from the display projection', () => {
     // V5 D1 golden-path closure (A3.1 Task 6): both compact top-level
     // `value` and canonical `observed_state.value` are dropped from
-    // the LLM-facing projection. The raw ContextPack.graph still
+    // the LLM-facing projection. The raw input graph still
     // carries them for handler / freshness / edit_graph reads.
     const out = formatGraphForContext(
       rawGraph({

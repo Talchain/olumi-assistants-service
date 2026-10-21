@@ -2,8 +2,10 @@
 /**
  * LIVE TIER of the prompt↔pack sanction gate.
  *
- * The CI gate (`src/orchestrator-v5/context/__tests__/prompt-pack-sanction.gate.test.ts`)
- * checks the ContextPack against a CHECKED-IN snapshot of the served prompt.
+ * The CI gate that checked the ContextPack against a CHECKED-IN snapshot of
+ * the served prompt (`prompt-pack-sanction.gate.test.ts`) was retired with the
+ * context-pack assembler (deletion 8, 22 Oct 2026); the snapshot remains the
+ * checked-in record of the served prompt.
  * That snapshot is a mirror, and **the prompt is re-pinnable in PMS with NO
  * deploy** — so CI alone would happily validate a prompt we do not serve.
  *
@@ -205,9 +207,8 @@ export function evaluateDrift({
         `SERVED PROMPT DRIFT.\n` +
         `  live   ${who} v${version} hash=${liveHash} (${liveChars} chars)\n` +
         `  pinned snapshot        hash=${snapshotHash} (${snapshotChars} chars)\n` +
-        `The CI sanction gate validated the ContextPack against bytes we are NOT serving.\n` +
-        `Re-snapshot and re-ratify: the prompt was re-pinned in PMS without a deploy.\n` +
-        `Every prompt-hash-keyed waiver in the sanction gate has now EXPIRED by design.`,
+        `The checked-in snapshot no longer matches the bytes we are serving.\n` +
+        `Re-snapshot and re-ratify: the prompt was re-pinned in PMS without a deploy.`,
     };
   }
   return {

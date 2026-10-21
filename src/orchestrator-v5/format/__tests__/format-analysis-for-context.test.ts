@@ -18,7 +18,7 @@ import type {
 ContextPackAnalysis,
 ContextPackAnalysisDriver,
 ContextPackAnalysisFragileEdge,
-} from '../../context/context-pack-assembler.js';
+} from '../../context/context-pack-types.js';
 import {
 ANALYSIS_UNVERIFIED_NOTE,
 DISPLAY_ANALYSIS_CHAR_BUDGET,

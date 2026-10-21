@@ -36,7 +36,7 @@
  * voice ("Updated X"). Emitted bare as a whole reply on a turn that wrote
  * nothing, that sentence is a present-tense claim, and it is false whatever
  * question reached the arm. The arm's input is
- * `Pick<ContextPack, 'recent_changes'>`, which is BY TYPE the projection of
+ * `recent_changes: readonly RecentMutation[]`, which is BY TYPE the projection of
  * `prior_facts`, and the guard runs before any handler and never mutates — so
  * "earlier in this session" is true by construction, not by inspection. The
  * summary stays VERBATIM (grounding is not weakened); only its attribution is
@@ -78,7 +78,8 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import type { ContextPack } from '../../context/context-pack-assembler.js';
+import type { RecentChangesHistoryStatus } from '../../context/reconcile-recent-mutation-facts.js';
+import type { TryStateQueryGuardInput } from '../state-query-guard.js';
 import type { RecentMutation } from '../../context/recent-changes.js';
 import { findSuccessClaimHit } from '../../compose/forbidden-user-facing-phrases.js';
 import {
@@ -178,8 +179,8 @@ const WITNESS_GRAPH_WITH_QUOTE = {
 
 function ctx(
   recent: readonly RecentMutation[],
-  status: ContextPack['recent_changes_status'] = 'complete',
-): Pick<ContextPack, 'recent_changes' | 'recent_changes_status'> {
+  status: RecentChangesHistoryStatus = 'complete',
+): TryStateQueryGuardInput['contextPack'] {
   return { recent_changes: recent, recent_changes_status: status };
 }
 

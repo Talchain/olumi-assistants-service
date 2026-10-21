@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import { buildTurnContext } from '../build-turn-context.js';
-import { assembleContextPackWithSummary } from '../context/context-pack-assembler.js';
 import { RECENT_MUTATION_FACT_LOOKAHEAD_LIMIT } from '../context/reconcile-recent-mutation-facts.js';
 import { makeMessagePayload } from './fixtures.js';
 import { SessionReadError } from '../session/store.js';
@@ -67,20 +66,8 @@ function hotTurns(count: number) {
   ).reverse();
 }
 
-function packFromContext(
-  context: Awaited<ReturnType<typeof buildTurnContext>>,
-) {
-  return assembleContextPackWithSummary({
-    payload,
-    priorTurns: context.prior_turns,
-    priorTurnsTotal: context.prior_turns_total,
-    priorFacts: context.prior_facts,
-    priorFactsReadOk: context.prior_facts_read_ok,
-  }).contextPack;
-}
-
 describe('buildTurnContext durable recent-mutation binding', () => {
-  it('calls the scenario reader with the exact cap+1 lookahead and reaches ContextPack', async () => {
+  it('calls the scenario reader with the exact cap+1 lookahead', async () => {
     const receipt = acceptedChange();
     const readDurable = vi.fn(async () => [identified(receipt)]);
     const context = await buildTurnContext(payload, 'req-durable-41', {
@@ -101,15 +88,6 @@ describe('buildTurnContext durable recent-mutation binding', () => {
     expect(JSON.stringify(context.prior_facts)).toBe('[]');
     expect(context.prior_facts.recent_mutation_facts).toEqual([receipt]);
     expect(context.prior_facts.recent_changes_status).toBe('complete');
-
-    const pack = packFromContext(context);
-    expect(pack.recent_changes_status).toBe('complete');
-    expect(pack.recent_changes).toEqual([
-      expect.objectContaining({
-        action: 'factor_value_updated',
-        target_label: 'Support capacity',
-      }),
-    ]);
   });
 
   it('keeps a failed scenario-wide read degraded on a truncated 41-turn return', async () => {
@@ -126,10 +104,6 @@ describe('buildTurnContext durable recent-mutation binding', () => {
 
     expect(context.prior_facts.recent_mutation_facts).toEqual([]);
     expect(context.prior_facts.recent_changes_status).toBe('degraded');
-    expect(packFromContext(context)).toMatchObject({
-      recent_changes: [],
-      recent_changes_status: 'degraded',
-    });
   });
 
   it('never logs or emits malformed eligible-row content when the durable read degrades', async () => {
@@ -265,6 +239,5 @@ describe('buildTurnContext durable recent-mutation binding', () => {
 
     expect(context.prior_facts.recent_mutation_facts).toEqual([receipt]);
     expect(context.prior_facts.recent_changes_status).toBe('degraded');
-    expect(packFromContext(context).recent_changes).toHaveLength(1);
   });
 });

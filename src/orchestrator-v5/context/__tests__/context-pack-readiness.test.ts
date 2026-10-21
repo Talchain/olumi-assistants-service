@@ -12,20 +12,19 @@
  * never by prose matching — prose is exactly the wrong key here.
  *
  * CANONICAL OWNER: `summariseReadiness` (routing/readiness-summary.ts), which
- * itself delegates to `projectReadinessRecovery`. This suite asserts the pack
- * carries that projection VERBATIM; it never re-derives readiness.
+ * itself delegates to `projectReadinessRecovery`. This suite asserts what
+ * `projectContextPackReadiness` emits from it; it never re-derives readiness.
+ *
+ * Deletion 8: the pack-level rows (the assembler carrying the projection, and
+ * the assembler omitting the key) went with `context-pack-assembler.ts`. The
+ * identity row is rebound to `projectContextPackReadiness` directly.
  */
 import { describe, it, expect } from 'vitest';
 
-import { makeMessagePayload } from '../../__tests__/fixtures.js';
-import { assembleContextPack } from '../context-pack-assembler.js';
-import { ContextPackSchema } from '../context-pack-schema.js';
 import {
   projectContextPackReadiness,
   READINESS_MAX_OPEN_ITEMS,
 } from '../../routing/readiness-summary.js';
-
-const PAYLOAD = makeMessagePayload();
 
 /**
  * Canonical `analysis_ready` payload with TWO human-input blockers — the
@@ -55,33 +54,22 @@ const READINESS_TWO_BLOCKERS = {
 
 describe('ContextPack readiness — the blocker identity reaches the pack', () => {
   it('carries each canonical blocker BY IDENTITY, not merely a count', () => {
-    const pack = assembleContextPack({
-      payload: PAYLOAD,
-      priorTurns: [],
-      readiness: projectContextPackReadiness(READINESS_TWO_BLOCKERS)!,
-    });
+    const readiness = projectContextPackReadiness(READINESS_TWO_BLOCKERS);
 
-    expect(pack.readiness).toBeDefined();
-    expect(pack.readiness!.status).toBe('needs_user_input');
+    // null is projectContextPackReadiness's "no canonical payload" — must not pass here.
+    expect(readiness).not.toBeNull();
+    expect(readiness!.status).toBe('needs_user_input');
     // BY IDENTITY: the option labels, not the prose.
-    expect(pack.readiness!.open_items.map((i) => i.option_label)).toEqual([
+    expect(readiness!.open_items.map((i) => i.option_label)).toEqual([
       'Churn rate',
       'Onboarding time',
     ]);
-    expect(pack.readiness!.open_items.map((i) => i.kind)).toEqual([
+    expect(readiness!.open_items.map((i) => i.kind)).toEqual([
       'option_needs_encoding',
       'option_needs_encoding',
     ]);
-    // The ROUTE out reaches the model, not just the fact of being blocked.
-    expect(pack.readiness!.open_items[0].description.length).toBeGreaterThan(0);
-    expect(ContextPackSchema.safeParse(pack).success).toBe(true);
-  });
-
-  it('ABSENT readiness leaves the key absent — never a fabricated "nothing is blocking"', () => {
-    const pack = assembleContextPack({ payload: PAYLOAD, priorTurns: [] });
-    expect(pack.readiness).toBeUndefined();
-    expect(Object.keys(pack)).not.toContain('readiness');
-    expect(ContextPackSchema.safeParse(pack).success).toBe(true);
+    // The ROUTE out is carried, not just the fact of being blocked.
+    expect(readiness!.open_items[0].description.length).toBeGreaterThan(0);
   });
 
   it('a non-ready status with ZERO open items still carries the status (empty ≠ unblocked)', () => {

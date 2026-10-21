@@ -302,8 +302,7 @@ describe('PRODUCER CONTROL — the enforcement scanner sees the repo\'s own temp
  * `leads` in it, or a withheld substitution that does not. Scanning the blob
  * measures the blob. The property that actually matters is that the CLAUSE
  * carrying the claim is visible on its own, because that is the granularity the
- * enforcing consumers work at — `context/withheld-history-redaction.ts` redacts
- * per sentence, and `compose/withheld-explanation-answer.ts` decides
+ * enforcing consumers work at — `compose/withheld-explanation-answer.ts` decides
  * REPLACE-vs-APPEND on whether it can see a claim at all.
  *
  * THE RULE IS DERIVED FROM THE FIXTURE, NOT FROM A LIST OF SENTENCES: every

@@ -38,7 +38,10 @@ import {
   projectRunFact,
   type ContentSafeRunDelta,
 } from '../coaching/compare-runs.js';
-import type { ContextPack } from '../context/context-pack-assembler.js';
+import type { ContextPackAnalysis } from '../context/context-pack-types.js';
+
+/** The one part of a context pack these signals read: its analysis. */
+export type CoachingContextPack = { readonly analysis: ContextPackAnalysis | null };
 import type { CoachingSignalId } from '../coaching/types.js';
 import {
   deriveInterveningChange,
@@ -76,7 +79,7 @@ export interface CoachingSignalInput {
    * branch signals never consult the pack, so a null pack degrades
    * only the edit-target driver-label lookup (to null).
    */
-  readonly contextPack: ContextPack | null;
+  readonly contextPack: CoachingContextPack | null;
   /**
    * Spine A backstop: factor_ids an option intervenes on. Threaded into
    * `compareRuns` so an option-controlled lever is never reported as
@@ -1188,7 +1191,7 @@ function hasPriorRunAnalysisFactToStale(facts: readonly HandlerFact[]): boolean 
  */
 function findEditTargetTopDriverLabel(
   outcome: SuccessfulHandlerOutcome,
-  contextPack: ContextPack | null,
+  contextPack: CoachingContextPack | null,
 ): string | null {
   if (contextPack === null || contextPack.analysis === null) return null;
   const drivers = contextPack.analysis.top_drivers;

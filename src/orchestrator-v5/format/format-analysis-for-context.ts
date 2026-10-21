@@ -27,7 +27,7 @@ import type {
   ContextPackAnalysisFlipThreshold,
   ContextPackAnalysisFragileEdge,
   ContextPackAnalysisOption,
-} from '../context/context-pack-assembler.js';
+} from '../context/context-pack-types.js';
 import { formatPercentagePoints, formatProbability } from './format-analysis-value.js';
 import { looksLikeRawDecimal } from './format-graph-for-context.js';
 import { bandFromMagnitude, NEAR_ZERO_INFLUENCE_THRESHOLD } from './influence-bands.js';

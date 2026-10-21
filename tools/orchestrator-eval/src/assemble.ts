@@ -16,7 +16,7 @@
  */
 
 import { formatAnalysisForContext } from '../../../src/orchestrator-v5/format/format-analysis-for-context.js';
-import type { ContextPackAnalysis } from '../../../src/orchestrator-v5/context/context-pack-assembler.js';
+import type { ContextPackAnalysis } from '../../../src/orchestrator-v5/context/context-pack-types.js';
 
 /** The display-safe analysis the prompt sees (return type of the prod formatter). */
 export type AssembledAnalysis = ReturnType<typeof formatAnalysisForContext>;

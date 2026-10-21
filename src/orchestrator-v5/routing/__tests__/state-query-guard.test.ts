@@ -8,7 +8,8 @@
 import { describe, expect, it } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
-import type { ContextPack } from '../../context/context-pack-assembler.js';
+import type { RecentChangesHistoryStatus } from '../../context/reconcile-recent-mutation-facts.js';
+import type { TryStateQueryGuardInput } from '../state-query-guard.js';
 import {
   projectRecentChanges,
   type RecentMutation,
@@ -64,8 +65,8 @@ const UNTYPED_GRAPH_EDIT = projectRecentChanges([
 
 function ctxWith(
   recent: readonly RecentMutation[],
-  status: ContextPack['recent_changes_status'] = 'complete',
-): Pick<ContextPack, 'recent_changes' | 'recent_changes_status'> {
+  status: RecentChangesHistoryStatus = 'complete',
+): TryStateQueryGuardInput['contextPack'] {
   return { recent_changes: recent, recent_changes_status: status };
 }
 

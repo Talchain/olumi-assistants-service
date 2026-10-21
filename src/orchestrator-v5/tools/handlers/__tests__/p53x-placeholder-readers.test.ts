@@ -10,7 +10,7 @@ import {
   PLACEHOLDER_PARTS_REASON,
   OLUMI_GUESS_LIMIT_REASON,
 } from '../../../../orchestrator/context/placeholder-parts.js';
-import type { ContextPackGraph } from '../../../context/context-pack-assembler.js';
+import type { ContextPackGraph } from '../../../context/context-pack-types.js';
 import { buildStructureProjectionSummary } from '../../../context/projection-summaries.js';
 import { compactGraphForContextPack } from '../../../context/compact-graph-for-contextpack.js';
 import type { GraphStateIngress } from '../../../boundary/request-extensions.js';
@@ -37,7 +37,7 @@ const sizedD1 = (): GraphV3T => {
   return graph;
 };
 
-/** Mirrors context-pack-assembler's verbatim compact-edge projection, including its kind indexes. */
+/** Builds a ContextPackGraph from the verbatim compact-edge projection (as the deleted context-pack-assembler did), including its kind indexes. */
 function contextGraph(graph: GraphV3T): ContextPackGraph {
   const compact = compactGraph(graph);
   const options = compact.nodes.filter((node) => node.kind === 'option').map(({ id, label }) => ({ id, label }));

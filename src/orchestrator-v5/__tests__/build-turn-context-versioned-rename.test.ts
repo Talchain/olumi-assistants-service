@@ -4,7 +4,8 @@ import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
 import { config } from '../../config/index.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import { buildTurnContext,type BuildTurnContextOptions } from '../build-turn-context.js';
-import { assembleContextPackWithSummary } from '../context/context-pack-assembler.js';
+import { readRecentMutationHistoryFromPriorFacts } from '../context/reconcile-recent-mutation-facts.js';
+import { projectRecentChanges } from '../context/recent-changes.js';
 import { RecentMutationSchema } from '../context/context-pack-schema.js';
 import { computeGraphIdentityHash,computeVersionAnalysisAffectingHashRecord } from '../context/graph-identity.js';
 import type { ModelVersionRecord } from '../model-management/types.js';
@@ -86,10 +87,13 @@ function setup(options: { lineage?: boolean; before?: string; after?: string } =
     const context = await buildTurnContext(payload, 'versioned-rename-test', {
       sessionStore: store(), mutationVersionReader: reader,
     });
-    const pack = assembleContextPackWithSummary({
-      payload, priorTurns: context.prior_turns, priorTurnsTotal: context.prior_turns_total,
-      priorFacts: context.prior_facts, priorFactsReadOk: context.prior_facts_read_ok,
-    }).contextPack;
+    // The assembler that used to build this pack was deleted (deletion 8).
+    // Rebound to the two live functions it composed for `recent_changes`.
+    const history = readRecentMutationHistoryFromPriorFacts(context.prior_facts);
+    const pack = {
+      recent_changes: projectRecentChanges(history?.recent_mutation_facts, history?.recent_mutation_entries),
+      recent_changes_status: history?.recent_changes_status ?? 'degraded',
+    } as const;
     return { context, pack, answer: tryStateQueryGuard({ message, contextPack: pack }) };
   };
   return { facts, parent, child, reader, writes, durableRead, read };

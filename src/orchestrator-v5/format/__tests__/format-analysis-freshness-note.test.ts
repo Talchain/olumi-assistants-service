@@ -38,7 +38,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import type { ContextPackAnalysis } from '../../context/context-pack-assembler.js';
+import type { ContextPackAnalysis } from '../../context/context-pack-types.js';
 import {
   formatAnalysisForContext,
   DISPLAY_ANALYSIS_CHAR_BUDGET,

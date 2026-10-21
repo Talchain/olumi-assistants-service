@@ -26,7 +26,7 @@ import type {
 import { createExplainResultsHandler } from '../explain-results.js';
 import type { HandlerInvocation } from '../../registry.js';
 import { generateChips } from '../../../compose/chip-generator.js';
-import type { ContextPackAnalysis } from '../../../context/context-pack-assembler.js';
+import type { ContextPackAnalysis } from '../../../context/context-pack-types.js';
 import type { AnalysisProjectionSummary } from '../../../context/projection-summaries.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../../../routing/validation-registry.js';
 import { deriveAnalysisFreshness } from '../../../context/freshness.js';

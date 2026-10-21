@@ -19,7 +19,8 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import type { ContextPack } from '../../context/context-pack-assembler.js';
+import type { RecentChangesHistoryStatus } from '../../context/reconcile-recent-mutation-facts.js';
+import type { TryStateQueryGuardInput } from '../state-query-guard.js';
 import type { RecentMutation } from '../../context/recent-changes.js';
 import { tryStructureOriginAnswer } from '../../../cee/context-integrity/structure-origin-answer.js';
 import { isStateQueryQuestionShape, tryStateQueryGuard } from '../state-query-guard.js';
@@ -70,8 +71,8 @@ const ADD_CONSTRAINT_50K: RecentMutation = {
 
 function ctx(
   recent: readonly RecentMutation[],
-  status: ContextPack['recent_changes_status'] = 'complete',
-): Pick<ContextPack, 'recent_changes' | 'recent_changes_status'> {
+  status: RecentChangesHistoryStatus = 'complete',
+): TryStateQueryGuardInput['contextPack'] {
   return { recent_changes: recent, recent_changes_status: status };
 }
 

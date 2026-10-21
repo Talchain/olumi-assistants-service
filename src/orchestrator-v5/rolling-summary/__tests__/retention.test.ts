@@ -13,9 +13,9 @@
  *     → every later turn's ContextPack told the coach, affirmatively, that no
  *       settled history exists.
  *
- * The user-visible consequence is the last step, so the erasure test below
- * follows the value all the way into the injected pack section rather than
- * stopping at an internal string comparison.
+ * inject.ts and the ContextPack assembler were deleted in deletion 8 (22 Oct
+ * 2026) as unreachable from src/server.ts, so the erasure tests below now stop
+ * at the STORED summary's text — the last step still in the product.
  *
  * Sibling defect, same write path (observed once by
  * parallel-briefs/COACH-RECORD-DENIAL-PROBE-2026-07-25.md): the summariser
@@ -33,7 +33,6 @@ import { buildSummariserInput } from '../build-input.js';
 import type { SummariserTurn } from '../build-input.js';
 import { maintainRollingSummaryForCommit } from '../capture.js';
 import type { ConversationHistoryReader, MaintainerTurn } from '../capture.js';
-import { buildConversationSummarySection } from '../inject.js';
 import { parseSummaryOutput } from '../parse-summary.js';
 import {
   findErasedSlots,
@@ -116,10 +115,11 @@ const ERASING_OUTPUT = [
 // ---------------------------------------------------------------------------
 
 describe('durable memory is not erased by a user challenging it', () => {
-  it('the erased summary, if written, TELLS THE COACH no settled history exists (the consequence being prevented)', () => {
+  it('the erased summary, if written, STORES "(none)" for RESOLVED — the eight records gone (the consequence being prevented)', () => {
     // This test does not exercise the guard — it establishes WHY the guard
-    // exists, by running the erased summary through the real injector and
-    // reading what the coach would be handed.
+    // exists, by reading the summary that would be stored. (The injector that
+    // used to render it into the coach's pack was deleted in deletion 8 as
+    // unreachable from src/server.ts.)
     const parsed = parseSummaryOutput(ERASING_OUTPUT);
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
@@ -130,14 +130,10 @@ describe('durable memory is not erased by a user challenging it', () => {
       version: 9,
       generator: 'incremental',
     });
-    const section = buildConversationSummarySection(erasedSummary, 0, 8);
-
-    // The pack section injected on every subsequent turn.
-    expect(section.text).toContain('RESOLVED: (none)');
-    expect(section.text).not.toContain('Marchbanks-Delacroix');
-    // ...and the bare "(none)" is an ASSERTION, not a silence: inject.ts uses
-    // "(none captured yet)" precisely when it must NOT claim coverage.
-    expect(section.text).not.toContain('(none captured yet)');
+    // The stored summary: RESOLVED has zero entries and renders a bare "(none)".
+    expect(erasedSummary.slots.find((s) => s.slot === 'RESOLVED')!.entries).toEqual([]);
+    expect(erasedSummary.text).toContain('RESOLVED: (none)');
+    expect(erasedSummary.text).not.toContain('Marchbanks-Delacroix');
   });
 
   it('CARRIES the eight records forward instead of erasing them — and the pass still lands', async () => {
@@ -167,9 +163,9 @@ describe('durable memory is not erased by a user challenging it', () => {
     expect(written.updated_turn_id).toBe('turn-9');
   });
 
-  it('and the coach therefore still reads the eight records, not "(none)"', async () => {
-    // The user-visible half: what the injector projects into the next turn's
-    // ContextPack, built from what was actually written above.
+  it('and the stored text therefore still carries the eight records, not "(none)"', async () => {
+    // The stored text of what was actually written above. (The injector that
+    // projected it into the next turn's ContextPack was deleted in deletion 8.)
     const store = new RecordingStore(priorWithRecords());
     await maintainRollingSummaryForCommit({
       scenarioId: SCENARIO,
@@ -180,9 +176,8 @@ describe('durable memory is not erased by a user challenging it', () => {
       model: fakeModel(ERASING_OUTPUT),
     });
     const written = store.upsertSummary.mock.calls[0]![1];
-    const section = buildConversationSummarySection(written, 0, 8);
-    expect(section.text).toContain('Marchbanks-Delacroix');
-    expect(section.text).not.toContain('RESOLVED: (none)');
+    expect(written.text).toContain('Marchbanks-Delacroix');
+    expect(written.text).not.toContain('RESOLVED: (none)');
   });
 
   it('findErasedSlots names RESOLVED and CONSTRAINTS but never OPEN (answering a question SHOULD empty OPEN)', () => {

@@ -25,7 +25,7 @@ deriveTippingPointsFromTopLevel,
 OPTION_GOAL_FIT_SIGNAL_CAP,
 OPTION_OUTCOME_SIGNAL_CAP,
 } from '../analysis-signals.js';
-import { MAX_PROJECTED_OPTIONS } from '../context-pack-assembler.js';
+import { POLICY_MAX_PROJECTED_OPTIONS } from '../context-policy.js';
 import {
 emitUnknownEnrichmentKeyTelemetry,
 ENRICHMENT_ANALYSIS_LLM_SKIP,
@@ -350,12 +350,13 @@ describe('runtime tripwire — findUnknownEnrichmentKeys / emit (context-audit #
 
 
 describe('projection cap parity (context-audit #1 row #6 — was comment-only)', () => {
-  it('OPTION_GOAL_FIT_SIGNAL_CAP === OPTION_OUTCOME_SIGNAL_CAP === MAX_PROJECTED_OPTIONS', () => {
+  it('OPTION_GOAL_FIT_SIGNAL_CAP === OPTION_OUTCOME_SIGNAL_CAP === POLICY_MAX_PROJECTED_OPTIONS', () => {
     // Fail-loud pin: the per-option annotation caps must never silently fall
-    // below the option list they annotate. If MAX_PROJECTED_OPTIONS moves,
-    // both caps must move with it or this goes RED.
-    expect(OPTION_GOAL_FIT_SIGNAL_CAP).toBe(MAX_PROJECTED_OPTIONS);
-    expect(OPTION_OUTCOME_SIGNAL_CAP).toBe(MAX_PROJECTED_OPTIONS);
+    // below the option list they annotate. If POLICY_MAX_PROJECTED_OPTIONS (the
+    // option cap; the assembler's MAX_PROJECTED_OPTIONS was deleted in deletion
+    // 8) moves, both caps must move with it or this goes RED.
+    expect(OPTION_GOAL_FIT_SIGNAL_CAP).toBe(POLICY_MAX_PROJECTED_OPTIONS);
+    expect(OPTION_OUTCOME_SIGNAL_CAP).toBe(POLICY_MAX_PROJECTED_OPTIONS);
   });
 });
 
