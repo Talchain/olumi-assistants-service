@@ -178,9 +178,9 @@ describe('PATH-B core: the AI\'s own words are the reply; protocol, cards, resul
     expect(core.analysis_ready).toBeUndefined();
   });
 
-  const press = async (id: string, message: string, headers: Record<string, string> = CORE): Promise<Json> => {
+  const press = async (id: string, message: string, headers: Record<string, string> = CORE, turnId = randomUUID()): Promise<Json> => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', headers, payload: {
-      kind: 'message', turn_id: randomUUID(), scenario_id: SCENARIO, stage: 'analyse', turn_class: 'frame', message, source: 'chip', chip: { id } } });
+      kind: 'message', turn_id: turnId, scenario_id: SCENARIO, stage: 'analyse', turn_class: 'frame', message, source: 'chip', chip: { id } } });
     expect(r.statusCode, r.body).toBe(200);
     return r.json() as Json;
   };
@@ -188,22 +188,28 @@ describe('PATH-B core: the AI\'s own words are the reply; protocol, cards, resul
   it('⭐ RED→GREEN (Lenses step 0, served d96a687f): on core, a press whose legacy card can never be saved there runs the core turn on its own words, with no Run', async () => {
     const presses: readonly (readonly [string, string])[] = [
       ['agent-next-widen', 'What else could you do?'],
-      ['agent-next-strengthen', 'Strengthen the model.'],
       ['agent-suggest-starting-assumptions', 'Suggest starting assumptions for what this model is missing, so I can review and approve them.'],
-      ['agent-drawn-link:fac_a>fac_b', 'How strong is the link I drew from Price to Demand?'],
       ['act:confirm_reading', 'Check how Olumi works out the goal.'],
       // No handler answers this press: it went to the legacy loop, whose cards never save on core.
       ['ask:missing-factor', 'What else could change how this turns out that the model doesn’t have yet?'],
     ];
     for (const [id, message] of presses) {
       sent.length = 0;
-      const core = await press(id, message);
+      const turnId = randomUUID();
+      const core = await press(id, message, CORE, turnId);
       expect(core._agent.sdk?.runtime, id).toBe('@openai/agents@0.18.0');
+      // ⛔ Codex r1 #3604: still a press on the record. Its row's hash keeps the chip, so a restart never proves its words typed,
+      // and typed words under the same turn id are a different request (refused, never this press's answer).
+      expect(rows.get(turnId)?.request_hash, id).toContain('#chip:');
+      const reused = await app.inject({ method: 'POST', url: '/agent/v1/turn', headers: CORE, payload: {
+        kind: 'message', turn_id: turnId, scenario_id: SCENARIO, stage: 'analyse', turn_class: 'frame', message, source: 'composer' } });
+      expect(reused.statusCode, id).toBe(409);
+      expect(reused.json().error, id).toBe('TURN_ID_REUSED');
       expect(sent.some((b) => b.includes(CORE_RULE) && b.includes(JSON.stringify(message).slice(1, -1))), `${id}: the press's words reach the AI`).toBe(true);
       // A press carries no consent to Run: the core turn is offered every tool but run_analysis.
-      const rows = (core._provider_calls as Json[]).filter((c) => c.site === 'agent-core.sdk');
-      expect(rows.length, id).toBeGreaterThan(0);
-      for (const row of rows) {
+      const calls = (core._provider_calls as Json[]).filter((c) => c.site === 'agent-core.sdk');
+      expect(calls.length, id).toBeGreaterThan(0);
+      for (const row of calls) {
         expect(row.tool_names, id).toContain('propose_change');
         expect(row.tool_names, id).not.toContain('run_analysis');
       }

@@ -82,7 +82,7 @@ import { asVerdictState, readLimitVerdicts, type StoredLimitVerdicts } from '../
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { runOmittedRisks, type RunOmittedRisk } from '../orchestrator-v5/agent-lane/unsized-risk.js';
-import { drawnLinkPress, isDrawnLinkPress, parseDrawnLinkPress } from '../orchestrator-v5/agent-lane/drawn-link-press.js';
+import { drawnLinkPress, isDrawnLinkPress } from '../orchestrator-v5/agent-lane/drawn-link-press.js';
 import { answerIsIncomplete, heldChangeSentence, runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import { acquireCoreTurnSlot, CoreDeliveryUnknownError, CoreStateUnavailableError, runCoreTurn, type CoreTurnSdk } from '../orchestrator-v5/agent-lane/core/sdk-turn.js';
 import { pathBTools } from '../orchestrator-v5/path-b/tools/index.js';
@@ -2336,15 +2336,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (recoveryFault !== undefined) log.warn({ event: 'v5.recovery_fault.armed', request_id: String(req.id), scenario_id: scenarioId, point: recoveryFault }, 'agent-lane: recovery fault seam armed for this turn');
     /**
      * ⭐ THIN CORE (Lenses step 0, 21 Oct, served d96a687f): in `core` these presses held legacy cards that can never be saved
-     * there (`persist-graph-write.ts` CORE_SCENARIO_LEGACY_WRITE): Olumi's options, a link's strength, starting assumptions, a
-     * drawn link's size, the goal's reading. Each goes to the core turn as the press's own words (the UI sends them in
-     * `message`, labels included), so its propose_change holds a card that does save. Still a press: never typed, so nothing
-     * in it reads as the person's words, and it carries no consent to Run.
+     * there (`persist-graph-write.ts` CORE_SCENARIO_LEGACY_WRITE): Olumi's options, starting assumptions, the goal's reading.
+     * Each goes to the core turn as the press's own words (the UI sends them in `message`), so its propose_change holds a card
+     * that does save. Still a press (Codex r1 on #3604): its request hash keeps the chip (`pressedChipOperation`), so its
+     * durable row is never proven typed and a different press or typed words under its turn_id is a different request; the
+     * source stays a chip, so nothing in it reads as the person's words; and it carries no consent to Run.
      */
     const pressChip = body['chip'] as { id?: unknown } | null | undefined;
     const pressToCore = mode === 'core' && pressChip != null && typeof body.message === 'string' && body.message.trim() !== ''
-      && (isWidenPress(pressChip.id) || pressChip.id === STRENGTHEN_PRESS_CHIP_ID || pressChip.id === SUGGEST_STARTING_ASSUMPTIONS_CHIP.id
-        || parseDrawnLinkPress(pressChip.id) !== null || actionPressOf(pressChip, body.message)?.action === 'confirm_reading');
+      && (isWidenPress(pressChip.id) || pressChip.id === SUGGEST_STARTING_ASSUMPTIONS_CHIP.id
+        || actionPressOf(pressChip, body.message)?.action === 'confirm_reading');
+    const pressedChipOperation = pressToCore ? chipOperationOf(body) : undefined;
     if (pressToCore) {
       log.info({ event: 'agent_lane.press_to_core', scenario_id: scenarioId, chip_id: pressChip!.id }, 'agent-lane: a legacy-card press goes to the core turn');
       body = { ...body, chip: null, source: 'chip' };
@@ -2548,7 +2550,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       : isRunExplanationChip(explanationId) ? explanationId : undefined;
     const pressedChipIsStructural = typeof explanationId === 'string' && explanationId.startsWith(STRUCTURAL_CHALLENGE_PRESS_PREFIX);
     let requestHash = withChipOperation(agentTurnRequestHash(scenarioId, userId, message, ownOperation),
-      ownOperation === undefined ? chipOperationOf(body) : undefined, pressedChipIsStructural ? STRUCTURAL_CHALLENGE_HASH_TAG : '');
+      ownOperation === undefined ? pressedChipOperation ?? chipOperationOf(body) : undefined, pressedChipIsStructural ? STRUCTURAL_CHALLENGE_HASH_TAG : '');
     const chiplessRetry = isChiplessRetry(body);
     /** Live turns and replays resolve issuance exactly as reload does, from one bounded recent window. */
     const proposalIssuers = async (records: readonly ProposalRecord[], pending: readonly PendingAction[]): Promise<ReadonlyMap<string, string>> => {
