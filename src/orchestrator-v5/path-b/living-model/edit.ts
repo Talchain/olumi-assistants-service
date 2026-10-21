@@ -67,7 +67,12 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       if (raw === undefined) return { refused: 'no_frame' };
       if (f !== undefined) Object.assign(f, { value: raw, ...noRange, unit: unit ?? edit.unit ?? null, ...theirs });
       else if (a!.target === null) return { refused: 'no_target' };
-      else a!.target = { ...a!.target, current: raw, current_source: 'user' };
+      else {
+        // Today's level keeps the unit the person gave it (Track 3 Q2-02: "30 %" on a goal with no target unit saved as a bare 30):
+        // `current_unit` when it differs from the target's unit, null when it is the same (the schema's own rule).
+        const levelUnit = edit.unit ?? a!.target.current_unit;
+        a!.target = { ...a!.target, current: raw, current_source: 'user', current_unit: levelUnit === a!.target.unit ? null : levelUnit };
+      }
       return { model: m };
     }
     case 'prior_range_edit': {

@@ -70,6 +70,15 @@ describe('thin core explicit edit: a canvas gesture applied to the living model,
     expect(apply({ kind: 'structural_add', node_id: 'h', node_kind: 'factor', label: 'Hours' }).factors.map((f) => f.id)).toEqual(['f', 'h']);
   });
 
+  it('Track 3 Q2-02: a level given with a unit keeps it, on a goal whose target has no unit yet ("cut churn a lot")', () => {
+    const noUnit: LivingModelT = structuredClone(KNOWN_ANSWER);
+    noUnit.aims[0]!.target = { ...noUnit.aims[0]!.target!, unit: null, current: null, current_unit: null };
+    const m = (applyExplicitEdit(noUnit, { kind: 'factor_value_edit', target_id: 'g', value: 0.3, raw_value: 30, unit: '%' }) as { model: LivingModelT }).model;
+    expect(m.aims[0]!.target).toMatchObject({ current: 30, current_source: 'user', current_unit: '%' });
+    // CONTROL: the same unit as the target's is not repeated.
+    expect(apply({ kind: 'factor_value_edit', target_id: 'g', value: 0.6, raw_value: 75, unit: 'units' }).aims[0]!.target!.current_unit).toBeNull();
+  });
+
   it('refuses, changing nothing: another unit, a label that moved, an unknown item, a kind not in this slice', () => {
     expect(applyExplicitEdit(KNOWN_ANSWER, { kind: 'factor_value_edit', target_id: 'g', value: 0.6, raw_value: 75, unit: '%' })).toEqual({ refused: 'unit_mismatch' });
     expect(applyExplicitEdit(KNOWN_ANSWER, { kind: 'structural_rename', node_id: 'f', label: 'x', expected_label: 'old' })).toEqual({ refused: 'label_moved' });
