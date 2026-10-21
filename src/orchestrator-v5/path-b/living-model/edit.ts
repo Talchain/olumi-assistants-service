@@ -37,6 +37,20 @@ const theirs = { source: 'user', party: null, quote: null } as const;
 const noRange = { low: null, high: null } as const;
 /** The person's own figure: an edit replaces the WHOLE figure, so Olumi's estimate of it is gone (per-figure authorship). */
 const theirFigure = { estimate_by: null } as const;
+/**
+ * Round-trip error only (a figure read back through its frame, `value * cap`: 28 % reads 28.000000000000004): within a few
+ * units in the last place of the two numbers, never a gap a person could mean (Codex R2/R3 on the range edit).
+ */
+const roundTripEqual = (a: number, b: number): boolean =>
+  a === b || Math.abs(a - b) <= 4 * Number.EPSILON * Math.max(Math.abs(a), Math.abs(b));
+/**
+ * An edit that leaves a point figure as it was, in the same unit, changes nothing, so its author stays (approving adopts; it
+ * never re-authors). A unit the edit gives a figure that had none is a change (Codex r2 on #3609). A figure that came through
+ * the frame is compared within round-trip error (buddy on #3609: an unchanged 28 % setting was re-authored); a raw one exactly.
+ */
+const unchangedPoint = (fig: { value: number | null; low: number | null; high: number | null; unit: string | null }, raw: number,
+  unit: string | null, viaFrame: boolean): boolean => fig.value !== null && (viaFrame ? roundTripEqual(fig.value, raw) : fig.value === raw)
+  && fig.low === null && fig.high === null && fig.unit === unit;
 /** A target figure on Olumi's suggested measure is Olumi's: kept in history, never adopted as the person's (Codex #3585 P1). */
 function supersedeOlumiTarget(m: LivingModelT, a: LivingModelT['aims'][number]): void {
   const t = a.target;
@@ -75,6 +89,8 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       if (edit.unit !== undefined && unit !== null && edit.unit !== unit) return { refused: 'unit_mismatch' };
       const raw = edit.raw_value ?? toRaw(edit.target_id, edit.value);
       if (raw === undefined) return { refused: 'no_frame' };
+      // The same figure entered again is a confirmation, not a new figure: it keeps its author (Codex r1 on #3609).
+      if (f !== undefined && unchangedPoint(f, raw, unit ?? edit.unit ?? null, edit.raw_value === undefined)) return { model: m };
       if (f !== undefined) Object.assign(f, { ...theirFigure, value: raw, ...noRange, unit: unit ?? edit.unit ?? null, ...theirs });
       else if (a!.target === null) return { refused: 'no_target' };
       else {
@@ -107,7 +123,7 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       // a range from the figure itself still holds it.
       // Round-trip error only: each bound against the figure itself, within a few units in the last place of those two
       // numbers, never a gap a person could mean (Codex R2/R3: a shared or floored allowance kept 1 out of [2, 1e15]).
-      const atMost = (a: number, b: number) => a <= b || Math.abs(a - b) <= 4 * Number.EPSILON * Math.max(Math.abs(a), Math.abs(b));
+      const atMost = (a: number, b: number) => a <= b || roundTripEqual(a, b);
       // Olumi's estimate on the person's factor is Olumi's, so a range around it never keeps it as theirs (per-figure authorship).
       const keep = f.value !== null && f.source === 'user' && f.estimate_by !== 'olumi' && atMost(low, f.value) && atMost(f.value, high);
       Object.assign(f, { ...theirFigure, value: keep ? f.value : null, low, high, ...theirs });
@@ -119,6 +135,8 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       if (o === undefined || f === undefined) return { refused: 'not_in_model' };
       const raw = toRaw(f.id, edit.value);
       if (raw === undefined) return { refused: 'no_frame' };
+      const was = o.settings.find((s) => s.factor_id === f.id);
+      if (was !== undefined && unchangedPoint(was, raw, f.unit, true)) return { model: m };
       const setting = { factor_id: f.id, ...theirFigure, value: raw, ...noRange, unit: f.unit, ...theirs };
       o.settings = [...o.settings.filter((s) => s.factor_id !== f.id), setting];
       return { model: m };

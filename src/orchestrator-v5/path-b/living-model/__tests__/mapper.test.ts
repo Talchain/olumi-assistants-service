@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { GraphV3 } from '../../../../schemas/cee-v3.js';
+import { GraphV3, InterventionV3 } from '../../../../schemas/cee-v3.js';
 import { LivingModel, type LivingModelT } from '../../../../schemas/living-model.js';
 import { mapLivingModel } from '../mapper.js';
 import { linkDefaultAssumptionsOf } from '../../../../cee/magnitude/link-default-assumptions.js';
@@ -484,6 +484,28 @@ describe('thin core mapper: living model → GraphV3', () => {
     };
     expect(node(mapLivingModel(whose('olumi')).graph, 'push').interventions.f).not.toHaveProperty('extractionType');
     expect(census(whose('unverified')).unverifiedSettingsByOption).toEqual({ push: 1 });
+  });
+
+  it('⭐ RED→GREEN (Lenses read-only A/B, 21 Oct): each setting carries the intervention contract\'s own word for its author, never "Source not recorded"', () => {
+    const setting = (patch: Partial<LivingModelT['options'][number]['settings'][number]>) => {
+      const m: LivingModelT = structuredClone(KNOWN_ANSWER);
+      m.options[1]!.settings[0] = { ...m.options[1]!.settings[0]!, ...patch };
+      return node(mapLivingModel(m).graph, 'push').interventions.f as Rec;
+    };
+    // The UI reads these words only (DGAI valueProvenance INTERVENTION_SOURCE_CLASSES), and so does the contract.
+    const cases: readonly [Partial<LivingModelT['options'][number]['settings'][number]>, string][] = [
+      [{}, 'brief_extraction'],
+      [{ quote: null }, 'user_specified'],
+      [{ source: 'olumi', quote: null }, 'cee_hypothesis'],
+      [{ estimate_by: 'olumi' }, 'cee_hypothesis'],
+    ];
+    for (const [patch, word] of cases) {
+      const cell = setting(patch);
+      expect(cell.source, JSON.stringify(patch)).toBe(word);
+      expect(InterventionV3.safeParse(cell).success, JSON.stringify(patch)).toBe(true);
+    }
+    // CONTROL: an unconfirmed source stays unknown, never given a word.
+    expect(setting({ source: 'unverified', quote: null })).not.toHaveProperty('source');
   });
 
   it('a model saved before change goals reads the new target fields as null', () => {
