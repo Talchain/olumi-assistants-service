@@ -244,13 +244,12 @@ function goalOf(graph: unknown): { id: string; target: number | null; comparator
 
 /** The mapped variant as a core save would store it (display refs carried from the saved graph, as the register route
  *  does: `assist.v1.scenario-graph-register.ts` withEntityRefs); under H1 the added alternative HOLDS (the mapper gives
- *  Olumi's own link 0.8). `testable`: the items the mapper carries as stated, never withheld or replaced by its placeholder. */
-function variantGraph(v: Variant, saved: unknown, alternativeLinkId: string | null): { graph: Rec; testable: ReadonlySet<string> } {
+ *  Olumi's own link 0.8). `withheld`: what the mapper holds back; `drawn`: edges it carries as stated, never its placeholder. */
+function variantGraph(v: Variant, saved: unknown, alternativeLinkId: string | null): { graph: Rec; withheld: ReadonlySet<string>; drawn: ReadonlySet<string> } {
   const mapped = mapLivingModel(v.living, savedGoal(saved));
-  const withheld = new Set(mapped.withheld.map((w) => w.id));
   const edges = mapped.graph.edges.map((e) => (v.hypothesis === 'H1' && e.id === alternativeLinkId ? { ...e, exists_probability: 1 } : e));
-  const carried = [...mapped.graph.nodes, ...mapped.graph.edges.filter((e) => e.defaulted !== true)].map((x) => String(x.id));
-  return { graph: asStored({ ...mapped.graph, edges, living_model: v.living }, saved), testable: new Set(carried.filter((id) => !withheld.has(id))) };
+  return { graph: asStored({ ...mapped.graph, edges, living_model: v.living }, saved), withheld: new Set(mapped.withheld.map((w) => w.id)),
+    drawn: new Set(mapped.graph.edges.filter((e) => e.defaulted !== true).map((e) => String(e.id))) };
 }
 
 /** A write as the register route stores it: the saved graph's display refs carried (`entity-refs.ts`: identity only). */
@@ -296,11 +295,20 @@ export async function stressTest(deps: StressDeps, ctx: Pick<AgentToolContext, '
   const goal = goalOf(remapped.graph);
   if (goal === undefined) return refused('no_goal');
   const variants = plan.variants.map((v) => ({ v, ...variantGraph(v, saved.graph, plan.alternativeLinkId) }));
-  // A tested link or the alternative the mapper holds back would test nothing: refused, never a silent no-op.
-  const notMapped = variants.flatMap(({ v, testable }) => [
-    ...plan.coordinates.filter((c) => !testable.has(c.item_id)).map((c) => c.item_id),
-    ...(v.hypothesis === 'H1' && plan.alternativeLinkId !== null && !testable.has(plan.alternativeLinkId) ? ['alternative'] : []),
-  ]);
+  // Each tested item must REACH the Run, never a silent no-op: the mapper withholds it in no variant, and the variant that
+  // changes it alone differs from the saved graph (an option's own link reaches it as that option's setting, e.g. the
+  // exact sum's `<goal>__change`; a held link or a placeholder ignores the value). The alternative must be drawn as stated.
+  const savedInputs = runInputs(saved.graph);
+  const alone = (c: Coordinate) => variants.find(({ v }) => v.hypothesis === 'H0'
+    && plan.coordinates.every((d) => (d.item_id === c.item_id ? v.setting[d.item_id] !== d.saved : v.setting[d.item_id] === d.saved)));
+  const notMapped = [
+    ...plan.coordinates.filter((c) => {
+      const only = alone(c);
+      return only === undefined || variants.some(({ withheld }) => withheld.has(c.item_id)) || isDeepStrictEqual(runInputs(only.graph), savedInputs);
+    }).map((c) => c.item_id),
+    ...(variants.some(({ v, withheld, drawn }) => v.hypothesis === 'H1' && plan.alternativeLinkId !== null
+      && (withheld.has(plan.alternativeLinkId) || !drawn.has(plan.alternativeLinkId))) ? ['alternative'] : []),
+  ];
   if (notMapped.length > 0) return refused('stress_item_not_mapped', undefined, { item_ids: [...new Set(notMapped)] });
   const seed = parseInt(createHash('sha256').update(saved.identity).digest('hex').slice(0, 7), 16);
   const optionIds = living.options.map((o) => o.id);
