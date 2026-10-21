@@ -71,6 +71,12 @@ const edited = (a: { source: LivingSourceT; quote: string | null }): boolean => 
 /** user/party → their words (or their own edit); Olumi → its inference; unverified → no stamp (unknown). */
 const levelSource = (a: { source: LivingSourceT; quote: string | null }): string | undefined =>
   edited(a) ? 'user_edited' : stated(a.source) ? 'brief_extraction' : a.source === 'olumi' ? 'cee_inference' : undefined;
+/**
+ * An option's setting in the intervention contract's own words (`InterventionV3.source`): the factor-level words above are
+ * not members, so every core setting Olumi estimated or the person edited read "Source not recorded" (Lenses, 21 Oct).
+ */
+const settingSource = (a: { source: LivingSourceT; quote: string | null }): 'brief_extraction' | 'cee_hypothesis' | 'user_specified' | undefined =>
+  edited(a) ? 'user_specified' : stated(a.source) ? 'brief_extraction' : a.source === 'olumi' ? 'cee_hypothesis' : undefined;
 /** Per-figure authorship: a figure Olumi estimated on another's item is Olumi's, whatever the item's source (`estimate_by`). */
 const OLUMI_FIGURE = { source: 'olumi' as LivingSourceT, quote: null };
 const figureBy = (fig: { estimate_by?: 'olumi' | null }, item: { source: LivingSourceT; quote: string | null }) =>
@@ -344,7 +350,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
       const cap = caps.get(factorId);
       if (cap === undefined) { droppedSettings.add(factorId); return hold(`${o.id}:${factorId}`, 'setting_not_convertible'); }
       interventions[factorId] = {
-        value: raw / cap, raw_value: raw, unit: unit ?? '', ...(levelSource(source) !== undefined ? { source: levelSource(source) } : {}),
+        value: raw / cap, raw_value: raw, unit: unit ?? '', ...(settingSource(source) !== undefined ? { source: settingSource(source) } : {}),
         // The person's stated setting is attested as theirs, exactly as `withSource` attests a stated level (else every core
         // Run said "could not confirm where some figures came from" about the person's own option, KA1 21 Oct).
         ...(stated(source.source) && !edited(source) ? { extractionType: 'explicit' } : {}),
