@@ -51,6 +51,17 @@ describe('a canvas gesture on a core scenario', () => {
     expect(out.response.draft_graph).toBeDefined();
   });
 
+  it('⭐ Track 3 Q2-02: today\'s level set on the goal, with its unit, is written once, moves the analysed hash, and reopens equal', async () => {
+    const out = await send({ kind: 'factor_value_edit', target_id: 'g', value: 0.6, raw_value: 75, unit: 'units', base_graph_hash: BASE });
+    expect(out.commitPerformed, JSON.stringify(out.response)).toBe(true);
+    expect(append).toHaveBeenCalledTimes(1);
+    const saved = written();
+    expect((saved.living_model as typeof KNOWN_ANSWER).aims[0]!.target).toMatchObject({ current: 75, current_source: 'user', current_unit: null, unit: 'units' });
+    expect(out.response.graph_hash, 'the level reaches the engine graph, so the analysed hash moves').not.toBe(BASE.slice(0, (out.response.graph_hash as string).length));
+    // Cold reopen: the graph regenerated from the saved living model is the graph that was committed.
+    expect(mapLivingModel(saved.living_model as typeof KNOWN_ANSWER).graph.nodes).toEqual(saved.nodes);
+  });
+
   it('a gesture this slice cannot apply is refused, said plainly, and nothing is written', async () => {
     const out = await send({ kind: 'structural_add', node_id: 'o', node_kind: 'outcome', label: 'Churn', base_graph_hash: BASE });
     expect(out.commitPerformed).toBe(false);
