@@ -18,7 +18,7 @@
  *    upstream graph format ever changes.
  */
 
-import type { ContextPackAnalysis, ContextPackGraph } from './context-pack-assembler.js';
+import type { ContextPackAnalysis, ContextPackGraph } from './context-pack-types.js';
 import type { LinkSizing } from '../../cee/magnitude/link-sizing.js';
 import { isRenderableValidationEdge } from '../coaching/validation-priority.js';
 import {

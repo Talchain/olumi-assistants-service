@@ -79,8 +79,9 @@ describe('evaluateDrift — the comparison discriminates', () => {
     });
     expect(v.ok).toBe(false);
     expect(v.message).toContain('SERVED PROMPT DRIFT');
-    // The operator must be told the waivers are now void, not just that bytes differ.
-    expect(v.message).toContain('EXPIRED');
+    // The operator must be told what to do, not just that bytes differ. (The
+    // "waivers EXPIRED" line went with the retired sanction gate, deletion 8.)
+    expect(v.message).toContain('Re-snapshot and re-ratify');
   });
 
   it('FAILS when the status row carries no hash at all (degraded PMS is not a pass)', () => {

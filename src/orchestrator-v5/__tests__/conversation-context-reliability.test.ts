@@ -8,7 +8,8 @@
  * "what changed?"). This suite asserts the ACTUAL WORDS now flow:
  *   write  → commitDirectAnswer captures user + assistant text;
  *   read   → buildTurnContext surfaces prior content on prior_turns;
- *   project→ assembleContextPack carries content into recent_turns (→ LLM);
+ *   (the assembleContextPack → recent_turns projection rows were deleted with
+ *    the assembler in deletion 8: unreachable from src/server.ts);
  *   guard  → a chip turn with zero prior turns emits a continuity-gap event.
  *
  * Tests assert CONTENT, not just field presence (brief §"Required tests").
@@ -25,8 +26,6 @@ import {
 } from '../compose/forbidden-user-facing-phrases.js';
 import { sanitiseOlumiResponseForEgress } from '../compose/output-safety.js';
 import { buildTurnContext } from '../build-turn-context.js';
-import { assembleContextPack } from '../context/context-pack-assembler.js';
-import { ContextPackSchema } from '../context/context-pack-schema.js';
 import { createNoopSessionStore } from '../session/__tests__/fixtures.js';
 import { parseConversationContent, type SessionTurnWithContent } from '../session/conversation-content.js';
 import type { SessionStore, SessionTurnWrite } from '../session/store.js';
@@ -296,159 +295,6 @@ describe('read side — buildTurnContext carries prior conversation content', ()
     expect(ctx.prior_turns[0].assistant_message).toBe(
       'Option B (Mid-Market Tier) leads Option A by 6 points.',
     );
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Projection — ContextPack.recent_turns carries the actual words to the LLM
-// ---------------------------------------------------------------------------
-
-describe('projection — ContextPack.recent_turns carries content', () => {
-  it('carry-over: prior turn user + assistant text appears in recent_turns', () => {
-    const priorTurns = [
-      makeContentTurn({
-        turn_id: 't1',
-        created_at: '2026-06-09T10:00:00.000Z',
-        user_message: 'Which option is best?',
-        assistant_message: 'Option B leads Option A by 6 points.',
-      }),
-    ];
-    const pack = assembleContextPack({
-      payload: makeMessagePayload({ scenario_id: SCENARIO, message: 'Why?' }),
-      priorTurns,
-    });
-    expect(pack.conversation.recent_turns[0].user_message).toBe('Which option is best?');
-    expect(pack.conversation.recent_turns[0].assistant_message).toBe(
-      'Option B leads Option A by 6 points.',
-    );
-    // The pack must validate against the (strict) schema with content present.
-    expect(ContextPackSchema.safeParse(pack).success).toBe(true);
-  });
-
-  it('reference resolution: the option list the user means by "the second one" is in recent_turns', () => {
-    const priorTurns = [
-      makeContentTurn({
-        turn_id: 't1',
-        created_at: '2026-06-09T10:00:00.000Z',
-        user_message: 'What are my options?',
-        assistant_message: 'Two options: 1) Expand into the EU; 2) Stay domestic.',
-      }),
-    ];
-    const pack = assembleContextPack({
-      payload: makeMessagePayload({ scenario_id: SCENARIO, message: 'the second one' }),
-      priorTurns,
-    });
-    const lastAnswer = pack.conversation.recent_turns[0].assistant_message ?? '';
-    // The referent ("the second one" → "Stay domestic") must be present so the
-    // LLM can resolve the ellipsis instead of asking what the user means.
-    expect(lastAnswer).toContain('Stay domestic');
-    expect(lastAnswer).toContain('Expand into the EU');
-  });
-
-  it('rejected-edit follow-up: the rejection answer is available for "why did that fail?"', () => {
-    const priorTurns = [
-      makeContentTurn({
-        turn_id: 't1',
-        created_at: '2026-06-09T10:00:00.000Z',
-        user_message: 'Add a risk for supplier delays',
-        assistant_message:
-          "I couldn't add that — the model is already at its 30-link limit, so a new factor can't be connected.",
-      }),
-    ];
-    const pack = assembleContextPack({
-      payload: makeMessagePayload({ scenario_id: SCENARIO, message: 'why did that fail?' }),
-      priorTurns,
-    });
-    expect(pack.conversation.recent_turns[0].assistant_message).toContain('30-link limit');
-  });
-
-  it('no blank valid context: when prior turns exist, recent_turns is non-empty AND content-bearing', () => {
-    const priorTurns = [
-      makeContentTurn({
-        turn_id: 't1',
-        created_at: '2026-06-09T10:00:00.000Z',
-        user_message: 'Hello',
-        assistant_message: 'Here is your decision model.',
-      }),
-    ];
-    const pack = assembleContextPack({
-      payload: makeMessagePayload({ scenario_id: SCENARIO, message: 'Why?' }),
-      priorTurns,
-    });
-    expect(pack.conversation.recent_turns.length).toBeGreaterThan(0);
-    const anyContent = pack.conversation.recent_turns.some(
-      (t) => t.user_message !== null || t.assistant_message !== null,
-    );
-    expect(anyContent).toBe(true);
-  });
-
-  it('legacy turns without content project null (backward compatible), still schema-valid', () => {
-    // A plain turn missing the content fields (pre-migration row / legacy
-    // fixture) must project null, not undefined, and keep the pack schema-valid.
-    const legacy = {
-      id: 'row-legacy',
-      scenario_id: SCENARIO,
-      user_id: 'u',
-      turn_id: 't-legacy',
-      turn_class: 'direct_answer' as const,
-      handler_id: null,
-      request_hash: 'sha256:legacy',
-      response_emitted: true,
-      llm_calls_used: 1,
-      duration_ms: 10,
-      created_at: '2026-06-09T09:00:00.000Z',
-    };
-    const pack = assembleContextPack({
-      payload: makeMessagePayload({ scenario_id: SCENARIO, message: 'Why?' }),
-      priorTurns: [legacy],
-    });
-    expect(pack.conversation.recent_turns[0].user_message).toBeNull();
-    expect(pack.conversation.recent_turns[0].assistant_message).toBeNull();
-    expect(ContextPackSchema.safeParse(pack).success).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Post-analysis follow-up — analysis + conversation content both present
-// ---------------------------------------------------------------------------
-
-describe('post-analysis follow-up — analysis summary AND conversation text present', () => {
-  it('"what could change it?" has both the latest analysis and the prior answer in context', () => {
-    const priorTurns = [
-      makeContentTurn({
-        turn_id: 't-analysis',
-        created_at: '2026-06-09T10:00:00.000Z',
-        turn_class: 'handler',
-        handler_id: 'run_analysis',
-        user_message: 'Run the analysis',
-        assistant_message: 'Option B wins in 72% of futures; churn is the biggest swing factor.',
-      }),
-    ];
-    const pack = assembleContextPack({
-      payload: makeMessagePayload({ scenario_id: SCENARIO, message: 'what could change it?' }),
-      priorTurns,
-      analysis: {
-        winner: { option_id: 'opt-b', option_label: 'Mid-Market Tier', win_probability: 0.72 },
-        options: [
-          { option_id: 'opt-b', option_label: 'Mid-Market Tier', win_probability: 0.72, outcome_mean: 120000 },
-          { option_id: 'opt-a', option_label: 'Enterprise', win_probability: 0.28, outcome_mean: 90000 },
-        ],
-        top_drivers: [
-          { factor_id: 'f-churn', factor_label: 'Customer Churn', sensitivity: 0.41, direction: 'negative' },
-        ],
-        robustness_level: 'moderate',
-        fragile_edge_count: 0,
-        top_fragile_edges: [],
-        margin: 0.44,
-        margin_pp: 44,
-        analysis_status: 'complete',
-      },
-    });
-    // Latest analysis is present (so "what could change it?" has something to reason about)...
-    expect(pack.analysis).not.toBeNull();
-    expect(pack.analysis?.leading_option).not.toBeNull();
-    // ...AND the prior conversational answer is carried so the follow-up resolves.
-    expect(pack.conversation.recent_turns[0].assistant_message).toContain('churn');
   });
 });
 

@@ -29,8 +29,8 @@ import {
   readMayNameLeadingOptionForFacts,
 } from '../claim-safety-read.js';
 import { findLeaderClaims } from '../../compose/leading-option-egress-guard.js';
-import type { ContextPackAnalysis } from '../context-pack-assembler.js';
-import type { ContextPackFocus } from '../context-pack-assembler.js';
+import type { ContextPackAnalysis } from '../context-pack-types.js';
+import type { ContextPackFocus } from '../context-pack-types.js';
 import type { DisplaySafeAnalysis } from '../../format/format-analysis-for-context.js';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 

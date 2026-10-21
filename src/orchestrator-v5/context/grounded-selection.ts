@@ -40,7 +40,7 @@
  * `responseParser` demotes any undeclared root key into its `__additive__`
  * sidecar, which is where the consumer reads it.
  */
-import type { ContextPackFocus } from './context-pack-assembler.js';
+import type { ContextPackFocus } from './context-pack-types.js';
 import type { TurnSelection } from '../build-turn-context.js';
 
 /**

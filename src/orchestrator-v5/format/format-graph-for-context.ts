@@ -41,7 +41,7 @@ import {
   type CompactProvenance,
   type CompactUncertaintyDriversDisclosure,
 } from '../../orchestrator/context/graph-compact.js';
-import type { ContextPackGraph } from '../context/context-pack-assembler.js';
+import type { ContextPackGraph } from '../context/context-pack-types.js';
 import { CANVAS_BAND_WORD } from './edge-strength-bands.js';
 import { edgeStrengthWords } from './edge-strength-words.js';
 import type { LinkSizing } from '../../cee/magnitude/link-sizing.js';

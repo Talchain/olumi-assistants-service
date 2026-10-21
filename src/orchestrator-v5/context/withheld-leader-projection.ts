@@ -115,7 +115,7 @@ import type {
   ContextPackAnalysis,
   ContextPackFocus,
   ContextPackFocusElement,
-} from './context-pack-assembler.js';
+} from './context-pack-types.js';
 import type { DisplaySafeAnalysis } from '../format/format-analysis-for-context.js';
 import type { CoachingCache } from '../coaching/types.js';
 import type { ConstraintVerdictState } from '../../orchestrator/context/constraint-feasibility.js';

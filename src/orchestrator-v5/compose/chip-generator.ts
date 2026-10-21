@@ -48,7 +48,7 @@ import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import type { SuggestedAction } from './types.js';
 import type { HandlerValidationRegistry } from '../routing/validator.js';
 import { curatedHandlerChips } from './helpers.js';
-import type { ContextPackAnalysis } from '../context/context-pack-assembler.js';
+import type { ContextPackAnalysis } from '../context/context-pack-types.js';
 // D-ask-1 (2.11 P0-1): configure chip for scaffolded-placeholder runs —
 // derives from #487's single configure-chip copy source.
 import { buildScaffoldConfigureChip } from '../coaching/scaffold-disclosure.js';

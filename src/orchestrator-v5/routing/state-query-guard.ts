@@ -51,7 +51,6 @@ import {
   isStructureOriginQuestion,
   tryStructureOriginAnswer,
 } from '../../cee/context-integrity/structure-origin-answer.js';
-import type { ContextPack } from '../context/context-pack-assembler.js';
 import type { RecentMutation } from '../context/recent-changes.js';
 import type { RecentChangesHistoryStatus } from '../context/reconcile-recent-mutation-facts.js';
 import type { SuggestedAction } from '../compose/types.js';
@@ -353,8 +352,10 @@ export function isStateQueryQuestionShape(message: string): boolean {
 
 export interface TryStateQueryGuardInput {
   readonly message: string;
-  readonly contextPack: Pick<ContextPack, 'recent_changes'> &
-    Partial<Pick<ContextPack, 'recent_changes_status'>>;
+  readonly contextPack: {
+    readonly recent_changes: readonly RecentMutation[];
+    readonly recent_changes_status?: RecentChangesHistoryStatus;
+  };
   /**
    * ROADMAP 2.975 — the persisted brief and graph, for answering a BRIEF-AUDIT
    * question ("what did you keep from my brief?") rather than a session-edit
@@ -788,7 +789,7 @@ export const CHANGES_UNAVAILABLE_TEXT =
   'This reply does not change the model; please try again.';
 
 function resolveRecentChangesStatus(
-  status: ContextPack['recent_changes_status'] | undefined,
+  status: RecentChangesHistoryStatus | undefined,
 ): RecentChangesHistoryStatus {
   return status === 'complete' || status === 'capped' || status === 'degraded'
     ? status

@@ -15,7 +15,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import type { ContextPackGraph } from '../../context/context-pack-assembler.js';
+import type { ContextPackGraph } from '../../context/context-pack-types.js';
 import { formatGraphForContext } from '../format-graph-for-context.js';
 
 function pack(nodes: unknown[], edges: unknown[]): ContextPackGraph {

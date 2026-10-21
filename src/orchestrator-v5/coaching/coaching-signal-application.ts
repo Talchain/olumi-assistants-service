@@ -24,10 +24,9 @@ import {
   readMayNameLeadingOptionVerdict,
   type ClaimSafetyScenarioScope,
 } from '../context/claim-safety-read.js';
-import type { ContextPack } from '../context/context-pack-assembler.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
 import { analysisReadyPermitsLeaderNaming } from '../admission/analysis-admission.js';
-import { detectCoachingSignal } from '../signals/coaching-signals.js';
+import { detectCoachingSignal, type CoachingContextPack } from '../signals/coaching-signals.js';
 import type { SuccessfulHandlerOutcome } from '../tools/handler-outcome.js';
 import { appendLastCoachingSignal } from './last-coaching-signal-log.js';
 import type { CoachingSignalId } from './types.js';
@@ -41,7 +40,7 @@ export interface ApplyCoachingSignalInput {
    * LLM-facing context pack for this turn, or null on the chip-click
    * path (which assembles no pack). See CoachingSignalInput.contextPack.
    */
-  readonly contextPack: ContextPack | null;
+  readonly contextPack: CoachingContextPack | null;
   /** Current canonical admission; absent retains the existing legacy behaviour. */
   readonly analysisReady?: AnalysisReadyPayload;
   /** Facts from prior turns in this scenario (newest-first). */

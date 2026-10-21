@@ -362,23 +362,6 @@ if [ -n "$ROGUE_ANTHROPIC" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 9. Phase 1 — context pack assembler is free of UI / LLM imports
-#
-# ContextPack is a pure projection. Any LLM or UI import in this module is
-# a smell that will cascade into test mocks and cycle dependencies.
-# ---------------------------------------------------------------------------
-CTXPACK_FILE='src/orchestrator-v5/context/context-pack-assembler.ts'
-if [ -f "$CTXPACK_FILE" ]; then
-  CTX_BAD=$(
-    grep -nE "from '[^']*(adapters/llm|DecisionGuideAI|decision-guide-ai)" "$CTXPACK_FILE" 2>/dev/null \
-    || true
-  )
-  if [ -n "$CTX_BAD" ]; then
-    fail 'context-pack-assembler.ts imports an LLM or UI module' "$CTX_BAD"
-  fi
-fi
-
-# ---------------------------------------------------------------------------
 # 10. Phase 1 — validator has no LLM imports and no numeric coercions
 #
 # Validator is pure. LLM calls, network calls, and Math.round/.toFixed/
@@ -465,7 +448,7 @@ if [ "$EXIT" -eq 0 ]; then
   echo '  - one composed remove-only claim-safety writer inside one validated fact'
   echo '  - placeholder scenario reader acceptable (classifier prompt still direct_answer/clarify only)'
   echo '  - Phase 1: Anthropic SDK confined to route-with-tool-use.ts'
-  echo '  - Phase 1: context-pack-assembler + validator free of LLM/UI imports'
+  echo '  - Phase 1: validator free of LLM/UI imports'
   echo '  - Phase 1: canonical §5 enums defined only in routing/types.ts'
 fi
 

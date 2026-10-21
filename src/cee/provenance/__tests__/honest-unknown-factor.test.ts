@@ -909,7 +909,8 @@ describe("E — WHAT THE USER NOW SEES: the factor_values slice stops reporting 
   //   producer     `context/factor-value-record.ts:170` `has_value`, `:175` `without_value_count`
   //   predicate    `provenance/factor-value-provenance.ts` `factorHasExtractedValue`
   //                → `readFactorValueView` reads `observed_state.value` then `data.value`
-  //   assembled    `context/context-pack-assembler.ts:1874-1876`
+  //   assembled    formerly `context/context-pack-assembler.ts` (deleted in deletion 8,
+  //                22 Oct 2026, as unreachable from src/server.ts)
   //   instruction  `routing/route-with-tool-use.ts` FACTOR_VALUES_INSTRUCTION:
   //                "When the count is above 0, name the factors whose
   //                 has_value is false, using their labels as given, and offer

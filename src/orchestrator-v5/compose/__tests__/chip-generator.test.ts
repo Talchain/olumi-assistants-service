@@ -17,7 +17,7 @@ import { ActionSchema } from '@talchain/schemas/boundary';
 
 import { generateChips } from '../chip-generator.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../../routing/validation-registry.js';
-import type { ContextPackAnalysis } from '../../context/context-pack-assembler.js';
+import type { ContextPackAnalysis } from '../../context/context-pack-types.js';
 import { buildReadinessRecoveryChip } from '../../coaching/readiness-recovery.js';
 import { setTestSink } from '../../../utils/telemetry.js';
 

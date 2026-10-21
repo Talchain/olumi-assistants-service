@@ -12,7 +12,8 @@
  *      crowns the top, status-blind; feeds `summary.winner` + `margin`.
  *   2. context-pack-assembler.ts `projectAnalysis` — re-selects leading/runner
  *      -up, but `OptionSummary` DROPPED `status` upstream so it structurally
- *      COULD NOT gate on it.
+ *      COULD NOT gate on it. (Site 2 was deleted in Track 2 deletion 8: it was
+ *      unreachable from the server, so its rows went with it.)
  *   3. decision-review-enricher.ts `selectWinner`/`selectRunnerUp` — gate on a
  *      usable win_probability but never on status.
  *
@@ -32,8 +33,6 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import { compactAnalysis } from '../../../../orchestrator/context/analysis-compact.js';
 import type { V2RunResponseEnvelope } from '../../../../orchestrator/types.js';
-import { projectAnalysis } from '../../../context/context-pack-assembler.js';
-import type { AnalysisResponseSummaryWithSignals } from '../../../context/analysis-signals.js';
 import { buildInvokeInputForTests } from '../../../coaching/decision-review-enricher.js';
 import { buildAnalysisResultHeadline } from '../../../coaching/analysis-result-headline.js';
 import { buildAnalysisFromPriorFacts } from '../../../context/analysis-fallback.js';
@@ -109,22 +108,6 @@ describe('shared status-aware winner — site 1: compactAnalysis', () => {
   it('GOLDEN — status-less legacy shape is unchanged: highest win_probability wins', () => {
     const summary = compactAnalysis(statuslessEnvelope());
     expect(summary!.winner.option_id).toBe('B');
-  });
-});
-
-describe('shared status-aware winner — site 2: projectAnalysis (context pack)', () => {
-  it('does NOT surface a failed option as the leading coaching option', () => {
-    const summary = compactAnalysis(reproEnvelope()) as AnalysisResponseSummaryWithSignals;
-    const pack = projectAnalysis(summary, null);
-    expect(pack).not.toBeNull();
-    expect(pack!.leading_option?.label).toBe('Option A');
-    expect(pack!.runner_up?.label).toBe('Option C');
-  });
-
-  it('GOLDEN — all-computed set is unchanged: highest win_probability leads', () => {
-    const summary = compactAnalysis(allComputedEnvelope()) as AnalysisResponseSummaryWithSignals;
-    const pack = projectAnalysis(summary, null);
-    expect(pack!.leading_option?.label).toBe('Option B');
   });
 });
 

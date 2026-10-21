@@ -1,11 +1,13 @@
 /**
- * Coaching Context Pack v1 — pack redaction + source + assembler injection.
+ * Coaching Context Pack v1 — pack redaction + source.
  *
  * Proves the pack is exactly the agreed Tier-1 fields, pinned to the live
  * `deriveAnalysisFreshness` verdict, and carries NO hashes / indices / values /
- * units / labels / free text. Also proves the assembler surfaces it as
- * `coaching_context` only when supplied (flag-off ⇒ field absent), and that the
- * pack validates against the canonical ContextPack schema.
+ * units / labels / free text.
+ *
+ * Deletion 8: the two assembler-injection rows (`coaching_context` surfaced /
+ * omitted by `assembleContextPackWithSummary`) went with
+ * `context-pack-assembler.ts`, which no served lane calls.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -15,9 +17,6 @@ import {
   summariseCoachingStatePack,
 } from '../canonical-analysis-state.js';
 import type { FreshnessDerivation } from '../freshness.js';
-import { assembleContextPackWithSummary } from '../context-pack-assembler.js';
-import { ContextPackSchema } from '../context-pack-schema.js';
-import { makeMessagePayload } from '../../__tests__/fixtures.js';
 
 const HASH_AT_RUN = 'a1b2c3d4e5f60718';
 const CURRENT_HASH = 'ffeeddccbbaa9988';
@@ -120,37 +119,3 @@ describe('CoachingStatePack — Tier-1 fields, pinned to deriveAnalysisFreshness
   });
 });
 
-describe('assembleContextPack — coaching_context injection (flag-gated)', () => {
-  const payload = makeMessagePayload({
-    turn_id: 't-1',
-    scenario_id: 'scen-1',
-    message: 'what should I do?',
-  });
-
-  it('surfaces coaching_context when supplied; validates against the schema', () => {
-    const pack = summariseCoachingStatePack(
-      canonicalStateFromFreshness(staleFreshness(), {
-        readiness: { status: 'ready', blockers: [] },
-      }),
-    );
-    const { contextPack } = assembleContextPackWithSummary({
-      payload,
-      priorTurns: [],
-      priorFacts: [],
-      coachingContext: pack,
-    });
-    expect(contextPack.coaching_context).toEqual(pack);
-    expect(ContextPackSchema.safeParse(contextPack).success).toBe(true);
-  });
-
-  it('omits coaching_context entirely when not supplied (flag-off shape)', () => {
-    const { contextPack } = assembleContextPackWithSummary({
-      payload,
-      priorTurns: [],
-      priorFacts: [],
-    });
-    expect('coaching_context' in contextPack).toBe(false);
-    expect(contextPack.coaching_context).toBeUndefined();
-    expect(ContextPackSchema.safeParse(contextPack).success).toBe(true);
-  });
-});

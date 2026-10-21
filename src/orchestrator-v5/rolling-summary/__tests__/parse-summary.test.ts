@@ -14,7 +14,6 @@
 import { describe, it, expect } from 'vitest';
 
 import { assembleSummaryFromParsed } from '../assemble.js';
-import { buildConversationSummarySection } from '../inject.js';
 import { parseSummaryOutput } from '../parse-summary.js';
 import { SUMMARISER_SYSTEM_PROMPT } from '../summariser.js';
 import { RollingSummarySchema, SUMMARY_HARD_CAP_CHARS } from '../summary-types.js';
@@ -179,11 +178,12 @@ describe('parseSummaryOutput — the cap contract is unchanged and still enforce
 /**
  * THE END-TO-END EVIDENCE, and the reason the measurement change was withdrawn.
  *
- * parser → assemble → store read-parse → inject, on one summary. This is what a
- * parser-only length assertion cannot show, and it is what settles the question
- * of whether stamps may be discounted from the cap.
+ * parser → assemble → store read-parse, on one summary. The INJECT half (which
+ * re-rendered provenance stamps LONGER than the model's, and so settled the
+ * question of whether stamps may be discounted from the cap) was deleted with
+ * `inject.ts` in deletion 8 (unreachable from src/server.ts).
  */
-describe('rolling summary — parser → assemble → read → inject, on real slot content', () => {
+describe('rolling summary — parser → assemble → read, on real slot content', () => {
   const RAW = [
     'DECISION FRAME: Choosing between two hiring routes under a fixed deadline.',
     'CONSTRAINTS & PREFERENCES: Budget is £200k and the six-month deadline is externally committed. [t1, t4]',
@@ -191,7 +191,7 @@ describe('rolling summary — parser → assemble → read → inject, on real s
     'OPEN: Whether salary inflation changes the comparison. [t5]',
   ].join('\n');
 
-  it('the STORED text drops the stamps, and the INJECTED text puts provenance back — LARGER', () => {
+  it('the STORED text drops the stamps, keeps refs structurally, and survives the read-parse', () => {
     const parsed = parseSummaryOutput(RAW);
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
@@ -224,22 +224,12 @@ describe('rolling summary — parser → assemble → read → inject, on real s
     // READ: the stored shape survives the defensive read-parse unchanged.
     const readBack = RollingSummarySchema.safeParse(JSON.parse(JSON.stringify(assembled)));
     expect(readBack.success).toBe(true);
+    if (!readBack.success) return;
 
-    // INJECT: provenance is RE-RENDERED, in a form LONGER than the model's.
-    // ⭐ THIS IS THE MEASUREMENT EVIDENCE. Discounting `[t3]` at the parser
-    // would have let more content in and then paid for it again here at
-    // `[t:0934b3c3, t:ea7a0079]` — bigger, not smaller.
-    const injected = buildConversationSummarySection(
-      readBack.success ? readBack.data : assembled,
-      0,
-      8,
-    );
-    expect(injected.text).toMatch(/\[t:[0-9a-f]{8}/);
-    expect(injected.text.length).toBeGreaterThan(assembled.text.length);
-    // The user-facing meaning survives the whole path.
-    expect(injected.text).toContain('£200k');
-    expect(injected.text).toContain('externally committed');
-    expect(injected.text).toContain('Delaying the hire was ruled out.');
+    // The user-facing meaning survives the whole (live) path.
+    expect(readBack.data.text).toContain('£200k');
+    expect(readBack.data.text).toContain('externally committed');
+    expect(readBack.data.text).toContain('Delaying the hire was ruled out.');
   });
 });
 

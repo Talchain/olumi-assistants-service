@@ -5,8 +5,6 @@
  * FAIL on the unguarded version:
  *  - parse-reject: an off-contract summariser output must be rejected, not
  *    written (unguarded = accepted garbage);
- *  - watermark/lag boundary: the window must always cover unabsorbed turns
- *    (unguarded = a hole opens silently);
  *  - regen from FULL history (R1): a turn-1 constraint must survive a regen
  *    at turn >20 (unguarded = the 20-window clamp rebuilds the exact cliff);
  *  - capped-input fallback (R1): even a degraded regen re-reads provenance
@@ -18,10 +16,6 @@
 import { describe, it, expect } from 'vitest';
 
 import { parseSummaryOutput } from '../../src/orchestrator-v5/rolling-summary/parse-summary.js';
-import {
-  computeSummaryLag,
-  isSummaryStale,
-} from '../../src/orchestrator-v5/rolling-summary/lag.js';
 import {
   buildSummariserInput,
   shouldRegenerate,
@@ -95,58 +89,6 @@ describe('parseSummaryOutput', () => {
 
   it('REJECTS empty output', () => {
     expect(parseSummaryOutput('   \n  ')).toEqual({ ok: false, reason: 'empty' });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Watermark / lag — the staleness invariant boundary.
-// ---------------------------------------------------------------------------
-
-describe('computeSummaryLag / isSummaryStale (watermark invariant)', () => {
-  function summaryAt(t: SummariserTurn): RollingSummary {
-    return {
-      text: 'x',
-      slots: [],
-      updated_turn_id: t.turn_id,
-      updated_turn_created_at: t.created_at,
-      version: 1,
-      generator: 'incremental',
-      schema_version: SUMMARY_SCHEMA_VERSION,
-    };
-  }
-
-  it('null summary ⇒ lag equals the whole window', () => {
-    const window = [turn(5), turn(4), turn(3)]; // newest-first
-    expect(computeSummaryLag(null, window)).toBe(3);
-  });
-
-  it('counts only turns after the watermark (the watermark turn is absorbed)', () => {
-    const window = [turn(5), turn(4), turn(3)]; // newest-first
-    // summary covers turn 3 ⇒ turns 4 and 5 are unabsorbed ⇒ lag 2.
-    expect(computeSummaryLag(summaryAt(turn(3)), window)).toBe(2);
-  });
-
-  it('lag 1 for the normal post-commit case (summary through N, turn N+1 live)', () => {
-    const window = [turn(9), turn(8)];
-    expect(computeSummaryLag(summaryAt(turn(8)), window)).toBe(1);
-  });
-
-  it('BOUNDARY: window depth 8 covers lag ≤ 7; discloses at lag 8 (stale summary at the window edge)', () => {
-    // Exactly 8 turns newer than the watermark, window depth 8.
-    const newest = Array.from({ length: 8 }, (_, i) => turn(20 - i)); // turns 20..13 newest-first
-    const stale = summaryAt(turn(12)); // watermark below all 8
-    const lag = computeSummaryLag(stale, newest);
-    expect(lag).toBe(8);
-    expect(isSummaryStale(lag, 8)).toBe(true); // hole would open → must disclose
-    expect(isSummaryStale(7, 8)).toBe(false); // lag 7 is still fully covered
-  });
-
-  it('same-ms sibling of the watermark turn counts as unabsorbed (conservative)', () => {
-    const a = turn(3, { ms: 100 });
-    const b = { ...turn(4, { ms: 100 }) }; // same created_at as a, different turn_id
-    const window = [b, a]; // newest-first, both same ms
-    // watermark = a; b shares the ms but is not a ⇒ counted (safe over-disclosure).
-    expect(computeSummaryLag(summaryAt(a), window)).toBe(1);
   });
 });
 

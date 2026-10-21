@@ -32,8 +32,7 @@ import type { StageContext } from '../../../cee/unified-pipeline/types.js';
 import * as telemetry from '../../../utils/telemetry.js';
 
 import { DISPLAY_ANALYSIS_CHAR_BUDGET } from '../../format/format-analysis-for-context.js';
-import { CONTEXT_PACK_RECENT_TURNS_CAP, MAX_PROJECTED_OPTIONS } from '../context-pack-assembler.js';
-import { CONTEXT_PACK_BRIEF_CHAR_CAP } from '../context-pack-schema.js';
+import { CONTEXT_PACK_BRIEF_CHAR_CAP, CONTEXT_PACK_RECENT_TURNS_CAP } from '../context-pack-schema.js';
 
 /** The assembler's own `analysis` input type, derived without importing the (unexported) name. */
 
@@ -75,8 +74,8 @@ describe('context-policy — local-const replicas PINNED to their originals (fai
   it('POLICY_VERBATIM_TURNS === CONTEXT_PACK_RECENT_TURNS_CAP', () => {
     expect(POLICY_VERBATIM_TURNS).toBe(CONTEXT_PACK_RECENT_TURNS_CAP);
   });
-  it('POLICY_MAX_PROJECTED_OPTIONS === MAX_PROJECTED_OPTIONS', () => {
-    expect(POLICY_MAX_PROJECTED_OPTIONS).toBe(MAX_PROJECTED_OPTIONS);
+  it('POLICY_MAX_PROJECTED_OPTIONS is pinned at 12 (the deleted assembler MAX_PROJECTED_OPTIONS)', () => {
+    expect(POLICY_MAX_PROJECTED_OPTIONS).toBe(12);
   });
 });
 
@@ -519,7 +518,7 @@ describe('runtime tripwire — emitContextPolicyDivergence (observe-only)', () =
 });
 
 // ---------------------------------------------------------------------------
-// Namesake-twin kill (P4) — exactly ONE exported assembleContextPack repo-wide
+// Namesake-twin kill (P4) — NO exported assembleContextPack repo-wide (V5 assembler deleted, deletion 8)
 // ---------------------------------------------------------------------------
 
 const SRC_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..'); // → src/
@@ -540,15 +539,25 @@ function walkTsFiles(dir: string): string[] {
 const EXPORT_ASSEMBLE_DEF_RE =
   /^export\s+(?:async\s+)?function\s+assembleContextPack\b|^export\s+const\s+assembleContextPack\b/m;
 
-describe('namesake-twin kill — assembleContextPack resolves to exactly ONE exported symbol', () => {
-  it('exactly one exported assembleContextPack DEFINITION exists in src/ (the V5 model-facing one)', () => {
-    const defs = walkTsFiles(SRC_ROOT)
-      .filter((f) => EXPORT_ASSEMBLE_DEF_RE.test(readFileSync(f, 'utf8')))
-      .map((f) => f.slice(f.indexOf('/src/') + 1).replace(/\\/g, '/'));
+/** Repo-relative paths under src/ whose source matches `re`. */
+function filesDefining(re: RegExp): string[] {
+  return walkTsFiles(SRC_ROOT)
+    .filter((f) => re.test(readFileSync(f, 'utf8')))
+    .map((f) => f.slice(f.indexOf('/src/') + 1).replace(/\\/g, '/'));
+}
+
+describe('namesake-twin kill — no exported assembleContextPack resurrects after the V5 assembler was deleted', () => {
+  it('NO exported assembleContextPack DEFINITION exists in src/ (the V5 assembler was deleted, deletion 8)', () => {
     // RED at c930f05c (two defs: the V5 assembler + the draft-provenance twin);
     // GREEN after the twin was renamed to assembleDraftProvenanceDescriptor.
-    // A future re-collision (a second exported def) turns this RED again.
-    expect(defs).toEqual(['src/orchestrator-v5/context/context-pack-assembler.ts']);
+    // Deletion 8 removed the V5 assembler, so the expected set is now empty: a
+    // re-introduced exported def under the old name turns this RED again.
+    expect(filesDefining(EXPORT_ASSEMBLE_DEF_RE)).toEqual([]);
+    // CONTRAST CONTROL (same walk, same run): the scan SEES the disambiguated
+    // draft-provenance definition, so the empty set above is not a blind walk.
+    expect(
+      filesDefining(/^export\s+function\s+assembleDraftProvenanceDescriptor\b/m),
+    ).toEqual(['src/context/context-pack.ts']);
   });
 
   it('the draft-provenance builder is exported under its DISAMBIGUATED name only', () => {
@@ -565,15 +574,15 @@ describe('namesake-twin kill — assembleContextPack resolves to exactly ONE exp
     expect(body).not.toMatch(/export\s+interface\s+AssembleContextPackInput\b/);
   });
 
-  it('exactly one exported AssembleContextPackInput DEFINITION exists in src/ (the V5 assembler)', () => {
-    // egress-F4 (2026-07-24): pin the input-type name to a single owner, the same
-    // way the function name is pinned — a second same-named exported interface is
-    // the type-twin the #662 P4 kill claimed to close but left open.
-    const INPUT_DEF_RE = /^export\s+interface\s+AssembleContextPackInput\b/m;
-    const defs = walkTsFiles(SRC_ROOT)
-      .filter((f) => INPUT_DEF_RE.test(readFileSync(f, 'utf8')))
-      .map((f) => f.slice(f.indexOf('/src/') + 1).replace(/\\/g, '/'));
-    expect(defs).toEqual(['src/orchestrator-v5/context/context-pack-assembler.ts']);
+  it('NO exported AssembleContextPackInput DEFINITION exists in src/ (the V5 assembler was deleted, deletion 8)', () => {
+    // egress-F4 (2026-07-24): the input-type name was pinned to a single owner,
+    // the same way the function name is pinned. That owner is deleted, so a
+    // same-named exported interface anywhere in src/ is now a resurrection.
+    expect(filesDefining(/^export\s+interface\s+AssembleContextPackInput\b/m)).toEqual([]);
+    // CONTRAST CONTROL: the same walk sees the disambiguated draft-side input type.
+    expect(
+      filesDefining(/^export\s+interface\s+AssembleDraftProvenanceInput\b/m),
+    ).toEqual(['src/context/context-pack.ts']);
   });
 });
 

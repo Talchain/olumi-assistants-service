@@ -9,7 +9,7 @@
  * where a paid LLM judge scores it, is documented in `judge-seam.ts`.
  */
 
-import type { ContextPackAnalysis } from '../../../src/orchestrator-v5/context/context-pack-assembler.js';
+import type { ContextPackAnalysis } from '../../../src/orchestrator-v5/context/context-pack-types.js';
 
 /**
  * A single candidate orchestrator response under evaluation.

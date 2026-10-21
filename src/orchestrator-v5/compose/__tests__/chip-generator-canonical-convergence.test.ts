@@ -25,7 +25,7 @@ import {
 } from '../../context/canonical-analysis-state.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import type { TurnOutcome } from '../../turn-outcome.js';
-import type { ContextPackAnalysis } from '../../context/context-pack-assembler.js';
+import type { ContextPackAnalysis } from '../../context/context-pack-types.js';
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
 
 // A populated analysis projection — in production the assembler fills this

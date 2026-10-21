@@ -19,7 +19,7 @@ import { describe, expect, it } from 'vitest';
 
 import { generateChips } from '../chip-generator.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../../routing/validation-registry.js';
-import type { ContextPackAnalysis } from '../../context/context-pack-assembler.js';
+import type { ContextPackAnalysis } from '../../context/context-pack-types.js';
 
 const REGISTRY = HANDLER_VALIDATION_REGISTRY;
 

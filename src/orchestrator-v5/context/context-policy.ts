@@ -70,7 +70,7 @@ export const POLICY_EDIT_BRIEF_CHAR_CAP = 1_000;
 export const POLICY_DECISION_REVIEW_BRIEF_CHAR_CAP = 2_000;
 /** DERIVED from `CONTEXT_PACK_RECENT_TURNS_CAP` (context-pack-schema.ts, the single source) — no longer a hand-typed mirror (FINAL-SWEEP F4). */
 export const POLICY_VERBATIM_TURNS = CONTEXT_PACK_RECENT_TURNS_CAP;
-/** = `MAX_PROJECTED_OPTIONS` (context-pack-assembler.ts). Pinned. */
+/** The option cap the retired context-pack assembler projected (`MAX_PROJECTED_OPTIONS`). Pinned. */
 export const POLICY_MAX_PROJECTED_OPTIONS = 12;
 /**
  * Edit-context graph-JSON serialiser cap (= serialise.ts default

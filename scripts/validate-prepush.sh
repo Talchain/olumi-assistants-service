@@ -36,7 +36,6 @@ SMOKE_TESTS=(
   src/orchestrator-v5/__tests__/turn-executor-commit-floor-degraded.test.ts           # C1: retained held writer CAS/fence floor
   tests/unit/validators/b1-drift.test.ts                                              # B1 boundary validator (INGRESS drift -> typed fallback)
   tests/unit/mc25.coaching-boundary-validation.test.ts                                # B1 boundary validator (EGRESS/response-side pass+fail)
-  src/orchestrator-v5/context/__tests__/context-pack-assembler.test.ts                # context-pack assembly
   src/orchestrator-v5/tools/handlers/__tests__/run-analysis.test.ts                   # run_analysis handler ingest
   src/orchestrator-v5/tools/handlers/__tests__/explanation-fallback.test.ts           # deterministic explain_results/what_would_flip fallbacks
 )

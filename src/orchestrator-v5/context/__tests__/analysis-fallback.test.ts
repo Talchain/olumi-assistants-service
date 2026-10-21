@@ -564,8 +564,8 @@ describe('buildAnalysisFromPriorFacts', () => {
         const edges = summary.top_fragile_edges!;
         expect(edges.length).toBe(3);
         // Every projected edge carries its structural source id on the fallback
-        // path too — so the assembler's source-only lever filter cannot silently
-        // miss the exact path P0b-1 protects.
+        // path too — so a source-only lever filter cannot silently miss the exact
+        // path P0b-1 protects (the assembler's filter went in deletion 8).
         for (const e of edges) expect(typeof e.from_id).toBe('string');
         const leverEdge = edges.find((e) => e.from_label === 'Local Senior Hire');
         expect(leverEdge?.from_id).toBe('fac_local_hire');
@@ -590,7 +590,7 @@ describe('buildAnalysisFromPriorFacts', () => {
         const summary = buildAnalysisFromPriorFacts([runAnalysisFactWithEnrichment(labelOnly)])!;
         const edge = summary.top_fragile_edges?.find((e) => e.from_label === 'Some Source');
         expect(edge).toBeDefined();
-        expect(edge?.from_id).toBeUndefined(); // assembler fail-closes on this (see context-pack-assembler tests)
+        expect(edge?.from_id).toBeUndefined(); // no source id is invented for a label-only edge
       });
 
       it('GOLDEN: ranks by switch_probability so [0] names the MOST fragile link (parity with m1_coaching)', () => {

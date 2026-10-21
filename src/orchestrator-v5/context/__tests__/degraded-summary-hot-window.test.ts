@@ -9,115 +9,18 @@
  * the sole budget authority.
  */
 
+/*
+ * ⚠ DELETION 8 (track2, 22 Oct 2026): `assembleContextPackWithSummary` is
+ * deleted (no served caller), so the three rows that drove the pack through it
+ * were dropped. What stays is the row on the LIVE executable policy.
+ */
+
 import { describe,expect,it } from 'vitest';
 
-import { makeMessagePayload } from '../../__tests__/fixtures.js';
-import {
-CONTEXT_PACK_RECENT_TURNS_CAP,
-assembleContextPackWithSummary,
-} from '../context-pack-assembler.js';
-import { CONTEXT_PACK_CEILING_MIN_RETAINED_TURNS,CONTEXT_POLICY } from '../context-policy.js';
-
-import { priorTurnsFixture } from './context-budget-fixtures.js';
-
-const HOT_WINDOW = 20;
-const STORED_TOTAL = 28;
-const EARLY_CONSTRAINT = 'The signed Bluebird licence expires on 17 September.';
-
-function hotTurns() {
-  return priorTurnsFixture(HOT_WINDOW).map((turn, index) => ({
-    ...turn,
-    user_message: index === 12 ? EARLY_CONSTRAINT : `Routine working note ${index}`,
-    assistant_message: `Acknowledged working note ${index}`,
-  }));
-}
-
-function assemble(args: {
-  turns?: ReturnType<typeof hotTurns>;
-  priorTurnsTotal?: number | null;
-  conversationSummary?: {
-    text: string;
-    current_to_turn_id: string;
-    lag_turns: number;
-    stale: boolean;
-    note?: string;
-  };
-  summarisedTurns?: number | null;
-}) {
-  return assembleContextPackWithSummary({
-    payload: makeMessagePayload({
-      scenario_id: '00000000-0000-4000-8000-000000000321',
-      message: 'What constraints still govern the programme?',
-    }),
-    priorTurns: args.turns ?? hotTurns(),
-    priorTurnsTotal: args.priorTurnsTotal === undefined ? STORED_TOTAL : args.priorTurnsTotal,
-    priorFacts: [],
-    priorFactsReadOk: true,
-    brief: 'Plan the programme without breaching its signed licence.',
-    graphContext: { status: 'canonical' },
-    compactedGraph: {
-      nodes: [
-        { id: 'goal_launch', kind: 'goal', label: 'Launch safely' },
-        { id: 'opt_phase', kind: 'option', label: 'Phase the launch' },
-      ],
-      edges: [],
-      _node_count: 2,
-      _edge_count: 0,
-    },
-    compactedConstraints: [],
-    goalTarget: { status: 'set', value: 73, unit: '%' },
-    conversationSummary: args.conversationSummary,
-    summarisedTurns: args.summarisedTurns,
-  }).contextPack;
-}
+import { CONTEXT_PACK_RECENT_TURNS_CAP } from '../context-pack-schema.js';
+import { CONTEXT_POLICY } from '../context-policy.js';
 
 describe('degraded-summary hot-window fallback', () => {
-
-
-
-
-  it('does not present the fetched-window length as a total when the count read failed', () => {
-    const pack = assemble({ summarisedTurns: null, priorTurnsTotal: null });
-    const notice = pack.conversation.window?.notice ?? '';
-
-    expect(pack.conversation.recent_turns).toHaveLength(HOT_WINDOW);
-    expect(pack.conversation.window).toMatchObject({ shown: HOT_WINDOW, available: HOT_WINDOW });
-    expect(notice).toContain('true total could not be read this turn');
-    expect(notice).toContain('earlier turns may exist outside the fetched window');
-    expect(notice).not.toContain('earlier turns exist that are not shown');
-    expect(notice).toContain('do not state a total number of turns or exchanges');
-  });
-
-
-
-  it('preserves omitted-loader compatibility and short-window byte identity', () => {
-    expect(assemble({}).conversation.recent_turns).toHaveLength(CONTEXT_PACK_RECENT_TURNS_CAP);
-
-    const short = hotTurns().slice(0, 5);
-    expect(assemble({ turns: short, summarisedTurns: null })).toEqual(
-      assemble({ turns: short }),
-    );
-  });
-
-  it('lets the existing whole-pack ceiling trim noisy fallback turns oldest-first', () => {
-    const noisy = hotTurns().map((turn, index) => ({
-      ...turn,
-      user_message: `newest-rank-${index} ${'u'.repeat(1_900)}`,
-      assistant_message: `answer-rank-${index} ${'a'.repeat(1_900)}`,
-    }));
-    const pack = assemble({ turns: noisy, summarisedTurns: null });
-    const shown = pack.conversation.recent_turns.length;
-
-    expect(shown).toBeLessThan(HOT_WINDOW);
-    expect(shown).toBeGreaterThanOrEqual(CONTEXT_PACK_CEILING_MIN_RETAINED_TURNS);
-    expect(pack.conversation.recent_turns.map((turn) => turn.turn_id)).toEqual(
-      Array.from({ length: shown }, (_, index) => `t-prev-${index}`),
-    );
-    expect(pack.brief?.text).toContain('signed licence');
-    expect(pack.goal_target).toEqual({ status: 'set', value: 73, unit: '%' });
-    expect(pack.conversation.window?.shown).toBe(shown);
-  });
-
   it('publishes the fallback in the executable context policy', () => {
     expect(CONTEXT_POLICY.coach_converse.memory_window).toMatchObject({
       verbatim_turns: CONTEXT_PACK_RECENT_TURNS_CAP,

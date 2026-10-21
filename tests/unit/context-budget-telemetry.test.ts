@@ -23,12 +23,6 @@ import {
   computeOverBudget,
   CONTEXT_SECTION_BUDGETS,
 } from '../../src/orchestrator-v5/context/context-budget-telemetry.js';
-import {
-  projectBrief,
-  projectConversation,
-  CONTEXT_PACK_RECENT_TURNS_CAP,
-} from '../../src/orchestrator-v5/context/context-pack-assembler.js';
-import type { SessionTurnWithContent } from '../../src/orchestrator-v5/session/conversation-content.js';
 import { capConversationText, CONVERSATION_TEXT_CAP } from '../../src/orchestrator-v5/commit.js';
 
 let emitSpy: ReturnType<typeof vi.spyOn>;
@@ -221,90 +215,11 @@ describe('emitContextTruncation (v5.context_truncation)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Cut site 3: brief slice (context-pack-assembler projectBrief)
-// ---------------------------------------------------------------------------
-
-describe('cut site: brief slice (projectBrief)', () => {
-  it('emits a DISCLOSED brief truncation event with exact original_chars', () => {
-    const brief = 'b'.repeat(4_321);
-    const projected = projectBrief(brief);
-    expect(projected).not.toBeNull();
-    expect(projected!.truncated).toBe(true);
-
-    const briefCuts = eventsNamed(TelemetryEvents.V5ContextTruncation).filter(
-      (e) => e.section === 'brief',
-    );
-    expect(briefCuts).toHaveLength(1);
-    expect(briefCuts[0]).toMatchObject({
-      site: 'context-pack-assembler.projectBrief',
-      original_chars: 4_321,
-      kept_chars: 2_000,
-      strategy: 'hard_slice',
-      disclosed: true, // the pack carries truncated/original_chars in-band
-    });
-  });
-
-  it('emits nothing when the brief fits', () => {
-    projectBrief('short brief');
-    expect(eventsNamed(TelemetryEvents.V5ContextTruncation)).toHaveLength(0);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Cut site 4: window slice (context-pack-assembler projectConversation)
-// ---------------------------------------------------------------------------
-
-function turnFixture(i: number): SessionTurnWithContent {
-  return {
-    id: `row_${i}`,
-    scenario_id: 'scenario_fixture',
-    user_id: null,
-    turn_id: `turn_${i}`,
-    turn_class: 'handler',
-    handler_id: 'run_analysis',
-    request_hash: 'sha256:test',
-    response_emitted: true,
-    llm_calls_used: 0,
-    duration_ms: 0,
-    created_at: new Date(2026, 0, 1, 0, i).toISOString(),
-    user_message: `question ${i}`,
-    assistant_message: `answer ${i}`,
-  };
-}
-
-describe('cut site: window slice (projectConversation)', () => {
-  it('emits a DISCLOSED window-slice truncation event when prior turns exceed the cap', () => {
-    const turns = Array.from({ length: 9 }, (_, i) => turnFixture(i));
-    const projected = projectConversation(turns, false);
-    expect(projected.recent_turns).toHaveLength(CONTEXT_PACK_RECENT_TURNS_CAP);
-
-    const cuts = eventsNamed(TelemetryEvents.V5ContextTruncation).filter(
-      (e) => e.section === 'conversation',
-    );
-    expect(cuts).toHaveLength(1);
-    expect(cuts[0].site).toBe('context-pack-assembler.projectConversation');
-    expect(cuts[0].strategy).toBe('window_slice');
-    // Disclosure is now unconditional — the pack carries {shown, available}.
-    expect(cuts[0].disclosed).toBe(true);
-    // Chars accounting: message content of ALL prior turns vs the kept 5.
-    const chars = (t: ReturnType<typeof turnFixture>) =>
-      (t.user_message?.length ?? 0) + (t.assistant_message?.length ?? 0);
-    expect(cuts[0].original_chars).toBe(turns.reduce((a, t) => a + chars(t), 0));
-    expect(cuts[0].kept_chars).toBe(turns.slice(0, CONTEXT_PACK_RECENT_TURNS_CAP).reduce((a, t) => a + chars(t), 0));
-  });
-
-  it('emits nothing at or under the cap', () => {
-    projectConversation(Array.from({ length: 5 }, (_, i) => turnFixture(i)), false);
-    expect(eventsNamed(TelemetryEvents.V5ContextTruncation)).toHaveLength(0);
-  });
-});
-
-// ---------------------------------------------------------------------------
 // Cut site 5: capConversationText (commit.ts persistence cap)
 // ---------------------------------------------------------------------------
 
 describe('cut site: capConversationText (commit.ts)', () => {
-  it('emits a DISCLOSED hard-slice event with the exact original length', () => {
+  it('emits an UNDISCLOSED hard-slice event with the exact original length', () => {
     const long = 'z'.repeat(CONVERSATION_TEXT_CAP + 777);
     const capped = capConversationText(long, 'user_message');
     expect(capped).toHaveLength(CONVERSATION_TEXT_CAP);
@@ -317,9 +232,9 @@ describe('cut site: capConversationText (commit.ts)', () => {
       original_chars: CONVERSATION_TEXT_CAP + 777,
       kept_chars: CONVERSATION_TEXT_CAP,
       strategy: 'hard_slice',
-      // Disclosure is unconditional — projectConversation marks the at-cap
-      // turn truncated:true, so downstream LLMs can see this cut.
-      disclosed: true,
+      // No served lane marks this cut to the model, so the receipt must not
+      // claim disclosure (the retired assembler's projectConversation did).
+      disclosed: false,
     });
   });
 

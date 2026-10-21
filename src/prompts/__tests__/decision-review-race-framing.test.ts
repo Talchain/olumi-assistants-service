@@ -121,10 +121,9 @@ const RACE_IDIOMS: readonly string[] = [
   // the corpus was blind to the same race stated from the BACK of the field.
   // "close behind" reached the rewritten close_call exemplar in the monolith
   // and not one member saw it. This is not a hypothetical family: the live-leak
-  // corpus in `orchestrator-v5/context/withheld-history-redaction.ts` records
-  // "…with Standardise on Dell XPS close behind at 34%" as a string that
-  // actually reached a user, and that module already redacts the family
-  // downstream. A prompt asking for it is asking for a string the wire strips.
+  // corpus in `orchestrator-v5/context/withheld-history-redaction.ts` (deleted
+  // in deletion 8, 22 Oct 2026, as unreachable) recorded "…with Standardise on
+  // Dell XPS close behind at 34%" as a string that actually reached a user.
   'close behind',
   'falls behind',
   'lags behind',

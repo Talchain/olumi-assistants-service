@@ -2,27 +2,16 @@ import { describe, expect, it } from 'vitest';
 
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
-import type { ContextPack } from '../../context/context-pack-assembler.js';
 import { isSuccessfulRunAnalysisFact } from '../../context/freshness.js';
 import type { SuccessfulHandlerOutcome } from '../../tools/handler-outcome.js';
-import { COACHING_TEXT, detectCoachingSignal } from '../coaching-signals.js';
+import { COACHING_TEXT, detectCoachingSignal, type CoachingContextPack } from '../coaching-signals.js';
 
 function makeContextPack(overrides: {
   topDrivers?: readonly string[];
   analysisPresent?: boolean;
-} = {}): ContextPack {
+} = {}): CoachingContextPack {
   const driverLabels = overrides.topDrivers ?? ['Customer Churn'];
   return {
-    version: '2.0',
-    stage: 'analyse',
-    graph: {
-      nodes: [],
-      edges: [],
-      options: [],
-      goals: [],
-      constraints: [],
-      counts: { nodes: 0, edges: 0, options: 0, goals: 0, constraints: 0 },
-    },
     analysis:
       overrides.analysisPresent === false
         ? null
@@ -39,21 +28,6 @@ function makeContextPack(overrides: {
             fragile_edges: [],
             staleness_reason: null,
           },
-    conversation: {
-      recent_turns: [],
-      turn_count: 1,
-      last_tool_used: null,
-      pending_confirmation: false,
-    },
-    coaching: {
-      draft_coaching: null,
-      decision_review: null,
-      last_coaching_signal: null,
-    },
-    compound_detected: false,
-    compound_pattern_matched: null,
-    parsed_quantities: [],
-    system_event: null,
   };
 }
 
