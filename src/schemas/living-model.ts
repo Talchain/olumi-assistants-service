@@ -112,7 +112,13 @@ export const LivingLink = z.object({
     unit: z.string().nullable().describe(
       "The unit of the `to` item's quantity, written exactly as that item writes its own unit (e.g. \"units\", \"£\"). The effect is always per +1 of `from`, so never add \"per …\". Null when `to` has no unit."),
     sd: z.number().nullable(),
-    sign: z.enum(['+', '-']).nullable(),
+    /**
+     * The engine has no "unknown" direction, so an unsigned link is left out of the model the engine runs on (mapper
+     * `link_sign_unknown`). On 21 Oct, every overnight core hiring draft held Olumi's own goal links unsigned, which cut
+     * the goal off from its factors and left Run disabled. The AI reads this description, so it is the instruction.
+     */
+    sign: z.enum(['+', '-']).nullable().describe(
+      "Which way `to` moves for each +1 of `from`: '+' raises it, '-' lowers it. A link you add yourself (source olumi) always carries your best judgement of its direction, even with no size (form direction_only); it is shown as Olumi's, for the person to confirm or flip. Null only for the person's own link when they did not say which way it goes: then ask them that one question."),
   }).strict().describe('The change in `to` for each +1 of `from`, in the unit of `to`.'),
   ...attribution,
 }).strict();
