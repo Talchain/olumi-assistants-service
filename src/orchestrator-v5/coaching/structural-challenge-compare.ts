@@ -51,7 +51,7 @@ type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
-interface OptionRow {
+export interface OptionRow {
   readonly win: number | null;
   readonly goal: number | null;
   readonly mean: number | null;
@@ -318,6 +318,20 @@ const identicalCarriers = (identicalArms: boolean, groups: readonly (readonly st
 
 function deltaOnlyBasis(noise: RunDeltaNoiseVerdictLiteral): StructuralChallengeClaimV1['basis'] {
   return noise === 'within_noise' ? 'within_noise' : noise === 'not_noise_qualified' ? 'not_noise_qualified' : 'no_licensed_boundary';
+}
+
+/**
+ * TRACK 3 (`stress_test`): ONE Run fact's per-option rows, read exactly as the comparison below reads each side — the
+ * read-time horizon gate, the submitted-identity checks, a withheld goal figure kept null — and whether that Run licenses
+ * comparing its levels with the stated target. Null when the fact is unreadable.
+ */
+export function licensedOptionRows(fact: HandlerFact, graph: unknown, goalNodeId: string, goalLevelTarget: number | null):
+  { readonly rows: ReadonlyMap<string, OptionRow>; readonly targetLicensed: boolean } | null {
+  const gated = fact.fact_type === 'run_analysis'
+    ? { ...fact, result: withReadTimeHorizonGate(fact.result, graph, fact.result.enrichment) } : fact;
+  const echoes = readRunEchoes(gated);
+  const rows = echoes === null ? null : optionRows(echoes.enrichment, gated);
+  return rows === null ? null : { rows, targetLicensed: licensedTarget(gated, graph, goalNodeId, goalLevelTarget) };
 }
 
 export function compareStructuralChallenge(input: CompareStructuralChallengeInput): CompareStructuralChallengeOutput {
