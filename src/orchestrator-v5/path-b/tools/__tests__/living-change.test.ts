@@ -131,3 +131,63 @@ describe('a core scenario changes through its living model', () => {
       .toMatchObject({ status: 'refused', reason: 'not_a_core_scenario' });
   });
 });
+
+/**
+ * Codex r6 on #3522: a condition could never be corrected. An edit is a removal plus an addition, and every condition removal
+ * was refused, so a met prerequisite kept withholding the goal chance. SYNTHETIC wording.
+ */
+describe('a condition is corrected through a proposal the person approves, and kept in history', () => {
+  const REQUIRED = 'Only after supplier approval can f be pushed.';
+  const OBTAINED = 'We got the supplier approval yesterday.';
+  const gated = (): LivingModelT => ({ ...structuredClone(KNOWN_ANSWER),
+    conditions: [{ text: 'Only after supplier approval', applies_to: ['f_g'], role: 'prerequisite', source: 'user', party: null, quote: REQUIRED }] });
+  const resolved = (): LivingModelT => ({ ...gated(),
+    conditions: [{ text: 'Supplier approval obtained', applies_to: ['f_g'], role: 'assumption', source: 'user', party: null, quote: OBTAINED }] });
+  const goal = (g: Rec) => (g.nodes as Rec[]).find((n) => n.kind === 'goal')!;
+  const said = { ...ctx, verified_user_messages: [REQUIRED], user_turn_text: OBTAINED };
+
+  it('"only after supplier approval" → "supplier approval obtained": the approval lifts the withheld chance and keeps the old condition', async () => {
+    const p = product(gated());
+    expect(goal(p.saved())).not.toHaveProperty('goal_threshold_raw');
+    const proposals = new ProposalStore();
+    const out = await proposeLivingChange({ dispatch: p.dispatch, proposals }, said, args(resolved()));
+    expect(out.status, JSON.stringify(out)).toBe('ok');
+    const changes = (out as { data: Rec }).data.changes as Rec[];
+    expect(changes.map((c) => `${c.kind}:${c.change}`).sort()).toEqual(['condition:add', 'condition:remove', 'history:add']);
+    expect(p.registered).toHaveLength(0);
+
+    const applied = await applyLivingChange({ dispatch: p.dispatch, proposals }, said, String((out as { data: Rec }).data.proposal_id));
+    expect(applied).toMatchObject({ status: 'ok', mutated: true });
+    expect(goal(p.saved())).toMatchObject({ goal_threshold_raw: 100 });
+    const saved = p.saved().living_model as LivingModelT;
+    expect(saved.conditions.map((c) => c.text)).toEqual(['Supplier approval obtained']);
+    expect(saved.history).toEqual([{ id: 'condition', change: 'superseded', old: JSON.stringify(gated().conditions[0]), quote: OBTAINED }]);
+  });
+
+  it('NEGATIVE: Olumi removing the person\'s condition only proposes it; nothing changes until the person approves', async () => {
+    const p = product(gated());
+    const proposals = new ProposalStore();
+    const olumiOnly = { ...gated(), conditions: [] };
+    const out = await proposeLivingChange({ dispatch: p.dispatch, proposals }, { ...said, user_turn_text: 'Run it again.' }, args(olumiOnly));
+    expect(out).toMatchObject({ status: 'ok' });
+    expect(p.registered).toHaveLength(0);
+    expect(goal(p.saved())).not.toHaveProperty('goal_threshold_raw');
+    const id = String((out as { data: Rec }).data.proposal_id);
+    // Codex r1 on #3576: this turn's words do not state the change, so the kept condition carries no one's words.
+    expect((proposals.get(id)!.living_model as LivingModelT).history).toEqual([{ id: 'condition', change: 'superseded', old: JSON.stringify(gated().conditions[0]), quote: null }]);
+    expect(await applyLivingChange({ dispatch: p.dispatch, proposals }, { ...said, authenticated_user_id: 'user-b' }, id))
+      .toMatchObject({ status: 'refused', reason: 'not_authorised' });
+    expect(p.registered).toHaveLength(0);
+    expect((p.saved().living_model as LivingModelT).conditions.map((c) => c.role)).toEqual(['prerequisite']);
+  });
+
+  it('NEGATIVE: a history entry the AI writes for the removed condition, with words the person never said, is replaced by the host\'s', async () => {
+    const p = product(gated());
+    const proposals = new ProposalStore();
+    const forged = { ...resolved(), history: [{ id: 'condition', change: 'superseded' as const, old: JSON.stringify(gated().conditions[0]),
+      quote: 'I withdraw the supplier prerequisite.' }] };
+    const out = await proposeLivingChange({ dispatch: p.dispatch, proposals }, said, args(forged));
+    const history = (proposals.get(String((out as { data: Rec }).data.proposal_id))!.living_model as LivingModelT).history;
+    expect(history).toEqual([{ id: 'condition', change: 'superseded', old: JSON.stringify(gated().conditions[0]), quote: OBTAINED }]);
+  });
+});
