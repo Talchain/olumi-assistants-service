@@ -131,7 +131,7 @@ export function ledgeredAgentsClient(ledger: AgentsClientLedger): OpenAI {
       };
       init?.signal?.addEventListener('abort', () => end('stopped', init.signal?.reason), { once: true });
       const reader = r.body.getReader();
-      const passThrough = new ReadableStream<Uint8Array>({
+      const passThrough = new globalThis.ReadableStream<Uint8Array>({
         async pull(controller) {
           try {
             const { done, value } = await reader.read();
