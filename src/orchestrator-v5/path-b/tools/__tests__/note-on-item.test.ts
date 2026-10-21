@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { UiDirectiveBlockSchema } from '@talchain/schemas/boundary';
 import { NOTE_MAX, noteOnItem } from '../note-on-item.js';
-import { read } from './fixtures.js';
+import { graph, read } from './fixtures.js';
 
 const ctx = { scenario_id: 'scn_1' };
 const NOTE = 'What would make two assistants on shift too few?';
@@ -36,6 +36,35 @@ describe('note_on_item', () => {
     const { dispatch, turn } = setup();
     expect(await noteOnItem({ dispatch }, ctx, args, turn)).toMatchObject({ status: 'refused', reason });
     expect(turn.notes).toBe(0);
+  });
+
+  it('⭐ KA1 (served 9d3ad5ac): a living-model LINK id is accepted, its note on the card where the link starts', async () => {
+    const living = { ...graph(), living_model: { links: [{ id: 'f_g', from: 'staff', to: 'goal' }, { id: 'in_from_elsewhere', from: 'not_a_card', to: 'queue' }, { id: 'nowhere', from: 'a', to: 'b' }] } };
+    const { dispatch, turn } = setup(read({ graph: living }));
+    const out = await noteOnItem({ dispatch }, ctx, { item_id: 'f_g', note: 'How strongly do assistants on shift move this?' }, turn);
+    expect(out).toMatchObject({ status: 'ok', data: { for_link: 'f_g', anchored_on: 'staff',
+      ui_directive: { verb: 'highlight', targets: [{ id: 'staff', label: 'Assistants on shift', kind: 'factor' }], source: 'composer' } } });
+    expect(out.status === 'ok' && UiDirectiveBlockSchema.safeParse(out.data.ui_directive).success).toBe(true);
+    // A link whose start is not a card sits on the card where it ends.
+    const t2 = { notes: 0 };
+    expect(await noteOnItem({ dispatch }, ctx, { item_id: 'in_from_elsewhere', note: NOTE }, t2)).toMatchObject({ status: 'ok', data: { anchored_on: 'queue' } });
+    // NEGATIVE: a link with no card at either end has nowhere to show.
+    expect(await noteOnItem({ dispatch }, ctx, { item_id: 'nowhere', note: NOTE }, { notes: 0 })).toMatchObject({ status: 'refused', reason: 'item_not_in_model' });
+  });
+
+  it('⭐ Codex (fresh, #3548): an id naming BOTH a card and a link is refused as ambiguous, never placed on the card', async () => {
+    const living = { ...graph(), living_model: { links: [{ id: 'queue', from: 'staff', to: 'goal' }] } };
+    const { dispatch, turn } = setup(read({ graph: living }));
+    expect(await noteOnItem({ dispatch }, ctx, { item_id: 'queue', note: NOTE }, turn)).toMatchObject({ status: 'refused', reason: 'item_id_ambiguous' });
+    expect(turn.notes).toBe(0);
+  });
+
+  it('CONTRAST: a card id keeps its own target and carries no link fields', async () => {
+    const living = { ...graph(), living_model: { links: [{ id: 'f_g', from: 'staff', to: 'goal' }] } };
+    const { dispatch, turn } = setup(read({ graph: living }));
+    const out = await noteOnItem({ dispatch }, ctx, { item_id: 'queue', note: NOTE }, turn);
+    expect(out).toMatchObject({ status: 'ok', data: { ui_directive: { targets: [{ id: 'queue' }] } } });
+    expect(out.status === 'ok' && 'for_link' in out.data).toBe(false);
   });
 
   it('one note per turn: the second is refused, the first stands', async () => {
