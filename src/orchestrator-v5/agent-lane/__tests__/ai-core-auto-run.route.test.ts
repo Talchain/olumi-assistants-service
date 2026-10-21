@@ -11,6 +11,7 @@
  * Harness: the real route, SDK, card carrier, Run pipeline and adapters; the write itself is a counted commit (C5's door is
  * proven in `path-b/tools/__tests__`), the model is scripted through global fetch (0 provider calls). SYNTHETIC wording.
  */
+import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
@@ -193,7 +194,7 @@ describe('PATH-B gap 4: commit and Undo each run the existing Run pipeline once;
     app.post('/assist/v1/scenarios/:id/graph', async () => world.ranOnSaved
       ? withCanonicalAnalysisView({ graph: world.graph, graph_hash: world.hash, analysis_ready: READY, analysis_state: STATE, analysis_result: { ...RESULT, computed_against_hash: world.hash },
           current_read: { run_state: STATE.run_state, run_id: 'fixture-read-run', computed_against_hash: world.hash, ...(world.delta ? { run_delta: DELTA } : {}) } }, SCENARIO)
-      : { graph: world.graph, graph_hash: world.hash, analysis_ready: READY,
+      : { graph: world.graph, graph_hash: world.hash, graph_identity_hash: computeGraphIdentityHash(world.graph as never), analysis_ready: READY,
           ...(world.prior ? { analysis_state: PRIOR_STATE, analysis_result: PRIOR_RESULT } : {}) });
     await app.register(route.agentV1TurnRoute);
     await app.ready();
@@ -257,6 +258,17 @@ describe('PATH-B gap 4: commit and Undo each run the existing Run pipeline once;
     const r = await post({ turn_id: randomUUID(), message: 'What should I question here?', source: 'composer' });
     expect(r.statusCode, r.body).toBe(200);
     expect(outputOf('note_call'), 'PRECONDITION: the tool accepted the note at the earlier revision').toMatchObject({ status: 'ok' });
+    expect(((r.json() as Json).blocks as Json[] | undefined ?? []).filter((b) => b.type === 'ui_directive')).toHaveLength(0);
+  });
+
+  it('⭐ Codex R2: a concurrent RENAME (same analysis hash, new identity) → the note naming the old card is not shipped', async () => {
+    outputs = [[{ type: 'function_call', name: 'note_on_item', call_id: 'note_call', args: { item_id: 'f', note: 'What would make Capacity stop driving Velocity?' } }], [{ type: 'message', text: 'I have put a question beside Capacity.' }]];
+    const renamed = { ...GRAPH_AT_4, nodes: GRAPH_AT_4.nodes.map((n) => n.id === 'f' ? { ...n, label: 'Team size' } : n) };
+    expect(computeAnalysisAffectingGraphHash(renamed as never), 'PRECONDITION: a rename leaves the analysis hash alone').toBe(HASH_4);
+    beforeModelCall = (body) => { if (toolOutputs(body).some((o) => o.call_id === 'note_call')) Object.assign(world, { graph: renamed }); };
+    const r = await post({ turn_id: randomUUID(), message: 'What should I question here?', source: 'composer' });
+    expect(r.statusCode, r.body).toBe(200);
+    expect(outputOf('note_call'), 'PRECONDITION: the tool accepted the note on the model as it was').toMatchObject({ status: 'ok' });
     expect(((r.json() as Json).blocks as Json[] | undefined ?? []).filter((b) => b.type === 'ui_directive')).toHaveLength(0);
   });
 

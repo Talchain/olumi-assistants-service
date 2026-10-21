@@ -3,8 +3,8 @@
  * ONE item of the saved model and says one short thing beside it: a question, a challenge or what is missing. The note is
  * the existing `ui_directive` block (`highlight`, one target, `note` ≤ 140, `source: 'composer'`), which the canvas shows
  * beside the item as Olumi's. It writes nothing to the model.
- *  · `ok` with `data.ui_directive` (the block, schema-checked) and `data.graph_hash` (the revision it was read at: the route
- *    ships the note only beside that same revision);
+ *  · `ok` with `data.ui_directive` (the block, schema-checked) and `data.graph_identity` (identity.v1 of the model it was read
+ *    on, labels included: the route ships the note only while the saved model is still that model);
  *  · `refused('item_not_in_model')` — the id is not a card of the saved model (the decision has no card note; links wait for
  *    a link identity the reader exposes);
  *  · `refused('note_empty' | 'note_too_long')` — strict schemas carry no length limits, so the adapter keeps the contract's;
@@ -46,6 +46,7 @@ export async function noteOnItem(deps: Pick<RunDeps, 'dispatch'>, ctx: Pick<Agen
   if (turn.notes > 0) return refused('one_note_per_turn');
   const saved = await readSaved(deps, ctx.scenario_id);
   if (!isSavedRead(saved)) return saved.status === 'refused' ? refused('item_not_in_model') : saved;
+  if (saved.identity === null) return refused('item_not_in_model');
   const nodes = recs(saved.graph.nodes);
   const node = nodes.find((n) => n.id === args.item_id);
   const label = typeof node?.label === 'string' ? node.label.trim() : '';
@@ -56,5 +57,5 @@ export async function noteOnItem(deps: Pick<RunDeps, 'dispatch'>, ctx: Pick<Agen
     note, source: 'composer' });
   if (!block.success) return refused('item_not_in_model');
   turn.notes += 1;
-  return ok({ ui_directive: block.data, graph_hash: saved.graphHash });
+  return ok({ ui_directive: block.data, graph_identity: saved.identity });
 }

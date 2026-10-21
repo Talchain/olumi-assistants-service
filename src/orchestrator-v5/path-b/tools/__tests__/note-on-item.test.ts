@@ -15,7 +15,7 @@ describe('note_on_item', () => {
   it('a factor of the saved model gets the note beside it: highlight, one target with its own label and kind, Olumi as composer', async () => {
     const { dispatch, turn } = setup();
     const out = await noteOnItem({ dispatch }, ctx, { item_id: 'staff', note: `  ${NOTE} ` }, turn);
-    expect(out).toEqual({ status: 'ok', mutated: false, ran: false, data: { graph_hash: 'h_one', ui_directive: {
+    expect(out).toEqual({ status: 'ok', mutated: false, ran: false, data: { graph_identity: 'id_one', ui_directive: {
       type: 'ui_directive', verb: 'highlight', targets: [{ id: 'staff', label: 'Assistants on shift', kind: 'factor' }], note: NOTE, source: 'composer' } } });
     expect(out.status === 'ok' && UiDirectiveBlockSchema.safeParse(out.data.ui_directive).success).toBe(true);
     // A read only: the graph route, never a write.
