@@ -6,7 +6,7 @@
  * (no module mock: the kernel, the mapper and the construction's own helpers are real). SYNTHETIC brief.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { BuildModelParams, REVIEW_FIRST, buildModel, type DraftDeps } from '../draft-tool.js';
+import { BuildFromBriefParams, BuildModelParams, REVIEW_FIRST, REVISE_ONCE, buildModel, type DraftDeps } from '../draft-tool.js';
 import { applyKernel } from '../../living-model/kernel.js';
 import { mapLivingModel } from '../../living-model/mapper.js';
 import type { LivingModelT } from '../../../../schemas/living-model.js';
@@ -304,5 +304,66 @@ describe('the critic (21 Oct): a second model reviews the first draft of the tur
     const p = product({ graph: [EMPTY, MODEL], register: [SAVED], versions: [VERSIONS(true)] });
     const out = await buildModel({ ...p, review: { done: false }, critique: async () => undefined }, ctx, ARGS);
     expect(out).toMatchObject({ status: 'ok', mutated: true });
+  });
+});
+
+describe('the construction role (21 Oct, buddy AMEND/PROCEED): Olumi\'s drafter writes the model from the brief, inside the build', () => {
+  const CRITIQUE = { measurable_goal: null, missing: [], connect: [], question: 'How many visitors do you need to serve on a Saturday?' };
+  const FIRST: LivingModelT = { ...LIVING, aims: [{ ...LIVING.aims[0]!, text: 'Saturday visitors, first draft' }] };
+  const BRIEF_ONLY = { brief: BRIEF };
+
+  it('brief only: the drafter drafts, the critic reads that draft, the drafter revises once IN the tool, and the revision is what is saved', async () => {
+    const draft = vi.fn(async (input: string) => (JSON.parse(input).critique === undefined ? FIRST : LIVING));
+    const critique = vi.fn(async (_input: string) => CRITIQUE);
+    const p = product({ graph: [EMPTY, MODEL], register: [SAVED], versions: [VERSIONS(true)] });
+    const out = await buildModel({ ...p, review: { done: false }, critique, draft }, ctx, BRIEF_ONLY);
+    expect(out, 'never handed back to the conversation agent as review_first').toMatchObject({ status: 'ok', mutated: true });
+    expect(draft).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(draft.mock.calls[0]![0])).toEqual({ brief: BRIEF, said: [BRIEF, BRIEF] });
+    expect(JSON.parse(critique.mock.calls[0]![0])).toMatchObject({ brief: BRIEF, draft: { aims: [{ text: 'Saturday visitors, first draft' }] } });
+    expect(JSON.parse(draft.mock.calls[1]![0])).toMatchObject({ brief: BRIEF, critique: CRITIQUE, instruction: REVISE_ONCE });
+    const saved = JSON.stringify(registerCalls(p).map((c) => c.body));
+    expect(saved).toContain('Visitors served on Saturdays');
+    expect(saved, 'the first draft is never what is saved once a revision exists').not.toContain('first draft');
+  });
+
+  it('buddy BLOCK on #3574: what the person said later in the conversation reaches the draft, the critic and the revision, oldest first', async () => {
+    const CORRECTION = 'Actually the second assistant would only work mornings.';
+    const said = { ...ctx, verified_user_messages: [BRIEF, CORRECTION], user_turn_text: 'Please build the model.' };
+    const draft = vi.fn(async (input: string) => (JSON.parse(input).critique === undefined ? FIRST : LIVING));
+    const critique = vi.fn(async (_input: string) => CRITIQUE);
+    const p = product({ graph: [EMPTY, MODEL], register: [SAVED], versions: [VERSIONS(true)] });
+    await buildModel({ ...p, review: { done: false }, critique, draft }, said, BRIEF_ONLY);
+    const heard = [BRIEF, CORRECTION, 'Please build the model.'];
+    expect(JSON.parse(draft.mock.calls[0]![0]).said).toEqual(heard);
+    expect(JSON.parse(critique.mock.calls[0]![0]).said).toEqual(heard);
+    expect(JSON.parse(draft.mock.calls[1]![0]).said).toEqual(heard);
+  });
+
+  it('CONTRAST: the default path\'s critic input is unchanged (no `said`)', async () => {
+    const critique = vi.fn(async (_input: string) => CRITIQUE);
+    const p = product({ graph: [EMPTY, EMPTY, MODEL], register: [SAVED], versions: [VERSIONS(true)] });
+    await buildModel({ ...p, review: { done: false }, critique }, ctx, ARGS);
+    expect(Object.keys(JSON.parse(critique.mock.calls[0]![0]))).toEqual(['brief', 'draft', 'gaps']);
+  });
+
+  it('a failed draft writes nothing and is said as a failed draft; a failed revision keeps the first draft', async () => {
+    const none = product({ graph: [EMPTY] });
+    const critique = vi.fn(async (_input: string) => CRITIQUE);
+    expect(await buildModel({ ...none, review: { done: false }, critique, draft: async () => undefined }, ctx, BRIEF_ONLY))
+      .toMatchObject({ status: 'unavailable', reason: 'draft_failed' });
+    expect(registerCalls(none)).toEqual([]);
+    expect(critique, 'no draft, nothing to review').not.toHaveBeenCalled();
+    const p = product({ graph: [EMPTY, MODEL], register: [SAVED], versions: [VERSIONS(true)] });
+    const draft = vi.fn(async (input: string) => (JSON.parse(input).critique === undefined ? LIVING : undefined));
+    expect(await buildModel({ ...p, review: { done: false }, critique, draft }, ctx, BRIEF_ONLY)).toMatchObject({ status: 'ok', mutated: true });
+  });
+
+  it('CONTRAST: a brief that is not the person\'s words is refused before any draft; the arm\'s schema takes the brief and nothing else', async () => {
+    const draft = vi.fn(async (_input: string) => LIVING);
+    expect(await buildModel({ ...product({}), draft }, ctx, { brief: 'Something nobody typed.' })).toMatchObject({ status: 'refused', reason: 'brief_not_users_words' });
+    expect(draft).not.toHaveBeenCalled();
+    expect(BuildFromBriefParams.safeParse(BRIEF_ONLY).success).toBe(true);
+    expect(BuildFromBriefParams.safeParse({ brief: BRIEF, model: LIVING }).success, 'the conversation agent cannot author a competing draft').toBe(false);
   });
 });

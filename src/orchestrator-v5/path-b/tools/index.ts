@@ -19,7 +19,7 @@ import { tool, type Tool } from '@openai/agents';
 import { toolArgumentsAsSent } from '../../agent-lane/runtime/agent-loop.js';
 import type { AgentLaneMode, AgentToolContext } from '../../agent-lane/runtime/agent-tools.js';
 import { READ_CANONICAL_CONTEXT, ReadCanonicalContextParams, readCanonicalContext } from './context-tool.js';
-import { BUILD_MODEL_FROM_BRIEF, BuildModelParams, buildModel, type DraftDeps } from './draft-tool.js';
+import { BUILD_MODEL_FROM_BRIEF, BuildFromBriefParams, BuildModelParams, buildModel, type DraftDeps } from './draft-tool.js';
 import { RUN_ANALYSIS, RunAnalysisParams, recordedRun, runAnalysis, type RunDeps } from './run-tool.js';
 import { APPLY_CHANGE, ApplyChangeParams, PROPOSE_CHANGE, ProposeChangeParams, applyChange, proposeChange, type ChangeDeps } from './change-tools.js';
 import { LivingChangeParams, applyLivingChange, isLivingProposal, proposeLivingChange } from './living-change.js';
@@ -49,6 +49,9 @@ export const TOOL_DESCRIPTIONS = {
   stress_test:
     'Only when the person asks to stress-test an assumption, or to try other values for one. Name one to three links or factors from read_canonical_context with the values to test, in their own units, and say whether the person gave those values; optionally one named alternative link. Nothing is saved. Each result is that tested setting’s own chance of meeting the goal, in this model, as the result would show it, or why it is not shown: say each option’s lowest and highest with the settings that give them. Never average the settings or call anything across them a chance. Never use this to compute something a Run could not use (an unsized link, or a range with no distribution): propose a size with propose_change instead. Say where the two explanations differ; never combine them, never call an option best and never recommend one.',
 } as const;
+
+/** The build tool when Olumi's construction role drafts (`model-drafter.ts`): the caller supplies the brief only. */
+export const BUILD_FROM_BRIEF_DESCRIPTION = 'Create and save Olumi\u2019s provisional first Living Model from the user\u2019s actual brief, supplied verbatim from their messages. Olumi\u2019s model builder drafts the model from the brief; supply the brief only. Use only when there is no existing model to replace. Report creation only from the tool\u2019s confirmed outcome.';
 
 export type PathBToolDeps = ChangeDeps & DraftDeps & RunDeps & Pick<StressDeps, 'runStressVariant'> & ResearchDeps & {
   /**
@@ -113,8 +116,9 @@ export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLa
     read,
     tool({
       name: BUILD_MODEL_FROM_BRIEF,
-      description: TOOL_DESCRIPTIONS.build_model_from_brief,
-      parameters: BuildModelParams,
+      // The construction role's arm: the brief only, and Olumi's drafter writes the model (`DraftDeps.draft`).
+      description: deps.draft === undefined ? TOOL_DESCRIPTIONS.build_model_from_brief : BUILD_FROM_BRIEF_DESCRIPTION,
+      parameters: deps.draft === undefined ? BuildModelParams : BuildFromBriefParams,
       execute: async (args) => record(BUILD_MODEL_FROM_BRIEF, args, await buildModel({ ...deps, review }, ctx, args)),
       errorFunction: null,
     }),

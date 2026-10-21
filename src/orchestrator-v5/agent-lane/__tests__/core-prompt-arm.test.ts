@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { CORE_ALIGNED_INSTRUCTIONS, CORE_NEXT_STEP, CORE_REPLY_INSTRUCTION, NOTE_ON_ITEM_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION, instructionsForMode, MODEL_RELATIVE_NAMING_INSTRUCTION,
-  promptArmOf, coreEffortArmOf } from '../../../routes/agent-v1-turn.js';
+  promptArmOf, coreEffortArmOf, drafterArmOf } from '../../../routes/agent-v1-turn.js';
 import { coreBudget } from '../model-budgets.js';
 import { OLUMI_PURPOSE_INSTRUCTION } from '../olumi-purpose.js';
 import { HOST_SCIENCE_AND_SOURCE_RULES, HOST_TOOL_CONTRACT } from '../coach-route-v0_2.js';
@@ -58,6 +58,10 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     // selects anything. Every other mode keeps arm A.
     for (const header of [undefined, 'A', 'B', 'C', 'b', ['B']]) expect(promptArmOf('core', header)).toBe('B');
     expect(promptArmOf('full', 'B')).toBe('A');
+    // The construction-role arm (buddy AMEND/PROCEED, 21 Oct): header D on a core turn only.
+    expect(drafterArmOf('core', 'D')).toBe(true);
+    for (const header of [undefined, 'B', 'd', ['D']]) expect(drafterArmOf('core', header)).toBe(false);
+    expect(drafterArmOf('full', 'D')).toBe(false);
   });
 
   it('arm C ADOPTED (Paul 21 Oct, long replies narrating the tools; R2 100 % at 90 words median): the core reply rule speaks in the user\u2019s terms with a length bound', () => {
