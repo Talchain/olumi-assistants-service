@@ -461,6 +461,21 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
     for (const b of bodiesSeen) expect({ model: b.model, effort: b.reasoning?.effort, max: b.max_output_tokens }).toEqual({ model: 'gpt-6.1-sol', effort: 'high', max: 12000 });
   });
 
+  it("Paul's served test (21 Oct, 31711a9): every core call is told to complete Olumi's own items with labelled estimates, and never to put one on the person's item", async () => {
+    bodiesSeen.length = 0;
+    expect(draftCall(await turn())).toMatchObject({ ok: true, mutated: true });
+    expect(bodiesSeen.length).toBeGreaterThan(0);
+    for (const b of bodiesSeen) {
+      expect(String(b.instructions)).toContain("Build a model the analysis can run on. Each item Olumi adds is complete and visibly Olumi's");
+      expect(String(b.instructions)).toContain("Never put Olumi's figure on the person's or a party's item, and never set the goal's target figure");
+      const build = JSON.stringify((b.tools as Json[]).find((t) => t.name === 'build_model_from_brief')?.parameters ?? null);
+      expect(build).toContain("For Olumi's own factor (source olumi), give Olumi's provisional range in a stated unit");
+      expect(build).toContain("For Olumi's own risk (source olumi), Olumi's provisional range");
+      expect(build).toContain("For Olumi's own link (source olumi), give Olumi's provisional range (form range)");
+      expect(build, 'the old blanket rule is gone').not.toContain('never guessed');
+    }
+  });
+
   it('THIN CORE budget (real route, Codex #3587): a first build under the effort arm runs at that effort with the full builder budget, whatever the arm header', async () => {
     bodiesSeen.length = 0;
     expect(draftCall(await turn({ 'x-olumi-prompt-arm': 'B', 'x-olumi-core-effort': 'medium' }))).toMatchObject({ ok: true, mutated: true });

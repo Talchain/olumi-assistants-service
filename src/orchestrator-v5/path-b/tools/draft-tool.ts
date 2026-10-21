@@ -59,7 +59,7 @@ export const REVIEW_FIRST = 'Nothing was saved yet: a second reviewer read your 
   + 'new inference of yours is Olumi\'s (source olumi, quote null), while every item the person or another party stated keeps its source, '
   + 'quote and uncertainty unchanged. Every option except the status quo (which changes nothing) reaches the goal through what it changes: give its link a direction when you can '
   + 'judge one, else form unknown with sign null so the person can say which way. Connect other items only where there is a real '
-  + 'causal relationship; context may stay unconnected. Never invent a chance, a strength or a target figure to complete the model: ask for it instead. In your reply, '
+  + 'causal relationship; context may stay unconnected. Never put a figure the person or a party did not give under their item, and never a target figure: ask for those. Olumi\'s own items carry Olumi\'s provisional ranges, labelled as Olumi\'s. In your reply, '
   + 'say which items are Olumi\'s suggestions, and ask the critique\'s question if it is still open.';
 
 const nodesIn = (graph: Record<string, unknown>): number => (Array.isArray(graph.nodes) ? graph.nodes.length : 0);
