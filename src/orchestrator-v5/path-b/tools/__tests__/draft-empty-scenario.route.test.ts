@@ -468,7 +468,7 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
     expect(bodiesSeen.length).toBeGreaterThan(0);
     for (const b of bodiesSeen) {
       expect(String(b.instructions)).toContain("Build a model the analysis can run on. Each item Olumi adds is complete and visibly Olumi's");
-      expect(String(b.instructions)).toContain("Never put Olumi's figure on the person's or a party's item, and never set the goal's target figure");
+      expect(String(b.instructions)).toContain("give Olumi's provisional estimate of it with estimate_by olumi, as wide as what is genuinely unknown; never change or mix with a figure they gave, and never set the goal's target figure");
       const build = JSON.stringify((b.tools as Json[]).find((t) => t.name === 'build_model_from_brief')?.parameters ?? null);
       expect(build).toContain("For Olumi's own factor (source olumi), give Olumi's central estimate in value, with low and high around it");
       expect(build).toContain("For Olumi's own risk (source olumi), Olumi's provisional range");

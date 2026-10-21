@@ -31,8 +31,20 @@ const attribution = {
   quote: z.string().nullable().describe("The person's exact words that state this item, copied verbatim. Null for Olumi's own items."),
 };
 
+/**
+ * Per-figure authorship (DL 21 Oct, buddy SIMPLER): Olumi's provisional estimate of a WHOLLY missing figure on an item the
+ * person or a party named. The item keeps its source and quote; only this figure is Olumi's. Track 3 candidate 2: all 22
+ * Q2 factors were the person's with no level, so nothing could be worked out, and the schema could not say "your factor,
+ * Olumi's starting estimate". A saved model without it reads null: unchanged.
+ */
+const estimateBy = z.enum(['olumi']).nullable().default(null).describe(
+  "'olumi' when Olumi supplies this WHOLE figure (value, range and unit) for an item the person or a party named without one: "
+  + 'its provisional estimate, as wide as what is genuinely unknown. Null when the item\'s own source gave the figure, and on '
+  + 'Olumi\'s own items (their source already says so). Never on or mixed with a figure the person or a party gave.');
+
 /** A figure as stated: a point (`value`) or a range (`low`/`high`), never a range collapsed to its midpoint. */
 const figure = {
+  estimate_by: estimateBy,
   value: z.number().nullable(),
   low: z.number().nullable(),
   high: z.number().nullable(),
@@ -109,7 +121,7 @@ export const LivingFactor = z.object({
    */
   value: figure.value.describe(
     "Today's level of this factor, in its unit: one figure here, or a range in low and high (value then null unless a central figure was given). "
-    + "For the person's or a party's factor, only the figures they gave; a level they did not give stays null and is asked for. "
+    + "For the person's or a party's factor, the figures they gave; where they gave none, Olumi's provisional central estimate with a range, with estimate_by olumi, never mixed with theirs. "
     + "For Olumi's own factor (source olumi), give Olumi's central estimate in value, with low and high around it as wide as what is genuinely unknown, in a stated unit."),
   defined_as: definedAs,
   /** TRACK 2 (21 Oct): a limit beside the aim, sent as the legacy lane's limit row (one per quantity). Saved before: null. */
@@ -150,9 +162,12 @@ export const LivingOption = z.object({
 export const LivingRisk = z.object({
   id,
   label: z.string(),
-  occurrence: z.object({ low: z.number().nullable(), high: z.number().nullable() }).strict().describe(
-    'The chance it happens at least once within the window, from 0 to 1 ("5–15%" is low 0.05, high 0.15; one figure is low = high). For a risk the person or a party raised, only the chance they gave, else null and asked for. For Olumi\'s own risk (source olumi), Olumi\'s provisional range, as wide as what is genuinely unknown.'),
-  horizon_months: z.number().nullable().describe('The window that chance is over, in months ("within a year" is 12). Null when not stated, except Olumi\'s own window for Olumi\'s own risk with a chance.'),
+  occurrence: z.object({ estimate_by: estimateBy, low: z.number().nullable(), high: z.number().nullable() }).strict().describe(
+    'The chance it happens at least once within the window, from 0 to 1 ("5–15%" is low 0.05, high 0.15; one figure is low = high). For a risk the person or a party raised, the chance they gave; where they gave none, Olumi\'s provisional range with estimate_by olumi. For Olumi\'s own risk (source olumi), Olumi\'s provisional range. Each as wide as what is genuinely unknown.'),
+  horizon_months: z.number().nullable().describe('The window that chance is over, in months ("within a year" is 12). Null when not stated, except Olumi\'s own window (horizon_by olumi on another\'s risk) when Olumi gives the chance.'),
+  /** Per-figure authorship of the window (buddy: a chance is owned FOR its window; a supplied window is never replaced). */
+  horizon_by: z.enum(['olumi']).nullable().default(null).describe(
+    "'olumi' when Olumi supplies the window for a risk the person or a party raised without one. Null when its source gave it, and on Olumi's own risk."),
   mitigations: z.array(z.object({
     factor_id: id,
     reduction: z.number(),
@@ -191,7 +206,7 @@ export const LivingLink = z.object({
      */
     sign: z.enum(['+', '-']).nullable().describe(
       "Which way `to` moves for each +1 of `from`: '+' raises it, '-' lowers it. For source olumi, give your provisional judgement of direction; use form direction_only only when an end has no unit, else give its size. For source user, party or unverified, preserve only the direction that source supplied. If none was supplied, use sign null and form unknown, then ask. Never put an Olumi-inferred direction under another source."),
-  }).strict().describe("The change in `to` for each +1 of `from`, in the unit of `to`. For Olumi's own link (source olumi), when both ends have a unit, give form range with Olumi's central estimate in value and low and high around it; else direction_only with its sign."),
+  }).strict().describe("The change in `to` for each +1 of `from`, in the unit of `to`. For Olumi's own link (source olumi), when both ends have a unit, give form range with Olumi's central estimate in value and low and high around it; else direction_only with its sign. For the person's or a party's link they gave no size, Olumi's provisional size the same way, with estimate_by olumi; its sign stays the one they gave."),
   ...attribution,
 }).strict();
 

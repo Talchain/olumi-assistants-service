@@ -35,6 +35,8 @@ export type EditOutcome = { readonly model: LivingModelT } | { readonly refused:
 
 const theirs = { source: 'user', party: null, quote: null } as const;
 const noRange = { low: null, high: null } as const;
+/** The person's own figure: an edit replaces the WHOLE figure, so Olumi's estimate of it is gone (per-figure authorship). */
+const theirFigure = { estimate_by: null } as const;
 /** A target figure on Olumi's suggested measure is Olumi's: kept in history, never adopted as the person's (Codex #3585 P1). */
 function supersedeOlumiTarget(m: LivingModelT, a: LivingModelT['aims'][number]): void {
   const t = a.target;
@@ -73,7 +75,7 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       if (edit.unit !== undefined && unit !== null && edit.unit !== unit) return { refused: 'unit_mismatch' };
       const raw = edit.raw_value ?? toRaw(edit.target_id, edit.value);
       if (raw === undefined) return { refused: 'no_frame' };
-      if (f !== undefined) Object.assign(f, { value: raw, ...noRange, unit: unit ?? edit.unit ?? null, ...theirs });
+      if (f !== undefined) Object.assign(f, { ...theirFigure, value: raw, ...noRange, unit: unit ?? edit.unit ?? null, ...theirs });
       else if (a!.target === null) return { refused: 'no_target' };
       else {
         // Today's level keeps the unit the person gave it (Track 3 Q2-02: "30 %" on a goal with no target unit saved as a bare 30):
@@ -106,8 +108,9 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       // Round-trip error only: each bound against the figure itself, within a few units in the last place of those two
       // numbers, never a gap a person could mean (Codex R2/R3: a shared or floored allowance kept 1 out of [2, 1e15]).
       const atMost = (a: number, b: number) => a <= b || Math.abs(a - b) <= 4 * Number.EPSILON * Math.max(Math.abs(a), Math.abs(b));
-      const keep = f.value !== null && f.source === 'user' && atMost(low, f.value) && atMost(f.value, high);
-      Object.assign(f, { value: keep ? f.value : null, low, high, ...theirs });
+      // Olumi's estimate on the person's factor is Olumi's, so a range around it never keeps it as theirs (per-figure authorship).
+      const keep = f.value !== null && f.source === 'user' && f.estimate_by !== 'olumi' && atMost(low, f.value) && atMost(f.value, high);
+      Object.assign(f, { ...theirFigure, value: keep ? f.value : null, low, high, ...theirs });
       return { model: m };
     }
     case 'option_intervention_edit': {
@@ -116,7 +119,7 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       if (o === undefined || f === undefined) return { refused: 'not_in_model' };
       const raw = toRaw(f.id, edit.value);
       if (raw === undefined) return { refused: 'no_frame' };
-      const setting = { factor_id: f.id, value: raw, ...noRange, unit: f.unit, ...theirs };
+      const setting = { factor_id: f.id, ...theirFigure, value: raw, ...noRange, unit: f.unit, ...theirs };
       o.settings = [...o.settings.filter((s) => s.factor_id !== f.id), setting];
       return { model: m };
     }
@@ -159,7 +162,7 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
         : edit.direction_intent === 'preserve' ? existing!.effect.sign : edit.direction_intent === 'negative' ? '-' : '+';
       if (sign === null) return { refused: 'sign_unknown' };
       // The gesture's strength is the engine's coefficient; the model keeps it in the person's units per +1 of `from`.
-      const effect = { form: 'point' as const, value: edit.magnitude * to.cap / from.cap, ...noRange, sd: null, unit: to.unit, sign };
+      const effect = { form: 'point' as const, ...theirFigure, value: edit.magnitude * to.cap / from.cap, ...noRange, sd: null, unit: to.unit, sign };
       if (existing !== undefined) Object.assign(existing, { effect, ...theirs });
       else m.links.push({ id: `${edit.from}__${edit.to}`, from: edit.from, to: edit.to, effect, ...theirs });
       return { model: m };
@@ -222,10 +225,10 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       // Any id already in use: an item, a link, or a node the mapper draws (`decision_…`, a switch) (Codex).
       if ([...m.aims, ...m.options, ...m.factors, ...m.risks, ...m.links].some((x) => x.id === edit.node_id)
         || mapped.graph.nodes.some((n) => n.id === edit.node_id)) return { refused: 'id_exists' };
-      if (edit.node_kind === 'factor') m.factors.push({ id: edit.node_id, label: edit.label, kind: 'factor', value: null, ...noRange, unit: null, defined_as: null, limit: null, ...theirs });
+      if (edit.node_kind === 'factor') m.factors.push({ id: edit.node_id, label: edit.label, kind: 'factor', ...theirFigure, value: null, ...noRange, unit: null, defined_as: null, limit: null, ...theirs });
       else if (edit.node_kind === 'option') m.options.push({ id: edit.node_id, label: edit.label, settings: [], status: 'feasible', developed_from: null, ...theirs });
       // A new risk has no chance yet: never guessed, so it is drawn and the analysis asks for one (mapper: risk_occurrence_unknown).
-      else if (edit.node_kind === 'risk') m.risks.push({ id: edit.node_id, label: edit.label, occurrence: { low: null, high: null }, horizon_months: null, mitigations: [], ...theirs });
+      else if (edit.node_kind === 'risk') m.risks.push({ id: edit.node_id, label: edit.label, occurrence: { estimate_by: null, low: null, high: null }, horizon_months: null, horizon_by: null, mitigations: [], ...theirs });
       else return { refused: 'kind_not_in_slice' };
       return { model: m };
     }

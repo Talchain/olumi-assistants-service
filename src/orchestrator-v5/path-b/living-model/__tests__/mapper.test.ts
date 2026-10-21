@@ -528,3 +528,35 @@ describe('thin core mapper: living model → GraphV3', () => {
     }
   });
 });
+
+describe('per-figure authorship (estimate_by, 21 Oct): Olumi\'s estimate of a wholly missing figure on another\'s item', () => {
+  it('INVARIANCE FIRST: estimate_by null on every figure maps to the same engine graph as a model saved before the field', () => {
+    const before = structuredClone(KNOWN_ANSWER) as any;
+    for (const f of before.factors) delete f.estimate_by;
+    for (const l of before.links) delete l.effect.estimate_by;
+    for (const o of before.options) for (const s of o.settings) delete s.estimate_by;
+    const withField = structuredClone(KNOWN_ANSWER) as any;
+    for (const f of withField.factors) f.estimate_by = null;
+    for (const l of withField.links) l.effect.estimate_by = null;
+    for (const o of withField.options) for (const s of o.settings) s.estimate_by = null;
+    const a = mapLivingModel(before as LivingModelT); const b = mapLivingModel(withField as LivingModelT);
+    expect(JSON.stringify({ n: b.graph.nodes, e: b.graph.edges, w: b.withheld })).toBe(JSON.stringify({ n: a.graph.nodes, e: a.graph.edges, w: a.withheld }));
+  });
+
+  it("the person's factor and link keep their source; only the figure Olumi estimated reads as Olumi's (cee_inference / olumi_estimate)", () => {
+    const m: LivingModelT = structuredClone(KNOWN_ANSWER);
+    m.factors[0] = { ...m.factors[0]!, value: 0.5, low: 0.3, high: 0.7, estimate_by: 'olumi' };
+    m.links[0] = { ...m.links[0]!, effect: { form: 'range', value: 50, low: 30, high: 70, sd: null, unit: 'units', sign: '+', estimate_by: 'olumi' } };
+    const r = mapLivingModel(m);
+    expect(m.factors[0]!.source).toBe('user');
+    expect(node(r.graph, 'f').observed_state).toMatchObject({ raw_value: 0.5, source: 'cee_inference' });
+    const edge = r.graph.edges.find((e) => e.from === 'f' && e.to === 'g') as Record<string, any>;
+    expect(edge.provenance).toMatchObject({ source: 'cee_hypothesis', magnitude: 'olumi_estimate' });
+    expect(edge.exists_probability, "the link's existence stays the person's claim").toBe(1);
+    // CONTRAST: the same figures with no estimate_by are the person's own.
+    const theirs = mapLivingModel(structuredClone({ ...m, factors: [{ ...m.factors[0]!, estimate_by: null }],
+      links: [{ ...m.links[0]!, effect: { ...m.links[0]!.effect, estimate_by: null } }] }));
+    expect(node(theirs.graph, 'f').observed_state.source).toBe('brief_extraction');
+    expect((theirs.graph.edges.find((e) => e.from === 'f') as Record<string, any>).provenance.magnitude).toBe('user_stated');
+  });
+});
