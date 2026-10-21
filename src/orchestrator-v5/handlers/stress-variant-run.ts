@@ -14,7 +14,7 @@
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 
 import { buildTurnContext, loadScenarioSnapshotForRunAnalysis } from '../build-turn-context.js';
-import { runSeedEcho } from '../coaching/build-run-delta.js';
+import { readRunEchoes } from '../coaching/build-run-delta.js';
 import { priorRunForSeed, seedHistoryFacts } from '../coaching/seed-reuse.js';
 import { projectCanonicalAnalysisCells } from '../../routes/canonical-analysis-view.js';
 import { agentLicenceRecordOf, goalChanceLicenceForAgent } from '../goal-target/goal-chance-licence.js';
@@ -57,7 +57,17 @@ export async function runStressVariant(p: StressVariantParams): Promise<StressVa
 }
 
 /** One variant's rows and the seed PLoT echoed for it (`meta.seed_used`), so a caller can prove two Runs drew the same. */
-export type VariantRun = Exclude<StressVariantRows, { kind: 'rows' }> | { readonly kind: 'rows'; readonly rows: ReadonlyMap<string, StressChance>; readonly seedUsed: string | null };
+export type VariantRun = Exclude<StressVariantRows, { kind: 'rows' }> | {
+  readonly kind: 'rows'; readonly rows: ReadonlyMap<string, StressChance>; readonly seedUsed: string | null;
+  /** PLoT's sample count (`meta.n_samples`) and each shown figure's display step (`display_rounding_by_option`), for a noise bound. */
+  readonly nSamples: number | null; readonly displayStep: ReadonlyMap<string, 'whole' | 'nearest_5'>;
+};
+
+/** The step each licensed option's figure was shown at: `nearest_5` where the licence says so, else whole points. */
+export function displayStepsOf(result: Record<string, unknown>): ReadonlyMap<string, 'whole' | 'nearest_5'> {
+  const steps = (agentLicenceRecordOf({ ...result, type: 'analysis_result' })?.display_rounding_by_option ?? {}) as Record<string, unknown>;
+  return new Map(Object.entries(steps).map(([id, step]) => [id, step === 'nearest_5' ? 'nearest_5' : 'whole']));
+}
 
 export async function runVariant(p: StressVariantParams): Promise<VariantRun> {
   const context = await buildTurnContext(p.payload, p.requestId);
@@ -88,7 +98,8 @@ export async function runVariant(p: StressVariantParams): Promise<VariantRun> {
     );
     const fact = outcome.handler_facts.find((f) => f.fact_type === 'run_analysis');
     return fact?.fact_type !== 'run_analysis' ? { kind: 'refused', reason: 'failed' }
-      : { kind: 'rows', rows: stressChancesOf(fact.result, edited.graph), seedUsed: runSeedEcho(fact) };
+      : { kind: 'rows', rows: stressChancesOf(fact.result, edited.graph), seedUsed: readRunEchoes(fact)?.seedUsed ?? null,
+        nSamples: readRunEchoes(fact)?.nSamples ?? null, displayStep: displayStepsOf(fact.result) };
   } catch (err) {
     return refusal(err);
   }

@@ -23,6 +23,8 @@ import { applyExplicitEdit, type ExplicitEdit } from '../path-b/living-model/edi
 import { goalIdOf, mapLivingModel, savedGoal } from '../path-b/living-model/mapper.js';
 import { livingViewOf } from '../path-b/living-model/view.js';
 import type { StressChance } from '../path-b/tools/stress-tool.js';
+import { NOISE_BAND_SE_MULTIPLE } from '../coaching/win-probability-noise-band.js';
+import { displayedPctAt, type GoalChanceDisplayRounding } from '../goal-target/goal-chance-display.js';
 import { runVariant, type StressVariantParams, type VariantRun } from './stress-variant-run.js';
 
 /** The value gestures a what-if holds. Structural edits, renames, goal and status changes are not what-ifs. */
@@ -33,11 +35,22 @@ const isWhatIf = (c: Rec): c is Rec & ExplicitEdit => typeof c.kind === 'string'
 type Cell = Omit<StressChance, 'pct'>;
 export type WhatIfTarget = { readonly node_id: string } | { readonly from: string; readonly to: string };
 
+/** Beyond ordinary run-to-run variation, or not shown to be. On paired draws "within" can never be claimed safely. */
+export type WhatIfVariation = 'beyond_ordinary_variation' | 'not_judged';
+export const VARIATION_WORDS: Readonly<Record<WhatIfVariation, string>> = {
+  beyond_ordinary_variation: "The what-if moves this option's chance by more than ordinary run-to-run variation.",
+  not_judged: "This model can't say whether the what-if moves this option's chance by more than ordinary run-to-run variation.",
+};
+
 export interface WhatIfVariant {
   readonly change_index: number | 'all';
   /** The what-if and the saved model drew the same samples (PLoT's seed echoes are equal). Else not like-for-like. */
   readonly paired: boolean;
-  readonly options: readonly { readonly option_id: string; readonly saved: Cell; readonly what_if: Cell }[];
+  readonly options: readonly {
+    readonly option_id: string; readonly saved: Cell; readonly what_if: Cell;
+    /** CEE's judgement and its sentence (`variationOf`); the UI renders the words and composes none. */
+    readonly variation: WhatIfVariation; readonly variation_words: string;
+  }[];
 }
 
 export type WhatIfResult =
@@ -66,9 +79,51 @@ function targetOf(edit: ExplicitEdit): WhatIfTarget {
 }
 
 /** A cell with neither a figure nor the Run's reason says why itself: never a blank the user must interpret (Codex #3591). */
+/** CEE's sentences for a cell with nothing to show; the Run's own withheld `why` is already one. The UI composes no copy. */
+export const NO_RESULT_WORDS = 'This run gave no result to show for this option.';
+export const NOT_IN_RUN_WORDS = 'This option was not part of this run.';
+/** A cell with neither a figure nor the Run's reason says why itself: never a blank the user must interpret (Codex #3591). */
 const cellOf = ({ pct: _figure, ...shown }: StressChance): Cell =>
-  shown.display === null && shown.not_shown === null ? { ...shown, not_shown: 'no_result_for_this_option' } : shown;
-const NOT_SHOWN: Cell = { display: null, provisional: false, not_shown: 'not_in_this_run' };
+  shown.display === null && shown.not_shown === null ? { ...shown, not_shown: NO_RESULT_WORDS } : shown;
+const NOT_SHOWN: Cell = { display: null, provisional: false, not_shown: NOT_IN_RUN_WORDS };
+
+/** Every true chance the display could have shown as `pct` at `step`, read off `displayedPctAt` itself (its clamps
+ *  included: a coarse step shows a small positive chance as 5%), widened by the scan's resolution. Null if none. */
+const SCAN = 10_000;
+const intervals = new Map<string, readonly [number, number] | null>();
+function shownInterval(pct: number, step: GoalChanceDisplayRounding): readonly [number, number] | null {
+  const key = `${step}:${pct}`;
+  if (!intervals.has(key)) {
+    let lo = Infinity; let hi = -Infinity;
+    for (let i = 0; i <= SCAN; i++) if (displayedPctAt(i / SCAN, step) === pct) { lo = Math.min(lo, i / SCAN); hi = Math.max(hi, i / SCAN); }
+    intervals.set(key, lo > hi ? null : [Math.max(0, lo - 1 / SCAN), Math.min(1, hi + 1 / SCAN)]);
+  }
+  return intervals.get(key)!;
+}
+
+/**
+ * BEYOND ORDINARY VARIATION, claimed only when it holds for ANY true values the shown figures allow and ANY covariance
+ * between the runs (Codex #3591 r2, #3602 r1):
+ *  · each shown figure (the licence's `pct_by_option`) stands for the whole interval of chances its display step could have
+ *    shown as it (`shownInterval`, from `displayedPctAt`, so the 5%/95% clamps are included);
+ *  · the gap is the smallest distance between the two intervals;
+ *  · the band is 2 × (sd A + sd B): sd A + sd B bounds sd(A − B) for any covariance (the runs may move oppositely), each sd
+ *    at the most variable proportion inside its interval, n from PLoT's n_samples; 2 SE as the Run delta (`NOISE_BAND_SE_MULTIPLE`).
+ * Anything else is `not_judged`: on paired draws a "within" can never be claimed safely, so it is not offered.
+ */
+function variationOf(saved: StressChance | undefined, whatIf: StressChance | undefined, sSaved: GoalChanceDisplayRounding | undefined,
+  sWhatIf: GoalChanceDisplayRounding | undefined, nSaved: number | null, nWhatIf: number | null): WhatIfVariation {
+  if (saved?.pct == null || whatIf?.pct == null || nSaved === null || nWhatIf === null || nSaved <= 0 || nWhatIf <= 0) return 'not_judged';
+  const ia = shownInterval(saved.pct, sSaved ?? 'whole');
+  const ib = shownInterval(whatIf.pct, sWhatIf ?? 'whole');
+  if (ia === null || ib === null) return 'not_judged';
+  const sd = ([lo, hi]: readonly [number, number], n: number) => {
+    const worst = Math.min(Math.max(0.5, lo), hi);
+    return Math.sqrt((worst * (1 - worst)) / n);
+  };
+  const gap = Math.max(0, Math.max(ia[0], ib[0]) - Math.min(ia[1], ib[1]));
+  return gap > NOISE_BAND_SE_MULTIPLE * (sd(ia, nSaved) + sd(ib, nWhatIf)) ? 'beyond_ordinary_variation' : 'not_judged';
+}
 
 export async function runWhatIf(
   p: {
@@ -131,6 +186,8 @@ export async function runWhatIf(
         option_id,
         saved: baseline.rows.has(option_id) ? cellOf(baseline.rows.get(option_id)!) : NOT_SHOWN,
         what_if: result.rows.has(option_id) ? cellOf(result.rows.get(option_id)!) : NOT_SHOWN,
+        ...((v) => ({ variation: v, variation_words: VARIATION_WORDS[v] }))(variationOf(baseline.rows.get(option_id), result.rows.get(option_id),
+          baseline.displayStep.get(option_id), result.displayStep.get(option_id), baseline.nSamples, result.nSamples)),
       })),
     });
   }
