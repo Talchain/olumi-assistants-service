@@ -20,10 +20,10 @@
  * most. Today it has little effect on the lead"). Every UI surface correctly
  * showed Technical Leadership Capacity from influence_score.
  *
- * These tests assert the composed user-visible text through the real
- * composition path (top-level enrichment → top_drivers derivation →
- * projectTopDrivers → projection summary → fallback composer), not just a
- * formatter's return value.
+ * The headline and top_drivers rows drive the real derivation from the
+ * enrichment. The fallback-composer rows feed the composer the projection's
+ * `top_drivers` as a literal (see DRIVERS_341 below): the context-pack
+ * projection that used to build it is unreachable at runtime.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -35,18 +35,19 @@ import {
 import {
   applyTopLevelDriversOverride,
 } from '../../context/analysis-fallback.js';
-import { projectTopDrivers } from '../../context/context-pack-assembler.js';
 import {
   composeExplainResultsFallback,
   composeWhatWouldFlipFallback,
 } from '../../tools/handlers/explanation-fallback.js';
-import type { AnalysisProjectionSummary } from '../../context/projection-summaries.js';
+import type {
+  AnalysisProjectionDriver,
+  AnalysisProjectionSummary,
+} from '../../context/projection-summaries.js';
 import {
   compactAnalysis,
   type AnalysisResponseSummary,
 } from '../../../orchestrator/context/analysis-compact.js';
 import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
-import { tryPostAnalysisAdviceGate } from '../../routing/post-analysis-advice-gate.js';
 
 // ============================================================================
 // Fixtures — minimal reconstruction of the DGAI #341 wire
@@ -134,21 +135,34 @@ const EMPTY_SUMMARY: AnalysisResponseSummary = {
   analysis_status: 'complete',
 };
 
-function projectionFromEnrichment(
-  enrichment: Record<string, unknown>,
-  controlled?: ReadonlySet<string>,
+/**
+ * The #341 board as the fallback composers receive it: each factor's
+ * influence_score, signed by its direction, sorted by magnitude, capped at 3.
+ */
+const DRIVERS_341: readonly AnalysisProjectionDriver[] = [
+  { factor_label: 'Technical Leadership Capacity', sensitivity_value: 1 },
+  { factor_label: 'Founder Equity Dilution', sensitivity_value: -0.379 },
+  { factor_label: 'Market Timing Pressure', sensitivity_value: 0.039 },
+];
+
+/**
+ * The same board with the two option-controlled levers (fac_tlc, fac_fed)
+ * suppressed: only the 0.039 factor survives.
+ */
+const DRIVERS_341_LEVERS_SUPPRESSED: readonly AnalysisProjectionDriver[] = [
+  { factor_label: 'Market Timing Pressure', sensitivity_value: 0.039 },
+];
+
+function projectionWithDrivers(
+  topDrivers: readonly AnalysisProjectionDriver[],
 ): AnalysisProjectionSummary {
-  // Real chain: top-level enrichment → deriveTopDriversFromTopLevel (via the
-  // shared override seam) → projectTopDrivers → projection summary shape.
-  const { summary } = applyTopLevelDriversOverride(EMPTY_SUMMARY, enrichment);
-  const projected = projectTopDrivers(summary.top_drivers, controlled);
   return {
     status: 'success',
     leading_option: { label: 'Bring On Technical Co-Founder', probability: 0.86 },
     runner_up: { label: 'Continue Solo', probability: 0.14 },
     margin_pp: 72,
     robustness_band: null,
-    top_drivers: projected,
+    top_drivers: topDrivers,
   };
 }
 
@@ -324,8 +338,8 @@ describe('DGAI #341 — top_drivers rank by influence_score (per-option shape)',
 // ============================================================================
 
 describe('DGAI #341 — what_would_flip fallback names the influence top and never self-contradicts', () => {
-  it('composed through the real chain, names Technical Leadership Capacity, not Market Timing Pressure', () => {
-    const text = composeWhatWouldFlipFallback(projectionFromEnrichment(ENRICHMENT_341));
+  it('names Technical Leadership Capacity, not Market Timing Pressure', () => {
+    const text = composeWhatWouldFlipFallback(projectionWithDrivers(DRIVERS_341));
     expect(text).toContain(
       'Movement on Technical Leadership Capacity or Founder Equity Dilution would shift this result the most.',
     );
@@ -340,10 +354,7 @@ describe('DGAI #341 — what_would_flip fallback names the influence top and nev
     // Structural suppression of the two influence-top levers leaves only the
     // 0.039 factor — a "most" claim about it would contradict the "has little
     // effect on the lead" band in the same breath. Omit instead.
-    const projection = projectionFromEnrichment(
-      ENRICHMENT_341,
-      new Set(['fac_tlc', 'fac_fed']),
-    );
+    const projection = projectionWithDrivers(DRIVERS_341_LEVERS_SUPPRESSED);
     const text = composeWhatWouldFlipFallback(projection);
     expect(text).not.toContain('would shift this result the most');
     expect(text).not.toContain('Market Timing Pressure');
@@ -356,62 +367,14 @@ describe('DGAI #341 — what_would_flip fallback names the influence top and nev
 
 describe('DGAI #341 — explain_results fallback never says "driven mainly by" a no-effect factor', () => {
   it('omits the driver sentence when the only surviving driver has near-zero influence', () => {
-    const projection = projectionFromEnrichment(
-      ENRICHMENT_341,
-      new Set(['fac_tlc', 'fac_fed']),
-    );
+    const projection = projectionWithDrivers(DRIVERS_341_LEVERS_SUPPRESSED);
     const text = composeExplainResultsFallback(projection);
     expect(text).not.toContain('driven mainly by');
     expect(text).not.toContain('Market Timing Pressure');
   });
 
   it('still names material drivers', () => {
-    const text = composeExplainResultsFallback(projectionFromEnrichment(ENRICHMENT_341));
+    const text = composeExplainResultsFallback(projectionWithDrivers(DRIVERS_341));
     expect(text).toContain('driven mainly by Technical Leadership Capacity');
-  });
-});
-
-// ============================================================================
-// 6. post-analysis advice gate — superlative driver claims
-// ============================================================================
-
-describe('DGAI #341 — advice gate does not superlativise a near-zero driver', () => {
-  const NEAR_ZERO_ONLY_ANALYSIS = {
-    status: 'success',
-    leading_option: { label: 'Bring On Technical Co-Founder' },
-    runner_up: { label: 'Continue Solo' },
-    top_drivers: [
-      { factor_label: 'Market Timing Pressure', sensitivity_value: 0.039 },
-    ],
-    fragile_edges: [],
-  };
-
-  it('evidence_gap fallback omits "the strongest sensitivity is on X" for a near-zero top driver', () => {
-    const out = tryPostAnalysisAdviceGate({
-      message: 'What evidence is missing?',
-      analysis: NEAR_ZERO_ONLY_ANALYSIS,
-      freshness: 'fresh',
-    });
-    expect(out.matched).toBe(true);
-    if (out.matched) {
-      expect(out.assistant_text).not.toContain('the strongest sensitivity is on');
-      expect(out.assistant_text).not.toContain('Market Timing Pressure');
-    }
-  });
-
-  it('drivers without a sensitivity_value stay nameable (no materiality verdict on missing data)', () => {
-    const out = tryPostAnalysisAdviceGate({
-      message: 'What evidence is missing?',
-      analysis: {
-        ...NEAR_ZERO_ONLY_ANALYSIS,
-        top_drivers: [{ factor_label: 'Delivery risk' }],
-      },
-      freshness: 'fresh',
-    });
-    expect(out.matched).toBe(true);
-    if (out.matched) {
-      expect(out.assistant_text).toContain('The analysis is sensitive to Delivery risk');
-      expect(out.assistant_text).toContain('Sensitivity alone does not establish where research would be most valuable');
-    }
   });
 });

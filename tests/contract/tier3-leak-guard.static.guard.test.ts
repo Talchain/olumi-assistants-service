@@ -104,7 +104,6 @@ const ALLOWLIST = new Map<string, 'cage' | 'transport' | 'structured'>([
   // treat it as 0 until you give it."). No warning prose, value or other id is
   // returned, logged or quoted; the card's words come from the graph's label.
   ['coaching/unvalued-driver-card.ts', 'structured'],
-  ['routing/post-analysis-advice-gate.ts', 'structured'],
   // ⭐ NEW SITE, AND IT IS DELIBERATELY CLASSIFIED `transport` RATHER THAN
   // `structured` — the classification that asks for the most scrutiny, because
   // this one genuinely puts a projection of a banned subtree ON THE WIRE rather

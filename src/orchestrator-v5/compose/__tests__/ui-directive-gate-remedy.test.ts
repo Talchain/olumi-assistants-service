@@ -46,14 +46,12 @@ import {
 } from '@talchain/schemas/boundary';
 
 import {
+  buildGateFlipSectionDirective,
   buildGateRemedySectionDirective,
   REMEDY_SECTION_BY_OPEN_ITEM_KIND,
 } from '../ui-directive.js';
 import { summariseReadiness } from '../../routing/readiness-summary.js';
 import type { ReadinessOpenItem } from '../../routing/readiness-summary.js';
-import { tryPostAnalysisAdviceGate } from '../../routing/post-analysis-advice-gate.js';
-import { composeDirectAnswerResponse } from '../../compose.js';
-import { sanitiseOlumiResponseForEgress } from '../output-safety.js';
 import { setTestSink } from '../../../utils/telemetry.js';
 
 // ===========================================================================
@@ -362,100 +360,24 @@ describe('ROADMAP 2.640 — gate-close remedy directive', () => {
     expect(block).not.toBeNull();
     expect(emitted()).toHaveLength(1);
   });
+});
 
-  // =========================================================================
-  // INTEGRATION — the half that decides whether this is a capability or just a
-  // function. A builder nothing feeds is the estate's most-repeated failure, so
-  // these tests drive the REAL gate rather than hand-constructing its output.
-  // =========================================================================
-  describe('the advice gate actually feeds it', () => {
-    const askBlocked = (analysisReady: ReadinessPayload) =>
-      tryPostAnalysisAdviceGate({
-        message: "What's blocking the analysis?",
-        analysis: { status: 'success', leading_option: null, top_drivers: [] },
-        analysisReady,
-        freshness: 'fresh',
-      } as unknown as Parameters<typeof tryPostAnalysisAdviceGate>[0]);
+describe('the directive the gesture ships as', () => {
+  it.each(['relationships', 'factors'] as const)(
+    '%s → a strict-valid, gate-stamped open_section directive',
+    (section) => {
+      const block = buildGateFlipSectionDirective(section);
+      expect(block).not.toBeNull();
+      const directive = block as UiDirectiveBlock;
 
-    it('answers the readiness question and names the top blocker for the gesture', () => {
-      const out = askBlocked(READY_MAPPING);
-
-      // Pin the precondition IN-TEST (trap 13b): if the gate stopped matching
-      // this message, every assertion below would be about a state the product
-      // never reaches, and an `if (matched)` guard would go vacuously green.
-      expect(out.matched).toBe(true);
-      const matched = out as Extract<typeof out, { matched: true }>;
-      expect(matched.advice_class).toBe('readiness');
-
-      // The answer still carries its prose — the gesture is ADDITIVE, never a
-      // replacement for telling the user what is wrong.
-      expect(matched.assistant_text.length).toBeGreaterThan(0);
-
-      // Bound by IDENTITY to the producer's own top item, not to a literal a
-      // future reordering could silently diverge from.
-      expect(matched.remedy_open_item_kind).toBe(
-        summariseReadiness(READY_MAPPING).open_items[0].kind,
-      );
-    });
-
-    it('tracks the payload rather than reporting a constant', () => {
-      // A field hardcoded to one kind would satisfy the test above. Two
-      // payloads whose TOP blockers differ is what proves it is derived.
-      const a = askBlocked(READY_MAPPING) as Extract<
-        ReturnType<typeof askBlocked>,
-        { matched: true }
-      >;
-      const b = askBlocked(READY_ENCODING) as Extract<
-        ReturnType<typeof askBlocked>,
-        { matched: true }
-      >;
-
-      expect(a.matched).toBe(true);
-      expect(b.matched).toBe(true);
-      expect(a.remedy_open_item_kind).toBe('option_needs_mapping');
-      expect(b.remedy_open_item_kind).toBe('option_needs_encoding');
-      expect(a.remedy_open_item_kind).not.toBe(b.remedy_open_item_kind);
-    });
-
-    it('END TO END — a blocked-model question ships an answer AND the section to fix it', () => {
-      // This is the acceptance test for the whole row: gate → kind → directive
-      // → composed response → egress, with nothing hand-fed in the middle.
-      const out = askBlocked(READY_ENCODING);
-      expect(out.matched).toBe(true);
-      const matched = out as Extract<typeof out, { matched: true }>;
-
-      const directive = buildGateRemedySectionDirective(
-        matched.remedy_open_item_kind!,
-      );
-      expect(directive).not.toBeNull();
-
-      const response = composeDirectAnswerResponse({
-        assistant_text: matched.assistant_text,
-        stage: 'analyse',
-        answerKind: 'substantive',
-        blocks: [directive as UiDirectiveBlock],
-      } as unknown as Parameters<typeof composeDirectAnswerResponse>[0]);
-
-      const egressed = sanitiseOlumiResponseForEgress(response, {
-        graph: null,
-        requestId: 'req-gate-remedy',
-        exitPath: 'test',
-        userMessage: null,
-        mayNameLeadingOption: true,
-      });
-
-      const directives = egressed.blocks.filter(
-        (b): b is UiDirectiveBlock => b.type === 'ui_directive',
-      );
-      expect(directives).toHaveLength(1);
-      expect(directives[0].verb).toBe('open_section');
-      expect(directives[0].ui_target).toEqual({
-        kind: 'model_section',
-        id: 'options',
-      });
-      expect(directives[0].source).toBe('gate');
-      // The user still gets told what is wrong, in words.
-      expect(egressed.assistant_text.length).toBeGreaterThan(0);
-    });
-  });
+      expect(directive.verb).toBe('open_section');
+      expect(directive.ui_target).toEqual({ kind: 'model_section', id: section });
+      // `source: 'gate'` is what lets a capture tell a gesture that followed an
+      // ENQUIRY from one that followed an ACTION. Several dashboards bind on it.
+      expect(directive.source).toBe('gate');
+      // Opening a section is not a graph mutation: no node targets.
+      expect(directive.targets).toEqual([]);
+      expect(UiDirectiveBlockSchema.safeParse(directive).success).toBe(true);
+    },
+  );
 });

@@ -52,7 +52,6 @@ import { isStructureOriginQuestion } from '../../../cee/context-integrity/struct
 import { asksForOwnJudgement } from '../judgement-request.js';
 import { hasMutationWarrantSignal, isEditRequestShape } from '../mutation-warrant.js';
 import { isStateQueryQuestionShape, tryStateQueryGuard } from '../state-query-guard.js';
-import { tryPostAnalysisAdviceGate } from '../post-analysis-advice-gate.js';
 
 /** Lifted verbatim from `state-query-guard.structure-origin.test.ts`. */
 const WITNESS_GRAPH = {
@@ -394,24 +393,6 @@ describe('a brief reference is not permission to replace a conversation with an 
     expect(isStateQueryQuestionShape(message)).toBe(true);
     expect(hasMutationWarrantSignal(message)).toBe(false);
   });
-
-  it.each(['fresh', 'stale', 'unknown'] as const)(
-    'the witnessed request clears the retained advice gate when analysis is %s',
-    (freshness) => {
-      const message = reasoningRequests[0];
-      expect(tryPostAnalysisAdviceGate({
-        message,
-        freshness,
-        analysis: {
-          status: 'success',
-          leading_option: { label: 'Increase price' },
-          runner_up: { label: 'Hold price' },
-          top_drivers: [],
-          fragile_edges: [],
-        },
-      }).matched).toBe(false);
-    },
-  );
 
   it.each([
     'Tell me what you kept from my brief.',

@@ -36,7 +36,6 @@ import type {
   OptionSummary,
 } from '../../orchestrator/context/analysis-compact.js';
 import type { GraphV3Compact } from '../../orchestrator/context/graph-compact.js';
-import type { ContextPackGoalTarget } from './goal-target-record.js';
 import type { ContextPackFactorValues } from './factor-value-record.js';
 import { buildRunDelta } from '../coaching/build-run-delta.js';
 import { projectModelFacingRunDelta } from './model-facing-run-delta.js';
@@ -129,6 +128,12 @@ import {
   type CoachingStatePack,
   type SelectCanonicalAnalysisStateInput,
 } from './canonical-analysis-state.js';
+
+/** The success-target record (moved here from the retired goal-target-record.ts, whose reader went with the receipt guard):
+ * `set` quotes it, `unset` says the graph was read and registers none, an absent key means nothing was read. */
+type ContextPackGoalTarget =
+  | { readonly status: 'set'; readonly value: number; readonly unit?: string; readonly operator?: '<=' | '<' | '>=' | '>' }
+  | { readonly status: 'unset' };
 
 // Recent turns cap for the conversation projection — the verbatim memory window.
 // SINGLE SOURCE is now `context-pack-schema.ts` (FINAL-SWEEP F4); re-exported here

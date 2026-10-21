@@ -14,26 +14,17 @@
  *       (`detectChipClickResumeIntent`) gates on
  *       `ingress.chip?.action_type === 'what_would_flip'`, and the coaching-card
  *       ActionChip sends NO `action_type` (design §1.1). The TYPED route is
- *       structurally unreachable from this card. The reachable route is the
- *       FREE-TEXT one — `tryPostAnalysisAdviceGate`'s `what_would_flip_free_text`
- *       class — and §3 drives THAT gate directly rather than a proxy for it.
+ *       structurally unreachable from this card, so the prompt travels as FREE
+ *       TEXT. (The deterministic post-analysis advice gate this spec once drove
+ *       was unreachable from `src/server.ts` and has been deleted; this spec does
+ *       NOT claim which free-text route answers the prompt on served code.)
  *
- *   (b) ⚠ THE PROMPT ITSELF IS **NOT** BROADLY REFUTED, AND THIS LANE'S FIRST
- *       WRITE-UP OF IT WAS AN OVERCLAIM, CORRECTED BY MEASUREMENT BEFORE IT
- *       SHIPPED. The claim written here first was *"the gate returns
- *       mutation_signal on EVERY pair"*, generalised from an aggregate count.
- *       Measured pair-by-pair against the real gate: on all 22 live-capture
- *       pairs the two phrasings are IDENTICAL (20 matched, the same 2 rejected,
- *       differ = 0), because `/\bfrom\s+\S+\s+to\s+\S+/i` admits exactly ONE
- *       token between `from` and `to` and real endpoint labels are multi-word.
- *       The phrasings diverge on 2 of the 8 adversarial pairs — `Set Up Cost` and
- *       `Change Rate`, where the LABEL's edit verb plus the phrasing's own `to`
- *       forms a `<verb> … to <X>` span the flip exception cannot forgive.
- *       So the honest finding is not "refuted" but STRICTLY MORE FRAGILE: the
- *       proposed phrasing turns a live route into a dead button whenever a
- *       producer label carries an edit verb, and the `→` spelling — which
- *       `target_refs[].label` already uses — removes that class at no cost.
- *       §3 pins the divergence, in the direction it was measured.
+ *   (b) THE `→` SPELLING. The design's `from {from} to {to}` phrasing, combined
+ *       with a producer label carrying an edit verb (`Set Up Cost`,
+ *       `Change Rate`), forms a `<verb> … to <X>` span that is an INDEPENDENT
+ *       mutation signal; the `→` spelling — which `target_refs[].label` already
+ *       uses — does not. §3 pins that on the live predicates
+ *       (`hasIndependentMutationSignal`, `isOverrideActionComposable`).
  *
  * ── WHY T1'S POLARITY IS INVERTED, DERIVED AT THE BYTES ──────────────────────
  * `route-v2.ts:4128` — `editVerbCandidate = positiveEditRegexHit &&
@@ -89,10 +80,6 @@ classifyAnalyticalIntent,
 hasIndependentMutationSignal,
 } from '../../routing/analytical-intent.js';
 import { isAnalyticalQuestion } from '../../routing/analytical-question-guard.js';
-import {
-tryPostAnalysisAdviceGate,
-type AdviceGateAnalysis,
-} from '../../routing/post-analysis-advice-gate.js';
 
 // ============================================================================
 // The corpus
@@ -255,74 +242,19 @@ describe('§2 the two prompts have OPPOSITE routing polarity', () => {
 });
 
 // ============================================================================
-// §3 — the LIVE free-text route, end to end, and the design's refutation
+// §3 — the `→` spelling versus the design phrasing, on the live predicates
 // ============================================================================
 
-const FRESH_ANALYSIS: AdviceGateAnalysis = {
-  status: 'ready',
-  leading_option: { label: 'Partner-led expansion' },
-  runner_up: { label: 'Direct sales build-out' },
-  margin_pp: 12,
-  robustness_band: 'moderate',
-  top_drivers: [{ factor_label: 'Partner Channel Investment' }],
-};
-
-function gate(message: string) {
-  return tryPostAnalysisAdviceGate({
-    message,
-    analysis: FRESH_ANALYSIS,
-    freshness: 'fresh',
-  });
-}
-
-describe('§3 T1 reaches the free-text what_would_flip class (the real gate)', () => {
-  it('the leaf predicate and the REAL gate agree pair-for-pair, in BOTH directions', () => {
-    // This is the load-bearing assertion of the whole spec, and it is an
-    // agreement check rather than a restatement: `isOverrideActionComposable` is
-    // a cheap pure predicate, `tryPostAnalysisAdviceGate` is the surface that
-    // actually answers the turn. If they disagree in EITHER direction the button
-    // is wrong — a false `true` ships a dead chip (2.770), a false `false`
-    // withholds an action that would have worked.
-    let admitted = 0;
-    let refused = 0;
-    for (const [from, to] of CORPUS) {
-      const result = gate(composeOverrideActionPrompt(from, to));
-      const composable = isOverrideActionComposable(from, to);
-      expect(composable).toBe(result.matched);
-      if (result.matched) {
-        expect(result.advice_class).toBe('what_would_flip_free_text');
-        admitted += 1;
-      } else {
-        refused += 1;
-      }
-    }
-    // Both arms are non-empty, so neither direction of the agreement is vacuous
-    // (a corpus where everything is admitted proves nothing about the refusals).
-    expect(admitted).toBeGreaterThanOrEqual(20);
-    expect(refused).toBeGreaterThanOrEqual(2);
-  });
-
+describe('§3 the `→` spelling keeps T1 composable where the design phrasing would not', () => {
   it('PHRASING PIN: the `→` spelling survives edit-verb labels the design phrasing does not', () => {
-    // Same gate, same fixture, same labels — only the phrasing differs. Kept as a
-    // test so a rewrite back to `from … to …` REDs on the class it breaks
-    // instead of shipping a button that terminates in the generic router.
-    //
-    // ⚠ The claim is NARROW and is the corrected one: on the live captures the
-    // two phrasings are IDENTICAL. The divergence is a label class, not a
-    // universal, and it is asserted where it was measured.
+    // Same labels — only the phrasing differs. Kept as a test so a rewrite back
+    // to `from … to …` REDs on the class it breaks.
     const designPhrasing = (from: string, to: string) =>
       `Show me what would flip the result if the link from ${from} to ${to} were different.`;
 
-    // Direction 1 — the live captures: no divergence at all.
-    for (const [from, to] of C_A) {
-      expect(gate(designPhrasing(from, to)).matched).toBe(
-        gate(composeOverrideActionPrompt(from, to)).matched,
-      );
-    }
-
-    // Direction 2 — a producer label carrying an edit verb: the design phrasing
-    // forms `<verb> … to <X>`, an INDEPENDENT mutation signal, which is exactly
-    // what denies the gate's narrow flip exception. The `→` spelling does not.
+    // A producer label carrying an edit verb: the design phrasing forms
+    // `<verb> … to <X>`, an INDEPENDENT mutation signal. The `→` spelling does
+    // not, and the action stays composable.
     const divergent: readonly LabelPair[] = [
       ['Set Up Cost', 'Margin'],
       ['Change Rate', 'Throughput'],
@@ -332,10 +264,7 @@ describe('§3 T1 reaches the free-text what_would_flip class (the real gate)', (
       const shipped = composeOverrideActionPrompt(from, to);
       expect(hasIndependentMutationSignal(design)).toBe(true);
       expect(hasIndependentMutationSignal(shipped)).toBe(false);
-      const designResult = gate(design);
-      expect(designResult.matched).toBe(false);
-      if (!designResult.matched) expect(designResult.reason).toBe('mutation_signal');
-      expect(gate(shipped).matched).toBe(true);
+      expect(isOverrideActionComposable(from, to)).toBe(true);
     }
   });
 });
@@ -365,7 +294,7 @@ describe('§4 an unphrasable action costs the action, never the card', () => {
   it('a label carrying a magnitude drops T1’s action but keeps T1’s card', () => {
     // "Raise Group Operating Profit by 8% Within 18 Months" is a REAL capture
     // label; verb+digits is an ALWAYS_INDEPENDENT mutation pattern, so the
-    // advice gate's flip exception would be denied and the button would be dead.
+    // probe prompt would read as an edit and the action is dropped.
     const magnitude = C_A.filter(([from, to]) =>
       hasIndependentMutationSignal(composeOverrideActionPrompt(from, to)),
     );
@@ -373,9 +302,6 @@ describe('§4 an unphrasable action costs the action, never the card', () => {
     for (const [from, to] of magnitude) {
       expect(isOverrideActionComposable(from, to)).toBe(false);
       expect(isOverrideOfferComposable(from, to)).toBe(true);
-      // …and the gate is right to refuse: the real gate rejects it too.
-      const result = gate(composeOverrideActionPrompt(from, to));
-      expect(result.matched).toBe(false);
     }
   });
 

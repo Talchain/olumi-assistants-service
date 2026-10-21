@@ -11,9 +11,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { extractPersistedGoalTarget } from '../../compose/goal-target-receipt-guard.js';
-import { projectGoalTargetRecord } from '../../context/goal-target-record.js';
-import { ContextPackGoalTargetSchema } from '../../context/context-pack-schema.js';
+import { statedGoalTargetOf } from '../stated-goal-target.js';
 import { decisionInputAsk } from '../../agent-lane/decision-input-ask.js';
 import { targetTestabilityOf, untestableTargetTail } from '../../admission/target-testability.js';
 
@@ -22,6 +20,9 @@ const FIXTURE = JSON.parse(readFileSync(new URL('../../tools/handlers/__tests__/
   graph_without_target: Rec; graph_with_target: Rec;
 };
 const ASK_CTX = { restingText: '', questionsToggle: false, awaitingApproval: false, builtOrRan: true } as const;
+
+/** The one target reader, on the fixture's sole goal node. */
+const target = (g: Rec) => statedGoalTargetOf(g, (g.nodes as Rec[]).find((n) => n.kind === 'goal')!);
 
 /** The post-edit graph with the goal's `<=` row turned into a deadline ("within 12 months"). */
 const deadlineOnly = (): Rec => {
@@ -40,18 +41,16 @@ const below = (onNode: boolean): Rec => {
 const p3 = (g: Rec): boolean => { const v = targetTestabilityOf(g); return v.kind === 'not_testable' && v.failures.some((f) => f.precondition === 'P3'); };
 
 describe('B′ R3 (Codex r1 #2606) — "below" and "at most" read the same in every reader', () => {
-  it.each([['held on the goal too', true], ['on its row only', false]])('"below 400" (%s): receipt, record, tail and P3 all read "<"', (_w, onNode) => {
+  it.each([['held on the goal too', true], ['on its row only', false]])('"below 400" (%s): the one target reader, tail and P3 all read "<"', (_w, onNode) => {
     const g = below(onNode as boolean);
-    expect(extractPersistedGoalTarget(g)?.held).toBe('<');
-    expect(projectGoalTargetRecord(g)).toMatchObject({ status: 'set', value: 400, operator: '<' });
+    expect(target(g)?.held).toBe('<');
     expect(untestableTargetTail(g, targetTestabilityOf(g))).toMatch(/^I can't yet say how likely any option is to keep monthly cancellations below 400 /);
     expect(p3(g)).toBe(true);
   });
 
   it('CONTRAST: "at most 400" reads "<=" in every reader, and P3 does not fail', () => {
     const g = FIXTURE.graph_with_target;
-    expect(extractPersistedGoalTarget(g)?.held).toBe('<=');
-    expect(projectGoalTargetRecord(g)).toMatchObject({ operator: '<=' });
+    expect(target(g)?.held).toBe('<=');
     expect(untestableTargetTail(g, targetTestabilityOf(g))).toMatch(/keep monthly cancellations at or below 400 /);
     expect(p3(g)).toBe(false);
   });
@@ -65,38 +64,30 @@ describe('B′ R3 — "at most 400" is a recorded target everywhere it is read',
     expect((FIXTURE.graph_with_target.goal_constraints as Rec[])[0]).toMatchObject({ node_id: goal.id, operator: '<=', value: 400 });
   });
 
-  it('the receipt reads at most 400 — the value, its unit, its frame and the comparator', () => {
-    expect(extractPersistedGoalTarget(FIXTURE.graph_with_target)).toEqual({
+  it('the one target reader reads at most 400 — the value, its unit, its frame and the comparator', () => {
+    expect(target(FIXTURE.graph_with_target)).toEqual({
       value: 400, unit: 'cancellations/month', frame: 'level', held: '<=',
     });
-  });
-
-  it('the model\'s record is set, with the comparator, and the strict schema admits it', () => {
-    const record = projectGoalTargetRecord(FIXTURE.graph_with_target);
-    expect(record).toEqual({ status: 'set', value: 400, unit: 'cancellations/month', operator: '<=' });
-    expect(ContextPackGoalTargetSchema.safeParse(record).success).toBe(true);
   });
 
   it('the chat never asks for the target again', () => {
     expect(decisionInputAsk(FIXTURE.graph_with_target, ASK_CTX)).toBeNull();
   });
 
-  it('the receipt and testability read the SAME answer (one reader)', () => {
+  it('the one target reader and testability read the SAME answer', () => {
     const verdict = targetTestabilityOf(FIXTURE.graph_with_target);
     expect(verdict.kind).not.toBe('no_target');
-    expect(extractPersistedGoalTarget(FIXTURE.graph_with_target)?.value).toBe(400);
+    expect(target(FIXTURE.graph_with_target)?.value).toBe(400);
   });
 
-  it('CONTRAST: before the edit there is no target — unset, and the one question asks for it', () => {
-    expect(extractPersistedGoalTarget(FIXTURE.graph_without_target)).toBeNull();
-    expect(projectGoalTargetRecord(FIXTURE.graph_without_target)).toEqual({ status: 'unset' });
+  it('CONTRAST: before the edit there is no target — the reader reads none, and the one question asks for it', () => {
+    expect(target(FIXTURE.graph_without_target)).toBeNull();
     expect(decisionInputAsk(FIXTURE.graph_without_target, ASK_CTX)).toMatch(/as your target\.$/);
   });
 
-  it('CONTRAST: a deadline-only row is a time limit, not a target — still unset, and still no_target', () => {
+  it('CONTRAST: a deadline-only row is a time limit, not a target — the reader reads none, and still no_target', () => {
     const g = deadlineOnly();
-    expect(extractPersistedGoalTarget(g)).toBeNull();
-    expect(projectGoalTargetRecord(g)).toEqual({ status: 'unset' });
+    expect(target(g)).toBeNull();
     expect(targetTestabilityOf(g).kind).toBe('no_target');
   });
 });

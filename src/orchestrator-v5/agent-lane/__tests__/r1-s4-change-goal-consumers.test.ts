@@ -17,7 +17,6 @@ import { sayGoalChange } from '../limit-frame.js';
 import { goalNotCheckedLine } from '../break-even.js';
 import { readMoneyTotal } from '../same-unit.js';
 import { sayFigure } from '../say-figure.js';
-import { formatGoalTargetNotSavedText } from '../../compose/goal-target-receipt-guard.js';
 import { applyGoalTargetEdit } from '../../system-events/goal-target-edit.js';
 import { createAddConstraintHandler } from '../../tools/handlers/add-constraint.js';
 import { buildD1Fixture } from '../../tools/handlers/d1-shared/__tests__/fixtures.js';
@@ -75,20 +74,9 @@ describe('S4C sayers: a change goal is said as the change, never as the stored f
     expect(goalNotCheckedLine(graphOf('level'), NOT_CONVERTIBLE)).toMatch(/^Your Cloud bill target of £38,250 a month is not checked yet: /);
   });
 
-  it('S4C-3 RED: the "not saved" receipt names the surviving change as a change', () => {
-    const text = formatGoalTargetNotSavedText(graphOf('change_rel'));
-    expect(text).toContain('your previous target (down 15% from today) is still registered');
-    expect(text).not.toMatch(/-0\.15/);
-  });
-
-  it('S4C-2/3 held: with the goal\'s held "<=" both sentences say "down at least 15% from today"', () => {
+  it('S4C-2 held: with the goal\'s held "<=" the unchecked-target line says "down at least 15% from today"', () => {
     const held = { nodes: [{ id: 'bill', kind: 'goal', label: 'Cloud bill', ...goalFields('change_rel'), goal_direction: '<=' }], edges: [] };
     expect(goalNotCheckedLine(held, NOT_CONVERTIBLE)).toContain('Your Cloud bill target (down at least 15% from today) is not checked yet');
-    expect(formatGoalTargetNotSavedText(held)).toContain('your previous target (down at least 15% from today) is still registered');
-  });
-
-  it('S4C-3 CONTROL: a surviving LEVEL target is said as before', () => {
-    expect(formatGoalTargetNotSavedText(graphOf('level'))).toContain('your previous target of 38250GBP per month is still registered');
   });
 });
 

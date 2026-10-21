@@ -18,11 +18,10 @@
  *   - it proves every node class that collapses to 'node' (factor/risk/outcome/
  *     decision/action) now routes + validates on both explain handlers;
  *   - for EMITTED chips it proves only the surface it actually exercises: the
- *     manually-maintained EMITTED_EXECUTABLE_ACTION_TYPES set, plus whatever the
- *     one real `tryPostAnalysisAdviceGate` emission path returns. It does NOT
+ *     manually-maintained EMITTED_EXECUTABLE_ACTION_TYPES set. It does NOT
  *     auto-derive the chip surface from source, so a new executable chip added
- *     in chip-generator.ts (or anywhere off the advice-gate path) will NOT fail
- *     this test unless EMITTED_EXECUTABLE_ACTION_TYPES is updated too. That set
+ *     in compose/chip-generator.ts will NOT fail this test unless
+ *     EMITTED_EXECUTABLE_ACTION_TYPES is updated too. That set
  *     is the forcing function: any new target-bearing executable chip must be
  *     added there with explicit target-kind coverage (see the guardrail block).
  *
@@ -47,13 +46,6 @@ import type { EntityKind, ProposalAction, ProposalEntity } from '../types.js';
 import { buildGraphLookup } from '../graph-lookup-adapter.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../validation-registry.js';
 import { validateToolCall, type GraphLookup } from '../validator.js';
-import {
-  tryPostAnalysisAdviceGate,
-  type AdviceGateAnalysis,
-} from '../post-analysis-advice-gate.js';
-import type { GraphPatchBlockData } from '../../../orchestrator/types.js';
-
-type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
 
 // The two scenario-wide explanation handlers this lane widened.
 // ⚠ ROADMAP 2.229 fix 2 — the line here used to read "what_would_flip is
@@ -310,24 +302,23 @@ describe('chip routeability — genuine ambiguity still fails safely (authority 
 // (e) Emitted-chip routeability invariant.
 //
 // EMITTED_EXECUTABLE_ACTION_TYPES is a MANUALLY-MAINTAINED list of the
-// action_type values V5 attaches to EXECUTABLE chips, observed today in
-// compose/chip-generator.ts and routing/post-analysis-advice-gate.ts. It is
-// NOT auto-derived from source — keep it in sync by hand. An executable chip
-// carries no entity target; on click the target resolves to the scenario's
-// goal or option, so each listed action_type must (1) be a registered handler
-// and (2) accept both 'goal' and 'option'.
+// action_type values V5 attaches to EXECUTABLE chips, observed today in the
+// live emitter compose/chip-generator.ts (`generateChips`: 'what_would_flip',
+// 'explain_results', 'run_analysis'). It is NOT auto-derived from source —
+// keep it in sync by hand. An executable chip carries no entity target; on
+// click the target resolves to the scenario's goal or option, so each listed
+// action_type must (1) be a registered handler and (2) accept both 'goal' and
+// 'option'.
 //
 // What this proves / does NOT prove:
-//   - PROVES: every action_type in the list routes to a handler that accepts
-//     the goal/option a clicked chip resolves to; AND every chip the one real
-//     `tryPostAnalysisAdviceGate` emission path returns is in the list and
-//     validates when clicked (the drift guard below).
-//   - DOES NOT prove: that the list is exhaustive of all emission sites. A new
-//     executable chip added in chip-generator.ts, or added without updating
-//     this list, will not be caught here unless it flows through the advice
-//     gate. The list is the forcing function — a future target-bearing chip
-//     (one resolving to a 'node' kind) MUST be added here with explicit
-//     target-kind coverage and its handler must accept that kind.
+//   - PROVES: every action_type in the list is declared to accept goal/option
+//     in the registry, AND a goal-targeted proposal for each one validates
+//     end to end through `validateToolCall` (i.e. it routes when clicked).
+//   - DOES NOT prove: that the list is exhaustive of chip-generator.ts's
+//     emission sites. A new executable chip added there without updating this
+//     list will not be caught here. The list is the forcing function — a future
+//     target-bearing chip (one resolving to a 'node' kind) MUST be added here
+//     with explicit target-kind coverage and its handler must accept that kind.
 // ---------------------------------------------------------------------------
 const EMITTED_EXECUTABLE_ACTION_TYPES = [
   'run_analysis',
@@ -345,48 +336,14 @@ describe('chip routeability — emitted executable chips route and validate when
     });
   }
 
-  // Ground the invariant in a REAL emission path: drive the post-analysis
-  // advice gate, collect every executable chip it emits, and prove each one
-  // validates as a proposal targeting the scenario goal — i.e. it routes and
-  // validates when clicked. Guards against the action_type set above drifting.
-  const FIXTURE_ANALYSIS: AdviceGateAnalysis = {
-    status: 'success',
-    leading_option: { label: 'Hire two senior engineers locally' },
-    runner_up: { label: 'Hire one senior engineer overseas' },
-    top_drivers: [{ factor_label: 'Delivery risk' }, { factor_label: 'Cost overrun risk' }],
-    fragile_edges: [{ from_label: 'Delivery risk', to_label: 'Successful launch' }],
-  };
-  const READY_PAYLOAD_OPEN: AnalysisReadyPayload = {
-    goal_node_id: 'goal_1',
-    status: 'needs_user_mapping',
-    options: [
-      { option_id: 'opt_a', label: 'Hire two senior engineers locally', status: 'needs_user_mapping', interventions: {} },
-      { option_id: 'opt_b', label: 'Hire one senior engineer overseas', status: 'needs_encoding', interventions: {} },
-    ],
-  };
-
-  it('every executable chip emitted by the post-analysis advice gate validates when clicked (goal target)', () => {
-    const out = tryPostAnalysisAdviceGate({
-      message: 'Tell me what to change.',
-      analysis: FIXTURE_ANALYSIS,
-      analysisReady: READY_PAYLOAD_OPEN,
-      freshness: 'fresh',
-    });
-    expect(out.matched).toBe(true);
-    if (!out.matched) return;
-    const executable = out.suggested_actions.filter((a) => a.action_type != null);
-    expect(executable.length).toBeGreaterThan(0);
-    for (const chip of executable) {
-      const actionType = chip.action_type as string;
-      // drift guard — the emitted action_type is one this contract knows about
-      expect(EMITTED_EXECUTABLE_ACTION_TYPES as readonly string[]).toContain(actionType);
-      // routes + validates when clicked (resolves to the scenario goal)
-      const result = validateToolCall(
-        mkProposal(actionType, { id: 'goal_1', kind: 'goal' }),
-        LOOKUP,
-        HANDLER_VALIDATION_REGISTRY,
-      );
-      expect(result.valid, `clicked chip "${actionType}" should route and validate`).toBe(true);
+  // A goal-targeted proposal for every listed executable action_type validates
+  // end to end — i.e. it routes and validates when clicked.
+  it('every listed executable chip validates when clicked (goal target)', () => {
+    for (const t of EMITTED_EXECUTABLE_ACTION_TYPES) {
+      expect(
+        validateToolCall(mkProposal(t, { id: 'goal_1', kind: 'goal' }), LOOKUP, HANDLER_VALIDATION_REGISTRY).valid,
+        `clicked chip "${t}" should route and validate`,
+      ).toBe(true);
     }
   });
 });
