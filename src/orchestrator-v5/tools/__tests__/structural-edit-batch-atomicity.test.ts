@@ -128,6 +128,8 @@ describe('A2 — a mixed batch from the tool is held WHOLE; no value op pre-appl
     const mixed = gateFor(MIXED_BATCH);
     expect(mixed.verdictCounts.would_apply).toBe(1);
     expect(mixed.verdictCounts.held).toBe(2);
+    // The tally counts exactly what was submitted: no op lands in another bucket or twice.
+    expect(Object.values(mixed.verdictCounts).reduce((a, b) => a + (b ?? 0), 0)).toBe(MIXED_BATCH.length);
     expect(mixed.governing).toBe('held');
   });
 
