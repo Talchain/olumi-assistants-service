@@ -440,12 +440,13 @@ describe("POST /proxy/v5/turn", () => {
   // ---- Core measurement arms (21 Oct: every arm through the proxy ran the default) ----
 
   describe("core measurement arm forwarding", () => {
-    it("forwards x-olumi-prompt-arm and x-olumi-core-effort, as sent, to the internal route", async () => {
+    it("forwards x-olumi-prompt-arm, x-olumi-core-effort and x-olumi-draft-arm, as sent, to the internal route", async () => {
       const captured: Record<string, unknown> = {};
       app = buildApp({
         internalHandler: (req: any, reply: any) => {
           captured.arm = req.headers["x-olumi-prompt-arm"];
           captured.effort = req.headers["x-olumi-core-effort"];
+          captured.draft = req.headers["x-olumi-draft-arm"];
           return reply.code(200).send({ blocks: [] });
         },
       });
@@ -453,10 +454,11 @@ describe("POST /proxy/v5/turn", () => {
       await app.inject({
         method: "POST",
         url: "/proxy/v5/turn",
-        headers: { origin: STAGING_ORIGIN, "content-type": "application/json", "x-olumi-prompt-arm": "C", "x-olumi-core-effort": "medium" },
+        headers: { origin: STAGING_ORIGIN, "content-type": "application/json", "x-olumi-prompt-arm": "C", "x-olumi-core-effort": "medium", "x-olumi-draft-arm": "off" },
         payload: SAMPLE_PAYLOAD,
       });
-      expect(captured).toEqual({ arm: "C", effort: "medium" });
+      // Track 3, 21 Oct 23:5xZ: the drafting A/B's "off" arm reached the route without its header and ran "on".
+      expect(captured).toEqual({ arm: "C", effort: "medium", draft: "off" });
     });
 
     it("CONTROL: an unlisted header is still not forwarded", async () => {
