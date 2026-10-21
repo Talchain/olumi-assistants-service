@@ -60,6 +60,54 @@ describe('F2 (served): a status quo a supplier-failure risk reaches is a forecas
     expect(l!.pct_by_option[DUAL]).toBe(97);
   });
 
+  // Codex r1 counterexamples: an event that cannot occur under carrying on leaves it exactly at today, so it stays paired.
+  const withEvent = (edit: (risk: Rec, carryOn: Rec) => void): Rec => {
+    const graph = structuredClone(FX.graph);
+    const nodes = graph.nodes as Rec[];
+    edit(nodes.find((n) => n.id === 'supplier_failure')!, nodes.find((n) => n.id === SQ)!);
+    return graph;
+  };
+
+  it('contrast: an event with no chance of happening (p_low = p_high = 0) keeps carrying on paired', () => {
+    const graph = withEvent((risk) => {
+      (risk.event_risk as Rec).occurrence = { ...((risk.event_risk as Rec).occurrence as Rec), p_low: 0, p_high: 0 };
+    });
+    const l = licence(graph);
+    expect(reasonOf(l)?.reason).toBe('reference_moved');
+    expect(l!.withheld_option_ids).toContain(SQ);
+  });
+
+  it('contrast: an event fully prevented under carrying on (reduction 1, preventer in place) keeps carrying on paired', () => {
+    const graph = withEvent((risk, carryOn) => {
+      (risk.event_risk as Rec).mitigations = [{ factor_id: 'dual_sourcing_in_place', occurrence_reduction: 1 }];
+      ((carryOn.interventions as Rec).dual_sourcing_in_place as Rec).value = 1;
+    });
+    const l = licence(graph);
+    expect(reasonOf(l)?.reason).toBe('reference_moved');
+    expect(l!.withheld_option_ids).toContain(SQ);
+  });
+
+  it('contrast: a preventer already in place today, which carrying on leaves as is, fully prevents it: still paired', () => {
+    const graph = withEvent((risk, carryOn) => {
+      (risk.event_risk as Rec).mitigations = [{ factor_id: 'dual_sourcing_in_place', occurrence_reduction: 1 }];
+      delete (carryOn.interventions as Rec).dual_sourcing_in_place;
+    });
+    const preventer = (graph.nodes as Rec[]).find((n) => n.id === 'dual_sourcing_in_place')!;
+    preventer.observed_state = { value: 1, raw_value: 1 };
+    const l = licence(graph);
+    expect(reasonOf(l)?.reason).toBe('reference_moved');
+    expect(l!.withheld_option_ids).toContain(SQ);
+  });
+
+  it('control: the same mitigation NOT in place under carrying on (value 0) still moves it, so its chance is shown', () => {
+    const graph = withEvent((risk) => {
+      (risk.event_risk as Rec).mitigations = [{ factor_id: 'dual_sourcing_in_place', occurrence_reduction: 1 }];
+    });
+    const l = licence(graph);
+    expect(reasonOf(l)?.reason).not.toBe('reference_moved');
+    expect(l!.pct_by_option[SQ]).toBe(91);
+  });
+
   it('contrast: the same Run with the risk taken off the goal path reads as paired again (the D2 check still applies)', () => {
     const graph = structuredClone(FX.graph);
     graph.edges = (graph.edges as Rec[]).filter((e) => e.from !== 'supplier_failure');

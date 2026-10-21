@@ -357,21 +357,48 @@ function pairedLevelFacts(graph: unknown, node: Rec, basis: Pick<GoalTargetBasis
   const kindOf = (id: unknown): unknown => nodes.find((n) => n.id === id)?.kind;
   const anchored = isRec(node.observed_state) && finite(node.observed_state.raw_value);
   const reached = edges.some((e) => e.to === node.id && kindOf(e.from) !== undefined && kindOf(e.from) !== 'option' && kindOf(e.from) !== 'decision');
-  const setByOption = (id: string): boolean => nodes.some((n) => n.kind === 'option'
-    && [n.interventions, isRec(n.data) ? n.data.interventions : undefined].some((iv) => isRec(iv) && Object.hasOwn(iv, id)));
-  const setDirectly = setByOption(node.id);
-  // ⭐ DL lease 22 Oct (served F2): the same draw cancels every link's spread for the status quo, but not a risk EVENT the
-  // engine draws on its own (`event_risk.occurrence`). A goal such an uncontrolled event reaches (no option sets the risk
-  // itself) is not paired: carrying on is a real forecast there, never "the reference moved". A risk node without an
-  // occurrence is an ordinary linear node and still cancels (the batch-D capacity ramp-up risk).
+  const setDirectly = nodes.some((n) => n.kind === 'option'
+    && [n.interventions, isRec(n.data) ? n.data.interventions : undefined].some((iv) => isRec(iv) && Object.hasOwn(iv, node.id as string)));
+  return anchored && reached && !setDirectly && (basis === undefined || basis.reference === 'today');
+}
+
+/**
+ * ⭐ DL lease 22 Oct (served F2): whether an EVENT risk moves carrying on off today's level. ISL's `event_risk.v1` holds
+ * every event at 0 in today's reference and draws it for every option, the status quo included, so the same draw does
+ * NOT cancel it the way it cancels a link's spread. It moves carrying on exactly when it can occur there: the expected
+ * occurrence `p_mid × Π(1 − m·clamp(x, 0, 1)) > 0`, x being each named preventer's value under carrying on (its setting
+ * there, else today's value; an unset preventer reads 0, as ISL reads it). An event with no chance, fully prevented under carrying on, set by an option, or
+ * not upstream of the goal leaves the same-draw reading untouched; so does a risk node without an occurrence (linear).
+ * Single-goal reading only: the joint and limit readings keep `pairedLevelFacts` as it was.
+ */
+function eventRiskMovesStatusQuo(graph: unknown, node: Rec, statusQuoId: string | undefined): boolean {
+  if (!isRec(graph) || typeof node.id !== 'string' || statusQuoId === undefined) return false;
+  const nodes = Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const edges = Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
+  const interventionsOf = (n: Rec): Rec[] => [n.interventions, isRec(n.data) ? n.data.interventions : undefined].filter(isRec);
+  const setByOption = (id: string): boolean => nodes.some((n) => n.kind === 'option' && interventionsOf(n).some((iv) => Object.hasOwn(iv, id)));
+  const sq = nodes.find((n) => n.id === statusQuoId);
+  // The preventer's value under carrying on: its setting there, else the value it holds today, else 0 (not in place).
+  const sqValue = (id: string): number => {
+    const set = sq === undefined ? undefined : interventionsOf(sq).map((iv) => iv[id]).find(isRec);
+    if (set !== undefined && finite(set.value)) return set.value;
+    const today = nodes.find((n) => n.id === id)?.observed_state;
+    return isRec(today) && finite(today.value) ? today.value : 0;
+  };
   const upstream = new Set<unknown>([node.id]);
   for (let grew = true; grew;) {
     grew = false;
     for (const e of edges) if (upstream.has(e.to) && !upstream.has(e.from)) { upstream.add(e.from); grew = true; }
   }
-  const riskReaches = nodes.some((n) => n.kind === 'risk' && isRec(n.event_risk) && isRec(n.event_risk.occurrence)
-    && typeof n.id === 'string' && upstream.has(n.id) && !setByOption(n.id));
-  return anchored && reached && !setDirectly && !riskReaches && (basis === undefined || basis.reference === 'today');
+  return nodes.some((n) => {
+    if (n.kind !== 'risk' || typeof n.id !== 'string' || !upstream.has(n.id) || setByOption(n.id)) return false;
+    const occurrence = isRec(n.event_risk) && isRec(n.event_risk.occurrence) ? n.event_risk.occurrence : undefined;
+    if (occurrence === undefined || !finite(occurrence.p_low) || !finite(occurrence.p_high)) return false;
+    const mitigations = isRec(n.event_risk) && Array.isArray(n.event_risk.mitigations) ? n.event_risk.mitigations.filter(isRec) : [];
+    const level = mitigations.reduce((l, m) => typeof m.factor_id === 'string' && finite(m.occurrence_reduction)
+      ? l * (1 - m.occurrence_reduction * Math.min(1, Math.max(0, sqValue(m.factor_id)))) : l, (occurrence.p_low + occurrence.p_high) / 2);
+    return level > 0;
+  });
 }
 
 /**
@@ -757,7 +784,8 @@ export function goalChanceLicenceOf(
     && sentRunScoresHeldChange(constraints.sentRun, graph, goalId, held);
   const sqReading: StatusQuoReading = share !== null || statusQuoId === undefined || goal === undefined ? 'unknown'
     : statusQuoReadingOf({
-      paired: timing.ordinary && (changeQuantity ? pairedChange : pairedLevelFacts(graph, goal, basis)),
+      paired: timing.ordinary && (changeQuantity ? pairedChange
+        : pairedLevelFacts(graph, goal, basis) && !eventRiskMovesStatusQuo(graph, goal, statusQuoId)),
       forecast: timing.forecast,
       row: sqRow,
       // A quantity measured AS a change is 0 today by construction; a level's reference is its held level today (D2: in
