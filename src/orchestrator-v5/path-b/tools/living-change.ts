@@ -16,7 +16,7 @@ import { createProposal, type ProposalOperation, type ProposalStore, type Struct
 import { LivingModel, type LivingModelT } from '../../../schemas/living-model.js';
 import { applyKernel } from '../living-model/kernel.js';
 import { mapLivingModel, savedGoal } from '../living-model/mapper.js';
-import { diffLivingModels, type LivingChange } from '../living-model/diff.js';
+import { diffLivingModels, stable, type LivingChange } from '../living-model/diff.js';
 import { livingViewOf } from '../living-model/view.js';
 import { isNoModelYet, isSavedRead, readSaved } from './context-tool.js';
 import { changeOperationId, findOperationVersion, writeCorePostimage } from './core-write.js';
@@ -61,12 +61,20 @@ export async function proposeLivingChange(deps: Deps, ctx: Ctx, args: LivingChan
   const brief = typeof base.saved.json.brief_text === 'string' ? [base.saved.json.brief_text] : [];
   const kernelled = applyKernel(args.model, [...brief, ...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])], base.model);
   // A condition is corrected or resolved by replacing it ("only after supplier approval" → "supplier approval obtained"; Codex
-  // r6 on #3522): its removal is a row on the card the person approves, and the condition itself goes to history with the
-  // person's words this turn, so a correction never loses what it replaced.
-  const goneConditions = diffLivingModels(base.model, kernelled.model).filter((c) => c.kind === 'condition' && c.change === 'remove'
-    && !kernelled.model.history.some((h) => h.old === JSON.stringify(c.before)));
-  const next: LivingModelT = goneConditions.length === 0 ? kernelled.model : { ...kernelled.model, history: [...kernelled.model.history,
-    ...goneConditions.map((c) => ({ id: 'condition', change: 'superseded' as const, old: JSON.stringify(c.before), quote: ctx.user_turn_text || null }))] };
+  // r6 on #3522): its removal is a row on the card the person approves, and the host keeps it in history. The quote is the
+  // person's own words for the change: a replacement THEY stated (kernel-verified) on the same items, else null. Never this
+  // turn's other words, and never a history entry the AI wrote for it (Codex r1 on #3576).
+  const proposed = diffLivingModels(base.model, kernelled.model).filter((c) => c.kind === 'condition');
+  const gone = proposed.filter((c) => c.change === 'remove').map((c) => c.before as LivingModelT['conditions'][number]);
+  const added = proposed.filter((c) => c.change === 'add').map((c) => c.after as LivingModelT['conditions'][number]);
+  const wordsFor = (c: LivingModelT['conditions'][number]): string | null => added.find((a) => (a.source === 'user' || a.source === 'party')
+    && a.quote !== null && a.applies_to.some((id) => c.applies_to.includes(id)))?.quote ?? null;
+  const olds = new Set(gone.map(stable));
+  const recordsGone = (old: string): boolean => { try { return olds.has(stable(JSON.parse(old))); } catch { return false; } };
+  const saved = new Set(base.model.history.map(stable));
+  const next: LivingModelT = gone.length === 0 ? kernelled.model : { ...kernelled.model, history: [
+    ...kernelled.model.history.filter((h) => saved.has(stable(h)) || !recordsGone(h.old)),
+    ...gone.map((c) => ({ id: 'condition', change: 'superseded' as const, old: JSON.stringify(c), quote: wordsFor(c) }))] };
   const changes = diffLivingModels(base.model, next);
   if (changes.length === 0) return refused('no_change');
   const removed = changes.filter((c) => c.change === 'remove' && c.kind !== 'condition');
