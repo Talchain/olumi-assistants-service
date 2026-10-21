@@ -264,7 +264,9 @@ describe('refusals and unknowns, said as such', () => {
   it('Olumi\'s own link carries its direction (21 Oct: unsigned goal links left Run disabled): the strict tool schema tells the AI so', () => {
     const link = (BuildModelParams.shape.model as unknown as { shape: { links: { element: { shape: { effect: { shape: { sign: { description?: string } } } } } } } })
       .shape.links.element.shape.effect.shape.sign;
-    expect(link.description).toMatch(/A link you add yourself \(source olumi\) always carries your best judgement of its direction/);
-    expect(link.description).toMatch(/Null only for the person's own link when they did not say which way it goes: then ask them/);
+    expect(link.description).toMatch(/For source olumi, give your provisional judgement of direction; when unsized, use form direction_only\./);
+    // Codex #3551 R1: every other source (user, party, unverified) keeps only the direction it supplied; else null and ask.
+    expect(link.description).toMatch(/For source user, party or unverified, preserve only the direction that source supplied\. If none was supplied, use sign null and form unknown, then ask\./);
+    expect(link.description).toMatch(/Never put an Olumi-inferred direction under another source\./);
   });
 });
