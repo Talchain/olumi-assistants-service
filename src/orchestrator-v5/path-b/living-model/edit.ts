@@ -142,8 +142,8 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       if (current !== edit.expected_label) return { refused: 'label_moved' };
       if ('text' in item) item.text = edit.label;
       else item.label = edit.label;
-      // The words are now the person's: their act, not their earlier quote (Codex: a renamed item kept Olumi's name and quote).
-      Object.assign(item, theirs);
+      // ⛔ The author is NOT re-stamped: `source` also says whose FIGURES these are (a goal's starting level, a factor's value,
+      // a risk's chance), so a rename must never pass Olumi's estimate off as the person's (Codex R2 on the core-edit PR).
       return { model: m };
     }
     case 'structural_delete': {
