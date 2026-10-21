@@ -1567,6 +1567,36 @@ describe('generateChips — V5 link-safe chip floor', () => {
     expect(floor[0].data.has_run_analysis_fact).toBe(true);
   });
 
+  it('frame stage + a successful run_analysis fact with NO leader, NO probabilities and no enrichment → floor keeps the conversational prompt (projection not buildable)', () => {
+    // Deletion 10: the false branch of `hasBuildableAnalysisProjection`. A
+    // successful fact exists, so exploration is offered, but nothing could be
+    // projected from it — "a successful fact exists" is NOT the predicate.
+    const unprojectable = {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: '00000000-0000-4000-8000-000000000001',
+        leading_option_id: null,
+        summary: 'Prior run',
+      },
+    } as unknown as HandlerFact;
+    const chips = generateChips({
+      stage: 'frame',
+      handlerFacts: [],
+      analysis: null,
+      validationRegistry: REGISTRY,
+      priorFacts: [unprojectable],
+    });
+    expect(chips).toHaveLength(1);
+    expect(chips[0].id).toBe('chip_prompt_floor_post_analysis_explore');
+    expect(chips[0]).not.toHaveProperty('action_type');
+    const floor = eventsNamed('v5.chips.floor_applied');
+    expect(floor).toHaveLength(1);
+    expect(floor[0].data.reason).toBe('post_analysis_no_obvious_next');
+    expect(floor[0].data.has_run_analysis_fact).toBe(true);
+  });
+
   it('stale freshness + prior run_analysis fact → floor adds conversational Re-run prompt (does NOT emit executable run_analysis)', () => {
     const chips = generateChips({
       stage: 'frame',

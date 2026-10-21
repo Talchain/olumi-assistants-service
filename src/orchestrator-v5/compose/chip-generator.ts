@@ -54,7 +54,7 @@ import type { ContextPackAnalysis } from '../context/context-pack-types.js';
 import { buildScaffoldConfigureChip } from '../coaching/scaffold-disclosure.js';
 import type { GraphPatchBlockData } from '../../orchestrator/types.js';
 import { isSuccessfulRunAnalysisFact } from '../context/freshness.js';
-import { buildAnalysisFromPriorFacts } from '../context/analysis-fallback.js';
+import { hasBuildableAnalysisProjection } from '../context/analysis-fallback.js';
 // Canonical typed readiness derives the sole recovery chip here; call sites
 // do not re-type readiness copy or infer an executable action from option
 // count. `configure-option-product-copy-routes.test.ts` pins `generateChips`
@@ -406,9 +406,9 @@ function applyChipFloor(input: ChipGeneratorInput): readonly SuggestedAction[] {
   // now anchored to the predicate that actually governs CHIPS rather than to a
   // handler precondition that has moved beneath it.
   //
-  // `buildAnalysisProjectionSummary` returns null only for a null input, and on
-  // the chip-click path that input is non-null iff `buildAnalysisFromPriorFacts`
-  // is non-null. Priority 1 already diverts the rerun-required case, so the
+  // `hasBuildableAnalysisProjection` is the deleted prior-facts summary builder
+  // cut off at its null decision (deletion 10): the same boolean, without the
+  // summary nobody read. Priority 1 already diverts the rerun-required case, so the
   // freshness test is defensive. When this does not hold we keep the
   // conversational promptChip (status quo) so a click never lands the user on a
   // "no analysis run yet" handler template.
@@ -417,7 +417,7 @@ function applyChipFloor(input: ChipGeneratorInput): readonly SuggestedAction[] {
       ...(input.handlerFacts ?? []),
       ...(input.priorFacts ?? []),
     ];
-    const projectionBuildable = buildAnalysisFromPriorFacts(combinedFacts, undefined) !== null;
+    const projectionBuildable = hasBuildableAnalysisProjection(combinedFacts);
     // Deliberately NOT named for the handler precondition any more — it no
     // longer mirrors it, and the old name would re-teach the false parity.
     const chipSafeToOffer = projectionBuildable && freshness !== 'stale';

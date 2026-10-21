@@ -15,7 +15,7 @@ import {
   type DurableScenarioAnalysisFactRead,
 } from '../reconcile-scenario-analysis-facts.js';
 import { readMayNameLeadingOptionVerdict } from '../claim-safety-read.js';
-import { buildAnalysisFromPriorFacts } from '../analysis-fallback.js';
+import { hasBuildableAnalysisProjection } from '../analysis-fallback.js';
 import {
   selectDegradedRunAnalysisFact,
   selectRunAnalysisFact,
@@ -285,7 +285,7 @@ describe('reconcileScenarioAnalysisFacts', () => {
     // the one they select — the same property `complete` already guarantees.
     expect(result.facts).toHaveLength(SCENARIO_ANALYSIS_FACT_CAP);
     expect(selectRunAnalysisFact(result.facts)?.fact).toEqual(newest);
-    expect(buildAnalysisFromPriorFacts(result.facts, [])).not.toBeNull();
+    expect(hasBuildableAnalysisProjection(result.facts)).toBe(true);
     // The 21st row is the one the wall removes, and it is the OLDEST — the
     // model loses the tail of its history, never its current analysis.
     expect(result.facts).not.toContainEqual(older[older.length - 1]);

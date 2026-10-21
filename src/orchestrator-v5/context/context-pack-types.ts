@@ -7,9 +7,6 @@
  * 22 Oct 2026): the assembler is gone, these shapes are not.
  */
 
-import type { InvestigationPriorityLicence } from '../coaching/investigation-priority.js';
-import type { FactorInvestigationVerdict } from './factor-investigation-licence.js';
-
 /**
  * Graph passthrough projection. Passes through the underlying node/edge
  * arrays verbatim and derives counts. Options / goals / constraints are
@@ -71,31 +68,14 @@ export interface ContextPackAnalysisDriver {
   readonly factor_label: string;
   readonly sensitivity_value: number;
   /**
-   * The producer's own verdict on whether this factor is worth RESOLVING —
-   * see `./factor-investigation-licence.ts`. Joined on the structural
-   * `factor_id` before this projection strips it.
-   *
-   * ⚠ A DIFFERENT QUESTION FROM `sensitivity_value` (trap #21). Sensitivity
-   * says how much this factor moves the outcome; this says whether there is
-   * any measured gain in the user going and pinning it down. The witnessed
-   * live harm was a factor with `sensitivity_score: -0.35` and
-   * `value_of_information: 0` — it mattered a great deal AND was worthless to
-   * investigate, and with only the first field projected the model could not
-   * possibly know the second.
-   *
-   * Key absent when the producer said nothing (older producer) or scored a
-   * real value of information — both keep today's behaviour exactly.
-   */
-  readonly investigation_verdict?: FactorInvestigationVerdict;
-  /**
-   * True when that verdict rests on a heuristic method or a default range, so
+   * True when the producer's investigation verdict rests on a heuristic method or a default range, so
    * the display layer can disclose the strength of its own evidence instead of
    * asserting a settledness the producer never claimed.
    */
   readonly investigation_basis_heuristic?: boolean;
   /**
    * The producer's `value_of_information` for this factor — the dimensionless
-   * [0,1] figure the verdict above is decided on.
+   * [0,1] figure the producer's investigation verdict is decided on.
    *
    * ⭐ Carried so a claim's STRENGTH can match its evidence. The verdicts decide
    * whether a factor may be recommended at all; this says how MUCH it is worth,
@@ -105,7 +85,8 @@ export interface ContextPackAnalysisDriver {
    *
    * ⚠ This is the PUBLIC-SURFACE figure, never `m1_coaching.evidence_gaps[]
    * .voi_score`. Derived at PLoT, those are different quantities sharing a
-   * word — see `./factor-investigation-licence.ts` for the two formulas and the
+   * word — see `./factor-investigation-licence.ts` (deleted in deletion 10; a copy is
+   * in `evidence/track2-deletion10-20261022/deleted/`) for the two formulas and the
    * producer's own regression pin against conflating them.
    *
    * Key absent when the producer emitted no finite figure.
@@ -136,8 +117,8 @@ export interface ContextPackAnalysisFlipThreshold {
    * ROADMAP 2.205 practical resolution (2026-07-31) — the DISPLAY LICENCE.
    * The producer's own display strings for this factor's current/flip values,
    * present exactly when those digits are already on the user's screen for
-   * this analysis (chain traced at
-   * `./analysis-signals.ts` → {@link deriveFlipDisplayLicences}). Both keys or
+   * this analysis (its producer, `deriveFlipDisplayLicences`, was deleted in
+   * deletion 10, 22 Oct 2026: its only caller's result was never read). Both keys or
    * neither. ABSENT when unlicensed — key-absence doctrine, so an unlicensed
    * pack stays byte-identical to today's.
    *
@@ -194,7 +175,7 @@ export interface ContextPackAnalysis {
    *    when any edge is suppressed the count collapses to the filtered
    *    list length rather than repeating the producer count.
    *  - `evidence_gaps` / `goal_fit`: VOI + goal-fit provenance signals
-   *    (see `./analysis-signals.ts`), raw here, banded by the formatter.
+   *    (their derivers in `./analysis-signals.ts` were deleted in deletion 10), raw here, banded by the formatter.
    */
   readonly options?: readonly ContextPackAnalysisOption[];
   readonly flip_thresholds?: readonly ContextPackAnalysisFlipThreshold[];
@@ -213,23 +194,6 @@ export interface ContextPackAnalysis {
    * #308-union structural authority) fires.
    */
   readonly evidence_gaps_lever_suppressed?: true;
-  /**
-   * ⭐ WHAT THE INFORMATION-VALUE SCIENCE SAID ABOUT WHAT TO INVESTIGATE FIRST.
-   *
-   * A DIFFERENT QUESTION FROM `evidence_gaps` ABOVE, from a DIFFERENT PRODUCER
-   * CHANNEL, and the two disagreed on the capture that produced this field.
-   * `evidence_gaps` is `enrichment.m1_coaching.evidence_gaps[]`; this is ISL's
-   * `enrichment.factor_evppi`, read through the existing
-   * `coaching/select-factor-evppi.ts` authority.
-   *
-   * Attached at `reconcileAnalysisSummaryWithEnrichment` — the single seam
-   * between a summary and its own enrichment — so it can never describe a
-   * different run from the analysis it travels with.
-   *
-   * ABSENT (never `'not_assessed'`) when the EVPPI channel said nothing at all:
-   * other information-value channels retain their separate disclosures.
-   */
-  readonly investigation_priority?: InvestigationPriorityLicence;
   readonly goal_fit?: ContextPackAnalysisGoalFit | null;
   /**
    * Lane 30 fix 3 — top-level ordinal confidence tier (attested values

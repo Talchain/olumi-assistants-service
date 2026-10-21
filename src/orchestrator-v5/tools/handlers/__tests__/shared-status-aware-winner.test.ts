@@ -29,13 +29,10 @@
 
 import { describe, it, expect } from 'vitest';
 
-import type { HandlerFact } from '@talchain/schemas/orchestrator';
-
 import { compactAnalysis } from '../../../../orchestrator/context/analysis-compact.js';
 import type { V2RunResponseEnvelope } from '../../../../orchestrator/types.js';
 import { buildInvokeInputForTests } from '../../../coaching/decision-review-enricher.js';
 import { buildAnalysisResultHeadline } from '../../../coaching/analysis-result-headline.js';
-import { buildAnalysisFromPriorFacts } from '../../../context/analysis-fallback.js';
 
 // --- Codex #4 repro: a FAILED option carries the top win_probability --------
 // B (error, 0.90) must never beat A (computed, 0.40). C (computed, 0.30) is the
@@ -245,80 +242,7 @@ describe('shared status-aware winner — site 4: run_analysis headline (resolveW
 });
 
 // ---------------------------------------------------------------------------
-// Site 5 (P2) — analysis-fallback.ts `buildAnalysisFromPriorFacts`. The
-// enriched prior-facts path OVERRODE compactAnalysis's already-gated winner
-// with `relabelled[0]` — the FULL (status-blind) option list's top — so a
-// failed option carrying the highest win_probability was re-crowned on the
-// conversational follow-up path, AND desynced from the margin (which
-// compactAnalysis measures over the recommendable subset only). The fix picks
-// the top RECOMMENDABLE option, pinning winner and margin to the same source.
+// Site 5 (P2) — analysis-fallback.ts `buildAnalysisFromPriorFacts`: deleted in
+// deletion 10 (22 Oct 2026), with its rows — its only caller discarded the
+// summary, so its winner was never read.
 // ---------------------------------------------------------------------------
-
-function priorFactWithEnrichment(optionComparison: Record<string, unknown>[]): HandlerFact {
-  return {
-    fact_type: 'run_analysis',
-    fact_version: 1,
-    noop: false,
-    result: {
-      scenario_id: '00000000-0000-4000-8000-000000000001',
-      leading_option_id: 'A',
-      win_probabilities: {},
-      summary: 'Prior run',
-      // Envelope status is a SUCCESS (the fact is eligible); the gate under
-      // test is the PER-OPTION status carried on each option_comparison entry.
-      enrichment: { analysis_status: 'complete', option_comparison: optionComparison },
-    },
-  } as unknown as HandlerFact;
-}
-
-describe('shared status-aware winner — site 5: prior-facts fallback (buildAnalysisFromPriorFacts)', () => {
-  it('does NOT re-crown the failed top option; winner is the recommendable leader', () => {
-    const summary = buildAnalysisFromPriorFacts([
-      priorFactWithEnrichment([
-        { option_id: 'A', option_label: 'Option A', win_probability: 0.4, status: 'computed', outcome_mean: 10 },
-        { option_id: 'B', option_label: 'Option B', win_probability: 0.9, status: 'error', outcome_mean: 20 },
-        { option_id: 'C', option_label: 'Option C', win_probability: 0.3, status: 'computed', outcome_mean: 5 },
-      ]),
-    ]);
-    expect(summary).not.toBeNull();
-    expect(summary!.winner.option_id).toBe('A');
-    expect(summary!.winner.win_probability).toBeCloseTo(0.4, 10);
-  });
-
-  it('pins coherence: the winner and the margin derive from the SAME recommendable subset', () => {
-    const summary = buildAnalysisFromPriorFacts([
-      priorFactWithEnrichment([
-        { option_id: 'A', option_label: 'Option A', win_probability: 0.4, status: 'computed', outcome_mean: 10 },
-        { option_id: 'B', option_label: 'Option B', win_probability: 0.9, status: 'error', outcome_mean: 20 },
-        { option_id: 'C', option_label: 'Option C', win_probability: 0.3, status: 'computed', outcome_mean: 5 },
-      ]),
-    ])!;
-    // margin = A(0.40) - C(0.30); the failed B is neither winner nor runner-up.
-    expect(summary.margin).toBeCloseTo(0.1, 10);
-  });
-
-  it('retains the failed option in the FULL options list (so the coach can disclose it ran)', () => {
-    const summary = buildAnalysisFromPriorFacts([
-      priorFactWithEnrichment([
-        { option_id: 'A', option_label: 'Option A', win_probability: 0.4, status: 'computed', outcome_mean: 10 },
-        { option_id: 'B', option_label: 'Option B', win_probability: 0.9, status: 'error', outcome_mean: 20 },
-        { option_id: 'C', option_label: 'Option C', win_probability: 0.3, status: 'computed', outcome_mean: 5 },
-      ]),
-    ])!;
-    const b = summary.options.find((o) => o.option_id === 'B');
-    expect(b).toBeDefined();
-    expect(b?.status).toBe('error');
-  });
-
-  it('GOLDEN — all-computed set is unchanged: highest win_probability is crowned', () => {
-    const summary = buildAnalysisFromPriorFacts([
-      priorFactWithEnrichment([
-        { option_id: 'A', option_label: 'Option A', win_probability: 0.4, status: 'computed', outcome_mean: 10 },
-        { option_id: 'B', option_label: 'Option B', win_probability: 0.9, status: 'computed', outcome_mean: 20 },
-        { option_id: 'C', option_label: 'Option C', win_probability: 0.3, status: 'computed', outcome_mean: 5 },
-      ]),
-    ])!;
-    expect(summary.winner.option_id).toBe('B');
-    expect(summary.margin).toBeCloseTo(0.5, 10); // B 0.90 - A 0.40
-  });
-});

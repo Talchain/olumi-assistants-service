@@ -57,7 +57,7 @@ import {
   readMayNameLeadingOptionVerdict,
   type ClaimSafetyScenarioScope,
 } from '../claim-safety-read.js';
-import { buildAnalysisFromPriorFacts } from '../analysis-fallback.js';
+import { hasBuildableAnalysisProjection } from '../analysis-fallback.js';
 import { selectClaimBearingRunAnalysisFact, selectRunAnalysisFact } from '../freshness.js';
 
 const ARRAY_ONLY: ClaimSafetyScenarioScope = {
@@ -168,18 +168,22 @@ describe('F1 — a withheld analysis must not be displayed under a newer fact’
   });
 
   it('INSTRUMENT: the projected CONTENT really is built from the WITHHELD fact', () => {
-    // `buildAnalysisFromPriorFacts` is what fills `contextPack.analysis` and,
-    // through it, the model-facing `display_analysis`. It selects with the
-    // QUALITY selector, so on this input it grounds the turn in A.
+    // The content selector is the QUALITY selector, so on this input it grounds
+    // the turn in A. (Deletion 10: the prior-facts summary builder that used to
+    // be read here was deleted — nothing read its summary — so the row reads the
+    // selected fact itself, plus the builder's surviving null decision.)
     //
     // The two facts name DIFFERENT leaders on purpose: `opt_a` at 72% is A's
     // claim, `opt_b` at 66% is B's. Reading `opt_a` back proves the content
-    // came from the fact whose verdict WITHHELD it — not merely that some
+    // comes from the fact whose verdict WITHHELD it — not merely that some
     // content exists.
-    const projected = buildAnalysisFromPriorFacts(DIVERGENT_FACTS, undefined);
-    expect(projected).not.toBeNull();
-    expect(projected!.winner.option_id).toBe('opt_a');
-    expect(projected!.winner.win_probability).toBe(0.72);
+    const selected = selectRunAnalysisFact(DIVERGENT_FACTS);
+    expect(selected?.fact).toBe(FACT_A_SUCCESSFUL_WITHHELD);
+    const fact = selected!.fact;
+    if (fact.fact_type !== 'run_analysis') throw new Error('expected the run_analysis fact');
+    expect(fact.result.leading_option_id).toBe('opt_a');
+    expect(fact.result.win_probabilities?.opt_a).toBe(0.72);
+    expect(hasBuildableAnalysisProjection(DIVERGENT_FACTS)).toBe(true);
   });
 
   // ── THE DEFECT ────────────────────────────────────────────────────────────
@@ -440,9 +444,9 @@ describe('F1 — the window/scenario asymmetry, on inputs the loader should not 
     // the 20-turn window still narrows, which is exactly the decay #726 was
     // built to stop and which F1's conjunction would otherwise re-open.
     expect(
-      buildAnalysisFromPriorFacts([FACT_B_PARTIAL_PERMITTED], undefined),
+      hasBuildableAnalysisProjection([FACT_B_PARTIAL_PERMITTED]),
       'the bare window projects nothing here — that is what makes this the scope-only arm',
-    ).toBeNull();
+    ).toBe(false);
 
     const v = readMayNameLeadingOptionVerdict(
       [FACT_B_PARTIAL_PERMITTED],
@@ -487,10 +491,11 @@ describe('F1 — the window/scenario asymmetry, on inputs the loader should not 
     });
 
     // The premise of the characterisation: the bare window really does still
-    // project the WITHHELD fact's leader. Without this the arm proves nothing.
-    const displayed = buildAnalysisFromPriorFacts([FACT_A_SUCCESSFUL_WITHHELD], undefined);
-    expect(displayed?.winner.option_id).toBe('opt_a');
-    expect(displayed?.winner.win_probability).toBe(0.72);
+    // select (and could project) the WITHHELD fact's leader. Without this the
+    // arm proves nothing.
+    const displayed = selectRunAnalysisFact([FACT_A_SUCCESSFUL_WITHHELD]);
+    expect(displayed?.fact).toBe(FACT_A_SUCCESSFUL_WITHHELD);
+    expect(hasBuildableAnalysisProjection([FACT_A_SUCCESSFUL_WITHHELD])).toBe(true);
 
     const v = readMayNameLeadingOptionVerdict(
       [FACT_A_SUCCESSFUL_WITHHELD],
