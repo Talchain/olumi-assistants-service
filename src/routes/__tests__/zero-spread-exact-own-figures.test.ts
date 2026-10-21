@@ -75,6 +75,49 @@ describe('F1: a zero-spread result on the person’s own exact figures says its 
       b: { reason: 'zero_spread', side: 'falls_short', line: ZERO_SPREAD_LINE } });
   });
 
+  it('CODEX F1v2 #1: an unlinked operand, a raw setting under a held value, a stray change part, an accepted Olumi figure: none is the person\'s exact arithmetic', () => {
+    const unlinked = structuredClone(REC.graph) as Rec;
+    unlinked.edges = (unlinked.edges as Rec[]).filter((e) => !(e.from === 'w_today' && e.to === 'w'));
+    olumis(node(unlinked, 'w_today').observed_state);
+    expect(exactnessEarned(unlinked, 'a', EVALUATIONS), 'an identity part with no link hides its own figure').toBe(false);
+    const rawMoves = structuredClone(REC.graph) as Rec;
+    Object.assign(node(rawMoves, 'b').interventions.w__change, { value: 0 });
+    olumis(node(rawMoves, 'b').interventions.w__change);
+    expect(exactnessEarned(rawMoves, 'b', EVALUATIONS), 'held means the RAW level: 19.9 is not 0').toBe(false);
+    const stray = structuredClone(REC.graph) as Rec;
+    (stray.nodes as Rec[]).push({ id: 'x', kind: 'factor', label: 'x', quantity_frame: 'change', observed_state: { value: 0, raw_value: 0, cap: 75, unit: 'widgets per hour', source: 'cee_inference' } });
+    const theirs = (node(stray, 'w').nonlinear_identity as Rec).factor_ids as string[];
+    (stray.edges as Rec[]).push({ ...structuredClone((stray.edges as Rec[]).find((e) => e.from === 'w_today' && e.to === 'w')!), id: 'x__w', from: 'x',
+      provenance: { source: 'brief_extraction', magnitude: 'user_stated', natural_effect: { amount: 1, amount_unit: 'widgets per hour', per_source_change: 1,
+        per_source_change_unit: 'widgets per hour', strength_mean: 1, strength_mean_frame: 'edge_strength' } } });
+    expect(theirs, 'precondition: x is not a part of the goal\'s own sum').not.toContain('x');
+    expect(exactnessEarned(stray, 'a', EVALUATIONS), 'only the goal\'s own sum part is a definitional change').toBe(false);
+    const accepted = structuredClone(REC.graph) as Rec;
+    Object.assign(node(accepted, 'b').interventions.w__change, { source: 'user_confirmed' });
+    delete node(accepted, 'b').interventions.w__change.extractionType;
+    expect(exactnessEarned(accepted, 'b', EVALUATIONS), 'an accepted Olumi figure is still Olumi\'s').toBe(false);
+    expect(exactnessEarned(REC.graph, 'b', EVALUATIONS), 'CONTRAST: the person\'s own setting').toBe(true);
+  });
+
+  it('CODEX F1v2 #2: the frame is ISL\'s own: a Run that rebuilt today in another frame says no finding', () => {
+    const normalised = EVALUATIONS.map((e) => ({ ...e, reconciliation: { ...e.reconciliation, reconstructed: 40 / 75 } }));
+    expect(exactFinding(REC.graph, 'a', normalised)).toBeUndefined();
+    expect(produce(REC.graph, { ...structuredClone(RUN.enrichment), identity_evaluations: normalised })?.a)
+      .toEqual({ reason: 'zero_spread', side: 'meets', line: ZERO_SPREAD_LINE });
+  });
+
+  it('CODEX F1v2 #3: the figure that keeps it is said only for a change from 0 today', () => {
+    const fromTen = structuredClone(REC.graph) as Rec;
+    Object.assign(node(fromTen, 'w__change').observed_state, { value: 10 / 75, raw_value: 10, source: 'brief_extraction', extractionType: 'explicit' });
+    expect(exactFinding(fromTen, 'a', EVALUATIONS)).toEqual({ projected: 60, threshold: 60 });
+  });
+
+  it('CODEX F1v2 #5: a figure is never rounded: one that cannot be said exactly drops its sentence, or the whole line', () => {
+    const f = { projected: 59.99995, threshold: 60, setting: { value: 19.99995, tipping: 20 } };
+    expect(zeroSpreadExactLine('A', f, '>=', '')).toBeUndefined();
+    expect(zeroSpreadExactLine('A', { ...f, projected: 59.999 }, '>=', '')).toBe('With your figures, ‘A’ reaches 59.999, 0.001 below your target of 60.');
+  });
+
   it('COMPARATOR: at most 60 reverses both sides and the words that keep them', () => {
     const graph = structuredClone(REC.graph) as Rec;
     node(graph, 'w').goal_direction = '<=';
@@ -114,5 +157,12 @@ describe('F1: a zero-spread result on the person’s own exact figures says its 
     expect(goalChanceLicenceForAgent(stored as never)?.withheld_reason_by_option?.a)
       .toEqual({ reason: 'zero_spread', side: 'meets', line: ZERO_SPREAD_LINE });
     expect(cells(stored).find((c) => c.option_id === 'a')!.cell).toMatchObject({ face: 'Chance not shown yet', why: ZERO_SPREAD_LINE });
+    // CODEX F1v2 #4: a cut line is not this line, so it keeps no basis.
+    const cut = structuredClone(RUN) as Rec;
+    licenceRecord(cut).withheld_reason_by_option.a.line = A_LINE.slice(0, A_LINE.indexOf(' your target'));
+    expect(goalChanceLicenceForAgent(cut as never)?.withheld_reason_by_option?.a).not.toHaveProperty('basis');
+    const truncated = structuredClone(RUN) as Rec;
+    licenceRecord(truncated).withheld_reason_by_option.a.line = A_LINE.replace('How sure are you of the 30?', 'How sure are you of the 3?');
+    expect(goalChanceLicenceForAgent(truncated as never)?.withheld_reason_by_option?.a).not.toHaveProperty('basis');
   });
 });

@@ -39,7 +39,7 @@ import { magnitudeNodes, percentLevelIds } from '../../cee/magnitude/frame-defau
 import { resolveMagnitudeFrame, unitOf } from '../../cee/magnitude/link-effect.js';
 import { chanceGoalSentence, goalDeadlineFromRecord, goalKindOf } from '../goal-target/goal-kind.js';
 import { sayDate } from '../goal-target/deadline-date.js';
-import { isUsersLevelOrApproved } from '../../cee/provenance/provenance-of.js';
+import { isUsersLevelOrApproved, valueAuthorshipOf } from '../../cee/provenance/provenance-of.js';
 import { linkHoldsStatedRange } from '../statement-door/statements.js';
 
 type Rec = Record<string, unknown>;
@@ -267,11 +267,11 @@ function linkExactness(graph: Rec, nodes: Rec[], edges: Rec[], identityEvaluatio
  * said as a finding (`exactFinding`); otherwise #3017's line stays. Earned when everything the goal's result rests on is
  * exact and the person's own:
  *   · every link into the goal's ancestry (through factors, outcomes and risks) passes the walk's own test (`exact`) and,
- *     unless it is an operand's link into an identity THIS run evaluated, is sized by the person or is Olumi's size they
- *     approved;
- *   · every level on it is theirs (`isUsersLevelOrApproved`), except the exact sum's change, 0 today by definition
- *     (`quantity_frame: 'change'`); a root with no level fails;
- *   · every setting the option makes on it is theirs, or holds a factor at its level today (it moves nothing).
+ *     unless it is an operand's link into an identity THIS run evaluated, is sized by the person; every declared operand
+ *     of an identity on it is linked into it (else what reaches it is unseen);
+ *   · every level on it is theirs (`valueAuthorshipOf` 'yours': an accepted Olumi figure is still Olumi's), except a part
+ *     of the goal's own sum that is a change, 0 today by definition (`quantity_frame: 'change'`); a root with no level fails;
+ *   · every setting the option makes on it is theirs, or holds a factor at its raw level today (it moves nothing).
  * The zero spread itself is the caller's test (`zeroSpread`). Pure; anything unreadable fails closed.
  */
 export function exactnessEarned(graph: unknown, optionId: string, identityEvaluations?: ReadonlyArray<unknown>): boolean {
@@ -290,20 +290,22 @@ export function exactnessEarned(graph: unknown, optionId: string, identityEvalua
     for (const e of edges) if (ancestry.has(e.to) && !ancestry.has(e.from) && walked(e.from)) { ancestry.add(e.from); grew = true; }
   }
   const into = edges.filter((e) => ancestry.has(e.to) && walked(e.from));
-  const ownSize = (e: Rec): boolean => linkSizing(e) === 'user' || linkSizing(e) === 'olumi_accepted';
-  if (!into.every((e) => byId.has(e.from) && exact(e) && (operandLink(e) || ownSize(e)))) return false;
+  if (!into.every((e) => byId.has(e.from) && exact(e) && (operandLink(e) || linkSizing(e) === 'user'))) return false;
+  const goalParts = isRec(goal.nonlinear_identity) && Array.isArray(goal.nonlinear_identity.factor_ids) ? goal.nonlinear_identity.factor_ids : [];
+  const yours = (x: unknown): boolean => valueAuthorshipOf(x) === 'yours';
   for (const id of ancestry) {
     const n = byId.get(id)!;
+    const parts = isRec(n.nonlinear_identity) && Array.isArray(n.nonlinear_identity.factor_ids) ? n.nonlinear_identity.factor_ids : [];
+    if (parts.some((p) => !into.some((e) => e.from === p && e.to === id))) return false;
     const level = levelOf(n);
     const figure = level.raw ?? level.value;
-    if (n.quantity_frame === 'change' && figure === 0) continue;
-    if (figure === undefined ? !into.some((e) => e.to === id) : !userOwns(level.observed)) return false;
+    if (n.quantity_frame === 'change' && figure === 0 && goalParts.includes(id)) continue;
+    if (figure === undefined ? !into.some((e) => e.to === id) : !yours(level.observed)) return false;
   }
   return Object.entries(mergeInterventionSourceObjects(option)).every(([factorId, set]) => {
     if (!ancestry.has(factorId)) return true;
-    const to = interventionLevel(set);
-    const now = levelOf(byId.get(factorId));
-    return (to.value !== undefined && to.value === now.value) || userOwns(set);
+    const to = interventionLevel(set).raw;
+    return (to !== undefined && to === levelOf(byId.get(factorId)).raw) || yours(set);
   });
 }
 
@@ -356,8 +358,9 @@ function projectedIfHeld(op: 'sum' | 'product', today: number, operands: Readonl
 
 /**
  * ⭐ F1 v2 (Paul, 21 Oct: exact figures are a positive): where `exactnessEarned` holds and the goal is a sum or product THIS
- * Run evaluated, the level the option reaches (the break-even's own arithmetic) against the target; and, where it sets one
- * part of a sum, that setting and the value that would put the result exactly on the target. Undefined otherwise. Pure.
+ * Run evaluated from its stated level in the goal's own units (ISL's reconstruction of today is the person's today), the
+ * level the option reaches (the break-even's own arithmetic) against the target; and, where the option sets only the sum's
+ * change (0 today), that change and the change that would put the result exactly on the target. Undefined otherwise. Pure.
  */
 export function exactFinding(graph: unknown, optionId: string, identityEvaluations?: ReadonlyArray<unknown>):
   { readonly projected: number; readonly threshold: number; readonly setting?: { readonly value: number; readonly tipping: number } } | undefined {
@@ -370,14 +373,17 @@ export function exactFinding(graph: unknown, optionId: string, identityEvaluatio
   const op = identity?.operation;
   const today = levelOf(goal).raw;
   const threshold = num(goal.goal_threshold_raw);
-  if ((op !== 'sum' && op !== 'product') || today === undefined || threshold === undefined
-    || !linkExactness(graph as Rec, nodes, edges, identityEvaluations).evaluated(goal.id)) return undefined;
+  const evaluation = linkExactness(graph as Rec, nodes, edges, identityEvaluations).evaluations.get(goal.id);
+  const reconstructed = isRec(evaluation?.reconciliation) ? num(evaluation!.reconciliation.reconstructed) : undefined;
+  if ((op !== 'sum' && op !== 'product') || today === undefined || threshold === undefined || evaluation?.level_source !== 'stated_level'
+    || reconstructed === undefined || !sameFrameArithmeticAgreement(reconstructed, today, today, REPORTED_SPREAD_PRECISION)) return undefined;
   const operands = new Set(Array.isArray(identity!.factor_ids) ? identity!.factor_ids.filter((x): x is string => typeof x === 'string') : []);
   const iv = mergeInterventionSourceObjects(byId.get(optionId)!);
   const projected = projectedIfHeld(op, today, operands, byId, iv);
   if (projected === undefined) return undefined;
   const set = [...operands].filter((id) => id in iv);
-  const value = op === 'sum' && set.length === 1 ? interventionLevel(iv[set[0]!]).raw : undefined;
+  const change = op === 'sum' && set.length === 1 && byId.get(set[0])?.quantity_frame === 'change' && levelOf(byId.get(set[0])).raw === 0;
+  const value = change ? interventionLevel(iv[set[0]!]).raw : undefined;
   return { projected, threshold, ...(value !== undefined ? { setting: { value, tipping: value - (projected - threshold) } } : {}) };
 }
 

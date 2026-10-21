@@ -463,21 +463,32 @@ function fixedBaselineOf(sentRun: unknown, graph: unknown): { readonly id: strin
  * arithmetic (`exactFinding`). The level it reaches and its margin; where it sets one part of a sum, the value that keeps it
  * there and theirs; then one question on that figure. Never a chance.
  */
-export function zeroSpreadExactLine(option: string, f: NonNullable<ReturnType<typeof exactFinding>>, comparator: '>=' | '<=', unit: string): string {
-  const n = (x: number) => sayFigure(x, '');
-  const margin = f.projected - f.threshold;
-  const where = margin === 0 ? `exactly your target of ${n(f.threshold)}` : `${n(Math.abs(margin))} ${margin > 0 ? 'above' : 'below'} your target of ${n(f.threshold)}`;
-  const finding = `With your figures, ‘${option}’ reaches ${sayFigure(f.projected, unit)}, ${where}.`;
+export function zeroSpreadExactLine(option: string, f: NonNullable<ReturnType<typeof exactFinding>>, comparator: '>=' | '<=', unit: string): string | undefined {
+  const same = (a: number, b: number) => sameFrameArithmeticAgreement(a, b, b, REPORTED_SPREAD_PRECISION);
+  // Every figure exactly as written (never rounded: "59.999" is not "60"), or no line at all (#3017's line stays).
+  const exact = (x: number, u = ''): string | undefined => {
+    const words = sayFigureAsWritten(x, u);
+    const digits = /\d[\d,]*(?:\.\d+)?/.exec(words)?.[0];
+    return digits !== undefined && same(Number(digits.replace(/,/g, '')), Math.abs(x)) ? words : undefined;
+  };
+  const margin = same(f.projected, f.threshold) ? 0 : f.projected - f.threshold;
+  const [reached, target, gap] = [exact(f.projected, unit), exact(f.threshold), exact(Math.abs(margin))];
+  if (reached === undefined || target === undefined || gap === undefined) return undefined;
+  const where = margin === 0 ? `exactly your target of ${target}` : `${gap} ${margin > 0 ? 'above' : 'below'} your target of ${target}`;
+  const finding = `With your figures, ‘${option}’ reaches ${reached}, ${where}.`;
   if (f.setting === undefined) return finding;
   const { value, tipping } = f.setting;
+  const [said, keep] = [exact(Math.abs(value)), exact(Math.abs(tipping))];
+  if (said === undefined || keep === undefined) return finding;
   const higher = comparator === '>=';
-  const keeps = tipping >= 0 ? `adds ${higher ? 'at least' : 'no more than'} ${n(tipping)}` : `removes ${higher ? 'no more than' : 'at least'} ${n(-tipping)}`;
+  const keeps = tipping >= 0 ? `adds ${higher ? 'at least' : 'no more than'} ${keep}` : `removes ${higher ? 'no more than' : 'at least'} ${keep}`;
   const meets = higher ? margin >= 0 : margin <= 0;
-  return `${finding} It ${meets ? 'still gets there as long as' : 'would get there if'} it ${keeps}; you said it ${value >= 0 ? 'adds' : 'removes'} ${n(Math.abs(value))}. `
-    + `How sure are you of the ${n(Math.abs(value))}?`;
+  return `${finding} It ${meets ? 'still gets there as long as' : 'would get there if'} it ${keeps}; you said it ${value >= 0 ? 'adds' : 'removes'} ${said}. `
+    + `How sure are you of the ${said}?`;
 }
-/** That line's shape, for the stored-licence reader (no other line carries the basis). */
-const EXACT_OWN_FIGURES_LINE = /^With your figures, ‘[^‘’\r\n]+’ reaches /u;
+/** That line's whole shape, for the stored-licence reader (no other line carries the basis; a cut line keeps none). */
+const EXACT_OWN_FIGURES_LINE = new RegExp('^With your figures, ‘[^‘’\\r\\n]+’ reaches [^\\r\\n]+?, (?:[^\\r\\n]+? (?:above|below) your target of [^\\r\\n]+?|exactly your target of [^\\r\\n]+?)\\.'
+  + '(?: It (?:still gets there as long as|would get there if) it (?:adds|removes) (?:at least|no more than) [^\\r\\n]+?; you said it (?:adds|removes) ([^\\r\\n]+?)\\. How sure are you of the \\1\\?)?$', 'u');
 
 /**
  * F1: each zero-spread option `exactFinding` finds, bound to THIS Run: its single value is the arithmetic's, and its side the
@@ -499,7 +510,8 @@ function exactOwnFiguresLines(
     if (f === undefined || !isRec(p50) || !finite(p50.p50)
       || !sameFrameArithmeticAgreement(p50.p50, f.projected, f.projected, REPORTED_SPREAD_PRECISION)
       || (side === 'meets') !== (comparator === '>=' ? f.projected >= f.threshold : f.projected <= f.threshold)) continue;
-    out[id] = zeroSpreadExactLine(label!, f, comparator!, unit);
+    const line = zeroSpreadExactLine(label!, f, comparator!, unit);
+    if (line !== undefined) out[id] = line;
   }
   return out;
 }
