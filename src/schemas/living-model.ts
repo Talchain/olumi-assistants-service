@@ -175,7 +175,7 @@ export const LivingLink = z.object({
      */
     form: z.enum(['point', 'exact', 'range', 'normal', 'direction_only', 'unknown']).describe(
       'point: a stated figure ("adds about 50"); exact: the person says it is exactly this, with no variation ("adds exactly 50"); '
-      + 'normal: a stated Normal law, value its mean and sd its standard deviation; range: low to high, with value the person\'s own central figure when they give one ("about 20, between 10 and 30"), else null; direction_only: a known or explicitly Olumi-proposed sign with no size; unknown: direction is unstated or unresolved, with sign null.'),
+      + 'normal: a stated Normal law, value its mean and sd its standard deviation; range: low to high, with value the source\'s own central figure: the person\'s when they give one, Olumi\'s for Olumi\'s own estimate ("about 20, between 10 and 30"), else null; direction_only: a sign with no size, only when an end has no unit or the source gave a direction only; unknown: direction is unstated or unresolved, with sign null.'),
     ...figure,
     /**
      * The link's unit is the `to` item's own unit, exactly as that item writes it; "per +1 of `from`" is implied, so it is

@@ -53,14 +53,14 @@ export interface DraftDeps {
   readonly deadlineAt?: number;
 }
 
-/** What the AI is told when a reviewer read its first draft. Nothing is saved; the drafter decides what to adopt. */
-export const REVIEW_FIRST = 'Nothing was saved yet: a second reviewer read your first draft (critique; gaps are structural facts). '
-  + 'Revise once, then call build_model_from_brief again with the complete model. Adopt only what helps the person reason; a genuinely '
-  + 'new inference of yours is Olumi\'s (source olumi, quote null), while every item the person or another party stated keeps its source, '
-  + 'quote and uncertainty unchanged. Every option except the status quo (which changes nothing) reaches the goal through what it changes: give its link a direction when you can '
-  + 'judge one, else form unknown with sign null so the person can say which way. Connect other items only where there is a real '
-  + 'causal relationship; context may stay unconnected. Never put a figure the person or a party did not give under their item, and never a target figure: ask for those. Olumi\'s own items carry Olumi\'s provisional ranges, labelled as Olumi\'s. In your reply, '
-  + 'say which items are Olumi\'s suggestions, and ask the critique\'s question if it is still open.';
+/**
+ * What the AI is told with the saved first draft's review (Track 3, candidate 2: the review used to refuse the first build, and
+ * the redraft cost 32–46 s of a first turn whose replies overran the stream at 151–162 s). The draft is saved at once; the
+ * reviewer's point reaches the person as Olumi's suggestion in the reply, and the person decides whether to adopt it.
+ */
+export const REVIEW_AFTER_SAVE = 'Your draft is saved. A second reviewer read it (critique; gaps are structural facts). Do not rebuild or '
+  + 'change the model in this turn. In your reply, name the critique\'s most useful point as Olumi\'s suggestion the person can ask you to '
+  + 'add, and ask its question if it is still open (at most one question).';
 
 const nodesIn = (graph: Record<string, unknown>): number => (Array.isArray(graph.nodes) ? graph.nodes.length : 0);
 
@@ -97,11 +97,12 @@ async function constructUnrecorded(deps: DraftDeps, ctx: DraftContext, args: Bui
   const mapped = mapLivingModel(kernelled.model);
   if (!mapped.graph.nodes.some((n) => n.kind !== 'decision')) return refused('model_empty');
   const gaps = structureGaps(kernelled.model);
-  if (deps.review !== undefined && !deps.review.done) {
-    deps.review.done = true;
-    const critique = await deps.critique?.(JSON.stringify({ brief: args.brief, draft: kernelled.model, gaps }), msLeft());
-    if (critique !== undefined) return refused('review_first', REVIEW_FIRST, { gaps, critique });
-  }
+  // The turn's first draft is reviewed BESIDE its save, never before it: the critic never gates or delays the write.
+  const reviewing = deps.review !== undefined && !deps.review.done;
+  if (deps.review !== undefined) deps.review.done = true;
+  const critiqued = reviewing
+    ? (deps.critique?.(JSON.stringify({ brief: args.brief, draft: kernelled.model, gaps }), msLeft()) ?? Promise.resolve(undefined)).catch(() => undefined)
+    : Promise.resolve(undefined);
   const graph: Record<string, unknown> = { ...mapped.graph, living_model: kernelled.model };
 
   const write = await writeCorePostimage(deps, { scenarioId: ctx.scenario_id, graph, briefText: args.brief,
@@ -114,8 +115,10 @@ async function constructUnrecorded(deps: DraftDeps, ctx: DraftContext, args: Bui
   if (write.status === 'already_saved') return ok({ already_saved: true, model_version: write.receipt }, { mutated: false });
   const { receipt, after } = write;
   try { deps.onModelRegistered?.(after.graph); } catch { /* an observer never decides the outcome */ }
+  const critique = await critiqued;
   return ok({
     provisional: 'olumi', model_version: receipt, revision: { graph_hash: after.graphHash, graph_identity_hash: after.identity },
     draft: { withheld: mapped.withheld, assumed: mapped.assumed, relabelled: kernelled.relabelled, ...(hasGaps(gaps) ? { gaps } : {}) },
+    ...(critique !== undefined ? { review: { critique, note: REVIEW_AFTER_SAVE } } : {}),
   }, { mutated: true });
 }

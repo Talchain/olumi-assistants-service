@@ -6,7 +6,7 @@
  * (no module mock: the kernel, the mapper and the construction's own helpers are real). SYNTHETIC brief.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { BuildModelParams, REVIEW_FIRST, buildModel, type DraftDeps } from '../draft-tool.js';
+import { BuildModelParams, REVIEW_AFTER_SAVE, buildModel, type DraftDeps } from '../draft-tool.js';
 import { applyKernel } from '../../living-model/kernel.js';
 import { mapLivingModel } from '../../living-model/mapper.js';
 import type { LivingModelT } from '../../../../schemas/living-model.js';
@@ -283,20 +283,15 @@ describe('the critic (21 Oct): a second model reviews the first draft of the tur
   const CRITIQUE = { measurable_goal: { quantity: 'visitors served', unit: 'visitors', horizon: 'per Saturday', why: 'the aim has no target' },
     missing: [{ kind: 'risk' as const, label: 'Assistant calls in sick', reaches_goal_via: 'lowers assistants on shift', why_it_matters: 'one absence undoes the option' }],
     connect: [], question: 'How many visitors do you need to serve on a Saturday?' };
-  it('first draft: refused with the critique and the gaps, nothing written, the critic read the brief and the draft; second: saved', async () => {
+  it('Track 3 candidate 2 (504s after a 32–46 s redraft): the first draft is SAVED at once, its review returned beside it; the critic read the brief and the draft, once', async () => {
     const review = { done: false };
     const critique = vi.fn(async (_input: string) => CRITIQUE);
-    const p = product({ graph: [EMPTY, EMPTY, MODEL], register: [SAVED], versions: [VERSIONS(true)] });
+    const p = product({ graph: [EMPTY, MODEL], register: [SAVED], versions: [VERSIONS(true)] });
     const first = await buildModel({ ...p, review, critique }, ctx, ARGS);
-    expect(first).toMatchObject({ status: 'refused', reason: 'review_first', data: { critique: CRITIQUE, gaps: { goal_not_measurable: true } } });
-    // Track 3 E2E (served dce1b50a, 21 Oct): 2 of 8 first drafts left options with no path to the goal after the review.
-    expect((first as { detail?: string }).detail).toBe(REVIEW_FIRST);
-    expect(REVIEW_FIRST).toContain('Every option except the status quo (which changes nothing) reaches the goal through what it changes');
-    expect(REVIEW_FIRST).toContain('else form unknown with sign null so the person can say which way');
+    expect(first).toMatchObject({ status: 'ok', mutated: true, data: { review: { critique: CRITIQUE, note: REVIEW_AFTER_SAVE }, draft: { gaps: { goal_not_measurable: true } } } });
+    expect(REVIEW_AFTER_SAVE).toContain('Do not rebuild or change the model in this turn.');
     expect(JSON.parse(critique.mock.calls[0]![0])).toMatchObject({ brief: BRIEF, draft: { aims: [{ id: 'visitors_served' }] } });
-    expect(registerCalls(p)).toEqual([]);
-    const second = await buildModel({ ...p, review, critique }, ctx, ARGS);
-    expect(second).toMatchObject({ status: 'ok', mutated: true });
+    expect(registerCalls(p), 'one save, never gated on the review').toHaveLength(1);
     expect(critique, 'the critic reads the first draft of the turn only').toHaveBeenCalledTimes(1);
   });
 
@@ -304,6 +299,10 @@ describe('the critic (21 Oct): a second model reviews the first draft of the tur
     const p = product({ graph: [EMPTY, MODEL], register: [SAVED], versions: [VERSIONS(true)] });
     const out = await buildModel({ ...p, review: { done: false }, critique: async () => undefined }, ctx, ARGS);
     expect(out).toMatchObject({ status: 'ok', mutated: true });
+    expect((out as { data: Record<string, unknown> }).data, 'no review to carry').not.toHaveProperty('review');
+    const failing = product({ graph: [EMPTY, MODEL], register: [SAVED], versions: [VERSIONS(true)] });
+    const thrown = await buildModel({ ...failing, review: { done: false }, critique: async () => { throw new Error('critic down'); } }, ctx, ARGS);
+    expect(thrown, 'a failed critic never fails the saved draft').toMatchObject({ status: 'ok', mutated: true });
   });
 });
 
