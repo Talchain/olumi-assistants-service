@@ -50,12 +50,18 @@ export interface DraftDeps {
    * The second model's review of a first draft (`model-critic.ts`; Paul, 21 Oct: a multi-model architecture that checks and
    * enhances the model). Read once, beside the structure check; undefined when unavailable, so a draft never waits on it.
    */
-  readonly critique?: (input: string) => Promise<CritiqueT | undefined>;
+  readonly critique?: (input: string, msLeft?: number) => Promise<CritiqueT | undefined>;
   /**
    * The construction role (`model-drafter.ts`; buddy AMEND/PROCEED 21 Oct). When present, the model is drafted HERE from the
    * brief, and revised here once after the critic, so the conversation agent never authors a competing draft.
    */
-  readonly draft?: (input: string) => Promise<LivingModelT | undefined>;
+  readonly draft?: (input: string, msLeft?: number) => Promise<LivingModelT | undefined>;
+  /**
+   * When the construction must have ended (`constructionDeadline`: the stream budget less the save and the reply). The draft,
+   * the review and the revision each get only what is left of it, so an optional review never takes the save's time and a
+   * revision that cannot finish keeps the first draft (buddy served BLOCK on #3574: 217 s turn, 170 s stream).
+   */
+  readonly deadlineAt?: number;
 }
 
 /** What the AI is told when a reviewer read its first draft. Nothing is saved; the drafter decides what to adopt. */
@@ -104,7 +110,8 @@ async function constructUnrecorded(deps: DraftDeps, ctx: DraftContext, args: Bui
   // The construction role reads what the person has said in this conversation too (buddy BLOCK on #3574): verified messages,
   // oldest first, so a later correction governs. The kernel checks every quote against the same words.
   const said = words.slice(1);
-  const drafted = 'model' in args ? args.model : await deps.draft?.(JSON.stringify({ brief: args.brief, said }));
+  const msLeft = (): number | undefined => (deps.deadlineAt === undefined ? undefined : deps.deadlineAt - Date.now());
+  const drafted = 'model' in args ? args.model : await deps.draft?.(JSON.stringify({ brief: args.brief, said }), msLeft());
   if (drafted === undefined) return unavailable('draft_failed');
   let kernelled = applyKernel(drafted, words);
   let mapped = mapLivingModel(kernelled.model);
@@ -112,11 +119,11 @@ async function constructUnrecorded(deps: DraftDeps, ctx: DraftContext, args: Bui
   let gaps = structureGaps(kernelled.model);
   if (deps.review !== undefined && !deps.review.done) {
     deps.review.done = true;
-    const critique = await deps.critique?.(JSON.stringify({ brief: args.brief, ...('model' in args ? {} : { said }), draft: kernelled.model, gaps }));
+    const critique = await deps.critique?.(JSON.stringify({ brief: args.brief, ...('model' in args ? {} : { said }), draft: kernelled.model, gaps }), msLeft());
     if (critique !== undefined && deps.draft === undefined) return refused('review_first', REVIEW_FIRST, { gaps, critique });
     // The construction role revises its own draft here, once; a failed revision keeps the first draft.
     const revised = critique === undefined ? undefined
-      : await deps.draft?.(JSON.stringify({ brief: args.brief, said, draft: kernelled.model, gaps, critique, instruction: REVISE_ONCE }));
+      : await deps.draft?.(JSON.stringify({ brief: args.brief, said, draft: kernelled.model, gaps, critique, instruction: REVISE_ONCE }), msLeft());
     if (revised !== undefined) {
       const k = applyKernel(revised, words);
       const m = mapLivingModel(k.model);

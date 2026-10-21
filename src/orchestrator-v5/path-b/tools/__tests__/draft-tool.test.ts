@@ -359,6 +359,25 @@ describe('the construction role (21 Oct, buddy AMEND/PROCEED): Olumi\'s drafter 
     expect(await buildModel({ ...p, review: { done: false }, critique, draft }, ctx, BRIEF_ONLY)).toMatchObject({ status: 'ok', mutated: true });
   });
 
+  it('buddy served BLOCK on #3574 (217 s turn, 170 s stream): the draft, the critic and the revision each get what is LEFT of one construction deadline', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(1_000_000);
+      const draft = vi.fn(async (input: string, _msLeft?: number) => { vi.setSystemTime(Date.now() + 100_000); return JSON.parse(input).critique === undefined ? FIRST : LIVING; });
+      const critique = vi.fn(async (_input: string, _msLeft?: number) => { vi.setSystemTime(Date.now() + 30_000); return CRITIQUE; });
+      const p = product({ graph: [EMPTY, MODEL], register: [SAVED], versions: [VERSIONS(true)] });
+      await buildModel({ ...p, review: { done: false }, critique, draft, deadlineAt: 1_000_000 + 145_000 }, ctx, BRIEF_ONLY);
+      expect([draft.mock.calls[0]![1], critique.mock.calls[0]![1], draft.mock.calls[1]![1]]).toEqual([145_000, 45_000, 15_000]);
+      // CONTRAST: with no deadline (a caller that supplies none), every call keeps its own clock.
+      const q = product({ graph: [EMPTY, MODEL], register: [SAVED], versions: [VERSIONS(true)] });
+      draft.mockClear(); critique.mockClear();
+      await buildModel({ ...q, review: { done: false }, critique, draft }, ctx, BRIEF_ONLY);
+      expect([draft.mock.calls[0]![1], critique.mock.calls[0]![1], draft.mock.calls[1]![1]]).toEqual([undefined, undefined, undefined]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('CONTRAST: a brief that is not the person\'s words is refused before any draft; the arm\'s schema takes the brief and nothing else', async () => {
     const draft = vi.fn(async (_input: string) => LIVING);
     expect(await buildModel({ ...product({}), draft }, ctx, { brief: 'Something nobody typed.' })).toMatchObject({ status: 'refused', reason: 'brief_not_users_words' });

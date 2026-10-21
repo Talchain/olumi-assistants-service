@@ -43,13 +43,15 @@ export const CRITIC_MAX_OUTPUT_TOKENS = 2_000;
 /**
  * The critic for one turn: undefined when the call fails or runs out of time, so a draft is never blocked by its reviewer.
  * The deadline is HARD (Codex delta on #3567): the answer races the clock, so SDK retry backoff can never hold the draft
- * past it; the request is then aborted.
+ * past it; the request is then aborted. `msLeft` is what remains of the turn's construction budget; the smaller one wins.
  */
-export function modelCritic(budget: CallBudget, signal?: AbortSignal, deadlineMs = CRITIC_DEADLINE_MS): (input: string) => Promise<CritiqueT | undefined> {
-  return async (input) => {
+export function modelCritic(budget: CallBudget, signal?: AbortSignal, deadlineMs = CRITIC_DEADLINE_MS): (input: string, msLeft?: number) => Promise<CritiqueT | undefined> {
+  return async (input, msLeft) => {
+    const ms = Math.min(deadlineMs, msLeft ?? deadlineMs);
+    if (ms <= 0) return undefined;
     const abort = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const clock = new Promise<undefined>((resolve) => { timer = setTimeout(() => { abort.abort(); resolve(undefined); }, deadlineMs); });
+    const clock = new Promise<undefined>((resolve) => { timer = setTimeout(() => { abort.abort(); resolve(undefined); }, ms); });
     try {
       return await Promise.race([critique(budget, input, signal === undefined ? abort.signal : AbortSignal.any([signal, abort.signal])), clock]);
     } finally {
