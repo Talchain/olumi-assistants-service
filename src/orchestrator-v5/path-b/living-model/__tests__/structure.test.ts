@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { LivingModelT } from '../../../../schemas/living-model.js';
-import { hasGaps, needsRepair, structureGaps } from '../structure.js';
+import { hasGaps, structureGaps } from '../structure.js';
 import { KNOWN_ANSWER, OPTION_EFFECTS } from './fixtures.js';
 
 const orphan = { id: 'runway', label: 'Remaining cash runway', value: null, low: null, high: null, unit: 'months', defined_as: null,
@@ -16,7 +16,7 @@ describe('the draft structure check (structure only, never meaning)', () => {
   it('a goal with no target is not measurable (the decision title as the goal)', () => {
     const m: LivingModelT = { ...KNOWN_ANSWER, aims: [{ ...KNOWN_ANSWER.aims[0]!, text: 'Accelerate it', target: null }] };
     expect(structureGaps(m).goal_not_measurable).toBe(true);
-    expect(needsRepair(structureGaps(m))).toBe(true);
+    expect(hasGaps(structureGaps(m))).toBe(true);
   });
 
   it('a factor, an option or a risk with no path to the goal is unreachable; a path through a definition or a setting reaches it', () => {
@@ -31,12 +31,12 @@ describe('the draft structure check (structure only, never meaning)', () => {
     expect(structureGaps(part).unreachable, 'a part of a definition on the goal path reaches it').toEqual([]);
   });
 
-  it('a risk with no chance or window is reported, never sent for repair (its chance is the person\'s to give)', () => {
+  it('a risk with no chance or window is reported (its chance is the person\'s to give)', () => {
     const linkFrom = (id: string) => ({ id: `${id}_g`, from: id, to: 'g', source: 'user' as const, party: null, quote: 'it would cost us 20 units',
       effect: { form: 'point' as const, value: 20, sd: null, low: null, high: null, unit: 'units', sign: '-' as const } });
     const m: LivingModelT = { ...KNOWN_ANSWER, risks: [risk('r1', null, null, null), risk('r2', 0.1, 0.2, 12)], links: [...KNOWN_ANSWER.links, linkFrom('r1'), linkFrom('r2')] };
     const g = structureGaps(m);
     expect(g).toEqual({ goal_not_measurable: false, unreachable: [], risk_without_chance: ['r1'] });
-    expect([needsRepair(g), hasGaps(g)]).toEqual([false, true]);
+    expect(hasGaps(g)).toBe(true);
   });
 });

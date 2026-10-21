@@ -5,6 +5,7 @@
  * blocks: no host guidance card, action bar, gap signal, sizing chip, next step or Run offer. The A lane is unchanged.
  * Harness: the real `/agent/v1/turn` route (as `goal-level-card.route.test.ts`); a scripted AI (0 provider calls). SYNTHETIC.
  */
+import { readFileSync } from 'node:fs';
 import { randomUUID, createHash } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -142,6 +143,9 @@ const ANSWER = 'The model holds 120 orders a week today, from your brief.';
 // L8 sign-off text: independent of the production constant, tested at the SDK HTTP boundary.
 const COHERENT_REPLY = 'Write one coherent reply in a single voice: give the explanation first, mention what changed since the last Run only when it matters, and weave at most one next step from the current readiness facts into the prose, never as a separate bullet or receipt line and never asking for something the user has already said; ask at most one question per reply.';
 const COHERENT_REPLY_SHA = '3be8d67e53696147c1b12cc8384416de7dfb9854a7e98c91e3913609bb9a9f4b';
+/** Olumi's approved reply discipline, read from the served routing prompt itself (independent of the production constant). */
+const ROUTING = readFileSync(new URL('../../../../../Prompts/canonical/routing.txt', import.meta.url), 'utf8');
+const DISCIPLINE = ROUTING.slice(ROUTING.indexOf('<RESPONSE_DISCIPLINE>'), ROUTING.indexOf('</RESPONSE_DISCIPLINE>') + '</RESPONSE_DISCIPLINE>'.length);
 
 describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host guidance or advice', () => {
   let app: FastifyInstance;
@@ -193,9 +197,11 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
     expect(calls.length).toBeGreaterThan(0);
     for (const c of calls) {
       expect(typeof c.instructions).toBe('string');
-      expect(c.instructions.split(COHERENT_REPLY), 'the signed sentence rides every call exactly once').toHaveLength(2);
-      const at = c.instructions.indexOf(COHERENT_REPLY);
-      expect(createHash('sha256').update(c.instructions.slice(at, at + COHERENT_REPLY.length), 'utf8').digest('hex')).toBe(COHERENT_REPLY_SHA);
+      // Paul, 21 Oct (standing): bullets first, detail on request. The approved discipline replaces the prose-only sentence.
+      expect(DISCIPLINE.length, 'the canonical block was found').toBeGreaterThan(500);
+      expect(c.instructions.split(DISCIPLINE), 'the approved response discipline rides every call exactly once').toHaveLength(2);
+      expect(createHash('sha256').update(COHERENT_REPLY, 'utf8').digest('hex'), 'the replaced sentence is the one L8 signed').toBe(COHERENT_REPLY_SHA);
+      expect(c.instructions, 'the prose-only sentence it replaced is gone').not.toContain(COHERENT_REPLY);
     }
     expect(j._provider_calls.filter((c: Json) => c.site === 'agent-core.sdk').map((c: Json) => c.prompt_sha256))
       .toEqual(calls.map((c) => createHash('sha256').update(c.instructions, 'utf8').digest('hex')));
@@ -503,7 +509,7 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
     expect(r.statusCode, r.body).toBe(200);
     expectCoherentInstructions(r.json());
     const { CORE_REPLY_INSTRUCTION } = await import('../../../../routes/agent-v1-turn.js');
-    expect(createHash('sha256').update(CORE_REPLY_INSTRUCTION, 'utf8').digest('hex')).toBe('814966937a2ea047ffaef43b3e9f521e68d5cb05ad19f099e9df766c953c50e8'); // arm C adopted 21 Oct (was 60809c1b…)
+    expect(createHash('sha256').update(CORE_REPLY_INSTRUCTION, 'utf8').digest('hex')).toBe('7f0493d6a2cadbc6ace9ae0dd37f2d57bab91a9b40f52242c0b7869f55cb27c6'); // arm C adopted 21 Oct (was 60809c1b…)
     for (const c of calls) {
       expect(c.instructions).toContain(CORE_REPLY_INSTRUCTION);
       expect(c.instructions.split(scope)).toHaveLength(2);

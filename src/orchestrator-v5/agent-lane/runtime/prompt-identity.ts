@@ -29,7 +29,7 @@ import { GIT_COMMIT_SHA } from '../../../version.js';
 import { getRuntimeEnvResolution } from '../../../config/env-resolver.js';
 
 /** The served Agent lane's prompt aliases (map Part 3, stages 1–4). One list, so tests and the map share it. */
-export const AGENT_PROMPT_ALIASES = ['agent.converse', 'agent.interpret', 'agent.research', 'agent.construct', 'agent.read_brief'] as const;
+export const AGENT_PROMPT_ALIASES = ['agent.converse', 'agent.interpret', 'agent.research', 'agent.construct', 'agent.read_brief', 'agent.critique'] as const;
 export type AgentPromptAlias = (typeof AGENT_PROMPT_ALIASES)[number];
 
 /**

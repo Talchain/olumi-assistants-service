@@ -271,31 +271,34 @@ describe('refusals and unknowns, said as such', () => {
   });
 });
 
-describe('the structure check (21 Oct): a first draft with repairable gaps comes back unsaved, once per turn', () => {
-  const GAPS = { goal_not_measurable: true, unreachable: [], risk_without_chance: [] };
-  it('first draft: refused with its gaps and what to repair, nothing written; second draft: saved, its gaps said with it', async () => {
-    const structure = { checked: false };
+describe('the structure facts (21 Oct, advisory): never a refusal; said with the saved draft', () => {
+  it('a draft with gaps and no critic is saved at once, its gaps said with it', async () => {
+    const p = product({ graph: [EMPTY, MODEL], register: [SAVED], versions: [VERSIONS(true)] });
+    const out = await buildModel({ ...p, review: { done: false } }, ctx, ARGS);
+    expect(out).toMatchObject({ status: 'ok', mutated: true, data: { draft: { gaps: { goal_not_measurable: true, unreachable: [], risk_without_chance: [] } } } });
+  });
+});
+
+describe('the critic (21 Oct): a second model reviews the first draft of the turn, beside the structure check', () => {
+  const CRITIQUE = { measurable_goal: { quantity: 'visitors served', unit: 'visitors', horizon: 'per Saturday', why: 'the aim has no target' },
+    missing: [{ kind: 'risk' as const, label: 'Assistant calls in sick', reaches_goal_via: 'lowers assistants on shift', why_it_matters: 'one absence undoes the option' }],
+    connect: [], question: 'How many visitors do you need to serve on a Saturday?' };
+  it('first draft: refused with the critique and the gaps, nothing written, the critic read the brief and the draft; second: saved', async () => {
+    const review = { done: false };
+    const critique = vi.fn(async (_input: string) => CRITIQUE);
     const p = product({ graph: [EMPTY, EMPTY, MODEL], register: [SAVED], versions: [VERSIONS(true)] });
-    const first = await buildModel({ ...p, structure }, ctx, ARGS);
-    expect(first).toMatchObject({ status: 'refused', reason: 'structure_gaps', data: { gaps: GAPS, save_outcome: 'VERIFIED_NO_WRITE' } });
-    expect((first as Rec).detail).toMatch(/^Nothing was saved/);
-    expect(registerCalls(p), 'nothing written on the first draft').toEqual([]);
-    const second = await buildModel({ ...p, structure }, ctx, ARGS);
-    expect(second).toMatchObject({ status: 'ok', mutated: true, data: { draft: { gaps: GAPS } } });
-    expect(registerCalls(p)).toHaveLength(1);
+    const first = await buildModel({ ...p, review, critique }, ctx, ARGS);
+    expect(first).toMatchObject({ status: 'refused', reason: 'review_first', data: { critique: CRITIQUE, gaps: { goal_not_measurable: true } } });
+    expect(JSON.parse(critique.mock.calls[0]![0])).toMatchObject({ brief: BRIEF, draft: { aims: [{ id: 'visitors_served' }] } });
+    expect(registerCalls(p)).toEqual([]);
+    const second = await buildModel({ ...p, review, critique }, ctx, ARGS);
+    expect(second).toMatchObject({ status: 'ok', mutated: true });
+    expect(critique, 'the critic reads the first draft of the turn only').toHaveBeenCalledTimes(1);
   });
 
-  it('CONTRAST: a draft with no repairable gap is saved at once', async () => {
-    const complete: LivingModelT = { ...LIVING, aims: [{ ...LIVING.aims[0]!, target: { quantity: 'visitors served', comparator: '>=', value: 120,
-      low: null, high: null, unit: 'visitors', by_when: null, baseline: null, current: null, current_source: null, current_unit: null, change_kind: null } }] };
-    const k = applyKernel(complete, [BRIEF]);
-    const post: Rec = { ...mapLivingModel(k.model).graph, living_model: k.model };
-    const model: Reply = { status: 200, json: { graph: post, graph_hash: computeAnalysisAffectingGraphHash(post as never), graph_identity_hash: computeGraphIdentityHash(post as never) } };
-    const saved: Reply = { status: 200, json: { graph_identity_hash: model.json.graph_identity_hash, graph_hash: model.json.graph_hash,
-      model_version: { ...(SAVED.json.model_version as Rec), graph_identity_hash: (model.json.graph_identity_hash as Rec).value, analysis_affecting_hash: computeAnalysisAffectingGraphHashSha256(post as never) } } };
-    const p = product({ graph: [EMPTY, model], register: [saved], versions: [VERSIONS(true)] });
-    const out = await buildModel({ ...p, structure: { checked: false } }, ctx, { brief: BRIEF, model: complete });
+  it('CONTRAST: an unavailable critic never blocks the draft: it is saved at once', async () => {
+    const p = product({ graph: [EMPTY, MODEL], register: [SAVED], versions: [VERSIONS(true)] });
+    const out = await buildModel({ ...p, review: { done: false }, critique: async () => undefined }, ctx, ARGS);
     expect(out).toMatchObject({ status: 'ok', mutated: true });
-    expect(((out as Rec).data as Rec).draft).not.toHaveProperty('gaps');
   });
 });
