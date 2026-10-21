@@ -42,6 +42,19 @@ describe('thin core explicit edit: a canvas gesture applied to the living model,
       .toMatchObject({ value: 0.5, unit: '%', estimate_by: null, source: 'user' });
   });
 
+  it('⛔ buddy on #3609: an unchanged 28 % read back through its frame (28.000000000000004) keeps Olumi\'s author; a real change is theirs', () => {
+    const pct: LivingModelT = structuredClone(KNOWN_ANSWER);
+    pct.factors[0] = { ...pct.factors[0]!, value: 28, unit: '%', estimate_by: 'olumi' };
+    pct.options[1]!.settings[0] = { ...pct.options[1]!.settings[0]!, value: 28, unit: '%', source: 'olumi', quote: null };
+    const edit = (e: ExplicitEdit) => { const out = applyExplicitEdit(pct, e); if (!('model' in out)) throw new Error(out.refused); return out.model; };
+    expect(0.28 * 100, 'the frame round-trip this row is about').not.toBe(28);
+    expect(edit({ kind: 'option_intervention_edit', option_id: 'push', factor_id: 'f', value: 0.28 }).options[1]!.settings[0]).toMatchObject({ source: 'olumi', value: 28 });
+    expect(edit({ kind: 'factor_value_edit', target_id: 'f', value: 0.28 }).factors[0]).toMatchObject({ estimate_by: 'olumi', value: 28 });
+    // CONTRAST: a nearby real change is the person's own, through the frame or typed raw.
+    expect(edit({ kind: 'option_intervention_edit', option_id: 'push', factor_id: 'f', value: 0.281 }).options[1]!.settings[0]).toMatchObject({ source: 'user' });
+    expect(edit({ kind: 'factor_value_edit', target_id: 'f', value: 0.29, raw_value: 28.000000000000004 }).factors[0]).toMatchObject({ estimate_by: null, source: 'user' });
+  });
+
   it('a goal target and a link strength are kept in the person\'s units; the regenerated engine values match the gesture', () => {
     const target = apply({ kind: 'goal_target_edit', goal_node_id: 'g', constraint_type: 'at_least', raw_value: 110, unit: 'units' });
     expect(target.aims[0]!.target).toMatchObject({ comparator: '>=', value: 110, unit: 'units', current: 70 });
