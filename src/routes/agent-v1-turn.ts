@@ -87,7 +87,7 @@ import { answerIsIncomplete, heldChangeSentence, runAgentTurn, WITHHELD_ON_CHIP_
 import { acquireCoreTurnSlot, CoreStateUnavailableError, runCoreTurn, type CoreTurnSdk } from '../orchestrator-v5/agent-lane/core/sdk-turn.js';
 import { pathBTools } from '../orchestrator-v5/path-b/tools/index.js';
 import { APPLY_CHANGE, isChangeProposal } from '../orchestrator-v5/path-b/tools/change-tools.js';
-import { isLegacyGraph, livingViewOf } from '../orchestrator-v5/path-b/living-model/view.js';
+import { legacyFromRead, livingViewOf } from '../orchestrator-v5/path-b/living-model/view.js';
 import { parseSelectedElements } from '../orchestrator-v5/boundary/request-extensions.js';
 import { agentSelectionContext, type AgentSelectionContext } from '../orchestrator-v5/agent-lane/selection-context.js';
 import type { AgentLaneMode, AgentToolContext, ToolResult } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
@@ -2301,8 +2301,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       && laneModeFor(baseMode, aiMode, getRuntimeEnv()) === 'core'
       && await dispatchFor(typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined)(
         `/assist/v1/scenarios/${requestedScenario}/graph`, {})
-        .then((read) => read.status === 200 && isLegacyGraph((read.json as Record<string, unknown> | undefined)?.['graph']))
-        .catch(() => false);
+        .then(legacyFromRead, () => legacyFromRead(undefined));
     const mode: AgentLaneMode = laneModeFor(baseMode, aiMode, getRuntimeEnv(), legacyScenario);
     let body = (req.body ?? {}) as Record<string, unknown>;
     const scenarioId = typeof body.scenario_id === 'string' ? body.scenario_id : '';

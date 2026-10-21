@@ -2236,7 +2236,9 @@ export async function ceeOrchestratorRouteV2(
         const rawSysResult = await dispatchSystemEvent({
           payload: ingress,
           requestId,
-          coreScenarioCheck: req.headers['x-olumi-ai-mode'] === 'core',
+          // The SCENARIO decides, never the header (#3522; data-layer audit 21 Oct: a core scenario opened from "My scenarios"
+          // carries the default header): the core edit reads the scenario and declines one with no living model.
+          coreScenarioCheck: true,
         });
 
         // ═══════════════════════════════════════════════════════════════════
