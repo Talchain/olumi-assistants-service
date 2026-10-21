@@ -437,6 +437,40 @@ describe("POST /proxy/v5/turn", () => {
     });
   });
 
+  // ---- Core measurement arms (21 Oct: every arm through the proxy ran the default) ----
+
+  describe("core measurement arm forwarding", () => {
+    it("forwards x-olumi-prompt-arm and x-olumi-core-effort, as sent, to the internal route", async () => {
+      const captured: Record<string, unknown> = {};
+      app = buildApp({
+        internalHandler: (req: any, reply: any) => {
+          captured.arm = req.headers["x-olumi-prompt-arm"];
+          captured.effort = req.headers["x-olumi-core-effort"];
+          return reply.code(200).send({ blocks: [] });
+        },
+      });
+      await app.ready();
+      await app.inject({
+        method: "POST",
+        url: "/proxy/v5/turn",
+        headers: { origin: STAGING_ORIGIN, "content-type": "application/json", "x-olumi-prompt-arm": "C", "x-olumi-core-effort": "medium" },
+        payload: SAMPLE_PAYLOAD,
+      });
+      expect(captured).toEqual({ arm: "C", effort: "medium" });
+    });
+
+    it("CONTROL: an unlisted header is still not forwarded", async () => {
+      let captured: unknown = "unset";
+      app = buildApp({
+        internalHandler: (req: any, reply: any) => { captured = req.headers["x-olumi-not-allowed"]; return reply.code(200).send({ blocks: [] }); },
+      });
+      await app.ready();
+      await app.inject({ method: "POST", url: "/proxy/v5/turn",
+        headers: { origin: STAGING_ORIGIN, "content-type": "application/json", "x-olumi-not-allowed": "x" }, payload: SAMPLE_PAYLOAD });
+      expect(captured).toBeUndefined();
+    });
+  });
+
   // ---- Authorization forwarding + required-login front door (login 3.4 CEE-half) ----
 
   describe("Authorization forwarding + required-login front door", () => {

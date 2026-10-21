@@ -87,6 +87,10 @@ export const ALLOWED_REQUEST_HEADERS = [
   "x-olumi-client-build",
   "x-olumi-payload-hash",
   AI_MODE_HEADER,
+  // The core lane's measurement arms (#94 comparison): read only on a core turn, defaults unchanged without them. Before
+  // these were forwarded, every arm sent through this proxy silently ran the default (21 Oct: identical prompt hashes).
+  "x-olumi-prompt-arm",
+  "x-olumi-core-effort",
   // Login 3.4 CEE-half seam: the browser's Supabase access token
   // (`Authorization: Bearer <jwt>`) passes through to the internal turn
   // route, where the flag-gated CEE_REQUIRE_USER_JWT verification consumes
