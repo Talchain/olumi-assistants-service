@@ -2,8 +2,9 @@
  * THIN CORE: THE ONE WRITE (20 Oct 2026). A core postimage (the graph regenerated from its living model, with the living
  * model on it) is registered as `thin_core` under its operation's own id and CAS base, then verified INDEPENDENTLY: saved
  * only when THIS registration's own receipt and hashes match a fresh read AND that read holds the complete postimage
- * (`approvedGraphHeld`). A lost response or a concurrent copy is recovered as the operation's own version, never a second
- * write. Matching values never count as proof; an unverifiable save stays UNKNOWN.
+ * (`approvedGraphHeld`). A guest's write mints no version, so its proof is the acknowledgement plus that read alone. A lost
+ * response or a concurrent copy is recovered as the operation's own version, never a second write. Matching values never
+ * count as proof; an unverifiable save stays UNKNOWN.
  */
 import { createHash } from 'node:crypto';
 import type { InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
@@ -68,7 +69,10 @@ export async function writeCorePostimage(deps: { readonly dispatch: InternalDisp
   const ack = typeof reg.json.graph_identity_hash === 'string' ? reg.json.graph_identity_hash
     : (reg.json.graph_identity_hash as { value?: unknown } | undefined)?.value;
   const after = await readSaved(deps, w.scenarioId);
-  if (receipt == null) return unknown('not_verified', { check: 'receipt_absent' });
+  // A guest's write mints no version (`append_turn_atomic_v5`: `v_should_create := v_user_id IS NOT NULL AND …`), so it has no
+  // receipt to give. Its proof is the one the construction registration already uses (`agent-capabilities.ts`): THIS
+  // registration's acknowledgement, which a fresh read must equal, holding the complete postimage (below).
+  if (receipt == null) return acknowledged(w, reg.json, ack, after);
   if (typeof receipt.version_id !== 'string' || receipt.version_id === '') return unknown('not_verified', { check: 'receipt_invalid', field: 'version_id' });
   if (!Number.isSafeInteger(receipt.version_number) || Number(receipt.version_number) < 1) return unknown('not_verified', { check: 'revision_mismatch', field: 'version_number' });
   if (typeof receipt.mutation_id !== 'string' || receipt.mutation_id === '') return unknown('not_verified', { check: 'receipt_invalid', field: 'mutation_id' });
@@ -86,6 +90,20 @@ export async function writeCorePostimage(deps: { readonly dispatch: InternalDisp
   });
   if (reg.json.replayed === true) return { status: 'already_saved', receipt };
   return { status: 'saved', receipt, after };
+}
+
+/** A write that minted no version: saved only when the acknowledgement, a fresh read and the complete postimage agree. */
+function acknowledged(w: CoreWriteRequest, json: Rec, ack: unknown, after: Awaited<ReturnType<typeof readSaved>>): CoreWrite {
+  if (typeof ack !== 'string') return unknown('not_verified', { check: 'receipt_absent' });
+  if (!isSavedRead(after)) return unknown('not_verified', { check: 'readback_unavailable', code: after.status === 'ok' ? 'read_malformed' : after.reason });
+  if (ack !== after.identity) return unknown('not_verified', { check: 'hash_mismatch', field: 'ack_identity', expected: hashPrefix(ack), actual: hashPrefix(after.identity) });
+  const identity = computeGraphIdentityHash(after.graph as never)?.value;
+  if (identity !== ack) return unknown('not_verified', { check: 'hash_mismatch', field: 'read_identity', expected: hashPrefix(ack), actual: hashPrefix(identity) });
+  if (json.graph_hash !== after.graphHash) return unknown('not_verified', { check: 'revision_mismatch', field: 'graph_hash', expected: hashPrefix(json.graph_hash), actual: hashPrefix(after.graphHash) });
+  if (!approvedGraphHeld(w.graph, after.graph)) return unknown('not_verified', { check: 'postimage_diff',
+    keys: Object.keys(w.graph).filter((key) => !approvedGraphHeld(w.graph, { ...w.graph, [key]: after.graph[key] })).slice(0, 8) });
+  const receipt: Receipt = { graph_identity_hash: ack };
+  return json.replayed === true ? { status: 'already_saved', receipt } : { status: 'saved', receipt, after };
 }
 
 /** A stable UUID-shaped operation id for one prepared change: a retry of the same approval is the same operation. */

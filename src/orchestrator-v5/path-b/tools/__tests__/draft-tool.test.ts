@@ -106,9 +106,21 @@ describe('Olumi\'s provisional first model: the AI\'s living model, compiled by 
   });
 });
 
+describe('a guest\u2019s write mints no version (append_turn_atomic_v5: no owner, no version)', () => {
+  it('saved on THIS registration\u2019s acknowledgement and a fresh read holding the complete model; its receipt is that acknowledgement', async () => {
+    const reg = structuredClone(SAVED);
+    delete reg.json.model_version;
+    const p = product({ graph: [EMPTY, MODEL], register: [reg] });
+    const out = await buildModel(p, ctx, ARGS);
+    expect(out).toMatchObject({ status: 'ok', data: { model_version: { graph_identity_hash: (MODEL.json.graph_identity_hash as Rec).value } } });
+    expect(traceRow('build_model_from_brief', out).mutated).toBe(true);
+    expect(p.onModelRegistered).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('L26B verifier diagnostics never change the outcome bytes or effects', () => {
   const cases = [
-    ['receipt', { check: 'receipt_absent' }],
+    ['receipt-postimage', { check: 'postimage_diff', keys: ['nodes'] }],
     ['version_id', { check: 'receipt_invalid', field: 'version_id' }],
     ['version_number', { check: 'revision_mismatch', field: 'version_number' }],
     ['mutation_id', { check: 'receipt_invalid', field: 'mutation_id' }],
@@ -129,7 +141,7 @@ describe('L26B verifier diagnostics never change the outcome bytes or effects', 
     const graph = read.json.graph as Rec;
     const hash = (x: unknown): string => String(x).slice(0, 12);
     let extra: Rec = {};
-    if (fault === 'receipt') delete reg.json.model_version;
+    if (fault === 'receipt-postimage') delete reg.json.model_version;
     if (fault === 'version_id' || fault === 'mutation_id') receipt[fault] = '';
     if (fault === 'version_number') receipt.version_number = 0;
     if (fault === 'ack-missing') reg.json.graph_identity_hash = null;
@@ -154,7 +166,7 @@ describe('L26B verifier diagnostics never change the outcome bytes or effects', 
       receipt.analysis_affecting_hash = 'a'.repeat(64);
       extra = { expected: hash(computeAnalysisAffectingGraphHashSha256(graph as never)), actual: 'a'.repeat(12) };
     }
-    if (fault === 'postimage') {
+    if (fault === 'postimage' || fault === 'receipt-postimage') {
       (graph.nodes as Rec[])[0]!.label = 'Unrelated private content';
       reg.json.graph_identity_hash = read.json.graph_identity_hash = computeGraphIdentityHash(graph as never);
       receipt.graph_identity_hash = (read.json.graph_identity_hash as Rec).value;
