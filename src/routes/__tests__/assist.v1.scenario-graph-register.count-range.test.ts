@@ -18,7 +18,7 @@ vi.mock('../../orchestrator/user-identity.js', async importOriginal => ({
 import registerRoute from '../assist.v1.scenario-graph-register.js';
 import { GraphV3 } from '../../schemas/cee-v3.js';
 import { projectGraphForPersistence } from '../../orchestrator-v5/persisted-graph-projection.js';
-import { candidateToGraph } from '../../orchestrator-v5/path-b/tools/candidate-to-graph.js';
+import { frozenCandidateGraph } from '../../orchestrator-v5/path-b/tools/__tests__/frozen-candidate-graphs.js';
 
 const SCENARIO = 'b63d8672-0000-4000-8000-0000000b63d8';
 const BRIEF = 'The starter tier would win about 150 new subscribers, between 80 and 250.';
@@ -155,7 +155,7 @@ describe('K2 on path B: a range its own construction record states, at real grap
       statements: [{ quote: B_BRIEF, subject: { kind: 'option', label: 'Hire a second baker', to_label: null, factor_label: 'Extra baking capacity' },
         field: 'level', form: 'range', value: 40, low: 25, high: 60, unit: 'loaves a day', qualifier: 'about', conditions: null, speaker: 'user' }],
     };
-    const out = candidateToGraph(draft, { words: B_BRIEF, recorded_at: '2026-10-19T22:00:00.000Z' });
+    const out = frozenCandidateGraph(draft, { words: B_BRIEF, recorded_at: '2026-10-19T22:00:00.000Z' });
     if ('refused' in out) throw new Error(out.refused);
     const response = await register(out.graph as Rec, B_BRIEF);
     expect(response.statusCode, response.body).toBe(200);
@@ -180,7 +180,7 @@ describe('K2 on path B: a range its own construction record states, at real grap
       statements: [{ quote: LEVEL, subject: { kind: 'factor', label: 'Daily baking', to_label: null, factor_label: null },
         field: 'level', form: 'range', value: null, low: 200, high: 300, unit: 'loaves a day', qualifier: null, conditions: null, speaker: 'user' }],
     };
-    const out = candidateToGraph(draft, { words: LEVEL, recorded_at: '2026-10-19T22:00:00.000Z' });
+    const out = frozenCandidateGraph(draft, { words: LEVEL, recorded_at: '2026-10-19T22:00:00.000Z' });
     if ('refused' in out) throw new Error(out.refused);
     const response = await register(out.graph as Rec, LEVEL);
     expect(response.statusCode, response.body).toBe(200);

@@ -1,4 +1,4 @@
-import { candidateToGraph } from '../candidate-to-graph.js';
+import { frozenCandidateGraph } from './frozen-candidate-graphs.js';
 import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import { projectGraphForPersistence } from '../../../persisted-graph-projection.js';
 import { withGoalChanceLicence } from '../../../goal-target/goal-chance-licence.js';
@@ -26,7 +26,7 @@ export function d3Run(subject: 'orders' | 'repairs', mode: 'conditional' | 'plac
       unit, conditions: `If ${label} is introduced.`, qualifier: 'about' })),
     risks: [], outcomes: [], identities: [], unknowns: [], unknown_concerns: [], decision_question: 'How could we increase throughput?',
   };
-  const converted = candidateToGraph(candidate, { words: quotes.join(' '), recorded_at: '2026-10-20T04:00:00.000Z' });
+  const converted = frozenCandidateGraph(candidate, { words: quotes.join(' '), recorded_at: '2026-10-20T04:00:00.000Z' });
   if ('refused' in converted) throw new Error(converted.refused);
   const graph = projectGraphForPersistence({ ...GraphV3.parse(converted.graph), options: [] }) as Json;
   if (mode === 'stated') for (const edge of graph.edges) {

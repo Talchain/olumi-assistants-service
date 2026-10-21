@@ -1,11 +1,12 @@
-/** L15: synthetic strict-output replays through the legacy B conversion and the real Run request, no provider or PLoT calls.
+/** L15: synthetic strict-output replays through the legacy B conversion (its outputs frozen when it was retired, 21 Oct
+ * 2026: `frozen-candidate-graphs.ts`) and the real Run request, no provider or PLoT calls.
  * The user owns the central effect/raw range; existing D3 defaults remain Olumi illustrative assumptions.
  */
 import { describe, expect, it, vi } from 'vitest';
 import captured from './fixtures/l18-captured-sum.json';
 import liveRows from './fixtures/l23-live-drafter-raw-5203fed5.json';
 import { normaliseFactorValue } from '../../../tools/handlers/d1-shared/normalise-factor-value.js';
-import { candidateToGraph } from '../candidate-to-graph.js';
+import { frozenCandidateGraph } from './frozen-candidate-graphs.js';
 import { admitCandidateModel, type CandidateModel } from '../../../agent-lane/admit-model.js';
 import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.js';
@@ -63,9 +64,9 @@ function draft(statementUnit = `${UNIT} per specialist`): Rec {
         { form: 'range', low: 10, high: 30, qualifier: 'about' })],
   };
 }
-/** The drafter bytes through the legacy B converter, kept as the spec the thin-core mapper must reach (sums, per-unit additions). */
+/** The drafter bytes as the retired legacy B converter turned them into a graph (frozen), kept as the spec the thin-core mapper must reach. */
 async function replay(raw: Rec | string, brief = BRIEF): Promise<Rec> {
-  const converted = candidateToGraph(typeof raw === 'string' ? JSON.parse(raw) : raw, { words: brief, recorded_at: '2026-10-20T08:00:00.000Z' });
+  const converted = frozenCandidateGraph(typeof raw === 'string' ? JSON.parse(raw) : raw, { words: brief, recorded_at: '2026-10-20T08:00:00.000Z' });
   expect('refused' in converted, JSON.stringify(converted)).toBe(false);
   return GraphV3.parse((converted as { graph: Rec }).graph) as Rec;
 }
@@ -153,9 +154,9 @@ describe('current level plus a stated per-unit addition', () => {
     expect(unrelated.scale_frame).toBeUndefined();
     expect(unrelated.observed_state.cap).toBeUndefined();
     expect(graph.nodes.find((n: Rec) => n.kind === 'goal').nonlinear_identity).toBeUndefined();
-    const converted = candidateToGraph(raw, { words: BRIEF, recorded_at: '2026-10-20T08:00:00.000Z' });
+    const converted = frozenCandidateGraph(raw, { words: BRIEF, recorded_at: '2026-10-20T08:00:00.000Z' });
     if ('refused' in converted) throw new Error(converted.refused);
-    expect(converted.loss.some(row => row.field_path === 'nodes[total_capacity].nonlinear_identity_rejected' && row.severity === 'warn')).toBe(true);
+    expect(converted.loss.some((row: Rec) => row.field_path === 'nodes[total_capacity].nonlinear_identity_rejected' && row.severity === 'warn')).toBe(true);
   });
 
   it('L18 preserves an existing operand frame rather than replacing it with the goal frame', async () => {

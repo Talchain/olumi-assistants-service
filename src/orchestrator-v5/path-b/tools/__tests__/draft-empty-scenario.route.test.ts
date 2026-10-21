@@ -3,7 +3,7 @@
  * turn 1 — `build_model_from_brief` → unavailable `read_malformed`). A NEW scenario's graph read is `graph: null, graph_present:
  * false, graph_hash: null, graph_identity_hash: null` (assist.v1.scenario-graph.ts, "An EMPTY graph is a valid answer"), and the
  * adapters' one reader called that malformed. Through the REAL route in core mode: a scripted AI, the REAL draft adapter (one
- * drafter call with a scripted answer, Step 8's `candidateToGraph`, create-only registration), and the graph / register / versions
+ * drafter call with a scripted answer, create-only registration), and the graph / register / versions
  * routes as doubles that answer in the served shapes. SYNTHETIC wording; no journey brief. (The brief stays the AI's literal copy
  * of the user's words, as on base.)
  */

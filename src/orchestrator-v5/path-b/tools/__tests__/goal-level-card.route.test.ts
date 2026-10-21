@@ -15,7 +15,7 @@ import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.j
 import { registrationTurnId } from '../../../graph-registration/registration-identity.js';
 import { createProposal } from '../../../agent-lane/proposal.js';
 import { proposalPendingAction } from '../../../agent-lane/durable-proposal.js';
-import { candidateToGraph } from '../candidate-to-graph.js';
+import { frozenCandidateGraph } from './frozen-candidate-graphs.js';
 import { valueProvenanceOf } from '../../../../cee/provenance/provenance-of.js';
 import { userStatementOf } from '../../../agent-lane/user-statements.js';
 import { claimRecordFor, CONSTRUCTION_ATTEST, userStatementRecord } from '../../../statement-door/statements.js';
@@ -338,7 +338,7 @@ describe('PATH-B: the goal’s current level, typed as a correction, shows its c
         effect_per_source_change: null, effect_provenance: null, definitional: false, source_quote: null, basis: 'Illustrative staffing and timing assumptions for review.' })),
       constraints: [], risks: [], outcomes: [], identities: [], statements: [], unknowns: [], unknown_concerns: [], decision_question: null,
     };
-    const converted = candidateToGraph(draft, { words: brief, recorded_at: new Date().toISOString() });
+    const converted = frozenCandidateGraph(draft, { words: brief, recorded_at: '2026-10-21T12:00:00.000Z' });
     if ('refused' in converted) throw new Error(converted.refused);
     persisted = JSON.parse(JSON.stringify(converted.graph)) as Json;
     const node = (label: string): Json => (persisted.nodes as Json[]).find(n => n.label === label)!;
