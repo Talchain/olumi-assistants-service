@@ -43,7 +43,7 @@ export interface DraftDeps {
   readonly review?: { done: boolean };
   /**
    * The second model's review of a first draft (`model-critic.ts`; Paul, 21 Oct: a multi-model architecture that checks and
-   * enhances the model). Read once, beside the structure check; undefined when unavailable, so a draft never waits on it.
+   * enhances the model). Read once, beside the save, within what is left of the construction deadline; undefined when unavailable.
    */
   readonly critique?: (input: string, msLeft?: number) => Promise<CritiqueT | undefined>;
   /**
@@ -60,7 +60,7 @@ export interface DraftDeps {
  */
 export const REVIEW_AFTER_SAVE = 'Your draft is saved. A second reviewer read it (critique; gaps are structural facts). Do not rebuild or '
   + 'change the model in this turn. In your reply, name the critique\'s most useful point as Olumi\'s suggestion the person can ask you to '
-  + 'add, and ask its question if it is still open (at most one question).';
+  + 'add. Its question is a candidate for your one question: ask whichever input would most change how the options compare.';
 
 const nodesIn = (graph: Record<string, unknown>): number => (Array.isArray(graph.nodes) ? graph.nodes.length : 0);
 

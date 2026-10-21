@@ -190,7 +190,7 @@ export const LivingLink = z.object({
      * the goal off from its factors and left Run disabled. The AI reads this description, so it is the instruction.
      */
     sign: z.enum(['+', '-']).nullable().describe(
-      "Which way `to` moves for each +1 of `from`: '+' raises it, '-' lowers it. For source olumi, give your provisional judgement of direction; when unsized, use form direction_only. For source user, party or unverified, preserve only the direction that source supplied. If none was supplied, use sign null and form unknown, then ask. Never put an Olumi-inferred direction under another source."),
+      "Which way `to` moves for each +1 of `from`: '+' raises it, '-' lowers it. For source olumi, give your provisional judgement of direction; use form direction_only only when an end has no unit, else give its size. For source user, party or unverified, preserve only the direction that source supplied. If none was supplied, use sign null and form unknown, then ask. Never put an Olumi-inferred direction under another source."),
   }).strict().describe("The change in `to` for each +1 of `from`, in the unit of `to`. For Olumi's own link (source olumi), when both ends have a unit, give form range with Olumi's central estimate in value and low and high around it; else direction_only with its sign."),
   ...attribution,
 }).strict();

@@ -264,7 +264,7 @@ describe('refusals and unknowns, said as such', () => {
   it('Olumi\'s own link carries its direction (21 Oct: unsigned goal links left Run disabled): the strict tool schema tells the AI so', () => {
     const link = (BuildModelParams.shape.model as unknown as { shape: { links: { element: { shape: { effect: { shape: { sign: { description?: string } } } } } } } })
       .shape.links.element.shape.effect.shape.sign;
-    expect(link.description).toMatch(/For source olumi, give your provisional judgement of direction; when unsized, use form direction_only\./);
+    expect(link.description).toMatch(/For source olumi, give your provisional judgement of direction; use form direction_only only when an end has no unit, else give its size\./);
     // Codex #3551 R1: every other source (user, party, unverified) keeps only the direction it supplied; else null and ask.
     expect(link.description).toMatch(/For source user, party or unverified, preserve only the direction that source supplied\. If none was supplied, use sign null and form unknown, then ask\./);
     expect(link.description).toMatch(/Never put an Olumi-inferred direction under another source\./);
@@ -285,9 +285,14 @@ describe('the critic (21 Oct): a second model reviews the first draft of the tur
     connect: [], question: 'How many visitors do you need to serve on a Saturday?' };
   it('Track 3 candidate 2 (504s after a 32–46 s redraft): the first draft is SAVED at once, its review returned beside it; the critic read the brief and the draft, once', async () => {
     const review = { done: false };
-    const critique = vi.fn(async (_input: string) => CRITIQUE);
+    // Codex #3599: the critic is held PENDING, so the save is proven to happen before (and without) its answer.
+    let answer: (c: typeof CRITIQUE) => void = () => {};
+    const critique = vi.fn((_input: string) => new Promise<typeof CRITIQUE>((resolve) => { answer = resolve; }));
     const p = product({ graph: [EMPTY, MODEL], register: [SAVED], versions: [VERSIONS(true)] });
-    const first = await buildModel({ ...p, review, critique }, ctx, ARGS);
+    const pending = buildModel({ ...p, review, critique }, ctx, ARGS);
+    await vi.waitFor(() => expect(registerCalls(p), 'saved while the critic is still reading').toHaveLength(1));
+    answer(CRITIQUE);
+    const first = await pending;
     expect(first).toMatchObject({ status: 'ok', mutated: true, data: { review: { critique: CRITIQUE, note: REVIEW_AFTER_SAVE }, draft: { gaps: { goal_not_measurable: true } } } });
     expect(REVIEW_AFTER_SAVE).toContain('Do not rebuild or change the model in this turn.');
     expect(JSON.parse(critique.mock.calls[0]![0])).toMatchObject({ brief: BRIEF, draft: { aims: [{ id: 'visitors_served' }] } });
