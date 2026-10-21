@@ -35,10 +35,21 @@ const theirs = { source: 'user', party: null, quote: null } as const;
 const noRange = { low: null, high: null } as const;
 
 export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?: string): EditOutcome {
-  const frames = mapLivingModel(model, goal === undefined ? {} : { goal }).frames;
+  const mapped = mapLivingModel(model, goal === undefined ? {} : { goal });
+  const frames = mapped.frames;
   const m: LivingModelT = structuredClone(model);
   const factor = (id: string) => m.factors.find((f) => f.id === id);
   const aim = (id: string) => m.aims.find((a) => a.id === id);
+  // A gesture names a DRAWN edge. An option's own effect is drawn from its `<option>__on` switch (the mapper's option-effect
+  // route), which draws an edge only from a stored link, under that link's own id. So an edge from an option's switch is the
+  // stored link with its id; any other generated edge (an exact sum's lever, a goal's level today) is no stored link's.
+  // Without this a strength edit was refused and a delete was acknowledged, then redrawn (a false "saved", Codex on #3555).
+  const optionSwitch = (id: string) => model.options.some((o) => `${o.id}__on` === id);
+  const ownersOf = (from: string, to: string) => {
+    const exact = m.links.filter((l) => l.from === from && l.to === to);
+    if (exact.length > 0 || !optionSwitch(from)) return exact;
+    return m.links.filter((l) => l.to === to && mapped.graph.edges.some((e) => e.id === l.id && e.from === from && e.to === to));
+  };
   const toRaw = (id: string, value: number): number | undefined => {
     const frame = frames.get(id);
     return frame === undefined ? undefined : value * frame.cap;
@@ -95,7 +106,10 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       const from = frames.get(edit.from);
       const to = frames.get(edit.to);
       if (from === undefined || to === undefined) return { refused: 'no_frame' };
-      const existing = m.links.find((l) => l.from === edit.from && l.to === edit.to);
+      const owners = ownersOf(edit.from, edit.to);
+      // A link at the drawn endpoints is edited as before; one drawn edge that two stored links make names no single change.
+      if (owners.length > 1 && owners[0]!.from !== edit.from) return { refused: 'link_ambiguous' };
+      const existing = owners[0];
       if (edit.kind === 'structural_add_edge' && existing !== undefined) return { refused: 'link_exists' };
       if (edit.kind === 'edge_strength_edit' && existing === undefined) return { refused: 'not_in_model' };
       const sign = edit.kind === 'structural_add_edge' ? (edit.effect_direction === 'negative' ? '-' : '+')
@@ -131,7 +145,8 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       m.aims = m.aims.filter((a) => !gone.has(a.id));
       m.factors = m.factors.filter((f) => !gone.has(f.id));
       m.options = m.options.filter((o) => !gone.has(o.id)).map((o) => ({ ...o, settings: o.settings.filter((s) => !gone.has(s.factor_id)) }));
-      m.links = m.links.filter((l) => !gone.has(l.from) && !gone.has(l.to) && !pairGone(l));
+      const drawnGone = new Set(edit.removed_edges.flatMap((e) => ownersOf(e.from, e.to)));
+      m.links = m.links.filter((l) => !gone.has(l.from) && !gone.has(l.to) && !pairGone(l) && !drawnGone.has(l));
       m.conditions = m.conditions.map((c) => ({ ...c, applies_to: c.applies_to.filter((id) => !gone.has(id)) }));
       return { model: m };
     }
