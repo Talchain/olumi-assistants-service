@@ -4,7 +4,7 @@ import { readGoalRecord } from '../goal-target/goal-record.js';
 import { factorValueHash, linkValueHash, type GoalPathFactor, type GoalPathLink } from './turn-context/guidance-signals.js';
 import { linkSizing } from '../../cee/magnitude/link-sizing.js';
 import {
-  inputOriginOf, isEventByDateSwitchCell, isEventByDateSwitchValue, isUnverifiedProvenance, linkProvenanceOf, settingProvenanceOf,
+  inputOriginOf, isEventByDateSwitchCell, isEventByDateSwitchValue, isStructuralValue, isUnverifiedProvenance, linkProvenanceOf, settingProvenanceOf,
   type InputOrigin,
 } from '../../cee/provenance/provenance-of.js';
 import { olumiEstimatesFeedingResult, type OlumiEstimates } from './olumi-estimates-feeding-result.js';
@@ -140,7 +140,7 @@ export function goalChanceEstimateCensus(graph: unknown, optionIds?: readonly st
   const originOf = new Map(upstream.map(id => [id, inputOriginOf(byId.get(id)!.observed_state)] as const));
   const relativeChange = readGoalRecord(stored, scored.id as string)?.target?.frame === 'change_rel';
   const baseSaidApart = (id: string): boolean => id === scored.id && relativeChange && originOf.get(id) !== 'unverified';
-  const valued = upstream.filter(id => !baseSaidApart(id) && !isEventByDateSwitchValue(byId.get(id))
+  const valued = upstream.filter(id => !baseSaidApart(id) && !isStructuralValue(byId.get(id))
     && typeof rec(byId.get(id)!.observed_state)?.value === 'number'
     && Number.isFinite(rec(byId.get(id)!.observed_state)!.value));
   const RC4_AUTHORSHIP = { human: 'yours', ai: 'olumi_estimate', ai_accepted: 'olumi_accepted', unverified: 'unknown' } as const;

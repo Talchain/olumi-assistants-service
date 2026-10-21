@@ -20,7 +20,8 @@ import { goalChanceEstimateCounts } from '../../../agent-lane/goal-chance-estima
 import { applyExplicitEdit } from '../edit.js';
 import { applyKernel } from '../kernel.js';
 import { mapLivingModel } from '../mapper.js';
-import { KNOWN_ANSWER } from './fixtures.js';
+import { KNOWN_ANSWER, OPTION_EFFECTS } from './fixtures.js';
+import { valueProvenanceOf } from '../../../../cee/provenance/provenance-of.js';
 import {
   CASCADE, CERTAIN_WITHIN_WINDOW, COSTED_HALF_SWITCH, COSTED_SWITCH, COSTED_SWITCH_IN_PLACE, COSTED_SWITCH_TWO_OPTIONS, HALF_MITIGATION, NO_CHANCE, NO_WINDOW, OLUMI_CHANCE, OLUMI_MITIGATION,
   PERCENT_PREVENTER, SHARED_PREVENTER, UNATTRIBUTED, UNIT_TEXT_PREVENTER, UNVERIFIED_MITIGATION, supplier,
@@ -276,5 +277,32 @@ describe('Track 2 F2: an event risk reaches the engine as event_risk.v1, with it
     // CONTROL: what the event does if it happens is an ordinary stated link, deleted as before.
     const sev = applyExplicitEdit(supplier('point'), { kind: 'structural_delete', removed_node_ids: [], removed_edges: [{ from: 'supplier_fails', to: 'gp' }] });
     expect('model' in sev && sev.model.links.map((l) => l.id)).toEqual(['cost_gp']);
+  });
+});
+
+// DL ruling on served F2 (L2, 21 Oct): "using Olumi's estimates for 1 starting value" was the mapper's own switch, a definition.
+describe('the mapper\'s own switch and change lever are definitions, never Olumi\'s estimates', () => {
+  const values = (m: LivingModelT, options: string[], goal: string) => goalChanceEstimateCounts(stored(m), options, goal).values;
+
+  it('F2: the switch is stored as a definition, and the chance rests on no Olumi starting value', () => {
+    const sw = node({ graph: stored(supplier('point')) }, 'dual_source__on');
+    expect(sw.observed_state).toMatchObject({ value: 0, structural: true });
+    expect(valueProvenanceOf(sw.observed_state)).toMatchObject({ origin: 'ai', structural: true });
+    expect(values(supplier('point'), ['status_quo', 'dual_source'], 'gp')).toBe(0);
+  });
+
+  it('the exact sum\'s change lever: no Olumi starting value either', () => {
+    expect(node({ graph: stored(OPTION_EFFECTS) }, 'w__change').observed_state).toMatchObject({ value: 0, structural: true });
+    expect(values(OPTION_EFFECTS, ['a', 'b'], 'w')).toBe(0);
+  });
+
+  it('CONTRAST: Olumi\'s own starting value, the same 0 on the same path, still counts once', () => {
+    const olumiStep: LivingModelT = { ...supplier('point'), factors: [{ ...supplier('point').factors[0]!, source: 'olumi', quote: null }] };
+    expect(node({ graph: stored(olumiStep) }, 'dual_sourcing').observed_state).not.toHaveProperty('structural');
+    expect(values(olumiStep, ['status_quo', 'dual_source'], 'gp')).toBe(1);
+  });
+
+  it('NEGATIVE: the marker never hides a figure: only a 0 is a definition', () => {
+    expect(valueProvenanceOf({ value: 0.5, raw_value: 0.5, cap: 1, source: 'cee_inference', structural: true })).toMatchObject({ origin: 'ai', structural: false });
   });
 });
