@@ -5,6 +5,7 @@ import { mapLivingModel } from '../mapper.js';
 import { linkDefaultAssumptionsOf } from '../../../../cee/magnitude/link-default-assumptions.js';
 import { goalChanceEstimateCounts } from '../../../agent-lane/goal-chance-estimate-attribution.js';
 import { KNOWN_ANSWER, OPTION_EFFECTS } from './fixtures.js';
+import { RunInputLinkSchema } from '@talchain/schemas/orchestrator';
 
 type Rec = Record<string, any>;
 
@@ -95,6 +96,19 @@ describe('thin core mapper: living model → GraphV3', () => {
     // Buddy R1: Olumi's default spread reaches the person through the existing ledger (so the result stays illustrative). The
     // link's existence is the person's stated claim, not a default (Science, 21 Oct).
     expect(linkDefaultAssumptionsOf(p).map((r) => r.code)).toEqual(['CLAMP_STD_MINIMUM']);
+  });
+
+  it('Compare C1 21 Oct: an option\'s own sized effect is said per \'switch\', so the Run-input contract keeps its natural size (an edit can be named)', () => {
+    const pointed: LivingModelT = structuredClone(OPTION_EFFECTS);
+    for (const l of pointed.links) l.effect = { ...l.effect, form: 'point' };
+    const { graph } = mapLivingModel(pointed);
+    const ne = (from: string) => (graph.edges.find((e) => e.from === from && e.to === 'w') as Record<string, any>).provenance.natural_effect;
+    expect(ne('a__on')).toMatchObject({ amount: 30, amount_unit: 'widgets per hour', per_source_change: 1, per_source_change_unit: 'switch' });
+    const four = (n: Rec) => ({ amount: n.amount, amount_unit: n.amount_unit, per_source_change: n.per_source_change, per_source_change_unit: n.per_source_change_unit });
+    expect(RunInputLinkSchema.shape.natural_effect.safeParse(four(ne('b__on'))).success).toBe(true);
+    // CONTROL: a factor with its own unit keeps that unit, never 'switch'.
+    const { graph: g2 } = mapLivingModel(KNOWN_ANSWER);
+    expect((g2.edges.find((e) => e.from === 'f' && e.to === 'g') as Record<string, any>).provenance.natural_effect.per_source_change_unit).not.toBe('switch');
   });
 
   it('Lenses 20 Oct (capacity): the person\'s own figure inside their range sizes the link as their point; the range is kept and said', () => {
