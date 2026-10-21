@@ -15,7 +15,7 @@
  *    explanation and they are never combined; where they disagree the disagreement is the finding.
  *  · THE ONE RUN PATH, NOTHING PERSISTED. Each variant is the saved living model with those values, mapped by the core
  *    mapper and computed by `deps.runStressVariant` (the `run_analysis` handler on an in-memory snapshot, discarded:
- *    `handlers/stress-variant-run.ts`). Its rows are the licensed rows the structural challenge reads. The saved model must
+ *    `handlers/stress-variant-run.ts`). Its cells are what that Run's result would show (`stressChancesOf`). The saved model must
  *    remap to exactly the saved graph (every Run input, e.g. a goal's deadline; display refs carried as the register route
  *    carries them), or H0 would not be the saved model: refused. The one tolerance is a named allow-list of attestation and
  *    display fields that change no number (`ATTESTATION_ONLY`, DL ruling 21 Oct): never a general "additive" rule, which
@@ -169,7 +169,7 @@ export function planStress(living: LivingModelT, args: StressTestArgs):
 }
 
 /** Per option and explanation: the lowest and highest single figure across the settings tested, never averaged or combined. */
-export function chanceRange(cells: readonly Cell[], optionIds: readonly string[], hypotheses: readonly Hypothesis[]) {
+function chanceRange(cells: readonly Cell[], optionIds: readonly string[], hypotheses: readonly Hypothesis[]) {
   return Object.fromEntries(optionIds.map((o) => [o, hypotheses.map((h) => {
     const mine = cells.filter((c) => c.option_id === o && c.hypothesis === h.id);
     const figures = mine.filter((c) => typeof c.pct === 'number').sort((a, b) => a.pct! - b.pct!);
