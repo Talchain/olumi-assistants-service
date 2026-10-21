@@ -38,7 +38,7 @@ export type WithheldReason =
   | 'exact_not_drawable' | 'stay_within_base_not_theirs' | 'stay_within_unconfirmed'
   | 'identity_not_in_slice' | 'identity_part_unknown' | 'identity_unit_mismatch' | 'identity_inconsistent'
   | 'identity_other_cause' | 'identity_contradicted' | 'identity_restated'
-  | 'risk_occurrence_unknown' | 'risk_unattributed' | 'risk_not_in_slice';
+  | 'risk_occurrence_unknown' | 'risk_unattributed' | 'risk_not_in_slice' | 'limit_not_in_slice';
 
 /** A definition that withholds the chance when its carrier is on the goal's path (it cannot be worked out as stated). */
 const IDENTITY_REFUSED: ReadonlySet<WithheldReason> = new Set(['identity_not_in_slice', 'identity_part_unknown', 'identity_unit_mismatch', 'identity_inconsistent']);
@@ -237,8 +237,8 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
       exactSum = { lever: `${g.id}__change`, today: `${g.id}_today` };
       const lever = exactSum.lever;
       model = { ...model,
-        factors: [...model.factors, { id: lever, label: `Change in ${aim!.target!.quantity}`, value: 0, low: null, high: null,
-          unit: g.unit === '' ? null : g.unit, defined_as: null, source: 'olumi', party: null, quote: null }],
+        factors: [...model.factors, { id: lever, label: `Change in ${aim!.target!.quantity}`, kind: 'factor', value: 0, low: null, high: null,
+          unit: g.unit === '' ? null : g.unit, defined_as: null, limit: null, source: 'olumi', party: null, quote: null }],
         options: model.options.map((o) => {
           const l = direct.find((d) => d.from === o.id);
           return l === undefined ? o : { ...o, settings: [...o.settings, { factor_id: lever, value: (l.effect.sign === '-' ? -1 : 1) * Math.abs(l.effect.value!),
@@ -261,7 +261,8 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     for (const l of fromOption) switches.add(on(l.from));
     model = { ...model,
       factors: [...model.factors, ...[...new Set(fromOption.map((l) => l.from))].map((id) => ({ id: on(id),
-        label: `${model.options.find((o) => o.id === id)!.label} in place`, value: 0, low: null, high: null, unit: null, defined_as: null, source: 'olumi' as const, party: null, quote: null }))],
+        label: `${model.options.find((o) => o.id === id)!.label} in place`, kind: 'factor' as const, value: 0, low: null, high: null, unit: null, defined_as: null, limit: null,
+        source: 'olumi' as const, party: null, quote: null }))],
       options: model.options.map((o) => {
         const l = fromOption.find((d) => d.from === o.id);
         return l === undefined ? o : { ...o, settings: [...o.settings, { factor_id: on(o.id), value: 1, low: null, high: null, unit: null, source: l.source, party: l.party, quote: l.quote }] };
@@ -274,7 +275,8 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   const caps = new Map<string, number>();
   const current = new Map<string, number>();
   for (const f of model.factors) {
-    const levels = [f.value, ...model.options.flatMap((o) => o.settings.filter((s) => s.factor_id === f.id).map((s) => s.value))]
+    // A limit is a level of the quantity too, so the frame covers it (PLoT reads the limit on this frame, never clamped).
+    const levels = [f.value, f.limit?.value ?? null, ...model.options.flatMap((o) => o.settings.filter((s) => s.factor_id === f.id).map((s) => s.value))]
       .filter((v): v is number => v !== null);
     // The exact sum's change is read on the goal's own frame, so the goal is its parts added in the goal's units.
     const cap = exactSum !== undefined && f.id === exactSum.lever ? goal!.cap : capFor(levels, f.unit, goal);
@@ -288,6 +290,17 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     } else hold(f.id, f.low !== null || f.high !== null ? 'level_range_not_in_slice' : 'factor_level_unknown');
     nodes.push(node);
   }
+
+  // ── Limits (Track 2): a bound beside the aim, as the legacy lane's limit row (`add_constraint`), read on the factor's frame.
+  const goal_constraints = model.factors.flatMap((f) => {
+    const l = f.limit ?? null;
+    if (l === null) return [];
+    if (!current.has(f.id) || l.value < 0) { hold(f.id, 'limit_not_in_slice'); return []; }
+    const strict = l.comparator === '<' || l.comparator === '>';
+    return [{ constraint_id: `limit_${f.id}`, node_id: f.id, operator: l.comparator.startsWith('<') ? '<=' : '>=',
+      ...(strict ? { operator_as_stated: l.comparator } : {}), value: l.value, label: f.label, provenance: stated(l.source) ? 'explicit' : 'inferred',
+      ...(l.quote !== null && l.quote.length <= 200 ? { source_quote: l.quote } : {}), value_frame: 'level', ...(f.unit !== null ? { unit: f.unit } : {}) }];
+  });
 
   // ── Options: one decision, one status quo, each setting an intervention on its factor's frame.
   const decisionId = `decision_${goal?.id ?? 'model'}`;
@@ -319,7 +332,9 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     }
     // The status quo holds every controllable factor at its current level, explicitly.
     if (isBaseline) for (const id of setsFactor) if (interventions[id] === undefined && current.has(id)) set(id, current.get(id)!, model.factors.find((f) => f.id === id)!.unit, { source: 'olumi', quote: null });
-    nodes.push({ id: o.id, kind: 'option', label: o.label, ...(isBaseline ? { is_baseline: true } : {}), ...(Object.keys(interventions).length > 0 ? { interventions } : {}) });
+    // A ruled-out option stays on the board, out of the comparison: the legacy status, which the Run's option gate honours.
+    const out = o.status === 'infeasible' || o.status === 'removed' ? { option_status: o.status, analysis_participation: 'retained_excluded' } : {};
+    nodes.push({ id: o.id, kind: 'option', label: o.label, ...(isBaseline ? { is_baseline: true } : {}), ...(Object.keys(interventions).length > 0 ? { interventions } : {}), ...out });
     edges.push({ from: decisionId, to: o.id, ...STRUCTURAL, provenance: { source: 'cee_hypothesis' } });
     for (const id of Object.keys(interventions)) edges.push({ from: o.id, to: id, ...STRUCTURAL, provenance: { source: 'cee_hypothesis' } });
   }
@@ -527,6 +542,12 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     }
     // An option moves the goal through what it sets, so it is on the path too (science check 5bbceeec, point 5).
     for (const o of model.options) if (o.settings.some((s) => onPath.has(s.factor_id))) onPath.add(o.id);
+    // An outcome other factors lead to is drawn as one on the goal's path; one an option sets is a lever, so a factor.
+    for (const f of model.factors) if (f.kind === 'outcome' && onPath.has(f.id) && !setsFactor.has(f.id)) {
+      const node = nodes.find((n) => n.id === f.id)!;
+      node.kind = 'outcome';
+      delete node.category;
+    }
     const leftOut = withheld.some((w) => (w.reason === 'link_sign_unknown' || w.reason === 'link_endpoint_unknown' || w.reason === 'exact_not_drawable'
       || w.reason === 'identity_other_cause' || w.reason === 'identity_contradicted' || w.reason === 'risk_not_in_slice') && onPath.has(model.links.find((l) => l.id === w.id)?.to ?? ''))
       || withheld.some((w) => (IDENTITY_REFUSED.has(w.reason) || RISK_REFUSED.has(w.reason)) && onPath.has(w.id)) || [...droppedSettings].some((id) => onPath.has(id));
@@ -544,5 +565,5 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
 
   const frames = new Map<string, Frame>(model.factors.flatMap((f) => (caps.has(f.id) ? [[f.id, { cap: caps.get(f.id)!, unit: f.unit }] as const] : [])));
   if (goal !== undefined) frames.set(goal.id, { cap: goal.cap, unit: goal.unit === '' ? null : goal.unit });
-  return { graph: { nodes, edges }, withheld, frames, assumed };
+  return { graph: { nodes, edges, ...(goal_constraints.length > 0 ? { goal_constraints } : {}) }, withheld, frames, assumed };
 }

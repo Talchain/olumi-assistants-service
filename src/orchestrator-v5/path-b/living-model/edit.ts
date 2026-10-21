@@ -182,8 +182,8 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       // Any id already in use: an item, a link, or a node the mapper draws (`decision_…`, a switch) (Codex).
       if ([...m.aims, ...m.options, ...m.factors, ...m.risks, ...m.links].some((x) => x.id === edit.node_id)
         || mapped.graph.nodes.some((n) => n.id === edit.node_id)) return { refused: 'id_exists' };
-      if (edit.node_kind === 'factor') m.factors.push({ id: edit.node_id, label: edit.label, value: null, ...noRange, unit: null, defined_as: null, ...theirs });
-      else if (edit.node_kind === 'option') m.options.push({ id: edit.node_id, label: edit.label, settings: [], developed_from: null, ...theirs });
+      if (edit.node_kind === 'factor') m.factors.push({ id: edit.node_id, label: edit.label, kind: 'factor', value: null, ...noRange, unit: null, defined_as: null, limit: null, ...theirs });
+      else if (edit.node_kind === 'option') m.options.push({ id: edit.node_id, label: edit.label, settings: [], status: 'feasible', developed_from: null, ...theirs });
       // A new risk has no chance yet: never guessed, so it is drawn and the analysis asks for one (mapper: risk_occurrence_unknown).
       else if (edit.node_kind === 'risk') m.risks.push({ id: edit.node_id, label: edit.label, occurrence: { low: null, high: null }, horizon_months: null, mitigations: [], ...theirs });
       else return { refused: 'kind_not_in_slice' };
