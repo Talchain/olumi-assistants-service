@@ -98,6 +98,13 @@ describe('stress_test on a G2-shaped living model', () => {
     expect(d.explanation_disagreements.map((x) => [x.option_id, x.saved_model, x.alternative])).toEqual([['A', 'meets', 'falls_short'], ['A', 'meets', 'falls_short']]);
   });
 
+  it('a joint failure needs each stress alone to pass: an option already failing on one stress is no witness', async () => {
+    const p = product(G2);
+    const args = { ...ARGS, stresses: [{ item_id: 'dexp_c', values: [-2], values_source: 'user' as const }, ARGS.stresses[1]!] };
+    const d = ((await stressTest({ dispatch: p.dispatch, runStressVariant: engineDouble() }, ctx, args)) as unknown as { data: Data }).data;
+    expect(d.joint_failure_witnesses).toEqual([{ hypothesis: 'H0', option_id: 'C' }, { hypothesis: 'H1', option_id: 'C' }]);
+  });
+
   it('keeps a tie at the most favourable level as a tie, never one option', async () => {
     const p = product(G2);
     const d = ((await stressTest({ dispatch: p.dispatch, runStressVariant: engineDouble() }, ctx, ARGS)) as unknown as { data: Data }).data;
