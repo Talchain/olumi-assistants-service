@@ -6258,6 +6258,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // A replacement by the AI's own words (nothing appended): every host line above is dropped, not added to.
       const aiOwnWords = withoutProposalIds(narratorWords ?? text);
       wireBody = { ...unshaped, assistant_text: aiOwnWords } as OlumiResponse & Record<string, unknown>;
+      // The AI's words replace the reconciled text above, so the search controls' truth is settled again on them (Codex #3558
+      // R1): a control the final read withdrew is never left promised by the AI's own "press the control below".
+      if (!leaderFreeEnvelope) wireBody = withResearchControlTruth(wireBody, researchOffered, (chip) => controlSurvivesLeaderGate(chip, leaderGate));
     } else if (aiWroteReply && noDirectLink === null && fastPath !== 'method') {
       const checked = withEstimateGoalPointsAtEgress(wireBody, {
         analysisResult, graph: readbackGraph ?? null, current: selectedRunCurrent,
