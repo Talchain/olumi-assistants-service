@@ -18,10 +18,12 @@
  *        a FAILED turn — see applyExtractionContract)
  *     -> candidates RANKED on identical scenarios.
  *
- * SCOPE (deliberate, documented): the turn context here is the user message
- * only. It once also carried the assembled analysis (production
- * formatAnalysisForContext output); that formatter was deleted (Track 2
- * deletion 9), and retiring this routing task is a DL follow-up. The full
+ * SCOPE (deliberate, documented): the turn context carries the user message
+ * and the fixture's RAW analysis — the same object the scorer grounds on, so a
+ * candidate is never scored against numbers it was not shown. It once carried
+ * the display-formatted analysis (formatAnalysisForContext); that formatter was
+ * deleted with the context pack (Track 2 deletion 9) because nothing served
+ * uses it, and retiring this routing task is a DL follow-up. The full
  * context-pack -> system-prompt compose stays deferred (README "Deliberately deferred"),
  * and eligible-actions shaping is omitted because the eval fixtures carry
  * none. Rankings are therefore comparable BETWEEN candidates (same shaping
@@ -149,7 +151,8 @@ export interface CandidateEvalReport {
 /**
  * Build the request for one fixture, shaped per SEAM-1's documented reuse of
  * the graph-evaluator orchestrator adapter (prompt + <TURN_CONTEXT> + JSON
- * forcing). The turn context carries the user message only (see SCOPE above).
+ * forcing). The turn context carries the user message and the raw analysis
+ * the scorer grounds on (see SCOPE above).
  */
 export function buildCandidateRequest(
   fixture: OrchestratorEvalFixture,
@@ -157,6 +160,7 @@ export function buildCandidateRequest(
 ): { system: string; user: string } {
   const turnContext = {
     user_message: fixture.user_message,
+    analysis: fixture.analysis,
   };
   const system = [
     promptText,
