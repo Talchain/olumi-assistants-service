@@ -11,6 +11,7 @@
  * Harness: the real route, SDK, card carrier, Run pipeline and adapters; the write itself is a counted commit (C5's door is
  * proven in `path-b/tools/__tests__`), the model is scripted through global fetch (0 provider calls). SYNTHETIC wording.
  */
+import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
@@ -159,11 +160,14 @@ describe('PATH-B gap 4: commit and Undo each run the existing Run pipeline once;
   let calls: Json[] = [];
   let outputs: (Json[] | 'fail')[] = [];
   let runTurns = 0;
+  /** A change between the AI's calls (another writer), seen by the model call about to be answered. */
+  let beforeModelCall: ((body: Json) => void) | undefined;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
       if (String(url).endsWith('/v1/conversations')) return json({ id: 'conv_gap4', object: 'conversation' });
       const body = JSON.parse(String(init?.body ?? '{}')) as Json;
       calls.push(body);
+      beforeModelCall?.(body);
       const next = outputs.shift() ?? [{ type: 'message', text: COACHED }];
       if (next === 'fail') return json({ error: { message: 'scripted provider failure', type: 'server_error' } }, 400);
       return json(responsesBody(next));
@@ -190,7 +194,7 @@ describe('PATH-B gap 4: commit and Undo each run the existing Run pipeline once;
     app.post('/assist/v1/scenarios/:id/graph', async () => world.ranOnSaved
       ? withCanonicalAnalysisView({ graph: world.graph, graph_hash: world.hash, analysis_ready: READY, analysis_state: STATE, analysis_result: { ...RESULT, computed_against_hash: world.hash },
           current_read: { run_state: STATE.run_state, run_id: 'fixture-read-run', computed_against_hash: world.hash, ...(world.delta ? { run_delta: DELTA } : {}) } }, SCENARIO)
-      : { graph: world.graph, graph_hash: world.hash, analysis_ready: READY,
+      : { graph: world.graph, graph_hash: world.hash, graph_identity_hash: computeGraphIdentityHash(world.graph as never), analysis_ready: READY,
           ...(world.prior ? { analysis_state: PRIOR_STATE, analysis_result: PRIOR_RESULT } : {}) });
     await app.register(route.agentV1TurnRoute);
     await app.ready();
@@ -198,6 +202,9 @@ describe('PATH-B gap 4: commit and Undo each run the existing Run pipeline once;
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   beforeEach(() => {
     rows.clear(); runRows.clear(); runFacts.clear(); conversationIds.clear(); pausedRun = null; calls = []; outputs = []; runTurns = 0; probe.applied = 0;
+    beforeModelCall = undefined;
+    // The store's own read of the saved scenario (the other-writer recheck): the live world, as the graph route serves it.
+    store.readExistingScenario.mockImplementation(async () => ({ revision: 7, graph: world.graph }) as never);
     Object.assign(world, { graph: GRAPH_AT_4, hash: HASH_4, ranOnSaved: false, prior: true, runStatus: 200, delta: true });
     head = { status: 'ok', value: versionRow({ creation_kind: 'committed_mutation', source_version_id: null, restored_from_version_id: null, label: 'Edit Capacity', id: EDIT_V }) };
   });
@@ -231,6 +238,46 @@ describe('PATH-B gap 4: commit and Undo each run the existing Run pipeline once;
   /** The tool output the AI received for one scripted call (by its call id: `apply_call`, `run_call`). */
   const outputOf = (callId: string): Json | undefined => calls.flatMap(toolOutputs).find((o) => o.call_id === callId)?.output;
   const interpreterCalls = () => calls.filter((b) => b.tool_choice === 'none').length;
+
+  it('⭐ note_on_item (DL ruling 21 Oct): the AI\'s note on one item ships as the turn\'s first block, Olumi\'s, and nothing is written', async () => {
+    const NOTE = 'What would make Capacity stop driving Velocity?';
+    outputs = [[{ type: 'function_call', name: 'note_on_item', call_id: 'note_call', args: { item_id: 'f', note: NOTE } }], [{ type: 'message', text: 'I have put a question beside Capacity.' }]];
+    const r = await post({ turn_id: randomUUID(), message: 'What should I question here?', source: 'composer' });
+    expect(r.statusCode, r.body).toBe(200);
+    const blocks = (r.json() as Json).blocks as Json[];
+    expect(blocks[0]).toEqual({ type: 'ui_directive', verb: 'highlight', targets: [{ id: 'f', label: 'Capacity', kind: 'factor' }], note: NOTE, source: 'composer' });
+    expect(blocks.filter((b) => b.type === 'ui_directive')).toHaveLength(1);
+    expect(probe.applied, 'a note writes nothing').toBe(0);
+    expect(runTurns).toBe(0);
+  });
+
+  it('⭐ Codex R1 (3): the model changed after the note was read (another writer) → the note is not shipped beside the new revision', async () => {
+    outputs = [[{ type: 'function_call', name: 'note_on_item', call_id: 'note_call', args: { item_id: 'f', note: 'What would make Capacity stop driving Velocity?' } }], [{ type: 'message', text: 'I have put a question beside Capacity.' }]];
+    // Another writer saves after the note was read: the call that carries the note's tool output is the first one after it.
+    beforeModelCall = (body) => { if (toolOutputs(body).some((o) => o.call_id === 'note_call')) Object.assign(world, { graph: GRAPH_AT_2, hash: HASH_2 }); };
+    const r = await post({ turn_id: randomUUID(), message: 'What should I question here?', source: 'composer' });
+    expect(r.statusCode, r.body).toBe(200);
+    expect(outputOf('note_call'), 'PRECONDITION: the tool accepted the note at the earlier revision').toMatchObject({ status: 'ok' });
+    expect(((r.json() as Json).blocks as Json[] | undefined ?? []).filter((b) => b.type === 'ui_directive')).toHaveLength(0);
+  });
+
+  it('⭐ Codex R2: a concurrent RENAME (same analysis hash, new identity) → the note naming the old card is not shipped', async () => {
+    outputs = [[{ type: 'function_call', name: 'note_on_item', call_id: 'note_call', args: { item_id: 'f', note: 'What would make Capacity stop driving Velocity?' } }], [{ type: 'message', text: 'I have put a question beside Capacity.' }]];
+    const renamed = { ...GRAPH_AT_4, nodes: GRAPH_AT_4.nodes.map((n) => n.id === 'f' ? { ...n, label: 'Team size' } : n) };
+    expect(computeAnalysisAffectingGraphHash(renamed as never), 'PRECONDITION: a rename leaves the analysis hash alone').toBe(HASH_4);
+    beforeModelCall = (body) => { if (toolOutputs(body).some((o) => o.call_id === 'note_call')) Object.assign(world, { graph: renamed }); };
+    const r = await post({ turn_id: randomUUID(), message: 'What should I question here?', source: 'composer' });
+    expect(r.statusCode, r.body).toBe(200);
+    expect(outputOf('note_call'), 'PRECONDITION: the tool accepted the note on the model as it was').toMatchObject({ status: 'ok' });
+    expect(((r.json() as Json).blocks as Json[] | undefined ?? []).filter((b) => b.type === 'ui_directive')).toHaveLength(0);
+  });
+
+  it('CONTRAST: the same turn with no note call ships no directive', async () => {
+    outputs = [[{ type: 'message', text: 'Capacity is the one factor here.' }]];
+    const r = await post({ turn_id: randomUUID(), message: 'What should I question here?', source: 'composer' });
+    expect(r.statusCode, r.body).toBe(200);
+    expect(((r.json() as Json).blocks as Json[] | undefined ?? []).filter((b) => b.type === 'ui_directive')).toHaveLength(0);
+  });
 
   it('⭐ RED→GREEN commit → ONE Run → the SAME SDK run gets its results and coaches; with the preceding Run\'s comparison', async () => {
     const card = await prepared();
@@ -321,7 +368,7 @@ describe('PATH-B gap 4: commit and Undo each run the existing Run pipeline once;
     expect(j._agent.sdk, 'the SDK run owns this reply').toBeDefined();
     expect(runTurns, 'exactly one Run').toBe(1);
     expect(calls[0]!.tool_choice, 'its first call spends the press on run_analysis').toMatchObject({ type: 'function', name: 'run_analysis' });
-    expect((calls[0]!.tools as Json[]).map((t) => t.name), 'a Run press calculates and reads only').toEqual(['read_canonical_context', 'run_analysis']);
+    expect((calls[0]!.tools as Json[]).map((t) => t.name), 'a Run press calculates and reads only (a note writes nothing)').toEqual(['read_canonical_context', 'run_analysis', 'note_on_item']);
     expect(calls.length, 'the call that runs it and the call that narrates it; no interpreting call').toBe(2);
     expect(interpreterCalls()).toBe(0);
     const ran = outputOf('run_call');

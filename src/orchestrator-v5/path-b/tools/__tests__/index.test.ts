@@ -28,9 +28,9 @@ function setup(mode: 'core' | 'preview' = 'core', analyseAfterCommit?: () => Pro
 const named = (tools: Tool[], name: string): FunctionTool => tools.find((t) => t.name === name) as FunctionTool;
 
 describe('the adapters as SDK function tools', () => {
-  it('core: the five tools, strict, with no string limits a strict schema cannot carry; only apply_change asks for approval', async () => {
+  it('core: the six tools, strict, with no string limits a strict schema cannot carry; only apply_change asks for approval', async () => {
     const { tools } = setup();
-    expect(tools.map((t) => t.name)).toEqual(['read_canonical_context', 'build_model_from_brief', 'propose_change', 'apply_change', 'run_analysis']);
+    expect(tools.map((t) => t.name)).toEqual(['read_canonical_context', 'build_model_from_brief', 'propose_change', 'apply_change', 'run_analysis', 'note_on_item']);
     for (const t of tools as FunctionTool[]) {
       expect(t.type).toBe('function');
       expect(t.strict, t.name).toBe(true);
@@ -38,6 +38,22 @@ describe('the adapters as SDK function tools', () => {
       const asks = await t.needsApproval(new RunContext(), (t.name === 'apply_change' ? { proposal_id: PROPOSAL } : {}) as never, 'call_1');
       expect(asks, t.name).toBe(t.name === 'apply_change');
     }
+  });
+
+  it('note_on_item: its block rides the route result, so the route can ship it beside the reply; nothing is written', async () => {
+    const { tools, calls } = setup();
+    await named(tools, 'note_on_item').invoke(new RunContext(), JSON.stringify({ item_id: 'staff', note: 'Is one more assistant enough?' }));
+    const [row, result] = calls[0]!;
+    expect(row).toMatchObject({ name: 'note_on_item', ok: true, mutated: false });
+    expect(result.ui_directive).toEqual({ type: 'ui_directive', verb: 'highlight',
+      targets: [{ id: 'staff', label: 'Assistants on shift', kind: 'factor' }], note: 'Is one more assistant enough?', source: 'composer' });
+    expect(result.note_basis, 'the model identity it was read on, for the route to bind').toBe('id_one');
+  });
+
+  it('CONTRAST: no other tool result carries a directive', async () => {
+    const { tools, calls } = setup();
+    await named(tools, 'read_canonical_context').invoke(new RunContext(), '{}');
+    expect(calls[0]![1].ui_directive).toBeUndefined();
   });
 
   it('preview: the reader only', () => {
@@ -137,8 +153,13 @@ const AIE_STANCE = 'How this particular figure is put forward in its full source
 
 describe('the AIE\'s signed words', () => {
   it('each tool\'s description is the AIE\'s, byte for byte, replacing the old text', () => {
-    for (const t of setup().tools as FunctionTool[]) expect(t.description, t.name).toBe(AIE_DESCRIPTIONS[t.name]);
+    for (const t of (setup().tools as FunctionTool[]).filter((t) => t.name !== 'note_on_item')) expect(t.description, t.name).toBe(AIE_DESCRIPTIONS[t.name]);
     expect(Object.keys(AIE_DESCRIPTIONS)).toHaveLength(5);
+  });
+
+  it('note_on_item (DL ruling 21 Oct): its description says it writes nothing, allows one note per turn, and never ranks an option', () => {
+    const d = named(setup().tools, 'note_on_item').description;
+    for (const part of ['it changes nothing in the model', 'At most one per turn', 'Never call an option best and never recommend one']) expect(d).toContain(part);
   });
 
   it('propose_change carries the per-figure stance enum with the AIE\'s description, verbatim', () => {
