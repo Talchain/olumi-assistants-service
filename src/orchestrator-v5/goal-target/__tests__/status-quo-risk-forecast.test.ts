@@ -15,6 +15,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { goalChanceLicenceOf } from '../goal-chance-licence.js';
+import { wireGoalConstraints } from '../../tools/handlers/run-analysis.js';
 
 type Rec = Record<string, unknown>;
 const FX = JSON.parse(readFileSync('tests/fixtures/track2-f2/served-f2-supplier-risk-20261021T222244Z.json', 'utf8')) as {
@@ -118,3 +119,72 @@ describe('F2 (served): a status quo a supplier-failure risk reaches is a forecas
     expect(l!.withheld_option_ids).toContain(SQ);
   });
 });
+
+// ── Codex r1/r2 on #3610: the event-risk reading is the SINGLE goal's only. A joint keeps the reading as it was, so a status
+// quo the engine scores at an exact 100% stays out of the joint and the primary target even when an event reaches the goal.
+const J_LEVEL = (raw: number, cap: number, unit: string): Rec => ({ value: raw / cap, raw_value: raw, cap, unit, source: 'brief_extraction', extractionType: 'explicit' });
+const J_LINK = (): Rec => ({ strength: { mean: 0.3, std: 0.05 }, exists_probability: 1, effect_direction: 'positive', provenance: { source: 'user_specified', magnitude: 'user_stated' } });
+const J_CELL = (node: string): Rec => ({ value: 0.6, raw_value: 60, source: 'user_specified', target_match: { node_id: node } });
+const JGOAL = 'new_customers';
+const J_BASIS = { quantity_frame: 'level', target_frame: 'level', target_raw: 20, reference: 'today', source: 'olumi_reading' };
+const J_ROWS = [
+  { constraint_id: 'target:new_customers', node_id: JGOAL, operator: '>=', value: 20, unit: 'customers', value_frame: 'level', role: 'goal_target' },
+  { constraint_id: 'target:conversion_rate', node_id: 'conversion_rate', operator: '>=', value: 15, unit: '%', value_frame: 'level', role: 'goal_target' },
+];
+function jointGraph(withRisk: boolean): Rec {
+  const nodes: Rec[] = [
+    { id: 'which_plan', kind: 'decision', label: 'Which plan?' },
+    { id: JGOAL, kind: 'goal', label: 'New customers', goal_threshold_frame: 'level', goal_threshold_raw: 20, goal_threshold_unit: 'customers',
+      goal_threshold_cap: 50, goal_threshold: 0.4, goal_direction: '>=', goal_target_basis: J_BASIS, observed_state: J_LEVEL(30, 50, 'customers') },
+    { id: 'conversion_rate', kind: 'factor', label: 'Conversion rate', observed_state: J_LEVEL(20, 100, '%') },
+    { id: 'outreach', kind: 'factor', label: 'Outreach', observed_state: J_LEVEL(40, 100, 'points') },
+    { id: 'carry_on', kind: 'option', label: 'Carry on as now', is_baseline: true, interventions: {} },
+    { id: 'hire', kind: 'option', label: 'Hire', interventions: { outreach: J_CELL('outreach') } },
+  ];
+  const edges: Rec[] = [
+    ...['carry_on', 'hire'].map((o) => ({ from: 'which_plan', to: o, ...J_LINK() })),
+    { from: 'hire', to: 'outreach', ...J_LINK() },
+    { from: 'outreach', to: JGOAL, ...J_LINK() },
+    { from: 'conversion_rate', to: JGOAL, ...J_LINK() },
+  ];
+  if (withRisk) {
+    nodes.push({ id: 'outage', kind: 'risk', label: 'Platform outage', event_risk: { version: 1, horizon: { months: 12 },
+      occurrence: { basis: 'user', p_low: 0.05, p_high: 0.15 }, mitigations: [] } });
+    edges.push({ from: 'outage', to: JGOAL, strength: { mean: -0.2, std: 0.05 }, exists_probability: 1, effect_direction: 'negative',
+      provenance: { source: 'user_specified', magnitude: 'user_stated' } });
+  }
+  return { nodes, edges, goal_constraints: structuredClone(J_ROWS) };
+}
+const JP = { n_informative: 10000, standard_error: 0.005 };
+const JOINT_RUN = (): Rec => ({ option_comparison: [
+  { option_id: 'carry_on', probability_of_goal: 1, probability_of_joint_goal: 1, probability_of_joint_goal_precision: JP,
+    constraint_probabilities: { 'target:new_customers': 1, 'target:conversion_rate': 1 },
+    constraint_probabilities_precision: { 'target:new_customers': JP, 'target:conversion_rate': JP } },
+  { option_id: 'hire', probability_of_goal: 0.7, probability_of_joint_goal: 0.48, probability_of_joint_goal_precision: JP,
+    constraint_probabilities: { 'target:new_customers': 0.7, 'target:conversion_rate': 0.55 },
+    constraint_probabilities_precision: { 'target:new_customers': JP, 'target:conversion_rate': JP } },
+] });
+const jointLicence = (withRisk: boolean): Rec => {
+  const g = jointGraph(withRisk);
+  return goalChanceLicenceOf(JOINT_RUN(), g, JGOAL, () => false, undefined, g,
+    { storedConstraints: g.goal_constraints, sentConstraints: wireGoalConstraints(g.goal_constraints) } as never) as Rec;
+};
+
+describe('a joint over the goal keeps the status-quo reading as it was, with or without an event risk on the goal', () => {
+  it('precondition: with no risk, the joint and the primary target leave carrying on out (no unearned exact 100%)', () => {
+    const l = jointLicence(false);
+    expect(l.targets.joint.status).toBe('licensed');
+    expect(l.targets.joint.pct_by_option).not.toHaveProperty('carry_on');
+    expect((l.targets.per_target as Rec[]).find((t) => t.constraint_id === 'target:new_customers')!.pct_by_option).not.toHaveProperty('carry_on');
+  });
+
+  it('an event risk reaching the primary goal changes nothing in the joint: carrying on stays out, exactly as without it', () => {
+    const withRisk = jointLicence(true);
+    expect(withRisk.targets.joint.pct_by_option).not.toHaveProperty('carry_on');
+    expect((withRisk.targets.per_target as Rec[]).find((t) => t.constraint_id === 'target:new_customers')!.pct_by_option)
+      .not.toHaveProperty('carry_on');
+    expect(withRisk.targets).toEqual(jointLicence(false).targets);
+    expect(withRisk.withheld_option_ids).toEqual(jointLicence(false).withheld_option_ids);
+  });
+});
+
