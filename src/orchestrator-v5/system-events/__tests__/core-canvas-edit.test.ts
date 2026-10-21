@@ -52,11 +52,50 @@ describe('a canvas gesture on a core scenario', () => {
   });
 
   it('a gesture this slice cannot apply is refused, said plainly, and nothing is written', async () => {
-    const out = await send({ kind: 'structural_add', node_id: 'r', node_kind: 'risk', label: 'Supplier delay', base_graph_hash: BASE });
+    const out = await send({ kind: 'structural_add', node_id: 'o', node_kind: 'outcome', label: 'Churn', base_graph_hash: BASE });
     expect(out.commitPerformed).toBe(false);
     expect(out.response.blocks).toEqual([expect.objectContaining({ error_code: 'FEATURE_NOT_ENABLED', details: { reason: 'core_kind_not_in_slice', retryable: false } })]);
     expect(out.response.assistant_text).toContain("haven't changed the model");
     expect(append).not.toHaveBeenCalled();
+  });
+
+  // ⭐ Codex r5 on #3522 (A1): a range the canvas sets, and a risk added, renamed or deleted, were refused on core. Each now
+  // changes the living model through the same one-write door, in the person's name.
+  it('⭐ a range the person sets is the factor\'s own low and high (a range, not a figure), theirs, written once', async () => {
+    const out = await send({ kind: 'prior_range_edit', target_id: 'f', range_min: 0.2, range_max: 0.8, distribution: 'uniform', base_graph_hash: BASE });
+    expect(out.commitPerformed, JSON.stringify(out.response)).toBe(true);
+    expect(append).toHaveBeenCalledTimes(1);
+    expect((written().living_model as typeof KNOWN_ANSWER).factors.find((f) => f.id === 'f')).toMatchObject({ value: null, low: 0.2, high: 0.8, source: 'user', quote: null });
+  });
+
+  it('NEGATIVE: an inverted range, another distribution, or an item that is not a factor changes nothing', async () => {
+    for (const [event, reason] of [
+      [{ kind: 'prior_range_edit', target_id: 'f', range_min: 0.8, range_max: 0.2 }, 'core_range_inverted'],
+      [{ kind: 'prior_range_edit', target_id: 'f', range_min: 0.2, range_max: 0.8, distribution: 'normal' }, 'core_distribution_not_in_slice'],
+      [{ kind: 'prior_range_edit', target_id: 'g', range_min: 0.2, range_max: 0.8 }, 'core_not_in_model'],
+    ] as const) {
+      const out = await send({ ...event, base_graph_hash: BASE });
+      expect(out.response.blocks, reason).toEqual([expect.objectContaining({ details: { reason, retryable: false } })]);
+    }
+    expect(append).not.toHaveBeenCalled();
+  });
+
+  it('⭐ a risk is added (no chance yet, never guessed), renamed and deleted like a factor, each written once', async () => {
+    const added = await send({ kind: 'structural_add', node_id: 'r', node_kind: 'risk', label: 'Supplier delay', base_graph_hash: BASE });
+    expect(added.commitPerformed, JSON.stringify(added.response)).toBe(true);
+    const withRisk = written();
+    expect((withRisk.living_model as typeof KNOWN_ANSWER).risks).toEqual([{ id: 'r', label: 'Supplier delay', occurrence: { low: null, high: null },
+      horizon_months: null, mitigations: [], source: 'user', party: null, quote: null }]);
+    loadGraph.mockResolvedValue(withRisk);
+    const base = computeExpectedGraphCasHashes(withRisk).expectedGraphAnalysisHash!;
+    append.mockClear();
+    const renamed = await send({ kind: 'structural_rename', node_id: 'r', label: 'Key supplier fails', expected_label: 'Supplier delay', base_graph_hash: base });
+    expect(renamed.commitPerformed, JSON.stringify(renamed.response)).toBe(true);
+    expect((written().living_model as typeof KNOWN_ANSWER).risks[0]!.label).toBe('Key supplier fails');
+    append.mockClear();
+    const deleted = await send({ kind: 'structural_delete', removed_node_ids: ['r'], removed_edges: [], base_graph_hash: base });
+    expect(deleted.commitPerformed, JSON.stringify(deleted.response)).toBe(true);
+    expect((written().living_model as typeof KNOWN_ANSWER).risks).toEqual([]);
   });
 
   // A delete of an edge Olumi draws from no stored link (here the option's setting) was acknowledged and committed, then the
@@ -85,7 +124,7 @@ describe('a canvas gesture on a core scenario', () => {
 
   it('CONTROL: a scenario without a living model never takes the core path', async () => {
     loadGraph.mockResolvedValue(mapLivingModel(KNOWN_ANSWER).graph);
-    const out = await send({ kind: 'structural_add', node_id: 'r', node_kind: 'risk', label: 'Supplier delay', base_graph_hash: BASE });
+    const out = await send({ kind: 'structural_add', node_id: 'o', node_kind: 'outcome', label: 'Churn', base_graph_hash: BASE });
     expect(JSON.stringify(out.response)).not.toContain('core_kind_not_in_slice');
     if (append.mock.calls.length > 0) expect(written().living_model).toBeUndefined();
   });

@@ -74,7 +74,7 @@ describe('thin core explicit edit: a canvas gesture applied to the living model,
     expect(applyExplicitEdit(KNOWN_ANSWER, { kind: 'factor_value_edit', target_id: 'g', value: 0.6, raw_value: 75, unit: '%' })).toEqual({ refused: 'unit_mismatch' });
     expect(applyExplicitEdit(KNOWN_ANSWER, { kind: 'structural_rename', node_id: 'f', label: 'x', expected_label: 'old' })).toEqual({ refused: 'label_moved' });
     expect(applyExplicitEdit(KNOWN_ANSWER, { kind: 'factor_value_edit', target_id: 'nope', value: 1 })).toEqual({ refused: 'not_in_model' });
-    expect(applyExplicitEdit(KNOWN_ANSWER, { kind: 'structural_add', node_id: 'r', node_kind: 'risk', label: 'Risk' })).toEqual({ refused: 'kind_not_in_slice' });
+    expect(applyExplicitEdit(KNOWN_ANSWER, { kind: 'structural_add', node_id: 'o', node_kind: 'outcome', label: 'Churn' })).toEqual({ refused: 'kind_not_in_slice' });
   });
 
   // Staging defect (21 Oct, Codex on #3555): an option's own effect is drawn from its `<option>__on` switch, so a gesture on
@@ -139,6 +139,21 @@ describe('thin core explicit edit: a canvas gesture applied to the living model,
     for (const removed_edges of [[], [{ from: 'decision_g', to: 'push' }]]) {
       expect(applyExplicitEdit(KNOWN_ANSWER, { kind: 'structural_delete', removed_node_ids: ['decision_g'], removed_edges }))
         .toEqual({ refused: 'node_is_generated' });
+    }
+  });
+
+  it('Codex (core edit): a renamed risk keeps whose chance it is; a risk deleted takes its links and the conditions on them; an id in use anywhere is refused', () => {
+    const m: LivingModelT = { ...supplier('point'), conditions: [{ id: 'c1', text: 'only if the supplier is the only source', applies_to: ['fails_gp'],
+      kind: 'assumption', source: 'olumi', party: null, quote: null } as never] };
+    const renamed = (applyExplicitEdit(m, { kind: 'structural_rename', node_id: 'supplier_fails', label: 'Key supplier stops', expected_label: 'Key supplier fails' }) as { model: LivingModelT }).model;
+    // Codex R2: the author also owns the chance; a rename never makes Olumi's figure the person's.
+    const olumis = (applyExplicitEdit({ ...m, risks: [{ ...m.risks[0]!, source: 'olumi', quote: null }] },
+      { kind: 'structural_rename', node_id: 'supplier_fails', label: 'Key supplier stops', expected_label: 'Key supplier fails' }) as { model: LivingModelT }).model;
+    expect([renamed.risks[0]!.label, olumis.risks[0]!.source]).toEqual(['Key supplier stops', 'olumi']);
+    const del = (applyExplicitEdit(m, { kind: 'structural_delete', removed_node_ids: ['supplier_fails'], removed_edges: [] }) as { model: LivingModelT }).model;
+    expect([del.risks, del.links.map((l) => l.id), del.conditions[0]!.applies_to]).toEqual([[], ['cost_gp'], []]);
+    for (const id of ['fails_gp', 'decision_gp', 'dual_source__on']) {
+      expect(applyExplicitEdit(m, { kind: 'structural_add', node_id: id, node_kind: 'risk', label: 'X' }), id).toEqual({ refused: 'id_exists' });
     }
   });
 
