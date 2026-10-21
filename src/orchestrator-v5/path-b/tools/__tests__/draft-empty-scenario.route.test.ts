@@ -53,8 +53,8 @@ const livingFor = (brief: string): LivingModelT => {
   return {
     aims: [{ id: 'aim', text: first, status: 'current', target: null, defined_as: null, source: 'user', party: null, quote: first }],
     options: [
-      { id: 'carry_on', label: 'Carry on as now', settings: [], source: 'olumi', party: null, quote: null },
-      { id: 'change', label: 'Make the change', source: 'olumi', party: null, quote: null,
+      { id: 'carry_on', label: 'Carry on as now', settings: [], developed_from: null, source: 'olumi', party: null, quote: null },
+      { id: 'change', label: 'Make the change', developed_from: null, source: 'olumi', party: null, quote: null,
         settings: [{ factor_id: 'level', value: 2, low: null, high: null, unit: null, source: 'olumi', party: null, quote: null }] },
     ],
     factors: [{ id: 'level', label: 'Current level', value: 1, low: null, high: null, unit: null, defined_as: null, source: 'olumi', party: null, quote: null }],

@@ -132,7 +132,7 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
     case 'structural_add': {
       if ([...m.aims, ...m.options, ...m.factors].some((x) => x.id === edit.node_id)) return { refused: 'id_exists' };
       if (edit.node_kind === 'factor') m.factors.push({ id: edit.node_id, label: edit.label, value: null, ...noRange, unit: null, defined_as: null, ...theirs });
-      else if (edit.node_kind === 'option') m.options.push({ id: edit.node_id, label: edit.label, settings: [], ...theirs });
+      else if (edit.node_kind === 'option') m.options.push({ id: edit.node_id, label: edit.label, settings: [], developed_from: null, ...theirs });
       else return { refused: 'kind_not_in_slice' };
       return { model: m };
     }
