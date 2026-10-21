@@ -166,22 +166,24 @@ const JOINT_RUN = (): Rec => ({ option_comparison: [
 ] });
 const jointLicence = (withRisk: boolean): Rec => {
   const g = jointGraph(withRisk);
-  return goalChanceLicenceOf(JOINT_RUN(), g, JGOAL, () => false, undefined, g,
-    { storedConstraints: g.goal_constraints, sentConstraints: wireGoalConstraints(g.goal_constraints) } as never) as Rec;
+  const licence: unknown = goalChanceLicenceOf(JOINT_RUN(), g, JGOAL, () => false, undefined, g,
+    { storedConstraints: g.goal_constraints, sentConstraints: wireGoalConstraints(g.goal_constraints) } as never);
+  return licence as Rec;
 };
+const targetsOf = (l: Rec): { joint: Rec; per_target: Rec[] } => l.targets as { joint: Rec; per_target: Rec[] };
 
 describe('a joint over the goal keeps the status-quo reading as it was, with or without an event risk on the goal', () => {
   it('precondition: with no risk, the joint and the primary target leave carrying on out (no unearned exact 100%)', () => {
     const l = jointLicence(false);
-    expect(l.targets.joint.status).toBe('licensed');
-    expect(l.targets.joint.pct_by_option).not.toHaveProperty('carry_on');
-    expect((l.targets.per_target as Rec[]).find((t) => t.constraint_id === 'target:new_customers')!.pct_by_option).not.toHaveProperty('carry_on');
+    expect(targetsOf(l).joint.status).toBe('licensed');
+    expect(targetsOf(l).joint.pct_by_option).not.toHaveProperty('carry_on');
+    expect(targetsOf(l).per_target.find((t) => t.constraint_id === 'target:new_customers')!.pct_by_option).not.toHaveProperty('carry_on');
   });
 
   it('an event risk reaching the primary goal changes nothing in the joint: carrying on stays out, exactly as without it', () => {
     const withRisk = jointLicence(true);
-    expect(withRisk.targets.joint.pct_by_option).not.toHaveProperty('carry_on');
-    expect((withRisk.targets.per_target as Rec[]).find((t) => t.constraint_id === 'target:new_customers')!.pct_by_option)
+    expect(targetsOf(withRisk).joint.pct_by_option).not.toHaveProperty('carry_on');
+    expect(targetsOf(withRisk).per_target.find((t) => t.constraint_id === 'target:new_customers')!.pct_by_option)
       .not.toHaveProperty('carry_on');
     expect(withRisk.targets).toEqual(jointLicence(false).targets);
     expect(withRisk.withheld_option_ids).toEqual(jointLicence(false).withheld_option_ids);
