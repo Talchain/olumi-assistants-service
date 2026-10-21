@@ -54,6 +54,18 @@ function streamTerminal(text: string): { usage?: unknown; model?: unknown; statu
   return undefined;
 }
 
+/**
+ * Whether a Responses SSE stream carried the provider's own `error` event (a refusal such as exhausted credits or a server
+ * error). That is an answer, so its delivery is known; only a stream that simply stops leaves delivery unknown.
+ */
+function streamCarriedError(sse: string): boolean {
+  return sse.split('\n').some((line) => {
+    if (line.trim() === 'event: error') return true;
+    if (!line.startsWith('data:')) return false;
+    try { return (JSON.parse(line.slice(5).trim()) as { type?: unknown }).type === 'error'; } catch { return false; }
+  });
+}
+
 /** The SDK's client with the ledger on its fetch. Make one per turn: the ledger is the request's. */
 export function ledgeredAgentsClient(ledger: AgentsClientLedger): OpenAI {
   if (!isProviderAllowed('openai')) throw new ForbiddenProviderError('openai', currentProviderPolicy()?.route ?? 'unknown', ledger.site);
@@ -90,7 +102,7 @@ export function ledgeredAgentsClient(ledger: AgentsClientLedger): OpenAI {
         const done = streamTerminal(text);
         if (done === undefined) {
           recordProviderAttempt(handle, { transport_status: r.status, result: 'stream_without_terminal_event', outcome: 'invalid_response', retry: false });
-          if (ledger.conversationBound) ledger.onDeliveryUnknown?.(new Error('Conversation response ended without a terminal event'));
+          if (ledger.conversationBound && !streamCarriedError(text)) ledger.onDeliveryUnknown?.(new Error('Conversation response ended without a terminal event'));
           return;
         }
         recordProviderUsage(handle, done.usage);

@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { read } from './fixtures.js';
+import { streamWhenAsked } from '../../../agent-lane/__tests__/stream-when-asked.js';
 
 const conversations = new Map<string, string>();
 const rows = new Map<string, Record<string, unknown>>();
@@ -27,7 +28,7 @@ describe('L22: path B records the declared tool arguments without changing outco
   let toolOutput: string | undefined;
   const reply = 'That factor is not available in this model; please identify the factor you mean.';
   beforeAll(async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
+    vi.stubGlobal('fetch', vi.fn(streamWhenAsked(async (url: unknown, init?: { body?: unknown }) => {
       if (String(url).endsWith('/v1/conversations')) return Response.json({ id: 'conv_trace', object: 'conversation' });
       const request = JSON.parse(String(init?.body ?? '{}')) as { input?: { type: string; call_id?: string; output?: string }[] };
       toolOutput = request.input?.find((i) => i.type === 'function_call_output' && i.call_id === 'declared')?.output ?? toolOutput;
@@ -37,7 +38,7 @@ describe('L22: path B records the declared tool arguments without changing outco
         : [{ id: 'msg_final', type: 'message', status: 'completed', role: 'assistant', content: [{ type: 'output_text', text: reply, annotations: [] }] }];
       return Response.json({ id: `resp_${step}`, object: 'response', model: 'gpt-scripted', status: 'completed', output,
         usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15, input_tokens_details: { cached_tokens: 0 }, output_tokens_details: { reasoning_tokens: 0 } } });
-    }));
+    })));
     vi.resetModules();
     process.env.AGENT_LANE_ENABLED = 'true'; process.env.AGENT_LANE_PREVIEW = 'false';
     const { agentV1TurnRoute } = await import('../../../../routes/agent-v1-turn.js');

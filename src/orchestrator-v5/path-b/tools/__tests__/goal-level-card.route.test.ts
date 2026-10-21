@@ -20,6 +20,7 @@ import { userStatementOf } from '../../../agent-lane/user-statements.js';
 import { claimRecordFor, CONSTRUCTION_ATTEST, userStatementRecord } from '../../../statement-door/statements.js';
 import { subjectKey, type DoorSubject } from '../../../statement-door/subject.js';
 import { approvalChipIdFor } from '../../../agent-lane/approval-chips.js';
+import { streamWhenAsked } from '../../../agent-lane/__tests__/stream-when-asked.js';
 
 type Json = Record<string, any>;
 let SCENARIO = '';
@@ -133,13 +134,14 @@ describe('PATH-B: the goal’s current level, typed as a correction, shows its c
   let calls: Json[] = [];
   let outputs: Json[][] = [];
   beforeAll(async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
+    vi.stubGlobal('fetch', vi.fn(streamWhenAsked(async (url: unknown, init?: { body?: unknown }) => {
       if (String(url).endsWith('/v1/conversations')) return json({ id: 'conv_level', object: 'conversation' });
       calls.push(JSON.parse(String(init?.body ?? '{}')) as Json);
       const output = outputs.shift() ?? [{ type: 'message', text: 'Done.' }];
       if (output[0]?.type === 'provider_failure') return json({ error: { message: 'Scripted continuation failed', type: 'invalid_request_error' } }, 400);
+      if (output[0]?.type === 'transport_loss') throw new TypeError('fetch failed');
       return json(responsesBody(output));
-    }));
+    })));
     vi.resetModules();
     process.env.AGENT_LANE_ENABLED = 'true';
     process.env.AGENT_LANE_PREVIEW = 'false';
@@ -602,6 +604,27 @@ describe('PATH-B: the goal’s current level, typed as a correction, shows its c
     const claims = (persisted.nodes as Json[]).find(n => n.id === 'orders')!.user_statements.flatMap((r: Json) => r.statements);
     expect(claims.filter((s: Json) => s.quote === quote)).toHaveLength(1);
     expect(claims.find((s: Json) => s.quote === quote)).toMatchObject({ said_by: 'user', low: value, high: value, source: words });
+  });
+
+  it("Paul's served test (21 Oct, 31711a9): a lost transport is delivery UNKNOWN: nothing written, never resent, the claim kept, and a resend replays the honest answer", async () => {
+    const turnId = randomUUID();
+    const payload = { turn_id: turnId, message: 'What would change the comparison most?', source: 'composer' };
+    calls.length = 0;
+    outputs = [[{ type: 'transport_loss' }]];
+    const failed = await post(payload);
+    expect(failed.statusCode, failed.body).toBe(502);
+    expect(failed.json()).toMatchObject({ nothing_saved: true, save_outcome: 'VERIFIED_NO_WRITE', provider_delivery: 'unknown', retry_safe: false });
+    expect(calls, 'never resent into a Conversation the provider may still hold').toHaveLength(1);
+    expect(turnRows.get(turnId)?.assistant_message).toBe('The reply didn’t arrive. Any changes already saved are kept. Send a new message to continue.');
+    const replay = await post(payload);
+    expect(replay.statusCode, replay.body).toBe(200);
+    expect((replay.json() as Json).assistant_text).toBe('The reply didn’t arrive. Any changes already saved are kept. Send a new message to continue.');
+    expect(calls, 'the resend replays the answer: no second provider call').toHaveLength(1);
+    // CONTRAST: a provider refusal is an HTTP answer, so its delivery is known (the claim release is the capacity spec's row).
+    outputs = [[{ type: 'provider_failure' }]];
+    const refused = await post({ ...payload, turn_id: randomUUID() });
+    expect(refused.json()).toMatchObject({ save_outcome: 'VERIFIED_NO_WRITE' });
+    expect(refused.json()).not.toHaveProperty('provider_delivery');
   });
 
   it('L2 unknown save: dispatched registration without its receipt never becomes verified saved on failure or replay', async () => {

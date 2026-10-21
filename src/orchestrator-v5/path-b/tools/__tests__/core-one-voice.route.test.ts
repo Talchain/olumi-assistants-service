@@ -16,6 +16,7 @@ import { withCanonicalAnalysisView } from '../../../agent-lane/__tests__/fixture
 import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import { projectGraphForPersistence } from '../../../persisted-graph-projection.js';
 import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
+import { streamWhenAsked } from '../../../agent-lane/__tests__/stream-when-asked.js';
 
 type Json = Record<string, any>;
 let SCENARIO = '';
@@ -152,12 +153,12 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
   let calls: Json[] = [];
   let outputs: Json[][] = [];
   beforeAll(async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
+    vi.stubGlobal('fetch', vi.fn(streamWhenAsked(async (url: unknown, init?: { body?: unknown }) => {
       if (String(url).endsWith('/v1/conversations')) return json({ id: 'conv_voice', object: 'conversation' });
       calls.push(JSON.parse(String(init?.body ?? '{}')) as Json);
       if (holdProvider !== undefined) { const hold = holdProvider; holdProvider = undefined; await hold; }
       return json(responsesBody(outputs.shift() ?? [{ type: 'message', text: ANSWER }]));
-    }));
+    })));
     vi.resetModules();
     process.env.AGENT_LANE_ENABLED = 'true';
     process.env.AGENT_LANE_PREVIEW = 'false';

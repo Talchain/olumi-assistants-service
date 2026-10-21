@@ -18,6 +18,7 @@ import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { createHash } from 'node:crypto';
 import { graph as fixtureGraph } from '../../path-b/tools/__tests__/fixtures.js';
 import { USER_TODAY_SOURCE } from '../../routing/add-factor-transaction.js';
+import { streamWhenAsked } from './stream-when-asked.js';
 
 type Json = Record<string, any>;
 /** A fresh scenario per row: a proposal's id is its content (scenario, user, base, operations), so rows never share one. */
@@ -120,11 +121,11 @@ describe('PATH-B gap 2: a new factor the person states is prepared on a card in 
   let calls: Json[] = [];
   let outputs: Json[][] = [];
   beforeAll(async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
+    vi.stubGlobal('fetch', vi.fn(streamWhenAsked(async (url: unknown, init?: { body?: unknown }) => {
       if (String(url).endsWith('/v1/conversations')) return json({ id: 'conv_add', object: 'conversation' });
       calls.push(JSON.parse(String(init?.body ?? '{}')) as Json);
       return json(responsesBody(outputs.shift() ?? [{ type: 'message', text: 'Done.' }]));
-    }));
+    })));
     vi.resetModules();
     process.env.AGENT_LANE_ENABLED = 'true';
     process.env.AGENT_LANE_PREVIEW = 'false';

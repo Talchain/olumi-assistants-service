@@ -91,10 +91,10 @@ describe('A provider capacity or credit refusal is PROVIDER_CAPACITY at the rout
   beforeEach(() => { rows.clear(); providerCalls = 0; });
 
   /** One typed turn, as the composer sends it; streamed through the stage-stream context when asked. */
-  const turn = async (headers: Record<string, string>, streamed: boolean) => {
+  const turn = async (headers: Record<string, string>, streamed: boolean, turnId: string = randomUUID()) => {
     // Awaited INSIDE the context: `inject` dispatches only when awaited, so a bare chain would run outside the stream.
     const send = async () => await app.inject({ method: 'POST', url: '/agent/v1/turn', headers, payload: {
-      kind: 'message', turn_id: randomUUID(), scenario_id: SCENARIO, stage: 'frame', turn_class: 'frame',
+      kind: 'message', turn_id: turnId, scenario_id: SCENARIO, stage: 'frame', turn_class: 'frame',
       message: 'Correction: the weekly figure is a little lower than I said.', source: 'composer' } });
     const r = streamed ? await runWithStageStream(() => {}, send) : await send();
     return { status: r.statusCode, body: r.json() as Json };
@@ -119,6 +119,23 @@ describe('A provider capacity or credit refusal is PROVIDER_CAPACITY at the rout
     expect(body.detail, 'the same provider refusal the served turn carried').toBe(CAPTURED.openai_lane_response.detail);
     expect(body).toEqual({ error: 'UPSTREAM_ERROR', detail: CAPTURED.openai_lane_response.detail,
       _provider_calls: expect.any(Array), retry_safe: true });
+  });
+
+  it("Paul's served test (21 Oct, 31711a9): a lost transport keeps the turn's claim (delivery unknown), where a provider answer releases it", async () => {
+    provider = () => { throw new TypeError('fetch failed'); };
+    const id = randomUUID();
+    const { status, body } = await turn(CORE, false, id);
+    expect(status).toBe(502);
+    expect(body).toMatchObject({ nothing_saved: true, save_outcome: 'VERIFIED_NO_WRITE', provider_delivery: 'unknown', retry_safe: false });
+    expect(providerCalls, 'never resent automatically').toBe(1);
+    expect(rows.has(id), 'the claim is kept').toBe(true);
+    // CONTRAST: the provider answered (a server error), so its delivery is known and the claim is released.
+    provider = () => serverErrorStream();
+    const other = randomUUID();
+    const answered = await turn(CORE, false, other);
+    expect(answered.body).toMatchObject({ retry_safe: true });
+    expect(answered.body).not.toHaveProperty('provider_delivery');
+    expect(rows.has(other)).toBe(false);
   });
 
   it('⛔ CONTRAST: a provider fault that is not capacity stays UPSTREAM_ERROR and keeps the UI\'s own retry rule', async () => {

@@ -10,6 +10,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { streamWhenAsked } from '../../../agent-lane/__tests__/stream-when-asked.js';
 
 type Json = Record<string, any>;
 const READ = (JSON.parse(readFileSync(new URL('../../../agent-lane/__tests__/fixtures/waveB9-unseen1-df15c8c-readback-pre-challenge.json', import.meta.url), 'utf8')) as { j: Json }).j;
@@ -64,14 +65,14 @@ describe('LINK STRENGTH: a core turn’s band for a link reaches the existing ca
   const sent: string[] = [];
   let outputs: Record<string, unknown>[][] = [];
   beforeAll(async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
+    vi.stubGlobal('fetch', vi.fn(streamWhenAsked(async (url: unknown, init?: { body?: unknown }) => {
       if (String(url).endsWith('/v1/conversations')) return new Response(JSON.stringify({ id: 'conv_link', object: 'conversation' }), { status: 200, headers: { 'content-type': 'application/json' } });
       const runCall = runPressToolResponse(JSON.parse(String(init?.body ?? '{}')));
       if (runCall) return runCall;
       sent.push(typeof init?.body === 'string' ? init.body : '');
       const output = outputs.shift() ?? [{ type: 'message', content: [{ type: 'output_text', text: 'Done.' }] }];
       return new Response(JSON.stringify(responsesBody(output)), { status: 200, headers: { 'content-type': 'application/json' } });
-    }));
+    })));
     vi.resetModules();
     process.env.AGENT_LANE_ENABLED = 'true';
     process.env.AGENT_LANE_PREVIEW = 'false';

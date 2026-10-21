@@ -12,10 +12,11 @@ import { z as z4 } from 'zod-v4';
 import { ForbiddenProviderError, OPENAI_ONLY, recordedProviderCalls, runWithProviderPolicy } from '../../../adapters/llm/provider-policy.js';
 import { ledgeredAgentsClient } from '../../../adapters/llm/openai-agents-client.js';
 import { runWithStageStream } from '../../../cee/unified-pipeline/stage-stream-context.js';
-import { acquireCoreTurnSlot, AGENTS_SDK, CORE_COMPACT_THRESHOLD, CoreStateUnavailableError, PAUSE_DECLINED, PAUSE_SUPERSEDED, replyOnlyTurn, runCoreTurn, type ConversationIdStore, type CoreToolRecorder, type PausedRunStore } from '../core/sdk-turn.js';
+import { acquireCoreTurnSlot, AGENTS_SDK, CoreDeliveryUnknownError, CORE_COMPACT_THRESHOLD, CoreStateUnavailableError, PAUSE_DECLINED, PAUSE_SUPERSEDED, replyOnlyTurn, runCoreTurn, type ConversationIdStore, type CoreToolRecorder, type PausedRunStore } from '../core/sdk-turn.js';
 import type { OpenAiPausedRun } from '../../session/store.js';
 import { budgetFor, type CallBudget } from '../model-budgets.js';
 import type { AgentToolContext } from '../runtime/agent-tools.js';
+import { streamWhenAsked } from './stream-when-asked.js';
 
 type Json = Record<string, any>;
 const PID = `prop_${'a'.repeat(32)}`;
@@ -48,14 +49,14 @@ const body = (output: Json[]): Json => {
 };
 beforeEach(() => {
   scripted = []; sent.length = 0; created.length = 0; column = new Map();
-  vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
+  vi.stubGlobal('fetch', vi.fn(streamWhenAsked(async (url: unknown, init?: { body?: unknown }) => {
     if (String(url).endsWith('/v1/conversations')) {
       created.push(JSON.parse(String(init?.body ?? '{}')) as Json);
       return new Response(JSON.stringify({ id: `conv_${created.length}`, object: 'conversation' }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
     sent.push(JSON.parse(String(init?.body ?? '{}')) as Json);
     return new Response(JSON.stringify(body(scripted.shift() ?? [{ type: 'message', text: 'Noted.' }])), { status: 200, headers: { 'content-type': 'application/json' } });
-  }));
+  })));
 });
 afterEach(() => { vi.unstubAllGlobals(); });
 
@@ -118,7 +119,7 @@ describe('PATH-B core turn on the Agents SDK', () => {
       });
       return out + ev({ type: 'response.completed', response: resp });
     };
-    vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
+    vi.stubGlobal('fetch', vi.fn(streamWhenAsked(async (url: unknown, init?: { body?: unknown }) => {
       if (String(url).endsWith('/v1/conversations')) {
         return new Response(JSON.stringify({ id: 'conv_s', object: 'conversation' }), { status: 200, headers: { 'content-type': 'application/json' } });
       }
@@ -128,7 +129,7 @@ describe('PATH-B core turn on the Agents SDK', () => {
       return req.stream === true
         ? new Response(sse(resp), { status: 200, headers: { 'content-type': 'text/event-stream' } })
         : new Response(JSON.stringify(resp), { status: 200, headers: { 'content-type': 'application/json' } });
-    }));
+    })));
     scripted = [[{ type: 'function_call', name: 'read_canonical_context', args: {} }], [{ type: 'message', text: 'The model is empty.' }]];
     const frames: Json[] = [];
     const { result, calls } = await runWithStageStream((e) => { frames.push(e as Json); }, () => turn('What is in my model?', caps()));
@@ -137,10 +138,12 @@ describe('PATH-B core turn on the Agents SDK', () => {
     expect(result.tool_calls.map((t) => t.name)).toEqual(['read_canonical_context']);
     expect(frames.filter((f) => f.kind === 'PROGRESS').map((f) => f.phase), 'writing once, when the words arrive').toEqual(['writing']);
     expect(calls.map((c) => [c.attempt?.outcome, c.returned_model])).toEqual([['success', RETURNED_MODEL], ['success', RETURNED_MODEL]]);
-    // Contrast: the buffered entry runs the same turn unstreamed and shows no frame.
-    sent.length = 0; scripted = [[{ type: 'message', text: 'Buffered.' }]];
-    await turn('What is in my model?', caps());
-    expect(sent.map((b) => b.stream ?? false)).toEqual([false]);
+    // The buffered entry streams too (#3594: a Conversation call never sits idle on a buffered transport), with no frame.
+    sent.length = 0; scripted = [[{ type: 'message', text: 'Buffered.' }]]; frames.length = 0;
+    const buffered = await turn('What is in my model?', caps());
+    expect(sent.map((b) => b.stream ?? false)).toEqual([true]);
+    expect(buffered.result.assistant_text).toBe('Buffered.');
+    expect(frames).toEqual([]);
   });
 
   it('TRACE: the SDK\'s own trace carries the prompt, model, Conversation, revision and Run; each tool call is a native span', async () => {
@@ -220,20 +223,28 @@ describe('PATH-B core turn on the Agents SDK', () => {
     expect(sent).toHaveLength(0);
   });
 
-  it('a failed attempt the SDK client resends is marked retried; the resend is its own row with the returned model', async () => {
-    let first = true;
-    vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
-      if (String(url).endsWith('/v1/conversations')) return new Response(JSON.stringify({ id: 'conv_r', object: 'conversation' }), { status: 200, headers: { 'content-type': 'application/json' } });
-      sent.push(JSON.parse(String(init?.body ?? '{}')) as Json);
-      if (first) { first = false; return new Response(JSON.stringify({ error: { message: 'busy' } }), { status: 500, headers: { 'content-type': 'application/json', 'retry-after-ms': '1' } }); }
-      return new Response(JSON.stringify(body([{ type: 'message', text: 'Recovered.' }])), { status: 200, headers: { 'content-type': 'application/json' } });
-    }));
-    const { result, calls } = await turn('A synthetic question.', caps());
-    expect(result.assistant_text).toBe('Recovered.');
-    expect(sent).toHaveLength(2);
-    expect(calls.map((c) => [c.attempt?.outcome, c.attempt?.retry, c.returned_model ?? null])).toEqual([
-      ['http_error', true, null], ['success', false, RETURNED_MODEL]]);
-    expect(calls[0]!.input_sha256).toBe(calls[1]!.input_sha256);
+  it("Paul's served test (21 Oct, 31711a9): a Conversation call is never resent; a lost transport ends the turn as delivery UNKNOWN, never a locked-conversation retry", async () => {
+    const reply = (status: number, b: Json) => new Response(JSON.stringify(b), { status, headers: { 'content-type': 'application/json', 'retry-after-ms': '1' } });
+    const conv = (url: unknown) => String(url).endsWith('/v1/conversations') ? reply(200, { id: 'conv_r', object: 'conversation' }) : undefined;
+    // A server error on a Conversation call: one attempt, no resend, the provider's error.
+    vi.stubGlobal('fetch', vi.fn(streamWhenAsked(async (url: unknown, init?: { body?: unknown }) => conv(url)
+      ?? (sent.push(JSON.parse(String(init?.body ?? '{}')) as Json), reply(500, { error: { message: 'busy' } })))));
+    await expect(turn('A synthetic question.', caps())).rejects.toMatchObject({ status: 500 });
+    expect(sent, 'never resent').toHaveLength(1);
+    // A lost transport (the served case: a TypeError at 110 s): one attempt, no resend, delivery UNKNOWN, not retry-safe.
+    sent.length = 0;
+    vi.stubGlobal('fetch', vi.fn(streamWhenAsked(async (url: unknown, init?: { body?: unknown }) => conv(url)
+      ?? (() => { sent.push(JSON.parse(String(init?.body ?? '{}')) as Json); throw new TypeError('fetch failed'); })())));
+    const lost = await turn('A synthetic question.', caps()).then(() => undefined, (e: unknown) => e);
+    expect(lost).toBeInstanceOf(CoreDeliveryUnknownError);
+    expect(lost).toMatchObject({ code: 'CORE_DELIVERY_UNKNOWN', delivery_outcome: 'UNKNOWN', retry_safe: false });
+    expect(sent, 'never resent into a Conversation the provider may still hold').toHaveLength(1);
+    // CONTRAST: a stateless call (no Conversation, e.g. the critic) keeps the client's native retry.
+    let attempts = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => (attempts += 1) === 1 ? reply(500, { error: { message: 'busy' } }) : reply(200, body([{ type: 'message', text: 'ok' }]))));
+    await runWithProviderPolicy(OPENAI_ONLY('agent_v1_turn'), () => ledgeredAgentsClient({ site: 'critic', detailOf: () => ({ model: 'gpt-6.1-sol', purpose: 'critic' }) as never })
+      .responses.create({ model: 'gpt-6.1-sol', input: 'x' }));
+    expect(attempts, 'the stateless call is resent once after a 500').toBe(2);
   });
 
   it('zod isolation: the SDK and the adapters share ONE zod 4 (`zod-v4`); the service stays on zod 3; a zod schema is the tool\'s schema', () => {

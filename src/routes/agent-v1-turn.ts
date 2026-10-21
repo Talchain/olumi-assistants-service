@@ -84,7 +84,7 @@ import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { runOmittedRisks, type RunOmittedRisk } from '../orchestrator-v5/agent-lane/unsized-risk.js';
 import { drawnLinkPress, isDrawnLinkPress } from '../orchestrator-v5/agent-lane/drawn-link-press.js';
 import { answerIsIncomplete, heldChangeSentence, runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
-import { acquireCoreTurnSlot, CoreStateUnavailableError, runCoreTurn, type CoreTurnSdk } from '../orchestrator-v5/agent-lane/core/sdk-turn.js';
+import { acquireCoreTurnSlot, CoreDeliveryUnknownError, CoreStateUnavailableError, runCoreTurn, type CoreTurnSdk } from '../orchestrator-v5/agent-lane/core/sdk-turn.js';
 import { pathBTools } from '../orchestrator-v5/path-b/tools/index.js';
 import { APPLY_CHANGE, isChangeProposal } from '../orchestrator-v5/path-b/tools/change-tools.js';
 import { legacyFromRead, livingViewOf } from '../orchestrator-v5/path-b/living-model/view.js';
@@ -4689,10 +4689,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       } else {
         // No possible writes remain: release the claim, so a retry of the SAME
         // turn_id can run. Earlier writes or unknown outcomes keep the claim.
-        const released = await releaseUnwrittenTurnClaim();
+        // A core call whose provider delivery is unknown (#3594; Paul's served test, 31711a9: a transport loss, then a resend
+        // into a Conversation the provider still held) keeps it too: Olumi wrote nothing, but the call may still be running.
+        const deliveryUnknown = mode === 'core' && err instanceof CoreDeliveryUnknownError;
+        const released = deliveryUnknown ? false : await releaseUnwrittenTurnClaim();
         // A possible save keeps its claim. Record the failed continuation as an ordinary answer so a resend
         // reads current state immediately; the persistence floor carries the latest held cards, including concurrent offers.
-        if (mode === 'core' && !released && writesDispatched > 0 && claimAppendSucceeded && turnId !== undefined) {
+        if (mode === 'core' && !released && (writesDispatched > 0 || deliveryUnknown) && claimAppendSucceeded && turnId !== undefined) {
           try {
             await appendCheckedGraphWrite({
               store, writesGraph: false, source: 'agent_turn',
@@ -4731,6 +4734,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ...(mode === 'core' ? {
             ...providerFailureOf(err), nothing_saved: writesDispatched === 0,
             save_outcome: verifiedSave ? 'VERIFIED_SAVED' : writesDispatched === 0 ? 'VERIFIED_NO_WRITE' : 'UNKNOWN',
+            // Olumi's writes above are known; whether the provider received the call is not.
+            ...(deliveryUnknown ? { provider_delivery: 'unknown' } : {}),
           } : { error: 'UPSTREAM_ERROR' }),
           detail: String(err).slice(0, 300),
           _provider_calls: recordedProviderCalls(),
