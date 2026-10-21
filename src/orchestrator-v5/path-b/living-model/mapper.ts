@@ -200,6 +200,28 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   // Joint goals are not in this slice: every other current aim with a target is kept in the living model, withheld here.
   for (const a of model.aims) if (a !== aim && a.status === 'current' && a.target !== null) hold(a.id, 'aim_not_in_slice');
 
+  // ── A mitigation's own effect ("dual-sourcing cuts that chance by 70% and costs £1k a month"). ISL's preventer is a switch
+  // for its risk only (EVENT_RISK_PREVENTER_HAS_OTHER_CHILDREN), so a CLEAN switch's other links (one risk's, unitless, 0
+  // today, set only to 0 or 1, no cause of its own) are said of the ONE option that switches it on, and reach the engine by
+  // the option's own route below: the same effect on the same draws, under the link's own id. A switch two options turn on
+  // stays as it is (split per option, the cost would be drawn separately for each, changing their comparison), as does one
+  // that is not clean or whose option already says its own effect on the same item: its risk is refused by name below
+  // (`risk_not_in_slice`). All of a switch's links move, or none.
+  const effectsOf = (id: string) => model.links.filter((l) => l.from === id && !model.risks.some((r) => r.id === l.to));
+  const movesTo = (id: string): string | undefined => {
+    const f = model.factors.find((x) => x.id === id);
+    const on = model.options.filter((o) => o.settings.some((s) => s.factor_id === id && s.value === 1));
+    const clean = f !== undefined && f.unit === null && f.value === 0 && !model.links.some((l) => l.to === id)
+      && model.risks.filter((r) => r.mitigations.some((m) => m.factor_id === id)).length === 1
+      && model.options.every((o) => o.settings.every((s) => s.factor_id !== id || s.value === 0 || s.value === 1));
+    return clean && on.length === 1 && effectsOf(id).every((l) => !model.links.some((x) => x.from === on[0]!.id && x.to === l.to)) ? on[0]!.id : undefined;
+  };
+  const moved = new Map(model.risks.flatMap((r) => r.mitigations.map((m) => [m.factor_id, movesTo(m.factor_id)] as const))
+    .filter((e): e is readonly [string, string] => e[1] !== undefined && effectsOf(e[0]).length > 0));
+  if (moved.size > 0) {
+    model = { ...model, links: model.links.map((l) => (moved.has(l.from) && effectsOf(l.from).includes(l) ? { ...l, from: moved.get(l.from)! } : l)) };
+  }
+
   // ── An option's own effect on the goal becomes a factor the options set (see the header). Same ids, same attribution.
   const optionIds = new Set(model.options.map((o) => o.id));
   const direct = goal === undefined ? [] : model.links.filter((l) => optionIds.has(l.from) && l.to === goal!.id);

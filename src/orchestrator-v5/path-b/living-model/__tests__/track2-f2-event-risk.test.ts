@@ -22,8 +22,8 @@ import { applyKernel } from '../kernel.js';
 import { mapLivingModel } from '../mapper.js';
 import { KNOWN_ANSWER } from './fixtures.js';
 import {
-  CASCADE, CERTAIN_WITHIN_WINDOW, HALF_MITIGATION, NO_CHANCE, NO_WINDOW, OLUMI_CHANCE, OLUMI_MITIGATION, PERCENT_PREVENTER, SHARED_PREVENTER,
-  UNATTRIBUTED, UNVERIFIED_MITIGATION, supplier,
+  CASCADE, CERTAIN_WITHIN_WINDOW, COSTED_HALF_SWITCH, COSTED_SWITCH, COSTED_SWITCH_IN_PLACE, COSTED_SWITCH_TWO_OPTIONS, HALF_MITIGATION, NO_CHANCE, NO_WINDOW, OLUMI_CHANCE, OLUMI_MITIGATION,
+  PERCENT_PREVENTER, SHARED_PREVENTER, UNATTRIBUTED, UNVERIFIED_MITIGATION, supplier,
 } from './track2-f2-event-risk.fixtures.js';
 
 type Rec = Record<string, any>;
@@ -148,6 +148,44 @@ describe('Track 2 F2: an event risk reaches the engine as event_risk.v1, with it
     expect(reasons(HALF_MITIGATION)).toEqual(expect.arrayContaining(['supplier_fails:risk_not_in_slice', 'gp:chance_rests_on_withheld']));
     await noChanceSent('cascade', CASCADE, 'ORPHAN_NODE');
     await noChanceSent('half-mitigation', HALF_MITIGATION, 'NO_PATH_TO_GOAL');
+  });
+
+  // Served re-run (CEE 997f7a15): the drafter said the cost of the mitigation itself, and the whole risk was refused.
+  it('a mitigation that costs money keeps its risk: the cost reaches the goal through the option, and the chance is sent', async () => {
+    expect(reasons(COSTED_SWITCH)).toEqual([]);
+    // The same engine graph as the cost said of the option, whose chain gives 0.9159 / 0.9732 (the analytic answer above).
+    expect(mapLivingModel(COSTED_SWITCH).graph).toEqual(mapLivingModel(supplier('point')).graph);
+    const r = await requestTheRunSends('costed-switch', COSTED_SWITCH);
+    expect(node(r, 'supplier_fails')).toMatchObject({ kind: 'risk', event_risk: { mitigations: [{ factor_id: 'dual_sourcing', occurrence_reduction: 0.7 }] } });
+    expect((r.graph.edges as Rec[]).filter((e) => e.from === 'dual_sourcing').map((e) => e.to)).toEqual(['supplier_fails']);
+    expect((r.graph.edges as Rec[]).find((e) => e.from === 'dual_source__on' && e.to === 'gp')).toMatchObject({
+      provenance: { source: 'brief_extraction', natural_effect: { amount: -1000 } } });
+    expect(node(r, r.goal_node_id)).toMatchObject({ goal_direction: '>=', goal_threshold_raw: 12000 });
+  });
+
+  // Codex r1/r2 item 4: drawn from the option's switch, the cost is still the person's to change on the canvas (#3557).
+  it('the cost said of the mitigation stays editable: a gesture on its drawn edge reaches the stored link', () => {
+    const drawn = { from: 'dual_source__on', to: 'gp' };
+    const strength = applyExplicitEdit(COSTED_SWITCH, { kind: 'edge_strength_edit', ...drawn, magnitude: 0.1, direction_intent: 'preserve' });
+    if (!('model' in strength)) throw new Error(`refused: ${strength.refused}`);
+    expect(strength.model.links.find((l) => l.id === 'cost_gp')).toMatchObject({ from: 'dual_sourcing', to: 'gp', source: 'user', effect: { sign: '-' } });
+    const del = applyExplicitEdit(COSTED_SWITCH, { kind: 'structural_delete', removed_node_ids: [], removed_edges: [drawn] });
+    if (!('model' in del)) throw new Error(`refused: ${del.refused}`);
+    expect(del.model.links.map((l) => l.id)).toEqual(['fails_gp']);
+    expect(mapLivingModel(del.model).graph.edges.some((e) => e.from === drawn.from)).toBe(false);
+  });
+
+  it('CONTROL: a costed switch that is not a clean 0/1 step keeps its link, and its risk is refused by name, as before', async () => {
+    for (const [name, m] of [['costed-half-switch', COSTED_HALF_SWITCH], ['costed-switch-in-place', COSTED_SWITCH_IN_PLACE],
+      ['costed-switch-two-options', COSTED_SWITCH_TWO_OPTIONS]] as const) {
+      expect(reasons(m), name).toEqual(expect.arrayContaining(['supplier_fails:risk_not_in_slice', 'gp:chance_rests_on_withheld']));
+      const graph = mapLivingModel(m).graph;
+      expect((graph.edges as Rec[]).find((e) => e.id === 'cost_gp'), name).toMatchObject({ from: 'dual_sourcing', to: 'gp' });
+      expect((graph.nodes as Rec[]).map((n) => n.id), name).not.toContain('dual_source__on');
+      expect((graph.nodes as Rec[]).find((n) => n.kind === 'goal'), name).not.toHaveProperty('goal_threshold_raw');
+    }
+    // In place today, both options set the same level, so the Run is refused before PLoT whatever this rule does.
+    await noChanceSent('costed-half-switch', COSTED_HALF_SWITCH, 'sent');
   });
 
   it('POSITIVE CONTROL: the Batch 0 known answer, with no risks, keeps its threshold (the chain can show a chance)', async () => {
