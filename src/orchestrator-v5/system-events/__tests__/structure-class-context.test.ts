@@ -13,6 +13,7 @@ import { KNOWN_ANSWER } from '../../path-b/living-model/__tests__/fixtures.js';
 import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { decisionInputLines } from '../../agent-lane/decision-input-ask.js';
 import { buildAnalysisSubmissionDisclosure } from '../../coaching/scaffold-disclosure.js';
+import { contextNodeIds } from '../../../orchestrator/graph-structure-validator.js';
 import { NO_CHANCE } from '../../path-b/living-model/__tests__/track2-f2-event-risk.fixtures.js';
 
 const append = vi.fn();
@@ -85,6 +86,19 @@ describe('context: an item with no path to the goal is kept, said, and never blo
     expect(codes(g)).toContain('NO_PATH_TO_GOAL');
     expect(assessCanonicalAnalysisReadiness(g).submission!.gate.excluded.filter((e) => e.reason === 'no_path_to_goal')).toEqual([]);
     expect(decisionInputLines(g, AT, { onlyRiskKind: ['inert', 'context'] }).filter((l) => l.includes('isn\'t connected'))).toEqual([]);
+  });
+
+  it('buddy SIMPLER on #3584: an item linked only to ANOTHER aim (not the goal this Run evaluates) is context for this Run', () => {
+    const lm: LM = structuredClone(KNOWN_ANSWER);
+    lm.aims.push({ ...structuredClone(lm.aims[0]!), id: 'g2', text: 'Keep the team happy', target: null, quote: null });
+    lm.factors.push({ kind: 'factor', limit: null, id: 'office', label: 'Office move', value: 0.5, low: null, high: null, unit: null, defined_as: null, source: 'user', party: null, quote: null });
+    lm.links.push({ id: 'office_g2', from: 'office', to: 'g2', source: 'user', party: null, quote: null,
+      effect: { form: 'normal', value: 1, sd: 0.5, low: null, high: null, unit: null, sign: '+' } });
+    const g = stored(lm);
+    expect((g.nodes as Rec[]).find((n) => n.kind === 'goal')!.id, 'the Run evaluates g').toBe('g');
+    expect(contextNodeIds(g as never).has('office')).toBe(true);
+    expect(codes(g)).not.toContain('ORPHAN_NODE');
+    expect(codes(g)).not.toContain('NO_PATH_TO_GOAL');
   });
 
   it('CONTRAST A: a factor that IS on a path to the goal but has no level still blocks as a missing level', async () => {

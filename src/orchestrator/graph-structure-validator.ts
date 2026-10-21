@@ -662,7 +662,9 @@ export function reachesGoalInPersonsModel(graph: GoalPathGraph): Set<string> {
     ...list(lm.risks).flatMap((r) => list(r.mitigations).map((x) => ({ from: x.factor_id, to: r.id }))),
     ...[...list(lm.aims), ...list(lm.factors)].flatMap((x) => list(x.defined_as?.of).map((part) => ({ from: part, to: x.id }))),
   ];
-  for (const id of reachableNodeIds(edges, list(lm.aims).map((a) => a.id), true)) reach.add(id);
+  // Only the aim this Run evaluates (the drawn goal carries its id): an item reaching only another aim is context here.
+  const evaluated = list(lm.aims).map((a) => a.id).filter((id) => goals.includes(id));
+  for (const id of reachableNodeIds(edges, evaluated, true)) reach.add(id);
   return reach;
 }
 
