@@ -229,6 +229,14 @@ describe('thin core mapper: living model → GraphV3', () => {
     expect((mapLivingModel(olumis).graph.nodes as Rec[]).find((x) => x.id === 'w')!.nonlinear_identity).toBeUndefined();
   });
 
+  it('R2 P01/P07 (46d30e6e): with no option at today\'s levels, every option is still emitted and nothing is reported withheld', () => {
+    const m = mapLivingModel(OPTION_EFFECTS);
+    const options = (m.graph.nodes as Rec[]).filter((n) => n.kind === 'option');
+    expect(options.map((o) => o.id)).toEqual(['a', 'b']);
+    expect(options.some((o) => o.is_baseline === true)).toBe(false);
+    expect(m.withheld.filter((w) => w.id === 'options')).toEqual([]);
+  });
+
   it('Paul 21 Oct (f46a14e3): an option\'s effect on a FACTOR reaches the engine through its switch, so the option drives that factor', () => {
     const viaFactor: LivingModelT = structuredClone(OPTION_EFFECTS);
     viaFactor.factors = [{ id: 'k', label: 'Customer understanding', value: null, low: null, high: null, unit: null, source: 'olumi', party: null, quote: null }];
