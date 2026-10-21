@@ -13,7 +13,7 @@ export const KNOWN_ANSWER: LivingModelT = {
   // The control's explicitly specified law (AIE, 20 Oct): Normal, mean 50 and SD 10 goal units per +1 of f, existence 1.
   links: [{ id: 'f_g', from: 'f', to: 'g', source: 'user', party: null, quote: 'each +1 in f adds 50 units on average, with a standard deviation of 10',
     effect: { form: 'normal', value: 50, sd: 10, low: null, high: null, unit: 'units', sign: '+' } }],
-  conditions: [], views: [{ holder: 'Sam', position: 'thinks push is too risky', quote: 'Sam disagrees' }], history: [],
+  risks: [], conditions: [], views: [{ holder: 'Sam', position: 'thinks push is too risky', quote: 'Sam disagrees' }], history: [],
 };
 
 /** A synthetic brief where each option states its own exact effect on the goal: today 40, at least 60, A +30, B +19.9. */
@@ -29,5 +29,5 @@ export const OPTION_EFFECTS: LivingModelT = {
     { id: 'a_w', from: 'a', to: 'w', source: 'user', party: null, quote: 'A adds exactly 30', effect: { form: 'exact', value: 30, sd: null, low: null, high: null, unit: 'widgets per hour', sign: '+' } },
     { id: 'b_w', from: 'b', to: 'w', source: 'user', party: null, quote: 'B adds exactly 19.9', effect: { form: 'exact', value: 19.9, sd: null, low: null, high: null, unit: 'widgets per hour', sign: '+' } },
   ],
-  conditions: [], views: [], history: [],
+  risks: [], conditions: [], views: [], history: [],
 };

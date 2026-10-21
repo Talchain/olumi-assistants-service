@@ -89,7 +89,7 @@ beforeEach(() => {
   readMostRecentPendingActions.mockResolvedValue([]);
 });
 
-const LIVING = { aims: [], options: [], factors: [], links: [], conditions: [], views: [{ holder: 'us', position: 'wary', quote: null }], history: [] };
+const LIVING = { aims: [], options: [], factors: [], links: [], risks: [], conditions: [], views: [{ holder: 'us', position: 'wary', quote: null }], history: [] };
 
 describe('/graph/register stores a core postimage as given, and only for CEE\'s own writer', () => {
   it('CEE\'s writer with thin_core: no meaning step runs (the stale mark is kept as given) and the living model is kept', async () => {

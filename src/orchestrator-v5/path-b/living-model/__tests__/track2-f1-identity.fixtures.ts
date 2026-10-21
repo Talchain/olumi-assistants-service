@@ -29,7 +29,7 @@ const REVENUE_IS = { op: 'product' as const, of: ['total', 'price'], ...who('rev
 /** The person's definitions, declared: total = UK + EU; revenue = total × price. No links: a definition is not a cause. */
 export const F1_DEFINED: LivingModelT = {
   aims: [{ ...AIM, defined_as: REVENUE_IS }],
-  options: OPTIONS, factors: [UK, EU, TOTAL, PRICE], links: [], conditions: [], views: [], history: [],
+  options: OPTIONS, factors: [UK, EU, TOTAL, PRICE], links: [], risks: [], conditions: [], views: [], history: [],
 };
 
 /** Buddy r1: the goal AT the defined figure (£6,800). Grow the UK meets it in every draw, so its chance is 1, never ~50%. */
@@ -54,7 +54,7 @@ export const F1_RESTATED: LivingModelT = {
 
 /** CONTROL, unchanged by the identity diff: the breakdown written only as exact links still withholds (`exact_not_drawable`). */
 export const F1_EXACT_LINKS: LivingModelT = {
-  aims: [{ ...AIM, defined_as: null }], options: OPTIONS, factors: [UK, EU, { ...TOTAL, defined_as: null }], conditions: [], views: [], history: [],
+  aims: [{ ...AIM, defined_as: null }], options: OPTIONS, factors: [UK, EU, { ...TOTAL, defined_as: null }], risks: [], conditions: [], views: [], history: [],
   links: [
     { id: 'uk_total', from: 'uk', to: 'total', ...who('total customers is UK plus EU'), effect: exact(1, 'customers') },
     { id: 'eu_total', from: 'eu', to: 'total', ...who('total customers is UK plus EU'), effect: exact(1, 'customers') },

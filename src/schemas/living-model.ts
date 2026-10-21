@@ -112,6 +112,24 @@ export const LivingOption = z.object({
   ...attribution,
 }).strict();
 
+/**
+ * TRACK 2 event risk (21 Oct): an EVENT that may or may not happen within a window. What it does if it happens is an
+ * ordinary link FROM it (per +1: it happening). Its chance and window are the item's own figures, attributed like any other.
+ */
+export const LivingRisk = z.object({
+  id,
+  label: z.string(),
+  occurrence: z.object({ low: z.number().nullable(), high: z.number().nullable() }).strict().describe(
+    'The chance it happens at least once within the window, from 0 to 1 ("5–15%" is low 0.05, high 0.15; one figure is low = high). Null when nobody gave one: never guessed.'),
+  horizon_months: z.number().nullable().describe('The window that chance is over, in months ("within a year" is 12). Null when not stated.'),
+  mitigations: z.array(z.object({
+    factor_id: id,
+    reduction: z.number(),
+  }).strict()).describe('Steps that make it less likely: the factor an option switches on (0 = not in place, 1 = in place) and the share of the chance it removes ("cuts it by 70%" is 0.7).'),
+  ...attribution,
+}).strict().describe(
+  'An event that may or may not happen within a window ("our key supplier may fail within 12 months"). Never something already true: a present condition ("we lack marketing experience") is a factor at its current level, never a risk. What it does if it happens is a link from it.');
+
 export const LivingLink = z.object({
   id,
   /** A factor id (or an option id for an option's direct effect). */
@@ -177,6 +195,8 @@ export const LivingModel = z.object({
   options: z.array(LivingOption),
   factors: z.array(LivingFactor),
   links: z.array(LivingLink),
+  /** A model saved before risks reads none. */
+  risks: z.array(LivingRisk).default([]),
   conditions: z.array(LivingCondition),
   views: z.array(LivingView),
   history: z.array(LivingHistoryEntry),

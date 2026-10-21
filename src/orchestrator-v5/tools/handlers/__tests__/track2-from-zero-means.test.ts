@@ -55,7 +55,7 @@ export const pricingAndReferral = (today: number | null): LivingModelT => ({
     { id: 'referral_gp', from: 'referral_running', to: 'gp', ...who('the referral scheme would add about £2k a month'),
       effect: { form: 'point', value: 2000, sd: null, low: null, high: null, unit: '£', sign: '+' } },
   ],
-  conditions: [], views: [], history: [],
+  risks: [], conditions: [], views: [], history: [],
 });
 
 const stored = (model: LivingModelT): Json => projectCorePostimageForPersistence(GraphV3.parse({ ...mapLivingModel(model).graph, living_model: model })) as Json;

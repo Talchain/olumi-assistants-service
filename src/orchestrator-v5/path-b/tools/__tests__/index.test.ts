@@ -70,7 +70,7 @@ describe('the adapters as SDK function tools', () => {
 
   it.each([
     ['read_canonical_context', {}],
-    ['build_model_from_brief', { brief: '', model: { aims: [], options: [], factors: [], links: [], conditions: [], views: [], history: [] } }],
+    ['build_model_from_brief', { brief: '', model: { aims: [], options: [], factors: [], links: [], risks: [], conditions: [], views: [], history: [] } }],
     ['apply_change', { proposal_id: PROPOSAL }],
     ['run_analysis', { reason: 'Run it.', effects_timing: null }],
   ])('%s records its SDK-parsed declaration on both carriers', async (name, args) => {

@@ -58,7 +58,7 @@ const livingFor = (brief: string): LivingModelT => {
         settings: [{ factor_id: 'level', value: 2, low: null, high: null, unit: null, source: 'olumi', party: null, quote: null }] },
     ],
     factors: [{ id: 'level', label: 'Current level', value: 1, low: null, high: null, unit: null, defined_as: null, source: 'olumi', party: null, quote: null }],
-    links: [], conditions: [], views: [], history: [],
+    links: [], risks: [], conditions: [], views: [], history: [],
   };
 };
 

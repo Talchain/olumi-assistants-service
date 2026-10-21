@@ -30,7 +30,7 @@ function canonicalIds(model: LivingModelT): LivingModelT {
     map.set(raw, id);
     return id;
   };
-  for (const item of [...model.aims, ...model.options, ...model.factors, ...model.links]) canon(item.id);
+  for (const item of [...model.aims, ...model.options, ...model.factors, ...model.links, ...model.risks]) canon(item.id);
   const ref = (raw: string): string => map.get(raw) ?? raw;
   const defined = <T extends { defined_as?: { op: 'sum' | 'product'; of: string[] } | null }>(x: T): T =>
     (x.defined_as ? { ...x, defined_as: { ...x.defined_as, of: x.defined_as.of.map(ref) } } : x);
@@ -40,6 +40,7 @@ function canonicalIds(model: LivingModelT): LivingModelT {
     options: model.options.map((o) => ({ ...o, id: ref(o.id), settings: o.settings.map((s) => ({ ...s, factor_id: ref(s.factor_id) })),
       ...(o.developed_from ? { developed_from: ref(o.developed_from) } : {}) })),
     links: model.links.map((l) => ({ ...l, id: ref(l.id), from: ref(l.from), to: ref(l.to) })),
+    risks: model.risks.map((r) => ({ ...r, id: ref(r.id), mitigations: r.mitigations.map((m) => ({ ...m, factor_id: ref(m.factor_id) })) })),
     conditions: model.conditions.map((c) => ({ ...c, applies_to: c.applies_to.map(ref) })),
     views: model.views,
     history: model.history.map((h) => ({ ...h, id: ref(h.id) })),
@@ -57,6 +58,7 @@ function savedAttributions(saved: LivingModelT): Set<string> {
     ...saved.factors.map((f) => attributionKey(f.id, f)),
     ...saved.options.flatMap((o) => [attributionKey(o.id, o), ...o.settings.map((x) => attributionKey(`${o.id}:${x.factor_id}`, x))]),
     ...saved.links.map((l) => attributionKey(l.id, l)),
+    ...saved.risks.map((r) => attributionKey(r.id, r)),
     ...saved.conditions.map((c) => attributionKey(`condition:${c.text}`, c)),
     ...[...saved.aims, ...saved.factors].flatMap((x) => (x.defined_as ? [attributionKey(`${x.id}:defined_as`, x.defined_as)] : [])),
   ]);
@@ -97,6 +99,7 @@ export function applyKernel(model: LivingModelT, verifiedWords: readonly string[
       factors: m.factors.map((f) => defined(attribute(f.id, f))),
       options: m.options.map((o) => ({ ...attribute(o.id, o), settings: o.settings.map((s) => attribute(`${o.id}:${s.factor_id}`, s)) })),
       links: m.links.map((l) => attribute(l.id, l)),
+      risks: m.risks.map((r) => attribute(r.id, r)),
       conditions: m.conditions.map((c) => attribute(`condition:${c.text}`, c)),
     },
     relabelled,
