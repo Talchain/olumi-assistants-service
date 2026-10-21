@@ -26,6 +26,18 @@ describe('thin core explicit edit: a canvas gesture applied to the living model,
     expect(push.settings).toEqual([{ factor_id: 'f', estimate_by: null, value: 0.8, low: null, high: null, unit: null, source: 'user', party: null, quote: null }]);
   });
 
+  it('⛔ Codex r1 #3609: the same figure entered again keeps its author (approving adopts, never re-authors); a new figure is theirs', () => {
+    const olumis: LivingModelT = structuredClone(KNOWN_ANSWER);
+    olumis.options[1]!.settings[0] = { ...olumis.options[1]!.settings[0]!, source: 'olumi', quote: null };
+    olumis.factors[0] = { ...olumis.factors[0]!, estimate_by: 'olumi' };
+    const edit = (e: ExplicitEdit) => { const out = applyExplicitEdit(olumis, e); if (!('model' in out)) throw new Error(out.refused); return out.model; };
+    expect(edit({ kind: 'option_intervention_edit', option_id: 'push', factor_id: 'f', value: 1 }).options[1]!.settings[0]).toMatchObject({ source: 'olumi', value: 1 });
+    expect(edit({ kind: 'factor_value_edit', target_id: 'f', value: 0.5 }).factors[0]).toMatchObject({ estimate_by: 'olumi', value: 0.5 });
+    // CONTRAST: a different figure is the person's own.
+    expect(edit({ kind: 'option_intervention_edit', option_id: 'push', factor_id: 'f', value: 0.8 }).options[1]!.settings[0]).toMatchObject({ source: 'user', value: 0.8 });
+    expect(edit({ kind: 'factor_value_edit', target_id: 'f', value: 0.6 }).factors[0]).toMatchObject({ estimate_by: null, value: 0.6 });
+  });
+
   it('a goal target and a link strength are kept in the person\'s units; the regenerated engine values match the gesture', () => {
     const target = apply({ kind: 'goal_target_edit', goal_node_id: 'g', constraint_type: 'at_least', raw_value: 110, unit: 'units' });
     expect(target.aims[0]!.target).toMatchObject({ comparator: '>=', value: 110, unit: 'units', current: 70 });
