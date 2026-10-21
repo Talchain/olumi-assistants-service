@@ -5,6 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { AI_CORE_MODE, laneModeFor, toolsFor } from '../runtime/agent-tools.js';
+import { legacyFromRead } from '../../path-b/living-model/view.js';
 
 describe('laneModeFor: the per-request lane mode', () => {
   it('core on staging, local and test; the full tool surface either way', () => {
@@ -32,6 +33,15 @@ describe('laneModeFor: the per-request lane mode', () => {
     expect(laneModeFor('full', 'openai', 'staging', false), 'CONTRAST: a core or new scenario').toBe('core');
     expect(laneModeFor('full', 'core', 'staging', true), 'an explicit core request is unchanged').toBe('core');
     expect(laneModeFor('preview', 'openai', 'staging', false)).toBe('preview');
+  });
+
+  it('THE BRIDGE\'S READ (Codex #3522 r4): only a read that shows the scenario or proves it absent can select core', () => {
+    expect(legacyFromRead({ status: 200, json: { graph: { nodes: [], edges: [] } } }), 'a saved graph with no living model').toBe(true);
+    expect(legacyFromRead({ status: 200, json: { graph: { nodes: [], edges: [], living_model: {} } } }), 'a core scenario').toBe(false);
+    expect(legacyFromRead({ status: 200, json: { graph: null } }), 'a new scenario').toBe(false);
+    expect(legacyFromRead({ status: 404 }), 'absent').toBe(false);
+    for (const status of [500, 503, 401, 403]) expect(legacyFromRead({ status }), `a failed read (${status}) keeps the full lane`).toBe(true);
+    expect(legacyFromRead(undefined), 'a thrown read keeps the full lane').toBe(true);
   });
 
   it('any other value keeps the base mode (contrast: only the exact values select core)', () => {
