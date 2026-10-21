@@ -119,7 +119,8 @@ describe('the real variant path: a what-if draws the saved Run\'s samples and wr
 
 // ── Part 2: runWhatIf on the real edit chain ──────────────────────────────────────────────────────────────────────────
 const stored = () => ({ ...mapLivingModel(structuredClone(KNOWN_ANSWER)).graph, living_model: structuredClone(KNOWN_ANSWER) });
-const BASE = computeExpectedGraphCasHashes(stored()).expectedGraphAnalysisHash;
+const BASE = computeExpectedGraphCasHashes(stored()).expectedGraphAnalysisHash as string;
+it('PRECONDITION: the saved fixture has an analysis hash, so the stale rows test a real comparison', () => expect(BASE).toMatch(/\S/));
 const chance = (display: string): StressChance => ({ display, pct: 42, provisional: false, not_shown: null });
 const VALUE = { kind: 'factor_value_edit', target_id: 'f', value: 0.7, raw_value: 0.7 };
 const LINK = { kind: 'edge_strength_edit', from: 'f', to: 'g', magnitude: 0.2, direction_intent: 'preserve', base_graph_hash: BASE };

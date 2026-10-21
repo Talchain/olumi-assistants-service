@@ -29,6 +29,7 @@ import { runVariant, type StressVariantParams, type VariantRun } from './stress-
 export const WHAT_IF_KINDS: ReadonlySet<string> = new Set(['factor_value_edit', 'edge_strength_edit', 'option_intervention_edit', 'prior_range_edit']);
 
 type Rec = Record<string, unknown>;
+const isWhatIf = (c: Rec): c is Rec & ExplicitEdit => typeof c.kind === 'string' && WHAT_IF_KINDS.has(c.kind);
 type Cell = Omit<StressChance, 'pct'>;
 export type WhatIfTarget = { readonly node_id: string } | { readonly from: string; readonly to: string };
 
@@ -91,11 +92,11 @@ export async function runWhatIf(
   const refused: { index: number; reason: string }[] = [];
   let all = saved;
   p.changes.forEach((c, index) => {
-    if (!WHAT_IF_KINDS.has(String(c.kind))) { refused.push({ index, reason: 'not_a_what_if_gesture' }); return; }
-    const outcome = applyExplicitEdit(all, c as unknown as ExplicitEdit, goalIdOf(stored));
+    if (!isWhatIf(c)) { refused.push({ index, reason: 'not_a_what_if_gesture' }); return; }
+    const outcome = applyExplicitEdit(all, c, goalIdOf(stored));
     if (!('model' in outcome)) { refused.push({ index, reason: outcome.refused }); return; }
     all = outcome.model;
-    applied.push({ index, edit: c as unknown as ExplicitEdit });
+    applied.push({ index, edit: c });
   });
   if (applied.length === 0) return { kind: 'refused', reason: 'no_change_applied', changes_refused: refused };
 

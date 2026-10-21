@@ -53,7 +53,7 @@ export default async function route(app: FastifyInstance) {
         const result = await runWhatIf({
           payload: { kind: "message", scenario_id: scenarioId, turn_id: randomUUID(), stage: "analyse", turn_class: "decide", source: "composer", message: "" } as never,
           requestId: `${requestId}:what-if`,
-          changes: parsed.data.changes as unknown as Record<string, unknown>[],
+          changes: parsed.data.changes.map((c) => ({ ...c })),
           crux: parsed.data.crux === true,
           ...(parsed.data.base_graph_hash === undefined ? {} : { baseGraphHash: parsed.data.base_graph_hash }),
         }, { loadSaved: (id) => loadPersistedScenarioStateStrict(id) });
