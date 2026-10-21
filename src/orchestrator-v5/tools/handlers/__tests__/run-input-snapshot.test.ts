@@ -281,4 +281,15 @@ describe('0.78.0 natural_effect on a link (Compare\'s served C1 witness, 21 Oct:
     // CONTROL: the same size on both Runs is no row.
     expect(diffRunInputSnapshots(withEffect(20), withEffect(20)).filter((r) => r.field === 'effect')).toEqual([]);
   });
+
+  it('a size whose unit breaks the contract (empty, as the core mapper writes for a unitless link, or over 64) is left out alone; the snapshot is kept (buddy #3550)', () => {
+    for (const over of [{ amount_unit: '' }, { per_source_change_unit: '' }, { amount_unit: 'x'.repeat(65) }, { per_source_change: 0 }]) {
+      const snap = withEffect(20, over);
+      expect(snap, JSON.stringify(over)).not.toBeNull();
+      expect(linkOf(snap), JSON.stringify(over)).not.toHaveProperty('natural_effect');
+      expect(linkOf(snap).mean, JSON.stringify(over)).toBe(0.4);
+    }
+    // CONTROL: the boundary unit (64 characters) is kept.
+    expect(linkOf(withEffect(20, { amount_unit: 'x'.repeat(64) })).natural_effect).toMatchObject({ amount_unit: 'x'.repeat(64) });
+  });
 });

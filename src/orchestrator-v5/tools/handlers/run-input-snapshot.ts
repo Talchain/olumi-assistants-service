@@ -25,7 +25,7 @@ import { createHash } from 'node:crypto';
 import { sentDigest } from './run-input-digest.js';
 export { sentDigest } from './run-input-digest.js';
 import { InterventionRangeSchema } from '@talchain/schemas';
-import { RunInputSnapshotSchema, type RunInputSnapshot } from '@talchain/schemas/orchestrator';
+import { RunInputLinkSchema, RunInputSnapshotSchema, type RunInputSnapshot } from '@talchain/schemas/orchestrator';
 import { normalizeRunGoalUnit } from '../../context/run-goal-unit.js';
 import { linkSizing } from '../../../cee/magnitude/link-sizing.js';
 import { edgeBandFromMagnitude, strengthBandFromEdgeBand } from '../../format/edge-strength-bands.js';
@@ -247,13 +247,14 @@ export function buildRunInputSnapshot(input: RunInputSnapshotInput): RunInputSna
     // 0.78.0 (SD-1 cut 6): the link's size in the user's terms, copied from the edge's own `provenance.natural_effect`
     // ONLY while it is current (its `strength_mean` is the mean sent) and a point size (never one end of a written range).
     // Never inferred from `mean`. Without it the diff could not name an edited effect ("20 → 35"), so an approved edit
-    // read as an unexplained `partial` (Compare's served C1 witness, 21 Oct).
+    // read as an unexplained `partial` (Compare's served C1 witness, 21 Oct). It must meet the contract's own link rule (units
+    // 1–64 characters), or it is left out alone: one invalid optional field would otherwise null the whole snapshot (buddy #3550).
     const ne = isRec(e.provenance) && isRec(e.provenance.natural_effect) ? e.provenance.natural_effect : undefined;
     const range = ne !== undefined && isRec(ne.stated_range) ? ne.stated_range : undefined;
-    const natural = ne !== undefined && finite(ne.amount) !== undefined && typeof ne.amount_unit === 'string'
-      && finite(ne.per_source_change) !== undefined && finite(ne.per_source_change)! > 0 && typeof ne.per_source_change_unit === 'string'
+    const natural = ne !== undefined && (finite(ne.per_source_change) ?? 0) > 0
       && finite(ne.strength_mean) === mean && (range === undefined || range.end === 'centre')
-      ? { amount: finite(ne.amount)!, amount_unit: ne.amount_unit, per_source_change: finite(ne.per_source_change)!, per_source_change_unit: ne.per_source_change_unit }
+      ? RunInputLinkSchema.shape.natural_effect.safeParse({ amount: finite(ne.amount), amount_unit: ne.amount_unit,
+        per_source_change: finite(ne.per_source_change), per_source_change_unit: ne.per_source_change_unit }).data
       : undefined;
     return [{
       from,
