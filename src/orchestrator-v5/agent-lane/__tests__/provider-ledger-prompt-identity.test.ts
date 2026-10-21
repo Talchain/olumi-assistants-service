@@ -276,7 +276,7 @@ describe('the ledger fields are additive, and the alias list is the map’s', ()
     expect(promptSha256(circular)).toBe(sha(''));
   });
 
-  it('the four served-stage aliases are the identity map’s Part 3 names, verbatim, plus C6-2\'s brief reading', () => {
-    expect([...AGENT_PROMPT_ALIASES]).toEqual(['agent.converse', 'agent.interpret', 'agent.research', 'agent.construct', 'agent.read_brief']);
+  it('the four served-stage aliases are the identity map’s Part 3 names, verbatim, plus C6-2\'s brief reading and the core critic (21 Oct)', () => {
+    expect([...AGENT_PROMPT_ALIASES]).toEqual(['agent.converse', 'agent.interpret', 'agent.research', 'agent.construct', 'agent.read_brief', 'agent.critique']);
   });
 });

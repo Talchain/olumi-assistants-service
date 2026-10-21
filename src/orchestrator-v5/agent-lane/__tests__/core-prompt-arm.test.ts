@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { CORE_ALIGNED_INSTRUCTIONS, CORE_REPLY_INSTRUCTION, NOTE_ON_ITEM_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION, instructionsForMode, MODEL_RELATIVE_NAMING_INSTRUCTION,
   promptArmOf, coreEffortArmOf } from '../../../routes/agent-v1-turn.js';
@@ -36,7 +37,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
   it('arm B is the AIE\'s assembled reference, byte for byte (programme-docs #94 6303242136, static text sha256 7b6145d4…), plus the canvas-coaching sentence', () => {
     expect(b.split(NOTE_ON_ITEM_INSTRUCTION)).toHaveLength(2);
     // 7b6145d4… until 21 Oct; arm C's adoption changed only the closing core reply rule (see its row), now 56625e00….
-    expect(createHash('sha256').update(b.replace(`${NOTE_ON_ITEM_INSTRUCTION}\n\n`, ''), 'utf8').digest('hex')).toBe('56625e00774dcfe9855a29df963722af2a62e61bcfdd3c851670ec29be9d3098');
+    expect(createHash('sha256').update(b.replace(`${NOTE_ON_ITEM_INSTRUCTION}\n\n`, ''), 'utf8').digest('hex')).toBe('8039876b844c5e2eaa368a800849eb4218947a1d96de923d9f2e5e33fc74b303');
   });
 
   it('arm A is untouched: the legacy host contract is byte-identical to staging b76bc42c', () => {
@@ -62,7 +63,12 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
   it('arm C ADOPTED (Paul 21 Oct, long replies narrating the tools; R2 100 % at 90 words median): the core reply rule speaks in the user\u2019s terms with a length bound', () => {
     expect(CORE_REPLY_INSTRUCTION).not.toContain('from this turn\u2019s tool results');
     expect(CORE_REPLY_INSTRUCTION).toContain('never your tools or what a tool response did or did not contain');
-    expect(CORE_REPLY_INSTRUCTION).toContain('usually under 100 words');
+    // Paul, 21 Oct (standing): bullets first, detail on request: the approved discipline from the served routing prompt, verbatim.
+    const routing = readFileSync(new URL('../../../../Prompts/canonical/routing.txt', import.meta.url), 'utf8');
+    const discipline = routing.slice(routing.indexOf('<RESPONSE_DISCIPLINE>'), routing.indexOf('</RESPONSE_DISCIPLINE>') + '</RESPONSE_DISCIPLINE>'.length);
+    expect(discipline.length).toBeGreaterThan(500);
+    expect(CORE_REPLY_INSTRUCTION).toContain(discipline);
+    expect(CORE_REPLY_INSTRUCTION).not.toContain('weave at most one next step');
     // The licences, attribution and Run-coaching rules are kept.
     for (const rule of ['never call a win share a chance', 'never call an option best, a winner or recommended',
       'approving a reading adopts it but does not make the user its author', 'A Run that did not complete leaves a saved change saved'])
