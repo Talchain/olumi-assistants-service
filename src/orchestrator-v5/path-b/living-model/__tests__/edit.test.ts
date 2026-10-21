@@ -74,7 +74,7 @@ describe('thin core explicit edit: a canvas gesture applied to the living model,
     expect(applyExplicitEdit(KNOWN_ANSWER, { kind: 'factor_value_edit', target_id: 'g', value: 0.6, raw_value: 75, unit: '%' })).toEqual({ refused: 'unit_mismatch' });
     expect(applyExplicitEdit(KNOWN_ANSWER, { kind: 'structural_rename', node_id: 'f', label: 'x', expected_label: 'old' })).toEqual({ refused: 'label_moved' });
     expect(applyExplicitEdit(KNOWN_ANSWER, { kind: 'factor_value_edit', target_id: 'nope', value: 1 })).toEqual({ refused: 'not_in_model' });
-    expect(applyExplicitEdit(KNOWN_ANSWER, { kind: 'structural_add', node_id: 'r', node_kind: 'risk', label: 'Risk' })).toEqual({ refused: 'kind_not_in_slice' });
+    expect(applyExplicitEdit(KNOWN_ANSWER, { kind: 'structural_add', node_id: 'o', node_kind: 'outcome', label: 'Churn' })).toEqual({ refused: 'kind_not_in_slice' });
   });
 
   // Staging defect (21 Oct, Codex on #3555): an option's own effect is drawn from its `<option>__on` switch, so a gesture on
