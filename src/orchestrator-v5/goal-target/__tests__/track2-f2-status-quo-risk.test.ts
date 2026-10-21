@@ -18,11 +18,15 @@ import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import type { HandlerInvocation } from '../../tools/registry.js';
 import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import { goalChanceLicenceOf, statusQuoReadingOf } from '../goal-chance-licence.js';
+import { GOAL_TARGET_ROLE } from '../goal-targets-joint.js';
+import { wireGoalConstraints } from '../../tools/handlers/run-analysis.js';
 
 type Rec = Record<string, any>;
 const SCENARIO = 'f2f2f2f2-f2f2-4f2f-8f2f-f2f2f2f2f2f2';
 const ENGINE = JSON.parse(readFileSync('tests/fixtures/track2-f2/point.plot-response.json', 'utf8')) as Rec;
 const LINE = '‘Carry on’ still faces ‘Key supplier fails’ in this model, so its chance allows for that risk — not an assumption that nothing changes.';
+/** The threshold the Run sends for F2 (goal ≥ £12,000 on its £20,000 frame; today £16,000), pinned by the handler row below. */
+const SENT = { value: 0.6, field: 'goal_threshold', frame: 'level', baseline: 0.8, status_quo_option_id: 'status_quo' } as const;
 const stored = (m: LivingModelT): Rec => projectCorePostimageForPersistence(GraphV3.parse({ ...mapLivingModel(m).graph, living_model: m })) as Rec;
 const noRisk = (): LivingModelT => {
   const m = supplier('point');
@@ -62,6 +66,7 @@ describe('carrying on as now, facing a risk the person stated, has an earned cha
     expect(l.withheld_option_ids ?? []).not.toContain('status_quo');
     expect(l.pct_by_option).toMatchObject({ status_quo: 92, dual_source: 97 });
     expect(l.notes).toContain(LINE);
+    expect(l.sent_threshold).toEqual(SENT);
   });
 
   it('CONTRAST: the same engine response with no risk in the model: carry on stays withheld as moved, with no risk line', async () => {
@@ -71,26 +76,78 @@ describe('carrying on as now, facing a risk the person stated, has an earned cha
     expect(JSON.stringify(l)).not.toContain('still faces');
   });
 
-  it('CONTRAST: a risk whose only path to the goal carrying on cuts (it sets the node between) earns nothing', () => {
-    const g = stored(supplier('point'));
-    const edge = (g.edges as Rec[]).find((e) => e.from === 'supplier_fails' && e.to === 'gp')!;
-    g.nodes.push({ id: 'supply_loss', kind: 'factor', label: 'Supply loss', observed_state: { value: 0, raw_value: 0, cap: 1, unit: '' } });
-    g.edges = [...(g.edges as Rec[]).filter((e) => e !== edge), { ...edge, to: 'supply_loss' }, { ...edge, from: 'supply_loss' }];
-    const cut = structuredClone(g);
-    const sq = (cut.nodes as Rec[]).find((n) => n.id === 'status_quo')!;
-    sq.interventions = { ...(sq.interventions ?? {}), supply_loss: 0 };
-    const open = goalChanceLicenceOf(structuredClone(ENGINE), g, 'gp');
-    const closed = goalChanceLicenceOf(structuredClone(ENGINE), cut, 'gp');
-    expect(open?.pct_by_option).toMatchObject({ status_quo: 92 });
-    expect(closed?.withheld_reason_by_option?.status_quo).toMatchObject({ reason: 'reference_moved' });
+  // Codex r1 on #3582: each counterexample it reproduced, on the same saved graph and the Run's own sent threshold.
+  const lic = (graph: Rec, env: Rec = ENGINE) => goalChanceLicenceOf(structuredClone(env), graph, 'gp', undefined, SENT as never);
+  const sqOf = (l: ReturnType<typeof lic>) => ({ pct: l?.pct_by_option?.status_quo, reason: (l?.withheld_reason_by_option as Rec | undefined)?.status_quo?.reason });
+  const EARNED = { pct: 92, reason: undefined };
+  const MOVED = { pct: undefined, reason: 'reference_moved' };
+  const f2 = () => stored(supplier('point'));
+  const nodeOf = (g: Rec, id: string): Rec => (g.nodes as Rec[]).find((n) => n.id === id)!;
+
+  it('CONTROL: the same saved graph and engine response, read directly with the Run\'s threshold, earn 92 %', () => {
+    expect(sqOf(lic(f2()))).toEqual(EARNED);
   });
 
-  it('NEGATIVE: a risk earns nothing on a change frame, on an unsupported reference, or for an exact chance on the wrong side', () => {
-    const row = { probability_of_goal: 0.9 };
-    expect(statusQuoReadingOf({ paired: true, forecast: false, row, reference: 0, zeroChange: 1, riskOnPath: true })).toBe('moved');
-    expect(statusQuoReadingOf({ paired: true, forecast: false, row, reference: 16000, riskOnPath: true })).toBe('moved');
-    expect(statusQuoReadingOf({ paired: true, forecast: false, row: { probability_of_goal: 0 }, reference: 16000, referenceChance: 1, riskOnPath: true })).toBe('moved');
-    expect(statusQuoReadingOf({ paired: true, forecast: false, row, reference: 16000, referenceChance: 1, riskOnPath: true })).toBe('at_risk');
-    expect(statusQuoReadingOf({ paired: true, forecast: false, row, reference: 16000, referenceChance: 1 })).toBe('moved');
+  it('NEGATIVE: a move the risk cannot explain stays withheld: 50 % when at most 15 % can fail, or a frame the Run did not record', () => {
+    const env = structuredClone(ENGINE);
+    (env.option_comparison as Rec[]).find((o) => o.option_id === 'status_quo')!.probability_of_goal = 0.5;
+    expect(sqOf(lic(f2(), env))).toEqual(MOVED);
+    const unframed = goalChanceLicenceOf(structuredClone(ENGINE), f2(), 'gp');
+    expect(unframed?.withheld_reason_by_option?.status_quo).toMatchObject({ reason: 'reference_moved' });
+  });
+
+  it('NEGATIVE: a path carrying on cuts earns nothing, whether its setting is held in interventions or in data.interventions', () => {
+    const between = (): Rec => {
+      const g = f2();
+      const edge = (g.edges as Rec[]).find((e) => e.from === 'supplier_fails' && e.to === 'gp')!;
+      g.nodes.push({ id: 'supply_loss', kind: 'factor', label: 'Supply loss', observed_state: { value: 0, raw_value: 0, cap: 1, unit: '' } });
+      g.edges = [...(g.edges as Rec[]).filter((e) => e !== edge), { ...edge, to: 'supply_loss' }, { ...edge, from: 'supply_loss' }];
+      return g;
+    };
+    expect(sqOf(lic(between()))).toEqual(EARNED);
+    const top = between();
+    nodeOf(top, 'status_quo').interventions.supply_loss = { value: 0, raw_value: 0 };
+    expect(sqOf(lic(top))).toEqual(MOVED);
+    const nested = between();
+    nodeOf(nested, 'status_quo').data = { interventions: { supply_loss: { value: 0, raw_value: 0 } } };
+    expect(sqOf(lic(nested))).toEqual(MOVED);
+  });
+
+  it('NEGATIVE: a risk that cannot happen under carrying on (no chance, or fully prevented there), or reaches the goal only through an option, earns nothing', () => {
+    const none = f2();
+    nodeOf(none, 'supplier_fails').event_risk.occurrence = { p_low: 0, p_high: 0, basis: 'user' };
+    expect(sqOf(lic(none))).toEqual(MOVED);
+    const beside = f2();
+    beside.nodes.push({ ...nodeOf(beside, 'supplier_fails'), id: 'flood', label: 'Flood', event_risk: { ...nodeOf(beside, 'supplier_fails').event_risk, occurrence: { p_low: 0, p_high: 0, basis: 'user' } } });
+    beside.edges.push({ ...(beside.edges as Rec[]).find((e) => e.from === 'supplier_fails' && e.to === 'gp')!, from: 'flood' });
+    expect(lic(beside)?.notes).toContain(LINE);
+    const prevented = f2();
+    nodeOf(prevented, 'supplier_fails').event_risk.mitigations[0].occurrence_reduction = 1;
+    nodeOf(prevented, 'status_quo').interventions.dual_sourcing = { value: 1, raw_value: 1 };
+    expect(sqOf(lic(prevented))).toEqual(MOVED);
+    const viaOption = f2();
+    viaOption.edges = [...(viaOption.edges as Rec[]).map((e) => (e.from === 'supplier_fails' && e.to === 'gp' ? { ...e, to: 'dual_source' } : e)),
+      { from: 'dual_source', to: 'gp', strength: { mean: 1, std: 0.01 }, exists_probability: 1 }];
+    expect(sqOf(lic(viaOption))).toEqual(MOVED);
+  });
+
+  it('NEGATIVE: with several targets sent, carrying on is read as before: this rule licenses the single goal\'s chance only', () => {
+    const g = f2();
+    const stored = [{ constraint_id: 'target:gp', node_id: 'gp', role: GOAL_TARGET_ROLE, operator: '>=', value: 12000, unit: '£', label: 'Gross profit', value_frame: 'level' }];
+    const l = goalChanceLicenceOf(structuredClone(ENGINE), g, 'gp', undefined, SENT as never, g, { storedConstraints: stored, sentConstraints: wireGoalConstraints(stored) });
+    expect(l?.pct_by_option ?? {}).not.toHaveProperty('status_quo');
+    expect(JSON.stringify(l)).not.toContain('still faces');
+  });
+
+  it('NEGATIVE: a risk earns nothing on a change frame, on an unsupported reference, for an exact chance on the wrong side, or past a half', () => {
+    const row = { probability_of_goal: 0.9, outcome: { p50: 16000, n_samples: 10000 } };
+    const at = (x: Record<string, unknown>) => statusQuoReadingOf({ paired: true, forecast: false, row, reference: 16000, referenceChance: 1, riskChance: 0.15, ...x });
+    expect(at({})).toBe('at_risk');
+    expect(at({ riskChance: undefined })).toBe('moved');
+    expect(at({ referenceChance: undefined })).toBe('moved');
+    expect(at({ reference: 0, zeroChange: 1, referenceChance: undefined })).toBe('moved');
+    expect(at({ row: { probability_of_goal: 0 } })).toBe('moved');
+    expect(at({ riskChance: 0.6 })).toBe('moved');
+    expect(at({ row: { probability_of_goal: 0.9, outcome: { p50: 16000 } } })).toBe('moved');
   });
 });

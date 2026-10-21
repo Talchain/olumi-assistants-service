@@ -333,29 +333,61 @@ function labelOfNode(nodes: readonly Rec[], id: string): string | undefined {
 
 /**
  * The risks carrying on as now still faces (DL ruling on served F2, L1, 21 Oct): each risk the Run sends with a chance
- * (`event_risk`, the person's or Olumi's labelled), named, that reaches the goal by a path the status quo leaves open (no
- * node on it set by the status quo, which would cut the path). Empty when there is none.
+ * (`event_risk`, the person's or Olumi's labelled), named, that can still happen under the status quo (its highest stated
+ * chance, less the mitigations the status quo has in place, above 0) and reaches the goal by a path through quantities the
+ * status quo leaves open (a node it sets cuts the path; an option or decision is never a path). `chance` is the most that
+ * at least one of them happens: 1 − Π(1 − highest). Codex r1 on #3582.
  */
-function risksFacingStatusQuo(graph: unknown, goalId: unknown, statusQuoId: string | undefined): string[] {
-  if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges) || statusQuoId === undefined) return [];
+function risksFacingStatusQuo(graph: unknown, goalId: unknown, statusQuoId: string | undefined): { labels: string[]; chance: number } {
+  const none = { labels: [], chance: 0 };
+  if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges) || statusQuoId === undefined) return none;
   const nodes = graph.nodes.filter(isRec);
   const edges = graph.edges.filter(isRec);
   const sq = nodes.find((n) => n.id === statusQuoId);
-  const sets = new Set(Object.keys([sq?.interventions, isRec(sq?.data) ? sq!.data.interventions : undefined].find(isRec) ?? {}));
-  return nodes.filter((n) => n.kind === 'risk' && typeof n.id === 'string' && EventRiskV1.safeParse(n.event_risk).success).flatMap((r) => {
-    const label = labelOfNode(nodes, r.id as string);
+  const cells: Rec = { ...(isRec(sq?.interventions) ? sq!.interventions : {}), ...(isRec(sq?.data) && isRec(sq!.data.interventions) ? sq!.data.interventions : {}) };
+  const level = (id: string): unknown => {
+    const cell = cells[id];
+    if (cell !== undefined) return isRec(cell) ? cell.raw_value ?? cell.value : cell;
+    const os = nodes.find((n) => n.id === id)?.observed_state;
+    return isRec(os) ? os.raw_value ?? os.value : undefined;
+  };
+  const kindOf = (id: unknown): unknown => nodes.find((n) => n.id === id)?.kind;
+  const facing = nodes.flatMap((r) => {
+    const risk = r.kind === 'risk' && typeof r.id === 'string' ? EventRiskV1.safeParse(r.event_risk).data : undefined;
+    const label = risk === undefined ? undefined : labelOfNode(nodes, r.id as string);
+    if (risk === undefined || label === undefined) return [];
+    const high = risk.mitigations.reduce((q, m) => (level(m.factor_id) === 1 ? q * (1 - m.occurrence_reduction) : q), risk.occurrence.p_high);
+    if (!(high > 0)) return [];
     const seen = new Set<unknown>([r.id]);
-    for (const queue: unknown[] = [r.id]; label !== undefined && queue.length > 0;) {
+    for (const queue: unknown[] = [r.id]; queue.length > 0;) {
       const u = queue.shift();
       for (const e of edges) {
-        if (e.from !== u || seen.has(e.to) || sets.has(e.to as string)) continue;
-        if (e.to === goalId) return [label];
+        if (e.from !== u || seen.has(e.to) || Object.hasOwn(cells, e.to as string) || kindOf(e.to) === 'option' || kindOf(e.to) === 'decision') continue;
+        if (e.to === goalId) return [{ label, high }];
         seen.add(e.to);
         queue.push(e.to);
       }
     }
     return [];
   });
+  return { labels: facing.map((f) => f.label), chance: 1 - facing.reduce((q, f) => q * (1 - f.high), 1) };
+}
+
+/**
+ * Whether the risks carrying on faces explain its chance (Codex r1 on #3582). Same-draw cancellation leaves every draw in which
+ * none of them happens at today's level exactly, so the chance differs from today's side by at most the chance one happens
+ * (within four standard errors of the Run's own sample), and, while that is under a half, the median sits at today's level in
+ * the Run's own frame. Anything else (a larger move, another frame, no sample size, a change frame) is not explained.
+ */
+function riskExplains(a: { readonly row: Rec | undefined; readonly reference: number | 'unknown' | undefined; readonly rawReference?: number;
+  readonly referenceChance?: 0 | 1; readonly zeroChange?: 0 | 1; readonly riskChance?: number }, p: number): boolean {
+  const q = a.riskChance;
+  const o = isRec(a.row?.outcome) ? a.row!.outcome as Rec : undefined;
+  const n = finite(o?.n_valid_samples) ? o!.n_valid_samples : o?.n_samples;
+  if (q === undefined || !(q > 0) || q >= 0.5 || a.zeroChange !== undefined || a.referenceChance === undefined || !finite(n) || n < 1) return false;
+  const atToday = [a.reference, a.rawReference].some((ref) => finite(ref) && finite(o?.p50)
+    && sameFrameArithmeticAgreement(o!.p50 as number, ref, ref, PAIRED_REFERENCE_PRECISION));
+  return atToday && Math.abs(p - a.referenceChance) <= q + 4 * Math.sqrt(q * (1 - q) / n);
 }
 
 /**
@@ -407,8 +439,8 @@ export function statusQuoReadingOf(a: {
   readonly referenceChance?: 0 | 1;
   /** A goal measured AS a change: the chance a ZERO change has against the held target (1 meets it, 0 does not). */
   readonly zeroChange?: 0 | 1;
-  /** A named risk with a chance reaches the goal by a path carrying on as now leaves open (`risksFacingStatusQuo`). */
-  readonly riskOnPath?: boolean;
+  /** The most the risks carrying on still faces can happen (`risksFacingStatusQuo`); absent when it faces none. */
+  readonly riskChance?: number;
 }): StatusQuoReading {
   if (!a.paired) return a.forecast ? 'projection' : 'unknown';
   // A paired reference never establishes the target's side when its unit/frame evidence is unsupported, even with exact centres.
@@ -417,8 +449,9 @@ export function statusQuoReadingOf(a: {
   if (row === undefined) return 'assumed';
   const p = row.probability_of_goal;
   // DL ruling on served F2 (L1, 21 Oct): on a LEVEL, an event carrying on still faces moves it from today legitimately, so a
-  // chance between 0 and 1 is earned and said with that risk. Any other disagreement, and every change frame, stays moved.
-  if (typeof p === 'number' && p !== 0 && p !== 1) return a.riskOnPath === true && a.zeroChange === undefined ? 'at_risk' : 'moved';
+  // chance between 0 and 1 the event explains is earned and said with that risk. Any other disagreement, and every change
+  // frame, stays moved.
+  if (typeof p === 'number' && p !== 0 && p !== 1) return riskExplains(a, p) ? 'at_risk' : 'moved';
   if (typeof p === 'number' && a.referenceChance !== undefined && p !== a.referenceChance) return 'moved';
   // ⭐ G (DL ruling 12 Oct: the AIE's D2 exact equality, applied IN THE RUN'S OWN RECORDED FRAME): a goal measured AS a change is
   // scored as the PAIRED change (each option minus carrying on, on the same draw), so carrying on's change is 0 = the
@@ -777,13 +810,14 @@ export function goalChanceLicenceOf(
   const pairedChange = changeQuantity && sentRunPairsChange(constraints.sentRun, goalId)
     && sentRunScoresHeldChange(constraints.sentRun, graph, goalId, held);
   // Earned only where the line can name carrying on and the risk (`risksFacingStatusQuo` names each one).
-  const sqRisks = statusQuoId !== undefined && labelOfNode(nodes, statusQuoId) !== undefined ? risksFacingStatusQuo(graph, goalId, statusQuoId) : [];
+  const sqRisks = statusQuoId !== undefined && labelOfNode(nodes, statusQuoId) !== undefined ? risksFacingStatusQuo(graph, goalId, statusQuoId) : { labels: [], chance: 0 };
   const sqReading: StatusQuoReading = share !== null || statusQuoId === undefined || goal === undefined ? 'unknown'
     : statusQuoReadingOf({
       paired: timing.ordinary && (changeQuantity ? pairedChange : pairedLevelFacts(graph, goal, basis)),
       forecast: timing.forecast,
       row: sqRow,
-      riskOnPath: sqRisks.length > 0,
+      // The single goal's chance only: with several targets sent, the joint reads carrying on as before (Codex r1 on #3582).
+      ...(sqRisks.labels.length > 0 && !sentTargetRows(constraints) ? { riskChance: sqRisks.chance } : {}),
       // A quantity measured AS a change is 0 today by construction; a level's reference is its held level today (D2: in
       // the Run's own frame).
       reference: changeQuantity ? 0 : levelToday,
@@ -1011,7 +1045,7 @@ export function goalChanceLicenceOf(
   // DL ruling on served F2 (L1): carrying on's earned chance is said with the risk it still faces.
   const sqLabel = statusQuoId === undefined ? undefined : labelOfNode(nodes, statusQuoId);
   const atRisk = sqReading === 'at_risk' && statusQuoId !== undefined && licensed.includes(statusQuoId) && sqLabel !== undefined
-    ? [statusQuoRiskWords(sqLabel, sqRisks)] : [];
+    ? [statusQuoRiskWords(sqLabel, sqRisks.labels)] : [];
   const notes = [...(staticLevel ? [STATIC_MODEL_SCOPE_NOTE] : []), ...atRisk, ...rangeLines, ...(assumedRange === null ? [] : [olumiAssumedRangeLine(assumedRange)]),
     ...(onShare && hireLinkLimitedFor(graph, licensed) ? [OLUMI_HIRE_LIMIT_NOTE] : []),
     ...(ratioLicensed ? [CAPACITY_RATIO_ASSUMPTION_NOTE, CAPACITY_RATIO_COMPARISON_NOTE] : [])];
