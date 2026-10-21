@@ -91,7 +91,8 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       // factor has one author, so a range that excludes the figure, or one around an estimate, replaces it (held and asked).
       // The bounds come through the frame (`toRaw`), so 28 % against a range from 28 % reads 28.000000000000004 (Codex):
       // a range from the figure itself still holds it.
-      const eps = 1e-9 * Math.max(1, Math.abs(f.value ?? 0));
+      // Round-trip error only (a few units in the last place), never a gap a person could mean (Codex R2: 1e-9 relative kept 1e12 out of [1e12 + 500, …]).
+      const eps = 16 * Number.EPSILON * Math.max(1, Math.abs(f.value ?? 0), Math.abs(low), Math.abs(high));
       const keep = f.value !== null && f.source === 'user' && low - eps <= f.value && f.value <= high + eps;
       Object.assign(f, { value: keep ? f.value : null, low, high, ...theirs });
       return { model: m };

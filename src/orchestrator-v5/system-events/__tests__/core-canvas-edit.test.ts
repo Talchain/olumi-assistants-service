@@ -111,6 +111,23 @@ describe('a canvas gesture on a core scenario', () => {
     expect(mapLivingModel(written().living_model as typeof KNOWN_ANSWER).withheld.filter((w) => w.id === 'f')).toEqual([]);
   });
 
+  it('⛔ Codex R2 on #3575: the rounding allowance never keeps a figure the range leaves out, however large', async () => {
+    const big = structuredClone(KNOWN_ANSWER);
+    Object.assign(big.factors[0]!, { value: 1e12, unit: '£' });
+    Object.assign(big.options.find((o) => o.id === 'push')!.settings[0]!, { value: 2e12, unit: '£' });
+    const cap = mapLivingModel(big).frames.get('f')!.cap;
+    const stored: Rec = { ...mapLivingModel(big).graph, living_model: big };
+    loadGraph.mockResolvedValue(stored);
+    const base_graph_hash = computeExpectedGraphCasHashes(stored).expectedGraphAnalysisHash!;
+    const out = await send({ kind: 'prior_range_edit', target_id: 'f', range_min: (1e12 + 500) / cap, range_max: (1e12 + 2000) / cap, base_graph_hash });
+    expect(out.commitPerformed, JSON.stringify(out.response)).toBe(true);
+    expect((written().living_model as typeof KNOWN_ANSWER).factors.find((f) => f.id === 'f')!.value).toBeNull();
+    append.mockClear();
+    const from = await send({ kind: 'prior_range_edit', target_id: 'f', range_min: 1e12 / cap, range_max: (1e12 + 2000) / cap, base_graph_hash });
+    expect(from.commitPerformed, JSON.stringify(from.response)).toBe(true);
+    expect((written().living_model as typeof KNOWN_ANSWER).factors.find((f) => f.id === 'f')!.value).toBe(1e12);
+  });
+
   it('⛔ Codex on #3575: Olumi\'s own figure with a range is never called "stated"', () => {
     const est = structuredClone(KNOWN_ANSWER);
     Object.assign(est.factors[0]!, { source: 'olumi', quote: null, low: 0.2, high: 0.8 });
