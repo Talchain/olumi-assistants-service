@@ -47,7 +47,7 @@ describe('a canvas gesture on a core scenario', () => {
     expect(append).toHaveBeenCalledTimes(1);
     const push = (written().living_model as typeof KNOWN_ANSWER).options.find((o) => o.id === 'push')!;
     expect(push.settings).toEqual([{ factor_id: 'f', estimate_by: null, value: 0.8, low: null, high: null, unit: null, source: 'user', party: null, quote: null }]);
-    expect((written().nodes as Rec[]).find((n) => n.id === 'push')!.interventions.f).toMatchObject({ value: 0.8, raw_value: 0.8, source: 'user_edited' });
+    expect((written().nodes as Rec[]).find((n) => n.id === 'push')!.interventions.f).toMatchObject({ value: 0.8, raw_value: 0.8, source: 'user_specified' });
     expect(out.response.draft_graph).toBeDefined();
   });
 
