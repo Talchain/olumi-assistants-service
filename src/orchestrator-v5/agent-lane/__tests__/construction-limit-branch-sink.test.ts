@@ -14,6 +14,7 @@ import { buildCandidateSchema, buildModelFromBrief, type CallStructuredModel } f
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { structuralFacts } from '../structural-facts.js';
+import { contextNodeIds } from '../../../orchestrator/graph-structure-validator.js';
 
 type Json = Record<string, any>;
 const BRIEF = 'Should we switch our cloud provider from AWS to GCP? Monthly spend is £45k; we want to cut costs by 20% '
@@ -74,12 +75,16 @@ describe('a limited quantity\'s branch is never said to be unconnected (served c
     expect(stranded(graph)).toEqual([]);
     expect(JSON.stringify(out)).not.toMatch(/no chain of causes runs from it/);
     expect(readinessCodes(graph)).not.toContain('NO_PATH_TO_GOAL');
+    expect([...contextNodeIds(graph as never)], 'never said as context either').toEqual([]);
   });
 
-  it('CONTROL (the probe sees it): the same branch with no limit is listed as unable to reach the goal, and readiness refuses it', async () => {
+  // ⭐ DL ruling 21 Oct (structure class) supersedes "readiness refuses it": with no limit the branch cannot change the
+  // result, so it is CONTEXT — kept and said as not connected, never a block. The probe still sees it.
+  it('CONTROL (the probe sees it): the same branch with no limit is context — said as not connected, never a block', async () => {
     const { graph } = await build(draft((c) => { c.constraints = []; }));
-    expect(stranded(graph)).toEqual(expect.arrayContaining(['Migration complexity', 'Migration downtime']));
-    expect(readinessCodes(graph)).toContain('NO_PATH_TO_GOAL');
+    const context = contextNodeIds(graph as never);
+    expect((graph.nodes as Json[]).filter((n) => context.has(n.id)).map((n) => n.label)).toEqual(expect.arrayContaining(['Migration complexity', 'Migration downtime']));
+    expect(readinessCodes(graph)).not.toContain('NO_PATH_TO_GOAL');
   });
 
   it('admission never names the branch "unconnected" (its own ledger reads the same sink); the control does', () => {

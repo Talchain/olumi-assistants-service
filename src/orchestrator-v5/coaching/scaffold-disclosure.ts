@@ -537,13 +537,31 @@ export function buildScaffoldDisclosureForPartition(
  */
 export function buildAnalysisSubmissionDisclosure(
   heldPartition: ScaffoldPresencePartition,
-  excluded: readonly OmittedOptionRecord[],
+  excluded: readonly (OmittedOptionRecord & { readonly reason?: string; readonly goal_label?: string | null })[],
   keptLabelFor?: DedupKeptLabelResolver,
 ): string {
+  // ⭐ DL ruling 21 Oct: an option nothing links to the goal says so, with its own next step, never "it has no values set".
+  const pathless = excluded.filter((e) => e.reason === 'no_path_to_goal');
   return (
     buildBaselineHoldSuffix(heldPartition.analysed) +
-    buildScaffoldOmittedSuffix([...heldPartition.omitted, ...excluded], keptLabelFor)
+    buildScaffoldOmittedSuffix([...heldPartition.omitted, ...excluded.filter((e) => e.reason !== 'no_path_to_goal')], keptLabelFor) +
+    pathless.map((e) => ` ${pathlessOptionSentence(e.label, e.goal_label ?? null, e.option_id)}`).join('')
   );
+}
+
+/** The next step for an option with no path to the goal (DL ruling 21 Oct), with sanitised labels. */
+export function pathlessNextStep(optionLabel: string | null, goalLabel: string | null, optionId: string): string {
+  const option = optionLabel !== null ? sanitiseLabel(optionLabel, optionId) : null;
+  const goal = goalLabel ? sanitiseLabel(goalLabel, 'goal') : null;
+  return `Say what ${option !== null ? `'${option}'` : 'that option'} changes that affects ${goal !== null ? `'${goal}'` : 'the goal'}.`;
+}
+
+/** The reply's line for it: why it is out of this comparison, then the next step. */
+export function pathlessOptionSentence(optionLabel: string | null, goalLabel: string | null, optionId: string): string {
+  const option = optionLabel !== null ? sanitiseLabel(optionLabel, optionId) : null;
+  const goal = goalLabel ? sanitiseLabel(goalLabel, 'goal') : null;
+  return `${option !== null ? `'${option}'` : 'One option'} was left out of this comparison because nothing links it to `
+    + `${goal !== null ? `'${goal}'` : 'the goal'}. ${pathlessNextStep(optionLabel, goalLabel, optionId)}`;
 }
 
 /** The arms ran: say, relative to the model, which come out the same (true whatever the cause), and ask what would make them differ. */

@@ -1,10 +1,9 @@
 
 import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
 import { _resetConfigCache } from '../../../config/index.js';
-import { validateGraphStructure } from '../../../orchestrator/graph-structure-validator.js';
+import { validateGraphStructure, contextNodeIds } from '../../../orchestrator/graph-structure-validator.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { buildReadyGraph } from '../../graph-management/__tests__/fixtures.js';
-import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js';
 
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
 
@@ -47,7 +46,8 @@ function expectUnstampedOrphan(graph: unknown) {
   expect(parsed.nodes.find(n => n.id === RISK)).not.toHaveProperty('relies_on');
   expect(validateGraphStructure(parsed).violations.some(v =>
     (v.code === 'ORPHAN_NODE' || v.code === 'NO_PATH_TO_GOAL') && v.detail.includes(RISK))).toBe(true);
-  expect(resolveRunAdmission(parsed).willProceed).toBe(false);
+  // ⭐ DL ruling 21 Oct (structure class): unstamped, it is context (never a block), never a left-out precondition.
+  expect(contextNodeIds(parsed as never).has(RISK)).toBe(true);
 }
 beforeEach(() => {
   vi.clearAllMocks();

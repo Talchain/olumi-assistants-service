@@ -164,19 +164,19 @@ function withoutNode(id: string): Dict {
   return graph;
 }
 
-/** A graph carrying an extra factor wired to nothing → ORPHAN_NODE. */
-function withOrphanFactor(): Dict {
+/**
+ * A graph carrying an extra option wired to nothing → ORPHAN_NODE. (⭐ DL ruling 21 Oct, structure class: an unwired
+ * FACTOR is now context — kept, said, never a readiness issue — so the code's voice is pinned on an unwired option.)
+ */
+function withOrphanOption(): Dict {
   const graph = baseGraph();
   (graph.nodes as Dict[]).push({
-    id: 'fac_orphan',
-    kind: 'factor',
-    label: 'Unwired concern',
-    // Same node SHAPE as `fac_cost` on purpose: a divergent shape fails schema
-    // validation and the assessment returns SCHEMA_INVALID instead of the
-    // structural code, which the precondition pin below would (correctly)
-    // report as a vacuous fixture rather than let pass.
-    category: 'controllable',
-    observed_state: { value: 0.3, unit: '£', cap: 100 },
+    id: 'opt_orphan',
+    kind: 'option',
+    label: 'Unwired option',
+    // Same node SHAPE as `opt_b` on purpose: a divergent shape fails schema validation and the assessment returns
+    // SCHEMA_INVALID instead of the structural code, which the precondition pin below would report as vacuous.
+    interventions: { fac_cost: { value: 0.5, source: 'user_specified' } },
   });
   return graph;
 }
@@ -244,7 +244,7 @@ describe('END TO END — the canonical readiness authority emits the current-sta
   }> = [
     { name: 'a model with one option', code: 'FEWER_THAN_TWO_OPTIONS', graph: () => withoutNode('opt_b') },
     { name: 'a model with no decision', code: 'NO_DECISION', graph: () => withoutNode('dec_1') },
-    { name: 'a model with an unwired factor', code: 'ORPHAN_NODE', graph: () => withOrphanFactor() },
+    { name: 'a model with an unwired option', code: 'ORPHAN_NODE', graph: () => withOrphanOption() },
   ];
 
   it.each(CASES)('$name → the $code issue speaks in the present tense', ({ code, graph }) => {

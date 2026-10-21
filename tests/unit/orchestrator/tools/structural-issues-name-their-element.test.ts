@@ -13,6 +13,8 @@
 import { describe, it, expect } from 'vitest';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../../../src/orchestrator/tools/analysis-ready-helper.js';
 import { issuesAsWireBlockers } from '../../../../src/orchestrator-v5/compose/analysis-state-v1.js';
+import { validateGraphStructure } from '../../../../src/orchestrator/graph-structure-validator.js';
+import { GraphV3 } from '../../../../src/schemas/cee-v3.js';
 
 const edge = (from: string, to: string) => ({ from, to, strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' });
 
@@ -54,24 +56,26 @@ describe('(B4 class) every per-element structural issue names its element', () =
     ]);
   });
 
-  it('ORPHAN_NODE names the factor it is about', () => {
-    expect(scoped('ORPHAN_NODE')).toEqual([
-      { option_id: undefined, option_label: undefined, factor_id: 'fac_orphan', factor_label: 'Office rent' },
-    ]);
+  // ⭐ DL ruling 21 Oct (structure class): in readiness an unwired or dead-end factor is CONTEXT (kept, said, never a block),
+  // so readiness raises no issue for it. The chat-edit gate (the validator with no flag) still refuses both, by name.
+  const gate = (code: string) => validateGraphStructure(GraphV3.parse(GRAPH)).violations.filter((v) => v.code === code)
+    .map((v) => ({ factor_id: v.factor_id, factor_label: v.factor_label }));
+
+  it('ORPHAN_NODE names the factor it is about (the chat-edit gate); readiness reads it as context, never an issue', () => {
+    expect(gate('ORPHAN_NODE')).toEqual([{ factor_id: 'fac_orphan', factor_label: 'Office rent' }]);
+    expect(scoped('ORPHAN_NODE')).toEqual([]);
   });
 
-  it('the per-node NO_PATH_TO_GOAL names the factor it is about', () => {
-    expect(scoped('NO_PATH_TO_GOAL')).toContainEqual(
-      { option_id: undefined, option_label: undefined, factor_id: 'fac_deadend', factor_label: 'Team morale' },
-    );
+  it('the per-node NO_PATH_TO_GOAL names the factor it is about (the chat-edit gate); readiness reads it as context', () => {
+    expect(gate('NO_PATH_TO_GOAL')).toContainEqual({ factor_id: 'fac_deadend', factor_label: 'Team morale' });
+    expect(scoped('NO_PATH_TO_GOAL').filter((i) => i.factor_id === 'fac_deadend')).toEqual([]);
   });
 
   it('the WIRE blockers carry the same identities', () => {
     const wire = issuesAsWireBlockers(issues());
     const ids = wire.map((b) => `${b.code}:${b.option_id ?? ''}:${b.factor_id ?? ''}`);
     expect(ids).toContain('OPTION_NO_FACTOR_EDGES:opt_bare:');
-    expect(ids).toContain('ORPHAN_NODE::fac_orphan');
-    expect(ids).toContain('NO_PATH_TO_GOAL::fac_deadend');
+    expect(ids.filter((id) => /^(ORPHAN_NODE|NO_PATH_TO_GOAL)::fac_(orphan|deadend)$/.test(id)), 'context is never a structural wire blocker').toEqual([]);
   });
 
   it('CONTROL: a model-wide issue names no element (nothing is invented)', () => {

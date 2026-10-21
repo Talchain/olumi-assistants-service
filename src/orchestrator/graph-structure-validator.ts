@@ -408,10 +408,15 @@ export function validateGraphStructure(
   // No size check. Absolute graph size is `graphCaps`' question, not this
   // validator's — see the file header for the measurement that settled it.
   for (const id of retainedLimitOnlyNodeIds(graph)) leftOut.add(id);
+  // ⭐ DL ruling 21 Oct (structure class): an item with no path to the goal cannot change the result. In readiness it is
+  // context: kept in the model, on the canvas and in the Run (the engine ignores a dead end), said, never a block.
+  // Core's construction is told "context may stay unconnected" (draft-tool.ts REVIEW_FIRST); legacy wired or pruned it.
+  if (opts.leaveOutInertRisks === true) for (const id of contextNodeIds(graph)) leftOut.add(id);
   checkOrphanNodes(graph, violations, leftOut);
   checkOptionFactorEdges(graph, violations);
   checkOptionDecisionEdges(graph, violations);
-  optionsWithoutGoalPath(graph, leftOut, violations);
+  // …and an option with no path is left out of the comparison by the Run's gate with its own reason, not a block.
+  optionsWithoutGoalPath(graph, leftOut, violations, { optionsToGate: opts.leaveOutInertRisks === true });
   // ⭐ DL ruling (A), 15 Oct: an event-forecast option linked only to the kept-aside sketch is UNSIZED, not unconnected, so it
   // is no structural defect: readiness asks how much it changes the work (`assessCanonicalAnalysisReadiness`). While EVERY
   // option is unsized, the goal is unreachable from the decision for that same reason. A really unconnected option keeps
@@ -626,11 +631,56 @@ export function reachableNodeIds(
   return reachable;
 }
 
+/**
+ * Context (DL ruling 21 Oct): an item that is not a goal, decision or option and has NO directed path to the goal in the
+ * person's model, so it cannot change the result. A limit's own branch is not context (it is scored against its limit).
+ */
+export function contextNodeIds(graph: GoalPathGraph): Set<string> {
+  if (!graph.nodes.some((n) => n.kind === 'goal')) return new Set();
+  const reach = reachesGoalInPersonsModel(graph);
+  const limits = limitIdsOf(graph);
+  const sink = limitSinkBranch(graph.nodes, graph.edges.filter(isDirected), limits);
+  return new Set(graph.nodes.filter((n) => !['goal', 'decision', 'option'].includes(n.kind)
+    && !reach.has(n.id) && !limits.has(n.id) && !sink.has(n.id)).map((n) => n.id));
+}
+
+/**
+ * What reaches the goal in the person's model, not only in the drawn graph. A K3 risk is connected (its direction is not
+ * said yet, and K3 says so). On a core model the drawn graph leaves out what the mapper withholds (a risk whose chance is
+ * unknown, a shape not in the slice), so the model's own links, settings, mitigations and definitions count too: an
+ * item linked only through a withheld one is not context, and keeps its refusal.
+ */
+export function reachesGoalInPersonsModel(graph: GoalPathGraph): Set<string> {
+  const goals = graph.nodes.filter((n) => n.kind === 'goal').map((n) => n.id);
+  const reach = reachableNodeIds(graph.edges, [...goals, ...inertRiskBranch(graph.nodes, graph.edges, limitIdsOf(graph))], true);
+  const lm = graph.living_model as LivingModelLinks | undefined;
+  if (lm === null || typeof lm !== 'object') return reach;
+  const list = <T>(x: readonly T[] | undefined): readonly T[] => (Array.isArray(x) ? x : []);
+  const edges = [
+    ...list(lm.links).map((l) => ({ from: l.from, to: l.to })),
+    ...list(lm.options).flatMap((o) => list(o.settings).map((x) => ({ from: o.id, to: x.factor_id }))),
+    ...list(lm.risks).flatMap((r) => list(r.mitigations).map((x) => ({ from: x.factor_id, to: r.id }))),
+    ...[...list(lm.aims), ...list(lm.factors)].flatMap((x) => list(x.defined_as?.of).map((part) => ({ from: part, to: x.id }))),
+  ];
+  for (const id of reachableNodeIds(edges, list(lm.aims).map((a) => a.id), true)) reach.add(id);
+  return reach;
+}
+
+/** The parts of a stored living model that say what is linked to what (read defensively: it is stored JSON). */
+interface LivingModelLinks {
+  readonly aims?: readonly { readonly id: string; readonly defined_as?: { readonly of?: readonly string[] } | null }[];
+  readonly factors?: readonly { readonly id: string; readonly defined_as?: { readonly of?: readonly string[] } | null }[];
+  readonly options?: readonly { readonly id: string; readonly settings?: readonly { readonly factor_id: string }[] }[];
+  readonly risks?: readonly { readonly id: string; readonly mitigations?: readonly { readonly factor_id: string }[] }[];
+  readonly links?: readonly { readonly from: string; readonly to: string }[];
+}
+
 /** The admitted data needed by the existing path referee; no schema projection or guessed constraints. */
 export interface GoalPathGraph {
   readonly nodes: readonly { readonly id: string; readonly kind: string; readonly label: string; readonly category?: unknown; readonly relies_on?: unknown }[];
   readonly edges: readonly { readonly from: string; readonly to: string; readonly edge_type?: string }[];
   readonly goal_constraints?: readonly { readonly node_id?: string }[];
+  readonly living_model?: unknown;
 }
 
 /**
@@ -641,6 +691,7 @@ export function optionsWithoutGoalPath(
   graph: GoalPathGraph,
   leftOut: ReadonlySet<string> = inertRiskBranch(graph.nodes, graph.edges, limitIdsOf(graph)),
   violations: StructuralViolation[] = [],
+  opts: { readonly optionsToGate?: boolean } = {},
 ): Set<string> {
   const refusedOptions = new Set<string>();
   const goalNodes = graph.nodes.filter((n) => n.kind === 'goal');
@@ -733,6 +784,7 @@ export function optionsWithoutGoalPath(
   // and every ancestor of it. Any other dead end — one reaching no limit, a limited node with an onward edge that misses
   // the goal, or a limited island no lever reaches — is still refused. Journey C's all-lever parents is a case of this;
   // an exogenous cause of a limited quantity is part of its branch (this supersedes #2129's parents-only contrast).
+  let personsReach: Set<string> | undefined;
   const limitTargetIds = limitIdsOf(graph);
   const limitSinkBranchIds = limitSinkBranch(graph.nodes, graph.edges.filter(isDirected), limitTargetIds);
 
@@ -749,6 +801,7 @@ export function optionsWithoutGoalPath(
     const hasAnyEdge = graph.edges.some((e) => e.from === node.id || e.to === node.id);
     if (hasAnyEdge) {
       if (node.kind === 'option') refusedOptions.add(node.id);
+      if (node.kind === 'option' && opts.optionsToGate === true && !(personsReach ??= reachesGoalInPersonsModel(graph)).has(node.id)) continue;
       violations.push({
         code: 'NO_PATH_TO_GOAL',
         detail: `Node "${node.id}" (${node.label}) cannot reach the goal via directed paths`,

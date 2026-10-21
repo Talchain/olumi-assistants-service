@@ -24,6 +24,7 @@ import { goalTargetGapOf } from '../goal-target/goal-target-gap.js';
 import { deriveEmittedGoalDirection } from '../goal-target/goal-direction.js';
 import { deriveGoalIntent } from '../coaching/objective-contradiction.js';
 import { inertRiskBranch, preconditionRiskIds } from '../../graph/inert-risk.js';
+import { contextNodeIds } from '../../orchestrator/graph-structure-validator.js';
 import { reliesOnRiskLine } from '../routing/relies-on-risk.js';
 import { unsizedOlumiRiskLineFor, type RunOmittedRisk } from './unsized-risk.js';
 import { withoutProposalIds } from './display-ids.js';
@@ -166,7 +167,7 @@ const withinMonths = (goal: Rec): string => {
  * the Run, which proceeds — so the Run says so, or its results would silently ignore a risk the user can see on the canvas.
  */
 interface LeftOutRiskLine {
-  readonly kind: 'inert' | 'relies_on' | 'unsized';
+  readonly kind: 'inert' | 'relies_on' | 'unsized' | 'context';
   readonly riskId: string;
   readonly line: string;
   readonly chanceOmission: boolean;
@@ -224,7 +225,23 @@ function leftOutRiskLines(graph: unknown, goalLabel: string, cells: readonly Opt
     const withIt = named.length === 0 ? '' : ` (with ${list}, which ${named.length === 1 ? 'feeds' : 'feed'} only what is left out)`;
     return { kind: 'inert' as const, riskId: r.id as string, line: `"${labelOf(r)}"${withIt} is left out of this analysis until you say whether it raises or lowers "${goalLabel}".`,
       chanceOmission: false };
-  }), ...unsized];
+  }), ...contextLines(nodes, allEdges, g, leftOut, goalLabel, labelOf), ...unsized];
+}
+
+/**
+ * ⭐ Context (DL ruling 21 Oct, structure class): an item nothing connects to the goal cannot change the result; it stays in
+ * the model and is said once with the coaching, in the DL's words. K3's left-out risks and what feeds them say their own line.
+ */
+function contextLines(nodes: readonly Rec[], edges: readonly { from: string; to: string; edge_type?: unknown }[], g: Rec | undefined,
+  leftOut: ReadonlySet<string>, goalLabel: string, labelOf: (n: Rec) => string): LeftOutRiskLine[] {
+  const context = contextNodeIds({ nodes: nodes.map((n) => ({ id: n.id as string, kind: String(n.kind ?? ''), label: labelOf(n),
+    ...(n.category !== undefined ? { category: n.category } : {}), ...(n.relies_on !== undefined ? { relies_on: n.relies_on } : {}) })),
+    edges: edges.map((e) => ({ from: e.from, to: e.to, ...(typeof e.edge_type === 'string' ? { edge_type: e.edge_type } : {}) })),
+    goal_constraints: (Array.isArray(g?.goal_constraints) ? g.goal_constraints : []).map(recordOf)
+      .flatMap((k) => (typeof k?.node_id === 'string' ? [{ node_id: k.node_id }] : [])), living_model: g?.living_model });
+  return nodes.filter((n) => context.has(n.id as string) && !leftOut.has(n.id as string)).map((n) => ({ kind: 'context' as const, riskId: n.id as string,
+    line: `"${labelOf(n)}" isn't connected to "${goalLabel}", so it doesn't change this result. It stays in your model as context; say how it affects "${goalLabel}" if it does.`,
+    chanceOmission: false }));
 }
 
 /** The exact singular/plural prefixes identify the one horizon fact without interpreting narrator wording. */
@@ -439,7 +456,7 @@ export function withDecisionInputAskDisplay(text: string, graph: unknown): strin
 
 export function decisionInputLines(graph: unknown, ctx: DecisionInputAskContext,
   /** Select only this existing typed exclusion; no horizon or missing-input ask is added. */
-  opts: { readonly onlyRiskKind?: LeftOutRiskLine['kind'] } = {}): string[] {
+  opts: { readonly onlyRiskKind?: LeftOutRiskLine['kind'] | readonly LeftOutRiskLine['kind'][] } = {}): string[] {
   if (!ctx.builtOrRan) return [];
   const goal = goalOf(graph);
   const label = typeof goal?.label === 'string' ? goal.label.trim() : '';
@@ -447,7 +464,8 @@ export function decisionInputLines(graph: unknown, ctx: DecisionInputAskContext,
   // ⭐ K3 (DL on lease 5945974225; CODEX P1; HARNESS CR): the HOST is the one writer — said on the build turn (and its
   // automatic first analysis) and on every Run, never handed to the narrator, so it is said exactly once by construction.
   const risks = leftOutRiskLines(graph, label, ctx.chanceCells ?? [], ctx.omittedRisks);
-  const leftOut = risks.filter(line => opts.onlyRiskKind === undefined || line.kind === opts.onlyRiskKind).map(line => line.line);
+  const only = opts.onlyRiskKind === undefined ? undefined : ([] as LeftOutRiskLine['kind'][]).concat(opts.onlyRiskKind);
+  const leftOut = risks.filter(line => only === undefined || only.includes(line.kind)).map(line => line.line);
   if (opts.onlyRiskKind !== undefined) return leftOut;
   const a7 = untestedHorizonLineForCells(graph, ctx.chanceCells ?? []);
   const rawWanted = ctx.awaitingApproval || /\?/.test(ctx.restingText) ? null : rawDecisionInputAsk(graph);

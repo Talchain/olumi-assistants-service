@@ -77,9 +77,11 @@ import { filterOlumiProposedOptions } from './olumi-option-filter.js';
 import { guardAnalysisGraphIntercepts } from './run-analysis-intercept-guard.js';
 import { guardAnalysisParticipation } from './run-analysis-participation-guard.js';
 import { withoutPreconditionRisks } from '../../../graph/inert-risk.js';
+import { optionsWithoutGoalPath, reachesGoalInPersonsModel, type GoalPathGraph } from '../../../orchestrator/graph-structure-validator.js';
 import { withoutUnsizedOlumiRisksRecorded } from '../../agent-lane/unsized-risk.js';
 import { projectRequestInterventionsToWireScale, decideAnalysisScaleBlock, findScaleIncoherentBaselineFactorIds } from '../plot-intervention-scale.js';
 import type { ScaffoldedOptionRecord } from '../../coaching/scaffold-disclosure.js';
+import { pathlessNextStep } from '../../coaching/scaffold-disclosure.js';
 import {
   buildFactorScaleMap,
   extractNumericInterventionValue,
@@ -139,7 +141,10 @@ export interface ExcludedOptionRecord {
   readonly option_id: string;
   /** Raw option label (unsanitised); null when the node carried none. */
   readonly label: string | null;
-  readonly reason: 'no_interventions';
+  /** `no_path_to_goal` (DL ruling 21 Oct): nothing links the option to the goal, so it cannot change the result. */
+  readonly reason: 'no_interventions' | 'no_path_to_goal';
+  /** The goal's own label, for the `no_path_to_goal` next step ("say what it changes that affects …"). */
+  readonly goal_label?: string | null;
 }
 
 export interface AnalysableOptionGateOutcome {
@@ -166,6 +171,12 @@ export function comparisonAfterExclusionsRefusal(
     };
   }
   if (gate.excluded.length === 0) return null;
+  const pathless = gate.excluded.filter((e) => e.reason === 'no_path_to_goal');
+  if (pathless.length > 0) {
+    const step = pathlessNextStep(pathless[0]!.label, pathless[0]!.goal_label ?? null, pathless[0]!.option_id);
+    return { message: 'An option with no path to the goal leaves too few to compare',
+      nextStep: `I've left out options that nothing links to the goal, and that leaves fewer than two options, so there's nothing to compare yet. ${step}` };
+  }
   const label = firstUsableExcludedLabel(gate.excluded);
   return {
     message: 'Excluding unanalysable options leaves too few to compare',
@@ -628,8 +639,22 @@ export function projectRunOptionSubmission(
     options: snapshot.options,
     graph: snapshot.rawPersistedGraph ?? snapshot.graph,
   });
-  const gate = gateAnalysableOptions({
-    options: userStatus.options,
+  // ⭐ DL ruling 21 Oct: an option nothing links to the goal is left out of the comparison with its own reason and next
+  // step, never a block on the whole Run (the validator gives it to this gate in readiness).
+  const optionIdOf = (o: Record<string, unknown>): string | null =>
+    typeof o.option_id === 'string' ? o.option_id : typeof o.id === 'string' ? o.id : null;
+  // Only an option with no path in the person's model: one linked through something the mapper withholds keeps its refusal.
+  const pathGraph = snapshot.graph as GoalPathGraph;
+  const reach = reachesGoalInPersonsModel({ ...pathGraph,
+    living_model: (snapshot.rawPersistedGraph as { living_model?: unknown } | undefined)?.living_model ?? pathGraph.living_model });
+  const noPath = new Set([...optionsWithoutGoalPath(pathGraph)].filter((id) => !reach.has(id)));
+  const goalNode = pathGraph.nodes?.find((n) => n.id === input.goalNodeId) ?? pathGraph.nodes?.find((n) => n.kind === 'goal');
+  const pathless: ExcludedOptionRecord[] = (userStatus.options as ReadonlyArray<Record<string, unknown>>)
+    .filter((o) => { const id = optionIdOf(o); return id !== null && noPath.has(id); })
+    .map((o) => ({ option_id: optionIdOf(o)!, label: typeof o.label === 'string' ? o.label : null, reason: 'no_path_to_goal' as const,
+      goal_label: typeof goalNode?.label === 'string' ? goalNode.label : null }));
+  const gateOnPaths = gateAnalysableOptions({
+    options: (userStatus.options as ReadonlyArray<Record<string, unknown>>).filter((o) => { const id = optionIdOf(o); return id === null || !noPath.has(id); }) as typeof userStatus.options,
     graph: snapshot.graph,
     rawPersistedGraph: snapshot.rawPersistedGraph,
     // P1-1 (one scale convention): the egress scale net is UNCONDITIONAL
@@ -640,6 +665,8 @@ export function projectRunOptionSubmission(
     // at this, its only production call site.)
     scaleNetEnabled: true,
   });
+  const gate: AnalysableOptionGateOutcome = pathless.length === 0 ? gateOnPaths
+    : { ...gateOnPaths, excluded: [...gateOnPaths.excluded, ...pathless] };
 
   const olumiFilter = filterOlumiProposedOptions({
     submitted: gate.options as ReadonlyArray<Record<string, unknown>>,

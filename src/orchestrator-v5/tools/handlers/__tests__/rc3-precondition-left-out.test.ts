@@ -11,7 +11,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { RunAnalysisResultSchema } from '@talchain/schemas/orchestrator';
 import type { PLoTClient } from '../../../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../../../orchestrator/types.js';
-import { validateGraphStructure } from '../../../../orchestrator/graph-structure-validator.js';
+import { validateGraphStructure, contextNodeIds } from '../../../../orchestrator/graph-structure-validator.js';
 import { assessCanonicalAnalysisReadiness } from '../../../../orchestrator/tools/analysis-ready-helper.js';
 import { inertRiskBranch, preconditionRiskIds, withoutPreconditionRisks } from '../../../../graph/inert-risk.js';
 import { structuralFacts } from '../../../agent-lane/structural-facts.js';
@@ -101,21 +101,26 @@ describe('RC3 a′ identity-keyed readiness and Run exclusion', () => {
     expect(facts.entities_that_cannot_reach_goal).not.toContain(RISK_LABEL);
   });
 
-  it('rc3-unstamped-control: exactly the same zero-edge shape remains an orphan and blocks readiness', () => {
+  // ⭐ DL ruling 21 Oct (structure class) supersedes "blocks readiness": the unstamped zero-edge risk is CONTEXT (kept, said
+  // as not connected, never a block). Kept: it is never left out as a precondition, and the chat-edit gate still refuses it.
+  it('rc3-unstamped-control: exactly the same zero-edge shape is never a precondition — it is context, and the chat-edit gate still calls it an orphan', () => {
     const unstamped = withRisk();
     delete unstamped.nodes.find((n: Json) => n.id === RISK_ID).relies_on;
     expect(leftOut(unstamped).has(RISK_ID)).toBe(false);
-    expect(assessCanonicalAnalysisReadiness(unstamped).safeToAnalyse).toBe(false);
-    expect(validateGraphStructure(unstamped as never, { leaveOutInertRisks: true }).violations)
+    expect(contextNodeIds(unstamped as never).has(RISK_ID)).toBe(true);
+    expect(contextNodeIds(withRisk() as never).has(RISK_ID), 'contrast: the stamped one is left out, not context').toBe(false);
+    expect(assessCanonicalAnalysisReadiness(unstamped).blockingIssues.map((i) => i.code)).not.toContain('ORPHAN_NODE');
+    expect(validateGraphStructure(unstamped as never).violations)
       .toContainEqual(expect.objectContaining({ code: 'ORPHAN_NODE', detail: expect.stringContaining(RISK_ID) }));
     expect(withoutPreconditionRisks(unstamped)).toBe(unstamped);
     expect(structuralFacts(unstamped.nodes, unstamped.edges, limitsOf(unstamped)).entities_with_no_connections).toContain(RISK_LABEL);
   });
 
-  it.each(['pro_plan_price', 'absent_option'])('rc3-stamp-bad-option: %s is not an existing option, so still blocks', (option_id) => {
+  // ⭐ DL ruling 21 Oct supersedes "still blocks": a bad stamp is never a precondition (kept), so the risk is context.
+  it.each(['pro_plan_price', 'absent_option'])('rc3-stamp-bad-option: %s is not an existing option, so it is never left out as a precondition — it is context', (option_id) => {
     const invalid = withRisk({ option_id });
     expect(leftOut(invalid).has(RISK_ID)).toBe(false);
-    expect(assessCanonicalAnalysisReadiness(invalid).safeToAnalyse).toBe(false);
+    expect(contextNodeIds(invalid as never).has(RISK_ID)).toBe(true);
     expect(withoutPreconditionRisks(invalid)).toBe(invalid);
   });
 
