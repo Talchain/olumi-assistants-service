@@ -47,6 +47,7 @@ describe('the adapters as SDK function tools', () => {
     expect(row).toMatchObject({ name: 'note_on_item', ok: true, mutated: false });
     expect(result.ui_directive).toEqual({ type: 'ui_directive', verb: 'highlight',
       targets: [{ id: 'staff', label: 'Assistants on shift', kind: 'factor' }], note: 'Is one more assistant enough?', source: 'composer' });
+    expect(result.note_basis, 'the revision it was read at, for the route to bind').toBe('h_one');
   });
 
   it('CONTRAST: no other tool result carries a directive', async () => {

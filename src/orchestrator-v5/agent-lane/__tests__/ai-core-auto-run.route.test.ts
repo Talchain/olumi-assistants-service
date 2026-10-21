@@ -159,11 +159,14 @@ describe('PATH-B gap 4: commit and Undo each run the existing Run pipeline once;
   let calls: Json[] = [];
   let outputs: (Json[] | 'fail')[] = [];
   let runTurns = 0;
+  /** A change between the AI's calls (another writer), seen by the model call about to be answered. */
+  let beforeModelCall: ((body: Json) => void) | undefined;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
       if (String(url).endsWith('/v1/conversations')) return json({ id: 'conv_gap4', object: 'conversation' });
       const body = JSON.parse(String(init?.body ?? '{}')) as Json;
       calls.push(body);
+      beforeModelCall?.(body);
       const next = outputs.shift() ?? [{ type: 'message', text: COACHED }];
       if (next === 'fail') return json({ error: { message: 'scripted provider failure', type: 'server_error' } }, 400);
       return json(responsesBody(next));
@@ -198,6 +201,9 @@ describe('PATH-B gap 4: commit and Undo each run the existing Run pipeline once;
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   beforeEach(() => {
     rows.clear(); runRows.clear(); runFacts.clear(); conversationIds.clear(); pausedRun = null; calls = []; outputs = []; runTurns = 0; probe.applied = 0;
+    beforeModelCall = undefined;
+    // The store's own read of the saved scenario (the other-writer recheck): the live world, as the graph route serves it.
+    store.readExistingScenario.mockImplementation(async () => ({ revision: 7, graph: world.graph }) as never);
     Object.assign(world, { graph: GRAPH_AT_4, hash: HASH_4, ranOnSaved: false, prior: true, runStatus: 200, delta: true });
     head = { status: 'ok', value: versionRow({ creation_kind: 'committed_mutation', source_version_id: null, restored_from_version_id: null, label: 'Edit Capacity', id: EDIT_V }) };
   });
@@ -242,6 +248,16 @@ describe('PATH-B gap 4: commit and Undo each run the existing Run pipeline once;
     expect(blocks.filter((b) => b.type === 'ui_directive')).toHaveLength(1);
     expect(probe.applied, 'a note writes nothing').toBe(0);
     expect(runTurns).toBe(0);
+  });
+
+  it('⭐ Codex R1 (3): the model changed after the note was read (another writer) → the note is not shipped beside the new revision', async () => {
+    outputs = [[{ type: 'function_call', name: 'note_on_item', call_id: 'note_call', args: { item_id: 'f', note: 'What would make Capacity stop driving Velocity?' } }], [{ type: 'message', text: 'I have put a question beside Capacity.' }]];
+    // Another writer saves after the note was read: the call that carries the note's tool output is the first one after it.
+    beforeModelCall = (body) => { if (toolOutputs(body).some((o) => o.call_id === 'note_call')) Object.assign(world, { graph: GRAPH_AT_2, hash: HASH_2 }); };
+    const r = await post({ turn_id: randomUUID(), message: 'What should I question here?', source: 'composer' });
+    expect(r.statusCode, r.body).toBe(200);
+    expect(outputOf('note_call'), 'PRECONDITION: the tool accepted the note at the earlier revision').toMatchObject({ status: 'ok' });
+    expect(((r.json() as Json).blocks as Json[] | undefined ?? []).filter((b) => b.type === 'ui_directive')).toHaveLength(0);
   });
 
   it('CONTRAST: the same turn with no note call ships no directive', async () => {

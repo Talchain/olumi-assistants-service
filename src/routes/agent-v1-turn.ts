@@ -177,7 +177,7 @@ import { composeLeaderClaim, composeAnalysisStateV1, NO_ANALYSIS_CONTEXT_DERIVAT
 import { canonicalStateFromFreshness } from '../orchestrator-v5/context/canonical-analysis-state.js';
 import { readScenarioAnalysis } from './scenario-graph-analysis-read.js';
 import { goalScopeClaimInput } from '../orchestrator-v5/compose/goal-scope-claim-input.js';
-import { AnalysisStateV1Schema, type AnalysisStateV1 } from '@talchain/schemas/boundary';
+import { AnalysisStateV1Schema, UiDirectiveBlockSchema, type AnalysisStateV1 } from '@talchain/schemas/boundary';
 import { cardCallFor, isMethodPress, methodTurnForReadback, methodTurnItems, settleMethodTurn, TALK_IT_THROUGH_CHIP, type MethodTurn } from '../orchestrator-v5/agent-lane/method-turn/method-turn.js';
 import { premortemProducerDirective, readPremortemProduction, premortemWorksheetDiagnosticsFor, methodReplySurvives } from '../orchestrator-v5/agent-lane/runtime/reasoning-artefacts/premortem.js';
 import {
@@ -5561,8 +5561,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // Data blocks stay bound to the current readback. The AI's reply owns the coaching move.
     const runCoaching = runTurnNextMove(lastRun, { scenarioId, graphHash, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, limitVerdicts });
     // ⭐ Olumi's note beside one item (`note_on_item`, core): the AI's own directive goes first, so it is the turn's one directive.
-    const itemNote = mode === 'core' ? (result?.tool_results ?? []).map((r) => (r as { ui_directive?: unknown })?.ui_directive)
-      .find((b) => b !== null && typeof b === 'object') : undefined;
+    // Shipped only while the saved model is still the revision it was read at (the turn cache cannot see another writer, so the
+    // store is asked again); a model changed since then gets no note about an item that may be gone.
+    const noted = mode === 'core' ? (result?.tool_results ?? []).map((r) => r as { ui_directive?: unknown; note_basis?: unknown })
+      .find((r) => r?.ui_directive !== null && typeof r?.ui_directive === 'object' && typeof r.note_basis === 'string') : undefined;
+    const itemNote = noted !== undefined && noted.note_basis === graphHash
+      && await canonicalViewBasisUnchanged(store, scenarioId, { graphHash: noted.note_basis as string }) ? noted.ui_directive : undefined;
     const coachingBound = [...(itemNote === undefined ? [] : [itemNote]), ...runBound, ...runCoaching.blocks.filter(b => !lastRunBlocks.includes(b))]
       .filter(block => !aiWroteReply || !['coaching', 'exercise'].includes(String((block as { type?: unknown })?.type)));
     // What changed since the last run: the run turn's own block and refusal reason, only beside that same run.
@@ -5577,7 +5581,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // Vestigial on this function (see its docblock); the readback's own typed verdict, never a literal.
           mayNameLeadingOption: (analysisState as { leader_claim?: { permitted?: unknown } } | undefined)?.leader_claim?.permitted === true,
         },
-      ).blocks;
+      ).blocks
+      // Egress rewrites ids to labels: a note it pushed past the contract is dropped, never shipped invalid.
+      .filter((block) => (block as { type?: unknown })?.type !== 'ui_directive' || UiDirectiveBlockSchema.safeParse(block).success);
 
     // A Run writes nothing: its interpretation is never passed through the WRITE narrator, whose
     // completion-claim stripper would delete a sentence and append a false write-status line

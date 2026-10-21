@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { UiDirectiveBlockSchema } from '@talchain/schemas/boundary';
 import { NOTE_MAX, noteOnItem } from '../note-on-item.js';
-import { graph, read } from './fixtures.js';
+import { read } from './fixtures.js';
 
 const ctx = { scenario_id: 'scn_1' };
 const NOTE = 'What would make two assistants on shift too few?';
@@ -15,7 +15,7 @@ describe('note_on_item', () => {
   it('a factor of the saved model gets the note beside it: highlight, one target with its own label and kind, Olumi as composer', async () => {
     const { dispatch, turn } = setup();
     const out = await noteOnItem({ dispatch }, ctx, { item_id: 'staff', note: `  ${NOTE} ` }, turn);
-    expect(out).toEqual({ status: 'ok', mutated: false, ran: false, data: { ui_directive: {
+    expect(out).toEqual({ status: 'ok', mutated: false, ran: false, data: { graph_hash: 'h_one', ui_directive: {
       type: 'ui_directive', verb: 'highlight', targets: [{ id: 'staff', label: 'Assistants on shift', kind: 'factor' }], note: NOTE, source: 'composer' } } });
     expect(out.status === 'ok' && UiDirectiveBlockSchema.safeParse(out.data.ui_directive).success).toBe(true);
     // A read only: the graph route, never a write.
@@ -23,19 +23,15 @@ describe('note_on_item', () => {
     expect(String((dispatch.mock.calls[0] as unknown[])[0])).toBe('/assist/v1/scenarios/scn_1/graph');
   });
 
-  it('a link with an id is named by its two ends', async () => {
-    const g = graph();
-    (g.edges as Record<string, unknown>[])[4] = { ...(g.edges as Record<string, unknown>[])[4], id: 'staff->goal' };
-    const { dispatch, turn } = setup(read({ graph: g }));
-    const out = await noteOnItem({ dispatch }, ctx, { item_id: 'staff->goal', note: NOTE }, turn);
-    expect(out).toMatchObject({ status: 'ok', data: { ui_directive: { targets: [{ id: 'staff->goal', label: 'Assistants on shift → Serve every visitor on the day', kind: 'edge' }] } } });
-  });
-
   it.each([
     ['an id not in the model', { item_id: 'nowhere', note: NOTE }, 'item_not_in_model'],
     ['the decision, which has no card note', { item_id: 'decision', note: NOTE }, 'item_not_in_model'],
     ['an empty note', { item_id: 'staff', note: '   ' }, 'note_empty'],
     ['a note over the contract limit', { item_id: 'staff', note: 'x'.repeat(NOTE_MAX + 1) }, 'note_too_long'],
+    ['a link (no link identity yet)', { item_id: 'staff->goal', note: NOTE }, 'item_not_in_model'],
+    ['a note that ranks options ("best")', { item_id: 'add_staff', note: 'This is the best option here.' }, 'note_ranks_options'],
+    ['a note that recommends', { item_id: 'add_staff', note: 'I would recommend testing this first.' }, 'note_ranks_options'],
+    ['a note naming a machine id', { item_id: 'staff', note: 'Does add_staff really move this?' }, 'note_names_an_id'],
   ])('refuses %s, and reads nothing it does not need', async (_name, args, reason) => {
     const { dispatch, turn } = setup();
     expect(await noteOnItem({ dispatch }, ctx, args, turn)).toMatchObject({ status: 'refused', reason });
@@ -46,6 +42,11 @@ describe('note_on_item', () => {
     const { dispatch, turn } = setup();
     expect(await noteOnItem({ dispatch }, ctx, { item_id: 'staff', note: NOTE }, turn)).toMatchObject({ status: 'ok' });
     expect(await noteOnItem({ dispatch }, ctx, { item_id: 'queue', note: NOTE }, turn)).toMatchObject({ status: 'refused', reason: 'one_note_per_turn' });
+  });
+
+  it('CONTRAST: a plain word that is also an id ("goal") is ordinary wording, not an id', async () => {
+    const { dispatch, turn } = setup();
+    expect(await noteOnItem({ dispatch }, ctx, { item_id: 'staff', note: 'Does this really serve the goal on busy days?' }, turn)).toMatchObject({ status: 'ok' });
   });
 
   it('CONTRAST: a note at exactly the limit is kept whole', async () => {

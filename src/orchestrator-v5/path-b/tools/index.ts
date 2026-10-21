@@ -65,8 +65,9 @@ export interface ToolCallResult {
   readonly refusal?: string;
   /** The commit's own receipt, as every writer reports one (`turn-receipts.ts` lifts it onto `_agent.receipts`). */
   readonly receipts?: readonly Record<string, unknown>[];
-  /** `note_on_item`'s block, for the route to ship beside the reply. */
+  /** `note_on_item`'s block, for the route to ship beside the reply, and the revision it was read at (`note_basis`). */
   readonly ui_directive?: Record<string, unknown>;
+  readonly note_basis?: string;
 }
 export type OnToolCall = (row: TraceRow, result: ToolCallResult) => void;
 
@@ -85,7 +86,7 @@ export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLa
         ...(outcome.status === 'ok' && typeof outcome.data.public_label === 'string' ? { public_label: outcome.data.public_label } : {}), outcome: row.outcome, ...(row.refusal === null ? {} : { refusal: row.refusal }),
         ...(receipt !== null && typeof receipt === 'object' ? { receipts: [receipt as Record<string, unknown>] } : {}),
         ...(outcome.status === 'ok' && outcome.data.ui_directive !== null && typeof outcome.data.ui_directive === 'object'
-          ? { ui_directive: outcome.data.ui_directive as Record<string, unknown> } : {}) });
+          ? { ui_directive: outcome.data.ui_directive as Record<string, unknown>, note_basis: String(outcome.data.graph_hash) } : {}) });
     } catch { /* a recorder never decides the outcome */ }
     return JSON.stringify(outcome);
   };
