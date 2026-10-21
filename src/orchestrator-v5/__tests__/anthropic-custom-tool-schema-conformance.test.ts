@@ -49,23 +49,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, it, expect } from 'vitest';
 
-import {
-  buildProposeStructuralEditTool,
-  buildStructuralEditGrounding,
-  type StructuralEditGrounding,
-} from '../tools/propose-structural-edit.js';
-
 const SRC_ROOT = join(fileURLToPath(new URL('../../', import.meta.url)));
-
-/** A grounded add-option model, so its tool schema is built the way it is served. */
-const GROUNDING: StructuralEditGrounding = buildStructuralEditGrounding({
-  nodes: [
-    { id: 'dec_mrr', kind: 'decision', label: 'MRR Growth Strategy' },
-    { id: 'goal_mrr', kind: 'goal', label: 'Reach £250,000 MRR' },
-    { id: 'fac_churn', kind: 'factor', label: 'Monthly churn' },
-  ],
-  edges: [{ from: 'dec_mrr', to: 'goal_mrr' }],
-})!;
 
 /**
  * Every custom tool schema this service can send to Anthropic, taken from the
@@ -86,11 +70,10 @@ const SERVED_TOOL_SCHEMAS: readonly {
   readonly label: string;
   readonly schema: unknown;
 }[] = [
-  {
-    label: 'propose_structural_edit',
-    schema: buildProposeStructuralEditTool(GROUNDING).input_schema,
-  },
-
+  // EMPTY since 21 Oct 2026: `propose_structural_edit`, the only producer, was
+  // retired with the coach's structural-edit tool. The completeness census
+  // below proves the tree has no other producer, so empty is measured, not
+  // assumed. A new producer goes RED there and must be added here.
 ];
 
 /**
@@ -107,8 +90,10 @@ const SERVED_TOOL_SCHEMAS: readonly {
  */
 const TOOL_SCHEMA_CONSTRUCTION_FILES: readonly string[] = [
   'adapters/llm/anthropic.ts',
-  'orchestrator-v5/tools/propose-structural-edit.ts',
 ];
+
+/** Files that RE-WRAP a caller's schema rather than producing one (see above). */
+const RE_WRAPPING_FILES: readonly string[] = ['adapters/llm/anthropic.ts'];
 
 interface ObjectNode {
   readonly path: string;
@@ -164,6 +149,14 @@ function tsFilesUnder(dir: string): string[] {
   return out;
 }
 
+/** Every source file that constructs a tool `input_schema`, relative to `src/`. */
+function toolSchemaConstructionFilesInTree(): string[] {
+  return tsFilesUnder(SRC_ROOT)
+    .filter((file) => /^\s*input_schema:\s*\{/m.test(readFileSync(file, 'utf8')))
+    .map((file) => relative(SRC_ROOT, file).split(sep).join('/'))
+    .sort();
+}
+
 describe('⭐⭐ 2.655 — every custom tool schema Anthropic is sent is API-conformant', () => {
   it('the walker reaches into the schemas (positive control: it is not vacuous)', () => {
     // If the walker silently returned [], every assertion below would pass by
@@ -175,6 +168,15 @@ describe('⭐⭐ 2.655 — every custom tool schema Anthropic is sent is API-con
     }));
     for (const { label, count } of perTool) {
       expect(count, `${label} contributed no object nodes to the sweep`).toBeGreaterThan(0);
+    }
+    if (SERVED_TOOL_SCHEMAS.length === 0) {
+      // An empty registry is legal ONLY while the tree has no producer: every
+      // file constructing an `input_schema` must be a re-wrapper.
+      const producers = toolSchemaConstructionFilesInTree().filter(
+        (file) => !RE_WRAPPING_FILES.includes(file),
+      );
+      expect(producers, 'a tool-schema producer exists but the sweep registry is empty').toEqual([]);
+      return;
     }
     expect(perTool.reduce((n, t) => n + t.count, 0)).toBeGreaterThan(
       SERVED_TOOL_SCHEMAS.length,
@@ -263,10 +265,7 @@ describe('⭐⭐ 2.655 — every custom tool schema Anthropic is sent is API-con
     // the list is right. This block is the completeness half — it is derived
     // from the SOURCE TREE, not from the registry, so a third tool cannot be
     // added without a row here.
-    const found = tsFilesUnder(SRC_ROOT)
-      .filter((file) => /^\s*input_schema:\s*\{/m.test(readFileSync(file, 'utf8')))
-      .map((file) => relative(SRC_ROOT, file).split(sep).join('/'))
-      .sort();
+    const found = toolSchemaConstructionFilesInTree();
     expect(
       found,
       'A file constructs a tool input_schema and is not accounted for here. ' +

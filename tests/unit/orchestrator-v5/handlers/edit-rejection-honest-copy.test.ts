@@ -1,218 +1,56 @@
 /**
- * edit_graph rejection copy — TRUTHFULNESS over the WHOLE code domain.
+ * edit_graph rejection codes — the PLoT failure classifier stays honest over its
+ * WHOLE throwable domain.
  *
- * The defect this pins: `PLOT_UNAVAILABLE` (the analysis service was
- * unreachable — an outage) shared an arm with `structural_validation`, so the
- * product told the user *"I wasn't able to make that change safely. Can you
- * describe what you'd like to add or change in simpler terms?"* — i.e. it
- * blamed the user's own input for our infrastructure failure. The `default`
- * arm did the same, so five further codes, every one of them a SYSTEM-side
- * failure, inherited the same false accusation.
- *
- * ⭐ WHY THIS SUITE IS DOMAIN-SHAPED, NOT CASE-SHAPED (CLAUDE.md review
- * doctrine): a copy mapping is a claim about EVERY code that can reach it, not
- * about the one the bug report came in through. So the table below is the
- * complete domain, and a separate assertion proves the table is neither short
- * nor carrying dead rows against the exported `EDIT_REJECTION_CODES`.
- *
- * ⭐ ASSERTIONS BIND BY IDENTITY: exact code string → exact reason string →
- * exact user-visible sentence, spelled out here rather than imported from the
- * module under test. Importing the copy would make these tests agree with
- * whatever the module says, which is a guard agreeing with itself.
+ * ⚠ 21 Oct 2026 — the host-written rejection copy
+ * (`orchestrator-v5/handlers/edit-rejection-text.ts`) and the code → reason map
+ * (`mapCodeToRejectionReason`) were retired as caller-less. Their copy rows went
+ * with them. What stays asserts LIVE code in `orchestrator/tools/edit-graph.ts`:
+ * the exported code set, and `classifyPlotFailureCode`. The copy claims are
+ * restated at the classifier, where they are decided: the outage sentence was
+ * reachable ONLY from `PLOT_UNAVAILABLE`, and the user was blamed ONLY by the
+ * user-cause codes below.
  */
 import { describe, it, expect } from 'vitest';
 import {
-  buildEditRejectionResponse,
-  type EditRejectionReason,
-} from '../../../../src/orchestrator-v5/handlers/edit-rejection-text.js';
-import {
-  mapCodeToRejectionReason,
   classifyPlotFailureCode,
   EDIT_REJECTION_CODES,
   type EditRejectionCode,
 } from '../../../../src/orchestrator/tools/edit-graph.js';
 import { PLoTError, PLoTTimeoutError } from '../../../../src/orchestrator/plot-client.js';
 
-/** The accusation that must never be shown for a failure the user did not cause. */
-const STRUCTURAL_ACCUSATION =
-  "I wasn't able to make that change safely. " +
-  "Can you describe what you'd like to add or change in simpler terms?";
-
-const SERVICE_UNAVAILABLE_COPY =
-  "I couldn't reach the analysis service, so nothing in your model has changed. " +
-  'Try again in a moment.';
-
-const INTERNAL_FAILURE_COPY =
-  'Something went wrong on my side, so nothing in your model has changed. ' +
-  'Try again in a moment — and if it keeps happening, describing the change a ' +
-  'different way may help.';
-
-const UNKNOWN_FAILURE_COPY =
-  "I couldn't complete that change, and nothing in your model has changed. " +
-  'Try again in a moment, or describe the change a different way.';
-
 /**
- * THE COMPLETE DOMAIN. Derived by reading every `buildRejectionResult` call
- * site at CEE staging d0544243 — 11 sites, 9 distinct codes, plus `undefined`
- * (the parameter is optional).
- *
- * `userFault` records WHOSE failure this is, and is what makes the accusation
- * assertion below meaningful rather than decorative.
+ * THE COMPLETE DOMAIN, derived by reading every `buildRejectionResult` call
+ * site at CEE staging d0544243, with WHOSE failure each code is.
  */
-const CODE_TABLE: ReadonlyArray<{
-  code: EditRejectionCode;
-  reason: EditRejectionReason;
-  blame: 'user' | 'system' | 'mixed';
-}> = [
-  // The user's request genuinely was the problem — the accusation is TRUE here.
-  { code: 'MAX_OPERATIONS_EXCEEDED', reason: 'too_many_operations', blame: 'user' },
-  { code: 'STRUCTURAL_VALIDATION_FAILED', reason: 'structural_validation', blame: 'user' },
-  { code: 'PLOT_SEMANTIC_REJECTED', reason: 'structural_validation', blame: 'user' },
-  // Outage — PROVABLY no usable answer from the analysis service. Narrow: only
-  // a timeout or a 5xx reaches this code (see `classifyPlotFailureCode`).
-  { code: 'PLOT_UNAVAILABLE', reason: 'service_unavailable', blame: 'system' },
-  // ⭐ PLoT ANSWERED, or we never sent, or the cause is not established. The
-  // rest of the old catch-all domain lives here, and it must claim NOTHING: a
-  // 400/413/429 or a malformed 200 means the service was reached, so "I
-  // couldn't reach the analysis service" would be false; a pre-fetch payload
-  // error means it was never sent; an abort means we gave up, not PLoT.
-  { code: 'PLOT_REQUEST_FAILED', reason: 'unknown_failure', blame: 'mixed' },
-  // System-side failures: our own synthesis or reconciliation broke.
-  { code: 'PLOT_APPLIED_GRAPH_OMITTED_WITH_REPAIRS', reason: 'internal_failure', blame: 'system' },
-  { code: 'SYNTHESIZED_GRAPH_INVALID', reason: 'internal_failure', blame: 'system' },
-  { code: 'APPLIED_GRAPH_UNAVAILABLE', reason: 'internal_failure', blame: 'system' },
-  // ⭐ MIXED, and the one code here with a dated live witness (staging 9a0541b,
-  // 3 Aug 2026): the edit LLM invents an operation that does not survive
-  // canonicalisation, on an under-specified user turn. Proximate cause ours,
-  // distal cause the turn — so `internal_failure` both over-attributes AND
-  // leads with the retry this repo's own 2.11 diagnosis calls a loop.
-  { code: 'OPERATION_DID_NOT_LAND', reason: 'unknown_failure', blame: 'mixed' },
-  // ⭐ MIXED — one code, two opposite causes. `encode-option-interventions.ts`
-  // emits an unresolved id both when the USER'S value is rejected by the
-  // canonical guards (`deriveValue`'s catch: unit mismatch / out-of-range /
-  // ambiguous bare number) and when OUR side cannot proceed (target factor
-  // unresolvable, no cap, ambiguous factor edges, encoder threw). No specific
-  // copy is true across it, so it must attribute nothing.
-  { code: 'OPTION_INTERVENTIONS_UNRESOLVABLE', reason: 'unknown_failure', blame: 'mixed' },
+const CODE_TABLE: ReadonlyArray<{ code: EditRejectionCode; blame: 'user' | 'system' | 'mixed' }> = [
+  { code: 'MAX_OPERATIONS_EXCEEDED', blame: 'user' },
+  { code: 'STRUCTURAL_VALIDATION_FAILED', blame: 'user' },
+  { code: 'PLOT_SEMANTIC_REJECTED', blame: 'user' },
+  { code: 'PLOT_UNAVAILABLE', blame: 'system' },
+  { code: 'PLOT_REQUEST_FAILED', blame: 'mixed' },
+  { code: 'PLOT_APPLIED_GRAPH_OMITTED_WITH_REPAIRS', blame: 'system' },
+  { code: 'SYNTHESIZED_GRAPH_INVALID', blame: 'system' },
+  { code: 'APPLIED_GRAPH_UNAVAILABLE', blame: 'system' },
+  { code: 'OPERATION_DID_NOT_LAND', blame: 'mixed' },
+  { code: 'OPTION_INTERVENTIONS_UNRESOLVABLE', blame: 'mixed' },
 ];
 
-describe('edit_graph rejection copy — honest over the whole code domain', () => {
-  it('PLOT_UNAVAILABLE maps to service_unavailable, NOT to structural_validation', () => {
-    expect(mapCodeToRejectionReason('PLOT_UNAVAILABLE')).toBe('service_unavailable');
-    expect(mapCodeToRejectionReason('PLOT_UNAVAILABLE')).not.toBe('structural_validation');
-  });
+const USER_BLAME_CODES = new Set(CODE_TABLE.filter((r) => r.blame === 'user').map((r) => r.code));
 
-  it('service_unavailable copy names the outage, states nothing changed, and offers a way forward', () => {
-    const { assistantText, suggestedActions } = buildEditRejectionResponse('service_unavailable');
-    // Exact sentence — identity, not a "contains the word analysis" predicate
-    // that a dozen other strings would satisfy.
-    expect(assistantText).toBe(SERVICE_UNAVAILABLE_COPY);
-    // Property 1: does not attribute the failure to the user's input.
-    expect(assistantText).not.toBe(STRUCTURAL_ACCUSATION);
-    expect(assistantText).not.toMatch(/simpler terms/i);
-    // Property 2: states the actual state of the world.
-    expect(assistantText).toMatch(/nothing in your model has changed/);
-    // Property 3: offers a route forward.
-    expect(assistantText).toMatch(/Try again/);
-    expect(suggestedActions.length).toBeGreaterThanOrEqual(1);
-  });
-
-  it('maps every rejection code to its exact reason (complete domain)', () => {
-    for (const row of CODE_TABLE) {
-      expect(mapCodeToRejectionReason(row.code), `code ${row.code}`).toBe(row.reason);
-    }
-  });
-
+describe('edit_graph rejection codes — the domain', () => {
   it('the domain table matches EDIT_REJECTION_CODES exactly — not short, no dead rows', () => {
-    // Union assertion in BOTH directions (CLAUDE.md trap 12d): derivation stops
-    // this table drifting from the module, and the module's own compile-time
-    // guard stops the module drifting from the call sites.
     const tableCodes = [...CODE_TABLE.map((r) => r.code)].sort();
     const exported = [...EDIT_REJECTION_CODES].sort();
     expect(tableCodes).toEqual(exported);
     expect(CODE_TABLE.length).toBe(10);
-  });
-
-  it('an absent code maps to unknown_failure, never to a specific accusation', () => {
-    expect(mapCodeToRejectionReason(undefined)).toBe('unknown_failure');
-    expect(mapCodeToRejectionReason(undefined)).not.toBe('structural_validation');
-    const { assistantText } = buildEditRejectionResponse('unknown_failure');
-    expect(assistantText).toBe(UNKNOWN_FAILURE_COPY);
-    expect(assistantText).not.toBe(STRUCTURAL_ACCUSATION);
-    expect(assistantText).toMatch(/nothing in your model has changed/);
-  });
-
-  it('a MIXED-cause code attributes blame in NEITHER direction', () => {
-    // The narrow regression this pins: mapping a mixed domain to
-    // `internal_failure` takes the blame for a guard that worked correctly (a
-    // unit-mismatched value IS the user's), and prescribes "try again in a
-    // moment", which is futile for that half. Mapping it to
-    // `structural_validation` blames the user for the system-side half. Both
-    // are false over part of the domain, so the copy must claim neither.
-    for (const row of CODE_TABLE.filter((r) => r.blame === 'mixed')) {
-      const reason = mapCodeToRejectionReason(row.code);
-      expect(reason, `${row.code} must not blame the user`).not.toBe('structural_validation');
-      expect(reason, `${row.code} must not blame our side`).not.toBe('internal_failure');
-      const text = buildEditRejectionResponse(reason).assistantText;
-      expect(text).not.toMatch(/on my side/i);
-      expect(text).not.toMatch(/simpler terms/i);
-      // It must still tell the truth about the model, and offer BOTH routes —
-      // retry for the system half, rephrase for the user half.
-      expect(text).toMatch(/nothing in your model has changed/);
-      expect(text).toMatch(/Try again/);
-      expect(text).toMatch(/describe the change a different way/);
-    }
-  });
-
-  it('no failure the user did not cause inherits the structural-validation accusation', () => {
-    for (const row of CODE_TABLE.filter((r) => r.blame !== 'user')) {
-      const text = buildEditRejectionResponse(mapCodeToRejectionReason(row.code)).assistantText;
-      expect(text, `code ${row.code} still blames the user`).not.toBe(STRUCTURAL_ACCUSATION);
-      expect(text, `code ${row.code} still asks for simpler terms`).not.toMatch(/simpler terms/i);
-      // ...and every one of them tells the truth about the state of the model.
-      expect(text, `code ${row.code} omits the state of the world`).toMatch(
-        /nothing in your model has changed/,
-      );
-    }
-  });
-
-  it('a failure the user DID cause keeps its accurate, specific copy', () => {
-    // The mirror-direction twin: fixing the lie must not flatten the honest
-    // arms into a generic apology. A code whose cause really is the user's
-    // request must still get the specific, actionable sentence.
-    expect(
-      buildEditRejectionResponse(mapCodeToRejectionReason('STRUCTURAL_VALIDATION_FAILED'))
-        .assistantText,
-    ).toBe(STRUCTURAL_ACCUSATION);
-    expect(mapCodeToRejectionReason('MAX_OPERATIONS_EXCEEDED')).toBe('too_many_operations');
-  });
-
-  it('internal_failure copy is honest about whose failure it was', () => {
-    const { assistantText, suggestedActions } = buildEditRejectionResponse('internal_failure');
-    expect(assistantText).toBe(INTERNAL_FAILURE_COPY);
-    expect(suggestedActions.length).toBeGreaterThanOrEqual(1);
-  });
-
-  it('every new reason emits at least one chip and no chip sets action_type', () => {
-    const newReasons: EditRejectionReason[] = [
-      'service_unavailable',
-      'internal_failure',
-      'unknown_failure',
-    ];
-    for (const reason of newReasons) {
-      const { suggestedActions } = buildEditRejectionResponse(reason);
-      expect(suggestedActions.length, `reason ${reason}`).toBeGreaterThanOrEqual(1);
-      for (const chip of suggestedActions) {
-        expect(chip.action_type, `reason ${reason}`).toBeUndefined();
-      }
-    }
   });
 });
 
 /**
  * ⭐⭐ THE SENTENCE'S TRUTH CONDITION OVER ITS *WHOLE* THROWABLE DOMAIN.
  *
- * The suite above pins code → reason → copy. It is structurally blind to the
+ * The table above pins the code domain. It is structurally blind to the
  * defect this block exists for, and the blindness is worth naming: its `blame`
  * column is the author's classification of a CODE, and no assertion there
  * enumerates the CAUSE CLASSES BEHIND ONE CODE. `PLOT_UNAVAILABLE` used to be
@@ -230,6 +68,8 @@ describe('edit_graph rejection copy — honest over the whole code domain', () =
  */
 describe('PLoT failure classification — the outage sentence over its whole domain', () => {
   const OUTAGE_FIRST_CLAUSE = "I couldn't reach the analysis service";
+  /** The only code whose (retired) copy carried that sentence. */
+  const OUTAGE_CODE: EditRejectionCode = 'PLOT_UNAVAILABLE';
 
   /**
    * The complete set of classes that can reach `catch (plotError)`, derived at
@@ -315,40 +155,34 @@ describe('PLoT failure classification — the outage sentence over its whole dom
     },
   ];
 
-  it('never shows the outage sentence for a failure where PLoT answered', () => {
+  it('never takes the outage code for a failure where PLoT answered', () => {
     // The headline invariant, bound to ground truth rather than to the code.
     for (const row of CAUSE_TABLE.filter((r) => r.reachedPlot && !r.mayClaimUnreachable)) {
       const code = classifyPlotFailureCode(row.error);
-      const text = buildEditRejectionResponse(mapCodeToRejectionReason(code)).assistantText;
-      expect(text, `${row.label}: PLoT answered, so this sentence is false`).not.toContain(
-        OUTAGE_FIRST_CLAUSE,
+      expect(code, `${row.label}: PLoT answered, so "${OUTAGE_FIRST_CLAUSE}" is false`).not.toBe(
+        OUTAGE_CODE,
       );
     }
   });
 
-  it('classifies every cause class to copy that is true of it', () => {
+  it('classifies every cause class to a code that is true of it', () => {
     for (const row of CAUSE_TABLE) {
       const code = classifyPlotFailureCode(row.error);
-      const text = buildEditRejectionResponse(mapCodeToRejectionReason(code)).assistantText;
       if (row.mayClaimUnreachable) {
-        expect(text, row.label).toContain(OUTAGE_FIRST_CLAUSE);
+        expect(code, row.label).toBe(OUTAGE_CODE);
       } else {
-        expect(text, row.label).not.toContain(OUTAGE_FIRST_CLAUSE);
+        expect(code, row.label).not.toBe(OUTAGE_CODE);
       }
     }
   });
 
-  it('blames the user on NO cause class, and states the model is untouched on all of them', () => {
+  it('blames the user on NO cause class', () => {
     // The guarantee that must hold across the entire domain regardless of how
     // the classifier splits it — this is the PR's actual deliverable.
+    expect(USER_BLAME_CODES.size).toBe(3); // positive control: the set is not empty
     for (const row of CAUSE_TABLE) {
       const code = classifyPlotFailureCode(row.error);
-      const text = buildEditRejectionResponse(mapCodeToRejectionReason(code)).assistantText;
-      expect(text, `${row.label} blames the user`).not.toBe(STRUCTURAL_ACCUSATION);
-      expect(text, `${row.label} asks for simpler terms`).not.toMatch(/simpler terms/i);
-      expect(text, `${row.label} omits the state of the model`).toMatch(
-        /nothing in your model has changed/,
-      );
+      expect(USER_BLAME_CODES.has(code), `${row.label} classified to user-blame code ${code}`).toBe(false);
     }
   });
 

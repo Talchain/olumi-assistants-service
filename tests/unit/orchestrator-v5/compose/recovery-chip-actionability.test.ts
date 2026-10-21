@@ -48,11 +48,6 @@
 
 import { describe,expect,it } from 'vitest';
 
-import {
-buildEditRejectionResponse,
-type EditRejectionReason,
-} from '../../../../src/orchestrator-v5/handlers/edit-rejection-text.js';
-
 import { composeHandlerFailureBody } from '../../../../src/orchestrator-v5/compose/handler-failure-responses.js';
 import { HandlerInvocationFailedError } from '../../../../src/orchestrator-v5/tools/handler-errors.js';
 import { OVER_CAP_SPLIT_CHIPS } from '../../../../src/orchestrator/tools/edit-graph.js';
@@ -101,52 +96,14 @@ function assertNoHistoricDeadEnd(chips: readonly { message?: string; prompt?: st
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// 1. edit-rejection-text.ts — the composer that produced the live defect.
+// 1. The corpus can fire. (The composer that produced the live defect,
+//    `edit-rejection-text.ts`, was retired 21 Oct 2026 with its pinned rows.)
 // ───────────────────────────────────────────────────────────────────────────
 
-/**
- * ⭐ EXHAUSTIVE BY THE COMPILER, not by hand (CLAUDE.md trap 12) — the same
- * pattern as `edit-rejection-text.test.ts`. A new `EditRejectionReason` that
- * does not appear here fails TYPECHECK, so a new arm cannot silently escape
- * the rule. The VALUE is the exact set of click-submitted chip texts, in
- * order: it REDs if the set grows OR shrinks, which is trap 22f's stated exit
- * for a rule no predicate can bound.
- */
-const EXPECTED_EDIT_REJECTION_CHIP_TEXT: Record<EditRejectionReason, readonly string[]> = {
-  too_many_operations: ['Add just the main element to start.'],
-  structural_validation: ["Show me what's in my model."],
-  parse_failure: ["Show me what's in my model."],
-  service_unavailable: ['Try that change again.'],
-  internal_failure: ['Try that change again.', "Show me what's in my model."],
-  unknown_failure: ['Try that change again.', "Show me what's in my model."],
-  entity_not_found: ['Add churn rate to the model.'],
-};
-
-const EDIT_REJECTION_REASONS = Object.keys(
-  EXPECTED_EDIT_REJECTION_CHIP_TEXT,
-) as EditRejectionReason[];
-
-describe('no-dead-end rule — buildEditRejectionResponse', () => {
-  for (const reason of EDIT_REJECTION_REASONS) {
-    const ctx = reason === 'entity_not_found' ? { label: 'churn rate' } : undefined;
-
-    it(`${reason}: emits EXACTLY the pinned chip text`, () => {
-      const { suggestedActions } = buildEditRejectionResponse(reason, ctx);
-      expect(suggestedActions.map(chipText)).toEqual([
-        ...EXPECTED_EDIT_REJECTION_CHIP_TEXT[reason],
-      ]);
-    });
-
-    it(`${reason}: no chip repeats a historic dead end`, () => {
-      const { suggestedActions } = buildEditRejectionResponse(reason, ctx);
-      expect(suggestedActions.length, `${reason} must still offer a next move`).toBeGreaterThanOrEqual(1);
-      assertNoHistoricDeadEnd(suggestedActions, `buildEditRejectionResponse(${reason})`);
-    });
-  }
-
+describe('no-dead-end rule — the historic corpus', () => {
   /**
    * The negative control for the whole file: the corpus must be able to FIRE.
-   * Without this, every assertion above is consistent with a corpus that
+   * Without this, every sibling assertion below is consistent with a corpus that
    * matches nothing at all (CLAUDE.md trap 13 — an absence assertion needs a
    * positive control, or it passes by testing nothing).
    */

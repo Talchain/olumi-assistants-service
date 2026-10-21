@@ -58,9 +58,9 @@ import type { SystemEventTurnPayload } from '@talchain/schemas/boundary';
 import {
   buildReaderOnlyRefusal,
   READER_ONLY_CHAT_ROUTE_OPS,
+  STRUCTURAL_EDIT_OPS,
   SYSTEM_EVENT_HANDLING,
 } from '../dispatch.js';
-import { STRUCTURAL_EDIT_OPS } from '../../tools/propose-structural-edit.js';
 
 /**
  * Build the payload the real emitter reads. Only `event.kind` and `stage` are
