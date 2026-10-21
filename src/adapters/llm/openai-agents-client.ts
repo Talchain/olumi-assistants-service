@@ -146,7 +146,10 @@ export function ledgeredAgentsClient(ledger: AgentsClientLedger): OpenAI {
           } catch (err) { end('failed', err); controller.error(err); }
         },
         cancel(reason) { end('stopped', reason); return reader.cancel(reason); },
-      });
+      // Read the provider's stream to its end whether or not the SDK reads on (Codex r1 on #3613): with the default
+      // backpressure an unread stream never reached `end()`, so its attempt never settled and its listener stayed. Its
+      // text is held in full anyway, so reading ahead holds nothing more.
+      }, { highWaterMark: Number.POSITIVE_INFINITY });
       return new Response(passThrough, { status: r.status, statusText: r.statusText, headers: r.headers });
     }
     const bytes = await r.clone().text();

@@ -36,4 +36,21 @@ describe('the SDK client holds nothing once a streamed call has ended', () => {
     expect(signals, 'one request, with a signal').toHaveLength(1);
     expect(getEventListeners(signals[0]!, 'abort'), 'nothing is left listening on an ended call').toHaveLength(0);
   });
+
+  it('⛔ Codex r1 #3613: a streamed call whose body is never read still reaches its end: recorded, settled, nothing left listening', async () => {
+    const signals: AbortSignal[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { signal?: AbortSignal | null }) => {
+      if (init?.signal) signals.push(init.signal);
+      return sseResponse(responsesSse(RESPONSE), init);
+    }));
+    const pending: Promise<void>[] = [];
+    const client = runWithProviderPolicy(OPENAI_ONLY('agent_v1_turn'),
+      () => ledgeredAgentsClient({ site: 'core', pending, detailOf: () => ({ model: 'gpt-6.1-sol', purpose: 'test' }) as never }));
+    // The raw response is taken and dropped unread: no read, no cancel, no abort.
+    await client.responses.create({ model: 'gpt-6.1-sol', input: 'x', stream: true }).asResponse();
+    let settled = false;
+    await Promise.race([Promise.all(pending).then(() => { settled = true; }), new Promise((resolve) => setTimeout(resolve, 500))]);
+    expect(settled, 'the attempt settles without its consumer').toBe(true);
+    expect(getEventListeners(signals[0]!, 'abort')).toHaveLength(0);
+  });
 });
