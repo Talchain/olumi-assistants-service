@@ -192,3 +192,31 @@ describe('Paul 21 Oct: what each option most likely gives reaches every AI call 
     expect(RUN_FACTS_USE).not.toMatch(/A win share is supporting detail/);
   });
 });
+
+describe('Codex #3572 r1: the words never outlive the chance they quote (read-time withhold strips them)', () => {
+  const words = { code: 'OPTION_OUTCOME_WORDS', severity: 'info', message: '', separation: null,
+    options: [{ option_id: 'x', words: 'With the data provided, X most likely gives about 40 tickets a week (likely 30–50 tickets a week), about 40% chance of meeting your goal.' }] };
+  // The served Run whose licence carries chances (contrast needs a chance to keep).
+  const BODY = BRIEFS.map(([, b]) => b).find((b) => Object.keys(runFactsOf(b.analysis_result, b.graph, true).chances).length > 0)!;
+  const withWords = (sentThreshold: boolean): Rec => {
+    const body = BODY;
+    const result = structuredClone(body.analysis_result) as Rec;
+    const warnings = result.enrichment.inference_warnings as Rec[];
+    const licence = warnings.find((w) => w.code === 'GOAL_CHANCE_LICENSED')!;
+    if (sentThreshold) licence.sent_threshold = { frame: 'level', field: 'goal_threshold', value: 0.8 };
+    warnings.push(structuredClone(words));
+    return result;
+  };
+  it('a recorded level calculation with no dispatched-input evidence: the licence is withheld, and so are the words', () => {
+    const body = BODY;
+    const facts = runFactsOf(withWords(true), body.graph, true);
+    expect(facts.chances).toEqual({});
+    expect(facts.outcomes).toBeUndefined();
+  });
+  it('CONTROL: the same Run without that withhold keeps both', () => {
+    const body = BODY;
+    const facts = runFactsOf(withWords(false), body.graph, true);
+    expect(Object.keys(facts.chances).length).toBeGreaterThan(0);
+    expect(facts.outcomes?.options).toEqual(words.options);
+  });
+});

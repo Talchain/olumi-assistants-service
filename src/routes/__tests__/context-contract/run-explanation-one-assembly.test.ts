@@ -264,7 +264,10 @@ describe('Explain scoped assembly safety', () => {
       // back exactly the template text reproduces 52520051… and 49,310 bytes.
       // REFUSAL WORDS (AIE bb91dcdd): the coach template's AGENCY sentence and host #9/#25/#42 only: 50,626 → 50,951 bytes,
       // re-derived from the SENT body; swapping back exactly that template and host text reproduces e68f11f7….
-      .toBe('2ce31441b3d5728dc0eb56973b8920e430702d672b2ecd8fdb6770c301f83bb8');
+      // NO WIN SHARE (Paul 21 Oct; DL rulings; Codex #3572 r1): RUN_FACTS_USE's win-share sentence → the outcome-words sentence,
+      // and the host's three share/leader edits only: 50,951 → 50,451 bytes. Captured from the SENT body; reversing exactly
+      // those four edits on it reproduces 2ce31441… byte for byte.
+      .toBe('10519418cfbbbfe60f29f48c7d5eb6ea2aee0836c980173d7364e84abc193c6a');
   },60000);
 });
 

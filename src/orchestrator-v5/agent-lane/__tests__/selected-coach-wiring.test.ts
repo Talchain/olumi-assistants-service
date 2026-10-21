@@ -57,8 +57,8 @@ const TEMPLATE_SHA = 'bb95cec532a823482dfd1a8b2d66a2c8ad47af7a6e3ab3df652665d9db
 //   clause gives this.
 // REFUSAL WORDS (AIE bb91dcdd): #9 and #42 lose only their refusal clauses and #25 is removed whole (folded into AGENCY):
 // reversing exactly those three edits reproduces ffc8144f….
-// NO WIN SHARE (Paul 21 Oct): #34's permitted-share sentence removed only (the SENT-body diff shows exactly that sentence).
-const HOST_SHA = 'e76fbc212841006beec0210858fece6df6a14b0d76e9bf960e63533013850576';
+// NO WIN SHARE (Paul 21 Oct; Codex #3572 r1): the three share/leader edits only, 22,916 → 22,306 bytes (−610).
+const HOST_SHA = 'b98d3fd4f418bcc7eb90ace8175233340e64e72803ecfd2f2f11e65ef51f5f31';
 // + REPLY_LENGTH_INSTRUCTION appended after the host contract (1 Oct, AIQ bound v2 5922412812): 26,834 → 27,324 bytes.
 // + K2: the budgets are limits, one question, the goal's target left to the host's D1 (1 Oct, DL 5925649954 item 5): 27,324 → 27,547 bytes.
 // + AI HARNESS: the links sentence's `sizing` definition replaces the `defaulted` one (1 Oct, DL 5936996041): 27,547 → 27,833 bytes.
@@ -110,10 +110,12 @@ const HOST_SHA = 'e76fbc212841006beec0210858fece6df6a14b0d76e9bf960e635330138505
 //   AGENT_INSTRUCTIONS at the branch head; swapping back exactly the template's text on it reproduces e3b4f5cf… and 36,584 bytes.
 // + REFUSAL WORDS (AIE bb91dcdd): the template's AGENCY sentence and host #9/#25/#42 only: 37,900 → 38,225 bytes. Swapping back
 //   exactly the template and host text on the rendered AGENT_INSTRUCTIONS reproduces 8ce39cf1… and 37,900 bytes.
-// + NO WIN SHARE (Paul 21 Oct; DL rulings): host #34's "In dedicated comparative reasoning only, you may report a permitted
-//   share …" sentence removed only: 38,225 → 38,004 bytes (−221, exactly that sentence). Derived from the SENT bodies (4 calls).
-const RENDERED_SHA = 'f87c4da546bcb31aa273229f608a284fd0c7b673f389548e39474f386fe29621';
-const RENDERED_BYTES = 38_004;
+// + NO WIN SHARE (Paul 21 Oct; DL rulings; Codex #3572 r1): host #34's "In dedicated comparative reasoning only, you may report
+//   a permitted share …" removed; its comparative-leader permission → "Never name a leader from a share of runs."; "The share of
+//   runs supporting an option is supporting detail only …" → "Never state a share of runs supporting an option.":
+//   38,225 → 37,615 bytes (−610, exactly those three edits). Derived from the SENT bodies (4 calls).
+const RENDERED_SHA = 'e85a3d395f2f57ec7814ab3caeb5a0ebf8714dbb4c0f7822ac9d961f8063d12f';
+const RENDERED_BYTES = 37_615;
 /**
  * BYPASS1 (AIE #94 6158232014): a call that offers the Agent's proposing tools carries the selected coach, then the
  * stated-figure rule; a tool-less call carries the coach alone. The coach bytes stay exactly RENDERED either way.

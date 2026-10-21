@@ -235,7 +235,9 @@ describe('PR-S2: same-Run per-option chance, range and deadline licences', () =>
     // ⛔ CHANGED EXPECTATION (prompt P5/P6, AIE one-pass packet SHA 94ad9c8f…): the AI explains the licensed figures in its
     // own words, keeping the exact number or range, option, target, unit and period; the screen-verbatim directives are retired.
     expect(HOST_TOOL_CONTRACT).toContain('Explain the selected Run’s currently licensed figures in your own words, retaining the exact licensed number or range, named option and target, unit, reference and period, in-this-model meaning, and supplied provisional or timing qualifications. A narrower target is not the chance of meeting the whole goal. Do not derive, invent, re-round or substitute a goal chance, or replace a missing chance with a share of model runs.');
-    expect(HOST_TOOL_CONTRACT).toContain('A computed comparative leader may be named only in dedicated comparative reasoning when the selected CURRENT Run explicitly sets leader_may_be_named to true. Missing or false permission, or permission from an earlier analysis, does not permit naming a leader.');
+    // ⛔ CHANGED EXPECTATION (NO WIN SHARE, Paul 21 Oct; Codex #3572 r1): no leader is ever named from a share of runs.
+    expect(HOST_TOOL_CONTRACT).toContain('Never name a leader from a share of runs.');
+    expect(HOST_TOOL_CONTRACT).not.toContain('A computed comparative leader may be named');
     expect(HOST_TOOL_CONTRACT).toContain('When leader permission is withheld, do not describe an option as the better, preferred or superior option, or the one to choose. You may explain a specifically scoped difference supported by current supplied facts, preserving its uncertainty and unresolved conditions; that difference does not establish an overall option to favour.');
     expect(HOST_TOOL_CONTRACT).toContain('Never write recommend or recommendation, including negated forms.');
     expect(HOST_TOOL_CONTRACT).toContain('Never state a single figure for an option licensed only as a range, and never compare or order ranges without an actual licence for that comparison.');
@@ -422,7 +424,9 @@ describe('PR-S2 Round 2: screen-exact licensed driver sentences', () => {
     // rests on comes from measured sensitivity and the figure\'s source. The false-absence bans stay word for word.
     expect(HOST_TOOL_CONTRACT).toContain('Explain the supported implication or useful next action, and what the result rests on, using measured sensitivity and the figure\'s source when available.');
     expect(HOST_TOOL_CONTRACT).not.toContain('say that sentence exactly, right after the chance');
-    expect(HOST_TOOL_CONTRACT).toContain('A computed comparative leader may be named only in dedicated comparative reasoning when the selected CURRENT Run explicitly sets leader_may_be_named to true. Missing or false permission, or permission from an earlier analysis, does not permit naming a leader.');
+    // ⛔ CHANGED EXPECTATION (NO WIN SHARE, Paul 21 Oct; Codex #3572 r1): no leader is ever named from a share of runs.
+    expect(HOST_TOOL_CONTRACT).toContain('Never name a leader from a share of runs.');
+    expect(HOST_TOOL_CONTRACT).not.toContain('A computed comparative leader may be named');
     expect(HOST_TOOL_CONTRACT).toContain('Do not state a share of model runs or name a leader from that share in a result reply');
     // ⛔ CHANGED EXPECTATION (#2994 AMEND, AIE Q2, rulings 1ad7f7b2…): the AIE's whole #35 entry; same rule, its words.
     expect(HOST_TOOL_CONTRACT).toContain('Leader permission still governs dedicated comparative reasoning; do not turn per-option facts into an unlicensed ranking.');

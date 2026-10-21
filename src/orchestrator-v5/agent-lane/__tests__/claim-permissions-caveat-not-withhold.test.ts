@@ -107,7 +107,8 @@ describe('the Agent is told how to use `provisional` (the flag is worded, not me
     // ⛔ CHANGED EXPECTATION (AIE one-pass packet 94ad9c8f…: #34 is replaced whole, "Otherwise …" included). The measured order
     // is kept: the CURRENT-Run permission and the withheld rule come first, and the provisional rule refines a nameable
     // result right AFTER them, sent once.
-    const permission = 'Missing or false permission, or permission from an earlier analysis, does not permit naming a leader.';
+    // ⛔ CHANGED EXPECTATION (Paul 21 Oct, no win share): the gated grant became one refusal, in the same place.
+    const permission = 'Never name a leader from a share of runs.';
     const tail = 'that difference does not establish an overall option to favour.';
     expect(sent.indexOf(permission)).toBeGreaterThan(-1);
     expect(sent.indexOf(permission)).toBeLessThan(sent.indexOf(tail));
