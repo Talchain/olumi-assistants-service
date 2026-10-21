@@ -15,7 +15,6 @@ import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.j
 import { registrationTurnId } from '../../../graph-registration/registration-identity.js';
 import { createProposal } from '../../../agent-lane/proposal.js';
 import { proposalPendingAction } from '../../../agent-lane/durable-proposal.js';
-import { candidateToGraph } from '../candidate-to-graph.js';
 import { valueProvenanceOf } from '../../../../cee/provenance/provenance-of.js';
 import { userStatementOf } from '../../../agent-lane/user-statements.js';
 import { claimRecordFor, CONSTRUCTION_ATTEST, userStatementRecord } from '../../../statement-door/statements.js';
@@ -319,43 +318,29 @@ describe('PATH-B: the goal’s current level, typed as a correction, shows its c
   it.each([
     ['We run a studio and could add evening sessions; we have 6 rooms.', 'Weekly sessions', 'sessions a week'],
     ['We run a workshop and could extend opening hours; there are 6 service bays.', 'Weekly repairs', 'repairs a week'],
-  ])('L5 draft estimates convert as Olumi’s; the existing card fills an unsized model (%s)', async (brief, metric, unit) => {
-    // Scripted drafter output: no estimated number was supplied by the person; the unrelated 6 is never a staffing source.
+  ])('L5: the existing card fills an unsized model with Olumi’s estimates, by press (%s)', async (brief, metric, unit) => {
+    // No estimated number was supplied by the person; the unrelated 6 is never a staffing source.
     const estimates = [
       { label: 'People on shift', unit: 'people', baseline: 3, setting: 4 },
       { label: 'Overtime per week', unit: 'hours a week', baseline: 5, setting: 6 },
       { label: 'Ramp-up time', unit: 'months', baseline: 2, setting: 1 },
     ];
-    const pair = { origin: 'olumi', stance: 'estimate', provenance: 'ai_proposed' };
-    const draft = {
-      goal: { metric, operator: '>=', target_stated: false, value: null, unit, horizon_months: null,
-        baseline_known: false, baseline_value: null, provenance: 'inferred', frame: 'level', quantity_frame: 'level' },
-      options: [{ label: 'Extend hours', provenance: 'ai_proposed', changes: [], is_status_quo: false, interventions: estimates.map(e => ({
-        factor_label: e.label, value: e.setting, value_kind: 'absolute', unit: e.unit, ...pair, stated_evidence: null })) }],
-      factors: estimates.map(e => ({ label: e.label, role: 'controllable', baseline_known: false, baseline_value: e.baseline,
-        unit: e.unit, plausible_max: null, baseline_evidence: null, ...pair })),
-      links: estimates.map(e => ({ from: e.label, to: metric, direction: 'positive', ...pair, effect_amount: null,
-        effect_per_source_change: null, effect_provenance: null, definitional: false, source_quote: null, basis: 'Illustrative staffing and timing assumptions for review.' })),
-      constraints: [], risks: [], outcomes: [], identities: [], statements: [], unknowns: [], unknown_concerns: [], decision_question: null,
-    };
-    const converted = candidateToGraph(draft, { words: brief, recorded_at: new Date().toISOString() });
-    if ('refused' in converted) throw new Error(converted.refused);
-    persisted = JSON.parse(JSON.stringify(converted.graph)) as Json;
+    // The unsized model as drafted (the RC4 gaps): the goal, Olumi's three levers on one option, no levels or settings yet.
+    const idOf = (label: string): string => label.toLowerCase().replace(/[^a-z]+/g, '_');
+    const goalId = idOf(metric);
+    persisted = projectGraphForPersistence({ ...GraphV3.parse({ nodes: [
+      { id: 'decision', kind: 'decision', label: `Decision: ${metric}` },
+      { id: goalId, kind: 'goal', label: metric, goal_threshold_unit: unit, goal_threshold_frame: 'level' },
+      { id: 'extend_hours', kind: 'option', label: 'Extend hours' },
+      ...estimates.map(e => ({ id: idOf(e.label), kind: 'factor', label: e.label, category: 'controllable', scale_frame: 10 })),
+    ], edges: [
+      { from: 'decision', to: 'extend_hours', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+      ...estimates.map(e => ({ from: 'extend_hours', to: idOf(e.label), strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' })),
+      ...estimates.map(e => ({ from: idOf(e.label), to: goalId, strength: { mean: 0.5, std: 0.125 }, exists_probability: 0.8, effect_direction: 'positive',
+        provenance: { source: 'cee_hypothesis', magnitude: 'olumi_placeholder' } })),
+    ] }), options: [] as Json[] }) as Json;
     const node = (label: string): Json => (persisted.nodes as Json[]).find(n => n.label === label)!;
     const option = node('Extend hours');
-    for (const e of estimates) {
-      expect(node(e.label).observed_state?.raw_value ?? node(e.label).observed_state?.value).toBe(e.baseline);
-      expect(valueProvenanceOf(node(e.label).observed_state).origin).toBe('ai');
-      expect(node(e.label).observed_state.unit).toBe(e.unit);
-      expect(option.interventions[node(e.label).id].unit).toBe(e.unit);
-      expect(option.interventions[node(e.label).id].raw_value ?? option.interventions[node(e.label).id].value).toBe(e.setting);
-      expect(valueProvenanceOf(option.interventions[node(e.label).id]).origin).toBe('ai');
-      expect(node(e.label).user_statements ?? []).toEqual([]);
-    }
-    // Independently test the existing approval seam on the same model with the RC4 gaps: no operative levels/settings yet.
-    // Re-approving identical operative settings is a no-op; this row proves proposed figures can fill missing inputs by press.
-    for (const e of estimates) delete node(e.label).observed_state;
-    delete option.interventions;
     const source = { origin: 'olumi', quote: null, named_source: null };
     const ops = estimates.flatMap(e => [
       { op: 'set_factor_value', factor_id: node(e.label).id, value: e.baseline, unit: e.unit, stance: 'estimate', source },

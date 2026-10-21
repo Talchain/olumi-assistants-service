@@ -411,13 +411,13 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
     const ledger = licence.default_assumptions.links;
     expect(ledger).toHaveLength(2);
     for (const [i, link] of ledger.entries()) {
-      expect(link.loss.map((l: Json) => l.after)).toEqual([Math.abs((i ? 25 : 20) / 187.5) / 2, 0.8]);
-      expect(link.loss[0].reason).toContain('half its size');
-      expect(link.loss[1].reason).toContain('Nobody stated how likely');
+      // The person's figure is theirs and so is the link's existence; only the spread is Olumi's, and its reason keeps their range apart.
       const edge = persisted.edges.find((e: Json) => e.from === link.from && e.to === link.to);
-      expect(edge.provenance.natural_effect).toMatchObject({ amount: i ? 25 : 20,
-        stated_range: { low: i ? 5 : 10, high: i ? 45 : 30, end: 'centre', text: fixture.quotes[i] } });
-      expect(edge.provenance.source_quote).toBe(fixture.quotes[i]);
+      expect(link.loss.map((l: Json) => l.after)).toEqual([edge.strength.std]);
+      expect(edge.strength.std).toBeCloseTo((i ? 25 : 20) / 187.5 / 2, 12);
+      expect(link.loss[0].reason).toContain('Olumi\'s illustrative spread (half the stated effect)');
+      expect(link.loss[0].reason).toContain(`The stated range, ${i ? 5 : 10} to ${i ? 45 : 30}, is kept with the model but is not used as a spread.`);
+      expect(edge.provenance.natural_effect).toMatchObject({ amount: i ? 25 : 20 });
       expect(edge.provenance.magnitude).toBe('user_stated');
     }
     const tool = calls.flatMap(c => c.input ?? []).find((i: Json) => i.type === 'function_call_output' && i.call_id === 'd3_run');
@@ -434,19 +434,23 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
     expect(selected.facts.current).toBe(true);
     expect(selected.facts.chances.goal_chance_licence.default_assumptions).toEqual(licence.default_assumptions);
     expect(selected.facts.must_say.filter((s: string) => s === ILLUSTRATIVE)).toEqual([ILLUSTRATIVE]);
-    const human = selected.facts.user_statements.flatMap((r: Json) => r.record.statements).filter((st: Json) => fixture.quotes.includes(st.quote));
-    expect(human.map((st: Json) => ({ speaker: st.speaker, low: st.low, high: st.high, conditions: st.conditions }))).toEqual([
-      { speaker: 'user', low: 10, high: 30, conditions: 'If Weekend opening is introduced.' },
-      { speaker: 'user', low: 5, high: 45, conditions: 'If Online bookings is introduced.' },
-    ]);
-    expect((context.data.links as Json[]).filter(l => l.default_assumptions).map(l => l.default_assumptions)).toEqual(ledger.map((l: Json) => l.loss));
+    // The AI reads the person's own words and range in the living model, apart from Olumi's ledger.
+    expect((context.data.living_model as Json).links.map((l: Json) => [l.source, l.quote, l.effect.low, l.effect.high])).toEqual([
+      ['user', fixture.quotes[0], 10, 30], ['user', fixture.quotes[1], 5, 45]]);
+    // A scenario saved before the core flip has no living model: the stored-model reader states the same ledger per link.
+    const { living_model: _living, ...older } = persisted;
+    const stored = await readCanonicalContext({ dispatch: async () => ({ status: 200, json: withCanonicalAnalysisView({
+      graph: older, graph_hash: hashOf(older), analysis_state: runState, analysis_result: carriedResult,
+    }, SCENARIO) }) }, { scenario_id: SCENARIO });
+    if (stored.status !== 'ok') throw new Error('context unavailable');
+    expect((stored.data.links as Json[]).filter(l => l.default_assumptions).map(l => l.default_assumptions)).toEqual(ledger.map((l: Json) => l.loss));
     const cold = (await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph`, payload: {} })).json();
     expect(cold.canonical_analysis_view.goal_chance.default_assumptions).toEqual(licence.default_assumptions);
     expect(cold.canonical_analysis_view).toEqual(r.json().canonical_analysis_view);
     expect(runCount).toBe(1);
   });
 
-  it.each([['orders', 'placeholder'], ['repairs', 'placeholder'], ['orders', 'stated'], ['repairs', 'stated']] as const)('L11: %s %s strengths disclose the actual Run assumptions and inputs on every reader', async (subject, mode) => {
+  it.each([['orders', 'olumi'], ['repairs', 'olumi'], ['orders', 'stated'], ['repairs', 'stated']] as const)('L11: %s %s strengths disclose the actual Run assumptions and inputs on every reader', async (subject, mode) => {
     const fixture = d3Run(subject, mode);
     persisted = fixture.graph;
     inputsUsed = buildRunInputSnapshot({ submittedOptions: fixture.sent.options,
@@ -471,9 +475,6 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
       expect(assumptions.links).toHaveLength(2);
       for (const link of assumptions.links) {
         const edge = persisted.edges.find((e: Json) => e.from === link.from && e.to === link.to);
-        expect(edge.provenance.uncertainty_defaults).toEqual(expect.arrayContaining([expect.objectContaining({
-          field_path: `edges[${edge.from}::${edge.to}].strength.mean`, after: edge.strength.mean,
-        })]));
         expect(link.loss.map((row: Json) => [row.field_path.split('].')[1], row.after]).sort()).toEqual([
           ['exists_probability', edge.exists_probability], ['strength.std', edge.strength.std],
         ]);
@@ -481,7 +482,7 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
     }
     const cold = (await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph`, payload: {} })).json();
     expect(cold.analysis_result.enrichment.inference_warnings.find((w: Json) => w.code === 'GOAL_CHANCE_LICENSED').default_assumptions).toEqual(assumptions);
-    expect(cold.canonical_analysis_view.goal_chance.default_assumptions).toEqual(assumptions);
+    expect(cold.canonical_analysis_view.goal_chance?.default_assumptions).toEqual(assumptions);
     expect(r.json().canonical_analysis_view).toEqual(cold.canonical_analysis_view);
     expect(runCount).toBe(1);
   });

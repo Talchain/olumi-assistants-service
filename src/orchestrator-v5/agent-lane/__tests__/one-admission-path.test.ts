@@ -52,9 +52,8 @@ const BUILD_FILE = 'orchestrator-v5/agent-lane/runtime/build-model.ts';
 /** The ONE construction pass that holds `admitForBuild` (K6: the exported `buildModelFromBrief` only runs it, once or twice). */
 const BUILD_PASS = 'buildModelFromBriefOnce';
 const ADMIT_FILE = 'orchestrator-v5/agent-lane/admit-model.ts';
-/** The ONE named path-B door (DL 19 Oct, Step 8): admission inside `admitWithoutBrief` only, and only with the brief `undefined`. */
+/** The retired path-B door (DL 19 Oct, Step 8; the converter deleted 21 Oct 2026): no exception is left there. */
 const PATH_B_DOOR = 'orchestrator-v5/path-b/tools/candidate-to-graph.ts';
-const PATH_B_FN = 'admitWithoutBrief';
 const protectedNames = new Set(['admitCandidateModel', 'admitOrdinaryCandidateModel']);
 
 /** A virtual TS program resolves import aliases, namespaces and re-export chains to their original symbols. */
@@ -82,13 +81,6 @@ function scanSources(sources: Map<string, string>) {
   for (const file of sources.keys()) {
     const ast = program.getSourceFile(full(file))!;
     let allowedBody: ts.Node | undefined;
-    if (file === PATH_B_DOOR) {
-      const doors = ast.statements.filter((node): node is ts.FunctionDeclaration => ts.isFunctionDeclaration(node) && node.name?.text === PATH_B_FN);
-      allowedBody = doors.length === 1 ? doors[0]!.body : undefined;
-    }
-    // The path-B door's call carries exactly three arguments, the third the literal `undefined` (no brief reaches it).
-    const noBrief = (node: ts.Node): boolean => ts.isCallExpression(node) && node.arguments.length === 3
-      && ts.isIdentifier(node.arguments[2]!) && node.arguments[2]!.text === 'undefined';
     if (file === BUILD_FILE) {
       const builds = ast.statements.filter((node): node is ts.FunctionDeclaration => ts.isFunctionDeclaration(node) && node.name?.text === BUILD_PASS);
       const declarations = builds.length === 1 && builds[0]!.body
@@ -117,7 +109,7 @@ function scanSources(sources: Map<string, string>) {
     const record = (node: ts.Node, kind: string, canAllow = true) => {
       const hit = `${file}:${ast.getLineAndCharacterOfPosition(node.getStart(ast)).line + 1}:${kind}`;
       const inBody = allowedBody !== undefined && node.pos >= allowedBody.pos && node.end <= allowedBody.end;
-      if (canAllow && (file === ADMIT_FILE || (file === BUILD_FILE && inBody) || (file === PATH_B_DOOR && inBody && noBrief(node)))) allowed.push(hit);
+      if (canAllow && (file === ADMIT_FILE || (file === BUILD_FILE && inBody))) allowed.push(hit);
       else forbidden.push(hit);
     };
     const visit = (node: ts.Node) => {
@@ -170,8 +162,8 @@ describe('one production admission path', () => {
     }
     const { allowed, forbidden } = scanSources(new Map([...sources].filter(([f]) => reach.has(f))));
     expect(allowed.filter(hit => hit.startsWith('orchestrator-v5/agent-lane/runtime/build-model.ts:')).length).toBeGreaterThanOrEqual(1);
-    // The path-B door is live: its two no-brief calls (the admission and its ordinary fallback) are the allowed ones.
-    expect(allowed.filter(hit => hit.startsWith(`${PATH_B_DOOR}:`)).length).toBe(2);
+    // The path-B door is retired with its converter: nothing there is allowed (the file is gone).
+    expect(allowed.filter(hit => hit.startsWith(`${PATH_B_DOOR}:`))).toEqual([]);
     expect(forbidden, 'production admission ratchet: target 0').toEqual([]);
   }, 120_000);
   it('detects a planted second path, ignores comments, and refuses calls outside the allowed body', () => {
@@ -200,17 +192,11 @@ describe('source guard bypass controls', () => {
   it('flags a namespace indirect invocation', () => {
     expect(scan('planted.ts', "import * as m from './orchestrator-v5/agent-lane/admit-model.js'; m.admitOrdinaryCandidateModel.apply(undefined, [c]);").forbidden).toHaveLength(1);
   });
-  it('path-B door (DL 19 Oct): only inside admitWithoutBrief, only with the brief `undefined`', () => {
+  it('the retired path-B door (21 Oct 2026) is no exception: even its once-allowed no-brief call is refused', () => {
     const door = (body: string) => scan(PATH_B_DOOR, body);
-    expect(door('function admitWithoutBrief(c) { try { return admitCandidateModel(c, {}, undefined); } catch { return admitOrdinaryCandidateModel(c, {}, undefined); } }'))
-      .toMatchObject({ forbidden: [] });
-    expect(door('function admitWithoutBrief(c) { return admitCandidateModel(c, {}, undefined); }').allowed).toHaveLength(1);
-    // A brief, a missing brief argument, or a call outside the named function is refused.
+    expect(door('function admitWithoutBrief(c) { return admitCandidateModel(c, {}, undefined); }')).toMatchObject({ allowed: [] });
+    expect(door('function admitWithoutBrief(c) { try { return admitCandidateModel(c, {}, undefined); } catch { return admitOrdinaryCandidateModel(c, {}, undefined); } }').forbidden).toHaveLength(2);
     expect(door('function admitWithoutBrief(c, brief) { return admitCandidateModel(c, {}, brief); }').forbidden).toHaveLength(1);
-    expect(door("function admitWithoutBrief(c) { return admitCandidateModel(c, {}, 'brief text'); }").forbidden).toHaveLength(1);
-    expect(door('function admitWithoutBrief(c) { return admitCandidateModel(c, {}); }').forbidden).toHaveLength(1);
-    expect(door('function other(c) { return admitCandidateModel(c, {}, undefined); }').forbidden).toHaveLength(1);
-    // The door is that file's alone: the same function anywhere else is refused.
     expect(scan('planted.ts', 'function admitWithoutBrief(c) { return admitCandidateModel(c, {}, undefined); }').forbidden).toHaveLength(1);
   });
   it('refuses an absent direct declaration even when there are no calls', () => {

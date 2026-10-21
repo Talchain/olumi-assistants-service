@@ -117,10 +117,7 @@ export default [
   // build-model's admitForBuild (injected where needed); importing the raw admitters anywhere else fails lint.
   {
     files: ['src/**/*.ts'],
-    ignores: ['src/**/__tests__/**', 'src/**/*.test.ts', 'src/orchestrator-v5/agent-lane/admit-model.ts', 'src/orchestrator-v5/agent-lane/runtime/build-model.ts',
-      // The ONE named path-B door (DL 19 Oct, Step 8): `admitWithoutBrief` admits the drafter's output with the brief pinned
-      // `undefined`; the S7 census allows admission calls only inside that function, and only with no brief.
-      'src/orchestrator-v5/path-b/tools/candidate-to-graph.ts'],
+    ignores: ['src/**/__tests__/**', 'src/**/*.test.ts', 'src/orchestrator-v5/agent-lane/admit-model.ts', 'src/orchestrator-v5/agent-lane/runtime/build-model.ts'],
     rules: {
       'no-restricted-imports': ['error', { patterns: [{ group: ['**/admit-model', '**/admit-model.js'], importNames: ['admitCandidateModel', 'admitOrdinaryCandidateModel'],
         message: 'S7: one admission path. Admit through build-model admitForBuild (inject it), never the raw admitter.' }] }],

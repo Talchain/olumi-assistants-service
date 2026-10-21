@@ -103,6 +103,16 @@ describe('thin core mapper: living model → GraphV3', () => {
     expect(r.withheld).toContainEqual({ id: 'f_g', reason: 'link_range_no_law' });
     expect(edge(r.graph)!.provenance.magnitude).toBe('olumi_placeholder');
 
+    // An effect in another unit than its target (another numerator, or another driver denominator) never sizes the link.
+    for (const unit of ['parcels', 'units per machine']) {
+      const other: LivingModelT = structuredClone(KNOWN_ANSWER);
+      other.links[0]!.effect.unit = unit;
+      const o = mapLivingModel(other);
+      expect(o.withheld, unit).toContainEqual({ id: 'f_g', reason: 'link_unit_mismatch' });
+      expect(edge(o.graph)!.provenance.magnitude, unit).toBe('olumi_placeholder');
+    }
+    expect(edge(mapLivingModel(KNOWN_ANSWER).graph)!.provenance.magnitude, 'contrast: the target\'s own unit sizes it').toBe('user_stated');
+
     const unsigned: LivingModelT = structuredClone(KNOWN_ANSWER);
     unsigned.links[0]!.effect.sign = null;
     const u = mapLivingModel(unsigned);
