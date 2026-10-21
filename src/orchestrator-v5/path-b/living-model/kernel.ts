@@ -58,7 +58,7 @@ function savedAttributions(saved: LivingModelT): Set<string> {
     ...saved.factors.map((f) => attributionKey(f.id, f)),
     ...saved.options.flatMap((o) => [attributionKey(o.id, o), ...o.settings.map((x) => attributionKey(`${o.id}:${x.factor_id}`, x))]),
     ...saved.links.map((l) => attributionKey(l.id, l)),
-    ...saved.risks.map((r) => attributionKey(r.id, r)),
+    ...saved.risks.flatMap((r) => [attributionKey(r.id, r), ...r.mitigations.map((x) => attributionKey(`${r.id}:${x.factor_id}`, x))]),
     ...saved.conditions.map((c) => attributionKey(`condition:${c.text}`, c)),
     ...[...saved.aims, ...saved.factors].flatMap((x) => (x.defined_as ? [attributionKey(`${x.id}:defined_as`, x.defined_as)] : [])),
   ]);
@@ -99,7 +99,8 @@ export function applyKernel(model: LivingModelT, verifiedWords: readonly string[
       factors: m.factors.map((f) => defined(attribute(f.id, f))),
       options: m.options.map((o) => ({ ...attribute(o.id, o), settings: o.settings.map((s) => attribute(`${o.id}:${s.factor_id}`, s)) })),
       links: m.links.map((l) => attribute(l.id, l)),
-      risks: m.risks.map((r) => attribute(r.id, r)),
+      // A mitigation carries its own attribution, as an option's setting does: the person's risk is not their reduction.
+      risks: m.risks.map((r) => ({ ...attribute(r.id, r), mitigations: r.mitigations.map((x) => attribute(`${r.id}:${x.factor_id}`, x)) })),
       conditions: m.conditions.map((c) => attribute(`condition:${c.text}`, c)),
     },
     relabelled,

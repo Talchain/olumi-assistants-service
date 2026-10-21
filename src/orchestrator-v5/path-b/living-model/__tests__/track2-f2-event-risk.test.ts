@@ -21,7 +21,8 @@ import { applyKernel } from '../kernel.js';
 import { mapLivingModel } from '../mapper.js';
 import { KNOWN_ANSWER } from './fixtures.js';
 import {
-  CASCADE, CERTAIN_WITHIN_WINDOW, HALF_MITIGATION, NO_CHANCE, NO_WINDOW, OLUMI_CHANCE, PERCENT_PREVENTER, SHARED_PREVENTER, UNATTRIBUTED, supplier,
+  CASCADE, CERTAIN_WITHIN_WINDOW, HALF_MITIGATION, NO_CHANCE, NO_WINDOW, OLUMI_CHANCE, OLUMI_MITIGATION, PERCENT_PREVENTER, SHARED_PREVENTER,
+  UNATTRIBUTED, UNVERIFIED_MITIGATION, supplier,
 } from './track2-f2-event-risk.fixtures.js';
 
 type Rec = Record<string, any>;
@@ -53,6 +54,8 @@ async function noChanceSent(name: string, model: LivingModelT): Promise<void> {
   else expect((sent.graph.nodes as Rec[]).find((n) => n.id === sent.goal_node_id)!.goal_threshold_raw).toBeUndefined();
 }
 
+/** The brief, as the person wrote it: every quote the supplier fixture attributes to them. */
+const RISK_WORDS_FOR_KERNEL = 'we need at least £12k a month; today it is £16k. a 5–15% chance our key supplier fails within 12 months; dual-sourcing would cut that by 70%. if it does we lose £8k a month. dual-source the part, it costs £1k a month, or we carry on as now; we single-source today';
 const node = (r: Rec, id: string) => (r.graph.nodes as Rec[]).find((n) => n.id === id)!;
 const reasons = (m: LivingModelT) => mapLivingModel(m).withheld.map((w) => `${w.id}:${w.reason}`);
 
@@ -107,8 +110,9 @@ describe('Track 2 F2: an event risk reaches the engine as event_risk.v1, with it
     expect(reasons(OLUMI_CHANCE)).toEqual([]);
     const r = await requestTheRunSends('olumi-chance', OLUMI_CHANCE);
     expect(node(r, 'supplier_fails').event_risk.occurrence.basis).toBe('olumi');
+    // Olumi's chance does not make the person's stated 70% Olumi's: the reduction keeps its own author.
     expect((r.graph.edges as Rec[]).find((e) => e.from === 'dual_sourcing' && e.to === 'supplier_fails')!.provenance)
-      .toMatchObject({ source: 'cee_hypothesis', magnitude: 'olumi_estimate' });
+      .toMatchObject({ source: 'brief_extraction', magnitude: 'user_stated' });
   });
 
   it('NEGATIVE (buddy r1): a switch preventing two risks, or a switch in %, is refused by name before ISL sees it', async () => {
@@ -170,5 +174,26 @@ describe('Track 2 F2: an event risk reaches the engine as event_risk.v1, with it
     const hedged: LivingModelT = { ...supplier('point'), conditions: [{ text: 'if the supplier cannot be replaced within the month',
       applies_to: ['fails_gp'], role: 'assumption', source: 'user', party: null, quote: null }] };
     expect(existence(hedged, 'supplier_fails', 'gp')).toEqual([1, true]);
+  });
+  // Codex integration review (21 Oct), item 1: the person's risk with Olumi's proposed step must not read as the person's
+  // 70%. A mitigation carries its own attribution, as an option's setting does.
+  it('a mitigation\'s reduction is labelled by its OWN author, never the risk\'s', () => {
+    const preventer = (m: LivingModelT) => (mapLivingModel(m).graph.edges as Rec[]).find((e) => e.from === 'dual_sourcing' && e.to === 'supplier_fails')!;
+    expect(preventer(supplier('point')).provenance).toEqual({ source: 'brief_extraction', magnitude: 'user_stated' });
+    expect(preventer(OLUMI_MITIGATION).provenance).toEqual({ source: 'cee_hypothesis', magnitude: 'olumi_estimate' });
+    expect(preventer(UNVERIFIED_MITIGATION).provenance).toEqual({});
+    // The risk's own figures stay the person's either way.
+    expect(node({ graph: mapLivingModel(OLUMI_MITIGATION).graph }, 'supplier_fails').event_risk.occurrence.basis).toBe('user');
+  });
+
+  it('the kernel checks a mitigation\'s words on their own: the risk can be the person\'s while the reduction is not', () => {
+    const halves: LivingModelT = { ...supplier('point'), risks: [{ ...supplier('point').risks[0]!,
+      mitigations: [{ ...supplier('point').risks[0]!.mitigations[0]!, quote: 'dual-sourcing halves it' }] }] };
+    const { model, relabelled } = applyKernel(halves, [RISK_WORDS_FOR_KERNEL]);
+    expect(model.risks[0]!.source).toBe('user');
+    expect(model.risks[0]!.mitigations[0]!.source).toBe('unverified');
+    expect(relabelled).toContainEqual({ id: 'supplier_fails:dual_sourcing', was: 'user' });
+    // CONTROL: words the brief does hold keep the reduction the person's.
+    expect(applyKernel(supplier('point'), [RISK_WORDS_FOR_KERNEL]).model.risks[0]!.mitigations[0]!.source).toBe('user');
   });
 });

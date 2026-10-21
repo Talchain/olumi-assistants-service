@@ -125,7 +125,8 @@ export const LivingRisk = z.object({
   mitigations: z.array(z.object({
     factor_id: id,
     reduction: z.number(),
-  }).strict()).describe('Steps that make it less likely: the factor an option switches on (0 = not in place, 1 = in place) and the share of the chance it removes ("cuts it by 70%" is 0.7).'),
+    ...attribution,
+  }).strict()).describe('Steps that make it less likely: the factor an option switches on (0 = not in place, 1 = in place) and the share of the chance it removes ("cuts it by 70%" is 0.7), with who said that share (its own words: the person may state the risk while Olumi proposes the step).'),
   ...attribution,
 }).strict().describe(
   'An event that may or may not happen within a window ("our key supplier may fail within 12 months"). Never something already true: a present condition ("we lack marketing experience") is a factor at its current level, never a risk. What it does if it happens is a link from it.');

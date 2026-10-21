@@ -28,7 +28,7 @@ export const supplier = (form: 'point' | 'exact'): LivingModelT => ({
   ],
   factors: [{ id: 'dual_sourcing', label: 'Dual sourcing in place', value: 0, low: null, high: null, unit: null, defined_as: null, ...who('we single-source today') }],
   risks: [{ id: 'supplier_fails', label: 'Key supplier fails', occurrence: { low: 0.05, high: 0.15 }, horizon_months: 12,
-    mitigations: [{ factor_id: 'dual_sourcing', reduction: 0.7 }], ...who(RISK_WORDS) }],
+    mitigations: [{ factor_id: 'dual_sourcing', reduction: 0.7, ...who('dual-sourcing would cut that by 70%') }], ...who(RISK_WORDS) }],
   links: [
     { id: 'fails_gp', from: 'supplier_fails', to: 'gp', ...who('if it does we lose £8k a month'), effect: pointOrExact(form, 8000, '-') },
     { id: 'cost_gp', from: 'dual_source', to: 'gp', ...who('it costs £1k a month'), effect: pointOrExact(form, 1000, '-') },
@@ -43,6 +43,10 @@ const withRisk = (patch: Record<string, unknown>): LivingModelT => ({ ...supplie
 export const CERTAIN_WITHIN_WINDOW = withRisk({ occurrence: { low: 1, high: 1 } });
 /** §3C: a chance nobody stated but Olumi gave is sent as Olumi's (basis olumi), so the result is labelled provisional. */
 export const OLUMI_CHANCE = withRisk({ source: 'olumi', quote: null });
+/** The person's risk with Olumi's proposed step: the 70% is Olumi's estimate, never the person's (codex integration review). */
+export const OLUMI_MITIGATION = withRisk({ mitigations: [{ ...risk.mitigations[0]!, source: 'olumi', quote: null }] });
+/** A reduction in words nobody can find: no one's yet, so the link carries no author. */
+export const UNVERIFIED_MITIGATION = withRisk({ mitigations: [{ ...risk.mitigations[0]!, source: 'unverified' }] });
 /** NEGATIVE: no chance stated is never guessed; nor is a window. */
 export const NO_CHANCE = withRisk({ occurrence: { low: null, high: null } });
 export const NO_WINDOW = withRisk({ horizon_months: null });

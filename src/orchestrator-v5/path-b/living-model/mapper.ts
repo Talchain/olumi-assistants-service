@@ -390,9 +390,12 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     if (reason !== undefined) { hold(r.id, reason); refusedRisks.add(r.id); continue; }
     risks.add(r.id);
     nodes.push({ id: r.id, kind: 'risk', label: r.label, event_risk: block, ...(r.quote !== null ? { source_quote: r.quote } : {}) });
-    const who = stated(r.source) ? { source: edited(r) ? 'user_specified' : 'brief_extraction', magnitude: 'user_stated' } : { source: 'cee_hypothesis', magnitude: 'olumi_estimate' };
-    // The preventer's link: its strength is not read (the stated reduction is), so it carries no doubt of its own.
+    // The preventer's link: its strength is not read (the stated reduction is), so it carries no doubt of its own. Whose
+    // reduction it is comes from the mitigation's OWN attribution, never the risk's (codex integration review, 21 Oct):
+    // user/party → their words; Olumi → its estimate; unverified → no stamp (unknown), as for a link.
     for (const m of r.mitigations) {
+      const who = stated(m.source) ? { source: edited(m) ? 'user_specified' : 'brief_extraction', magnitude: 'user_stated' }
+        : m.source === 'olumi' ? { source: 'cee_hypothesis', magnitude: 'olumi_estimate' } : {};
       edges.push({ id: `${m.factor_id}__${r.id}`, from: m.factor_id, to: r.id, strength: { mean: -1, std: LLM_STRENGTH_STD_FLOOR }, exists_probability: 1,
         effect_direction: 'negative', provenance: who });
     }
