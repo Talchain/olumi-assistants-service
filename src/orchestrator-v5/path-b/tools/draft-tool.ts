@@ -19,6 +19,7 @@ import { constructionOperationId, findConstructionVersion } from '../../agent-la
 import { LivingModel } from '../../../schemas/living-model.js';
 import { applyKernel } from '../living-model/kernel.js';
 import { mapLivingModel } from '../living-model/mapper.js';
+import { hasGaps, needsRepair, structureGaps, STRUCTURE_REPAIR } from '../living-model/structure.js';
 import { isNoModelYet, isSavedRead, readSaved } from './context-tool.js';
 import { ok, refused, OUTCOME_TRACE, type ToolOutcome } from './outcome.js';
 import { writeCorePostimage } from './core-write.js';
@@ -37,6 +38,11 @@ export interface DraftDeps {
   readonly dispatch: InternalDispatch;
   /** The route's GRAPH_READY observer: told once, with the graph as read back. */
   readonly onModelRegistered?: (graph: Record<string, unknown>) => void;
+  /**
+   * One structure check per turn (`pathBTools` makes it per turn): a first draft with gaps the AI can repair is returned
+   * unsaved to repair once (`structure.ts`); a second draft is saved, its remaining gaps said with it.
+   */
+  readonly structure?: { checked: boolean };
 }
 
 const nodesIn = (graph: Record<string, unknown>): number => (Array.isArray(graph.nodes) ? graph.nodes.length : 0);
@@ -71,6 +77,11 @@ async function constructUnrecorded(deps: DraftDeps, ctx: DraftContext, args: Bui
   const kernelled = applyKernel(args.model, [args.brief, ...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text === undefined ? [] : [ctx.user_turn_text])]);
   const mapped = mapLivingModel(kernelled.model);
   if (!mapped.graph.nodes.some((n) => n.kind !== 'decision')) return refused('model_empty');
+  const gaps = structureGaps(kernelled.model);
+  if (needsRepair(gaps) && deps.structure !== undefined && !deps.structure.checked) {
+    deps.structure.checked = true;
+    return refused('structure_gaps', STRUCTURE_REPAIR, { gaps });
+  }
   const graph: Record<string, unknown> = { ...mapped.graph, living_model: kernelled.model };
 
   const write = await writeCorePostimage(deps, { scenarioId: ctx.scenario_id, graph, briefText: args.brief,
@@ -85,6 +96,6 @@ async function constructUnrecorded(deps: DraftDeps, ctx: DraftContext, args: Bui
   try { deps.onModelRegistered?.(after.graph); } catch { /* an observer never decides the outcome */ }
   return ok({
     provisional: 'olumi', model_version: receipt, revision: { graph_hash: after.graphHash, graph_identity_hash: after.identity },
-    draft: { withheld: mapped.withheld, assumed: mapped.assumed, relabelled: kernelled.relabelled },
+    draft: { withheld: mapped.withheld, assumed: mapped.assumed, relabelled: kernelled.relabelled, ...(hasGaps(gaps) ? { gaps } : {}) },
   }, { mutated: true });
 }
