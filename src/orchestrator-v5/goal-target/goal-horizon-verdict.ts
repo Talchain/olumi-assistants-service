@@ -190,9 +190,10 @@ export function withChanceReadbackWithheld<R>(result: R, currentGraph: unknown, 
     option_ids: ids, detail: { reason: 'EVALUATED_STATIC_INPUTS_NOT_RECORDED' },
   }, { keepOutcome: true, keepOrdering: true }) : withholdUntestedHorizonFigures(candidate, currentGraph);
   if (gated === candidate) return result;
-  // Stored display records contain percentages and attainment wording of their own. They cannot survive the withhold.
+  // Stored display records contain percentages and attainment wording of their own. They cannot survive the withhold
+  // (OPTION_OUTCOME_WORDS quotes the licence's chance in each option's sentence, Codex #3572 r1).
   const stripChanceRecords = (value: unknown): unknown => Array.isArray(value)
-    ? value.filter(w => !['GOAL_CHANCE_LICENSED', 'GOAL_CHANCE_RANGE', 'GOAL_HORIZON_NOT_TESTED', GOAL_HORIZON_STEADY_ATTESTED]
+    ? value.filter(w => !['GOAL_CHANCE_LICENSED', 'GOAL_CHANCE_RANGE', 'GOAL_HORIZON_NOT_TESTED', GOAL_HORIZON_STEADY_ATTESTED, 'OPTION_OUTCOME_WORDS']
       .includes(String(recordOf(w)?.code))) : value;
   // UI-normalised aliases are also stored in legacy carriers. Keep only the non-target fields of those rows.
   const stripAliases = (value: unknown): unknown => Array.isArray(value) ? value.map(raw => {

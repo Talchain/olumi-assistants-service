@@ -36,12 +36,14 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
 
   it('arm B is the AIE\'s assembled reference, byte for byte (programme-docs #94 6303242136, static text sha256 7b6145d4…), plus the canvas-coaching sentence', () => {
     expect(b.split(NOTE_ON_ITEM_INSTRUCTION)).toHaveLength(2);
-    // 7b6145d4… until 21 Oct; arm C's adoption changed only the closing core reply rule (see its row), now 56625e00….
-    expect(createHash('sha256').update(b.replace(`${NOTE_ON_ITEM_INSTRUCTION}\n\n`, ''), 'utf8').digest('hex')).toBe('a605c43f4479a524170db09c6c8f239a7dca027bba74a0f6c0b647e47707d660'); // + CORE_NEXT_STEP (Codex #3571 wording), Track 3 E2E 21 Oct (was 8039876b…)
+    // 7b6145d4… until 21 Oct; arm C's adoption changed only the closing core reply rule (see its row), then 56625e00…, then
+    // 8039876b… (bullets-first discipline), a605c43f… (+ CORE_NEXT_STEP, #3571). NO WIN SHARE (Paul 21 Oct; Codex #3572): the
+    // host's three share/leader edits only (−610 bytes on 8039876b…), re-derived on the merge with #3571.
+    expect(createHash('sha256').update(b.replace(`${NOTE_ON_ITEM_INSTRUCTION}\n\n`, ''), 'utf8').digest('hex')).toBe('ca4ab0141c09feb4dced07987f1b25bf6426ca2d75608e833818279dbfda455a');
   });
 
-  it('arm A is untouched: the legacy host contract is byte-identical to staging b76bc42c', () => {
-    expect(createHash('sha256').update(HOST_TOOL_CONTRACT, 'utf8').digest('hex')).toBe('a118a398d9e214017df46195c40ece2105d70d8343577ed14521b10736edf64d');
+  it('arm A is untouched except the NO WIN SHARE removal (Paul 21 Oct): the legacy host contract less its permitted-share sentence', () => {
+    expect(createHash('sha256').update(HOST_TOOL_CONTRACT, 'utf8').digest('hex')).toBe('b98d3fd4f418bcc7eb90ace8175233340e64e72803ecfd2f2f11e65ef51f5f31');
   });
 
   it('canvas coaching: every core call carries the note_on_item sentence once, on both arms; no other mode gets it', () => {

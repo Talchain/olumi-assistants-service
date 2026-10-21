@@ -235,7 +235,9 @@ describe('W3 instruction and discriminating mutants', () => {
     // ⛔ CHANGED EXPECTATION (prompt P13 + the AIE's whole-entry replacement and withheld-better rule): no share or leader in a
     // result reply, a leader only on the CURRENT Run's explicit permission, never a better or preferred option while withheld.
     expect(HOST_TOOL_CONTRACT).toContain('Do not state a share of model runs or name a leader from that share in a result reply, even when a comparative leader-naming permission is present.');
-    expect(HOST_TOOL_CONTRACT).toContain('Missing or false permission, or permission from an earlier analysis, does not permit naming a leader.');
+    // ⛔ CHANGED EXPECTATION (Paul 21 Oct, no win share): the permission grant is withdrawn outright, not gated.
+    expect(HOST_TOOL_CONTRACT).toContain('Never name a leader from a share of runs.');
+    expect(HOST_TOOL_CONTRACT).not.toContain('permission from an earlier analysis');
     expect(HOST_TOOL_CONTRACT).toContain('When leader permission is withheld, do not describe an option as the better, preferred or superior option, or the one to choose.');
     // ⛔ CHANGED EXPECTATION (#2994 AMEND, AIE Q2, rulings 1ad7f7b2…): the AIE's whole #35 entry; same rule, its words.
     expect(HOST_TOOL_CONTRACT).toContain('earned: false permits explaining its recorded say reason in your own words, retaining its actual scope, source, conditions and uncertainty, never an inferred 0 or 1.');

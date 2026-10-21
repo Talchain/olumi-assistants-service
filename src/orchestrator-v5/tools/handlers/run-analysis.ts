@@ -1,4 +1,5 @@
 import { runChanceHeadline } from '../../coaching/run-chance-headline.js';
+import { withOptionOutcomeWords } from '../../goal-target/option-outcome-words.js';
 import { boundRunLeaderClaim } from '../../model-management/version-result-binding.js';
 import { canonicalAnalysisReadyFrom } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { unresolvedRetainedLimits, withholdRetainedLimitFrames, retainedLimitWithheldLine, RETAINED_LIMIT_WITHHOLD_CODE } from '../../../graph/retained-limit.js';
@@ -2747,15 +2748,18 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // Recovery Batch B (b1, AIE 6125204695): what CEE SENT binds a deadline goal's engine-read chance, per option. The payload
     // itself (its graph, direction and strictness), never a copy: nothing edits it after the PLoT call above.
     const sentRun = plotPayload;
+    // Hiring row 3 (14 Oct): read with the period-end withhold's own inputs, so a change goal's conditional licence holds here too.
+    const sentThreshold = sentGoalThresholdOf(response, plotPayload.graph, snapshot.goal_node_id, earnedGoalChance, periodEndInputs);
     response = withGoalChanceLicence(response, graphForAnalysis, snapshot.goal_node_id, earnedGoalChance,
-      // Hiring row 3 (14 Oct): read with the period-end withhold's own inputs, so a change goal's conditional licence holds here too.
-      sentGoalThresholdOf(response, plotPayload.graph, snapshot.goal_node_id, earnedGoalChance, periodEndInputs),
+      sentThreshold,
       snapshot.rawPersistedGraph ?? graphForAnalysis,
       // Recovery Batch C: the rows the engine was SENT (strict as stated) and the stored rows (role, stated comparator),
       // so a several-targets joint names exactly the conditions ISL counted on each draw.
       // G: the persisted brief as this Run read it (absent → null: an unread source is never "no contradiction").
       { storedConstraints: storedGoalRows, sentConstraints: plotPayload.goal_constraints, sentRun, evaluatedScope: evaluated.scope, perLimit: constraintVerdict.perLimit,
         brief: snapshot.briefText ?? null, effects_timing: effectsTiming });
+    // Paul 21 Oct: what each option most likely gives, in the goal's units, after the licence it quotes (stored with the Run).
+    response = withOptionOutcomeWords(response, graphForAnalysis, snapshot.goal_node_id, sentThreshold);
     // The stored fact and its readers share the same verdict when the dispatched snapshot was not retained.
     response = withGoalChanceReadback(response, { ...response, run_id: runId, input_snapshot: runInputSnapshot });
     response = withIndexGoalWeightsNote(response, graphForAnalysis, snapshot.goal_node_id);

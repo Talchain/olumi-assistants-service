@@ -18,7 +18,7 @@ import { enforceLeaderLicenceAtFinalEgress } from '../leader-final-egress.js';
  * for dedicated comparative reasoning only. The AIE placed these words inside HOST_TOOL_CONTRACT's whole replaced entry, so
  * the constant is no longer joined a second time (the SENT-once row is in `selected-coach-wiring.test.ts`).
  */
-const P13 = 'Run result replies: lead with the selected Run\'s licensed goal-chance or withholding lines. Retain their target scope, unscored conditions and provisional, timing and source qualifications. Do not state a share of model runs or name a leader from that share in a result reply, even when a comparative leader-naming permission is present. Never substitute a relative ranking for an unavailable goal chance. The separate goal-chance licence governs any comparison of goal chances. In dedicated comparative reasoning only, you may report a permitted share recorded for the selected Run, using the approved credit label and qualifier; never turn it into a recommendation or the chance of the whole goal. Explain the supported implication or useful next action, and what the result rests on, using measured sensitivity and the figure\'s source when available. Never write recommend or recommendation, including negated forms. Never call a result, option or link fragile.';
+const P13 = 'Run result replies: lead with the selected Run\'s licensed goal-chance or withholding lines. Retain their target scope, unscored conditions and provisional, timing and source qualifications. Do not state a share of model runs or name a leader from that share in a result reply, even when a comparative leader-naming permission is present. Never substitute a relative ranking for an unavailable goal chance. The separate goal-chance licence governs any comparison of goal chances. Explain the supported implication or useful next action, and what the result rests on, using measured sensitivity and the figure\'s source when available. Never write recommend or recommendation, including negated forms. Never call a result, option or link fragile.';
 
 describe('the result-reply rule (P13)', () => {
   it('is exactly the packet\'s P13 text', () => {
@@ -45,9 +45,10 @@ describe('the result-reply rule (P13)', () => {
     expect(HOST_TOOL_CONTRACT.split(P13)).toHaveLength(2);
     expect(SELECTED_COACH_V02_TEMPLATE).not.toContain(P13);
     expect(REPLY_LENGTH_INSTRUCTION).not.toContain(P13);
-    // It grants nothing: the CURRENT Run's explicit permission stays the only place a leader may be named.
+    // ⛔ CHANGED EXPECTATION (Paul 21 Oct, no win share): it grants nothing, and no leader may be named from a share of runs.
     expect(P13).not.toContain('leader_may_be_named');
-    expect(HOST_TOOL_CONTRACT).toContain('when the selected CURRENT Run explicitly sets leader_may_be_named to true');
+    expect(HOST_TOOL_CONTRACT).toContain('Never name a leader from a share of runs.');
+    expect(HOST_TOOL_CONTRACT).not.toContain('A computed comparative leader may be named');
   });
 
   it('carries no dash a user could see quoted back and no figure', () => {
