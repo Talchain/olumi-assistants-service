@@ -264,6 +264,13 @@ describe('beyond ordinary variation: claimed only when it holds for any covarian
     expect((await judge([45, 50], { step: 'whole' })).variation).toBe('beyond_ordinary_variation');
   });
 
+  it('near the extremes the spread is taken at the most variable value the rounding allows: 2% → 5% on 1,400 draws is not judged', async () => {
+    // Gap 2 points; the band is 2.05 points at each interval's most variable value, but only 1.91 at the shown figures.
+    expect((await judge([2, 5], { n: 1400 })).variation).toBe('not_judged');
+    // CONTROL: 2% → 6% clears it.
+    expect((await judge([2, 6], { n: 1400 })).variation).toBe('beyond_ordinary_variation');
+  });
+
   it('the words never rank, recommend or say "significant"', () => {
     expect(JSON.stringify(VARIATION_WORDS)).not.toMatch(/\b(best|winner|recommend|significant|better|worse)\b/i);
   });
