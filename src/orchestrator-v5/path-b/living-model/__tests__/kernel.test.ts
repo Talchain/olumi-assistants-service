@@ -52,4 +52,39 @@ describe('per-figure authorship in the kernel (estimate_by, 21 Oct, buddy SIMPLE
     claimed.factors[0] = { ...claimed.factors[0]!, value: 0.5, estimate_by: null };
     expect(applyKernel(claimed, words, saved).model.factors[0]!.source, 'an AI figure is never credited to the person').toBe('unverified');
   });
+  it('⛔ Codex r1 #3603 (1): an Olumi "estimate" over the person\'s stated law keeps the WHOLE law: form, spread and sign, never mixed', () => {
+    const next: LivingModelT = parsed(structuredClone(KNOWN_ANSWER));
+    next.links[0] = { ...next.links[0]!, effect: { ...next.links[0]!.effect, estimate_by: 'olumi', value: 90, sd: 100, sign: '-' } };
+    expect(applyKernel(next, words, parsed(structuredClone(KNOWN_ANSWER))).model.links[0]!.effect)
+      .toEqual(parsed(structuredClone(KNOWN_ANSWER)).links[0]!.effect);
+  });
+  it('⛔ Codex r1 #3603 (2): a later draft cannot drop Olumi\'s label from its unchanged figure; a changed figure is checked as new', () => {
+    const saved: LivingModelT = parsed(structuredClone(KNOWN_ANSWER));
+    saved.factors[0] = { ...saved.factors[0]!, value: 0.6, low: 0.4, high: 0.8, estimate_by: 'olumi', quote: 'consider f' };
+    const relabel: LivingModelT = structuredClone(saved);
+    relabel.factors[0] = { ...relabel.factors[0]!, estimate_by: null };
+    expect(applyKernel(relabel, [...words, 'consider f'], saved).model.factors[0]).toMatchObject({ value: 0.6, estimate_by: 'olumi', source: 'user' });
+    // CONTRAST: a different figure claimed as the person's is not Olumi's revision; its own quote decides (none holds 0.7).
+    const other: LivingModelT = structuredClone(saved);
+    other.factors[0] = { ...other.factors[0]!, value: 0.7, low: null, high: null, estimate_by: null };
+    expect(applyKernel(other, words, saved).model.factors[0]).toMatchObject({ value: 0.7, estimate_by: null, source: 'unverified' });
+  });
+  it('⛔ Codex r1 #3603 (3): Olumi\'s estimate on a canvas option\'s empty setting keeps the OPTION the person\'s; a changed option does not', () => {
+    const saved: LivingModelT = parsed(structuredClone(KNOWN_ANSWER));
+    saved.options[1] = { ...saved.options[1]!, quote: null, settings: [{ ...saved.options[1]!.settings[0]!, value: null, quote: null }] };
+    const estimated: LivingModelT = structuredClone(saved);
+    estimated.options[1]!.settings[0] = { ...estimated.options[1]!.settings[0]!, value: 1, low: 0.5, high: 1.5, estimate_by: 'olumi' };
+    const out = applyKernel(estimated, words, saved).model.options[1]!;
+    expect(out).toMatchObject({ source: 'user', settings: [{ source: 'user', value: 1, estimate_by: 'olumi' }] });
+    const renamed: LivingModelT = structuredClone(estimated);
+    renamed.options[1] = { ...renamed.options[1]!, label: 'Push hard' };
+    expect(applyKernel(renamed, words, saved).model.options[1]!.source).toBe('unverified');
+  });
+  it('Olumi revising its OWN earlier estimate on the person\'s item keeps the item theirs and the figure Olumi\'s', () => {
+    const saved: LivingModelT = parsed(structuredClone(KNOWN_ANSWER));
+    saved.factors[0] = { ...saved.factors[0]!, value: 0.5, low: 0.3, high: 0.7, estimate_by: 'olumi', quote: null };
+    const revised: LivingModelT = structuredClone(saved);
+    revised.factors[0] = { ...revised.factors[0]!, value: 0.6, low: 0.4, high: 0.8 };
+    expect(applyKernel(revised, words, saved).model.factors[0]).toMatchObject({ source: 'user', value: 0.6, estimate_by: 'olumi' });
+  });
 });
