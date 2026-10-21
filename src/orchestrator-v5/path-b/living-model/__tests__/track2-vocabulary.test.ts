@@ -132,7 +132,7 @@ describe('Track 2: the model has outcomes', () => {
     expect(same).toEqual({ ...asFactor, request_id: asOutcome.request_id });
   });
 
-  it('NEGATIVE: an "outcome" an option sets, one with a limit, and one off the goal path are not drawn as outcomes', () => {
+  it('NEGATIVE: an "outcome" an option sets, one with a limit sent, one nothing leads into, and one off the goal path stay factors', () => {
     const set = deliveries('factor');
     set.factors[0] = { ...set.factors[0]!, kind: 'outcome' };
     expect(node(mapLivingModel(set).graph, 'couriers')).toMatchObject({ kind: 'factor', category: 'controllable' });
@@ -144,6 +144,14 @@ describe('Track 2: the model has outcomes', () => {
     limited.factors[1] = { ...limited.factors[1]!, limit: { comparator: '>=', value: 70, ...who('on-time must stay at 70% or more') } };
     expect(node(mapLivingModel(limited).graph, 'on_time')!.kind).toBe('factor');
     expect((mapLivingModel(limited).graph as Rec).goal_constraints.map((c: Rec) => c.node_id)).toContain('on_time');
+    // Codex r2: a limit that is held (here, off the 100% frame) sends nothing, so it changes nothing: still an outcome.
+    const held = deliveries('outcome');
+    held.factors[1] = { ...held.factors[1]!, limit: { comparator: '>=', value: 200, ...who('at least 200% on time') } };
+    expect(node(mapLivingModel(held).graph, 'on_time')!.kind).toBe('outcome');
+    // ISL draws a root's level and never an outcome's, so an "outcome" nothing leads into stays a factor.
+    const root = deliveries('outcome');
+    root.links = root.links.filter((l) => l.id !== 'couriers_on_time');
+    expect(node(mapLivingModel(root).graph, 'on_time')!.kind).toBe('factor');
   });
 });
 

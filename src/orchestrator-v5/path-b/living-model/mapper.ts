@@ -542,9 +542,11 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     }
     // An option moves the goal through what it sets, so it is on the path too (science check 5bbceeec, point 5).
     for (const o of model.options) if (o.settings.some((s) => onPath.has(s.factor_id))) onPath.add(o.id);
-    // An outcome other factors lead to is drawn as one on the goal's path. One an option sets is a lever, and one with a limit
-    // is scored on its level (PLoT drops a time limit on an outcome), so each stays a factor.
-    for (const f of model.factors) if (f.kind === 'outcome' && onPath.has(f.id) && !setsFactor.has(f.id) && (f.limit ?? null) === null) {
+    // An outcome is drawn as one on the goal's path only where something leads into it (ISL draws a root's level, never an
+    // outcome's). One an option sets is a lever, and one with a limit sent is scored on its level (PLoT drops a time limit on
+    // an outcome), so each stays a factor.
+    for (const f of model.factors) if (f.kind === 'outcome' && onPath.has(f.id) && edges.some((e) => e.to === f.id) && !setsFactor.has(f.id)
+      && !goal_constraints.some((c) => c.node_id === f.id)) {
       const node = nodes.find((n) => n.id === f.id)!;
       node.kind = 'outcome';
       delete node.category;
