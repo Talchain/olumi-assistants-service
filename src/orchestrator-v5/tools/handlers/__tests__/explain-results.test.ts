@@ -3,9 +3,9 @@
  *
  * Covers registration, validator accept/reject, fact persistence,
  * the precondition pass/fail paths (with the critical non-noop filter),
- * and the new answer-carrying contract: happy path consumes
- * `invocation.explanation.answer_text`, fallback path composes a
- * deterministic response from `invocation.analysisProjection`.
+ * and the answer contract: the handler always composes its deterministic
+ * response from `invocation.analysisProjection` (the authored-explanation
+ * input was never fed at runtime and is gone).
  */
 
 import { describe, it, expect } from 'vitest';
@@ -82,7 +82,6 @@ function makeInvocation(
   overrides?: {
     priorFacts?: readonly HandlerFact[];
     optionCount?: number;
-    explanation?: HandlerInvocation['explanation'];
     analysisProjection?: AnalysisProjectionSummary;
     analysisFreshness?: HandlerInvocation['analysisFreshness'];
   },
@@ -113,7 +112,6 @@ function makeInvocation(
     signal: new AbortController().signal,
     orientationText: '',
     analysisReady: makeAnalysisReady(optionCount),
-    explanation: overrides?.explanation,
     analysisProjection: overrides?.analysisProjection,
     analysisFreshness: overrides?.analysisFreshness,
   };
@@ -135,17 +133,12 @@ function buildProposal(overrides?: Partial<ProposalAction>): ProposalAction {
   };
 }
 
-const VALID_ANSWER_TEXT =
-  'Hire Senior Engineer leads at 62 per cent because Engineering Capacity carries the strongest sensitivity in the model, well ahead of the runner-up.';
-
-// V5-LANE-B-STRUCTURAL-01: the standalone "what to validate" beat appended
-// on the execute path. With the default ANALYSIS_PROJECTION (no
-// fragile_edges, top driver "Engineering Capacity") and VALID_ANSWER_TEXT
-// (mentions the driver but carries no validation vocabulary), the dedup
-// guard does NOT fire and the driver-variant beat is appended.
+// V5-LANE-B-STRUCTURAL-01: the standalone "what to validate" beat on the
+// execute path. With the default ANALYSIS_PROJECTION (no fragile_edges, top
+// driver "Engineering Capacity") the driver-variant beat is composed.
 const DRIVER_BEAT_TEXT =
   "The evidence that would most improve confidence is firmer support for 'Engineering Capacity', since it carries the most weight in this result.";
-const VALID_ANSWER_WITH_BEAT = `${VALID_ANSWER_TEXT}\n\n${DRIVER_BEAT_TEXT}`;
+const CLOSING_NUDGE = 'Would you like to explore what would change this result?';
 
 describe('explain_results — registration', () => {
   it('is registered in the default V5 handler registry', () => {
@@ -221,21 +214,20 @@ describe('explain_results — precondition (analysis fact)', () => {
   });
 });
 
-describe('explain_results — answer-carrying contract', () => {
-  it('happy path: preserves Sonnet answer_text verbatim and appends the validation beat as a final paragraph', async () => {
+describe('explain_results — answer contract (deterministic, from the analysis projection)', () => {
+  // REBOUND from "happy path: preserves Sonnet answer_text verbatim and appends the validation beat": the
+  // authored answer was never fed at runtime; the live claim is the driver beat on the deterministic answer.
+  it('composes the driver validation beat before the closing nudge when no fragile link exists', async () => {
     const handler = createExplainResultsHandler();
     const outcome = await handler(
       makeInvocation({
         priorFacts: [makeRunAnalysisFact(false)],
-        explanation: {
-          answer_text: VALID_ANSWER_TEXT,
-          answer_text_valid: true,
-        },
         analysisProjection: ANALYSIS_PROJECTION,
       }),
     );
-    expect(outcome.assistant_text).toBe(VALID_ANSWER_WITH_BEAT);
-    expect(outcome.assistant_text.startsWith(VALID_ANSWER_TEXT)).toBe(true);
+    const beatIndex = outcome.assistant_text.indexOf(DRIVER_BEAT_TEXT);
+    expect(beatIndex).toBeGreaterThan(-1);
+    expect(outcome.assistant_text.indexOf(CLOSING_NUDGE)).toBeGreaterThan(beatIndex);
     expect(outcome.suppress_orientation).toBe(true);
     expect(outcome.llm_calls_used).toBe(0);
     expect(outcome.__validation_beat).toEqual({
@@ -248,16 +240,14 @@ describe('explain_results — answer-carrying contract', () => {
     });
   });
 
-  it('bare tool_use regression: missing explanation → deterministic fallback with leading option + driver', async () => {
-    // Reproduces the v40 staging Test D failure shape: explanation is
-    // absent (Sonnet emitted bare tool_use). The handler must NOT return
-    // the old 32-char SAFE_FALLBACK stub; it must compose a useful
-    // response from the analysis projection.
+  it('bare tool_use regression: deterministic answer with leading option + driver', async () => {
+    // Reproduces the v40 staging Test D failure shape (Sonnet emitted bare
+    // tool_use). The handler must NOT return the old 32-char SAFE_FALLBACK
+    // stub; it must compose a useful response from the analysis projection.
     const handler = createExplainResultsHandler();
     const outcome = await handler(
       makeInvocation({
         priorFacts: [makeRunAnalysisFact(false)],
-        explanation: undefined,
         analysisProjection: ANALYSIS_PROJECTION,
       }),
     );
@@ -267,16 +257,13 @@ describe('explain_results — answer-carrying contract', () => {
     expect(outcome.assistant_text).not.toBe('Here is what the analysis shows.');
   });
 
-  it('invalid answer_text → deterministic fallback (probability + driver from projection)', async () => {
+  // REBOUND (was "invalid answer_text → deterministic fallback"): the authored input is gone; the
+  // composer's own claims stay pinned.
+  it('deterministic answer renders probability as a percentage and the driver as bucketed prose, no raw decimals', async () => {
     const handler = createExplainResultsHandler();
     const outcome = await handler(
       makeInvocation({
         priorFacts: [makeRunAnalysisFact(false)],
-        explanation: {
-          answer_text: 'too short',
-          answer_text_valid: false,
-          answer_validation_error: 'too_short',
-        },
         analysisProjection: ANALYSIS_PROJECTION,
       }),
     );
@@ -292,15 +279,11 @@ describe('explain_results — answer-carrying contract', () => {
     expect(outcome.assistant_text).not.toMatch(/-?\d+\.\d/);
   });
 
-  it('persists a fact that round-trips through the schema on the happy path', async () => {
+  it('persists a fact that round-trips through the schema on the execute path', async () => {
     const handler = createExplainResultsHandler();
     const outcome = await handler(
       makeInvocation({
         priorFacts: [makeRunAnalysisFact(false)],
-        explanation: {
-          answer_text: VALID_ANSWER_TEXT,
-          answer_text_valid: true,
-        },
         analysisProjection: ANALYSIS_PROJECTION,
       }),
     );
@@ -310,100 +293,33 @@ describe('explain_results — answer-carrying contract', () => {
 
   it('always sets suppress_orientation: true on explanation turns (handler owns the user-visible string)', async () => {
     const handler = createExplainResultsHandler();
-    const valid = await handler(
+    const outcome = await handler(
       makeInvocation({
         priorFacts: [makeRunAnalysisFact(false)],
-        explanation: { answer_text: VALID_ANSWER_TEXT, answer_text_valid: true },
         analysisProjection: ANALYSIS_PROJECTION,
       }),
     );
-    const fallback = await handler(
-      makeInvocation({
-        priorFacts: [makeRunAnalysisFact(false)],
-        explanation: undefined,
-        analysisProjection: ANALYSIS_PROJECTION,
-      }),
-    );
-    expect(valid.suppress_orientation).toBe(true);
-    expect(fallback.suppress_orientation).toBe(true);
+    expect(outcome.suppress_orientation).toBe(true);
   });
 });
 
 describe('explain_results — diagnostic fields', () => {
-  it('Sonnet valid → answer_source=sonnet, fallback_reason=null, length matches text', async () => {
+  it('execute path → answer_source=deterministic_fallback, fallback_reason=missing, length matches text', async () => {
     const handler = createExplainResultsHandler();
     const outcome = await handler(
       makeInvocation({
         priorFacts: [makeRunAnalysisFact(false)],
-        explanation: { answer_text: VALID_ANSWER_TEXT, answer_text_valid: true },
         analysisProjection: ANALYSIS_PROJECTION,
       }),
     );
-    const fact = outcome.handler_facts[0];
-    if (fact.fact_type === 'explain_results') {
-      expect(fact.result.answer_source).toBe('sonnet');
-      expect(fact.result.fallback_reason).toBeNull();
-      // answer_text_length measures the user-visible string, which now
-      // includes the appended validation beat.
-      expect(fact.result.answer_text_length).toBe(outcome.assistant_text.length);
-      expect(fact.result.answer_text_length).toBe(VALID_ANSWER_WITH_BEAT.length);
-    }
-  });
-
-  it('Sonnet invalid (too_short) → answer_source=deterministic_fallback, fallback_reason=too_short', async () => {
-    const handler = createExplainResultsHandler();
-    const outcome = await handler(
-      makeInvocation({
-        priorFacts: [makeRunAnalysisFact(false)],
-        explanation: {
-          answer_text: 'too short',
-          answer_text_valid: false,
-          answer_validation_error: 'too_short',
-        },
-        analysisProjection: ANALYSIS_PROJECTION,
-      }),
-    );
-    const fact = outcome.handler_facts[0];
-    if (fact.fact_type === 'explain_results') {
-      expect(fact.result.answer_source).toBe('deterministic_fallback');
-      expect(fact.result.fallback_reason).toBe('too_short');
-      expect(fact.result.answer_text_length).toBe(outcome.assistant_text.length);
-    }
-  });
-
-  it('Sonnet absent → answer_source=deterministic_fallback, fallback_reason=missing', async () => {
-    const handler = createExplainResultsHandler();
-    const outcome = await handler(
-      makeInvocation({
-        priorFacts: [makeRunAnalysisFact(false)],
-        explanation: undefined,
-        analysisProjection: ANALYSIS_PROJECTION,
-      }),
-    );
-    const fact = outcome.handler_facts[0];
-    if (fact.fact_type === 'explain_results') {
-      expect(fact.result.answer_source).toBe('deterministic_fallback');
-      expect(fact.result.fallback_reason).toBe('missing');
-    }
-  });
-
-  it('mutation_language_detected validator code maps to fallback_reason=mutation_language', async () => {
-    const handler = createExplainResultsHandler();
-    const outcome = await handler(
-      makeInvocation({
-        priorFacts: [makeRunAnalysisFact(false)],
-        explanation: {
-          answer_text: 'irrelevant',
-          answer_text_valid: false,
-          answer_validation_error: 'mutation_language_detected',
-        },
-        analysisProjection: ANALYSIS_PROJECTION,
-      }),
-    );
-    const fact = outcome.handler_facts[0];
-    if (fact.fact_type === 'explain_results') {
-      expect(fact.result.fallback_reason).toBe('mutation_language');
-    }
+    expect(outcome.handler_facts[0]).toMatchObject({
+      fact_type: 'explain_results',
+      result: {
+        answer_source: 'deterministic_fallback',
+        fallback_reason: 'missing',
+        answer_text_length: outcome.assistant_text.length,
+      },
+    });
   });
 
   it('precondition fail → answer_source=precondition_template, fallback_reason explicitly null', async () => {
@@ -474,12 +390,8 @@ describe('explain_results — P0 combined precondition (missing / degraded / sta
     const outcome = await handler(
       makeInvocation({
         priorFacts: [makeRunAnalysisFactWithStatus('partial')],
-        explanation: {
-          // Sonnet produced a "valid" answer that we MUST NOT use because
-          // the underlying analysis is degraded.
-          answer_text: VALID_ANSWER_TEXT,
-          answer_text_valid: true,
-        },
+        // A projection IS present: the degraded status alone must stop the
+        // handler composing a confident answer from it.
         analysisProjection: ANALYSIS_PROJECTION,
       }),
     );
@@ -517,10 +429,6 @@ describe('explain_results — P0 combined precondition (missing / degraded / sta
     const outcome = await handler(
       makeInvocation({
         priorFacts: [makeRunAnalysisFactWithStatus('computed')],
-        explanation: {
-          answer_text: VALID_ANSWER_TEXT,
-          answer_text_valid: true,
-        },
         analysisProjection: ANALYSIS_PROJECTION,
         analysisFreshness: makeFreshness('stale', 'graph_hash_diverged'),
       }),
@@ -555,7 +463,6 @@ describe('explain_results — P0 combined precondition (missing / degraded / sta
     const outcome = await handler(
       makeInvocation({
         priorFacts: [makeRunAnalysisFactWithStatus('completed')],
-        explanation: { answer_text: VALID_ANSWER_TEXT, answer_text_valid: true },
         analysisProjection: undefined,
         analysisFreshness: makeFreshness('fresh', 'graph_hash_match'),
       }),
@@ -569,10 +476,17 @@ describe('explain_results — P0 combined precondition (missing / degraded / sta
     // A legacy fact whose currency cannot be confirmed must NOT be explained as
     // if current; it returns the "can't confirm it still matches" copy instead.
     const handler = createExplainResultsHandler();
+    // CONTRAST: the same legacy fact under a FRESH verdict — the uncaveated answer this row must never equal.
+    const asIfFresh = await handler(
+      makeInvocation({
+        priorFacts: [makeRunAnalysisFactWithStatus(null)],
+        analysisProjection: ANALYSIS_PROJECTION,
+        analysisFreshness: makeFreshness('fresh', 'graph_hash_match'),
+      }),
+    );
     const outcome = await handler(
       makeInvocation({
         priorFacts: [makeRunAnalysisFactWithStatus(null)],
-        explanation: { answer_text: VALID_ANSWER_TEXT, answer_text_valid: true },
         analysisProjection: ANALYSIS_PROJECTION,
         analysisFreshness: {
           freshness: 'unknown',
@@ -585,7 +499,8 @@ describe('explain_results — P0 combined precondition (missing / degraded / sta
       }),
     );
     expect(outcome.assistant_text).toMatch(/can'?t confirm it still matches the current model/i);
-    expect(outcome.assistant_text).not.toBe(VALID_ANSWER_WITH_BEAT);
+    expect(outcome.assistant_text).not.toBe(asIfFresh.assistant_text);
+    expect(asIfFresh.assistant_text).not.toMatch(/can'?t confirm/i);
     expect(outcome.assistant_text).not.toMatch(/the model has changed/i);
   });
 
@@ -594,20 +509,22 @@ describe('explain_results — P0 combined precondition (missing / degraded / sta
     const outcome = await handler(
       makeInvocation({
         priorFacts: [makeRunAnalysisFactWithStatus('computed')],
-        explanation: { answer_text: VALID_ANSWER_TEXT, answer_text_valid: true },
         analysisProjection: ANALYSIS_PROJECTION,
         analysisFreshness: makeFreshness('fresh', 'graph_hash_match'),
       }),
     );
-    expect(outcome.assistant_text).toBe(VALID_ANSWER_WITH_BEAT);
+    // No caveat of either kind: the answer opens on the result itself and ends on the closing nudge.
+    expect(outcome.assistant_text).toMatch(/^In this model, Hire Senior Engineer/);
+    expect(outcome.assistant_text).not.toMatch(/out of date|can'?t confirm/i);
+    expect(outcome.assistant_text.endsWith(CLOSING_NUDGE)).toBe(true);
+    expect(outcome.assistant_text).toContain(DRIVER_BEAT_TEXT);
   });
 
-  it('redaction (validation beat): appended link/driver beats contain no internal terms or raw IDs', async () => {
+  it('redaction (validation beat): the link beat, and the answer carrying it, contain no internal terms or raw IDs', async () => {
     const handler = createExplainResultsHandler();
     const outcome = await handler(
       makeInvocation({
         priorFacts: [makeRunAnalysisFact(false)],
-        explanation: { answer_text: VALID_ANSWER_TEXT, answer_text_valid: true },
         analysisProjection: {
           ...ANALYSIS_PROJECTION,
           fragile_edges: [
@@ -616,9 +533,14 @@ describe('explain_results — P0 combined precondition (missing / degraded / sta
         },
       }),
     );
-    const appended = outcome.assistant_text.slice(VALID_ANSWER_TEXT.length);
-    for (const pat of [/\bfragile_edges\b/i, /\bopt_/i, /\bfac_/i, /\bnode_/i, /-?\d+\.\d/, /\brecommend/i]) {
-      expect(appended, appended).not.toMatch(pat);
+    const validationBeat = outcome.__validation_beat;
+    if (validationBeat?.mechanism !== 'appended') {
+      throw new Error('expected an appended validation beat');
+    }
+    for (const text of [validationBeat.beat.text, outcome.assistant_text]) {
+      for (const pat of [/\bfragile_edges\b/i, /\bopt_/i, /\bfac_/i, /\bnode_/i, /-?\d+\.\d/, /\brecommend/i]) {
+        expect(text, text).not.toMatch(pat);
+      }
     }
   });
 
@@ -657,8 +579,9 @@ describe('explain_results — P0 combined precondition (missing / degraded / sta
 
 // ---------------------------------------------------------------------------
 // V5-LANE-B-STRUCTURAL-01 — the "what to validate" beat on the execute path.
-// Sonnet-valid append (link first, driver fallback), dedup skip, omit on no
-// signal, fallback parity, and schema round-trip with the beat present.
+// Link first (driver fallback), omit on no signal, placement before the
+// closing nudge, and schema round-trip with the beat present. (The dedup
+// guard against an authored answer went with the never-fed explanation path.)
 // ---------------------------------------------------------------------------
 
 const FRAGILE_PROJECTION: AnalysisProjectionSummary = {
@@ -676,25 +599,21 @@ const LINK_BEAT_TEXT =
 
 describe('explain_results — validation beat (V5-LANE-B-STRUCTURAL-01)', () => {
   function makeExecuteInvocation(overrides?: {
-    explanation?: HandlerInvocation['explanation'];
     analysisProjection?: AnalysisProjectionSummary;
   }): HandlerInvocation {
     return makeInvocation({
       priorFacts: [makeRunAnalysisFact(false)],
-      explanation: overrides?.explanation ?? {
-        answer_text: VALID_ANSWER_TEXT,
-        answer_text_valid: true,
-      },
       analysisProjection: overrides?.analysisProjection ?? ANALYSIS_PROJECTION,
     });
   }
 
-  it('Sonnet-valid + renderable fragile link → link beat appended, names both endpoints', async () => {
+  it('renderable fragile link → link beat composed, names both endpoints (outranks the driver)', async () => {
     const handler = createExplainResultsHandler();
     const outcome = await handler(
       makeExecuteInvocation({ analysisProjection: FRAGILE_PROJECTION }),
     );
-    expect(outcome.assistant_text).toBe(`${VALID_ANSWER_TEXT}\n\n${LINK_BEAT_TEXT}`);
+    expect(outcome.assistant_text).toContain(LINK_BEAT_TEXT);
+    expect(outcome.assistant_text).not.toContain(DRIVER_BEAT_TEXT);
     expect(outcome.__validation_beat).toEqual({
       mechanism: 'appended',
       beat: {
@@ -765,63 +684,7 @@ describe('explain_results — validation beat (V5-LANE-B-STRUCTURAL-01)', () => 
     expect(outcome.assistant_text).not.toContain('Head relationship');
   });
 
-  it('dedup: both endpoint labels WITHOUT validation vocabulary → still appends (labels alone are not enough)', async () => {
-    const handler = createExplainResultsHandler();
-    const answer =
-      'Local Senior Hire Programme feeds Q3 Roadmap Delivery Capacity, which is why the leading option stays ahead in this model.';
-    const outcome = await handler(
-      makeExecuteInvocation({
-        explanation: { answer_text: answer, answer_text_valid: true },
-        analysisProjection: FRAGILE_PROJECTION,
-      }),
-    );
-    expect(outcome.assistant_text).toBe(`${answer}\n\n${LINK_BEAT_TEXT}`);
-    expect(outcome.__validation_beat?.mechanism).toBe('appended');
-  });
-
-  it('dedup: both endpoint labels AND validation vocabulary → link skipped; distinct driver beat appended instead', async () => {
-    const handler = createExplainResultsHandler();
-    const answer =
-      'The result hinges on whether Local Senior Hire Programme really lifts Q3 Roadmap Delivery Capacity, so it is worth validating that relationship with real hiring data before relying on it.';
-    const outcome = await handler(
-      makeExecuteInvocation({
-        explanation: { answer_text: answer, answer_text_valid: true },
-        analysisProjection: FRAGILE_PROJECTION,
-      }),
-    );
-    // The driver ('Engineering Capacity') differs from both endpoints and is
-    // absent from the answer, so the driver rung adds a distinct priority.
-    expect(outcome.assistant_text).toBe(`${answer}\n\n${DRIVER_BEAT_TEXT}`);
-    expect(outcome.__validation_beat).toEqual({
-      mechanism: 'appended',
-      beat: {
-        variant: 'driver',
-        driver_label: 'Engineering Capacity',
-        text: DRIVER_BEAT_TEXT,
-      },
-    });
-  });
-
-  it('dedup: link covered AND driver already in the answer → dedup_skipped, narrative untouched', async () => {
-    const handler = createExplainResultsHandler();
-    const answer =
-      'The result hinges on Engineering Capacity and on whether Local Senior Hire Programme lifts Q3 Roadmap Delivery Capacity; checking that link against real evidence is the next step.';
-    const outcome = await handler(
-      makeExecuteInvocation({
-        explanation: { answer_text: answer, answer_text_valid: true },
-        analysisProjection: FRAGILE_PROJECTION,
-      }),
-    );
-    expect(outcome.assistant_text).toBe(answer);
-    expect(outcome.__validation_beat).toEqual({
-      mechanism: 'dedup_skipped',
-      variant: 'link',
-      from_label: 'Local Senior Hire Programme',
-      to_label: 'Q3 Roadmap Delivery Capacity',
-    });
-  });
-
-  it('omit: no fragile link and no driver → narrative untouched, mechanism omitted', async () => {
+  it('omit: no fragile link and no driver → no beat in the answer, mechanism omitted', async () => {
     const handler = createExplainResultsHandler();
     const outcome = await handler(
       makeExecuteInvocation({
@@ -832,7 +695,8 @@ describe('explain_results — validation beat (V5-LANE-B-STRUCTURAL-01)', () => 
         },
       }),
     );
-    expect(outcome.assistant_text).toBe(VALID_ANSWER_TEXT);
+    expect(outcome.assistant_text).not.toMatch(/confidence check|would most improve confidence/i);
+    expect(outcome.assistant_text).toContain('Hire Senior Engineer');
     expect(outcome.__validation_beat).toEqual({
       mechanism: 'omitted',
       reason: 'no_renderable_signal',
@@ -850,27 +714,19 @@ describe('explain_results — validation beat (V5-LANE-B-STRUCTURAL-01)', () => 
         },
       }),
     );
-    expect(outcome.assistant_text).toBe(VALID_ANSWER_TEXT);
+    expect(outcome.assistant_text).not.toMatch(/confidence check|would most improve confidence/i);
+    expect(outcome.assistant_text).not.toContain("'fac_engineering_capacity_1'");
     expect(outcome.__validation_beat?.mechanism).toBe('omitted');
   });
 
-  it('fallback parity: invalid answer_text → fallback narrative carries the same beat before the closing nudge', async () => {
+  it('placement: the link beat sits before the closing nudge', async () => {
     const handler = createExplainResultsHandler();
     const outcome = await handler(
-      makeExecuteInvocation({
-        explanation: {
-          answer_text: 'too short',
-          answer_text_valid: false,
-          answer_validation_error: 'too_short',
-        },
-        analysisProjection: FRAGILE_PROJECTION,
-      }),
+      makeExecuteInvocation({ analysisProjection: FRAGILE_PROJECTION }),
     );
     expect(outcome.assistant_text).toContain(LINK_BEAT_TEXT);
     const beatIndex = outcome.assistant_text.indexOf(LINK_BEAT_TEXT);
-    const nudgeIndex = outcome.assistant_text.indexOf(
-      'Would you like to explore what would change this result?',
-    );
+    const nudgeIndex = outcome.assistant_text.indexOf(CLOSING_NUDGE);
     expect(beatIndex).toBeGreaterThan(-1);
     expect(nudgeIndex).toBeGreaterThan(beatIndex);
     expect(outcome.__validation_beat?.mechanism).toBe('appended');

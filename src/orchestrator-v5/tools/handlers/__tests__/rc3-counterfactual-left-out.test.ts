@@ -7,11 +7,11 @@ import { describe, expect, it, vi } from 'vitest';
 import type { CounterfactualClient, CounterfactualResult } from '../../../../adapters/isl/counterfactual-client.js';
 import type { HandlerInvocation } from '../../registry.js';
 import { createWhatWouldFlipHandler } from '../what-would-flip.js';
+import { composeWhatWouldFlipFallback } from '../explanation-fallback.js';
 
 type Json = Record<string, any>;
 const SCENARIO = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const RISK = 'risk_release_slips';
-const ANSWER = 'For the runner-up to overtake the leader, the strongest driver would need to move materially given the current margin.';
 const graph = (): Json => ({
   nodes: [
     { id: 'goal_fit', kind: 'goal', label: 'Goal fit', observed_state: { value: 0 } },
@@ -46,7 +46,6 @@ function invocation(g: Json): HandlerInvocation {
     payload: { turn_id: 'rc3-counterfactual-turn', scenario_id: SCENARIO, message: 'what would change the outcome?', turn_class: 'decide', stage: 'decide' },
     requestId: 'rc3-counterfactual', signal: new AbortController().signal, orientationText: '',
     analysisReady: { options: [], goal_node_id: 'goal_fit', status: 'ready' },
-    explanation: { answer_text: ANSWER, answer_text_valid: true },
     analysisProjection: { status: 'complete', leading_option: { label: 'Option A', probability: 0.6 }, runner_up: { label: 'Option B', probability: 0.3 },
       margin_pp: 30, robustness_band: 'fragile', top_drivers: [{ factor_label: 'Engineering capacity', sensitivity_value: 0.6 }], staleness_reason: null },
     analysisFreshness: { freshness: 'fresh', reason: 'graph_hash_match' }, graphForTurn: g,
@@ -84,6 +83,11 @@ describe('RC3 FIX-r1 counterfactual compute exclusion', () => {
     g.nodes.push({ id: RISK, kind: 'risk', label: 'Release slips', ...(stamp === undefined ? {} : { relies_on: stamp }) });
     const result = await whatWouldFlip(g);
     expect(result.getCounterfactual).not.toHaveBeenCalled();
-    expect(result.outcome.assistant_text).toBe(ANSWER);
+    // The base flip answer, composed independently by the handler's own exported composer: no card appended.
+    const inv = invocation(g);
+    expect(result.outcome.assistant_text).toBe(
+      composeWhatWouldFlipFallback(inv.analysisProjection, inv.rawRobustness ?? null, inv.flipSummary ?? null, null),
+    );
+    expect(result.outcome.assistant_text).not.toContain('One further what-if worth exploring');
   });
 });

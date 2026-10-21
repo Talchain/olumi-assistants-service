@@ -136,12 +136,10 @@ import {
   containsWholePhrase,
   GENERIC_LEVER_TOKENS,
   hasAmbiguousProseEntityReference,
-  hasAmbiguousProseEntityReferenceWithOptions,
   LEVER_LABEL_MIN_LEN,
   normaliseForPhraseMatch,
   resolveLabelToId,
   resolveProseEntityRefs,
-  resolveProseEntityRefsWithOptions,
   AMBIGUOUS_LABEL,
   type GraphNodeLookup,
   type GraphNodeRef,
@@ -665,41 +663,6 @@ export function resolveGraphEntityRef(
   return lookup.get(address);
 }
 
-
-/**
- * Resolve exact canonical labels for a typed identity-bearing question.
- *
- * Unlike ordinary prose linking, this permits a unique generic single-word
- * label because the caller must also provide the exact canonical ids it
- * expects. It returns `null` unless the message resolves to precisely that id
- * set. Duplicate labels, missing labels, extra model references and forged ids
- * therefore all fail weak rather than turning the generic word into authority.
- */
-export function resolveTypedCanonicalProseEntityRefs(
-  lookup: GraphNodeLookup,
-  index: LabelIndex,
-  prose: string,
-  expectedIds: readonly string[],
-  scope: { readonly rejectOtherGenericReferences?: boolean } = {},
-): readonly TargetRef[] | null {
-  const expected = new Set(expectedIds);
-  if (expected.size !== expectedIds.length) return null;
-  const options = {
-    allowGenericSingleWordLabels: true,
-    // A singleton dependency question must not silently drop a second named
-    // generic object (e.g. "Engineering Build Cost and Cost"). Opt-in keeps
-    // ordinary prose linking and existing pair-query behavior unchanged. Extra
-    // matches can only reject the typed id set, never select another target.
-    genericAllowedIds: scope.rejectOtherGenericReferences === true
-      ? new Set(lookup.keys())
-      : expected,
-    preferLongestMention: scope.rejectOtherGenericReferences === true,
-  } as const;
-  if (hasAmbiguousProseEntityReferenceWithOptions(index, prose, options)) return null;
-  const refs = resolveProseEntityRefsWithOptions(lookup, index, prose, options);
-  if (refs.length !== expected.size || refs.some((ref) => !expected.has(ref.id))) return null;
-  return refs;
-}
 
 /**
  * Build a factor_id → confidence-band lookup from

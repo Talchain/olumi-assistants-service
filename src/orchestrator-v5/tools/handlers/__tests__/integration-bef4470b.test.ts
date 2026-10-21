@@ -236,9 +236,9 @@ describe('integration: bef4470b ENTITY_KIND_MISMATCH replay', () => {
     const handler = createExplainFromStructureHandler();
     const outcome = await handler(bef4470bInvocation(proposal, orientation));
 
-    // Answer-carrying contract (post-Commit-4): handler always owns the
-    // user-visible string, suppress_orientation is always true. Without an
-    // explanation payload OR a structureProjection, the handler composes
+    // Answer contract (post-Commit-4): handler always owns the
+    // user-visible string, suppress_orientation is always true. Without a
+    // structureProjection, the handler composes
     // the generic "could not be summarised" fallback. Compose with a
     // structureProjection in dedicated tests; this integration test only
     // checks the no-op fact persistence and the suppress_orientation flag.
@@ -254,18 +254,16 @@ describe('integration: bef4470b ENTITY_KIND_MISMATCH replay', () => {
   });
 });
 
-// --- Answer-carrying integration tests (Commit 6) -----------------------
+// --- Answer integration tests (Commit 6) ----------------------------------
 //
-// These exercise the post-v40 contract end-to-end on the bef4470b graph
-// shape: the handler now consumes invocation.explanation and falls back to
-// composing from the projection summaries. They cover the four key cases
-// the brief calls out:
-//   1. valid answer_text → used verbatim
-//   2. bare tool_use (missing explanation) → deterministic fallback
-//   3. post-analysis explain_results with empty answer_text → fallback cites
-//      leading option AND a top driver
-//   4. mutation language in answer_text → fallback used (covered indirectly
-//      via the invalid path)
+// These exercise the contract end-to-end on the bef4470b graph shape: the
+// handlers compose their answer from the projection summaries (the
+// authored-explanation input was never fed at runtime and is gone):
+//   1. bare tool_use → deterministic structure answer
+//   2. post-analysis explain_results → answer cites leading option AND a top
+//      driver
+//   3. a healthy explanation reads as exposition to the live mutation-language
+//      detector
 
 const HIRING_STRUCTURE_PROJECTION: StructureProjectionSummary = {
   relationship_detail_status: 'canonical_strict',
@@ -306,36 +304,9 @@ const RUN_ANALYSIS_FACT: RunAnalysisHandlerFact = {
 };
 
 describe('integration: bef4470b answer-carrying explanation contract', () => {
-  it('explain_from_structure: valid answer_text is used verbatim', async () => {
-    const handler = createExplainFromStructureHandler();
-    const validAnswer =
-      'Code quality has the strongest direct link to the goal at 0.62 strength, ahead of salary cost which works in the opposite direction. These two are the largest structural drivers in your hiring model.';
-    const proposal: ProposalAction = {
-      handler_id: 'explain_from_structure',
-      entity: {
-        id: GOAL_NODE_ID,
-        kind: 'goal',
-        resolution_status: 'resolved',
-        resolution_method: 'context_inference',
-      },
-      parameters: [],
-      cited_context_fields: [],
-      structure_query: { kind: 'general' },
-      explanation: { answer_text: validAnswer },
-    };
-    const invocation = {
-      ...bef4470bInvocation(proposal, ''),
-      explanation: { answer_text: validAnswer, answer_text_valid: true },
-      structureProjection: HIRING_STRUCTURE_PROJECTION,
-    };
-    const outcome = await handler(invocation);
-    expect(outcome.assistant_text).toBe(validAnswer);
-    expect(outcome.suppress_orientation).toBe(true);
-  });
-
-  it('explain_from_structure: bare tool_use (missing explanation) → fallback contains causal links AND factor labels', async () => {
+  it('explain_from_structure: bare tool_use → answer contains causal links AND factor labels', async () => {
     // Brief Task 5 integration test: simulate Sonnet response with tool_use
-    // block, no text blocks, no explanation field → handler produces
+    // block, no text blocks → handler produces
     // deterministic fallback, NOT the 39-char SAFE_FALLBACK stub.
     const handler = createExplainFromStructureHandler();
     const proposal: ProposalAction = {
@@ -351,7 +322,6 @@ describe('integration: bef4470b answer-carrying explanation contract', () => {
     };
     const invocation = {
       ...bef4470bInvocation(proposal, ''),
-      explanation: undefined,
       structureProjection: HIRING_STRUCTURE_PROJECTION,
     };
     const outcome = await handler(invocation);
@@ -367,10 +337,9 @@ describe('integration: bef4470b answer-carrying explanation contract', () => {
     expect(outcome.assistant_text).not.toBe('Here is what the model structure shows.');
   });
 
-  it('explain_results post-analysis: empty answer_text → fallback contains leading option AND driver', async () => {
-    // Brief Task 5 integration test: post-analysis explain_results with
-    // empty answer_text → deterministic fallback contains leading option
-    // and driver.
+  it('explain_results post-analysis: answer contains leading option AND driver', async () => {
+    // Brief Task 5 integration test: post-analysis explain_results →
+    // the deterministic answer contains leading option and driver.
     const handler = createExplainResultsHandler();
     const proposal: ProposalAction = {
       handler_id: 'explain_results',
@@ -393,11 +362,6 @@ describe('integration: bef4470b answer-carrying explanation contract', () => {
           recent_changes_status: 'degraded',
         }),
       } as HandlerInvocation['context'],
-      explanation: {
-        answer_text: '',
-        answer_text_valid: false,
-        answer_validation_error: 'missing',
-      },
       analysisProjection: HIRING_ANALYSIS_PROJECTION,
     };
     const outcome = await handler(invocation);
@@ -417,7 +381,7 @@ describe('integration: bef4470b answer-carrying explanation contract', () => {
     expect(outcome.assistant_text).not.toBe('Here is what the analysis shows.');
   });
 
-  it('explain_from_structure: happy-path answer_text on hiring graph never triggers mutation-language guard', () => {
+  it('explain_from_structure: a healthy answer on the hiring graph never triggers the mutation-language detector', () => {
     // Defensive: confirm a healthy explain_from_structure answer about
     // bef4470b's hiring graph reads as exposition, not as a mutation.
     const healthyAnswer =

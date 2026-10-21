@@ -9,6 +9,9 @@
  * is what the user reads"). The call happened, the prose existed, and the
  * handler returned a template and never read `invocation.explanation`.
  * ⭐ THE MODEL ANSWERED AND WE DELETED THE ANSWER UNREAD.
+ * (That authored-answer input was never fed at runtime and is now gone; the
+ * handlers always compose their deterministic answer from the analysis
+ * projection, and the same narrowing — caveat it, do not delete it — applies.)
  *
  * ⭐⭐ WHY THIS IS CONVERGENCE, NOT NEW LICENCE — and this is the whole
  * justification for the change. `canonical-analysis-state.ts` already computes
@@ -57,21 +60,17 @@ const GOAL_ID = 'goal_node_1';
 
 /**
  * ⭐ THE IDENTITY SENTINEL (CLAUDE.md trap 19). Assertions below bind to the
- * model's answer by a string NO OTHER OBJECT IN THE FIXTURE CAN PRODUCE — not
- * by a value predicate like "contains a percentage", which the deterministic
- * fallback and the canned templates would also satisfy. If this sentinel
- * survives into `assistant_text`, `invocation.explanation` was READ.
+ * answer composed from the analysis projection by a string NO OTHER OBJECT IN
+ * THE FIXTURE CAN PRODUCE — not by a value predicate like "contains a
+ * percentage". It is the projection's leading-option label, which the canned
+ * missing/degraded templates never carry. If this sentinel survives into
+ * `assistant_text`, the projection's answer was composed and KEPT.
  */
-const MODEL_ANSWER_SENTINEL = 'ZQX-MODEL-AUTHORED-ANSWER-SENTINEL';
-
-const VALID_ANSWER_TEXT =
-  `Hire Senior Engineer leads at 62 per cent because Engineering Capacity carries ` +
-  `the strongest sensitivity in the model, well ahead of the runner-up. ` +
-  `${MODEL_ANSWER_SENTINEL}`;
+const ANSWER_SENTINEL = 'Zqx Sentinel Senior Hire';
 
 const ANALYSIS_PROJECTION: AnalysisProjectionSummary = {
   status: 'complete',
-  leading_option: { label: 'Hire Senior Engineer', probability: 0.62 },
+  leading_option: { label: ANSWER_SENTINEL, probability: 0.62 },
   runner_up: { label: 'Hire Two Mid-Level', probability: 0.27 },
   margin_pp: 35,
   robustness_band: 'stable',
@@ -133,7 +132,6 @@ function makeFreshness(
 function makeInvocation(overrides?: {
   priorFacts?: readonly HandlerFact[];
   optionCount?: number;
-  explanation?: HandlerInvocation['explanation'];
   analysisProjection?: AnalysisProjectionSummary;
   analysisFreshness?: HandlerInvocation['analysisFreshness'];
 }): HandlerInvocation {
@@ -163,74 +161,31 @@ function makeInvocation(overrides?: {
     signal: new AbortController().signal,
     orientationText: '',
     analysisReady: makeAnalysisReady(optionCount),
-    explanation: overrides?.explanation,
     analysisProjection: overrides?.analysisProjection,
     analysisFreshness: overrides?.analysisFreshness,
   };
 }
 
-/** A stale/unconfirmed invocation carrying a VALID model-authored answer. */
+/** A stale/unconfirmed invocation whose projection can be answered. */
 function makeAnsweredInvocation(freshness: 'stale' | 'unknown', reason: string) {
   return makeInvocation({
     priorFacts: [makeRunAnalysisFactWithStatus('computed')],
-    explanation: { answer_text: VALID_ANSWER_TEXT, answer_text_valid: true },
     analysisProjection: ANALYSIS_PROJECTION,
     analysisFreshness: makeFreshness(freshness, reason),
   });
 }
 
 describe('S8b — a stale/unconfirmed explanation is CAVEATED, not swallowed', () => {
-  /**
-   * ⭐⭐ THE SELF-CAVEAT CASE — where "did we prepend?" and "is this caveated?"
-   * give DIFFERENT answers, and why the fact carries the second.
-   *
-   * `applyStalenessPrefix` is idempotent: when the model's own text already
-   * opens with an APPROVED_OPENING it returns `prefixed: false`, because there
-   * is nothing to prepend. The answer is still fully caveated. Since
-   * `ui-directive.ts` now GATES the results panel on `staleness_prefixed`, a
-   * flag carrying "we prepended" would read false here and the panel would open
-   * on stale numbers for exactly the turns where the model caveated first — a
-   * hole that is invisible to every other case in this file, because every
-   * other case lets us do the prepending.
-   *
-   * The opening below is the CANONICAL `STALENESS_PREFIX` wording, so this
-   * binds to the same constant the producer uses rather than a retyped phrase.
-   */
-  it('a model answer that ALREADY carries the caveat is still marked caveated (prefixed=false, caveated=true)', async () => {
-    const handler = createExplainResultsHandler();
-    const selfCaveated = `${STALENESS_PREFIX} ${VALID_ANSWER_TEXT}`;
-    const outcome = await handler(
-      makeInvocation({
-        priorFacts: [makeRunAnalysisFactWithStatus('computed')],
-        explanation: { answer_text: selfCaveated, answer_text_valid: true },
-        analysisProjection: ANALYSIS_PROJECTION,
-        analysisFreshness: makeFreshness('stale', 'graph_hash_diverged'),
-      }),
-    );
-
-    // The caveat is present exactly ONCE — the idempotence guarantee holds.
-    const occurrences = outcome.assistant_text.split(STALENESS_PREFIX).length - 1;
-    expect(occurrences, 'the approved opening must not be doubled').toBe(1);
-    expect(outcome.assistant_text).toContain(MODEL_ANSWER_SENTINEL);
-
-    const fact = outcome.handler_facts[0];
-    if (fact.fact_type !== 'explain_results') throw new Error('wrong fact type');
-    expect(
-      fact.result.staleness_prefixed,
-      'the fact must report CAVEATED, not "we prepended" — the ui-directive gate reads this',
-    ).toBe(true);
-  });
-
-  it('explain_results / stale: answers, leads with STALENESS_PREFIX, and KEEPS the model answer', async () => {
+  it('explain_results / stale: answers, leads with STALENESS_PREFIX, and KEEPS the answer', async () => {
     const handler = createExplainResultsHandler();
     const outcome = await handler(makeAnsweredInvocation('stale', 'graph_hash_diverged'));
 
     // The caveat still leads — unchanged from the blocking behaviour, and the
     // brief's required wording verbatim.
     expect(outcome.assistant_text.startsWith(STALENESS_PREFIX)).toBe(true);
-    // ⭐ THE HALF THAT FLIPS: the model's answer is no longer deleted.
+    // ⭐ THE HALF THAT FLIPS: the answer is no longer deleted.
     // Bound by the identity sentinel, not by a value predicate.
-    expect(outcome.assistant_text).toContain(MODEL_ANSWER_SENTINEL);
+    expect(outcome.assistant_text).toContain(ANSWER_SENTINEL);
     expect(outcome.suppress_orientation).toBe(true);
 
     // ⭐⭐ THE WAY OUT. The blocking template always carried a recovery offer;
@@ -239,15 +194,15 @@ describe('S8b — a stale/unconfirmed explanation is CAVEATED, not swallowed', (
     // agreed (CLAUDE.md trap 23). `requiresRerun` is true here, so it is owed.
     expect(outcome.assistant_text).toContain(STALE_RECOVERY_OFFER);
     // ORDER IS THE GUARANTEE: caveat → answer → way out.
-    expect(outcome.assistant_text.indexOf(MODEL_ANSWER_SENTINEL)).toBeLessThan(
+    expect(outcome.assistant_text.indexOf(ANSWER_SENTINEL)).toBeLessThan(
       outcome.assistant_text.indexOf(STALE_RECOVERY_OFFER),
     );
 
     const fact = outcome.handler_facts[0];
     if (fact.fact_type !== 'explain_results') throw new Error('wrong fact type');
     expect(fact.result.precondition_unmet).toBe(false);
-    // Proves `invocation.explanation` was READ, not merely that some text exists.
-    expect(fact.result.answer_source).toBe('sonnet');
+    // The executed (not templated) answer: composed from the projection.
+    expect(fact.result.answer_source).toBe('deterministic_fallback');
     // ⭐ DERIVED, NOT HAND-SET: the flag and the text come from one call.
     expect(fact.result.staleness_prefixed).toBe(true);
   });
@@ -260,7 +215,7 @@ describe('S8b — a stale/unconfirmed explanation is CAVEATED, not swallowed', (
     // Authority parity: we must NOT assert the model changed when we cannot
     // confirm it. The stronger claim must be absent, not merely non-leading.
     expect(outcome.assistant_text).not.toContain(STALENESS_PREFIX);
-    expect(outcome.assistant_text).toContain(MODEL_ANSWER_SENTINEL);
+    expect(outcome.assistant_text).toContain(ANSWER_SENTINEL);
     // The way out, in the UNCONFIRMED wording — and the stale wording must NOT
     // appear: it offers to show how "your changes" affected the result, which
     // presumes the change we cannot confirm.
@@ -277,7 +232,7 @@ describe('S8b — a stale/unconfirmed explanation is CAVEATED, not swallowed', (
     const outcome = await handler(makeAnsweredInvocation('stale', 'graph_hash_diverged'));
 
     expect(outcome.assistant_text.startsWith(STALENESS_PREFIX)).toBe(true);
-    expect(outcome.assistant_text).toContain(MODEL_ANSWER_SENTINEL);
+    expect(outcome.assistant_text).toContain(ANSWER_SENTINEL);
     // The way out is owed on BOTH handlers — it rides the shared funnel, so a
     // handler that skipped the funnel would lose it here too.
     expect(outcome.assistant_text).toContain(STALE_RECOVERY_OFFER);
@@ -300,13 +255,12 @@ describe('S8b — a stale/unconfirmed explanation is CAVEATED, not swallowed', (
     const outcome = await handler(
       makeInvocation({
         priorFacts: [],
-        explanation: { answer_text: VALID_ANSWER_TEXT, answer_text_valid: true },
         analysisProjection: ANALYSIS_PROJECTION,
       }),
     );
     expect(outcome.assistant_text).toMatch(/No analysis has been run on your model yet/);
-    // The model's answer must NOT leak: caveating it would not make it true.
-    expect(outcome.assistant_text).not.toContain(MODEL_ANSWER_SENTINEL);
+    // The projection's answer must NOT leak: caveating it would not make it true.
+    expect(outcome.assistant_text).not.toContain(ANSWER_SENTINEL);
     expect(outcome.assistant_text).not.toContain(STALENESS_PREFIX);
 
     const fact = outcome.handler_facts[0];
@@ -320,12 +274,11 @@ describe('S8b — a stale/unconfirmed explanation is CAVEATED, not swallowed', (
     const outcome = await handler(
       makeInvocation({
         priorFacts: [makeRunAnalysisFactWithStatus('blocked')],
-        explanation: { answer_text: VALID_ANSWER_TEXT, answer_text_valid: true },
         analysisProjection: ANALYSIS_PROJECTION,
       }),
     );
     expect(outcome.assistant_text).toMatch(/didn't produce a usable result/);
-    expect(outcome.assistant_text).not.toContain(MODEL_ANSWER_SENTINEL);
+    expect(outcome.assistant_text).not.toContain(ANSWER_SENTINEL);
 
     const fact = outcome.handler_facts[0];
     if (fact.fact_type !== 'explain_results') throw new Error('wrong fact type');
@@ -337,12 +290,11 @@ describe('S8b — a stale/unconfirmed explanation is CAVEATED, not swallowed', (
     const outcome = await handler(
       makeInvocation({
         priorFacts: [makeRunAnalysisFactWithStatus('computed')],
-        explanation: { answer_text: VALID_ANSWER_TEXT, answer_text_valid: true },
         analysisProjection: ANALYSIS_PROJECTION,
         analysisFreshness: makeFreshness('fresh', 'graph_hash_match'),
       }),
     );
-    expect(outcome.assistant_text).toContain(MODEL_ANSWER_SENTINEL);
+    expect(outcome.assistant_text).toContain(ANSWER_SENTINEL);
     expect(outcome.assistant_text).not.toContain(STALENESS_PREFIX);
     expect(outcome.assistant_text).not.toContain(UNCONFIRMED_PREFIX);
     // A CURRENT result owes no way out — appending one would invent a doubt.
@@ -362,7 +314,6 @@ describe('S8b — a stale/unconfirmed explanation is CAVEATED, not swallowed', (
     const outcome = await handler(
       makeInvocation({
         priorFacts: [makeRunAnalysisFactWithStatus('completed')],
-        explanation: { answer_text: VALID_ANSWER_TEXT, answer_text_valid: true },
         analysisProjection: undefined,
         analysisFreshness: makeFreshness('fresh', 'graph_hash_match'),
       }),

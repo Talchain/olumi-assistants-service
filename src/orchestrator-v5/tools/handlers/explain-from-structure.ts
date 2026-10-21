@@ -6,14 +6,9 @@
  * might X be the leading option?"). The handler does not call PLoT or ISL,
  * does not compute anything, and does not mutate state.
  *
- * Answer-carrying contract (post-v40 fix): Sonnet writes the complete
- * user-facing answer inside `invocation.explanation.answer_text`. When the
- * side-band validator marks it valid, the handler uses it verbatim;
- * otherwise it composes a deterministic fallback from
- * `invocation.structureProjection` (top causal links, named-factor
- * pathways, goal label, factor / option counts). The turn-executor forces
- * `suppress_orientation: true` for explanation handlers; the handler also
- * sets the flag on its outcome as defence-in-depth.
+ * The handler composes the whole answer deterministically from `invocation.structureProjection` (top causal links,
+ * named-factor pathways, goal label, factor / option counts) and sets `suppress_orientation: true` on its outcome.
+ * (The authored-answer side-band, `invocation.explanation`, was never fed at runtime and was removed on 22 Oct 2026.)
  *
  * Accepted entity kinds (validation-registry.ts):
  *   `['goal', 'option', 'node']` — the wire entity-kind enum's `node` literal
@@ -48,7 +43,6 @@ import type {
 import { HandlerResultInvalidError } from '../handler-errors.js';
 import { resolveOptionCount } from './no-op-helpers.js';
 import { composeExplainFromStructureFallback } from './explanation-fallback.js';
-import { mapFallbackReason } from './diagnostics.js';
 
 export function createExplainFromStructureHandler(): HandlerFn {
   return async function explainFromStructureHandler(
@@ -67,21 +61,10 @@ export function createExplainFromStructureHandler(): HandlerFn {
     // populates answer_text for them). Pass `canRunAnalysis` so the
     // composer's next-step nudge stays grounded in the structural-
     // readiness signal — no nudge when the graph cannot yet support a run.
-    const explanation = invocation.explanation;
-    const sonnetValid = !!(explanation && explanation.answer_text_valid);
     const canRunAnalysis = invocation.analysisReady?.status === 'ready';
-    // A valid authored answer is licensed only when the router explicitly
-    // classified the question as the open-ended `general` arm; every other kind
-    // fails weak to the deterministic projection, so absence never bypasses the
-    // topology authority.
-    const mayUseAuthoredGeneralAnswer =
-      invocation.proposal?.structure_query?.kind === 'general';
-    const useSonnetAnswer = sonnetValid && mayUseAuthoredGeneralAnswer;
-    const assistantText = useSonnetAnswer
-      ? explanation!.answer_text
-      : composeExplainFromStructureFallback(invocation.structureProjection, {
-          canRunAnalysis,
-        });
+    const assistantText = composeExplainFromStructureFallback(invocation.structureProjection, {
+      canRunAnalysis,
+    });
 
     const fact: ExplainFromStructureHandlerFact = {
       fact_type: 'explain_from_structure',
@@ -89,10 +72,8 @@ export function createExplainFromStructureHandler(): HandlerFn {
       noop: true,
       result: {
         option_count: optionCount,
-        answer_source: useSonnetAnswer ? 'sonnet' : 'deterministic_fallback',
-        fallback_reason: useSonnetAnswer
-          ? null
-          : mapFallbackReason(explanation?.answer_validation_error),
+        answer_source: 'deterministic_fallback',
+        fallback_reason: 'missing',
         answer_text_length: assistantText.length,
       },
     };
