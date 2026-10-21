@@ -200,27 +200,24 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   // Joint goals are not in this slice: every other current aim with a target is kept in the living model, withheld here.
   for (const a of model.aims) if (a !== aim && a.status === 'current' && a.target !== null) hold(a.id, 'aim_not_in_slice');
 
-  // ── A mitigation's own effect ("dual-sourcing cuts that chance by 70% and costs £1k a month"). ISL's preventer is a switch
-  // for its risk only (EVENT_RISK_PREVENTER_HAS_OTHER_CHILDREN), so a CLEAN switch's other links (one risk's, unitless, 0
-  // today, set only to 0 or 1, no cause of its own) are said of the ONE option that switches it on, and reach the engine by
-  // the option's own route below: the same effect on the same draws, under the link's own id. A switch two options turn on
-  // stays as it is (split per option, the cost would be drawn separately for each, changing their comparison), as does one
-  // that is not clean or whose option already says its own effect on the same item: its risk is refused by name below
-  // (`risk_not_in_slice`). All of a switch's links move, or none.
-  const effectsOf = (id: string) => model.links.filter((l) => l.from === id && !model.risks.some((r) => r.id === l.to));
-  const movesTo = (id: string): string | undefined => {
+  // ── A mitigation is a switch: one risk's step, unitless, off today, set only to 0 or 1, with no cause of its own.
+  const isRisk = (id: string) => model.risks.some((r) => r.id === id);
+  const isSwitch = (id: string) => {
     const f = model.factors.find((x) => x.id === id);
-    const on = model.options.filter((o) => o.settings.some((s) => s.factor_id === id && s.value === 1));
-    const clean = f !== undefined && f.unit === null && f.value === 0 && !model.links.some((l) => l.to === id)
-      && model.risks.filter((r) => r.mitigations.some((m) => m.factor_id === id)).length === 1
-      && model.options.every((o) => o.settings.every((s) => s.factor_id !== id || s.value === 0 || s.value === 1));
-    return clean && on.length === 1 && effectsOf(id).every((l) => !model.links.some((x) => x.from === on[0]!.id && x.to === l.to)) ? on[0]!.id : undefined;
+    return f !== undefined && f.unit === null && f.value === 0 && !model.links.some((l) => l.to === id)
+      && model.options.every((o) => o.settings.every((s) => s.factor_id !== id || s.value === 0 || s.value === 1))
+      && model.risks.filter((r) => r.mitigations.some((m) => m.factor_id === id)).length === 1;
   };
-  const moved = new Map(model.risks.flatMap((r) => r.mitigations.map((m) => [m.factor_id, movesTo(m.factor_id)] as const))
-    .filter((e): e is readonly [string, string] => e[1] !== undefined && effectsOf(e[0]).length > 0));
-  if (moved.size > 0) {
-    model = { ...model, links: model.links.map((l) => (moved.has(l.from) && effectsOf(l.from).includes(l) ? { ...l, from: moved.get(l.from)! } : l)) };
+  // ISL's preventer may feed only its risk, so a switch's own effects ("costs £1k a month") are said of the ONE option that
+  // turns it on, and reach the engine by that option's route below: the same effect on the same draws. With two such
+  // options, or one already stating its own effect on the same item, nothing moves and the risk is refused by name below.
+  const moved = new Map<string, string>();
+  for (const id of new Set(model.risks.flatMap((r) => r.mitigations.map((m) => m.factor_id)))) {
+    const on = model.options.filter((o) => o.settings.some((s) => s.factor_id === id && s.value === 1));
+    const clash = model.links.some((l) => l.from === id && !isRisk(l.to) && model.links.some((x) => x.from === on[0]?.id && x.to === l.to));
+    if (isSwitch(id) && on.length === 1 && !clash) moved.set(id, on[0]!.id);
   }
+  if (moved.size > 0) model = { ...model, links: model.links.map((l) => (moved.has(l.from) && !isRisk(l.to) ? { ...l, from: moved.get(l.from)! } : l)) };
 
   // ── An option's own effect on the goal becomes a factor the options set (see the header). Same ids, same attribution.
   const optionIds = new Set(model.options.map((o) => o.id));
@@ -391,20 +388,12 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   // (p = 1, which ISL evaluates). A cause INTO an event (a cascade) is not in this slice (§9). Anything else is refused.
   const risks = new Set<string>();
   const refusedRisks = new Set<string>();
-  const settingsOf = (factorId: string) => model.options.flatMap((o) => o.settings.filter((x) => x.factor_id === factorId));
   for (const r of model.risks) {
     const { low, high } = r.occurrence;
     const basis = stated(r.source) ? 'user' as const : r.source === 'olumi' ? 'olumi' as const : undefined;
-    // A mitigation is a step an option switches on: a unitless factor on a frame of 1 (so "in place" reaches the engine as
-    // 1, never 0.01 of a %), not in place today (0), set only to 0 or 1, with no other effect, no cause of its own and no
-    // other risk (ISL: a preventer is a root switch whose only child is this risk).
-    const switchOk = (id: string) => {
-      const f = model.factors.find((x) => x.id === id);
-      return f !== undefined && f.unit === null && caps.get(id) === 1 && f.value === 0
-        && settingsOf(id).every((x) => x.value === 0 || x.value === 1)
-        && !model.links.some((l) => l.to === id || (l.from === id && l.to !== r.id))
-        && !model.risks.some((o) => o.id !== r.id && o.mitigations.some((m) => m.factor_id === id));
-    };
+    // A mitigation reaches ISL as a root switch whose only child is this risk. A switch has no unit, so its frame is 1 and
+    // "in place" reaches the engine as 1, never 0.01 of a % (`capFor`).
+    const switchOk = (id: string) => isSwitch(id) && !model.links.some((l) => l.from === id && l.to !== r.id);
     const block = basis === undefined || low === null || high === null || r.horizon_months === null ? undefined : {
       version: 1 as const, occurrence: { p_low: low, p_high: high, basis }, horizon: { months: r.horizon_months },
       ...(r.mitigations.length > 0 ? { mitigations: r.mitigations.map((m) => ({ factor_id: m.factor_id, occurrence_reduction: m.reduction })) } : {}),
