@@ -3907,7 +3907,9 @@ export function withholdGoalFiguresForMissingCurrentLevel<E>(response: E, graph:
     node_ids: [String(goal.id)], option_ids: scored,
     ...(ownTargets.length > 0 ? { constraint_ids: ownTargets } : {}),
     detail: { reason: 'missing_goal_baseline' },
-  }, { keepOutcome: true, keepOrdering: true });
+  // Only a launch window's outcome is that window's forecast. With no level today, any other outcome is the options'
+  // effects summed from zero, a figure nobody stated, so it goes too (Track 2, 21 Oct: an earlier withhold had skipped P1's strip).
+  }, { keepOutcome: launch !== undefined, keepOrdering: true });
 }
 
 /** The target-testability failures that leave every option's outcome distribution meaningful in the goal's units. */
