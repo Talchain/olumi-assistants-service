@@ -219,9 +219,13 @@ export function callEffortFor(budget: CallBudget, req: { readonly reasoning_role
   return req.reasoning_role === 'narrate' ? narrateEffortFor(budget) : budget.reasoning_effort;
 }
 
-/** THIN CORE: the model builder's budget (it drafts or edits the complete living model). */
-export function coreBudget(): CallBudget {
-  return budgetFor('gpt-6.1-sol', 'core');
+/**
+ * THIN CORE: the model builder's budget (it drafts or edits the complete living model). A comparison arm may lower its
+ * effort (`coreEffortArmOf`); otherwise it is the banked entry.
+ */
+export function coreBudget(effort?: 'low' | 'medium'): CallBudget {
+  const banked = budgetFor('gpt-6.1-sol', 'core');
+  return effort === undefined ? banked : { ...banked, reasoning_effort: effort };
 }
 
 /**
