@@ -40,6 +40,23 @@ const figure = {
   unit: z.string().nullable(),
 };
 
+/**
+ * TRACK 2 identity (21 Oct): what a quantity IS, when it is defined as the sum or product of factors. A definition, not a
+ * cause: the engine works it out exactly and never draws its parts. A model saved before reads null.
+ */
+const definedAs = z.object({
+  op: z.enum(['sum', 'product']),
+  of: z.array(id),
+  /**
+   * Who stated the definition itself, which can differ from who stated the quantity ("we need £6,500" vs "revenue is
+   * customers × price"). A definition saved without it reads as unverified: said, but with no one's words for it.
+   */
+  source: attribution.source.default('unverified'),
+  party: attribution.party.default(null),
+  quote: attribution.quote.default(null),
+}).strict().nullable().default(null).describe(
+  'When this quantity IS the sum or product of factors ("total customers = UK + EU"; "revenue = customers × price per customer"): op, the factor ids, and who stated the definition (its quote is their words for the definition itself). A definition, not a cause, so add no links from those factors to it. Null otherwise.');
+
 export const LivingAim = z.object({
   id,
   text: z.string(),
@@ -64,6 +81,7 @@ export const LivingAim = z.object({
     change_kind: z.enum(['absolute', 'relative', 'points']).nullable().default(null).describe(
       'For increase or decrease only: absolute = the change in the quantity\'s own unit; relative = a percentage of today\'s level; points = percentage points of a quantity that is itself a percentage (its unit is "%"). Null for a level target.'),
   }).strict().nullable(),
+  defined_as: definedAs,
   ...attribution,
 }).strict();
 
@@ -72,6 +90,7 @@ export const LivingFactor = z.object({
   label: z.string(),
   /** The factor's current level, when known. */
   ...figure,
+  defined_as: definedAs,
   ...attribution,
 }).strict();
 
