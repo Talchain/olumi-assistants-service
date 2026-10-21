@@ -377,6 +377,9 @@ describe('thin core mapper: living model → GraphV3', () => {
     expect(floor.withheld.filter((w) => w.id === 'g')).toEqual([]);
     expect(goal(floor)).toMatchObject({ goal_direction: '>=', goal_threshold_raw: 50, observed_state: { raw_value: 70 } });
     expect(floor.assumed).toEqual([{ id: 'g', text: 'Keep units at or above 50 units (today 70 units). The chance is for its level at the end of next quarter, not along the way.' }]);
+    // Money is said as the person writes it (Track 2, F2 on 27bdb81c read "12000 £ (today 16000 £)"): one figure rule.
+    expect(target({ comparator: '>=', value: 12000, current: 16000, unit: '£' }, { quote: 'keep monthly profit at least £12,000; today £16,000' }).assumed.map((a) => a.text))
+      .toEqual(['Keep units at or above £12,000 (today £16,000). The chance is for its level at the end of the period, not along the way.']);
     // A ceiling today already sits under ("at most 90", today 70): the same, read as a ceiling.
     const ceiling = target({ comparator: '<=', value: 90 }, { quote: 'at most 90 units; today we are at 70' });
     expect(goal(ceiling)).toMatchObject({ goal_direction: '<=', goal_threshold_raw: 90, observed_state: { raw_value: 70 } });

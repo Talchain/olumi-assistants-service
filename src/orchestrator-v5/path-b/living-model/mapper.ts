@@ -25,6 +25,7 @@ import { REPAIR_CODES, type RepairEntry } from '@talchain/schemas';
 import type { LivingModelT, LivingSourceT } from '../../../schemas/living-model.js';
 import { resolveGoalThresholdCapWithProvenance } from '../../../utils/goal-threshold-cap.js';
 import { admitGoalBaseline } from '../../../cee/factor-extraction/goal-baseline-admissibility.js';
+import { sayFigureAsWritten } from '../../agent-lane/say-figure.js';
 import { LLM_STRENGTH_STD_FLOOR } from '../../../cee/constants.js';
 
 export type WithheldReason =
@@ -176,10 +177,10 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
               t!.current_source === 'user' ? { source: 'user', quote: null } : aim);
             // A change is measured from today only if carrying on as now leaves the quantity there (amendment 1): said beside it.
             if (stays) {
-              const say = (v: number) => `${v}${lt.unit ? ` ${lt.unit}` : ''}`;
+              const say = (v: number) => sayFigureAsWritten(v, lt.unit ?? '');
               assumed.push({ id: aim.id, text: `Keep ${t!.quantity} at or ${lt.comparator === '<=' ? 'below' : 'above'} ${say(lt.value)} (today ${say(t!.current)}). The chance is for its level at the end of ${t!.by_when ?? 'the period'}, not along the way.` });
             }
-            if (isChange) assumed.push({ id: aim.id, text: `Carrying on as now leaves ${t!.quantity} at today's ${t!.current}${lt.unit ? ` ${lt.unit}` : ''}; the change is measured from that.` });
+            if (isChange) assumed.push({ id: aim.id, text: `Carrying on as now leaves ${t!.quantity} at today's ${sayFigureAsWritten(t!.current, lt.unit ?? '')}; the change is measured from that.` });
           }
         }
       }
