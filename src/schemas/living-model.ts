@@ -144,7 +144,7 @@ export const LivingLink = z.object({
      */
     form: z.enum(['point', 'exact', 'range', 'normal', 'direction_only', 'unknown']).describe(
       'point: a stated figure ("adds about 50"); exact: the person says it is exactly this, with no variation ("adds exactly 50"); '
-      + 'normal: a stated Normal law, value its mean and sd its standard deviation; range: low to high, with value the person\'s own central figure when they give one ("about 20, between 10 and 30"), else null; direction_only: a sign with no size; unknown.'),
+      + 'normal: a stated Normal law, value its mean and sd its standard deviation; range: low to high, with value the person\'s own central figure when they give one ("about 20, between 10 and 30"), else null; direction_only: a known or explicitly Olumi-proposed sign with no size; unknown: direction is unstated or unresolved, with sign null.'),
     ...figure,
     /**
      * The link's unit is the `to` item's own unit, exactly as that item writes it; "per +1 of `from`" is implied, so it is
@@ -153,7 +153,13 @@ export const LivingLink = z.object({
     unit: z.string().nullable().describe(
       "The unit of the `to` item's quantity, written exactly as that item writes its own unit (e.g. \"units\", \"£\"). The effect is always per +1 of `from`, so never add \"per …\". Null when `to` has no unit."),
     sd: z.number().nullable(),
-    sign: z.enum(['+', '-']).nullable(),
+    /**
+     * The engine has no "unknown" direction, so an unsigned link is left out of the model the engine runs on (mapper
+     * `link_sign_unknown`). On 21 Oct, every overnight core hiring draft held Olumi's own goal links unsigned, which cut
+     * the goal off from its factors and left Run disabled. The AI reads this description, so it is the instruction.
+     */
+    sign: z.enum(['+', '-']).nullable().describe(
+      "Which way `to` moves for each +1 of `from`: '+' raises it, '-' lowers it. For source olumi, give your provisional judgement of direction; when unsized, use form direction_only. For source user, party or unverified, preserve only the direction that source supplied. If none was supplied, use sign null and form unknown, then ask. Never put an Olumi-inferred direction under another source."),
   }).strict().describe('The change in `to` for each +1 of `from`, in the unit of `to`.'),
   ...attribution,
 }).strict();
