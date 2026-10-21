@@ -91,7 +91,7 @@ describe('thin core: the known-answer living model reaches the engine unchanged'
 
   it('served capacity 20 Oct (Lenses): "about 20, between 10 and 30" keeps the target testable, never "needs a size for the link"', () => {
     const centred = structuredClone(KNOWN_ANSWER);
-    centred.links[0]!.effect = { form: 'range', value: 50, low: 30, high: 70, sd: null, unit: 'units', sign: '+' };
+    centred.links[0]!.effect = { estimate_by: null, form: 'range', value: 50, low: 30, high: 70, sd: null, unit: 'units', sign: '+' };
     expect(targetTestabilityOf(stored(centred))).toEqual({ kind: 'testable', goal_id: 'g' });
     // CONTROL: a bare range still asks for a size.
     const bare = structuredClone(centred);

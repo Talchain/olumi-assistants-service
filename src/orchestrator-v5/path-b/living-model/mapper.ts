@@ -262,11 +262,11 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
       exactSum = { lever: `${g.id}__change`, today: `${g.id}_today` };
       const lever = exactSum.lever;
       model = { ...model,
-        factors: [...model.factors, { id: lever, label: `Change in ${aim!.target!.quantity}`, kind: 'factor', value: 0, low: null, high: null,
+        factors: [...model.factors, { id: lever, label: `Change in ${aim!.target!.quantity}`, kind: 'factor', estimate_by: null, value: 0, low: null, high: null,
           unit: g.unit === '' ? null : g.unit, defined_as: null, limit: null, source: 'olumi', party: null, quote: null }],
         options: model.options.map((o) => {
           const l = direct.find((d) => d.from === o.id);
-          return l === undefined ? o : { ...o, settings: [...o.settings, { factor_id: lever, value: (l.effect.sign === '-' ? -1 : 1) * Math.abs(l.effect.value!),
+          return l === undefined ? o : { ...o, settings: [...o.settings, { factor_id: lever, estimate_by: l.effect.estimate_by, value: (l.effect.sign === '-' ? -1 : 1) * Math.abs(l.effect.value!),
             low: null, high: null, unit: g.unit === '' ? null : g.unit, source: l.source, party: l.party, quote: l.quote }] };
         }),
         links: model.links.filter((l) => !direct.includes(l)) };
@@ -286,11 +286,11 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     for (const l of fromOption) switches.add(on(l.from));
     model = { ...model,
       factors: [...model.factors, ...[...new Set(fromOption.map((l) => l.from))].map((id) => ({ id: on(id),
-        label: `${model.options.find((o) => o.id === id)!.label} in place`, kind: 'factor' as const, value: 0, low: null, high: null, unit: null, defined_as: null, limit: null,
+        label: `${model.options.find((o) => o.id === id)!.label} in place`, kind: 'factor' as const, estimate_by: null, value: 0, low: null, high: null, unit: null, defined_as: null, limit: null,
         source: 'olumi' as const, party: null, quote: null }))],
       options: model.options.map((o) => {
         const l = fromOption.find((d) => d.from === o.id);
-        return l === undefined ? o : { ...o, settings: [...o.settings, { factor_id: on(o.id), value: 1, low: null, high: null, unit: null, source: l.source, party: l.party, quote: l.quote }] };
+        return l === undefined ? o : { ...o, settings: [...o.settings, { factor_id: on(o.id), estimate_by: null, value: 1, low: null, high: null, unit: null, source: l.source, party: l.party, quote: l.quote }] };
       }),
       links: model.links.map((l) => (fromOption.includes(l) ? { ...l, from: on(l.from) } : l)) };
   }

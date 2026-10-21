@@ -13,7 +13,7 @@ import type { LivingModelT } from '../../../../schemas/living-model.js';
  */
 const who = (quote: string) => ({ source: 'user' as const, party: null, quote });
 const pointOrExact = (form: 'point' | 'exact', value: number, sign: '+' | '-') =>
-  ({ form, value, sd: null, low: null, high: null, unit: '£', sign });
+  ({ form, estimate_by: null, value, sd: null, low: null, high: null, unit: '£', sign });
 
 const RISK_WORDS = 'a 5–15% chance our key supplier fails within 12 months; dual-sourcing would cut that by 70%';
 
@@ -24,10 +24,10 @@ export const supplier = (form: 'point' | 'exact'): LivingModelT => ({
   options: [
     { status: 'feasible', id: 'status_quo', label: 'Carry on', settings: [], developed_from: null, ...who('or we carry on as now') },
     { status: 'feasible', id: 'dual_source', label: 'Dual-source', developed_from: null, ...who('dual-source the part'),
-      settings: [{ factor_id: 'dual_sourcing', value: 1, low: null, high: null, unit: null, ...who('dual-source the part') }] },
+      settings: [{ estimate_by: null, factor_id: 'dual_sourcing', value: 1, low: null, high: null, unit: null, ...who('dual-source the part') }] },
   ],
-  factors: [{ kind: 'factor', limit: null, id: 'dual_sourcing', label: 'Dual sourcing in place', value: 0, low: null, high: null, unit: null, defined_as: null, ...who('we single-source today') }],
-  risks: [{ id: 'supplier_fails', label: 'Key supplier fails', occurrence: { low: 0.05, high: 0.15 }, horizon_months: 12,
+  factors: [{ estimate_by: null, kind: 'factor', limit: null, id: 'dual_sourcing', label: 'Dual sourcing in place', value: 0, low: null, high: null, unit: null, defined_as: null, ...who('we single-source today') }],
+  risks: [{ id: 'supplier_fails', label: 'Key supplier fails', occurrence: { estimate_by: null, low: 0.05, high: 0.15 }, horizon_months: 12, horizon_by: null,
     mitigations: [{ factor_id: 'dual_sourcing', reduction: 0.7, ...who('dual-sourcing would cut that by 70%') }], ...who(RISK_WORDS) }],
   links: [
     { id: 'fails_gp', from: 'supplier_fails', to: 'gp', ...who('if it does we lose £8k a month'), effect: pointOrExact(form, 8000, '-') },
@@ -54,13 +54,13 @@ export const NO_WINDOW = withRisk({ horizon_months: null });
 export const UNATTRIBUTED = withRisk({ source: 'unverified' });
 /** NEGATIVE (§9: no shared-cause cascades): a cause INTO the event is not in this slice. */
 export const CASCADE: LivingModelT = { ...supplier('point'),
-  factors: [...supplier('point').factors, { kind: 'factor', limit: null, id: 'demand', label: 'Demand', value: 1, low: null, high: null, unit: null, defined_as: null, ...who('demand is high') }],
+  factors: [...supplier('point').factors, { estimate_by: null, kind: 'factor', limit: null, id: 'demand', label: 'Demand', value: 1, low: null, high: null, unit: null, defined_as: null, ...who('demand is high') }],
   links: [...supplier('point').links, { id: 'demand_fails', from: 'demand', to: 'supplier_fails', ...who('high demand strains the supplier'),
-    effect: { form: 'point', value: 0.1, sd: null, low: null, high: null, unit: null, sign: '+' } }] };
+    effect: { estimate_by: null, form: 'point', value: 0.1, sd: null, low: null, high: null, unit: null, sign: '+' } }] };
 /** NEGATIVE: a mitigation must be a 0/1 step an option switches on; a half-measure level is not in this slice. */
 export const HALF_MITIGATION: LivingModelT = { ...supplier('point'),
   options: [supplier('point').options[0]!, { ...supplier('point').options[1]!,
-    settings: [{ factor_id: 'dual_sourcing', value: 0.5, low: null, high: null, unit: null, ...who('half dual-source') }] }] };
+    settings: [{ estimate_by: null, factor_id: 'dual_sourcing', value: 0.5, low: null, high: null, unit: null, ...who('half dual-source') }] }] };
 
 /**
  * The served re-run's shape (CEE 997f7a15, 21 Oct): the £1k cost said of the mitigation itself ("dual-sourcing … costs £1k a
@@ -81,14 +81,14 @@ export const COSTED_SWITCH_TWO_OPTIONS: LivingModelT = { ...COSTED_SWITCH,
 
 /** NEGATIVE (buddy r1): one switch preventing two risks has two children; ISL refuses that preventer, so CEE does first. */
 export const SHARED_PREVENTER: LivingModelT = { ...supplier('point'),
-  risks: [...supplier('point').risks, { ...risk, id: 'port_strike', label: 'Port strike', occurrence: { low: 0.02, high: 0.04 } }],
+  risks: [...supplier('point').risks, { ...risk, id: 'port_strike', label: 'Port strike', occurrence: { estimate_by: null, low: 0.02, high: 0.04 } }],
   links: [...supplier('point').links, { id: 'strike_gp', from: 'port_strike', to: 'gp', ...who('a strike costs £2k a month'),
-    effect: { form: 'point', value: 2000, sd: null, low: null, high: null, unit: '£', sign: '-' } }] };
+    effect: { estimate_by: null, form: 'point', value: 2000, sd: null, low: null, high: null, unit: '£', sign: '-' } }] };
 /** NEGATIVE (buddy r1): a switch in % would reach the engine "in place" at 0.01, not 1: refused. */
 export const PERCENT_PREVENTER: LivingModelT = { ...supplier('point'),
   factors: [{ ...supplier('point').factors[0]!, unit: '%' }],
   options: [supplier('point').options[0]!, { ...supplier('point').options[1]!,
-    settings: [{ factor_id: 'dual_sourcing', value: 1, low: null, high: null, unit: '%', ...who('dual-source the part') }] }] };
+    settings: [{ estimate_by: null, factor_id: 'dual_sourcing', value: 1, low: null, high: null, unit: '%', ...who('dual-source the part') }] }] };
 /** NEGATIVE (served F2, CEE f51249ba): any unit says a quantity, even one whose frame happens to be 1, so the switch is refused. */
 export const UNIT_TEXT_PREVENTER: LivingModelT = { ...supplier('point'),
   factors: [{ ...supplier('point').factors[0]!, unit: '0 = not in place; 1 = in place' }] };

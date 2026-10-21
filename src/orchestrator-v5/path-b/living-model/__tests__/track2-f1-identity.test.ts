@@ -111,7 +111,7 @@ describe('Track 2 F1: a defined quantity reaches the engine as its definition, w
     await noChanceSent('missing-part-level', noEu, 'ORPHAN_NODE,NO_PATH_TO_GOAL');
     // A definition that leaves a part out: 20 customers elsewhere, total stated 170, but defined as UK + EU (150).
     const leftOut: LivingModelT = { ...F1_DEFINED, factors: [...F1_DEFINED.factors.map((f) => (f.id === 'total' ? { ...f, value: 170 } : f)),
-      { kind: 'factor', limit: null, id: 'row', label: 'Customers elsewhere', value: 20, low: null, high: null, unit: 'customers', defined_as: null, source: 'user', party: null, quote: '20 elsewhere' }] };
+      { estimate_by: null, kind: 'factor', limit: null, id: 'row', label: 'Customers elsewhere', value: 20, low: null, high: null, unit: 'customers', defined_as: null, source: 'user', party: null, quote: '20 elsewhere' }] };
     expect(reasons(leftOut)).toEqual(expect.arrayContaining(['total:identity_inconsistent', 'rev:chance_rests_on_withheld']));
     await noChanceSent('missing-part', leftOut, 'ORPHAN_NODE,NO_PATH_TO_GOAL');
   });
@@ -150,13 +150,13 @@ describe('Track 2 F1: a defined quantity reaches the engine as its definition, w
   it('NEGATIVE (buddy r2): a part\'s link with its OWN stated spread (Normal σ 0.2; a range 0.8–1.2) contradicts an exact definition', () => {
     const uncertain = (effect: LivingModelT['links'][number]['effect']): LivingModelT => ({ ...F1_DEFINED,
       links: [{ id: 'uk_total', from: 'uk', to: 'total', source: 'user', party: null, quote: 'about one each', effect }] });
-    expect(reasons(uncertain({ form: 'normal', value: 1, sd: 0.2, low: null, high: null, unit: 'customers', sign: '+' })))
+    expect(reasons(uncertain({ form: 'normal', estimate_by: null, value: 1, sd: 0.2, low: null, high: null, unit: 'customers', sign: '+' })))
       .toEqual(['uk_total:identity_contradicted', 'rev:chance_rests_on_withheld']);
-    expect(reasons(uncertain({ form: 'range', value: 1, sd: null, low: 0.8, high: 1.2, unit: 'customers', sign: '+' })))
+    expect(reasons(uncertain({ form: 'range', estimate_by: null, value: 1, sd: null, low: 0.8, high: 1.2, unit: 'customers', sign: '+' })))
       .toEqual(['uk_total:identity_contradicted', 'rev:chance_rests_on_withheld']);
     // CONTROL: the same link stated exactly, or as a bare point (its σ is Olumi's convention, not the person's), restates it.
-    expect(reasons(uncertain({ form: 'exact', value: 1, sd: null, low: null, high: null, unit: 'customers', sign: '+' }))).toEqual(['uk_total:identity_restated']);
-    expect(reasons(uncertain({ form: 'point', value: 1, sd: null, low: null, high: null, unit: 'customers', sign: '+' }))).toEqual(['uk_total:identity_restated']);
+    expect(reasons(uncertain({ form: 'exact', estimate_by: null, value: 1, sd: null, low: null, high: null, unit: 'customers', sign: '+' }))).toEqual(['uk_total:identity_restated']);
+    expect(reasons(uncertain({ form: 'point', estimate_by: null, value: 1, sd: null, low: null, high: null, unit: 'customers', sign: '+' }))).toEqual(['uk_total:identity_restated']);
   });
 
   it('a definition saved without its own attribution (buddy r2) still parses, and reads as unverified: no one\'s yet', () => {

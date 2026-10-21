@@ -50,9 +50,9 @@ const excluded = (g: Rec) => assessCanonicalAnalysisReadiness(g).submission!.gat
 /** An option that sets only "Office move", a factor nothing links to the goal (an option that sets nothing is a different
  * class, OPTION_NO_FACTOR_EDGES, and keeps its own coaching). */
 const withPathlessOption = (lm: LM): LM => ({ ...lm,
-  factors: [...lm.factors, { kind: 'factor', limit: null, id: 'office', label: 'Office move', value: 0, low: null, high: null, unit: null, defined_as: null, source: 'user', party: null, quote: null }],
+  factors: [...lm.factors, { estimate_by: null, kind: 'factor', limit: null, id: 'office', label: 'Office move', value: 0, low: null, high: null, unit: null, defined_as: null, source: 'user', party: null, quote: null }],
   options: [...lm.options, { status: 'feasible', id: 'pivot', label: 'Pivot', developed_from: null, source: 'user', party: null, quote: null,
-    settings: [{ factor_id: 'office', value: 1, low: null, high: null, unit: null, source: 'user', party: null, quote: null }] }] });
+    settings: [{ estimate_by: null, factor_id: 'office', value: 1, low: null, high: null, unit: null, source: 'user', party: null, quote: null }] }] });
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -91,7 +91,7 @@ describe('context: an item with no path to the goal is kept, said, and never blo
     lm.aims.push({ ...structuredClone(lm.aims[0]!), id: 'g2', text: 'Keep the team happy', target: null, quote: null });
     lm.factors.push({ kind: 'factor', limit: null, id: 'office', label: 'Office move', value: 0.5, low: null, high: null, unit: null, defined_as: null, source: 'user', party: null, quote: null });
     lm.links.push({ id: 'office_g2', from: 'office', to: 'g2', source: 'user', party: null, quote: null,
-      effect: { form: 'normal', value: 1, sd: 0.5, low: null, high: null, unit: null, sign: '+' } });
+      effect: { estimate_by: null, form: 'normal', value: 1, sd: 0.5, low: null, high: null, unit: null, sign: '+' } });
     const g = stored(lm);
     expect((g.nodes as Rec[]).find((n) => n.kind === 'goal')!.id, 'the Run evaluates g').toBe('g');
     expect(contextNodeIds(g as never).has('office')).toBe(true);
@@ -115,7 +115,7 @@ describe('context: an item with no path to the goal is kept, said, and never blo
     const g = await gesture(KNOWN_ANSWER, { kind: 'structural_add', node_id: 'office', node_kind: 'factor', label: 'Office move' });
     const lm = structuredClone(g.living_model as LM);
     lm.links.push({ id: 'office_f', from: 'office', to: 'f', source: 'user', party: null, quote: 'the office move lifts f',
-      effect: { form: 'normal', value: 0.1, sd: 0.05, low: null, high: null, unit: null, sign: '+' } });
+      effect: { estimate_by: null, form: 'normal', value: 0.1, sd: 0.05, low: null, high: null, unit: null, sign: '+' } });
     expect(codes(stored(lm))).toContain('MISSING_FACTOR_LEVEL');
   });
 });

@@ -46,7 +46,7 @@ describe('a canvas gesture on a core scenario', () => {
     expect(out.commitPerformed, JSON.stringify(out.response)).toBe(true);
     expect(append).toHaveBeenCalledTimes(1);
     const push = (written().living_model as typeof KNOWN_ANSWER).options.find((o) => o.id === 'push')!;
-    expect(push.settings).toEqual([{ factor_id: 'f', value: 0.8, low: null, high: null, unit: null, source: 'user', party: null, quote: null }]);
+    expect(push.settings).toEqual([{ factor_id: 'f', estimate_by: null, value: 0.8, low: null, high: null, unit: null, source: 'user', party: null, quote: null }]);
     expect((written().nodes as Rec[]).find((n) => n.id === 'push')!.interventions.f).toMatchObject({ value: 0.8, raw_value: 0.8, source: 'user_edited' });
     expect(out.response.draft_graph).toBeDefined();
   });
@@ -196,8 +196,8 @@ describe('a canvas gesture on a core scenario', () => {
     const added = await send({ kind: 'structural_add', node_id: 'r', node_kind: 'risk', label: 'Supplier delay', base_graph_hash: BASE });
     expect(added.commitPerformed, JSON.stringify(added.response)).toBe(true);
     const withRisk = written();
-    expect((withRisk.living_model as typeof KNOWN_ANSWER).risks).toEqual([{ id: 'r', label: 'Supplier delay', occurrence: { low: null, high: null },
-      horizon_months: null, mitigations: [], source: 'user', party: null, quote: null }]);
+    expect((withRisk.living_model as typeof KNOWN_ANSWER).risks).toEqual([{ id: 'r', label: 'Supplier delay', occurrence: { estimate_by: null, low: null, high: null },
+      horizon_months: null, horizon_by: null, mitigations: [], source: 'user', party: null, quote: null }]);
     loadGraph.mockResolvedValue(withRisk);
     const base = computeExpectedGraphCasHashes(withRisk).expectedGraphAnalysisHash!;
     append.mockClear();

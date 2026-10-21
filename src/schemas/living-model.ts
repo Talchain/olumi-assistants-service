@@ -44,7 +44,6 @@ const estimateBy = z.enum(['olumi']).nullable().default(null).describe(
 
 /** A figure as stated: a point (`value`) or a range (`low`/`high`), never a range collapsed to its midpoint. */
 const figure = {
-  estimate_by: estimateBy,
   value: z.number().nullable(),
   low: z.number().nullable(),
   high: z.number().nullable(),
@@ -52,6 +51,9 @@ const figure = {
   unit: z.string().nullable().describe(
     'The unit as written ("tickets per week", "£", "%"). Null when none was given, except that Olumi\'s own estimate states its unit. Always null for something that is simply on or off, such as a step an option takes or not ("dual-sourcing in place"): it has no unit.'),
 };
+
+/** A figure Olumi may estimate on another's item (factor level, setting, link size): never the aim's target, which is asked for. */
+const estimable = { estimate_by: estimateBy, ...figure };
 
 /**
  * TRACK 2 identity (21 Oct): what a quantity IS, when it is defined as the sum or product of factors. A definition, not a
@@ -114,7 +116,7 @@ export const LivingFactor = z.object({
   kind: z.enum(['factor', 'outcome']).default('factor').describe(
     'outcome for a result that other factors lead to and that in turn moves the aim ("customer satisfaction", "staff turnover"); factor for everything else, including anything an option sets.'),
   /** The factor's current level, when known. */
-  ...figure,
+  ...estimable,
   /**
    * Paul's served test (21 Oct, 31711a9): with no rule here, every Olumi factor came back with no level, so nothing could be
    * worked out. Olumi completes its OWN items, labelled as its own; a person's missing figure stays null and is asked for.
@@ -136,7 +138,7 @@ export const LivingFactor = z.object({
 
 export const LivingSetting = z.object({
   factor_id: id,
-  ...figure,
+  ...estimable,
   ...attribution,
 }).strict();
 
@@ -191,7 +193,7 @@ export const LivingLink = z.object({
     form: z.enum(['point', 'exact', 'range', 'normal', 'direction_only', 'unknown']).describe(
       'point: a stated figure ("adds about 50"); exact: the person says it is exactly this, with no variation ("adds exactly 50"); '
       + 'normal: a stated Normal law, value its mean and sd its standard deviation; range: low to high, with value the source\'s own central figure: the person\'s when they give one, Olumi\'s for Olumi\'s own estimate ("about 20, between 10 and 30"), else null; direction_only: a sign with no size, only when an end has no unit or the source gave a direction only; unknown: direction is unstated or unresolved, with sign null.'),
-    ...figure,
+    ...estimable,
     /**
      * The link's unit is the `to` item's own unit, exactly as that item writes it; "per +1 of `from`" is implied, so it is
      * never written here. The AI reads this description (the strict tool schema carries it), so it is the instruction.

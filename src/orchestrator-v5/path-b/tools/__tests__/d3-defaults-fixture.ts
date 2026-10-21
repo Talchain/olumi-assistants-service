@@ -22,14 +22,14 @@ export function d3Run(subject: 'orders' | 'repairs', mode: 'conditional' | 'olum
       target: { quantity: unit, comparator: '>=', value: 150, low: null, high: null, unit, by_when: null, baseline: 'today', current: 120,
         current_source: null, current_unit: null, change_kind: null, source: null } }],
     options: levers.map(([id, label]) => ({ status: 'feasible' as const, id: `try_${id}`, label: `Try ${label}`, developed_from: null, source: 'user' as const,
-      party: null, quote: `try ${label.toLowerCase()}`, settings: [{ factor_id: id, value: 1, low: null, high: null, unit: null, source: 'user' as const, party: null, quote: `try ${label.toLowerCase()}` }] })),
-    factors: levers.map(([id, label]) => ({ kind: 'factor' as const, limit: null, id, label, value: 0, low: null, high: null, unit: null, defined_as: null,
+      party: null, quote: `try ${label.toLowerCase()}`, settings: [{ factor_id: id, estimate_by: null, value: 1, low: null, high: null, unit: null, source: 'user' as const, party: null, quote: `try ${label.toLowerCase()}` }] })),
+    factors: levers.map(([id, label]) => ({ kind: 'factor' as const, limit: null, id, label, estimate_by: null, value: 0, low: null, high: null, unit: null, defined_as: null,
       source: 'user' as const, party: null, quote: `no ${label.toLowerCase()} today` })),
     links: levers.map(([id, , v, low, high], i) => ({ id: `${id}_goal`, from: id, to: 'goal', source: mode === 'olumi' ? 'olumi' as const : 'user' as const, party: null,
       quote: mode === 'olumi' ? null : quotes[i]!,
-      effect: mode === 'conditional' ? { form: 'range' as const, value: v, low, high, sd: null, unit, sign: '+' as const }
-        : mode === 'olumi' ? { form: 'point' as const, value: v, low: null, high: null, sd: null, unit, sign: '+' as const }
-          : { form: 'normal' as const, value: v, sd: (high - low) / 4, low: null, high: null, unit, sign: '+' as const } })),
+      effect: mode === 'conditional' ? { form: 'range' as const, estimate_by: null, value: v, low, high, sd: null, unit, sign: '+' as const }
+        : mode === 'olumi' ? { form: 'point' as const, estimate_by: null, value: v, low: null, high: null, sd: null, unit, sign: '+' as const }
+          : { form: 'normal' as const, estimate_by: null, value: v, sd: (high - low) / 4, low: null, high: null, unit, sign: '+' as const } })),
     risks: [], conditions: [], views: [], history: [],
   };
   const { graph: mapped, withheld } = mapLivingModel(living);

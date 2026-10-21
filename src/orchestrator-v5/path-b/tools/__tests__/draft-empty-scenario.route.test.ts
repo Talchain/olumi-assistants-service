@@ -56,9 +56,9 @@ const livingFor = (brief: string): LivingModelT => {
     options: [
       { status: 'feasible', id: 'carry_on', label: 'Carry on as now', settings: [], developed_from: null, source: 'olumi', party: null, quote: null },
       { status: 'feasible', id: 'change', label: 'Make the change', developed_from: null, source: 'olumi', party: null, quote: null,
-        settings: [{ factor_id: 'level', value: 2, low: null, high: null, unit: null, source: 'olumi', party: null, quote: null }] },
+        settings: [{ estimate_by: null, factor_id: 'level', value: 2, low: null, high: null, unit: null, source: 'olumi', party: null, quote: null }] },
     ],
-    factors: [{ kind: 'factor', limit: null, id: 'level', label: 'Current level', value: 1, low: null, high: null, unit: null, defined_as: null, source: 'olumi', party: null, quote: null }],
+    factors: [{ estimate_by: null, kind: 'factor', limit: null, id: 'level', label: 'Current level', value: 1, low: null, high: null, unit: null, defined_as: null, source: 'olumi', party: null, quote: null }],
     links: [], risks: [], conditions: [], views: [], history: [],
   };
 };
