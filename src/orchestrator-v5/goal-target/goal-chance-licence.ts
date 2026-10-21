@@ -356,7 +356,7 @@ function risksFacingStatusQuo(graph: unknown, goalId: unknown, statusQuoId: stri
     const risk = r.kind === 'risk' && typeof r.id === 'string' ? EventRiskV1.safeParse(r.event_risk).data : undefined;
     const label = risk === undefined ? undefined : labelOfNode(nodes, r.id as string);
     if (risk === undefined || label === undefined) return [];
-    const high = risk.mitigations.reduce((q, m) => (level(m.factor_id) === 1 ? q * (1 - m.occurrence_reduction) : q), risk.occurrence.p_high);
+    const high = (risk.mitigations ?? []).reduce((q, m) => (level(m.factor_id) === 1 ? q * (1 - m.occurrence_reduction) : q), risk.occurrence.p_high);
     if (!(high > 0)) return [];
     const seen = new Set<unknown>([r.id]);
     for (const queue: unknown[] = [r.id]; queue.length > 0;) {
