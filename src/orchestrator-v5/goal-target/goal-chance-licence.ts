@@ -380,11 +380,12 @@ function risksFacingStatusQuo(graph: unknown, goalId: unknown, statusQuoId: stri
  * the Run's own frame. Anything else (a larger move, another frame, no sample size, a change frame) is not explained.
  */
 function riskExplains(a: { readonly row: Rec | undefined; readonly reference: number | 'unknown' | undefined; readonly rawReference?: number;
-  readonly referenceChance?: 0 | 1; readonly zeroChange?: 0 | 1; readonly riskChance?: number }, p: number): boolean {
+  readonly referenceChance?: 0 | 1; readonly riskChance?: number }, p: number): boolean {
   const q = a.riskChance;
   const o = isRec(a.row?.outcome) ? a.row!.outcome as Rec : undefined;
   const n = finite(o?.n_valid_samples) ? o!.n_valid_samples : o?.n_samples;
-  if (q === undefined || !(q > 0) || q >= 0.5 || a.zeroChange !== undefined || a.referenceChance === undefined || !finite(n) || n < 1) return false;
+  // A change frame carries no `referenceChance` (only `zeroChange`), so it is never explained here.
+  if (q === undefined || !(q > 0) || q >= 0.5 || a.referenceChance === undefined || !finite(n) || n < 1) return false;
   const atToday = [a.reference, a.rawReference].some((ref) => finite(ref) && finite(o?.p50)
     && sameFrameArithmeticAgreement(o!.p50 as number, ref, ref, PAIRED_REFERENCE_PRECISION));
   return atToday && Math.abs(p - a.referenceChance) <= q + 4 * Math.sqrt(q * (1 - q) / n);
