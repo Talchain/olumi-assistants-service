@@ -37,7 +37,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
   it('arm B is the AIE\'s assembled reference, byte for byte (programme-docs #94 6303242136, static text sha256 7b6145d4…), plus the canvas-coaching sentence', () => {
     expect(b.split(NOTE_ON_ITEM_INSTRUCTION)).toHaveLength(2);
     // 7b6145d4… until 21 Oct; arm C's adoption changed only the closing core reply rule (see its row), now 56625e00….
-    expect(createHash('sha256').update(b.replace(`${NOTE_ON_ITEM_INSTRUCTION}\n\n`, ''), 'utf8').digest('hex')).toBe('a605c43f4479a524170db09c6c8f239a7dca027bba74a0f6c0b647e47707d660'); // + CORE_NEXT_STEP (Codex #3571 wording), Track 3 E2E 21 Oct (was 8039876b…)
+    expect(createHash('sha256').update(b.replace(`${NOTE_ON_ITEM_INSTRUCTION}\n\n`, ''), 'utf8').digest('hex')).toBe('9fabad93c7c1ddf0ce3a6f277810d8414f12ac5e90212aea9e45e3fa7eb8bdc4'); // + CORE_NEXT_STEP ask order (Track 3 default Q2 v2, 21 Oct; was a605c43f…)
   });
 
   it('arm A is untouched: the legacy host contract is byte-identical to staging b76bc42c', () => {
@@ -78,6 +78,10 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(CORE_REPLY_INSTRUCTION.split(CORE_NEXT_STEP)).toHaveLength(2);
     expect(CORE_REPLY_INSTRUCTION.indexOf(CORE_NEXT_STEP)).toBeGreaterThan(CORE_REPLY_INSTRUCTION.indexOf(discipline));
     expect(CORE_NEXT_STEP).toContain('the input that would most change how their options compare on their goal');
+    // Track 3 default Q2 (8177faa9, v2 half 6/6): the one question was secondary (evidence, framing) while the goal's figure,
+    // today's level or an option's effect was missing. The order is stated, and a vague goal gets Olumi's suggested measure.
+    expect(CORE_NEXT_STEP).toContain('Take it in this order: the goal\u2019s figure (when they named no measure, suggest one as yours and ask for its figure), then today\u2019s level of what it measures, then what an option would deliver or cost.');
+    expect(CORE_NEXT_STEP).toContain('Ask about evidence or causes only when none of these is missing.');
     // Codex #3571 BLOCK: a state query ("what is still needed?") is answered in full.
     expect(CORE_NEXT_STEP).toContain('When they ask what is still needed, give the complete list.');
     // The licences, attribution and Run-coaching rules are kept.
