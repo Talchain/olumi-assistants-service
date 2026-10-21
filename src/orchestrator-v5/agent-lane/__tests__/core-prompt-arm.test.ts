@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CORE_ALIGNED_INSTRUCTIONS, CORE_REPLY_CONCISE_INSTRUCTION, CORE_REPLY_INSTRUCTION, coreReplyOf, NOTE_ON_ITEM_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION, instructionsForMode, MODEL_RELATIVE_NAMING_INSTRUCTION,
+import { CORE_ALIGNED_INSTRUCTIONS, CORE_REPLY_INSTRUCTION, NOTE_ON_ITEM_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION, instructionsForMode, MODEL_RELATIVE_NAMING_INSTRUCTION,
   promptArmOf, coreEffortArmOf } from '../../../routes/agent-v1-turn.js';
 import { coreBudget } from '../model-budgets.js';
 import { OLUMI_PURPOSE_INSTRUCTION } from '../olumi-purpose.js';
@@ -35,7 +35,8 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
 
   it('arm B is the AIE\'s assembled reference, byte for byte (programme-docs #94 6303242136, static text sha256 7b6145d4…), plus the canvas-coaching sentence', () => {
     expect(b.split(NOTE_ON_ITEM_INSTRUCTION)).toHaveLength(2);
-    expect(createHash('sha256').update(b.replace(`${NOTE_ON_ITEM_INSTRUCTION}\n\n`, ''), 'utf8').digest('hex')).toBe('7b6145d42064bc345cfa3c59e0ea6b4434f6f64f3640b41c262274e558fd300c');
+    // 7b6145d4… until 21 Oct; arm C's adoption changed only the closing core reply rule (see its row), now 56625e00….
+    expect(createHash('sha256').update(b.replace(`${NOTE_ON_ITEM_INSTRUCTION}\n\n`, ''), 'utf8').digest('hex')).toBe('56625e00774dcfe9855a29df963722af2a62e61bcfdd3c851670ec29be9d3098');
   });
 
   it('arm A is untouched: the legacy host contract is byte-identical to staging b76bc42c', () => {
@@ -53,30 +54,23 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
 
   it('the arm is B only on a core turn that asks for it; every other turn keeps the default', () => {
     expect(promptArmOf('core', 'B')).toBe('B');
-    expect(promptArmOf('core', 'C')).toBe('C');
-    for (const header of [undefined, 'A', 'b', 'c', ['B'], ['C']]) expect(promptArmOf('core', header)).toBe('A');
+    // Arm C was adopted as the core reply rule (21 Oct), so its header no longer selects anything.
+    for (const header of [undefined, 'A', 'C', 'b', 'c', ['B'], ['C']]) expect(promptArmOf('core', header)).toBe('A');
     expect(promptArmOf('full', 'B')).toBe('A');
-    expect(promptArmOf('full', 'C')).toBe('A');
   });
 
-  it('arm C (Paul 21 Oct, long replies narrating the tools): only the reply rule\u2019s save sentence changes, to the user\u2019s terms with a length bound', () => {
-    expect(coreReplyOf('core', 'C')).toBe(CORE_REPLY_CONCISE_INSTRUCTION);
-    for (const header of [undefined, 'A', 'B']) expect(coreReplyOf('core', header), String(header)).toBe(CORE_REPLY_INSTRUCTION);
-    expect(coreReplyOf('full', 'C')).toBe(CORE_REPLY_INSTRUCTION);
-    expect(CORE_REPLY_CONCISE_INSTRUCTION).not.toBe(CORE_REPLY_INSTRUCTION);
-    expect(CORE_REPLY_INSTRUCTION).toContain('So say, from this turn\u2019s tool results, what was saved');
-    expect(CORE_REPLY_CONCISE_INSTRUCTION).not.toContain('from this turn\u2019s tool results');
-    expect(CORE_REPLY_CONCISE_INSTRUCTION).toContain('never your tools or what a tool response did or did not contain');
-    expect(CORE_REPLY_CONCISE_INSTRUCTION).toContain('usually under 100 words');
-    // Every other sentence is kept byte for byte: the licences, attribution and Run-coaching rules.
-    const [before, after] = CORE_REPLY_INSTRUCTION.split('So say, from this turn\u2019s tool results, what was saved, what was not saved and why, and any proposal that is waiting for the user\u2019s approval on its card. ');
-    expect(CORE_REPLY_CONCISE_INSTRUCTION.startsWith(before!)).toBe(true);
-    expect(CORE_REPLY_CONCISE_INSTRUCTION.endsWith(after!)).toBe(true);
-    expect(after).toContain('never call a win share a chance');
-    const sent = instructionsForMode('core', 'legacy arm A text', CORE_REPLY_CONCISE_INSTRUCTION);
-    expect(sent.endsWith(CORE_REPLY_CONCISE_INSTRUCTION)).toBe(true);
+  it('arm C ADOPTED (Paul 21 Oct, long replies narrating the tools; R2 100 % at 90 words median): the core reply rule speaks in the user\u2019s terms with a length bound', () => {
+    expect(CORE_REPLY_INSTRUCTION).not.toContain('from this turn\u2019s tool results');
+    expect(CORE_REPLY_INSTRUCTION).toContain('never your tools or what a tool response did or did not contain');
+    expect(CORE_REPLY_INSTRUCTION).toContain('usually under 100 words');
+    // The licences, attribution and Run-coaching rules are kept.
+    for (const rule of ['never call a win share a chance', 'never call an option best, a winner or recommended',
+      'approving a reading adopts it but does not make the user its author', 'A Run that did not complete leaves a saved change saved'])
+      expect(CORE_REPLY_INSTRUCTION, rule).toContain(rule);
+    const sent = instructionsForMode('core', 'legacy arm A text');
+    expect(sent.endsWith(CORE_REPLY_INSTRUCTION)).toBe(true);
     expect(sent.split(NOTE_ON_ITEM_INSTRUCTION)).toHaveLength(2);
-    expect(instructionsForMode('full', 'legacy arm A text', CORE_REPLY_CONCISE_INSTRUCTION)).toBe('legacy arm A text');
+    expect(instructionsForMode('full', 'legacy arm A text')).toBe('legacy arm A text');
   });
 
   it('the builder\u2019s effort arm is lowered only on a core turn that asks for it; the default stays the banked high', () => {

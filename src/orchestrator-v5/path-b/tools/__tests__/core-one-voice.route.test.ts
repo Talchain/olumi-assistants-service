@@ -464,7 +464,7 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
     expect(r.statusCode, r.body).toBe(200);
     expectCoherentInstructions(r.json());
     const { CORE_REPLY_INSTRUCTION } = await import('../../../../routes/agent-v1-turn.js');
-    expect(createHash('sha256').update(CORE_REPLY_INSTRUCTION, 'utf8').digest('hex')).toBe('60809c1bbc40c732fb73b683bfebf6035be2b767a39c17f39f8662e7e0144d9a');
+    expect(createHash('sha256').update(CORE_REPLY_INSTRUCTION, 'utf8').digest('hex')).toBe('814966937a2ea047ffaef43b3e9f521e68d5cb05ad19f099e9df766c953c50e8'); // arm C adopted 21 Oct (was 60809c1b…)
     for (const c of calls) {
       expect(c.instructions).toContain(CORE_REPLY_INSTRUCTION);
       expect(c.instructions.split(scope)).toHaveLength(2);

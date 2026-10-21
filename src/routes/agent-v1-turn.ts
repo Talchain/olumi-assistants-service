@@ -951,7 +951,7 @@ export const CORE_ALIGNED_INSTRUCTIONS = SELECTED_COACH_V02_TEMPLATE.replace(
   `${OLUMI_PURPOSE_INSTRUCTION}\n\n${[CORE_AUTHORITY_INSTRUCTION, HOST_SCIENCE_AND_SOURCE_RULES, REPLY_LENGTH_INSTRUCTION, REPLY_SHAPE_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION].join(' ')}`,
 ).replace(LEGACY_STARTING_INPUTS, CORE_STARTING_INPUTS);
 /** The comparison's arm for one request: B only on a core turn that asks for it. Removed, with the losing arm, when it closes. */
-export const promptArmOf = (mode: AgentLaneMode, header: unknown): 'A' | 'B' | 'C' => (mode === 'core' && (header === 'B' || header === 'C') ? header : 'A');
+export const promptArmOf = (mode: AgentLaneMode, header: unknown): 'A' | 'B' => (mode === 'core' && header === 'B' ? 'B' : 'A');
 /** The builder's effort for the configuration comparison (#94): `x-olumi-core-effort` on a core turn, else the banked high. */
 export const coreEffortArmOf = (mode: AgentLaneMode, header: unknown): 'low' | 'medium' | undefined =>
   (mode === 'core' && (header === 'medium' || header === 'low') ? header : undefined);
@@ -961,7 +961,7 @@ export const coreEffortArmOf = (mode: AgentLaneMode, header: unknown): 'low' | '
  * itself carries what the host would otherwise add, from the typed facts the AI already holds. Sent only in `core`, after
  * the shared instructions, so every other mode's instructions stay byte-identical. ⚠ Prompt text: AIE review owed.
  */
-export const CORE_REPLY_INSTRUCTION = 'In this mode Olumi adds nothing to your reply and rewrites none of it: the user reads exactly your words. '
+const CORE_REPLY_BEFORE_C = 'In this mode Olumi adds nothing to your reply and rewrites none of it: the user reads exactly your words. '
   + 'So say, from this turn\u2019s tool results, what was saved, what was not saved and why, and any proposal that is waiting for the user\u2019s approval on its card. '
   + 'Write one coherent reply in a single voice: give the explanation first, mention what changed since the last Run only when it matters, and weave at most one next step from the current readiness facts into the prose, never as a separate bullet or receipt line and never asking for something the user has already said; ask at most one question per reply. '
   + 'Keep every must_say disclosure and the licences in run_facts: never call a win share a chance, and never call an option best, a winner or recommended. '
@@ -980,17 +980,16 @@ export const CORE_RUN_PRESS_WITHHELD: readonly string[] = ['build_model_from_bri
 /** Coaching on the canvas (Lenses, #3535 `note_on_item`): one question or challenge beside the item that most deserves attention. */
 export const NOTE_ON_ITEM_INSTRUCTION = "When one item in the model most deserves the person's attention (an untested assumption a result rests on, a missing cost or risk, or a link nobody has sized), use note_on_item once to put one short question or challenge beside it, in your own words; ask, do not answer or choose for them.";
 /**
- * Arm C (#94, the AIE's step after the A/B: one recurring class against the winning prompt A): Paul's 21 Oct session found
- * core replies long and narrating the tools ("the save response gave no reason"). The same reply rule, with its save
- * sentence in the user's terms and a length bound; every other word is byte-identical.
+ * Arm C, ADOPTED (#94; R2 window 21 Oct 04:29Z on served a4e6efaa, arms verified in the provider ledger): Paul's 21 Oct
+ * session found core replies long and narrating the tools ("the save response gave no reason"). The same reply rule, with
+ * its save sentence in the user's terms and a length bound; every other word is byte-identical. On R2 it kept every quality
+ * rate at 100 % (facts 34/34, corrections 8/8 cold, 0/66 misattributions, outcome 18/18) with replies of 90 words median
+ * (p90 111) against arm A's 127 (p90 202).
  */
 const CORE_REPLY_SAVE_SENTENCE = 'So say, from this turn\u2019s tool results, what was saved, what was not saved and why, and any proposal that is waiting for the user\u2019s approval on its card. ';
-export const CORE_REPLY_CONCISE_INSTRUCTION = CORE_REPLY_INSTRUCTION.replace(CORE_REPLY_SAVE_SENTENCE,
+export const CORE_REPLY_INSTRUCTION = CORE_REPLY_BEFORE_C.replace(CORE_REPLY_SAVE_SENTENCE,
   'So say plainly what changed in their model, what was not saved and why, and any proposal that is waiting for the user\u2019s approval on its card, in the user\u2019s terms (their model, its items and its Run), never your tools or what a tool response did or did not contain. '
   + 'Keep the whole reply short, usually under 100 words, in plain sentences without tables or headings, unless the user asks for more detail. ');
-/** The reply rule for one core request: arm C's concise variant only when the request asks for it. */
-export const coreReplyOf = (mode: AgentLaneMode, header: unknown): string =>
-  (promptArmOf(mode, header) === 'C' ? CORE_REPLY_CONCISE_INSTRUCTION : CORE_REPLY_INSTRUCTION);
 /** The instructions for one call in this lane mode: unchanged outside `core`. */
 export function instructionsForMode(mode: AgentLaneMode, instructions: string, reply: string = CORE_REPLY_INSTRUCTION): string {
   return mode === 'core' ? `${instructions}\n\n${NOTE_ON_ITEM_INSTRUCTION}\n\n${reply}` : instructions;
@@ -3907,7 +3906,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const interpret = interpretBudget();
         const resp = await callModelFor(interpret)({
           // Standing unit/authorship/calculation safeguards remain; RUN_FACTS_USE is the one Run coaching instruction.
-          instructions: instructionsForMode(mode, `${AGENT_INSTRUCTIONS}\n\n${eligibleIntervention === undefined ? '' : `${ELIGIBLE_INTERVENTION_INSTRUCTION}\n\n`}${askView ? `${RUN_INTERPRETATION_VIEW_INSTRUCTION}\n\n` : ''}${INTERPRET_ONLY_CONSTRAINT}\n\n${RUN_FACTS_USE}`, coreReplyOf(mode, req.headers['x-olumi-prompt-arm'])),
+          instructions: instructionsForMode(mode, `${AGENT_INSTRUCTIONS}\n\n${eligibleIntervention === undefined ? '' : `${ELIGIBLE_INTERVENTION_INSTRUCTION}\n\n`}${askView ? `${RUN_INTERPRETATION_VIEW_INSTRUCTION}\n\n` : ''}${INTERPRET_ONLY_CONSTRAINT}\n\n${RUN_FACTS_USE}`),
           input: explanationInput,
           // No tools at all: acting is structurally impossible on this call (and no schema tokens
           // are spent on tools it may not use). Measured against the live API: accepted with the
@@ -4530,7 +4529,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
               if (result.ok && result.mutated && (result.receipts?.length ?? 0) > 0) verifiedSave = true;
               onCall(row, { ...result });
             }, coreScenario ? 'core' : 'legacy'),
-          instructions: instructionsForMode(mode, `${promptArmOf(mode, req.headers['x-olumi-prompt-arm']) === 'B' ? CORE_ALIGNED_INSTRUCTIONS : AGENT_TOOL_INSTRUCTIONS}${eligibleIntervention === undefined ? '' : `\n\n${ELIGIBLE_INTERVENTION_INSTRUCTION}`}`, coreReplyOf(mode, req.headers['x-olumi-prompt-arm'])),
+          instructions: instructionsForMode(mode, `${promptArmOf(mode, req.headers['x-olumi-prompt-arm']) === 'B' ? CORE_ALIGNED_INSTRUCTIONS : AGENT_TOOL_INSTRUCTIONS}${eligibleIntervention === undefined ? '' : `\n\n${ELIGIBLE_INTERVENTION_INSTRUCTION}`}`),
           briefText: coreSaved?.brief_text,
           canonicalState: livingView === undefined ? canonicalContext?.packet?.state
             : { ...(canonicalContext?.packet?.state as Record<string, unknown> | undefined), ...livingView },
@@ -4574,7 +4573,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             instructions: instructionsForMode(mode, methodTurn?.kind === 'run' ? `${AGENT_INSTRUCTIONS}\n\n${methodTurn.directive}\n\n${premortemProducerDirective(methodTurn, methodGraph)}`
               : widenRun !== undefined ? `${AGENT_INSTRUCTIONS}\n\n${widenRun.directive}`
               : risksRun !== undefined ? `${AGENT_INSTRUCTIONS}\n\n${risksRun.directive}`
-              : eligibleIntervention === undefined ? AGENT_TOOL_INSTRUCTIONS : `${AGENT_TOOL_INSTRUCTIONS}\n\n${ELIGIBLE_INTERVENTION_INSTRUCTION}`, coreReplyOf(mode, req.headers['x-olumi-prompt-arm'])),
+              : eligibleIntervention === undefined ? AGENT_TOOL_INSTRUCTIONS : `${AGENT_TOOL_INSTRUCTIONS}\n\n${ELIGIBLE_INTERVENTION_INSTRUCTION}`),
             maxOutputTokens: budget.max_output_tokens,
             mode,
             // T3: a method turn is structurally ONE model call with NO tool (DL 5939415083 (2)): every tool withheld, one hop.
