@@ -16,13 +16,13 @@ import { z } from 'zod-v4';
 import type { AgentToolContext } from '../../agent-lane/runtime/agent-tools.js';
 import type { InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
 import { constructionOperationId, findConstructionVersion } from '../../agent-lane/runtime/build-model.js';
-import { LivingModel } from '../../../schemas/living-model.js';
+import { LivingModel, type LivingModelT } from '../../../schemas/living-model.js';
 import { applyKernel } from '../living-model/kernel.js';
 import { mapLivingModel } from '../living-model/mapper.js';
 import { hasGaps, structureGaps } from '../living-model/structure.js';
 import type { CritiqueT } from '../../agent-lane/core/model-critic.js';
 import { isNoModelYet, isSavedRead, readSaved } from './context-tool.js';
-import { ok, refused, OUTCOME_TRACE, type ToolOutcome } from './outcome.js';
+import { ok, refused, unavailable, OUTCOME_TRACE, type ToolOutcome } from './outcome.js';
 import { writeCorePostimage } from './core-write.js';
 import { inTheUsersWords, type TypedWords } from './user-words.js';
 
@@ -33,7 +33,12 @@ export const BuildModelParams = z.object({
   /** The complete living model of the brief: every aim, option, factor, link, condition and view, with who said it. */
   model: LivingModel,
 }).strict();
-export type BuildModelArgs = z.infer<typeof BuildModelParams>;
+/** The construction role's arm (`model-drafter.ts`): the conversation agent supplies only the brief; Olumi's drafter writes the model. */
+export const BuildFromBriefParams = z.object({
+  /** The user's brief, copied verbatim from their own messages. */
+  brief: z.string(),
+}).strict();
+export type BuildModelArgs = z.infer<typeof BuildModelParams> | z.infer<typeof BuildFromBriefParams>;
 
 export interface DraftDeps {
   readonly dispatch: InternalDispatch;
@@ -46,6 +51,11 @@ export interface DraftDeps {
    * enhances the model). Read once, beside the structure check; undefined when unavailable, so a draft never waits on it.
    */
   readonly critique?: (input: string) => Promise<CritiqueT | undefined>;
+  /**
+   * The construction role (`model-drafter.ts`; buddy AMEND/PROCEED 21 Oct). When present, the model is drafted HERE from the
+   * brief, and revised here once after the critic, so the conversation agent never authors a competing draft.
+   */
+  readonly draft?: (input: string) => Promise<LivingModelT | undefined>;
 }
 
 /** What the AI is told when a reviewer read its first draft. Nothing is saved; the drafter decides what to adopt. */
@@ -56,6 +66,10 @@ export const REVIEW_FIRST = 'Nothing was saved yet: a second reviewer read your 
   + 'judge one, else form unknown with sign null so the person can say which way. Connect other items only where there is a real '
   + 'causal relationship; context may stay unconnected. Never invent a chance, a strength or a target figure to complete the model: ask for it instead. In your reply, '
   + 'say which items are Olumi\'s suggestions, and ask the critique\'s question if it is still open.';
+
+/** What the construction role is told when it revises its own first draft after the critic (the same rules as REVIEW_FIRST). */
+export const REVISE_ONCE = 'Revise your draft once in light of the critique and the structural gaps, and return the complete model. '
+  + REVIEW_FIRST.slice(REVIEW_FIRST.indexOf('Adopt only what helps'), REVIEW_FIRST.indexOf(' In your reply,'));
 
 const nodesIn = (graph: Record<string, unknown>): number => (Array.isArray(graph.nodes) ? graph.nodes.length : 0);
 
@@ -86,14 +100,25 @@ async function constructUnrecorded(deps: DraftDeps, ctx: DraftContext, args: Bui
     return prior === null ? refused('model_exists') : ok({ already_saved: true, model_version: prior }, { mutated: false });
   }
 
-  const kernelled = applyKernel(args.model, [args.brief, ...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text === undefined ? [] : [ctx.user_turn_text])]);
-  const mapped = mapLivingModel(kernelled.model);
+  const words = [args.brief, ...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text === undefined ? [] : [ctx.user_turn_text])];
+  const drafted = 'model' in args ? args.model : await deps.draft?.(JSON.stringify({ brief: args.brief }));
+  if (drafted === undefined) return unavailable('draft_failed');
+  let kernelled = applyKernel(drafted, words);
+  let mapped = mapLivingModel(kernelled.model);
   if (!mapped.graph.nodes.some((n) => n.kind !== 'decision')) return refused('model_empty');
-  const gaps = structureGaps(kernelled.model);
+  let gaps = structureGaps(kernelled.model);
   if (deps.review !== undefined && !deps.review.done) {
     deps.review.done = true;
     const critique = await deps.critique?.(JSON.stringify({ brief: args.brief, draft: kernelled.model, gaps }));
-    if (critique !== undefined) return refused('review_first', REVIEW_FIRST, { gaps, critique });
+    if (critique !== undefined && deps.draft === undefined) return refused('review_first', REVIEW_FIRST, { gaps, critique });
+    // The construction role revises its own draft here, once; a failed revision keeps the first draft.
+    const revised = critique === undefined ? undefined
+      : await deps.draft?.(JSON.stringify({ brief: args.brief, draft: kernelled.model, gaps, critique, instruction: REVISE_ONCE }));
+    if (revised !== undefined) {
+      const k = applyKernel(revised, words);
+      const m = mapLivingModel(k.model);
+      if (m.graph.nodes.some((n) => n.kind !== 'decision')) { kernelled = k; mapped = m; gaps = structureGaps(k.model); }
+    }
   }
   const graph: Record<string, unknown> = { ...mapped.graph, living_model: kernelled.model };
 
