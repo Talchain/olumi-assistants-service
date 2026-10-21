@@ -40,6 +40,10 @@ describe('the construction role (21 Oct): one bounded call whose strict output i
     expect(DRAFTER_INSTRUCTIONS).toContain('Never invent a level or a size to connect it.');
     expect(DRAFTER_INSTRUCTIONS).not.toContain('Give its level as Olumi');
     expect(DRAFTER_INSTRUCTIONS).not.toContain("or is Olumi's estimate");
+    // Buddy delta on #3574: quotes may come from the verified conversation; no path is added merely to connect the model.
+    expect(DRAFTER_INSTRUCTIONS).toContain('copied verbatim from the brief or the verified chronological said messages; later corrections govern');
+    expect(DRAFTER_INSTRUCTIONS).toContain('Never add a path merely to make the model connected; a missing mechanism stays an explicit challenge.');
+    expect(DRAFTER_INSTRUCTIONS).not.toContain('EVERY FACTOR YOU KEEP NEEDS A PATH');
     // Codex BLOCK on #3574: a product's parts keep their own units (customers × £ per customer per month), only a sum's share one.
     expect(DRAFTER_INSTRUCTIONS).toContain("In a sum, each part is in the defined quantity's unit; in a product, each part keeps its own unit and the units compose");
     expect(DRAFTER_INSTRUCTIONS).not.toContain("Every part needs its level today in the defined quantity's unit.");
