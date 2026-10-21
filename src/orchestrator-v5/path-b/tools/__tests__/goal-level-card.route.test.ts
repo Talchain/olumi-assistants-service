@@ -459,9 +459,7 @@ describe('PATH-B: the goal’s current level, typed as a correction, shows its c
     expect(goalRaw(), 'the goal keeps its level').toBe(120);
   });
 
-  // THIN CORE FLIP (A1, #3522): off production, `openai` now selects the core lane (pinned in ai-core-lane-mode.test.ts), so
-  // the legacy lane's reply and model bytes are pinned on `conventional` alone.
-  it.each(['conventional'])('L2c parity: %s keeps its base reply and model bytes', async (mode) => {
+  it.each(['openai', 'conventional'])('L2c parity: %s keeps its base reply and model bytes', async (mode) => {
     SCENARIO = '5c5c5c5c-0000-4000-8000-000000000039';
     const before = JSON.stringify(persisted);
     outputs = [[{ type: 'message', text: 'The current baseline is 120 a week.' }]];

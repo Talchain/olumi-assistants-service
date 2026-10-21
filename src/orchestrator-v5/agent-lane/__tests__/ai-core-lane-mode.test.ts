@@ -27,6 +27,13 @@ describe('laneModeFor: the per-request lane mode', () => {
     expect(laneModeFor('full', 'openai', 'prod')).toBe('full');
   });
 
+  it('THE NAMED BRIDGE (Codex #3522 r3): on the default header, a scenario saved before the core lane keeps its legacy lane', () => {
+    expect(laneModeFor('full', 'openai', 'staging', true)).toBe('full');
+    expect(laneModeFor('full', 'openai', 'staging', false), 'CONTRAST: a core or new scenario').toBe('core');
+    expect(laneModeFor('full', 'core', 'staging', true), 'an explicit core request is unchanged').toBe('core');
+    expect(laneModeFor('preview', 'openai', 'staging', false)).toBe('preview');
+  });
+
   it('any other value keeps the base mode (contrast: only the exact values select core)', () => {
     for (const value of [undefined, 'conventional', 'CORE', 'OPENAI', ['core'], 'core ']) {
       expect(laneModeFor('full', value, 'staging'), String(value)).toBe('full');
