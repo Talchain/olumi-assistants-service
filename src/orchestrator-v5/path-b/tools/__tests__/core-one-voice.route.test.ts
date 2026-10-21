@@ -213,6 +213,25 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
     expectCoherentInstructions(j);
   });
 
+  it('⭐ RED→GREEN (#3522 review BLOCK, 21 Oct): a core turn can offer ONE public search; the reply ships its control, nothing is searched', async () => {
+    const QUERY = 'typical weekly order growth after a loyalty scheme in small food businesses';
+    outputs = [[{ type: 'function_call', name: 'offer_public_research', call_id: 'research_call', args: { query: QUERY } }],
+      [{ type: 'message', text: 'A search is on offer below; it runs only if you press it.' }]];
+    const r = await post({ turn_id: randomUUID(), message: 'Is there any published evidence on how much loyalty schemes help?', source: 'composer' });
+    expect(r.statusCode, r.body).toBe(200);
+    const j = r.json() as Json;
+    expect((j._agent.tool_calls as Json[]).find((c) => c.name === 'offer_public_research')).toMatchObject({ ok: true });
+    const chips = ((j.suggested_actions ?? []) as Json[]).filter((a) => String(a.id).startsWith('agent-public-research:'));
+    expect(chips, 'exactly the one control that can send the query').toHaveLength(1);
+    expect(JSON.stringify(chips[0])).toContain(QUERY);
+    // CONTROL: a query that is not one sendable line is refused, and no control ships.
+    outputs = [[{ type: 'function_call', name: 'offer_public_research', call_id: 'research_bad', args: { query: 'x'.repeat(201) } }],
+      [{ type: 'message', text: 'No search is on offer.' }]];
+    const bad = (await post({ turn_id: randomUUID(), message: 'Search for something very long.', source: 'composer' })).json() as Json;
+    expect((bad._agent.tool_calls as Json[]).find((c) => c.name === 'offer_public_research')).toMatchObject({ ok: false });
+    expect(((bad.suggested_actions ?? []) as Json[]).filter((a) => String(a.id).startsWith('agent-public-research:'))).toEqual([]);
+  });
+
   it('⭐ RED→GREEN: a goal with no target: no host gap question beside the AI\u2019s answer', async () => {
     persisted = stored(false);
     const r = await post({ turn_id: randomUUID(), message: QUESTION, source: 'composer' });
