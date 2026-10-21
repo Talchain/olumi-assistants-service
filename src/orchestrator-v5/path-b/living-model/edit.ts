@@ -35,6 +35,13 @@ export type EditOutcome = { readonly model: LivingModelT } | { readonly refused:
 
 const theirs = { source: 'user', party: null, quote: null } as const;
 const noRange = { low: null, high: null } as const;
+/** A target figure on Olumi's suggested measure is Olumi's: kept in history, never adopted as the person's (Codex #3585 P1). */
+function supersedeOlumiTarget(m: LivingModelT, a: LivingModelT['aims'][number]): void {
+  const t = a.target;
+  if (t === null || (t.value === null && t.low === null && t.high === null)) return;
+  const figure = t.value !== null ? `${t.value}` : `${t.low ?? '?'}\u2013${t.high ?? '?'}`;
+  m.history.push({ id: a.id, change: 'superseded', quote: null, old: `target ${figure}${t.unit === null ? '' : ` ${t.unit}`} (Olumi\u2019s figure, not confirmed by you)` });
+}
 
 export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?: string): EditOutcome {
   const mapped = mapLivingModel(model, goal === undefined ? {} : { goal });
@@ -72,8 +79,12 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
         // Today's level keeps the unit the person gave it (Track 3 Q2-02: "30 %" on a goal with no target unit saved as a bare 30):
         // `current_unit` when it differs from the target's unit, null when it is the same (the schema's own rule).
         const levelUnit = edit.unit ?? a!.target.current_unit;
-        // A figure the person sets makes the measure theirs (`target.source`), as their own words would.
-        a!.target = { ...a!.target, current: raw, current_source: 'user', current_unit: levelUnit === a!.target.unit ? null : levelUnit, source: null };
+        // A figure the person sets makes Olumi's suggested measure theirs (`target.source`), as their own words would; only
+        // the figure they set is adopted, and any target figure Olumi left on it goes to history as Olumi's (Codex #3585 P1).
+        const olumiMeasure = a!.target.source === 'olumi';
+        if (olumiMeasure) supersedeOlumiTarget(m, a!);
+        a!.target = { ...a!.target, ...(olumiMeasure ? { value: null, ...noRange } : {}), current: raw, current_source: 'user',
+          current_unit: levelUnit === a!.target.unit ? null : levelUnit, source: null };
       }
       return { model: m };
     }
@@ -119,10 +130,12 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       if (prior !== null && prior.current !== null && levelUnit !== null && levelUnit !== edit.unit) return { refused: 'unit_mismatch' };
       // The edit makes the aim the person's. A starting level they never gave is not carried as theirs: it is kept in the
       // history, and Olumi asks for today's level instead.
-      const keepCurrent = a.source === 'user' || prior?.current_source === 'user';
+      // On Olumi's suggested measure only a level the person set is theirs, whoever authored the aim (Codex #3585 P1).
+      const olumiMeasure = prior?.source === 'olumi';
+      const keepCurrent = olumiMeasure ? prior.current_source === 'user' : a.source === 'user' || prior?.current_source === 'user';
       if (!keepCurrent && prior?.current != null) {
         m.history.push({ id: a.id, change: 'superseded', quote: null,
-          old: `starting level ${prior.current}${prior.unit === null ? '' : ` ${prior.unit}`} (${a.source === 'olumi' ? 'Olumi\u2019s estimate' : 'not confirmed by you'})` });
+          old: `starting level ${prior.current}${prior.unit === null ? '' : ` ${prior.unit}`} (${a.source === 'olumi' || olumiMeasure ? 'Olumi\u2019s estimate' : 'not confirmed by you'})` });
       }
       a.target = { quantity: prior?.quantity ?? a.text, comparator: edit.constraint_type === 'at_least' ? '>=' : '<=',
         value: edit.raw_value, ...noRange, unit: edit.unit, by_when: prior?.by_when ?? null,
