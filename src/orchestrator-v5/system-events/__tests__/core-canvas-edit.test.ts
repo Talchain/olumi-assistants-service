@@ -83,11 +83,72 @@ describe('a canvas gesture on a core scenario', () => {
 
   // ⭐ Codex r5 on #3522 (A1): a range the canvas sets, and a risk added, renamed or deleted, were refused on core. Each now
   // changes the living model through the same one-write door, in the person's name.
-  it('⭐ a range the person sets is the factor\'s own low and high (a range, not a figure), theirs, written once', async () => {
+  it('⭐ DL ruling 21 Oct: a range around the person\'s own figure keeps it (a central figure with a range); the Run still has its level, and Olumi says the range is not a spread', async () => {
     const out = await send({ kind: 'prior_range_edit', target_id: 'f', range_min: 0.2, range_max: 0.8, distribution: 'uniform', base_graph_hash: BASE });
     expect(out.commitPerformed, JSON.stringify(out.response)).toBe(true);
     expect(append).toHaveBeenCalledTimes(1);
-    expect((written().living_model as typeof KNOWN_ANSWER).factors.find((f) => f.id === 'f')).toMatchObject({ value: null, low: 0.2, high: 0.8, source: 'user', quote: null });
+    const g = written();
+    expect((g.living_model as typeof KNOWN_ANSWER).factors.find((f) => f.id === 'f')).toMatchObject({ value: 0.5, low: 0.2, high: 0.8, source: 'user', quote: null });
+    expect((g.nodes as Rec[]).find((n) => n.id === 'f')!.observed_state).toMatchObject({ raw_value: 0.5 });
+    // Codex probe on #3522: the range used to drop the level, withholding f and with it the status quo's only factor edge.
+    const mapped = mapLivingModel(g.living_model as typeof KNOWN_ANSWER);
+    expect(mapped.withheld.filter((w) => w.id === 'f')).toEqual([]);
+    expect((g.edges as Rec[]).some((e) => e.from === 'hold' && e.to === 'f')).toBe(true);
+    expect(mapped.assumed).toContainEqual({ id: 'f', text: expect.stringMatching(/uses 0\.5 for f\. The range, 0\.2 to 0\.8, is kept with the model but is not used as a spread\./) });
+  });
+
+  it('⛔ Codex on #3575: a range from the figure itself (28 % to 50 %) keeps it, though the frame reads 28.000000000000004', async () => {
+    const pct = structuredClone(KNOWN_ANSWER);
+    Object.assign(pct.factors[0]!, { value: 28, unit: '%' });
+    Object.assign(pct.options.find((o) => o.id === 'push')!.settings[0]!, { value: 50, unit: '%' });
+    const cap = mapLivingModel(pct).frames.get('f')!.cap;
+    const stored: Rec = { ...mapLivingModel(pct).graph, living_model: pct };
+    loadGraph.mockResolvedValue(stored);
+    const out = await send({ kind: 'prior_range_edit', target_id: 'f', range_min: 28 / cap, range_max: 50 / cap,
+      base_graph_hash: computeExpectedGraphCasHashes(stored).expectedGraphAnalysisHash! });
+    expect(out.commitPerformed, JSON.stringify(out.response)).toBe(true);
+    expect((written().living_model as typeof KNOWN_ANSWER).factors.find((f) => f.id === 'f')!.value).toBe(28);
+    expect(mapLivingModel(written().living_model as typeof KNOWN_ANSWER).withheld.filter((w) => w.id === 'f')).toEqual([]);
+  });
+
+  it('⛔ Codex R2 on #3575: the rounding allowance never keeps a figure the range leaves out, however large', async () => {
+    const big = structuredClone(KNOWN_ANSWER);
+    Object.assign(big.factors[0]!, { value: 1e12, unit: '£' });
+    Object.assign(big.options.find((o) => o.id === 'push')!.settings[0]!, { value: 2e12, unit: '£' });
+    const cap = mapLivingModel(big).frames.get('f')!.cap;
+    const stored: Rec = { ...mapLivingModel(big).graph, living_model: big };
+    loadGraph.mockResolvedValue(stored);
+    const base_graph_hash = computeExpectedGraphCasHashes(stored).expectedGraphAnalysisHash!;
+    const out = await send({ kind: 'prior_range_edit', target_id: 'f', range_min: (1e12 + 500) / cap, range_max: (1e12 + 2000) / cap, base_graph_hash });
+    expect(out.commitPerformed, JSON.stringify(out.response)).toBe(true);
+    expect((written().living_model as typeof KNOWN_ANSWER).factors.find((f) => f.id === 'f')!.value).toBeNull();
+    append.mockClear();
+    const from = await send({ kind: 'prior_range_edit', target_id: 'f', range_min: 1e12 / cap, range_max: (1e12 + 2000) / cap, base_graph_hash });
+    expect(from.commitPerformed, JSON.stringify(from.response)).toBe(true);
+    expect((written().living_model as typeof KNOWN_ANSWER).factors.find((f) => f.id === 'f')!.value).toBe(1e12);
+  });
+
+  it('⛔ Codex on #3575: Olumi\'s own figure with a range is never called "stated"', () => {
+    const est = structuredClone(KNOWN_ANSWER);
+    Object.assign(est.factors[0]!, { source: 'olumi', quote: null, low: 0.2, high: 0.8 });
+    const line = mapLivingModel(est).assumed.find((a) => a.id === 'f');
+    expect(line?.text).toMatch(/uses 0\.5 for f\. The range, 0\.2 to 0\.8/);
+    expect(line?.text).not.toMatch(/stated/);
+  });
+
+  it('NEGATIVE: a range that leaves the figure out, or one around Olumi\'s estimate, replaces it: held and asked, never kept under the person\'s name', async () => {
+    const out = await send({ kind: 'prior_range_edit', target_id: 'f', range_min: 0.6, range_max: 0.9, base_graph_hash: BASE });
+    expect(out.commitPerformed, JSON.stringify(out.response)).toBe(true);
+    expect((written().living_model as typeof KNOWN_ANSWER).factors.find((f) => f.id === 'f')).toMatchObject({ value: null, low: 0.6, high: 0.9, source: 'user' });
+    expect(mapLivingModel(written().living_model as typeof KNOWN_ANSWER).withheld).toContainEqual({ id: 'f', reason: 'level_range_not_in_slice' });
+    const estimated = structuredClone(KNOWN_ANSWER);
+    Object.assign(estimated.factors[0]!, { source: 'olumi', quote: null });
+    const olumis: Rec = { ...mapLivingModel(estimated).graph, living_model: estimated };
+    loadGraph.mockResolvedValue(olumis);
+    append.mockClear();
+    const around = await send({ kind: 'prior_range_edit', target_id: 'f', range_min: 0.2, range_max: 0.8, base_graph_hash: computeExpectedGraphCasHashes(olumis).expectedGraphAnalysisHash! });
+    expect(around.commitPerformed, JSON.stringify(around.response)).toBe(true);
+    expect((written().living_model as typeof KNOWN_ANSWER).factors.find((f) => f.id === 'f')).toMatchObject({ value: null, low: 0.2, high: 0.8, source: 'user' });
   });
 
   it('NEGATIVE: an inverted range, another distribution, or an item that is not a factor changes nothing', async () => {

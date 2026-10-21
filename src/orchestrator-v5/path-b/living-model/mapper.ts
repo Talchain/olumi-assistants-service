@@ -286,6 +286,9 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     if (f.value !== null && cap !== undefined) {
       current.set(f.id, f.value);
       node.observed_state = withSource({ value: f.value / cap, raw_value: f.value, cap, unit: f.unit ?? '' }, f);
+      // A central figure with a range (the link's "centred" rule): the figure is used; the range is kept, not used as a spread.
+      // Neutral words: the figure may be Olumi's estimate, never called "stated" (Codex); the card says whose it is.
+      if (f.low !== null && f.high !== null) assumed.push({ id: f.id, text: `The calculation uses ${sayFigureAsWritten(f.value, f.unit ?? '')} for ${f.label}. The range, ${sayFigureAsWritten(f.low, f.unit ?? '')} to ${sayFigureAsWritten(f.high, f.unit ?? '')}, is kept with the model but is not used as a spread.` });
     } else hold(f.id, f.low !== null || f.high !== null ? 'level_range_not_in_slice' : 'factor_level_unknown');
     nodes.push(node);
   }

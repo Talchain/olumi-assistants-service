@@ -172,4 +172,19 @@ describe('thin core explicit edit: a canvas gesture applied to the living model,
     expect(deleted.factors).toEqual([]);
     expect(deleted.links).toEqual([]);
   });
+
+  it('⛔ Codex R3 on #3575: the rounding allowance is per bound and relative, so no figure outside the range is kept', () => {
+    const at = (value: number, min: number, max: number) => {
+      const m = structuredClone(KNOWN_ANSWER);
+      Object.assign(m.factors[0]!, { value, unit: null, source: 'user' });
+      const cap = mapLivingModel(m).frames.get('f')!.cap;
+      const out = applyExplicitEdit(m, { kind: 'prior_range_edit', target_id: 'f', range_min: min / cap, range_max: max / cap });
+      return 'model' in out ? out.model.factors[0]!.value : 'refused';
+    };
+    expect(at(1, 2, 1e15)).toBeNull();
+    expect(at(1e-16, 2e-16, 3e-16)).toBeNull();
+    expect(at(1e12, 1e12 + 500, 1e12 + 2000)).toBeNull();
+    expect(at(28, 28, 50)).toBe(28);
+    expect(at(0.5, 0.2, 0.8)).toBe(0.5);
+  });
 });

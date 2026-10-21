@@ -86,7 +86,16 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       const low = toRaw(f.id, edit.range_min);
       const high = toRaw(f.id, edit.range_max);
       if (low === undefined || high === undefined) return { refused: 'no_frame' };
-      Object.assign(f, { value: null, low, high, ...theirs });
+      // A range around the person's own figure keeps it: a central figure with a range, so more information never costs
+      // the Run (DL ruling 21 Oct, as a link's "centred" range). Olumi's estimate is never kept under the person's name: the
+      // factor has one author, so a range that excludes the figure, or one around an estimate, replaces it (held and asked).
+      // The bounds come through the frame (`toRaw`), so 28 % against a range from 28 % reads 28.000000000000004 (Codex):
+      // a range from the figure itself still holds it.
+      // Round-trip error only: each bound against the figure itself, within a few units in the last place of those two
+      // numbers, never a gap a person could mean (Codex R2/R3: a shared or floored allowance kept 1 out of [2, 1e15]).
+      const atMost = (a: number, b: number) => a <= b || Math.abs(a - b) <= 4 * Number.EPSILON * Math.max(Math.abs(a), Math.abs(b));
+      const keep = f.value !== null && f.source === 'user' && atMost(low, f.value) && atMost(f.value, high);
+      Object.assign(f, { value: keep ? f.value : null, low, high, ...theirs });
       return { model: m };
     }
     case 'option_intervention_edit': {
