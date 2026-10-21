@@ -12,7 +12,7 @@ import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.j
 import { LivingModel, type LivingModelT } from '../../../../schemas/living-model.js';
 import { assignEntityRefs } from '../../../graph/entity-refs.js';
 import { mapLivingModel } from '../../living-model/mapper.js';
-import { STRESS_MAX_WALL_MS, planStress, sideOf, stressTest, type StressRow, type StressTestArgs, type StressVariantRows } from '../stress-tool.js';
+import { STRESS_MAX_WALL_MS, STRESS_PAUSED, planStress, sideOf, stressTest, type StressRow, type StressTestArgs, type StressVariantRows } from '../stress-tool.js';
 import { TOOL_DESCRIPTIONS } from '../index.js';
 import type { Rec } from './fixtures.js';
 import { HALF_MITIGATION } from '../../living-model/__tests__/track2-f2-event-risk.fixtures.js';
@@ -86,7 +86,7 @@ describe('stress_test on a G2-shaped living model', () => {
   it('reproduces the brief reference: counts by side of the AVERAGE, worst tested average, maximum tested regret; ties are too close to call', async () => {
     const p = product(G2);
     const run = engineDouble();
-    const out = await stressTest({ dispatch: p.dispatch, runStressVariant: run }, ctx, ARGS);
+    const out = await stressTest({ sidesProven: true, dispatch: p.dispatch, runStressVariant: run }, ctx, ARGS);
     expect(out.status).toBe('ok');
     const d = dataOf(out);
     expect(run).toHaveBeenCalledTimes(8);
@@ -102,7 +102,7 @@ describe('stress_test on a G2-shaped living model', () => {
   });
 
   it('says AVERAGE, never "meets the goal": every side, the reading rule and the tool description (Science, 21 Oct)', async () => {
-    const d = dataOf(await stressTest({ dispatch: product(G2).dispatch, runStressVariant: engineDouble() }, ctx, ARGS));
+    const d = dataOf(await stressTest({ sidesProven: true, dispatch: product(G2).dispatch, runStressVariant: engineDouble() }, ctx, ARGS));
     expect(new Set(d.cells.map((c) => c.side))).toEqual(new Set(['average_clears', 'average_short', 'too_close_to_call']));
     expect(d.reading_rule).toContain('never means "meets the goal"');
     expect(TOOL_DESCRIPTIONS.stress_test).toContain('AVERAGE level with the target');
@@ -112,7 +112,7 @@ describe('stress_test on a G2-shaped living model', () => {
 
   it('under H1 the alternative HOLDS: Olumi\'s link reaches the Run with existence 1, and only under H1', async () => {
     const run = engineDouble();
-    await stressTest({ dispatch: product(G2).dispatch, runStressVariant: run }, ctx, ARGS);
+    await stressTest({ sidesProven: true, dispatch: product(G2).dispatch, runStressVariant: run }, ctx, ARGS);
     const alt = (g: Rec) => (g.edges as Rec[]).find((e) => e.id === 'stress_alternative_0');
     const held = run.mock.calls.map(([v]) => alt(v.variantGraph)).filter((e) => e !== undefined);
     expect(held.map((e) => e!.exists_probability)).toEqual([1, 1, 1, 1]);
@@ -122,7 +122,7 @@ describe('stress_test on a G2-shaped living model', () => {
   it('H1 touches only the ADDED link: a saved Olumi link already called stress_alternative_0 keeps 0.8', async () => {
     const taken = { ...G2, links: G2.links.map((l) => (l.id === 'cexp_c' ? { ...l, id: 'stress_alternative_0', source: 'olumi' as const, quote: null } : l)) };
     const run = engineDouble();
-    await stressTest({ dispatch: product(taken).dispatch, runStressVariant: run }, ctx, { ...ARGS, stresses: [ARGS.stresses[0]!] });
+    await stressTest({ sidesProven: true, dispatch: product(taken).dispatch, runStressVariant: run }, ctx, { ...ARGS, stresses: [ARGS.stresses[0]!] });
     const h1 = run.mock.calls.map(([v]) => v.variantGraph.edges as Rec[]).filter((es) => es.some((e) => e.id === 'stress_alternative_1'));
     expect(h1).toHaveLength(2);
     expect(h1.map((es) => [es.find((e) => e.id === 'stress_alternative_0')!.exists_probability, es.find((e) => e.id === 'stress_alternative_1')!.exists_probability]))
@@ -130,19 +130,19 @@ describe('stress_test on a G2-shaped living model', () => {
   });
 
   it('finds the joint shortfall of the average (A under the saved model only) and where the explanations disagree', async () => {
-    const d = dataOf(await stressTest({ dispatch: product(G2).dispatch, runStressVariant: engineDouble() }, ctx, ARGS));
+    const d = dataOf(await stressTest({ sidesProven: true, dispatch: product(G2).dispatch, runStressVariant: engineDouble() }, ctx, ARGS));
     expect(d.joint_shortfall_witnesses).toEqual([{ hypothesis: 'H0', option_id: 'A' }]);
     expect(d.explanation_disagreements.map((x) => [x.option_id, x.saved_model, x.alternative])).toEqual([['A', 'average_clears', 'average_short'], ['A', 'average_clears', 'average_short']]);
   });
 
   it('a joint shortfall needs the average to clear under each stress alone: an option already failing on one stress is no witness', async () => {
     const args = { ...ARGS, stresses: [{ item_id: 'dexp_c', values: [-2], values_source: 'user' as const }, ARGS.stresses[1]!] };
-    const d = dataOf(await stressTest({ dispatch: product(G2).dispatch, runStressVariant: engineDouble() }, ctx, args));
+    const d = dataOf(await stressTest({ sidesProven: true, dispatch: product(G2).dispatch, runStressVariant: engineDouble() }, ctx, args));
     expect(d.joint_shortfall_witnesses).toEqual([{ hypothesis: 'H0', option_id: 'C' }, { hypothesis: 'H1', option_id: 'C' }]);
   });
 
   it('keeps a tie at the most favourable average as a tie, never one option', async () => {
-    const d = dataOf(await stressTest({ dispatch: product(G2).dispatch, runStressVariant: engineDouble() }, ctx, ARGS));
+    const d = dataOf(await stressTest({ sidesProven: true, dispatch: product(G2).dispatch, runStressVariant: engineDouble() }, ctx, ARGS));
     const tie = d.most_favourable_average_per_setting.find((x) => x.hypothesis === 'H0' && x.setting.dexp_c === 0 && x.setting.cexp_c === -1);
     expect(tie?.options).toEqual(['A', 'B']);
   });
@@ -150,7 +150,7 @@ describe('stress_test on a G2-shaped living model', () => {
   it('a variant that did not run is not_run, never a pass, and its regret is withheld', async () => {
     const base = engineDouble();
     const flaky = vi.fn(async (v: RunArgs) => (flaky.mock.calls.length === 4 ? { kind: 'refused' as const, reason: 'timed_out' } : base(v)));
-    const d = dataOf(await stressTest({ dispatch: product(G2).dispatch, runStressVariant: flaky }, ctx, ARGS));
+    const d = dataOf(await stressTest({ sidesProven: true, dispatch: product(G2).dispatch, runStressVariant: flaky }, ctx, ARGS));
     expect(d.incomplete).toBe(true);
     expect(d.cells.filter((c) => c.side === 'not_run').every((c) => c.reason === 'variant_timed_out')).toBe(true);
     expect(d.options.A.not_run).toBe(1);
@@ -159,7 +159,7 @@ describe('stress_test on a G2-shaped living model', () => {
 
   it('stops at the time limit and says so', async () => {
     let t = 0;
-    const d = dataOf(await stressTest({ dispatch: product(G2).dispatch, runStressVariant: engineDouble(), now: () => (t += STRESS_MAX_WALL_MS / 3) }, ctx, ARGS));
+    const d = dataOf(await stressTest({ sidesProven: true, dispatch: product(G2).dispatch, runStressVariant: engineDouble(), now: () => (t += STRESS_MAX_WALL_MS / 3) }, ctx, ARGS));
     expect(d.incomplete).toBe(true);
     expect(d.cells.some((c) => c.reason === 'time_limit')).toBe(true);
   });
@@ -168,7 +168,7 @@ describe('stress_test on a G2-shaped living model', () => {
     const signals: AbortSignal[] = [];
     const hang = vi.fn((v: RunArgs) => { signals.push(v.signal); return new Promise<StressVariantRows>(() => undefined); });
     const clock = [0, STRESS_MAX_WALL_MS - 5];
-    const d = dataOf(await stressTest({ dispatch: product(G2).dispatch, runStressVariant: hang, now: () => clock.shift() ?? STRESS_MAX_WALL_MS }, ctx, ARGS));
+    const d = dataOf(await stressTest({ sidesProven: true, dispatch: product(G2).dispatch, runStressVariant: hang, now: () => clock.shift() ?? STRESS_MAX_WALL_MS }, ctx, ARGS));
     expect(hang).toHaveBeenCalledTimes(1);
     expect(signals[0]!.aborted).toBe(true);
     expect(d.variants_run).toBe(0);
@@ -177,7 +177,7 @@ describe('stress_test on a G2-shaped living model', () => {
 
   it('rows that settle after the deadline are not run, never counted', async () => {
     const clock = [0, 1_000, STRESS_MAX_WALL_MS + 1];
-    const d = dataOf(await stressTest({ dispatch: product(G2).dispatch, runStressVariant: engineDouble(), now: () => clock.shift() ?? STRESS_MAX_WALL_MS + 2 }, ctx, ARGS));
+    const d = dataOf(await stressTest({ sidesProven: true, dispatch: product(G2).dispatch, runStressVariant: engineDouble(), now: () => clock.shift() ?? STRESS_MAX_WALL_MS + 2 }, ctx, ARGS));
     expect(d.variants_run).toBe(0);
     expect(d.cells.every((c) => c.side === 'not_run' && c.reason === 'time_limit')).toBe(true);
   });
@@ -185,13 +185,13 @@ describe('stress_test on a G2-shaped living model', () => {
   it('a model changed during the test returns no rows', async () => {
     const p = product(G2);
     const run = vi.fn(async (v: RunArgs) => { p.move({ ...G2, factors: G2.factors.map((f) => ({ ...f, quote: 'moved' })) }); return engineDouble()(v); });
-    expect(await stressTest({ dispatch: p.dispatch, runStressVariant: run }, ctx, ARGS)).toMatchObject({ status: 'unavailable', reason: 'model_changed_during_stress' });
+    expect(await stressTest({ sidesProven: true, dispatch: p.dispatch, runStressVariant: run }, ctx, ARGS)).toMatchObject({ status: 'unavailable', reason: 'model_changed_during_stress' });
   });
 
   it('a saved graph today\'s mapper does not reproduce is refused: H0 must be the saved model', async () => {
     const drift = (g: Rec) => ({ ...g, edges: (g.edges as Rec[]).map((e) => (e.id === 'uplift_c' ? { ...e, exists_probability: 0.5 } : e)) });
     const run = engineDouble();
-    expect(await stressTest({ dispatch: product(G2, drift).dispatch, runStressVariant: run }, ctx, ARGS)).toMatchObject({ status: 'refused', reason: 'saved_graph_not_reproducible' });
+    expect(await stressTest({ sidesProven: true, dispatch: product(G2, drift).dispatch, runStressVariant: run }, ctx, ARGS)).toMatchObject({ status: 'refused', reason: 'saved_graph_not_reproducible' });
     expect(run).not.toHaveBeenCalled();
   });
 
@@ -202,7 +202,7 @@ describe('stress_test on a G2-shaped living model', () => {
     const refOf = (g: Rec) => new Map((g.nodes as Rec[]).map((n) => [n.id, n.ref]));
     expect([...refOf(saved).values()].every((r) => typeof r === 'string')).toBe(true);
     const run = engineDouble();
-    expect((await stressTest({ dispatch: p.dispatch, runStressVariant: run }, ctx, ARGS)).status).toBe('ok');
+    expect((await stressTest({ sidesProven: true, dispatch: p.dispatch, runStressVariant: run }, ctx, ARGS)).status).toBe('ok');
     for (const [v] of run.mock.calls) {
       expect(v.variantGraph.ref_high_water).toEqual(saved.ref_high_water);
       for (const [id, ref] of refOf(saved)) expect(refOf(v.variantGraph).get(id)).toBe(ref);
@@ -212,7 +212,7 @@ describe('stress_test on a G2-shaped living model', () => {
   it('a Run input the mapper does not write (a goal deadline) is refused: the variants would silently drop it', async () => {
     const deadline = (g: Rec) => ({ ...g, nodes: (g.nodes as Rec[]).map((n) => (n.kind === 'goal' ? { ...n, goal_horizon: { deadline: '2027-04-09' } } : n)) });
     const run = engineDouble();
-    expect(await stressTest({ dispatch: product(G2, deadline).dispatch, runStressVariant: run }, ctx, ARGS)).toMatchObject({ status: 'refused', reason: 'saved_graph_not_reproducible' });
+    expect(await stressTest({ sidesProven: true, dispatch: product(G2, deadline).dispatch, runStressVariant: run }, ctx, ARGS)).toMatchObject({ status: 'refused', reason: 'saved_graph_not_reproducible' });
     expect(run).not.toHaveBeenCalled();
   });
 
@@ -223,7 +223,7 @@ describe('stress_test on a G2-shaped living model', () => {
     expect(placeholder).toMatchObject({ defaulted: true });
     for (const m of [unsigned, wrongUnit]) {
       const run = engineDouble();
-      expect(await stressTest({ dispatch: product(m).dispatch, runStressVariant: run }, ctx, ARGS)).toMatchObject({ status: 'refused', reason: 'stress_item_not_mapped' });
+      expect(await stressTest({ sidesProven: true, dispatch: product(m).dispatch, runStressVariant: run }, ctx, ARGS)).toMatchObject({ status: 'refused', reason: 'stress_item_not_mapped' });
       expect(run).not.toHaveBeenCalled();
     }
   });
@@ -231,7 +231,7 @@ describe('stress_test on a G2-shaped living model', () => {
   it('a link from a risk the mapper holds back (risk_not_in_slice) reaches no Run: refused, though the link itself is not withheld', async () => {
     const m = LivingModel.parse(HALF_MITIGATION);
     const run = engineDouble();
-    expect(await stressTest({ dispatch: product(m).dispatch, runStressVariant: run }, ctx,
+    expect(await stressTest({ sidesProven: true, dispatch: product(m).dispatch, runStressVariant: run }, ctx,
       { reason: 'what if a failure costs twice as much?', stresses: [{ item_id: 'fails_gp', values: [-16000], values_source: 'olumi' }], alternative: null }))
       .toMatchObject({ status: 'refused', reason: 'stress_item_not_mapped', data: { item_ids: ['fails_gp'] } });
     expect(run).not.toHaveBeenCalled();
@@ -246,7 +246,7 @@ describe('stress_test on a G2-shaped living model', () => {
   it('the remap allow-list (DL 21 Oct): a save from before #3544, differing only by extractionType, runs', async () => {
     expect(hasInterventionLabel(G2), 'precondition: today\'s mapper labels the settings').toBe(true);
     const run = engineDouble();
-    expect((await stressTest({ dispatch: product(G2, pre3544).dispatch, runStressVariant: run }, ctx, ARGS)).status).toBe('ok');
+    expect((await stressTest({ sidesProven: true, dispatch: product(G2, pre3544).dispatch, runStressVariant: run }, ctx, ARGS)).status).toBe('ok');
     expect(run).toHaveBeenCalledTimes(8);
   });
 
@@ -259,7 +259,7 @@ describe('stress_test on a G2-shaped living model', () => {
       observed_state: Object.fromEntries(Object.entries(n.observed_state as Rec).filter(([k]) => k !== 'raw_value')) })) });
     for (const [why, tweak] of [['added goal_threshold', noThreshold], ['changed setting', changedSetting], ['missing field', missingField]] as const) {
       const run = engineDouble();
-      expect(await stressTest({ dispatch: product(G2, tweak).dispatch, runStressVariant: run }, ctx, ARGS), why)
+      expect(await stressTest({ sidesProven: true, dispatch: product(G2, tweak).dispatch, runStressVariant: run }, ctx, ARGS), why)
         .toMatchObject({ status: 'refused', reason: 'saved_graph_not_reproducible' });
       expect(run, why).not.toHaveBeenCalled();
     }
@@ -269,14 +269,23 @@ describe('stress_test on a G2-shaped living model', () => {
     const m = LivingModel.parse(HALF_MITIGATION);
     expect(hasInterventionLabel(m), 'precondition: the older save differs by its labels').toBe(true);
     const run = engineDouble();
-    expect(await stressTest({ dispatch: product(m, pre3544).dispatch, runStressVariant: run }, ctx,
+    expect(await stressTest({ sidesProven: true, dispatch: product(m, pre3544).dispatch, runStressVariant: run }, ctx,
       { reason: 'what if a failure costs twice as much?', stresses: [{ item_id: 'fails_gp', values: [-16000], values_source: 'olumi' }], alternative: null }))
       .toMatchObject({ status: 'refused', reason: 'stress_item_not_mapped' });
     expect(run).not.toHaveBeenCalled();
   });
 
+  it('⛔ ST1 (served 21 Oct): as the route wires it (no test seam), it refuses, named, before any read or Run', async () => {
+    const p = product(G2);
+    const run = engineDouble();
+    expect(await stressTest({ dispatch: p.dispatch, runStressVariant: run }, ctx, ARGS)).toEqual({ status: 'refused', reason: STRESS_PAUSED,
+      detail: 'Stress testing is paused: its comparison with the target used the wrong scale. Nothing was run or saved.' });
+    expect(p.dispatch).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it('is unavailable where the route has not wired the variant Run', async () => {
-    expect(await stressTest({ dispatch: product(G2).dispatch }, ctx, ARGS)).toMatchObject({ status: 'unavailable', reason: 'stress_unavailable' });
+    expect(await stressTest({ sidesProven: true, dispatch: product(G2).dispatch }, ctx, ARGS)).toMatchObject({ status: 'unavailable', reason: 'stress_unavailable' });
   });
 });
 
@@ -308,7 +317,7 @@ const sumDouble = () => vi.fn(async (v: RunArgs): Promise<StressVariantRows> => 
 describe('stress_test on the served exact-sum shape (an option\'s own link to the goal)', () => {
   it('the tested value reaches the Run as the option\'s setting and is compared exactly: a tie at the target clears it', async () => {
     const run = sumDouble();
-    const out = await stressTest({ dispatch: product(SUM).dispatch, runStressVariant: run }, ctx,
+    const out = await stressTest({ sidesProven: true, dispatch: product(SUM).dispatch, runStressVariant: run }, ctx,
       { reason: 'what if the second shift adds less?', stresses: [{ item_id: 'x_w', values: [10, 20], values_source: 'user' }], alternative: null });
     expect(out.status).toBe('ok');
     const d = dataOf(out);

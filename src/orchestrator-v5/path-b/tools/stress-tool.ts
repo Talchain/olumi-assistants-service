@@ -77,7 +77,15 @@ export interface StressDeps {
   readonly runStressVariant?: (v: { readonly variantGraph: Rec; readonly seed: number; readonly goalNodeId: string;
     readonly goalLevelTarget: number | null; readonly signal: AbortSignal }) => Promise<StressVariantRows>;
   readonly now?: () => number;
+  /**
+   * ⛔ ST1 (served 21 Oct; DL ruling A). TEST SEAM ONLY: the route never sets it. A cell compared PLoT's `outcome.mean` with
+   * the RAW target, but that mean has no typed scale and is not ISL's paired level (`routes/selected-run-figures.ts:82`), so a
+   * side could be wrong. Until each cell is the variant Run's own licensed chance (ruling B), the tool refuses before any read.
+   */
+  readonly sidesProven?: true;
 }
+
+export const STRESS_PAUSED = 'stress_scale_unproven';
 
 export interface Coordinate {
   readonly item_id: string; readonly kind: 'link_effect' | 'factor_level'; readonly label: string; readonly unit: string | null;
@@ -304,6 +312,9 @@ async function withinTime(ms: number, run: (signal: AbortSignal) => Promise<Stre
 export async function stressTest(deps: StressDeps, ctx: Pick<AgentToolContext, 'scenario_id'>, args: StressTestArgs): Promise<ToolOutcome> {
   const runVariant = deps.runStressVariant;
   if (runVariant === undefined) return unavailable('stress_unavailable');
+  if (deps.sidesProven !== true) {
+    return refused(STRESS_PAUSED, 'Stress testing is paused: its comparison with the target used the wrong scale. Nothing was run or saved.');
+  }
   const now = deps.now ?? (() => Date.now());
   const deadline = now() + STRESS_MAX_WALL_MS;
   const saved = await readSaved(deps, ctx.scenario_id);
