@@ -39,6 +39,7 @@ import { executableWaitingProposal } from '../orchestrator-v5/agent-lane/held-ap
 import { actionFactsOf } from '../orchestrator-v5/agent-lane/actions/state.js';
 import { actionBarOf, type ActionBarV1 } from '../orchestrator-v5/agent-lane/actions/rank.js';
 import { laneModeFor } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
+import { isLegacyGraph } from '../orchestrator-v5/path-b/living-model/view.js';
 import { getRuntimeEnv } from '../config/env-resolver.js';
 import { readEvaluatedIdentityNodeIds } from '../orchestrator-v5/agent-lane/admit-model.js';
 import type { GuidanceState } from '../orchestrator-v5/agent-lane/guidance/index.js';
@@ -487,7 +488,7 @@ export default async function route(app: FastifyInstance) {
        */
       let actionBar: ActionBarV1 | undefined;
       // PATH-B core (#3487's rule, PL 00:18): a cold reopen in core carries no host action bar, as no core turn does.
-      if (conversationRequested && laneModeFor('full', req.headers['x-olumi-ai-mode'], getRuntimeEnv()) !== 'core') {
+      if (conversationRequested && laneModeFor('full', req.headers['x-olumi-ai-mode'], getRuntimeEnv(), graphPresent && isLegacyGraph(graph)) !== 'core') {
         let guidance: GuidanceState | null = null;
         try { guidance = typeof store.readGuidanceHistory === 'function' ? await store.readGuidanceHistory(scenarioId) : null; } catch { guidance = null; }
         try {
@@ -619,7 +620,7 @@ export default async function route(app: FastifyInstance) {
         ...(scopePermissions.total_goal_claims_allowed === false ? {
           goal_scope_claim_permissions: { total_goal_claims_allowed: false, exploratory_work_allowed: true },
         } : {}),
-        analysis_result: laneModeFor('full', req.headers['x-olumi-ai-mode'], getRuntimeEnv()) === 'core'
+        analysis_result: laneModeFor('full', req.headers['x-olumi-ai-mode'], getRuntimeEnv(), graphPresent && isLegacyGraph(graph)) === 'core'
           && analysis.analysis_result?.type === 'analysis_result'
           ? { ...analysis.analysis_result, summary: '' } : analysis.analysis_result,
         canonical_analysis_view: analysis.canonical_analysis_view,

@@ -10,6 +10,11 @@ export type LivingView =
   | { readonly living_model: unknown; readonly withheld: readonly Withheld[]; readonly assumed: readonly { readonly id: string; readonly text: string }[] }
   | { readonly living_model: unknown; readonly living_model_invalid: true };
 
+/** A scenario saved before the core lane: a saved graph with no living model (the flip's named bridge, `laneModeFor`). */
+export function isLegacyGraph(graph: unknown): boolean {
+  return graph !== null && typeof graph === 'object' && (graph as Record<string, unknown>).living_model === undefined;
+}
+
 /** The core view of a saved graph, or `undefined` when the scenario is not a core one (it has no living model). */
 export function livingViewOf(graph: unknown): LivingView | undefined {
   if (graph === null || typeof graph !== 'object') return undefined;

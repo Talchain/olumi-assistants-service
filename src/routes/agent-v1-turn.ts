@@ -87,7 +87,7 @@ import { answerIsIncomplete, heldChangeSentence, runAgentTurn, WITHHELD_ON_CHIP_
 import { acquireCoreTurnSlot, CoreStateUnavailableError, runCoreTurn, type CoreTurnSdk } from '../orchestrator-v5/agent-lane/core/sdk-turn.js';
 import { pathBTools } from '../orchestrator-v5/path-b/tools/index.js';
 import { APPLY_CHANGE, isChangeProposal } from '../orchestrator-v5/path-b/tools/change-tools.js';
-import { livingViewOf } from '../orchestrator-v5/path-b/living-model/view.js';
+import { isLegacyGraph, livingViewOf } from '../orchestrator-v5/path-b/living-model/view.js';
 import { parseSelectedElements } from '../orchestrator-v5/boundary/request-extensions.js';
 import { agentSelectionContext, type AgentSelectionContext } from '../orchestrator-v5/agent-lane/selection-context.js';
 import type { AgentLaneMode, AgentToolContext, ToolResult } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
@@ -152,7 +152,7 @@ import { derivePendingActionsFromFinalizedChips } from '../orchestrator-v5/compo
 import { isPendingActionExpired, PENDING_ACTIONS_PER_TURN_CAP, type PendingAction } from '../orchestrator-v5/session/pending-action.js';
 import { computeSurvivingPriorPendingsDetailed } from '../orchestrator-v5/commit.js';
 import { GM_HELD_HANDLER_ID } from '../orchestrator-v5/handlers/edit-graph-referee-gate.js';
-import { dispatchTool, laneModeFor, toolsFor } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
+import { AI_OPENAI_MODE, dispatchTool, laneModeFor, toolsFor } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { getRuntimeEnv } from '../config/env-resolver.js';
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
 import { currentStageEmitter, graphPreviewEmitted } from '../cee/unified-pipeline/stage-stream-context.js';
@@ -2294,7 +2294,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
   const agentTurnHandler = async (req: FastifyRequest, reply: FastifyReply, takeActiveRun: (key: string) => boolean) => {
     const startedAt = Date.now();
     // PATH-B: this request's lane mode. `core` = the AI's own reply, with no Olumi prose added or rewritten (agent-tools.ts).
-    const mode: AgentLaneMode = laneModeFor(baseMode, req.headers['x-olumi-ai-mode'], getRuntimeEnv());
+    // The flip's named bridge: on the default header, a scenario saved before the core lane keeps the legacy lane (one read).
+    const aiMode = req.headers['x-olumi-ai-mode'];
+    const requestedScenario = ((req.body ?? {}) as Record<string, unknown>)['scenario_id'];
+    const legacyScenario = aiMode === AI_OPENAI_MODE && typeof requestedScenario === 'string' && requestedScenario !== ''
+      && laneModeFor(baseMode, aiMode, getRuntimeEnv()) === 'core'
+      && await dispatchFor(typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined)(
+        `/assist/v1/scenarios/${requestedScenario}/graph`, {})
+        .then((read) => read.status === 200 && isLegacyGraph((read.json as Record<string, unknown> | undefined)?.['graph']))
+        .catch(() => false);
+    const mode: AgentLaneMode = laneModeFor(baseMode, aiMode, getRuntimeEnv(), legacyScenario);
     let body = (req.body ?? {}) as Record<string, unknown>;
     const scenarioId = typeof body.scenario_id === 'string' ? body.scenario_id : '';
     // ⭐ Lane A recovery seam (`recovery-fault-seam.ts`): staging-only, off by default, armed by THIS request for its own scenario.
