@@ -435,7 +435,10 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
     const lc = (id: string, before: unknown, after: unknown) => ({ op: 'living_change' as const, path: `factor:${id}`, value: { change: 'change', before, after } });
     const p = createProposal({ scenario_id: SID, user_id: null, base_graph_identity_hash: 'pin', operations: [
       lc('f_olumi', f('f_olumi', null, 'olumi'), f('f_olumi', 24, 'olumi')),
-      lc('f_user', f('f_user', 10, 'user'), f('f_user', 12, 'user')),
+      lc('f_user', f('f_user', 10, 'user', { quote: 'We have 10 hours.' }), f('f_user', 12, 'user', { quote: 'Make it 12 hours.' })),
+      // Codex #3554 R1: the AI changes the figure under the person's EARLIER quote; it is not theirs, so not shown.
+      lc('f_stale', f('f_stale', 10, 'user', { quote: 'We have 10 hours.' }), f('f_stale', 24, 'user', { quote: 'We have 10 hours.' })),
+      lc('f_noquote', f('f_noquote', 10, 'user'), f('f_noquote', 24, 'user')),
       lc('f_party', f('f_party', 5, 'party'), f('f_party', 6, 'party')),
       lc('f_range', f('f_range', 5, 'user'), f('f_range', null, 'user', { low: 4, high: 8 })),
       lc('f_label', f('f_label', 7, 'user'), f('f_label', 7, 'user', { label: 'Renamed' })),

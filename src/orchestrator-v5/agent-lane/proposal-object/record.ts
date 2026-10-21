@@ -402,13 +402,16 @@ export function agentProposalRecord(pa: PendingAction, graph: unknown, nowMs = D
       // A core proposal (path-b `living_change`, the whole proposed model diffed item by item): a factor whose point value
       // changes is projected so the canvas can show it on the card it changes (Lenses #2880, 21 Oct: core cards had no
       // fields). A range stays a range (not projected); a party's or unverified figure is never shown as Olumi's estimate;
-      // never editable, because a core approval writes the proposed model exactly as prepared.
+      // never editable, because a core approval writes the proposed model exactly as prepared. A new figure is the person's
+      // only with NEW words of theirs: one kept under their earlier quote is not theirs (Codex #3554 R1: 10 → 24 under
+      // "We have 10 hours." read as "yours"), so it is not shown at all.
       const a = v['after'];
       const b = isRec(v['before']) ? v['before'] : {};
       const id = o.path.slice('factor:'.length);
+      const theirs = a['source'] === 'user' && typeof a['quote'] === 'string' && a['quote'] !== '' && a['quote'] !== b['quote'];
       if (typeof a['value'] !== 'number' || !Number.isFinite(a['value']) || a['low'] != null || a['high'] != null
         || typeof a['unit'] !== 'string' || a['unit'] === '' || a['value'] === b['value']
-        || (a['source'] !== 'user' && a['source'] !== 'olumi')) continue;
+        || (a['source'] !== 'olumi' && !theirs)) continue;
       fields.push({ field_id: `factor_value:${id}`, kind: 'factor_value', node_id: id,
         label: typeof a['label'] === 'string' ? a['label'] : labelOf(id), unit: a['unit'],
         current: { value: a['value'], unit: a['unit'], source: a['source'] === 'user' ? 'yours' : 'estimate' },
