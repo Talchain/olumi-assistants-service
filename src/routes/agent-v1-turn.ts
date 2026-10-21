@@ -188,8 +188,7 @@ import {
   type WidenGateResult, type WidenTurn, type WidenUnavailableTurn,
 } from '../orchestrator-v5/agent-lane/method-turn/widen-turn.js';
 import { widenTurnForReadback } from '../orchestrator-v5/agent-lane/method-turn/guidance-widen-turn.js';
-import { isWhatChangesPress, whatChangesTurnFor, type WhatChangesTurn } from '../orchestrator-v5/agent-lane/method-turn/what-changes-turn.js';
-import { dispatchDecisionFlip } from '../orchestrator-v5/handlers/decision-flip-dispatch.js';
+import { isWhatChangesPress, type WhatChangesTurn } from '../orchestrator-v5/agent-lane/method-turn/what-changes-turn.js';
 import { dispatchStructuralChallenge, readStructuralChallengeReceipt } from '../orchestrator-v5/handlers/structural-challenge-dispatch.js';
 import { runStressVariant } from '../orchestrator-v5/handlers/stress-variant-run.js';
 import { STRUCTURAL_CHALLENGE_PRESS_PREFIX, parseStructuralChallengePress, structuralChallengePressId, structuralChallengeRefusal, structuralChallengeReplay, structuralChallengeTurnFor, structuralChallengeTurnUnderLicence, type StructuralChallengePressResolution, type StructuralChallengeTurn } from '../orchestrator-v5/agent-lane/method-turn/structural-challenge-turn.js';
@@ -883,7 +882,7 @@ export const REPLY_LENGTH_INSTRUCTION =
  * without win_probability), so with no share the rule makes no claim about how runs fell at all.
  */
 export const MODEL_RELATIVE_NAMING_INSTRUCTION =
-  'Run result replies: lead with the selected Run\'s licensed goal-chance or withholding lines. Retain their target scope, unscored conditions and provisional, timing and source qualifications. Do not state a share of model runs or name a leader from that share in a result reply, even when a comparative leader-naming permission is present. Never substitute a relative ranking for an unavailable goal chance. The separate goal-chance licence governs any comparison of goal chances. In dedicated comparative reasoning only, you may report a permitted share recorded for the selected Run, using the approved credit label and qualifier; never turn it into a recommendation or the chance of the whole goal. Explain the supported implication or useful next action, and what the result rests on, using measured sensitivity and the figure\'s source when available. Never write recommend or recommendation, including negated forms. Never call a result, option or link fragile.';
+  'Run result replies: lead with the selected Run\'s licensed goal-chance or withholding lines. Retain their target scope, unscored conditions and provisional, timing and source qualifications. Do not state a share of model runs or name a leader from that share in a result reply, even when a comparative leader-naming permission is present. Never substitute a relative ranking for an unavailable goal chance. The separate goal-chance licence governs any comparison of goal chances. Explain the supported implication or useful next action, and what the result rests on, using measured sensitivity and the figure\'s source when available. Never write recommend or recommendation, including negated forms. Never call a result, option or link fragile.';
 
 /**
  * ⭐ D3 step 2, DL 0df0e1 ruling C (6 Oct): step 2 puts each option's licensed chance of meeting the goal in front of the
@@ -4170,29 +4169,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let whatChangesTurn: WhatChangesTurn | null = null;
     let measuredRunKey: string | null = null;
     let whatChangesRead: Awaited<ReturnType<typeof readBackState>> | undefined;
-    let measuredCandidate: MeasuredWhatChanges | null = null;
     // ⭐ A4 slice 1: "Review this decision" — typed facts on the bound Run, no model call (`decision-review-press.ts`).
     let decisionReviewRequested = false;
     let decisionReviewTurn: DecisionReviewTurn | null = null;
     if (result === undefined && approvedProposal === undefined && pressedChipId === TIPPING_POINT_PRESS_ID) {
       const rb = await readBackState(readingDispatch, scenarioId);
       whatChangesRead = rb;
-      const boundRun = runExplanationChip(scenarioId, rb);
-      if (boundRun !== null && config.features.whatChangesMeasuredEnabled && isWhatChangesPress(pressedChipId)
-        && chipOperationOf(body) === WHAT_CHANGES_CHIP_OPERATION) {
-        const turn = await whatChangesTurnFor(pressedChipId, rb, (candidateLinks) => dispatchDecisionFlip({
-          payload: {
-            kind: 'message', scenario_id: scenarioId, turn_id: randomUUID(), stage: 'analyse', turn_class: 'decide',
-            source: 'chip_click', message,
-          },
-          requestId: `${String(req.id)}:decision-flip`,
-          candidateLinks,
-        }));
-        if (turn?.outcome === 'measured') measuredCandidate = { runKey: boundRun.id, turn };
-        log.info({ scenario_id: scenarioId, what_changes: turn?.outcome ?? null, answered: measuredCandidate !== null }, 'agent-lane: what-would-change measured attempt');
-      }
+      // DL ruling 21 Oct (Paul: no win framing): the measured link tipping points ("would be supported by the most runs")
+      // are ISL's win-ordering crossing, so they are WITHDRAWN, not reworded: the press is answered by the Run's own
+      // tipping-point coaching below. The unreachable measured chain is retired in its own deletion PR.
       // Selection and cache insertion wait for the final pending read and canonical scope composition below.
-      measuredRunKey = measuredCandidate?.runKey ?? null;
       fastPath = 'method';
       result = { assistant_text: '', items: [], tool_calls: [], tool_results: [], mutated: false,
         hops: 0, stopped_reason: 'answered',
@@ -5044,7 +5030,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     })).values()];
     if (whatChangesRead !== undefined) {
       const answer = whatWouldChangeAnswer(scenarioId,
-        await withRetainedScopeIssues(whatChangesRead, scenarioId, retainedScopeIssues, String(req.id)), measuredCandidate,
+        await withRetainedScopeIssues(whatChangesRead, scenarioId, retainedScopeIssues, String(req.id)), null,
         undefined, composedRead);
       text = answer.text;
       result = { ...result, assistant_text: text };
