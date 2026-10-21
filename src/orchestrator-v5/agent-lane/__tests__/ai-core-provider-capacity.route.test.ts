@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
+import { sseResponse } from './stream-when-asked.js';
 
 type Json = Record<string, any>;
 const READ = (JSON.parse(readFileSync(new URL('./fixtures/waveB9-unseen1-df15c8c-readback-pre-challenge.json', import.meta.url), 'utf8')) as { j: Json }).j;
@@ -51,26 +52,25 @@ vi.mock('../../../orchestrator/user-identity.js', async (original) => ({
 }));
 
 /** What the scripted provider answers every Responses call with this row. */
-let provider: (streamed: boolean) => Response;
+let provider: (streamed: boolean, init?: { signal?: AbortSignal | null }) => Response;
 /** The captured credit refusal: on a stream, the `error` event the SDK reads; unstreamed, the HTTP 429 the route reads. */
-const creditsStream = () => new Response(`event: error\ndata: ${JSON.stringify(CAPTURED.provider_error_body)}\n\n`,
-  { status: 200, headers: { 'content-type': 'text/event-stream' } });
+// Like the served connection, the stream stays open after its `error` event until the client cancels the request (fresh Claude D).
+const creditsStream = (init?: { signal?: AbortSignal | null }) => sseResponse(`event: error\ndata: ${JSON.stringify(CAPTURED.provider_error_body)}\n\n`, init);
 const credits429 = () => new Response(JSON.stringify(CAPTURED.provider_error_body, null, 2),
   { status: 429, headers: { 'content-type': 'application/json', 'x-should-retry': 'false' } });
 /** CONTRAST: a provider fault that is not capacity, on the same streamed entry. */
-const serverErrorStream = () => new Response(`event: error\ndata: ${JSON.stringify({ error: { message: 'The server had an error while processing your request.', type: 'server_error', param: null, code: 'server_error' } })}\n\n`,
-  { status: 200, headers: { 'content-type': 'text/event-stream' } });
+const serverErrorStream = (init?: { signal?: AbortSignal | null }) => sseResponse(`event: error\ndata: ${JSON.stringify({ error: { message: 'The server had an error while processing your request.', type: 'server_error', param: null, code: 'server_error' } })}\n\n`, init);
 
 describe('A provider capacity or credit refusal is PROVIDER_CAPACITY at the route\'s one 502 producer, in core; A keeps its legacy response', () => {
   let app: FastifyInstance;
   let runWithStageStream: typeof import('../../../cee/unified-pipeline/stage-stream-context.js').runWithStageStream;
   let providerCalls = 0;
   beforeAll(async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
+    vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown; signal?: AbortSignal | null }) => {
       if (String(url).endsWith('/v1/conversations')) return new Response(JSON.stringify({ id: 'conv_capacity', object: 'conversation' }), { status: 200, headers: { 'content-type': 'application/json' } });
       providerCalls += 1;
       const body = JSON.parse(String(init?.body ?? '{}')) as Json;
-      return provider(body.stream === true);
+      return provider(body.stream === true, init);
     }));
     vi.resetModules();
     process.env.AGENT_LANE_ENABLED = 'true';
@@ -101,7 +101,7 @@ describe('A provider capacity or credit refusal is PROVIDER_CAPACITY at the rout
   };
 
   it('⭐ RED→GREEN core (the captured 19 Oct turn): the streamed credit refusal is PROVIDER_CAPACITY, not retryable, nothing saved', async () => {
-    provider = () => creditsStream();
+    provider = (_s, init) => creditsStream(init);
     const { status, body } = await turn(CORE, true);
     expect(providerCalls, 'the scripted provider answered').toBeGreaterThan(0);
     expect(status).toBe(CAPTURED.core_response.status_code);
@@ -130,7 +130,7 @@ describe('A provider capacity or credit refusal is PROVIDER_CAPACITY at the rout
     expect(providerCalls, 'never resent automatically').toBe(1);
     expect(rows.has(id), 'the claim is kept').toBe(true);
     // CONTRAST: the provider answered (a server error), so its delivery is known and the claim is released.
-    provider = () => serverErrorStream();
+    provider = (_s, init) => serverErrorStream(init);
     const other = randomUUID();
     const answered = await turn(CORE, false, other);
     expect(answered.body).toMatchObject({ retry_safe: true });
@@ -139,7 +139,7 @@ describe('A provider capacity or credit refusal is PROVIDER_CAPACITY at the rout
   });
 
   it('⛔ CONTRAST: a provider fault that is not capacity stays UPSTREAM_ERROR and keeps the UI\'s own retry rule', async () => {
-    provider = () => serverErrorStream();
+    provider = (_s, init) => serverErrorStream(init);
     const { status, body } = await turn(CORE, true);
     expect(status).toBe(502);
     expect(body.error).toBe('UPSTREAM_ERROR');

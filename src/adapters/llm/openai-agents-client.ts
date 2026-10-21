@@ -96,25 +96,53 @@ export function ledgeredAgentsClient(ledger: AgentsClientLedger): OpenAI {
       recordProviderAttempt(handle, { transport_status: r.status, result: 'http_error', outcome: r.status === 429 ? 'rate_limited' : 'http_error', retry: false });
       return r;
     }
-    if (body['stream'] === true) {
-      // The SDK reads the stream as it arrives; the copy is read to its end in the background and recorded then.
-      ledger.pending?.push(r.clone().text().then((text) => {
-        const done = streamTerminal(text);
-        if (done === undefined) {
-          recordProviderAttempt(handle, { transport_status: r.status, result: 'stream_without_terminal_event', outcome: 'invalid_response', retry: false });
-          if (ledger.conversationBound && !streamCarriedError(text)) ledger.onDeliveryUnknown?.(new Error('Conversation response ended without a terminal event'));
-          return;
-        }
-        recordProviderUsage(handle, done.usage);
-        recordProviderReturnedModel(handle, done.model);
-        recordProviderAttempt(handle, { transport_status: r.status, result: typeof done.status === 'string' ? done.status : 'response',
-          outcome: 'success', retry: false, response_sha256: sha256(text) });
-        attempt.ok = true;
-      }, (err: unknown) => {
-        recordProviderAttempt(handle, { transport_status: r.status, result: err instanceof Error ? err.name : 'stream_failure', outcome: 'transport_error', retry: false });
-        if (ledger.conversationBound) ledger.onDeliveryUnknown?.(err);
-      }));
-      return r;
+    if (body['stream'] === true && r.body !== null) {
+      /**
+       * The SDK reads THIS stream, and Olumi notes the bytes as they pass through (fresh Claude BLOCK on #3594: a copy is
+       * destroyed when the SDK cancels the request on a provider `error` event, so it cannot tell a refusal from a lost
+       * transport). The attempt is recorded once, when the stream ends, is cancelled or its request is aborted. Delivery is
+       * unknown only when neither a terminal event nor the provider's own error passed through.
+       */
+      const decoder = new TextDecoder();
+      let text = '';
+      let ended = false;
+      let settle: () => void = () => {};
+      ledger.pending?.push(new Promise<void>((resolve) => { settle = resolve; }));
+      const end = (how: 'done' | 'stopped' | 'failed', cause?: unknown): void => {
+        if (ended) return;
+        ended = true;
+        try {
+          const done = streamTerminal(text);
+          if (done !== undefined) {
+            recordProviderUsage(handle, done.usage);
+            recordProviderReturnedModel(handle, done.model);
+            recordProviderAttempt(handle, { transport_status: r.status, result: typeof done.status === 'string' ? done.status : 'response',
+              outcome: 'success', retry: false, response_sha256: sha256(text) });
+            attempt.ok = true;
+            return;
+          }
+          recordProviderAttempt(handle, how === 'failed'
+            ? { transport_status: r.status, result: cause instanceof Error ? cause.name : 'stream_failure', outcome: 'transport_error', retry: false }
+            : { transport_status: r.status, result: 'stream_without_terminal_event', outcome: 'invalid_response', retry: false });
+          if (ledger.conversationBound && !streamCarriedError(text)) {
+            ledger.onDeliveryUnknown?.(cause ?? new Error('Conversation response ended without a terminal event'));
+          }
+        } finally { settle(); }
+      };
+      init?.signal?.addEventListener('abort', () => end('stopped', init.signal?.reason), { once: true });
+      const reader = r.body.getReader();
+      const passThrough = new ReadableStream<Uint8Array>({
+        async pull(controller) {
+          try {
+            const { done, value } = await reader.read();
+            if (done) { text += decoder.decode(); end('done'); controller.close(); return; }
+            text += decoder.decode(value, { stream: true });
+            controller.enqueue(value);
+          } catch (err) { end('failed', err); controller.error(err); }
+        },
+        cancel(reason) { end('stopped', reason); return reader.cancel(reason); },
+      });
+      return new Response(passThrough, { status: r.status, statusText: r.statusText, headers: r.headers });
     }
     const bytes = await r.clone().text();
     try {

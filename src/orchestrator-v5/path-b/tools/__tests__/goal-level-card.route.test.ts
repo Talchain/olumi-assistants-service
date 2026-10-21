@@ -615,10 +615,10 @@ describe('PATH-B: the goal’s current level, typed as a correction, shows its c
     expect(failed.statusCode, failed.body).toBe(502);
     expect(failed.json()).toMatchObject({ nothing_saved: true, save_outcome: 'VERIFIED_NO_WRITE', provider_delivery: 'unknown', retry_safe: false });
     expect(calls, 'never resent into a Conversation the provider may still hold').toHaveLength(1);
-    expect(turnRows.get(turnId)?.assistant_message).toBe('The reply didn’t arrive. Any changes already saved are kept. Send a new message to continue.');
+    expect(turnRows.get(turnId)?.assistant_message).toBe('The reply didn’t arrive and may still be finishing. Nothing in your model was changed. Wait a moment, then send a new message.');
     const replay = await post(payload);
     expect(replay.statusCode, replay.body).toBe(200);
-    expect((replay.json() as Json).assistant_text).toBe('The reply didn’t arrive. Any changes already saved are kept. Send a new message to continue.');
+    expect((replay.json() as Json).assistant_text).toBe('The reply didn’t arrive and may still be finishing. Nothing in your model was changed. Wait a moment, then send a new message.');
     expect(calls, 'the resend replays the answer: no second provider call').toHaveLength(1);
     // CONTRAST: a provider refusal is an HTTP answer, so its delivery is known (the claim release is the capacity spec's row).
     outputs = [[{ type: 'provider_failure' }]];

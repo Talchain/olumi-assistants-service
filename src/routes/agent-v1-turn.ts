@@ -4705,7 +4705,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
                 request_hash: requestHash, response_emitted: false,
                 llm_calls_used: providerCallsMade() ?? 0, duration_ms: Date.now() - startedAt, handler_facts: [],
                 userMessage: message,
+                // A lost delivery may still be running at the provider, so a new message straight away can meet it (fresh Claude E).
                 assistantMessage: verifiedSave ? 'The saved change is kept, but the reply didn’t arrive. Send a new message to continue.'
+                  : deliveryUnknown && writesDispatched === 0 ? 'The reply didn’t arrive and may still be finishing. Nothing in your model was changed. Wait a moment, then send a new message.'
                   : 'The reply didn’t arrive. Any changes already saved are kept. Send a new message to continue.',
               },
             });
@@ -4732,7 +4734,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // A dispatched write is a possible effect, never positive readback proof; provider retryability is separate.
         return reply.code(502).send({
           ...(mode === 'core' ? {
-            ...providerFailureOf(err), nothing_saved: writesDispatched === 0,
+            // A lost delivery is reported with ITS cause, never Olumi's own code as if the provider had sent it (fresh Claude).
+            ...providerFailureOf(deliveryUnknown ? (err as CoreDeliveryUnknownError).cause : err), nothing_saved: writesDispatched === 0,
             save_outcome: verifiedSave ? 'VERIFIED_SAVED' : writesDispatched === 0 ? 'VERIFIED_NO_WRITE' : 'UNKNOWN',
             // Olumi's writes above are known; whether the provider received the call is not.
             ...(deliveryUnknown ? { provider_delivery: 'unknown' } : {}),
