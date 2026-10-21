@@ -14,7 +14,7 @@
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 
 import { buildTurnContext, loadScenarioSnapshotForRunAnalysis } from '../build-turn-context.js';
-import { runSeedEcho } from '../coaching/build-run-delta.js';
+import { readRunEchoes } from '../coaching/build-run-delta.js';
 import { priorRunForSeed, seedHistoryFacts } from '../coaching/seed-reuse.js';
 import { projectCanonicalAnalysisCells } from '../../routes/canonical-analysis-view.js';
 import { agentLicenceRecordOf, goalChanceLicenceForAgent } from '../goal-target/goal-chance-licence.js';
@@ -56,8 +56,10 @@ export async function runStressVariant(p: StressVariantParams): Promise<StressVa
   return run.kind === 'rows' ? { kind: 'rows', rows: run.rows } : run;
 }
 
-/** One variant's rows and the seed PLoT echoed for it (`meta.seed_used`), so a caller can prove two Runs drew the same. */
-export type VariantRun = Exclude<StressVariantRows, { kind: 'rows' }> | { readonly kind: 'rows'; readonly rows: ReadonlyMap<string, StressChance>; readonly seedUsed: string | null };
+/** One variant's rows, the seed PLoT echoed for it (`meta.seed_used`, so a caller can prove two Runs drew the same) and its
+ *  sample count (`meta.n_samples`, for a noise judgement). */
+export type VariantRun = Exclude<StressVariantRows, { kind: 'rows' }>
+  | { readonly kind: 'rows'; readonly rows: ReadonlyMap<string, StressChance>; readonly seedUsed: string | null; readonly nSamples: number | null };
 
 export async function runVariant(p: StressVariantParams): Promise<VariantRun> {
   const context = await buildTurnContext(p.payload, p.requestId);
@@ -88,7 +90,7 @@ export async function runVariant(p: StressVariantParams): Promise<VariantRun> {
     );
     const fact = outcome.handler_facts.find((f) => f.fact_type === 'run_analysis');
     return fact?.fact_type !== 'run_analysis' ? { kind: 'refused', reason: 'failed' }
-      : { kind: 'rows', rows: stressChancesOf(fact.result, edited.graph), seedUsed: runSeedEcho(fact) };
+      : { kind: 'rows', rows: stressChancesOf(fact.result, edited.graph), seedUsed: readRunEchoes(fact)?.seedUsed ?? null, nSamples: readRunEchoes(fact)?.nSamples ?? null };
   } catch (err) {
     return refusal(err);
   }
