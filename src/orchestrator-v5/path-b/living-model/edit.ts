@@ -37,9 +37,12 @@ const theirs = { source: 'user', party: null, quote: null } as const;
 const noRange = { low: null, high: null } as const;
 /** The person's own figure: an edit replaces the WHOLE figure, so Olumi's estimate of it is gone (per-figure authorship). */
 const theirFigure = { estimate_by: null } as const;
-/** An edit that leaves a point figure as it was changes nothing, so its author stays (approving adopts; it never re-authors). */
-const unchangedPoint = (fig: { value: number | null; low: number | null; high: number | null }, raw: number): boolean =>
-  fig.value === raw && fig.low === null && fig.high === null;
+/**
+ * An edit that leaves a point figure as it was, in the same unit, changes nothing, so its author stays (approving adopts; it
+ * never re-authors). A unit the edit gives a figure that had none is a change (Codex r2 on #3609).
+ */
+const unchangedPoint = (fig: { value: number | null; low: number | null; high: number | null; unit: string | null }, raw: number,
+  unit: string | null): boolean => fig.value === raw && fig.low === null && fig.high === null && fig.unit === unit;
 /** A target figure on Olumi's suggested measure is Olumi's: kept in history, never adopted as the person's (Codex #3585 P1). */
 function supersedeOlumiTarget(m: LivingModelT, a: LivingModelT['aims'][number]): void {
   const t = a.target;
@@ -79,7 +82,7 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       const raw = edit.raw_value ?? toRaw(edit.target_id, edit.value);
       if (raw === undefined) return { refused: 'no_frame' };
       // The same figure entered again is a confirmation, not a new figure: it keeps its author (Codex r1 on #3609).
-      if (f !== undefined && unchangedPoint(f, raw)) return { model: m };
+      if (f !== undefined && unchangedPoint(f, raw, unit ?? edit.unit ?? null)) return { model: m };
       if (f !== undefined) Object.assign(f, { ...theirFigure, value: raw, ...noRange, unit: unit ?? edit.unit ?? null, ...theirs });
       else if (a!.target === null) return { refused: 'no_target' };
       else {
@@ -125,7 +128,7 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       const raw = toRaw(f.id, edit.value);
       if (raw === undefined) return { refused: 'no_frame' };
       const was = o.settings.find((s) => s.factor_id === f.id);
-      if (was !== undefined && unchangedPoint(was, raw)) return { model: m };
+      if (was !== undefined && unchangedPoint(was, raw, f.unit)) return { model: m };
       const setting = { factor_id: f.id, ...theirFigure, value: raw, ...noRange, unit: f.unit, ...theirs };
       o.settings = [...o.settings.filter((s) => s.factor_id !== f.id), setting];
       return { model: m };

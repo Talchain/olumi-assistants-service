@@ -36,6 +36,10 @@ describe('thin core explicit edit: a canvas gesture applied to the living model,
     // CONTRAST: a different figure is the person's own.
     expect(edit({ kind: 'option_intervention_edit', option_id: 'push', factor_id: 'f', value: 0.8 }).options[1]!.settings[0]).toMatchObject({ source: 'user', value: 0.8 });
     expect(edit({ kind: 'factor_value_edit', target_id: 'f', value: 0.6 }).factors[0]).toMatchObject({ estimate_by: null, value: 0.6 });
+    // ⛔ Codex r2 #3609: the same figure with a unit it did not have is a change: the unit is saved, and the figure is theirs.
+    expect(olumis.factors[0]!.unit, 'the factor has no unit before the edit').toBeNull();
+    expect(edit({ kind: 'factor_value_edit', target_id: 'f', value: 0.5, raw_value: 0.5, unit: '%' }).factors[0])
+      .toMatchObject({ value: 0.5, unit: '%', estimate_by: null, source: 'user' });
   });
 
   it('a goal target and a link strength are kept in the person\'s units; the regenerated engine values match the gesture', () => {
