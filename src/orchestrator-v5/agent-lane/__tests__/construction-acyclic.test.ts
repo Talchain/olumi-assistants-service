@@ -40,7 +40,7 @@ import { buildModelFromBrief, prepareProvisionalCandidate, type CallStructuredMo
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { asProjectedMeanCapture, asServedBeforeOneForm } from './fixtures/one-form-levels.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
-import { validateGraphStructure } from '../../../orchestrator/graph-structure-validator.js';
+import { validateGraphStructure, contextNodeIds } from '../../../orchestrator/graph-structure-validator.js';
 import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
 import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
@@ -683,14 +683,17 @@ describe('NO PLACEHOLDER LINK FOR AN UNLINKED CONCERN: never wired into the goal
     expect(loss.filter((l) => l.field_path === `nodes[${CONCERN}]`), 'never said as unconnected').toEqual([]);
   });
 
-  it('RED: a concern of UNKNOWN origin with no link — zero links grant no exclusion: no invented link, no mark, it is said and asked about, and the result that depends on it is withheld', async () => {
+  // ⭐ DL ruling 21 Oct (structure class) supersedes "the result that depends on it is withheld": an item with no link cannot
+  // change the result, so it is context (kept, said, never a block). Kept: no invented link, no mark, never Olumi's.
+  it('RED: a concern of UNKNOWN origin with no link — zero links grant no exclusion: no invented link, no mark, it is said and asked about, and it is context, never a block', async () => {
     const c = withConcern('explicit');
     const { graph } = await build(c);
     expect(graph.nodes.find((n) => n.id === CONCERN)?.label, 'the full concern is saved').toBe('Storage overflow');
     expect(graph.edges.filter((e) => e.from === CONCERN || e.to === CONCERN), 'no invented link').toEqual([]);
     expect(participation(graph), 'never relabelled as Olumi’s optional material').toBeUndefined();
-    // The dependent result is withheld (d2cb10ef instead asked a figure for a cause nobody stated: MISSING_FACTOR_LEVEL).
-    expect(blockers(graph)).toContain('ORPHAN_NODE');
+    // Never a figure for a cause nobody stated (d2cb10ef asked one: MISSING_FACTOR_LEVEL), and never a block (context).
+    expect(blockers(graph)).not.toContain('ORPHAN_NODE');
+    expect(contextNodeIds(graph as never).has(CONCERN)).toBe(true);
     expect(blockers(graph)).not.toContain('MISSING_FACTOR_LEVEL');
     const loss = ledgerOf(c);
     expect(loss.filter((l) => l.field_path === `nodes[${CONCERN}]`).map((l) => l.reason)).toEqual([
@@ -698,7 +701,7 @@ describe('NO PLACEHOLDER LINK FOR AN UNLINKED CONCERN: never wired into the goal
     expect(loss.some((l) => l.field_path === `edges[${CONCERN}->${GOAL}]` || l.field_path === `nodes[${CONCERN}].left_out_of_analysis`)).toBe(false);
   });
 
-  it('RED: a HUMAN-claimed concern with no link (the user’s own sentence) — not excluded, never relabelled as Olumi’s, said as unconnected, and the dependent result withheld; the unsized rule never takes it even if marked', async () => {
+  it('RED: a HUMAN-claimed concern with no link (the user’s own sentence) — not excluded, never relabelled as Olumi’s, said as unconnected, context and never a block; the unsized rule never takes it even if marked', async () => {
     const said = ' Our storage is already overflowing at peak times.';
     const c = withConcern('explicit') as unknown as { statements?: unknown[] };
     c.statements = [{ quote: said.trim(), subject: { kind: 'risk', label: 'Storage overflow', to_label: null, factor_label: null }, field: 'holds_now',
@@ -710,7 +713,8 @@ describe('NO PLACEHOLDER LINK FOR AN UNLINKED CONCERN: never wired into the goal
       expect(node?.provenance, 'the user’s claim, never Olumi’s').toBe('unverified_brief');
       expect(graph.edges.filter((e) => e.from === CONCERN || e.to === CONCERN), 'no invented link').toEqual([]);
       expect(participation(graph)).toBeUndefined();
-      expect(blockers(graph)).toContain('ORPHAN_NODE');
+      expect(blockers(graph)).not.toContain('ORPHAN_NODE');
+      expect(contextNodeIds(graph as never).has(CONCERN)).toBe(true);
       // Run consumption: the unsized-risk rule keeps its authorship safeguard — a stray mark on the user's concern is not Olumi's omission.
       const stray = { ...graph, nodes: graph.nodes.map((n) => (n.id === CONCERN ? { ...n, analysis_participation: 'retained_excluded' } : n)) };
       expect(unsizedOlumiRiskIds(stray).has(CONCERN)).toBe(false);

@@ -96,9 +96,11 @@ const ASKING_GRAPH = { nodes: NODES, edges: EDGES };
  * is itself `status: 'blocked'` / `ORPHAN_NODE`. Genuine drafted graphs are
  * structurally messy; this is the normal case on a real governed-brief draw.
  */
+// ⭐ DL ruling 21 Oct (structure class): an unlinked factor is now context, never a block, so the structural fault here is
+// an option that changes nothing (OPTION_NO_FACTOR_EDGES), which still blocks.
 const BLOCKED_GRAPH = {
-  nodes: [...NODES, { id: 'fac_orphan', kind: 'factor', label: 'Orphan thing' }],
-  edges: EDGES,
+  nodes: [...NODES, { id: 'opt_floating', kind: 'option', label: 'Floating option' }],
+  edges: [...EDGES, edge('dec_launch', 'opt_floating')],
 };
 
 const readinessFor = (graph: unknown) => buildCanonicalAnalysisReadyFromGraph(graph as never);

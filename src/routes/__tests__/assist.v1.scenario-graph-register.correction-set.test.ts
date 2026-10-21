@@ -8,8 +8,9 @@ import { log } from '../../utils/telemetry.js';
 import { applyGoalSteadyEdit } from '../../orchestrator-v5/goal-target/goal-steady-write.js';
 import { horizonSteadyAttested } from '../../orchestrator-v5/goal-target/horizon-basis.js';
 import { assessCanonicalAnalysisReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
+import { resolveRunAdmission } from '../../orchestrator-v5/tools/handlers/analysis-ready-core.js';
 import { guardAnalysisParticipation } from '../../orchestrator-v5/tools/handlers/run-analysis-participation-guard.js';
-import { validateGraphStructure } from '../../orchestrator/graph-structure-validator.js';
+import { validateGraphStructure, contextNodeIds } from '../../orchestrator/graph-structure-validator.js';
 import { boundNodeDescriptionForContext } from '../../orchestrator/context/graph-compact.js';
 import { GraphV3 } from '../../schemas/cee-v3.js';
 import { readFileSync } from 'node:fs';
@@ -558,11 +559,19 @@ describe('one native governing-outcome correction', () => {
     expect(wire.refusals).toEqual([]); expect(wire.excludedNodeIds).toEqual(['large_fund']);
     expect((wire.graph as Rec).nodes.some((n: Rec) => n.id === 'large_fund')).toBe(false);
     expect((wire.graph as Rec).edges.some((e: Rec) => e.from === 'large_fund' || e.to === 'large_fund')).toBe(false);
+    // ⭐ DL ruling 21 Oct (structure class) supersedes "unmarked, it blocks": the earlier aim has no path to the new goal, so
+    // it is context — kept, said, never a block. The chat-edit gate (no flag) still refuses it by name.
     const ordinary = structuredClone(after); delete ordinary.nodes.find((n: Rec) => n.id === 'large_fund').analysis_participation;
-    expect(assessCanonicalAnalysisReadiness(ordinary).safeToAnalyse).toBe(false);
-    expect(validateGraphStructure(GraphV3.parse(ordinary), { leaveOutInertRisks: true }).violations.some(i => i.code === 'NO_PATH_TO_GOAL' && i.detail.includes('Larger fund'))).toBe(true);
+    expect(assessCanonicalAnalysisReadiness(ordinary).blockingIssues).toEqual([]);
+    expect(contextNodeIds(GraphV3.parse(ordinary) as never).has('large_fund')).toBe(true);
+    expect(validateGraphStructure(GraphV3.parse(ordinary)).violations.some(i => i.code === 'NO_PATH_TO_GOAL' && i.detail.includes('Larger fund'))).toBe(true);
     const changed = structuredClone(after); changed.nodes.find((n: Rec) => n.id === 'focus').interventions.large_fund = { value: 0.2 };
+    // Kept: an option that sets the earlier aim is still refused — by the Run's own admission (the participation guard
+    // keeps a targeted node in), never by calling it unconnected.
+    expect(resolveRunAdmission(changed)).toMatchObject({ willProceed: false, submission: { eligible: false } });
+    // …and readiness agrees: a set-aside item an option still sets is never context (Codex delta on #3584).
     expect(assessCanonicalAnalysisReadiness(changed).safeToAnalyse).toBe(false);
+    expect(contextNodeIds(GraphV3.parse(changed) as never).has('large_fund')).toBe(false);
     const limited = structuredClone(after); limited.goal_constraints.push({ constraint_id: 'held-limit', node_id: 'large_fund', operator: '<=', value: 2000000, unit: '£', provenance: 'explicit' });
     limited.edges = limited.edges.filter((e: Rec) => e.from !== 'large_fund' && e.to !== 'large_fund');
     expect(assessCanonicalAnalysisReadiness(limited).safeToAnalyse).toBe(false);

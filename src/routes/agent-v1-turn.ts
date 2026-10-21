@@ -5831,7 +5831,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // BYPASS1: the AI asks for a missing target, objective or deadline itself (R:784); the host keeps K3 and A7's facts.
     const decisionLines = hostProse
       ? await decisionLinesAskedOnce(readbackGraph, decisionCtx, historyReader, scenarioId, undefined)
-      : decisionInputLines(readbackGraph, decisionCtx, { onlyRiskKind: 'inert' });
+      : decisionInputLines(readbackGraph, decisionCtx, { onlyRiskKind: ['inert', 'context'] });
     // ⭐ L1 (DL #75 5925649954 item 5; AIQ words 5925678816): the user asks about ONE link Olumi has not sized → the host asks
     // for its size, at rest, unless this turn already asks (D1 above, the model, the host status) or a card awaits a yes.
     // BYPASS1 keeps it: it is never said when the reply at rest already asks (the AI's own ask included), so it cannot double.

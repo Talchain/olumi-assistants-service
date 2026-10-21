@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs';
 import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
-import { validateGraphStructure } from '../../../orchestrator/graph-structure-validator.js';
+import { validateGraphStructure, contextNodeIds } from '../../../orchestrator/graph-structure-validator.js';
 import { inertRiskBranch } from '../../../graph/inert-risk.js';
 import { decisionInputLines, withA7AfterGate } from '../decision-input-ask.js';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
@@ -177,12 +177,16 @@ describe('the ONE definition: only a risk, and only what reaches the goal throug
     expect([...inertRiskBranch(x.nodes, x.edges, [])].sort()).toEqual(['exo', 'r']);
   });
 
-  it('CONTROL (CI: dual-draft G12): a risk with NO edge at all states nothing — never left out; it stays an ORPHAN_NODE', () => {
+  // ⭐ DL ruling 21 Oct (structure class) supersedes "it stays an ORPHAN_NODE" in readiness: it is CONTEXT (kept, said, never a
+  // block). Kept: it is never K3's left-out risk, and the chat-edit gate (no flag) still refuses it as an orphan.
+  it('CONTROL (CI: dual-draft G12): a risk with NO edge at all states nothing — never K3\'s left-out risk; readiness reads it as context; the chat-edit gate still says ORPHAN_NODE', () => {
     const bare = g(base, [['opt', 'f'], ['f', 'goal']]);
     expect(inertRiskBranch(bare.nodes, bare.edges, []).has('r')).toBe(false);
     const graph = { nodes: [...base.map((n) => ({ ...n, label: n.id })), { id: 'dec', kind: 'decision', label: 'd' }, { id: 'opt2', kind: 'option', label: 'o2' }],
       edges: [{ from: 'dec', to: 'opt' }, { from: 'dec', to: 'opt2' }, { from: 'opt', to: 'f' }, { from: 'opt2', to: 'f' }, { from: 'f', to: 'goal' }] };
-    expect(validateGraphStructure(graph as never, { leaveOutInertRisks: true }).violations.map((v) => `${v.code} ${v.detail.match(/^Node "([^"]+)"/)?.[1]}`)).toEqual(['ORPHAN_NODE r']);
+    expect(validateGraphStructure(graph as never, { leaveOutInertRisks: true }).violations).toEqual([]);
+    expect([...contextNodeIds(graph as never)]).toEqual(['r']);
+    expect(validateGraphStructure(graph as never).violations.map((v) => `${v.code} ${v.detail.match(/^Node "([^"]+)"/)?.[1]}`)).toEqual(['ORPHAN_NODE r']);
   });
 
   it('CONTROL (DL condition 1): an option whose ONLY path runs through the risk stays REFUSED — never a silent "no effect"', () => {

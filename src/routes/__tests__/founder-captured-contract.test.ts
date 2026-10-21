@@ -17,7 +17,7 @@ import { parsePendingAction, type PendingAction } from '../../orchestrator-v5/se
 import { commitOptionLevelsInProcess } from '../../orchestrator-v5/system-events/dispatch.js';
 import { assessCanonicalAnalysisReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { GraphV3 } from '../../schemas/cee-v3.js';
-import { validateGraphStructure } from '../../orchestrator/graph-structure-validator.js';
+import { validateGraphStructure, contextNodeIds } from '../../orchestrator/graph-structure-validator.js';
 import { approvedGraphHeld, draftHistory, prepareRequestedRebuild } from '../../orchestrator-v5/agent-lane/runtime/draft-replacement.js';
 import { buildModelFromBrief, constructionOperationId } from '../../orchestrator-v5/agent-lane/runtime/build-model.js';
 import { runPreparingDraftReplacement } from '../../orchestrator-v5/agent-lane/runtime/draft-replacement-context.js';
@@ -129,7 +129,9 @@ describe('captured G1 whole goal-change scope', () => {
     expect(await c.authoriseChange(press, { proposal_id: held.proposal_id })).toMatchObject({ ok: true, mutated: false, already_applied: true });
     expect(w.writes).toHaveLength(1);
   });
-  it('a branch also reaching the new goal stays active; an unrelated dead end stays blocked', async () => {
+  // ⭐ DL ruling 21 Oct (structure class) supersedes "blocked": a dead end cannot change the result, so it is context (kept,
+  // said, never a block); and so is the earlier goal's own branch that a protected item keeps in the model (below).
+  it('a branch also reaching the new goal stays active; an unrelated dead end is context, never a block', async () => {
     const w = await goalWorld(g => {
       g.edges.push({ ...structuredClone(g.edges.find((e: Rec) => e.from === 'larger_fund_secured')), to: 'angel_funding_secured' });
       g.nodes.push({ id: 'unrelated', kind: 'outcome', label: 'Unrelated unresolved outcome', provenance: 'ai_inferred' });
@@ -137,7 +139,8 @@ describe('captured G1 whole goal-change scope', () => {
     });
     const r = await offer(w); expect(r.ok, JSON.stringify(r)).toBe(true); const v = valueOf(w, r);
     expect(v.scope_excluded).toEqual([]); expect(v.candidate.nodes.find((n: Rec) => n.id === 'larger_fund_secured').analysis_participation).toBeUndefined();
-    expect(noPath(v.candidate).map(i => i.detail)).toEqual([expect.stringContaining('unrelated')]); expect(w.writes).toHaveLength(0);
+    expect(noPath(v.candidate)).toEqual([]); expect([...contextNodeIds(GraphV3.parse(v.candidate) as never)].sort()).toEqual(['funding_secured', 'unrelated']);
+    expect(w.writes).toHaveLength(0);
   });
   it.each(['option', 'lever target', 'limit'])('a protected %s leaves the complete goal card available with no branch excluded', async kind => {
     const w = await goalWorld(g => {
@@ -155,7 +158,14 @@ describe('captured G1 whole goal-change scope', () => {
     }
     expect(v.candidate.edges).toEqual(w.original.edges);
     expect(r.public_label).not.toContain('its words and links also stay visible');
-    expect(noPath(v.candidate).length).toBeGreaterThan(0); // Recording a goal does not waive Run readiness.
+    // Recording a goal waives nothing (Codex on #3584: bound by identity). A protected LIMIT's own node is never context,
+    // so it still refuses by name; elsewhere the earlier goal's branch is context — kept and said, never dropped.
+    const scoped = (g: Rec) => {
+      expect(noPath(g).map(i => i.detail)).toEqual(kind === 'limit' ? [expect.stringContaining('"larger_fund_secured"')] : []);
+      expect([...contextNodeIds(GraphV3.parse(g) as never)].sort()).toEqual(kind === 'limit' ? ['funding_secured']
+        : kind === 'option' ? ['funding_secured', 'larger_fund_secured'] : ['founder_time_on_angel_outreach', 'funding_secured', 'larger_fund_secured']);
+    };
+    scoped(v.candidate);
     const held = w.proposals.get(String(r.proposal_id))!, operations = structuredClone(held.operations);
     const forged = operations[0]!.value as Rec;
     forged.scope_excluded = ['larger_fund_secured'];
@@ -172,7 +182,7 @@ describe('captured G1 whole goal-change scope', () => {
     for (const n of w.original.nodes.filter((n: Rec) => !['funding_secured', 'angel_funding_secured'].includes(n.id))) {
       expect(w.graph().nodes.find((x: Rec) => x.id === n.id)).toEqual(n);
     }
-    expect(noPath(w.graph()).length).toBeGreaterThan(0);
+    scoped(w.graph());
   });
   it('reads FINAL removals and rejects forged scope ids or changed retained reasoning at approval', async () => {
     const quote = 'Remove the link from Larger fund secured to Angel funding secured.';
