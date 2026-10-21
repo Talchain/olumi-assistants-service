@@ -106,6 +106,11 @@ export const RATE_BUCKET_REGISTRY: Readonly<Record<string, RateBucketTier>> = {
   // `read`. The UI calls it once per sign-in. Bucket keyed on the CLIENT, as the sibling scenario routes.
   CEE_SCENARIO_COPY_RATE_LIMIT_RPM: "coach",
 
+  // Scenario-addressed WHAT-IF (canvas scenario comparison, 21 Oct): the saved model and the held changes each run through
+  // PLoT (one more per change on a crux run), in memory, nothing written. A compute route, so `coach` (fails CLOSED).
+  // Bucket keyed on the CLIENT, as the sibling scenario routes.
+  CEE_SCENARIO_WHAT_IF_RATE_LIMIT_RPM: "coach",
+
   // --- coach: medium coaching / analysis engines ---
   // RESERVED — no src reference yet, deliberately. The drift test reads this
   // marker (it is machine-read, not decoration: see the reverse assertion in
