@@ -27,7 +27,7 @@ const { dispatchChipClickRunAnalysis } = await import('../chip-click-dispatch.js
 const { loadScenarioSnapshotForRunAnalysis } = await import('../../build-turn-context.js');
 const { createRunAnalysisHandler } = await import('../../tools/handlers/run-analysis.js');
 const { runVariant } = await import('../stress-variant-run.js');
-const { runWhatIf } = await import('../what-if-run.js');
+const { runWhatIf, VARIATION_WORDS, NO_RESULT_WORDS, NOT_IN_RUN_WORDS } = await import('../what-if-run.js');
 const { mapLivingModel } = await import('../../path-b/living-model/mapper.js');
 const { computeExpectedGraphCasHashes } = await import('../../context/graph-cas-conflict.js');
 
@@ -121,12 +121,13 @@ describe('the real variant path: a what-if draws the saved Run\'s samples and wr
 const stored = () => ({ ...mapLivingModel(structuredClone(KNOWN_ANSWER)).graph, living_model: structuredClone(KNOWN_ANSWER) });
 const BASE = computeExpectedGraphCasHashes(stored()).expectedGraphAnalysisHash as string;
 it('PRECONDITION: the saved fixture has an analysis hash, so the stale rows test a real comparison', () => expect(BASE).toMatch(/\S/));
-const chance = (display: string): StressChance => ({ display, pct: 42, provisional: false, not_shown: null });
+const chance = (display: string, pct: number | null = 42): StressChance => ({ display, pct, provisional: false, not_shown: null });
 const VALUE = { kind: 'factor_value_edit', target_id: 'f', value: 0.7, raw_value: 0.7 };
 const LINK = { kind: 'edge_strength_edit', from: 'f', to: 'g', magnitude: 0.2, direction_intent: 'preserve', base_graph_hash: BASE };
 
 /** A fake PLoT run: each call's graph is recorded; `f`'s value decides the display, so a change is visible by identity. */
-function fakeRun(seeds: (string | null)[] = []) {
+type FakeOpts = { pushPct?: (number | null)[]; n?: number | null; step?: 'whole' | 'nearest_5' };
+function fakeRun(seeds: (string | null)[] = [], opts: FakeOpts = {}) {
   const calls: { graph: Rec; seed: unknown }[] = [];
   const run = vi.fn(async (p: { variantGraph: Rec; seed?: number }) => {
     calls.push({ graph: p.variantGraph, seed: p.seed });
@@ -134,8 +135,10 @@ function fakeRun(seeds: (string | null)[] = []) {
     // graph under an edited living model must not pass).
     const f = (p.variantGraph.nodes as Rec[]).find((n) => n.id === 'f')!.observed_state.value;
     const strength = Math.round((p.variantGraph.edges as Rec[]).find((e) => e.from === 'f' && e.to === 'g')!.strength.mean * 100) / 100;
+    const pushPct = opts.pushPct === undefined ? 42 : opts.pushPct[calls.length - 1] ?? null;
     return { kind: 'rows' as const, seedUsed: calls.length <= seeds.length ? seeds[calls.length - 1]! : 'seed-a',
-      rows: new Map([['push', chance(`push f=${f} s=${strength}`)], ['hold', chance('hold')]]) };
+      nSamples: opts.n === undefined ? 10000 : opts.n, displayStep: new Map([['push', opts.step ?? 'whole']]),
+      rows: new Map([['push', chance(`push f=${f} s=${strength}`, pushPct)], ['hold', chance('hold')]]) };
   });
   return { run, calls };
 }
@@ -160,6 +163,7 @@ describe('runWhatIf: the canvas gestures, held, applied to a COPY and run beside
     expect(v).toMatchObject({ change_index: 'all', paired: true });
     expect(v.options.find((o: Rec) => o.option_id === 'push')).toEqual({
       option_id: 'push', saved: { display: 'push f=0.5 s=0.4', provisional: false, not_shown: null }, what_if: { display: 'push f=0.7 s=0.4', provisional: false, not_shown: null },
+      variation: 'not_judged', variation_words: VARIATION_WORDS.not_judged,
     });
     expect(JSON.stringify(out)).not.toContain('"pct"');
     expect(row, 'the saved row is never mutated').toEqual(before);
@@ -203,15 +207,15 @@ describe('runWhatIf: the canvas gestures, held, applied to a COPY and run beside
 
   it('a cell with neither a figure nor the Run\'s reason says why; an option missing from one run says so (Codex #3591)', async () => {
     const run = vi.fn(async (p: { variantGraph: Rec }) => ({
-      kind: 'rows' as const, seedUsed: 's',
+      kind: 'rows' as const, seedUsed: 's', nSamples: 10000, displayStep: new Map(),
       rows: (p.variantGraph.nodes as Rec[]).find((n) => n.id === 'f')!.observed_state.value === 0.5
         ? new Map([['push', { display: null, pct: null, provisional: false, not_shown: null }], ['hold', chance('hold')]])
         : new Map([['push', chance('push')]]),
     }));
     const out = await runWhatIf(ask([VALUE]), { loadSaved: async () => ({ graph: stored() }), run: run as never });
     const opts = (out as Rec).variants[0].options as Rec[];
-    expect(opts.find((o) => o.option_id === 'push')!.saved.not_shown).toBe('no_result_for_this_option');
-    expect(opts.find((o) => o.option_id === 'hold')!.what_if.not_shown).toBe('not_in_this_run');
+    expect(opts.find((o) => o.option_id === 'push')!.saved.not_shown).toBe(NO_RESULT_WORDS);
+    expect(opts.find((o) => o.option_id === 'hold')!.what_if.not_shown).toBe(NOT_IN_RUN_WORDS);
     // CONTROL: a shown figure keeps not_shown null.
     expect(opts.find((o) => o.option_id === 'push')!.what_if).toEqual({ display: 'push', provisional: false, not_shown: null });
   });
@@ -226,5 +230,41 @@ describe('runWhatIf: the canvas gestures, held, applied to a COPY and run beside
     const out = await runWhatIf(ask([{ kind: 'factor_value_edit', target_id: 'nope', value: 0.3 }, VALUE]), { loadSaved: async () => ({ graph: stored() }), run: run as never });
     expect(out).toMatchObject({ kind: 'ran', changes_applied: [{ index: 1 }] });
     expect((out as Rec).changes_refused).toEqual([{ index: 0, reason: expect.any(String) }]);
+  });
+});
+
+describe('beyond ordinary variation: claimed only when it holds for any covariance and any rounding (Codex #3591 r2)', () => {
+  const judge = async (pushPct: (number | null)[], opts: FakeOpts = {}) => {
+    const { run } = fakeRun([], { pushPct, ...opts });
+    const out = await runWhatIf(ask([VALUE]), { loadSaved: async () => ({ graph: stored() }), run: run as never });
+    return (out as Rec).variants[0].options.find((o: Rec) => o.option_id === 'push');
+  };
+  it.each([
+    ['40% → 60% on 10,000 draws', [40, 60], {}, 'beyond_ordinary_variation'],
+    ['60% → 40% (a fall, judged the same way)', [60, 40], {}, 'beyond_ordinary_variation'],
+    ['50% → 54%: 3 points clear of rounding, above the 2-point any-covariance band', [50, 54], {}, 'beyond_ordinary_variation'],
+    ['50% → 52%: inside the band', [50, 52], {}, 'not_judged'],
+    ['CODEX r2 (1): 45% → 50% shown at nearest 5 (712 vs 713 of 1,500)', [45, 50], { n: 1500, step: 'nearest_5' }, 'not_judged'],
+    ['CODEX r2 (2): 51% → 49% on 30,000 opposite-moving paired draws', [51, 49], { n: 30000 }, 'not_judged'],
+    ['a withheld chance on one side', [40, null], {}, 'not_judged'],
+    ['no sample count from PLoT', [40, 60], { n: null }, 'not_judged'],
+  ])('%s → %s', async (_, pcts, opts, expected) => {
+    const o = await judge(pcts as (number | null)[], opts as FakeOpts);
+    expect(o.variation).toBe(expected);
+    expect(o.variation_words).toBe(VARIATION_WORDS[expected as keyof typeof VARIATION_WORDS]);
+  });
+
+  it('CONTROL for the nearest-5 row: the same 45% → 50% shown to the whole point on 1,500 draws is still not judged, 40% → 60% is beyond', async () => {
+    expect((await judge([45, 50], { n: 1500 })).variation).toBe('not_judged');
+    expect((await judge([40, 60], { n: 1500, step: 'nearest_5' })).variation).toBe('beyond_ordinary_variation');
+  });
+
+  it('the display step decides it: 45% → 50% on 10,000 draws is beyond when shown to the point, not when shown to the nearest 5', async () => {
+    expect((await judge([45, 50], { step: 'nearest_5' })).variation).toBe('not_judged');
+    expect((await judge([45, 50], { step: 'whole' })).variation).toBe('beyond_ordinary_variation');
+  });
+
+  it('the words never rank, recommend or say "significant"', () => {
+    expect(JSON.stringify(VARIATION_WORDS)).not.toMatch(/\b(best|winner|recommend|significant|better|worse)\b/i);
   });
 });
