@@ -14,18 +14,18 @@
  *  · THE ONE RUN PATH, NOTHING PERSISTED. Each variant is the saved living model with those values, mapped by the core
  *    mapper and computed by `deps.runStressVariant` (the `run_analysis` handler on an in-memory snapshot, discarded:
  *    `handlers/stress-variant-run.ts`). Its rows are the licensed rows the structural challenge reads. The saved model must
- *    remap to exactly what is saved (analysis-affecting hash), or H0 would not be the saved model: otherwise refused.
+ *    remap to exactly the saved graph (every Run input, e.g. a goal's deadline), or H0 would not be the saved model: refused.
  *  · HONEST LIMITS. At most 16 variants and 60 s, one deadline that aborts a variant in flight; what did not run is
  *    `not_run`, never a pass. A level within 4 standard
  *    errors of the target, or a target this Run does not license, is `unresolved`, never met. A model changed during the
  *    test is `unavailable`, with no rows. Model-relative wording only: no best, winner or recommendation.
  */
 import { createHash } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod-v4';
 import type { AgentToolContext } from '../../agent-lane/runtime/agent-tools.js';
 import type { InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
 import { LivingModel, type LivingModelT } from '../../../schemas/living-model.js';
-import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { mapLivingModel, savedGoal } from '../living-model/mapper.js';
 import { livingViewOf } from '../living-model/view.js';
 import { isNoModelYet, isSavedRead, readSaved } from './context-tool.js';
@@ -88,7 +88,8 @@ const signed = (sign: '+' | '-' | null, value: number) => (sign === '-' ? -1 : 1
 
 /** The coordinates, hypotheses and every variant, or the reason the request cannot be tested as asked. */
 export function planStress(living: LivingModelT, args: StressTestArgs):
-  { readonly coordinates: Coordinate[]; readonly hypotheses: Hypothesis[]; readonly variants: Variant[] } | { readonly refusal: string; readonly data?: Rec } {
+  { readonly coordinates: Coordinate[]; readonly hypotheses: Hypothesis[]; readonly variants: Variant[]; readonly alternativeLinkId: string | null }
+  | { readonly refusal: string; readonly data?: Rec } {
   if (args.stresses.length < 1 || args.stresses.length > 3) return { refusal: 'stress_count_unsupported', data: { allowed: '1 to 3' } };
   const labelOf = (id: string) => living.factors.find((f) => f.id === id)?.label ?? living.options.find((o) => o.id === id)?.label
     ?? living.aims.find((a) => a.id === id)?.text ?? id;
@@ -110,7 +111,8 @@ export function planStress(living: LivingModelT, args: StressTestArgs):
   const hypotheses: Hypothesis[] = [{ id: 'H0', label: 'The saved model', source: 'saved' }];
   const alt = args.alternative;
   if (alt !== null) {
-    // The mapper draws links between factors and the goal only (`mapper.ts` `causal`): a link from an option is held.
+    // From a factor only: the mapper lowers an option's own link onto a switch factor (`<option>__on`, `mapper.ts`), which
+    // this grid does not track, so that is refused rather than guessed.
     const fromOk = living.factors.some((f) => f.id === alt.from);
     const toFactor = living.factors.find((f) => f.id === alt.to);
     const toAim = living.aims.find((a) => a.id === alt.to && a.target !== null);
@@ -118,6 +120,10 @@ export function planStress(living: LivingModelT, args: StressTestArgs):
     if (living.links.some((l) => l.from === alt.from && l.to === alt.to)) return { refusal: 'alternative_duplicates_link', data: { from: alt.from, to: alt.to } };
     hypotheses.push({ id: 'H1', label: alt.label, source: alt.source });
   }
+  // A temporary id no saved link has, so H1's "it holds" touches only the added link.
+  const ids = new Set(living.links.map((l) => l.id));
+  let alternativeLinkId: string | null = null;
+  if (alt !== null) for (let i = 0; alternativeLinkId === null || ids.has(alternativeLinkId); i += 1) alternativeLinkId = `stress_alternative_${i}`;
   let grid: Record<string, number>[] = [{}];
   for (const c of coordinates) grid = grid.flatMap((g) => [c.saved, ...c.values].map((v) => ({ ...g, [c.item_id]: v })));
   if (grid.length * hypotheses.length > STRESS_MAX_VARIANTS) {
@@ -142,7 +148,7 @@ export function planStress(living: LivingModelT, args: StressTestArgs):
       }
       if (h.id === 'H1' && alt !== null) {
         const unit = living.factors.find((f) => f.id === alt.to)?.unit ?? living.aims.find((a) => a.id === alt.to)?.target?.unit ?? null;
-        v.links = [...v.links, { id: 'stress_alternative', from: alt.from, to: alt.to, source: alt.source, party: null, quote: null,
+        v.links = [...v.links, { id: alternativeLinkId!, from: alt.from, to: alt.to, source: alt.source, party: null, quote: null,
           effect: { form: 'point', value: Math.abs(alt.value), low: null, high: null, unit, sd: null, sign: alt.sign } }];
       }
       const parsed = LivingModel.safeParse(v);
@@ -150,7 +156,7 @@ export function planStress(living: LivingModelT, args: StressTestArgs):
       variants.push({ hypothesis: h.id, setting, living: parsed.data });
     }
   }
-  return { coordinates, hypotheses, variants };
+  return { coordinates, hypotheses, variants, alternativeLinkId };
 }
 
 /** A side only when the level clears the target by more than STRESS_Z standard errors; an exact level (sd 0) is exact. */
@@ -230,12 +236,21 @@ function goalOf(graph: unknown): { id: string; target: number | null; comparator
   return { id: goal.id, target, comparator };
 }
 
-/** The mapped variant as a Run would read it; under H1 the alternative HOLDS (the mapper gives Olumi's own link 0.8). */
-function variantGraph(v: Variant, saved: unknown): { graph: Rec; edges: ReadonlySet<string> } {
+/** The mapped variant as a Run would read it; under H1 the added alternative HOLDS (the mapper gives Olumi's own link 0.8).
+ *  `testable`: the items the mapper carries as stated, never withheld or replaced by its placeholder. */
+function variantGraph(v: Variant, saved: unknown, alternativeLinkId: string | null): { graph: Rec; testable: ReadonlySet<string> } {
   const mapped = mapLivingModel(v.living, savedGoal(saved));
-  const edges = Array.isArray(mapped.graph.edges) ? (mapped.graph.edges as Rec[]) : [];
-  const held = v.hypothesis === 'H1' ? edges.map((e) => (e.id === 'stress_alternative' ? { ...e, exists_probability: 1 } : e)) : edges;
-  return { graph: { ...mapped.graph, edges: held, living_model: v.living }, edges: new Set(edges.map((e) => String(e.id))) };
+  const withheld = new Set(mapped.withheld.map((w) => w.id));
+  const edges = mapped.graph.edges.map((e) => (v.hypothesis === 'H1' && e.id === alternativeLinkId ? { ...e, exists_probability: 1 } : e));
+  const carried = [...mapped.graph.nodes, ...mapped.graph.edges.filter((e) => e.defaulted !== true)].map((x) => String(x.id));
+  return { graph: { ...mapped.graph, edges, living_model: v.living }, testable: new Set(carried.filter((id) => !withheld.has(id))) };
+}
+
+/** Every Run input of a saved graph, the living model aside (it is compared through its own mapping). */
+function runInputs(graph: unknown): Rec {
+  const inputs: Rec = { ...(graph as Rec) };
+  delete inputs.living_model;
+  return inputs;
 }
 
 /** One variant inside the time left: past it the variant is aborted (PLoT through the handler's turn signal) and not run. */
@@ -267,17 +282,14 @@ export async function stressTest(deps: StressDeps, ctx: Pick<AgentToolContext, '
   if ('refusal' in plan) return refused(plan.refusal, undefined, plan.data);
   // Every variant is remapped by today's mapper, so the saved model must remap to what is saved: else H0 is not it.
   const remapped = mapLivingModel(living, savedGoal(saved.graph));
-  const savedHash = computeAnalysisAffectingGraphHash(saved.graph as never);
-  if (savedHash === null || computeAnalysisAffectingGraphHash({ ...remapped.graph, living_model: living } as never) !== savedHash) {
-    return refused('saved_graph_not_reproducible');
-  }
+  if (!isDeepStrictEqual(runInputs(saved.graph), runInputs(remapped.graph))) return refused('saved_graph_not_reproducible');
   const goal = goalOf(remapped.graph);
   if (goal === undefined) return refused('no_goal');
-  const variants = plan.variants.map((v) => ({ v, ...variantGraph(v, saved.graph) }));
+  const variants = plan.variants.map((v) => ({ v, ...variantGraph(v, saved.graph, plan.alternativeLinkId) }));
   // A tested link or the alternative the mapper holds back would test nothing: refused, never a silent no-op.
-  const notMapped = variants.flatMap(({ v, edges }) => [
-    ...plan.coordinates.filter((c) => c.kind === 'link_effect' && !edges.has(c.item_id)).map((c) => c.item_id),
-    ...(v.hypothesis === 'H1' && !edges.has('stress_alternative') ? ['stress_alternative'] : []),
+  const notMapped = variants.flatMap(({ v, testable }) => [
+    ...plan.coordinates.filter((c) => !testable.has(c.item_id)).map((c) => c.item_id),
+    ...(v.hypothesis === 'H1' && plan.alternativeLinkId !== null && !testable.has(plan.alternativeLinkId) ? ['alternative'] : []),
   ]);
   if (notMapped.length > 0) return refused('stress_item_not_mapped', undefined, { item_ids: [...new Set(notMapped)] });
   const seed = parseInt(createHash('sha256').update(saved.identity).digest('hex').slice(0, 7), 16);
@@ -291,6 +303,8 @@ export async function stressTest(deps: StressDeps, ctx: Pick<AgentToolContext, '
     const target = goalOf(graph)?.target ?? null;
     const result = await withinTime(left, (signal) => runVariant({ variantGraph: graph, seed, goalNodeId: goal.id, goalLevelTarget: target, signal }));
     if (result.kind !== 'rows') { blank('not_run', result.reason === 'time_limit' ? 'time_limit' : `variant_${result.reason}`); continue; }
+    // Rows that settled after the deadline (a late timer) are not run, never counted.
+    if (now() > deadline) { blank('not_run', 'time_limit'); continue; }
     for (const o of optionIds) {
       const row = result.rows.get(o);
       cells.push({ hypothesis: v.hypothesis, setting: v.setting, option_id: o, level: row?.mean ?? null, sd: row?.sd ?? null, n: row?.n ?? null,
