@@ -15,8 +15,8 @@ const AIM = { id: 'rev', text: 'Monthly revenue of at least £6,500', status: 'c
   target: { quantity: 'monthly revenue', comparator: '>=' as const, value: 6500, low: null, high: null, unit: '£', by_when: null, baseline: 'today',
     current: 6000, current_source: null, current_unit: null, change_kind: null } };
 const OPTIONS: LivingModelT['options'] = [
-  { id: 'hold', label: 'Carry on', settings: [], ...who('or we carry on as now') },
-  { id: 'grow_uk', label: 'Grow the UK', ...who('grow the UK to 120 customers'),
+  { id: 'hold', label: 'Carry on', settings: [], developed_from: null, ...who('or we carry on as now') },
+  { id: 'grow_uk', label: 'Grow the UK', developed_from: null, ...who('grow the UK to 120 customers'),
     settings: [{ factor_id: 'uk', value: 120, low: null, high: null, unit: 'customers', ...who('grow the UK to 120 customers') }] },
 ];
 const UK = level('uk', 'UK customers', 100, 'customers', 'we have 100 UK customers');
@@ -86,7 +86,7 @@ export const F1_CYCLE: LivingModelT = { ...F1_DEFINED, factors: [UK, EU,
   { ...level('rest', 'Other customers', 50, 'customers', 'the rest'), defined_as: { op: 'sum', of: ['total', 'eu'], ...who('the rest') } }, PRICE] };
 
 const MKT = level('mkt', 'UK marketing spend', 0, '£k', 'we spend nothing on UK marketing');
-const SPEND: LivingModelT['options'] = [OPTIONS[0]!, { id: 'spend', label: 'Spend on UK marketing', ...who('spend £2k a month on UK marketing'),
+const SPEND: LivingModelT['options'] = [OPTIONS[0]!, { id: 'spend', label: 'Spend on UK marketing', developed_from: null, ...who('spend £2k a month on UK marketing'),
   settings: [{ factor_id: 'mkt', value: 2, low: null, high: null, unit: '£k', ...who('spend £2k a month on UK marketing') }] }];
 const ABOUT_10 = { form: 'point' as const, value: 10, sd: null, low: null, high: null, unit: 'customers', sign: '+' as const };
 

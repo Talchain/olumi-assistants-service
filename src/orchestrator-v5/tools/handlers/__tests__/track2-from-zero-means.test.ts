@@ -40,9 +40,9 @@ export const pricingAndReferral = (today: number | null): LivingModelT => ({
     target: { quantity: 'monthly gross profit', comparator: '>=', value: 12000, low: null, high: null, unit: '£', by_when: null,
       baseline: 'today', current: today, current_source: null, current_unit: null, change_kind: null } }],
   options: [
-    { id: 'carry_on', label: 'Carry on as now', settings: [], ...who('or we carry on as now') },
-    { id: 'pricing', label: 'New pricing page', settings: [on('pricing_page', 'launch the new pricing page')], ...who('launch the new pricing page') },
-    { id: 'referral', label: 'Referral scheme', settings: [on('referral_running', 'start a referral scheme')], ...who('start a referral scheme') },
+    { id: 'carry_on', label: 'Carry on as now', developed_from: null, settings: [], ...who('or we carry on as now') },
+    { id: 'pricing', label: 'New pricing page', developed_from: null, settings: [on('pricing_page', 'launch the new pricing page')], ...who('launch the new pricing page') },
+    { id: 'referral', label: 'Referral scheme', developed_from: null, settings: [on('referral_running', 'start a referral scheme')], ...who('start a referral scheme') },
   ],
   factors: [
     { id: 'pricing_page', label: 'New pricing page live', value: 0, low: null, high: null, unit: null, defined_as: null, ...who('we have no pricing page') },
