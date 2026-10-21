@@ -21,7 +21,6 @@ import { applyExplicitEdit } from '../edit.js';
 import { applyKernel } from '../kernel.js';
 import { mapLivingModel } from '../mapper.js';
 import { KNOWN_ANSWER, OPTION_EFFECTS } from './fixtures.js';
-import { valueProvenanceOf } from '../../../../cee/provenance/provenance-of.js';
 import {
   CASCADE, CERTAIN_WITHIN_WINDOW, COSTED_HALF_SWITCH, COSTED_SWITCH, COSTED_SWITCH_IN_PLACE, COSTED_SWITCH_TWO_OPTIONS, HALF_MITIGATION, NO_CHANCE, NO_WINDOW, OLUMI_CHANCE, OLUMI_MITIGATION,
   PERCENT_PREVENTER, SHARED_PREVENTER, UNATTRIBUTED, UNIT_TEXT_PREVENTER, UNVERIFIED_MITIGATION, supplier,
@@ -282,27 +281,42 @@ describe('Track 2 F2: an event risk reaches the engine as event_risk.v1, with it
 
 // DL ruling on served F2 (L2, 21 Oct): "using Olumi's estimates for 1 starting value" was the mapper's own switch, a definition.
 describe('the mapper\'s own switch and change lever are definitions, never Olumi\'s estimates', () => {
-  const values = (m: LivingModelT, options: string[], goal: string) => goalChanceEstimateCounts(stored(m), options, goal).values;
+  const values = (g: Rec, options: string[], goal: string) => goalChanceEstimateCounts(g, options, goal).values;
+  const F2 = ['status_quo', 'dual_source'];
+  /** The mitigation step as Olumi's own starting value (0), under the given id. */
+  const olumiStep = (id: string): LivingModelT => {
+    const m = supplier('point');
+    return { ...m, factors: [{ ...m.factors[0]!, id, source: 'olumi', quote: null }],
+      options: m.options.map((o) => ({ ...o, settings: o.settings.map((x) => ({ ...x, factor_id: id })) })),
+      risks: m.risks.map((r) => ({ ...r, mitigations: r.mitigations.map((x) => ({ ...x, factor_id: id })) })) };
+  };
 
-  it('F2: the switch is stored as a definition, and the chance rests on no Olumi starting value', () => {
-    const sw = node({ graph: stored(supplier('point')) }, 'dual_source__on');
-    expect(sw.observed_state).toMatchObject({ value: 0, structural: true });
-    expect(valueProvenanceOf(sw.observed_state)).toMatchObject({ origin: 'ai', structural: true });
-    expect(values(supplier('point'), ['status_quo', 'dual_source'], 'gp')).toBe(0);
+  it('F2: the chance rests on no Olumi starting value; the switch is still Olumi\'s construction, at 0', () => {
+    const g = stored(supplier('point'));
+    expect(node({ graph: g }, 'dual_source__on').observed_state).toMatchObject({ value: 0, source: 'cee_inference' });
+    expect(values(g, F2, 'gp')).toBe(0);
   });
 
   it('the exact sum\'s change lever: no Olumi starting value either', () => {
-    expect(node({ graph: stored(OPTION_EFFECTS) }, 'w__change').observed_state).toMatchObject({ value: 0, structural: true });
-    expect(values(OPTION_EFFECTS, ['a', 'b'], 'w')).toBe(0);
+    expect(values(stored(OPTION_EFFECTS), ['a', 'b'], 'w')).toBe(0);
   });
 
-  it('CONTRAST: Olumi\'s own starting value, the same 0 on the same path, still counts once', () => {
-    const olumiStep: LivingModelT = { ...supplier('point'), factors: [{ ...supplier('point').factors[0]!, source: 'olumi', quote: null }] };
-    expect(node({ graph: stored(olumiStep) }, 'dual_sourcing').observed_state).not.toHaveProperty('structural');
-    expect(values(olumiStep, ['status_quo', 'dual_source'], 'gp')).toBe(1);
+  it('CONTRAST: Olumi\'s own starting value, the same 0 on the same path, still counts once, under any id', () => {
+    expect(values(stored(olumiStep('dual_sourcing')), F2, 'gp')).toBe(1);
+    // An item the model itself holds is its own, even under an id shaped like the mapper's switch.
+    expect(values(stored(olumiStep('status_quo__on')), F2, 'gp')).toBe(1);
   });
 
-  it('NEGATIVE: the marker never hides a figure: only a 0 is a definition', () => {
-    expect(valueProvenanceOf({ value: 0.5, raw_value: 0.5, cap: 1, source: 'cee_inference', structural: true })).toMatchObject({ origin: 'ai', structural: false });
+  it('NEGATIVE (Codex r1 on #3581): nothing a graph carries can hide an estimate: a forged marker, or a legacy graph\'s look-alike', () => {
+    const forged = stored(olumiStep('dual_sourcing'));
+    for (const n of forged.nodes as Rec[]) if (n.observed_state) n.observed_state.structural = true;
+    expect(values(forged, F2, 'gp')).toBe(1);
+    const g = stored(supplier('point'));
+    const legacy = structuredClone(g);
+    delete legacy.living_model;
+    expect(values(legacy, F2, 'gp')).toBe(1);
+    const moved = structuredClone(g);
+    node({ graph: moved }, 'dual_source__on').observed_state = { ...node({ graph: moved }, 'dual_source__on').observed_state, value: 1, raw_value: 1 };
+    expect(values(moved, F2, 'gp')).toBe(1);
   });
 });

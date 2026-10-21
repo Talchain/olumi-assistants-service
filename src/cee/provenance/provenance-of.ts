@@ -901,7 +901,7 @@ function readValue(observed: unknown): ValueReading | undefined {
   // origin, accepted — never the person's own figure. (F1 and the display table used to call it the person's.)
   if (os.source === 'user_confirmed') return { provenance: P('ai', { accepted: true }), display: ACCEPTED_OLUMI_ESTIMATE };
   // The event-by-date switch's own 0: "this option is not adding capacity today" — its definition, never an estimate.
-  if (isEventByDateSwitchState(os) || isConstructedZeroState(os)) return { provenance: P('ai', { structural: true }), display: OLUMI_DISPLAY };
+  if (isEventByDateSwitchState(os)) return { provenance: P('ai', { structural: true }), display: OLUMI_DISPLAY };
   // The person's own stamps (and a system repair) decide by themselves (`SOURCE_AUTHORSHIP`).
   const stamped = valueSourceAuthorship(os.source);
   if (stamped !== undefined) {
@@ -1051,20 +1051,6 @@ function isEventByDateSwitchState(os: Rec): boolean {
 export function isEventByDateSwitchValue(node: unknown): boolean {
   const os = rec(rec(node)?.observed_state);
   return os !== undefined && isEventByDateSwitchState(os);
-}
-
-/**
- * The core mapper's own construction (`mapper.ts`): an option's switch (`<option>__on`) or an exact sum's change lever
- * (`<goal>__change`), 0 today by definition ("not taken yet", "no change yet"), never anyone's estimate (DL, F2 L2, 21 Oct).
- */
-function isConstructedZeroState(os: Rec): boolean {
-  return os.value === 0 && os.structural === true;
-}
-
-/** A starting value that is a definition, never an estimate: the event-by-date switch's, or the core mapper's own. */
-export function isStructuralValue(node: unknown): boolean {
-  const os = rec(rec(node)?.observed_state);
-  return os !== undefined && (isEventByDateSwitchState(os) || isConstructedZeroState(os));
 }
 
 /**
