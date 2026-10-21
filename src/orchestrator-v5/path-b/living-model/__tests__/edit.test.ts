@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { LivingModelT } from '../../../../schemas/living-model.js';
 import { applyExplicitEdit, type ExplicitEdit } from '../edit.js';
 import { mapLivingModel } from '../mapper.js';
-import { KNOWN_ANSWER } from './fixtures.js';
+import { KNOWN_ANSWER, OPTION_EFFECTS } from './fixtures.js';
+import { supplier } from './track2-f2-event-risk.fixtures.js';
 
 const apply = (edit: ExplicitEdit): LivingModelT => {
   const out = applyExplicitEdit(KNOWN_ANSWER, edit);
@@ -74,5 +75,55 @@ describe('thin core explicit edit: a canvas gesture applied to the living model,
     expect(applyExplicitEdit(KNOWN_ANSWER, { kind: 'structural_rename', node_id: 'f', label: 'x', expected_label: 'old' })).toEqual({ refused: 'label_moved' });
     expect(applyExplicitEdit(KNOWN_ANSWER, { kind: 'factor_value_edit', target_id: 'nope', value: 1 })).toEqual({ refused: 'not_in_model' });
     expect(applyExplicitEdit(KNOWN_ANSWER, { kind: 'structural_add', node_id: 'r', node_kind: 'risk', label: 'Risk' })).toEqual({ refused: 'kind_not_in_slice' });
+  });
+
+  // Staging defect (21 Oct, Codex on #3555): an option's own effect is drawn from its `<option>__on` switch, so a gesture on
+  // that drawn edge named no stored link. A strength edit was refused, and a delete was acknowledged, then redrawn.
+  it('a gesture on an option\'s drawn effect edge reaches its stored link: the strength is edited, and a delete removes it', () => {
+    const m = supplier('point');
+    const drawn = { from: 'dual_source__on', to: 'gp' };
+    expect(mapLivingModel(m).graph.edges.find((e) => e.from === drawn.from && e.to === drawn.to)).toMatchObject({ id: 'cost_gp' });
+    const strength = applyExplicitEdit(m, { kind: 'edge_strength_edit', ...drawn, magnitude: 0.1, direction_intent: 'preserve' });
+    if (!('model' in strength)) throw new Error(`refused: ${strength.refused}`);
+    const cost = strength.model.links.find((l) => l.id === 'cost_gp')!;
+    expect(cost).toMatchObject({ from: 'dual_source', to: 'gp', source: 'user', quote: null, effect: { sign: '-' } });
+    const edge = mapLivingModel(strength.model).graph.edges.find((e) => e.from === drawn.from && e.to === drawn.to) as Record<string, any>;
+    expect(edge.strength.mean).toBeCloseTo(-0.1, 10);
+    const del = applyExplicitEdit(m, { kind: 'structural_delete', removed_node_ids: [], removed_edges: [drawn] });
+    if (!('model' in del)) throw new Error(`refused: ${del.refused}`);
+    expect(del.model.links.map((l) => l.id)).toEqual(['fails_gp']);
+    expect(mapLivingModel(del.model).graph.edges.some((e) => e.from === drawn.from)).toBe(false);
+  });
+
+  it('NEGATIVE (Codex): a generated edge is no stored link\'s, whether a link shares its id or alone gives rise to it', () => {
+    const lever = mapLivingModel(OPTION_EFFECTS).graph.edges.find((e) => e.from === 'w__change' && e.to === 'w')!;
+    const shared: LivingModelT = { ...OPTION_EFFECTS, links: OPTION_EFFECTS.links.map((l) => (l.id === 'a_w' ? { ...l, id: String(lever.id) } : l)) };
+    // One exact option effect alone gives rise to the lever: editing the lever must not turn "adds exactly 30" into a point.
+    const alone: LivingModelT = { ...OPTION_EFFECTS, links: OPTION_EFFECTS.links.slice(0, 1) };
+    const drawn = { from: 'w__change', to: 'w' };
+    for (const [name, m] of [['shared id', shared], ['alone', alone]] as const) {
+      expect(mapLivingModel(m).graph.edges.some((e) => e.from === drawn.from && e.to === drawn.to), name).toBe(true);
+      expect(applyExplicitEdit(m, { kind: 'edge_strength_edit', ...drawn, magnitude: 0.1, direction_intent: 'preserve' }), name).toEqual({ refused: 'not_in_model' });
+      const del = applyExplicitEdit(m, { kind: 'structural_delete', removed_node_ids: [], removed_edges: [drawn] });
+      expect('model' in del && del.model.links, name).toEqual(m.links);
+    }
+  });
+
+  it('NEGATIVE (Codex): one drawn edge two stored links make is deleted whole, and names no single strength', () => {
+    const twice: LivingModelT = { ...supplier('point'), links: [...supplier('point').links,
+      { ...supplier('point').links.find((l) => l.id === 'cost_gp')!, id: 'admin_gp', quote: 'and £200 a month of admin' }] };
+    const drawn = { from: 'dual_source__on', to: 'gp' };
+    expect(mapLivingModel(twice).graph.edges.filter((e) => e.from === drawn.from && e.to === drawn.to)).toHaveLength(2);
+    expect(applyExplicitEdit(twice, { kind: 'edge_strength_edit', ...drawn, magnitude: 0.1, direction_intent: 'preserve' })).toEqual({ refused: 'link_ambiguous' });
+    const del = applyExplicitEdit(twice, { kind: 'structural_delete', removed_node_ids: [], removed_edges: [drawn] });
+    expect('model' in del && del.model.links.map((l) => l.id)).toEqual(['fails_gp']);
+  });
+
+  it('CONTROL: a plain factor → goal edge is edited and deleted by its own endpoints; an edge nobody drew changes nothing', () => {
+    expect(apply({ kind: 'edge_strength_edit', from: 'f', to: 'g', magnitude: 0.2, direction_intent: 'preserve' }).links[0]!.effect.value).toBe(25);
+    expect(apply({ kind: 'structural_delete', removed_node_ids: [], removed_edges: [{ from: 'f', to: 'g' }] }).links).toEqual([]);
+    expect(applyExplicitEdit(KNOWN_ANSWER, { kind: 'edge_strength_edit', from: 'g', to: 'f', magnitude: 0.2, direction_intent: 'preserve' }))
+      .toEqual({ refused: 'not_in_model' });
+    expect(apply({ kind: 'structural_delete', removed_node_ids: [], removed_edges: [{ from: 'nope', to: 'g' }] }).links).toEqual(KNOWN_ANSWER.links);
   });
 });
