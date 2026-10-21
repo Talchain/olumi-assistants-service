@@ -19,6 +19,27 @@ function phi(z: number): number {
 }
 
 describe('thin core mapper: living model → GraphV3', () => {
+  it('Track 3 Q2 s1 (0/8; buddy AMEND): Olumi\'s suggested measure is labelled as Olumi\'s, carries no figure, and a figure on it is never read as the person\'s target', () => {
+    const aim = KNOWN_ANSWER.aims[0]!;
+    const withTarget = (target: Rec): LivingModelT => ({ ...KNOWN_ANSWER, aims: [{ ...aim, target: { ...aim.target!, ...target } }] });
+    // Invariance: a target whose measure the person named (source null) maps exactly as before the field existed.
+    expect(mapLivingModel(withTarget({ source: null }))).toEqual(mapLivingModel(KNOWN_ANSWER));
+    // A suggested measure with no figure maps exactly like the person's own measure with no figure: held, asked, never a threshold.
+    const noFigure = { value: null, low: null, high: null, current: null };
+    const suggested = mapLivingModel(withTarget({ ...noFigure, source: 'olumi' }));
+    expect(suggested).toEqual(mapLivingModel(withTarget({ ...noFigure, source: null })));
+    expect(suggested.withheld).toContainEqual({ id: 'g', reason: 'no_level_target' });
+    // A figure on Olumi's measure is held by name: never the target the person stated.
+    const figured = mapLivingModel(withTarget({ source: 'olumi' }));
+    expect(figured.withheld).toContainEqual({ id: 'g', reason: 'target_not_theirs' });
+    expect(node(figured.graph, 'g').goal_threshold_raw).toBeUndefined();
+    // CONTRAST: the same figure under the person's own measure is their target (the known answer).
+    expect(node(mapLivingModel(withTarget({ source: null })).graph, 'g').goal_threshold_raw).toBe(100);
+    // A model saved before the field reads null.
+    const { source: _s, ...before } = { ...aim.target!, source: null };
+    expect(LivingModel.parse({ ...KNOWN_ANSWER, aims: [{ ...aim, target: before }] }).aims[0]!.target!.source).toBeNull();
+  });
+
   it('the known-answer control maps to push ≈ Φ(−1) = 0.1587 and hold = 0 on the engine\'s own scale', () => {
     expect(LivingModel.safeParse(KNOWN_ANSWER).success).toBe(true);
     const { graph, withheld } = mapLivingModel(KNOWN_ANSWER);

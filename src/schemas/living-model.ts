@@ -81,9 +81,16 @@ export const LivingAim = z.object({
     /** For increase/decrease: what the change's figure means. Declared, never guessed; a model saved before reads null. */
     change_kind: z.enum(['absolute', 'relative', 'points']).nullable().default(null).describe(
       'For increase or decrease only: absolute = the change in the quantity\'s own unit; relative = a percentage of today\'s level; points = percentage points of a quantity that is itself a percentage (its unit is "%"). Null for a level target.'),
+    /**
+     * Who chose the MEASURE (Track 3 Q2 s1 0/8; buddy AMEND 21 Oct): 'olumi' when the person stated an aim without one and Olumi
+     * suggests how to measure it. The aim's own text, source and quote stay the person's; a suggested measure never carries a
+     * figure the person did not give (the mapper holds one). A model saved before reads null.
+     */
+    source: z.enum(['olumi']).nullable().default(null).describe(
+      "'olumi' when the measure is your suggestion for an aim they stated without one (the aim stays theirs); null when they named the measure. Your suggestion keeps every figure null; once they give a figure or confirm the measure, set null."),
   }).strict().nullable().describe(
     // Track 3 E2E, 21 Oct: 12 of 13 aims drafted from briefs without figures had no target, so the person's figure had no place to go.
-    'For a measurable quantity the person named for this aim, give its target even without a figure: leave every figure they did not state null (never invent one) and keep any deadline they gave. Null when they named no measurable quantity: a deadline alone never makes one.'),
+    'For a measurable quantity the person named for this aim, give its target even without a figure: leave every figure they did not state null (never invent one) and keep any deadline they gave. When they named none but a measure would serve the aim, suggest one as yours (source olumi): its quantity, usual unit and comparator, every figure null. Null when no measure would serve: a deadline alone never makes one.'),
   defined_as: definedAs,
   ...attribution,
 }).strict();
