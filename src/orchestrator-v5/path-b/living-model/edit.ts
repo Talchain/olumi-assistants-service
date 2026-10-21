@@ -133,8 +133,10 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
     case 'structural_delete': {
       const gone = new Set(edit.removed_node_ids);
       const known = new Set([...m.aims, ...m.options, ...m.factors].map((x) => x.id));
-      // The decision node is the mapper's own; removing it alone changes nothing the model holds.
-      if ([...gone].some((id) => !known.has(id) && !id.startsWith('decision_'))) return { refused: 'not_in_model' };
+      // The decision node is the mapper's own, redrawn on every regeneration: a delete of it was acknowledged, then redrawn (a
+      // false "saved", Codex), so it is refused by name like any other edge or node Olumi draws.
+      if ([...gone].some((id) => id.startsWith('decision_') && !known.has(id))) return { refused: 'node_is_generated' };
+      if ([...gone].some((id) => !known.has(id))) return { refused: 'not_in_model' };
       const pairGone = (l: { from: string; to: string }) => edit.removed_edges.some((e) => e.from === l.from && e.to === l.to);
       // A definition's parts and a risk's mitigations are drawn from the item itself, not from a link: deleting that edge
       // alone would be acknowledged, then redrawn on regeneration (a false "saved"). Removing a part changes what the
@@ -142,6 +144,11 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       const standing = (e: { from: string; to: string }) => !gone.has(e.from) && !gone.has(e.to) && pairGone(e);
       if ([...m.aims, ...m.factors].some((x) => (x.defined_as?.of ?? []).some((p) => standing({ from: p, to: x.id })))) return { refused: 'link_is_definition' };
       if (m.risks.some((r) => r.mitigations.some((x) => standing({ from: x.factor_id, to: r.id })))) return { refused: 'link_is_mitigation' };
+      // Any other edge Olumi draws from no stored link (an option's setting, the decision's choice, an exact sum's lever, a
+      // goal's level today) has nothing to remove: the same false "saved", so it is refused by name too.
+      const generated = (e: { from: string; to: string }) => !gone.has(e.from) && !gone.has(e.to) && ownersOf(e.from, e.to).length === 0
+        && mapped.graph.edges.some((x) => x.from === e.from && x.to === e.to);
+      if (edit.removed_edges.some(generated)) return { refused: 'link_is_generated' };
       m.aims = m.aims.filter((a) => !gone.has(a.id));
       m.factors = m.factors.filter((f) => !gone.has(f.id));
       m.options = m.options.filter((o) => !gone.has(o.id)).map((o) => ({ ...o, settings: o.settings.filter((s) => !gone.has(s.factor_id)) }));
