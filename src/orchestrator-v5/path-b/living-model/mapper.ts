@@ -86,15 +86,23 @@ const withSource = (o: Rec, a: { source: LivingSourceT; quote: string | null }):
   return source === undefined ? o : { ...o, source, ...(stated(a.source) ? { extractionType: 'explicit' } : {}) };
 };
 
-/** The frame a factor's levels are read on: '%' → 100, unitless [0,1] → 1, the goal's when the unit matches, else headroom. */
-function capFor(levels: readonly number[], unit: string | null, goal: { cap: number; unit: string } | undefined): number | undefined {
+/**
+ * The frame a factor's levels are read on: '%' → 100, unitless [0,1] → 1, the goal's when the unit matches, else headroom.
+ * Every level 0 (DL lease 22 Oct, served eb481e4a "Client delivery delay", 0 weeks, range 0 to 8): the stated range's top if
+ * positive, else 1. A level of 0 reads 0 on any frame and links scale by the frame, so the figures do not move; without a
+ * frame the level was held and the card read "Value not set yet".
+ */
+function capFor(levels: readonly number[], unit: string | null, goal: { cap: number; unit: string } | undefined,
+  range: readonly (number | null)[] = []): number | undefined {
   const finite = levels.filter((v) => Number.isFinite(v));
   if (finite.length === 0) return undefined;
   const top = Math.max(...finite.map(Math.abs));
   if (unit === '%') return 100;
   if (goal !== undefined && unit !== null && unit === goal.unit && goal.cap >= top) return goal.cap;
   if (unit === null && finite.every((v) => v >= 0 && v <= 1)) return 1;
-  return top > 0 ? top * 1.25 : undefined;
+  if (top > 0) return top * 1.25;
+  const rangeTop = Math.max(0, ...range.filter((v): v is number => v !== null && Number.isFinite(v)));
+  return rangeTop > 0 ? rangeTop : 1;
 }
 
 /**
@@ -309,7 +317,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     const levels = [f.value, ...model.options.flatMap((o) => o.settings.filter((s) => s.factor_id === f.id).map((s) => s.value))]
       .filter((v): v is number => v !== null);
     // The exact sum's change is read on the goal's own frame, so the goal is its parts added in the goal's units.
-    const cap = exactSum !== undefined && f.id === exactSum.lever ? goal!.cap : capFor(levels, f.unit, goal);
+    const cap = exactSum !== undefined && f.id === exactSum.lever ? goal!.cap : capFor(levels, f.unit, goal, [f.low, f.high]);
     if (cap !== undefined) caps.set(f.id, cap);
     const node: Rec = { id: f.id, kind: 'factor', label: f.label, category: setsFactor.has(f.id) ? 'controllable' : 'observable',
       // The exact sum's change: 0 today by definition (the contract's marker), so the engine holds it exact.
