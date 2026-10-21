@@ -85,6 +85,15 @@ describe('thin core mapper: living model → GraphV3', () => {
     expect(said).toContain('the stated standard deviation, 10');
     expect(said).toContain('Olumi assumes a bell shape (Normal)');
     expect(said).not.toContain('Nobody stated how uncertain');
+    // ⛔ Codex r1 #3606: an SD whose source is unconfirmed is never Olumi's; Olumi's own estimate says so.
+    const sdSaid = (m: LivingModelT) => linkDefaultAssumptionsOf(edge(mapLivingModel(m).graph)!).find((r) => r.code === 'CLAMP_STD_MINIMUM')!.reason;
+    const unconfirmed: LivingModelT = structuredClone(meanSd);
+    unconfirmed.links[0] = { ...unconfirmed.links[0]!, source: 'unverified', quote: null };
+    expect(sdSaid(unconfirmed)).toContain('the given (its source is not confirmed) standard deviation, 10');
+    expect(sdSaid(unconfirmed)).not.toContain('Olumi\'s estimated');
+    const olumis: LivingModelT = structuredClone(meanSd);
+    olumis.links[0]!.effect.estimate_by = 'olumi';
+    expect(sdSaid(olumis)).toContain('Olumi\'s estimated standard deviation, 10');
     // CONTRAST: the same point with no SD keeps Olumi's illustrative half-effect spread, and says so.
     meanSd.links[0]!.effect.sd = null;
     const bare = edge(mapLivingModel(meanSd).graph)!;
