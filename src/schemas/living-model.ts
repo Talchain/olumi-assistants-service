@@ -81,7 +81,9 @@ export const LivingAim = z.object({
     /** For increase/decrease: what the change's figure means. Declared, never guessed; a model saved before reads null. */
     change_kind: z.enum(['absolute', 'relative', 'points']).nullable().default(null).describe(
       'For increase or decrease only: absolute = the change in the quantity\'s own unit; relative = a percentage of today\'s level; points = percentage points of a quantity that is itself a percentage (its unit is "%"). Null for a level target.'),
-  }).strict().nullable(),
+  }).strict().nullable().describe(
+    // Track 3 E2E, 21 Oct: 12 of 13 aims drafted from briefs without figures had no target, so the person's figure had no place to go.
+    'For a measurable quantity the person named for this aim, give its target even without a figure: leave every figure they did not state null (never invent one) and keep any deadline they gave. Null when they named no measurable quantity: a deadline alone never makes one.'),
   defined_as: definedAs,
   ...attribution,
 }).strict();

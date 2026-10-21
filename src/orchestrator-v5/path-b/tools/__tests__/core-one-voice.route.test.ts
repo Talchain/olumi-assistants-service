@@ -509,7 +509,7 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
     expect(r.statusCode, r.body).toBe(200);
     expectCoherentInstructions(r.json());
     const { CORE_REPLY_INSTRUCTION } = await import('../../../../routes/agent-v1-turn.js');
-    expect(createHash('sha256').update(CORE_REPLY_INSTRUCTION, 'utf8').digest('hex')).toBe('7f0493d6a2cadbc6ace9ae0dd37f2d57bab91a9b40f52242c0b7869f55cb27c6'); // arm C adopted 21 Oct (was 60809c1b…)
+    expect(createHash('sha256').update(CORE_REPLY_INSTRUCTION, 'utf8').digest('hex')).toBe('2dd87dc8a710f0ca26988df6dd619188fcecf6e0438af360cdeda5178307a748'); // + CORE_NEXT_STEP (Codex #3571 wording), Track 3 E2E 21 Oct (was 7f0493d6…; arm C adopted 21 Oct)
     for (const c of calls) {
       expect(c.instructions).toContain(CORE_REPLY_INSTRUCTION);
       expect(c.instructions.split(scope)).toHaveLength(2);

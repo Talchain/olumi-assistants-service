@@ -44,4 +44,13 @@ describe('thin core: the link-unit convention reaches the AI in the tool schema 
     expect(sent).toContain('Never a factor for the option itself being taken');
     expect(sent).toContain('The only on or off setting is a step a risk\'s mitigation names, set to 1.');
   });
+
+  // Track 3 E2E (served dce1b50a, 21 Oct): 12 of 13 aims from briefs without figures were drafted with no target, so the
+  // person's figure had nowhere to go on the goal.
+  it('an aim whose quantity the person named gets its target even without a figure, which stays null; a deadline alone makes none', () => {
+    expect(sent).toContain('For a measurable quantity the person named for this aim, give its target even without a figure');
+    expect(sent).toContain('leave every figure they did not state null (never invent one)');
+    // Codex #3571 BLOCK: "agree our direction by Friday" must not get an invented measure credited to the person.
+    expect(sent).toContain('a deadline alone never makes one');
+  });
 });
