@@ -1068,12 +1068,12 @@ function withBatchCWords(unframed: GoalChanceLicence, c: {
   const sqLevel = c.changeFrame === undefined && c.quantityFrame !== 'change' && finite(goalState?.raw_value)
     && typeof c.target.unit === 'string' && levelUnit !== '' && levelUnit === c.target.unit.trim()
     ? { today: goalState!.raw_value as number, comparator: c.comparatorHeld, target: c.target.value, unit: c.target.unit } : undefined;
-  // Class 1 (DL, 22 Oct): a checked level reference on the missing side is a determined miss in this model, not a
-  // missing chance. The 14 Oct status-quo ruling still governs meets and every unsupported frame; no leader rule changes.
+  // Class 1 (DL, 22 Oct Round 2): keep the assumption label and append the determined miss for a checked level reference.
+  // The 14 Oct status-quo ruling still governs meets and every unsupported frame; no leader rule changes.
   const statusQuo = c.sqByAssumption && goalLabel !== undefined && c.statusQuoId !== undefined && single.option_ids.includes(c.statusQuoId)
     ? { status_quo: { option_id: c.statusQuoId, line: sqLevel !== undefined
       && exactComparisonSide(sqLevel.today, sqLevel.comparator, sqLevel.target) === 0
-      ? `Stays at today’s ${sayFigureAsWritten(sqLevel.today, sqLevel.unit)}; this does not meet your target of `
+      ? `No change, by assumption: stays at today's ${sayFigureAsWritten(sqLevel.today, sqLevel.unit)}, which does not meet your target of `
         + `${comparatorWords(sqLevel.comparator)} ${sayFigureAsWritten(sqLevel.target, sqLevel.unit)}, in this model.`
       : statusQuoRowWords(goalLabel, sqLevel) } } : {};
   // AIE disposition: a forecast's status quo is carrying on's own projection, said as such (never "no change").
