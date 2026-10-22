@@ -22,7 +22,7 @@
  *    each option gets an on/off factor whose link is sized like any other.
  */
 import { REPAIR_CODES, type RepairEntry } from '@talchain/schemas';
-import type { LivingModelT, LivingSourceT } from '../../../schemas/living-model.js';
+import { LivingModel, type LivingModelT, type LivingSourceT } from '../../../schemas/living-model.js';
 import { resolveGoalThresholdCapWithProvenance } from '../../../utils/goal-threshold-cap.js';
 import { admitGoalBaseline } from '../../../cee/factor-extraction/goal-baseline-admissibility.js';
 import { sayFigureAsWritten } from '../../agent-lane/say-figure.js';
@@ -34,7 +34,7 @@ import { readStatedDeadline } from '../../goal-target/deadline-date.js';
 
 export type WithheldReason =
   | 'no_level_target' | 'aim_not_in_slice' | 'change_kind_unknown' | 'change_base_invalid' | 'change_base_not_theirs' | 'current_unit_mismatch' | 'exact_target_not_in_slice' | 'target_range_not_in_slice'
-  | 'goal_level_unknown' | 'link_frame_unknown' | 'chance_rests_on_withheld' | 'condition_not_in_slice'
+  | 'goal_level_unknown' | 'link_frame_unknown' | 'link_goal_target_unknown' | 'link_goal_level_unknown' | 'chance_rests_on_withheld' | 'condition_not_in_slice'
   | 'goal_level_not_admitted' | 'factor_level_unknown' | 'level_range_not_in_slice' | 'setting_not_convertible'
   | 'link_endpoint_unknown' | 'link_unit_mismatch' | 'link_range_no_law' | 'link_sign_unknown'
   | 'exact_not_drawable' | 'stay_within_base_not_theirs' | 'stay_within_unconfirmed'
@@ -180,6 +180,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   const aim = (opts.goal === undefined ? undefined : model.aims.find((a) => a.id === opts.goal && a.status === 'current'))
     ?? model.aims.find((a) => a.status === 'current' && a.target !== null) ?? model.aims.find((a) => a.status === 'current');
   let goal: { id: string; cap: number; unit: string } | undefined;
+  let goalHeld: WithheldReason | undefined;
   let goalNode: Rec | undefined;
   if (aim === undefined) hold('goal', 'no_level_target');
   else {
@@ -194,7 +195,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     const lt = t === null ? 'no_level_target' as const
       : t.source === 'olumi' && [t.value, t.low, t.high, t.current].some((v) => v !== null) ? 'target_not_theirs' as const
       : isChange && t.current !== null && !(t.current_source === 'user' || stated(aim.source)) ? 'change_base_not_theirs' as const : levelTargetOf(t);
-    if (typeof lt === 'string') hold(aim.id, lt);
+    if (typeof lt === 'string') { goalHeld = lt; hold(aim.id, lt); }
     else {
       const fromTarget = resolveGoalThresholdCapWithProvenance(undefined, lt.value, lt.unit ?? undefined, undefined);
       // The goal's frame holds today's level too: a ceiling below today would put today off its own scale ('level_frame').
@@ -563,7 +564,19 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
         // one exact route.
         : (e.form === 'exact' && e.value !== null) ? { mean: sign * Math.abs(e.value) * ratio, std: LLM_STRENGTH_STD_FLOOR }
         : undefined;
-    if (ratio === undefined && (e.form === 'point' || e.form === 'normal' || e.form === 'exact' || centred)) hold(l.id, 'link_frame_unknown');
+    // A figure INTO the goal while the goal has no scale yet, because its target states no figure or its change target has no
+    // level today to be measured from: the figure is kept and used once that input is given (DL 23 Oct, Q2 coaching zeros;
+    // Track 3 funding/hiring). It is never called "not sized" (`linksAwaitingGoalInput`).
+    const target = aim?.target ?? null;
+    const intoFramelessGoal = from !== undefined && goal === undefined && goalNode !== undefined && l.to === goalNode.id;
+    // Only a figure that would be sized once the goal has its scale (the branches of `sized` above); a link with no figure
+    // of its own is unsized, and keeps that reason (Codex r1 on this fix).
+    const drawable = ((e.form === 'point' || centred) && e.value !== null) || (e.form === 'normal' && e.value !== null && e.sd !== null && e.sd > 0)
+      || (e.form === 'exact' && e.value !== null);
+    const awaiting = !intoFramelessGoal || !drawable ? undefined
+      : target === null || [target.value, target.low, target.high].every((v) => v === null) ? 'link_goal_target_unknown' as const
+        : goalHeld === 'goal_level_unknown' ? 'link_goal_level_unknown' as const : undefined;
+    if (ratio === undefined && (e.form === 'point' || e.form === 'normal' || e.form === 'exact' || centred)) hold(l.id, awaiting ?? 'link_frame_unknown');
     if (e.form === 'exact') hold(l.id, 'exact_not_drawable');
     if (e.form === 'range' && !centred) hold(l.id, 'link_range_no_law');
     if (unitMismatch) hold(l.id, 'link_unit_mismatch');
@@ -668,4 +681,26 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   const frames = new Map<string, Frame>(model.factors.flatMap((f) => (caps.has(f.id) ? [[f.id, { cap: caps.get(f.id)!, unit: f.unit }] as const] : [])));
   if (goal !== undefined) frames.set(goal.id, { cap: goal.cap, unit: goal.unit === '' ? null : goal.unit });
   return { graph: { nodes, edges, ...(goal_constraints.length > 0 ? { goal_constraints } : {}) }, withheld, frames, assumed };
+}
+
+/**
+ * The links the mapper holds only because the goal has no scale yet (`link_goal_target_unknown`: no target figure;
+ * `link_goal_level_unknown`: a change target with no level today), read from a stored graph's own living model, with
+ * whose figure each carries and the input it awaits. The Run's withhold says this reason, never "not sized".
+ */
+export function linksAwaitingGoalInput(graph: unknown): Array<{ from: string; to: string; by: 'olumi' | 'stated' | 'given'; awaits: 'target' | 'level' }> {
+  const living = LivingModel.safeParse(graph !== null && typeof graph === 'object' ? (graph as Rec).living_model : undefined);
+  if (!living.success) return [];
+  const mapped = mapLivingModel(living.data, savedGoal(graph));
+  // The engine edge's own endpoints: an option's link leaves from its switch (`<option>__on`), as the Run reads it (Codex r1).
+  const edgeOf = new Map(mapped.graph.edges.map((e) => [e.id, e] as const));
+  return mapped.withheld.flatMap((w) => {
+    if (w.reason !== 'link_goal_target_unknown' && w.reason !== 'link_goal_level_unknown') return [];
+    const l = living.data.links.find((x) => x.id === w.id);
+    const e = edgeOf.get(w.id);
+    if (l === undefined || e === undefined || typeof e.from !== 'string' || typeof e.to !== 'string') return [];
+    const source = figureBy(l.effect, l).source;
+    return [{ from: e.from, to: e.to, by: source === 'olumi' ? 'olumi' as const : stated(source) ? 'stated' as const : 'given' as const,
+      awaits: w.reason === 'link_goal_target_unknown' ? 'target' as const : 'level' as const }];
+  });
 }

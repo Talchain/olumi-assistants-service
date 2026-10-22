@@ -564,6 +564,42 @@ export function unsizedLinkWords(graph: unknown, links: readonly UnsizedPathLink
   return stated === '' ? unsizedLinkSentence(links) : `${stated} ${invite}`;
 }
 
+/** A link held only because the goal has no scale yet, with whose figure it carries and the input it awaits (`linksAwaitingGoalInput`). */
+export interface AwaitingGoalLink { readonly from: string; readonly to: string; readonly by: 'olumi' | 'stated' | 'given'; readonly awaits: 'target' | 'level' }
+
+/**
+ * DL 23 Oct (Q2 coaching zeros; Track 3 funding/hiring): the true reason for a link held while the goal has no scale. Its
+ * figure is kept and used once the goal's target figure, or (for a change target) today's level, is given; it is never
+ * called "not sized". Whose figure it is is said per link. Every such link points into the one goal, so it awaits one input.
+ */
+export function awaitingGoalSentence(links: ReadonlyArray<AwaitingGoalLink & UnsizedPathLink>, maxLength = 400): string {
+  if (links.length === 0) return '';
+  const groups = ([
+    [['Olumi\u2019s estimate', 'Olumi\u2019s estimates'], links.filter((l) => l.by === 'olumi')],
+    [['the stated figure', 'the stated figures'], links.filter((l) => l.by === 'stated')],
+    [['the figure given', 'the figures given'], links.filter((l) => l.by === 'given')],
+  ] as Array<[[string, string], ReadonlyArray<UnsizedPathLink>]>).filter(([, ls]) => ls.length > 0);
+  const plural = links.length > 1;
+  const capital = (t: string): string => `${t.charAt(0).toUpperCase()}${t.slice(1)}`;
+  const build = (count: number, labelBudget: number | null): string => {
+    const label = (v: string): string => (labelBudget === null ? v : compactWordLabel(v, labelBudget));
+    const goal = label(links[0]!.to_label);
+    const until = links[0]!.awaits === 'level'
+      ? `once today\u2019s level for \u2018${goal}\u2019 is known, since the target is measured from it.`
+      : `once \u2018${goal}\u2019 has a target figure, which sets ${plural ? 'their' : 'its'} scale.`;
+    const parts = groups.map(([[one, many], ls]) => `${ls.length > 1 ? many : one} for the ${linkList(ls.map((l) => ({ ...l,
+      from_label: label(l.from_label), to_label: label(l.to_label) })), Math.min(count, ls.length))}`).join(' and ');
+    return `${capital(parts)} ${plural ? 'are' : 'is'} kept, and used ${until}`;
+  };
+  // The 400-character carrier (Codex r1): fewer names, then compact labels, then no labels; '' when even that cannot fit.
+  for (const labelBudget of [null, 60, 30, 15]) {
+    for (let count = 3; count >= 1; count -= 1) { const out = build(count, labelBudget); if (out.length <= maxLength) return out; }
+  }
+  const who = groups.length === 1 ? groups[0]![0][plural ? 1 : 0] : plural ? 'the figures' : 'the figure';
+  const bare = `${capital(who)} on the way to the goal ${plural ? 'are' : 'is'} kept, and used once the goal has ${links[0]!.awaits === 'level' ? 'today\u2019s level' : 'a target figure'}.`;
+  return bare.length <= maxLength ? bare : '';
+}
+
 /**
  * The ONE typed warning for (S) (`GOAL_FIGURES_PLACEHOLDER_PATH`): which options, which links, and the words, in the
  * UI's "Not shown." register (400-character explanation budget; complete question labels take precedence).
@@ -577,7 +613,8 @@ export function placeholderGoalWarning(
   code: string,
   productBlocks = false,
   /** RT-18: the (B) gauge ask is gated off in production (cut 5); only its own rows opt in, so cut 6 can lift it tested. */
-  opts: { readonly gaugeAsk?: true } = {},
+  /** `awaitingGoal` (DL 23 Oct): links held only because the goal has no scale yet (`linksAwaitingGoalInput`). */
+  opts: { readonly gaugeAsk?: true; readonly awaitingGoal?: readonly AwaitingGoalLink[] } = {},
 ): { code: string; message: string; severity: 'warning'; node_ids: string[]; option_ids: string[]; links: Array<{ from: string; to: string }>; acceptable_links?: Array<{ from: string; to: string }>; first_ask?: PlaceholderFirstAsk } {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const byId = new Map(nodes.map((n) => [n.id, n] as const));
@@ -586,6 +623,10 @@ export function placeholderGoalWarning(
     return isRec(id) && Array.isArray(id.factor_ids) && id.factor_ids.includes(l.from);
   };
   const links = [...new Map(paths.flatMap((p) => p.links).map((l) => [`${l.from}->${l.to}`, l] as const)).values()];
+  // ⭐ DL 23 Oct (Q2 coaching zeros; Track 3 funding/hiring): a link held only because the goal has no scale yet carries a
+  // figure, so it is never said as "not sized" nor asked to be sized: its own sentence names the goal input it awaits.
+  const heldForTarget = new Map((opts.awaitingGoal ?? []).map((t) => [`${t.from}->${t.to}`, t] as const));
+  const awaitingTarget = links.filter((l) => heldForTarget.has(`${l.from}->${l.to}`));
   const named = links.filter((l) => !cardSized(l));
   // ⛔ ASK ONLY FOR A SIZE THAT CAN MAKE THE FIGURE RIGHT (AIQ 5902834053; MG successor 5902809244): a link from a node
   // that holds no level would add the same amount to EVERY option once sized ("Stay on AWS" would save too), so it is
@@ -600,23 +641,41 @@ export function placeholderGoalWarning(
   // subscribers is a real mechanism whose size is unknown, so it is asked for as before; downtime → spend is the guess.
   const guessedLink = (l: { from: string; to: string }): boolean => limitIds.has(l.from) && byId.get(l.to)?.kind === 'goal';
   const ordered = goalOrderedLinks(graph, links);
+  const unsized = ordered.filter((l) => !heldForTarget.has(`${l.from}->${l.to}`));
   const labelOf = (id: string): string => text(byId.get(id)?.label) ?? id;
   // ⭐ NO DEAD END (MC 21's chain; Science #87 6006425419, 6006548763, 6006685510): every withheld path gets an ask the
   // user can answer in one sentence. A level-less mediator is asked END TO END (the gauge) or in the unit its sized parent
   // fixes; a goal with no frame is asked its level first. Pure wording + offer: the links and the withhold are unchanged.
-  const noDeadEnd = productBlocks ? undefined : placeholderAskWords(graph, ordered, opts);
+  const noDeadEnd = productBlocks || unsized.length === 0 ? undefined : placeholderAskWords(graph, unsized, opts);
   // S-E GOALS §2: no link into a chance goal is offered or asked (its sentence above asks nothing).
   const chanceGoal = nodes.some((n) => n.kind === 'goal' && goalKindOf(n) === 'chance_of_event');
   // ⭐ ITEM 3 (AIE 16 Oct amended range contract: "do not repeatedly ask for the already-supplied range"; G3 1a1a7907 re-ask
   // classes 2–3): a link whose effect the USER stated as a range is never asked to be sized again (no chip, no first ask):
   // the range is held on it (construction's record), and construction disclosed Olumi's placeholder against it once.
   const statedRange = (l: { from: string; to: string }): boolean => userStatedRangeOn(graph, l);
-  const asked = chanceGoal ? [] : named.filter((l) => !guessedLink(l) && !statedRange(l) && levelOf(byId.get(l.from)).value !== undefined
+  const asked = chanceGoal ? [] : named.filter((l) => !heldForTarget.has(`${l.from}->${l.to}`) && !guessedLink(l) && !statedRange(l) && levelOf(byId.get(l.from)).value !== undefined
     && !(noDeadEnd?.gaugeLinks.has(`${l.from}->${l.to}`) ?? false));
   // #2613 CR (b): while Gate 5 withholds every option, sizing a link cannot lift it: state the link, invite nothing, offer nothing.
   // ⭐ ITEM 3: the invitation names only links with no stated range (`unsizedLinkWords`, shared with the host Run reply).
   const said = productBlocks ? unsizedLinkStatement : (ls: readonly UnsizedPathLink[]): string => unsizedLinkWords(graph, ls);
-  const message = noDeadEnd?.message ?? said(ordered.map(l => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) })));
+  // Today's words for the links with no figure, exactly as before (with no awaiting link, `unsized` IS `ordered`).
+  const todaysWords = (lab: (id: string) => string): string => (unsized.length === 0 ? ''
+    : said(unsized.map(l => ({ ...l, from_label: lab(l.from), to_label: lab(l.to) }))));
+  const unsizedWords = unsized.length === 0 ? '' : noDeadEnd?.message ?? todaysWords(labelOf);
+  // The awaiting sentence takes only what the 400-character carrier has left, so it never pushes a message past 400. When it
+  // cannot fit, today's plain statement is said with compact labels so both reasons fit (Codex r1/r2); failing that, today's
+  // words stand alone, exactly as before this change (their own length is today's, never lengthened here).
+  const withAwaiting = (words: string, lab: (id: string) => string): string => {
+    const awaiting = awaitingGoalSentence(awaitingTarget.map((l) => ({ ...heldForTarget.get(`${l.from}->${l.to}`)!, from_label: lab(l.from), to_label: lab(l.to) })),
+      Math.max(0, 400 - (words === '' ? 0 : words.length + 1)));
+    const joined = [words, awaiting].filter((w) => w !== '').join(' ');
+    return awaiting === '' || joined.length > 400 ? '' : joined;
+  };
+  const compact = (budget: number) => (id: string): string => compactWordLabel(labelOf(id), budget);
+  const message = awaitingTarget.length === 0 ? unsizedWords
+    : withAwaiting(unsizedWords, labelOf)
+      || withAwaiting(todaysWords(compact(40)), compact(40)) || withAwaiting(todaysWords(compact(20)), compact(20))
+      || unsizedWords;
   const firstLink = ordered.find((l) => asked.some((a) => a.from === l.from && a.to === l.to));
   const firstAsk: PlaceholderFirstAsk | undefined = productBlocks ? undefined
     : noDeadEnd !== undefined ? noDeadEnd.first
