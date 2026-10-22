@@ -1034,7 +1034,12 @@ export const CORE_NEXT_STEP = 'When input the analysis needs is missing and they
   + 'input that would most change how their options compare on their goal, in their own words; a rough range is fine for a quantity. '
   + 'That is usually the goal\u2019s figure (when they named no measure, suggest one as yours and ask for its figure), today\u2019s level '
   + 'of what it measures, or what an option would deliver or cost; a question about what success means or what evidence would change '
-  + 'their view comes first only when it decides more. Say in a few words what their answer would change. When they ask what is still '
+  + 'their view comes first only when it decides more. '
+  // Q2 fm1 (22 Oct, b921a8e2, double-judged 7/8 half): with an aim's target figure missing, the first reply asked about buyer
+  // terms or cash instead, although no chance can be shown without the target (drafting guidance already says to ask for it).
+  + 'When an aim has no target figure, that figure decides most, since no option\u2019s chance of meeting the aim can be shown without '
+  + 'it: ask for it, and by when if they gave no date, unless what success means is still unclear. '
+  + 'Say in a few words what their answer would change. When they ask what is still '
   + 'needed, give the complete list. Never ask for a date, figure or name their words already give. '
   // Track 3 on 4b (22 Oct): Olumi's risk chance counts only over the goal's window in months, and a core goal has none, so the
   // mapper holds the risk (`risk_window_not_goal_window`) and the goal's chance is withheld. A chance the person states counts over
