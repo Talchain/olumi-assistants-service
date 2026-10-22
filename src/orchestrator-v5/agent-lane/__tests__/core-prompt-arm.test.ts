@@ -38,7 +38,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
   it('arm B is the AIE\'s assembled reference, byte for byte (programme-docs #94 6303242136, static text sha256 7b6145d4…), plus the canvas-coaching sentence', () => {
     expect(b.split(NOTE_ON_ITEM_INSTRUCTION)).toHaveLength(2);
     // 7b6145d4… until 21 Oct; arm C's adoption changed only the closing core reply rule (see its row), now 56625e00….
-    expect(createHash('sha256').update(b.replace(`${NOTE_ON_ITEM_INSTRUCTION}\n\n`, ''), 'utf8').digest('hex')).toBe('52d3ab03a8de5017b61463157f4ee96f46b66cdb8cb8c2def98354c0b3034302'); // 22 Oct: stress_test only for a sized link/factor (buddy SIMPLER, was 9a57bae9…); the three-part coaching after a Run (part 2 never ranks unmeasured figures, Codex r1) + the held-risk window ask (Track 3 judge on 4b, 11 c1 zeros; was 6dedb153…). 21 Oct: + Olumi's labelled estimate on another's item (estimate_by); + CORE_NEXT_STEP decisive question (Track 3 Q2 v2 + buddy AMEND, 21 Oct; was a605c43f…)
+    expect(createHash('sha256').update(b.replace(`${NOTE_ON_ITEM_INSTRUCTION}\n\n`, ''), 'utf8').digest('hex')).toBe('d36f159e5bd79631d1590e2923ca579760b48b6407f8aacae9df2ff36d1e0fba'); // 22 Oct: exact inputs → margin + a test of a link/level (Track 3 c5, was 52d3ab03…); stress_test only for a sized link/factor (buddy SIMPLER, was 9a57bae9…); the three-part coaching after a Run (part 2 never ranks unmeasured figures, Codex r1) + the held-risk window ask (Track 3 judge on 4b, 11 c1 zeros; was 6dedb153…). 21 Oct: + Olumi's labelled estimate on another's item (estimate_by); + CORE_NEXT_STEP decisive question (Track 3 Q2 v2 + buddy AMEND, 21 Oct; was a605c43f…)
     // Candidate-3 witnesses (21 Oct): presence checks (text only, not behaviour): WHEN to build, and Olumi's additions on a card.
     expect(b).toContain('build the first model from their brief in that same turn');
     expect(b).toContain('a list in your reply adds nothing to their model');
@@ -102,6 +102,9 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(CORE_REPLY_INSTRUCTION).toContain('(2) what the result depends on: when the run facts measure sensitivity, the most-sensitive assumption');
     // Codex r1: never an unmeasured importance claim (run-facts.ts:84).
     expect(CORE_REPLY_INSTRUCTION).toContain('without ranking them or saying which matters most');
+    // Track 3 on candidate 5: exact-figure briefs get the margin and a test of the nearest option's own figure, never a generic caution.
+    expect(CORE_REPLY_INSTRUCTION).toContain('when every input is the person\u2019s own exact figure, say so once and give how far each option lands from the target');
+    expect(CORE_REPLY_INSTRUCTION).toContain('offer to test a stated link effect or factor level that the option landing nearest the target depends on, at a value the person names (stress_test)');
     expect(CORE_REPLY_INSTRUCTION).not.toContain('rests on most: the measured');
     expect(CORE_REPLY_INSTRUCTION).toContain('(3) one concrete next step for the model');
     // planStress tests only a sized link effect or factor level; a risk chance or missing figure is asked for.
