@@ -44,6 +44,10 @@ const USER_OVERRIDE_LITERAL = "user_override";
  * 2.714 revert.
  */
 const REVIEWED: Readonly<Record<string, string>> = {
+  // THIN CORE mapper (#3661, Codex PASS on the label rule): stamps user_override only for an item the living model
+  // attributes to the user (source user) with a quote and said_in chat, i.e. their approved chat correction. The stamp is TRUE here.
+  "orchestrator-v5/path-b/living-model/mapper.ts":
+    "levelSource: user_override only when source is user, quote is set and said_in is chat (the person's approved chat correction, #3661)",
   // Declares USER_EDIT_SOURCE and stamps it onto `update_node` ops that carry
   // an `observed_state.value` — i.e. a value the user wrote through a
   // structured patch operation they consented to. The stamp is TRUE here.
