@@ -68,7 +68,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
 
   it('THE PROMPTS (DL 22 Oct, priority change): the coach\u2019s reply rules and the drafter\u2019s rules, adapted as ruled; the old constants are gone', () => {
     expect(createHash('sha256').update(CORE_REPLY_RULES, 'utf8').digest('hex')).toBe('6f5f00c581ac4be2f1f590973e4bcf58c6eba498e5216bc3a8a21a189be5f3d6');
-    expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('50b1574d554586f9ed858101fedb02be4127727af3cde0fd15cf5803025f7cae'); // 22 Oct: modelling classes + a stated level goes in current, not prose; #3660 deadline/difference and the entire estimate rule kept.
+    expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('416a74e827a702050b4e564b35a06d3e2a661d3328aa91745e4eb181393265ce'); // 22 Oct: every stated goal saved in their words, never approximated (Claude r1 on #3670).
     // The retired constants are gone from both modules: no route can send the accreted text again.
     for (const name of ['CORE_REPLY_INSTRUCTION', 'CORE_RESPONSE_DISCIPLINE', 'CORE_NEXT_STEP']) expect(Object.keys(coreInstructions), name).not.toContain(name);
     expect(Object.keys(drafting)).toEqual(['CORE_DRAFTER_RULES']);
@@ -94,6 +94,11 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       'A Run that did not complete leaves a saved change saved: say both.', "Keep a clearly separate situation out of the current scenario's Living Model.",
       'do not claim it was created or put its facts into this model instead'])
       expect(b.split(kept), kept).toHaveLength(2);
+  });
+
+  it('the drafter saves every stated goal in their words and never approximates it, with the rule present once', () => {
+    const rule = "Save every goal the person states, in their words: keep what fits the schema, and leave the rest null (or use = or a range, which Olumi asks about). Never approximate a comparator, figure or window, and never leave a stated goal unsaved.";
+    expect(CORE_DRAFTER_RULES.split(rule)).toHaveLength(2);
   });
 
   it('the figure rule (Paul\u2019s 21 Oct served test; DL ruling 22 Oct) is said once, verbatim, in the drafter\u2019s rules, and the drafter keeps no rule against it', () => {
