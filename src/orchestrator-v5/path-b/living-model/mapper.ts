@@ -470,16 +470,19 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
    * ⭐ A DEFINED QUANTITY IS FRAMED BY ITS PARTS (DL 22 Oct; Lenses' served run 591b918e: "Weekly revenue", loaves × price
    * with no stated level, had no frame, so readiness asked "What unit is Weekly revenue measured in?" and refused the whole
    * Run, IDENTITY_FRAME_MISSING; PLoT derives a frame only for an INFERRED product, `translator-v3.ts` variant (a)). Its unit is
-   * stated; what the engine lacked was a scale to read it on. With every part framed, its frame is the most its parts can make
-   * (the sum or product of their frames, PLoT's own derived-frame rule), so no level the parts reach falls off it, carried as
-   * the node's `scale_frame`: a frame only, never a level anyone stated. A definition its parts cannot frame is left as before.
+   * stated; what the engine lacked was a scale to read it on. With every part at a level today, it is framed exactly as any
+   * factor is (`capFor`), on the levels its parts make today and under each option, so it reads on the frame it would have if
+   * that level were stated. Never the sum or product of the parts' frames: two parts each on the goal's frame put their sum on
+   * twice it, so a link of 1 into the goal became 2 and PLoT clamped it to 1, halving it (Codex on #3664). Carried as the
+   * node's `scale_frame`: a frame only, never a level anyone stated. A definition its parts cannot frame is left as before.
    */
   for (const f of model.factors) {
     const d = f.defined_as;
     if (d === null || f.value !== null || caps.has(f.id) || d.of.length === 0 || !d.of.every((p) => current.has(p) && caps.has(p))) continue;
-    const frames = d.of.map((p) => caps.get(p)!);
-    const cap = d.op === 'sum' ? frames.reduce((a, v) => a + v, 0) : frames.reduce((a, v) => a * v, 1);
-    if (!Number.isFinite(cap) || cap <= 0) continue;
+    const made = (level: (p: string) => number) => (d.op === 'sum' ? d.of.reduce((a, p) => a + level(p), 0) : d.of.reduce((a, p) => a * level(p), 1));
+    const levels = [made((p) => current.get(p)!), ...model.options.map((o) => made((p) => o.settings.find((s) => s.factor_id === p)?.value ?? current.get(p)!))];
+    const cap = capFor(levels, f.unit, goal);
+    if (cap === undefined || !Number.isFinite(cap) || cap <= 0) continue;
     caps.set(f.id, cap);
     nodes.find((n) => n.id === f.id)!.scale_frame = cap;
   }
