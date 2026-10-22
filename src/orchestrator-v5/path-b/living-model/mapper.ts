@@ -849,10 +849,10 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
           : centred
           // Olumi's own centred link is never called "stated" (Codex on #3590): its figure and range are Olumi's estimate.
           ? (figureBy(e, l).source === 'olumi'
-            ? `The calculation uses Olumi's estimated ${Math.abs(e.value!)} with Olumi's illustrative spread (half the estimated effect). Olumi's range, ${e.low} to ${e.high}, is kept with the model but is not used as a spread.`
-            : `The calculation uses the stated ${Math.abs(e.value!)} with Olumi's illustrative spread (half the stated effect). The stated range, ${e.low} to ${e.high}, is kept with the model but is not used as a spread.`)
+            ? `The calculation uses Olumi's estimated ${e.value} with Olumi's illustrative spread (half the estimated effect). Olumi's range, ${e.low} to ${e.high}, is kept with the model but is not used as a spread.`
+            : `The calculation uses the stated ${e.value} with Olumi's illustrative spread (half the stated effect). The stated range, ${e.low} to ${e.high}, is kept with the model but is not used as a spread.`)
           : statedSd !== null
-            ? `The calculation uses ${sdBy(figureBy(e, l).source)} standard deviation, ${statedSd}. Nobody stated the shape of the spread, so Olumi assumes a bell shape (Normal) around ${Math.abs(e.value!)}.`
+            ? `The calculation uses ${sdBy(figureBy(e, l).source)} standard deviation, ${statedSd}. Nobody stated the shape of the spread, so Olumi assumes a bell shape (Normal) around ${e.value}.`
             : 'Nobody stated how uncertain this strength is. Applied Olumi\'s illustrative spread (half the stated effect). It is not a measurement of anyone\'s confidence.' }] : []),
       // A stated effect asserts that the link exists: existence 1 is the stater's claim, never an Olumi default (Science,
       // 21 Oct). Olumi's own link, or one the person hedged (an assumption on it), keeps the default and says so.
