@@ -76,7 +76,7 @@ export async function proposeLivingChange(deps: Deps, ctx: Ctx, args: LivingChan
   // Only a card settles a pending change: another tool's result never discards it (Codex r1 on #3675).
   if (outcome.status === 'ok' && r?.pending?.tool === 'propose_change') r.pending = undefined;
   return outcome.status === 'ok' && lost.length > 0
-    ? { ...outcome, data: { ...outcome.data, restructure: { kept: 'first_call', lost, note: KEPT_AS_REFUSED } } } : outcome;
+    ? { ...outcome, data: { ...outcome.data, restructure: { kept: 'refused_call', lost, note: KEPT_AS_REFUSED } } } : outcome;
 }
 
 /**
@@ -146,7 +146,7 @@ async function proposeOnce(deps: Deps, ctx: Ctx, args: LivingChangeArgs): Promis
     selfCheck(base.model, mapLivingModel(base.model, savedGoal(base.saved.graph))));
   if (repairOf(deps.restructure, introduced, args.model)) {
     deps.restructure!.repairs += 1;
-    deps.restructure!.pending ??= { tool: 'propose_change', args };
+    deps.restructure!.pending = { tool: 'propose_change', args };
     return refused('not_run_ready', REPAIR_CHANGE, { blockers: introduced });
   }
   const p = deps.proposals.put(createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,

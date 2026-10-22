@@ -172,6 +172,56 @@ describe('THE READINESS SELF-CHECK: a draft a Run would withhold the goal\'s cha
     expect(p.registered).toHaveLength(1);
   });
 
+  it('Codex r1 on #3689 (a): the person\'s content a LATER refused call added is protected too: a retry that drops it is not used, for a draft and a change', async () => {
+    const said = 'Ana backs push';
+    const olumiCondition = (text: string, m: LivingModelT = KNOWN_ANSWER): LivingModelT => ({ ...structuredClone(m), conditions: [{ text, applies_to: ['f_g'], role: 'prerequisite', ...olumi }] });
+    const withView = (m: LivingModelT): LivingModelT => ({ ...m, views: [...m.views, { holder: 'Ana', position: 'backs push', quote: said }] });
+    // Draft: call 2 adds the person's view and is refused; call 3 drops it, so call 2 is used as it was.
+    const p = product(null);
+    const restructure = { repairs: 0 };
+    const ctx = { ...draftCtx, verified_user_messages: [BRIEF, said] };
+    await buildModel({ dispatch: p.dispatch, restructure }, ctx, { brief: BRIEF, model: olumiCondition('first') });
+    expect(await buildModel({ dispatch: p.dispatch, restructure }, ctx, { brief: BRIEF, model: withView(olumiCondition('second')) })).toMatchObject({ reason: 'not_run_ready' });
+    const third = await buildModel({ dispatch: p.dispatch, restructure }, ctx, { brief: BRIEF, model: structuredClone(KNOWN_ANSWER) });
+    expect(third, JSON.stringify(third)).toMatchObject({ status: 'ok', data: { restructure: { kept: 'refused_call', lost: [`views:Ana: backs push`] } } });
+    expect((p.saved()!.living_model as LivingModelT).views.map((v) => v.holder)).toContain('Ana');
+    // Change: the same chain on a card.
+    const q = product(KNOWN_ANSWER);
+    const r2 = { repairs: 0 };
+    const cctx = { ...changeCtx, verified_user_messages: [said], user_turn_text: said };
+    await proposeLivingChange({ dispatch: q.dispatch, proposals: new ProposalStore(), restructure: r2 }, cctx, change(olumiCondition('first')));
+    expect(await proposeLivingChange({ dispatch: q.dispatch, proposals: new ProposalStore(), restructure: r2 }, cctx, change(withView(olumiCondition('second')))))
+      .toMatchObject({ reason: 'not_run_ready' });
+    const card = await proposeLivingChange({ dispatch: q.dispatch, proposals: new ProposalStore(), restructure: r2 }, cctx, change(structuredClone(KNOWN_ANSWER)));
+    expect(card, JSON.stringify(card)).toMatchObject({ status: 'ok', data: { restructure: { kept: 'refused_call', lost: [`views:Ana: backs push`] } } });
+  });
+
+  it('Codex r1 on #3689 (b): the person\'s setting under an option of Olumi\'s, and today\'s level they set on an aim of Olumi\'s, are asked, never fixed', () => {
+    const nested = structuredClone(KNOWN_ANSWER);
+    nested.factors[0] = { ...nested.factors[0]!, ...olumi, unit: 'kg' };
+    nested.options[1] = { ...nested.options[1]!, ...olumi, settings: [{ ...nested.options[1]!.settings[0]!, unit: 'hours' }] };
+    const level = structuredClone(KNOWN_ANSWER);
+    level.aims[0] = { ...level.aims[0]!, ...olumi, target: { ...level.aims[0]!.target!, current_source: 'user', current_unit: 'kg' } };
+    for (const [model, code] of [[nested, 'setting_not_convertible'], [level, 'current_unit_mismatch']] as const) {
+      const out = { data: { blockers: blockersOf(model, selfCheck(model, mapLivingModel(model))).all } };
+      expect(codes(out)).toContain(`${code}:ask`);
+      expect(codes(out).filter((c) => c.endsWith(':fix'))).toEqual([]);
+    }
+  });
+
+  it('Codex r1 on #3689 (c): an Olumi link held on the goal\'s path (a one-sided range, a unit that is not the goal\'s) is never Run-ready: said with its fix', async () => {
+    for (const [effect, code] of [[{ form: 'range' as const, value: null, sd: null, low: 5, high: null }, 'link_range_no_law'], [{ unit: '%' }, 'link_unit_mismatch']] as const) {
+      const model = { ...structuredClone(KNOWN_ANSWER), links: [{ ...KNOWN_ANSWER.links[0]!, ...olumi, effect: { ...KNOWN_ANSWER.links[0]!.effect, ...effect } }] };
+      const p = product(null);
+      const out = await buildModel({ dispatch: p.dispatch, restructure: { repairs: 0 } }, draftCtx, { brief: BRIEF, model });
+      expect(out, JSON.stringify(out)).toMatchObject({ status: 'refused', reason: 'not_run_ready' });
+      expect(codes(out)).toContain(`${code}:fix`);
+      // Saved as it is (no repair left), it says it is not Run-ready.
+      const kept = await buildModel({ dispatch: p.dispatch }, draftCtx, { brief: BRIEF, model });
+      expect(kept).toMatchObject({ status: 'ok', data: { run_ready: false } });
+    }
+  });
+
   it('the bound: the refused draft sent again unchanged is saved as it is, its blockers said', async () => {
     const p = product(null);
     const restructure = { repairs: 0 };
@@ -349,7 +399,7 @@ describe('the SDK tools: the route\'s repairs per turn; a refusal never makes th
     const t = turn(p);
     await call(t.build, draft(withCondition('prerequisite')));
     const out = await call(t.build, draft(withoutHold(withCondition('assumption'))));
-    expect(out).toMatchObject({ status: 'ok', mutated: true, data: { restructure: { kept: 'first_call', lost: ['options:hold'], note: KEPT_AS_REFUSED } } });
+    expect(out).toMatchObject({ status: 'ok', mutated: true, data: { restructure: { kept: 'refused_call', lost: ['options:hold'], note: KEPT_AS_REFUSED } } });
     const b = await base(null, 'build', draft(withCondition('prerequisite')));
     expect(p.registered).toEqual(b.registered);
   });
@@ -373,7 +423,7 @@ describe('the SDK tools: the route\'s repairs per turn; a refusal never makes th
     const args = (model: LivingModelT) => ({ public_label: 'Update the model', basis: 'The person asked for it.', model, remove: [] as string[] });
     await call(t.propose, args(withCondition('prerequisite')));
     const out = await call(t.propose, args(withoutHold(withCondition('challenge'))));
-    expect(out).toMatchObject({ status: 'ok', data: { proposal_id: expect.any(String), restructure: { kept: 'first_call', lost: ['options:hold'] } } });
+    expect(out).toMatchObject({ status: 'ok', data: { proposal_id: expect.any(String), restructure: { kept: 'refused_call', lost: ['options:hold'] } } });
     const b = await base(KNOWN_ANSWER, 'propose', args(withCondition('prerequisite')));
     expect((out.data as Rec).changes).toEqual(((await call(turn(product(KNOWN_ANSWER), false).propose, args(withCondition('prerequisite')))).data as Rec).changes);
     expect(b.calls).toHaveLength(1);
@@ -428,7 +478,7 @@ describe('the SDK tools: the route\'s repairs per turn; a refusal never makes th
     expect(await call(t.propose, args('challenge', 'prerequisite'))).toMatchObject({ status: 'refused', reason: 'not_run_ready' });
     const out = await call(t.propose, args('assumption', 'assumption'));
     expect(out, JSON.stringify(out)).toMatchObject({ status: 'ok', data: { proposal_id: expect.any(String),
-      restructure: { kept: 'first_call', lost: ['conditions:if the supplier agrees'] } } });
+      restructure: { kept: 'refused_call', lost: ['conditions:if the supplier agrees'] } } });
     // CONTRAST: re-reading only Olumi's own condition is a repair, and the retry is used.
     const q = turn(product(saved));
     await call(q.propose, args('challenge', 'prerequisite'));

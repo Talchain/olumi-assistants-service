@@ -90,7 +90,7 @@ export async function buildModel(deps: DraftDeps, ctx: DraftContext, args: Build
   const save_outcome = outcome.status === 'ok' ? 'VERIFIED_SAVED'
     : outcome.status === 'unavailable' && outcome.write === 'unknown' ? 'UNKNOWN' : 'VERIFIED_NO_WRITE';
   return Object.defineProperty({ ...outcome, data: { ...outcome.data, save_outcome,
-    ...(lost.length > 0 ? { restructure: { kept: 'first_call', lost, note: KEPT_AS_REFUSED } } : {}) }, ...(save_outcome === 'UNKNOWN' ? {
+    ...(lost.length > 0 ? { restructure: { kept: 'refused_call', lost, note: KEPT_AS_REFUSED } } : {}) }, ...(save_outcome === 'UNKNOWN' ? {
     detail: 'The construction was dispatched, but its save could not be verified. It may already be saved. Do not say nothing was saved, and do not repeat a write or Run to repair the reply.',
   } : {}) }, OUTCOME_TRACE, { value: outcome[OUTCOME_TRACE] });
 }
@@ -119,7 +119,7 @@ async function constructUnrecorded(deps: DraftDeps, ctx: DraftContext, args: Bui
   const { all: blockers } = blockersOf(kernelled.model, selfCheck(kernelled.model, mapped));
   if (repairOf(deps.restructure, blockers, args.model)) {
     deps.restructure!.repairs += 1;
-    deps.restructure!.pending ??= { tool: BUILD_MODEL_FROM_BRIEF, args };
+    deps.restructure!.pending = { tool: BUILD_MODEL_FROM_BRIEF, args };
     return refused('not_run_ready', REPAIR_DRAFT, { blockers });
   }
   const gaps = structureGaps(kernelled.model);

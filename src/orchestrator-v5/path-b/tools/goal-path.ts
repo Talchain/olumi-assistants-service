@@ -15,8 +15,8 @@ import { composeIdentityAskForNode } from '../../coaching/identity-not-evaluated
 
 /**
  * The turn's repairs, shared by the draft and the change; the core route makes it per turn and `pathBTools` uses it.
- * ⭐ A REFUSAL CAN MAKE A TURN BETTER, NEVER WORSE (DL, #3672 fix-forward): the first refused call is kept (`pending`) until a
- * draft or a card succeeds after it, and the turn's end runs a call still pending once more, with no repair left, exactly as
+ * ⭐ A REFUSAL CAN MAKE A TURN BETTER, NEVER WORSE (DL, #3672 fix-forward): the latest refused call is kept (`pending`) until a
+ * draft or a card succeeds after it (each retry is checked against it, so it holds all the person's content of the calls before), and the turn's end runs a call still pending once more, with no repair left, exactly as
  * base would (`settle`, filled by `pathBTools`), so an agent that stops after the refusal still leaves its draft saved.
  */
 export interface Restructure {
@@ -78,8 +78,8 @@ export function personContentLost(refused: LivingModelT, retry: LivingModelT): s
 }
 
 /** What the AI is told when its retry would have lost the person's content, so the refused call was used as it was. */
-export const KEPT_AS_REFUSED = 'Your second call left out or changed items the person or a party gave (listed in lost), so your first '
-  + 'call was used exactly as it was. Say so plainly if it matters to your reply.';
+export const KEPT_AS_REFUSED = 'Your call left out or changed items the person or a party gave in the call refused before it (listed in '
+  + 'lost), so that refused call was used exactly as it was. Say so plainly if it matters to your reply.';
 
 /** The postimage a write registers, which the self-check reads too: the same object, so the two never differ. */
 export const corePostimage = (mapped: Mapped, model: LivingModelT): Rec => ({ ...mapped.graph, living_model: model });
@@ -118,14 +118,17 @@ export interface Blocker {
 }
 
 /**
- * Whether the item is the person's or a party's: a setting (`<option>:<factor>`) is its option's. An item the model does not
- * hold, or none named, counts as theirs, so it is asked about, never edited.
+ * Whether the item holds anything of the person's or a party's (Codex r1 on #3689): the item itself, any record nested in it (a
+ * setting, a limit, a definition), today's level they set on it, or their setting on it (a factor). A setting (`<option>:<factor>`)
+ * is its option's. An item the model does not hold, or none named, counts as theirs, so it is asked about, never edited.
  */
 function theirsIn(model: LivingModelT, item: string | null): boolean {
   if (item?.startsWith('condition:')) return model.conditions.some((c) => `condition:${c.text}` === item && theirs(c));
   const id = item?.split(':')[0];
   const found = [...model.aims, ...model.options, ...model.factors, ...model.links, ...model.risks].find((x) => x.id === id);
-  return found === undefined || theirs(found);
+  return found === undefined || theirs(found) || nestedTheirs(Object.values(found)).length > 0
+    || ('target' in found && found.target?.current_source === 'user')
+    || model.options.some((o) => o.settings.some((st) => st.factor_id === id && theirs(st)));
 }
 
 /** A blocker found, on one item; a condition's scope is part of it, since two conditions can share their words (Codex r1 on #3672). */
@@ -153,7 +156,15 @@ function said(model: LivingModelT, found: readonly Found[]): Blocker[] {
 export function selfCheck(model: LivingModelT, mapped: Mapped): Found[] {
   const goal = mapped.graph.nodes.find((n) => n.kind === 'goal')?.id;
   const held = mapped.withheld.filter((w) => w.id === goal && w.reason !== 'chance_rests_on_withheld');
-  const causes: NonNullable<Mapped['rests_on']>[number][] = [...held, ...(mapped.rests_on ?? [])];
+  // A held link on the goal's path (into it, or into what leads to it) leaves the Run a placeholder it withholds the goal's
+  // figures on, even where the goal keeps its threshold (Codex r1 on #3689).
+  const reach = new Set(goal === undefined ? [] : [String(goal)]);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const l of model.links) if (reach.has(l.to) && !reach.has(l.from)) { reach.add(l.from); grew = true; }
+  }
+  const linkHolds = mapped.withheld.filter((w) => model.links.some((l) => l.id === w.id && reach.has(l.to)));
+  const causes: NonNullable<Mapped['rests_on']>[number][] = [...held, ...(mapped.rests_on ?? []), ...linkHolds];
   // A path cut by a held link on it is said by that link's own cause (a fix, or an ask on the person's link): never a parallel
   // link of Olumi's beside it.
   const linkHeld = causes.some((w) => model.links.some((l) => l.id === w.id));
