@@ -109,8 +109,8 @@ export const addedCauses = (before: readonly GoalPathCause[], after: readonly Go
   after.filter((c) => !new Set(before.map(key)).has(key(c)));
 
 const CHECK = 'Check each against the person\'s own words. A condition they stated as an assumption the result is worked out under is an '
-  + 'assumption, and a doubt to raise is a challenge; only a requirement that must actually be met first stays a prerequisite. Never add '
-  + 'or change a figure.';
+  + 'assumption, and a doubt to raise is a challenge; only a requirement that must actually be met first stays a prerequisite. A missing '
+  + 'input is never a condition: remove it and ask the person for the figure. Never add or change a figure.';
 
 /** What the AI is told with a draft it can restructure once (words for the AI, never shown to the person). */
 export const RESTRUCTURE_DRAFT = `Not saved yet. The goal's chance would be withheld by the prerequisites in goal_path. ${CHECK} `
@@ -172,6 +172,10 @@ export const RESTRUCTURE_CUT = 'No card yet. After this change no option reaches
 export const RESTRUCTURE_AIM = 'No card yet. This change adds the person\'s own aim with its target (aim), so it becomes the goal, but '
   + `no option reaches it, so no analysis could run. Link what drives each option to that aim under its measure. ${RELINK} ${AGAIN}`;
 
-/** On a card that still leaves the goal with no path where the saved model had one: the base fallback, with its one question. */
-export const ASK_LINK_SIZES = 'This card leaves no option reaching the goal, so no analysis can run once it is approved. In your '
-  + 'reply, ask the person in one question for the size of each link into the goal.';
+/**
+ * On a card that still leaves the goal with no path where the saved model had one (the base fallback). DL 22 Oct (marketing on
+ * 68ca54f0: asked only for link sizes, which nothing the person said answers, the goal stayed pathless): Olumi estimates, labelled.
+ */
+export const ESTIMATE_LINKS = 'This card leaves no option reaching the goal, so no analysis can run once it is approved. Propose the '
+  + 'missing links into the goal as one more change, each with Olumi\'s own labelled estimate under the estimate rule, and ask the '
+  + 'person only for what Olumi cannot estimate.';

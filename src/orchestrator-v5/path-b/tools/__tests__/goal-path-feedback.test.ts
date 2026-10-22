@@ -10,7 +10,7 @@ import { ProposalStore } from '../../../agent-lane/proposal.js';
 import { computeGraphIdentityHash } from '../../../context/graph-identity.js';
 import { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha256 } from '../../../context/graph-hash.js';
 import { registrationTurnId } from '../../../graph-registration/registration-identity.js';
-import type { LivingModelT } from '../../../../schemas/living-model.js';
+import { LivingCondition, type LivingModelT } from '../../../../schemas/living-model.js';
 import { mapLivingModel } from '../../living-model/mapper.js';
 import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import { projectCorePostimageForPersistence } from '../../../persisted-graph-projection.js';
@@ -22,7 +22,7 @@ import { buildModel } from '../draft-tool.js';
 import { applyLivingChange, proposeLivingChange } from '../living-change.js';
 import { pathBTools, type ToolCallResult } from '../index.js';
 import type { TraceRow } from '../outcome.js';
-import { ASK_LINK_SIZES, goalPathEncodingCauses, KEPT_AS_REFUSED, optionsReachingGoal, pathCut, personContentLost, RESTRUCTURE_AIM, RESTRUCTURE_CHANGE, RESTRUCTURE_CUT, RESTRUCTURE_DRAFT, type Restructure } from '../goal-path.js';
+import { ESTIMATE_LINKS, goalPathEncodingCauses, KEPT_AS_REFUSED, optionsReachingGoal, pathCut, personContentLost, RESTRUCTURE_AIM, RESTRUCTURE_CHANGE, RESTRUCTURE_CUT, RESTRUCTURE_DRAFT, type Restructure } from '../goal-path.js';
 import type { Rec } from './fixtures.js';
 
 const SID = 'scn_1';
@@ -70,6 +70,30 @@ const changeCtx = { scenario_id: SID, authenticated_user_id: 'user-a', turn_id: 
 const change = (model: LivingModelT) => ({ public_label: 'Update the model', basis: 'The person asked for it.', model, remove: [] as string[] });
 
 describe('a draft whose own encoding withholds its goal is said back once, then saved as the agent sends it', () => {
+  it('DL 22 Oct (hiring on 2fa753d6): a missing input written as Olumi\'s prerequisite is said back; the retry asks instead, and is saved with its chance', async () => {
+    const missing = 'Today\'s level of f is not yet specified';
+    const asCondition = { ...structuredClone(KNOWN_ANSWER), conditions: [{ text: missing, applies_to: ['f_g'], role: 'prerequisite' as const, source: 'olumi' as const, party: null, quote: null }] };
+    const p = product(null);
+    const restructure = { offered: false };
+    const first = await buildModel({ dispatch: p.dispatch, restructure }, draftCtx, { brief: BRIEF, model: asCondition });
+    // Bound by identity: the refusal names this condition as what withholds the chance.
+    expect(first).toMatchObject({ status: 'refused', reason: 'goal_path_withheld', detail: RESTRUCTURE_DRAFT,
+      data: { goal_path: [expect.objectContaining({ id: `condition:${missing}`, reason: 'condition_not_in_slice' })] } });
+    expect(RESTRUCTURE_DRAFT).toContain('A missing input is never a condition: remove it and ask the person for the figure.');
+    expect(p.registered).toHaveLength(0);
+    const asked = await buildModel({ dispatch: p.dispatch, restructure }, draftCtx, { brief: BRIEF, model: structuredClone(KNOWN_ANSWER) });
+    expect(asked).toMatchObject({ status: 'ok', mutated: true });
+    expect(goalOf(p.saved())).toMatchObject({ goal_threshold: expect.anything() });
+    expect((p.saved()!.living_model as LivingModelT).conditions).toEqual([]);
+  });
+
+  it('DL 22 Oct (pin): the drafter\'s schema says a missing input is never a condition, and no longer lists an input as a prerequisite', () => {
+    const role = LivingCondition.shape.role.description ?? '';
+    expect(role).toContain('A missing input (a measure, today\'s level, a cost or a period nobody has given) is never a condition of any role: give it Olumi\'s labelled estimate as the figure rules allow, or ask the person for it.');
+    expect(role).not.toContain('event or input');
+    expect(RESTRUCTURE_CHANGE).toContain('A missing input is never a condition');
+  });
+
   it('a prerequisite on the goal\'s path: refused with its typed cause and nothing written; the restructured draft is saved with its chance', async () => {
     const p = product(null);
     const restructure = { offered: false };
@@ -475,7 +499,26 @@ describe('DL 22 Oct (marketing on 7ee0d90f): a change never silently cuts the go
     expect(((again as { data: Rec }).data.changes as Rec[]).filter((c) => c.kind === 'link').map((c) => [c.id, c.change])).toEqual([['f_g', 'remove']]);
     expect((again as { data: Rec }).data.restructure, 'nothing of the person’s was lost, so no fallback note').toBeUndefined();
     expect(restructure.pending).toBeUndefined();
-    expect((again as { data: Rec }).data.goal_unreached, 'the pathless card asks for the link sizes in one question').toEqual({ cut: ['f_g'], ask: ASK_LINK_SIZES });
+    expect((again as { data: Rec }).data.goal_unreached, 'the pathless card says to propose Olumi\'s labelled links').toEqual({ cut: ['f_g'], ask: ESTIMATE_LINKS });
+  });
+
+  it('DL 22 Oct (marketing on 68ca54f0): Olumi\'s missing-input prerequisite is said back with "remove it"; the pathless resend is carded with "propose Olumi\'s labelled links"; that change reaches the goal', async () => {
+    const p = product(KNOWN_ANSWER);
+    const proposals = new ProposalStore();
+    const deps = { dispatch: p.dispatch, proposals, restructure: { offered: false } as Restructure };
+    const missing = 'How a new customer is counted is not yet defined';
+    const withCondition = { ...remeasured(), conditions: [{ text: missing, applies_to: ['g'], role: 'prerequisite' as const, source: 'olumi' as const, party: null, quote: null }] };
+    expect(await proposeLivingChange(deps, changeCtx, args(withCondition, ['f_g']))).toMatchObject({ status: 'refused', reason: 'goal_path_withheld',
+      detail: expect.stringContaining('A missing input is never a condition: remove it'), data: { goal_path: [expect.objectContaining({ id: `condition:${missing}` })] } });
+    const resent = await proposeLivingChange(deps, changeCtx, args(remeasured(), ['f_g']));
+    expect(resent, JSON.stringify(resent)).toMatchObject({ status: 'ok', data: { goal_unreached: { cut: ['f_g'], ask: ESTIMATE_LINKS } } });
+    const linked = await proposeLivingChange(deps, changeCtx, args(relinked(), ['f_g']));
+    expect(linked, JSON.stringify(linked)).toMatchObject({ status: 'ok' });
+    expect((linked as { data: Rec }).data.goal_unreached).toBeUndefined();
+    await applyLivingChange({ dispatch: p.dispatch, proposals }, changeCtx, String((linked as { data: Rec }).data.proposal_id));
+    expect((p.saved()!.living_model as LivingModelT).links).toEqual([expect.objectContaining({ id: 'f_customers', to: 'g', source: 'olumi', quote: null })]);
+    const readiness = assessCanonicalAnalysisReadiness(projectCorePostimageForPersistence(GraphV3.parse(p.saved()!)) as never);
+    expect(JSON.stringify(readiness), 'a path exists').not.toContain('NO_PATH_TO_GOAL');
   });
 
   it('DL 22 Oct (acceptance): the re-measured goal re-linked with Olumi\'s labelled estimate: carded, written, analysable; the person\'s figures byte-unchanged', async () => {
@@ -533,7 +576,7 @@ describe('DL 22 Oct (marketing on 7ee0d90f): a change never silently cuts the go
     expect(RESTRUCTURE_CUT).toContain(ruling);
     expect(RESTRUCTURE_AIM).toContain(ruling);
     for (const t of [RESTRUCTURE_CUT, RESTRUCTURE_AIM]) expect(t).toContain('ask them in one question for the size of each link into the goal');
-    expect(ASK_LINK_SIZES).toContain('ask the person in one question for the size of each link into the goal');
+    expect(ESTIMATE_LINKS).toContain('Propose the missing links into the goal as one more change, each with Olumi\'s own labelled estimate under the estimate rule, and ask the person only for what Olumi cannot estimate.');
   });
 
   it('#3679 follow-up (Codex): a change that re-ids the goal and drops its link: cut names the link into the goal it was', async () => {

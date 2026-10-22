@@ -106,8 +106,14 @@ export const LivingAim = z.object({
       'The day Olumi read the date, as YYYY-MM-DD. Olumi records it: keep a saved one unchanged; null for a new reading.'),
     /** The reference the target is measured from, as written ("today", "last quarter"); null when none. */
     baseline: z.string().nullable(),
-    /** The quantity's current level, in the target's unit, when stated. Unknown is null, never 0. */
-    current: z.number().nullable().describe("Today's level of the quantity, in the target's unit, when stated. Unknown is null, never 0."),
+    /**
+     * The quantity's current level, in the target's unit, when stated. Unknown is null, never 0. DL 22 Oct (served marketing
+     * on 68ca54f0-b, a count from launch held as goal_level_unknown): a count not yet started is 0 by the person's own words,
+     * said on its card; a count that began earlier is asked.
+     */
+    current: z.number().nullable().describe("Today's level of the quantity, in the target's unit, when stated. Unknown is null, never 0. "
+      + "A count that has not started yet (sign-ups in the first six weeks after opening, orders next quarter) is 0 today by its own definition: set 0, "
+      + "say why in plain words on the change's public_label (\"0 today: it counts from opening\"), and never ask for it. A count that began earlier is not 0: ask for it."),
     /** 'user' only when the person set today's level themselves (a canvas edit); otherwise null: the aim's attribution covers it. */
     current_source: z.enum(['user']).nullable(),
     /** Today's level's own unit when it differs from the target's ("+10%" on "£ per month"). A model saved before reads null. */
@@ -246,12 +252,15 @@ export const LivingCondition = z.object({
    * What the condition does to a result that rests on these items (AIE 17:59 20 Oct), declared by the AI (meaning), applied by
    * the mapper (rule), never decided by source: a challenge is said beside it; an applied assumption carries a CONDITIONAL
    * result shown with it; an unresolved prerequisite withholds it. A model saved before roles reads every condition as unresolved.
+   * A missing input is never a condition: Olumi estimates it, labelled, or asks (DL 22 Oct, hiring on 2fa753d6: Olumi's "productivity measure and today's
+   * level are not yet specified" as a prerequisite withheld every chance; "or input" here had invited it).
    */
   role: z.enum(['challenge', 'assumption', 'prerequisite']).default('prerequisite').describe(
     'challenge: a question or doubt worth raising, said beside a result without changing it; '
     + 'assumption: a concrete modelling premise the result is actually worked out under, compatible with the stated figures, quantity and '
     + 'window, and said with the result ("assuming the trial effect is fully realised by the end of the quarter"); '
-    + 'prerequisite: a requirement that must actually be met first, such as an approval, event or input ("only after supplier approval"), so a result resting on it cannot be computed yet. '
+    + 'prerequisite: a real-world requirement the person states or the situation imposes, which must actually be met first, such as an approval or an event ("only after supplier approval"), so a result resting on it cannot be computed yet. '
+    + 'A missing input (a measure, today\'s level, a cost or a period nobody has given) is never a condition of any role: give it Olumi\'s labelled estimate as the figure rules allow, or ask the person for it. '
     + 'An open question about whether, how fully or how soon an effect happens is a challenge, or an assumption when the result is worked out under it; never a prerequisite. '
     + 'Decide by what it does to the calculation, never by who raised it.'),
   ...attribution,

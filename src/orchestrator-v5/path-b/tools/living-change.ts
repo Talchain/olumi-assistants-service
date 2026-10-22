@@ -18,7 +18,7 @@ import { applyKernel, canonicalIds, plain } from '../living-model/kernel.js';
 import { withCalendarReadings } from '../living-model/calendar-reading.js';
 import { todayInLondon } from '../../goal-target/deadline-date.js';
 import { changeGoal, mapLivingModel, savedGoal } from '../living-model/mapper.js';
-import { addedCauses, ASK_LINK_SIZES, goalPathEncodingCauses, KEPT_AS_REFUSED, optionsReachingGoal, pathCut, personContentLost, RESTRUCTURE_AIM, RESTRUCTURE_CHANGE, RESTRUCTURE_CUT, withRefusedRoles, type Restructure } from './goal-path.js';
+import { addedCauses, ESTIMATE_LINKS, goalPathEncodingCauses, KEPT_AS_REFUSED, optionsReachingGoal, pathCut, personContentLost, RESTRUCTURE_AIM, RESTRUCTURE_CHANGE, RESTRUCTURE_CUT, withRefusedRoles, type Restructure } from './goal-path.js';
 import { diffLivingModels, stable, type LivingChange } from '../living-model/diff.js';
 import { livingViewOf } from '../living-model/view.js';
 import { isNoModelYet, isSavedRead, readSaved } from './context-tool.js';
@@ -170,10 +170,10 @@ async function proposeOnce(deps: Deps, ctx: Ctx, args: LivingChangeArgs): Promis
     base_graph_identity_hash: base.saved.graphHash, base_model_identity: base.saved.identity!, operations: operationsOf(changes),
     provenance: { authored_by: 'model_proposed', basis: args.basis }, validation: { admitted: true, loss_count: 0, refusals: [] },
     public_label: args.public_label, living_model: next }));
-  // The base fallback carded a change that leaves the goal with no path: the AI asks for the link sizes in one question (DL).
+  // The base fallback carded a change that leaves the goal with no path: the AI proposes Olumi's labelled links into it (DL).
   return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: base.saved.graphHash,
     changes, withheld: mapped.withheld, assumed: mapped.assumed, relabelled: kernelled.relabelled,
-    ...(cutsPath ? { goal_unreached: { cut: pathCut(base.model, baseMapped, next), ask: ASK_LINK_SIZES } } : {}) });
+    ...(cutsPath ? { goal_unreached: { cut: pathCut(base.model, baseMapped, next), ask: ESTIMATE_LINKS } } : {}) });
 }
 
 /** A proposal this module prepared: it carries the complete living model it would write. */

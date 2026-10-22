@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { GraphV3, InterventionV3 } from '../../../../schemas/cee-v3.js';
-import { LivingModel, type LivingModelT } from '../../../../schemas/living-model.js';
+import { LivingAim, LivingModel, type LivingModelT } from '../../../../schemas/living-model.js';
+import { readGoalRecord } from '../../../goal-target/goal-record.js';
 import { mapLivingModel } from '../mapper.js';
 import { linkDefaultAssumptionsOf } from '../../../../cee/magnitude/link-default-assumptions.js';
 import { goalChanceEstimateCounts } from '../../../agent-lane/goal-chance-estimate-attribution.js';
@@ -128,6 +129,23 @@ describe('thin core mapper: living model → GraphV3', () => {
     const change: LivingModelT = structuredClone(KNOWN_ANSWER);
     change.aims[0]!.target = { ...change.aims[0]!.target!, comparator: 'increase', value: 30, current: null };
     expect(mapLivingModel(change).withheld, 'a change with no level today: never read from 0').toContainEqual({ id: 'g', reason: 'goal_level_unknown' });
+  });
+
+  it('DL 22 Oct (marketing on 68ca54f0-b): a count not yet started is 0 today by its own definition, so its threshold is carried; one that began earlier is asked', () => {
+    const count: LivingModelT = structuredClone(KNOWN_ANSWER);
+    count.aims[0] = { ...count.aims[0]!, text: 'Win 30 sign-ups', quote: 'win 30 sign-ups in the first six weeks after opening',
+      target: { ...count.aims[0]!.target!, quantity: 'sign-ups', unit: 'sign-ups', value: 30, baseline: null, current: 0 } };
+    count.links[0]!.effect = { ...count.links[0]!.effect, unit: 'sign-ups', value: 10, sd: 2 };
+    const read = mapLivingModel(count);
+    expect(read.withheld).toEqual([]);
+    expect(node(read.graph, 'g')).toMatchObject({ goal_threshold: expect.any(Number), goal_threshold_raw: 30 });
+    expect(readGoalRecord(read.graph, 'g')?.target, 'the licence reads the target').toMatchObject({ raw: 30, comparator: '>=' });
+    // CONTRAST: a count that began earlier ("sign-ups this year") has no level today until the person gives it: held, so asked.
+    const earlier = { ...count, aims: [{ ...count.aims[0]!, quote: 'win 30 sign-ups this year', target: { ...count.aims[0]!.target!, current: null } }] };
+    expect(mapLivingModel(earlier).withheld).toContainEqual({ id: 'g', reason: 'goal_level_unknown' });
+    const current = LivingAim.shape.target.unwrap().shape.current.description ?? '';
+    expect(current).toContain('A count that has not started yet (sign-ups in the first six weeks after opening, orders next quarter) is 0 today by its own definition: set 0, '
+      + 'say why in plain words on the change\'s public_label ("0 today: it counts from opening"), and never ask for it. A count that began earlier is not 0: ask for it.');
   });
 
   it('DL 22 Oct: an ordinary range uses Olumi\'s assumed law; an unknown sign is never drawn positive; a point\'s σ is |β|/2', () => {
