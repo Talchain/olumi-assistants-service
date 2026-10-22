@@ -53,7 +53,11 @@ function canonicalIds(model: LivingModelT): LivingModelT {
 
 type Attributed = { source: LivingSourceT; party: string | null; quote: string | null };
 /** An item's identity and its WHOLE content, attribution included (key order never counts). */
-const attributionKey = (id: string, item: Attributed): string => `${id}\u0000${stable(item)}`;
+/** An item's attribution, as the kernel names it: never the host's own `said_in` mark, which the AI can neither set nor clear (Codex r1 on #3661). */
+const attributionKey = (id: string, item: Attributed): string => {
+  const { said_in: _host, ...rest } = item as Attributed & { said_in?: unknown };
+  return `${id}\u0000${stable(rest)}`;
+};
 
 /** Every attribution the saved model holds, keyed by item id, as the kernel names them. */
 function savedAttributions(saved: LivingModelT): Set<string> {
@@ -128,11 +132,12 @@ export function applyKernel(model: LivingModelT, verifiedWords: readonly string[
     return t?.current_source === 'user' && t.current === current;
   };
   // ⭐ WHERE THE PERSON SAID A FIGURE (DL 22 Oct, Lenses' step 3: an approved chat correction was saved as the brief's figure).
-  // Host-set, never the AI's: an unchanged figure keeps what was saved; a changed one is 'chat' only for the person's own
-  // verified words that the brief does not hold. A first draft, or an unknown brief, says nothing (null): the brief's, as before.
+  // Host-set, never the AI's: an unchanged FIGURE keeps what was saved, whatever its words now (a new quote alone states no
+  // figure, Codex r1 on #3661); a changed one is 'chat' only for the person's own verified words that the brief does not hold.
+  // A first draft, or an unknown brief, says nothing (null): the brief's, as before.
   const briefWords = typeof brief === 'string' ? plain(brief) : null;
   const savedFactor = new Map((saved?.factors ?? []).map((f) => [f.id, f] as const));
-  const SAID_FIGURE = ['value', 'low', 'high', 'unit', 'estimate_by', 'source', 'quote'] as const;
+  const SAID_FIGURE = ['value', 'low', 'high', 'unit', 'estimate_by'] as const;
   const saidIn = (f: Omit<LivingModelT['factors'][number], 'said_in'>): 'chat' | null => {
     const before = savedFactor.get(f.id);
     if (before !== undefined && SAID_FIGURE.every((k) => before[k] === f[k])) return before.said_in ?? null;

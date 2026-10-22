@@ -337,6 +337,42 @@ describe('DL 22 Oct (Lenses\' step 3): the person\'s approved chat correction is
     expect(after).toEqual({ f: 'chat', h: null });
   });
 
+  it('Codex r1 on #3661: the AI clearing the mark never reauthors the person\'s saved chat figure, after its words leave the window', async () => {
+    const p = product(KNOWN_ANSWER);
+    const proposals = new ProposalStore();
+    const first = await proposeLivingChange({ dispatch: p.dispatch, proposals }, ctx, args(corrected()));
+    await applyLivingChange({ dispatch: p.dispatch, proposals }, ctx, String((first as { data: Rec }).data.proposal_id));
+    // A later turn: the correction's words are no longer in the verified window, and the AI sends f unchanged with said_in null.
+    const later = { ...ctx, turn_id: 'turn-2', verified_user_messages: [], user_turn_text: 'Also m is about 2.' };
+    const next = structuredClone(p.saved().living_model as LivingModelT);
+    next.factors = next.factors.map((f) => (f.id === 'f' ? { ...f, said_in: null } : f));
+    next.factors.push({ id: 'm', label: 'm', kind: 'factor', estimate_by: null, value: 2, low: null, high: null, unit: null, defined_as: null, limit: null,
+      source: 'user', party: null, quote: 'Also m is about 2.' });
+    const out = await proposeLivingChange({ dispatch: p.dispatch, proposals }, later, args(next));
+    expect(out.status, JSON.stringify(out)).toBe('ok');
+    expect(((out as { data: Rec }).data.relabelled as Rec[]).map((r) => r.id)).not.toContain('f');
+    await applyLivingChange({ dispatch: p.dispatch, proposals }, later, String((out as { data: Rec }).data.proposal_id));
+    expect(factorOf(p.saved(), 'f')).toMatchObject({ source: 'user', said_in: 'chat' });
+    expect(nodeOf(p.saved(), 'f').observed_state).toMatchObject({ source: 'user_override', raw_value: 0.6 });
+  });
+
+  it('Codex r1 on #3661: new words on an untouched figure state no figure; it stays the brief\'s, even when an estimate on it is refused', async () => {
+    const saidNow = { ...ctx, user_turn_text: 'Please update f.' };
+    const requoted = structuredClone(KNOWN_ANSWER);
+    requoted.factors[0] = { ...requoted.factors[0]!, quote: 'Please update f.' };
+    const guardedBack = structuredClone(KNOWN_ANSWER);
+    guardedBack.factors[0] = { ...guardedBack.factors[0]!, value: 0.7, estimate_by: 'olumi', quote: 'Please update f.' };
+    for (const sent of [requoted, guardedBack]) {
+      const p = product(KNOWN_ANSWER);
+      const proposals = new ProposalStore();
+      const out = await proposeLivingChange({ dispatch: p.dispatch, proposals }, saidNow, args(sent));
+      expect(out.status, `the change is proposed: ${JSON.stringify(out)}`).toBe('ok');
+      await applyLivingChange({ dispatch: p.dispatch, proposals }, saidNow, String((out as { data: Rec }).data.proposal_id));
+      expect(factorOf(p.saved(), 'f'), JSON.stringify(sent.factors[0])).not.toHaveProperty('said_in');
+      expect(nodeOf(p.saved(), 'f').observed_state).toMatchObject({ source: 'brief_extraction', raw_value: 0.5 });
+    }
+  });
+
   it('the host sets it, never the AI: an unchanged brief figure the AI marks "chat" stays the brief\'s; a first draft says nothing', () => {
     const marked = structuredClone(KNOWN_ANSWER);
     marked.factors[0] = { ...marked.factors[0]!, said_in: 'chat' };
