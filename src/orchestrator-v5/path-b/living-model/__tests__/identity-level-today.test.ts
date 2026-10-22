@@ -98,6 +98,8 @@ describe('a confirmed definition gives the goal its level today, worked out from
     ['a part that is Olumi\'s', THEIRS, { price: { source: 'olumi', quote: null } }],
     ['a part with a range', THEIRS, { loaves: { low: 250, high: 310 } }],
     ['a part whose source is not confirmed', THEIRS, { price: { source: 'unverified', quote: null } }],
+    ['a part that is not a finite figure (Codex r3)', THEIRS, { loaves: { value: Infinity } }],
+    ['a part in exponent form', THEIRS, { price: { value: 1e-7 } }],
     ['a change target', THEIRS, { target: { comparator: 'increase', value: 20, unit: '%', change_kind: 'relative' } }],
   ] as const)('NEGATIVE: %s: no level is worked out', (_name, definedBy, over) => {
     const m = bakery(definedBy as Rec, over as never);

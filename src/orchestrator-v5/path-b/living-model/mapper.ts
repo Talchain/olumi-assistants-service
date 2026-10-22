@@ -206,8 +206,10 @@ function definitionCheck(model: LivingModelT, def: Definition, itemId: string, u
   return { ...(reason === undefined ? {} : { reason }), made, parts };
 }
 
-/** A figure as the decimal it is written as (its shortest exact digits), or undefined in exponent form. */
+/** A figure as the decimal it is written as (its shortest exact digits), or undefined when not finite or in exponent form. */
 const decimalOf = (v: number): { readonly digits: bigint; readonly places: number } | undefined => {
+  // Not a decimal at all (the schema admits Infinity; Codex r3): nothing is worked out, never a throw.
+  if (!Number.isFinite(v)) return undefined;
   const t = String(v);
   if (/e/i.test(t)) return undefined;
   const [whole, frac = ''] = t.replace(/^-/, '').split('.');
