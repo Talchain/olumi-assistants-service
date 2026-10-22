@@ -407,6 +407,21 @@ describe('DL 22 Oct (Lenses\' step 3): the person\'s approved chat correction is
     }
   });
 
+  it('Codex r4 on #3661: the figure itself, signed as written; one range end never attests a value; ".6" and a range dash read as written', () => {
+    const markOf = (said: string, figure: Partial<LivingModelT['factors'][number]>) => {
+      const sent = structuredClone(KNOWN_ANSWER);
+      sent.factors[0] = { ...sent.factors[0]!, ...figure, source: 'user', quote: said };
+      return applyKernel(sent, [BRIEF, said], KNOWN_ANSWER, BRIEF).model.factors[0]!.said_in ?? null;
+    };
+    expect(markOf('Make f -0.6.', { value: 0.6 }), '"-0.6" never attests +0.6').toBeNull();
+    expect(markOf('Make f -0.6.', { value: -0.6 }), 'CONTRAST: -0.6 as written').toBe('chat');
+    expect(markOf('Make f 0.6.', { value: 0.5, high: 0.6 }), 'one range end never attests an unstated value').toBeNull();
+    expect(markOf('Make f 0.6.', { value: 0.6, high: null }), 'CONTRAST: the value itself').toBe('chat');
+    expect(markOf('Make f .6.', { value: 0.6 }), '".6" is 0.6').toBe('chat');
+    expect(markOf('f is between 0.3-0.7.', { value: null, low: 0.3, high: 0.7 }), 'a range dash is not a minus').toBe('chat');
+    expect(markOf('f is between 0.3-0.7.', { value: null, low: 0.3, high: 0.8 }), 'a range needs both ends stated').toBeNull();
+  });
+
   it('the host sets it, never the AI: an unchanged brief figure the AI marks "chat" stays the brief\'s; a first draft says nothing', () => {
     const marked = structuredClone(KNOWN_ANSWER);
     marked.factors[0] = { ...marked.factors[0]!, said_in: 'chat' };

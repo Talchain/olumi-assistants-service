@@ -120,7 +120,7 @@ function withoutEstimates(item: Record<string, any>, before: Record<string, any>
 }
 
 export function applyKernel(model: LivingModelT, verifiedWords: readonly string[], saved?: LivingModelT,
-  /** The scenario's brief, when known: a changed figure in the person's words it does not hold was said in the conversation. */
+  /** The scenario's brief, when known: a figure stated in the person's own words that it does not hold was said in the conversation. */
   brief?: string | null): Kernelled {
   const words = verifiedWords.map(plain).filter((w) => w.length > 0);
   const kept = saved === undefined ? new Set<string>() : savedAttributions(saved);
@@ -138,9 +138,17 @@ export function applyKernel(model: LivingModelT, verifiedWords: readonly string[
   // state no figure ("Please update f.") never make one theirs, whoever it was before (Codex r1-r3 on #3661). An unknown brief,
   // or a first draft, says nothing (null): the brief's, as before.
   const briefWords = typeof brief === 'string' ? plain(brief) : null;
+  // The figure itself, signed as written (Codex r4 on #3661): its value, or for a range with no value both of its ends. One range
+  // end matching never attests a value nobody said, and "-0.6" never attests +0.6. A minus right after a figure is a range's dash.
   const statesFigure = (quote: string, f: Omit<LivingModelT['factors'][number], 'said_in'>): boolean => {
-    const said = findStatedAmounts(quote).map((a) => a.magnitude);
-    return [f.value, f.low, f.high].some((v) => v !== null && said.some((m) => Math.abs(Math.abs(v) - m) <= 1e-9 * Math.max(1, m)));
+    const text = quote.replace(/(^|[^\d])\.(\d)/g, '$10.$2');
+    const minus = (before: string): boolean => {
+      const m = /[-−]\s*$/.exec(before);
+      return m !== null && !/[\d%]$/.test(before.slice(0, m.index).trimEnd());
+    };
+    const said = findStatedAmounts(text).map((a) => (minus(text.slice(0, a.index)) ? -a.magnitude : a.magnitude));
+    const stated = (v: number) => said.some((m) => Math.abs(v - m) <= 1e-9 * Math.max(1, Math.abs(m)));
+    return f.value !== null ? stated(f.value) : f.low !== null && f.high !== null && stated(f.low) && stated(f.high);
   };
   const saidIn = (f: Omit<LivingModelT['factors'][number], 'said_in'>): 'chat' | null => {
     if (briefWords === null || f.source !== 'user' || f.estimate_by !== null || f.quote === null) return null;
