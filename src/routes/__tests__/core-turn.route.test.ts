@@ -257,12 +257,31 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(a.receipts).toEqual([expect.objectContaining({ version_id: 'v_1', authorised_by: 'person' })]);
     expect(a.cards, 'the applied card is no longer waiting').toEqual([]);
     expect(a.assistant_text).toBe('Saved: f is 0.6 now.');
+    // CONTRAST (the row below): readiness admits no Run here, so none ran and no result is claimed.
+    expect(runs).toBe(0);
+    expect(a).not.toHaveProperty('analysis_result');
 
     const callsBefore = calls.length;
     const again = (await post(press)).json() as Json;
     expect(again).toMatchObject({ durability: 'replayed', assistant_text: 'Saved: f is 0.6 now.', error: null });
     expect(calls.length, 'a replay calls no model').toBe(callsBefore);
     expect(registered, 'and writes nothing').toHaveLength(1);
+  });
+
+  it('Lenses 22 Oct (15c72e9d): an approval whose saved model admits a Run carries that automatic Run\u2019s analysis_result in the contract, as a Run press does', async () => {
+    outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop', args: CHANGE }], [{ type: 'message', text: 'I prepared that change; press its card to save it.' }]];
+    const card = ((await typed(SAID)).json() as Json).cards[0];
+    preparedId = String(card.proposal_id);
+    readiness = { status: 'ready', may_run: true, options: [], blockers: [] };
+    outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: 'Saved, and the analysis ran.' }]];
+    const r = await post({ turn_id: randomUUID(), message: card.approve_action.message, source: 'chip_click',
+      chip: { id: card.approve_action.id, action_type: card.approve_action.action_type } });
+    expect(r.statusCode, r.body).toBe(200);
+    const a = r.json() as Json;
+    expect(runs, JSON.stringify(a._agent)).toBe(1);
+    const read = await freshRead();
+    expect(a.analysis_result, 'the automatic Run\u2019s fresh result, as the read now holds it').toEqual(read.analysis_result);
+    expect(a.run).toMatchObject({ run_id: read.canonical_analysis_view.run.run_id, state: { kind: 'complete_current' } });
   });
 
   it('analysis_state is the read\u2019s FULL v1 state on a typed turn, a card turn and a Run turn (contract v1.4/v1.5)', async () => {

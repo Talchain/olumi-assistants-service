@@ -148,7 +148,10 @@ export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLa
         const auto = await deps.analyseAfterCommit();
         const analysis = auto.run === undefined ? refused('run_not_ready', undefined, { analysis_ready: auto.ready ?? null })
           : await recordedRun(deps, ctx, auto.run);
-        return record(APPLY_CHANGE, args, { ...outcome, data: { analysis, ...outcome.data } }, args.proposal_id);
+        // The automatic Run ran (Lenses 22 Oct, 15c72e9d): this approval's call says so, as a pressed Run's does, so the turn
+        // ships that Run's analysis_result (`core-turn.ts` ranThisTurn) instead of "refresh to see it".
+        const ran = analysis.status === 'ok' && analysis.ran;
+        return record(APPLY_CHANGE, args, { ...outcome, ...(ran ? { ran: true } : {}), data: { analysis, ...outcome.data } }, args.proposal_id);
       },
       errorFunction: null,
     }),

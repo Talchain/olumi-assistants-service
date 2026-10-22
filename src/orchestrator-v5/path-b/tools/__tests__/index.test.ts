@@ -131,13 +131,17 @@ describe('the adapters as SDK function tools', () => {
     expect(auto).toHaveBeenCalledTimes(1);
     expect(out).toMatchObject({ status: 'ok', mutated: true, data: { saved: true,
       analysis: { status: 'ok', ran: true, data: { run_id: 'run_1', result: { headline: 'synthetic' } } } } });
-    expect(calls[0]?.[0]).toMatchObject({ name: 'apply_change', mutated: true });
+    expect(calls[0]?.[0]).toMatchObject({ name: 'apply_change', mutated: true, ran: true });
+    // The route reads this mark to ship the Run's analysis_result with the approval (Lenses 22 Oct, 15c72e9d).
+    expect(calls[0]?.[1]).toMatchObject({ ran: true });
   });
 
   it('⭐ gap 4: a saved model whose readiness admits no Run says so in the same result, with its readiness', async () => {
-    const { tools } = setup('core', vi.fn(async () => ({ ready: { status: 'blocked' } })));
+    const { tools, calls } = setup('core', vi.fn(async () => ({ ready: { status: 'blocked' } })));
     const out = JSON.parse(String(await named(tools, 'apply_change').invoke(new RunContext(), JSON.stringify({ proposal_id: PROPOSAL }))));
     expect(out.data.analysis).toEqual({ status: 'refused', reason: 'run_not_ready', data: { analysis_ready: { status: 'blocked' } } });
+    // No Run ran, so none is claimed.
+    expect(calls[0]?.[1]).not.toHaveProperty('ran');
   });
 });
 
