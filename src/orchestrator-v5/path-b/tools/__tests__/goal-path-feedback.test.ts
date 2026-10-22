@@ -10,7 +10,7 @@ import { ProposalStore } from '../../../agent-lane/proposal.js';
 import { computeGraphIdentityHash } from '../../../context/graph-identity.js';
 import { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha256 } from '../../../context/graph-hash.js';
 import { registrationTurnId } from '../../../graph-registration/registration-identity.js';
-import type { LivingModelT } from '../../../../schemas/living-model.js';
+import { LivingCondition, type LivingModelT } from '../../../../schemas/living-model.js';
 import { mapLivingModel } from '../../living-model/mapper.js';
 import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import { projectCorePostimageForPersistence } from '../../../persisted-graph-projection.js';
@@ -70,6 +70,28 @@ const changeCtx = { scenario_id: SID, authenticated_user_id: 'user-a', turn_id: 
 const change = (model: LivingModelT) => ({ public_label: 'Update the model', basis: 'The person asked for it.', model, remove: [] as string[] });
 
 describe('a draft whose own encoding withholds its goal is said back once, then saved as the agent sends it', () => {
+  it('DL 22 Oct (hiring on 2fa753d6): a missing input written as Olumi\'s prerequisite is said back; the retry asks instead, and is saved with its chance', async () => {
+    const missing = 'Today\'s level of f is not yet specified';
+    const asCondition = { ...structuredClone(KNOWN_ANSWER), conditions: [{ text: missing, applies_to: ['f_g'], role: 'prerequisite' as const, source: 'olumi' as const, party: null, quote: null }] };
+    const p = product(null);
+    const restructure = { offered: false };
+    const first = await buildModel({ dispatch: p.dispatch, restructure }, draftCtx, { brief: BRIEF, model: asCondition });
+    expect(first).toMatchObject({ status: 'refused', reason: 'goal_path_withheld', detail: RESTRUCTURE_DRAFT });
+    expect(RESTRUCTURE_DRAFT).toContain('A missing input is never a condition: remove it and ask the person for the figure.');
+    expect(p.registered).toHaveLength(0);
+    const asked = await buildModel({ dispatch: p.dispatch, restructure }, draftCtx, { brief: BRIEF, model: structuredClone(KNOWN_ANSWER) });
+    expect(asked).toMatchObject({ status: 'ok', mutated: true });
+    expect(goalOf(p.saved())).toMatchObject({ goal_threshold: expect.anything() });
+    expect((p.saved()!.living_model as LivingModelT).conditions).toEqual([]);
+  });
+
+  it('DL 22 Oct (pin): the drafter\'s schema says a missing input is never a condition, and no longer lists an input as a prerequisite', () => {
+    const role = LivingCondition.shape.role.description ?? '';
+    expect(role).toContain('A missing input (a measure, today\'s level, a cost or a period nobody has given) is never a condition of any role: leave its figure null and ask the person for it.');
+    expect(role).not.toContain('event or input');
+    expect(RESTRUCTURE_CHANGE).toContain('A missing input is never a condition');
+  });
+
   it('a prerequisite on the goal\'s path: refused with its typed cause and nothing written; the restructured draft is saved with its chance', async () => {
     const p = product(null);
     const restructure = { offered: false };

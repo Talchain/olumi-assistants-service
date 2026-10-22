@@ -109,8 +109,8 @@ export const addedCauses = (before: readonly GoalPathCause[], after: readonly Go
   after.filter((c) => !new Set(before.map(key)).has(key(c)));
 
 const CHECK = 'Check each against the person\'s own words. A condition they stated as an assumption the result is worked out under is an '
-  + 'assumption, and a doubt to raise is a challenge; only a requirement that must actually be met first stays a prerequisite. Never add '
-  + 'or change a figure.';
+  + 'assumption, and a doubt to raise is a challenge; only a requirement that must actually be met first stays a prerequisite. A missing '
+  + 'input is never a condition: remove it and ask the person for the figure. Never add or change a figure.';
 
 /** What the AI is told with a draft it can restructure once (words for the AI, never shown to the person). */
 export const RESTRUCTURE_DRAFT = `Not saved yet. The goal's chance would be withheld by the prerequisites in goal_path. ${CHECK} `

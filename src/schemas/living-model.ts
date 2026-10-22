@@ -241,12 +241,15 @@ export const LivingCondition = z.object({
    * What the condition does to a result that rests on these items (AIE 17:59 20 Oct), declared by the AI (meaning), applied by
    * the mapper (rule), never decided by source: a challenge is said beside it; an applied assumption carries a CONDITIONAL
    * result shown with it; an unresolved prerequisite withholds it. A model saved before roles reads every condition as unresolved.
+   * A missing input is a question, never a condition (DL 22 Oct, hiring on 2fa753d6: Olumi's "productivity measure and today's
+   * level are not yet specified" as a prerequisite withheld every chance; "or input" here had invited it).
    */
   role: z.enum(['challenge', 'assumption', 'prerequisite']).default('prerequisite').describe(
     'challenge: a question or doubt worth raising, said beside a result without changing it; '
     + 'assumption: a concrete modelling premise the result is actually worked out under, compatible with the stated figures, quantity and '
     + 'window, and said with the result ("assuming the trial effect is fully realised by the end of the quarter"); '
-    + 'prerequisite: a requirement that must actually be met first, such as an approval, event or input ("only after supplier approval"), so a result resting on it cannot be computed yet. '
+    + 'prerequisite: a real-world requirement the person states or the situation imposes, which must actually be met first, such as an approval or an event ("only after supplier approval"), so a result resting on it cannot be computed yet. '
+    + 'A missing input (a measure, today\'s level, a cost or a period nobody has given) is never a condition of any role: leave its figure null and ask the person for it. '
     + 'An open question about whether, how fully or how soon an effect happens is a challenge, or an assumption when the result is worked out under it; never a prerequisite. '
     + 'Decide by what it does to the calculation, never by who raised it.'),
   ...attribution,
