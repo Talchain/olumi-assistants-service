@@ -565,9 +565,12 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     // The chance is owned FOR its window: Olumi's estimate of either makes the chance Olumi's (buddy, per-figure authorship).
     const basis = r.occurrence.estimate_by === 'olumi' || r.horizon_by === 'olumi' ? 'olumi' as const
       : stated(r.source) ? 'user' as const : r.source === 'olumi' ? 'olumi' as const : undefined;
-    // Constant-rate conversion is science applied only to Olumi's valid estimate, never to a person's stated chance.
-    const converted = basis === 'olumi' && goalWindow !== undefined && months !== null && months > 0 && months <= 600
-      && months !== goalWindow && low !== null && high !== null && low >= 0 && high <= 1 && low <= high;
+    // Convert only Olumi's CHANCE: the joint basis can also be Olumi's solely because it supplied the window.
+    // v1 cannot carry per-end mitigation reductions; certainty cannot license a shorter window. Both stay held below.
+    const converted = (r.occurrence.estimate_by === 'olumi' || (r.occurrence.estimate_by === null && r.source === 'olumi'))
+      && r.mitigations.length === 0 && goalWindow !== undefined && months !== null && months > 0 && months <= 600
+      && months !== goalWindow && low !== null && high !== null && low >= 0 && high <= 1 && low <= high
+      && (goalWindow >= months || high < 1);
     if (converted) {
       low = 1 - (1 - low!) ** (goalWindow! / months!);
       high = 1 - (1 - high!) ** (goalWindow! / months!);

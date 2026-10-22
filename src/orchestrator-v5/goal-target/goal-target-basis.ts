@@ -270,8 +270,8 @@ export function goalTargetBasisOf(goal: unknown): GoalTargetBasis | undefined {
 }
 
 const NUMBER_WORDS = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
-const months = (n: number): string => `${n <= 12 ? NUMBER_WORDS[n] : String(n)} ${n === 1 ? 'month' : 'months'}`;
-export const monthNumber = (n: number): string => `month ${n <= 12 ? NUMBER_WORDS[n] : String(n)}`;
+const months = (n: number): string => `${NUMBER_WORDS[n] ?? String(n)} ${n === 1 ? 'month' : 'months'}`;
+export const monthNumber = (n: number): string => `month ${NUMBER_WORDS[n] ?? String(n)}`;
 
 /** "month three" / "month three after launch": the point by which a change target is read (D3, AIE #94 6128697025). */
 export function periodEndWords(basis: Pick<GoalTargetBasis, 'reference' | 'period_months'>): string {

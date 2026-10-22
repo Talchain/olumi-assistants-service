@@ -172,7 +172,7 @@ export function riskOccurrenceWindowMonths(graph: unknown): number | undefined {
   const recorded = [held, reading?.period_months].filter(finite);
   if (recorded.length === 0 || recorded.some((m) => m !== recorded[0])) return undefined;
   const months = recorded[0]!;
-  return months > 0 && months <= 120 ? months : undefined;
+  return months > 0 && months <= 600 ? months : undefined;
 }
 
 export type RiskOccurrenceIneligible = 'not_a_risk' | 'holds_a_level' | 'has_a_cause' | 'no_window' | 'unreadable';

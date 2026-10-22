@@ -1,5 +1,5 @@
 /**
- * An Olumi risk is converted to a known goal window, with its preventer intact. An unknown goal window still holds it
+ * A mitigated Olumi risk counts over its original goal window. A different or unknown goal window holds it
  * with its preventer switch and the options' settings on that switch, so nothing is stranded.
  */
 import { describe, expect, it } from 'vitest';
@@ -33,15 +33,13 @@ describe('a mitigated Olumi risk counts only over the goal\'s window', () => {
     expect(readiness(m)).toEqual({ safe: true, blocking: [] });
   });
 
-  it('over a DIFFERENT known window it is converted, with its preventer and settings intact', () => {
+  it('over a DIFFERENT known window it is held with its preventer, because v1 cannot carry per-end reductions', () => {
     const m = withPeriod(OLUMI_CHANCE, 6);
-    expect(nodesOf(m).find((n) => n.id === 'supplier_fails')!.event_risk).toEqual({ version: 1,
-      occurrence: { basis: 'olumi', p_low: 1 - 0.95 ** 0.5, p_high: 1 - 0.85 ** 0.5 }, horizon: { months: 6 },
-      mitigations: [{ factor_id: 'dual_sourcing', occurrence_reduction: 0.7 }] });
-    expect(nodesOf(m).find((n) => n.id === 'dual_sourcing')).toBeDefined();
-    expect(edgesOf(m).some((e) => e.from === 'dual_sourcing' && e.to === 'supplier_fails')).toBe(true);
-    expect(nodesOf(m).find((n) => n.id === 'dual_source')!.interventions).toHaveProperty('dual_sourcing');
-    expect(reasons(m)).toEqual([]);
+    expect(nodesOf(m).find((n) => n.id === 'supplier_fails')).toBeUndefined();
+    expect(nodesOf(m).find((n) => n.id === 'dual_sourcing')).toBeUndefined();
+    expect(edgesOf(m).some((e) => e.from === 'dual_sourcing' || e.to === 'dual_sourcing')).toBe(false);
+    expect(nodesOf(m).find((n) => n.id === 'dual_source')!.interventions).not.toHaveProperty('dual_sourcing');
+    expect(reasons(m)).toEqual(expect.arrayContaining(['supplier_fails:risk_window_not_goal_window', 'dual_sourcing:risk_window_not_goal_window']));
     expect(readiness(m)).toEqual({ safe: true, blocking: [] });
   });
 
