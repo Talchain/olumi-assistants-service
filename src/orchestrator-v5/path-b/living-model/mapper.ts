@@ -548,7 +548,10 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     if (f.value !== null && cap !== undefined) {
       current.set(f.id, f.value);
       node.observed_state = withSource({ value: f.value / cap, raw_value: f.value, cap, unit: f.unit ?? '' }, figureBy(f, f));
-      if (f.low !== null && f.high !== null && f.low < f.high) {
+      // A figure at an end of its range keeps base behaviour: a Normal centred there would draw outside the range (0 weeks in
+      // 0 to 8 would draw negative delays, reversing its links), so only a figure strictly inside its range gains the spread.
+      if (f.low !== null && f.high !== null && !(f.low < f.value && f.value < f.high)) assumed.push({ id: f.id, text: `The calculation uses ${sayFigureAsWritten(f.value, f.unit ?? '')} for ${f.label}. The range, ${sayFigureAsWritten(f.low, f.unit ?? '')} to ${sayFigureAsWritten(f.high, f.unit ?? '')}, is kept with the model but is not used as a spread.` });
+      else if (f.low !== null && f.high !== null) {
         const spread = rangeSpread(f.low, f.high, figureBy(f, f).source, f.party), std = spread.std / cap;
         Object.assign(node.observed_state as Rec, { std, std_source: 'olumi' });
         (node.observed_state as Rec).uncertainty_defaults = [{ code: REPAIR_CODES.CLAMP_STD_MINIMUM, layer: 'cee',
