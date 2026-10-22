@@ -709,7 +709,8 @@ function coreChangeNotes(operations: readonly HeldOp[], adds: readonly AddField[
     return s.who !== undefined && (next?.who === undefined || next.who.tag !== s.who.tag) ? `${s.text} (${s.who.tag})` : s.text;
   }).join('; ');
   const sourceOf = (said: readonly Said[], item: Who): NoteSource => (said.some((s) => s.who?.source === 'estimate') ? 'estimate' : item.source);
-  const shownFigure = new Map(fields.flatMap((f) => (f.kind === 'factor_value' ? [[`factor:${f.node_id}`, f.current.source] as const] : [])));
+  const shownFigure = new Map<string, string>();
+  for (const f of fields) if (f.kind === 'factor_value') shownFigure.set(`factor:${f.node_id}`, f.current.source);
   const addOf = new Map(adds.map((a) => [a.kind === 'factor_add' ? `factor:${a.node_id}` : a.kind === 'link_add' ? `link:${a.link_id}` : '', a]));
   const KIND_WORDS: Readonly<Record<string, string>> = { aim: 'the aim', option: 'the option', factor: 'the factor', risk: 'the risk', link: 'the link', condition: 'the condition', view: '' };
   const notes: ChangeNoteField[] = [];
