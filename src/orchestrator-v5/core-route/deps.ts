@@ -116,7 +116,7 @@ export interface CoreTurnToolsInput {
   readonly researchShowable: NonNullable<PathBToolDeps['researchShowable']>;
   /** Told when a tool's own receipt AND its successful postimage readback establish a saved change. */
   readonly onVerifiedSave: () => void;
-  /** Class 3's one offer for this turn, made by the route, which settles it at the turn's end (`goal-path.ts`). */
+  /** This turn's repairs, made by the route, which settles them at the turn's end (`goal-path.ts`). */
   readonly restructure?: PathBToolDeps['restructure'];
 }
 

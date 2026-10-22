@@ -26,7 +26,7 @@ import type { CritiqueT } from '../../agent-lane/core/model-critic.js';
 import { isNoModelYet, isSavedRead, readSaved } from './context-tool.js';
 import { ok, refused, OUTCOME_TRACE, type ToolOutcome } from './outcome.js';
 import { writeCorePostimage } from './core-write.js';
-import { goalPathEncodingCauses, KEPT_AS_REFUSED, personContentLost, RESTRUCTURE_DRAFT, withRefusedRoles, type Restructure } from './goal-path.js';
+import { blockersOf, corePostimage, KEPT_AS_REFUSED, personContentLost, repairOf, REPAIR_DRAFT, REPAIRS, selfCheck, STILL_ASK, type Restructure } from './goal-path.js';
 import { inTheUsersWords, type TypedWords } from './user-words.js';
 
 export const BUILD_MODEL_FROM_BRIEF = 'build_model_from_brief';
@@ -54,7 +54,7 @@ export interface DraftDeps {
    * gets only what is left of it, so it never takes the save's time (buddy served BLOCK on #3574: 217 s turn, 170 s stream).
    */
   readonly deadlineAt?: number;
-  /** Class 3: the turn's one offer to restructure a draft whose own encoding withholds its goal (`goal-path.ts`). */
+  /** The turn's repairs of a draft a Run would withhold the goal's chance on (`goal-path.ts`). */
   readonly restructure?: Restructure;
 }
 
@@ -81,8 +81,10 @@ export async function buildModel(deps: DraftDeps, ctx: DraftContext, args: Build
   const r = deps.restructure;
   const first = r?.pending?.tool === BUILD_MODEL_FROM_BRIEF ? r.pending.args : undefined;
   const read = (a: BuildModelArgs) => applyKernel(a.model, draftWords(ctx, a.brief)).model;
-  const lost = first === undefined ? [] : personContentLost(read(first), read({ ...args, model: withRefusedRoles(args.model, first.model) }));
-  const outcome = await construct(deps, ctx, first !== undefined && lost.length > 0 ? first : args);
+  const lost = first === undefined ? [] : personContentLost(read(first), read(args));
+  // The refused draft is used as it is: no repair is left for it.
+  if (lost.length > 0) r!.repairs = REPAIRS;
+  const outcome = await constructUnrecorded(deps, ctx, first !== undefined && lost.length > 0 ? first : args);
   // Only a draft settles a pending draft: another tool's result never discards it (Codex r1 on #3675).
   if (outcome.status === 'ok' && r?.pending?.tool === BUILD_MODEL_FROM_BRIEF) r.pending = undefined;
   const save_outcome = outcome.status === 'ok' ? 'VERIFIED_SAVED'
@@ -93,10 +95,6 @@ export async function buildModel(deps: DraftDeps, ctx: DraftContext, args: Build
   } : {}) }, OUTCOME_TRACE, { value: outcome[OUTCOME_TRACE] });
 }
 
-
-async function construct(deps: DraftDeps, ctx: DraftContext, args: BuildModelArgs): Promise<ToolOutcome> {
-  return constructUnrecorded(deps, ctx, args);
-}
 
 async function constructUnrecorded(deps: DraftDeps, ctx: DraftContext, args: BuildModelArgs): Promise<ToolOutcome> {
   if (!inTheUsersWords(args.brief, ctx)) return refused('brief_not_users_words');
@@ -116,13 +114,13 @@ async function constructUnrecorded(deps: DraftDeps, ctx: DraftContext, args: Bui
   const kernelled = { ...read, model: withCalendarReadings(read.model, undefined, todayInLondon(new Date())) };
   const mapped = mapLivingModel(kernelled.model);
   if (!mapped.graph.nodes.some((n) => n.kind !== 'decision')) return refused('model_empty');
-  // ⭐ CLASS 3: a draft whose own encoding withholds its goal's chance is said back ONCE, before any save or review, so the agent
-  // can restructure it in this turn; its next draft is saved as it is (`goal-path.ts`).
-  const causes = goalPathEncodingCauses(mapped);
-  if (causes.length > 0 && deps.restructure !== undefined && !deps.restructure.offered) {
-    deps.restructure.offered = true;
-    deps.restructure.pending = { tool: BUILD_MODEL_FROM_BRIEF, args };
-    return refused('goal_path_withheld', RESTRUCTURE_DRAFT, { goal_path: causes });
+  // ⭐ THE READINESS SELF-CHECK (`goal-path.ts`): a draft a Run would withhold the goal's chance on is said back, before any save
+  // or review, while a fix and a repair are left; then it is saved as it is, with its asks.
+  const { all: blockers } = blockersOf(kernelled.model, selfCheck(kernelled.model, mapped));
+  if (repairOf(deps.restructure, blockers, args.model)) {
+    deps.restructure!.repairs += 1;
+    deps.restructure!.pending ??= { tool: BUILD_MODEL_FROM_BRIEF, args };
+    return refused('not_run_ready', REPAIR_DRAFT, { blockers });
   }
   const gaps = structureGaps(kernelled.model);
   // The turn's first draft is reviewed BESIDE its save, never before it: the critic never gates or delays the write.
@@ -131,7 +129,7 @@ async function constructUnrecorded(deps: DraftDeps, ctx: DraftContext, args: Bui
   const critiqued = reviewing
     ? (deps.critique?.(JSON.stringify({ brief: args.brief, draft: kernelled.model, gaps }), msLeft()) ?? Promise.resolve(undefined)).catch(() => undefined)
     : Promise.resolve(undefined);
-  const graph: Record<string, unknown> = { ...mapped.graph, living_model: kernelled.model };
+  const graph = corePostimage(mapped, kernelled.model);
 
   const write = await writeCorePostimage(deps, { scenarioId: ctx.scenario_id, graph, briefText: args.brief,
     operationId: constructionOperationId(ctx.scenario_id, args.brief),
@@ -147,6 +145,7 @@ async function constructUnrecorded(deps: DraftDeps, ctx: DraftContext, args: Bui
   return ok({
     provisional: 'olumi', model_version: receipt, revision: { graph_hash: after.graphHash, graph_identity_hash: after.identity },
     draft: { withheld: mapped.withheld, assumed: mapped.assumed, relabelled: kernelled.relabelled, ...(hasGaps(gaps) ? { gaps } : {}) },
+    run_ready: blockers.length === 0, ...(blockers.length > 0 ? { blockers, note: STILL_ASK } : {}),
     ...(critique !== undefined ? { review: { critique, note: REVIEW_AFTER_SAVE } } : {}),
   }, { mutated: true });
 }

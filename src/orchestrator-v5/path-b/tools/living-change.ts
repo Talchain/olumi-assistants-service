@@ -18,7 +18,7 @@ import { applyKernel, canonicalIds, plain } from '../living-model/kernel.js';
 import { withCalendarReadings } from '../living-model/calendar-reading.js';
 import { todayInLondon } from '../../goal-target/deadline-date.js';
 import { changeGoal, mapLivingModel, savedGoal } from '../living-model/mapper.js';
-import { addedCauses, ESTIMATE_LINKS, goalPathEncodingCauses, KEPT_AS_REFUSED, optionsReachingGoal, pathCut, personContentLost, RESTRUCTURE_AIM, RESTRUCTURE_CHANGE, RESTRUCTURE_CUT, withRefusedRoles, type Restructure } from './goal-path.js';
+import { blockersOf, corePostimage, KEPT_AS_REFUSED, personContentLost, repairOf, REPAIR_CHANGE, REPAIRS, selfCheck, STILL_ASK, type Restructure } from './goal-path.js';
 import { diffLivingModels, stable, type LivingChange } from '../living-model/diff.js';
 import { livingViewOf } from '../living-model/view.js';
 import { isNoModelYet, isSavedRead, readSaved } from './context-tool.js';
@@ -40,10 +40,9 @@ export type LivingChangeArgs = z.infer<typeof LivingChangeParams>;
 type Ctx = Pick<AgentToolContext, 'scenario_id' | 'authenticated_user_id' | 'turn_id' | 'verified_user_messages' | 'user_turn_text'>;
 interface Deps {
   readonly dispatch: InternalDispatch; readonly proposals: ProposalStore;
-  /** Class 3: the turn's one offer to restructure a change that withholds the goal through its own encoding (`goal-path.ts`). */
+  /** The turn's repairs of a change a Run would withhold the goal's chance on (`goal-path.ts`). */
   readonly restructure?: Restructure;
 }
-type Rec = Record<string, unknown>;
 
 /** The card's rows: one operation per changed item, on the item's own id. */
 function operationsOf(changes: readonly LivingChange[]): ProposalOperation[] {
@@ -70,7 +69,9 @@ export async function proposeLivingChange(deps: Deps, ctx: Ctx, args: LivingChan
   const first = r?.pending?.tool === 'propose_change' ? r.pending.args : undefined;
   const base = first === undefined ? undefined : await savedLiving(deps, ctx);
   const lost = first === undefined || base === undefined || 'status' in base ? []
-    : personContentLost(kernelFor(base, ctx, first.model).model, kernelFor(base, ctx, withRefusedRoles(args.model, first.model)).model);
+    : personContentLost(kernelFor(base, ctx, first.model).model, kernelFor(base, ctx, args.model).model);
+  // The refused change is used as it is: no repair is left for it.
+  if (lost.length > 0) r!.repairs = REPAIRS;
   const outcome = await proposeOnce(deps, ctx, first !== undefined && lost.length > 0 ? first : args);
   // Only a card settles a pending change: another tool's result never discards it (Codex r1 on #3675).
   if (outcome.status === 'ok' && r?.pending?.tool === 'propose_change') r.pending = undefined;
@@ -139,41 +140,22 @@ async function proposeOnce(deps: Deps, ctx: Ctx, args: LivingChangeArgs): Promis
   const goal = changeGoal(base.saved.graph, next);
   const mapped = mapLivingModel(next, goal);
   if (!mapped.graph.nodes.some((n) => n.kind !== 'decision')) return refused('model_empty');
-  // ⭐ CLASS 3: a change that ADDS a cause withholding the goal's chance through its own encoding is said back ONCE, before its
-  // card; what the saved model already held is not this change's to answer for (`goal-path.ts`).
-  const offer = deps.restructure !== undefined && !deps.restructure.offered ? deps.restructure : undefined;
-  const baseMapped = mapLivingModel(base.model, savedGoal(base.saved.graph));
-  const introduced = offer === undefined ? [] : addedCauses(goalPathEncodingCauses(baseMapped), goalPathEncodingCauses(mapped));
-  // The saved model had a path to its goal and this change leaves none (to the goal it maps under).
-  const cutsPath = optionsReachingGoal(base.model, baseMapped).length > 0 && optionsReachingGoal(next, mapped).length === 0;
-  // ⭐ THE PERSON'S AIM BECOMES THE GOAL (DL 22 Oct, marketing on 4a4c338c): when it does and no option reaches it, the same one
-  // offer says so, with the aim, before its card.
-  if (offer !== undefined && goal.goal !== savedGoal(base.saved.graph).goal && optionsReachingGoal(next, mapped).length === 0) {
-    offer.offered = true;
-    offer.pending = { tool: 'propose_change', args };
-    return refused('aim_unconnected', RESTRUCTURE_AIM, { aim: goal.goal });
-  }
-  if (offer !== undefined && introduced.length > 0) {
-    offer.offered = true;
-    offer.pending = { tool: 'propose_change', args };
-    return refused('goal_path_withheld', RESTRUCTURE_CHANGE, { goal_path: introduced });
-  }
-  // ⭐ A CHANGE NEVER SILENTLY CUTS THE GOAL'S PATH (DL 22 Oct, marketing on 7ee0d90f): when the saved model has an option that
-  // reaches the goal and this change leaves none, the same one offer says so, with the links into the goal it removes.
-  if (offer !== undefined && cutsPath) {
-    const cut = pathCut(base.model, baseMapped, next);
-    offer.offered = true;
-    offer.pending = { tool: 'propose_change', args };
-    return refused('goal_path_cut', RESTRUCTURE_CUT, { cut });
+  // ⭐ THE READINESS SELF-CHECK (`goal-path.ts`): a change that ADDS a blocker to what a Run would get is said back, before its card,
+  // while a fix and a repair are left; what the saved model already held is not this change's to answer for.
+  const { all: blockers, added: introduced } = blockersOf(next, selfCheck(next, mapped),
+    selfCheck(base.model, mapLivingModel(base.model, savedGoal(base.saved.graph))));
+  if (repairOf(deps.restructure, introduced, args.model)) {
+    deps.restructure!.repairs += 1;
+    deps.restructure!.pending ??= { tool: 'propose_change', args };
+    return refused('not_run_ready', REPAIR_CHANGE, { blockers: introduced });
   }
   const p = deps.proposals.put(createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
     base_graph_identity_hash: base.saved.graphHash, base_model_identity: base.saved.identity!, operations: operationsOf(changes),
     provenance: { authored_by: 'model_proposed', basis: args.basis }, validation: { admitted: true, loss_count: 0, refusals: [] },
     public_label: args.public_label, living_model: next }));
-  // The base fallback carded a change that leaves the goal with no path: the AI proposes Olumi's labelled links into it (DL).
   return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: base.saved.graphHash,
     changes, withheld: mapped.withheld, assumed: mapped.assumed, relabelled: kernelled.relabelled,
-    ...(cutsPath ? { goal_unreached: { cut: pathCut(base.model, baseMapped, next), ask: ESTIMATE_LINKS } } : {}) });
+    run_ready: blockers.length === 0, ...(blockers.length > 0 ? { blockers, note: STILL_ASK } : {}) });
 }
 
 /** A proposal this module prepared: it carries the complete living model it would write. */
@@ -201,7 +183,7 @@ export async function applyLivingChange(deps: Deps, ctx: Ctx, proposalId: string
   // The model's FULL identity when it was prepared: any change since, wording included, supersedes the proposal.
   if (p.base_model_identity !== before.identity) return refused('superseded');
   const mapped = mapLivingModel(p.living_model, changeGoal(before.graph, p.living_model));
-  const graph: Rec = { ...mapped.graph, living_model: p.living_model };
+  const graph = corePostimage(mapped, p.living_model);
   const commit = async (): Promise<ToolOutcome> => {
     const w = await writeCorePostimage(deps, { scenarioId: ctx.scenario_id, graph, operationId, expectedIdentity: before.identity, ownVersion });
     if (w.status === 'unknown') return w.outcome;

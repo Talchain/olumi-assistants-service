@@ -372,8 +372,6 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
         goal_direction: signed > 0 ? '>=' : '<=', quantity_frame: 'change',
         goal_threshold_raw: signed, goal_threshold_unit: '%', goal_threshold_cap: relative.cap, goal_threshold_cap_provenance: relative.provenance,
         goal_threshold: signed / relative.cap, goal_threshold_frame: 'change_abs',
-        ...(t.by_when !== null ? { goal_deadline_as_stated: t.by_when } : {}),
-        ...(deadline !== undefined ? { goal_horizon: { deadline } } : {}),
         goal_target_basis: { source: 'olumi_reading', quantity_frame: 'change', target_frame: 'change_abs', target_raw: signed, reference: 'today',
           denominator: today, ...(window !== undefined && Number.isInteger(window) && window >= 1 && window <= 120
             ? { period_months: window } : {}), period_kind: 'at_end', effect_unit: `% of ${today}`, effects_at_period_end: false },
