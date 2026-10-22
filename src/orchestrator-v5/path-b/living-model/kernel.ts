@@ -132,12 +132,13 @@ export function applyKernel(model: LivingModelT, verifiedWords: readonly string[
     return t?.current_source === 'user' && t.current === current;
   };
   // ⭐ WHERE THE PERSON SAID A FIGURE (DL 22 Oct, Lenses' step 3: an approved chat correction was saved as the brief's figure).
-  // Host-set, never the AI's: an unchanged FIGURE keeps what was saved, whatever its words now (a new quote alone states no
-  // figure, Codex r1 on #3661); a changed one is 'chat' only for the person's own verified words that the brief does not hold.
+  // Host-set, never the AI's: an unchanged figure BY the same author keeps what was saved, whatever its words now (a new quote
+  // alone states no figure, Codex r1 on #3661); a changed figure, or one the person now states as theirs (Olumi's or an
+  // unverified figure they adopt in their own words, Codex r2), is 'chat' only for their verified words the brief does not hold.
   // A first draft, or an unknown brief, says nothing (null): the brief's, as before.
   const briefWords = typeof brief === 'string' ? plain(brief) : null;
   const savedFactor = new Map((saved?.factors ?? []).map((f) => [f.id, f] as const));
-  const SAID_FIGURE = ['value', 'low', 'high', 'unit', 'estimate_by'] as const;
+  const SAID_FIGURE = ['value', 'low', 'high', 'unit', 'estimate_by', 'source'] as const;
   const saidIn = (f: Omit<LivingModelT['factors'][number], 'said_in'>): 'chat' | null => {
     const before = savedFactor.get(f.id);
     if (before !== undefined && SAID_FIGURE.every((k) => before[k] === f[k])) return before.said_in ?? null;

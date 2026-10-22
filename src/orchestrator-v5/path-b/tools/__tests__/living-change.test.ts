@@ -373,6 +373,23 @@ describe('DL 22 Oct (Lenses\' step 3): the person\'s approved chat correction is
     }
   });
 
+  it('Codex r2 on #3661: the person adopting Olumi\'s or an unverified figure in their own chat words makes it theirs, numbers unchanged', async () => {
+    const said = 'We measured f at 0.5, with a range of 0.3 to 0.7.';
+    for (const was of ['olumi', 'unverified'] as const) {
+      const saved = structuredClone(KNOWN_ANSWER);
+      saved.factors[0] = { ...saved.factors[0]!, source: was, quote: null, low: 0.3, high: 0.7 };
+      const p = product(saved);
+      const proposals = new ProposalStore();
+      const adopted = structuredClone(saved);
+      adopted.factors[0] = { ...adopted.factors[0]!, source: 'user', quote: said };
+      const out = await proposeLivingChange({ dispatch: p.dispatch, proposals }, { ...ctx, user_turn_text: said }, args(adopted));
+      expect(out.status, `${was}: ${JSON.stringify(out)}`).toBe('ok');
+      await applyLivingChange({ dispatch: p.dispatch, proposals }, { ...ctx, user_turn_text: said }, String((out as { data: Rec }).data.proposal_id));
+      expect(factorOf(p.saved(), 'f'), was).toMatchObject({ source: 'user', said_in: 'chat', value: 0.5 });
+      expect(nodeOf(p.saved(), 'f').observed_state, was).toMatchObject({ source: 'user_override', raw_value: 0.5 });
+    }
+  });
+
   it('the host sets it, never the AI: an unchanged brief figure the AI marks "chat" stays the brief\'s; a first draft says nothing', () => {
     const marked = structuredClone(KNOWN_ANSWER);
     marked.factors[0] = { ...marked.factors[0]!, said_in: 'chat' };
