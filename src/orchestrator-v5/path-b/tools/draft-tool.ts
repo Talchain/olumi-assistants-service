@@ -24,7 +24,7 @@ import type { CritiqueT } from '../../agent-lane/core/model-critic.js';
 import { isNoModelYet, isSavedRead, readSaved } from './context-tool.js';
 import { ok, refused, OUTCOME_TRACE, type ToolOutcome } from './outcome.js';
 import { writeCorePostimage } from './core-write.js';
-import { goalPathEncodingCauses, KEPT_AS_REFUSED, personContentLost, RESTRUCTURE_DRAFT, type Restructure } from './goal-path.js';
+import { goalPathEncodingCauses, KEPT_AS_REFUSED, personContentLost, RESTRUCTURE_DRAFT, withRefusedRoles, type Restructure } from './goal-path.js';
 import { inTheUsersWords, type TypedWords } from './user-words.js';
 
 export const BUILD_MODEL_FROM_BRIEF = 'build_model_from_brief';
@@ -79,7 +79,7 @@ export async function buildModel(deps: DraftDeps, ctx: DraftContext, args: Build
   const r = deps.restructure;
   const first = r?.pending?.tool === BUILD_MODEL_FROM_BRIEF ? r.pending.args : undefined;
   const read = (a: BuildModelArgs) => applyKernel(a.model, draftWords(ctx, a.brief)).model;
-  const lost = first === undefined ? [] : personContentLost(read(first), read(args));
+  const lost = first === undefined ? [] : personContentLost(read(first), read({ ...args, model: withRefusedRoles(args.model, first.model) }));
   const outcome = await construct(deps, ctx, first !== undefined && lost.length > 0 ? first : args);
   // Only a draft settles a pending draft: another tool's result never discards it (Codex r1 on #3675).
   if (outcome.status === 'ok' && r?.pending?.tool === BUILD_MODEL_FROM_BRIEF) r.pending = undefined;

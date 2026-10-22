@@ -45,6 +45,10 @@ function personContent(m: LivingModelT): { readonly label: string; readonly valu
       else for (const r of nestedTheirs(Object.values(item))) out.push({ label: `${kind}:${item.id}`, value: stable(r) });
     }
   }
+  // Today's level the person set themselves on an aim of Olumi's (`current_source: 'user'`, a canvas edit; Codex r2 on #3675).
+  for (const a of m.aims) {
+    if (!theirs(a) && a.target?.current_source === 'user') out.push({ label: `aims:${a.id}`, value: stable({ current: a.target.current, current_unit: a.target.current_unit }) });
+  }
   for (const { role: _role, ...c } of m.conditions) {
     if (theirs(c)) out.push({ label: `conditions:${c.text}`, value: stable({ ...c, applies_to: [...c.applies_to].sort() }) });
   }
@@ -66,6 +70,17 @@ export function personContentLost(refused: LivingModelT, retry: LivingModelT): s
     return n > 0 ? [] : [e.label];
   });
   return [...new Set(lost)];
+}
+
+/**
+ * The retry as the refused call would have it, but for the one part the offer re-reads: each condition the refused call also
+ * holds (by its words, scope and author) takes the refused call's role, so the kernel reads the two alike (Codex r2 on #3675: a
+ * role-only change re-checked a saved quote outside the verified window and relabelled it).
+ */
+export function withRefusedRoles(retry: LivingModelT, refused: LivingModelT): LivingModelT {
+  const id = (c: LivingModelT['conditions'][number]) => stable([c.text, [...c.applies_to].sort(), c.source, c.party, c.quote]);
+  const roles = new Map(refused.conditions.map((c) => [id(c), c.role] as const));
+  return { ...retry, conditions: retry.conditions.map((c) => ({ ...c, role: roles.get(id(c)) ?? c.role })) };
 }
 
 /** What the AI is told when its retry would have lost the person's content, so the refused call was used as it was. */

@@ -16,7 +16,7 @@ import { createProposal, type ProposalOperation, type ProposalStore, type Struct
 import { LivingModel, type LivingModelT } from '../../../schemas/living-model.js';
 import { applyKernel, plain } from '../living-model/kernel.js';
 import { mapLivingModel, savedGoal } from '../living-model/mapper.js';
-import { addedCauses, goalPathEncodingCauses, KEPT_AS_REFUSED, personContentLost, RESTRUCTURE_CHANGE, type Restructure } from './goal-path.js';
+import { addedCauses, goalPathEncodingCauses, KEPT_AS_REFUSED, personContentLost, RESTRUCTURE_CHANGE, withRefusedRoles, type Restructure } from './goal-path.js';
 import { diffLivingModels, stable, type LivingChange } from '../living-model/diff.js';
 import { livingViewOf } from '../living-model/view.js';
 import { isNoModelYet, isSavedRead, readSaved } from './context-tool.js';
@@ -68,7 +68,7 @@ export async function proposeLivingChange(deps: Deps, ctx: Ctx, args: LivingChan
   const first = r?.pending?.tool === 'propose_change' ? r.pending.args : undefined;
   const base = first === undefined ? undefined : await savedLiving(deps, ctx);
   const lost = first === undefined || base === undefined || 'status' in base ? []
-    : personContentLost(kernelFor(base, ctx, first.model).model, kernelFor(base, ctx, args.model).model);
+    : personContentLost(kernelFor(base, ctx, first.model).model, kernelFor(base, ctx, withRefusedRoles(args.model, first.model)).model);
   const outcome = await proposeOnce(deps, ctx, first !== undefined && lost.length > 0 ? first : args);
   // Only a card settles a pending change: another tool's result never discards it (Codex r1 on #3675).
   if (outcome.status === 'ok' && r?.pending?.tool === 'propose_change') r.pending = undefined;

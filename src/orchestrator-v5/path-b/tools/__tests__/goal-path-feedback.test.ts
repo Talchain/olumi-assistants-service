@@ -307,6 +307,26 @@ describe('the SDK tools: the route\'s one offer per turn; a refusal never makes 
     expect(t.calls.at(-1)![1].proposal_id).toEqual(expect.any(String));
   });
 
+  it('Codex r2 on #3675: a role-only re-read of the person\'s saved condition, its quote outside this turn\'s words, is no loss: the retry is used', async () => {
+    const theirs = { text: 'if the supplier agrees', applies_to: ['push'], role: 'challenge' as const, source: 'user' as const, party: null, quote: 'if the supplier agrees' };
+    const saved = { ...structuredClone(KNOWN_ANSWER), conditions: [theirs] };
+    const p = product(saved);
+    const t = turn(p);
+    const args = (role: 'challenge' | 'assumption', prereq: 'prerequisite' | 'assumption') => ({ public_label: 'Update the model', basis: 'The person asked for it.', remove: [],
+      model: { ...structuredClone(saved), conditions: [{ ...theirs, role }, { text: PREREQ, applies_to: ['f_g'], role: prereq, source: 'olumi' as const, party: null, quote: null }] } });
+    expect(await call(t.propose, args('challenge', 'prerequisite'))).toMatchObject({ status: 'refused', reason: 'goal_path_withheld' });
+    const out = await call(t.propose, args('assumption', 'assumption'));
+    expect(out, JSON.stringify(out)).toMatchObject({ status: 'ok', data: { proposal_id: expect.any(String) } });
+    expect((out.data as Rec).restructure).toBeUndefined();
+  });
+
+  it('Codex r2 on #3675: today\'s level the person set on an aim of Olumi\'s is theirs: a retry that drops it is not used', () => {
+    const m = withCondition('prerequisite');
+    m.aims[0] = { ...m.aims[0]!, source: 'olumi', quote: null, target: { ...m.aims[0]!.target!, current: 70, current_source: 'user' } };
+    expect(personContentLost(m, { ...m, aims: [{ ...m.aims[0]!, target: { ...m.aims[0]!.target!, current: null, current_source: null } }] })).toEqual(['aims:g']);
+    expect(personContentLost(m, m)).toEqual([]);
+  });
+
   it('CONTRAST: a caller without the route\'s offer saves the first call, as before; its turn has nothing to settle', async () => {
     const p = product(null);
     const t = turn(p, false);
