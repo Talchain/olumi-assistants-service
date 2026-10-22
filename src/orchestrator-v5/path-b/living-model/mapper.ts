@@ -25,6 +25,7 @@ import { REPAIR_CODES, type RepairEntry } from '@talchain/schemas';
 import { LivingModel, type LivingModelT, type LivingSourceT } from '../../../schemas/living-model.js';
 import { aimTargetReading, stated } from './aim-reading.js';
 import { resolveGoalThresholdCapWithProvenance } from '../../../utils/goal-threshold-cap.js';
+import { isPercentScaledUnit } from '../../../cee/draft/records/unit-scale-class.js';
 import { admitGoalBaseline } from '../../../cee/factor-extraction/goal-baseline-admissibility.js';
 import { sayFigureAsWritten } from '../../agent-lane/say-figure.js';
 import { LLM_STRENGTH_STD_FLOOR } from '../../../cee/constants.js';
@@ -305,13 +306,16 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
      * ⭐ A RELATIVE CHANGE WITH NO LEVEL TODAY (DL 22 Oct, item 2; Batch 0 change-goal decision, rulings 2, 6, 8 and 20; the served
      * Q1 run, "+25% bottling output", every link into the goal in %, held for a level nobody gave). Measured AS the change, as
      * the legacy lane measures hiring's "+10% productivity" (`admit-model.ts` change quantity): "% change from today", 0 today by
-     * definition, on its own 0–100 scale, with every effect read as a % of today's level, so no level is needed or made up. Only
-     * when the change is declared relative, of a named quantity, and every figure into the goal is in %: an absolute effect needs
-     * the level, so the goal stays held for it. Its period, when stated, goes with Olumi's reading (`goal_target_basis`), as the legacy lane's.
+     * definition, on the legacy lane's change scale (0–100, wider for a rise above 100%), with every effect read as a % of today's
+     * level, so no level is needed or made up. Only when the change is declared relative, from today (a stated other reference
+     * is never replaced by today), of a named quantity not itself measured in %, a cut of at most 100%, and every figure into the
+     * goal is in %: otherwise the goal stays held for its level, as before (Codex r1 on #3666). Its period, when stated, goes with
+     * Olumi's reading (`goal_target_basis`), as the legacy lane's.
      */
     const into = model.links.filter((l) => l.to === aim.id && [l.effect.value, l.effect.low, l.effect.high].some((v) => v !== null));
-    const relative = lt === 'goal_level_unknown' && t !== null && t.change_kind === 'relative' && t.unit === '%' && t.current_unit !== '%' && t.quantity.trim() !== ''
-      && t.value !== null && into.every((l) => l.effect.unit === '%')
+    const relative = lt === 'goal_level_unknown' && t !== null && t.change_kind === 'relative' && t.unit === '%' && t.quantity.trim() !== ''
+      && (t.baseline === null || /^\s*(the\s+)?(today|now|current|present)\b/i.test(t.baseline)) && !(t.current_unit !== null && isPercentScaledUnit(t.current_unit))
+      && t.value !== null && !(t.comparator === 'decrease' && Math.abs(t.value) > 100) && into.every((l) => l.effect.unit === '%')
       ? resolveGoalThresholdCapWithProvenance(undefined, Math.abs(t.value), '%', undefined) : null;
     if (relative !== null && t !== null && t.value !== null) {
       const signed = t.comparator === 'increase' ? Math.abs(t.value) : -Math.abs(t.value);

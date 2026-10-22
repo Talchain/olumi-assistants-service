@@ -11,6 +11,8 @@ import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import { assessCanonicalAnalysisReadiness } from '../../../../orchestrator/tools/analysis-ready-helper.js';
 import { projectCorePostimageForPersistence } from '../../../persisted-graph-projection.js';
 import { goalTargetBasisOf } from '../../../goal-target/goal-target-basis.js';
+import { goalTargetGapOf } from '../../../goal-target/goal-target-gap.js';
+import { projectCanonicalAnalysisCells } from '../../../../routes/canonical-analysis-view.js';
 import { mapLivingModel } from '../mapper.js';
 
 type Rec = Record<string, any>;
@@ -34,6 +36,7 @@ const model = (target: Partial<Target> = {}, linkUnit = '%'): LivingModelT => ({
 });
 const goalOf = (g: Rec): Rec => (g.nodes as Rec[]).find((n) => n.kind === 'goal')!;
 const reasons = (m: LivingModelT) => mapLivingModel(m).withheld.map((w) => `${w.id}:${w.reason}`);
+const stored = (m: LivingModelT): Rec => projectCorePostimageForPersistence(GraphV3.parse({ ...mapLivingModel(m).graph, living_model: m })) as Rec;
 
 describe('a relative change with no level today is measured as the change, never held for a level', () => {
   it('the goal is "% change from today" on 0–100, with Olumi\'s reading beside it; no level is sent, nothing is held for one', () => {
@@ -71,6 +74,32 @@ describe('a relative change with no level today is measured as the change, never
     expect(goal.goal_target_basis.target_raw).toBe(-15);
   });
 
+  it('a rise above 100% sits on the legacy lane\'s wider change scale (the same resolver), and the same effect reads back the same', () => {
+    const { graph } = mapLivingModel(model({ value: 150 }));
+    const goal = goalOf(graph);
+    expect(goal).toMatchObject({ goal_threshold_raw: 150, goal_threshold_cap: 187.5, goal_threshold: 0.8, quantity_frame: 'change' });
+    const edge = (graph.edges as Rec[]).find((e) => e.id === 'speed_tp')!;
+    const fromCap = (graph.nodes as Rec[]).find((n) => n.id === 'speed')!.observed_state.cap as number;
+    expect(((12 - 10) / fromCap) * edge.strength.mean * goal.goal_threshold_cap).toBeCloseTo(3, 9);
+  });
+
+  it('Codex r1 on #3666: a chance withheld for another reason says that reason, never "needs today\'s level" (no level is needed)', () => {
+    const m = model();
+    m.conditions = [{ text: 'only after the new belt is fitted', applies_to: ['speed_tp'], role: 'prerequisite', source: 'user', party: null, quote: 'only after the new belt is fitted' }];
+    expect(reasons(m)).toContain('tp:chance_rests_on_withheld');
+    const g = stored(m);
+    expect(goalOf(g).quantity_frame, 'its frame stays when the threshold is withheld').toBe('change');
+    expect(goalTargetGapOf(g)).toBeNull();
+    const block = { type: 'analysis_result', enrichment: { option_comparison: [{ option_id: 'keep' }, { option_id: 'faster' }] } };
+    const cells = projectCanonicalAnalysisCells(block as never, g);
+    expect(cells.length).toBe(2);
+    for (const { cell } of cells) expect(JSON.stringify(cell)).not.toMatch(/today\u2019s level|today's level/);
+    // CONTRAST: the same withheld goal with an absolute effect still needs today's level, and asks for it.
+    const absolute = model({}, 'units per week');
+    absolute.conditions = m.conditions;
+    expect(goalTargetGapOf(stored(absolute))?.kind).toBe('goal_level_missing');
+  });
+
   it('a stated period goes with the reading, so the licence reads it; with none, the reading waits for the period (never guessed)', () => {
     const withPeriod = goalOf(mapLivingModel(model({ period_months: 6 })).graph);
     expect(withPeriod.goal_target_basis.period_months).toBe(6);
@@ -104,8 +133,19 @@ describe('REFUSALS: the goal stays held for its level wherever the change cannot
     expect(reasons(model({ quantity: '' }))).toContain('tp:goal_level_unknown');
   });
 
-  it('a quantity measured in % (points or % of today?) is never read here: held as before', () => {
-    expect(reasons(model({ current_unit: '%' }))).toContain('tp:goal_level_unknown');
+  it('a quantity measured in % (points or % of today?) is never read here, however "%" is spelled: held as before', () => {
+    for (const unit of ['%', 'percent', 'per cent', 'percentage points']) expect(reasons(model({ current_unit: unit })), unit).toContain('tp:goal_level_unknown');
+  });
+
+  it('Codex r1 on #3666: a stated reference other than today is never replaced by today: held as before', () => {
+    expect(reasons(model({ baseline: 'last quarter' }))).toContain('tp:goal_level_unknown');
+    expect(goalOf(mapLivingModel(model({ baseline: 'last quarter' })).graph).goal_target_basis).toBeUndefined();
+    // CONTRAST: today in other words (the served hiring reference) is today.
+    expect(goalOf(mapLivingModel(model({ baseline: 'Current throughput; level not yet supplied' })).graph).quantity_frame).toBe('change');
+  });
+
+  it('a cut of more than 100% is never read: held as before', () => {
+    expect(reasons(model({ comparator: 'decrease', value: 150 }))).toContain('tp:goal_level_unknown');
   });
 
   it('CONTRAST: with today\'s level stated, the change is read on that level, exactly as before (no change frame)', () => {
