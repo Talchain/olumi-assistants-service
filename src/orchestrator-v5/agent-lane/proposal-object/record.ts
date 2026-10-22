@@ -28,6 +28,7 @@ import { identityCardOfferable } from '../../system-events/identity-confirm-edit
 import { identityReadingOf } from '../identity-card.js';
 import { GM_HELD_HANDLER_ID, buildGmHeldPublicCopy } from '../../handlers/edit-graph-referee-gate.js';
 import { describeChangeset } from '../../handlers/describe-changeset.js';
+import { sayFigureWithoutRounding } from '../say-figure.js';
 import { GM_HELD_GRADED_TODAY_KEY, GM_HELD_SWITCH_FACTORS_KEY, readGradedTodayMember } from '../../routing/add-option-transaction.js';
 import { GM_HELD_USER_TODAY_KEY, readUserTodayMember } from '../../routing/add-factor-transaction.js';
 import { EDGE_STRENGTH_MIDPOINTS, edgeBandFromMagnitude, strengthBandFromEdgeBand } from '../../format/edge-strength-bands.js';
@@ -176,7 +177,18 @@ export interface LinkAddField {
   readonly source: 'estimate' | 'yours';
   readonly editable: false;
 }
-export type AddField = FactorAddField | LinkAddField;
+/**
+ * Everything else a core approval writes, one plain sentence per changed item (Track 3, 22 Oct: 12/12 approve presses wrote
+ * changes the card never showed; 9/12 showed nothing). Never editable; whose figure it is, as for an add.
+ */
+export interface ChangeNoteField {
+  readonly field_id: string;
+  readonly kind: 'change_note';
+  readonly text: string;
+  readonly source: 'estimate' | 'yours' | 'party' | 'unverified';
+  readonly editable: false;
+}
+export type AddField = FactorAddField | LinkAddField | ChangeNoteField;
 
 export interface MissingDatum {
   readonly node_id: string;
@@ -438,17 +450,32 @@ export function agentProposalRecord(pa: PendingAction, graph: unknown, nowMs = D
       const a = v['after'];
       const b = isRec(v['before']) ? v['before'] : {};
       const id = o.path.slice('factor:'.length);
+      // Olumi's labelled estimate on anyone's item is Olumi's figure, never "yours" (Codex r2 on #3632).
+      const olumis = a['source'] === 'olumi' || a['estimate_by'] === 'olumi';
       const theirs = a['source'] === 'user' && typeof a['quote'] === 'string' && a['quote'] !== '' && a['quote'] !== b['quote'];
       if (typeof a['value'] !== 'number' || !Number.isFinite(a['value']) || a['low'] != null || a['high'] != null
         || typeof a['unit'] !== 'string' || a['unit'] === '' || a['value'] === b['value']
-        || (a['source'] !== 'olumi' && !theirs)) continue;
+        || (!olumis && !theirs)) continue;
       fields.push({ field_id: `factor_value:${id}`, kind: 'factor_value', node_id: id,
         label: typeof a['label'] === 'string' ? a['label'] : labelOf(id), unit: a['unit'],
-        current: { value: a['value'], unit: a['unit'], source: a['source'] === 'user' ? 'yours' : 'estimate' },
+        current: { value: a['value'], unit: a['unit'], source: olumis ? 'estimate' : 'yours' },
         filled_missing: typeof b['value'] !== 'number', editable: false });
     }
   }
-  const adds = coreAdds(p.operations, labelOf);
+  // A label the saved graph lacks (an aim with no graph node) is read from the saved living model (Track 3: the link into
+  // the hiring aim "productivity" was dropped from the card, then written).
+  const living = isRec(graph) && isRec(graph['living_model']) ? graph['living_model'] : {};
+  const livingLabel = (id: string): string | undefined => {
+    for (const k of ['aims', 'options', 'factors', 'risks']) {
+      const hit = (Array.isArray(living[k]) ? living[k] as unknown[] : []).filter(isRec).find((x) => x['id'] === id);
+      const words = hit?.['label'] ?? hit?.['text'];
+      if (typeof words === 'string' && words.trim() !== '') return words;
+    }
+    return undefined;
+  };
+  const savedLabelOf = (id: string): string => { const l = labelOf(id); return l !== id ? l : livingLabel(id) ?? id; };
+  const shownAdds = coreAdds(p.operations, savedLabelOf);
+  const adds = [...shownAdds, ...coreChangeNotes(p.operations, shownAdds, fields, savedLabelOf)];
   const decline: CardAction = { id: declineChipIdFor(p.proposal_id), label: 'Not now', message: 'Not now.' };
   // A card that adds nothing keeps its digest byte-identical (a card issued before this projection still binds).
   const digest = projectionDigest({ p: p.proposal_id, r: pa.id, g: p.base_graph_identity_hash, approve, decline, fields, missing: [],
@@ -494,7 +521,8 @@ function coreAdds(operations: readonly HeldOp[], savedLabel: (id: string) => str
       const point = typeof a['value'] === 'number' && Number.isFinite(a['value']) && a['low'] == null && a['high'] == null
         && typeof a['unit'] === 'string' && a['unit'] !== '';
       adds.push({ field_id: `factor_add:${id}`, kind: 'factor_add', node_id: id, label,
-        value: point ? { value: a['value'] as number, unit: a['unit'] as string } : null, source: by, editable: false });
+        value: point ? { value: a['value'] as number, unit: a['unit'] as string } : null,
+        source: point && a['estimate_by'] === 'olumi' ? 'estimate' : by, editable: false });
     } else if (o.path.startsWith('link:')) {
       const sign = isRec(a['effect']) ? a['effect']['sign'] : null;
       const from = labelOf(a['from']);
@@ -506,6 +534,303 @@ function coreAdds(operations: readonly HeldOp[], savedLabel: (id: string) => str
   }
   return adds;
 }
+type NoteSource = ChangeNoteField['source'];
+type Who = { readonly tag: string; readonly source: NoteSource };
+/** The canvas reader drops a longer note (DGAI proposalFields): a longer sentence is split into parts, never cut. */
+const NOTE_MAX = 400;
+const quoted = (t: string): string => `‘${t}’`;
+/** Content, never key order (a stored hold may come back from JSONB in another order; Codex r1 on #3632). */
+const stableJson = (v: unknown): string => (Array.isArray(v) ? `[${v.map(stableJson).join(',')}]`
+  : v !== null && typeof v === 'object' ? `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${stableJson((v as Rec)[k])}`).join(',')}}`
+    : JSON.stringify(v ?? null));
+const OLUMI: Who = { tag: 'Olumi’s estimate', source: 'estimate' };
+/** Whose a record is: Olumi's estimate, the person's, a named party's, or a source not yet confirmed. */
+function whoseOf(r: Rec): Who {
+  if (r['source'] === 'olumi') return OLUMI;
+  if (r['source'] === 'user') return { tag: 'yours', source: 'yours' };
+  if (r['source'] === 'party') return { tag: typeof r['party'] === 'string' && r['party'] !== '' ? `${r['party']}’s` : 'a party’s', source: 'party' };
+  return { tag: 'source not yet confirmed', source: 'unverified' };
+}
+/** The words for each part of a living-model item (src/schemas/living-model.ts); an unlisted key is said as written. */
+const KEY_WORDS: Readonly<Record<string, string>> = { label: 'name', text: 'wording', quote: 'recorded words', value: 'figure',
+  low: 'low end', high: 'high end', sd: 'spread', unit: 'unit', form: 'form', sign: 'direction', target: 'target', quantity: 'measure',
+  comparator: 'comparison', by_when: 'date', period_months: 'period', baseline: 'baseline', current: 'today’s level',
+  current_unit: 'today’s unit', change_kind: 'kind of change', status: 'status', kind: 'type', limit: 'limit', defined_as: 'definition',
+  op: 'kind', of: 'parts', occurrence: 'chance', horizon_months: 'window', effect: 'effect', from: 'from', to: 'to',
+  applies_to: 'applies to', role: 'role', developed_from: 'developed from', holder: 'holder', position: 'view', reduction: '' };
+const VALUE_WORDS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  comparator: { '>=': 'at least', '<=': 'at most', '<': 'below', '>': 'above', '=': 'exactly', increase: 'an increase', decrease: 'a decrease' },
+  sign: { '+': 'raises it', '-': 'lowers it' }, op: { sum: 'the sum', product: 'the product' },
+  status: { feasible: 'compared', infeasible: 'ruled out (kept in view)', removed: 'taken out of the comparison', current: 'current', later: 'for later', withdrawn: 'withdrawn' },
+  form: { point: 'a point figure', exact: 'exact', range: 'a range', normal: 'a normal spread', direction_only: 'direction only', unknown: 'not known' },
+  change_kind: { absolute: 'an absolute change', relative: 'a relative change', points: 'percentage points' },
+  role: { challenge: 'a challenge', assumption: 'an assumption', prerequisite: 'a prerequisite' }, kind: { factor: 'a factor', outcome: 'an outcome' } };
+const KEY_ORDER: readonly string[] = ['label', 'text', 'holder', 'position', 'quantity', 'comparator', 'op', 'of', 'value', 'reduction', 'low', 'high', 'sd', 'unit', 'form', 'sign'];
+/** Parts said in the plural. */
+const PLURAL: ReadonlySet<string> = new Set(['quote', 'of', 'applies_to']);
+/** Keys whose values are other items' ids, said by name. */
+const REF_KEYS: ReadonlySet<string> = new Set(['from', 'to', 'factor_id', 'of', 'applies_to', 'developed_from']);
+/** Who-keys of a record, and the parts of that record each one says whose they are; `source`/`party` say the rest. */
+const OWNER_KEYS: Readonly<Record<string, { readonly words: string; readonly parts: readonly string[] }>> = {
+  // Olumi's WHOLE figure on another's item (schema `estimateBy`): its size, never the direction the source stated (Codex r4).
+  estimate_by: { words: 'figure', parts: ['value', 'low', 'high', 'sd', 'unit', 'form'] },
+  current_source: { words: 'today’s level', parts: ['current', 'current_unit'] }, horizon_by: { words: 'window', parts: ['horizon_months'] } };
+const WHO_KEYS: ReadonlySet<string> = new Set(['source', 'party', ...Object.keys(OWNER_KEYS)]);
+/** Lists of records, each told apart by the item it names. */
+const ELEMENT: Readonly<Record<string, { readonly key: string; readonly words: (name: string) => string }>> = {
+  settings: { key: 'factor_id', words: (n) => `setting for ${n}` }, mitigations: { key: 'factor_id', words: (n) => `reduction by ${n}` } };
+/** A share said as an exact percentage (a risk's chance, a step's reduction), never rounded away (Codex r3: 0.0004 read 0%). */
+const SHARE = /(?:^|\.)(?:occurrence\.(?:low|high)|reduction)$/;
+/**
+ * A share as a percentage, by moving the decimal point in its written digits: every digit kept, never re-read as a number
+ * (Codex r4: 12.3456789012%; r5: a re-read rounded 12.345678901234568% to …567%).
+ */
+function percentText(v: number): string {
+  const [m = '', e = '0'] = String(v).split('e');
+  const neg = m.startsWith('-');
+  const [i = '', f = ''] = m.replace('-', '').split('.');
+  let digits = i + f;
+  let point = i.length + Number(e) + 2;
+  if (point <= 0) { digits = '0'.repeat(1 - point) + digits; point = 1; }
+  if (point > digits.length) digits += '0'.repeat(point - digits.length);
+  const whole = digits.slice(0, point).replace(/^0+(?=\d)/, '');
+  const frac = digits.slice(point).replace(/0+$/, '');
+  return `${neg ? '-' : ''}${whole}${frac === '' ? '' : `.${frac}`}%`;
+}
+/** A unit is said with its figures; on its own only where its record has none. */
+const UNIT_OF: Readonly<Record<string, readonly string[]>> = { unit: ['value', 'low', 'high', 'sd'], current_unit: ['current'] };
+const hasFigure = (r: Rec, unitKey: string): boolean => (UNIT_OF[unitKey] ?? []).some((k) => typeof r[k] === 'number' && Number.isFinite(r[k]));
+
+/** One said part of an item: its words, what it says, and whose it is (absent where the part says whose it is itself). */
+interface Said { readonly path: string; readonly text: string; readonly who?: Who; readonly owners?: readonly Who[] }
+
+/**
+ * ⭐ THE CARD SHOWS EVERY CHANGE IT WRITES (Track 3, 22 Oct, consent: 12/12 core approvals wrote changes the card never
+ * showed). Re-scoped after Codex r3 on #3632 (per-kind sentences kept leaving parts unshown or misattributed): each note is
+ * built BY STRUCTURE. A changed item says every part that differs, "<part> was X, now Y"; an added item says every part it
+ * writes; a removed item is named. Each value as written (its record's unit; a share as an exact %; ids by name), each run of
+ * parts with whose its record is (Olumi's labelled estimate first). What a field or add already shows in full is not repeated.
+ * History entries (the host's own record) excepted. Nothing is cut: a longer note is split into numbered parts.
+ */
+function coreChangeNotes(operations: readonly HeldOp[], adds: readonly AddField[], fields: readonly ProposalField[],
+  savedLabel: (id: string) => string): ChangeNoteField[] {
+  // Labels as the card's adds read them: the proposed model's own items first, then the saved ones.
+  const proposed = new Map<string, string>();
+  for (const o of operations) {
+    const a = o.op === 'living_change' && isRec(o.value) && isRec(o.value['after']) ? o.value['after'] : undefined;
+    const words = a?.['label'] ?? a?.['text'];
+    const sep = o.path.indexOf(':');
+    if (a !== undefined && CARD_KINDS.has(o.path.slice(0, sep)) && typeof words === 'string' && words.trim() !== '') proposed.set(o.path.slice(sep + 1), words);
+  }
+  const name = (id: unknown): string => quoted(typeof id === 'string' ? proposed.get(id) ?? savedLabel(id) : 'an item');
+  // Whose a part is: its record's own who-key for that part, else the nearest record that says whose it is.
+  const whoOf = (chain: readonly Rec[], key?: string): Who => {
+    const own = chain[chain.length - 1]!;
+    for (const [k, o] of Object.entries(OWNER_KEYS)) {
+      if (key !== undefined && o.parts.includes(key) && own[k] === 'olumi') return OLUMI;
+      if (key !== undefined && o.parts.includes(key) && own[k] === 'user') return { tag: 'yours', source: 'yours' };
+    }
+    for (let i = chain.length - 1; i >= 0; i -= 1) {
+      const r = chain[i]!;
+      if (r['source'] != null) return whoseOf(r);
+      if (i === 0 && typeof r['holder'] === 'string') return { tag: `${r['holder']}’s`, source: 'party' };
+    }
+    return whoseOf(chain[0]!);
+  };
+  const unitOf = (chain: readonly Rec[], key: string): string => {
+    const own = chain[chain.length - 1]!;
+    if (key === 'current' && typeof own['current_unit'] === 'string') return own['current_unit'];
+    if (key === 'horizon_months' || key === 'period_months') return 'months';
+    for (let i = chain.length - 1; i >= 0; i -= 1) if (typeof chain[i]!['unit'] === 'string') return chain[i]!['unit'] as string;
+    return '';
+  };
+  const say = (v: unknown, key: string, path: string, chain: readonly Rec[]): string => {
+    if (v === null || v === undefined || (Array.isArray(v) && v.length === 0)) return 'not stated';
+    if (REF_KEYS.has(key)) return Array.isArray(v) ? v.map(name).join(' and ') : name(v);
+    if (typeof v === 'string') return VALUE_WORDS[key]?.[v] ?? `“${v}”`;
+    if (typeof v === 'number') return SHARE.test(path)
+      ? percentText(v) : sayFigureWithoutRounding(v, unitOf(chain, key));
+    if (typeof v === 'boolean') return v ? 'yes' : 'no';
+    if (Array.isArray(v)) return v.map((x) => (typeof x === 'string' ? `“${x}”` : stableJson(x))).join(' and ');
+    return stableJson(v);
+  };
+  // A fixed order (the item's words, then its figure as a person reads it, the rest by key, the recorded words last): never key order.
+  const rank = (k: string): number => { const i = KEY_ORDER.indexOf(k); return k === 'quote' ? KEY_ORDER.length + 1 : i < 0 ? KEY_ORDER.length : i; };
+  // Each run of parts with the same owner closes with whose they are.
+  const tagged = (said: readonly Said[], sep: string): string => said.map((s, i) => {
+    const next = said[i + 1];
+    return s.who !== undefined && (next?.who === undefined || next.who.tag !== s.who.tag) ? `${s.text} (${s.who.tag})` : s.text;
+  }).join(sep);
+  const keysOf = (b: Rec, a: Rec): string[] => [...new Set([...Object.keys(b), ...Object.keys(a)])].sort()
+    .sort((x, y) => rank(x) - rank(y)).filter((k) => k !== 'id' && !WHO_KEYS.has(k));
+  const join = (words: readonly string[]): string => words.filter((w) => w !== '').join(' ');
+  // Every part a record writes (an added item or sub-record), skipping empty parts.
+  const list = (a: Rec, chain: readonly Rec[], words: readonly string[], path: string, skip: ReadonlySet<string>, out: Said[]): void => {
+    for (const k of keysOf({}, a)) {
+      const v = a[k];
+      const p = path === '' ? k : `${path}.${k}`;
+      if (skip.has(p) || v === null || v === undefined || v === '' || (Array.isArray(v) && v.length === 0) || (k in UNIT_OF && hasFigure(a, k))) continue;
+      const w = [...words, KEY_WORDS[k] ?? k.replace(/_/g, ' ')];
+      if (ELEMENT[k] !== undefined && Array.isArray(v)) {
+        for (const el of v.filter(isRec)) list(el, [...chain, el], [...words, ELEMENT[k]!.words(name(el[ELEMENT[k]!.key]))], p, new Set([`${p}.${ELEMENT[k]!.key}`]), out);
+      } else if (isRec(v)) list(v, [...chain, v], w, p, skip, out);
+      else out.push({ path: p, text: `${join(w)} ${say(v, k, p, chain)}`, who: whoOf(chain, k) });
+    }
+  };
+  // A removed record's parts, each run with whose they were (Codex r4: a removed party's limit lost its owner), and those
+  // owners, for the note's own source (r5: a removed Olumi estimate under the person's setting read as "yours").
+  const removed = (path: string, words: readonly string[], a: Rec, chain: readonly Rec[], skip: ReadonlySet<string> = new Set()): Said => {
+    const out: Said[] = [];
+    list(a, chain, [], path, skip, out);
+    return { path, text: `${join(words)} removed (was ${tagged(out, ', ') || 'nothing'})`, owners: out.flatMap((x) => (x.who === undefined ? [] : [x.who])) };
+  };
+  // Every part that differs between two versions of a record, and every change of whose a part is.
+  const diff = (b: Rec, a: Rec, cb: readonly Rec[], ca: readonly Rec[], words: readonly string[], path: string, out: Said[]): void => {
+    for (const k of keysOf(b, a)) {
+      const bv = b[k];
+      const av = a[k];
+      if (stableJson(bv ?? null) === stableJson(av ?? null)) continue;
+      const p = path === '' ? k : `${path}.${k}`;
+      const w = [...words, KEY_WORDS[k] ?? k.replace(/_/g, ' ')];
+      const el = ELEMENT[k];
+      if (el !== undefined && (Array.isArray(bv) || Array.isArray(av))) {
+        // Each entry kept, a repeat of the same item by its turn (Codex r4: a duplicate setting hid a write).
+        const byId = (xs: unknown): Map<string, Rec> => {
+          const m = new Map<string, Rec>();
+          (Array.isArray(xs) ? xs : []).filter(isRec).forEach((x, i) => {
+            const base = typeof x[el.key] === 'string' ? x[el.key] as string : `#${i}`;
+            let k = base;
+            for (let n = 2; m.has(k); n += 1) k = `${base}#${n}`;
+            m.set(k, x);
+          });
+          return m;
+        };
+        const was = byId(bv);
+        const now = byId(av);
+        for (const id of [...new Set([...now.keys(), ...was.keys()])]) {
+          const eb = was.get(id);
+          const ea = now.get(id);
+          const named = name((ea ?? eb)![el.key]);
+          const ew = [...words, `${el.words(named)}${id.includes('#') ? ` (entry ${id.slice(id.indexOf('#') + 1)})` : ''}`];
+          if (eb === undefined) list(ea!, [...ca, ea!], [...words, `new ${ew[ew.length - 1]}`], p, new Set([`${p}.${el.key}`]), out);
+          else if (ea === undefined) out.push(removed(p, ew, eb, [...cb, eb], new Set([`${p}.${el.key}`])));
+          else if (stableJson(eb) !== stableJson(ea)) diff(eb, ea, [...cb, eb], [...ca, ea], ew, p, out);
+        }
+      } else if ((isRec(bv) || bv == null) && (isRec(av) || av == null)) {
+        if (isRec(bv) && isRec(av)) diff(bv, av, [...cb, bv], [...ca, av], w, p, out);
+        else if (isRec(av)) list(av, [...ca, av], [...words, `new ${KEY_WORDS[k] ?? k.replace(/_/g, ' ')}`], p, new Set(), out);
+        else if (isRec(bv)) out.push(removed(p, w, bv, [...cb, bv]));
+      } else {
+        const was = say(bv, k, p, cb);
+        const now = say(av, k, p, ca);
+        out.push({ path: p, text: `${join(w)} ${PLURAL.has(k) ? 'were' : 'was'} ${was}, now ${now}${was === now ? ' (a different item with the same name)' : ''}`, who: whoOf(ca, k) });
+      }
+    }
+    // Whose it is, said where it changes: the record's own source, and each who-key's parts.
+    if (stableJson([b['source'], b['party']]) !== stableJson([a['source'], a['party']]) && whoOf(cb).tag !== whoOf(ca).tag) {
+      out.push({ path: `${path}.source`, text: `${join(words) === '' ? 'it' : join(words)} is now ${whoOf(ca).tag} (was ${whoOf(cb).tag})` });
+    }
+    for (const [k, o] of Object.entries(OWNER_KEYS)) {
+      const part = o.parts.find((x) => x in a || x in b) ?? o.parts[0]!;
+      if (b[k] !== a[k] && whoOf(cb, part).tag !== whoOf(ca, part).tag) {
+        const what = k === 'estimate_by' && join(words) !== '' ? join(words) : join([...words, o.words]);
+        out.push({ path: `${path}.${k}`, text: `${what} is now ${whoOf(ca, part).tag} (was ${whoOf(cb, part).tag})` });
+      }
+    }
+  };
+  const sentence = (said: readonly Said[]): string => tagged(said, '; ');
+  // Olumi's estimate anywhere marks the note Olumi's; else one owner of every part is the note's; else the item's.
+  const sourceOf = (said: readonly Said[], item: Who): NoteSource => {
+    const owners = new Set(said.flatMap((s) => [...(s.who === undefined ? [] : [s.who]), ...(s.owners ?? [])].map((w) => w.source)));
+    return owners.has('estimate') ? 'estimate' : owners.size === 1 ? [...owners][0]! : item.source;
+  };
+  const shownFigure = new Map<string, string>();
+  for (const f of fields) if (f.kind === 'factor_value') shownFigure.set(`factor:${f.node_id}`, f.current.source);
+  const addOf = new Map(adds.map((a) => [a.kind === 'factor_add' ? `factor:${a.node_id}` : a.kind === 'link_add' ? `link:${a.link_id}` : '', a]));
+  const KIND_WORDS: Readonly<Record<string, string>> = { aim: 'the aim', option: 'the option', factor: 'the factor', risk: 'the risk', link: 'the link', condition: 'the condition', view: '' };
+  const notes: ChangeNoteField[] = [];
+  const used = new Set<string>();
+  const push = (path: string, change: string, text: string, source: NoteSource): void => {
+    // Split into parts the canvas reads in full (each "(n/N)"), at clause boundaries ("; ") so a figure stays with its unit;
+    // only a single clause longer than a part is split between words, and a single word longer than a part between
+    // characters (Codex r2 on #3632: a 401-character word made a 409-character part). No written detail is cut.
+    const room = NOTE_MAX - ' (999/999)'.length;
+    const words = (clause: string): string[] => clause.split(' ').flatMap((w) => {
+      const out: string[] = [];
+      for (let k = 0; k < w.length; k += room) out.push(w.slice(k, k + room));
+      return out.length === 0 ? [w] : out;
+    });
+    const pieces = text.length <= NOTE_MAX ? [text] : text.split('; ').flatMap((clause) => {
+      if (clause.length <= room) return [clause];
+      const out: string[] = [];
+      let cur = '';
+      for (const w of words(clause)) { if (cur !== '' && `${cur} ${w}`.length > room) { out.push(cur); cur = w; } else cur = cur === '' ? w : `${cur} ${w}`; }
+      return cur === '' ? out : [...out, cur];
+    });
+    const chunks: string[] = [];
+    let cur = '';
+    for (const piece of pieces) {
+      if (cur !== '' && `${cur}; ${piece}`.length > room) { chunks.push(cur); cur = piece; } else cur = cur === '' ? piece : `${cur}; ${piece}`;
+    }
+    if (cur !== '') chunks.push(cur);
+    // One id per note: a positional path (a condition removed and another added at index 0) is told apart by its change.
+    let base = `change_note:${path}`;
+    for (let n = 1; used.has(base); n += 1) base = `change_note:${path}:${change}${n === 1 ? '' : `:${n}`}`;
+    used.add(base);
+    chunks.forEach((c, k) => notes.push({ field_id: chunks.length === 1 ? base : `${base}#${k + 1}`, kind: 'change_note',
+      text: chunks.length === 1 ? c : `${c} (${k + 1}/${chunks.length})`, source, editable: false }));
+  };
+  for (const o of operations) {
+    if (o.op !== 'living_change' || !isRec(o.value)) continue;
+    const sep = o.path.indexOf(':');
+    const kind = o.path.slice(0, sep);
+    const id = o.path.slice(sep + 1);
+    if (kind === 'history') continue;
+    const v = o.value;
+    const before = isRec(v['before']) ? v['before'] : {};
+    const after = isRec(v['after']) ? v['after'] : {};
+    const item = v['change'] === 'remove' ? before : after;
+    // An item's own words first (a removed item is in no proposed list and may have no saved node), then the card's labels.
+    const ownWords = item['label'] ?? item['text'];
+    const own = kind === 'link' ? `${name(item['from'])} → ${name(item['to'])}` : kind === 'view' ? `${String(item['holder'] ?? 'a party')}’s view`
+      : kind === 'condition' ? `“${String(item['text'] ?? '')}”`
+      : typeof ownWords === 'string' && ownWords.trim() !== '' ? quoted(ownWords) : name(id);
+    const who = whoOf([item]);
+    if (v['change'] === 'remove') {
+      push(o.path, 'remove', kind === 'link' ? `Removes the link ${own}.` : kind === 'condition' ? `Moves the condition “${String(before['text'] ?? '')}” to history.`
+        : kind === 'view' ? `Replaces ${own}.` : `Removes ${own}.`, who.source);
+      continue;
+    }
+    const said: Said[] = [];
+    if (v['change'] === 'add') {
+      const shown = addOf.get(o.path);
+      // What the add already shows, unless it shows another owner than the item's (then the name says whose it is).
+      const skip = new Set(['label', 'text', 'holder', ...(after['kind'] === 'factor' ? ['kind'] : []),
+        ...(after['status'] === 'feasible' || after['status'] === 'current' ? ['status'] : [])]);
+      // The add shows a point figure with its unit; a figureless add's unit is said here (Codex r4: "hours" was unshown).
+      if (shown?.kind === 'factor_add' && shown.value !== null) { skip.add('value'); skip.add('unit'); }
+      if (shown?.kind === 'link_add') {
+        const e = isRec(after['effect']) ? after['effect'] : {};
+        for (const k of ['from', 'to', 'effect.sign', ...(e['form'] === 'direction_only' ? ['effect.form'] : []), ...(hasFigure(e, 'unit') ? [] : ['effect.unit'])]) skip.add(k);
+      }
+      list(after, [after], [], '', skip, said);
+      // A shown add says whose its figure is; where the item is someone else's, the note says so.
+      const otherOwner = shown !== undefined && shown.source !== who.source;
+      if (shown !== undefined && said.length === 0 && !otherOwner) continue;
+      const head = shown !== undefined ? `${own}${otherOwner ? ` is ${who.tag}` : ''}` : `${kind === 'view' ? 'Records' : `Adds ${KIND_WORDS[kind] ?? ''}`.trimEnd()} ${own}`;
+      push(o.path, 'add', said.length === 0 ? `${head}${shown !== undefined ? '' : ` (${who.tag})`}.` : `${head}: ${sentence(said)}.`, sourceOf(said, who));
+      continue;
+    }
+    diff(before, after, [before], [after], [], '', said);
+    // A changed point figure the card's field shows, with the same owner, is not repeated.
+    const field = shownFigure.get(o.path);
+    const rest = said.filter((s) => !(field !== undefined && s.path === 'value' && s.who?.source === field));
+    if (field !== undefined && rest.length === 0) continue;
+    push(o.path, 'change', rest.length === 0 ? `Changes ${own} (${who.tag}).` : `Changes ${kind === 'link' ? 'the link ' : ''}${own}: ${sentence(rest)}.`, sourceOf(rest, who));
+  }
+  return notes;
+}
+
 /** One envelope, with a reader for each stored dialect. */
 export function proposalRecord(pa: PendingAction, graph: unknown, nowMs = Date.now()): ProposalRecord | undefined {
   // ⛔ #2851 buddy r2 P1: a held identity card is projected (carried on a turn, served on reload) only while it is still
