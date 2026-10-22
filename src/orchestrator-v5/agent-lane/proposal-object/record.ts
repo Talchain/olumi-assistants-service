@@ -542,8 +542,11 @@ function coreAdds(operations: readonly HeldOp[], savedLabel: (id: string) => str
 }
 type NoteSource = ChangeNoteField['source'];
 type Who = { readonly tag: string; readonly source: NoteSource };
-/** The canvas reader drops a longer note (DGAI proposalFields): a longer sentence is split into parts, never cut. */
-const NOTE_MAX = 400;
+/**
+ * The canvas reads a whole note up to 4,000 characters (DGAI #2922, 22 Oct), so a change is said as ONE note (canvas-lm via DL,
+ * M4). Only a note past that is split into parts, never cut.
+ */
+const NOTE_MAX = 4000;
 const quoted = (t: string): string => `‘${t}’`;
 /** Content, never key order (a stored hold may come back from JSONB in another order; Codex r1 on #3632). */
 const stableJson = (v: unknown): string => (Array.isArray(v) ? `[${v.map(stableJson).join(',')}]`

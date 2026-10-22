@@ -43,10 +43,25 @@ export interface ImpliedQuantityTarget { readonly node_id: string; readonly labe
 
 const STRUCTURAL = new Set(['option', 'decision']);
 
-/** Each sized item's frame, from the stored graph's own living model; undefined for a scenario with none (a legacy one). */
-export function livingFramesOf(graph: unknown): ReadonlyMap<string, Frame> | undefined {
+/**
+ * Each sized item's frame, and the aim's own stated deadline ("within 3 weeks"), from the stored graph's own living model;
+ * undefined for a scenario with none (a legacy one). The deadline is read from the aim itself: with no target figure the
+ * engine graph's goal carries none (DL 22 Oct: 80a77832 saved by_when with period_months null, and M4 must use it).
+ */
+export function livingFramesOf(graph: unknown): (ReadonlyMap<string, Frame> & { readonly byWhen?: string | null }) | undefined {
   const living = LivingModel.safeParse(isRec(graph) ? graph.living_model : undefined);
-  return living.success ? mapLivingModel(living.data, savedGoal(graph)).frames : undefined;
+  if (!living.success) return undefined;
+  const goal = savedGoal(graph);
+  const frames = mapLivingModel(living.data, goal).frames;
+  const aim = living.data.aims.find((a) => a.id === goal.goal) ?? living.data.aims.find((a) => a.status === 'current');
+  const byWhen = aim?.target?.by_when?.trim();
+  return Object.assign(new Map(frames), { byWhen: byWhen === undefined || byWhen === '' ? null : byWhen });
+}
+
+/** The time scope the person declared, said as they wrote it: "within 3 weeks" as is, "March 2027" as "by March 2027". */
+export function sayTimeScope(byWhen: string | null): string | null {
+  if (byWhen === null) return null;
+  return /^(by|within|in|before|over|during|at|until|on)\b/i.test(byWhen) ? byWhen : `by ${byWhen}`;
 }
 
 /** The quantity the Run reads (see the header), or why there is none. Pure. */
@@ -113,11 +128,10 @@ export async function readImpliedQuantity(input: {
   }
   if (Object.keys(by_option).length === 0) return withheld('engine_read_failed');
   const counts = goalChanceEstimateCounts(input.graph, input.optionIds, target.node_id);
-  const goal = (isRec(input.graph) && Array.isArray(input.graph.nodes) ? input.graph.nodes.filter(isRec) : []).find((n) => n.id === input.goalId);
-  const byWhen = typeof goal?.goal_deadline_as_stated === 'string' && goal.goal_deadline_as_stated.trim() !== '' ? goal.goal_deadline_as_stated : null;
+  const frames = input.frames as { readonly byWhen?: string | null };
   return { version: 1, status: 'computed', node_id: target.node_id, quantity: target.label, unit: target.unit, by_option,
     rests_on_olumi_estimates: counts.links > 0 || counts.values > 0 || Object.values(counts.settingsByOption).some((n) => n > 0),
-    by_when: byWhen };
+    by_when: frames.byWhen ?? null };
 }
 
 /** The stored record, read back strictly: anything else is absent. */

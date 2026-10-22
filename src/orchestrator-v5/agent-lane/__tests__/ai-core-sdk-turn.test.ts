@@ -708,6 +708,18 @@ describe('PATH-B core turn on the Agents SDK', () => {
         expect(callable(b), 'no model writer is callable').toEqual(['apply_change', 'read_canonical_context', 'run_analysis']);
       }
     });
+    it('M4 (DL 22 Oct): with no reply budget given (the core route), a press keeps the typed budget and still offers no writer', async () => {
+      scripted = [[{ type: 'message', text: 'Synthetic answer.' }]];
+      const c = caps();
+      await turn('', c, { press: { decision: 'decline', proposal_id: PID }, tools: namedTools(c) });
+      expect(sent.length).toBeGreaterThan(0);
+      for (const b of sent) {
+        expect(b.model).toBe(BUILDER.model);
+        expect(b.reasoning?.effort, 'the typed turn\'s effort, so it reads their cached prefix').toBe(BUILDER.reasoning_effort);
+        expect(b.max_output_tokens).toBe(BUILDER.max_output_tokens);
+        expect(callable(b), 'no model writer is callable').toEqual(['apply_change', 'read_canonical_context', 'run_analysis']);
+      }
+    });
     it('CONTROL: a typed message, which may change the model, stays on the builder with every writer', async () => {
       scripted = [[{ type: 'message', text: 'Synthetic answer.' }]];
       const c = caps();

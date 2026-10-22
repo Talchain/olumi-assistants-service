@@ -17,7 +17,7 @@ import { readRawRobustnessSignals } from '../coaching/pick-raw-robustness.js';
 import { STATIC_LEVEL_CAPABILITY } from '../goal-target/run-question-scope.js';
 import { analysedOptionIds, conditionalInputFactsOf, conditionalInputDisclosuresOf, type ConditionalInputFacts } from './conditional-input-basis.js';
 import { goalMarginsOf, type GoalMargins } from './goal-margins.js';
-import { IMPLIED_QUANTITY_KEY, readStoredImpliedQuantity, type ImpliedQuantity, type ImpliedQuantityWithheld, type ImpliedRange } from '../goal-target/implied-quantity.js';
+import { IMPLIED_QUANTITY_KEY, readStoredImpliedQuantity, sayTimeScope, type ImpliedQuantity, type ImpliedQuantityWithheld, type ImpliedRange } from '../goal-target/implied-quantity.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -147,15 +147,15 @@ export type ImpliedByDeadline =
     readonly by_option: Readonly<Record<string, ImpliedRange>>;
     readonly rests_on_olumi_estimates: boolean; readonly ask: 'goal_target';
   }
-  | { readonly withheld: ImpliedQuantityWithheld };
+  | { readonly withheld: ImpliedQuantityWithheld; readonly ask: 'goal_target' };
 
 /** The Run's stored implied quantity as the AI reads it (three significant figures; the stored record keeps the exact values). */
 export function impliedByDeadlineOf(implied: ImpliedQuantity | undefined): ImpliedByDeadline | undefined {
   if (implied === undefined) return undefined;
-  if (implied.status === 'withheld') return { withheld: implied.reason };
+  if (implied.status === 'withheld') return { withheld: implied.reason, ask: 'goal_target' };
   const sig3 = (v: number) => Number(v.toPrecision(3));
   return {
-    label: `What the model implies for ${implied.quantity}${implied.by_when === null ? '' : ` by ${implied.by_when}`}, as the model stands`,
+    label: `What the model implies for ${implied.quantity}${implied.by_when === null ? '' : ` ${sayTimeScope(implied.by_when)}`}, as the model stands`,
     quantity: implied.quantity, unit: implied.unit,
     by_option: Object.fromEntries(Object.entries(implied.by_option).map(([id, r]) => [id, { p10: sig3(r.p10), p50: sig3(r.p50), p90: sig3(r.p90) }])),
     rests_on_olumi_estimates: implied.rests_on_olumi_estimates, ask: 'goal_target',

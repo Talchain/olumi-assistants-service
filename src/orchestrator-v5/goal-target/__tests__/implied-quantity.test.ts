@@ -16,7 +16,7 @@ import type { HandlerInvocation } from '../../tools/registry.js';
 import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import { mapLivingModel } from '../../path-b/living-model/mapper.js';
 import { runFactsOf } from '../../agent-lane/run-facts.js';
-import { IMPLIED_QUANTITY_KEY, impliedQuantityTarget, livingFramesOf, readImpliedQuantity, readStoredImpliedQuantity } from '../implied-quantity.js';
+import { IMPLIED_QUANTITY_KEY, impliedQuantityTarget, livingFramesOf, readImpliedQuantity, readStoredImpliedQuantity, sayTimeScope } from '../implied-quantity.js';
 
 type Json = Record<string, any>;
 const SCENARIO = 'f0f0f0f0-0000-4000-8000-0000000000a2';
@@ -96,6 +96,16 @@ describe('the quantity: sized, on every changing option\'s path, resting on noth
     expect(impliedQuantityTarget(g, 'funding', livingFramesOf(g)!, ['current'])).toBe('no_changing_option');
   });
 
+  it('the time scope is the aim\'s own deadline as written; none declared, none said', () => {
+    expect(livingFramesOf(stored(angels()))!.byWhen).toBe('within 3 weeks');
+    const m = angels();
+    const none = { ...m, aims: m.aims.map((a) => ({ ...a, target: { ...a.target!, by_when: null } })) };
+    expect(livingFramesOf(stored(none))!.byWhen).toBeNull();
+    expect(sayTimeScope('within 3 weeks')).toBe('within 3 weeks');
+    expect(sayTimeScope('March 2027')).toBe('by March 2027');
+    expect(sayTimeScope(null)).toBeNull();
+  });
+
   it('a legacy scenario (no living model) has no frames, so no quantity is read', () => {
     const { living_model: _gone, ...legacy } = stored(angels());
     expect(livingFramesOf(legacy)).toBeUndefined();
@@ -113,7 +123,7 @@ describe('the read: ONE engine read of the dispatched request, converted back wi
     const implied = await readImpliedQuantity({ graph: g, goalId: 'funding', frames, optionIds: OPTIONS, dispatched, seed: 'seed-80a7', run });
     expect(implied).toEqual({ version: 1, status: 'computed', node_id: 'commitments', quantity: 'Angels completing investment within three weeks', unit: 'angels',
       by_option: { current: { p10: 0.25 * cap, p50: 0.5 * cap, p90: 0.75 * cap }, warm: { p10: 0.5 * cap, p50: 0.75 * cap, p90: 1 * cap },
-        direct: { p10: 0.375 * cap, p50: 0.625 * cap, p90: 0.875 * cap } }, rests_on_olumi_estimates: false, by_when: null });
+        direct: { p10: 0.375 * cap, p50: 0.625 * cap, p90: 0.875 * cap } }, rests_on_olumi_estimates: false, by_when: 'within 3 weeks' });
     expect(Object.keys((implied as Json).by_option)).toEqual(OPTIONS);
     expect(((implied as Json).by_option.warm.p50 as number) / cap).toBe(0.75);
     // The Run's own graph, options and draws; nothing about the goal it has no target for.
@@ -176,7 +186,8 @@ describe('the Run: bound to the SAME Run, stored with it, never a second Run', (
     expect(typeof fact.result.run_id).toBe('string');
     // The AI's Run facts name the quantity, in its unit, model-relative: never a chance, a target or a ranking.
     const facts = runFactsOf({ enrichment: {} }, graph, true, { impliedQuantity: enrichment[IMPLIED_QUANTITY_KEY] });
-    expect(facts.implied_by_deadline).toMatchObject({ label: 'What the model implies for Angels completing investment within three weeks, as the model stands',
+    // The aim's own deadline, saved with no window (by_when 'within 3 weeks', period_months null), is the declared time scope.
+    expect(facts.implied_by_deadline).toMatchObject({ label: 'What the model implies for Angels completing investment within three weeks within 3 weeks, as the model stands',
       quantity: 'Angels completing investment within three weeks', unit: 'angels', ask: 'goal_target',
       by_option: { warm: { p10: Number((0.5 * cap).toPrecision(3)), p50: Number((0.75 * cap).toPrecision(3)), p90: Number((1 * cap).toPrecision(3)) } } });
     expect(JSON.stringify(facts.implied_by_deadline)).not.toMatch(/chance|target figure|best|winner|recommend|lead/i);
@@ -188,6 +199,9 @@ describe('the Run: bound to the SAME Run, stored with it, never a second Run', (
     const { plotRun, enrichment } = await runOn(angels({ splitPaths: true }));
     expect(plotRun).toHaveBeenCalledTimes(1);
     expect(readStoredImpliedQuantity(enrichment)).toEqual({ version: 1, status: 'withheld', reason: 'no_sized_quantity_on_every_path' });
+    // No range is made up: the facts keep the reason and name the one decisive missing input.
+    expect(runFactsOf({ enrichment: {} }, {}, true, { impliedQuantity: enrichment[IMPLIED_QUANTITY_KEY] }).implied_by_deadline)
+      .toEqual({ withheld: 'no_sized_quantity_on_every_path', ask: 'goal_target' });
   });
 
   it('CONTRAST: an aim WITH a target figure gives no extra engine read and stores nothing new', async () => {

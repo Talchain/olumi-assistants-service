@@ -48,7 +48,7 @@ export const AGENTS_SDK = '@openai/agents@0.18.0';
 export const CORE_MAX_MODEL_CALLS = 8;
 /** Rendered tokens past which the server compacts the Conversation (native compaction; the window grows every turn). */
 export const CORE_COMPACT_THRESHOLD = 100_000;
-/** The tools that draft or change the living model: never offered on a reply-only turn, so its fast budget writes no model. */
+/** The tools that draft or change the living model: never offered on a reply-only turn (a press carries no consent to draft). */
 const MODEL_WRITING_TOOLS: ReadonlySet<string> = new Set(['build_model_from_brief', 'propose_change']);
 /** The tools the route opens a reply-only turn on: the Run, and applying a change the person approved. */
 const REPLY_ENTRY_TOOLS: ReadonlySet<string> = new Set(['run_analysis', 'apply_change']);
@@ -274,8 +274,11 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
   };
   // The typed adapters (`path-b/tools`), less any the route withholds on this turn. Approval is theirs to require
   // (`needsApproval`) and the SDK's to pause on: no consent orchestration of our own.
-  // A reply-only turn runs on the fast budget without the model writers, so drafting and changes stay on the builder.
-  const fast = input.replyBudget !== undefined && replyOnlyTurn(input);
+  // A reply-only turn never offers the model writers, so drafting and changes stay on typed turns. It runs on the fast budget
+  // only where the caller gives one; the core route gives none (DL 22 Oct, M4), so its presses keep the typed turn's effort
+  // and settings and read the typed turns' cached prefix (the served A/B: a press at "low" read 0 of 37,303 tokens).
+  const replyOnly = replyOnlyTurn(input);
+  const fast = input.replyBudget !== undefined && replyOnly;
   const budget = fast ? input.replyBudget! : input.budget;
   /**
    * ⭐ ONE TOOL LIST, BYTE-IDENTICAL ON EVERY CALL (DL 22 Oct, the caching split: a list that changed with the turn's kind
@@ -283,7 +286,7 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
    * definition; the provider is told which it may call (`allowed_tools`, below), and the tool refuses in execute if it is
    * called anyway: no approval, nothing written.
    */
-  const blocked = (name: string): boolean => withheld.has(name) || (fast && MODEL_WRITING_TOOLS.has(name));
+  const blocked = (name: string): boolean => withheld.has(name) || (replyOnly && MODEL_WRITING_TOOLS.has(name));
   const allTools = input.tools(record);
   const allowedNames = allTools.flatMap((t) => ('name' in t && !blocked(t.name) ? [t.name] : []));
   const tools = allTools.map((t): Tool => {
