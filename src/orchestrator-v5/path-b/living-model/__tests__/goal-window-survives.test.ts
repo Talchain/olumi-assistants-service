@@ -5,7 +5,6 @@ import { assessCanonicalAnalysisReadiness } from '../../../../orchestrator/tools
 import { projectCorePostimageForPersistence } from '../../../persisted-graph-projection.js';
 import { riskOccurrenceWindowMonths } from '../../../agent-lane/risk-occurrence.js';
 import { readGoalRecord } from '../../../goal-target/goal-record.js';
-import { CORE_DRAFTER_RULES } from '../../drafting-guidance.js';
 import { mapLivingModel } from '../mapper.js';
 import { OLUMI_CHANCE } from './track2-f2-event-risk.fixtures.js';
 import { KNOWN_ANSWER } from './fixtures.js';
@@ -51,6 +50,7 @@ describe('the aim window survives the real mapper and readiness path', () => {
     m.links.push({ ...m.links[0]!, id: 'roof_gp', from: 'roof' });
     const { mapped, graph, goal } = run(m);
     expect(goal.goal_target_basis).toBeUndefined();
+    expect(goal.goal_horizon_months).toBe(18);
     expect(riskOccurrenceWindowMonths(graph)).toBe(18);
     expect(risk(graph)?.horizon.months).toBe(18);
     expect(risk(graph, 'roof')?.horizon.months).toBe(18);
@@ -59,7 +59,7 @@ describe('the aim window survives the real mapper and readiness path', () => {
     expect(goal.goal_threshold).toBeUndefined();
   });
 
-  it.each([18, 0.69])('a: window %s survives without a target reading or a chance', months => {
+  it.each([18, 0.69, 120])('a: window %s survives without a target reading or a chance', months => {
     const m = model(months);
     m.aims[0]!.target!.unit = null;
     m.aims[0]!.target!.value = null;
@@ -84,9 +84,20 @@ describe('the aim window survives the real mapper and readiness path', () => {
     expect(risk(graph)?.horizon.months).toBe(18);
   });
 
-  it('b/c: the drafter declares the calendar window once at write time and names its reading', () => {
-    const sentence = "For a calendar date ('by 30 June', 'the end of March'), set period_months to the months from today's date in your state to that date, reading a missing year as its next occurrence, and say in your reply the date you read it as.";
-    expect(CORE_DRAFTER_RULES.split(sentence)).toHaveLength(2);
+  it('ii: 150 months supplies no held window and holds Olumi risks as on base', () => {
+    const m = model(150, 'within 150 months');
+    Object.assign(m.aims[0]!.target!, { value: null, unit: null });
+    const { mapped, graph, goal } = run(m);
+    expect(goal.goal_target_basis).toBeUndefined();
+    expect(goal.goal_threshold).toBeUndefined();
+    expect(goal.goal_horizon_months).toBeUndefined();
+    expect(readGoalRecord(graph, goal.id)?.horizon).toEqual({ as_stated: 'within 150 months' });
+    expect(riskOccurrenceWindowMonths(graph)).toBeUndefined();
+    expect(risk(graph)).toBeUndefined();
+    expect(mapped.withheld).toContainEqual({ id: 'supplier_fails', reason: 'risk_window_not_goal_window' });
+    const base = structuredClone(m);
+    base.aims[0]!.target!.period_months = null;
+    expect(mapped.withheld).toEqual(run(base).mapped.withheld);
   });
 
   it('PURITY: the same saved models map to byte-identical output on different system days', () => {

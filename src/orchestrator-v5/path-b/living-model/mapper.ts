@@ -355,8 +355,9 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
         }
       }
     }
-    // No target/unit is needed to retain a window. The existing target reading remains authoritative when available.
-    if (window !== undefined && goalNode.goal_target_basis === undefined) goalNode.goal_horizon_months = window;
+    // Retain a bounded window only without a scored target; a visible chance keeps its existing horizon disclosure.
+    if (window !== undefined && window > 0 && window <= 120 && goalNode.goal_threshold === undefined
+      && goalNode.goal_target_basis === undefined) goalNode.goal_horizon_months = window;
   }
 
   // Joint goals are not in this slice: every other current aim with a target is kept in the living model, withheld here.

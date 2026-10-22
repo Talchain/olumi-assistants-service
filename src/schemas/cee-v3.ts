@@ -337,7 +337,7 @@ export const NodeV3 = z.object({
    * a top-level wire key. Same word, a different concept at a different level — but READ by it: a held `<=` / `<`
    * sends `'minimise'` (`resolveGoalDirection`, `goal-target/goal-direction.ts`); with none held, the label decides.
    *
-   * `goal_horizon_months` retains the aim window, including fractional months from Olumi's calendar reading. The analysis has no time axis: it
+   * `goal_horizon_months` retains the aim's declared duration, including fractional months. The analysis has no time axis: it
    * compares levels, so no result answers the deadline yet.
    *
    * THESE DECLARATIONS ARE LOAD-BEARING, the same warning `threshold_source` carries above: undeclared, the next
