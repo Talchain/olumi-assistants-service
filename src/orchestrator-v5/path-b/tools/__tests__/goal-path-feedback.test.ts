@@ -16,8 +16,9 @@ import { KNOWN_ANSWER } from '../../living-model/__tests__/fixtures.js';
 import { F1_CONTRADICTED, F1_OTHER_CAUSE } from '../../living-model/__tests__/track2-f1-identity.fixtures.js';
 import { buildModel } from '../draft-tool.js';
 import { proposeLivingChange } from '../living-change.js';
-import { pathBTools } from '../index.js';
-import { goalPathEncodingCauses, RESTRUCTURE_CHANGE, RESTRUCTURE_DRAFT } from '../goal-path.js';
+import { pathBTools, type ToolCallResult } from '../index.js';
+import type { TraceRow } from '../outcome.js';
+import { goalPathEncodingCauses, KEPT_AS_REFUSED, personContentLost, RESTRUCTURE_CHANGE, RESTRUCTURE_DRAFT, type Restructure } from '../goal-path.js';
 import type { Rec } from './fixtures.js';
 
 const SID = 'scn_1';
@@ -171,20 +172,168 @@ describe('a change answers once for the goal-path causes it ADDS', () => {
   });
 });
 
-describe('the SDK tools: one offer per turn, and the agent reads the typed reasons in the call\'s own result', () => {
-  const turn = (p: ReturnType<typeof product>) => pathBTools({ dispatch: p.dispatch, proposals: new ProposalStore(), runAnalysis: vi.fn() },
-    { ...draftCtx, authenticated_user_id: 'user-a', turn_id: 'turn-1' }, 'core', () => {}, 'core')
-    .find((t) => t.name === 'build_model_from_brief') as FunctionTool;
-  const call = async (tool: FunctionTool) => JSON.parse(String(await tool.invoke(new RunContext(), JSON.stringify({ brief: BRIEF, model: withCondition('prerequisite') })))) as Rec;
+describe('the SDK tools: the route\'s one offer per turn; a refusal never makes the turn worse; the retry never loses the person\'s content', () => {
+  /** One turn of the core route's tools: its offer (none for another caller), its recorded calls, the draft and change tools. */
+  const turn = (p: ReturnType<typeof product>, offer = true) => {
+    const restructure: Restructure | undefined = offer ? { offered: false } : undefined;
+    const calls: [TraceRow, ToolCallResult][] = [];
+    const tools = pathBTools({ dispatch: p.dispatch, proposals: new ProposalStore(), runAnalysis: vi.fn(), ...(restructure !== undefined ? { restructure } : {}) },
+      { ...draftCtx, authenticated_user_id: 'user-a', turn_id: 'turn-1' }, 'core', (row, result) => { calls.push([row, result]); }, 'core');
+    const named = (n: string) => tools.find((t) => t.name === n) as FunctionTool;
+    return { restructure, calls, build: named('build_model_from_brief'), propose: named('propose_change') };
+  };
+  const call = async (tool: FunctionTool, args: Rec) => JSON.parse(String(await tool.invoke(new RunContext(), JSON.stringify(args)))) as Rec;
+  const draft = (model: LivingModelT) => ({ brief: BRIEF, model });
+  /** What base does with the same first call: no offer, saved (or carded) at once. */
+  const base = async (initial: LivingModelT | null, tool: 'build' | 'propose', args: Rec) => {
+    const p = product(initial);
+    const t = turn(p, false);
+    await call(t[tool], args);
+    return { registered: p.registered, calls: t.calls };
+  };
+  /** The same model, less the person's option "Hold": a retry that loses their content. */
+  const withoutHold = (m: LivingModelT): LivingModelT => ({ ...m, options: m.options.filter((o) => o.id !== 'hold') });
 
-  it('the first call in a turn is said back with goal_path; the second in that turn is saved; a new turn offers again', async () => {
+  it('the first call in a turn is said back with goal_path; the second in that turn is saved, and the turn\'s end has nothing left to do', async () => {
     const p = product(null);
-    const build = turn(p);
-    expect(await call(build)).toMatchObject({ status: 'refused', reason: 'goal_path_withheld', detail: RESTRUCTURE_DRAFT,
+    const t = turn(p);
+    expect(await call(t.build, draft(withCondition('prerequisite')))).toMatchObject({ status: 'refused', reason: 'goal_path_withheld', detail: RESTRUCTURE_DRAFT,
       data: { goal_path: [{ reason: 'condition_not_in_slice', item: PREREQ }] } });
-    expect(await call(build)).toMatchObject({ status: 'ok', mutated: true });
+    expect(await call(t.build, draft(withCondition('assumption')))).toMatchObject({ status: 'ok', mutated: true });
+    await t.restructure!.settle!();
     expect(p.registered).toHaveLength(1);
-    expect(await call(turn(product(null)))).toMatchObject({ status: 'refused', reason: 'goal_path_withheld' });
+    expect(t.calls).toHaveLength(2);
+    expect(await call(turn(product(null)).build, draft(withCondition('prerequisite')))).toMatchObject({ status: 'refused', reason: 'goal_path_withheld' });
+  });
+
+  it('DL (a): the agent stops after the refusal: the turn\'s end saves the draft byte-identical to base, with the receipt base gives', async () => {
+    const p = product(null);
+    const t = turn(p);
+    await call(t.build, draft(withCondition('prerequisite')));
+    expect(p.registered).toHaveLength(0);
+    await t.restructure!.settle!();
+    const b = await base(null, 'build', draft(withCondition('prerequisite')));
+    expect(p.registered).toEqual(b.registered);
+    expect(t.calls.at(-1)).toEqual(b.calls[0]);
+    expect(t.calls.at(-1)![1].receipts).toHaveLength(1);
+    await t.restructure!.settle!();
+    expect(p.registered, 'once only').toHaveLength(1);
+    expect(t.calls).toHaveLength(2);
+  });
+
+  it('DL (a): a change the agent left refused is carded at the turn\'s end, as base cards it', async () => {
+    const p = product(KNOWN_ANSWER);
+    const t = turn(p);
+    const args = { public_label: 'Update the model', basis: 'The person asked for it.', model: withCondition('prerequisite'), remove: [] };
+    expect(await call(t.propose, args)).toMatchObject({ status: 'refused', reason: 'goal_path_withheld' });
+    await t.restructure!.settle!();
+    const b = await base(KNOWN_ANSWER, 'propose', args);
+    const [row, result] = t.calls.at(-1)!;
+    expect(row).toMatchObject({ name: 'propose_change', ok: true });
+    expect(result.proposal_id).toEqual(expect.any(String));
+    expect({ ...row, args: undefined }).toEqual({ ...b.calls[0]![0], args: undefined });
+  });
+
+  it('DL (b): a retry that leaves out the person\'s own item is not used: the refused draft is saved, byte-identical to base, and the AI is told', async () => {
+    const p = product(null);
+    const t = turn(p);
+    await call(t.build, draft(withCondition('prerequisite')));
+    const out = await call(t.build, draft(withoutHold(withCondition('assumption'))));
+    expect(out).toMatchObject({ status: 'ok', mutated: true, data: { restructure: { kept: 'first_call', lost: ['options:hold'], note: KEPT_AS_REFUSED } } });
+    const b = await base(null, 'build', draft(withCondition('prerequisite')));
+    expect(p.registered).toEqual(b.registered);
+  });
+
+  it('DL (b): a retry that changes the person\'s figure is not used either; one that re-reads only the condition\'s role is', async () => {
+    const changed = withCondition('assumption');
+    changed.links[0] = { ...changed.links[0]!, effect: { ...changed.links[0]!.effect, value: 60 } };
+    expect(personContentLost(withCondition('prerequisite'), changed)).toEqual(['links:f_g']);
+    expect(personContentLost(withCondition('prerequisite'), withCondition('assumption'))).toEqual([]);
+    const theirs = withCondition('prerequisite');
+    theirs.conditions[0] = { ...theirs.conditions[0]!, source: 'user', quote: PREREQ };
+    expect(personContentLost(theirs, { ...theirs, conditions: [] })).toEqual([`conditions:${PREREQ}`]);
+    expect(personContentLost(theirs, { ...theirs, conditions: [{ ...theirs.conditions[0]!, role: 'assumption' }] }), 'its role is the one part re-read').toEqual([]);
+    expect(personContentLost(theirs, { ...theirs, views: [] })).toEqual(['views:Sam: thinks push is too risky']);
+  });
+
+  it('DL (b): a change\'s retry that leaves out the person\'s item is not carded; the refused change is', async () => {
+    const p = product(KNOWN_ANSWER);
+    const t = turn(p);
+    const args = (model: LivingModelT) => ({ public_label: 'Update the model', basis: 'The person asked for it.', model, remove: [] as string[] });
+    await call(t.propose, args(withCondition('prerequisite')));
+    const out = await call(t.propose, args(withoutHold(withCondition('challenge'))));
+    expect(out).toMatchObject({ status: 'ok', data: { proposal_id: expect.any(String), restructure: { kept: 'first_call', lost: ['options:hold'] } } });
+    const b = await base(KNOWN_ANSWER, 'propose', args(withCondition('prerequisite')));
+    expect((out.data as Rec).changes).toEqual(((await call(turn(product(KNOWN_ANSWER), false).propose, args(withCondition('prerequisite')))).data as Rec).changes);
+    expect(b.calls).toHaveLength(1);
+  });
+
+  it('Codex r1 on #3675: the person\'s record nested in an item of Olumi\'s counts; so does each of two same-words conditions; a kernel-only difference does not', () => {
+    const nested = withCondition('prerequisite');
+    nested.options[1] = { ...nested.options[1]!, source: 'olumi', quote: null };
+    const moved = structuredClone(nested);
+    moved.options[1]!.settings[0] = { ...moved.options[1]!.settings[0]!, value: 99 };
+    expect(personContentLost(nested, moved)).toEqual(['options:push']);
+    const two = withCondition('prerequisite');
+    two.conditions = [{ ...two.conditions[0]!, source: 'user', quote: PREREQ }, { ...two.conditions[0]!, source: 'party', party: 'Sam', quote: PREREQ }];
+    expect(personContentLost(two, { ...two, conditions: [two.conditions[1]!] })).toEqual([`conditions:${PREREQ}`]);
+    expect(personContentLost(two, { ...two, views: [...two.views, ...two.views] }), 'nothing of theirs is gone').toEqual([]);
+    expect(personContentLost({ ...two, views: [...two.views, ...two.views] }, two)).toEqual(['views:Sam: thinks push is too risky']);
+  });
+
+  it('Codex r1 on #3675: a retry that differs from the refused draft only as the kernel reads it (an id\'s case) is used, with its chance', async () => {
+    const p = product(null);
+    const t = turn(p);
+    await call(t.build, draft(withCondition('prerequisite')));
+    const upper = withCondition('assumption');
+    upper.factors[0] = { ...upper.factors[0]!, id: 'F' };
+    upper.options[1]!.settings[0] = { ...upper.options[1]!.settings[0]!, factor_id: 'F' };
+    upper.links[0] = { ...upper.links[0]!, from: 'F' };
+    const out = await call(t.build, draft(upper));
+    expect(out).toMatchObject({ status: 'ok', mutated: true });
+    expect((out.data as Rec).restructure).toBeUndefined();
+    expect(goalOf(p.saved())?.goal_threshold).toBe(0.8);
+  });
+
+  it('Codex r1 on #3675: another tool\'s success never discards a pending change: a draft "already saved" leaves it, and the turn\'s end cards it', async () => {
+    const p = product(null);
+    const t = turn(p);
+    expect(await call(t.build, draft(KNOWN_ANSWER))).toMatchObject({ status: 'ok', mutated: true });
+    const args = { public_label: 'Update the model', basis: 'The person asked for it.', model: withCondition('prerequisite'), remove: [] };
+    expect(await call(t.propose, args)).toMatchObject({ status: 'refused', reason: 'goal_path_withheld' });
+    expect(await call(t.build, draft(KNOWN_ANSWER))).toMatchObject({ status: 'ok', mutated: false, data: { already_saved: true } });
+    await t.restructure!.settle!();
+    expect(t.calls.at(-1)![0]).toMatchObject({ name: 'propose_change', ok: true });
+    expect(t.calls.at(-1)![1].proposal_id).toEqual(expect.any(String));
+  });
+
+  it('Codex r2 on #3675: a role-only re-read of the person\'s saved condition, its quote outside this turn\'s words, is no loss: the retry is used', async () => {
+    const theirs = { text: 'if the supplier agrees', applies_to: ['push'], role: 'challenge' as const, source: 'user' as const, party: null, quote: 'if the supplier agrees' };
+    const saved = { ...structuredClone(KNOWN_ANSWER), conditions: [theirs] };
+    const p = product(saved);
+    const t = turn(p);
+    const args = (role: 'challenge' | 'assumption', prereq: 'prerequisite' | 'assumption') => ({ public_label: 'Update the model', basis: 'The person asked for it.', remove: [],
+      model: { ...structuredClone(saved), conditions: [{ ...theirs, role }, { text: PREREQ, applies_to: ['f_g'], role: prereq, source: 'olumi' as const, party: null, quote: null }] } });
+    expect(await call(t.propose, args('challenge', 'prerequisite'))).toMatchObject({ status: 'refused', reason: 'goal_path_withheld' });
+    const out = await call(t.propose, args('assumption', 'assumption'));
+    expect(out, JSON.stringify(out)).toMatchObject({ status: 'ok', data: { proposal_id: expect.any(String) } });
+    expect((out.data as Rec).restructure).toBeUndefined();
+  });
+
+  it('Codex r2 on #3675: today\'s level the person set on an aim of Olumi\'s is theirs: a retry that drops it is not used', () => {
+    const m = withCondition('prerequisite');
+    m.aims[0] = { ...m.aims[0]!, source: 'olumi', quote: null, target: { ...m.aims[0]!.target!, current: 70, current_source: 'user' } };
+    expect(personContentLost(m, { ...m, aims: [{ ...m.aims[0]!, target: { ...m.aims[0]!.target!, current: null, current_source: null } }] })).toEqual(['aims:g']);
+    expect(personContentLost(m, m)).toEqual([]);
+    // Codex r3: the unit it is read in counts (no current_unit: the target's), so 70 units never becomes 70 kg.
+    expect(personContentLost(m, { ...m, aims: [{ ...m.aims[0]!, target: { ...m.aims[0]!.target!, unit: 'kg' } }] })).toEqual(['aims:g']);
+  });
+
+  it('CONTRAST: a caller without the route\'s offer saves the first call, as before; its turn has nothing to settle', async () => {
+    const p = product(null);
+    const t = turn(p, false);
+    expect(await call(t.build, draft(withCondition('prerequisite')))).toMatchObject({ status: 'ok', mutated: true });
+    expect(t.restructure).toBeUndefined();
   });
 });
 

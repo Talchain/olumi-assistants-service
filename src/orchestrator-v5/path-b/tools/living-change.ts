@@ -18,7 +18,7 @@ import { applyKernel, plain } from '../living-model/kernel.js';
 import { withCalendarReadings } from '../living-model/calendar-reading.js';
 import { todayInLondon } from '../../goal-target/deadline-date.js';
 import { mapLivingModel, savedGoal } from '../living-model/mapper.js';
-import { addedCauses, goalPathEncodingCauses, RESTRUCTURE_CHANGE, type Restructure } from './goal-path.js';
+import { addedCauses, goalPathEncodingCauses, KEPT_AS_REFUSED, personContentLost, RESTRUCTURE_CHANGE, withRefusedRoles, type Restructure } from './goal-path.js';
 import { diffLivingModels, stable, type LivingChange } from '../living-model/diff.js';
 import { livingViewOf } from '../living-model/view.js';
 import { isNoModelYet, isSavedRead, readSaved } from './context-tool.js';
@@ -63,13 +63,35 @@ async function savedLiving(deps: Deps, ctx: Ctx) {
 }
 
 export async function proposeLivingChange(deps: Deps, ctx: Ctx, args: LivingChangeArgs): Promise<ToolOutcome> {
+  // ⭐ THE RETRY NEVER LOSES THE PERSON'S CONTENT (DL, #3672 fix-forward): a second change that left out or changed an item the
+  // person or a party gave is not used; the refused change is, exactly as base would have carded it.
+  // Compared as the kernel reads them on the saved model (canonical ids, labelled sources): one extra read, on a retry only.
+  const r = deps.restructure;
+  const first = r?.pending?.tool === 'propose_change' ? r.pending.args : undefined;
+  const base = first === undefined ? undefined : await savedLiving(deps, ctx);
+  const lost = first === undefined || base === undefined || 'status' in base ? []
+    : personContentLost(kernelFor(base, ctx, first.model).model, kernelFor(base, ctx, withRefusedRoles(args.model, first.model)).model);
+  const outcome = await proposeOnce(deps, ctx, first !== undefined && lost.length > 0 ? first : args);
+  // Only a card settles a pending change: another tool's result never discards it (Codex r1 on #3675).
+  if (outcome.status === 'ok' && r?.pending?.tool === 'propose_change') r.pending = undefined;
+  return outcome.status === 'ok' && lost.length > 0
+    ? { ...outcome, data: { ...outcome.data, restructure: { kept: 'first_call', lost, note: KEPT_AS_REFUSED } } } : outcome;
+}
+
+/**
+ * The kernel on a change: the person's words (the saved brief and their messages) and the saved model it changes. A calendar
+ * deadline's reading: a saved one stands while its words do; a new one gets the host's day (`calendar-reading.ts`).
+ */
+function kernelFor(base: Exclude<Awaited<ReturnType<typeof savedLiving>>, ToolOutcome>, ctx: Ctx, model: LivingModelT) {
+  const brief = typeof base.saved.json.brief_text === 'string' ? [base.saved.json.brief_text] : [];
+  const read = applyKernel(model, [...brief, ...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])], base.model, brief[0] ?? null);
+  return { ...read, model: withCalendarReadings(read.model, base.model, todayInLondon(new Date())) };
+}
+
+async function proposeOnce(deps: Deps, ctx: Ctx, args: LivingChangeArgs): Promise<ToolOutcome> {
   const base = await savedLiving(deps, ctx);
   if ('status' in base) return base;
-  const brief = typeof base.saved.json.brief_text === 'string' ? [base.saved.json.brief_text] : [];
-  // A calendar deadline's reading: a saved one stands while its words do; a new one gets the host's day (`calendar-reading.ts`).
-  const read = applyKernel(args.model, [...brief, ...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])], base.model,
-    brief[0] ?? null);
-  const kernelled = { ...read, model: withCalendarReadings(read.model, base.model, todayInLondon(new Date())) };
+  const kernelled = kernelFor(base, ctx, args.model);
   // A condition is corrected or resolved by replacing it ("only after supplier approval" → "supplier approval obtained"; Codex
   // r6 on #3522): its removal is a row on the card the person approves, and the host keeps it in history. The quote is the
   // person's own words for the change: a replacement THEY stated (kernel-verified) on the same items, else null. Never this
@@ -118,6 +140,7 @@ export async function proposeLivingChange(deps: Deps, ctx: Ctx, args: LivingChan
     : addedCauses(goalPathEncodingCauses(mapLivingModel(base.model, savedGoal(base.saved.graph))), goalPathEncodingCauses(mapped));
   if (introduced.length > 0) {
     deps.restructure!.offered = true;
+    deps.restructure!.pending = { tool: 'propose_change', args };
     return refused('goal_path_withheld', RESTRUCTURE_CHANGE, { goal_path: introduced });
   }
   const p = deps.proposals.put(createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,

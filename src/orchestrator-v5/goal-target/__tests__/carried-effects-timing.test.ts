@@ -69,6 +69,10 @@ describe('the automatic Run carries the AI’s timing reading only while its sub
     expect(carriedEffectsTiming(undefined, saved)).toBeNull();
     expect(carriedEffectsTiming({ graph: clone(), analysis_result: undefined }, saved)).toBeNull();
     expect(carriedEffectsTiming({ graph: clone(), analysis_result: withheld(null) }, saved)).toBeNull();
+    // Another warning's timing-shaped detail is not the Run's recorded reading.
+    expect(carriedEffectsTiming({ graph: clone(), analysis_result: { enrichment: { inference_warnings: [{
+      code: 'UNRELATED_NOTE', effects_timing: 'not_stated', effects_timing_origin: 'olumi',
+    }] } } }, saved)).toBeNull();
     expect(carriedEffectsTiming({ graph: clone(), analysis_result: licensed('in_place_by_period', 'user') }, saved)).toBeNull();
     expect(carriedEffectsTiming({ graph: clone(), analysis_result: licensed('soon') }, saved)).toBeNull();
     const both = licensed('in_place_by_period');

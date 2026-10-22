@@ -14,7 +14,7 @@ import { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha
 import { registrationTurnId } from '../../orchestrator-v5/graph-registration/registration-identity.js';
 import { toOutboundGraph } from '../../orchestrator-v5/goal-target/outbound-graph.js';
 import { mapLivingModel } from '../../orchestrator-v5/path-b/living-model/mapper.js';
-import { KNOWN_ANSWER } from '../../orchestrator-v5/path-b/living-model/__tests__/fixtures.js';
+import { KNOWN_ANSWER, OPTION_EFFECTS } from '../../orchestrator-v5/path-b/living-model/__tests__/fixtures.js';
 import { withCanonicalAnalysisView } from '../../orchestrator-v5/agent-lane/__tests__/fixtures/canonical-analysis-read.js';
 import { streamWhenAsked } from '../../orchestrator-v5/agent-lane/__tests__/stream-when-asked.js';
 import { SELECTION_NOTE_PREFIX } from '../../orchestrator-v5/agent-lane/selection-context.js';
@@ -24,6 +24,8 @@ import { CORE_ALIGNED_INSTRUCTIONS, instructionsForMode } from '../../orchestrat
 import { ASK_CHALLENGE_CHIP_ID } from '../../orchestrator-v5/core-route/turn-request.js';
 import { CORE_DRAFTER_RULES } from '../../orchestrator-v5/path-b/drafting-guidance.js';
 import type { LivingModelT } from '../../schemas/living-model.js';
+import { GOAL_CHANCE_LICENSED, PERIOD_END_EFFECTS_UNSTATED } from '../../orchestrator-v5/goal-target/goal-chance-licence.js';
+import { GOAL_FIGURES_TARGET_NOT_TESTABLE } from '../../orchestrator/context/option-result-source.js';
 import { coreBudget } from '../../orchestrator-v5/agent-lane/model-budgets.js';
 
 type Json = Record<string, any>;
@@ -49,6 +51,8 @@ let carriedResult: Json | undefined;
 /** When set, the read selects ANOTHER Run than the one this turn confirmed (one that landed while the reply was written). */
 let otherRun: string | undefined;
 let runs = 0;
+let timingRun = false;
+const runTimings: unknown[] = [];
 const registered: Json[] = [];
 const canvasForwards: { headers: Json; body: Json }[] = [];
 const turnRows = new Map<string, any>();
@@ -180,9 +184,24 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       }
       // The Run: one engine result, on the saved revision.
       runs += 1;
+      const timing = b.chip?.parameters?.effects_timing;
+      runTimings.push(timing);
       carriedResult = { type: 'analysis_result', computed_against_hash: hashOf(persisted), leading_option_id: null, summary: 'Engine summary.',
         enrichment: { option_comparison: [{ option_id: 'push', option_label: 'Push', win_probability: 0.7, outcome: { mean: 115 } },
           { option_id: 'hold', option_label: 'Hold', win_probability: 0.3, outcome: { mean: 95 } }], inference_warnings: [] } };
+      // Engine double: a valid timing reading licenses its synthetic chances; otherwise every target is withheld.
+      if (timingRun) {
+        const options = (persisted!.nodes as Json[]).filter((n) => n.kind === 'option');
+        const hasReading = timing === 'not_stated' || timing === 'in_place_by_period';
+        carriedResult.enrichment = {
+          option_comparison: options.map((o) => ({ option_id: o.id, option_label: o.label, ...(hasReading ? { probability_of_goal: 0.5 } : {}) })),
+          inference_warnings: [hasReading
+            ? { code: GOAL_CHANCE_LICENSED, effects_timing: timing, effects_timing_origin: 'olumi' }
+            : { code: GOAL_FIGURES_TARGET_NOT_TESTABLE, option_ids: options.map((o) => o.id),
+                message: 'The model has not established how much of these effects would be in place by then.',
+                detail: { reason: PERIOD_END_EFFECTS_UNSTATED, effects_timing: null, effects_timing_origin: null } }],
+        };
+      }
       runState = { run_state: { kind: 'complete_current', computed_at: '2026-10-22T10:00:00.000Z' } };
       return { response_version: 2, assistant_text: '', blocks: [carriedResult], analysis_state: runState, analysis_ready: readiness, graph_hash: hashOf(persisted) };
     });
@@ -192,7 +211,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   beforeEach(() => {
     SCENARIO = randomUUID(); persisted = postimage(KNOWN_ANSWER); registered.length = 0; canvasForwards.length = 0; turnRows.clear(); conversationIds.clear();
-    readiness = { status: 'blocked', may_run: false, options: [], blockers: [] }; runState = undefined; carriedResult = undefined; otherRun = undefined; runs = 0;
+    readiness = { status: 'blocked', may_run: false, options: [], blockers: [] }; runState = undefined; carriedResult = undefined; otherRun = undefined; runs = 0; timingRun = false; runTimings.length = 0;
     pausedRun = null; calls = []; outputs = []; preparedId = ''; holdProvider = undefined; holdWhen = undefined;
   });
   const post = (payload: Json) => app.inject({ method: 'POST', url: '/agent/v1/core-turn',
@@ -286,6 +305,64 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     const read = await freshRead();
     expect(a.analysis_result, 'the automatic Run\u2019s fresh result, as the read now holds it').toEqual(read.analysis_result);
     expect(a.run).toMatchObject({ run_id: read.canonical_analysis_view.run.run_id, state: { kind: 'complete_current' } });
+  });
+
+  describe.each([
+    ['capacity brief', KNOWN_ANSWER, 'not_stated'],
+    ['widgets brief', OPTION_EFFECTS, 'in_place_by_period'],
+  ] as const)('automatic Run timing: %s', (_brief, base, reading) => {
+    it.each(['unrelated change', 'subject changed', 'no prior reading'] as const)('%s', async (row) => {
+      // Small synthetic change-at-period-end models, with the same timing carrier as the captured approval.
+      const initial = structuredClone(base);
+      initial.aims[0]!.source = 'olumi';
+      initial.aims[0]!.quote = null;
+      Object.assign(initial.aims[0]!.target!, { comparator: 'increase', value: 10, unit: '%', current: null,
+        current_unit: null, change_kind: 'relative', baseline: 'today', period_months: 3 });
+      for (const link of initial.links) link.effect.unit = '%';
+      persisted = postimage(initial);
+      expect(persisted.nodes.find((n: Json) => n.kind === 'goal').goal_target_basis).toMatchObject({
+        period_months: 3, effects_at_period_end: false, source: 'olumi_reading',
+      });
+      timingRun = true;
+      readiness = { status: 'ready', may_run: true, options: [], blockers: [] };
+      if (row !== 'no prior reading') {
+        outputs = [[{ type: 'function_call', name: 'run_analysis', call_id: 'pressed', args: { reason: 'Run pressed.', effects_timing: reading } }],
+          [{ type: 'message', text: 'Ran.' }]];
+        const pressed = await post({ turn_id: randomUUID(), message: 'Run analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } });
+        expect(pressed.statusCode, pressed.body).toBe(200);
+        expect(runTimings).toEqual([reading]);
+      }
+      const model = structuredClone(initial);
+      // As in the capture: add an unrelated factor, leaving every option and the goal unchanged.
+      model.factors.push({ ...structuredClone(KNOWN_ANSWER.factors[0]!), id: 'extra', label: 'Extra factor', value: null, low: 0.2, high: 0.3, source: 'olumi', quote: null });
+      if (row === 'subject changed') model.options[0]!.label += ' revised';
+      outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop',
+        args: { public_label: 'Add extra factor', basis: 'An additional consideration.', model, remove: [] } }],
+        [{ type: 'message', text: 'Prepared.' }]];
+      const proposed = await typed('Add an extra factor.');
+      expect(proposed.statusCode, proposed.body).toBe(200);
+      const card = (proposed.json() as Json).cards[0];
+      expect(card).toBeDefined();
+      preparedId = String(card.proposal_id);
+      outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: 'Saved and analysed.' }]];
+      const approved = await post({ turn_id: randomUUID(), message: card.approve_action.message, source: 'chip_click',
+        chip: { id: card.approve_action.id, action_type: card.approve_action.action_type } });
+      expect(approved.statusCode, approved.body).toBe(200);
+      expect(registered).toHaveLength(1);
+      expect(runs).toBe(row === 'no prior reading' ? 1 : 2);
+      expect(runTimings.at(-1)).toBe(row === 'unrelated change' ? reading : null);
+      const result = (approved.json() as Json).analysis_result;
+      expect(result).toEqual((await freshRead()).analysis_result);
+      expect(result.enrichment.option_comparison).toHaveLength(initial.options.length);
+      for (const option of result.enrichment.option_comparison) {
+        if (row === 'unrelated change') expect(option.probability_of_goal, option.option_id).toBe(0.5);
+        else expect(option, option.option_id).not.toHaveProperty('probability_of_goal');
+      }
+      if (row !== 'unrelated change') expect(result.enrichment.inference_warnings[0]).toMatchObject({
+        code: GOAL_FIGURES_TARGET_NOT_TESTABLE, message: expect.stringContaining('has not established'),
+        detail: { reason: PERIOD_END_EFFECTS_UNSTATED, effects_timing: null, effects_timing_origin: null },
+      });
+    });
   });
 
   it('Codex r1 on #3668: a Run that lands while the approval\u2019s reply is written is not that approval\u2019s: its result is not shipped', async () => {
@@ -549,6 +626,33 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(ids(j.model.graph).length).toBeGreaterThan(0);
     expect(j.receipts).toEqual([expect.objectContaining({ version_id: 'v_1', authorised_by: 'olumi' })]);
     expect(j.model.scenario_revision).toBe((await freshRead()).content_hash);
+  });
+
+  it('DL (#3672 fix-forward): the AI stops after the goal_path_withheld refusal; the turn\u2019s end saves its draft as base, with its receipt', async () => {
+    persisted = null;
+    const model = { ...structuredClone(KNOWN_ANSWER), conditions: [{ text: 'only once the board signs off', applies_to: ['f_g'], role: 'prerequisite' as const,
+      source: 'olumi' as const, party: null, quote: null }] };
+    outputs = [[{ type: 'function_call', name: 'build_model_from_brief', call_id: 'draft', args: { brief: BRIEF, model } }],
+      [{ type: 'message', text: 'I will look at that condition again.' }]];
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/core-turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), message: BRIEF, source: 'composer' } });
+    expect(r.statusCode, r.body).toBe(200);
+    const j = r.json() as Json;
+    expect(j._agent.tool_calls.map((c: Json) => [c.name, c.outcome])).toEqual([['build_model_from_brief', 'refused'], ['build_model_from_brief', 'ok']]);
+    expect(registered).toHaveLength(1);
+    expect((registered[0]!.graph as Json).living_model.conditions).toEqual(model.conditions);
+    expect(j.receipts).toEqual([expect.objectContaining({ version_id: 'v_1', authorised_by: 'olumi' })]);
+  });
+
+  it('Codex r1 on #3675: a provider error after the refusal still leaves the draft saved, as base would; the error is the one reported', async () => {
+    persisted = null;
+    const model = { ...structuredClone(KNOWN_ANSWER), conditions: [{ text: 'only once the board signs off', applies_to: ['f_g'], role: 'prerequisite' as const,
+      source: 'olumi' as const, party: null, quote: null }] };
+    outputs = [[{ type: 'function_call', name: 'build_model_from_brief', call_id: 'draft', args: { brief: BRIEF, model } }], [{ type: 'refuse' }]];
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/core-turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), message: BRIEF, source: 'composer' } });
+    expect(registered).toHaveLength(1);
+    expect((registered[0]!.graph as Json).living_model.conditions).toEqual(model.conditions);
+    expect(r.statusCode).not.toBe(200);
+    expect((r.json() as Json).error ?? r.json()).toMatchObject({ nothing_saved: false });
   });
 
   it('⭐ ESTIMATES (DL ruling 22 Oct): a first draft keeps Olumi\'s factor and Olumi\'s estimate on the person\'s figure-less factor, each with its range; the person\'s source stays theirs; the target stays unset', async () => {

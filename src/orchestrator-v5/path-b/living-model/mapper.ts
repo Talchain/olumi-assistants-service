@@ -251,7 +251,7 @@ function decimalText(digits: bigint, places: number): string {
  * cancels keeps every digit; Codex r1/r2), with its exact text; undefined when a part is in exponent form: nothing is
  * worked out rather than a figure near it.
  */
-function exactlyMade(op: 'sum' | 'product', values: readonly number[]): { readonly level: number; readonly text: string } | undefined {
+export function exactlyMade(op: 'sum' | 'product', values: readonly number[]): { readonly level: number; readonly text: string } | undefined {
   const parts = values.map(decimalOf);
   if (parts.some((p) => p === undefined)) return undefined;
   const ds = parts as { readonly digits: bigint; readonly places: number }[];
