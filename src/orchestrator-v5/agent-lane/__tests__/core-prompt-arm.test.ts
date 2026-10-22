@@ -6,6 +6,7 @@ import { coreBudget } from '../model-budgets.js';
 import { OLUMI_PURPOSE_INSTRUCTION } from '../olumi-purpose.js';
 import { HOST_SCIENCE_AND_SOURCE_RULES, HOST_TOOL_CONTRACT } from '../coach-route-v0_2.js';
 import { createHash } from 'node:crypto';
+import { CORE_DRAFTING_GUIDANCE } from '../../path-b/drafting-guidance.js';
 
 /** Tools the core agent does not have, named by the legacy routing arm B removes (AIE #3523 6298433275). */
 const LEGACY_TOOLS = ['propose_starting_point', 'propose_assumptions', 'authorise_change', 'get_canonical_state', 'propose_link_effect',
@@ -37,7 +38,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
   it('arm B is the AIE\'s assembled reference, byte for byte (programme-docs #94 6303242136, static text sha256 7b6145d4…), plus the canvas-coaching sentence', () => {
     expect(b.split(NOTE_ON_ITEM_INSTRUCTION)).toHaveLength(2);
     // 7b6145d4… until 21 Oct; arm C's adoption changed only the closing core reply rule (see its row), now 56625e00….
-    expect(createHash('sha256').update(b.replace(`${NOTE_ON_ITEM_INSTRUCTION}\n\n`, ''), 'utf8').digest('hex')).toBe('6dedb15310f121c6e73b8d138c559b300bdb84d05aae5cca5c06e5bcd70107e8'); // 21 Oct: + Olumi's labelled estimate on another's item (estimate_by); + CORE_NEXT_STEP decisive question (Track 3 Q2 v2 + buddy AMEND, 21 Oct; was a605c43f…)
+    expect(createHash('sha256').update(b.replace(`${NOTE_ON_ITEM_INSTRUCTION}\n\n`, ''), 'utf8').digest('hex')).toBe('9415d41def27ee76bce957eb74d8d33942e81903b1cd933e41c18c5ebe9bffb1'); // 22 Oct: the three-part coaching after a Run (Track 3 judge on 4b, 11 c1 zeros; was 6dedb153…). 21 Oct: + Olumi's labelled estimate on another's item (estimate_by); + CORE_NEXT_STEP decisive question (Track 3 Q2 v2 + buddy AMEND, 21 Oct; was a605c43f…)
     // Candidate-3 witnesses (21 Oct): presence checks (text only, not behaviour): WHEN to build, and Olumi's additions on a card.
     expect(b).toContain('build the first model from their brief in that same turn');
     expect(b).toContain('a list in your reply adds nothing to their model');
@@ -95,6 +96,15 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(sent.endsWith(CORE_REPLY_INSTRUCTION)).toBe(true);
     expect(sent.split(NOTE_ON_ITEM_INSTRUCTION)).toHaveLength(2);
     expect(instructionsForMode('full', 'legacy arm A text')).toBe('legacy arm A text');
+  });
+
+  it('candidate 5 (Track 3 judge on 4b, 22 Oct): coaching after a Run names its three specific parts and never closes on a general caution; an inferred item is Olumi\'s', () => {
+    expect(CORE_REPLY_INSTRUCTION).toContain('(2) what the result rests on most');
+    expect(CORE_REPLY_INSTRUCTION).toContain('without calling it the main driver');
+    expect(CORE_REPLY_INSTRUCTION).toContain('(3) one concrete next step that would most improve the model');
+    expect(CORE_REPLY_INSTRUCTION).toContain('Never close on a general caution');
+    expect(CORE_DRAFTING_GUIDANCE).toContain("An item is the person's or a party's only when their words state that very item");
+    expect(CORE_DRAFTING_GUIDANCE).toContain('estimate_by olumi is only for a missing figure on an item their words do state');
   });
 
   it('the builder\u2019s effort arm is set only on a core turn that asks for it; the default is the banked medium (A/B/C 22 Oct)', () => {

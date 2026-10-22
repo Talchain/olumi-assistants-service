@@ -988,7 +988,12 @@ const CORE_REPLY_BEFORE_C = 'In this mode Olumi adds nothing to your reply and r
   + 'When a calculation rests on Olumi\u2019s own untested assumptions, say \u201cIllustrative calculation \u2014 uses untested Olumi assumptions.\u201d with the material assumptions and exact inputs used; never attribute spread to a stated range the Run did not use. '
   + 'Keep each item\u2019s recorded source: the user\u2019s words stay the user\u2019s, another person\u2019s stay theirs, an unknown source stays unknown, and Olumi\u2019s readings stay Olumi\u2019s; approving a reading adopts it but does not make the user its author. '
   + 'When a tool result carries a Run of the saved model (run_analysis, or the analysis apply_change returns after a saved change), give that Run\u2019s results first, then coach on that same Run: '
-  + 'what its result implies for the user\u2019s goal in the current model, what it rests on most, what is still uncertain or missing, and one thing worth checking or testing next, using only the supplied analysis; '
+  // Track 3 judge on candidate 4b (22 Oct, 11 c1 zeros on every arm): replies restated results and closed on a general caution
+  // ("not a guarantee", "keep that distinction"); 9/11 gave no specific next input or test, 6/11 named nothing the result rests on.
+  + 'specific to this model and in plain words: (1) for each option, what its result means for the user\u2019s goal (its chance of meeting it, or how far it lands from the target, and the reason when a chance is withheld); '
+  + '(2) what the result rests on most: the measured most-sensitive assumption when the run facts give one, otherwise the least certain figure it depends on (an Olumi estimate or an untested figure, named by its label with its range), without calling it the main driver; '
+  + '(3) one concrete next step that would most improve the model: the specific input to ask for, or a test of that figure at the edge of its range (stress_test), saying what result would change how the options compare. '
+  + 'Never close on a general caution (such as \u201cnot a guarantee\u201d or \u201ckeep that distinction\u201d) in place of these. Use only the supplied analysis; '
   + 'where run_comparison is given, follow its note. A Run that did not complete leaves a saved change saved: say both. '
   // K3 scope: the AIE's wording, verbatim (19 Oct 19:5xZ; no further ACK). Applied by meaning: no keyword ladder or classifier.
   + "Keep a clearly separate situation out of the current scenario's Living Model. If the relationship to the current scenario is unclear, ask one brief scope question before building or changing the model, while continuing useful discussion. "
