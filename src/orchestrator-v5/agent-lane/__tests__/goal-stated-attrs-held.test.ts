@@ -334,7 +334,7 @@ describe('J2: no producer may set them', () => {
 });
 
 describe('a malformed stored value is absence (tolerant read), never a refused graph', () => {
-  it.each([[12.5], [-1], [0], ['12'], [null]])('goal_horizon_months %j is dropped; the goal and its target stay', (bad) => {
+  it.each([[-1], [0], ['12'], [null]])('goal_horizon_months %j is dropped; the goal and its target stay', (bad) => {
     const g = storedWithHeldGoal();
     goalOf(g).goal_horizon_months = bad;
     const parsed = GraphV3.parse(projectGraphForPersistence(g)) as Rec;

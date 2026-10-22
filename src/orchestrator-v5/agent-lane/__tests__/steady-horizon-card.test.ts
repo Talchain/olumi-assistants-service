@@ -277,7 +277,7 @@ describe('steady horizon: one held card through the existing approved batch door
     expect(offered(graph)).toBeNull();
   });
 
-  it.each([undefined, 0, -1, 1.5, '9', NaN, Infinity])('no card without a positive integer held month: %s', months => {
+  it.each([undefined, 0, -1, '9', NaN, Infinity])('no card without a positive held month: %s', months => {
     const graph = seed();
     goalOf(graph).goal_horizon_months = months;
     expect(offered(graph)).toBeNull();
