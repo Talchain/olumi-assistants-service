@@ -123,7 +123,10 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
 
   it('first-model guidance preserves material causal paths before figures, without item-count quotas (DL lease, 22 Oct)', () => {
     // Static text contract only; Track 3 measures the resulting models on the served candidate.
-    expect(createHash('sha256').update(CORE_DRAFTING_GUIDANCE, 'utf8').digest('hex')).toBe('faeb76e1f5a43aa9c56b7cda553db9b9bf3bb2133be91b8dc740058c86ce1881');
+    expect(createHash('sha256').update(CORE_DRAFTING_GUIDANCE, 'utf8').digest('hex')).toBe('15c95d1ab087f090acb07402b629b23551a2d674f5efa88a37edf978c6eb576e');
+    // Track 3 c6 Q2 fm3 (22 Oct): an option's outlay that no aim measures was drafted as a factor reaching nothing.
+    expect(CORE_DRAFTING_GUIDANCE).toContain('A factor that reaches no aim, carries no limit and defines nothing is decorative');
+    expect(CORE_DRAFTING_GUIDANCE).toContain('the reply says it is left out and asks whether it should count, as a limit or within the aim');
     expect(CORE_DRAFTING_GUIDANCE).toContain('every material causal path the person states or proposes, including each intermediate effect and distinct outcome');
     expect(CORE_DRAFTING_GUIDANCE).toContain('complete paths and distinct outcomes before adding figures');
     expect(CORE_DRAFTING_GUIDANCE).toContain('a missing figure never justifies replacing a material mechanism with a proxy result or a caveat');
