@@ -24,6 +24,7 @@ import type { CritiqueT } from '../../agent-lane/core/model-critic.js';
 import { isNoModelYet, isSavedRead, readSaved } from './context-tool.js';
 import { ok, refused, OUTCOME_TRACE, type ToolOutcome } from './outcome.js';
 import { writeCorePostimage } from './core-write.js';
+import { goalPathEncodingCauses, RESTRUCTURE_DRAFT, type Restructure } from './goal-path.js';
 import { inTheUsersWords, type TypedWords } from './user-words.js';
 
 export const BUILD_MODEL_FROM_BRIEF = 'build_model_from_brief';
@@ -51,6 +52,8 @@ export interface DraftDeps {
    * gets only what is left of it, so it never takes the save's time (buddy served BLOCK on #3574: 217 s turn, 170 s stream).
    */
   readonly deadlineAt?: number;
+  /** Class 3: the turn's one offer to restructure a draft whose own encoding withholds its goal (`goal-path.ts`). */
+  readonly restructure?: Restructure;
 }
 
 /**
@@ -96,6 +99,13 @@ async function constructUnrecorded(deps: DraftDeps, ctx: DraftContext, args: Bui
   const kernelled = applyKernel(args.model, words);
   const mapped = mapLivingModel(kernelled.model);
   if (!mapped.graph.nodes.some((n) => n.kind !== 'decision')) return refused('model_empty');
+  // ⭐ CLASS 3: a draft whose own encoding withholds its goal's chance is said back ONCE, before any save or review, so the agent
+  // can restructure it in this turn; its next draft is saved as it is (`goal-path.ts`).
+  const causes = goalPathEncodingCauses(kernelled.model, mapped);
+  if (causes.length > 0 && deps.restructure !== undefined && !deps.restructure.offered) {
+    deps.restructure.offered = true;
+    return refused('goal_path_withheld', RESTRUCTURE_DRAFT, { goal_path: causes });
+  }
   const gaps = structureGaps(kernelled.model);
   // The turn's first draft is reviewed BESIDE its save, never before it: the critic never gates or delays the write.
   const reviewing = deps.review !== undefined && !deps.review.done;

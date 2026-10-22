@@ -16,6 +16,7 @@ import { createProposal, type ProposalOperation, type ProposalStore, type Struct
 import { LivingModel, type LivingModelT } from '../../../schemas/living-model.js';
 import { applyKernel, plain } from '../living-model/kernel.js';
 import { mapLivingModel, savedGoal } from '../living-model/mapper.js';
+import { addedCauses, goalPathEncodingCauses, RESTRUCTURE_CHANGE, type Restructure } from './goal-path.js';
 import { diffLivingModels, stable, type LivingChange } from '../living-model/diff.js';
 import { livingViewOf } from '../living-model/view.js';
 import { isNoModelYet, isSavedRead, readSaved } from './context-tool.js';
@@ -35,7 +36,11 @@ export const LivingChangeParams = z.object({
 export type LivingChangeArgs = z.infer<typeof LivingChangeParams>;
 
 type Ctx = Pick<AgentToolContext, 'scenario_id' | 'authenticated_user_id' | 'turn_id' | 'verified_user_messages' | 'user_turn_text'>;
-interface Deps { readonly dispatch: InternalDispatch; readonly proposals: ProposalStore }
+interface Deps {
+  readonly dispatch: InternalDispatch; readonly proposals: ProposalStore;
+  /** Class 3: the turn's one offer to restructure a change that withholds the goal through its own encoding (`goal-path.ts`). */
+  readonly restructure?: Restructure;
+}
 type Rec = Record<string, unknown>;
 
 /** The card's rows: one operation per changed item, on the item's own id. */
@@ -102,6 +107,14 @@ export async function proposeLivingChange(deps: Deps, ctx: Ctx, args: LivingChan
   if (kept.length > 0) return refused('removal_not_applied', undefined, { still_present: kept });
   const mapped = mapLivingModel(next, savedGoal(base.saved.graph));
   if (!mapped.graph.nodes.some((n) => n.kind !== 'decision')) return refused('model_empty');
+  // ⭐ CLASS 3: a change that ADDS a cause withholding the goal's chance through its own encoding is said back ONCE, before its
+  // card; what the saved model already held is not this change's to answer for (`goal-path.ts`).
+  const introduced = deps.restructure === undefined || deps.restructure.offered ? []
+    : addedCauses(goalPathEncodingCauses(base.model, mapLivingModel(base.model, savedGoal(base.saved.graph))), goalPathEncodingCauses(next, mapped));
+  if (introduced.length > 0) {
+    deps.restructure!.offered = true;
+    return refused('goal_path_withheld', RESTRUCTURE_CHANGE, { goal_path: introduced });
+  }
   const p = deps.proposals.put(createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
     base_graph_identity_hash: base.saved.graphHash, base_model_identity: base.saved.identity!, operations: operationsOf(changes),
     provenance: { authored_by: 'model_proposed', basis: args.basis }, validation: { admitted: true, loss_count: 0, refusals: [] },
