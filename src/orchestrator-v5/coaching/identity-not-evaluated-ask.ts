@@ -414,10 +414,11 @@ export function composeIdentityAskForNode(nodeId: string, graph: unknown): Ident
     })
     && operands.every((id) => rec(byId.get(id)?.nonlinear_identity)?.operation !== 'accumulation');
   const reason: IdentityWithheldReason | null = operands.some((id) => level(id) === null) ? 'identity_operand_missing'
-    // Zero churn is a valid accumulation rate; its stock and inflow may be zero too, unlike product reconciliation.
-    : declared?.operation === 'product' && targetLevel !== null
-      && (targetLevel === 0 || operands.some((id) => level(id) === 0)) && !pureZero ? 'identity_zero_level'
-      : operands.some(lacksFrame) || targetUnitless ? 'identity_frame_missing' : null;
+    // A zero cannot supply the missing unit/frame; the engine checks frames before reconciliation.
+    : operands.some(lacksFrame) || targetUnitless ? 'identity_frame_missing'
+      // Zero churn is a valid accumulation rate; only product reconciliation has this refusal.
+      : declared?.operation === 'product' && targetLevel !== null
+        && (targetLevel === 0 || operands.some((id) => level(id) === 0)) && !pureZero ? 'identity_zero_level' : null;
   return reason === null ? null
     : composeIdentityNotEvaluatedAsk([{ code: IDENTITY_NOT_EVALUATED_CODE, identity: { node_id: nodeId, participants: operands, withheld_reason: reason } }], graph);
 }
