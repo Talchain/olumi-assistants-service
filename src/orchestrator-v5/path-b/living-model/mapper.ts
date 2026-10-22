@@ -466,8 +466,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
 
   // ── Options: one decision, one status quo, each setting an intervention on its factor's frame.
   const decisionId = `decision_${goal?.id ?? 'model'}`;
-  // The question alone (Paul 22 Oct: "remove the 'Decision:' text"; a decision is only the person's own act). The id is unchanged.
-  nodes.unshift({ id: decisionId, kind: 'decision', label: aim?.text ?? 'Options' });
+  nodes.unshift({ id: decisionId, kind: 'decision', label: `Decision: ${aim?.text ?? 'options'}` });
   const atCurrent = (o: LivingModelT['options'][number]) => o.settings.every((s) => s.value !== null && s.value === current.get(s.factor_id));
   const statusQuo = model.options.filter(atCurrent);
   // No single option at today's levels is not a loss: every option is still emitted and compared on its own interventions.
