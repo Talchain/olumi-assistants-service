@@ -247,6 +247,38 @@ describe('PATH-B core turn on the Agents SDK', () => {
     expect(attempts, 'the stateless call is resent once after a 500').toBe(2);
   });
 
+  it('⛔ a Conversation left holding an unanswered tool call (a restart mid-tool; served 22 Oct, "No tool output found for function call") is answered once as interrupted, then the turn runs', async () => {
+    const items: Json[] = [];
+    let refusedOnce = false;
+    const json = { 'content-type': 'application/json' };
+    const install = (refusal: string) => vi.stubGlobal('fetch', vi.fn(streamWhenAsked(async (url: unknown, init?: { body?: unknown }) => {
+      const u = String(url);
+      if (u.endsWith('/v1/conversations')) return new Response(JSON.stringify({ id: 'conv_cut', object: 'conversation' }), { status: 200, headers: json });
+      if (u.endsWith('/v1/conversations/conv_cut/items')) {
+        items.push(JSON.parse(String(init?.body ?? '{}')) as Json);
+        return new Response(JSON.stringify({ object: 'list', data: [], first_id: null, last_id: null, has_more: false }), { status: 200, headers: json });
+      }
+      sent.push(JSON.parse(String(init?.body ?? '{}')) as Json);
+      if (!refusedOnce) {
+        refusedOnce = true;
+        return new Response(JSON.stringify({ error: { message: refusal, type: 'invalid_request_error', param: 'input', code: null } }), { status: 400, headers: json });
+      }
+      return new Response(JSON.stringify(body([{ type: 'message', text: 'Noted.' }])), { status: 200, headers: json });
+    })));
+    install('No tool output found for function call call_lost1.');
+    const { result } = await turn('A synthetic question.', caps());
+    expect(result.assistant_text, 'the turn runs after the answer').toBe('Noted.');
+    expect(items, 'exactly that call is answered, once').toEqual([{ items: [expect.objectContaining({ type: 'function_call_output', call_id: 'call_lost1' })] }]);
+    expect(String(items[0]!.items[0].output)).toContain('interrupted');
+    expect(sent, 'the refused request, then the turn').toHaveLength(2);
+    // CONTRAST: any other refusal is the provider's answer: nothing is answered and nothing is resent.
+    items.length = 0; sent.length = 0; refusedOnce = false; column = new Map();
+    install('Invalid value for input.');
+    await expect(turn('A synthetic question.', caps())).rejects.toMatchObject({ status: 400 });
+    expect(items).toHaveLength(0);
+    expect(sent).toHaveLength(1);
+  });
+
   it('zod isolation: the SDK and the adapters share ONE zod 4 (`zod-v4`); the service stays on zod 3; a zod schema is the tool\'s schema', () => {
     const service = createRequire(`${process.cwd()}/package.json`);
     const sdkCore = createRequire(createRequire(service.resolve('@openai/agents')).resolve('@openai/agents-core'));
