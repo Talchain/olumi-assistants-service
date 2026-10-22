@@ -251,7 +251,8 @@ describe('PATH-B core turn on the Agents SDK', () => {
     const items: Json[] = [];
     let refusedOnce = false;
     const json = { 'content-type': 'application/json' };
-    const install = (refusal: string) => vi.stubGlobal('fetch', vi.fn(streamWhenAsked(async (url: unknown, init?: { body?: unknown }) => {
+    // `refuseAt`: which Responses request is refused (0 = the turn's first); `first`: what the requests before it answer.
+    const install = (refusal: string, status = 400, refuseAt = 0, first: Json[] = []) => vi.stubGlobal('fetch', vi.fn(streamWhenAsked(async (url: unknown, init?: { body?: unknown }) => {
       const u = String(url);
       if (u.endsWith('/v1/conversations')) return new Response(JSON.stringify({ id: 'conv_cut', object: 'conversation' }), { status: 200, headers: json });
       if (u.endsWith('/v1/conversations/conv_cut/items')) {
@@ -259,10 +260,11 @@ describe('PATH-B core turn on the Agents SDK', () => {
         return new Response(JSON.stringify({ object: 'list', data: [], first_id: null, last_id: null, has_more: false }), { status: 200, headers: json });
       }
       sent.push(JSON.parse(String(init?.body ?? '{}')) as Json);
-      if (!refusedOnce) {
+      if (!refusedOnce && sent.length - 1 === refuseAt) {
         refusedOnce = true;
-        return new Response(JSON.stringify({ error: { message: refusal, type: 'invalid_request_error', param: 'input', code: null } }), { status: 400, headers: json });
+        return new Response(JSON.stringify({ error: { message: refusal, type: 'invalid_request_error', param: 'input', code: null } }), { status, headers: json });
       }
+      if (sent.length - 1 < refuseAt) return new Response(JSON.stringify(body(first)), { status: 200, headers: json });
       return new Response(JSON.stringify(body([{ type: 'message', text: 'Noted.' }])), { status: 200, headers: json });
     })));
     install('No tool output found for function call call_lost1.');
@@ -277,6 +279,19 @@ describe('PATH-B core turn on the Agents SDK', () => {
     await expect(turn('A synthetic question.', caps())).rejects.toMatchObject({ status: 400 });
     expect(items).toHaveLength(0);
     expect(sent).toHaveLength(1);
+    // CONTRAST (Codex r1): the same words on a 500 are not a refusal that accepted nothing: never answered, never resent.
+    items.length = 0; sent.length = 0; refusedOnce = false; column = new Map();
+    install('No tool output found for function call call_lost1.', 500);
+    await expect(turn('A synthetic question.', caps())).rejects.toBeDefined();
+    expect(items).toHaveLength(0);
+    // CONTRAST (Codex r1): a later hop refused after a tool already ran this turn: resending would repeat it.
+    items.length = 0; sent.length = 0; refusedOnce = false; column = new Map();
+    const c = caps();
+    install('No tool output found for function call call_lost1.', 400, 1, [{ type: 'function_call', name: 'read_canonical_context', args: {} }]);
+    await expect(turn('A synthetic question.', c)).rejects.toMatchObject({ status: 400 });
+    expect(c.read, 'the tool ran once').toHaveBeenCalledTimes(1);
+    expect(items, 'nothing answered after accepted work').toHaveLength(0);
+    expect(sent, 'nothing resent').toHaveLength(2);
   });
 
   it('zod isolation: the SDK and the adapters share ONE zod 4 (`zod-v4`); the service stays on zod 3; a zod schema is the tool\'s schema', () => {
