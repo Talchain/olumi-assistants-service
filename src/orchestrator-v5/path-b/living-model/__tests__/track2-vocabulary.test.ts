@@ -29,7 +29,7 @@ const LIMIT_WORDS = 'we cannot spend more than £10,000 a month';
  */
 const deliveries = (onTime: 'factor' | 'outcome', outsource: 'feasible' | 'infeasible' = 'feasible'): LivingModelT => ({
   aims: [{ id: 'profit', text: 'Monthly profit of at least £2,000', status: 'current', defined_as: null, ...who('at least £2,000 a month; today £1,500'),
-    target: { quantity: 'monthly profit', comparator: '>=', value: 2000, low: null, high: null, unit: '£', by_when: null, period_months: null, baseline: 'today',
+    target: { quantity: 'monthly profit', comparator: '>=', value: 2000, low: null, high: null, unit: '£', by_when: null, period_months: null, period_by: null, period_read_on: null, baseline: 'today',
       current: 1500, current_source: null, current_unit: null, change_kind: null, source: null } }],
   options: [
     { id: 'carry_on', label: 'Carry on', settings: [], status: 'feasible', developed_from: null, ...who('or we carry on') },

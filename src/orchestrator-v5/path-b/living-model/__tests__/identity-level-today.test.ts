@@ -26,7 +26,7 @@ const level = (id: string, label: string, value: number, unit: string, quote: st
 const bakery = (definedBy: Rec, over: { target?: Rec; loaves?: Rec; price?: Rec } = {}): LivingModelT => ({
   aims: [{ id: 'takings', text: 'Daily takings of at least £1,000', status: 'current', defined_as: { op: 'product', of: ['loaves', 'price'], ...definedBy } as never,
     ...who('we want daily takings of at least £1,000'),
-    target: { quantity: 'daily takings', comparator: '>=', value: 1000, low: null, high: null, unit: '£ per day', by_when: null, period_months: null,
+    target: { quantity: 'daily takings', comparator: '>=', value: 1000, low: null, high: null, unit: '£ per day', by_when: null, period_months: null, period_by: null, period_read_on: null,
       baseline: null, current: null, current_source: null, current_unit: null, change_kind: null, source: null, ...over.target } }],
   options: [
     { status: 'feasible', id: 'hold', label: 'Carry on', settings: [], developed_from: null, ...who('or we carry on') },

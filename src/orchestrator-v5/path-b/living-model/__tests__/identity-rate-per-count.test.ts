@@ -22,7 +22,7 @@ const level = (id: string, label: string, value: number, unit: string, quote: st
 
 const bakery = (loavesUnit: string, priceUnit: string, aimUnit = '£ per week'): LivingModelT => ({
   aims: [{ id: 'takings', text: 'Weekly takings of at least £2,900', status: 'current', ...who('we need at least £2,900 a week; today it is £2,700'),
-    target: { quantity: 'weekly takings', comparator: '>=', value: 2900, low: null, high: null, unit: aimUnit, by_when: null, period_months: null,
+    target: { quantity: 'weekly takings', comparator: '>=', value: 2900, low: null, high: null, unit: aimUnit, by_when: null, period_months: null, period_by: null, period_read_on: null,
       baseline: 'today', current: 2700, current_source: null, current_unit: null, change_kind: null, source: null },
     defined_as: { op: 'product', of: ['loaves', 'price'], ...who('takings are loaves sold times the price per loaf') } }],
   options: [

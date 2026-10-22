@@ -20,7 +20,7 @@ const level = (id: string, label: string, value: number, unit: string) =>
 const cafe = (units: { goal: string; count: string; price: string }): LivingModelT => ({
   aims: [{ id: 'revenue', text: 'Daily coffee revenue of at least £1,000', status: 'current', ...who('daily coffee revenue of at least £1,000'),
     defined_as: { op: 'product', of: ['coffees', 'price'], ...who('revenue is just the coffees we sell each day times the £3 price') },
-    target: { quantity: 'Daily coffee revenue', comparator: '>=', value: 1000, low: null, high: null, unit: units.goal, by_when: null, period_months: null,
+    target: { quantity: 'Daily coffee revenue', comparator: '>=', value: 1000, low: null, high: null, unit: units.goal, by_when: null, period_months: null, period_by: null, period_read_on: null,
       baseline: null, current: null, current_source: null, current_unit: null, change_kind: null, source: null } }],
   options: [
     { status: 'feasible', id: 'keep', label: 'Keep things as they are', settings: [], developed_from: null, ...who('keep things as they are') },

@@ -142,6 +142,26 @@ export function todayInLondon(now: Date): string {
   return /^\d{4}-\d{2}-\d{2}$/.test(out) ? out : isoOf(now);
 }
 
+/** A real calendar date, YYYY-MM-DD. */
+export const isCalendarDate = (d: unknown): d is string => {
+  if (typeof d !== 'string') return false;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d);
+  if (m === null) return false;
+  const [y, mo, da] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const t = new Date(Date.UTC(y, mo - 1, da));
+  return t.getUTCFullYear() === y && t.getUTCMonth() === mo - 1 && t.getUTCDate() === da;
+};
+
+/**
+ * The whole calendar months completed from `fromIso` to `toIso` (7 Oct to 6 Apr is 5; to 7 Apr is 6): the goal's held horizon
+ * as the date card writes it (`goal-horizon-write.ts`) and as the core reads a calendar deadline (`mapper.ts`), one rule.
+ */
+export function completedMonthsBetween(fromIso: string, toIso: string): number {
+  const [yr, mr, dr] = fromIso.split('-').map(Number) as [number, number, number];
+  const [yd, md, dd] = toIso.split('-').map(Number) as [number, number, number];
+  return 12 * (yd - yr) + md - mr - (dd < dr ? 1 : 0);
+}
+
 /** Add whole calendar months, clamping the day to the target month's last day. */
 export function addMonths(fromIso: string, months: number): string {
   const [y, m, d] = fromIso.split('-').map(Number) as [number, number, number];
