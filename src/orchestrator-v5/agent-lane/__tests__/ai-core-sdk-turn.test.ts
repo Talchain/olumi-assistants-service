@@ -72,7 +72,8 @@ const readTools = (c: ReturnType<typeof caps>) => (onCall: CoreToolRecorder) => 
   errorFunction: null,
 })];
 type Extra = { briefText?: string; conversationStore?: ConversationIdStore; state?: unknown; tools?: Parameters<typeof runCoreTurn>[0]['tools'];
-  pausedRunStore?: PausedRunStore; press?: { decision: 'approve' | 'decline'; proposal_id: string }; replyBudget?: CallBudget; firstTool?: string };
+  pausedRunStore?: PausedRunStore; press?: { decision: 'approve' | 'decline'; proposal_id: string }; replyBudget?: CallBudget; firstTool?: string;
+  withheldTools?: readonly string[] };
 const turn = (message: string, c: ReturnType<typeof caps>, extra: Extra & { traceMeta?: { revision?: string; run_id?: string } } = {}) =>
   runWithProviderPolicy(OPENAI_ONLY('agent_v1_turn'), async () => {
   const result = await runCoreTurn({ ctx: ctx(message), message, tools: extra.tools ?? readTools(c),
@@ -80,7 +81,8 @@ const turn = (message: string, c: ReturnType<typeof caps>, extra: Extra & { trac
     canonicalState: extra.state ?? { empty: true, entities: [] }, briefText: extra.briefText, conversationStore: 'conversationStore' in extra ? extra.conversationStore : columnStore(),
     ...(extra.pausedRunStore !== undefined ? { pausedRunStore: extra.pausedRunStore } : {}),
     ...(extra.press !== undefined ? { press: extra.press } : {}), ...(extra.traceMeta !== undefined ? { traceMeta: extra.traceMeta } : {}),
-    ...(extra.replyBudget !== undefined ? { replyBudget: extra.replyBudget } : {}), ...(extra.firstTool !== undefined ? { firstTool: extra.firstTool } : {}) });
+    ...(extra.replyBudget !== undefined ? { replyBudget: extra.replyBudget } : {}), ...(extra.firstTool !== undefined ? { firstTool: extra.firstTool } : {}),
+    ...(extra.withheldTools !== undefined ? { withheldTools: extra.withheldTools } : {}) });
   return { result, calls: recordedProviderCalls() };
 });
 
@@ -453,6 +455,38 @@ describe('PATH-B core turn on the Agents SDK', () => {
       expect(typed, 'the typed message follows its answer, in the same call').toBeGreaterThan(answered);
       expect(sent, 'one model call for the typed turn').toHaveLength(2);
       expect(pausedColumn).toBeNull();
+    });
+
+    // Lenses on served 0ce7ae88 (22 Oct): a Run press while a card awaited approval answered 502, "UserError: Tool apply_change
+    // not found". The press withholds apply_change, and the SDK cannot restore a paused call to a tool the agent lacks.
+    it('⛔ a Run press while a card awaits approval (apply_change withheld on the press) answers the paused call as superseded; nothing applied; ONE reply', async () => {
+      scripted = [pausing()];
+      await turn('Please drop option B.', caps(), { tools: () => applyTool(), pausedRunStore: pausedStore() });
+      scripted = [[{ type: 'message', text: 'Here is the Run on the saved model.' }]];
+      const { result } = await turn('Run it.', caps(), { tools: () => applyTool(), pausedRunStore: pausedStore(), withheldTools: ['apply_change'] });
+      expect(applied).toBe(0);
+      expect(result.sdk.resumed).toMatchObject({ answer: 'superseded' });
+      expect(result.assistant_text).toBe('Here is the Run on the saved model.');
+      expect(JSON.stringify(sent[1]!.input)).toContain(PAUSE_SUPERSEDED);
+      expect(pausedColumn).toBeNull();
+    });
+
+    it('⛔ on that press a NEW call to the withheld tool is refused: never applied, never paused, its row says so', async () => {
+      scripted = [pausing()];
+      await turn('Please drop option B.', caps(), { tools: () => applyTool(), pausedRunStore: pausedStore() });
+      scripted = [[{ type: 'function_call', name: 'apply_change', args: { proposal_id: PID } }], [{ type: 'message', text: 'This press only runs the saved model.' }]];
+      const { result } = await turn('Run it.', caps(), { tools: () => applyTool(), pausedRunStore: pausedStore(), withheldTools: ['apply_change'] });
+      expect(applied).toBe(0);
+      expect(result.sdk.paused).toBeUndefined();
+      expect(pausedColumn).toBeNull();
+      expect(result.mutated).toBe(false);
+      expect(result.tool_calls).toContainEqual(expect.objectContaining({ name: 'apply_change', ok: false, mutated: false, outcome: 'refused', refusal: 'not_on_this_turn' }));
+    });
+
+    it('CONTROL: with no paused run, a withheld tool is not offered at all', async () => {
+      scripted = [[{ type: 'message', text: 'Here is the Run.' }]];
+      await turn('Run it.', caps(), { tools: () => applyTool(), pausedRunStore: pausedStore(), withheldTools: ['apply_change'] });
+      expect(JSON.stringify(sent[0]!.tools ?? [])).not.toContain('apply_change');
     });
 
     it('⛔ a pause that cannot be kept is answered in the same turn: nothing applied, nothing left open, the AI says so', async () => {

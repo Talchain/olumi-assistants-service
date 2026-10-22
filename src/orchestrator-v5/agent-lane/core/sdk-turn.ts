@@ -49,6 +49,8 @@ export const CORE_MAX_MODEL_CALLS = 8;
 export const CORE_COMPACT_THRESHOLD = 100_000;
 /** The tools that draft or change the living model: never offered on a reply-only turn, so its fast budget writes no model. */
 const MODEL_WRITING_TOOLS: ReadonlySet<string> = new Set(['build_model_from_brief', 'propose_change']);
+/** A tool this turn withholds, called while a paused run is answered: refused, never run (`runCoreTurn`). */
+const NOT_THIS_TURN = 'not_on_this_turn';
 /** The tools the route opens a reply-only turn on: the Run, and applying a change the person approved. */
 const REPLY_ENTRY_TOOLS: ReadonlySet<string> = new Set(['run_analysis', 'apply_change']);
 /** A turn that reads, runs and explains only: a press, or a turn the route opens on applying a change or a Run. */
@@ -253,7 +255,18 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
   // A reply-only turn runs on the fast budget without the model writers, so drafting and changes stay on the builder.
   const fast = input.replyBudget !== undefined && replyOnlyTurn(input);
   const budget = fast ? input.replyBudget! : input.budget;
-  const tools = input.tools(record).filter((t) => !('name' in t) || !(withheld.has(t.name) || (fast && MODEL_WRITING_TOOLS.has(t.name))));
+  // A paused run is restored with THIS turn's agent, and the SDK cannot restore a paused call to a tool the agent lacks
+  // (Lenses on served 0ce7ae88: every Run press while a card awaited approval answered 502, "Tool apply_change not found").
+  // So while a run is paused, a tool this turn withholds stays present as a refusal: the paused call is answered from its
+  // recorded decision (the SDK honours it before asking `needsApproval`), and a new call is refused, with no write and no pause.
+  const held = await input.pausedRunStore?.read(input.ctx.scenario_id);
+  const notThisTurn = (t: Tool): Tool => t.type !== 'function' ? t : { ...t, needsApproval: async () => false, invoke: async () => {
+    record({ name: t.name, ok: false, mutated: false, outcome: 'refused', refusal: NOT_THIS_TURN, ran: null },
+      { ok: false, mutated: false, outcome: 'refused', refusal: NOT_THIS_TURN });
+    return JSON.stringify({ status: 'refused', reason: NOT_THIS_TURN });
+  } };
+  const tools = input.tools(record).flatMap((t) => !('name' in t) || !(withheld.has(t.name) || (fast && MODEL_WRITING_TOOLS.has(t.name))) ? [t]
+    : held != null ? [notThisTurn(t)] : []);
   const pendingRows: Promise<void>[] = [];
   let deliveryUnknown: { readonly cause: unknown } | undefined;
   const client = ledgeredAgentsClient({ site: 'agent-core.sdk', pending: pendingRows,
@@ -300,7 +313,6 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
    */
   let carried: string | undefined;
   let resumed: CoreTurnSdk['resumed'];
-  const held = await input.pausedRunStore?.read(input.ctx.scenario_id);
   if (held != null) {
     if ((await input.pausedRunStore!.take(input.ctx.scenario_id, held.pause_id)) !== true) {
       throw new CoreStateUnavailableError('pause_not_resumable');
