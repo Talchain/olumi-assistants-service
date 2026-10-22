@@ -206,6 +206,38 @@ function definitionCheck(model: LivingModelT, def: Definition, itemId: string, u
   return { ...(reason === undefined ? {} : { reason }), made, parts };
 }
 
+/** Decimal places as written, or undefined in exponent form. */
+const placesOf = (v: number): number | undefined => {
+  const t = String(v);
+  if (/e/i.test(t)) return undefined;
+  const i = t.indexOf('.');
+  return i < 0 ? 0 : t.length - i - 1;
+};
+/**
+ * A definition's level from its parts exactly as decimals (3 × 2.3 is 6.9, never 6.8999999999999995; Codex r1), or undefined
+ * when a part cannot be held exactly as a safe integer at its places: nothing is worked out rather than a float near it.
+ */
+function exactlyMade(op: 'sum' | 'product', values: readonly number[]): number | undefined {
+  const places = values.map(placesOf);
+  if (places.some((p) => p === undefined)) return undefined;
+  const ints = values.map((v, i) => Math.round(v * 10 ** places[i]!));
+  if (!ints.every(Number.isSafeInteger)) return undefined;
+  if (op === 'sum') {
+    const k = Math.max(...(places as number[]));
+    const total = ints.reduce((a, n, i) => a + n * 10 ** (k - places[i]!), 0);
+    return Number.isSafeInteger(total) ? total / 10 ** k + 0 : undefined;
+  }
+  const product = ints.reduce((a, n) => a * n, 1);
+  return Number.isSafeInteger(product) ? product / 10 ** (places as number[]).reduce((a, p) => a + p, 0) + 0 : undefined;
+}
+/** A figure exactly as written, its unit placed as the person writes it ("£3 per loaf", "280 loaves a day"): never rounded. */
+function sayExactly(v: number, unit: string | null): string {
+  const n = v.toLocaleString('en-GB', { maximumFractionDigits: 20 });
+  const u = (unit ?? '').trim();
+  const money = /^([£$€])\s*(.*)$/.exec(u);
+  return money !== null ? `${money[1]}${n}${money[2] === '' ? '' : ` ${money[2]}`}` : u === '%' ? `${n}%` : u === '' ? n : `${n} ${u}`;
+}
+
 /** No one's figure: `withSource` stamps nothing (a worked-out level, read as unverified, never as Olumi's estimate). */
 const UNSTAMPED = { source: 'unverified' as LivingSourceT, quote: null };
 
@@ -223,11 +255,12 @@ function levelFromDefinition(model: LivingModelT, aim: LivingModelT['aims'][numb
   const check = definitionCheck(model, def, aim.id, t.unit, t.quantity ?? aim.text, null);
   if (check.reason !== undefined || !check.parts.every((p) => p.value !== null && p.low === null && p.high === null
     && p.estimate_by !== 'olumi' && stated(p.source))) return undefined;
-  const say = (v: number, unit: string | null) => sayFigureAsWritten(v, unit ?? '');
+  const made = exactlyMade(def.op, check.parts.map((p) => p.value!));
+  if (made === undefined) return undefined;
   const sign = def.op === 'sum' ? ' + ' : ' × ';
-  const said = `Today\u2019s ${t.quantity} is worked out from your figures: ${check.parts.map((p) => `${p.label} ${say(p.value!, p.unit)}`).join(sign)}`
-    + ` = ${say(check.made, t.unit)}.`;
-  return { level: check.made, said };
+  const said = `Today\u2019s ${t.quantity} is worked out from your figures: ${check.parts.map((p) => `${p.label} ${sayExactly(p.value!, p.unit)}`).join(sign)}`
+    + ` = ${sayExactly(made, t.unit)}.`;
+  return { level: made, said };
 }
 
 export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: string } = {}): Mapped {

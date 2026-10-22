@@ -97,6 +97,7 @@ describe('a confirmed definition gives the goal its level today, worked out from
     ['a part Olumi estimated', THEIRS, { loaves: { estimate_by: 'olumi' } }],
     ['a part that is Olumi\'s', THEIRS, { price: { source: 'olumi', quote: null } }],
     ['a part with a range', THEIRS, { loaves: { low: 250, high: 310 } }],
+    ['a part whose source is not confirmed', THEIRS, { price: { source: 'unverified', quote: null } }],
     ['a change target', THEIRS, { target: { comparator: 'increase', value: 20, unit: '%', change_kind: 'relative' } }],
   ] as const)('NEGATIVE: %s: no level is worked out', (_name, definedBy, over) => {
     const m = bakery(definedBy as Rec, over as never);
@@ -108,6 +109,42 @@ describe('a confirmed definition gives the goal its level today, worked out from
     expect(goalOf(bakery(THEIRS, { target: { current: 840 } })).observed_state).toMatchObject({ raw_value: 840 });
     expect(mapLivingModel(bakery(THEIRS, { target: { current: 840 } })).assumed.some((a) => a.text.includes('worked out'))).toBe(false);
     expect(reasons(bakery(THEIRS, { target: { current: 900 } }))).toContain('takings:identity_inconsistent');
+  });
+
+  it('Codex r1: worked out exactly as decimals, so 3 × £2.30 = £6.90 takes the same path as a stated £6.90', () => {
+    const decimal = (current: number | null): LivingModelT => {
+      const m = bakery(THEIRS, { target: { value: 6.9, current }, loaves: { value: 3 }, price: { value: 2.3 } });
+      // Codex's input: words with no "stay" cue, so a level already at the target is asked about, not read silently.
+      m.aims[0] = { ...m.aims[0]!, quote: 'Reach £6.90 daily takings' };
+      return m;
+    };
+    expect(reasons(decimal(null))).toContain('takings:stay_within_unconfirmed');
+    expect(reasons(decimal(6.9))).toContain('takings:stay_within_unconfirmed');
+  });
+
+  it('Codex r1: the sentence says each figure exactly as written, never rounded to £0', () => {
+    const m = bakery(THEIRS, { target: { value: 20 }, loaves: { value: 1000000 }, price: { value: 0.00001 } });
+    expect(goalOf(m).observed_state).toMatchObject({ raw_value: 10 });
+    expect(mapLivingModel(m).assumed).toContainEqual({ id: 'takings',
+      text: 'Today\u2019s daily takings is worked out from your figures: Loaves sold 1,000,000 loaves a day × Price per loaf £0.00001 per loaf = £10 per day.' });
+  });
+
+  it('a sum: today\'s level is the parts added', () => {
+    const m: LivingModelT = { ...bakery(THEIRS), factors: [
+      level('loaves', 'Morning takings', 400, '£ per day', 'mornings bring in £400'), level('price', 'Afternoon takings', 440, '£ per day', 'afternoons £440')] };
+    m.aims[0]!.defined_as = { ...m.aims[0]!.defined_as!, op: 'sum' };
+    expect(goalOf(m).observed_state).toMatchObject({ raw_value: 840 });
+  });
+
+  it('a ceiling target: today\'s worked-out level above it is its level today', () => {
+    const m = bakery(THEIRS, { target: { comparator: '<=', value: 800 } });
+    expect(goalOf(m).observed_state).toMatchObject({ raw_value: 840 });
+  });
+
+  it('NEGATIVE: a part that is itself defined: no level is worked out (the identity\'s own cycle check decides)', () => {
+    const m = bakery(THEIRS);
+    m.factors[1] = { ...m.factors[1]!, defined_as: { op: 'product', of: ['loaves', 'takings'], ...THEIRS } } as never;
+    expect(mapLivingModel(m).assumed.some((a) => a.text.includes('worked out from your figures'))).toBe(false);
   });
 
   it('NEGATIVE: units that do not compose: the identity is held as today and no level is worked out', () => {
