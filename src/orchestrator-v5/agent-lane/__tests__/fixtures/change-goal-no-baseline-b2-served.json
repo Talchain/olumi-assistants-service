@@ -1,0 +1,505 @@
+{
+ "_source": "Served staging turn (PROMPT-INT underdefined-coaching trace, 19 Oct 12:39Z; synthetic brief B2 \"change with no baseline\", BRIEFS.json): the build reply body, as a GET /graph read (graph = draft_graph).",
+ "body": {
+  "scenario_id": "01e06aa8-6b86-4db1-9ce9-cbc81ca2d83c",
+  "graph": {
+   "nodes": [
+    {
+     "id": "how_should_we_think_about_this",
+     "ref": "D1",
+     "kind": "decision",
+     "label": "How should we think about this?",
+     "provenance": "from_brief"
+    },
+    {
+     "id": "average_onboarding_time_for_new_enterprise_clients",
+     "ref": "G1",
+     "kind": "goal",
+     "label": "Average onboarding time for new enterprise clients",
+     "provenance": "from_brief",
+     "goal_sense_reading": {
+      "basis": "typed_change_sign",
+      "sense": "minimise",
+      "words": "Olumi reads ‘Average onboarding time for new enterprise clients’ as a target to bring it DOWN by at least 33.33% from today.",
+      "threshold": -0.33333333333299997,
+      "threshold_frame": "change_rel"
+     },
+     "goal_threshold_raw": -0.33333333333299997,
+     "goal_threshold_frame": "change_rel"
+    },
+    {
+     "id": "continue_current_approach",
+     "ref": "O1",
+     "kind": "option",
+     "label": "Continue current approach",
+     "provenance": "ai_inferred",
+     "is_baseline": true
+    },
+    {
+     "id": "dedicated_onboarding_engineer",
+     "ref": "O2",
+     "kind": "option",
+     "label": "Dedicated onboarding engineer",
+     "provenance": "from_brief",
+     "interventions": {
+      "dedicated_onboarding_engineers_per_new_client": {
+       "value": 1,
+       "source": "cee_hypothesis",
+       "target_match": {
+        "node_id": "dedicated_onboarding_engineers_per_new_client",
+        "confidence": "high",
+        "match_type": "exact_id"
+       },
+       "user_material_unverified": true
+      }
+     }
+    },
+    {
+     "id": "build_self_serve_setup_wizard",
+     "ref": "O3",
+     "kind": "option",
+     "label": "Build self-serve setup wizard",
+     "provenance": "from_brief",
+     "interventions": {
+      "self_serve_setup_wizard_build_activity": {
+       "value": 1,
+       "source": "cee_hypothesis",
+       "target_match": {
+        "node_id": "self_serve_setup_wizard_build_activity",
+        "confidence": "high",
+        "match_type": "exact_id"
+       },
+       "user_material_unverified": true
+      }
+     }
+    },
+    {
+     "id": "dedicated_onboarding_engineers_per_new_client",
+     "ref": "F1",
+     "kind": "factor",
+     "label": "Dedicated onboarding engineers per new client",
+     "category": "controllable",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "self_serve_setup_wizard_build_activity",
+     "ref": "F2",
+     "kind": "factor",
+     "label": "Self-serve setup wizard build activity",
+     "category": "controllable",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "engineer_assignment_delays",
+     "ref": "R1",
+     "kind": "risk",
+     "label": "Engineer assignment delays",
+     "provenance": "ai_inferred",
+     "proposed_by": "olumi",
+     "draft_widening": {
+      "hits": {
+       "id": "dedicated_onboarding_engineer",
+       "kind": "option",
+       "label": "Dedicated onboarding engineer"
+      },
+      "affects": {
+       "id": "average_onboarding_time_for_new_enterprise_clients",
+       "label": "Average onboarding time for new enterprise clients",
+       "direction": "negative"
+      },
+      "through": {
+       "id": "dedicated_onboarding_engineers_per_new_client",
+       "label": "Dedicated onboarding engineers per new client",
+       "direction": "negative"
+      },
+      "mechanism": "relies_on",
+      "relies_on": "staffing a dedicated engineer for each client",
+      "watch_for": "unfilled onboarding assignments",
+      "provenance": "ai_suggested_widen"
+     },
+     "analysis_participation": "retained_excluded"
+    },
+    {
+     "id": "wizard_cannot_cover_enterprise_setup",
+     "ref": "R2",
+     "kind": "risk",
+     "label": "Wizard cannot cover enterprise setup",
+     "provenance": "ai_inferred",
+     "proposed_by": "olumi",
+     "draft_widening": {
+      "hits": {
+       "id": "build_self_serve_setup_wizard",
+       "kind": "option",
+       "label": "Build self-serve setup wizard"
+      },
+      "affects": {
+       "id": "average_onboarding_time_for_new_enterprise_clients",
+       "label": "Average onboarding time for new enterprise clients",
+       "direction": "negative"
+      },
+      "through": {
+       "id": "self_serve_setup_wizard_build_activity",
+       "label": "Self-serve setup wizard build activity",
+       "direction": "negative"
+      },
+      "mechanism": "relies_on",
+      "relies_on": "enterprise setups fitting a standard guided flow",
+      "watch_for": "frequent manual setup exceptions",
+      "provenance": "ai_suggested_widen"
+     },
+     "analysis_participation": "retained_excluded"
+    }
+   ],
+   "edges": [
+    {
+     "to": "continue_current_approach",
+     "from": "how_should_we_think_about_this",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "dedicated_onboarding_engineer",
+     "from": "how_should_we_think_about_this",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "build_self_serve_setup_wizard",
+     "from": "how_should_we_think_about_this",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "dedicated_onboarding_engineers_per_new_client",
+     "from": "dedicated_onboarding_engineer",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "self_serve_setup_wizard_build_activity",
+     "from": "build_self_serve_setup_wizard",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "dedicated_onboarding_engineers_per_new_client",
+     "from": "continue_current_approach",
+     "origin": "repair",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "self_serve_setup_wizard_build_activity",
+     "from": "continue_current_approach",
+     "origin": "repair",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "average_onboarding_time_for_new_enterprise_clients",
+     "from": "dedicated_onboarding_engineers_per_new_client",
+     "strength": {
+      "std": 0.125,
+      "mean": -0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis",
+      "magnitude": "olumi_placeholder",
+      "mean_projected": true
+     },
+     "effect_direction": "negative",
+     "exists_probability": 0.8
+    },
+    {
+     "to": "average_onboarding_time_for_new_enterprise_clients",
+     "from": "self_serve_setup_wizard_build_activity",
+     "strength": {
+      "std": 0.125,
+      "mean": -0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis",
+      "magnitude": "olumi_placeholder",
+      "mean_projected": true
+     },
+     "effect_direction": "negative",
+     "exists_probability": 0.8
+    }
+   ],
+   "node_count": 9,
+   "edge_count": 9
+  },
+  "analysis_state": {
+   "run_state": {
+    "kind": "never_run"
+   },
+   "readiness": {
+    "status": "needs_user_input",
+    "blockers": [
+     {
+      "code": "MISSING_FACTOR_LEVEL",
+      "category": "option_values",
+      "message": "What is \"Dedicated onboarding engineers per new client\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+      "repairability": "human_input_required",
+      "factor_id": "dedicated_onboarding_engineers_per_new_client",
+      "factor_label": "Dedicated onboarding engineers per new client"
+     },
+     {
+      "code": "MISSING_FACTOR_LEVEL",
+      "category": "option_values",
+      "message": "What is \"Self-serve setup wizard build activity\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+      "repairability": "human_input_required",
+      "factor_id": "self_serve_setup_wizard_build_activity",
+      "factor_label": "Self-serve setup wizard build activity"
+     }
+    ]
+   },
+   "leader_claim": {
+    "permitted": false,
+    "withheld_reason": "analysis_no_result"
+   },
+   "robustness": {},
+   "usable_for_prose": false,
+   "usable_for_chips": false,
+   "usable_for_followup": false,
+   "requires_rerun": false,
+   "blocked_unusable": false,
+   "contradictions": []
+  },
+  "current_read": {
+   "analysis_ready": {
+    "options": [
+     {
+      "option_id": "continue_current_approach",
+      "label": "Continue current approach",
+      "status": "ready",
+      "interventions": {},
+      "is_baseline": true,
+      "status_reason": "Baseline: every factor holds at its observed value, so no effect values are needed"
+     },
+     {
+      "option_id": "dedicated_onboarding_engineer",
+      "label": "Dedicated onboarding engineer",
+      "status": "ready",
+      "interventions": {
+       "dedicated_onboarding_engineers_per_new_client": 1
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "dedicated_onboarding_engineers_per_new_client": {
+        "display_value": "1",
+        "normalised_value": 1
+       }
+      },
+      "status_reason": "1 intervention(s) ready for analysis"
+     },
+     {
+      "option_id": "build_self_serve_setup_wizard",
+      "label": "Build self-serve setup wizard",
+      "status": "ready",
+      "interventions": {
+       "self_serve_setup_wizard_build_activity": 1
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "self_serve_setup_wizard_build_activity": {
+        "display_value": "1",
+        "normalised_value": 1
+       }
+      },
+      "status_reason": "1 intervention(s) ready for analysis"
+     }
+    ],
+    "goal_node_id": "average_onboarding_time_for_new_enterprise_clients",
+    "status": "needs_user_input",
+    "goal_threshold_raw": -0.33333333333299997,
+    "bias_findings": [],
+    "blockers": [
+     {
+      "factor_id": "dedicated_onboarding_engineers_per_new_client",
+      "factor_label": "Dedicated onboarding engineers per new client",
+      "blocker_type": "missing_value",
+      "message": "What is \"Dedicated onboarding engineers per new client\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+      "suggested_action": "add_value"
+     },
+     {
+      "factor_id": "self_serve_setup_wizard_build_activity",
+      "factor_label": "Self-serve setup wizard build activity",
+      "blocker_type": "missing_value",
+      "message": "What is \"Self-serve setup wizard build activity\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+      "suggested_action": "add_value"
+     }
+    ],
+    "readiness_issues": [
+     {
+      "issue_id": "level_1",
+      "code": "MISSING_FACTOR_LEVEL",
+      "category": "option_values",
+      "message": "What is \"Dedicated onboarding engineers per new client\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+      "repairability": "human_input_required",
+      "factor_id": "dedicated_onboarding_engineers_per_new_client",
+      "factor_label": "Dedicated onboarding engineers per new client",
+      "provenance": "system_repaired",
+      "obligation": "required"
+     },
+     {
+      "issue_id": "level_2",
+      "code": "MISSING_FACTOR_LEVEL",
+      "category": "option_values",
+      "message": "What is \"Self-serve setup wizard build activity\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+      "repairability": "human_input_required",
+      "factor_id": "self_serve_setup_wizard_build_activity",
+      "factor_label": "Self-serve setup wizard build activity",
+      "provenance": "system_repaired",
+      "obligation": "required"
+     }
+    ],
+    "repair_proposal": {
+     "proposal_version": "readiness_repair_v1",
+     "complete": true,
+     "issue_ids": [
+      "level_1",
+      "level_2"
+     ],
+     "changes": [],
+     "unresolved_inputs": [
+      {
+       "issue_id": "level_1",
+       "kind": "option_effect_value",
+       "prompt": "What is \"Dedicated onboarding engineers per new client\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+       "factor_id": "dedicated_onboarding_engineers_per_new_client",
+       "obligation": "required",
+       "provenance": "system_repaired"
+      },
+      {
+       "issue_id": "level_2",
+       "kind": "option_effect_value",
+       "prompt": "What is \"Self-serve setup wizard build activity\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+       "factor_id": "self_serve_setup_wizard_build_activity",
+       "obligation": "required",
+       "provenance": "system_repaired"
+      }
+     ]
+    },
+    "may_run": false,
+    "analysis_admission": {
+     "structurally_analysable": false,
+     "missing_important_inputs": [
+      {
+       "issue_id": "level_1",
+       "code": "MISSING_FACTOR_LEVEL",
+       "factor_id": "dedicated_onboarding_engineers_per_new_client",
+       "factor_label": "Dedicated onboarding engineers per new client",
+       "why_it_matters": "What is \"Dedicated onboarding engineers per new client\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+       "obligation": "required",
+       "waived_by_exclusion": false
+      },
+      {
+       "issue_id": "level_2",
+       "code": "MISSING_FACTOR_LEVEL",
+       "factor_id": "self_serve_setup_wizard_build_activity",
+       "factor_label": "Self-serve setup wizard build activity",
+       "why_it_matters": "What is \"Self-serve setup wizard build activity\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+       "obligation": "required",
+       "waived_by_exclusion": false
+      }
+     ],
+     "semantic_quality_sufficient": false,
+     "permitted_analysis_mode": "none",
+     "reasons": [
+      {
+       "field": "structurally_analysable",
+       "code": "MODEL_HAS_BLOCKERS",
+       "message": "Review all 2 readiness issues together before analysis."
+      },
+      {
+       "field": "missing_important_inputs",
+       "code": "MODEL_HAS_BLOCKERS",
+       "message": "2 inputs are still needed from you."
+      },
+      {
+       "field": "semantic_quality_sufficient",
+       "code": "CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED",
+       "message": "Every estimate this comparison rests on is Olumi’s, not yours. Figures, and which option they favour, can be shown only as provisional, and no result can be called stable or robust until you have set at least one of them."
+      },
+      {
+       "field": "permitted_analysis_mode",
+       "code": "MODEL_HAS_BLOCKERS",
+       "message": "This model cannot be analysed yet."
+      }
+     ],
+     "graph_hash": "18f17c98e9df4d0c7ffb33f5df28e5b2e43578936bfa2dcba8bcc65fd67d4ee6",
+     "semantic_signals": {
+      "confidence_parameters_total": 7,
+      "confidence_parameters_user_stated": 0,
+      "confidence_parameters_machine_authored": 4,
+      "confidence_parameters_unattributed": 3,
+      "material_parameters_total": 4,
+      "material_parameters_user_stated": 0,
+      "intervened_factor_baselines_total": 2,
+      "intervened_factor_baselines_user_stated": 0,
+      "material_parameters_awaiting_user_node_ids": [
+       "dedicated_onboarding_engineers_per_new_client",
+       "self_serve_setup_wizard_build_activity"
+      ],
+      "goal_target_stated": true
+     }
+    },
+    "current_graph_hash": "18f17c98e9df4d0c"
+   }
+  }
+ }
+}
