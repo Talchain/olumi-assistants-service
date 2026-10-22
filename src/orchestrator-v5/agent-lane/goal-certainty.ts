@@ -658,19 +658,24 @@ export function placeholderGoalWarning(
   // #2613 CR (b): while Gate 5 withholds every option, sizing a link cannot lift it: state the link, invite nothing, offer nothing.
   // ⭐ ITEM 3: the invitation names only links with no stated range (`unsizedLinkWords`, shared with the host Run reply).
   const said = productBlocks ? unsizedLinkStatement : (ls: readonly UnsizedPathLink[]): string => unsizedLinkWords(graph, ls);
-  // The awaiting sentence takes what the carrier has left after today's words, never pushing the message past 400; when it
-  // cannot fit beside them, both say their labels compactly (Codex r1), so neither reason is left unsaid.
-  const compose = (labelBudget: number | null): string => {
-    const lab = (id: string): string => (labelBudget === null ? labelOf(id) : compactWordLabel(labelOf(id), labelBudget));
-    const unsizedWords = unsized.length === 0 ? '' : (labelBudget === null ? noDeadEnd?.message : undefined)
-      ?? said(unsized.map(l => ({ ...l, from_label: lab(l.from), to_label: lab(l.to) })));
-    if (awaitingTarget.length === 0) return unsizedWords;
+  // Today's words for the links with no figure, exactly as before (with no awaiting link, `unsized` IS `ordered`).
+  const todaysWords = (lab: (id: string) => string): string => (unsized.length === 0 ? ''
+    : said(unsized.map(l => ({ ...l, from_label: lab(l.from), to_label: lab(l.to) }))));
+  const unsizedWords = unsized.length === 0 ? '' : noDeadEnd?.message ?? todaysWords(labelOf);
+  // The awaiting sentence takes only what the 400-character carrier has left, so it never pushes a message past 400. When it
+  // cannot fit, today's plain statement is said with compact labels so both reasons fit (Codex r1/r2); failing that, today's
+  // words stand alone, exactly as before this change (their own length is today's, never lengthened here).
+  const withAwaiting = (words: string, lab: (id: string) => string): string => {
     const awaiting = awaitingGoalSentence(awaitingTarget.map((l) => ({ ...heldForTarget.get(`${l.from}->${l.to}`)!, from_label: lab(l.from), to_label: lab(l.to) })),
-      Math.max(0, 400 - (unsizedWords === '' ? 0 : unsizedWords.length + 1)));
-    return awaiting === '' ? '' : [unsizedWords, awaiting].filter((w) => w !== '').join(' ');
+      Math.max(0, 400 - (words === '' ? 0 : words.length + 1)));
+    const joined = [words, awaiting].filter((w) => w !== '').join(' ');
+    return awaiting === '' || joined.length > 400 ? '' : joined;
   };
-  const message = [null, 40, 20].map(compose).find((m) => m !== '')
-    ?? (noDeadEnd?.message ?? said(unsized.map(l => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) }))));
+  const compact = (budget: number) => (id: string): string => compactWordLabel(labelOf(id), budget);
+  const message = awaitingTarget.length === 0 ? unsizedWords
+    : withAwaiting(unsizedWords, labelOf)
+      || withAwaiting(todaysWords(compact(40)), compact(40)) || withAwaiting(todaysWords(compact(20)), compact(20))
+      || unsizedWords;
   const firstLink = ordered.find((l) => asked.some((a) => a.from === l.from && a.to === l.to));
   const firstAsk: PlaceholderFirstAsk | undefined = productBlocks ? undefined
     : noDeadEnd !== undefined ? noDeadEnd.first

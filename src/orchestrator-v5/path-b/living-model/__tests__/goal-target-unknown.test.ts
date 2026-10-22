@@ -17,7 +17,8 @@ import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 import type { HandlerInvocation } from '../../../tools/registry.js';
 import { createRunAnalysisHandler } from '../../../tools/handlers/run-analysis.js';
 import { linksAwaitingGoalInput, mapLivingModel } from '../mapper.js';
-import { awaitingGoalSentence } from '../../../agent-lane/goal-certainty.js';
+import { awaitingGoalSentence, placeholderGoalWarning } from '../../../agent-lane/goal-certainty.js';
+import { unsizedLinkStatement } from '../../../agent-lane/unsized-path-cause.js';
 
 type Json = Record<string, any>;
 const SCENARIO = 'f0f0f0f0-0000-4000-8000-000000000023';
@@ -182,6 +183,14 @@ describe('a sized link into a goal with no target figure is held for that reason
     const l = (from: string) => ({ from, to: 'g', from_label: from, to_label: 'Goal', by: 'given' as const, awaits: 'target' as const });
     const out = awaitingGoalSentence([l('A'), l('B')]);
     expect(out).toBe('The figures given for the links from \u2018A\u2019 to \u2018Goal\u2019 and from \u2018B\u2019 to \u2018Goal\u2019 are kept, and used once \u2018Goal\u2019 has a target figure, which sets their scale.');
+  });
+
+  it('Codex r2: with no link awaiting the goal, the words are today\'s exactly, even where they fit nothing (no retry)', () => {
+    const E = '\u{1F600}'.repeat(300);
+    const graph = { nodes: [{ id: 'f', kind: 'factor', label: E }, { id: 'g', kind: 'goal', label: E }],
+      edges: [{ id: 'fg', from: 'f', to: 'g', strength: { mean: 0.5, std: 0.125 }, defaulted: true, provenance: { source: 'cee_hypothesis', magnitude: 'olumi_placeholder' } }] };
+    const w = placeholderGoalWarning(graph, [{ option_id: 'o', links: [{ from: 'f', to: 'g' }] }], 'GOAL_FIGURES_PLACEHOLDER_PATH', true);
+    expect(w.message).toBe(unsizedLinkStatement([{ from: 'f', to: 'g', from_label: E, to_label: E }]));
   });
 
   it('with a target figure, the same link is sized from Olumi\'s estimate (regenerated), and nothing is held', () => {
