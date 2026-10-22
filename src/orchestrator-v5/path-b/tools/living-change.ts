@@ -161,7 +161,7 @@ async function proposeOnce(deps: Deps, ctx: Ctx, args: LivingChangeArgs): Promis
   // ⭐ A CHANGE NEVER SILENTLY CUTS THE GOAL'S PATH (DL 22 Oct, marketing on 7ee0d90f): when the saved model has an option that
   // reaches the goal and this change leaves none, the same one offer says so, with the links into the goal it removes.
   if (offer !== undefined && cutsPath) {
-    const cut = pathCut(base.model, baseMapped, next, mapped);
+    const cut = pathCut(base.model, baseMapped, next);
     offer.offered = true;
     offer.pending = { tool: 'propose_change', args };
     return refused('goal_path_cut', RESTRUCTURE_CUT, { cut });
@@ -173,7 +173,7 @@ async function proposeOnce(deps: Deps, ctx: Ctx, args: LivingChangeArgs): Promis
   // The base fallback carded a change that leaves the goal with no path: the AI asks for the link sizes in one question (DL).
   return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: base.saved.graphHash,
     changes, withheld: mapped.withheld, assumed: mapped.assumed, relabelled: kernelled.relabelled,
-    ...(cutsPath ? { goal_unreached: { cut: pathCut(base.model, baseMapped, next, mapped), ask: ASK_LINK_SIZES } } : {}) });
+    ...(cutsPath ? { goal_unreached: { cut: pathCut(base.model, baseMapped, next), ask: ASK_LINK_SIZES } } : {}) });
 }
 
 /** A proposal this module prepared: it carries the complete living model it would write. */

@@ -22,7 +22,7 @@ import { buildModel } from '../draft-tool.js';
 import { applyLivingChange, proposeLivingChange } from '../living-change.js';
 import { pathBTools, type ToolCallResult } from '../index.js';
 import type { TraceRow } from '../outcome.js';
-import { ASK_LINK_SIZES, goalPathEncodingCauses, KEPT_AS_REFUSED, optionsReachingGoal, personContentLost, RESTRUCTURE_AIM, RESTRUCTURE_CHANGE, RESTRUCTURE_CUT, RESTRUCTURE_DRAFT, type Restructure } from '../goal-path.js';
+import { ASK_LINK_SIZES, goalPathEncodingCauses, KEPT_AS_REFUSED, optionsReachingGoal, pathCut, personContentLost, RESTRUCTURE_AIM, RESTRUCTURE_CHANGE, RESTRUCTURE_CUT, RESTRUCTURE_DRAFT, type Restructure } from '../goal-path.js';
 import type { Rec } from './fixtures.js';
 
 const SID = 'scn_1';
@@ -505,6 +505,27 @@ describe('DL 22 Oct (marketing on 7ee0d90f): a change never silently cuts the go
     const bare = await proposeLivingChange({ dispatch: q.dispatch, proposals: qs }, ctx, args({ ...structuredClone(next), links: [] }, ['f_g']));
     await applyLivingChange({ dispatch: q.dispatch, proposals: qs }, ctx, String((bare as { data: Rec }).data.proposal_id));
     expect(JSON.stringify(assessCanonicalAnalysisReadiness(projectCorePostimageForPersistence(GraphV3.parse(q.saved()!)) as never))).toContain('NO_PATH_TO_GOAL');
+  });
+
+  it('DL 22 Oct (contrast): a re-measured goal keeps the person\'s own stated link into it as theirs; nothing of Olumi\'s is added', async () => {
+    const p = product(KNOWN_ANSWER);
+    const proposals = new ProposalStore();
+    const said = 'we need at least 120 units shipped';
+    const next = structuredClone(KNOWN_ANSWER);
+    next.aims[0] = { ...next.aims[0]!, quote: said, target: { ...next.aims[0]!.target!, quantity: 'units shipped', value: 120 } };
+    const ctx = { ...changeCtx, user_turn_text: `Measure it as units shipped: ${said}.` };
+    const out = await proposeLivingChange({ dispatch: p.dispatch, proposals, restructure: { offered: false } }, ctx, args(next, []));
+    expect(out, JSON.stringify(out)).toMatchObject({ status: 'ok' });
+    expect((out as { data: Rec }).data.goal_unreached).toBeUndefined();
+    await applyLivingChange({ dispatch: p.dispatch, proposals }, ctx, String((out as { data: Rec }).data.proposal_id));
+    expect((p.saved()!.living_model as LivingModelT).links).toEqual(KNOWN_ANSWER.links);
+  });
+
+  it('#3679 follow-up (Codex on #3685): an added aim that becomes the goal leaves the old goal\'s own definition out of cut', () => {
+    const plus = { ...structuredClone(F1_DEFINED), aims: [...structuredClone(F1_DEFINED).aims, { ...structuredClone(F1_DEFINED).aims[0]!, id: 'rev2', defined_as: null }] };
+    expect(pathCut(F1_DEFINED, mapLivingModel(F1_DEFINED), plus)).toEqual([]);
+    const dropped = { ...structuredClone(F1_DEFINED), aims: [{ ...structuredClone(F1_DEFINED).aims[0]!, defined_as: null }] };
+    expect(pathCut(F1_DEFINED, mapLivingModel(F1_DEFINED), dropped)).toEqual(['rev:defined_as']);
   });
 
   it('DL 22 Oct (pin): both offers carry the ruling\'s instruction; the fallback card carries its one question', () => {

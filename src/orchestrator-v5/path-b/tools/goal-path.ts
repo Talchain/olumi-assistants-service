@@ -137,10 +137,11 @@ export function optionsReachingGoal(model: LivingModelT, mapped: Mapped): string
  * path ran through and removed no link, so `cut` was empty). A link the change keeps but the mapper holds still counts as a
  * path (`optionsReachingGoal`), so it never cuts one.
  */
-export function pathCut(base: LivingModelT, baseMapped: Mapped, next: LivingModelT, mapped: Mapped): string[] {
+export function pathCut(base: LivingModelT, baseMapped: Mapped, next: LivingModelT): string[] {
   const goal = baseMapped.graph.nodes.find((n) => n.kind === 'goal')?.id;
   const was = base.aims.find((a) => a.id === goal);
-  const kept = next.aims.find((a) => a.id === mapped.graph.nodes.find((n) => n.kind === 'goal')?.id);
+  // The same aim after the change, by the base goal's id: a goal that moved to another aim keeps its own definition (Codex on #3685).
+  const kept = next.aims.find((a) => a.id === goal);
   return [...base.links.filter((l) => l.to === goal && !next.links.some((n) => n.id === l.id)).map((l) => l.id),
     ...(was?.defined_as && !kept?.defined_as ? [`${was.id}:defined_as`] : [])];
 }
