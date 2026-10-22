@@ -13,7 +13,8 @@ const finiteNum = (v: unknown): v is number => typeof v === 'number' && Number.i
 const quote = (label: string): string => `‘${label}’`;
 
 export interface GoalTargetGap {
-  readonly kind: 'goal_target_missing';
+  /** `goal_level_missing`: a core goal's change target the person stated, with no level today to measure it from. */
+  readonly kind: 'goal_target_missing' | 'goal_level_missing';
   readonly goal_id: string;
   readonly deadline_known: boolean;
   readonly question: string;
@@ -46,6 +47,23 @@ function namedGoalOf(raw: Rec): Rec | undefined {
 }
 
 /**
+ * DL ruling 23 Oct (a) (Track 3 hiring): on a core graph the living model is the single source of meaning (A2), so this ONE
+ * reader reads the aim's own target there: the quantity of a change target the person stated (+10%) with no level today.
+ * Such a goal has a target; what is missing is today's level, never the target. A suggested measure (`source: 'olumi'`) is
+ * not the person's target. Undefined on a legacy graph (no `living_model`), whose words are unchanged.
+ */
+function coreChangeAwaitingLevel(raw: Rec, goalId: string): string | undefined {
+  const aims = rec(raw.living_model)?.aims;
+  const aim = Array.isArray(aims) ? aims.map(rec).find((a) => a?.id === goalId) : undefined;
+  const t = rec(aim?.target);
+  if (t === undefined || (t.comparator !== 'increase' && t.comparator !== 'decrease') || !finiteNum(t.value) || t.current !== null
+    || t.source === 'olumi' || typeof t.quantity !== 'string' || t.quantity.trim() === '') return undefined;
+  const q = t.quantity.trim();
+  // "Productivity" reads mid-sentence as "productivity"; an acronym ("NPS") keeps its case.
+  return /^\p{Lu}\p{Ll}/u.test(q) ? `${q.charAt(0).toLowerCase()}${q.slice(1)}` : q;
+}
+
+/**
  * The named goal holds no target ({@link goalHasStatedTarget}), or null. A chance goal takes no target quantity (the goal-kind
  * registry, #2742 S1): its one question is S1's deadline ask. A provisional objective's is the objective ask. Never this one.
  */
@@ -62,6 +80,11 @@ export function goalTargetGapOf(graph: unknown): GoalTargetGap | null {
   const deadlineKnown = rows.some((r) => r?.node_id === goal.id && rec(r?.deadline_metadata) !== undefined)
     || typeof horizon?.deadline === 'string' || finiteNum(horizon?.months)
     || (typeof goal.goal_deadline_as_stated === 'string' && goal.goal_deadline_as_stated.trim() !== '');
+  const quantity = coreChangeAwaitingLevel(raw, goal.id);
+  if (quantity !== undefined) {
+    return { kind: 'goal_level_missing', goal_id: goal.id, deadline_known: deadlineKnown,
+      question: `One gap: ${quote(label)} is a change from today\u2019s level of ${quantity}, which isn\u2019t given yet. What is today\u2019s level of ${quantity}?` };
+  }
   return {
     kind: 'goal_target_missing', goal_id: goal.id, deadline_known: deadlineKnown,
     question: deadlineKnown

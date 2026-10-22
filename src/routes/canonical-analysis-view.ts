@@ -34,6 +34,8 @@ const STATUS_QUO_FACE = 'No change, by assumption';
 /** C1: with no goal target, no option can have a chance of meeting it. */
 const GOAL_TARGET_MISSING = 'goal_target_missing';
 const GOAL_TARGET_MISSING_FACE = 'Not shown yet: needs a target';
+/** DL 23 Oct (a): a core change target with no level today needs that level, never "a target" (`goal-target-gap.ts`). */
+const GOAL_LEVEL_MISSING_FACE = 'Not shown yet: needs today\u2019s level';
 
 /**
  * Moved readGoalIdentityWithheld message selection from DGAI
@@ -190,7 +192,8 @@ export function projectCanonicalAnalysisCells(
   // (`goal-target-gap.ts`, which `modelGapOf` and the action bar's "Set target" read; one target predicate with the target
   // ask, so a legacy goal's normalised threshold is a target, and a provisional objective is never asked for one).
   const gap = goalTargetGapOf(graph);
-  const targetMissing = gap === null ? undefined : { code: GOAL_TARGET_MISSING, message: gap.question };
+  const targetMissing = gap === null ? undefined : { code: gap.kind === 'goal_level_missing' ? gap.kind : GOAL_TARGET_MISSING, message: gap.question };
+  const targetMissingFace = gap?.kind === 'goal_level_missing' ? GOAL_LEVEL_MISSING_FACE : GOAL_TARGET_MISSING_FACE;
   const compared = rec(rec(result)?.enrichment)?.option_comparison;
   // The roster belongs to the served Run, not today's graph or a refused attempt.
   const optionIds = [...new Set([
@@ -229,7 +232,7 @@ export function projectCanonicalAnalysisCells(
     const cell: CanonicalAnalysisCell = range !== undefined ? { kind: 'range', display: range.range, detail: range, ...(face === undefined ? {} : { face }) }
       : display !== undefined ? { kind: 'figure', display, ...(face === undefined ? {} : { face }) }
         : reasons.length > 0 ? { kind: 'withheld', reasons,
-          face: targetMissing !== undefined ? GOAL_TARGET_MISSING_FACE : horizonReason !== undefined ? ZERO_SPREAD_NEEDS_MONTHLY_CHANGES : byAssumption !== undefined ? STATUS_QUO_FACE : OPTION_CHANCE_NOT_SHOWN,
+          face: targetMissing !== undefined ? targetMissingFace : horizonReason !== undefined ? ZERO_SPREAD_NEEDS_MONTHLY_CHANGES : byAssumption !== undefined ? STATUS_QUO_FACE : OPTION_CHANCE_NOT_SHOWN,
           why: withheldWhy } : { kind: 'none' };
     return { option_id, cell };
   });
