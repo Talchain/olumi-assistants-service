@@ -5,6 +5,9 @@ import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import { LivingModel, type LivingModelT } from '../../../../schemas/living-model.js';
 import { evaluatedIdentityCarriers } from '../../../admission/identity-evaluations.js';
 import { applyExplicitEdit } from '../edit.js';
+import { applyKernel } from '../kernel.js';
+import { diffLivingModels } from '../diff.js';
+import { F1_DEFINED } from './track2-f1-identity.fixtures.js';
 import { mapLivingModel } from '../mapper.js';
 
 const who = (quote: string) => ({ source: 'user' as const, party: null, quote });
@@ -90,5 +93,48 @@ describe('profit is revenue minus costs, through saved model, mapping and edits'
     const evaluation = { node_id: 'profit', operation: 'sum', factor_ids: ['revenue', 'costs'], evaluated: true };
     expect(evaluatedIdentityCarriers(nodes, [evaluation]).has('profit')).toBe(false);
     expect(evaluatedIdentityCarriers(nodes, [{ ...evaluation, subtract: ['costs'] }]).has('profit')).toBe(true);
+  });
+});
+
+
+describe('signed definitions survive the shared kernel', () => {
+  it('canonicalises minus-part ids along with the parts, before deriving profit or mapping edges', () => {
+    const m = model();
+    m.factors[0]!.id = 'Revenue'; m.factors[1]!.id = 'Costs';
+    m.aims[0]!.defined_as!.of = ['Revenue', 'Costs'];
+    m.aims[0]!.defined_as!.subtract = ['Costs'];
+    m.aims[0]!.target!.current = null;
+    m.options[1]!.settings[0]!.factor_id = 'Revenue';
+    const words = [...m.aims, ...m.factors, ...m.options, ...m.options.flatMap((o) => o.settings),
+      m.aims[0]!.defined_as!].map((x) => x.quote!).filter(Boolean);
+    const out = applyKernel(save(m), words);
+    expect(out.relabelled).toEqual([]);
+    expect(out.model.aims[0]!.defined_as).toMatchObject({ of: ['revenue', 'costs'], subtract: ['costs'], source: 'user' });
+    const mapped = mapLivingModel(save(out.model));
+    const graph = GraphV3.parse({ ...mapped.graph, living_model: out.model });
+    expect(mapped.withheld).toEqual([]);
+    expect(graph.nodes.find((n) => n.id === 'profit')).toMatchObject({
+      observed_state: { raw_value: 30 },
+      nonlinear_identity: { operation: 'sum', factor_ids: ['revenue', 'costs'], subtract: ['costs'] },
+    });
+    expect(graph.edges.find((e) => e.from === 'costs' && e.to === 'profit'))
+      .toMatchObject({ effect_direction: 'negative', provenance: { definitional: true } });
+  });
+
+  it('a native null echo on old definitions changes only the edited price and preserves saved authorship', () => {
+    const saved = save(F1_DEFINED);
+    const edit = save(saved);
+    const price = edit.factors.find((f) => f.id === 'price')!;
+    price.value = 45; price.quote = 'Each pays £45 a month';
+    const control = applyKernel(save(edit), [price.quote], saved);
+    for (const item of [...edit.aims, ...edit.factors]) if (item.defined_as) item.defined_as.subtract = null;
+    const echoed = applyKernel(save(edit), [price.quote], saved);
+    expect(echoed).toEqual(control);
+    expect(echoed.relabelled).toEqual([]);
+    expect(diffLivingModels(saved, save(echoed.model)).map(({ kind, id, change }) => ({ kind, id, change })))
+      .toEqual([{ kind: 'factor', id: 'price', change: 'change' }]);
+    expect(echoed.model.aims[0]!.defined_as).toEqual(saved.aims[0]!.defined_as);
+    expect(echoed.model.factors.find((f) => f.id === 'total')!.defined_as)
+      .toEqual(saved.factors.find((f) => f.id === 'total')!.defined_as);
   });
 });

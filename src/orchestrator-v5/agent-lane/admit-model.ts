@@ -1664,7 +1664,7 @@ function markProductIdentities(
    * withholds it (`identity_operand_missing` / `identity_zero_level`), PLoT then withholds the goal's chance on every
    * option (#416), and the Run ends with no question — served cut-costs chained "AWS workload spend × GCP workload
    * share" into "× GCP saving rate", the share and the rate with no level. So Olumi's own reading is refused when a part
-   * is a factor with no level (or 0) today, or an outcome another product refused here was to give its level — to a
+   * is a factor with no usable level today, or an outcome another product refused here was to give its level — to a
    * fixpoint, so a chain is refused whole in either order — and `unlevelledProductQuestions` asks for the root figures once. A
    * declaration the brief states is the user's structure and is kept.
    */

@@ -12,9 +12,8 @@
  *   deadline's window in period_months; a deadline is the aim's window, never an aim (DL, Paul's 22 Oct tests).
  * - A calendar deadline is Olumi's labelled reading: the AI reads the date (`period_deadline`, `period_by`), the host records the
  *   day, and the mapper works out the window between them, never the AI (DL 22 Oct, calendar carrier; Codex r1 on #3674).
- * - A stated difference is linked part to whole with its exact unit conversion (±1 only on a shared unit, Codex r2):
- *   defined_as holds only a sum or product, so a stated difference was left unconnected and the Run was blocked (DL, Lenses'
- *   22 Oct run).
+ * - A stated difference uses the shared signed sum: all part ids in of and minus-part ids in subtract,
+ *   with shared units and definition attribution, replacing the exact-link workaround without duplicate effects.
  * On a later turn, Olumi's additions are held to the same rule by the tool's own schema descriptions (`living-model.ts`).
  *
  * Modelling adapted from ~/Downloads/draft_graph_v197a.txt (CONSTRUCTION_FLOW, TOPOLOGY, OPTION_RULES);
