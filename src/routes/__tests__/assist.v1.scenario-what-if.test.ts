@@ -41,6 +41,13 @@ describe('the what-if route', () => {
     expect([r.statusCode, r.json()]).toEqual([200, { persisted: false, refusal: 'stale_base', changes_refused: [] }]);
   });
 
+  it('a saved model the Run cannot analyse: the refusal carries the Run\'s own next step and questions, as given', async () => {
+    ran.result = { kind: 'refused', reason: 'saved_unsupported', next_step: 'Connect the unlinked part.', readiness_questions: ['How does price affect revenue?'] };
+    const r = await post({ changes: [VALUE] });
+    expect([r.statusCode, r.json()]).toEqual([200, { persisted: false, refusal: 'saved_unsupported', changes_refused: [],
+      next_step: 'Connect the unlinked part.', readiness_questions: ['How does price affect revenue?'] }]);
+  });
+
   it.each([
     ['no changes', { changes: [] }],
     ['a structural gesture', { changes: [{ kind: 'structural_rename', node_id: 'f', label: 'x', expected_label: 'f' }] }],

@@ -74,7 +74,11 @@ export interface StressChance {
 }
 export type StressVariantRows =
   | { readonly kind: 'rows'; readonly rows: ReadonlyMap<string, StressChance> }
-  | { readonly kind: 'refused'; readonly reason: string };
+  | {
+    readonly kind: 'refused'; readonly reason: string;
+    /** For a model the Run cannot analyse: the Run's own next step and named questions (`analysis_not_ready` details). */
+    readonly next_step?: string; readonly readiness_questions?: readonly string[];
+  };
 export interface StressDeps {
   readonly dispatch: InternalDispatch;
   readonly runStressVariant?: (v: { readonly variantGraph: Rec; readonly seed: number; readonly signal: AbortSignal }) => Promise<StressVariantRows>;
