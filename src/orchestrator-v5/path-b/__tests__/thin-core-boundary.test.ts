@@ -12,12 +12,14 @@ const SRC = resolve(__dirname, '../../..');
 
 /** The thin core's own files. A file joins this list in the commit that moves it onto the living model. */
 const THIN_CORE_ROOTS = ['schemas/living-model.ts', 'orchestrator-v5/path-b/living-model', 'orchestrator-v5/path-b/tools/draft-tool.ts',
-  'orchestrator-v5/path-b/tools/core-write.ts'];
+  'orchestrator-v5/path-b/tools/core-write.ts', 'orchestrator-v5/core-route'];
 
 /** The legacy meaning/admission layer (module basenames). */
 const FORBIDDEN = [
   'admit-model', 'admit-candidate', 'build-model', 'statements', 'subject', 'provenance-of', 'stated-by-user',
   'user-statements', 'agent-capabilities', 'candidate-to-graph', 'quote-confirmation',
+  // The core route builds nothing from the legacy route (DL, 22 Oct): what both need lives in `core-route/`.
+  'agent-v1-turn',
 ];
 
 /** Protocol helpers that live in a forbidden module but carry no meaning. */
@@ -62,6 +64,7 @@ describe('thin core dependency boundary', () => {
     expect(forbiddenImports(`import {\n  BUILD_INSTRUCTIONS, constructionOperationId,\n} from '../../agent-lane/runtime/build-model.js';`))
       .toEqual(['build-model: BUILD_INSTRUCTIONS']);
     expect(forbiddenImports(`import type { InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';`)).toEqual([]);
+    expect(forbiddenImports(`import { readBackState } from '../../routes/agent-v1-turn.js';`)).toEqual(['agent-v1-turn: readBackState']);
     expect(forbiddenImports(`import { type CallStructuredModel, constructionOperationId } from '../runtime/build-model.js';`)).toEqual([]);
   });
 });

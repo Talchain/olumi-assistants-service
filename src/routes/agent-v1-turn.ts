@@ -54,7 +54,7 @@ const fenceRefused = (verdict: 'unclaimed' | 'unavailable') => ({ status: 'refus
 import { withRunStateFreshness } from '../orchestrator-v5/agent-lane/analysis-ready-freshness.js';
 import { readStoredGoalCertainty, type StoredGoalCertainty } from '../orchestrator-v5/tools/handlers/run-goal-certainty.js';
 import { readStoredOptionParticipation, type RecordedRunOptionSet, type StoredOptionParticipation } from '../orchestrator-v5/tools/handlers/option-participation.js';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
 import { OPENAI_ONLY, providerCallsMade, providerLedgerTruncated, recordProviderUsage, recordProviderRetry, recordedProviderCalls, runWithProviderPolicy, type ProviderCallHandle } from '../adapters/llm/provider-policy.js';
@@ -62,11 +62,9 @@ import { RESEARCH_CHIP_PREFIX, RESEARCH_NOT_ON_OFFER_TEXT, RESEARCH_ONLY_SHOWN_T
 import { agentRequestIdentity, conversationPromptAlias } from '../orchestrator-v5/agent-lane/runtime/prompt-identity.js';
 import { composeHeldResultReply, composeProposalReply } from '../orchestrator-v5/agent-lane/proposal-reply.js';
 import { firstAnalysisResultReply } from '../orchestrator-v5/agent-lane/first-analysis-result-reply.js';
-import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
-import { CONSTRUCTION_TAIL_RESERVE_MS } from '../orchestrator-v5/agent-lane/runtime/construction-deadline.js';
 export { CONSTRUCTION_TAIL_RESERVE_MS } from '../orchestrator-v5/agent-lane/runtime/construction-deadline.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
-import { answerRunNarrationOf, type CommittedTurnRecord, type OpenAiPausedRun } from '../orchestrator-v5/session/store.js';
+import { answerRunNarrationOf, type CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
 import { ModelReadFailedError, isRevisionConflict, promoteRevisionConflictResponse } from '../orchestrator-v5/graph-revision-conflict.js';
 import { toErrorV1 } from '../utils/errors.js';
 import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
@@ -85,14 +83,16 @@ import { runOmittedRisks, type RunOmittedRisk } from '../orchestrator-v5/agent-l
 import { drawnLinkPress, isDrawnLinkPress } from '../orchestrator-v5/agent-lane/drawn-link-press.js';
 import { answerIsIncomplete, heldChangeSentence, runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import { acquireCoreTurnSlot, CoreDeliveryUnknownError, CoreStateUnavailableError, runCoreTurn, type CoreTurnSdk } from '../orchestrator-v5/agent-lane/core/sdk-turn.js';
-import { pathBTools } from '../orchestrator-v5/path-b/tools/index.js';
 import { APPLY_CHANGE, isChangeProposal } from '../orchestrator-v5/path-b/tools/change-tools.js';
 import { legacyFromRead, livingViewOf } from '../orchestrator-v5/path-b/living-model/view.js';
 import { CORE_DRAFTING_GUIDANCE } from '../orchestrator-v5/path-b/drafting-guidance.js';
-import { modelCritic } from '../orchestrator-v5/agent-lane/core/model-critic.js';
+import { constructionDeadline, CORE_RUN_PRESS_WITHHELD, coreTurnStores, coreTurnTools, graphReadyEmitter } from '../orchestrator-v5/core-route/deps.js';
+import { AGENT_TURN_CLAIM_WAIT, agentTurnRequestHash, challengeTargetOf, chipOperationOf, claimHashFor, claimTurnIdOf, isChiplessRetry, requestHashOfClaim,
+  sameAgentTurnRequest, STRUCTURAL_CHALLENGE_HASH_TAG, typedRowProof, withChipOperation } from '../orchestrator-v5/core-route/turn-request.js';
+import { CORE_ALIGNED_INSTRUCTIONS, draftArmOf, GOAL_CHANCE_RANKING_INSTRUCTION, instructionsForMode, REPLY_LENGTH_INSTRUCTION } from '../orchestrator-v5/core-route/instructions.js';
 import { parseSelectedElements } from '../orchestrator-v5/boundary/request-extensions.js';
 import { agentSelectionContext, type AgentSelectionContext } from '../orchestrator-v5/agent-lane/selection-context.js';
-import { NOTE_NODE_KINDS, NOTE_ON_ITEM } from '../orchestrator-v5/path-b/tools/note-on-item.js';
+import { NOTE_ON_ITEM } from '../orchestrator-v5/path-b/tools/note-on-item.js';
 import type { AgentLaneMode, AgentToolContext, ToolResult } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { createAgentCapabilities, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
 import { runExplanationCurrentness } from '../orchestrator-v5/agent-lane/run-currentness.js';
@@ -120,7 +120,7 @@ import { agentProposals as proposals, executableWaitingProposal, identityProposa
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
 import { budgetFor, callEffortFor, conversationBudgetFor, coreBudget, coreReplyBudget, type CallBudget, INTERPRET_DEADLINE, interpretBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
-import { HOST_SCIENCE_AND_SOURCE_RULES, HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../orchestrator-v5/agent-lane/coach-route-v0_2.js';
+import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../orchestrator-v5/agent-lane/coach-route-v0_2.js';
 import { agentFactorEnrichments } from '../orchestrator-v5/agent-lane/factor-review.js';
 import { OLUMI_PURPOSE_INSTRUCTION } from '../orchestrator-v5/agent-lane/olumi-purpose.js';
 import { APPROVAL_REQUIRED_WORDS, approvalChoiceWords, narrateWriteOutcome, TYPED_APPROVAL_READ_BY_OLUMI, notAdoptedLine, openQuestionsForReply, staleOnlyByRangeReading, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
@@ -194,7 +194,6 @@ import { widenTurnForReadback } from '../orchestrator-v5/agent-lane/method-turn/
 import { isWhatChangesPress, whatChangesTurnFor, type WhatChangesTurn } from '../orchestrator-v5/agent-lane/method-turn/what-changes-turn.js';
 import { dispatchDecisionFlip } from '../orchestrator-v5/handlers/decision-flip-dispatch.js';
 import { dispatchStructuralChallenge, readStructuralChallengeReceipt } from '../orchestrator-v5/handlers/structural-challenge-dispatch.js';
-import { runStressVariant } from '../orchestrator-v5/handlers/stress-variant-run.js';
 import { STRUCTURAL_CHALLENGE_PRESS_PREFIX, parseStructuralChallengePress, structuralChallengePressId, structuralChallengeRefusal, structuralChallengeReplay, structuralChallengeTurnFor, structuralChallengeTurnUnderLicence, type StructuralChallengePressResolution, type StructuralChallengeTurn } from '../orchestrator-v5/agent-lane/method-turn/structural-challenge-turn.js';
 import { methodResultForEgress, testLinkMethodResult, whatChangesMethodResult, type MethodResultV1 } from '../orchestrator-v5/agent-lane/actions/method-result.js';
 import { readStructuralChallengeEdge } from '../orchestrator-v5/coaching/structural-challenge-eligibility.js';
@@ -282,75 +281,7 @@ function refusesInstructionsBreakpoint(status: number, text: string): boolean {
   } catch { return false; }
 }
 
-/**
- * ⛔ A TURN'S IDENTITY IS CLAIMED BEFORE IT RUNS — independent review of #1720
- * at f616bc2a (CHANGES_REQUIRED): a preflight READ of "has this turn
- * committed?" let two concurrent identical requests both see "no row" and both
- * call the provider and the tools; and a turn whose final row failed to persist
- * was re-run by its retry. So the identity is now CLAIMED in the durable turn
- * table (unique on (scenario_id, turn_id)) before any provider or tool call:
- *   · the CLAIM row carries `<turn_id>:claim` and no messages (history readers
- *     exclude it before their LIMIT — see `SupabaseSessionStore.readRecent`);
- *   · the ANSWER row carries the client's `turn_id` with the user and final text.
- * Only the request that CREATED the claim runs. Any other sees the claim, never
- * runs, and waits for the answer (replaying it) or says the outcome is unknown.
- * A claim without an answer is never read as permission to run again.
- */
-export const claimTurnIdOf = (turnId: string): string => `${turnId}:claim`;
-/**
- * ⛔ THE CLAIM MUST DECIDE OWNERSHIP ON THE PRODUCTION STORE — independent review
- * of #1720 at cb4e9d35: a non-graph write goes to `append_turn_atomic_v2`, which
- * does `ON CONFLICT DO NOTHING` and returns the EXISTING id with no error, so the
- * store never reports "someone else created this" for a claim. The claim row
- * therefore carries a per-request NONCE in its hash; the row is written once by
- * whichever insert wins and never updated, so reading it back says, exactly,
- * whether THIS request created it.
- */
-const CLAIM_NONCE = '#claim:';
-const claimHashFor = (requestHash: string, nonce: string): string => `${requestHash}${CLAIM_NONCE}${nonce}`;
-const requestHashOfClaim = (claimHash: string): string => claimHash.split(CLAIM_NONCE)[0] ?? '';
-/**
- * How long a request that did not win the claim waits for the winner's answer.
- *
- * ⛔ IT MUST END BEFORE THE BROWSER PROXY GIVES UP (Panel, #1720 APPROVE 5792014826,
- * non-blocking #1). At 150 s it outlasted the proxy's 125 s inject timeout, so a
- * same-id duplicate in the browser got a proxy timeout instead of the replay or the
- * 409 it was designed to return. Derived from the served proxy timeout, less the
- * same response headroom the V5 turn budget reserves, so the loser always answers.
- */
-export const AGENT_TURN_CLAIM_WAIT = {
-  totalMs: Math.min(150_000, config.proxy.browserProxyTimeoutMs - TURN_RESPONSE_HEADROOM_MS),
-  everyMs: 1_000,
-};
 
-/**
- * ⛔ THE CONSTRUCTION CALL ENDS BY ITS OWN DEADLINE, AND A TIMEOUT OF IT IS NEVER RETRIED
- * (DL CHANGES_REQUIRED on #2113 @ 6aa4f3c2).
- *
- * Its only bound was the global undici Agent (`HTTP_CLIENT_TIMEOUT_MS`, 110 s headers timeout), and
- * `onceMoreOnTransportFailure` retried that timeout. At the 12000 ceiling and the measured 76–87
- * output tok/s, a call needing more than ~8.4–9.6k tokens timed out at 110 s, a SECOND paid call
- * started, the browser proxy answered 504 at 125 s, and the server could register a model at ~220 s —
- * after the user had been told the turn failed.
- *
- * The arithmetic, from this request's start (the origin `firstAnalysisDeadline` uses):
- *     browserProxyTimeoutMs          125 000   the browser gives up here
- *   − TURN_RESPONSE_HEADROOM_MS       10 000   the turn's response tail (the V5 turn budget's, as above)
- *   − CONSTRUCTION_TAIL_RESERVE_MS    15 000   what must follow a build inside the turn: registration and
- *                                              the Agent's one narrating hop (~10–15 s — the same hop
- *                                              `FIRST_ANALYSIS_RESERVE_MS` reserves)
- *   = the construction call must have ENDED by start + 100 s.
- * Its abort budget is what remains of that when it starts (a conversation hop comes first), so it is
- * always below 100 s and below the 110 s undici bound. A first analysis cannot start past its own,
- * earlier deadline and says so (`first-analysis.ts`), so it needs no reserve here.
- */
-/** When the construction call must have ended, in a turn that began at `turnStartedAt`. */
-export function constructionDeadline(
-  turnStartedAt: number,
-  proxyTimeoutMs: number = config.proxy.browserProxyTimeoutMs,
-): number {
-  return turnStartedAt + proxyTimeoutMs - TURN_RESPONSE_HEADROOM_MS - CONSTRUCTION_TAIL_RESERVE_MS;
-}
 /** The typed reason a construction that ran out of turn budget carries — the truncation label's path. */
 export const CONSTRUCTION_TIMEOUT_REASON = 'construction_timeout';
 /** Our own abort (`AbortSignal.timeout`) and undici's own timeouts — the failures that must not be retried. */
@@ -845,27 +776,16 @@ function askEachOnce(lines: string[], replies: readonly string[]): void {
   lines.splice(0, lines.length, ...lines.map((l) => withoutAskedQuestion(l, replies)).filter((l) => l.trim() !== ''));
 }
 
+/** The core agent's instructions, moved to `core-route/instructions.ts`; re-exported for this route's existing importers. */
+export { CORE_ALIGNED_INSTRUCTIONS, CORE_NEXT_STEP, CORE_REPLY_INSTRUCTION, CORE_RESPONSE_DISCIPLINE, draftArmOf, GOAL_CHANCE_RANKING_INSTRUCTION,
+  instructionsForMode, NOTE_ON_ITEM_INSTRUCTION, REPLY_LENGTH_INSTRUCTION, SELECTED_RUN_SCOPE_INSTRUCTION } from '../orchestrator-v5/core-route/instructions.js';
+export { constructionDeadline, CORE_RUN_PRESS_WITHHELD } from '../orchestrator-v5/core-route/deps.js';
+/** A turn's request identity, moved to `core-route/turn-request.ts`; re-exported for this route's existing importers. */
+export { AGENT_TURN_CLAIM_WAIT, agentTurnRequestHash, ASK_CHALLENGE_CHIP_ID, challengeTargetOf, chipOperationOf, claimTurnIdOf, isChiplessRetry,
+  sameAgentTurnRequest, STRUCTURAL_CHALLENGE_HASH_TAG, TYPED_ORIGIN_PROOF_FROM, typedRowProof, withChipOperation } from '../orchestrator-v5/core-route/turn-request.js';
+
 /** Marks a board edit in the Agent's history — defined beside `needsDurableSeed`, which must recognise it. */
 export { BOARD_EDIT_PREFIX } from '../orchestrator-v5/agent-lane/history-store.js';
-
-/**
- * ⭐ THE REPLY'S OWN LENGTH (Paul's staging test, 1 Oct 00:1xZ: "the AI replies are much longer again"; DL #75 5922040401;
- * AIQ bound 5922092866). Measured 0-LLM on R3's seven funding brief turns: the model's own words went from ~100
- * (`base-1449Z` 105 · `train-1924Z` 102 · `train-1942Z` 100) to 180–195 after the v0.2 coach template landed (#2379), and the
- * host then appends 63–115 words of receipt and disclosure (#75 5922398757). So the sentence budgets the MODEL's words to
- * the pre-v0.2 size, which keeps the whole reply inside AIQ's ≤180 / ≤150 / ≤130. It never trades away a truth sentence.
- * Appended after the host contract: no existing rule is restated, moved or dropped.
- *
- * ⭐ K2 (DL #75 5925649954 item 5; R3 5925627855; lease 5925667650): "about" read as a target, and the model kept its own ask
- * beside the host's. R3's 06:00Z acceptance: run1 157 model words with "The useful next step is to state the minimum funding…"
- * right above the host's D1 ask (the same ask twice), examine 2 asks. Now the budgets are LIMITS, one question at most, last,
- * and on a build or Run turn the goal's target is never asked by the model: the host's D1 asks it, in AIQ's direction words
- * (`decision-input-ask.ts`). Real-route A/B, ONLY this sentence swapped, interleaved, request identity equal apart from it
- * (R3 train-0545Z captures; 16 calls): Run turn with the brief in history 101/97 → 89/90 model words, the model's own target
- * ask 2/2 → 0/2 (D1 then asks once), every truth point kept; examine asks 2,1 → 1,1; inspect 84/88 → 86/81.
- */
-export const REPLY_LENGTH_INSTRUCTION =
-  'Answer the user directly and visibly with the relevant reasoning, uncertainty and next action. The host does not supply a separate explanatory answer. Ask for a necessary missing target or input yourself only when it has not already been supplied; do not re-ask a known figure. Keep concise ordinary replies, with enough detail for the actual question and proposed change. To fit, cut restated model contents, process narration and extra questions first; never drop a caveat that changes the meaning, why a result or a leading option is withheld, a limit, or who supplied a figure.';
 
 /**
  * ⭐ AN OPTION IS NAMED ONLY IN THIS MODEL, AND NEVER "FRAGILE" (WORDING BATCH; DL 0df0e1 lease, 5 Oct ~15:0xZ; Acceptance
@@ -889,34 +809,6 @@ export const MODEL_RELATIVE_NAMING_INSTRUCTION =
   'Run result replies: lead with the selected Run\'s licensed goal-chance or withholding lines. Retain their target scope, unscored conditions and provisional, timing and source qualifications. Do not state a share of model runs or name a leader from that share in a result reply, even when a comparative leader-naming permission is present. Never substitute a relative ranking for an unavailable goal chance. The separate goal-chance licence governs any comparison of goal chances. In dedicated comparative reasoning only, you may report a permitted share recorded for the selected Run, using the approved credit label and qualifier; never turn it into a recommendation or the chance of the whole goal. Explain the supported implication or useful next action, and what the result rests on, using measured sensitivity and the figure\'s source when available. Never write recommend or recommendation, including negated forms. Never call a result, option or link fragile.';
 
 /**
- * ⭐ D3 step 2, DL 0df0e1 ruling C (6 Oct): step 2 puts each option's licensed chance of meeting the goal in front of the
- * model (`saved_run_options[].probability_of_goal`), so the model is told, typed, how far it may compare them: the Run's
- * own licence (`analysis.goal_chance_licence`, CEE's ≥ 10-point rule, Science d5), never its own reading of the figures.
- * Words follow Wording c6 (6 Oct): "similar chances" below the rule. The egress guard is cut 6.
- */
-/**
- * ⭐ G (AIE #94 6133027121, approved verbatim): said ONCE, here, where the Agent receives the selected Run's licence
- * (`analysis.goal_chance_licence`, with its target, `chance_words`, `notes` and `period_end_assumption`). A canonical note beside
- * a figure does not control free prose elsewhere; this does not repair licensing, source loss or approval.
- */
-export const SELECTED_RUN_SCOPE_INSTRUCTION = 'Describe the selected Run using its licensed target wording and scope. If it scores only part of the user\'s '
-  + 'goal, name that target and retain the unscored conditions; never call its chance the chance of meeting the whole goal. Keep its '
-  + 'provisional or timing-assumption qualification in your own explanation.';
-
-export const GOAL_CHANCE_RANKING_INSTRUCTION =
-  'Comparing options by their goal chances (any probability_of_goal you are given, including goal_certainty): only as '
-  + 'the GOAL_CHANCE_LICENSED record of the result you are reporting allows (CURRENT MODEL STATE analysis.goal_chance_licence, or that '
-  + 'record among a run result\u2019s inference_warnings), never by your own reading of the figures; a licence from an earlier result never '
-  + 'speaks for a newer one. '
-  + 'If its form is highest or highest_all_likely_to_miss, you may say that the option whose option_id is its leader_option_id has the highest '
-  + 'chance in this model, naming it by its display label. '
-  + 'If its form is similar, say the options in its similar_option_ids have similar chances in this model; never say one is '
-  + 'higher, ahead or more likely. '
-  + 'For any other form, or with no such licence, give each option\u2019s chance in its recorded order and never rank, order or single '
-  + 'out options by it. '
-  + SELECTED_RUN_SCOPE_INSTRUCTION;
-
-/**
  * ⭐ HIRING (e) (Paul's funding test 14 Oct: 0 tool calls on a stated capacity effect, per-option staffing and hiring starts).
  * AIE #94 6158232014 (recovery/codex/AIE-Q4-AND-STATED-FIGURE-INSTRUCTIONS-20261014.json), verbatim. Only where tools are
  * offered (`AGENT_TOOL_INSTRUCTIONS`): never on the tool-less Explain, a method, risks or widen call.
@@ -934,34 +826,6 @@ const AGENT_INSTRUCTIONS = SELECTED_COACH_V02_TEMPLATE.replace(
 const AGENT_TOOL_INSTRUCTIONS = `${AGENT_INSTRUCTIONS}\n\n${STATED_FIGURE_INSTRUCTION}`;
 
 /**
- * PROMPT ARM B (programme-docs #94 6302769609): AIE-CORE-TOOL-ALIGNMENT-v1, verbatim (#3523 comment 6298433275, packet
- * 4ea5e3ce…). The core agent's own authority, naming only the five tools it has, in place of the legacy mutation, host
- * and stated-figure routing (tools it does not have, another approval and Run flow). Every other section is kept, and so
- * are the host contract's science, source and freshness rules (`HOST_SCIENCE_AND_SOURCE_RULES`, which already carry the
- * model-relative naming rule, P13).
- */
-const CORE_AUTHORITY_INSTRUCTION = [
-  'Use only the tools declared for this turn and follow their descriptions and returned outcomes. Use the current saved Living Model and its revision as the operative state; keep proposed changes and hypothetical alternatives separate. A later confirmed tool result supersedes the turn-start snapshot only for what that result covers.',
-  // Candidate-3 witnesses (21 Oct, 16d96c79): a marketing brief with no saved model got advice and no model (Run 0/3), and
-  // "What else could you do?" got a list in the reply and no card. The instruction said how to build, never when.
-  // Codex r1: building waits for a clear scope (the scope rule below), and what is missing is asked as the other rules say.
-  "When there is no saved model, the scope is clear, and the person describes a situation they are reasoning about (a choice between options, a goal or a plan), build the first model from their brief in that same turn, even when figures are still missing, and answer their question alongside it. "
-  + "When the person asks what else could be added (other options, factors, risks or links), prepare Olumi's suggested additions with propose_change, each visibly Olumi's, so they can approve, change or decline them on its card; a list in your reply adds nothing to their model.",
-  "For a first model, use build_model_from_brief with the user's actual brief and the complete Living Model. For a requested revision, use propose_change with the complete proposed model. Copy unaffected saved items unchanged, including their ids, wording, sources, party names and quotes; preserve conditions, dissent and required history. Do not preserve an item that the requested correction actually supersedes.",
-  "For a prepared revision, apply_change requests commitment and the SDK requires the person's approval of that proposal on its card. Do not treat a typed yes or your own interpretation as the card's approval. Confirm a save only from the operation's own confirmed outcome; a lost or unknown outcome is not proof of either success or failure.",
-  // Paul's served test (21 Oct, 31711a9): the draft held Olumi's factors with no level, its links unsigned and no risk, so
-  // nothing could be worked out. Olumi completes its OWN items, visibly Olumi's; a person's item never takes Olumi's figure.
-  "Build a model the analysis can run on. Each item Olumi adds is complete and visibly Olumi's (source olumi, quote null): a factor has a provisional level, a central figure with a range around it, in a stated unit; each of Olumi's links has a direction and, where `to` has a unit and `from` has one or is an option or an on-or-off step (+1 when in place), a rough strength, a central figure with a range around it; each option except the status quo reaches the goal through what it changes; a risk Olumi raises has a provisional chance range and window, and links to what it would hit. Make each range as wide as what is genuinely unknown, from general knowledge of situations like this one. Where the person's or a party's item has no figure, give Olumi's provisional estimate of it with estimate_by olumi, as wide as what is genuinely unknown; never change or mix with a figure they gave, and never set the goal's target figure (ask for it). In the reply, say that the figures marked as Olumi's are starting estimates for them to correct.",
-  "Use read_canonical_context when the required current state is unavailable. Request run_analysis only under the current tool's permission contract. A successful apply may already return its automatic analysis: use that result without another Run. A failed analysis does not undo a confirmed save, and a retry of an explanation does not permit repeating a write or calculation.",
-].join('\n\n');
-/** The shared coach's starting-input paragraph (legacy proposing tools) and the core copy's replacement (AIE, verbatim). */
-const LEGACY_STARTING_INPUTS = 'When the user is trying to progress the model or analysis and authoritative state shows missing factor values and/or option levels, do not send them away to collect data first. Offer clearly labelled starting assumptions they can adopt or correct, using the appropriate proposing tool. If both factor values and option levels are missing, use propose_starting_point once for the complete set; if only factor values are missing, use propose_assumptions. A proposal changes nothing until the user explicitly approves it.';
-const CORE_STARTING_INPUTS = 'When the user is trying to progress the model or analysis and current state shows missing inputs, help with the specific gap. Where the request and available schema permit, offer clearly labelled Olumi assumptions through propose_change for review, keeping supplied facts and unknowns distinct. Otherwise explain the missing capability or ask only for the necessary input. A proposal changes nothing until its own approval and confirmed save.';
-export const CORE_ALIGNED_INSTRUCTIONS = SELECTED_COACH_V02_TEMPLATE.replace(
-  '{{MODE_AND_AUTHORITY}}',
-  `${OLUMI_PURPOSE_INSTRUCTION}\n\n${[CORE_AUTHORITY_INSTRUCTION, HOST_SCIENCE_AND_SOURCE_RULES, REPLY_LENGTH_INSTRUCTION, REPLY_SHAPE_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION].join(' ')}`,
-).replace(LEGACY_STARTING_INPUTS, CORE_STARTING_INPUTS);
-/**
  * The core agent's instructions: arm B, the AIE-aligned authority naming only the tools core has, on EVERY core turn
  * (buddy SIMPLER on #3571: the default arm A told core about legacy writers it does not have; R2 04:29Z: every arm 100 %).
  * The header no longer selects anything; every other mode keeps arm A.
@@ -970,88 +834,6 @@ export const promptArmOf = (mode: AgentLaneMode, _header?: unknown): 'A' | 'B' =
 /** The builder's effort for a configuration comparison (#94): `x-olumi-core-effort` on a core turn, else the banked medium. */
 export const coreEffortArmOf = (mode: AgentLaneMode, header: unknown): 'low' | 'medium' | 'high' | undefined =>
   (mode === 'core' && (header === 'medium' || header === 'low' || header === 'high') ? header : undefined);
-/**
- * The drafting guidance's arm (Paul 21 Oct: port the benchmarked drafting prompt, A/B it once): a core turn on a scenario
- * with no saved model gets it unless `x-olumi-draft-arm: off`; a saved model is 'n/a'. Echoed as `_agent.draft_arm`.
- */
-export const draftArmOf = (mode: AgentLaneMode, noSavedModel: boolean, header: unknown): 'on' | 'off' | 'n/a' | undefined =>
-  (mode !== 'core' ? undefined : !noSavedModel ? 'n/a' : header === 'off' ? 'off' : 'on');
-
-/**
- * ⭐ PATH-B `core` (agent-tools.ts `AgentLaneMode`): Olumi appends and rewrites nothing after the AI's reply, so the reply
- * itself carries what the host would otherwise add, from the typed facts the AI already holds. Sent only in `core`, after
- * the shared instructions, so every other mode's instructions stay byte-identical. ⚠ Prompt text: AIE review owed.
- */
-const CORE_REPLY_BEFORE_C = 'In this mode Olumi adds nothing to your reply and rewrites none of it: the user reads exactly your words. '
-  + 'So say, from this turn\u2019s tool results, what was saved, what was not saved and why, and any proposal that is waiting for the user\u2019s approval on its card. '
-  + 'Write one coherent reply in a single voice: give the explanation first, mention what changed since the last Run only when it matters, and weave at most one next step from the current readiness facts into the prose, never as a separate bullet or receipt line and never asking for something the user has already said; ask at most one question per reply. '
-  + 'Keep every must_say disclosure and the licences in run_facts: never call a win share a chance, and never call an option best, a winner or recommended. '
-  + 'When a calculation rests on Olumi\u2019s own untested assumptions, say \u201cIllustrative calculation \u2014 uses untested Olumi assumptions.\u201d with the material assumptions and exact inputs used; never attribute spread to a stated range the Run did not use. '
-  + 'Keep each item\u2019s recorded source: the user\u2019s words stay the user\u2019s, another person\u2019s stay theirs, an unknown source stays unknown, and Olumi\u2019s readings stay Olumi\u2019s; approving a reading adopts it but does not make the user its author. '
-  + 'When a tool result carries a Run of the saved model (run_analysis, or the analysis apply_change returns after a saved change), give that Run\u2019s results first, then coach on that same Run: '
-  // Track 3 judge on candidate 4b (22 Oct, 11 c1 zeros on every arm): replies restated results and closed on a general caution
-  // ("not a guarantee", "keep that distinction"); 9/11 gave no specific next input or test, 6/11 named nothing the result rests on.
-  + 'specific to this model and in plain words: (1) for each option, what its result means for the user\u2019s goal (its chance of meeting it, or how far it lands from the target, and the reason when a chance is withheld); '
-  // Track 3 on candidate 5 (22 Oct): exact-figure briefs had no untested estimate to name, so 5/8 R2 replies closed on
-  // "check whether those assumptions remain appropriate"; with exact inputs, the Run's own results and the person's choice of which figure to test (Codex r1 on #3625: no computed margin, no unmeasured ranking).
-  // DL 23 Oct (R2 c1 0/3/5): the margin and the input a result rests on are now the Run's own facts (`goalMarginsOf`, goal_margins).
-  // DL 23 Oct (double-judged R2 on 7b0af1a9: fm6 1/7/0, c1 0/1/7): judges found no "recorded boundary" in the stored Run, so it
-  // is said as arithmetic on the person's own figures; the input is always named where goal_margins gives one; and the input a
-  // chance would need (its low and high) is invited, never promised (fm6). Codex on the approach: "equal", with which side meets.
-  // Codex r1 on #3619: "the least certain figure" is not "what it rests on most" (an unmeasured importance claim, run-facts.ts:84).
-  + '(2) what the result depends on: when the run facts measure sensitivity, the most-sensitive assumption with its source; otherwise which of its inputs are Olumi\u2019s untested estimates or unconfirmed figures, named by label with their ranges, without ranking them or saying which matters most; when every input is the person\u2019s own exact figure, say so once and give each option\u2019s result against the target as goal_margins states it (how far above or below the target it lands, in the target\u2019s unit), never worked out from the inputs, and name the input a result rests on only where goal_margins gives one (rests_on); where goal_margins has static_scope_declared false, say once that these are the model\u2019s figures as they stand, not a forecast to the goal\u2019s date; '
-  // Buddy SIMPLER on #3619: planStress (stress-tool.ts:99) tests only a sized link effect or factor level.
-  + '(3) one concrete next step for the model: the specific input to ask for, or, for a sized link effect or factor level, a test of it at the edge of its range (stress_test); a risk\u2019s chance or a missing figure is an input to ask for, never a test; with exact inputs, where goal_margins names the input a result rests on, always name that input and its boundary, said as what it is: from this Run\u2019s own figures, <input> at <boundary> is where <option>\u2019s level would equal the target (an \u201cat least\u201d or \u201cat most\u201d target is met at that point, an \u201cabove\u201d or \u201cbelow\u201d one is not), never as a recorded or measured threshold, and offer one stress_test of that link at it, said as a test the person can run, never as a claim about what will happen; in the same next step, invite them, if that figure could in fact vary, to give its lowest and highest likely values, without promising that a chance will then be shown and without suggesting the values; never say no further input is needed; without one, ask which of their own stated figures they are least sure of and offer to test it at a value they name (stress_test); say what result would change how the options compare. '
-  + 'Never close on a general caution (such as \u201cnot a guarantee\u201d, \u201ckeep that distinction\u201d or \u201ccheck whether those assumptions remain appropriate\u201d) in place of these. Use only the supplied analysis; '
-  + 'where run_comparison is given, follow its note. A Run that did not complete leaves a saved change saved: say both. '
-  // K3 scope: the AIE's wording, verbatim (19 Oct 19:5xZ; no further ACK). Applied by meaning: no keyword ladder or classifier.
-  + "Keep a clearly separate situation out of the current scenario's Living Model. If the relationship to the current scenario is unclear, ask one brief scope question before building or changing the model, while continuing useful discussion. "
-  + 'Do not ask again when the person has already made the scope clear. Ordinary expansion and what-ifs within this scenario remain allowed. '
-  + 'If the available tools cannot create or work in a separate scenario, say so; do not claim it was created or put its facts into this model instead.';
-/** A `core` Run press permits calculation and reading only: every tool but the reader and the Run (`withheldToolsOf`). The
- *  stress test is withheld too (DL 21 Oct): a press runs and reads; typed turns still offer it, where the person asks. */
-export const CORE_RUN_PRESS_WITHHELD: readonly string[] = ['build_model_from_brief', 'propose_change', 'apply_change', 'stress_test', 'offer_public_research'];
-/** Coaching on the canvas (Lenses, #3535 `note_on_item`): one question or challenge beside the item that most deserves attention. */
-export const NOTE_ON_ITEM_INSTRUCTION = "When one item in the model most deserves the person's attention (an untested assumption a result rests on, a missing cost or risk, or a link nobody has sized), use note_on_item once to put one short question or challenge beside it, in your own words; ask, do not answer or choose for them.";
-/**
- * Arm C, ADOPTED (#94; R2 window 21 Oct 04:29Z on served a4e6efaa, arms verified in the provider ledger): Paul's 21 Oct
- * session found core replies long and narrating the tools ("the save response gave no reason"). The same reply rule, with
- * its save sentence in the user's terms and a length bound; every other word is byte-identical. On R2 it kept every quality
- * rate at 100 % (facts 34/34, corrections 8/8 cold, 0/66 misattributions, outcome 18/18) with replies of 90 words median
- * (p90 111) against arm A's 127 (p90 202).
- */
-const CORE_REPLY_SAVE_SENTENCE = 'So say, from this turn\u2019s tool results, what was saved, what was not saved and why, and any proposal that is waiting for the user\u2019s approval on its card. ';
-/**
- * BULLETS FIRST, DETAIL ON REQUEST (Paul, 21 Oct, standing: "concise, action-oriented bullets as the first response, and then any
- * additional context or guidance that is valuable under progressive disclosure"). The core reply takes Olumi's approved reply
- * discipline VERBATIM from the served routing prompt (`Prompts/canonical/routing.txt`, <RESPONSE_DISCIPLINE>; pinned equal by
- * core-prompt-arm.test.ts), in place of the prose-only sentence it replaces: a headline, at most three bold-led insight bullets,
- * at most one question, about 130 words, and more detail offered in one clause, never unloaded unasked.
- */
-export const CORE_RESPONSE_DISCIPLINE = "<RESPONSE_DISCIPLINE>\nTwo shapes; choose by turn type.\n\nSHARP SHAPE (factual lookup, state query, pre-action orientation): answer or orientation in plain language; the evidence that matters; at most one focused question or concrete next step. Lookups and state queries: 1 to 3 sentences. Pre-action orientation: 2 to 4 sentences.\n\nCOACHING SHAPE (explaining results, including every explanation answer sent alongside a tool call; challenging a choice, handling contradiction, surfacing risk, improving the model; the shape that defines Olumi quality):\n1. HEADLINE: one plain-language sentence naming the key finding. No raw numbers. Lead with the insight.\n2. AT MOST THREE INSIGHT BULLETS, each a single sentence: \"- **Bold lead phrase.** Observation in plain language, then the specific action the user can take.\" Every bullet pairs insight with a concrete, decision-specific action; never a second sentence inside a bullet;\n3. QUESTIONS: zero to three, most turns zero or one. Only what would change the next step, woven where each does its work, never stacked into a list.\n\nCoaching-shape rules: substantive coaching turns use bullets, not prose paragraphs; the whole response stays under about 130 words unless the user asks for depth; very short clarifications or simple answers stay concise. Bold each lead phrase. Plain language only; raw decimals and precise terminology stay out (see TERMINOLOGY_MAP). Possessive framing: \"your model\", \"your estimate\", \"your assumptions\". Pair every risk with what to do about it.\n\nDETAIL BEHIND THE SUMMARY: when materially more sits in view than the shape admits (full driver list, per-option figures, method), end by naming that more detail is available and offer it in one clause; never unload it unasked.\n\nAvoid: long introductions, generic frameworks, repeating the question, stacked or decorative questions, unactionable advice.\n</RESPONSE_DISCIPLINE>";
-/** The one question while input is missing: the input that decides between their options, not the readiness list unless asked (Codex #3571). */
-export const CORE_NEXT_STEP = 'When input the analysis needs is missing and they have not asked what is missing, ask one focused question: the '
-  + 'input that would most change how their options compare on their goal, in their own words; a rough range is fine for a quantity. '
-  + 'That is usually the goal\u2019s figure (when they named no measure, suggest one as yours and ask for its figure), today\u2019s level '
-  + 'of what it measures, or what an option would deliver or cost; a question about what success means or what evidence would change '
-  + 'their view comes first only when it decides more. Say in a few words what their answer would change. When they ask what is still '
-  + 'needed, give the complete list. Never ask for a date, figure or name their words already give. '
-  // Track 3 on 4b (22 Oct): Olumi's risk chance counts only over the goal's window in months, and a core goal has none, so the
-  // mapper holds the risk (`risk_window_not_goal_window`) and the goal's chance is withheld. A chance the person states counts over
-  // their own window (riskOccurrenceIsCurrent), so that is the input that brings it in; a deadline alone does not (Track 2 step 0).
-  + 'When a risk is held as risk_window_not_goal_window, say once that this risk is not in the calculation yet, so the goal\u2019s chance is '
-  + 'not shown, and invite them to give their own estimate of how likely it is and over what time, which then goes in; make that your one '
-  + 'question unless another input would change the comparison more. ';
-export const CORE_REPLY_INSTRUCTION = CORE_REPLY_BEFORE_C.replace(CORE_REPLY_SAVE_SENTENCE,
-  'So say plainly what changed in their model, what was not saved and why, and any proposal that is waiting for the user\u2019s approval on its card, in the user\u2019s terms (their model, its items and its Run), never your tools or what a tool response did or did not contain. ')
-  .replace('Write one coherent reply in a single voice: give the explanation first, mention what changed since the last Run only when it matters, and weave at most one next step from the current readiness facts into the prose, never as a separate bullet or receipt line and never asking for something the user has already said; ask at most one question per reply. ', `${CORE_RESPONSE_DISCIPLINE}\nIn this lane, ask at most one question per reply, and never ask for something the user has already said. `)
-  // Track 3 E2E, 21 Oct (served dce1b50a, Q2 0/8 decisive): with no Run result, replies read out the readiness list ("today's
-  // footfall", "by when?" when the brief gave the date) instead of the input that decides between the options.
-  + CORE_NEXT_STEP;
-/** The instructions for one call in this lane mode: unchanged outside `core`. */
-export function instructionsForMode(mode: AgentLaneMode, instructions: string, reply: string = CORE_REPLY_INSTRUCTION): string {
-  return mode === 'core' ? `${instructions}\n\n${NOTE_ON_ITEM_INSTRUCTION}\n\n${reply}` : instructions;
-}
 
 /**
  * Read the persisted state back for the response: `graph_hash`, readiness and
@@ -1561,26 +1343,6 @@ export function typedRunOf(body: Record<string, unknown>): boolean {
  * proposal authorised, each on one click. Composer messages are untouched.
  */
 export const CHIP_TURN_WITHHELD_TOOLS: readonly string[] = ['authorise_change', 'run_analysis'];
-/** The canvas's Challenge press on one card (DGAI `NodeQuickActions` → `askAi`, chip `ask:challenge`). */
-export const ASK_CHALLENGE_CHIP_ID = 'ask:challenge';
-/**
- * ⭐ CHALLENGE ON ONE CARD (DL 22 Oct, Lenses lease; served 0/4 notes with #3630's description alone): a Challenge press on
- * exactly ONE card the model holds gets that card's own selection note for this turn, and its first call must be
- * note_on_item, so the challenge lands beside the card. No card, several, a link, or a selection that could not be checked:
- * null, and the turn runs as before.
- */
-export function challengeTargetOf(body: Record<string, unknown>, selection: AgentSelectionContext | null | undefined,
-  savedGraph: unknown): AgentSelectionContext | null {
-  const chip = body['chip'] as { id?: unknown } | null | undefined;
-  if (chip?.id !== ASK_CHALLENGE_CHIP_ID || selection == null) return null;
-  if (selection.grounded.element_ids.length !== 1 || selection.links !== undefined || selection.grounded.unresolved !== 'none') return null;
-  // Only a card a note can sit beside, on the saved model note_on_item itself reads (Codex r1: a decision is refused there).
-  const id = selection.grounded.element_ids[0];
-  const rec = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
-  const nodes = rec(savedGraph) && Array.isArray(savedGraph['nodes']) ? (savedGraph['nodes'] as unknown[]).filter(rec) : [];
-  const card = nodes.find((n) => n['id'] === id);
-  return card !== undefined && NOTE_NODE_KINDS.has(String(card['kind'])) ? selection : null;
-}
 export function withheldToolsOf(body: Record<string, unknown>): readonly string[] {
   const chip = body['chip'];
   if (chip === null || typeof chip !== 'object') return [];
@@ -1947,86 +1709,6 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/**
- * What makes two Agent turns "the same request": the scenario, WHO is asking,
- * and the message itself (trimmed). Stored as the turn row's `request_hash`, so
- * an exact retry replays and a reused id carrying a different message refuses.
- */
-export function agentTurnRequestHash(scenarioId: string, userId: string | null, message: string, operation?: string): string {
-  /**
-   * ⛔ A TYPED OPERATION IS PART OF WHAT WAS ASKED (independent review of #1782,
-   * 5804375960). Two approval chips carry the SAME words ("Yes, use those.") for
-   * DIFFERENT proposals, so a hash of the words alone let a reused turn_id replay
-   * approval A's answer for a request to approve B. The operation is bound only when
-   * present, so an ordinary message hashes exactly as before and its retries still
-   * replay.
-   */
-  const digest = createHash('sha256')
-    .update(JSON.stringify({ v: 1, scenario_id: scenarioId, subject: userId, message: message.trim(), ...(operation !== undefined ? { operation } : {}) }))
-    .digest('hex');
-  return `agent_turn:${digest}`;
-}
-
-/**
- * ⛔ THE CHIP IS PART OF WHAT WAS ASKED, TOO (DL P2 on #2481; the class, not the one chip). The same words do different
- * things with and without a chip, and with different chips: every chip turn withholds `authorise_change` and
- * `run_analysis` (`withheldToolsOf`), and the Run, research, Strengthen and starting-assumptions chips each take their
- * own path. So a reused turn_id carrying the same words with another chip, or none, is another request: it meets
- * `TURN_ID_REUSED`, never the other's recorded answer. The approve and explanation chips keep their own operations
- * (`approve:<id>`, the explanation id) inside the digest, unchanged.
- *
- * The chip rides as a SUFFIX (`#chip:<digest>`), not inside the digest, because the UI's own retry resends a turn's words
- * under its turn_id WITHOUT the chip (DGAI `buildPayload.ts`: `chip` only on chip sources; `retryLast` sends
- * `source: 'retry'`). `sameAgentTurnRequest` lets exactly that retry replay the recorded press (Codex pre-review P1).
- */
-const CHIP_HASH_SEP = '#chip:';
-/**
- * Restart continuity (DL 17:18Z, 14 Oct): a durable answer row's words were TYPED when its stored hash is this subject's
- * PLAIN hash of them: no `#chip:` suffix and no operation in the digest, the same rule as `typedByUser`. The reseed holds
- * proven rows as typed words (`HistoryStore.seed`); every other row stays source-unknown.
- */
-export function typedRowProof(scenarioId: string, userId: string | null):
-  (row: { request_hash?: string | null; user_message?: string | null; created_at?: string | null }) => boolean {
-  return (row) => typeof row.user_message === 'string' && writtenSinceTypedOriginCutoff(row.created_at)
-    && row.request_hash === agentTurnRequestHash(scenarioId, userId, row.user_message);
-}
-/**
- * ⛔ THE CUTOFF (DL, 14 Oct): before DGAI c3a20ea9 (#2792 + #2793 + #2794) the UI sent some of Olumi's own text without a
- * chip (GuidanceStrip discuss and exercise, confirm, OptionsComparison, OptionPreview, DraftNotes, FactorNode, …), so an
- * older row's plain hash does not prove its words were typed. Only rows written once that UI was served are proven:
- * staging's version.json showed c3a20ea9 at 21:03Z (built 20:24:48Z), so the cutoff is that observation, never earlier.
- * An older row, or one with no readable time, stays source-unknown.
- */
-export const TYPED_ORIGIN_PROOF_FROM = '2026-10-14T21:03:00Z';
-function writtenSinceTypedOriginCutoff(createdAt: string | null | undefined): boolean {
-  const at = typeof createdAt === 'string' ? Date.parse(createdAt) : Number.NaN;
-  return Number.isFinite(at) && at >= Date.parse(TYPED_ORIGIN_PROOF_FROM);
-}
-/** A durable typed discriminator lets the UI's chipless retry recognise SCI-DEEP without reversing the digest. */
-export const STRUCTURAL_CHALLENGE_HASH_TAG = 'sci-deep:';
-export function chipOperationOf(body: Record<string, unknown>): string | undefined {
-  const chip = body['chip'];
-  if (chip === null || typeof chip !== 'object') return undefined;
-  const { id, action_type: actionType } = chip as { id?: unknown; action_type?: unknown };
-  return `chip:${JSON.stringify([typeof id === 'string' ? id : null, typeof actionType === 'string' ? actionType : null])}`;
-}
-/** The turn's request hash with its chip bound, when it has one (see `chipOperationOf`). */
-export function withChipOperation(requestHash: string, chipOperation: string | undefined, tag = ''): string {
-  return chipOperation === undefined ? requestHash
-    : `${requestHash}${CHIP_HASH_SEP}${tag}${createHash('sha256').update(chipOperation).digest('hex').slice(0, 32)}`;
-}
-/** A UI retry: `source: 'retry'` and no chip (the UI drops it on a retry). */
-export function isChiplessRetry(body: Record<string, unknown>): boolean {
-  return body['source'] === 'retry' && (body['chip'] === undefined || body['chip'] === null);
-}
-/**
- * Whether a recorded turn (`stored`) is this request. Exact, except that a chipless UI retry of the same words is the
- * same request as the recorded chip press of those words: it is that press, resent without its chip.
- */
-export function sameAgentTurnRequest(stored: string, requested: string, chiplessRetry: boolean): boolean {
-  if (stored === requested) return true;
-  return chiplessRetry && !requested.includes(CHIP_HASH_SEP) && stored.startsWith(`${requested}${CHIP_HASH_SEP}`);
-}
 
 /** Only the AI narrates a core turn. Run data stays intact; the stored Run retains its original summary. */
 function turnAnalysisData<T extends { blocks?: unknown }>(response: T, mode: AgentLaneMode): T {
@@ -3283,18 +2965,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     /** X5: set only when this turn ran a construction — see `ConstructionTrace`. */
     let constructionTrace: ConstructionTrace | undefined;
     /** The streamed GRAPH_READY frame for a model graph (nothing outside a streamed turn); through COMPLETE's own projection. */
-    const emitGraphReady = (raw: Record<string, unknown>): void => {
-      const emitStage = currentStageEmitter();
-      if (emitStage === undefined || !Array.isArray(raw.nodes) || raw.nodes.length === 0) return;
-      // The same single cast COMPLETE's readback makes (`after.json.graph`).
-      const g = raw as GraphV3T;
-      emitStage({
-        kind: 'GRAPH_READY',
-        graph: buildAppliedGraphWireField({ ...g, edges: Array.isArray(g.edges) ? g.edges : [] }),
-        schema_version: 'v3',
-        elapsed_ms: Date.now() - startedAt,
-      });
-    };
+    const emitGraphReady = graphReadyEmitter(startedAt);
     // The objects the capabilities run on, named once so PATH-B's typed adapters (`pathBTools`) run on the SAME ones.
     const capDispatch = bindHeldApprovalWriter(countingDispatch, (input) => {
       writesDispatched += 1;
@@ -4632,23 +4303,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const challenge = challengeTargetOf(body, selectionContext, coreSaved?.graph);
         const core = await runCoreTurn({
           ctx: coreCtx, message, budget: coreBudget(coreEffortArmOf(mode, req.headers['x-olumi-core-effort'])), replyBudget: coreReplyBudget(), userId,
-          tools: (onCall) => pathBTools({ dispatch: capDispatch, proposals, critique: modelCritic(coreBudget()), deadlineAt: constructionDeadlineAt,
+          // The core turn's tools and stores, built as `routes/core-turn.ts` builds them (`core-route/deps.ts`).
+          tools: coreTurnTools({ ctx: coreCtx, mode, scenario: coreScenario ? 'core' : 'legacy', requestId: String(req.id), message,
+            dispatch: capDispatch, proposals, deadlineAt: constructionDeadlineAt, capabilities,
             ...(challenge !== null ? { noteOnlyOn: challenge.grounded.element_ids[0] } : {}),
-            proposeLinkStrengths: (c, a) => dispatchTool('propose_link_strengths', JSON.stringify(a), { ...coreCtx, ...c }, capabilities, mode),
             commitOptionLevels: commitOptionLevelsDoor, onModelRegistered: (raw) => emitGraphReady(raw),
             runAnalysis: (args) => restoreRun === undefined ? Promise.resolve({ ok: false, mutated: false, ran: false, refusal: 'run_failed' })
               : loopCapabilities.runAnalysis(toolCtx, args),
             analyseAfterCommit: () => { analysisToCore = true; return analyseCommittedChange(); },
-            // TRACK 3: each stress variant on the one Run path, in memory, discarded (`handlers/stress-variant-run.ts`).
-            // The research offer's gate: the final egress's own chip rule on this route's readback (fail closed).
             researchShowable: (query) => researchControlShowableNow(readingDispatch, scenarioId, query),
-            runStressVariant: (v) => runStressVariant({ ...v, requestId: `${String(req.id)}:stress`,
-              payload: { kind: 'message', scenario_id: scenarioId, turn_id: randomUUID(), stage: 'analyse', turn_class: 'decide', source: 'composer', message } }) }, coreCtx, mode,
-            (row, result) => {
-              // Only the adapter's own receipt AND successful postimage readback establish a saved change.
-              if (result.ok && result.mutated && (result.receipts?.length ?? 0) > 0) verifiedSave = true;
-              onCall(row, { ...result });
-            }, coreScenario ? 'core' : 'legacy'),
+            onVerifiedSave: () => { verifiedSave = true; } }),
           instructions: instructionsForMode(mode, `${promptArmOf(mode, req.headers['x-olumi-prompt-arm']) === 'B' ? CORE_ALIGNED_INSTRUCTIONS : AGENT_TOOL_INSTRUCTIONS}${eligibleIntervention === undefined ? '' : `\n\n${ELIGIBLE_INTERVENTION_INSTRUCTION}`}${coreDraftArm === 'on' ? `\n\n${CORE_DRAFTING_GUIDANCE}` : ''}${challenge === null ? '' : `\n\n${challenge.note}`}`),
           briefText: coreSaved?.brief_text,
           canonicalState: livingView === undefined ? canonicalContext?.packet?.state
@@ -4659,21 +4323,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             : challenge !== null ? { firstTool: NOTE_ON_ITEM } : {}),
           ...(corePress !== undefined ? { press: corePress } : {}),
           ...(canonicalContext?.packet?.graph_revision !== undefined ? { traceMeta: { revision: canonicalContext.packet.graph_revision } } : {}),
-          // A run paused for the person's approval is saved on the scenario, so the press (any later request) resumes it.
-          ...(typeof store.readOpenAiPausedRun === 'function' && typeof store.saveOpenAiPausedRun === 'function'
-            && typeof store.takeOpenAiPausedRun === 'function' ? {
-            pausedRunStore: {
-              read: (sid: string) => store.readOpenAiPausedRun!(sid),
-              save: (sid: string, run: OpenAiPausedRun) => store.saveOpenAiPausedRun!(sid, run),
-              take: (sid: string, id: string) => store.takeOpenAiPausedRun!(sid, id),
-            } } : {}),
-          // The scenario's ONE OpenAI Conversation id is saved on the scenario, so a reopen continues it. A store without it
-          // stops the turn (CoreStateUnavailableError → 503 below): never a Conversation the next turn could not find.
-          ...(typeof store.readOpenAiConversationId === 'function' && typeof store.claimOpenAiConversationId === 'function' ? {
-            conversationStore: {
-              read: (sid: string) => store.readOpenAiConversationId!(sid),
-              claim: (sid: string, id: string) => store.claimOpenAiConversationId!(sid, id),
-            } } : {}),
+          // The paused run and the ONE OpenAI Conversation id, kept on the scenario. A store without the id stops the turn
+          // (CoreStateUnavailableError → 503 below).
+          ...coreTurnStores(store),
         });
         coreSdk = core.sdk;
         result = core;
