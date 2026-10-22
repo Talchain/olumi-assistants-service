@@ -337,7 +337,7 @@ export const NodeV3 = z.object({
    * a top-level wire key. Same word, a different concept at a different level — but READ by it: a held `<=` / `<`
    * sends `'minimise'` (`resolveGoalDirection`, `goal-target/goal-direction.ts`); with none held, the label decides.
    *
-   * `goal_horizon_months` is the deadline the brief states ("within 12 months"). The analysis has no time axis: it
+   * `goal_horizon_months` retains the aim window, including fractional months from Olumi's calendar reading. The analysis has no time axis: it
    * compares levels, so no result answers the deadline yet.
    *
    * THESE DECLARATIONS ARE LOAD-BEARING, the same warning `threshold_source` carries above: undeclared, the next
@@ -347,7 +347,7 @@ export const NodeV3 = z.object({
    * reason to refuse a stored graph.
    */
   goal_direction: z.enum(['>=', '<=', '>', '<']).optional().catch(undefined),
-  goal_horizon_months: z.number().int().positive().optional().catch(undefined),
+  goal_horizon_months: z.number().finite().positive().optional().catch(undefined),
   /** User's steady-state judgement, written only through the approved goal-steady door. Never defaulted. */
   horizon_basis: z.object({
     basis: z.literal('steady_attested'),

@@ -109,8 +109,7 @@ export function readGoalRecord(graph: unknown, goalId: string): GoalRecord | nul
       ...(typeof goal.threshold_source === 'string' && goal.threshold_source.length <= 64 ? { source: goal.threshold_source } : {}),
     };
     const approvedHorizon = GoalHorizonSchema.safeParse(goal.goal_horizon).data;
-    const months = finite(goal.goal_horizon_months) && Number.isInteger(goal.goal_horizon_months)
-      && goal.goal_horizon_months > 0 ? goal.goal_horizon_months : undefined;
+    const months = finite(goal.goal_horizon_months) && goal.goal_horizon_months > 0 ? goal.goal_horizon_months : undefined;
     // A schema months arm needs a separately held H; then its approved count keeps precedence.
     // A deadline arm can coexist with that H, but a months-only schema arm supplies no deadline.
     const heldMonths = months !== undefined && approvedHorizon !== undefined && 'months' in approvedHorizon ? approvedHorizon.months : months;
