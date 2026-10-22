@@ -8,9 +8,9 @@
  *  · a level is `raw / cap`; the goal's cap is `resolveGoalThresholdCapWithProvenance`, its level `admitGoalBaseline`;
  *  · a link's β = (change in `to` per +1 of `from`) × cap_from / cap_to, its σ scaled by the same ratio (AIE, 20 Oct):
  *    a stated point gives the central coefficient only, and σ = |β|/2 is Olumi's illustrative convention (D3), never the
- *    user's spread; an explicitly stated Normal law gives both; an ordinary range is not a law, so it stays in the living
- *    model and its dependent chance is withheld, unless the person gave their own figure inside it, which sizes the link
- *    as their point (AIE range disposition, 16 Oct: `centre`), the range kept beside it;
+ *    user's spread; an explicitly stated Normal law gives both; a range without a central figure uses its midpoint and
+ *    width/√12 as Olumi's assumed Normal moments, with sign preserved (nonnegative magnitudes may size a negative link).
+ *    A stated figure inside a range sizes the link as a point, the range kept beside it;
  *  · existence 1 for a stated link is the assumption of conditioning on it; Olumi's 0.8 is an untested convention;
  *  · an unsized link is Olumi's placeholder, which the chance licence withholds; an unknown sign is never drawn positive;
  *  · unknown is never 0: a level, setting or link this slice cannot convert is WITHHELD with its reason, never dropped
@@ -780,8 +780,13 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     const unitMismatch = to !== undefined && e.unit !== null && to.unit !== null && e.unit !== to.unit;
     const ratio = from !== undefined && to !== undefined ? from.cap / to.cap : undefined;
     // The person's own figure inside their range ("about 20, between 10 and 30") sizes the link as their point, with the
-    // range kept beside it in the living model (AIE range disposition, 16 Oct: `centre`). A bare range sizes nothing.
+    // range kept beside it in the living model (AIE range disposition, 16 Oct: `centre`). Without a central figure,
+    // use uniform-matched moments for the engine's Normal, explicitly Olumi's assumption, never the person's stated point.
+    // A conflicting midpoint stays held, except nonnegative magnitudes on a minus link: applying the sign must not reflect it.
     const centred = e.form === 'range' && e.value !== null && e.low !== null && e.high !== null && e.low < e.value && e.value < e.high;
+    const uncentred = e.form === 'range' && e.value === null && e.low !== null && e.high !== null && e.low < e.high
+      && (Math.sign((e.low + e.high) / 2) === sign || (e.low >= 0 && sign < 0));
+    const value = uncentred ? (e.low! + e.high!) / 2 : e.value;
     // A point with the source's own standard deviation ("50 on average, standard deviation 10") keeps that SD (A5, 21 Oct:
     // the SD was saved and then replaced by half the effect). Its shape was not stated, so the Normal draw is Olumi's
     // assumption, said in the ledger below; the person's link is never promoted to a Normal law they stated (buddy 21:28Z).
@@ -796,6 +801,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
         // since any drawn spread can turn a deterministic "meets" into about 50% (AIE 17:59, point 4). The exact sum is the
         // one exact route.
         : (e.form === 'exact' && e.value !== null) ? { mean: sign * Math.abs(e.value) * ratio, std: LLM_STRENGTH_STD_FLOOR }
+        : uncentred ? { mean: sign * Math.abs(value!) * ratio, std: (e.high! - e.low!) / Math.sqrt(12) * ratio }
         : undefined;
     // A figure INTO the goal while the goal has no scale yet, because its target states no figure or its change target has no
     // level today to be measured from: the figure is kept and used once that input is given (DL 23 Oct, Q2 coaching zeros;
@@ -805,13 +811,13 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     // Only a figure that would be sized once the goal has its scale (the branches of `sized` above); a link with no figure
     // of its own is unsized, and keeps that reason (Codex r1 on this fix).
     const drawable = ((e.form === 'point' || centred) && e.value !== null) || (e.form === 'normal' && e.value !== null && e.sd !== null && e.sd > 0)
-      || (e.form === 'exact' && e.value !== null);
+      || (e.form === 'exact' && e.value !== null) || uncentred;
     const awaiting = !intoFramelessGoal || !drawable ? undefined
       : target === null || [target.value, target.low, target.high].every((v) => v === null) ? 'link_goal_target_unknown' as const
         : goalHeld === 'goal_level_unknown' ? 'link_goal_level_unknown' as const : undefined;
-    if (ratio === undefined && (e.form === 'point' || e.form === 'normal' || e.form === 'exact' || centred)) hold(l.id, awaiting ?? 'link_frame_unknown');
+    if (ratio === undefined && (e.form === 'point' || e.form === 'normal' || e.form === 'exact' || centred || uncentred)) hold(l.id, awaiting ?? 'link_frame_unknown');
     if (e.form === 'exact') hold(l.id, 'exact_not_drawable');
-    if (e.form === 'range' && !centred) hold(l.id, 'link_range_no_law');
+    if (e.form === 'range' && !centred && !uncentred) hold(l.id, 'link_range_no_law');
     if (unitMismatch) hold(l.id, 'link_unit_mismatch');
     if (sized === undefined || unitMismatch) {
       // Unsized (or not convertible): Olumi's placeholder, which the chance licence withholds.
@@ -824,9 +830,13 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     // left to a comment: a point's spread, and whether the link exists at all.
     const path = `edges[${l.from}::${l.to}]`;
     const assumed: RepairEntry[] = [
-      ...(e.form === 'point' || centred ? [{ code: REPAIR_CODES.CLAMP_STD_MINIMUM, layer: 'cee' as const, field_path: `${path}.strength.std`, before: null,
+      ...(e.form === 'point' || centred || uncentred ? [{ code: REPAIR_CODES.CLAMP_STD_MINIMUM, layer: 'cee' as const, field_path: `${path}.strength.std`, before: null,
         after: sized.std, severity: 'info' as const,
-        reason: centred
+        reason: uncentred
+          ? `${figureBy(e, l).source === 'user' ? 'You gave a range'
+            : figureBy(e, l).source === 'party' ? l.party ? `${l.party}’s range` : 'The stated range'
+              : `The calculation uses ${sdBy(figureBy(e, l).source)} range`}, ${e.low} to ${e.high}, and no most likely value. The calculation centres on the middle, ${value}, with a spread matching the range's width; this is Olumi's assumption, and a most likely value would replace it.`
+          : centred
           // Olumi's own centred link is never called "stated" (Codex on #3590): its figure and range are Olumi's estimate.
           ? (figureBy(e, l).source === 'olumi'
             ? `The calculation uses Olumi's estimated ${Math.abs(e.value!)} with Olumi's illustrative spread (half the estimated effect). Olumi's range, ${e.low} to ${e.high}, is kept with the model but is not used as a spread.`
@@ -843,14 +853,14 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     ];
     // Whose SIZE this is (per figure): the person's link with Olumi's estimated size is an Olumi estimate; its existence
     // above stays the link's own claim.
-    const sizedBy = figureBy(e, l);
+    const sizedBy = uncentred ? { source: 'olumi' as const, quote: null } : figureBy(e, l);
     const who = stated(sizedBy.source) ? { source: edited(sizedBy) ? 'user_specified' : 'brief_extraction', magnitude: 'user_stated' }
       : sizedBy.source === 'olumi' ? { source: 'cee_hypothesis', magnitude: 'olumi_estimate' } : {};
     // The size in the person's own units, as every existing reader of a sized link reads it (`natural_effect`: the target's
     // testability, the chance licence, the canvas): the change in `to` per +1 of `from`, and the β it was written for.
     // An option's own switch (`<option>__on`) has no unit; its change is said per 'switch', as legacy link-effect.ts says it.
     // An empty unit breaks the run-input contract, so the snapshot left the size out and no edit could be named (Compare C1).
-    const natural_effect = { amount: sign * Math.abs(e.value!), amount_unit: to!.unit ?? '', per_source_change: 1,
+    const natural_effect = { amount: sign * Math.abs(value!), amount_unit: to!.unit ?? '', per_source_change: 1,
       per_source_change_unit: from!.unit ?? (switches.has(l.from) ? 'switch' : ''), strength_mean: sized.mean, strength_mean_frame: 'edge_strength' as const };
     edges.push({ ...base, strength: sized, exists_probability: exists, provenance: { ...who, natural_effect, uncertainty_defaults: assumed } });
   }
@@ -929,7 +939,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
  * `link_goal_level_unknown`: a change target with no level today), read from a stored graph's own living model, with
  * whose figure each carries and the input it awaits. The Run's withhold says this reason, never "not sized".
  */
-export function linksAwaitingGoalInput(graph: unknown): Array<{ from: string; to: string; by: 'olumi' | 'stated' | 'given'; awaits: 'target' | 'level' }> {
+export function linksAwaitingGoalInput(graph: unknown): Array<{ from: string; to: string; by: 'olumi' | 'stated' | 'given'; range?: true; awaits: 'target' | 'level' }> {
   const living = LivingModel.safeParse(graph !== null && typeof graph === 'object' ? (graph as Rec).living_model : undefined);
   if (!living.success) return [];
   const mapped = mapLivingModel(living.data, savedGoal(graph));
@@ -940,8 +950,10 @@ export function linksAwaitingGoalInput(graph: unknown): Array<{ from: string; to
     const l = living.data.links.find((x) => x.id === w.id);
     const e = edgeOf.get(w.id);
     if (l === undefined || e === undefined || typeof e.from !== 'string' || typeof e.to !== 'string') return [];
+    // Attribution names the original range when it has no stated centre, never Olumi's derived midpoint.
     const source = figureBy(l.effect, l).source;
     return [{ from: e.from, to: e.to, by: source === 'olumi' ? 'olumi' as const : stated(source) ? 'stated' as const : 'given' as const,
+      ...(l.effect.form === 'range' && l.effect.value === null ? { range: true as const } : {}),
       awaits: w.reason === 'link_goal_target_unknown' ? 'target' as const : 'level' as const }];
   });
 }

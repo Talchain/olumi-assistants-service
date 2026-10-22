@@ -565,7 +565,7 @@ export function unsizedLinkWords(graph: unknown, links: readonly UnsizedPathLink
 }
 
 /** A link held only because the goal has no scale yet, with whose figure it carries and the input it awaits (`linksAwaitingGoalInput`). */
-export interface AwaitingGoalLink { readonly from: string; readonly to: string; readonly by: 'olumi' | 'stated' | 'given'; readonly awaits: 'target' | 'level' }
+export interface AwaitingGoalLink { readonly from: string; readonly to: string; readonly by: 'olumi' | 'stated' | 'given'; readonly range?: true; readonly awaits: 'target' | 'level' }
 
 /**
  * DL 23 Oct (Q2 coaching zeros; Track 3 funding/hiring): the true reason for a link held while the goal has no scale. Its
@@ -575,9 +575,12 @@ export interface AwaitingGoalLink { readonly from: string; readonly to: string; 
 export function awaitingGoalSentence(links: ReadonlyArray<AwaitingGoalLink & UnsizedPathLink>, maxLength = 400): string {
   if (links.length === 0) return '';
   const groups = ([
-    [['Olumi\u2019s estimate', 'Olumi\u2019s estimates'], links.filter((l) => l.by === 'olumi')],
-    [['the stated figure', 'the stated figures'], links.filter((l) => l.by === 'stated')],
-    [['the figure given', 'the figures given'], links.filter((l) => l.by === 'given')],
+    [['Olumi\u2019s estimate', 'Olumi\u2019s estimates'], links.filter((l) => l.by === 'olumi' && !l.range)],
+    [['the stated figure', 'the stated figures'], links.filter((l) => l.by === 'stated' && !l.range)],
+    [['the figure given', 'the figures given'], links.filter((l) => l.by === 'given' && !l.range)],
+    [['Olumi\u2019s estimated range', 'Olumi\u2019s estimated ranges'], links.filter((l) => l.by === 'olumi' && l.range)],
+    [['the stated range', 'the stated ranges'], links.filter((l) => l.by === 'stated' && l.range)],
+    [['the range given', 'the ranges given'], links.filter((l) => l.by === 'given' && l.range)],
   ] as Array<[[string, string], ReadonlyArray<UnsizedPathLink>]>).filter(([, ls]) => ls.length > 0);
   const plural = links.length > 1;
   const capital = (t: string): string => `${t.charAt(0).toUpperCase()}${t.slice(1)}`;
