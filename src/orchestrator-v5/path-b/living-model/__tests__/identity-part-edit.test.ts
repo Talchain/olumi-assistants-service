@@ -55,6 +55,65 @@ describe('a canvas level edit keeps admitted definitions and supersedes stale to
     expect(mapLivingModel(edit(before, 'price', 3))).toEqual(mapLivingModel(before));
   });
 
+  it('P1: a total with no figure stays a frame, with its identity, both edges and readiness intact', () => {
+    const before = save(bakery());
+    Object.assign(before.factors[2]!, { value: null, estimate_by: null, quote: 'our weekly revenue' });
+    const after = edit(before, 'price', 3.2);
+    expect(after.factors[2]).toEqual(before.factors[2]);
+    expect(after.history).toEqual([]);
+    expect(node(after, 'revenue').nonlinear_identity).toEqual(identity);
+    const mapped = mapLivingModel(after);
+    for (const from of ['loaves', 'price']) expect(mapped.graph.edges.filter((e) => e.from === from && e.to === 'revenue')).toHaveLength(1);
+    const persisted = projectCorePostimageForPersistence(GraphV3.parse({ ...mapped.graph, living_model: after }));
+    expect(assessRouteAdmission(persisted).readiness_issues).toEqual([]);
+    expect(mapped.withheld).toEqual(mapLivingModel(before).withheld);
+  });
+
+  it('P10: estimated, ranged or unstated parts never re-author a person’s total, across two briefs', () => {
+    const customer = () => {
+      const m = structuredClone(F1_DEFINED);
+      m.aims[0]!.defined_as = null;
+      return m;
+    };
+    for (const make of [bakery, customer]) {
+      for (const patch of [{ estimate_by: 'olumi' as const }, { low: 1, high: 1000 },
+        { source: 'olumi' as const, quote: null }, { source: 'unverified' as const, quote: null }]) {
+        const before = save(make());
+        Object.assign(before.factors[0]!, patch);
+        // A different part is edited: the untouched part's authorship must not be transferred from the gesture.
+        const edited = before.factors[1]!;
+        const total = before.factors[2]!;
+        total.estimate_by = null;
+        const after = edit(before, edited.id, edited.value! + 1);
+        expect(after.factors[2]).toEqual(total);
+        expect(after.history.filter((h) => h.id === total.id)).toEqual([]);
+        expect(mapLivingModel(after).withheld).toContainEqual({ id: total.id, reason: 'identity_inconsistent' });
+      }
+    }
+  });
+
+  it('P3: two part edits on a derived goal never supersede an unchanged aim', () => {
+    const weekly = bakery();
+    weekly.aims[0]!.defined_as = weekly.factors[2]!.defined_as;
+    weekly.aims[0]!.target!.quantity = 'weekly revenue';
+    weekly.factors = weekly.factors.slice(0, 2);
+    weekly.links = [];
+    for (const [model, first, second, level1, level2] of [
+      [F1_COARSE, 42, 43, 6300, 6450], [weekly, 4, 5, 3800, 4750],
+    ] as const) {
+      const before = save(model);
+      before.aims[0]!.target!.current = null;
+      const id = before.aims[0]!.id;
+      const once = edit(before, 'price', first);
+      const twice = edit(once, 'price', second);
+      expect(once.aims).toEqual(before.aims);
+      expect(twice.aims).toEqual(before.aims);
+      expect(twice.history).toEqual([]);
+      expect(node(once, id).observed_state).toMatchObject({ raw_value: level1 });
+      expect(node(twice, id).observed_state).toMatchObject({ raw_value: level2 });
+    }
+  });
+
   it('editing the defined total itself keeps today’s inconsistent-total behaviour', () => {
     const after = edit(bakery(), 'revenue', 2900);
     expect(after.factors[2]).toMatchObject({ value: 2900, source: 'user', estimate_by: null });

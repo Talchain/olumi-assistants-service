@@ -9,6 +9,7 @@
  */
 import type { LivingModelT } from '../../../schemas/living-model.js';
 import { exactlyMade, mapLivingModel } from './mapper.js';
+import { stated } from './aim-reading.js';
 
 /** The canvas gestures this slice applies, in the wire's own shapes (`@talchain/schemas` turn-payload). */
 export type ExplicitEdit =
@@ -93,6 +94,9 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       if (f !== undefined && unchangedPoint(f, raw, unit ?? edit.unit ?? null, edit.raw_value === undefined)) return { model: m };
       if (f !== undefined) {
         Object.assign(f, { ...theirFigure, value: raw, ...noRange, unit: unit ?? edit.unit ?? null, ...theirs });
+        // Snapshot this gesture's inputs before following dependencies reattributes calculated subtotals.
+        const theirPoints = new Set(m.factors.filter((p) => p.value !== null && p.low === null && p.high === null
+          && p.estimate_by !== 'olumi' && stated(p.source)).map((p) => p.id));
         // A changed part supersedes dependent totals, never their definitions. Only identities admitted BEFORE the edit:
         // contradictory totals, bad units and cycles keep their existing checks. Visit parts first, once (also for diamonds).
         const admitted = new Set(mapped.graph.nodes.filter((n) => n.nonlinear_identity !== undefined).map((n) => n.id));
@@ -103,7 +107,8 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
           visited.add(id);
           const quantity = factor(id);
           const def = quantity?.defined_as;
-          if (quantity === undefined || !def || !admitted.has(id)) return false;
+          if (quantity === undefined || quantity.value === null || !def || !admitted.has(id)
+            || !def.of.every((p) => theirPoints.has(p))) return false;
           const affected = def.of.map(follow).some(Boolean);
           if (!affected) return false;
           const values = def.of.map((p) => factor(p)?.value ?? null);
@@ -117,7 +122,7 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
         };
         for (const quantity of m.factors) follow(quantity.id);
         // A goal already has a derived-level route: retire only its stale current figure, keeping the aim and target theirs.
-        for (const a of m.aims) if (a.target !== null && admitted.has(a.id) && a.defined_as?.of.some((id) => changed.has(id))) {
+        for (const a of m.aims) if (a.target !== null && a.target.current !== null && admitted.has(a.id) && a.defined_as?.of.some((id) => changed.has(id))) {
           m.history.push({ id: a.id, change: 'superseded', old: JSON.stringify(a), quote: null });
           a.target = { ...a.target, current: null, current_source: null };
         }
