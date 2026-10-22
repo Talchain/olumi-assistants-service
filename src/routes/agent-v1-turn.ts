@@ -1026,7 +1026,11 @@ export const CORE_NEXT_STEP = 'When input the analysis needs is missing and they
   + 'That is usually the goal\u2019s figure (when they named no measure, suggest one as yours and ask for its figure), today\u2019s level '
   + 'of what it measures, or what an option would deliver or cost; a question about what success means or what evidence would change '
   + 'their view comes first only when it decides more. Say in a few words what their answer would change. When they ask what is still '
-  + 'needed, give the complete list. Never ask for a date, figure or name their words already give. ';
+  + 'needed, give the complete list. Never ask for a date, figure or name their words already give. '
+  // Track 3 on 4b (22 Oct): an Olumi risk chance counts only over the goal's window in months; with none, the mapper holds the risk
+  // (`risk_window_not_goal_window`) and the goal's chance is withheld. Say so once, in their terms, and ask the one input that fixes it.
+  + 'When a risk is held as risk_window_not_goal_window, say once that this risk is left out of the chance until they say by when the goal '
+  + 'should be met, and make that your one question unless another input would change the comparison more. ';
 export const CORE_REPLY_INSTRUCTION = CORE_REPLY_BEFORE_C.replace(CORE_REPLY_SAVE_SENTENCE,
   'So say plainly what changed in their model, what was not saved and why, and any proposal that is waiting for the user\u2019s approval on its card, in the user\u2019s terms (their model, its items and its Run), never your tools or what a tool response did or did not contain. ')
   .replace('Write one coherent reply in a single voice: give the explanation first, mention what changed since the last Run only when it matters, and weave at most one next step from the current readiness facts into the prose, never as a separate bullet or receipt line and never asking for something the user has already said; ask at most one question per reply. ', `${CORE_RESPONSE_DISCIPLINE}\nIn this lane, ask at most one question per reply, and never ask for something the user has already said. `)
