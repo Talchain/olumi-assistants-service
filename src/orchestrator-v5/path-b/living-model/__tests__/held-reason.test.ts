@@ -91,6 +91,36 @@ describe('every held reason says its own words in the one gap, never "no target"
     expect(goalTargetGapOf(stored(m))?.question).toBe('One gap: ‘Add £2,000 of sessions’ has a change in £ but today’s level in sessions. What is the change in sessions?');
   });
 
+  it('Codex r1: "relative or points" is asked only when both units are %, and a unit question only when the units differ', () => {
+    const generic = (label: string) => `One gap: ‘${label}’ has a target Olumi can’t read as stated yet. What exactly would count as meeting it?`;
+    const points = model('Add 10 points of sessions', { ...target, quantity: 'Sessions', comparator: 'increase', value: 10, unit: '%', change_kind: 'points', current: 100, current_unit: 'sessions' });
+    const sameUnit = model('Grow revenue by £10', { ...target, quantity: 'Revenue', comparator: 'increase', value: 10, unit: '£', change_kind: 'relative', current: 100, current_unit: '£' });
+    for (const [label, m] of [['Add 10 points of sessions', points], ['Grow revenue by £10', sameUnit]] as const) {
+      expect(goalHeld(m)).toBe('change_kind_unknown');
+      expect(goalTargetGapOf(stored(m))).toMatchObject({ kind: 'goal_answer_missing', question: generic(label) });
+    }
+  });
+
+  it('Codex r1: a range on a change is said as a change, never as the target level', () => {
+    const both = model('Grow members', { ...target, quantity: 'Members', comparator: 'increase', value: null, low: 10, high: 20, unit: 'members', current: 100, current_unit: 'members' });
+    expect(goalTargetGapOf(stored(both))?.question).toBe('One gap: ‘Grow members’ aims for a change of between 10 members and 20 members. Does meeting it mean a change of at least 10 members, at most 20 members, or both?');
+    const low = model('Grow members', { ...target, quantity: 'Members', comparator: 'increase', value: null, low: 10, unit: 'members', current: 100, current_unit: 'members' });
+    expect(goalTargetGapOf(stored(low))?.question).toBe('One gap: ‘Grow members’ gives a change of 10 members as the low end of a range. Does meeting it mean a change of at least 10 members?');
+  });
+
+  it('Codex r1: "exactly" says the figure exactly as written, never rounded', () => {
+    const pounds = model('Exactly £1.23456', { ...target, quantity: 'Price', comparator: '=', value: 1.23456, unit: '£' });
+    expect(goalTargetGapOf(stored(pounds))?.question).toContain('aims for exactly £1.23456.');
+    const tiny = model('Exactly 0.00001%', { ...target, quantity: 'Error rate', comparator: '=', value: 0.00001, unit: '%' });
+    expect(goalTargetGapOf(stored(tiny))?.question).toContain('aims for exactly 0.00001%.');
+  });
+
+  it('Codex r1: "exactly" with only a range asks the range question, never "no target"', () => {
+    const m = model('Between 400 and 600 members', { ...target, quantity: 'Members', comparator: '=', value: null, low: 400, high: 600, unit: 'members' });
+    expect(goalHeld(m)).toBe('exact_target_not_in_slice');
+    expect(goalTargetGapOf(stored(m))?.question).toBe(CASES[1]![2]);
+  });
+
   it('NEGATIVE: no target figure keeps today\'s words; a legacy graph is byte-identical; #3631\'s today\'s-level ask is unchanged', () => {
     expect(goalTargetGapOf(stored(model('Grow the business', null)))?.kind).toBe('goal_target_missing');
     for (const [, m] of CASES) expect(goalTargetGapOf(legacy(stored(m)))?.kind ?? null).not.toBe('goal_answer_missing');
@@ -98,10 +128,13 @@ describe('every held reason says its own words in the one gap, never "no target"
     expect(goalTargetGapOf(stored(hiring))?.kind).toBe('goal_level_missing');
   });
 
-  it('every question stays inside the 400-character carrier, whatever the label', () => {
+  it('every question stays inside the 400-character carrier, whatever the label, quantity or unit (Codex r1: units too)', () => {
     for (const [, m] of CASES) {
-      const long: LivingModelT = { ...m, aims: m.aims.map((a) => ({ ...a, text: 'L'.repeat(400), target: a.target === null ? null : { ...a.target, quantity: 'Q'.repeat(400) } })) };
-      expect(goalTargetGapOf(stored(long))!.question.length).toBeLessThanOrEqual(400);
+      const long: LivingModelT = { ...m, aims: m.aims.map((a) => ({ ...a, text: 'L'.repeat(400), target: a.target === null ? null
+        : { ...a.target, quantity: 'Q'.repeat(400), ...(a.target.unit === null ? {} : { unit: 'U'.repeat(400) }), ...(a.target.current_unit === null ? {} : { current_unit: 'C'.repeat(400) }) } })) };
+      const q = goalTargetGapOf(stored(long))!;
+      expect(q.kind).toBe('goal_answer_missing');
+      expect(q.question.length).toBeLessThanOrEqual(400);
     }
   });
 });

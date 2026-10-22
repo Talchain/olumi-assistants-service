@@ -6,7 +6,6 @@
  */
 import { statedGoalTargetOf } from './stated-goal-target.js';
 import { goalKindOf } from './goal-kind.js';
-import { sayFigureAsWritten } from '../agent-lane/say-figure.js';
 import { aimTargetReading } from '../path-b/living-model/aim-reading.js';
 
 type Rec = Record<string, unknown>;
@@ -89,49 +88,68 @@ function todaysLevelQuestion(label: string, quantity: string): string {
  * not one of these (no target figure: today's words).
  */
 function heldTargetQuestion(label: string, aim: Rec, t: Rec, reason: string): string | undefined {
-  const unit = typeof t.unit === 'string' ? t.unit : '';
-  const fig = (v: unknown, u: string = unit): string => (finiteNum(v) ? sayFigureAsWritten(v, u) : '');
-  const q = typeof t.quantity === 'string' && t.quantity.trim() !== '' ? midSentence(t.quantity.trim()) : undefined;
-  const up = t.comparator === 'decrease' ? 'less' : 'more';
-  const fit = (ask: (lab: string, qq: string) => string): string => {
-    const full = ask(label, q ?? '');
-    return full.length <= 400 ? full : ask(cut(label, 100), cut(q ?? '', 60));
+  if (reason === 'no_level_target' || reason === 'goal_level_unknown') return undefined;
+  // Every bounded part: a label, quantity or unit of any length still fits the 400-character carrier (Codex r1).
+  const plain = (lab: number, qty: number, un: number) => {
+    const u = cut(typeof t.unit === 'string' ? t.unit : '', un);
+    const cu = cut(typeof t.current_unit === 'string' ? t.current_unit : '', un);
+    // The person's figure exactly as written, never rounded ("exactly £1.23456"; Codex r1), its unit placed as it reads.
+    const exact = (v: number, unitOf: string): string => {
+      const n = v.toLocaleString('en-GB', { maximumFractionDigits: 20 });
+      return unitOf === '' ? n : /^[£$€]$/.test(unitOf) ? `${v < 0 ? '-' : ''}${unitOf}${n.replace(/^-/, '')}` : unitOf === '%' ? `${n}%` : `${n} ${unitOf}`;
+    };
+    const fig = (v: unknown, unitOf: string = u): string => (finiteNum(v) ? exact(v, unitOf) : '');
+    const q = typeof t.quantity === 'string' && t.quantity.trim() !== '' ? cut(midSentence(t.quantity.trim()), qty) : undefined;
+    return { L: quote(cut(label, lab)), u, cu, fig, q };
   };
-  switch (reason) {
-    case 'exact_target_not_in_slice':
-      return finiteNum(t.value) ? fit((lab) => `One gap: ${quote(lab)} aims for exactly ${fig(t.value)}. Would at least ${fig(t.value)}, or at most ${fig(t.value)}, count as meeting it?`) : undefined;
-    case 'target_range_not_in_slice':
-      if (finiteNum(t.low) && finiteNum(t.high)) {
-        return fit((lab) => `One gap: ${quote(lab)} aims for between ${fig(t.low)} and ${fig(t.high)}. Does meeting it mean reaching at least ${fig(t.low)}, staying at most ${fig(t.high)}, or both?`);
+  const ask = ({ L, u, cu, fig, q }: ReturnType<typeof plain>): string | undefined => {
+    const change = t.comparator === 'increase' || t.comparator === 'decrease';
+    const up = t.comparator === 'decrease' ? 'less' : 'more';
+    // A range on a change is a range of the change, never the target level itself (Codex r1).
+    const of = change ? 'a change of ' : '';
+    const range = (): string | undefined => (finiteNum(t.low) && finiteNum(t.high)
+        ? `One gap: ${L} aims for ${of}between ${fig(t.low)} and ${fig(t.high)}. Does meeting it mean ${change ? 'a change of ' : 'reaching '}at least ${fig(t.low)}, ${change ? '' : 'staying '}at most ${fig(t.high)}, or both?`
+        : finiteNum(t.low) ? `One gap: ${L} gives ${of}${fig(t.low)} as the low end of a range. Does meeting it mean ${change ? 'a change of ' : 'reaching '}at least ${fig(t.low)}?`
+          : finiteNum(t.high) ? `One gap: ${L} gives ${of}${fig(t.high)} as the high end of a range. Does meeting it mean ${change ? 'a change of ' : 'staying '}at most ${fig(t.high)}?` : undefined);
+    switch (reason) {
+      case 'exact_target_not_in_slice':
+        // "Exactly" with only a range is that range's question (Codex r1: never "no target").
+        return finiteNum(t.value) ? `One gap: ${L} aims for exactly ${fig(t.value)}. Would at least ${fig(t.value)}, or at most ${fig(t.value)}, count as meeting it?` : range();
+      case 'target_range_not_in_slice':
+        return range();
+      case 'change_kind_unknown':
+        // Only the ambiguity itself is asked as "relative or points": a % change of a quantity that is itself in % (Codex r1).
+        return finiteNum(t.value) && q !== undefined && u === '%' && (cu === '' || cu === '%') && (t.change_kind === null || t.change_kind === undefined)
+          ? `One gap: ${L} aims for ${fig(t.value)} ${up} ${q}. Is that ${fig(t.value)} of today\u2019s level, or ${fig(t.value, '')} percentage points?`
+          // A change in one unit on a level in another, neither a %: the change's unit is asked (never when the units match).
+          : u !== '' && u !== '%' && cu !== '' && cu !== u ? `One gap: ${L} has a change in ${u} but today\u2019s level in ${cu}. What is the change in ${cu}?` : undefined;
+      case 'change_base_invalid':
+        return finiteNum(t.value) && q !== undefined
+          ? `One gap: ${L} is a ${fig(t.value)} change, which needs a level today above zero. What is today\u2019s level of ${q}?` : undefined;
+      case 'current_unit_mismatch':
+        return cu !== '' && u !== '' ? `One gap: ${L} has a target in ${u} but today\u2019s level in ${cu}. What is today\u2019s level in ${u}?` : undefined;
+      case 'change_base_not_theirs': {
+        if (q === undefined || !finiteNum(t.current)) return undefined;
+        // Show, label, de-bias (Paul): Olumi's figure is named as Olumi's; one from an unconfirmed source is never called Olumi's.
+        const estimate = fig(t.current, cu !== '' ? cu : u);
+        return aim.source === 'olumi'
+          ? `One gap: ${L} is measured from today\u2019s level of ${q}, which Olumi estimated at ${estimate}. What is today\u2019s level? If Olumi\u2019s estimate is right, say so.`
+          : `One gap: ${L} is measured from today\u2019s level of ${q}, given as ${estimate} from a source not yet confirmed. What is today\u2019s level? If that figure is right, say so.`;
       }
-      return finiteNum(t.low) ? fit((lab) => `One gap: ${quote(lab)} gives ${fig(t.low)} as the low end of a range. Does meeting it mean reaching at least ${fig(t.low)}?`)
-        : finiteNum(t.high) ? fit((lab) => `One gap: ${quote(lab)} gives ${fig(t.high)} as the high end of a range. Does meeting it mean staying at most ${fig(t.high)}?`) : undefined;
-    case 'change_kind_unknown': {
-      if (!finiteNum(t.value) || q === undefined) return undefined;
-      const levelUnit = typeof t.current_unit === 'string' ? t.current_unit : unit;
-      return unit === '%'
-        ? fit((lab, qq) => `One gap: ${quote(lab)} aims for ${fig(t.value)} ${up} ${qq}. Is that ${fig(t.value)} of today\u2019s level, or ${sayFigureAsWritten(t.value as number, '')} percentage points?`)
-        : fit((lab) => `One gap: ${quote(lab)} has a change in ${unit === '' ? 'no unit' : unit} but today\u2019s level in ${levelUnit === '' ? 'no unit' : levelUnit}. What is the change in ${levelUnit === '' ? 'today\u2019s level\u2019s unit' : levelUnit}?`);
+      case 'target_not_theirs':
+        // The goal's figure is the person's to set: Olumi's suggestion's figure is never said here (anchoring risk; DL).
+        return q === undefined ? undefined : `One gap: Olumi suggested measuring ${L} as ${q}. What figure would count as meeting it?`;
+      default:
+        return undefined;
     }
-    case 'change_base_invalid':
-      return finiteNum(t.value) && q !== undefined
-        ? fit((lab, qq) => `One gap: ${quote(lab)} is a ${fig(t.value)} change, which needs a level today above zero. What is today\u2019s level of ${qq}?`) : undefined;
-    case 'current_unit_mismatch':
-      return typeof t.current_unit === 'string'
-        ? fit((lab) => `One gap: ${quote(lab)} has a target in ${unit} but today\u2019s level in ${t.current_unit as string}. What is today\u2019s level in ${unit}?`) : undefined;
-    case 'change_base_not_theirs': {
-      if (q === undefined || !finiteNum(t.current)) return undefined;
-      // Show, label, de-bias (Paul): Olumi's figure is named as Olumi's; one from an unconfirmed source is never called Olumi's.
-      const estimate = fig(t.current, typeof t.current_unit === 'string' ? t.current_unit : unit);
-      const whose = aim.source === 'olumi' ? `which Olumi estimated at ${estimate}` : `given as ${estimate} from a source not yet confirmed`;
-      return fit((lab, qq) => `One gap: ${quote(lab)} is measured from today\u2019s level of ${qq}, ${whose}. What is today\u2019s level? If ${aim.source === 'olumi' ? 'Olumi\u2019s estimate' : 'that figure'} is right, say so.`);
-    }
-    case 'target_not_theirs':
-      // The goal's figure is the person's to set: Olumi's suggestion's figure is never said here (anchoring risk; DL).
-      return q === undefined ? undefined : fit((lab, qq) => `One gap: Olumi suggested measuring ${quote(lab)} as ${qq}. What figure would count as meeting it?`);
-    default:
-      return undefined;
+  };
+  for (const [lab, qty, un] of [[Infinity, Infinity, Infinity], [100, 60, 30], [40, 30, 12]] as const) {
+    const out = ask(plain(lab, qty, un));
+    if (out !== undefined && out.length <= 400) return out;
+    if (out === undefined) break;
   }
+  // A stated target the core cannot read yet, for any other cause: still never "no target" (Codex r1), and always short.
+  return `One gap: ${quote(cut(label, 120))} has a target Olumi can\u2019t read as stated yet. What exactly would count as meeting it?`;
 }
 
 /**
