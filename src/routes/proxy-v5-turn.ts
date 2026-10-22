@@ -91,6 +91,8 @@ export const ALLOWED_REQUEST_HEADERS = [
   // these were forwarded, every arm sent through this proxy silently ran the default (21 Oct: identical prompt hashes).
   "x-olumi-prompt-arm",
   "x-olumi-core-effort",
+  // The drafting guidance's A/B arm (#3611): without it the "off" arm silently ran "on" (Track 3, 21 Oct 23:5xZ).
+  "x-olumi-draft-arm",
   // Login 3.4 CEE-half seam: the browser's Supabase access token
   // (`Authorization: Bearer <jwt>`) passes through to the internal turn
   // route, where the flag-gated CEE_REQUIRE_USER_JWT verification consumes
