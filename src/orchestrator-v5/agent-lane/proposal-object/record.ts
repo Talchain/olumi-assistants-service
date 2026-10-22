@@ -475,9 +475,10 @@ export function agentProposalRecord(pa: PendingAction, graph: unknown, nowMs = D
   };
   const savedLabelOf = (id: string): string => { const l = labelOf(id); return l !== id ? l : livingLabel(id) ?? id; };
   // A link has no label: a note names it by its ends (Lenses witness on c5d72d77: "applies to ‘speed_output’").
-  const savedLinkOf = (id: string): readonly [string, string] | undefined => {
+  const savedLinkOf = (id: string): readonly [string, string, unknown] | undefined => {
     const l = (Array.isArray(living['links']) ? living['links'] as unknown[] : []).filter(isRec).find((x) => x['id'] === id);
-    return l !== undefined && typeof l['from'] === 'string' && typeof l['to'] === 'string' ? [l['from'], l['to']] : undefined;
+    return l !== undefined && typeof l['from'] === 'string' && typeof l['to'] === 'string'
+      ? [l['from'], l['to'], isRec(l['effect']) ? l['effect']['sign'] : null] : undefined;
   };
   const shownAdds = coreAdds(p.operations, savedLabelOf);
   const adds = [...shownAdds, ...coreChangeNotes(p.operations, shownAdds, fields, savedLabelOf, savedLinkOf)];
@@ -620,7 +621,7 @@ interface Said { readonly path: string; readonly text: string; readonly who?: Wh
  * History entries (the host's own record) excepted. Nothing is cut: a longer note is split into numbered parts.
  */
 function coreChangeNotes(operations: readonly HeldOp[], adds: readonly AddField[], fields: readonly ProposalField[],
-  savedLabel: (id: string) => string, savedLink: (id: string) => readonly [string, string] | undefined): ChangeNoteField[] {
+  savedLabel: (id: string) => string, savedLink: (id: string) => readonly [string, string, unknown] | undefined): ChangeNoteField[] {
   // Labels as the card's adds read them: the proposed model's own items first, then the saved ones.
   const proposed = new Map<string, string>();
   for (const o of operations) {
@@ -629,17 +630,21 @@ function coreChangeNotes(operations: readonly HeldOp[], adds: readonly AddField[
     const sep = o.path.indexOf(':');
     if (a !== undefined && CARD_KINDS.has(o.path.slice(0, sep)) && typeof words === 'string' && words.trim() !== '') proposed.set(o.path.slice(sep + 1), words);
   }
-  const linkEnds = new Map<string, readonly [string, string]>();
+  const linkEnds = new Map<string, readonly [string, string, unknown]>();
   for (const o of operations) {
     const r = o.op === 'living_change' && isRec(o.value) ? (isRec(o.value['after']) ? o.value['after'] : isRec(o.value['before']) ? o.value['before'] : undefined) : undefined;
-    if (o.path.startsWith('link:') && r !== undefined && typeof r['from'] === 'string' && typeof r['to'] === 'string') linkEnds.set(o.path.slice('link:'.length), [r['from'], r['to']]);
+    if (o.path.startsWith('link:') && r !== undefined && typeof r['from'] === 'string' && typeof r['to'] === 'string') {
+      linkEnds.set(o.path.slice('link:'.length), [r['from'], r['to'], isRec(r['effect']) ? r['effect']['sign'] : null]);
+    }
   }
   const label = (id: string): string => quoted(proposed.get(id) ?? savedLabel(id));
   const name = (id: unknown): string => {
     if (typeof id !== 'string') return quoted('an item');
     const known = proposed.get(id) ?? savedLabel(id);
     const ends = known === id ? linkEnds.get(id) ?? savedLink(id) : undefined;
-    return ends !== undefined ? `${label(ends[0])} → ${label(ends[1])}` : quoted(known);
+    // Its direction, where stated, tells apart two links between equally named items (Codex r1 #3637).
+    const sign = ends?.[2] === '+' ? ' (raises it)' : ends?.[2] === '-' ? ' (lowers it)' : '';
+    return ends !== undefined ? `${label(ends[0])} → ${label(ends[1])}${sign}` : quoted(known);
   };
   // Whose a part is: its record's own who-key for that part, else the nearest record that says whose it is.
   const whoOf = (chain: readonly Rec[], key?: string): Who => {
@@ -729,7 +734,9 @@ function coreChangeNotes(operations: readonly HeldOp[], adds: readonly AddField[
         figure = true;
         const was = figureText(b, cb, path);
         const now = figureText(a, ca, path);
-        if (was !== now) out.push({ path: figurePath(path), text: `${join(figureWords(words, path))} was ${was}, now ${now}`, who: whoOf(ca, 'value') });
+        // A field shows only a point: a range that changes too keeps its own part (Codex r1 #3637: cleared bounds were hidden).
+        const pointOnly = stableJson([b['low'] ?? null, b['high'] ?? null]) === stableJson([a['low'] ?? null, a['high'] ?? null]);
+        if (was !== now) out.push({ path: pointOnly ? figurePath(path) : `${figurePath(path)}+range`, text: `${join(figureWords(words, path))} was ${was}, now ${now}`, who: whoOf(ca, 'value') });
         continue;
       }
       if (stableJson(bv ?? null) === stableJson(av ?? null)) continue;

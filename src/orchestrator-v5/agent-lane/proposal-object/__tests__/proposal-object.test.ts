@@ -726,9 +726,25 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
     const linkAdd = { id: 'l_new', from: 'backup', to: 'r', effect: { form: 'direction_only', value: null, low: null, high: null, sd: null, unit: 'hours', sign: '+', estimate_by: null }, source: 'olumi', party: null, quote: null };
     const named = (card([{ op: 'living_change', path: 'condition:0', value: { change: 'add', after: onLink } }, { op: 'living_change', path: 'link:l_new', value: { change: 'add', after: linkAdd } }]).adds ?? [])
       .flatMap((a) => (a.kind === 'change_note' ? [a.text] : []));
-    expect(named).toContain('Adds the condition “Only if the line runs at speed”: applies to ‘Backup supplier’ → ‘Supplier fails’ and ‘Backup supplier’ → ‘Supplier fails’; role an assumption (Olumi’s estimate).');
+    expect(named).toContain('Adds the condition “Only if the line runs at speed”: applies to ‘Backup supplier’ → ‘Supplier fails’ and ‘Backup supplier’ → ‘Supplier fails’ (raises it); role an assumption (Olumi’s estimate).');
     // A direction-only link's stated unit is written, so it is said (buddy on #3632).
     expect(named).toContain('‘Backup supplier’ → ‘Supplier fails’: effect unit “hours” (Olumi’s estimate).');
+    // Codex r1 on #3637: cleared bounds beside a shown point are said; opposing links between equally named items differ.
+    const ranged = (more: Record<string, unknown>) => ({ id: 'f', label: 'Lead time', value: 6, low: 2, high: 10, unit: 'weeks', defined_as: null, estimate_by: null, limit: null, source: 'olumi', party: null, quote: null, ...more });
+    const cleared = card([ch('factor:f', ranged({}), ranged({ value: 8, low: null, high: null }))]);
+    expect(cleared.fields.map((f) => f.field_id)).toEqual(['factor_value:f']);
+    expect(texts(cleared)).toEqual(['Changes ‘Lead time’: figure was 6 weeks (2 weeks to 10 weeks), now 8 weeks (Olumi’s estimate).']);
+    const twin = (on: string) => {
+      const p = createProposal({ scenario_id: SID, user_id: null, base_graph_identity_hash: 'pin', provenance: { authored_by: 'model_proposed' },
+        operations: [{ op: 'living_change', path: 'condition:0', value: { change: 'add', after: { text: 'Only in winter', applies_to: [on], role: 'assumption', source: 'olumi', party: null, quote: null } } }] as never,
+        validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: 'Core change' });
+      const carrier = proposalPendingAction(p, { id: `agent-approve-proposal:${p.proposal_id}`, label: p.public_label, message: 'Apply.' }, { scenario_id: SID, emitted_at_iso: new Date().toISOString() });
+      const g = { nodes: [{ id: 'a', label: 'Capacity' }, { id: 'b', label: 'Capacity' }, { id: 'c', label: 'Output' }], edges: [],
+        living_model: { links: [{ id: 'l1', from: 'a', to: 'c', effect: { sign: '+' } }, { id: 'l2', from: 'b', to: 'c', effect: { sign: '-' } }] } };
+      return (agentProposalRecord(carrier, g)!.adds ?? []).flatMap((x) => (x.kind === 'change_note' ? [x.text] : []));
+    };
+    expect(twin('l1')).toEqual(['Adds the condition “Only in winter”: applies to ‘Capacity’ → ‘Output’ (raises it); role an assumption (Olumi’s estimate).']);
+    expect(twin('l2')).toEqual(['Adds the condition “Only in winter”: applies to ‘Capacity’ → ‘Output’ (lowers it); role an assumption (Olumi’s estimate).']);
   });
   it('RED classifier assigns Agent factor and link kinds exhaustively', () => {
     expect(FIELD_CLASS_BY_OP.set_factor_value).toBe('factor_value');
