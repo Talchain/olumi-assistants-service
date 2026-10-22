@@ -401,7 +401,7 @@ export interface PlaceholderGoalPath {
  * and confirmed identity operands are exact. Examples and Olumi's actual estimates keep their existing disclosures.
  */
 /** Actual moved factors, using the legacy placeholder reader's held/raw scale rule. Unknown moves fail closed. */
-function actualMoveSeeds(graph: unknown, optionIds: readonly string[], scoredInterventions?: ReadonlyMap<string, Record<string, unknown>>): Map<string, string[]> {
+export function actualMoveSeeds(graph: unknown, optionIds: readonly string[], scoredInterventions?: ReadonlyMap<string, Record<string, unknown>>): Map<string, string[]> {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const byId = new Map(nodes.map(n => [n.id, n] as const));
   return new Map(optionIds.map(optionId => {

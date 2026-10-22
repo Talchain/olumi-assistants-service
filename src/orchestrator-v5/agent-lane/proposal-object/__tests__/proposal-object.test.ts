@@ -592,13 +592,14 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
     const added = card([{ op: 'living_change', path: 'factor:f', value: { change: 'add', after: fac({ source: 'olumi', quote: null, value: 40,
       limit: { comparator: '<=', value: 50, source: 'user', party: null, quote: 'no more than 50' }, defined_as: { op: 'sum', of: ['out'], source: 'olumi', party: null, quote: null } }) } }]);
     expect(notesOf(added).map((n) => n.text)).toEqual(['‘Orders’: definition kind the sum; definition parts ‘Output’ (Olumi’s estimate); limit comparison at most; limit figure 50 units; limit quoting “no more than 50” (yours).']);
-    // (5) Nine settings: split into parts the canvas reads in full, every figure on the card, never cut.
+    // (5) Nine settings: ONE whole note the canvas reads in full (DGAI #2922 reads up to 4,000), every figure on it, never cut.
     const set = (k: number) => ({ factor_id: `fac_${k}`, value: 10 + k, low: null, high: null, unit: 'units', source: 'user', party: null, quote: 'set', estimate_by: null });
     const opt = (settings: unknown[]) => ({ id: 'o', label: 'A plan with a fairly long descriptive name for the comparison', settings, status: 'feasible', developed_from: null, source: 'user', party: null, quote: 'plan' });
     const long = notesOf(card([ch('option:o', opt([]), opt([1, 2, 3, 4, 5, 6, 7, 8, 9].map(set)))]));
-    expect(long.length).toBeGreaterThan(1);
-    expect(long.every((n) => n.text.length <= 400)).toBe(true);
-    for (let k = 1; k <= 9; k += 1) expect(long.some((n) => n.text.includes(`${10 + k} units`)), `setting ${k}`).toBe(true);
+    expect(long).toHaveLength(1);
+    expect(long[0]!.text.length, 'control: longer than the old 400 parts').toBeGreaterThan(400);
+    expect(long[0]!.text).not.toMatch(/\(\d+\/\d+\)$/);
+    for (let k = 1; k <= 9; k += 1) expect(long[0]!.text.includes(`${10 + k} units`), `setting ${k}`).toBe(true);
     // (6) Key order never changes what is shown: the same change with keys reordered binds the same digest.
     const reorder = (o: Record<string, unknown>) => Object.fromEntries(Object.entries(o).reverse());
     // A unit and whose a figure is, with no figure yet: said in a fixed order, never the keys' order.
@@ -642,13 +643,17 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
       .toEqual(['Changes ‘Orders’: definition parts were ‘Output’, now ‘Output’ (a different item with the same name) (Olumi’s estimate).']);
     expect(notesOf(card([ch('factor:f', fac({ limit: lim }), fac({ limit: { ...lim, source: 'olumi', quote: null } }))])).map((n) => n.text))
       .toEqual(['Changes ‘Orders’: limit quoting now not stated (was “no more than 50”) (Olumi’s estimate); limit is now Olumi’s estimate (was yours).']);
-    // (4) An unbroken 401-character condition: every part fits the canvas; nothing is cut; a replaced condition's ids stay unique.
-    const word = 'x'.repeat(401);
+    // (4) An unbroken 401-character condition is now ONE note, in full; past the canvas's 4,000 a note still splits, never cut,
+    // every part within it; a replaced condition's ids stay unique.
+    const one = notesOf(card([{ op: 'living_change', path: 'condition:0', value: { change: 'add', after: { text: 'x'.repeat(401), applies_to: [], source: 'user', party: null, quote: 'x'.repeat(401) } } }]));
+    expect(one).toHaveLength(1);
+    expect(one[0]!.text.split('x').length - 1).toBe(802);
+    const word = 'x'.repeat(4001);
     const cond = notesOf(card([{ op: 'living_change', path: 'condition:0', value: { change: 'add', after: { text: word, applies_to: [], source: 'user', party: null, quote: word } } }]));
     expect(cond.length).toBeGreaterThan(1);
-    expect(cond.every((n) => n.text.length <= 400)).toBe(true);
-    // Its wording and its quoting (the same 401 characters here), each in full.
-    expect(cond.map((n) => n.text).join('').split('x').length - 1).toBe(802);
+    expect(cond.every((n) => n.text.length <= 4000)).toBe(true);
+    // Its wording and its quoting (the same 4,001 characters here), each in full.
+    expect(cond.map((n) => n.text).join('').split('x').length - 1).toBe(8002);
     const replaced = notesOf(card([
       { op: 'living_change', path: 'condition:0', value: { change: 'remove', before: { text: word, applies_to: [], source: 'user', party: null, quote: word } } },
       { op: 'living_change', path: 'condition:0', value: { change: 'add', after: { text: word, applies_to: [], source: 'user', party: null, quote: word } } }]));

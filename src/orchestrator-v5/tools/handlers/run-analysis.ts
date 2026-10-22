@@ -212,7 +212,8 @@ import {
 // emit the locked template on the one population that most needs the reason.
 import { buildSeparabilityDisclosure } from '../../coaching/separability-disclosure.js';
 import { heldGoalPointsUp, readGoalLabel, resolveGoalDirection, resolveGoalThresholdStrict } from '../../goal-target/goal-direction.js';
-import { withholdForOpenTargetQuestion, withholdUnusableGoalChances } from '../../goal-target/goal-chance-gate.js';
+import { goalChanceTargetCause, withholdForOpenTargetQuestion, withholdUnusableGoalChances } from '../../goal-target/goal-chance-gate.js';
+import { IMPLIED_QUANTITY_KEY, livingFramesOf, readImpliedQuantity } from '../../goal-target/implied-quantity.js';
 import { effectsTimingOf } from '../../goal-target/period-end-assumption.js';
 import { withGoalChanceReadback, withEvaluatedGoalChanceInputs, sentGoalThresholdOf, withGoalChanceLicence, withholdForOlumiGoalLevel, withholdForPeriodEndEffects } from '../../goal-target/goal-chance-licence.js';
 import { capacityRatioOptionIds, shareChanceRunBlock, withShareByDateFrame } from '../../goal-target/share-by-date-run.js';
@@ -2774,6 +2775,20 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // Record the caller's internal cause before the single owned projection/validation boundary.
     if (withheldBecauseUnsizedPath !== undefined) {
       response = { ...response, [UNSIZED_PATH_LEADER_CAUSE_KEY]: withheldBecauseUnsizedPath };
+    }
+    // ⭐ ITEM 2 (DL 22 Oct): an aim with no target figure gets what the model implies for the sized quantity nearest it, read on
+    // THIS Run's own request and draws and stored with this Run (`implied-quantity.ts`). A core scenario only (its frames).
+    const impliedFrames = goalChanceTargetCause(graphForAnalysis, snapshot.goal_node_id) === 'no_stated_target'
+      ? livingFramesOf(snapshot.rawPersistedGraph ?? snapshot.graph) : undefined;
+    if (impliedFrames !== undefined && impliedFrames.aimStatesFigure !== true) {
+      const optionIds = finalWireOptions.map((o) => optionIdOf(o as Record<string, unknown>)).filter((id): id is string => typeof id === 'string');
+      response = { ...response, [IMPLIED_QUANTITY_KEY]: await readImpliedQuantity({
+        graph: graphForAnalysis, goalId: snapshot.goal_node_id, frames: impliedFrames, optionIds,
+        scoredInterventions: new Map(finalWireOptions.map((o) => [optionIdOf(o as Record<string, unknown>) ?? '', o.interventions as Record<string, unknown>])),
+        dispatched: plotPayload, seed: plotPayload.seed ?? (isRecord(response.meta) ? response.meta.seed_used : undefined),
+        run: (payload) => deps.plotClient.run(payload, `${invocation.requestId}-implied`,
+          { turnSignal: invocation.signal, turnStartedAt: plotStartedAt, turnBudgetMs: getHandlerBudgetMs() }),
+      }) };
     }
     // ⭐ SPEED cut 3 (undeployed/SPEED.md, DL 14 Oct): the factor review's gpt-4.1 call no longer sits on every Run's
     // critical path (2.7 s median, p90 4.3, 8 s cap). Its one reader, the decision-review press, computes it for the same

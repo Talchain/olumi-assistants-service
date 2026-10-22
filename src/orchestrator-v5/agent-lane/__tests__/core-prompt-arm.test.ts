@@ -68,7 +68,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
 
   it('THE PROMPTS (DL 22 Oct, priority change): the coach\u2019s reply rules and the drafter\u2019s rules, adapted as ruled; the old constants are gone', () => {
     expect(createHash('sha256').update(CORE_REPLY_RULES, 'utf8').digest('hex')).toBe('0d1c339f1750712b5a4c769618343e9c343f4da60959066ae6d80a1404044d30');
-    expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('b23434b85ae1a4fca7d47ab8ad40c7b37f865203e04c09fb34cd44ad3785502f');
+    expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('d53b36a796519b62f4729856abc2480cd5ae91b1407d785446100214c14f4264'); // 22 Oct: a deadline is the aim's window, never an aim; a stated difference is linked (DL, Paul's tests, Lenses' bakery run; was b23434b8…)
     // The retired constants are gone from both modules: no route can send the accreted text again.
     for (const name of ['CORE_REPLY_INSTRUCTION', 'CORE_RESPONSE_DISCIPLINE', 'CORE_NEXT_STEP']) expect(Object.keys(coreInstructions), name).not.toContain(name);
     expect(Object.keys(drafting)).toEqual(['CORE_DRAFTER_RULES']);
@@ -115,9 +115,13 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     for (const rule of ['Find what most limits reaching the aim (its binding constraint or critical path, e.g. time to close, approval, capacity) and model that mechanism explicitly.',
       "Offer at least one option that is structurally different (a different route, not a different split of the same levers), labelled Olumi's.",
       'Every item either lies on a path to the aim or is a condition on one; no stand-alone items.',
+      `A stated difference ("net stock is deliveries minus usage"), which defined_as cannot hold, links each part to the whole instead, with the exact conversion from the part's unit to the whole's: +1 per unit for what is added and \u22121 for what is taken away when they share a unit, scaled when they do not (a part in thousands moves the whole by 1,000 per unit); a stated part is never left unconnected.`,
       'Conditions are short, written for the person, one point each; keep working notes out of the model.',
-      'When the aim has a deadline, record its window in period_months (weeks \u00f7 4.35).'])
+      'A deadline is the window of the aim it belongs to, never an aim of its own: keep its words in by_when and, when it counts from today, its window in period_months (weeks \u00f7 4.35).'])
       expect(CORE_DRAFTER_RULES.split(rule), rule).toHaveLength(2);
+    expect(CORE_DRAFTER_RULES).not.toContain('When the aim has a deadline, record its window');
+    // Codex r2 on #3660: never a fixed +1/\u22121 across different scales (\u00a3 thousands into \u00a3 is 1,000 per unit).
+    expect(CORE_DRAFTER_RULES).not.toContain("in the whole's unit per the part's unit;");
     expect(CORE_DRAFTER_RULES).not.toContain("add at most one as Olumi's when it materially changes the reasoning");
   });
 

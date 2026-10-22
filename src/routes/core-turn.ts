@@ -25,7 +25,7 @@ import { OPENAI_ONLY, providerCallsMade, recordedProviderCalls, runWithProviderP
 import { requestWasTyped } from '../cee/provenance/provenance-of.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
 import { acquireCoreTurnSlot, CoreDeliveryUnknownError, CoreStateUnavailableError, runCoreTurn } from '../orchestrator-v5/agent-lane/core/sdk-turn.js';
-import { coreBudget, coreReplyBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
+import { coreBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { AI_CORE_MODE, laneModeFor, type AgentLaneMode, type AgentToolContext } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import type { InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
 import { WITHHELD_ON_CHIP_TURN, type AgentTurnResult } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
@@ -568,7 +568,8 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         const draftArm = draftArmOf(MODE, saved.graph === null, req.headers['x-olumi-draft-arm']);
         try {
           result = await runCoreTurn({
-            ctx: coreCtx, message, budget: coreBudget(), replyBudget: coreReplyBudget(), userId,
+            // One budget for every call (DL 22 Oct, M4): a press at the typed turn's effort reads the typed turns' cached prefix.
+            ctx: coreCtx, message, budget: coreBudget(), userId,
             tools: coreTurnTools({ ctx: coreCtx, mode: MODE, scenario: 'core', requestId: String(req.id), message,
               dispatch: capDispatch, proposals, deadlineAt: constructionDeadlineAt, capabilities,
               ...(challenge !== null ? { noteOnlyOn: challenge.grounded.element_ids[0] } : {}),

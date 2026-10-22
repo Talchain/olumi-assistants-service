@@ -787,6 +787,43 @@ describe("the reload carries the selected run's evaluated identities (`analysis_
   });
 });
 
+// ─── Item 2 (DL 22 Oct): what the selected Run implies for the quantity nearest an aim with no target ────────────────────
+
+describe("the reload carries the selected Run's implied quantity (`analysis_implied_quantity`), never inside the transport block", () => {
+  const IMPLIED = { version: 1, status: "computed", node_id: "commitments", quantity: "Angels completing investment within three weeks", unit: "angels",
+    by_option: { a: { p10: 0.5, p50: 1, p90: 1.5 } }, rests_on_olumi_estimates: false, by_when: null };
+  const withImplied = (graphHash: string) => {
+    const fact = runAnalysisFact({ graphHash, mayName: false }) as { result: { enrichment: Record<string, unknown> } };
+    fact.result.enrichment = { ...fact.result.enrichment, __cee_implied_quantity: IMPLIED };
+    return fact;
+  };
+
+  it("FRESH — the same fact's record rides beside its block; the block's enrichment does not carry it", async () => {
+    readFactsFor.mockResolvedValue([withImplied(GRAPH_HASH)]);
+    const app = await buildApp();
+    const body = (await read(app)).json() as Record<string, unknown>;
+    expect(body.analysis_constraint_verdict_state, "control: the same fact is read").toBe("unevaluated");
+    expect(body.analysis_implied_quantity).toEqual(IMPLIED);
+    expect((body.analysis_result as { enrichment?: Record<string, unknown> }).enrichment).not.toHaveProperty("__cee_implied_quantity");
+  });
+
+  it("CONTRAST — a fresh fact that recorded none (an aim with a target) carries no key", async () => {
+    readFactsFor.mockResolvedValue([runAnalysisFact({ graphHash: GRAPH_HASH, mayName: false })]);
+    const app = await buildApp();
+    const body = (await read(app)).json() as Record<string, unknown>;
+    expect(body.analysis_constraint_verdict_state, "control: the same fact is read").toBe("unevaluated");
+    expect(body).not.toHaveProperty("analysis_implied_quantity");
+  });
+
+  it("STALE — no block, and no implied quantity: both describe a different graph", async () => {
+    readFactsFor.mockResolvedValue([withImplied(PRE_EDIT_GRAPH_HASH)]);
+    const app = await buildApp();
+    const body = (await read(app)).json() as Record<string, unknown>;
+    expect(body.analysis_result).toBeNull();
+    expect(body).not.toHaveProperty("analysis_implied_quantity");
+  });
+});
+
 // ─── R3-9 (#2248): the last successful Run's use of each identity — the link writer's own input, NOT freshness-gated ────
 
 describe("the reload carries the last Run's identity use (`analysis_identity_run_use`), exactly as the link writer reads it", () => {

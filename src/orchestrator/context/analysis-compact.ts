@@ -821,8 +821,9 @@ export function compactAnalysis(
     const recommendableOptions = options.filter(isRecommendableTypedOption);
 
     const winner = deriveWinner(recommendableOptions);
-    if (!winner) {
-      // No recommendable options — can still return summary with empty winner
+    // No winner is crowned when an option has no win figure (a Run that withheld them, e.g. on an unsized path): the options
+    // are all kept, so that is not "no valid options" (Track 3, 22 Oct: every read of 80a77832 warned with 4 options ready).
+    if (!winner && recommendableOptions.length === 0) {
       log.warn({ result_count: results.length }, 'compactAnalysis: no valid options found');
     }
 

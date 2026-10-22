@@ -24,6 +24,7 @@ import { CORE_ALIGNED_INSTRUCTIONS, instructionsForMode } from '../../orchestrat
 import { ASK_CHALLENGE_CHIP_ID } from '../../orchestrator-v5/core-route/turn-request.js';
 import { CORE_DRAFTER_RULES } from '../../orchestrator-v5/path-b/drafting-guidance.js';
 import type { LivingModelT } from '../../schemas/living-model.js';
+import { coreBudget } from '../../orchestrator-v5/agent-lane/model-budgets.js';
 
 type Json = Record<string, any>;
 let SCENARIO = '';
@@ -247,6 +248,10 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(approved.statusCode, approved.body).toBe(200);
     const a = approved.json() as Json;
     expect(calls[2]?.tool_choice, 'the press opens on the change’s own apply_change').toMatchObject({ type: 'function', name: 'apply_change' });
+    // M4 (DL 22 Oct): every press call goes out at the typed turn's effort and output cap, so it reads their cached prefix.
+    for (const c of calls.slice(2)) expect({ model: c.model, reasoning: c.reasoning, max_output_tokens: c.max_output_tokens })
+      .toEqual({ model: calls[0]!.model, reasoning: calls[0]!.reasoning, max_output_tokens: calls[0]!.max_output_tokens });
+    expect(calls[0]!.reasoning, 'control: the typed turn sends an effort').toEqual({ effort: coreBudget().reasoning_effort });
     expect(registered, JSON.stringify(a._agent)).toHaveLength(1);
     expect(((persisted as Json).living_model as LivingModelT).factors[0]).toMatchObject({ value: 0.6 });
     expect(a.receipts).toEqual([expect.objectContaining({ version_id: 'v_1', authorised_by: 'person' })]);

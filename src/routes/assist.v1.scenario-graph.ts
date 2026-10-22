@@ -666,6 +666,10 @@ export default async function route(app: FastifyInstance) {
         ...(analysis.analysis_identity_evaluated_node_ids !== undefined
           ? { analysis_identity_evaluated_node_ids: analysis.analysis_identity_evaluated_node_ids }
           : {}),
+        // Item 2: what the selected Run implies for the quantity nearest an aim with no target — same fact, same gates.
+        ...(analysis.analysis_implied_quantity !== undefined
+          ? { analysis_implied_quantity: analysis.analysis_implied_quantity }
+          : {}),
         // R3-9 (#2248): the last successful Run's use of each declared identity — the link writer's own input, not gated.
         ...(analysis.analysis_identity_run_use !== undefined
           ? { analysis_identity_run_use: analysis.analysis_identity_run_use }
