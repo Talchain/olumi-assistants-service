@@ -48,34 +48,35 @@ function namedGoalOf(raw: Rec): Rec | undefined {
 
 /**
  * DL ruling 23 Oct (a) (Track 3 funding/hiring): on a core graph the living model is the single source of meaning (A2), so
- * this ONE reader reads the goal's own aim there; undefined on a legacy graph (no `living_model`), whose words are unchanged.
+ * this ONE reader reads the goal's own current aim there; undefined on a legacy graph (no `living_model`), whose words are
+ * unchanged.
  */
 function coreAimTargetOf(raw: Rec, goalId: string): Rec | null | undefined {
   const aims = rec(raw.living_model)?.aims;
   if (!Array.isArray(aims)) return undefined;
-  const aim = aims.map(rec).find((a) => a?.id === goalId);
+  const aim = aims.map(rec).find((a) => a?.id === goalId && a.status === 'current');
   return aim === undefined ? undefined : rec(aim.target) ?? null;
 }
 
 /** "Productivity" mid-sentence is "productivity"; "GitHub stars" and "NPS" keep their case (only a plain capitalised first word). */
 const midSentence = (q: string): string => (/^\p{Lu}\p{Ll}*(?=\s|$)/u.test(q) ? `${q.charAt(0).toLowerCase()}${q.slice(1)}` : q);
 /** A whole-word prefix plus an ellipsis, so the question fits the cell's 400-character carrier. */
-const cut = (v: string, limit: number): string => (v.length <= limit ? v : `${v.slice(0, v.lastIndexOf(' ', limit - 1) > 0 ? v.lastIndexOf(' ', limit - 1) : limit - 1).trimEnd()}\u2026`);
-/** A reference that is today ("today", "current productivity…", "now"): the change is measured from today's level. */
-const TODAY_REFERENCE = /\b(?:today|now|current(?:ly)?|present)\b/i;
+const cut = (v: string, limit: number): string => {
+  if (v.length <= limit) return v;
+  const space = v.lastIndexOf(' ', limit - 1);
+  return `${v.slice(0, space > 0 ? space : limit - 1).trimEnd()}\u2026`;
+};
 
 /**
- * The question for a change target the person stated (+10%) with no starting level: that level, never the target. Said
- * from today, or from the reference they stated ("against last year"; Codex r2), which is quoted only when it is short.
+ * The person's change target (+10%) with no level today (`current` is today's level, the one the change is measured
+ * from): that level is what is missing, never the target. The labels shorten only when the question would exceed 400.
  */
-function startingLevelQuestion(label: string, t: Rec): string {
-  const ref = typeof t.baseline === 'string' && t.baseline.trim() !== '' && !TODAY_REFERENCE.test(t.baseline) ? t.baseline.trim() : null;
-  const ask = (lab: string, q: string): string => (ref === null
-    ? `One gap: ${quote(lab)} is a change from today\u2019s level of ${q}, which isn\u2019t given yet. What is today\u2019s level of ${q}?`
-    : `One gap: ${quote(lab)} is a change from ${q} ${ref.length <= 40 ? `as at ${quote(ref)}` : 'at its stated starting point'}, which isn\u2019t given yet. What was ${q} then?`);
-  const q = midSentence(String(t.quantity).trim());
+function todaysLevelQuestion(label: string, quantity: string): string {
+  const ask = (lab: string, q: string): string =>
+    `One gap: ${quote(lab)} is a change from today\u2019s level of ${q}, which isn\u2019t given yet. What is today\u2019s level of ${q}?`;
+  const q = midSentence(quantity.trim());
   const full = ask(label, q);
-  return full.length <= 400 ? full : ask(cut(label, 120), cut(q, 80));
+  return full.length <= 400 ? full : ask(cut(label, 100), cut(q, 60));
 }
 
 /**
@@ -95,14 +96,11 @@ export function goalTargetGapOf(graph: unknown): GoalTargetGap | null {
   const deadlineKnown = rows.some((r) => r?.node_id === goal.id && rec(r?.deadline_metadata) !== undefined)
     || typeof horizon?.deadline === 'string' || finiteNum(horizon?.months)
     || (typeof core?.by_when === 'string' && core.by_when.trim() !== '');
-  // A core aim whose target holds the person's own figure HAS a target, whatever the mapper held it for: never "no target".
-  // A change from a level not given yet asks for that level; any other held target is said by its own reason elsewhere.
-  // Olumi's suggested measure (`source: 'olumi'`) is not their target, so it is still asked for.
-  if (core !== undefined && core !== null && core.source !== 'olumi' && [core.value, core.low, core.high].some(finiteNum)) {
-    const change = core.comparator === 'increase' || core.comparator === 'decrease';
-    return change && finiteNum(core.value) && core.current === null && typeof core.quantity === 'string' && core.quantity.trim() !== ''
-      ? { kind: 'goal_level_missing', goal_id: goal.id, deadline_known: deadlineKnown, question: startingLevelQuestion(label, core) }
-      : null;
+  // The person's change from a level not given yet: the target is there, today's level is not. Olumi's suggested measure
+  // (`source: 'olumi'`) is not their target. Any other held target keeps the words below (DL ruling (a), narrowest reading).
+  if (core !== undefined && core !== null && core.source !== 'olumi' && (core.comparator === 'increase' || core.comparator === 'decrease')
+    && finiteNum(core.value) && core.current === null && typeof core.quantity === 'string' && core.quantity.trim() !== '') {
+    return { kind: 'goal_level_missing', goal_id: goal.id, deadline_known: deadlineKnown, question: todaysLevelQuestion(label, core.quantity) };
   }
   return {
     kind: 'goal_target_missing', goal_id: goal.id, deadline_known: deadlineKnown,

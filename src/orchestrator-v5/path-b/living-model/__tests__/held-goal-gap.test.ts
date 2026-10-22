@@ -63,28 +63,26 @@ describe('the one gap asks only for what is missing: the target, or the level a 
     }
   });
 
-  it('Codex r2: a change against a stated reference asks for that level, not today\'s', () => {
-    const g = stored(model('Grow revenue 10% on last year', { ...target, quantity: 'Revenue', comparator: 'increase', value: 10, unit: '%', change_kind: 'relative', baseline: 'last year' }));
-    expect(goalTargetGapOf(g)?.question).toBe('One gap: ‘Grow revenue 10% on last year’ is a change from revenue as at ‘last year’, which isn’t given yet. What was revenue then?');
-  });
-
-  it('Codex r2: a stated target held for another reason (level given, kind unclear; exact) is never called "no target"', () => {
-    const unclear = model('Raise conversion by 10%', { ...target, quantity: 'Conversion', comparator: 'increase', value: 10, unit: '%', current: 40, current_unit: '%' });
-    expect(reasons(unclear)).toContain('goal:change_kind_unknown');
-    expect(goalTargetGapOf(stored(unclear))).toBeNull();
+  it('SCOPE (narrowest reading): a target held for another reason keeps today\'s words; it is not this ruling\'s shape', () => {
     const exact = model('Exactly 500 members', { ...target, quantity: 'Members', comparator: '=', value: 500, unit: 'members' });
     expect(reasons(exact)).toContain('goal:exact_target_not_in_slice');
-    expect(goalTargetGapOf(stored(exact))).toBeNull();
+    expect(goalTargetGapOf(stored(exact))).toEqual(goalTargetGapOf(legacy(stored(exact))));
   });
 
-  it('Codex r2: a level that is not the person\'s (change_base_not_theirs) is never called "not given"', () => {
+  it('a level that exists but is not the person\'s (change_base_not_theirs) is never called "not given"', () => {
     const m = hiring({ current: 40, current_unit: 'points' });
     const unconfirmed: LivingModelT = { ...m, aims: m.aims.map((a) => ({ ...a, source: 'unverified' as const, quote: null })) };
     expect(reasons(unconfirmed)).toContain('goal:change_base_not_theirs');
-    expect(goalTargetGapOf(stored(unconfirmed))).toBeNull();
+    expect(goalTargetGapOf(stored(unconfirmed))?.kind).not.toBe('goal_level_missing');
   });
 
-  it('Codex r2: a proper quantity keeps its case, and a long label and quantity keep the question inside 400 characters', () => {
+  it('Codex r3: only the CURRENT aim is read (a withdrawn aim with the goal\'s id is not)', () => {
+    const g = stored(hiring());
+    const withdrawn = { ...g, living_model: { ...g.living_model, aims: g.living_model.aims.map((a: Json) => ({ ...a, status: 'withdrawn' })) } };
+    expect(goalTargetGapOf(withdrawn)?.kind).toBe('goal_target_missing');
+  });
+
+  it('Codex r2/r3: a proper quantity keeps its case, and long labels keep the question inside 400 characters', () => {
     expect(goalTargetGapOf(stored(hiring({ quantity: 'GitHub stars' })))?.question).toContain('today’s level of GitHub stars');
     const long = 'Weekly delivered sessions across every estate, school and partner venue we run, '.repeat(3).trim();
     const q = goalTargetGapOf(stored(model(long, { ...target, quantity: long, comparator: 'increase', value: 10, unit: '%', change_kind: 'relative' })))!.question;
