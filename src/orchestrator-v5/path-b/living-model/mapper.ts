@@ -22,7 +22,7 @@
  *    each option gets an on/off factor whose link is sized like any other.
  */
 import { REPAIR_CODES, type RepairEntry } from '@talchain/schemas';
-import type { LivingModelT, LivingSourceT } from '../../../schemas/living-model.js';
+import { LivingModel, type LivingModelT, type LivingSourceT } from '../../../schemas/living-model.js';
 import { resolveGoalThresholdCapWithProvenance } from '../../../utils/goal-threshold-cap.js';
 import { admitGoalBaseline } from '../../../cee/factor-extraction/goal-baseline-admissibility.js';
 import { sayFigureAsWritten } from '../../agent-lane/say-figure.js';
@@ -34,7 +34,7 @@ import { readStatedDeadline } from '../../goal-target/deadline-date.js';
 
 export type WithheldReason =
   | 'no_level_target' | 'aim_not_in_slice' | 'change_kind_unknown' | 'change_base_invalid' | 'change_base_not_theirs' | 'current_unit_mismatch' | 'exact_target_not_in_slice' | 'target_range_not_in_slice'
-  | 'goal_level_unknown' | 'link_frame_unknown' | 'chance_rests_on_withheld' | 'condition_not_in_slice'
+  | 'goal_level_unknown' | 'link_frame_unknown' | 'link_goal_target_unknown' | 'chance_rests_on_withheld' | 'condition_not_in_slice'
   | 'goal_level_not_admitted' | 'factor_level_unknown' | 'level_range_not_in_slice' | 'setting_not_convertible'
   | 'link_endpoint_unknown' | 'link_unit_mismatch' | 'link_range_no_law' | 'link_sign_unknown'
   | 'exact_not_drawable' | 'stay_within_base_not_theirs' | 'stay_within_unconfirmed'
@@ -563,7 +563,12 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
         // one exact route.
         : (e.form === 'exact' && e.value !== null) ? { mean: sign * Math.abs(e.value) * ratio, std: LLM_STRENGTH_STD_FLOOR }
         : undefined;
-    if (ratio === undefined && (e.form === 'point' || e.form === 'normal' || e.form === 'exact' || centred)) hold(l.id, 'link_frame_unknown');
+    // A figure INTO the goal while the goal states no target figure yet: the figure is kept, and is used once the target
+    // sets the goal's scale (DL 23 Oct, Q2 coaching zeros). It is never called "not sized" (`goalTargetUnknownLinks`).
+    const target = aim?.target ?? null;
+    const targetUnknown = from !== undefined && goal === undefined && goalNode !== undefined && l.to === goalNode.id
+      && (target === null || [target.value, target.low, target.high].every((v) => v === null));
+    if (ratio === undefined && (e.form === 'point' || e.form === 'normal' || e.form === 'exact' || centred)) hold(l.id, targetUnknown ? 'link_goal_target_unknown' : 'link_frame_unknown');
     if (e.form === 'exact') hold(l.id, 'exact_not_drawable');
     if (e.form === 'range' && !centred) hold(l.id, 'link_range_no_law');
     if (unitMismatch) hold(l.id, 'link_unit_mismatch');
@@ -668,4 +673,19 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   const frames = new Map<string, Frame>(model.factors.flatMap((f) => (caps.has(f.id) ? [[f.id, { cap: caps.get(f.id)!, unit: f.unit }] as const] : [])));
   if (goal !== undefined) frames.set(goal.id, { cap: goal.cap, unit: goal.unit === '' ? null : goal.unit });
   return { graph: { nodes, edges, ...(goal_constraints.length > 0 ? { goal_constraints } : {}) }, withheld, frames, assumed };
+}
+
+/**
+ * The links the mapper holds only because the goal states no target figure yet (`link_goal_target_unknown`), read from a
+ * stored graph's own living model, with whose figure each carries. The Run's withhold says this reason, never "not sized".
+ */
+export function goalTargetUnknownLinks(graph: unknown): Array<{ from: string; to: string; by: 'olumi' | 'stated' | 'given' }> {
+  const living = LivingModel.safeParse(graph !== null && typeof graph === 'object' ? (graph as Rec).living_model : undefined);
+  if (!living.success) return [];
+  const held = new Set(mapLivingModel(living.data, savedGoal(graph)).withheld
+    .filter((w) => w.reason === 'link_goal_target_unknown').map((w) => w.id));
+  return living.data.links.filter((l) => held.has(l.id)).map((l) => {
+    const source = figureBy(l.effect, l).source;
+    return { from: l.from, to: l.to, by: source === 'olumi' ? 'olumi' : stated(source) ? 'stated' : 'given' };
+  });
 }

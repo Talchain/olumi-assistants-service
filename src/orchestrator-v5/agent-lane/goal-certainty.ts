@@ -564,6 +564,30 @@ export function unsizedLinkWords(graph: unknown, links: readonly UnsizedPathLink
   return stated === '' ? unsizedLinkSentence(links) : `${stated} ${invite}`;
 }
 
+/** A link held only because the goal states no target figure yet, with whose figure it carries (`goalTargetUnknownLinks`). */
+export interface TargetUnknownLink { readonly from: string; readonly to: string; readonly by: 'olumi' | 'stated' | 'given' }
+
+/**
+ * DL 23 Oct (Q2 coaching zeros): the true reason for a link held while the goal has no target figure. Its figure is kept and
+ * used once the target sets the goal's scale; it is never called "not sized". Whose figure it is is said per link.
+ */
+export function awaitingTargetSentence(links: ReadonlyArray<TargetUnknownLink & UnsizedPathLink>, maxLength = 400): string {
+  if (links.length === 0) return '';
+  const groups: Array<[string, readonly UnsizedPathLink[]]> = ([
+    ['Olumi\u2019s estimate', links.filter((l) => l.by === 'olumi')],
+    ['the stated figure', links.filter((l) => l.by === 'stated')],
+    ['the figure given', links.filter((l) => l.by === 'given')],
+  ] as Array<[string, readonly UnsizedPathLink[]]>).filter(([, ls]) => ls.length > 0);
+  const goal = links[0]!.to_label;
+  const plural = links.length > 1;
+  const build = (count: number): string => {
+    const parts = groups.map(([who, ls]) => `${who}${ls.length > 1 ? 's' : ''} for the ${linkList(ls, Math.min(count, ls.length))}`).join(' and ');
+    return `${parts.charAt(0).toUpperCase()}${parts.slice(1)} ${plural ? 'are' : 'is'} kept, and used once \u2018${goal}\u2019 has a target figure, which sets ${plural ? 'their' : 'its'} scale.`;
+  };
+  for (let count = 3; count >= 1; count -= 1) { const out = build(count); if (out.length <= maxLength) return out; }
+  return build(1);
+}
+
 /**
  * The ONE typed warning for (S) (`GOAL_FIGURES_PLACEHOLDER_PATH`): which options, which links, and the words, in the
  * UI's "Not shown." register (400-character explanation budget; complete question labels take precedence).
@@ -577,7 +601,8 @@ export function placeholderGoalWarning(
   code: string,
   productBlocks = false,
   /** RT-18: the (B) gauge ask is gated off in production (cut 5); only its own rows opt in, so cut 6 can lift it tested. */
-  opts: { readonly gaugeAsk?: true } = {},
+  /** `targetUnknown` (DL 23 Oct): links held only because the goal has no target figure (`goalTargetUnknownLinks`). */
+  opts: { readonly gaugeAsk?: true; readonly targetUnknown?: readonly TargetUnknownLink[] } = {},
 ): { code: string; message: string; severity: 'warning'; node_ids: string[]; option_ids: string[]; links: Array<{ from: string; to: string }>; acceptable_links?: Array<{ from: string; to: string }>; first_ask?: PlaceholderFirstAsk } {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const byId = new Map(nodes.map((n) => [n.id, n] as const));
@@ -586,6 +611,10 @@ export function placeholderGoalWarning(
     return isRec(id) && Array.isArray(id.factor_ids) && id.factor_ids.includes(l.from);
   };
   const links = [...new Map(paths.flatMap((p) => p.links).map((l) => [`${l.from}->${l.to}`, l] as const)).values()];
+  // ⭐ DL 23 Oct (Q2 coaching zeros): a link held only because the goal has no target figure carries a figure, so it is
+  // never said as "not sized" nor asked to be sized: its own sentence says the figure is kept until the target sets the scale.
+  const heldForTarget = new Map((opts.targetUnknown ?? []).map((t) => [`${t.from}->${t.to}`, t] as const));
+  const awaitingTarget = links.filter((l) => heldForTarget.has(`${l.from}->${l.to}`));
   const named = links.filter((l) => !cardSized(l));
   // ⛔ ASK ONLY FOR A SIZE THAT CAN MAKE THE FIGURE RIGHT (AIQ 5902834053; MG successor 5902809244): a link from a node
   // that holds no level would add the same amount to EVERY option once sized ("Stay on AWS" would save too), so it is
@@ -600,23 +629,27 @@ export function placeholderGoalWarning(
   // subscribers is a real mechanism whose size is unknown, so it is asked for as before; downtime → spend is the guess.
   const guessedLink = (l: { from: string; to: string }): boolean => limitIds.has(l.from) && byId.get(l.to)?.kind === 'goal';
   const ordered = goalOrderedLinks(graph, links);
+  const unsized = ordered.filter((l) => !heldForTarget.has(`${l.from}->${l.to}`));
   const labelOf = (id: string): string => text(byId.get(id)?.label) ?? id;
   // ⭐ NO DEAD END (MC 21's chain; Science #87 6006425419, 6006548763, 6006685510): every withheld path gets an ask the
   // user can answer in one sentence. A level-less mediator is asked END TO END (the gauge) or in the unit its sized parent
   // fixes; a goal with no frame is asked its level first. Pure wording + offer: the links and the withhold are unchanged.
-  const noDeadEnd = productBlocks ? undefined : placeholderAskWords(graph, ordered, opts);
+  const noDeadEnd = productBlocks || unsized.length === 0 ? undefined : placeholderAskWords(graph, unsized, opts);
   // S-E GOALS §2: no link into a chance goal is offered or asked (its sentence above asks nothing).
   const chanceGoal = nodes.some((n) => n.kind === 'goal' && goalKindOf(n) === 'chance_of_event');
   // ⭐ ITEM 3 (AIE 16 Oct amended range contract: "do not repeatedly ask for the already-supplied range"; G3 1a1a7907 re-ask
   // classes 2–3): a link whose effect the USER stated as a range is never asked to be sized again (no chip, no first ask):
   // the range is held on it (construction's record), and construction disclosed Olumi's placeholder against it once.
   const statedRange = (l: { from: string; to: string }): boolean => userStatedRangeOn(graph, l);
-  const asked = chanceGoal ? [] : named.filter((l) => !guessedLink(l) && !statedRange(l) && levelOf(byId.get(l.from)).value !== undefined
+  const asked = chanceGoal ? [] : named.filter((l) => !heldForTarget.has(`${l.from}->${l.to}`) && !guessedLink(l) && !statedRange(l) && levelOf(byId.get(l.from)).value !== undefined
     && !(noDeadEnd?.gaugeLinks.has(`${l.from}->${l.to}`) ?? false));
   // #2613 CR (b): while Gate 5 withholds every option, sizing a link cannot lift it: state the link, invite nothing, offer nothing.
   // ⭐ ITEM 3: the invitation names only links with no stated range (`unsizedLinkWords`, shared with the host Run reply).
   const said = productBlocks ? unsizedLinkStatement : (ls: readonly UnsizedPathLink[]): string => unsizedLinkWords(graph, ls);
-  const message = noDeadEnd?.message ?? said(ordered.map(l => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) })));
+  const unsizedWords = unsized.length === 0 ? '' : noDeadEnd?.message ?? said(unsized.map(l => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) })));
+  const message = awaitingTarget.length === 0 ? unsizedWords
+    : [unsizedWords, awaitingTargetSentence(awaitingTarget.map((l) => ({ ...heldForTarget.get(`${l.from}->${l.to}`)!, from_label: labelOf(l.from), to_label: labelOf(l.to) })),
+      400 - (unsizedWords === '' ? 0 : unsizedWords.length + 1))].filter((w) => w !== '').join(' ');
   const firstLink = ordered.find((l) => asked.some((a) => a.from === l.from && a.to === l.to));
   const firstAsk: PlaceholderFirstAsk | undefined = productBlocks ? undefined
     : noDeadEnd !== undefined ? noDeadEnd.first
