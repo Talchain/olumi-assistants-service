@@ -13,7 +13,6 @@ import { readRunEvidence } from '../run-evidence.js';
 import { GOAL_FIGURES_USER_EFFECT_CLAMPED } from '../../../orchestrator/context/option-result-source.js';
 import { runAnalysis } from '../../path-b/tools/run-tool.js';
 import { read } from '../../path-b/tools/__tests__/fixtures.js';
-import { CORE_REPLY_INSTRUCTION } from '../../../routes/agent-v1-turn.js';
 
 type Json = Record<string, any>;
 // Read via fs, not a JSON import attribute (TS2823 under the ratchet's config; precedent in run-analysis-brief-to-plot.test.ts).
@@ -77,15 +76,6 @@ describe('exact results carry their margins and the input each rests on, from th
       { reason: 'Run it.', effects_timing: 'not_stated' }, { approvalApplied: false });
     expect(out.status).toBe('ok');
     expect(out.status === 'ok' ? out.data.goal_margins : undefined).toEqual(EXPECTED);
-  });
-
-  it('the core reply is told to say each margin as stated and to offer the test at the boundary, never a claim', () => {
-    expect(CORE_REPLY_INSTRUCTION).toContain('as goal_margins states it');
-    expect(CORE_REPLY_INSTRUCTION).toContain('and offer one stress_test of that link at it');
-    expect(CORE_REPLY_INSTRUCTION).toContain('never as a claim about what will happen');
-    // #3625's negatives stay.
-    expect(CORE_REPLY_INSTRUCTION).toContain('never worked out from the inputs');
-    expect(CORE_REPLY_INSTRUCTION).toContain('without ranking them or saying which matters most');
   });
 
   it('NEGATIVE: a Run that is not current says nothing', () => {

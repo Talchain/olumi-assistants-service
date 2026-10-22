@@ -53,7 +53,7 @@ import { bindHeldApprovalWriter, commitHeldProposalInProcess } from '../orchestr
 import { isRevisionConflict, ModelReadFailedError, promoteRevisionConflictResponse } from '../orchestrator-v5/graph-revision-conflict.js';
 import { MODEL_WRITE_OWNERSHIP_REFUSAL_BODY, ModelWriteOwnershipRefused, readSuccessfulDoorEntries, readUnsavableEffects, recordReleasedTurnClaim } from '../orchestrator-v5/ownership/door-ownership.js';
 import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
-import { CORE_DRAFTING_GUIDANCE } from '../orchestrator-v5/path-b/drafting-guidance.js';
+import { CORE_DRAFTER_RULES } from '../orchestrator-v5/path-b/drafting-guidance.js';
 import { readCanonicalContext } from '../orchestrator-v5/path-b/tools/index.js';
 import { APPLY_CHANGE, isChangeProposal } from '../orchestrator-v5/path-b/tools/change-tools.js';
 import { NOTE_ON_ITEM } from '../orchestrator-v5/path-b/tools/note-on-item.js';
@@ -578,7 +578,10 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
               // No research control is in this contract, so no search may be promised (fail closed).
               researchShowable: async () => false,
               onVerifiedSave: () => { verifiedSave = true; } }),
-            instructions: instructionsForMode(MODE, `${CORE_ALIGNED_INSTRUCTIONS}${draftArm === 'on' ? `\n\n${CORE_DRAFTING_GUIDANCE}` : ''}${challenge === null ? '' : `\n\n${challenge.note}`}`),
+            // The standing instructions, the same bytes on every call of every scenario (the cached prefix); this turn's own
+            // guidance (the drafting arm, a Challenge's note) follows its state block in the turn's input.
+            instructions: instructionsForMode(MODE, CORE_ALIGNED_INSTRUCTIONS),
+            turnGuidance: [...(draftArm === 'on' ? [CORE_DRAFTER_RULES] : []), ...(challenge === null ? [] : [challenge.note])],
             briefText: saved.briefText,
             canonicalState: canonical.status === 'ok' ? canonical.data : undefined,
             // A Run press permits calculation and reading only; any other press carries no consent to Run.

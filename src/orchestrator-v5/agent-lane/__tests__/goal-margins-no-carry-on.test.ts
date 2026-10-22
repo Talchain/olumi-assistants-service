@@ -11,7 +11,6 @@ import { readFileSync } from 'node:fs';
 import { goalMarginsOf } from '../goal-margins.js';
 import { runFactsOf } from '../run-facts.js';
 import { readRunEvidence } from '../run-evidence.js';
-import { CORE_REPLY_INSTRUCTION } from '../../../routes/agent-v1-turn.js';
 
 type Json = Record<string, any>;
 const fixture = JSON.parse(readFileSync(new URL('./fixtures/exact-no-carry-on-run.json', import.meta.url), 'utf8')) as Json;
@@ -147,9 +146,6 @@ describe('exact results with no "carry on" option: margins from the Run\'s own r
     expect(at(8.5, 1.25)?.options[0]).toMatchObject({ level: 9.75, margin: 0.75, meets: true });
   });
 
-  it('the reply is told what an undeclared scope means: the model\'s figures as they stand, not a forecast to the goal\'s date', () => {
-    expect(CORE_REPLY_INSTRUCTION).toContain('where goal_margins has static_scope_declared false, say once that these are the model\u2019s figures as they stand, not a forecast to the goal\u2019s date');
-  });
 });
 
 /** Served R2 on CEE b921a8e2 (P01): a "carry on" option, but the engine's row 960.0000000000001 carries float noise, so the recorded

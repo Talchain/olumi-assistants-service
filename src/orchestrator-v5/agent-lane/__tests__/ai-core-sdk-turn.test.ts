@@ -12,7 +12,7 @@ import { z as z4 } from 'zod-v4';
 import { ForbiddenProviderError, OPENAI_ONLY, recordedProviderCalls, runWithProviderPolicy } from '../../../adapters/llm/provider-policy.js';
 import { ledgeredAgentsClient } from '../../../adapters/llm/openai-agents-client.js';
 import { runWithStageStream } from '../../../cee/unified-pipeline/stage-stream-context.js';
-import { acquireCoreTurnSlot, AGENTS_SDK, CoreDeliveryUnknownError, CORE_COMPACT_THRESHOLD, CoreStateUnavailableError, PAUSE_DECLINED, PAUSE_SUPERSEDED, replyOnlyTurn, runCoreTurn, type ConversationIdStore, type CoreToolRecorder, type PausedRunStore } from '../core/sdk-turn.js';
+import { acquireCoreTurnSlot, AGENTS_SDK, CoreDeliveryUnknownError, CORE_COMPACT_THRESHOLD, corePromptCacheKey, CoreStateUnavailableError, PAUSE_DECLINED, PAUSE_SUPERSEDED, replyOnlyTurn, runCoreTurn, STATE_BLOCK_PREFIX, type ConversationIdStore, type CoreToolRecorder, type PausedRunStore } from '../core/sdk-turn.js';
 import type { OpenAiPausedRun } from '../../session/store.js';
 import { budgetFor, type CallBudget } from '../model-budgets.js';
 import type { AgentToolContext } from '../runtime/agent-tools.js';
@@ -45,6 +45,7 @@ const body = (output: Json[]): Json => {
     id: `resp_${served}`, object: 'response', model: RETURNED_MODEL, status: 'completed',
     output: output.map((item, i) => item.type === 'message'
       ? { id: `msg_${served}_${i}`, type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: item.text, annotations: [] }] }
+      : item.type === 'compaction' ? { id: `cmp_${served}_${i}`, type: 'compaction', encrypted_content: 'opaque' }
       : { id: `fc_${served}_${i}`, status: 'completed', type: 'function_call', call_id: `call_${served}_${i}`, name: item.name, arguments: JSON.stringify(item.args) }),
     usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15, input_tokens_details: { cached_tokens: 0 }, output_tokens_details: { reasoning_tokens: 0 } },
   };
@@ -79,11 +80,11 @@ const readTools = (c: ReturnType<typeof caps>) => (onCall: CoreToolRecorder) => 
 })];
 type Extra = { briefText?: string; conversationStore?: ConversationIdStore; state?: unknown; tools?: Parameters<typeof runCoreTurn>[0]['tools'];
   pausedRunStore?: PausedRunStore; press?: { decision: 'approve' | 'decline'; proposal_id: string }; replyBudget?: CallBudget; firstTool?: string;
-  withheldTools?: readonly string[] };
+  withheldTools?: readonly string[]; scenarioId?: string; instructions?: string };
 const turn = (message: string, c: ReturnType<typeof caps>, extra: Extra & { traceMeta?: { revision?: string; run_id?: string } } = {}) =>
   runWithProviderPolicy(OPENAI_ONLY('agent_v1_turn'), async () => {
-  const result = await runCoreTurn({ ctx: ctx(message), message, tools: extra.tools ?? readTools(c),
-    instructions: 'Synthetic instructions.', budget: budgetFor('gpt-6.1-sol', 'conversation'), userId: null,
+  const result = await runCoreTurn({ ctx: { ...ctx(message), scenario_id: extra.scenarioId ?? SCENARIO }, message, tools: extra.tools ?? readTools(c),
+    instructions: extra.instructions ?? 'Synthetic instructions.', budget: budgetFor('gpt-6.1-sol', 'conversation'), userId: null,
     canonicalState: extra.state ?? { empty: true, entities: [] }, briefText: extra.briefText, conversationStore: 'conversationStore' in extra ? extra.conversationStore : columnStore(),
     ...(extra.pausedRunStore !== undefined ? { pausedRunStore: extra.pausedRunStore } : {}),
     ...(extra.press !== undefined ? { press: extra.press } : {}), ...(extra.traceMeta !== undefined ? { traceMeta: extra.traceMeta } : {}),
@@ -91,6 +92,18 @@ const turn = (message: string, c: ReturnType<typeof caps>, extra: Extra & { trac
     ...(extra.withheldTools !== undefined ? { withheldTools: extra.withheldTools } : {}) });
   return { result, calls: recordedProviderCalls() };
 });
+
+
+/**
+ * The tools a request lets the model call (DL 22 Oct, the caching split): the ONE fixed list is always sent, so what a turn
+ * withholds is told by `tool_choice` — a forced call names its one tool, `allowed_tools` lists the rest — never by its absence.
+ */
+const callable = (b: Record<string, any>): string[] => {
+  const choice = b.tool_choice as Record<string, any> | string | undefined;
+  if (choice !== null && typeof choice === 'object' && choice.type === 'function') return [String(choice.name)];
+  if (choice !== null && typeof choice === 'object' && choice.type === 'allowed_tools') return (choice.tools as Record<string, any>[]).map((t) => String(t.name)).sort();
+  return ((b.tools ?? []) as Record<string, any>[]).map((t) => String(t.name)).sort();
+};
 
 describe('PATH-B core turn on the Agents SDK', () => {
   it('WITNESS: each provider row carries the returned model, the tools sent and an input digest; the turn names its SDK and trace', async () => {
@@ -183,7 +196,7 @@ describe('PATH-B core turn on the Agents SDK', () => {
     expect(sent, 'no further model call after the throw').toHaveLength(1);
   });
 
-  it('CONVERSATION: ONE OpenAI Conversation per scenario; each turn sends only its new input; the state rides the instructions', async () => {
+  it('CONVERSATION: ONE OpenAI Conversation per scenario; each turn sends only its new input, with its ONE state block', async () => {
     const store = columnStore();
     scripted = [[{ type: 'message', text: 'First answer.' }]];
     const one = await turn('First synthetic question.', caps(), { conversationStore: store, briefText: 'A synthetic brief, written apart.', state: { revision: 1 } });
@@ -191,7 +204,7 @@ describe('PATH-B core turn on the Agents SDK', () => {
     expect(created).toHaveLength(1);
     // The brief written apart from the message goes in first on the turn that creates the Conversation, once, as the user's words.
     expect(sent[0]!.conversation).toBe('conv_1');
-    expect(sent[0]!.input.map((i: Json) => i.role)).toEqual(['user', 'user']);
+    expect(sent[0]!.input.map((i: Json) => i.role)).toEqual(['user', 'user', 'system']);
     expect(JSON.stringify(sent[0]!.input[0])).toContain('A synthetic brief, written apart.');
     expect(JSON.stringify(sent[0]!.input[1])).toContain('First synthetic question.');
     expect(column.get(SCENARIO), 'saved on the scenario before the turn used it').toBe('conv_1');
@@ -209,12 +222,16 @@ describe('PATH-B core turn on the Agents SDK', () => {
     expect(input, 'no replay: the server holds turn 1').not.toContain('First synthetic question.');
     expect(input, 'the brief was seeded once').not.toContain('A synthetic brief, written apart.');
     expect(input).not.toContain('First answer.');
-    expect(input, 'the state is never put in the Conversation').not.toContain('CURRENT MODEL STATE');
-    // Today's facts, fresh: the CURRENT state (revision 2, not 1) and the date ride this call's instructions, once each.
-    expect(second.instructions.split('CURRENT MODEL STATE').length - 1).toBe(1);
-    expect(second.instructions).toContain('"revision":2');
-    expect(second.instructions).not.toContain('"revision":1');
-    expect(second.instructions.split('TODAY, from Olumi').length - 1).toBe(1);
+    // Today's facts, fresh: the CURRENT state (revision 2, not 1) and the date, once each, in this turn's one state block.
+    expect(second.instructions, 'the agent\'s own instructions, the same bytes on every call').toBe('Synthetic instructions.');
+    const blocks = (second.input as Json[]).filter((i) => i.role === 'system').map((i) => JSON.stringify(i.content));
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toContain(STATE_BLOCK_PREFIX);
+    expect(blocks[0]).toContain('supersedes every earlier state block');
+    expect(blocks[0]!.split('CURRENT MODEL STATE').length - 1).toBe(1);
+    expect(blocks[0]).toContain('\\"revision\\":2');
+    expect(blocks[0]).not.toContain('\\"revision\\":1');
+    expect(blocks[0]!.split('TODAY, from Olumi').length - 1).toBe(1);
   });
 
   it('⛔ the SDK client obeys the request policy: a route that does not allow OpenAI never gets one, so nothing leaves', async () => {
@@ -479,7 +496,7 @@ describe('PATH-B core turn on the Agents SDK', () => {
       expect(result.assistant_text).toBe('Here is the Run on the saved model.');
       expect(added, 'the paused call is answered once, as superseded').toEqual([{ items: [{ type: 'function_call_output', call_id: pausedCall, output: PAUSE_SUPERSEDED }] }]);
       expect(sent[1]!.tool_choice, 'the press\'s first call is forced to the Run').toEqual({ type: 'function', name: 'run_analysis' });
-      expect(JSON.stringify(sent[1]!.tools ?? []), 'the withheld tool is not offered').not.toContain('apply_change');
+      expect(callable(sent[1]!), 'the withheld tool is not callable').not.toContain('apply_change');
       expect(JSON.stringify(sent[1]!.input), 'the press\'s own words, no replay').toContain('Run it.');
       expect(pausedColumn, 'taken by the press').toBeNull();
     });
@@ -496,7 +513,8 @@ describe('PATH-B core turn on the Agents SDK', () => {
     it('CONTROL: with no paused run, a withheld tool is not offered and nothing is answered', async () => {
       scripted = [[{ type: 'message', text: 'Here is the Run.' }]];
       await turn('Run it.', caps(), { tools: () => applyTool(), pausedRunStore: pausedStore(), withheldTools: ['apply_change'] });
-      expect(JSON.stringify(sent[0]!.tools ?? [])).not.toContain('apply_change');
+      expect(callable(sent[0]!), 'the withheld tool is not callable').not.toContain('apply_change');
+      expect(JSON.stringify(sent[0]!.tools ?? []), 'it is still in the one fixed list').toContain('apply_change');
       expect(added).toHaveLength(0);
     });
 
@@ -508,6 +526,136 @@ describe('PATH-B core turn on the Agents SDK', () => {
       expect(result.assistant_text).toBe('I could not hold that change for your approval; nothing changed.');
       expect(JSON.stringify(sent[1]!.input)).toContain('could not hold this change');
       expect(pausedColumn).toBeNull();
+    });
+  });
+
+  describe('⭐ CACHING (DL 22 Oct, ruling B): one tool list, standing instructions, the full state block every turn', () => {
+    /** The turn's system items: its state block (or the one line), then any guidance. */
+    const systemItems = (b: Json): string[] => ((b.input ?? []) as Json[]).filter((i) => i.role === 'system').map((i) => String(i.content));
+    let written = 0;
+    const writerTool = () => tool({ name: 'propose_change', description: 'Prepare a change to the model.', parameters: z4.object({}),
+      execute: async () => { written += 1; return '{"status":"ok","mutated":true}'; }, errorFunction: null });
+    beforeEach(() => { written = 0; });
+
+    it('(2) a withheld tool stays in the list; the provider is told it may not call it; called anyway, it refuses in execute and nothing is written', async () => {
+      scripted = [[{ type: 'function_call', name: 'propose_change', args: {} }], [{ type: 'message', text: 'That is not available on this turn.' }]];
+      const c = caps();
+      const { result } = await turn('Run it.', c, { tools: (onCall) => [...readTools(c)(onCall), writerTool()], withheldTools: ['propose_change'] });
+      expect(written, 'the withheld tool never ran').toBe(0);
+      expect(result.tool_calls).toEqual([expect.objectContaining({ name: 'propose_change', ok: false, mutated: false, refusal: 'withheld_on_chip_turn' })]);
+      expect(result.mutated).toBe(false);
+      expect(JSON.stringify(sent[1]!.input), 'the AI is told nothing was changed').toContain('Nothing was changed or run');
+      for (const b of sent) {
+        expect((b.tools as Json[]).map((t) => t.name), 'still in the one fixed list').toEqual(['read_canonical_context', 'propose_change']);
+        expect(b.tool_choice).toEqual({ type: 'allowed_tools', mode: 'auto', tools: [{ type: 'function', name: 'read_canonical_context' }] });
+      }
+    });
+
+    it('(3) a Run press\'s first call is still forced to the Run; its later calls go back to the turn\'s allowed tools', async () => {
+      let ran = 0;
+      const runTool = tool({ name: 'run_analysis', description: 'Run the saved model.', parameters: z4.object({}), execute: async () => { ran += 1; return '{"status":"ok"}'; }, errorFunction: null });
+      scripted = [[{ type: 'function_call', name: 'run_analysis', args: {} }], [{ type: 'message', text: 'Here is the Run.' }]];
+      const c = caps();
+      await turn('Run it.', c, { tools: (onCall) => [...readTools(c)(onCall), runTool, writerTool()], withheldTools: ['propose_change'], firstTool: 'run_analysis' });
+      expect(ran).toBe(1);
+      expect(sent[0]!.tool_choice, 'forced, never widened to the allowed list').toEqual({ type: 'function', name: 'run_analysis' });
+      expect(sent[1]!.tool_choice).toEqual({ type: 'allowed_tools', mode: 'auto',
+        tools: [{ type: 'function', name: 'read_canonical_context' }, { type: 'function', name: 'run_analysis' }] });
+      expect(JSON.stringify(sent[0]!.tools)).toBe(JSON.stringify(sent[1]!.tools));
+    });
+
+    it('(4) one cache key and 24 h retention for one model and standing prompt, across scenarios; a changed prompt changes the key', async () => {
+      const other = '7d1e2a3b-4c5d-4e6f-8a9b-0c1d2e3f4a5b';
+      await turn('First synthetic question.', caps());
+      await turn('Second synthetic question.', caps(), { scenarioId: other, state: { revision: 9 } });
+      await turn('Third synthetic question.', caps(), { scenarioId: other, instructions: 'Synthetic instructions, revised.' });
+      expect(sent.map((b) => b.conversation), 'two scenarios, two Conversations').toEqual(['conv_1', 'conv_2', 'conv_2']);
+      const key = corePromptCacheKey('gpt-6.1-sol', 'Synthetic instructions.');
+      expect(sent.map((b) => b.prompt_cache_key)).toEqual([key, key, corePromptCacheKey('gpt-6.1-sol', 'Synthetic instructions, revised.')]);
+      expect(sent[2]!.prompt_cache_key).not.toBe(key);
+      expect(sent.map((b) => b.prompt_cache_retention)).toEqual(['24h', '24h', '24h']);
+    });
+
+    it('(B) the instructions are the agent\'s own bytes on every call; the state block is sent once per turn, headed with its revision and Run', async () => {
+      scripted = [[{ type: 'function_call', name: 'read_canonical_context', args: {} }], [{ type: 'message', text: 'Read.' }]];
+      await turn('What is in my model?', caps(), { state: { revision: 4 }, traceMeta: { revision: 'rev-4', run_id: 'run-7' } });
+      expect(sent).toHaveLength(2);
+      expect(sent.map((b) => b.instructions)).toEqual(['Synthetic instructions.', 'Synthetic instructions.']);
+      const first = systemItems(sent[0]!);
+      expect(first).toHaveLength(1);
+      expect(first[0]!.startsWith(`${STATE_BLOCK_PREFIX}: model revision rev-4, run run-7. It supersedes every earlier state block in this conversation.`)).toBe(true);
+      expect(first[0]).toContain('"revision":4');
+      expect(systemItems(sent[1]!), 'the later call reads it from the Conversation: never sent twice').toEqual([]);
+      expect(JSON.stringify(sent[0]!.input).indexOf('What is in my model?'), 'the block follows the turn\'s own words').toBeLessThan(JSON.stringify(sent[0]!.input).indexOf(STATE_BLOCK_PREFIX));
+    });
+
+    /** The turn's first request's system items, read as: the full block of this revision, or the text itself. */
+    const blockOf = (b: Json): string[] => systemItems(b).map((t) => (t.startsWith(STATE_BLOCK_PREFIX) ? `block ${/"revision":(\d+)/.exec(t)?.[1]}` : t.slice(0, 40)));
+    const noOneLine = () => { for (const b of sent) for (const t of systemItems(b)) expect(t, 'the old one-line text is gone').not.toMatch(/^State unchanged/); };
+
+    it('(B) every turn sends the full block, whatever its kind and whether the state changed: typed, a Run press, a card press', async () => {
+      const meta = { revision: 'rev-4', run_id: 'run-7' };
+      let ran = 0;
+      const runTool = tool({ name: 'run_analysis', description: 'Run the saved model.', parameters: z4.object({}), execute: async () => { ran += 1; return '{"status":"ok"}'; }, errorFunction: null });
+      const c = caps();
+      const tools = (onCall: CoreToolRecorder) => [...readTools(c)(onCall), runTool];
+      await turn('One.', c, { state: { revision: 4 }, traceMeta: meta, tools });
+      await turn('Two, the same state.', c, { state: { revision: 4 }, traceMeta: meta, tools });
+      scripted = [[{ type: 'function_call', name: 'run_analysis', args: {} }], [{ type: 'message', text: 'Here is the Run.' }]];
+      await turn('Run it.', c, { state: { revision: 4 }, traceMeta: meta, tools, firstTool: 'run_analysis' });
+      await turn('', c, { state: { revision: 4 }, traceMeta: meta, tools, press: { decision: 'decline', proposal_id: PID } });
+      expect(ran).toBe(1);
+      const firsts = [sent[0]!, sent[1]!, sent[2]!, sent[4]!];
+      expect(firsts.map(blockOf)).toEqual([['block 4'], ['block 4'], ['block 4'], ['block 4']]);
+      expect(blockOf(sent[3]!), 'the Run press\'s later call reads it from the Conversation').toEqual([]);
+      noOneLine();
+    });
+
+    it('⛔ Codex r2 #3656: after a partial failure (a later call of the turn fails), the next turn still sends its own full block', async () => {
+      // rev-1 delivered; rev-2's block is accepted, then a later call of that turn fails; the model is back at rev-1 (an Undo).
+      let failAt = -1;
+      const json = { 'content-type': 'application/json' };
+      vi.stubGlobal('fetch', vi.fn(streamWhenAsked(async (url: unknown, init?: { body?: unknown }) => {
+        const u = String(url);
+        if (u.endsWith('/v1/conversations')) return new Response(JSON.stringify({ id: 'conv_partial', object: 'conversation' }), { status: 200, headers: json });
+        if (u.endsWith('/items')) return new Response(JSON.stringify({ object: 'list', data: [], first_id: null, last_id: null, has_more: false }), { status: 200, headers: json });
+        sent.push(JSON.parse(String(init?.body ?? '{}')) as Json);
+        if (sent.length - 1 === failAt) return new Response(JSON.stringify({ error: { message: 'busy', type: 'server_error', param: null, code: null } }), { status: 500, headers: json });
+        return new Response(JSON.stringify(body(scripted.shift() ?? [{ type: 'message', text: 'Noted.' }])), { status: 200, headers: json });
+      })));
+      await turn('One.', caps(), { state: { revision: 1 }, traceMeta: { revision: 'rev-1', run_id: 'run-1' } });
+      failAt = 2;
+      scripted = [[{ type: 'function_call', name: 'read_canonical_context', args: {} }]];
+      await expect(turn('Two.', caps(), { state: { revision: 2 }, traceMeta: { revision: 'rev-2', run_id: 'run-1' } })).rejects.toBeDefined();
+      expect(blockOf(sent[1]!), 'rev-2\'s block was accepted before the failure').toEqual(['block 2']);
+      await turn('Three.', caps(), { state: { revision: 1 }, traceMeta: { revision: 'rev-1', run_id: 'run-1' } });
+      expect(blockOf(sent[sent.length - 1]!), 'the restored state, in full: never "unchanged since rev-1"').toEqual(['block 1']);
+      noOneLine();
+    });
+
+    it('⛔ Codex r1 #3656: a first request refused before anything was accepted is resent WITH the state block, and the next turn sends its own', async () => {
+      // Revision 1 is in the Conversation; revision 2 is saved; the turn's first request is refused ("No tool output found…").
+      let refuseAt = -1;
+      const json = { 'content-type': 'application/json' };
+      vi.stubGlobal('fetch', vi.fn(streamWhenAsked(async (url: unknown, init?: { body?: unknown }) => {
+        const u = String(url);
+        if (u.endsWith('/v1/conversations')) return new Response(JSON.stringify({ id: 'conv_recover', object: 'conversation' }), { status: 200, headers: json });
+        if (u.endsWith('/items')) return new Response(JSON.stringify({ object: 'list', data: [], first_id: null, last_id: null, has_more: false }), { status: 200, headers: json });
+        sent.push(JSON.parse(String(init?.body ?? '{}')) as Json);
+        if (sent.length - 1 === refuseAt) {
+          return new Response(JSON.stringify({ error: { message: 'No tool output found for function call call_lost1.', type: 'invalid_request_error', param: 'input', code: null } }), { status: 400, headers: json });
+        }
+        return new Response(JSON.stringify(body([{ type: 'message', text: 'Noted.' }])), { status: 200, headers: json });
+      })));
+      await turn('One.', caps(), { state: { revision: 1 }, traceMeta: { revision: 'rev-1', run_id: 'run-1' } });
+      refuseAt = 1;
+      const two = await turn('Two.', caps(), { state: { revision: 2 }, traceMeta: { revision: 'rev-2', run_id: 'run-1' } });
+      expect(two.result.assistant_text, 'the turn ran after the answer').toBe('Noted.');
+      expect(sent, 'turn 1, the refused request, its resend').toHaveLength(3);
+      await turn('Three.', caps(), { state: { revision: 2 }, traceMeta: { revision: 'rev-2', run_id: 'run-1' } });
+      expect({ refused: blockOf(sent[1]!), resend: blockOf(sent[2]!), next: blockOf(sent[3]!) })
+        .toEqual({ refused: ['block 2'], resend: ['block 2'], next: ['block 2'] });
+      noOneLine();
     });
   });
 
@@ -547,7 +695,8 @@ describe('PATH-B core turn on the Agents SDK', () => {
       await turn('Run it.', c, { replyBudget: REPLY, firstTool: 'run_analysis', tools: namedTools(c) });
       expect(sent.map((b) => b.model)).toEqual([REPLY.model]);
       expect(sent[0]!.reasoning?.effort).toBe(REPLY.reasoning_effort);
-      expect(toolNames(sent[0]!)).toEqual(['apply_change', 'read_canonical_context', 'run_analysis']);
+      expect(toolNames(sent[0]!), 'the one fixed list').toEqual(['apply_change', 'build_model_from_brief', 'propose_change', 'read_canonical_context', 'run_analysis']);
+      expect(callable(sent[0]!), 'its forced first call can call the Run alone: no model writer').toEqual(['run_analysis']);
     });
     it('buddy #3526 R1: a press resumes on the reply model with no model writer, so no continuation can write the model fast', async () => {
       scripted = [[{ type: 'message', text: 'Synthetic answer.' }]];
@@ -556,7 +705,7 @@ describe('PATH-B core turn on the Agents SDK', () => {
       expect(sent.length).toBeGreaterThan(0);
       for (const b of sent) {
         expect(b.model).toBe(REPLY.model);
-        expect(toolNames(b)).not.toEqual(expect.arrayContaining([expect.stringMatching(/^(build_model_from_brief|propose_change)$/)]));
+        expect(callable(b), 'no model writer is callable').toEqual(['apply_change', 'read_canonical_context', 'run_analysis']);
       }
     });
     it('CONTROL: a typed message, which may change the model, stays on the builder with every writer', async () => {

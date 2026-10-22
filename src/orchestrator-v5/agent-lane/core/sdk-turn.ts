@@ -11,9 +11,10 @@
  * press resumes the same saved RunState) and the Run, each over the product's own protocol-safe primitives, each returning
  * ONE typed outcome that it records once (`onCall`).
  *
- * The Conversation holds only the conversation. The model, its proposals and its Runs stay in Olumi's stores. Every model
- * call is given today's date and the CURRENT model state afresh (`turnContextItems`), in its instructions, which the
- * Conversation never stores: conversation history never overrides saved state (after Undo, the restored state is given).
+ * The model, its proposals and its Runs stay in Olumi's stores. Each turn gives today's date and the CURRENT model state
+ * (`turnContextItems`) as ONE state block in the turn's own input, and the newest block supersedes every earlier one:
+ * conversation history never overrides saved state (after Undo, the restored state is given). The instructions are the
+ * same bytes on every call, so the provider's cache holds them (DL ruling B, 22 Oct; `stateBlockText`).
  *
  * The SDK's Responses model runs on its Conversation-bound client (`ledgeredAgentsClient`: no automatic replay), whose fetch writes each
  * attempt to this request's `_provider_calls` with the returned model, the tool names sent and a digest of the input sent.
@@ -37,7 +38,7 @@ import type { OpenAiPausedRun } from '../../session/store.js';
 import type { DraftVerification } from '../../path-b/tools/outcome.js';
 import { agentRequestIdentity } from '../runtime/prompt-identity.js';
 import type { AgentToolContext, ToolResult } from '../runtime/agent-tools.js';
-import type { AgentTurnResult } from '../runtime/agent-loop.js';
+import { WITHHELD_ON_CHIP_TURN, type AgentTurnResult } from '../runtime/agent-loop.js';
 import type { CallBudget } from '../model-budgets.js';
 import { BRIEF_LABEL, runFactsContext, turnContextItems, turnContextText } from '../turn-context.js';
 
@@ -146,10 +147,33 @@ export type CoreToolRecorder = (
   result: ToolResult,
 ) => void;
 
+/** The provider's prompt-cache key for the core agent: one per model and standing-instructions text (`instructions`). */
+export function corePromptCacheKey(model: string, instructions: string): string {
+  return `olumi-core:${model}:${createHash('sha256').update(instructions, 'utf8').digest('hex').slice(0, 16)}`;
+}
+
+/**
+ * ⭐ THE TURN'S STATE IS ONE BLOCK IN THE TURN'S INPUT, NOT IN THE INSTRUCTIONS (DL ruling B, 22 Oct). A request writes ONE
+ * cache breakpoint, at its end, so a call reads the cache only when an earlier prompt is a whole prefix of it. The state in
+ * the instructions came before the stored Conversation, so every turn's first call read nothing and wrote ~20k tokens
+ * (served 21ad02f5, baseline). Now the full block follows the turn's new input, every turn, and is stored with it: the
+ * newest block supersedes every earlier one (Codex r2 #3656: no cross-turn memory of what was sent, so no stale "unchanged").
+ */
+export const STATE_BLOCK_PREFIX = 'OLUMI STATE BLOCK';
+export const stateBlockText = (revision: string, runId: string, body: string): string =>
+  `${STATE_BLOCK_PREFIX}: model revision ${revision}, run ${runId}. It supersedes every earlier state block in this conversation.\n\n${body}`;
+
 export interface CoreTurnInput {
   readonly ctx: AgentToolContext;
   readonly message: string;
+  /**
+   * The agent's STANDING instructions: the same bytes on every call of every turn for one mode, so the provider's cached
+   * prefix (the tools, then these, then the stored Conversation) is reused (DL 22 Oct, the caching split). Anything that
+   * varies by turn goes in the turn's input: the state block, and `turnGuidance`.
+   */
   readonly instructions: string;
+  /** This turn's own guidance (a Challenge's note, the drafting arm), given once, after the turn's state block. */
+  readonly turnGuidance?: readonly string[];
   readonly budget: CallBudget;
   /**
    * MULTI-MODEL (Paul, 20 Oct): the fast budget for a turn that only reads, runs and explains: a press on a card or the Run
@@ -253,11 +277,34 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
   // A reply-only turn runs on the fast budget without the model writers, so drafting and changes stay on the builder.
   const fast = input.replyBudget !== undefined && replyOnlyTurn(input);
   const budget = fast ? input.replyBudget! : input.budget;
-  const tools = input.tools(record).filter((t) => !('name' in t) || !(withheld.has(t.name) || (fast && MODEL_WRITING_TOOLS.has(t.name))));
+  /**
+   * ⭐ ONE TOOL LIST, BYTE-IDENTICAL ON EVERY CALL (DL 22 Oct, the caching split: a list that changed with the turn's kind
+   * broke the provider's cached prefix on every press and the turn after it). A tool this turn withholds keeps its exact
+   * definition; the provider is told which it may call (`allowed_tools`, below), and the tool refuses in execute if it is
+   * called anyway: no approval, nothing written.
+   */
+  const blocked = (name: string): boolean => withheld.has(name) || (fast && MODEL_WRITING_TOOLS.has(name));
+  const allTools = input.tools(record);
+  const allowedNames = allTools.flatMap((t) => ('name' in t && !blocked(t.name) ? [t.name] : []));
+  const tools = allTools.map((t): Tool => {
+    if (!('name' in t) || !blocked(t.name) || t.type !== 'function') return t;
+    const name = t.name;
+    return { ...t, needsApproval: async () => false, invoke: async () => {
+      record({ name, ok: false, mutated: false, outcome: 'refused', refusal: WITHHELD_ON_CHIP_TURN, ran: null },
+        { ok: false, mutated: false, refusal: WITHHELD_ON_CHIP_TURN });
+      return JSON.stringify({ status: 'refused', reason: WITHHELD_ON_CHIP_TURN, mutated: false,
+        detail: `${name} is not available on this turn. Nothing was changed or run.` });
+    } };
+  });
+  const restrictedTo = allowedNames.length < allTools.length
+    ? { type: 'allowed_tools', mode: 'auto', tools: allowedNames.map((name) => ({ type: 'function', name })) } : undefined;
   const pendingRows: Promise<void>[] = [];
   let deliveryUnknown: { readonly cause: unknown } | undefined;
   const client = ledgeredAgentsClient({ site: 'agent-core.sdk', pending: pendingRows,
     conversationBound: true, onDeliveryUnknown: (cause) => { deliveryUnknown = { cause }; },
+    // A call the SDK leaves free (no forced first tool) may call only this turn's allowed tools; a forced call names its own.
+    ...(restrictedTo !== undefined ? { requestBody: (body: Record<string, unknown>) => (body['tool_choice'] === undefined || body['tool_choice'] === 'auto'
+      ? { ...body, tool_choice: restrictedTo } : body) } : {}),
     detailOf: (body) => ({ model: budget.model, purpose: 'conversation', ...agentRequestIdentity('agent.converse', body) }) });
   const agent = new Agent({
     name: 'Olumi',
@@ -270,6 +317,10 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
       ...(input.firstTool !== undefined ? { toolChoice: input.firstTool } : {}),
       // Native server-side compaction of the Conversation as it grows: no transcript trim of our own.
       contextManagement: [{ type: 'compaction', compactThreshold: CORE_COMPACT_THRESHOLD }],
+      // The cached prefix (the tools, then the standing instructions) is the same for every scenario on one model and prompt:
+      // one cache key for it, kept 24 h, so each scenario's first call reads it rather than writing it again.
+      promptCacheRetention: '24h',
+      providerData: { prompt_cache_key: corePromptCacheKey(budget.model, input.instructions) },
     },
     tools: [...tools],
   });
@@ -279,16 +330,28 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
   agent.on('agent_tool_end', () => { if (toolStartedAt !== undefined) toolMs += Math.max(0, now() - toolStartedAt); toolStartedAt = undefined; });
 
   /**
-   * Olumi's own facts for THIS turn, given fresh on every model call in its instructions (never stored in the Conversation):
-   * today's date, the CURRENT model state as the turn began, and the Run-facts rule when a Run is in it. The user's own
-   * words are the Conversation's: on the turn that creates it, a brief written apart from this message goes in first, once.
+   * Olumi's own facts for THIS turn, as its state block: today's date, the CURRENT model state as the turn began, and the
+   * Run-facts rule when a Run is in it. The user's own words are the Conversation's: on the turn that creates it, a brief
+   * written apart from this message goes in first, once.
    */
   const stateContext = runFactsContext(input.canonicalState);
-  const turnFacts = turnContextItems({
+  const stateBody = turnContextItems({
     now: new Date(startedAt), briefText: undefined, conversation: [],
     canonicalState: stateContext.facts, runFactsUse: stateContext.use,
-  }).map(turnContextText).filter((t) => t !== '');
+  }).map(turnContextText).filter((t) => t !== '').join('\n\n');
   const conversation = await scenarioConversation(input.ctx.scenario_id, input.conversationStore, () => startOpenAIConversationsSession(client));
+  /**
+   * After the turn's new input: the full state block, then this turn's guidance. Sent on every request until a
+   * response the provider ACCEPTED carried them (Codex r1 #3656: a first request refused before anything was accepted is
+   * resent, and the resend must carry the state, or the turn reasons from the Conversation's older block).
+   */
+  const turnItems: AgentInputItem[] = [
+    { role: 'system', content: stateBlockText(input.traceMeta?.revision ?? 'none', input.traceMeta?.run_id ?? 'none', stateBody) },
+    ...(input.turnGuidance ?? []).map((text): AgentInputItem => ({ role: 'system', content: text })),
+  ];
+  /** This request carries the turn's items; an accepted response's input carried them (the only proof they are stored). */
+  let carrying = false;
+  let delivered = false;
   const brief = typeof input.briefText === 'string' ? input.briefText.trim() : '';
   let turnInput: string | AgentInputItem[] | RunState<unknown, Agent> = conversation.created && brief !== '' && brief !== input.message.trim()
     ? [{ role: 'user', content: `${BRIEF_LABEL}\n${brief}` }, { role: 'user', content: input.message }] : input.message;
@@ -354,13 +417,14 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
         conversationId: conversation.id,
         maxTurns: CORE_MAX_MODEL_CALLS,
         ...(input.signal !== undefined ? { signal: input.signal } : {}),
-        // This turn's facts ride the instructions of every call. The input is what the SDK sends, plus, once, a typed
-        // message that declined a paused run (it follows that run's answer).
+        // The instructions go as the agent holds them, the same bytes on every call. The input is what the SDK sends, plus
+        // the turn's state block and guidance until an accepted response carried them, then, once, a typed message that
+        // declined a paused run.
         callModelInputFilter: ({ modelData }: { modelData: { input: AgentInputItem[]; instructions?: string } }) => {
-          const extra: AgentInputItem[] = carried === undefined ? [] : [{ role: 'user', content: carried }];
+          carrying = !delivered;
+          const extra: AgentInputItem[] = [...(carrying ? turnItems : []), ...(carried === undefined ? [] : [{ role: 'user' as const, content: carried }])];
           carried = undefined;
-          return { ...modelData, input: [...modelData.input, ...extra],
-            instructions: [modelData.instructions ?? '', ...turnFacts].filter((t) => t !== '').join('\n\n') };
+          return { ...modelData, input: [...modelData.input, ...extra] };
         },
       };
       /**
@@ -373,6 +437,8 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
         let writing = false;
         for await (const event of live) {
           accepted = true;
+          // The provider created the response from this request's input: the turn's items are now in the Conversation.
+          if (carrying && event.type === 'raw_model_stream_event' && event.data.type === 'response_started') { delivered = true; carrying = false; }
           if (!writing && event.type === 'raw_model_stream_event' && event.data.type === 'output_text_delta') {
             writing = true;
             if (showProgress) emitAgentPhase('writing');

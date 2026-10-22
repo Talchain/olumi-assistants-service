@@ -1,12 +1,14 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { CORE_ALIGNED_INSTRUCTIONS, CORE_NEXT_STEP, CORE_REPLY_INSTRUCTION, NOTE_ON_ITEM_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION, instructionsForMode, MODEL_RELATIVE_NAMING_INSTRUCTION,
+import { CORE_ALIGNED_INSTRUCTIONS, CORE_REPLY_RULES, NOTE_ON_ITEM_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION, instructionsForMode, MODEL_RELATIVE_NAMING_INSTRUCTION,
   promptArmOf, coreEffortArmOf } from '../../../routes/agent-v1-turn.js';
 import { coreBudget } from '../model-budgets.js';
 import { OLUMI_PURPOSE_INSTRUCTION } from '../olumi-purpose.js';
 import { HOST_SCIENCE_AND_SOURCE_RULES, HOST_TOOL_CONTRACT } from '../coach-route-v0_2.js';
 import { createHash } from 'node:crypto';
-import { CORE_DRAFTING_GUIDANCE } from '../../path-b/drafting-guidance.js';
+import * as drafting from '../../path-b/drafting-guidance.js';
+import * as coreInstructions from '../../core-route/instructions.js';
+
+const { CORE_DRAFTER_RULES } = drafting;
 
 /** Tools the core agent does not have, named by the legacy routing arm B removes (AIE #3523 6298433275). */
 const LEGACY_TOOLS = ['propose_starting_point', 'propose_assumptions', 'authorise_change', 'get_canonical_state', 'propose_link_effect',
@@ -25,20 +27,20 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(b).not.toContain('{{MODE_AND_AUTHORITY}}');
   });
 
-  it('keeps the shared reasoning, science and reply rules, each once, and the core reply rule last', () => {
+  it('keeps the shared reasoning, science and reply rules, each once, and the core reply rules last', () => {
     for (const h of ['\nTRUTH\n', '\nREASONING\n', '\nAUTHORSHIP\n', '\nIDEATION\n', 'POLYMATH COACHING', 'CALCULATION BOUNDARY']) expect(b, h).toContain(h);
-    for (const part of [OLUMI_PURPOSE_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION, MODEL_RELATIVE_NAMING_INSTRUCTION, CORE_REPLY_INSTRUCTION,
+    for (const part of [OLUMI_PURPOSE_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION, MODEL_RELATIVE_NAMING_INSTRUCTION, CORE_REPLY_RULES,
       HOST_SCIENCE_AND_SOURCE_RULES]) expect(count(b, part)).toBe(1);
     // The host contract's science, source and freshness rules ride along byte for byte (AIE 22:17Z), naming no tool.
     for (const rule of ['Never express the chance as a percentage of model runs.', 'Earlier assistant replies can describe a Run that was current then',
       'that separation rests on Olumi\'s own starting estimates', "The goal\u2019s `target` is the figure the user stated"]) expect(b, rule).toContain(rule);
-    expect(b.endsWith(CORE_REPLY_INSTRUCTION)).toBe(true);
+    expect(b.endsWith(CORE_REPLY_RULES)).toBe(true);
   });
 
   it('arm B is the AIE\'s assembled reference, byte for byte (programme-docs #94 6303242136, static text sha256 7b6145d4…), plus the canvas-coaching sentence', () => {
     expect(b.split(NOTE_ON_ITEM_INSTRUCTION)).toHaveLength(2);
     // 7b6145d4… until 21 Oct; arm C's adoption changed only the closing core reply rule (see its row), now 56625e00….
-    expect(createHash('sha256').update(b.replace(`${NOTE_ON_ITEM_INSTRUCTION}\n\n`, ''), 'utf8').digest('hex')).toBe('1545a0fc8f3131cc3c567332175f0350dfddcaf335d7ce70f26a42c8d9f4508e'); // 23 Oct (b): the boundary said as the person's own arithmetic, the input always named, the low/high invited (DL, double-judged R2; was f9c44c8f…). 23 Oct: exact inputs → each option's margin as goal_margins states it + a stress_test offered at the boundary of the input it rests on (DL brief, R2 c1; was 97d3bea4…). 22 Oct: exact inputs → the Run's own results + the person's choice of figure to test (Track 3 c5; Codex r1 #3625; was 52d3ab03…); stress_test only for a sized link/factor (buddy SIMPLER, was 9a57bae9…); the three-part coaching after a Run (part 2 never ranks unmeasured figures, Codex r1) + the held-risk window ask (Track 3 judge on 4b, 11 c1 zeros; was 6dedb153…). 21 Oct: + Olumi's labelled estimate on another's item (estimate_by); + CORE_NEXT_STEP decisive question (Track 3 Q2 v2 + buddy AMEND, 21 Oct; was a605c43f…)
+    expect(createHash('sha256').update(b.replace(`${NOTE_ON_ITEM_INSTRUCTION}\n\n`, ''), 'utf8').digest('hex')).toBe('950681a04fa63f0333d99c0679cd6cc7b983b02717f5e5e1d2f8fbce44919dc5'); // 22 Oct: the coach's reply rules (two phrases deleted, Codex r1 / buddy), the figure rule moved to the drafter's rules (DL priority change; was 1545a0fc…)
     // Candidate-3 witnesses (21 Oct): presence checks (text only, not behaviour): WHEN to build, and Olumi's additions on a card.
     expect(b).toContain('build the first model from their brief in that same turn');
     expect(b).toContain('a list in your reply adds nothing to their model');
@@ -52,7 +54,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     for (const arm of [CORE_ALIGNED_INSTRUCTIONS, 'legacy arm A text']) {
       const sent = instructionsForMode('core', arm);
       expect(sent.split(NOTE_ON_ITEM_INSTRUCTION)).toHaveLength(2);
-      expect(sent.endsWith(CORE_REPLY_INSTRUCTION)).toBe(true);
+      expect(sent.endsWith(CORE_REPLY_RULES)).toBe(true);
     }
     expect(instructionsForMode('full', 'legacy arm A text')).not.toContain('note_on_item');
   });
@@ -64,89 +66,59 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(promptArmOf('full', 'B')).toBe('A');
   });
 
-  it('arm C ADOPTED (Paul 21 Oct, long replies narrating the tools; R2 100 % at 90 words median): the core reply rule speaks in the user\u2019s terms with a length bound', () => {
-    expect(CORE_REPLY_INSTRUCTION).not.toContain('from this turn\u2019s tool results');
-    expect(CORE_REPLY_INSTRUCTION).toContain('never your tools or what a tool response did or did not contain');
-    // Paul, 21 Oct (standing): bullets first, detail on request: the approved discipline from the served routing prompt, verbatim.
-    const routing = readFileSync(new URL('../../../../Prompts/canonical/routing.txt', import.meta.url), 'utf8');
-    const discipline = routing.slice(routing.indexOf('<RESPONSE_DISCIPLINE>'), routing.indexOf('</RESPONSE_DISCIPLINE>') + '</RESPONSE_DISCIPLINE>'.length);
-    expect(discipline.length).toBeGreaterThan(500);
-    expect(CORE_REPLY_INSTRUCTION).toContain(discipline);
-    expect(CORE_REPLY_INSTRUCTION).not.toContain('weave at most one next step');
-    // Track 3 E2E (served dce1b50a, 21 Oct, Q2 0/8 decisive): with no Run result, the one question is the input that decides
-    // between the options, never the readiness list, and never a date the brief already gave.
-    expect(CORE_REPLY_INSTRUCTION.split(CORE_NEXT_STEP)).toHaveLength(2);
-    expect(CORE_REPLY_INSTRUCTION.indexOf(CORE_NEXT_STEP)).toBeGreaterThan(CORE_REPLY_INSTRUCTION.indexOf(discipline));
-    expect(CORE_NEXT_STEP).toContain('the input that would most change how their options compare on their goal');
-    // Track 3 default Q2 (8177faa9, v2 half 6/6): the one question was secondary while the goal's figure, today's level or an
-    // option's effect decided more. Those are named as the usual decisive inputs (a vague goal gets Olumi's suggested measure);
-    // buddy AMEND: never a fixed order, since a framing or evidence question comes first when it decides more, and the reply
-    // says what the answer would change.
-    expect(CORE_NEXT_STEP).toContain('That is usually the goal\u2019s figure (when they named no measure, suggest one as yours and ask for its figure), today\u2019s level of what it measures, or what an option would deliver or cost;');
-    expect(CORE_NEXT_STEP).toContain('a question about what success means or what evidence would change their view comes first only when it decides more.');
-    expect(CORE_NEXT_STEP).toContain('Say in a few words what their answer would change.');
-    expect(CORE_NEXT_STEP).not.toContain('in this order');
-    // Codex #3571 BLOCK: a state query ("what is still needed?") is answered in full.
-    expect(CORE_NEXT_STEP).toContain('When they ask what is still needed, give the complete list.');
-    // The licences, attribution and Run-coaching rules are kept.
-    for (const rule of ['never call a win share a chance', 'never call an option best, a winner or recommended',
-      'approving a reading adopts it but does not make the user its author', 'A Run that did not complete leaves a saved change saved'])
-      expect(CORE_REPLY_INSTRUCTION, rule).toContain(rule);
-    const sent = instructionsForMode('core', 'legacy arm A text');
-    expect(sent.endsWith(CORE_REPLY_INSTRUCTION)).toBe(true);
-    expect(sent.split(NOTE_ON_ITEM_INSTRUCTION)).toHaveLength(2);
-    expect(instructionsForMode('full', 'legacy arm A text')).toBe('legacy arm A text');
+  it('THE PROMPTS (DL 22 Oct, priority change): the coach\u2019s reply rules and the drafter\u2019s rules, adapted as ruled; the old constants are gone', () => {
+    expect(createHash('sha256').update(CORE_REPLY_RULES, 'utf8').digest('hex')).toBe('0d1c339f1750712b5a4c769618343e9c343f4da60959066ae6d80a1404044d30');
+    expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('b23434b85ae1a4fca7d47ab8ad40c7b37f865203e04c09fb34cd44ad3785502f');
+    // The retired constants are gone from both modules: no route can send the accreted text again.
+    for (const name of ['CORE_REPLY_INSTRUCTION', 'CORE_RESPONSE_DISCIPLINE', 'CORE_NEXT_STEP']) expect(Object.keys(coreInstructions), name).not.toContain(name);
+    expect(Object.keys(drafting)).toEqual(['CORE_DRAFTER_RULES']);
+    for (const old of ['<RESPONSE_DISCIPLINE>', 'DRAFTING THE FIRST MODEL', 'goal_margins', 'risk_window_not_goal_window', 'COACHING SHAPE'])
+      expect(`${b}${CORE_DRAFTER_RULES}`, old).not.toContain(old);
+    // The candidates' output lines and the benchmark override do not go in (DL): the agent replies natively, with its tools.
+    // Codex r1 / buddy on #3656: no sentence against Olumi's labelled estimates, and a supported goal chance may lead the headline.
+    for (const line of ['Return only', 'NO INVENTED FIGURES', 'this sprint', 'never invent a number, range, threshold',
+      'Only use numbers the supplied result actually computed', 'without raw numbers'])
+      expect(`${CORE_REPLY_RULES}${CORE_DRAFTER_RULES}`, line).not.toContain(line);
+    // The coach's own rules: the chance as the headline where supported, never a recommendation, figures only with their author.
+    for (const rule of ['Lead with one plain-language headline naming the insight. Then at most three short bullets',
+      "give each option's chance of meeting the aim in this model and its stated uncertainty",
+      'Never recommend, call an option best or a winner, say \u201cyou should choose\u201d or \u201cgo with\u201d, or choose for the team',
+      "use only figures that are in the model with their author, or that the supplied result computed; never invent one. Say when a figure is Olumi's starting estimate.",
+      'If calculations use untested Olumi assumptions, say \u201cIllustrative calculation \u2014 uses untested Olumi assumptions.\u201d'])
+      expect(CORE_REPLY_RULES.split(rule), rule).toHaveLength(2);
+    // Kept from the old reply rule, each once: what the reply must report of the tools, saves and approvals.
+    for (const kept of ['In this mode Olumi adds nothing to your reply and rewrites none of it: the user reads exactly your words.',
+      'never your tools or what a tool response did or did not contain', 'Keep every must_say disclosure and the licences in run_facts.',
+      'approving a reading adopts it but does not make the user its author', 'Where run_comparison is given, follow its note.',
+      'or the analysis apply_change returns after a saved change), give that Run\u2019s results first, then coach on that same Run.',
+      'A Run that did not complete leaves a saved change saved: say both.', "Keep a clearly separate situation out of the current scenario's Living Model.",
+      'do not claim it was created or put its facts into this model instead'])
+      expect(b.split(kept), kept).toHaveLength(2);
   });
 
-  it('candidate 5 (Track 3 judge on 4b, 22 Oct): coaching after a Run names its three specific parts and never closes on a general caution; an inferred item is Olumi\'s', () => {
-    expect(CORE_REPLY_INSTRUCTION).toContain('(2) what the result depends on: when the run facts measure sensitivity, the most-sensitive assumption');
-    // Codex r1: never an unmeasured importance claim (run-facts.ts:84).
-    expect(CORE_REPLY_INSTRUCTION).toContain('without ranking them or saying which matters most');
-    // Track 3 on candidate 5: exact-figure briefs get the Run's own results and the person's choice of figure to test, never a generic caution.
-    // DL 23 Oct (R2 c1): the margin is now the Run's own fact (goal_margins), said as stated, still never worked out by the AI.
-    expect(CORE_REPLY_INSTRUCTION).toContain('when every input is the person\u2019s own exact figure, say so once and give each option\u2019s result against the target as goal_margins states it (how far above or below the target it lands, in the target\u2019s unit), never worked out from the inputs');
-    // Codex r1 on #3625: no computed margin and no unmeasured "nearest" ranking.
-    expect(CORE_REPLY_INSTRUCTION).not.toContain('nearest the target');
-    expect(CORE_REPLY_INSTRUCTION).not.toContain('how far each option lands');
-    expect(CORE_REPLY_INSTRUCTION).toContain('without one, ask which of their own stated figures they are least sure of and offer to test it at a value they name (stress_test)');
-    // DL 23 Oct (double-judged R2 on 7b0af1a9): (a) the boundary is the person's own arithmetic, never a recorded threshold, with
-    // which side of "equal" meets the target (Codex on the approach); (b) the input is always named where goal_margins gives one;
-    // (c) fm6: the input a chance would need is invited, never promised or suggested.
-    expect(CORE_REPLY_INSTRUCTION).toContain('from this Run\u2019s own figures, <input> at <boundary> is where <option>\u2019s level would equal the target');
-    expect(CORE_REPLY_INSTRUCTION).toContain('an \u201cat least\u201d or \u201cat most\u201d target is met at that point, an \u201cabove\u201d or \u201cbelow\u201d one is not');
-    expect(CORE_REPLY_INSTRUCTION).toContain('never as a recorded or measured threshold');
-    expect(CORE_REPLY_INSTRUCTION).toContain('always name that input and its boundary');
-    expect(CORE_REPLY_INSTRUCTION).toContain('never say no further input is needed');
-    expect(CORE_REPLY_INSTRUCTION).toContain('give its lowest and highest likely values, without promising that a chance will then be shown and without suggesting the values');
-    expect(CORE_REPLY_INSTRUCTION).not.toContain('rests on most: the measured');
-    expect(CORE_REPLY_INSTRUCTION).toContain('(3) one concrete next step for the model');
-    // planStress tests only a sized link effect or factor level; a risk chance or missing figure is asked for.
-    expect(CORE_REPLY_INSTRUCTION).toContain('a risk\u2019s chance or a missing figure is an input to ask for, never a test');
-    expect(CORE_REPLY_INSTRUCTION).toContain('Never close on a general caution');
-    expect(CORE_DRAFTING_GUIDANCE).toContain("An item is the person's or a party's only when their words state that very item");
-    expect(CORE_DRAFTING_GUIDANCE).toContain('estimate_by olumi is only for a missing figure on an item their words do state');
-    // A risk held for want of the goal's window (risk_window_not_goal_window) is said once, and the deadline becomes the one question.
-    expect(CORE_REPLY_INSTRUCTION).toContain('When a risk is held as risk_window_not_goal_window, say once that this risk is not in the calculation yet');
-    // Never promise a deadline unlocks it: on core no window is written, so only their own estimate brings it in (Track 2 step 0).
-    expect(CORE_REPLY_INSTRUCTION).not.toContain('until they say by when');
-  });
-
-  it('first-model guidance preserves material causal paths before figures, without item-count quotas (DL lease, 22 Oct)', () => {
-    // Static text contract only; Track 3 measures the resulting models on the served candidate.
-    expect(createHash('sha256').update(CORE_DRAFTING_GUIDANCE, 'utf8').digest('hex')).toBe('2fda3ede8113a368d39a07633a2a6b2c26757b51424b629728c1a4c277a78c18'); // 22 Oct: + at most one link per pair, each way its own path through its real factor, outcome or risk (Q2-06; Codex r1 #3642; was 15c95d1a…)
-    // Track 3 c6 Q2 fm3 (22 Oct): an option's outlay that no aim measures was drafted as a factor reaching nothing.
-    expect(CORE_DRAFTING_GUIDANCE).toContain('A factor that reaches no aim, carries no limit and defines nothing is decorative');
-    expect(CORE_DRAFTING_GUIDANCE).toContain('the reply says it is left out and asks whether it should count, as a limit or within the aim');
-    // Q2-06 (22 Oct, 7b0af1a9): two links between the same two items, one per way it moved the other; the engine holds one.
-    expect(CORE_DRAFTING_GUIDANCE).toContain('Two items have at most one link between them: when one item moves another in two ways, each way is its own path through its real factor, outcome or risk');
-    expect(CORE_DRAFTING_GUIDANCE).toContain('every material causal path the person states or proposes, including each intermediate effect and distinct outcome');
-    expect(CORE_DRAFTING_GUIDANCE).toContain('complete paths and distinct outcomes before adding figures');
-    expect(CORE_DRAFTING_GUIDANCE).toContain('a missing figure never justifies replacing a material mechanism with a proxy result or a caveat');
-    for (const quota of ['5 to 8 items', '8 to 14', 'up to about 16']) expect(CORE_DRAFTING_GUIDANCE).not.toContain(quota);
-    // The complete-estimate and human-target rules remain: no return to blank Olumi items.
-    expect(CORE_DRAFTING_GUIDANCE).toContain("Then complete Olumi's own items with labelled provisional estimates");
-    expect(b).toContain("Each item Olumi adds is complete and visibly Olumi's");
-    expect(b).toContain("never set the goal's target figure (ask for it)");
+  it('the figure rule (Paul\u2019s 21 Oct served test; DL ruling 22 Oct) is said once, verbatim, in the drafter\u2019s rules, and the drafter keeps no rule against it', () => {
+    const rule = "Build a model the analysis can run on. Each item Olumi adds is complete and visibly Olumi's (source olumi, quote null)";
+    expect(CORE_DRAFTER_RULES.split(rule)).toHaveLength(2);
+    expect(b, 'not repeated in the agent instructions').not.toContain(rule);
+    for (const part of ["give Olumi's provisional estimate of it with estimate_by olumi, as wide as what is genuinely unknown; never change or mix with a figure they gave, and never set the goal's target figure (ask for it)",
+      "In the reply, say that the figures marked as Olumi's are starting estimates for them to correct.", 'with unstated figures following the estimate rule',
+      'no parallel links, duplicates, unlabelled figures, or a figure attributed to the wrong author.'])
+      expect(CORE_DRAFTER_RULES, part).toContain(part);
+    expect(CORE_DRAFTER_RULES).not.toContain('all unstated figures null');
+    expect(CORE_DRAFTER_RULES).not.toContain('estimate_by and horizon_by stay null');
+    // The drafter's own structure rules: authorship per item, one link per pair, no decorative links, no item quotas.
+    expect(CORE_DRAFTER_RULES).toContain('user/party requires verbatim words stating that very item');
+    expect(CORE_DRAFTER_RULES).toContain('At most one link between any two items: opposing mechanisms need distinct real intermediate paths.');
+    expect(CORE_DRAFTER_RULES).toContain('Never add an arbitrary link just for connectivity');
+    for (const quota of ['5 to 8 items', '8 to 14', 'up to about 16']) expect(CORE_DRAFTER_RULES).not.toContain(quota);
+    // Paul's approved structure items (DL 22 Oct, his 12:00Z test): each said once; "at least one" different route replaces "at most one".
+    for (const rule of ['Find what most limits reaching the aim (its binding constraint or critical path, e.g. time to close, approval, capacity) and model that mechanism explicitly.',
+      "Offer at least one option that is structurally different (a different route, not a different split of the same levers), labelled Olumi's.",
+      'Every item either lies on a path to the aim or is a condition on one; no stand-alone items.',
+      'Conditions are short, written for the person, one point each; keep working notes out of the model.',
+      'When the aim has a deadline, record its window in period_months (weeks \u00f7 4.35).'])
+      expect(CORE_DRAFTER_RULES.split(rule), rule).toHaveLength(2);
+    expect(CORE_DRAFTER_RULES).not.toContain("add at most one as Olumi's when it materially changes the reasoning");
   });
 
   it('the builder\u2019s effort arm is set only on a core turn that asks for it; the default is the banked medium (A/B/C 22 Oct)', () => {

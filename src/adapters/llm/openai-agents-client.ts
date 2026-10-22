@@ -39,6 +39,8 @@ export interface AgentsClientLedger {
   readonly conversationBound?: boolean;
   /** A Conversation response was lost or ended without a terminal event; this does not describe Olumi's saved writes. */
   readonly onDeliveryUnknown?: (cause: unknown) => void;
+  /** The body each Responses request is sent with, from the one the SDK built (the core turn's per-call tool restriction). */
+  readonly requestBody?: (body: Record<string, unknown>) => Record<string, unknown>;
 }
 
 /** The terminal response of a Responses SSE stream (`response.completed`, `.incomplete` or `.failed`), if it has one. */
@@ -73,7 +75,10 @@ export function ledgeredAgentsClient(ledger: AgentsClientLedger): OpenAI {
   const ledgerFetch = async (url: string | URL | Request, init?: Parameters<typeof fetch>[1]): Promise<Response> => {
     const path = new URL(url instanceof Request ? url.url : String(url)).pathname;
     if (!path.endsWith('/responses')) return fetch(url, init);
-    const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as Record<string, unknown>;
+    const built = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as Record<string, unknown>;
+    // What is sent is what is recorded: the ledger reads the body the caller's hook returns.
+    const body = ledger.requestBody === undefined ? built : ledger.requestBody(built);
+    if (body !== built) init = { ...init, body: JSON.stringify(body) };
     const input = sha256(JSON.stringify(body['input'] ?? null));
     const handle = assertProviderAllowed('openai', ledger.site, {
       ...ledger.detailOf(body), model: String(body['model']), tool_names: toolNamesOf(body['tools']), input_sha256: input,

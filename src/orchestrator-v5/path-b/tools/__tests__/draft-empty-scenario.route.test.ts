@@ -21,6 +21,7 @@ import { toOutboundGraph } from '../../../goal-target/outbound-graph.js';
 import type { DrafterRawRow } from '../../../drafter-raw/index.js';
 import type { LivingModelT } from '../../../../schemas/living-model.js';
 import { streamWhenAsked } from '../../../agent-lane/__tests__/stream-when-asked.js';
+import { STATE_BLOCK_PREFIX } from '../../../agent-lane/core/sdk-turn.js';
 
 const rawRecorder = vi.hoisted(() => ({
   rows: [] as DrafterRawRow[], mode: 'ok' as 'ok' | 'throws' | 'failed' | 'pending',
@@ -151,7 +152,8 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
   let toolBrief: string | undefined;
   let toolModel: LivingModelT | undefined;
   /** The instructions each core agent call was given (the turn's own facts ride there). */
-  const instructionsSeen: string[] = [];
+  /** Each core call's state block (the turn's system items), as sent. */
+  const stateSeen: string[] = [];
   const bodiesSeen: Json[] = [];
   let drafterCalls = 0;
   let cutShortAfterRun = false;
@@ -162,7 +164,7 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
   let failReply = false;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(streamWhenAsked(async (url: unknown, init?: { body?: unknown }) => {
-      if (String(url).endsWith('/v1/conversations')) return new Response(JSON.stringify({ id: 'conv_draft', object: 'conversation' }), { status: 200, headers: { 'content-type': 'application/json' } });
+      if (String(url).endsWith('/v1/conversations')) return new Response(JSON.stringify({ id: `conv_${randomUUID()}`, object: 'conversation' }), { status: 200, headers: { 'content-type': 'application/json' } });
       const body = JSON.parse(String(init?.body ?? '{}')) as Json;
       const runCall = runPressToolResponse(body);
       if (runCall) return runCall;
@@ -173,9 +175,9 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
         return ok(body.text.format.name === 'whole_candidate' ? [{ type: 'message', content: [{ type: 'output_text', text: rawDraftText() }] }] : []);
       }
       // The core agent: first the draft call, then its words.
-      instructionsSeen.push(String(body.instructions ?? ''));
       bodiesSeen.push(body);
       const input = Array.isArray(body.input) ? body.input as Json[] : [];
+      stateSeen.push(input.filter((i) => i.role === 'system').map((i) => String(i.content)).join('\n'));
       toolOutputs.push(...input.filter((i) => i.type === 'function_call_output'));
       if (!input.some((i) => i.type === 'function_call_output')) {
         if (skipDraft) return ok([{ type: 'function_call', name: 'run_analysis', call_id: 'refused_run',
@@ -525,14 +527,14 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
     const model = livingFor(BRIEF);
     model.factors[0] = { ...model.factors[0]!, source: 'user', quote: 'Bookings are 180 a week today.' };
     toolModel = model;
-    instructionsSeen.length = 0;
+    stateSeen.length = 0;
     expect(draftCall(await turn())).toMatchObject({ ok: true, mutated: true });
-    expect(instructionsSeen.length).toBeGreaterThan(0);
-    expect(instructionsSeen.some((t) => t.includes('living_model')), 'CONTRAST: an empty scenario has none').toBe(false);
-    instructionsSeen.length = 0;
+    expect(stateSeen[0], 'the turn\'s state block is sent').toContain(STATE_BLOCK_PREFIX);
+    expect(stateSeen.some((t) => t.includes('living_model')), 'CONTRAST: an empty scenario has none').toBe(false);
+    stateSeen.length = 0;
     await turn();
-    expect(instructionsSeen[0]).toContain('living_model');
-    expect(instructionsSeen[0]).toContain('Bookings are 180 a week today.');
+    expect(stateSeen[0]).toContain('living_model');
+    expect(stateSeen[0]).toContain('Bookings are 180 a week today.');
   });
 
   it('CONTRAST: a non-null read that is not a graph is still malformed: refused, nothing registered', async () => {
