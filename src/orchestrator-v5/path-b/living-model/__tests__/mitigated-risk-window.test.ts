@@ -61,4 +61,37 @@ describe('a mitigated Olumi risk counts only over the goal\'s window', () => {
       expect(readiness(m)).toEqual({ safe: true, blocking: [] });
     }
   });
+
+  it('Codex r1: a limit on the removed switch goes with it; no limit row names a node that is gone', () => {
+    const m: LivingModelT = { ...OLUMI_CHANCE, factors: OLUMI_CHANCE.factors.map((f) => (f.id === 'dual_sourcing'
+      ? { ...f, limit: { comparator: '<=', value: 1, source: 'user', party: null, quote: 'we single-source today' } } : f)) } as LivingModelT;
+    const g = mapLivingModel(withPeriod(m, 6)).graph as Rec;
+    expect(g.nodes.find((n: Rec) => n.id === 'dual_sourcing')).toBeUndefined();
+    expect((g.goal_constraints ?? []).filter((c: Rec) => c.node_id === 'dual_sourcing')).toEqual([]);
+    // Over the goal's own window the switch and its limit stay.
+    const kept = mapLivingModel(withPeriod(m, 12)).graph as Rec;
+    expect((kept.goal_constraints ?? []).some((c: Rec) => c.node_id === 'dual_sourcing')).toBe(true);
+  });
+
+  it('DL ruling (a): when the mitigation is the ONLY difference between the options, the Run is refused, with the risk and switch named as held', () => {
+    const only: LivingModelT = { ...OLUMI_CHANCE, links: OLUMI_CHANCE.links.filter((l) => l.id !== 'cost_gp') };
+    const m = withPeriod(only, 6);
+    expect(reasons(m)).toEqual(expect.arrayContaining(['supplier_fails:risk_window_not_goal_window', 'dual_sourcing:risk_window_not_goal_window']));
+    expect(readiness(m).safe).toBe(false);
+  });
+
+  it('Codex r1: a switch that is also a part of a definition stays, so the definition never names a node that is gone', () => {
+    const m: LivingModelT = { ...OLUMI_CHANCE, factors: [...OLUMI_CHANCE.factors,
+      { estimate_by: null, kind: 'factor', limit: null, id: 'insurance', label: 'Insurance in place', value: 1, low: null, high: null, unit: null,
+        defined_as: null, source: 'user', party: null, quote: 'we are insured' },
+      { estimate_by: null, kind: 'factor', limit: null, id: 'cover', label: 'Supply cover', value: 1, low: null, high: null, unit: null,
+        defined_as: { op: 'sum', of: ['dual_sourcing', 'insurance'], source: 'user', party: null, quote: 'cover is dual sourcing plus insurance' },
+        source: 'user', party: null, quote: 'cover is dual sourcing plus insurance' }] } as LivingModelT;
+    const g = mapLivingModel(withPeriod(m, 6)).graph as Rec;
+    expect(g.nodes.find((n: Rec) => n.id === 'supplier_fails')).toBeUndefined();
+    expect(g.nodes.find((n: Rec) => n.id === 'dual_sourcing')).toBeDefined();
+    const ids = (g.nodes as Rec[]).map((n) => n.id);
+    for (const n of g.nodes as Rec[]) for (const part of n.nonlinear_identity?.factor_ids ?? []) expect(ids).toContain(part);
+  });
 });
+
