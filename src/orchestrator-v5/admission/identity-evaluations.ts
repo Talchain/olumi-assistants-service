@@ -52,6 +52,13 @@ export function evaluatedIdentityCarriers(nodes: readonly Rec[], identityEvaluat
     if (e.evaluated !== true || !isRec(identity) || !identityCanCarryExactLinks(nodes, identity)) return false;
     const declared: unknown[] = Array.isArray(identity.factor_ids) ? identity.factor_ids : [];
     const said = Array.isArray(e.factor_ids) ? e.factor_ids : undefined;
+    // An all-positive evaluation never attests a signed sum with the same operand ids.
+    if (identity.subtract !== undefined || e.subtract !== undefined) {
+      const minus = identity.subtract;
+      const used = e.subtract;
+      if (!Array.isArray(minus) || !Array.isArray(used) || new Set(used).size !== used.length
+        || minus.length !== used.length || !minus.every((id) => used.includes(id))) return false;
+    }
     // Accumulation's inputs are positional (stock, churn, inflow), and its result belongs to one horizon.
     // A different month or reordered input tuple never attests this declaration; products/sums remain commutative.
     if (identity.operation === 'accumulation' && (e.horizon_months !== identity.horizon_months
