@@ -38,7 +38,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
   it('arm B is the AIE\'s assembled reference, byte for byte (programme-docs #94 6303242136, static text sha256 7b6145d4…), plus the canvas-coaching sentence', () => {
     expect(b.split(NOTE_ON_ITEM_INSTRUCTION)).toHaveLength(2);
     // 7b6145d4… until 21 Oct; arm C's adoption changed only the closing core reply rule (see its row), now 56625e00….
-    expect(createHash('sha256').update(b.replace(`${NOTE_ON_ITEM_INSTRUCTION}\n\n`, ''), 'utf8').digest('hex')).toBe('fb675749d39c86b15ea514340254927e5ed155f616f46500cde04829d46d176b'); // 22 Oct: the three-part coaching after a Run + the held-risk window ask (Track 3 judge on 4b, 11 c1 zeros; was 6dedb153…). 21 Oct: + Olumi's labelled estimate on another's item (estimate_by); + CORE_NEXT_STEP decisive question (Track 3 Q2 v2 + buddy AMEND, 21 Oct; was a605c43f…)
+    expect(createHash('sha256').update(b.replace(`${NOTE_ON_ITEM_INSTRUCTION}\n\n`, ''), 'utf8').digest('hex')).toBe('9a57bae9b8028901d048fa154ea9bd151df52e4b7df7c3986d7be59450f02918'); // 22 Oct: the three-part coaching after a Run (part 2 never ranks unmeasured figures, Codex r1) + the held-risk window ask (Track 3 judge on 4b, 11 c1 zeros; was 6dedb153…). 21 Oct: + Olumi's labelled estimate on another's item (estimate_by); + CORE_NEXT_STEP decisive question (Track 3 Q2 v2 + buddy AMEND, 21 Oct; was a605c43f…)
     // Candidate-3 witnesses (21 Oct): presence checks (text only, not behaviour): WHEN to build, and Olumi's additions on a card.
     expect(b).toContain('build the first model from their brief in that same turn');
     expect(b).toContain('a list in your reply adds nothing to their model');
@@ -99,9 +99,11 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
   });
 
   it('candidate 5 (Track 3 judge on 4b, 22 Oct): coaching after a Run names its three specific parts and never closes on a general caution; an inferred item is Olumi\'s', () => {
-    expect(CORE_REPLY_INSTRUCTION).toContain('(2) what the result rests on most');
-    expect(CORE_REPLY_INSTRUCTION).toContain('without calling it the main driver');
-    expect(CORE_REPLY_INSTRUCTION).toContain('(3) one concrete next step that would most improve the model');
+    expect(CORE_REPLY_INSTRUCTION).toContain('(2) what the result depends on: when the run facts measure sensitivity, the most-sensitive assumption');
+    // Codex r1: never an unmeasured importance claim (run-facts.ts:84).
+    expect(CORE_REPLY_INSTRUCTION).toContain('without ranking them or saying which matters most');
+    expect(CORE_REPLY_INSTRUCTION).not.toContain('rests on most: the measured');
+    expect(CORE_REPLY_INSTRUCTION).toContain('(3) one concrete next step for the model');
     expect(CORE_REPLY_INSTRUCTION).toContain('Never close on a general caution');
     expect(CORE_DRAFTING_GUIDANCE).toContain("An item is the person's or a party's only when their words state that very item");
     expect(CORE_DRAFTING_GUIDANCE).toContain('estimate_by olumi is only for a missing figure on an item their words do state');
