@@ -184,6 +184,10 @@ describe('the AIE\'s signed words', () => {
     expect(d).toContain(`at most ${NOTE_MAX} characters`)
   });
 
+  it('note_on_item (DL 22 Oct): a challenge to one named item is given as the note on it; none or several, the reply alone', () => {
+    expect(named(setup().tools, 'note_on_item').description).toContain('When the person asks you to challenge one item they name, put your challenge to it as this note on that item; if they name no item or several, answer in your reply alone.');
+  });
+
   it('propose_change carries the per-figure stance enum with the AIE\'s description, verbatim', () => {
     const params = JSON.stringify(named(setup().tools, 'propose_change').parameters);
     expect(params).toContain(JSON.stringify(AIE_STANCE));
