@@ -103,7 +103,8 @@ describe('Run handler records the sent goal threshold on its stored licence', ()
     expect(licence).not.toHaveProperty('spread_note_by_option');
     if (row.endsWith('_unchanged')) {
       expect(licence.status_quo?.option_id).toBe('keep_pricing_as_it_is');
-      expect(licence.status_quo?.line).toContain('unchanged from today’s £120,000');
+      expect(licence.status_quo?.line).toBe('No change, by assumption: stays at today’s £120,000 / month, '
+        + 'which does not meet your target of at least £126,000 / month, in this model.');
       expect(licence.withheld_reason_by_option?.keep_pricing_as_it_is?.reason).not.toBe('reference_moved');
       expect(licence.pct_by_option).not.toHaveProperty('keep_pricing_as_it_is');
     } else if (row !== 'captured') {

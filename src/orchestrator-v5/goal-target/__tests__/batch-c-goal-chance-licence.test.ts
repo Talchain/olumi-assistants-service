@@ -27,7 +27,7 @@ import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
  */
 // Plain words (Paul's principle review, 14 Oct): the row's new wording, same meaning.
 const SQ_GENERIC_PRODUCTIVITY = 'This Run can’t give a chance for carrying on as now, because it treats ‘Productivity’ as unchanged from today.';
-const SQ_LEVEL_CAPACITY = "No change, by assumption: stays at today's 75%, which does not meet your target of at least 85%, in this model.";
+const SQ_LEVEL_CAPACITY = "No change, by assumption: stays at today’s 75%, which does not meet your target of at least 85%, in this model.";
 type Rec = Record<string, unknown>;
 
 // ── Hiring: productivity, % change from today; +10 by month three ─────────────────────────────────────────────────────

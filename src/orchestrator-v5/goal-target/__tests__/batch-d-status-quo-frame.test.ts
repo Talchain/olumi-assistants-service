@@ -26,7 +26,7 @@ const SERVED_LINE = (FX.served_licence.withheld_reason_by_option as Record<strin
  * status-quo row's LEVEL line. This goal holds today's 80 and a target of at least 100 in one unit, spelt as each served graph
  * holds it. DL 22 Oct Round 2 retains the assumption label and appends the checked determined-miss comparison.
  */
-const byAssumptionIn = (unit: string): string => `No change, by assumption: stays at today's 80 ${unit}, `
+const byAssumptionIn = (unit: string): string => `No change, by assumption: stays at today’s 80 ${unit}, `
   + `which does not meet your target of at least 100 ${unit}, in this model.`;
 const BY_ASSUMPTION = byAssumptionIn('tickets per week');
 /** The run-4 served graph (`FLOAT`) spells the same unit "tickets / week". */
