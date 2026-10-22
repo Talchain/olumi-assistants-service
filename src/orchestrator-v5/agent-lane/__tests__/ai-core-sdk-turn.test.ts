@@ -478,7 +478,7 @@ describe('PATH-B core turn on the Agents SDK', () => {
       expect(result.sdk.resumed).toMatchObject({ answer: 'superseded' });
       expect(result.assistant_text).toBe('Here is the Run on the saved model.');
       expect(added, 'the paused call is answered once, as superseded').toEqual([{ items: [{ type: 'function_call_output', call_id: pausedCall, output: PAUSE_SUPERSEDED }] }]);
-      expect(JSON.stringify(sent[1]!.tool_choice), 'the press\'s first call is forced to the Run').toContain('run_analysis');
+      expect(sent[1]!.tool_choice, 'the press\'s first call is forced to the Run').toEqual({ type: 'function', name: 'run_analysis' });
       expect(JSON.stringify(sent[1]!.tools ?? []), 'the withheld tool is not offered').not.toContain('apply_change');
       expect(JSON.stringify(sent[1]!.input), 'the press\'s own words, no replay').toContain('Run it.');
       expect(pausedColumn, 'taken by the press').toBeNull();
