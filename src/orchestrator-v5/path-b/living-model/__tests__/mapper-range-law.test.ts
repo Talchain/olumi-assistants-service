@@ -9,7 +9,7 @@ import { mapLivingModel } from '../mapper.js';
 import { KNOWN_ANSWER, OPTION_EFFECTS } from './fixtures.js';
 
 type Rec = Record<string, any>;
-const disclosure = (low: number, high: number) => `You gave a range, ${low} to ${high}, and no most likely value. The calculation treats every value in it as equally likely; this is Olumi's assumption, and you can give a most likely value to replace it.`;
+const disclosure = (low: number, high: number, who = 'You gave a range') => `${who}, ${low} to ${high}, and no most likely value. The calculation centres on the middle, ${(low + high) / 2}, with a spread matching the range's width; this is Olumi's assumption, and a most likely value would replace it.`;
 const edgeOf = (graph: { edges: Rec[] }, from = 'f') => graph.edges.find(e => e.from === from)!;
 const digest = (model: LivingModelT) => createHash('sha256').update(JSON.stringify(mapLivingModel(model))).digest('hex');
 
@@ -27,8 +27,9 @@ function cafe(): LivingModelT {
 }
 
 describe('DL range law: a declared range never costs the chance', () => {
-  it('café: both chances are licensed provisionally, each original range and disclosure survive the stored graph', () => {
+  it.each(['user', 'party'] as const)('café: both chances are licensed provisionally, each original range and disclosure survive the stored graph (%s)', source => {
     const model = cafe();
+    for (const [i, link] of model.links.entries()) Object.assign(link, { source, party: source === 'party' ? ['Finance', 'Operations'][i] : null });
     const before = structuredClone(model);
     expect(LivingModel.safeParse(model).success).toBe(true);
     const mapped = mapLivingModel(model);
@@ -45,6 +46,7 @@ describe('DL range law: a declared range never costs the chance', () => {
     expect(licence).toBeDefined();
     expect(Object.keys(licence.pct_by_option).sort()).toEqual(['a', 'b']);
     expect(licence.provisional).toBe(true);
+    expect(licence.default_assumptions.coefficient_distribution).toBe('unbounded_normal');
     expect(licence.default_assumptions.status).toBe('Illustrative calculation — uses untested Olumi assumptions.');
     expect(licence.default_assumptions.links).toHaveLength(2);
     expect(licence.notes.filter((n: string) => n === licence.default_assumptions.status)).toEqual([licence.default_assumptions.status]);
@@ -53,7 +55,7 @@ describe('DL range law: a declared range never costs the chance', () => {
       const range = before.links[i]!.effect;
       const loss = linkDefaultAssumptionsOf(edge);
       expect(loss).toEqual([{ code: 'CLAMP_STD_MINIMUM', layer: 'cee', field_path: `edges[${from}::w].strength.std`, before: null,
-        after: edge.strength.std, severity: 'info', reason: disclosure(range.low!, range.high!) }]);
+        after: edge.strength.std, severity: 'info', reason: disclosure(range.low!, range.high!, source === 'user' ? 'You gave a range' : `${before.links[i]!.party}’s range`) }]);
       expect(edge.exists_probability).toBe(1);
       expect(edge.provenance.source).toBe('cee_hypothesis');
       expect(edge.provenance.magnitude).toBe('olumi_estimate');
@@ -65,12 +67,12 @@ describe('DL range law: a declared range never costs the chance', () => {
 
   it('number + author class: a second factor brief retains signed uniform moments across scales and sources', () => {
     for (const [low, high, sign] of [[50, 90, '+'], [-90, -50, '-'], [20, 40, '-'], [-10, 50, '+']] as const) {
-      for (const target of [100, 200]) for (const source of ['user', 'party', 'olumi', 'unverified'] as const) {
+      for (const target of [100, 200]) for (const source of ['user', 'party', 'olumi', 'unverified'] as const) for (const party of source === 'party' ? ['Finance', null] : [null]) {
         const model = structuredClone(KNOWN_ANSWER);
         model.aims[0]!.target!.value = target;
         Object.assign(model.aims[0]!, { text: `Reach ${target} units`, quote: `we need at least ${target} units; today we are at 70` });
         const link = model.links[0]!;
-        Object.assign(link, { source, quote: source === 'user' || source === 'party' ? `Each +1 changes units by ${low} to ${high}` : null });
+        Object.assign(link, { source, party, quote: source === 'user' || source === 'party' ? `Each +1 changes units by ${low} to ${high}` : null });
         Object.assign(link.effect, { form: 'range', value: null, sd: null, low, high, sign });
         const before = structuredClone(model);
         const mapped = mapLivingModel(model);
@@ -89,9 +91,9 @@ describe('DL range law: a declared range never costs the chance', () => {
           per_source_change: 1, per_source_change_unit: '', strength_mean: edge.strength.mean, strength_mean_frame: 'edge_strength' });
         expect(edge.exists_probability).toBe(source === 'user' || source === 'party' ? 1 : 0.8);
         const reason = linkDefaultAssumptionsOf(edge).find(r => r.code === 'CLAMP_STD_MINIMUM')!.reason;
-        if (source === 'user' || source === 'party') expect(reason).toBe(disclosure(low, high));
-        else if (source === 'olumi') { expect(reason).toContain("Olumi's estimated range"); expect(reason).not.toContain('You gave'); }
-        else { expect(reason).toContain('its source is not confirmed'); expect(reason).not.toContain('You gave'); expect(reason).not.toContain("Olumi's estimated range"); }
+        expect(reason).toBe(disclosure(low, high, source === 'user' ? 'You gave a range'
+          : source === 'party' ? party === null ? 'The stated range' : `${party}’s range`
+            : source === 'olumi' ? "The calculation uses Olumi's estimated range" : 'The calculation uses the given (its source is not confirmed) range'));
         expect(model).toEqual(before);
       }
     }
@@ -116,8 +118,28 @@ describe('DL range law: a declared range never costs the chance', () => {
       expect(edge.provenance.magnitude).toBe('olumi_estimate');
       expect(edge.exists_probability).toBe(1);
       expect(linkDefaultAssumptionsOf(edge)[0]!.reason).toBe(estimate_by === null ? disclosure(50, 90)
-        : "The calculation uses Olumi's estimated range, 50 to 90, and no most likely value. The calculation treats every value in it as equally likely; this is Olumi's assumption, and you can give a most likely value to replace it.");
+        : disclosure(50, 90, "The calculation uses Olumi's estimated range"));
     }
+  });
+
+  it.each([
+    ['factor', -30, 10, '+', 'a87a49fb13f95187db2703a4836fd871741c7a92ce4dd641319b4949d0c3a406'],
+    ['factor', -10, 30, '-', 'd2c03cc8f2335d8686a0555ce42278d75dc749e508fa5164516dfe9af7a6ced9'],
+    ['café', -30, 10, '+', '2b0706c714524b0c8a0e0e81261c8dbd1e32d5b97dd82bc2d3c5fc8363a98aad'],
+    ['café', -10, 30, '-', 'c2a1d9875427e2da82e97bc1e39e0b47128829026b3c6cd3d056e045d414b3d3'],
+  ] as const)('conflicting zero-crossing range stays held and byte-identical to base: %s %s..%s %s', (shape, low, high, sign, baseHash) => {
+    const model = shape === 'factor' ? structuredClone(KNOWN_ANSWER) : cafe();
+    if (shape === 'café') model.links[1]!.effect.value = 30; // Independent centred link stays sized on base too.
+    Object.assign(model.links[0]!.effect, { form: 'range', value: null, low, high, sign, sd: null });
+    const mapped = mapLivingModel(model);
+    expect(digest(model)).toBe(baseHash);
+    expect(mapped.withheld).toContainEqual({ id: model.links[0]!.id, reason: 'link_range_no_law' });
+    const edge = edgeOf(mapped.graph, shape === 'factor' ? 'f' : 'a__on');
+    expect(edge.provenance.magnitude).toBe('olumi_placeholder');
+    expect(linkDefaultAssumptionsOf(edge)).toEqual([]);
+    model.aims[0]!.target!.value = null;
+    const frameless = mapLivingModel(model);
+    expect(frameless.withheld.filter(w => w.id === model.links[0]!.id)).toEqual([{ id: model.links[0]!.id, reason: 'link_range_no_law' }]);
   });
 
   it('a range cannot supply a missing goal frame, unsigned direction, incompatible unit or invalid bounds', () => {

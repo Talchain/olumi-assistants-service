@@ -8,9 +8,9 @@
  *  · a level is `raw / cap`; the goal's cap is `resolveGoalThresholdCapWithProvenance`, its level `admitGoalBaseline`;
  *  · a link's β = (change in `to` per +1 of `from`) × cap_from / cap_to, its σ scaled by the same ratio (AIE, 20 Oct):
  *    a stated point gives the central coefficient only, and σ = |β|/2 is Olumi's illustrative convention (D3), never the
- *    user's spread; an explicitly stated Normal law gives both; an ordinary range is not a law, so it stays in the living
- *    model and its dependent chance is withheld, unless the person gave their own figure inside it, which sizes the link
- *    as their point (AIE range disposition, 16 Oct: `centre`), the range kept beside it;
+ *    user's spread; an explicitly stated Normal law gives both; a range without a central figure uses its midpoint and
+ *    width/√12 as Olumi's assumed Normal moments, unless it crosses zero with a midpoint conflicting with the link's sign.
+ *    A stated figure inside a range sizes the link as a point, the range kept beside it;
  *  · existence 1 for a stated link is the assumption of conditioning on it; Olumi's 0.8 is an untested convention;
  *  · an unsized link is Olumi's placeholder, which the chance licence withholds; an unknown sign is never drawn positive;
  *  · unknown is never 0: a level, setting or link this slice cannot convert is WITHHELD with its reason, never dropped
@@ -765,9 +765,11 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     const ratio = from !== undefined && to !== undefined ? from.cap / to.cap : undefined;
     // The person's own figure inside their range ("about 20, between 10 and 30") sizes the link as their point, with the
     // range kept beside it in the living model (AIE range disposition, 16 Oct: `centre`). Without a central figure,
-    // use the uniform range's moments, explicitly Olumi's assumption (DL, 22 Oct), never the person's stated point.
+    // use uniform-matched moments for the engine's Normal, explicitly Olumi's assumption, never the person's stated point.
+    // A conflicting midpoint across zero stays held: applying the link's sign must never reflect that midpoint.
     const centred = e.form === 'range' && e.value !== null && e.low !== null && e.high !== null && e.low < e.value && e.value < e.high;
-    const uncentred = e.form === 'range' && e.value === null && e.low !== null && e.high !== null && e.low < e.high;
+    const uncentred = e.form === 'range' && e.value === null && e.low !== null && e.high !== null && e.low < e.high
+      && !(e.low < 0 && e.high > 0 && Math.sign((e.low + e.high) / 2) !== sign);
     const value = uncentred ? (e.low! + e.high!) / 2 : e.value;
     // A point with the source's own standard deviation ("50 on average, standard deviation 10") keeps that SD (A5, 21 Oct:
     // the SD was saved and then replaced by half the effect). Its shape was not stated, so the Normal draw is Olumi's
@@ -815,7 +817,9 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
       ...(e.form === 'point' || centred || uncentred ? [{ code: REPAIR_CODES.CLAMP_STD_MINIMUM, layer: 'cee' as const, field_path: `${path}.strength.std`, before: null,
         after: sized.std, severity: 'info' as const,
         reason: uncentred
-          ? `${stated(figureBy(e, l).source) ? 'You gave a range' : `The calculation uses ${sdBy(figureBy(e, l).source)} range`}, ${e.low} to ${e.high}, and no most likely value. The calculation treats every value in it as equally likely; this is Olumi's assumption, and you can give a most likely value to replace it.`
+          ? `${figureBy(e, l).source === 'user' ? 'You gave a range'
+            : figureBy(e, l).source === 'party' ? l.party ? `${l.party}’s range` : 'The stated range'
+              : `The calculation uses ${sdBy(figureBy(e, l).source)} range`}, ${e.low} to ${e.high}, and no most likely value. The calculation centres on the middle, ${value}, with a spread matching the range's width; this is Olumi's assumption, and a most likely value would replace it.`
           : centred
           // Olumi's own centred link is never called "stated" (Codex on #3590): its figure and range are Olumi's estimate.
           ? (figureBy(e, l).source === 'olumi'
