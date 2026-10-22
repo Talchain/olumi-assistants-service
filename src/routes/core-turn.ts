@@ -57,6 +57,7 @@ import { CORE_DRAFTER_RULES } from '../orchestrator-v5/path-b/drafting-guidance.
 import { readCanonicalContext } from '../orchestrator-v5/path-b/tools/index.js';
 import { APPLY_CHANGE, isChangeProposal } from '../orchestrator-v5/path-b/tools/change-tools.js';
 import { NOTE_ON_ITEM } from '../orchestrator-v5/path-b/tools/note-on-item.js';
+import type { Restructure } from '../orchestrator-v5/path-b/tools/goal-path.js';
 import { livingViewOf } from '../orchestrator-v5/path-b/living-model/view.js';
 import { runAsAgentSubturn } from '../orchestrator-v5/session/agent-subturn-context.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
@@ -566,6 +567,8 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       } else {
         const canonical = await readCanonicalContext({ dispatch: readingDispatch }, { scenario_id: scenarioId });
         const draftArm = draftArmOf(MODE, saved.graph === null, req.headers['x-olumi-draft-arm']);
+        // Class 3's one offer for this turn: a refusal it makes is settled as base at the turn's end (`goal-path.ts`).
+        const restructure: Restructure = { offered: false };
         try {
           result = await runCoreTurn({
             // One budget for every call (DL 22 Oct, M4): a press at the typed turn's effort reads the typed turns' cached prefix.
@@ -578,7 +581,8 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
               analyseAfterCommit: analyseCommittedChange,
               // No research control is in this contract, so no search may be promised (fail closed).
               researchShowable: async () => false,
-              onVerifiedSave: () => { verifiedSave = true; } }),
+              onVerifiedSave: () => { verifiedSave = true; }, restructure }),
+            settle: async () => { await restructure.settle?.(); },
             // The standing instructions, the same bytes on every call of every scenario (the cached prefix); this turn's own
             // guidance (the drafting arm, a Challenge's note) follows its state block in the turn's input.
             instructions: instructionsForMode(MODE, CORE_ALIGNED_INSTRUCTIONS),

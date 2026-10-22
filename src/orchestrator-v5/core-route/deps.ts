@@ -116,12 +116,14 @@ export interface CoreTurnToolsInput {
   readonly researchShowable: NonNullable<PathBToolDeps['researchShowable']>;
   /** Told when a tool's own receipt AND its successful postimage readback establish a saved change. */
   readonly onVerifiedSave: () => void;
+  /** Class 3's one offer for this turn, made by the route, which settles it at the turn's end (`goal-path.ts`). */
+  readonly restructure?: PathBToolDeps['restructure'];
 }
 
 /** The SDK turn's tools: the typed adapters over the route's primitives, each call recorded once. */
 export function coreTurnTools(i: CoreTurnToolsInput): CoreTurnInput['tools'] {
   return (onCall) => pathBTools({ dispatch: i.dispatch, proposals: i.proposals, critique: modelCritic(coreBudget()), deadlineAt: i.deadlineAt,
-    ...(i.noteOnlyOn !== undefined ? { noteOnlyOn: i.noteOnlyOn } : {}),
+    ...(i.noteOnlyOn !== undefined ? { noteOnlyOn: i.noteOnlyOn } : {}), ...(i.restructure !== undefined ? { restructure: i.restructure } : {}),
     proposeLinkStrengths: (c, a) => dispatchTool('propose_link_strengths', JSON.stringify(a), { ...i.ctx, ...c }, i.capabilities, i.mode),
     ...(i.commitOptionLevels !== undefined ? { commitOptionLevels: i.commitOptionLevels } : {}), onModelRegistered: (raw) => i.onModelRegistered(raw),
     runAnalysis: i.runAnalysis,

@@ -8,10 +8,85 @@
  * withheld). Its role is the AI's declaration, so re-reading it against the person's words changes no figure. An unsigned link
  * may be the person's own uncertainty, and moving a cause onto a part can change what its figure measures: neither is offered.
  */
+import type { LivingModelT } from '../../../schemas/living-model.js';
 import type { Mapped, Withheld } from '../living-model/mapper.js';
+import { stable } from '../living-model/diff.js';
 
-/** One offer per turn (`pathBTools` makes it per turn), shared by the draft and the change. */
-export interface Restructure { offered: boolean }
+/**
+ * One offer per turn, shared by the draft and the change; the core route makes it per turn and `pathBTools` uses it.
+ * ⭐ A REFUSAL CAN MAKE A TURN BETTER, NEVER WORSE (DL, #3672 fix-forward): the refused call is kept (`pending`) until a draft
+ * or a card succeeds after it, and the turn's end runs a call still pending once more, with the offer used, exactly as base
+ * would (`settle`, filled by `pathBTools`), so an agent that stops after the refusal still leaves its draft saved.
+ */
+export interface Restructure {
+  offered: boolean;
+  pending?: { readonly tool: 'build_model_from_brief'; readonly args: { brief: string; model: LivingModelT } }
+    | { readonly tool: 'propose_change'; readonly args: { public_label: string; basis: string; model: LivingModelT; remove: string[] } };
+  settle?: () => Promise<void>;
+}
+
+type Rec = Record<string, unknown>;
+const theirs = (r: unknown): boolean => typeof r === 'object' && r !== null && !Array.isArray(r)
+  && ((r as Rec).source === 'user' || (r as Rec).source === 'party');
+/** Every record a person or a party gave, nested at any depth (an option's setting, a risk's mitigation, a limit, a definition). */
+const nestedTheirs = (v: unknown): unknown[] => (Array.isArray(v) ? v.flatMap(nestedTheirs)
+  : typeof v === 'object' && v !== null ? [...(theirs(v) ? [v] : []), ...Object.values(v).flatMap(nestedTheirs)] : []);
+
+/**
+ * The person's own content in a (kernelled) model, as labelled entries, one per record, repeats kept (Codex r1 on #3675): each
+ * item a person or a party gave, whole (its figures, quotes and settings); each of their records nested in an item of Olumi's;
+ * each of their conditions whole, its role left out (the one part the offer asks the AI to re-read); and every view.
+ */
+function personContent(m: LivingModelT): { readonly label: string; readonly value: string }[] {
+  const out: { label: string; value: string }[] = [];
+  for (const kind of ['aims', 'options', 'factors', 'links', 'risks'] as const) {
+    for (const item of m[kind]) {
+      if (theirs(item)) out.push({ label: `${kind}:${item.id}`, value: stable(item) });
+      else for (const r of nestedTheirs(Object.values(item))) out.push({ label: `${kind}:${item.id}`, value: stable(r) });
+    }
+  }
+  // Today's level the person set themselves on an aim of Olumi's (`current_source: 'user'`, a canvas edit), in the unit it is
+  // read in (Codex r2, r3 on #3675).
+  for (const a of m.aims) {
+    if (!theirs(a) && a.target?.current_source === 'user') out.push({ label: `aims:${a.id}`, value: stable({ current: a.target.current, unit: a.target.current_unit ?? a.target.unit }) });
+  }
+  for (const { role: _role, ...c } of m.conditions) {
+    if (theirs(c)) out.push({ label: `conditions:${c.text}`, value: stable({ ...c, applies_to: [...c.applies_to].sort() }) });
+  }
+  for (const v of m.views) out.push({ label: `views:${v.holder}: ${v.position}`, value: stable(v) });
+  return out;
+}
+
+/**
+ * What of the person's content in `refused` the retry left out or changed, compared on the kernelled models (the kernel makes
+ * ids canonical and labels sources): the retry never loses it (DL, #3672 fix-forward).
+ */
+export function personContentLost(refused: LivingModelT, retry: LivingModelT): string[] {
+  const keyOf = (e: { readonly label: string; readonly value: string }) => `${e.label}\u0000${e.value}`;
+  const left = new Map<string, number>();
+  for (const e of personContent(retry)) left.set(keyOf(e), (left.get(keyOf(e)) ?? 0) + 1);
+  const lost = personContent(refused).flatMap((e) => {
+    const n = left.get(keyOf(e)) ?? 0;
+    left.set(keyOf(e), n - 1);
+    return n > 0 ? [] : [e.label];
+  });
+  return [...new Set(lost)];
+}
+
+/**
+ * The retry as the refused call would have it, but for the one part the offer re-reads: each condition the refused call also
+ * holds (by its words, scope and author) takes the refused call's role, so the kernel reads the two alike (Codex r2 on #3675: a
+ * role-only change re-checked a saved quote outside the verified window and relabelled it).
+ */
+export function withRefusedRoles(retry: LivingModelT, refused: LivingModelT): LivingModelT {
+  const id = (c: LivingModelT['conditions'][number]) => stable([c.text, [...c.applies_to].sort(), c.source, c.party, c.quote]);
+  const roles = new Map(refused.conditions.map((c) => [id(c), c.role] as const));
+  return { ...retry, conditions: retry.conditions.map((c) => ({ ...c, role: roles.get(id(c)) ?? c.role })) };
+}
+
+/** What the AI is told when its retry would have lost the person's content, so the refused call was used as it was. */
+export const KEPT_AS_REFUSED = 'Your second call left out or changed items the person or a party gave (listed in lost), so your first '
+  + 'call was used exactly as it was. Say so plainly if it matters to your reply.';
 
 export interface GoalPathCause {
   readonly id: string;
