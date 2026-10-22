@@ -74,6 +74,13 @@ describe('the one gap asks only for what is missing: the target, or today\'s lev
     expect(goalTargetGapOf(stored(suggested))?.kind).toBe('goal_target_missing');
   });
 
+  it('NEGATIVE: a level today that is not the person\'s (change_base_not_theirs) is never called "not given"', () => {
+    const m = hiring(40);
+    const unconfirmed: LivingModelT = { ...m, aims: m.aims.map((a) => ({ ...a, source: 'unverified' as const, quote: null })) };
+    expect(mapLivingModel(unconfirmed).withheld.map((w) => `${w.id}:${w.reason}`)).toContain('goal:change_base_not_theirs');
+    expect(goalTargetGapOf(stored(unconfirmed))?.kind).not.toBe('goal_level_missing');
+  });
+
   it('NEGATIVE: with today\'s level given, hiring has a level target, so there is no gap', () => {
     expect(goalTargetGapOf(stored(hiring(40)))).toBeNull();
   });
