@@ -130,13 +130,13 @@ describe('thin core mapper: living model → GraphV3', () => {
     expect(mapLivingModel(change).withheld, 'a change with no level today: never read from 0').toContainEqual({ id: 'g', reason: 'goal_level_unknown' });
   });
 
-  it('AIE 20 Oct: an ordinary range is kept but not read as a law; an unknown sign is never drawn positive; a point\'s σ is |β|/2', () => {
+  it('DL 22 Oct: an ordinary range uses Olumi\'s assumed law; an unknown sign is never drawn positive; a point\'s σ is |β|/2', () => {
     const edge = (g: { edges: Record<string, unknown>[] }) => g.edges.find((e) => e.from === 'f' && e.to === 'g') as Record<string, any> | undefined;
     const range: LivingModelT = structuredClone(KNOWN_ANSWER);
     range.links[0]!.effect = { estimate_by: null, form: 'range', value: null, low: 33.55, high: 66.45, sd: null, unit: 'units', sign: '+' };
     const r = mapLivingModel(range);
-    expect(r.withheld).toContainEqual({ id: 'f_g', reason: 'link_range_no_law' });
-    expect(edge(r.graph)!.provenance.magnitude).toBe('olumi_placeholder');
+    expect(r.withheld).toEqual([]);
+    expect(edge(r.graph)!.provenance.magnitude).toBe('olumi_estimate');
 
     // An effect in another unit than its target (another numerator, or another driver denominator) never sizes the link.
     for (const unit of ['parcels', 'units per machine']) {
@@ -199,13 +199,13 @@ describe('thin core mapper: living model → GraphV3', () => {
     expect(edge(c.graph).strength.mean).toBeCloseTo(0.4, 10);
     expect(edge(c.graph).strength.std).toBeCloseTo(0.2, 10);
     expect(linkDefaultAssumptionsOf(edge(c.graph)).find((r) => r.code === 'CLAMP_STD_MINIMUM')!.reason).toContain('30 to 70');
-    // CONTROLS: a bare range, or a figure outside the person's range, sizes nothing.
+    // DL 22 Oct: no central figure uses Olumi's assumed law; a contradictory central figure stays held.
     for (const value of [null, 80, 30]) {
       const m: LivingModelT = structuredClone(centred);
       m.links[0]!.effect.value = value;
       const r = mapLivingModel(m);
-      expect(r.withheld, String(value)).toContainEqual({ id: 'f_g', reason: 'link_range_no_law' });
-      expect(edge(r.graph).provenance.magnitude, String(value)).toBe('olumi_placeholder');
+      expect(r.withheld.filter(w => w.id === 'f_g'), String(value)).toEqual(value === null ? [] : [{ id: 'f_g', reason: 'link_range_no_law' }]);
+      expect(edge(r.graph).provenance.magnitude, String(value)).toBe(value === null ? 'olumi_estimate' : 'olumi_placeholder');
     }
   });
 
@@ -266,7 +266,7 @@ describe('thin core mapper: living model → GraphV3', () => {
     expect(node(mapLivingModel(offPath).graph, 'g')).toMatchObject({ goal_threshold: 0.8 });
   });
 
-  it("Codex BLOCK on #3590: Olumi's own centred estimates reach the calculation as Olumi's, and are never called stated; a bare range does not", () => {
+  it("DL 22 Oct: Olumi's centred and bare link ranges stay Olumi's; a bare factor level stays held", () => {
     const edge = (g: { edges: Record<string, unknown>[] }) => g.edges.find((e) => e.from === 'f' && e.to === 'g') as Record<string, any>;
     const olumi: LivingModelT = structuredClone(KNOWN_ANSWER);
     olumi.factors[0] = { ...olumi.factors[0]!, value: 0.5, low: 0.3, high: 0.7, source: 'olumi', quote: null };
@@ -279,13 +279,13 @@ describe('thin core mapper: living model → GraphV3', () => {
     expect(said).toContain("Olumi's estimated 50");
     expect(said).toContain("Olumi's range, 30 to 70");
     expect(said).not.toContain('stated');
-    // CONTROL: a bare range (no central figure) on Olumi's own items reaches nothing: the level is held, the link a placeholder.
+    // CONTROL: the link's range supplies its moments, but never invents a current level for the factor.
     const bare: LivingModelT = structuredClone(olumi);
     bare.factors[0]!.value = null;
     bare.links[0]!.effect.value = null;
     const b = mapLivingModel(bare);
     expect(b.withheld).toContainEqual({ id: 'f', reason: 'level_range_not_in_slice' });
-    expect(edge(b.graph).provenance.magnitude).toBe('olumi_placeholder');
+    expect(edge(b.graph).provenance.magnitude).toBe('olumi_estimate');
   });
 
   it('attribution is a label: an unverified figure gets no stamp, Olumi\'s gets its own, a user\'s is the brief\'s', () => {
