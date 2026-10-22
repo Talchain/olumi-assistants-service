@@ -29,6 +29,7 @@ import { sayFigureAsWritten } from '../../agent-lane/say-figure.js';
 import { LLM_STRENGTH_STD_FLOOR } from '../../../cee/constants.js';
 import { sameUnit, unitsCompose } from '../../agent-lane/same-unit.js';
 import { EventRiskV1 } from '../../../schemas/event-risk.js';
+import { riskOccurrenceIsCurrent } from '../../agent-lane/risk-occurrence.js';
 import { readStatedDeadline } from '../../goal-target/deadline-date.js';
 
 export type WithheldReason =
@@ -39,12 +40,13 @@ export type WithheldReason =
   | 'exact_not_drawable' | 'stay_within_base_not_theirs' | 'stay_within_unconfirmed'
   | 'identity_not_in_slice' | 'identity_part_unknown' | 'identity_unit_mismatch' | 'identity_inconsistent'
   | 'identity_other_cause' | 'identity_contradicted' | 'identity_restated'
-  | 'risk_occurrence_unknown' | 'risk_unattributed' | 'risk_not_in_slice' | 'limit_not_in_slice' | 'target_not_theirs';
+  | 'risk_occurrence_unknown' | 'risk_unattributed' | 'risk_not_in_slice' | 'risk_window_not_goal_window' | 'limit_not_in_slice'
+  | 'target_not_theirs';
 
 /** A definition that withholds the chance when its carrier is on the goal's path (it cannot be worked out as stated). */
 const IDENTITY_REFUSED: ReadonlySet<WithheldReason> = new Set(['identity_not_in_slice', 'identity_part_unknown', 'identity_unit_mismatch', 'identity_inconsistent']);
 /** A risk that cannot be sent as the event the person described withholds the chance when it is on the goal's path. */
-const RISK_REFUSED: ReadonlySet<WithheldReason> = new Set(['risk_occurrence_unknown', 'risk_unattributed', 'risk_not_in_slice']);
+const RISK_REFUSED: ReadonlySet<WithheldReason> = new Set(['risk_occurrence_unknown', 'risk_unattributed', 'risk_not_in_slice', 'risk_window_not_goal_window']);
 
 export interface Withheld { readonly id: string; readonly reason: WithheldReason }
 
@@ -457,12 +459,19 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
       version: 1 as const, occurrence: { p_low: low, p_high: high, basis }, horizon: { months: r.horizon_months },
       ...(r.mitigations.length > 0 ? { mitigations: r.mitigations.map((m) => ({ factor_id: m.factor_id, occurrence_reduction: m.reduction })) } : {}),
     };
+    const node: Rec = { id: r.id, kind: 'risk', label: r.label, event_risk: block, ...(r.quote !== null ? { source_quote: r.quote } : {}) };
+    // DL lease 22 Oct (candidate 4b, Q2 0/14 Run ok): Olumi's chance counts only over the goal's current window, by the SAME
+    // predicate readiness reads (`riskOccurrenceIsCurrent`), so the two cannot drift. Readiness asks for a level only on a
+    // ROOT (`goalRootsWithoutStatusQuoLevel`), and here a risk's only parents are its preventers, so a risk with no
+    // mitigation off that window is held, never sent as a level readiness then refuses as "no figure" (no window is ever
+    // guessed, AIE). A mitigated one is sent as before: holding it would strand its preventer (NO_PATH_TO_GOAL).
     const reason: WithheldReason | undefined = low === null || high === null || r.horizon_months === null ? 'risk_occurrence_unknown'
       : basis === undefined ? 'risk_unattributed'
-        : !EventRiskV1.safeParse(block).success || !r.mitigations.every((m) => switchOk(m.factor_id)) ? 'risk_not_in_slice' : undefined;
+        : !EventRiskV1.safeParse(block).success || !r.mitigations.every((m) => switchOk(m.factor_id)) ? 'risk_not_in_slice'
+          : r.mitigations.length === 0 && !riskOccurrenceIsCurrent(node, { nodes, edges }) ? 'risk_window_not_goal_window' : undefined;
     if (reason !== undefined) { hold(r.id, reason); refusedRisks.add(r.id); continue; }
     risks.add(r.id);
-    nodes.push({ id: r.id, kind: 'risk', label: r.label, event_risk: block, ...(r.quote !== null ? { source_quote: r.quote } : {}) });
+    nodes.push(node);
     // The preventer's link: its strength is not read (the stated reduction is), so it carries no doubt of its own. Whose
     // reduction it is comes from the mitigation's OWN attribution, never the risk's (codex integration review, 21 Oct):
     // user/party → their words; Olumi → its estimate; unverified → no stamp (unknown), as for a link.
