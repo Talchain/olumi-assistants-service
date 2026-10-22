@@ -305,16 +305,25 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
     if ((await input.pausedRunStore!.take(input.ctx.scenario_id, held.pause_id)) !== true) {
       throw new CoreStateUnavailableError('pause_not_resumable');
     }
-    const state = await RunState.fromString(agent, held.state);
-    const item = state.getInterruptions().find((i) => callIdOf(i) === held.call_id);
-    if (item === undefined) throw new CoreStateUnavailableError('pause_not_resumable');
-    const onCard = input.press !== undefined && input.press.proposal_id === held.proposal_id;
-    const answer = onCard ? (input.press!.decision === 'approve' ? 'approved' : 'declined') : 'superseded';
-    if (answer === 'approved') state.approve(item);
-    else state.reject(item, { message: answer === 'declined' ? PAUSE_DECLINED : PAUSE_SUPERSEDED });
-    if (answer === 'superseded') carried = input.message;
-    turnInput = state;
-    resumed = { pause_id: held.pause_id, answer };
+    if (withheld.has(held.tool)) {
+      // A turn that withholds the paused call's own tool (a Run press withholds apply_change) does not restore the paused run:
+      // the SDK cannot restore a call to a tool the agent lacks (Lenses, served 0ce7ae88: every Run press while a card awaited
+      // approval answered 502), and a restored run would drop the press's forced first call (Codex r1 on #3644). The paused
+      // call is answered as superseded in the Conversation, as a typed message answers it, and this turn runs from its own input.
+      await client.conversations.items.create(conversation.id, { items: [{ type: 'function_call_output', call_id: held.call_id, output: PAUSE_SUPERSEDED }] });
+      resumed = { pause_id: held.pause_id, answer: 'superseded' };
+    } else {
+      const state = await RunState.fromString(agent, held.state);
+      const item = state.getInterruptions().find((i) => callIdOf(i) === held.call_id);
+      if (item === undefined) throw new CoreStateUnavailableError('pause_not_resumable');
+      const onCard = input.press !== undefined && input.press.proposal_id === held.proposal_id;
+      const answer = onCard ? (input.press!.decision === 'approve' ? 'approved' : 'declined') : 'superseded';
+      if (answer === 'approved') state.approve(item);
+      else state.reject(item, { message: answer === 'declined' ? PAUSE_DECLINED : PAUSE_SUPERSEDED });
+      if (answer === 'superseded') carried = input.message;
+      turnInput = state;
+      resumed = { pause_id: held.pause_id, answer };
+    }
   }
   /**
    * A press on a card whose change never paused (the AI prepared it and said so): the run's first call is that change's own
