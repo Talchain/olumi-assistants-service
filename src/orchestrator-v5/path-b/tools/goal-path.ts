@@ -11,6 +11,7 @@
 import type { LivingModelT } from '../../../schemas/living-model.js';
 import type { Mapped, Withheld } from '../living-model/mapper.js';
 import { stable } from '../living-model/diff.js';
+import { reachesGoalInPersonsModel } from '../../../orchestrator/graph-structure-validator.js';
 
 /**
  * One offer per turn, shared by the draft and the change; the core route makes it per turn and `pathBTools` uses it.
@@ -118,3 +119,34 @@ export const RESTRUCTURE_DRAFT = `Not saved yet. The goal's chance would be with
 /** What the AI is told with a change it can restructure once. */
 export const RESTRUCTURE_CHANGE = `No card yet. This change would withhold the goal's chance through the prerequisites in goal_path. ${CHECK} `
   + 'Then call propose_change once more. If every item is right as it is, call it again with the same change and its card is made.';
+
+const pathNode = (n: Rec): n is Rec & { id: string; kind: string; label: string } =>
+  typeof n.id === 'string' && typeof n.kind === 'string' && typeof n.label === 'string';
+const pathEdge = (e: Rec): e is Rec & { from: string; to: string } => typeof e.from === 'string' && typeof e.to === 'string';
+
+/** The options the person compares that reach the goal in their model, by the reader readiness uses (`reachesGoalInPersonsModel`). */
+export function optionsReachingGoal(model: LivingModelT, mapped: Mapped): string[] {
+  const reach = reachesGoalInPersonsModel({ nodes: mapped.graph.nodes.filter(pathNode), edges: mapped.graph.edges.filter(pathEdge), living_model: model });
+  return model.options.filter((o) => o.status === 'feasible' && reach.has(o.id)).map((o) => o.id);
+}
+
+/**
+ * What the AI is told with a change after which no option reaches the goal any more (marketing on 7ee0d90f, DL 22 Oct: a new
+ * measure for the goal removed every link into it and added none, so the approved card cut the goal's path and no Run could
+ * start). The person's figures stay on the measure they gave them for; a link of Olumi's carries Olumi's own provisional
+ * estimate, labelled as Olumi's, as the estimate rule says.
+ */
+export const RESTRUCTURE_CUT = 'No card yet. After this change no option reaches the goal (cut lists the links into it that the '
+  + 'change removes), so no analysis could run. If the goal\'s new measure changes what those links meant, link what drives the goal '
+  + 'to it under that measure: never move a figure the person gave onto a different measure; a link of yours carries your own provisional '
+  + 'estimate, labelled as yours. Then call propose_change once more. If the change is right as it is, call it again with the same '
+  + 'change and its card is made.';
+
+/**
+ * What the AI is told with a change that adds the person's own aim with its target, which becomes the goal (`changeGoal`), when
+ * no option reaches it (DL 22 Oct, marketing on 4a4c338c: both aims were added with no links, so no analysis could run).
+ */
+export const RESTRUCTURE_AIM = 'No card yet. This change adds the person\'s own aim with its target (aim), so it becomes the goal, but '
+  + 'no option reaches it, so no analysis could run. Link what drives it to that aim under its measure: never move a figure the '
+  + 'person gave onto a different measure; a link of yours carries your own provisional estimate, labelled as yours. Then call '
+  + 'propose_change once more. If the change is right as it is, call it again with the same change and its card is made.';

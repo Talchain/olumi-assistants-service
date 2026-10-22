@@ -157,6 +157,23 @@ export function goalIdOf(graph: unknown): string | undefined {
 /** The options that keep a saved graph's goal (none when it has none). */
 export const savedGoal = (graph: unknown): { goal?: string } => { const goal = goalIdOf(graph); return goal === undefined ? {} : { goal }; };
 
+/**
+ * The goal a change maps under (DL 22 Oct, marketing on 4a4c338c: the person's two aims with their targets were added beside a
+ * goal with no target, which stayed the goal, so the Run tested an aim nothing could be scored on). The saved goal, unless its
+ * aim has no target after the change and the change ADDS the person's own aim (user or party) with one: then the first such
+ * aim, in the model's order. Several stay out of the slice (the joint AND), as on a draft. Read from the saved graph and the
+ * change alone, so the card and its write agree; once written, the saved goal is that aim.
+ */
+export function changeGoal(graph: unknown, next: LivingModelT): { goal?: string } {
+  const saved = savedGoal(graph);
+  const kept = next.aims.find((a) => a.id === saved.goal && a.status === 'current');
+  const aims = (graph as { living_model?: { aims?: unknown } } | null | undefined)?.living_model?.aims;
+  if (kept === undefined || kept.target !== null || !Array.isArray(aims)) return saved;
+  const had = new Set(aims.map((a) => (a as { id?: unknown } | null)?.id));
+  const added = next.aims.find((a) => !had.has(a.id) && a.status === 'current' && a.target !== null && (a.source === 'user' || a.source === 'party'));
+  return added === undefined ? saved : { goal: added.id };
+}
+
 // The other half of the one composition rule (DL 22 Oct, served board 6ce4f6ae: "£ per loaf" × "loaves a week" was refused):
 // money per X times a count of X is money, with ONE period across the two parts and it the defined quantity's own
 // ("£ per week"). `unitsCompose` reads money per X per period × a count; the denominator naming the count's noun is the

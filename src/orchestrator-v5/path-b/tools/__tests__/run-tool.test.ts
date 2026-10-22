@@ -43,6 +43,32 @@ describe('a Run is claimed only when the read selects that Run on the current mo
     expect(p.runAnalysis).toHaveBeenCalledWith(ARGS);
   });
 
+  it('DL 22 Oct: the AI’s copy keeps every warning’s typed fields, each withheld and provisional reason included, never its prose; the stored result is unchanged', async () => {
+    const licence = { code: 'GOAL_CHANCE_LICENSED', severity: 'info', message: 'Each option’s chance is licensed on this Run.', form: 'each',
+      option_ids: ['a', 'b'], pct_by_option: { b: 40 }, withheld_option_ids: ['a'], provisional: true, horizon_untested: true,
+      notes: ['Illustrative calculation.'], status_quo: { option_id: 'a', line: 'Carrying on as now is treated as unchanged.' },
+      withheld_reason_by_option: { a: { reason: 'reference_moved', line: 'Its own row disagrees.' } } };
+    const held = { code: 'GOAL_FIGURES_PLACEHOLDER_PATH', severity: 'warning', message: 'Olumi’s estimates for the links are kept.',
+      node_ids: ['f'], option_ids: ['a'], links: [{ from: 'f', to: 'g' }] };
+    const plain = { code: 'GOAL_DIRECTION_UNATTESTED', severity: 'warning', message: 'No objective sense was stated.' };
+    const result = { headline: 'synthetic', enrichment: { option_comparison: [], inference_warnings: [licence, held, plain] }, inference_warnings: [plain] };
+    const stored = structuredClone(result);
+    const typed = (w: Rec): Rec => { const { message: _m, ...rest } = w; return rest; };
+    const out = await runAnalysis(product({ ...RAN, result }, [graphRead('run_2')]), ctx, ARGS, FREE);
+    if (out.status !== 'ok') throw new Error('not recorded');
+    const seen = out.data.result as Rec & { enrichment: Rec };
+    expect(seen.enrichment.inference_warnings).toEqual([typed(licence), typed(held), typed(plain)]);
+    expect(seen.inference_warnings).toEqual([typed(plain)]);
+    expect(JSON.stringify(seen)).not.toContain('"message"');
+    expect(seen.enrichment.option_comparison).toEqual([]);
+    expect(result, 'the pipeline’s own result, which is stored, keeps its prose').toEqual(stored);
+    // A declined Run's facts reach the AI the same way.
+    const blocked = await runAnalysis(product({ ok: true, mutated: false, ran: false, result }, []), ctx, ARGS, FREE);
+    expect(blocked).toMatchObject({ status: 'refused', reason: 'run_blocked' });
+    expect(JSON.stringify(blocked)).not.toContain('"message"');
+    expect(JSON.stringify(blocked)).toContain('reference_moved');
+  });
+
   it.each(['parcels', 'repairs'])('L11: %s exact dispatched inputs reach the Run tool, never substituted from today’s model', async subject => {
     const snapshot = { options: [
       { option_id: 'evening', settings: [{ factor_id: 'capacity', raw: 300, encoded: 0.3, unit: `${subject} per day` }] },
