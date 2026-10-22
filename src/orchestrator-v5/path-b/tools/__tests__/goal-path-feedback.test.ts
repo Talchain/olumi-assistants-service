@@ -201,6 +201,26 @@ describe('THE READINESS SELF-CHECK: a draft a Run would withhold the goal\'s cha
     }
   });
 
+  it('DL 22 Oct (#3680 row :65): an identity the engine would refuse (a part at 0) reaches the loop as the identity composer\'s ask, never a fix', () => {
+    // A living model defines only sums and products, so the shape is fed as the graph the postimage carries.
+    const frame = (value: number) => ({ value: value / 100, raw_value: value, cap: 100, source: 'brief_extraction' });
+    const nodes: Rec[] = [
+      { id: 'stock', kind: 'factor', label: 'Specialists today', observed_state: frame(0) },
+      { id: 'churn', kind: 'factor', label: 'Specialists leaving', observed_state: frame(0) },
+      { id: 'inflow', kind: 'factor', label: 'Specialists joining', observed_state: frame(0) },
+      { id: 'specialists', kind: 'outcome', label: 'Specialists', observed_state: frame(0),
+        nonlinear_identity: { operation: 'accumulation', factor_ids: ['stock', 'churn', 'inflow'], horizon_months: 1, rate_scale: 1 } },
+      { id: 'each', kind: 'factor', label: 'Capacity each', observed_state: frame(12) },
+      { id: 'total', kind: 'outcome', label: 'Additional capacity', observed_state: frame(0),
+        nonlinear_identity: { operation: 'product', factor_ids: ['specialists', 'each'] } },
+    ];
+    const edges: Rec[] = [...['stock', 'churn', 'inflow'].map((from) => ({ from, to: 'specialists' })), ...['specialists', 'each'].map((from) => ({ from, to: 'total' }))];
+    const mapped = { graph: { nodes, edges }, withheld: [], frames: new Map(), assumed: [] };
+    expect(blockersOf(KNOWN_ANSWER, selfCheck(KNOWN_ANSWER, mapped))).toMatchObject({ all: expect.arrayContaining([{ code: 'identity_zero_level', items: ['total'], ask: true }]) });
+    // CONTRAST: a stated product with no part at 0 asks nothing of its identity.
+    expect(blockersOf(F1_DEFINED, selfCheck(F1_DEFINED, mapLivingModel(F1_DEFINED))).all.filter((x) => x.code.startsWith('identity_'))).toEqual([]);
+  });
+
   it('CONTRAST: a cause only the person\'s input settles, a clean model, an assumption or a challenge: saved on the first call, no repair used', async () => {
     for (const model of [unconvertible(), KNOWN_ANSWER, withCondition('assumption'), withCondition('challenge')]) {
       const p = product(null);

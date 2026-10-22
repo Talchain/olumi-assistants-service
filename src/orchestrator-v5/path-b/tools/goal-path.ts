@@ -11,6 +11,7 @@ import type { Mapped } from '../living-model/mapper.js';
 import { stable } from '../living-model/diff.js';
 import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { projectCorePostimageForPersistence } from '../../persisted-graph-projection.js';
+import { composeIdentityAskForNode } from '../../coaching/identity-not-evaluated-ask.js';
 
 /**
  * The turn's repairs, shared by the draft and the change; the core route makes it per turn and `pathBTools` uses it.
@@ -103,6 +104,8 @@ const BLOCKER: Readonly<Record<string, keyof typeof FIX | 'ask'>> = {
   OPTION_NEEDS_ENCODING: 'option', OPTION_NEEDS_MAPPING: 'option', setting_not_convertible: 'option', MISSING_OPTION_VALUE: 'option',
   goal_level_unknown: 'ask', link_goal_level_unknown: 'ask', no_level_target: 'ask', link_goal_target_unknown: 'ask', change_kind_unknown: 'ask',
   change_base_not_theirs: 'ask', stay_within_unconfirmed: 'ask', MISSING_FACTOR_LEVEL: 'ask', identity_part_unknown: 'ask', FEWER_THAN_TWO_OPTIONS: 'ask',
+  // The identity ask composer's own reasons (`composeIdentityAskForNode`): each is the person's to answer.
+  identity_operand_missing: 'ask', identity_frame_missing: 'ask', identity_zero_level: 'ask', identity_rate_out_of_range: 'ask',
 };
 
 /** One blocker: its code, the items it is on (by id; `condition:<words>` for a condition), and its fix, or an ask, or said only. */
@@ -150,14 +153,20 @@ function said(model: LivingModelT, found: readonly Found[]): Blocker[] {
 export function selfCheck(model: LivingModelT, mapped: Mapped): Found[] {
   const goal = mapped.graph.nodes.find((n) => n.kind === 'goal')?.id;
   const held = mapped.withheld.filter((w) => w.id === goal && w.reason !== 'chance_rests_on_withheld');
-  const causes = [...held, ...(mapped.rests_on ?? [])];
+  const causes: NonNullable<Mapped['rests_on']>[number][] = [...held, ...(mapped.rests_on ?? [])];
   // A path cut by a held link on it is said by that link's own cause (a fix, or an ask on the person's link): never a parallel
   // link of Olumi's beside it.
   const linkHeld = causes.some((w) => model.links.some((l) => l.id === w.id));
-  const issues = assessCanonicalAnalysisReadiness(projectCorePostimageForPersistence(corePostimage(mapped, model))).blockingIssues
+  const postimage = projectCorePostimageForPersistence(corePostimage(mapped, model));
+  const issues = assessCanonicalAnalysisReadiness(postimage).blockingIssues
     .filter((i) => !linkHeld || (i.code !== 'NO_PATH_TO_GOAL' && i.code !== 'MISSING_OPTION_CONNECTION'));
+  // An identity the engine would refuse (a part at 0, a missing level or frame) is the composer's one ask (DL 22 Oct).
+  const identities = mapped.graph.nodes.filter((n) => n.nonlinear_identity !== undefined).flatMap((n) => {
+    const ask = composeIdentityAskForNode(String(n.id), postimage);
+    return ask === null ? [] : [{ code: ask.reason, item: String(n.id) }];
+  });
   return [...causes.map((w) => ({ code: w.reason, item: w.id, ...(w.applies_to ? { scope: stable([...w.applies_to].sort()) } : {}) })),
-    ...issues.map((i) => ({ code: i.code, item: i.option_id ?? i.factor_id ?? null }))];
+    ...issues.map((i) => ({ code: i.code, item: i.option_id ?? i.factor_id ?? null })), ...identities];
 }
 
 /** The blockers of `after` to say back: a change answers only for those it adds to what `before` had (none for a draft). */

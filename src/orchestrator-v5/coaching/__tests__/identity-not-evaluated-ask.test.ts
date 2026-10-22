@@ -342,3 +342,30 @@ describe('accumulation readers: ISL reasons and units are bound to the derived n
     expect(composeIdentityAskForNode('mrr', g)).toMatchObject({ node_id: 'mrr', reason: 'identity_zero_level' });
   });
 });
+
+describe('#3680 row :65 (DL 22 Oct, owned by the readiness loop): an accumulation part at 0 is asked through its starting level', () => {
+  const frame = (value: number) => ({ value: value / 100, raw_value: value, cap: 100, source: 'brief_extraction' });
+  const graph = (stockLabel?: string) => ({
+    nodes: [
+      { id: 'stock', kind: 'factor', ...(stockLabel === undefined ? {} : { label: stockLabel }), observed_state: frame(0) },
+      { id: 'churn', kind: 'factor', label: 'Specialists leaving', observed_state: frame(0) },
+      { id: 'inflow', kind: 'factor', label: 'Specialists joining', observed_state: frame(0) },
+      { id: 'specialists', kind: 'outcome', label: 'Specialists', observed_state: frame(0),
+        nonlinear_identity: { operation: 'accumulation', factor_ids: ['stock', 'churn', 'inflow'], horizon_months: 1, rate_scale: 1 } },
+      { id: 'each', kind: 'factor', label: 'Capacity each', observed_state: frame(12) },
+      { id: 'total', kind: 'outcome', label: 'Additional capacity', observed_state: frame(0),
+        nonlinear_identity: { operation: 'product', factor_ids: ['specialists', 'each'] } },
+    ],
+    edges: [...['stock', 'churn', 'inflow'].map((from) => ({ from, to: 'specialists' })), ...['specialists', 'each'].map((from) => ({ from, to: 'total' }))],
+  });
+
+  it('an accumulation operand at zero still asks, rather than treating it as a pure unit product: about its stock, the level a control can save', () => {
+    const ask = composeIdentityAskForNode('total', graph('Specialists today'));
+    expect(ask?.reason).toBe('identity_zero_level');
+    expect(ask?.assistant_text).toContain('“Specialists today” is 0 today');
+  });
+
+  it('CONTRAST: a stock with no name is asked nothing (no question a control could not answer)', () => {
+    expect(composeIdentityAskForNode('total', graph())).toBeNull();
+  });
+});
