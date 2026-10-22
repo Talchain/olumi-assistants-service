@@ -16,7 +16,8 @@ const model = (): LivingModelT => ({
     ...who('Profit is £30 today and we need at least £40 weekly'),
     defined_as: { op: 'sum', of: ['revenue', 'costs'], subtract: ['costs'], ...who('profit is revenue minus costs') },
     target: { quantity: 'weekly profit', comparator: '>=', value: 40, low: null, high: null, unit: '£ per week',
-      by_when: null, period_months: null, baseline: null, current: 30, current_source: null,
+      by_when: null, period_months: null, period_by: null, period_deadline: null, period_read_on: null,
+      baseline: null, current: 30, current_source: null,
       current_unit: null, change_kind: null, source: null } }],
   factors: [
     { id: 'revenue', label: 'Revenue', kind: 'factor', value: 100, unit: '£ per week', ...who('revenue is £100 per week'),
