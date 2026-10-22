@@ -248,7 +248,7 @@ export function goalTargetBasisOf(goal: unknown): GoalTargetBasis | undefined {
   // months, S5); with no deadline held it stays absent (`admitGoalTargetBasisAwaitingPeriod`).
   const period = b.period_months === undefined && typeof goal.id === 'string' ? readGoalRecord({ nodes: [goal] }, goal.id)?.horizon?.months
     : b.period_months;
-  if (!finite(period) || !Number.isInteger(period) || period < 1 || period > 120) return undefined;
+  if (!finite(period) || period <= 0 || period > 120) return undefined;
   if (b.period_kind !== 'at_end' && b.period_kind !== 'over_period') return undefined;
   const effectUnit = words(b.effect_unit, BASIS_TEXT_MAX);
   if (effectUnit === undefined || typeof b.effects_at_period_end !== 'boolean') return undefined;

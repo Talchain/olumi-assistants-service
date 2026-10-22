@@ -1,0 +1,151 @@
+import { describe, expect, it } from 'vitest';
+import { EventRiskV1, type EventRiskV1T } from '../../../../schemas/event-risk.js';
+import { GraphV3 } from '../../../../schemas/cee-v3.js';
+import { LivingModel, type LivingModelT } from '../../../../schemas/living-model.js';
+import { assessCanonicalAnalysisReadiness } from '../../../../orchestrator/tools/analysis-ready-helper.js';
+import { projectCorePostimageForPersistence } from '../../../persisted-graph-projection.js';
+import { riskOccurrenceWindowMonths } from '../../../agent-lane/risk-occurrence.js';
+import { mapLivingModel } from '../mapper.js';
+import { KNOWN_ANSWER } from './fixtures.js';
+import { OLUMI_CHANCE } from './track2-f2-event-risk.fixtures.js';
+
+const withWindow = (m: LivingModelT, months: number | null): LivingModelT => ({ ...m,
+  aims: m.aims.map((a) => ({ ...a, target: { ...a.target!, period_months: months, by_when: 'within 3 weeks' } })) });
+const supplier = (months: number | null): LivingModelT => ({ ...withWindow(OLUMI_CHANCE, months),
+  risks: OLUMI_CHANCE.risks.map((r) => ({ ...r, horizon_months: 1, occurrence: { estimate_by: null, low: 0.1, high: 0.9 } })) });
+const blockOf = (mapped: ReturnType<typeof mapLivingModel>, id = 'supplier_fails') =>
+  mapped.graph.nodes.find((n) => n.id === id)?.event_risk as EventRiskV1T | undefined;
+const note = { id: 'supplier_fails', text: "converted from Olumi's 1-month estimate, assuming an even rate" };
+// Captured from the base mapper by the initial RED run: exact serialised event_risk, including key order.
+const SAME_WINDOW_BASE = '{"version":1,"occurrence":{"p_low":0.1,"p_high":0.9,"basis":"olumi"},"horizon":{"months":1},"mitigations":[{"factor_id":"dual_sourcing","occurrence_reduction":0.7}]}';
+
+// Second synthetic brief: reach 100 units; a delivery interruption could cost 10 units.
+const delivery: LivingModelT = { ...withWindow(KNOWN_ANSWER, 0.69), risks: [{ ...supplier(0.69).risks[0]!,
+  id: 'delivery_delay', label: 'Delivery interruption', mitigations: [] }], links: [...KNOWN_ANSWER.links,
+  { ...KNOWN_ANSWER.links[0]!, id: 'delay_g', from: 'delivery_delay', effect: { ...KNOWN_ANSWER.links[0]!.effect, value: 10, sign: '-' } }] };
+
+describe('Olumi occurrence is converted to the declared LM goal window', () => {
+  it.each([
+    ['supplier failure', supplier(0.69), 'supplier_fails'],
+    ['delivery interruption', delivery, 'delivery_delay'],
+  ] as const)('row 1: %s reaches the engine over 0.69 months with both converted bounds', (_brief, model, id) => {
+    expect(LivingModel.safeParse(model).success).toBe(true);
+    const before = structuredClone(model);
+    const mapped = mapLivingModel(model);
+    const block = blockOf(mapped, id);
+    expect(block).toBeDefined();
+    expect(block!.horizon).toEqual({ months: 0.69 });
+    expect(block!.occurrence.basis).toBe('olumi');
+    expect(Math.abs(block!.occurrence.p_low - (1 - 0.9 ** 0.69))).toBeLessThanOrEqual(1e-9);
+    expect(Math.abs(block!.occurrence.p_high - (1 - 0.1 ** 0.69))).toBeLessThanOrEqual(1e-9);
+    expect(mapped.graph.edges.some((e) => e.from === id)).toBe(true);
+    expect(mapped.withheld.filter((w) => w.id === id)).toEqual([]);
+    expect(mapped.assumed.filter((a) => a.id === id)).toEqual([{ ...note, id }]);
+    expect(model).toEqual(before);
+  });
+
+  it.each([
+    ['supplier failure', supplier(0.69), 'supplier_fails'],
+    ['delivery interruption', delivery, 'delivery_delay'],
+  ] as const)('round 2: %s is admitted by canonical Run readiness over 0.69 months', (_brief, model, id) => {
+    const mapped = mapLivingModel(model);
+    const graph = projectCorePostimageForPersistence(GraphV3.parse({ ...mapped.graph, living_model: model }));
+    const readiness = assessCanonicalAnalysisReadiness(graph);
+    expect(readiness.blockingIssues).toEqual([]);
+    expect(readiness.safeToAnalyse).toBe(true);
+    // A ready graph that silently lost the risk does not prove admission of its converted chance.
+    expect(graph.nodes.find((n) => n.id === id)?.event_risk).toEqual(blockOf(mapped, id));
+    expect(blockOf(mapped, id)?.horizon).toEqual({ months: 0.69 });
+    expect(riskOccurrenceWindowMonths(graph)).toBe(0.69);
+  });
+
+  it('round 2: one period only; conflicting periods and a second goal never license a window', () => {
+    const graph = mapLivingModel(supplier(1)).graph;
+    expect(riskOccurrenceWindowMonths(graph)).toBe(1);
+    const goal = graph.nodes.find((n) => n.kind === 'goal')!;
+    expect(riskOccurrenceWindowMonths({ ...graph, nodes: [...graph.nodes, { ...goal, id: 'another_goal' }] })).toBeUndefined();
+    expect(riskOccurrenceWindowMonths({ ...graph, nodes: graph.nodes.map((n) => n === goal
+      ? { ...n, goal_horizon_months: 2, goal_horizon_stated_months: 2 } : n) })).toBeUndefined();
+  });
+
+  it.each(['user', 'party'] as const)('row 2: %s keeps the original chance and its own window, beside an Olumi conversion', (source) => {
+    const model = supplier(0.69);
+    model.risks.push({ ...model.risks[0]!, id: 'stated_risk', source, party: source === 'party' ? 'Sam' : null,
+      quote: 'Revenue was 2m; Sam puts this separate risk at 10–90% within a month.', mitigations: [] });
+    const before = structuredClone(model);
+    const mapped = mapLivingModel(model);
+    expect(JSON.stringify(blockOf(mapped, 'stated_risk'))).toBe('{"version":1,"occurrence":{"p_low":0.1,"p_high":0.9,"basis":"user"},"horizon":{"months":1}}');
+    expect(mapped.assumed.filter((a) => a.id === 'stated_risk')).toEqual([]);
+    expect(mapped.assumed.filter((a) => a.id === 'supplier_fails')).toEqual([note]);
+    expect(model).toEqual(before);
+  });
+
+  it('row 3: by_when alone never supplies T, so the Olumi risk remains held', () => {
+    const mapped = mapLivingModel(supplier(null));
+    expect(blockOf(mapped)).toBeUndefined();
+    expect(mapped.withheld).toContainEqual({ id: 'supplier_fails', reason: 'risk_window_not_goal_window' });
+    expect(mapped.assumed.filter((a) => a.id === 'supplier_fails')).toEqual([]);
+  });
+
+  it('row 4: the same window keeps the byte-identical base block, with no conversion note', () => {
+    const mapped = mapLivingModel(supplier(1));
+    expect(JSON.stringify(blockOf(mapped))).toBe(SAME_WINDOW_BASE);
+    expect(mapped.assumed.filter((a) => a.id === 'supplier_fails')).toEqual([]);
+    const graph = projectCorePostimageForPersistence(GraphV3.parse({ ...mapped.graph, living_model: supplier(1) }));
+    const readiness = assessCanonicalAnalysisReadiness(graph);
+    expect(readiness.blockingIssues).toEqual([]);
+    expect(readiness.safeToAnalyse).toBe(true);
+    expect(JSON.stringify(graph.nodes.find((n) => n.id === 'supplier_fails')?.event_risk)).toBe(SAME_WINDOW_BASE);
+    expect(riskOccurrenceWindowMonths(graph)).toBe(1);
+  });
+
+  it('class: shorter and longer windows preserve ordered probabilities in [0,1], including 0 and 1', () => {
+    for (const months of [0.01, 0.69, 6, 120]) for (const [low, high] of [[0, 1], [0.1, 0.9], [0.3, 0.3]]) {
+      const model = supplier(months);
+      model.risks[0]!.occurrence = { estimate_by: null, low: low!, high: high! };
+      const block = blockOf(mapLivingModel(model));
+      expect(block).toBeDefined();
+      expect(EventRiskV1.safeParse(block).success).toBe(true);
+      expect(block!.horizon.months).toBe(months);
+      expect(Math.abs(block!.occurrence.p_low - (1 - (1 - low!) ** months))).toBeLessThanOrEqual(1e-9);
+      expect(Math.abs(block!.occurrence.p_high - (1 - (1 - high!) ** months))).toBeLessThanOrEqual(1e-9);
+    }
+  });
+
+  it('an unverified adjacent risk never gains Olumi authorship or a conversion note', () => {
+    const model = supplier(0.69);
+    model.risks.push({ ...model.risks[0]!, id: 'unknown_author', source: 'unverified', mitigations: [] });
+    const mapped = mapLivingModel(model);
+    expect(blockOf(mapped, 'unknown_author')).toBeUndefined();
+    expect(mapped.withheld).toContainEqual({ id: 'unknown_author', reason: 'risk_unattributed' });
+    expect(mapped.assumed.filter((a) => a.id === 'unknown_author')).toEqual([]);
+  });
+
+  it('round 3: invalid goal periods never license an adjacent valid risk window', () => {
+    const base = mapLivingModel(supplier(1)).graph;
+    for (const months of [0, -1, 120.01, NaN, Infinity, -Infinity]) {
+      const graph = { ...base, nodes: base.nodes.map((n) => n.kind === 'goal'
+        ? { ...n, goal_target_basis: { ...(n.goal_target_basis as object), period_months: months } } : n) };
+      expect(riskOccurrenceWindowMonths(graph)).toBeUndefined();
+      const parsed = GraphV3.parse(graph);
+      expect(parsed.nodes.find((n) => n.kind === 'goal')?.goal_target_basis).toBeUndefined();
+      expect(riskOccurrenceWindowMonths(parsed)).toBeUndefined();
+    }
+  });
+
+  it('invalid source probabilities and horizons are refused, never repaired by conversion', () => {
+    for (const patch of [
+      { occurrence: { estimate_by: null, low: -0.1, high: 0.9 } },
+      { occurrence: { estimate_by: null, low: 0.9, high: 0.1 } },
+      { occurrence: { estimate_by: null, low: 0.1, high: 1.1 } },
+      { horizon_months: 0 }, { horizon_months: -1 }, { horizon_months: 601 },
+    ]) {
+      const model = supplier(0.69);
+      Object.assign(model.risks[0]!, patch);
+      const mapped = mapLivingModel(model);
+      expect(blockOf(mapped)).toBeUndefined();
+      expect(mapped.withheld).toContainEqual({ id: 'supplier_fails', reason: 'risk_not_in_slice' });
+      expect(mapped.assumed.filter((a) => a.id === 'supplier_fails')).toEqual([]);
+    }
+  });
+});

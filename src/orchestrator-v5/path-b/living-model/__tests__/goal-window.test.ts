@@ -92,10 +92,16 @@ describe('the goal window: the person\'s stated months, read as Olumi\'s, counte
     expect(readiness(m)).toEqual({ safe: true, blocking: [] });
   });
 
-  it('contrast: over a different window it is still held, and the goal\'s chance withheld', () => {
+  it('Paul 22 Oct: an Olumi risk over a different window is converted to the goal\'s window, kept, and the Run is ready', () => {
     const m = withPeriod(bare(OLUMI_CHANCE), 6);
-    expect(reasons(m)).toEqual(['supplier_fails:risk_window_not_goal_window', 'gp:chance_rests_on_withheld']);
+    expect((mapLivingModel(m).graph.nodes as Rec[]).find((n) => n.id === 'supplier_fails')!.event_risk.horizon.months).toBe(6);
+    expect(reasons(m)).toEqual([]);
     expect(readiness(m)).toEqual({ safe: true, blocking: [] });
+  });
+
+  it('contrast: with no goal window it is still held, and the goal\'s chance withheld (no window is ever guessed)', () => {
+    const m = withPeriod(bare(OLUMI_CHANCE), null);
+    expect(reasons(m)).toEqual(['supplier_fails:risk_window_not_goal_window', 'gp:chance_rests_on_withheld']);
   });
 
   it('a change target is not covered yet: no window is written for it', () => {

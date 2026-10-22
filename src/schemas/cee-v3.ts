@@ -429,7 +429,7 @@ export const NodeV3 = z.object({
     denominator: z.string().min(1).max(120).optional(),
     // DL ruling 14 Oct: absent only when the drafter left the period unstated; the user's confirmed deadline (its held months, read
     // through the one goal record) then supplies it on read (`goalTargetBasisOf`). Never written as a guess.
-    period_months: z.number().int().min(1).max(120).optional(),
+    period_months: z.number().finite().positive().max(120).optional(),
     period_kind: z.enum(['at_end', 'over_period']),
     effect_unit: z.string().min(1).max(120),
     effects_at_period_end: z.boolean(),
