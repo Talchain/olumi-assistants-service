@@ -477,11 +477,40 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   const unmeasured = new Set(model.factors.filter((f) => f.value === null && !f.defined_as && f.limit === null && !usedHere.has(f.id)).map((f) => f.id));
   const caps = new Map<string, number>();
   const current = new Map<string, number>();
+  const levelsOf = (f: LivingModelT['factors'][number]) => [f.value, ...model.options.flatMap((o) => o.settings.filter((s) => s.factor_id === f.id)
+    .map((s) => s.value))].filter((v): v is number => v !== null);
+  // The exact sum's change is read on the goal's own frame, so the goal is its parts added in the goal's units.
+  const widths = new Map(model.factors.flatMap((f) => {
+    const cap = exactSum !== undefined && f.id === exactSum.lever ? goal!.cap : capFor(levelsOf(f), f.unit, goal, [f.low, f.high]);
+    return cap === undefined ? [] : [[f.id, cap] as const];
+  }));
+  /**
+   * ⭐ A FACTOR'S FRAME HOLDS EVERY EFFECT STATED INTO IT (DL 22 Oct; served bf9ccf15: "Volunteers signed up", 12 today, so a
+   * frame of 15, while the person's options add 18 and 25 volunteers). A link of v per unit of its cause reaches the engine as
+   * v × the cause's frame ÷ this frame, so those went as 1.2 and 1.67; PLoT clamps a coefficient to [-1, 1]
+   * (`graph-normaliser.ts`) and, for a person's own size on the goal's path, withholds every figure (`clampedEffects`): nothing
+   * was shown, and the implied quantity's read came back empty (`engine_read_incomplete`). Each frame is widened, as `capFor`
+   * frames any level, until every effect it is sized with fits, causes first; a frame already wide enough is unchanged, and it
+   * is never a level anyone stated. A definition (its parts' links are not sized) and the exact sum's lever keep theirs.
+   */
+  const sizedInto = (id: string) => model.links.filter((l) => {
+    const e = l.effect;
+    return l.to === id && e.sign !== null && e.value !== null && ((e.form === 'point' || e.form === 'exact') || (e.form === 'normal' && e.sd !== null && e.sd > 0)
+      || (e.form === 'range' && e.low !== null && e.high !== null && e.low < e.value && e.value < e.high));
+  });
+  const eventIds = new Set(model.risks.map((r) => r.id));
+  for (let pass = 0, widened = true; widened && pass <= model.factors.length; pass++) {
+    widened = false;
+    for (const f of model.factors) {
+      const cap = widths.get(f.id);
+      if (cap === undefined || f.defined_as !== null || f.id === exactSum?.lever) continue;
+      const need = Math.max(0, ...sizedInto(f.id).filter((l) => l.effect.unit === null || f.unit === null || l.effect.unit === f.unit)
+        .map((l) => Math.abs(l.effect.value!) * (eventIds.has(l.from) ? 1 : widths.get(l.from) ?? 0)));
+      if (need > cap) { widths.set(f.id, capFor([...levelsOf(f), need], f.unit, goal, [f.low, f.high])!); widened = true; }
+    }
+  }
   for (const f of model.factors) {
-    const levels = [f.value, ...model.options.flatMap((o) => o.settings.filter((s) => s.factor_id === f.id).map((s) => s.value))]
-      .filter((v): v is number => v !== null);
-    // The exact sum's change is read on the goal's own frame, so the goal is its parts added in the goal's units.
-    const cap = exactSum !== undefined && f.id === exactSum.lever ? goal!.cap : capFor(levels, f.unit, goal, [f.low, f.high]);
+    const cap = widths.get(f.id);
     if (cap !== undefined) caps.set(f.id, cap);
     const node: Rec = { id: f.id, kind: 'factor', label: f.label, category: setsFactor.has(f.id) ? 'controllable' : 'observable',
       // The exact sum's change: 0 today by definition (the contract's marker), so the engine holds it exact.
