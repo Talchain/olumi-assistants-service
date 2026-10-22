@@ -259,15 +259,15 @@ describe('PATH-B core: the AI\'s own words are the reply; protocol, cards, resul
     expect((await typed('What does the model say now?'))._agent.draft_arm).toBeUndefined();
   });
 
-  it('effort arm (programme-docs #94): the header lowers the builder\u2019s effort on the provider call; without it the call keeps high', async () => {
+  it('effort arm (programme-docs #94): the header sets the builder\u2019s effort on the provider call; without it the call takes the banked medium', async () => {
     const effortsSent = (): unknown[] => sent.filter((b) => b.includes(CORE_RULE)).map((b) => (JSON.parse(b) as Json).reasoning?.effort);
-    await typed('What does the model say now?', { ...CORE, 'x-olumi-core-effort': 'medium' });
+    await typed('What does the model say now?', { ...CORE, 'x-olumi-core-effort': 'high' });
     expect(effortsSent().length).toBeGreaterThan(0);
-    expect(new Set(effortsSent())).toEqual(new Set(['medium']));
-    // CONTROL: the same core turn without the header keeps the banked effort.
+    expect(new Set(effortsSent())).toEqual(new Set(['high']));
+    // CONTROL: the same core turn without the header takes the banked effort (medium since the 22 Oct A/B/C).
     sent.length = 0;
     await typed('What does the model say now?', CORE);
-    expect(new Set(effortsSent())).toEqual(new Set(['high']));
+    expect(new Set(effortsSent())).toEqual(new Set(['medium']));
   });
 
   it('⛔ a core turn whose scenario cannot hold its Conversation id stops before any model call, with a typed 503', async () => {

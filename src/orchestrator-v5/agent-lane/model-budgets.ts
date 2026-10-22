@@ -28,9 +28,13 @@ export const BANKED_BUDGETS: readonly CallBudget[] = [
     // THIN CORE (20 Oct 2026): the core lane's every call, drafting included, emits the COMPLETE living model as strict tool
     // arguments, so it runs at the configuration the 18 Oct bake-off measured, and with room for a whole model.
     max_output_tokens: 12000,
-    reasoning_effort: 'high',
+    // Medium since 22 Oct (Track 3's A/B/C on candidate 4b, 48 cases, blind judge): medium matched or beat high on links sized
+    // and mechanisms, with about 40% faster first models and about 35% fewer tokens; high had 2 first-turn 504s on Q2.
+    reasoning_effort: 'medium',
     evidence:
-      'Bake-off 18 Oct (outbox/HEAD-TO-HEAD-R1-RESULT.md; redteam/armB/run_armB.py: gpt-6.1-sol, model_reasoning_effort=high, ' +
+      'A/B/C 22 Oct on cee bb8370fd (outbox/track3/E2E/DRAFT-ABC-{Q2,R2}-TABLE-*.md): Q2 fm4 links sized full 8/8 medium vs 5/6 high, '
+      + 'fm3 mechanisms full 5/8 vs 2/6; R2 fm1/fm2/fm4 full on both, fm3 3/8 vs 5/8; GRAPH_READY median Q2 67 vs 110 s, R2 24 vs 30 s; '
+      + 'input tokens Q2 1545k vs 2420k. Earlier: bake-off 18 Oct (outbox/HEAD-TO-HEAD-R1-RESULT.md; redteam/armB/run_armB.py: gpt-6.1-sol, model_reasoning_effort=high, ' +
       'no output cap): the living-model arm kept 99-100% of facts and saved 10/10 corrections, against 59-72% and 0/10 for ' +
       'the served lane at low effort. 12000 is the largest ceiling measured to finish inside the browser proxy budget (the ' +
       'gpt-5.6-terra whole entry). Effort is re-measured on R2 (low/medium/high) once the lane is served; latency is reported.',
@@ -223,7 +227,7 @@ export function callEffortFor(budget: CallBudget, req: { readonly reasoning_role
  * THIN CORE: the model builder's budget (it drafts or edits the complete living model). A comparison arm may lower its
  * effort (`coreEffortArmOf`); otherwise it is the banked entry.
  */
-export function coreBudget(effort?: 'low' | 'medium'): CallBudget {
+export function coreBudget(effort?: 'low' | 'medium' | 'high'): CallBudget {
   const banked = budgetFor('gpt-6.1-sol', 'core');
   return effort === undefined ? banked : { ...banked, reasoning_effort: effort };
 }
