@@ -84,9 +84,9 @@ export const LivingAim = z.object({
       ">= or <= for a level to reach; = for exactly; increase or decrease for a change from the baseline, `value` being the size of the change."),
     ...figure,
     by_when: z.string().nullable(),
-    /** The goal's window in whole months, ONLY when the person states a duration counted from today. A model saved before reads null. */
+    /** The goal's window in months (fractions allowed), ONLY when the person states a duration counted from today. A model saved before reads null. */
     period_months: z.number().nullable().default(null).describe(
-      'The goal\'s window in whole months, only when the person states a duration counted from today ("within 12 months" is 12, "over the next six months" is 6). Null for a calendar date ("by March"), a period counted from a launch or any other event, or no duration stated: never worked out or guessed.'),
+      'The goal\'s window in months; fractions are allowed (3 weeks is 0.69), only when the person states a duration counted from today ("within 12 months" is 12, "over the next six months" is 6). Null for a calendar date ("by March"), a period counted from a launch or any other event, or no duration stated: never worked out or guessed.'),
     /** The reference the target is measured from, as written ("today", "last quarter"); null when none. */
     baseline: z.string().nullable(),
     /** The quantity's current level, in the target's unit, when stated. Unknown is null, never 0. */

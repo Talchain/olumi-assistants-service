@@ -248,7 +248,7 @@ export function goalTargetBasisOf(goal: unknown): GoalTargetBasis | undefined {
   // months, S5); with no deadline held it stays absent (`admitGoalTargetBasisAwaitingPeriod`).
   const period = b.period_months === undefined && typeof goal.id === 'string' ? readGoalRecord({ nodes: [goal] }, goal.id)?.horizon?.months
     : b.period_months;
-  if (!finite(period) || !Number.isInteger(period) || period < 1 || period > 120) return undefined;
+  if (!finite(period) || period <= 0 || period > 120) return undefined;
   if (b.period_kind !== 'at_end' && b.period_kind !== 'over_period') return undefined;
   const effectUnit = words(b.effect_unit, BASIS_TEXT_MAX);
   if (effectUnit === undefined || typeof b.effects_at_period_end !== 'boolean') return undefined;
@@ -270,8 +270,8 @@ export function goalTargetBasisOf(goal: unknown): GoalTargetBasis | undefined {
 }
 
 const NUMBER_WORDS = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
-const months = (n: number): string => `${n <= 12 ? NUMBER_WORDS[n] : String(n)} ${n === 1 ? 'month' : 'months'}`;
-export const monthNumber = (n: number): string => `month ${n <= 12 ? NUMBER_WORDS[n] : String(n)}`;
+const months = (n: number): string => `${NUMBER_WORDS[n] ?? Number(n.toFixed(2))} ${n === 1 ? 'month' : 'months'}`;
+export const monthNumber = (n: number): string => `month ${NUMBER_WORDS[n] ?? Number(n.toFixed(2))}`;
 
 /** "month three" / "month three after launch": the point by which a change target is read (D3, AIE #94 6128697025). */
 export function periodEndWords(basis: Pick<GoalTargetBasis, 'reference' | 'period_months'>): string {

@@ -31,7 +31,7 @@ import { LLM_STRENGTH_STD_FLOOR } from '../../../cee/constants.js';
 import { quantityUnitsCompose, readUnitParts, sameUnit, singular, unitsCompose, words } from '../../agent-lane/same-unit.js';
 import { periodAdverb, periodNoun } from '../../../utils/unit-alphabet.js';
 import { EventRiskV1 } from '../../../schemas/event-risk.js';
-import { riskOccurrenceIsCurrent } from '../../agent-lane/risk-occurrence.js';
+import { riskOccurrenceIsCurrent, riskOccurrenceWindowMonths } from '../../agent-lane/risk-occurrence.js';
 import { readStatedDeadline } from '../../goal-target/deadline-date.js';
 
 export type WithheldReason =
@@ -322,7 +322,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
           // (`riskOccurrenceWindowMonths`). The effects are NOT read as in place by its end (`effects_at_period_end: false`), so
           // the chance stays the static reading (`goalHorizonVerdict` → no_horizon) and no window is claimed for it. A level
           // target only; a change target is not covered yet.
-          ...(!isChange && t!.period_months !== null && Number.isInteger(t!.period_months) && t!.period_months >= 1 && t!.period_months <= 120
+          ...(!isChange && t!.period_months !== null && Number.isFinite(t!.period_months) && t!.period_months > 0 && t!.period_months <= 120
             && lt.unit !== null && lt.unit.trim() !== '' ? { goal_target_basis: { source: 'olumi_reading', quantity_frame: 'level', target_frame: 'level',
               target_raw: lt.value, reference: 'today', period_months: t!.period_months, period_kind: 'at_end', effect_unit: lt.unit,
               effects_at_period_end: false } } : {}),
@@ -557,23 +557,34 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   // (p = 1, which ISL evaluates). A cause INTO an event (a cascade) is not in this slice (§9). Anything else is refused.
   const risks = new Set<string>();
   const refusedRisks = new Set<string>();
+  // Conversion uses the same single, conflict-free goal window as Run readiness.
+  const goalWindow = riskOccurrenceWindowMonths({ nodes, edges });
   for (const r of model.risks) {
-    const { low, high } = r.occurrence;
+    let { low, high } = r.occurrence;
+    let months = r.horizon_months;
     // The chance is owned FOR its window: Olumi's estimate of either makes the chance Olumi's (buddy, per-figure authorship).
     const basis = r.occurrence.estimate_by === 'olumi' || r.horizon_by === 'olumi' ? 'olumi' as const
       : stated(r.source) ? 'user' as const : r.source === 'olumi' ? 'olumi' as const : undefined;
+    // Convert only Olumi's CHANCE: the joint basis can also be Olumi's solely because it supplied the window.
+    // v1 cannot carry per-end mitigation reductions; certainty cannot license a shorter window, nor zero a longer one.
+    const converted = (r.occurrence.estimate_by === 'olumi' || (r.occurrence.estimate_by === null && r.source === 'olumi'))
+      && r.mitigations.length === 0 && goalWindow !== undefined && months !== null && months > 0 && months <= 600
+      && months !== goalWindow && low !== null && high !== null && low >= 0 && high <= 1 && low <= high
+      && (goalWindow >= months || high < 1) && (goalWindow <= months || high > 0);
+    if (converted) {
+      low = 1 - (1 - low!) ** (goalWindow! / months!);
+      high = 1 - (1 - high!) ** (goalWindow! / months!);
+      months = goalWindow!;
+    }
     // A mitigation reaches ISL as a root switch whose only child is this risk. A switch has no unit, so its frame is 1 and
     // "in place" reaches the engine as 1, never 0.01 of a % (`capFor`).
     const switchOk = (id: string) => isSwitch(id) && !model.links.some((l) => l.from === id && l.to !== r.id);
-    const block = basis === undefined || low === null || high === null || r.horizon_months === null ? undefined : {
-      version: 1 as const, occurrence: { p_low: low, p_high: high, basis }, horizon: { months: r.horizon_months },
+    const block = basis === undefined || low === null || high === null || months === null ? undefined : {
+      version: 1 as const, occurrence: { p_low: low, p_high: high, basis }, horizon: { months },
       ...(r.mitigations.length > 0 ? { mitigations: r.mitigations.map((m) => ({ factor_id: m.factor_id, occurrence_reduction: m.reduction })) } : {}),
     };
     const node: Rec = { id: r.id, kind: 'risk', label: r.label, event_risk: block, ...(r.quote !== null ? { source_quote: r.quote } : {}) };
-    // DL lease 22 Oct (candidate 4b, Q2 0/14 Run ok): Olumi's chance counts only over the goal's current window, by the SAME
-    // predicate readiness reads (`riskOccurrenceIsCurrent`), so the two cannot drift; off it the risk is held, never sent as
-    // a level readiness then refuses as "no figure" (no window is ever guessed, AIE). DL ruling 23 Oct: mitigated or not, an
-    // occurrence over another window is a wrong quantity, so a mitigated one is held too, with its preventer below.
+    // Recheck the converted block with readiness's shared predicate; unknown or conflicting windows stay held.
     const reason: WithheldReason | undefined = low === null || high === null || r.horizon_months === null ? 'risk_occurrence_unknown'
       : basis === undefined ? 'risk_unattributed'
         : !EventRiskV1.safeParse(block).success || !r.mitigations.every((m) => switchOk(m.factor_id)) ? 'risk_not_in_slice'
@@ -601,6 +612,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
       }
     }
     if (reason !== undefined) { hold(r.id, reason); refusedRisks.add(r.id); continue; }
+    if (converted) assumed.push({ id: r.id, text: `converted from Olumi's ${r.horizon_months}-month estimate, assuming an even rate` });
     risks.add(r.id);
     nodes.push(node);
     // The preventer's link: its strength is not read (the stated reduction is), so it carries no doubt of its own. Whose

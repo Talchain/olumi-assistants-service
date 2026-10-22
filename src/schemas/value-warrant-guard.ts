@@ -924,8 +924,8 @@ export const WARRANT_DECISIONS: readonly Decision[] = [
     id: "scope-ambiguous:cee.NodeV3::goal_target_basis.period_months",
     status: "ACCEPTED",
     decision:
-      "ACCEPTED — field-scoped by construction, as `goal_horizon_months` is: its UNIT is its name (whole months, " +
-      "`.int().min(1).max(120)`), and what it measures is named by its two siblings — `reference` (today | launch) and " +
+      "ACCEPTED — field-scoped by construction, as `goal_horizon_months` is: its UNIT is its name (finite positive months, including fractions, " +
+      "`.finite().positive().max(120)`), and what it measures is named by its two siblings — `reference` (today | launch) and " +
       "`period_kind` (at_end | over_period). Its attestation is the block's REQUIRED literal `source: 'olumi_reading'`: " +
       "it is always Olumi's reading of the brief, never presented as the user's. Its one writer refuses it when it " +
       "disagrees with the drafted deadline ('period_conflict'), and the horizon verdict licenses a chance on it only " +

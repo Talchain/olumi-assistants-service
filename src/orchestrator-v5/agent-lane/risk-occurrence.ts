@@ -150,8 +150,20 @@ export function riskOccurrenceWindowFromToday(graph: unknown): boolean {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const goals = nodes.filter((n) => n.kind === 'goal' && typeof n.id === 'string');
   if (goals.length !== 1 || riskOccurrenceWindowMonths(graph) === undefined) return false;
-  const reading = goalTargetBasisOf(goals[0]);
+  const reading = goalWindowReadingOf(goals[0]!);
   return reading === undefined || reading.reference === 'today';
+}
+
+/**
+ * The goal's target reading as both window readers see it (#3658 r2/r3). Withholding the goal's chance deletes its threshold
+ * (mapper), not its reading, so a goal with no threshold checks the reading against the reading's own target. A stale or
+ * mismatched reading stays rejected, and the window and the day it counts from always come from the same reading.
+ */
+function goalWindowReadingOf(goal: Rec): ReturnType<typeof goalTargetBasisOf> {
+  const b = goal.goal_target_basis;
+  return goal.goal_threshold_raw === undefined && isRec(b)
+    ? goalTargetBasisOf({ ...goal, goal_threshold_raw: b.target_raw, goal_threshold_frame: b.target_frame })
+    : goalTargetBasisOf(goal);
 }
 
 /**
@@ -164,7 +176,7 @@ export function riskOccurrenceWindowMonths(graph: unknown): number | undefined {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const goals = nodes.filter((n) => n.kind === 'goal' && typeof n.id === 'string');
   if (goals.length !== 1) return undefined;
-  const reading = goalTargetBasisOf(goals[0]);
+  const reading = goalWindowReadingOf(goals[0]!);
   const held = readGoalRecord(graph, goals[0]!.id as string)?.horizon?.months;
   // The goal's horizon counts from its own reference date; a reading counted from a launch is a DIFFERENT window, whatever its
   // month count (Codex r1): two such periods are a conflict, never a window. A launch reading alone is the one window.
@@ -172,7 +184,7 @@ export function riskOccurrenceWindowMonths(graph: unknown): number | undefined {
   const recorded = [held, reading?.period_months].filter(finite);
   if (recorded.length === 0 || recorded.some((m) => m !== recorded[0])) return undefined;
   const months = recorded[0]!;
-  return Number.isInteger(months) && months >= 1 && months <= 600 ? months : undefined;
+  return months > 0 && months <= 600 ? months : undefined;
 }
 
 export type RiskOccurrenceIneligible = 'not_a_risk' | 'holds_a_level' | 'has_a_cause' | 'no_window' | 'unreadable';
