@@ -37,7 +37,7 @@ const retarget = (f: Json, raw: number, encoded: number, baseline?: { raw: numbe
   return f;
 };
 const levels = (f: Json, by: Readonly<Record<string, number>>): Json => {
-  for (const [id, v] of Object.entries(by)) Object.assign(row(f, id).outcome, { p10: v, p50: v, p90: v, mean: v });
+  for (const [id, v] of Object.entries(by)) Object.assign(row(f, id).outcome, { p10: v, p50: v, p90: v, mean: v, std: 0 });
   return f;
 };
 /** Every option's recorded level in the encoded frame (the Run's own scale: 0.8 encodes the target 400). */
@@ -112,6 +112,12 @@ describe('exact results carry their margins and the input each rests on, from th
 
   it('a Run that recorded its levels in the encoded frame: the same margins, in the target\'s unit', () => {
     expect(marginsOf(encode(fresh()))).toEqual(EXPECTED);
+  });
+
+  it('an encoded scale whose conversion carries float noise (0.11 encodes 400): read at float\'s own precision, the same margins', () => {
+    const f = retarget(fresh(), 400, 0.11, { raw: 200, encoded: 0.055 });
+    levels(f, Object.fromEntries([['night', 550], ['sorter', 250], ['loop', 520], ['status_quo', 200]].map(([id, v]) => [id, (v as number) * 0.11 / 400])));
+    expect(marginsOf(f)).toEqual(EXPECTED);
   });
 
   it('NEGATIVE: encoded levels with the status quo off both frames: the frame is unproven, nothing is said', () => {
