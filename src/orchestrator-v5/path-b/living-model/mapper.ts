@@ -27,7 +27,8 @@ import { resolveGoalThresholdCapWithProvenance } from '../../../utils/goal-thres
 import { admitGoalBaseline } from '../../../cee/factor-extraction/goal-baseline-admissibility.js';
 import { sayFigureAsWritten } from '../../agent-lane/say-figure.js';
 import { LLM_STRENGTH_STD_FLOOR } from '../../../cee/constants.js';
-import { readUnitParts, sameUnit, unitsCompose } from '../../agent-lane/same-unit.js';
+import { readUnitParts, sameUnit, singular, unitsCompose, words } from '../../agent-lane/same-unit.js';
+import { periodAdverb, periodNoun } from '../../../utils/unit-alphabet.js';
 import { EventRiskV1 } from '../../../schemas/event-risk.js';
 import { riskOccurrenceIsCurrent } from '../../agent-lane/risk-occurrence.js';
 import { readStatedDeadline } from '../../goal-target/deadline-date.js';
@@ -397,20 +398,31 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   // money per X times a count of X is money, with ONE period across the two parts and it the defined quantity's own
   // ("£ per week"). `unitsCompose` reads money per X per period × a count; the denominator naming the count's noun is the
   // dimensional proof either way. Unscaled, unqualified units only; two periods ("£ per loaf per week" × "loaves a week") never.
+  // Every word is accounted for (Codex r1 on #3627: the parser drops a count's own denominator, collapses "week/week" and folds
+  // "thousand" into the noun): a currency word, the denominator, the count's own noun, and ONE period word at most across
+  // the two parts, the defined quantity's own. Any other word refuses it.
+  const unitWordsOf = (u: string | null): { readonly periods: readonly string[]; readonly rest: readonly string[] } => {
+    const ws = (u === null ? [] : words(u)).filter((w) => w !== 'a' && w !== 'an' && w !== 'per' && w !== '/');
+    const periodOf = (w: string): string | null => periodNoun(w) ?? periodAdverb(w);
+    return { periods: ws.map(periodOf).filter((p): p is string => p !== null), rest: ws.filter((w) => periodOf(w) === null) };
+  };
+  const plainMoney = (w: string | undefined, code: string | null): boolean => {
+    const m = w === undefined ? null : readUnitParts(w);
+    return m !== null && m.kind === 'currency' && m.scale === 1 && m.per === null && m.period === null && m.code === code;
+  };
   const ratePerCountComposes = (whole: string | null, a: string | null, b: string | null): boolean => {
     const g = readUnitParts(whole);
-    if (g === null || g.kind !== 'currency' || g.scale !== 1 || g.per !== null || g.base !== null || g.qualifiers !== null) return false;
+    const gw = unitWordsOf(whole);
+    if (g === null || g.kind !== 'currency' || gw.rest.length !== 1 || !plainMoney(gw.rest[0], g.code) || gw.periods.length > 1) return false;
     return ([[a, b], [b, a]] as const).some(([m, c]) => {
-      const rate = readUnitParts(m);
-      const count = readUnitParts(c);
-      if (rate === null || count === null || rate.kind !== 'currency' || count.kind !== 'count' || rate.code !== g.code) return false;
-      if (rate.scale !== 1 || count.scale !== 1 || rate.base !== null || count.base !== null || rate.qualifiers !== null || count.qualifiers !== null) return false;
-      const per = rate.per;
-      const noun = count.noun;
-      if (per === null || per.length === 0 || noun === null || noun.length === 0) return false;
-      if (per[per.length - 1] !== noun[noun.length - 1] || !per.every((w) => noun.includes(w))) return false;
-      const periods = [rate.period, count.period].filter((p) => p !== null);
-      return periods.length <= 1 && (periods[0] ?? null) === g.period;
+      if (readUnitParts(m)?.kind !== 'currency' || readUnitParts(c)?.kind !== 'count') return false;
+      const rate = unitWordsOf(m);
+      const count = unitWordsOf(c);
+      const per = rate.rest.slice(1).map(singular);
+      const noun = count.rest.map(singular);
+      if (!plainMoney(rate.rest[0], g.code) || per.length === 0 || noun.length !== per.length || noun.some((w, k) => w !== per[k])) return false;
+      const periods = [...rate.periods, ...count.periods];
+      return periods.length === gw.periods.length && periods.every((p, k) => p === gw.periods[k]);
     });
   };
 

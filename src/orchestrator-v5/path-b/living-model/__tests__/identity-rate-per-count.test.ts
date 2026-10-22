@@ -82,6 +82,13 @@ describe('a product of money per X and a count of X per period is money per peri
     expect(reasons(bakery('loaves a week', '£ per customer'))).toEqual(['takings:identity_unit_mismatch', 'takings:chance_rests_on_withheld']);
   });
 
+  it('NEGATIVE (Codex r1): the count\'s own denominator, a repeated period and a scale word are each refused, never read as £ per week', () => {
+    for (const [loaves, price] of [['loaves per customer per week', '£ per loaf'], ['loaves/week/week', '£ per loaf'], ['loaves', '£/loaf/week/week'],
+      ['thousand loaves a week', '£ per loaf'], ['loaves a week', '£k per loaf'], ['loaves a week', '£ per loaf each']] as const) {
+      expect(reasons(bakery(loaves, price)), `${price} × ${loaves}`).toEqual(['takings:identity_unit_mismatch', 'takings:chance_rests_on_withheld']);
+    }
+  });
+
   it('CONTROL: the existing forms are unchanged (F1 accepted; £ per ORDER × customers still refused)', () => {
     expect(reasons(F1_DEFINED)).toEqual([]);
     expect(reasons(F1_UNIT_MISMATCH)).toEqual(['rev:identity_unit_mismatch', 'rev:chance_rests_on_withheld']);
