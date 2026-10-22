@@ -16,7 +16,7 @@ import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import { projectCorePostimageForPersistence } from '../../../persisted-graph-projection.js';
 import { assessCanonicalAnalysisReadiness } from '../../../../orchestrator/tools/analysis-ready-helper.js';
 import { KNOWN_ANSWER } from '../../living-model/__tests__/fixtures.js';
-import { F1_CONTRADICTED, F1_DEFINED, F1_OTHER_CAUSE } from '../../living-model/__tests__/track2-f1-identity.fixtures.js';
+import { F1_CONTRADICTED, F1_DEFINED, F1_EXACT_LINKS, F1_OTHER_CAUSE } from '../../living-model/__tests__/track2-f1-identity.fixtures.js';
 import { OLUMI_CHANCE } from '../../living-model/__tests__/track2-f2-event-risk.fixtures.js';
 import { buildModel } from '../draft-tool.js';
 import { applyLivingChange, proposeLivingChange } from '../living-change.js';
@@ -220,6 +220,16 @@ describe('THE READINESS SELF-CHECK: a draft a Run would withhold the goal\'s cha
       const kept = await buildModel({ dispatch: p.dispatch }, draftCtx, { brief: BRIEF, model });
       expect(kept).toMatchObject({ status: 'ok', data: { run_ready: false } });
     }
+  });
+
+  it('Codex r2 on #3689: a held link that withholds nothing (the person\'s exact link restating a definition) never blocks; one held on a law still does', () => {
+    const restated: LivingModelT = { ...structuredClone(F1_DEFINED), links: [{ id: 'total_rev', from: 'total', to: 'rev', source: 'user', party: null,
+      quote: 'revenue is customers times the price', effect: { form: 'exact', estimate_by: null, value: 40, sd: null, low: null, high: null, unit: '£', sign: '+' } }] };
+    const mapped = mapLivingModel(restated);
+    expect(mapped.withheld, 'held, but withholding nothing').toContainEqual({ id: 'total_rev', reason: 'identity_restated' });
+    expect(blockersOf(restated, selfCheck(restated, mapped)).all).toEqual([]);
+    // CONTROL: the breakdown written only as exact links still withholds, and is said.
+    expect(codes({ data: { blockers: blockersOf(F1_EXACT_LINKS, selfCheck(F1_EXACT_LINKS, mapLivingModel(F1_EXACT_LINKS))).all } })).toContain('exact_not_drawable:ask');
   });
 
   it('the bound: the refused draft sent again unchanged is saved as it is, its blockers said', async () => {

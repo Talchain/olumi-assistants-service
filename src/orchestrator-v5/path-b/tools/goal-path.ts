@@ -157,13 +157,14 @@ export function selfCheck(model: LivingModelT, mapped: Mapped): Found[] {
   const goal = mapped.graph.nodes.find((n) => n.kind === 'goal')?.id;
   const held = mapped.withheld.filter((w) => w.id === goal && w.reason !== 'chance_rests_on_withheld');
   // A held link on the goal's path (into it, or into what leads to it) leaves the Run a placeholder it withholds the goal's
-  // figures on, even where the goal keeps its threshold (Codex r1 on #3689).
+  // figures on, even where the goal keeps its threshold (Codex r1 on #3689). Only a listed hold: one that withholds nothing (a
+  // person's link restating a definition, `identity_restated`) never blocks (Codex r2).
   const reach = new Set(goal === undefined ? [] : [String(goal)]);
   for (let grew = true; grew;) {
     grew = false;
     for (const l of model.links) if (reach.has(l.to) && !reach.has(l.from)) { reach.add(l.from); grew = true; }
   }
-  const linkHolds = mapped.withheld.filter((w) => model.links.some((l) => l.id === w.id && reach.has(l.to)));
+  const linkHolds = mapped.withheld.filter((w) => BLOCKER[w.reason] !== undefined && model.links.some((l) => l.id === w.id && reach.has(l.to)));
   const causes: NonNullable<Mapped['rests_on']>[number][] = [...held, ...(mapped.rests_on ?? []), ...linkHolds];
   // A path cut by a held link on it is said by that link's own cause (a fix, or an ask on the person's link): never a parallel
   // link of Olumi's beside it.
