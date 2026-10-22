@@ -74,10 +74,12 @@ const cut = (v: string, limit: number): string => {
  * The person's change target (+10%) with no level today (`current` is today's level, the one the change is measured
  * from): that level is what is missing, never the target. The labels shorten only when the question would exceed 400.
  */
-function todaysLevelQuestion(label: string, quantity: string): string {
-  const ask = (lab: string, q: string): string =>
-    `One gap: ${quote(lab)} is a change from today\u2019s level of ${q}, which isn\u2019t given yet. What is today\u2019s level of ${q}?`;
-  const q = midSentence(quantity.trim());
+function todaysLevelQuestion(label: string, quantity: unknown): string {
+  // No quantity named (Codex r2): today's level is still what is missing, never "no target".
+  const ask = (lab: string, q: string): string => (q === ''
+    ? `One gap: ${quote(lab)} is a change from today\u2019s level, which isn\u2019t given yet. What is today\u2019s level?`
+    : `One gap: ${quote(lab)} is a change from today\u2019s level of ${q}, which isn\u2019t given yet. What is today\u2019s level of ${q}?`);
+  const q = typeof quantity === 'string' ? midSentence(quantity.trim()) : '';
   const full = ask(label, q);
   return full.length <= 400 ? full : ask(cut(label, 100), cut(q, 60));
 }
@@ -95,14 +97,18 @@ function heldTargetQuestion(label: string, aim: Rec, t: Rec, reason: string): st
     const cu = cut(typeof t.current_unit === 'string' ? t.current_unit : '', un);
     // The person's figure exactly as written, never rounded ("exactly £1.23456"; Codex r1), its unit placed as it reads.
     const exact = (v: number, unitOf: string): string => {
-      const n = v.toLocaleString('en-GB', { maximumFractionDigits: 20 });
+      const grouped = v.toLocaleString('en-GB', { maximumFractionDigits: 20 });
+      // Beyond 20 places (1e-21) the grouped form rounds: the figure's own digits instead (Codex r2).
+      const n = Number(grouped.replace(/,/g, '')) === v ? grouped : String(v);
       return unitOf === '' ? n : /^[£$€]$/.test(unitOf) ? `${v < 0 ? '-' : ''}${unitOf}${n.replace(/^-/, '')}` : unitOf === '%' ? `${n}%` : `${n} ${unitOf}`;
     };
     const fig = (v: unknown, unitOf: string = u): string => (finiteNum(v) ? exact(v, unitOf) : '');
     const q = typeof t.quantity === 'string' && t.quantity.trim() !== '' ? cut(midSentence(t.quantity.trim()), qty) : undefined;
-    return { L: quote(cut(label, lab)), u, cu, fig, q };
+    // Today's level's unit as the leaf reads it (`current_unit ?? unit`): an explicit '' is no unit, never the target's (Codex r2).
+    const lu = typeof t.current_unit === 'string' ? cu : u;
+    return { L: quote(cut(label, lab)), u, cu, lu, fig, q };
   };
-  const ask = ({ L, u, cu, fig, q }: ReturnType<typeof plain>): string | undefined => {
+  const ask = ({ L, u, cu, lu, fig, q }: ReturnType<typeof plain>): string | undefined => {
     const change = t.comparator === 'increase' || t.comparator === 'decrease';
     const up = t.comparator === 'decrease' ? 'less' : 'more';
     // A range on a change is a range of the change, never the target level itself (Codex r1).
@@ -119,7 +125,7 @@ function heldTargetQuestion(label: string, aim: Rec, t: Rec, reason: string): st
         return range();
       case 'change_kind_unknown':
         // Only the ambiguity itself is asked as "relative or points": a % change of a quantity that is itself in % (Codex r1).
-        return finiteNum(t.value) && q !== undefined && u === '%' && (cu === '' || cu === '%') && (t.change_kind === null || t.change_kind === undefined)
+        return finiteNum(t.value) && q !== undefined && u === '%' && lu === '%' && (t.change_kind === null || t.change_kind === undefined)
           ? `One gap: ${L} aims for ${fig(t.value)} ${up} ${q}. Is that ${fig(t.value)} of today\u2019s level, or ${fig(t.value, '')} percentage points?`
           // A change in one unit on a level in another, neither a %: the change's unit is asked (never when the units match).
           : u !== '' && u !== '%' && cu !== '' && cu !== u ? `One gap: ${L} has a change in ${u} but today\u2019s level in ${cu}. What is the change in ${cu}?` : undefined;
@@ -131,7 +137,7 @@ function heldTargetQuestion(label: string, aim: Rec, t: Rec, reason: string): st
       case 'change_base_not_theirs': {
         if (q === undefined || !finiteNum(t.current)) return undefined;
         // Show, label, de-bias (Paul): Olumi's figure is named as Olumi's; one from an unconfirmed source is never called Olumi's.
-        const estimate = fig(t.current, cu !== '' ? cu : u);
+        const estimate = fig(t.current, lu);
         return aim.source === 'olumi'
           ? `One gap: ${L} is measured from today\u2019s level of ${q}, which Olumi estimated at ${estimate}. What is today\u2019s level? If Olumi\u2019s estimate is right, say so.`
           : `One gap: ${L} is measured from today\u2019s level of ${q}, given as ${estimate} from a source not yet confirmed. What is today\u2019s level? If that figure is right, say so.`;
@@ -149,6 +155,8 @@ function heldTargetQuestion(label: string, aim: Rec, t: Rec, reason: string): st
     if (out === undefined) break;
   }
   // A stated target the core cannot read yet, for any other cause: still never "no target" (Codex r1), and always short.
+  // Only where the target carries a figure: one with none keeps today's "no target" words, which are true (Codex r2).
+  if (![t.value, t.low, t.high].some(finiteNum)) return undefined;
   return `One gap: ${quote(cut(label, 120))} has a target Olumi can\u2019t read as stated yet. What exactly would count as meeting it?`;
 }
 
@@ -174,7 +182,7 @@ export function goalTargetGapOf(graph: unknown): GoalTargetGap | null {
     // The ONE reading of the aim's target, as the mapper holds it (`aim-reading.ts`); stored living-model bytes.
     const reading = aimTargetReading(aim as never);
     // The person's change from a level not given yet: the target is there, today's level is not (#3631).
-    if (reading === 'goal_level_unknown' && typeof core.quantity === 'string' && core.quantity.trim() !== '') {
+    if (reading === 'goal_level_unknown') {
       return { kind: 'goal_level_missing', goal_id: goal.id, deadline_known: deadlineKnown, question: todaysLevelQuestion(label, core.quantity) };
     }
     const held = typeof reading === 'string' ? heldTargetQuestion(label, aim, core, reading) : undefined;

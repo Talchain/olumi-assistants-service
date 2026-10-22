@@ -121,6 +121,28 @@ describe('every held reason says its own words in the one gap, never "no target"
     expect(goalTargetGapOf(stored(m))?.question).toBe(CASES[1]![2]);
   });
 
+  it('Codex r2: a figure past 20 decimal places is still said exactly', () => {
+    const m = model('Exactly a trace', { ...target, quantity: 'Error rate', comparator: '=', value: 1e-21, unit: '%' });
+    expect(goalTargetGapOf(stored(m))?.question).toContain('aims for exactly 1e-21%.');
+  });
+
+  it('Codex r2: today\'s level keeps its own (empty) unit, never the target\'s', () => {
+    const m = model('Grow productivity by 10%', { ...target, quantity: 'Productivity', comparator: 'increase', value: 10, unit: '%', change_kind: 'relative', current: 40, current_unit: '' }, 'olumi');
+    expect(goalTargetGapOf(stored(m))?.question).toContain('which Olumi estimated at 40.');
+  });
+
+  it('Codex r2: a change with no quantity named still asks for today\'s level, never "no target"', () => {
+    const m = model('Grow by 10%', { ...target, quantity: '', comparator: 'increase', value: 10, unit: '%', change_kind: 'relative' });
+    expect(goalTargetGapOf(stored(m))).toMatchObject({ kind: 'goal_level_missing',
+      question: 'One gap: ‘Grow by 10%’ is a change from today’s level, which isn’t given yet. What is today’s level?' });
+  });
+
+  it('Codex r2 NEGATIVE: an "exactly" with no figure at all keeps the true "no target" words', () => {
+    const m = model('Exactly right', { ...target, quantity: 'Members', comparator: '=', value: null, unit: 'members' });
+    expect(goalHeld(m)).toBe('exact_target_not_in_slice');
+    expect(goalTargetGapOf(stored(m))?.question).toBe('One gap: ‘Exactly right’ has no target or deadline yet. What would count as meeting it, and by when?');
+  });
+
   it('NEGATIVE: no target figure keeps today\'s words; a legacy graph is byte-identical; #3631\'s today\'s-level ask is unchanged', () => {
     expect(goalTargetGapOf(stored(model('Grow the business', null)))?.kind).toBe('goal_target_missing');
     for (const [, m] of CASES) expect(goalTargetGapOf(legacy(stored(m)))?.kind ?? null).not.toBe('goal_answer_missing');
