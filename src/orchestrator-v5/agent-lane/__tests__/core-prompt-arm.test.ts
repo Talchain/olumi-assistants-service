@@ -40,7 +40,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
   it('arm B is the AIE\'s assembled reference, byte for byte (programme-docs #94 6303242136, static text sha256 7b6145d4…), plus the canvas-coaching sentence', () => {
     expect(b.split(NOTE_ON_ITEM_INSTRUCTION)).toHaveLength(2);
     // 7b6145d4… until 21 Oct; arm C's adoption changed only the closing core reply rule (see its row), now 56625e00….
-    expect(createHash('sha256').update(b.replace(`${NOTE_ON_ITEM_INSTRUCTION}\n\n`, ''), 'utf8').digest('hex')).toBe('dfdb4f2b49833e745ec7ca7691e1f97b014f572331df2972631692eb8f70812e'); // 22 Oct: the coach's reply rules, the figure rule moved to the drafter's rules (DL priority change; was 1545a0fc…)
+    expect(createHash('sha256').update(b.replace(`${NOTE_ON_ITEM_INSTRUCTION}\n\n`, ''), 'utf8').digest('hex')).toBe('950681a04fa63f0333d99c0679cd6cc7b983b02717f5e5e1d2f8fbce44919dc5'); // 22 Oct: the coach's reply rules (two phrases deleted, Codex r1 / buddy), the figure rule moved to the drafter's rules (DL priority change; was 1545a0fc…)
     // Candidate-3 witnesses (21 Oct): presence checks (text only, not behaviour): WHEN to build, and Olumi's additions on a card.
     expect(b).toContain('build the first model from their brief in that same turn');
     expect(b).toContain('a list in your reply adds nothing to their model');
@@ -67,18 +67,21 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
   });
 
   it('THE PROMPTS (DL 22 Oct, priority change): the coach\u2019s reply rules and the drafter\u2019s rules, adapted as ruled; the old constants are gone', () => {
-    expect(createHash('sha256').update(CORE_REPLY_RULES, 'utf8').digest('hex')).toBe('675c66186980b6cba6695c308a6747e32eccead4c2a41ca1d9b79d1470ec60a2');
-    expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('bbe7159e70139bd02717041fd3ce919fbd3d5cc619b18ff2009c76040da91d6b');
+    expect(createHash('sha256').update(CORE_REPLY_RULES, 'utf8').digest('hex')).toBe('0d1c339f1750712b5a4c769618343e9c343f4da60959066ae6d80a1404044d30');
+    expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('b23434b85ae1a4fca7d47ab8ad40c7b37f865203e04c09fb34cd44ad3785502f');
     // The retired constants are gone from both modules: no route can send the accreted text again.
     for (const name of ['CORE_REPLY_INSTRUCTION', 'CORE_RESPONSE_DISCIPLINE', 'CORE_NEXT_STEP']) expect(Object.keys(coreInstructions), name).not.toContain(name);
     expect(Object.keys(drafting)).toEqual(['CORE_DRAFTER_RULES']);
     for (const old of ['<RESPONSE_DISCIPLINE>', 'DRAFTING THE FIRST MODEL', 'goal_margins', 'risk_window_not_goal_window', 'COACHING SHAPE'])
       expect(`${b}${CORE_DRAFTER_RULES}`, old).not.toContain(old);
     // The candidates' output lines and the benchmark override do not go in (DL): the agent replies natively, with its tools.
-    for (const line of ['Return only', 'NO INVENTED FIGURES', 'this sprint', 'never invent a number, range, threshold'])
+    // Codex r1 / buddy on #3656: no sentence against Olumi's labelled estimates, and a supported goal chance may lead the headline.
+    for (const line of ['Return only', 'NO INVENTED FIGURES', 'this sprint', 'never invent a number, range, threshold',
+      'Only use numbers the supplied result actually computed', 'without raw numbers'])
       expect(`${CORE_REPLY_RULES}${CORE_DRAFTER_RULES}`, line).not.toContain(line);
     // The coach's own rules: the chance as the headline where supported, never a recommendation, figures only with their author.
-    for (const rule of ["give each option's chance of meeting the aim in this model and its stated uncertainty",
+    for (const rule of ['Lead with one plain-language headline naming the insight. Then at most three short bullets',
+      "give each option's chance of meeting the aim in this model and its stated uncertainty",
       'Never recommend, call an option best or a winner, say \u201cyou should choose\u201d or \u201cgo with\u201d, or choose for the team',
       "use only figures that are in the model with their author, or that the supplied result computed; never invent one. Say when a figure is Olumi's starting estimate.",
       'If calculations use untested Olumi assumptions, say \u201cIllustrative calculation \u2014 uses untested Olumi assumptions.\u201d'])
@@ -108,6 +111,14 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(CORE_DRAFTER_RULES).toContain('At most one link between any two items: opposing mechanisms need distinct real intermediate paths.');
     expect(CORE_DRAFTER_RULES).toContain('Never add an arbitrary link just for connectivity');
     for (const quota of ['5 to 8 items', '8 to 14', 'up to about 16']) expect(CORE_DRAFTER_RULES).not.toContain(quota);
+    // Paul's approved structure items (DL 22 Oct, his 12:00Z test): each said once; "at least one" different route replaces "at most one".
+    for (const rule of ['Find what most limits reaching the aim (its binding constraint or critical path, e.g. time to close, approval, capacity) and model that mechanism explicitly.',
+      "Offer at least one option that is structurally different (a different route, not a different split of the same levers), labelled Olumi's.",
+      'Every item either lies on a path to the aim or is a condition on one; no stand-alone items.',
+      'Conditions are short, written for the person, one point each; keep working notes out of the model.',
+      'When the aim has a deadline, record its window in period_months (weeks \u00f7 4.35).'])
+      expect(CORE_DRAFTER_RULES.split(rule), rule).toHaveLength(2);
+    expect(CORE_DRAFTER_RULES).not.toContain("add at most one as Olumi's when it materially changes the reasoning");
   });
 
   it('the builder\u2019s effort arm is set only on a core turn that asks for it; the default is the banked medium (A/B/C 22 Oct)', () => {

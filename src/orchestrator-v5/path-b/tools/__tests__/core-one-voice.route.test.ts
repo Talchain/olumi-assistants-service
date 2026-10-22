@@ -491,13 +491,13 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
     for (const c of calls) {
       expect(c.instructions.split('Illustrative calculation — uses untested Olumi assumptions.')).toHaveLength(2);
       expect(c.instructions.split('Ask at most one focused question')).toHaveLength(2);
-      expect(c.instructions.split('Only use numbers the supplied result actually computed.')).toHaveLength(2);
+      expect(c.instructions.split('use only figures that are in the model with their author')).toHaveLength(2);
     }
     const count = calls.length;
     await post({ turn_id: randomUUID(), message: QUESTION, source: 'composer' }, {});
     for (const c of calls.slice(count)) {
       expect(JSON.stringify(c)).not.toContain('Ask at most one focused question');
-      expect(JSON.stringify(c)).not.toContain('Only use numbers the supplied result actually computed.');
+      expect(JSON.stringify(c)).not.toContain('use only figures that are in the model with their author');
     }
   });
 
@@ -506,7 +506,7 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
     const r = await post({ turn_id: randomUUID(), message: 'Keep staff training separate; discuss it here without changing this model.', source: 'composer' });
     expect(r.statusCode, r.body).toBe(200);
     expectCoherentInstructions(r.json());
-    expect(createHash('sha256').update(CORE_REPLY_RULES, 'utf8').digest('hex')).toBe('675c66186980b6cba6695c308a6747e32eccead4c2a41ca1d9b79d1470ec60a2'); // 22 Oct: the coach's reply rules + the kept tool and approval rules (DL priority change; was 8c0d1f73…)
+    expect(createHash('sha256').update(CORE_REPLY_RULES, 'utf8').digest('hex')).toBe('0d1c339f1750712b5a4c769618343e9c343f4da60959066ae6d80a1404044d30'); // 22 Oct: the coach's reply rules + the kept tool and approval rules (DL priority change; Codex r1 / buddy: two coach phrases deleted; was 8c0d1f73…)
     for (const c of calls) {
       expect(c.instructions).toContain(CORE_REPLY_RULES);
       expect(c.instructions.split(scope)).toHaveLength(2);

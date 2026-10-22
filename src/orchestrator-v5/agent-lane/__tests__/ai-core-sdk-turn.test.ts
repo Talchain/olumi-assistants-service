@@ -603,6 +603,31 @@ describe('PATH-B core turn on the Agents SDK', () => {
       expect(systemItems(sent[4]!)).toEqual([stateUnchangedText('rev-5')]);
     });
 
+    it('⛔ Codex r1 #3656: a first request refused before anything was accepted is resent WITH the state block; only an accepted response\'s input counts as delivered', async () => {
+      // Revision 1 is in the Conversation; revision 2 is saved; the turn's first request is refused ("No tool output found…").
+      let refuseAt = -1;
+      const json = { 'content-type': 'application/json' };
+      vi.stubGlobal('fetch', vi.fn(streamWhenAsked(async (url: unknown, init?: { body?: unknown }) => {
+        const u = String(url);
+        if (u.endsWith('/v1/conversations')) return new Response(JSON.stringify({ id: 'conv_recover', object: 'conversation' }), { status: 200, headers: json });
+        if (u.endsWith('/items')) return new Response(JSON.stringify({ object: 'list', data: [], first_id: null, last_id: null, has_more: false }), { status: 200, headers: json });
+        sent.push(JSON.parse(String(init?.body ?? '{}')) as Json);
+        if (sent.length - 1 === refuseAt) {
+          return new Response(JSON.stringify({ error: { message: 'No tool output found for function call call_lost1.', type: 'invalid_request_error', param: 'input', code: null } }), { status: 400, headers: json });
+        }
+        return new Response(JSON.stringify(body([{ type: 'message', text: 'Noted.' }])), { status: 200, headers: json });
+      })));
+      await turn('One.', caps(), { state: { revision: 1 }, traceMeta: { revision: 'rev-1', run_id: 'run-1' } });
+      refuseAt = 1;
+      const two = await turn('Two.', caps(), { state: { revision: 2 }, traceMeta: { revision: 'rev-2', run_id: 'run-1' } });
+      expect(two.result.assistant_text, 'the turn ran after the answer').toBe('Noted.');
+      expect(sent, 'turn 1, the refused request, its resend').toHaveLength(3);
+      await turn('Three.', caps(), { state: { revision: 2 }, traceMeta: { revision: 'rev-2', run_id: 'run-1' } });
+      // Both facts together, so a failure shows each: what the resend carried, and what the next turn was then told.
+      expect({ resend: systemItems(sent[2]!).map((t) => (t.includes('"revision":2') ? 'block rev 2' : t.slice(0, 40))), next: systemItems(sent[3]!) })
+        .toEqual({ resend: ['block rev 2'], next: [stateUnchangedText('rev-2')] });
+    });
+
     it('(B) after a turn that wrote, the next turn sends the full block, even when the state reads as the last block did (a save, then an Undo back)', async () => {
       const meta = { revision: 'rev-4', run_id: 'run-7' };
       await turn('One.', caps(), { state: { revision: 4 }, traceMeta: meta });

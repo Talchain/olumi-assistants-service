@@ -349,11 +349,18 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
   const revision = input.traceMeta?.revision ?? 'none';
   const conversation = await scenarioConversation(input.ctx.scenario_id, input.conversationStore, () => startOpenAIConversationsSession(client));
   const stateUnchanged = sentStateBlocks.get(conversation.id) === stateDigest;
-  /** Given once, after the turn's new input on its first call: the state (or the one line), then this turn's guidance. */
-  let turnItems: AgentInputItem[] | undefined = [
+  /**
+   * After the turn's new input: the state (or the one line), then this turn's guidance. Sent on every request until a
+   * response the provider ACCEPTED carried them (Codex r1 #3656: a first request refused before anything was accepted is
+   * resent, and the resend must carry the state, or the turn reasons from the Conversation's older block).
+   */
+  const turnItems: AgentInputItem[] = [
     { role: 'system', content: stateUnchanged ? stateUnchangedText(revision) : stateBlockText(revision, input.traceMeta?.run_id ?? 'none', stateBody) },
     ...(input.turnGuidance ?? []).map((text): AgentInputItem => ({ role: 'system', content: text })),
   ];
+  /** This request carries the turn's items; an accepted response's input carried them (the only proof they are stored). */
+  let carrying = false;
+  let delivered = false;
   /** A compaction drops earlier items from what the model reads, so the next turn sends the full block again. */
   let compacted = false;
   const brief = typeof input.briefText === 'string' ? input.briefText.trim() : '';
@@ -403,11 +410,11 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
   /** Whether the provider has accepted any request of this turn (a model event arrived). */
   let accepted = false;
   const finish = (text: string, stopped: AgentTurnResult['stopped_reason'], calls: number, author: 'ai' | 'host'): AgentTurnResult & { sdk: CoreTurnSdk } => {
-    // The Conversation stored this turn's block with its first call; a turn that failed is never remembered as having sent it.
+    // Remembered only from an accepted response's input; a turn that failed is never remembered as having sent it.
     // A turn that wrote showed the model a newer state than its block (a save, then an Undo back to the block's own text
     // must not read as "unchanged"), so the next turn sends the full block.
     if (compacted || toolResults.some((r) => r.mutated === true)) sentStateBlocks.delete(conversation.id);
-    else if (turnItems === undefined && !stateUnchanged) {
+    else if (delivered && !stateUnchanged) {
       sentStateBlocks.delete(conversation.id);
       sentStateBlocks.set(conversation.id, stateDigest);
       if (sentStateBlocks.size > REMEMBERED_STATE_BLOCKS) sentStateBlocks.delete(sentStateBlocks.keys().next().value!);
@@ -430,11 +437,12 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
         conversationId: conversation.id,
         maxTurns: CORE_MAX_MODEL_CALLS,
         ...(input.signal !== undefined ? { signal: input.signal } : {}),
-        // The instructions go as the agent holds them, the same bytes on every call. The input is what the SDK sends, plus,
-        // on the turn's first call, its state block and guidance, then, once, a typed message that declined a paused run.
+        // The instructions go as the agent holds them, the same bytes on every call. The input is what the SDK sends, plus
+        // the turn's state block and guidance until an accepted response carried them, then, once, a typed message that
+        // declined a paused run.
         callModelInputFilter: ({ modelData }: { modelData: { input: AgentInputItem[]; instructions?: string } }) => {
-          const extra: AgentInputItem[] = [...(turnItems ?? []), ...(carried === undefined ? [] : [{ role: 'user' as const, content: carried }])];
-          turnItems = undefined;
+          carrying = !delivered;
+          const extra: AgentInputItem[] = [...(carrying ? turnItems : []), ...(carried === undefined ? [] : [{ role: 'user' as const, content: carried }])];
           carried = undefined;
           return { ...modelData, input: [...modelData.input, ...extra] };
         },
@@ -449,6 +457,8 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
         let writing = false;
         for await (const event of live) {
           accepted = true;
+          // The provider created the response from this request's input: the turn's items are now in the Conversation.
+          if (carrying && event.type === 'raw_model_stream_event' && event.data.type === 'response_started') { delivered = true; carrying = false; }
           if (!writing && event.type === 'raw_model_stream_event' && event.data.type === 'output_text_delta') {
             writing = true;
             if (showProgress) emitAgentPhase('writing');
