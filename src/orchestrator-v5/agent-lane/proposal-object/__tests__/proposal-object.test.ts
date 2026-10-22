@@ -546,7 +546,7 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
     const notes = (record.adds ?? []).filter((a) => a.kind === 'change_note').map((a) => a.kind === 'change_note' ? a.text : '');
     expect(notes).toContain('‘External wait’: figure 1 week (0 weeks to 8 weeks) (Olumi’s estimate).');
     expect(notes).toContain('Removes ‘Old backlog’.');
-    expect(notes).toContain('Adds the condition “Only if the budget is approved”: applies to ‘Hire a tech lead’; role a prerequisite; recorded words “if the budget is approved” (yours).');
+    expect(notes).toContain('Adds the condition “Only if the budget is approved”: applies to ‘Hire a tech lead’; role a prerequisite; quoting “if the budget is approved” (yours).');
     expect(notes).toContain('Changes ‘Team capacity’: name was “Capacity”, now “Team capacity” (Olumi’s estimate).');
     expect(notes).toContain('Changes ‘Hire a tech lead’: new setting for ‘External wait’ figure 0.5 weeks (Olumi’s estimate).');
     expect(notes).toContain('Adds the factor ‘Vendor delay’: figure 2 weeks (Acme’s).');
@@ -591,7 +591,7 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
     // (4) A point-valued add with a limit and a definition: both are said beside the add.
     const added = card([{ op: 'living_change', path: 'factor:f', value: { change: 'add', after: fac({ source: 'olumi', quote: null, value: 40,
       limit: { comparator: '<=', value: 50, source: 'user', party: null, quote: 'no more than 50' }, defined_as: { op: 'sum', of: ['out'], source: 'olumi', party: null, quote: null } }) } }]);
-    expect(notesOf(added).map((n) => n.text)).toEqual(['‘Orders’: definition kind the sum; definition parts ‘Output’ (Olumi’s estimate); limit comparison at most; limit figure 50 units; limit recorded words “no more than 50” (yours).']);
+    expect(notesOf(added).map((n) => n.text)).toEqual(['‘Orders’: definition kind the sum; definition parts ‘Output’ (Olumi’s estimate); limit comparison at most; limit figure 50 units; limit quoting “no more than 50” (yours).']);
     // (5) Nine settings: split into parts the canvas reads in full, every figure on the card, never cut.
     const set = (k: number) => ({ factor_id: `fac_${k}`, value: 10 + k, low: null, high: null, unit: 'units', source: 'user', party: null, quote: 'set', estimate_by: null });
     const opt = (settings: unknown[]) => ({ id: 'o', label: 'A plan with a fairly long descriptive name for the comparison', settings, status: 'feasible', developed_from: null, source: 'user', party: null, quote: 'plan' });
@@ -607,7 +607,7 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
     expect(notesOf(a).map((n) => n.text)).toEqual(['Changes ‘Orders’: unit was “units”, now “boxes” (Olumi’s estimate); figure is now Olumi’s estimate (was yours).']);
     // Whose an item is, and the words recorded for it, are said with their new content.
     const said = notesOf(card([ch('factor:f', fac({}), fac({ quote: 'our new words', source: 'party', party: 'Acme' }))]))[0]!.text;
-    expect(said).toBe('Changes ‘Orders’: recorded words were “our orders”, now “our new words” (Acme’s); it is now Acme’s (was yours).');
+    expect(said).toBe('Changes ‘Orders’: quoting now “our new words” (was “our orders”) (Acme’s); it is now Acme’s (was yours).');
     expect(notesOf(b).map((n) => n.text)).toEqual(notesOf(a).map((n) => n.text));
   });
   it('Codex r2 on #3632: a point estimate on the person\'s item, each limit and definition change, and long notes', async () => {
@@ -630,24 +630,24 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
     expect(changed.fields.map((f) => f.kind === 'factor_value' ? f.current.source : f.kind)).toEqual(['estimate']);
     const added = card([{ op: 'living_change', path: 'factor:f', value: { change: 'add', after: fac({ value: 40, estimate_by: 'olumi' }) } }]);
     expect((added.adds ?? []).map((a) => [a.kind, a.source])).toEqual([['factor_add', 'estimate'], ['change_note', 'yours']]);
-    expect(notesOf(added).map((n) => n.text)).toEqual(['‘Orders’ is yours: recorded words “our orders” (yours).']);
+    expect(notesOf(added).map((n) => n.text)).toEqual(['‘Orders’ is yours: quoting “our orders” (yours).']);
     // (3) Each limit and definition change is said on its own, compared by ids, not names.
     const lim = { comparator: '<=', value: 50, source: 'user', party: null, quote: 'no more than 50' };
     const def = (of: string[]) => ({ op: 'sum', of, source: 'olumi', party: null, quote: null });
     expect(notesOf(card([ch('factor:f', fac({ limit: lim, defined_as: def(['out']) }), fac({ defined_as: def(['out']) }))])).map((n) => n.text))
-      .toEqual(['Changes ‘Orders’: limit removed (was comparison at most, figure 50 units, recorded words “no more than 50” (yours)).']);
+      .toEqual(['Changes ‘Orders’: limit removed (was comparison at most, figure 50 units, quoting “no more than 50” (yours)).']);
     expect(notesOf(card([ch('factor:f', fac({ limit: lim, defined_as: def(['out']) }), fac({}))])).map((n) => n.text))
-      .toEqual(['Changes ‘Orders’: definition removed (was kind the sum, parts ‘Output’ (Olumi’s estimate)); limit removed (was comparison at most, figure 50 units, recorded words “no more than 50” (yours)).']);
+      .toEqual(['Changes ‘Orders’: definition removed (was kind the sum, parts ‘Output’ (Olumi’s estimate)); limit removed (was comparison at most, figure 50 units, quoting “no more than 50” (yours)).']);
     expect(notesOf(card([ch('factor:f', fac({ defined_as: def(['out']) }), fac({ defined_as: def(['out2']) }))])).map((n) => n.text))
       .toEqual(['Changes ‘Orders’: definition parts were ‘Output’, now ‘Output’ (a different item with the same name) (Olumi’s estimate).']);
     expect(notesOf(card([ch('factor:f', fac({ limit: lim }), fac({ limit: { ...lim, source: 'olumi', quote: null } }))])).map((n) => n.text))
-      .toEqual(['Changes ‘Orders’: limit recorded words were “no more than 50”, now not stated (Olumi’s estimate); limit is now Olumi’s estimate (was yours).']);
+      .toEqual(['Changes ‘Orders’: limit quoting now not stated (was “no more than 50”) (Olumi’s estimate); limit is now Olumi’s estimate (was yours).']);
     // (4) An unbroken 401-character condition: every part fits the canvas; nothing is cut; a replaced condition's ids stay unique.
     const word = 'x'.repeat(401);
     const cond = notesOf(card([{ op: 'living_change', path: 'condition:0', value: { change: 'add', after: { text: word, applies_to: [], source: 'user', party: null, quote: word } } }]));
     expect(cond.length).toBeGreaterThan(1);
     expect(cond.every((n) => n.text.length <= 400)).toBe(true);
-    // Its wording and its recorded words (the same 401 characters here), each in full.
+    // Its wording and its quoting (the same 401 characters here), each in full.
     expect(cond.map((n) => n.text).join('').split('x').length - 1).toBe(802);
     const replaced = notesOf(card([
       { op: 'living_change', path: 'condition:0', value: { change: 'remove', before: { text: word, applies_to: [], source: 'user', party: null, quote: word } } },
@@ -675,7 +675,7 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
     expect(texts(card([ch('risk:r', risk({}), risk({ occurrence: { estimate_by: 'olumi', low: 0.3, high: 0.5 }, horizon_months: 6 }))])))
       .toEqual(['Changes ‘Supplier fails’: window was 12 months, now 6 months (yours); chance was 10% to 20%, now 30% to 50% (Olumi’s estimate); chance is now Olumi’s estimate (was yours).']);
     expect(texts(card([ch('risk:r', risk({}), risk({ mitigations: [{ factor_id: 'backup', reduction: 0.7, source: 'user', party: null, quote: 'cuts it by 70%' }] }))])))
-      .toEqual(['Changes ‘Supplier fails’: new reduction by ‘Backup supplier’ 70%; new reduction by ‘Backup supplier’ recorded words “cuts it by 70%” (yours).']);
+      .toEqual(['Changes ‘Supplier fails’: new reduction by ‘Backup supplier’ 70%; new reduction by ‘Backup supplier’ quoting “cuts it by 70%” (yours).']);
     const aim = (target: Record<string, unknown>) => ({ id: 'a', text: 'Grow revenue', status: 'current', source: 'user', party: null, quote: 'grow revenue',
       target: { quantity: 'revenue', comparator: '>=', value: 100, low: null, high: null, unit: '£k', by_when: 'next year', period_months: null, baseline: null, current: null, current_source: null, current_unit: null, change_kind: null, source: null, ...target } });
     expect(texts(card([ch('aim:a', aim({}), aim({ value: 120, current: 90 }))])))
@@ -693,11 +693,11 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
     const suggested = { id: 'a', text: 'Grow the community', status: 'current', source: 'user', party: null, quote: 'grow the community',
       target: { quantity: 'active members', comparator: '>=', value: null, low: null, high: null, unit: null, by_when: null, period_months: null, baseline: null, current: null, current_source: null, current_unit: null, change_kind: null, source: 'olumi' } };
     expect(texts(card([{ op: 'living_change', path: 'aim:a', value: { change: 'add', after: suggested } }])))
-      .toEqual(['Adds the aim ‘Grow the community’: target measure “active members”; target comparison at least (Olumi’s estimate); recorded words “grow the community” (yours).']);
+      .toEqual(['Adds the aim ‘Grow the community’: target measure “active members”; target comparison at least (Olumi’s estimate); quoting “grow the community” (yours).']);
     const lim = (more: Record<string, unknown>) => ({ id: 'f', label: 'Orders', value: null, low: null, high: null, unit: 'units', defined_as: null, estimate_by: null,
       limit: { comparator: '<=', value: 50, source: 'user', party: null, quote: 'no more than 50', ...more }, source: 'user', party: null, quote: 'our orders' });
     expect(texts(card([ch('factor:f', lim({}), lim({ source: 'party', party: 'Acme', quote: 'Acme requires at most 50' }))])))
-      .toEqual(['Changes ‘Orders’: limit recorded words were “no more than 50”, now “Acme requires at most 50” (Acme’s); limit is now Acme’s (was yours).']);
+      .toEqual(['Changes ‘Orders’: limit quoting now “Acme requires at most 50” (was “no more than 50”) (Acme’s); limit is now Acme’s (was yours).']);
     // Codex r4 on #3632.
     const set2 = (v: number) => ({ factor_id: 'backup', value: v, low: null, high: null, unit: 'units', estimate_by: null, source: 'olumi', party: null, quote: null });
     const plan = (settings: unknown[]) => ({ id: 'o', label: 'Plan', settings, status: 'feasible', developed_from: null, source: 'olumi', party: null, quote: null });
@@ -705,13 +705,13 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
     const userLink = (sign: string, quote: string) => ({ id: 'l', from: 'backup', to: 'r', effect: { form: 'range', value: null, low: 1, high: 3, sd: null, unit: 'units', sign, estimate_by: 'olumi' },
       source: 'user', party: null, quote });
     expect(texts(card([ch('link:l', userLink('+', 'it helps'), userLink('-', 'it hurts'))])))
-      .toEqual(['Changes the link ‘Backup supplier’ → ‘Supplier fails’: effect direction was raises it, now lowers it; recorded words were “it helps”, now “it hurts” (yours).']);
+      .toEqual(['Changes the link ‘Backup supplier’ → ‘Supplier fails’: effect direction was raises it, now lowers it; quoting now “it hurts” (was “it helps”) (yours).']);
     const fac = (limit: unknown) => ({ id: 'f', label: 'Orders', value: null, low: null, high: null, unit: 'units', defined_as: null, estimate_by: null, limit, source: 'user', party: null, quote: 'our orders' });
     const acme = card([ch('factor:f', fac({ comparator: '<=', value: 40, source: 'party', party: 'Acme', quote: 'no more than 40' }), fac(null))]);
     expect((acme.adds ?? []).flatMap((a) => (a.kind === 'change_note' ? [[a.text, a.source]] : [])))
-      .toEqual([['Changes ‘Orders’: limit removed (was comparison at most, figure 40 units, recorded words “no more than 40” (Acme’s)).', 'party']]);
+      .toEqual([['Changes ‘Orders’: limit removed (was comparison at most, figure 40 units, quoting “no more than 40” (Acme’s)).', 'party']]);
     const hours = { id: 'h', label: 'Overtime', value: null, low: null, high: null, unit: 'hours', defined_as: null, estimate_by: null, limit: null, source: 'user', party: null, quote: 'we do overtime' };
-    expect(texts(card([{ op: 'living_change', path: 'factor:h', value: { change: 'add', after: hours } }]))).toEqual(['‘Overtime’: unit “hours”; recorded words “we do overtime” (yours).']);
+    expect(texts(card([{ op: 'living_change', path: 'factor:h', value: { change: 'add', after: hours } }]))).toEqual(['‘Overtime’: unit “hours”; quoting “we do overtime” (yours).']);
     expect(texts(card([ch('risk:r', risk({}), risk({ occurrence: { estimate_by: null, low: 0.1234567890123, high: 0.2 } }))]))[0])
       .toContain('chance was 10% to 20%, now 12.34567890123% to 20%');
     // Codex r5 on #3632: every digit of a share; a removed Olumi estimate under the person's setting is Olumi's on the note.
@@ -720,7 +720,7 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
     const own = { factor_id: 'backup', value: 2, low: null, high: null, unit: 'units', estimate_by: 'olumi', source: 'user', party: null, quote: 'use the backup supplier' };
     const gone = card([ch('option:o', plan([own]), plan([]))]);
     expect((gone.adds ?? []).flatMap((a) => (a.kind === 'change_note' ? [[a.text, a.source]] : [])))
-      .toEqual([['Changes ‘Plan’: setting for ‘Backup supplier’ removed (was figure 2 units (Olumi’s estimate), recorded words “use the backup supplier” (yours)).', 'estimate']]);
+      .toEqual([['Changes ‘Plan’: setting for ‘Backup supplier’ removed (was figure 2 units (Olumi’s estimate), quoting “use the backup supplier” (yours)).', 'estimate']]);
     // Served witness on c5d72d77 (Lenses): a condition on a link named the link's id; a link is named by its ends.
     const onLink = { text: 'Only if the line runs at speed', applies_to: ['l_saved', 'l_new'], role: 'assumption', source: 'olumi', party: null, quote: null };
     const linkAdd = { id: 'l_new', from: 'backup', to: 'r', effect: { form: 'direction_only', value: null, low: null, high: null, sd: null, unit: 'hours', sign: '+', estimate_by: null }, source: 'olumi', party: null, quote: null };
