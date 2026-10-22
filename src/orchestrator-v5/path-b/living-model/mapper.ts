@@ -566,11 +566,11 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     const basis = r.occurrence.estimate_by === 'olumi' || r.horizon_by === 'olumi' ? 'olumi' as const
       : stated(r.source) ? 'user' as const : r.source === 'olumi' ? 'olumi' as const : undefined;
     // Convert only Olumi's CHANCE: the joint basis can also be Olumi's solely because it supplied the window.
-    // v1 cannot carry per-end mitigation reductions; certainty cannot license a shorter window. Both stay held below.
+    // v1 cannot carry per-end mitigation reductions; certainty cannot license a shorter window, nor zero a longer one.
     const converted = (r.occurrence.estimate_by === 'olumi' || (r.occurrence.estimate_by === null && r.source === 'olumi'))
       && r.mitigations.length === 0 && goalWindow !== undefined && months !== null && months > 0 && months <= 600
       && months !== goalWindow && low !== null && high !== null && low >= 0 && high <= 1 && low <= high
-      && (goalWindow >= months || high < 1);
+      && (goalWindow >= months || high < 1) && (goalWindow <= months || high > 0);
     if (converted) {
       low = 1 - (1 - low!) ** (goalWindow! / months!);
       high = 1 - (1 - high!) ** (goalWindow! / months!);

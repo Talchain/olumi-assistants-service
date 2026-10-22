@@ -225,6 +225,77 @@ describe('Olumi occurrence is converted to the declared LM goal window', () => {
     expect(readiness.safeToAnalyse).toBe(true);
   });
 
+  it.each([12, 6])('round 5: a held mitigated risk leaves the goal period readable for a port risk over %s months', (months) => {
+    const model = structuredClone(withWindow(OLUMI_CHANCE, 6));
+    model.risks.push({ ...model.risks[0]!, id: 'port', label: 'Port disruption', horizon_months: months, mitigations: [] });
+    model.links.push({ ...model.links[0]!, id: 'port_gp', from: 'port' });
+    const before = structuredClone(model);
+    const mapped = mapLivingModel(model);
+    const graph = projectCorePostimageForPersistence(GraphV3.parse({ ...mapped.graph, living_model: model }));
+    const goal = graph.nodes.find((n) => n.kind === 'goal')!;
+    expect(goal.goal_threshold_raw).toBeUndefined();
+    expect(goalTargetBasisOf(goal)).toBeUndefined();
+    expect(goal.goal_target_basis?.period_months).toBe(6);
+    expect(riskOccurrenceWindowMonths(graph)).toBe(6);
+    expect(mapped.withheld).toContainEqual({ id: 'gp', reason: 'chance_rests_on_withheld' });
+    expect(mapped.withheld).toContainEqual({ id: 'supplier_fails', reason: 'risk_window_not_goal_window' });
+    expect(graph.nodes.some((n) => n.id === 'supplier_fails' || n.id === 'dual_sourcing')).toBe(false);
+    const block = graph.nodes.find((n) => n.id === 'port')!.event_risk!;
+    expect(block.horizon.months).toBe(6);
+    expect(block.occurrence.p_low).toBeCloseTo(1 - 0.95 ** (6 / months), 12);
+    expect(block.occurrence.p_high).toBeCloseTo(1 - 0.85 ** (6 / months), 12);
+    expect(mapped.assumed.filter((a) => a.id === 'port')).toEqual(months === 6 ? []
+      : [{ id: 'port', text: "converted from Olumi's 12-month estimate, assuming an even rate" }]);
+    const readiness = assessCanonicalAnalysisReadiness(graph);
+    expect(readiness.blockingIssues).toEqual([]);
+    expect(readiness.safeToAnalyse).toBe(true);
+    expect(model).toEqual(before);
+  });
+
+  it('round 5 contrast: an adjacent risk window never supplies a missing goal period', () => {
+    const model = structuredClone(withWindow(OLUMI_CHANCE, null));
+    model.risks.push({ ...model.risks[0]!, id: 'port', label: 'Port disruption', horizon_months: 6, mitigations: [] });
+    model.links.push({ ...model.links[0]!, id: 'port_gp', from: 'port' });
+    const mapped = mapLivingModel(model);
+    const graph = projectCorePostimageForPersistence(GraphV3.parse({ ...mapped.graph, living_model: model }));
+    expect(riskOccurrenceWindowMonths(graph)).toBeUndefined();
+    for (const id of ['supplier_fails', 'port']) {
+      expect(graph.nodes.some((n) => n.id === id)).toBe(false);
+      expect(mapped.withheld).toContainEqual({ id, reason: 'risk_window_not_goal_window' });
+    }
+    expect(mapped.assumed.filter((a) => ['supplier_fails', 'port'].includes(a.id))).toEqual([]);
+    expect(assessCanonicalAnalysisReadiness(graph).safeToAnalyse).toBe(true);
+  });
+
+  it('round 5: zero over one month cannot imply impossibility over twelve; a zero lower bound still converts', () => {
+    for (const high of [0, 0.15]) {
+      const model = supplier(12);
+      model.risks[0]!.occurrence = { estimate_by: 'olumi', low: 0, high };
+      const mapped = mapLivingModel(model);
+      if (high === 0) {
+        expect(blockOf(mapped)).toBeUndefined();
+        expect(mapped.withheld).toContainEqual({ id: 'supplier_fails', reason: 'risk_window_not_goal_window' });
+        expect(mapped.assumed.filter((a) => a.id === 'supplier_fails')).toEqual([]);
+      } else {
+        expect(blockOf(mapped)!.occurrence.p_low).toBe(0);
+        expect(blockOf(mapped)!.occurrence.p_high).toBeCloseTo(1 - 0.85 ** 12, 12);
+        expect(blockOf(mapped)!.horizon.months).toBe(12);
+      }
+    }
+  });
+
+  it('round 5: fractional period words have at most two decimal places without trailing zeros', () => {
+    for (const [months, printed] of [[1 / 3, '0.33'], [0.69, '0.69'], [1.5, '1.5']] as const) {
+      const mapped = mapLivingModel(supplier(months));
+      const graph = projectCorePostimageForPersistence(GraphV3.parse({ ...mapped.graph, living_model: supplier(months) }));
+      const goal = graph.nodes.find((n) => n.kind === 'goal')!;
+      const basis = goalTargetBasisOf(goal)!;
+      expect(periodWords(basis)).toBe(`at ${printed} months`);
+      expect(periodEndWords(basis)).toBe(`month ${printed}`);
+      expect(timingAskOf(graph, goal.id)!.words).toContain(`fully in place by month ${printed} from today`);
+    }
+  });
+
   it('invalid source probabilities and horizons are refused, never repaired by conversion', () => {
     for (const patch of [
       { occurrence: { estimate_by: null, low: -0.1, high: 0.9 } },
