@@ -36,6 +36,8 @@ const GOAL_TARGET_MISSING = 'goal_target_missing';
 const GOAL_TARGET_MISSING_FACE = 'Not shown yet: needs a target';
 /** DL 23 Oct (a): a core change target with no level today needs that level, never "a target" (`goal-target-gap.ts`). */
 const GOAL_LEVEL_MISSING_FACE = 'Not shown yet: needs today\u2019s level';
+/** DL held-reason ruling (23 Oct): ONE face for a stated target held for another reason; its question carries the specifics. */
+const GOAL_ANSWER_MISSING_FACE = 'Not shown yet: needs your answer';
 
 /**
  * Moved readGoalIdentityWithheld message selection from DGAI
@@ -192,8 +194,9 @@ export function projectCanonicalAnalysisCells(
   // (`goal-target-gap.ts`, which `modelGapOf` and the action bar's "Set target" read; one target predicate with the target
   // ask, so a legacy goal's normalised threshold is a target, and a provisional objective is never asked for one).
   const gap = goalTargetGapOf(graph);
-  const targetMissing = gap === null ? undefined : { code: gap.kind === 'goal_level_missing' ? gap.kind : GOAL_TARGET_MISSING, message: gap.question };
-  const targetMissingFace = gap?.kind === 'goal_level_missing' ? GOAL_LEVEL_MISSING_FACE : GOAL_TARGET_MISSING_FACE;
+  const targetMissing = gap === null ? undefined : { code: gap.kind === 'goal_target_missing' ? GOAL_TARGET_MISSING : gap.kind, message: gap.question };
+  const targetMissingFace = gap?.kind === 'goal_level_missing' ? GOAL_LEVEL_MISSING_FACE
+    : gap?.kind === 'goal_answer_missing' ? GOAL_ANSWER_MISSING_FACE : GOAL_TARGET_MISSING_FACE;
   const compared = rec(rec(result)?.enrichment)?.option_comparison;
   // The roster belongs to the served Run, not today's graph or a refused attempt.
   const optionIds = [...new Set([

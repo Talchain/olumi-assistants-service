@@ -63,10 +63,10 @@ describe('the one gap asks only for what is missing: the target, or the level a 
     }
   });
 
-  it('SCOPE (narrowest reading): a target held for another reason keeps today\'s words; it is not this ruling\'s shape', () => {
+  it('a target held for another reason is never "no target" (its own words: `held-reason.test.ts`, DL 23 Oct)', () => {
     const exact = model('Exactly 500 members', { ...target, quantity: 'Members', comparator: '=', value: 500, unit: 'members' });
     expect(reasons(exact)).toContain('goal:exact_target_not_in_slice');
-    expect(goalTargetGapOf(stored(exact))).toEqual(goalTargetGapOf(legacy(stored(exact))));
+    expect(goalTargetGapOf(stored(exact))?.kind).toBe('goal_answer_missing');
   });
 
   it('a level that exists but is not the person\'s (change_base_not_theirs) is never called "not given"', () => {
@@ -105,7 +105,9 @@ describe('the one gap asks only for what is missing: the target, or the level a 
 
   it('NEGATIVE: Olumi\'s suggested change measure is not the person\'s target: the target is still asked for', () => {
     const suggested = model('Grow productivity', { ...target, quantity: 'Productivity', comparator: 'increase', value: 10, unit: '%', change_kind: 'relative', source: 'olumi' });
-    expect(goalTargetGapOf(stored(suggested))?.kind).toBe('goal_target_missing');
+    // The held-reason ruling (23 Oct): the person is asked for their own figure, never told "no target" and never anchored.
+    expect(goalTargetGapOf(stored(suggested))).toMatchObject({ kind: 'goal_answer_missing',
+      question: 'One gap: Olumi suggested measuring ‘Grow productivity’ as productivity. What figure would count as meeting it?' });
   });
 
   it('NEGATIVE: with today\'s level given, hiring has a level target, so there is no gap', () => {

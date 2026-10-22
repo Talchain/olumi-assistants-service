@@ -23,6 +23,7 @@
  */
 import { REPAIR_CODES, type RepairEntry } from '@talchain/schemas';
 import { LivingModel, type LivingModelT, type LivingSourceT } from '../../../schemas/living-model.js';
+import { aimTargetReading, stated } from './aim-reading.js';
 import { resolveGoalThresholdCapWithProvenance } from '../../../utils/goal-threshold-cap.js';
 import { admitGoalBaseline } from '../../../cee/factor-extraction/goal-baseline-admissibility.js';
 import { sayFigureAsWritten } from '../../agent-lane/say-figure.js';
@@ -66,7 +67,6 @@ export interface Mapped {
 const STRUCTURAL = { strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' } as const;
 const OLUMI_EXISTS = 0.8;
 
-const stated = (s: LivingSourceT): boolean => s === 'user' || s === 'party';
 /** The person's own words for keeping a level where it is (Science, 21 Oct). The cue only skips the question; it never sets the comparator or the number. */
 const STAY_CUE = { '>=': /\b(keep|keeps|keeping|stay|stays|staying|at least|no less than|minimum)\b/i, '<=': /\b(keep|keeps|keeping|stay|stays|staying|at most|no more than|cap|capped)\b/i } as const;
 /** An item the person set themselves on the canvas: theirs, with no words to quote (`edit.ts`). */
@@ -124,37 +124,6 @@ function statedDeadline(byWhen: string | null): string | undefined {
     && ['date', 'quarter_end', 'month_end', 'year_end'].includes(read.form) ? read.date : undefined;
 }
 
-type Target = NonNullable<LivingModelT['aims'][number]['target']>;
-interface LevelTarget { readonly comparator: '>=' | '<='; readonly value: number; readonly unit: string | null }
-
-/**
- * The level a target asks for. A change from today ("raise it by 10%") is read on today's level, in that level's own unit
- * (Batch 0 rulings 19 and 21; amendment 1: carrying on as now leaves the quantity unchanged, so the status quo is today):
- * absolute B ± C, relative B × (1 ± r/100), points B ± C on a quantity that is itself a percentage. What a percentage change
- * means on a percentage is never picked (amendment 3): it needs the AI's declared `change_kind`.
- */
-function levelTargetOf(t: Target): LevelTarget | WithheldReason {
-  if (t.comparator === '=') return 'exact_target_not_in_slice';
-  if (t.value === null) return t.low !== null || t.high !== null ? 'target_range_not_in_slice' : 'no_level_target';
-  // A declared unit is model content, never relabelled by another field (buddy R1 on #3525): today's level in another unit
-  // than a level target has no supported conversion here, so the dependent calculation is withheld.
-  if (t.comparator === '>=' || t.comparator === '<=') {
-    if (t.current !== null && t.current_unit !== null && t.current_unit !== t.unit) return 'current_unit_mismatch';
-    return { comparator: t.comparator, value: t.value, unit: t.unit };
-  }
-  if (t.current === null) return 'goal_level_unknown';
-  const levelUnit = t.current_unit ?? t.unit;
-  const kind = t.change_kind ?? (levelUnit === '%' ? null : t.unit === levelUnit ? 'absolute' : t.unit === '%' ? 'relative' : null);
-  // Points are percentage points of a percentage quantity: both units are '%', or nothing is dropped silently.
-  const fits = kind === 'absolute' ? t.unit === levelUnit : kind === 'relative' ? t.unit === '%'
-    : kind === 'points' ? levelUnit === '%' && t.unit === '%' : false;
-  if (kind === null || !fits) return 'change_kind_unknown';
-  if (kind === 'relative' && !(t.current > 0)) return 'change_base_invalid';
-  const sign = t.comparator === 'increase' ? 1 : -1;
-  const by = Math.abs(t.value);
-  return { comparator: sign > 0 ? '>=' : '<=', value: kind === 'relative' ? t.current * (1 + (sign * by) / 100) : t.current + sign * by, unit: levelUnit };
-}
-
 /** The goal a saved graph was compiled with: a regeneration keeps it unless its aim is no longer current. */
 export function goalIdOf(graph: unknown): string | undefined {
   const nodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
@@ -189,13 +158,8 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     nodes.push(goalNode);
     const t = aim.target;
     const isChange = t !== null && (t.comparator === 'increase' || t.comparator === 'decrease');
-    // "Exactly N" is never read as "at least N"; a change is read on today's level (`levelTargetOf`), and only on the
-    // person's own: a change on Olumi's estimated base would need the provisional estimate_only treatment (rulings 9/10),
-    // which this slice does not carry, so it is withheld and Olumi asks for today's level.
-    // Olumi's suggested measure (`target.source`) carries no figure of its own: one there is never read as the person's target.
-    const lt = t === null ? 'no_level_target' as const
-      : t.source === 'olumi' && [t.value, t.low, t.high, t.current].some((v) => v !== null) ? 'target_not_theirs' as const
-      : isChange && t.current !== null && !(t.current_source === 'user' || stated(aim.source)) ? 'change_base_not_theirs' as const : levelTargetOf(t);
+    // The ONE reading of the aim's target (`aim-reading.ts`), shared with the gap that says its held reason.
+    const lt = aimTargetReading(aim);
     if (typeof lt === 'string') { goalHeld = lt; hold(aim.id, lt); }
     else {
       const fromTarget = resolveGoalThresholdCapWithProvenance(undefined, lt.value, lt.unit ?? undefined, undefined);
