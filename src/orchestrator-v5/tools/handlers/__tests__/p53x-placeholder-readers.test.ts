@@ -12,9 +12,6 @@ import {
 } from '../../../../orchestrator/context/placeholder-parts.js';
 import type { ContextPackGraph } from '../../../context/context-pack-types.js';
 import { buildStructureProjectionSummary } from '../../../context/projection-summaries.js';
-import { compactGraphForContextPack } from '../../../context/compact-graph-for-contextpack.js';
-import type { GraphStateIngress } from '../../../boundary/request-extensions.js';
-import { formatGraphForContext } from '../../../format/format-graph-for-context.js';
 import { composeExplainFromStructureFallback } from '../explanation-fallback.js';
 import { limitChecksForAgent } from '../../../agent-lane/limit-checks.js';
 import { honestLimitReply } from '../../../agent-lane/method-turn/what-changes-turn.js';
@@ -60,47 +57,8 @@ describe('P53x: served D1 prospect → revenue, identity-bound across v2 readers
     expect(linkSizing(targetEdge(sizedD1()))).toBe('olumi_estimate');
   });
 
-  it('formatted v2 context says not sized; the same sized link keeps strong positive link', () => {
-    const placeholder = formatGraphForContext(contextGraph(servedD1())).edges.find((edge) => edge.from === FROM && edge.to === TO)!;
-    // Science 393023 LICENCE ruling 3 (P53x), re-derived: captured defaulted 0.5/0.125 is placeholder, so strong positive link → not sized yet.
-    expect(placeholder).toMatchObject({ from_label: FROM_LABEL, to_label: TO_LABEL, relationship: 'not sized yet' });
-    expect(placeholder.relationship).not.toMatch(/strong|slight|moderate|estimate/i);
-    expect(formatGraphForContext(contextGraph(sizedD1())).edges.find((edge) => edge.from === FROM && edge.to === TO)!.relationship)
-      .toBe('strong positive link');
-  });
-
-  it('canonical direct formatter and repeated projection cannot lose the placeholder class', () => {
-    const graph = servedD1();
-    const direct = formatGraphForContext({ ...contextGraph(graph), edges: [targetEdge(graph)] });
-    expect(direct.edges[0]!.relationship).toBe('not sized yet');
-    expect(formatGraphForContext(direct as unknown as ContextPackGraph)).toEqual(direct);
-    const forged = formatGraphForContext({ ...contextGraph(graph), edges: [{ from: FROM, to: TO,
-      sizing: 'placeholder', relationship: 'strong positive link' }] });
-    expect(forged.edges[0]!.relationship).toBe('not sized yet');
-  });
-
-  it('the adapter’s structural fallback preserves the original default-door sizing identity', () => {
-    const graph = servedD1();
-    graph.nodes[0]!.kind = 'invalid-kind' as never;
-    const before = JSON.stringify(graph);
-    const outcome = compactGraphForContextPack(graph as unknown as GraphStateIngress, { requestId: 'p53x-served-d1-fallback' });
-    expect(outcome).toMatchObject({ kind: 'compacted', via: 'structural_fallback' });
-    if (outcome.kind !== 'compacted') throw new Error('Expected served D1 structural fallback');
-    const edge = outcome.compact.edges.find((candidate) => candidate.from === FROM && candidate.to === TO)!;
-    expect(edge.strength).toBe(0);
-    const base = contextGraph(servedD1());
-    // Science 393023 LICENCE ruling 3 (P53x), re-derived: fallback’s inert zero was negligible link; the original captured placeholder stays not sized yet.
-    expect(formatGraphForContext({ ...base, nodes: outcome.compact.nodes, edges: outcome.compact.edges }).edges
-      .find((candidate) => candidate.from === FROM && candidate.to === TO)!.relationship).toBe('not sized yet');
-    expect(JSON.stringify(graph)).toBe(before);
-  });
-
-  it('a sized numeric compact mean already owns its sign despite a legacy direction field', () => {
-    expect(formatGraphForContext({ ...contextGraph(sizedD1()), edges: [{ from: FROM, to: TO,
-      strength: 0.5, sizing: 'olumi_estimate', effect_direction: 'negative' }] }).edges[0]!.relationship)
-      .toBe('strong positive link');
-  });
-
+  // Deletion 11: four rows on the deleted `formatGraphForContext` / `compactGraphForContextPack` (no runtime caller) are
+  // retired; the placeholder's "not sized yet" stays pinned on the live compactor below.
   it('compact interpretation keeps unsized words and the sized control’s existing adverb', () => {
     const placeholder = contextGraph(servedD1()).edges.find((edge) => (edge as Rec).from === FROM && (edge as Rec).to === TO) as Rec;
     // Science 393023 LICENCE ruling 3 (P53x), re-derived: the captured prior’s moderately increases/confidence wording becomes the not-sized sentence.

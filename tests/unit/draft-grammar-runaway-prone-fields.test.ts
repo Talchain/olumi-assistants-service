@@ -49,8 +49,8 @@
  * is display-only; never affects inference or intervention logic." CEE already
  * carries the deterministic replacement — `synthesiseDisplayValue`
  * (src/cee/factor-extraction/display-value.ts) — and
- * `formatGraphForContext` (src/orchestrator-v5/format/format-graph-for-context.ts)
- * already prefers an existing `display_value` and SYNTHESISES one when absent.
+ * `formatGraphForContext` (src/orchestrator-v5/format/format-graph-for-context.ts,
+ * since deleted with no runtime caller) preferred an existing `display_value` and SYNTHESISES one when absent.
  * Removing the key from the grammar therefore routes the field from
  * "free prose the model writes, capped by nothing" to "a deterministic
  * formatter, capped at 50 characters" — which is the better answer regardless
@@ -171,7 +171,7 @@ describe("draft grammar — runaway-prone free-text fields are unemittable", () 
 
   it("the deterministic replacement exists and produces a bounded display string", () => {
     // Dropping the field is only safe because a deterministic formatter already
-    // fills the same slot downstream (format-graph-for-context.ts prefers an
+    // fills the same slot downstream (format-graph-for-context.ts, since deleted, preferred an
     // existing display_value and synthesises one when absent). Pin that the
     // replacement mechanism WORKS — not merely that it is imported.
     expect(synthesiseDisplayValue({ raw_value: 180_000, unit: "£" })).toBe("£180k");

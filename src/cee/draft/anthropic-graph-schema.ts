@@ -561,8 +561,8 @@ for (const key of DEFERRED_AUX_KEYS) {
 // SAFE because the field is display-only and already has a DETERMINISTIC
 // replacement. The served prompt says so itself (v195 line 392: "display_value
 // is display-only; never affects inference or intervention logic"), and
-// `formatGraphForContext` (orchestrator-v5/format/format-graph-for-context.ts)
-// already prefers an existing `display_value` and SYNTHESISES one via
+// `formatGraphForContext` (orchestrator-v5/format/format-graph-for-context.ts,
+// since deleted with no runtime caller) preferred an existing `display_value` and SYNTHESISES one via
 // `synthesiseDisplayValue` (cee/factor-extraction/display-value.ts, capped at
 // 50 chars) when absent. This routes the field from "free prose the model
 // writes, bounded by nothing" to "a deterministic formatter, bounded at 50

@@ -125,7 +125,7 @@ export function humanItemsAfterTheDraft(raw: unknown, goalHandled = false): Huma
  *     means the same natural size; a link cannot be re-sized here, so a moved range refuses;
  *   · a part the user added or renamed must be in the revision, and carries the user's own stamp onto it, but never onto
  *     a part holding a figure the user did not set (readers take a node's stamp as "whose number is this?",
- *     `format-graph-for-context.ts`); a typed figure carries its own node stamp, as the value writer pairs them.
+ *     `format-graph-for-context.ts`, since deleted); a typed figure carries its own node stamp, as the value writer pairs them.
  * A user limit row is not carried: the stored graph cannot hold one (`GraphV3` limits are explicit / inferred / proxy), so
  * G1's limit item refuses, as before. MISSING (the part is absent) or INCOMPATIBLE (a unit or range that cannot hold the
  * same meaning) → the caller offers nothing and names the item. Nothing else in the candidate is changed.

@@ -34,7 +34,7 @@
 import { describe,expect,it } from 'vitest';
 
 import { qualitativeBand } from '../../../cee/factor-extraction/display-value.js';
-import { compactGraphForContextPack } from '../../../orchestrator-v5/context/compact-graph-for-contextpack.js';
+import { compactGraph } from '../graph-compact.js';
 
 
 function summariesFor(interventions: Record<string, unknown>[]): string[] {
@@ -60,12 +60,11 @@ function summariesFor(interventions: Record<string, unknown>[]): string[] {
       },
     ],
   } as never;
-  const out = compactGraphForContextPack(graph, { requestId: 'req-band-test' });
-  expect(out.kind, 'fixture did not compact — the assertions below would prove nothing').toBe(
-    'compacted',
-  );
-  if (out.kind !== 'compacted') throw new Error('not compacted');
-  return out.compact.nodes
+  // Deletion 11: the context-pack wrapper is gone; `compactGraph` is the live producer of `intervention_summary`
+  // (graph-compact.ts, reached via decision-review-graph-projection).
+  const compact = compactGraph(graph);
+  expect(compact.nodes.length, 'fixture did not compact — the assertions below would prove nothing').toBeGreaterThan(0);
+  return compact.nodes
     .map((n) => (n as { intervention_summary?: string }).intervention_summary)
     .filter((s): s is string => typeof s === 'string');
 }
@@ -132,7 +131,7 @@ describe('an option setting reaches the model with its meaning qualified', () =>
 /**
  * ⭐ DOES IT ACTUALLY REACH THE MODEL? The compactor is not the wire.
  *
- * Everything above asserts what `compactGraphForContextPack` returns. Between
+ * Everything above asserts what `compactGraph` returns. Between
  * that and the provider sit the context-pack assembler, the budget pass that
  * drops `intervention_summary` wholesale under pressure, and
  * `buildUserMessage`. A field that is correct in the compactor and dropped

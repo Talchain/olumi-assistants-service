@@ -67,6 +67,7 @@
 
 import { describe, it, expect } from "vitest";
 import { ensureControllableFactorBaselines } from "../../../adapters/llm/normalisation.js";
+import { readFactorValueView } from "../factor-value-provenance.js";
 import { fixObservableMissingData } from "../../unified-pipeline/stages/repair/deterministic-sweep.js";
 import { validateGraph } from "../../../validators/graph-validator.js";
 import {
@@ -906,7 +907,7 @@ describe("E — WHAT THE USER NOW SEES: the factor_values slice stops reporting 
   //
   // The channel that DOES reach the user is the `factor_values` context-pack
   // slice, and it is already built and already instructed:
-  //   producer     `context/factor-value-record.ts:170` `has_value`, `:175` `without_value_count`
+  //   producer     formerly `context/factor-value-record.ts` (deleted in deletion 11, 22 Oct 2026, unreached)
   //   predicate    `provenance/factor-value-provenance.ts` `factorHasExtractedValue`
   //                → `readFactorValueView` reads `observed_state.value` then `data.value`
   //   assembled    formerly `context/context-pack-assembler.ts` (deleted in deletion 8,
@@ -922,29 +923,18 @@ describe("E — WHAT THE USER NOW SEES: the factor_values slice stops reporting 
   //
   // ⚠ RUNG. This is a PRODUCER assertion: it proves the slice reports the gap.
   // It does NOT prove a sentence reached a screen — that needs a live turn.
-  it("a factor left explicitly unquantified is reported as has_value:false and counted", async () => {
-    const { projectFactorValueRecord } = await import(
-      "../../../orchestrator-v5/context/factor-value-record.js"
-    );
+  // Deletion 11 (22 Oct): the slice's producer (`factor-value-record.ts`) is deleted with its unreached assembler. The
+  // negative it carried stays, on the live reader the slice used: the baseline repair never puts a number on a factor
+  // that was left unquantified (`readFactorValueView`, factor-value-provenance.ts, reached via the unified pipeline).
+  it("a factor left explicitly unquantified still reads as having no value after the baseline repair", () => {
+    const valueOf = (g: any) => readFactorValueView(g.nodes.find((n: any) => n.label === "Support headcount")).value;
 
-    const graph = optionConnectedGraph({ extractionType: "inferred" });
+    // PRECONDITION PINNED IN-TEST: with a stated value the reader sees it, so a green result below is the change's doing
+    // and not the fixture's.
+    expect(valueOf(optionConnectedGraph({ value: 0.42, extractionType: "explicit" }))).toBe(0.42);
 
-    // PRECONDITION PINNED IN-TEST: with a stated value the slice reports no gap,
-    // so a green result below is the change's doing and not the fixture's.
-    const stated = optionConnectedGraph({ value: 0.42, extractionType: "explicit" });
-    const before = projectFactorValueRecord(stated) as any;
-    expect(before.without_value_count).toBe(0);
-    expect(before.factors.find((f: any) => f.label === "Support headcount").has_value).toBe(true);
-
-    const { response } = ensureControllableFactorBaselines(graph) as any;
-    const after = projectFactorValueRecord(response) as any;
-
-    // Bound by the factor's LABEL as the slice emits it — which is also the
-    // string the instruction tells the model to use when naming it back.
-    const entry = after.factors.find((f: any) => f.label === "Support headcount");
-    expect(entry).toBeDefined();
-    expect(entry.has_value).toBe(false);
-    expect(after.without_value_count).toBe(1);
+    const { response } = ensureControllableFactorBaselines(optionConnectedGraph({ extractionType: "inferred" })) as any;
+    expect(valueOf(response)).toBeUndefined();
   });
 
   it("the ignorance prior does NOT masquerade as a value to that slice", () => {

@@ -20,7 +20,7 @@
  *
  * That adapter is the right RICH compactor on its strict-parse arm, and this
  * module reuses exactly that arm (`compactGraph`). Its OTHER arm is not usable
- * here. `toStructuralGraphV3` (compact-graph-for-contextpack.ts:267-277)
+ * here. `toStructuralGraphV3` (compact-graph-for-contextpack.ts:267-277,(deleted in deletion 11, 22 Oct 2026: no runtime caller)
  * spreads the raw edge and then UNCONDITIONALLY overwrites three facts:
  *
  *     strength: { mean: 0, std: 0 },

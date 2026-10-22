@@ -23,7 +23,6 @@ import {
 } from '../edge-strength-bands.js';
 import { AdjustEdgeStrengthSchema } from '../../tools/handlers/adjust-edge-strength.js';
 import { bandFromMagnitude, type InfluenceBand } from '../influence-bands.js';
-import { bidirectedRelationshipPhrase, relationshipPhrase } from '../format-graph-for-context.js';
 import { formatEdgeStrengthMagnitude } from '../../tools/handlers/explanation-fallback.js';
 
 /** The canvas's table (see header), CEE band word → [min, max, midpoint]. */
@@ -61,14 +60,6 @@ describe('the edge-strength table IS the canvas table', () => {
 });
 
 describe('every EDGE-strength phrase reads the one table; SENSITIVITY keeps its own', () => {
-  it('RED: a 0.55 link (the canvas\'s "Strong") is phrased "strong", not "moderate", in the Agent\'s context, both families', () => {
-    expect(relationshipPhrase(0.55)).toBe('strong positive link');
-    expect(relationshipPhrase(-0.85)).toBe('very strong negative link');
-    expect(bidirectedRelationshipPhrase(0.5)).toMatch(/^strong positive co-movement/);
-    // Unchanged below the near-zero threshold.
-    expect(relationshipPhrase(0.02)).toBe('negligible link');
-  });
-
   it('RED: the structural explanation names a 0.5 link "strong"', () => {
     expect(formatEdgeStrengthMagnitude(0.5)).toBe('strong');
     expect(formatEdgeStrengthMagnitude(-0.3)).toBe('moderate');
