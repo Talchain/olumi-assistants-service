@@ -617,3 +617,11 @@ describe('per-figure authorship (estimate_by, 21 Oct): Olumi\'s estimate of a wh
     expect((theirs.graph.edges.find((e) => e.from === 'f') as Record<string, any>).provenance.magnitude).toBe('user_stated');
   });
 });
+
+describe('the question node (Paul 22 Oct: "remove the \'Decision:\' text"; Lenses)', () => {
+  it('is labelled with the question alone; its id is unchanged', () => {
+    const decision = mapLivingModel(KNOWN_ANSWER).graph.nodes.find((n) => n.kind === 'decision')!;
+    expect(decision).toMatchObject({ id: 'decision_g', label: KNOWN_ANSWER.aims[0]!.text });
+    expect(String(decision.label)).not.toMatch(/^Decision\b/);
+  });
+});
