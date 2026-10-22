@@ -8,7 +8,7 @@
  *  · Anything this slice cannot apply is refused with its reason, never half-applied.
  */
 import type { LivingModelT } from '../../../schemas/living-model.js';
-import { mapLivingModel } from './mapper.js';
+import { exactlyMade, mapLivingModel } from './mapper.js';
 
 /** The canvas gestures this slice applies, in the wire's own shapes (`@talchain/schemas` turn-payload). */
 export type ExplicitEdit =
@@ -91,7 +91,37 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       if (raw === undefined) return { refused: 'no_frame' };
       // The same figure entered again is a confirmation, not a new figure: it keeps its author (Codex r1 on #3609).
       if (f !== undefined && unchangedPoint(f, raw, unit ?? edit.unit ?? null, edit.raw_value === undefined)) return { model: m };
-      if (f !== undefined) Object.assign(f, { ...theirFigure, value: raw, ...noRange, unit: unit ?? edit.unit ?? null, ...theirs });
+      if (f !== undefined) {
+        Object.assign(f, { ...theirFigure, value: raw, ...noRange, unit: unit ?? edit.unit ?? null, ...theirs });
+        // A changed part supersedes dependent totals, never their definitions. Only identities admitted BEFORE the edit:
+        // contradictory totals, bad units and cycles keep their existing checks. Visit parts first, once (also for diamonds).
+        const admitted = new Set(mapped.graph.nodes.filter((n) => n.nonlinear_identity !== undefined).map((n) => n.id));
+        const changed = new Set([f.id]);
+        const visited = new Set([f.id]); // A direct edit to a defined quantity keeps its own figure, as before.
+        const follow = (id: string): boolean => {
+          if (visited.has(id)) return changed.has(id);
+          visited.add(id);
+          const quantity = factor(id);
+          const def = quantity?.defined_as;
+          if (quantity === undefined || !def || !admitted.has(id)) return false;
+          const affected = def.of.map(follow).some(Boolean);
+          if (!affected) return false;
+          const values = def.of.map((p) => factor(p)?.value ?? null);
+          const made = values.every((v): v is number => v !== null) ? exactlyMade(def.op, values) : undefined;
+          if (made === undefined || !Number.isFinite(made.level) || made.level === quantity.value) return false;
+          m.history.push({ id, change: 'superseded', old: JSON.stringify(quantity), quote: null });
+          // A calculation is no one's stated figure or estimate; keep its definition's attribution separately.
+          Object.assign(quantity, { value: made.level, ...noRange, estimate_by: null, source: 'unverified', party: null, quote: null });
+          changed.add(id);
+          return true;
+        };
+        for (const quantity of m.factors) follow(quantity.id);
+        // A goal already has a derived-level route: retire only its stale current figure, keeping the aim and target theirs.
+        for (const a of m.aims) if (a.target !== null && admitted.has(a.id) && a.defined_as?.of.some((id) => changed.has(id))) {
+          m.history.push({ id: a.id, change: 'superseded', old: JSON.stringify(a), quote: null });
+          a.target = { ...a.target, current: null, current_source: null };
+        }
+      }
       else if (a!.target === null) return { refused: 'no_target' };
       else {
         // Today's level keeps the unit the person gave it (Track 3 Q2-02: "30 %" on a goal with no target unit saved as a bare 30):
