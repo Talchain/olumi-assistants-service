@@ -53,7 +53,11 @@ function canonicalIds(model: LivingModelT): LivingModelT {
 
 type Attributed = { source: LivingSourceT; party: string | null; quote: string | null };
 /** An item's identity and its WHOLE content, attribution included (key order never counts). */
-const attributionKey = (id: string, item: Attributed): string => `${id}\u0000${stable(item)}`;
+/** An item's attribution, as the kernel names it: never the host's own `said_in` mark, which the AI can neither set nor clear (Codex r1 on #3661). */
+const attributionKey = (id: string, item: Attributed): string => {
+  const { said_in: _host, ...rest } = item as Attributed & { said_in?: unknown };
+  return `${id}\u0000${stable(rest)}`;
+};
 
 /** Every attribution the saved model holds, keyed by item id, as the kernel names them. */
 function savedAttributions(saved: LivingModelT): Set<string> {
@@ -114,7 +118,9 @@ function withoutEstimates(item: Record<string, any>, before: Record<string, any>
   return changed ? out : undefined;
 }
 
-export function applyKernel(model: LivingModelT, verifiedWords: readonly string[], saved?: LivingModelT): Kernelled {
+export function applyKernel(model: LivingModelT, verifiedWords: readonly string[], saved?: LivingModelT,
+  /** The scenario's brief, when known: a figure stated in the person's own words that it does not hold was said in the conversation. */
+  brief?: string | null): Kernelled {
   const words = verifiedWords.map(plain).filter((w) => w.length > 0);
   const kept = saved === undefined ? new Set<string>() : savedAttributions(saved);
   const savedItem = new Map<string, Record<string, any>>(saved === undefined ? [] : [
@@ -124,6 +130,19 @@ export function applyKernel(model: LivingModelT, verifiedWords: readonly string[
   const keptCurrent = (id: string, current: number | null): boolean => {
     const t = saved?.aims.find((a) => a.id === id)?.target;
     return t?.current_source === 'user' && t.current === current;
+  };
+  // ⭐ WHERE THE PERSON SAID IT (DL 22 Oct, Lenses' step 3: an approved chat correction was saved as the brief's figure). The
+  // thin-core plan's authorship rule (20 Oct): a label, never a gate, and never figure-matching. An item of the person's (never
+  // Olumi's estimate) whose quote is found VERBATIM in one of their chat messages, and not in the brief, was said in the chat;
+  // the label stays with its unchanged quote once the words leave the verified window (host-verified when it was made). It
+  // says "these are the person's words", not that the figure is proven. Host-set, never the AI's; an unknown brief, or a first
+  // draft, says nothing (null): the brief's, as before.
+  const briefWords = typeof brief === 'string' ? plain(brief) : null;
+  const savedChat = new Set((saved?.factors ?? []).flatMap((f) => (f.said_in === 'chat' && f.quote !== null ? [`${f.id}\u0000${plain(f.quote)}`] : [])));
+  const saidIn = (id: string, f: Omit<LivingModelT['factors'][number], 'said_in'>): 'chat' | null => {
+    if (briefWords === null || f.source !== 'user' || f.estimate_by !== null || f.quote === null) return null;
+    const q = plain(f.quote);
+    return q.length > 0 && !briefWords.includes(q) && (words.some((w) => w.includes(q)) || savedChat.has(`${id}\u0000${q}`)) ? 'chat' : null;
   };
   const relabelled: Relabelled[] = [];
   const attribute = <T extends Attributed>(id: string, item: T): T => {
@@ -152,7 +171,12 @@ export function applyKernel(model: LivingModelT, verifiedWords: readonly string[
         }
         return out;
       }),
-      factors: m.factors.map((f) => defined(attribute(f.id, guarded(f, savedItem.get(f.id), FIGURE)))),
+      // What the AI sent for `said_in` is dropped; the key is written only when the host reads 'chat', so an unmarked factor stays
+      // byte for byte what it was.
+      factors: m.factors.map((f) => {
+        const { said_in: _sent, ...out } = defined(attribute(f.id, guarded(f, savedItem.get(f.id), FIGURE)));
+        return saidIn(f.id, out) === 'chat' ? { ...out, said_in: 'chat' as const } : out;
+      }),
       options: m.options.map((o) => ({ ...attribute(o.id, optionItself(o)),
         settings: o.settings.map((s) => attribute(`${o.id}:${s.factor_id}`, guarded(s, savedItem.get(`${o.id}:${s.factor_id}`), FIGURE))) })),
       links: m.links.map((l) => attribute(l.id, { ...l, effect: guarded(l.effect, savedItem.get(l.id)?.effect, EFFECT) })),
