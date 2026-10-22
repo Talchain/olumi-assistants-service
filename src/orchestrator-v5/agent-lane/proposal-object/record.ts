@@ -533,40 +533,74 @@ function coreAdds(operations: readonly HeldOp[], savedLabel: (id: string) => str
 }
 type NoteSource = ChangeNoteField['source'];
 const finiteNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
-const clip = (t: string, n = 160): string => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
-/** A figure as written: its point, its range, or both ("1 week, between 0 and 8 weeks"). */
+/** The canvas reader drops a longer note (DGAI proposalFields): a longer sentence is split into parts, never cut. */
+const NOTE_MAX = 400;
+const quoted = (t: string): string => `‘${t}’`;
+/** Content, never key order (a stored hold may come back from JSONB in another order; Codex r1 on #3632). */
+const stableJson = (v: unknown): string => (Array.isArray(v) ? `[${v.map(stableJson).join(',')}]`
+  : v !== null && typeof v === 'object' ? `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${stableJson((v as Rec)[k])}`).join(',')}}`
+    : JSON.stringify(v ?? null));
+/** A figure as written: its point, its range, its stated spread. */
 function figureOf(x: unknown): string | undefined {
   if (!isRec(x)) return undefined;
   const unit = typeof x['unit'] === 'string' ? x['unit'] : '';
   const say = (v: number): string => sayFigureAsWritten(v, unit);
-  const v = finiteNum(x['value']) ? x['value'] : undefined;
-  const range = finiteNum(x['low']) && finiteNum(x['high']) ? `between ${say(x['low'])} and ${say(x['high'])}` : undefined;
-  return v !== undefined ? (range === undefined ? say(v) : `${say(v)}, ${range}`) : range;
+  const parts = [finiteNum(x['value']) ? say(x['value']) : undefined,
+    finiteNum(x['low']) && finiteNum(x['high']) ? `between ${say(x['low'])} and ${say(x['high'])}` : undefined,
+    finiteNum(x['sd']) ? `standard deviation ${say(x['sd'])}` : undefined].filter((t): t is string => t !== undefined);
+  return parts.length === 0 ? undefined : parts.join(', ');
+}
+/**
+ * A link's effect in words. A direction word only where the sign is stated and the figures agree with it; otherwise the
+ * figures as written, signed, and what the sign says (Codex r1 on #3632: a range across zero read as "between 2 and 2").
+ */
+function effectOf(e: unknown): string | undefined {
+  if (!isRec(e)) return undefined;
+  const verb = e['sign'] === '+' ? 'raises' : e['sign'] === '-' ? 'lowers' : undefined;
+  const nums = [e['value'], e['low'], e['high']].filter(finiteNum);
+  const crosses = nums.some((n) => n < 0) && nums.some((n) => n > 0);
+  const asWritten = figureOf(e);
+  if (verb === undefined || crosses || (verb === 'raises' && nums.some((n) => n < 0))) {
+    if (asWritten === undefined) return verb === undefined ? undefined : `each 1 more ${verb} it`;
+    return `each 1 more changes it by ${asWritten} (${verb === undefined ? 'direction not stated' : `marked as ${verb === 'raises' ? 'raising' : 'lowering'} it`})`;
+  }
+  const abs = (x: unknown): number | null => (finiteNum(x) ? Math.abs(x) : null);
+  const lo = abs(e['low']);
+  const hi = abs(e['high']);
+  const size = figureOf({ unit: e['unit'], value: abs(e['value']), sd: e['sd'],
+    low: lo !== null && hi !== null ? Math.min(lo, hi) : null, high: lo !== null && hi !== null ? Math.max(lo, hi) : null });
+  return size === undefined ? `each 1 more ${verb} it` : `each 1 more ${verb} it by ${size}`;
 }
 /** Whose it is: Olumi's estimate, the person's, a named party's, or a source not yet confirmed. */
 function whoseOf(x: unknown): { readonly tag: string; readonly source: NoteSource } {
   const r = isRec(x) ? x : {};
-  if (r['source'] === 'olumi') return { tag: 'Olumi\u2019s estimate', source: 'estimate' };
+  if (r['source'] === 'olumi') return { tag: 'Olumi’s estimate', source: 'estimate' };
   if (r['source'] === 'user') return { tag: 'yours', source: 'yours' };
-  if (r['source'] === 'party') return { tag: typeof r['party'] === 'string' && r['party'] !== '' ? `${r['party']}\u2019s` : 'a party\u2019s', source: 'party' };
+  if (r['source'] === 'party') return { tag: typeof r['party'] === 'string' && r['party'] !== '' ? `${r['party']}’s` : 'a party’s', source: 'party' };
   return { tag: 'source not yet confirmed', source: 'unverified' };
+}
+/** Whose a FIGURE is: Olumi's labelled estimate on anyone's item is Olumi's (Codex r1 on #3632: it was called "yours"). */
+function figureWhoseOf(x: unknown): { readonly tag: string; readonly source: NoteSource } {
+  return isRec(x) && x['estimate_by'] === 'olumi' ? { tag: 'Olumi’s estimate', source: 'estimate' } : whoseOf(x);
 }
 const PART_WORDS: Readonly<Record<string, string>> = { label: 'its name', text: 'its wording', value: 'its figure', low: 'its figure',
   high: 'its figure', unit: 'its unit', sd: 'its figure', form: 'its figure', sign: 'its direction', effect: 'its effect', quote: 'the words recorded',
   source: 'whose it is', party: 'whose it is', estimate_by: 'whose figure it is', limit: 'its limit', defined_as: 'its definition',
   target: 'its target', settings: 'what it sets', status: 'whether it is compared', occurrence: 'its chance', horizon_months: 'its window',
-  horizon_by: 'its window', mitigations: 'what reduces it', developed_from: 'where it came from', from: 'its ends', to: 'its ends' };
-/** The parts of an item a change touches, in words, each once. */
+  horizon_by: 'its window', mitigations: 'what reduces it', developed_from: 'where it came from', from: 'its ends', to: 'its ends',
+  role: 'its role', applies_to: 'what it applies to', holder: 'whose view it is', position: 'the view' };
+/** The parts of an item a change touches, in words, each once, in a fixed order (sorted keys). */
 function changedParts(before: Rec, after: Rec): string[] {
-  const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])].filter((k) => k !== 'id'
-    && JSON.stringify(before[k] ?? null) !== JSON.stringify(after[k] ?? null));
+  const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])].sort().filter((k) => k !== 'id'
+    && stableJson(before[k]) !== stableJson(after[k]));
   return [...new Set(keys.map((k) => PART_WORDS[k] ?? k.replace(/_/g, ' ')))];
 }
 
 /**
  * ⭐ THE CARD SHOWS EVERY CHANGE IT WRITES (Track 3, 22 Oct, consent: 12/12 core approvals wrote changes the card never
  * showed: option settings, conditions, range figures, renames, link-effect corrections, removals). One sentence for each
- * changed item a field or add does not already show in full; history entries (the host's own record) excepted.
+ * changed item a field or add does not already show in full; history entries (the host's own record) excepted. Nothing is
+ * cut: a sentence longer than the canvas reads is split into numbered parts.
  */
 function coreChangeNotes(operations: readonly HeldOp[], adds: readonly AddField[], fields: readonly ProposalField[],
   savedLabel: (id: string) => string): ChangeNoteField[] {
@@ -578,21 +612,40 @@ function coreChangeNotes(operations: readonly HeldOp[], adds: readonly AddField[
     const sep = o.path.indexOf(':');
     if (a !== undefined && CARD_KINDS.has(o.path.slice(0, sep)) && typeof words === 'string' && words.trim() !== '') proposed.set(o.path.slice(sep + 1), words);
   }
-  const name = (id: unknown): string => `\u2018${typeof id === 'string' ? clip(proposed.get(id) ?? savedLabel(id), 80) : 'an item'}\u2019`;
-  // A link's effect in words: which way, and by how much (value and sign are separate fields; a range may be written signed).
-  const effectOf = (e: unknown): string | undefined => {
-    if (!isRec(e)) return undefined;
-    const mag = (x: unknown): number | undefined => (finiteNum(x) ? Math.abs(x) : undefined);
-    const lo = mag(e['low']);
-    const hi = mag(e['high']);
-    const size = figureOf({ unit: e['unit'], value: mag(e['value']) ?? null,
-      low: lo !== undefined && hi !== undefined ? Math.min(lo, hi) : null, high: lo !== undefined && hi !== undefined ? Math.max(lo, hi) : null });
-    if (size === undefined) return undefined;
-    return `each 1 more ${e['sign'] === '-' ? 'lowers' : 'raises'} it by ${size}`;
+  const name = (id: unknown): string => quoted(typeof id === 'string' ? proposed.get(id) ?? savedLabel(id) : 'an item');
+  const CMP: Readonly<Record<string, string>> = { '<=': 'at most', '>=': 'at least', '<': 'below', '>': 'above' };
+  // What else an item carries that a field or add never shows: its limit and its definition.
+  const extrasOf = (x: Rec): string[] => {
+    const out: string[] = [];
+    const l = isRec(x['limit']) ? x['limit'] : undefined;
+    if (l !== undefined && finiteNum(l['value'])) out.push(`limit ${CMP[String(l['comparator'])] ?? String(l['comparator'])} ${sayFigureAsWritten(l['value'], typeof x['unit'] === 'string' ? x['unit'] : '')} (${whoseOf(l).tag})`);
+    const d = isRec(x['defined_as']) ? x['defined_as'] : undefined;
+    if (d !== undefined && Array.isArray(d['of'])) out.push(`defined as the ${d['op'] === 'product' ? 'product' : 'sum'} of ${d['of'].map(name).join(' and ')} (${whoseOf(d).tag})`);
+    return out;
   };
   const shownFigure = new Set(fields.flatMap((f) => (f.kind === 'factor_value' ? [`factor:${f.node_id}`] : [])));
   const addOf = new Map(adds.map((a) => [a.kind === 'factor_add' ? `factor:${a.node_id}` : a.kind === 'link_add' ? `link:${a.link_id}` : '', a]));
   const notes: ChangeNoteField[] = [];
+  const push = (path: string, text: string, source: NoteSource): void => {
+    // Split into parts the canvas reads in full (each "(n/N)"), at clause boundaries ("; ") so a figure stays with its unit;
+    // only a single clause longer than a part is split between words. No written detail is cut.
+    const room = NOTE_MAX - 8;
+    const pieces = text.split('; ').flatMap((clause) => {
+      if (clause.length <= room) return [clause];
+      const out: string[] = [];
+      let cur = '';
+      for (const w of clause.split(' ')) { if (cur !== '' && `${cur} ${w}`.length > room) { out.push(cur); cur = w; } else cur = cur === '' ? w : `${cur} ${w}`; }
+      return cur === '' ? out : [...out, cur];
+    });
+    const chunks: string[] = [];
+    let cur = '';
+    for (const piece of pieces) {
+      if (cur !== '' && `${cur}; ${piece}`.length > room) { chunks.push(cur); cur = piece; } else cur = cur === '' ? piece : `${cur}; ${piece}`;
+    }
+    if (cur !== '') chunks.push(cur);
+    chunks.forEach((c, k) => notes.push({ field_id: chunks.length === 1 ? `change_note:${path}` : `change_note:${path}#${k + 1}`, kind: 'change_note',
+      text: chunks.length === 1 ? c : `${c} (${k + 1}/${chunks.length})`, source, editable: false }));
+  };
   for (const o of operations) {
     if (o.op !== 'living_change' || !isRec(o.value)) continue;
     const sep = o.path.indexOf(':');
@@ -605,35 +658,43 @@ function coreChangeNotes(operations: readonly HeldOp[], adds: readonly AddField[
     const item = v['change'] === 'remove' ? before : after;
     // An item's own words first (a removed item is in no proposed list and may have no saved node), then the card's labels.
     const ownWords = item['label'] ?? item['text'];
-    const own = kind === 'link' ? `${name(item['from'])} \u2192 ${name(item['to'])}`
-      : typeof ownWords === 'string' && ownWords.trim() !== '' ? `\u2018${clip(ownWords, 80)}\u2019` : name(id);
+    const own = kind === 'link' ? `${name(item['from'])} → ${name(item['to'])}`
+      : typeof ownWords === 'string' && ownWords.trim() !== '' ? quoted(ownWords) : name(id);
     // A view names its holder and carries no source of its own: it is that party's.
-    const who = kind === 'view' ? { tag: `${String(item['holder'] ?? 'a party')}\u2019s`, source: 'party' as const } : whoseOf(item);
+    const who = kind === 'view' ? { tag: `${String(item['holder'] ?? 'a party')}’s`, source: 'party' as const } : whoseOf(item);
     const figureOfItem = (x: Rec): string | undefined => (kind === 'link' ? effectOf(x['effect']) : figureOf(x));
+    const figureWho = (x: Rec) => figureWhoseOf(kind === 'link' ? (isRec(x['effect']) ? { ...x, ...x['effect'] } : x) : x);
     let text: string | undefined;
+    let source: NoteSource = who.source;
     if (v['change'] === 'remove') {
-      text = kind === 'link' ? `Removes the link ${own}.` : kind === 'condition' ? `Moves the condition \u201c${clip(String(before['text'] ?? ''))}\u201d to history.`
-        : kind === 'view' ? `Replaces ${String(before['holder'] ?? 'a party')}\u2019s earlier view.` : `Removes ${own}.`;
+      text = kind === 'link' ? `Removes the link ${own}.` : kind === 'condition' ? `Moves the condition “${String(before['text'] ?? '')}” to history.`
+        : kind === 'view' ? `Replaces ${String(before['holder'] ?? 'a party')}’s earlier view.` : `Removes ${own}.`;
     } else if (v['change'] === 'add') {
       const shown = addOf.get(o.path);
+      const extras = extrasOf(after);
       const figure = kind === 'factor' || kind === 'link' ? figureOfItem(after) : undefined;
-      if (kind === 'factor' && shown?.kind === 'factor_add' && (shown.value !== null || figure === undefined)) continue;
+      const fw = figureWho(after);
+      if (kind === 'factor' && shown?.kind === 'factor_add' && (shown.value !== null || figure === undefined) && extras.length === 0
+        && fw.source === (shown.source === 'yours' ? 'yours' : 'estimate')) continue;
       if (kind === 'link' && shown !== undefined && figure === undefined) continue;
       if (kind === 'factor' || kind === 'link') {
-        text = shown !== undefined ? `${own} (${who.tag}): ${figure}.` : `Adds ${kind === 'link' ? 'the link ' : ''}${own}${figure === undefined ? '' : `: ${figure}`} (${who.tag}).`;
+        const said = [figure === undefined ? undefined : `${figure} (${fw.tag})`, ...extras].filter((t): t is string => t !== undefined);
+        const tail = shown === undefined && (figure === undefined || fw.tag !== who.tag) ? ` (${who.tag})` : '';
+        text = `${shown !== undefined ? '' : 'Adds '}${kind === 'link' && shown === undefined ? 'the link ' : ''}${own}${said.length > 0 ? `: ${said.join('; ')}` : ''}${tail}.`;
+        source = figure !== undefined ? fw.source : who.source;
       } else if (kind === 'option') {
         const sets = (Array.isArray(after['settings']) ? after['settings'] : []).filter(isRec)
-          .map((st) => `${name(st['factor_id'])} to ${figureOf(st) ?? 'no figure yet'}`);
+          .map((st) => `${name(st['factor_id'])} to ${figureOf(st) ?? 'no figure yet'} (${figureWhoseOf(st).tag})`);
         text = `Adds the option ${own}${sets.length > 0 ? `, which sets ${sets.join('; ')}` : ''} (${who.tag}).`;
       } else if (kind === 'condition') {
-        text = `Adds the condition \u201c${clip(String(after['text'] ?? ''))}\u201d.`;
+        text = `Adds the condition “${String(after['text'] ?? '')}” (${who.tag}).`;
       } else if (kind === 'view') {
-        text = `Records ${String(after['holder'] ?? 'a party')}\u2019s view: \u201c${clip(String(after['position'] ?? ''))}\u201d.`;
+        text = `Records ${String(after['holder'] ?? 'a party')}’s view: “${String(after['position'] ?? '')}”.`;
       } else if (kind === 'risk') {
         const occ = isRec(after['occurrence']) ? after['occurrence'] : {};
         const pct = (x: unknown): string | undefined => (finiteNum(x) ? `${Math.round(x * 1000) / 10}%` : undefined);
-        const chance = pct(occ['low']) !== undefined && pct(occ['high']) !== undefined ? `, a ${pct(occ['low'])}\u2013${pct(occ['high'])} chance`
-          + `${finiteNum(after['horizon_months']) ? ` within ${after['horizon_months']} months` : ''}` : '';
+        const chance = pct(occ['low']) !== undefined && pct(occ['high']) !== undefined ? `, a ${pct(occ['low'])}–${pct(occ['high'])} chance`
+          + `${finiteNum(after['horizon_months']) ? ` within ${after['horizon_months']} months` : ''} (${figureWhoseOf(occ).tag})` : '';
         text = `Adds the risk ${own}${chance} (${who.tag}).`;
       } else {
         text = `Adds ${own} (${who.tag}).`;
@@ -643,24 +704,33 @@ function coreChangeNotes(operations: readonly HeldOp[], adds: readonly AddField[
       if (kind === 'factor' && shownFigure.has(o.path) && parts.every((p) => p === 'its figure')) continue;
       const said: string[] = [];
       const oldName = before['label'] ?? before['text'];
-      if (parts.includes('its name') || parts.includes('its wording')) said.push(`Renames \u2018${clip(String(oldName ?? ''), 80)}\u2019 to ${own}`);
+      if (parts.includes('its name') || parts.includes('its wording')) said.push(`Renames ${quoted(String(oldName ?? ''))} to ${own}`);
+      const done = new Set(['its name', 'its wording']);
       if (kind === 'option') {
+        done.add('what it sets');
         const was = new Map((Array.isArray(before['settings']) ? before['settings'] : []).filter(isRec).map((st) => [String(st['factor_id']), st]));
         const now = (Array.isArray(after['settings']) ? after['settings'] : []).filter(isRec);
-        for (const st of now) if (JSON.stringify(was.get(String(st['factor_id'])) ?? null) !== JSON.stringify(st)) said.push(`${own} now sets ${name(st['factor_id'])} to ${figureOf(st) ?? 'no figure yet'} (${whoseOf(st).tag})`);
+        for (const st of now) if (stableJson(was.get(String(st['factor_id'])) ?? null) !== stableJson(st)) said.push(`${own} now sets ${name(st['factor_id'])} to ${figureOf(st) ?? 'no figure yet'} (${figureWhoseOf(st).tag})`);
         for (const f of was.keys()) if (!now.some((st) => String(st['factor_id']) === f)) said.push(`${own} no longer sets ${name(f)}`);
       } else {
         const was = figureOfItem(before);
         const is = figureOfItem(after);
-        if (was !== is) said.push(`${kind === 'link' ? 'The link ' : ''}${own}: was ${was ?? 'no figure'}, now ${is ?? 'no figure'}`);
+        if (was !== is) {
+          const fw = figureWho(after);
+          said.push(`${kind === 'link' ? 'The link ' : ''}${own}: was ${was ?? 'no figure'}, now ${is ?? 'no figure'} (${fw.tag})`);
+          source = fw.source;
+          for (const p of [kind === 'link' ? 'its effect' : 'its figure', 'whose figure it is']) done.add(p);
+        }
+        const xWas = extrasOf(before).join('; ');
+        const xIs = extrasOf(after).join('; ');
+        if (xWas !== xIs) { said.push(`${own}: ${xIs === '' ? `no longer has its ${xWas.startsWith('limit') ? 'limit' : 'definition'}` : `now ${xIs}`}`); done.add('its limit'); done.add('its definition'); }
       }
-      const done = new Set(['its name', 'its wording', 'what it sets', ...(kind === 'link' ? ['its effect'] : ['its figure'])]);
       const rest = parts.filter((p) => !done.has(p));
       if (rest.length > 0) said.push(said.length === 0 ? `Changes ${kind === 'link' ? 'the link ' : ''}${own}: ${rest.join(', ')}` : `also changes ${rest.join(', ')}`);
       if (said.length === 0) said.push(`Changes ${own}`);
-      text = `${said.join('; ')} (${who.tag}).`;
+      text = `${said.join('; ')}${said.some((t) => t.endsWith(')')) ? '' : ` (${who.tag})`}.`;
     }
-    notes.push({ field_id: `change_note:${o.path}`, kind: 'change_note', text: clip(text, 400), source: who.source, editable: false });
+    push(o.path, text, source);
   }
   return notes;
 }
