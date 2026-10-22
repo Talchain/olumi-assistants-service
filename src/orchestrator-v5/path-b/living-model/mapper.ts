@@ -33,7 +33,7 @@ import { quantityUnitsCompose, readUnitParts, sameUnit, singular, unitsCompose, 
 import { periodAdverb, periodNoun } from '../../../utils/unit-alphabet.js';
 import { EventRiskV1 } from '../../../schemas/event-risk.js';
 import { riskOccurrenceIsCurrent, riskOccurrenceWindowMonths } from '../../agent-lane/risk-occurrence.js';
-import { readStatedDeadline } from '../../goal-target/deadline-date.js';
+import { isCalendarDate, readStatedDeadline, wholeMonthsBetween } from '../../goal-target/deadline-date.js';
 
 export type WithheldReason =
   | 'no_level_target' | 'aim_not_in_slice' | 'change_kind_unknown' | 'change_base_invalid' | 'change_base_not_theirs' | 'current_unit_mismatch' | 'exact_target_not_in_slice' | 'target_range_not_in_slice'
@@ -131,6 +131,20 @@ function statedDeadline(byWhen: string | null): string | undefined {
   const year = /^(\d{4})-\d{2}-\d{2}$/.exec(read?.date ?? '')?.[1];
   return read !== null && year !== undefined && Number(year) >= 1000 && new RegExp(`\\b${year}\\b`).test(byWhen)
     && ['date', 'quarter_end', 'month_end', 'year_end'].includes(read.form) ? read.date : undefined;
+}
+
+/**
+ * ⭐ A CALENDAR DEADLINE, READ BY OLUMI AND LABELLED (DL 22 Oct): "by the end of March" fixes a date, so its window depends on the
+ * day it is read. The AI reads the date (`period_deadline`, Olumi's reading of the person's words, labelled `period_by: 'olumi'`)
+ * and the host records the day it was read (`period_read_on`, `calendar-reading.ts`); the months between them are worked out
+ * HERE, whole calendar months as a month-end date counts them (`wholeMonthsBetween`), never by the AI and never from the clock.
+ * The goal keeps the deadline and the day beside the window, so it is never unlabelled. Dates that are not real, or under a
+ * month between them (a deadline on or before its day included), give no window, as before (Codex r1 on #3674: no date parser, which can drop a stated day).
+ */
+function olumiWindow(t: LivingModelT['aims'][number]['target']): { readonly deadline: string; readonly months: number; readonly readOn: string } | undefined {
+  if (t === null || t.period_by !== 'olumi' || !isCalendarDate(t.period_read_on) || !isCalendarDate(t.period_deadline)) return undefined;
+  const months = wholeMonthsBetween(t.period_read_on, t.period_deadline);
+  return months >= 1 && months <= 120 ? { deadline: t.period_deadline, months, readOn: t.period_read_on } : undefined;
 }
 
 /** The goal a saved graph was compiled with: a regeneration keeps it unless its aim is no longer current. */
@@ -320,11 +334,14 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     goalNode = { id: aim.id, kind: 'goal', label: aim.text, ...(aim.quote !== null ? { source_quote: aim.quote } : {}) };
     nodes.push(goalNode);
     const t = aim.target;
-    // A window belongs to the aim, independently of whether its target can be scored.
-    const window = t?.period_months ?? undefined;
-    const deadline = statedDeadline(t?.by_when ?? null);
+    // A window belongs to the aim, independently of whether its target can be scored: the person's own duration, or Olumi's
+    // labelled reading of their calendar date, never a month count the AI worked out for one.
+    const reading = olumiWindow(t);
+    const window = t?.period_by === 'olumi' ? reading?.months : t?.period_months ?? undefined;
+    const deadline = reading?.deadline ?? statedDeadline(t?.by_when ?? null);
     if (t?.by_when != null) goalNode.goal_deadline_as_stated = t.by_when;
     if (deadline !== undefined) goalNode.goal_horizon = { deadline };
+    if (reading !== undefined) goalNode.goal_horizon_reference_date = reading.readOn;
     const isChange = t !== null && (t.comparator === 'increase' || t.comparator === 'decrease');
     // The ONE reading of the aim's target (`aim-reading.ts`), shared with the gap that says its held reason.
     const lt = aimTargetReading(aim);
@@ -350,7 +367,6 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     if (relative !== null && t !== null && t.value !== null) {
       const signed = t.comparator === 'increase' ? Math.abs(t.value) : -Math.abs(t.value);
       const today = `today's ${t.quantity}`;
-      const deadline = statedDeadline(t.by_when);
       goal = { id: aim.id, cap: relative.cap, unit: '%' };
       Object.assign(goalNode, {
         goal_direction: signed > 0 ? '>=' : '<=', quantity_frame: 'change',
@@ -359,8 +375,8 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
         ...(t.by_when !== null ? { goal_deadline_as_stated: t.by_when } : {}),
         ...(deadline !== undefined ? { goal_horizon: { deadline } } : {}),
         goal_target_basis: { source: 'olumi_reading', quantity_frame: 'change', target_frame: 'change_abs', target_raw: signed, reference: 'today',
-          denominator: today, ...(t.period_months !== null && Number.isInteger(t.period_months) && t.period_months >= 1 && t.period_months <= 120
-            ? { period_months: t.period_months } : {}), period_kind: 'at_end', effect_unit: `% of ${today}`, effects_at_period_end: false },
+          denominator: today, ...(window !== undefined && Number.isInteger(window) && window >= 1 && window <= 120
+            ? { period_months: window } : {}), period_kind: 'at_end', effect_unit: `% of ${today}`, effects_at_period_end: false },
       });
       assumed.push({ id: aim.id, text: `Carrying on as now leaves ${t.quantity} unchanged, so the change is measured from today's level, whatever it is.` });
       assumed.push({ id: aim.id, text: `Every effect on ${t.quantity} is a % of today's level, and the effects add rather than compound.` });

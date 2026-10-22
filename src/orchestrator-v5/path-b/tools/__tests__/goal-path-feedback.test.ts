@@ -4,7 +4,7 @@
  * (or carded) as it is. A cause only the person's input can settle never triggers it, nor does a clean model, and a change
  * answers only for the causes it adds. A stateful product double; the kernel, the mapper and the write are real. SYNTHETIC wording.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RunContext, type FunctionTool } from '@openai/agents';
 import { ProposalStore } from '../../../agent-lane/proposal.js';
 import { computeGraphIdentityHash } from '../../../context/graph-identity.js';
@@ -334,6 +334,102 @@ describe('the SDK tools: the route\'s one offer per turn; a refusal never makes 
     const t = turn(p, false);
     expect(await call(t.build, draft(withCondition('prerequisite')))).toMatchObject({ status: 'ok', mutated: true });
     expect(t.restructure).toBeUndefined();
+  });
+});
+
+describe('Codex r1 on #3674: the tools record the day of a calendar reading, the host\'s, and a change keeps a saved reading', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('a draft\'s new reading is saved with the host\'s day and no count; a change that sends another day keeps the saved reading', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-22T12:00:00Z'));
+    const m = structuredClone(KNOWN_ANSWER);
+    Object.assign(m.aims[0]!.target!, { by_when: 'by the end of September', period_by: 'olumi', period_deadline: '2027-09-30', period_read_on: '2031-01-01', period_months: 9 });
+    const p = product(null);
+    expect(await buildModel({ dispatch: p.dispatch }, draftCtx, { brief: BRIEF, model: m })).toMatchObject({ status: 'ok', mutated: true });
+    const reading = { period_by: 'olumi', period_deadline: '2027-09-30', period_read_on: '2026-10-22', period_months: null };
+    expect((p.saved()!.living_model as LivingModelT).aims[0]!.target).toMatchObject(reading);
+    vi.setSystemTime(new Date('2026-11-05T12:00:00Z'));
+    const next = structuredClone(p.saved()!.living_model as LivingModelT);
+    Object.assign(next.aims[0]!.target!, { period_read_on: '2026-11-05' });
+    next.factors[0] = { ...next.factors[0]!, value: 0.6, quote: 'Actually f is at 0.6 now.' };
+    const out = await proposeLivingChange({ dispatch: p.dispatch, proposals: new ProposalStore() }, changeCtx, change(next));
+    expect(out, JSON.stringify(out)).toMatchObject({ status: 'ok' });
+    expect(((out as { data: Rec }).data.changes as Rec[]).map((c) => c.id), 'the reading is unchanged, so no row for the aim').toEqual(['f']);
+  });
+
+  /** A change two weeks on that corrects f and, beside it, sends `aim` for the goal: the card has a row for f alone, and the write keeps the saved aim. */
+  async function onlyF(saved: LivingModelT, aim: Partial<NonNullable<LivingModelT['aims'][number]['target']>>) {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-05T12:00:00Z'));
+    const p = product(saved);
+    const proposals = new ProposalStore();
+    const next = structuredClone(saved);
+    Object.assign(next.aims[0]!.target!, aim);
+    next.factors[0] = { ...next.factors[0]!, value: 0.6, quote: 'Actually f is at 0.6 now.' };
+    const out = await proposeLivingChange({ dispatch: p.dispatch, proposals }, changeCtx, change(next));
+    expect(out, JSON.stringify(out)).toMatchObject({ status: 'ok' });
+    expect(((out as { data: Rec }).data.changes as Rec[]).map((c) => c.id)).toEqual(['f']);
+    expect(await applyLivingChange({ dispatch: p.dispatch, proposals }, changeCtx, String((out as { data: Rec }).data.proposal_id))).toMatchObject({ status: 'ok' });
+    return (p.saved()!.living_model as LivingModelT).aims[0]!;
+  }
+
+  it('Codex r2: the person\'s own saved duration stands while its words do; a reading beside it never replaces it', async () => {
+    const saved = structuredClone(KNOWN_ANSWER);
+    Object.assign(saved.aims[0]!.target!, { by_when: 'within 6 months, by the end of March', period_months: 6 });
+    const aim = await onlyF(saved, { period_by: 'olumi', period_deadline: '2027-03-31', period_months: null });
+    expect(aim.target).toMatchObject({ period_months: 6, period_by: null, period_deadline: null, period_read_on: null });
+  });
+
+  it('Codex r2: a saved reading the AI re-dated keeps its author; the person\'s aim never reads as changed', async () => {
+    const saved = structuredClone(KNOWN_ANSWER);
+    saved.aims[0] = { ...saved.aims[0]!, quote: 'reach the units by the end of September' };
+    Object.assign(saved.aims[0]!.target!, { by_when: 'by the end of September', period_by: 'olumi', period_deadline: '2027-09-30', period_read_on: '2026-10-22' });
+    const aim = await onlyF(saved, { period_read_on: '2026-11-05', period_deadline: '2027-10-31' });
+    expect(aim).toEqual(saved.aims[0]);
+  });
+
+  /** Saved: the person's aim, out of the verified window, with Olumi's reading of its calendar deadline. */
+  const readSaved = (): LivingModelT => {
+    const saved = structuredClone(KNOWN_ANSWER);
+    saved.aims[0] = { ...saved.aims[0]!, quote: 'reach the units by the end of September' };
+    Object.assign(saved.aims[0]!.target!, { by_when: 'by the end of September', period_by: 'olumi', period_deadline: '2027-09-30', period_read_on: '2026-10-22' });
+    return saved;
+  };
+
+  it('Codex r3: the saved aim sent under another spelling of its id ("G") is matched as the kernel matches it, and keeps its author and reading', async () => {
+    const saved = readSaved();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-05T12:00:00Z'));
+    const p = product(saved);
+    const proposals = new ProposalStore();
+    const next = structuredClone(saved);
+    next.aims[0] = { ...next.aims[0]!, id: 'G', target: { ...next.aims[0]!.target!, period_read_on: '2026-11-05' } };
+    next.factors[0] = { ...next.factors[0]!, value: 0.6, quote: 'Actually f is at 0.6 now.' };
+    const out = await proposeLivingChange({ dispatch: p.dispatch, proposals }, changeCtx, change(next));
+    expect(out, JSON.stringify(out)).toMatchObject({ status: 'ok' });
+    expect(((out as { data: Rec }).data.changes as Rec[]).map((c) => c.id)).toEqual(['f']);
+    await applyLivingChange({ dispatch: p.dispatch, proposals }, changeCtx, String((out as { data: Rec }).data.proposal_id));
+    expect((p.saved()!.living_model as LivingModelT).aims[0]).toEqual(saved.aims[0]);
+  });
+
+  it('Codex r3: a second aim whose raw id is the saved aim\'s ("G", "g" → g, g_2) never takes the saved reading; its own duration stays', async () => {
+    const saved = readSaved();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-05T12:00:00Z'));
+    const p = product(saved);
+    const proposals = new ProposalStore();
+    const next = structuredClone(saved);
+    const second = { ...structuredClone(saved.aims[0]!), id: 'g', text: 'A second aim', source: 'olumi' as const, quote: null,
+      target: { ...saved.aims[0]!.target!, period_by: null, period_deadline: null, period_read_on: null, period_months: 18 } };
+    next.aims = [{ ...next.aims[0]!, id: 'G' }, second];
+    const out = await proposeLivingChange({ dispatch: p.dispatch, proposals }, changeCtx, change(next));
+    expect(out, JSON.stringify(out)).toMatchObject({ status: 'ok' });
+    await applyLivingChange({ dispatch: p.dispatch, proposals }, changeCtx, String((out as { data: Rec }).data.proposal_id));
+    const aims = (p.saved()!.living_model as LivingModelT).aims;
+    expect(aims.map((a) => a.id)).toEqual(['g', 'g_2']);
+    expect(aims[0]).toEqual(saved.aims[0]);
+    expect(aims[1]!.target).toMatchObject({ period_months: 18, period_by: null, period_deadline: null, period_read_on: null });
   });
 });
 

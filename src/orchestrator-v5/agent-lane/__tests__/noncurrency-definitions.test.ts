@@ -12,7 +12,7 @@ const delivery = (): LivingModelT => ({
   aims: [{ id: 'delivered', text: 'Deliver at least 60 developer-days', status: 'current', ...who('deliver at least 60 developer-days'),
     defined_as: { op: 'product', of: ['pace', 'days'], ...who('developer-days delivered equals developer-days per working day times working days') },
     target: { quantity: 'developer-days delivered', comparator: '>=', value: 60, low: null, high: null, unit: 'developer-days', by_when: null,
-      period_months: null, baseline: null, current: null, current_source: null, current_unit: null, change_kind: null, source: null } }],
+      period_months: null, period_by: null, period_deadline: null, period_read_on: null, baseline: null, current: null, current_source: null, current_unit: null, change_kind: null, source: null } }],
   options: [], factors: [factor('pace', 3, 'developer-days per working day', 'we deliver 3 developer-days per working day'),
     factor('days', 12, 'working days', 'we have 12 working days')],
   links: [], risks: [], conditions: [], views: [], history: [],

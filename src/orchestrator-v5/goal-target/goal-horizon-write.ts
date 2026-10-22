@@ -29,7 +29,7 @@ import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { goalDeadlineFromRecord } from './goal-kind.js';
 import { admitStructuralGoalAccumulation } from '../agent-lane/accumulation-identity.js';
 import { readGoalRecord } from './goal-record.js';
-import { readStatedDeadline, sayDate } from './deadline-date.js';
+import { isCalendarDate, readStatedDeadline, sayDate } from './deadline-date.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -59,14 +59,7 @@ export type GoalHorizonEditResult =
   | { readonly kind: 'unchanged' }
   | { readonly kind: 'refused'; readonly reason: GoalHorizonRefusal };
 
-export const isCalendarDate = (d: unknown): d is string => {
-  if (typeof d !== 'string') return false;
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d);
-  if (m === null) return false;
-  const [y, mo, da] = [Number(m[1]), Number(m[2]), Number(m[3])];
-  const t = new Date(Date.UTC(y, mo - 1, da));
-  return t.getUTCFullYear() === y && t.getUTCMonth() === mo - 1 && t.getUTCDate() === da;
-};
+export { isCalendarDate };
 
 export function applyGoalHorizonEdit(persistedGraph: unknown, approved: ApprovedGoalHorizon): GoalHorizonEditResult {
   if (!isRec(persistedGraph) || !Array.isArray(persistedGraph.nodes) || !Array.isArray(persistedGraph.edges)) {

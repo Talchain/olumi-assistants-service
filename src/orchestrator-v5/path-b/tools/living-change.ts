@@ -14,7 +14,9 @@ import type { AgentToolContext } from '../../agent-lane/runtime/agent-tools.js';
 import type { InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
 import { createProposal, type ProposalOperation, type ProposalStore, type StructuredProposal } from '../../agent-lane/proposal.js';
 import { LivingModel, type LivingModelT } from '../../../schemas/living-model.js';
-import { applyKernel, plain } from '../living-model/kernel.js';
+import { applyKernel, canonicalIds, plain } from '../living-model/kernel.js';
+import { withCalendarReadings } from '../living-model/calendar-reading.js';
+import { todayInLondon } from '../../goal-target/deadline-date.js';
 import { changeGoal, mapLivingModel, savedGoal } from '../living-model/mapper.js';
 import { addedCauses, goalPathEncodingCauses, KEPT_AS_REFUSED, optionsReachingGoal, personContentLost, RESTRUCTURE_AIM, RESTRUCTURE_CHANGE, RESTRUCTURE_CUT, withRefusedRoles, type Restructure } from './goal-path.js';
 import { diffLivingModels, stable, type LivingChange } from '../living-model/diff.js';
@@ -76,10 +78,18 @@ export async function proposeLivingChange(deps: Deps, ctx: Ctx, args: LivingChan
     ? { ...outcome, data: { ...outcome.data, restructure: { kept: 'first_call', lost, note: KEPT_AS_REFUSED } } } : outcome;
 }
 
-/** The kernel on a change: the person's words (the saved brief and their messages) and the saved model it changes. */
+/**
+ * The kernel on a change: the person's words (the saved brief and their messages) and the saved model it changes. A calendar
+ * deadline's reading: a saved one stands while its words do; a new one gets the host's day (`calendar-reading.ts`), before the
+ * kernel judges what changed and again on its canonical ids.
+ */
 function kernelFor(base: Exclude<Awaited<ReturnType<typeof savedLiving>>, ToolOutcome>, ctx: Ctx, model: LivingModelT) {
   const brief = typeof base.saved.json.brief_text === 'string' ? [base.saved.json.brief_text] : [];
-  return applyKernel(model, [...brief, ...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])], base.model, brief[0] ?? null);
+  const today = todayInLondon(new Date());
+  // On the kernel's canonical ids, so a reading is matched to the saved aim the kernel judges by (Codex r3 on #3674).
+  const read = applyKernel(withCalendarReadings(canonicalIds(model), base.model, today), [...brief, ...(ctx.verified_user_messages ?? []),
+    ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])], base.model, brief[0] ?? null);
+  return { ...read, model: withCalendarReadings(read.model, base.model, today) };
 }
 
 async function proposeOnce(deps: Deps, ctx: Ctx, args: LivingChangeArgs): Promise<ToolOutcome> {

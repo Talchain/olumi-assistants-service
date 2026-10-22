@@ -205,6 +205,7 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       }
       a.target = { quantity: prior?.quantity ?? a.text, comparator: edit.constraint_type === 'at_least' ? '>=' : '<=',
         value: edit.raw_value, ...noRange, unit: edit.unit, by_when: prior?.by_when ?? null, period_months: prior?.period_months ?? null,
+        period_by: prior?.period_by ?? null, period_deadline: prior?.period_deadline ?? null, period_read_on: prior?.period_read_on ?? null,
         baseline: prior?.baseline ?? null, current: keepCurrent ? prior?.current ?? null : null,
         current_source: keepCurrent ? prior?.current_source ?? null : null, current_unit: null, change_kind: null, source: null };
       Object.assign(a, theirs);

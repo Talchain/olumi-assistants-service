@@ -30,7 +30,7 @@ const point = (value: number, unit: string | null) => ({ form: 'point' as const,
 const SERIAL: LivingModelT = {
   aims: [{ id: 'g', text: 'Reach 100 units', status: 'current', defined_as: null, ...user('we need at least 100 units; today we are at 70'),
     target: { quantity: 'units', comparator: '>=', value: 100, low: null, high: null, unit: 'units', by_when: null, baseline: 'today',
-      current: 70, current_source: null, current_unit: null, change_kind: null, period_months: null, source: null } }],
+      current: 70, current_source: null, current_unit: null, change_kind: null, period_months: null, period_by: null, period_deadline: null, period_read_on: null, source: null } }],
   options: [
     { id: 'hold', label: 'Hold', settings: [], status: 'feasible', developed_from: null, ...user('or we hold') },
     { id: 'push', label: 'Push', status: 'feasible', developed_from: null, ...user('push a to 1'), settings: [{ factor_id: 'a', estimate_by: null, value: 1, low: null, high: null, unit: null, ...user('push a to 1') }] },

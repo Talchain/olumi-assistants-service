@@ -18,6 +18,8 @@ import type { InternalDispatch } from '../../agent-lane/runtime/agent-capabiliti
 import { constructionOperationId, findConstructionVersion } from '../../agent-lane/runtime/build-model.js';
 import { LivingModel } from '../../../schemas/living-model.js';
 import { applyKernel } from '../living-model/kernel.js';
+import { withCalendarReadings } from '../living-model/calendar-reading.js';
+import { todayInLondon } from '../../goal-target/deadline-date.js';
 import { mapLivingModel } from '../living-model/mapper.js';
 import { hasGaps, structureGaps } from '../living-model/structure.js';
 import type { CritiqueT } from '../../agent-lane/core/model-critic.js';
@@ -109,7 +111,9 @@ async function constructUnrecorded(deps: DraftDeps, ctx: DraftContext, args: Bui
 
   const words = draftWords(ctx, args.brief);
   const msLeft = (): number | undefined => (deps.deadlineAt === undefined ? undefined : deps.deadlineAt - Date.now());
-  const kernelled = applyKernel(args.model, words);
+  // A calendar deadline's reading is labelled with the day the host read it (`calendar-reading.ts`).
+  const read = applyKernel(args.model, words);
+  const kernelled = { ...read, model: withCalendarReadings(read.model, undefined, todayInLondon(new Date())) };
   const mapped = mapLivingModel(kernelled.model);
   if (!mapped.graph.nodes.some((n) => n.kind !== 'decision')) return refused('model_empty');
   // ⭐ CLASS 3: a draft whose own encoding withholds its goal's chance is said back ONCE, before any save or review, so the agent
