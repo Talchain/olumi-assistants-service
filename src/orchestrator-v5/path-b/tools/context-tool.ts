@@ -92,7 +92,8 @@ function selectedRunOf(json: Rec, graph: Rec): Rec | null {
     run_state: runState ?? null,
     leader_claim_permitted: bool(isRec(state?.leader_claim) ? state.leader_claim.permitted : undefined),
     facts: runFactsOf(json.analysis_result ?? null, graph, current,
-      { analysisState: json.analysis_state, analysisReady, selectedRunId: runId, ...(evidence === undefined ? {} : { runEvidence: evidence }) }),
+      { analysisState: json.analysis_state, analysisReady, selectedRunId: runId, ...(evidence === undefined ? {} : { runEvidence: evidence }),
+        impliedQuantity: json.analysis_implied_quantity }),
   };
 }
 

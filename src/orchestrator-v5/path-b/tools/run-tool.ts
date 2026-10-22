@@ -70,7 +70,10 @@ export async function recordedRun(deps: { readonly dispatch: InternalDispatch },
     && run.graph_hash_at_run === id.graph_hash_at_run && id.graph_hash_at_run === revision && at === id.computed_at) {
     // Exact results: the margins and the input each rests on, from the ONE run-facts packet of this same Run (`goalMarginsOf`).
     const margins = isRec(run.facts) ? run.facts.margins : undefined;
-    return ok({ run_id: run.run_id, ...facts, inputs_used: run.inputs_used, ...(margins === undefined ? {} : { goal_margins: margins }) }, { ran: true });
+    // Item 2: with no target figure, what this same Run implies for the quantity nearest the aim (`implied_by_deadline`).
+    const implied = isRec(run.facts) ? run.facts.implied_by_deadline : undefined;
+    return ok({ run_id: run.run_id, ...facts, inputs_used: run.inputs_used, ...(margins === undefined ? {} : { goal_margins: margins }),
+      ...(implied === undefined ? {} : { implied_by_deadline: implied }) }, { ran: true });
   }
   return unavailable('run_not_recorded');
 }

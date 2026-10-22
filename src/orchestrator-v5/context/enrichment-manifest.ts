@@ -231,6 +231,7 @@ export const ENRICHMENT_PRODUCER_MANIFEST: ReadonlySet<string> = new Set<string>
   // SERVER-initiated run only. Unmanifested until now, so every auto-run fact
   // fired the unknown-key tripwire.
   'run_provenance', // CEE-injected: handlers/chip-click-dispatch.ts stampAutoRunProvenance
+  '__cee_implied_quantity', // CEE-injected: tools/handlers/run-analysis.ts (goal-target/implied-quantity.ts), aim with no target
   // ── Legacy V1 inbound-tolerance ───────────────────────────────────────────
   // Not emitted by the live PLoT /v2/run producer (RunResponseV3 has no
   // top-level `results`); emitted by the V1 bundle (plot v1/run.ts:589) and
@@ -420,6 +421,8 @@ const R_COACHING_SIGNAL =
   'CEE-injected coaching-signal marker for the next turn coaching-cache reader (coaching-signal-application.ts) — routing metadata, not analysis content.';
 const R_RUN_PROVENANCE =
   'CEE-injected run-initiation marker (context/run-initiator.ts) — provenance, not analysis content. Its readers are the initiation/delivery predicates in run-initiator.ts (coaching first-vs-rerun, unrequested-analysis confinement), never the analysis→LLM derivers; it is also transported to the UI (P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP, schemas 0.57.0) for the provisional label.';
+const R_IMPLIED_QUANTITY =
+  'CEE-injected (item 2, 22 Oct): what a Run with no stated target implies for the sized quantity nearest the aim. Off the UI transport keep-list; the scenario read serves it on its own key (`analysis_implied_quantity`) and the AI reads it in its Run facts (`implied_by_deadline`), never through the analysis→LLM derivers.';
 const R_LEGACY_COMPACT =
   'Legacy V1 inbound-tolerance array — not emitted by the live /v2/run producer; consumed by the shared compactAnalysis projection (results[].factor_sensitivity / results[].robustness), not the row-#2 enrichment derivers.';
 /**
@@ -512,6 +515,7 @@ export const ENRICHMENT_ANALYSIS_LLM_SKIP: ReadonlyMap<string, string> = new Map
   ['coaching_signal_produced_at', R_COACHING_SIGNAL],
   ['_diagnostics', R_INTERNAL],
   ['run_provenance', R_RUN_PROVENANCE],
+  ['__cee_implied_quantity', R_IMPLIED_QUANTITY],
   ['results', R_LEGACY_COMPACT],
   // V7-C slice 1b — transported to the UI, never narrated by the coach.
   ['correlation_model', R_VOI_NOT_COACH_NARRATED],

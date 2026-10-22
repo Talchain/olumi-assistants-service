@@ -130,6 +130,7 @@ import {
 } from '../orchestrator-v5/compose/unrequested-analysis-confinement.js';
 // C46 stage 1: WHY a persisted fact's leader was withheld, when the reason is a product the analysis adds up.
 import { evaluatedIdentityNodeIds, nodesUnderANonlinearIdentity, nonlinearIdentityLeaderClaimCause } from '../orchestrator-v5/agent-lane/admit-model.js';
+import { readStoredImpliedQuantity, type ImpliedQuantity } from '../orchestrator-v5/goal-target/implied-quantity.js';
 import { selectCanonicalAnalysisState } from '../orchestrator-v5/context/canonical-analysis-state.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
 import { withRunStateFreshness } from '../orchestrator-v5/agent-lane/analysis-ready-freshness.js';
@@ -249,6 +250,12 @@ export interface ScenarioAnalysisRead {
    * not answer; a consumer reads absent as unknown and refuses a definitional link, as the writer would with no Run.
    */
   readonly analysis_identity_run_use?: IdentityRunUseWire | null;
+  /**
+   * Item 2 (DL 22 Oct): the SELECTED fact's own implied quantity (`goal-target/implied-quantity.ts`), under the SAME gates as
+   * `analysis_run_evidence`: what that Run implies for the sized quantity nearest an aim with no target, or why it implies
+   * nothing. ABSENT when the Run recorded none (an aim with a target, a legacy scenario, an older Run).
+   */
+  readonly analysis_implied_quantity?: ImpliedQuantity;
 }
 
 /** `IdentityRunUse` on the wire: the carriers the last successful Run WITHDREW, sorted. */
@@ -740,6 +747,12 @@ export async function readScenarioAnalysis(
             ...(Array.isArray((fact.result.enrichment as { identity_evaluations?: unknown } | undefined)?.identity_evaluations)
               ? { analysis_identity_evaluated_node_ids: [...evaluatedIdentityNodeIds(fact.result.enrichment)] }
               : {}),
+            // Item 2: what the SAME selected Run implies for the quantity nearest an aim with no target (internal enrichment,
+            // off the transport keep-list), for the AI's Run facts; absent = this Run recorded none.
+            ...(() => {
+              const implied = readStoredImpliedQuantity(fact.result.enrichment);
+              return implied === undefined ? {} : { analysis_implied_quantity: implied };
+            })(),
           }
         : {}),
     };

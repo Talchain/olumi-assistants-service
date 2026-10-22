@@ -17,6 +17,7 @@ import { readRawRobustnessSignals } from '../coaching/pick-raw-robustness.js';
 import { STATIC_LEVEL_CAPABILITY } from '../goal-target/run-question-scope.js';
 import { analysedOptionIds, conditionalInputFactsOf, conditionalInputDisclosuresOf, type ConditionalInputFacts } from './conditional-input-basis.js';
 import { goalMarginsOf, type GoalMargins } from './goal-margins.js';
+import { IMPLIED_QUANTITY_KEY, readStoredImpliedQuantity, type ImpliedQuantity, type ImpliedQuantityWithheld, type ImpliedRange } from '../goal-target/implied-quantity.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -116,6 +117,13 @@ export interface RunFacts {
    * (`goalMarginsOf`). Absent otherwise.
    */
   readonly margins?: GoalMargins;
+  /**
+   * Item 2 (DL 22 Oct): the aim states no target figure, so there is no chance to give; this is what the Run implies for the
+   * sized quantity nearest the aim, per option in the Run's order (p10/p50/p90 in that quantity's unit), said as `label`:
+   * model-relative, never a chance, a target or a ranking. `ask` names the one question that would let a chance be given.
+   * Or why the Run implies nothing (`withheld`). Absent when the aim has a target or the Run is not current.
+   */
+  readonly implied_by_deadline?: ImpliedByDeadline;
   /** How many of THIS Run's inputs on the goal's paths are Olumi's estimates. */
   readonly olumi_inputs?: { readonly links: number; readonly values: number; readonly settings_by_option: Readonly<Record<string, number>> };
   /** Current saved-model records, not historical evaluated inputs. The quote's human source and Olumi's reading stay distinct. */
@@ -131,6 +139,27 @@ export interface RunFacts {
   readonly comparison?: RunComparison;
   /** The AIE's exact disclosures that apply to THIS Run: each said once, word for word, where it applies. */
   readonly must_say: readonly string[];
+}
+
+export type ImpliedByDeadline =
+  | {
+    readonly label: string; readonly quantity: string; readonly unit: string;
+    readonly by_option: Readonly<Record<string, ImpliedRange>>;
+    readonly rests_on_olumi_estimates: boolean; readonly ask: 'goal_target';
+  }
+  | { readonly withheld: ImpliedQuantityWithheld };
+
+/** The Run's stored implied quantity as the AI reads it (three significant figures; the stored record keeps the exact values). */
+export function impliedByDeadlineOf(implied: ImpliedQuantity | undefined): ImpliedByDeadline | undefined {
+  if (implied === undefined) return undefined;
+  if (implied.status === 'withheld') return { withheld: implied.reason };
+  const sig3 = (v: number) => Number(v.toPrecision(3));
+  return {
+    label: `What the model implies for ${implied.quantity}${implied.by_when === null ? '' : ` by ${implied.by_when}`}, as the model stands`,
+    quantity: implied.quantity, unit: implied.unit,
+    by_option: Object.fromEntries(Object.entries(implied.by_option).map(([id, r]) => [id, { p10: sig3(r.p10), p50: sig3(r.p50), p90: sig3(r.p90) }])),
+    rests_on_olumi_estimates: implied.rests_on_olumi_estimates, ask: 'goal_target',
+  };
 }
 
 /** Olumi's record of what changed, as facts only: its instruction (`use`) already rides beside it in the state, said once. */
@@ -152,6 +181,8 @@ export function runFactsOf(analysisResult: unknown, graph: unknown, current: boo
     readonly runEvidence?: SelectedRunEvidence;
     /** The selected Run's own id, which `runEvidence` must match for the exact-result margins (`goalMarginsOf`). */
     readonly selectedRunId?: string | null;
+    /** The SAME selected Run's implied quantity, as the read serves it (`analysis_implied_quantity`). */
+    readonly impliedQuantity?: unknown;
     readonly comparison?: { readonly prior_run_id?: string; readonly run_delta?: unknown; readonly rerun_record?: unknown } } = {}): RunFacts {
   const question = analysisResult == null && state.runEvidence === undefined ? undefined
     : deriveRunQuestion({ runEvidence: state.runEvidence, storedResult: analysisResult });
@@ -172,6 +203,7 @@ export function runFactsOf(analysisResult: unknown, graph: unknown, current: boo
   const enrichment = isRec(analysisResult) ? analysisResult.enrichment : undefined;
   const s = current ? decisionSensitivityOf(enrichment) : { status: 'not_measured' as const };
   const margins = goalMarginsOf(analysisResult, graph, current, state.runEvidence, state.selectedRunId);
+  const implied = current ? impliedByDeadlineOf(readStoredImpliedQuantity({ [IMPLIED_QUANTITY_KEY]: state.impliedQuantity })) : undefined;
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const said: RunFacts['user_statements'] = nodes.flatMap((n) => (typeof n.id !== 'string' ? [] : userStatementsOn(n).map((r) => ({
     node_id: n.id as string, record: structuredClone(r),
@@ -202,6 +234,7 @@ export function runFactsOf(analysisResult: unknown, graph: unknown, current: boo
     ...(zeroSpread.length > 0 ? { zero_spread: zeroSpread } : {}),
     sensitivity: s.status === 'measured' ? { measured: true, most_sensitive: s.most_sensitive.label } : { measured: false },
     ...(margins === undefined ? {} : { margins }),
+    ...(implied === undefined ? {} : { implied_by_deadline: implied }),
     ...(census !== undefined ? { olumi_inputs: census } : {}),
     user_statements: said,
     ...(inputBasis === undefined ? {} : { input_basis: { ...inputBasis, required_disclosures: conditionalInputDisclosuresOf(inputBasis) } }),
