@@ -628,6 +628,25 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(j.model.scenario_revision).toBe((await freshRead()).content_hash);
   });
 
+  it('DL 22 Oct (marketing on 7ee0d90f): a change that would cut the goal\u2019s path is said back; the AI\u2019s re-linked retry is the card', async () => {
+    const remeasured = structuredClone(KNOWN_ANSWER);
+    remeasured.aims[0]!.target = { ...remeasured.aims[0]!.target!, quantity: 'new customers', unit: 'customers', value: 20, current: null };
+    remeasured.links = [];
+    const relinked = { ...structuredClone(remeasured), links: [{ id: 'f_customers', from: 'f', to: 'g', source: 'olumi' as const, party: null, quote: null,
+      effect: { estimate_by: null, form: 'range' as const, value: null, low: 2, high: 8, sd: null, unit: 'customers', sign: '+' as const } }] };
+    const change = (model: LivingModelT) => ({ public_label: 'Measure the goal in customers', basis: 'The person restated the goal.', model, remove: ['f_g'] });
+    outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'cut', args: change(remeasured) }],
+      [{ type: 'function_call', name: 'propose_change', call_id: 'relink', args: change(relinked) }],
+      [{ type: 'message', text: 'I prepared the change, with what drives the goal linked to its new measure.' }]];
+    const r = await typed('Measure the goal in new customers: we need 20.');
+    expect(r.statusCode, r.body).toBe(200);
+    const j = r.json() as Json;
+    expect(j._agent.tool_calls.map((c: Json) => [c.name, c.outcome])).toEqual([['propose_change', 'refused'], ['propose_change', 'ok']]);
+    expect(j.cards).toHaveLength(1);
+    expect(JSON.stringify(j.cards[0].adds)).toContain('f_customers');
+    expect(registered, 'a card writes nothing').toHaveLength(0);
+  });
+
   it('DL (#3672 fix-forward): the AI stops after the goal_path_withheld refusal; the turn\u2019s end saves its draft as base, with its receipt', async () => {
     persisted = null;
     const model = { ...structuredClone(KNOWN_ANSWER), conditions: [{ text: 'only once the board signs off', applies_to: ['f_g'], role: 'prerequisite' as const,

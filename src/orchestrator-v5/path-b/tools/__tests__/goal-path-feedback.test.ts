@@ -18,7 +18,7 @@ import { buildModel } from '../draft-tool.js';
 import { proposeLivingChange } from '../living-change.js';
 import { pathBTools, type ToolCallResult } from '../index.js';
 import type { TraceRow } from '../outcome.js';
-import { goalPathEncodingCauses, KEPT_AS_REFUSED, personContentLost, RESTRUCTURE_CHANGE, RESTRUCTURE_DRAFT, type Restructure } from '../goal-path.js';
+import { goalPathEncodingCauses, KEPT_AS_REFUSED, optionsReachingGoal, personContentLost, RESTRUCTURE_CHANGE, RESTRUCTURE_CUT, RESTRUCTURE_DRAFT, type Restructure } from '../goal-path.js';
 import type { Rec } from './fixtures.js';
 
 const SID = 'scn_1';
@@ -334,5 +334,62 @@ describe('the SDK tools: the route\'s one offer per turn; a refusal never makes 
     const t = turn(p, false);
     expect(await call(t.build, draft(withCondition('prerequisite')))).toMatchObject({ status: 'ok', mutated: true });
     expect(t.restructure).toBeUndefined();
+  });
+});
+
+describe('DL 22 Oct (marketing on 7ee0d90f): a change never silently cuts the goal\'s path', () => {
+  /** The goal re-measured in customers, its one link (in units) removed, nothing in its place: no option reaches it. */
+  const remeasured = (): LivingModelT => {
+    const m = structuredClone(KNOWN_ANSWER);
+    m.aims[0]!.target = { ...m.aims[0]!.target!, quantity: 'new customers', unit: 'customers', value: 20, current: null };
+    m.links = [];
+    return m;
+  };
+  /** The retry: what drives the goal linked to it under the new measure, as Olumi's own provisional estimate. */
+  const relinked = (): LivingModelT => ({ ...remeasured(), links: [{ id: 'f_customers', from: 'f', to: 'g', source: 'olumi', party: null, quote: null,
+    effect: { estimate_by: null, form: 'range', value: null, low: 2, high: 8, sd: null, unit: 'customers', sign: '+' } }] });
+  const args = (model: LivingModelT, remove: string[]) => ({ public_label: 'Measure the goal in customers', basis: 'The person restated the goal.', model, remove });
+
+  it('the change that removes every link into the goal: no card and no proposal, the cut said; the re-linked retry gets its card', async () => {
+    const p = product(KNOWN_ANSWER);
+    const proposals = new ProposalStore();
+    const restructure: Restructure = { offered: false };
+    expect(optionsReachingGoal(KNOWN_ANSWER, mapLivingModel(KNOWN_ANSWER))).toEqual(['hold', 'push']);
+    const first = await proposeLivingChange({ dispatch: p.dispatch, proposals, restructure }, changeCtx, args(remeasured(), ['f_g']));
+    expect(first).toEqual({ status: 'refused', reason: 'goal_path_cut', detail: RESTRUCTURE_CUT, data: { cut: ['f_g'] } });
+    expect(restructure.pending).toMatchObject({ tool: 'propose_change' });
+    const second = await proposeLivingChange({ dispatch: p.dispatch, proposals, restructure }, changeCtx, args(relinked(), ['f_g']));
+    expect(second, JSON.stringify(second)).toMatchObject({ status: 'ok', data: { proposal_id: expect.any(String) } });
+    expect(optionsReachingGoal(relinked(), mapLivingModel(relinked())).length).toBeGreaterThan(0);
+  });
+
+  it('the agent stops after the cut is said: the turn\'s end cards the change as base would', async () => {
+    const p = product(KNOWN_ANSWER);
+    const calls: [TraceRow, ToolCallResult][] = [];
+    const restructure: Restructure = { offered: false };
+    const propose = pathBTools({ dispatch: p.dispatch, proposals: new ProposalStore(), runAnalysis: vi.fn(), restructure },
+      { ...changeCtx, verified_user_messages: [BRIEF] }, 'core', (row, result) => { calls.push([row, result]); }, 'core').find((t) => t.name === 'propose_change') as FunctionTool;
+    expect(JSON.parse(String(await propose.invoke(new RunContext(), JSON.stringify(args(remeasured(), ['f_g'])))))).toMatchObject({ status: 'refused', reason: 'goal_path_cut' });
+    await restructure.settle!();
+    expect(calls.map(([row]) => [row.name, row.outcome])).toEqual([['propose_change', 'refused'], ['propose_change', 'ok']]);
+    expect(calls[1]![1].proposal_id).toEqual(expect.any(String));
+  });
+
+  it('CONTRAST: a change that removes one link while an option still reaches the goal, or one on a model already without a path, gets its card at once', async () => {
+    const two = structuredClone(KNOWN_ANSWER);
+    two.factors.push({ ...two.factors[0]!, id: 'f2', label: 'f2', quote: null, source: 'olumi', value: 1 });
+    two.links.push({ ...two.links[0]!, id: 'f2_g', from: 'f2', source: 'olumi', quote: null });
+    two.options[1]!.settings.push({ ...two.options[1]!.settings[0]!, factor_id: 'f2', value: 2, source: 'olumi', quote: null });
+    const less = { ...structuredClone(two), links: two.links.filter((l) => l.id !== 'f_g') };
+    const restructure: Restructure = { offered: false };
+    expect(await proposeLivingChange({ dispatch: product(two).dispatch, proposals: new ProposalStore(), restructure }, changeCtx, args(less, ['f_g'])))
+      .toMatchObject({ status: 'ok', data: { proposal_id: expect.any(String) } });
+    expect(restructure.offered).toBe(false);
+    const pathless = remeasured();
+    const fewer = structuredClone(pathless);
+    fewer.factors[0] = { ...fewer.factors[0]!, value: 0.6, quote: 'Actually f is at 0.6 now.' };
+    expect(await proposeLivingChange({ dispatch: product(pathless).dispatch, proposals: new ProposalStore(), restructure }, changeCtx, args(fewer, [])))
+      .toMatchObject({ status: 'ok' });
+    expect(restructure.offered).toBe(false);
   });
 });
