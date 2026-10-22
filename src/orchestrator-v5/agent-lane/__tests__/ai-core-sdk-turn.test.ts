@@ -12,7 +12,7 @@ import { z as z4 } from 'zod-v4';
 import { ForbiddenProviderError, OPENAI_ONLY, recordedProviderCalls, runWithProviderPolicy } from '../../../adapters/llm/provider-policy.js';
 import { ledgeredAgentsClient } from '../../../adapters/llm/openai-agents-client.js';
 import { runWithStageStream } from '../../../cee/unified-pipeline/stage-stream-context.js';
-import { acquireCoreTurnSlot, AGENTS_SDK, CoreDeliveryUnknownError, CORE_COMPACT_THRESHOLD, corePromptCacheKey, CoreStateUnavailableError, forgetCoreStateBlocks, PAUSE_DECLINED, PAUSE_SUPERSEDED, replyOnlyTurn, runCoreTurn, STATE_BLOCK_PREFIX, stateUnchangedText, type ConversationIdStore, type CoreToolRecorder, type PausedRunStore } from '../core/sdk-turn.js';
+import { acquireCoreTurnSlot, AGENTS_SDK, CoreDeliveryUnknownError, CORE_COMPACT_THRESHOLD, corePromptCacheKey, CoreStateUnavailableError, PAUSE_DECLINED, PAUSE_SUPERSEDED, replyOnlyTurn, runCoreTurn, STATE_BLOCK_PREFIX, type ConversationIdStore, type CoreToolRecorder, type PausedRunStore } from '../core/sdk-turn.js';
 import type { OpenAiPausedRun } from '../../session/store.js';
 import { budgetFor, type CallBudget } from '../model-budgets.js';
 import type { AgentToolContext } from '../runtime/agent-tools.js';
@@ -51,7 +51,7 @@ const body = (output: Json[]): Json => {
   };
 };
 beforeEach(() => {
-  scripted = []; sent.length = 0; created.length = 0; added.length = 0; column = new Map(); forgetCoreStateBlocks();
+  scripted = []; sent.length = 0; created.length = 0; added.length = 0; column = new Map();
   vi.stubGlobal('fetch', vi.fn(streamWhenAsked(async (url: unknown, init?: { body?: unknown }) => {
     if (/\/v1\/conversations\/[^/]+\/items$/.test(String(url))) {
       added.push(JSON.parse(String(init?.body ?? '{}')) as Json);
@@ -529,7 +529,7 @@ describe('PATH-B core turn on the Agents SDK', () => {
     });
   });
 
-  describe('⭐ CACHING (DL 22 Oct, ruling B): one tool list, standing instructions, the state once per turn', () => {
+  describe('⭐ CACHING (DL 22 Oct, ruling B): one tool list, standing instructions, the full state block every turn', () => {
     /** The turn's system items: its state block (or the one line), then any guidance. */
     const systemItems = (b: Json): string[] => ((b.input ?? []) as Json[]).filter((i) => i.role === 'system').map((i) => String(i.content));
     let written = 0;
@@ -589,21 +589,51 @@ describe('PATH-B core turn on the Agents SDK', () => {
       expect(JSON.stringify(sent[0]!.input).indexOf('What is in my model?'), 'the block follows the turn\'s own words').toBeLessThan(JSON.stringify(sent[0]!.input).indexOf(STATE_BLOCK_PREFIX));
     });
 
-    it('(B) an unchanged state sends one line; a changed state, and the turn after a compaction, send the full block again', async () => {
+    /** The turn's first request's system items, read as: the full block of this revision, or the text itself. */
+    const blockOf = (b: Json): string[] => systemItems(b).map((t) => (t.startsWith(STATE_BLOCK_PREFIX) ? `block ${/"revision":(\d+)/.exec(t)?.[1]}` : t.slice(0, 40)));
+    const noOneLine = () => { for (const b of sent) for (const t of systemItems(b)) expect(t, 'the old one-line text is gone').not.toMatch(/^State unchanged/); };
+
+    it('(B) every turn sends the full block, whatever its kind and whether the state changed: typed, a Run press, a card press', async () => {
       const meta = { revision: 'rev-4', run_id: 'run-7' };
-      await turn('One.', caps(), { state: { revision: 4 }, traceMeta: meta });
-      await turn('Two.', caps(), { state: { revision: 4 }, traceMeta: meta });
-      expect(systemItems(sent[1]!), 'unchanged since the block this Conversation holds').toEqual([stateUnchangedText('rev-4')]);
-      scripted = [[{ type: 'compaction' }, { type: 'message', text: 'Three.' }]];
-      await turn('Three.', caps(), { state: { revision: 5 }, traceMeta: { revision: 'rev-5', run_id: 'run-7' } });
-      expect(systemItems(sent[2]!)[0], 'changed: the full block').toContain('"revision":5');
-      await turn('Four.', caps(), { state: { revision: 5 }, traceMeta: { revision: 'rev-5', run_id: 'run-7' } });
-      expect(systemItems(sent[3]!)[0], 'the compaction dropped the earlier block, so it is sent again').toContain(STATE_BLOCK_PREFIX);
-      await turn('Five.', caps(), { state: { revision: 5 }, traceMeta: { revision: 'rev-5', run_id: 'run-7' } });
-      expect(systemItems(sent[4]!)).toEqual([stateUnchangedText('rev-5')]);
+      let ran = 0;
+      const runTool = tool({ name: 'run_analysis', description: 'Run the saved model.', parameters: z4.object({}), execute: async () => { ran += 1; return '{"status":"ok"}'; }, errorFunction: null });
+      const c = caps();
+      const tools = (onCall: CoreToolRecorder) => [...readTools(c)(onCall), runTool];
+      await turn('One.', c, { state: { revision: 4 }, traceMeta: meta, tools });
+      await turn('Two, the same state.', c, { state: { revision: 4 }, traceMeta: meta, tools });
+      scripted = [[{ type: 'function_call', name: 'run_analysis', args: {} }], [{ type: 'message', text: 'Here is the Run.' }]];
+      await turn('Run it.', c, { state: { revision: 4 }, traceMeta: meta, tools, firstTool: 'run_analysis' });
+      await turn('', c, { state: { revision: 4 }, traceMeta: meta, tools, press: { decision: 'decline', proposal_id: PID } });
+      expect(ran).toBe(1);
+      const firsts = [sent[0]!, sent[1]!, sent[2]!, sent[4]!];
+      expect(firsts.map(blockOf)).toEqual([['block 4'], ['block 4'], ['block 4'], ['block 4']]);
+      expect(blockOf(sent[3]!), 'the Run press\'s later call reads it from the Conversation').toEqual([]);
+      noOneLine();
     });
 
-    it('⛔ Codex r1 #3656: a first request refused before anything was accepted is resent WITH the state block; only an accepted response\'s input counts as delivered', async () => {
+    it('⛔ Codex r2 #3656: after a partial failure (a later call of the turn fails), the next turn still sends its own full block', async () => {
+      // rev-1 delivered; rev-2's block is accepted, then a later call of that turn fails; the model is back at rev-1 (an Undo).
+      let failAt = -1;
+      const json = { 'content-type': 'application/json' };
+      vi.stubGlobal('fetch', vi.fn(streamWhenAsked(async (url: unknown, init?: { body?: unknown }) => {
+        const u = String(url);
+        if (u.endsWith('/v1/conversations')) return new Response(JSON.stringify({ id: 'conv_partial', object: 'conversation' }), { status: 200, headers: json });
+        if (u.endsWith('/items')) return new Response(JSON.stringify({ object: 'list', data: [], first_id: null, last_id: null, has_more: false }), { status: 200, headers: json });
+        sent.push(JSON.parse(String(init?.body ?? '{}')) as Json);
+        if (sent.length - 1 === failAt) return new Response(JSON.stringify({ error: { message: 'busy', type: 'server_error', param: null, code: null } }), { status: 500, headers: json });
+        return new Response(JSON.stringify(body(scripted.shift() ?? [{ type: 'message', text: 'Noted.' }])), { status: 200, headers: json });
+      })));
+      await turn('One.', caps(), { state: { revision: 1 }, traceMeta: { revision: 'rev-1', run_id: 'run-1' } });
+      failAt = 2;
+      scripted = [[{ type: 'function_call', name: 'read_canonical_context', args: {} }]];
+      await expect(turn('Two.', caps(), { state: { revision: 2 }, traceMeta: { revision: 'rev-2', run_id: 'run-1' } })).rejects.toBeDefined();
+      expect(blockOf(sent[1]!), 'rev-2\'s block was accepted before the failure').toEqual(['block 2']);
+      await turn('Three.', caps(), { state: { revision: 1 }, traceMeta: { revision: 'rev-1', run_id: 'run-1' } });
+      expect(blockOf(sent[sent.length - 1]!), 'the restored state, in full: never "unchanged since rev-1"').toEqual(['block 1']);
+      noOneLine();
+    });
+
+    it('⛔ Codex r1 #3656: a first request refused before anything was accepted is resent WITH the state block, and the next turn sends its own', async () => {
       // Revision 1 is in the Conversation; revision 2 is saved; the turn's first request is refused ("No tool output found…").
       let refuseAt = -1;
       const json = { 'content-type': 'application/json' };
@@ -623,25 +653,9 @@ describe('PATH-B core turn on the Agents SDK', () => {
       expect(two.result.assistant_text, 'the turn ran after the answer').toBe('Noted.');
       expect(sent, 'turn 1, the refused request, its resend').toHaveLength(3);
       await turn('Three.', caps(), { state: { revision: 2 }, traceMeta: { revision: 'rev-2', run_id: 'run-1' } });
-      // Both facts together, so a failure shows each: what the resend carried, and what the next turn was then told.
-      expect({ resend: systemItems(sent[2]!).map((t) => (t.includes('"revision":2') ? 'block rev 2' : t.slice(0, 40))), next: systemItems(sent[3]!) })
-        .toEqual({ resend: ['block rev 2'], next: [stateUnchangedText('rev-2')] });
-    });
-
-    it('(B) after a turn that wrote, the next turn sends the full block, even when the state reads as the last block did (a save, then an Undo back)', async () => {
-      const meta = { revision: 'rev-4', run_id: 'run-7' };
-      await turn('One.', caps(), { state: { revision: 4 }, traceMeta: meta });
-      scripted = [[{ type: 'function_call', name: 'propose_change', args: {} }], [{ type: 'message', text: 'Saved.' }]];
-      const c = caps();
-      const wrote = await turn('Save it.', c, { state: { revision: 4 }, traceMeta: meta, tools: (onCall) => [...readTools(c)(onCall), tool({
-        name: 'propose_change', description: 'Save a change.', parameters: z4.object({}), errorFunction: null,
-        execute: async () => { onCall({ name: 'propose_change', ok: true, mutated: true, outcome: 'ok', refusal: null, ran: null }, { ok: true, mutated: true }); return '{"status":"ok","mutated":true}'; } })] });
-      expect(wrote.result.mutated).toBe(true);
-      expect(systemItems(sent[1]!), 'CONTROL: before the write, unchanged').toEqual([stateUnchangedText('rev-4')]);
-      // The Undo restored the model to the block's own text, outside the Conversation.
-      await turn('And now?', caps(), { state: { revision: 4 }, traceMeta: meta });
-      expect(systemItems(sent[3]!)[0]).toContain(STATE_BLOCK_PREFIX);
-      expect(systemItems(sent[3]!)[0]).toContain('"revision":4');
+      expect({ refused: blockOf(sent[1]!), resend: blockOf(sent[2]!), next: blockOf(sent[3]!) })
+        .toEqual({ refused: ['block 2'], resend: ['block 2'], next: ['block 2'] });
+      noOneLine();
     });
   });
 

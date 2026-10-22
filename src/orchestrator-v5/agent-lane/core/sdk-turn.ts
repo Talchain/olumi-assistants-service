@@ -156,18 +156,12 @@ export function corePromptCacheKey(model: string, instructions: string): string 
  * ⭐ THE TURN'S STATE IS ONE BLOCK IN THE TURN'S INPUT, NOT IN THE INSTRUCTIONS (DL ruling B, 22 Oct). A request writes ONE
  * cache breakpoint, at its end, so a call reads the cache only when an earlier prompt is a whole prefix of it. The state in
  * the instructions came before the stored Conversation, so every turn's first call read nothing and wrote ~20k tokens
- * (served 21ad02f5, baseline). Now the block follows the turn's new input on its first call and is stored with it. The full
- * block is sent only when its text changed since the block this Conversation last received; otherwise one line says so.
+ * (served 21ad02f5, baseline). Now the full block follows the turn's new input, every turn, and is stored with it: the
+ * newest block supersedes every earlier one (Codex r2 #3656: no cross-turn memory of what was sent, so no stale "unchanged").
  */
 export const STATE_BLOCK_PREFIX = 'OLUMI STATE BLOCK';
 export const stateBlockText = (revision: string, runId: string, body: string): string =>
   `${STATE_BLOCK_PREFIX}: model revision ${revision}, run ${runId}. It supersedes every earlier state block in this conversation.\n\n${body}`;
-export const stateUnchangedText = (revision: string): string => `State unchanged since revision ${revision}.`;
-
-/** The full block each Conversation last received, by digest (process memory: a restart, a compaction or a write sends it again). */
-const sentStateBlocks = new Map<string, string>();
-const REMEMBERED_STATE_BLOCKS = 1_000;
-export const forgetCoreStateBlocks = (): void => { sentStateBlocks.clear(); };
 
 export interface CoreTurnInput {
   readonly ctx: AgentToolContext;
@@ -345,24 +339,19 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
     now: new Date(startedAt), briefText: undefined, conversation: [],
     canonicalState: stateContext.facts, runFactsUse: stateContext.use,
   }).map(turnContextText).filter((t) => t !== '').join('\n\n');
-  const stateDigest = createHash('sha256').update(stateBody, 'utf8').digest('hex');
-  const revision = input.traceMeta?.revision ?? 'none';
   const conversation = await scenarioConversation(input.ctx.scenario_id, input.conversationStore, () => startOpenAIConversationsSession(client));
-  const stateUnchanged = sentStateBlocks.get(conversation.id) === stateDigest;
   /**
-   * After the turn's new input: the state (or the one line), then this turn's guidance. Sent on every request until a
+   * After the turn's new input: the full state block, then this turn's guidance. Sent on every request until a
    * response the provider ACCEPTED carried them (Codex r1 #3656: a first request refused before anything was accepted is
    * resent, and the resend must carry the state, or the turn reasons from the Conversation's older block).
    */
   const turnItems: AgentInputItem[] = [
-    { role: 'system', content: stateUnchanged ? stateUnchangedText(revision) : stateBlockText(revision, input.traceMeta?.run_id ?? 'none', stateBody) },
+    { role: 'system', content: stateBlockText(input.traceMeta?.revision ?? 'none', input.traceMeta?.run_id ?? 'none', stateBody) },
     ...(input.turnGuidance ?? []).map((text): AgentInputItem => ({ role: 'system', content: text })),
   ];
   /** This request carries the turn's items; an accepted response's input carried them (the only proof they are stored). */
   let carrying = false;
   let delivered = false;
-  /** A compaction drops earlier items from what the model reads, so the next turn sends the full block again. */
-  let compacted = false;
   const brief = typeof input.briefText === 'string' ? input.briefText.trim() : '';
   let turnInput: string | AgentInputItem[] | RunState<unknown, Agent> = conversation.created && brief !== '' && brief !== input.message.trim()
     ? [{ role: 'user', content: `${BRIEF_LABEL}\n${brief}` }, { role: 'user', content: input.message }] : input.message;
@@ -410,15 +399,6 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
   /** Whether the provider has accepted any request of this turn (a model event arrived). */
   let accepted = false;
   const finish = (text: string, stopped: AgentTurnResult['stopped_reason'], calls: number, author: 'ai' | 'host'): AgentTurnResult & { sdk: CoreTurnSdk } => {
-    // Remembered only from an accepted response's input; a turn that failed is never remembered as having sent it.
-    // A turn that wrote showed the model a newer state than its block (a save, then an Undo back to the block's own text
-    // must not read as "unchanged"), so the next turn sends the full block.
-    if (compacted || toolResults.some((r) => r.mutated === true)) sentStateBlocks.delete(conversation.id);
-    else if (delivered && !stateUnchanged) {
-      sentStateBlocks.delete(conversation.id);
-      sentStateBlocks.set(conversation.id, stateDigest);
-      if (sentStateBlocks.size > REMEMBERED_STATE_BLOCKS) sentStateBlocks.delete(sentStateBlocks.keys().next().value!);
-    }
     const total = Math.max(0, now() - startedAt);
     return {
       assistant_text: text, items: [], tool_calls: toolCalls, tool_results: toolResults,
@@ -465,7 +445,6 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
           }
         }
         await live.completed;
-        if (live.rawResponses.some((r) => r.output.some((item) => item.type === 'compaction'))) compacted = true;
         await Promise.allSettled(pendingRows);
         if (deliveryUnknown !== undefined) throw new CoreDeliveryUnknownError(deliveryUnknown.cause);
         return live;
