@@ -283,4 +283,76 @@ describe('draft source → risk admission → retained participation → readine
       if (fault === 'duplicate id') g.nodes.push(structuredClone(r));
       expect([...unsizedOlumiRiskIds(g)]).toEqual([]);
     });
+
+  // ⭐ AIE 19 Oct 10:54Z + 11:25Z AMEND (#3450 Codex R1): a quote is a source for the CLAIM, not a change of author. Only a risk the
+  // drafter says it ADDED (`ai_proposed`) whose every cited user sentence is another subject's verified figure statement, with no clause
+  // naming the risk, stays Olumi's. RED at 390a1dbe for the positive: construction made it unverified human material and readiness withheld
+  // the Run. `inferred` stays protected (a reformulation or an unresolved introduction), and so does any sentence that names the risk.
+  const RANGE = 'Each extra team adds about 20 projects per week, between 10 and 30.';
+  const linkRange = (quote: string) => ({ subject: { kind: 'link', label: 'Teams', to_label: 'Output' }, field: 'effect', form: 'range',
+    quote, low: 10, high: 30, unit: 'projects per week' });
+  const measure = (quote: string) => riskStatement(quote, { field: 'measure', form: 'describes' });
+  const withTag = (tag: string, quote: string) => { const m = draft([linkRange(quote), measure(quote)]); m.risks[0].provenance = tag; return m; };
+  it('an Olumi-ADDED (ai_proposed) risk citing only another subject\u2019s verified figure sentence stays Olumi\u2019s, left out, blocking nothing', () => {
+    const { graph, risk, out } = admitted(withTag('ai_proposed', RANGE), `${BASE} ${RANGE}`);
+    expect(risk.provenance).toBe('ai_inferred');
+    expect(risk.user_statements).toBeUndefined();
+    expect([...unsizedOlumiRiskIds(graph)]).toEqual([risk.id]);
+    expect(issuesFor(graph, risk.id)).toEqual([]);
+    expect(resolveRunAdmission(graph).willProceed, JSON.stringify(resolveRunAdmission(graph).assessment.issues)).toBe(true);
+    expect(withoutUnsizedOlumiRisksRecorded(JSON.parse(JSON.stringify(graph))).omitted)
+      .toEqual([{ node_id: risk.id, label: RISK, reason: 'unsized_olumi_risk' }]);
+    // The user's sentence stays with the link that states it, as theirs.
+    expect(JSON.stringify(graph.edges.find((e: Rec) => e.from === 'teams' && e.to === 'output'))).toContain(RANGE);
+    expect(JSON.stringify(out.loss)).not.toContain('The risk’s claimed source could not be verified');
+  });
+  // ⭐ RE-RULED (AIE 11:25Z AMEND; was this PR's own first-head positive for `inferred`): `inferred` is never proof that Olumi added it.
+  it.each(['inferred', 'explicit'] as const)('CONTROL: a %s risk citing only the same borrowed sentence keeps today\u2019s path (unverified human material, its record kept, asks)', tag => {
+    const { graph, risk } = admitted(withTag(tag, RANGE), `${BASE} ${RANGE}`);
+    expect(risk.provenance).toBe('unverified_brief');
+    // The shared sentence's record on the risk survives, as before this PR (a genuine multi-subject source is never deleted).
+    expect(JSON.stringify(risk.user_statements)).toContain(RANGE);
+    expect([...unsizedOlumiRiskIds(graph)]).toEqual([]);
+    expect(issuesFor(graph, risk.id).some(i => i.code === 'MISSING_FACTOR_LEVEL')).toBe(true);
+    expect(resolveRunAdmission(graph).willProceed).toBe(false);
+  });
+  // Codex R1 probes (#3450 @9d169027): one sentence gives the link's range AND raises, sizes or adopts the risk. Another figure in the
+  // sentence never erases the concern, whatever the drafter's tag.
+  const SHARED = {
+    concern: 'Each extra team adds about 20 projects per week, between 10 and 30, but specialist capacity below target is a concern for us.',
+    sized: 'Each extra team adds about 20 projects per week, between 10 and 30, and we estimate specialist capacity below target could cost 5 projects per week.',
+    adopted: 'Each extra team adds about 20 projects per week, between 10 and 30, and we adopt specialist capacity below target as a concern.',
+  } as const;
+  it.each((['ai_proposed', 'inferred'] as const).flatMap(tag => (Object.keys(SHARED) as (keyof typeof SHARED)[]).map(k => [tag, k] as const)))(
+    'CONTROL (%s, %s in the same sentence): the user\u2019s concern stays human material and asks; never left out to obtain a Run', (tag, k) => {
+      const quote = SHARED[k];
+      const { graph, risk } = admitted(withTag(tag, quote), `${BASE} ${quote}`);
+      expect(risk.provenance).toBe('unverified_brief');
+      expect([...unsizedOlumiRiskIds(graph)]).toEqual([]);
+      expect(issuesFor(graph, risk.id).some(i => i.code === 'MISSING_FACTOR_LEVEL')).toBe(true);
+      expect(resolveRunAdmission(graph).willProceed).toBe(false);
+    });
+  it('CONTROL: an operative claim (an occurrence read from the borrowed sentence) is never this rule\u2019s; the risk keeps today\u2019s path', () => {
+    const m = draft([linkRange(RANGE), riskStatement(RANGE, { field: 'occurrence', form: 'point', value: 20, unit: '%' })]);
+    m.risks[0].provenance = 'ai_proposed';
+    const { graph, risk } = admitted(m, `${BASE} ${RANGE}`);
+    expect(risk.provenance).toBe('unverified_brief');
+    expect([...unsizedOlumiRiskIds(graph)]).toEqual([]);
+  });
+  // Not this PR's class: a cited sentence that is no other subject's verified figure statement gives no proof the binding is
+  // inapplicable here, so it keeps today's path (#3425's describes-only rule is the owner of that case; re-rule there if it lands).
+  it('BOUNDARY: an Olumi-added risk citing a figure-free sentence of no other subject keeps today\u2019s path here', () => {
+    const plain = 'We run two shifts on weekdays.';
+    const m = draft([measure(plain)]); m.risks[0].provenance = 'ai_proposed';
+    const { risk } = admitted(m, `${BASE} ${plain}`);
+    expect(risk.provenance).toBe('unverified_brief');
+  });
+  it('CONTROL (AIE 396071d7): an Olumi-added risk the user also names in a sentence of its own stays human material and asks', () => {
+    const own = 'Specialist capacity below target is a concern for us.';
+    const m = draft([linkRange(RANGE), measure(RANGE), riskStatement(own)]); m.risks[0].provenance = 'ai_proposed';
+    const { graph, risk } = admitted(m, `${BASE} ${RANGE} ${own}`);
+    expect(risk.provenance).toBe('unverified_brief');
+    expect([...unsizedOlumiRiskIds(graph)]).toEqual([]);
+    expect(issuesFor(graph, risk.id).some(i => i.code === 'MISSING_FACTOR_LEVEL')).toBe(true);
+  });
 });
