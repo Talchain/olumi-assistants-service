@@ -141,3 +141,12 @@ export const RESTRUCTURE_CUT = 'No card yet. After this change no option reaches
   + 'to it under that measure: never move a figure the person gave onto a different measure; a link of yours carries your own provisional '
   + 'estimate, labelled as yours. Then call propose_change once more. If the change is right as it is, call it again with the same '
   + 'change and its card is made.';
+
+/**
+ * What the AI is told with a change that adds the person's own aim with its target, which becomes the goal (`changeGoal`), when
+ * no option reaches it (DL 22 Oct, marketing on 4a4c338c: both aims were added with no links, so no analysis could run).
+ */
+export const RESTRUCTURE_AIM = 'No card yet. This change adds the person\'s own aim with its target (aim), so it becomes the goal, but '
+  + 'no option reaches it, so no analysis could run. Link what drives it to that aim under its measure: never move a figure the '
+  + 'person gave onto a different measure; a link of yours carries your own provisional estimate, labelled as yours. Then call '
+  + 'propose_change once more. If the change is right as it is, call it again with the same change and its card is made.';
