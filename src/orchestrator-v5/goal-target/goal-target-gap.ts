@@ -6,6 +6,7 @@
  */
 import { statedGoalTargetOf } from './stated-goal-target.js';
 import { goalKindOf } from './goal-kind.js';
+import { aimTargetReading } from '../path-b/living-model/aim-reading.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Rec) : undefined);
@@ -13,8 +14,12 @@ const finiteNum = (v: unknown): v is number => typeof v === 'number' && Number.i
 const quote = (label: string): string => `‘${label}’`;
 
 export interface GoalTargetGap {
-  /** `goal_level_missing`: a core goal's change target the person stated, with no level today to measure it from. */
-  readonly kind: 'goal_target_missing' | 'goal_level_missing';
+  /**
+   * `goal_level_missing`: a core goal's change target the person stated, with no level today to measure it from.
+   * `goal_answer_missing`: a core goal's target the person stated that the core holds for another reason (exact, a range, an
+   * unclear change, …): its question asks the one thing that would let the model use it (DL held-reason ruling, 23 Oct).
+   */
+  readonly kind: 'goal_target_missing' | 'goal_level_missing' | 'goal_answer_missing';
   readonly goal_id: string;
   readonly deadline_known: boolean;
   readonly question: string;
@@ -51,15 +56,13 @@ function namedGoalOf(raw: Rec): Rec | undefined {
  * this ONE reader reads the goal's own current aim there; undefined on a legacy graph (no `living_model`), whose words are
  * unchanged.
  */
-function coreAimTargetOf(raw: Rec, goalId: string): Rec | null | undefined {
+function coreAimOf(raw: Rec, goalId: string): Rec | undefined {
   const aims = rec(raw.living_model)?.aims;
-  if (!Array.isArray(aims)) return undefined;
-  const aim = aims.map(rec).find((a) => a?.id === goalId && a.status === 'current');
-  return aim === undefined ? undefined : rec(aim.target) ?? null;
+  return Array.isArray(aims) ? aims.map(rec).find((a) => a?.id === goalId && a.status === 'current') : undefined;
 }
 
 /** "Productivity" mid-sentence is "productivity"; "GitHub stars" and "NPS" keep their case (only a plain capitalised first word). */
-const midSentence = (q: string): string => (/^\p{Lu}\p{Ll}*(?=\s|$)/u.test(q) ? `${q.charAt(0).toLowerCase()}${q.slice(1)}` : q);
+const midSentence = (q: string): string => (/^\p{Lu}[\p{Ll}'-]*(?=\s|$)/u.test(q) ? `${q.charAt(0).toLowerCase()}${q.slice(1)}` : q);
 /** A whole-word prefix plus an ellipsis, so the question fits the cell's 400-character carrier. */
 const cut = (v: string, limit: number): string => {
   if (v.length <= limit) return v;
@@ -71,12 +74,90 @@ const cut = (v: string, limit: number): string => {
  * The person's change target (+10%) with no level today (`current` is today's level, the one the change is measured
  * from): that level is what is missing, never the target. The labels shorten only when the question would exceed 400.
  */
-function todaysLevelQuestion(label: string, quantity: string): string {
-  const ask = (lab: string, q: string): string =>
-    `One gap: ${quote(lab)} is a change from today\u2019s level of ${q}, which isn\u2019t given yet. What is today\u2019s level of ${q}?`;
-  const q = midSentence(quantity.trim());
+function todaysLevelQuestion(label: string, quantity: unknown): string {
+  // No quantity named (Codex r2): today's level is still what is missing, never "no target".
+  const ask = (lab: string, q: string): string => (q === ''
+    ? `One gap: ${quote(lab)} is a change from today\u2019s level, which isn\u2019t given yet. What is today\u2019s level?`
+    : `One gap: ${quote(lab)} is a change from today\u2019s level of ${q}, which isn\u2019t given yet. What is today\u2019s level of ${q}?`);
+  const q = typeof quantity === 'string' ? midSentence(quantity.trim()) : '';
   const full = ask(label, q);
   return full.length <= 400 ? full : ask(cut(label, 100), cut(q, 60));
+}
+
+/**
+ * DL held-reason ruling (23 Oct): a target the person stated that the core holds for another reason is never "no target".
+ * Its own question, from the ONE reading of the aim (`aimTargetReading`, as the mapper holds it). Undefined when the reason is
+ * not one of these (no target figure: today's words).
+ */
+function heldTargetQuestion(label: string, aim: Rec, t: Rec, reason: string): string | undefined {
+  if (reason === 'no_level_target' || reason === 'goal_level_unknown') return undefined;
+  // Every bounded part: a label, quantity or unit of any length still fits the 400-character carrier (Codex r1).
+  const plain = (lab: number, qty: number, un: number) => {
+    const u = cut(typeof t.unit === 'string' ? t.unit : '', un);
+    const cu = cut(typeof t.current_unit === 'string' ? t.current_unit : '', un);
+    // The person's figure exactly as written, never rounded ("exactly £1.23456"; Codex r1), its unit placed as it reads.
+    const exact = (v: number, unitOf: string): string => {
+      const grouped = v.toLocaleString('en-GB', { maximumFractionDigits: 20 });
+      // Beyond 20 places (1e-21) the grouped form rounds: the figure's own digits instead (Codex r2).
+      const n = Number(grouped.replace(/,/g, '')) === v ? grouped : String(v);
+      return unitOf === '' ? n : /^[£$€]$/.test(unitOf) ? `${v < 0 ? '-' : ''}${unitOf}${n.replace(/^-/, '')}` : unitOf === '%' ? `${n}%` : `${n} ${unitOf}`;
+    };
+    const fig = (v: unknown, unitOf: string = u): string => (finiteNum(v) ? exact(v, unitOf) : '');
+    const q = typeof t.quantity === 'string' && t.quantity.trim() !== '' ? cut(midSentence(t.quantity.trim()), qty) : undefined;
+    // Today's level's unit as the leaf reads it (`current_unit ?? unit`): an explicit '' is no unit, never the target's (Codex r2).
+    const lu = typeof t.current_unit === 'string' ? cu : u;
+    return { L: quote(cut(label, lab)), u, cu, lu, fig, q };
+  };
+  const ask = ({ L, u, cu, lu, fig, q }: ReturnType<typeof plain>): string | undefined => {
+    const change = t.comparator === 'increase' || t.comparator === 'decrease';
+    const up = t.comparator === 'decrease' ? 'less' : 'more';
+    // A range on a change is a range of the change, never the target level itself (Codex r1).
+    const of = change ? 'a change of ' : '';
+    const range = (): string | undefined => (finiteNum(t.low) && finiteNum(t.high)
+        ? `One gap: ${L} aims for ${of}between ${fig(t.low)} and ${fig(t.high)}. Does meeting it mean ${change ? 'a change of ' : 'reaching '}at least ${fig(t.low)}, ${change ? '' : 'staying '}at most ${fig(t.high)}, or both?`
+        : finiteNum(t.low) ? `One gap: ${L} gives ${of}${fig(t.low)} as the low end of a range. Does meeting it mean ${change ? 'a change of ' : 'reaching '}at least ${fig(t.low)}?`
+          : finiteNum(t.high) ? `One gap: ${L} gives ${of}${fig(t.high)} as the high end of a range. Does meeting it mean ${change ? 'a change of ' : 'staying '}at most ${fig(t.high)}?` : undefined);
+    switch (reason) {
+      case 'exact_target_not_in_slice':
+        // "Exactly" with only a range is that range's question (Codex r1: never "no target").
+        return finiteNum(t.value) ? `One gap: ${L} aims for exactly ${fig(t.value)}. Would at least ${fig(t.value)}, or at most ${fig(t.value)}, count as meeting it?` : range();
+      case 'target_range_not_in_slice':
+        return range();
+      case 'change_kind_unknown':
+        // Only the ambiguity itself is asked as "relative or points": a % change of a quantity that is itself in % (Codex r1).
+        return finiteNum(t.value) && q !== undefined && u === '%' && lu === '%' && (t.change_kind === null || t.change_kind === undefined)
+          ? `One gap: ${L} aims for ${fig(t.value)} ${up} ${q}. Is that ${fig(t.value)} of today\u2019s level, or ${fig(t.value, '')} percentage points?`
+          // A change in one unit on a level in another, neither a %: the change's unit is asked (never when the units match).
+          : u !== '' && u !== '%' && cu !== '' && cu !== u ? `One gap: ${L} has a change in ${u} but today\u2019s level in ${cu}. What is the change in ${cu}?` : undefined;
+      case 'change_base_invalid':
+        return finiteNum(t.value) && q !== undefined
+          ? `One gap: ${L} is a ${fig(t.value)} change, which needs a level today above zero. What is today\u2019s level of ${q}?` : undefined;
+      case 'current_unit_mismatch':
+        return cu !== '' && u !== '' ? `One gap: ${L} has a target in ${u} but today\u2019s level in ${cu}. What is today\u2019s level in ${u}?` : undefined;
+      case 'change_base_not_theirs': {
+        if (q === undefined || !finiteNum(t.current)) return undefined;
+        // Show, label, de-bias (Paul): Olumi's figure is named as Olumi's; one from an unconfirmed source is never called Olumi's.
+        const estimate = fig(t.current, lu);
+        return aim.source === 'olumi'
+          ? `One gap: ${L} is measured from today\u2019s level of ${q}, which Olumi estimated at ${estimate}. What is today\u2019s level? If Olumi\u2019s estimate is right, say so.`
+          : `One gap: ${L} is measured from today\u2019s level of ${q}, given as ${estimate} from a source not yet confirmed. What is today\u2019s level? If that figure is right, say so.`;
+      }
+      case 'target_not_theirs':
+        // The goal's figure is the person's to set: Olumi's suggestion's figure is never said here (anchoring risk; DL).
+        return q === undefined ? undefined : `One gap: Olumi suggested measuring ${L} as ${q}. What figure would count as meeting it?`;
+      default:
+        return undefined;
+    }
+  };
+  for (const [lab, qty, un] of [[Infinity, Infinity, Infinity], [100, 60, 30], [40, 30, 12]] as const) {
+    const out = ask(plain(lab, qty, un));
+    if (out !== undefined && out.length <= 400) return out;
+    if (out === undefined) break;
+  }
+  // A stated target the core cannot read yet, for any other cause: still never "no target" (Codex r1), and always short.
+  // Only where the target carries a figure: one with none keeps today's "no target" words, which are true (Codex r2).
+  if (![t.value, t.low, t.high].some(finiteNum)) return undefined;
+  return `One gap: ${quote(cut(label, 120))} has a target Olumi can\u2019t read as stated yet. What exactly would count as meeting it?`;
 }
 
 /**
@@ -91,16 +172,21 @@ export function goalTargetGapOf(graph: unknown): GoalTargetGap | null {
     || goalKindOf(goal) === 'chance_of_event' || isProvisionalObjective(goal) || goalHasStatedTarget(goal, raw)) return null;
   const rows = Array.isArray(raw.goal_constraints) ? raw.goal_constraints.map(rec) : [];
   const horizon = rec(goal.goal_horizon);
-  const core = coreAimTargetOf(raw, goal.id);
+  const aim = coreAimOf(raw, goal.id);
+  const core = aim === undefined ? undefined : rec(aim.target) ?? null;
   // On a core graph the aim's own deadline counts, in the person's words ("within the next 2 months" has no date).
   const deadlineKnown = rows.some((r) => r?.node_id === goal.id && rec(r?.deadline_metadata) !== undefined)
     || typeof horizon?.deadline === 'string' || finiteNum(horizon?.months)
     || (typeof core?.by_when === 'string' && core.by_when.trim() !== '');
-  // The person's change from a level not given yet: the target is there, today's level is not. Olumi's suggested measure
-  // (`source: 'olumi'`) is not their target. Any other held target keeps the words below (DL ruling (a), narrowest reading).
-  if (core !== undefined && core !== null && core.source !== 'olumi' && (core.comparator === 'increase' || core.comparator === 'decrease')
-    && finiteNum(core.value) && core.current === null && typeof core.quantity === 'string' && core.quantity.trim() !== '') {
-    return { kind: 'goal_level_missing', goal_id: goal.id, deadline_known: deadlineKnown, question: todaysLevelQuestion(label, core.quantity) };
+  if (aim !== undefined && core !== undefined && core !== null) {
+    // The ONE reading of the aim's target, as the mapper holds it (`aim-reading.ts`); stored living-model bytes.
+    const reading = aimTargetReading(aim as never);
+    // The person's change from a level not given yet: the target is there, today's level is not (#3631).
+    if (reading === 'goal_level_unknown') {
+      return { kind: 'goal_level_missing', goal_id: goal.id, deadline_known: deadlineKnown, question: todaysLevelQuestion(label, core.quantity) };
+    }
+    const held = typeof reading === 'string' ? heldTargetQuestion(label, aim, core, reading) : undefined;
+    if (held !== undefined) return { kind: 'goal_answer_missing', goal_id: goal.id, deadline_known: deadlineKnown, question: held };
   }
   return {
     kind: 'goal_target_missing', goal_id: goal.id, deadline_known: deadlineKnown,
