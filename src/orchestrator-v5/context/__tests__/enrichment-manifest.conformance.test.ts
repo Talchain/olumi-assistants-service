@@ -127,6 +127,7 @@ describe('manifest ↔ PLoT RunResponseV3 (the seam that had no bolt)', () => {
     'coaching_signal_produced_at',
     '_diagnostics',
     'run_provenance',
+    '__cee_implied_quantity', // CEE-injected by run-analysis.ts (#3660), never a PLoT key
   ]);
   const LEGACY_V1_ONLY = new Set(['results']);
   const manifestPlotSection = [...ENRICHMENT_PRODUCER_MANIFEST].filter(
