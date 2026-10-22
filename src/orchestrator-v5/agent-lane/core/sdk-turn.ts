@@ -205,6 +205,15 @@ export interface CoreTurnSdk {
  */
 const turnsInFlight = new Map<string, Promise<void>>();
 
+/**
+ * The provider refuses any turn on a Conversation that holds a tool call with no answer. The in-process queue above cannot
+ * prevent that when a turn is cut off mid-tool by a restart or a crash (served 22 Oct, after a deploy: every later turn of
+ * the scenario was refused). The refusal accepts nothing, so the call is answered as interrupted and the turn is sent again.
+ */
+const UNANSWERED_CALL = /No tool output found for function call (call_[A-Za-z0-9_-]+)/;
+export const INTERRUPTED_CALL = 'This step was interrupted before its result was recorded, so whether it saved anything is unknown. '
+  + 'Read the current saved model (read_canonical_context) before saying what happened or repeating it.';
+
 /** Waits for the scenario's earlier core turns, then holds its slot until `release`; `waited` says an earlier turn was running. */
 export async function acquireCoreTurnSlot(scenarioId: string): Promise<{ readonly release: () => void; readonly waited: boolean }> {
   const prior = turnsInFlight.get(scenarioId);
@@ -315,6 +324,8 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
   let paused: CoreTurnSdk['paused'];
 
   let traceId = `trace_${randomUUID().replace(/-/g, '')}`;
+  /** Whether the provider has accepted any request of this turn (a model event arrived). */
+  let accepted = false;
   const finish = (text: string, stopped: AgentTurnResult['stopped_reason'], calls: number, author: 'ai' | 'host'): AgentTurnResult & { sdk: CoreTurnSdk } => {
     const total = Math.max(0, now() - startedAt);
     return {
@@ -352,6 +363,7 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
         const live = await run(agent, from, { ...options, stream: true });
         let writing = false;
         for await (const event of live) {
+          accepted = true;
           if (!writing && event.type === 'raw_model_stream_event' && event.data.type === 'output_text_delta') {
             writing = true;
             if (showProgress) emitAgentPhase('writing');
@@ -362,7 +374,24 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
         if (deliveryUnknown !== undefined) throw new CoreDeliveryUnknownError(deliveryUnknown.cause);
         return live;
       };
-      let result = await go(turnInput);
+      // At most two interrupted calls are answered, each once, and only when the turn's FIRST request was refused with a 400
+      // before anything was accepted (no model event, no tool run): only then is a resend sure to repeat nothing (Codex r1
+      // on #3615: a matching 500, or a later hop's refusal after a tool ran, must stay the provider's answer).
+      const answered = new Set<string>();
+      const goAnswering = async (from: typeof turnInput) => {
+        for (;;) {
+          try { return await go(from); } catch (err) {
+            const callId = UNANSWERED_CALL.exec(err instanceof Error ? err.message : '')?.[1];
+            const refusedFirst = (err as { status?: unknown }).status === 400 && !accepted && toolCalls.length === 0;
+            if (callId === undefined || !refusedFirst || answered.has(callId) || answered.size >= 2 || from instanceof RunState) throw err;
+            answered.add(callId);
+            await client.conversations.items.create(conversation.id, { items: [{ type: 'function_call_output', call_id: callId, output: INTERRUPTED_CALL }] });
+            log.warn({ event: 'agent_core.unanswered_call_answered', scenario_id: input.ctx.scenario_id, call_id: callId },
+              'agent-core: an interrupted tool call was answered before the turn');
+          }
+        }
+      };
+      let result = await goAnswering(turnInput);
       let calls = result.rawResponses.length;
       const pressed = result.interruptions.length === 1 ? result.interruptions[0] : undefined;
       if (pressed !== undefined && approvesNow !== undefined && argsOf(pressed)['proposal_id'] === approvesNow) {
