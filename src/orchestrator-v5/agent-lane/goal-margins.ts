@@ -20,14 +20,13 @@ const rec = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 /** Float noise only, relative to the figures themselves (Codex r1: no absolute floor that makes tiny frames agree). */
 const close = (a: number, b: number): boolean => a === b || Math.abs(a - b) <= 1e-12 * Math.max(Math.abs(a), Math.abs(b));
+/** A level converted from the encoded frame, read at float's own precision (1.1 × 500 is the 550 the Run means). */
+const clean = (v: number): number => Number(v.toPrecision(15)) + 0;
 /**
- * The figure without float noise (549.9999999999999 is the 550 the Run means; 1.1 × 500 is 550): its 15-digit form only when
- * that is within a few units in the last place, so an exactly held figure is never rounded (1e15 + 1 stays; Codex r2).
+ * A level the Run recorded in the target's own unit, used exactly as recorded: only when it is exactly its 15-digit form, so
+ * neither float noise nor a real last digit is ever rounded into a different figure (Codex r2/r3: 1.2e15 + 1); else nothing.
  */
-const clean = (v: number): number => {
-  const c = Number(v.toPrecision(15));
-  return Math.abs(c - v) <= 4 * Number.EPSILON * Math.abs(v) ? c + 0 : v;
-};
+const asRecorded = (v: number): number | undefined => (Number(v.toPrecision(15)) === v ? v + 0 : undefined);
 /** Decimal places as written, or undefined in exponent form. */
 const places = (v: number): number | undefined => {
   const s = String(v);
@@ -141,7 +140,8 @@ export function goalMarginsOf(result: unknown, graph: unknown, current: boolean,
   for (const id of ev.option_ids) {
     const raw = exactLevelOf(rowOf(id));
     if (raw === undefined) return undefined;
-    const level = clean(raw * toNatural);
+    const level = toNatural === 1 ? asRecorded(raw) : clean(raw * toNatural);
+    if (level === undefined) return undefined;
     const margin = upward ? add(level, -ev.target) : add(ev.target, -level);
     if (margin === undefined) return undefined;
     const meets = strict ? margin > 0 : margin >= 0;

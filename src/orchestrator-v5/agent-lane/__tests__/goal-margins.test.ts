@@ -168,14 +168,13 @@ describe('exact results carry their margins and the input each rests on, from th
     expect(night.rests_on).toBeUndefined();
   });
 
-  it('Codex r2: an exactly held 16-digit level keeps its last digit; a decimal margin is the decimal', () => {
-    expect(marginsOf(levels(fresh(), { night: 1000000000000001 }))!.options[0]!.margin).toBe(999999999999601);
+  it('Codex r2: a 15-digit level keeps its last digit; a decimal margin is the decimal', () => {
+    expect(marginsOf(levels(fresh(), { night: 100000000000001 }))!.options[0]!.margin).toBe(99999999999601);
     expect(marginsOf(levels(fresh(), { night: 400.3 }))!.options[0]!.margin).toBe(0.3);
   });
 
-  it('float noise in a recorded level is cleared, so the identity and its boundary still hold', () => {
-    const night = marginsOf(levels(fresh(), { night: 549.9999999999999 }))!.options[0]!;
-    expect(night).toEqual(EXPECTED.options[0]);
+  it('NEGATIVE (Codex r3): a level beyond 15 digits, a real digit or float noise, is never rounded into another figure: nothing is said', () => {
+    for (const night of [1200000000000001, 1000000000000001, 549.9999999999999]) expect(marginsOf(levels(fresh(), { night }))).toBeUndefined();
   });
 
   it('NEGATIVE (Codex r2): evidence with no selected Run id to match says nothing (every caller passes the canonical id)', () => {
