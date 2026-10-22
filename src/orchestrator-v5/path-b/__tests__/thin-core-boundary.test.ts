@@ -35,18 +35,35 @@ function filesUnder(rel: string): string[] {
     .map((f) => join(abs, f));
 }
 
-/** Each runtime import of a forbidden module, as "<module>: <names>". Type-only imports are skipped. */
+/**
+ * Each runtime dependency on a forbidden module, as "<module>: <names>" (or the form, when it binds no names). EVERY module
+ * specifier counts (Codex BLOCK on #3647 r1: only `import … from` was seen): `import … from`, `export … from`, `import('…')`,
+ * a side-effect `import '…'` and `require('…')`. Type-only imports and re-exports are skipped.
+ */
 export function forbiddenImports(source: string): string[] {
   const out: string[] = [];
-  const importRe = /import\s+(type\s+)?([\s\S]*?)\s+from\s+['"]([^'"]+)['"]/g;
-  for (const m of source.matchAll(importRe)) {
-    if (m[1] !== undefined) continue;
-    const base = m[3]!.split('/').pop()!.replace(/\.js$/, '');
+  const baseOf = (spec: string): string => spec.split('/').pop()!.replace(/\.js$/, '');
+  // `import X from`, `import { a } from`, `import * as n from`, `export { a } from`, `export * from` (one statement: no `;`).
+  const fromRe = /\b(import|export)\s+(type\s+)?([^;]*?)\s+from\s+['"]([^'"]+)['"]/g;
+  for (const m of source.matchAll(fromRe)) {
+    if (m[2] !== undefined) continue;
+    const base = baseOf(m[4]!);
     if (!FORBIDDEN.includes(base)) continue;
-    const names = (m[2]!.match(/\{([\s\S]*)\}/)?.[1] ?? m[2]!)
-      .split(',').map((s) => s.trim()).filter((s) => s.length > 0 && !s.startsWith('type '));
+    const clause = m[3]!;
+    const braced = clause.match(/\{([\s\S]*)\}/)?.[1];
+    const names = [...(braced ?? '').split(','), ...clause.replace(/\{[\s\S]*\}/, '').split(',')]
+      .map((s) => s.trim()).filter((s) => s.length > 0 && !s.startsWith('type '));
     const runtime = names.filter((n) => !(ALLOWED_BY_NAME[base] ?? []).includes(n.split(/\s+as\s+/)[0]!));
     if (runtime.length > 0) out.push(`${base}: ${runtime.join(', ')}`);
+  }
+  // Forms that bind no names: the whole module is loaded at runtime.
+  const unnamed: readonly [RegExp, string][] = [
+    [/\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g, 'import()'],
+    [/^\s*import\s+['"]([^'"]+)['"]/gm, 'side-effect import'],
+    [/\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)/g, 'require()'],
+  ];
+  for (const [re, form] of unnamed) {
+    for (const m of source.matchAll(re)) if (FORBIDDEN.includes(baseOf(m[1]!))) out.push(`${baseOf(m[1]!)}: ${form}`);
   }
   return out;
 }
@@ -66,5 +83,20 @@ describe('thin core dependency boundary', () => {
     expect(forbiddenImports(`import type { InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';`)).toEqual([]);
     expect(forbiddenImports(`import { readBackState } from '../../routes/agent-v1-turn.js';`)).toEqual(['agent-v1-turn: readBackState']);
     expect(forbiddenImports(`import { type CallStructuredModel, constructionOperationId } from '../runtime/build-model.js';`)).toEqual([]);
+  });
+
+  it('POSITIVE CONTROL: every other form that loads a module is seen too (Codex BLOCK on #3647 r1)', () => {
+    const route = '../../routes/agent-v1-turn.js';
+    expect(forbiddenImports(`void import('${route}');`)).toEqual(['agent-v1-turn: import()']);
+    expect(forbiddenImports(`import '${route}';`)).toEqual(['agent-v1-turn: side-effect import']);
+    expect(forbiddenImports(`const r = require('${route}');`)).toEqual(['agent-v1-turn: require()']);
+    expect(forbiddenImports(`export { readBackState } from '${route}';`)).toEqual(['agent-v1-turn: readBackState']);
+    expect(forbiddenImports(`export * from '${route}';`)).toEqual(['agent-v1-turn: *']);
+    expect(forbiddenImports(`import route, { readBackState } from '${route}';`)).toEqual(['agent-v1-turn: readBackState, route']);
+    // Type-only forms load nothing.
+    expect(forbiddenImports(`export type { CallStructuredModel } from '../runtime/build-model.js';`)).toEqual([]);
+    expect(forbiddenImports(`import type * as T from '${route}';`)).toEqual([]);
+    // CONTRAST: a module outside the list is never flagged, in any form.
+    expect(forbiddenImports(`void import('./deps.js'); import './instructions.js'; export * from './turn-request.js';`)).toEqual([]);
   });
 });
