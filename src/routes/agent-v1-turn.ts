@@ -106,7 +106,8 @@ import { commitLimitAddInProcess, commitLimitEditInProcess, commitOptionLevelsIn
 import { declinedProposalOf, declineChipIdFor, displayedProposalsOf, shownAsHeldNow, heldChangeName, heldChangeLabel, isHeldProposal, heldProposalId, proposalRecord, agentProposalOf, proposalFieldsWire, heldRecordAppliesAt, heldRecordsApplyAt, issuedTurnIdsForProposalRecords, proposalIssuances, type ProposalRecord } from '../orchestrator-v5/agent-lane/proposal-object/record.js';
 import { amendAgentProposal, parseProposalEdits, proposalEditsDigest, readUserEdits } from '../orchestrator-v5/agent-lane/proposal-object/amend.js';
 import { refreshedHold, reconcileHeldProposals } from '../orchestrator-v5/agent-lane/proposal-object/lifecycle.js';
-import { heldCardStillApplies, heldCardSubjectMoved, heldCardUnderReview } from '../orchestrator-v5/agent-lane/proposal-object/still-applies.js';
+import { heldCardReplaced, heldCardStillApplies, heldCardSubjectMoved, heldCardUnderReview } from '../orchestrator-v5/agent-lane/proposal-object/still-applies.js';
+import { correctedReviewLine, correctedSubjectsOf, retireCorrectedHolds, writtenSubjects } from '../orchestrator-v5/agent-lane/runtime/correction-workflows.js';
 import { editsRefusedSentence, heldDeclineSentence, heldLapseSentence, heldReviewSentence, reviewChipFor, reviewedProposalOf, userEditsReceipt, PLAIN_APPROVAL_SUPERSEDED } from '../orchestrator-v5/agent-lane/proposal-object/reply.js';
 import { CONVERSATION_ROWS_READ } from './assist.v1.scenario-graph.js';
 import { commitOlumiOptionAdoptionInProcess } from '../orchestrator-v5/system-events/olumi-option-adoption.js';
@@ -5065,11 +5066,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           subjectMoved: (hold) => { const p = agentProposalOf(hold); return p !== undefined && heldCardSubjectMoved(p, readbackGraph); } });
         liveHolds = reconciled.carried;
         for (const l of reconciled.lapsed) if (agentProposalOf(l.hold) !== undefined) proposals.discard(heldProposalId(l.hold));
+        // ⭐ A correction offered this turn retires the part of a held card it replaces, visibly (`retireCorrectedHolds`).
+        const corrected = new Set(result.tool_calls.filter((c) => c.name === 'propose_statement' && c.ok && typeof c.proposal_id === 'string')
+          .flatMap((c) => correctedSubjectsOf(proposals.get(c.proposal_id as string)) ?? []));
+        const retired = corrected.size === 0 ? undefined : retireCorrectedHolds(liveHolds, corrected, readbackGraph, graphHash);
+        if (retired !== undefined) { liveHolds = retired.holds; for (const id of retired.gone) proposals.discard(id); }
         // A stale press of a card under review is answered with its review line again (nothing was applied).
         const pressedForReview = staleReviewPress === undefined || reconciled.review.some((h) => heldProposalId(h) === staleReviewPress) ? []
           : reconciled.carried.filter((h) => heldProposalId(h) === staleReviewPress && heldCardUnderReview(h));
         heldLapseLines = [...takeOwedHeldLapses(scenarioId), ...reconciled.lapsed.map((l) => heldLapseSentence(heldChangeName(l.hold), l.reason)),
-          ...[...reconciled.review, ...pressedForReview].map((h) => heldReviewSentence(heldChangeName(h)))];
+          ...reconciled.review.map((h) => heldReviewSentence(heldChangeName(h))),
+          ...pressedForReview.map((h) => correctedReviewLine(h, readbackGraph) ?? heldReviewSentence(heldChangeName(h))), ...(retired?.said ?? [])];
         // An earlier turn's held proposal the Agent set aside on the user's typed decline is SAID (the press says its own).
         if (declinedHold === undefined) {
           const setAside = heldAtStart.filter((h) => withdrawn.has(heldProposalId(h)));
@@ -5496,13 +5503,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ? [...heldCards.filter((r) => !underReview.has(r.proposal_id)).map((r) => approveWithItsChange(r)),
         ...heldCards.filter((r) => underReview.has(r.proposal_id)).map((r) => {
           const hold = liveHolds.find((h) => heldProposalId(h) === r.proposal_id);
-          return reviewChipFor(r.proposal_id, hold === undefined ? undefined : heldChangeLabel(hold)) as OfferedAction;
+          return reviewChipFor(r.proposal_id, hold === undefined ? undefined : heldChangeLabel(hold),
+            hold === undefined ? [] : heldCardReplaced(hold).map((x) => x.name)) as OfferedAction;
         }),
         ...(heldCards.some((r) => !underReview.has(r.proposal_id)) ? [AMEND_CHIP] : []),
         ...heldCards.map((r) => r.decline_action as OfferedAction)] : [];
     const meantHold = waitingIds.size > 1 && meantId !== undefined ? heldAtStart.find((h) => heldProposalId(h) === meantId) : undefined;
-    const approvalWords = waitingIds.size > 1
-      ? approvalChoiceWords(waitingIds.size, meantHold === undefined ? undefined : heldChangeLabel(meantHold)) : APPROVAL_REQUIRED_WORDS;
+    // ⛔ Codex R1 on #3463: an approval of a card kept for review is answered with what happened to it (its review line), never
+    // "press the approval button" (it has none) beside the Agent's own "Applied.".
+    const refusedCards = result.tool_calls.filter((c) => c.name === 'authorise_change' && c.refusal === 'approval_required').map((c) => c.proposal_id);
+    const reviewedHold = refusedCards.length === 0 ? undefined : liveHolds.find((h) => heldCardUnderReview(h) && refusedCards.every((id) => id === heldProposalId(h)));
+    const approvalWords = reviewedHold !== undefined ? correctedReviewLine(reviewedHold, readbackGraph) ?? heldReviewSentence(heldChangeName(reviewedHold))
+      : waitingIds.size > 1
+        ? approvalChoiceWords(waitingIds.size, meantHold === undefined ? undefined : heldChangeLabel(meantHold)) : APPROVAL_REQUIRED_WORDS;
     // A resolved construction card, whatever it confirms. The complete stored window must attest both the first
     // public user answer and its exact-brief construction registration; neither a later card nor unknown history qualifies.
     const constructionConfirmResolved = await (async (): Promise<boolean> => {
@@ -5585,11 +5598,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      */
     const offeredAgent = approvalCarrier !== undefined ? agentProposalOf(approvalCarrier) : undefined;
     if (offeredAgent !== undefined && approvalCarrier !== undefined) {
-      const targets = new Set(offeredAgent.operations.map((o) => o.path));
+      const targets = new Set(offeredAgent.operations.flatMap(writtenSubjects));
       const replaced = liveHolds.filter((h) => {
         const older = agentProposalOf(h);
-        return h.chip_id !== approvalCarrier.chip_id && older !== undefined && older.operations.length > 0
-          && h.emitted_at_iso < approvalCarrier.emitted_at_iso && older.operations.every((o) => targets.has(o.path));
+        // A part a correction already replaced counts as gone: a card for the kept part replaces the reviewed one.
+        const gone = new Set(heldCardReplaced(h).map((r) => r.subject));
+        const rest = older === undefined ? [] : older.operations.flatMap(writtenSubjects).filter((s) => !gone.has(s));
+        return h.chip_id !== approvalCarrier.chip_id && older !== undefined && rest.length > 0
+          && h.emitted_at_iso < approvalCarrier.emitted_at_iso && rest.every((s) => targets.has(s));
       });
       for (const h of replaced) proposals.discard(heldProposalId(h));
       // DL 7 Oct: recorded as superseded (log + the saved answer's words), never silently dropped.

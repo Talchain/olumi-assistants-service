@@ -22,6 +22,10 @@ const CLAIMS = [
   'Recorded assumptions:',
   'The direction is now recorded: a discount campaign is expected to increase churn.',
   'All others were recorded as approved:',
+  // Codex R1 on #3463: the whole sentence is the claim word (served shape "Applied." before a refusal receipt).
+  'Applied.',
+  'Saved!',
+  '**Applied.**',
 ];
 // Served sentences that are NOT write claims (each must survive).
 const NOT_CLAIMS = [
@@ -35,6 +39,7 @@ const NOT_CLAIMS = [
   '- Recorded by the model: **£59/month**',
   'The practical question is whether the extra **£10 per Pro customer per month** offsets any reduction in new demand and any added churn, while staying below the 4% cap.',
   'This is not yet represented in the decision model: it currently has price, churn and price-sensitivity factors, but no recorded prior-rise amount, date, or measured subscriber-loss outcome.',
+  'Saved scenarios open from the list.',
 ];
 
 describe('which served sentences assert a completed write', () => {

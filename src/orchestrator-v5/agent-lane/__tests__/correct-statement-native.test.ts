@@ -85,6 +85,24 @@ describe.each(cases)('$name: sourced reading and subject review are separate', r
     expect(awaiting).not.toContain(stale);
     expect(awaiting).toContain(unrelated);
   });
+  // ⭐ Codex approach review (8b, the retirement fix): a compound correction writes EVERY edit's subject, not only its first (`op.path`).
+  // RED before: a newer correction of its SECOND subject left the older compound card awaiting approval beside it.
+  it('a correction of a compound card\u2019s second subject retires that card; the newer correction saves through the real register route and reads back cold', async () => {
+    const f = fixture(row), w = await correctionWorld(f.graph, f.message);
+    const compound = await w.offer('propose_statement', { correction: f.request });
+    const older = w.proposals.get(String(compound.proposal_id))!;
+    const restored = w.restoreCard(older, compound);
+    const second = await w.offer('propose_statement', { correction: { ...f.request, edits: [f.request.edits[1]!] } });
+    expect(second).toMatchObject({ ok: true, mutated: false });
+    const awaiting = w.proposals.outstanding(w.ctx.scenario_id, null).map(o => o.proposal_id);
+    expect(awaiting).toContain(String(second.proposal_id));
+    expect(awaiting, 'the compound card writes the corrected subject too').not.toContain(older.proposal_id);
+    expect(await w.press(String(second.proposal_id))).toMatchObject({ ok: true, applied: true });
+    expect(w.writes).toHaveLength(1);
+    expect((await w.cold()).status).toBe(200);
+    expect(await w.press(older.proposal_id, restored), 'a restored copy of the retired card writes nothing').toMatchObject({ ok: false });
+    expect(w.writes).toHaveLength(1);
+  });
   it('CONTROL: a refused correction retires nothing', async () => {
     const f = fixture(row), w = await correctionWorld(f.graph, f.message);
     const p = createProposal({ scenario_id: w.ctx.scenario_id, user_id: null, base_graph_identity_hash: 'earlier',

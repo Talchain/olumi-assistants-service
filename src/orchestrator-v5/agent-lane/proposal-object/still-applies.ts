@@ -198,10 +198,27 @@ export function heldCardUnderReviewIn(pendings: readonly PendingAction[], propos
   return pendings.some((pa) => pa.action.kind === 'apply_proposed_change' && heldCardUnderReview(pa)
     && ((pa.action.inline_patch as Rec | undefined)?.['agent_proposal'] as Rec | undefined)?.['proposal_id'] === proposalId);
 }
-export function heldCardForReview(pa: PendingAction, modelNow: string | null | undefined): PendingAction {
-  if (pa.action.kind !== 'apply_proposed_change' || heldCardUnderReview(pa)) return pa;
+/** A subject of a held card that a correction replaced (`retireCorrectedHolds`), with its name as the card is reviewed. */
+export interface HeldReplaced { readonly subject: string; readonly name: string }
+/** The replaced part recorded on a card under review, cumulative across corrections; empty for any other card. */
+export function heldCardReplaced(pa: PendingAction): HeldReplaced[] {
+  const mark = pa.action.kind === 'apply_proposed_change' ? (pa.action.inline_patch as Rec | undefined)?.[AWAITING_REVIEW] : undefined;
+  const replaced = isRec(mark) && Array.isArray(mark.replaced) ? mark.replaced : [];
+  return replaced.filter((r): r is HeldReplaced => isRec(r) && typeof r.subject === 'string' && typeof r.name === 'string');
+}
+/**
+ * Keep a held card for review. A correction that replaces part of it (`replaced`) adds that part to the mark, MERGED with what an
+ * earlier correction replaced, so the review asks for the kept part only, on this or a cold read.
+ */
+export function heldCardForReview(pa: PendingAction, modelNow: string | null | undefined, replaced: readonly HeldReplaced[] = []): PendingAction {
+  if (pa.action.kind !== 'apply_proposed_change') return pa;
+  const before = heldCardReplaced(pa);
+  const added = replaced.filter((r) => !before.some((b) => b.subject === r.subject));
+  if (heldCardUnderReview(pa) && added.length === 0) return pa;
+  const mark = heldCardUnderReview(pa) ? (pa.action.inline_patch as Rec)[AWAITING_REVIEW] as Rec
+    : { reason: replaced.length > 0 ? 'corrected' : 'model_changed', ...(typeof modelNow === 'string' && modelNow !== '' ? { model: modelNow } : {}) };
   return { ...pa, action: { ...pa.action, inline_patch: { ...pa.action.inline_patch,
-    [AWAITING_REVIEW]: { reason: 'model_changed', ...(typeof modelNow === 'string' && modelNow !== '' ? { model: modelNow } : {}) } } } } as PendingAction;
+    [AWAITING_REVIEW]: { ...mark, ...(before.length + added.length > 0 ? { replaced: [...before, ...added] } : {}) } } } } as PendingAction;
 }
 
 export function heldAgentCardStillApplies(pa: PendingAction, graph: unknown): boolean {

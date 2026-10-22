@@ -62,11 +62,26 @@ const REVIEW_THIS_CHANGE = 'Review this change';
 export function reviewedProposalOf(chipId: unknown): string | undefined {
   return typeof chipId === 'string' && chipId.startsWith(REVIEW_CHIP_PREFIX) ? chipId.slice(REVIEW_CHIP_PREFIX.length) : undefined;
 }
-export function reviewChipFor(proposalId: string, change: string | undefined): { id: string; label: string; message: string; detail?: string } {
+/** "A", "A" and "B", "A", "B" and "C". */
+const namesSaid = (names: readonly string[]): string => {
+  const q = names.map((n) => `"${n}"`);
+  return q.length <= 1 ? q.join('') : `${q.slice(0, -1).join(', ')} and ${q.at(-1)}`;
+};
+/** `replaced`: the part a correction replaced (`heldCardReplaced`); the review then asks for the kept part only. */
+export function reviewChipFor(proposalId: string, change: string | undefined, replaced: readonly string[] = []): { id: string; label: string; message: string; detail?: string } {
   const what = change?.trim().replace(/\.$/, '');
+  const without = replaced.length > 0 ? `, without ${namesSaid(replaced)}, which my correction replaced` : '';
   return { id: `${REVIEW_CHIP_PREFIX}${proposalId}`, label: REVIEW_THIS_CHANGE,
-    message: what !== undefined && what !== '' ? `Show me this change again on the model as it is now: "${what}".` : 'Show me this change again on the model as it is now.',
+    message: what !== undefined && what !== '' ? `Show me this change again on the model as it is now${without}: "${what}".` : `Show me this change again on the model as it is now${without}.`,
     ...(what !== undefined && what !== '' ? { detail: what } : {}) };
+}
+
+/** A correction replaced part of a held card (`retireCorrectedHolds`): said once, naming the replaced and the kept part. */
+export function heldCorrectedSentence(change: string | undefined, replaced: readonly string[], kept: readonly string[]): string {
+  const what = change?.trim().replace(/\.$/, '');
+  const card = what !== undefined && what !== '' ? `the held change "${what}"` : 'a held change';
+  return `Your correction replaces ${namesSaid(replaced)} in ${card}, so that change waits for your review; nothing was applied.`
+    + (kept.length > 0 ? ` Its other part (${namesSaid(kept)}) can be prepared again with ${REVIEW_THIS_CHANGE}.` : '');
 }
 
 /**
