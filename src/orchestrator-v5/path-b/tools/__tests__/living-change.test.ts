@@ -425,6 +425,10 @@ describe('DL 22 Oct (Lenses\' step 3): the person\'s approved chat correction is
     expect(markOf('f is .6k-.7k.', { value: -700 }), '".6k-.7k" never attests -700').toBeNull();
     expect(markOf('f is £10k-£20k.', { value: null, low: 10000, high: 20000 }), 'CONTRAST: the range as written').toBe('chat');
     expect(markOf('f goes from 5 to -3.', { value: -3 }), 'CONTRAST: a minus after words is a minus').toBe('chat');
+    // Codex r6: a dash after a figure the parser skips ("GBP10") is still a range's; an unclear dash attests nothing.
+    expect(markOf('f goes from £5 to GBP10-20.', { value: -20 }), '"GBP10-20" never attests -20').toBeNull();
+    expect(markOf('f is 5 units -8 units.', { value: -8 }), 'an unclear dash attests nothing').toBeNull();
+    expect(markOf('f is 5 units -8 units.', { value: 8 }), 'nor its unsigned figure').toBeNull();
   });
 
   it('the host sets it, never the AI: an unchanged brief figure the AI marks "chat" stays the brief\'s; a first draft says nothing', () => {
