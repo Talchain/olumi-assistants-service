@@ -841,6 +841,34 @@ describe("POST /proxy/v5/turn", () => {
       // CORS headers still present on error
       expect(res.headers["access-control-allow-origin"]).toBe(STAGING_ORIGIN);
     }, 10_000);
+
+    it("a core-route turn past the timeout answers in the core contract: TURN_STILL_RUNNING under its own turn id, outcome unknown", async () => {
+      // Paul 22 Oct 12:37Z: a turn past the 170 s proxy answered `PROXY_UPSTREAM_TIMEOUT`, which the core client cannot read,
+      // so its same-turn-id resend (which replays the recorded answer) never ran and the reply was lost to the session.
+      app = Fastify({ logger: false });
+      let finished = false;
+      app.post("/agent/v1/core-turn", async (_req, reply) => {
+        await new Promise((r) => setTimeout(r, 6_000));
+        finished = true;
+        return reply.code(200).send({ turn_id: "turn-001", durability: "recorded", assistant_text: "late" });
+      });
+      app.register(proxyV5TurnRoute);
+      await app.ready();
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/proxy/v5/turn",
+        headers: { origin: STAGING_ORIGIN, "content-type": "application/json", "x-olumi-ai-mode": "core-route" },
+        payload: SAMPLE_PAYLOAD,
+      });
+
+      expect(res.statusCode).toBe(504);
+      expect(finished).toBe(false);
+      const body = JSON.parse(res.body);
+      expect(body).toMatchObject({ turn_id: "turn-001", durability: "unknown", assistant_text: "",
+        error: { code: "TURN_STILL_RUNNING", retry_safe: false, nothing_saved: false } });
+      expect(res.headers["access-control-allow-origin"]).toBe(STAGING_ORIGIN);
+    }, 10_000);
   });
 
   // ---- Internal error handling ----
