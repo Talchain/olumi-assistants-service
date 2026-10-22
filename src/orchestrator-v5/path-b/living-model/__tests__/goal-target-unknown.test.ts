@@ -193,6 +193,16 @@ describe('a sized link into a goal with no target figure is held for that reason
     expect(w.message).toBe(unsizedLinkStatement([{ from: 'f', to: 'g', from_label: E, to_label: E }]));
   });
 
+  it('Codex r1: the awaiting sentence never exceeds its own budget (fewer names, compact labels, no labels, then nothing)', () => {
+    const long = 'Monthly gross profit and steady growth across every region and channel';
+    const l = (from: string) => ({ from, to: 'g', from_label: `${from} ${long}`, to_label: long, by: 'olumi' as const, awaits: 'target' as const });
+    for (const budget of [400, 200, 120, 60]) {
+      const out = awaitingGoalSentence([l('A'), l('B'), l('C')], budget);
+      expect(out.length, `budget ${budget}`).toBeLessThanOrEqual(budget);
+      if (budget >= 120) expect(out).toContain('are kept, and used once');
+    }
+  });
+
   it('with a target figure, the same link is sized from Olumi\'s estimate (regenerated), and nothing is held', () => {
     const m = awaitingTarget({ targetValue: 12000 });
     expect(reasons(m).filter((r) => r.startsWith('referral_gp:'))).toEqual([]);
