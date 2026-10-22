@@ -3,7 +3,7 @@
  * are the AIE's, byte for byte, bound by identity to `tests/fixtures/status-quo-row/aie-status-quo-lines-fc17c200.json`
  * (AMENDED: #94 6163023819, packet fc17c200, for capacity judge post3017 row 3; were #94 6160089127's lines): a LEVEL line
  * naming the held reference value and the target as recorded values, and a generic line. Neither compares them as a future
- * event ("stays at", "meets") and neither promises that a figure unlocks a chance.
+ * event ("stays at", "meets") and neither promises that a figure unlocks a chance. DL 22 Oct overrides the miss only.
  *
  * Served capacity-post2996 (CEE 351eeda0): ‘Keep current staffing’ showed "No change, by assumption" and only "Doing nothing:
  * no change to ‘Weekly support capacity’ in this model, by assumption." The judge: neither an actionable step nor a plain
@@ -34,12 +34,13 @@ const AIE = {
 };
 const levelLine = (goal: string, reference: string, comparator: string, target: string): string => AIE.exact_LEVEL_line
   .split('<goal>').join(goal).replace('<reference>', reference).replace('<comparator>', comparator).replace('<target>', target);
-const NEW = levelLine('Weekly support capacity', '80 tickets per week', 'at least', '100 tickets per week');
+const NEW = 'No change, by assumption: stays at today’s 80 tickets per week, which does not meet your target of at least 100 tickets per week, in this model.';
 /** The AIE's generic line, for the same recorded assumed-reference row where the LEVEL figures do not hold. */
 const generic = (goal: string): string => AIE.exact_generic_line.split('<goal>').join(goal);
 const GENERIC = generic('Weekly support capacity');
-/** AIE: no future-event comparison, no promise, no chance figure, no recommendation. */
-const NEVER = /stays at|\bmeets\b|does not meet|short of|Olumi can add|%|recommend|best|should/i;
+/** DL 22 Oct: only a checked determined miss overrides the AIE future-event prohibition. */
+const NEVER = /short of|Olumi can add|%|recommend|best|should/i;
+const NO_COMPARISON = /stays at|\bmeets\b|does not meet/i;
 
 /** The envelope as the Run's licence reads it: the served licence removed (it is this code's output). */
 const runEnvelope = (): Rec => ({ ...FX.envelope,
@@ -66,7 +67,27 @@ describe('the status quo row: the held reference value and the target as recorde
       .find((c) => c.option_id === SQ)!.cell;
     expect(cell).toEqual({ kind: 'withheld', face: 'No change, by assumption', why: NEW,
       reasons: [{ code: 'status_quo_by_assumption', message: NEW }] });
+    expect(NEW).toMatch(/^No change, by assumption: stays at today’s/);
     expect(NEW).not.toMatch(NEVER);
+    expect(l!.pct_by_option).not.toHaveProperty(SQ);
+    expect(l!.leader_option_id).not.toBe(SQ);
+  });
+
+  it('a reference already meeting the target retains the AIE words and no earned chance or leader', () => {
+    const graph = structuredClone(FX.graph);
+    const goal = graph.nodes.find((n: Rec) => n.id === GOAL);
+    goal.goal_threshold_raw = 80;
+    goal.goal_threshold = 0.16;
+    const envelope = structuredClone(runEnvelope());
+    envelope.option_comparison.find((r: Rec) => r.option_id === SQ).probability_of_goal = 1;
+    const l = goalChanceLicenceOf(envelope, graph, GOAL, () => false,
+      { ...FX.served.sent_threshold, value: 0.16 }, graph, {})!;
+    expect(l.status_quo).toEqual({ option_id: SQ,
+      line: levelLine('Weekly support capacity', '80 tickets per week', 'at least', '80 tickets per week') });
+    expect(l.status_quo!.line).not.toMatch(NO_COMPARISON);
+    expect(l.status_quo!.line).not.toMatch(NEVER);
+    expect(l.pct_by_option).not.toHaveProperty(SQ);
+    expect(l.leader_option_id).not.toBe(SQ);
   });
 
   it('CONTRAST (AMENDED: was the convention\'s words, now the AIE\'s generic line): a level held in another unit, or with no unit', () => {
@@ -76,6 +97,7 @@ describe('the status quo row: the held reference value and the target as recorde
     // AIE: the SAME unit must be held, not assumed.
     expect(licence(withLevelUnit(undefined))!.status_quo).toEqual({ option_id: SQ, line: GENERIC });
     expect(GENERIC).not.toMatch(NEVER);
+    expect(GENERIC).not.toMatch(NO_COMPARISON);
   });
 
   it('the LEVEL line says the held comparator as recorded, never "meets"; anything unreadable gets the generic line', () => {
@@ -84,7 +106,10 @@ describe('the status quo row: the held reference value and the target as recorde
     expect(say(100, '>')).toContain('(your target is above £100).');
     expect(say(90, '<=')).toContain('as unchanged from today’s £90 (your target is at most £100).');
     expect(say(100, '<')).toContain('(your target is below £100).');
-    for (const c of ['>=', '>', '<=', '<']) expect(say(100, c)).not.toMatch(NEVER);
+    for (const c of ['>=', '>', '<=', '<']) {
+      expect(say(100, c)).not.toMatch(NEVER);
+      expect(say(100, c)).not.toMatch(NO_COMPARISON);
+    }
     expect(statusQuoRowWords('Cost')).toBe(generic('Cost'));
     expect(statusQuoRowWords('Cost', { today: 1, comparator: '==', target: 1, unit: '£' })).toBe(generic('Cost'));
     expect(statusQuoRowWords('Cost', { today: NaN, comparator: '>=', target: 1, unit: '£' })).toBe(generic('Cost'));

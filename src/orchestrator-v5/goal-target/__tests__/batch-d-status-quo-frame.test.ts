@@ -24,10 +24,10 @@ const SERVED_LINE = (FX.served_licence.withheld_reason_by_option as Record<strin
 /**
  * AMENDED (AIE #94 6163023819, packet fc17c200; was #94 6160089127's "Carrying on as now: this Run uses …" lines): the
  * status-quo row's LEVEL line. This goal holds today's 80 and a target of at least 100 in one unit, spelt as each served graph
- * holds it. These rows are about the Run's frame; the words are pinned in `status-quo-row-words.test.ts`.
+ * holds it. DL 22 Oct Round 2 retains the assumption label and appends the checked determined-miss comparison.
  */
-const byAssumptionIn = (unit: string): string => `This Run can’t give a chance for carrying on as now, because it treats ‘Weekly support capacity’ `
-  + `as unchanged from today’s 80 ${unit} (your target is at least 100 ${unit}).`;
+const byAssumptionIn = (unit: string): string => `No change, by assumption: stays at today’s 80 ${unit}, `
+  + `which does not meet your target of at least 100 ${unit}, in this model.`;
 const BY_ASSUMPTION = byAssumptionIn('tickets per week');
 /** The run-4 served graph (`FLOAT`) spells the same unit "tickets / week". */
 const FLOAT_BY_ASSUMPTION = byAssumptionIn('tickets / week');

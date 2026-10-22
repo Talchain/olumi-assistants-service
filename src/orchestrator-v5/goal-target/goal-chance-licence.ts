@@ -70,7 +70,7 @@ import { resolveGoalDirection } from './goal-direction.js';
 import { goalReadingsOf, type GoalReading } from '../coaching/goal-reading-disclosure.js';
 import {
   BASIS_ALSO_REQUIRED_MAX, BASIS_CONDITION_MAX, effectsBasisWords, estimateOnlyWords, goalTargetBasisOf, partialGoalWords, periodEndWords, statusQuoAssumptionWords, statusQuoMovedWords,
-  statusQuoProjectionWords, statusQuoRowWords,
+  statusQuoProjectionWords, statusQuoRowWords, comparatorWords,
   targetChanceWords, type GoalTargetBasis,
 } from './goal-target-basis.js';
 import { goalTargetsBlockOf, readGoalTargetsBlock, GOAL_TARGET_ROLE, type GoalTargetsBlock } from './goal-targets-joint.js';
@@ -1000,7 +1000,7 @@ export function goalChanceLicenceOf(
   const worded = withBatchCWords(single, {
     envelope, graph, goal, goalLabel, basis, staticLevel, changeFrame, comparatorHeld: held, target, base, estimateOnly, statusQuoId,
     periodEndNote: conditional?.note,
-    sqByAssumption, sqReading, jointSqReading, timingOrdinary: timing.ordinary,
+    sqByAssumption, sqP, sqReading, jointSqReading, timingOrdinary: timing.ordinary,
     statusQuoLabel: statusQuoId === undefined ? undefined : labelOfNode(nodes, statusQuoId),
     // Acceptance is not authorship (DL 12 Oct, BLOCKING 3): an accepted Olumi value or link is still Olumi's — provisional.
     quantityFrame: readingFrame, olumiInputs: estimates.links + estimates.values + Object.keys(settingsByOption).length
@@ -1032,7 +1032,7 @@ function withBatchCWords(unframed: GoalChanceLicence, c: {
   readonly basis: GoalTargetBasis | undefined; readonly changeFrame: 'change_abs' | 'change_rel' | undefined;
   readonly comparatorHeld: string; readonly target: { readonly value: number; readonly unit?: string };
   readonly base: number | undefined; readonly estimateOnly: boolean; readonly statusQuoId: string | undefined;
-  readonly sqByAssumption: boolean; readonly quantityFrame: 'level' | 'change' | undefined; readonly olumiInputs: boolean;
+  readonly sqP: unknown; readonly sqByAssumption: boolean; readonly quantityFrame: 'level' | 'change' | undefined; readonly olumiInputs: boolean;
   /** R5-2: an input on this figure's paths whose origin is unverified (never "zero estimates", never Olumi's). */
   readonly unverifiedInputs: boolean;
   readonly sqReading: StatusQuoReading; readonly timingOrdinary: boolean; readonly statusQuoLabel: string | undefined;
@@ -1068,8 +1068,15 @@ function withBatchCWords(unframed: GoalChanceLicence, c: {
   const sqLevel = c.changeFrame === undefined && c.quantityFrame !== 'change' && finite(goalState?.raw_value)
     && typeof c.target.unit === 'string' && levelUnit !== '' && levelUnit === c.target.unit.trim()
     ? { today: goalState!.raw_value as number, comparator: c.comparatorHeld, target: c.target.value, unit: c.target.unit } : undefined;
+  // Class 1 (DL, 22 Oct Round 2): keep the assumption label and append the determined miss for a checked level reference.
+  // Round 3 P9: never contradict a recorded meets probability, even if the raw and scored targets disagree.
+  // The 14 Oct status-quo ruling still governs meets and every unsupported frame; no leader rule changes.
   const statusQuo = c.sqByAssumption && goalLabel !== undefined && c.statusQuoId !== undefined && single.option_ids.includes(c.statusQuoId)
-    ? { status_quo: { option_id: c.statusQuoId, line: statusQuoRowWords(goalLabel, sqLevel) } } : {};
+    ? { status_quo: { option_id: c.statusQuoId, line: sqLevel !== undefined && c.sqP !== 1
+      && exactComparisonSide(sqLevel.today, sqLevel.comparator, sqLevel.target) === 0
+      ? `No change, by assumption: stays at today’s ${sayFigureAsWritten(sqLevel.today, sqLevel.unit)}, which does not meet your target of `
+        + `${comparatorWords(sqLevel.comparator)} ${sayFigureAsWritten(sqLevel.target, sqLevel.unit)}, in this model.`
+      : statusQuoRowWords(goalLabel, sqLevel) } } : {};
   // AIE disposition: a forecast's status quo is carrying on's own projection, said as such (never "no change").
   const projection = c.sqReading === 'projection' && c.statusQuoLabel !== undefined && c.statusQuoId !== undefined
     && single.option_ids.includes(c.statusQuoId) ? [statusQuoProjectionWords(c.statusQuoLabel)] : [];

@@ -137,7 +137,7 @@ describe('Track 2: an option outcome measured from zero never reaches analysis_r
     expect(disclosures(changed)).toEqual(disclosures(base));
     expect(disclosures(changed)).toEqual({
       horizon: "These chances use the model's numbers as they are today; the model doesn't project how they change over time yet.",
-      statusQuo: 'This Run can’t give a chance for carrying on as now, because it treats ‘Monthly gross profit of at least £12,000’ as unchanged from today’s £10,000 (your target is at least £12,000).',
+      statusQuo: 'No change, by assumption: stays at today’s £10,000, which does not meet your target of at least £12,000, in this model.',
     });
     const licence = (changed.fact.result as Json).enrichment.inference_warnings.find((w: Json) => w.code === 'GOAL_CHANCE_LICENSED');
     expect(licence.pct_by_option.referral).toBe(50);
