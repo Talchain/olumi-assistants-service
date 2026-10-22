@@ -91,9 +91,12 @@ describe('exact results with no "carry on" option: margins from the Run\'s own r
 
   it('agreement only: an engine row off the exact level, or a licence side that disagrees, gets nothing', () => {
     const r = fresh(); Object.assign(row(r, 'early_start').outcome, { p10: 961, p50: 961, p90: 961, mean: 961 });
+    // Codex r2: a spread recorded as Infinity or NaN is not a zero spread.
+    const inf = fresh(); row(inf, 'early_start').outcome.std = Infinity;
+    const nan = fresh(); row(nan, 'early_start').outcome.std = Number.NaN;
     const s = fresh(); licence(s).withheld_reason_by_option.extra_bench.side = 'meets';
     const z = fresh(); licence(z).withheld_reason_by_option.extra_bench.reason = 'not_zero_spread';
-    for (const f of [r, s, z]) expect(marginsOf(f)).toBeUndefined();
+    for (const f of [r, inf, nan, s, z]) expect(marginsOf(f)).toBeUndefined();
   });
 
   it('only the Run this route can read: a carry-on option, two settings, another unit, a moved change, a sent threshold, another target shown, an option not in the Run', () => {

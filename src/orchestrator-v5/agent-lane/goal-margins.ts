@@ -97,7 +97,8 @@ function exactLevelOf(row: Rec | undefined): number | undefined {
   const o = rec(row?.outcome);
   if (o === undefined || !finite(o.p50)) return undefined;
   const p50 = o.p50;
-  if (finite(o.std) && Math.abs(o.std) > 1e-12 * Math.abs(p50)) return undefined;
+  // A recorded spread that is not a finite figure is no evidence of zero spread (Codex r2: Infinity / NaN slipped past).
+  if (typeof o.std === 'number' && !(Math.abs(o.std) <= 1e-12 * Math.abs(p50))) return undefined;
   return ['p10', 'p90', 'mean'].every((k) => !(k in o) || (finite(o[k]) && close(o[k] as number, p50))) ? p50 : undefined;
 }
 
