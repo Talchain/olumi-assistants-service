@@ -159,7 +159,7 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
           old: `starting level ${prior.current}${prior.unit === null ? '' : ` ${prior.unit}`} (${a.source === 'olumi' || olumiMeasure ? 'Olumi\u2019s estimate' : 'not confirmed by you'})` });
       }
       a.target = { quantity: prior?.quantity ?? a.text, comparator: edit.constraint_type === 'at_least' ? '>=' : '<=',
-        value: edit.raw_value, ...noRange, unit: edit.unit, by_when: prior?.by_when ?? null,
+        value: edit.raw_value, ...noRange, unit: edit.unit, by_when: prior?.by_when ?? null, period_months: prior?.period_months ?? null,
         baseline: prior?.baseline ?? null, current: keepCurrent ? prior?.current ?? null : null,
         current_source: keepCurrent ? prior?.current_source ?? null : null, current_unit: null, change_kind: null, source: null };
       Object.assign(a, theirs);

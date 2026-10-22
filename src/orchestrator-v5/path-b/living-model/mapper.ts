@@ -210,6 +210,15 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
           goal_threshold_cap_provenance: resolved.provenance, goal_threshold: lt.value / resolved.cap, goal_threshold_frame: 'level',
           ...(t!.by_when !== null ? { goal_deadline_as_stated: t!.by_when } : {}),
           ...(deadline !== undefined ? { goal_horizon: { deadline } } : {}),
+          // DL ruling 22 Oct (goal-window carrier): the person's own duration counted from today ("within 12 months") is the
+          // goal's window as Olumi's reading (`goalTargetBasisOf`), so an Olumi risk over that same window counts
+          // (`riskOccurrenceWindowMonths`). The effects are NOT read as in place by its end (`effects_at_period_end: false`), so
+          // the chance stays the static reading (`goalHorizonVerdict` → no_horizon) and no window is claimed for it. A level
+          // target only; a change target is not covered yet.
+          ...(!isChange && t!.period_months !== null && Number.isInteger(t!.period_months) && t!.period_months >= 1 && t!.period_months <= 120
+            && lt.unit !== null && lt.unit.trim() !== '' ? { goal_target_basis: { source: 'olumi_reading', quantity_frame: 'level', target_frame: 'level',
+              target_raw: lt.value, reference: 'today', period_months: t!.period_months, period_kind: 'at_end', effect_unit: lt.unit,
+              effects_at_period_end: false } } : {}),
         });
         if (t!.current === null) hold(aim.id, 'goal_level_unknown');
         else {

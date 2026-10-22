@@ -3,7 +3,7 @@ import type { LivingModelT } from '../../../../schemas/living-model.js';
 /** The recovery Batch 0 numerical control (ISL `test_recovery_numerical_check.py`), stated as a person would state it. */
 export const KNOWN_ANSWER: LivingModelT = {
   aims: [{ id: 'g', text: 'Reach 100 units', status: 'current', defined_as: null, source: 'user', party: null, quote: 'we need at least 100 units; today we are at 70',
-    target: { quantity: 'units', comparator: '>=', value: 100, low: null, high: null, unit: 'units', by_when: null, baseline: 'today', current: 70, current_source: null, current_unit: null, change_kind: null, source: null } }],
+    target: { quantity: 'units', comparator: '>=', value: 100, low: null, high: null, unit: 'units', by_when: null, period_months: null, baseline: 'today', current: 70, current_source: null, current_unit: null, change_kind: null, source: null } }],
   options: [
     { status: 'feasible', id: 'hold', label: 'Hold', settings: [], developed_from: null, source: 'user', party: null, quote: 'or we hold' },
     { status: 'feasible', id: 'push', label: 'Push', developed_from: null, source: 'user', party: null, quote: 'push f to 1',
@@ -19,7 +19,7 @@ export const KNOWN_ANSWER: LivingModelT = {
 /** A synthetic brief where each option states its own exact effect on the goal: today 40, at least 60, A +30, B +19.9. */
 export const OPTION_EFFECTS: LivingModelT = {
   aims: [{ id: 'w', text: 'Widgets per hour', status: 'current', defined_as: null, source: 'user', party: null, quote: 'at least 60 widgets per hour; today 40',
-    target: { quantity: 'widgets per hour', comparator: '>=', value: 60, low: null, high: null, unit: 'widgets per hour', by_when: null, baseline: 'today', current: 40, current_source: null, current_unit: null, change_kind: null, source: null } }],
+    target: { quantity: 'widgets per hour', comparator: '>=', value: 60, low: null, high: null, unit: 'widgets per hour', by_when: null, period_months: null, baseline: 'today', current: 40, current_source: null, current_unit: null, change_kind: null, source: null } }],
   options: [
     { status: 'feasible', id: 'a', label: 'Option A', settings: [], developed_from: null, source: 'user', party: null, quote: 'option A' },
     { status: 'feasible', id: 'b', label: 'Option B', settings: [], developed_from: null, source: 'user', party: null, quote: 'option B' },
