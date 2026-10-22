@@ -511,7 +511,7 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
     expect(r.statusCode, r.body).toBe(200);
     expectCoherentInstructions(r.json());
     const { CORE_REPLY_INSTRUCTION } = await import('../../../../routes/agent-v1-turn.js');
-    expect(createHash('sha256').update(CORE_REPLY_INSTRUCTION, 'utf8').digest('hex')).toBe('22f30daf11f1cbe3c8f79b3b336ecbc0b44f25507619df3ddc5e09ab38fbe290'); // 22 Oct: exact inputs → margin + a test of a link/level (Track 3 c5, was ae209749…); stress_test only for a sized link/factor (buddy SIMPLER, was 30c84e52…); three-part coaching after a Run (part 2 never ranks unmeasured figures, Codex r1) + the held-risk window ask (was 9d54116b…); + CORE_NEXT_STEP decisive question (Track 3 Q2 v2 + buddy AMEND, 21 Oct; was 2dd87dc8…), Track 3 E2E 21 Oct (was 7f0493d6…; arm C adopted 21 Oct)
+    expect(createHash('sha256').update(CORE_REPLY_INSTRUCTION, 'utf8').digest('hex')).toBe('883853862c04e0075e8f64a28eec540b6cf0c9363fa1b59a699bba3dfeefc521'); // 22 Oct: exact inputs → the Run's own results + the person's choice of figure to test (Track 3 c5; Codex r1 #3625; was ae209749…); stress_test only for a sized link/factor (buddy SIMPLER, was 30c84e52…); three-part coaching after a Run (part 2 never ranks unmeasured figures, Codex r1) + the held-risk window ask (was 9d54116b…); + CORE_NEXT_STEP decisive question (Track 3 Q2 v2 + buddy AMEND, 21 Oct; was 2dd87dc8…), Track 3 E2E 21 Oct (was 7f0493d6…; arm C adopted 21 Oct)
     for (const c of calls) {
       expect(c.instructions).toContain(CORE_REPLY_INSTRUCTION);
       expect(c.instructions.split(scope)).toHaveLength(2);
