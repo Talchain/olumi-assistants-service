@@ -23,6 +23,17 @@ import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import type { HandlerInvocation } from '../../tools/registry.js';
 import minimalFixture from '../../../../tests/fixtures/plot/v2-run-golden-minimal.json';
 
+/**
+ * ⭐ STEP 8 (AIE `point_uncertainty` 564fe768): a chance resting on a user's size whose spread nobody stated is withheld
+ * (`run-analysis-unsupported-spread.test.ts` pins that rule, its words and every surface). This file tests
+ * the horizon consumers, not that rule, so the Run's spread selection is held empty here; the rest of the support walk runs as served.
+ */
+vi.mock('../goal-certainty.js', async (original) => {
+  const actual = await original<typeof import('../goal-certainty.js')>();
+  return { ...actual, chanceSupportGoalPaths: (...args: Parameters<typeof actual.chanceSupportGoalPaths>) =>
+    ({ ...actual.chanceSupportGoalPaths(...args), unsupportedSpread: [] }) };
+});
+
 type Rec = Record<string, any>;
 const fixture = (path: string): Rec => JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8'));
 const B1_GRAPH = fixture('../../system-events/__tests__/fixtures/b1-828d87ac-stored-graph.json');

@@ -74,6 +74,18 @@ export const GOAL_FIGURES_USER_EFFECT_CLAMPED = 'GOAL_FIGURES_USER_EFFECT_CLAMPE
  * status quo) keeps its chance, so unlike #416 it is PER OPTION; the win shares and the leader go with it.
  */
 export const GOAL_FIGURES_PLACEHOLDER_PATH = 'GOAL_FIGURES_PLACEHOLDER_PATH';
+/**
+ * ⭐ STEP 8 (AIE `point_uncertainty` 564fe768): CEE withheld the chances that rest on a user's size whose spread is Olumi's D3
+ * default (`unsupportedSpreadWarning`, goal-certainty.ts). The size stays the user's; the chance is not supported.
+ */
+export const GOAL_FIGURES_UNSUPPORTED_SPREAD = 'GOAL_FIGURES_UNSUPPORTED_SPREAD';
+/**
+ * ⭐ STEP 8 (Codex R1 #3443; DL-3: targets AND limits): the same cause for ONE condition on another node (`constraint_ids`):
+ * the Run withheld those options' P on it and their joint (`withholdOptionLimitScores`), and this record says why, in the
+ * AIE's words, links named. NOT a goal-figures withhold (deliberately outside {@link GOAL_FIGURES_WITHHELD_CODES}): the
+ * primary goal's own chance stands; only the several-targets block and the limit checks read it.
+ */
+export const CONDITION_FIGURES_UNSUPPORTED_SPREAD = 'CONDITION_FIGURES_UNSUPPORTED_SPREAD';
 
 /**
  * CEE's code for a run whose goal figures it withheld because the user's own levels make the goal a rate × count product
@@ -133,6 +145,7 @@ export const GOAL_FIGURES_WITHHELD_CODES: ReadonlySet<string> = new Set([
   GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
   GOAL_FIGURES_USER_EFFECT_CLAMPED,
   GOAL_FIGURES_PLACEHOLDER_PATH,
+  GOAL_FIGURES_UNSUPPORTED_SPREAD,
   GOAL_FIGURES_PRODUCT_NOT_READ,
   GOAL_FIGURES_TARGET_NOT_TESTABLE,
   GOAL_FIGURES_MISSING_CURRENT_LEVEL,
@@ -211,6 +224,20 @@ export function readOptionResultSources(
  */
 export function runWithheldGoalFigures(envelope: Record<string, unknown>): boolean {
   return goalFiguresWithheldWarning(envelope) !== undefined;
+}
+
+/**
+ * ⭐ STEP 8 (AIE 764e9c72 `decision` / `consumer_scope`): the options whose simulated outcome RANGE rests on the same unsupported
+ * spread as their withheld chance — read off the Run's own recorded support (`GOAL_FIGURES_UNSUPPORTED_SPREAD`). The saved Run
+ * keeps every engine figure (the structural challenge reads it); a public result block, the AI's facts and the decision review
+ * carry the centre only, never that range. Empty for every Run without the record (history unchanged).
+ */
+export function unsupportedIntervalOptionIds(envelope: unknown): ReadonlySet<string> {
+  if (envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) return new Set();
+  const warnings = (envelope as Record<string, unknown>).inference_warnings;
+  return new Set(filterObjectEntries(Array.isArray(warnings) ? warnings : [])
+    .filter((w) => w.code === GOAL_FIGURES_UNSUPPORTED_SPREAD && Array.isArray(w.option_ids))
+    .flatMap((w) => (w.option_ids as unknown[]).filter((id): id is string => typeof id === 'string')));
 }
 
 /** That warning (the first), or `undefined`. */

@@ -55,10 +55,10 @@ import { IDENTITY_NOT_EVALUATED_CODE, composeIdentityNotEvaluatedAsk } from '../
 import { RunAnalysisArgsSchema, RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import { recordGoalCertainty } from './run-goal-certainty.js';
 import { UNSIZED_PATH_LEADER_CAUSE_KEY, type UnsizedPathLeaderCause } from '../../agent-lane/unsized-path-cause.js';
-import { legacyLeaderGoalLinks, legacyGoalWarning, unsizedLeaderGoalPaths, placeholderGoalWarning } from '../../agent-lane/goal-certainty.js';
+import { legacyLeaderGoalLinks, legacyGoalWarning, chanceSupportGoalPaths, placeholderGoalWarning, unsupportedSpreadWarning } from '../../agent-lane/goal-certainty.js';
 import { chanceGoalSentence, goalDeadlineFromRecord, goalKindOf, soleGoalOf } from '../../goal-target/goal-kind.js';
 import { sayDate } from '../../goal-target/deadline-date.js';
-import { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED, GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_MISSING_CURRENT_LEVEL, GOAL_FIGURES_OPTIONS_IDENTICAL, appendInferenceWarning, goalFiguresWithheldWarnings, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
+import { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED, GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_MISSING_CURRENT_LEVEL, GOAL_FIGURES_OPTIONS_IDENTICAL, CONDITION_FIGURES_UNSUPPORTED_SPREAD, appendInferenceWarning, goalFiguresWithheldWarnings, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
 import { targetTestabilityOf, targetNotTestableWarning, untestableGoalTargetRowId } from '../../admission/target-testability.js';
 import { unreadGoalProduct, unreadGoalProductWarning } from '../../agent-lane/unread-goal-product.js';
 import { submittedOptionsForMethod } from '../../goal-target/goal-horizon-detail.js';
@@ -1864,12 +1864,24 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // off the same analysed graph and the options PLoT scored — the one predicate the verdict's R-c reads.
     const limitIdentityEvaluations = Array.isArray((response as Record<string, unknown>).identity_evaluations)
       ? (response as Record<string, unknown>).identity_evaluations as unknown[] : undefined;
-    const placeholderMovedByLimit = collectLimitLevelOwners(
+    // ⭐ STEP 8 (Codex R1 #3443; DL-3: targets AND limits): the Run's one chance-support walk, pointed at each condition's own
+    // node, so a target or limit moved through a user's size on Olumi's default spread is withheld per option, as above.
+    const wireIds = finalWireOptions.map((o) => optionIdOf(o as Record<string, unknown>)).filter((id): id is string => typeof id === 'string' && id !== '');
+    const wireInterventions = new Map(finalWireOptions.map((o) => [optionIdOf(o as Record<string, unknown>) ?? '', o.interventions as Record<string, unknown>]));
+    const unsupportedSpreadTo = (nodeId: string) =>
+      chanceSupportGoalPaths(graphForAnalysis, wireIds, limitIdentityEvaluations, wireInterventions, nodeId).unsupportedSpread;
+    const limitOwners = collectLimitLevelOwners(
       graphForAnalysis,
       readRatifiedConstraints(snapshot.goal_constraints ?? snapshot.rawPersistedGraph ?? snapshot.graph),
       finalWireOptions,
       limitIdentityEvaluations,
-    ).placeholderMovedOptionIds;
+      unsupportedSpreadTo,
+    );
+    const placeholderMovedByLimit = limitOwners.placeholderMovedOptionIds;
+    for (const [constraintId, paths] of limitOwners.unsupportedSpreadByLimit) {
+      response = appendInferenceWarning(response, { ...unsupportedSpreadWarning(graphForAnalysis, paths),
+        code: CONDITION_FIGURES_UNSUPPORTED_SPREAD, severity: 'info', constraint_ids: [constraintId] });
+    }
     if (placeholderMovedByLimit.size > 0) {
       response = withholdOptionLimitScores(response, placeholderMovedByLimit);
       log.info(
@@ -1949,7 +1961,9 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         .filter((id): id is string => typeof id === 'string' && id !== ''))];
       const evaluations = Array.isArray(envelope.identity_evaluations) ? envelope.identity_evaluations : undefined;
       const scoredInterventions = new Map(finalWireOptions.map(o => [optionIdOf(o as Record<string, unknown>) ?? '', o.interventions as Record<string, unknown>]));
-      const goalPaths = unsizedLeaderGoalPaths(graphForAnalysis, scoredIds, evaluations, scoredInterventions);
+      // ONE chance-support walk: the unsized paths, and the user's sizes on Olumi's default spread (AIE `point_uncertainty`).
+      const support = chanceSupportGoalPaths(graphForAnalysis, scoredIds, evaluations, scoredInterventions);
+      const goalPaths = support.unsized;
       rangeInputs = { ...rangeInputs, goalPaths };
       // ⛔ GATE 5 (DL #75 5904272507): the user's own levels make the goal rate × count within 5%, and this run did not
       // evaluate that product, so its goal figures come from a walk those figures contradict. Every option, the leader too.
@@ -1995,6 +2009,27 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
             withheld: goalPaths.map((p) => ({ option_id: p.option_id, links: p.links.length })),
           },
           'run_analysis: goal figures withheld for the options an unsized Olumi link moves',
+        );
+      }
+      // ⭐ STEP 8 (AIE `point_uncertainty` 564fe768; DL-3 #94 6260306712 as AMENDED): an option whose path runs through a user's
+      // size on Olumi's default spread has no supported chance: withheld for that option only, with the AIE's exact words. Its
+      // range cannot return either: `goalChanceRangeOf` refuses beside any withhold code other than its own two. Gate 5 speaks alone.
+      if (support.unsupportedSpread.length > 0 && !productGateWithholds) {
+        // The dependent claims go: the point, joint and target chances, and every win share and the leader (AIE cc9fbadf: a share
+        // drawn on the same unsupported spread has no warrant of its own, and never stands in for the withheld chance). The
+        // outcome stays in the saved Run for the structural challenge (`keepOutcome`); its range never reaches a public block or
+        // the AI (`unsupportedIntervalOptionIds`, AIE 764e9c72).
+        response = withholdOptionGoalFigures(response, new Set(support.unsupportedSpread.map((p) => p.option_id)),
+          unsupportedSpreadWarning(graphForAnalysis, support.unsupportedSpread), { keepOutcome: true });
+        log.info(
+          {
+            event: 'run_analysis.goal_figures_withheld_for_unsupported_spread',
+            request_id: invocation.requestId,
+            scenario_id: args.scenario_id,
+            // Redacted: ids only.
+            withheld: support.unsupportedSpread.map((p) => ({ option_id: p.option_id, links: p.links.length })),
+          },
+          'run_analysis: goal figures withheld where a user-sized link runs on the default spread',
         );
       }
       // #2613 CR (b): no "Set your own…" disclosure while Gate 5 withholds every figure it would describe.
@@ -2308,7 +2343,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       leaderEstimatedTargetIds,
       // (a) and WHOSE figure an estimate_only row was checked against (DL CR 5859853452), from the same one walk.
       // R-c: with the options PLoT scores, so a change limit moved only through unsized parts is withheld.
-      collectLimitLevelOwners(graphForAnalysis, ratifiedConstraints, finalWireOptions, limitIdentityEvaluations),
+      collectLimitLevelOwners(graphForAnalysis, ratifiedConstraints, finalWireOptions, limitIdentityEvaluations, unsupportedSpreadTo),
       strictThresholdPins,
     );
     // ⚠ NO TELEMETRY EVENT FOR THE UNMEASURED-TARGET PARTITION, AND THAT IS A

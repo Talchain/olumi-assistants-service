@@ -252,7 +252,7 @@ describe('CONTROLS — figures kept where the user\'s figures make no unread pro
     expect(r.leading_option_id).toBe('switch_to_gcp');
   });
 
-  it('CONTROL (signed-in MRR W3 520aab46, product confirmed): the cold read keeps 0.2469', async () => {
+  it('CONTROL (signed-in MRR W3 520aab46, product confirmed): the product is read; 0.2469 waits only on the unattested spread', async () => {
     expect(unreadGoalProduct(W3_SERVED.graph)).toBeNull();
     // Science 393023 LICENCE (a)/(b), 7 Oct: std 0.125 → 0.1 on a clone preserves this independent claim; captured bytes stay unchanged.
     const g = structuredClone(legacyDoorGraph(W3_SERVED.graph));
@@ -264,7 +264,11 @@ describe('CONTROLS — figures kept where the user\'s figures make no unread pro
     const r = await runOn({ ...W3_SERVED, graph: g });
     const env = r.enrichment ?? r;
     expect(env.inference_warnings.map((x: Json) => x.code)).not.toContain(GOAL_FIGURES_PRODUCT_NOT_READ);
-    expect(JSON.stringify(env.option_comparison)).toContain('0.2469');
+    // STEP 8 (AIE 564fe768, 764e9c72): the served price → churn strength is the user's chat write saved with no attestation, so
+    // 0.2469 is truthfully withheld for its spread, never for an unread product (`run-analysis-unsupported-spread.test.ts`).
+    expect(JSON.stringify(env.option_comparison)).not.toContain('0.2469');
+    expect(env.inference_warnings.find((x: Json) => x.code === 'GOAL_FIGURES_UNSUPPORTED_SPREAD')?.links)
+      .toContainEqual({ from: 'pro_plan_price', to: 'monthly_churn' });
   });
 });
 

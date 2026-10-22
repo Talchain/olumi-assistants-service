@@ -7,6 +7,17 @@ import { readFileSync } from 'node:fs';
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { RUN_QUESTION_EVIDENCE_KEY } from '../../tools/handlers/run-input-snapshot.js';
 
+/**
+ * ⭐ STEP 8 (AIE `point_uncertainty` 564fe768): a chance resting on a user's size whose spread nobody stated is withheld
+ * (`run-analysis-unsupported-spread.test.ts` pins that rule, its words and every surface). This file tests
+ * the Run's evidence hook, not that rule, so the Run's spread selection is held empty here; the rest of the support walk runs as served.
+ */
+vi.mock('../goal-certainty.js', async (original) => {
+  const actual = await original<typeof import('../goal-certainty.js')>();
+  return { ...actual, chanceSupportGoalPaths: (...args: Parameters<typeof actual.chanceSupportGoalPaths>) =>
+    ({ ...actual.chanceSupportGoalPaths(...args), unsupportedSpread: [] }) };
+});
+
 const SERVED_FACT = JSON.parse(readFileSync(new URL('./fixtures/served-run-analysis-fact-for-binding.json', import.meta.url), 'utf8')) as { fact_type: string; result: Record<string, unknown> };
 const SCENARIO = '9e5c1b0a-5e6f-4a7b-8c9d-0e1f2a3b4c5d';
 const GRAPH = {

@@ -13,7 +13,7 @@ import { log } from "../../utils/telemetry.js";
 import { config } from "../../config/index.js";
 import { resolveInfluenceDirection, type InfluenceDirection } from "./influence-direction.js";
 import { readDriverInfluenceScore } from "./driver-influence.js";
-import { goalFiguresWithheldWarning, winnerOptionResultSource } from "./option-result-source.js";
+import { goalFiguresWithheldWarning, unsupportedIntervalOptionIds, winnerOptionResultSource } from "./option-result-source.js";
 import { deriveWinnerConstraintInfeasibility } from "./constraint-feasibility.js";
 import { isRecommendableTypedOption } from "../../orchestrator-v5/tools/handlers/recommendable-option.js";
 
@@ -765,6 +765,7 @@ export function compactAnalysis(
     // per-option factor_sensitivity/robustness shape lives in `results`, not in
     // the identity-only live option_comparison.)
     const results = [...winnerOptionResultSource(response as Record<string, unknown>)];
+    const unsupportedIntervals = unsupportedIntervalOptionIds(response);
     const options: OptionSummary[] = results
       .filter(isOptionResult)
       .filter((r) => {
@@ -785,9 +786,11 @@ export function compactAnalysis(
         const outcomeObj = (r.outcome && typeof r.outcome === 'object') ? r.outcome as Record<string, unknown> : null;
         const outcomeMean = typeof r.outcome_mean === 'number' ? r.outcome_mean
           : (outcomeObj && typeof outcomeObj.mean === 'number' ? outcomeObj.mean : null);
-        const outcomeP10 = typeof r.outcome_p10 === 'number' ? r.outcome_p10
+        // STEP 8 (AIE 764e9c72): a range resting on an unsupported spread never reaches the AI as a result fact.
+        const rangeUnsupported = unsupportedIntervals.has(optionId);
+        const outcomeP10 = rangeUnsupported ? undefined : typeof r.outcome_p10 === 'number' ? r.outcome_p10
           : (outcomeObj && typeof outcomeObj.p10 === 'number' ? outcomeObj.p10 : undefined);
-        const outcomeP90 = typeof r.outcome_p90 === 'number' ? r.outcome_p90
+        const outcomeP90 = rangeUnsupported ? undefined : typeof r.outcome_p90 === 'number' ? r.outcome_p90
           : (outcomeObj && typeof outcomeObj.p90 === 'number' ? outcomeObj.p90 : undefined);
         const probOfGoal = typeof r.probability_of_goal === 'number' ? r.probability_of_goal : undefined;
 

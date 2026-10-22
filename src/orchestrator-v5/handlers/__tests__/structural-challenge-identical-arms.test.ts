@@ -55,6 +55,18 @@ import { runArmsDistinct, runArmsIdentical } from '../../coaching/structural-cha
 import { composeStructuralChallengeReply, structuralChallengePressId, structuralChallengeTurnFor } from '../../agent-lane/method-turn/structural-challenge-turn.js';
 import { goalChanceDisplayForAgent } from '../../goal-target/goal-chance-licence.js';
 
+/**
+ * ⭐ STEP 8 (AIE `point_uncertainty` 564fe768, cc9fbadf): a chance, win share or leader resting on a user's size whose spread is
+ * not attested is withheld (`run-analysis-unsupported-spread.test.ts` pins that rule, its words and every surface). This served
+ * graph's user sizes have no attested spread, and no positive is invented for them. This file tests
+ * the structural challenge's identical arms and leader licence, not that rule, so the Run's spread selection is held empty here; the rest of the support walk runs as served.
+ */
+vi.mock('../../agent-lane/goal-certainty.js', async (original) => {
+  const actual = await original<typeof import('../../agent-lane/goal-certainty.js')>();
+  return { ...actual, chanceSupportGoalPaths: (...args: Parameters<typeof actual.chanceSupportGoalPaths>) =>
+    ({ ...actual.chanceSupportGoalPaths(...args), unsupportedSpread: [] }) };
+});
+
 type Rec = Record<string, any>;
 const SCENARIO = 'fa027cf5-c5c9-4021-9578-ee79b15c6eb8';
 const servedGraph = JSON.parse(readFileSync(new URL('./fixtures/sci-deep-fa027cf5-graph.json', import.meta.url), 'utf8')) as Rec;

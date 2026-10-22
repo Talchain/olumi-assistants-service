@@ -266,7 +266,9 @@ export function untestableGoalTargetRowId(input: unknown, identityEvaluations?: 
  * edges carry no causal size. Callers supply seeds: P5's option nodes, or the licence's actual moved factors.
  * No target, unit, sizing or intervention-level judgement is made by this walk.
  */
-export function reachedGoalPaths(graph: unknown, optionIds: readonly string[], seeds: ReadonlyMap<string, readonly unknown[]>, identityEvaluations?: readonly unknown[], scoredGoalId?: unknown): {
+export function reachedGoalPaths(graph: unknown, optionIds: readonly string[], seeds: ReadonlyMap<string, readonly unknown[]>, identityEvaluations?: readonly unknown[], scoredGoalId?: unknown,
+  /** STEP 8 (Codex R1 #3443): walk to ONE condition's own node (a target or limit on another node) instead of the scored goal. */
+  toNodeId?: string): {
   reached: Set<unknown>;
   paths: Array<{ option_id: string; links: Record<string, unknown>[] }>;
   exactLinks: Set<Record<string, unknown>>;
@@ -274,7 +276,7 @@ export function reachedGoalPaths(graph: unknown, optionIds: readonly string[], s
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
   const byId = new Map(nodes.map(n => [n.id, n] as const));
-  const goalId = scoredGoalIdOf(graph, scoredGoalId);
+  const goalId = toNodeId !== undefined && byId.has(toNodeId) ? toNodeId : scoredGoalIdOf(graph, scoredGoalId);
   const ceilingStock = confirmedCeilingStockOf(graph);
   // A confirmed unary stock reading defines the entire goal. Retained surplus parents do not alter its calculation.
   const goalEdges = ceilingStock !== null && ceilingStock.goalId === goalId ? edges.filter(e => e.to !== goalId || String(e.from) === ceilingStock.carrierId) : edges;

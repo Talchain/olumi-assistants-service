@@ -608,7 +608,12 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         // and says so per field, as existence does. Every user write sets the flag's state, so a stale one never
         // survives a later write that changed who chose the spread.
         // An adopted spread is Olumi's working point's, never the user's: it keeps the flag as Olumi's.
+        // ⭐ STEP 8 (AIE 764e9c72 `legacy_attestation`; DL-3 lease): `false` ATTESTS the spread — written only for the band the
+        // user named for THIS link (the verified side band, landing in that band), never for an explicit `std` (no verified
+        // user origin reaches this writer) or a drawn link's band. Absent is never support: a legacy or unattested spread
+        // stays unsupported (`goal-certainty.ts` `unsupportedSpreadLink`).
         if (statedStd === undefined || (adoptedStd !== undefined && statedStd === adoptedStd)) edge.std_defaulted = true;
+        else if (drawn === undefined && bandStd !== undefined && statedStd === bandStd) edge.std_defaulted = false;
         else delete edge.std_defaulted;
 
         return {

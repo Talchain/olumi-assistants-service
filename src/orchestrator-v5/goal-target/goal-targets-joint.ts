@@ -18,7 +18,7 @@
  * Pure and total; reads only the Run's own records and the rows it sent.
  */
 import { sayFigureAsWritten } from '../agent-lane/say-figure.js';
-import { goalFiguresWithheldWarnings, readOptionResultSources } from '../../orchestrator/context/option-result-source.js';
+import { CONDITION_FIGURES_UNSUPPORTED_SPREAD, goalFiguresWithheldWarnings, readOptionResultSources } from '../../orchestrator/context/option-result-source.js';
 import { comparatorWords, periodWords, type GoalTargetBasis } from './goal-target-basis.js';
 import { readGoalRecord } from './goal-record.js';
 import type { PressBlocker } from '../agent-lane/press-next-step.js';
@@ -342,6 +342,16 @@ export function goalTargetsBlockOf(args: {
   const comparedFor = (constraintId: string): string[] => args.optionIds.filter((id) => !(sq?.fromTargets.has(constraintId) === true && id === sq.id));
 
   const upstream = isRec(args.envelope) ? goalFiguresWithheldWarnings(args.envelope) : [];
+  // ⭐ STEP 8 (Codex R1 #3443; DL-3: targets AND limits): the Run's record of a condition whose P it withheld per option for a
+  // user's size on Olumi's default spread — that condition's own words (the AIE's), and exactly the options it names.
+  const spreadRecords = (isRec(args.envelope) && Array.isArray(args.envelope.inference_warnings) ? args.envelope.inference_warnings : [])
+    .filter(isRec).filter((w) => w.code === CONDITION_FIGURES_UNSUPPORTED_SPREAD && typeof w.message === 'string' && w.message !== ''
+      && Array.isArray(w.constraint_ids) && Array.isArray(w.option_ids));
+  const spreadOf = (constraintId: string): { message: string; options: string[] } | undefined => {
+    const w = spreadRecords.find((x) => (x.constraint_ids as unknown[]).includes(constraintId));
+    return w === undefined ? undefined
+      : { message: w.message as string, options: (w.option_ids as unknown[]).filter((id): id is string => typeof id === 'string') };
+  };
   const notes: string[] = [];
   const limitNotes = new Set<string>();
   const causes = new Map<string, { reason: string; clauses: Set<string>; notes: Set<string>; options?: readonly string[] }>();
@@ -362,7 +372,9 @@ export function goalTargetsBlockOf(args: {
     if (forecastMode && c.role === 'target') continue;
     const verdict = args.perLimit?.find((v) => v.constraint_id === c.constraint_id);
     if (verdict?.state === 'unscored') {
-      const reason = retainedIds.has(c.constraint_id) ? retainedLimitWithheldLine(args.graph) : verdict.reason === 'parts_links_placeholder'
+      const spreadWords = verdict.reason === 'parts_links_unsupported_spread' ? spreadOf(c.constraint_id)?.message : undefined;
+      const reason = retainedIds.has(c.constraint_id) ? retainedLimitWithheldLine(args.graph) : spreadWords !== undefined ? spreadWords
+        : verdict.reason === 'parts_links_placeholder'
         ? 'The contributing quantities have links whose sizes are not yet specified. This calculation needs supported contributions in this quantity’s units, or a supported forecast for the quantity.'
         : verdict.reason === 'limit_rests_on_olumi_guess'
           ? 'The calculation still rests on Olumi’s estimated quantities. Review their basis and uncertainty; the limit or target itself is not a forecast.'
@@ -373,6 +385,13 @@ export function goalTargetsBlockOf(args: {
       // A retained limit's cause is the retained-limit withhold itself, whatever the engine's per-limit code: so two retained
       // limits are ONE cause and one line (reply-face P2; served marketing 7f5659fd said it once per limit).
       recordCause(c, note, retainedIds.has(c.constraint_id) ? RETAINED_LIMIT_WITHHOLD_CODE : verdict.reason, reason);
+    }
+    const spread = spreadOf(c.constraint_id);
+    // Said once: a row withheld for the spread itself already says these words above.
+    if (spread !== undefined && !(verdict?.state === 'unscored' && verdict.reason === 'parts_links_unsupported_spread') && spread.options.length > 0) {
+      const note = `${c.clause} (for ${listWords(spread.options.map((id) => `‘${labelOf(id) ?? id}’`))}): ${spread.message}`;
+      notes.push(note);
+      recordCause(c, note, CONDITION_FIGURES_UNSUPPORTED_SPREAD, spread.message, spread.options);
     }
     if (c.role === 'target' && olumiBase.has(c.constraint_id)) {
       const reason = jointWithheldLine(Math.max(ordered.length + unsupported.length + (unnamed ? 1 : 0), 2), 'olumi_base');
@@ -452,7 +471,9 @@ export function goalTargetsBlockOf(args: {
       if (pr !== null) rounding[id] = step;
     }
     const absent = comparedFor(t.constraint_id).filter((id) => !Object.hasOwn(pct, id)
-      && !targetWarnings(t).some((w) => !Array.isArray(w.option_ids) || w.option_ids.includes(id)));
+      && !targetWarnings(t).some((w) => !Array.isArray(w.option_ids) || w.option_ids.includes(id))
+      // STEP 8: an option the Run withheld for the spread has its own note above, in the AIE's words.
+      && spreadOf(t.constraint_id)?.options.includes(id) !== true);
     // A target this Run left unscored has its own reason said above (marketing e2e 25d14238: said once, never a second note).
     if (absent.length > 0 && args.perLimit?.find((v) => v.constraint_id === t.constraint_id)?.state !== 'unscored') {
       notes.push(`${t.clause}: This Run did not return a usable chance for ${listWords(absent.map((id) => `‘${labelOf(id) ?? id}’`))}.`);

@@ -1,9 +1,21 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { targetTestabilityOf } from '../../admission/target-testability.js';
 import { verifyJ3, verifyIdentity, verifyCertaintyEdges, verifyTargetBytes, verifyNamedGraphs, verifyUserStampExclusions } from '../../../../tools/limit-check-replay/r3-cases.js';
 import { verifyHandler } from '../../../../tools/limit-check-replay/handler-r3.js';
+
+/**
+ * ⭐ STEP 8 (AIE `point_uncertainty` 564fe768; DL-3: targets AND limits): a limit moved through a user's size whose spread nobody
+ * stated is withheld per option (`run-analysis-unsupported-spread.test.ts` pins that rule, its words and every surface), so these
+ * captured limits are no longer checked on staging. This file tests L1 R3's sizing and evaluation hand-off, not that rule, so the
+ * spread selection is held empty here; the rest of the per-option fold runs as served.
+ */
+vi.mock('../goal-certainty.js', async (original) => {
+  const actual = await original<typeof import('../goal-certainty.js')>();
+  return { ...actual, chanceSupportGoalPaths: (...args: Parameters<typeof actual.chanceSupportGoalPaths>) =>
+    ({ ...actual.chanceSupportGoalPaths(...args), unsupportedSpread: [] }) };
+});
 
 describe('L1 R3 independent-review regressions, with captured graph bytes', () => {
   it('P1: J3 user-confirmed 3 customers per 1% stays sized and its second limit stays scored', () => {

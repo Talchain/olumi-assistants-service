@@ -21,6 +21,18 @@ import { finaliseV5Response } from '../../../response-finaliser.js';
 import { readScenarioAnalysis } from '../../../../routes/scenario-graph-analysis-read.js';
 import { buildAnalysisResultBlock } from '../../../compose.js';
 
+/**
+ * ⭐ STEP 8 (AIE `point_uncertainty` 564fe768, cc9fbadf): a chance, share or leader resting on a user's size whose spread is
+ * not attested is withheld (`run-analysis-unsupported-spread.test.ts` pins that rule, its words and every surface). This
+ * fixture's user sizes have no attested spread, and no positive is invented for them. This file tests
+ * the stated cause of an unsized goal path, not that rule, so the Run's spread selection is held empty here; the rest of the support walk runs as served.
+ */
+vi.mock('../../../agent-lane/goal-certainty.js', async (original) => {
+  const actual = await original<typeof import('../../../agent-lane/goal-certainty.js')>();
+  return { ...actual, chanceSupportGoalPaths: (...args: Parameters<typeof actual.chanceSupportGoalPaths>) =>
+    ({ ...actual.chanceSupportGoalPaths(...args), unsupportedSpread: [] }) };
+});
+
 type R = Record<string, any>;
 const brief = readFileSync(new URL('../../../admission/__tests__/fixtures/mc-p0/BRIEF.txt', import.meta.url), 'utf8');
 function graph(d: number, noTarget = false): R {

@@ -25,6 +25,18 @@ import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import minimalFixture from '../../../../tests/fixtures/plot/v2-run-golden-minimal.json';
 
+/**
+ * ⭐ STEP 8 (AIE `point_uncertainty` 564fe768): a chance resting on a user's size whose spread nobody stated is withheld
+ * (`run-analysis-unsupported-spread.test.ts` pins that rule, its words and every surface). This brief's figures are such sizes, so
+ * on staging its chance is now withheld. This file tests the product reading on the licence, not that rule, so the Run's spread selection is held empty
+ * here and every other part of the support walk (`unsized`, exact links, the licence) runs as served.
+ */
+vi.mock('../goal-certainty.js', async (original) => {
+  const actual = await original<typeof import('../goal-certainty.js')>();
+  return { ...actual, chanceSupportGoalPaths: (...args: Parameters<typeof actual.chanceSupportGoalPaths>) =>
+    ({ ...actual.chanceSupportGoalPaths(...args), unsupportedSpread: [] }) };
+});
+
 const WIN = 'The starter tier would win about 150 new subscribers, between 80 and 250.';
 const T1B = 'We are a B2B software company with £120,000 monthly recurring revenue from 400 customers paying £300 a month. '
   + 'Decision: raise prices by 10%, launch a starter tier at £49 a month, or keep pricing as it is. Goal: reach at least '

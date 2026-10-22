@@ -43,7 +43,7 @@ const GOAL_TARGET_MISSING_FACE = 'Not shown yet: needs a target';
 function goalIdentityWithheldMessage(result: unknown, option_id: string): string | undefined {
   const block = rec(result);
   const codes = ['GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED', 'GOAL_FIGURES_USER_EFFECT_CLAMPED',
-    'GOAL_FIGURES_PLACEHOLDER_PATH', 'GOAL_FIGURES_PRODUCT_NOT_READ',
+    'GOAL_FIGURES_PLACEHOLDER_PATH', 'GOAL_FIGURES_UNSUPPORTED_SPREAD', 'GOAL_FIGURES_PRODUCT_NOT_READ',
     'GOAL_FIGURES_TARGET_NOT_TESTABLE', 'GOAL_FIGURES_SHARE_APPROXIMATION', 'GOAL_FIGURES_OPTIONS_IDENTICAL'];
   const warnings = [rec(block?.enrichment)?.inference_warnings, block?.inference_warnings]
     .flatMap(value => Array.isArray(value) ? value : []).map(rec);
