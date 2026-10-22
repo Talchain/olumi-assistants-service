@@ -428,12 +428,14 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
       const rate = unitShapeOf(m);
       const count = unitShapeOf(c);
       if (rate === null || count === null || readUnitParts(c)?.kind !== 'count') return false;
-      // Money, then per or "/", then the denominator; the count is that noun alone (equality refuses a count's own "per").
-      const [money, sep, ...den] = rate.head;
-      if (!plainMoney(money, g.code) || (sep !== 'per' && sep !== '/') || den.length === 0 || den.some((w) => RATE_CONNECTORS.has(w))) return false;
-      const per = den.map(singular);
-      const noun = count.head.map(singular);
-      if (noun.length !== per.length || noun.some((w, k) => w !== per[k])) return false;
+      // A CLOSED grammar (Codex r3 on #3627: "each"/"every" made a two-dimension denominator read as one): money, then per or
+      // "/", then ONE word, and the count is that same ONE word. A many-word denominator ("per user account") is refused,
+      // never parsed: the person is asked, as for any identity that cannot be worked out as stated.
+      const [money, sep, den, ...extra] = rate.head;
+      const [noun, ...more] = count.head;
+      const oneWord = (w: string | undefined): w is string => w !== undefined && /^[a-z]+$/.test(w) && !RATE_CONNECTORS.has(w) && w !== 'each' && w !== 'every';
+      if (!plainMoney(money, g.code) || (sep !== 'per' && sep !== '/') || extra.length > 0 || more.length > 0 || !oneWord(den) || !oneWord(noun)) return false;
+      if (singular(den) !== singular(noun)) return false;
       const periods = [rate.period, count.period].filter((p): p is string => p !== null);
       return periods.length <= 1 && (periods[0] ?? null) === gs.period;
     });
