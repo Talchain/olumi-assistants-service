@@ -145,7 +145,7 @@ describe('thin core mapper: living model → GraphV3', () => {
     expect(mapLivingModel(earlier).withheld).toContainEqual({ id: 'g', reason: 'goal_level_unknown' });
     const current = LivingAim.shape.target.unwrap().shape.current.description ?? '';
     expect(current).toContain('A count that has not started yet (sign-ups in the first six weeks after opening, orders next quarter) is 0 today by its own definition: set 0, '
-      + 'say why in plain words on the change\'s public_label ("0 today: it counts from opening"), and never ask for it. A count that began earlier is not 0: ask for it.');
+      + 'say why in plain words on the change\'s public_label ("0 today: it counts from opening"), and never ask for it. For a count that began earlier, never assume 0: keep a 0 the person states, and ask if it is unknown.');
   });
 
   it('DL 22 Oct: an ordinary range uses Olumi\'s assumed law; an unknown sign is never drawn positive; a point\'s σ is |β|/2', () => {

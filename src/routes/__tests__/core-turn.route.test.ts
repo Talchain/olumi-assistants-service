@@ -661,14 +661,14 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(r.statusCode, r.body).toBe(200);
     const j = r.json() as Json;
     expect(j._agent.tool_calls.map((c: Json) => [c.name, c.outcome])).toEqual([['propose_change', 'refused'], ['propose_change', 'ok']]);
-    // DL 22 Oct: which offer fired is on the wire, as the refused call's typed reason; an ok call names none.
-    expect(j._agent.tool_calls.map((c: Json) => c.refusal ?? null)).toEqual(['goal_path_cut', null]);
+    // DL 22 Oct: the self-check's refusal is on the wire, as the refused call's typed reason; an ok call names none.
+    expect(j._agent.tool_calls.map((c: Json) => c.refusal ?? null)).toEqual(['not_run_ready', null]);
     expect(j.cards).toHaveLength(1);
     expect(JSON.stringify(j.cards[0].adds)).toContain('f_customers');
     expect(registered, 'a card writes nothing').toHaveLength(0);
   });
 
-  it('DL (#3672 fix-forward): the AI stops after the goal_path_withheld refusal; the turn\u2019s end saves its draft as base, with its receipt', async () => {
+  it('DL (#3672 fix-forward): the AI stops after the not_run_ready refusal; the turn\u2019s end saves its draft as base, with its receipt', async () => {
     persisted = null;
     const model = { ...structuredClone(KNOWN_ANSWER), conditions: [{ text: 'only once the board signs off', applies_to: ['f_g'], role: 'prerequisite' as const,
       source: 'olumi' as const, party: null, quote: null }] };

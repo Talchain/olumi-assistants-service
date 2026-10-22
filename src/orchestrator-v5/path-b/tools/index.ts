@@ -23,6 +23,7 @@ import { BUILD_MODEL_FROM_BRIEF, BuildModelParams, buildModel, type DraftDeps } 
 import { RUN_ANALYSIS, RunAnalysisParams, recordedRun, runAnalysis, type RunDeps } from './run-tool.js';
 import { APPLY_CHANGE, ApplyChangeParams, PROPOSE_CHANGE, ProposeChangeParams, applyChange, proposeChange, type ChangeDeps } from './change-tools.js';
 import { LivingChangeParams, applyLivingChange, isLivingProposal, proposeLivingChange } from './living-change.js';
+import { REPAIRS } from './goal-path.js';
 import { NOTE_MAX, NOTE_ON_ITEM, NoteOnItemParams, noteOnItem } from './note-on-item.js';
 import { STRESS_TEST, StressTestParams, stressTest, type StressDeps } from './stress-tool.js';
 import { OFFER_PUBLIC_RESEARCH, OFFER_PUBLIC_RESEARCH_DESCRIPTION, OfferResearchParams, offerResearch, type ResearchDeps } from './research-tool.js';
@@ -111,14 +112,15 @@ export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLa
     return JSON.stringify(outcome);
   };
 
-  // ⭐ CLASS 3's ONE OFFER PER TURN is the route's (`deps.restructure`; none without it). At the turn's end, a call it left
-  // refused, with no draft or card since, runs once more as base would, recorded like any call (DL, #3672 fix-forward).
+  // ⭐ THE TURN'S REPAIRS are the route's (`deps.restructure`; none without it). At the turn's end, a call it left refused, with no
+  // draft or card since, runs once more with no repair left, as base would, recorded like any call (DL, #3672 fix-forward).
   const restructure = deps.restructure;
   if (restructure !== undefined) {
     let settled = false;
     restructure.settle = async () => {
       if (settled) return;
       settled = true;
+      restructure.repairs = REPAIRS;
       const p = restructure.pending;
       if (p?.tool === BUILD_MODEL_FROM_BRIEF) record(BUILD_MODEL_FROM_BRIEF, p.args, await buildModel({ ...deps, review }, ctx, p.args));
       else if (p?.tool === PROPOSE_CHANGE && scenario === 'core') record(PROPOSE_CHANGE, p.args, await proposeLivingChange(deps, ctx, p.args));
