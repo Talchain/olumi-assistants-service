@@ -78,12 +78,14 @@ export function licensedChancesOf(analysisResult: unknown, graph: unknown, curre
   });
   if (options.length === 0) return undefined;
   const goal = nodes.find((n) => n.kind === 'goal');
-  // DL ruling 22 Oct: a window may be named with the chance only where the chance speaks to it: Olumi reads the effects as in
-  // place by its end (basis_at_h), or the goal holds that same month (the period-end conditional's own words). A window read
-  // with effects_at_period_end false leaves a static reading (no_horizon), so "within N months" would claim a time never computed.
+  // DL ruling 22 Oct: on a LEVEL target, a window may be named with the chance only where the chance speaks to it: Olumi reads
+  // the effects as in place by its end (basis_at_h), or the goal holds that same month. A level window read with
+  // effects_at_period_end false leaves a static reading (no_horizon), so "within N months" would claim a time never computed.
+  // A change target keeps its period as before: its chance is read at the period's end (Codex r1 on #3622, served hiring).
   const basis = goalTargetBasisOf(goal);
   const heldMonths = typeof goal?.id === 'string' ? readGoalRecord(graph, goal.id)?.horizon?.months : undefined;
-  const period = basis !== undefined && (basis.effects_at_period_end || heldMonths === basis.period_months) ? basis.period_months : undefined;
+  const period = basis !== undefined && (basis.target_frame !== 'level' || basis.effects_at_period_end || heldMonths === basis.period_months)
+    ? basis.period_months : undefined;
   return { options, ...(typeof period === 'number' ? { periodMonths: period } : {}),
     ...(typeof facts.goal_chance_words === 'string' && facts.goal_chance_words.trim() !== '' ? { chanceWords: facts.goal_chance_words } : {}) };
 }

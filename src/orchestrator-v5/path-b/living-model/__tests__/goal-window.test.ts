@@ -74,6 +74,17 @@ describe('the goal window: the person\'s stated months, read as Olumi\'s, counte
     expect(isLicensedChanceLine('Within 12 months, Dual-source the part has about 97% chance of meeting the goal.', chances, labels)).toBe(false);
   });
 
+  it('zero flip (Codex r1): a CHANGE target read at its period\'s end keeps naming that period, with no held month', () => {
+    const g: Rec = structuredClone(cap.graph);
+    const goal = goalOf(g);
+    goal.goal_threshold_frame = 'change_abs';
+    goal.goal_target_basis = { source: 'olumi_reading', quantity_frame: 'level', target_frame: 'change_abs', target_raw: goal.goal_threshold_raw,
+      reference: 'today', denominator: 'today\'s level', period_months: 3, period_kind: 'at_end', effect_unit: goal.goal_threshold_unit,
+      effects_at_period_end: false };
+    expect(goalOf(g)).not.toHaveProperty('goal_horizon_months');
+    expect(licensedChancesOf(cap.envelope, g, true)).toMatchObject({ periodMonths: 3 });
+  });
+
   it('an Olumi risk over the goal\'s window counts: its node is kept and the Run is ready', () => {
     const m = withPeriod(bare(OLUMI_CHANCE), 12);
     expect((mapLivingModel(m).graph.nodes as Rec[]).find((n) => n.id === 'supplier_fails')!.event_risk.occurrence.basis).toBe('olumi');
