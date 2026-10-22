@@ -483,6 +483,17 @@ describe('PATH-B core turn on the Agents SDK', () => {
       expect(result.tool_calls).toContainEqual(expect.objectContaining({ name: 'apply_change', ok: false, mutated: false, outcome: 'refused', refusal: 'not_on_this_turn' }));
     });
 
+    it('⛔ while a run is paused, only its paused call\'s tool stays (as a refusal); every other withheld tool is still not offered', async () => {
+      scripted = [pausing()];
+      await turn('Please drop option B.', caps(), { tools: () => applyTool(), pausedRunStore: pausedStore() });
+      const writer = tool({ name: 'propose_change', description: 'Synthetic propose_change.', parameters: z4.object({}), execute: async () => '{}', errorFunction: null });
+      scripted = [[{ type: 'message', text: 'Here is the Run on the saved model.' }]];
+      await turn('Run it.', caps(), { tools: () => [...applyTool(), writer], pausedRunStore: pausedStore(), withheldTools: ['apply_change', 'propose_change'] });
+      const offered = JSON.stringify(sent[1]!.tools ?? []);
+      expect(offered).toContain('apply_change');
+      expect(offered).not.toContain('propose_change');
+    });
+
     it('CONTROL: with no paused run, a withheld tool is not offered at all', async () => {
       scripted = [[{ type: 'message', text: 'Here is the Run.' }]];
       await turn('Run it.', caps(), { tools: () => applyTool(), pausedRunStore: pausedStore(), withheldTools: ['apply_change'] });

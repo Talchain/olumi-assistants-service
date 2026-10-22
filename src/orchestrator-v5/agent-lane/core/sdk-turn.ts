@@ -257,8 +257,9 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
   const budget = fast ? input.replyBudget! : input.budget;
   // A paused run is restored with THIS turn's agent, and the SDK cannot restore a paused call to a tool the agent lacks
   // (Lenses on served 0ce7ae88: every Run press while a card awaited approval answered 502, "Tool apply_change not found").
-  // So while a run is paused, a tool this turn withholds stays present as a refusal: the paused call is answered from its
-  // recorded decision (the SDK honours it before asking `needsApproval`), and a new call is refused, with no write and no pause.
+  // So while a run is paused, its paused call's own tool stays present even when this turn withholds it, as a refusal: the
+  // paused call is answered from its recorded decision (the SDK honours it before asking `needsApproval`), and a new call is
+  // refused, with no write and no pause. No other withheld tool is offered (no model writer reaches a reply-model press).
   const held = await input.pausedRunStore?.read(input.ctx.scenario_id);
   const notThisTurn = (t: Tool): Tool => t.type !== 'function' ? t : { ...t, needsApproval: async () => false, invoke: async () => {
     record({ name: t.name, ok: false, mutated: false, outcome: 'refused', refusal: NOT_THIS_TURN, ran: null },
@@ -266,7 +267,7 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
     return JSON.stringify({ status: 'refused', reason: NOT_THIS_TURN });
   } };
   const tools = input.tools(record).flatMap((t) => !('name' in t) || !(withheld.has(t.name) || (fast && MODEL_WRITING_TOOLS.has(t.name))) ? [t]
-    : held != null ? [notThisTurn(t)] : []);
+    : held != null && t.name === held.tool ? [notThisTurn(t)] : []);
   const pendingRows: Promise<void>[] = [];
   let deliveryUnknown: { readonly cause: unknown } | undefined;
   const client = ledgeredAgentsClient({ site: 'agent-core.sdk', pending: pendingRows,
