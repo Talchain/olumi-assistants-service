@@ -12,7 +12,7 @@
  */
 import { isDeepStrictEqual } from 'node:util';
 import { effectsTimingOf, type EffectsTiming } from './period-end-assumption.js';
-import { GOAL_CHANCE_LICENSED, PERIOD_END_EFFECTS_UNSTATED } from './goal-chance-licence.js';
+import { GOAL_CHANCE_LICENSED, PERIOD_END_EFFECTS_UNSTATED, periodEndEffectsUnstatedOf } from './goal-chance-licence.js';
 import { GOAL_FIGURES_TARGET_NOT_TESTABLE } from '../../orchestrator/context/option-result-source.js';
 import { goalReadingProjectionOf } from './goal-reading-write.js';
 
@@ -64,4 +64,15 @@ export function carriedEffectsTiming(before: { readonly graph?: unknown; readonl
   const goalBefore = goalSubjectOf(before.graph);
   if (goalBefore === undefined || !isDeepStrictEqual(goalBefore, goalSubjectOf(saved))) return null;
   return isDeepStrictEqual(optionsSubjectOf(before.graph), optionsSubjectOf(saved)) ? reading : null;
+}
+
+/**
+ * ⭐ NO AUTOMATIC RUN THAT COULD ONLY WITHHOLD (DL 22 Oct, hiring a on 2fa753d6: the automatic Run after an approval withheld
+ * every chance, and the pressed Run two minutes later gave them on the same graph). True when the saved goal's chance rests on
+ * a reading of when the options' effects are in place (`periodEndEffectsUnstatedOf`) and no reading can be carried: the reply
+ * invites Run, where the AI gives its reading. A goal that needs no timing reading keeps its automatic Run.
+ */
+export function awaitsTimingReading(saved: unknown, carried: EffectsTiming | null): boolean {
+  const goals = nodesOf(saved).filter((n) => n.kind === 'goal');
+  return carried === null && goals.length === 1 && periodEndEffectsUnstatedOf(saved, goals[0]!.id) !== undefined;
 }
