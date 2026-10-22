@@ -15,7 +15,7 @@
  *      and one option setting; the panel said "Olumi supplied 1".
  */
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { buildModelFromBrief } from '../../agent-lane/runtime/build-model.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
@@ -30,6 +30,7 @@ import { transformNodeToV2 } from '../../../cee/transforms/schema-v2.js';
 import { actionFactsOf } from '../../agent-lane/actions/state.js';
 import { decidePress } from '../../agent-lane/actions/handlers.js';
 import { sayOlumiEstimates } from '../../agent-lane/olumi-estimates-feeding-result.js';
+import { withStatedSd } from '../../__tests__/support/supported-spread.support.js';
 
 type Rec = Record<string, any>;
 const clone = <T>(x: T): T => structuredClone(x);
@@ -239,7 +240,9 @@ describe('BLOCKING 4 — Check estimates lists exactly what the 31% chance face 
     }
     for (const e of base.edges as Rec[]) { e.provenance = { ...e.provenance, source: 'user_specified', magnitude: 'user_stated' }; e.exists_probability = 1; delete e.defaulted; }
     for (const n of base.nodes as Rec[]) for (const c of Object.values((n.interventions ?? {}) as Rec)) (c as Rec).source = 'user_specified';
-    const g = clone(base);
+    // ⭐ STEP 8 (Codex R2 #3443): a size alone carries no supported spread, which withholds the chance. This row's subject is the
+    // census, so both sizes read a SUPPORTED control: the user also states each one's standard deviation, through the actual writer.
+    const g = await withStatedSd(await withStatedSd(clone(base), sid, 'support_effort', 'quality'), sid, 'training_effort', 'quality');
     Object.assign(node(g, 'support_effort').observed_state, { source: 'cee_inference', extractionType: 'inferred' });
     node(g, 'improve_support').interventions.quality = { value: 0.8, raw_value: 80, unit: '%', source: 'cee_hypothesis',
       target_match: { node_id: 'quality', match_type: 'exact_id', confidence: 'high' } };
@@ -268,7 +271,7 @@ describe('BLOCKING 4 — Check estimates lists exactly what the 31% chance face 
 describe('NARROW RE-CHECK r2 — Check estimates on a JOINT chance lists exactly what its face names', () => {
   const jsid = 'acdca123-4567-4000-8000-123456789abc';
   const precision = { n_informative: 10000, standard_error: 0.005 };
-  const jointGraph = (): Rec => {
+  const rawJointGraph = (): Rec => {
     const names: Record<string, string> = { g: 'Quality', other: 'Reach', limit: 'Cost', x: 'Effort', y: 'Audience' };
     const nodes: Rec[] = Object.entries(names).map(([id, label]) => ({ id, label, kind: id === 'g' ? 'goal' : 'factor',
       observed_state: { value: 0.2, baseline: 0.2, raw_value: 20, cap: 100, unit: '%', source: 'user_override' } }));
@@ -289,6 +292,12 @@ describe('NARROW RE-CHECK r2 — Check estimates on a JOINT chance lists exactly
       { constraint_id: 'budget', node_id: 'limit', operator: '<=', value: 80, unit: '%', value_frame: 'level' },
     ] };
   };
+  // ⭐ STEP 8 (Codex R2 #3443): the user's two sizes (Effort → Quality, Audience → Reach) carry no supported spread alone, which
+  // withholds the joint. These rows' subject is the census, so each reads a SUPPORTED control: the user also states its
+  // standard deviation, recorded by the actual chat writer (`withStatedSd`).
+  let attestedJoint: Rec;
+  beforeAll(async () => { attestedJoint = await withStatedSd(await withStatedSd(rawJointGraph(), jsid, 'x', 'g'), jsid, 'y', 'other'); });
+  const jointGraph = (): Rec => clone(attestedJoint);
   const jointRows = (req: Rec): Rec[] => (req.options as Rec[]).map((o, i) => ({ option_id: o.id, probability_of_goal: 0.41 + i * 0.1,
     probability_of_goal_precision: precision, probability_of_joint_goal: 0.21 + i * 0.1, probability_of_joint_goal_precision: precision,
     constraint_probabilities: Object.fromEntries(((req.goal_constraints ?? []) as Rec[]).map((c) => [c.constraint_id,

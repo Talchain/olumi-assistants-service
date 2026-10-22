@@ -21,6 +21,7 @@ import {
   readRawRobustnessFromResponseBody, separationWithholdFromRobustness, WITHHELD_SEPARATION_UNAVAILABLE,
 } from '../../../compose/analysis-state-v1.js';
 import { GOAL_FIGURES_TARGET_NOT_TESTABLE } from '../../../../orchestrator/context/option-result-source.js';
+import { withNamedBands } from '../../../__tests__/support/supported-spread.support.js';
 
 type Json = Record<string, any>;
 const F = JSON.parse(readFileSync(new URL('./fixtures/r6-target-keeps-separation.json', import.meta.url), 'utf8')) as {
@@ -30,11 +31,11 @@ const SCENARIO = '00000000-0000-4000-8000-0000000000a6';
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
 const robustnessOf = (envelope: unknown) => readRawRobustnessFromResponseBody({ blocks: [{ enrichment: envelope }] });
 
-async function runR6(): Promise<Json> {
+async function runR6(graph: Json = F.graph): Promise<Json> {
   const store = {
     readMostRecentPendingActions: async () => [],
-    loadGraphAndBriefText: vi.fn(async () => ({ graph: clone(F.graph), briefText: F.brief_text })),
-    loadGraph: vi.fn(async () => clone(F.graph)),
+    loadGraphAndBriefText: vi.fn(async () => ({ graph: clone(graph), briefText: F.brief_text })),
+    loadGraph: vi.fn(async () => clone(graph)),
   };
   const snapshot = await loadScenarioSnapshotForRunAnalysis(SCENARIO, 'req-r6-load', store as never);
   const run = vi.fn(async () => clone(F.plot_body) as unknown as V2RunResponseEnvelope);
@@ -69,8 +70,15 @@ describe('Cut-3 R6 — an untestable target keeps the separation evidence', () =
     expect(F.plot_body.robustness_synthesis).toBeDefined();
   });
 
+  /**
+   * ⭐ STEP 8 (Codex R2 #3443): the stored sizings predate the attested band (each `strong` on Olumi's default spread,
+   * `std_defaulted: true`), so today the comparison resting on them is withheld for that reason, robustness with it. This row's
+   * subject is the TARGET withhold, so it reads a SUPPORTED control: the user names each of those links' bands through the
+   * actual writer (`withNamedBands`).
+   */
   it('through the real handler: the target-only withhold keeps robustness, so separation is evaluated (never separation_unavailable)', async () => {
-    const result = await runR6();
+    const userLinks = (F.graph.edges as Json[]).filter((e) => e.provenance?.source === 'user_specified').map((e) => [e.from, e.to] as const);
+    const result = await runR6(await withNamedBands(clone(F.graph), userLinks));
     const env = result.enrichment as Json;
     // The withhold that applied is the TARGET one, and it kept the ordering (no win_share in its withheld claims).
     const target = (env.inference_warnings as Json[]).filter((w) => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE);

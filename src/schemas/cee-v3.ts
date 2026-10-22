@@ -839,6 +839,23 @@ export const EdgeProvenanceV3 = z.object({
      * user's point inside it ("about 150, between 80 and 250"; d5 6009282279). Malformed: dropped.
      */
     stated_range: z.object({ low: z.number().finite(), high: z.number().finite(), text: z.string().min(1), end: z.enum(["low", "high", "centre"]) }).optional().catch(undefined),
+    /**
+     * STEP 8 producer (AIE df3304b7): a supported uncertainty for THIS size, written only by the chat strength writer with its
+     * `std_defaulted: false` (`stated-uncertainty.ts`). CEE-owned. Malformed: dropped, and the size's chance stays withheld.
+     */
+    uncertainty: z.object({
+      stated_as: z.enum(["standard_deviation", "normal_quantiles"]),
+      sd: z.number().finite().positive(),
+      lower: z.number().finite().optional(),
+      p_lower: z.number().finite().gt(0).lt(1).optional(),
+      upper: z.number().finite().optional(),
+      p_upper: z.number().finite().gt(0).lt(1).optional(),
+      distribution: z.literal("normal"),
+      distribution_origin: z.enum(["stated", "olumi_provisional"]),
+      assessor: z.string().min(1),
+      basis: z.string().min(1),
+      source_quote: z.string().min(1),
+    }).optional().catch(undefined),
   }).optional().catch(undefined),
   /**
    * The link holds BY DEFINITION, checked at construction (`definitionalLink`: ±1 in one unit, on the drafter's word; DL
@@ -930,7 +947,8 @@ export const EdgeV3 = z.object({
    * Without this flag that std read as the user's.
    *
    * CEE-MINTED, TWO WRITERS: `adjust-edge-strength.ts` sets it to `true` on every user write whose std the user did
-   * not state, and REMOVES it when the write states the spread itself (a named band, or an explicit `std`);
+   * not state, sets it to `false` (ATTESTED, STEP 8 / AIE 764e9c72) only for the band the user named for this link, and
+   * REMOVES it for an explicit `std` (no verified user origin). Only `false` supports a chance resting on the spread;
    * `structural-add-edge.ts` sets it on a causal link the user draws, whose `DEFAULT_STD` is Olumi's. The
    * confirmation guard (`isProvenanceOnlyEdgeConfirmation`) admits absent → `true` on a figure confirm and present →
    * absent on a band confirm, and nothing else. A producer cannot write it: the root is in `field-safety.ts`

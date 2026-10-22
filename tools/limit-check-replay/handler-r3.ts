@@ -7,6 +7,7 @@ import { createRunAnalysisHandler, type ScenarioReader } from '../../src/orchest
 import type { HandlerInvocation } from '../../src/orchestrator-v5/tools/registry.js';
 import type { PLoTClient } from '../../src/orchestrator/plot-client.js';
 import { optionsOf, j3WithLimits } from './r3-cases.js';
+import { withNamedBand } from '../../src/orchestrator-v5/__tests__/support/supported-spread.support.js';
 import type { Rec } from './r2-cases.js';
 
 async function handlerResult(graph: Rec, identityEvaluations: Rec[] = [], starterOnly = false): Promise<Rec> {
@@ -49,7 +50,11 @@ export async function verifyHandler(): Promise<void> {
   const row = actualJ3.constraint_verdict.per_limit.find((r: Rec) => r.constraint_id === 'j3-customers');
   assert.equal(row.state, 'scored', 'J3 second synthetic limit remains scored through actual Run handler');
   // Reviewer's stated-only graph and its product operand: one option moves this limit through that identity.
-  const graph = JSON.parse(readFileSync(new URL('../../src/orchestrator-v5/admission/__tests__/fixtures/t1b-126k-c7878208-graph.json', import.meta.url), 'utf8'));
+  // ⭐ STEP 8 (Codex R2 #3443): the user's chat strength on support cost → service quality carries no supported spread alone, which
+  // withholds the limit's score for that reason. This row's subject is the evaluation carrier, so it reads a SUPPORTED control:
+  // the user names that link's band through the actual writer (`withNamedBand`).
+  const graph = await withNamedBand(JSON.parse(readFileSync(new URL('../../src/orchestrator-v5/admission/__tests__/fixtures/t1b-126k-c7878208-graph.json', import.meta.url), 'utf8')),
+    'starter_support_cost', 'service_quality_deterioration', 'strong');
   graph.goal_constraints = [{ constraint_id: 'quality', node_id: 'service_quality_deterioration', value: 1, operator: '<=', value_frame: 'level' }];
   graph.nodes.find((n: Rec) => n.id === 'service_quality_deterioration').observed_state = { value: 0, source: 'user_override' };
   const present = await handlerResult(graph, [{ node_id: 'starter_support_cost', evaluated: true }]);

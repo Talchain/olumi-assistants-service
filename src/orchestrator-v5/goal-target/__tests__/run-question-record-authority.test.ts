@@ -14,7 +14,14 @@ import { readRunEvidence, runEvidenceWireOf } from '../../agent-lane/run-evidenc
 import { SupabaseSessionStore } from '../../session/supabase-store.js';
 import { SessionLRUCache } from '../../session/cache.js';
 import * as seedReuse from '../../coaching/seed-reuse.js';
+import { withStatedSd } from '../../__tests__/support/supported-spread.support.js';
 
+/**
+ * ⭐ STEP 8 (Codex R2 #3443): the captured "between 10 and 30" is a bare range, so a Run on the captured graph withholds the chance
+ * (screen-lines route, "STEP 8 truthful"). These rows' subject is the question record and its caution, so the Runs read a SUPPORTED
+ * control: the user then states the standard deviation of that contribution, recorded by the actual chat writer.
+ */
+const supportedGraph = await withStatedSd(structuredClone(captured.graph), 'bc0c0c0c-0c0c-4c0c-8c0c-0c0c0c0c0c0c', 'additional_specialists', 'additional_specialist_capacity');
 const stored = () => ({ ...structuredClone(captured.result), run_id: captured.evidence.run_id,
   input_snapshot: structuredClone(captured.evidence.input_snapshot), graph_hash_at_run: 'saved-capture' });
 const evidence = () => ({ runId: captured.evidence.run_id, inputSnapshot: structuredClone(captured.evidence.input_snapshot),
@@ -22,7 +29,7 @@ const evidence = () => ({ runId: captured.evidence.run_id, inputSnapshot: struct
 
 describe('the evaluated-question producer survives the actual Run-fact writer and cold reader', () => {
   it.each([true, false])('records asked and final dispatched inputs even when scoring threshold present=%s', async hasThreshold => {
-    const graph = structuredClone(captured.graph);
+    const graph = structuredClone(supportedGraph) as typeof captured.graph;
     const goal = graph.nodes.find(node => node.id === 'weekly_support_capacity')! as Record<string, unknown>;
     Object.assign(goal, { goal_horizon_months: 6, goal_deadline_as_stated: 'by March' });
     if (!hasThreshold) delete goal.goal_threshold;
@@ -192,7 +199,7 @@ describe('S3 single evaluated-input authority — independent capacity capture24
 
   it.each(['normal', 'reduced', 'partial', 'provisional', 'missing_snapshot'] as const)('the actual handler stores the record-owned chance and retains the %s caution through the registry', async mode => {
     const snapshot = await loadScenarioSnapshotForRunAnalysis('bc0c0c0c-0c0c-4c0c-8c0c-0c0c0c0c0c0c', 's3-capture', {
-      loadGraphAndBriefText: vi.fn(async () => ({ graph: structuredClone(captured.graph), briefText: captured.brief, revision: 2 })),
+      loadGraphAndBriefText: vi.fn(async () => ({ graph: structuredClone(supportedGraph), briefText: captured.brief, revision: 2 })),
       readMostRecentPendingActions: vi.fn(async () => []),
     } as never);
     // Transport replay only: these are the observed finite output rows, not an engine-maths test.
@@ -264,7 +271,7 @@ describe('S3 single evaluated-input authority — independent capacity capture24
   });
 
   it.each([false, true])('over-period level threshold, period-end reading=%s: existing licence owns the chance, never the static label', async supported => {
-    const graph = structuredClone(captured.graph);
+    const graph = structuredClone(supportedGraph) as typeof captured.graph;
     const goal = graph.nodes.find(n => n.kind === 'goal')!;
     Object.assign(goal, { goal_horizon_months: 3, goal_target_basis: { quantity_frame: 'level', target_frame: 'level', target_raw: 100,
       reference: 'launch', period_months: 3, period_kind: 'over_period', effect_unit: 'tickets over the first three months',

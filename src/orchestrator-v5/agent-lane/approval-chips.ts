@@ -31,6 +31,7 @@ import { linkEffectSourceLevels } from './link-effect-figures.js';
 import { namesSourceOf } from './stated-by-user.js';
 import { POINTS_SPELLINGS } from '../../utils/unit-alphabet.js';
 import { statedInOneOf } from '../system-events/link-effect-edit.js';
+import { UNCERTAINTY_SAVE_BUTTON } from '../../cee/magnitude/stated-uncertainty.js';
 import { CONFIRM_GOAL_READING_OP } from '../goal-target/held-change-target.js';
 
 /**
@@ -332,6 +333,11 @@ function approvalChipsForOne(proposalId: string, tool: string, labelSourceFor?: 
     // the egress rule for unvalidated figures in chip labels.
     return [{ id: approvalChipIdFor(proposalId), label: 'Add this suggestion to my comparison',
       message: adoption.approval_message, detail: stored!.public_label }, AMEND_CHIP];
+  }
+  // ⭐ STEP 8 PRODUCER (AIE df3304b7 `button`): a supported uncertainty for the user's size: the AIE's card rides in `detail`.
+  if (tool === 'propose_link_strength' && stored?.proposal_id === proposalId && stored.operations.length === 1
+    && (stored.operations[0]?.value as { uncertainty?: unknown } | undefined)?.uncertainty !== undefined) {
+    return [{ id: approvalChipIdFor(proposalId), label: UNCERTAINTY_SAVE_BUTTON, message: 'Yes, save that uncertainty.', detail: stored.public_label }, AMEND_CHIP];
   }
   const reading = readingShownFor(tool, labelSourceFor?.(proposalId));
   if (reading !== undefined) return [{ id: approvalChipIdFor(proposalId), ...reading, message: approve.message }, AMEND_CHIP];

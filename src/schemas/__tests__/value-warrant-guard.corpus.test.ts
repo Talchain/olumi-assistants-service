@@ -334,13 +334,16 @@ describe("the live value-bearing contract, adjudicated", () => {
     // {target_raw (a staleness key equal to goal_threshold_raw), period_months (months by name, `source: olumi_reading`)}.
     // Science PR-4 — +1 NONE site / +1 finding / +1 ACCEPTED (14 Oct): CEE's NodeV3 `cohort_forecast.people_reached`, people
     // by name, attested by the block's REQUIRED `author` and the user's `same_cohort` answer (value-warrant-guard.ts).
-    expect(SITES.length).toBe(60);
-    expect(FINDINGS.length).toBe(44);
+    // STEP 8 producer — +5 LEVEL_SHARED sites / +5 findings / +5 ACCEPTED (19 Oct, AIE df3304b7): CEE's EdgeV3
+    // `natural_effect.uncertainty.{sd, lower, p_lower, upper, p_upper}`, the supported uncertainty of the user's own size, in the
+    // enclosing `amount_unit` (probabilities unitless), written only by the chat strength writer (value-warrant-guard.ts).
+    expect(SITES.length).toBe(65);
+    expect(FINDINGS.length).toBe(49);
     expect(report.open.length).toBe(20);
-    expect(report.accepted.length).toBe(24);
+    expect(report.accepted.length).toBe(29);
     expect(SITES.filter((s) => s.verdict === "FIELD").length).toBe(9);
     expect(SITES.filter((s) => s.verdict === "LEVEL_SOLE").length).toBe(7);
-    expect(SITES.filter((s) => s.verdict === "LEVEL_SHARED").length).toBe(18);
+    expect(SITES.filter((s) => s.verdict === "LEVEL_SHARED").length).toBe(23);
     expect(SITES.filter((s) => s.verdict === "NONE").length).toBe(26);
   });
 

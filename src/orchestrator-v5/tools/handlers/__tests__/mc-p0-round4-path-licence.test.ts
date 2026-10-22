@@ -9,6 +9,7 @@ import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.
 import { createRunAnalysisHandler } from '../run-analysis.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 import { RunAnalysisResultSchema } from '@talchain/schemas/orchestrator';
+import { withStatedSds as withStatedSdsFor } from '../../../__tests__/support/supported-spread.support.js';
 
 type R = Record<string, any>;
 const brief = readFileSync(new URL('../../../admission/__tests__/fixtures/mc-p0/BRIEF.txt', import.meta.url), 'utf8');
@@ -27,6 +28,13 @@ function graph(draw: number, noTarget = false): R {
   }
   return g;
 }
+/**
+ * ⭐ STEP 8 (Codex R2 #3443): the brief's own sizes ("2 customers", "-£300 a month", "150 subscribers", ...) carry no supported
+ * spread, so on the captured draws the leader resting on them is WITHHELD for that reason. A SUPPORTED contrast: the user also
+ * states each size's standard deviation, recorded by the actual chat writer (`withStatedSd`).
+ */
+const withStatedSds = (g: R): Promise<R> => withStatedSdsFor(g, '714abc5c-4e82-4436-9454-eec6c8f68589');
+const SPREAD = 'GOAL_FIGURES_UNSUPPORTED_SPREAD';
 const idsOf = (g: R): string[] => g.nodes.filter((n: R) => n.kind === 'option').map((n: R) => n.id);
 function carrier(g: R): R {
   const ids = idsOf(g);
@@ -75,7 +83,13 @@ describe('MC P0 R4: target-independent licence on stored T1b paths', () => {
           { from: 'starter_subscribers', to: 'starter_tier_monthly_recurring_revenue' }];
       expect(paths).toEqual(d === 2 ? [] : [{ option_id: 'launch_starter_tier', links: expectedLinks }]);
       // Science 393023 LICENCE (a)/(b), 7 Oct: an unsized compared path withholds the leader, independent of target.
-      expect(r.leading_option_id).toBe(d === 2 ? idsOf(g)[0] : null);
+      // STEP 8: d2's sized path rests on the brief's sizes with no supported spread, so its leader is withheld for THAT reason
+      // (never a placeholder); with each size's stated spread recorded, the same twin names it.
+      expect(r.leading_option_id).toBe(null);
+      if (d === 2) {
+        expect(warnings.some((w: R) => w.code === SPREAD)).toBe(true);
+        expect((await run(await withStatedSds(g))).leading_option_id).toBe(idsOf(g)[0]);
+      }
       // Science 393023 LICENCE (a)/(b), 7 Oct: d1/d3 now record the exact placeholder links.
       if (d === 2) expect(warning).toBeUndefined();
       else expect(warning.links).toEqual(expectedLinks);
@@ -96,7 +110,16 @@ describe('MC P0 R4: target-independent licence on stored T1b paths', () => {
     const g = JSON.parse(readFileSync(new URL('../../../admission/__tests__/fixtures/mc-p0/draw2.json', import.meta.url), 'utf8'));
     const edge = g.edges.find((e: R) => e.from === 'price_increase' && e.to === 'monthly_recurring_revenue');
     expect(edge.provenance.magnitude).toBe('olumi_estimate'); expect(edge.provenance.natural_effect).toBeDefined();
-    expect(licence(g, idsOf(g))).toEqual([]); expect((await run(g)).leading_option_id).toBe(idsOf(g)[0]);
+    expect(licence(g, idsOf(g))).toEqual([]);
+    // STEP 8: the leader also rests on the brief's own sizes (price → customer losses → MRR), which carry no supported spread, so
+    // it is withheld for that reason, and Olumi's sized estimate is never named as one. With each user size's stated spread
+    // recorded, the leader is retained: the olumi_estimate + natural_effect link itself withholds nothing.
+    const raw = await run(g);
+    expect(raw.leading_option_id).toBeNull();
+    const spread = (raw.enrichment?.inference_warnings ?? []).filter((w: R) => w.code === SPREAD);
+    expect(spread.length).toBeGreaterThan(0);
+    expect(spread.flatMap((w: R) => w.links ?? [])).not.toContainEqual({ from: 'price_increase', to: 'monthly_recurring_revenue' });
+    expect((await run(await withStatedSds(g))).leading_option_id).toBe(idsOf(g)[0]);
   });
   it('approval/coaching and licence walks agree on stored d1/d2/d3', () => {
     for (const d of [1, 2, 3]) {

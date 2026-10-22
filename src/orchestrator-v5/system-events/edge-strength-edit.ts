@@ -20,7 +20,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { log } from '../../utils/telemetry.js';
 import { approvedLinkAdoptionFor } from '../agent-lane/approved-adoption-context.js';
-import { statedLinkBandFor, statedLinkReplacesUserFigureFor } from '../agent-lane/stated-link-band-context.js';
+import { statedLinkBandFor, statedLinkReplacesUserFigureFor, statedLinkUncertaintyFor } from '../agent-lane/stated-link-band-context.js';
 import { REPLACE_KEEPS_DIRECTION_TEXT, userFigureHeld, userFigureHeldRefusalText } from '../../cee/magnitude/user-figure-held.js';
 import { composeToolCallResponse } from '../compose.js';
 import { definitionalLinkInUse, definitionalLinkRefusalText, type IdentityRunUse } from '../compose/definitional-links.js';
@@ -535,6 +535,8 @@ export async function applyEdgeStrengthEdit(
     : undefined;
   const heldNow = userFigureHeld(rawTargetEdge ?? targetEdge);
   const replacesUserFigure = heldNow !== null && statedLinkReplacesUserFigureFor(payload.scenario_id, event.from, event.to);
+  // ⭐ STEP 8 PRODUCER (AIE df3304b7): an uncertainty edit keeps the size, so it is a real write at the stored strength (below).
+  const statedUncertainty = statedLinkUncertaintyFor(payload.scenario_id, event.from, event.to);
   if (replacesUserFigure && target.effectDirection !== targetEdge.effect_direction) {
     return refuse(payload, 'replace_keeps_direction', REPLACE_KEEPS_DIRECTION_TEXT);
   }
@@ -560,6 +562,7 @@ export async function applyEdgeStrengthEdit(
   // the explicit confirmation intent grants that provenance-only write.
   if (
     !replacesUserFigure &&
+    statedUncertainty === undefined &&
     drawnLinkAdoptionFor(payload.scenario_id, event.from, event.to, event.magnitude, targetEdge) === undefined &&
     event.intent === 'set' &&
     target.mean === targetEdge.strength.mean &&
@@ -657,6 +660,7 @@ export async function applyEdgeStrengthEdit(
     ...(statedBand !== undefined ? { edgeStrengthBandAuthority: statedBand } : {}),
     ...(adoptedEstimate !== undefined ? { edgeStrengthAdoptedEstimateAuthority: adoptedEstimate } : {}),
     ...(replacesUserFigure ? { edgeStrengthReplacesUserFigureAuthority: true as const } : {}),
+    ...(statedUncertainty !== undefined ? { edgeStrengthStatedUncertaintyAuthority: statedUncertainty } : {}),
     // Give the canonical handler the strict raw persisted shape. It performs
     // its own GraphV3 narrowing for mutation while its existing merge helper
     // preserves additive top-level fields; the parsed `graph` above remains

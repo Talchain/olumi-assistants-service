@@ -170,6 +170,27 @@ const obj = (props: Record<string, unknown>, required: string[]): Record<string,
   type: 'object', additionalProperties: false, properties: props, required,
 });
 
+/**
+ * ⭐ STEP 8 PRODUCER (AIE df3304b7 `accepted_input_shapes`): a supported uncertainty for a size the user already gave on one link.
+ * The host verifies every figure and phrase against this turn's words and answers an unsupported or incomplete statement with
+ * the exact question or limitation to give the user.
+ */
+const LINK_UNCERTAINTY = obj({
+  stated_as: { type: 'string', enum: ['standard_deviation', 'normal_quantiles'], description: 'standard_deviation: an explicit standard deviation of this same effect. normal_quantiles: values with the probability below, inside or above them (for example "90% between 10 and 30", or "5% below 10 and 5% above 30").' },
+  sd: { type: 'number', description: 'standard_deviation only: the standard deviation exactly as written, in the size\u2019s own unit and per the same change in the cause.' },
+  lower: { type: 'number', description: 'normal_quantiles only: the lower value as written, signed as the link\u2019s size is.' },
+  upper: { type: 'number', description: 'normal_quantiles only: the upper value as written, signed as the link\u2019s size is.' },
+  probability_inside: { type: 'number', description: 'normal_quantiles only: the percent stated as lying between lower and upper (90 for "90%").' },
+  probability_below: { type: 'number', description: 'normal_quantiles only, when stated: the percent below lower (5 for "5% below 10").' },
+  probability_above: { type: 'number', description: 'normal_quantiles only, when stated: the percent above upper (5 for "5% above 30").' },
+  unit: { type: 'string', description: 'The unit the values are written in, as written.' },
+  from_words: { type: 'string', description: 'The user\u2019s words in THIS message that give the values, copied exactly.' },
+  tails_words: { type: 'string', description: 'When given: the user\u2019s exact words saying how much lies below and above (for example "5% below 10 and 5% above 30").' },
+  shape_words: { type: 'string', description: 'When given: the user\u2019s exact words saying it is symmetric, bell-shaped or Normal.' },
+  basis_words: { type: 'string', description: 'When given: the user\u2019s exact words saying what the assessment is based on.' },
+  source: { type: 'string', description: 'Only when the assessment is another party\u2019s: who, exactly as the user names them (for example "the supplier").' },
+}, ['stated_as', 'unit', 'from_words']);
+
 const UNMODELLED_MECHANISMS = {
   type: 'array', maxItems: 5, items: { type: 'string', minLength: 1, maxLength: 80 },
   description: 'Unresolved effects this option does not yet model. Omit to preserve its existing gaps; [] explicitly requests clearing them. '
@@ -464,17 +485,19 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'Give `direction` ONLY when the user said the link pushes the other way. When they described the strength in their own words '
       + '("very high", "hardly at all"), give your reading in `strength` and their exact phrase in `from_words`: the user approves your reading. '
       + 'Never use this for a strength the user did not state: if they said nothing about how strong it is, ask which band it is first '
-      + '\u2014 a band they did not say is refused.' + SLIGHT_IS_WEAK,
+      + '\u2014 a band they did not say is refused.' + SLIGHT_IS_WEAK
+      + ' To record how much a size the user ALREADY gave on this link could vary, give `uncertainty` instead of `strength`: the size stays exactly as it is.',
     parameters: obj({
       from_label: { type: 'string', description: 'Where the link starts, exactly as get_canonical_state labels it.' },
       to_label: { type: 'string', description: 'Where the link ends, exactly as get_canonical_state labels it.' },
-      strength: { type: 'string', enum: ['weak', 'moderate', 'strong', 'very strong'], description: 'The strength the user stated, or your reading of their own words, given with `from_words`.' },
+      strength: { type: 'string', enum: ['weak', 'moderate', 'strong', 'very strong'], description: 'The strength the user stated, or your reading of their own words, given with `from_words`. Leave it out with `uncertainty`.' },
+      uncertainty: LINK_UNCERTAINTY,
       from_words: FROM_WORDS,
       direction: { type: 'string', enum: ['positive', 'negative'], description: 'ONLY when the user said the link pushes the other way, with their words in `direction_from_words`. Leave it out otherwise: the link keeps its direction.' },
       direction_from_words: { type: 'string', description: 'With `direction`: the user\u2019s exact words in THIS message saying the link runs the other way. A reversal without them is refused.' },
       rationale: { type: 'string', description: 'What the user said, in their words.' },
       whole_request: WHOLE_REQUEST,
-    }, ['from_label', 'to_label', 'strength', 'rationale']),
+    }, ['from_label', 'to_label', 'rationale']),
   },
   {
     type: 'function',
@@ -1104,7 +1127,13 @@ export interface AgentCapabilities {
   withdrawProposal?(ctx: AgentToolContext, args: { proposal_id: string }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). */
   proposeLinkStrength?(ctx: AgentToolContext, args: {
-    from_label: string; to_label: string; strength: 'weak' | 'moderate' | 'strong' | 'very strong';
+    from_label: string; to_label: string; strength?: 'weak' | 'moderate' | 'strong' | 'very strong';
+    /** STEP 8 producer: a supported uncertainty for the size the user already gave on this link (`LINK_UNCERTAINTY`). */
+    uncertainty?: {
+      stated_as: 'standard_deviation' | 'normal_quantiles'; sd?: number; lower?: number; upper?: number;
+      probability_inside?: number; probability_below?: number; probability_above?: number; unit: string; from_words: string;
+      tails_words?: string; shape_words?: string; basis_words?: string; source?: string;
+    };
     direction?: 'positive' | 'negative'; rationale: string;
     /** The user's own phrase THIS turn when `strength` is Olumi's reading of it (slice C3). */
     from_words?: string;

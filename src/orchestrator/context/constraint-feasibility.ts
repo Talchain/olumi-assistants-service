@@ -42,6 +42,7 @@ import {
   OLUMI_GUESS_LIMIT_REASON,
   PARTS_IDENTITY_UNMODELLED_REASON,
   PLACEHOLDER_PARTS_REASON,
+  UNSUPPORTED_SPREAD_PARTS_REASON,
   optionIdOf,
   placeholderMovedOptions,
   limitUnitsOf,
@@ -221,6 +222,10 @@ export function withholdOptionLimitScores<E>(envelope: E, byLimit: ReadonlyMap<s
       return rest;
     });
   }
+  // ⭐ STEP 8 (Codex R2 #3443 P1): PLoT's `conditional_probabilities` are POOLED over the options' draws, one row per pair of
+  // conditions. A row naming a condition whose P is withheld for any option rests on that withheld P, so it goes with it.
+  const conditional = withholdConditionalRows(env.conditional_probabilities, new Set(byLimit.keys()));
+  if (conditional !== env.conditional_probabilities) out.conditional_probabilities = conditional;
   const robustness = readRecord(env.robustness);
   if (robustness !== null) {
     const crowned = readString(robustness.recommended_option_id);
@@ -231,6 +236,20 @@ export function withholdOptionLimitScores<E>(envelope: E, byLimit: ReadonlyMap<s
     }
   }
   return out as E;
+}
+
+/**
+ * ⭐ STEP 8 (Codex R2 #3443 P1): PLoT's pooled `conditional_probabilities` rows (`constraint_a_id`, `constraint_b_id`,
+ * `conditional_probability`, `marginal_probability`) without every row that names a condition in `conditions`. Any other shape,
+ * and a carrier with no such row, is returned as it is. Pure.
+ */
+function withholdConditionalRows(carrier: unknown, conditions: ReadonlySet<string>): unknown {
+  if (!Array.isArray(carrier) || conditions.size === 0) return carrier;
+  const names = (row: unknown): boolean => {
+    const r = readRecord(row);
+    return r !== null && [r.constraint_a_id, r.constraint_b_id].some((id) => typeof id === 'string' && conditions.has(id));
+  };
+  return carrier.some(names) ? carrier.filter((row) => !names(row)) : carrier;
 }
 
 /** The outcome figures that are claims about the goal (PLoT #416's "centre and spread"); the sample counts stay. */
@@ -1135,12 +1154,20 @@ export function collectLimitLevelOwners(
   options?: ReadonlyArray<Record<string, unknown>>,
   /** Only identities evaluated by this response may exempt operand links in the limit walk. */
   identityEvaluations?: readonly unknown[],
+  /**
+   * ⭐ STEP 8 (AIE `point_uncertainty` 564fe768; Codex R1 #3443; DL-3: targets AND limits): per option, the user's sizes on
+   * Olumi's default spread on its path to a condition's node — the Run's own chance-support walk pointed at that node
+   * (`chanceSupportGoalPaths`, passed in by the Run). Omitted = no condition is withheld for its spread (as before).
+   */
+  unsupportedSpreadTo?: (nodeId: string) => ReadonlyArray<{ readonly option_id: string; readonly links: ReadonlyArray<{ readonly from: string; readonly to: string }> }>,
 ): {
   userBaselineIds: Set<string>;
   userAssumptionIds: Set<string>;
   relativeChangeIds: Set<string>;
   placeholderPartsReasons: Map<string, PlaceholderPartsReason>;
   placeholderMovedOptionIds: Map<string, Set<string>>;
+  /** Per condition, the options withheld for the spread and the links it rests on (the Run says them in the AIE's words). */
+  unsupportedSpreadByLimit: Map<string, ReadonlyArray<{ readonly option_id: string; readonly links: ReadonlyArray<{ readonly from: string; readonly to: string }> }>>;
 } {
   const out = {
     userBaselineIds: new Set<string>(),
@@ -1148,6 +1175,7 @@ export function collectLimitLevelOwners(
     relativeChangeIds: new Set<string>(),
     placeholderPartsReasons: new Map<string, PlaceholderPartsReason>(),
     placeholderMovedOptionIds: new Map<string, Set<string>>(),
+    unsupportedSpreadByLimit: new Map<string, ReadonlyArray<{ readonly option_id: string; readonly links: ReadonlyArray<{ readonly from: string; readonly to: string }> }>>(),
   };
   // R1 S4-core: the limits STORED as a relative change from today (`value_frame: 'change_rel'`), read off the same
   // persisted rows the ratified list came from. ISL's `frame_verdict` must be present for these (0.61.0: absent fails
@@ -1180,6 +1208,11 @@ export function collectLimitLevelOwners(
       if (typeof c.node_id !== 'string' || c.node_id.length === 0) continue;
       if (nodes.find((n) => n.id === c.node_id)?.kind === 'goal') continue;
       const moved = placeholderMovedOptions(c.node_id, nodes, edges, options, limitUnits, identityEvaluations);
+      // STEP 8: the same per-option withhold for an option whose P rests on a user's size on Olumi's default spread. An
+      // unsized link keeps its own reason (it is the first loss); the spread names only the options it alone withholds.
+      const spread = (unsupportedSpreadTo?.(c.node_id) ?? []).filter((p) => !moved.has(p.option_id));
+      for (const p of spread) moved.set(p.option_id, UNSUPPORTED_SPREAD_PARTS_REASON);
+      if (spread.length > 0) out.unsupportedSpreadByLimit.set(c.constraint_id, spread);
       if (moved.size === 0) continue;
       out.placeholderMovedOptionIds.set(c.constraint_id, new Set(moved.keys()));
       const scored = options.map((o) => optionIdOf(o)).filter((id): id is string => id !== undefined);
@@ -1885,6 +1918,7 @@ export const PER_LIMIT_REASON_RANK: ReadonlyMap<string, number> = new Map([
   ['parts_links_placeholder' satisfies typeof PLACEHOLDER_PARTS_REASON, 2],
   ['parts_identity_unmodelled' satisfies typeof PARTS_IDENTITY_UNMODELLED_REASON, 2],
   ['limit_rests_on_olumi_guess' satisfies typeof OLUMI_GUESS_LIMIT_REASON, 2],
+  ['parts_links_unsupported_spread' satisfies typeof UNSUPPORTED_SPREAD_PARTS_REASON, 2],
   ['threshold_clamped', 3],
   ['CONSTRAINT_NOT_CONVERTIBLE', 4],
   ['CONSTRAINT_OUT_OF_DOMAIN', 4],

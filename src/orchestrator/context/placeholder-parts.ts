@@ -42,10 +42,17 @@ const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFi
 export const PLACEHOLDER_PARTS_REASON = 'parts_links_placeholder';
 export const PARTS_IDENTITY_UNMODELLED_REASON = 'parts_identity_unmodelled';
 export const OLUMI_GUESS_LIMIT_REASON = 'limit_rests_on_olumi_guess';
+/**
+ * ⭐ STEP 8 (AIE `point_uncertainty` 564fe768; Codex R1 #3443; DL-3: targets AND limits): the option moves this condition's
+ * quantity through a size the user gave whose spread nobody stated (`chanceSupportGoalPaths` pointed at the condition's
+ * node), so its P rests on Olumi's default spread. Read by the Run's per-option fold (`collectLimitLevelOwners`), never here.
+ */
+export const UNSUPPORTED_SPREAD_PARTS_REASON = 'parts_links_unsupported_spread';
 export type PlaceholderPartsReason =
   | typeof PLACEHOLDER_PARTS_REASON
   | typeof PARTS_IDENTITY_UNMODELLED_REASON
-  | typeof OLUMI_GUESS_LIMIT_REASON;
+  | typeof OLUMI_GUESS_LIMIT_REASON
+  | typeof UNSUPPORTED_SPREAD_PARTS_REASON;
 
 /**
  * A link sized only by Olumi: an `olumi_*` magnitude, OR a plain `defaulted: true` size, and never a link the user sized

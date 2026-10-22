@@ -19,6 +19,7 @@ import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import type { PLoTClient } from '../../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 import type { HandlerInvocation } from '../../tools/registry.js';
+import { withNamedBand } from '../../__tests__/support/supported-spread.support.js';
 
 type Json = Record<string, any>;
 const clone = <T>(v: T): T => structuredClone(v);
@@ -320,7 +321,10 @@ describe('real loader and run-analysis handler', () => {
   };
 
   it('captures the driver before placeholder stripping and stores its range; a held month without a carrier withholds it instead', async () => {
-    const free = (await runOn(withoutHorizon(servedGraph(true)), placeholderBody())).enrichment as Json;
+    // ⭐ STEP 8 (Codex R2 #3443): the user's churn → subscribers link on the £59 path carries no supported spread alone, which
+    // withholds the range; this row's subject is the range record, so the user names that link's band through the actual writer.
+    const free = (await runOn(await withNamedBand(withoutHorizon(servedGraph(true)), 'monthly_churn_rate', 'paying_subscribers_at_12_months', 'strong'),
+      placeholderBody())).enrichment as Json;
     expect(record(free)).toMatchObject({ code: GOAL_CHANCE_RANGE, option_ids: ['59_price'],
       range_by_option: { '59_price': { ...expected, from: 'pro_plan_price', to: 'monthly_churn_rate' } } });
     // No held month: the record still copies the short basis line (no month named), as before.

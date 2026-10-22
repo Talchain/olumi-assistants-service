@@ -24,6 +24,7 @@ import type { PLoTClient } from '../../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import minimalFixture from '../../../../tests/fixtures/plot/v2-run-golden-minimal.json';
+import { withStatedSds } from '../../__tests__/support/supported-spread.support.js';
 
 const WIN = 'The starter tier would win about 150 new subscribers, between 80 and 250.';
 const T1B = 'We are a B2B software company with £120,000 monthly recurring revenue from 400 customers paying £300 a month. '
@@ -239,9 +240,19 @@ async function runFact(graph: Rec, evaluations: (sent: Rec) => Rec[]): Promise<R
 const storedLicence = (fact: Rec): Rec | undefined =>
   (fact.result?.enrichment?.inference_warnings ?? []).find((w: Rec) => w.code === 'GOAL_CHANCE_LICENSED');
 
+/**
+ * ⭐ STEP 8 (Codex R2 #3443): the brief's own sizes carry no supported spread alone, which withholds the chances resting on them.
+ * These real-Run rows' subject is the goal reading, so they read a SUPPORTED control: the user also states each size's standard
+ * deviation, recorded by the actual chat writer (`withStatedSds`).
+ */
+const supportedD1 = async (): Promise<{ graph: Rec; id: (label: string) => string }> => {
+  const built = await d1(T1B_NOW, D1_NOW);
+  return { ...built, graph: await withStatedSds(built.graph, 'a9ee494a-0000-4000-8000-000000a9ee49') };
+};
+
 describe('DL 13:55Z, real Run: the Run\'s stored licence (turn and reload) carries the reading its chances rest on', () => {
   it('⭐ RED: real construction → real Run, the product evaluated → `goal_reading` on the stored licence, by node, in the reply\'s words', async () => {
-    const { graph, id } = await d1(T1B_NOW, D1_NOW);
+    const { graph, id } = await supportedD1();
     const fact = await runFact(graph, () => [evaluation(id)]);
     const licence = storedLicence(fact);
     expect(Object.keys(licence?.pct_by_option ?? {}).length, JSON.stringify(fact.result?.enrichment?.inference_warnings)).toBeGreaterThan(0);
@@ -249,7 +260,7 @@ describe('DL 13:55Z, real Run: the Run\'s stored licence (turn and reload) carri
   });
 
   it('CONTROL (real Run): the Run walked the links (no evaluation) → licensed chances, no reading label', async () => {
-    const { graph } = await d1(T1B_NOW, D1_NOW);
+    const { graph } = await supportedD1();
     const licence = storedLicence(await runFact(graph, () => []));
     expect(Object.keys(licence?.pct_by_option ?? {}).length).toBeGreaterThan(0);
     expect(licence).not.toHaveProperty('goal_reading');

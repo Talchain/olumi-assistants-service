@@ -1700,7 +1700,7 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
    * Unit rows (mapping, contrast, parse): `src/orchestrator-v5/system-events/__tests__/edge-band-reader.test.ts`.
    */
   describe('0.60.0 `band` on the UI event (the canvas band pill)', () => {
-    it('⭐ a band SET: committed std is the band’s, no `std_defaulted`, the mean is the pill’s', async () => {
+    it('⭐ a band SET: committed std is the band’s, attested (`std_defaulted: false`), the mean is the pill’s', async () => {
       const response = await app.inject({
         method: 'POST',
         url: '/orchestrate/v2/turn',
@@ -1713,7 +1713,7 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
         effect_direction: 'negative',
         provenance: { source: 'user_specified' },
       });
-      expect(committedEdge()).not.toHaveProperty('std_defaulted');
+      expect(committedEdge()?.std_defaulted, 'AIE 764e9c72: the writer ATTESTS the band the user named (`false`); absent is never support').toBe(false);
     });
 
     it('⭐ a band outside the magnitude ("slight" at 0.55): refused, no graph written, the stored graph untouched', async () => {

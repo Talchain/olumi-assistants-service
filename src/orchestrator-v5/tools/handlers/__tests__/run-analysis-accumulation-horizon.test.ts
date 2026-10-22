@@ -12,6 +12,7 @@ import { GOAL_CHANCE_LICENSED } from '../../../goal-target/goal-chance-licence.j
 import type { HandlerInvocation } from '../../registry.js';
 import { createRunAnalysisHandler } from '../run-analysis.js';
 import minimalFixture from '../../../../../tests/fixtures/plot/v2-run-golden-minimal.json';
+import { withNamedBands } from '../../../__tests__/support/supported-spread.support.js';
 
 type Rec = Record<string, any>;
 const served = JSON.parse(readFileSync(new URL('../../../../../tests/fixtures/served/c96fc4bb-saved-graph.json', import.meta.url), 'utf8')).graph as Rec;
@@ -116,7 +117,9 @@ describe('Run accumulation horizon drift — the wire copy uses the current dead
       const ratePath = graph.edges.find((e: Rec) => e.from === 'pro_plan_price' && e.to === 'monthly_churn');
       Object.assign(ratePath, { exists_probability: 1, defaulted: false, provenance: { source: 'user_specified' } });
       graph.edges.find((e: Rec) => e.from === 'monthly_churn' && e.to === CARRIER_ID).exists_probability = 0.5;
-      const { result } = await run(graph, body);
+      // ⭐ STEP 8 (Codex R2 #3443): the user's chat strength on price → churn carries no supported spread alone; this row's subject
+      // is the horizon, so the user names that link's band through the actual writer (`withNamedBands`), which attests its spread.
+      const { result } = await run(await withNamedBands(graph, [['pro_plan_price', 'monthly_churn']]), body);
       const licence = result.enrichment.inference_warnings.find((w: Rec) => w.code === GOAL_CHANCE_LICENSED);
       if (deadline === 6) {
         expect(licence).toBeUndefined();

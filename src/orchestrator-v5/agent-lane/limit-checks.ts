@@ -17,6 +17,7 @@ import {
   OLUMI_GUESS_LIMIT_REASON,
   PARTS_IDENTITY_UNMODELLED_REASON,
   PLACEHOLDER_PARTS_REASON,
+  UNSUPPORTED_SPREAD_PARTS_REASON,
   optionIdOf,
   placeholderPartsFinding,
   limitUnitsOf,
@@ -25,6 +26,7 @@ import {
 import { log } from '../../utils/telemetry.js';
 import { limitCheckAsks } from './limited-level-ask.js';
 import { likelyRangeLawWords, likelyRangeUseOf, rangeLawAdopted } from '../intervention-range.js';
+import { CONDITION_FIGURES_UNSUPPORTED_SPREAD } from '../../orchestrator/context/option-result-source.js';
 
 export interface LimitCheck {
   /** The join key for MG's per-limit ask (`limited-level-ask.ts`, seam 5865033356): its sentence rides here verbatim. */
@@ -138,6 +140,7 @@ function withheldOptionsFor(
   targetId: string | null,
   identityEvaluated?: ReadonlySet<string>,
   leftOutOptionIds?: ReadonlySet<string>,
+  spread?: SpreadRecord,
 ): WithheldOptions {
   const nodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
   const edges = (graph as { edges?: unknown } | null | undefined)?.edges;
@@ -151,10 +154,22 @@ function withheldOptionsFor(
   const target = labelOf(targetId);
   const out = NONE_WITHHELD();
   for (const o of recs.filter((n) => n.kind === 'option')) {
+    const evaluations = identityEvaluated === undefined ? undefined : [...identityEvaluated].map(node_id => ({ node_id, evaluated: true }));
     const finding = placeholderPartsFinding(targetId, recs, links, [o], limitUnitsOf((graph as { goal_constraints?: unknown } | null | undefined)?.goal_constraints),
-      identityEvaluated === undefined ? undefined : [...identityEvaluated].map(node_id => ({ node_id, evaluated: true })));
+      evaluations);
     const label = labelOf(optionIdOf(o));
-    if (finding === null || label === null) continue;
+    if (label === null) continue;
+    if (finding === null) {
+      // ⭐ STEP 8 (Codex R1 #3443; DL-3: targets AND limits): an option the Run withheld on this condition for a user's size
+      // whose spread is not attested — named from THAT Run's own record, so the sentence and the numbers cannot disagree.
+      const id = optionIdOf(o);
+      if (id === undefined || spread?.options.includes(id) !== true) continue;
+      out.hasSpread = true;
+      if (leftOutOptionIds?.has(id)) continue;
+      out.labels.push(label);
+      out.spreadLabels.push(label);
+      continue;
+    }
     const words = finding.reason === OLUMI_GUESS_LIMIT_REASON ? guessWords(finding, labelOf, target, isUnverifiedUserMaterial(recs.find(n => n.id === targetId)?.observed_state)) : null;
     // Q6: filtering per-option words must not change the row's own sentence or revive its superseded level ask.
     if (words !== null) out.hasGuesses = true;
@@ -185,13 +200,33 @@ interface WithheldOptions {
   hasGuesses: boolean;
   /** B6's ONE question: the first withheld option's arm's ask. */
   guessAsk?: string;
+  /** STEP 8: the options the Run withheld for a user's size whose spread is not attested (said in the record's AIE words). */
+  spreadLabels: string[];
+  hasSpread: boolean;
 }
-const NONE_WITHHELD = (): WithheldOptions => ({ labels: [], byReason: new Map(), asks: [], guesses: new Map(), hasGuesses: false });
+const NONE_WITHHELD = (): WithheldOptions => ({ labels: [], byReason: new Map(), asks: [], guesses: new Map(), hasGuesses: false,
+  spreadLabels: [], hasSpread: false });
+
+/** STEP 8: one condition's record from the Run (`CONDITION_FIGURES_UNSUPPORTED_SPREAD`): its options and the AIE's words. */
+interface SpreadRecord { readonly options: readonly string[]; readonly message: string }
+function spreadRecordsOf(runResult: unknown): ReadonlyMap<string, SpreadRecord> {
+  const rec = (v: unknown): Record<string, unknown> | undefined => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : undefined;
+  const r = rec(runResult);
+  const warnings = [rec(r?.enrichment)?.inference_warnings, r?.inference_warnings].flatMap((v) => Array.isArray(v) ? v : []);
+  const out = new Map<string, SpreadRecord>();
+  for (const w of warnings.map(rec)) {
+    if (w?.code !== CONDITION_FIGURES_UNSUPPORTED_SPREAD || typeof w.message !== 'string' || !Array.isArray(w.constraint_ids) || !Array.isArray(w.option_ids)) continue;
+    const options = w.option_ids.filter((id): id is string => typeof id === 'string');
+    for (const id of w.constraint_ids) if (typeof id === 'string' && !out.has(id)) out.set(id, { options, message: w.message });
+  }
+  return out;
+}
 
 /** {@link withheldOptionsFor} that never throws: a failure costs only the per-option words and asks, never the rows. */
-function withheldOptionsOrNone(graph: unknown, targetId: string | null, identityEvaluated?: ReadonlySet<string>, leftOutOptionIds?: ReadonlySet<string>): ReturnType<typeof withheldOptionsFor> {
+function withheldOptionsOrNone(graph: unknown, targetId: string | null, identityEvaluated?: ReadonlySet<string>, leftOutOptionIds?: ReadonlySet<string>,
+  spread?: SpreadRecord): ReturnType<typeof withheldOptionsFor> {
   try {
-    return withheldOptionsFor(graph, targetId, identityEvaluated, leftOutOptionIds);
+    return withheldOptionsFor(graph, targetId, identityEvaluated, leftOutOptionIds, spread);
   } catch (err) {
     log.warn({ event: 'agent_lane.limit_withheld_options_failed', err: err instanceof Error ? err.message : String(err) }, 'agent-lane: the options withheld on a limit could not be read; the row goes without them');
     return NONE_WITHHELD();
@@ -246,8 +281,11 @@ export function limitAskIdsOf(graph: unknown): ReadonlySet<string> {
 }
 
 /** `undefined` when the run carries no per-limit rows, or none can be named. */
-export function limitChecksForAgent(graph: unknown, verdicts: StoredLimitVerdicts | null | undefined, identityEvaluated?: ReadonlySet<string>, leftOutOptionIds?: ReadonlySet<string>): LimitCheck[] | undefined {
+export function limitChecksForAgent(graph: unknown, verdicts: StoredLimitVerdicts | null | undefined, identityEvaluated?: ReadonlySet<string>, leftOutOptionIds?: ReadonlySet<string>,
+  /** The same Run's result (its block or envelope): its per-condition spread records name the options it withheld (STEP 8). */
+  runResult?: unknown): LimitCheck[] | undefined {
   if (verdicts === null || verdicts === undefined) return undefined;
+  const spreadRecords = spreadRecordsOf(runResult);
   const limits = readRatifiedConstraints(graph);
   const nodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
   const nodeLabel = (id: string | null): string | null => {
@@ -263,20 +301,24 @@ export function limitChecksForAgent(graph: unknown, verdicts: StoredLimitVerdict
     if (label === null) continue;
     // A today-level ask only where a level could make the limit checkable: never on a scored, an off-scale or a parts limit.
     const levelCannotHelp = row.state === 'unscored' && typeof row.reason === 'string'
-      && (OFF_SCALE_LIMIT_REASONS.has(row.reason) || PARTS_LIMIT_SENTENCES.has(row.reason));
+      && (OFF_SCALE_LIMIT_REASONS.has(row.reason) || PARTS_LIMIT_SENTENCES.has(row.reason) || row.reason === UNSUPPORTED_SPREAD_PARTS_REASON);
     const ask = row.state === 'scored' || levelCannotHelp ? undefined : asks.get(row.constraint_id);
     // R-c per option: a row the options checked, with some options' own check withheld — say which, and ask once. An
     // unscored row checked no option, so it names none (its own sentence already says it could not be checked)...
     const perOptionRow = row.state !== 'unscored' || row.reason === PLACEHOLDER_PARTS_REASON
-      || row.reason === PARTS_IDENTITY_UNMODELLED_REASON || row.reason === OLUMI_GUESS_LIMIT_REASON;
-    const perOption = perOptionRow ? withheldOptionsOrNone(graph, limit?.node_id ?? null, identityEvaluated, leftOutOptionIds) : NONE_WITHHELD();
+      || row.reason === PARTS_IDENTITY_UNMODELLED_REASON || row.reason === OLUMI_GUESS_LIMIT_REASON || row.reason === UNSUPPORTED_SPREAD_PARTS_REASON;
+    const spread = spreadRecords.get(row.constraint_id);
+    const perOption = perOptionRow ? withheldOptionsOrNone(graph, limit?.node_id ?? null, identityEvaluated, leftOutOptionIds, spread) : NONE_WITHHELD();
     // ...unless B6 withheld one of its options (AIQ 5916187873): then every option was withheld PER OPTION, for its own
     // reason, and the row says each one — never one option's reason as if it were every option's.
-    if (row.state === 'unscored' && !perOption.hasGuesses) {
+    if (row.state === 'unscored' && !perOption.hasGuesses && !perOption.hasSpread) {
       perOption.labels.length = 0;
       perOption.byReason.clear();
       perOption.asks.length = 0;
     }
+    // STEP 8: the AIE's words, links named, once, for exactly the options the spread withheld (never a "checked" claim for them).
+    const spreadSays = perOption.spreadLabels.length > 0 && spread !== undefined
+      ? [`For ${andList(perOption.spreadLabels.map(q))} it isn’t shown. ${spread.message}`] : [];
     const why = [...PER_OPTION_WHY].filter(([reason]) => perOption.byReason.has(reason)).map(([reason, [one, many]]) => {
       const named = perOption.byReason.get(reason)!;
       return `For ${andList(named.map(q))} it couldn’t be checked: ${named.length === 1 ? one : many}`;
@@ -287,13 +329,15 @@ export function limitChecksForAgent(graph: unknown, verdicts: StoredLimitVerdict
     // the ONE question of the first withheld option's arm.
     const b6 = perOption.hasGuesses;
     const levelUnverified = Array.isArray(nodes) && isUnverifiedUserMaterial((nodes.find(n => n !== null && typeof n === 'object' && (n as { id?: unknown }).id === limit?.node_id) as { observed_state?: unknown } | undefined)?.observed_state);
-    const rowSays = levelUnverified && row.state === 'estimate_only' ? ['Not confirmed from your brief'] : !b6 ? [sentenceFor(label, row.state, row.reason)]
+    const rowSays = levelUnverified && row.state === 'estimate_only' ? ['Not confirmed from your brief']
+      : perOption.hasSpread && !b6 && row.state === 'unscored' ? [`${q(label)} isn’t shown for any option.`]
+      : !b6 ? [sentenceFor(label, row.state, row.reason)]
       : row.state === 'unscored' ? [`${q(label)} isn’t shown for any option.`]
         : row.state === 'estimate_only' && row.reason === 'level_olumi_estimate' ? [] : [sentenceFor(label, row.state, row.reason)];
     // C2 join (AIE 6184022140): an option checked on this limit through its own likely range rests on Olumi's equal-tail
     // approximation of it, said once per option (never on an option the row did not check).
     const ranged = row.state === 'unscored' ? [] : likelyRangeLinesFor(graph, limit?.node_id ?? null, new Set(perOption.labels), leftOutOptionIds);
-    const say = [...rowSays, ...why, ...guessed, ...ranged].join(' ');
+    const say = [...rowSays, ...why, ...guessed, ...spreadSays, ...ranged].join(' ');
     // The link-size questions are MG's ask, never the sentence's (one wording, one producer): after the level ask.
     const allAsks = [...(ask !== undefined && !b6 ? [ask] : []), ...(perOption.guessAsk !== undefined ? [perOption.guessAsk] : []), ...perOption.asks].join(' ');
     out.push({

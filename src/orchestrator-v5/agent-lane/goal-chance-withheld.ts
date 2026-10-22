@@ -19,6 +19,7 @@ import {
   GOAL_FIGURES_PRODUCT_NOT_READ,
   GOAL_FIGURES_TARGET_NOT_TESTABLE,
   GOAL_FIGURES_USER_EFFECT_CLAMPED,
+  GOAL_FIGURES_UNSUPPORTED_SPREAD,
   GOAL_FIGURES_WITHHELD_CODES,
   GOAL_FIGURES_SHARE_APPROXIMATION,
   GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
@@ -320,8 +321,11 @@ function goalChanceFromWarnings(warnings: readonly Record<string, unknown>[], op
   // licence, and the reply says the B′ tail the warning carries (`say`, from `untestableTargetParts`).
   const targetOnly = warnings.every((w) => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE
     && Array.isArray(w.withheld_claims) && !(w.withheld_claims as unknown[]).includes('win_share'));
-  const targetAndPaths = warnings.every(w => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE || w.code === GOAL_FIGURES_PLACEHOLDER_PATH)
-    && warnings.some(w => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE);
+  // ⭐ STEP 8: a user's size on Olumi's default spread is withheld per option too (`GOAL_FIGURES_UNSUPPORTED_SPREAD`), so the same
+  // scoped licence applies: the other options' points stay sayable.
+  const targetAndPaths = warnings.every(w => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE || w.code === GOAL_FIGURES_PLACEHOLDER_PATH
+    || w.code === GOAL_FIGURES_UNSUPPORTED_SPREAD)
+    && warnings.some(w => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE || w.code === GOAL_FIGURES_UNSUPPORTED_SPREAD);
   const scoped = warnings.every(w => Array.isArray(w.option_ids) && w.option_ids.length > 0
     && w.option_ids.every(id => typeof id === 'string' && id.trim() !== ''));
   const scopedIds = [...new Set(warnings.flatMap(w => Array.isArray(w.option_ids) ? w.option_ids : []))]
@@ -375,7 +379,7 @@ function goalChanceFromWarnings(warnings: readonly Record<string, unknown>[], op
       return words.match(/What's today's level of [^?]*\?/u)?.[0];
     }).find((s): s is string => typeof s === 'string' && s !== '');
     const say = [reasonFor(GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED), reasonFor(GOAL_FIGURES_USER_EFFECT_CLAMPED),
-      targetSay ?? levelAsk ?? reasonFor(GOAL_FIGURES_TARGET_NOT_TESTABLE), guidedText].filter((r): r is string => typeof r === 'string' && r !== '').join(' ');
+      targetSay ?? levelAsk ?? reasonFor(GOAL_FIGURES_TARGET_NOT_TESTABLE), reasonFor(GOAL_FIGURES_UNSUPPORTED_SPREAD), guidedText].filter((r): r is string => typeof r === 'string' && r !== '').join(' ');
     const nodeIds = [...new Set(warnings.flatMap(w => Array.isArray(w.node_ids) ? w.node_ids : []).filter((id): id is string => typeof id === 'string'))];
     return { withheld: true, say, node_ids: nodeIds, note: scopedNote ?? GOAL_CHANCE_WITHHELD_NOTE,
       ...(partial ? { option_ids: scopedIds } : {}) };
@@ -385,7 +389,7 @@ function goalChanceFromWarnings(warnings: readonly Record<string, unknown>[], op
   const sizingReason = mixedTarget ? (targetSay ?? reasonFor(opening === RANGE_OPENING ? GOAL_FIGURES_PLACEHOLDER_PATH : GOAL_FIGURES_TARGET_NOT_TESTABLE))
     : reasonFor(GOAL_FIGURES_PLACEHOLDER_PATH);
   const reason = [reasonFor(GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED), reasonFor(GOAL_FIGURES_USER_EFFECT_CLAMPED),
-    sizingReason].filter((r) => r !== '').join(' ');
+    sizingReason, reasonFor(GOAL_FIGURES_UNSUPPORTED_SPREAD)].filter((r) => r !== '').join(' ');
   const nodeIds = [...new Set(warnings.flatMap((w) => (Array.isArray(w.node_ids) ? w.node_ids : [])).filter((id): id is string => typeof id === 'string'))];
   const scopedOpening = partial && opening !== RANGE_OPENING ? 'This run doesn’t show a target chance for some options.' : opening;
   return { withheld: true, say: reason === '' ? scopedOpening : `${scopedOpening} ${reason}`, node_ids: nodeIds,

@@ -2,6 +2,7 @@ import { HANDLER_VALIDATION_REGISTRY } from '../../../routing/validation-registr
 import { withScenarioRevision } from '../../../../../tests/utils/revision-store-double.js';
 import { readFileSync } from 'node:fs';
 import { expect, it, vi } from 'vitest';
+import { withNamedBand } from '../../../__tests__/support/supported-spread.support.js';
 import { GraphV3Schema } from '@talchain/schemas';
 import { HandlerFactSchema } from '@talchain/schemas/orchestrator';
 const reads = vi.hoisted(() => ({ facts: [] as any[] }));
@@ -24,7 +25,13 @@ import { leaderLicenceShadow } from '../../../compose/leader-licence-shadow.js';
 import { runP0Outcome } from './mc-p0-run-helper.js';
 
 type R = Record<string, any>;
-const fa027Graph = JSON.parse(readFileSync(new URL('../../../handlers/__tests__/fixtures/sci-deep-fa027cf5-graph.json', import.meta.url), 'utf8')) as R;
+/**
+ * ⭐ STEP 8 (AIE 764e9c72 / cc9fbadf; Codex R2 #3443): the served fa027 graph's one chat-strength link (the user's exact 0.1) carries
+ * no supported spread, so the leader and shares resting on it are withheld. This file's subject needs a leader, so it reads a
+ * SUPPORTED control: the user names that link "moderate" through the actual writer (`withNamedBand`), which attests its spread.
+ */
+const fa027Graph = await withNamedBand(JSON.parse(readFileSync(new URL('../../../handlers/__tests__/fixtures/sci-deep-fa027cf5-graph.json', import.meta.url), 'utf8')) as R,
+  'ai_reporting_module_availability', 'enterprise_prospect_signing_likelihood', 'moderate') as R;
 // pre-ruling legacy class: a defaulted size that is not the door constant (Science 393023 LICENCE (a))
 const fa027Legacy = structuredClone(fa027Graph);
 for (const edge of fa027Legacy.edges) {

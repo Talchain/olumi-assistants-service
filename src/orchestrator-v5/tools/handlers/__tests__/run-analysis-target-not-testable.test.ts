@@ -21,6 +21,7 @@ import type { HandlerInvocation } from '../../registry.js';
 import { createRunAnalysisHandler, withholdGoalFiguresForUntestableTarget } from '../run-analysis.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 
+import { RUN_EVALUATED_BEFORE_SUPPORT_KEY } from '../../../context/analysis-projection-policy.js';
 type Json = Record<string, any>;
 const M1 = JSON.parse(readFileSync(new URL('./fixtures/r3-m1-card-yes-served-run-20260930.json', import.meta.url), 'utf8')) as {
   _provenance: { brief_text: string }; graph: Json; plot_body: Json;
@@ -64,7 +65,8 @@ const chances = (result: Json): Record<string, number> => {
     if (v === null || typeof v !== 'object') return;
     const r = v as Json;
     if (typeof r.probability_of_goal === 'number') out[String(r.option_id ?? r.id)] = r.probability_of_goal;
-    Object.values(r).forEach(walk);
+    // The saved Run's evaluated copy is internal (never a public surface nor the AI's): the chance a reader sees is the projection.
+    Object.entries(r).forEach(([k, x]) => { if (k !== RUN_EVALUATED_BEFORE_SUPPORT_KEY) walk(x); });
   };
   walk(result);
   return out;
@@ -106,7 +108,7 @@ describe('m1 after the identity card\'s Yes: target failures belong to their aff
     expect(GOAL_FIGURES_WITHHELD_CODES.has(placeholder.code)).toBe(true);
   });
 
-  it('CONTROL: the user sized the route (price → churn → subscribers at 12 months) → the chance is shown', async () => {
+  it('CONTROL: the user sized the route (price → churn → subscribers at 12 months) → the target is testable; the chance waits only on the unattested spread', async () => {
     const g = structuredClone(M1.graph);
     // §(ad) S4: horizon removed — this row's claim is not about time (a held month without a carrier withholds the chance).
     for (const goal of g.nodes.filter((n: Json) => n.kind === 'goal')) {
@@ -119,7 +121,11 @@ describe('m1 after the identity card\'s Yes: target failures belong to their aff
       }
     }
     const result = await runOn(g);
-    expect(chances(result)['59_price']).toBeCloseTo(0.9929, 4);
+    // STEP 8 (AIE 564fe768, cc9fbadf): the user's sizes on that route carry no attested spread, so the chance resting on them is
+    // truthfully withheld for that reason (`run-analysis-unsupported-spread.test.ts`). This row's claim still holds: once the
+    // user sized the route, the TARGET is testable — no target-not-testable withhold.
+    expect(chances(result)['59_price']).toBeUndefined();
+    expect(warningsOf(result).some((x) => x.code === 'GOAL_FIGURES_UNSUPPORTED_SPREAD' && (x.option_ids as string[]).includes('59_price'))).toBe(true);
     expect(warningsOf(result).some((x) => x.code === GOAL_FIGURES_TARGET_NOT_TESTABLE)).toBe(false);
   });
 });

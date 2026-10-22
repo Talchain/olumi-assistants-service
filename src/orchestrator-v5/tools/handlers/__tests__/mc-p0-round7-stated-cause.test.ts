@@ -20,6 +20,7 @@ import { readMayNameLeadingOptionVerdictForFact, readMayNameLeadingOptionVerdict
 import { finaliseV5Response } from '../../../response-finaliser.js';
 import { readScenarioAnalysis } from '../../../../routes/scenario-graph-analysis-read.js';
 import { buildAnalysisResultBlock } from '../../../compose.js';
+import { withStatedSds } from '../../../__tests__/support/supported-spread.support.js';
 
 type R = Record<string, any>;
 const brief = readFileSync(new URL('../../../admission/__tests__/fixtures/mc-p0/BRIEF.txt', import.meta.url), 'utf8');
@@ -38,6 +39,12 @@ function graph(d: number, noTarget = false): R {
   }
   return g;
 }
+/**
+ * ⭐ STEP 8 (Codex R2 #3443): d2's sized path rests on the brief's own sizes, which carry no supported spread alone, so its leader is
+ * withheld for that reason (mc-p0-round4 holds that truthful row). Where d2 is this file's PERMITTED control it reads a SUPPORTED
+ * twin: the user also states each size's standard deviation, recorded by the actual chat writer.
+ */
+const supportedD2 = (noTarget = false): Promise<R> => withStatedSds(graph(2, noTarget), '714abc5c-4e82-4436-9454-eec6c8f68589');
 const factOf = (result: R) => ({ fact_type: 'run_analysis', fact_version: 1, noop: false, result }) as never;
 const fresh = { kind: 'complete_current' } as never;
 const stale = { kind: 'complete_stale', cause: 'graph_changed' } as never;
@@ -52,7 +59,7 @@ afterEach(() => { vi.restoreAllMocks(); reads.facts = []; });
 
 describe('MC P0 R7 stated unsized goal path cause', () => {
   it.each([1, 2, 3].flatMap(d => [false, true].map(noTarget => [d, noTarget] as const)))('d%i post-Fi no-target=%s binds the SAME caller-stated ends into composer, finaliser and cold read', async (d, noTarget) => {
-    const g = graph(d, noTarget), result = await runP0Graph(g, brief), fact = factOf(result);
+    const g = d === 2 ? await supportedD2(noTarget) : graph(d, noTarget), result = await runP0Graph(g, brief), fact = factOf(result);
     const cause = readUnsizedPathLeaderCause(result);
     // The constraint check retains its own permission; the independent Run licence withhold removes the overall claim.
     expect(result.constraint_verdict.may_name_leading_option).toBe(true);
@@ -157,7 +164,7 @@ describe('MC P0 R7 stated unsized goal path cause', () => {
 
   it('a newer permitted partial Run cannot erase the displayed older Run’s stated cause', async () => {
     const displayed = factOf(await runP0Graph(graph(1), brief));
-    const partial = factOf(await runP0Graph(graph(2, true), brief));
+    const partial = factOf(await runP0Graph(await supportedD2(true), brief));
     (displayed as R).result.computed_at = '2026-10-05T21:00:00.000Z';
     (partial as R).result.computed_at = '2026-10-05T22:00:00.000Z';
     (partial as R).result.enrichment.analysis_status = 'partial';
