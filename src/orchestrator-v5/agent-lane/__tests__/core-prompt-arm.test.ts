@@ -97,12 +97,13 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(instructionsForMode('full', 'legacy arm A text')).toBe('legacy arm A text');
   });
 
-  it('the builder\u2019s effort arm is lowered only on a core turn that asks for it; the default stays the banked high', () => {
+  it('the builder\u2019s effort arm is set only on a core turn that asks for it; the default is the banked medium (A/B/C 22 Oct)', () => {
     expect(coreEffortArmOf('core', 'medium')).toBe('medium');
     expect(coreEffortArmOf('core', 'low')).toBe('low');
-    for (const header of [undefined, 'high', 'Medium', ['medium']]) expect(coreEffortArmOf('core', header)).toBeUndefined();
-    expect(coreEffortArmOf('full', 'medium')).toBeUndefined();
-    expect(coreBudget().reasoning_effort).toBe('high');
+    expect(coreEffortArmOf('core', 'high')).toBe('high');
+    for (const header of [undefined, 'High', 'Medium', ['medium']]) expect(coreEffortArmOf('core', header)).toBeUndefined();
+    expect(coreEffortArmOf('full', 'high')).toBeUndefined();
+    expect(coreBudget().reasoning_effort).toBe('medium');
     expect(coreBudget('medium')).toEqual({ ...coreBudget(), reasoning_effort: 'medium' });
   });
 });

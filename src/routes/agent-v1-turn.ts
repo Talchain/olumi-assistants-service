@@ -966,9 +966,9 @@ export const CORE_ALIGNED_INSTRUCTIONS = SELECTED_COACH_V02_TEMPLATE.replace(
  * The header no longer selects anything; every other mode keeps arm A.
  */
 export const promptArmOf = (mode: AgentLaneMode, _header?: unknown): 'A' | 'B' => (mode === 'core' ? 'B' : 'A');
-/** The builder's effort for the configuration comparison (#94): `x-olumi-core-effort` on a core turn, else the banked high. */
-export const coreEffortArmOf = (mode: AgentLaneMode, header: unknown): 'low' | 'medium' | undefined =>
-  (mode === 'core' && (header === 'medium' || header === 'low') ? header : undefined);
+/** The builder's effort for a configuration comparison (#94): `x-olumi-core-effort` on a core turn, else the banked medium. */
+export const coreEffortArmOf = (mode: AgentLaneMode, header: unknown): 'low' | 'medium' | 'high' | undefined =>
+  (mode === 'core' && (header === 'medium' || header === 'low' || header === 'high') ? header : undefined);
 /**
  * The drafting guidance's arm (Paul 21 Oct: port the benchmarked drafting prompt, A/B it once): a core turn on a scenario
  * with no saved model gets it unless `x-olumi-draft-arm: off`; a saved model is 'n/a'. Echoed as `_agent.draft_arm`.
