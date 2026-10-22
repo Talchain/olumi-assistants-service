@@ -5,6 +5,7 @@
  * reads 0 on any frame and a link scales by the frame, so no figure moves.
  */
 import { describe, expect, it } from 'vitest';
+import { linkDefaultAssumptionsOf } from '../../../../cee/magnitude/link-default-assumptions.js';
 import type { LivingModelT } from '../../../../schemas/living-model.js';
 import { mapLivingModel } from '../mapper.js';
 import { KNOWN_ANSWER } from './fixtures.js';
@@ -31,14 +32,27 @@ describe('a factor whose every level is 0 gets a frame, so its level is a fact, 
     // The link is sized from its own stated effect (−5 units per week), never Olumi's placeholder (Codex r1).
     expect(edge(graph, 'delay')!.provenance).toMatchObject({ magnitude: 'olumi_estimate',
       natural_effect: { amount: -5, amount_unit: 'units', per_source_change: 1, per_source_change_unit: 'weeks' } });
-    // No spread is sent with the level, so served PLoT (b60fe4fb, translator-v3 priority 4b) holds a zero that no option moves
-    // at exactly 0 and names it: the frame never becomes a spread (Codex r1 read the stale FALLBACK_STD = 0.5 of the frame).
+    // 0 sits at the range's end, so it gains no spread (a Normal around 0 would draw negative delays): base behaviour, the
+    // frame never becomes a spread (Codex r1 read the stale FALLBACK_STD = 0.5 of the frame).
     expect(node(graph, 'delay').observed_state).not.toHaveProperty('std');
+    expect(linkDefaultAssumptionsOf(node(graph, 'delay'))).toEqual([]);
+  });
+
+  it('a one-sign range near zero keeps base behaviour, including at either end (DL Round 5)', () => {
+    for (const value of [0, 2, 8]) {
+      const mapped = mapLivingModel(withDelay(value, 0, 8)), level = node(mapped.graph, 'delay');
+      expect(level.observed_state).toEqual({ value: value / (value === 0 ? 8 : value * 1.25), raw_value: value,
+        cap: value === 0 ? 8 : value * 1.25, unit: 'weeks', source: 'cee_inference' });
+      expect(linkDefaultAssumptionsOf(level)).toEqual([]);
+      expect(mapped.assumed.filter(a => a.id === 'delay')).toEqual([{ id: 'delay', text:
+        `The calculation uses ${value} weeks for Client delivery delay. The range, 0 weeks to 8 weeks, is kept with the model but is not used as a spread.` }]);
+    }
   });
 
   it('with no stated range the frame is 1, and the level still reads 0', () => {
     const { graph, withheld } = mapLivingModel(withDelay(0, null, null));
     expect(node(graph, 'delay').observed_state).toMatchObject({ value: 0, raw_value: 0, cap: 1 });
+    expect(node(graph, 'delay').observed_state).not.toHaveProperty('std');
     expect(withheld.filter((w) => w.id === 'delay')).toEqual([]);
   });
 
@@ -52,7 +66,16 @@ describe('a factor whose every level is 0 gets a frame, so its level is a fact, 
   it('invariance: a factor with a level above 0 keeps its frame (headroom), whatever its range says', () => {
     const at4 = mapLivingModel(withDelay(4, 0, 8));
     expect(node(at4.graph, 'delay').observed_state).toMatchObject({ raw_value: 4, cap: 5 });
-    expect(mapLivingModel(withDelay(4, 0, 64)).graph).toEqual(at4.graph);
+    const on64 = mapLivingModel(withDelay(4, 0, 64));
+    expect(on64.frames).toEqual(at4.frames);
+    // Both widths fail the two-SD sign rule. Keep the entire base graph and the truthful base notes.
+    for (const [mapped, high] of [[at4, 8], [on64, 64]] as const) {
+      expect(node(mapped.graph, 'delay').observed_state).toEqual({ value: 0.8, raw_value: 4, cap: 5, unit: 'weeks', source: 'cee_inference' });
+      expect(linkDefaultAssumptionsOf(node(mapped.graph, 'delay'))).toEqual([]);
+      expect(mapped.assumed.filter(a => a.id === 'delay')).toEqual([{ id: 'delay', text:
+        `The calculation uses 4 weeks for Client delivery delay. The range, 0 weeks to ${high} weeks, is kept with the model but is not used as a spread.` }]);
+    }
+    expect(on64.graph).toEqual(at4.graph);
     // The known answer's own unitless factor keeps its frame of 1.
     expect(node(mapLivingModel(KNOWN_ANSWER).graph, 'f').observed_state).toMatchObject({ raw_value: 0.5, cap: 1 });
   });

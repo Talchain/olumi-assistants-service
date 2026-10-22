@@ -3,6 +3,7 @@
  * with its preventer switch and the options' settings on that switch, so nothing is stranded.
  */
 import { describe, expect, it } from 'vitest';
+import { linkDefaultAssumptionsOf } from '../../../../cee/magnitude/link-default-assumptions.js';
 import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import type { LivingModelT } from '../../../../schemas/living-model.js';
 import { projectCorePostimageForPersistence } from '../../../persisted-graph-projection.js';
@@ -93,8 +94,23 @@ describe('a mitigated Olumi risk counts only over the goal\'s window', () => {
 
   it('Codex r2: no line about the removed switch\'s figure reaches the AI', () => {
     const ranged: LivingModelT = { ...OLUMI_CHANCE, factors: OLUMI_CHANCE.factors.map((f) => (f.id === 'dual_sourcing' ? { ...f, low: 0, high: 1 } : f)) };
-    expect(mapLivingModel(withPeriod(ranged, null)).assumed.filter((a) => a.id === 'dual_sourcing')).toEqual([]);
+    ranged.factors.push({ ...ranged.factors[0]!, id: 'audit', label: 'Audit coverage', value: 0.5,
+      low: 0.2, high: 0.8, source: 'party', party: 'Finance', quote: 'Finance: audit coverage is 0.5, between 0.2 and 0.8.' });
+    const removed = mapLivingModel(withPeriod(ranged, null));
+    expect(removed.assumed.filter((a) => a.id === 'dual_sourcing')).toEqual([]);
+    expect(removed.graph.nodes.filter(n => n.id === 'dual_sourcing')).toEqual([]);
+    expect(removed.graph.nodes.flatMap(n => linkDefaultAssumptionsOf(n)).map(r => ({ field: r.field_path, text: r.reason }))).toEqual([
+      { field: 'nodes[audit].observed_state.std', text: "The calculation uses 0.5 for Audit coverage, with a spread matching Finance’s range, 0.2 to 0.8; the spread is Olumi's assumption." },
+    ]);
     // Over the goal's own window the switch stays, and so does what is said about its figure.
-    expect(mapLivingModel(withPeriod(ranged, 12)).assumed.some((a) => a.id === 'dual_sourcing')).toBe(true);
+    // The switch's 0 sits at its range's end, so it keeps base behaviour: no spread (a Normal around 0 would draw negative
+    // switch settings), and the base line that the range is not used as a spread.
+    const kept = mapLivingModel(withPeriod(ranged, 12));
+    expect(kept.assumed.filter((a) => a.id === 'dual_sourcing').map((a) => a.text)).toEqual([
+      'The calculation uses 0 for Dual sourcing in place. The range, 0 to 1, is kept with the model but is not used as a spread.',
+    ]);
+    const level = kept.graph.nodes.find(n => n.id === 'dual_sourcing') as Rec;
+    expect(level.observed_state).not.toHaveProperty('std');
+    expect(linkDefaultAssumptionsOf(level)).toEqual([]);
   });
 });

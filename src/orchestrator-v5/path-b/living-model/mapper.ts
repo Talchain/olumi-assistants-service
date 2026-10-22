@@ -98,6 +98,15 @@ const withSource = (o: Rec, a: { source: LivingSourceT; quote: string | null; sa
   return source === undefined ? o : { ...o, source, ...(stated(a.source) ? { extractionType: 'explicit' } : {}) };
 };
 
+/** Uniform-matched spread and the range's declared owner; shared by levels and links. */
+const sdBy = (s: LivingSourceT): string => (s === 'olumi' ? "Olumi's estimated" : stated(s) ? 'the stated' : 'the given (its source is not confirmed)');
+function rangeSpread(low: number, high: number, source: LivingSourceT, party: string | null) {
+  const who = source === 'user' ? 'your' : source === 'party' ? party ? `${party}’s` : 'the stated' : sdBy(source);
+  return { std: (high - low) / Math.sqrt(12), who,
+    introduction: source === 'user' ? 'You gave a range' : source === 'party' ? party ? `${party}’s range` : 'The stated range'
+      : `The calculation uses ${who} range` };
+}
+
 /**
  * The frame a factor's levels are read on: '%' → 100, unitless [0,1] → 1, the goal's when the unit matches, else headroom.
  * Every level 0 (DL lease 22 Oct, served eb481e4a "Client delivery delay", 0 weeks, range 0 to 8): the stated range's top if
@@ -542,9 +551,16 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     if (f.value !== null && cap !== undefined) {
       current.set(f.id, f.value);
       node.observed_state = withSource({ value: f.value / cap, raw_value: f.value, cap, unit: f.unit ?? '' }, figureBy(f, f));
-      // A central figure with a range (the link's "centred" rule): the figure is used; the range is kept, not used as a spread.
-      // Neutral words: the figure may be Olumi's estimate, never called "stated" (Codex); the card says whose it is.
-      if (f.low !== null && f.high !== null) assumed.push({ id: f.id, text: `The calculation uses ${sayFigureAsWritten(f.value, f.unit ?? '')} for ${f.label}. The range, ${sayFigureAsWritten(f.low, f.unit ?? '')} to ${sayFigureAsWritten(f.high, f.unit ?? '')}, is kept with the model but is not used as a spread.` });
+      if (f.low !== null && f.high !== null) {
+        const spread = rangeSpread(f.low, f.high, figureBy(f, f).source, f.party), std = spread.std / cap;
+        if (!setsFactor.has(f.id) && f.low < f.value && f.value < f.high
+          && ((f.low < 0 && f.high > 0) || Math.abs(f.value) >= 2 * spread.std)) {
+          Object.assign(node.observed_state as Rec, { std, std_source: 'olumi' });
+          (node.observed_state as Rec).uncertainty_defaults = [{ code: REPAIR_CODES.CLAMP_STD_MINIMUM, layer: 'cee',
+            field_path: `nodes[${f.id}].observed_state.std`, before: null, after: std, severity: 'info',
+            reason: `The calculation uses ${sayFigureAsWritten(f.value, f.unit ?? '')} for ${f.label}, with a spread matching ${spread.who} range, ${sayFigureAsWritten(f.low, f.unit ?? '')} to ${sayFigureAsWritten(f.high, f.unit ?? '')}; the spread is Olumi's assumption.` }];
+        } else assumed.push({ id: f.id, text: `The calculation uses ${sayFigureAsWritten(f.value, f.unit ?? '')} for ${f.label}. The range, ${sayFigureAsWritten(f.low, f.unit ?? '')} to ${sayFigureAsWritten(f.high, f.unit ?? '')}, is kept with the model but is not used as a spread.` });
+      }
     } else hold(f.id, f.low !== null || f.high !== null ? 'level_range_not_in_slice' : 'factor_level_unknown');
     nodes.push(node);
   }
@@ -796,8 +812,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     // the SD was saved and then replaced by half the effect). Its shape was not stated, so the Normal draw is Olumi's
     // assumption, said in the ledger below; the person's link is never promoted to a Normal law they stated (buddy 21:28Z).
     const statedSd = e.form === 'point' && e.value !== null && e.sd !== null && e.sd > 0 ? e.sd : null;
-    // Whose SD it is, as for any figure: an unconfirmed source is never Olumi's (Codex r1 on #3606).
-    const sdBy = (s: LivingSourceT): string => (s === 'olumi' ? 'Olumi\'s estimated' : stated(s) ? 'the stated' : 'the given (its source is not confirmed)');
+    const range = e.low !== null && e.high !== null ? rangeSpread(e.low, e.high, figureBy(e, l).source, l.party) : undefined;
     const sized = ratio === undefined ? undefined : ((e.form === 'point' || centred) && e.value !== null)
       ? { mean: sign * Math.abs(e.value) * ratio, std: (statedSd ?? Math.abs(e.value) / 2) * ratio }
       : (e.form === 'normal' && e.value !== null && e.sd !== null && e.sd > 0)
@@ -806,7 +821,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
         // since any drawn spread can turn a deterministic "meets" into about 50% (AIE 17:59, point 4). The exact sum is the
         // one exact route.
         : (e.form === 'exact' && e.value !== null) ? { mean: sign * Math.abs(e.value) * ratio, std: LLM_STRENGTH_STD_FLOOR }
-        : uncentred ? { mean: sign * Math.abs(value!) * ratio, std: (e.high! - e.low!) / Math.sqrt(12) * ratio }
+        : uncentred ? { mean: sign * Math.abs(value!) * ratio, std: range!.std * ratio }
         : undefined;
     // A figure INTO the goal while the goal has no scale yet, because its target states no figure or its change target has no
     // level today to be measured from: the figure is kept and used once that input is given (DL 23 Oct, Q2 coaching zeros;
@@ -838,16 +853,14 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
       ...(e.form === 'point' || centred || uncentred ? [{ code: REPAIR_CODES.CLAMP_STD_MINIMUM, layer: 'cee' as const, field_path: `${path}.strength.std`, before: null,
         after: sized.std, severity: 'info' as const,
         reason: uncentred
-          ? `${figureBy(e, l).source === 'user' ? 'You gave a range'
-            : figureBy(e, l).source === 'party' ? l.party ? `${l.party}’s range` : 'The stated range'
-              : `The calculation uses ${sdBy(figureBy(e, l).source)} range`}, ${e.low} to ${e.high}, and no most likely value. The calculation centres on the middle, ${value}, with a spread matching the range's width; this is Olumi's assumption, and a most likely value would replace it.`
+          ? `${range!.introduction}, ${e.low} to ${e.high}, and no most likely value. The calculation centres on the middle, ${value}, with a spread matching the range's width; this is Olumi's assumption, and a most likely value would replace it.`
           : centred
           // Olumi's own centred link is never called "stated" (Codex on #3590): its figure and range are Olumi's estimate.
           ? (figureBy(e, l).source === 'olumi'
-            ? `The calculation uses Olumi's estimated ${Math.abs(e.value!)} with Olumi's illustrative spread (half the estimated effect). Olumi's range, ${e.low} to ${e.high}, is kept with the model but is not used as a spread.`
-            : `The calculation uses the stated ${Math.abs(e.value!)} with Olumi's illustrative spread (half the stated effect). The stated range, ${e.low} to ${e.high}, is kept with the model but is not used as a spread.`)
+            ? `The calculation uses Olumi's estimated ${e.value} with Olumi's illustrative spread (half the estimated effect). Olumi's range, ${e.low} to ${e.high}, is kept with the model but is not used as a spread.`
+            : `The calculation uses the stated ${e.value} with Olumi's illustrative spread (half the stated effect). The stated range, ${e.low} to ${e.high}, is kept with the model but is not used as a spread.`)
           : statedSd !== null
-            ? `The calculation uses ${sdBy(figureBy(e, l).source)} standard deviation, ${statedSd}. Nobody stated the shape of the spread, so Olumi assumes a bell shape (Normal) around ${Math.abs(e.value!)}.`
+            ? `The calculation uses ${sdBy(figureBy(e, l).source)} standard deviation, ${statedSd}. Nobody stated the shape of the spread, so Olumi assumes a bell shape (Normal) around ${e.value}.`
             : 'Nobody stated how uncertain this strength is. Applied Olumi\'s illustrative spread (half the stated effect). It is not a measurement of anyone\'s confidence.' }] : []),
       // A stated effect asserts that the link exists: existence 1 is the stater's claim, never an Olumi default (Science,
       // 21 Oct). Olumi's own link, or one the person hedged (an assumption on it), keeps the default and says so.

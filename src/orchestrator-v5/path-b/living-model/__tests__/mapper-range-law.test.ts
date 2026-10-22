@@ -6,6 +6,7 @@ import { linkDefaultAssumptionsOf } from '../../../../cee/magnitude/link-default
 import { withGoalChanceLicence } from '../../../goal-target/goal-chance-licence.js';
 import { projectCorePostimageForPersistence } from '../../../persisted-graph-projection.js';
 import { mapLivingModel } from '../mapper.js';
+import { readCanonicalContext } from '../../tools/context-tool.js';
 import { KNOWN_ANSWER, OPTION_EFFECTS } from './fixtures.js';
 
 type Rec = Record<string, any>;
@@ -27,6 +28,33 @@ function cafe(): LivingModelT {
 }
 
 describe('DL range law: a declared range never costs the chance', () => {
+  it.each(['factor', 'café'] as const)('signed centred figure reaches estimate notes and AI context unchanged: %s', async shape => {
+    for (const source of ['olumi', 'user', 'party', 'unverified'] as const) for (const estimate_by of [null, 'olumi'] as const) {
+      const model = shape === 'factor' ? structuredClone(KNOWN_ANSWER) : cafe();
+      const link = model.links[0]!;
+      Object.assign(link, { source, party: source === 'party' ? 'Finance' : null,
+        quote: 'The effect is -5, between -8 and -1; revenue was 2m as of 2026-09-01.' });
+      Object.assign(link.effect, { form: 'range', value: -5, low: -8, high: -1, sd: null, sign: '-', estimate_by });
+      const before = structuredClone(model), graph = mapLivingModel(model).graph;
+      expect(LivingModel.safeParse(model).success).toBe(true);
+      const edge = edgeOf(graph, shape === 'factor' ? 'f' : 'a__on');
+      const olumi = source === 'olumi' || estimate_by === 'olumi';
+      const expected = olumi
+        ? "The calculation uses Olumi's estimated -5 with Olumi's illustrative spread (half the estimated effect). Olumi's range, -8 to -1, is kept with the model but is not used as a spread."
+        : "The calculation uses the stated -5 with Olumi's illustrative spread (half the stated effect). The stated range, -8 to -1, is kept with the model but is not used as a spread.";
+      const loss = linkDefaultAssumptionsOf(edge).filter(r => r.code === 'CLAMP_STD_MINIMUM');
+      expect(loss.map(r => r.reason)).toEqual([expected]);
+      expect(edge.provenance.natural_effect.amount).toBe(-5);
+      expect(edge.provenance.source).toBe(olumi ? 'cee_hypothesis' : source === 'unverified' ? undefined : 'brief_extraction');
+      if (shape === 'café') expect(linkDefaultAssumptionsOf(edgeOf(graph, 'b__on'))[0]!.reason).toBe(disclosure(20, 40));
+      const context = await readCanonicalContext({ dispatch: async () => ({ status: 200, json: { graph, graph_hash: 'signed-range' } }) }, { scenario_id: 'signed-range' });
+      expect(context.status).toBe('ok');
+      const seen = (context.data as Rec).links.find((e: Rec) => e.from === edge.from && e.to === edge.to);
+      expect(seen.default_assumptions.filter((r: Rec) => r.code === 'CLAMP_STD_MINIMUM')).toEqual(loss);
+      expect(model).toEqual(before);
+    }
+  });
+
   it.each(['user', 'party'] as const)('café: both chances are licensed provisionally, each original range and disclosure survive the stored graph (%s)', source => {
     const model = cafe();
     for (const [i, link] of model.links.entries()) Object.assign(link, { source, party: source === 'party' ? ['Finance', 'Operations'][i] : null });
