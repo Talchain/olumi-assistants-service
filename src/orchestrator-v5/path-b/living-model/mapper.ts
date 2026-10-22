@@ -27,7 +27,8 @@ import { resolveGoalThresholdCapWithProvenance } from '../../../utils/goal-thres
 import { admitGoalBaseline } from '../../../cee/factor-extraction/goal-baseline-admissibility.js';
 import { sayFigureAsWritten } from '../../agent-lane/say-figure.js';
 import { LLM_STRENGTH_STD_FLOOR } from '../../../cee/constants.js';
-import { sameUnit, unitsCompose } from '../../agent-lane/same-unit.js';
+import { readUnitParts, sameUnit, singular, unitsCompose, words } from '../../agent-lane/same-unit.js';
+import { periodAdverb, periodNoun } from '../../../utils/unit-alphabet.js';
 import { EventRiskV1 } from '../../../schemas/event-risk.js';
 import { riskOccurrenceIsCurrent } from '../../agent-lane/risk-occurrence.js';
 import { readStatedDeadline } from '../../goal-target/deadline-date.js';
@@ -393,6 +394,53 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     for (const id of Object.keys(interventions)) edges.push({ from: o.id, to: id, ...STRUCTURAL, provenance: { source: 'cee_hypothesis' } });
   }
 
+  // The other half of the one composition rule (DL 22 Oct, served board 6ce4f6ae: "£ per loaf" × "loaves a week" was refused):
+  // money per X times a count of X is money, with ONE period across the two parts and it the defined quantity's own
+  // ("£ per week"). `unitsCompose` reads money per X per period × a count; the denominator naming the count's noun is the
+  // dimensional proof either way. Unscaled, unqualified units only; two periods ("£ per loaf per week" × "loaves a week") never.
+  // Every word is accounted for, by its place (Codex r1 + r2 on #3627: flattening dropped a count's own denominator,
+  // "users per account per week"; collapsed "week/week"; folded "thousand" into the noun; read "person-weeks" as a rate).
+  // A period is a rate's only as the unit's LAST word, an adverb ("weekly") or after per, "/", a or an; any other period
+  // word is a duration or a second period and refuses it.
+  const RATE_CONNECTORS = new Set(['per', '/', 'a', 'an']);
+  const unitShapeOf = (u: string | null): { readonly head: readonly string[]; readonly period: string | null } | null => {
+    const ws = u === null ? [] : words(u);
+    let end = ws.length;
+    let period: string | null = null;
+    const last = ws[end - 1];
+    if (last !== undefined && periodAdverb(last) !== null) { period = periodAdverb(last); end -= 1; }
+    else if (last !== undefined && periodNoun(last) !== null) {
+      if (end < 2 || !RATE_CONNECTORS.has(ws[end - 2]!)) return null;
+      period = periodNoun(last); end -= 2;
+    }
+    const head = ws.slice(0, end);
+    return head.some((w) => periodNoun(w) !== null || periodAdverb(w) !== null) ? null : { head, period };
+  };
+  const plainMoney = (w: string | undefined, code: string | null): boolean => {
+    const m = w === undefined ? null : readUnitParts(w);
+    return m !== null && m.kind === 'currency' && m.scale === 1 && m.per === null && m.period === null && m.code === code;
+  };
+  const ratePerCountComposes = (whole: string | null, a: string | null, b: string | null): boolean => {
+    const g = readUnitParts(whole);
+    const gs = unitShapeOf(whole);
+    if (g === null || g.kind !== 'currency' || gs === null || gs.head.length !== 1 || !plainMoney(gs.head[0], g.code)) return false;
+    return ([[a, b], [b, a]] as const).some(([m, c]) => {
+      const rate = unitShapeOf(m);
+      const count = unitShapeOf(c);
+      if (rate === null || count === null || readUnitParts(c)?.kind !== 'count') return false;
+      // A CLOSED grammar (Codex r3 on #3627: "each"/"every" made a two-dimension denominator read as one): money, then per or
+      // "/", then ONE word, and the count is that same ONE word. A many-word denominator ("per user account") is refused,
+      // never parsed: the person is asked, as for any identity that cannot be worked out as stated.
+      const [money, sep, den, ...extra] = rate.head;
+      const [noun, ...more] = count.head;
+      const oneWord = (w: string | undefined): w is string => w !== undefined && /^[a-z]+$/.test(w) && !RATE_CONNECTORS.has(w);
+      if (!plainMoney(money, g.code) || (sep !== 'per' && sep !== '/') || extra.length > 0 || more.length > 0 || !oneWord(den) || !oneWord(noun)) return false;
+      if (singular(den) !== singular(noun)) return false;
+      const periods = [rate.period, count.period].filter((p): p is string => p !== null);
+      return periods.length <= 1 && (periods[0] ?? null) === gs.period;
+    });
+  };
+
   // ── Identities (Track 2): what a quantity IS, defined as the sum or product of factors. ISL works it out exactly from
   // its parts' levels and never draws them, so the parts' edges are definitional, held at 1 with no existence doubt. A
   // definition that cannot be worked out as stated (a part unknown, units that do not compose, a stated level its parts
@@ -418,7 +466,8 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
       || parts.some((p) => p === undefined) || (op === 'product' && of.length !== 2) || inCycle(item.id) ? 'identity_not_in_slice'
       : values.some((v) => v === null) ? 'identity_part_unknown'
         : (op === 'sum' ? !parts.every((p) => sameUnit(p!.unit, unit))
-          : unitsCompose(unit, label, { unit: parts[0]!.unit, label: parts[0]!.label }, { unit: parts[1]!.unit, label: parts[1]!.label }).kind !== 'proof')
+          : unitsCompose(unit, label, { unit: parts[0]!.unit, label: parts[0]!.label }, { unit: parts[1]!.unit, label: parts[1]!.label }).kind !== 'proof'
+            && !ratePerCountComposes(unit, parts[0]!.unit, parts[1]!.unit))
           ? 'identity_unit_mismatch'
           : level !== null && Math.abs(level - made) > 1e-9 * Math.max(1, Math.abs(level)) ? 'identity_inconsistent' : undefined;
     if (reason !== undefined) { hold(item.id, reason); continue; }

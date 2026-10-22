@@ -24,7 +24,11 @@ const c1Period = (w: string): Period => {
   return p !== null && C1_PERIODS.has(p) ? (p as 'month' | 'year') : null;
 };
 export const words = (s: string): string[] => s.toLowerCase().replace(/[()]/g, ' ').replace(/\//g, ' / ').split(/[\s-]+/).filter((w) => w !== '');
-export const singular = (w: string): string => (w.length > 3 && w.endsWith('s') ? w.slice(0, -1) : w);
+// Irregular "-ves" plurals a unit can name ("loaves a week" × "£ per loaf"): their singular, never "loave" (DL 22 Oct,
+// served board 6ce4f6ae: revenue = loaves × price was refused as a unit mismatch). Only these words; "incentives" stays regular.
+const VES_SINGULAR: ReadonlyMap<string, string> = new Map([['loaves', 'loaf'], ['leaves', 'leaf'], ['halves', 'half'], ['shelves', 'shelf'],
+  ['knives', 'knife'], ['lives', 'life'], ['wives', 'wife'], ['wolves', 'wolf'], ['calves', 'calf'], ['thieves', 'thief'], ['selves', 'self']]);
+export const singular = (w: string): string => VES_SINGULAR.get(w) ?? (w.length > 3 && w.endsWith('s') ? w.slice(0, -1) : w);
 
 function periodOf(ws: readonly string[]): Period | 'both' {
   const m = ws.some((w) => c1Period(w) === 'month');
