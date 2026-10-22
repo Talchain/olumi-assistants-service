@@ -92,6 +92,7 @@ import { CORE_DRAFTING_GUIDANCE } from '../orchestrator-v5/path-b/drafting-guida
 import { modelCritic } from '../orchestrator-v5/agent-lane/core/model-critic.js';
 import { parseSelectedElements } from '../orchestrator-v5/boundary/request-extensions.js';
 import { agentSelectionContext, type AgentSelectionContext } from '../orchestrator-v5/agent-lane/selection-context.js';
+import { NOTE_ON_ITEM } from '../orchestrator-v5/path-b/tools/note-on-item.js';
 import type { AgentLaneMode, AgentToolContext, ToolResult } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { createAgentCapabilities, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
 import { runExplanationCurrentness } from '../orchestrator-v5/agent-lane/run-currentness.js';
@@ -1556,6 +1557,20 @@ export function typedRunOf(body: Record<string, unknown>): boolean {
  * proposal authorised, each on one click. Composer messages are untouched.
  */
 export const CHIP_TURN_WITHHELD_TOOLS: readonly string[] = ['authorise_change', 'run_analysis'];
+/** The canvas's Challenge press on one card (DGAI `NodeQuickActions` → `askAi`, chip `ask:challenge`). */
+export const ASK_CHALLENGE_CHIP_ID = 'ask:challenge';
+/**
+ * ⭐ CHALLENGE ON ONE CARD (DL 22 Oct, Lenses lease; served 0/4 notes with #3630's description alone): a Challenge press on
+ * exactly ONE card the model holds gets that card's own selection note for this turn, and its first call must be
+ * note_on_item, so the challenge lands beside the card. No card, several, a link, or a selection that could not be checked:
+ * null, and the turn runs as before.
+ */
+export function challengeTargetOf(body: Record<string, unknown>, selection: AgentSelectionContext | null | undefined): AgentSelectionContext | null {
+  const chip = body['chip'] as { id?: unknown } | null | undefined;
+  if (chip?.id !== ASK_CHALLENGE_CHIP_ID || selection == null) return null;
+  return selection.grounded.element_ids.length === 1 && selection.links === undefined && selection.grounded.unresolved === 'none'
+    ? selection : null;
+}
 export function withheldToolsOf(body: Record<string, unknown>): readonly string[] {
   const chip = body['chip'];
   if (chip === null || typeof chip !== 'object') return [];
@@ -4604,6 +4619,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // A scenario with no model yet, or whose meaning is its living model, changes through the living model only.
         const coreScenario = coreSaved !== undefined && (coreSaved.graph == null || livingView !== undefined);
         coreDraftArm = draftArmOf(mode, coreSaved !== undefined && coreSaved.graph == null, req.headers['x-olumi-draft-arm']);
+        const challenge = challengeTargetOf(body, selectionContext);
         const core = await runCoreTurn({
           ctx: coreCtx, message, budget: coreBudget(coreEffortArmOf(mode, req.headers['x-olumi-core-effort'])), replyBudget: coreReplyBudget(), userId,
           tools: (onCall) => pathBTools({ dispatch: capDispatch, proposals, critique: modelCritic(coreBudget()), deadlineAt: constructionDeadlineAt,
@@ -4622,13 +4638,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
               if (result.ok && result.mutated && (result.receipts?.length ?? 0) > 0) verifiedSave = true;
               onCall(row, { ...result });
             }, coreScenario ? 'core' : 'legacy'),
-          instructions: instructionsForMode(mode, `${promptArmOf(mode, req.headers['x-olumi-prompt-arm']) === 'B' ? CORE_ALIGNED_INSTRUCTIONS : AGENT_TOOL_INSTRUCTIONS}${eligibleIntervention === undefined ? '' : `\n\n${ELIGIBLE_INTERVENTION_INSTRUCTION}`}${coreDraftArm === 'on' ? `\n\n${CORE_DRAFTING_GUIDANCE}` : ''}`),
+          instructions: instructionsForMode(mode, `${promptArmOf(mode, req.headers['x-olumi-prompt-arm']) === 'B' ? CORE_ALIGNED_INSTRUCTIONS : AGENT_TOOL_INSTRUCTIONS}${eligibleIntervention === undefined ? '' : `\n\n${ELIGIBLE_INTERVENTION_INSTRUCTION}`}${coreDraftArm === 'on' ? `\n\n${CORE_DRAFTING_GUIDANCE}` : ''}${challenge === null ? '' : `\n\n${challenge.note}`}`),
           briefText: coreSaved?.brief_text,
           canonicalState: livingView === undefined ? canonicalContext?.packet?.state
             : { ...(canonicalContext?.packet?.state as Record<string, unknown> | undefined), ...livingView },
           // A Run press permits calculation and reading only (`withheldToolsOf`), on this lane's own tool names.
           withheldTools: runPress ? CORE_RUN_PRESS_WITHHELD : pressToCore ? CHIP_TURN_WITHHELD_TOOLS : withheldToolsOf(body),
-          ...(runPress ? { firstTool: 'run_analysis' } : coreCardOnly && corePress !== undefined ? { firstTool: APPLY_CHANGE } : {}),
+          ...(runPress ? { firstTool: 'run_analysis' } : coreCardOnly && corePress !== undefined ? { firstTool: APPLY_CHANGE }
+            : challenge !== null ? { firstTool: NOTE_ON_ITEM } : {}),
           ...(corePress !== undefined ? { press: corePress } : {}),
           ...(canonicalContext?.packet?.graph_revision !== undefined ? { traceMeta: { revision: canonicalContext.packet.graph_revision } } : {}),
           // A run paused for the person's approval is saved on the scenario, so the press (any later request) resumes it.
