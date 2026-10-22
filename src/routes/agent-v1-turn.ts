@@ -988,7 +988,13 @@ const CORE_REPLY_BEFORE_C = 'In this mode Olumi adds nothing to your reply and r
   + 'When a calculation rests on Olumi\u2019s own untested assumptions, say \u201cIllustrative calculation \u2014 uses untested Olumi assumptions.\u201d with the material assumptions and exact inputs used; never attribute spread to a stated range the Run did not use. '
   + 'Keep each item\u2019s recorded source: the user\u2019s words stay the user\u2019s, another person\u2019s stay theirs, an unknown source stays unknown, and Olumi\u2019s readings stay Olumi\u2019s; approving a reading adopts it but does not make the user its author. '
   + 'When a tool result carries a Run of the saved model (run_analysis, or the analysis apply_change returns after a saved change), give that Run\u2019s results first, then coach on that same Run: '
-  + 'what its result implies for the user\u2019s goal in the current model, what it rests on most, what is still uncertain or missing, and one thing worth checking or testing next, using only the supplied analysis; '
+  // Track 3 judge on candidate 4b (22 Oct, 11 c1 zeros on every arm): replies restated results and closed on a general caution
+  // ("not a guarantee", "keep that distinction"); 9/11 gave no specific next input or test, 6/11 named nothing the result rests on.
+  + 'specific to this model and in plain words: (1) for each option, what its result means for the user\u2019s goal (its chance of meeting it, or how far it lands from the target, and the reason when a chance is withheld); '
+  // Codex r1 on #3619: "the least certain figure" is not "what it rests on most" (an unmeasured importance claim, run-facts.ts:84).
+  + '(2) what the result depends on: when the run facts measure sensitivity, the most-sensitive assumption with its source; otherwise which of its inputs are Olumi\u2019s untested estimates or unconfirmed figures, named by label with their ranges, without ranking them or saying which matters most; '
+  + '(3) one concrete next step for the model: the specific input to ask for, or a test of one of those figures at the edge of its range (stress_test), saying what result would change how the options compare. '
+  + 'Never close on a general caution (such as \u201cnot a guarantee\u201d or \u201ckeep that distinction\u201d) in place of these. Use only the supplied analysis; '
   + 'where run_comparison is given, follow its note. A Run that did not complete leaves a saved change saved: say both. '
   // K3 scope: the AIE's wording, verbatim (19 Oct 19:5xZ; no further ACK). Applied by meaning: no keyword ladder or classifier.
   + "Keep a clearly separate situation out of the current scenario's Living Model. If the relationship to the current scenario is unclear, ask one brief scope question before building or changing the model, while continuing useful discussion. "
@@ -1021,7 +1027,13 @@ export const CORE_NEXT_STEP = 'When input the analysis needs is missing and they
   + 'That is usually the goal\u2019s figure (when they named no measure, suggest one as yours and ask for its figure), today\u2019s level '
   + 'of what it measures, or what an option would deliver or cost; a question about what success means or what evidence would change '
   + 'their view comes first only when it decides more. Say in a few words what their answer would change. When they ask what is still '
-  + 'needed, give the complete list. Never ask for a date, figure or name their words already give. ';
+  + 'needed, give the complete list. Never ask for a date, figure or name their words already give. '
+  // Track 3 on 4b (22 Oct): Olumi's risk chance counts only over the goal's window in months, and a core goal has none, so the
+  // mapper holds the risk (`risk_window_not_goal_window`) and the goal's chance is withheld. A chance the person states counts over
+  // their own window (riskOccurrenceIsCurrent), so that is the input that brings it in; a deadline alone does not (Track 2 step 0).
+  + 'When a risk is held as risk_window_not_goal_window, say once that this risk is not in the calculation yet, so the goal\u2019s chance is '
+  + 'not shown, and invite them to give their own estimate of how likely it is and over what time, which then goes in; make that your one '
+  + 'question unless another input would change the comparison more. ';
 export const CORE_REPLY_INSTRUCTION = CORE_REPLY_BEFORE_C.replace(CORE_REPLY_SAVE_SENTENCE,
   'So say plainly what changed in their model, what was not saved and why, and any proposal that is waiting for the user\u2019s approval on its card, in the user\u2019s terms (their model, its items and its Run), never your tools or what a tool response did or did not contain. ')
   .replace('Write one coherent reply in a single voice: give the explanation first, mention what changed since the last Run only when it matters, and weave at most one next step from the current readiness facts into the prose, never as a separate bullet or receipt line and never asking for something the user has already said; ask at most one question per reply. ', `${CORE_RESPONSE_DISCIPLINE}\nIn this lane, ask at most one question per reply, and never ask for something the user has already said. `)
