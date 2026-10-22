@@ -450,13 +450,15 @@ export function agentProposalRecord(pa: PendingAction, graph: unknown, nowMs = D
       const a = v['after'];
       const b = isRec(v['before']) ? v['before'] : {};
       const id = o.path.slice('factor:'.length);
+      // Olumi's labelled estimate on anyone's item is Olumi's figure, never "yours" (Codex r2 on #3632).
+      const olumis = a['source'] === 'olumi' || a['estimate_by'] === 'olumi';
       const theirs = a['source'] === 'user' && typeof a['quote'] === 'string' && a['quote'] !== '' && a['quote'] !== b['quote'];
       if (typeof a['value'] !== 'number' || !Number.isFinite(a['value']) || a['low'] != null || a['high'] != null
         || typeof a['unit'] !== 'string' || a['unit'] === '' || a['value'] === b['value']
-        || (a['source'] !== 'olumi' && !theirs)) continue;
+        || (!olumis && !theirs)) continue;
       fields.push({ field_id: `factor_value:${id}`, kind: 'factor_value', node_id: id,
         label: typeof a['label'] === 'string' ? a['label'] : labelOf(id), unit: a['unit'],
-        current: { value: a['value'], unit: a['unit'], source: a['source'] === 'user' ? 'yours' : 'estimate' },
+        current: { value: a['value'], unit: a['unit'], source: olumis ? 'estimate' : 'yours' },
         filled_missing: typeof b['value'] !== 'number', editable: false });
     }
   }
@@ -519,7 +521,8 @@ function coreAdds(operations: readonly HeldOp[], savedLabel: (id: string) => str
       const point = typeof a['value'] === 'number' && Number.isFinite(a['value']) && a['low'] == null && a['high'] == null
         && typeof a['unit'] === 'string' && a['unit'] !== '';
       adds.push({ field_id: `factor_add:${id}`, kind: 'factor_add', node_id: id, label,
-        value: point ? { value: a['value'] as number, unit: a['unit'] as string } : null, source: by, editable: false });
+        value: point ? { value: a['value'] as number, unit: a['unit'] as string } : null,
+        source: point && a['estimate_by'] === 'olumi' ? 'estimate' : by, editable: false });
     } else if (o.path.startsWith('link:')) {
       const sign = isRec(a['effect']) ? a['effect']['sign'] : null;
       const from = labelOf(a['from']);
@@ -614,14 +617,53 @@ function coreChangeNotes(operations: readonly HeldOp[], adds: readonly AddField[
   }
   const name = (id: unknown): string => quoted(typeof id === 'string' ? proposed.get(id) ?? savedLabel(id) : 'an item');
   const CMP: Readonly<Record<string, string>> = { '<=': 'at most', '>=': 'at least', '<': 'below', '>': 'above' };
-  // What else an item carries that a field or add never shows: its limit and its definition.
-  const extrasOf = (x: Rec): string[] => {
-    const out: string[] = [];
+  // What else an item carries that a field or add never shows: its limit and its definition, each said on its own.
+  const limitOf = (x: Rec): string | undefined => {
     const l = isRec(x['limit']) ? x['limit'] : undefined;
-    if (l !== undefined && finiteNum(l['value'])) out.push(`limit ${CMP[String(l['comparator'])] ?? String(l['comparator'])} ${sayFigureAsWritten(l['value'], typeof x['unit'] === 'string' ? x['unit'] : '')} (${whoseOf(l).tag})`);
+    return l !== undefined && finiteNum(l['value'])
+      ? `${CMP[String(l['comparator'])] ?? String(l['comparator'])} ${sayFigureAsWritten(l['value'], typeof x['unit'] === 'string' ? x['unit'] : '')} (${whoseOf(l).tag})`
+      : undefined;
+  };
+  const definitionOf = (x: Rec): string | undefined => {
     const d = isRec(x['defined_as']) ? x['defined_as'] : undefined;
-    if (d !== undefined && Array.isArray(d['of'])) out.push(`defined as the ${d['op'] === 'product' ? 'product' : 'sum'} of ${d['of'].map(name).join(' and ')} (${whoseOf(d).tag})`);
-    return out;
+    return d !== undefined && Array.isArray(d['of'])
+      ? `the ${d['op'] === 'product' ? 'product' : 'sum'} of ${d['of'].map(name).join(' and ')} (${whoseOf(d).tag})` : undefined;
+  };
+  const extrasOf = (x: Rec): string[] => {
+    const l = limitOf(x);
+    const d = definitionOf(x);
+    return [...(l === undefined ? [] : [`limit ${l}`]), ...(d === undefined ? [] : [`defined as ${d}`])];
+  };
+  // Whose a limit or definition is, or its recorded words, where only that changes.
+  const attributionChange = (part: string, b: Rec, a: Rec): string | undefined => {
+    if (whoseOf(b).tag !== whoseOf(a).tag) return `${part} is now ${whoseOf(a).tag} (was ${whoseOf(b).tag})`;
+    if (stableJson(b['quote'] ?? null) === stableJson(a['quote'] ?? null)) return undefined;
+    return typeof a['quote'] === 'string' && a['quote'] !== '' ? `the words recorded for ${part} are now \u201c${a['quote']}\u201d` : `the words recorded for ${part} are removed`;
+  };
+  // A changed limit or definition, each part on its own, compared by content (ids, not names; Codex r2 on #3632). A part
+  // changed in a way not said here is left to the item's "also changes" list.
+  const extraChanges = (before: Rec, after: Rec): { readonly said: string[]; readonly parts: string[] } => {
+    const said: string[] = [];
+    const parts: string[] = [];
+    const lb = isRec(before['limit']) ? before['limit'] : undefined;
+    const la = isRec(after['limit']) ? after['limit'] : undefined;
+    const limitContent = (l: Rec, x: Rec): string => stableJson([l['comparator'], l['value'], x['unit'] ?? null]);
+    const limitSaid = la === undefined ? (lb === undefined ? undefined : `no longer has a limit${limitOf(before) === undefined ? '' : ` (was ${limitOf(before)})`}`)
+      : lb === undefined ? (limitOf(after) === undefined ? undefined : `now has a limit of ${limitOf(after)}`)
+        : limitContent(lb, before) !== limitContent(la, after) ? `limit now ${limitOf(after) ?? 'not stated'} (was ${limitOf(before) ?? 'not stated'})`
+          : attributionChange('its limit', lb, la);
+    if (limitSaid !== undefined) { said.push(limitSaid); parts.push('its limit'); }
+    const db = isRec(before['defined_as']) ? before['defined_as'] : undefined;
+    const da = isRec(after['defined_as']) ? after['defined_as'] : undefined;
+    const defContent = (d: Rec): string => stableJson([d['op'], d['of']]);
+    const was = definitionOf(before);
+    const is = definitionOf(after);
+    const defSaid = da === undefined ? (db === undefined ? undefined : `no longer defined${was === undefined ? '' : ` as ${was}`}`)
+      : db === undefined ? (is === undefined ? undefined : `now defined as ${is}`)
+        : defContent(db) !== defContent(da) ? (was === is ? `now defined as ${is}, from different items with the same names` : `now defined as ${is ?? 'not stated'} (was ${was ?? 'not stated'})`)
+          : attributionChange('its definition', db, da);
+    if (defSaid !== undefined) { said.push(defSaid); parts.push('its definition'); }
+    return { said, parts };
   };
   // A risk's chance, window and what reduces it; an aim's target; an option's status: each said with its content and whose
   // its figure is (buddy BLOCK on #3632: these changes were named, never shown).
@@ -653,15 +695,22 @@ function coreChangeNotes(operations: readonly HeldOp[], adds: readonly AddField[
   const shownFigure = new Set(fields.flatMap((f) => (f.kind === 'factor_value' ? [`factor:${f.node_id}`] : [])));
   const addOf = new Map(adds.map((a) => [a.kind === 'factor_add' ? `factor:${a.node_id}` : a.kind === 'link_add' ? `link:${a.link_id}` : '', a]));
   const notes: ChangeNoteField[] = [];
-  const push = (path: string, text: string, source: NoteSource): void => {
+  const used = new Set<string>();
+  const push = (path: string, change: string, text: string, source: NoteSource): void => {
     // Split into parts the canvas reads in full (each "(n/N)"), at clause boundaries ("; ") so a figure stays with its unit;
-    // only a single clause longer than a part is split between words. No written detail is cut.
-    const room = NOTE_MAX - 8;
-    const pieces = text.split('; ').flatMap((clause) => {
+    // only a single clause longer than a part is split between words, and a single word longer than a part between
+    // characters (Codex r2 on #3632: a 401-character word made a 409-character part). No written detail is cut.
+    const room = NOTE_MAX - ' (999/999)'.length;
+    const words = (clause: string): string[] => clause.split(' ').flatMap((w) => {
+      const out: string[] = [];
+      for (let k = 0; k < w.length; k += room) out.push(w.slice(k, k + room));
+      return out.length === 0 ? [w] : out;
+    });
+    const pieces = text.length <= NOTE_MAX ? [text] : text.split('; ').flatMap((clause) => {
       if (clause.length <= room) return [clause];
       const out: string[] = [];
       let cur = '';
-      for (const w of clause.split(' ')) { if (cur !== '' && `${cur} ${w}`.length > room) { out.push(cur); cur = w; } else cur = cur === '' ? w : `${cur} ${w}`; }
+      for (const w of words(clause)) { if (cur !== '' && `${cur} ${w}`.length > room) { out.push(cur); cur = w; } else cur = cur === '' ? w : `${cur} ${w}`; }
       return cur === '' ? out : [...out, cur];
     });
     const chunks: string[] = [];
@@ -670,7 +719,12 @@ function coreChangeNotes(operations: readonly HeldOp[], adds: readonly AddField[
       if (cur !== '' && `${cur}; ${piece}`.length > room) { chunks.push(cur); cur = piece; } else cur = cur === '' ? piece : `${cur}; ${piece}`;
     }
     if (cur !== '') chunks.push(cur);
-    chunks.forEach((c, k) => notes.push({ field_id: chunks.length === 1 ? `change_note:${path}` : `change_note:${path}#${k + 1}`, kind: 'change_note',
+    // One id per note: a positional path (a condition removed and another added at index 0) is told apart by its change.
+    let base = `change_note:${path}`;
+    if (used.has(base)) base = `${base}:${change}`;
+    for (let n = 2; used.has(base); n += 1) base = `change_note:${path}:${change}:${n}`;
+    used.add(base);
+    chunks.forEach((c, k) => notes.push({ field_id: chunks.length === 1 ? base : `${base}#${k + 1}`, kind: 'change_note',
       text: chunks.length === 1 ? c : `${c} (${k + 1}/${chunks.length})`, source, editable: false }));
   };
   for (const o of operations) {
@@ -701,13 +755,15 @@ function coreChangeNotes(operations: readonly HeldOp[], adds: readonly AddField[
       const extras = extrasOf(after);
       const figure = kind === 'factor' || kind === 'link' ? figureOfItem(after) : undefined;
       const fw = figureWho(after);
+      // Whose the item is, said beside its name, where its figure is someone else's (a person's factor, Olumi's estimate).
+      const split = figure !== undefined && fw.tag !== who.tag;
       if (kind === 'factor' && shown?.kind === 'factor_add' && (shown.value !== null || figure === undefined) && extras.length === 0
-        && fw.source === (shown.source === 'yours' ? 'yours' : 'estimate')) continue;
+        && !split && fw.source === shown.source) continue;
       if (kind === 'link' && shown !== undefined && figure === undefined) continue;
       if (kind === 'factor' || kind === 'link') {
         const said = [figure === undefined ? undefined : `${figure} (${fw.tag})`, ...extras].filter((t): t is string => t !== undefined);
-        const tail = shown === undefined && (figure === undefined || fw.tag !== who.tag) ? ` (${who.tag})` : '';
-        text = `${shown !== undefined ? '' : 'Adds '}${kind === 'link' && shown === undefined ? 'the link ' : ''}${own}${said.length > 0 ? `: ${said.join('; ')}` : ''}${tail}.`;
+        const tail = shown === undefined && figure === undefined ? ` (${who.tag})` : '';
+        text = `${shown !== undefined ? '' : 'Adds '}${kind === 'link' && shown === undefined ? 'the link ' : ''}${own}${split ? ` (${who.tag})` : ''}${said.length > 0 ? `: ${said.join('; ')}` : ''}${tail}.`;
         source = figure !== undefined ? fw.source : who.source;
       } else if (kind === 'option') {
         const sets = (Array.isArray(after['settings']) ? after['settings'] : []).filter(isRec)
@@ -764,9 +820,9 @@ function coreChangeNotes(operations: readonly HeldOp[], adds: readonly AddField[
           const tIs = targetOf(after);
           if (tWas !== tIs) { said.push(`${own}: was ${tWas ?? 'no target'}, now ${tIs ?? 'no target'}`); done.add('its target'); }
         }
-        const xWas = extrasOf(before).join('; ');
-        const xIs = extrasOf(after).join('; ');
-        if (xWas !== xIs) { tagged = xIs !== '' || tagged; said.push(`${own}: ${xIs === '' ? `no longer has its ${xWas.startsWith('limit') ? 'limit' : 'definition'}` : `now ${xIs}`}`); done.add('its limit'); done.add('its definition'); }
+        const extra = extraChanges(before, after);
+        for (const x of extra.said) tagged = said.push(`${own}: ${x}`) > 0;
+        for (const p of extra.parts) done.add(p);
       }
       if (kind === 'option' && before['status'] !== after['status'] && typeof after['status'] === 'string') { said.push(`${own} is now ${STATUS[after['status']] ?? after['status']}`); done.add('whether it is compared'); }
       const whoWas = whoseOf(before).tag;
@@ -777,7 +833,7 @@ function coreChangeNotes(operations: readonly HeldOp[], adds: readonly AddField[
       if (said.length === 0) said.push(`Changes ${own}`);
       text = `${said.join('; ')}${tagged ? '' : ` (${who.tag})`}.`;
     }
-    push(o.path, text, source);
+    push(o.path, String(v['change']), text, source);
   }
   return notes;
 }

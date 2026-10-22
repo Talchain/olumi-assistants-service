@@ -610,6 +610,51 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
     expect(said).toBe('\u2018Orders\u2019 is now Acme\u2019s (was yours); \u2018Orders\u2019: the words recorded are now \u201cour new words\u201d.');
     expect(notesOf(b).map((n) => n.text)).toEqual(notesOf(a).map((n) => n.text));
   });
+  it('Codex r2 on #3632: a point estimate on the person\'s item, each limit and definition change, and long notes', async () => {
+    const { createProposal } = await import('../../proposal.js');
+    const { proposalPendingAction } = await import('../../durable-proposal.js');
+    const { agentProposalRecord } = await import('../record.js');
+    const card = (operations: unknown[]) => {
+      const p = createProposal({ scenario_id: SID, user_id: null, base_graph_identity_hash: 'pin', operations: operations as never,
+        provenance: { authored_by: 'model_proposed' }, validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: 'Core change' });
+      const carrier = proposalPendingAction(p, { id: `agent-approve-proposal:${p.proposal_id}`, label: p.public_label, message: 'Apply.' },
+        { scenario_id: SID, emitted_at_iso: new Date().toISOString() });
+      return agentProposalRecord(carrier, { nodes: [{ id: 'out', label: 'Output' }, { id: 'out2', label: 'Output' }], edges: [] })!;
+    };
+    const notesOf = (r: ReturnType<typeof card>) => (r.adds ?? []).flatMap((a) => (a.kind === 'change_note' ? [a] : []));
+    const fac = (more: Record<string, unknown>) => ({ id: 'f', label: 'Orders', value: null, low: null, high: null, unit: 'units', defined_as: null, limit: null,
+      estimate_by: null, source: 'user', party: null, quote: 'our orders', ...more });
+    const ch = (path: string, before: unknown, after: unknown) => ({ op: 'living_change', path, value: { change: 'change', before, after } });
+    // (1) Olumi's point estimate on the person's factor is Olumi's on the field and the add; the note says whose the factor is.
+    const changed = card([ch('factor:f', fac({ value: 30, estimate_by: 'olumi' }), fac({ value: 40, estimate_by: 'olumi' }))]);
+    expect(changed.fields.map((f) => f.kind === 'factor_value' ? f.current.source : f.kind)).toEqual(['estimate']);
+    const added = card([{ op: 'living_change', path: 'factor:f', value: { change: 'add', after: fac({ value: 40, estimate_by: 'olumi' }) } }]);
+    expect((added.adds ?? []).map((a) => [a.kind, a.source])).toEqual([['factor_add', 'estimate'], ['change_note', 'estimate']]);
+    expect(notesOf(added).map((n) => n.text)).toEqual(['‘Orders’ (yours): 40 units (Olumi’s estimate).']);
+    // (3) Each limit and definition change is said on its own, compared by ids, not names.
+    const lim = { comparator: '<=', value: 50, source: 'user', party: null, quote: 'no more than 50' };
+    const def = (of: string[]) => ({ op: 'sum', of, source: 'olumi', party: null, quote: null });
+    expect(notesOf(card([ch('factor:f', fac({ limit: lim, defined_as: def(['out']) }), fac({ defined_as: def(['out']) }))])).map((n) => n.text))
+      .toEqual(['‘Orders’: no longer has a limit (was at most 50 units (yours)).']);
+    expect(notesOf(card([ch('factor:f', fac({ limit: lim, defined_as: def(['out']) }), fac({}))])).map((n) => n.text))
+      .toEqual(['‘Orders’: no longer has a limit (was at most 50 units (yours)); ‘Orders’: no longer defined as the sum of ‘Output’ (Olumi’s estimate).']);
+    expect(notesOf(card([ch('factor:f', fac({ defined_as: def(['out']) }), fac({ defined_as: def(['out2']) }))])).map((n) => n.text))
+      .toEqual(['‘Orders’: now defined as the sum of ‘Output’ (Olumi’s estimate), from different items with the same names.']);
+    expect(notesOf(card([ch('factor:f', fac({ limit: lim }), fac({ limit: { ...lim, source: 'olumi', quote: null } }))])).map((n) => n.text))
+      .toEqual(['‘Orders’: its limit is now Olumi’s estimate (was yours).']);
+    // (4) An unbroken 401-character condition: every part fits the canvas; nothing is cut; a replaced condition's ids stay unique.
+    const word = 'x'.repeat(401);
+    const cond = notesOf(card([{ op: 'living_change', path: 'condition:0', value: { change: 'add', after: { text: word, applies_to: [], source: 'user', party: null, quote: word } } }]));
+    expect(cond.length).toBeGreaterThan(1);
+    expect(cond.every((n) => n.text.length <= 400)).toBe(true);
+    expect(cond.map((n) => n.text).join('').split('x').length - 1).toBe(401);
+    const replaced = notesOf(card([
+      { op: 'living_change', path: 'condition:0', value: { change: 'remove', before: { text: word, applies_to: [], source: 'user', party: null, quote: word } } },
+      { op: 'living_change', path: 'condition:0', value: { change: 'add', after: { text: word, applies_to: [], source: 'user', party: null, quote: word } } }]));
+    const ids = replaced.map((n) => n.field_id);
+    expect(ids.length).toBeGreaterThan(2);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
   it('buddy BLOCK on #3632: a risk\'s chance, window and what reduces it, an aim\'s target and an option\'s status are said with their content', async () => {
     const { createProposal } = await import('../../proposal.js');
     const { proposalPendingAction } = await import('../../durable-proposal.js');
