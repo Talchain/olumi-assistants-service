@@ -195,7 +195,25 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     const lt = t === null ? 'no_level_target' as const
       : t.source === 'olumi' && [t.value, t.low, t.high, t.current].some((v) => v !== null) ? 'target_not_theirs' as const
       : isChange && t.current !== null && !(t.current_source === 'user' || stated(aim.source)) ? 'change_base_not_theirs' as const : levelTargetOf(t);
-    if (typeof lt === 'string') { goalHeld = lt; hold(aim.id, lt); }
+    if (typeof lt === 'string') {
+      goalHeld = lt; hold(aim.id, lt);
+      // DL 23 Oct (Track 3 funding/hiring): a held goal still carries what the person said, where the ONE "no target" gap
+      // (`goalTargetGapOf`) reads it, so it asks only for what is missing. Their deadline, in their words (and as a date when
+      // it is one), as the level branch writes it. A relative change with no level today is their target, held as legacy holds
+      // it (a fraction of today's level, `change_rel`): target-testability then asks for today's level (`missing_goal_baseline`),
+      // never the target. No normalised threshold is written, so the engine scores no chance from it (fail closed).
+      if (t !== null) {
+        const deadline = statedDeadline(t.by_when);
+        const relative = lt === 'goal_level_unknown' && t.change_kind === 'relative' && t.unit === '%' && t.value !== null;
+        Object.assign(goalNode, {
+          ...(t.by_when !== null ? { goal_deadline_as_stated: t.by_when } : {}),
+          ...(deadline !== undefined ? { goal_horizon: { deadline } } : {}),
+          ...(relative ? { goal_direction: t.comparator === 'decrease' ? '<=' : '>=', goal_threshold_frame: 'change_rel',
+            goal_threshold_raw: (t.comparator === 'decrease' ? -1 : 1) * Math.abs(t.value!) / 100,
+            ...(t.current_unit !== null ? { goal_threshold_unit: t.current_unit } : {}) } : {}),
+        });
+      }
+    }
     else {
       const fromTarget = resolveGoalThresholdCapWithProvenance(undefined, lt.value, lt.unit ?? undefined, undefined);
       // The goal's frame holds today's level too: a ceiling below today would put today off its own scale ('level_frame').
