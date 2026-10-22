@@ -455,9 +455,16 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
     expect((reloaded.nodes as Json[]).find((n) => n.id === 'level')!.observed_state?.source).toBeUndefined();
   });
 
-  it('THIN CORE budget (real route): every core call runs at the bake-off configuration, with room for a whole model', async () => {
+  it('THIN CORE budget (real route): every core call runs at the banked medium effort (#3618, A/B/C 22 Oct), with room for a whole model', async () => {
     bodiesSeen.length = 0;
     expect(draftCall(await turn())).toMatchObject({ ok: true, mutated: true });
+    expect(bodiesSeen.length).toBeGreaterThan(0);
+    for (const b of bodiesSeen) expect({ model: b.model, effort: b.reasoning?.effort, max: b.max_output_tokens }).toEqual({ model: 'gpt-6.1-sol', effort: 'medium', max: 12000 });
+  });
+
+  it('CONTRAST (#3618): x-olumi-core-effort: high keeps the old bake-off arm on the same route', async () => {
+    bodiesSeen.length = 0;
+    expect(draftCall(await turn({ 'x-olumi-core-effort': 'high' }))).toMatchObject({ ok: true, mutated: true });
     expect(bodiesSeen.length).toBeGreaterThan(0);
     for (const b of bodiesSeen) expect({ model: b.model, effort: b.reasoning?.effort, max: b.max_output_tokens }).toEqual({ model: 'gpt-6.1-sol', effort: 'high', max: 12000 });
   });
