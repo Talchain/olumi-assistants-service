@@ -12,13 +12,17 @@ import { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha
 import { registrationTurnId } from '../../../graph-registration/registration-identity.js';
 import type { LivingModelT } from '../../../../schemas/living-model.js';
 import { mapLivingModel } from '../../living-model/mapper.js';
+import { GraphV3 } from '../../../../schemas/cee-v3.js';
+import { projectCorePostimageForPersistence } from '../../../persisted-graph-projection.js';
+import { assessCanonicalAnalysisReadiness } from '../../../../orchestrator/tools/analysis-ready-helper.js';
 import { KNOWN_ANSWER } from '../../living-model/__tests__/fixtures.js';
-import { F1_CONTRADICTED, F1_OTHER_CAUSE } from '../../living-model/__tests__/track2-f1-identity.fixtures.js';
+import { F1_CONTRADICTED, F1_DEFINED, F1_OTHER_CAUSE } from '../../living-model/__tests__/track2-f1-identity.fixtures.js';
+import { OLUMI_CHANCE } from '../../living-model/__tests__/track2-f2-event-risk.fixtures.js';
 import { buildModel } from '../draft-tool.js';
 import { applyLivingChange, proposeLivingChange } from '../living-change.js';
 import { pathBTools, type ToolCallResult } from '../index.js';
 import type { TraceRow } from '../outcome.js';
-import { goalPathEncodingCauses, KEPT_AS_REFUSED, optionsReachingGoal, personContentLost, RESTRUCTURE_AIM, RESTRUCTURE_CHANGE, RESTRUCTURE_CUT, RESTRUCTURE_DRAFT, type Restructure } from '../goal-path.js';
+import { ASK_LINK_SIZES, goalPathEncodingCauses, KEPT_AS_REFUSED, optionsReachingGoal, pathCut, personContentLost, RESTRUCTURE_AIM, RESTRUCTURE_CHANGE, RESTRUCTURE_CUT, RESTRUCTURE_DRAFT, type Restructure } from '../goal-path.js';
 import type { Rec } from './fixtures.js';
 
 const SID = 'scn_1';
@@ -471,6 +475,88 @@ describe('DL 22 Oct (marketing on 7ee0d90f): a change never silently cuts the go
     expect(((again as { data: Rec }).data.changes as Rec[]).filter((c) => c.kind === 'link').map((c) => [c.id, c.change])).toEqual([['f_g', 'remove']]);
     expect((again as { data: Rec }).data.restructure, 'nothing of the person’s was lost, so no fallback note').toBeUndefined();
     expect(restructure.pending).toBeUndefined();
+    expect((again as { data: Rec }).data.goal_unreached, 'the pathless card asks for the link sizes in one question').toEqual({ cut: ['f_g'], ask: ASK_LINK_SIZES });
+  });
+
+  it('DL 22 Oct (acceptance): the re-measured goal re-linked with Olumi\'s labelled estimate: carded, written, analysable; the person\'s figures byte-unchanged', async () => {
+    const p = product(KNOWN_ANSWER);
+    const proposals = new ProposalStore();
+    const said = 'we need at least 20 customers; today we have 12';
+    const next = structuredClone(KNOWN_ANSWER);
+    next.aims[0] = { ...next.aims[0]!, quote: said, target: { ...next.aims[0]!.target!, quantity: 'customers', unit: 'customers', value: 20, current: 12 } };
+    next.links = [{ id: 'f_customers', from: 'f', to: 'g', source: 'olumi', party: null, quote: null,
+      effect: { estimate_by: null, form: 'range', value: null, low: 4, high: 12, sd: null, unit: 'customers', sign: '+' } }];
+    const ctx = { ...changeCtx, user_turn_text: `Measure the goal in customers: ${said}.` };
+    const out = await proposeLivingChange({ dispatch: p.dispatch, proposals, restructure: { offered: false } }, ctx, args(next, ['f_g']));
+    expect(out, JSON.stringify(out)).toMatchObject({ status: 'ok' });
+    expect((out as { data: Rec }).data.goal_unreached).toBeUndefined();
+    expect(await applyLivingChange({ dispatch: p.dispatch, proposals }, ctx, String((out as { data: Rec }).data.proposal_id))).toMatchObject({ status: 'ok', mutated: true });
+    const saved = p.saved()!;
+    const lm = saved.living_model as LivingModelT;
+    expect(lm.links).toEqual([expect.objectContaining({ id: 'f_customers', source: 'olumi', quote: null })]);
+    expect(lm.factors).toEqual(KNOWN_ANSWER.factors);
+    expect(lm.options).toEqual(KNOWN_ANSWER.options);
+    expect(goalOf(saved)).toMatchObject({ id: 'g', goal_threshold: expect.anything() });
+    const readiness = assessCanonicalAnalysisReadiness(projectCorePostimageForPersistence(GraphV3.parse(saved)) as never);
+    expect(JSON.stringify(readiness), 'a Run can start: no option is cut off from the goal').not.toContain('NO_PATH_TO_GOAL');
+    // CONTRAST, same probe: the same change with no link into the goal, written, is cut off.
+    const q = product(KNOWN_ANSWER);
+    const qs = new ProposalStore();
+    const bare = await proposeLivingChange({ dispatch: q.dispatch, proposals: qs }, ctx, args({ ...structuredClone(next), links: [] }, ['f_g']));
+    await applyLivingChange({ dispatch: q.dispatch, proposals: qs }, ctx, String((bare as { data: Rec }).data.proposal_id));
+    expect(JSON.stringify(assessCanonicalAnalysisReadiness(projectCorePostimageForPersistence(GraphV3.parse(q.saved()!)) as never))).toContain('NO_PATH_TO_GOAL');
+  });
+
+  it('DL 22 Oct (contrast): a re-measured goal keeps the person\'s own stated link into it as theirs; nothing of Olumi\'s is added', async () => {
+    const p = product(KNOWN_ANSWER);
+    const proposals = new ProposalStore();
+    const said = 'we need at least 120 units shipped';
+    const next = structuredClone(KNOWN_ANSWER);
+    next.aims[0] = { ...next.aims[0]!, quote: said, target: { ...next.aims[0]!.target!, quantity: 'units shipped', value: 120 } };
+    const ctx = { ...changeCtx, user_turn_text: `Measure it as units shipped: ${said}.` };
+    const out = await proposeLivingChange({ dispatch: p.dispatch, proposals, restructure: { offered: false } }, ctx, args(next, []));
+    expect(out, JSON.stringify(out)).toMatchObject({ status: 'ok' });
+    expect((out as { data: Rec }).data.goal_unreached).toBeUndefined();
+    await applyLivingChange({ dispatch: p.dispatch, proposals }, ctx, String((out as { data: Rec }).data.proposal_id));
+    expect((p.saved()!.living_model as LivingModelT).links).toEqual(KNOWN_ANSWER.links);
+  });
+
+  it('#3679 follow-up (Codex on #3685): an added aim that becomes the goal leaves the old goal\'s own definition out of cut', () => {
+    const plus = { ...structuredClone(F1_DEFINED), aims: [...structuredClone(F1_DEFINED).aims, { ...structuredClone(F1_DEFINED).aims[0]!, id: 'rev2', defined_as: null }] };
+    expect(pathCut(F1_DEFINED, mapLivingModel(F1_DEFINED), plus)).toEqual([]);
+    const dropped = { ...structuredClone(F1_DEFINED), aims: [{ ...structuredClone(F1_DEFINED).aims[0]!, defined_as: null }] };
+    expect(pathCut(F1_DEFINED, mapLivingModel(F1_DEFINED), dropped)).toEqual(['rev:defined_as']);
+  });
+
+  it('DL 22 Oct (pin): both offers carry the ruling\'s instruction; the fallback card carries its one question', () => {
+    const ruling = 'If a link into the new goal has no figure the person gave, add it with Olumi\'s own labelled estimate under the estimate rule (or ask for it); never leave the goal with no path.';
+    expect(RESTRUCTURE_CUT).toContain(ruling);
+    expect(RESTRUCTURE_AIM).toContain(ruling);
+    for (const t of [RESTRUCTURE_CUT, RESTRUCTURE_AIM]) expect(t).toContain('ask them in one question for the size of each link into the goal');
+    expect(ASK_LINK_SIZES).toContain('ask the person in one question for the size of each link into the goal');
+  });
+
+  it('#3679 follow-up (Codex): a change that re-ids the goal and drops its link: cut names the link into the goal it was', async () => {
+    const reid = { ...remeasured(), aims: [{ ...remeasured().aims[0]!, id: 'g2' }] };
+    const out = await proposeLivingChange({ dispatch: product(KNOWN_ANSWER).dispatch, proposals: new ProposalStore(), restructure: { offered: false } },
+      changeCtx, args(reid, ['g', 'f_g']));
+    expect(out).toEqual({ status: 'refused', reason: 'goal_path_cut', detail: RESTRUCTURE_CUT, data: { cut: ['f_g'] } });
+  });
+
+  it('#3679 follow-up: a removed risk\'s link into the goal is cut, though a risk\'s link is not mapped as an edge into the goal', async () => {
+    const goal = OLUMI_CHANCE.aims[0]!.id;
+    const unlinked = { ...structuredClone(OLUMI_CHANCE), links: OLUMI_CHANCE.links.filter((l) => l.to !== goal) };
+    const out = await proposeLivingChange({ dispatch: product(OLUMI_CHANCE).dispatch, proposals: new ProposalStore(), restructure: { offered: false } },
+      changeCtx, args(unlinked, OLUMI_CHANCE.links.map((l) => l.id)));
+    expect(out).toMatchObject({ status: 'refused', reason: 'goal_path_cut', data: { cut: ['fails_gp', 'cost_gp'] } });
+  });
+
+  it('#3679 follow-up (served 79c1e150-b): a change that drops the definition the goal\'s path ran through: cut names the definition', async () => {
+    expect(optionsReachingGoal(F1_DEFINED, mapLivingModel(F1_DEFINED))).toEqual(['hold', 'grow_uk']);
+    const undefined_ = { ...structuredClone(F1_DEFINED), aims: [{ ...structuredClone(F1_DEFINED).aims[0]!, defined_as: null }] };
+    const out = await proposeLivingChange({ dispatch: product(F1_DEFINED).dispatch, proposals: new ProposalStore(), restructure: { offered: false } },
+      changeCtx, args(undefined_, []));
+    expect(out).toEqual({ status: 'refused', reason: 'goal_path_cut', detail: RESTRUCTURE_CUT, data: { cut: ['rev:defined_as'] } });
   });
 
   it('the agent stops after the cut is said: the turn\'s end cards the change as base would', async () => {
