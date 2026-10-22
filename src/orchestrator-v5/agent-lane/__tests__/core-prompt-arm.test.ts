@@ -40,7 +40,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
   it('arm B is the AIE\'s assembled reference, byte for byte (programme-docs #94 6303242136, static text sha256 7b6145d4…), plus the canvas-coaching sentence', () => {
     expect(b.split(NOTE_ON_ITEM_INSTRUCTION)).toHaveLength(2);
     // 7b6145d4… until 21 Oct; arm C's adoption changed only the closing core reply rule (see its row), now 56625e00….
-    expect(createHash('sha256').update(b.replace(`${NOTE_ON_ITEM_INSTRUCTION}\n\n`, ''), 'utf8').digest('hex')).toBe('950681a04fa63f0333d99c0679cd6cc7b983b02717f5e5e1d2f8fbce44919dc5'); // 22 Oct: the coach's reply rules (two phrases deleted, Codex r1 / buddy), the figure rule moved to the drafter's rules (DL priority change; was 1545a0fc…)
+    expect(createHash('sha256').update(b.replace(`${NOTE_ON_ITEM_INSTRUCTION}\n\n`, ''), 'utf8').digest('hex')).toBe('055841368f958fd07a9e729b8f459e83d1793e98acbbd0b6bcefa8aba9ddf41a'); // 22 Oct: one exact blocking-input question; retire the coach's duplicate ask.
     // Candidate-3 witnesses (21 Oct): presence checks (text only, not behaviour): WHEN to build, and Olumi's additions on a card.
     expect(b).toContain('build the first model from their brief in that same turn');
     expect(b).toContain('a list in your reply adds nothing to their model');
@@ -67,8 +67,8 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
   });
 
   it('THE PROMPTS (DL 22 Oct, priority change): the coach\u2019s reply rules and the drafter\u2019s rules, adapted as ruled; the old constants are gone', () => {
-    expect(createHash('sha256').update(CORE_REPLY_RULES, 'utf8').digest('hex')).toBe('0d1c339f1750712b5a4c769618343e9c343f4da60959066ae6d80a1404044d30');
-    expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('d53b36a796519b62f4729856abc2480cd5ae91b1407d785446100214c14f4264'); // 22 Oct: a deadline is the aim's window, never an aim; a stated difference is linked (DL, Paul's tests, Lenses' bakery run; was b23434b8…)
+    expect(createHash('sha256').update(CORE_REPLY_RULES, 'utf8').digest('hex')).toBe('6f5f00c581ac4be2f1f590973e4bcf58c6eba498e5216bc3a8a21a189be5f3d6');
+    expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('50b1574d554586f9ed858101fedb02be4127727af3cde0fd15cf5803025f7cae'); // 22 Oct: modelling classes + a stated level goes in current, not prose; #3660 deadline/difference and the entire estimate rule kept.
     // The retired constants are gone from both modules: no route can send the accreted text again.
     for (const name of ['CORE_REPLY_INSTRUCTION', 'CORE_RESPONSE_DISCIPLINE', 'CORE_NEXT_STEP']) expect(Object.keys(coreInstructions), name).not.toContain(name);
     expect(Object.keys(drafting)).toEqual(['CORE_DRAFTER_RULES']);
@@ -123,6 +123,34 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     // Codex r2 on #3660: never a fixed +1/\u22121 across different scales (\u00a3 thousands into \u00a3 is 1,000 per unit).
     expect(CORE_DRAFTER_RULES).not.toContain("in the whole's unit per the part's unit;");
     expect(CORE_DRAFTER_RULES).not.toContain("add at most one as Olumi's when it materially changes the reasoning");
+  });
+
+  it('the drafter modelling contract is sent once, with the blocking-input question on later turns too', () => {
+    const draftRules = [
+      "A qualitative worry or uncertainty is a risk, or a condition when it cannot reasonably be quantified, never an unmeasured factor.",
+      "Every factor has a stated unit and a current value or a labelled Olumi estimate under the estimate rule; only schema-defined on/off steps use unit null and a 0-or-1 level (a risk-mitigation step is 0 today and 1 under the option that takes it).",
+      "Represent mechanisms and dependencies with items and links (or defined_as for a stated sum/product), not only in condition or assumption text.",
+      "Use conditions only for what cannot be quantified; aim for at most 5 conditions in a first model, retaining material context and dissent.",
+      "Name the risks the brief implies: include at least one risk when the brief implies any, linked to what it would hit.",
+      "For a risk's chance and window, use supplied figures or, where reasonable, a labelled Olumi estimate under the estimate rule; if no reasonable estimate is possible, keep it unknown and say what is missing.",
+      "An option acts through settings on factors or sized option-to-item links; retain either valid form without adding an artificial factor.",
+    ];
+    const question = "Whenever a missing input leaves the Run blocked, end every reply with exactly ONE question asking for the specific input the Run needs next (today's level, a measure, a target or a time window), in plain words; use the current state and tool outcome, never re-ask a supplied input.";
+    const firstTurn = `${b}\n\n${CORE_DRAFTER_RULES}`;
+    for (const rule of [...draftRules, question]) expect(count(firstTurn, rule), rule).toBe(1);
+    expect(count(b, question), 'the question survives after the first model').toBe(1);
+    for (const rule of draftRules) expect(b, 'draft-only modelling rules are not repeated in standing instructions').not.toContain(rule);
+    for (const old of ['A possible event is a risk; an existing condition is a factor.',
+      'Otherwise explain the missing capability or ask only for the necessary input.',
+      'and ask for the decisive missing input;']) expect(firstTurn, old).not.toContain(old);
+    // Unrelated quantities and adoption cannot lend a figure or authorship to another item.
+    expect(firstTurn).toContain('never change or mix with a figure they gave');
+    expect(firstTurn).toContain('user/party requires verbatim words stating that very item');
+    expect(firstTurn).toContain('Adoption does not transfer authorship.');
+  });
+
+  it('keeps the entire estimate rule verbatim, rather than weakening figure or author protections', () => {
+    expect(CORE_DRAFTER_RULES.split('\n\n').find((p) => p.startsWith('ESTIMATE RULE:'))).toBe("ESTIMATE RULE: Build a model the analysis can run on. Each item Olumi adds is complete and visibly Olumi's (source olumi, quote null): a factor has a provisional level, a central figure with a range around it, in a stated unit; each of Olumi's links has a direction and, where `to` has a unit and `from` has one or is an option or an on-or-off step (+1 when in place), a rough strength, a central figure with a range around it; each option except the status quo reaches the goal through what it changes; a risk Olumi raises has a provisional chance range and window, and links to what it would hit. Make each range as wide as what is genuinely unknown, from general knowledge of situations like this one. Where the person's or a party's item has no figure, give Olumi's provisional estimate of it with estimate_by olumi, as wide as what is genuinely unknown; never change or mix with a figure they gave, and never set the goal's target figure (ask for it). In the reply, say that the figures marked as Olumi's are starting estimates for them to correct.");
   });
 
   it('the builder\u2019s effort arm is set only on a core turn that asks for it; the default is the banked medium (A/B/C 22 Oct)', () => {
