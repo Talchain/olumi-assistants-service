@@ -9,6 +9,7 @@
  */
 import { goalChanceFactsForAgent } from '../goal-target/goal-chance-range-agent.js';
 import { goalTargetBasisOf } from '../goal-target/goal-target-basis.js';
+import { readGoalRecord } from '../goal-target/goal-record.js';
 import { sayGoalChanceSide } from './goal-chance-side-words.js';
 
 type Rec = Record<string, unknown>;
@@ -77,7 +78,12 @@ export function licensedChancesOf(analysisResult: unknown, graph: unknown, curre
   });
   if (options.length === 0) return undefined;
   const goal = nodes.find((n) => n.kind === 'goal');
-  const period = goalTargetBasisOf(goal)?.period_months;
+  // DL ruling 22 Oct: a window may be named with the chance only where the chance speaks to it: Olumi reads the effects as in
+  // place by its end (basis_at_h), or the goal holds that same month (the period-end conditional's own words). A window read
+  // with effects_at_period_end false leaves a static reading (no_horizon), so "within N months" would claim a time never computed.
+  const basis = goalTargetBasisOf(goal);
+  const heldMonths = typeof goal?.id === 'string' ? readGoalRecord(graph, goal.id)?.horizon?.months : undefined;
+  const period = basis !== undefined && (basis.effects_at_period_end || heldMonths === basis.period_months) ? basis.period_months : undefined;
   return { options, ...(typeof period === 'number' ? { periodMonths: period } : {}),
     ...(typeof facts.goal_chance_words === 'string' && facts.goal_chance_words.trim() !== '' ? { chanceWords: facts.goal_chance_words } : {}) };
 }
