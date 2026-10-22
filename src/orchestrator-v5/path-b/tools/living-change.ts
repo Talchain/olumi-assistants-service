@@ -80,12 +80,15 @@ export async function proposeLivingChange(deps: Deps, ctx: Ctx, args: LivingChan
 
 /**
  * The kernel on a change: the person's words (the saved brief and their messages) and the saved model it changes. A calendar
- * deadline's reading: a saved one stands while its words do; a new one gets the host's day (`calendar-reading.ts`).
+ * deadline's reading: a saved one stands while its words do; a new one gets the host's day (`calendar-reading.ts`), before the
+ * kernel judges what changed and again on its canonical ids.
  */
 function kernelFor(base: Exclude<Awaited<ReturnType<typeof savedLiving>>, ToolOutcome>, ctx: Ctx, model: LivingModelT) {
   const brief = typeof base.saved.json.brief_text === 'string' ? [base.saved.json.brief_text] : [];
-  const read = applyKernel(model, [...brief, ...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])], base.model, brief[0] ?? null);
-  return { ...read, model: withCalendarReadings(read.model, base.model, todayInLondon(new Date())) };
+  const today = todayInLondon(new Date());
+  const read = applyKernel(withCalendarReadings(model, base.model, today), [...brief, ...(ctx.verified_user_messages ?? []),
+    ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])], base.model, brief[0] ?? null);
+  return { ...read, model: withCalendarReadings(read.model, base.model, today) };
 }
 
 async function proposeOnce(deps: Deps, ctx: Ctx, args: LivingChangeArgs): Promise<ToolOutcome> {

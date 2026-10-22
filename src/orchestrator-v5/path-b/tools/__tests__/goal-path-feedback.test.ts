@@ -15,7 +15,7 @@ import { mapLivingModel } from '../../living-model/mapper.js';
 import { KNOWN_ANSWER } from '../../living-model/__tests__/fixtures.js';
 import { F1_CONTRADICTED, F1_OTHER_CAUSE } from '../../living-model/__tests__/track2-f1-identity.fixtures.js';
 import { buildModel } from '../draft-tool.js';
-import { proposeLivingChange } from '../living-change.js';
+import { applyLivingChange, proposeLivingChange } from '../living-change.js';
 import { pathBTools, type ToolCallResult } from '../index.js';
 import type { TraceRow } from '../outcome.js';
 import { goalPathEncodingCauses, KEPT_AS_REFUSED, personContentLost, RESTRUCTURE_CHANGE, RESTRUCTURE_DRAFT, type Restructure } from '../goal-path.js';
@@ -356,5 +356,36 @@ describe('Codex r1 on #3674: the tools record the day of a calendar reading, the
     const out = await proposeLivingChange({ dispatch: p.dispatch, proposals: new ProposalStore() }, changeCtx, change(next));
     expect(out, JSON.stringify(out)).toMatchObject({ status: 'ok' });
     expect(((out as { data: Rec }).data.changes as Rec[]).map((c) => c.id), 'the reading is unchanged, so no row for the aim').toEqual(['f']);
+  });
+
+  /** A change two weeks on that corrects f and, beside it, sends `aim` for the goal: the card has a row for f alone, and the write keeps the saved aim. */
+  async function onlyF(saved: LivingModelT, aim: Partial<NonNullable<LivingModelT['aims'][number]['target']>>) {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-05T12:00:00Z'));
+    const p = product(saved);
+    const proposals = new ProposalStore();
+    const next = structuredClone(saved);
+    Object.assign(next.aims[0]!.target!, aim);
+    next.factors[0] = { ...next.factors[0]!, value: 0.6, quote: 'Actually f is at 0.6 now.' };
+    const out = await proposeLivingChange({ dispatch: p.dispatch, proposals }, changeCtx, change(next));
+    expect(out, JSON.stringify(out)).toMatchObject({ status: 'ok' });
+    expect(((out as { data: Rec }).data.changes as Rec[]).map((c) => c.id)).toEqual(['f']);
+    expect(await applyLivingChange({ dispatch: p.dispatch, proposals }, changeCtx, String((out as { data: Rec }).data.proposal_id))).toMatchObject({ status: 'ok' });
+    return (p.saved()!.living_model as LivingModelT).aims[0]!;
+  }
+
+  it('Codex r2: the person\'s own saved duration stands while its words do; a reading beside it never replaces it', async () => {
+    const saved = structuredClone(KNOWN_ANSWER);
+    Object.assign(saved.aims[0]!.target!, { by_when: 'within 6 months, by the end of March', period_months: 6 });
+    const aim = await onlyF(saved, { period_by: 'olumi', period_deadline: '2027-03-31', period_months: null });
+    expect(aim.target).toMatchObject({ period_months: 6, period_by: null, period_deadline: null, period_read_on: null });
+  });
+
+  it('Codex r2: a saved reading the AI re-dated keeps its author; the person\'s aim never reads as changed', async () => {
+    const saved = structuredClone(KNOWN_ANSWER);
+    saved.aims[0] = { ...saved.aims[0]!, quote: 'reach the units by the end of September' };
+    Object.assign(saved.aims[0]!.target!, { by_when: 'by the end of September', period_by: 'olumi', period_deadline: '2027-09-30', period_read_on: '2026-10-22' });
+    const aim = await onlyF(saved, { period_read_on: '2026-11-05', period_deadline: '2027-10-31' });
+    expect(aim).toEqual(saved.aims[0]);
   });
 });
