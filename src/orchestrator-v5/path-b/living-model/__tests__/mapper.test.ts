@@ -131,20 +131,21 @@ describe('thin core mapper: living model → GraphV3', () => {
     expect(mapLivingModel(change).withheld, 'a change with no level today: never read from 0').toContainEqual({ id: 'g', reason: 'goal_level_unknown' });
   });
 
-  it('DL 22 Oct (marketing on 68ca54f0-b): a count not yet started is 0 today by its own definition, so its threshold is carried', () => {
+  it('DL 22 Oct (marketing on 68ca54f0-b): a count not yet started is 0 today by its own definition, so its threshold is carried; one that began earlier is asked', () => {
     const count: LivingModelT = structuredClone(KNOWN_ANSWER);
-    count.aims[0] = { ...count.aims[0]!, text: 'secure 20 new customers', quote: 'secure 20 new customers within the first 3 months',
-      target: { ...count.aims[0]!.target!, quantity: 'new customers', unit: 'customers', value: 20, baseline: null, current: 0 } };
-    count.links[0]!.effect = { ...count.links[0]!.effect, unit: 'customers', value: 10, sd: 2 };
+    count.aims[0] = { ...count.aims[0]!, text: 'Win 30 sign-ups', quote: 'win 30 sign-ups in the first six weeks after opening',
+      target: { ...count.aims[0]!.target!, quantity: 'sign-ups', unit: 'sign-ups', value: 30, baseline: null, current: 0 } };
+    count.links[0]!.effect = { ...count.links[0]!.effect, unit: 'sign-ups', value: 10, sd: 2 };
     const read = mapLivingModel(count);
     expect(read.withheld).toEqual([]);
-    expect(node(read.graph, 'g')).toMatchObject({ goal_threshold: expect.any(Number), goal_threshold_raw: 20 });
-    expect(readGoalRecord(read.graph, 'g')?.target, 'the licence reads the target').toMatchObject({ raw: 20, comparator: '>=' });
-    // CONTRAST (the served case): the same goal with no level today is held, so its chance is withheld.
-    const unknown = { ...count, aims: [{ ...count.aims[0]!, target: { ...count.aims[0]!.target!, current: null } }] };
-    expect(mapLivingModel(unknown).withheld).toContainEqual({ id: 'g', reason: 'goal_level_unknown' });
+    expect(node(read.graph, 'g')).toMatchObject({ goal_threshold: expect.any(Number), goal_threshold_raw: 30 });
+    expect(readGoalRecord(read.graph, 'g')?.target, 'the licence reads the target').toMatchObject({ raw: 30, comparator: '>=' });
+    // CONTRAST: a count that began earlier ("sign-ups this year") has no level today until the person gives it: held, so asked.
+    const earlier = { ...count, aims: [{ ...count.aims[0]!, quote: 'win 30 sign-ups this year', target: { ...count.aims[0]!.target!, current: null } }] };
+    expect(mapLivingModel(earlier).withheld).toContainEqual({ id: 'g', reason: 'goal_level_unknown' });
     const current = LivingAim.shape.target.unwrap().shape.current.description ?? '';
-    expect(current).toContain('A count that has not started yet (new customers in the first 3 months after a launch, sales next quarter) is 0 today by its own definition: set 0 and never ask for it; a count that began earlier is not 0.');
+    expect(current).toContain('A count that has not started yet (sign-ups in the first six weeks after opening, orders next quarter) is 0 today by its own definition: set 0, '
+      + 'say why in plain words on the change\'s public_label ("0 today: it counts from opening"), and never ask for it. A count that began earlier is not 0: ask for it.');
   });
 
   it('DL 22 Oct: an ordinary range uses Olumi\'s assumed law; an unknown sign is never drawn positive; a point\'s σ is |β|/2', () => {
