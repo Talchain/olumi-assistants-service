@@ -1660,7 +1660,7 @@ function markProductIdentities(
   /**
    * ⛔ OLUMI'S PRODUCT OVER A PART WITH NO LEVEL IS NOT DECLARED; ITS FIGURES ARE ASKED (AIQ #72 5898415568 run 0
    * `0c426b00`; R3 5898443502: "admission could refuse a product over level-less Olumi parts and draft the ask
-   * instead"). The engine multiplies a declared product only when every part has a level above 0 today; otherwise ISL
+   * instead"). The engine requires every part's level; a pure product with a stated zero can also have a zero part. Otherwise ISL
    * withholds it (`identity_operand_missing` / `identity_zero_level`), PLoT then withholds the goal's chance on every
    * option (#416), and the Run ends with no question — served cut-costs chained "AWS workload spend × GCP workload
    * share" into "× GCP saving rate", the share and the rate with no level. So Olumi's own reading is refused when a part
@@ -1679,7 +1679,7 @@ function markProductIdentities(
    * ⭐ AN EVIDENCED CREATION-0 IS A LEVEL WHEN NOTHING STATES THE PRODUCT'S OWN (Science d5 #87 6008551439 (A), amending
    * 6006376889 (b)). The refusal above exists because ISL withholds a product over a missing or zero part, so PLoT then
    * withholds every option's goal chance with no question (R3 5898443502). ISL withholds a ZERO part only against a
-   * stated level on the product (its rule 3, AIQ #72 5881596876: "with no stated target … a zero operand is an ordinary
+   * nonzero level on the product, or an unexplained extra cause (its rule 3, AIQ #72 5881596876: "with no stated target … a zero operand is an ordinary
    * level"). So a part at 0 today, or with no level, that an option CREATES (`optionsCreating`: its own creation verb,
    * and its path reaches the part) is not refused under a product whose node states no level; construction holds a
    * level-less one at 0 (`created_part_zero`, below), and ISL works the product out exactly.
@@ -1688,8 +1688,15 @@ function markProductIdentities(
   const createdAtZero = (part: string, d: CandidateIdentity): boolean => {
     const t = todayOf(part);
     const product = resolve(d.outcome);
-    if ((t !== undefined && t !== 0) || product === undefined || todayOf(product) !== undefined) return false;
-    return optionsCreating(nodes, edges, part, statusQuoOptions).length > 0;
+    if ((t !== undefined && t !== 0) || product === undefined) return false;
+    const target = todayOf(product);
+    // A stated zero is compatible only with a pure product. Other causes/addends need
+    // reconciliation, and cannot be guessed from a zero product's unidentified ratio.
+    const parts = d.factors.map(resolve);
+    const pureZero = target === 0 && edges.every((e) => e.to !== product || parts.includes(e.from));
+    if (target !== undefined && !pureZero) return false;
+    // An existing zero is a real level for this pure identity, independent of who authored it.
+    return (pureZero && t === 0) || optionsCreating(nodes, edges, part, statusQuoOptions).length > 0;
   };
   for (let changed = true; changed;) {
     changed = false;
@@ -6054,14 +6061,19 @@ function admitOnce(
    * creation verb, and its path reaches the part) is 0 today: Olumi's reading (`cee_inference`, never the user's), said
    * once among what was done with the brief, where the user can correct it. The same holds for Olumi's own product (served
    * witness draw 6 on b501eda4: #416 withheld every option's chance over the same part). Only on a product whose node has
-   * no level of its own: with one, ISL's ratio needs every part above 0 (`identity_zero_level`), so the part is left to
-   * the ask. A part with any level, or one no option creates, is untouched.
+   * no level of its own, or an exact stated zero on a pure product. A nonzero anchor or extra cause still needs a
+   * reconciled scale, so its missing part is left to the ask. Every existing level and its author is untouched.
    */
   const levelled = (n: AdmittedNode | undefined): boolean => typeof n?.observed_state?.value === 'number' && Number.isFinite(n.observed_state.value);
   const statusQuoIds = new Set(levers.nodes.filter((n) => n.kind === 'option' && (declaredStatusQuoIds.has(n.id) || n.is_baseline === true)).map((n) => n.id));
   const createdZero = new Map<string, { label: string; options: string[] }>();
   for (const [carrierId, carrier] of carriers) {
-    if (carrier.operation !== 'product' || levelled(levers.nodes.find((n) => n.id === carrierId))) continue;
+    if (carrier.operation !== 'product') continue;
+    const carrierNode = levers.nodes.find((n) => n.id === carrierId);
+    const pureZero = carrierNode?.observed_state?.value === 0 && !(carrier.addends?.length)
+      && finalEdges.every((e) => e.to !== carrierId || carrier.factor_ids.includes(e.from))
+      && carrier.factor_ids.every((id) => carriers.get(id)?.operation !== 'accumulation');
+    if (levelled(carrierNode) && !pureZero) continue;
     for (const partId of carrier.factor_ids) {
       const part = levers.nodes.find((n) => n.id === partId);
       if (part === undefined || levelled(part) || createdZero.has(partId)) continue;
