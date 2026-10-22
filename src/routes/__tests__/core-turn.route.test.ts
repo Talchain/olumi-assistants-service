@@ -370,19 +370,25 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     const card = ((await typed(SAID)).json() as Json).cards[0];
     preparedId = String(card.proposal_id);
     readiness = { status: 'ready', may_run: true, options: [], blockers: [] };
-    let release!: () => void;
-    holdProvider = new Promise<void>((resolve) => { release = resolve; });
-    holdWhen = (body) => Array.isArray(body.input) && (body.input as Json[]).some((i) => i.type === 'function_call_output');
+    // ⭐ DETERMINISTIC (DL 22 Oct: a timer-polled flip raced the automatic Run's own confirming read, about 1 run in 4): the other
+    // Run lands exactly when the reply call is made, so after the approval's tool (its Run and that Run's confirming read) and
+    // before the turn's final read. The gate is already resolved: no timer and no wait decide the order.
+    let landedAfterRuns: number | undefined;
+    holdProvider = Promise.resolve();
+    holdWhen = (body) => {
+      const reply = Array.isArray(body.input) && (body.input as Json[]).some((i) => i.type === 'function_call_output');
+      if (reply) {
+        landedAfterRuns = runs;
+        otherRun = 'another-run';
+        carriedResult = { ...carriedResult, summary: 'Another Run\u2019s summary.' };
+      }
+      return reply;
+    };
     outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: 'Saved, and the analysis ran.' }]];
-    const pending = post({ turn_id: randomUUID(), message: card.approve_action.message, source: 'chip_click',
+    const r = await post({ turn_id: randomUUID(), message: card.approve_action.message, source: 'chip_click',
       chip: { id: card.approve_action.id, action_type: card.approve_action.action_type } });
-    await vi.waitFor(() => expect(runs).toBe(1));
-    // The automatic Run is confirmed; while its words are written, another Run becomes the read's selected Run.
-    otherRun = 'another-run';
-    carriedResult = { ...carriedResult, summary: 'Another Run\u2019s summary.' };
-    release();
-    const r = await pending;
     expect(r.statusCode, r.body).toBe(200);
+    expect(landedAfterRuns, 'the other Run lands after the approval\u2019s own automatic Run').toBe(1);
     const a = r.json() as Json;
     expect(a.analysis_result, 'never another Run\u2019s result beside this Run\u2019s narration').toBeUndefined();
     expect(a.run).toMatchObject({ run_id: 'another-run' });
