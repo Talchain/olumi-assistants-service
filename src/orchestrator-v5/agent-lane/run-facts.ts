@@ -150,6 +150,8 @@ const warningsOf = (result: unknown): Rec[] => {
 export function runFactsOf(analysisResult: unknown, graph: unknown, current: boolean,
   state: { readonly analysisState?: unknown; readonly analysisReady?: unknown;
     readonly runEvidence?: SelectedRunEvidence;
+    /** The selected Run's own id, which `runEvidence` must match for the exact-result margins (`goalMarginsOf`). */
+    readonly selectedRunId?: string | null;
     readonly comparison?: { readonly prior_run_id?: string; readonly run_delta?: unknown; readonly rerun_record?: unknown } } = {}): RunFacts {
   const question = analysisResult == null && state.runEvidence === undefined ? undefined
     : deriveRunQuestion({ runEvidence: state.runEvidence, storedResult: analysisResult });
@@ -169,7 +171,7 @@ export function runFactsOf(analysisResult: unknown, graph: unknown, current: boo
     : [{ option_id, basis: r.basis === 'fixed_baseline' ? 'fixed_baseline' as const : 'measured_spread' as const }]);
   const enrichment = isRec(analysisResult) ? analysisResult.enrichment : undefined;
   const s = current ? decisionSensitivityOf(enrichment) : { status: 'not_measured' as const };
-  const margins = goalMarginsOf(analysisResult, graph, current, state.runEvidence);
+  const margins = goalMarginsOf(analysisResult, graph, current, state.runEvidence, state.selectedRunId);
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const said: RunFacts['user_statements'] = nodes.flatMap((n) => (typeof n.id !== 'string' ? [] : userStatementsOn(n).map((r) => ({
     node_id: n.id as string, record: structuredClone(r),

@@ -19,10 +19,27 @@ type Json = Record<string, any>;
 // Read via fs, not a JSON import attribute (TS2823 under the ratchet's config; precedent in run-analysis-brief-to-plot.test.ts).
 const fixture = JSON.parse(readFileSync(new URL('./fixtures/exact-figures-run.json', import.meta.url), 'utf8')) as Json;
 const fresh = (): Json => structuredClone(fixture) as Json;
-const marginsOf = (f: Json, current = true) => goalMarginsOf(f.analysis_result, f.graph, current, readRunEvidence(f.analysis_run_evidence));
+const marginsOf = (f: Json, current = true, selected: string | null = f.analysis_run_evidence.run_id) =>
+  goalMarginsOf(f.analysis_result, f.graph, current, readRunEvidence(f.analysis_run_evidence), selected);
 const row = (f: Json, id: string): Json => f.analysis_result.enrichment.option_comparison.find((r: Json) => r.option_id === id);
 const link = (f: Json, id: string): Json => f.graph.living_model.links.find((l: Json) => l.id === id);
 const licence = (f: Json): Json => f.analysis_result.enrichment.inference_warnings.find((w: Json) => w.code === 'GOAL_CHANCE_LICENSED');
+/** The Run's own target moved: the snapshot's raw target, the threshold it sent (encoded) and the licence's display. */
+const retarget = (f: Json, raw: number, encoded: number, baseline?: { raw: number; encoded: number }): Json => {
+  const snap = f.analysis_run_evidence.input_snapshot;
+  snap.goal.target_raw = raw;
+  licence(f).target.value = raw;
+  licence(f).sent_threshold.value = encoded;
+  if (baseline !== undefined) {
+    Object.assign(snap.factors.find((x: Json) => x.factor_id === snap.goal.node_id), { raw: baseline.raw, encoded: baseline.encoded });
+    licence(f).sent_threshold.baseline = baseline.encoded;
+  }
+  return f;
+};
+const levels = (f: Json, by: Readonly<Record<string, number>>): Json => {
+  for (const [id, v] of Object.entries(by)) Object.assign(row(f, id).outcome, { p10: v, p50: v, p90: v, mean: v });
+  return f;
+};
 /** Every option's recorded level in the encoded frame (the Run's own scale: 0.8 encodes the target 400). */
 const encode = (f: Json, sq = 0.4): Json => {
   for (const [id, v] of [['night', 1.1], ['sorter', 0.5], ['loop', 1.04], ['status_quo', sq]] as const) {
@@ -43,7 +60,7 @@ const EXPECTED = {
 describe('exact results carry their margins and the input each rests on, from the Run itself', () => {
   it('the run-facts packet of a served exact-figure Run: each margin, and each own link\'s boundary', () => {
     const f = fresh();
-    const facts = runFactsOf(f.analysis_result, f.graph, true, { runEvidence: readRunEvidence(f.analysis_run_evidence) });
+    const facts = runFactsOf(f.analysis_result, f.graph, true, { runEvidence: readRunEvidence(f.analysis_run_evidence), selectedRunId: f.analysis_run_evidence.run_id });
     expect(facts.margins).toEqual(EXPECTED);
   });
 
@@ -121,6 +138,47 @@ describe('exact results carry their margins and the input each rests on, from th
     const f = fresh();
     f.analysis_result.run_id = 'another_run';
     expect(marginsOf(f)).toBeUndefined();
+  });
+
+  it('NEGATIVE (Codex r1): a stored result with no id of its own, and evidence of another Run than the one selected', () => {
+    const f = fresh();
+    expect(f.analysis_result.run_id).toBeUndefined();
+    f.analysis_run_evidence.run_id = 'foreign';
+    expect(marginsOf(f, true, '9848593d6dbc5d4d62fcbd210e9bd2c5fc712801bca143fae404b52a07ea7abb')).toBeUndefined();
+    expect(marginsOf(fresh(), true, null)).toBeUndefined();
+  });
+
+  it('NEGATIVE (Codex r1): a tiny encoding scale with today\'s level at 0 is two frames that agree only at 0: nothing is said', () => {
+    const f = levels(retarget(fresh(), 1e-10, 1e-12, { raw: 0, encoded: 0 }), { status_quo: 0 });
+    for (const id of ['night', 'sorter', 'loop']) licence(f).withheld_reason_by_option[id].side = 'meets';
+    expect(marginsOf(f)).toBeUndefined();
+  });
+
+  it('NEGATIVE (Codex r1): a small recorded spread is still a spread', () => {
+    const f = fresh();
+    row(f, 'night').outcome.std = 1e-7;
+    expect(marginsOf(f)).toBeUndefined();
+  });
+
+  it('Codex r1: a level is never rounded away (only float noise is cleared)', () => {
+    const f = levels(fresh(), { night: 550.0000000001 });
+    const night = marginsOf(f)!.options.find((o) => o.option_id === 'night')!;
+    expect(night.margin).toBe(150.0000000001);
+    expect(night.rests_on).toBeUndefined();
+  });
+
+  it('Codex r1: the status quo is the Run\'s reference, so it is never given a boundary, even with a link of its own', () => {
+    const f = fresh();
+    f.graph.living_model.links.push({ ...link(f, 'night_output'), id: 'sq_output', from: 'status_quo', effect: { ...link(f, 'night_output').effect, value: 0 } });
+    expect(marginsOf(f)!.options.find((o) => o.option_id === 'status_quo')!.rests_on).toBeUndefined();
+  });
+
+  it('Codex r1: a target equal to today\'s level offers no test at a zero effect (another "carry on as now")', () => {
+    const f = retarget(fresh(), 200, 0.4);
+    licence(f).withheld_reason_by_option.sorter.side = 'meets';
+    const m = marginsOf(f)!;
+    expect(m.options.map((o) => o.margin)).toEqual([350, 50, 320, 0]);
+    expect(m.options.some((o) => o.rests_on !== undefined)).toBe(false);
   });
 
   it('no exact sum on the goal: margins, but no input is said to tip a result', () => {

@@ -18,9 +18,10 @@ import { keptOutcomeOptionIds } from './decision-sensitivity.js';
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Rec) : undefined);
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
-const close = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
-/** The Run's figure without float noise (549.9999999999999 is the 550 the Run reports as its p50). */
-const clean = (v: number): number => Number(v.toPrecision(12)) + 0;
+/** Float noise only, relative to the figures themselves (Codex r1: no absolute floor that makes tiny frames agree). */
+const close = (a: number, b: number): boolean => a === b || Math.abs(a - b) <= 1e-12 * Math.max(Math.abs(a), Math.abs(b));
+/** The Run's figure without float noise (549.9999999999999 is the 550 the Run reports), never a rounded figure (1e12 + 1 stays). */
+const clean = (v: number): number => Number(v.toPrecision(15)) + 0;
 
 /** The one input an option's result rests on, where the model's exact sum makes its level today's level plus that input. */
 export interface GoalMarginRestsOn {
@@ -58,7 +59,7 @@ function exactLevelOf(row: Rec | undefined): number | undefined {
   const o = rec(row?.outcome);
   if (o === undefined || !finite(o.p50)) return undefined;
   const p50 = o.p50;
-  if (finite(o.std) && !close(p50 + o.std, p50)) return undefined;
+  if (finite(o.std) && Math.abs(o.std) > 1e-12 * Math.abs(p50)) return undefined;
   return ['p10', 'p90', 'mean'].every((k) => !(k in o) || (finite(o[k]) && close(o[k] as number, p50))) ? p50 : undefined;
 }
 
@@ -66,10 +67,13 @@ function exactLevelOf(row: Rec | undefined): number | undefined {
  * The selected CURRENT Run's margins against the target (see the header), or undefined. Its input snapshot is the Run's own
  * retained evidence where the stored result does not carry it, only when that evidence is this same Run (as `deriveRunQuestion`).
  */
-export function goalMarginsOf(result: unknown, graph: unknown, current: boolean, evidence?: SelectedRunEvidence): GoalMargins | undefined {
+export function goalMarginsOf(result: unknown, graph: unknown, current: boolean, evidence?: SelectedRunEvidence,
+  /** The selected Run's id: the evidence must be THAT Run's (Codex r1: a stored result may carry no id of its own). */
+  selectedRunId?: string | null): GoalMargins | undefined {
   const stored = rec(result);
   if (!current || stored === undefined) return undefined;
-  if (evidence?.runId !== undefined && typeof stored.run_id === 'string' && stored.run_id !== evidence.runId) return undefined;
+  if (evidence !== undefined && (typeof selectedRunId !== 'string' || evidence.runId !== selectedRunId
+    || (typeof stored.run_id === 'string' && stored.run_id !== selectedRunId))) return undefined;
   const ev = recordedStaticLevelEvidence(evidence?.inputSnapshot === undefined ? stored : { ...stored, input_snapshot: evidence.inputSnapshot });
   if (ev === undefined || !ev.static_scope_declared) return undefined;
   const enrichment = rec(stored.enrichment);
@@ -84,7 +88,8 @@ export function goalMarginsOf(result: unknown, graph: unknown, current: boolean,
   // The frame, from the status quo's own row: today's level in the target's unit, or its encoded value.
   const sqLevel = exactLevelOf(rowOf(sq));
   if (sqLevel === undefined) return undefined;
-  const sameFrame = close(ev.baseline, ev.encoded_baseline) && close(ev.target, ev.encoded_target);
+  // The same frame only when the Run recorded identical figures in both (Codex r1: a near-zero scale is not the same frame).
+  const sameFrame = ev.baseline === ev.encoded_baseline && ev.target === ev.encoded_target;
   const natural = close(sqLevel, ev.baseline);
   const encoded = close(sqLevel, ev.encoded_baseline);
   if (!natural && !encoded) return undefined;
@@ -125,13 +130,15 @@ export function goalMarginsOf(result: unknown, graph: unknown, current: boolean,
     const own = lmLinks.filter((l) => l?.from === id);
     const link = own.length === 1 && own[0]?.to === ev.goal_id ? own[0]! : undefined;
     const effect = rec(link?.effect);
-    if (exactSum && link !== undefined && typeof link.id === 'string' && effect?.form === 'exact' && finite(effect.value)
+    // Never the status quo: it is the Run's paired reference, and testing its effect would remove that reference (Codex r1).
+    if (exactSum && id !== sq && link !== undefined && typeof link.id === 'string' && effect?.form === 'exact' && finite(effect.value)
       && (effect.sign === '+' || effect.sign === '-') && (effect.unit === null || effect.unit === ev.unit)
       && Array.isArray(lmOption?.settings) && lmOption!.settings.length === 0) {
       const saved = (effect.sign === '-' ? -1 : 1) * Math.abs(effect.value) + 0;
       // The identity checked on THIS Run: its level is today's level plus that effect, or nothing is said.
       const boundary = clean(ev.target - ev.baseline);
-      if (close(level, ev.baseline + saved) && !close(boundary, saved)) restsOn = { link_id: link.id, saved, boundary };
+      // A zero boundary would make the option another "carry on as now" (Codex r1): no test is offered there.
+      if (level === clean(ev.baseline + saved) && boundary !== 0 && !close(boundary, saved)) restsOn = { link_id: link.id, saved, boundary };
     }
     options.push({ option_id: id, label, level, margin, meets, ...(restsOn === undefined ? {} : { rests_on: restsOn }) });
   }

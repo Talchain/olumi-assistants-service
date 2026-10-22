@@ -1078,7 +1078,7 @@
       "source": null,
       "by_when": "next month",
       "current": 200,
-      "baseline": "today's 200 crates per shift",
+      "baseline": "Synthetic words.",
       "quantity": "Synthetic text.",
       "comparator": ">=",
       "change_kind": null,
@@ -1151,7 +1151,7 @@
    "history": [
     {
      "id": "loop_output",
-     "old": "Extra loop adds exactly 300 crates per shift.",
+     "old": "Synthetic words.",
      "quote": "Synthetic text.",
      "change": "superseded"
     }
@@ -1161,7 +1161,7 @@
      "id": "night",
      "label": "Night crew",
      "party": null,
-     "quote": "Our three alternatives are Night crew, Second sorter and Extra loop.",
+     "quote": "Synthetic words.",
      "source": "user",
      "status": "feasible",
      "settings": [],
@@ -1171,7 +1171,7 @@
      "id": "sorter",
      "label": "Second sorter",
      "party": null,
-     "quote": "Our three alternatives are Night crew, Second sorter and Extra loop.",
+     "quote": "Synthetic words.",
      "source": "user",
      "status": "feasible",
      "settings": [],
@@ -1181,7 +1181,7 @@
      "id": "loop",
      "label": "Extra loop",
      "party": null,
-     "quote": "Our three alternatives are Night crew, Second sorter and Extra loop.",
+     "quote": "Synthetic words.",
      "source": "user",
      "status": "feasible",
      "settings": [],
@@ -1201,9 +1201,9 @@
    "conditions": [
     {
      "role": "assumption",
-     "text": "Use exact fixed effects with no remaining variation for this comparison.",
+     "text": "Synthetic words.",
      "party": null,
-     "quote": "Assume exact fixed effects and no remaining variation for this comparison.",
+     "quote": "Synthetic words.",
      "source": "user",
      "applies_to": [
       "night_output",
