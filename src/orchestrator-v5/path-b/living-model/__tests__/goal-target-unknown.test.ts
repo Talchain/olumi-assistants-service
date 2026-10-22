@@ -17,6 +17,7 @@ import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 import type { HandlerInvocation } from '../../../tools/registry.js';
 import { createRunAnalysisHandler } from '../../../tools/handlers/run-analysis.js';
 import { linksAwaitingGoalInput, mapLivingModel } from '../mapper.js';
+import { awaitingGoalSentence } from '../../../agent-lane/goal-certainty.js';
 
 type Json = Record<string, any>;
 const SCENARIO = 'f0f0f0f0-0000-4000-8000-000000000023';
@@ -48,16 +49,18 @@ const pricingAndReferral = (): LivingModelT => ({
 });
 
 /** Olumi's suggested measure with no figure (the Q2 shape), and Olumi's centred estimate on the referral link. */
-const awaitingTarget = (opts: { targetValue?: number | null; bareRange?: true; olumiTarget?: true; statedLink?: true; change?: { current: number | null } } = {}): LivingModelT => {
+const awaitingTarget = (opts: { targetValue?: number | null; bareRange?: true; olumiTarget?: true; statedLink?: true; change?: { current: number | null }; optionLink?: true; noValue?: true; longGoal?: true } = {}): LivingModelT => {
   const m = pricingAndReferral();
   return {
     ...m,
-    aims: m.aims.map((a) => ({ ...a, target: opts.change !== undefined
+    aims: m.aims.map((a) => ({ ...a, ...(opts.longGoal ? { text: `Monthly gross profit ${'and steady growth across every region and channel '.repeat(4)}`.trim() } : {}), target: opts.change !== undefined
       // Track 3 hiring shape: a +10% change target the person stated, with no level today to measure it from.
       ? { ...a.target!, comparator: 'increase' as const, value: 10, unit: '%', change_kind: 'relative' as const, current: opts.change.current, current_unit: '£', current_source: null, source: null }
       : { ...a.target!, value: opts.olumiTarget ? 12000 : opts.targetValue ?? null, source: opts.targetValue == null ? 'olumi' as const : null } })),
     links: m.links.map((l) => (l.id !== 'referral_gp' || opts.statedLink ? l : { ...l, source: 'olumi' as const, party: null, quote: null,
-      effect: { estimate_by: null, form: 'range' as const, value: opts.bareRange ? null : 2000, sd: null, low: 500, high: 4000, unit: '£', sign: '+' as const } })),
+      ...(opts.optionLink ? { from: 'referral' } : {}),
+      effect: opts.noValue ? { estimate_by: null, form: 'point' as const, value: null, sd: null, low: null, high: null, unit: '£', sign: '+' as const }
+        : { estimate_by: null, form: 'range' as const, value: opts.bareRange ? null : 2000, sd: null, low: 500, high: 4000, unit: '£', sign: '+' as const } })),
   };
 };
 const stored = (model: LivingModelT): Json =>
@@ -149,6 +152,36 @@ describe('a sized link into a goal with no target figure is held for that reason
     expect(reasons(m).filter((r) => r.startsWith('referral_gp:') || r.startsWith('gp:'))).toEqual([]);
     expect(edge(m, 'referral_running').defaulted).toBeUndefined();
     expect(linksAwaitingGoalInput(stored(m))).toEqual([]);
+  });
+
+  it('Codex r1: an option\'s own link is named by the engine edge it compiles to (its switch), so it is said and not offered', async () => {
+    const m = awaitingTarget({ optionLink: true });
+    expect(reasons(m)).toContain('referral_gp:link_goal_target_unknown');
+    expect(linksAwaitingGoalInput(stored(m))).toEqual([{ from: 'referral__on', to: 'gp', by: 'olumi', awaits: 'target' }]);
+    const w = await placeholderWarning(m);
+    expect(w!.links).toEqual(expect.arrayContaining([{ from: 'referral__on', to: 'gp' }]));
+    expect(w!.message).toContain('Olumi\u2019s estimate for the link from \u2018Referral scheme in place\u2019');
+    expect(w!.message).not.toMatch(/Referral scheme in place\u2019 to \u2018[^\u2019]+\u2019[^.]*sized/);
+    expect((w!.acceptable_links ?? []).filter((l: Json) => l.from === 'referral__on')).toEqual([]);
+  });
+
+  it('Codex r1 NEGATIVE: a point link with no figure is unsized, never "kept" (link_frame_unknown)', () => {
+    const m = awaitingTarget({ noValue: true });
+    expect(reasons(m)).toContain('referral_gp:link_frame_unknown');
+    expect(linksAwaitingGoalInput(stored(m))).toEqual([]);
+  });
+
+  it('Codex r1: a long goal label keeps the message inside the 400-character carrier, with the true reason', async () => {
+    const w = await placeholderWarning(awaitingTarget({ longGoal: true }));
+    expect(w!.message.length).toBeLessThanOrEqual(400);
+    expect(w!.message).toContain('is kept, and used once');
+    expect(w!.message).not.toMatch(/Referral scheme running\u2019[^.]*sized/);
+  });
+
+  it('Codex r1: plurals are per phrase ("the figures given", never "the figure givens")', () => {
+    const l = (from: string) => ({ from, to: 'g', from_label: from, to_label: 'Goal', by: 'given' as const, awaits: 'target' as const });
+    const out = awaitingGoalSentence([l('A'), l('B')]);
+    expect(out).toBe('The figures given for the links from \u2018A\u2019 to \u2018Goal\u2019 and from \u2018B\u2019 to \u2018Goal\u2019 are kept, and used once \u2018Goal\u2019 has a target figure, which sets their scale.');
   });
 
   it('with a target figure, the same link is sized from Olumi\'s estimate (regenerated), and nothing is held', () => {

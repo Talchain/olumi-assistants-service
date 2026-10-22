@@ -574,22 +574,30 @@ export interface AwaitingGoalLink { readonly from: string; readonly to: string; 
  */
 export function awaitingGoalSentence(links: ReadonlyArray<AwaitingGoalLink & UnsizedPathLink>, maxLength = 400): string {
   if (links.length === 0) return '';
-  const groups: Array<[string, readonly UnsizedPathLink[]]> = ([
-    ['Olumi\u2019s estimate', links.filter((l) => l.by === 'olumi')],
-    ['the stated figure', links.filter((l) => l.by === 'stated')],
-    ['the figure given', links.filter((l) => l.by === 'given')],
-  ] as Array<[string, readonly UnsizedPathLink[]]>).filter(([, ls]) => ls.length > 0);
-  const goal = links[0]!.to_label;
+  const groups = ([
+    [['Olumi\u2019s estimate', 'Olumi\u2019s estimates'], links.filter((l) => l.by === 'olumi')],
+    [['the stated figure', 'the stated figures'], links.filter((l) => l.by === 'stated')],
+    [['the figure given', 'the figures given'], links.filter((l) => l.by === 'given')],
+  ] as Array<[[string, string], ReadonlyArray<UnsizedPathLink>]>).filter(([, ls]) => ls.length > 0);
   const plural = links.length > 1;
-  const until = links[0]!.awaits === 'level'
-    ? `once today\u2019s level for \u2018${goal}\u2019 is known, since the target is measured from it.`
-    : `once \u2018${goal}\u2019 has a target figure, which sets ${plural ? 'their' : 'its'} scale.`;
-  const build = (count: number): string => {
-    const parts = groups.map(([who, ls]) => `${who}${ls.length > 1 ? 's' : ''} for the ${linkList(ls, Math.min(count, ls.length))}`).join(' and ');
-    return `${parts.charAt(0).toUpperCase()}${parts.slice(1)} ${plural ? 'are' : 'is'} kept, and used ${until}`;
+  const capital = (t: string): string => `${t.charAt(0).toUpperCase()}${t.slice(1)}`;
+  const build = (count: number, labelBudget: number | null): string => {
+    const label = (v: string): string => (labelBudget === null ? v : compactWordLabel(v, labelBudget));
+    const goal = label(links[0]!.to_label);
+    const until = links[0]!.awaits === 'level'
+      ? `once today\u2019s level for \u2018${goal}\u2019 is known, since the target is measured from it.`
+      : `once \u2018${goal}\u2019 has a target figure, which sets ${plural ? 'their' : 'its'} scale.`;
+    const parts = groups.map(([[one, many], ls]) => `${ls.length > 1 ? many : one} for the ${linkList(ls.map((l) => ({ ...l,
+      from_label: label(l.from_label), to_label: label(l.to_label) })), Math.min(count, ls.length))}`).join(' and ');
+    return `${capital(parts)} ${plural ? 'are' : 'is'} kept, and used ${until}`;
   };
-  for (let count = 3; count >= 1; count -= 1) { const out = build(count); if (out.length <= maxLength) return out; }
-  return build(1);
+  // The 400-character carrier (Codex r1): fewer names, then compact labels, then no labels; '' when even that cannot fit.
+  for (const labelBudget of [null, 60, 30, 15]) {
+    for (let count = 3; count >= 1; count -= 1) { const out = build(count, labelBudget); if (out.length <= maxLength) return out; }
+  }
+  const who = groups.length === 1 ? groups[0]![0][plural ? 1 : 0] : plural ? 'the figures' : 'the figure';
+  const bare = `${capital(who)} on the way to the goal ${plural ? 'are' : 'is'} kept, and used once the goal has ${links[0]!.awaits === 'level' ? 'today\u2019s level' : 'a target figure'}.`;
+  return bare.length <= maxLength ? bare : '';
 }
 
 /**
@@ -650,10 +658,19 @@ export function placeholderGoalWarning(
   // #2613 CR (b): while Gate 5 withholds every option, sizing a link cannot lift it: state the link, invite nothing, offer nothing.
   // ⭐ ITEM 3: the invitation names only links with no stated range (`unsizedLinkWords`, shared with the host Run reply).
   const said = productBlocks ? unsizedLinkStatement : (ls: readonly UnsizedPathLink[]): string => unsizedLinkWords(graph, ls);
-  const unsizedWords = unsized.length === 0 ? '' : noDeadEnd?.message ?? said(unsized.map(l => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) })));
-  const message = awaitingTarget.length === 0 ? unsizedWords
-    : [unsizedWords, awaitingGoalSentence(awaitingTarget.map((l) => ({ ...heldForTarget.get(`${l.from}->${l.to}`)!, from_label: labelOf(l.from), to_label: labelOf(l.to) })),
-      400 - (unsizedWords === '' ? 0 : unsizedWords.length + 1))].filter((w) => w !== '').join(' ');
+  // The awaiting sentence takes what the carrier has left after today's words, never pushing the message past 400; when it
+  // cannot fit beside them, both say their labels compactly (Codex r1), so neither reason is left unsaid.
+  const compose = (labelBudget: number | null): string => {
+    const lab = (id: string): string => (labelBudget === null ? labelOf(id) : compactWordLabel(labelOf(id), labelBudget));
+    const unsizedWords = unsized.length === 0 ? '' : (labelBudget === null ? noDeadEnd?.message : undefined)
+      ?? said(unsized.map(l => ({ ...l, from_label: lab(l.from), to_label: lab(l.to) })));
+    if (awaitingTarget.length === 0) return unsizedWords;
+    const awaiting = awaitingGoalSentence(awaitingTarget.map((l) => ({ ...heldForTarget.get(`${l.from}->${l.to}`)!, from_label: lab(l.from), to_label: lab(l.to) })),
+      Math.max(0, 400 - (unsizedWords === '' ? 0 : unsizedWords.length + 1)));
+    return awaiting === '' ? '' : [unsizedWords, awaiting].filter((w) => w !== '').join(' ');
+  };
+  const message = [null, 40, 20].map(compose).find((m) => m !== '')
+    ?? (noDeadEnd?.message ?? said(unsized.map(l => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) }))));
   const firstLink = ordered.find((l) => asked.some((a) => a.from === l.from && a.to === l.to));
   const firstAsk: PlaceholderFirstAsk | undefined = productBlocks ? undefined
     : noDeadEnd !== undefined ? noDeadEnd.first

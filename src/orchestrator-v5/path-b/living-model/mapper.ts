@@ -569,7 +569,11 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     // Track 3 funding/hiring). It is never called "not sized" (`linksAwaitingGoalInput`).
     const target = aim?.target ?? null;
     const intoFramelessGoal = from !== undefined && goal === undefined && goalNode !== undefined && l.to === goalNode.id;
-    const awaiting = !intoFramelessGoal ? undefined
+    // Only a figure that would be sized once the goal has its scale (the branches of `sized` above); a link with no figure
+    // of its own is unsized, and keeps that reason (Codex r1 on this fix).
+    const drawable = ((e.form === 'point' || centred) && e.value !== null) || (e.form === 'normal' && e.value !== null && e.sd !== null && e.sd > 0)
+      || (e.form === 'exact' && e.value !== null);
+    const awaiting = !intoFramelessGoal || !drawable ? undefined
       : target === null || [target.value, target.low, target.high].every((v) => v === null) ? 'link_goal_target_unknown' as const
         : goalHeld === 'goal_level_unknown' ? 'link_goal_level_unknown' as const : undefined;
     if (ratio === undefined && (e.form === 'point' || e.form === 'normal' || e.form === 'exact' || centred)) hold(l.id, awaiting ?? 'link_frame_unknown');
@@ -687,11 +691,16 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
 export function linksAwaitingGoalInput(graph: unknown): Array<{ from: string; to: string; by: 'olumi' | 'stated' | 'given'; awaits: 'target' | 'level' }> {
   const living = LivingModel.safeParse(graph !== null && typeof graph === 'object' ? (graph as Rec).living_model : undefined);
   if (!living.success) return [];
-  const held = new Map(mapLivingModel(living.data, savedGoal(graph)).withheld
-    .filter((w) => w.reason === 'link_goal_target_unknown' || w.reason === 'link_goal_level_unknown')
-    .map((w) => [w.id, w.reason === 'link_goal_target_unknown' ? 'target' as const : 'level' as const] as const));
-  return living.data.links.filter((l) => held.has(l.id)).map((l) => {
+  const mapped = mapLivingModel(living.data, savedGoal(graph));
+  // The engine edge's own endpoints: an option's link leaves from its switch (`<option>__on`), as the Run reads it (Codex r1).
+  const edgeOf = new Map(mapped.graph.edges.map((e) => [e.id, e] as const));
+  return mapped.withheld.flatMap((w) => {
+    if (w.reason !== 'link_goal_target_unknown' && w.reason !== 'link_goal_level_unknown') return [];
+    const l = living.data.links.find((x) => x.id === w.id);
+    const e = edgeOf.get(w.id);
+    if (l === undefined || e === undefined || typeof e.from !== 'string' || typeof e.to !== 'string') return [];
     const source = figureBy(l.effect, l).source;
-    return { from: l.from, to: l.to, by: source === 'olumi' ? 'olumi' : stated(source) ? 'stated' : 'given', awaits: held.get(l.id)! };
+    return [{ from: e.from, to: e.to, by: source === 'olumi' ? 'olumi' as const : stated(source) ? 'stated' as const : 'given' as const,
+      awaits: w.reason === 'link_goal_target_unknown' ? 'target' as const : 'level' as const }];
   });
 }
