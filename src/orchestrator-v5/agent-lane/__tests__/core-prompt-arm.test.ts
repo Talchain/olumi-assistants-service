@@ -68,7 +68,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
 
   it('THE PROMPTS (DL 22 Oct, priority change): the coach\u2019s reply rules and the drafter\u2019s rules, adapted as ruled; the old constants are gone', () => {
     expect(createHash('sha256').update(CORE_REPLY_RULES, 'utf8').digest('hex')).toBe('0d1c339f1750712b5a4c769618343e9c343f4da60959066ae6d80a1404044d30');
-    expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('b23434b85ae1a4fca7d47ab8ad40c7b37f865203e04c09fb34cd44ad3785502f');
+    expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('10e9c82cc45f46d4fbb7323ed9ba59734073d42747e35f112faeda5e69e57bc6'); // 22 Oct: a deadline is the aim's window, never an aim (DL, Paul's tests; was b23434b8…)
     // The retired constants are gone from both modules: no route can send the accreted text again.
     for (const name of ['CORE_REPLY_INSTRUCTION', 'CORE_RESPONSE_DISCIPLINE', 'CORE_NEXT_STEP']) expect(Object.keys(coreInstructions), name).not.toContain(name);
     expect(Object.keys(drafting)).toEqual(['CORE_DRAFTER_RULES']);
@@ -116,8 +116,9 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       "Offer at least one option that is structurally different (a different route, not a different split of the same levers), labelled Olumi's.",
       'Every item either lies on a path to the aim or is a condition on one; no stand-alone items.',
       'Conditions are short, written for the person, one point each; keep working notes out of the model.',
-      'When the aim has a deadline, record its window in period_months (weeks \u00f7 4.35).'])
+      'A deadline is the window of the aim it belongs to, never an aim of its own: keep its words in by_when and, when it counts from today, its window in period_months (weeks \u00f7 4.35).'])
       expect(CORE_DRAFTER_RULES.split(rule), rule).toHaveLength(2);
+    expect(CORE_DRAFTER_RULES).not.toContain('When the aim has a deadline, record its window');
     expect(CORE_DRAFTER_RULES).not.toContain("add at most one as Olumi's when it materially changes the reasoning");
   });
 
