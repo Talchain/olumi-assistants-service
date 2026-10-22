@@ -181,6 +181,9 @@ export function goalTargetGapOf(graph: unknown): GoalTargetGap | null {
   if (aim !== undefined && core !== undefined && core !== null) {
     // The ONE reading of the aim's target, as the mapper holds it (`aim-reading.ts`); stored living-model bytes.
     const reading = aimTargetReading(aim as never);
+    // A change the mapper measured AS the change needs no level (item 2, DL 22 Oct): a chance withheld on it says its own reason,
+    // never "needs today's level" (Codex r1 on #3666). Its frame stays on the goal when the threshold is withheld.
+    if (reading === 'goal_level_unknown' && goal.quantity_frame === 'change') return null;
     // The person's change from a level not given yet: the target is there, today's level is not (#3631).
     if (reading === 'goal_level_unknown') {
       return { kind: 'goal_level_missing', goal_id: goal.id, deadline_known: deadlineKnown, question: todaysLevelQuestion(label, core.quantity) };

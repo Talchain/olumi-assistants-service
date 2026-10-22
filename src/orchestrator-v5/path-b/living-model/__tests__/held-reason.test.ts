@@ -16,7 +16,7 @@ type Json = Record<string, any>;
 const who = (quote: string) => ({ source: 'user' as const, party: null, quote });
 const on = (factor_id: string) => ({ factor_id, estimate_by: null, value: 1, low: null, high: null, unit: null, ...who('do it') });
 const target = { low: null, high: null, baseline: null, current: null, current_source: null, current_unit: null, period_months: null, change_kind: null, source: null, by_when: null };
-const model = (aimText: string, t: Json | null, aimSource: 'user' | 'olumi' | 'unverified' = 'user'): LivingModelT => ({
+const model = (aimText: string, t: Json | null, aimSource: 'user' | 'olumi' | 'unverified' = 'user', linkUnit = '%'): LivingModelT => ({
   aims: [{ id: 'goal', text: aimText, status: 'current', defined_as: null, source: aimSource, party: null, quote: aimSource === 'user' ? aimText : null, target: t as never }],
   options: [
     { status: 'feasible', id: 'carry_on', label: 'Carry on as now', developed_from: null, settings: [], ...who('or carry on') },
@@ -24,7 +24,7 @@ const model = (aimText: string, t: Json | null, aimSource: 'user' | 'olumi' | 'u
   ],
   factors: [{ estimate_by: null, kind: 'factor', limit: null, id: 'effort', label: 'Effort', value: 0, low: null, high: null, unit: null, defined_as: null, ...who('none today') }],
   links: [{ id: 'effort_goal', from: 'effort', to: 'goal', source: 'olumi', party: null, quote: null,
-    effect: { estimate_by: null, form: 'range', value: 0.6, sd: null, low: 0.2, high: 1, unit: '%', sign: '+' } }],
+    effect: { estimate_by: null, form: 'range', value: 0.6, sd: null, low: 0.2, high: 1, unit: linkUnit, sign: '+' } }],
   risks: [], conditions: [], views: [], history: [],
 });
 const stored = (m: LivingModelT): Json => projectCorePostimageForPersistence(GraphV3.parse({ ...mapLivingModel(m).graph, living_model: m })) as Json;
@@ -146,7 +146,8 @@ describe('every held reason says its own words in the one gap, never "no target"
   it('NEGATIVE: no target figure keeps today\'s words; a legacy graph is byte-identical; #3631\'s today\'s-level ask is unchanged', () => {
     expect(goalTargetGapOf(stored(model('Grow the business', null)))?.kind).toBe('goal_target_missing');
     for (const [, m] of CASES) expect(goalTargetGapOf(legacy(stored(m)))?.kind ?? null).not.toBe('goal_answer_missing');
-    const hiring = model('Increase productivity by at least 10%', { ...target, quantity: 'Productivity', comparator: 'increase', value: 10, unit: '%', change_kind: 'relative' });
+    // Its effect in points needs today's level (item 2, DL 22 Oct: with every effect in % it is measured as the change; `held-goal-gap.test.ts`).
+    const hiring = model('Increase productivity by at least 10%', { ...target, quantity: 'Productivity', comparator: 'increase', value: 10, unit: '%', change_kind: 'relative' }, 'user', 'points');
     expect(goalTargetGapOf(stored(hiring))?.kind).toBe('goal_level_missing');
   });
 
