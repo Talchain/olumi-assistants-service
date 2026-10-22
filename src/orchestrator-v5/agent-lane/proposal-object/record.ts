@@ -572,7 +572,8 @@ const PLURAL: ReadonlySet<string> = new Set(['quote', 'of', 'applies_to']);
 const REF_KEYS: ReadonlySet<string> = new Set(['from', 'to', 'factor_id', 'of', 'applies_to', 'developed_from']);
 /** Who-keys of a record, and the parts of that record each one says whose they are; `source`/`party` say the rest. */
 const OWNER_KEYS: Readonly<Record<string, { readonly words: string; readonly parts: readonly string[] }>> = {
-  estimate_by: { words: 'figure', parts: ['value', 'low', 'high', 'sd', 'unit', 'form', 'sign'] },
+  // Olumi's WHOLE figure on another's item (schema `estimateBy`): its size, never the direction the source stated (Codex r4).
+  estimate_by: { words: 'figure', parts: ['value', 'low', 'high', 'sd', 'unit', 'form'] },
   current_source: { words: 'today’s level', parts: ['current', 'current_unit'] }, horizon_by: { words: 'window', parts: ['horizon_months'] } };
 const WHO_KEYS: ReadonlySet<string> = new Set(['source', 'party', ...Object.keys(OWNER_KEYS)]);
 /** Lists of records, each told apart by the item it names. */
@@ -580,12 +581,23 @@ const ELEMENT: Readonly<Record<string, { readonly key: string; readonly words: (
   settings: { key: 'factor_id', words: (n) => `setting for ${n}` }, mitigations: { key: 'factor_id', words: (n) => `reduction by ${n}` } };
 /** A share said as an exact percentage (a risk's chance, a step's reduction), never rounded away (Codex r3: 0.0004 read 0%). */
 const SHARE = /(?:^|\.)(?:occurrence\.(?:low|high)|reduction)$/;
+/** A share × 100 by moving the decimal point in its written digits: exact, never a float product (Codex r4: 12.3456789012%). */
+function percentOf(v: number): number {
+  const [m = '', e = '0'] = String(v).split('e');
+  const neg = m.startsWith('-');
+  const [i = '', f = ''] = m.replace('-', '').split('.');
+  let digits = i + f;
+  let point = i.length + Number(e) + 2;
+  if (point <= 0) { digits = '0'.repeat(1 - point) + digits; point = 1; }
+  if (point > digits.length) digits += '0'.repeat(point - digits.length);
+  return Number(`${neg ? '-' : ''}${digits.slice(0, point)}.${digits.slice(point) || '0'}`);
+}
 /** A unit is said with its figures; on its own only where its record has none. */
 const UNIT_OF: Readonly<Record<string, readonly string[]>> = { unit: ['value', 'low', 'high', 'sd'], current_unit: ['current'] };
 const hasFigure = (r: Rec, unitKey: string): boolean => (UNIT_OF[unitKey] ?? []).some((k) => typeof r[k] === 'number' && Number.isFinite(r[k]));
 
 /** One said part of an item: its words, what it says, and whose it is (absent where the part says whose it is itself). */
-interface Said { readonly path: string; readonly text: string; readonly who?: Who }
+interface Said { readonly path: string; readonly text: string; readonly who?: Who; readonly owner?: Who }
 
 /**
  * ⭐ THE CARD SHOWS EVERY CHANGE IT WRITES (Track 3, 22 Oct, consent: 12/12 core approvals wrote changes the card never
@@ -632,13 +644,18 @@ function coreChangeNotes(operations: readonly HeldOp[], adds: readonly AddField[
     if (REF_KEYS.has(key)) return Array.isArray(v) ? v.map(name).join(' and ') : name(v);
     if (typeof v === 'string') return VALUE_WORDS[key]?.[v] ?? `“${v}”`;
     if (typeof v === 'number') return SHARE.test(path)
-      ? sayFigureWithoutRounding(Number((v * 100).toPrecision(12)), '%') : sayFigureWithoutRounding(v, unitOf(chain, key));
+      ? sayFigureWithoutRounding(percentOf(v), '%') : sayFigureWithoutRounding(v, unitOf(chain, key));
     if (typeof v === 'boolean') return v ? 'yes' : 'no';
     if (Array.isArray(v)) return v.map((x) => (typeof x === 'string' ? `“${x}”` : stableJson(x))).join(' and ');
     return stableJson(v);
   };
   // A fixed order (the item's words, then its figure as a person reads it, the rest by key, the recorded words last): never key order.
   const rank = (k: string): number => { const i = KEY_ORDER.indexOf(k); return k === 'quote' ? KEY_ORDER.length + 1 : i < 0 ? KEY_ORDER.length : i; };
+  // Each run of parts with the same owner closes with whose they are.
+  const tagged = (said: readonly Said[], sep: string): string => said.map((s, i) => {
+    const next = said[i + 1];
+    return s.who !== undefined && (next?.who === undefined || next.who.tag !== s.who.tag) ? `${s.text} (${s.who.tag})` : s.text;
+  }).join(sep);
   const keysOf = (b: Rec, a: Rec): string[] => [...new Set([...Object.keys(b), ...Object.keys(a)])].sort()
     .sort((x, y) => rank(x) - rank(y)).filter((k) => k !== 'id' && !WHO_KEYS.has(k));
   const join = (words: readonly string[]): string => words.filter((w) => w !== '').join(' ');
@@ -655,10 +672,11 @@ function coreChangeNotes(operations: readonly HeldOp[], adds: readonly AddField[
       else out.push({ path: p, text: `${join(w)} ${say(v, k, p, chain)}`, who: whoOf(chain, k) });
     }
   };
+  // A removed record's parts, each run with whose they were (Codex r4: a removed party's limit lost its owner).
   const listText = (a: Rec, chain: readonly Rec[], path: string): string => {
     const out: Said[] = [];
     list(a, chain, [], path, new Set(), out);
-    return out.map((s) => s.text).join(', ') || 'nothing';
+    return tagged(out, ', ') || 'nothing';
   };
   // Every part that differs between two versions of a record, and every change of whose a part is.
   const diff = (b: Rec, a: Rec, cb: readonly Rec[], ca: readonly Rec[], words: readonly string[], path: string, out: Said[]): void => {
@@ -670,21 +688,32 @@ function coreChangeNotes(operations: readonly HeldOp[], adds: readonly AddField[
       const w = [...words, KEY_WORDS[k] ?? k.replace(/_/g, ' ')];
       const el = ELEMENT[k];
       if (el !== undefined && (Array.isArray(bv) || Array.isArray(av))) {
-        const byId = (xs: unknown): Map<string, Rec> => new Map((Array.isArray(xs) ? xs : []).filter(isRec).map((x, i) => [typeof x[el.key] === 'string' ? x[el.key] as string : `#${i}`, x]));
+        // Each entry kept, a repeat of the same item by its turn (Codex r4: a duplicate setting hid a write).
+        const byId = (xs: unknown): Map<string, Rec> => {
+          const m = new Map<string, Rec>();
+          (Array.isArray(xs) ? xs : []).filter(isRec).forEach((x, i) => {
+            const base = typeof x[el.key] === 'string' ? x[el.key] as string : `#${i}`;
+            let k = base;
+            for (let n = 2; m.has(k); n += 1) k = `${base}#${n}`;
+            m.set(k, x);
+          });
+          return m;
+        };
         const was = byId(bv);
         const now = byId(av);
         for (const id of [...new Set([...now.keys(), ...was.keys()])]) {
-          const ew = [...words, el.words(name(id))];
           const eb = was.get(id);
           const ea = now.get(id);
-          if (eb === undefined) list(ea!, [...ca, ea!], [...words, `new ${el.words(name(id))}`], p, new Set([`${p}.${el.key}`]), out);
-          else if (ea === undefined) out.push({ path: p, text: `${join(ew)} removed (was ${listText(eb, [...cb, eb], p)})` });
+          const named = name((ea ?? eb)![el.key]);
+          const ew = [...words, `${el.words(named)}${id.includes('#') ? ` (entry ${id.slice(id.indexOf('#') + 1)})` : ''}`];
+          if (eb === undefined) list(ea!, [...ca, ea!], [...words, `new ${ew[ew.length - 1]}`], p, new Set([`${p}.${el.key}`]), out);
+          else if (ea === undefined) out.push({ path: p, text: `${join(ew)} removed (was ${listText(eb, [...cb, eb], p)})`, owner: whoOf([...cb, eb]) });
           else if (stableJson(eb) !== stableJson(ea)) diff(eb, ea, [...cb, eb], [...ca, ea], ew, p, out);
         }
       } else if ((isRec(bv) || bv == null) && (isRec(av) || av == null)) {
         if (isRec(bv) && isRec(av)) diff(bv, av, [...cb, bv], [...ca, av], w, p, out);
         else if (isRec(av)) list(av, [...ca, av], [...words, `new ${KEY_WORDS[k] ?? k.replace(/_/g, ' ')}`], p, new Set(), out);
-        else if (isRec(bv)) out.push({ path: p, text: `${join(w)} removed (was ${listText(bv, [...cb, bv], p)})` });
+        else if (isRec(bv)) out.push({ path: p, text: `${join(w)} removed (was ${listText(bv, [...cb, bv], p)})`, owner: whoOf([...cb, bv]) });
       } else {
         const was = say(bv, k, p, cb);
         const now = say(av, k, p, ca);
@@ -703,12 +732,12 @@ function coreChangeNotes(operations: readonly HeldOp[], adds: readonly AddField[
       }
     }
   };
-  // Each run of parts with the same owner closes with whose they are.
-  const sentence = (said: readonly Said[]): string => said.map((s, i) => {
-    const next = said[i + 1];
-    return s.who !== undefined && (next?.who === undefined || next.who.tag !== s.who.tag) ? `${s.text} (${s.who.tag})` : s.text;
-  }).join('; ');
-  const sourceOf = (said: readonly Said[], item: Who): NoteSource => (said.some((s) => s.who?.source === 'estimate') ? 'estimate' : item.source);
+  const sentence = (said: readonly Said[]): string => tagged(said, '; ');
+  // Olumi's estimate anywhere marks the note Olumi's; else one owner of every part is the note's; else the item's.
+  const sourceOf = (said: readonly Said[], item: Who): NoteSource => {
+    const owners = new Set(said.flatMap((s) => { const w = s.who ?? s.owner; return w === undefined ? [] : [w.source]; }));
+    return owners.has('estimate') ? 'estimate' : owners.size === 1 ? [...owners][0]! : item.source;
+  };
   const shownFigure = new Map<string, string>();
   for (const f of fields) if (f.kind === 'factor_value') shownFigure.set(`factor:${f.node_id}`, f.current.source);
   const addOf = new Map(adds.map((a) => [a.kind === 'factor_add' ? `factor:${a.node_id}` : a.kind === 'link_add' ? `link:${a.link_id}` : '', a]));
@@ -772,10 +801,8 @@ function coreChangeNotes(operations: readonly HeldOp[], adds: readonly AddField[
       // What the add already shows, unless it shows another owner than the item's (then the name says whose it is).
       const skip = new Set(['label', 'text', 'holder', ...(after['kind'] === 'factor' ? ['kind'] : []),
         ...(after['status'] === 'feasible' || after['status'] === 'current' ? ['status'] : [])]);
-      if (shown?.kind === 'factor_add') {
-        if (shown.value !== null) skip.add('value');
-        skip.add('unit');
-      }
+      // The add shows a point figure with its unit; a figureless add's unit is said here (Codex r4: "hours" was unshown).
+      if (shown?.kind === 'factor_add' && shown.value !== null) { skip.add('value'); skip.add('unit'); }
       if (shown?.kind === 'link_add') {
         const e = isRec(after['effect']) ? after['effect'] : {};
         for (const k of ['from', 'to', 'effect.sign', ...(e['form'] === 'direction_only' ? ['effect.form'] : []), ...(hasFigure(e, 'unit') ? [] : ['effect.unit'])]) skip.add(k);

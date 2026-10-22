@@ -503,7 +503,7 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
       { op: 'living_change', path: 'condition:0', value: { change: 'add', after: { text: 'Only if the vendor agrees', applies_to: [], source: 'party' } } },
     ]).record;
     expect(positional.adds?.filter((f) => f.kind !== 'change_note').map((f) => f.kind === 'factor_add' && f.label)).toEqual(['Queue length']);
-    expect(positional.adds?.filter((f) => f.kind === 'change_note').map((f) => f.kind === 'change_note' && f.text)).toEqual(['Adds the condition \u201cOnly if the vendor agrees\u201d (a party\u2019s).']);
+    expect(positional.adds?.filter((f) => f.kind === 'change_note').map((f) => f.kind === 'change_note' && f.text)).toEqual(['‘Queue length’: unit “tickets” (Olumi’s estimate).', 'Adds the condition \u201cOnly if the vendor agrees\u201d (a party\u2019s).']);
     // A card whose fields show every change it writes has no `adds` and the digest it always had (a removal is now a note).
     const plain = card([{ op: 'living_change', path: 'factor:x', value: { change: 'change', before: fac('x', 'X', 'olumi', { value: 3 }), after: fac('x', 'X', 'olumi', { value: 4 }) } }]).record;
     expect(plain.fields.map((f) => f.field_id)).toEqual(['factor_value:x']);
@@ -635,9 +635,9 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
     const lim = { comparator: '<=', value: 50, source: 'user', party: null, quote: 'no more than 50' };
     const def = (of: string[]) => ({ op: 'sum', of, source: 'olumi', party: null, quote: null });
     expect(notesOf(card([ch('factor:f', fac({ limit: lim, defined_as: def(['out']) }), fac({ defined_as: def(['out']) }))])).map((n) => n.text))
-      .toEqual(['Changes ‘Orders’: limit removed (was comparison at most, figure 50 units, recorded words “no more than 50”).']);
+      .toEqual(['Changes ‘Orders’: limit removed (was comparison at most, figure 50 units, recorded words “no more than 50” (yours)).']);
     expect(notesOf(card([ch('factor:f', fac({ limit: lim, defined_as: def(['out']) }), fac({}))])).map((n) => n.text))
-      .toEqual(['Changes ‘Orders’: definition removed (was kind the sum, parts ‘Output’); limit removed (was comparison at most, figure 50 units, recorded words “no more than 50”).']);
+      .toEqual(['Changes ‘Orders’: definition removed (was kind the sum, parts ‘Output’ (Olumi’s estimate)); limit removed (was comparison at most, figure 50 units, recorded words “no more than 50” (yours)).']);
     expect(notesOf(card([ch('factor:f', fac({ defined_as: def(['out']) }), fac({ defined_as: def(['out2']) }))])).map((n) => n.text))
       .toEqual(['Changes ‘Orders’: definition parts were ‘Output’, now ‘Output’ (a different item with the same name) (Olumi’s estimate).']);
     expect(notesOf(card([ch('factor:f', fac({ limit: lim }), fac({ limit: { ...lim, source: 'olumi', quote: null } }))])).map((n) => n.text))
@@ -697,6 +697,22 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
       limit: { comparator: '<=', value: 50, source: 'user', party: null, quote: 'no more than 50', ...more }, source: 'user', party: null, quote: 'our orders' });
     expect(texts(card([ch('factor:f', lim({}), lim({ source: 'party', party: 'Acme', quote: 'Acme requires at most 50' }))])))
       .toEqual(['Changes ‘Orders’: limit recorded words were “no more than 50”, now “Acme requires at most 50” (Acme’s); limit is now Acme’s (was yours).']);
+    // Codex r4 on #3632.
+    const set2 = (v: number) => ({ factor_id: 'backup', value: v, low: null, high: null, unit: 'units', estimate_by: null, source: 'olumi', party: null, quote: null });
+    const plan = (settings: unknown[]) => ({ id: 'o', label: 'Plan', settings, status: 'feasible', developed_from: null, source: 'olumi', party: null, quote: null });
+    expect(texts(card([ch('option:o', plan([set2(2), set2(10)]), plan([set2(8), set2(10)]))]))[0]).toContain('setting for ‘Backup supplier’ figure was 2 units, now 8 units');
+    const userLink = (sign: string, quote: string) => ({ id: 'l', from: 'backup', to: 'r', effect: { form: 'range', value: null, low: 1, high: 3, sd: null, unit: 'units', sign, estimate_by: 'olumi' },
+      source: 'user', party: null, quote });
+    expect(texts(card([ch('link:l', userLink('+', 'it helps'), userLink('-', 'it hurts'))])))
+      .toEqual(['Changes the link ‘Backup supplier’ → ‘r’: effect direction was raises it, now lowers it; recorded words were “it helps”, now “it hurts” (yours).']);
+    const fac = (limit: unknown) => ({ id: 'f', label: 'Orders', value: null, low: null, high: null, unit: 'units', defined_as: null, estimate_by: null, limit, source: 'user', party: null, quote: 'our orders' });
+    const acme = card([ch('factor:f', fac({ comparator: '<=', value: 40, source: 'party', party: 'Acme', quote: 'no more than 40' }), fac(null))]);
+    expect((acme.adds ?? []).flatMap((a) => (a.kind === 'change_note' ? [[a.text, a.source]] : [])))
+      .toEqual([['Changes ‘Orders’: limit removed (was comparison at most, figure 40 units, recorded words “no more than 40” (Acme’s)).', 'party']]);
+    const hours = { id: 'h', label: 'Overtime', value: null, low: null, high: null, unit: 'hours', defined_as: null, estimate_by: null, limit: null, source: 'user', party: null, quote: 'we do overtime' };
+    expect(texts(card([{ op: 'living_change', path: 'factor:h', value: { change: 'add', after: hours } }]))).toEqual(['‘Overtime’: unit “hours”; recorded words “we do overtime” (yours).']);
+    expect(texts(card([ch('risk:r', risk({}), risk({ occurrence: { estimate_by: null, low: 0.1234567890123, high: 0.2 } }))]))[0])
+      .toContain('chance low end was 10%, now 12.34567890123%');
   });
   it('RED classifier assigns Agent factor and link kinds exhaustively', () => {
     expect(FIELD_CLASS_BY_OP.set_factor_value).toBe('factor_value');
