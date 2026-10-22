@@ -180,7 +180,10 @@ describe('exact results carry their margins and the input each rests on, from th
   });
 
   it('NEGATIVE (Codex r3): a level beyond 15 digits, a real digit or float noise, is never rounded into another figure: nothing is said', () => {
-    for (const night of [1200000000000001, 1000000000000001, 549.9999999999999]) expect(marginsOf(levels(fresh(), { night }))).toBeUndefined();
+    for (const night of [1200000000000001, 1000000000000001]) expect(marginsOf(levels(fresh(), { night }))).toBeUndefined();
+    // Track 2 (served R2 8006 P01, DL-ruled): float noise is not rounded either; the recorded levels say nothing, and the Run's own
+    // dispatched arithmetic (today 200 + the dispatched 350) says 550 exactly, the noisy row only agreeing with it.
+    expect(marginsOf(levels(fresh(), { night: 549.9999999999999 }))?.options.find((o) => o.option_id === 'night')).toMatchObject({ level: 550, margin: 150 });
   });
 
   it('NEGATIVE (Codex r2): evidence with no selected Run id to match says nothing (every caller passes the canonical id)', () => {

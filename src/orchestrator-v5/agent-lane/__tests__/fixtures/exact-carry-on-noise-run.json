@@ -1,0 +1,1269 @@
+{
+ "graph": {
+  "edges": [
+   {
+    "to": "early_start",
+    "from": "decision_crate_goal",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "crate_goal__change",
+    "from": "early_start",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "extra_bench",
+    "from": "decision_crate_goal",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "crate_goal__change",
+    "from": "extra_bench",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "status_quo",
+    "from": "decision_crate_goal",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "crate_goal__change",
+    "from": "status_quo",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "id": "crate_goal_today__crate_goal",
+    "to": "crate_goal",
+    "from": "crate_goal_today",
+    "strength": {
+     "std": 0.001,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "definitional": true,
+     "natural_effect": {
+      "amount": 1,
+      "amount_unit": "crates",
+      "strength_mean": 1,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "crates"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "id": "crate_goal__change__crate_goal",
+    "to": "crate_goal",
+    "from": "crate_goal__change",
+    "strength": {
+     "std": 0.001,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "definitional": true,
+     "natural_effect": {
+      "amount": 1,
+      "amount_unit": "crates",
+      "strength_mean": 1,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "crates"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   }
+  ],
+  "nodes": [
+   {
+    "id": "decision_crate_goal",
+    "ref": "D1",
+    "kind": "decision",
+    "label": "Decision: Pack at least 900 crates at next week's depot shift"
+   },
+   {
+    "id": "crate_goal",
+    "ref": "G1",
+    "kind": "goal",
+    "label": "Pack at least 900 crates at next week's depot shift",
+    "source_quote": "synthetic words",
+    "goal_direction": ">=",
+    "goal_threshold": 0.8,
+    "observed_state": {
+     "cap": 1125,
+     "unit": "crates",
+     "value": 0.6222222222222222,
+     "source": "brief_extraction",
+     "baseline": 0.6222222222222222,
+     "raw_value": 700,
+     "extractionType": "explicit"
+    },
+    "goal_threshold_cap": 1125,
+    "goal_threshold_raw": 900,
+    "nonlinear_identity": {
+     "operation": "sum",
+     "factor_ids": [
+      "crate_goal_today",
+      "crate_goal__change"
+     ],
+     "stated_in_brief": false
+    },
+    "goal_threshold_unit": "crates",
+    "goal_threshold_frame": "level",
+    "goal_deadline_as_stated": "next week",
+    "goal_threshold_cap_provenance": "target_derived_headroom"
+   },
+   {
+    "id": "crate_goal__change",
+    "ref": "F1",
+    "kind": "factor",
+    "label": "Change in crates packed per shift",
+    "category": "controllable",
+    "observed_state": {
+     "cap": 1125,
+     "unit": "crates",
+     "value": 0,
+     "source": "cee_inference",
+     "raw_value": 0
+    },
+    "quantity_frame": "change"
+   },
+   {
+    "id": "early_start",
+    "ref": "O1",
+    "kind": "option",
+    "label": "Early start",
+    "interventions": {
+     "crate_goal__change": {
+      "unit": "crates",
+      "value": 0.2311111111111111,
+      "source": "brief_extraction",
+      "raw_value": 260,
+      "target_match": {
+       "node_id": "crate_goal__change",
+       "confidence": "high",
+       "match_type": "exact_id"
+      },
+      "extractionType": "explicit"
+     }
+    }
+   },
+   {
+    "id": "extra_bench",
+    "ref": "O2",
+    "kind": "option",
+    "label": "Extra bench",
+    "interventions": {
+     "crate_goal__change": {
+      "unit": "crates",
+      "value": 0.10666666666666667,
+      "source": "brief_extraction",
+      "raw_value": 120,
+      "target_match": {
+       "node_id": "crate_goal__change",
+       "confidence": "high",
+       "match_type": "exact_id"
+      },
+      "extractionType": "explicit"
+     }
+    }
+   },
+   {
+    "id": "status_quo",
+    "ref": "O3",
+    "kind": "option",
+    "label": "Carry on as now",
+    "is_baseline": true,
+    "interventions": {
+     "crate_goal__change": {
+      "unit": "crates",
+      "value": 0,
+      "source": "cee_hypothesis",
+      "raw_value": 0,
+      "target_match": {
+       "node_id": "crate_goal__change",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     }
+    }
+   },
+   {
+    "id": "crate_goal_today",
+    "ref": "F2",
+    "kind": "factor",
+    "label": "Pack at least 900 crates at next week's depot shift today",
+    "category": "observable",
+    "observed_state": {
+     "cap": 1125,
+     "unit": "crates",
+     "value": 0.6222222222222222,
+     "source": "brief_extraction",
+     "baseline": 0.6222222222222222,
+     "raw_value": 700,
+     "extractionType": "explicit"
+    }
+   }
+  ],
+  "living_model": {
+   "aims": [
+    {
+     "id": "crate_goal",
+     "text": "synthetic words",
+     "party": null,
+     "quote": "synthetic words",
+     "source": "user",
+     "status": "current",
+     "target": {
+      "low": null,
+      "high": null,
+      "unit": "crates",
+      "value": 900,
+      "source": null,
+      "by_when": "next week",
+      "current": 700,
+      "baseline": null,
+      "quantity": "synthetic words",
+      "comparator": ">=",
+      "change_kind": null,
+      "current_unit": null,
+      "period_months": null,
+      "current_source": null
+     },
+     "defined_as": null
+    }
+   ],
+   "links": [
+    {
+     "id": "early_effect",
+     "to": "crate_goal",
+     "from": "early_start",
+     "party": null,
+     "quote": "synthetic words",
+     "effect": {
+      "sd": null,
+      "low": null,
+      "form": "exact",
+      "high": null,
+      "sign": "+",
+      "unit": "crates",
+      "value": 260,
+      "estimate_by": null
+     },
+     "source": "user"
+    },
+    {
+     "id": "bench_effect",
+     "to": "crate_goal",
+     "from": "extra_bench",
+     "party": null,
+     "quote": "synthetic words",
+     "effect": {
+      "sd": null,
+      "low": null,
+      "form": "exact",
+      "high": null,
+      "sign": "+",
+      "unit": "crates",
+      "value": 120,
+      "estimate_by": null
+     },
+     "source": "user"
+    }
+   ],
+   "risks": [],
+   "views": [],
+   "factors": [],
+   "history": [
+    {
+     "id": "bench_effect",
+     "old": "synthetic words",
+     "quote": "synthetic words",
+     "change": "superseded"
+    }
+   ],
+   "options": [
+    {
+     "id": "early_start",
+     "label": "Early start",
+     "party": null,
+     "quote": "synthetic words",
+     "source": "user",
+     "status": "feasible",
+     "settings": [],
+     "developed_from": null
+    },
+    {
+     "id": "extra_bench",
+     "label": "Extra bench",
+     "party": null,
+     "quote": "synthetic words",
+     "source": "user",
+     "status": "feasible",
+     "settings": [],
+     "developed_from": null
+    },
+    {
+     "id": "status_quo",
+     "label": "Carry on as now",
+     "party": null,
+     "quote": null,
+     "source": "olumi",
+     "status": "feasible",
+     "settings": [],
+     "developed_from": null
+    }
+   ],
+   "conditions": [
+    {
+     "role": "assumption",
+     "text": "synthetic words",
+     "party": null,
+     "quote": "synthetic words",
+     "source": "user",
+     "applies_to": [
+      "early_effect",
+      "bench_effect"
+     ]
+    },
+    {
+     "role": "assumption",
+     "text": "synthetic words",
+     "party": null,
+     "quote": "synthetic words",
+     "source": "user",
+     "applies_to": [
+      "early_start",
+      "extra_bench"
+     ]
+    }
+   ]
+  },
+  "ref_high_water": {
+   "D": 1,
+   "F": 2,
+   "G": 1,
+   "O": 3
+  }
+ },
+ "analysis_result": {
+  "type": "analysis_result",
+  "summary": "Ran analysis on your current scenario. 2 options are effectively eliminated (each supported by under 1% of runs). I supplied 4 of the values behind this, because your brief did not state them. They are mine rather than yours. Changing any of them changes what this model implies.",
+  "leading_option_id": "early_start",
+  "win_probabilities": {
+   "Early start": 1,
+   "Extra bench": 0,
+   "Carry on as now": 0
+  },
+  "enrichment": {
+   "option_comparison": [
+    {
+     "id": "early_start",
+     "label": "Early start",
+     "status": "computed",
+     "outcome": {
+      "p10": 960.0000000000001,
+      "p50": 960.0000000000001,
+      "p90": 960.0000000000001,
+      "std": 0,
+      "mean": 960.0000000000001,
+      "n_samples": 10000,
+      "validity_ratio": 1,
+      "n_valid_samples": 10000,
+      "percentiles_source": "samples"
+     },
+     "downside": {
+      "p05": 0.8533333333333334,
+      "cvar_10": 0.8533333333333334,
+      "expected_regret": 0
+     },
+     "option_id": "early_start",
+     "option_label": "Early start",
+     "win_probability": 1
+    },
+    {
+     "id": "extra_bench",
+     "label": "Extra bench",
+     "status": "computed",
+     "outcome": {
+      "p10": 820,
+      "p50": 820,
+      "p90": 820,
+      "std": 1.249000902703301e-13,
+      "mean": 820.0000000000001,
+      "n_samples": 10000,
+      "validity_ratio": 1,
+      "n_valid_samples": 10000,
+      "percentiles_source": "samples"
+     },
+     "downside": {
+      "p05": 0.7288888888888889,
+      "cvar_10": 0.728888888888889,
+      "expected_regret": 0.12444444444444441
+     },
+     "option_id": "extra_bench",
+     "option_label": "Extra bench",
+     "win_probability": 0
+    },
+    {
+     "id": "status_quo",
+     "label": "Carry on as now",
+     "status": "computed",
+     "outcome": {
+      "p50": 700,
+      "mean": 699.9999999999998,
+      "n_samples": 10000,
+      "validity_ratio": 1,
+      "n_valid_samples": 10000,
+      "percentiles_source": "samples"
+     },
+     "downside": {
+      "p05": 0.6222222222222222,
+      "cvar_10": 0.622222222222222,
+      "expected_regret": 0.2311111111111112
+     },
+     "option_id": "status_quo",
+     "option_label": "Carry on as now",
+     "win_probability": 0
+    }
+   ],
+   "factor_sensitivity": [
+    {
+     "source": "graph",
+     "direction": "positive",
+     "factor_id": "crate_goal_today",
+     "confidence": 0.5,
+     "elasticity": 1,
+     "evpi_method": "heuristic",
+     "driver_label": "biggest",
+     "factor_label": "Pack at least 900 crates at next week's depot shift today",
+     "value_source": "brief_extraction",
+     "evidence_hint": false,
+     "influence_rank": 2,
+     "importance_rank": 1,
+     "influence_basis": "isl_structural",
+     "influence_score": 1,
+     "importance_basis": "isl_structural",
+     "confidence_source": "plot_unified_from_graph",
+     "sensitivity_score": 1,
+     "flip_risk_category": "negligible",
+     "value_of_information": 0,
+     "confidence_components": {
+      "sampling_stability": null,
+      "structural_certainty": 0.5
+     },
+     "confidence_provenance": {
+      "input_quality": "degenerate_fallback",
+      "is_provisional": true,
+      "formula_version": "plot_unified_v2",
+      "calibration_status": "provisional_pending_pilot_calibration",
+      "computation_source": "plot_unified_from_graph"
+     },
+     "value_extraction_type": "explicit",
+     "evpi_percentage_points": 0,
+     "range_derivation_source": "explicit_cap"
+    },
+    {
+     "source": "graph",
+     "direction": "positive",
+     "factor_id": "crate_goal__change",
+     "confidence": 0.5,
+     "elasticity": 0,
+     "zero_reason": "intervention_override",
+     "driver_label": "strong",
+     "factor_label": "Change in crates packed per shift",
+     "value_source": "cee_inference",
+     "influence_rank": 1,
+     "importance_rank": 2,
+     "influence_basis": "isl_structural",
+     "influence_score": 1,
+     "importance_basis": "isl_structural",
+     "confidence_source": "plot_unified_from_graph",
+     "sensitivity_score": 0,
+     "flip_risk_category": "negligible",
+     "value_of_information": 0,
+     "confidence_components": {
+      "sampling_stability": null,
+      "structural_certainty": 0.5
+     },
+     "confidence_provenance": {
+      "input_quality": "degenerate_fallback",
+      "is_provisional": true,
+      "formula_version": "plot_unified_v2",
+      "calibration_status": "provisional_pending_pilot_calibration",
+      "computation_source": "plot_unified_from_graph"
+     },
+     "range_derivation_source": "explicit_cap"
+    }
+   ],
+   "robustness": {
+    "level": "high",
+    "near_tie": {
+     "gap": 1,
+     "is_tie": false,
+     "threshold": 0.1,
+     "top_option_id": "early_start",
+     "tied_option_ids": [
+      "early_start"
+     ],
+     "second_option_id": "extra_bench"
+    },
+    "is_robust": true,
+    "confidence": 1,
+    "robust_edges": [],
+    "fragile_edges": [],
+    "display_verdict": "robust",
+    "confidence_basis": "recommendation_stability_uncalibrated",
+    "recommended_option_id": "early_start",
+    "display_verdict_reason": "this run held up under the changes we tested",
+    "recommended_option_label": "Early start",
+    "recommended_option_compliance": "not_applicable",
+    "recommended_option_compliance_reason": "no limits were set for this decision"
+   },
+   "option_comparison_status": "computed",
+   "edge_e_values": [],
+   "inference_warnings": [
+    {
+     "code": "EDGE_SENSITIVITY_UNAVAILABLE_V2_WIRE",
+     "message": "synthetic words",
+     "severity": "info"
+    },
+    {
+     "code": "EDGE_E_VALUES_UNAVAILABLE_V2_WIRE",
+     "message": "synthetic words",
+     "severity": "info"
+    },
+    {
+     "code": "GOAL_CHANCE_LICENSED",
+     "form": "each",
+     "notes": [
+      "This assumes carrying on as now leaves \u2018Pack at least 900 crates at next week's depot shift\u2019 unchanged; each option is measured against that.",
+      "Static model; not a forecast to a date."
+     ],
+     "target": {
+      "unit": "crates",
+      "frame": "level",
+      "value": 900,
+      "comparator": "at_least"
+     },
+     "message": "synthetic words",
+     "severity": "info",
+     "goal_label": "Pack at least 900 crates at next week's depot shift",
+     "option_ids": [
+      "early_start",
+      "extra_bench",
+      "status_quo"
+     ],
+     "status_quo": {
+      "line": "synthetic words",
+      "option_id": "status_quo"
+     },
+     "chance_words": "chance of \u2018Pack at least 900 crates at next week's depot shift\u2019 being at least 900 crates",
+     "goal_node_id": "crate_goal",
+     "pct_by_option": {},
+     "sent_threshold": {
+      "field": "goal_threshold",
+      "frame": "level",
+      "value": 0.8,
+      "baseline": 0.6222222222222222,
+      "status_quo_option_id": "status_quo"
+     },
+     "withheld_option_ids": [
+      "early_start",
+      "extra_bench",
+      "status_quo"
+     ],
+     "option_labels_by_option": {
+      "status_quo": "Carry on as now",
+      "early_start": "Early start",
+      "extra_bench": "Extra bench"
+     },
+     "withheld_reason_by_option": {
+      "early_start": {
+       "line": "synthetic words",
+       "side": "meets",
+       "reason": "zero_spread"
+      },
+      "extra_bench": {
+       "line": "synthetic words",
+       "side": "falls_short",
+       "reason": "zero_spread"
+      }
+     }
+    }
+   ],
+   "confidence_tier": "strong",
+   "flip_thresholds": [
+    {
+     "unit": "crates",
+     "factor_id": "crate_goal_today",
+     "flip_value": null,
+     "flip_reason": "structurally_invariant",
+     "probes_used": 0,
+     "value_scale": "display",
+     "factor_label": "Pack at least 900 crates at next week's depot shift today",
+     "current_value": 700,
+     "current_display": "700 crates",
+     "iterations_used": 0,
+     "no_flip_in_range": true,
+     "alternative_winner_id": null,
+     "alternative_winner_label": null
+    }
+   ],
+   "decision_brief": {
+    "options": [
+     {
+      "rank": 1,
+      "label": "Early start",
+      "option_id": "early_start",
+      "win_probability": 1
+     },
+     {
+      "rank": 2,
+      "label": "Extra bench",
+      "option_id": "extra_bench",
+      "win_probability": 0
+     },
+     {
+      "rank": 3,
+      "label": "Carry on as now",
+      "option_id": "status_quo",
+      "win_probability": 0
+     }
+    ],
+    "version": "1",
+    "brief_id": "c642e40d-e031-4ed6-a255-c14d305d8f41",
+    "headline": "Early start currently leads by 100 points on the current model. This option leads on the current model, with important caveats. Before acting, validate the assumptions most likely to change the result.",
+    "warnings": [
+     {
+      "code": "DEGENERATE_OPTION_ZERO_VARIANCE",
+      "message": "synthetic words",
+      "severity": "warning"
+     },
+     {
+      "code": "M2_UNAVAILABLE",
+      "message": "synthetic words",
+      "severity": "warning"
+     },
+     {
+      "code": "MISSING_RISK_PATHWAY",
+      "message": "synthetic words",
+      "severity": "warning"
+     }
+    ],
+    "created_at": "2026-10-22T08:07:08.664Z",
+    "robustness": "robust",
+    "top_drivers": [
+     {
+      "direction": "positive",
+      "sensitivity": 1,
+      "factor_label": "Pack at least 900 crates at next week's depot shift today"
+     }
+    ],
+    "warning_codes": [],
+    "headline_banded": {
+     "band": "clearly_ahead",
+     "text": "synthetic words",
+     "doctrine": "provisional_doctrine_v0",
+     "leader_label": "Early start",
+     "runner_up_label": "Extra bench",
+     "leader_option_id": "early_start",
+     "robustness_gated": false,
+     "runner_up_option_id": "extra_bench",
+     "win_probability_gap": 1
+    },
+    "key_assumptions": [
+     "Pack at least 900 crates at next week's depot shift today"
+    ],
+    "analysis_summary": {
+     "goal_fit": 1,
+     "leading_option": "Early start",
+     "robustness_band": "robust",
+     "win_probability": 1
+    },
+    "robustness_caveat": {
+     "text": "synthetic words",
+     "basis": "is_robust",
+     "doctrine": "provisional_doctrine_v0",
+     "flip_evidence": {
+      "text": "synthetic words",
+      "status": "all_no_effect"
+     }
+    },
+    "what_would_change": [],
+    "defaulted_assumptions": []
+   },
+   "factor_evppi": [
+    {
+     "evppi": 0,
+     "units": "outcome",
+     "method": "regression_evppi_v1",
+     "status": "below_resolution",
+     "evppi_raw": 0,
+     "factor_id": "crate_goal_today",
+     "n_samples": 10000,
+     "clamped_low": false,
+     "noise_floor": 0,
+     "clamped_high": false,
+     "status_reason": "at_or_below_noise_floor",
+     "regression_degree": 0,
+     "correlation_active": false,
+     "baseline_max_expected_utility": 0.853333,
+     "conditional_max_expected_utility": 0.853333
+    }
+   ],
+   "decision_evpi": 0,
+   "p_win_sensitivity": [
+    {
+     "method": "p_win_delta_at_mean_v1",
+     "status": "below_resolution",
+     "clamped": false,
+     "factor_id": "crate_goal__change",
+     "n_samples": 2000,
+     "metric_type": "p_win_recommended",
+     "noise_floor": 0.03099,
+     "p_win_delta": 0,
+     "current_metric": 1,
+     "perfect_metric": 1,
+     "labelling_doctrine": "provisional_doctrine_v0",
+     "noise_floor_method": "z95_worst_case_bernoulli_diff",
+     "p_win_delta_percentage_points": 0
+    },
+    {
+     "method": "p_win_delta_at_mean_v1",
+     "status": "below_resolution",
+     "clamped": false,
+     "factor_id": "crate_goal_today",
+     "n_samples": 2000,
+     "metric_type": "p_win_recommended",
+     "noise_floor": 0.03099,
+     "p_win_delta": 0,
+     "current_metric": 1,
+     "perfect_metric": 1,
+     "labelling_doctrine": "provisional_doctrine_v0",
+     "noise_floor_method": "z95_worst_case_bernoulli_diff",
+     "p_win_delta_percentage_points": 0
+    }
+   ],
+   "critiques": [
+    {
+     "id": "critique_5f687d72c36c",
+     "code": "DEGENERATE_OPTION_ZERO_VARIANCE",
+     "severity": "warning",
+     "source": "isl",
+     "blocks_analysis": false,
+     "affected_option_ids": [
+      "early_start"
+     ],
+     "user_message": "Option 'Early start' produces the same result in every simulation, so nothing in your model makes its outcome uncertain. If you expected it to move, review the factors it changes and the ranges set on them."
+    },
+    {
+     "id": "critique_65f80e7b1d45",
+     "code": "DEGENERATE_OPTION_ZERO_VARIANCE",
+     "severity": "warning",
+     "source": "isl",
+     "blocks_analysis": false,
+     "affected_option_ids": [
+      "extra_bench"
+     ],
+     "user_message": "Option 'Extra bench' produces the same result in every simulation, so nothing in your model makes its outcome uncertain. If you expected it to move, review the factors it changes and the ranges set on them."
+    },
+    {
+     "id": "critique_7a44ca0caf9e",
+     "code": "DEGENERATE_OPTION_ZERO_VARIANCE",
+     "severity": "warning",
+     "source": "isl",
+     "blocks_analysis": false,
+     "affected_option_ids": [
+      "status_quo"
+     ],
+     "user_message": "Option 'Carry on as now' produces the same result in every simulation, so nothing in your model makes its outcome uncertain. If you expected it to move, review the factors it changes and the ranges set on them."
+    }
+   ],
+   "conditional_winners": [],
+   "flip_thresholds_status": "all_no_effect"
+  },
+  "computed_against_hash": "cddf9a31006d167c"
+ },
+ "analysis_run_evidence": {
+  "run_id": "4502bfa8b393fcc0dd3a649488b329dcc9a78818af872d553afb3505b740aeee",
+  "input_snapshot": {
+   "snapshot_version": 1,
+   "sent_digest": "1f9ac6e235576cdac4e801225805acd514ba2676d5d1d8cce59579d7c03c4b15",
+   "residual_digest": "7c49a17587a910ccc73a0c2dcc3dcaa0524186398927e38e2765d33e224263c2",
+   "goal": {
+    "node_id": "crate_goal",
+    "label": "Pack at least 900 crates at next week's depot shift",
+    "target_raw": 900,
+    "unit": "crates",
+    "operator": ">=",
+    "frame": "level"
+   },
+   "options": [
+    {
+     "option_id": "early_start",
+     "label": "Early start",
+     "settings": [
+      {
+       "factor_id": "crate_goal__change",
+       "label": "Change in crates packed per shift",
+       "raw": 260,
+       "unit": "crates",
+       "encoded": 260
+      }
+     ]
+    },
+    {
+     "option_id": "extra_bench",
+     "label": "Extra bench",
+     "settings": [
+      {
+       "factor_id": "crate_goal__change",
+       "label": "Change in crates packed per shift",
+       "raw": 120,
+       "unit": "crates",
+       "encoded": 120
+      }
+     ]
+    },
+    {
+     "option_id": "status_quo",
+     "label": "Carry on as now",
+     "is_baseline": true,
+     "settings": [
+      {
+       "factor_id": "crate_goal__change",
+       "label": "Change in crates packed per shift",
+       "raw": 0,
+       "unit": "crates",
+       "encoded": 0
+      }
+     ]
+    }
+   ],
+   "options_not_sent": [],
+   "factors": [
+    {
+     "factor_id": "crate_goal",
+     "label": "Pack at least 900 crates at next week's depot shift",
+     "raw": 700,
+     "unit": "crates",
+     "encoded": 0.6222222222222222,
+     "source": "brief_extraction",
+     "authorship_digest": "983c20d6199343e1a16b7d287cf48ea84d3ffcfcf04ebee46a3af95cad9cd934"
+    },
+    {
+     "factor_id": "crate_goal__change",
+     "label": "Change in crates packed per shift",
+     "raw": 0,
+     "unit": "crates",
+     "encoded": 0,
+     "source": "cee_inference",
+     "authorship_digest": "d0ca748fe129094d60d5352a541397f355e8e4fc200b2b65004badd27922b099"
+    },
+    {
+     "factor_id": "crate_goal_today",
+     "label": "Pack at least 900 crates at next week's depot shift today",
+     "raw": 700,
+     "unit": "crates",
+     "encoded": 0.6222222222222222,
+     "source": "brief_extraction",
+     "authorship_digest": "ecff958ba014cf552622eb69414622dea00c281de94d943baba9b9e0d4114c48"
+    }
+   ],
+   "constraints": [],
+   "links": [
+    {
+     "from": "decision_crate_goal",
+     "to": "early_start",
+     "mean": 1,
+     "std": 0.01,
+     "exists_probability": 1,
+     "band": "very_strong",
+     "sizing": "unmarked",
+     "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1"
+    },
+    {
+     "from": "early_start",
+     "to": "crate_goal__change",
+     "mean": 1,
+     "std": 0.01,
+     "exists_probability": 1,
+     "band": "very_strong",
+     "sizing": "unmarked",
+     "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1"
+    },
+    {
+     "from": "decision_crate_goal",
+     "to": "extra_bench",
+     "mean": 1,
+     "std": 0.01,
+     "exists_probability": 1,
+     "band": "very_strong",
+     "sizing": "unmarked",
+     "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1"
+    },
+    {
+     "from": "extra_bench",
+     "to": "crate_goal__change",
+     "mean": 1,
+     "std": 0.01,
+     "exists_probability": 1,
+     "band": "very_strong",
+     "sizing": "unmarked",
+     "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1"
+    },
+    {
+     "from": "decision_crate_goal",
+     "to": "status_quo",
+     "mean": 1,
+     "std": 0.01,
+     "exists_probability": 1,
+     "band": "very_strong",
+     "sizing": "unmarked",
+     "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1"
+    },
+    {
+     "from": "status_quo",
+     "to": "crate_goal__change",
+     "mean": 1,
+     "std": 0.01,
+     "exists_probability": 1,
+     "band": "very_strong",
+     "sizing": "unmarked",
+     "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1"
+    },
+    {
+     "from": "crate_goal_today",
+     "to": "crate_goal",
+     "mean": 1,
+     "std": 0.01,
+     "exists_probability": 1,
+     "band": "very_strong",
+     "sizing": "olumi_estimate",
+     "authorship_digest": "c6b8ae17d1d86561e0ce87405fb11c38bfa51612434e6095990216a9fa9d691d",
+     "natural_effect": {
+      "amount": 1,
+      "amount_unit": "crates",
+      "per_source_change": 1,
+      "per_source_change_unit": "crates"
+     }
+    },
+    {
+     "from": "crate_goal__change",
+     "to": "crate_goal",
+     "mean": 1,
+     "std": 0.001,
+     "exists_probability": 1,
+     "band": "very_strong",
+     "sizing": "olumi_estimate",
+     "authorship_digest": "c6b8ae17d1d86561e0ce87405fb11c38bfa51612434e6095990216a9fa9d691d",
+     "natural_effect": {
+      "amount": 1,
+      "amount_unit": "crates",
+      "per_source_change": 1,
+      "per_source_change_unit": "crates"
+     }
+    }
+   ]
+  },
+  "evaluated_question": {
+   "asked": {
+    "unit": "crates",
+    "frame": "level",
+    "target": 900,
+    "horizon": {
+     "as_stated": "synthetic words"
+    },
+    "baseline": 700,
+    "quantity": {
+     "label": "Pack at least 900 crates at next week's depot shift",
+     "node_id": "crate_goal"
+    },
+    "comparator": ">=",
+    "option_ids": [
+     "early_start",
+     "extra_bench",
+     "status_quo"
+    ]
+   },
+   "run_id": "4502bfa8b393fcc0dd3a649488b329dcc9a78818af872d553afb3505b740aeee",
+   "calculated": {
+    "unit": "crates",
+    "frame": "level",
+    "target": 900,
+    "baseline": 700,
+    "quantity": {
+     "label": "Pack at least 900 crates at next week's depot shift",
+     "node_id": "crate_goal"
+    },
+    "comparator": ">=",
+    "option_ids": [
+     "early_start",
+     "extra_bench",
+     "status_quo"
+    ],
+    "encoded_target": 0.8,
+    "encoded_baseline": 0.6222222222222222
+   },
+   "sent_digest": "1f9ac6e235576cdac4e801225805acd514ba2676d5d1d8cce59579d7c03c4b15",
+   "graph_hash_at_run": "cddf9a31006d167c",
+   "dispatched_goal_baseline": 0.6222222222222222,
+   "dispatched_goal_threshold": 0.8,
+   "evaluated_scenario_revision": 3
+  },
+  "occurrence": {
+   "fact_row_id": "b3b904df-97d7-463e-97c2-a81509c75280",
+   "evaluated_scenario_revision": 3
+  }
+ },
+ "canonical_analysis_view": {
+  "schema": "canonical_analysis_view.v1",
+  "source": "stored_run_facts",
+  "question": {
+   "run_id": "4502bfa8b393fcc0dd3a649488b329dcc9a78818af872d553afb3505b740aeee",
+   "fact_row_id": "b3b904df-97d7-463e-97c2-a81509c75280",
+   "evaluated_scenario_revision": 3,
+   "asked": {
+    "quantity": {
+     "node_id": "crate_goal",
+     "label": "Pack at least 900 crates at next week's depot shift"
+    },
+    "target": 900,
+    "comparator": ">=",
+    "unit": "crates",
+    "frame": "level",
+    "horizon": {
+     "as_stated": "synthetic words"
+    },
+    "option_ids": [
+     "early_start",
+     "extra_bench",
+     "status_quo"
+    ],
+    "baseline": 700
+   },
+   "calculated": {
+    "quantity": {
+     "node_id": "crate_goal",
+     "label": "Pack at least 900 crates at next week's depot shift"
+    },
+    "comparator": ">=",
+    "unit": "crates",
+    "frame": "level",
+    "option_ids": [
+     "early_start",
+     "extra_bench",
+     "status_quo"
+    ],
+    "baseline": 700,
+    "encoded_target": 0.8,
+    "encoded_baseline": 0.6222222222222222,
+    "target": 900,
+    "scope": "static"
+   },
+   "omitted": [
+    {
+     "field": "horizon",
+     "reason": "not_calculated",
+     "asked": {
+      "as_stated": "synthetic words"
+     }
+    },
+    {
+     "field": "asked_reference_at_evaluated_revision",
+     "reason": "not_bound_in_saved_model"
+    }
+   ],
+   "scope": {
+    "status": "supported_static",
+    "can_show_goal_chance": true,
+    "reasons": [],
+    "note": "Static model; not a forecast to a date.",
+    "capability": {
+     "declaration_version": 1,
+     "authority": "cee_source_contract",
+     "engine_attestation": "unverified",
+     "engine_support": {
+      "static_level": {
+       "request_frame": "level",
+       "method": "baseline_plus_paired_option_change"
+      },
+      "request_frames": [
+       "level",
+       "delta",
+       "change_abs",
+       "change_rel"
+      ],
+      "minimum_option_count": 1,
+      "temporal_evolution": "outside_this_declaration",
+      "source": "Inference-Service-Layer@a5725a158ce9431350eb1e805e9d9ff8db2dea64:src/services/robustness_analyzer_v2.py:_resolve_threshold_in_sample_frame",
+      "request_source": "Inference-Service-Layer@a5725a158ce9431350eb1e805e9d9ff8db2dea64:src/models/robustness_v2.py:TargetFrame,RobustnessRequestV2.options"
+     },
+     "transport_admission": {
+      "route": "/v2/run",
+      "minimum_option_count": 2,
+      "single_option_goal_chance": false,
+      "source": "plot-lite-service@58b3e3c4c6e8eb1df33cb66f4df129607962aaa9:src/routes/v2/run.ts:options.minItems"
+     },
+     "potential_claim_support": {
+      "goal_chance_requires": [
+       "admission",
+       "target_testability",
+       "currentness",
+       "goal_chance_licence"
+      ],
+      "goal_chance_and_ordering": "goalChanceLicenceForAgent",
+      "comparative_leadership": "leaderLicenceFromState",
+      "one_surviving_result_licenses_leader": false,
+      "static_calculation_answers_date": false
+     }
+    },
+    "dispatched_input_digest": "1f9ac6e235576cdac4e801225805acd514ba2676d5d1d8cce59579d7c03c4b15"
+   },
+   "evidence": {
+    "status": "partial",
+    "missing": [
+     "asked_reference_at_evaluated_revision"
+    ],
+    "dispatched_input_digest": "1f9ac6e235576cdac4e801225805acd514ba2676d5d1d8cce59579d7c03c4b15"
+   }
+  },
+  "run": {
+   "run_id": "4502bfa8b393fcc0dd3a649488b329dcc9a78818af872d553afb3505b740aeee",
+   "graph_hash_at_run": "cddf9a31006d167c",
+   "computed_at": "2026-10-22T08:07:04.376Z"
+  },
+  "staleness": {
+   "stale": false,
+   "revision": 3,
+   "run_revision": 3,
+   "run_revision_source": "recorded",
+   "basis": "analysis_graph_hash_interim",
+   "reason": "graph_hash_match",
+   "limitation": "Hash equality cannot detect brief, framing or stage changes."
+  },
+  "leader_licence": "permitted_with_caveat",
+  "leader": {
+   "licence": "permitted_with_caveat",
+   "option_id": "early_start",
+   "goal_chance_leader": null,
+   "similar_option_ids": [],
+   "near_tie": false,
+   "robustness": "high"
+  },
+  "options": [
+   {
+    "option_id": "early_start",
+    "cell": {
+     "kind": "withheld",
+     "reasons": [
+      {
+       "code": "zero_spread",
+       "message": "synthetic words"
+      }
+     ],
+     "face": "Chance not shown yet",
+     "why": "Chance not shown: this result reports a very narrow central range or a very small spread. That alone does not establish certainty. Review whether the model captures the uncertainties that matter for this option."
+    },
+    "main_driver": {
+     "kind": "not_recorded"
+    }
+   },
+   {
+    "option_id": "extra_bench",
+    "cell": {
+     "kind": "withheld",
+     "reasons": [
+      {
+       "code": "zero_spread",
+       "message": "synthetic words"
+      }
+     ],
+     "face": "Chance not shown yet",
+     "why": "Chance not shown: this result reports a very narrow central range or a very small spread. That alone does not establish certainty. Review whether the model captures the uncertainties that matter for this option."
+    },
+    "main_driver": {
+     "kind": "not_recorded"
+    }
+   },
+   {
+    "option_id": "status_quo",
+    "cell": {
+     "kind": "withheld",
+     "reasons": [
+      {
+       "code": "status_quo_by_assumption",
+       "message": "synthetic words"
+      }
+     ],
+     "face": "No change, by assumption",
+     "why": "This Run can\u2019t give a chance for carrying on as now, because it treats \u2018Pack at least 900 crates at next week's depot shift\u2019 as unchanged from today\u2019s 700 crates (your target is at least 900 crates)."
+    },
+    "main_driver": {
+     "kind": "not_recorded"
+    }
+   }
+  ],
+  "goal_chance": {
+   "status_quo": {
+    "option_id": "status_quo",
+    "line": "synthetic words"
+   }
+  }
+ }
+}

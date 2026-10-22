@@ -11,9 +11,10 @@
  * they are the same frame); no option whose outcome the Run keeps from the AI.
  */
 import { goalChanceLicenceForAgent } from '../goal-target/goal-chance-licence.js';
-import { recordedStaticLevelEvidence } from '../goal-target/static-run-evidence.js';
+import { recordedStaticLevelEvidence, recordedStaticScopeDeclared } from '../goal-target/static-run-evidence.js';
 import type { SelectedRunEvidence } from '../goal-target/goal-chance-licence.js';
 import { keptOutcomeOptionIds } from './decision-sensitivity.js';
+import { readRecordedRunQuestion } from '../tools/handlers/run-input-snapshot.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Rec) : undefined);
@@ -27,23 +28,32 @@ const clean = (v: number): number => Number(v.toPrecision(15)) + 0;
  * neither float noise nor a real last digit is ever rounded into a different figure (Codex r2/r3: 1.2e15 + 1); else nothing.
  */
 const asRecorded = (v: number): number | undefined => (Number(v.toPrecision(15)) === v ? v + 0 : undefined);
-/** Decimal places as written, or undefined in exponent form. */
-const places = (v: number): number | undefined => {
-  const s = String(v);
-  if (/e/i.test(s)) return undefined;
-  const i = s.indexOf('.');
-  return i < 0 ? 0 : s.length - i - 1;
+/** A finite figure's own shortest decimal digits as an integer n and places p (value n × 10^−p), trailing zeros dropped. */
+const digitsOf = (v: number): { readonly n: bigint; readonly p: number } | undefined => {
+  const m = /^(-?)(\d+)(?:\.(\d+))?(?:e([+-]\d+))?$/u.exec(String(v + 0));
+  if (m === null) return undefined;
+  let n = BigInt(m[2]! + (m[3] ?? '')) * (m[1] === '-' ? -1n : 1n);
+  let p = (m[3] ?? '').length - Number(m[4] ?? 0);
+  if (p < 0) { n *= 10n ** BigInt(-p); p = 0; }
+  while (p > 0 && n % 10n === 0n) { n /= 10n; p -= 1; }
+  return { n, p };
 };
 /**
- * a + b exactly as decimals (0.3 − 0.1 is 0.2, 1e15 + 1 − 400 keeps its last digit; Codex r2), or undefined when either
- * figure cannot be held exactly as a safe integer at the shared number of places: nothing is said rather than a rounded figure.
+ * a + b exactly as decimals, from each figure's own digits (0.3 − 0.1 is 0.2, 1e15 + 1 − 400 keeps its last digit; Codex r2;
+ * 8.00000000000001 + 1.000000000000001 is 9.000000000000011, never a float-scaled 9.000000000000012), or undefined when the
+ * exact sum is not exactly what the number it becomes says: nothing is said rather than a rounded figure.
  */
 const add = (a: number, b: number): number | undefined => {
-  const pa = places(a), pb = places(b);
-  if (pa === undefined || pb === undefined) return undefined;
-  const k = 10 ** Math.max(pa, pb);
-  const ia = Math.round(a * k), ib = Math.round(b * k);
-  return Number.isSafeInteger(ia) && Number.isSafeInteger(ib) && Number.isSafeInteger(ia + ib) ? (ia + ib) / k + 0 : undefined;
+  const x = digitsOf(a), y = digitsOf(b);
+  if (x === undefined || y === undefined) return undefined;
+  const p = Math.max(x.p, y.p);
+  const sum = x.n * 10n ** BigInt(p - x.p) + y.n * 10n ** BigInt(p - y.p);
+  const digits = (sum < 0n ? -sum : sum).toString().padStart(p + 1, '0');
+  const out = Number(`${sum < 0n ? '-' : ''}${digits.slice(0, digits.length - p)}.${digits.slice(digits.length - p)}0`) + 0;
+  const back = digitsOf(out);
+  let n = sum, q = p;
+  while (q > 0 && n % 10n === 0n) { n /= 10n; q -= 1; }
+  return back !== undefined && back.n === n && back.p === q ? out : undefined;
 };
 
 /** The one input an option's result rests on, where the model's exact sum makes its level today's level plus that input. */
@@ -74,6 +84,11 @@ export interface GoalMargins {
   readonly unit: string;
   /** Today's level, as the Run recorded it. */
   readonly baseline: number;
+  /**
+   * Present (false) only when the licence declared no static scope (a Run with no "carry on" option): these are the model's
+   * figures as they stand, not a forecast to the goal's date.
+   */
+  readonly static_scope_declared?: false;
   readonly options: readonly GoalMargin[];
 }
 
@@ -82,7 +97,8 @@ function exactLevelOf(row: Rec | undefined): number | undefined {
   const o = rec(row?.outcome);
   if (o === undefined || !finite(o.p50)) return undefined;
   const p50 = o.p50;
-  if (finite(o.std) && Math.abs(o.std) > 1e-12 * Math.abs(p50)) return undefined;
+  // A recorded spread that is not a finite figure is no evidence of zero spread (Codex r2: Infinity / NaN slipped past).
+  if (typeof o.std === 'number' && !(Math.abs(o.std) <= 1e-12 * Math.abs(p50))) return undefined;
   return ['p10', 'p90', 'mean'].every((k) => !(k in o) || (finite(o[k]) && close(o[k] as number, p50))) ? p50 : undefined;
 }
 
@@ -97,13 +113,20 @@ export function goalMarginsOf(result: unknown, graph: unknown, current: boolean,
   if (!current || stored === undefined) return undefined;
   if (evidence !== undefined && (typeof selectedRunId !== 'string' || evidence.runId !== selectedRunId
     || (typeof stored.run_id === 'string' && stored.run_id !== selectedRunId))) return undefined;
+  // The Run's recorded levels first; where they say nothing (no "carry on" option, or a level carrying float noise), the
+  // Run's own dispatched arithmetic, under its own binding (served R2 8006: P01's 960.0000000000001, P03/P04/P05/P07).
+  return recordedMarginsOf(stored, graph, evidence) ?? snapshotMarginsOf(stored, graph, evidence, selectedRunId);
+}
+
+/** #3636's route: the levels the Run recorded, its frame proved by the status quo's own row. */
+function recordedMarginsOf(stored: Rec, graph: unknown, evidence: SelectedRunEvidence | undefined): GoalMargins | undefined {
   const ev = recordedStaticLevelEvidence(evidence?.inputSnapshot === undefined ? stored : { ...stored, input_snapshot: evidence.inputSnapshot });
   if (ev === undefined || !ev.static_scope_declared) return undefined;
   const enrichment = rec(stored.enrichment);
   const rows = Array.isArray(enrichment?.option_comparison) ? enrichment!.option_comparison.map(rec) : [];
   const rowOf = (id: string) => rows.find((r) => r?.option_id === id || (r?.option_id === undefined && r?.id === id));
   if (enrichment === undefined || keptOutcomeOptionIds(enrichment).size > 0) return undefined;
-  const licence = goalChanceLicenceForAgent(result);
+  const licence = goalChanceLicenceForAgent(stored);
   const reasons = licence?.withheld_reason_by_option ?? {};
   // Every option is an exact result: withheld for zero spread, the status quo by its own record.
   const sq = ev.status_quo_option_id;
@@ -169,4 +192,116 @@ export function goalMarginsOf(result: unknown, graph: unknown, current: boolean,
     options.push({ option_id: id, label, level, margin, meets, ...(restsOn === undefined ? {} : { rests_on: restsOn }) });
   }
   return { target: ev.target, comparator: ev.comparator, unit: ev.unit, baseline: ev.baseline, options };
+}
+
+/** The option's own single exact link to the goal in the living model, with its signed saved effect (the existing conditions). */
+function ownExactLink(graph: unknown, optionId: string, goalId: string, unit: string): { readonly id: string; readonly saved: number; readonly label: string } | undefined {
+  const living = rec(rec(graph)?.living_model);
+  const lmOption = (Array.isArray(living?.options) ? living!.options.map(rec) : []).find((o) => o?.id === optionId);
+  const own = (Array.isArray(living?.links) ? living!.links.map(rec) : []).filter((l) => l?.from === optionId);
+  const link = own.length === 1 && own[0]?.to === goalId ? own[0]! : undefined;
+  const effect = rec(link?.effect);
+  if (typeof lmOption?.label !== 'string' || link === undefined || typeof link.id !== 'string' || effect?.form !== 'exact'
+    || !finite(effect.value) || (effect.sign !== '+' && effect.sign !== '-') || (effect.unit !== null && effect.unit !== unit)
+    || !Array.isArray(lmOption.settings) || lmOption.settings.length !== 0) return undefined;
+  return { id: link.id, saved: (effect.sign === '-' ? -1 : 1) * Math.abs(effect.value) + 0, label: lmOption.label };
+}
+
+/**
+ * The second route, where the recorded levels say nothing (Track 2, 23 Oct; served R2: no "carry on" option, so no sent
+ * threshold, on P03/P04/P05/P07; a float-noise level, 960.0000000000001, on P01). Every figure comes from the selected Run's OWN
+ * retained inputs: its recorded
+ * question, bound by run id, evaluated revision, sent digest and the graph hash it was computed against, whose dispatched
+ * threshold must be the target on the goal's own scale (Codex approach: the performed threshold, not the snapshot alone); today's
+ * level and each option's one dispatched change; the model's exact sum as the rule that makes a level today plus change. The
+ * engine's rows and the licence's sides only have to AGREE; they never supply a figure. Anything else: nothing.
+ */
+function snapshotMarginsOf(stored: Rec, graph: unknown, evidence: SelectedRunEvidence | undefined, selectedRunId: string | null | undefined): GoalMargins | undefined {
+  const snapshot = rec(evidence?.inputSnapshot), goal = rec(snapshot?.goal);
+  const revision = evidence?.occurrence?.evaluated_scenario_revision;
+  const hash = stored.computed_against_hash;
+  if (evidence === undefined || typeof selectedRunId !== 'string' || snapshot === undefined || goal === undefined
+    || typeof revision !== 'number' || !Number.isSafeInteger(revision) || typeof hash !== 'string' || hash === '') return undefined;
+  const asked = readRecordedRunQuestion(evidence.evaluatedQuestion, { runId: selectedRunId, revision, inputSnapshot: snapshot, graphHashAtRun: hash });
+  const calc = asked?.calculated;
+  const goalId = goal.node_id, target = goal.target_raw, unit = goal.unit, comparator = goal.operator;
+  if (asked === undefined || calc == null || typeof goalId !== 'string' || goalId === ''
+    || goal.frame !== 'level' || calc.frame !== 'level' || !finite(target) || typeof unit !== 'string' || unit.trim() === ''
+    || typeof comparator !== 'string' || !['>=', '>', '<=', '<'].includes(comparator) || calc.comparator !== comparator || calc.unit !== unit) return undefined;
+  if (goal.direction !== undefined && goal.direction !== 'maximise' && goal.direction !== 'minimise') return undefined;
+  if (goal.direction === 'minimise' ? !['<=', '<'].includes(comparator) : !['>=', '>'].includes(comparator)) return undefined;
+  // Today's level and the change the options set, each once, in the goal's unit; the change itself recorded at zero.
+  const factors = Array.isArray(snapshot.factors) ? snapshot.factors.map(rec) : [];
+  const one = (id: string) => { const f = factors.filter((x) => x?.factor_id === id); return f.length === 1 && f[0]!.unit === unit && finite(f[0]!.raw) ? f[0]!.raw as number : undefined; };
+  const level0 = one(goalId), today = one(`${goalId}_today`), change0 = one(`${goalId}__change`);
+  if (level0 === undefined || today !== level0 || change0 !== 0 || calc.baseline !== today) return undefined;
+  // The performed target: the dispatched threshold IS the raw target on the dispatched baseline's own scale (relative, no floor).
+  const sentT = asked.dispatched_goal_threshold, sentB = asked.dispatched_goal_baseline;
+  if (sentT === null || sentB === null || today === 0) return undefined;
+  const scale = sentB / today, expected = target * scale;
+  // Every step finite (Codex r1: an overflowed product is "close" to an overflowed threshold).
+  if (!(scale > 0) || !Number.isFinite(scale) || !Number.isFinite(expected) || !close(sentT, expected)) return undefined;
+  // The licence's carrier: one, with no sent threshold (the first route owns those), describing this same goal and target.
+  const carriers = [stored.inference_warnings, rec(stored.enrichment)?.inference_warnings].flatMap((v) => (Array.isArray(v) ? v : []))
+    .map(rec).filter((w): w is Rec => w?.code === 'GOAL_CHANCE_LICENSED');
+  const carrier = carriers.length === 1 ? carriers[0]! : undefined;
+  const shown = rec(carrier?.target);
+  const said: Readonly<Record<string, string>> = { at_least: '>=', above: '>', at_most: '<=', below: '<' };
+  const sentRecord = rec(carrier?.sent_threshold);
+  if (carrier === undefined || (carrier.sent_threshold !== undefined && (sentRecord?.value !== sentT || sentRecord.baseline !== sentB))
+    || carrier.goal_node_id !== goalId || shown === undefined
+    || shown.value !== target || shown.unit !== unit || said[String(shown.comparator)] !== comparator
+    || (shown.frame !== undefined && shown.frame !== 'level')) return undefined;
+  // The model's exact sum is the rule that makes each level today plus its change (Codex approach #3: required, not optional).
+  const nodes = Array.isArray(rec(graph)?.nodes) ? (rec(graph)!.nodes as unknown[]).map(rec) : [];
+  const identity = rec(nodes.find((n) => n?.id === goalId)?.nonlinear_identity);
+  const parts = Array.isArray(identity?.factor_ids) ? identity!.factor_ids : [];
+  if (identity?.operation !== 'sum' || parts.length !== 2 || parts[0] !== `${goalId}_today` || parts[1] !== `${goalId}__change`) return undefined;
+  const enrichment = rec(stored.enrichment);
+  if (enrichment === undefined || keptOutcomeOptionIds(enrichment).size > 0) return undefined;
+  const rows = Array.isArray(enrichment.option_comparison) ? enrichment.option_comparison.map(rec) : [];
+  const licence = goalChanceLicenceForAgent(stored);
+  const reasons = licence?.withheld_reason_by_option ?? {};
+  const options = Array.isArray(snapshot.options) ? snapshot.options.map(rec) : [];
+  if (options.length === 0 || !Array.isArray(snapshot.options_not_sent) || snapshot.options_not_sent.length !== 0) return undefined;
+  const upward = comparator === '>=' || comparator === '>';
+  const strict = comparator === '>' || comparator === '<';
+  const boundary = add(target, -today);
+  const out: GoalMargin[] = [];
+  const seen = new Set<string>();
+  for (const o of options) {
+    const id = o?.option_id;
+    const settings = Array.isArray(o?.settings) ? o!.settings.map(rec) : [];
+    if (typeof id !== 'string' || id === '' || seen.has(id) || settings.length !== 1) return undefined;
+    seen.add(id);
+    const set = settings[0]!;
+    if (set.factor_id !== `${goalId}__change` || set.unit !== unit || !finite(set.raw)) return undefined;
+    // "Carry on as now": at most one, and it changes nothing (its level IS today's); it is never a test.
+    const carryOn = o?.is_baseline === true;
+    if (carryOn && (set.raw !== 0 || options.filter((x) => x?.is_baseline === true).length !== 1)) return undefined;
+    const level = add(today, set.raw);
+    const margin = level === undefined ? undefined : upward ? add(level, -target) : add(target, -level);
+    if (level === undefined || margin === undefined) return undefined;
+    const meets = strict ? margin > 0 : margin >= 0;
+    // Agreement only: the engine's zero-spread row is this level within float noise; the licence withheld it for zero
+    // spread on the same side.
+    const row = rows.find((r) => r?.option_id === id || (r?.option_id === undefined && r?.id === id));
+    const engine = exactLevelOf(row);
+    const reason = reasons[id] as { reason?: string; side?: string } | undefined;
+    // The status quo may carry the licence's own status-quo record instead of a zero-spread reason (as #3636's route).
+    const withheld = reason === undefined && carryOn && licence?.status_quo?.option_id === id
+      || reason?.reason === 'zero_spread' && (reason.side === 'meets') === meets;
+    if (engine === undefined || !close(engine, level) || !withheld) return undefined;
+    const link = carryOn ? undefined : ownExactLink(graph, id, goalId, unit);
+    const label = typeof o?.label === 'string' ? o.label : undefined;
+    if (link === undefined && label === undefined) return undefined;
+    // The person's link bound to what the Run dispatched: its saved effect IS the change the Run sent, exactly.
+    const restsOn = link !== undefined && link.saved === set.raw && link.saved !== 0 && boundary !== undefined && boundary !== 0
+      && boundary !== link.saved ? { link_id: link.id, saved: link.saved, boundary } : undefined;
+    out.push({ option_id: id, label: link?.label ?? label!, level, margin, meets, ...(restsOn === undefined ? {} : { rests_on: restsOn }) });
+  }
+  // The licence covered exactly the Run's options.
+  const licensed = Array.isArray(carrier.option_ids) ? carrier.option_ids : [];
+  if (licensed.length !== seen.size || licensed.some((id) => typeof id !== 'string' || !seen.has(id))) return undefined;
+  return { target, comparator, unit, baseline: today, ...(recordedStaticScopeDeclared(carrier) ? {} : { static_scope_declared: false as const }), options: out };
 }
