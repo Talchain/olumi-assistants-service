@@ -552,7 +552,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         const savedRead = savedScenarioOf(await readingDispatch(graphPath, {}));
         if (!admitsRun(savedRead.analysisReady)) return { ready: savedRead.analysisReady };
         // The AI's timing reading, carried from the Run current when the turn began while this change left its subject as it was.
-        const turnStart = (await readCache.turnStartRead())?.json as { graph?: unknown; analysis_result?: unknown } | undefined;
+        const turnStart = start.json as { graph?: unknown; analysis_result?: unknown };
         return { run: await capabilities.runAnalysis(toolCtx, { reason: 'Analyse the model as just saved.',
           effects_timing: carriedEffectsTiming(turnStart, savedRead.graph) }, { afterCommittedChange: true }) };
       })();
