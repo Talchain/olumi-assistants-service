@@ -648,6 +648,8 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(r.statusCode, r.body).toBe(200);
     const j = r.json() as Json;
     expect(j._agent.tool_calls.map((c: Json) => [c.name, c.outcome])).toEqual([['propose_change', 'refused'], ['propose_change', 'ok']]);
+    // DL 22 Oct: which offer fired is on the wire, as the refused call's typed reason; an ok call names none.
+    expect(j._agent.tool_calls.map((c: Json) => c.refusal ?? null)).toEqual(['goal_path_cut', null]);
     expect(j.cards).toHaveLength(1);
     expect(JSON.stringify(j.cards[0].adds)).toContain('f_customers');
     expect(registered, 'a card writes nothing').toHaveLength(0);

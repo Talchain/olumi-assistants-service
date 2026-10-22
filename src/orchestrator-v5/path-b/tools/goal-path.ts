@@ -131,22 +131,46 @@ export function optionsReachingGoal(model: LivingModelT, mapped: Mapped): string
 }
 
 /**
+ * What carried the base's path into the goal and is gone after the change: the links into the BASE goal that the change
+ * removes (read against the base goal's id, so a re-id of the goal still names them: Codex on #3679), and the goal's definition
+ * (`<goal id>:defined_as`) when the change drops it (served 79c1e150-b, marketing: a re-measured goal dropped the definition its
+ * path ran through and removed no link, so `cut` was empty). A link the change keeps but the mapper holds still counts as a
+ * path (`optionsReachingGoal`), so it never cuts one.
+ */
+export function pathCut(base: LivingModelT, baseMapped: Mapped, next: LivingModelT, mapped: Mapped): string[] {
+  const goal = baseMapped.graph.nodes.find((n) => n.kind === 'goal')?.id;
+  const was = base.aims.find((a) => a.id === goal);
+  const kept = next.aims.find((a) => a.id === mapped.graph.nodes.find((n) => n.kind === 'goal')?.id);
+  return [...base.links.filter((l) => l.to === goal && !next.links.some((n) => n.id === l.id)).map((l) => l.id),
+    ...(was?.defined_as && !kept?.defined_as ? [`${was.id}:defined_as`] : [])];
+}
+
+/**
+ * ⭐ NEVER A PATHLESS CARD WHEN THE GOAL HAD A PATH (DL 22 Oct, served 79c1e150: told to re-link, the AI kept the cut and added a
+ * condition that the old estimates could not transfer). The estimate rule already lets Olumi add complete, visibly Olumi's
+ * figures; a link into a re-measured or replaced goal is one, provisional, approved on the card. The person's figures never move.
+ */
+const RELINK = 'If a link into the new goal has no figure the person gave, add it with Olumi\'s own labelled estimate under the estimate '
+  + 'rule (or ask for it); never leave the goal with no path. Never move a figure the person gave onto a different measure.';
+const AGAIN = 'Then call propose_change once more. If the person asked for exactly this change, call it again with the same change: '
+  + 'its card is made, and ask them in one question for the size of each link into the goal.';
+
+/**
  * What the AI is told with a change after which no option reaches the goal any more (marketing on 7ee0d90f, DL 22 Oct: a new
  * measure for the goal removed every link into it and added none, so the approved card cut the goal's path and no Run could
- * start). The person's figures stay on the measure they gave them for; a link of Olumi's carries Olumi's own provisional
- * estimate, labelled as Olumi's, as the estimate rule says.
+ * start).
  */
-export const RESTRUCTURE_CUT = 'No card yet. After this change no option reaches the goal (cut lists the links into it that the '
-  + 'change removes), so no analysis could run. If the goal\'s new measure changes what those links meant, link what drives the goal '
-  + 'to it under that measure: never move a figure the person gave onto a different measure; a link of yours carries your own provisional '
-  + 'estimate, labelled as yours. Then call propose_change once more. If the change is right as it is, call it again with the same '
-  + 'change and its card is made.';
+export const RESTRUCTURE_CUT = 'No card yet. After this change no option reaches the goal (cut lists what carried its path and is '
+  + 'gone: the links into it, and its definition as <goal id>:defined_as), so no analysis could run. Link what drives each option '
+  + `to the goal under its new measure. ${RELINK} ${AGAIN}`;
 
 /**
  * What the AI is told with a change that adds the person's own aim with its target, which becomes the goal (`changeGoal`), when
  * no option reaches it (DL 22 Oct, marketing on 4a4c338c: both aims were added with no links, so no analysis could run).
  */
 export const RESTRUCTURE_AIM = 'No card yet. This change adds the person\'s own aim with its target (aim), so it becomes the goal, but '
-  + 'no option reaches it, so no analysis could run. Link what drives it to that aim under its measure: never move a figure the '
-  + 'person gave onto a different measure; a link of yours carries your own provisional estimate, labelled as yours. Then call '
-  + 'propose_change once more. If the change is right as it is, call it again with the same change and its card is made.';
+  + `no option reaches it, so no analysis could run. Link what drives each option to that aim under its measure. ${RELINK} ${AGAIN}`;
+
+/** On a card that still leaves the goal with no path where the saved model had one: the base fallback, with its one question. */
+export const ASK_LINK_SIZES = 'This card leaves no option reaching the goal, so no analysis can run once it is approved. In your '
+  + 'reply, ask the person in one question for the size of each link into the goal.';

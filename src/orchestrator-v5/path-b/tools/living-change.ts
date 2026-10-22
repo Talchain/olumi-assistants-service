@@ -18,7 +18,7 @@ import { applyKernel, canonicalIds, plain } from '../living-model/kernel.js';
 import { withCalendarReadings } from '../living-model/calendar-reading.js';
 import { todayInLondon } from '../../goal-target/deadline-date.js';
 import { changeGoal, mapLivingModel, savedGoal } from '../living-model/mapper.js';
-import { addedCauses, goalPathEncodingCauses, KEPT_AS_REFUSED, optionsReachingGoal, personContentLost, RESTRUCTURE_AIM, RESTRUCTURE_CHANGE, RESTRUCTURE_CUT, withRefusedRoles, type Restructure } from './goal-path.js';
+import { addedCauses, ASK_LINK_SIZES, goalPathEncodingCauses, KEPT_AS_REFUSED, optionsReachingGoal, pathCut, personContentLost, RESTRUCTURE_AIM, RESTRUCTURE_CHANGE, RESTRUCTURE_CUT, withRefusedRoles, type Restructure } from './goal-path.js';
 import { diffLivingModels, stable, type LivingChange } from '../living-model/diff.js';
 import { livingViewOf } from '../living-model/view.js';
 import { isNoModelYet, isSavedRead, readSaved } from './context-tool.js';
@@ -142,8 +142,10 @@ async function proposeOnce(deps: Deps, ctx: Ctx, args: LivingChangeArgs): Promis
   // ⭐ CLASS 3: a change that ADDS a cause withholding the goal's chance through its own encoding is said back ONCE, before its
   // card; what the saved model already held is not this change's to answer for (`goal-path.ts`).
   const offer = deps.restructure !== undefined && !deps.restructure.offered ? deps.restructure : undefined;
-  const baseMapped = offer === undefined ? undefined : mapLivingModel(base.model, savedGoal(base.saved.graph));
-  const introduced = baseMapped === undefined ? [] : addedCauses(goalPathEncodingCauses(baseMapped), goalPathEncodingCauses(mapped));
+  const baseMapped = mapLivingModel(base.model, savedGoal(base.saved.graph));
+  const introduced = offer === undefined ? [] : addedCauses(goalPathEncodingCauses(baseMapped), goalPathEncodingCauses(mapped));
+  // The saved model had a path to its goal and this change leaves none (to the goal it maps under).
+  const cutsPath = optionsReachingGoal(base.model, baseMapped).length > 0 && optionsReachingGoal(next, mapped).length === 0;
   // ⭐ THE PERSON'S AIM BECOMES THE GOAL (DL 22 Oct, marketing on 4a4c338c): when it does and no option reaches it, the same one
   // offer says so, with the aim, before its card.
   if (offer !== undefined && goal.goal !== savedGoal(base.saved.graph).goal && optionsReachingGoal(next, mapped).length === 0) {
@@ -158,9 +160,8 @@ async function proposeOnce(deps: Deps, ctx: Ctx, args: LivingChangeArgs): Promis
   }
   // ⭐ A CHANGE NEVER SILENTLY CUTS THE GOAL'S PATH (DL 22 Oct, marketing on 7ee0d90f): when the saved model has an option that
   // reaches the goal and this change leaves none, the same one offer says so, with the links into the goal it removes.
-  if (offer !== undefined && baseMapped !== undefined && optionsReachingGoal(base.model, baseMapped).length > 0 && optionsReachingGoal(next, mapped).length === 0) {
-    const goal = mapped.graph.nodes.find((n) => n.kind === 'goal')?.id;
-    const cut = changes.filter((c) => c.kind === 'link' && c.change === 'remove' && (c.before as { to?: unknown } | undefined)?.to === goal).map((c) => c.id);
+  if (offer !== undefined && cutsPath) {
+    const cut = pathCut(base.model, baseMapped, next, mapped);
     offer.offered = true;
     offer.pending = { tool: 'propose_change', args };
     return refused('goal_path_cut', RESTRUCTURE_CUT, { cut });
@@ -169,8 +170,10 @@ async function proposeOnce(deps: Deps, ctx: Ctx, args: LivingChangeArgs): Promis
     base_graph_identity_hash: base.saved.graphHash, base_model_identity: base.saved.identity!, operations: operationsOf(changes),
     provenance: { authored_by: 'model_proposed', basis: args.basis }, validation: { admitted: true, loss_count: 0, refusals: [] },
     public_label: args.public_label, living_model: next }));
+  // The base fallback carded a change that leaves the goal with no path: the AI asks for the link sizes in one question (DL).
   return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: base.saved.graphHash,
-    changes, withheld: mapped.withheld, assumed: mapped.assumed, relabelled: kernelled.relabelled });
+    changes, withheld: mapped.withheld, assumed: mapped.assumed, relabelled: kernelled.relabelled,
+    ...(cutsPath ? { goal_unreached: { cut: pathCut(base.model, baseMapped, next, mapped), ask: ASK_LINK_SIZES } } : {}) });
 }
 
 /** A proposal this module prepared: it carries the complete living model it would write. */

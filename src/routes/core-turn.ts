@@ -715,8 +715,11 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         receipts: receiptsOf(result),
         paused: paused !== undefined ? { proposal_id: paused.proposal_id } : null,
         error: noReply ? RECORDED.reply_empty.error : null,
+        // A refused or unavailable call names its typed reason (DL 22 Oct: which of Class 3's offers fired was not on the wire).
         agent: { mode: MODE, stopped_reason: result.stopped_reason, tool_calls: result.tool_calls.map((c) => ({ name: c.name,
-          outcome: (c as { outcome?: unknown }).outcome ?? (c.ok ? 'ok' : 'refused') })), ...(result.sdk !== undefined ? { sdk: result.sdk } : {}) },
+          outcome: (c as { outcome?: unknown }).outcome ?? (c.ok ? 'ok' : 'refused'),
+          ...(typeof (c as { refusal?: unknown }).refusal === 'string' ? { refusal: (c as { refusal: string }).refusal } : {}) })),
+          ...(result.sdk !== undefined ? { sdk: result.sdk } : {}) },
         providerCalls: recordedProviderCalls(),
       }));
     } finally {
