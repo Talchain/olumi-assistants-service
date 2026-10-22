@@ -122,7 +122,7 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
           const affected = def.of.map(follow).some(Boolean);
           if (!affected) return false;
           const values = def.of.map((p) => factor(p)?.value ?? null);
-          const made = values.every((v): v is number => v !== null) ? exactlyMade(def.op, values) : undefined;
+          const made = values.every((v): v is number => v !== null) ? exactlyMade(def.op, values.map((v, i) => (def.subtract?.includes(def.of[i]!) ? -1 : 1) * v)) : undefined;
           if (made === undefined || !Number.isFinite(made.level) || made.level === quantity.value) return false;
           m.history.push({ id, change: 'superseded', old: JSON.stringify(quantity), quote: null });
           // A calculation is no one's stated figure or estimate; keep its definition's attribution separately.

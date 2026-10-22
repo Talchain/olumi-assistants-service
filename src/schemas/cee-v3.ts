@@ -720,8 +720,9 @@ export const NodeV3 = z.object({
       z.object({
         operation: z.literal('sum'),
         factor_ids: z.array(z.string().min(1)).min(2),
+        subtract: z.array(z.string().min(1)).min(1).optional(),
         stated_in_brief: z.boolean(),
-      }).strict(),
+      }).strict().refine((d) => d.subtract === undefined || (new Set(d.subtract).size === d.subtract.length && d.subtract.every((id) => d.factor_ids.includes(id))), 'subtract must name distinct sum parts'),
       // S4 Q1: graph-level validation below restricts this arm to a goal's accumulation carrier.
       z.object({
         operation: z.literal('sum'),

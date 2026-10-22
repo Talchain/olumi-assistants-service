@@ -37,8 +37,12 @@ export function canonicalIds(model: LivingModelT): LivingModelT {
   };
   for (const item of [...model.aims, ...model.options, ...model.factors, ...model.links, ...model.risks]) canon(item.id);
   const ref = (raw: string): string => map.get(raw) ?? raw;
-  const defined = <T extends { defined_as?: { op: 'sum' | 'product'; of: string[] } | null }>(x: T): T =>
-    (x.defined_as ? { ...x, defined_as: { ...x.defined_as, of: x.defined_as.of.map(ref) } } : x);
+  const defined = <T extends { defined_as?: { op: 'sum' | 'product'; of: string[]; subtract?: string[] | null } | null }>(x: T): T => {
+    if (!x.defined_as) return x;
+    const { subtract, ...definition } = x.defined_as;
+    return { ...x, defined_as: { ...definition, of: definition.of.map(ref),
+      ...(subtract == null ? {} : { subtract: subtract.map(ref) }) } };
+  };
   return {
     aims: model.aims.map((a) => defined({ ...a, id: ref(a.id) })),
     factors: model.factors.map((f) => defined({ ...f, id: ref(f.id) })),
