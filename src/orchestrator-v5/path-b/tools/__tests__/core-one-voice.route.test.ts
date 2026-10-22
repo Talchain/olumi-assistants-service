@@ -506,7 +506,7 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
     const r = await post({ turn_id: randomUUID(), message: 'Keep staff training separate; discuss it here without changing this model.', source: 'composer' });
     expect(r.statusCode, r.body).toBe(200);
     expectCoherentInstructions(r.json());
-    expect(createHash('sha256').update(CORE_REPLY_RULES, 'utf8').digest('hex')).toBe('0d1c339f1750712b5a4c769618343e9c343f4da60959066ae6d80a1404044d30'); // 22 Oct: the coach's reply rules + the kept tool and approval rules (DL priority change; Codex r1 / buddy: two coach phrases deleted; was 8c0d1f73…)
+    expect(createHash('sha256').update(CORE_REPLY_RULES, 'utf8').digest('hex')).toBe('6f5f00c581ac4be2f1f590973e4bcf58c6eba498e5216bc3a8a21a189be5f3d6'); // 22 Oct: retire the duplicate missing-input ask; the standing core paragraph asks it once.
     for (const c of calls) {
       expect(c.instructions).toContain(CORE_REPLY_RULES);
       expect(c.instructions.split(scope)).toHaveLength(2);
