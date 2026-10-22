@@ -19,6 +19,8 @@ import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import type { LivingModelT } from '../../../../schemas/living-model.js';
 import { projectCorePostimageForPersistence } from '../../../persisted-graph-projection.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.js';
+import { goalHorizonVerdict } from '../../../goal-target/goal-horizon-verdict.js';
+import { goalChanceFactsForAgent } from '../../../goal-target/goal-chance-range-agent.js';
 import { mapLivingModel } from '../../../path-b/living-model/mapper.js';
 import { buildAnalysisResultBlock } from '../../../compose.js';
 import type { HandlerInvocation } from '../../registry.js';
@@ -116,6 +118,31 @@ const RECORDED = (name: string): Json => {
 };
 
 describe('Track 2: an option outcome measured from zero never reaches analysis_result', () => {
+  it.each([6, 5.29])('i: change target with threshold and %s months keeps base verdict and both disclosure lines', async months => {
+    const m = pricingAndReferral(10000);
+    Object.assign(m.aims[0]!.target!, { comparator: 'increase', value: 2000, change_kind: 'absolute' });
+    const base = await runOn(m, 'change-base', RECORDED('today'));
+    m.aims[0]!.target!.period_months = months;
+    const graph = stored(m);
+    const goal = graph.nodes.find((n: Json) => n.id === 'gp');
+    expect(goal.goal_threshold).toBe(0.8);
+    expect(goal.goal_target_basis).toBeUndefined();
+    expect(goalHorizonVerdict(graph)).toBe('no_horizon');
+    expect(goal.goal_horizon_months).toBeUndefined();
+    const changed = await runOn(m, 'change-window', RECORDED('today'));
+    const disclosures = ({ fact, request }: Awaited<ReturnType<typeof runOn>>) => ({
+      horizon: (fact.result as Json).enrichment.inference_warnings.find((w: Json) => w.code === 'GOAL_HORIZON_NOT_TESTED')?.message,
+      statusQuo: goalChanceFactsForAgent(fact.result, request.graph, true).goal_chance_status_quo?.line,
+    });
+    expect(disclosures(changed)).toEqual(disclosures(base));
+    expect(disclosures(changed)).toEqual({
+      horizon: "These chances use the model's numbers as they are today; the model doesn't project how they change over time yet.",
+      statusQuo: 'This Run can’t give a chance for carrying on as now, because it treats ‘Monthly gross profit of at least £12,000’ as unchanged from today’s £10,000 (your target is at least £12,000).',
+    });
+    const licence = (changed.fact.result as Json).enrichment.inference_warnings.find((w: Json) => w.code === 'GOAL_CHANCE_LICENSED');
+    expect(licence.pct_by_option.referral).toBe(50);
+  });
+
   it.skipIf(process.env.F1_OUT === undefined)('RECORD: the Run requests the real chain answers (F1_OUT)', async () => {
     await runOn(pricingAndReferral(null), 'held');
     await runOn(pricingAndReferral(10000), 'today');

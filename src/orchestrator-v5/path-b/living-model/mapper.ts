@@ -295,6 +295,11 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     goalNode = { id: aim.id, kind: 'goal', label: aim.text, ...(aim.quote !== null ? { source_quote: aim.quote } : {}) };
     nodes.push(goalNode);
     const t = aim.target;
+    // A window belongs to the aim, independently of whether its target can be scored.
+    const window = t?.period_months ?? undefined;
+    const deadline = statedDeadline(t?.by_when ?? null);
+    if (t?.by_when != null) goalNode.goal_deadline_as_stated = t.by_when;
+    if (deadline !== undefined) goalNode.goal_horizon = { deadline };
     const isChange = t !== null && (t.comparator === 'increase' || t.comparator === 'decrease');
     // The ONE reading of the aim's target (`aim-reading.ts`), shared with the gap that says its held reason.
     const lt = aimTargetReading(aim);
@@ -343,21 +348,17 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
       if (resolved === null) hold(aim.id, 'goal_level_not_admitted');
       else {
         goal = { id: aim.id, cap: resolved.cap, unit: lt.unit ?? '' };
-        const deadline = statedDeadline(t!.by_when);
         Object.assign(goalNode, {
           goal_direction: lt.comparator,
           goal_threshold_raw: lt.value, goal_threshold_unit: lt.unit ?? '', goal_threshold_cap: resolved.cap,
           goal_threshold_cap_provenance: resolved.provenance, goal_threshold: lt.value / resolved.cap, goal_threshold_frame: 'level',
-          ...(t!.by_when !== null ? { goal_deadline_as_stated: t!.by_when } : {}),
-          ...(deadline !== undefined ? { goal_horizon: { deadline } } : {}),
           // DL ruling 22 Oct (goal-window carrier): the person's own duration counted from today ("within 12 months") is the
           // goal's window as Olumi's reading (`goalTargetBasisOf`), so an Olumi risk over that same window counts
-          // (`riskOccurrenceWindowMonths`). The effects are NOT read as in place by its end (`effects_at_period_end: false`), so
-          // the chance stays the static reading (`goalHorizonVerdict` → no_horizon) and no window is claimed for it. A level
-          // target only; a change target is not covered yet.
-          ...(!isChange && t!.period_months !== null && Number.isFinite(t!.period_months) && t!.period_months > 0 && t!.period_months <= 120
+          // (`riskOccurrenceWindowMonths`). Effects are not assumed in place by its end. Duration-only goals keep their
+          // static reading; calendar deadlines retain the existing horizon gate. Other aims retain their window below.
+          ...(!isChange && window !== undefined && Number.isFinite(window) && window > 0 && window <= 120
             && lt.unit !== null && lt.unit.trim() !== '' ? { goal_target_basis: { source: 'olumi_reading', quantity_frame: 'level', target_frame: 'level',
-              target_raw: lt.value, reference: 'today', period_months: t!.period_months, period_kind: 'at_end', effect_unit: lt.unit,
+              target_raw: lt.value, reference: 'today', period_months: window, period_kind: 'at_end', effect_unit: lt.unit,
               effects_at_period_end: false } } : {}),
         });
         if (current === null) hold(aim.id, 'goal_level_unknown');
@@ -387,6 +388,9 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
         }
       }
     }
+    // Retain a bounded window only without a scored target; a visible chance keeps its existing horizon disclosure.
+    if (window !== undefined && window > 0 && window <= 120 && goalNode.goal_threshold === undefined
+      && goalNode.goal_target_basis === undefined) goalNode.goal_horizon_months = window;
   }
 
   // Joint goals are not in this slice: every other current aim with a target is kept in the living model, withheld here.
@@ -859,7 +863,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     const conditioned = model.conditions.filter((c) => c.role === 'prerequisite' && c.applies_to.some((id) => onPath.has(id) || pathLinks.has(id)));
     for (const c of conditioned) hold(`condition:${c.text}`, 'condition_not_in_slice');
     if (leftOut || conditioned.length > 0) {
-      for (const k of Object.keys(goalNode)) if (k.startsWith('goal_threshold') || k === 'goal_direction' || k === 'goal_deadline_as_stated' || k === 'goal_horizon') delete goalNode[k];
+      for (const k of Object.keys(goalNode)) if (k.startsWith('goal_threshold') || k === 'goal_direction') delete goalNode[k];
       hold(goal.id, 'chance_rests_on_withheld');
     }
   }
