@@ -17,6 +17,12 @@ import { mapLivingModel } from '../../orchestrator-v5/path-b/living-model/mapper
 import { KNOWN_ANSWER } from '../../orchestrator-v5/path-b/living-model/__tests__/fixtures.js';
 import { withCanonicalAnalysisView } from '../../orchestrator-v5/agent-lane/__tests__/fixtures/canonical-analysis-read.js';
 import { streamWhenAsked } from '../../orchestrator-v5/agent-lane/__tests__/stream-when-asked.js';
+import { SELECTION_NOTE_PREFIX } from '../../orchestrator-v5/agent-lane/selection-context.js';
+import { TODAY_PREFIX } from '../../orchestrator-v5/agent-lane/turn-context.js';
+import { corePromptCacheKey, STATE_BLOCK_PREFIX } from '../../orchestrator-v5/agent-lane/core/sdk-turn.js';
+import { CORE_ALIGNED_INSTRUCTIONS, instructionsForMode } from '../../orchestrator-v5/core-route/instructions.js';
+import { ASK_CHALLENGE_CHIP_ID } from '../../orchestrator-v5/core-route/turn-request.js';
+import { CORE_DRAFTING_GUIDANCE } from '../../orchestrator-v5/path-b/drafting-guidance.js';
 import type { LivingModelT } from '../../schemas/living-model.js';
 
 type Json = Record<string, any>;
@@ -123,7 +129,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
   let runWithStageStream: typeof import('../../cee/unified-pipeline/stage-stream-context.js').runWithStageStream;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(streamWhenAsked(async (url: unknown, init?: { body?: unknown }) => {
-      if (String(url).endsWith('/v1/conversations')) return json({ id: 'conv_core_route', object: 'conversation' });
+      if (String(url).endsWith('/v1/conversations')) return json({ id: `conv_${randomUUID()}`, object: 'conversation' });
       const body = JSON.parse(String(init?.body ?? '{}')) as Json;
       // A structured side call (the model critic) answers nothing, and never takes the conversation's scripted outputs.
       if (body.text?.format?.type === 'json_schema') return json(responsesBody([]));
@@ -421,8 +427,9 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     const [a, b] = await Promise.all([first, second]);
     expect([a.statusCode, b.statusCode]).toEqual([200, 200]);
     expect(calls).toHaveLength(2);
-    expect(String(calls[0]!.instructions), 'CONTROL: the first turn read the model before the move').not.toContain('prefers a slower push');
-    expect(String(calls[1]!.instructions), 'the waiting turn reads the model as it now stands').toContain('prefers a slower push');
+    const stateBlock = (b: Json): string => ((b.input ?? []) as Json[]).filter((i) => i.role === 'system').map((i) => String(i.content)).join('\n');
+    expect(stateBlock(calls[0]!), 'CONTROL: the first turn read the model before the move').not.toContain('prefers a slower push');
+    expect(stateBlock(calls[1]!), 'the waiting turn reads the model as it now stands').toContain('prefers a slower push');
   });
 
   it('a legacy scenario (a graph with no living model) is refused with a typed 409: no model call, the claim released', async () => {
@@ -491,5 +498,83 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(ids(j.model.graph).length).toBeGreaterThan(0);
     expect(j.receipts).toEqual([expect.objectContaining({ version_id: 'v_1', authorised_by: 'olumi' })]);
     expect(j.model.scenario_revision).toBe((await freshRead()).content_hash);
+  });
+
+  describe('⭐ CACHING (DL 22 Oct): the provider\'s cached prefix is the same bytes on every call', () => {
+    /** The standing instructions: the same on every turn of every scenario; this turn's facts and guidance follow them. */
+    const STANDING = instructionsForMode('core', CORE_ALIGNED_INSTRUCTIONS);
+    const challengeOn = (id: string) => post({ turn_id: randomUUID(), message: 'Challenge this', source: 'chip_click', chip: { id: ASK_CHALLENGE_CHIP_ID },
+      selected_elements: { node_ids: [id] } });
+
+    it('(1) ONE tool list, byte for byte, on typed, approval, Run-press and Challenge calls; what a turn may call rides tool_choice', async () => {
+      outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop', args: CHANGE }], [{ type: 'message', text: 'Press its card to save it.' }]];
+      const card = ((await typed(SAID)).json() as Json).cards[0];
+      preparedId = String(card.proposal_id);
+      const typedCalls = calls.length;
+      outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: 'Saved.' }]];
+      expect((await post({ turn_id: randomUUID(), message: card.approve_action.message, source: 'chip_click',
+        chip: { id: card.approve_action.id, action_type: card.approve_action.action_type } })).statusCode).toBe(200);
+      const pressCalls = calls.length;
+      outputs = [[{ type: 'function_call', name: 'run_analysis', call_id: 'run', args: { reason: 'The person pressed Run.', effects_timing: 'not_stated' } }],
+        [{ type: 'message', text: 'The analysis ran.' }]];
+      expect((await post({ turn_id: randomUUID(), message: 'Run the analysis', source: 'chip_click', chip: { id: 'run_analysis', action_type: 'run_analysis' } })).statusCode).toBe(200);
+      const runCalls = calls.length;
+      const factor = (((persisted as Json).nodes ?? []) as Json[]).find((n) => n.kind === 'factor')!;
+      outputs = [[{ type: 'message', text: 'Here is the strongest case against that figure.' }]];
+      expect((await challengeOn(String(factor.id))).statusCode).toBe(200);
+      expect([typedCalls, pressCalls - typedCalls, runCalls - pressCalls, calls.length - runCalls], 'two calls each, then one').toEqual([2, 2, 2, 1]);
+
+      const lists = calls.map((b) => JSON.stringify(b.tools));
+      expect(lists[0]!.length).toBeGreaterThan(2);
+      expect(new Set(lists).size, 'every call sends the same tools array').toBe(1);
+      // The restriction lives in tool_choice: a withheld tool stays in the list; a press opens on its own tool; a Run press's later calls are restricted.
+      const names = (calls[0]!.tools as Json[]).map((t) => String(t.name));
+      const typedChoice = calls[0]!.tool_choice as Json;
+      expect(typedChoice.type).toBe('allowed_tools');
+      expect(names.filter((n) => !(typedChoice.tools as Json[]).some((t) => t.name === n)), 'research is withheld on this route, and still listed')
+        .toEqual(['offer_public_research']);
+      expect(calls[typedCalls]!.tool_choice).toMatchObject({ type: 'function', name: 'apply_change' });
+      expect(calls[pressCalls]!.tool_choice).toMatchObject({ type: 'function', name: 'run_analysis' });
+      const after = calls[pressCalls + 1]!.tool_choice as Json;
+      expect(after.type).toBe('allowed_tools');
+      expect((after.tools as Json[]).map((t) => t.name), 'a Run press withholds the writers').not.toContain('propose_change');
+      expect(((calls[calls.length - 1]!.input ?? []) as Json[]).filter((i) => i.role === 'system').map((i) => String(i.content).slice(0, SELECTION_NOTE_PREFIX.length)),
+        'the Challenge call carried its note, after its state block').toEqual([expect.stringContaining(STATE_BLOCK_PREFIX), SELECTION_NOTE_PREFIX]);
+      expect(new Set(calls.map((b) => b.instructions)), 'the standing instructions, the same bytes on every call of every turn kind')
+        .toEqual(new Set([STANDING]));
+    });
+
+    it('(5) the standing instructions open every call of two different scenarios; the Challenge note and the drafting arm follow the state block in the turn\'s input', async () => {
+      /** The turn's system items, in order: its state block, then its guidance. */
+      const systemItems = (b: Json): string[] => ((b.input ?? []) as Json[]).filter((i) => i.role === 'system').map((i) => String(i.content));
+      const factor = (((persisted as Json).nodes ?? []) as Json[]).find((n) => n.kind === 'factor')!;
+      outputs = [[{ type: 'message', text: 'Here is the strongest case against that figure.' }]];
+      expect((await challengeOn(String(factor.id))).statusCode).toBe(200);
+      const challenged = calls[0]!;
+      expect(challenged.instructions).toBe(STANDING);
+      const one = systemItems(challenged);
+      expect(one).toHaveLength(2);
+      expect(one[0]).toContain(STATE_BLOCK_PREFIX);
+      expect(one[0]).toContain(TODAY_PREFIX);
+      expect(one[1]!.startsWith(SELECTION_NOTE_PREFIX), 'the note follows the state block').toBe(true);
+
+      // A second scenario, with no saved model: the first draft's arm is on.
+      const first = { scenario: SCENARIO, body: challenged };
+      SCENARIO = randomUUID(); persisted = null; calls = [];
+      outputs = [[{ type: 'message', text: 'Tell me more about the situation first.' }]];
+      expect((await typed('We are weighing two staffing options.')).statusCode).toBe(200);
+      const drafting = calls[0]!;
+      expect(SCENARIO).not.toBe(first.scenario);
+      expect(drafting.instructions, 'byte-equal across the two scenarios').toBe(first.body.instructions);
+      expect(systemItems(drafting)).toEqual([expect.stringContaining(STATE_BLOCK_PREFIX), CORE_DRAFTING_GUIDANCE]);
+      expect(String(challenged.instructions), 'no Challenge note in the instructions').not.toContain(SELECTION_NOTE_PREFIX);
+      expect(String(drafting.instructions), 'no drafting arm in the instructions').not.toContain(CORE_DRAFTING_GUIDANCE);
+
+      // The prefix the provider caches (the tools, then the standing instructions) is byte-equal across the two scenarios.
+      expect(JSON.stringify(drafting.tools)).toBe(JSON.stringify(first.body.tools));
+      expect(drafting.prompt_cache_key).toBe(first.body.prompt_cache_key);
+      expect(drafting.prompt_cache_key).toBe(corePromptCacheKey(String(drafting.model), STANDING));
+      expect([drafting.prompt_cache_retention, first.body.prompt_cache_retention]).toEqual(['24h', '24h']);
+    });
   });
 });

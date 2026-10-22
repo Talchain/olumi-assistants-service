@@ -11,9 +11,10 @@
  * press resumes the same saved RunState) and the Run, each over the product's own protocol-safe primitives, each returning
  * ONE typed outcome that it records once (`onCall`).
  *
- * The Conversation holds only the conversation. The model, its proposals and its Runs stay in Olumi's stores. Every model
- * call is given today's date and the CURRENT model state afresh (`turnContextItems`), in its instructions, which the
- * Conversation never stores: conversation history never overrides saved state (after Undo, the restored state is given).
+ * The model, its proposals and its Runs stay in Olumi's stores. Each turn gives today's date and the CURRENT model state
+ * (`turnContextItems`) as ONE state block in the turn's own input, and the newest block supersedes every earlier one:
+ * conversation history never overrides saved state (after Undo, the restored state is given). The instructions are the
+ * same bytes on every call, so the provider's cache holds them (DL ruling B, 22 Oct; `stateBlockText`).
  *
  * The SDK's Responses model runs on its Conversation-bound client (`ledgeredAgentsClient`: no automatic replay), whose fetch writes each
  * attempt to this request's `_provider_calls` with the returned model, the tool names sent and a digest of the input sent.
@@ -37,7 +38,7 @@ import type { OpenAiPausedRun } from '../../session/store.js';
 import type { DraftVerification } from '../../path-b/tools/outcome.js';
 import { agentRequestIdentity } from '../runtime/prompt-identity.js';
 import type { AgentToolContext, ToolResult } from '../runtime/agent-tools.js';
-import type { AgentTurnResult } from '../runtime/agent-loop.js';
+import { WITHHELD_ON_CHIP_TURN, type AgentTurnResult } from '../runtime/agent-loop.js';
 import type { CallBudget } from '../model-budgets.js';
 import { BRIEF_LABEL, runFactsContext, turnContextItems, turnContextText } from '../turn-context.js';
 
@@ -146,10 +147,39 @@ export type CoreToolRecorder = (
   result: ToolResult,
 ) => void;
 
+/** The provider's prompt-cache key for the core agent: one per model and standing-instructions text (`instructions`). */
+export function corePromptCacheKey(model: string, instructions: string): string {
+  return `olumi-core:${model}:${createHash('sha256').update(instructions, 'utf8').digest('hex').slice(0, 16)}`;
+}
+
+/**
+ * ⭐ THE TURN'S STATE IS ONE BLOCK IN THE TURN'S INPUT, NOT IN THE INSTRUCTIONS (DL ruling B, 22 Oct). A request writes ONE
+ * cache breakpoint, at its end, so a call reads the cache only when an earlier prompt is a whole prefix of it. The state in
+ * the instructions came before the stored Conversation, so every turn's first call read nothing and wrote ~20k tokens
+ * (served 21ad02f5, baseline). Now the block follows the turn's new input on its first call and is stored with it. The full
+ * block is sent only when its text changed since the block this Conversation last received; otherwise one line says so.
+ */
+export const STATE_BLOCK_PREFIX = 'OLUMI STATE BLOCK';
+export const stateBlockText = (revision: string, runId: string, body: string): string =>
+  `${STATE_BLOCK_PREFIX}: model revision ${revision}, run ${runId}. It supersedes every earlier state block in this conversation.\n\n${body}`;
+export const stateUnchangedText = (revision: string): string => `State unchanged since revision ${revision}.`;
+
+/** The full block each Conversation last received, by digest (process memory: a restart, a compaction or a write sends it again). */
+const sentStateBlocks = new Map<string, string>();
+const REMEMBERED_STATE_BLOCKS = 1_000;
+export const forgetCoreStateBlocks = (): void => { sentStateBlocks.clear(); };
+
 export interface CoreTurnInput {
   readonly ctx: AgentToolContext;
   readonly message: string;
+  /**
+   * The agent's STANDING instructions: the same bytes on every call of every turn for one mode, so the provider's cached
+   * prefix (the tools, then these, then the stored Conversation) is reused (DL 22 Oct, the caching split). Anything that
+   * varies by turn goes in the turn's input: the state block, and `turnGuidance`.
+   */
   readonly instructions: string;
+  /** This turn's own guidance (a Challenge's note, the drafting arm), given once, after the turn's state block. */
+  readonly turnGuidance?: readonly string[];
   readonly budget: CallBudget;
   /**
    * MULTI-MODEL (Paul, 20 Oct): the fast budget for a turn that only reads, runs and explains: a press on a card or the Run
@@ -253,11 +283,34 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
   // A reply-only turn runs on the fast budget without the model writers, so drafting and changes stay on the builder.
   const fast = input.replyBudget !== undefined && replyOnlyTurn(input);
   const budget = fast ? input.replyBudget! : input.budget;
-  const tools = input.tools(record).filter((t) => !('name' in t) || !(withheld.has(t.name) || (fast && MODEL_WRITING_TOOLS.has(t.name))));
+  /**
+   * ⭐ ONE TOOL LIST, BYTE-IDENTICAL ON EVERY CALL (DL 22 Oct, the caching split: a list that changed with the turn's kind
+   * broke the provider's cached prefix on every press and the turn after it). A tool this turn withholds keeps its exact
+   * definition; the provider is told which it may call (`allowed_tools`, below), and the tool refuses in execute if it is
+   * called anyway: no approval, nothing written.
+   */
+  const blocked = (name: string): boolean => withheld.has(name) || (fast && MODEL_WRITING_TOOLS.has(name));
+  const allTools = input.tools(record);
+  const allowedNames = allTools.flatMap((t) => ('name' in t && !blocked(t.name) ? [t.name] : []));
+  const tools = allTools.map((t): Tool => {
+    if (!('name' in t) || !blocked(t.name) || t.type !== 'function') return t;
+    const name = t.name;
+    return { ...t, needsApproval: async () => false, invoke: async () => {
+      record({ name, ok: false, mutated: false, outcome: 'refused', refusal: WITHHELD_ON_CHIP_TURN, ran: null },
+        { ok: false, mutated: false, refusal: WITHHELD_ON_CHIP_TURN });
+      return JSON.stringify({ status: 'refused', reason: WITHHELD_ON_CHIP_TURN, mutated: false,
+        detail: `${name} is not available on this turn. Nothing was changed or run.` });
+    } };
+  });
+  const restrictedTo = allowedNames.length < allTools.length
+    ? { type: 'allowed_tools', mode: 'auto', tools: allowedNames.map((name) => ({ type: 'function', name })) } : undefined;
   const pendingRows: Promise<void>[] = [];
   let deliveryUnknown: { readonly cause: unknown } | undefined;
   const client = ledgeredAgentsClient({ site: 'agent-core.sdk', pending: pendingRows,
     conversationBound: true, onDeliveryUnknown: (cause) => { deliveryUnknown = { cause }; },
+    // A call the SDK leaves free (no forced first tool) may call only this turn's allowed tools; a forced call names its own.
+    ...(restrictedTo !== undefined ? { requestBody: (body: Record<string, unknown>) => (body['tool_choice'] === undefined || body['tool_choice'] === 'auto'
+      ? { ...body, tool_choice: restrictedTo } : body) } : {}),
     detailOf: (body) => ({ model: budget.model, purpose: 'conversation', ...agentRequestIdentity('agent.converse', body) }) });
   const agent = new Agent({
     name: 'Olumi',
@@ -270,6 +323,10 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
       ...(input.firstTool !== undefined ? { toolChoice: input.firstTool } : {}),
       // Native server-side compaction of the Conversation as it grows: no transcript trim of our own.
       contextManagement: [{ type: 'compaction', compactThreshold: CORE_COMPACT_THRESHOLD }],
+      // The cached prefix (the tools, then the standing instructions) is the same for every scenario on one model and prompt:
+      // one cache key for it, kept 24 h, so each scenario's first call reads it rather than writing it again.
+      promptCacheRetention: '24h',
+      providerData: { prompt_cache_key: corePromptCacheKey(budget.model, input.instructions) },
     },
     tools: [...tools],
   });
@@ -279,16 +336,26 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
   agent.on('agent_tool_end', () => { if (toolStartedAt !== undefined) toolMs += Math.max(0, now() - toolStartedAt); toolStartedAt = undefined; });
 
   /**
-   * Olumi's own facts for THIS turn, given fresh on every model call in its instructions (never stored in the Conversation):
-   * today's date, the CURRENT model state as the turn began, and the Run-facts rule when a Run is in it. The user's own
-   * words are the Conversation's: on the turn that creates it, a brief written apart from this message goes in first, once.
+   * Olumi's own facts for THIS turn, as its state block: today's date, the CURRENT model state as the turn began, and the
+   * Run-facts rule when a Run is in it. The user's own words are the Conversation's: on the turn that creates it, a brief
+   * written apart from this message goes in first, once.
    */
   const stateContext = runFactsContext(input.canonicalState);
-  const turnFacts = turnContextItems({
+  const stateBody = turnContextItems({
     now: new Date(startedAt), briefText: undefined, conversation: [],
     canonicalState: stateContext.facts, runFactsUse: stateContext.use,
-  }).map(turnContextText).filter((t) => t !== '');
+  }).map(turnContextText).filter((t) => t !== '').join('\n\n');
+  const stateDigest = createHash('sha256').update(stateBody, 'utf8').digest('hex');
+  const revision = input.traceMeta?.revision ?? 'none';
   const conversation = await scenarioConversation(input.ctx.scenario_id, input.conversationStore, () => startOpenAIConversationsSession(client));
+  const stateUnchanged = sentStateBlocks.get(conversation.id) === stateDigest;
+  /** Given once, after the turn's new input on its first call: the state (or the one line), then this turn's guidance. */
+  let turnItems: AgentInputItem[] | undefined = [
+    { role: 'system', content: stateUnchanged ? stateUnchangedText(revision) : stateBlockText(revision, input.traceMeta?.run_id ?? 'none', stateBody) },
+    ...(input.turnGuidance ?? []).map((text): AgentInputItem => ({ role: 'system', content: text })),
+  ];
+  /** A compaction drops earlier items from what the model reads, so the next turn sends the full block again. */
+  let compacted = false;
   const brief = typeof input.briefText === 'string' ? input.briefText.trim() : '';
   let turnInput: string | AgentInputItem[] | RunState<unknown, Agent> = conversation.created && brief !== '' && brief !== input.message.trim()
     ? [{ role: 'user', content: `${BRIEF_LABEL}\n${brief}` }, { role: 'user', content: input.message }] : input.message;
@@ -336,6 +403,15 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
   /** Whether the provider has accepted any request of this turn (a model event arrived). */
   let accepted = false;
   const finish = (text: string, stopped: AgentTurnResult['stopped_reason'], calls: number, author: 'ai' | 'host'): AgentTurnResult & { sdk: CoreTurnSdk } => {
+    // The Conversation stored this turn's block with its first call; a turn that failed is never remembered as having sent it.
+    // A turn that wrote showed the model a newer state than its block (a save, then an Undo back to the block's own text
+    // must not read as "unchanged"), so the next turn sends the full block.
+    if (compacted || toolResults.some((r) => r.mutated === true)) sentStateBlocks.delete(conversation.id);
+    else if (turnItems === undefined && !stateUnchanged) {
+      sentStateBlocks.delete(conversation.id);
+      sentStateBlocks.set(conversation.id, stateDigest);
+      if (sentStateBlocks.size > REMEMBERED_STATE_BLOCKS) sentStateBlocks.delete(sentStateBlocks.keys().next().value!);
+    }
     const total = Math.max(0, now() - startedAt);
     return {
       assistant_text: text, items: [], tool_calls: toolCalls, tool_results: toolResults,
@@ -354,13 +430,13 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
         conversationId: conversation.id,
         maxTurns: CORE_MAX_MODEL_CALLS,
         ...(input.signal !== undefined ? { signal: input.signal } : {}),
-        // This turn's facts ride the instructions of every call. The input is what the SDK sends, plus, once, a typed
-        // message that declined a paused run (it follows that run's answer).
+        // The instructions go as the agent holds them, the same bytes on every call. The input is what the SDK sends, plus,
+        // on the turn's first call, its state block and guidance, then, once, a typed message that declined a paused run.
         callModelInputFilter: ({ modelData }: { modelData: { input: AgentInputItem[]; instructions?: string } }) => {
-          const extra: AgentInputItem[] = carried === undefined ? [] : [{ role: 'user', content: carried }];
+          const extra: AgentInputItem[] = [...(turnItems ?? []), ...(carried === undefined ? [] : [{ role: 'user' as const, content: carried }])];
+          turnItems = undefined;
           carried = undefined;
-          return { ...modelData, input: [...modelData.input, ...extra],
-            instructions: [modelData.instructions ?? '', ...turnFacts].filter((t) => t !== '').join('\n\n') };
+          return { ...modelData, input: [...modelData.input, ...extra] };
         },
       };
       /**
@@ -379,6 +455,7 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
           }
         }
         await live.completed;
+        if (live.rawResponses.some((r) => r.output.some((item) => item.type === 'compaction'))) compacted = true;
         await Promise.allSettled(pendingRows);
         if (deliveryUnknown !== undefined) throw new CoreDeliveryUnknownError(deliveryUnknown.cause);
         return live;

@@ -23,6 +23,13 @@ const SCENARIO = '7e6d5c4b-3a2f-4e1d-8c9b-6a5f4e3d2c1b';
 const CORE = { 'x-olumi-ai-mode': 'core' };
 /** The core instruction's own opening words (agent-v1-turn.ts `CORE_REPLY_INSTRUCTION`). */
 const CORE_RULE = 'In this mode Olumi adds nothing to your reply and rewrites none of it';
+/** The tools a request lets the model call: a forced call names one, `allowed_tools` lists the turn's, else every tool sent. */
+const mayCall = (b: Record<string, any>): string[] => {
+  const choice = b.tool_choice as Record<string, any> | string | undefined;
+  if (choice !== null && typeof choice === 'object' && choice.type === 'function') return [String(choice.name)];
+  if (choice !== null && typeof choice === 'object' && choice.type === 'allowed_tools') return (choice.tools as Record<string, any>[]).map((t) => String(t.name));
+  return ((b.tools ?? []) as Record<string, any>[]).map((t) => String(t.name));
+};
 /**
  * K3 SCOPE (the AIE's exact wording, inbox/DL-3.md "### AIE → current DL and existing owners — scope wording supplied",
  * 19 Oct 19:5xZ). Copied from the AIE's post, never from the source under test: a change to either side turns the row RED.
@@ -206,17 +213,19 @@ describe('PATH-B core: the AI\'s own words are the reply; protocol, cards, resul
       expect(reused.statusCode, id).toBe(409);
       expect(reused.json().error, id).toBe('TURN_ID_REUSED');
       expect(sent.some((b) => b.includes(CORE_RULE) && b.includes(JSON.stringify(message).slice(1, -1))), `${id}: the press's words reach the AI`).toBe(true);
-      // A press carries no consent to Run: the core turn is offered every tool but run_analysis.
-      const calls = (core._provider_calls as Json[]).filter((c) => c.site === 'agent-core.sdk');
-      expect(calls.length, id).toBeGreaterThan(0);
-      for (const row of calls) {
-        expect(row.tool_names, id).toContain('propose_change');
-        expect(row.tool_names, id).not.toContain('run_analysis');
+      // A press carries no consent to Run: every tool is sent (one fixed list), and each call may use every tool but run_analysis.
+      const bodies = sent.filter((b) => b.includes(CORE_RULE)).map((b) => JSON.parse(b) as Json);
+      expect(bodies.length, id).toBeGreaterThan(0);
+      for (const b of bodies) {
+        expect(mayCall(b), id).toContain('propose_change');
+        expect(mayCall(b), id).not.toContain('run_analysis');
+        expect((b.tools as Json[]).map((t) => t.name), `${id}: still in the one fixed list`).toContain('run_analysis');
       }
     }
-    // CONTRAST: a typed core turn is offered run_analysis, and the full lane keeps its own path for the same press.
-    const typedRows = ((await typed('What else could you do?', CORE))._provider_calls as Json[]).filter((c) => c.site === 'agent-core.sdk');
-    expect(typedRows.some((r) => (r.tool_names as string[]).includes('run_analysis'))).toBe(true);
+    // CONTRAST: a typed core turn may call run_analysis, and the full lane keeps its own path for the same press.
+    sent.length = 0;
+    await typed('What else could you do?', CORE);
+    expect(sent.filter((b) => b.includes(CORE_RULE)).some((b) => mayCall(JSON.parse(b) as Json).includes('run_analysis'))).toBe(true);
     expect((await press('agent-next-widen', 'What else could you do?', {}))._agent.sdk).toBeUndefined();
   });
 

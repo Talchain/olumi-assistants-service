@@ -167,7 +167,7 @@ describe('PATH-B gap 4: commit and Undo each run the existing Run pipeline once;
   let beforeModelCall: ((body: Json) => void) | undefined;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(streamWhenAsked(async (url: unknown, init?: { body?: unknown }) => {
-      if (String(url).endsWith('/v1/conversations')) return json({ id: 'conv_gap4', object: 'conversation' });
+      if (String(url).endsWith('/v1/conversations')) return json({ id: `conv_${randomUUID()}`, object: 'conversation' });
       const body = JSON.parse(String(init?.body ?? '{}')) as Json;
       calls.push(body);
       beforeModelCall?.(body);
@@ -452,7 +452,9 @@ describe('PATH-B gap 4: commit and Undo each run the existing Run pipeline once;
     expect(j._agent.sdk, 'the SDK run owns this reply').toBeDefined();
     expect(runTurns, 'exactly one Run').toBe(1);
     expect(calls[0]!.tool_choice, 'its first call spends the press on run_analysis').toMatchObject({ type: 'function', name: 'run_analysis' });
-    expect((calls[0]!.tools as Json[]).map((t) => t.name), 'a Run press calculates and reads only (a note writes nothing)').toEqual(['read_canonical_context', 'run_analysis', 'note_on_item']);
+    // One fixed tool list on every call (the caching split); what the press's later call may use rides its tool_choice.
+    const allowed = ((calls[1]!.tool_choice as Json | undefined)?.tools as Json[] | undefined ?? []).map((t) => t.name);
+    expect(allowed, 'a Run press calculates and reads only (a note writes nothing)').toEqual(['read_canonical_context', 'run_analysis', 'note_on_item']);
     expect(calls.length, 'the call that runs it and the call that narrates it; no interpreting call').toBe(2);
     expect(interpreterCalls()).toBe(0);
     const ran = outputOf('run_call');
@@ -586,8 +588,9 @@ describe('PATH-B gap 4: commit and Undo each run the existing Run pipeline once;
     const ran = outputOf('run_call');
     expect(ran?.status, JSON.stringify(ran)).toBe('ok');
     expect(ran?.data?.run_comparison?.restore_between_runs, 'it knows a restore came between the Runs').toMatchObject({ version_id: RESTORE_V, restored_version_id: EARLIER_V, label: 'Undo: Edit Capacity' });
-    // The coaching call holds the restored figure, by its factor's identity, on the restored revision.
-    const seen = JSON.stringify(calls[calls.length - 1]);
+    // The turn's state block, on its first call (the coaching call reads it from the Conversation), holds the restored figure,
+    // by its factor's identity, on the restored revision.
+    const seen = JSON.stringify(calls[0]);
     expect(seen, 'the restored revision').toContain(`_revision\\":\\"${HASH_4}`);
     expect(seen, 'Capacity at its restored figure').toContain('\\"id\\":\\"f\\",\\"label\\":\\"Capacity\\",\\"kind\\":\\"factor\\",\\"value\\":4');
     expect(calls.length, 'the call that runs it and the call that coaches on it; no interpreting call').toBe(2);

@@ -154,7 +154,7 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
   let outputs: Json[][] = [];
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(streamWhenAsked(async (url: unknown, init?: { body?: unknown }) => {
-      if (String(url).endsWith('/v1/conversations')) return json({ id: 'conv_voice', object: 'conversation' });
+      if (String(url).endsWith('/v1/conversations')) return json({ id: `conv_${randomUUID()}`, object: 'conversation' });
       calls.push(JSON.parse(String(init?.body ?? '{}')) as Json);
       if (holdProvider !== undefined) { const hold = holdProvider; holdProvider = undefined; await hold; }
       return json(responsesBody(outputs.shift() ?? [{ type: 'message', text: ANSWER }]));
@@ -538,7 +538,8 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
       expect(a.statusCode, a.body).toBe(200);
       expect(b.statusCode, b.body).toBe(200);
       expect(calls).toHaveLength(2);
-      const vans = (c: Json): unknown => (JSON.parse(String(c.instructions).split('As the turn began: ')[1]!.split('\n')[0]!) as Json)
+      const stateOf = (c: Json): string => ((c.input ?? []) as Json[]).filter((i) => i.role === 'system').map((i) => String(i.content)).join('\n');
+      const vans = (c: Json): unknown => (JSON.parse(stateOf(c).split('As the turn began: ')[1]!.split('\n')[0]!) as Json)
         .entities.find((e: Json) => e.id === 'vans').raw_value;
       expect(vans(calls[0]!), 'CONTROL: the first turn read the model before the save').toBe(2);
       expect(vans(calls[1]!), 'the waiting turn reads the model the first turn saved').toBe(3);
