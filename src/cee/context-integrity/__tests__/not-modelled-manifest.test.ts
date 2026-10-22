@@ -35,6 +35,7 @@ import { dirname, join } from "node:path";
 
 import {
   deriveNotModelledManifest,
+  deriveStatedQuantityRoles,
   extractStatedQuantities,
   NOT_TRACKED_CLASSES,
   type NotModelledItem,
@@ -56,6 +57,123 @@ function loadCapture(name: string): ColdRead {
 const B1 = loadCapture("b1-growth"); // market entry — Germany vs UK depth
 const B2 = loadCapture("b2-restructuring"); // £4m opex reduction
 const B3 = loadCapture("b3-product-bet"); // copilot vs platform rewrite
+
+describe('statement evidence is retained separately from represented quantities', () => {
+  it('the captured compound-unit target is represented by the goal, independently of copied source prose', () => {
+    // Existing G3 2da89781 capture: the source says this exact target and the saved goal holds 950 MWh/year.
+    const brief = 'Our head office used roughly 1,250 MWh of electricity last year and the board has asked me to bring that down to at most 950 MWh a year by the end of 2027.';
+    const graph = { nodes: [{ id: 'head_office_electricity_use', kind: 'goal', label: 'Head office electricity use',
+      goal_threshold_raw: 950, goal_threshold_unit: 'MWh a year', goal_threshold_frame: 'level',
+      observed_state: { raw_value: 1250, unit: 'MWh a year', source: 'brief_extraction' } }], edges: [] };
+    const q = deriveNotModelledManifest(brief, graph).quantities!.items.find(item => item.literal === '950 MWh a year');
+    expect(q).toBeDefined();
+    expect(q).toMatchObject({ verdict: 'in_model', matched_node_id: 'head_office_electricity_use' });
+  });
+
+  it.each(['MWh a month', 'years'])('the captured annual energy target cannot borrow a %s carrier', unit => {
+    const brief = 'Our head office used roughly 1,250 MWh of electricity last year and the board has asked me to bring that down to at most 950 MWh a year by the end of 2027.';
+    const graph = { nodes: [{ id: 'head_office_electricity_use', kind: 'goal', label: 'Head office electricity use',
+      goal_threshold_raw: 950, goal_threshold_unit: unit, goal_threshold_frame: 'level' }], edges: [] };
+    const q = deriveNotModelledManifest(brief, graph).quantities!.items.find(item => item.literal === '950 MWh a year');
+    expect(q).toBeDefined();
+    expect(q!.verdict).toBe('absent');
+  });
+
+  it.each(['MWh/year', 'MWh per year', 'MWh annually', 'MWh/yr'])(
+    'the captured annual target and its %s carrier have identical full unit parts', unit => {
+      const brief = 'Bring head office electricity use down to at most 950 MWh a year.';
+      const graph = { nodes: [{ id: 'electricity', kind: 'goal', label: 'Electricity',
+        goal_threshold_raw: 950, goal_threshold_unit: unit }], edges: [] };
+      const q = deriveNotModelledManifest(brief, graph).quantities!.items.find(item => item.literal === '950 MWh a year');
+      expect(q).toBeDefined();
+      expect(q).toMatchObject({ verdict: 'in_model', matched_node_id: 'electricity' });
+    },
+  );
+
+  it.each(['MWh', 'kWh a year', 'Trustpilot score'])(
+    'an annual target cannot become the different quantity %s', unit => {
+      const brief = 'Bring electricity use down to at most 950 MWh a year.';
+      const graph = { nodes: [{ id: 'electricity', kind: 'goal', label: 'Electricity',
+        goal_threshold_raw: 950, goal_threshold_unit: unit }], edges: [] };
+      const q = deriveNotModelledManifest(brief, graph).quantities!.items.find(item => item.literal === '950 MWh a year');
+      expect(q).toBeDefined();
+      expect(q!.verdict).toBe('absent');
+    },
+  );
+
+  it('the annual target is not the negative of the stated figure', () => {
+    const q = deriveNotModelledManifest('Bring electricity use down to at most 950 MWh a year.', {
+      nodes: [{ id: 'electricity', kind: 'goal', label: 'Electricity', goal_threshold_raw: -950,
+        goal_threshold_unit: 'MWh a year' }], edges: [],
+    }).quantities!.items.find(item => item.literal === '950 MWh a year');
+    expect(q).toBeDefined();
+    expect(q!.verdict).toBe('absent');
+  });
+
+  it.each([
+    ['18 months', 'month', 18], ['2 years', 'year', 2], ['5 people', 'person', 5],
+    ['5 people', 'persons', 5], ['3 hires a month', 'hires per month', 3],
+  ] as const)('preserves the source quantity %s in the equivalent %s carrier', (literal, unit, value) => {
+    const q = deriveNotModelledManifest(`We have ${literal}.`, { nodes: [{ id: 'quantity', kind: 'factor', label: 'Quantity',
+      observed_state: { raw_value: value, unit, source: 'brief_extraction' } }], edges: [] }).quantities!.items.find(item => item.literal === literal);
+    expect(q).toBeDefined();
+    expect(q).toMatchObject({ verdict: 'in_model', matched_node_id: 'quantity' });
+  });
+
+  it('a per-person rate is never credited to a per-day total', () => {
+    const q = deriveNotModelledManifest('We use 40 kWh per day per person.', { nodes: [{ id: 'energy', kind: 'factor', label: 'Energy',
+      observed_state: { raw_value: 40, unit: 'kWh per day', source: 'brief_extraction' } }], edges: [] }).quantities!.items.find(item => item.literal.startsWith('40'));
+    expect(q).toBeDefined();
+    expect(q!.verdict).toBe('absent');
+    expect(q!.matched_node_id).toBeNull();
+  });
+
+  it('the shared role reader cannot demote an observation also stated as an eight-month limit', () => {
+    const brief = 'We have an 8-month runway today. We must keep the runway above 8 months.';
+    const graph = { nodes: [{ id: 'runway', kind: 'factor', label: 'Runway', observed_state: { value: 8, unit: 'months', source: 'brief_extraction' } }],
+      edges: [], goal_constraints: [{ node_id: 'runway', operator: '>=', value: 8, unit: 'months',
+        source_quote: 'We must keep the runway above 8 months.' }] };
+    expect(deriveStatedQuantityRoles(brief, graph)).toEqual([]);
+  });
+
+  it('a limit-worded target cannot borrow the swapped starting value on that same goal', () => {
+    const brief = 'Our head office used roughly 1,250 MWh of electricity last year and the board has asked me to bring that down to at most 950 MWh a year by the end of 2027.';
+    const q = deriveNotModelledManifest(brief, { nodes: [{ id: 'electricity', kind: 'goal', label: 'Electricity',
+      goal_threshold_raw: 1250, goal_threshold_unit: 'MWh a year',
+      observed_state: { raw_value: 950, unit: 'MWh a year', source: 'brief_extraction' } }], edges: [],
+    }).quantities!.items.find(item => item.literal === '950 MWh a year');
+    expect(q).toBeDefined();
+    expect(q!.verdict).toBe('absent');
+    expect(q!.matched_node_id).toBeNull();
+  });
+
+  it('a quantity retained only in a rationale is prose, independently of its spelling', () => {
+    const q = deriveNotModelledManifest('Electricity use is 950 MWh a year.', {
+      nodes: [{ id: 'electricity', kind: 'factor', label: 'Electricity', rationale: 'Electricity use is 950 MWh a year.' }], edges: [],
+    }).quantities!.items.find(item => item.literal === '950 MWh a year');
+    expect(q).toBeDefined();
+    expect(q!.verdict).toBe('prose_only');
+  });
+
+  it.each([['B1', B1], ['B2', B2], ['B3', B3]] as const)(
+    '%s: copying the brief into statement evidence cannot make missing quantities in-model', (_name, capture) => {
+      const baseline = deriveNotModelledManifest(capture.brief_text, capture.graph).quantities!;
+      const graph = structuredClone(capture.graph);
+      const nodes = graph.nodes as Record<string, unknown>[];
+      expect(nodes.length).toBeGreaterThan(0);
+      expect(baseline.items.some(item => item.verdict !== 'in_model')).toBe(true);
+      for (const node of nodes) node.user_statements = [{ statements: [{ source: capture.brief_text, quote: capture.brief_text }] }];
+      const before = structuredClone(graph);
+      const result = deriveNotModelledManifest(capture.brief_text, graph).quantities!;
+      expect(result.items.map(item => item.literal)).toEqual(baseline.items.map(item => item.literal));
+      for (const [index, item] of result.items.entries()) {
+        expect(item.verdict).toBe(baseline.items[index]!.verdict === 'in_model' ? 'in_model' : 'prose_only');
+      }
+      expect(result.in_model).toBe(baseline.in_model);
+      expect(graph).toEqual(before);
+    },
+  );
+});
 
 /**
  * Find the item for a literal, having FIRST proved the brief really says it
