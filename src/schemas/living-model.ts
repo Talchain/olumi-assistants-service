@@ -70,7 +70,8 @@ const definedAs = z.object({
   party: attribution.party.default(null),
   quote: attribution.quote.default(null),
 }).strict().nullable().default(null).describe(
-  'When this quantity IS the sum or product of factors ("total customers = UK + EU"; "revenue = customers × price per customer"): op, the factor ids, and who stated the definition (its quote is their words for the definition itself). A definition, not a cause, so add no links from those factors to it. Null otherwise.');
+  'When this quantity IS the sum or product of factors ("total customers = UK + EU"; "revenue = customers × price per customer"): op, the factor ids, and who stated the definition (its quote is their words for the definition itself). A definition, not a cause, so add no links from those factors to it. '
+  + 'Write the units so the parts\' units make the quantity\'s, in the person\'s meaning: a sum\'s parts share the quantity\'s unit; for a product, the quantity\'s unit names its period when it has one ("£ per day" for daily revenue, not "£"), a price names the thing it is per ("£ per coffee", not "£ each"), and a count names the same thing and period ("coffees per day"). Null otherwise.');
 
 export const LivingAim = z.object({
   id,
