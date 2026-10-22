@@ -402,13 +402,23 @@ export function composeIdentityAskForNode(nodeId: string, graph: unknown): Ident
   const target = byId.get(nodeId);
   // The identity NODE is framed too (ISL rule 1; Codex buddy r1 P2): its own unit, or a goal's target unit.
   const targetUnitless = lacksFrame(nodeId) && !(typeof target?.goal_threshold_unit === 'string' && target.goal_threshold_unit.trim() !== '');
-  // ISL rule 3: a zero operand withholds a product only when its node has a stated level (with none, 0 is an ordinary
-  // level — construction's created part, below). So a zero is inferred only against a stated target.
-  const statedTarget = level(nodeId) !== null;
+  // A pure declared product with a zero part and stated zero uses the literal unit product in ISL.
+  // Other stated-zero shapes still cannot identify a fitted scale; never ask to replace a valid zero.
+  const targetLevel = level(nodeId);
+  const edges = rec(graph)?.edges;
+  const pureZero = targetLevel === 0 && operands.some((id) => level(id) === 0)
+    && (!Array.isArray(declared?.addends) || declared.addends.length === 0)
+    && Array.isArray(edges) && edges.every((e: unknown) => {
+      const edge = rec(e);
+      return edge?.to !== nodeId || (typeof edge.from === 'string' && operands.includes(edge.from));
+    })
+    && operands.every((id) => rec(byId.get(id)?.nonlinear_identity)?.operation !== 'accumulation');
   const reason: IdentityWithheldReason | null = operands.some((id) => level(id) === null) ? 'identity_operand_missing'
-    // Zero churn is a valid accumulation rate; its stock and inflow may be zero too, unlike product reconciliation.
-    : declared?.operation !== 'accumulation' && statedTarget && operands.some((id) => level(id) === 0) ? 'identity_zero_level'
-      : operands.some(lacksFrame) || targetUnitless ? 'identity_frame_missing' : null;
+    // A zero cannot supply the missing unit/frame; the engine checks frames before reconciliation.
+    : operands.some(lacksFrame) || targetUnitless ? 'identity_frame_missing'
+      // Zero churn is a valid accumulation rate; only product reconciliation has this refusal.
+      : declared?.operation === 'product' && targetLevel !== null
+        && (targetLevel === 0 || operands.some((id) => level(id) === 0)) && !pureZero ? 'identity_zero_level' : null;
   return reason === null ? null
     : composeIdentityNotEvaluatedAsk([{ code: IDENTITY_NOT_EVALUATED_CODE, identity: { node_id: nodeId, participants: operands, withheld_reason: reason } }], graph);
 }
