@@ -398,13 +398,23 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   // money per X times a count of X is money, with ONE period across the two parts and it the defined quantity's own
   // ("£ per week"). `unitsCompose` reads money per X per period × a count; the denominator naming the count's noun is the
   // dimensional proof either way. Unscaled, unqualified units only; two periods ("£ per loaf per week" × "loaves a week") never.
-  // Every word is accounted for (Codex r1 on #3627: the parser drops a count's own denominator, collapses "week/week" and folds
-  // "thousand" into the noun): a currency word, the denominator, the count's own noun, and ONE period word at most across
-  // the two parts, the defined quantity's own. Any other word refuses it.
-  const unitWordsOf = (u: string | null): { readonly periods: readonly string[]; readonly rest: readonly string[] } => {
-    const ws = (u === null ? [] : words(u)).filter((w) => w !== 'a' && w !== 'an' && w !== 'per' && w !== '/');
-    const periodOf = (w: string): string | null => periodNoun(w) ?? periodAdverb(w);
-    return { periods: ws.map(periodOf).filter((p): p is string => p !== null), rest: ws.filter((w) => periodOf(w) === null) };
+  // Every word is accounted for, by its place (Codex r1 + r2 on #3627: flattening dropped a count's own denominator,
+  // "users per account per week"; collapsed "week/week"; folded "thousand" into the noun; read "person-weeks" as a rate).
+  // A period is a rate's only as the unit's LAST word, an adverb ("weekly") or after per, "/", a or an; any other period
+  // word is a duration or a second period and refuses it.
+  const RATE_CONNECTORS = new Set(['per', '/', 'a', 'an']);
+  const unitShapeOf = (u: string | null): { readonly head: readonly string[]; readonly period: string | null } | null => {
+    const ws = u === null ? [] : words(u);
+    let end = ws.length;
+    let period: string | null = null;
+    const last = ws[end - 1];
+    if (last !== undefined && periodAdverb(last) !== null) { period = periodAdverb(last); end -= 1; }
+    else if (last !== undefined && periodNoun(last) !== null) {
+      if (end < 2 || !RATE_CONNECTORS.has(ws[end - 2]!)) return null;
+      period = periodNoun(last); end -= 2;
+    }
+    const head = ws.slice(0, end);
+    return head.some((w) => periodNoun(w) !== null || periodAdverb(w) !== null) ? null : { head, period };
   };
   const plainMoney = (w: string | undefined, code: string | null): boolean => {
     const m = w === undefined ? null : readUnitParts(w);
@@ -412,17 +422,21 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   };
   const ratePerCountComposes = (whole: string | null, a: string | null, b: string | null): boolean => {
     const g = readUnitParts(whole);
-    const gw = unitWordsOf(whole);
-    if (g === null || g.kind !== 'currency' || gw.rest.length !== 1 || !plainMoney(gw.rest[0], g.code) || gw.periods.length > 1) return false;
+    const gs = unitShapeOf(whole);
+    if (g === null || g.kind !== 'currency' || gs === null || gs.head.length !== 1 || !plainMoney(gs.head[0], g.code)) return false;
     return ([[a, b], [b, a]] as const).some(([m, c]) => {
-      if (readUnitParts(m)?.kind !== 'currency' || readUnitParts(c)?.kind !== 'count') return false;
-      const rate = unitWordsOf(m);
-      const count = unitWordsOf(c);
-      const per = rate.rest.slice(1).map(singular);
-      const noun = count.rest.map(singular);
-      if (!plainMoney(rate.rest[0], g.code) || per.length === 0 || noun.length !== per.length || noun.some((w, k) => w !== per[k])) return false;
-      const periods = [...rate.periods, ...count.periods];
-      return periods.length === gw.periods.length && periods.every((p, k) => p === gw.periods[k]);
+      const rate = unitShapeOf(m);
+      const count = unitShapeOf(c);
+      if (rate === null || count === null || readUnitParts(c)?.kind !== 'count') return false;
+      // Money, then per or "/", then the denominator; a count is its noun alone (no per of its own).
+      const [money, sep, ...den] = rate.head;
+      if (!plainMoney(money, g.code) || (sep !== 'per' && sep !== '/') || den.length === 0 || den.some((w) => RATE_CONNECTORS.has(w))) return false;
+      if (count.head.length === 0 || count.head.some((w) => RATE_CONNECTORS.has(w))) return false;
+      const per = den.map(singular);
+      const noun = count.head.map(singular);
+      if (noun.length !== per.length || noun.some((w, k) => w !== per[k])) return false;
+      const periods = [rate.period, count.period].filter((p): p is string => p !== null);
+      return periods.length <= 1 && (periods[0] ?? null) === gs.period;
     });
   };
 

@@ -70,6 +70,11 @@ describe('a product of money per X and a count of X per period is money per peri
     expect(reasons(bakery('loaves', '£ per loaf per week'))).toEqual([]);
   });
 
+  it('the period may be an adverb on either part or on the whole ("loaves weekly"; "£ weekly")', () => {
+    expect(reasons(bakery('loaves weekly', '£ per loaf'))).toEqual([]);
+    expect(reasons(bakery('loaves a week', '£ per loaf', '£ weekly'))).toEqual([]);
+  });
+
   it('NEGATIVE: two periods ("£ per loaf per week" × "loaves a week") are money per week², refused by name', () => {
     expect(reasons(bakery('loaves a week', '£ per loaf per week'))).toEqual(['takings:identity_unit_mismatch', 'takings:chance_rests_on_withheld']);
   });
@@ -84,7 +89,9 @@ describe('a product of money per X and a count of X per period is money per peri
 
   it('NEGATIVE (Codex r1): the count\'s own denominator, a repeated period and a scale word are each refused, never read as £ per week', () => {
     for (const [loaves, price] of [['loaves per customer per week', '£ per loaf'], ['loaves/week/week', '£ per loaf'], ['loaves', '£/loaf/week/week'],
-      ['thousand loaves a week', '£ per loaf'], ['loaves a week', '£k per loaf'], ['loaves a week', '£ per loaf each']] as const) {
+      ['thousand loaves a week', '£ per loaf'], ['loaves a week', '£k per loaf'], ['loaves a week', '£ per loaf each'],
+      // Codex r2: a count with its own denominator, and a duration read as a period.
+      ['users per account per week', '£ per user account'], ['person-weeks', '£ per person']] as const) {
       expect(reasons(bakery(loaves, price)), `${price} × ${loaves}`).toEqual(['takings:identity_unit_mismatch', 'takings:chance_rests_on_withheld']);
     }
   });
