@@ -38,10 +38,15 @@ describe('a factor whose every level is 0 gets a frame, so its level is a fact, 
     expect(linkDefaultAssumptionsOf(node(graph, 'delay'))).toEqual([]);
   });
 
-  it('a figure strictly inside its range gains the spread; at either end it does not (DL 22 Oct)', () => {
-    const inside = node(mapLivingModel(withDelay(2, 0, 8)).graph, 'delay').observed_state;
-    expect(inside.std).toBe(8 / Math.sqrt(12) / inside.cap);
-    for (const value of [0, 8]) expect(node(mapLivingModel(withDelay(value, 0, 8)).graph, 'delay').observed_state).not.toHaveProperty('std');
+  it('a one-sign range near zero keeps base behaviour, including at either end (DL Round 5)', () => {
+    for (const value of [0, 2, 8]) {
+      const mapped = mapLivingModel(withDelay(value, 0, 8)), level = node(mapped.graph, 'delay');
+      expect(level.observed_state).toEqual({ value: value / (value === 0 ? 8 : value * 1.25), raw_value: value,
+        cap: value === 0 ? 8 : value * 1.25, unit: 'weeks', source: 'cee_inference' });
+      expect(linkDefaultAssumptionsOf(level)).toEqual([]);
+      expect(mapped.assumed.filter(a => a.id === 'delay')).toEqual([{ id: 'delay', text:
+        `The calculation uses ${value} weeks for Client delivery delay. The range, 0 weeks to 8 weeks, is kept with the model but is not used as a spread.` }]);
+    }
   });
 
   it('with no stated range the frame is 1, and the level still reads 0', () => {
@@ -63,16 +68,12 @@ describe('a factor whose every level is 0 gets a frame, so its level is a fact, 
     expect(node(at4.graph, 'delay').observed_state).toMatchObject({ raw_value: 4, cap: 5 });
     const on64 = mapLivingModel(withDelay(4, 0, 64));
     expect(on64.frames).toEqual(at4.frames);
-    // Compare the entire graph exactly after checking and removing only the newly ruled spread/ledger.
+    // Both widths fail the two-SD sign rule. Keep the entire base graph and the truthful base notes.
     for (const [mapped, high] of [[at4, 8], [on64, 64]] as const) {
-      const level = node(mapped.graph, 'delay');
-      const { std, std_source, uncertainty_defaults, ...observed } = level.observed_state;
-      expect(std).toBe(high / Math.sqrt(12) / 5);
-      expect(std_source).toBe('olumi');
-      expect(uncertainty_defaults).toEqual([{ code: 'CLAMP_STD_MINIMUM', layer: 'cee',
-        field_path: 'nodes[delay].observed_state.std', before: null, after: std, severity: 'info',
-        reason: `The calculation uses 4 weeks for Client delivery delay, with a spread matching Olumi's estimated range, 0 weeks to ${high} weeks; the spread is Olumi's assumption.` }]);
-      level.observed_state = observed;
+      expect(node(mapped.graph, 'delay').observed_state).toEqual({ value: 0.8, raw_value: 4, cap: 5, unit: 'weeks', source: 'cee_inference' });
+      expect(linkDefaultAssumptionsOf(node(mapped.graph, 'delay'))).toEqual([]);
+      expect(mapped.assumed.filter(a => a.id === 'delay')).toEqual([{ id: 'delay', text:
+        `The calculation uses 4 weeks for Client delivery delay. The range, 0 weeks to ${high} weeks, is kept with the model but is not used as a spread.` }]);
     }
     expect(on64.graph).toEqual(at4.graph);
     // The known answer's own unitless factor keeps its frame of 1.

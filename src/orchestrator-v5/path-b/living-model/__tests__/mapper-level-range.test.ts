@@ -50,6 +50,7 @@ describe('a stated level range supplies its own provisional spread', () => {
       source: 'brief_extraction', extractionType: 'explicit', std: (30 - 10) / Math.sqrt(12) / cap, std_source: 'olumi' });
     expect(each.observed_state.std * cap).toBeCloseTo(5.773502691896258, 12);
     const loss = linkDefaultAssumptionsOf(each);
+    expect(uncertainty_defaults).toEqual(loss);
     expect(loss).toEqual([{ code: 'CLAMP_STD_MINIMUM', layer: 'cee', field_path: 'nodes[each].observed_state.std', before: null,
       after: each.observed_state.std, severity: 'info', reason: `The calculation uses 20 ${subject} per specialist for each, with a spread matching your range, 10 ${subject} per specialist to 30 ${subject} per specialist; the spread is Olumi's assumption.` }]);
     const scenarioId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -81,6 +82,52 @@ describe('a stated level range supplies its own provisional spread', () => {
     expect(goalChanceLicenceForAgent(result)?.default_assumptions).toEqual(earned.default_assumptions);
     expect(model).toEqual(before);
     expect(graph.living_model).toEqual(before);
+  });
+
+  it('a lever keeps base behaviour: no unused spread, false disclosure or provisional chance', () => {
+    const model = structuredClone(KNOWN_ANSWER), base = mapLivingModel(model);
+    Object.assign(model.factors[0]!, { low: 0.2, high: 0.8 });
+    const mapped = mapLivingModel(model), level = node(mapped.graph, 'f');
+    expect(mapped.graph).toEqual(base.graph);
+    expect(mapped.frames).toEqual(base.frames);
+    expect(level.observed_state).not.toHaveProperty('std');
+    expect(linkDefaultAssumptionsOf(level)).toEqual([]);
+    expect(mapped.assumed.filter(a => a.id === 'f')).toEqual([{ id: 'f', text:
+      'The calculation uses 0.5 for f. The range, 0.2 to 0.8, is kept with the model but is not used as a spread.' }]);
+    expect(licence(run(mapped.graph))).toEqual(licence(run(base.graph)));
+    expect(licence(run(mapped.graph)).provisional).not.toBe(true);
+    expect(licence(run(mapped.graph)).default_assumptions).toBeUndefined();
+  });
+
+  it.each([
+    [20, 10, 30, true], [2, 0, 8, false], [0.5, 0.2, 0.8, true], [-3, -10, 5, true],
+    [8, 0, 8, false], [-2, -8, 0, false], [-20, -30, -10, true],
+  ])('observable %s in %s to %s: spread eligibility is %s, with its own value and frame', (value, low, high, eligible) => {
+    const model = capacity();
+    Object.assign(model.factors[2]!, { value, low, high });
+    const before = structuredClone(model);
+    const noRange = structuredClone(model);
+    Object.assign(noRange.factors[2]!, { low: null, high: null });
+    const mapped = mapLivingModel(model), base = mapLivingModel(noRange), level = node(mapped.graph);
+    const { std, std_source, uncertainty_defaults, ...observed } = level.observed_state;
+    expect(observed).toEqual(node(base.graph).observed_state);
+    expect(mapped.frames).toEqual(base.frames);
+    expect(mapped.graph.edges).toEqual(base.graph.edges);
+    if (eligible) {
+      expect(std).toBe((high - low) / Math.sqrt(12) / observed.cap);
+      expect(std_source).toBe('olumi');
+      expect(uncertainty_defaults).toEqual(linkDefaultAssumptionsOf(level));
+      expect(licence(run(mapped.graph)).provisional).toBe(true);
+    } else {
+      expect(std).toBeUndefined();
+      expect(std_source).toBeUndefined();
+      expect(uncertainty_defaults).toBeUndefined();
+      expect(mapped.graph).toEqual(base.graph);
+      expect(mapped.assumed.filter(a => a.id === 'each')).toEqual([{ id: 'each', text:
+        `The calculation uses ${value} cases per specialist for each. The range, ${low} cases per specialist to ${high} cases per specialist, is kept with the model but is not used as a spread.` }]);
+      expect(licence(run(mapped.graph))).toEqual(licence(run(base.graph)));
+    }
+    expect(model).toEqual(before);
   });
 
   it('source and frame class: no range credits another figure, party or an unrelated number', () => {

@@ -8,7 +8,6 @@ import type { SystemEventTurnPayload } from '@talchain/schemas/boundary';
 import { withScenarioRevision } from '../../../../tests/utils/revision-store-double.js';
 import { computeExpectedGraphCasHashes } from '../../context/graph-cas-conflict.js';
 import { mapLivingModel } from '../../path-b/living-model/mapper.js';
-import { linkDefaultAssumptionsOf } from '../../../cee/magnitude/link-default-assumptions.js';
 import { KNOWN_ANSWER } from '../../path-b/living-model/__tests__/fixtures.js';
 
 const append = vi.fn();
@@ -84,7 +83,7 @@ describe('a canvas gesture on a core scenario', () => {
 
   // ⭐ Codex r5 on #3522 (A1): a range the canvas sets, and a risk added, renamed or deleted, were refused on core. Each now
   // changes the living model through the same one-write door, in the person's name.
-  it('⭐ DL ruling 22 Oct: a range around the person\'s own figure keeps it; the Run adds Olumi\'s disclosed spread', async () => {
+  it('⭐ DL ruling 21 Oct: a range around the person\'s own figure keeps it (a central figure with a range); the Run still has its level, and Olumi says the range is not a spread', async () => {
     const out = await send({ kind: 'prior_range_edit', target_id: 'f', range_min: 0.2, range_max: 0.8, distribution: 'uniform', base_graph_hash: BASE });
     expect(out.commitPerformed, JSON.stringify(out.response)).toBe(true);
     expect(append).toHaveBeenCalledTimes(1);
@@ -95,13 +94,7 @@ describe('a canvas gesture on a core scenario', () => {
     const mapped = mapLivingModel(g.living_model as typeof KNOWN_ANSWER);
     expect(mapped.withheld.filter((w) => w.id === 'f')).toEqual([]);
     expect((g.edges as Rec[]).some((e) => e.from === 'hold' && e.to === 'f')).toBe(true);
-    const level = (g.nodes as Rec[]).find(n => n.id === 'f')!;
-    expect(level.observed_state).toEqual({ value: 0.5, raw_value: 0.5, cap: 1, unit: '', source: 'user_edited', extractionType: 'explicit',
-      std: (0.8 - 0.2) / Math.sqrt(12), std_source: 'olumi', uncertainty_defaults: linkDefaultAssumptionsOf(level) });
-    expect(linkDefaultAssumptionsOf(level).map(r => r.reason)).toEqual([
-      "The calculation uses 0.5 for f, with a spread matching your range, 0.2 to 0.8; the spread is Olumi's assumption.",
-    ]);
-    expect(mapped.assumed.filter(a => a.id === 'f')).toEqual([]);
+    expect(mapped.assumed).toContainEqual({ id: 'f', text: expect.stringMatching(/uses 0\.5 for f\. The range, 0\.2 to 0\.8, is kept with the model but is not used as a spread\./) });
   });
 
   it('⛔ Codex on #3575: a range from the figure itself (28 % to 50 %) keeps it, though the frame reads 28.000000000000004', async () => {
@@ -138,12 +131,9 @@ describe('a canvas gesture on a core scenario', () => {
   it('⛔ Codex on #3575: Olumi\'s own figure with a range is never called "stated"', () => {
     const est = structuredClone(KNOWN_ANSWER);
     Object.assign(est.factors[0]!, { source: 'olumi', quote: null, low: 0.2, high: 0.8 });
-    const mapped = mapLivingModel(est), level = mapped.graph.nodes.find(n => n.id === 'f') as Rec;
-    expect(level.observed_state.source).toBe('cee_inference');
-    const lines = linkDefaultAssumptionsOf(level).map(r => r.reason);
-    expect(lines).toEqual(["The calculation uses 0.5 for f, with a spread matching Olumi's estimated range, 0.2 to 0.8; the spread is Olumi's assumption."]);
-    expect(lines[0]).not.toMatch(/stated/);
-    expect(mapped.assumed.filter(a => a.id === 'f')).toEqual([]);
+    const line = mapLivingModel(est).assumed.find((a) => a.id === 'f');
+    expect(line?.text).toMatch(/uses 0\.5 for f\. The range, 0\.2 to 0\.8/);
+    expect(line?.text).not.toMatch(/stated/);
   });
 
   it('NEGATIVE: a range that leaves the figure out, or one around Olumi\'s estimate, replaces it: held and asked, never kept under the person\'s name', async () => {
