@@ -82,6 +82,16 @@ describe('a redeploy keeps what the user typed, from the row\'s own request hash
     expect(h.typedWords('sess')).toEqual([]);
   });
 
+  it('the core route\'s recorded outcome (#3650 r1, typed on the hash) keeps a failed turn\'s words typed; an unknown marker proves nothing', async () => {
+    const { withRecordedOutcome } = await import('../../core-route/turn-request.js');
+    const plain = agentTurnRequestHash(SCENARIO, null, OTHERS);
+    const row = (request_hash: string) => ({ request_hash, user_message: OTHERS, created_at: '2026-10-22T12:00:00Z' });
+    expect(proofFor(null)(row(withRecordedOutcome(plain, 'reply_lost')))).toBe(true);
+    expect(proofFor(null)(row(withRecordedOutcome(plain, 'reply_empty')))).toBe(true);
+    expect(proofFor(null)(row(`${plain}#outcome:not_an_outcome`))).toBe(false);
+    expect(proofFor(null)(row(plain)), 'CONTRAST: the plain row, as before').toBe(true);
+  });
+
   it('⛔ CUTOFF: rows written before the UI sent all of Olumi\'s text as chips (DGAI c3a20ea9) are never proven typed', () => {
     const h = new HistoryStore();
     h.seed('sess', historyFromDurableTurns(ROWS_AS_SERVED), [], ROWS_AS_SERVED, proofFor(null));

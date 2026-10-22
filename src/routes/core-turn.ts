@@ -68,8 +68,10 @@ import {
 import { CORE_ALIGNED_INSTRUCTIONS, draftArmOf, instructionsForMode } from '../orchestrator-v5/core-route/instructions.js';
 import {
   AGENT_TURN_CLAIM_WAIT, agentTurnRequestHash, challengeTargetOf, chipOperationOf, claimHashFor, claimTurnIdOf, isChiplessRetry,
-  requestHashOfClaim, sameAgentTurnRequest, typedRowProof, withChipOperation,
+  recordedOutcomeOf, requestHashOfAnswer, requestHashOfClaim, sameAgentTurnRequest, typedRowProof, withChipOperation, withRecordedOutcome,
+  type RecordedOutcome,
 } from '../orchestrator-v5/core-route/turn-request.js';
+import { stableStringify } from '../orchestrator/context/stable-stringify.js';
 import {
   coreTurnContract, coreTurnFailure, type AuthorisedBy, type CoreTurnCard, type CoreTurnContract, type CoreTurnDurability,
   type CoreTurnError, type CoreTurnNote, type CoreTurnReceipt, type CoreTurnRun,
@@ -86,21 +88,22 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MODE: AgentLaneMode = 'core';
 
 /**
- * What the answer row records when the turn ended without the AI's reply, as the legacy route records it (`agent-v1-turn.ts`,
- * its failed-continuation row), so a resend of the turn id replays THIS outcome, typed, never as if the AI had said it.
+ * What a turn that ended without the AI's reply records, as the legacy route records it (`agent-v1-turn.ts`, its failed-
+ * continuation row): the sentence the conversation shows, and the outcome itself, TYPED on the row's request hash
+ * (`withRecordedOutcome`), so a resend replays the outcome as the contract's error and never as if the AI had said it. None
+ * says the turn may be sent again. `reply_empty`: the SDK turn ended with no words of the AI's and no card waiting; the row
+ * keeps whatever it returned, unmodified.
  */
 const REPLY_LOST_SAVED = 'The saved change is kept, but the reply didn’t arrive. Send a new message to continue.';
 const REPLY_LOST_MAY_FINISH = 'The reply didn’t arrive and may still be finishing. Nothing in your model was changed. Wait a moment, then send a new message.';
 const REPLY_LOST = 'The reply didn’t arrive. Any changes already saved are kept. Send a new message to continue.';
-/** The SDK turn ended with no words of the AI's (its model calls ran out, or it returned none) and no card waiting. */
-const REPLY_NOT_FINISHED = 'Olumi didn’t finish its reply. Anything already saved is kept; reload to see your model, then send a new message.';
-/** The recorded outcome of each of those rows, as the contract's error: none says the turn may be sent again. */
-const RECORDED_FAILURES: ReadonlyMap<string, CoreTurnError> = new Map([
-  [REPLY_LOST_SAVED, { code: 'REPLY_NOT_DELIVERED', message: REPLY_LOST_SAVED, retry_safe: false, nothing_saved: false }],
-  [REPLY_LOST_MAY_FINISH, { code: 'REPLY_NOT_DELIVERED', message: REPLY_LOST_MAY_FINISH, retry_safe: false, nothing_saved: true }],
-  [REPLY_LOST, { code: 'REPLY_NOT_DELIVERED', message: REPLY_LOST, retry_safe: false, nothing_saved: false }],
-  [REPLY_NOT_FINISHED, { code: 'REPLY_INCOMPLETE', message: REPLY_NOT_FINISHED, retry_safe: false, nothing_saved: false }],
-]);
+const RECORDED: Readonly<Record<RecordedOutcome, { readonly said?: string; readonly error: CoreTurnError }>> = {
+  reply_lost_saved: { said: REPLY_LOST_SAVED, error: { code: 'REPLY_NOT_DELIVERED', message: REPLY_LOST_SAVED, retry_safe: false, nothing_saved: false } },
+  reply_lost_may_finish: { said: REPLY_LOST_MAY_FINISH, error: { code: 'REPLY_NOT_DELIVERED', message: REPLY_LOST_MAY_FINISH, retry_safe: false, nothing_saved: true } },
+  reply_lost: { said: REPLY_LOST, error: { code: 'REPLY_NOT_DELIVERED', message: REPLY_LOST, retry_safe: false, nothing_saved: false } },
+  reply_empty: { error: { code: 'REPLY_INCOMPLETE', message: 'Olumi didn’t finish its reply. Anything already saved is kept; reload to see your model, then send a new message.',
+    retry_safe: false, nothing_saved: false } },
+};
 
 /** The saved scenario as one graph read gives it, in the contract's terms. */
 interface SavedScenario {
@@ -235,37 +238,18 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
     const graphPath = `/assist/v1/scenarios/${scenarioId}/graph`;
     const store = getSessionStore();
     const kind = typeof body.kind === 'string' ? body.kind : 'message';
-
     /**
      * ⭐ A CANVAS EDIT is the person's own hand on their model: the EXISTING core canvas-edit path (`/orchestrate/v2/turn` with
      * the core header: the living model first, then the graph regenerated from it), as the legacy route forwards it. No model
-     * call and no reply of Olumi's; the contract carries the saved state and any refusal.
+     * call and no reply of Olumi's; the contract carries the saved state and any refusal. No other kind but a message is taken.
      */
-    if (kind === 'system_event') {
-      const forwarded = await dispatchFor(authorization, { 'x-olumi-ai-mode': AI_CORE_MODE })('/orchestrate/v2/turn', body);
-      const after = savedScenarioOf(await dispatchFor(authorization)(graphPath, { ...FRESH_READ }));
-      let pending: readonly PendingAction[] = [];
-      try { pending = await store.readMostRecentPendingActions?.(scenarioId, { validation: 'strict' }) ?? []; } catch { pending = []; }
-      const refusal = isRec(forwarded.json.error) ? forwarded.json.error : undefined;
-      return send(forwarded.status, coreTurnContract({
-        turnId, durability: forwarded.status === 200 ? 'recorded' : 'not_recorded',
-        revision: after.revision, scenarioRevision: after.identity, graph: appliedGraphWire(after.graph),
-        cards: await heldCardsOf(store, scenarioId, pending, after), run: after.run, analysisState: after.analysisState,
-        receipts: collectTurnReceipts([forwarded.json]).map((r) => ({ ...r, authorised_by: 'person' as const })),
-        error: forwarded.status === 200 ? null : {
-          code: str(refusal?.code) ?? str(forwarded.json.error) ?? str(forwarded.json.code) ?? 'CANVAS_EDIT_REFUSED',
-          message: str(refusal?.message) ?? str(forwarded.json.message) ?? str(forwarded.json.detail) ?? 'That change could not be saved.',
-          retry_safe: false, nothing_saved: forwarded.status < 500,
-        },
-        agent: { forwarded_kind: kind },
-      }));
-    }
-    if (kind !== 'message') {
+    const canvasEdit = kind === 'system_event';
+    if (!canvasEdit && kind !== 'message') {
       return fail(422, { code: 'BAD_INPUT', message: `A ${kind} turn is not taken on this route.`, retry_safe: false, nothing_saved: true });
     }
-    const message = typeof body.message === 'string' ? body.message : '';
-    if (scenarioId === '' || message.trim() === '') {
-      return fail(422, { code: 'BAD_INPUT', message: 'scenario_id and message are required.', retry_safe: false, nothing_saved: true });
+    const message = !canvasEdit && typeof body.message === 'string' ? body.message : '';
+    if (scenarioId === '' || (!canvasEdit && message.trim() === '')) {
+      return fail(422, { code: 'BAD_INPUT', message: canvasEdit ? 'scenario_id is required.' : 'scenario_id and message are required.', retry_safe: false, nothing_saved: true });
     }
     if (turnId === null || !UUID.test(turnId)) {
       return fail(422, { code: 'BAD_INPUT', message: '`turn_id` is required and must be a UUID.', retry_safe: false, nothing_saved: true });
@@ -276,9 +260,77 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
     if (typeof store.readCommittedTurn !== 'function') {
       return fail(503, { code: 'TURN_STATE_UNVERIFIABLE', message: 'This turn cannot be recorded here. Nothing was run.', retry_safe: true, nothing_saved: true });
     }
+    const readTurn = store.readCommittedTurn.bind(store);
     const internal = dispatchFor(authorization);
     // Every in-process call the turn makes is a SUB-TURN: a row it commits keeps no conversation text (`agent-subturn-context.ts`).
     const dispatch: InternalDispatch = (path, b) => runAsAgentSubturn(scenarioId, () => internal(path, b));
+    const reused = () => fail(409, { code: 'TURN_ID_REUSED', message: 'That turn id was already used for a different message. Nothing was run or changed.',
+      retry_safe: false, nothing_saved: true });
+
+    /**
+     * ── THE CLAIM (the legacy route's protocol, its primitives), taken BEFORE any forward or write, for every kind (Codex r1 on
+     * #3650: a canvas edit forwarded first could commit under a turn id an approval was still answering). `mine`: this request
+     * runs the turn; `same`: the same request already holds it; `refused`: its refusal has been sent.
+     */
+    const claimTurnId = claimTurnIdOf(turnId);
+    let claimAppendSucceeded = false;
+    const takeClaim = async (forRequest: string, chipless: boolean): Promise<{ readonly held: 'mine'; readonly claimHash: string }
+      | { readonly held: 'same' } | { readonly held: 'refused'; readonly sent: unknown }> => {
+      const claimHash = claimHashFor(forRequest, randomUUID());
+      let owner: CommittedTurnRecord | null;
+      try {
+        await appendCheckedGraphWrite({ store, writesGraph: false, source: 'agent_turn_claim', write: {
+          scenario_id: scenarioId, turn_id: claimTurnId, turn_class: 'direct_answer', handler_id: null, request_hash: claimHash,
+          response_emitted: false, llm_calls_used: 0, duration_ms: 0, handler_facts: [],
+        } });
+        claimAppendSucceeded = true;
+        owner = await readTurn(scenarioId, claimTurnId);
+      } catch (err) {
+        if (err instanceof ModelWriteOwnershipRefused) {
+          const refusalBody = MODEL_WRITE_OWNERSHIP_REFUSAL_BODY[err.reason];
+          return { held: 'refused', sent: fail(403, readSuccessfulDoorEntries() > 0 || readUnsavableEffects() > 0
+            ? { code: err.code, message: refusalBody.message, retry_safe: false, nothing_saved: false }
+            : { code: refusalBody.error, message: refusalBody.message, retry_safe: false, nothing_saved: true }) };
+        }
+        log.warn({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'core-turn: turn claim failed; refusing rather than running unclaimed');
+        return { held: 'refused', sent: fail(503, { code: 'TURN_STATE_UNVERIFIABLE', message: 'Could not reserve this turn. Nothing was run; please try again.', retry_safe: true, nothing_saved: true }) };
+      }
+      if (owner === null) {
+        return { held: 'refused', sent: fail(503, { code: 'TURN_STATE_UNVERIFIABLE', message: 'Could not confirm this turn was reserved. Nothing was run; please try again.', retry_safe: true, nothing_saved: true }) };
+      }
+      if (owner.request_hash === claimHash) return { held: 'mine', claimHash };
+      return sameAgentTurnRequest(requestHashOfClaim(owner.request_hash), forRequest, chipless) ? { held: 'same' } : { held: 'refused', sent: reused() };
+    };
+
+    if (canvasEdit) {
+      // The edit's identity is the event itself: the same edit resent is that edit, never a second one.
+      const claim = await takeClaim(agentTurnRequestHash(scenarioId, userId, '', stableStringify({ system_event: body.event ?? body.system_event ?? null })), false);
+      if (claim.held === 'refused') return claim.sent;
+      // One turn at a time per scenario, as for a message. A resend runs after its original, and the canvas-edit path answers
+      // it from its own record: the store replays a turn id it committed and never writes it twice.
+      const slot = await acquireCoreTurnSlot(scenarioId);
+      try {
+        const forwarded = await dispatchFor(authorization, { 'x-olumi-ai-mode': AI_CORE_MODE })('/orchestrate/v2/turn', body);
+        const after = savedScenarioOf(await internal(graphPath, { ...FRESH_READ }));
+        let pending: readonly PendingAction[] = [];
+        try { pending = await store.readMostRecentPendingActions?.(scenarioId, { validation: 'strict' }) ?? []; } catch { pending = []; }
+        const refusal = isRec(forwarded.json.error) ? forwarded.json.error : undefined;
+        return send(forwarded.status, coreTurnContract({
+          turnId, durability: claim.held === 'same' ? 'replayed' : forwarded.status === 200 ? 'recorded' : 'not_recorded',
+          revision: after.revision, scenarioRevision: after.identity, graph: appliedGraphWire(after.graph),
+          cards: await heldCardsOf(store, scenarioId, pending, after), run: after.run, analysisState: after.analysisState,
+          receipts: collectTurnReceipts([forwarded.json]).map((r) => ({ ...r, authorised_by: 'person' as const })),
+          error: forwarded.status === 200 ? null : {
+            code: str(refusal?.code) ?? str(forwarded.json.error) ?? str(forwarded.json.code) ?? 'CANVAS_EDIT_REFUSED',
+            message: str(refusal?.message) ?? str(forwarded.json.message) ?? str(forwarded.json.detail) ?? 'That change could not be saved.',
+            retry_safe: false, nothing_saved: forwarded.status < 500,
+          },
+          agent: { forwarded_kind: kind, ...(claim.held === 'same' ? { replayed: true } : {}) },
+        }));
+      } finally {
+        slot.release();
+      }
+    }
 
     // ── WHAT WAS ASKED: the words, the press, the selection. Its hash is the turn's identity for replay. ──────────────────
     const chip = isRec(body.chip) ? body.chip : null;
@@ -295,64 +347,42 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       approvedProposal === undefined ? chipOperationOf(body) : undefined);
     const chiplessRetry = isChiplessRetry(body);
 
-    /** A replay: the recorded reply, byte for byte, on today's saved state. No model call and no Run. */
+    /**
+     * A replay: the recorded reply, byte for byte, on today's saved state. No model call and no Run. A row whose outcome is
+     * recorded (typed on its hash) replays that outcome: a lost reply as its error with no words, an empty one with its own.
+     */
     const replayed = async (prior: CommittedTurnRecord) => {
       const now = savedScenarioOf(await dispatch(graphPath, { ...FRESH_READ }));
       let pending: readonly PendingAction[] = [];
       try { pending = await store.readMostRecentPendingActions?.(scenarioId, { validation: 'strict' }) ?? []; } catch { pending = []; }
       const paused = await store.readOpenAiPausedRun?.(scenarioId).catch(() => undefined);
-      const recordedFailure = RECORDED_FAILURES.get(prior.assistant_message ?? '');
+      const outcome = recordedOutcomeOf(prior.request_hash);
       return send(200, coreTurnContract({
-        turnId, durability: 'replayed', assistantText: recordedFailure !== undefined ? '' : prior.assistant_message ?? '',
+        turnId, durability: 'replayed', assistantText: outcome === undefined || outcome === 'reply_empty' ? prior.assistant_message ?? '' : '',
         revision: now.revision, scenarioRevision: now.identity, graph: appliedGraphWire(now.graph),
         cards: await heldCardsOf(store, scenarioId, pending, now),
         run: now.run, analysisState: now.analysisState, ...(runPress ? { analysisResult: now.analysisResult } : {}),
-        paused: paused != null ? { proposal_id: paused.proposal_id } : null, error: recordedFailure ?? null,
+        paused: paused != null ? { proposal_id: paused.proposal_id } : null, error: outcome === undefined ? null : RECORDED[outcome].error,
         agent: { replayed: true }, providerCalls: recordedProviderCalls(),
       }));
     };
-    const reused = () => fail(409, { code: 'TURN_ID_REUSED', message: 'That turn id was already used for a different message. Nothing was run or changed.',
-      retry_safe: false, nothing_saved: true });
 
-    // ── THE CLAIM (the legacy route's protocol, its primitives): only the request that creates it runs. ─────────────────
+    // A recorded answer replays before any claim; only the request that creates the claim runs.
     let prior: CommittedTurnRecord | null;
-    try { prior = await store.readCommittedTurn(scenarioId, turnId); } catch (err) {
+    try { prior = await readTurn(scenarioId, turnId); } catch (err) {
       log.warn({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'core-turn: prior-turn read failed; refusing rather than re-running');
       return fail(503, { code: 'TURN_STATE_UNVERIFIABLE', message: 'Could not check whether this turn already ran. Nothing was run; please try again.', retry_safe: true, nothing_saved: true });
     }
-    if (prior !== null) return sameAgentTurnRequest(prior.request_hash, requestHash, chiplessRetry) ? replayed(prior) : reused();
-    const claimTurnId = claimTurnIdOf(turnId);
-    const claimHash = claimHashFor(requestHash, randomUUID());
-    let claimAppendSucceeded = false;
-    let owner: CommittedTurnRecord | null;
-    try {
-      await appendCheckedGraphWrite({ store, writesGraph: false, source: 'agent_turn_claim', write: {
-        scenario_id: scenarioId, turn_id: claimTurnId, turn_class: 'direct_answer', handler_id: null, request_hash: claimHash,
-        response_emitted: false, llm_calls_used: 0, duration_ms: 0, handler_facts: [],
-      } });
-      claimAppendSucceeded = true;
-      owner = await store.readCommittedTurn(scenarioId, claimTurnId);
-    } catch (err) {
-      if (err instanceof ModelWriteOwnershipRefused) {
-        const refusalBody = MODEL_WRITE_OWNERSHIP_REFUSAL_BODY[err.reason];
-        return fail(403, readSuccessfulDoorEntries() > 0 || readUnsavableEffects() > 0
-          ? { code: err.code, message: refusalBody.message, retry_safe: false, nothing_saved: false }
-          : { code: refusalBody.error, message: refusalBody.message, retry_safe: false, nothing_saved: true });
-      }
-      log.warn({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'core-turn: turn claim failed; refusing rather than running unclaimed');
-      return fail(503, { code: 'TURN_STATE_UNVERIFIABLE', message: 'Could not reserve this turn. Nothing was run; please try again.', retry_safe: true, nothing_saved: true });
-    }
-    if (owner === null) {
-      return fail(503, { code: 'TURN_STATE_UNVERIFIABLE', message: 'Could not confirm this turn was reserved. Nothing was run; please try again.', retry_safe: true, nothing_saved: true });
-    }
-    if (owner.request_hash !== claimHash) {
-      if (!sameAgentTurnRequest(requestHashOfClaim(owner.request_hash), requestHash, chiplessRetry)) return reused();
+    if (prior !== null) return sameAgentTurnRequest(requestHashOfAnswer(prior.request_hash), requestHash, chiplessRetry) ? replayed(prior) : reused();
+    const claim = await takeClaim(requestHash, chiplessRetry);
+    if (claim.held === 'refused') return claim.sent;
+    if (claim.held === 'same') {
       // Another request holds this turn: wait for its answer and replay it, never run it again.
       const deadline = Date.now() + AGENT_TURN_CLAIM_WAIT.totalMs;
       for (;;) {
         let answer: CommittedTurnRecord | null = null;
-        try { answer = await store.readCommittedTurn(scenarioId, turnId); } catch { answer = null; }
-        if (answer !== null) return sameAgentTurnRequest(answer.request_hash, requestHash, chiplessRetry) ? replayed(answer) : reused();
+        try { answer = await readTurn(scenarioId, turnId); } catch { answer = null; }
+        if (answer !== null) return sameAgentTurnRequest(requestHashOfAnswer(answer.request_hash), requestHash, chiplessRetry) ? replayed(answer) : reused();
         if (Date.now() >= deadline) break;
         await new Promise((r) => setTimeout(r, AGENT_TURN_CLAIM_WAIT.everyMs));
       }
@@ -360,6 +390,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       return fail(409, { code: 'TURN_OUTCOME_UNKNOWN', message: 'This message is already being handled, or an earlier attempt ran and its reply was not recorded. Nothing was run again; reload to see the current model.',
         retry_safe: false, nothing_saved: false }, 'unknown');
     }
+    const { claimHash } = claim;
 
     // ── THE TURN'S WRITE ACCOUNTING (ported line for line from `agent-v1-turn.ts`: its countingDispatch and doors). ────────
     const readCache = turnReadCache(dispatch, graphPath, [`/assist/v1/scenarios/${scenarioId}/versions`]);
@@ -563,16 +594,16 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
           // A core call whose provider delivery is unknown keeps its claim: Olumi wrote nothing, but the call may still be running.
           const deliveryUnknown = err instanceof CoreDeliveryUnknownError;
           const released = deliveryUnknown ? false : await releaseUnwrittenTurnClaim();
-          const said = verifiedSave ? REPLY_LOST_SAVED : deliveryUnknown && writesDispatched === 0 ? REPLY_LOST_MAY_FINISH : REPLY_LOST;
+          const lost: RecordedOutcome = verifiedSave ? 'reply_lost_saved' : deliveryUnknown && writesDispatched === 0 ? 'reply_lost_may_finish' : 'reply_lost';
           // A possible save keeps its claim: record the outcome as the answer, so a resend replays it and reads current state.
           let continuationRecorded = false;
           if (!released && (writesDispatched > 0 || deliveryUnknown) && claimAppendSucceeded) {
             try {
               await appendCheckedGraphWrite({ store, writesGraph: false, source: 'agent_turn',
                 heldProposals: { isHeld: isHeldProposal, seenByThisRequest: new Set<string>() },
-                write: { scenario_id: scenarioId, turn_id: turnId, turn_class: 'direct_answer', handler_id: null, request_hash: requestHash,
+                write: { scenario_id: scenarioId, turn_id: turnId, turn_class: 'direct_answer', handler_id: null, request_hash: withRecordedOutcome(requestHash, lost),
                   response_emitted: false, llm_calls_used: providerCallsMade() ?? 0, duration_ms: Date.now() - startedAt, handler_facts: [],
-                  userMessage: message, assistantMessage: said } });
+                  userMessage: message, assistantMessage: RECORDED[lost].said } });
               continuationRecorded = true;
             } catch (recordErr) {
               log.warn({ err: String(recordErr), scenario_id: scenarioId, turn_id: turnId }, 'core-turn: failed continuation answer could not be recorded');
@@ -593,7 +624,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
           }
           // A lost delivery is reported with ITS cause, never Olumi's own code as if the provider had sent it.
           const failure = providerFailureOf(deliveryUnknown ? (err as CoreDeliveryUnknownError).cause : err);
-          return fail(502, { code: String(failure.error), message: said, retry_safe: released, nothing_saved: nothingSaved }, durable);
+          return fail(502, { code: String(failure.error), message: RECORDED[lost].error.message, retry_safe: released, nothing_saved: nothingSaved }, durable);
         }
       }
 
@@ -601,7 +632,8 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       const after = savedScenarioOf(await readingDispatch(graphPath, { ...FRESH_READ }));
       const paused = result.sdk?.paused;
       const noReply = result.assistant_text.trim() === '' && paused === undefined && declinedCardOnly === undefined;
-      const assistantText = noReply ? '' : result.assistant_text;
+      // The model's text exactly as returned (Codex r1 on #3650: " \n" became ""); only whether it says anything is decided here.
+      const assistantText = result.assistant_text;
       let latestPending: readonly PendingAction[] = heldAtStart;
       try { latestPending = await store.readMostRecentPendingActions?.(scenarioId, { validation: 'strict' }) ?? heldAtStart; } catch { /* the floor re-reads it */ }
       const graphHash = after.revision ?? undefined;
@@ -638,16 +670,17 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
           heldProposals: { isHeld: isHeldProposal, seenByThisRequest: new Set([...heldAtStart, ...latestPending].filter(isHeldProposal).map((h) => h.chip_id)),
             offeredChipIds: new Set(durablePending.map((p) => p.chip_id)),
             onReconciled: (write) => { rowPending = write.pending_actions ?? []; return write; } },
-          write: { scenario_id: scenarioId, turn_id: turnId, turn_class: 'direct_answer', handler_id: null, request_hash: requestHash,
+          write: { scenario_id: scenarioId, turn_id: turnId, turn_class: 'direct_answer', handler_id: null,
+            request_hash: noReply ? withRecordedOutcome(requestHash, 'reply_empty') : requestHash,
             response_emitted: true, llm_calls_used: providerCallsMade() ?? result.hops + 1, duration_ms: Date.now() - startedAt, handler_facts: [],
-            userMessage: message, assistantMessage: noReply ? REPLY_NOT_FINISHED : assistantText,
+            userMessage: message, assistantMessage: assistantText,
             ...(durablePending.length > 0 ? { pending_actions: durablePending } : {}) } });
         if (outcome.priorTurnConflict === true) {
           return fail(409, { code: 'TURN_ID_REUSED', message: 'That turn id was already used for a different message. This reply was not recorded.',
             retry_safe: false, nothing_saved: writesDispatched === 0 && !verifiedSave });
         }
         if (outcome.replayedPriorTurn === true) {
-          const first = await store.readCommittedTurn(scenarioId, turnId);
+          const first = await readTurn(scenarioId, turnId);
           if (first !== null) return await replayed(first);
         }
         durability = 'recorded';
@@ -670,7 +703,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         run: after.run, analysisState: after.analysisState, ...(ranThisTurn ? { analysisResult: after.analysisResult } : {}),
         receipts: receiptsOf(result),
         paused: paused !== undefined ? { proposal_id: paused.proposal_id } : null,
-        error: noReply ? RECORDED_FAILURES.get(REPLY_NOT_FINISHED)! : null,
+        error: noReply ? RECORDED.reply_empty.error : null,
         agent: { mode: MODE, stopped_reason: result.stopped_reason, tool_calls: result.tool_calls.map((c) => ({ name: c.name,
           outcome: (c as { outcome?: unknown }).outcome ?? (c.ok ? 'ok' : 'refused') })), ...(result.sdk !== undefined ? { sdk: result.sdk } : {}) },
         providerCalls: recordedProviderCalls(),

@@ -91,6 +91,8 @@ vi.mock('../../orchestrator/user-identity.js', async (original) => ({
 let served = 0;
 /** When set, the next provider call waits for it: a turn still running while another is sent. */
 let holdProvider: Promise<void> | undefined;
+/** When set, only a call this picks is held (the reply call after a tool ran: the approval has committed and awaits its words). */
+let holdWhen: ((body: Json) => boolean) | undefined;
 let preparedId = '';
 const responsesBody = (output: Json[]): Json => {
   served += 1;
@@ -126,7 +128,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       // A structured side call (the model critic) answers nothing, and never takes the conversation's scripted outputs.
       if (body.text?.format?.type === 'json_schema') return json(responsesBody([]));
       calls.push(body);
-      if (holdProvider !== undefined) { const hold = holdProvider; holdProvider = undefined; await hold; }
+      if (holdProvider !== undefined && (holdWhen === undefined || holdWhen(body))) { const hold = holdProvider; holdProvider = undefined; await hold; }
       const next = outputs.shift() ?? [{ type: 'message', text: ANSWER }];
       // A refused call (a 400: never retried), so the turn ends with no reply.
       if (next[0]?.type === 'refuse') return json({ error: { message: 'Refused.', type: 'invalid_request_error', param: null, code: null } }, 400);
@@ -180,7 +182,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
   beforeEach(() => {
     SCENARIO = randomUUID(); persisted = postimage(KNOWN_ANSWER); registered.length = 0; canvasForwards.length = 0; turnRows.clear(); conversationIds.clear();
     readiness = { status: 'blocked', may_run: false, options: [], blockers: [] }; runState = undefined; carriedResult = undefined; runs = 0;
-    pausedRun = null; calls = []; outputs = []; preparedId = ''; holdProvider = undefined;
+    pausedRun = null; calls = []; outputs = []; preparedId = ''; holdProvider = undefined; holdWhen = undefined;
   });
   const post = (payload: Json) => app.inject({ method: 'POST', url: '/agent/v1/core-turn',
     payload: { kind: 'message', scenario_id: SCENARIO, stage: 'analyse', turn_class: 'frame', ...payload } });
@@ -287,6 +289,88 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(unitless.cards).toHaveLength(1);
     expect(unitless.cards[0].fields).toEqual([]);
     expect(unitless.cards[0].adds).toEqual([expect.objectContaining({ kind: 'change_note', field_id: 'change_note:factor:f' })]);
+  });
+
+  describe('Codex r1 on #3650: a canvas edit claims its turn and takes the slot BEFORE it is forwarded', () => {
+    const afterTool = (body: Json): boolean => Array.isArray(body.input) && (body.input as Json[]).some((i) => i.type === 'function_call_output');
+    /** A card, then its approval held mid-turn: committed (one register), its reply not yet written. */
+    const approvalHeldAfterCommit = async () => {
+      outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop', args: CHANGE }], [{ type: 'message', text: 'Prepared.' }]];
+      const card = ((await typed(SAID)).json() as Json).cards[0];
+      preparedId = String(card.proposal_id);
+      let release!: () => void;
+      holdProvider = new Promise<void>((resolve) => { release = resolve; });
+      holdWhen = afterTool;
+      outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: 'Saved.' }]];
+      const pressId = randomUUID();
+      const approval = post({ turn_id: pressId, message: card.approve_action.message, source: 'chip_click', chip: { id: card.approve_action.id, action_type: card.approve_action.action_type } });
+      await vi.waitFor(() => expect(registered).toHaveLength(1));
+      return { approval, pressId, release };
+    };
+    const canvasEdit = (turnId: string) => post({ kind: 'system_event', turn_id: turnId,
+      event: { kind: 'option_intervention_edit', option_id: 'push', factor_id: 'f', value: 0.8, base_graph_hash: hashOf(persisted) } });
+
+    it('an edit sent under the turn id an approval is answering is refused, and never forwarded: one write for that turn id', async () => {
+      const { approval, pressId, release } = await approvalHeldAfterCommit();
+      const pending = canvasEdit(pressId);
+      const settled = await Promise.race([pending.then(() => 'answered'), new Promise((resolve) => setTimeout(() => resolve('waiting'), 150))]);
+      expect(settled, 'refused at once by the claim, never queued behind the approval').toBe('answered');
+      release();
+      const edit = await pending;
+      expect(edit.statusCode, edit.body).toBe(409);
+      expect((edit.json() as Json).error).toMatchObject({ code: 'TURN_ID_REUSED', nothing_saved: true });
+      const a = await approval;
+      expect(a.statusCode, a.body).toBe(200);
+      expect((a.json() as Json)).toMatchObject({ durability: 'recorded', error: null });
+      expect(registered).toHaveLength(1);
+      expect(canvasForwards).toHaveLength(0);
+    });
+
+    it('an edit under its own turn id waits for the running turn, then runs: never interleaved with it', async () => {
+      const { approval, release } = await approvalHeldAfterCommit();
+      const edit = canvasEdit(randomUUID());
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(canvasForwards, 'nothing is forwarded while the approval holds the scenario').toHaveLength(0);
+      release();
+      const [a, e] = await Promise.all([approval, edit]);
+      expect([a.statusCode, e.statusCode]).toEqual([200, 200]);
+      expect(canvasForwards).toHaveLength(1);
+    });
+
+    it('the same edit resent replays it: no second change', async () => {
+      const turnId = randomUUID();
+      const event = { kind: 'option_intervention_edit', option_id: 'push', factor_id: 'f', value: 0.8, base_graph_hash: hashOf(persisted) };
+      expect((await post({ kind: 'system_event', turn_id: turnId, event })).statusCode).toBe(200);
+      const again = await post({ kind: 'system_event', turn_id: turnId, event });
+      expect(again.statusCode, again.body).toBe(200);
+      expect((again.json() as Json).durability).toBe('replayed');
+      // CONTRAST: a different edit under that turn id is refused, and never forwarded.
+      const other = await post({ kind: 'system_event', turn_id: turnId, event: { kind: 'option_intervention_edit', option_id: 'push', factor_id: 'f', value: 0.9, base_graph_hash: hashOf(persisted) } });
+      expect(other.statusCode).toBe(409);
+      expect(canvasForwards.map((f) => f.body.event.value)).toEqual([0.8, 0.8]);
+    });
+  });
+
+  it('Codex r1 on #3650: a reply whose words equal a host failure sentence is the AI\u2019s reply, recorded and replayed byte for byte', async () => {
+    const SAME = 'The saved change is kept, but the reply didn’t arrive. Send a new message to continue.';
+    outputs = [[{ type: 'message', text: SAME }]];
+    const turnId = randomUUID();
+    const first = (await typed('What happens if the reply is lost?', turnId)).json() as Json;
+    expect(first).toMatchObject({ assistant_text: SAME, error: null });
+    const again = (await typed('What happens if the reply is lost?', turnId)).json() as Json;
+    expect(again).toMatchObject({ durability: 'replayed', assistant_text: SAME, error: null });
+  });
+
+  it('Codex r1 on #3650: a whitespace-only reply is passed on unmodified, as the typed empty-reply outcome, and replays so', async () => {
+    outputs = [[{ type: 'message', text: ' \n' }]];
+    const turnId = randomUUID();
+    const first = (await typed('Say nothing.', turnId)).json() as Json;
+    expect(first.assistant_text).toBe(' \n');
+    expect(first).toMatchObject({ durability: 'recorded', error: { code: 'REPLY_INCOMPLETE', retry_safe: false, nothing_saved: false } });
+    const again = (await typed('Say nothing.', turnId)).json() as Json;
+    expect(again.assistant_text).toBe(' \n');
+    expect(again).toMatchObject({ durability: 'replayed', error: { code: 'REPLY_INCOMPLETE' } });
+    expect(calls, 'the replay calls no model').toHaveLength(1);
   });
 
   it('⭐ REPLAY: a resend of the same turn id returns the recorded reply on today’s state: no model call, no write, no Run', async () => {

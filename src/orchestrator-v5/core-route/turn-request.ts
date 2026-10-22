@@ -85,6 +85,23 @@ export function agentTurnRequestHash(scenarioId: string, userId: string | null, 
  */
 const CHIP_HASH_SEP = '#chip:';
 /**
+ * A core turn's RECORDED OUTCOME, typed on its answer row's request hash as `#claim:` and `#chip:` are, and never read from
+ * its words (Codex r1 on #3650: a model reply whose words equalled a host sentence replayed as that failure). An ordinary
+ * answer carries none, so its row and its replay are exactly as before.
+ */
+const OUTCOME_SEP = '#outcome:';
+export const RECORDED_OUTCOMES = ['reply_lost_saved', 'reply_lost_may_finish', 'reply_lost', 'reply_empty'] as const;
+export type RecordedOutcome = (typeof RECORDED_OUTCOMES)[number];
+export const withRecordedOutcome = (requestHash: string, outcome: RecordedOutcome): string => `${requestHash}${OUTCOME_SEP}${outcome}`;
+export function recordedOutcomeOf(stored: string): RecordedOutcome | undefined {
+  const at = stored.lastIndexOf(OUTCOME_SEP);
+  const outcome = at < 0 ? '' : stored.slice(at + OUTCOME_SEP.length);
+  return (RECORDED_OUTCOMES as readonly string[]).includes(outcome) ? outcome as RecordedOutcome : undefined;
+}
+/** The request a stored answer row answers: its hash, less any recorded outcome. */
+export const requestHashOfAnswer = (stored: string): string =>
+  (recordedOutcomeOf(stored) === undefined ? stored : stored.slice(0, stored.lastIndexOf(OUTCOME_SEP)));
+/**
  * Restart continuity (DL 17:18Z, 14 Oct): a durable answer row's words were TYPED when its stored hash is this subject's
  * PLAIN hash of them: no `#chip:` suffix and no operation in the digest, the same rule as `typedByUser`. The reseed holds
  * proven rows as typed words (`HistoryStore.seed`); every other row stays source-unknown.
@@ -92,7 +109,7 @@ const CHIP_HASH_SEP = '#chip:';
 export function typedRowProof(scenarioId: string, userId: string | null):
   (row: { request_hash?: string | null; user_message?: string | null; created_at?: string | null }) => boolean {
   return (row) => typeof row.user_message === 'string' && writtenSinceTypedOriginCutoff(row.created_at)
-    && row.request_hash === agentTurnRequestHash(scenarioId, userId, row.user_message);
+    && typeof row.request_hash === 'string' && requestHashOfAnswer(row.request_hash) === agentTurnRequestHash(scenarioId, userId, row.user_message);
 }
 /**
  * ⛔ THE CUTOFF (DL, 14 Oct): before DGAI c3a20ea9 (#2792 + #2793 + #2794) the UI sent some of Olumi's own text without a
