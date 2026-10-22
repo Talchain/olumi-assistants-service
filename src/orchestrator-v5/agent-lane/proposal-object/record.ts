@@ -558,7 +558,7 @@ function whoseOf(r: Rec): Who {
   return { tag: 'source not yet confirmed', source: 'unverified' };
 }
 /** The words for each part of a living-model item (src/schemas/living-model.ts); an unlisted key is said as written. */
-const KEY_WORDS: Readonly<Record<string, string>> = { label: 'name', text: 'wording', quote: 'recorded words', value: 'figure',
+const KEY_WORDS: Readonly<Record<string, string>> = { label: 'name', text: 'wording', quote: 'quoting', value: 'figure',
   low: 'low end', high: 'high end', sd: 'spread', unit: 'unit', form: 'form', sign: 'direction', target: 'target', quantity: 'measure',
   comparator: 'comparison', by_when: 'date', period_months: 'period', baseline: 'baseline', current: 'today’s level',
   current_unit: 'today’s unit', change_kind: 'kind of change', status: 'status', kind: 'type', limit: 'limit', defined_as: 'definition',
@@ -573,7 +573,7 @@ const VALUE_WORDS: Readonly<Record<string, Readonly<Record<string, string>>>> = 
   role: { challenge: 'a challenge', assumption: 'an assumption', prerequisite: 'a prerequisite' }, kind: { factor: 'a factor', outcome: 'an outcome' } };
 const KEY_ORDER: readonly string[] = ['label', 'text', 'holder', 'position', 'quantity', 'comparator', 'op', 'of', 'value', 'reduction', 'low', 'high', 'sd', 'unit', 'form', 'sign'];
 /** Parts said in the plural. */
-const PLURAL: ReadonlySet<string> = new Set(['quote', 'of', 'applies_to']);
+const PLURAL: ReadonlySet<string> = new Set(['of', 'applies_to']);
 /** A figure's parts, said together as one. */
 const FIG: readonly string[] = ['value', 'low', 'high'];
 /** Keys whose values are other items' ids, said by name. */
@@ -773,7 +773,11 @@ function coreChangeNotes(operations: readonly HeldOp[], adds: readonly AddField[
       } else {
         const was = say(bv, k, p, cb);
         const now = say(av, k, p, ca);
-        out.push({ path: p, text: `${join(w)} ${PLURAL.has(k) ? 'were' : 'was'} ${was}, now ${now}${was === now ? ' (a different item with the same name)' : ''}`, who: whoOf(ca, k) });
+        // The person's words, as the card keeps them: the new words first, the old in brackets (Lenses pre-flight on 60ee5601:
+        // "recorded words were …, now …" read as jargon and crowded each note).
+        const text = k === 'quote' ? `${join(w)} now ${now} (was ${was})`
+          : `${join(w)} ${PLURAL.has(k) ? 'were' : 'was'} ${was}, now ${now}${was === now ? ' (a different item with the same name)' : ''}`;
+        out.push({ path: p, text, who: whoOf(ca, k) });
       }
     }
     // Whose it is, said where it changes: the record's own source, and each who-key's parts.
