@@ -428,10 +428,9 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
       const rate = unitShapeOf(m);
       const count = unitShapeOf(c);
       if (rate === null || count === null || readUnitParts(c)?.kind !== 'count') return false;
-      // Money, then per or "/", then the denominator; a count is its noun alone (no per of its own).
+      // Money, then per or "/", then the denominator; the count is that noun alone (equality refuses a count's own "per").
       const [money, sep, ...den] = rate.head;
       if (!plainMoney(money, g.code) || (sep !== 'per' && sep !== '/') || den.length === 0 || den.some((w) => RATE_CONNECTORS.has(w))) return false;
-      if (count.head.length === 0 || count.head.some((w) => RATE_CONNECTORS.has(w))) return false;
       const per = den.map(singular);
       const noun = count.head.map(singular);
       if (noun.length !== per.length || noun.some((w, k) => w !== per[k])) return false;
