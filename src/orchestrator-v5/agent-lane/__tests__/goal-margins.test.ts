@@ -81,7 +81,7 @@ describe('exact results carry their margins and the input each rests on, from th
 
   it('the core reply is told to say each margin as stated and to offer the test at the boundary, never a claim', () => {
     expect(CORE_REPLY_INSTRUCTION).toContain('as goal_margins states it');
-    expect(CORE_REPLY_INSTRUCTION).toContain('offer one stress_test of that link at its boundary');
+    expect(CORE_REPLY_INSTRUCTION).toContain('and offer one stress_test of that link at it');
     expect(CORE_REPLY_INSTRUCTION).toContain('never as a claim about what will happen');
     // #3625's negatives stay.
     expect(CORE_REPLY_INSTRUCTION).toContain('never worked out from the inputs');

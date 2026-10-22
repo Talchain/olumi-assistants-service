@@ -38,7 +38,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
   it('arm B is the AIE\'s assembled reference, byte for byte (programme-docs #94 6303242136, static text sha256 7b6145d4…), plus the canvas-coaching sentence', () => {
     expect(b.split(NOTE_ON_ITEM_INSTRUCTION)).toHaveLength(2);
     // 7b6145d4… until 21 Oct; arm C's adoption changed only the closing core reply rule (see its row), now 56625e00….
-    expect(createHash('sha256').update(b.replace(`${NOTE_ON_ITEM_INSTRUCTION}\n\n`, ''), 'utf8').digest('hex')).toBe('f9c44c8f34d1628def53f0d08b700fb56e91d0ea3ce4cbbcd1dece477d6dfdab'); // 23 Oct: exact inputs → each option's margin as goal_margins states it + a stress_test offered at the boundary of the input it rests on (DL brief, R2 c1; was 97d3bea4…). 22 Oct: exact inputs → the Run's own results + the person's choice of figure to test (Track 3 c5; Codex r1 #3625; was 52d3ab03…); stress_test only for a sized link/factor (buddy SIMPLER, was 9a57bae9…); the three-part coaching after a Run (part 2 never ranks unmeasured figures, Codex r1) + the held-risk window ask (Track 3 judge on 4b, 11 c1 zeros; was 6dedb153…). 21 Oct: + Olumi's labelled estimate on another's item (estimate_by); + CORE_NEXT_STEP decisive question (Track 3 Q2 v2 + buddy AMEND, 21 Oct; was a605c43f…)
+    expect(createHash('sha256').update(b.replace(`${NOTE_ON_ITEM_INSTRUCTION}\n\n`, ''), 'utf8').digest('hex')).toBe('cd529a5a363f7229c674533d311d85186b9dae5cd29a20155b04a6bf9327ba8c'); // 23 Oct (b): the boundary said as the person's own arithmetic, the input always named, the low/high invited (DL, double-judged R2; was f9c44c8f…). 23 Oct: exact inputs → each option's margin as goal_margins states it + a stress_test offered at the boundary of the input it rests on (DL brief, R2 c1; was 97d3bea4…). 22 Oct: exact inputs → the Run's own results + the person's choice of figure to test (Track 3 c5; Codex r1 #3625; was 52d3ab03…); stress_test only for a sized link/factor (buddy SIMPLER, was 9a57bae9…); the three-part coaching after a Run (part 2 never ranks unmeasured figures, Codex r1) + the held-risk window ask (Track 3 judge on 4b, 11 c1 zeros; was 6dedb153…). 21 Oct: + Olumi's labelled estimate on another's item (estimate_by); + CORE_NEXT_STEP decisive question (Track 3 Q2 v2 + buddy AMEND, 21 Oct; was a605c43f…)
     // Candidate-3 witnesses (21 Oct): presence checks (text only, not behaviour): WHEN to build, and Olumi's additions on a card.
     expect(b).toContain('build the first model from their brief in that same turn');
     expect(b).toContain('a list in your reply adds nothing to their model');
@@ -109,6 +109,15 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(CORE_REPLY_INSTRUCTION).not.toContain('nearest the target');
     expect(CORE_REPLY_INSTRUCTION).not.toContain('how far each option lands');
     expect(CORE_REPLY_INSTRUCTION).toContain('without one, ask which of their own stated figures they are least sure of and offer to test it at a value they name (stress_test)');
+    // DL 23 Oct (double-judged R2 on 7b0af1a9): (a) the boundary is the person's own arithmetic, never a recorded threshold, with
+    // which side of "equal" meets the target (Codex on the approach); (b) the input is always named where goal_margins gives one;
+    // (c) fm6: the input a chance would need is invited, never promised or suggested.
+    expect(CORE_REPLY_INSTRUCTION).toContain('from this Run\u2019s own figures, <input> at <boundary> is where <option>\u2019s level would equal the target');
+    expect(CORE_REPLY_INSTRUCTION).toContain('an \u201cat least\u201d or \u201cat most\u201d target is met at that point, an \u201cabove\u201d or \u201cbelow\u201d one is not');
+    expect(CORE_REPLY_INSTRUCTION).toContain('never as a recorded or measured threshold');
+    expect(CORE_REPLY_INSTRUCTION).toContain('always name that input and its boundary');
+    expect(CORE_REPLY_INSTRUCTION).toContain('never say no further input is needed');
+    expect(CORE_REPLY_INSTRUCTION).toContain('give its lowest and highest likely values, without promising that a chance will then be shown and without suggesting the values');
     expect(CORE_REPLY_INSTRUCTION).not.toContain('rests on most: the measured');
     expect(CORE_REPLY_INSTRUCTION).toContain('(3) one concrete next step for the model');
     // planStress tests only a sized link effect or factor level; a risk chance or missing figure is asked for.
