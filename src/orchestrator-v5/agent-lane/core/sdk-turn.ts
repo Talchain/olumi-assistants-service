@@ -516,10 +516,10 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
   } catch (err) {
     // The stream's copy records transport loss asynchronously; settle it before classifying the SDK's error.
     await Promise.allSettled(pendingRows);
-    if (err instanceof MaxTurnsExceededError && deliveryUnknown === undefined) {
-      await input.settle?.();
-      return finish('', 'hop_limit', CORE_MAX_MODEL_CALLS, 'host');
-    }
+    // ⭐ Whatever ended the run, a call Class 3's offer left refused is settled as base would have it (Codex r1 on #3675: a
+    // provider error after the refusal left nothing saved, where base had saved the draft). The turn's own error is reported.
+    await input.settle?.().catch(() => undefined);
+    if (err instanceof MaxTurnsExceededError && deliveryUnknown === undefined) return finish('', 'hop_limit', CORE_MAX_MODEL_CALLS, 'host');
     // The capability's own error, unwrapped, so the route's existing handlers see the same error the loop would raise.
     if (err instanceof ToolCallError && err.error !== undefined) throw err.error;
     log.warn({ event: 'agent_core.turn_failed', scenario_id: input.ctx.scenario_id, request_id: input.ctx.request_id, err: String(err).slice(0, 300) },

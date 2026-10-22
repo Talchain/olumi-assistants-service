@@ -25,28 +25,47 @@ export interface Restructure {
   settle?: () => Promise<void>;
 }
 
+type Rec = Record<string, unknown>;
+const theirs = (r: unknown): boolean => typeof r === 'object' && r !== null && !Array.isArray(r)
+  && ((r as Rec).source === 'user' || (r as Rec).source === 'party');
+/** Every record a person or a party gave, nested at any depth (an option's setting, a risk's mitigation, a limit, a definition). */
+const nestedTheirs = (v: unknown): unknown[] => (Array.isArray(v) ? v.flatMap(nestedTheirs)
+  : typeof v === 'object' && v !== null ? [...(theirs(v) ? [v] : []), ...Object.values(v).flatMap(nestedTheirs)] : []);
+
 /**
- * The person's own content in a model: each item a person or a party gave, whole (its figures, quotes and settings), and every
- * view. A condition is keyed by its words and scope, its role left out: the one part the offer asks the AI to re-read.
+ * The person's own content in a (kernelled) model, as labelled entries, one per record, repeats kept (Codex r1 on #3675): each
+ * item a person or a party gave, whole (its figures, quotes and settings); each of their records nested in an item of Olumi's;
+ * each of their conditions whole, its role left out (the one part the offer asks the AI to re-read); and every view.
  */
-function personContent(m: LivingModelT): Map<string, string> {
-  const out = new Map<string, string>();
-  const theirs = (source: string) => source === 'user' || source === 'party';
+function personContent(m: LivingModelT): { readonly label: string; readonly value: string }[] {
+  const out: { label: string; value: string }[] = [];
   for (const kind of ['aims', 'options', 'factors', 'links', 'risks'] as const) {
-    for (const item of m[kind]) if (theirs(item.source)) out.set(`${kind}:${item.id}`, stable(item));
+    for (const item of m[kind]) {
+      if (theirs(item)) out.push({ label: `${kind}:${item.id}`, value: stable(item) });
+      else for (const r of nestedTheirs(Object.values(item))) out.push({ label: `${kind}:${item.id}`, value: stable(r) });
+    }
   }
   for (const { role: _role, ...c } of m.conditions) {
-    const scope = [...c.applies_to].sort();
-    if (theirs(c.source)) out.set(`conditions:${stable([c.text, scope])}`, stable({ ...c, applies_to: scope }));
+    if (theirs(c)) out.push({ label: `conditions:${c.text}`, value: stable({ ...c, applies_to: [...c.applies_to].sort() }) });
   }
-  for (const v of m.views) out.set(`views:${stable([v.holder, v.position])}`, stable(v));
+  for (const v of m.views) out.push({ label: `views:${v.holder}: ${v.position}`, value: stable(v) });
   return out;
 }
 
-/** What of the person's content in `refused` the retry left out or changed: the retry never loses it (DL, #3672 fix-forward). */
+/**
+ * What of the person's content in `refused` the retry left out or changed, compared on the kernelled models (the kernel makes
+ * ids canonical and labels sources): the retry never loses it (DL, #3672 fix-forward).
+ */
 export function personContentLost(refused: LivingModelT, retry: LivingModelT): string[] {
-  const kept = personContent(retry);
-  return [...personContent(refused)].flatMap(([key, item]) => (kept.get(key) === item ? [] : [key]));
+  const keyOf = (e: { readonly label: string; readonly value: string }) => `${e.label}\u0000${e.value}`;
+  const left = new Map<string, number>();
+  for (const e of personContent(retry)) left.set(keyOf(e), (left.get(keyOf(e)) ?? 0) + 1);
+  const lost = personContent(refused).flatMap((e) => {
+    const n = left.get(keyOf(e)) ?? 0;
+    left.set(keyOf(e), n - 1);
+    return n > 0 ? [] : [e.label];
+  });
+  return [...new Set(lost)];
 }
 
 /** What the AI is told when its retry would have lost the person's content, so the refused call was used as it was. */

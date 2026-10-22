@@ -68,15 +68,21 @@ export const REVIEW_AFTER_SAVE = 'Your draft is saved. A second reviewer read it
 const nodesIn = (graph: Record<string, unknown>): number => (Array.isArray(graph.nodes) ? graph.nodes.length : 0);
 
 type DraftContext = Pick<AgentToolContext, 'scenario_id'> & Partial<Pick<AgentToolContext, 'request_id'>> & TypedWords;
+/** The words a draft's kernel checks quotes against: its brief and the person's own messages. */
+const draftWords = (ctx: DraftContext, brief: string): string[] =>
+  [brief, ...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text === undefined ? [] : [ctx.user_turn_text])];
 
 export async function buildModel(deps: DraftDeps, ctx: DraftContext, args: BuildModelArgs): Promise<ToolOutcome> {
   // ⭐ THE RETRY NEVER LOSES THE PERSON'S CONTENT (DL, #3672 fix-forward): a second draft that left out or changed an item the
   // person or a party gave is not used; the refused draft is, exactly as base would have saved it.
+  // Compared as the kernel reads them (canonical ids, labelled sources), so a retry that differs only there is no loss.
   const r = deps.restructure;
   const first = r?.pending?.tool === BUILD_MODEL_FROM_BRIEF ? r.pending.args : undefined;
-  const lost = first === undefined ? [] : personContentLost(first.model, args.model);
+  const read = (a: BuildModelArgs) => applyKernel(a.model, draftWords(ctx, a.brief)).model;
+  const lost = first === undefined ? [] : personContentLost(read(first), read(args));
   const outcome = await construct(deps, ctx, first !== undefined && lost.length > 0 ? first : args);
-  if (outcome.status === 'ok' && r !== undefined) r.pending = undefined;
+  // Only a draft settles a pending draft: another tool's result never discards it (Codex r1 on #3675).
+  if (outcome.status === 'ok' && r?.pending?.tool === BUILD_MODEL_FROM_BRIEF) r.pending = undefined;
   const save_outcome = outcome.status === 'ok' ? 'VERIFIED_SAVED'
     : outcome.status === 'unavailable' && outcome.write === 'unknown' ? 'UNKNOWN' : 'VERIFIED_NO_WRITE';
   return Object.defineProperty({ ...outcome, data: { ...outcome.data, save_outcome,
@@ -101,7 +107,7 @@ async function constructUnrecorded(deps: DraftDeps, ctx: DraftContext, args: Bui
     return prior === null ? refused('model_exists') : ok({ already_saved: true, model_version: prior }, { mutated: false });
   }
 
-  const words = [args.brief, ...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text === undefined ? [] : [ctx.user_turn_text])];
+  const words = draftWords(ctx, args.brief);
   const msLeft = (): number | undefined => (deps.deadlineAt === undefined ? undefined : deps.deadlineAt - Date.now());
   const kernelled = applyKernel(args.model, words);
   const mapped = mapLivingModel(kernelled.model);

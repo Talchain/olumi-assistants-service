@@ -111,7 +111,10 @@ export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLa
   // refused, with no draft or card since, runs once more as base would, recorded like any call (DL, #3672 fix-forward).
   const restructure = deps.restructure;
   if (restructure !== undefined) {
+    let settled = false;
     restructure.settle = async () => {
+      if (settled) return;
+      settled = true;
       const p = restructure.pending;
       if (p?.tool === BUILD_MODEL_FROM_BRIEF) record(BUILD_MODEL_FROM_BRIEF, p.args, await buildModel({ ...deps, review }, ctx, p.args));
       else if (p?.tool === PROPOSE_CHANGE && scenario === 'core') record(PROPOSE_CHANGE, p.args, await proposeLivingChange(deps, ctx, p.args));

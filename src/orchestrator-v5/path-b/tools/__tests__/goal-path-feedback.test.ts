@@ -251,9 +251,9 @@ describe('the SDK tools: the route\'s one offer per turn; a refusal never makes 
     expect(personContentLost(withCondition('prerequisite'), withCondition('assumption'))).toEqual([]);
     const theirs = withCondition('prerequisite');
     theirs.conditions[0] = { ...theirs.conditions[0]!, source: 'user', quote: PREREQ };
-    expect(personContentLost(theirs, { ...theirs, conditions: [] })).toEqual([`conditions:${JSON.stringify([PREREQ, ['f_g']])}`]);
+    expect(personContentLost(theirs, { ...theirs, conditions: [] })).toEqual([`conditions:${PREREQ}`]);
     expect(personContentLost(theirs, { ...theirs, conditions: [{ ...theirs.conditions[0]!, role: 'assumption' }] }), 'its role is the one part re-read').toEqual([]);
-    expect(personContentLost(theirs, { ...theirs, views: [] })).toEqual([`views:${JSON.stringify(['Sam', 'thinks push is too risky'])}`]);
+    expect(personContentLost(theirs, { ...theirs, views: [] })).toEqual(['views:Sam: thinks push is too risky']);
   });
 
   it('DL (b): a change\'s retry that leaves out the person\'s item is not carded; the refused change is', async () => {
@@ -266,6 +266,45 @@ describe('the SDK tools: the route\'s one offer per turn; a refusal never makes 
     const b = await base(KNOWN_ANSWER, 'propose', args(withCondition('prerequisite')));
     expect((out.data as Rec).changes).toEqual(((await call(turn(product(KNOWN_ANSWER), false).propose, args(withCondition('prerequisite')))).data as Rec).changes);
     expect(b.calls).toHaveLength(1);
+  });
+
+  it('Codex r1 on #3675: the person\'s record nested in an item of Olumi\'s counts; so does each of two same-words conditions; a kernel-only difference does not', () => {
+    const nested = withCondition('prerequisite');
+    nested.options[1] = { ...nested.options[1]!, source: 'olumi', quote: null };
+    const moved = structuredClone(nested);
+    moved.options[1]!.settings[0] = { ...moved.options[1]!.settings[0]!, value: 99 };
+    expect(personContentLost(nested, moved)).toEqual(['options:push']);
+    const two = withCondition('prerequisite');
+    two.conditions = [{ ...two.conditions[0]!, source: 'user', quote: PREREQ }, { ...two.conditions[0]!, source: 'party', party: 'Sam', quote: PREREQ }];
+    expect(personContentLost(two, { ...two, conditions: [two.conditions[1]!] })).toEqual([`conditions:${PREREQ}`]);
+    expect(personContentLost(two, { ...two, views: [...two.views, ...two.views] }), 'nothing of theirs is gone').toEqual([]);
+    expect(personContentLost({ ...two, views: [...two.views, ...two.views] }, two)).toEqual(['views:Sam: thinks push is too risky']);
+  });
+
+  it('Codex r1 on #3675: a retry that differs from the refused draft only as the kernel reads it (an id\'s case) is used, with its chance', async () => {
+    const p = product(null);
+    const t = turn(p);
+    await call(t.build, draft(withCondition('prerequisite')));
+    const upper = withCondition('assumption');
+    upper.factors[0] = { ...upper.factors[0]!, id: 'F' };
+    upper.options[1]!.settings[0] = { ...upper.options[1]!.settings[0]!, factor_id: 'F' };
+    upper.links[0] = { ...upper.links[0]!, from: 'F' };
+    const out = await call(t.build, draft(upper));
+    expect(out).toMatchObject({ status: 'ok', mutated: true });
+    expect((out.data as Rec).restructure).toBeUndefined();
+    expect(goalOf(p.saved())?.goal_threshold).toBe(0.8);
+  });
+
+  it('Codex r1 on #3675: another tool\'s success never discards a pending change: a draft "already saved" leaves it, and the turn\'s end cards it', async () => {
+    const p = product(null);
+    const t = turn(p);
+    expect(await call(t.build, draft(KNOWN_ANSWER))).toMatchObject({ status: 'ok', mutated: true });
+    const args = { public_label: 'Update the model', basis: 'The person asked for it.', model: withCondition('prerequisite'), remove: [] };
+    expect(await call(t.propose, args)).toMatchObject({ status: 'refused', reason: 'goal_path_withheld' });
+    expect(await call(t.build, draft(KNOWN_ANSWER))).toMatchObject({ status: 'ok', mutated: false, data: { already_saved: true } });
+    await t.restructure!.settle!();
+    expect(t.calls.at(-1)![0]).toMatchObject({ name: 'propose_change', ok: true });
+    expect(t.calls.at(-1)![1].proposal_id).toEqual(expect.any(String));
   });
 
   it('CONTRAST: a caller without the route\'s offer saves the first call, as before; its turn has nothing to settle', async () => {

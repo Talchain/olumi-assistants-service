@@ -63,21 +63,29 @@ async function savedLiving(deps: Deps, ctx: Ctx) {
 export async function proposeLivingChange(deps: Deps, ctx: Ctx, args: LivingChangeArgs): Promise<ToolOutcome> {
   // ⭐ THE RETRY NEVER LOSES THE PERSON'S CONTENT (DL, #3672 fix-forward): a second change that left out or changed an item the
   // person or a party gave is not used; the refused change is, exactly as base would have carded it.
+  // Compared as the kernel reads them on the saved model (canonical ids, labelled sources): one extra read, on a retry only.
   const r = deps.restructure;
   const first = r?.pending?.tool === 'propose_change' ? r.pending.args : undefined;
-  const lost = first === undefined ? [] : personContentLost(first.model, args.model);
+  const base = first === undefined ? undefined : await savedLiving(deps, ctx);
+  const lost = first === undefined || base === undefined || 'status' in base ? []
+    : personContentLost(kernelFor(base, ctx, first.model).model, kernelFor(base, ctx, args.model).model);
   const outcome = await proposeOnce(deps, ctx, first !== undefined && lost.length > 0 ? first : args);
-  if (outcome.status === 'ok' && r !== undefined) r.pending = undefined;
+  // Only a card settles a pending change: another tool's result never discards it (Codex r1 on #3675).
+  if (outcome.status === 'ok' && r?.pending?.tool === 'propose_change') r.pending = undefined;
   return outcome.status === 'ok' && lost.length > 0
     ? { ...outcome, data: { ...outcome.data, restructure: { kept: 'first_call', lost, note: KEPT_AS_REFUSED } } } : outcome;
+}
+
+/** The kernel on a change: the person's words (the saved brief and their messages) and the saved model it changes. */
+function kernelFor(base: Exclude<Awaited<ReturnType<typeof savedLiving>>, ToolOutcome>, ctx: Ctx, model: LivingModelT) {
+  const brief = typeof base.saved.json.brief_text === 'string' ? [base.saved.json.brief_text] : [];
+  return applyKernel(model, [...brief, ...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])], base.model, brief[0] ?? null);
 }
 
 async function proposeOnce(deps: Deps, ctx: Ctx, args: LivingChangeArgs): Promise<ToolOutcome> {
   const base = await savedLiving(deps, ctx);
   if ('status' in base) return base;
-  const brief = typeof base.saved.json.brief_text === 'string' ? [base.saved.json.brief_text] : [];
-  const kernelled = applyKernel(args.model, [...brief, ...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])], base.model,
-    brief[0] ?? null);
+  const kernelled = kernelFor(base, ctx, args.model);
   // A condition is corrected or resolved by replacing it ("only after supplier approval" → "supplier approval obtained"; Codex
   // r6 on #3522): its removal is a row on the card the person approves, and the host keeps it in history. The quote is the
   // person's own words for the change: a replacement THEY stated (kernel-verified) on the same items, else null. Never this
