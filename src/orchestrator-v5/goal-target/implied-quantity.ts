@@ -8,9 +8,14 @@
  *    near, gives nothing, with the reason. A goal the mapper can size is its own nearest quantity.
  *  · Bound to the SAME Run: one more engine read of the request this Run dispatched (its graph, options and seed) with that
  *    quantity as the analysis target, stored in this Run's own enrichment (`IMPLIED_QUANTITY_KEY`); never a second Run.
- *  · Units: the engine reads a level as `raw / cap` (`mapper.ts` frames), so each figure is converted back with its cap.
+ *  · Units: the engine reads a level as `raw / cap` (`mapper.ts` frames). PLoT converts the target's figures back itself
+ *    ONLY when some option's setting lies outside [0, 1] (`needsNormalisation`, PLoT staging b60fe4fb `routes/v2/run.ts`
+ *    Phase 4a/5a), on the target's own cap (`deriveRange` rung 0); otherwise each figure is converted here with that cap.
+ *    So the quantity must hold today's level on its own cap in the engine graph (Codex r1 on #3660: one rule, never twice).
+ *  · Every option of the Run is read, or none is said; an unknown currency is never a range (DL constraint 1).
  */
 import { isPlaceholderLink } from '../../cee/magnitude/link-sizing.js';
+import { isUnnamedCurrencyUnit } from '../agent-lane/unnamed-currency.js';
 import { actualMoveSeeds } from '../agent-lane/goal-certainty.js';
 import { goalChanceEstimateCounts } from '../agent-lane/goal-chance-estimate-attribution.js';
 import { mapLivingModel, savedGoal, type Frame } from '../path-b/living-model/mapper.js';
@@ -24,7 +29,8 @@ const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFi
 export const IMPLIED_QUANTITY_KEY = '__cee_implied_quantity';
 
 export type ImpliedQuantityWithheld =
-  | 'no_changing_option' | 'no_sized_quantity_on_every_path' | 'nearest_quantity_tied' | 'engine_read_failed';
+  | 'no_changing_option' | 'no_sized_quantity_on_every_path' | 'nearest_quantity_tied' | 'engine_read_failed'
+  | 'engine_read_incomplete' | 'estimates_unread';
 
 export interface ImpliedRange { readonly p10: number; readonly p50: number; readonly p90: number }
 
@@ -48,14 +54,18 @@ const STRUCTURAL = new Set(['option', 'decision']);
  * undefined for a scenario with none (a legacy one). The deadline is read from the aim itself: with no target figure the
  * engine graph's goal carries none (DL 22 Oct: 80a77832 saved by_when with period_months null, and M4 must use it).
  */
-export function livingFramesOf(graph: unknown): (ReadonlyMap<string, Frame> & { readonly byWhen?: string | null }) | undefined {
+export function livingFramesOf(graph: unknown):
+  (ReadonlyMap<string, Frame> & { readonly byWhen?: string | null; readonly aimStatesFigure?: boolean }) | undefined {
   const living = LivingModel.safeParse(isRec(graph) ? graph.living_model : undefined);
   if (!living.success) return undefined;
   const goal = savedGoal(graph);
   const frames = mapLivingModel(living.data, goal).frames;
   const aim = living.data.aims.find((a) => a.id === goal.goal) ?? living.data.aims.find((a) => a.status === 'current');
   const byWhen = aim?.target?.by_when?.trim();
-  return Object.assign(new Map(frames), { byWhen: byWhen === undefined || byWhen === '' ? null : byWhen });
+  // A target figure the person stated ("= £250,000") is a target, whatever the engine graph could project of it (Codex r1).
+  const t = aim?.target;
+  const aimStatesFigure = t != null && (t.value !== null || t.low !== null || t.high !== null);
+  return Object.assign(new Map(frames), { byWhen: byWhen === undefined || byWhen === '' ? null : byWhen, aimStatesFigure });
 }
 
 /** The time scope the person declared, said as they wrote it: "within 3 weeks" as is, "March 2027" as "by March 2027". */
@@ -85,7 +95,13 @@ export function impliedQuantityTarget(graph: unknown, goalId: string, frames: Re
   if (moved.length === 0) return 'no_changing_option';
   const toGoal = walk([goalId], false);
   const reached = moved.map((seeds) => walk(seeds, true));
-  const sized = (id: string) => { const f = frames.get(id); return f !== undefined && f.cap > 0 && (f.unit ?? '').trim() !== ''; };
+  // Sized: a named unit (never an unknown currency) and today's level held on its own cap, which is what PLoT scales by.
+  const sized = (id: string) => {
+    const f = frames.get(id);
+    const level = byId.get(id)?.observed_state;
+    return f !== undefined && f.cap > 0 && (f.unit ?? '').trim() !== '' && !isUnnamedCurrencyUnit(f.unit)
+      && isRec(level) && level.cap === f.cap && finite(level.value);
+  };
   const clean = (id: string) => { const cone = walk([id], false); return !causal.some((e) => cone.has(String(e.to)) && isPlaceholderLink(e)); };
   const candidates = [...toGoal.keys()].filter((id) => sized(id) && reached.every((r) => r.has(id)) && clean(id));
   if (candidates.length === 0) return 'no_sized_quantity_on_every_path';
@@ -119,19 +135,29 @@ export async function readImpliedQuantity(input: {
   let envelope: unknown;
   try { envelope = await input.run(payload); } catch { return withheld('engine_read_failed'); }
   const rows = isRec(envelope) && Array.isArray(envelope.option_comparison) ? envelope.option_comparison.filter(isRec) : [];
+  if (rows.length === 0) return withheld('engine_read_failed');
+  // PLoT's own gate (see the header): already in the quantity's unit when it converted, else on its frame.
+  const scale = plotConvertsOutcomes(d.options) ? 1 : target.cap;
   const by_option: Record<string, ImpliedRange> = {};
   for (const id of input.optionIds) {
     const o = rows.find((r) => r.option_id === id)?.outcome;
-    if (isRec(o) && finite(o.p10) && finite(o.p50) && finite(o.p90)) {
-      by_option[id] = { p10: o.p10 * target.cap, p50: o.p50 * target.cap, p90: o.p90 * target.cap };
-    }
+    if (!isRec(o) || !finite(o.p10) || !finite(o.p50) || !finite(o.p90)) return withheld('engine_read_incomplete');
+    by_option[id] = { p10: o.p10 * scale, p50: o.p50 * scale, p90: o.p90 * scale };
   }
-  if (Object.keys(by_option).length === 0) return withheld('engine_read_failed');
-  const counts = goalChanceEstimateCounts(input.graph, input.optionIds, target.node_id);
+  // The census of the quantity's OWN inputs (its event alone, never the goal's), accepted estimates still Olumi's.
+  const counts = goalChanceEstimateCounts(input.graph, input.optionIds, input.goalId, [target.node_id], { scoredInEvent: false });
+  if (counts.unread) return withheld('estimates_unread');
   const frames = input.frames as { readonly byWhen?: string | null };
   return { version: 1, status: 'computed', node_id: target.node_id, quantity: target.label, unit: target.unit, by_option,
-    rests_on_olumi_estimates: counts.links > 0 || counts.values > 0 || Object.values(counts.settingsByOption).some((n) => n > 0),
+    rests_on_olumi_estimates: counts.links + counts.values + counts.acceptedLinks + counts.acceptedValues > 0
+      || Object.values(counts.settingsByOption).some((n) => n > 0),
     by_when: frames.byWhen ?? null };
+}
+
+/** PLoT's `needsNormalisation`: does any option's setting lie outside [0, 1], so PLoT converts the outcomes back itself? */
+export function plotConvertsOutcomes(options: unknown): boolean {
+  return Array.isArray(options) && options.filter(isRec).some((o) => isRec(o.interventions) && Object.values(o.interventions)
+    .some((cell) => { const v = isRec(cell) ? cell.value : cell; return finite(v) && (v < 0 || v > 1); }));
 }
 
 /** The stored record, read back strictly: anything else is absent. */

@@ -2780,7 +2780,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // THIS Run's own request and draws and stored with this Run (`implied-quantity.ts`). A core scenario only (its frames).
     const impliedFrames = goalChanceTargetCause(graphForAnalysis, snapshot.goal_node_id) === 'no_stated_target'
       ? livingFramesOf(snapshot.rawPersistedGraph ?? snapshot.graph) : undefined;
-    if (impliedFrames !== undefined) {
+    if (impliedFrames !== undefined && impliedFrames.aimStatesFigure !== true) {
       const optionIds = finalWireOptions.map((o) => optionIdOf(o as Record<string, unknown>)).filter((id): id is string => typeof id === 'string');
       response = { ...response, [IMPLIED_QUANTITY_KEY]: await readImpliedQuantity({
         graph: graphForAnalysis, goalId: snapshot.goal_node_id, frames: impliedFrames, optionIds,
