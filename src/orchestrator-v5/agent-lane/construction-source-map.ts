@@ -22,7 +22,7 @@ import { CONSTRUCTION_ATTEST, userStatementRecord, withUserStatement } from '../
 import { authorshipOf } from '../../cee/provenance/provenance-of.js';
 import { wholeStatementIn, quoteIsNotTheUsersClaim } from '../goal-target/input-claim-context.js';
 import { readUnitParts, sameUnit, statedTailParts } from './same-unit.js';
-import { figureTheUserWroteFor } from './stated-by-user.js';
+import { amountsWrittenIn, figureTheUserWroteFor, figureTheUserWroteForSpan, sameWord, timesTheUserWrote, wordsOf } from './stated-by-user.js';
 import { goalTargetIdentity } from './construction-size-gate.js';
 
 /**
@@ -271,9 +271,44 @@ export function figureSource(model: unknown, brief: string | undefined, subject:
     && (typeof st.low === 'number' && typeof st.high === 'number' ? st.low === st.high && st.low === value
       : typeof st.low === 'number' ? st.low === value : typeof st.high === 'number' && st.high === value);
   const map = sourceMapOf(drafted, brief);
-  return (map.verified.get(key) ?? []).some((st) => states(st)
-    && ![...map.verified.entries()].some(([other, said]) => other !== key && said.some((o) => o.quote === st.quote && states(o))))
-    ? 'user' : 'unverified';
+  // ⭐ ONE QUANTITY READ TWICE IS NO RIVAL, ONLY AT ONE OWNED OCCURRENCE (PROMPT-INT first-loss trace; Codex pair AMEND; Codex #3439
+  // BLOCK + Buddy-A occurrence design). An option's setting and the link FROM the factor it sets are one quantity read twice ("hiring a
+  // contractor would add 60 tickets a week") only at ONE occurrence the option provably owns: the one reader binds it to the option's
+  // own name (strict, never inside another speaker's words), its clause names no other option, its complete written quantity is the
+  // setting's (its unit as written after it, never a range end, no distributive before it: "each temp adds 30" is per temp), and the
+  // user writes that figure only there in the sentence, so the carried link can be reading nothing else. Anything else stays a rival
+  // (base): swapped figures, another quantity's figure, another period, a range end, a speaker's quotation, a per-unit figure.
+  const carried = subject.kind === 'option' && subject.factor_label !== undefined ? `link|${norm(subject.factor_label)}|` : undefined;
+  const raw = model as { options?: { label?: unknown }[]; factors?: { label?: unknown }[]; goal?: { metric?: unknown } };
+  const optionLabels = (raw.options ?? []).map((o) => o?.label).filter((l): l is string => typeof l === 'string' && l.trim() !== '');
+  const labels = [...new Set([...(Array.isArray(drafted) ? drafted : []).flatMap((e) => {
+    const sub = subjectOf(e !== null && typeof e === 'object' && !Array.isArray(e) ? (e as Record<string, unknown>)['subject'] : undefined);
+    return sub === undefined ? [] : [sub.label, sub.factor_label, sub.to_label];
+  }), ...optionLabels, ...(raw.factors ?? []).map((f) => f?.label), raw.goal?.metric]
+    .filter((l): l is string => typeof l === 'string' && l.trim() !== ''))];
+  const ownWords = wordsOf(subject.label);
+  const ownedOccurrence = (st: UserStatement): boolean => {
+    if (carried === undefined) return false;
+    const at = figureTheUserWroteForSpan(value, st.unit, st.quote,
+      { target: [subject.label], others: labels.filter((l) => l !== subject.label), strict: true })?.start ?? null;
+    const amount = at === null ? undefined : amountsWrittenIn(st.quote).find((a) => a.index === at);
+    if (at === null || amount === undefined) return false;
+    const from = Math.max(...['.', ';', ',', ':', '!', '?', '\n'].map((c) => st.quote.lastIndexOf(c, at - 1))) + 1;
+    const stop = st.quote.slice(at).search(/[.;,:!?\n]/);
+    const clause = wordsOf(st.quote.slice(from, stop < 0 ? st.quote.length : at + stop));
+    const namesAnother = optionLabels.some((l) => l !== subject.label
+      && wordsOf(l).some((w) => !ownWords.some((x) => sameWord(x, w)) && clause.some((c) => sameWord(c, w))));
+    const written = statedTailParts(st.quote, amount), claimed = readUnitParts(st.unit);
+    return !namesAnother && written !== null && claimed !== null && JSON.stringify(written) === JSON.stringify(claimed)
+      && !findJoinedRanges(st.quote).some((r) => r.low.index === at || r.high.index === at)
+      && !/\b(?:each|every|per)\b/i.test(st.quote.slice(from, at)) && timesTheUserWrote(value, st.unit, st.quote) === 1;
+  };
+  return (map.verified.get(key) ?? []).some((st) => {
+    if (!states(st)) return false;
+    const owned = ownedOccurrence(st);
+    return [...map.verified.entries()].every(([other, said]) => other === key || !said.some((o) => o.quote === st.quote && states(o)
+      && !(owned && other.startsWith(carried!) && sameUnit(o.unit, st.unit))));
+  }) ? 'user' : 'unverified';
 }
 
 /**
