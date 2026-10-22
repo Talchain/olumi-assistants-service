@@ -16,6 +16,7 @@ import { leaderLicenceFromState } from '../compose/leader-licence.js';
 import { readRawRobustnessSignals } from '../coaching/pick-raw-robustness.js';
 import { STATIC_LEVEL_CAPABILITY } from '../goal-target/run-question-scope.js';
 import { analysedOptionIds, conditionalInputFactsOf, conditionalInputDisclosuresOf, type ConditionalInputFacts } from './conditional-input-basis.js';
+import { goalMarginsOf, type GoalMargins } from './goal-margins.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -109,6 +110,12 @@ export interface RunFacts {
    */
   readonly zero_spread?: readonly { readonly option_id: string; readonly basis: 'fixed_baseline' | 'measured_spread' }[];
   readonly sensitivity: { readonly measured: boolean; readonly most_sensitive?: string };
+  /**
+   * With every result exact (no spread, no chance shown): how far each option lands from the target, and the one input a
+   * result rests on with the value at which it would reach the target, where the model's exact sum makes that so
+   * (`goalMarginsOf`). Absent otherwise.
+   */
+  readonly margins?: GoalMargins;
   /** How many of THIS Run's inputs on the goal's paths are Olumi's estimates. */
   readonly olumi_inputs?: { readonly links: number; readonly values: number; readonly settings_by_option: Readonly<Record<string, number>> };
   /** Current saved-model records, not historical evaluated inputs. The quote's human source and Olumi's reading stay distinct. */
@@ -143,6 +150,8 @@ const warningsOf = (result: unknown): Rec[] => {
 export function runFactsOf(analysisResult: unknown, graph: unknown, current: boolean,
   state: { readonly analysisState?: unknown; readonly analysisReady?: unknown;
     readonly runEvidence?: SelectedRunEvidence;
+    /** The selected Run's own id, which `runEvidence` must match for the exact-result margins (`goalMarginsOf`). */
+    readonly selectedRunId?: string | null;
     readonly comparison?: { readonly prior_run_id?: string; readonly run_delta?: unknown; readonly rerun_record?: unknown } } = {}): RunFacts {
   const question = analysisResult == null && state.runEvidence === undefined ? undefined
     : deriveRunQuestion({ runEvidence: state.runEvidence, storedResult: analysisResult });
@@ -162,6 +171,7 @@ export function runFactsOf(analysisResult: unknown, graph: unknown, current: boo
     : [{ option_id, basis: r.basis === 'fixed_baseline' ? 'fixed_baseline' as const : 'measured_spread' as const }]);
   const enrichment = isRec(analysisResult) ? analysisResult.enrichment : undefined;
   const s = current ? decisionSensitivityOf(enrichment) : { status: 'not_measured' as const };
+  const margins = goalMarginsOf(analysisResult, graph, current, state.runEvidence, state.selectedRunId);
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const said: RunFacts['user_statements'] = nodes.flatMap((n) => (typeof n.id !== 'string' ? [] : userStatementsOn(n).map((r) => ({
     node_id: n.id as string, record: structuredClone(r),
@@ -191,6 +201,7 @@ export function runFactsOf(analysisResult: unknown, graph: unknown, current: boo
     withheld,
     ...(zeroSpread.length > 0 ? { zero_spread: zeroSpread } : {}),
     sensitivity: s.status === 'measured' ? { measured: true, most_sensitive: s.most_sensitive.label } : { measured: false },
+    ...(margins === undefined ? {} : { margins }),
     ...(census !== undefined ? { olumi_inputs: census } : {}),
     user_statements: said,
     ...(inputBasis === undefined ? {} : { input_basis: { ...inputBasis, required_disclosures: conditionalInputDisclosuresOf(inputBasis) } }),

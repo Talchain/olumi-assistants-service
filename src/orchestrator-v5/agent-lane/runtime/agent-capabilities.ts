@@ -1245,8 +1245,10 @@ function nextStepFactOf(read: { readonly raw: unknown; readonly analysis_state?:
  * §9 (Lane B BLOCKED-LEASE): `runFactsOf`'s state, plus the selected Run's own evidence as read-only `runEvidence` when the
  * read carried it. Lane B's `runFactsOf` reads it; absent evidence is never filled from today's graph.
  */
-function runFactsStateOf<S extends object>(read: { readonly run_evidence?: RunEvidence }, state: S): S & { readonly runEvidence?: RunEvidence } {
-  return read.run_evidence === undefined ? state : { ...state, runEvidence: read.run_evidence };
+function runFactsStateOf<S extends object>(read: { readonly run_evidence?: RunEvidence; readonly selected_run_id?: string | null }, state: S):
+  S & { readonly runEvidence?: RunEvidence; readonly selectedRunId?: string } {
+  const selected = typeof read.selected_run_id === 'string' ? { selectedRunId: read.selected_run_id } : {};
+  return read.run_evidence === undefined ? { ...state, ...selected } : { ...state, runEvidence: read.run_evidence, ...selected };
 }
 
 interface GraphRead {
@@ -1359,6 +1361,8 @@ interface GraphRead {
   readonly run_option_set?: RecordedRunOptionSet;
   /** §9: the selected Run's own recorded evidence (`run-evidence.ts`), from the same read; absent = not recorded. */
   readonly run_evidence?: RunEvidence;
+  /** The selected Run's id in the same read's canonical view, which its evidence must match (`goalMarginsOf`). */
+  readonly selected_run_id?: string | null;
 }
 
 // An edited graph can still carry an earlier Run. Its old result must not be
@@ -2898,6 +2902,7 @@ export function createAgentCapabilities(
       ...(r.json.analysis_run_option_set !== undefined
         ? { run_option_set: r.json.analysis_run_option_set as RecordedRunOptionSet } : {}),
       ...((evidence) => evidence === undefined ? {} : { run_evidence: evidence })(readRunEvidence(r.json.analysis_run_evidence)),
+      ...(isPlainRecord(view?.run) && typeof view.run.run_id === 'string' ? { selected_run_id: view.run.run_id } : {}),
     };
   };
 
@@ -10812,7 +10817,9 @@ export function createAgentCapabilities(
           const current = isPlainRecord(read.analysis_state) && isPlainRecord(read.analysis_state.run_state)
             && read.analysis_state.run_state.kind === 'complete_current';
           firstRunFacts = runFactsOf(read.analysis_result, read.graph, current,
-            runFactsStateOf({ ...(evidence === undefined ? {} : { run_evidence: evidence }) },
+            runFactsStateOf({ ...(evidence === undefined ? {} : { run_evidence: evidence }),
+              selected_run_id: isPlainRecord(read.canonical_analysis_view) && isPlainRecord(read.canonical_analysis_view.run)
+                && typeof read.canonical_analysis_view.run.run_id === 'string' ? read.canonical_analysis_view.run.run_id : null },
               { analysisState: read.analysis_state, analysisReady: read.analysis_ready }));
           // The same selected Run's recorded omission, never today's graph's suggested risks.
           const omitted = runOmittedRisks(read.analysis_result);

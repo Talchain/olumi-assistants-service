@@ -355,7 +355,7 @@ export const ALL_LIMITS_HOLD_NOTE =
  * B2), or {@link EVERY_OPTION}. Their outcome figures are removed from the Agent's view (DL 5931658539 item 1 (ii)).
  */
 const EVERY_OPTION = '*';
-function keptOutcomeOptionIds(enrichment: Record<string, unknown>): Set<string> {
+export function keptOutcomeOptionIds(enrichment: Record<string, unknown>): Set<string> {
   const out = new Set<string>();
   const warnings = Array.isArray(enrichment.inference_warnings) ? enrichment.inference_warnings : [];
   for (const w of warnings) {

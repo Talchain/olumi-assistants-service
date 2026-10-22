@@ -68,7 +68,9 @@ export async function recordedRun(deps: { readonly dispatch: InternalDispatch },
   // A Run with no id is no receipt, whatever its revision and time (the canonical view allows `run_id: null`).
   if (run !== null && typeof run.run_id === 'string' && run.run_id !== '' && id !== undefined
     && run.graph_hash_at_run === id.graph_hash_at_run && id.graph_hash_at_run === revision && at === id.computed_at) {
-    return ok({ run_id: run.run_id, ...facts, inputs_used: run.inputs_used }, { ran: true });
+    // Exact results: the margins and the input each rests on, from the ONE run-facts packet of this same Run (`goalMarginsOf`).
+    const margins = isRec(run.facts) ? run.facts.margins : undefined;
+    return ok({ run_id: run.run_id, ...facts, inputs_used: run.inputs_used, ...(margins === undefined ? {} : { goal_margins: margins }) }, { ran: true });
   }
   return unavailable('run_not_recorded');
 }
