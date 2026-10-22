@@ -709,7 +709,7 @@
     "frame": "level",
     "target": 400,
     "horizon": {
-     "as_stated": "next month"
+     "as_stated": "in due course"
     },
     "baseline": 200,
     "quantity": {
@@ -946,7 +946,7 @@
     },
     "goal_threshold_unit": "crates per shift",
     "goal_threshold_frame": "level",
-    "goal_deadline_as_stated": "next month",
+    "goal_deadline_as_stated": "in due course",
     "goal_threshold_cap_provenance": "target_derived_headroom"
    },
    {
@@ -1076,7 +1076,7 @@
       "unit": "crates per shift",
       "value": 400,
       "source": null,
-      "by_when": "next month",
+      "by_when": "in due course",
       "current": 200,
       "baseline": "Synthetic words.",
       "quantity": "Synthetic text.",

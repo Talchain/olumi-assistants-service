@@ -167,6 +167,21 @@ describe('exact results carry their margins and the input each rests on, from th
     expect(night.rests_on).toBeUndefined();
   });
 
+  it('Codex r2: an exactly held 16-digit level keeps its last digit; a decimal margin is the decimal', () => {
+    expect(marginsOf(levels(fresh(), { night: 1000000000000001 }))!.options[0]!.margin).toBe(999999999999601);
+    expect(marginsOf(levels(fresh(), { night: 400.3 }))!.options[0]!.margin).toBe(0.3);
+  });
+
+  it('float noise in a recorded level is cleared, so the identity and its boundary still hold', () => {
+    const night = marginsOf(levels(fresh(), { night: 549.9999999999999 }))!.options[0]!;
+    expect(night).toEqual(EXPECTED.options[0]);
+  });
+
+  it('NEGATIVE (Codex r2): evidence with no selected Run id to match says nothing (every caller passes the canonical id)', () => {
+    const f = fresh();
+    expect(runFactsOf(f.analysis_result, f.graph, true, { runEvidence: readRunEvidence(f.analysis_run_evidence) }).margins).toBeUndefined();
+  });
+
   it('Codex r1: the status quo is the Run\'s reference, so it is never given a boundary, even with a link of its own', () => {
     const f = fresh();
     f.graph.living_model.links.push({ ...link(f, 'night_output'), id: 'sq_output', from: 'status_quo', effect: { ...link(f, 'night_output').effect, value: 0 } });

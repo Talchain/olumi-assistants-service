@@ -20,8 +20,32 @@ const rec = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 /** Float noise only, relative to the figures themselves (Codex r1: no absolute floor that makes tiny frames agree). */
 const close = (a: number, b: number): boolean => a === b || Math.abs(a - b) <= 1e-12 * Math.max(Math.abs(a), Math.abs(b));
-/** The Run's figure without float noise (549.9999999999999 is the 550 the Run reports), never a rounded figure (1e12 + 1 stays). */
-const clean = (v: number): number => Number(v.toPrecision(15)) + 0;
+/**
+ * The figure without float noise (549.9999999999999 is the 550 the Run means; 1.1 × 500 is 550): its 15-digit form only when
+ * that is within a few units in the last place, so an exactly held figure is never rounded (1e15 + 1 stays; Codex r2).
+ */
+const clean = (v: number): number => {
+  const c = Number(v.toPrecision(15));
+  return Math.abs(c - v) <= 4 * Number.EPSILON * Math.abs(v) ? c + 0 : v;
+};
+/** Decimal places as written, or undefined in exponent form. */
+const places = (v: number): number | undefined => {
+  const s = String(v);
+  if (/e/i.test(s)) return undefined;
+  const i = s.indexOf('.');
+  return i < 0 ? 0 : s.length - i - 1;
+};
+/**
+ * a + b exactly as decimals (0.3 − 0.1 is 0.2, 1e15 + 1 − 400 keeps its last digit; Codex r2), or undefined when either
+ * figure cannot be held exactly as a safe integer at the shared number of places: nothing is said rather than a rounded figure.
+ */
+const add = (a: number, b: number): number | undefined => {
+  const pa = places(a), pb = places(b);
+  if (pa === undefined || pb === undefined) return undefined;
+  const k = 10 ** Math.max(pa, pb);
+  const ia = Math.round(a * k), ib = Math.round(b * k);
+  return Number.isSafeInteger(ia) && Number.isSafeInteger(ib) && Number.isSafeInteger(ia + ib) ? (ia + ib) / k + 0 : undefined;
+};
 
 /** The one input an option's result rests on, where the model's exact sum makes its level today's level plus that input. */
 export interface GoalMarginRestsOn {
@@ -118,7 +142,8 @@ export function goalMarginsOf(result: unknown, graph: unknown, current: boolean,
     const raw = exactLevelOf(rowOf(id));
     if (raw === undefined) return undefined;
     const level = clean(raw * toNatural);
-    const margin = clean(upward ? level - ev.target : ev.target - level);
+    const margin = upward ? add(level, -ev.target) : add(ev.target, -level);
+    if (margin === undefined) return undefined;
     const meets = strict ? margin > 0 : margin >= 0;
     // The licence's own side for this result: a disagreement is a frame we have not understood, so nothing is said.
     const side = reasons[id]?.reason === 'zero_spread' ? (reasons[id] as { side?: string }).side : undefined;
@@ -136,9 +161,10 @@ export function goalMarginsOf(result: unknown, graph: unknown, current: boolean,
       && Array.isArray(lmOption?.settings) && lmOption!.settings.length === 0) {
       const saved = (effect.sign === '-' ? -1 : 1) * Math.abs(effect.value) + 0;
       // The identity checked on THIS Run: its level is today's level plus that effect, or nothing is said.
-      const boundary = clean(ev.target - ev.baseline);
+      const boundary = add(ev.target, -ev.baseline);
+      const reached = add(ev.baseline, saved);
       // A zero boundary would make the option another "carry on as now" (Codex r1): no test is offered there.
-      if (level === clean(ev.baseline + saved) && boundary !== 0 && !close(boundary, saved)) restsOn = { link_id: link.id, saved, boundary };
+      if (boundary !== undefined && reached !== undefined && level === reached && boundary !== 0 && boundary !== saved) restsOn = { link_id: link.id, saved, boundary };
     }
     options.push({ option_id: id, label, level, margin, meets, ...(restsOn === undefined ? {} : { rests_on: restsOn }) });
   }
