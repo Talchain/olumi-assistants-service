@@ -374,7 +374,7 @@ describe('DL 22 Oct (Lenses\' step 3): the person\'s approved chat correction is
   });
 
   it('Codex r2 on #3661: the person adopting Olumi\'s or an unverified figure in their own chat words makes it theirs, numbers unchanged', async () => {
-    const said = 'We measured f at 0.5, with a range of 0.3 to 0.7.';
+    const said = 'We measured f at 0.5.';
     for (const was of ['olumi', 'unverified'] as const) {
       const saved = structuredClone(KNOWN_ANSWER);
       saved.factors[0] = { ...saved.factors[0]!, source: was, quote: null, low: 0.3, high: 0.7 };
@@ -407,7 +407,7 @@ describe('DL 22 Oct (Lenses\' step 3): the person\'s approved chat correction is
     }
   });
 
-  it('Codex r4-r9 on #3661: only the value itself, plainly written; anything else (a range end, a glued figure, a sign, unicode) attests nothing', () => {
+  it('Codex r4-r10 on #3661 (DL ruling: a single figure equal to the value): anything else (several figures, a glued figure, a sign, unicode) attests nothing', () => {
     const markOf = (said: string, figure: Partial<LivingModelT['factors'][number]>) => {
       const sent = structuredClone(KNOWN_ANSWER);
       sent.factors[0] = { ...sent.factors[0]!, ...figure, source: 'user', quote: said };
@@ -416,8 +416,8 @@ describe('DL 22 Oct (Lenses\' step 3): the person\'s approved chat correction is
     // What the words state plainly is the person's.
     expect(markOf('Make f 0.6.', { value: 0.6, high: null }), 'the value itself').toBe('chat');
     expect(markOf('Make f .6.', { value: 0.6 }), '".6" is 0.6').toBe('chat');
-    expect(markOf('f is £10,000, between £8,000 and £12,000.', { value: 10000, low: 8000, high: 12000 }), 'currency, thousands and a range').toBe('chat');
-    expect(markOf('About 950 loaves (60%).', { value: 60 }), 'a percentage in brackets').toBe('chat');
+    expect(markOf('f is £10,000.', { value: 10000, low: 8000, high: 12000 }), 'currency and thousands').toBe('chat');
+    expect(markOf('About 60% of loaves.', { value: 60 }), 'a percentage').toBe('chat');
     // A value nobody said is never theirs.
     expect(markOf('Make f 0.6.', { value: 0.5, high: 0.6 }), 'one range end never attests an unstated value').toBeNull();
     expect(markOf('f is between 0.3 and 0.7.', { value: null, low: 0.3, high: 0.7 }), 'a range with no value is never marked (missed, the brief\'s)').toBeNull();
@@ -431,7 +431,10 @@ describe('DL 22 Oct (Lenses\' step 3): the person\'s approved chat correction is
       ['f is 10:30.', 30], ['f is 950k.', 950], ['f is 5\u2019000.', 5], ['f is 1.000.', 1], ['f is 12,5.', 12], ['f is Q3.', 3], ['f is v2.', 2],
       // Codex r9: repeated or other unicode spaces, digits and dashes, a bracketed power, and overflow.
       ['f is £1\u202F\u202F000.', 1], ['f is £1  000.', 1], ['f is 1.\uFF12.', 1], ['f is 10^(3).', 3], ['f is \u2012 8.', 8], ['f is \u207B 8.', 8],
-      [`f is ${'9'.repeat(309)}.`, 8]] as const) {
+      [`f is ${'9'.repeat(309)}.`, 8],
+      // Codex r10: three decimals on a non-zero whole number, however written; and (DL ruling) any second figure.
+      ['f is 01.000.', 1], ['f is 1000.000.', 1000], ['f is 1,000.000.', 1000], ['f is £10,000, between £8,000 and £12,000.', 10000],
+      ['We sell about 950 loaves a week, not 900.', 950], ['We measured f at 0.5, with a range of 0.3 to 0.7.', 0.5]] as const) {
       expect(markOf(said, { value }), `${said} / ${value}`).toBeNull();
     }
   });

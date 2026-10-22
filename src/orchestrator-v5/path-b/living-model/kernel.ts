@@ -137,21 +137,23 @@ export function applyKernel(model: LivingModelT, verifiedWords: readonly string[
   // state no figure ("Please update f.") never make one theirs, whoever it was before (Codex r1-r3 on #3661). An unknown brief,
   // or a first draft, says nothing (null): the brief's, as before.
   const briefWords = typeof brief === 'string' ? plain(brief) : null;
-  // The value itself, plainly written (Codex r4-r9 on #3661). A wrong mark is worse than a missed one (a missed mark leaves the
-  // brief's figure, as before), and reading figures out of free text failed every way a fragment can match (signs, dashes,
-  // exponents, unicode digits and spaces, overflow), so the words attest only when they are plain: ASCII letters, digits, spaces
-  // and common punctuation; no minus, dash or sign word; no digit groups split by spaces; every figure standing alone (nothing
-  // glued to it). The factor's value must then equal one of those figures (an overflowing figure is Infinity, never equal); a
-  // range with no value is never marked.
+  // The value itself, plainly written (Codex r4-r10 on #3661; DL ruling 22 Oct). A wrong mark is worse than a missed one (a
+  // missed mark leaves the brief's figure, as before), and reading figures out of free text failed every way a fragment can
+  // match (signs, dashes, exponents, unicode digits and spaces, overflow, "1.000"), so the words attest only when they are plain
+  // (ASCII letters, digits, spaces and common punctuation; no minus, dash or sign word) and hold exactly ONE figure, standing
+  // alone (nothing glued to it), that equals the factor's value (an overflowing figure is Infinity, never equal). Three decimals
+  // on a non-zero whole number ("1.000", "1,000.000", "01.000") is never read; a range with no value is never marked.
   const statesFigure = (quote: string, f: Omit<LivingModelT['factors'][number], 'said_in'>): boolean => {
-    if (f.value === null || !/^[A-Za-z0-9 .,;:!?'\u2019"()£$€%&]*$/.test(quote) || /\b(minus|negative)\b/i.test(quote) || /\d\s+\d/.test(quote)) return false;
+    if (f.value === null || !/^[A-Za-z0-9 .,;:!?'\u2019"()£$€%&]*$/.test(quote) || /\b(minus|negative)\b/i.test(quote)) return false;
     const text = quote.replace(/(^|[ (£$€])\.(\d)/g, '$10.$2');
     const figures = [...text.matchAll(/\d+(?:,\d{3})*(?:\.\d+)?/g)];
     const alone = (m: RegExpMatchArray) => /^$|[ (£$€]$/.test(text.slice(Math.max(0, m.index! - 1), m.index!))
       && /^(?:$|[ ;:!?)%]|[.,](?!\d))/.test(text.slice(m.index! + m[0].length));
-    if (figures.length === 0 || !figures.every(alone)) return false;
-    return figures.some(([fig]) => !/^[1-9]\d{0,2}\.\d{3}$/.test(fig)
-      && Math.abs(f.value! - Number(fig.replace(/,/g, ''))) <= 1e-9 * Math.max(1, Math.abs(f.value!)));
+    if (figures.length !== 1 || !alone(figures[0]!)) return false;
+    const fig = figures[0]![0];
+    const whole = Number(fig.split('.')[0]!.replace(/,/g, ''));
+    if (/\.\d{3}$/.test(fig) && whole !== 0) return false;
+    return Math.abs(f.value - Number(fig.replace(/,/g, ''))) <= 1e-9 * Math.max(1, Math.abs(f.value));
   };
   const saidIn = (f: Omit<LivingModelT['factors'][number], 'said_in'>): 'chat' | null => {
     if (briefWords === null || f.source !== 'user' || f.estimate_by !== null || f.quote === null) return null;
