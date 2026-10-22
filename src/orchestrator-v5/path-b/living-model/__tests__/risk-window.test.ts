@@ -50,10 +50,13 @@ describe('an Olumi chance off the goal\'s window is held, so the Run is not refu
     expect(riskOccurrenceIsCurrent(olumi, graph)).toBe(false);
   });
 
-  it('invariance: a mitigated Olumi risk and F2 (the person\'s, mitigated) map and ready exactly as before', () => {
-    expect(node(mapLivingModel(OLUMI_CHANCE).graph as never, 'supplier_fails')!.event_risk.occurrence.basis).toBe('olumi');
-    expect(reasons(OLUMI_CHANCE)).toEqual([]);
-    expect(readiness(OLUMI_CHANCE)).toEqual({ safe: true, blocking: [] });
+  // DL ruling 23 Oct (mitigated-risk window): a mitigated Olumi risk now counts only over the goal's window, held with its
+  // preventer otherwise (mitigated-risk-window.test.ts). Over the goal's own 12 months it maps and readies as before.
+  it('invariance: a mitigated Olumi risk over the goal\'s window, and F2 (the person\'s, mitigated), map and ready as before', () => {
+    const windowed: LivingModelT = { ...OLUMI_CHANCE, aims: OLUMI_CHANCE.aims.map((a) => ({ ...a, target: { ...a.target!, period_months: 12 } })) };
+    expect(node(mapLivingModel(windowed).graph as never, 'supplier_fails')!.event_risk.occurrence.basis).toBe('olumi');
+    expect(reasons(windowed)).toEqual([]);
+    expect(readiness(windowed)).toEqual({ safe: true, blocking: [] });
     expect(node(mapLivingModel(supplier('point')).graph as never, 'supplier_fails')!.event_risk.occurrence.basis).toBe('user');
     expect(reasons(supplier('point'))).toEqual([]);
     expect(readiness(supplier('point'))).toEqual({ safe: true, blocking: [] });

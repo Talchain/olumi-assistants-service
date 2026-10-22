@@ -470,14 +470,30 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     };
     const node: Rec = { id: r.id, kind: 'risk', label: r.label, event_risk: block, ...(r.quote !== null ? { source_quote: r.quote } : {}) };
     // DL lease 22 Oct (candidate 4b, Q2 0/14 Run ok): Olumi's chance counts only over the goal's current window, by the SAME
-    // predicate readiness reads (`riskOccurrenceIsCurrent`), so the two cannot drift. Readiness asks for a level only on a
-    // ROOT (`goalRootsWithoutStatusQuoLevel`), and here a risk's only parents are its preventers, so a risk with no
-    // mitigation off that window is held, never sent as a level readiness then refuses as "no figure" (no window is ever
-    // guessed, AIE). A mitigated one is sent as before: holding it would strand its preventer (NO_PATH_TO_GOAL).
+    // predicate readiness reads (`riskOccurrenceIsCurrent`), so the two cannot drift; off it the risk is held, never sent as
+    // a level readiness then refuses as "no figure" (no window is ever guessed, AIE). DL ruling 23 Oct: mitigated or not, an
+    // occurrence over another window is a wrong quantity, so a mitigated one is held too, with its preventer below.
     const reason: WithheldReason | undefined = low === null || high === null || r.horizon_months === null ? 'risk_occurrence_unknown'
       : basis === undefined ? 'risk_unattributed'
         : !EventRiskV1.safeParse(block).success || !r.mitigations.every((m) => switchOk(m.factor_id)) ? 'risk_not_in_slice'
-          : r.mitigations.length === 0 && !riskOccurrenceIsCurrent(node, { nodes, edges }) ? 'risk_window_not_goal_window' : undefined;
+          : !riskOccurrenceIsCurrent(node, { nodes, edges }) ? 'risk_window_not_goal_window' : undefined;
+    if (reason === 'risk_window_not_goal_window') {
+      // The preventer goes with its risk: a switch whose only child is this risk (`switchOk`) would otherwise reach nothing
+      // (NO_PATH_TO_GOAL). Its node, every option's setting on it and their links leave the engine graph; it is held by name.
+      for (const m of r.mitigations) {
+        const id = m.factor_id;
+        nodes.splice(0, nodes.length, ...nodes.filter((n) => n.id !== id));
+        for (const n of nodes) {
+          const iv = n.kind === 'option' && typeof n.interventions === 'object' && n.interventions !== null ? n.interventions as Rec : undefined;
+          if (iv === undefined || !(id in iv)) continue;
+          delete iv[id];
+          if (Object.keys(iv).length === 0) delete n.interventions;
+        }
+        edges.splice(0, edges.length, ...edges.filter((e) => e.to !== id && e.from !== id));
+        caps.delete(id); current.delete(id);
+        hold(id, 'risk_window_not_goal_window');
+      }
+    }
     if (reason !== undefined) { hold(r.id, reason); refusedRisks.add(r.id); continue; }
     risks.add(r.id);
     nodes.push(node);
