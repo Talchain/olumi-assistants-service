@@ -1037,8 +1037,8 @@ export const CORE_NEXT_STEP = 'When input the analysis needs is missing and they
   + 'their view comes first only when it decides more. '
   // Q2 fm1 (22 Oct, b921a8e2, double-judged 7/8 half): with an aim's target figure missing, the first reply asked about buyer
   // terms or cash instead, although no chance can be shown without the target (drafting guidance already says to ask for it).
-  + 'When an aim has no target figure, that figure decides most, since no option\u2019s chance of meeting the aim can be shown without '
-  + 'it: ask for it, and by when if they gave no date, unless what success means is still unclear. '
+  + 'For a quantitative aim whose chance they want assessed, prioritise its missing target and deadline unless they have declined to set '
+  + 'one or a framing or evidence question would change the comparison more. '
   + 'Say in a few words what their answer would change. When they ask what is still '
   + 'needed, give the complete list. Never ask for a date, figure or name their words already give. '
   // Track 3 on 4b (22 Oct): Olumi's risk chance counts only over the goal's window in months, and a core goal has none, so the
