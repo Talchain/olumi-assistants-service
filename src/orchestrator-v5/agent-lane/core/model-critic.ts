@@ -1,9 +1,9 @@
 /**
  * THE MODEL CRITIC (21 Oct 2026; Paul: a multi-model architecture that checks and enhances the model). A second agent, SDK-native
  * (`Agent` + `run`, its own ledgered client, the same OpenAI family), reads the person's brief and Olumi's first draft and says
- * what a thoughtful expert would add: a measurable goal when there is none, at most three missing options, factors, outcomes or
- * risks with how each reaches the goal, the links that would connect stranded items, and the one question that would most
- * change the result. It never edits the model and never gives a figure: the drafter decides what to adopt, as Olumi's own.
+ * what a thoughtful expert would question: fidelity, consequential gaps and contradictions, optional measures and
+ * supported causal hypotheses, with at most one useful clarification. It never edits the model and never gives a figure;
+ * the person decides whether to adopt its suggestions, which remain Olumi's own.
  */
 import { Agent, OpenAIResponsesModel, run } from '@openai/agents';
 import { z } from 'zod-v4';
@@ -13,7 +13,7 @@ import type { CallBudget } from '../model-budgets.js';
 
 export const Critique = z.object({
   measurable_goal: z.object({ quantity: z.string(), unit: z.string(), horizon: z.string(), why: z.string() }).strict().nullable()
-    .describe('Only when no current aim has a target: the measurable quantity the person\'s aim depends on. Null otherwise.'),
+    .describe('Only when a proposed measure would materially help the stated aim; otherwise null, including when qualitative reasoning is sufficient. A missing target alone does not require a measure. Never invent a goal or deadline.'),
   missing: z.array(z.object({
     kind: z.enum(['option', 'factor', 'outcome', 'risk']),
     label: z.string(),
@@ -21,8 +21,8 @@ export const Critique = z.object({
     why_it_matters: z.string(),
   }).strict()).describe('At most three, the most consequential first. Specific to this situation, never generic advice.'),
   connect: z.array(z.object({ item_id: z.string(), to_id: z.string(), sign: z.enum(['+', '-']), why: z.string() }).strict())
-    .describe('For each item in the draft that does not reach the goal: the link that would connect it.'),
-  question: z.string().describe('The ONE input from the person that would most change the result.'),
+    .describe('Only justified causal links for stranded causal items. Return [] when no link is justified; context, views, definitions and unresolved relationships do not require a new link merely for connectivity.'),
+  question: z.string().describe('At most one useful clarification: resolve a material ambiguity in the representation before requesting numbers for a calculation. Empty string when none is needed; do not repeat a supplied input.'),
 }).strict();
 export type CritiqueT = z.infer<typeof Critique>;
 
@@ -30,8 +30,9 @@ export const CRITIC_INSTRUCTIONS = [
   'You review the first model Olumi drafted of a person\'s situation. Olumi is a reasoning partner: it helps people think, it never decides for them.',
   'You are given the person\'s own words, the draft (aims, options, factors, links, risks, conditions, views) and its structural gaps.',
   'You are advisory: say what a thoughtful, independent expert would raise so the model is complete enough to reason with and to analyse:',
-  'a measurable goal when no aim has a target; at most three consequential omissions or contradictions (options, factors, outcomes or risks, including non-obvious ones);',
-  'the link that would connect a stranded item where there is a real causal relationship (context may rightly stay unconnected); and the one question whose answer would most change the result.',
+  'first check faithful meaning, attributed claims, contradictions and plausible mechanisms; then at most three useful omissions or challenges (including non-obvious alternatives and countereffects), not a generic checklist;',
+  'suggest a measure only when it serves the stated aim; do not replace a qualitative purpose or require a target to make the model complete;',
+  'suggest a link only for a defensible causal hypothesis, visibly Olumi\'s; context may rightly stay unconnected. Offer at most one question that changes the next useful step, prioritising a material ambiguity in what the brief means. Use an empty question when none is needed.',
   'Never give a figure or a chance, never credit anything to the person they did not say, and never repeat what the draft already represents adequately.',
   'A mechanism mentioned only in a condition, caveat or label is not represented: name the factor, outcome or risk it needs and how it connects to the goal.',
 ].join(' ');

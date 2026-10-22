@@ -92,8 +92,8 @@ const FIX = {
   path: 'Link what drives each option to the goal under its measure, adding each missing link with Olumi\'s own labelled estimate under '
     + 'the estimate rule. Never move a figure the person gave onto a different measure.',
   unit: 'State Olumi\'s figure in the unit of the item it links into; convert only where the conversion is exact.',
-  law: 'Give Olumi\'s link a direction, ends that are in the model, and a figure or range a law can be drawn from.',
-  option: 'Give Olumi\'s option a setting on a factor, or a sized link of Olumi\'s from it.',
+  law: 'Where supportable under the estimate rule, give Olumi\'s link a direction, ends that are in the model, and a labelled figure or range; otherwise keep the unsupported part unresolved.',
+  option: 'Where supportable under the estimate rule, give Olumi\'s option a setting on a factor, or a sized link of Olumi\'s from it; otherwise retain the unresolved mechanism.',
 } as const;
 /** Each blocker's fix, or `ask` for the person's input. An unlisted code is said, never repaired. */
 const BLOCKER: Readonly<Record<string, keyof typeof FIX | 'ask'>> = {
@@ -188,14 +188,16 @@ export function blockersOf(model: LivingModelT, after: readonly Found[], before:
 }
 
 /** What the AI is told with a call it can repair (words for the AI, never shown to the person). */
-const REPAIR = 'A Run would withhold the goal\'s chance; blockers lists why. Make each fix, in Olumi\'s own items, labelled Olumi\'s. Never '
+const REPAIR = 'A Run would withhold the goal\'s chance; blockers lists why. Make each supportable fix, in Olumi\'s own items, labelled Olumi\'s. '
+  + 'A blocker gives no evidence for a missing link, direction, figure or probability: follow the estimate rule, and leave unsupported content unresolved. Never '
   + 'change or remove anything the person or a party gave (a figure, sign, range, unit, condition, target or link). Each ask is the '
-  + 'person\'s: ask them, in one question, in your reply.';
+  + 'person\'s: ask at most one question that changes the next useful step, resolving material ambiguity before numerical completion.';
 export const REPAIR_DRAFT = `Not saved yet. ${REPAIR} Then call build_model_from_brief once more; sent unchanged, it is saved as it is.`;
 export const REPAIR_CHANGE = `No card yet. ${REPAIR} Then call propose_change once more; sent unchanged, its card is made.`;
 /** With a save or card that a Run would still withhold the goal's chance on. */
-export const STILL_ASK = 'A Run would still withhold the goal\'s chance (blockers). In your reply, ask the person, in one question, for '
-  + 'what is marked ask; never present a chance.';
+export const STILL_ASK = 'A Run would still withhold the goal\'s chance (blockers); never present a chance. Explain the relevant limitation, '
+  + 'continue useful reasoning and ask at most one question that changes the next useful step. For requested analysis, use what is marked ask; '
+  + 'do not require a numerical target merely to reason about a qualitative purpose.';
 
 /** The repair to offer, if any: a fix to make, a repair left, and not the refused call sent again unchanged. */
 export function repairOf(r: Restructure | undefined, blockers: readonly Blocker[], model: LivingModelT): boolean {

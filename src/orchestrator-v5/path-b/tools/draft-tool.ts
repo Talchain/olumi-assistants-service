@@ -65,7 +65,7 @@ export interface DraftDeps {
  */
 export const REVIEW_AFTER_SAVE = 'Your draft is saved. A second reviewer read it (critique; gaps are structural facts). Do not rebuild or '
   + 'change the model in this turn. In your reply, name the critique\'s most useful point as Olumi\'s suggestion the person can ask you to '
-  + 'add. Its question is a candidate for your one question: ask whichever input would most change how the options compare.';
+  + 'add. Its question is optional: prioritise an ambiguity that changes the representation, then an input needed for the requested analysis. Ask at most one useful question and never re-ask a supplied input.';
 
 const nodesIn = (graph: Record<string, unknown>): number => (Array.isArray(graph.nodes) ? graph.nodes.length : 0);
 

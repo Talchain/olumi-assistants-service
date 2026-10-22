@@ -39,7 +39,7 @@ const attribution = {
  */
 const estimateBy = z.enum(['olumi']).nullable().default(null).describe(
   "'olumi' when Olumi supplies this WHOLE figure (value, range and unit) for an item the person or a party named without one: "
-  + 'its provisional estimate, as wide as what is genuinely unknown. Null when the item\'s own source gave the figure, and on '
+  + 'a supportable provisional estimate, as wide as what is genuinely unknown. Leave unsupported figures null. Null when the item\'s own source gave the figure, and on '
   + 'Olumi\'s own items (their source already says so). Never on or mixed with a figure the person or a party gave.');
 
 /** A figure as stated: a point (`value`) or a range (`low`/`high`), never a range collapsed to its midpoint. */
@@ -150,8 +150,8 @@ export const LivingFactor = z.object({
    */
   value: figure.value.describe(
     "Today's level of this factor, in its unit: one figure here, or a range in low and high (value then null unless a central figure was given). "
-    + "For the person's or a party's factor, the figures they gave; where they gave none, Olumi's provisional central estimate with a range, with estimate_by olumi, never mixed with theirs. "
-    + "For Olumi's own factor (source olumi), give Olumi's central estimate in value, with low and high around it as wide as what is genuinely unknown, in a stated unit."),
+    + "Keep the person's or a party's supplied figures unchanged. For a wholly missing level, give a supportable Olumi central estimate and range, with estimate_by olumi on their item. "
+    + "Olumi's own item uses source olumi, estimate_by null. State its unit and make the range reflect what is unknown. Where no reasonable estimate is possible, keep value, low and high null; never use 0 as unknown."),
   defined_as: definedAs,
   /** TRACK 2 (21 Oct): a limit beside the aim, sent as the legacy lane's limit row (one per quantity). Saved before: null. */
   limit: z.object({
@@ -198,8 +198,8 @@ export const LivingRisk = z.object({
   id,
   label: z.string(),
   occurrence: z.object({ estimate_by: estimateBy, low: z.number().nullable(), high: z.number().nullable() }).strict().describe(
-    'The chance it happens at least once within the window, from 0 to 1 ("5–15%" is low 0.05, high 0.15; one figure is low = high). For a risk the person or a party raised, the chance they gave; where they gave none, Olumi\'s provisional range with estimate_by olumi. For Olumi\'s own risk (source olumi), Olumi\'s provisional range. Each as wide as what is genuinely unknown.'),
-  horizon_months: z.number().nullable().describe('The window that chance is over, in months ("within a year" is 12). Null when not stated, except Olumi\'s own window (horizon_by olumi on another\'s risk) when Olumi gives the chance.'),
+    'The chance it happens at least once within its window, from 0 to 1 ("5–15%" is low 0.05, high 0.15; one figure is low = high). Preserve a supplied chance. A supportable missing chance may use Olumi\'s provisional range, with estimate_by olumi on another\'s risk and source olumi on Olumi\'s own risk. Otherwise keep low and high null; a labelled range is not a measured probability.'),
+  horizon_months: z.number().nullable().describe('The window that chance is over, in months ("within a year" is 12). Preserve a supplied window. A supportable Olumi estimate may supply a missing window, with horizon_by olumi on another\'s risk. Otherwise null; never silently choose a window to complete a chance.'),
   /** Per-figure authorship of the window (buddy: a chance is owned FOR its window; a supplied window is never replaced). */
   horizon_by: z.enum(['olumi']).nullable().default(null).describe(
     "'olumi' when Olumi supplies the window for a risk the person or a party raised without one. Null when its source gave it, and on Olumi's own risk."),
@@ -225,7 +225,7 @@ export const LivingLink = z.object({
      */
     form: z.enum(['point', 'exact', 'range', 'normal', 'direction_only', 'unknown']).describe(
       'point: a stated figure ("adds about 50"); exact: the person says it is exactly this, with no variation ("adds exactly 50"); '
-      + 'normal: a stated Normal law, value its mean and sd its standard deviation; range: low to high, with value the source\'s own central figure: the person\'s when they give one, Olumi\'s for Olumi\'s own estimate ("about 20, between 10 and 30"), else null; direction_only: a sign with no size, only when `to` has no unit, `from` is a quantity with no unit, or the source gave a direction only (an option or a step simply on or off is +1 when in place, so its link has a size); unknown: direction is unstated or unresolved, with sign null.'),
+      + 'normal: a stated Normal law, value its mean and sd its standard deviation; range: low to high, with value only when the source supplied a centre or Olumi gives a labelled central estimate. Never collapse a supplied range to a midpoint or infer a probability law from it. direction_only: a supported sign with no supportable size, including a source that stated only direction; unknown: direction is unstated or unresolved, with sign null. Unitful endpoints do not require an invented size.'),
     ...estimable,
     /**
      * The link's unit is the `to` item's own unit, exactly as that item writes it; "per +1 of `from`" is implied, so it is
@@ -240,8 +240,8 @@ export const LivingLink = z.object({
      * the goal off from its factors and left Run disabled. The AI reads this description, so it is the instruction.
      */
     sign: z.enum(['+', '-']).nullable().describe(
-      "Which way `to` moves for each +1 of `from`: '+' raises it, '-' lowers it. For source olumi, give your provisional judgement of direction; use form direction_only only when `to` has no unit or `from` is a quantity with no unit (an option or an on-or-off step is +1 when in place), else give its size. For source user, party or unverified, preserve only the direction that source supplied. If none was supplied, use sign null and form unknown, then ask. Never put an Olumi-inferred direction under another source."),
-  }).strict().describe("The change in `to` for each +1 of `from`, in the unit of `to`. For Olumi's own link (source olumi), when `to` has a unit and `from` has one or is an option or an on-or-off step (+1 when in place), give form range with Olumi's central estimate in value and low and high around it; else direction_only with its sign. For the person's or a party's link they gave no size, Olumi's provisional size the same way, with estimate_by olumi; its sign stays the one they gave."),
+      "Which way `to` moves for each +1 of `from`: '+' raises it, '-' lowers it. For source olumi, give a defensible provisional direction; use direction_only when a size cannot reasonably be estimated, or sign null and form unknown when direction is unresolved. For source user, party or unverified, preserve only the direction that source supplied; if none, use sign null and form unknown. Never attribute an Olumi-inferred direction to another source or guess one solely to connect the graph."),
+  }).strict().describe("The change in `to` for each +1 of `from`, in the unit of `to`; an option or on/off step is +1 when in place. Preserve supplied figures and direction. When a quantitative estimate is supportable and endpoint units make it meaningful, use Olumi's central estimate and range: source olumi for its own link, estimate_by olumi for a wholly missing size on another's link. Otherwise use direction_only for a supported sign, or unknown with sign null. Unknown size fields remain null; do not manufacture a size to obtain a calculation."),
   ...attribution,
 }).strict();
 
