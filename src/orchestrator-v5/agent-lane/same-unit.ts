@@ -555,6 +555,33 @@ export function unitsCompose(goalUnit: unknown, goalLabel: string, a: { unit: un
 }
 
 
+/**
+ * A non-currency whole made by a rate and the count or duration it is per: "developer-days per working day" × "working
+ * days" → "developer-days". The rate's explicit denominator cancels against the count; every remaining dimension,
+ * qualifier, scale and period must be the whole's own unit. Money wholes are unitsCompose's; this never reads them.
+ */
+export function quantityUnitsCompose(goalUnit: unknown, a: { unit: unknown; label: string }, b: { unit: unknown; label: string }): Composition {
+  const whole = readUnitParts(goalUnit);
+  if (whole === null || whole.kind === 'currency') return NO;
+  for (const [rate, count] of [[a, b], [b, a]] as const) {
+    const quantity = readUnitParts(count.unit);
+    if (quantity?.kind !== 'count' || quantity.per !== null || quantity.period !== null || readUnitParts(rate.unit) === null) continue;
+    // Cancel only an explicitly named denominator. Keep its duration words together ("working day"),
+    // then compare every remaining dimension, qualifier, scale and period with the whole's own unit.
+    const ws = words(rate.unit as string);
+    for (let i = 0; i < ws.length; i += 1) {
+      if (ws[i] !== 'per' && ws[i] !== '/') continue;
+      let end = i + 1;
+      while (end < ws.length && ws[end] !== 'per' && ws[end] !== '/') end += 1;
+      if (!sameWords(ws.slice(i + 1, end).map(singular), quantity.noun ?? [])) continue;
+      if (sameUnit([...ws.slice(0, i), ...ws.slice(end)].join(' '), goalUnit)) {
+        return { kind: 'proof', rate: rate.label, count: count.label, code: '' };
+      }
+    }
+  }
+  return NO;
+}
+
 export type Composition =
   | { readonly kind: 'proof' | 'confirm'; readonly rate: string; readonly count: string; readonly code: string }
   | { readonly kind: 'no' };
