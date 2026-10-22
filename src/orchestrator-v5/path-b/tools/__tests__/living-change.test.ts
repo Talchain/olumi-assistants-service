@@ -407,28 +407,26 @@ describe('DL 22 Oct (Lenses\' step 3): the person\'s approved chat correction is
     }
   });
 
-  it('Codex r4 on #3661: the figure itself, signed as written; one range end never attests a value; ".6" and a range dash read as written', () => {
+  it('Codex r4-r7 on #3661: the figure itself, never one range end; words with a sign, dash or exponent attest nothing, nor does a negative', () => {
     const markOf = (said: string, figure: Partial<LivingModelT['factors'][number]>) => {
       const sent = structuredClone(KNOWN_ANSWER);
       sent.factors[0] = { ...sent.factors[0]!, ...figure, source: 'user', quote: said };
       return applyKernel(sent, [BRIEF, said], KNOWN_ANSWER, BRIEF).model.factors[0]!.said_in ?? null;
     };
-    expect(markOf('Make f -0.6.', { value: 0.6 }), '"-0.6" never attests +0.6').toBeNull();
-    expect(markOf('Make f -0.6.', { value: -0.6 }), 'CONTRAST: -0.6 as written').toBe('chat');
-    expect(markOf('Make f 0.6.', { value: 0.5, high: 0.6 }), 'one range end never attests an unstated value').toBeNull();
-    expect(markOf('Make f 0.6.', { value: 0.6, high: null }), 'CONTRAST: the value itself').toBe('chat');
+    // What the words state plainly is the person's.
+    expect(markOf('Make f 0.6.', { value: 0.6, high: null }), 'the value itself').toBe('chat');
     expect(markOf('Make f .6.', { value: 0.6 }), '".6" is 0.6').toBe('chat');
-    expect(markOf('f is between 0.3-0.7.', { value: null, low: 0.3, high: 0.7 }), 'a range dash is not a minus').toBe('chat');
-    expect(markOf('f is between 0.3-0.7.', { value: null, low: 0.3, high: 0.8 }), 'a range needs both ends stated').toBeNull();
-    // Codex r5: a dash after a figure's own suffix or currency is still a range's dash, never a minus.
-    expect(markOf('f is £10k-£20k.', { value: -20000 }), '"£10k-£20k" never attests -20,000').toBeNull();
-    expect(markOf('f is .6k-.7k.', { value: -700 }), '".6k-.7k" never attests -700').toBeNull();
-    expect(markOf('f is £10k-£20k.', { value: null, low: 10000, high: 20000 }), 'CONTRAST: the range as written').toBe('chat');
-    expect(markOf('f goes from 5 to -3.', { value: -3 }), 'CONTRAST: a minus after words is a minus').toBe('chat');
-    // Codex r6: a dash after a figure the parser skips ("GBP10") is still a range's; an unclear dash attests nothing.
-    expect(markOf('f goes from £5 to GBP10-20.', { value: -20 }), '"GBP10-20" never attests -20').toBeNull();
-    expect(markOf('f is 5 units -8 units.', { value: -8 }), 'an unclear dash attests nothing').toBeNull();
-    expect(markOf('f is 5 units -8 units.', { value: 8 }), 'nor its unsigned figure').toBeNull();
+    expect(markOf('f is between 0.3 and 0.7.', { value: null, low: 0.3, high: 0.7 }), 'a range, both ends').toBe('chat');
+    expect(markOf('f is £10k to £20k.', { value: null, low: 10000, high: 20000 }), 'a range with suffixes').toBe('chat');
+    // A value nobody said is never theirs.
+    expect(markOf('Make f 0.6.', { value: 0.5, high: 0.6 }), 'one range end never attests an unstated value').toBeNull();
+    expect(markOf('f is between 0.3 and 0.7.', { value: null, low: 0.3, high: 0.8 }), 'a range needs both ends stated').toBeNull();
+    // Any sign, dash or exponent: nothing is read, so nothing is marked (the brief's, as before); a negative is never marked.
+    for (const [said, value] of [['Make f -0.6.', 0.6], ['Make f -0.6.', -0.6], ['f goes from 5 to -3.', -3], ['f is £10k-£20k.', -20000],
+      ['f is .6k-.7k.', -700], ['f goes from £5 to GBP10-20.', -20], ['f goes from £5 to GBP10-20.', 20], ['f is 5 units -8 units.', 8],
+      ['f is - 8 units.', -8], ['f is 1e-3.', 3], ['f is 1e3.', 1], ['f is 1E+3.', 3], ['f is 2.5e3.', 2.5], ['f is minus 4.', 4], ['f is 0.3\u20130.7.', 0.7]] as const) {
+      expect(markOf(said, { value }), `${said} / ${value}`).toBeNull();
+    }
   });
 
   it('the host sets it, never the AI: an unchanged brief figure the AI marks "chat" stays the brief\'s; a first draft says nothing', () => {

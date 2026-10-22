@@ -138,25 +138,15 @@ export function applyKernel(model: LivingModelT, verifiedWords: readonly string[
   // state no figure ("Please update f.") never make one theirs, whoever it was before (Codex r1-r3 on #3661). An unknown brief,
   // or a first draft, says nothing (null): the brief's, as before.
   const briefWords = typeof brief === 'string' ? plain(brief) : null;
-  // The figure itself, signed as written (Codex r4 on #3661): its value, or for a range with no value both of its ends. One range
-  // end matching never attests a value nobody said, and "-0.6" never attests +0.6. A wrong mark is worse than a missed one, so a
-  // figure is negative only where its minus is unambiguous: glued to it, opening the words or after a word that leads into a
-  // figure ("from 5 to -3"). A dash after a figure ("£10k-£20k", "GBP10-20", "0.3 - 0.7") is a range's; anything else attests
-  // nothing (Codex r5-r6).
+  // The figure itself (Codex r4 on #3661): its value, or for a range with no value both of its ends, so one range end never
+  // attests a value nobody said. A wrong mark is worse than a missed one (a missed mark leaves the brief's, as before), so words
+  // with any minus, dash, sign word or exponent attest nothing, and a negative figure is never marked: reading a sign from
+  // free text failed four ways ("-0.6", "£10k-£20k", "GBP10-20", "1e-3"; Codex r4-r7).
   const statesFigure = (quote: string, f: Omit<LivingModelT['factors'][number], 'said_in'>): boolean => {
     const text = quote.replace(/(^|[^\d])\.(\d)/g, '$10.$2');
-    const amounts = [...findStatedAmounts(text)].sort((x, y) => x.index - y.index);
-    const said = amounts.flatMap((a, i) => {
-      const before = text.slice(0, a.index);
-      const m = /[-−](\s*)$/.exec(before);
-      if (m === null) return [a.magnitude];
-      const lead = before.slice(0, m.index).trimEnd();
-      if (/\d[\p{L}%£$€]*$/u.test(lead)) return [a.magnitude];
-      const minus = m[1] === '' && (lead === '' || /[(:=]$/.test(lead) || (i === 0 && /\s$/.test(before.slice(0, m.index)))
-        || /\b(to|from|by|of|at|is|was|are|be|it|and|or|than|make|set|now|about|around|roughly|approximately)$/i.test(lead));
-      return minus ? [-a.magnitude] : [];
-    });
-    const stated = (v: number) => said.some((m) => Math.abs(v - m) <= 1e-9 * Math.max(1, Math.abs(m)));
+    if (/[-−–—]|\d[eE][+]?\d|\b(minus|negative)\b/i.test(text)) return false;
+    const said = findStatedAmounts(text).map((a) => a.magnitude);
+    const stated = (v: number) => said.some((m) => Math.abs(v - m) <= 1e-9 * Math.max(1, m));
     return f.value !== null ? stated(f.value) : f.low !== null && f.high !== null && stated(f.low) && stated(f.high);
   };
   const saidIn = (f: Omit<LivingModelT['factors'][number], 'said_in'>): 'chat' | null => {
