@@ -1,6 +1,6 @@
 # Useful, faithful first models from weak briefs
 
-Candidate on staging `6ecad9286f87c9add8ce3ee22aa8a271e74fca4a`; not deployed or behaviourally validated.
+Candidate rebased onto staging `05745055ee4f9ca5aa1963712ba78ac2b6013d3f` (#3689 readiness self-check included); not deployed or behaviourally validated.
 
 ## Intended behaviour
 
@@ -18,6 +18,7 @@ The candidate consolidates the existing 14-replacement fidelity packet rather th
 | Tool schema descriptions | Apply the same figure/direction/uncertainty rules on follow-up turns; no schema shape or arithmetic changes. |
 | Advisory critic | Check fidelity and contradictions before enriching; suggest useful measures/links rather than requiring them. An unnecessary question may be empty. |
 | Standing and post-save instructions | Clarify material meaning before requesting numerical completion; a requested calculation still receives the specific necessary input question. |
+| Readiness repair feedback (#3689) | Preserve DL's self-check, protected content and bounded retries. Its repair text follows the same supportability rule; a blocker is not evidence for a missing figure or link. |
 
 The completion and mandatory-structure changes amend existing DL rules recorded after Paul's served tests. They are explicit candidate policy changes for DL's disposition, not claims those rules were previously unapproved. This branch retains **show, label, de-bias** and useful generative reasoning. It does not adopt a blanket ban on estimates or turn incomplete inputs into automatic refusal.
 
@@ -41,6 +42,6 @@ The existing local execution status records one baseline draft and an automatic 
 
 ## Validation record
 
-Local validation: 63 checks passed across the existing draft-tool, kernel and core-prompt-arm files; 83 checks passed across signed-sum, calendar-window, mapper, mapper-level-range and mapper-range-law files. The first run exposed six old wording/hash assertions for deliberately changed policy; these pins were explicitly updated, with no operational test changed. There are 146 passing checks across eight files, including textual pins; this is not 146 independent quality cases.
+Local validation on the rebased candidate: **198 checks pass across nine existing files**: draft-tool, goal-path-feedback, kernel, core-prompt-arm, signed-sum, calendar-window, mapper, mapper-level-range and mapper-range-law. This includes the newly merged self-check's real-code paths and content-protection contrasts. The initial pre-rebase run exposed six old wording/hash assertions for deliberately changed policy; these pins were explicitly updated, with no operational test changed. The 198 checks include textual pins; they are not 198 independent quality cases.
 
-JSON Schema comparison after removing descriptions confirms the Living Model shape is unchanged. TypeScript syntax checks cover the seven changed source/test modules, and `git diff --check` passes. This is not a full repository typecheck or suite pass. Existing wording/hash pins must change for an intentional policy change; their passing is not evidence of improved model behaviour. Runtime, source attribution, signed-definition and calendar compatibility checks remain separate from prompt-quality evaluation. Integration and release remain with DL; this branch is a reviewable implementation candidate.
+JSON Schema comparison after removing descriptions confirms the Living Model shape is unchanged. TypeScript syntax checks cover the eight changed source/test modules, and `git diff --check` passes. This is not a full repository typecheck or suite pass. Existing wording/hash pins must change for an intentional policy change; their passing is not evidence of improved model behaviour. Runtime, source attribution, signed-definition and calendar compatibility checks remain separate from prompt-quality evaluation. Integration and release remain with DL; this branch is a reviewable implementation candidate.

@@ -458,20 +458,18 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
 
       // The held cards as the turn found them (the latest answer row), restored to this process when it forgot them.
       let heldAtStart: readonly PendingAction[] = [];
-      if (typeof store.readMostRecentPendingActions === 'function') {
-        try {
-          const latest = await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' });
-          if (!Array.isArray(latest) || latest.some((p) => parsePendingAction(p) === null || p.scenario_id !== scenarioId)) throw new Error('pending_actions_unreadable');
-          if ((approvedProposal !== undefined && proposals.get(approvedProposal) === undefined)
-            || (declinedProposal !== undefined && proposals.get(declinedProposal) === undefined)
-            || proposals.outstanding(scenarioId, userId).length === 0) {
-            rehydrateProposals(latest, proposals, { scenario_id: scenarioId, user_id: userId }, Date.now());
-          }
-          heldAtStart = latest.filter(isHeldProposal);
-        } catch (err) {
-          log.warn({ err: String(err), scenario_id: scenarioId }, 'core-turn: pending authority unreadable; nothing run');
-          return await refuseUnrun(503, 'PENDING_ACTIONS_UNREADABLE', 'I couldn’t verify the pending changes for this scenario. I haven’t applied any changes or run analysis in this request. Please try again.');
+      try {
+        const latest = await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' });
+        if (!Array.isArray(latest) || latest.some((p) => parsePendingAction(p) === null || p.scenario_id !== scenarioId)) throw new Error('pending_actions_unreadable');
+        if ((approvedProposal !== undefined && proposals.get(approvedProposal) === undefined)
+          || (declinedProposal !== undefined && proposals.get(declinedProposal) === undefined)
+          || proposals.outstanding(scenarioId, userId).length === 0) {
+          rehydrateProposals(latest, proposals, { scenario_id: scenarioId, user_id: userId }, Date.now());
         }
+        heldAtStart = latest.filter(isHeldProposal);
+      } catch (err) {
+        log.warn({ err: String(err), scenario_id: scenarioId }, 'core-turn: pending authority unreadable; nothing run');
+        return await refuseUnrun(503, 'PENDING_ACTIONS_UNREADABLE', 'I couldn’t verify the pending changes for this scenario. I haven’t applied any changes or run analysis in this request. Please try again.');
       }
 
       // ── A CARD PRESS (the legacy route's ONE consent check for a core change, ported). ──────────────────────────────────
@@ -570,8 +568,8 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       } else {
         const canonical = await readCanonicalContext({ dispatch: readingDispatch }, { scenario_id: scenarioId });
         const draftArm = draftArmOf(MODE, saved.graph === null, req.headers['x-olumi-draft-arm']);
-        // Class 3's one offer for this turn: a refusal it makes is settled as base at the turn's end (`goal-path.ts`).
-        const restructure: Restructure = { offered: false };
+        // This turn's repairs: a refusal they make is settled as base at the turn's end (`goal-path.ts`).
+        const restructure: Restructure = { repairs: 0 };
         try {
           result = await runCoreTurn({
             // One budget for every call (DL 22 Oct, M4): a press at the typed turn's effort reads the typed turns' cached prefix.

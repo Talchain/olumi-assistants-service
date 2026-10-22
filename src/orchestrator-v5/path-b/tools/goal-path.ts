@@ -1,30 +1,33 @@
 /**
- * ⭐ CLASS 3 (thin-core plan, 20 Oct; DL 22 Oct): THE MAPPER'S VERDICT AS TOOL FEEDBACK, OPENAI-NATIVE. The schema lets the AI
- * write one meaning several ways and the mapper takes one; fixing each with a prompt line is whack-a-mole. When a draft or a
- * change would withhold the goal's chance through the AI's OWN encoding of an item on the goal's path (`mapped.rests_on`),
- * the tool says so once, with the typed reasons, and the agent restructures in the same SDK turn: one bounded retry
- * (`Restructure`, one per turn), structure only, never a new figure (the quote rule still labels any figure).
- * ONLY THE MEASURED CLASS (Codex r1 on #3672): a condition declared a prerequisite (served first drafts, 22 Oct: 4 of 8 chances
- * withheld). Its role is the AI's declaration, so re-reading it against the person's words changes no figure. An unsigned link
- * may be the person's own uncertainty, and moving a cause onto a part can change what its figure measures: neither is offered.
+ * ⭐ THE READINESS SELF-CHECK (DL 22 Oct, replacing the one-encoding-at-a-time offers of Class 3). After every draft or change, before
+ * its save or card, the host dry-runs what a Run would get from the very postimage the write registers (`corePostimage`, 0 engine
+ * calls): the mapper's verdict on the goal and the readiness authority's blockers. A blocker the AI can fix in Olumi's own items
+ * gets one sentence; one that needs the person's input, or sits on the person's own content, is an ask. At most `REPAIRS` repairs
+ * a turn, then the call is saved as it is with its asks. A repair never alters or removes the person's content: a retry that
+ * would is not used (`personContentLost`), and the call it retried is.
  */
 import type { LivingModelT } from '../../../schemas/living-model.js';
-import type { Mapped, Withheld } from '../living-model/mapper.js';
+import type { Mapped } from '../living-model/mapper.js';
 import { stable } from '../living-model/diff.js';
-import { reachesGoalInPersonsModel } from '../../../orchestrator/graph-structure-validator.js';
+import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
+import { projectCorePostimageForPersistence } from '../../persisted-graph-projection.js';
+import { composeIdentityAskForNode } from '../../coaching/identity-not-evaluated-ask.js';
 
 /**
- * One offer per turn, shared by the draft and the change; the core route makes it per turn and `pathBTools` uses it.
- * ⭐ A REFUSAL CAN MAKE A TURN BETTER, NEVER WORSE (DL, #3672 fix-forward): the refused call is kept (`pending`) until a draft
- * or a card succeeds after it, and the turn's end runs a call still pending once more, with the offer used, exactly as base
- * would (`settle`, filled by `pathBTools`), so an agent that stops after the refusal still leaves its draft saved.
+ * The turn's repairs, shared by the draft and the change; the core route makes it per turn and `pathBTools` uses it.
+ * ⭐ A REFUSAL CAN MAKE A TURN BETTER, NEVER WORSE (DL, #3672 fix-forward): the latest refused call is kept (`pending`) until a
+ * draft or a card succeeds after it (each retry is checked against it, so it holds all the person's content of the calls before), and the turn's end runs a call still pending once more, with no repair left, exactly as
+ * base would (`settle`, filled by `pathBTools`), so an agent that stops after the refusal still leaves its draft saved.
  */
 export interface Restructure {
-  offered: boolean;
+  repairs: number;
   pending?: { readonly tool: 'build_model_from_brief'; readonly args: { brief: string; model: LivingModelT } }
     | { readonly tool: 'propose_change'; readonly args: { public_label: string; basis: string; model: LivingModelT; remove: string[] } };
   settle?: () => Promise<void>;
 }
+
+/** At most this many refusals a turn; then the call is saved as it is and the AI asks (DL 22 Oct). */
+export const REPAIRS = 2;
 
 type Rec = Record<string, unknown>;
 const theirs = (r: unknown): boolean => typeof r === 'object' && r !== null && !Array.isArray(r)
@@ -36,7 +39,7 @@ const nestedTheirs = (v: unknown): unknown[] => (Array.isArray(v) ? v.flatMap(ne
 /**
  * The person's own content in a (kernelled) model, as labelled entries, one per record, repeats kept (Codex r1 on #3675): each
  * item a person or a party gave, whole (its figures, quotes and settings); each of their records nested in an item of Olumi's;
- * each of their conditions whole, its role left out (the one part the offer asks the AI to re-read); and every view.
+ * each of their conditions whole, its role included (DL 22 Oct: a person's condition is asked about, never re-read); every view.
  */
 function personContent(m: LivingModelT): { readonly label: string; readonly value: string }[] {
   const out: { label: string; value: string }[] = [];
@@ -51,7 +54,7 @@ function personContent(m: LivingModelT): { readonly label: string; readonly valu
   for (const a of m.aims) {
     if (!theirs(a) && a.target?.current_source === 'user') out.push({ label: `aims:${a.id}`, value: stable({ current: a.target.current, unit: a.target.current_unit ?? a.target.unit }) });
   }
-  for (const { role: _role, ...c } of m.conditions) {
+  for (const c of m.conditions) {
     if (theirs(c)) out.push({ label: `conditions:${c.text}`, value: stable({ ...c, applies_to: [...c.applies_to].sort() }) });
   }
   for (const v of m.views) out.push({ label: `views:${v.holder}: ${v.position}`, value: stable(v) });
@@ -74,108 +77,130 @@ export function personContentLost(refused: LivingModelT, retry: LivingModelT): s
   return [...new Set(lost)];
 }
 
-/**
- * The retry as the refused call would have it, but for the one part the offer re-reads: each condition the refused call also
- * holds (by its words, scope and author) takes the refused call's role, so the kernel reads the two alike (Codex r2 on #3675: a
- * role-only change re-checked a saved quote outside the verified window and relabelled it).
- */
-export function withRefusedRoles(retry: LivingModelT, refused: LivingModelT): LivingModelT {
-  const id = (c: LivingModelT['conditions'][number]) => stable([c.text, [...c.applies_to].sort(), c.source, c.party, c.quote]);
-  const roles = new Map(refused.conditions.map((c) => [id(c), c.role] as const));
-  return { ...retry, conditions: retry.conditions.map((c) => ({ ...c, role: roles.get(id(c)) ?? c.role })) };
-}
-
 /** What the AI is told when its retry would have lost the person's content, so the refused call was used as it was. */
-export const KEPT_AS_REFUSED = 'Your second call left out or changed items the person or a party gave (listed in lost), so your first '
-  + 'call was used exactly as it was. Say so plainly if it matters to your reply.';
+export const KEPT_AS_REFUSED = 'Your call left out or changed items the person or a party gave in the call refused before it (listed in '
+  + 'lost), so that refused call was used exactly as it was. Say so plainly if it matters to your reply.';
 
-export interface GoalPathCause {
-  readonly id: string;
-  readonly reason: Withheld['reason'];
-  /** The condition's words, as the AI wrote them. */
-  readonly item: string;
-  /** The items it qualifies: part of its identity, since two conditions can share their words (Codex r1 on #3672). */
-  readonly applies_to: readonly string[];
-}
+/** The postimage a write registers, which the self-check reads too: the same object, so the two never differ. */
+export const corePostimage = (mapped: Mapped, model: LivingModelT): Rec => ({ ...mapped.graph, living_model: model });
 
-export function goalPathEncodingCauses(mapped: Mapped): GoalPathCause[] {
-  return (mapped.rests_on ?? []).flatMap((w) => (w.reason === 'condition_not_in_slice' && w.id.startsWith('condition:')
-    ? [{ id: w.id, reason: w.reason, item: w.id.slice('condition:'.length), applies_to: [...(w.applies_to ?? [])].sort() }] : []));
-}
+/** Each fix, in one sentence, for a blocker in Olumi's own items (DL 22 Oct). */
+const FIX = {
+  condition: 'Re-read Olumi\'s condition against the person\'s words: a doubt is a challenge, a premise the result is worked out under is an '
+    + 'assumption, and only a real-world requirement that must be met first stays a prerequisite. A missing input is never a condition: '
+    + 'remove it, and give the figure Olumi\'s labelled estimate as the figure rules allow, or ask.',
+  path: 'Link what drives each option to the goal under its measure, adding each missing link with Olumi\'s own labelled estimate under '
+    + 'the estimate rule. Never move a figure the person gave onto a different measure.',
+  unit: 'State Olumi\'s figure in the unit of the item it links into; convert only where the conversion is exact.',
+  law: 'Where supportable under the estimate rule, give Olumi\'s link a direction, ends that are in the model, and a labelled figure or range; otherwise keep the unsupported part unresolved.',
+  option: 'Where supportable under the estimate rule, give Olumi\'s option a setting on a factor, or a sized link of Olumi\'s from it; otherwise retain the unresolved mechanism.',
+} as const;
+/** Each blocker's fix, or `ask` for the person's input. An unlisted code is said, never repaired. */
+const BLOCKER: Readonly<Record<string, keyof typeof FIX | 'ask'>> = {
+  condition_not_in_slice: 'condition',
+  NO_PATH_TO_GOAL: 'path', MISSING_OPTION_CONNECTION: 'path',
+  link_unit_mismatch: 'unit', link_frame_unknown: 'unit', current_unit_mismatch: 'unit', UNIT_MISMATCH: 'unit',
+  link_sign_unknown: 'law', link_endpoint_unknown: 'law', exact_not_drawable: 'law', link_range_no_law: 'law',
+  OPTION_NEEDS_ENCODING: 'option', OPTION_NEEDS_MAPPING: 'option', setting_not_convertible: 'option', MISSING_OPTION_VALUE: 'option',
+  goal_level_unknown: 'ask', link_goal_level_unknown: 'ask', no_level_target: 'ask', link_goal_target_unknown: 'ask', change_kind_unknown: 'ask',
+  change_base_not_theirs: 'ask', stay_within_unconfirmed: 'ask', MISSING_FACTOR_LEVEL: 'ask', identity_part_unknown: 'ask', FEWER_THAN_TWO_OPTIONS: 'ask',
+  // The identity ask composer's own reasons (`composeIdentityAskForNode`): each is the person's to answer.
+  identity_operand_missing: 'ask', identity_frame_missing: 'ask', identity_zero_level: 'ask', identity_rate_out_of_range: 'ask',
+};
 
-const key = (c: GoalPathCause) => JSON.stringify([c.id, c.reason, c.applies_to]);
-/** The causes `after` has that `before` did not: a change answers only for what it adds. */
-export const addedCauses = (before: readonly GoalPathCause[], after: readonly GoalPathCause[]): GoalPathCause[] =>
-  after.filter((c) => !new Set(before.map(key)).has(key(c)));
-
-const CHECK = 'Check each against the person\'s own words. A condition they stated as an assumption the result is worked out under is an '
-  + 'assumption, and a doubt to raise is a challenge; only a requirement that must actually be met first stays a prerequisite. A missing '
-  + 'input is never a condition: remove it and ask the person for the figure. Never add or change a figure.';
-
-/** What the AI is told with a draft it can restructure once (words for the AI, never shown to the person). */
-export const RESTRUCTURE_DRAFT = `Not saved yet. The goal's chance would be withheld by the prerequisites in goal_path. ${CHECK} `
-  + 'Then call build_model_from_brief once more. If every item is right as it is, call it again with the same model and it is saved as it is.';
-
-/** What the AI is told with a change it can restructure once. */
-export const RESTRUCTURE_CHANGE = `No card yet. This change would withhold the goal's chance through the prerequisites in goal_path. ${CHECK} `
-  + 'Then call propose_change once more. If every item is right as it is, call it again with the same change and its card is made.';
-
-const pathNode = (n: Rec): n is Rec & { id: string; kind: string; label: string } =>
-  typeof n.id === 'string' && typeof n.kind === 'string' && typeof n.label === 'string';
-const pathEdge = (e: Rec): e is Rec & { from: string; to: string } => typeof e.from === 'string' && typeof e.to === 'string';
-
-/** The options the person compares that reach the goal in their model, by the reader readiness uses (`reachesGoalInPersonsModel`). */
-export function optionsReachingGoal(model: LivingModelT, mapped: Mapped): string[] {
-  const reach = reachesGoalInPersonsModel({ nodes: mapped.graph.nodes.filter(pathNode), edges: mapped.graph.edges.filter(pathEdge), living_model: model });
-  return model.options.filter((o) => o.status === 'feasible' && reach.has(o.id)).map((o) => o.id);
+/** One blocker: its code, the items it is on (by id; `condition:<words>` for a condition), and its fix, or an ask, or said only. */
+export interface Blocker {
+  readonly code: string;
+  readonly items: readonly string[];
+  readonly fix?: string;
+  readonly ask?: true;
+  readonly said?: true;
 }
 
 /**
- * What carried the base's path into the goal and is gone after the change: the links into the BASE goal that the change
- * removes (read against the base goal's id, so a re-id of the goal still names them: Codex on #3679), and the goal's definition
- * (`<goal id>:defined_as`) when the change drops it (served 79c1e150-b, marketing: a re-measured goal dropped the definition its
- * path ran through and removed no link, so `cut` was empty). A link the change keeps but the mapper holds still counts as a
- * path (`optionsReachingGoal`), so it never cuts one.
+ * Whether the item holds anything of the person's or a party's (Codex r1 on #3689): the item itself, any record nested in it (a
+ * setting, a limit, a definition), today's level they set on it, or their setting on it (a factor). A setting (`<option>:<factor>`)
+ * is its option's. An item the model does not hold, or none named, counts as theirs, so it is asked about, never edited.
  */
-export function pathCut(base: LivingModelT, baseMapped: Mapped, next: LivingModelT): string[] {
-  const goal = baseMapped.graph.nodes.find((n) => n.kind === 'goal')?.id;
-  const was = base.aims.find((a) => a.id === goal);
-  // The same aim after the change, by the base goal's id: a goal that moved to another aim keeps its own definition (Codex on #3685).
-  const kept = next.aims.find((a) => a.id === goal);
-  return [...base.links.filter((l) => l.to === goal && !next.links.some((n) => n.id === l.id)).map((l) => l.id),
-    ...(was?.defined_as && !kept?.defined_as ? [`${was.id}:defined_as`] : [])];
+function theirsIn(model: LivingModelT, item: string | null): boolean {
+  if (item?.startsWith('condition:')) return model.conditions.some((c) => `condition:${c.text}` === item && theirs(c));
+  const id = item?.split(':')[0];
+  const found = [...model.aims, ...model.options, ...model.factors, ...model.links, ...model.risks].find((x) => x.id === id);
+  return found === undefined || theirs(found) || nestedTheirs(Object.values(found)).length > 0
+    || ('target' in found && found.target?.current_source === 'user')
+    || model.options.some((o) => o.settings.some((st) => st.factor_id === id && theirs(st)));
+}
+
+/** A blocker found, on one item; a condition's scope is part of it, since two conditions can share their words (Codex r1 on #3672). */
+export type Found = { readonly code: string; readonly item: string | null; readonly scope?: string };
+/** Each found blocker's fix or ask, one per code and kind. */
+function said(model: LivingModelT, found: readonly Found[]): Blocker[] {
+  const out = new Map<string, { code: string; items: string[]; fix?: string; ask?: true; said?: true }>();
+  for (const { code, item } of found) {
+    const kind = BLOCKER[code];
+    // ⛔ A repair never alters or removes the person's own content (DL 22 Oct): a fix on it is an ask. Adding Olumi's links (`path`)
+    // alters nothing of theirs.
+    const how = kind === undefined ? { said: true as const } : kind === 'ask' || (kind !== 'path' && theirsIn(model, item))
+      ? { ask: true as const } : { fix: FIX[kind] };
+    const key = `${code}\u0000${Object.keys(how)[0]}`;
+    const b = out.get(key) ?? out.set(key, { code, items: [], ...how }).get(key)!;
+    if (item !== null && !b.items.includes(item)) b.items.push(item);
+  }
+  return [...out.values()];
 }
 
 /**
- * ⭐ NEVER A PATHLESS CARD WHEN THE GOAL HAD A PATH (DL 22 Oct, served 79c1e150: told to re-link, the AI kept the cut and added a
- * condition that the old estimates could not transfer). The estimate rule already lets Olumi add complete, visibly Olumi's
- * figures; a link into a re-measured or replaced goal is one, provisional, approved on the card. The person's figures never move.
+ * What a Run would get from this model, dry: the mapper's verdict on the goal (its own holds and, when its chance rests on held
+ * items, those), then each blocker the readiness authority finds on the postimage the write registers. None: Run-ready.
  */
-const RELINK = 'If a link into the new goal has no figure the person gave, add it with Olumi\'s own labelled estimate under the estimate '
-  + 'rule (or ask for it); never leave the goal with no path. Never move a figure the person gave onto a different measure.';
-const AGAIN = 'Then call propose_change once more. If the person asked for exactly this change, call it again with the same change: '
-  + 'its card is made, and ask them in one question for the size of each link into the goal.';
+export function selfCheck(model: LivingModelT, mapped: Mapped): Found[] {
+  const goal = mapped.graph.nodes.find((n) => n.kind === 'goal')?.id;
+  const held = mapped.withheld.filter((w) => w.id === goal && w.reason !== 'chance_rests_on_withheld');
+  // A held link on the goal's path (into it, or into what leads to it) leaves the Run a placeholder it withholds the goal's
+  // figures on, even where the goal keeps its threshold (Codex r1 on #3689). Only a listed hold: one that withholds nothing (a
+  // person's link restating a definition, `identity_restated`) never blocks (Codex r2).
+  const reach = new Set(goal === undefined ? [] : [String(goal)]);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const l of model.links) if (reach.has(l.to) && !reach.has(l.from)) { reach.add(l.from); grew = true; }
+  }
+  const linkHolds = mapped.withheld.filter((w) => BLOCKER[w.reason] !== undefined && model.links.some((l) => l.id === w.id && reach.has(l.to)));
+  const causes: NonNullable<Mapped['rests_on']>[number][] = [...held, ...(mapped.rests_on ?? []), ...linkHolds];
+  // A path cut by a held link on it is said by that link's own cause (a fix, or an ask on the person's link): never a parallel
+  // link of Olumi's beside it.
+  const linkHeld = causes.some((w) => model.links.some((l) => l.id === w.id));
+  const postimage = projectCorePostimageForPersistence(corePostimage(mapped, model));
+  const issues = assessCanonicalAnalysisReadiness(postimage).blockingIssues
+    .filter((i) => !linkHeld || (i.code !== 'NO_PATH_TO_GOAL' && i.code !== 'MISSING_OPTION_CONNECTION'));
+  // An identity the engine would refuse (a part at 0, a missing level or frame) is the composer's one ask (DL 22 Oct).
+  const identities = mapped.graph.nodes.filter((n) => n.nonlinear_identity !== undefined).flatMap((n) => {
+    const ask = composeIdentityAskForNode(String(n.id), postimage);
+    return ask === null ? [] : [{ code: ask.reason, item: String(n.id) }];
+  });
+  return [...causes.map((w) => ({ code: w.reason, item: w.id, ...(w.applies_to ? { scope: stable([...w.applies_to].sort()) } : {}) })),
+    ...issues.map((i) => ({ code: i.code, item: i.option_id ?? i.factor_id ?? null })), ...identities];
+}
 
-/**
- * What the AI is told with a change after which no option reaches the goal any more (marketing on 7ee0d90f, DL 22 Oct: a new
- * measure for the goal removed every link into it and added none, so the approved card cut the goal's path and no Run could
- * start).
- */
-export const RESTRUCTURE_CUT = 'No card yet. After this change no option reaches the goal (cut lists what carried its path and is '
-  + 'gone: the links into it, and its definition as <goal id>:defined_as), so no analysis could run. Link what drives each option '
-  + `to the goal under its new measure. ${RELINK} ${AGAIN}`;
+/** The blockers of `after` to say back: a change answers only for those it adds to what `before` had (none for a draft). */
+export function blockersOf(model: LivingModelT, after: readonly Found[], before: readonly Found[] = []): { all: Blocker[]; added: Blocker[] } {
+  const added = after.filter((b) => !before.some((a) => a.code === b.code && a.item === b.item && a.scope === b.scope));
+  return { all: said(model, after), added: said(model, added) };
+}
 
-/**
- * What the AI is told with a change that adds the person's own aim with its target, which becomes the goal (`changeGoal`), when
- * no option reaches it (DL 22 Oct, marketing on 4a4c338c: both aims were added with no links, so no analysis could run).
- */
-export const RESTRUCTURE_AIM = 'No card yet. This change adds the person\'s own aim with its target (aim), so it becomes the goal, but '
-  + `no option reaches it, so no analysis could run. Link what drives each option to that aim under its measure. ${RELINK} ${AGAIN}`;
+/** What the AI is told with a call it can repair (words for the AI, never shown to the person). */
+const REPAIR = 'A Run would withhold the goal\'s chance; blockers lists why. Make each supportable fix, in Olumi\'s own items, labelled Olumi\'s. '
+  + 'A blocker gives no evidence for a missing link, direction, figure or probability: follow the estimate rule, and leave unsupported content unresolved. Never '
+  + 'change or remove anything the person or a party gave (a figure, sign, range, unit, condition, target or link). Each ask is the '
+  + 'person\'s: ask at most one question that changes the next useful step, resolving material ambiguity before numerical completion.';
+export const REPAIR_DRAFT = `Not saved yet. ${REPAIR} Then call build_model_from_brief once more; sent unchanged, it is saved as it is.`;
+export const REPAIR_CHANGE = `No card yet. ${REPAIR} Then call propose_change once more; sent unchanged, its card is made.`;
+/** With a save or card that a Run would still withhold the goal's chance on. */
+export const STILL_ASK = 'A Run would still withhold the goal\'s chance (blockers); never present a chance. Explain the relevant limitation, '
+  + 'continue useful reasoning and ask at most one question that changes the next useful step. For requested analysis, use what is marked ask; '
+  + 'do not require a numerical target merely to reason about a qualitative purpose.';
 
-/**
- * On a card that still leaves the goal with no path where the saved model had one (the base fallback). DL 22 Oct (marketing on
- * 68ca54f0: asked only for link sizes, which nothing the person said answers, the goal stayed pathless): Olumi estimates, labelled.
- */
-export const ESTIMATE_LINKS = 'This card leaves no option reaching the goal, so no analysis can run once it is approved. Propose the '
-  + 'missing links into the goal as one more change, each with Olumi\'s own labelled estimate under the estimate rule, and ask the '
-  + 'person only for what Olumi cannot estimate.';
+/** The repair to offer, if any: a fix to make, a repair left, and not the refused call sent again unchanged. */
+export function repairOf(r: Restructure | undefined, blockers: readonly Blocker[], model: LivingModelT): boolean {
+  const resent = r?.pending !== undefined && stable(r.pending.args.model) === stable(model);
+  return r !== undefined && r.repairs < REPAIRS && !resent && blockers.some((b) => b.fix !== undefined);
+}

@@ -306,7 +306,14 @@ export function composeIdentityNotEvaluatedAsk(critiques: unknown, graph: unknow
       };
     }
     case 'identity_zero_level': {
-      const zeros = w.participants.filter((p) => levelOf(p) === 0);
+      // An accumulation part at 0 is set through its starting level, its stock (the first of [stock, rate, inflow]), when that
+      // is a named factor at 0 (DL 22 Oct, #3680 row :65): asked there, the one level a control can save.
+      const settable = (p: string): string => {
+        const acc = rec(byId.get(p)?.nonlinear_identity);
+        const stock = acc?.operation === 'accumulation' ? ids(acc.factor_ids)?.[0] : undefined;
+        return stock !== undefined && levelOf(stock) === 0 && labelOf(stock) !== null ? stock : p;
+      };
+      const zeros = w.participants.filter((p) => levelOf(p) === 0).map(settable);
       const zeroTarget = zeros.length === 0 && (w.stated === 0 || levelOf(w.nodeId) === 0);
       if (zeros.length === 0 && !zeroTarget) return unstated();
       // ⛔ The same rule: a zero no control can correct is never asked about (a goal's own level has its writer).
