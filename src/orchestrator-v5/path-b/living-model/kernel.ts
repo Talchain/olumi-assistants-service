@@ -14,6 +14,7 @@
  */
 import type { LivingModelT, LivingSourceT } from '../../../schemas/living-model.js';
 import { stable } from './diff.js';
+import { findStatedAmounts } from '../../../cee/provenance/stated-amounts.js';
 
 export interface Relabelled { readonly id: string; readonly was: LivingSourceT }
 export interface Kernelled { readonly model: LivingModelT; readonly relabelled: readonly Relabelled[] }
@@ -132,19 +133,19 @@ export function applyKernel(model: LivingModelT, verifiedWords: readonly string[
     return t?.current_source === 'user' && t.current === current;
   };
   // ⭐ WHERE THE PERSON SAID A FIGURE (DL 22 Oct, Lenses' step 3: an approved chat correction was saved as the brief's figure).
-  // Host-set, never the AI's: an unchanged figure BY the same author keeps what was saved, whatever its words now (a new quote
-  // alone states no figure, Codex r1 on #3661); a changed figure, or one the person now states as theirs (Olumi's or an
-  // unverified figure they adopt in their own words, Codex r2), is 'chat' only for their verified words the brief does not hold.
-  // A first draft, or an unknown brief, says nothing (null): the brief's, as before.
+  // Host-set, never the AI's, and read from the item itself every time: the person's own words (source user, never Olumi's
+  // estimate) that the brief does not hold AND that state the figure itself (its value or a range end, as written). Words that
+  // state no figure ("Please update f.") never make one theirs, whoever it was before (Codex r1-r3 on #3661). An unknown brief,
+  // or a first draft, says nothing (null): the brief's, as before.
   const briefWords = typeof brief === 'string' ? plain(brief) : null;
-  const savedFactor = new Map((saved?.factors ?? []).map((f) => [f.id, f] as const));
-  const SAID_FIGURE = ['value', 'low', 'high', 'unit', 'estimate_by', 'source'] as const;
+  const statesFigure = (quote: string, f: Omit<LivingModelT['factors'][number], 'said_in'>): boolean => {
+    const said = findStatedAmounts(quote).map((a) => a.magnitude);
+    return [f.value, f.low, f.high].some((v) => v !== null && said.some((m) => Math.abs(Math.abs(v) - m) <= 1e-9 * Math.max(1, m)));
+  };
   const saidIn = (f: Omit<LivingModelT['factors'][number], 'said_in'>): 'chat' | null => {
-    const before = savedFactor.get(f.id);
-    if (before !== undefined && SAID_FIGURE.every((k) => before[k] === f[k])) return before.said_in ?? null;
     if (briefWords === null || f.source !== 'user' || f.estimate_by !== null || f.quote === null) return null;
     const q = plain(f.quote);
-    return q.length > 0 && (f.value !== null || f.low !== null || f.high !== null) && !briefWords.includes(q) ? 'chat' : null;
+    return q.length > 0 && !briefWords.includes(q) && statesFigure(f.quote, f) ? 'chat' : null;
   };
   const relabelled: Relabelled[] = [];
   const attribute = <T extends Attributed>(id: string, item: T): T => {

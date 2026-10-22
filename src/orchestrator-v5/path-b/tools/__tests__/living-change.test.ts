@@ -390,6 +390,23 @@ describe('DL 22 Oct (Lenses\' step 3): the person\'s approved chat correction is
     }
   });
 
+  it('Codex r3 on #3661: words that state no figure never make one the person\'s chat figure, whoever it was before', async () => {
+    const vague = 'Please update f.';
+    for (const was of ['party', 'olumi', 'unverified'] as const) {
+      const saved = structuredClone(KNOWN_ANSWER);
+      saved.factors[0] = { ...saved.factors[0]!, source: was, party: was === 'party' ? 'Sam' : null, quote: was === 'olumi' ? null : 'f is at 0.5' };
+      const p = product(saved);
+      const proposals = new ProposalStore();
+      const relabelled = structuredClone(saved);
+      relabelled.factors[0] = { ...relabelled.factors[0]!, source: 'user', party: null, quote: vague };
+      const out = await proposeLivingChange({ dispatch: p.dispatch, proposals }, { ...ctx, user_turn_text: vague }, args(relabelled));
+      expect(out.status, `${was}: ${JSON.stringify(out)}`).toBe('ok');
+      await applyLivingChange({ dispatch: p.dispatch, proposals }, { ...ctx, user_turn_text: vague }, String((out as { data: Rec }).data.proposal_id));
+      expect(factorOf(p.saved(), 'f'), was).not.toHaveProperty('said_in');
+      expect((nodeOf(p.saved(), 'f').observed_state as Rec).source, was).not.toBe('user_override');
+    }
+  });
+
   it('the host sets it, never the AI: an unchanged brief figure the AI marks "chat" stays the brief\'s; a first draft says nothing', () => {
     const marked = structuredClone(KNOWN_ANSWER);
     marked.factors[0] = { ...marked.factors[0]!, said_in: 'chat' };
