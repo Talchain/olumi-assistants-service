@@ -22,6 +22,14 @@ const fresh = (): Json => structuredClone(fixture) as Json;
 const marginsOf = (f: Json, current = true) => goalMarginsOf(f.analysis_result, f.graph, current, readRunEvidence(f.analysis_run_evidence));
 const row = (f: Json, id: string): Json => f.analysis_result.enrichment.option_comparison.find((r: Json) => r.option_id === id);
 const link = (f: Json, id: string): Json => f.graph.living_model.links.find((l: Json) => l.id === id);
+const licence = (f: Json): Json => f.analysis_result.enrichment.inference_warnings.find((w: Json) => w.code === 'GOAL_CHANCE_LICENSED');
+/** Every option's recorded level in the encoded frame (the Run's own scale: 0.8 encodes the target 400). */
+const encode = (f: Json, sq = 0.4): Json => {
+  for (const [id, v] of [['night', 1.1], ['sorter', 0.5], ['loop', 1.04], ['status_quo', sq]] as const) {
+    Object.assign(row(f, id).outcome, { p10: v, p50: v, p90: v, mean: v });
+  }
+  return f;
+};
 const EXPECTED = {
   target: 400, comparator: '>=', unit: 'crates per shift', baseline: 200,
   options: [
@@ -85,6 +93,24 @@ describe('exact results carry their margins and the input each rests on, from th
     expect(marginsOf(f)).toBeUndefined();
   });
 
+  it('a Run that recorded its levels in the encoded frame: the same margins, in the target\'s unit', () => {
+    expect(marginsOf(encode(fresh()))).toEqual(EXPECTED);
+  });
+
+  it('NEGATIVE: encoded levels with the status quo off both frames: the frame is unproven, nothing is said', () => {
+    expect(marginsOf(encode(fresh(), 0.41))).toBeUndefined();
+  });
+
+  it('a strict target (above): a level exactly at the target misses it, with the licence\'s own side', () => {
+    const f = fresh();
+    f.analysis_run_evidence.input_snapshot.goal.operator = '>';
+    licence(f).target.comparator = 'above';
+    licence(f).withheld_reason_by_option.night.side = 'falls_short';
+    Object.assign(row(f, 'night').outcome, { p10: 400, p50: 400, p90: 400, mean: 400 });
+    link(f, 'night_output').effect.value = 200;
+    expect(marginsOf(f)!.options.find((o) => o.option_id === 'night')).toEqual({ option_id: 'night', label: 'Night crew', level: 400, margin: 0, meets: false });
+  });
+
   it('NEGATIVE: an outcome the Run keeps from the AI is never reconstructed as a margin (Codex)', () => {
     const f = fresh();
     f.analysis_result.enrichment.inference_warnings.push({ code: GOAL_FIGURES_USER_EFFECT_CLAMPED, option_ids: ['night'], withheld_claims: ['goal_probability'] });
@@ -118,15 +144,5 @@ describe('exact results carry their margins and the input each rests on, from th
     const f = fresh();
     f.graph.living_model.options.find((o: Json) => o.id === 'sorter').settings = [{ factor_id: 'x', value: 1 }];
     expect(marginsOf(f)!.options.find((o) => o.option_id === 'sorter')!.rests_on).toBeUndefined();
-  });
-
-  it('a strict target: a level exactly at it does not meet it', () => {
-    const f = fresh();
-    Object.assign(row(f, 'night').outcome, { p10: 400, p50: 400, p90: 400, mean: 400 });
-    link(f, 'night_output').effect.value = 200;
-    f.analysis_run_evidence.input_snapshot.goal.operator = '>';
-    const m = marginsOf(f);
-    // The licence's own side must agree with ours, or nothing is said; either way "meets" is never claimed at the boundary.
-    expect(m === undefined || m.options.find((o) => o.option_id === 'night')!.meets === false).toBe(true);
   });
 });
