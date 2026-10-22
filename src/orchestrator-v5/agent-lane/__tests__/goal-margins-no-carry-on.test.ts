@@ -95,16 +95,16 @@ describe('exact results with no "carry on" option: margins from the Run\'s own r
     const inf = fresh(); row(inf, 'early_start').outcome.std = Infinity;
     const nan = fresh(); row(nan, 'early_start').outcome.std = Number.NaN;
     const s = fresh(); licence(s).withheld_reason_by_option.extra_bench.side = 'meets';
-    const z = fresh(); licence(z).withheld_reason_by_option.extra_bench.reason = 'not_zero_spread';
+    const z = fresh(); licence(z).withheld_reason_by_option.extra_bench.reason = 'unearned_certainty';
     for (const f of [r, inf, nan, s, z]) expect(marginsOf(f)).toBeUndefined();
   });
 
-  it('only the Run this route can read: a carry-on option, two settings, another unit, a moved change, a sent threshold, another target shown, an option not in the Run', () => {
+  it('only the Run this route can read: a carry-on option that changes something, two settings, another unit, a moved change, a sent threshold not the dispatched one, another target shown, an option not in the Run', () => {
     const base = fresh(); snap(base).options[1].is_baseline = true;
     const two = fresh(); snap(two).options[0].settings.push({ ...setting(two, 'early_start'), factor_id: 'other' });
     const unit = fresh(); setting(unit, 'extra_bench').unit = 'boxes';
     const moved = fresh(); factor(moved, 'crate_goal__change').raw = 5;
-    const sent = fresh(); licence(sent).sent_threshold = { frame: 'level', field: 'goal_threshold', value: 0.8, baseline: 700 / 1125 };
+    const sent = fresh(); licence(sent).sent_threshold = { frame: 'level', field: 'goal_threshold', value: 0.85, baseline: 700 / 1125 };
     const shown = fresh(); licence(shown).target.value = 950;
     const ghost = fresh(); licence(ghost).option_ids.push('ghost');
     const unsent = fresh(); snap(unsent).options_not_sent = [{ option_id: 'ghost' }];
@@ -149,5 +149,32 @@ describe('exact results with no "carry on" option: margins from the Run\'s own r
 
   it('the reply is told what an undeclared scope means: the model\'s figures as they stand, not a forecast to the goal\'s date', () => {
     expect(CORE_REPLY_INSTRUCTION).toContain('where goal_margins has static_scope_declared false, say once that these are the model\u2019s figures as they stand, not a forecast to the goal\u2019s date');
+  });
+});
+
+/** Served R2 on CEE b921a8e2 (P01): a "carry on" option, but the engine's row 960.0000000000001 carries float noise, so the recorded
+ * levels say nothing; the Run's own dispatched arithmetic still does, with the carry-on option at today's level. Renamed likewise. */
+const noisy = JSON.parse(readFileSync(new URL('./fixtures/exact-carry-on-noise-run.json', import.meta.url), 'utf8')) as Json;
+const freshNoisy = (): Json => structuredClone(noisy) as Json;
+
+describe('exact results whose recorded levels carry float noise: the Run\'s dispatched arithmetic, carry-on included', () => {
+  it('the served shape: 700 + 260 and 700 + 120 against 900, carry on at 700, never a test; the licence declared the static scope', () => {
+    const f = freshNoisy();
+    expect(row(f, 'early_start').outcome.p50).toBe(960.0000000000001);
+    expect(marginsOf(f)).toEqual({
+      target: 900, comparator: '>=', unit: 'crates', baseline: 700,
+      options: [
+        { option_id: 'early_start', label: 'Early start', level: 960, margin: 60, meets: true, rests_on: { link_id: 'early_effect', saved: 260, boundary: 200 } },
+        { option_id: 'extra_bench', label: 'Extra bench', level: 820, margin: -80, meets: false, rests_on: { link_id: 'bench_effect', saved: 120, boundary: 200 } },
+        { option_id: 'status_quo', label: 'Carry on as now', level: 700, margin: -200, meets: false },
+      ],
+    });
+  });
+
+  it('carry on only as itself: a carry-on that changes something, one without the licence\'s status-quo record, or a sent threshold not the dispatched one gets nothing', () => {
+    const moves = freshNoisy(); setting(moves, 'status_quo').raw = 5;
+    const unrecorded = freshNoisy(); delete licence(unrecorded).status_quo;
+    const sent = freshNoisy(); licence(sent).sent_threshold.value = 0.85;
+    for (const f of [moves, unrecorded, sent]) expect(marginsOf(f)).toBeUndefined();
   });
 });
