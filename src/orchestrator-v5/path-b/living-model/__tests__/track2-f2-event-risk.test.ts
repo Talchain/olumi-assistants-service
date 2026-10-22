@@ -121,8 +121,11 @@ describe('Track 2 F2: an event risk reaches the engine as event_risk.v1, with it
   });
 
   it('§3C: a present condition is never a risk. The AI is told so (schema row below); a chance only Olumi gave is sent as Olumi\'s', async () => {
-    expect(reasons(OLUMI_CHANCE)).toEqual([]);
-    const r = await requestTheRunSends('olumi-chance', OLUMI_CHANCE);
+    // DL ruling 23 Oct: Olumi's chance counts over the goal's own window (here 12 months, stated from today); without one
+    // it is held with its preventer (mitigated-risk-window.test.ts).
+    const windowed: LivingModelT = { ...OLUMI_CHANCE, aims: OLUMI_CHANCE.aims.map((a) => ({ ...a, target: { ...a.target!, period_months: 12 } })) };
+    expect(reasons(windowed)).toEqual([]);
+    const r = await requestTheRunSends('olumi-chance', windowed);
     expect(node(r, 'supplier_fails').event_risk.occurrence.basis).toBe('olumi');
     // Olumi's chance does not make the person's stated 70% Olumi's: the reduction keeps its own author.
     expect((r.graph.edges as Rec[]).find((e) => e.from === 'dual_sourcing' && e.to === 'supplier_fails')!.provenance)
