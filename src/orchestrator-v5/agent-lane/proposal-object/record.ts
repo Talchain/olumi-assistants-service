@@ -581,8 +581,11 @@ const ELEMENT: Readonly<Record<string, { readonly key: string; readonly words: (
   settings: { key: 'factor_id', words: (n) => `setting for ${n}` }, mitigations: { key: 'factor_id', words: (n) => `reduction by ${n}` } };
 /** A share said as an exact percentage (a risk's chance, a step's reduction), never rounded away (Codex r3: 0.0004 read 0%). */
 const SHARE = /(?:^|\.)(?:occurrence\.(?:low|high)|reduction)$/;
-/** A share × 100 by moving the decimal point in its written digits: exact, never a float product (Codex r4: 12.3456789012%). */
-function percentOf(v: number): number {
+/**
+ * A share as a percentage, by moving the decimal point in its written digits: every digit kept, never re-read as a number
+ * (Codex r4: 12.3456789012%; r5: a re-read rounded 12.345678901234568% to …567%).
+ */
+function percentText(v: number): string {
   const [m = '', e = '0'] = String(v).split('e');
   const neg = m.startsWith('-');
   const [i = '', f = ''] = m.replace('-', '').split('.');
@@ -590,14 +593,16 @@ function percentOf(v: number): number {
   let point = i.length + Number(e) + 2;
   if (point <= 0) { digits = '0'.repeat(1 - point) + digits; point = 1; }
   if (point > digits.length) digits += '0'.repeat(point - digits.length);
-  return Number(`${neg ? '-' : ''}${digits.slice(0, point)}.${digits.slice(point) || '0'}`);
+  const whole = digits.slice(0, point).replace(/^0+(?=\d)/, '');
+  const frac = digits.slice(point).replace(/0+$/, '');
+  return `${neg ? '-' : ''}${whole}${frac === '' ? '' : `.${frac}`}%`;
 }
 /** A unit is said with its figures; on its own only where its record has none. */
 const UNIT_OF: Readonly<Record<string, readonly string[]>> = { unit: ['value', 'low', 'high', 'sd'], current_unit: ['current'] };
 const hasFigure = (r: Rec, unitKey: string): boolean => (UNIT_OF[unitKey] ?? []).some((k) => typeof r[k] === 'number' && Number.isFinite(r[k]));
 
 /** One said part of an item: its words, what it says, and whose it is (absent where the part says whose it is itself). */
-interface Said { readonly path: string; readonly text: string; readonly who?: Who; readonly owner?: Who }
+interface Said { readonly path: string; readonly text: string; readonly who?: Who; readonly owners?: readonly Who[] }
 
 /**
  * ⭐ THE CARD SHOWS EVERY CHANGE IT WRITES (Track 3, 22 Oct, consent: 12/12 core approvals wrote changes the card never
@@ -644,7 +649,7 @@ function coreChangeNotes(operations: readonly HeldOp[], adds: readonly AddField[
     if (REF_KEYS.has(key)) return Array.isArray(v) ? v.map(name).join(' and ') : name(v);
     if (typeof v === 'string') return VALUE_WORDS[key]?.[v] ?? `“${v}”`;
     if (typeof v === 'number') return SHARE.test(path)
-      ? sayFigureWithoutRounding(percentOf(v), '%') : sayFigureWithoutRounding(v, unitOf(chain, key));
+      ? percentText(v) : sayFigureWithoutRounding(v, unitOf(chain, key));
     if (typeof v === 'boolean') return v ? 'yes' : 'no';
     if (Array.isArray(v)) return v.map((x) => (typeof x === 'string' ? `“${x}”` : stableJson(x))).join(' and ');
     return stableJson(v);
@@ -672,11 +677,12 @@ function coreChangeNotes(operations: readonly HeldOp[], adds: readonly AddField[
       else out.push({ path: p, text: `${join(w)} ${say(v, k, p, chain)}`, who: whoOf(chain, k) });
     }
   };
-  // A removed record's parts, each run with whose they were (Codex r4: a removed party's limit lost its owner).
-  const listText = (a: Rec, chain: readonly Rec[], path: string): string => {
+  // A removed record's parts, each run with whose they were (Codex r4: a removed party's limit lost its owner), and those
+  // owners, for the note's own source (r5: a removed Olumi estimate under the person's setting read as "yours").
+  const removed = (path: string, words: readonly string[], a: Rec, chain: readonly Rec[], skip: ReadonlySet<string> = new Set()): Said => {
     const out: Said[] = [];
-    list(a, chain, [], path, new Set(), out);
-    return tagged(out, ', ') || 'nothing';
+    list(a, chain, [], path, skip, out);
+    return { path, text: `${join(words)} removed (was ${tagged(out, ', ') || 'nothing'})`, owners: out.flatMap((x) => (x.who === undefined ? [] : [x.who])) };
   };
   // Every part that differs between two versions of a record, and every change of whose a part is.
   const diff = (b: Rec, a: Rec, cb: readonly Rec[], ca: readonly Rec[], words: readonly string[], path: string, out: Said[]): void => {
@@ -707,13 +713,13 @@ function coreChangeNotes(operations: readonly HeldOp[], adds: readonly AddField[
           const named = name((ea ?? eb)![el.key]);
           const ew = [...words, `${el.words(named)}${id.includes('#') ? ` (entry ${id.slice(id.indexOf('#') + 1)})` : ''}`];
           if (eb === undefined) list(ea!, [...ca, ea!], [...words, `new ${ew[ew.length - 1]}`], p, new Set([`${p}.${el.key}`]), out);
-          else if (ea === undefined) out.push({ path: p, text: `${join(ew)} removed (was ${listText(eb, [...cb, eb], p)})`, owner: whoOf([...cb, eb]) });
+          else if (ea === undefined) out.push(removed(p, ew, eb, [...cb, eb], new Set([`${p}.${el.key}`])));
           else if (stableJson(eb) !== stableJson(ea)) diff(eb, ea, [...cb, eb], [...ca, ea], ew, p, out);
         }
       } else if ((isRec(bv) || bv == null) && (isRec(av) || av == null)) {
         if (isRec(bv) && isRec(av)) diff(bv, av, [...cb, bv], [...ca, av], w, p, out);
         else if (isRec(av)) list(av, [...ca, av], [...words, `new ${KEY_WORDS[k] ?? k.replace(/_/g, ' ')}`], p, new Set(), out);
-        else if (isRec(bv)) out.push({ path: p, text: `${join(w)} removed (was ${listText(bv, [...cb, bv], p)})`, owner: whoOf([...cb, bv]) });
+        else if (isRec(bv)) out.push(removed(p, w, bv, [...cb, bv]));
       } else {
         const was = say(bv, k, p, cb);
         const now = say(av, k, p, ca);
@@ -735,7 +741,7 @@ function coreChangeNotes(operations: readonly HeldOp[], adds: readonly AddField[
   const sentence = (said: readonly Said[]): string => tagged(said, '; ');
   // Olumi's estimate anywhere marks the note Olumi's; else one owner of every part is the note's; else the item's.
   const sourceOf = (said: readonly Said[], item: Who): NoteSource => {
-    const owners = new Set(said.flatMap((s) => { const w = s.who ?? s.owner; return w === undefined ? [] : [w.source]; }));
+    const owners = new Set(said.flatMap((s) => [...(s.who === undefined ? [] : [s.who]), ...(s.owners ?? [])].map((w) => w.source)));
     return owners.has('estimate') ? 'estimate' : owners.size === 1 ? [...owners][0]! : item.source;
   };
   const shownFigure = new Map<string, string>();

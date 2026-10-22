@@ -713,6 +713,13 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
     expect(texts(card([{ op: 'living_change', path: 'factor:h', value: { change: 'add', after: hours } }]))).toEqual(['‘Overtime’: unit “hours”; recorded words “we do overtime” (yours).']);
     expect(texts(card([ch('risk:r', risk({}), risk({ occurrence: { estimate_by: null, low: 0.1234567890123, high: 0.2 } }))]))[0])
       .toContain('chance low end was 10%, now 12.34567890123%');
+    // Codex r5 on #3632: every digit of a share; a removed Olumi estimate under the person's setting is Olumi's on the note.
+    expect(texts(card([ch('risk:r', risk({}), risk({ occurrence: { estimate_by: null, low: 0.12345678901234568, high: 0.2 } }))]))[0])
+      .toContain('now 12.345678901234568%');
+    const own = { factor_id: 'backup', value: 2, low: null, high: null, unit: 'units', estimate_by: 'olumi', source: 'user', party: null, quote: 'use the backup supplier' };
+    const gone = card([ch('option:o', plan([own]), plan([]))]);
+    expect((gone.adds ?? []).flatMap((a) => (a.kind === 'change_note' ? [[a.text, a.source]] : [])))
+      .toEqual([['Changes ‘Plan’: setting for ‘Backup supplier’ removed (was figure 2 units (Olumi’s estimate), recorded words “use the backup supplier” (yours)).', 'estimate']]);
   });
   it('RED classifier assigns Agent factor and link kinds exhaustively', () => {
     expect(FIELD_CLASS_BY_OP.set_factor_value).toBe('factor_value');
