@@ -176,6 +176,11 @@ describe('the AIE\'s signed words', () => {
     for (const part of ['it changes nothing in the model', 'At most one per turn', 'Never call an option best and never recommend one']) expect(d).toContain(part);
   });
 
+  it('note_on_item (DL 22 Oct): a reply that asks one question about one item pins that question on the item', () => {
+    const d = named(setup().tools, 'note_on_item').description;
+    expect(d).toContain('When your reply asks the person one question about one item in the model, call this with that item’s id and the question, so it shows on that item.');
+  });
+
   it('propose_change carries the per-figure stance enum with the AIE\'s description, verbatim', () => {
     const params = JSON.stringify(named(setup().tools, 'propose_change').parameters);
     expect(params).toContain(JSON.stringify(AIE_STANCE));
