@@ -56,7 +56,7 @@ export type PathBToolDeps = ChangeDeps & DraftDeps & RunDeps & Pick<StressDeps, 
    * The route's automatic Run after a committed change (the existing pipeline, at most once per request): the pipeline's
    * outcome, or none with the saved model's readiness when that readiness admits no Run.
    */
-  readonly analyseAfterCommit?: () => Promise<{ readonly run?: Record<string, unknown>; readonly ready?: unknown }>;
+  readonly analyseAfterCommit?: () => Promise<{ readonly run?: Record<string, unknown>; readonly ready?: unknown; readonly awaitsTiming?: true }>;
   /** A Challenge on one card (the route's `challengeTargetOf`): this turn's note may sit only beside that card (Codex r2 #3634). */
   readonly noteOnlyOn?: string;
 };
@@ -82,6 +82,10 @@ export interface ToolCallResult {
   readonly offered_query?: string;
 }
 export type OnToolCall = (row: TraceRow, result: ToolCallResult) => void;
+
+/** The automatic Run that was not started because the goal's chance needs a timing reading nobody has given (DL 22 Oct). */
+const AWAITS_TIMING = 'Saved. No analysis ran: this goal\'s chance rests on when the options\' effects are in place, and no reading of that '
+  + 'is recorded yet. Invite the person to press Run; give your reading of the timing (effects_timing) with that Run.';
 
 export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLaneMode, onCall: OnToolCall = () => {},
   scenario: 'core' | 'legacy' = 'legacy'): Tool[] {
@@ -163,7 +167,8 @@ export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLa
         if (outcome.status === 'ok') approvalApplied = true;
         if (outcome.status !== 'ok' || !outcome.mutated || deps.analyseAfterCommit === undefined) return record(APPLY_CHANGE, args, outcome, args.proposal_id);
         const auto = await deps.analyseAfterCommit();
-        const analysis = auto.run === undefined ? refused('run_not_ready', undefined, { analysis_ready: auto.ready ?? null })
+        const analysis = auto.awaitsTiming === true ? refused('run_awaits_timing', AWAITS_TIMING)
+          : auto.run === undefined ? refused('run_not_ready', undefined, { analysis_ready: auto.ready ?? null })
           : await recordedRun(deps, ctx, auto.run);
         // The automatic Run ran (Lenses 22 Oct, 15c72e9d): this approval's call says so, as a pressed Run's does, so the turn
         // ships that Run's analysis_result (`core-turn.ts` ranThisTurn) instead of "refresh to see it".

@@ -308,9 +308,10 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
   });
 
   describe.each([
-    ['capacity brief', KNOWN_ANSWER, 'not_stated'],
-    ['widgets brief', OPTION_EFFECTS, 'in_place_by_period'],
-  ] as const)('automatic Run timing: %s', (_brief, base, reading) => {
+    ['capacity brief', KNOWN_ANSWER, 'not_stated', true],
+    // CONTRAST: this shape's goal carries no target the licence reads (goal_threshold_raw null), so its chance needs no timing reading.
+    ['widgets brief', OPTION_EFFECTS, 'in_place_by_period', false],
+  ] as const)('automatic Run timing: %s', (_brief, base, reading, needsReading) => {
     it.each(['unrelated change', 'subject changed', 'no prior reading'] as const)('%s', async (row) => {
       // Small synthetic change-at-period-end models, with the same timing carrier as the captured approval.
       const initial = structuredClone(base);
@@ -349,19 +350,31 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
         chip: { id: card.approve_action.id, action_type: card.approve_action.action_type } });
       expect(approved.statusCode, approved.body).toBe(200);
       expect(registered).toHaveLength(1);
-      expect(runs).toBe(row === 'no prior reading' ? 1 : 2);
-      expect(runTimings.at(-1)).toBe(row === 'unrelated change' ? reading : null);
-      const result = (approved.json() as Json).analysis_result;
-      expect(result).toEqual((await freshRead()).analysis_result);
-      expect(result.enrichment.option_comparison).toHaveLength(initial.options.length);
-      for (const option of result.enrichment.option_comparison) {
-        if (row === 'unrelated change') expect(option.probability_of_goal, option.option_id).toBe(0.5);
-        else expect(option, option.option_id).not.toHaveProperty('probability_of_goal');
+      const chances = (result: Json) => {
+        expect(result.enrichment.option_comparison).toHaveLength(initial.options.length);
+        for (const option of result.enrichment.option_comparison) expect(option.probability_of_goal, option.option_id).toBe(0.5);
+      };
+      if (row === 'unrelated change' || !needsReading) {
+        // CONTRAST: a reading to carry, or a goal whose chance needs none: the automatic Run runs, as before.
+        expect(runs).toBe(row === 'no prior reading' ? 1 : 2);
+        expect(runTimings.at(-1)).toBe(row === 'unrelated change' ? reading : null);
+        const result = (approved.json() as Json).analysis_result;
+        expect(result).toEqual((await freshRead()).analysis_result);
+        if (row === 'unrelated change') chances(result);
+        return;
       }
-      if (row !== 'unrelated change') expect(result.enrichment.inference_warnings[0]).toMatchObject({
-        code: GOAL_FIGURES_TARGET_NOT_TESTABLE, message: expect.stringContaining('has not established'),
-        detail: { reason: PERIOD_END_EFFECTS_UNSTATED, effects_timing: null, effects_timing_origin: null },
-      });
+      // ⭐ DL 22 Oct (hiring a, 2fa753d6): no reading to carry, so no automatic Run that could only withhold every chance
+      // (it was a GOAL_FIGURES_TARGET_NOT_TESTABLE / PERIOD_END_EFFECTS_UNSTATED result). The reply is told to invite Run.
+      expect(runs).toBe(row === 'no prior reading' ? 0 : 1);
+      expect(approved.json() as Json).not.toHaveProperty('analysis_result');
+      expect(JSON.stringify(calls.at(-1)!.input)).toContain('run_awaits_timing');
+      // The invited Run, with the AI's reading, gives the chances.
+      outputs = [[{ type: 'function_call', name: 'run_analysis', call_id: 'invited', args: { reason: 'Run pressed.', effects_timing: reading } }],
+        [{ type: 'message', text: 'Ran.' }]];
+      const invited = await post({ turn_id: randomUUID(), message: 'Run analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } });
+      expect(invited.statusCode, invited.body).toBe(200);
+      expect(runTimings.at(-1)).toBe(reading);
+      chances((await freshRead()).analysis_result);
     });
   });
 
