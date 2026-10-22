@@ -24,7 +24,7 @@ import type { CritiqueT } from '../../agent-lane/core/model-critic.js';
 import { isNoModelYet, isSavedRead, readSaved } from './context-tool.js';
 import { ok, refused, OUTCOME_TRACE, type ToolOutcome } from './outcome.js';
 import { writeCorePostimage } from './core-write.js';
-import { goalPathEncodingCauses, RESTRUCTURE_DRAFT, type Restructure } from './goal-path.js';
+import { goalPathEncodingCauses, KEPT_AS_REFUSED, personContentLost, RESTRUCTURE_DRAFT, type Restructure } from './goal-path.js';
 import { inTheUsersWords, type TypedWords } from './user-words.js';
 
 export const BUILD_MODEL_FROM_BRIEF = 'build_model_from_brief';
@@ -70,10 +70,17 @@ const nodesIn = (graph: Record<string, unknown>): number => (Array.isArray(graph
 type DraftContext = Pick<AgentToolContext, 'scenario_id'> & Partial<Pick<AgentToolContext, 'request_id'>> & TypedWords;
 
 export async function buildModel(deps: DraftDeps, ctx: DraftContext, args: BuildModelArgs): Promise<ToolOutcome> {
-  const outcome = await construct(deps, ctx, args);
+  // ⭐ THE RETRY NEVER LOSES THE PERSON'S CONTENT (DL, #3672 fix-forward): a second draft that left out or changed an item the
+  // person or a party gave is not used; the refused draft is, exactly as base would have saved it.
+  const r = deps.restructure;
+  const first = r?.pending?.tool === BUILD_MODEL_FROM_BRIEF ? r.pending.args : undefined;
+  const lost = first === undefined ? [] : personContentLost(first.model, args.model);
+  const outcome = await construct(deps, ctx, first !== undefined && lost.length > 0 ? first : args);
+  if (outcome.status === 'ok' && r !== undefined) r.pending = undefined;
   const save_outcome = outcome.status === 'ok' ? 'VERIFIED_SAVED'
     : outcome.status === 'unavailable' && outcome.write === 'unknown' ? 'UNKNOWN' : 'VERIFIED_NO_WRITE';
-  return Object.defineProperty({ ...outcome, data: { ...outcome.data, save_outcome }, ...(save_outcome === 'UNKNOWN' ? {
+  return Object.defineProperty({ ...outcome, data: { ...outcome.data, save_outcome,
+    ...(lost.length > 0 ? { restructure: { kept: 'first_call', lost, note: KEPT_AS_REFUSED } } : {}) }, ...(save_outcome === 'UNKNOWN' ? {
     detail: 'The construction was dispatched, but its save could not be verified. It may already be saved. Do not say nothing was saved, and do not repeat a write or Run to repair the reply.',
   } : {}) }, OUTCOME_TRACE, { value: outcome[OUTCOME_TRACE] });
 }
@@ -104,6 +111,7 @@ async function constructUnrecorded(deps: DraftDeps, ctx: DraftContext, args: Bui
   const causes = goalPathEncodingCauses(mapped);
   if (causes.length > 0 && deps.restructure !== undefined && !deps.restructure.offered) {
     deps.restructure.offered = true;
+    deps.restructure.pending = { tool: BUILD_MODEL_FROM_BRIEF, args };
     return refused('goal_path_withheld', RESTRUCTURE_DRAFT, { goal_path: causes });
   }
   const gaps = structureGaps(kernelled.model);

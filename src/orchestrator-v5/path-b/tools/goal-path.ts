@@ -8,10 +8,50 @@
  * withheld). Its role is the AI's declaration, so re-reading it against the person's words changes no figure. An unsigned link
  * may be the person's own uncertainty, and moving a cause onto a part can change what its figure measures: neither is offered.
  */
+import type { LivingModelT } from '../../../schemas/living-model.js';
 import type { Mapped, Withheld } from '../living-model/mapper.js';
+import { stable } from '../living-model/diff.js';
 
-/** One offer per turn (`pathBTools` makes it per turn), shared by the draft and the change. */
-export interface Restructure { offered: boolean }
+/**
+ * One offer per turn, shared by the draft and the change; the core route makes it per turn and `pathBTools` uses it.
+ * ⭐ A REFUSAL CAN MAKE A TURN BETTER, NEVER WORSE (DL, #3672 fix-forward): the refused call is kept (`pending`) until a draft
+ * or a card succeeds after it, and the turn's end runs a call still pending once more, with the offer used, exactly as base
+ * would (`settle`, filled by `pathBTools`), so an agent that stops after the refusal still leaves its draft saved.
+ */
+export interface Restructure {
+  offered: boolean;
+  pending?: { readonly tool: 'build_model_from_brief'; readonly args: { brief: string; model: LivingModelT } }
+    | { readonly tool: 'propose_change'; readonly args: { public_label: string; basis: string; model: LivingModelT; remove: string[] } };
+  settle?: () => Promise<void>;
+}
+
+/**
+ * The person's own content in a model: each item a person or a party gave, whole (its figures, quotes and settings), and every
+ * view. A condition is keyed by its words and scope, its role left out: the one part the offer asks the AI to re-read.
+ */
+function personContent(m: LivingModelT): Map<string, string> {
+  const out = new Map<string, string>();
+  const theirs = (source: string) => source === 'user' || source === 'party';
+  for (const kind of ['aims', 'options', 'factors', 'links', 'risks'] as const) {
+    for (const item of m[kind]) if (theirs(item.source)) out.set(`${kind}:${item.id}`, stable(item));
+  }
+  for (const { role: _role, ...c } of m.conditions) {
+    const scope = [...c.applies_to].sort();
+    if (theirs(c.source)) out.set(`conditions:${stable([c.text, scope])}`, stable({ ...c, applies_to: scope }));
+  }
+  for (const v of m.views) out.set(`views:${stable([v.holder, v.position])}`, stable(v));
+  return out;
+}
+
+/** What of the person's content in `refused` the retry left out or changed: the retry never loses it (DL, #3672 fix-forward). */
+export function personContentLost(refused: LivingModelT, retry: LivingModelT): string[] {
+  const kept = personContent(retry);
+  return [...personContent(refused)].flatMap(([key, item]) => (kept.get(key) === item ? [] : [key]));
+}
+
+/** What the AI is told when its retry would have lost the person's content, so the refused call was used as it was. */
+export const KEPT_AS_REFUSED = 'Your second call left out or changed items the person or a party gave (listed in lost), so your first '
+  + 'call was used exactly as it was. Say so plainly if it matters to your reply.';
 
 export interface GoalPathCause {
   readonly id: string;

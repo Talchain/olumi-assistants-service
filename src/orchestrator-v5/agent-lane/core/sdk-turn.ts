@@ -199,6 +199,11 @@ export interface CoreTurnInput {
    * kit row and result.
    */
   readonly tools: (onCall: CoreToolRecorder) => readonly Tool[];
+  /**
+   * Run once when the SDK run has ended, before the result is built: a call Class 3's offer left refused runs as base would,
+   * recorded like any call, so a refusal never makes a turn worse (DL, #3672 fix-forward; `goal-path.ts`).
+   */
+  readonly settle?: () => Promise<void>;
   /** The model revision and selected Run this turn began on, carried on the SDK trace with the prompt, model and Conversation. */
   readonly traceMeta?: { readonly revision?: string; readonly run_id?: string };
   readonly signal?: AbortSignal;
@@ -491,6 +496,7 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
           toolResults.push({ ok: true, mutated: false, outcome: 'awaiting_approval', ...(run0.proposal_id !== null ? { proposal_id: run0.proposal_id } : {}) });
           // The AI's own words this turn, written with the call it paused on (the card shows the change).
           const words = extractAllTextOutput(result.newItems);
+          await input.settle?.();
           return finish(words, words.trim() === '' ? 'incomplete' : 'answered', calls, words.trim() === '' ? 'host' : 'ai');
         }
         // The pause cannot be kept, so the Conversation gets its answer now: nothing applied, said by the AI.
@@ -499,6 +505,7 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
         calls += result.rawResponses.length;
       }
       const text = typeof result.finalOutput === 'string' ? result.finalOutput : '';
+      await input.settle?.();
       return finish(text, text.trim() === '' ? 'incomplete' : 'answered', calls, text.trim() === '' ? 'host' : 'ai');
     }, { groupId: input.ctx.scenario_id, metadata: {
       // The SDK's own trace (tool spans are native) carries what this turn ran on: prompt, model, state, revision and Run.
@@ -509,7 +516,10 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
   } catch (err) {
     // The stream's copy records transport loss asynchronously; settle it before classifying the SDK's error.
     await Promise.allSettled(pendingRows);
-    if (err instanceof MaxTurnsExceededError && deliveryUnknown === undefined) return finish('', 'hop_limit', CORE_MAX_MODEL_CALLS, 'host');
+    if (err instanceof MaxTurnsExceededError && deliveryUnknown === undefined) {
+      await input.settle?.();
+      return finish('', 'hop_limit', CORE_MAX_MODEL_CALLS, 'host');
+    }
     // The capability's own error, unwrapped, so the route's existing handlers see the same error the loop would raise.
     if (err instanceof ToolCallError && err.error !== undefined) throw err.error;
     log.warn({ event: 'agent_core.turn_failed', scenario_id: input.ctx.scenario_id, request_id: input.ctx.request_id, err: String(err).slice(0, 300) },

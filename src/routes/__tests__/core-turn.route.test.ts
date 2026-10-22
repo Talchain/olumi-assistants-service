@@ -551,6 +551,21 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(j.model.scenario_revision).toBe((await freshRead()).content_hash);
   });
 
+  it('DL (#3672 fix-forward): the AI stops after the goal_path_withheld refusal; the turn\u2019s end saves its draft as base, with its receipt', async () => {
+    persisted = null;
+    const model = { ...structuredClone(KNOWN_ANSWER), conditions: [{ text: 'only once the board signs off', applies_to: ['f_g'], role: 'prerequisite' as const,
+      source: 'olumi' as const, party: null, quote: null }] };
+    outputs = [[{ type: 'function_call', name: 'build_model_from_brief', call_id: 'draft', args: { brief: BRIEF, model } }],
+      [{ type: 'message', text: 'I will look at that condition again.' }]];
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/core-turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), message: BRIEF, source: 'composer' } });
+    expect(r.statusCode, r.body).toBe(200);
+    const j = r.json() as Json;
+    expect(j._agent.tool_calls.map((c: Json) => [c.name, c.outcome])).toEqual([['build_model_from_brief', 'refused'], ['build_model_from_brief', 'ok']]);
+    expect(registered).toHaveLength(1);
+    expect((registered[0]!.graph as Json).living_model.conditions).toEqual(model.conditions);
+    expect(j.receipts).toEqual([expect.objectContaining({ version_id: 'v_1', authorised_by: 'olumi' })]);
+  });
+
   it('⭐ ESTIMATES (DL ruling 22 Oct): a first draft keeps Olumi\'s factor and Olumi\'s estimate on the person\'s figure-less factor, each with its range; the person\'s source stays theirs; the target stays unset', async () => {
     persisted = null;
     const brief = 'we need more units; today we are at 70. f matters. push f to 1, or we hold. each +1 in f adds 50 units on average, with a standard deviation of 10. Sam disagrees';

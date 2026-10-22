@@ -16,7 +16,7 @@ import { createProposal, type ProposalOperation, type ProposalStore, type Struct
 import { LivingModel, type LivingModelT } from '../../../schemas/living-model.js';
 import { applyKernel, plain } from '../living-model/kernel.js';
 import { mapLivingModel, savedGoal } from '../living-model/mapper.js';
-import { addedCauses, goalPathEncodingCauses, RESTRUCTURE_CHANGE, type Restructure } from './goal-path.js';
+import { addedCauses, goalPathEncodingCauses, KEPT_AS_REFUSED, personContentLost, RESTRUCTURE_CHANGE, type Restructure } from './goal-path.js';
 import { diffLivingModels, stable, type LivingChange } from '../living-model/diff.js';
 import { livingViewOf } from '../living-model/view.js';
 import { isNoModelYet, isSavedRead, readSaved } from './context-tool.js';
@@ -61,6 +61,18 @@ async function savedLiving(deps: Deps, ctx: Ctx) {
 }
 
 export async function proposeLivingChange(deps: Deps, ctx: Ctx, args: LivingChangeArgs): Promise<ToolOutcome> {
+  // ⭐ THE RETRY NEVER LOSES THE PERSON'S CONTENT (DL, #3672 fix-forward): a second change that left out or changed an item the
+  // person or a party gave is not used; the refused change is, exactly as base would have carded it.
+  const r = deps.restructure;
+  const first = r?.pending?.tool === 'propose_change' ? r.pending.args : undefined;
+  const lost = first === undefined ? [] : personContentLost(first.model, args.model);
+  const outcome = await proposeOnce(deps, ctx, first !== undefined && lost.length > 0 ? first : args);
+  if (outcome.status === 'ok' && r !== undefined) r.pending = undefined;
+  return outcome.status === 'ok' && lost.length > 0
+    ? { ...outcome, data: { ...outcome.data, restructure: { kept: 'first_call', lost, note: KEPT_AS_REFUSED } } } : outcome;
+}
+
+async function proposeOnce(deps: Deps, ctx: Ctx, args: LivingChangeArgs): Promise<ToolOutcome> {
   const base = await savedLiving(deps, ctx);
   if ('status' in base) return base;
   const brief = typeof base.saved.json.brief_text === 'string' ? [base.saved.json.brief_text] : [];
@@ -114,6 +126,7 @@ export async function proposeLivingChange(deps: Deps, ctx: Ctx, args: LivingChan
     : addedCauses(goalPathEncodingCauses(mapLivingModel(base.model, savedGoal(base.saved.graph))), goalPathEncodingCauses(mapped));
   if (introduced.length > 0) {
     deps.restructure!.offered = true;
+    deps.restructure!.pending = { tool: 'propose_change', args };
     return refused('goal_path_withheld', RESTRUCTURE_CHANGE, { goal_path: introduced });
   }
   const p = deps.proposals.put(createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
