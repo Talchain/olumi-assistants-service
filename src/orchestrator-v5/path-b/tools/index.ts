@@ -23,7 +23,7 @@ import { BUILD_MODEL_FROM_BRIEF, BuildModelParams, buildModel, type DraftDeps } 
 import { RUN_ANALYSIS, RunAnalysisParams, recordedRun, runAnalysis, type RunDeps } from './run-tool.js';
 import { APPLY_CHANGE, ApplyChangeParams, PROPOSE_CHANGE, ProposeChangeParams, applyChange, proposeChange, type ChangeDeps } from './change-tools.js';
 import { LivingChangeParams, applyLivingChange, isLivingProposal, proposeLivingChange } from './living-change.js';
-import { NOTE_ON_ITEM, NoteOnItemParams, noteOnItem } from './note-on-item.js';
+import { NOTE_MAX, NOTE_ON_ITEM, NoteOnItemParams, noteOnItem } from './note-on-item.js';
 import { STRESS_TEST, StressTestParams, stressTest, type StressDeps } from './stress-tool.js';
 import { OFFER_PUBLIC_RESEARCH, OFFER_PUBLIC_RESEARCH_DESCRIPTION, OfferResearchParams, offerResearch, type ResearchDeps } from './research-tool.js';
 import { refused, traceRow, type ToolOutcome, type TraceRow } from './outcome.js';
@@ -44,7 +44,7 @@ export const TOOL_DESCRIPTIONS = {
   run_analysis:
     'Request a fresh scientific Run of the current saved model. Eligible committed changes and Undo use the existing automatic analysis and coaching path; do not issue a duplicate Run after them. Read actual readiness and the recorded Run, then explain only what its results support. Report refusal or unavailability honestly. Do not rerun analysis merely to retry an explanation.',
   note_on_item:
-    'Show one short note beside one item of the saved model, labelled as Olumi’s: a question to test it, a challenge to an assumption, or what seems missing. At most one per turn; it changes nothing in the model. Use the item’s id from read_canonical_context. Never call an option best and never recommend one.',
+    `Show one short note beside one item of the saved model, labelled as Olumi’s: a question to test it, a challenge to an assumption, or what seems missing. When your reply asks the person one question about one item in the model, call this with that item’s id and the question, so it shows on that item; as the note, keep the same question in at most ${NOTE_MAX} characters, naming items by their label, never by id. At most one per turn; it changes nothing in the model. Use the item’s id from read_canonical_context. Never call an option best and never recommend one.`,
   // TRACK 3: prompt text routed to Science by the DL (inform-only); each cell is the variant Run's own chance (DL ruling B, 21 Oct).
   stress_test:
     'Only when the person asks to stress-test an assumption, or to try other values for one. Name one to three links or factors from read_canonical_context with the values to test, in their own units, and say whether the person gave those values; optionally one named alternative link. Nothing is saved. Each result is that tested setting’s own chance of meeting the goal, in this model, as the result would show it, or why it is not shown: say each option’s lowest and highest with the settings that give them. Never average the settings or call anything across them a chance. Never use this to compute something a Run could not use (an unsized link, or a range with no distribution): propose a size with propose_change instead. Say where the two explanations differ; never combine them, never call an option best and never recommend one.',

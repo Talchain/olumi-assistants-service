@@ -12,6 +12,7 @@ vi.mock('../change-tools.js', async (original) => ({
 }));
 
 import { pathBTools, type OnToolCall } from '../index.js';
+import { NOTE_MAX } from '../note-on-item.js';
 import { toolsFor } from '../../../agent-lane/runtime/agent-tools.js';
 import { ProposalStore } from '../../../agent-lane/proposal.js';
 import { read } from './fixtures.js';
@@ -174,6 +175,13 @@ describe('the AIE\'s signed words', () => {
   it('note_on_item (DL ruling 21 Oct): its description says it writes nothing, allows one note per turn, and never ranks an option', () => {
     const d = named(setup().tools, 'note_on_item').description;
     for (const part of ['it changes nothing in the model', 'At most one per turn', 'Never call an option best and never recommend one']) expect(d).toContain(part);
+  });
+
+  it('note_on_item (DL 22 Oct): a reply that asks one question about one item pins that question on the item', () => {
+    const d = named(setup().tools, 'note_on_item').description;
+    expect(d).toContain('When your reply asks the person one question about one item in the model, call this with that item’s id and the question, so it shows on that item; as the note, keep the same question in at most 140 characters, naming items by their label, never by id.')
+    // The limit the model reads is the tool's own refusal limit (Codex AMEND on #3616): a longer or id-naming copy is refused.
+    expect(d).toContain(`at most ${NOTE_MAX} characters`)
   });
 
   it('propose_change carries the per-figure stance enum with the AIE\'s description, verbatim', () => {
