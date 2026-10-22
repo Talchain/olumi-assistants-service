@@ -522,13 +522,32 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   const usedHere = new Set([...setsFactor, ...model.links.map((l) => l.to), ...model.factors.flatMap((f) => f.defined_as?.of ?? []),
     ...model.aims.flatMap((a) => a.defined_as?.of ?? []), ...model.risks.flatMap((r) => r.mitigations.map((m) => m.factor_id))]);
   const unmeasured = new Set(model.factors.filter((f) => f.value === null && !f.defined_as && f.limit === null && !usedHere.has(f.id)).map((f) => f.id));
+  /**
+   * ⭐ A FACTOR AT 0 TODAY THAT ONLY THE OPTIONS MOVE IS FRAMED BY WHAT THEY MOVE IT TO (DL 22 Oct, hiring on 79c1e150-b: Olumi's
+   * £0 "additional spend", raised only by the options' own links, had the frame 1 (`capFor` at all levels 0), so the person's
+   * "Our budget is £200,000" was off it and held). For a factor whose every level is 0 and whose every link in comes from an
+   * option (its switch, above), `capFor` also reads each option's total from its own links (each link's largest |value|, |low| or |high|, in the
+   * factor's unit: an option's effect is per +1 of the option, so it is the amount that option adds) and the factor's own limit.
+   * PLoT and ISL no longer cut a coefficient above 1 (PLoT #457, ISL #236), so the frame only rescales this factor's own edges.
+   * Every other factor is untouched.
+   */
+  const optionReach = (f: LivingModelT['factors'][number]): number[] => {
+    // An option's own link runs from its switch here (`<option>__on`, made above): only those count as the options'.
+    const into = model.links.filter((l) => l.to === f.id);
+    if (into.length === 0 || into.some((l) => !switches.has(l.from))) return [];
+    const size = (l: (typeof into)[number]) => Math.max(0, ...[l.effect.value, l.effect.low, l.effect.high]
+      .filter((v): v is number => v !== null && Number.isFinite(v)).map(Math.abs));
+    return [...model.options.map((o) => into.filter((l) => l.from === `${o.id}__on`).reduce((a, l) => a + size(l), 0)),
+      ...((f.limit ?? null) !== null && Number.isFinite(f.limit!.value) ? [Math.abs(f.limit!.value)] : [])];
+  };
   const caps = new Map<string, number>();
   const current = new Map<string, number>();
   for (const f of model.factors) {
     const levels = [f.value, ...model.options.flatMap((o) => o.settings.filter((s) => s.factor_id === f.id).map((s) => s.value))]
       .filter((v): v is number => v !== null);
+    const reach = levels.length > 0 && levels.every((v) => v === 0) ? optionReach(f) : [];
     // The exact sum's change is read on the goal's own frame, so the goal is its parts added in the goal's units.
-    const cap = exactSum !== undefined && f.id === exactSum.lever ? goal!.cap : capFor(levels, f.unit, goal, [f.low, f.high]);
+    const cap = exactSum !== undefined && f.id === exactSum.lever ? goal!.cap : capFor([...levels, ...reach], f.unit, goal, [f.low, f.high]);
     if (cap !== undefined) caps.set(f.id, cap);
     const node: Rec = { id: f.id, kind: 'factor', label: f.label, category: setsFactor.has(f.id) ? 'controllable' : 'observable',
       // The exact sum's change: 0 today by definition (the contract's marker), so the engine holds it exact.

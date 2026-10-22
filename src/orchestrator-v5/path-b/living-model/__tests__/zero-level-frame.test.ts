@@ -61,3 +61,46 @@ describe('a factor whose every level is 0 gets a frame, so its level is a fact, 
     expect(node(mapLivingModel(withDelay(0, 0, 8, '%')).graph, 'delay').observed_state).toMatchObject({ value: 0, raw_value: 0, cap: 100 });
   });
 });
+
+/**
+ * Hiring's shape (served 79c1e150-b, DL 22 Oct): Olumi's £0 "additional spend", raised only by the options' own links (Olumi's
+ * estimates), with the person's own "Our budget is £200,000" on it. On the frame of 1 the budget was held (limit_not_in_slice).
+ */
+function withSpend(opts: { limit?: boolean; factorLink?: boolean; level?: number } = {}): LivingModelT {
+  const m: LivingModelT = structuredClone(KNOWN_ANSWER);
+  m.factors.push({ estimate_by: null, kind: 'factor', id: 'spend', label: 'Additional spend', value: opts.level ?? 0, low: 0, high: 0, unit: '£',
+    defined_as: null, source: 'olumi', party: null, quote: null,
+    limit: opts.limit === false ? null : { comparator: '<=', value: 200000, source: 'user', party: null, quote: 'Our budget is £200,000' } });
+  const spend = (from: string, value: number, low: number, high: number) => ({ id: `${from}_spend`, from, to: 'spend', source: 'olumi' as const, party: null,
+    quote: null, effect: { estimate_by: null, form: 'range' as const, value, low, high, sd: null, unit: '£', sign: '+' as const } });
+  m.links.push(spend('push', 40000, 20000, 80000), spend('hold', 50000, 25000, 100000));
+  if (opts.factorLink === true) m.links.push({ ...spend('f', 1000, 500, 2000), id: 'f_spend' });
+  return m;
+}
+const into = (g: { edges: Record<string, unknown>[] }, from: string, to: string) => g.edges.find((e) => e.from === from && e.to === to) as Rec;
+
+describe('DL 22 Oct: a factor at 0 that only the options move is framed by what they move it to, so the person\'s limit on it is evaluated', () => {
+  it('hiring\'s shape: the budget is evaluated against £200,000 in natural £, and each option\'s spend keeps its own amount', () => {
+    const { graph, withheld } = mapLivingModel(withSpend()) as { graph: Rec; withheld: { id: string }[] };
+    // The largest of each option's total from its links' upper amounts (80,000; 100,000) and the limit (200,000), through capFor.
+    expect(node(graph, 'spend').observed_state).toMatchObject({ value: 0, raw_value: 0, cap: 250000, unit: '£' });
+    expect(withheld.filter((w) => w.id === 'spend')).toEqual([]);
+    expect(graph.goal_constraints).toEqual([expect.objectContaining({ constraint_id: 'limit_spend', node_id: 'spend', operator: '<=', value: 200000,
+      unit: '£', value_frame: 'level', provenance: 'explicit', source_quote: 'Our budget is £200,000' })]);
+    for (const [option, amount] of [['push', 40000], ['hold', 50000]] as const) {
+      const e = into(graph, `${option}__on`, 'spend');
+      expect(e.strength.mean * 250000, `${option}'s spend in £`).toBeCloseTo(amount, 6);
+    }
+    // Without a limit the options' own reach frames it: the larger total (100,000) through capFor.
+    expect(node(mapLivingModel(withSpend({ limit: false })).graph, 'spend').observed_state).toMatchObject({ cap: 125000 });
+  });
+
+  it('invariance: a factor at 0 that a factor also moves, or one with a level above 0, keeps its frame; the limit off it stays held', () => {
+    const mixed = mapLivingModel(withSpend({ factorLink: true }));
+    expect(node(mixed.graph, 'spend').observed_state).toMatchObject({ raw_value: 0, cap: 1 });
+    expect(mixed.withheld).toContainEqual({ id: 'spend', reason: 'limit_not_in_slice' });
+    const above = mapLivingModel(withSpend({ level: 1000, limit: false }));
+    expect(node(above.graph, 'spend').observed_state).toMatchObject({ raw_value: 1000, cap: 1250 });
+  });
+});
+
