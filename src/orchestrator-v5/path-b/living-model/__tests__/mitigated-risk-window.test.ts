@@ -93,5 +93,12 @@ describe('a mitigated Olumi risk counts only over the goal\'s window', () => {
     const ids = (g.nodes as Rec[]).map((n) => n.id);
     for (const n of g.nodes as Rec[]) for (const part of n.nonlinear_identity?.factor_ids ?? []) expect(ids).toContain(part);
   });
+
+  it('Codex r2: no line about the removed switch\'s figure reaches the AI', () => {
+    const ranged: LivingModelT = { ...OLUMI_CHANCE, factors: OLUMI_CHANCE.factors.map((f) => (f.id === 'dual_sourcing' ? { ...f, low: 0, high: 1 } : f)) };
+    expect(mapLivingModel(withPeriod(ranged, 6)).assumed.filter((a) => a.id === 'dual_sourcing')).toEqual([]);
+    // Over the goal's own window the switch stays, and so does what is said about its figure.
+    expect(mapLivingModel(withPeriod(ranged, 12)).assumed.some((a) => a.id === 'dual_sourcing')).toBe(true);
+  });
 });
 

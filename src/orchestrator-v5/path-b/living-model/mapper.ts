@@ -479,12 +479,14 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
           : !riskOccurrenceIsCurrent(node, { nodes, edges }) ? 'risk_window_not_goal_window' : undefined;
     if (reason === 'risk_window_not_goal_window') {
       // The preventer goes with its risk: a switch whose only child is this risk (`switchOk`) would otherwise reach nothing
-      // (NO_PATH_TO_GOAL). Its node, every option's setting on it, its links and any limit on it leave the engine graph; it is
-      // held by name. A switch that is also a part of a definition reaches the goal through it, so it stays (Codex r1).
+      // (NO_PATH_TO_GOAL). Its node, every option's setting on it, its links, any limit on it and any line said about its
+      // figure leave the engine graph and the AI's assumptions, and it is held by name. A switch that is also a part of a
+      // definition reaches the goal through it, so it stays (Codex r1).
       for (const m of r.mitigations) {
         const id = m.factor_id;
         if (declared.some(({ item }) => item.defined_as!.of.includes(id))) continue;
         goal_constraints.splice(0, goal_constraints.length, ...goal_constraints.filter((c) => c.node_id !== id));
+        assumed.splice(0, assumed.length, ...assumed.filter((x) => x.id !== id));
         nodes.splice(0, nodes.length, ...nodes.filter((n) => n.id !== id));
         for (const n of nodes) {
           const iv = n.kind === 'option' && typeof n.interventions === 'object' && n.interventions !== null ? n.interventions as Rec : undefined;
