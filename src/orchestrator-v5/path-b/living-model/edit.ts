@@ -94,12 +94,22 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       if (f !== undefined && unchangedPoint(f, raw, unit ?? edit.unit ?? null, edit.raw_value === undefined)) return { model: m };
       if (f !== undefined) {
         Object.assign(f, { ...theirFigure, value: raw, ...noRange, unit: unit ?? edit.unit ?? null, ...theirs });
-        // Snapshot this gesture's inputs before following dependencies reattributes calculated subtotals.
-        const theirPoints = new Set(m.factors.filter((p) => p.value !== null && p.low === null && p.high === null
-          && p.estimate_by !== 'olumi' && stated(p.source)).map((p) => p.id));
-        // A changed part supersedes dependent totals, never their definitions. Only identities admitted BEFORE the edit:
-        // contradictory totals, bad units and cycles keep their existing checks. Visit parts first, once (also for diamonds).
+        // Only identities admitted BEFORE the edit: contradictory totals, bad units and cycles keep their checks.
         const admitted = new Set(mapped.graph.nodes.filter((n) => n.nonlinear_identity !== undefined).map((n) => n.id));
+        // Read eligibility from the pre-edit snapshot, never from totals reattributed while following dependencies.
+        const before = new Map(model.factors.map((p) => [p.id, p]));
+        const points = new Map<string, boolean>([[f.id, true]]); // Only the typed gesture authors a new figure.
+        const theirPoint = (id: string): boolean => {
+          if (points.has(id)) return points.get(id)!;
+          points.set(id, false); // A visiting node cannot justify itself through a cycle.
+          const p = before.get(id);
+          const counts = p !== undefined && p.value !== null
+            && ((p.low === null && p.high === null && p.estimate_by !== 'olumi' && stated(p.source))
+              || (admitted.has(id) && p.defined_as !== null && p.defined_as.of.every(theirPoint)));
+          points.set(id, counts);
+          return counts;
+        };
+        // Visit parts first, once (also for diamonds).
         const changed = new Set([f.id]);
         const visited = new Set([f.id]); // A direct edit to a defined quantity keeps its own figure, as before.
         const follow = (id: string): boolean => {
@@ -108,7 +118,7 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
           const quantity = factor(id);
           const def = quantity?.defined_as;
           if (quantity === undefined || quantity.value === null || !def || !admitted.has(id)
-            || !def.of.every((p) => theirPoints.has(p))) return false;
+            || !def.of.every(theirPoint)) return false;
           const affected = def.of.map(follow).some(Boolean);
           if (!affected) return false;
           const values = def.of.map((p) => factor(p)?.value ?? null);

@@ -19,6 +19,17 @@ const bakery = (): LivingModelT => ({ ...structuredClone(KNOWN_ANSWER),
     { ...KNOWN_ANSWER.options[1]!.settings[0]!, factor_id: 'loaves', value: 1100, unit: 'loaves per week' }] }],
   links: [{ ...KNOWN_ANSWER.links[0]!, from: 'revenue', effect: { ...KNOWN_ANSWER.links[0]!.effect, value: 1, unit: '£ per week' } }],
 });
+const nested = (): LivingModelT[] => {
+  const customer = structuredClone(F1_DEFINED);
+  customer.factors.push({ ...factor('revenue', 6000, '£'), label: 'Monthly revenue', defined_as: customer.aims[0]!.defined_as });
+  customer.aims[0]!.defined_as = null;
+  customer.links = [{ ...KNOWN_ANSWER.links[0]!, from: 'revenue', to: 'rev',
+    effect: { ...KNOWN_ANSWER.links[0]!.effect, value: 1, unit: '£' } }];
+  const bread = bakery();
+  bread.factors[0]!.defined_as = { op: 'sum', of: ['retail', 'wholesale'], ...who('loaves are retail plus wholesale') };
+  bread.factors.push(factor('retail', 900, 'loaves per week'), factor('wholesale', 50, 'loaves per week'));
+  return [customer, bread];
+};
 const save = (m: LivingModelT) => LivingModel.parse(JSON.parse(JSON.stringify(m)));
 const edit = (m: LivingModelT, target_id: string, raw_value: number) => {
   const out = applyExplicitEdit(save(m), { kind: 'factor_value_edit', target_id, raw_value, value: 0.8 });
@@ -170,5 +181,48 @@ describe('a canvas level edit keeps admitted definitions and supersedes stale to
     expect(node(after, 'revenue').nonlinear_identity).toEqual({ operation: 'product', factor_ids: ['total', 'price'], stated_in_brief: true });
     expect(mapLivingModel(after).withheld).toEqual([]);
     expect(after.aims[0]!.source).toBe(before.aims[0]!.source);
+  });
+
+  it('P11/P12: successive nested leaf and sibling edits retain calculated subtotals, identities and clean readiness', () => {
+    for (const [i, model] of nested().entries()) {
+      const [leaf, first, second, price, levels] = i === 0
+        ? ['uk', 120, 130, 41, [6800, 7200, 7380]] as const
+        : ['retail', 1000, 1100, 4, [3150, 3450, 4600]] as const;
+      let after = save(model);
+      for (const [step, [id, value]] of ([[leaf, first], [leaf, second], ['price', price]] as const).entries()) {
+        after = edit(after, id, value);
+        expect(after.factors.find((f) => f.id === 'revenue')).toMatchObject({ value: levels[step], source: 'unverified', quote: null });
+        expect(node(after, 'revenue').observed_state).toMatchObject({ raw_value: levels[step] });
+        expect(node(after, 'revenue').nonlinear_identity).toEqual({ operation: 'product',
+          factor_ids: [i === 0 ? 'total' : 'loaves', 'price'], stated_in_brief: true });
+        const mapped = mapLivingModel(after);
+        expect(mapped.withheld).toEqual([]);
+        const persisted = projectCorePostimageForPersistence(GraphV3.parse({ ...mapped.graph, living_model: after }));
+        expect(assessRouteAdmission(persisted).readiness_issues).toEqual([]);
+      }
+    }
+  });
+
+  it('P13: successive single-level part edits keep the total current without re-authoring it', () => {
+    const after = edit(edit(bakery(), 'price', 3.2), 'loaves', 1000);
+    expect(after.factors[2]).toMatchObject({ value: 3200, source: 'unverified', quote: null, estimate_by: null });
+    expect(node(after, 'revenue').nonlinear_identity).toEqual(identity);
+    expect(mapLivingModel(after).withheld).toEqual([]);
+  });
+
+  it('NEGATIVE: a calculated subtotal never transfers authorship from an estimated or unknown leaf', () => {
+    for (const [i, model] of nested().entries()) {
+      const leaf = i === 0 ? 'uk' : 'retail';
+      const once = edit(model, leaf, i === 0 ? 120 : 1000);
+      for (const patch of [{ estimate_by: 'olumi' as const }, { source: 'unverified' as const, quote: null }]) {
+        const before = save(once);
+        Object.assign(before.factors.find((f) => f.id === leaf)!, patch);
+        const total = before.factors.find((f) => f.id === 'revenue')!;
+        const after = edit(before, 'price', i === 0 ? 41 : 4);
+        expect(after.factors.find((f) => f.id === 'revenue')).toEqual(total);
+        expect(after.history).toEqual(before.history);
+        expect(mapLivingModel(after).withheld).toContainEqual({ id: 'revenue', reason: 'identity_inconsistent' });
+      }
+    }
   });
 });
