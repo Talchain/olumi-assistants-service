@@ -407,7 +407,7 @@ describe('DL 22 Oct (Lenses\' step 3): the person\'s approved chat correction is
     }
   });
 
-  it('Codex r4-r7 on #3661: the figure itself, never one range end; words with a sign, dash or exponent attest nothing, nor does a negative', () => {
+  it('Codex r4-r8 on #3661: only a plainly written figure, never one range end; anything glued to a figure, a sign or a dash attests nothing', () => {
     const markOf = (said: string, figure: Partial<LivingModelT['factors'][number]>) => {
       const sent = structuredClone(KNOWN_ANSWER);
       sent.factors[0] = { ...sent.factors[0]!, ...figure, source: 'user', quote: said };
@@ -417,14 +417,18 @@ describe('DL 22 Oct (Lenses\' step 3): the person\'s approved chat correction is
     expect(markOf('Make f 0.6.', { value: 0.6, high: null }), 'the value itself').toBe('chat');
     expect(markOf('Make f .6.', { value: 0.6 }), '".6" is 0.6').toBe('chat');
     expect(markOf('f is between 0.3 and 0.7.', { value: null, low: 0.3, high: 0.7 }), 'a range, both ends').toBe('chat');
-    expect(markOf('f is £10k to £20k.', { value: null, low: 10000, high: 20000 }), 'a range with suffixes').toBe('chat');
+    expect(markOf('f is £10,000 to £20,000.', { value: null, low: 10000, high: 20000 }), 'a range with currency and thousands').toBe('chat');
+    expect(markOf('About 950 loaves (60%).', { value: 60 }), 'a percentage in brackets').toBe('chat');
     // A value nobody said is never theirs.
     expect(markOf('Make f 0.6.', { value: 0.5, high: 0.6 }), 'one range end never attests an unstated value').toBeNull();
     expect(markOf('f is between 0.3 and 0.7.', { value: null, low: 0.3, high: 0.8 }), 'a range needs both ends stated').toBeNull();
     // Any sign, dash or exponent: nothing is read, so nothing is marked (the brief's, as before); a negative is never marked.
     for (const [said, value] of [['Make f -0.6.', 0.6], ['Make f -0.6.', -0.6], ['f goes from 5 to -3.', -3], ['f is £10k-£20k.', -20000],
       ['f is .6k-.7k.', -700], ['f goes from £5 to GBP10-20.', -20], ['f goes from £5 to GBP10-20.', 20], ['f is 5 units -8 units.', 8],
-      ['f is - 8 units.', -8], ['f is 1e-3.', 3], ['f is 1e3.', 1], ['f is 1E+3.', 3], ['f is 2.5e3.', 2.5], ['f is minus 4.', 4], ['f is 0.3\u20130.7.', 0.7]] as const) {
+      ['f is - 8 units.', -8], ['f is 1e-3.', 3], ['f is 1e3.', 1], ['f is 1E+3.', 3], ['f is 2.5e3.', 2.5], ['f is minus 4.', 4], ['f is 0.3\u20130.7.', 0.7],
+      // Codex r8 (unicode minus, powers, other spaces and digits) and the rest of the glued family.
+      ['f is \uFF0D8.', 8], ['f is 10^3.', 3], ['f is £1\u202F000.', 1], ['f is \uFF112.', 2], ['f is £1 000.', 1], ['f is £1 000.', 0], ['f is 3/4.', 3],
+      ['f is 10:30.', 30], ['f is 950k.', 950], ['f is 5\u2019000.', 5], ['f is 1.000.', 1], ['f is 12,5.', 12], ['f is Q3.', 3], ['f is v2.', 2]] as const) {
       expect(markOf(said, { value }), `${said} / ${value}`).toBeNull();
     }
   });

@@ -14,7 +14,6 @@
  */
 import type { LivingModelT, LivingSourceT } from '../../../schemas/living-model.js';
 import { stable } from './diff.js';
-import { findStatedAmounts } from '../../../cee/provenance/stated-amounts.js';
 
 export interface Relabelled { readonly id: string; readonly was: LivingSourceT }
 export interface Kernelled { readonly model: LivingModelT; readonly relabelled: readonly Relabelled[] }
@@ -139,13 +138,18 @@ export function applyKernel(model: LivingModelT, verifiedWords: readonly string[
   // or a first draft, says nothing (null): the brief's, as before.
   const briefWords = typeof brief === 'string' ? plain(brief) : null;
   // The figure itself (Codex r4 on #3661): its value, or for a range with no value both of its ends, so one range end never
-  // attests a value nobody said. A wrong mark is worse than a missed one (a missed mark leaves the brief's, as before), so words
-  // with any minus, dash, sign word or exponent attest nothing, and a negative figure is never marked: reading a sign from
-  // free text failed four ways ("-0.6", "£10k-£20k", "GBP10-20", "1e-3"; Codex r4-r7).
+  // attests a value nobody said. A wrong mark is worse than a missed one (a missed mark leaves the brief's, as before), so only a
+  // PLAINLY written figure counts: ASCII digits, comma thousands and an optional decimal part, standing alone between the start,
+  // a space, a bracket or a currency sign and the end, a space, punctuation or "%". Anything glued to it (a suffix, exponent,
+  // fraction, time, other digits or spaces, a second digit group) leaves it unread, and words with any minus or dash, or a sign
+  // word, attest nothing: reading figures out of free text failed every other way (Codex r4-r8).
   const statesFigure = (quote: string, f: Omit<LivingModelT['factors'][number], 'said_in'>): boolean => {
-    const text = quote.replace(/(^|[^\d])\.(\d)/g, '$10.$2');
-    if (/[-−–—]|\d[eE][+]?\d|\b(minus|negative)\b/i.test(text)) return false;
-    const said = findStatedAmounts(text).map((a) => a.magnitude);
+    const text = quote.replace(/(^|[\s(£$€])\.(\d)/g, '$10.$2');
+    if (/[-\u2212\u2013\u2014\uFE63\uFF0D]|\b(minus|negative)\b/i.test(text)) return false;
+    const said = [...text.matchAll(/(?<![^\s(£$€])(?<!\d\s)(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d+))?(?![^\s.,;:!?)%]|[.,]\d|\s\d)/g)]
+      // "1.000" is a thousand in much of Europe: three decimals on a whole number is never read.
+      .filter((m) => !(m[2]?.length === 3 && Number(m[1]!.replace(/,/g, '')) !== 0))
+      .map((m) => Number(`${m[1]!.replace(/,/g, '')}${m[2] === undefined ? '' : `.${m[2]}`}`));
     const stated = (v: number) => said.some((m) => Math.abs(v - m) <= 1e-9 * Math.max(1, m));
     return f.value !== null ? stated(f.value) : f.low !== null && f.high !== null && stated(f.low) && stated(f.high);
   };
