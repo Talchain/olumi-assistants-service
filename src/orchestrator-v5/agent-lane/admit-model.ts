@@ -6070,9 +6070,10 @@ function admitOnce(
   for (const [carrierId, carrier] of carriers) {
     if (carrier.operation !== 'product') continue;
     const carrierNode = levers.nodes.find((n) => n.id === carrierId);
-    const pureZero = carrierNode?.observed_state?.value === 0 && !(carrier.addends?.length)
-      && finalEdges.every((e) => e.to !== carrierId || carrier.factor_ids.includes(e.from))
-      && carrier.factor_ids.every((id) => carriers.get(id)?.operation !== 'accumulation');
+    // At this admission stage carriers contain only literal products/sums, with no addends
+    // or accumulation carriers. Any non-part parent is still an unexplained extra cause.
+    const pureZero = carrierNode?.observed_state?.value === 0
+      && finalEdges.every((e) => e.to !== carrierId || carrier.factor_ids.includes(e.from));
     if (levelled(carrierNode) && !pureZero) continue;
     for (const partId of carrier.factor_ids) {
       const part = levers.nodes.find((n) => n.id === partId);
