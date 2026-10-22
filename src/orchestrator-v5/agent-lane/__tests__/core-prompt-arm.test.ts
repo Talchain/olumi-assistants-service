@@ -121,6 +121,19 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(CORE_REPLY_INSTRUCTION).not.toContain('until they say by when');
   });
 
+  it('first-model guidance preserves material causal paths before figures, without item-count quotas (DL lease, 22 Oct)', () => {
+    // Static text contract only; Track 3 measures the resulting models on the served candidate.
+    expect(createHash('sha256').update(CORE_DRAFTING_GUIDANCE, 'utf8').digest('hex')).toBe('faeb76e1f5a43aa9c56b7cda553db9b9bf3bb2133be91b8dc740058c86ce1881');
+    expect(CORE_DRAFTING_GUIDANCE).toContain('every material causal path the person states or proposes, including each intermediate effect and distinct outcome');
+    expect(CORE_DRAFTING_GUIDANCE).toContain('complete paths and distinct outcomes before adding figures');
+    expect(CORE_DRAFTING_GUIDANCE).toContain('a missing figure never justifies replacing a material mechanism with a proxy result or a caveat');
+    for (const quota of ['5 to 8 items', '8 to 14', 'up to about 16']) expect(CORE_DRAFTING_GUIDANCE).not.toContain(quota);
+    // The complete-estimate and human-target rules remain: no return to blank Olumi items.
+    expect(CORE_DRAFTING_GUIDANCE).toContain("Then complete Olumi's own items with labelled provisional estimates");
+    expect(b).toContain("Each item Olumi adds is complete and visibly Olumi's");
+    expect(b).toContain("never set the goal's target figure (ask for it)");
+  });
+
   it('the builder\u2019s effort arm is set only on a core turn that asks for it; the default is the banked medium (A/B/C 22 Oct)', () => {
     expect(coreEffortArmOf('core', 'medium')).toBe('medium');
     expect(coreEffortArmOf('core', 'low')).toBe('low');
