@@ -101,8 +101,12 @@ export const LivingAim = z.object({
       'The day Olumi read the date, as YYYY-MM-DD. Olumi records it: keep a saved one unchanged; null for a new reading.'),
     /** The reference the target is measured from, as written ("today", "last quarter"); null when none. */
     baseline: z.string().nullable(),
-    /** The quantity's current level, in the target's unit, when stated. Unknown is null, never 0. */
-    current: z.number().nullable().describe("Today's level of the quantity, in the target's unit, when stated. Unknown is null, never 0."),
+    /**
+     * The quantity's current level, in the target's unit, when stated. Unknown is null, never 0. DL 22 Oct (marketing on
+     * 68ca54f0-b, "20 new customers within the first 3 months" held as goal_level_unknown): a count not yet started is 0.
+     */
+    current: z.number().nullable().describe("Today's level of the quantity, in the target's unit, when stated. Unknown is null, never 0. "
+      + "A count that has not started yet (new customers in the first 3 months after a launch, sales next quarter) is 0 today by its own definition: set 0 and never ask for it; a count that began earlier is not 0."),
     /** 'user' only when the person set today's level themselves (a canvas edit); otherwise null: the aim's attribution covers it. */
     current_source: z.enum(['user']).nullable(),
     /** Today's level's own unit when it differs from the target's ("+10%" on "£ per month"). A model saved before reads null. */
