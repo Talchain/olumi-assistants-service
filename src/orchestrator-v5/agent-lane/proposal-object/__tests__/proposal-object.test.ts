@@ -601,10 +601,40 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
     for (let k = 1; k <= 9; k += 1) expect(long.some((n) => n.text.includes(`${10 + k} units`)), `setting ${k}`).toBe(true);
     // (6) Key order never changes what is shown: the same change with keys reordered binds the same digest.
     const reorder = (o: Record<string, unknown>) => Object.fromEntries(Object.entries(o).reverse());
-    const a = card([ch('factor:f', fac({}), fac({ quote: 'our new words', source: 'party', party: 'Acme' }))]);
-    const b = card([ch('factor:f', reorder(fac({})), reorder(fac({ quote: 'our new words', source: 'party', party: 'Acme' })))]);
-    expect(notesOf(a).map((n) => n.text)).toEqual(['Changes \u2018Orders\u2019: whose it is, the words recorded (Acme\u2019s).']);
+    // Two parts said by name only (a unit, and whose a figure is, with no figure yet): their order is the sorted keys'.
+    const a = card([ch('factor:f', fac({}), fac({ unit: 'boxes', estimate_by: 'olumi' }))]);
+    const b = card([ch('factor:f', reorder(fac({})), reorder(fac({ unit: 'boxes', estimate_by: 'olumi' })))]);
+    expect(notesOf(a).map((n) => n.text)).toEqual(['Changes \u2018Orders\u2019: whose figure it is, its unit (yours).']);
+    // Whose an item is, and the words recorded for it, are said with their new content.
+    const said = notesOf(card([ch('factor:f', fac({}), fac({ quote: 'our new words', source: 'party', party: 'Acme' }))]))[0]!.text;
+    expect(said).toBe('\u2018Orders\u2019 is now Acme\u2019s (was yours); \u2018Orders\u2019: the words recorded are now \u201cour new words\u201d.');
     expect(notesOf(b).map((n) => n.text)).toEqual(notesOf(a).map((n) => n.text));
+  });
+  it('buddy BLOCK on #3632: a risk\'s chance, window and what reduces it, an aim\'s target and an option\'s status are said with their content', async () => {
+    const { createProposal } = await import('../../proposal.js');
+    const { proposalPendingAction } = await import('../../durable-proposal.js');
+    const { agentProposalRecord } = await import('../record.js');
+    const card = (operations: unknown[]) => {
+      const p = createProposal({ scenario_id: SID, user_id: null, base_graph_identity_hash: 'pin', operations: operations as never,
+        provenance: { authored_by: 'model_proposed' }, validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: 'Core change' });
+      const carrier = proposalPendingAction(p, { id: `agent-approve-proposal:${p.proposal_id}`, label: p.public_label, message: 'Apply.' },
+        { scenario_id: SID, emitted_at_iso: new Date().toISOString() });
+      return agentProposalRecord(carrier, { nodes: [{ id: 'backup', label: 'Backup supplier' }], edges: [] })!;
+    };
+    const texts = (r: ReturnType<typeof card>) => (r.adds ?? []).flatMap((a) => (a.kind === 'change_note' ? [a.text] : []));
+    const ch = (path: string, before: unknown, after: unknown) => ({ op: 'living_change', path, value: { change: 'change', before, after } });
+    const risk = (more: Record<string, unknown>) => ({ id: 'r', label: 'Supplier fails', occurrence: { estimate_by: null, low: 0.1, high: 0.2 }, horizon_months: 12, horizon_by: null,
+      mitigations: [], source: 'user', party: null, quote: 'our supplier may fail', ...more });
+    expect(texts(card([ch('risk:r', risk({}), risk({ occurrence: { estimate_by: 'olumi', low: 0.3, high: 0.5 }, horizon_months: 6 }))])))
+      .toEqual(['‘Supplier fails’: was a 10% to 20% chance within 12 months (yours), now a 30% to 50% chance within 6 months (Olumi’s estimate).']);
+    expect(texts(card([ch('risk:r', risk({}), risk({ mitigations: [{ factor_id: 'backup', reduction: 0.7, source: 'user', party: null, quote: 'cuts it by 70%' }] }))])))
+      .toEqual(['‘Supplier fails’: now reduced by ‘Backup supplier’ (70% less likely) (yours).']);
+    const aim = (target: Record<string, unknown>) => ({ id: 'a', text: 'Grow revenue', status: 'current', source: 'user', party: null, quote: 'grow revenue',
+      target: { quantity: 'revenue', comparator: '>=', value: 100, low: null, high: null, unit: '£k', by_when: 'next year', period_months: null, baseline: null, current: null, current_source: null, current_unit: null, change_kind: null, source: null, ...target } });
+    expect(texts(card([ch('aim:a', aim({}), aim({ value: 120, current: 90 }))])))
+      .toEqual(['‘Grow revenue’: was target at least 100 £k by next year, now target at least 120 £k by next year, today 90 £k (yours).']);
+    const opt = (status: string) => ({ id: 'o', label: 'Open a second site', settings: [], status, developed_from: null, source: 'user', party: null, quote: 'second site' });
+    expect(texts(card([ch('option:o', opt('feasible'), opt('infeasible'))]))).toEqual(['‘Open a second site’ is now ruled out (kept in view) (yours).']);
   });
   it('RED classifier assigns Agent factor and link kinds exhaustively', () => {
     expect(FIELD_CLASS_BY_OP.set_factor_value).toBe('factor_value');
