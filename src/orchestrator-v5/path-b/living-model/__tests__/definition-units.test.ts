@@ -35,10 +35,17 @@ const reasons = (m: LivingModelT) => mapLivingModel(m).withheld.map((w) => `${w.
 
 describe('a definition\'s units are asked for so they compose, so the person\'s definition can be worked out', () => {
   it('the schema the drafter is sent asks for the quantity\'s period, a price per thing and a count of that thing', () => {
-    expect(sent).toContain('Write the units so the parts\' units make the quantity\'s, in the person\'s meaning');
+    expect(sent).toContain('Write the units so the parts\' units make the quantity\'s, in the person\'s meaning where the brief makes it plain');
     expect(sent).toContain('(\\"£ per day\\" for daily revenue, not \\"£\\")');
     expect(sent).toContain('(\\"£ per coffee\\", not \\"£ each\\")');
-    expect(sent).toContain('a count names the same thing and period (\\"coffees per day\\")');
+    expect(sent).toContain('the period sits on exactly one part, wherever the person put it (\\"coffees per day\\" × \\"£ per coffee\\"; \\"customers\\" × \\"£ per customer per month\\")');
+    expect(sent).toContain('This never changes the unit of a factor outside a definition.');
+  });
+
+  it('the period sits on one part only: a monthly price × a count of customers composes; the period on both does not', () => {
+    const monthly = (count: string) => reasons(cafe({ goal: '£ per month', count, price: '£ per customer per month' }));
+    expect(monthly('customers').filter((r) => r.startsWith('revenue:identity'))).toEqual([]);
+    expect(monthly('customers per month')).toContain('revenue:identity_unit_mismatch');
   });
 
   it('BEFORE (served ed17ce15): "£" from "coffees a day" × "£ each" cannot be proved, so the identity is held', () => {
