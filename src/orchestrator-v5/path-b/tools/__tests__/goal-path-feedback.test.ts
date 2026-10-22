@@ -70,7 +70,7 @@ describe('a draft whose own encoding withholds its goal is said back once, then 
     const restructure = { offered: false };
     const first = await buildModel({ dispatch: p.dispatch, restructure }, draftCtx, { brief: BRIEF, model: withCondition('prerequisite') });
     expect(first).toEqual({ status: 'refused', reason: 'goal_path_withheld', detail: RESTRUCTURE_DRAFT,
-      data: { goal_path: [{ id: `condition:${PREREQ}`, reason: 'condition_not_in_slice', item: PREREQ }], save_outcome: 'VERIFIED_NO_WRITE' } });
+      data: { goal_path: [{ id: `condition:${PREREQ}`, reason: 'condition_not_in_slice', item: PREREQ, applies_to: ['f_g'] }], save_outcome: 'VERIFIED_NO_WRITE' } });
     expect(p.registered).toHaveLength(0);
     expect(restructure.offered).toBe(true);
 
@@ -91,25 +91,22 @@ describe('a draft whose own encoding withholds its goal is said back once, then 
     expect(goalOf(p.saved())?.goal_threshold).toBeUndefined();
   });
 
-  it('an unsigned link and an "exact" figure on the path are encoding causes too, each named by its link', async () => {
+  it('Codex r1: ONLY a prerequisite is offered. An unsigned link (maybe the person\'s own uncertainty), an "exact" figure and a cause into a defined total are withheld and saved as before', async () => {
     const unsigned = structuredClone(KNOWN_ANSWER);
     unsigned.links[0] = { ...unsigned.links[0]!, effect: { ...unsigned.links[0]!.effect, sign: null } };
     const exact = structuredClone(KNOWN_ANSWER);
     exact.links[0] = { ...exact.links[0]!, effect: { ...exact.links[0]!.effect, form: 'exact', sd: null } };
     for (const [model, reason] of [[unsigned, 'link_sign_unknown'], [exact, 'exact_not_drawable']] as const) {
+      expect(mapLivingModel(model).rests_on, 'withheld on the path, as before').toEqual([{ id: 'f_g', reason }]);
       const p = product(null);
-      const out = await buildModel({ dispatch: p.dispatch, restructure: { offered: false } }, draftCtx, { brief: BRIEF, model });
-      expect(out).toMatchObject({ status: 'refused', reason: 'goal_path_withheld', data: { goal_path: [{ id: 'f_g', reason, item: 'f → Reach 100 units' }] } });
-      expect(p.registered).toHaveLength(0);
+      const restructure = { offered: false };
+      const out = await buildModel({ dispatch: p.dispatch, restructure }, draftCtx, { brief: BRIEF, model });
+      expect(out, JSON.stringify(out)).toMatchObject({ status: 'ok', mutated: true });
+      expect(restructure.offered).toBe(false);
     }
-  });
-
-  it('a cause into a total defined by its parts is an encoding cause; figures that contradict the definition are the person\'s to settle', () => {
-    expect(goalPathEncodingCauses(F1_OTHER_CAUSE, mapLivingModel(F1_OTHER_CAUSE)))
-      .toEqual([{ id: 'mkt_total', reason: 'identity_other_cause', item: 'UK marketing spend → Total customers' }]);
-    // CONTRAST: withheld on the same path, but no structure fixes it without a figure.
-    expect(mapLivingModel(F1_CONTRADICTED).rests_on).toEqual([{ id: 'uk_total', reason: 'identity_contradicted' }]);
-    expect(goalPathEncodingCauses(F1_CONTRADICTED, mapLivingModel(F1_CONTRADICTED))).toEqual([]);
+    expect(mapLivingModel(F1_OTHER_CAUSE).rests_on).toEqual([{ id: 'mkt_total', reason: 'identity_other_cause' }]);
+    expect(goalPathEncodingCauses(mapLivingModel(F1_OTHER_CAUSE))).toEqual([]);
+    expect(goalPathEncodingCauses(mapLivingModel(F1_CONTRADICTED))).toEqual([]);
   });
 
   it('CONTRAST: a cause only the person\'s input settles, a clean model, an assumption or a challenge: saved on the first call, no offer used', async () => {
@@ -138,7 +135,7 @@ describe('a change answers once for the goal-path causes it ADDS', () => {
     const restructure = { offered: false };
     const first = await proposeLivingChange({ dispatch: p.dispatch, proposals, restructure }, changeCtx, change(withCondition('prerequisite')));
     expect(first).toEqual({ status: 'refused', reason: 'goal_path_withheld', detail: RESTRUCTURE_CHANGE,
-      data: { goal_path: [{ id: `condition:${PREREQ}`, reason: 'condition_not_in_slice', item: PREREQ }] } });
+      data: { goal_path: [{ id: `condition:${PREREQ}`, reason: 'condition_not_in_slice', item: PREREQ, applies_to: ['f_g'] }] } });
     expect(restructure.offered).toBe(true);
     const second = await proposeLivingChange({ dispatch: p.dispatch, proposals, restructure }, changeCtx, change(withCondition('challenge')));
     expect(second).toMatchObject({ status: 'ok', data: { proposal_id: expect.any(String) } });
@@ -154,6 +151,16 @@ describe('a change answers once for the goal-path causes it ADDS', () => {
     const out = await proposeLivingChange({ dispatch: p.dispatch, proposals: new ProposalStore(), restructure }, changeCtx, change(next));
     expect(out, JSON.stringify(out)).toMatchObject({ status: 'ok', data: { proposal_id: expect.any(String) } });
     expect(restructure.offered).toBe(false);
+  });
+
+  it('Codex r1: a prerequisite with the same words on ANOTHER item is one the change adds: no card yet', async () => {
+    const base = withCondition('prerequisite');
+    const p = product(base);
+    const next = structuredClone(base);
+    next.conditions.push({ ...next.conditions[0]!, applies_to: ['f'] });
+    const out = await proposeLivingChange({ dispatch: p.dispatch, proposals: new ProposalStore(), restructure: { offered: false } }, changeCtx, change(next));
+    expect(out).toMatchObject({ status: 'refused', reason: 'goal_path_withheld',
+      data: { goal_path: [{ id: `condition:${PREREQ}`, reason: 'condition_not_in_slice', item: PREREQ, applies_to: ['f'] }] } });
   });
 
   it('one offer per turn, shared: once the draft used it, a change adding a cause gets its card', async () => {

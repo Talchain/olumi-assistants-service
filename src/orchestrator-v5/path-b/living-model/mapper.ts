@@ -63,8 +63,11 @@ export interface Mapped {
   readonly frames: ReadonlyMap<string, Frame>;
   /** Premises the result is worked out under that nobody stated, said beside it (amendment 1: "carrying on leaves X unchanged"). */
   readonly assumed: readonly { readonly id: string; readonly text: string }[];
-  /** When the goal's chance is withheld (`chance_rests_on_withheld`): the items on its path that withheld it, each with its reason. */
-  readonly rests_on?: readonly Withheld[];
+  /**
+   * When the goal's chance is withheld (`chance_rests_on_withheld`): the items on its path that withheld it, each with its reason;
+   * a condition with the items it qualifies, since its words alone do not tell two conditions apart (Codex r1 on #3672).
+   */
+  readonly rests_on?: readonly (Withheld & { readonly applies_to?: readonly string[] })[];
 }
 
 const STRUCTURAL = { strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' } as const;
@@ -827,7 +830,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     goalNode.nonlinear_identity = { operation: 'sum', factor_ids: [exactSum.today, exactSum.lever], stated_in_brief: false };
   }
 
-  const restsOn: Withheld[] = [];
+  const restsOn: (Withheld & { readonly applies_to?: readonly string[] })[] = [];
   // A chance rests on everything on the goal's path. Anything there that this slice left out of the engine graph (an
   // unsigned or unplaceable link, an option setting it could not convert) would change the calculation, so the chance is
   // withheld: the goal keeps no threshold, and says why (AIE, 20 Oct: withhold the dependent calculation, never compute it
@@ -873,7 +876,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
       for (const k of Object.keys(goalNode)) if (k.startsWith('goal_threshold') || k === 'goal_direction') delete goalNode[k];
       hold(goal.id, 'chance_rests_on_withheld');
       restsOn.push(...causes, ...dropped.map((id) => ({ id, reason: 'setting_not_convertible' as const })),
-        ...conditioned.map((c) => ({ id: `condition:${c.text}`, reason: 'condition_not_in_slice' as const })));
+        ...conditioned.map((c) => ({ id: `condition:${c.text}`, reason: 'condition_not_in_slice' as const, applies_to: [...c.applies_to] })));
     }
   }
 

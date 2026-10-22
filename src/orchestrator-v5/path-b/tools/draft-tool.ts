@@ -101,7 +101,7 @@ async function constructUnrecorded(deps: DraftDeps, ctx: DraftContext, args: Bui
   if (!mapped.graph.nodes.some((n) => n.kind !== 'decision')) return refused('model_empty');
   // ⭐ CLASS 3: a draft whose own encoding withholds its goal's chance is said back ONCE, before any save or review, so the agent
   // can restructure it in this turn; its next draft is saved as it is (`goal-path.ts`).
-  const causes = goalPathEncodingCauses(kernelled.model, mapped);
+  const causes = goalPathEncodingCauses(mapped);
   if (causes.length > 0 && deps.restructure !== undefined && !deps.restructure.offered) {
     deps.restructure.offered = true;
     return refused('goal_path_withheld', RESTRUCTURE_DRAFT, { goal_path: causes });

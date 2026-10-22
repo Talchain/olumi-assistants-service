@@ -110,7 +110,7 @@ export async function proposeLivingChange(deps: Deps, ctx: Ctx, args: LivingChan
   // ⭐ CLASS 3: a change that ADDS a cause withholding the goal's chance through its own encoding is said back ONCE, before its
   // card; what the saved model already held is not this change's to answer for (`goal-path.ts`).
   const introduced = deps.restructure === undefined || deps.restructure.offered ? []
-    : addedCauses(goalPathEncodingCauses(base.model, mapLivingModel(base.model, savedGoal(base.saved.graph))), goalPathEncodingCauses(next, mapped));
+    : addedCauses(goalPathEncodingCauses(mapLivingModel(base.model, savedGoal(base.saved.graph))), goalPathEncodingCauses(mapped));
   if (introduced.length > 0) {
     deps.restructure!.offered = true;
     return refused('goal_path_withheld', RESTRUCTURE_CHANGE, { goal_path: introduced });
