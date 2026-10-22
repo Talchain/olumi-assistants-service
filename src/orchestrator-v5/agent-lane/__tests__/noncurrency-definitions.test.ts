@@ -27,7 +27,6 @@ describe('explicit non-currency rate times its own count or duration', () => {
     ['slash and normalisation', 'sites', 'site/team', 'TEAMS'],
     ['qualified count', 'sites', 'sites per regional team', 'regional teams'],
     ['period retained', 'sites per month', 'sites per team per month', 'teams'],
-    ['share base retained', '% of output', '% of output per team', 'teams'],
   ])('%s composes in either operand order', (_row, whole, rate, count) => {
     expect(compose(whole, rate, count)).toEqual({ kind: 'proof', rate: 'rate', count: 'count', code: '' });
     expect(compose(whole, count, rate)).toEqual({ kind: 'proof', rate: 'count', count: 'rate', code: '' });
@@ -46,7 +45,10 @@ describe('explicit non-currency rate times its own count or duration', () => {
     ['missing denominator', 'sites', 'sites', 'teams'],
     ['unmatched period', 'sites per year', 'sites per team per month', 'teams'],
     ['unmatched share base', '% of output', '% of revenue per team', 'teams'],
-    ['scale cannot disappear', '£', '£k per team', 'teams'],
+    ['scale cannot disappear', 'users', 'k users per team', 'teams'],
+    ['a share whole is refused (a rate of change compounds)', '% of output', '% of output per team', 'teams'],
+    ['a percent rate over time is refused', '%', '% per month', 'months'],
+    ['a points whole is refused', 'pp', 'pp per year', 'years'],
     ['unrelated dimension elsewhere in the rate', 'sites', 'sites per team per office', 'teams'],
   ])('%s is refused', (_row, whole, rate, count) => {
     expect(compose(whole, rate, count)).toEqual({ kind: 'no' });

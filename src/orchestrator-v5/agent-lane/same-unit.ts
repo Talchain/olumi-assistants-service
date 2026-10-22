@@ -562,7 +562,8 @@ export function unitsCompose(goalUnit: unknown, goalLabel: string, a: { unit: un
  */
 export function quantityUnitsCompose(goalUnit: unknown, a: { unit: unknown; label: string }, b: { unit: unknown; label: string }): Composition {
   const whole = readUnitParts(goalUnit);
-  if (whole === null || whole.kind === 'currency') return NO;
+  // A share or points whole is never this product: a rate of change compounds (3% a month for 12 months is not 36%).
+  if (whole === null || whole.kind !== 'count') return NO;
   for (const [rate, count] of [[a, b], [b, a]] as const) {
     const quantity = readUnitParts(count.unit);
     if (quantity?.kind !== 'count' || quantity.per !== null || quantity.period !== null || readUnitParts(rate.unit) === null) continue;
