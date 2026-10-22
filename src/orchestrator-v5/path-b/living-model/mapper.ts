@@ -134,6 +134,102 @@ export function goalIdOf(graph: unknown): string | undefined {
 /** The options that keep a saved graph's goal (none when it has none). */
 export const savedGoal = (graph: unknown): { goal?: string } => { const goal = goalIdOf(graph); return goal === undefined ? {} : { goal }; };
 
+// The other half of the one composition rule (DL 22 Oct, served board 6ce4f6ae: "£ per loaf" × "loaves a week" was refused):
+// money per X times a count of X is money, with ONE period across the two parts and it the defined quantity's own
+// ("£ per week"). `unitsCompose` reads money per X per period × a count; the denominator naming the count's noun is the
+// dimensional proof either way. Unscaled, unqualified units only; two periods ("£ per loaf per week" × "loaves a week") never.
+// Every word is accounted for, by its place (Codex r1 + r2 on #3627: flattening dropped a count's own denominator,
+// "users per account per week"; collapsed "week/week"; folded "thousand" into the noun; read "person-weeks" as a rate).
+// A period is a rate's only as the unit's LAST word, an adverb ("weekly") or after per, "/", a or an; any other period
+// word is a duration or a second period and refuses it.
+const RATE_CONNECTORS = new Set(['per', '/', 'a', 'an']);
+const unitShapeOf = (u: string | null): { readonly head: readonly string[]; readonly period: string | null } | null => {
+  const ws = u === null ? [] : words(u);
+  let end = ws.length;
+  let period: string | null = null;
+  const last = ws[end - 1];
+  if (last !== undefined && periodAdverb(last) !== null) { period = periodAdverb(last); end -= 1; }
+  else if (last !== undefined && periodNoun(last) !== null) {
+    if (end < 2 || !RATE_CONNECTORS.has(ws[end - 2]!)) return null;
+    period = periodNoun(last); end -= 2;
+  }
+  const head = ws.slice(0, end);
+  return head.some((w) => periodNoun(w) !== null || periodAdverb(w) !== null) ? null : { head, period };
+};
+const plainMoney = (w: string | undefined, code: string | null): boolean => {
+  const m = w === undefined ? null : readUnitParts(w);
+  return m !== null && m.kind === 'currency' && m.scale === 1 && m.per === null && m.period === null && m.code === code;
+};
+const ratePerCountComposes = (whole: string | null, a: string | null, b: string | null): boolean => {
+  const g = readUnitParts(whole);
+  const gs = unitShapeOf(whole);
+  if (g === null || g.kind !== 'currency' || gs === null || gs.head.length !== 1 || !plainMoney(gs.head[0], g.code)) return false;
+  return ([[a, b], [b, a]] as const).some(([m, c]) => {
+    const rate = unitShapeOf(m);
+    const count = unitShapeOf(c);
+    if (rate === null || count === null || readUnitParts(c)?.kind !== 'count') return false;
+    // A CLOSED grammar (Codex r3 on #3627: "each"/"every" made a two-dimension denominator read as one): money, then per or
+    // "/", then ONE word, and the count is that same ONE word. A many-word denominator ("per user account") is refused,
+    // never parsed: the person is asked, as for any identity that cannot be worked out as stated.
+    const [money, sep, den, ...extra] = rate.head;
+    const [noun, ...more] = count.head;
+    const oneWord = (w: string | undefined): w is string => w !== undefined && /^[a-z]+$/.test(w) && !RATE_CONNECTORS.has(w);
+    if (!plainMoney(money, g.code) || (sep !== 'per' && sep !== '/') || extra.length > 0 || more.length > 0 || !oneWord(den) || !oneWord(noun)) return false;
+    if (singular(den) !== singular(noun)) return false;
+    const periods = [rate.period, count.period].filter((p): p is string => p !== null);
+    return periods.length <= 1 && (periods[0] ?? null) === gs.period;
+  });
+};
+
+type Definition = NonNullable<LivingModelT['factors'][number]['defined_as']>;
+/**
+ * What a definition makes, and why it cannot be worked out as stated, by ONE rule for the identity the engine evaluates and
+ * for the goal's level today it gives (a part unknown, units that do not compose, a stated level its parts do not make). Its
+ * place in the graph (a carrier, no cycle) is the identity's own check.
+ */
+function definitionCheck(model: LivingModelT, def: Definition, itemId: string, unit: string | null, label: string, level: number | null):
+  { readonly reason?: WithheldReason; readonly made: number; readonly parts: readonly LivingModelT['factors'][number][] } {
+  const { op, of } = def;
+  const found = of.map((id) => model.factors.find((f) => f.id === id));
+  const values = found.map((p) => p?.value ?? null);
+  // Exact: a definition's stated level is what its parts make. The engine would rescale a product to fit (ISL's k).
+  const made = op === 'sum' ? values.reduce<number>((a, v) => a + (v ?? 0), 0) : values.reduce<number>((a, v) => a * (v ?? 0), 1);
+  if (of.length < 2 || new Set(of).size !== of.length || of.includes(itemId) || found.some((p) => p === undefined)
+    || (op === 'product' && of.length !== 2)) return { reason: 'identity_not_in_slice', made, parts: [] };
+  const parts = found as LivingModelT['factors'][number][];
+  const reason: WithheldReason | undefined = values.some((v) => v === null) ? 'identity_part_unknown'
+    : (op === 'sum' ? !parts.every((p) => sameUnit(p.unit, unit))
+      : unitsCompose(unit, label, { unit: parts[0]!.unit, label: parts[0]!.label }, { unit: parts[1]!.unit, label: parts[1]!.label }).kind !== 'proof'
+        && !ratePerCountComposes(unit, parts[0]!.unit, parts[1]!.unit))
+      ? 'identity_unit_mismatch'
+      : level !== null && Math.abs(level - made) > 1e-9 * Math.max(1, Math.abs(level)) ? 'identity_inconsistent' : undefined;
+  return { ...(reason === undefined ? {} : { reason }), made, parts };
+}
+
+/** No one's figure: `withSource` stamps nothing (a worked-out level, read as unverified, never as Olumi's estimate). */
+const UNSTAMPED = { source: 'unverified' as LivingSourceT, quote: null };
+
+/**
+ * The goal's level today worked out from the person's OWN definition of it ("revenue = coffees sold × price", theirs, not
+ * Olumi's reading) and their OWN point figures for its parts, by the identity's one rule (`definitionCheck`): never from a
+ * figure Olumi estimated or a range, never from a part itself defined by others (the identity's cycle check). Exact, so the
+ * engine's identity reproduces it; the mapper's consistency check would require a stated level to equal it anyway.
+ */
+function levelFromDefinition(model: LivingModelT, aim: LivingModelT['aims'][number]): { readonly level: number; readonly said: string } | undefined {
+  const def = aim.defined_as;
+  const t = aim.target;
+  if (def === null || t === null || !stated(def.source)) return undefined;
+  if (def.of.some((id) => model.factors.find((f) => f.id === id)?.defined_as)) return undefined;
+  const check = definitionCheck(model, def, aim.id, t.unit, t.quantity ?? aim.text, null);
+  if (check.reason !== undefined || !check.parts.every((p) => p.value !== null && p.low === null && p.high === null
+    && p.estimate_by !== 'olumi' && stated(p.source))) return undefined;
+  const say = (v: number, unit: string | null) => sayFigureAsWritten(v, unit ?? '');
+  const sign = def.op === 'sum' ? ' + ' : ' × ';
+  const said = `Today\u2019s ${t.quantity} is worked out from your figures: ${check.parts.map((p) => `${p.label} ${say(p.value!, p.unit)}`).join(sign)}`
+    + ` = ${say(check.made, t.unit)}.`;
+  return { level: check.made, said };
+}
+
 export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: string } = {}): Mapped {
   let model = living;
   const withheld: Withheld[] = [];
@@ -160,12 +256,16 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     const isChange = t !== null && (t.comparator === 'increase' || t.comparator === 'decrease');
     // The ONE reading of the aim's target (`aim-reading.ts`), shared with the gap that says its held reason.
     const lt = aimTargetReading(aim);
+    // Today's level as the person gave it, or (a level target only) worked out exactly from their own confirmed definition
+    // and their own figures (café pre-flight 23 Oct: 280 coffees × £3 is today's £840), never from Olumi's.
+    const derived = t !== null && t.current === null && !isChange ? levelFromDefinition(model, aim) : undefined;
+    const current = t === null ? null : t.current ?? derived?.level ?? null;
     if (typeof lt === 'string') { goalHeld = lt; hold(aim.id, lt); }
     else {
       const fromTarget = resolveGoalThresholdCapWithProvenance(undefined, lt.value, lt.unit ?? undefined, undefined);
       // The goal's frame holds today's level too: a ceiling below today would put today off its own scale ('level_frame').
-      const resolved = fromTarget !== null && fromTarget.provenance !== 'metric_scale' && t!.current !== null && t!.current * 1.25 > fromTarget.cap
-        ? { cap: t!.current * 1.25, provenance: 'level_frame' as const } : fromTarget;
+      const resolved = fromTarget !== null && fromTarget.provenance !== 'metric_scale' && current !== null && current * 1.25 > fromTarget.cap
+        ? { cap: current * 1.25, provenance: 'level_frame' as const } : fromTarget;
       if (resolved === null) hold(aim.id, 'goal_level_not_admitted');
       else {
         goal = { id: aim.id, cap: resolved.cap, unit: lt.unit ?? '' };
@@ -186,27 +286,29 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
               target_raw: lt.value, reference: 'today', period_months: t!.period_months, period_kind: 'at_end', effect_unit: lt.unit,
               effects_at_period_end: false } } : {}),
         });
-        if (t!.current === null) hold(aim.id, 'goal_level_unknown');
+        if (current === null) hold(aim.id, 'goal_level_unknown');
         else {
           // "Stay within" (Science, 21 Oct): a floor today already clears, or a ceiling today already sits under, is a valid
           // goal, scored on the level at the end of the horizon (not along the way). Only on the person's own level today
           // (an Olumi estimate is asked for), and read silently only when their words say so; otherwise Olumi asks once.
-          const stays = lt.comparator === '<=' ? t!.current <= lt.value : t!.current >= lt.value;
+          const stays = lt.comparator === '<=' ? current <= lt.value : current >= lt.value;
           const level = stays && !(t!.current_source === 'user' || stated(aim.source)) ? 'stay_within_base_not_theirs' as const
             : stays && !STAY_CUE[lt.comparator].test(aim.quote ?? '') ? 'stay_within_unconfirmed' as const
-            : admitGoalBaseline({ rawTarget: lt.value, rawBaseline: t!.current, cap: resolved.cap, ...(lt.comparator === '<=' ? { ceiling: true } : {}),
+            : admitGoalBaseline({ rawTarget: lt.value, rawBaseline: current, cap: resolved.cap, ...(lt.comparator === '<=' ? { ceiling: true } : {}),
               ...(stays ? { stayWithin: true } : {}) });
           if (typeof level === 'string') hold(aim.id, level);
           else if (!level.admitted) hold(aim.id, 'goal_level_not_admitted');
           else {
-            goalNode.observed_state = withSource({ value: level.normalised, baseline: level.normalised, raw_value: t!.current, cap: resolved.cap, unit: lt.unit ?? '' },
-              t!.current_source === 'user' ? { source: 'user', quote: null } : aim);
+            goalNode.observed_state = withSource({ value: level.normalised, baseline: level.normalised, raw_value: current, cap: resolved.cap, unit: lt.unit ?? '' },
+              // A worked-out level is no one's statement: unstamped, and said beside the result how it was worked out.
+              derived !== undefined ? UNSTAMPED : t!.current_source === 'user' ? { source: 'user', quote: null } : aim);
+            if (derived !== undefined) assumed.push({ id: aim.id, text: derived.said });
             // A change is measured from today only if carrying on as now leaves the quantity there (amendment 1): said beside it.
             if (stays) {
               const say = (v: number) => sayFigureAsWritten(v, lt.unit ?? '');
-              assumed.push({ id: aim.id, text: `Keep ${t!.quantity} at or ${lt.comparator === '<=' ? 'below' : 'above'} ${say(lt.value)} (today ${say(t!.current)}). The chance is for its level at the end of ${(t!.by_when ?? 'the period').replace(/^(at |by )?(the )?end of /i, '')}, not along the way.` });
+              assumed.push({ id: aim.id, text: `Keep ${t!.quantity} at or ${lt.comparator === '<=' ? 'below' : 'above'} ${say(lt.value)} (today ${say(current)}). The chance is for its level at the end of ${(t!.by_when ?? 'the period').replace(/^(at |by )?(the )?end of /i, '')}, not along the way.` });
             }
-            if (isChange) assumed.push({ id: aim.id, text: `Carrying on as now leaves ${t!.quantity} at today's ${sayFigureAsWritten(t!.current, lt.unit ?? '')}; the change is measured from that.` });
+            if (isChange) assumed.push({ id: aim.id, text: `Carrying on as now leaves ${t!.quantity} at today's ${sayFigureAsWritten(current, lt.unit ?? '')}; the change is measured from that.` });
           }
         }
       }
@@ -358,52 +460,6 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     for (const id of Object.keys(interventions)) edges.push({ from: o.id, to: id, ...STRUCTURAL, provenance: { source: 'cee_hypothesis' } });
   }
 
-  // The other half of the one composition rule (DL 22 Oct, served board 6ce4f6ae: "£ per loaf" × "loaves a week" was refused):
-  // money per X times a count of X is money, with ONE period across the two parts and it the defined quantity's own
-  // ("£ per week"). `unitsCompose` reads money per X per period × a count; the denominator naming the count's noun is the
-  // dimensional proof either way. Unscaled, unqualified units only; two periods ("£ per loaf per week" × "loaves a week") never.
-  // Every word is accounted for, by its place (Codex r1 + r2 on #3627: flattening dropped a count's own denominator,
-  // "users per account per week"; collapsed "week/week"; folded "thousand" into the noun; read "person-weeks" as a rate).
-  // A period is a rate's only as the unit's LAST word, an adverb ("weekly") or after per, "/", a or an; any other period
-  // word is a duration or a second period and refuses it.
-  const RATE_CONNECTORS = new Set(['per', '/', 'a', 'an']);
-  const unitShapeOf = (u: string | null): { readonly head: readonly string[]; readonly period: string | null } | null => {
-    const ws = u === null ? [] : words(u);
-    let end = ws.length;
-    let period: string | null = null;
-    const last = ws[end - 1];
-    if (last !== undefined && periodAdverb(last) !== null) { period = periodAdverb(last); end -= 1; }
-    else if (last !== undefined && periodNoun(last) !== null) {
-      if (end < 2 || !RATE_CONNECTORS.has(ws[end - 2]!)) return null;
-      period = periodNoun(last); end -= 2;
-    }
-    const head = ws.slice(0, end);
-    return head.some((w) => periodNoun(w) !== null || periodAdverb(w) !== null) ? null : { head, period };
-  };
-  const plainMoney = (w: string | undefined, code: string | null): boolean => {
-    const m = w === undefined ? null : readUnitParts(w);
-    return m !== null && m.kind === 'currency' && m.scale === 1 && m.per === null && m.period === null && m.code === code;
-  };
-  const ratePerCountComposes = (whole: string | null, a: string | null, b: string | null): boolean => {
-    const g = readUnitParts(whole);
-    const gs = unitShapeOf(whole);
-    if (g === null || g.kind !== 'currency' || gs === null || gs.head.length !== 1 || !plainMoney(gs.head[0], g.code)) return false;
-    return ([[a, b], [b, a]] as const).some(([m, c]) => {
-      const rate = unitShapeOf(m);
-      const count = unitShapeOf(c);
-      if (rate === null || count === null || readUnitParts(c)?.kind !== 'count') return false;
-      // A CLOSED grammar (Codex r3 on #3627: "each"/"every" made a two-dimension denominator read as one): money, then per or
-      // "/", then ONE word, and the count is that same ONE word. A many-word denominator ("per user account") is refused,
-      // never parsed: the person is asked, as for any identity that cannot be worked out as stated.
-      const [money, sep, den, ...extra] = rate.head;
-      const [noun, ...more] = count.head;
-      const oneWord = (w: string | undefined): w is string => w !== undefined && /^[a-z]+$/.test(w) && !RATE_CONNECTORS.has(w);
-      if (!plainMoney(money, g.code) || (sep !== 'per' && sep !== '/') || extra.length > 0 || more.length > 0 || !oneWord(den) || !oneWord(noun)) return false;
-      if (singular(den) !== singular(noun)) return false;
-      const periods = [rate.period, count.period].filter((p): p is string => p !== null);
-      return periods.length <= 1 && (periods[0] ?? null) === gs.period;
-    });
-  };
 
   // ── Identities (Track 2): what a quantity IS, defined as the sum or product of factors. ISL works it out exactly from
   // its parts' levels and never draws them, so the parts' edges are definitional, held at 1 with no existence doubt. A
@@ -422,18 +478,8 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   for (const { item, carrier, unit, label, level } of declared) {
     const def = item.defined_as!;
     const { op, of } = def;
-    const parts = of.map((id) => model.factors.find((f) => f.id === id));
-    const values = parts.map((p) => p?.value ?? null);
-    // Exact: a definition's stated level is what its parts make. The engine would rescale a product to fit (ISL's k).
-    const made = op === 'sum' ? values.reduce<number>((a, v) => a + (v ?? 0), 0) : values.reduce<number>((a, v) => a * (v ?? 0), 1);
-    const reason: WithheldReason | undefined = carrier === undefined || of.length < 2 || new Set(of).size !== of.length || of.includes(item.id)
-      || parts.some((p) => p === undefined) || (op === 'product' && of.length !== 2) || inCycle(item.id) ? 'identity_not_in_slice'
-      : values.some((v) => v === null) ? 'identity_part_unknown'
-        : (op === 'sum' ? !parts.every((p) => sameUnit(p!.unit, unit))
-          : unitsCompose(unit, label, { unit: parts[0]!.unit, label: parts[0]!.label }, { unit: parts[1]!.unit, label: parts[1]!.label }).kind !== 'proof'
-            && !ratePerCountComposes(unit, parts[0]!.unit, parts[1]!.unit))
-          ? 'identity_unit_mismatch'
-          : level !== null && Math.abs(level - made) > 1e-9 * Math.max(1, Math.abs(level)) ? 'identity_inconsistent' : undefined;
+    const reason: WithheldReason | undefined = carrier === undefined || inCycle(item.id) ? 'identity_not_in_slice'
+      : definitionCheck(model, def, item.id, unit, label, level).reason;
     if (reason !== undefined) { hold(item.id, reason); continue; }
     identities.set(item.id, { op, of, unit });
     // Who stated the DEFINITION (its own attribution), never who stated the quantity: an unverified one is no one's yet.
