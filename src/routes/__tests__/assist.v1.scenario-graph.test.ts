@@ -141,6 +141,8 @@ import scenarioGraphRoute from "../assist.v1.scenario-graph.js";
 import { computeGraphIdentityHash } from "../../orchestrator-v5/context/graph-identity.js";
 import { computeAnalysisAffectingGraphHash } from "../../orchestrator-v5/context/graph-hash.js";
 import { resolveCeeRateLimit } from "../../cee/config/limits.js";
+import { mapLivingModel } from "../../orchestrator-v5/path-b/living-model/mapper.js";
+import { KNOWN_ANSWER } from "../../orchestrator-v5/path-b/living-model/__tests__/fixtures.js";
 
 /** A graph with no positional keys anywhere — the shape `scenarios.graph` holds today. */
 const GRAPH_NO_LAYOUT = {
@@ -327,6 +329,36 @@ describe("THE WRITE PRECONDITION — the base a manual edit sends back", () => {
 
     expect(res.json().graph_present).toBe(false);
     expect(res.json().graph_hash).toBeNull();
+    await app.close();
+  });
+});
+
+/**
+ * ⭐ THE CONTENT HASH (DL 22 Oct: one function, one value): identity.v1's own value, under the name the UI's read-after-write
+ * check reads (DGAI #2911). identity.v1 is an exclude list, so the living model is in it; the core turn serves the same value as
+ * `model.scenario_revision` (`routes/core-turn.ts`).
+ */
+describe("THE CONTENT HASH — identity.v1's own value, living model included", () => {
+  const core = (quote: string) => ({ ...mapLivingModel(KNOWN_ANSWER).graph,
+    living_model: { ...KNOWN_ANSWER, views: [{ ...KNOWN_ANSWER.views[0]!, quote }] } });
+
+  it("is graph_identity_hash.value, and a quote-only edit to the living model moves it", async () => {
+    loadGraphAndBriefText.mockResolvedValue({ graph: core("Sam disagrees"), briefText: null });
+    const app = await buildApp();
+    const before = (await read(app, SCENARIO)).json();
+    expect(before.content_hash).toBe(computeGraphIdentityHash(core("Sam disagrees") as never)!.value);
+    expect(before.content_hash).toBe(before.graph_identity_hash.value);
+    loadGraphAndBriefText.mockResolvedValue({ graph: core("Sam disagrees strongly"), briefText: null });
+    const after = (await read(app, SCENARIO)).json();
+    expect(after.content_hash).not.toBe(before.content_hash);
+    expect(after.content_hash).toBe(after.graph_identity_hash.value);
+    await app.close();
+  });
+
+  it("is null when there is no graph", async () => {
+    loadGraphAndBriefText.mockResolvedValue({ graph: null, briefText: null });
+    const app = await buildApp();
+    expect((await read(app, SCENARIO)).json().content_hash).toBeNull();
     await app.close();
   });
 });

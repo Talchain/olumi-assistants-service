@@ -527,6 +527,9 @@ export default async function route(app: FastifyInstance) {
         deriveDecisionContextGraphHash(graph)) : undefined;
 
       const todayPartNotes = graphPresent ? deriveTodayParts(graph).notes : [];
+      // identity.v1, from the single normaliser authority. Null when the graph is absent or identity-empty — there is no
+      // identity to anchor to, and a hash of nothing would be a false anchor.
+      const identity = graphPresent ? computeGraphIdentityHash(graph as GraphStateIngress) : null;
       return reply.code(200).send({
         schema: SCENARIO_GRAPH_SCHEMA,
         ...(heldOffers !== undefined && heldOffers.length > 0 ? { held_proposal_offers: heldOffers } : {}),
@@ -534,17 +537,15 @@ export default async function route(app: FastifyInstance) {
         ...(changedSinceRun !== undefined ? { changed_since_run: changedSinceRun } : {}),
         scenario_id: scenarioId,
         graph: graphPresent ? toOutboundGraph(graph) : null,
+        // The same identity.v1 value, under the name the UI's read-after-write check reads (DGAI #2911): what the core turn
+        // serves as `model.scenario_revision` (DL 22 Oct: one function, one value).
+        content_hash: identity?.value ?? null,
         // STEP 8: the stored bytes stay as stored; an invalid saved today part is said, with the value every Run uses instead.
         ...(todayPartNotes.length > 0 ? { today_part_notes: todayPartNotes } : {}),
         graph_present: graphPresent,
         brief_text: briefText,
         scenario_created_at: snapshot?.createdAt ?? null,
-        // identity.v1, from the single normaliser authority. Null when the
-        // graph is absent or identity-empty — there is no identity to anchor
-        // to, and a hash of nothing would be a false anchor.
-        graph_identity_hash: graphPresent
-          ? computeGraphIdentityHash(graph as GraphStateIngress)
-          : null,
+        graph_identity_hash: identity,
         // ⭐⭐ THE WRITE PRECONDITION FOR THE GRAPH THIS RESPONSE CARRIES.
         //
         // A manual edit is a compare-and-set: `option_intervention_edit` (and its

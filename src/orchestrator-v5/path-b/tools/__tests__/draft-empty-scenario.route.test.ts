@@ -158,6 +158,8 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
   let runFails = false;
   let runs = 0;
   let skipDraft = false;
+  /** The core agent's call after the draft is refused (a 400: not retried), so the turn ends with no reply. */
+  let failReply = false;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(streamWhenAsked(async (url: unknown, init?: { body?: unknown }) => {
       if (String(url).endsWith('/v1/conversations')) return new Response(JSON.stringify({ id: 'conv_draft', object: 'conversation' }), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -180,6 +182,7 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
           arguments: JSON.stringify({ reason: 'Check the model.', effects_timing: null }) }]);
         return ok([{ type: 'function_call', name: 'build_model_from_brief', call_id: 'draft_call', arguments: JSON.stringify({ brief: toolBrief ?? briefArg, model: toolModel ?? livingFor(toolBrief ?? briefArg) }) }]);
       }
+      if (failReply) return new Response(JSON.stringify({ error: { message: 'Refused.', type: 'invalid_request_error', param: null, code: null } }), { status: 400, headers: { 'content-type': 'application/json' } });
       if (cutShortAfterRun) {
         if (!input.some((i) => i.call_id === 'refused_run')) return ok([{ type: 'function_call', name: 'run_analysis',
           call_id: 'refused_run', arguments: JSON.stringify({ reason: 'Check the new model.', effects_timing: null }) }]);
@@ -247,7 +250,7 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
     await app.ready();
   }, 60_000);
   afterAll(async () => { await rawStore.settleDrafterRawWritesForTests(); await app.close(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { rawRecorder.rows.length = 0; rawRecorder.mode = 'ok'; rawRecorder.release = undefined; SCENARIO = randomUUID(); rows.clear(); conversationIds.clear(); saved = null; registered = []; read = EMPTY_READ; toolOutputs.length = 0; drafterAnswer = DRAFT; briefArg = BRIEF; versionsUnavailable = false; readUnavailable = false; proofFault = ''; toolBrief = undefined; toolModel = undefined; drafterCalls = 0; cutShortAfterRun = false; runFails = false; runs = 0; skipDraft = false; });
+  beforeEach(() => { rawRecorder.rows.length = 0; rawRecorder.mode = 'ok'; rawRecorder.release = undefined; SCENARIO = randomUUID(); rows.clear(); conversationIds.clear(); saved = null; registered = []; read = EMPTY_READ; toolOutputs.length = 0; drafterAnswer = DRAFT; briefArg = BRIEF; versionsUnavailable = false; readUnavailable = false; proofFault = ''; toolBrief = undefined; toolModel = undefined; drafterCalls = 0; cutShortAfterRun = false; runFails = false; runs = 0; skipDraft = false; failReply = false; });
 
   const turn = async (extra: Record<string, string> = {}): Promise<Json> => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', headers: { 'x-olumi-ai-mode': 'core', 'x-request-id': REQUEST_ID, ...extra }, payload: {
@@ -401,6 +404,33 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
     expect(draftCall(body), JSON.stringify(body._agent)).toMatchObject({ ok: true, mutated: true, outcome: 'ok' });
     expect(draftCall(body)).not.toHaveProperty('draft_verification');
     expect(registered).toHaveLength(1);
+  });
+
+  /**
+   * R2 of the core route (DL 22 Oct): the draft's own proof now counts as a verified save (`pathBTools`' recorder lifts its
+   * `model_version`, as it already lifted a change's `receipt`). Its one effect: a turn whose draft saved and whose reply was then
+   * lost records "The saved change is kept…" and answers save_outcome VERIFIED_SAVED, where it said "Any changes already saved
+   * are kept…" and UNKNOWN. Only on that draft's own proof: a commit receipt, or a guest's acknowledgement and readback.
+   */
+  it.each([
+    ['its commit receipt', '', false, 'VERIFIED_SAVED', 'The saved change is kept, but the reply didn’t arrive. Send a new message to continue.'],
+    ['a guest’s acknowledgement and readback', 'receipt', false, 'VERIFIED_SAVED', 'The saved change is kept, but the reply didn’t arrive. Send a new message to continue.'],
+    ['CONTRAST: nothing (its readback was unavailable)', '', true, 'UNKNOWN', 'The reply didn’t arrive. Any changes already saved are kept. Send a new message to continue.'],
+  ] as const)('a draft proven by %s, then a lost reply: "saved" only on that proof', async (_proof, fault, unreadable, outcome, said) => {
+    proofFault = fault; readUnavailable = unreadable; failReply = true;
+    const turnId = randomUUID();
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', headers: { 'x-olumi-ai-mode': 'core', 'x-request-id': REQUEST_ID }, payload: {
+      kind: 'message', turn_id: turnId, scenario_id: SCENARIO, stage: 'frame', turn_class: 'frame', message: briefArg, source: 'composer' } });
+    expect(r.statusCode, r.body).toBe(502);
+    expect(r.json().save_outcome).toBe(outcome);
+    expect(registered).toHaveLength(1);
+    expect(store.append.mock.calls.map((c) => c[0] as Json).find((w) => w.turn_id === turnId)?.assistantMessage).toBe(said);
+    if (outcome === 'VERIFIED_SAVED') {
+      // The save is real: the saved model holds the registered postimage, and a signed-in draft minted its version.
+      readUnavailable = false;
+      expect((read().graph as Json).living_model).toEqual((registered[0]!.graph as Json).living_model);
+      if (fault === '') expect(draftOutcome()).toMatchObject({ status: 'ok', mutated: true, data: { model_version: { version_id: 'v_1', version_number: 1 } } });
+    }
   });
 
   it('L13 refusal before dispatch is VERIFIED_NO_WRITE', async () => {

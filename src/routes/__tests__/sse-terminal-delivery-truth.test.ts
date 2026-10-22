@@ -33,6 +33,8 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import { resolveSseEndState } from "../assist.v1.draft-graph-staged.js";
 import { streamTurnAsStagedSse } from "../streamed-turn-sse.js";
 import { setTestSink, log } from "../../utils/telemetry.js";
+import { config } from "../../config/index.js";
+import { coreTurnStreamTimeout } from "../../orchestrator-v5/core-route/contract.js";
 
 describe("resolveSseEndState — the derivation", () => {
   it("reports `undelivered` when the socket died, even on a 200", () => {
@@ -200,6 +202,37 @@ describe("streamTurnAsStagedSse — the route reports delivery, not just status"
     expect(infoLines).toHaveLength(1);
     expect(infoLines[0].delivered).toBe(true);
     expect(deliveryLines(warnSpy)).toHaveLength(0);
+  });
+
+  it("the core route: a turn that outlives the stream budget ends in the core contract's own timeout body (DL 22 Oct)", async () => {
+    vi.useFakeTimers();
+    try {
+      const { reply, writes } = makeReply(Number.MAX_SAFE_INTEGER);
+      // The spec's own stand-in, whose turn never answers.
+      const hung = makeApp(200);
+      (hung as { inject: unknown }).inject = () => new Promise(() => {});
+      const done = streamTurnAsStagedSse({
+        app: hung,
+        reply,
+        requestId: "req-core-timeout",
+        internalHeaders: {},
+        payload: JSON.stringify({ turn_id: "turn-core-1" }),
+        featureVersion: "v5",
+        endpoint: "/proxy/v5/turn/stream",
+        internalTarget: "/agent/v1/core-turn",
+      });
+      await vi.advanceTimersByTimeAsync(config.proxy.browserProxyTimeoutMs + 1);
+      await done;
+      const frames = writes.filter((w) => w.startsWith("event: stage"))
+        .map((w) => JSON.parse(w.slice(w.indexOf("data: ") + 6)) as Record<string, unknown>);
+      const complete = frames.find((f) => f.stage === "COMPLETE");
+      expect(complete?.status_code).toBe(504);
+      // The turn may still save: never "retry", never "nothing saved"; the same turn id later replays its record.
+      expect(complete?.payload).toEqual(coreTurnStreamTimeout("turn-core-1"));
+      expect(complete?.payload).toMatchObject({ durability: "unknown", error: { code: "TURN_STILL_RUNNING", retry_safe: false, nothing_saved: false } });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("a failed turn the client DID receive is still `error`, not `undelivered`", async () => {

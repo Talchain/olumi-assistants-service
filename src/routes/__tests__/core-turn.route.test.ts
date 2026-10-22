@@ -1,0 +1,411 @@
+/**
+ * ⭐ THE CORE ROUTE (`POST /agent/v1/core-turn`, R2; DL 22 Oct). The real route over a core scenario (a living model), with a
+ * scripted AI (0 live provider calls) and the graph / register / versions / orchestrate routes as doubles in the served shapes:
+ * a typed turn, a Run press, a card's approval, a resend of the same turn id, two turns at once, a legacy scenario, a canvas
+ * edit, the first draft's streamed graph, and the contract's exact shape. SYNTHETIC wording (the KNOWN_ANSWER fixture).
+ */
+import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { AnalysisStateV1Schema } from '@talchain/schemas/boundary';
+import Fastify, { type FastifyInstance } from 'fastify';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { computeGraphIdentityHash } from '../../orchestrator-v5/context/graph-identity.js';
+import { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha256 } from '../../orchestrator-v5/context/graph-hash.js';
+import { registrationTurnId } from '../../orchestrator-v5/graph-registration/registration-identity.js';
+import { toOutboundGraph } from '../../orchestrator-v5/goal-target/outbound-graph.js';
+import { mapLivingModel } from '../../orchestrator-v5/path-b/living-model/mapper.js';
+import { KNOWN_ANSWER } from '../../orchestrator-v5/path-b/living-model/__tests__/fixtures.js';
+import { withCanonicalAnalysisView } from '../../orchestrator-v5/agent-lane/__tests__/fixtures/canonical-analysis-read.js';
+import { streamWhenAsked } from '../../orchestrator-v5/agent-lane/__tests__/stream-when-asked.js';
+import type { LivingModelT } from '../../schemas/living-model.js';
+
+type Json = Record<string, any>;
+let SCENARIO = '';
+const BRIEF = 'we need at least 100 units; today we are at 70. f is at 0.5. push f to 1, or we hold. each +1 in f adds 50 units on average, with a standard deviation of 10. Sam disagrees';
+const postimage = (m: LivingModelT): Json => ({ ...mapLivingModel(m).graph, living_model: m });
+const SAID = 'Actually f is at 0.6 now.';
+const corrected = (): LivingModelT => {
+  const m = structuredClone(KNOWN_ANSWER);
+  m.factors[0] = { ...m.factors[0]!, value: 0.6, quote: SAID };
+  return m;
+};
+const CHANGE = { public_label: 'Set f to 0.6, as you said', basis: 'The person corrected f.', model: corrected(), remove: [] as string[] };
+/** The SDK's final output, with the bytes a host "tidy" would touch: leading space, markdown, a trailing newline. */
+const ANSWER = '  The model holds **f at 0.5** today:\n\n- Push sets it to 1\n- Hold keeps it\n';
+const CONTRACT_KEYS = ['turn_id', 'durability', 'assistant_text', 'model', 'cards', 'notes', 'run', 'analysis_state', 'receipts', 'paused', 'error', '_agent', '_provider_calls'];
+const LEGACY_ENVELOPE = ['response_version', 'blocks', 'suggested_actions', 'insights', 'stage_indicator'];
+
+let persisted: Json | null = null;
+let readiness: Json = { status: 'blocked', may_run: false, options: [], blockers: [] };
+let runState: Json | undefined;
+let carriedResult: Json | undefined;
+let runs = 0;
+const registered: Json[] = [];
+const canvasForwards: { headers: Json; body: Json }[] = [];
+const turnRows = new Map<string, any>();
+let pausedRun: any = null;
+const conversationIds = new Map<string, string>();
+const hashOf = (g: unknown): string => computeAnalysisAffectingGraphHash(g as never) ?? '';
+/** A SERVED analysis_state (staging, `served-pj-a02-run.json`): the full v1 object the graph read's builder composes. */
+const SERVED_STATE = (JSON.parse(readFileSync(new URL('../../orchestrator-v5/agent-lane/__tests__/fixtures/served-pj-a02-run.json', import.meta.url), 'utf8')) as Json).analysis_state as Json;
+/** The read's state now: never run (no fact, so no usability) until the Run, then that Run, current. */
+const stateNow = (): Json => runState === undefined
+  ? { ...SERVED_STATE, run_state: { kind: 'never_run' }, usable_for_prose: false, usable_for_chips: false, usable_for_followup: false }
+  : { ...SERVED_STATE, run_state: runState.run_state };
+
+const store = {
+  readOpenAiPausedRun: vi.fn(async () => pausedRun),
+  saveOpenAiPausedRun: vi.fn(async (_s: string, r: any) => { if (pausedRun !== null) return false; pausedRun = r; return true; }),
+  takeOpenAiPausedRun: vi.fn(async (_s: string, id: string) => { if (pausedRun?.pause_id !== id) return false; pausedRun = null; return true; }),
+  readOpenAiConversationId: vi.fn(async (sid: string) => conversationIds.get(sid) ?? null),
+  claimOpenAiConversationId: vi.fn(async (sid: string, id: string) => { if (!conversationIds.has(sid)) conversationIds.set(sid, id); return conversationIds.get(sid); }),
+  loadGraph: async () => persisted,
+  loadGraphAndBriefText: async () => ({ graph: persisted, briefText: BRIEF }),
+  readFactsFor: vi.fn(async () => []),
+  // Newest first, claims included, as the store reads them (`supabase-store.ts` readRecent: created_at descending).
+  readRecent: vi.fn(async () => [...turnRows.values()].reverse()),
+  readFactsWithTurnFor: async () => [],
+  readCommittedTurn: vi.fn(async (_sid: string, id: string) => turnRows.get(id) ?? null),
+  readMostRecentPendingActions: vi.fn(async () => [...turnRows.values()].filter((r) => !String(r.turn_id).endsWith(':claim')).at(-1)?.pending_actions ?? []),
+  releaseTurnClaim: vi.fn(async (_sid: string, id: string, hash: string) => { if (turnRows.get(id)?.request_hash === hash) turnRows.delete(id); }),
+  readAnalysisInvalidatedAt: vi.fn(async () => null),
+  readExistingScenario: vi.fn(async () => null),
+  append: vi.fn(async (write: Json) => {
+    const key = String(write.turn_id);
+    const prior = turnRows.get(key);
+    if (prior !== undefined) return prior.request_hash === write.request_hash ? { id: prior.id, replayedPriorTurn: true as const } : { id: prior.id, priorTurnConflict: true as const };
+    const row = { ...write, id: `row-${turnRows.size + 1}`, created_at: new Date(Date.now() + turnRows.size).toISOString(), assistant_message: write.assistantMessage, user_message: write.userMessage };
+    turnRows.set(key, row);
+    return { id: row.id };
+  }),
+  getScenarioOwner: async () => null,
+  invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
+  invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
+  ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
+};
+vi.mock('../../orchestrator-v5/session/index.js', () => ({ getSessionStore: () => store, resetSessionStoreForTests: () => {}, SessionReadError: class SessionReadError extends Error {} }));
+vi.mock('../../orchestrator/user-identity.js', async (original) => ({
+  ...await original<Record<string, unknown>>(), resolveUserIdentity: async () => ({ mode: 'off' }),
+}));
+
+let served = 0;
+/** When set, the next provider call waits for it: a turn still running while another is sent. */
+let holdProvider: Promise<void> | undefined;
+let preparedId = '';
+const responsesBody = (output: Json[]): Json => {
+  served += 1;
+  return { id: `resp_${served}`, object: 'response', model: 'gpt-scripted', status: 'completed',
+    output: output.map((item, i) => item.type === 'message'
+      ? { id: `msg_${served}_${i}`, type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: item.text, annotations: [] }] }
+      : { id: `fc_${served}_${i}`, status: 'completed', type: 'function_call', name: item.name, call_id: item.call_id ?? `call_${served}_${i}`,
+          arguments: JSON.stringify(item.name === 'apply_change' && item.args === undefined ? { proposal_id: preparedId } : item.args ?? {}) }),
+    usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15, input_tokens_details: { cached_tokens: 0 }, output_tokens_details: { reasoning_tokens: 0 } } };
+};
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+
+/** The served read (assist.v1.scenario-graph.ts): the graph in its outbound projection; `content_hash` is identity.v1's value. */
+function graphRead(): Json {
+  if (persisted === null) return { scenario_id: SCENARIO, graph: null, graph_present: false, brief_text: null, graph_identity_hash: null, graph_hash: null, content_hash: null };
+  const graph = toOutboundGraph(persisted);
+  return withCanonicalAnalysisView({ scenario_id: SCENARIO, graph, graph_present: true, brief_text: BRIEF, graph_hash: hashOf(persisted),
+    graph_identity_hash: computeGraphIdentityHash(persisted as never), content_hash: computeGraphIdentityHash(persisted as never)!.value, analysis_ready: readiness,
+    analysis_state: stateNow(), current_read: runState === undefined ? { run_state: { kind: 'never_run' }, computed_against_hash: null, run_id: null }
+      : { run_state: runState.run_state, computed_against_hash: hashOf(persisted), run_id: 'fixture-read-run' },
+    ...(carriedResult === undefined ? {} : { analysis_result: carriedResult }) }, SCENARIO);
+}
+
+describe('POST /agent/v1/core-turn: the thin core route', () => {
+  let app: FastifyInstance;
+  let calls: Json[] = [];
+  let outputs: Json[][] = [];
+  let runWithStageStream: typeof import('../../cee/unified-pipeline/stage-stream-context.js').runWithStageStream;
+  beforeAll(async () => {
+    vi.stubGlobal('fetch', vi.fn(streamWhenAsked(async (url: unknown, init?: { body?: unknown }) => {
+      if (String(url).endsWith('/v1/conversations')) return json({ id: 'conv_core_route', object: 'conversation' });
+      const body = JSON.parse(String(init?.body ?? '{}')) as Json;
+      // A structured side call (the model critic) answers nothing, and never takes the conversation's scripted outputs.
+      if (body.text?.format?.type === 'json_schema') return json(responsesBody([]));
+      calls.push(body);
+      if (holdProvider !== undefined) { const hold = holdProvider; holdProvider = undefined; await hold; }
+      const next = outputs.shift() ?? [{ type: 'message', text: ANSWER }];
+      // A refused call (a 400: never retried), so the turn ends with no reply.
+      if (next[0]?.type === 'refuse') return json({ error: { message: 'Refused.', type: 'invalid_request_error', param: null, code: null } }, 400);
+      return json(responsesBody(next));
+    })));
+    vi.resetModules();
+    process.env.AGENT_LANE_ENABLED = 'true';
+    process.env.AGENT_LANE_PREVIEW = 'false';
+    const route = await import('../core-turn.js');
+    // The route's own instance (after resetModules): the stage context must be the one the route reads.
+    ({ runWithStageStream } = await import('../../cee/unified-pipeline/stage-stream-context.js'));
+    app = Fastify({ logger: false });
+    app.post('/assist/v1/scenarios/:id/graph', async () => graphRead());
+    app.post('/assist/v1/scenarios/:id/graph/register', async (req, reply) => {
+      const b = req.body as Json;
+      const current = persisted === null ? null : computeGraphIdentityHash(persisted as never)!.value;
+      if ((b.expected_graph_identity_hash ?? null) !== current) return reply.code(409).send({ details: { code: 'GRAPH_STALE' } });
+      persisted = b.graph as Json;
+      registered.push(b);
+      const identity = computeGraphIdentityHash(persisted as never)!;
+      return { registered: true, graph_identity_hash: identity, graph_hash: hashOf(persisted),
+        model_version: { version_id: `v_${registered.length}`, version_number: registered.length, mutation_id: `m_${registered.length}`,
+          creation_kind: registered.length === 1 ? 'initial' : 'committed_mutation', graph_identity_hash: identity.value,
+          analysis_affecting_hash: computeAnalysisAffectingGraphHashSha256(persisted as never) } };
+    });
+    app.post('/assist/v1/scenarios/:id/versions', async (req) => ({ versions: registered.map((b, i) => ({
+      version_id: `v_${i + 1}`, sequence: i + 1, created_at: '2026-10-22T10:00:00.000Z',
+      creation: { kind: 'committed_mutation', mutation_id: `m_${i + 1}`, source_turn_id: registrationTurnId((req.params as { id: string }).id, String(b.operation_id)) } })) }));
+    app.post('/orchestrate/v2/turn', async (req) => {
+      const b = req.body as Json;
+      // A canvas edit (the existing core canvas-edit path, as a double): the person's own value lands in the living model.
+      if (b.kind === 'system_event') {
+        canvasForwards.push({ headers: req.headers as Json, body: b });
+        const m = structuredClone((persisted as Json).living_model) as LivingModelT;
+        m.options = m.options.map((o) => o.id === 'push' ? { ...o, settings: [{ ...o.settings[0]!, value: Number(b.event.value), quote: null }] } : o);
+        persisted = postimage(m);
+        return { response_version: 2, assistant_text: '', graph_hash: hashOf(persisted) };
+      }
+      // The Run: one engine result, on the saved revision.
+      runs += 1;
+      carriedResult = { type: 'analysis_result', computed_against_hash: hashOf(persisted), leading_option_id: null, summary: 'Engine summary.',
+        enrichment: { option_comparison: [{ option_id: 'push', option_label: 'Push', win_probability: 0.7, outcome: { mean: 115 } },
+          { option_id: 'hold', option_label: 'Hold', win_probability: 0.3, outcome: { mean: 95 } }], inference_warnings: [] } };
+      runState = { run_state: { kind: 'complete_current', computed_at: '2026-10-22T10:00:00.000Z' } };
+      return { response_version: 2, assistant_text: '', blocks: [carriedResult], analysis_state: runState, analysis_ready: readiness, graph_hash: hashOf(persisted) };
+    });
+    await app.register(route.coreTurnRoute);
+    await app.ready();
+  }, 60_000);
+  afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
+  beforeEach(() => {
+    SCENARIO = randomUUID(); persisted = postimage(KNOWN_ANSWER); registered.length = 0; canvasForwards.length = 0; turnRows.clear(); conversationIds.clear();
+    readiness = { status: 'blocked', may_run: false, options: [], blockers: [] }; runState = undefined; carriedResult = undefined; runs = 0;
+    pausedRun = null; calls = []; outputs = []; preparedId = ''; holdProvider = undefined;
+  });
+  const post = (payload: Json) => app.inject({ method: 'POST', url: '/agent/v1/core-turn',
+    payload: { kind: 'message', scenario_id: SCENARIO, stage: 'analyse', turn_class: 'frame', ...payload } });
+  const typed = (message: string, turnId = randomUUID()) => post({ turn_id: turnId, message, source: 'composer' });
+  const freshRead = async (): Promise<Json> => (await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph`, payload: {} })).json() as Json;
+  const ids = (graph: Json | undefined): string[] => ((graph?.nodes ?? []) as Json[]).map((n) => String(n.id)).sort();
+
+  it('a typed turn: the AI’s reply byte for byte, and the saved model in the contract’s exact shape', async () => {
+    const r = await typed('What does the model hold for f today?');
+    expect(r.statusCode, r.body).toBe(200);
+    const j = r.json() as Json;
+    expect(Object.keys(j)).toEqual(CONTRACT_KEYS);
+    for (const k of LEGACY_ENVELOPE) expect(j, `no legacy envelope key ${k}`).not.toHaveProperty(k);
+    // NEGATIVE: nothing is composed around the SDK's final output, not even a trim.
+    expect(j.assistant_text).toBe(ANSWER);
+    expect(j).toMatchObject({ durability: 'recorded', cards: [], notes: [], run: null, receipts: [], paused: null, error: null });
+    expect(j).not.toHaveProperty('analysis_result');
+    const read = await freshRead();
+    expect(j.model.revision).toBe(read.graph_hash);
+    expect(j.model.scenario_revision, 'identity.v1, as the graph read serves it').toBe(read.graph_identity_hash.value);
+    expect(read.content_hash).toBe(read.graph_identity_hash.value);
+    expect(ids(j.model.graph)).toEqual(ids(read.graph));
+    expect(calls).toHaveLength(1);
+    expect(turnRows.get(j.turn_id)?.assistant_message, 'the answer row records the same words').toBe(ANSWER);
+  });
+
+  it('a Run press: run_analysis is the first call’s forced tool, ONE Run, and the fresh analysis_result rides the contract', async () => {
+    outputs = [[{ type: 'function_call', name: 'run_analysis', call_id: 'run_press', args: { reason: 'The person pressed Run.', effects_timing: 'not_stated' } }],
+      [{ type: 'message', text: 'The analysis ran on your saved model.' }]];
+    const r = await post({ turn_id: randomUUID(), message: 'Run the analysis', source: 'chip_click', chip: { id: 'run_analysis', action_type: 'run_analysis' } });
+    expect(r.statusCode, r.body).toBe(200);
+    const j = r.json() as Json;
+    expect(calls[0]?.tool_choice).toMatchObject({ type: 'function', name: 'run_analysis' });
+    expect(runs).toBe(1);
+    expect(j.assistant_text).toBe('The analysis ran on your saved model.');
+    const read = await freshRead();
+    expect(j.analysis_result).toEqual(read.analysis_result);
+    expect(j.run).toMatchObject({ run_id: read.canonical_analysis_view.run.run_id, state: { kind: 'complete_current' } });
+    expect(j.run.run_id).not.toBeNull();
+    expect(j.analysis_state).toEqual(read.analysis_state);
+  });
+
+  it('a card: proposed on a typed turn, approved by its own press as ONE commit with the person’s receipt, and a resend of the press writes nothing', async () => {
+    outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop', args: CHANGE }], [{ type: 'message', text: 'I prepared that change; press its card to save it.' }]];
+    const first = (await typed(SAID)).json() as Json;
+    expect(first.cards.map((c: Json) => c.proposal_id), JSON.stringify(first._agent)).toEqual([expect.stringMatching(/^prop_/)]);
+    const card = first.cards[0];
+    preparedId = String(card.proposal_id);
+    expect(card.issued_turn_id, 'the card names the reply that issued it, so it reattaches on reopen').toBe(first.turn_id);
+    expect(registered, 'a proposal writes nothing').toHaveLength(0);
+
+    outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: 'Saved: f is 0.6 now.' }]];
+    const pressId = randomUUID();
+    const press = { turn_id: pressId, message: card.approve_action.message, source: 'chip_click', chip: { id: card.approve_action.id, action_type: card.approve_action.action_type } };
+    const approved = await post(press);
+    expect(approved.statusCode, approved.body).toBe(200);
+    const a = approved.json() as Json;
+    expect(calls[2]?.tool_choice, 'the press opens on the change’s own apply_change').toMatchObject({ type: 'function', name: 'apply_change' });
+    expect(registered, JSON.stringify(a._agent)).toHaveLength(1);
+    expect(((persisted as Json).living_model as LivingModelT).factors[0]).toMatchObject({ value: 0.6 });
+    expect(a.receipts).toEqual([expect.objectContaining({ version_id: 'v_1', authorised_by: 'person' })]);
+    expect(a.cards, 'the applied card is no longer waiting').toEqual([]);
+    expect(a.assistant_text).toBe('Saved: f is 0.6 now.');
+
+    const callsBefore = calls.length;
+    const again = (await post(press)).json() as Json;
+    expect(again).toMatchObject({ durability: 'replayed', assistant_text: 'Saved: f is 0.6 now.', error: null });
+    expect(calls.length, 'a replay calls no model').toBe(callsBefore);
+    expect(registered, 'and writes nothing').toHaveLength(1);
+  });
+
+  it('analysis_state is the read\u2019s FULL v1 state on a typed turn, a card turn and a Run turn (contract v1.4/v1.5)', async () => {
+    const typedTurn = (await typed('What does the model hold for f today?')).json() as Json;
+    outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop', args: CHANGE }], [{ type: 'message', text: 'Prepared.' }]];
+    const cardTurn = (await typed(SAID)).json() as Json;
+    outputs = [[{ type: 'function_call', name: 'run_analysis', call_id: 'run_press', args: { reason: 'The person pressed Run.', effects_timing: 'not_stated' } }],
+      [{ type: 'message', text: 'Ran.' }]];
+    const runTurn = (await post({ turn_id: randomUUID(), message: 'Run the analysis', source: 'chip_click', chip: { id: 'run_analysis', action_type: 'run_analysis' } })).json() as Json;
+    expect(cardTurn.cards).toHaveLength(1);
+    expect(runs).toBe(1);
+    for (const [turn, kind] of [[typedTurn, 'never_run'], [cardTurn, 'never_run'], [runTurn, 'complete_current']] as const) {
+      expect(AnalysisStateV1Schema.safeParse(turn.analysis_state).success, JSON.stringify(turn.analysis_state)).toBe(true);
+      expect(Object.keys(turn.analysis_state).sort()).toEqual(Object.keys(SERVED_STATE).sort());
+      expect(turn.analysis_state.run_state.kind).toBe(kind);
+    }
+    expect(runTurn.analysis_state).toEqual((await freshRead()).analysis_state);
+  });
+
+  it('a value change on a factor WITH a unit: its card carries the factor_value field the canvas ghost reads (record.ts, the #2880 projection)', async () => {
+    const hours = structuredClone(KNOWN_ANSWER);
+    hours.factors[0] = { ...hours.factors[0]!, unit: 'hours' };
+    persisted = postimage(hours);
+    const next = structuredClone(hours);
+    next.factors[0] = { ...next.factors[0]!, value: 0.6, quote: SAID };
+    outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop', args: { ...CHANGE, model: next } }], [{ type: 'message', text: 'Prepared.' }]];
+    const j = (await typed(SAID)).json() as Json;
+    expect(j.cards).toHaveLength(1);
+    expect(j.cards[0].fields).toEqual([expect.objectContaining({ kind: 'factor_value', node_id: 'f', current: { value: 0.6, unit: 'hours', source: 'yours' }, filled_missing: false })]);
+    // CONTRAST: the same change on KNOWN_ANSWER's unitless f is shown as a change note only (the builder projects a unit-bearing point value).
+    // A new scenario: the store double holds one scenario's rows at a time.
+    SCENARIO = randomUUID(); turnRows.clear(); persisted = postimage(KNOWN_ANSWER);
+    outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop', args: CHANGE }], [{ type: 'message', text: 'Prepared.' }]];
+    const unitless = (await typed(SAID)).json() as Json;
+    expect(unitless.cards).toHaveLength(1);
+    expect(unitless.cards[0].fields).toEqual([]);
+    expect(unitless.cards[0].adds).toEqual([expect.objectContaining({ kind: 'change_note', field_id: 'change_note:factor:f' })]);
+  });
+
+  it('⭐ REPLAY: a resend of the same turn id returns the recorded reply on today’s state: no model call, no write, no Run', async () => {
+    const turnId = randomUUID();
+    const first = (await typed('What does the model hold for f today?', turnId)).json() as Json;
+    expect(calls).toHaveLength(1);
+    const again = await typed('What does the model hold for f today?', turnId);
+    expect(again.statusCode, again.body).toBe(200);
+    const j = again.json() as Json;
+    expect(j.durability).toBe('replayed');
+    expect(j.assistant_text).toBe(first.assistant_text);
+    expect(calls, 'no second provider call').toHaveLength(1);
+    expect(registered).toHaveLength(0);
+    expect(runs).toBe(0);
+    // CONTRAST: the same id with different words is refused, and nothing runs.
+    const reused = await typed('A different question.', turnId);
+    expect(reused.statusCode).toBe(409);
+    expect((reused.json() as Json).error).toMatchObject({ code: 'TURN_ID_REUSED', retry_safe: false, nothing_saved: true });
+    expect(calls).toHaveLength(1);
+  });
+
+  it('a Run press resent replays its result and never runs again', async () => {
+    outputs = [[{ type: 'function_call', name: 'run_analysis', call_id: 'run_press', args: { reason: 'The person pressed Run.', effects_timing: 'not_stated' } }],
+      [{ type: 'message', text: 'The analysis ran.' }]];
+    const press = { turn_id: randomUUID(), message: 'Run the analysis', source: 'chip_click', chip: { id: 'run_analysis', action_type: 'run_analysis' } };
+    await post(press);
+    expect(runs).toBe(1);
+    const again = (await post(press)).json() as Json;
+    expect(again.durability).toBe('replayed');
+    expect(runs).toBe(1);
+    expect(again.analysis_result).toEqual((await freshRead()).analysis_result);
+  });
+
+  it('two turns at once: the second waits on the scenario’s slot and starts from what the first saved', async () => {
+    let release!: () => void;
+    holdProvider = new Promise<void>((resolve) => { release = resolve; });
+    outputs = [[{ type: 'message', text: 'First answer.' }], [{ type: 'message', text: 'Second answer.' }]];
+    const first = typed('First question.');
+    await vi.waitFor(() => expect(calls.length).toBe(1));
+    const second = typed('Second question.');
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(calls.length, 'the second turn sends nothing while the first is running').toBe(1);
+    // The first turn's model moves meanwhile: a distinctive view, held in the living model only.
+    const moved = structuredClone(KNOWN_ANSWER);
+    moved.views.push({ holder: 'Ana', position: 'prefers a slower push', quote: null });
+    persisted = postimage(moved);
+    release();
+    const [a, b] = await Promise.all([first, second]);
+    expect([a.statusCode, b.statusCode]).toEqual([200, 200]);
+    expect(calls).toHaveLength(2);
+    expect(String(calls[0]!.instructions), 'CONTROL: the first turn read the model before the move').not.toContain('prefers a slower push');
+    expect(String(calls[1]!.instructions), 'the waiting turn reads the model as it now stands').toContain('prefers a slower push');
+  });
+
+  it('a legacy scenario (a graph with no living model) is refused with a typed 409: no model call, the claim released', async () => {
+    persisted = mapLivingModel(KNOWN_ANSWER).graph as Json;
+    const turnId = randomUUID();
+    const r = await typed('What does the model hold?', turnId);
+    expect(r.statusCode).toBe(409);
+    const j = r.json() as Json;
+    expect(Object.keys(j)).toEqual(CONTRACT_KEYS.filter((k) => k !== '_agent'));
+    expect(j.error).toMatchObject({ code: 'legacy_scenario', retry_safe: true, nothing_saved: true });
+    expect(calls).toHaveLength(0);
+    expect(turnRows.has(`${turnId}:claim`), 'a resend may run once the scenario is current').toBe(false);
+    // CONTRAST: the same graph WITH its living model is a core scenario and runs.
+    persisted = postimage(KNOWN_ANSWER);
+    expect((await typed('What does the model hold?')).statusCode).toBe(200);
+  });
+
+  it('⭐ scenario_revision is the graph read’s content_hash (identity.v1) after a core turn, and a canvas edit moves both', async () => {
+    const turn = (await typed('What does the model hold for f today?')).json() as Json;
+    const before = await freshRead();
+    expect(turn.model.scenario_revision).toBe(before.content_hash);
+    expect(before.content_hash).toBe(before.graph_identity_hash.value);
+    const edit = await post({ kind: 'system_event', turn_id: randomUUID(), event: { kind: 'option_intervention_edit', option_id: 'push', factor_id: 'f', value: 0.8, base_graph_hash: before.graph_hash } });
+    expect(edit.statusCode, edit.body).toBe(200);
+    const e = edit.json() as Json;
+    expect(canvasForwards).toHaveLength(1);
+    expect(canvasForwards[0]!.headers['x-olumi-ai-mode'], 'the existing core canvas-edit path').toBe('core');
+    const after = await freshRead();
+    expect(e.model.scenario_revision).toBe(after.content_hash);
+    expect(e.model.scenario_revision).not.toBe(turn.model.scenario_revision);
+    expect(e).toMatchObject({ assistant_text: '', error: null });
+    expect(calls, 'a canvas edit calls no model').toHaveLength(1);
+  });
+
+  it('a draft saved, then the reply refused: the contract says the save is kept, the outcome is recorded, and a resend replays it', async () => {
+    persisted = null;
+    outputs = [[{ type: 'function_call', name: 'build_model_from_brief', call_id: 'draft', args: { brief: BRIEF, model: KNOWN_ANSWER } }], [{ type: 'refuse' }]];
+    const turnId = randomUUID();
+    const r = await typed(BRIEF, turnId);
+    expect(r.statusCode, r.body).toBe(502);
+    const j = r.json() as Json;
+    expect(registered).toHaveLength(1);
+    expect(j).toMatchObject({ durability: 'recorded', assistant_text: '', error: {
+      message: 'The saved change is kept, but the reply didn’t arrive. Send a new message to continue.', retry_safe: false, nothing_saved: false } });
+    const callsBefore = calls.length;
+    const again = (await typed(BRIEF, turnId)).json() as Json;
+    expect(again).toMatchObject({ durability: 'replayed', assistant_text: '', error: { code: 'REPLY_NOT_DELIVERED', nothing_saved: false } });
+    expect(calls.length, 'a replay calls no model').toBe(callsBefore);
+    expect(registered).toHaveLength(1);
+  });
+
+  it('⭐ the first draft: the streamed GRAPH_READY frame and the COMPLETE contract carry the same ids', async () => {
+    persisted = null;
+    outputs = [[{ type: 'function_call', name: 'build_model_from_brief', call_id: 'draft', args: { brief: BRIEF, model: KNOWN_ANSWER } }],
+      [{ type: 'message', text: 'Here is the first model I built.' }]];
+    const frames: Json[] = [];
+    const r = await runWithStageStream((event) => { frames.push(event as Json); },
+      // Awaited INSIDE the stage context, as the SSE wrapper does (`streamed-turn-sse.ts`): light-my-request dispatches on await.
+      async () => await app.inject({ method: 'POST', url: '/agent/v1/core-turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), message: BRIEF, source: 'composer' } }));
+    expect(r.statusCode, r.body).toBe(200);
+    const j = r.json() as Json;
+    expect(registered).toHaveLength(1);
+    const ready = frames.filter((f) => f.kind === 'GRAPH_READY');
+    expect(ready, JSON.stringify(frames.map((f) => f.kind))).toHaveLength(1);
+    expect(ids(ready[0]!.graph)).toEqual(ids(j.model.graph));
+    expect(ids(j.model.graph).length).toBeGreaterThan(0);
+    expect(j.receipts).toEqual([expect.objectContaining({ version_id: 'v_1', authorised_by: 'olumi' })]);
+    expect(j.model.scenario_revision).toBe((await freshRead()).content_hash);
+  });
+});

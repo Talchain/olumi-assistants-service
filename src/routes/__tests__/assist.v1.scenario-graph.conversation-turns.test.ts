@@ -362,7 +362,8 @@ describe("the restore returns only the Agent's answer rows — what the user saw
   });
 
   it("DRIFT PIN: the prefix is the one the Agent route writes on its answer rows", () => {
-    const src = readFileSync(new URL("../agent-v1-turn.ts", import.meta.url), "utf8");
+    // The answer rows' request hash moved with the core route's request identity (R1, #3647): both routes write it from there.
+    const src = readFileSync(new URL("../../orchestrator-v5/core-route/turn-request.ts", import.meta.url), "utf8");
     expect(src).toContain(`return \`${AGENT_ANSWER_REQUEST_HASH_PREFIX}\${digest}\`;`);
   });
 });

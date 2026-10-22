@@ -63,6 +63,8 @@ export function installScenarioDeclarationGuard(app: FastifyInstance): void {
   });
 }
 function family(req: FastifyRequest): string { return req.routeOptions.url ?? ''; }
+/** The Agent's turn doors: the legacy lane and the core route (`routes/core-turn.ts`), admitted alike. */
+function agentTurn(path: string): boolean { return path === '/agent/v1/turn' || path === '/agent/v1/core-turn'; }
 function isTurn(path: string): boolean { return (path.startsWith('/orchestrate/v2/turn') || path.startsWith('/proxy/v5/turn')) && !path.endsWith('/stop'); }
 function personal(path: string): boolean { return path.startsWith('/collab/v1/rounds') || path.startsWith('/assist/v1/decision-records') || path.endsWith('/copy'); }
 function envelope(reply: FastifyReply, req: FastifyRequest, status: number, code: string, message: string) {
@@ -76,7 +78,7 @@ function signInRefusal(req: FastifyRequest, reply: FastifyReply, reason: 'missin
   const declaration = req.routeOptions.config.scenarioId;
   const rawId = declaration && declaration !== 'none' && 'from' in declaration ? (req[declaration.from] as Record<string, unknown> | undefined)?.[declaration.key] : undefined;
   ownershipRefusalEvent(req, reason, canonicalScenarioId(rawId) ?? '');
-  if (path === '/agent/v1/turn') return reply.code(401).send({ error: 'SIGN_IN_REQUIRED', detail: reason });
+  if (agentTurn(path)) return reply.code(401).send({ error: 'SIGN_IN_REQUIRED', detail: reason });
   if (!personal(path)) return reply.code(401).send(buildSignInRequiredError(reason, getOrGenerateRequestId(req)));
   const missing = path.startsWith('/collab/') ? 'Opening or closing a round is owner-only: sign in and retry.'
     : path.endsWith('/copy') ? 'Sign in to keep this decision in your account.'
@@ -93,7 +95,7 @@ function refuse(req: FastifyRequest, reply: FastifyReply, scenarioId: string, re
     details: { reason, scenario_id: scenarioId, ...(reason === 'scenario_deleted' ? { recovery: SCENARIO_DELETED_RECOVERY_BODY, recovery_suggestion: SCENARIO_DELETED_RECOVERY_BODY.suggestion } : {}) },
     request_id: requestId, retryable: false,
   });
-  if (path === '/agent/v1/turn') return oracleFailed
+  if (agentTurn(path)) return oracleFailed
     ? reply.code(409).send({ error: 'SCENARIO_OWNERSHIP_UNVERIFIABLE', detail: 'Could not verify the scenario. Nothing was changed.' })
     : reply.code(404).send({ error: 'NOT_FOUND', detail: 'No readable conversation for that scenario.' });
   if (path.startsWith('/collab/')) {
@@ -214,7 +216,7 @@ export const scenarioOwnershipPlugin = fp(async (app: FastifyInstance) => {
               ownershipRefusalEvent(req, 'invalid_scenario_id', '');
               return envelope(reply, req, 400, 'invalid_scenario_id', 'scenario_id is required.');
             }
-            if (path === '/agent/v1/turn') return refuse(req, reply, '', 'scenario_not_found');
+            if (agentTurn(path)) return refuse(req, reply, '', 'scenario_not_found');
           }
           return;
         }
@@ -249,7 +251,7 @@ export const scenarioOwnershipPlugin = fp(async (app: FastifyInstance) => {
         }
         if (ownerUserId === undefined) {
           const createsHere = path === '/orchestrate/v2/turn' || path.endsWith('/graph/register') ||
-            (path === '/agent/v1/turn' && ((req.body as { kind?: unknown })?.kind === undefined || (req.body as { kind?: unknown }).kind === 'message'));
+            (agentTurn(path) && ((req.body as { kind?: unknown })?.kind === undefined || (req.body as { kind?: unknown }).kind === 'message'));
           // Unknown rows have nothing to protect. Provision only at the handler's
           // original post-validation position, then admit the actual RPC-returned owner.
           req.scenarioAccess.scenarioMissing = true;
@@ -265,7 +267,7 @@ export const scenarioOwnershipPlugin = fp(async (app: FastifyInstance) => {
             return;
           }
           // Wrappers dispatch into the checked inner handler; never CREATE here.
-          if (isTurn(path) || path === '/agent/v1/turn' || declaration.allowMissing) return;
+          if (isTurn(path) || agentTurn(path) || declaration.allowMissing) return;
         }
       }
     } catch (err) {

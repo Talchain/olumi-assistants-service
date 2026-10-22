@@ -94,6 +94,7 @@ import {
 import { emit, log, TelemetryEvents } from "../utils/telemetry.js";
 import { SSE_HEARTBEAT_INTERVAL_MS } from "../config/timeouts.js";
 import { config } from "../config/index.js";
+import { coreTurnStreamTimeout } from "../orchestrator-v5/core-route/contract.js";
 
 /**
  * The buffered turn both streamed routes forward to. Single source of truth.
@@ -114,6 +115,14 @@ import { config } from "../config/index.js";
  */
 export const STREAMED_TURN_INTERNAL_TARGET =
   config.proxy.proxyV5Target === "agent" ? "/agent/v1/turn" : "/orchestrate/v2/turn";
+
+/** The turn id the request body names, for a terminal frame the turn itself never wrote. */
+function turnIdOfPayload(payload: string): string | null {
+  try {
+    const id = (JSON.parse(payload) as { turn_id?: unknown } | null)?.turn_id;
+    return typeof id === "string" && id !== "" ? id : null;
+  } catch { return null; }
+}
 
 const EVENT_STREAM = "text/event-stream";
 const SSE_TRANSPORT_HEADERS = {
@@ -183,7 +192,7 @@ export interface StagedTurnStreamOptions {
   /** Route path, for telemetry only. */
   readonly endpoint: string;
   /** Optional explicit comparison target; absent keeps deployment default. */
-  readonly internalTarget?: "/orchestrate/v2/turn" | "/agent/v1/turn";
+  readonly internalTarget?: "/orchestrate/v2/turn" | "/agent/v1/turn" | "/agent/v1/core-turn";
   /**
    * Additional raw response headers (e.g. the browser proxy's own CORS set).
    * Applied over the derived Fastify headers, under the SSE transport headers.
@@ -338,7 +347,8 @@ export async function streamTurnAsStagedSse(opts: StagedTurnStreamOptions): Prom
       );
       writeStage("COMPLETE", {
         status_code: 504,
-        payload: {
+        // The core route's client reads its own contract: the same timeout, said in it (the turn may still save).
+        payload: internalTarget === "/agent/v1/core-turn" ? coreTurnStreamTimeout(turnIdOfPayload(opts.payload)) : {
           schema: "error.v1",
           code: "UPSTREAM_TIMEOUT",
           message: "The turn did not complete within the stream budget.",

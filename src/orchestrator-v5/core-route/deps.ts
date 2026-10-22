@@ -7,8 +7,10 @@
  *  · `graphReadyEmitter`: the streamed GRAPH_READY frame for a drafted model;
  *  · `CORE_RUN_PRESS_WITHHELD`: the tools a Run press withholds.
  *  · `constructionDeadline`: when the turn's construction call must have ended.
- * The capabilities object a route passes in is used here ONLY for propose_link_strengths (through `dispatchTool`); the Run
- * and the stress variant come in as the route's own functions, so the legacy Run pipeline can be cut out later.
+ *  · `coreTurnCapabilities`: the legacy capabilities, built for `routes/core-turn.ts` and used there ONLY for the Run
+ *    (`runAnalysis`, the existing Run pipeline and its press guard); propose_link_strengths reaches them through
+ *    `dispatchTool` on a legacy scenario only, and the stress variant is `runStressVariant`'s own. Nothing else is used, so
+ *    the legacy Run pipeline can be cut out later.
  * The turn's write accounting (`countingDispatch`, `capDispatch`, the fenced doors) is the route's: it is passed in.
  */
 import { randomUUID } from 'node:crypto';
@@ -22,7 +24,8 @@ import type { CoreTurnInput } from '../agent-lane/core/sdk-turn.js';
 import { coreBudget } from '../agent-lane/model-budgets.js';
 import { CONSTRUCTION_TAIL_RESERVE_MS } from '../agent-lane/runtime/construction-deadline.js';
 import { dispatchTool, type AgentCapabilities, type AgentLaneMode, type AgentToolContext } from '../agent-lane/runtime/agent-tools.js';
-import type { InternalDispatch } from '../agent-lane/runtime/agent-capabilities.js';
+import { createAgentCapabilities, type InternalDispatch } from '../agent-lane/runtime/agent-capabilities.js';
+import type { RecoveredRun } from '../agent-lane/run-operation.js';
 import { runStressVariant } from '../handlers/stress-variant-run.js';
 import { pathBTools, type PathBToolDeps } from '../path-b/tools/index.js';
 import type { OpenAiPausedRun, SessionStore } from '../session/store.js';
@@ -60,16 +63,27 @@ export function constructionDeadline(
   return turnStartedAt + proxyTimeoutMs - TURN_RESPONSE_HEADROOM_MS - CONSTRUCTION_TAIL_RESERVE_MS;
 }
 
+/**
+ * The canvas's wire projection of a model graph (`buildAppliedGraphWireField`), or `undefined` for a graph with no nodes. ONE
+ * projection for the streamed GRAPH_READY frame and the core turn's COMPLETE `model.graph`, so their ids are equal.
+ */
+export function appliedGraphWire(raw: unknown): ReturnType<typeof buildAppliedGraphWireField> | undefined {
+  if (raw === null || typeof raw !== 'object' || !Array.isArray((raw as Record<string, unknown>).nodes)
+    || ((raw as Record<string, unknown>).nodes as unknown[]).length === 0) return undefined;
+  // The same single cast COMPLETE's readback makes (`after.json.graph`).
+  const g = raw as GraphV3T;
+  return buildAppliedGraphWireField({ ...g, edges: Array.isArray(g.edges) ? g.edges : [] });
+}
+
 /** The streamed GRAPH_READY frame for a model graph (nothing outside a streamed turn); through COMPLETE's own projection. */
 export function graphReadyEmitter(startedAt: number): (raw: Record<string, unknown>) => void {
   return (raw: Record<string, unknown>): void => {
     const emitStage = currentStageEmitter();
-    if (emitStage === undefined || !Array.isArray(raw.nodes) || raw.nodes.length === 0) return;
-    // The same single cast COMPLETE's readback makes (`after.json.graph`).
-    const g = raw as GraphV3T;
+    const graph = emitStage === undefined ? undefined : appliedGraphWire(raw);
+    if (emitStage === undefined || graph === undefined) return;
     emitStage({
       kind: 'GRAPH_READY',
-      graph: buildAppliedGraphWireField({ ...g, edges: Array.isArray(g.edges) ? g.edges : [] }),
+      graph,
       schema_version: 'v3',
       elapsed_ms: Date.now() - startedAt,
     });
@@ -93,7 +107,8 @@ export interface CoreTurnToolsInput {
   readonly noteOnlyOn?: PathBToolDeps['noteOnlyOn'];
   /** Used ONLY for propose_link_strengths, through `dispatchTool`. */
   readonly capabilities: AgentCapabilities;
-  readonly commitOptionLevels: PathBToolDeps['commitOptionLevels'];
+  /** The batch levels door, for a legacy scenario's change adapter; a core scenario's changes never reach it. */
+  readonly commitOptionLevels?: PathBToolDeps['commitOptionLevels'];
   readonly onModelRegistered: (raw: Record<string, unknown>) => void;
   /** The route's Run pipeline (a Run press's guard included). */
   readonly runAnalysis: PathBToolDeps['runAnalysis'];
@@ -108,7 +123,7 @@ export function coreTurnTools(i: CoreTurnToolsInput): CoreTurnInput['tools'] {
   return (onCall) => pathBTools({ dispatch: i.dispatch, proposals: i.proposals, critique: modelCritic(coreBudget()), deadlineAt: i.deadlineAt,
     ...(i.noteOnlyOn !== undefined ? { noteOnlyOn: i.noteOnlyOn } : {}),
     proposeLinkStrengths: (c, a) => dispatchTool('propose_link_strengths', JSON.stringify(a), { ...i.ctx, ...c }, i.capabilities, i.mode),
-    commitOptionLevels: i.commitOptionLevels, onModelRegistered: (raw) => i.onModelRegistered(raw),
+    ...(i.commitOptionLevels !== undefined ? { commitOptionLevels: i.commitOptionLevels } : {}), onModelRegistered: (raw) => i.onModelRegistered(raw),
     runAnalysis: i.runAnalysis,
     analyseAfterCommit: i.analyseAfterCommit,
     // TRACK 3: each stress variant on the one Run path, in memory, discarded (`handlers/stress-variant-run.ts`).
@@ -145,4 +160,13 @@ export function coreTurnStores(store: CoreTurnStoreReaders): Pick<CoreTurnInput,
         claim: (sid: string, id: string) => store.claimOpenAiConversationId!(sid, id),
       } } : {}),
   };
+}
+
+/**
+ * The capabilities `routes/core-turn.ts` runs the Run on: the existing pipeline over the route's counting dispatch, the
+ * request's own Run operation (or the restore's recorded Run) and the turn's deadline. Used for `runAnalysis` only.
+ */
+export function coreTurnCapabilities(dispatch: InternalDispatch, proposals: PathBToolDeps['proposals'],
+  run: { readonly recoveredRun?: RecoveredRun; readonly runOperationId?: string; readonly deadlineAt: number }): AgentCapabilities {
+  return createAgentCapabilities(dispatch, proposals, undefined, 'core', undefined, { turnAuthority: true, ...run });
 }

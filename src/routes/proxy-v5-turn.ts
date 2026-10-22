@@ -60,8 +60,8 @@ export const AI_MODE_HEADER = "x-olumi-ai-mode" as const;
  * `core` (PATH-B): the same Agent route, whose own per-request mode then drops Olumi's added reply prose
  * (`agent-tools.ts` `laneModeFor`; ignored in production). The value is forwarded unchanged with the other allowed headers.
  */
-export type BrowserAiMode = "conventional" | "openai" | "core";
-export type ProxyInternalTarget = "/orchestrate/v2/turn" | "/agent/v1/turn";
+export type BrowserAiMode = "conventional" | "openai" | "core" | "core-route";
+export type ProxyInternalTarget = "/orchestrate/v2/turn" | "/agent/v1/turn" | "/agent/v1/core-turn";
 
 /**
  * Explicit comparison mode wins over deployment default. The value is a closed
@@ -70,6 +70,8 @@ export type ProxyInternalTarget = "/orchestrate/v2/turn" | "/agent/v1/turn";
  */
 export function resolveProxyInternalTarget(mode: unknown): ProxyInternalTarget {
   if (mode === "conventional") return "/orchestrate/v2/turn";
+  // The core route (`routes/core-turn.ts`): the PoC's own thin turn, with its own contract.
+  if (mode === "core-route") return "/agent/v1/core-turn";
   if (mode === "openai" || mode === "core") return "/agent/v1/turn";
   return config.proxy.proxyV5Target === "agent"
     ? "/agent/v1/turn"
@@ -576,7 +578,7 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
     reply.header("x-proxy-source", "cee-browser-proxy");
     reply.header(
       "x-olumi-ai-mode",
-      internalTarget === "/agent/v1/turn" ? "openai" : "conventional",
+      internalTarget === "/agent/v1/core-turn" ? "core-route" : internalTarget === "/agent/v1/turn" ? "openai" : "conventional",
     );
 
     // Security: ensure the service key is NEVER in the response
