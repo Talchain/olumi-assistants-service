@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
-import { CONTEXT_UNCERTAINTY_DRIVER_MAX_CHARS, compactGraph } from '../graph-compact.js';
+import { CONTEXT_UNCERTAINTY_DRIVER_MAX_CHARS, compactGraph, projectUncertaintyDriversForContext } from '../graph-compact.js';
 
 type Rec = Record<string, any>;
 
@@ -56,10 +56,21 @@ describe('uncertainty drivers in the compact context (the shared bounds authorit
       status: 'truncated', original_entries: 3, retained_entries: 2, entries_omitted_by_count: 1, entries_truncated_by_chars: 1,
       per_entry_char_limit: CONTEXT_UNCERTAINTY_DRIVER_MAX_CHARS,
     });
+    // Reprojection keeps the prior truncation disclosure (Codex r2: format-graph-for-context.test.ts:557 asserted this
+    // through the deleted formatter; the shared authority accepts its own output, graph-compact.ts:306).
+    const once = compactFactor(g);
+    expect(projectUncertaintyDriversForContext(once)).toEqual({
+      uncertainty_drivers: once.uncertainty_drivers, uncertainty_drivers_disclosure: once.uncertainty_drivers_disclosure });
   });
 
-  it('adds no uncertainty keys when the producer supplied none', () => {
+  it('adds no uncertainty keys when the producer supplied none, and keeps the compact JSON byte-identical', () => {
     expect(JSON.stringify(compactGraph(GraphV3.parse(strictGraph())))).not.toContain('uncertainty_driver');
+    // Codex r2: compact-graph-for-contextpack.test.ts:390 pinned these exact bytes through the deleted wrapper.
+    const one = { nodes: [{ id: 'n-0', kind: 'goal', label: 'Node 0 label', body: 'x', category: 'observable',
+      observed_state: { value: 0, std: 0.05, extractionType: 'explicit' } }], edges: [] };
+    expect(JSON.stringify(compactGraph(GraphV3.parse(one)))).toBe(
+      '{"nodes":[{"id":"n-0","kind":"goal","label":"Node 0 label","category":"observable","value":0,"source":"user","provenance":"from_brief"}],"edges":[],"_node_count":1,"_edge_count":0}',
+    );
   });
 
   it('does not promote uncertainty-shaped metadata from non-factor nodes', () => {

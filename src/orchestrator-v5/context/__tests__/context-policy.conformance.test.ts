@@ -767,3 +767,19 @@ describe('budget honesty — every `enforced` section is backed by an importable
     expect(all.filter((s) => s.enforcement === 'enforced_by_total').length).toBeGreaterThan(0);
   });
 });
+
+// Deletion 11 (22 Oct 2026, Codex r2 on #3620): moved verbatim from the deleted factor-value-record unit spec (:178), which
+// was the only guard on this retained declaration. PIN THE DECLARATION, NOT JUST THE CONTENT.
+describe('factor_values stays declared in the coach_converse context policy', () => {
+  it('is declared in the coach_converse context policy as a model-facing section', () => {
+    const sections = CONTEXT_POLICY.coach_converse.sections;
+    // Guard against a vacuous pass if the registry shape ever moves.
+    expect(sections.length).toBeGreaterThan(5);
+    const section = sections.find((s) => s.name === 'factor_values');
+    expect(section, 'factor_values reaches the prompt but is not declared in CONTEXT_POLICY.coach_converse').toBeDefined();
+    expect(section!.model_facing).toBe(true);
+    expect(section!.source).toBe('graph');
+    expect(section!.projection).toContain('projectFactorValueRecord');
+  });
+});
+
