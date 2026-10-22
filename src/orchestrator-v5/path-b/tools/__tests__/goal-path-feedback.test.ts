@@ -325,6 +325,8 @@ describe('the SDK tools: the route\'s one offer per turn; a refusal never makes 
     m.aims[0] = { ...m.aims[0]!, source: 'olumi', quote: null, target: { ...m.aims[0]!.target!, current: 70, current_source: 'user' } };
     expect(personContentLost(m, { ...m, aims: [{ ...m.aims[0]!, target: { ...m.aims[0]!.target!, current: null, current_source: null } }] })).toEqual(['aims:g']);
     expect(personContentLost(m, m)).toEqual([]);
+    // Codex r3: the unit it is read in counts (no current_unit: the target's), so 70 units never becomes 70 kg.
+    expect(personContentLost(m, { ...m, aims: [{ ...m.aims[0]!, target: { ...m.aims[0]!.target!, unit: 'kg' } }] })).toEqual(['aims:g']);
   });
 
   it('CONTRAST: a caller without the route\'s offer saves the first call, as before; its turn has nothing to settle', async () => {

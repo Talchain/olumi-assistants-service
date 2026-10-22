@@ -45,9 +45,10 @@ function personContent(m: LivingModelT): { readonly label: string; readonly valu
       else for (const r of nestedTheirs(Object.values(item))) out.push({ label: `${kind}:${item.id}`, value: stable(r) });
     }
   }
-  // Today's level the person set themselves on an aim of Olumi's (`current_source: 'user'`, a canvas edit; Codex r2 on #3675).
+  // Today's level the person set themselves on an aim of Olumi's (`current_source: 'user'`, a canvas edit), in the unit it is
+  // read in (Codex r2, r3 on #3675).
   for (const a of m.aims) {
-    if (!theirs(a) && a.target?.current_source === 'user') out.push({ label: `aims:${a.id}`, value: stable({ current: a.target.current, current_unit: a.target.current_unit }) });
+    if (!theirs(a) && a.target?.current_source === 'user') out.push({ label: `aims:${a.id}`, value: stable({ current: a.target.current, unit: a.target.current_unit ?? a.target.unit }) });
   }
   for (const { role: _role, ...c } of m.conditions) {
     if (theirs(c)) out.push({ label: `conditions:${c.text}`, value: stable({ ...c, applies_to: [...c.applies_to].sort() }) });
