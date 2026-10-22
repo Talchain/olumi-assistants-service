@@ -100,6 +100,17 @@ describe('PROXY_V5_TARGET', () => {
     expect(onAgentDefault('openai')).toBe('/agent/v1/turn');
   });
 
+  it('core-route selects the thin core route on EITHER default; near-misses never do (DL 22 Oct)', async () => {
+    expect((await freshResolver('orchestrator'))('core-route')).toBe('/agent/v1/core-turn');
+    expect((await freshResolver('agent'))('core-route')).toBe('/agent/v1/core-turn');
+    // CONTRAST: the PATH-B header word keeps the legacy agent route; a near-miss or a path falls back to the default.
+    const resolve = await freshResolver('orchestrator');
+    expect(resolve('core')).toBe('/agent/v1/turn');
+    for (const mode of ['Core-Route', 'core-route ', 'core_route', '/agent/v1/core-turn', ['core-route']]) {
+      expect(resolve(mode), `mode ${JSON.stringify(mode)}`).toBe('/orchestrate/v2/turn');
+    }
+  });
+
   it('treats anything outside the vocabulary as ABSENT, never as a route', async () => {
     const resolve = await freshResolver('orchestrator');
     const hostile: unknown[] = [
@@ -117,11 +128,11 @@ describe('PROXY_V5_TARGET', () => {
     }
   });
 
-  it('can ONLY ever resolve to one of the two mounted turn routes', async () => {
-    const allowed = new Set(['/orchestrate/v2/turn', '/agent/v1/turn']);
+  it('can ONLY ever resolve to one of the three mounted turn routes', async () => {
+    const allowed = new Set(['/orchestrate/v2/turn', '/agent/v1/turn', '/agent/v1/core-turn']);
     for (const env of [undefined, 'orchestrator', 'agent']) {
       const resolve = await freshResolver(env);
-      for (const mode of [undefined, 'openai', 'conventional', 'agent', '/x', ['openai'], 7]) {
+      for (const mode of [undefined, 'openai', 'conventional', 'core-route', 'agent', '/x', ['openai'], 7]) {
         expect(allowed.has(resolve(mode)), `env=${env} mode=${JSON.stringify(mode)}`).toBe(true);
       }
     }

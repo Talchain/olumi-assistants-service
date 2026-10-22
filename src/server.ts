@@ -85,6 +85,7 @@ import { adminTestRoutes } from "./routes/admin.testing.js";
 import { adminModelRoutes } from "./routes/admin.models.js";
 import { proxyV5TurnRoute } from "./routes/proxy-v5-turn.js";
 import { agentV1TurnRoute } from "./routes/agent-v1-turn.js";
+import { coreTurnRoute } from "./routes/core-turn.js";
 import proxyV5TurnStreamRoute from "./routes/proxy-v5-turn-stream.js";
 import { logResolvedTaskModels } from "./config/model-resolution-logger.js";
 import {
@@ -1382,6 +1383,8 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
   // AGENT_LANE_ENABLED === 'true', so deploying it is inert and the rollback
   // is unsetting one variable.
   await agentV1TurnRoute(app);
+  // The core route: POST /agent/v1/core-turn, the PoC's own thin turn (the proxy selects it with `x-olumi-ai-mode: core-route`).
+  await coreTurnRoute(app);
 
     // ROADMAP 2.122 / 1.204 M1 (CEE lane 2) — the STREAMED browser surface.
     //

@@ -6,13 +6,14 @@
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
+import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
 const SRC = resolve(__dirname, '../../..');
 
 /** The thin core's own files. A file joins this list in the commit that moves it onto the living model. */
 const THIN_CORE_ROOTS = ['schemas/living-model.ts', 'orchestrator-v5/path-b/living-model', 'orchestrator-v5/path-b/tools/draft-tool.ts',
-  'orchestrator-v5/path-b/tools/core-write.ts', 'orchestrator-v5/core-route'];
+  'orchestrator-v5/path-b/tools/core-write.ts', 'orchestrator-v5/core-route', 'routes/core-turn.ts'];
 
 /** The legacy meaning/admission layer (module basenames). */
 const FORBIDDEN = [
@@ -25,6 +26,10 @@ const FORBIDDEN = [
 /** Protocol helpers that live in a forbidden module but carry no meaning. */
 const ALLOWED_BY_NAME: Record<string, readonly string[]> = {
   'build-model': ['constructionOperationId', 'findConstructionVersion'],
+  // The core route's Run runs on the existing pipeline (DL 22 Oct): `core-route/deps.ts` builds the capabilities for it alone.
+  'agent-capabilities': ['createAgentCapabilities'],
+  // Whether the request's words were typed: the one authority's predicate over the request shape, no meaning.
+  'provenance-of': ['requestWasTyped'],
 };
 
 function filesUnder(rel: string): string[] {
@@ -36,35 +41,44 @@ function filesUnder(rel: string): string[] {
 }
 
 /**
- * Each runtime dependency on a forbidden module, as "<module>: <names>" (or the form, when it binds no names). EVERY module
- * specifier counts (Codex BLOCK on #3647 r1: only `import … from` was seen): `import … from`, `export … from`, `import('…')`,
- * a side-effect `import '…'` and `require('…')`. Type-only imports and re-exports are skipped.
+ * Each runtime dependency on a forbidden module, as "<module>: <names>", or "<module>: loaded" when the form binds no names.
+ * EVERY module reference counts, from the compiler's own scanner (`ts.preProcessFile`; DL on #3647 r2, after Codex found
+ * regex escapes): `import … from`, `export … from`, `import()` (a template literal too), a side-effect import, `require()`.
+ * The declarations that bind names are read from the compiler's own tree, so a type-only import or re-export, or a type-only
+ * name inside one, loads nothing and is skipped.
  */
 export function forbiddenImports(source: string): string[] {
   const out: string[] = [];
   const baseOf = (spec: string): string => spec.split('/').pop()!.replace(/\.js$/, '');
-  // `import X from`, `import { a } from`, `import * as n from`, `export { a } from`, `export * from` (one statement: no `;`).
-  const fromRe = /\b(import|export)\s+(type\s+)?([^;]*?)\s+from\s+['"]([^'"]+)['"]/g;
-  for (const m of source.matchAll(fromRe)) {
-    if (m[2] !== undefined) continue;
-    const base = baseOf(m[4]!);
-    if (!FORBIDDEN.includes(base)) continue;
-    const clause = m[3]!;
-    const braced = clause.match(/\{([\s\S]*)\}/)?.[1];
-    const names = [...(braced ?? '').split(','), ...clause.replace(/\{[\s\S]*\}/, '').split(',')]
-      .map((s) => s.trim()).filter((s) => s.length > 0 && !s.startsWith('type '));
-    const runtime = names.filter((n) => !(ALLOWED_BY_NAME[base] ?? []).includes(n.split(/\s+as\s+/)[0]!));
+  const forbidden = (spec: string): boolean => FORBIDDEN.includes(baseOf(spec));
+  const referenced = ts.preProcessFile(source, true, true).importedFiles.map((f) => f.fileName).filter(forbidden);
+  const declared: string[] = [];
+  for (const s of ts.createSourceFile('boundary.ts', source, ts.ScriptTarget.Latest, true).statements) {
+    if (!ts.isImportDeclaration(s) && !ts.isExportDeclaration(s)) continue;
+    if (s.moduleSpecifier === undefined || !ts.isStringLiteral(s.moduleSpecifier) || !forbidden(s.moduleSpecifier.text)) continue;
+    // A side-effect import binds nothing: it stays a reference the scanner reports below.
+    if (ts.isImportDeclaration(s) && s.importClause === undefined) continue;
+    declared.push(s.moduleSpecifier.text);
+    let names: string[];
+    if (ts.isImportDeclaration(s)) {
+      const clause = s.importClause!;
+      if (clause.isTypeOnly) continue;
+      const bound = clause.namedBindings;
+      names = [...(clause.name !== undefined ? [clause.name.text] : []), ...(bound === undefined ? []
+        : ts.isNamespaceImport(bound) ? ['*'] : bound.elements.filter((e) => !e.isTypeOnly).map((e) => (e.propertyName ?? e.name).text))];
+    } else {
+      if (s.isTypeOnly) continue;
+      const clause = s.exportClause;
+      names = clause === undefined || ts.isNamespaceExport(clause) ? ['*']
+        : clause.elements.filter((e) => !e.isTypeOnly).map((e) => (e.propertyName ?? e.name).text);
+    }
+    const base = baseOf(s.moduleSpecifier.text);
+    const runtime = names.filter((n) => !(ALLOWED_BY_NAME[base] ?? []).includes(n));
     if (runtime.length > 0) out.push(`${base}: ${runtime.join(', ')}`);
   }
-  // Forms that bind no names: the whole module is loaded at runtime.
-  const unnamed: readonly [RegExp, string][] = [
-    [/\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g, 'import()'],
-    [/^\s*import\s+['"]([^'"]+)['"]/gm, 'side-effect import'],
-    [/\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)/g, 'require()'],
-  ];
-  for (const [re, form] of unnamed) {
-    for (const m of source.matchAll(re)) if (FORBIDDEN.includes(baseOf(m[1]!))) out.push(`${baseOf(m[1]!)}: ${form}`);
-  }
+  // Every other reference (`import()`, `require()`, a side-effect import) loads the whole module at runtime.
+  for (const spec of declared) { const i = referenced.indexOf(spec); if (i >= 0) referenced.splice(i, 1); }
+  for (const spec of referenced) out.push(`${baseOf(spec)}: loaded`);
   return out;
 }
 
@@ -85,17 +99,23 @@ describe('thin core dependency boundary', () => {
     expect(forbiddenImports(`import { type CallStructuredModel, constructionOperationId } from '../runtime/build-model.js';`)).toEqual([]);
   });
 
-  it('POSITIVE CONTROL: every other form that loads a module is seen too (Codex BLOCK on #3647 r1)', () => {
+  it('POSITIVE CONTROL: every other form that loads a module is seen too (Codex on #3647 r1 and r2)', () => {
     const route = '../../routes/agent-v1-turn.js';
-    expect(forbiddenImports(`void import('${route}');`)).toEqual(['agent-v1-turn: import()']);
-    expect(forbiddenImports(`import '${route}';`)).toEqual(['agent-v1-turn: side-effect import']);
-    expect(forbiddenImports(`const r = require('${route}');`)).toEqual(['agent-v1-turn: require()']);
+    expect(forbiddenImports(`void import('${route}');`)).toEqual(['agent-v1-turn: loaded']);
+    expect(forbiddenImports(`void import(\`${route}\`);`), 'a template-literal import()').toEqual(['agent-v1-turn: loaded']);
+    expect(forbiddenImports(`import '${route}';`)).toEqual(['agent-v1-turn: loaded']);
+    expect(forbiddenImports(`export {}; import "${route}";`), 'a side-effect import after another statement on its line').toEqual(['agent-v1-turn: loaded']);
+    expect(forbiddenImports(`const r = require('${route}');`)).toEqual(['agent-v1-turn: loaded']);
     expect(forbiddenImports(`export { readBackState } from '${route}';`)).toEqual(['agent-v1-turn: readBackState']);
     expect(forbiddenImports(`export * from '${route}';`)).toEqual(['agent-v1-turn: *']);
-    expect(forbiddenImports(`import route, { readBackState } from '${route}';`)).toEqual(['agent-v1-turn: readBackState, route']);
-    // Type-only forms load nothing.
+    expect(forbiddenImports(`import route, { readBackState } from '${route}';`)).toEqual(['agent-v1-turn: route, readBackState']);
+    // A named import AND a load of the same module: both are seen.
+    expect(forbiddenImports(`import { readBackState } from '${route}';\nvoid import('${route}');`))
+      .toEqual(['agent-v1-turn: readBackState', 'agent-v1-turn: loaded']);
+    // Type-only forms load nothing, however they are laid out.
     expect(forbiddenImports(`export type { CallStructuredModel } from '../runtime/build-model.js';`)).toEqual([]);
     expect(forbiddenImports(`import type * as T from '${route}';`)).toEqual([]);
+    expect(forbiddenImports(`import {\n  type\n  CallStructuredModel,\n} from '../runtime/build-model.js';`), 'an inline type-only name across lines').toEqual([]);
     // CONTRAST: a module outside the list is never flagged, in any form.
     expect(forbiddenImports(`void import('./deps.js'); import './instructions.js'; export * from './turn-request.js';`)).toEqual([]);
   });

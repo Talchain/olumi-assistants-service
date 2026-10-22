@@ -90,7 +90,8 @@ export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLa
     const args = toolArgumentsAsSent(name, JSON.stringify(input), [ctx.user_turn_text ?? '', ...(ctx.verified_user_messages ?? [])]).arguments;
     const row = { ...traceRow(name, outcome), args };
     const pid = outcome.status === 'ok' && typeof outcome.data.proposal_id === 'string' ? outcome.data.proposal_id : proposalId;
-    const receipt = outcome.status === 'ok' ? outcome.data.receipt : undefined;
+    // The draft reports its commit as `model_version` (`draft-tool.ts`), a change as `receipt`: either is this call's own receipt.
+    const receipt = outcome.status === 'ok' ? outcome.data.receipt ?? outcome.data.model_version : undefined;
     try {
       onCall(row, { args, ok: row.ok, mutated: row.mutated === true, ...(row.ran === true ? { ran: true as const } : {}),
         ...(pid === undefined ? {} : { proposal_id: pid }),

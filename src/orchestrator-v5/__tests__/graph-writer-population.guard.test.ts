@@ -146,11 +146,13 @@ describe('C8 — the `scenarios.graph` writer population is EXACTLY these call s
     // The OpenAI Agent route persists its conversational turn row — NO graph,
     // `writesGraph: false` — through the same floor, so a lost-response retry
     // can be replayed from it (#63 5788656586). It takes the floor rather than
-    // `store.append` so the one append stays inside the floor.
+    // `store.append` so the one append stays inside the floor. The core route
+    // (#3650) persists its claim and answer rows the same way, with no graph.
     expect(callers).toEqual([
       'orchestrator-v5/commit.ts',
       'routes/agent-v1-turn.ts',
       'routes/assist.v1.scenario-graph-register.ts',
+      'routes/core-turn.ts',
     ]);
   });
 
@@ -229,6 +231,8 @@ describe('C8 — the `scenarios.graph` writer population is EXACTLY these call s
       'routes/assist.v1.scenario-copy.ts',
       'routes/assist.v1.scenario-graph-register.ts',
       'routes/assist.v1.scenario-versions.ts',
+      // The core route's turn rows (no graph, `writesGraph: false`) through the checked floor, as the Agent route's.
+      'routes/core-turn.ts',
     ]);
   });
 });

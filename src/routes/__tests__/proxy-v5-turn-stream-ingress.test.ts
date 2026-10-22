@@ -186,6 +186,16 @@ describe("POST /proxy/v5/turn/stream — explicit AI comparison mode", () => {
       await app.close();
     }
   });
+
+  it("core-route header streams the thin core route (DL 22 Oct)", async () => {
+    const app = await buildApp();
+    try {
+      await post(app, SAMPLE_PAYLOAD, { "x-olumi-ai-mode": "core-route" });
+      expect(streamCalls[0].internalTarget).toBe("/agent/v1/core-turn");
+    } finally {
+      await app.close();
+    }
+  });
 });
 
 describe("POST /proxy/v5/turn/stream — client-asserted identity is stripped", () => {
