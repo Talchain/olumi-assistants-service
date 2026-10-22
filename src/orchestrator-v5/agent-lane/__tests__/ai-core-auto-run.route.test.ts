@@ -11,6 +11,8 @@
  * Harness: the real route, SDK, card carrier, Run pipeline and adapters; the write itself is a counted commit (C5's door is
  * proven in `path-b/tools/__tests__`), the model is scripted through global fetch (0 provider calls). SYNTHETIC wording.
  */
+import { SELECTION_NOTE_PREFIX } from '../selection-context.js';
+import { challengeTargetOf } from '../../../routes/agent-v1-turn.js';
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -293,6 +295,16 @@ describe('PATH-B gap 4: commit and Undo each run the existing Run pipeline once;
     expect(r.statusCode, r.body).toBe(200);
     const offered = (calls[0]!.tools as Json[]).find((t) => t.name === 'note_on_item');
     expect(String(offered?.description)).toContain(CHALLENGE_SENTENCE);
+    // ⭐ DL lease 22 Oct (served 0/4 on the description alone): the FIRST call must be the note, told which card by its own
+    // selection note (this turn's instructions only); the SDK frees the next call to reply.
+    expect(calls[0]!.tool_choice, 'the first call is the note').toMatchObject({ type: 'function', name: 'note_on_item' });
+    // The selection entry itself, decoded (Codex r1: the canonical state elsewhere in the instructions also names `f`).
+    const ins = String(calls[0]!.instructions);
+    const at = ins.indexOf(SELECTION_NOTE_PREFIX);
+    expect(at, 'the card\'s selection note is in this turn\'s instructions').toBeGreaterThanOrEqual(0);
+    const entry = JSON.parse(ins.slice(at + SELECTION_NOTE_PREFIX.length).split('\n')[0]!) as Json[];
+    expect(entry.map((e) => [e.id, e.label])).toEqual([['f', 'Capacity']]);
+    expect(forcesNote(calls[1]!), 'only the first call is forced').toBe(false);
     const blocks = (r.json() as Json).blocks as Json[];
     expect(blocks[0]).toMatchObject({ type: 'ui_directive', verb: 'highlight', targets: [{ id: 'f', label: 'Capacity', kind: 'factor' }], note: NOTE });
     expect(probe.applied, 'a challenge writes nothing').toBe(0);
@@ -303,6 +315,8 @@ describe('PATH-B gap 4: commit and Undo each run the existing Run pipeline once;
     const cases: [Json[], string][] = [
       [[], 'What in this model is most worth challenging, and why?'],
       [[{ id: 'f', kind: 'factor', label: 'Capacity' }, { id: 'g', kind: 'goal', label: 'Velocity' }], 'Challenge Capacity and Velocity: what is each based on?'],
+      // One card the model does not hold: no grounded target, so nothing is forced (DL lease 22 Oct).
+      [[{ id: 'zz', kind: 'factor', label: 'Gone' }], 'What is the figure for ‘Gone’ based on?'],
     ];
     for (const [selected, message] of cases) {
       calls = []; outputs = [[{ type: 'message', text: 'Capacity rests on one estimate; a second source would test it.' }]];
@@ -312,6 +326,40 @@ describe('PATH-B gap 4: commit and Undo each run the existing Run pipeline once;
       expect(JSON.stringify(calls[0]?.input ?? null)).not.toContain(CHALLENGE);
       expect(calls.filter(forcesNote), message).toHaveLength(0);
       expect(((r.json() as Json).blocks as Json[] | undefined ?? []).filter((b) => b.type === 'ui_directive')).toHaveLength(0);
+    }
+  });
+
+  it('⛔ Codex r2: a Challenge on one card never lands its note on ANOTHER valid card: the tool refuses it, no directive ships', async () => {
+    outputs = [[{ type: 'function_call', name: 'note_on_item', call_id: 'note_call', args: { item_id: 'g', note: 'Is Velocity the outcome you want?' } }],
+      [{ type: 'message', text: 'A question about the goal.' }]];
+    const r = await challengePress([{ id: 'f', kind: 'factor', label: 'Capacity' }]);
+    expect(r.statusCode, r.body).toBe(200);
+    expect(outputOf('note_call')).toMatchObject({ status: 'refused', reason: 'note_not_on_selected_item' });
+    expect(((r.json() as Json).blocks as Json[] | undefined ?? []).filter((b) => b.type === 'ui_directive')).toHaveLength(0);
+    // CONTRAST: the same note on another card, typed in the composer (no Challenge), still ships.
+    calls = []; outputs = [[{ type: 'function_call', name: 'note_on_item', call_id: 'note_call', args: { item_id: 'g', note: 'Is Velocity the outcome you want?' } }],
+      [{ type: 'message', text: 'A question about the goal.' }]];
+    const typed = await post({ turn_id: randomUUID(), message: 'What should I question here?', source: 'composer' });
+    expect(((typed.json() as Json).blocks as Json[])[0]).toMatchObject({ type: 'ui_directive', targets: [{ id: 'g' }] });
+  });
+
+  it('⛔ Codex r1: a Challenge on one card the note cannot sit beside (the decision) forces nothing; a factor or goal does', () => {
+    const one = (id: string) => ({ note: `${SELECTION_NOTE_PREFIX}[]`, grounded: { element_ids: [id], unresolved: 'none' as const } });
+    const saved = { nodes: [{ id: 'd', kind: 'decision', label: 'Which way?' }, { id: 'f', kind: 'factor', label: 'Capacity' }, { id: 'g', kind: 'goal', label: 'Velocity' }] };
+    const press = { chip: { id: 'ask:challenge' } };
+    expect(challengeTargetOf(press, one('d'), saved)).toBeNull();
+    expect(challengeTargetOf(press, one('f'), saved)).not.toBeNull();
+    expect(challengeTargetOf(press, one('g'), saved)).not.toBeNull();
+    expect(challengeTargetOf(press, one('f'), undefined), 'no saved model read → nothing forced').toBeNull();
+  });
+
+  it('⛔ CONTRAST (DL lease 22 Oct): the same one card typed in the composer, or on another chip, is never forced to a note', async () => {
+    for (const extra of [{ source: 'composer' }, { source: 'chip', chip: { id: 'ask:explain' } }]) {
+      calls = []; outputs = [[{ type: 'message', text: 'Capacity rests on one estimate.' }]];
+      const r = await post({ turn_id: randomUUID(), message: CHALLENGE, selected_elements: [{ id: 'f', kind: 'factor', label: 'Capacity' }], ...extra });
+      expect(r.statusCode, r.body).toBe(200);
+      expect(calls.length, 'PRECONDITION: the AI was asked').toBeGreaterThan(0);
+      expect(calls.filter(forcesNote), JSON.stringify(extra)).toHaveLength(0);
     }
   });
 

@@ -34,17 +34,21 @@ export type NoteOnItemArgs = z.infer<typeof NoteOnItemParams>;
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 const recs = (v: unknown): Rec[] => (Array.isArray(v) ? v.filter(isRec) : []);
-const NODE_KINDS = new Set(['factor', 'option', 'goal', 'risk', 'constraint', 'outcome']);
+/** The card kinds a note can sit beside (the decision is the question itself, never a card to note). */
+export const NOTE_NODE_KINDS: ReadonlySet<string> = new Set(['factor', 'option', 'goal', 'risk', 'constraint', 'outcome']);
+const NODE_KINDS = NOTE_NODE_KINDS;
 const RANKS_OPTIONS = /\b(best|recommend\w*|winner|go with|should (?:choose|pick))\b/i;
 const escape = (t: string): string => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 export async function noteOnItem(deps: Pick<RunDeps, 'dispatch'>, ctx: Pick<AgentToolContext, 'scenario_id'>, args: NoteOnItemArgs,
-  turn: { notes: number }): Promise<ToolOutcome> {
+  turn: { notes: number; readonly only?: string }): Promise<ToolOutcome> {
   const note = args.note.trim();
   if (note === '') return refused('note_empty');
   if (note.length > NOTE_MAX) return refused('note_too_long', undefined, { max: NOTE_MAX, length: note.length });
   if (RANKS_OPTIONS.test(note)) return refused('note_ranks_options');
   if (turn.notes > 0) return refused('one_note_per_turn');
+  // A Challenge on one card: the note goes beside THAT card, never another valid one (Codex r2 #3634).
+  if (turn.only !== undefined && args.item_id !== turn.only) return refused('note_not_on_selected_item');
   const saved = await readSaved(deps, ctx.scenario_id);
   if (!isSavedRead(saved)) return saved.status === 'refused' ? refused('item_not_in_model') : saved;
   if (saved.identity === null) return refused('item_not_in_model');
