@@ -420,6 +420,11 @@ describe('DL 22 Oct (Lenses\' step 3): the person\'s approved chat correction is
     expect(markOf('Make f .6.', { value: 0.6 }), '".6" is 0.6').toBe('chat');
     expect(markOf('f is between 0.3-0.7.', { value: null, low: 0.3, high: 0.7 }), 'a range dash is not a minus').toBe('chat');
     expect(markOf('f is between 0.3-0.7.', { value: null, low: 0.3, high: 0.8 }), 'a range needs both ends stated').toBeNull();
+    // Codex r5: a dash after a figure's own suffix or currency is still a range's dash, never a minus.
+    expect(markOf('f is £10k-£20k.', { value: -20000 }), '"£10k-£20k" never attests -20,000').toBeNull();
+    expect(markOf('f is .6k-.7k.', { value: -700 }), '".6k-.7k" never attests -700').toBeNull();
+    expect(markOf('f is £10k-£20k.', { value: null, low: 10000, high: 20000 }), 'CONTRAST: the range as written').toBe('chat');
+    expect(markOf('f goes from 5 to -3.', { value: -3 }), 'CONTRAST: a minus after words is a minus').toBe('chat');
   });
 
   it('the host sets it, never the AI: an unchanged brief figure the AI marks "chat" stays the brief\'s; a first draft says nothing', () => {

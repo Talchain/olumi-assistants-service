@@ -139,14 +139,18 @@ export function applyKernel(model: LivingModelT, verifiedWords: readonly string[
   // or a first draft, says nothing (null): the brief's, as before.
   const briefWords = typeof brief === 'string' ? plain(brief) : null;
   // The figure itself, signed as written (Codex r4 on #3661): its value, or for a range with no value both of its ends. One range
-  // end matching never attests a value nobody said, and "-0.6" never attests +0.6. A minus right after a figure is a range's dash.
+  // end matching never attests a value nobody said, and "-0.6" never attests +0.6. A dash joining two figures ("£10k-£20k",
+  // "0.3 - 0.7") is a range's, read off the parser's own matches, never a minus (Codex r5).
   const statesFigure = (quote: string, f: Omit<LivingModelT['factors'][number], 'said_in'>): boolean => {
     const text = quote.replace(/(^|[^\d])\.(\d)/g, '$10.$2');
-    const minus = (before: string): boolean => {
-      const m = /[-−]\s*$/.exec(before);
-      return m !== null && !/[\d%]$/.test(before.slice(0, m.index).trimEnd());
-    };
-    const said = findStatedAmounts(text).map((a) => (minus(text.slice(0, a.index)) ? -a.magnitude : a.magnitude));
+    const amounts = [...findStatedAmounts(text)].sort((x, y) => x.index - y.index);
+    const said = amounts.map((a, i) => {
+      const prev = amounts[i - 1];
+      const gap = text.slice(prev === undefined ? 0 : prev.index + prev.matchedText.length, a.index);
+      const m = /[-−]\s*$/.exec(gap);
+      const before = m === null ? '' : gap.slice(0, m.index).trimEnd();
+      return m !== null && (prev === undefined ? !/[\d%]$/.test(before) : before !== '') ? -a.magnitude : a.magnitude;
+    });
     const stated = (v: number) => said.some((m) => Math.abs(v - m) <= 1e-9 * Math.max(1, Math.abs(m)));
     return f.value !== null ? stated(f.value) : f.low !== null && f.high !== null && stated(f.low) && stated(f.high);
   };
