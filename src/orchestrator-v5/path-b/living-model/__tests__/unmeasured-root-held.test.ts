@@ -120,7 +120,7 @@ describe('a stated defined quantity with no level is framed by its parts, never 
       effect: { estimate_by: null, form: 'exact', value, sd: null, low: null, high: null, unit: '£ per week', sign: value > 0 ? '+' : '-' } });
   const model = (revenueLevel: number | null = null): LivingModelT => ({
     aims: [{ id: 'net', text: 'Net above £1,500 a week', status: 'current', defined_as: null, ...who('net above 1500 a week; it is 1200 now'),
-      target: { quantity: 'net', comparator: '>=', value: 1500, low: null, high: null, unit: '£ per week', by_when: null, period_months: null, period_by: null, period_read_on: null, baseline: 'today',
+      target: { quantity: 'net', comparator: '>=', value: 1500, low: null, high: null, unit: '£ per week', by_when: null, period_months: null, period_by: null, period_deadline: null, period_read_on: null, baseline: 'today',
         current: 1200, current_source: null, current_unit: null, change_kind: null, source: null } }],
     options: [
       { status: 'feasible', id: 'keep', label: 'Keep', settings: [], developed_from: null, ...who('or keep') },

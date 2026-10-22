@@ -19,7 +19,7 @@ export function d3Run(subject: 'orders' | 'repairs', mode: 'conditional' | 'olum
   const quotes = levers.map(([, label, v, low, high]) => `${label} could add about ${v} ${unit} (${low} to ${high}).`);
   const living: LivingModelT = {
     aims: [{ id: 'goal', text: `Weekly ${subject}`, status: 'current', defined_as: null, source: 'user', party: null, quote: `at least 150 ${unit}; today 120`,
-      target: { quantity: unit, comparator: '>=', value: 150, low: null, high: null, unit, by_when: null, period_months: null, period_by: null, period_read_on: null, baseline: 'today', current: 120,
+      target: { quantity: unit, comparator: '>=', value: 150, low: null, high: null, unit, by_when: null, period_months: null, period_by: null, period_deadline: null, period_read_on: null, baseline: 'today', current: 120,
         current_source: null, current_unit: null, change_kind: null, source: null } }],
     options: levers.map(([id, label]) => ({ status: 'feasible' as const, id: `try_${id}`, label: `Try ${label}`, developed_from: null, source: 'user' as const,
       party: null, quote: `try ${label.toLowerCase()}`, settings: [{ factor_id: id, estimate_by: null, value: 1, low: null, high: null, unit: null, source: 'user' as const, party: null, quote: `try ${label.toLowerCase()}` }] })),

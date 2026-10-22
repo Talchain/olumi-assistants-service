@@ -39,7 +39,7 @@ const on = (factor_id: string, quote: string) => ({ factor_id, estimate_by: null
 export const pricingAndReferral = (today: number | null): LivingModelT => ({
   aims: [{ id: 'gp', text: 'Monthly gross profit of at least £12,000', status: 'current', defined_as: null,
     ...who(today === null ? 'we need at least £12k a month' : `we need at least £12k a month; today it is £${today / 1000}k`),
-    target: { quantity: 'monthly gross profit', comparator: '>=', value: 12000, low: null, high: null, unit: '£', by_when: null, period_months: null, period_by: null, period_read_on: null,
+    target: { quantity: 'monthly gross profit', comparator: '>=', value: 12000, low: null, high: null, unit: '£', by_when: null, period_months: null, period_by: null, period_deadline: null, period_read_on: null,
       baseline: 'today', current: today, current_source: null, current_unit: null, change_kind: null, source: null } }],
   options: [
     { status: 'feasible', id: 'carry_on', label: 'Carry on as now', developed_from: null, settings: [], ...who('or we carry on as now') },

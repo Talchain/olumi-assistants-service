@@ -21,7 +21,7 @@ type Target = NonNullable<LivingModelT['aims'][number]['target']>;
 /** Throughput, +20% from today with no level today; line speed 10 an hour today, "Speed up" sets it to 12; each +1 an hour adds 1.5%. */
 const model = (target: Partial<Target> = {}, linkUnit = '%'): LivingModelT => ({
   aims: [{ id: 'tp', text: 'Raise throughput by 20%', status: 'current', defined_as: null, ...who('raise throughput by 20%'),
-    target: { quantity: 'Throughput', comparator: 'increase', value: 20, low: null, high: null, unit: '%', by_when: null, period_months: null, period_by: null, period_read_on: null,
+    target: { quantity: 'Throughput', comparator: 'increase', value: 20, low: null, high: null, unit: '%', by_when: null, period_months: null, period_by: null, period_deadline: null, period_read_on: null,
       baseline: 'today', current: null, current_source: null, current_unit: null, change_kind: 'relative', source: null, ...target } }],
   options: [
     { status: 'feasible', id: 'keep', label: 'Keep', settings: [], developed_from: null, ...who('or keep as we are') },

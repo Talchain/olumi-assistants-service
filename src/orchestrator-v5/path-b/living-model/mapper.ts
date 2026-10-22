@@ -33,7 +33,7 @@ import { quantityUnitsCompose, readUnitParts, sameUnit, singular, unitsCompose, 
 import { periodAdverb, periodNoun } from '../../../utils/unit-alphabet.js';
 import { EventRiskV1 } from '../../../schemas/event-risk.js';
 import { riskOccurrenceIsCurrent, riskOccurrenceWindowMonths } from '../../agent-lane/risk-occurrence.js';
-import { completedMonthsBetween, isCalendarDate, readStatedDeadline } from '../../goal-target/deadline-date.js';
+import { isCalendarDate, readStatedDeadline, wholeMonthsBetween } from '../../goal-target/deadline-date.js';
 
 export type WithheldReason =
   | 'no_level_target' | 'aim_not_in_slice' | 'change_kind_unknown' | 'change_base_invalid' | 'change_base_not_theirs' | 'current_unit_mismatch' | 'exact_target_not_in_slice' | 'target_range_not_in_slice'
@@ -133,27 +133,18 @@ function statedDeadline(byWhen: string | null): string | undefined {
     && ['date', 'quarter_end', 'month_end', 'year_end'].includes(read.form) ? read.date : undefined;
 }
 
-/** Calendar forms only: a duration ("within 6 months") is the person's own window (`period_months`), never Olumi's reading. */
-const CALENDAR_FORMS: ReadonlySet<string> = new Set(['date', 'quarter_end', 'month_end', 'year_end']);
-
-/** Words that fix a calendar date ("by the end of March"), on any day they are read. */
-const isCalendarWords = (byWhen: string | null): boolean =>
-  byWhen !== null && CALENDAR_FORMS.has(readStatedDeadline(byWhen, '0001-01-01')?.form ?? '');
-
 /**
  * ⭐ A CALENDAR DEADLINE, READ BY OLUMI AND LABELLED (DL 22 Oct): "by the end of March" fixes a date, so its window depends on the
- * day it is read. The AI marks it Olumi's reading and records that day (`period_by`, `period_read_on`); the months are worked
- * out HERE from the person's own words and that day, by the date card's completed-month rule (`completedMonthsBetween`), never
- * by the AI. The mapper stays pure (the day is in the model), and the window is never unlabelled: the goal keeps the deadline
- * and the day it counts from (`goal_horizon_reference_date`) beside it. A day that is not a real date, words that fix no
- * calendar date, or under a month give no window, as before.
+ * day it is read. The AI reads the date (`period_deadline`, Olumi's reading of the person's words, labelled `period_by: 'olumi'`)
+ * and the host records the day it was read (`period_read_on`, `calendar-reading.ts`); the months between them are worked out
+ * HERE, whole calendar months as a month-end date counts them (`wholeMonthsBetween`), never by the AI and never from the clock.
+ * The goal keeps the deadline and the day beside the window, so it is never unlabelled. Dates that are not real, or under a
+ * month between them (a deadline on or before its day included), give no window, as before (Codex r1 on #3674: no date parser, which can drop a stated day).
  */
 function olumiWindow(t: LivingModelT['aims'][number]['target']): { readonly deadline: string; readonly months: number; readonly readOn: string } | undefined {
-  if (t === null || t.period_by !== 'olumi' || t.by_when === null || !isCalendarDate(t.period_read_on)) return undefined;
-  const read = readStatedDeadline(t.by_when, t.period_read_on);
-  if (read === null || !CALENDAR_FORMS.has(read.form)) return undefined;
-  const months = completedMonthsBetween(t.period_read_on, read.date);
-  return months >= 1 && months <= 120 ? { deadline: read.date, months, readOn: t.period_read_on } : undefined;
+  if (t === null || t.period_by !== 'olumi' || !isCalendarDate(t.period_read_on) || !isCalendarDate(t.period_deadline)) return undefined;
+  const months = wholeMonthsBetween(t.period_read_on, t.period_deadline);
+  return months >= 1 && months <= 120 ? { deadline: t.period_deadline, months, readOn: t.period_read_on } : undefined;
 }
 
 /** The goal a saved graph was compiled with: a regeneration keeps it unless its aim is no longer current. */
@@ -327,9 +318,9 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     nodes.push(goalNode);
     const t = aim.target;
     // A window belongs to the aim, independently of whether its target can be scored: the person's own duration, or Olumi's
-    // labelled reading of their calendar date, never a month count the AI worked out for one (no window is unlabelled).
+    // labelled reading of their calendar date, never a month count the AI worked out for one.
     const reading = olumiWindow(t);
-    const window = t?.period_by === 'olumi' ? reading?.months : isCalendarWords(t?.by_when ?? null) ? undefined : t?.period_months ?? undefined;
+    const window = t?.period_by === 'olumi' ? reading?.months : t?.period_months ?? undefined;
     const deadline = reading?.deadline ?? statedDeadline(t?.by_when ?? null);
     if (t?.by_when != null) goalNode.goal_deadline_as_stated = t.by_when;
     if (deadline !== undefined) goalNode.goal_horizon = { deadline };

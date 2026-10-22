@@ -29,7 +29,7 @@ import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { goalDeadlineFromRecord } from './goal-kind.js';
 import { admitStructuralGoalAccumulation } from '../agent-lane/accumulation-identity.js';
 import { readGoalRecord } from './goal-record.js';
-import { completedMonthsBetween, isCalendarDate, readStatedDeadline, sayDate } from './deadline-date.js';
+import { isCalendarDate, readStatedDeadline, sayDate } from './deadline-date.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -82,7 +82,9 @@ export function applyGoalHorizonEdit(persistedGraph: unknown, approved: Approved
   } else {
     if (!isCalendarDate(reference)) return { kind: 'refused', reason: 'reference_missing' };
     if (approved.deadline <= reference) return { kind: 'refused', reason: 'horizon_not_modelled' };
-    months = approved.stated_months ?? completedMonthsBetween(reference, approved.deadline);
+    const [yr, mr, dr] = reference.split('-').map(Number) as [number, number, number];
+    const [yd, md, dd] = approved.deadline.split('-').map(Number) as [number, number, number];
+    months = approved.stated_months ?? 12 * (yd - yr) + md - mr - (dd < dr ? 1 : 0);
     if (!Number.isInteger(months) || months < 1) return { kind: 'refused', reason: 'horizon_not_modelled' };
     if (held === approved.deadline && readGoalRecord(persistedGraph, approved.goal_id)?.horizon?.months === months
       && matches[0]!.goal_horizon_reference_date === reference && matches[0]!.goal_horizon_stated_months === approved.stated_months) return { kind: 'unchanged' };

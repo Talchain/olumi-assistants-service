@@ -86,16 +86,19 @@ export const LivingAim = z.object({
     by_when: z.string().nullable(),
     /** The goal's window in months (fractions allowed), ONLY when the person states a duration counted from today. A model saved before reads null. */
     period_months: z.number().nullable().default(null).describe(
-      'The goal\'s window in months; fractions are allowed (3 weeks is 0.69), only when the person states a duration counted from today ("within 12 months" is 12, "over the next six months" is 6). Null for a calendar date ("by the end of March"): mark it with period_by instead, and Olumi works out its window. Null for a period counted from a launch or any other event, or no deadline stated: never worked out or guessed.'),
+      'The goal\'s window in months; fractions are allowed (3 weeks is 0.69), only when the person states a duration counted from today ("within 12 months" is 12, "over the next six months" is 6). Null for a calendar date ("by the end of September"): read it into period_deadline instead, with period_by olumi, and Olumi works out its window. Null for a period counted from a launch or any other event, or no deadline stated: never worked out or guessed.'),
     /**
-     * ⭐ A CALENDAR DEADLINE IS OLUMI'S READING, LABELLED (DL 22 Oct): "by the end of March" fixes a date, not a duration, so its
-     * window depends on the day it is read. The AI marks it Olumi's reading and records that day; the mapper works out the
-     * months from the person's words and that day (`mapper.ts` olumiWindow), never the AI. A model saved before reads null.
+     * ⭐ A CALENDAR DEADLINE IS OLUMI'S READING, LABELLED (DL 22 Oct): "by the end of September" fixes a date, not a duration, so its
+     * window depends on the day it is read. The AI reads the date (`period_deadline`) and marks it Olumi's (`period_by`); the host
+     * records the day it was read (`period_read_on`, `calendar-reading.ts`); the mapper works out the months between them, never
+     * the AI. A model saved before reads all three as null.
      */
     period_by: z.enum(['olumi']).nullable().default(null).describe(
-      '\'olumi\' when by_when is a calendar date ("by the end of March", "by 30 June 2027"): Olumi reads its window from the day in period_read_on. Null otherwise.'),
+      '\'olumi\' when by_when is a calendar date ("by the end of September", "by 15 June next year"): you read the date it fixes into period_deadline. Null otherwise.'),
+    period_deadline: z.string().nullable().default(null).describe(
+      'With period_by olumi: the calendar date by_when fixes, as YYYY-MM-DD, read from today\'s date in your state ("by 15 June next year" read on 22 October 2026 is 2027-06-15; "by the end of September" is 2027-09-30). Null otherwise.'),
     period_read_on: z.string().nullable().default(null).describe(
-      'With period_by olumi: the day the deadline was read, as YYYY-MM-DD: today\'s date from your state for a new reading; a saved one unchanged while by_when is unchanged. Null otherwise.'),
+      'The day Olumi read the date, as YYYY-MM-DD. Olumi records it: keep a saved one unchanged; null for a new reading.'),
     /** The reference the target is measured from, as written ("today", "last quarter"); null when none. */
     baseline: z.string().nullable(),
     /** The quantity's current level, in the target's unit, when stated. Unknown is null, never 0. */

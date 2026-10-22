@@ -4,7 +4,7 @@
  * (or carded) as it is. A cause only the person's input can settle never triggers it, nor does a clean model, and a change
  * answers only for the causes it adds. A stateful product double; the kernel, the mapper and the write are real. SYNTHETIC wording.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RunContext, type FunctionTool } from '@openai/agents';
 import { ProposalStore } from '../../../agent-lane/proposal.js';
 import { computeGraphIdentityHash } from '../../../context/graph-identity.js';
@@ -185,5 +185,27 @@ describe('the SDK tools: one offer per turn, and the agent reads the typed reaso
     expect(await call(build)).toMatchObject({ status: 'ok', mutated: true });
     expect(p.registered).toHaveLength(1);
     expect(await call(turn(product(null)))).toMatchObject({ status: 'refused', reason: 'goal_path_withheld' });
+  });
+});
+
+describe('Codex r1 on #3674: the tools record the day of a calendar reading, the host\'s, and a change keeps a saved reading', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('a draft\'s new reading is saved with the host\'s day and no count; a change that sends another day keeps the saved reading', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-22T12:00:00Z'));
+    const m = structuredClone(KNOWN_ANSWER);
+    Object.assign(m.aims[0]!.target!, { by_when: 'by the end of September', period_by: 'olumi', period_deadline: '2027-09-30', period_read_on: '2031-01-01', period_months: 9 });
+    const p = product(null);
+    expect(await buildModel({ dispatch: p.dispatch }, draftCtx, { brief: BRIEF, model: m })).toMatchObject({ status: 'ok', mutated: true });
+    const reading = { period_by: 'olumi', period_deadline: '2027-09-30', period_read_on: '2026-10-22', period_months: null };
+    expect((p.saved()!.living_model as LivingModelT).aims[0]!.target).toMatchObject(reading);
+    vi.setSystemTime(new Date('2026-11-05T12:00:00Z'));
+    const next = structuredClone(p.saved()!.living_model as LivingModelT);
+    Object.assign(next.aims[0]!.target!, { period_read_on: '2026-11-05' });
+    next.factors[0] = { ...next.factors[0]!, value: 0.6, quote: 'Actually f is at 0.6 now.' };
+    const out = await proposeLivingChange({ dispatch: p.dispatch, proposals: new ProposalStore() }, changeCtx, change(next));
+    expect(out, JSON.stringify(out)).toMatchObject({ status: 'ok' });
+    expect(((out as { data: Rec }).data.changes as Rec[]).map((c) => c.id), 'the reading is unchanged, so no row for the aim').toEqual(['f']);
   });
 });

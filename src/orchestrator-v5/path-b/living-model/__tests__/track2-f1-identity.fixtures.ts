@@ -12,7 +12,7 @@ const level = (id: string, label: string, value: number, unit: string, quote: st
   ({ id, label, kind: 'factor' as const, estimate_by: null, value, low: null, high: null, unit, defined_as: null, limit: null, ...who(quote) });
 
 const AIM = { id: 'rev', text: 'Monthly revenue of at least £6,500', status: 'current' as const, ...who('we need at least £6,500 a month; today it is £6,000'),
-  target: { quantity: 'monthly revenue', comparator: '>=' as const, value: 6500, low: null, high: null, unit: '£', by_when: null, period_months: null, period_by: null, period_read_on: null, baseline: 'today',
+  target: { quantity: 'monthly revenue', comparator: '>=' as const, value: 6500, low: null, high: null, unit: '£', by_when: null, period_months: null, period_by: null, period_deadline: null, period_read_on: null, baseline: 'today',
     current: 6000, current_source: null, current_unit: null, change_kind: null, source: null } };
 const OPTIONS: LivingModelT['options'] = [
   { status: 'feasible', id: 'hold', label: 'Carry on', settings: [], developed_from: null, ...who('or we carry on as now') },

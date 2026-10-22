@@ -68,7 +68,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
 
   it('THE PROMPTS (DL 22 Oct, priority change): the coach\u2019s reply rules and the drafter\u2019s rules, adapted as ruled; the old constants are gone', () => {
     expect(createHash('sha256').update(CORE_REPLY_RULES, 'utf8').digest('hex')).toBe('6f5f00c581ac4be2f1f590973e4bcf58c6eba498e5216bc3a8a21a189be5f3d6');
-    expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('d91de140459f832793e11d75656ad146d003062a001278873508e653d0fa1780'); // 22 Oct: every stated goal saved in their words, never approximated (Claude r1 on #3670); + a calendar date is Olumi's labelled reading
+    expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('0b1beb019dc58cba46f1d37ef1d64214cb88d5550f9993fb9aeb761dfc0d74d6'); // 22 Oct: every stated goal saved in their words, never approximated (Claude r1 on #3670); + a calendar date is Olumi's labelled reading
     // The retired constants are gone from both modules: no route can send the accreted text again.
     for (const name of ['CORE_REPLY_INSTRUCTION', 'CORE_RESPONSE_DISCIPLINE', 'CORE_NEXT_STEP']) expect(Object.keys(coreInstructions), name).not.toContain(name);
     expect(Object.keys(drafting)).toEqual(['CORE_DRAFTER_RULES']);
@@ -123,7 +123,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       `A stated difference ("net stock is deliveries minus usage"), which defined_as cannot hold, links each part to the whole instead, with the exact conversion from the part's unit to the whole's: +1 per unit for what is added and \u22121 for what is taken away when they share a unit, scaled when they do not (a part in thousands moves the whole by 1,000 per unit); a stated part is never left unconnected.`,
       'Conditions are short, written for the person, one point each; keep working notes out of the model.',
       'A deadline is the window of the aim it belongs to, never an aim of its own: keep its words in by_when and, when it counts from today, its window in period_months (weeks \u00f7 4.35); '
-        + 'for a calendar date ("by the end of March"), leave period_months null and set period_by olumi with period_read_on today\'s date (YYYY-MM-DD), and Olumi works out its window.'])
+        + 'for a calendar date ("by the end of September"), leave period_months null, set period_by olumi and read the date it fixes into period_deadline (YYYY-MM-DD, from today\'s date); Olumi records the day and works out its window.'])
       expect(CORE_DRAFTER_RULES.split(rule), rule).toHaveLength(2);
     expect(CORE_DRAFTER_RULES).not.toContain('When the aim has a deadline, record its window');
     // Codex r2 on #3660: never a fixed +1/\u22121 across different scales (\u00a3 thousands into \u00a3 is 1,000 per unit).

@@ -15,6 +15,8 @@ import type { InternalDispatch } from '../../agent-lane/runtime/agent-capabiliti
 import { createProposal, type ProposalOperation, type ProposalStore, type StructuredProposal } from '../../agent-lane/proposal.js';
 import { LivingModel, type LivingModelT } from '../../../schemas/living-model.js';
 import { applyKernel, plain } from '../living-model/kernel.js';
+import { withCalendarReadings } from '../living-model/calendar-reading.js';
+import { todayInLondon } from '../../goal-target/deadline-date.js';
 import { mapLivingModel, savedGoal } from '../living-model/mapper.js';
 import { addedCauses, goalPathEncodingCauses, RESTRUCTURE_CHANGE, type Restructure } from './goal-path.js';
 import { diffLivingModels, stable, type LivingChange } from '../living-model/diff.js';
@@ -64,8 +66,10 @@ export async function proposeLivingChange(deps: Deps, ctx: Ctx, args: LivingChan
   const base = await savedLiving(deps, ctx);
   if ('status' in base) return base;
   const brief = typeof base.saved.json.brief_text === 'string' ? [base.saved.json.brief_text] : [];
-  const kernelled = applyKernel(args.model, [...brief, ...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])], base.model,
+  // A calendar deadline's reading: a saved one stands while its words do; a new one gets the host's day (`calendar-reading.ts`).
+  const read = applyKernel(args.model, [...brief, ...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])], base.model,
     brief[0] ?? null);
+  const kernelled = { ...read, model: withCalendarReadings(read.model, base.model, todayInLondon(new Date())) };
   // A condition is corrected or resolved by replacing it ("only after supplier approval" → "supplier approval obtained"; Codex
   // r6 on #3522): its removal is a row on the card the person approves, and the host keeps it in history. The quote is the
   // person's own words for the change: a replacement THEY stated (kernel-verified) on the same items, else null. Never this

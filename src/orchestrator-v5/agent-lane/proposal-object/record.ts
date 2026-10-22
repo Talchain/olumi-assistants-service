@@ -563,7 +563,7 @@ function whoseOf(r: Rec): Who {
 /** The words for each part of a living-model item (src/schemas/living-model.ts); an unlisted key is said as written. */
 const KEY_WORDS: Readonly<Record<string, string>> = { label: 'name', text: 'wording', quote: 'quoting', value: 'figure',
   low: 'low end', high: 'high end', sd: 'spread', unit: 'unit', form: 'form', sign: 'direction', target: 'target', quantity: 'measure',
-  comparator: 'comparison', by_when: 'date', period_months: 'period', period_read_on: 'day the date was read', baseline: 'baseline', current: 'today’s level',
+  comparator: 'comparison', by_when: 'date', period_months: 'period', period_deadline: 'date Olumi read', period_read_on: 'day the date was read', baseline: 'baseline', current: 'today’s level',
   current_unit: 'today’s unit', change_kind: 'kind of change', status: 'status', kind: 'type', limit: 'limit', defined_as: 'definition',
   op: 'kind', of: 'parts', occurrence: 'chance', horizon_months: 'window', effect: 'effect', from: 'from', to: 'to',
   applies_to: 'applies to', role: 'role', developed_from: 'developed from', holder: 'holder', position: 'view', reduction: '' };
@@ -586,8 +586,8 @@ const OWNER_KEYS: Readonly<Record<string, { readonly words: string; readonly par
   // Olumi's WHOLE figure on another's item (schema `estimateBy`): its size, never the direction the source stated (Codex r4).
   estimate_by: { words: 'figure', parts: ['value', 'low', 'high', 'sd', 'unit', 'form'] },
   current_source: { words: 'today’s level', parts: ['current', 'current_unit'] }, horizon_by: { words: 'window', parts: ['horizon_months'] },
-  // Olumi's reading of a calendar date (`period_by`): the day it was read on is Olumi's; the date's words stay the aim's.
-  period_by: { words: 'window', parts: ['period_read_on'] } };
+  // Olumi's reading of a calendar date (`period_by`): the date read and the day it was read are Olumi's; the words stay the aim's.
+  period_by: { words: 'window', parts: ['period_deadline', 'period_read_on'] } };
 const WHO_KEYS: ReadonlySet<string> = new Set(['source', 'party', ...Object.keys(OWNER_KEYS)]);
 /** Lists of records, each told apart by the item it names. */
 const ELEMENT: Readonly<Record<string, { readonly key: string; readonly words: (name: string) => string }>> = {

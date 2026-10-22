@@ -39,9 +39,9 @@ const angels = (opts: { target?: true; equalTarget?: true; splitPaths?: true; un
   aims: [{ id: 'funding', text: 'Have angel funding money in the bank within 3 weeks', status: 'current', defined_as: null,
     ...who('we need the angel money in the bank within three weeks'),
     target: opts.target || opts.equalTarget
-      ? { quantity: 'angel funding in the bank', comparator: opts.equalTarget ? '=' : '>=', value: 250000, low: null, high: null, unit: '£', by_when: 'within 3 weeks', period_months: null, period_by: null, period_read_on: null,
+      ? { quantity: 'angel funding in the bank', comparator: opts.equalTarget ? '=' : '>=', value: 250000, low: null, high: null, unit: '£', by_when: 'within 3 weeks', period_months: null, period_by: null, period_deadline: null, period_read_on: null,
         baseline: null, current: 50000, current_source: null, current_unit: null, change_kind: null, source: null }
-      : { quantity: 'angel funding money in the bank', comparator: '>=', value: null, low: null, high: null, unit: null, by_when: 'within 3 weeks', period_months: null, period_by: null, period_read_on: null,
+      : { quantity: 'angel funding money in the bank', comparator: '>=', value: null, low: null, high: null, unit: null, by_when: 'within 3 weeks', period_months: null, period_by: null, period_deadline: null, period_read_on: null,
         baseline: null, current: null, current_source: null, current_unit: null, change_kind: null, source: null } }],
   options: [
     { status: 'feasible', id: 'current', label: 'Continue your current fundraising approach', developed_from: null, settings: [], ...who('or carry on as we are') },

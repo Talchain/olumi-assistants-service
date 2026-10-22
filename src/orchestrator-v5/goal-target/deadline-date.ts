@@ -152,16 +152,6 @@ export const isCalendarDate = (d: unknown): d is string => {
   return t.getUTCFullYear() === y && t.getUTCMonth() === mo - 1 && t.getUTCDate() === da;
 };
 
-/**
- * The whole calendar months completed from `fromIso` to `toIso` (7 Oct to 6 Apr is 5; to 7 Apr is 6): the goal's held horizon
- * as the date card writes it (`goal-horizon-write.ts`) and as the core reads a calendar deadline (`mapper.ts`), one rule.
- */
-export function completedMonthsBetween(fromIso: string, toIso: string): number {
-  const [yr, mr, dr] = fromIso.split('-').map(Number) as [number, number, number];
-  const [yd, md, dd] = toIso.split('-').map(Number) as [number, number, number];
-  return 12 * (yd - yr) + md - mr - (dd < dr ? 1 : 0);
-}
-
 /** Add whole calendar months, clamping the day to the target month's last day. */
 export function addMonths(fromIso: string, months: number): string {
   const [y, m, d] = fromIso.split('-').map(Number) as [number, number, number];
@@ -258,6 +248,17 @@ export function sayDate(isoDate: string): string {
 }
 
 /**
+ * The whole calendar months from `fromIso` to `toIso`, a month-end date clamped as `addMonths` clamps it (31 Aug to 28 Feb is 6;
+ * 31 Jan to 28 Feb is 1; 22 Oct to 31 Mar is 5): the whole part of `timeBetween`, and Olumi's reading of a calendar deadline.
+ */
+export function wholeMonthsBetween(fromIso: string, toIso: string): number {
+  const [fy, fm] = fromIso.split('-').map(Number) as [number, number];
+  const [ty, tm] = toIso.split('-').map(Number) as [number, number];
+  const whole = (ty - fy) * 12 + (tm - fm);
+  return addMonths(fromIso, whole) > toIso ? whole - 1 : whole;
+}
+
+/**
  * The time from `fromIso` to `toIso` in the goal's own time unit. Months: whole calendar months, plus the part-month left
  * as a fraction of the following month (6 from 7 Oct to 7 Apr exactly; 31 Mar from 7 Oct is 5 + 24/31). Rounded to two
  * decimals: a deadline is a calendar day, so finer is spurious precision. Weeks: days ÷ 7; days: days.
@@ -268,8 +269,7 @@ export function timeBetween(fromIso: string, toIso: string, unit: 'months' | 'we
   const days = Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(fy, fm - 1, fd)) / 86_400_000);
   if (unit === 'days') return days;
   if (unit === 'weeks') return Math.round((days / 7) * 100) / 100;
-  let whole = (ty - fy) * 12 + (tm - fm);
-  if (addMonths(fromIso, whole) > toIso) whole -= 1;
+  const whole = wholeMonthsBetween(fromIso, toIso);
   const anchor = addMonths(fromIso, whole);
   const next = addMonths(fromIso, whole + 1);
   const span = Math.round((Date.parse(`${next}T00:00:00Z`) - Date.parse(`${anchor}T00:00:00Z`)) / 86_400_000);
