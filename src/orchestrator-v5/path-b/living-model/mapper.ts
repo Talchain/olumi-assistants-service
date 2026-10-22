@@ -195,13 +195,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     const lt = t === null ? 'no_level_target' as const
       : t.source === 'olumi' && [t.value, t.low, t.high, t.current].some((v) => v !== null) ? 'target_not_theirs' as const
       : isChange && t.current !== null && !(t.current_source === 'user' || stated(aim.source)) ? 'change_base_not_theirs' as const : levelTargetOf(t);
-    if (typeof lt === 'string') {
-      goalHeld = lt; hold(aim.id, lt);
-      // DL 23 Oct (Track 3 funding): a held goal keeps the person's deadline in their own words, where the ONE "no target" gap
-      // (`goalTargetGapOf`) reads it, so it asks only for the target. Words only: no date, month or target is written here, so
-      // no horizon verdict, direction or engine input changes (Codex r1 on this fix).
-      if (t !== null && t.by_when !== null) Object.assign(goalNode, { goal_deadline_as_stated: t.by_when });
-    }
+    if (typeof lt === 'string') { goalHeld = lt; hold(aim.id, lt); }
     else {
       const fromTarget = resolveGoalThresholdCapWithProvenance(undefined, lt.value, lt.unit ?? undefined, undefined);
       // The goal's frame holds today's level too: a ceiling below today would put today off its own scale ('level_frame').

@@ -47,20 +47,35 @@ function namedGoalOf(raw: Rec): Rec | undefined {
 }
 
 /**
- * DL ruling 23 Oct (a) (Track 3 hiring): on a core graph the living model is the single source of meaning (A2), so this ONE
- * reader reads the aim's own target there: the quantity of a change target the person stated (+10%) with no level today.
- * Such a goal has a target; what is missing is today's level, never the target. A suggested measure (`source: 'olumi'`) is
- * not the person's target. Undefined on a legacy graph (no `living_model`), whose words are unchanged.
+ * DL ruling 23 Oct (a) (Track 3 funding/hiring): on a core graph the living model is the single source of meaning (A2), so
+ * this ONE reader reads the goal's own aim there; undefined on a legacy graph (no `living_model`), whose words are unchanged.
  */
-function coreChangeAwaitingLevel(raw: Rec, goalId: string): string | undefined {
+function coreAimTargetOf(raw: Rec, goalId: string): Rec | null | undefined {
   const aims = rec(raw.living_model)?.aims;
-  const aim = Array.isArray(aims) ? aims.map(rec).find((a) => a?.id === goalId) : undefined;
-  const t = rec(aim?.target);
-  if (t === undefined || (t.comparator !== 'increase' && t.comparator !== 'decrease') || !finiteNum(t.value) || t.current !== null
-    || t.source === 'olumi' || typeof t.quantity !== 'string' || t.quantity.trim() === '') return undefined;
-  const q = t.quantity.trim();
-  // "Productivity" reads mid-sentence as "productivity"; an acronym ("NPS") keeps its case.
-  return /^\p{Lu}\p{Ll}/u.test(q) ? `${q.charAt(0).toLowerCase()}${q.slice(1)}` : q;
+  if (!Array.isArray(aims)) return undefined;
+  const aim = aims.map(rec).find((a) => a?.id === goalId);
+  return aim === undefined ? undefined : rec(aim.target) ?? null;
+}
+
+/** "Productivity" mid-sentence is "productivity"; "GitHub stars" and "NPS" keep their case (only a plain capitalised first word). */
+const midSentence = (q: string): string => (/^\p{Lu}\p{Ll}*(?=\s|$)/u.test(q) ? `${q.charAt(0).toLowerCase()}${q.slice(1)}` : q);
+/** A whole-word prefix plus an ellipsis, so the question fits the cell's 400-character carrier. */
+const cut = (v: string, limit: number): string => (v.length <= limit ? v : `${v.slice(0, v.lastIndexOf(' ', limit - 1) > 0 ? v.lastIndexOf(' ', limit - 1) : limit - 1).trimEnd()}\u2026`);
+/** A reference that is today ("today", "current productivity…", "now"): the change is measured from today's level. */
+const TODAY_REFERENCE = /\b(?:today|now|current(?:ly)?|present)\b/i;
+
+/**
+ * The question for a change target the person stated (+10%) with no starting level: that level, never the target. Said
+ * from today, or from the reference they stated ("against last year"; Codex r2), which is quoted only when it is short.
+ */
+function startingLevelQuestion(label: string, t: Rec): string {
+  const ref = typeof t.baseline === 'string' && t.baseline.trim() !== '' && !TODAY_REFERENCE.test(t.baseline) ? t.baseline.trim() : null;
+  const ask = (lab: string, q: string): string => (ref === null
+    ? `One gap: ${quote(lab)} is a change from today\u2019s level of ${q}, which isn\u2019t given yet. What is today\u2019s level of ${q}?`
+    : `One gap: ${quote(lab)} is a change from ${q} ${ref.length <= 40 ? `as at ${quote(ref)}` : 'at its stated starting point'}, which isn\u2019t given yet. What was ${q} then?`);
+  const q = midSentence(String(t.quantity).trim());
+  const full = ask(label, q);
+  return full.length <= 400 ? full : ask(cut(label, 120), cut(q, 80));
 }
 
 /**
@@ -75,15 +90,19 @@ export function goalTargetGapOf(graph: unknown): GoalTargetGap | null {
     || goalKindOf(goal) === 'chance_of_event' || isProvisionalObjective(goal) || goalHasStatedTarget(goal, raw)) return null;
   const rows = Array.isArray(raw.goal_constraints) ? raw.goal_constraints.map(rec) : [];
   const horizon = rec(goal.goal_horizon);
-  // The person's deadline in their own words counts too ("within the next 2 months" has no date): the core goal and the
-  // builder's unresolved deadline both hold it there (`goal_deadline_as_stated`; DL 23 Oct, Track 3 funding).
+  const core = coreAimTargetOf(raw, goal.id);
+  // On a core graph the aim's own deadline counts, in the person's words ("within the next 2 months" has no date).
   const deadlineKnown = rows.some((r) => r?.node_id === goal.id && rec(r?.deadline_metadata) !== undefined)
     || typeof horizon?.deadline === 'string' || finiteNum(horizon?.months)
-    || (typeof goal.goal_deadline_as_stated === 'string' && goal.goal_deadline_as_stated.trim() !== '');
-  const quantity = coreChangeAwaitingLevel(raw, goal.id);
-  if (quantity !== undefined) {
-    return { kind: 'goal_level_missing', goal_id: goal.id, deadline_known: deadlineKnown,
-      question: `One gap: ${quote(label)} is a change from today\u2019s level of ${quantity}, which isn\u2019t given yet. What is today\u2019s level of ${quantity}?` };
+    || (typeof core?.by_when === 'string' && core.by_when.trim() !== '');
+  // A core aim whose target holds the person's own figure HAS a target, whatever the mapper held it for: never "no target".
+  // A change from a level not given yet asks for that level; any other held target is said by its own reason elsewhere.
+  // Olumi's suggested measure (`source: 'olumi'`) is not their target, so it is still asked for.
+  if (core !== undefined && core !== null && core.source !== 'olumi' && [core.value, core.low, core.high].some(finiteNum)) {
+    const change = core.comparator === 'increase' || core.comparator === 'decrease';
+    return change && finiteNum(core.value) && core.current === null && typeof core.quantity === 'string' && core.quantity.trim() !== ''
+      ? { kind: 'goal_level_missing', goal_id: goal.id, deadline_known: deadlineKnown, question: startingLevelQuestion(label, core) }
+      : null;
   }
   return {
     kind: 'goal_target_missing', goal_id: goal.id, deadline_known: deadlineKnown,
