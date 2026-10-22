@@ -356,24 +356,7 @@ describe('DL 22 Oct (Lenses\' step 3): the person\'s approved chat correction is
     expect(nodeOf(p.saved(), 'f').observed_state).toMatchObject({ source: 'user_override', raw_value: 0.6 });
   });
 
-  it('Codex r1 on #3661: new words on an untouched figure state no figure; it stays the brief\'s, even when an estimate on it is refused', async () => {
-    const saidNow = { ...ctx, user_turn_text: 'Please update f.' };
-    const requoted = structuredClone(KNOWN_ANSWER);
-    requoted.factors[0] = { ...requoted.factors[0]!, quote: 'Please update f.' };
-    const guardedBack = structuredClone(KNOWN_ANSWER);
-    guardedBack.factors[0] = { ...guardedBack.factors[0]!, value: 0.7, estimate_by: 'olumi', quote: 'Please update f.' };
-    for (const sent of [requoted, guardedBack]) {
-      const p = product(KNOWN_ANSWER);
-      const proposals = new ProposalStore();
-      const out = await proposeLivingChange({ dispatch: p.dispatch, proposals }, saidNow, args(sent));
-      expect(out.status, `the change is proposed: ${JSON.stringify(out)}`).toBe('ok');
-      await applyLivingChange({ dispatch: p.dispatch, proposals }, saidNow, String((out as { data: Rec }).data.proposal_id));
-      expect(factorOf(p.saved(), 'f'), JSON.stringify(sent.factors[0])).not.toHaveProperty('said_in');
-      expect(nodeOf(p.saved(), 'f').observed_state).toMatchObject({ source: 'brief_extraction', raw_value: 0.5 });
-    }
-  });
-
-  it('Codex r2 on #3661: the person adopting Olumi\'s or an unverified figure in their own chat words makes it theirs, numbers unchanged', async () => {
+  it('the person\'s own words for Olumi\'s or an unverified figure, verbatim in their chat, label it theirs (numbers unchanged)', async () => {
     const said = 'We measured f at 0.5.';
     for (const was of ['olumi', 'unverified'] as const) {
       const saved = structuredClone(KNOWN_ANSWER);
@@ -390,53 +373,41 @@ describe('DL 22 Oct (Lenses\' step 3): the person\'s approved chat correction is
     }
   });
 
-  it('Codex r3 on #3661: words that state no figure never make one the person\'s chat figure, whoever it was before', async () => {
-    const vague = 'Please update f.';
-    for (const was of ['party', 'olumi', 'unverified'] as const) {
-      const saved = structuredClone(KNOWN_ANSWER);
-      saved.factors[0] = { ...saved.factors[0]!, source: was, party: was === 'party' ? 'Sam' : null, quote: was === 'olumi' ? null : 'f is at 0.5' };
-      const p = product(saved);
-      const proposals = new ProposalStore();
-      const relabelled = structuredClone(saved);
-      relabelled.factors[0] = { ...relabelled.factors[0]!, source: 'user', party: null, quote: vague };
-      const out = await proposeLivingChange({ dispatch: p.dispatch, proposals }, { ...ctx, user_turn_text: vague }, args(relabelled));
-      expect(out.status, `${was}: ${JSON.stringify(out)}`).toBe('ok');
-      await applyLivingChange({ dispatch: p.dispatch, proposals }, { ...ctx, user_turn_text: vague }, String((out as { data: Rec }).data.proposal_id));
-      expect(factorOf(p.saved(), 'f'), was).not.toHaveProperty('said_in');
-      expect((nodeOf(p.saved(), 'f').observed_state as Rec).source, was).not.toBe('user_override');
-    }
+  it('a quote found nowhere in the person\'s words is no one\'s: unverified, never labelled (the plan\'s fallback)', async () => {
+    const p = product(KNOWN_ANSWER);
+    const sent = corrected();
+    sent.factors[0] = { ...sent.factors[0]!, quote: 'We moved f to 0.6 last week.' };
+    const out = await proposeLivingChange({ dispatch: p.dispatch, proposals: new ProposalStore() }, ctx, args(sent));
+    expect(out.status, JSON.stringify(out)).toBe('ok');
+    const f = ((out as { data: Rec }).data.changes as Rec[]).find((c) => c.id === 'f')!.after as Rec;
+    expect(f.source).toBe('unverified');
+    expect(f.said_in ?? null).toBeNull();
   });
 
-  it('Codex r4-r10 on #3661 (DL ruling: a single figure equal to the value): anything else (several figures, a glued figure, a sign, unicode) attests nothing', () => {
-    const markOf = (said: string, figure: Partial<LivingModelT['factors'][number]>) => {
-      const sent = structuredClone(KNOWN_ANSWER);
-      sent.factors[0] = { ...sent.factors[0]!, ...figure, source: 'user', quote: said };
-      return applyKernel(sent, [BRIEF, said], KNOWN_ANSWER, BRIEF).model.factors[0]!.said_in ?? null;
-    };
-    // What the words state plainly is the person's.
-    expect(markOf('Make f 0.6.', { value: 0.6, high: null }), 'the value itself').toBe('chat');
-    expect(markOf('Make f .6.', { value: 0.6 }), '".6" is 0.6').toBe('chat');
-    expect(markOf('f is £10,000.', { value: 10000, low: 8000, high: 12000 }), 'currency and thousands').toBe('chat');
-    expect(markOf('About 60% of loaves.', { value: 60 }), 'a percentage').toBe('chat');
-    // A value nobody said is never theirs.
-    expect(markOf('Make f 0.6.', { value: 0.5, high: 0.6 }), 'one range end never attests an unstated value').toBeNull();
-    expect(markOf('f is between 0.3 and 0.7.', { value: null, low: 0.3, high: 0.7 }), 'a range with no value is never marked (missed, the brief\'s)').toBeNull();
-    expect(markOf('f is between 0 and 0.7.', { value: null, low: 0, high: 0.7 }), 'nor one with a zero end').toBeNull();
-    // Any sign, dash or exponent: nothing is read, so nothing is marked (the brief's, as before); a negative is never marked.
-    for (const [said, value] of [['Make f -0.6.', 0.6], ['Make f -0.6.', -0.6], ['f goes from 5 to -3.', -3], ['f is £10k-£20k.', -20000],
-      ['f is .6k-.7k.', -700], ['f goes from £5 to GBP10-20.', -20], ['f goes from £5 to GBP10-20.', 20], ['f is 5 units -8 units.', 8],
-      ['f is - 8 units.', -8], ['f is 1e-3.', 3], ['f is 1e3.', 1], ['f is 1E+3.', 3], ['f is 2.5e3.', 2.5], ['f is minus 4.', 4], ['f is 0.3\u20130.7.', 0.7],
-      // Codex r8 (unicode minus, powers, other spaces and digits) and the rest of the glued family.
-      ['f is \uFF0D8.', 8], ['f is 10^3.', 3], ['f is £1\u202F000.', 1], ['f is \uFF112.', 2], ['f is £1 000.', 1], ['f is £1 000.', 0], ['f is 3/4.', 3],
-      ['f is 10:30.', 30], ['f is 950k.', 950], ['f is 5\u2019000.', 5], ['f is 1.000.', 1], ['f is 12,5.', 12], ['f is Q3.', 3], ['f is v2.', 2],
-      // Codex r9: repeated or other unicode spaces, digits and dashes, a bracketed power, and overflow.
-      ['f is £1\u202F\u202F000.', 1], ['f is £1  000.', 1], ['f is 1.\uFF12.', 1], ['f is 10^(3).', 3], ['f is \u2012 8.', 8], ['f is \u207B 8.', 8],
-      [`f is ${'9'.repeat(309)}.`, 8],
-      // Codex r10: three decimals on a non-zero whole number, however written; and (DL ruling) any second figure.
-      ['f is 01.000.', 1], ['f is 1000.000.', 1000], ['f is 1,000.000.', 1000], ['f is £10,000, between £8,000 and £12,000.', 10000],
-      ['We sell about 950 loaves a week, not 900.', 950], ['We measured f at 0.5, with a range of 0.3 to 0.7.', 0.5]] as const) {
-      expect(markOf(said, { value }), `${said} / ${value}`).toBeNull();
+  it('the label is the person\'s words, never a figure proof: words with no figure, found verbatim in their chat, label the item', () => {
+    const said = 'Please update f.';
+    const sent = structuredClone(KNOWN_ANSWER);
+    sent.factors[0] = { ...sent.factors[0]!, value: 0.6, quote: said };
+    expect(applyKernel(sent, [BRIEF, said], KNOWN_ANSWER, BRIEF).model.factors[0]!.said_in).toBe('chat');
+    // CONTRAST: the same words only in the brief are the brief's.
+    expect(applyKernel(sent, [said], KNOWN_ANSWER, said).model.factors[0]).not.toHaveProperty('said_in');
+    // Brief words repeated in a chat message stay the brief's (a first message is often the brief itself, give or take a word).
+    const briefSaid = structuredClone(KNOWN_ANSWER);
+    briefSaid.factors[0] = { ...briefSaid.factors[0]!, value: 0.6, quote: 'f is at 0.5' };
+    expect(applyKernel(briefSaid, [BRIEF, `As I said, ${BRIEF}`], KNOWN_ANSWER, BRIEF).model.factors[0]).not.toHaveProperty('said_in');
+    // Only the person's own items: Olumi's, or a named party's, are never labelled, whatever words are quoted.
+    for (const who of [{ source: 'olumi' as const, party: null }, { source: 'party' as const, party: 'Sam' }]) {
+      const theirs = structuredClone(sent);
+      theirs.factors[0] = { ...theirs.factors[0]!, ...who };
+      expect(applyKernel(theirs, [BRIEF, said], KNOWN_ANSWER, BRIEF).model.factors[0], who.source).not.toHaveProperty('said_in');
     }
+    // The person's factor with Olumi's estimated figure is never labelled theirs, whatever words are quoted.
+    const olumiFigure = structuredClone(KNOWN_ANSWER);
+    olumiFigure.factors[0] = { ...olumiFigure.factors[0]!, value: 0.7, estimate_by: 'olumi' };
+    const estimate = structuredClone(olumiFigure);
+    estimate.factors[0] = { ...estimate.factors[0]!, quote: said };
+    expect(applyKernel(estimate, [BRIEF, said], olumiFigure, BRIEF).model.factors[0]).toMatchObject({ estimate_by: 'olumi' });
+    expect(applyKernel(estimate, [BRIEF, said], olumiFigure, BRIEF).model.factors[0]).not.toHaveProperty('said_in');
   });
 
   it('the host sets it, never the AI: an unchanged brief figure the AI marks "chat" stays the brief\'s; a first draft says nothing', () => {

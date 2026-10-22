@@ -131,34 +131,18 @@ export function applyKernel(model: LivingModelT, verifiedWords: readonly string[
     const t = saved?.aims.find((a) => a.id === id)?.target;
     return t?.current_source === 'user' && t.current === current;
   };
-  // ⭐ WHERE THE PERSON SAID A FIGURE (DL 22 Oct, Lenses' step 3: an approved chat correction was saved as the brief's figure).
-  // Host-set, never the AI's, and read from the item itself every time: the person's own words (source user, never Olumi's
-  // estimate) that the brief does not hold AND that state the figure itself (its value or a range end, as written). Words that
-  // state no figure ("Please update f.") never make one theirs, whoever it was before (Codex r1-r3 on #3661). An unknown brief,
-  // or a first draft, says nothing (null): the brief's, as before.
+  // ⭐ WHERE THE PERSON SAID IT (DL 22 Oct, Lenses' step 3: an approved chat correction was saved as the brief's figure). The
+  // thin-core plan's authorship rule (20 Oct): a label, never a gate, and never figure-matching. An item of the person's (never
+  // Olumi's estimate) whose quote is found VERBATIM in one of their chat messages, and not in the brief, was said in the chat;
+  // the label stays with its unchanged quote once the words leave the verified window (host-verified when it was made). It
+  // says "these are the person's words", not that the figure is proven. Host-set, never the AI's; an unknown brief, or a first
+  // draft, says nothing (null): the brief's, as before.
   const briefWords = typeof brief === 'string' ? plain(brief) : null;
-  // The value itself, plainly written (Codex r4-r10 on #3661; DL ruling 22 Oct). A wrong mark is worse than a missed one (a
-  // missed mark leaves the brief's figure, as before), and reading figures out of free text failed every way a fragment can
-  // match (signs, dashes, exponents, unicode digits and spaces, overflow, "1.000"), so the words attest only when they are plain
-  // (ASCII letters, digits, spaces and common punctuation; no minus, dash or sign word) and hold exactly ONE figure, standing
-  // alone (nothing glued to it), that equals the factor's value (an overflowing figure is Infinity, never equal). Three decimals
-  // on a non-zero whole number ("1.000", "1,000.000", "01.000") is never read; a range with no value is never marked.
-  const statesFigure = (quote: string, f: Omit<LivingModelT['factors'][number], 'said_in'>): boolean => {
-    if (f.value === null || !/^[A-Za-z0-9 .,;:!?'\u2019"()£$€%&]*$/.test(quote) || /\b(minus|negative)\b/i.test(quote)) return false;
-    const text = quote.replace(/(^|[ (£$€])\.(\d)/g, '$10.$2');
-    const figures = [...text.matchAll(/\d+(?:,\d{3})*(?:\.\d+)?/g)];
-    const alone = (m: RegExpMatchArray) => /^$|[ (£$€]$/.test(text.slice(Math.max(0, m.index! - 1), m.index!))
-      && /^(?:$|[ ;:!?)%]|[.,](?!\d))/.test(text.slice(m.index! + m[0].length));
-    if (figures.length !== 1 || !alone(figures[0]!)) return false;
-    const fig = figures[0]![0];
-    const whole = Number(fig.split('.')[0]!.replace(/,/g, ''));
-    if (/\.\d{3}$/.test(fig) && whole !== 0) return false;
-    return Math.abs(f.value - Number(fig.replace(/,/g, ''))) <= 1e-9 * Math.max(1, Math.abs(f.value));
-  };
-  const saidIn = (f: Omit<LivingModelT['factors'][number], 'said_in'>): 'chat' | null => {
+  const savedChat = new Set((saved?.factors ?? []).flatMap((f) => (f.said_in === 'chat' && f.quote !== null ? [`${f.id}\u0000${plain(f.quote)}`] : [])));
+  const saidIn = (id: string, f: Omit<LivingModelT['factors'][number], 'said_in'>): 'chat' | null => {
     if (briefWords === null || f.source !== 'user' || f.estimate_by !== null || f.quote === null) return null;
     const q = plain(f.quote);
-    return q.length > 0 && !briefWords.includes(q) && statesFigure(f.quote, f) ? 'chat' : null;
+    return q.length > 0 && !briefWords.includes(q) && (words.some((w) => w.includes(q)) || savedChat.has(`${id}\u0000${q}`)) ? 'chat' : null;
   };
   const relabelled: Relabelled[] = [];
   const attribute = <T extends Attributed>(id: string, item: T): T => {
@@ -191,7 +175,7 @@ export function applyKernel(model: LivingModelT, verifiedWords: readonly string[
       // byte for byte what it was.
       factors: m.factors.map((f) => {
         const { said_in: _sent, ...out } = defined(attribute(f.id, guarded(f, savedItem.get(f.id), FIGURE)));
-        return saidIn(out) === 'chat' ? { ...out, said_in: 'chat' as const } : out;
+        return saidIn(f.id, out) === 'chat' ? { ...out, said_in: 'chat' as const } : out;
       }),
       options: m.options.map((o) => ({ ...attribute(o.id, optionItself(o)),
         settings: o.settings.map((s) => attribute(`${o.id}:${s.factor_id}`, guarded(s, savedItem.get(`${o.id}:${s.factor_id}`), FIGURE))) })),
