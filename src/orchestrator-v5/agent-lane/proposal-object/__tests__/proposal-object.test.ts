@@ -544,7 +544,7 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
     const shown = new Set([...record.fields, ...(record.adds ?? [])].map((f) => f.field_id.slice(f.field_id.indexOf(':') + 1)));
     for (const o of operations.filter((x) => !x.path.startsWith('history:'))) expect(shown.has(o.path.slice(o.path.indexOf(':') + 1)) || shown.has(o.path), o.path).toBe(true);
     const notes = (record.adds ?? []).filter((a) => a.kind === 'change_note').map((a) => a.kind === 'change_note' ? a.text : '');
-    expect(notes).toContain('‘External wait’: figure 1 week; low end 0 weeks; high end 8 weeks (Olumi’s estimate).');
+    expect(notes).toContain('‘External wait’: figure 1 week (0 weeks to 8 weeks) (Olumi’s estimate).');
     expect(notes).toContain('Removes ‘Old backlog’.');
     expect(notes).toContain('Adds the condition “Only if the budget is approved”: applies to ‘Hire a tech lead’; role a prerequisite; recorded words “if the budget is approved” (yours).');
     expect(notes).toContain('Changes ‘Team capacity’: name was “Capacity”, now “Team capacity” (Olumi’s estimate).');
@@ -552,7 +552,7 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
     expect(notes).toContain('Adds the factor ‘Vendor delay’: figure 2 weeks (Acme’s).');
     expect(notes).toContain('Changes the link ‘Team capacity’ → ‘Productivity up 10%’: effect figure was 0.2 features a week, now 0.4 features a week (yours).');
     // A negative link's direction is on its add, in words; its note gives the figures exactly as approval writes them.
-    expect(notes).toContain('‘Team capacity’ → ‘Productivity up 10%’: effect figure -0.4 features a week; effect low end -0.8 features a week; effect high end 0 features a week; effect form a range (Olumi’s estimate).');
+    expect(notes).toContain('‘Team capacity’ → ‘Productivity up 10%’: effect figure -0.4 features a week (-0.8 features a week to 0 features a week); effect form a range (Olumi’s estimate).');
     expect(record.adds?.some((a) => a.kind === 'link_add' && a.to_label === 'Productivity up 10%' && a.direction === 'negative')).toBe(true);
     expect(notes.some((t) => t.includes('history'))).toBe(false);
     // Bound: what the card SHOWS is in its digest, so a different note is a different card.
@@ -577,10 +577,10 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
     const ch = (path: string, before: unknown, after: unknown) => ({ op: 'living_change', path, value: { change: 'change', before, after } });
     // (1) Olumi's labelled estimate on the person's item is Olumi's, never "yours".
     const owned = notesOf(card([ch('factor:f', fac({}), fac({ value: 10, low: 5, high: 15, estimate_by: 'olumi' }))]));
-    expect(owned.map((n) => [n.text, n.source])).toEqual([['Changes ‘Orders’: figure was not stated, now 10 units; low end was not stated, now 5 units; high end was not stated, now 15 units (Olumi’s estimate); figure is now Olumi’s estimate (was yours).', 'estimate']]);
+    expect(owned.map((n) => [n.text, n.source])).toEqual([['Changes ‘Orders’: figure was not stated, now 10 units (5 units to 15 units) (Olumi’s estimate); figure is now Olumi’s estimate (was yours).', 'estimate']]);
     // (2) A range across zero, or no stated sign: the figures as written, never an invented direction.
     const crossing = notesOf(card([ch('link:l', lnk({}), lnk({ low: -2, high: 2 }))]))[0]!.text;
-    expect(crossing).toContain('effect low end was not stated, now -2 units; effect high end was not stated, now 2 units');
+    expect(crossing).toContain('effect figure was not stated, now -2 units to 2 units');
     const unsigned = notesOf(card([ch('link:l', lnk({}), lnk({ value: 2, sign: null }))]))[0]!.text;
     expect(unsigned).toContain('effect figure was not stated, now 2 units; effect direction was raises it, now not stated');
     // (3) A direction-only flip and a stated spread are said.
@@ -665,14 +665,15 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
         provenance: { authored_by: 'model_proposed' }, validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: 'Core change' });
       const carrier = proposalPendingAction(p, { id: `agent-approve-proposal:${p.proposal_id}`, label: p.public_label, message: 'Apply.' },
         { scenario_id: SID, emitted_at_iso: new Date().toISOString() });
-      return agentProposalRecord(carrier, { nodes: [{ id: 'backup', label: 'Backup supplier' }], edges: [] })!;
+      return agentProposalRecord(carrier, { nodes: [{ id: 'backup', label: 'Backup supplier' }], edges: [],
+        living_model: { risks: [{ id: 'r', label: 'Supplier fails' }], links: [{ id: 'l_saved', from: 'backup', to: 'r' }] } })!;
     };
     const texts = (r: ReturnType<typeof card>) => (r.adds ?? []).flatMap((a) => (a.kind === 'change_note' ? [a.text] : []));
     const ch = (path: string, before: unknown, after: unknown) => ({ op: 'living_change', path, value: { change: 'change', before, after } });
     const risk = (more: Record<string, unknown>) => ({ id: 'r', label: 'Supplier fails', occurrence: { estimate_by: null, low: 0.1, high: 0.2 }, horizon_months: 12, horizon_by: null,
       mitigations: [], source: 'user', party: null, quote: 'our supplier may fail', ...more });
     expect(texts(card([ch('risk:r', risk({}), risk({ occurrence: { estimate_by: 'olumi', low: 0.3, high: 0.5 }, horizon_months: 6 }))])))
-      .toEqual(['Changes ‘Supplier fails’: window was 12 months, now 6 months (yours); chance low end was 10%, now 30%; chance high end was 20%, now 50% (Olumi’s estimate); chance is now Olumi’s estimate (was yours).']);
+      .toEqual(['Changes ‘Supplier fails’: window was 12 months, now 6 months (yours); chance was 10% to 20%, now 30% to 50% (Olumi’s estimate); chance is now Olumi’s estimate (was yours).']);
     expect(texts(card([ch('risk:r', risk({}), risk({ mitigations: [{ factor_id: 'backup', reduction: 0.7, source: 'user', party: null, quote: 'cuts it by 70%' }] }))])))
       .toEqual(['Changes ‘Supplier fails’: new reduction by ‘Backup supplier’ 70%; new reduction by ‘Backup supplier’ recorded words “cuts it by 70%” (yours).']);
     const aim = (target: Record<string, unknown>) => ({ id: 'a', text: 'Grow revenue', status: 'current', source: 'user', party: null, quote: 'grow revenue',
@@ -686,7 +687,7 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
     expect(texts(card([ch('risk:r', risk({}), risk({ mitigations: [step] }))])))
       .toEqual(['Changes ‘Supplier fails’: new reduction by ‘Backup supplier’ 70% (Olumi’s estimate).']);
     expect(texts(card([ch('risk:r', risk({}), risk({ occurrence: { estimate_by: null, low: 0.0004, high: 0.0004 } }))]))[0])
-      .toContain('chance low end was 10%, now 0.04%; chance high end was 20%, now 0.04%');
+      .toContain('chance was 10% to 20%, now 0.04% to 0.04%');
     expect(texts(card([ch('aim:a', aim({}), aim({ quantity: 'gross profit', value: 120 }))]))[0])
       .toBe('Changes ‘Grow revenue’: target measure was “revenue”, now “gross profit”; target figure was 100 £k, now 120 £k (yours).');
     const suggested = { id: 'a', text: 'Grow the community', status: 'current', source: 'user', party: null, quote: 'grow the community',
@@ -704,7 +705,7 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
     const userLink = (sign: string, quote: string) => ({ id: 'l', from: 'backup', to: 'r', effect: { form: 'range', value: null, low: 1, high: 3, sd: null, unit: 'units', sign, estimate_by: 'olumi' },
       source: 'user', party: null, quote });
     expect(texts(card([ch('link:l', userLink('+', 'it helps'), userLink('-', 'it hurts'))])))
-      .toEqual(['Changes the link ‘Backup supplier’ → ‘r’: effect direction was raises it, now lowers it; recorded words were “it helps”, now “it hurts” (yours).']);
+      .toEqual(['Changes the link ‘Backup supplier’ → ‘Supplier fails’: effect direction was raises it, now lowers it; recorded words were “it helps”, now “it hurts” (yours).']);
     const fac = (limit: unknown) => ({ id: 'f', label: 'Orders', value: null, low: null, high: null, unit: 'units', defined_as: null, estimate_by: null, limit, source: 'user', party: null, quote: 'our orders' });
     const acme = card([ch('factor:f', fac({ comparator: '<=', value: 40, source: 'party', party: 'Acme', quote: 'no more than 40' }), fac(null))]);
     expect((acme.adds ?? []).flatMap((a) => (a.kind === 'change_note' ? [[a.text, a.source]] : [])))
@@ -712,7 +713,7 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
     const hours = { id: 'h', label: 'Overtime', value: null, low: null, high: null, unit: 'hours', defined_as: null, estimate_by: null, limit: null, source: 'user', party: null, quote: 'we do overtime' };
     expect(texts(card([{ op: 'living_change', path: 'factor:h', value: { change: 'add', after: hours } }]))).toEqual(['‘Overtime’: unit “hours”; recorded words “we do overtime” (yours).']);
     expect(texts(card([ch('risk:r', risk({}), risk({ occurrence: { estimate_by: null, low: 0.1234567890123, high: 0.2 } }))]))[0])
-      .toContain('chance low end was 10%, now 12.34567890123%');
+      .toContain('chance was 10% to 20%, now 12.34567890123% to 20%');
     // Codex r5 on #3632: every digit of a share; a removed Olumi estimate under the person's setting is Olumi's on the note.
     expect(texts(card([ch('risk:r', risk({}), risk({ occurrence: { estimate_by: null, low: 0.12345678901234568, high: 0.2 } }))]))[0])
       .toContain('now 12.345678901234568%');
@@ -720,6 +721,14 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
     const gone = card([ch('option:o', plan([own]), plan([]))]);
     expect((gone.adds ?? []).flatMap((a) => (a.kind === 'change_note' ? [[a.text, a.source]] : [])))
       .toEqual([['Changes ‘Plan’: setting for ‘Backup supplier’ removed (was figure 2 units (Olumi’s estimate), recorded words “use the backup supplier” (yours)).', 'estimate']]);
+    // Served witness on c5d72d77 (Lenses): a condition on a link named the link's id; a link is named by its ends.
+    const onLink = { text: 'Only if the line runs at speed', applies_to: ['l_saved', 'l_new'], role: 'assumption', source: 'olumi', party: null, quote: null };
+    const linkAdd = { id: 'l_new', from: 'backup', to: 'r', effect: { form: 'direction_only', value: null, low: null, high: null, sd: null, unit: 'hours', sign: '+', estimate_by: null }, source: 'olumi', party: null, quote: null };
+    const named = (card([{ op: 'living_change', path: 'condition:0', value: { change: 'add', after: onLink } }, { op: 'living_change', path: 'link:l_new', value: { change: 'add', after: linkAdd } }]).adds ?? [])
+      .flatMap((a) => (a.kind === 'change_note' ? [a.text] : []));
+    expect(named).toContain('Adds the condition “Only if the line runs at speed”: applies to ‘Backup supplier’ → ‘Supplier fails’ and ‘Backup supplier’ → ‘Supplier fails’; role an assumption (Olumi’s estimate).');
+    // A direction-only link's stated unit is written, so it is said (buddy on #3632).
+    expect(named).toContain('‘Backup supplier’ → ‘Supplier fails’: effect unit “hours” (Olumi’s estimate).');
   });
   it('RED classifier assigns Agent factor and link kinds exhaustively', () => {
     expect(FIELD_CLASS_BY_OP.set_factor_value).toBe('factor_value');
