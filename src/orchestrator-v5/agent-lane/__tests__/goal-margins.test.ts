@@ -149,7 +149,8 @@ describe('exact results carry their margins and the input each rests on, from th
   });
 
   it('NEGATIVE (Codex r1): a tiny encoding scale with today\'s level at 0 is two frames that agree only at 0: nothing is said', () => {
-    const f = levels(retarget(fresh(), 1e-10, 1e-12, { raw: 0, encoded: 0 }), { status_quo: 0 });
+    // A target written in decimals (0.000001), so only the frame check can refuse it.
+    const f = levels(retarget(fresh(), 0.000001, 1e-8, { raw: 0, encoded: 0 }), { status_quo: 0 });
     for (const id of ['night', 'sorter', 'loop']) licence(f).withheld_reason_by_option[id].side = 'meets';
     expect(marginsOf(f)).toBeUndefined();
   });
