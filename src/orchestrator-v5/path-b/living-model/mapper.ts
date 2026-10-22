@@ -301,7 +301,36 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     // and their own figures (café pre-flight 23 Oct: 280 coffees × £3 is today's £840), never from Olumi's.
     const derived = t !== null && t.current === null && !isChange ? levelFromDefinition(model, aim) : undefined;
     const current = t === null ? null : t.current ?? derived?.level ?? null;
-    if (typeof lt === 'string') { goalHeld = lt; hold(aim.id, lt); }
+    /**
+     * ⭐ A RELATIVE CHANGE WITH NO LEVEL TODAY (DL 22 Oct, item 2; Batch 0 change-goal decision, rulings 2, 6, 8 and 20; the served
+     * Q1 run, "+25% bottling output", every link into the goal in %, held for a level nobody gave). Measured AS the change, as
+     * the legacy lane measures hiring's "+10% productivity" (`admit-model.ts` change quantity): "% change from today", 0 today by
+     * definition, on its own 0–100 scale, with every effect read as a % of today's level, so no level is needed or made up. Only
+     * when the change is declared relative and every figure into the goal is in %: an absolute effect needs the level, so the
+     * goal stays held for it. Its period, when stated, goes with Olumi's reading (`goal_target_basis`), as the legacy lane's.
+     */
+    const into = model.links.filter((l) => l.to === aim.id && [l.effect.value, l.effect.low, l.effect.high].some((v) => v !== null));
+    const relative = lt === 'goal_level_unknown' && t !== null && t.change_kind === 'relative' && t.unit === '%' && t.current_unit !== '%'
+      && t.value !== null && into.every((l) => l.effect.unit === '%')
+      ? resolveGoalThresholdCapWithProvenance(undefined, Math.abs(t.value), '%', undefined) : null;
+    if (relative !== null && t !== null && t.value !== null) {
+      const signed = t.comparator === 'increase' ? Math.abs(t.value) : -Math.abs(t.value);
+      const today = `today's ${t.quantity}`;
+      const deadline = statedDeadline(t.by_when);
+      goal = { id: aim.id, cap: relative.cap, unit: '%' };
+      Object.assign(goalNode, {
+        goal_direction: signed > 0 ? '>=' : '<=', quantity_frame: 'change',
+        goal_threshold_raw: signed, goal_threshold_unit: '%', goal_threshold_cap: relative.cap, goal_threshold_cap_provenance: relative.provenance,
+        goal_threshold: signed / relative.cap, goal_threshold_frame: 'change_abs',
+        ...(t.by_when !== null ? { goal_deadline_as_stated: t.by_when } : {}),
+        ...(deadline !== undefined ? { goal_horizon: { deadline } } : {}),
+        goal_target_basis: { source: 'olumi_reading', quantity_frame: 'change', target_frame: 'change_abs', target_raw: signed, reference: 'today',
+          denominator: today, ...(t.period_months !== null && Number.isInteger(t.period_months) && t.period_months >= 1 && t.period_months <= 120
+            ? { period_months: t.period_months } : {}), period_kind: 'at_end', effect_unit: `% of ${today}`, effects_at_period_end: false },
+      });
+      assumed.push({ id: aim.id, text: `Carrying on as now leaves ${t.quantity} unchanged, so the change is measured from today's level, whatever it is.` });
+      assumed.push({ id: aim.id, text: `Every effect on ${t.quantity} is a % of today's level, and the effects add rather than compound.` });
+    } else if (typeof lt === 'string') { goalHeld = lt; hold(aim.id, lt); }
     else {
       const fromTarget = resolveGoalThresholdCapWithProvenance(undefined, lt.value, lt.unit ?? undefined, undefined);
       // The goal's frame holds today's level too: a ceiling below today would put today off its own scale ('level_frame').
