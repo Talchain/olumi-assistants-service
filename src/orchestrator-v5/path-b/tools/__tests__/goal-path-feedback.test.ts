@@ -363,6 +363,20 @@ describe('DL 22 Oct (marketing on 7ee0d90f): a change never silently cuts the go
     expect(optionsReachingGoal(relinked(), mapLivingModel(relinked())).length).toBeGreaterThan(0);
   });
 
+  it('DL (base fallback): the person asked to remove the link; the same change sent again is carded with the removal, as base would', async () => {
+    const p = product(KNOWN_ANSWER);
+    const proposals = new ProposalStore();
+    const restructure: Restructure = { offered: false };
+    const asked = { ...changeCtx, user_turn_text: 'Remove the link from f to the goal.' };
+    expect(await proposeLivingChange({ dispatch: p.dispatch, proposals, restructure }, asked, args(remeasured(), ['f_g'])))
+      .toMatchObject({ status: 'refused', reason: 'goal_path_cut', data: { cut: ['f_g'] } });
+    const again = await proposeLivingChange({ dispatch: p.dispatch, proposals, restructure }, asked, args(remeasured(), ['f_g']));
+    expect(again, JSON.stringify(again)).toMatchObject({ status: 'ok', data: { proposal_id: expect.any(String) } });
+    expect(((again as { data: Rec }).data.changes as Rec[]).filter((c) => c.kind === 'link').map((c) => [c.id, c.change])).toEqual([['f_g', 'remove']]);
+    expect((again as { data: Rec }).data.restructure, 'nothing of the person’s was lost, so no fallback note').toBeUndefined();
+    expect(restructure.pending).toBeUndefined();
+  });
+
   it('the agent stops after the cut is said: the turn\'s end cards the change as base would', async () => {
     const p = product(KNOWN_ANSWER);
     const calls: [TraceRow, ToolCallResult][] = [];
