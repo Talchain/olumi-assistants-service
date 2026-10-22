@@ -9,7 +9,7 @@
  *  · a link's β = (change in `to` per +1 of `from`) × cap_from / cap_to, its σ scaled by the same ratio (AIE, 20 Oct):
  *    a stated point gives the central coefficient only, and σ = |β|/2 is Olumi's illustrative convention (D3), never the
  *    user's spread; an explicitly stated Normal law gives both; a range without a central figure uses its midpoint and
- *    width/√12 as Olumi's assumed Normal moments, unless it crosses zero with a midpoint conflicting with the link's sign.
+ *    width/√12 as Olumi's assumed Normal moments, with sign preserved (nonnegative magnitudes may size a negative link).
  *    A stated figure inside a range sizes the link as a point, the range kept beside it;
  *  · existence 1 for a stated link is the assumption of conditioning on it; Olumi's 0.8 is an untested convention;
  *  · an unsized link is Olumi's placeholder, which the chance licence withholds; an unknown sign is never drawn positive;
@@ -766,10 +766,10 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     // The person's own figure inside their range ("about 20, between 10 and 30") sizes the link as their point, with the
     // range kept beside it in the living model (AIE range disposition, 16 Oct: `centre`). Without a central figure,
     // use uniform-matched moments for the engine's Normal, explicitly Olumi's assumption, never the person's stated point.
-    // A conflicting midpoint across zero stays held: applying the link's sign must never reflect that midpoint.
+    // A conflicting midpoint stays held, except nonnegative magnitudes on a minus link: applying the sign must not reflect it.
     const centred = e.form === 'range' && e.value !== null && e.low !== null && e.high !== null && e.low < e.value && e.value < e.high;
     const uncentred = e.form === 'range' && e.value === null && e.low !== null && e.high !== null && e.low < e.high
-      && !(e.low < 0 && e.high > 0 && Math.sign((e.low + e.high) / 2) !== sign);
+      && (Math.sign((e.low + e.high) / 2) === sign || (e.low >= 0 && sign < 0));
     const value = uncentred ? (e.low! + e.high!) / 2 : e.value;
     // A point with the source's own standard deviation ("50 on average, standard deviation 10") keeps that SD (A5, 21 Oct:
     // the SD was saved and then replaced by half the effect). Its shape was not stated, so the Normal draw is Olumi's

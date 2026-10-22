@@ -66,7 +66,8 @@ describe('DL range law: a declared range never costs the chance', () => {
   });
 
   it('number + author class: a second factor brief retains signed uniform moments across scales and sources', () => {
-    for (const [low, high, sign] of [[50, 90, '+'], [-90, -50, '-'], [20, 40, '-'], [-10, 50, '+']] as const) {
+    for (const [low, high, sign, mean] of [[50, 90, '+', 70], [-90, -50, '-', -70], [20, 40, '-', -30], [-10, 50, '+', 20],
+      [-10, 30, '+', 10], [-30, 10, '-', -10]] as const) {
       for (const target of [100, 200]) for (const source of ['user', 'party', 'olumi', 'unverified'] as const) for (const party of source === 'party' ? ['Finance', null] : [null]) {
         const model = structuredClone(KNOWN_ANSWER);
         model.aims[0]!.target!.value = target;
@@ -81,13 +82,13 @@ describe('DL range law: a declared range never costs the chance', () => {
         const goal = mapped.graph.nodes.find(n => n.id === 'g') as Rec;
         const factor = mapped.graph.nodes.find(n => n.id === 'f') as Rec;
         const ratio = factor.observed_state.cap / goal.goal_threshold_cap;
-        expect(edge.strength.mean).toBeCloseTo((sign === '-' ? -1 : 1) * Math.abs((low + high) / 2) * ratio, 12);
+        expect(edge.strength.mean).toBeCloseTo(mean * ratio, 12);
         expect(edge.strength.std).toBeCloseTo((high - low) / Math.sqrt(12) * ratio, 12);
         expect(edge.strength.std).toBeGreaterThan(0);
         expect(edge.effect_direction).toBe(sign === '-' ? 'negative' : 'positive');
         expect(edge.provenance.magnitude).toBe('olumi_estimate');
         expect(edge.provenance.source).toBe('cee_hypothesis');
-        expect(edge.provenance.natural_effect).toEqual({ amount: (sign === '-' ? -1 : 1) * Math.abs((low + high) / 2), amount_unit: 'units',
+        expect(edge.provenance.natural_effect).toEqual({ amount: mean, amount_unit: 'units',
           per_source_change: 1, per_source_change_unit: '', strength_mean: edge.strength.mean, strength_mean_frame: 'edge_strength' });
         expect(edge.exists_probability).toBe(source === 'user' || source === 'party' ? 1 : 0.8);
         const reason = linkDefaultAssumptionsOf(edge).find(r => r.code === 'CLAMP_STD_MINIMUM')!.reason;
@@ -123,11 +124,13 @@ describe('DL range law: a declared range never costs the chance', () => {
   });
 
   it.each([
+    ['factor', -40, -20, '+', 'a87a49fb13f95187db2703a4836fd871741c7a92ce4dd641319b4949d0c3a406'],
+    ['café', -40, -20, '+', '2b0706c714524b0c8a0e0e81261c8dbd1e32d5b97dd82bc2d3c5fc8363a98aad'],
     ['factor', -30, 10, '+', 'a87a49fb13f95187db2703a4836fd871741c7a92ce4dd641319b4949d0c3a406'],
     ['factor', -10, 30, '-', 'd2c03cc8f2335d8686a0555ce42278d75dc749e508fa5164516dfe9af7a6ced9'],
     ['café', -30, 10, '+', '2b0706c714524b0c8a0e0e81261c8dbd1e32d5b97dd82bc2d3c5fc8363a98aad'],
     ['café', -10, 30, '-', 'c2a1d9875427e2da82e97bc1e39e0b47128829026b3c6cd3d056e045d414b3d3'],
-  ] as const)('conflicting zero-crossing range stays held and byte-identical to base: %s %s..%s %s', (shape, low, high, sign, baseHash) => {
+  ] as const)('conflicting range stays held and byte-identical to base: %s %s..%s %s', (shape, low, high, sign, baseHash) => {
     const model = shape === 'factor' ? structuredClone(KNOWN_ANSWER) : cafe();
     if (shape === 'café') model.links[1]!.effect.value = 30; // Independent centred link stays sized on base too.
     Object.assign(model.links[0]!.effect, { form: 'range', value: null, low, high, sign, sd: null });
