@@ -484,7 +484,7 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
       add('link:l_ghostend', lnk('l_ghostend', 'nowhere', 'capacity', '+', 'olumi')),
     ]);
     expect(record.fields).toEqual([]);
-    expect(record.adds).toEqual([
+    expect(record.adds?.filter((a) => a.kind !== 'change_note')).toEqual([
       { field_id: 'factor_add:sickness', kind: 'factor_add', node_id: 'sickness', label: 'Capacity lost to sickness', value: { value: 5, unit: 'tickets' }, source: 'estimate', editable: false },
       { field_id: 'factor_add:mine', kind: 'factor_add', node_id: 'mine', label: 'Overtime hours', value: null, source: 'yours', editable: false },
       { field_id: 'factor_add:range', kind: 'factor_add', node_id: 'range', label: 'Backlog', value: null, source: 'estimate', editable: false },
@@ -502,12 +502,62 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
       add('factor:0', fac('0', 'Queue length', 'olumi')),
       { op: 'living_change', path: 'condition:0', value: { change: 'add', after: { text: 'Only if the vendor agrees', applies_to: [], source: 'party' } } },
     ]).record;
-    expect(positional.adds?.map((f) => f.kind === 'factor_add' && f.label)).toEqual(['Queue length']);
-    // A card that adds nothing has no `adds` and the digest it always had.
-    const plain = card([{ op: 'living_change', path: 'factor:x', value: { change: 'remove', before: fac('x', 'X', 'olumi') } }]).record;
+    expect(positional.adds?.filter((f) => f.kind !== 'change_note').map((f) => f.kind === 'factor_add' && f.label)).toEqual(['Queue length']);
+    expect(positional.adds?.filter((f) => f.kind === 'change_note').map((f) => f.kind === 'change_note' && f.text)).toEqual(['Adds the condition \u201cOnly if the vendor agrees\u201d.']);
+    // A card whose fields show every change it writes has no `adds` and the digest it always had (a removal is now a note).
+    const plain = card([{ op: 'living_change', path: 'factor:x', value: { change: 'change', before: fac('x', 'X', 'olumi', { value: 3 }), after: fac('x', 'X', 'olumi', { value: 4 }) } }]).record;
+    expect(plain.fields.map((f) => f.field_id)).toEqual(['factor_value:x']);
     expect(plain.adds).toBeUndefined();
-    expect(plain.digest).toBe(createHash('sha256').update(JSON.stringify({ approve: plain.approve_action, decline: plain.decline_action, fields: [], g: 'pin', missing: [], p: plain.proposal_id, r: plain.revision },
+    expect(plain.digest).toBe(createHash('sha256').update(JSON.stringify({ approve: plain.approve_action, decline: plain.decline_action, fields: plain.fields, g: 'pin', missing: [], p: plain.proposal_id, r: plain.revision },
       (_k, v: unknown) => (v !== null && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, (v as Record<string, unknown>)[k]])) : v))).digest('hex').slice(0, 32));
+  });
+  it('⭐ THE CARD SHOWS EVERY CHANGE IT WRITES (Track 3, 22 Oct: 12/12 core approvals wrote changes the card never showed)', async () => {
+    const { createProposal } = await import('../../proposal.js');
+    const { proposalPendingAction } = await import('../../durable-proposal.js');
+    const { agentProposalRecord } = await import('../record.js');
+    const fac = (id: string, label: string, more: Record<string, unknown> = {}) =>
+      ({ id, label, value: null, low: null, high: null, unit: 'weeks', defined_as: null, source: 'olumi', party: null, quote: null, ...more });
+    const lnk = (id: string, from: string, to: string, effect: Record<string, unknown>, source = 'olumi') =>
+      ({ id, from, to, effect: { form: 'range', value: null, low: null, high: null, unit: 'features a week', sign: '+', ...effect }, source, party: null, quote: null });
+    const opt = (id: string, label: string, settings: unknown[]) => ({ id, label, settings, status: 'feasible', developed_from: null, source: 'user', party: null, quote: 'hire' });
+    const ch = (path: string, change: string, before?: unknown, after?: unknown) => ({ op: 'living_change' as const, path,
+      value: { change, ...(before === undefined ? {} : { before }), ...(after === undefined ? {} : { after }) } });
+    const operations = [
+      ch('factor:wait', 'add', undefined, fac('wait', 'External wait', { value: 1, low: 0, high: 8 })),
+      ch('factor:cap', 'change', fac('cap', 'Capacity', { value: 4 }), fac('cap', 'Team capacity', { value: 4 })),
+      ch('factor:old', 'remove', fac('old', 'Old backlog')),
+      ch('factor:vendor', 'add', undefined, fac('vendor', 'Vendor delay', { source: 'party', party: 'Acme', value: 2 })),
+      ch('link:mentor', 'add', undefined, lnk('mentor', 'cap', 'productivity', { value: -0.4, low: -0.8, high: 0, sign: '-' })),
+      ch('link:fix', 'change', lnk('fix', 'cap', 'productivity', { value: 0.2 }, 'user'), lnk('fix', 'cap', 'productivity', { value: 0.4 }, 'user')),
+      ch('option:lead', 'change', opt('lead', 'Hire a tech lead', []), opt('lead', 'Hire a tech lead', [{ factor_id: 'wait', value: 0.5, low: null, high: null, unit: 'weeks', source: 'olumi', party: null, quote: null, estimate_by: null }])),
+      ch('condition:0', 'add', undefined, { text: 'Only if the budget is approved', applies_to: ['lead'], role: 'prerequisite', source: 'user', party: null, quote: 'if the budget is approved' }),
+      ch('history:0', 'add', undefined, { id: 'old', change: 'withdrawn', item: '{}' }),
+    ];
+    const p = createProposal({ scenario_id: SID, user_id: null, base_graph_identity_hash: 'pin', operations: operations as never,
+      provenance: { authored_by: 'model_proposed' }, validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: 'Core change' });
+    const carrier = proposalPendingAction(p, { id: `agent-approve-proposal:${p.proposal_id}`, label: p.public_label, message: 'Apply.' },
+      { scenario_id: SID, emitted_at_iso: new Date().toISOString() });
+    // The aim has no graph node: its label comes from the saved living model (Track 3: that link was dropped, then written).
+    const g = { nodes: [{ id: 'cap', label: 'Capacity' }], edges: [], living_model: { aims: [{ id: 'productivity', text: 'Productivity up 10%' }] } };
+    const record = agentProposalRecord(carrier, g)!;
+    // COVERAGE: every changed item but the host's history is named by a field, an add or a note on this card.
+    const shown = new Set([...record.fields, ...(record.adds ?? [])].map((f) => f.field_id.slice(f.field_id.indexOf(':') + 1)));
+    for (const o of operations.filter((x) => !x.path.startsWith('history:'))) expect(shown.has(o.path.slice(o.path.indexOf(':') + 1)) || shown.has(o.path), o.path).toBe(true);
+    const notes = (record.adds ?? []).filter((a) => a.kind === 'change_note').map((a) => a.kind === 'change_note' ? a.text : '');
+    expect(notes).toContain('\u2018External wait\u2019 (Olumi\u2019s estimate): 1 week, between 0 weeks and 8 weeks.');
+    expect(notes).toContain('Removes \u2018Old backlog\u2019.');
+    expect(notes).toContain('Adds the condition \u201cOnly if the budget is approved\u201d.');
+    expect(notes).toContain('Renames \u2018Capacity\u2019 to \u2018Team capacity\u2019 (Olumi\u2019s estimate).');
+    expect(notes).toContain('\u2018Hire a tech lead\u2019 now sets \u2018External wait\u2019 to 0.5 weeks (Olumi\u2019s estimate) (yours).');
+    expect(notes.some((t) => t.includes('Vendor delay') && t.includes('Acme\u2019s'))).toBe(true);
+    expect(notes).toContain('The link \u2018Team capacity\u2019 \u2192 \u2018Productivity up 10%\u2019: was each 1 more raises it by 0.2 features a week, now each 1 more raises it by 0.4 features a week (yours).');
+    // A negative link reads its direction in words, never a bare minus sign.
+    expect(notes).toContain('\u2018Team capacity\u2019 \u2192 \u2018Productivity up 10%\u2019 (Olumi\u2019s estimate): each 1 more lowers it by 0.4 features a week, between 0 features a week and 0.8 features a week.');
+    expect(record.adds?.some((a) => a.kind === 'link_add' && a.to_label === 'Productivity up 10%')).toBe(true);
+    expect(notes.some((t) => t.includes('history'))).toBe(false);
+    // Bound: what the card SHOWS is in its digest, so a different note is a different card.
+    const other = agentProposalRecord(carrier, { ...g, living_model: { aims: [{ id: 'productivity', text: 'Output up 10%' }] } })!;
+    expect(other.digest).not.toBe(record.digest);
   });
   it('RED classifier assigns Agent factor and link kinds exhaustively', () => {
     expect(FIELD_CLASS_BY_OP.set_factor_value).toBe('factor_value');
