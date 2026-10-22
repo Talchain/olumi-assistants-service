@@ -363,6 +363,32 @@ describe("THE CONTENT HASH — identity.v1's own value, living model included", 
   });
 });
 
+/**
+ * WHY AN ITEM IS NOT IN THE CALCULATION (canvas-lm, DL 22 Oct): the mapper's own holds ({id, reason}), served on the read so
+ * the canvas can say why, from the same mapping the writes and the Run use.
+ */
+describe("THE WITHHELD REASONS — the mapper's own holds, on the read", () => {
+  it("serves each held item with its reason on a core scenario; null on a legacy graph and with no graph", async () => {
+    // A goal with no target figure: its incoming link has no scale yet, so the mapper holds it as link_goal_target_unknown.
+    const untargeted = structuredClone(KNOWN_ANSWER);
+    untargeted.aims[0] = { ...untargeted.aims[0]!, target: { ...untargeted.aims[0]!.target!, value: null } };
+    const graph = { ...mapLivingModel(untargeted).graph, living_model: untargeted };
+    const expected = mapLivingModel(untargeted).withheld;
+    expect(expected, 'PRECONDITION: the mapper holds something').toContainEqual({ id: 'f_g', reason: 'link_goal_target_unknown' });
+    loadGraphAndBriefText.mockResolvedValue({ graph, briefText: null });
+    const app = await buildApp();
+    expect((await read(app, SCENARIO)).json().withheld).toEqual(expected);
+    // CONTROL: the fully stated model holds nothing; a legacy graph and an absent one have no reasons to give.
+    loadGraphAndBriefText.mockResolvedValue({ graph: { ...mapLivingModel(KNOWN_ANSWER).graph, living_model: KNOWN_ANSWER }, briefText: null });
+    expect((await read(app, SCENARIO)).json().withheld).toEqual(mapLivingModel(KNOWN_ANSWER).withheld);
+    loadGraphAndBriefText.mockResolvedValue({ graph: mapLivingModel(KNOWN_ANSWER).graph, briefText: null });
+    expect((await read(app, SCENARIO)).json().withheld).toBeNull();
+    loadGraphAndBriefText.mockResolvedValue({ graph: null, briefText: null });
+    expect((await read(app, SCENARIO)).json().withheld).toBeNull();
+    await app.close();
+  });
+});
+
 describe("THE RESPONSE CARRIES NO LAYOUT — pin (5)", () => {
   it("reports layout_present:false for the graph shape scenarios.graph actually holds", async () => {
     const app = await buildApp();

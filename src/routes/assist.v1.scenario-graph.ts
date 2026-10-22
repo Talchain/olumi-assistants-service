@@ -39,7 +39,7 @@ import { executableWaitingProposal } from '../orchestrator-v5/agent-lane/held-ap
 import { actionFactsOf } from '../orchestrator-v5/agent-lane/actions/state.js';
 import { actionBarOf, type ActionBarV1 } from '../orchestrator-v5/agent-lane/actions/rank.js';
 import { laneModeFor } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
-import { isLegacyGraph } from '../orchestrator-v5/path-b/living-model/view.js';
+import { isLegacyGraph, livingViewOf } from '../orchestrator-v5/path-b/living-model/view.js';
 import { getRuntimeEnv } from '../config/env-resolver.js';
 import { readEvaluatedIdentityNodeIds } from '../orchestrator-v5/agent-lane/admit-model.js';
 import type { GuidanceState } from '../orchestrator-v5/agent-lane/guidance/index.js';
@@ -530,6 +530,9 @@ export default async function route(app: FastifyInstance) {
       // identity.v1, from the single normaliser authority. Null when the graph is absent or identity-empty — there is no
       // identity to anchor to, and a hash of nothing would be a false anchor.
       const identity = graphPresent ? computeGraphIdentityHash(graph as GraphStateIngress) : null;
+      // Why an item is not in the calculation (canvas-lm, DL 22 Oct): the mapper's own holds on a core scenario, from the same
+      // mapping every write and Run uses (`livingViewOf`). Null for an absent or legacy graph, or a living model that does not parse.
+      const living = graphPresent ? livingViewOf(graph) : undefined;
       return reply.code(200).send({
         schema: SCENARIO_GRAPH_SCHEMA,
         ...(heldOffers !== undefined && heldOffers.length > 0 ? { held_proposal_offers: heldOffers } : {}),
@@ -540,6 +543,7 @@ export default async function route(app: FastifyInstance) {
         // The same identity.v1 value, under the name the UI's read-after-write check reads (DGAI #2911): what the core turn
         // serves as `model.scenario_revision` (DL 22 Oct: one function, one value).
         content_hash: identity?.value ?? null,
+        withheld: living !== undefined && 'withheld' in living ? living.withheld : null,
         // STEP 8: the stored bytes stay as stored; an invalid saved today part is said, with the value every Run uses instead.
         ...(todayPartNotes.length > 0 ? { today_part_notes: todayPartNotes } : {}),
         graph_present: graphPresent,
