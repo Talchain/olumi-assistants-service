@@ -85,9 +85,12 @@ describe('the one gap asks only for what is missing: the target, or the level a 
   it('Codex r2/r3: a proper quantity keeps its case, and long labels keep the question inside 400 characters', () => {
     expect(goalTargetGapOf(stored(hiring({ quantity: 'GitHub stars' })))?.question).toContain('today’s level of GitHub stars');
     const long = 'Weekly delivered sessions across every estate, school and partner venue we run, '.repeat(3).trim();
-    const q = goalTargetGapOf(stored(model(long, { ...target, quantity: long, comparator: 'increase', value: 10, unit: '%', change_kind: 'relative' })))!.question;
-    expect(q.length).toBeLessThanOrEqual(400);
-    expect(q).toContain('What is today’s level of');
+    // Codex r3's 476-character input (120 + 80), and the worst case (400 + 400, no spaces to cut at).
+    for (const [label, quantity] of [[long, long], ['L'.repeat(120), 'Q'.repeat(80)], ['L'.repeat(400), 'Q'.repeat(400)]] as const) {
+      const q = goalTargetGapOf(stored(model(label, { ...target, quantity, comparator: 'increase', value: 10, unit: '%', change_kind: 'relative' })))!.question;
+      expect(q.length, label.slice(0, 12)).toBeLessThanOrEqual(400);
+      expect(q).toContain('What is today’s level of');
+    }
   });
 
   it('NEGATIVE: a legacy graph (no living model) gets byte-identical words', () => {
