@@ -698,7 +698,10 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         // The answer is real and the writes already happened: it is returned, flagged as not recorded.
         log.error({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'core-turn: answer could not be recorded; the claim stands, so a resend reports an unknown outcome and never re-runs');
       }
-      const ranThisTurn = runPress || result.tool_calls.some((c) => (c as { ran?: unknown }).ran === true);
+      // A Run a call confirmed ships its result only while the fresh read still selects that same Run: a Run that landed while
+      // the reply was written is not this turn's (Codex r1 on #3668).
+      const confirmed = result.tool_results.flatMap((r) => (r.ran === true && typeof r.run_id === 'string' ? [r.run_id] : []));
+      const ranThisTurn = runPress || (confirmed.length > 0 && confirmed[confirmed.length - 1] === after.run?.run_id);
       return send(200, coreTurnContract({
         turnId, durability, assistantText,
         revision: after.revision, scenarioRevision: after.identity, graph: appliedGraphWire(after.graph),

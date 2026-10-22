@@ -46,6 +46,8 @@ let persisted: Json | null = null;
 let readiness: Json = { status: 'blocked', may_run: false, options: [], blockers: [] };
 let runState: Json | undefined;
 let carriedResult: Json | undefined;
+/** When set, the read selects ANOTHER Run than the one this turn confirmed (one that landed while the reply was written). */
+let otherRun: string | undefined;
 let runs = 0;
 const registered: Json[] = [];
 const canvasForwards: { headers: Json; body: Json }[] = [];
@@ -116,11 +118,13 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 function graphRead(): Json {
   if (persisted === null) return { scenario_id: SCENARIO, graph: null, graph_present: false, brief_text: null, graph_identity_hash: null, graph_hash: null, content_hash: null };
   const graph = toOutboundGraph(persisted);
-  return withCanonicalAnalysisView({ scenario_id: SCENARIO, graph, graph_present: true, brief_text: BRIEF, graph_hash: hashOf(persisted),
+  const read = withCanonicalAnalysisView({ scenario_id: SCENARIO, graph, graph_present: true, brief_text: BRIEF, graph_hash: hashOf(persisted),
     graph_identity_hash: computeGraphIdentityHash(persisted as never), content_hash: computeGraphIdentityHash(persisted as never)!.value, analysis_ready: readiness,
     analysis_state: stateNow(), current_read: runState === undefined ? { run_state: { kind: 'never_run' }, computed_against_hash: null, run_id: null }
       : { run_state: runState.run_state, computed_against_hash: hashOf(persisted), run_id: 'fixture-read-run' },
     ...(carriedResult === undefined ? {} : { analysis_result: carriedResult }) }, SCENARIO);
+  return otherRun === undefined ? read
+    : { ...read, canonical_analysis_view: { ...read.canonical_analysis_view, run: { ...read.canonical_analysis_view.run, run_id: otherRun } } };
 }
 
 describe('POST /agent/v1/core-turn: the thin core route', () => {
@@ -188,7 +192,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   beforeEach(() => {
     SCENARIO = randomUUID(); persisted = postimage(KNOWN_ANSWER); registered.length = 0; canvasForwards.length = 0; turnRows.clear(); conversationIds.clear();
-    readiness = { status: 'blocked', may_run: false, options: [], blockers: [] }; runState = undefined; carriedResult = undefined; runs = 0;
+    readiness = { status: 'blocked', may_run: false, options: [], blockers: [] }; runState = undefined; carriedResult = undefined; otherRun = undefined; runs = 0;
     pausedRun = null; calls = []; outputs = []; preparedId = ''; holdProvider = undefined; holdWhen = undefined;
   });
   const post = (payload: Json) => app.inject({ method: 'POST', url: '/agent/v1/core-turn',
@@ -257,12 +261,54 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(a.receipts).toEqual([expect.objectContaining({ version_id: 'v_1', authorised_by: 'person' })]);
     expect(a.cards, 'the applied card is no longer waiting').toEqual([]);
     expect(a.assistant_text).toBe('Saved: f is 0.6 now.');
+    // CONTRAST (the row below): readiness admits no Run here, so none ran and no result is claimed.
+    expect(runs).toBe(0);
+    expect(a).not.toHaveProperty('analysis_result');
 
     const callsBefore = calls.length;
     const again = (await post(press)).json() as Json;
     expect(again).toMatchObject({ durability: 'replayed', assistant_text: 'Saved: f is 0.6 now.', error: null });
     expect(calls.length, 'a replay calls no model').toBe(callsBefore);
     expect(registered, 'and writes nothing').toHaveLength(1);
+  });
+
+  it('Lenses 22 Oct (15c72e9d): an approval whose saved model admits a Run carries that automatic Run\u2019s analysis_result in the contract, as a Run press does', async () => {
+    outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop', args: CHANGE }], [{ type: 'message', text: 'I prepared that change; press its card to save it.' }]];
+    const card = ((await typed(SAID)).json() as Json).cards[0];
+    preparedId = String(card.proposal_id);
+    readiness = { status: 'ready', may_run: true, options: [], blockers: [] };
+    outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: 'Saved, and the analysis ran.' }]];
+    const r = await post({ turn_id: randomUUID(), message: card.approve_action.message, source: 'chip_click',
+      chip: { id: card.approve_action.id, action_type: card.approve_action.action_type } });
+    expect(r.statusCode, r.body).toBe(200);
+    const a = r.json() as Json;
+    expect(runs, JSON.stringify(a._agent)).toBe(1);
+    const read = await freshRead();
+    expect(a.analysis_result, 'the automatic Run\u2019s fresh result, as the read now holds it').toEqual(read.analysis_result);
+    expect(a.run).toMatchObject({ run_id: read.canonical_analysis_view.run.run_id, state: { kind: 'complete_current' } });
+  });
+
+  it('Codex r1 on #3668: a Run that lands while the approval\u2019s reply is written is not that approval\u2019s: its result is not shipped', async () => {
+    outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop', args: CHANGE }], [{ type: 'message', text: 'Prepared.' }]];
+    const card = ((await typed(SAID)).json() as Json).cards[0];
+    preparedId = String(card.proposal_id);
+    readiness = { status: 'ready', may_run: true, options: [], blockers: [] };
+    let release!: () => void;
+    holdProvider = new Promise<void>((resolve) => { release = resolve; });
+    holdWhen = (body) => Array.isArray(body.input) && (body.input as Json[]).some((i) => i.type === 'function_call_output');
+    outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: 'Saved, and the analysis ran.' }]];
+    const pending = post({ turn_id: randomUUID(), message: card.approve_action.message, source: 'chip_click',
+      chip: { id: card.approve_action.id, action_type: card.approve_action.action_type } });
+    await vi.waitFor(() => expect(runs).toBe(1));
+    // The automatic Run is confirmed; while its words are written, another Run becomes the read's selected Run.
+    otherRun = 'another-run';
+    carriedResult = { ...carriedResult, summary: 'Another Run\u2019s summary.' };
+    release();
+    const r = await pending;
+    expect(r.statusCode, r.body).toBe(200);
+    const a = r.json() as Json;
+    expect(a.analysis_result, 'never another Run\u2019s result beside this Run\u2019s narration').toBeUndefined();
+    expect(a.run).toMatchObject({ run_id: 'another-run' });
   });
 
   it('analysis_state is the read\u2019s FULL v1 state on a typed turn, a card turn and a Run turn (contract v1.4/v1.5)', async () => {

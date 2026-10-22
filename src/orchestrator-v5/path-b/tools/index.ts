@@ -68,6 +68,8 @@ export interface ToolCallResult {
   readonly ok: boolean;
   readonly mutated: boolean;
   readonly ran?: true;
+  /** The Run a `ran` call confirmed by a fresh read (`recordedRun`): the only Run whose result the route may ship for it. */
+  readonly run_id?: string;
   readonly proposal_id?: string;
   readonly outcome: ToolOutcome['status'];
   readonly refusal?: string;
@@ -94,6 +96,7 @@ export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLa
     const receipt = outcome.status === 'ok' ? outcome.data.receipt ?? outcome.data.model_version : undefined;
     try {
       onCall(row, { args, ok: row.ok, mutated: row.mutated === true, ...(row.ran === true ? { ran: true as const } : {}),
+        ...(row.ran === true && outcome.status === 'ok' && typeof outcome.data.run_id === 'string' ? { run_id: outcome.data.run_id } : {}),
         ...(pid === undefined ? {} : { proposal_id: pid }),
         ...(outcome.status === 'ok' && typeof outcome.data.public_label === 'string' ? { public_label: outcome.data.public_label } : {}), outcome: row.outcome, ...(row.refusal === null ? {} : { refusal: row.refusal }),
         ...(receipt !== null && typeof receipt === 'object' ? { receipts: [receipt as Record<string, unknown>] } : {}),
@@ -148,7 +151,11 @@ export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLa
         const auto = await deps.analyseAfterCommit();
         const analysis = auto.run === undefined ? refused('run_not_ready', undefined, { analysis_ready: auto.ready ?? null })
           : await recordedRun(deps, ctx, auto.run);
-        return record(APPLY_CHANGE, args, { ...outcome, data: { analysis, ...outcome.data } }, args.proposal_id);
+        // The automatic Run ran (Lenses 22 Oct, 15c72e9d): this approval's call says so, as a pressed Run's does, so the turn
+        // ships that Run's analysis_result (`core-turn.ts` ranThisTurn) instead of "refresh to see it".
+        const ran = analysis.status === 'ok' && analysis.ran;
+        return record(APPLY_CHANGE, args, { ...outcome, ...(ran ? { ran: true } : {}),
+          data: { analysis, ...outcome.data, ...(ran ? { run_id: analysis.data.run_id } : {}) } }, args.proposal_id);
       },
       errorFunction: null,
     }),
