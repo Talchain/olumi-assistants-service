@@ -35,6 +35,21 @@ async function requestTheRunSends(graph: Rec): Promise<{ request: Rec | undefine
 }
 
 describe('thin core: the known-answer living model reaches the engine unchanged', () => {
+  it.each(['>', '<'] as const)('a strict %s aim reaches the real Run request with its strict flag and direction', async comparator => {
+    const m = structuredClone(KNOWN_ANSWER);
+    m.aims[0]!.target!.comparator = comparator;
+    m.aims[0]!.target!.current = comparator === '>' ? 70 : 110;
+    m.aims[0]!.text = comparator === '>' ? 'Production over 100 units' : 'Production under 100 units';
+    m.aims[0]!.quote = m.aims[0]!.text;
+    const graph = stored(m);
+    expect(resolveRunAdmission(graph).willProceed).toBe(true);
+    const { request, outcome } = await requestTheRunSends(graph);
+    expect(request, JSON.stringify(outcome)).toBeDefined();
+    expect(request!.goal_threshold_strict).toBe(true);
+    expect(request!.goal_direction).toBe(comparator === '<' ? 'minimise' : undefined);
+    expect(request!.graph.nodes.find((n: Rec) => n.id === 'g')).toMatchObject({ goal_threshold_raw: 100, goal_direction: comparator });
+  });
+
   it('the Run sends the goal, both options and the sized link as mapped, and never the living model', async () => {
     const graph = stored();
     expect(graph.living_model, 'PRECONDITION: the stored graph carries the living model').toEqual(KNOWN_ANSWER);

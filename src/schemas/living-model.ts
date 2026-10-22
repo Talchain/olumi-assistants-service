@@ -80,8 +80,8 @@ export const LivingAim = z.object({
   target: z.object({
     /** The quantity the aim is about, as written. */
     quantity: z.string(),
-    comparator: z.enum(['>=', '<=', '=', 'increase', 'decrease']).describe(
-      ">= or <= for a level to reach; = for exactly; increase or decrease for a change from the baseline, `value` being the size of the change."),
+    comparator: z.enum(['>=', '<=', '>', '<', '=', 'increase', 'decrease']).describe(
+      ">= or <= for a level to reach; > when the person says over or more than; < when they say under or below; = for exactly; increase or decrease for a change from the baseline, `value` being the size of the change."),
     ...figure,
     by_when: z.string().nullable(),
     /** The goal's window in months (fractions allowed), ONLY when the person states a duration counted from today. A model saved before reads null. */

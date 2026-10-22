@@ -369,10 +369,11 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
           // "Stay within" (Science, 21 Oct): a floor today already clears, or a ceiling today already sits under, is a valid
           // goal, scored on the level at the end of the horizon (not along the way). Only on the person's own level today
           // (an Olumi estimate is asked for), and read silently only when their words say so; otherwise Olumi asks once.
-          const stays = lt.comparator === '<=' ? current <= lt.value : current >= lt.value;
+          const ceiling = lt.comparator === '<=' || lt.comparator === '<';
+          const stays = ceiling ? current <= lt.value : current >= lt.value;
           const level = stays && !(t!.current_source === 'user' || stated(aim.source)) ? 'stay_within_base_not_theirs' as const
-            : stays && !STAY_CUE[lt.comparator].test(aim.quote ?? '') ? 'stay_within_unconfirmed' as const
-            : admitGoalBaseline({ rawTarget: lt.value, rawBaseline: current, cap: resolved.cap, ...(lt.comparator === '<=' ? { ceiling: true } : {}),
+            : stays && !STAY_CUE[ceiling ? '<=' : '>='].test(aim.quote ?? '') ? 'stay_within_unconfirmed' as const
+            : admitGoalBaseline({ rawTarget: lt.value, rawBaseline: current, cap: resolved.cap, ...(ceiling ? { ceiling: true } : {}),
               ...(stays ? { stayWithin: true } : {}) });
           if (typeof level === 'string') hold(aim.id, level);
           else if (!level.admitted) hold(aim.id, 'goal_level_not_admitted');
@@ -384,7 +385,8 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
             // A change is measured from today only if carrying on as now leaves the quantity there (amendment 1): said beside it.
             if (stays) {
               const say = (v: number) => sayFigureAsWritten(v, lt.unit ?? '');
-              assumed.push({ id: aim.id, text: `Keep ${t!.quantity} at or ${lt.comparator === '<=' ? 'below' : 'above'} ${say(lt.value)} (today ${say(current)}). The chance is for its level at the end of ${(t!.by_when ?? 'the period').replace(/^(at |by )?(the )?end of /i, '')}, not along the way.` });
+              const bound = `${lt.comparator === '<' || lt.comparator === '>' ? 'strictly' : 'at or'} ${ceiling ? 'below' : 'above'}`;
+              assumed.push({ id: aim.id, text: `Keep ${t!.quantity} ${bound} ${say(lt.value)} (today ${say(current)}). The chance is for its level at the end of ${(t!.by_when ?? 'the period').replace(/^(at |by )?(the )?end of /i, '')}, not along the way.` });
             }
             if (isChange) assumed.push({ id: aim.id, text: `Carrying on as now leaves ${t!.quantity} at today's ${sayFigureAsWritten(current, lt.unit ?? '')}; the change is measured from that.` });
           }

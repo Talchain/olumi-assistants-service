@@ -10,6 +10,7 @@ import { BuildModelParams, REVIEW_AFTER_SAVE, buildModel, type DraftDeps } from 
 import { applyKernel } from '../../living-model/kernel.js';
 import { mapLivingModel } from '../../living-model/mapper.js';
 import type { LivingModelT } from '../../../../schemas/living-model.js';
+import { KNOWN_ANSWER } from '../../living-model/__tests__/fixtures.js';
 import { constructionOperationId } from '../../../agent-lane/runtime/build-model.js';
 import { registrationTurnId } from '../../../graph-registration/registration-identity.js';
 import { traceRow } from '../outcome.js';
@@ -69,6 +70,32 @@ const ctx = { scenario_id: SID, verified_user_messages: [BRIEF], user_turn_text:
 const registerCalls = (p: ReturnType<typeof product>) => p.sent.filter((s) => s.path.endsWith('/graph/register'));
 
 describe('Olumi\'s provisional first model: the AI\'s living model, compiled by the mapper, confirmed by its own receipt and a fresh read', () => {
+  it('two stated goals are saved as two aims, including strict conversion and the launch-relative customer deadline', async () => {
+    const brief = 'Conversion over 15%. 20 new customers within the first 3 months of launch.';
+    const m = structuredClone(KNOWN_ANSWER);
+    Object.assign(m.aims[0]!, { text: 'Conversion over 15%', quote: 'Conversion over 15%' });
+    Object.assign(m.aims[0]!.target!, { quantity: 'Conversion', comparator: '>', value: 15, unit: '%', current: 10 });
+    m.links[0]!.effect.unit = '%';
+    m.aims.push({ ...structuredClone(m.aims[0]!), id: 'customers', text: '20 new customers within the first 3 months of launch',
+      quote: '20 new customers within the first 3 months of launch', target: { ...m.aims[0]!.target!, quantity: 'New customers',
+        comparator: '>=', value: 20, unit: 'customers', current: null, by_when: 'within the first 3 months of launch', period_months: null } });
+    const args = BuildModelParams.parse({ brief, model: m });
+    const kernel = applyKernel(args.model, [brief]);
+    const mapped = mapLivingModel(kernel.model);
+    const postimage = JSON.parse(JSON.stringify({ ...mapped.graph, living_model: kernel.model }));
+    const graph_hash = computeAnalysisAffectingGraphHash(postimage);
+    const graph_identity_hash = computeGraphIdentityHash(postimage);
+    const p = product({ graph: [EMPTY, { status: 200, json: { graph: postimage, graph_hash, graph_identity_hash } }],
+      register: [{ status: 200, json: { graph_hash, graph_identity_hash } }] });
+    const out = await buildModel(p, { scenario_id: SID, verified_user_messages: [brief], user_turn_text: brief }, args);
+    expect(out).toMatchObject({ status: 'ok', mutated: true, data: { save_outcome: 'VERIFIED_SAVED' } });
+    expect(registerCalls(p)).toHaveLength(1);
+    expect((registerCalls(p)[0]!.body as { graph: { living_model: { aims: unknown } } }).graph.living_model.aims).toEqual(m.aims);
+    expect(p.onModelRegistered.mock.calls[0]![0].living_model.aims).toEqual(m.aims);
+    expect(mapped.graph.nodes.filter(n => n.kind === 'goal').map(n => n.id)).toEqual(['g']);
+    expect(mapped.withheld).toEqual([{ id: 'customers', reason: 'aim_not_in_slice' }]);
+  });
+
   it('the living model and its compiled graph are registered create-only, as a core postimage, under the construction\'s own operation', async () => {
     const p = product({ graph: [EMPTY, MODEL], register: [SAVED], versions: [VERSIONS(true)] });
     const out = await buildModel(p, ctx, ARGS);
