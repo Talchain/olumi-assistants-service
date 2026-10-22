@@ -280,6 +280,41 @@ describe('PATH-B gap 4: commit and Undo each run the existing Run pipeline once;
     expect(((r.json() as Json).blocks as Json[] | undefined ?? []).filter((b) => b.type === 'ui_directive')).toHaveLength(0);
   });
 
+  /** The canvas's Challenge press on one card (DGAI `NodeQuickActions` → `askAi`, served 22 Oct): chip `ask:challenge`, the card's own words. */
+  const CHALLENGE = 'What is the figure for ‘Capacity’ based on, and what would make a different figure more defensible?';
+  const challengePress = (selected: Json[], message = CHALLENGE) => post({ turn_id: randomUUID(), message, source: 'chip', chip: { id: 'ask:challenge' }, selected_elements: selected });
+  const CHALLENGE_SENTENCE = 'When the person asks you to challenge one item they name, put your challenge to it as this note on that item.';
+  const forcesNote = (b: Json) => b.tool_choice === 'required' || (b.tool_choice as Json | undefined)?.name === 'note_on_item';
+
+  it('⭐ Challenge on one card (DL 22 Oct): the press offers note_on_item saying to challenge as a note, and the AI\'s challenge ships on that card', async () => {
+    const NOTE = 'What is Capacity\'s figure based on, and what would make another one more defensible?';
+    outputs = [[{ type: 'function_call', name: 'note_on_item', call_id: 'note_call', args: { item_id: 'f', note: NOTE } }], [{ type: 'message', text: 'I have put a challenge beside Capacity.' }]];
+    const r = await challengePress([{ id: 'f', kind: 'factor', label: 'Capacity' }]);
+    expect(r.statusCode, r.body).toBe(200);
+    const offered = (calls[0]!.tools as Json[]).find((t) => t.name === 'note_on_item');
+    expect(String(offered?.description)).toContain(CHALLENGE_SENTENCE);
+    const blocks = (r.json() as Json).blocks as Json[];
+    expect(blocks[0]).toMatchObject({ type: 'ui_directive', verb: 'highlight', targets: [{ id: 'f', label: 'Capacity', kind: 'factor' }], note: NOTE });
+    expect(probe.applied, 'a challenge writes nothing').toBe(0);
+  });
+
+  it('⛔ NEGATIVE (DL 22 Oct; Codex r1): a challenge that names no item, or two, demands no note: the AI gets those words, nothing forces the tool, a reply alone ships no directive', async () => {
+    // The AI reads only the message (sdk-turn.ts `input.message`), never `selected_elements`: the words are what vary.
+    const cases: [Json[], string][] = [
+      [[], 'What in this model is most worth challenging, and why?'],
+      [[{ id: 'f', kind: 'factor', label: 'Capacity' }, { id: 'g', kind: 'goal', label: 'Velocity' }], 'Challenge Capacity and Velocity: what is each based on?'],
+    ];
+    for (const [selected, message] of cases) {
+      calls = []; outputs = [[{ type: 'message', text: 'Capacity rests on one estimate; a second source would test it.' }]];
+      const r = await challengePress(selected, message);
+      expect(r.statusCode, r.body).toBe(200);
+      expect(JSON.stringify(calls[0]?.input ?? null), 'PRECONDITION: the AI got these words').toContain(message);
+      expect(JSON.stringify(calls[0]?.input ?? null)).not.toContain(CHALLENGE);
+      expect(calls.filter(forcesNote), message).toHaveLength(0);
+      expect(((r.json() as Json).blocks as Json[] | undefined ?? []).filter((b) => b.type === 'ui_directive')).toHaveLength(0);
+    }
+  });
+
   it('⭐ RED→GREEN commit → ONE Run → the SAME SDK run gets its results and coaches; with the preceding Run\'s comparison', async () => {
     const card = await prepared();
     const r = await press(card);
