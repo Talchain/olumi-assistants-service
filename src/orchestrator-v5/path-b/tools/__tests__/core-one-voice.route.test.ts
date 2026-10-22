@@ -5,7 +5,6 @@
  * blocks: no host guidance card, action bar, gap signal, sizing chip, next step or Run offer. The A lane is unchanged.
  * Harness: the real `/agent/v1/turn` route (as `goal-level-card.route.test.ts`); a scripted AI (0 provider calls). SYNTHETIC.
  */
-import { readFileSync } from 'node:fs';
 import { randomUUID, createHash } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -17,6 +16,7 @@ import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import { projectGraphForPersistence } from '../../../persisted-graph-projection.js';
 import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
 import { streamWhenAsked } from '../../../agent-lane/__tests__/stream-when-asked.js';
+import { CORE_REPLY_RULES } from '../../../core-route/instructions.js';
 
 type Json = Record<string, any>;
 let SCENARIO = '';
@@ -144,9 +144,6 @@ const ANSWER = 'The model holds 120 orders a week today, from your brief.';
 // L8 sign-off text: independent of the production constant, tested at the SDK HTTP boundary.
 const COHERENT_REPLY = 'Write one coherent reply in a single voice: give the explanation first, mention what changed since the last Run only when it matters, and weave at most one next step from the current readiness facts into the prose, never as a separate bullet or receipt line and never asking for something the user has already said; ask at most one question per reply.';
 const COHERENT_REPLY_SHA = '3be8d67e53696147c1b12cc8384416de7dfb9854a7e98c91e3913609bb9a9f4b';
-/** Olumi's approved reply discipline, read from the served routing prompt itself (independent of the production constant). */
-const ROUTING = readFileSync(new URL('../../../../../Prompts/canonical/routing.txt', import.meta.url), 'utf8');
-const DISCIPLINE = ROUTING.slice(ROUTING.indexOf('<RESPONSE_DISCIPLINE>'), ROUTING.indexOf('</RESPONSE_DISCIPLINE>') + '</RESPONSE_DISCIPLINE>'.length);
 
 describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host guidance or advice', () => {
   let app: FastifyInstance;
@@ -198,9 +195,9 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
     expect(calls.length).toBeGreaterThan(0);
     for (const c of calls) {
       expect(typeof c.instructions).toBe('string');
-      // Paul, 21 Oct (standing): bullets first, detail on request. The approved discipline replaces the prose-only sentence.
-      expect(DISCIPLINE.length, 'the canonical block was found').toBeGreaterThan(500);
-      expect(c.instructions.split(DISCIPLINE), 'the approved response discipline rides every call exactly once').toHaveLength(2);
+      // DL 22 Oct (priority change): the coach's reply rules ride every call exactly once; the accreted discipline is gone.
+      expect(c.instructions.split(CORE_REPLY_RULES), 'the reply rules ride every call exactly once').toHaveLength(2);
+      expect(c.instructions).not.toContain('<RESPONSE_DISCIPLINE>');
       expect(createHash('sha256').update(COHERENT_REPLY, 'utf8').digest('hex'), 'the replaced sentence is the one L8 signed').toBe(COHERENT_REPLY_SHA);
       expect(c.instructions, 'the prose-only sentence it replaced is gone').not.toContain(COHERENT_REPLY);
     }
@@ -493,15 +490,14 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
     expect(calls.length).toBeGreaterThan(0);
     for (const c of calls) {
       expect(c.instructions.split('Illustrative calculation — uses untested Olumi assumptions.')).toHaveLength(2);
-      expect(c.instructions).toContain('with the material assumptions and exact inputs used');
-      expect(c.instructions).toContain('ask at most one question per reply');
-      expect(c.instructions).toContain('never attribute spread to a stated range the Run did not use');
+      expect(c.instructions.split('Ask at most one focused question')).toHaveLength(2);
+      expect(c.instructions.split('Only use numbers the supplied result actually computed.')).toHaveLength(2);
     }
     const count = calls.length;
     await post({ turn_id: randomUUID(), message: QUESTION, source: 'composer' }, {});
     for (const c of calls.slice(count)) {
-      expect(JSON.stringify(c)).not.toContain('ask at most one question per reply');
-      expect(JSON.stringify(c)).not.toContain('never attribute spread to a stated range the Run did not use');
+      expect(JSON.stringify(c)).not.toContain('Ask at most one focused question');
+      expect(JSON.stringify(c)).not.toContain('Only use numbers the supplied result actually computed.');
     }
   });
 
@@ -510,10 +506,9 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
     const r = await post({ turn_id: randomUUID(), message: 'Keep staff training separate; discuss it here without changing this model.', source: 'composer' });
     expect(r.statusCode, r.body).toBe(200);
     expectCoherentInstructions(r.json());
-    const { CORE_REPLY_INSTRUCTION } = await import('../../../../routes/agent-v1-turn.js');
-    expect(createHash('sha256').update(CORE_REPLY_INSTRUCTION, 'utf8').digest('hex')).toBe('8c0d1f7343bfae2da5301f4277f3fcc70ed5984a8bfd4e14e2e51b29bd055e32'); // 23 Oct (b): boundary as the person's own arithmetic, the input always named, the low/high invited (was ea5b1aa0…). 23 Oct: exact inputs → each margin as goal_margins states it + a stress_test offered at the boundary of the input it rests on (DL brief, R2 c1; was 88385386…). 22 Oct: exact inputs → the Run's own results + the person's choice of figure to test (Track 3 c5; Codex r1 #3625; was ae209749…); stress_test only for a sized link/factor (buddy SIMPLER, was 30c84e52…); three-part coaching after a Run (part 2 never ranks unmeasured figures, Codex r1) + the held-risk window ask (was 9d54116b…); + CORE_NEXT_STEP decisive question (Track 3 Q2 v2 + buddy AMEND, 21 Oct; was 2dd87dc8…), Track 3 E2E 21 Oct (was 7f0493d6…; arm C adopted 21 Oct)
+    expect(createHash('sha256').update(CORE_REPLY_RULES, 'utf8').digest('hex')).toBe('675c66186980b6cba6695c308a6747e32eccead4c2a41ca1d9b79d1470ec60a2'); // 22 Oct: the coach's reply rules + the kept tool and approval rules (DL priority change; was 8c0d1f73…)
     for (const c of calls) {
-      expect(c.instructions).toContain(CORE_REPLY_INSTRUCTION);
+      expect(c.instructions).toContain(CORE_REPLY_RULES);
       expect(c.instructions.split(scope)).toHaveLength(2);
       expect(c.instructions).not.toContain("Keep a clearly separate situation out of the current scenario's Living Model and ask once how they want to handle it, for example as its own scenario.");
       expect(c.instructions).not.toContain('Do not ask again once the person has said how to handle the separate situation.');

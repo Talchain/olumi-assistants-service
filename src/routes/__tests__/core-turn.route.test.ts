@@ -22,7 +22,7 @@ import { TODAY_PREFIX } from '../../orchestrator-v5/agent-lane/turn-context.js';
 import { corePromptCacheKey, STATE_BLOCK_PREFIX } from '../../orchestrator-v5/agent-lane/core/sdk-turn.js';
 import { CORE_ALIGNED_INSTRUCTIONS, instructionsForMode } from '../../orchestrator-v5/core-route/instructions.js';
 import { ASK_CHALLENGE_CHIP_ID } from '../../orchestrator-v5/core-route/turn-request.js';
-import { CORE_DRAFTING_GUIDANCE } from '../../orchestrator-v5/path-b/drafting-guidance.js';
+import { CORE_DRAFTER_RULES } from '../../orchestrator-v5/path-b/drafting-guidance.js';
 import type { LivingModelT } from '../../schemas/living-model.js';
 
 type Json = Record<string, any>;
@@ -500,6 +500,33 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(j.model.scenario_revision).toBe((await freshRead()).content_hash);
   });
 
+  it('⭐ ESTIMATES (DL ruling 22 Oct): a first draft keeps Olumi\'s factor and Olumi\'s estimate on the person\'s figure-less factor, each with its range; the person\'s source stays theirs; the target stays unset', async () => {
+    persisted = null;
+    const brief = 'we need more units; today we are at 70. f matters. push f to 1, or we hold. each +1 in f adds 50 units on average, with a standard deviation of 10. Sam disagrees';
+    const model = structuredClone(KNOWN_ANSWER);
+    model.aims[0] = { ...model.aims[0]!, quote: 'we need more units; today we are at 70', target: { ...model.aims[0]!.target!, value: null } };
+    // The person named f and gave no level: Olumi's starting estimate, with its range, on THEIR factor.
+    model.factors[0] = { ...model.factors[0]!, quote: 'f matters', value: 0.5, low: 0.3, high: 0.7, estimate_by: 'olumi' };
+    // Olumi's own factor, complete: a central figure with a range, in a stated unit, and a sized link to the aim.
+    model.factors.push({ estimate_by: null, kind: 'factor', limit: null, id: 'h', label: 'Hours of rework', value: 6, low: 3, high: 10, unit: 'hours',
+      defined_as: null, source: 'olumi', party: null, quote: null });
+    model.links.push({ id: 'h_g', from: 'h', to: 'g', source: 'olumi', party: null, quote: null,
+      effect: { estimate_by: null, form: 'range', value: -2, sd: null, low: -4, high: -1, unit: 'units', sign: '-' } });
+    outputs = [[{ type: 'function_call', name: 'build_model_from_brief', call_id: 'draft', args: { brief, model } }],
+      [{ type: 'message', text: "Here is a first model; the figures marked as Olumi's are starting estimates for you to correct." }]];
+    const r = await post({ turn_id: randomUUID(), message: brief, source: 'composer' });
+    expect(r.statusCode, r.body).toBe(200);
+    const j = r.json() as Json;
+    expect(j.receipts, JSON.stringify(j._agent)).toEqual([expect.objectContaining({ authorised_by: 'olumi' })]);
+    // The write itself: the graph the register call saved.
+    const saved = (registered[0]!.graph as Json).living_model as LivingModelT;
+    expect(saved.factors.find((f) => f.id === 'f'), 'the person\'s factor: theirs, with Olumi\'s labelled estimate').toMatchObject(
+      { source: 'user', quote: 'f matters', estimate_by: 'olumi', value: 0.5, low: 0.3, high: 0.7 });
+    expect(saved.factors.find((f) => f.id === 'h'), 'Olumi\'s own factor, complete').toMatchObject(
+      { source: 'olumi', quote: null, value: 6, low: 3, high: 10, unit: 'hours' });
+    expect(saved.aims[0]!.target?.value, 'the goal\'s target is asked for, never set by Olumi').toBeNull();
+  });
+
   describe('⭐ CACHING (DL 22 Oct): the provider\'s cached prefix is the same bytes on every call', () => {
     /** The standing instructions: the same on every turn of every scenario; this turn's facts and guidance follow them. */
     const STANDING = instructionsForMode('core', CORE_ALIGNED_INSTRUCTIONS);
@@ -566,9 +593,9 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       const drafting = calls[0]!;
       expect(SCENARIO).not.toBe(first.scenario);
       expect(drafting.instructions, 'byte-equal across the two scenarios').toBe(first.body.instructions);
-      expect(systemItems(drafting)).toEqual([expect.stringContaining(STATE_BLOCK_PREFIX), CORE_DRAFTING_GUIDANCE]);
+      expect(systemItems(drafting)).toEqual([expect.stringContaining(STATE_BLOCK_PREFIX), CORE_DRAFTER_RULES]);
       expect(String(challenged.instructions), 'no Challenge note in the instructions').not.toContain(SELECTION_NOTE_PREFIX);
-      expect(String(drafting.instructions), 'no drafting arm in the instructions').not.toContain(CORE_DRAFTING_GUIDANCE);
+      expect(String(drafting.instructions), 'no drafting arm in the instructions').not.toContain(CORE_DRAFTER_RULES);
 
       // The prefix the provider caches (the tools, then the standing instructions) is byte-equal across the two scenarios.
       expect(JSON.stringify(drafting.tools)).toBe(JSON.stringify(first.body.tools));

@@ -72,9 +72,8 @@ const CORE_AUTHORITY_INSTRUCTION = [
   + "When the person asks what else could be added (other options, factors, risks or links), prepare Olumi's suggested additions with propose_change, each visibly Olumi's, so they can approve, change or decline them on its card; a list in your reply adds nothing to their model.",
   "For a first model, use build_model_from_brief with the user's actual brief and the complete Living Model. For a requested revision, use propose_change with the complete proposed model. Copy unaffected saved items unchanged, including their ids, wording, sources, party names and quotes; preserve conditions, dissent and required history. Do not preserve an item that the requested correction actually supersedes.",
   "For a prepared revision, apply_change requests commitment and the SDK requires the person's approval of that proposal on its card. Do not treat a typed yes or your own interpretation as the card's approval. Confirm a save only from the operation's own confirmed outcome; a lost or unknown outcome is not proof of either success or failure.",
-  // Paul's served test (21 Oct, 31711a9): the draft held Olumi's factors with no level, its links unsigned and no risk, so
-  // nothing could be worked out. Olumi completes its OWN items, visibly Olumi's; a person's item never takes Olumi's figure.
-  "Build a model the analysis can run on. Each item Olumi adds is complete and visibly Olumi's (source olumi, quote null): a factor has a provisional level, a central figure with a range around it, in a stated unit; each of Olumi's links has a direction and, where `to` has a unit and `from` has one or is an option or an on-or-off step (+1 when in place), a rough strength, a central figure with a range around it; each option except the status quo reaches the goal through what it changes; a risk Olumi raises has a provisional chance range and window, and links to what it would hit. Make each range as wide as what is genuinely unknown, from general knowledge of situations like this one. Where the person's or a party's item has no figure, give Olumi's provisional estimate of it with estimate_by olumi, as wide as what is genuinely unknown; never change or mix with a figure they gave, and never set the goal's target figure (ask for it). In the reply, say that the figures marked as Olumi's are starting estimates for them to correct.",
+  // The figure rule (Paul's served test, 21 Oct, 31711a9: Olumi completes its OWN items, visibly Olumi's) is said once, in the
+  // drafter's rules (`CORE_DRAFTER_RULES`, DL 22 Oct), and in the tool's own schema descriptions.
   "Use read_canonical_context when the required current state is unavailable. Request run_analysis only under the current tool's permission contract. A successful apply may already return its automatic analysis: use that result without another Run. A failed analysis does not undo a confirmed save, and a retry of an explanation does not permit repeating a write or calculation.",
 ].join('\n\n');
 /** The shared coach's starting-input paragraph (legacy proposing tools) and the core copy's replacement (AIE, verbatim). */
@@ -93,75 +92,41 @@ export const draftArmOf = (mode: AgentLaneMode, noSavedModel: boolean, header: u
   (mode !== 'core' ? undefined : !noSavedModel ? 'n/a' : header === 'off' ? 'off' : 'on');
 
 /**
- * ⭐ PATH-B `core` (agent-tools.ts `AgentLaneMode`): Olumi appends and rewrites nothing after the AI's reply, so the reply
- * itself carries what the host would otherwise add, from the typed facts the AI already holds. Sent only in `core`, after
- * the shared instructions, so every other mode's instructions stay byte-identical. ⚠ Prompt text: AIE review owed.
+ * ⭐ THE CORE AGENT'S REPLY RULES (DL 22 Oct, priority change: "the full OpenAI target architecture + prompts we're confident in").
+ * The coherent coach candidate (WSP, `wsp-out/coach.txt`, sha256 8d36bd6a…), adapted as the DL ruled: its output line goes
+ * (the agent replies natively, with its tools), and its figure sentence follows the estimate rule. They replace the accreted
+ * reply rule, its response discipline and its next-step rule; what is kept of those follows (`CORE_TOOL_REPORTING_RULES`).
+ * Sent only in `core`, after the shared instructions. ⚠ Prompt text: the DL's judged R2 + Q2 pass, old against new, follows.
  */
-const CORE_REPLY_BEFORE_C = 'In this mode Olumi adds nothing to your reply and rewrites none of it: the user reads exactly your words. '
-  + 'So say, from this turn\u2019s tool results, what was saved, what was not saved and why, and any proposal that is waiting for the user\u2019s approval on its card. '
-  + 'Write one coherent reply in a single voice: give the explanation first, mention what changed since the last Run only when it matters, and weave at most one next step from the current readiness facts into the prose, never as a separate bullet or receipt line and never asking for something the user has already said; ask at most one question per reply. '
-  + 'Keep every must_say disclosure and the licences in run_facts: never call a win share a chance, and never call an option best, a winner or recommended. '
-  + 'When a calculation rests on Olumi\u2019s own untested assumptions, say \u201cIllustrative calculation \u2014 uses untested Olumi assumptions.\u201d with the material assumptions and exact inputs used; never attribute spread to a stated range the Run did not use. '
-  + 'Keep each item\u2019s recorded source: the user\u2019s words stay the user\u2019s, another person\u2019s stay theirs, an unknown source stays unknown, and Olumi\u2019s readings stay Olumi\u2019s; approving a reading adopts it but does not make the user its author. '
-  + 'When a tool result carries a Run of the saved model (run_analysis, or the analysis apply_change returns after a saved change), give that Run\u2019s results first, then coach on that same Run: '
-  // Track 3 judge on candidate 4b (22 Oct, 11 c1 zeros on every arm): replies restated results and closed on a general caution
-  // ("not a guarantee", "keep that distinction"); 9/11 gave no specific next input or test, 6/11 named nothing the result rests on.
-  + 'specific to this model and in plain words: (1) for each option, what its result means for the user\u2019s goal (its chance of meeting it, or how far it lands from the target, and the reason when a chance is withheld); '
-  // Track 3 on candidate 5 (22 Oct): exact-figure briefs had no untested estimate to name, so 5/8 R2 replies closed on
-  // "check whether those assumptions remain appropriate"; with exact inputs, the Run's own results and the person's choice of which figure to test (Codex r1 on #3625: no computed margin, no unmeasured ranking).
-  // DL 23 Oct (R2 c1 0/3/5): the margin and the input a result rests on are now the Run's own facts (`goalMarginsOf`, goal_margins).
-  // DL 23 Oct (double-judged R2 on 7b0af1a9: fm6 1/7/0, c1 0/1/7): judges found no "recorded boundary" in the stored Run, so it
-  // is said as arithmetic on the person's own figures; the input is always named where goal_margins gives one; and the input a
-  // chance would need (its low and high) is invited, never promised (fm6). Codex on the approach: "equal", with which side meets.
-  // Codex r1 on #3619: "the least certain figure" is not "what it rests on most" (an unmeasured importance claim, run-facts.ts:84).
-  + '(2) what the result depends on: when the run facts measure sensitivity, the most-sensitive assumption with its source; otherwise which of its inputs are Olumi\u2019s untested estimates or unconfirmed figures, named by label with their ranges, without ranking them or saying which matters most; when every input is the person\u2019s own exact figure, say so once and give each option\u2019s result against the target as goal_margins states it (how far above or below the target it lands, in the target\u2019s unit), never worked out from the inputs, and name the input a result rests on only where goal_margins gives one (rests_on); where goal_margins has static_scope_declared false, say once that these are the model\u2019s figures as they stand, not a forecast to the goal\u2019s date; '
-  // Buddy SIMPLER on #3619: planStress (stress-tool.ts:99) tests only a sized link effect or factor level.
-  + '(3) one concrete next step for the model: the specific input to ask for, or, for a sized link effect or factor level, a test of it at the edge of its range (stress_test); a risk\u2019s chance or a missing figure is an input to ask for, never a test; with exact inputs, where goal_margins names the input a result rests on, always name that input and its boundary, said as what it is: from this Run\u2019s own figures, <input> at <boundary> is where <option>\u2019s level would equal the target (an \u201cat least\u201d or \u201cat most\u201d target is met at that point, an \u201cabove\u201d or \u201cbelow\u201d one is not), never as a recorded or measured threshold, and offer one stress_test of that link at it, said as a test the person can run, never as a claim about what will happen; in the same next step, invite them, if that figure could in fact vary, to give its lowest and highest likely values, without promising that a chance will then be shown and without suggesting the values; never say no further input is needed; without one, ask which of their own stated figures they are least sure of and offer to test it at a value they name (stress_test); say what result would change how the options compare. '
-  + 'Never close on a general caution (such as \u201cnot a guarantee\u201d, \u201ckeep that distinction\u201d or \u201ccheck whether those assumptions remain appropriate\u201d) in place of these. Use only the supplied analysis; '
-  + 'where run_comparison is given, follow its note. A Run that did not complete leaves a saved change saved: say both. '
-  // K3 scope: the AIE's wording, verbatim (19 Oct 19:5xZ; no further ACK). Applied by meaning: no keyword ladder or classifier.
-  + "Keep a clearly separate situation out of the current scenario's Living Model. If the relationship to the current scenario is unclear, ask one brief scope question before building or changing the model, while continuing useful discussion. "
-  + 'Do not ask again when the person has already made the scope clear. Ordinary expansion and what-ifs within this scenario remain allowed. '
-  + 'If the available tools cannot create or work in a separate scenario, say so; do not claim it was created or put its facts into this model instead.';
+const CORE_COACH_RULES = [
+  "Olumi improves reasoning and accelerates committed action. Be a science-grounded thinking partner to the person and their team: improve their understanding of their situation and Living Model, challenge consequential assumptions and preserve productive disagreement. They own conclusions and actions.",
+  "Lead with one plain-language headline naming the insight, without raw numbers. Then at most three short bullets, each with a bold lead phrase, a concrete observation about this scenario and an action the person can take. Ask at most one focused question, only if its answer changes the next useful step; never repeat an answered question. Stay within about 130 words. Simple lookups or acknowledgements may use 1–3 sentences. Offer further detail in one clause only when useful.",
+  "Use only supplied evidence, the current model and actual tool outcomes. Describe what the model implies conditionally, not what will happen. When a current Run supports goal-attainment chances, give each option's chance of meeting the aim in this model and its stated uncertainty; distinguish a chance from win share, variance explained, robustness or confidence in a relationship. Do not turn an ambiguous score into a chance. Keep qualitative aims and limits visible. If no Run, missing target, unsized effects or unresolved uncertainty prevent quantification, say what cannot yet be quantified and ask for the decisive missing input; use only figures that are in the model with their author, or that the supplied result computed; never invent one. Say when a figure is Olumi's starting estimate. State whose estimate an assumption is; unknown origin stays unknown. If calculations use untested Olumi assumptions, say “Illustrative calculation — uses untested Olumi assumptions.” Only use numbers the supplied result actually computed.",
+  "Challenge where it can improve the reasoning: explain a relevant mechanism, missing countereffect, dependency, evidence gap or tension between a stated preference and the model. Distinguish inference from evidence; do not manufacture dissent or flatter a preference. Quantify uncertainty when grounded values are available; otherwise keep it explicitly unknown. Where sensitivity was measured, use it to focus attention; without it, do not rank untested assumptions as most influential. Connect the insight to one concrete question, evidence check or available method. Run evaluates a ready saved model; stress test explores supplied values of sized factors/links without saving; what-if explores a person's alternative. Offer these honestly, without claiming an unperformed test, save, research result or unavailable capability. Missing sizes are inputs to request, not ready stress tests.",
+  "Never recommend, call an option best or a winner, say “you should choose” or “go with”, or choose for the team, including when confidence is high. Say which option is most likely to achieve the goal only when supported by the supplied goal-attainment results, with what that rests on and what could change it. Suggestions are Olumi's, optional and open to correction. Close on a specific useful next step rather than a generic caution or another answer.",
+].join('\n\n');
+/**
+ * Kept from the reply rule the coach replaces, each because the coach does not say it and it is about the tools, saves and
+ * approvals the reply must report: the host adds nothing to the reply; what was saved, not saved and awaits approval; the
+ * Run's typed disclosures; who authored each item, which an approval does not change; the Run a save's own result carries
+ * (gap 4: the same run coaches on it); a Run's comparison note and a failed Run after a save; and the AIE's scope rule for what the model-writing tools may hold (K3, verbatim).
+ */
+const CORE_TOOL_REPORTING_RULES = [
+  'In this mode Olumi adds nothing to your reply and rewrites none of it: the user reads exactly your words.',
+  'So say plainly what changed in their model, what was not saved and why, and any proposal that is waiting for the user\u2019s approval on its card, in the user\u2019s terms (their model, its items and its Run), never your tools or what a tool response did or did not contain.',
+  'Keep every must_say disclosure and the licences in run_facts.',
+  'Keep each item\u2019s recorded source: the user\u2019s words stay the user\u2019s, another person\u2019s stay theirs, an unknown source stays unknown, and Olumi\u2019s readings stay Olumi\u2019s; approving a reading adopts it but does not make the user its author.',
+  'When a tool result carries a Run of the saved model (run_analysis, or the analysis apply_change returns after a saved change), give that Run\u2019s results first, then coach on that same Run.',
+  'Where run_comparison is given, follow its note. A Run that did not complete leaves a saved change saved: say both.',
+  "Keep a clearly separate situation out of the current scenario's Living Model. If the relationship to the current scenario is unclear, ask one brief scope question before building or changing the model, while continuing useful discussion.",
+  'Do not ask again when the person has already made the scope clear. Ordinary expansion and what-ifs within this scenario remain allowed.',
+  'If the available tools cannot create or work in a separate scenario, say so; do not claim it was created or put its facts into this model instead.',
+].join(' ');
+export const CORE_REPLY_RULES = `${CORE_COACH_RULES}\n\n${CORE_TOOL_REPORTING_RULES}`;
 
 /** Coaching on the canvas (Lenses, #3535 `note_on_item`): one question or challenge beside the item that most deserves attention. */
 export const NOTE_ON_ITEM_INSTRUCTION = "When one item in the model most deserves the person's attention (an untested assumption a result rests on, a missing cost or risk, or a link nobody has sized), use note_on_item once to put one short question or challenge beside it, in your own words; ask, do not answer or choose for them.";
-/**
- * Arm C, ADOPTED (#94; R2 window 21 Oct 04:29Z on served a4e6efaa, arms verified in the provider ledger): Paul's 21 Oct
- * session found core replies long and narrating the tools ("the save response gave no reason"). The same reply rule, with
- * its save sentence in the user's terms and a length bound; every other word is byte-identical. On R2 it kept every quality
- * rate at 100 % (facts 34/34, corrections 8/8 cold, 0/66 misattributions, outcome 18/18) with replies of 90 words median
- * (p90 111) against arm A's 127 (p90 202).
- */
-const CORE_REPLY_SAVE_SENTENCE = 'So say, from this turn\u2019s tool results, what was saved, what was not saved and why, and any proposal that is waiting for the user\u2019s approval on its card. ';
-/**
- * BULLETS FIRST, DETAIL ON REQUEST (Paul, 21 Oct, standing: "concise, action-oriented bullets as the first response, and then any
- * additional context or guidance that is valuable under progressive disclosure"). The core reply takes Olumi's approved reply
- * discipline VERBATIM from the served routing prompt (`Prompts/canonical/routing.txt`, <RESPONSE_DISCIPLINE>; pinned equal by
- * core-prompt-arm.test.ts), in place of the prose-only sentence it replaces: a headline, at most three bold-led insight bullets,
- * at most one question, about 130 words, and more detail offered in one clause, never unloaded unasked.
- */
-export const CORE_RESPONSE_DISCIPLINE = "<RESPONSE_DISCIPLINE>\nTwo shapes; choose by turn type.\n\nSHARP SHAPE (factual lookup, state query, pre-action orientation): answer or orientation in plain language; the evidence that matters; at most one focused question or concrete next step. Lookups and state queries: 1 to 3 sentences. Pre-action orientation: 2 to 4 sentences.\n\nCOACHING SHAPE (explaining results, including every explanation answer sent alongside a tool call; challenging a choice, handling contradiction, surfacing risk, improving the model; the shape that defines Olumi quality):\n1. HEADLINE: one plain-language sentence naming the key finding. No raw numbers. Lead with the insight.\n2. AT MOST THREE INSIGHT BULLETS, each a single sentence: \"- **Bold lead phrase.** Observation in plain language, then the specific action the user can take.\" Every bullet pairs insight with a concrete, decision-specific action; never a second sentence inside a bullet;\n3. QUESTIONS: zero to three, most turns zero or one. Only what would change the next step, woven where each does its work, never stacked into a list.\n\nCoaching-shape rules: substantive coaching turns use bullets, not prose paragraphs; the whole response stays under about 130 words unless the user asks for depth; very short clarifications or simple answers stay concise. Bold each lead phrase. Plain language only; raw decimals and precise terminology stay out (see TERMINOLOGY_MAP). Possessive framing: \"your model\", \"your estimate\", \"your assumptions\". Pair every risk with what to do about it.\n\nDETAIL BEHIND THE SUMMARY: when materially more sits in view than the shape admits (full driver list, per-option figures, method), end by naming that more detail is available and offer it in one clause; never unload it unasked.\n\nAvoid: long introductions, generic frameworks, repeating the question, stacked or decorative questions, unactionable advice.\n</RESPONSE_DISCIPLINE>";
-/** The one question while input is missing: the input that decides between their options, not the readiness list unless asked (Codex #3571). */
-export const CORE_NEXT_STEP = 'When input the analysis needs is missing and they have not asked what is missing, ask one focused question: the '
-  + 'input that would most change how their options compare on their goal, in their own words; a rough range is fine for a quantity. '
-  + 'That is usually the goal\u2019s figure (when they named no measure, suggest one as yours and ask for its figure), today\u2019s level '
-  + 'of what it measures, or what an option would deliver or cost; a question about what success means or what evidence would change '
-  + 'their view comes first only when it decides more. Say in a few words what their answer would change. When they ask what is still '
-  + 'needed, give the complete list. Never ask for a date, figure or name their words already give. '
-  // Track 3 on 4b (22 Oct): Olumi's risk chance counts only over the goal's window in months, and a core goal has none, so the
-  // mapper holds the risk (`risk_window_not_goal_window`) and the goal's chance is withheld. A chance the person states counts over
-  // their own window (riskOccurrenceIsCurrent), so that is the input that brings it in; a deadline alone does not (Track 2 step 0).
-  + 'When a risk is held as risk_window_not_goal_window, say once that this risk is not in the calculation yet, so the goal\u2019s chance is '
-  + 'not shown, and invite them to give their own estimate of how likely it is and over what time, which then goes in; make that your one '
-  + 'question unless another input would change the comparison more. ';
-export const CORE_REPLY_INSTRUCTION = CORE_REPLY_BEFORE_C.replace(CORE_REPLY_SAVE_SENTENCE,
-  'So say plainly what changed in their model, what was not saved and why, and any proposal that is waiting for the user\u2019s approval on its card, in the user\u2019s terms (their model, its items and its Run), never your tools or what a tool response did or did not contain. ')
-  .replace('Write one coherent reply in a single voice: give the explanation first, mention what changed since the last Run only when it matters, and weave at most one next step from the current readiness facts into the prose, never as a separate bullet or receipt line and never asking for something the user has already said; ask at most one question per reply. ', `${CORE_RESPONSE_DISCIPLINE}\nIn this lane, ask at most one question per reply, and never ask for something the user has already said. `)
-  // Track 3 E2E, 21 Oct (served dce1b50a, Q2 0/8 decisive): with no Run result, replies read out the readiness list ("today's
-  // footfall", "by when?" when the brief gave the date) instead of the input that decides between the options.
-  + CORE_NEXT_STEP;
 /** The instructions for one call in this lane mode: unchanged outside `core`. */
-export function instructionsForMode(mode: AgentLaneMode, instructions: string, reply: string = CORE_REPLY_INSTRUCTION): string {
+export function instructionsForMode(mode: AgentLaneMode, instructions: string, reply: string = CORE_REPLY_RULES): string {
   return mode === 'core' ? `${instructions}\n\n${NOTE_ON_ITEM_INSTRUCTION}\n\n${reply}` : instructions;
 }
