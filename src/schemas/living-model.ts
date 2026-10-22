@@ -137,6 +137,12 @@ export const LivingFactor = z.object({
     ...attribution,
   }).strict().nullable().default(null).describe(
     'A limit the person must stay within on this quantity, beside the aim ("we cannot spend more than £30,000" on total cost is <= 30000), in this factor\'s unit, with who stated it. Never the aim itself. Null when there is none.'),
+  /**
+   * Host-set, like an aim's `current_source` (DL 22 Oct, Lenses' step 3): 'chat' when this figure is the person's own words
+   * said in the conversation, not in the brief, saved by their approval, so the saved graph says it is their chat edit, never
+   * the brief's. The kernel sets it (`kernel.ts`); what the AI sends is replaced. Absent (a model saved before) reads as null.
+   */
+  said_in: z.enum(['chat']).nullable().optional(),
   ...attribution,
 }).strict();
 

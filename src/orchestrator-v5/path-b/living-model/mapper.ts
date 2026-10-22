@@ -71,9 +71,12 @@ const OLUMI_EXISTS = 0.8;
 const STAY_CUE = { '>=': /\b(keep|keeps|keeping|stay|stays|staying|at least|no less than|minimum)\b/i, '<=': /\b(keep|keeps|keeping|stay|stays|staying|at most|no more than|cap|capped)\b/i } as const;
 /** An item the person set themselves on the canvas: theirs, with no words to quote (`edit.ts`). */
 const edited = (a: { source: LivingSourceT; quote: string | null }): boolean => a.source === 'user' && a.quote === null;
-/** user/party → their words (or their own edit); Olumi → its inference; unverified → no stamp (unknown). */
-const levelSource = (a: { source: LivingSourceT; quote: string | null }): string | undefined =>
-  edited(a) ? 'user_edited' : stated(a.source) ? 'brief_extraction' : a.source === 'olumi' ? 'cee_inference' : undefined;
+/** The person's figure said in the conversation and saved by their approval (`said_in`): their chat edit, never the brief's. */
+const saidInChat = (a: { source: LivingSourceT; quote: string | null; said_in?: 'chat' | null }): boolean =>
+  a.source === 'user' && a.quote !== null && a.said_in === 'chat';
+/** user/party → their words (or their own edit, or their chat edit); Olumi → its inference; unverified → no stamp (unknown). */
+const levelSource = (a: { source: LivingSourceT; quote: string | null; said_in?: 'chat' | null }): string | undefined =>
+  edited(a) ? 'user_edited' : saidInChat(a) ? 'user_override' : stated(a.source) ? 'brief_extraction' : a.source === 'olumi' ? 'cee_inference' : undefined;
 /**
  * An option's setting in the intervention contract's own words (`InterventionV3.source`): the factor-level words above are
  * not members, so every core setting Olumi estimated or the person edited read "Source not recorded" (Lenses, 21 Oct).
@@ -82,9 +85,9 @@ const settingSource = (a: { source: LivingSourceT; quote: string | null }): 'bri
   edited(a) ? 'user_specified' : stated(a.source) ? 'brief_extraction' : a.source === 'olumi' ? 'cee_hypothesis' : undefined;
 /** Per-figure authorship: a figure Olumi estimated on another's item is Olumi's, whatever the item's source (`estimate_by`). */
 const OLUMI_FIGURE = { source: 'olumi' as LivingSourceT, quote: null };
-const figureBy = (fig: { estimate_by?: 'olumi' | null }, item: { source: LivingSourceT; quote: string | null }) =>
+const figureBy = (fig: { estimate_by?: 'olumi' | null }, item: { source: LivingSourceT; quote: string | null; said_in?: 'chat' | null }) =>
   (fig.estimate_by === 'olumi' ? OLUMI_FIGURE : item);
-const withSource = (o: Rec, a: { source: LivingSourceT; quote: string | null }): Rec => {
+const withSource = (o: Rec, a: { source: LivingSourceT; quote: string | null; said_in?: 'chat' | null }): Rec => {
   const source = levelSource(a);
   return source === undefined ? o : { ...o, source, ...(stated(a.source) ? { extractionType: 'explicit' } : {}) };
 };

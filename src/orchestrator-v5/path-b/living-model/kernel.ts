@@ -114,7 +114,9 @@ function withoutEstimates(item: Record<string, any>, before: Record<string, any>
   return changed ? out : undefined;
 }
 
-export function applyKernel(model: LivingModelT, verifiedWords: readonly string[], saved?: LivingModelT): Kernelled {
+export function applyKernel(model: LivingModelT, verifiedWords: readonly string[], saved?: LivingModelT,
+  /** The scenario's brief, when known: a changed figure in the person's words it does not hold was said in the conversation. */
+  brief?: string | null): Kernelled {
   const words = verifiedWords.map(plain).filter((w) => w.length > 0);
   const kept = saved === undefined ? new Set<string>() : savedAttributions(saved);
   const savedItem = new Map<string, Record<string, any>>(saved === undefined ? [] : [
@@ -124,6 +126,19 @@ export function applyKernel(model: LivingModelT, verifiedWords: readonly string[
   const keptCurrent = (id: string, current: number | null): boolean => {
     const t = saved?.aims.find((a) => a.id === id)?.target;
     return t?.current_source === 'user' && t.current === current;
+  };
+  // ⭐ WHERE THE PERSON SAID A FIGURE (DL 22 Oct, Lenses' step 3: an approved chat correction was saved as the brief's figure).
+  // Host-set, never the AI's: an unchanged figure keeps what was saved; a changed one is 'chat' only for the person's own
+  // verified words that the brief does not hold. A first draft, or an unknown brief, says nothing (null): the brief's, as before.
+  const briefWords = typeof brief === 'string' ? plain(brief) : null;
+  const savedFactor = new Map((saved?.factors ?? []).map((f) => [f.id, f] as const));
+  const SAID_FIGURE = ['value', 'low', 'high', 'unit', 'estimate_by', 'source', 'quote'] as const;
+  const saidIn = (f: Omit<LivingModelT['factors'][number], 'said_in'>): 'chat' | null => {
+    const before = savedFactor.get(f.id);
+    if (before !== undefined && SAID_FIGURE.every((k) => before[k] === f[k])) return before.said_in ?? null;
+    if (briefWords === null || f.source !== 'user' || f.estimate_by !== null || f.quote === null) return null;
+    const q = plain(f.quote);
+    return q.length > 0 && (f.value !== null || f.low !== null || f.high !== null) && !briefWords.includes(q) ? 'chat' : null;
   };
   const relabelled: Relabelled[] = [];
   const attribute = <T extends Attributed>(id: string, item: T): T => {
@@ -152,7 +167,12 @@ export function applyKernel(model: LivingModelT, verifiedWords: readonly string[
         }
         return out;
       }),
-      factors: m.factors.map((f) => defined(attribute(f.id, guarded(f, savedItem.get(f.id), FIGURE)))),
+      // What the AI sent for `said_in` is dropped; the key is written only when the host reads 'chat', so an unmarked factor stays
+      // byte for byte what it was.
+      factors: m.factors.map((f) => {
+        const { said_in: _sent, ...out } = defined(attribute(f.id, guarded(f, savedItem.get(f.id), FIGURE)));
+        return saidIn(out) === 'chat' ? { ...out, said_in: 'chat' as const } : out;
+      }),
       options: m.options.map((o) => ({ ...attribute(o.id, optionItself(o)),
         settings: o.settings.map((s) => attribute(`${o.id}:${s.factor_id}`, guarded(s, savedItem.get(`${o.id}:${s.factor_id}`), FIGURE))) })),
       links: m.links.map((l) => attribute(l.id, { ...l, effect: guarded(l.effect, savedItem.get(l.id)?.effect, EFFECT) })),

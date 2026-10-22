@@ -59,7 +59,8 @@ export async function proposeLivingChange(deps: Deps, ctx: Ctx, args: LivingChan
   const base = await savedLiving(deps, ctx);
   if ('status' in base) return base;
   const brief = typeof base.saved.json.brief_text === 'string' ? [base.saved.json.brief_text] : [];
-  const kernelled = applyKernel(args.model, [...brief, ...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])], base.model);
+  const kernelled = applyKernel(args.model, [...brief, ...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])], base.model,
+    brief[0] ?? null);
   // A condition is corrected or resolved by replacing it ("only after supplier approval" → "supplier approval obtained"; Codex
   // r6 on #3522): its removal is a row on the card the person approves, and the host keeps it in history. The quote is the
   // person's own words for the change: a replacement THEY stated (kernel-verified) on the same items, else null. Never this
