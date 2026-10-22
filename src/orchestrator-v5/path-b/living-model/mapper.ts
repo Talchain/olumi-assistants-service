@@ -233,7 +233,7 @@ function definitionCheck(model: LivingModelT, def: Definition, itemId: string, u
   const found = of.map((id) => model.factors.find((f) => f.id === id));
   const values = found.map((p) => p?.value ?? null);
   // Exact: a definition's stated level is what its parts make. The engine would rescale a product to fit (ISL's k).
-  const made = op === 'sum' ? values.reduce<number>((a, v) => a + (v ?? 0), 0) : values.reduce<number>((a, v) => a * (v ?? 0), 1);
+  const made = op === 'sum' ? values.reduce<number>((a, v, i) => a + (def.subtract?.includes(of[i]!) ? -1 : 1) * (v ?? 0), 0) : values.reduce<number>((a, v) => a * (v ?? 0), 1);
   if (of.length < 2 || new Set(of).size !== of.length || of.includes(itemId) || found.some((p) => p === undefined)
     || (op === 'product' && of.length !== 2)) return { reason: 'identity_not_in_slice', made, parts: [] };
   const parts = found as LivingModelT['factors'][number][];
@@ -303,10 +303,13 @@ function levelFromDefinition(model: LivingModelT, aim: LivingModelT['aims'][numb
   const check = definitionCheck(model, def, aim.id, t.unit, t.quantity ?? aim.text, null);
   if (check.reason !== undefined || !check.parts.every((p) => p.value !== null && p.low === null && p.high === null
     && p.estimate_by !== 'olumi' && stated(p.source))) return undefined;
-  const made = exactlyMade(def.op, check.parts.map((p) => p.value!));
+  const made = exactlyMade(def.op, check.parts.map((p) => (def.subtract?.includes(p.id) ? -1 : 1) * p.value!));
   if (made === undefined) return undefined;
-  const sign = def.op === 'sum' ? ' + ' : ' × ';
-  const said = `Today\u2019s ${t.quantity} is worked out from your figures: ${check.parts.map((p) => `${p.label} ${sayExactly(String(p.value), p.unit)}`).join(sign)}`
+  const expression = check.parts.map((p, i) => {
+    const sign = def.op === 'product' ? (i === 0 ? '' : ' × ') : def.subtract?.includes(p.id) ? (i === 0 ? '− ' : ' − ') : (i === 0 ? '' : ' + ');
+    return `${sign}${p.label} ${sayExactly(String(p.value), p.unit)}`;
+  }).join('');
+  const said = `Today\u2019s ${t.quantity} is worked out from your figures: ${expression}`
     + ` = ${sayExactly(made.text, t.unit)}.`;
   return { level: made.level, said };
 }
@@ -557,7 +560,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   for (const f of model.factors) {
     const d = f.defined_as;
     if (d === null || f.value !== null || caps.has(f.id) || d.of.length === 0 || !d.of.every((p) => current.has(p) && caps.has(p))) continue;
-    const made = (level: (p: string) => number) => (d.op === 'sum' ? d.of.reduce((a, p) => a + level(p), 0) : d.of.reduce((a, p) => a * level(p), 1));
+    const made = (level: (p: string) => number) => (d.op === 'sum' ? d.of.reduce((a, p) => a + (d.subtract?.includes(p) ? -1 : 1) * level(p), 0) : d.of.reduce((a, p) => a * level(p), 1));
     const levels = [made((p) => current.get(p)!), ...model.options.map((o) => made((p) => o.settings.find((s) => s.factor_id === p)?.value ?? current.get(p)!))];
     const cap = capFor(levels, f.unit, goal);
     if (cap === undefined || !Number.isFinite(cap) || cap <= 0) continue;
@@ -634,21 +637,22 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   const partsOf = new Map(declared.map((d) => [d.item.id, d.item.defined_as!.of] as const));
   const inCycle = (id: string, seen: ReadonlySet<string> = new Set()): boolean =>
     seen.has(id) || (partsOf.get(id) ?? []).some((p) => partsOf.has(p) && inCycle(p, new Set([...seen, id])));
-  const identities = new Map<string, { readonly op: 'sum' | 'product'; readonly of: readonly string[]; readonly unit: string | null }>();
+  const identities = new Map<string, { readonly op: 'sum' | 'product'; readonly of: readonly string[]; readonly subtract?: readonly string[]; readonly unit: string | null }>();
   for (const { item, carrier, unit, label, level } of declared) {
     const def = item.defined_as!;
     const { op, of } = def;
     const reason: WithheldReason | undefined = carrier === undefined || inCycle(item.id) ? 'identity_not_in_slice'
       : definitionCheck(model, def, item.id, unit, label, level).reason;
     if (reason !== undefined) { hold(item.id, reason); continue; }
-    identities.set(item.id, { op, of, unit });
+    identities.set(item.id, { op, of, unit, ...(def.subtract ? { subtract: def.subtract } : {}) });
     // Who stated the DEFINITION (its own attribution), never who stated the quantity: an unverified one is no one's yet.
-    carrier!.nonlinear_identity = { operation: op, factor_ids: [...of], stated_in_brief: stated(def.source) };
+    carrier!.nonlinear_identity = { operation: op, factor_ids: [...of], stated_in_brief: stated(def.source), ...(def.subtract ? { subtract: [...def.subtract] } : {}) };
     const who = stated(def.source) ? { source: edited(def) ? 'user_specified' : 'brief_extraction', magnitude: 'user_stated' }
       : def.source === 'olumi' ? { source: 'cee_hypothesis', magnitude: 'olumi_estimate' } : {};
     for (const part of of) {
-      edges.push({ id: `${part}__${item.id}`, from: part, to: item.id, strength: { mean: 1, std: LLM_STRENGTH_STD_FLOOR }, exists_probability: 1,
-        effect_direction: 'positive', provenance: { ...who, definitional: true } });
+      const negative = def.subtract?.includes(part) === true;
+      edges.push({ id: `${part}__${item.id}`, from: part, to: item.id, strength: { mean: negative ? -1 : 1, std: LLM_STRENGTH_STD_FLOOR }, exists_probability: 1,
+        effect_direction: negative ? 'negative' : 'positive', provenance: { ...who, definitional: true } });
     }
   }
   /**
@@ -656,9 +660,10 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
    * if sized, the definition's own coefficient (1 for a sum; the other part's level for a product, at today's levels).
    * Anything else (a negative sign, another size) contradicts it, so the chance on it is withheld: never silently dropped.
    */
-  const restates = (l: LivingModelT['links'][number], d: { op: 'sum' | 'product'; of: readonly string[]; unit: string | null }): boolean => {
+  const restates = (l: LivingModelT['links'][number], d: { op: 'sum' | 'product'; of: readonly string[]; subtract?: readonly string[]; unit: string | null }): boolean => {
     const e = l.effect;
-    if (e.sign === '-') return false;
+    const negative = d.op === 'sum' && d.subtract?.includes(l.from) === true;
+    if (negative ? e.sign !== '-' : e.sign === '-') return false;
     const coefficient = d.op === 'sum' ? 1 : d.of.filter((p) => p !== l.from).reduce((a, p) => a * (model.factors.find((f) => f.id === p)?.value ?? NaN), 1);
     const same = (v: number | null) => v !== null && Math.abs(Math.abs(v) - coefficient) <= 1e-9 * Math.max(1, Math.abs(coefficient));
     // A spread the person stated (a Normal law, a range) says the link is uncertain; a definition is exact (buddy r2).

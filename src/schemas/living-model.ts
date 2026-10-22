@@ -62,6 +62,7 @@ const estimable = { estimate_by: estimateBy, ...figure };
 const definedAs = z.object({
   op: z.enum(['sum', 'product']),
   of: z.array(id),
+  subtract: z.array(id).min(1).nullable().optional().describe('Sum only: ids from of whose values are subtracted. For profit = revenue minus costs, of is [revenue, costs] and subtract is [costs]. Null for an all-positive sum or a product; an older saved definition may omit it. Only the stated or visibly Olumi-authored definition supplies a sign.'),
   /**
    * Who stated the definition itself, which can differ from who stated the quantity ("we need £6,500" vs "revenue is
    * customers × price"). A definition saved without it reads as unverified: said, but with no one's words for it.
@@ -69,7 +70,11 @@ const definedAs = z.object({
   source: attribution.source.default('unverified'),
   party: attribution.party.default(null),
   quote: attribution.quote.default(null),
-}).strict().nullable().default(null).describe(
+}).strict().superRefine((d, ctx) => {
+  if (d.subtract != null && (d.op !== 'sum' || new Set(d.subtract).size !== d.subtract.length || d.subtract.some((id) => !d.of.includes(id)))) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['subtract'], message: 'subtract requires distinct parts of a sum' });
+  }
+}).nullable().default(null).describe(
   'When this quantity IS the sum or product of factors ("total customers = UK + EU"; "revenue = customers × price per customer"): op, the factor ids, and who stated the definition (its quote is their words for the definition itself). A definition, not a cause, so add no links from those factors to it. '
   + 'Write the units so the parts\' units make the quantity\'s, in the person\'s meaning where the brief makes it plain: a sum\'s parts share the quantity\'s unit; for a product, the quantity\'s unit names its period when it has one ("£ per day" for daily revenue, not "£"), a price names the thing it is per ("£ per coffee", not "£ each"), a count names that same thing, and the period sits on exactly one part, wherever the person put it ("coffees per day" × "£ per coffee"; "customers" × "£ per customer per month"). This never changes the unit of a factor outside a definition. Null otherwise.');
 

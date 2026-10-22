@@ -215,8 +215,13 @@ export function composeIdentityNotEvaluatedAsk(critiques: unknown, graph: unknow
   const operands = w.participants.filter((p) => declaredOperands.includes(p));
   const addends = w.participants.filter((p) => !operands.includes(p));
   const say = (xs: readonly string[]): string[] => xs.map((id) => q(labelOf(id)!));
+  const subtracted = ids(declared?.subtract) ?? [];
+  const expression = operands.map((id, i) => {
+    const sign = operation === 'product' ? (i === 0 ? '' : ' × ') : subtracted.includes(id) ? (i === 0 ? '− ' : ' − ') : (i === 0 ? '' : ' + ');
+    return `${sign}${q(labelOf(id)!)}`;
+  }).join('');
   const formula = operation !== null && operands.length > 0
-    ? `${say(operands).join(operation === 'product' ? ' × ' : ' + ')}${addends.length > 0 ? ` + ${say(addends).join(' + ')}` : ''}`
+    ? `${expression}${addends.length > 0 ? ` + ${say(addends).join(' + ')}` : ''}`
     : null;
   // "as “P” × “S”" when CEE's declaration gives the formula; "from “P” and “S”" when it does not.
   const asFormula = formula !== null ? `as ${formula}` : `from ${andList(say(w.participants))}`;
