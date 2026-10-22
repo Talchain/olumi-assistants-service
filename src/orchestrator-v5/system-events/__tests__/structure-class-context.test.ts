@@ -111,12 +111,18 @@ describe('context: an item with no path to the goal is kept, said, and never blo
     expect(contextNodeIds(graph('infeasible') as never).has('c')).toBe(true);
   });
 
-  it('CONTRAST A: a factor that IS on a path to the goal but has no level still blocks as a missing level', async () => {
+  // ⭐ DL ruling 22 Oct (item 1, the served Q1 and 591b918e runs) supersedes this contrast's 21 Oct block: one item the engine
+  // cannot take never refuses the whole Run. A factor with no level that nothing leads into keeps its node (named, no level,
+  // never 0) and its links are held, so the Run proceeds on the rest and the chance resting on it is withheld, never guessed.
+  it('CONTRAST A (DL 22 Oct): a factor linked into the goal\'s path with no level is named and its link held; it no longer blocks the Run', async () => {
     const g = await gesture(KNOWN_ANSWER, { kind: 'structural_add', node_id: 'office', node_kind: 'factor', label: 'Office move' });
     const lm = structuredClone(g.living_model as LM);
     lm.links.push({ id: 'office_f', from: 'office', to: 'f', source: 'user', party: null, quote: 'the office move lifts f',
       effect: { estimate_by: null, form: 'normal', value: 0.1, sd: 0.05, low: null, high: null, unit: null, sign: '+' } });
-    expect(codes(stored(lm))).toContain('MISSING_FACTOR_LEVEL');
+    expect(codes(stored(lm))).not.toContain('MISSING_FACTOR_LEVEL');
+    const mapped = mapLivingModel(lm);
+    expect(mapped.withheld).toEqual(expect.arrayContaining([{ id: 'office', reason: 'factor_level_unknown' }, { id: 'office_f', reason: 'link_endpoint_unknown' }]));
+    expect((mapped.graph.nodes as Rec[]).find((n) => n.id === 'office')!.observed_state, 'never read as 0').toBeUndefined();
   });
 });
 

@@ -431,6 +431,17 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
 
   // ── Factors, each on its own frame.
   const setsFactor = new Set(model.options.flatMap((o) => o.settings.map((s) => s.factor_id)));
+  /**
+   * ⭐ ONE UNMEASURED ITEM NEVER REFUSES THE WHOLE RUN (DL 22 Oct; the served Q1 run, where "Local difficulty recruiting
+   * evening-shift staff", with no level, refused every option). A factor with no level today that nothing leads into and
+   * nothing else uses (no option sets it; no definition, mitigation or limit names it) keeps its node on the canvas, with no
+   * level (never 0) and named (`factor_level_unknown`), set aside from the calculation (`analysis_participation:
+   * 'retained_excluded'`, which the Run's participation guard withholds), and its links are HELD (`link_endpoint_unknown`).
+   * The Run proceeds on the rest, and a chance it would feed is withheld below (`chance_rests_on_withheld`).
+   */
+  const usedHere = new Set([...setsFactor, ...model.links.map((l) => l.to), ...model.factors.flatMap((f) => f.defined_as?.of ?? []),
+    ...model.aims.flatMap((a) => a.defined_as?.of ?? []), ...model.risks.flatMap((r) => r.mitigations.map((m) => m.factor_id))]);
+  const unmeasured = new Set(model.factors.filter((f) => f.value === null && !f.defined_as && f.limit === null && !usedHere.has(f.id)).map((f) => f.id));
   const caps = new Map<string, number>();
   const current = new Map<string, number>();
   for (const f of model.factors) {
@@ -441,7 +452,10 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     if (cap !== undefined) caps.set(f.id, cap);
     const node: Rec = { id: f.id, kind: 'factor', label: f.label, category: setsFactor.has(f.id) ? 'controllable' : 'observable',
       // The exact sum's change: 0 today by definition (the contract's marker), so the engine holds it exact.
-      ...(f.id === exactSum?.lever ? { quantity_frame: 'change' } : {}) };
+      ...(f.id === exactSum?.lever ? { quantity_frame: 'change' } : {}),
+      // Set aside from the calculation, kept on the canvas (the Run's participation guard withholds it; readiness judges the
+      // graph the Run sends, so it owes no level and is never an orphan there).
+      ...(unmeasured.has(f.id) ? { analysis_participation: 'retained_excluded' } : {}) };
     if (f.value !== null && cap !== undefined) {
       current.set(f.id, f.value);
       node.observed_state = withSource({ value: f.value / cap, raw_value: f.value, cap, unit: f.unit ?? '' }, figureBy(f, f));
@@ -450,6 +464,24 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
       if (f.low !== null && f.high !== null) assumed.push({ id: f.id, text: `The calculation uses ${sayFigureAsWritten(f.value, f.unit ?? '')} for ${f.label}. The range, ${sayFigureAsWritten(f.low, f.unit ?? '')} to ${sayFigureAsWritten(f.high, f.unit ?? '')}, is kept with the model but is not used as a spread.` });
     } else hold(f.id, f.low !== null || f.high !== null ? 'level_range_not_in_slice' : 'factor_level_unknown');
     nodes.push(node);
+  }
+
+  /**
+   * ⭐ A DEFINED QUANTITY IS FRAMED BY ITS PARTS (DL 22 Oct; Lenses' served run 591b918e: "Weekly revenue", loaves × price
+   * with no stated level, had no frame, so readiness asked "What unit is Weekly revenue measured in?" and refused the whole
+   * Run, IDENTITY_FRAME_MISSING; PLoT derives a frame only for an INFERRED product, `translator-v3.ts` variant (a)). Its unit is
+   * stated; what the engine lacked was a scale to read it on. With every part framed, its frame is the most its parts can make
+   * (the sum or product of their frames, PLoT's own derived-frame rule), so no level the parts reach falls off it, carried as
+   * the node's `scale_frame`: a frame only, never a level anyone stated. A definition its parts cannot frame is left as before.
+   */
+  for (const f of model.factors) {
+    const d = f.defined_as;
+    if (d === null || f.value !== null || caps.has(f.id) || d.of.length === 0 || !d.of.every((p) => current.has(p) && caps.has(p))) continue;
+    const frames = d.of.map((p) => caps.get(p)!);
+    const cap = d.op === 'sum' ? frames.reduce((a, v) => a + v, 0) : frames.reduce((a, v) => a * v, 1);
+    if (!Number.isFinite(cap) || cap <= 0) continue;
+    caps.set(f.id, cap);
+    nodes.find((n) => n.id === f.id)!.scale_frame = cap;
   }
 
   // ── Limits (Track 2): a bound beside the aim, as the legacy lane's limit row (`add_constraint`), read on the factor's frame.
@@ -468,7 +500,13 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   const decisionId = `decision_${goal?.id ?? 'model'}`;
   nodes.unshift({ id: decisionId, kind: 'decision', label: `Decision: ${aim?.text ?? 'options'}` });
   const atCurrent = (o: LivingModelT['options'][number]) => o.settings.every((s) => s.value !== null && s.value === current.get(s.factor_id));
-  const statusQuo = model.options.filter(atCurrent);
+  // ⭐ THE STATUS QUO NEEDS NO SETTING (DL 22 Oct; Lenses' served run 591b918e): after the person put today's price at the
+  // price trial's level, two options read as "at today's levels", so neither was the baseline and "Keep things as they are"
+  // went out with no factor edges, refusing the whole Run (OPTION_NO_FACTOR_EDGES). Where several do, the one that sets
+  // nothing at all is the status quo; still none or two, as before.
+  const atToday = model.options.filter(atCurrent);
+  const setsNothing = atToday.filter((o) => o.settings.length === 0);
+  const statusQuo = atToday.length > 1 && setsNothing.length === 1 ? setsNothing : atToday;
   // No single option at today's levels is not a loss: every option is still emitted and compared on its own interventions.
   // It was reported as withheld, and the AI then said the alternatives were omitted (R2 P01/P07 at 46d30e6e).
   for (const o of model.options) {
@@ -635,7 +673,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     const cap = caps.get(id);
     return f !== undefined && cap !== undefined ? { cap, unit: f.unit } : undefined;
   };
-  const causal = new Set([...model.factors.map((f) => f.id), ...risks, ...(goalNode === undefined ? [] : [String(goalNode.id)])]);
+  const causal = new Set([...model.factors.map((f) => f.id).filter((id) => !unmeasured.has(id)), ...risks, ...(goalNode === undefined ? [] : [String(goalNode.id)])]);
   const hedged = new Set(model.conditions.filter((c) => c.role === 'assumption').flatMap((c) => c.applies_to));
   for (const l of model.links) {
     // What a refused risk would do is said once, by the risk's own reason; a cause INTO an event is not in this slice.
