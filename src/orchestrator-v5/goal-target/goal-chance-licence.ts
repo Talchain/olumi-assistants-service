@@ -70,7 +70,7 @@ import { resolveGoalDirection } from './goal-direction.js';
 import { goalReadingsOf, type GoalReading } from '../coaching/goal-reading-disclosure.js';
 import {
   BASIS_ALSO_REQUIRED_MAX, BASIS_CONDITION_MAX, effectsBasisWords, estimateOnlyWords, goalTargetBasisOf, partialGoalWords, periodEndWords, statusQuoAssumptionWords, statusQuoMovedWords,
-  statusQuoProjectionWords, statusQuoRowWords,
+  statusQuoProjectionWords, statusQuoRowWords, comparatorWords,
   targetChanceWords, type GoalTargetBasis,
 } from './goal-target-basis.js';
 import { goalTargetsBlockOf, readGoalTargetsBlock, GOAL_TARGET_ROLE, type GoalTargetsBlock } from './goal-targets-joint.js';
@@ -1068,8 +1068,14 @@ function withBatchCWords(unframed: GoalChanceLicence, c: {
   const sqLevel = c.changeFrame === undefined && c.quantityFrame !== 'change' && finite(goalState?.raw_value)
     && typeof c.target.unit === 'string' && levelUnit !== '' && levelUnit === c.target.unit.trim()
     ? { today: goalState!.raw_value as number, comparator: c.comparatorHeld, target: c.target.value, unit: c.target.unit } : undefined;
+  // Class 1 (DL, 22 Oct): a checked level reference on the missing side is a determined miss in this model, not a
+  // missing chance. The 14 Oct status-quo ruling still governs meets and every unsupported frame; no leader rule changes.
   const statusQuo = c.sqByAssumption && goalLabel !== undefined && c.statusQuoId !== undefined && single.option_ids.includes(c.statusQuoId)
-    ? { status_quo: { option_id: c.statusQuoId, line: statusQuoRowWords(goalLabel, sqLevel) } } : {};
+    ? { status_quo: { option_id: c.statusQuoId, line: sqLevel !== undefined
+      && exactComparisonSide(sqLevel.today, sqLevel.comparator, sqLevel.target) === 0
+      ? `Stays at today’s ${sayFigureAsWritten(sqLevel.today, sqLevel.unit)}; this does not meet your target of `
+        + `${comparatorWords(sqLevel.comparator)} ${sayFigureAsWritten(sqLevel.target, sqLevel.unit)}, in this model.`
+      : statusQuoRowWords(goalLabel, sqLevel) } } : {};
   // AIE disposition: a forecast's status quo is carrying on's own projection, said as such (never "no change").
   const projection = c.sqReading === 'projection' && c.statusQuoLabel !== undefined && c.statusQuoId !== undefined
     && single.option_ids.includes(c.statusQuoId) ? [statusQuoProjectionWords(c.statusQuoLabel)] : [];
