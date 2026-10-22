@@ -511,7 +511,7 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
     expect(r.statusCode, r.body).toBe(200);
     expectCoherentInstructions(r.json());
     const { CORE_REPLY_INSTRUCTION } = await import('../../../../routes/agent-v1-turn.js');
-    expect(createHash('sha256').update(CORE_REPLY_INSTRUCTION, 'utf8').digest('hex')).toBe('233eb0d5fe91cd83534c8c5a3203446c44f5a44e781cb4907462a1fb93207427'); // 22 Oct: three-part coaching after a Run + the held-risk window ask (was 9d54116b…); + CORE_NEXT_STEP decisive question (Track 3 Q2 v2 + buddy AMEND, 21 Oct; was 2dd87dc8…), Track 3 E2E 21 Oct (was 7f0493d6…; arm C adopted 21 Oct)
+    expect(createHash('sha256').update(CORE_REPLY_INSTRUCTION, 'utf8').digest('hex')).toBe('5f9f79324dd4e4bc0b9329a88b619a2420cc6e50375e77a2fcc805e2eea6c211'); // 22 Oct: three-part coaching after a Run + the held-risk window ask (was 9d54116b…); + CORE_NEXT_STEP decisive question (Track 3 Q2 v2 + buddy AMEND, 21 Oct; was 2dd87dc8…), Track 3 E2E 21 Oct (was 7f0493d6…; arm C adopted 21 Oct)
     for (const c of calls) {
       expect(c.instructions).toContain(CORE_REPLY_INSTRUCTION);
       expect(c.instructions.split(scope)).toHaveLength(2);
