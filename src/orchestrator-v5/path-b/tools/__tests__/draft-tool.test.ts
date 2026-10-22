@@ -288,13 +288,13 @@ describe('refusals and unknowns, said as such', () => {
     expect(await buildModel(product({}), ctx, { brief: '', model: LIVING })).toEqual({ status: 'refused', reason: 'brief_not_users_words', ...NO_WRITE });
   });
 
-  it('Olumi\'s own link carries its direction (21 Oct: unsigned goal links left Run disabled): the strict tool schema tells the AI so', () => {
+  it('the candidate tool description distinguishes a defensible direction from an unsupported size', () => {
     const link = (BuildModelParams.shape.model as unknown as { shape: { links: { element: { shape: { effect: { shape: { sign: { description?: string } } } } } } } })
       .shape.links.element.shape.effect.shape.sign;
-    expect(link.description).toMatch(/For source olumi, give your provisional judgement of direction; use form direction_only only when `to` has no unit or `from` is a quantity with no unit \(an option or an on-or-off step is \+1 when in place\), else give its size\./);
+    expect(link.description).toContain('give a defensible provisional direction; use direction_only when a size cannot reasonably be estimated');
     // Codex #3551 R1: every other source (user, party, unverified) keeps only the direction it supplied; else null and ask.
-    expect(link.description).toMatch(/For source user, party or unverified, preserve only the direction that source supplied\. If none was supplied, use sign null and form unknown, then ask\./);
-    expect(link.description).toMatch(/Never put an Olumi-inferred direction under another source\./);
+    expect(link.description).toContain('For source user, party or unverified, preserve only the direction that source supplied; if none, use sign null and form unknown.');
+    expect(link.description).toContain('Never attribute an Olumi-inferred direction to another source');
   });
 });
 
