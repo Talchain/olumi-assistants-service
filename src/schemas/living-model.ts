@@ -62,7 +62,7 @@ const estimable = { estimate_by: estimateBy, ...figure };
 const definedAs = z.object({
   op: z.enum(['sum', 'product']),
   of: z.array(id),
-  subtract: z.array(id).min(1).optional().describe('Sum only: ids from of whose values are subtracted. For profit = revenue minus costs, of is [revenue, costs] and subtract is [costs]. Omit for an all-positive sum or a product. Only the stated or visibly Olumi-authored definition supplies a sign.'),
+  subtract: z.array(id).min(1).nullable().optional().describe('Sum only: ids from of whose values are subtracted. For profit = revenue minus costs, of is [revenue, costs] and subtract is [costs]. Null for an all-positive sum or a product; an older saved definition may omit it. Only the stated or visibly Olumi-authored definition supplies a sign.'),
   /**
    * Who stated the definition itself, which can differ from who stated the quantity ("we need £6,500" vs "revenue is
    * customers × price"). A definition saved without it reads as unverified: said, but with no one's words for it.
@@ -71,7 +71,7 @@ const definedAs = z.object({
   party: attribution.party.default(null),
   quote: attribution.quote.default(null),
 }).strict().superRefine((d, ctx) => {
-  if (d.subtract !== undefined && (d.op !== 'sum' || new Set(d.subtract).size !== d.subtract.length || d.subtract.some((id) => !d.of.includes(id)))) {
+  if (d.subtract != null && (d.op !== 'sum' || new Set(d.subtract).size !== d.subtract.length || d.subtract.some((id) => !d.of.includes(id)))) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['subtract'], message: 'subtract requires distinct parts of a sum' });
   }
 }).nullable().default(null).describe(

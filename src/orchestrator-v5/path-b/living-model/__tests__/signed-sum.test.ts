@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { tool } from '@openai/agents';
+import { BuildModelParams } from '../../tools/draft-tool.js';
 import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import { LivingModel, type LivingModelT } from '../../../../schemas/living-model.js';
 import { evaluatedIdentityCarriers } from '../../../admission/identity-evaluations.js';
@@ -66,10 +68,21 @@ describe('profit is revenue minus costs, through saved model, mapping and edits'
 
   it.each([
     { subtract: ['missing'] }, { subtract: ['costs', 'costs'] }, { subtract: [] },
-    { subtract: null }, { op: 'product', subtract: ['costs'] },
+    { op: 'product', subtract: ['costs'] },
   ])('rejects malformed subtraction rather than dropping it: %j', (patch) => {
     const m = model(); Object.assign(m.aims[0]!.defined_as!, patch);
     expect(LivingModel.safeParse(m).success).toBe(false);
+  });
+
+  it('the native strict tool offers a nullable subtraction list; legacy sums keep their saved shape', () => {
+    const sent = JSON.stringify(tool({ name: 'build_model_from_brief', description: 'd', parameters: BuildModelParams, execute: async () => '' }).parameters);
+    expect(sent).toContain('Sum only: ids from of whose values are subtracted');
+    expect(sent).toContain('Null for an all-positive sum or a product');
+    const m = model(); delete m.aims[0]!.defined_as!.subtract;
+    m.aims[0]!.target!.current = 170;
+    expect(save(m).aims[0]!.defined_as).not.toHaveProperty('subtract');
+    m.aims[0]!.defined_as!.subtract = null;
+    expect(LivingModel.safeParse(m).success).toBe(true);
   });
 
   it('an all-positive evaluation does not attest the signed definition', () => {
