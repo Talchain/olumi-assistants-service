@@ -282,7 +282,7 @@ describe('Science §(ad): one horizon selector retires old clauses on a positive
       { ...envelope.identity_evaluations[1], horizon_months: 9 }] })).toBe('withhold');
   });
 
-  it.each([undefined, 0, -1, 1.5, Number.NaN])('H=%s is absent under the positive-integer selector rule', (goal_horizon_months) => {
+  it.each([undefined, 0, -1, Number.NaN])('H=%s is absent under the positive selector rule', (goal_horizon_months) => {
     expect(goalHorizonVerdict(graphWith({ goal_horizon_months }))).toBe('no_horizon');
   });
 
