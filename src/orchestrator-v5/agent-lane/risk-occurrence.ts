@@ -150,13 +150,25 @@ export function riskOccurrenceWindowFromToday(graph: unknown): boolean {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const goals = nodes.filter((n) => n.kind === 'goal' && typeof n.id === 'string');
   if (goals.length !== 1 || riskOccurrenceWindowMonths(graph) === undefined) return false;
-  const reading = goalTargetBasisOf(goals[0]);
+  const reading = goalWindowReadingOf(goals[0]!);
   return reading === undefined || reading.reference === 'today';
 }
 
 /**
+ * The goal's target reading as both window readers see it (#3658 r2/r3). Withholding the goal's chance deletes its threshold
+ * (mapper), not its reading, so a goal with no threshold checks the reading against the reading's own target. A stale or
+ * mismatched reading stays rejected, and the window and the day it counts from always come from the same reading.
+ */
+function goalWindowReadingOf(goal: Rec): ReturnType<typeof goalTargetBasisOf> {
+  const b = goal.goal_target_basis;
+  return goal.goal_threshold_raw === undefined && isRec(b)
+    ? goalTargetBasisOf({ ...goal, goal_threshold_raw: b.target_raw, goal_threshold_frame: b.target_frame })
+    : goalTargetBasisOf(goal);
+}
+
+/**
  * The window Olumi's range is stated over: the goal's CURRENT recorded period in months (AIE packet 6e52e896
- * `event_risk.horizon`): the ONE goal record's horizon and the target reading's independently validated period. One goal
+ * `event_risk.horizon`): the ONE goal record's horizon and the validated target reading's period, wherever held. One goal
  * only, and one period: two recorded periods that disagree are a conflict, never a window licence. Anything else is
  * `undefined` (no window is ever guessed, scaled or chosen between).
  */
@@ -164,10 +176,7 @@ export function riskOccurrenceWindowMonths(graph: unknown): number | undefined {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const goals = nodes.filter((n) => n.kind === 'goal' && typeof n.id === 'string');
   if (goals.length !== 1) return undefined;
-  // Withholding the goal's chance removes its threshold, not its recorded period. Validate the window on its own carrier.
-  const basis = goals[0]!.goal_target_basis;
-  const reading = isRec(basis) && basis.source === 'olumi_reading' && (basis.reference === 'today' || basis.reference === 'launch')
-    && (basis.period_months === undefined || (finite(basis.period_months) && basis.period_months > 0 && basis.period_months <= 120)) ? basis : undefined;
+  const reading = goalWindowReadingOf(goals[0]!);
   const held = readGoalRecord(graph, goals[0]!.id as string)?.horizon?.months;
   // The goal's horizon counts from its own reference date; a reading counted from a launch is a DIFFERENT window, whatever its
   // month count (Codex r1): two such periods are a conflict, never a window. A launch reading alone is the one window.
