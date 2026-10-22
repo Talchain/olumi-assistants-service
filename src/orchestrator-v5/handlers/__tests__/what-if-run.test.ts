@@ -107,6 +107,25 @@ describe('the real variant path: a what-if draws the saved Run\'s samples and wr
     expect(h.writes.length, 'NOTHING WRITTEN: no turn, no Run fact').toBe(1);
   });
 
+  it('S3: a saved model the Run cannot analyse refuses as the Run refuses: "unsupported" with the Run\'s own next step, no PLoT call', async () => {
+    const h = realPath();
+    // A part of the model with no connections (served 22 Oct, scenario 100fb7bc: "Price per loaf" unlinked → ORPHAN_NODE).
+    const g = h.whatIfGraph();
+    const lone = (g.nodes as Rec[]).find((n) => n.kind === 'factor' && (g.edges as Rec[]).some((e) => e.from === n.id || e.to === n.id))!;
+    g.edges = (g.edges as Rec[]).filter((e) => e.from !== lone.id && e.to !== lone.id);
+    const runs = (h.plotClient.run as unknown as { mock: { calls: unknown[] } }).mock.calls.length;
+    const out = await runVariant({ payload: h.payload('turn-nr'), requestId: 'turn-nr', variantGraph: g, plotClient: h.plotClient });
+    // The Run's own refusal for the same saved graph, read through the same handler: the what-if must say the same.
+    const handler = createRunAnalysisHandler({ plotClient: h.plotClient,
+      scenarioReader: (id) => loadScenarioSnapshotForRunAnalysis(id, 'nr', createNoopSessionStore({ loadGraphResult: structuredClone(g) })) });
+    const runRefusal = await handler({ context: { session_id: SCENARIO } as never, payload: h.payload('turn-nr2'), requestId: 'turn-nr2',
+      signal: new AbortController().signal, orientationText: '' } as never).then(() => null, (err: Rec) => err.details as Rec);
+    expect(runRefusal?.next_step, 'PRECONDITION: the Run itself refuses this graph with a next step').toEqual(expect.any(String));
+    expect(out).toEqual({ kind: 'refused', reason: 'unsupported', next_step: runRefusal!.next_step,
+      ...(runRefusal!.readiness_questions === undefined ? {} : { readiness_questions: runRefusal!.readiness_questions }) });
+    expect((h.plotClient.run as unknown as { mock: { calls: unknown[] } }).mock.calls.length, 'no PLoT call').toBe(runs);
+  });
+
   it('S2 (contrast): the stress path\'s explicit seed wins, so it does NOT pair with the saved Run', async () => {
     const h = realPath();
     const seedA = await h.savedRun();
@@ -169,6 +188,15 @@ describe('runWhatIf: the canvas gestures, held, applied to a COPY and run beside
     });
     expect(JSON.stringify(out)).not.toContain('"pct"');
     expect(row, 'the saved row is never mutated').toEqual(before);
+  });
+
+  it('a saved model the Run cannot analyse: the refusal keeps the Run\'s own next step and questions; nothing else is composed', async () => {
+    const run = vi.fn(async () => ({ kind: 'refused' as const, reason: 'unsupported', next_step: 'Connect the unlinked part.', readiness_questions: ['How does price affect revenue?'] }));
+    expect(await runWhatIf(ask([VALUE]), { loadSaved: async () => ({ graph: stored() }), run: run as never })).toEqual({
+      kind: 'refused', reason: 'saved_unsupported', next_step: 'Connect the unlinked part.', readiness_questions: ['How does price affect revenue?'] });
+    // CONTRAST: a refusal with no reason of its own carries none (absent keys stay absent).
+    const bare = vi.fn(async () => ({ kind: 'refused' as const, reason: 'timed_out' }));
+    expect(await runWhatIf(ask([VALUE]), { loadSaved: async () => ({ graph: stored() }), run: bare as never })).toEqual({ kind: 'refused', reason: 'saved_timed_out' });
   });
 
   it('paired is PROVEN from the echoes: different seeds → not like-for-like (contrast: equal → paired)', async () => {

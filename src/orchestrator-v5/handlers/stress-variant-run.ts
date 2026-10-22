@@ -77,19 +77,21 @@ export async function runVariant(p: StressVariantParams): Promise<VariantRun> {
     loadGraphAndBriefText: async () => ({ graph: p.variantGraph, briefText: null }),
     readMostRecentPendingActions: (scenarioId, opts) => pending.readMostRecentPendingActions(scenarioId, opts),
   };
-  let snapshot: RunAnalysisScenarioSnapshot;
-  try {
-    snapshot = await loadScenarioSnapshotForRunAnalysis(p.payload.scenario_id, p.requestId, variantStore);
-  } catch (err) {
-    return refusal(err);
-  }
-  const edited: RunAnalysisScenarioSnapshot = { ...snapshot, briefText: undefined, ...(p.seed === undefined ? {} : { seed: p.seed }) };
+  // Read through the handler, exactly as a Run reads (`run-analysis.ts` maps a not-ready graph to `analysis_not_ready` with
+  // its next step and questions). Read here first, a not-ready saved model escaped as a bare `failed` (served 22 Oct, what-if
+  // on scenario 100fb7bc: "Price per loaf" unconnected), and the person was never told why or what to add.
+  let edited: RunAnalysisScenarioSnapshot | undefined;
+  const scenarioReader = async (): Promise<RunAnalysisScenarioSnapshot> => {
+    const snapshot = await loadScenarioSnapshotForRunAnalysis(p.payload.scenario_id, p.requestId, variantStore);
+    edited = { ...snapshot, briefText: undefined, ...(p.seed === undefined ? {} : { seed: p.seed }) };
+    return edited;
+  };
   const plotClient = p.plotClient ?? getDefaultPlotClient();
   const once: PLoTClient = {
     run: (body, id, opts) => plotClient.run(body, id, { ...opts, retryPolicy: 'no_retry' }),
     validatePatch: (body, id, opts) => plotClient.validatePatch(body, id, opts),
   };
-  const handlerFn = resolveHandler(createRegistry({ scenarioReader: async () => edited, plotClient: once, counterfactualClient: null }), 'run_analysis');
+  const handlerFn = resolveHandler(createRegistry({ scenarioReader, plotClient: once, counterfactualClient: null }), 'run_analysis');
   if (!handlerFn) return { kind: 'refused', reason: 'failed' };
   try {
     const outcome = await runWithBoundAnalysisSnapshot(
@@ -97,7 +99,7 @@ export async function runVariant(p: StressVariantParams): Promise<VariantRun> {
       () => handlerFn({ context, payload: p.payload, requestId: p.requestId, signal: p.signal ?? new AbortController().signal, orientationText: '' }),
     );
     const fact = outcome.handler_facts.find((f) => f.fact_type === 'run_analysis');
-    return fact?.fact_type !== 'run_analysis' ? { kind: 'refused', reason: 'failed' }
+    return fact?.fact_type !== 'run_analysis' || edited === undefined ? { kind: 'refused', reason: 'failed' }
       : { kind: 'rows', rows: stressChancesOf(fact.result, edited.graph), seedUsed: readRunEchoes(fact)?.seedUsed ?? null,
         nSamples: readRunEchoes(fact)?.nSamples ?? null, displayStep: displayStepsOf(fact.result) };
   } catch (err) {
@@ -113,7 +115,11 @@ function refusal(err: unknown): Exclude<StressVariantRows, { kind: 'rows' }> {
     return { kind: 'refused', reason: 'stale' };
   }
   if (err instanceof HandlerInvocationFailedError && ['analysis_not_ready', 'options_not_configured', 'args_validation_failed'].includes(err.cause_kind)) {
-    return { kind: 'refused', reason: 'unsupported' };
+    // The Run's own words for why it cannot run and what to add, carried as it gave them (never composed here).
+    const { next_step: next, readiness_questions: questions } = err.details as { next_step?: unknown; readiness_questions?: unknown };
+    return { kind: 'refused', reason: 'unsupported',
+      ...(typeof next === 'string' && next !== '' ? { next_step: next } : {}),
+      ...(Array.isArray(questions) && questions.length > 0 ? { readiness_questions: questions.filter((q): q is string => typeof q === 'string') } : {}) };
   }
   if (err instanceof HandlerResultInvalidError) return { kind: 'refused', reason: 'failed' };
   return { kind: 'refused', reason: 'failed' };

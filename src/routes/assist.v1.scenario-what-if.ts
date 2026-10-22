@@ -64,7 +64,9 @@ export default async function route(app: FastifyInstance) {
           ...(parsed.data.base_graph_hash === undefined ? {} : { baseGraphHash: parsed.data.base_graph_hash }),
         }, { loadSaved: (id) => loadPersistedScenarioStateStrict(id) });
         if (result.kind === "refused") {
-          return reply.status(200).send({ persisted: false, refusal: result.reason, changes_refused: result.changes_refused ?? [] });
+          return reply.status(200).send({ persisted: false, refusal: result.reason, changes_refused: result.changes_refused ?? [],
+            ...(result.next_step !== undefined ? { next_step: result.next_step } : {}),
+            ...(result.readiness_questions !== undefined ? { readiness_questions: result.readiness_questions } : {}) });
         }
         const { kind: _kind, ...shown } = result;
         return reply.status(200).send(shown);

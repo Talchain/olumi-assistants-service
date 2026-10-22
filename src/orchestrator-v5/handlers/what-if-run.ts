@@ -54,7 +54,11 @@ export interface WhatIfVariant {
 }
 
 export type WhatIfResult =
-  | { readonly kind: 'refused'; readonly reason: string; readonly changes_refused?: readonly { readonly index: number; readonly reason: string }[] }
+  | {
+    readonly kind: 'refused'; readonly reason: string; readonly changes_refused?: readonly { readonly index: number; readonly reason: string }[];
+    /** A model the Run cannot analyse: the Run's own next step and questions, so the canvas can say why and what to add. */
+    readonly next_step?: string; readonly readiness_questions?: readonly string[];
+  }
   | {
     readonly kind: 'ran';
     readonly persisted: false;
@@ -125,6 +129,12 @@ function variationOf(saved: StressChance | undefined, whatIf: StressChance | und
   return gap > NOISE_BAND_SE_MULTIPLE * (sd(ia, nSaved) + sd(ib, nWhatIf)) ? 'beyond_ordinary_variation' : 'not_judged';
 }
 
+/** The Run's own reason a model cannot be analysed, carried as given (absent keys stay absent). */
+const whyNot = (r: { readonly next_step?: string; readonly readiness_questions?: readonly string[] }) => ({
+  ...(r.next_step !== undefined ? { next_step: r.next_step } : {}),
+  ...(r.readiness_questions !== undefined ? { readiness_questions: r.readiness_questions } : {}),
+});
+
 export async function runWhatIf(
   p: {
     readonly payload: MessageTurnPayload; readonly requestId: string; readonly changes: readonly Rec[]; readonly crux: boolean;
@@ -165,7 +175,7 @@ export async function runWhatIf(
   const runOne = (model: LivingModelT) => run({ payload: p.payload, requestId: p.requestId, variantGraph: graphOf(model), signal: p.signal });
 
   const baseline = await runOne(saved);
-  if (baseline.kind !== 'rows') return { kind: 'refused', reason: `saved_${baseline.reason}` };
+  if (baseline.kind !== 'rows') return { kind: 'refused', reason: `saved_${baseline.reason}`, ...whyNot(baseline) };
   const plan: { readonly change_index: number | 'all'; readonly model: LivingModelT | null }[] = [
     { change_index: 'all', model: all },
     ...(p.crux && applied.length > 1 ? applied.map(({ index, edit }) => ({ change_index: index, model: alone(edit) })) : []),
@@ -175,7 +185,7 @@ export async function runWhatIf(
     if (model === null) continue;
     const result = await runOne(model);
     if (result.kind !== 'rows') {
-      if (change_index === 'all') return { kind: 'refused', reason: `what_if_${result.reason}`, changes_refused: refused };
+      if (change_index === 'all') return { kind: 'refused', reason: `what_if_${result.reason}`, changes_refused: refused, ...whyNot(result) };
       continue;
     }
     const ids = [...new Set([...baseline.rows.keys(), ...result.rows.keys()])];
