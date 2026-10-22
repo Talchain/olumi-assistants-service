@@ -48,7 +48,7 @@ import { editsRefusedSentence } from '../orchestrator-v5/agent-lane/proposal-obj
 import { collectTurnReceipts } from '../orchestrator-v5/agent-lane/turn-receipts.js';
 import { readRecordedRun, restoreRunOperation, runOperationTurnId, type RecoveredRun } from '../orchestrator-v5/agent-lane/run-operation.js';
 import { parseSelectedElements } from '../orchestrator-v5/boundary/request-extensions.js';
-import { carriedEffectsTiming } from '../orchestrator-v5/goal-target/carried-effects-timing.js';
+import { awaitsTimingReading, carriedEffectsTiming } from '../orchestrator-v5/goal-target/carried-effects-timing.js';
 import { bindHeldApprovalWriter, commitHeldProposalInProcess } from '../orchestrator-v5/handlers/approve-held-proposal.js';
 import { isRevisionConflict, ModelReadFailedError, promoteRevisionConflictResponse } from '../orchestrator-v5/graph-revision-conflict.js';
 import { MODEL_WRITE_OWNERSHIP_REFUSAL_BODY, ModelWriteOwnershipRefused, readSuccessfulDoorEntries, readUnsavableEffects, recordReleasedTurnClaim } from '../orchestrator-v5/ownership/door-ownership.js';
@@ -548,14 +548,17 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         return capabilities.runAnalysis(toolCtx, { reason: args.reason, effects_timing: args.effects_timing });
       };
       // The automatic Run after a committed change: ONCE per request, on the saved revision, when its readiness admits a Run.
-      let committedAnalysis: Promise<{ readonly run?: Record<string, unknown>; readonly ready?: unknown }> | undefined;
+      let committedAnalysis: Promise<{ readonly run?: Record<string, unknown>; readonly ready?: unknown; readonly awaitsTiming?: true }> | undefined;
       const analyseCommittedChange = () => committedAnalysis ??= (async () => {
         const savedRead = savedScenarioOf(await readingDispatch(graphPath, {}));
         if (!admitsRun(savedRead.analysisReady)) return { ready: savedRead.analysisReady };
         // The AI's timing reading, carried from the Run current when the turn began while this change left its subject as it was.
         const turnStart = start.json as { graph?: unknown; analysis_result?: unknown };
+        const timing = carriedEffectsTiming(turnStart, savedRead.graph);
+        // None to carry where the chance needs one: no Run that could only withhold; the reply invites Run (`awaitsTimingReading`).
+        if (awaitsTimingReading(savedRead.graph, timing)) return { awaitsTiming: true };
         return { run: await capabilities.runAnalysis(toolCtx, { reason: 'Analyse the model as just saved.',
-          effects_timing: carriedEffectsTiming(turnStart, savedRead.graph) }, { afterCommittedChange: true }) };
+          effects_timing: timing }, { afterCommittedChange: true }) };
       })();
 
       // ── THE SDK TURN (or the declined card, which needs none). ───────────────────────────────────────────────────────────
