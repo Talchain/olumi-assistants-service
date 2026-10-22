@@ -76,7 +76,9 @@ describe('a draft whose own encoding withholds its goal is said back once, then 
     const p = product(null);
     const restructure = { offered: false };
     const first = await buildModel({ dispatch: p.dispatch, restructure }, draftCtx, { brief: BRIEF, model: asCondition });
-    expect(first).toMatchObject({ status: 'refused', reason: 'goal_path_withheld', detail: RESTRUCTURE_DRAFT });
+    // Bound by identity: the refusal names this condition as what withholds the chance.
+    expect(first).toMatchObject({ status: 'refused', reason: 'goal_path_withheld', detail: RESTRUCTURE_DRAFT,
+      data: { goal_path: [expect.objectContaining({ id: `condition:${missing}`, reason: 'condition_not_in_slice' })] } });
     expect(RESTRUCTURE_DRAFT).toContain('A missing input is never a condition: remove it and ask the person for the figure.');
     expect(p.registered).toHaveLength(0);
     const asked = await buildModel({ dispatch: p.dispatch, restructure }, draftCtx, { brief: BRIEF, model: structuredClone(KNOWN_ANSWER) });
@@ -87,7 +89,7 @@ describe('a draft whose own encoding withholds its goal is said back once, then 
 
   it('DL 22 Oct (pin): the drafter\'s schema says a missing input is never a condition, and no longer lists an input as a prerequisite', () => {
     const role = LivingCondition.shape.role.description ?? '';
-    expect(role).toContain('A missing input (a measure, today\'s level, a cost or a period nobody has given) is never a condition of any role: leave its figure null and ask the person for it.');
+    expect(role).toContain('A missing input (a measure, today\'s level, a cost or a period nobody has given) is never a condition of any role: give it Olumi\'s labelled estimate as the figure rules allow, or ask the person for it.');
     expect(role).not.toContain('event or input');
     expect(RESTRUCTURE_CHANGE).toContain('A missing input is never a condition');
   });
