@@ -601,8 +601,9 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
     for (let k = 1; k <= 9; k += 1) expect(long.some((n) => n.text.includes(`${10 + k} units`)), `setting ${k}`).toBe(true);
     // (6) Key order never changes what is shown: the same change with keys reordered binds the same digest.
     const reorder = (o: Record<string, unknown>) => Object.fromEntries(Object.entries(o).reverse());
-    const a = card([ch('factor:f', fac({ limit: null }), fac({ limit: { comparator: '<=', value: 5, source: 'user', party: null, quote: 'q' }, defined_as: { op: 'sum', of: ['out'], source: 'user', party: null, quote: 'q' } }))]);
-    const b = card([ch('factor:f', reorder(fac({ limit: null })), reorder(fac({ defined_as: { op: 'sum', of: ['out'], source: 'user', party: null, quote: 'q' }, limit: { comparator: '<=', value: 5, source: 'user', party: null, quote: 'q' } })))]);
+    const a = card([ch('factor:f', fac({}), fac({ quote: 'our new words', source: 'party', party: 'Acme' }))]);
+    const b = card([ch('factor:f', reorder(fac({})), reorder(fac({ quote: 'our new words', source: 'party', party: 'Acme' })))]);
+    expect(notesOf(a).map((n) => n.text)).toEqual(['Changes \u2018Orders\u2019: whose it is, the words recorded (Acme\u2019s).']);
     expect(notesOf(b).map((n) => n.text)).toEqual(notesOf(a).map((n) => n.text));
   });
   it('RED classifier assigns Agent factor and link kinds exhaustively', () => {
