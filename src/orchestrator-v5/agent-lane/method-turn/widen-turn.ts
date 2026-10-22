@@ -764,7 +764,7 @@ export const WIDEN_ADD_PREFIX = 'agent-widen-add:';
 
 /** ⭐ THE STANDING GAP SIGNAL (S-C / S-E): typed, deterministic, from model state; ONE question at most. */
 export type ModelGap =
-  | { readonly kind: 'goal_target_missing'; readonly goal_id: string; readonly deadline_known: boolean; readonly question: string }
+  | { readonly kind: 'goal_target_missing' | 'goal_level_missing'; readonly goal_id: string; readonly deadline_known: boolean; readonly question: string }
   /** A chance-of-event goal with no date: S1's ONE question, by its own function (never a target ask, #2742). */
   | { readonly kind: 'deadline_missing'; readonly goal_id: string; readonly question: string }
   | { readonly kind: 'budget_without_limit'; readonly question: string };
