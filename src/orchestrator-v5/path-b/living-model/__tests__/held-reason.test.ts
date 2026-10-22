@@ -135,6 +135,8 @@ describe('every held reason says its own words in the one gap, never "no target"
       const q = goalTargetGapOf(stored(long))!;
       expect(q.kind).toBe('goal_answer_missing');
       expect(q.question.length).toBeLessThanOrEqual(400);
+      // Bounded parts keep the reason's own question; the generic one is only for what has none.
+      expect(q.question).not.toContain('can’t read as stated yet');
     }
   });
 });
