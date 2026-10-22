@@ -21,7 +21,8 @@ export interface Kernelled { readonly model: LivingModelT; readonly relabelled: 
 /** Whitespace, case and typographic quote marks never decide whether words are the person's own. */
 export const plain = (s: string): string => s.replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/\s+/g, ' ').trim().toLowerCase();
 
-function canonicalIds(model: LivingModelT): LivingModelT {
+/** The kernel's own canonical ids (idempotent): a pass that matches items to the saved model before the kernel uses these. */
+export function canonicalIds(model: LivingModelT): LivingModelT {
   const seen = new Set<string>();
   const map = new Map<string, string>();
   const canon = (raw: string): string => {

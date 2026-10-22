@@ -14,7 +14,7 @@ import type { AgentToolContext } from '../../agent-lane/runtime/agent-tools.js';
 import type { InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
 import { createProposal, type ProposalOperation, type ProposalStore, type StructuredProposal } from '../../agent-lane/proposal.js';
 import { LivingModel, type LivingModelT } from '../../../schemas/living-model.js';
-import { applyKernel, plain } from '../living-model/kernel.js';
+import { applyKernel, canonicalIds, plain } from '../living-model/kernel.js';
 import { withCalendarReadings } from '../living-model/calendar-reading.js';
 import { todayInLondon } from '../../goal-target/deadline-date.js';
 import { mapLivingModel, savedGoal } from '../living-model/mapper.js';
@@ -86,7 +86,8 @@ export async function proposeLivingChange(deps: Deps, ctx: Ctx, args: LivingChan
 function kernelFor(base: Exclude<Awaited<ReturnType<typeof savedLiving>>, ToolOutcome>, ctx: Ctx, model: LivingModelT) {
   const brief = typeof base.saved.json.brief_text === 'string' ? [base.saved.json.brief_text] : [];
   const today = todayInLondon(new Date());
-  const read = applyKernel(withCalendarReadings(model, base.model, today), [...brief, ...(ctx.verified_user_messages ?? []),
+  // On the kernel's canonical ids, so a reading is matched to the saved aim the kernel judges by (Codex r3 on #3674).
+  const read = applyKernel(withCalendarReadings(canonicalIds(model), base.model, today), [...brief, ...(ctx.verified_user_messages ?? []),
     ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])], base.model, brief[0] ?? null);
   return { ...read, model: withCalendarReadings(read.model, base.model, today) };
 }
