@@ -63,6 +63,11 @@ export interface Mapped {
   readonly frames: ReadonlyMap<string, Frame>;
   /** Premises the result is worked out under that nobody stated, said beside it (amendment 1: "carrying on leaves X unchanged"). */
   readonly assumed: readonly { readonly id: string; readonly text: string }[];
+  /**
+   * When the goal's chance is withheld (`chance_rests_on_withheld`): the items on its path that withheld it, each with its reason;
+   * a condition with the items it qualifies, since its words alone do not tell two conditions apart (Codex r1 on #3672).
+   */
+  readonly rests_on?: readonly (Withheld & { readonly applies_to?: readonly string[] })[];
 }
 
 const STRUCTURAL = { strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' } as const;
@@ -394,10 +399,11 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
           // "Stay within" (Science, 21 Oct): a floor today already clears, or a ceiling today already sits under, is a valid
           // goal, scored on the level at the end of the horizon (not along the way). Only on the person's own level today
           // (an Olumi estimate is asked for), and read silently only when their words say so; otherwise Olumi asks once.
-          const stays = lt.comparator === '<=' ? current <= lt.value : current >= lt.value;
+          const ceiling = lt.comparator === '<=' || lt.comparator === '<';
+          const stays = ceiling ? current <= lt.value : current >= lt.value;
           const level = stays && !(t!.current_source === 'user' || stated(aim.source)) ? 'stay_within_base_not_theirs' as const
-            : stays && !STAY_CUE[lt.comparator].test(aim.quote ?? '') ? 'stay_within_unconfirmed' as const
-            : admitGoalBaseline({ rawTarget: lt.value, rawBaseline: current, cap: resolved.cap, ...(lt.comparator === '<=' ? { ceiling: true } : {}),
+            : stays && !STAY_CUE[ceiling ? '<=' : '>='].test(aim.quote ?? '') ? 'stay_within_unconfirmed' as const
+            : admitGoalBaseline({ rawTarget: lt.value, rawBaseline: current, cap: resolved.cap, ...(ceiling ? { ceiling: true } : {}),
               ...(stays ? { stayWithin: true } : {}) });
           if (typeof level === 'string') hold(aim.id, level);
           else if (!level.admitted) hold(aim.id, 'goal_level_not_admitted');
@@ -409,7 +415,8 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
             // A change is measured from today only if carrying on as now leaves the quantity there (amendment 1): said beside it.
             if (stays) {
               const say = (v: number) => sayFigureAsWritten(v, lt.unit ?? '');
-              assumed.push({ id: aim.id, text: `Keep ${t!.quantity} at or ${lt.comparator === '<=' ? 'below' : 'above'} ${say(lt.value)} (today ${say(current)}). The chance is for its level at the end of ${(t!.by_when ?? 'the period').replace(/^(at |by )?(the )?end of /i, '')}, not along the way.` });
+              const bound = `${lt.comparator === '<' || lt.comparator === '>' ? 'strictly' : 'at or'} ${ceiling ? 'below' : 'above'}`;
+              assumed.push({ id: aim.id, text: `Keep ${t!.quantity} ${bound} ${say(lt.value)} (today ${say(current)}). The chance is for its level at the end of ${(t!.by_when ?? 'the period').replace(/^(at |by )?(the )?end of /i, '')}, not along the way.` });
             }
             if (isChange) assumed.push({ id: aim.id, text: `Carrying on as now leaves ${t!.quantity} at today's ${sayFigureAsWritten(current, lt.unit ?? '')}; the change is measured from that.` });
           }
@@ -853,6 +860,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     goalNode.nonlinear_identity = { operation: 'sum', factor_ids: [exactSum.today, exactSum.lever], stated_in_brief: false };
   }
 
+  const restsOn: (Withheld & { readonly applies_to?: readonly string[] })[] = [];
   // A chance rests on everything on the goal's path. Anything there that this slice left out of the engine graph (an
   // unsigned or unplaceable link, an option setting it could not convert) would change the calculation, so the chance is
   // withheld: the goal keeps no threshold, and says why (AIE, 20 Oct: withhold the dependent calculation, never compute it
@@ -881,9 +889,13 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
       node.kind = 'outcome';
       delete node.category;
     }
-    const leftOut = withheld.some((w) => (w.reason === 'link_sign_unknown' || w.reason === 'link_endpoint_unknown' || w.reason === 'exact_not_drawable'
+    // The items the chance rests on that the engine graph left out, each with its own held reason (Class 3: the tool says them
+    // back to the AI, so a draft whose own encoding withholds its goal can be restructured in the same turn).
+    const causes = withheld.filter((w) => ((w.reason === 'link_sign_unknown' || w.reason === 'link_endpoint_unknown' || w.reason === 'exact_not_drawable'
       || w.reason === 'identity_other_cause' || w.reason === 'identity_contradicted' || w.reason === 'risk_not_in_slice') && onPath.has(model.links.find((l) => l.id === w.id)?.to ?? ''))
-      || withheld.some((w) => (IDENTITY_REFUSED.has(w.reason) || RISK_REFUSED.has(w.reason)) && onPath.has(w.id)) || [...droppedSettings].some((id) => onPath.has(id));
+      || ((IDENTITY_REFUSED.has(w.reason) || RISK_REFUSED.has(w.reason)) && onPath.has(w.id)));
+    const dropped = [...droppedSettings].filter((id) => onPath.has(id));
+    const leftOut = causes.length > 0 || dropped.length > 0;
     // An unresolved PREREQUISITE on anything the chance rests on (the engine cannot hold one) withholds it, whoever raised it.
     // An applied ASSUMPTION carries a CONDITIONAL result, kept in the living model the AI reads and said with the result; a
     // CHALLENGE is said beside it. The AI declares the role; the source never decides it (AIE, 17:59 20 Oct).
@@ -893,12 +905,15 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     if (leftOut || conditioned.length > 0) {
       for (const k of Object.keys(goalNode)) if (k.startsWith('goal_threshold') || k === 'goal_direction') delete goalNode[k];
       hold(goal.id, 'chance_rests_on_withheld');
+      restsOn.push(...causes, ...dropped.map((id) => ({ id, reason: 'setting_not_convertible' as const })),
+        ...conditioned.map((c) => ({ id: `condition:${c.text}`, reason: 'condition_not_in_slice' as const, applies_to: [...c.applies_to] })));
     }
   }
 
   const frames = new Map<string, Frame>(model.factors.flatMap((f) => (caps.has(f.id) ? [[f.id, { cap: caps.get(f.id)!, unit: f.unit }] as const] : [])));
   if (goal !== undefined) frames.set(goal.id, { cap: goal.cap, unit: goal.unit === '' ? null : goal.unit });
-  return { graph: { nodes, edges, ...(goal_constraints.length > 0 ? { goal_constraints } : {}) }, withheld, frames, assumed };
+  return { graph: { nodes, edges, ...(goal_constraints.length > 0 ? { goal_constraints } : {}) }, withheld, frames, assumed,
+    ...(restsOn.length > 0 ? { rests_on: restsOn } : {}) };
 }
 
 /**

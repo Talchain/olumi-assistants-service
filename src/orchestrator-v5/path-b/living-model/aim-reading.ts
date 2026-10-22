@@ -8,7 +8,7 @@ import type { LivingModelT, LivingSourceT } from '../../../schemas/living-model.
 export const stated = (s: LivingSourceT): boolean => s === 'user' || s === 'party';
 
 export type Target = NonNullable<LivingModelT['aims'][number]['target']>;
-export interface LevelTarget { readonly comparator: '>=' | '<='; readonly value: number; readonly unit: string | null }
+export interface LevelTarget { readonly comparator: '>=' | '<=' | '>' | '<'; readonly value: number; readonly unit: string | null }
 export type AimTargetHeld =
   | 'no_level_target' | 'target_not_theirs' | 'change_base_not_theirs' | 'exact_target_not_in_slice' | 'target_range_not_in_slice'
   | 'current_unit_mismatch' | 'goal_level_unknown' | 'change_kind_unknown' | 'change_base_invalid';
@@ -24,7 +24,7 @@ export function levelTargetOf(t: Target): LevelTarget | AimTargetHeld {
   if (t.value === null) return t.low !== null || t.high !== null ? 'target_range_not_in_slice' : 'no_level_target';
   // A declared unit is model content, never relabelled by another field (buddy R1 on #3525): today's level in another unit
   // than a level target has no supported conversion here, so the dependent calculation is withheld.
-  if (t.comparator === '>=' || t.comparator === '<=') {
+  if (t.comparator === '>=' || t.comparator === '<=' || t.comparator === '>' || t.comparator === '<') {
     if (t.current !== null && t.current_unit !== null && t.current_unit !== t.unit) return 'current_unit_mismatch';
     return { comparator: t.comparator, value: t.value, unit: t.unit };
   }
