@@ -721,8 +721,7 @@ function coreChangeNotes(operations: readonly HeldOp[], adds: readonly AddField[
     if (cur !== '') chunks.push(cur);
     // One id per note: a positional path (a condition removed and another added at index 0) is told apart by its change.
     let base = `change_note:${path}`;
-    if (used.has(base)) base = `${base}:${change}`;
-    for (let n = 2; used.has(base); n += 1) base = `change_note:${path}:${change}:${n}`;
+    for (let n = 1; used.has(base); n += 1) base = `change_note:${path}:${change}${n === 1 ? '' : `:${n}`}`;
     used.add(base);
     chunks.forEach((c, k) => notes.push({ field_id: chunks.length === 1 ? base : `${base}#${k + 1}`, kind: 'change_note',
       text: chunks.length === 1 ? c : `${c} (${k + 1}/${chunks.length})`, source, editable: false }));
