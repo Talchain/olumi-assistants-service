@@ -919,7 +919,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
  * `link_goal_level_unknown`: a change target with no level today), read from a stored graph's own living model, with
  * whose figure each carries and the input it awaits. The Run's withhold says this reason, never "not sized".
  */
-export function linksAwaitingGoalInput(graph: unknown): Array<{ from: string; to: string; by: 'olumi' | 'stated' | 'given'; awaits: 'target' | 'level' }> {
+export function linksAwaitingGoalInput(graph: unknown): Array<{ from: string; to: string; by: 'olumi' | 'stated' | 'given'; range?: true; awaits: 'target' | 'level' }> {
   const living = LivingModel.safeParse(graph !== null && typeof graph === 'object' ? (graph as Rec).living_model : undefined);
   if (!living.success) return [];
   const mapped = mapLivingModel(living.data, savedGoal(graph));
@@ -930,8 +930,10 @@ export function linksAwaitingGoalInput(graph: unknown): Array<{ from: string; to
     const l = living.data.links.find((x) => x.id === w.id);
     const e = edgeOf.get(w.id);
     if (l === undefined || e === undefined || typeof e.from !== 'string' || typeof e.to !== 'string') return [];
+    // Attribution names the original range when it has no stated centre, never Olumi's derived midpoint.
     const source = figureBy(l.effect, l).source;
     return [{ from: e.from, to: e.to, by: source === 'olumi' ? 'olumi' as const : stated(source) ? 'stated' as const : 'given' as const,
+      ...(l.effect.form === 'range' && l.effect.value === null ? { range: true as const } : {}),
       awaits: w.reason === 'link_goal_target_unknown' ? 'target' as const : 'level' as const }];
   });
 }

@@ -58,9 +58,10 @@ const awaitingTarget = (opts: { targetValue?: number | null; bareRange?: true; o
       // Track 3 hiring shape: a +10% change target the person stated, with no level today to measure it from.
       ? { ...a.target!, comparator: 'increase' as const, value: 10, unit: '%', change_kind: 'relative' as const, current: opts.change.current, current_unit: '£', current_source: null, source: null }
       : { ...a.target!, value: opts.olumiTarget ? 12000 : opts.targetValue ?? null, source: opts.targetValue == null ? 'olumi' as const : null } })),
-    links: m.links.map((l) => (l.id !== 'referral_gp' || opts.statedLink ? l : { ...l, source: 'olumi' as const, party: null, quote: null,
+    links: m.links.map((l) => (l.id !== 'referral_gp' ? l : { ...l,
+      ...(opts.statedLink ? (opts.bareRange ? who('the referral scheme would add £500 to £4000 a month') : {}) : { source: 'olumi' as const, party: null, quote: null }),
       ...(opts.optionLink ? { from: 'referral' } : {}),
-      effect: opts.noValue ? { estimate_by: null, form: 'point' as const, value: null, sd: null, low: null, high: null, unit: '£', sign: '+' as const }
+      effect: opts.statedLink && !opts.bareRange ? l.effect : opts.noValue ? { estimate_by: null, form: 'point' as const, value: null, sd: null, low: null, high: null, unit: '£', sign: '+' as const }
         : { estimate_by: null, form: 'range' as const, value: opts.bareRange ? null : 2000, sd: null, low: 500, high: 4000, unit: '£', sign: '+' as const } })),
   };
 };
@@ -114,11 +115,31 @@ describe('a sized link into a goal with no target figure is held for that reason
     expect(w!.message.startsWith('This comparison turns on the link from ‘New pricing page live’ to ‘Monthly gross profit of at least £12,000’, whose strength isn\'t sized in the model yet.')).toBe(true);
   });
 
-  it('NEGATIVE: a bare range with no figure of its own is unsized, not awaiting the target (link_range_no_law)', () => {
+  it('a bare range has Olumi’s moments and awaits the target, rather than a size', () => {
     const m = awaitingTarget({ bareRange: true });
-    expect(reasons(m)).toContain('referral_gp:link_range_no_law');
-    expect(reasons(m)).not.toContain('referral_gp:link_goal_target_unknown');
-    expect(linksAwaitingGoalInput(stored(m))).toEqual([]);
+    expect(reasons(m).filter((r) => r.startsWith('referral_gp:'))).toEqual(['referral_gp:link_goal_target_unknown']);
+    expect(linksAwaitingGoalInput(stored(m))).toEqual([{ from: 'referral_running', to: 'gp', by: 'olumi', range: true, awaits: 'target' }]);
+  });
+
+  it('a person’s bare range is named as their range, never their point or Olumi’s range, while it awaits the goal input', async () => {
+    for (const change of [undefined, { current: null }]) {
+      const m = awaitingTarget({ bareRange: true, statedLink: true, change });
+      // Keep the separate no-figure pricing negative above; isolate this warning’s exact words here.
+      m.links = m.links.filter((l) => l.id === 'referral_gp');
+      m.options = m.options.filter((o) => o.id !== 'pricing');
+      const input = change === undefined ? 'target' : 'level';
+      expect(reasons(m).filter((r) => r.startsWith('referral_gp:'))).toEqual([
+        `referral_gp:link_goal_${input}_unknown`,
+      ]);
+      expect(linksAwaitingGoalInput(stored(m))).toEqual([
+        { from: 'referral_running', to: 'gp', by: 'stated', range: true, awaits: input },
+      ]);
+      const w = await placeholderWarning(m);
+      expect(w!.message).toBe('The stated range for the link from ‘Referral scheme running’ to ‘Monthly gross profit of at least £12,000’ is kept, and used '
+        + (input === 'target' ? 'once ‘Monthly gross profit of at least £12,000’ has a target figure, which sets its scale.'
+          : 'once today’s level for ‘Monthly gross profit of at least £12,000’ is known, since the target is measured from it.'));
+      expect((w!.acceptable_links ?? []).filter((l: Json) => l.from === 'referral_running')).toEqual([]);
+    }
   });
 
   it('whose figure it is: the person\'s own stated figure is never called Olumi\'s estimate', async () => {
@@ -128,6 +149,20 @@ describe('a sized link into a goal with no target figure is held for that reason
     const w = await placeholderWarning(m);
     expect(w!.message).toContain('The stated figure for the link from \u2018Referral scheme running\u2019 to \u2018Monthly gross profit of at least £12,000\u2019 is kept');
     expect(w!.message).not.toContain('Olumi\u2019s estimate');
+  });
+
+  it('range wording preserves attribution per link beside an unrelated stated point', () => {
+    const link = { from: 'A', to: 'g', from_label: 'A', to_label: 'Goal', awaits: 'target' as const };
+    for (const [by, singular, plural] of [
+      ['olumi', 'Olumi’s estimated range', 'Olumi’s estimated ranges'],
+      ['stated', 'The stated range', 'The stated ranges'],
+      ['given', 'The range given', 'The ranges given'],
+    ] as const) {
+      const range = { ...link, by, range: true as const };
+      expect(awaitingGoalSentence([range])).toBe(`${singular} for the link from ‘A’ to ‘Goal’ is kept, and used once ‘Goal’ has a target figure, which sets its scale.`);
+      expect(awaitingGoalSentence([range, { ...range, from: 'B', from_label: 'B' }])).toBe(`${plural} for the links from ‘A’ to ‘Goal’ and from ‘B’ to ‘Goal’ are kept, and used once ‘Goal’ has a target figure, which sets their scale.`);
+      expect(awaitingGoalSentence([{ ...link, from: 'P', from_label: 'Point', by: 'stated' }, range])).toBe(`The stated figure for the link from ‘Point’ to ‘Goal’ and ${by === 'olumi' ? singular : singular.charAt(0).toLowerCase() + singular.slice(1)} for the link from ‘A’ to ‘Goal’ are kept, and used once ‘Goal’ has a target figure, which sets their scale.`);
+    }
   });
 
   it('SCOPE: a goal with a figure that is not the person\'s (target_not_theirs) keeps link_frame_unknown: only a figure-less target is this reason', () => {
