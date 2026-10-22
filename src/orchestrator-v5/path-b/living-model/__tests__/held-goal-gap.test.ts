@@ -17,7 +17,7 @@ type Json = Record<string, any>;
 const who = (quote: string) => ({ source: 'user' as const, party: null, quote });
 const on = (factor_id: string) => ({ factor_id, estimate_by: null, value: 1, low: null, high: null, unit: null, ...who('do it') });
 const target = { low: null, high: null, baseline: null, current: null, current_source: null, current_unit: null, period_months: null, change_kind: null, source: null, by_when: null };
-const model = (aimText: string, t: Json | null): LivingModelT => ({
+const model = (aimText: string, t: Json | null, linkUnit = '%'): LivingModelT => ({
   aims: [{ id: 'goal', text: aimText, status: 'current', defined_as: null, ...who(aimText), target: t as never }],
   options: [
     { status: 'feasible', id: 'carry_on', label: 'Carry on as now', developed_from: null, settings: [], ...who('or carry on') },
@@ -25,15 +25,19 @@ const model = (aimText: string, t: Json | null): LivingModelT => ({
   ],
   factors: [{ estimate_by: null, kind: 'factor', limit: null, id: 'effort', label: 'Effort', value: 0, low: null, high: null, unit: null, defined_as: null, ...who('none today') }],
   links: [{ id: 'effort_goal', from: 'effort', to: 'goal', source: 'olumi', party: null, quote: null,
-    effect: { estimate_by: null, form: 'range', value: 0.6, sd: null, low: 0.2, high: 1, unit: '%', sign: '+' } }],
+    effect: { estimate_by: null, form: 'range', value: 0.6, sd: null, low: 0.2, high: 1, unit: linkUnit, sign: '+' } }],
   risks: [], conditions: [], views: [], history: [],
 });
 /** Track 3 funding: Olumi's suggested measure (£, no figure), with the person's own deadline in words. */
 const funding = (byWhen: string | null) => model('Secure funding within the next 2 months',
   { ...target, quantity: 'Funding secured', comparator: '>=', value: null, unit: '£', by_when: byWhen, source: 'olumi' });
-/** Track 3 hiring: the person's +10% relative change, with no level today (its served reference words). */
-const hiring = (over: Json = {}) => model('Increase productivity by at least 10%', { ...target, quantity: 'Productivity', comparator: 'increase', value: 10,
-  unit: '%', change_kind: 'relative', baseline: 'Current productivity; measurement and level not yet supplied', by_when: 'in the next three months', ...over });
+/**
+ * Track 3 hiring: the person's +10% relative change, with no level today (its served reference words). Its effect is stated in
+ * productivity points, an absolute effect, so the change needs today's level (item 2, DL 22 Oct: with every effect in % of today
+ * it is measured as the change instead, and nothing is asked; the last row).
+ */
+const hiring = (over: Json = {}, linkUnit = 'points') => model('Increase productivity by at least 10%', { ...target, quantity: 'Productivity', comparator: 'increase', value: 10,
+  unit: '%', change_kind: 'relative', baseline: 'Current productivity; measurement and level not yet supplied', by_when: 'in the next three months', ...over }, linkUnit);
 const LEVEL_QUESTION = 'One gap: ‘Increase productivity by at least 10%’ is a change from today’s level of productivity, which isn’t given yet. What is today’s level of productivity?';
 const stored = (m: LivingModelT): Json => projectCorePostimageForPersistence(GraphV3.parse({ ...mapLivingModel(m).graph, living_model: m })) as Json;
 const legacy = (g: Json): Json => { const { living_model: _, ...rest } = g; return rest; };
@@ -87,7 +91,7 @@ describe('the one gap asks only for what is missing: the target, or the level a 
     const long = 'Weekly delivered sessions across every estate, school and partner venue we run, '.repeat(3).trim();
     // Codex r3's 476-character input (120 + 80), and the worst case (400 + 400, no spaces to cut at).
     for (const [label, quantity] of [[long, long], ['L'.repeat(120), 'Q'.repeat(80)], ['L'.repeat(400), 'Q'.repeat(400)]] as const) {
-      const q = goalTargetGapOf(stored(model(label, { ...target, quantity, comparator: 'increase', value: 10, unit: '%', change_kind: 'relative' })))!.question;
+      const q = goalTargetGapOf(stored(model(label, { ...target, quantity, comparator: 'increase', value: 10, unit: '%', change_kind: 'relative' }, 'points')))!.question;
       expect(q.length, label.slice(0, 12)).toBeLessThanOrEqual(400);
       expect(q).toContain('What is today’s level of');
     }
@@ -112,5 +116,12 @@ describe('the one gap asks only for what is missing: the target, or the level a 
 
   it('NEGATIVE: with today\'s level given, hiring has a level target, so there is no gap', () => {
     expect(goalTargetGapOf(stored(hiring({ current: 40, current_unit: 'points' })))).toBeNull();
+  });
+
+  it('item 2 (DL 22 Oct): with every effect in % of today\'s level, the same +10% needs no level: no gap, it is measured as the change', () => {
+    expect(reasons(hiring({}, '%'))).not.toContain('goal:goal_level_unknown');
+    expect(goalTargetGapOf(stored(hiring({}, '%')))).toBeNull();
+    // CONTRAST (the rows above): its effect in points needs today's level, so that is asked.
+    expect(goalTargetGapOf(stored(hiring()))?.kind).toBe('goal_level_missing');
   });
 });

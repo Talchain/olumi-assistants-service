@@ -100,6 +100,10 @@ describe('REFUSALS: the goal stays held for its level wherever the change cannot
     expect(goalOf(mapLivingModel(model({ change_kind: null })).graph).quantity_frame).toBeUndefined();
   });
 
+  it('a change of no named quantity is never read here (nothing to say it of): held as before', () => {
+    expect(reasons(model({ quantity: '' }))).toContain('tp:goal_level_unknown');
+  });
+
   it('a quantity measured in % (points or % of today?) is never read here: held as before', () => {
     expect(reasons(model({ current_unit: '%' }))).toContain('tp:goal_level_unknown');
   });

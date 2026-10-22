@@ -306,11 +306,11 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
      * Q1 run, "+25% bottling output", every link into the goal in %, held for a level nobody gave). Measured AS the change, as
      * the legacy lane measures hiring's "+10% productivity" (`admit-model.ts` change quantity): "% change from today", 0 today by
      * definition, on its own 0–100 scale, with every effect read as a % of today's level, so no level is needed or made up. Only
-     * when the change is declared relative and every figure into the goal is in %: an absolute effect needs the level, so the
-     * goal stays held for it. Its period, when stated, goes with Olumi's reading (`goal_target_basis`), as the legacy lane's.
+     * when the change is declared relative, of a named quantity, and every figure into the goal is in %: an absolute effect needs
+     * the level, so the goal stays held for it. Its period, when stated, goes with Olumi's reading (`goal_target_basis`), as the legacy lane's.
      */
     const into = model.links.filter((l) => l.to === aim.id && [l.effect.value, l.effect.low, l.effect.high].some((v) => v !== null));
-    const relative = lt === 'goal_level_unknown' && t !== null && t.change_kind === 'relative' && t.unit === '%' && t.current_unit !== '%'
+    const relative = lt === 'goal_level_unknown' && t !== null && t.change_kind === 'relative' && t.unit === '%' && t.current_unit !== '%' && t.quantity.trim() !== ''
       && t.value !== null && into.every((l) => l.effect.unit === '%')
       ? resolveGoalThresholdCapWithProvenance(undefined, Math.abs(t.value), '%', undefined) : null;
     if (relative !== null && t !== null && t.value !== null) {
