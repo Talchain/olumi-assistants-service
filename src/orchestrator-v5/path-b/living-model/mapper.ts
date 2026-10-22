@@ -27,7 +27,7 @@ import { resolveGoalThresholdCapWithProvenance } from '../../../utils/goal-thres
 import { admitGoalBaseline } from '../../../cee/factor-extraction/goal-baseline-admissibility.js';
 import { sayFigureAsWritten } from '../../agent-lane/say-figure.js';
 import { LLM_STRENGTH_STD_FLOOR } from '../../../cee/constants.js';
-import { sameUnit, unitsCompose } from '../../agent-lane/same-unit.js';
+import { readUnitParts, sameUnit, unitsCompose } from '../../agent-lane/same-unit.js';
 import { EventRiskV1 } from '../../../schemas/event-risk.js';
 import { riskOccurrenceIsCurrent } from '../../agent-lane/risk-occurrence.js';
 import { readStatedDeadline } from '../../goal-target/deadline-date.js';
@@ -393,6 +393,27 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     for (const id of Object.keys(interventions)) edges.push({ from: o.id, to: id, ...STRUCTURAL, provenance: { source: 'cee_hypothesis' } });
   }
 
+  // The other half of the one composition rule (DL 22 Oct, served board 6ce4f6ae: "£ per loaf" × "loaves a week" was refused):
+  // money per X times a count of X is money, with ONE period across the two parts and it the defined quantity's own
+  // ("£ per week"). `unitsCompose` reads money per X per period × a count; the denominator naming the count's noun is the
+  // dimensional proof either way. Unscaled, unqualified units only; two periods ("£ per loaf per week" × "loaves a week") never.
+  const ratePerCountComposes = (whole: string | null, a: string | null, b: string | null): boolean => {
+    const g = readUnitParts(whole);
+    if (g === null || g.kind !== 'currency' || g.scale !== 1 || g.per !== null || g.base !== null || g.qualifiers !== null) return false;
+    return ([[a, b], [b, a]] as const).some(([m, c]) => {
+      const rate = readUnitParts(m);
+      const count = readUnitParts(c);
+      if (rate === null || count === null || rate.kind !== 'currency' || count.kind !== 'count' || rate.code !== g.code) return false;
+      if (rate.scale !== 1 || count.scale !== 1 || rate.base !== null || count.base !== null || rate.qualifiers !== null || count.qualifiers !== null) return false;
+      const per = rate.per;
+      const noun = count.noun;
+      if (per === null || per.length === 0 || noun === null || noun.length === 0) return false;
+      if (per[per.length - 1] !== noun[noun.length - 1] || !per.every((w) => noun.includes(w))) return false;
+      const periods = [rate.period, count.period].filter((p) => p !== null);
+      return periods.length <= 1 && (periods[0] ?? null) === g.period;
+    });
+  };
+
   // ── Identities (Track 2): what a quantity IS, defined as the sum or product of factors. ISL works it out exactly from
   // its parts' levels and never draws them, so the parts' edges are definitional, held at 1 with no existence doubt. A
   // definition that cannot be worked out as stated (a part unknown, units that do not compose, a stated level its parts
@@ -418,7 +439,8 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
       || parts.some((p) => p === undefined) || (op === 'product' && of.length !== 2) || inCycle(item.id) ? 'identity_not_in_slice'
       : values.some((v) => v === null) ? 'identity_part_unknown'
         : (op === 'sum' ? !parts.every((p) => sameUnit(p!.unit, unit))
-          : unitsCompose(unit, label, { unit: parts[0]!.unit, label: parts[0]!.label }, { unit: parts[1]!.unit, label: parts[1]!.label }).kind !== 'proof')
+          : unitsCompose(unit, label, { unit: parts[0]!.unit, label: parts[0]!.label }, { unit: parts[1]!.unit, label: parts[1]!.label }).kind !== 'proof'
+            && !ratePerCountComposes(unit, parts[0]!.unit, parts[1]!.unit))
           ? 'identity_unit_mismatch'
           : level !== null && Math.abs(level - made) > 1e-9 * Math.max(1, Math.abs(level)) ? 'identity_inconsistent' : undefined;
     if (reason !== undefined) { hold(item.id, reason); continue; }
