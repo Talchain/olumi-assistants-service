@@ -433,7 +433,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
       // never parsed: the person is asked, as for any identity that cannot be worked out as stated.
       const [money, sep, den, ...extra] = rate.head;
       const [noun, ...more] = count.head;
-      const oneWord = (w: string | undefined): w is string => w !== undefined && /^[a-z]+$/.test(w) && !RATE_CONNECTORS.has(w) && w !== 'each' && w !== 'every';
+      const oneWord = (w: string | undefined): w is string => w !== undefined && /^[a-z]+$/.test(w) && !RATE_CONNECTORS.has(w);
       if (!plainMoney(money, g.code) || (sep !== 'per' && sep !== '/') || extra.length > 0 || more.length > 0 || !oneWord(den) || !oneWord(noun)) return false;
       if (singular(den) !== singular(noun)) return false;
       const periods = [rate.period, count.period].filter((p): p is string => p !== null);
