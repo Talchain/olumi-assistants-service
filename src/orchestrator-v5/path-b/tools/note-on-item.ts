@@ -41,12 +41,14 @@ const RANKS_OPTIONS = /\b(best|recommend\w*|winner|go with|should (?:choose|pick
 const escape = (t: string): string => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 export async function noteOnItem(deps: Pick<RunDeps, 'dispatch'>, ctx: Pick<AgentToolContext, 'scenario_id'>, args: NoteOnItemArgs,
-  turn: { notes: number }): Promise<ToolOutcome> {
+  turn: { notes: number; readonly only?: string }): Promise<ToolOutcome> {
   const note = args.note.trim();
   if (note === '') return refused('note_empty');
   if (note.length > NOTE_MAX) return refused('note_too_long', undefined, { max: NOTE_MAX, length: note.length });
   if (RANKS_OPTIONS.test(note)) return refused('note_ranks_options');
   if (turn.notes > 0) return refused('one_note_per_turn');
+  // A Challenge on one card: the note goes beside THAT card, never another valid one (Codex r2 #3634).
+  if (turn.only !== undefined && args.item_id !== turn.only) return refused('note_not_on_selected_item');
   const saved = await readSaved(deps, ctx.scenario_id);
   if (!isSavedRead(saved)) return saved.status === 'refused' ? refused('item_not_in_model') : saved;
   if (saved.identity === null) return refused('item_not_in_model');

@@ -57,6 +57,8 @@ export type PathBToolDeps = ChangeDeps & DraftDeps & RunDeps & Pick<StressDeps, 
    * outcome, or none with the saved model's readiness when that readiness admits no Run.
    */
   readonly analyseAfterCommit?: () => Promise<{ readonly run?: Record<string, unknown>; readonly ready?: unknown }>;
+  /** A Challenge on one card (the route's `challengeTargetOf`): this turn's note may sit only beside that card (Codex r2 #3634). */
+  readonly noteOnlyOn?: string;
 };
 export type PathBContext = Pick<AgentToolContext, 'scenario_id' | 'authenticated_user_id' | 'turn_id' | 'verified_user_messages' | 'user_turn_text'>;
 /** The route's tool result for one call: what `tool_results[i]` reads. `mutated` is false for an unknown write (the row says null). */
@@ -82,7 +84,7 @@ export type OnToolCall = (row: TraceRow, result: ToolCallResult) => void;
 export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLaneMode, onCall: OnToolCall = () => {},
   scenario: 'core' | 'legacy' = 'legacy'): Tool[] {
   let approvalApplied = false;
-  const notes = { notes: 0 };
+  const notes = { notes: 0, ...(deps.noteOnlyOn !== undefined ? { only: deps.noteOnlyOn } : {}) };
   const review = { done: false };
   const record = (name: string, input: Record<string, unknown>, outcome: ToolOutcome, proposalId?: string): string => {
     const args = toolArgumentsAsSent(name, JSON.stringify(input), [ctx.user_turn_text ?? '', ...(ctx.verified_user_messages ?? [])]).arguments;

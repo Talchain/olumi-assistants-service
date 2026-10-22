@@ -329,6 +329,20 @@ describe('PATH-B gap 4: commit and Undo each run the existing Run pipeline once;
     }
   });
 
+  it('⛔ Codex r2: a Challenge on one card never lands its note on ANOTHER valid card: the tool refuses it, no directive ships', async () => {
+    outputs = [[{ type: 'function_call', name: 'note_on_item', call_id: 'note_call', args: { item_id: 'g', note: 'Is Velocity the outcome you want?' } }],
+      [{ type: 'message', text: 'A question about the goal.' }]];
+    const r = await challengePress([{ id: 'f', kind: 'factor', label: 'Capacity' }]);
+    expect(r.statusCode, r.body).toBe(200);
+    expect(outputOf('note_call')).toMatchObject({ status: 'refused', reason: 'note_not_on_selected_item' });
+    expect(((r.json() as Json).blocks as Json[] | undefined ?? []).filter((b) => b.type === 'ui_directive')).toHaveLength(0);
+    // CONTRAST: the same note on another card, typed in the composer (no Challenge), still ships.
+    calls = []; outputs = [[{ type: 'function_call', name: 'note_on_item', call_id: 'note_call', args: { item_id: 'g', note: 'Is Velocity the outcome you want?' } }],
+      [{ type: 'message', text: 'A question about the goal.' }]];
+    const typed = await post({ turn_id: randomUUID(), message: 'What should I question here?', source: 'composer' });
+    expect(((typed.json() as Json).blocks as Json[])[0]).toMatchObject({ type: 'ui_directive', targets: [{ id: 'g' }] });
+  });
+
   it('⛔ Codex r1: a Challenge on one card the note cannot sit beside (the decision) forces nothing; a factor or goal does', () => {
     const one = (id: string) => ({ note: `${SELECTION_NOTE_PREFIX}[]`, grounded: { element_ids: [id], unresolved: 'none' as const } });
     const saved = { nodes: [{ id: 'd', kind: 'decision', label: 'Which way?' }, { id: 'f', kind: 'factor', label: 'Capacity' }, { id: 'g', kind: 'goal', label: 'Velocity' }] };
