@@ -124,10 +124,12 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
 
   it('first-model guidance preserves material causal paths before figures, without item-count quotas (DL lease, 22 Oct)', () => {
     // Static text contract only; Track 3 measures the resulting models on the served candidate.
-    expect(createHash('sha256').update(CORE_DRAFTING_GUIDANCE, 'utf8').digest('hex')).toBe('15c95d1ab087f090acb07402b629b23551a2d674f5efa88a37edf978c6eb576e');
+    expect(createHash('sha256').update(CORE_DRAFTING_GUIDANCE, 'utf8').digest('hex')).toBe('67dc1ec44d5b15cd3c1c9e14bdaa5f6b2d500d8489bd6f78ebca9915378d1d9b'); // 22 Oct: + at most one link per pair (Q2-06; was 15c95d1a…)
     // Track 3 c6 Q2 fm3 (22 Oct): an option's outlay that no aim measures was drafted as a factor reaching nothing.
     expect(CORE_DRAFTING_GUIDANCE).toContain('A factor that reaches no aim, carries no limit and defines nothing is decorative');
     expect(CORE_DRAFTING_GUIDANCE).toContain('the reply says it is left out and asks whether it should count, as a limit or within the aim');
+    // Q2-06 (22 Oct, 7b0af1a9): two links between the same two items, one per way it moved the other; the engine holds one.
+    expect(CORE_DRAFTING_GUIDANCE).toContain('Two items have at most one link between them: when one item moves another in two ways, each way is its own factor on the path');
     expect(CORE_DRAFTING_GUIDANCE).toContain('every material causal path the person states or proposes, including each intermediate effect and distinct outcome');
     expect(CORE_DRAFTING_GUIDANCE).toContain('complete paths and distinct outcomes before adding figures');
     expect(CORE_DRAFTING_GUIDANCE).toContain('a missing figure never justifies replacing a material mechanism with a proxy result or a caveat');
