@@ -1004,7 +1004,7 @@ export function goalChanceLicenceOf(
     statusQuoLabel: statusQuoId === undefined ? undefined : labelOfNode(nodes, statusQuoId),
     // Acceptance is not authorship (DL 12 Oct, BLOCKING 3): an accepted Olumi value or link is still Olumi's — provisional.
     quantityFrame: readingFrame, olumiInputs: estimates.links + estimates.values + Object.keys(settingsByOption).length
-      + estimates.acceptedValues + estimates.acceptedLinks + rangeUses.length > 0, unverifiedInputs,
+      + estimates.acceptedValues + estimates.acceptedLinks + rangeUses.length > 0 || levelDefaultsOn(graph, goalId, constraints.sentRun).length > 0, unverifiedInputs,
     constraints, option_ids,
     estimates, jointEstimates,
   });
@@ -1585,13 +1585,13 @@ function userLinkExistenceOn(graph: unknown, goalId: unknown, optionIds: readonl
  */
 export function userStatedLinksBelowOne(graph: unknown, goalId: unknown, optionIds: readonly string[]): Rec[] {
   const endsOf = endsOfGraph(graph);
-  return goalPathEdges(graph, goalId, optionIds).filter((e) => isUserStatedLink(e) && heldLinkOf(e, endsOf(e)) === null && belowOne(e));
+  return goalPathItems(graph, goalId, optionIds).filter((e) => isUserStatedLink(e) && heldLinkOf(e, endsOf(e)) === null && belowOne(e));
 }
 
 /** The interim's predicate: a link on a compared option's goal path whose existence < 1 the user did not set (unheld). */
 export function olumiExistenceOnGoalPath(graph: unknown, goalId: unknown, optionIds: readonly string[]): boolean {
   const endsOf = endsOfGraph(graph);
-  return goalPathEdges(graph, goalId, optionIds).some((e) => heldLinkOf(e, endsOf(e)) === null && belowOne(e));
+  return goalPathItems(graph, goalId, optionIds).some((e) => heldLinkOf(e, endsOf(e)) === null && belowOne(e));
 }
 
 const belowOne = (e: Rec): boolean =>
@@ -1599,9 +1599,9 @@ const belowOne = (e: Rec): boolean =>
 
 /**
  * The directed, non-identity links on the options' paths to THE SCORED goal: reached from an option's intervened factors
- * or out-links, and reaching the goal. An IDENTITY edge is fixed by ISL, never Bernoulli-gated (Codex r1 #2637).
+ * or out-links, and reaching the goal; `levels` reads all goal ancestors (including identity operands). An IDENTITY edge is fixed by ISL, never Bernoulli-gated (Codex r1 #2637).
  */
-function goalPathEdges(graph: unknown, goalId: unknown, optionIds: readonly string[]): Rec[] {
+function goalPathItems(graph: unknown, goalId: unknown, optionIds: readonly string[], levels = false): Rec[] {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
   const goal = nodes.find((n) => n.id === goalId && n.kind === 'goal');
@@ -1615,6 +1615,7 @@ function goalPathEdges(graph: unknown, goalId: unknown, optionIds: readonly stri
     grew = false;
     for (const e of directed) if (toGoal.has(e.to) && !toGoal.has(e.from) && walkable(e.from)) { toGoal.add(e.from); grew = true; }
   }
+  if (levels) return nodes.filter(n => toGoal.has(n.id));
   // Nodes reached from the licensed options: their intervened factors and their own out-links, then forward.
   const reached = new Set<unknown>();
   for (const id of optionIds) {
@@ -1634,6 +1635,15 @@ function goalPathEdges(graph: unknown, goalId: unknown, optionIds: readonly stri
   };
   // ⭐ Hold-at-1.0 (d5 #87 6008807178): a held link is not Olumi's doubt; callers filter with the SAME `heldLinkOf`.
   return directed.filter((e) => reached.has(e.from) && toGoal.has(e.to) && !identityEdge(e));
+}
+
+/** Checked level spreads include identity siblings, even when no option intervenes on that operand. */
+function levelDefaultsOn(graph: unknown, goalId: unknown, sentRun: unknown) {
+  const sent = isRec(sentRun) && isRec(sentRun.graph) && Array.isArray(sentRun.graph.nodes) ? sentRun.graph.nodes.filter(isRec) : [];
+  return goalPathItems(graph, goalId, [], true).flatMap(node => {
+    const matches = sent.filter(n => n.id === node.id), loss = matches.length === 1 ? linkDefaultAssumptionsOf(node, matches[0]) : [];
+    return loss.length === 0 ? [] : [{ id: String(node.id), loss }];
+  });
 }
 
 /** Appends the licence to the Run's `inference_warnings` when there is one; otherwise the envelope itself. Pure. */
@@ -1657,14 +1667,15 @@ export function withGoalChanceLicence<E>(
   const omitted = runOmittedRisks({ inference_warnings: warnings });
   const sentGraph = isRec(constraints.sentRun?.graph) ? constraints.sentRun.graph : undefined;
   const sentEdges = Array.isArray(sentGraph?.edges) ? sentGraph.edges.filter(isRec) : [];
-  const defaults = goalPathEdges(graph, goalId, Object.keys(licence.pct_by_option)).flatMap(edge => {
+  const defaults = goalPathItems(graph, goalId, Object.keys(licence.pct_by_option)).flatMap(edge => {
     const sent = sentEdges.filter(e => e.from === edge.from && e.to === edge.to);
     const loss = sent.length === 1 ? linkDefaultAssumptionsOf(edge, sent[0]) : [];
     return loss.length === 0 ? [] : [{ from: String(edge.from), to: String(edge.to), loss }];
   });
-  const assumptions: LinkDefaultAssumptions | undefined = defaults.length === 0 ? undefined : {
+  const nodeDefaults = Object.keys(licence.pct_by_option).length === 0 ? [] : levelDefaultsOn(graph, goalId, constraints.sentRun);
+  const assumptions: LinkDefaultAssumptions | undefined = defaults.length + nodeDefaults.length === 0 ? undefined : {
     status: 'Illustrative calculation — uses untested Olumi assumptions.', origin: 'olumi',
-    coefficient_distribution: 'unbounded_normal', stated_range_use: 'recorded_not_sampled_or_tail_bounds', links: defaults,
+    coefficient_distribution: 'unbounded_normal', stated_range_use: 'recorded_not_sampled_or_tail_bounds', links: defaults, ...(nodeDefaults.length === 0 ? {} : { nodes: nodeDefaults }),
   };
   return { ...shown, inference_warnings: [...warnings, { ...licence, ...goalChanceHorizonOf(checked),
     ...(assumptions === undefined ? {} : { default_assumptions: assumptions,
