@@ -67,10 +67,12 @@ describe('exact results with no "carry on" option: margins from the Run\'s own r
   });
 
   it('the conversion is relative with no floor (Codex): a tiny scale dispatching 850 is refused, the same scale at 900 is not', () => {
-    const tiny = (t: number) => { const f = fresh(); Object.assign(asked(f), { dispatched_goal_baseline: 7e-12, dispatched_goal_threshold: t });
-      Object.assign(asked(f).calculated, { encoded_baseline: 7e-12, encoded_target: t }); return marginsOf(f); };
+    const tiny = (t: number, b = 7e-12) => { const f = fresh(); Object.assign(asked(f), { dispatched_goal_baseline: b, dispatched_goal_threshold: t });
+      Object.assign(asked(f).calculated, { encoded_baseline: b, encoded_target: t }); return marginsOf(f); };
     expect(tiny(8.5e-12)).toBeUndefined();
     expect(tiny(9e-12)?.options.map((o) => o.margin)).toEqual([60, -80]);
+    // Codex r1: a product that overflows is never "close" to a finite threshold (700 → 1.7e308 makes 900 × scale infinite).
+    expect(tiny(1e300, 1.7e308)).toBeUndefined();
   });
 
   it('bound to THIS Run: another graph hash, a missing hash, another revision or another run id gets nothing', () => {

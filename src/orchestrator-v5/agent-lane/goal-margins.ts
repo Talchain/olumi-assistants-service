@@ -230,8 +230,9 @@ function snapshotMarginsOf(stored: Rec, graph: unknown, evidence: SelectedRunEvi
   // The performed target: the dispatched threshold IS the raw target on the dispatched baseline's own scale (relative, no floor).
   const sentT = asked.dispatched_goal_threshold, sentB = asked.dispatched_goal_baseline;
   if (sentT === null || sentB === null || today === 0) return undefined;
-  const scale = sentB / today;
-  if (!(scale > 0) || !Number.isFinite(scale) || !close(sentT, target * scale)) return undefined;
+  const scale = sentB / today, expected = target * scale;
+  // Every step finite (Codex r1: an overflowed product is "close" to an overflowed threshold).
+  if (!(scale > 0) || !Number.isFinite(scale) || !Number.isFinite(expected) || !close(sentT, expected)) return undefined;
   // The licence's carrier: one, with no sent threshold (the first route owns those), describing this same goal and target.
   const carriers = [stored.inference_warnings, rec(stored.enrichment)?.inference_warnings].flatMap((v) => (Array.isArray(v) ? v : []))
     .map(rec).filter((w): w is Rec => w?.code === 'GOAL_CHANCE_LICENSED');
