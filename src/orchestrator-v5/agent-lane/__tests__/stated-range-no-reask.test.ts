@@ -11,6 +11,11 @@ import { buildModelFromBrief } from '../runtime/build-model.js';
 import { placeholderGoalWarning, STATED_RANGE_NEXT_STEP, unsizedLeaderGoalPaths } from '../goal-certainty.js';
 import { guidedSizingActions, guidedSizingFromWarning, linkSizeQuestion } from '../guided-sizing.js';
 import { GOAL_FIGURES_PLACEHOLDER_PATH } from '../../../orchestrator/context/option-result-source.js';
+import { targetNotTestableWarning, targetTestabilityOf, untestableTargetParts } from '../../admission/target-testability.js';
+import { linkHoldsStatedRange } from '../../statement-door/statements.js';
+import { assembleGuidanceSignals } from '../turn-context/guidance-signals.js';
+import { selectStrengthenPlaceholder } from '../guidance/select-strengthen-placeholder.js';
+import served from '../../../../tests/fixtures/c2/capacity-1253187a-turn05-graph.json';
 
 type Rec = Record<string, any>;
 const EFFECT = 'Option one is a corporate wellness deal with two offices nearby, which would cost us around £6k a year in discounts — our membership manager thinks it could add somewhere between 4 and 7 attendance points.';
@@ -115,5 +120,61 @@ describe('a Run never asks again for a link whose effect the user stated as a ra
     expect(chips.map((c) => c.label)).toContain(linkSizeQuestion('Corporate deal active', 'weekday attendance'));
     expect(w.message).toMatch(/Set them to see how much they matter\.$/); // no range anywhere: today's sentence
     expect(chips).toHaveLength(3);
+  });
+});
+
+/**
+ * ⭐ C2 G2 turn 05 (served CEE 1253187a; capture's own graph and words, tests/fixtures/c2): the reply said the user's
+ * "10–30 per specialist" was supplied, while the target withhold's (c) question and the guidance S1 card asked for that
+ * link's size again. Both now read the statement door's ONE reader (`linkHoldsStatedRange`), as the sizer and the Run's
+ * withhold already do: the need stays said, the ask goes; Olumi's own unsized links are still asked.
+ */
+describe('served C2 turn 05: the target question and the S1 card never re-ask a held range', () => {
+  const HELD = { from: 'additional_specialists', to: 'additional_specialist_capacity' };
+  const OPTION = 'add_one_specialist';
+  const graphOf = (keepRange: boolean): Rec => {
+    const g = structuredClone(served.graph) as Rec;
+    if (!keepRange) for (const n of g.nodes as Rec[]) {
+      if (Array.isArray(n.user_statements)) n.user_statements = n.user_statements.filter((r: Rec) => r.subject_key !== `link|${HELD.from}|${HELD.to}||effect`);
+    }
+    return g;
+  };
+  const targetOf = (g: Rec) => {
+    const verdict = targetTestabilityOf(g);
+    expect(verdict).toMatchObject({ kind: 'not_testable', failures: [{ case: 'c', link: HELD }] });
+    return { parts: untestableTargetParts(g, verdict)!, warning: targetNotTestableWarning(g, verdict, [OPTION], 'GOAL_FIGURES_TARGET_NOT_TESTABLE')! };
+  };
+  const s1Of = (g: Rec) => ({
+    signal: assembleGuidanceSignals({ request: 'turn', offeredSpecific: [], graph: g, analysisState: undefined, analysisResult: undefined, leaderLicensed: false })['model.placeholder_goal_links'],
+    card: selectStrengthenPlaceholder(g, [OPTION]),
+  });
+
+  it('⭐ (c): the held link keeps its need said, with no question and no first ask', () => {
+    const g = graphOf(true);
+    expect(linkHoldsStatedRange(g, HELD.from, HELD.to), 'precondition: the served record holds the range').toBe(true);
+    const { parts, warning } = targetOf(g);
+    expect(parts.needs[0]).toMatch(/^a size for the links from Additional specialists to Additional specialist capacity, /u);
+    expect(parts.question).toBeNull();
+    expect(parts.asked).toBeNull();
+    expect(warning.first_ask).toBeUndefined();
+    expect(warning.message).toMatch(/^Not shown\. Olumi can compare your options, but can't yet test them against your target \(at least 100 tickets per week\), because it needs a size for the links from Additional specialists to Additional specialist capacity/u);
+    expect(warning.message).not.toMatch(/Roughly how much/u);
+    expect(warning.say).not.toMatch(/Roughly how much/u);
+  });
+  it('CONTRAST (c): the same served graph with no range record asks exactly what turn 05 served', () => {
+    const { parts, warning } = targetOf(graphOf(false));
+    expect(warning.message).toBe(served.served.target_not_testable_message);
+    expect(warning.first_ask).toEqual(served.served.target_not_testable_first_ask);
+    expect(parts.asked).toEqual(HELD);
+  });
+  it('⭐ S1: the held link is neither the guidance item nor the Strengthen card; Olumi\'s unsized links still are', () => {
+    const { signal, card } = s1Of(graphOf(true));
+    expect(signal).toEqual(['additional_specialists->specialist_capacity_shortfall', 'specialist_capacity_shortfall->additional_specialist_capacity']);
+    expect(card).toMatchObject({ variant: 'S1', from_id: 'specialist_capacity_shortfall', to_id: HELD.to });
+  });
+  it('CONTRAST S1: with no range record the held link is offered first, as turn 05 served it', () => {
+    const { signal, card } = s1Of(graphOf(false));
+    expect(signal).toContain(served.served.guidance_slot1_item);
+    expect(card).toMatchObject({ variant: 'S1', from_id: HELD.from, to_id: HELD.to });
   });
 });

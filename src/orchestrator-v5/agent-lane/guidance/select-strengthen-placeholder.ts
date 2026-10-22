@@ -19,7 +19,7 @@
 import { edgeBandFromMagnitude } from '../../format/edge-strength-bands.js';
 import type { InfluenceBand } from '../../format/influence-bands.js';
 import { isPlaceholderLink } from '../../../cee/magnitude/link-sizing.js';
-import { placeholderGoalPaths } from '../goal-certainty.js';
+import { placeholderGoalPaths, userStatedRangeOn } from '../goal-certainty.js';
 
 export interface LinkTarget {
   readonly from_id: string;
@@ -79,7 +79,8 @@ export function selectStrengthenPlaceholder(
   }
 
   const seen = new Set<string>();
-  const candidates = paths.flatMap((p) => p.links).filter((l) => !seen.has(`${l.from}->${l.to}`) && seen.add(`${l.from}->${l.to}`))
+  // ⭐ ITEM 3: never a size card for a link whose effect the USER stated as a range (the same reader as the guidance signal).
+  const candidates = paths.flatMap((p) => p.links).filter((l) => !userStatedRangeOn(graph, l) && !seen.has(`${l.from}->${l.to}`) && seen.add(`${l.from}->${l.to}`))
     .map((l) => ({ ...l, id: `${l.from}->${l.to}`, distance: distance.get(l.to) ?? 99 }))
     .sort((a, b) => a.distance - b.distance || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
