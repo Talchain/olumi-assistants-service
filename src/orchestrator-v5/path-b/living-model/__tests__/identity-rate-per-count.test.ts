@@ -34,6 +34,22 @@ const bakery = (loavesUnit: string, priceUnit: string, aimUnit = '£ per week'):
   links: [], risks: [], conditions: [], views: [], history: [],
 });
 
+/** Synthetic declared work = productivity × available duration; no inferred launch target or probability. */
+const delivery = (durationUnit = 'working days'): LivingModelT => ({
+  aims: [{ id: 'work', text: 'Complete at least 150 developer-days of work', status: 'current', ...who('at least 150 developer-days'),
+    target: { quantity: 'Work completed', comparator: '>=', value: 150, low: null, high: null, unit: 'developer-days', by_when: null, period_months: null,
+      baseline: 'today', current: 125, current_source: null, current_unit: null, change_kind: null, source: null },
+    defined_as: { op: 'product', of: ['productivity', 'available'], ...who('work is productivity times available working days') } }],
+  options: [
+    { status: 'feasible', id: 'hold', label: 'Carry on', settings: [], developed_from: null, ...who('carry on') },
+    { status: 'feasible', id: 'add', label: 'Add capacity', developed_from: null, ...who('add capacity'),
+      settings: [{ factor_id: 'productivity', estimate_by: null, value: 3.5, low: null, high: null, unit: 'developer-days per working day', ...who('3.5 developer-days per working day') }] },
+  ],
+  factors: [level('productivity', 'Productivity', 2.5, 'developer-days per working day', '2.5 developer-days per working day'),
+    level('available', 'Available working days', 50, durationUnit, '50 working days')],
+  links: [], risks: [], conditions: [], views: [], history: [],
+});
+
 const reasons = (m: LivingModelT) => mapLivingModel(m).withheld.map((w) => `${w.id}:${w.reason}`);
 const stored = (model: LivingModelT): Rec => projectCorePostimageForPersistence(GraphV3.parse({ ...mapLivingModel(model).graph, living_model: model })) as Rec;
 
@@ -54,6 +70,49 @@ async function requestTheRunSends(name: string, model: LivingModelT): Promise<Re
   return request!;
 }
 const node = (r: Rec, id: string) => (r.graph.nodes as Rec[]).find((n) => n.id === id)!;
+
+describe('declared non-currency rate × duration reaches the existing Run', () => {
+  it('keeps the exact product, both definition edges and the stated target in the real Run request', async () => {
+    const model = delivery();
+    expect(reasons(model)).toEqual([]);
+    const r = await requestTheRunSends('work-duration', model);
+    expect(node(r, 'work')).toMatchObject({ goal_threshold_raw: 150,
+      observed_state: { raw_value: 125 },
+      nonlinear_identity: { operation: 'product', factor_ids: ['productivity', 'available'], stated_in_brief: true } });
+    for (const from of ['productivity', 'available']) {
+      const edges = (r.graph.edges as Rec[]).filter((e) => e.from === from && e.to === 'work');
+      expect(edges).toHaveLength(1);
+      expect(edges[0]).toMatchObject({ provenance: { definitional: true } });
+    }
+  });
+
+  it.each(['calendar days', 'working weeks'])('a mismatched duration (%s) keeps the definition unproved and the Run blocked', async (unit) => {
+    const model = delivery(unit);
+    expect(reasons(model)).toContain('work:identity_unit_mismatch');
+    expect(mapLivingModel(model).graph.nodes.find((n) => n.id === 'work')!.nonlinear_identity).toBeUndefined();
+    await expect(requestTheRunSends(`work-${unit}`, model)).rejects.toThrow('Persisted graph is not analysis-ready');
+  });
+
+  it('an unknown part stays unknown even when its units compose', () => {
+    const model = delivery();
+    model.factors[1]!.value = null;
+    expect(reasons(model)).toContain('work:identity_part_unknown');
+    expect(mapLivingModel(model).graph.nodes.find((n) => n.id === 'work')!.nonlinear_identity).toBeUndefined();
+  });
+
+  it('keeps a provisional definition useful without inventing the person\'s missing target', () => {
+    const model = delivery();
+    model.aims[0]!.target!.value = null;
+    model.aims[0]!.defined_as = { ...model.aims[0]!.defined_as!, source: 'olumi', quote: null };
+    const mapped = mapLivingModel(model);
+    expect(mapped.withheld).toContainEqual({ id: 'work', reason: 'no_level_target' });
+    const goal = mapped.graph.nodes.find((n) => n.id === 'work')!;
+    expect(goal.nonlinear_identity).toMatchObject({ operation: 'product', stated_in_brief: false });
+    expect(goal.goal_threshold_raw).toBeUndefined();
+    expect(mapped.graph.edges.filter((e) => e.to === 'work')).toHaveLength(2);
+    expect(model.aims[0]!.target!.value).toBeNull();
+  });
+});
 
 describe('a product of money per X and a count of X per period is money per period', () => {
   it('"£ per loaf" × "loaves a week" = "£ per week": the definition reaches the engine and the Run keeps the £2,900 threshold', async () => {

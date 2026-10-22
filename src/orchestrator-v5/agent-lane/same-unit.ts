@@ -523,7 +523,33 @@ export function unitsAt(text: string, literal: { index: number; matchedText: str
   return nounUnitsAt(tail);
 }
 
-// Moved verbatim out of `reconciling-product.ts` (Track 2, 21 Oct): the thin-core mapper reads the ONE composition rule.
+/**
+ * An explicitly declared non-money identity: A per B × B = A. Read every noun/qualifier with the existing readers;
+ * never infer a definition from labels, convert a scale/period, or discard another denominator. This narrow proof
+ * admits compound duration counts ("developer-days per working day" × "working days"), not arbitrary products.
+ */
+export function countRateProductComposes(whole: unknown, a: unknown, b: unknown): boolean {
+  const plainCount = (unit: unknown): readonly string[] | null => {
+    const parts = readUnitParts(unit);
+    return parts?.kind === 'count' && parts.per === null && parts.period === null && typeof unit === 'string'
+      && words(unit).every((w) => /^[a-z][a-z.']*$/.test(w) && !isPeriodConnector(w) && periodAdverb(w) === null)
+      ? parts.noun?.map((w) => periodNoun(w) ?? w) ?? null : null;
+  };
+  const total = plainCount(whole);
+  if (total === null) return false;
+  return ([[a, b], [b, a]] as const).some(([rate, count]) => {
+    const counted = plainCount(count);
+    if (typeof rate !== 'string' || counted === null) return false;
+    const ws = words(rate);
+    const at = ws.findIndex((w) => w === 'per' || w === '/');
+    if (at < 1) return false;
+    const numerator = plainCount(ws.slice(0, at).join(' '));
+    const denominator = plainCount(ws.slice(at + 1).join(' '));
+    return numerator !== null && denominator !== null && sameWords(numerator, total) && sameWords(denominator, counted);
+  });
+}
+
+// Moved verbatim out of `reconciling-product.ts` (Track 2, 21 Oct): the thin-core mapper reads the ONE money composition rule.
 /**
  * ⛔ AIQ 5886846493 + 5886967509 (HARD): (money per <unit> per period) × (count of that <unit>) = money per period, in the
  * goal's OWN currency and period. The rate's per-unit denominator MUST name the count ("£/subscriber/month" ×

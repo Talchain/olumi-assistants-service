@@ -9,7 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { unitsCompose } from '../reconciling-product.js';
-import { readMoney } from '../same-unit.js';
+import { countRateProductComposes, readMoney } from '../same-unit.js';
 import { proposeProductIdentity } from '../identity-proposal.js';
 
 const compose = (rate: string, count: string) => unitsCompose('£ per month', 'MRR', { unit: rate, label: 'rate' }, { unit: count, label: 'count' }).kind;
@@ -37,5 +37,37 @@ describe('unitsCompose: a qualified per-denominator (DL 8 Oct, 77cb0774)', () =>
     ['two denominators', '£ per Pro subscriber per seat per month', 'Pro subscribers'],
   ])('CONTROL: %s → no', (_n, rate, count) => {
     expect(compose(rate, count)).toBe('no');
+  });
+});
+
+describe('declared non-money rate × matching count/duration', () => {
+  it.each([
+    ['developer-days', 'developer-days per working day', 'working days'],
+    ['tickets', 'tickets / billable hour', 'billable hours'],
+    ['completed tasks', 'completed tasks per team', 'teams'],
+    ['tickets', 'tickets per month', 'months'],
+    ['tickets', 'tickets per hr', 'hours'],
+  ])('%s = %s × %s, in either order', (whole, rate, count) => {
+    expect(countRateProductComposes(whole, rate, count)).toBe(true);
+    expect(countRateProductComposes(whole, count, rate)).toBe(true);
+  });
+
+  it.each([
+    ['missing duration qualifier', 'developer-days', 'developer-days per working day', 'days'],
+    ['different duration qualifier (mutant pair)', 'developer-days', 'developer-days per working day', 'calendar days'],
+    ['different duration', 'developer-days', 'developer-days per working day', 'working weeks'],
+    ['different numerator', 'developer-days', 'engineer-days per working day', 'working days'],
+    ['scaled count', 'tickets', 'tickets per hour', 'thousand hours'],
+    ['scaled numerator', 'tickets', 'thousand tickets per hour', 'hours'],
+    ['second denominator', 'tickets', 'tickets per agent per day', 'agents'],
+    ['residual period is not dropped', 'tickets', 'tickets weekly per agent', 'agents'],
+    ['a rate is not a duration count', 'tickets', 'tickets per day', 'days per week'],
+    ['no explicit rate', 'tickets', 'tickets', 'days'],
+    ['unknown count', 'tickets', 'tickets per day', null],
+    ['unknown numerator', null, 'tickets per day', 'days'],
+    ['share is not a count', '%', '% per day', 'days'],
+    ['money keeps its existing rule', '£', '£ per day', 'days'],
+  ])('%s stays unproved', (_why, whole, rate, count) => {
+    expect(countRateProductComposes(whole, rate, count)).toBe(false);
   });
 });

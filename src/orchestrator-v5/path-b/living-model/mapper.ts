@@ -28,7 +28,7 @@ import { resolveGoalThresholdCapWithProvenance } from '../../../utils/goal-thres
 import { admitGoalBaseline } from '../../../cee/factor-extraction/goal-baseline-admissibility.js';
 import { sayFigureAsWritten } from '../../agent-lane/say-figure.js';
 import { LLM_STRENGTH_STD_FLOOR } from '../../../cee/constants.js';
-import { readUnitParts, sameUnit, singular, unitsCompose, words } from '../../agent-lane/same-unit.js';
+import { countRateProductComposes, readUnitParts, sameUnit, singular, unitsCompose, words } from '../../agent-lane/same-unit.js';
 import { periodAdverb, periodNoun } from '../../../utils/unit-alphabet.js';
 import { EventRiskV1 } from '../../../schemas/event-risk.js';
 import { riskOccurrenceIsCurrent } from '../../agent-lane/risk-occurrence.js';
@@ -200,7 +200,8 @@ function definitionCheck(model: LivingModelT, def: Definition, itemId: string, u
   const reason: WithheldReason | undefined = values.some((v) => v === null) ? 'identity_part_unknown'
     : (op === 'sum' ? !parts.every((p) => sameUnit(p.unit, unit))
       : unitsCompose(unit, label, { unit: parts[0]!.unit, label: parts[0]!.label }, { unit: parts[1]!.unit, label: parts[1]!.label }).kind !== 'proof'
-        && !ratePerCountComposes(unit, parts[0]!.unit, parts[1]!.unit))
+        && !ratePerCountComposes(unit, parts[0]!.unit, parts[1]!.unit)
+        && !countRateProductComposes(unit, parts[0]!.unit, parts[1]!.unit))
       ? 'identity_unit_mismatch'
       : level !== null && Math.abs(level - made) > 1e-9 * Math.max(1, Math.abs(level)) ? 'identity_inconsistent' : undefined;
   return { ...(reason === undefined ? {} : { reason }), made, parts };
