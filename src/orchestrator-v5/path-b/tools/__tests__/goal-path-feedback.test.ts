@@ -15,10 +15,10 @@ import { mapLivingModel } from '../../living-model/mapper.js';
 import { KNOWN_ANSWER } from '../../living-model/__tests__/fixtures.js';
 import { F1_CONTRADICTED, F1_OTHER_CAUSE } from '../../living-model/__tests__/track2-f1-identity.fixtures.js';
 import { buildModel } from '../draft-tool.js';
-import { proposeLivingChange } from '../living-change.js';
+import { applyLivingChange, proposeLivingChange } from '../living-change.js';
 import { pathBTools, type ToolCallResult } from '../index.js';
 import type { TraceRow } from '../outcome.js';
-import { goalPathEncodingCauses, KEPT_AS_REFUSED, optionsReachingGoal, personContentLost, RESTRUCTURE_CHANGE, RESTRUCTURE_CUT, RESTRUCTURE_DRAFT, type Restructure } from '../goal-path.js';
+import { goalPathEncodingCauses, KEPT_AS_REFUSED, optionsReachingGoal, personContentLost, RESTRUCTURE_AIM, RESTRUCTURE_CHANGE, RESTRUCTURE_CUT, RESTRUCTURE_DRAFT, type Restructure } from '../goal-path.js';
 import type { Rec } from './fixtures.js';
 
 const SID = 'scn_1';
@@ -404,6 +404,71 @@ describe('DL 22 Oct (marketing on 7ee0d90f): a change never silently cuts the go
     fewer.factors[0] = { ...fewer.factors[0]!, value: 0.6, quote: 'Actually f is at 0.6 now.' };
     expect(await proposeLivingChange({ dispatch: product(pathless).dispatch, proposals: new ProposalStore(), restructure }, changeCtx, args(fewer, [])))
       .toMatchObject({ status: 'ok' });
+    expect(restructure.offered).toBe(false);
+  });
+});
+
+describe('DL 22 Oct (marketing on 4a4c338c): a change that adds the person\'s own aim with its target makes it the goal', () => {
+  /** Saved: the person's aim with no target is the goal; f reaches it. */
+  const untargeted = (): LivingModelT => {
+    const m = structuredClone(KNOWN_ANSWER);
+    m.aims[0] = { ...m.aims[0]!, text: 'Grow the units', target: null };
+    return m;
+  };
+  /** The change adds the person's own aim, with the target they stated, and nothing linked to it. */
+  const stated = (src: 'user' | 'olumi' = 'user'): LivingModelT['aims'][number] => ({ ...structuredClone(KNOWN_ANSWER.aims[0]!), id: 'g2', text: 'Reach 100 units',
+    source: src, quote: src === 'user' ? 'we need at least 100 units' : null });
+  const added = (src: 'user' | 'olumi' = 'user'): LivingModelT => ({ ...untargeted(), aims: [...untargeted().aims, stated(src)] });
+  /** The retry: what drives it linked to it, as Olumi's own provisional estimate. */
+  const linked = (): LivingModelT => ({ ...added(), links: [...added().links, { id: 'f_g2', from: 'f', to: 'g2', source: 'olumi', party: null, quote: null,
+    effect: { estimate_by: null, form: 'range', value: null, low: 20, high: 60, sd: null, unit: 'units', sign: '+' } }] });
+  const args = (model: LivingModelT) => ({ public_label: 'Add your target', basis: 'The person stated their target.', model, remove: [] as string[] });
+  const ctx = { ...changeCtx, user_turn_text: 'Our target: we need at least 100 units.' };
+
+  it('no option reaches the added aim: the aim is said once; the linked retry is carded and written with that aim as the goal', async () => {
+    const p = product(untargeted());
+    const proposals = new ProposalStore();
+    const restructure: Restructure = { offered: false };
+    expect(goalOf(p.saved())?.id).toBe('g');
+    const first = await proposeLivingChange({ dispatch: p.dispatch, proposals, restructure }, ctx, args(added()));
+    expect(first).toEqual({ status: 'refused', reason: 'aim_unconnected', detail: RESTRUCTURE_AIM, data: { aim: 'g2' } });
+    expect(p.registered).toHaveLength(0);
+    const second = await proposeLivingChange({ dispatch: p.dispatch, proposals, restructure }, ctx, args(linked()));
+    expect(second, JSON.stringify(second)).toMatchObject({ status: 'ok', data: { proposal_id: expect.any(String) } });
+    expect(((second as { data: Rec }).data.withheld as Rec[]).filter((w) => w.id === 'g2'), 'the stated aim is the goal, never held').toEqual([]);
+    expect(await applyLivingChange({ dispatch: p.dispatch, proposals }, ctx, String((second as { data: Rec }).data.proposal_id)))
+      .toMatchObject({ status: 'ok', mutated: true });
+    expect(goalOf(p.saved())).toMatchObject({ id: 'g2', goal_threshold: expect.anything() });
+  });
+
+  it('base fallback: the same change sent again is carded as it is, the stated aim the goal', async () => {
+    const p = product(untargeted());
+    const proposals = new ProposalStore();
+    const restructure: Restructure = { offered: false };
+    expect(await proposeLivingChange({ dispatch: p.dispatch, proposals, restructure }, ctx, args(added()))).toMatchObject({ reason: 'aim_unconnected' });
+    const again = await proposeLivingChange({ dispatch: p.dispatch, proposals, restructure }, ctx, args(added()));
+    expect(again, JSON.stringify(again)).toMatchObject({ status: 'ok' });
+    await applyLivingChange({ dispatch: p.dispatch, proposals }, ctx, String((again as { data: Rec }).data.proposal_id));
+    expect(goalOf(p.saved())?.id).toBe('g2');
+  });
+
+  it('JOINT: two stated aims added: the first is the goal, the second stays out of the slice', async () => {
+    const two = linked();
+    two.aims.push({ ...stated(), id: 'g3', text: 'Reach 100 units again' });
+    const out = await proposeLivingChange({ dispatch: product(untargeted()).dispatch, proposals: new ProposalStore(), restructure: { offered: false } }, ctx, args(two));
+    expect(out, JSON.stringify(out)).toMatchObject({ status: 'ok' });
+    expect(((out as { data: Rec }).data.withheld as Rec[]).filter((w) => w.id === 'g2' || w.id === 'g3')).toEqual([{ id: 'g3', reason: 'aim_not_in_slice' }]);
+  });
+
+  it('CONTRAST: a saved goal with its own target, or an aim Olumi adds, never moves the goal and is carded at once', async () => {
+    const restructure: Restructure = { offered: false };
+    const keeps = { ...structuredClone(KNOWN_ANSWER), aims: [...structuredClone(KNOWN_ANSWER).aims, stated()] };
+    const a = await proposeLivingChange({ dispatch: product(KNOWN_ANSWER).dispatch, proposals: new ProposalStore(), restructure }, ctx, args(keeps));
+    expect(a, JSON.stringify(a)).toMatchObject({ status: 'ok' });
+    expect(((a as { data: Rec }).data.withheld as Rec[]).filter((w) => w.id === 'g2')).toEqual([{ id: 'g2', reason: 'aim_not_in_slice' }]);
+    const b = await proposeLivingChange({ dispatch: product(untargeted()).dispatch, proposals: new ProposalStore(), restructure }, ctx, args(added('olumi')));
+    expect(b, JSON.stringify(b)).toMatchObject({ status: 'ok' });
+    expect(((b as { data: Rec }).data.withheld as Rec[]).filter((w) => w.id === 'g2')).toEqual([{ id: 'g2', reason: 'aim_not_in_slice' }]);
     expect(restructure.offered).toBe(false);
   });
 });

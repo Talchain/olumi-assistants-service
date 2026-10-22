@@ -15,8 +15,8 @@ import type { InternalDispatch } from '../../agent-lane/runtime/agent-capabiliti
 import { createProposal, type ProposalOperation, type ProposalStore, type StructuredProposal } from '../../agent-lane/proposal.js';
 import { LivingModel, type LivingModelT } from '../../../schemas/living-model.js';
 import { applyKernel, plain } from '../living-model/kernel.js';
-import { mapLivingModel, savedGoal } from '../living-model/mapper.js';
-import { addedCauses, goalPathEncodingCauses, KEPT_AS_REFUSED, optionsReachingGoal, personContentLost, RESTRUCTURE_CHANGE, RESTRUCTURE_CUT, withRefusedRoles, type Restructure } from './goal-path.js';
+import { changeGoal, mapLivingModel, savedGoal } from '../living-model/mapper.js';
+import { addedCauses, goalPathEncodingCauses, KEPT_AS_REFUSED, optionsReachingGoal, personContentLost, RESTRUCTURE_AIM, RESTRUCTURE_CHANGE, RESTRUCTURE_CUT, withRefusedRoles, type Restructure } from './goal-path.js';
 import { diffLivingModels, stable, type LivingChange } from '../living-model/diff.js';
 import { livingViewOf } from '../living-model/view.js';
 import { isNoModelYet, isSavedRead, readSaved } from './context-tool.js';
@@ -126,13 +126,21 @@ async function proposeOnce(deps: Deps, ctx: Ctx, args: LivingChangeArgs): Promis
   if (unnamed.length > 0) return refused('removal_not_named', undefined, { left_out: unnamed });
   const kept = args.remove.filter((id) => !removed.some((c) => c.id === id));
   if (kept.length > 0) return refused('removal_not_applied', undefined, { still_present: kept });
-  const mapped = mapLivingModel(next, savedGoal(base.saved.graph));
+  const goal = changeGoal(base.saved.graph, next);
+  const mapped = mapLivingModel(next, goal);
   if (!mapped.graph.nodes.some((n) => n.kind !== 'decision')) return refused('model_empty');
   // ⭐ CLASS 3: a change that ADDS a cause withholding the goal's chance through its own encoding is said back ONCE, before its
   // card; what the saved model already held is not this change's to answer for (`goal-path.ts`).
   const offer = deps.restructure !== undefined && !deps.restructure.offered ? deps.restructure : undefined;
   const baseMapped = offer === undefined ? undefined : mapLivingModel(base.model, savedGoal(base.saved.graph));
   const introduced = baseMapped === undefined ? [] : addedCauses(goalPathEncodingCauses(baseMapped), goalPathEncodingCauses(mapped));
+  // ⭐ THE PERSON'S AIM BECOMES THE GOAL (DL 22 Oct, marketing on 4a4c338c): when it does and no option reaches it, the same one
+  // offer says so, with the aim, before its card.
+  if (offer !== undefined && goal.goal !== savedGoal(base.saved.graph).goal && optionsReachingGoal(next, mapped).length === 0) {
+    offer.offered = true;
+    offer.pending = { tool: 'propose_change', args };
+    return refused('aim_unconnected', RESTRUCTURE_AIM, { aim: goal.goal });
+  }
   if (offer !== undefined && introduced.length > 0) {
     offer.offered = true;
     offer.pending = { tool: 'propose_change', args };
@@ -179,7 +187,7 @@ export async function applyLivingChange(deps: Deps, ctx: Ctx, proposalId: string
   if (decision.status !== 'execute') return refused(decision.status);
   // The model's FULL identity when it was prepared: any change since, wording included, supersedes the proposal.
   if (p.base_model_identity !== before.identity) return refused('superseded');
-  const mapped = mapLivingModel(p.living_model, savedGoal(before.graph));
+  const mapped = mapLivingModel(p.living_model, changeGoal(before.graph, p.living_model));
   const graph: Rec = { ...mapped.graph, living_model: p.living_model };
   const commit = async (): Promise<ToolOutcome> => {
     const w = await writeCorePostimage(deps, { scenarioId: ctx.scenario_id, graph, operationId, expectedIdentity: before.identity, ownVersion });
