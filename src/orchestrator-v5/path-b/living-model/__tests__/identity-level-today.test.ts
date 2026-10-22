@@ -129,6 +129,23 @@ describe('a confirmed definition gives the goal its level today, worked out from
       text: 'Today\u2019s daily takings is worked out from your figures: Loaves sold 1,000,000 loaves a day × Price per loaf £0.00001 per loaf = £10 per day.' });
   });
 
+  it('Codex r2: a sum that cancels keeps every digit (0.5, never 0.6), so it takes a stated 0.5\'s path', () => {
+    const net = (current: number | null): LivingModelT => {
+      const m = bakery(THEIRS, { target: { comparator: '<=', value: 0.5, current, unit: '£ per day' } });
+      m.factors = [level('loaves', 'Sales', 900719925474099, '£ per day', 'sales'), level('price', 'Refund', 0.5, '£ per day', 'refund'),
+        level('costs', 'Costs', -900719925474099, '£ per day', 'costs')];
+      m.aims[0] = { ...m.aims[0]!, quote: 'Reduce net takings to £0.50 daily', defined_as: { ...m.aims[0]!.defined_as!, op: 'sum', of: ['loaves', 'price', 'costs'] } };
+      return m;
+    };
+    expect(reasons(net(null))).toContain('takings:stay_within_unconfirmed');
+    expect(reasons(net(0.5))).toContain('takings:stay_within_unconfirmed');
+  });
+
+  it('Codex r2: a figure with 21 decimal places is said with every digit', () => {
+    const m = bakery(THEIRS, { target: { value: 1 }, loaves: { value: 1 }, price: { value: 0.000001000000000000001 } });
+    expect(mapLivingModel(m).assumed.find((a) => a.id === 'takings')?.text).toContain('£0.000001000000000000001 per loaf');
+  });
+
   it('a sum: today\'s level is the parts added', () => {
     const m: LivingModelT = { ...bakery(THEIRS), factors: [
       level('loaves', 'Morning takings', 400, '£ per day', 'mornings bring in £400'), level('price', 'Afternoon takings', 440, '£ per day', 'afternoons £440')] };

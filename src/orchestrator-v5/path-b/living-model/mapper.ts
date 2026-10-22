@@ -206,33 +206,38 @@ function definitionCheck(model: LivingModelT, def: Definition, itemId: string, u
   return { ...(reason === undefined ? {} : { reason }), made, parts };
 }
 
-/** Decimal places as written, or undefined in exponent form. */
-const placesOf = (v: number): number | undefined => {
+/** A figure as the decimal it is written as (its shortest exact digits), or undefined in exponent form. */
+const decimalOf = (v: number): { readonly digits: bigint; readonly places: number } | undefined => {
   const t = String(v);
   if (/e/i.test(t)) return undefined;
-  const i = t.indexOf('.');
-  return i < 0 ? 0 : t.length - i - 1;
+  const [whole, frac = ''] = t.replace(/^-/, '').split('.');
+  return { digits: BigInt(`${t.startsWith('-') ? '-' : ''}${whole}${frac}`), places: frac.length };
 };
-/**
- * A definition's level from its parts exactly as decimals (3 × 2.3 is 6.9, never 6.8999999999999995; Codex r1), or undefined
- * when a part cannot be held exactly as a safe integer at its places: nothing is worked out rather than a float near it.
- */
-function exactlyMade(op: 'sum' | 'product', values: readonly number[]): number | undefined {
-  const places = values.map(placesOf);
-  if (places.some((p) => p === undefined)) return undefined;
-  const ints = values.map((v, i) => Math.round(v * 10 ** places[i]!));
-  if (!ints.every(Number.isSafeInteger)) return undefined;
-  if (op === 'sum') {
-    const k = Math.max(...(places as number[]));
-    const total = ints.reduce((a, n, i) => a + n * 10 ** (k - places[i]!), 0);
-    return Number.isSafeInteger(total) ? total / 10 ** k + 0 : undefined;
-  }
-  const product = ints.reduce((a, n) => a * n, 1);
-  return Number.isSafeInteger(product) ? product / 10 ** (places as number[]).reduce((a, p) => a + p, 0) + 0 : undefined;
+/** The decimal digits back as written text ("6.9", "-0.5", "840"), with no trailing zeros. */
+function decimalText(digits: bigint, places: number): string {
+  const neg = digits < 0n;
+  const d = (neg ? -digits : digits).toString().padStart(places + 1, '0');
+  const frac = places === 0 ? '' : d.slice(-places).replace(/0+$/, '');
+  return `${neg ? '-' : ''}${places === 0 ? d : d.slice(0, -places)}${frac === '' ? '' : `.${frac}`}`;
 }
-/** A figure exactly as written, its unit placed as the person writes it ("£3 per loaf", "280 loaves a day"): never rounded. */
-function sayExactly(v: number, unit: string | null): string {
-  const n = v.toLocaleString('en-GB', { maximumFractionDigits: 20 });
+/**
+ * A definition's level from its parts in exact decimal arithmetic (3 × 2.3 is 6.9, never 6.8999999999999995; a sum that
+ * cancels keeps every digit; Codex r1/r2), with its exact text; undefined when a part is in exponent form: nothing is
+ * worked out rather than a figure near it.
+ */
+function exactlyMade(op: 'sum' | 'product', values: readonly number[]): { readonly level: number; readonly text: string } | undefined {
+  const parts = values.map(decimalOf);
+  if (parts.some((p) => p === undefined)) return undefined;
+  const ds = parts as { readonly digits: bigint; readonly places: number }[];
+  const places = op === 'sum' ? Math.max(...ds.map((p) => p.places)) : ds.reduce((a, p) => a + p.places, 0);
+  const digits = op === 'sum' ? ds.reduce((a, p) => a + p.digits * 10n ** BigInt(places - p.places), 0n)
+    : ds.reduce((a, p) => a * p.digits, 1n);
+  const text = decimalText(digits, places);
+  return { level: Number(text) + 0, text };
+}
+/** A figure exactly as written ("£3 per loaf", "280 loaves a day", "£0.000001000000000000001"): its digits, never rounded. */
+function sayExactly(written: string, unit: string | null): string {
+  const n = written.replace(/^(-?)(\d+)/, (_m, sign: string, whole: string) => `${sign}${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`);
   const u = (unit ?? '').trim();
   const money = /^([£$€])\s*(.*)$/.exec(u);
   return money !== null ? `${money[1]}${n}${money[2] === '' ? '' : ` ${money[2]}`}` : u === '%' ? `${n}%` : u === '' ? n : `${n} ${u}`;
@@ -258,9 +263,9 @@ function levelFromDefinition(model: LivingModelT, aim: LivingModelT['aims'][numb
   const made = exactlyMade(def.op, check.parts.map((p) => p.value!));
   if (made === undefined) return undefined;
   const sign = def.op === 'sum' ? ' + ' : ' × ';
-  const said = `Today\u2019s ${t.quantity} is worked out from your figures: ${check.parts.map((p) => `${p.label} ${sayExactly(p.value!, p.unit)}`).join(sign)}`
-    + ` = ${sayExactly(made, t.unit)}.`;
-  return { level: made, said };
+  const said = `Today\u2019s ${t.quantity} is worked out from your figures: ${check.parts.map((p) => `${p.label} ${sayExactly(String(p.value), p.unit)}`).join(sign)}`
+    + ` = ${sayExactly(made.text, t.unit)}.`;
+  return { level: made.level, said };
 }
 
 export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: string } = {}): Mapped {
