@@ -12,6 +12,7 @@
  * proven in `path-b/tools/__tests__`), the model is scripted through global fetch (0 provider calls). SYNTHETIC wording.
  */
 import { SELECTION_NOTE_PREFIX } from '../selection-context.js';
+import { challengeTargetOf } from '../../../routes/agent-v1-turn.js';
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -297,8 +298,12 @@ describe('PATH-B gap 4: commit and Undo each run the existing Run pipeline once;
     // ⭐ DL lease 22 Oct (served 0/4 on the description alone): the FIRST call must be the note, told which card by its own
     // selection note (this turn's instructions only); the SDK frees the next call to reply.
     expect(calls[0]!.tool_choice, 'the first call is the note').toMatchObject({ type: 'function', name: 'note_on_item' });
-    expect(String(calls[0]!.instructions)).toContain(SELECTION_NOTE_PREFIX);
-    expect(String(calls[0]!.instructions)).toContain('"id":"f"');
+    // The selection entry itself, decoded (Codex r1: the canonical state elsewhere in the instructions also names `f`).
+    const ins = String(calls[0]!.instructions);
+    const at = ins.indexOf(SELECTION_NOTE_PREFIX);
+    expect(at, 'the card\'s selection note is in this turn\'s instructions').toBeGreaterThanOrEqual(0);
+    const entry = JSON.parse(ins.slice(at + SELECTION_NOTE_PREFIX.length).split('\n')[0]!) as Json[];
+    expect(entry.map((e) => [e.id, e.label])).toEqual([['f', 'Capacity']]);
     expect(forcesNote(calls[1]!), 'only the first call is forced').toBe(false);
     const blocks = (r.json() as Json).blocks as Json[];
     expect(blocks[0]).toMatchObject({ type: 'ui_directive', verb: 'highlight', targets: [{ id: 'f', label: 'Capacity', kind: 'factor' }], note: NOTE });
@@ -322,6 +327,16 @@ describe('PATH-B gap 4: commit and Undo each run the existing Run pipeline once;
       expect(calls.filter(forcesNote), message).toHaveLength(0);
       expect(((r.json() as Json).blocks as Json[] | undefined ?? []).filter((b) => b.type === 'ui_directive')).toHaveLength(0);
     }
+  });
+
+  it('⛔ Codex r1: a Challenge on one card the note cannot sit beside (the decision) forces nothing; a factor or goal does', () => {
+    const one = (id: string) => ({ note: `${SELECTION_NOTE_PREFIX}[]`, grounded: { element_ids: [id], unresolved: 'none' as const } });
+    const saved = { nodes: [{ id: 'd', kind: 'decision', label: 'Which way?' }, { id: 'f', kind: 'factor', label: 'Capacity' }, { id: 'g', kind: 'goal', label: 'Velocity' }] };
+    const press = { chip: { id: 'ask:challenge' } };
+    expect(challengeTargetOf(press, one('d'), saved)).toBeNull();
+    expect(challengeTargetOf(press, one('f'), saved)).not.toBeNull();
+    expect(challengeTargetOf(press, one('g'), saved)).not.toBeNull();
+    expect(challengeTargetOf(press, one('f'), undefined), 'no saved model read → nothing forced').toBeNull();
   });
 
   it('⛔ CONTRAST (DL lease 22 Oct): the same one card typed in the composer, or on another chip, is never forced to a note', async () => {

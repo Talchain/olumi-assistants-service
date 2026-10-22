@@ -34,7 +34,9 @@ export type NoteOnItemArgs = z.infer<typeof NoteOnItemParams>;
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 const recs = (v: unknown): Rec[] => (Array.isArray(v) ? v.filter(isRec) : []);
-const NODE_KINDS = new Set(['factor', 'option', 'goal', 'risk', 'constraint', 'outcome']);
+/** The card kinds a note can sit beside (the decision is the question itself, never a card to note). */
+export const NOTE_NODE_KINDS: ReadonlySet<string> = new Set(['factor', 'option', 'goal', 'risk', 'constraint', 'outcome']);
+const NODE_KINDS = NOTE_NODE_KINDS;
 const RANKS_OPTIONS = /\b(best|recommend\w*|winner|go with|should (?:choose|pick))\b/i;
 const escape = (t: string): string => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 

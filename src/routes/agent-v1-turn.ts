@@ -92,7 +92,7 @@ import { CORE_DRAFTING_GUIDANCE } from '../orchestrator-v5/path-b/drafting-guida
 import { modelCritic } from '../orchestrator-v5/agent-lane/core/model-critic.js';
 import { parseSelectedElements } from '../orchestrator-v5/boundary/request-extensions.js';
 import { agentSelectionContext, type AgentSelectionContext } from '../orchestrator-v5/agent-lane/selection-context.js';
-import { NOTE_ON_ITEM } from '../orchestrator-v5/path-b/tools/note-on-item.js';
+import { NOTE_NODE_KINDS, NOTE_ON_ITEM } from '../orchestrator-v5/path-b/tools/note-on-item.js';
 import type { AgentLaneMode, AgentToolContext, ToolResult } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { createAgentCapabilities, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
 import { runExplanationCurrentness } from '../orchestrator-v5/agent-lane/run-currentness.js';
@@ -1565,11 +1565,17 @@ export const ASK_CHALLENGE_CHIP_ID = 'ask:challenge';
  * note_on_item, so the challenge lands beside the card. No card, several, a link, or a selection that could not be checked:
  * null, and the turn runs as before.
  */
-export function challengeTargetOf(body: Record<string, unknown>, selection: AgentSelectionContext | null | undefined): AgentSelectionContext | null {
+export function challengeTargetOf(body: Record<string, unknown>, selection: AgentSelectionContext | null | undefined,
+  savedGraph: unknown): AgentSelectionContext | null {
   const chip = body['chip'] as { id?: unknown } | null | undefined;
   if (chip?.id !== ASK_CHALLENGE_CHIP_ID || selection == null) return null;
-  return selection.grounded.element_ids.length === 1 && selection.links === undefined && selection.grounded.unresolved === 'none'
-    ? selection : null;
+  if (selection.grounded.element_ids.length !== 1 || selection.links !== undefined || selection.grounded.unresolved !== 'none') return null;
+  // Only a card a note can sit beside, on the saved model note_on_item itself reads (Codex r1: a decision is refused there).
+  const id = selection.grounded.element_ids[0];
+  const rec = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
+  const nodes = rec(savedGraph) && Array.isArray(savedGraph['nodes']) ? (savedGraph['nodes'] as unknown[]).filter(rec) : [];
+  const card = nodes.find((n) => n['id'] === id);
+  return card !== undefined && NOTE_NODE_KINDS.has(String(card['kind'])) ? selection : null;
 }
 export function withheldToolsOf(body: Record<string, unknown>): readonly string[] {
   const chip = body['chip'];
@@ -4619,7 +4625,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // A scenario with no model yet, or whose meaning is its living model, changes through the living model only.
         const coreScenario = coreSaved !== undefined && (coreSaved.graph == null || livingView !== undefined);
         coreDraftArm = draftArmOf(mode, coreSaved !== undefined && coreSaved.graph == null, req.headers['x-olumi-draft-arm']);
-        const challenge = challengeTargetOf(body, selectionContext);
+        const challenge = challengeTargetOf(body, selectionContext, coreSaved?.graph);
         const core = await runCoreTurn({
           ctx: coreCtx, message, budget: coreBudget(coreEffortArmOf(mode, req.headers['x-olumi-core-effort'])), replyBudget: coreReplyBudget(), userId,
           tools: (onCall) => pathBTools({ dispatch: capDispatch, proposals, critique: modelCritic(coreBudget()), deadlineAt: constructionDeadlineAt,
