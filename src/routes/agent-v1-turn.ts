@@ -993,7 +993,8 @@ const CORE_REPLY_BEFORE_C = 'In this mode Olumi adds nothing to your reply and r
   + 'specific to this model and in plain words: (1) for each option, what its result means for the user\u2019s goal (its chance of meeting it, or how far it lands from the target, and the reason when a chance is withheld); '
   // Codex r1 on #3619: "the least certain figure" is not "what it rests on most" (an unmeasured importance claim, run-facts.ts:84).
   + '(2) what the result depends on: when the run facts measure sensitivity, the most-sensitive assumption with its source; otherwise which of its inputs are Olumi\u2019s untested estimates or unconfirmed figures, named by label with their ranges, without ranking them or saying which matters most; '
-  + '(3) one concrete next step for the model: the specific input to ask for, or a test of one of those figures at the edge of its range (stress_test), saying what result would change how the options compare. '
+  // Buddy SIMPLER on #3619: planStress (stress-tool.ts:99) tests only a sized link effect or factor level.
+  + '(3) one concrete next step for the model: the specific input to ask for, or, for a sized link effect or factor level, a test of it at the edge of its range (stress_test); a risk\u2019s chance or a missing figure is an input to ask for, never a test; say what result would change how the options compare. '
   + 'Never close on a general caution (such as \u201cnot a guarantee\u201d or \u201ckeep that distinction\u201d) in place of these. Use only the supplied analysis; '
   + 'where run_comparison is given, follow its note. A Run that did not complete leaves a saved change saved: say both. '
   // K3 scope: the AIE's wording, verbatim (19 Oct 19:5xZ; no further ACK). Applied by meaning: no keyword ladder or classifier.
