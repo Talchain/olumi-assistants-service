@@ -43,7 +43,7 @@ export type WithheldReason =
   | 'identity_not_in_slice' | 'identity_part_unknown' | 'identity_unit_mismatch' | 'identity_inconsistent'
   | 'identity_other_cause' | 'identity_contradicted' | 'identity_restated'
   | 'risk_occurrence_unknown' | 'risk_unattributed' | 'risk_not_in_slice' | 'risk_window_not_goal_window' | 'limit_not_in_slice'
-  | 'target_not_theirs';
+  | 'target_not_theirs' | 'link_parallel_same_pair';
 
 /** A definition that withholds the chance when its carrier is on the goal's path (it cannot be worked out as stated). */
 const IDENTITY_REFUSED: ReadonlySet<WithheldReason> = new Set(['identity_not_in_slice', 'identity_part_unknown', 'identity_unit_mismatch', 'identity_inconsistent']);
@@ -62,6 +62,8 @@ export interface Mapped {
   readonly frames: ReadonlyMap<string, Frame>;
   /** Premises the result is worked out under that nobody stated, said beside it (amendment 1: "carrying on leaves X unchanged"). */
   readonly assumed: readonly { readonly id: string; readonly text: string }[];
+  /** Links between the same two items, withheld and never drawn (`link_parallel_same_pair`), at their engine endpoints, so an edit at that pair still finds them. */
+  readonly parallel: readonly Rec[];
 }
 
 const STRUCTURAL = { strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' } as const;
@@ -720,6 +722,15 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
       per_source_change_unit: from!.unit ?? (switches.has(l.from) ? 'switch' : ''), strength_mean: sized.mean, strength_mean_frame: 'edge_strength' as const };
     edges.push({ ...base, strength: sized, exists_probability: exists, provenance: { ...who, natural_effect, uncertainty_defaults: assumed } });
   }
+  // Two links between the same two items cannot both be sent: the engine holds one edge per pair (it refuses the Run), and
+  // merging them would claim a net effect nobody stated (Track Q2-06 on 7b0af1a9: discount → retained revenue +0.5 and
+  // −0.5, every Run refused). Both stay in the living model, withheld by name, until each mechanism has its own step.
+  const pairOf = (e: Rec): string => `${String(e['from'])}\u0000${String(e['to'])}`;
+  const perPair = new Map<string, number>();
+  for (const e of edges) perPair.set(pairOf(e), (perPair.get(pairOf(e)) ?? 0) + 1);
+  const parallel = edges.filter((e) => perPair.get(pairOf(e))! > 1);
+  for (const e of parallel) hold(String(e['id']), 'link_parallel_same_pair');
+  for (let i = edges.length - 1; i >= 0; i -= 1) if (perPair.get(pairOf(edges[i]!))! > 1) edges.splice(i, 1);
 
   // The exact sum: the goal's level today and the options' change, each one +1 definitional part (ISL adds them in the
   // goal's units and never draws them). The today part IS the goal's level today, copied, never a new figure.
@@ -762,7 +773,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
       node.kind = 'outcome';
       delete node.category;
     }
-    const leftOut = withheld.some((w) => (w.reason === 'link_sign_unknown' || w.reason === 'link_endpoint_unknown' || w.reason === 'exact_not_drawable'
+    const leftOut = withheld.some((w) => (w.reason === 'link_sign_unknown' || w.reason === 'link_endpoint_unknown' || w.reason === 'exact_not_drawable' || w.reason === 'link_parallel_same_pair'
       || w.reason === 'identity_other_cause' || w.reason === 'identity_contradicted' || w.reason === 'risk_not_in_slice') && onPath.has(model.links.find((l) => l.id === w.id)?.to ?? ''))
       || withheld.some((w) => (IDENTITY_REFUSED.has(w.reason) || RISK_REFUSED.has(w.reason)) && onPath.has(w.id)) || [...droppedSettings].some((id) => onPath.has(id));
     // An unresolved PREREQUISITE on anything the chance rests on (the engine cannot hold one) withholds it, whoever raised it.
@@ -779,7 +790,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
 
   const frames = new Map<string, Frame>(model.factors.flatMap((f) => (caps.has(f.id) ? [[f.id, { cap: caps.get(f.id)!, unit: f.unit }] as const] : [])));
   if (goal !== undefined) frames.set(goal.id, { cap: goal.cap, unit: goal.unit === '' ? null : goal.unit });
-  return { graph: { nodes, edges, ...(goal_constraints.length > 0 ? { goal_constraints } : {}) }, withheld, frames, assumed };
+  return { graph: { nodes, edges, ...(goal_constraints.length > 0 ? { goal_constraints } : {}) }, withheld, frames, assumed, parallel };
 }
 
 /**

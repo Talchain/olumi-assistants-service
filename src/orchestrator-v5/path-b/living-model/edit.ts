@@ -73,7 +73,7 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
   const ownersOf = (from: string, to: string) => {
     const exact = m.links.filter((l) => l.from === from && l.to === to);
     if (exact.length > 0 || !optionSwitch(from)) return exact;
-    return m.links.filter((l) => l.to === to && mapped.graph.edges.some((e) => e.id === l.id && e.from === from && e.to === to));
+    return m.links.filter((l) => l.to === to && [...mapped.graph.edges, ...mapped.parallel].some((e) => e.id === l.id && e.from === from && e.to === to));
   };
   const toRaw = (id: string, value: number): number | undefined => {
     const frame = frames.get(id);

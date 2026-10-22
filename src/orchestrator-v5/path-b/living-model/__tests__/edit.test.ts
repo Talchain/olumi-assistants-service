@@ -182,8 +182,14 @@ describe('thin core explicit edit: a canvas gesture applied to the living model,
     const twice: LivingModelT = { ...supplier('point'), links: [...supplier('point').links,
       { ...supplier('point').links.find((l) => l.id === 'cost_gp')!, id: 'admin_gp', quote: 'and £200 a month of admin' }] };
     const drawn = { from: 'dual_source__on', to: 'gp' };
-    expect(mapLivingModel(twice).graph.edges.filter((e) => e.from === drawn.from && e.to === drawn.to)).toHaveLength(2);
+    // The engine holds one edge per pair, so both are withheld by name and none is drawn (Q2-06); the edits below act on the
+    // living model's own links.
+    const mapped = mapLivingModel(twice);
+    expect(mapped.graph.edges.filter((e) => e.from === drawn.from && e.to === drawn.to)).toHaveLength(0);
+    expect(mapped.withheld.filter((w) => w.reason === 'link_parallel_same_pair').map((w) => w.id).sort()).toEqual(['admin_gp', 'cost_gp']);
     expect(applyExplicitEdit(twice, { kind: 'edge_strength_edit', ...drawn, magnitude: 0.1, direction_intent: 'preserve' })).toEqual({ refused: 'link_ambiguous' });
+    // Undrawn, the pair is still the model's: a link drawn there is never stored as a third one.
+    expect(applyExplicitEdit(twice, { kind: 'structural_add_edge', ...drawn, magnitude: 0.1, effect_direction: 'positive' })).toEqual({ refused: 'link_ambiguous' });
     const del = applyExplicitEdit(twice, { kind: 'structural_delete', removed_node_ids: [], removed_edges: [drawn] });
     expect('model' in del && del.model.links.map((l) => l.id)).toEqual(['fails_gp']);
   });
