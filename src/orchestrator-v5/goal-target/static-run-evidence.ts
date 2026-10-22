@@ -29,6 +29,8 @@ export function recordedStaticLevelEvidence(result: unknown): {
   readonly goal_id: string; readonly label?: string; readonly target: number; readonly unit: string; readonly comparator: string;
   readonly encoded_target: number; readonly baseline: number; readonly encoded_baseline: number;
   readonly option_ids: readonly string[];
+  /** The one option the Run evaluated as carrying on as now (`is_baseline`, the sent threshold's own status quo). */
+  readonly status_quo_option_id: string;
   /** The licence owner's existing scope declaration; a level threshold alone is not a static declaration. */
   readonly static_scope_declared: boolean;
 } | undefined {
@@ -69,6 +71,7 @@ export function recordedStaticLevelEvidence(result: unknown): {
   return { goal_id: goal.node_id, ...(typeof goal.label === 'string' ? { label: goal.label } : {}),
     target: goal.target_raw, unit: goal.unit, comparator: goal.operator as string,
     encoded_target: sent.value, baseline: base.raw, encoded_baseline: sent.baseline, option_ids: ids,
+    status_quo_option_id: sent.status_quo_option_id as string,
     static_scope_declared: recordedStaticScopeDeclared(carriers[0]) };
 }
 
