@@ -16,7 +16,7 @@ import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 import type { HandlerInvocation } from '../../../tools/registry.js';
 import { createRunAnalysisHandler } from '../../../tools/handlers/run-analysis.js';
-import { goalTargetUnknownLinks, mapLivingModel } from '../mapper.js';
+import { linksAwaitingGoalInput, mapLivingModel } from '../mapper.js';
 
 type Json = Record<string, any>;
 const SCENARIO = 'f0f0f0f0-0000-4000-8000-000000000023';
@@ -48,11 +48,14 @@ const pricingAndReferral = (): LivingModelT => ({
 });
 
 /** Olumi's suggested measure with no figure (the Q2 shape), and Olumi's centred estimate on the referral link. */
-const awaitingTarget = (opts: { targetValue?: number | null; bareRange?: true; olumiTarget?: true; statedLink?: true } = {}): LivingModelT => {
+const awaitingTarget = (opts: { targetValue?: number | null; bareRange?: true; olumiTarget?: true; statedLink?: true; change?: { current: number | null } } = {}): LivingModelT => {
   const m = pricingAndReferral();
   return {
     ...m,
-    aims: m.aims.map((a) => ({ ...a, target: { ...a.target!, value: opts.olumiTarget ? 12000 : opts.targetValue ?? null, source: opts.targetValue == null ? 'olumi' as const : null } })),
+    aims: m.aims.map((a) => ({ ...a, target: opts.change !== undefined
+      // Track 3 hiring shape: a +10% change target the person stated, with no level today to measure it from.
+      ? { ...a.target!, comparator: 'increase' as const, value: 10, unit: '%', change_kind: 'relative' as const, current: opts.change.current, current_unit: '£', current_source: null, source: null }
+      : { ...a.target!, value: opts.olumiTarget ? 12000 : opts.targetValue ?? null, source: opts.targetValue == null ? 'olumi' as const : null } })),
     links: m.links.map((l) => (l.id !== 'referral_gp' || opts.statedLink ? l : { ...l, source: 'olumi' as const, party: null, quote: null,
       effect: { estimate_by: null, form: 'range' as const, value: opts.bareRange ? null : 2000, sd: null, low: 500, high: 4000, unit: '£', sign: '+' as const } })),
   };
@@ -88,7 +91,7 @@ describe('a sized link into a goal with no target figure is held for that reason
     expect(reasons(m)).not.toContain('referral_gp:link_frame_unknown');
     expect(edge(m, 'referral_running')).toMatchObject({ defaulted: true, strength: { mean: 0.5, std: 0.125 },
       provenance: { source: 'cee_hypothesis', magnitude: 'olumi_placeholder' } });
-    expect(goalTargetUnknownLinks(stored(m))).toEqual([{ from: 'referral_running', to: 'gp', by: 'olumi' }]);
+    expect(linksAwaitingGoalInput(stored(m))).toEqual([{ from: 'referral_running', to: 'gp', by: 'olumi', awaits: 'target' }]);
   });
 
   it('the Run\'s withhold says the true reason for that link, and never "not sized"; it is not offered to be sized', async () => {
@@ -102,7 +105,7 @@ describe('a sized link into a goal with no target figure is held for that reason
   it('NEGATIVE: a genuinely unsized link (no figure at all) beside it still reads unsized, byte for byte', async () => {
     const m = awaitingTarget();
     expect(reasons(m).filter((r) => r.startsWith('pricing_gp:'))).toEqual([]);
-    expect(goalTargetUnknownLinks(stored(m)).map((l) => l.from)).not.toContain('pricing_page');
+    expect(linksAwaitingGoalInput(stored(m)).map((l) => l.from)).not.toContain('pricing_page');
     const w = await placeholderWarning(m);
     expect(w!.message.startsWith('This comparison turns on the link from ‘New pricing page live’ to ‘Monthly gross profit of at least £12,000’, whose strength isn\'t sized in the model yet.')).toBe(true);
   });
@@ -111,13 +114,13 @@ describe('a sized link into a goal with no target figure is held for that reason
     const m = awaitingTarget({ bareRange: true });
     expect(reasons(m)).toContain('referral_gp:link_range_no_law');
     expect(reasons(m)).not.toContain('referral_gp:link_goal_target_unknown');
-    expect(goalTargetUnknownLinks(stored(m))).toEqual([]);
+    expect(linksAwaitingGoalInput(stored(m))).toEqual([]);
   });
 
   it('whose figure it is: the person\'s own stated figure is never called Olumi\'s estimate', async () => {
     const m = awaitingTarget({ statedLink: true });
     expect(reasons(m)).toContain('referral_gp:link_goal_target_unknown');
-    expect(goalTargetUnknownLinks(stored(m))).toEqual([{ from: 'referral_running', to: 'gp', by: 'stated' }]);
+    expect(linksAwaitingGoalInput(stored(m))).toEqual([{ from: 'referral_running', to: 'gp', by: 'stated', awaits: 'target' }]);
     const w = await placeholderWarning(m);
     expect(w!.message).toContain('The stated figure for the link from \u2018Referral scheme running\u2019 to \u2018Monthly gross profit of at least £12,000\u2019 is kept');
     expect(w!.message).not.toContain('Olumi\u2019s estimate');
@@ -127,7 +130,25 @@ describe('a sized link into a goal with no target figure is held for that reason
     const m = awaitingTarget({ olumiTarget: true });
     expect(reasons(m)).toContain('gp:target_not_theirs');
     expect(reasons(m)).toContain('referral_gp:link_frame_unknown');
-    expect(goalTargetUnknownLinks(stored(m))).toEqual([]);
+    expect(linksAwaitingGoalInput(stored(m))).toEqual([]);
+  });
+
+  it('Track 3 hiring: a change target with no level today holds the link as link_goal_level_unknown, and says so', async () => {
+    const m = awaitingTarget({ change: { current: null } });
+    expect(reasons(m)).toContain('gp:goal_level_unknown');
+    expect(reasons(m)).toContain('referral_gp:link_goal_level_unknown');
+    expect(linksAwaitingGoalInput(stored(m))).toEqual([{ from: 'referral_running', to: 'gp', by: 'olumi', awaits: 'level' }]);
+    const w = await placeholderWarning(m);
+    expect(w!.message).toContain('Olumi\u2019s estimate for the link from \u2018Referral scheme running\u2019 to \u2018Monthly gross profit of at least £12,000\u2019 is kept, and used once today\u2019s level for \u2018Monthly gross profit of at least £12,000\u2019 is known, since the target is measured from it.');
+    expect(w!.message).not.toContain('target figure');
+    expect(w!.message).not.toMatch(/Referral scheme running\u2019 to \u2018[^\u2019]+\u2019[^.]*sized/);
+  });
+
+  it('Track 3 hiring, with today\'s level: the same link is sized from Olumi\'s estimate (regenerated), and nothing is held', () => {
+    const m = awaitingTarget({ change: { current: 10000 } });
+    expect(reasons(m).filter((r) => r.startsWith('referral_gp:') || r.startsWith('gp:'))).toEqual([]);
+    expect(edge(m, 'referral_running').defaulted).toBeUndefined();
+    expect(linksAwaitingGoalInput(stored(m))).toEqual([]);
   });
 
   it('with a target figure, the same link is sized from Olumi\'s estimate (regenerated), and nothing is held', () => {
@@ -136,6 +157,6 @@ describe('a sized link into a goal with no target figure is held for that reason
     const e = edge(m, 'referral_running');
     expect(e.defaulted).toBeUndefined();
     expect(e.provenance).toMatchObject({ source: 'cee_hypothesis', magnitude: 'olumi_estimate', natural_effect: { amount: 2000, amount_unit: '£' } });
-    expect(goalTargetUnknownLinks(stored(m))).toEqual([]);
+    expect(linksAwaitingGoalInput(stored(m))).toEqual([]);
   });
 });

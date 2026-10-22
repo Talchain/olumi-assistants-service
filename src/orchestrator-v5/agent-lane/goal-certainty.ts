@@ -564,14 +564,15 @@ export function unsizedLinkWords(graph: unknown, links: readonly UnsizedPathLink
   return stated === '' ? unsizedLinkSentence(links) : `${stated} ${invite}`;
 }
 
-/** A link held only because the goal states no target figure yet, with whose figure it carries (`goalTargetUnknownLinks`). */
-export interface TargetUnknownLink { readonly from: string; readonly to: string; readonly by: 'olumi' | 'stated' | 'given' }
+/** A link held only because the goal has no scale yet, with whose figure it carries and the input it awaits (`linksAwaitingGoalInput`). */
+export interface AwaitingGoalLink { readonly from: string; readonly to: string; readonly by: 'olumi' | 'stated' | 'given'; readonly awaits: 'target' | 'level' }
 
 /**
- * DL 23 Oct (Q2 coaching zeros): the true reason for a link held while the goal has no target figure. Its figure is kept and
- * used once the target sets the goal's scale; it is never called "not sized". Whose figure it is is said per link.
+ * DL 23 Oct (Q2 coaching zeros; Track 3 funding/hiring): the true reason for a link held while the goal has no scale. Its
+ * figure is kept and used once the goal's target figure, or (for a change target) today's level, is given; it is never
+ * called "not sized". Whose figure it is is said per link. Every such link points into the one goal, so it awaits one input.
  */
-export function awaitingTargetSentence(links: ReadonlyArray<TargetUnknownLink & UnsizedPathLink>, maxLength = 400): string {
+export function awaitingGoalSentence(links: ReadonlyArray<AwaitingGoalLink & UnsizedPathLink>, maxLength = 400): string {
   if (links.length === 0) return '';
   const groups: Array<[string, readonly UnsizedPathLink[]]> = ([
     ['Olumi\u2019s estimate', links.filter((l) => l.by === 'olumi')],
@@ -580,9 +581,12 @@ export function awaitingTargetSentence(links: ReadonlyArray<TargetUnknownLink & 
   ] as Array<[string, readonly UnsizedPathLink[]]>).filter(([, ls]) => ls.length > 0);
   const goal = links[0]!.to_label;
   const plural = links.length > 1;
+  const until = links[0]!.awaits === 'level'
+    ? `once today\u2019s level for \u2018${goal}\u2019 is known, since the target is measured from it.`
+    : `once \u2018${goal}\u2019 has a target figure, which sets ${plural ? 'their' : 'its'} scale.`;
   const build = (count: number): string => {
     const parts = groups.map(([who, ls]) => `${who}${ls.length > 1 ? 's' : ''} for the ${linkList(ls, Math.min(count, ls.length))}`).join(' and ');
-    return `${parts.charAt(0).toUpperCase()}${parts.slice(1)} ${plural ? 'are' : 'is'} kept, and used once \u2018${goal}\u2019 has a target figure, which sets ${plural ? 'their' : 'its'} scale.`;
+    return `${parts.charAt(0).toUpperCase()}${parts.slice(1)} ${plural ? 'are' : 'is'} kept, and used ${until}`;
   };
   for (let count = 3; count >= 1; count -= 1) { const out = build(count); if (out.length <= maxLength) return out; }
   return build(1);
@@ -601,8 +605,8 @@ export function placeholderGoalWarning(
   code: string,
   productBlocks = false,
   /** RT-18: the (B) gauge ask is gated off in production (cut 5); only its own rows opt in, so cut 6 can lift it tested. */
-  /** `targetUnknown` (DL 23 Oct): links held only because the goal has no target figure (`goalTargetUnknownLinks`). */
-  opts: { readonly gaugeAsk?: true; readonly targetUnknown?: readonly TargetUnknownLink[] } = {},
+  /** `awaitingGoal` (DL 23 Oct): links held only because the goal has no scale yet (`linksAwaitingGoalInput`). */
+  opts: { readonly gaugeAsk?: true; readonly awaitingGoal?: readonly AwaitingGoalLink[] } = {},
 ): { code: string; message: string; severity: 'warning'; node_ids: string[]; option_ids: string[]; links: Array<{ from: string; to: string }>; acceptable_links?: Array<{ from: string; to: string }>; first_ask?: PlaceholderFirstAsk } {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const byId = new Map(nodes.map((n) => [n.id, n] as const));
@@ -611,9 +615,9 @@ export function placeholderGoalWarning(
     return isRec(id) && Array.isArray(id.factor_ids) && id.factor_ids.includes(l.from);
   };
   const links = [...new Map(paths.flatMap((p) => p.links).map((l) => [`${l.from}->${l.to}`, l] as const)).values()];
-  // ⭐ DL 23 Oct (Q2 coaching zeros): a link held only because the goal has no target figure carries a figure, so it is
-  // never said as "not sized" nor asked to be sized: its own sentence says the figure is kept until the target sets the scale.
-  const heldForTarget = new Map((opts.targetUnknown ?? []).map((t) => [`${t.from}->${t.to}`, t] as const));
+  // ⭐ DL 23 Oct (Q2 coaching zeros; Track 3 funding/hiring): a link held only because the goal has no scale yet carries a
+  // figure, so it is never said as "not sized" nor asked to be sized: its own sentence names the goal input it awaits.
+  const heldForTarget = new Map((opts.awaitingGoal ?? []).map((t) => [`${t.from}->${t.to}`, t] as const));
   const awaitingTarget = links.filter((l) => heldForTarget.has(`${l.from}->${l.to}`));
   const named = links.filter((l) => !cardSized(l));
   // ⛔ ASK ONLY FOR A SIZE THAT CAN MAKE THE FIGURE RIGHT (AIQ 5902834053; MG successor 5902809244): a link from a node
@@ -648,7 +652,7 @@ export function placeholderGoalWarning(
   const said = productBlocks ? unsizedLinkStatement : (ls: readonly UnsizedPathLink[]): string => unsizedLinkWords(graph, ls);
   const unsizedWords = unsized.length === 0 ? '' : noDeadEnd?.message ?? said(unsized.map(l => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) })));
   const message = awaitingTarget.length === 0 ? unsizedWords
-    : [unsizedWords, awaitingTargetSentence(awaitingTarget.map((l) => ({ ...heldForTarget.get(`${l.from}->${l.to}`)!, from_label: labelOf(l.from), to_label: labelOf(l.to) })),
+    : [unsizedWords, awaitingGoalSentence(awaitingTarget.map((l) => ({ ...heldForTarget.get(`${l.from}->${l.to}`)!, from_label: labelOf(l.from), to_label: labelOf(l.to) })),
       400 - (unsizedWords === '' ? 0 : unsizedWords.length + 1))].filter((w) => w !== '').join(' ');
   const firstLink = ordered.find((l) => asked.some((a) => a.from === l.from && a.to === l.to));
   const firstAsk: PlaceholderFirstAsk | undefined = productBlocks ? undefined
