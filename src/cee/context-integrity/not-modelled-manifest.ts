@@ -711,7 +711,7 @@ const VALUE_FIELDS = ["value", "raw", "raw_value", "cap"] as const;
  * ⚠⚠ THIS GAP NOW HAS A SECOND DEPENDENT, AND IT IS THE MORE DANGEROUS ONE.
  * Added 31 Aug 2026. `cee/transforms/provenance-display.ts` `SOURCE_AUTHORSHIP`
  * projects `user_override` to `user_set`, and
- * `orchestrator-v5/format/format-graph-for-context.ts` carries that literal
+ * `orchestrator-v5/format/format-graph-for-context.ts` (deleted in deletion 11, 22 Oct 2026: no runtime caller) carried that literal
  * into the MODEL'S OWN CONTEXT, where the model then says it out loud.
  *
  * The direction of harm is the inverse of this module's, which is why it is

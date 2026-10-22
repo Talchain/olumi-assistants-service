@@ -23,8 +23,6 @@ import { describe, it, expect } from 'vitest';
 import { GraphV3, type GraphV3T } from '../../../../schemas/cee-v3.js';
 import type { ProposalAction } from '../../../routing/types.js';
 
-import type { ContextPackGraph } from '../../../context/context-pack-types.js';
-import { formatGraphForContext } from '../../../format/format-graph-for-context.js';
 import { createSetFactorValueHandler } from '../set-factor-value.js';
 import { createAdjustEdgeStrengthHandler } from '../adjust-edge-strength.js';
 import {
@@ -260,19 +258,10 @@ describe('A3.1 Task 3 — adjust_edge_strength stamps edge provenance', () => {
   });
 });
 
-describe('A2.2 set-then-read — handler-stamped display_value reaches the LLM display projection', () => {
-  it('set_factor_value mutates f-churn to 5% → next-turn display_graph node has display_value "5%" with no raw value/raw_value/cap', async () => {
-    // End-to-end round-trip across the two layers:
-    //   1. Handler (commit-side):  `set_factor_value` mutates `f-churn`
-    //      to 5% and stamps `display_value` via `synthesiseDisplayValue`
-    //      (A3.1 Task 3) on the persisted GraphV3T.
-    //   2. Next turn (LLM-facing): the persisted graph is projected to a
-    //      ContextPackGraph; `formatGraphForContext` reads the existing
-    //      `display_value` verbatim (A2.2 source priority #1) and emits
-    //      it on the display node — while stripping the underlying
-    //      `value` / `raw_value` / `cap` floats per A3.1 Task 6.
-    // The two layers MUST agree: the handler writes the formatted string
-    // exactly where the formatter expects to read it on the next turn.
+describe('A2.2 set_factor_value stamps the display value and keeps the figure underneath', () => {
+  it('set_factor_value mutates f-churn to 5% → the persisted node reads display_value "5%" over raw 5 %', async () => {
+    // `set_factor_value` mutates `f-churn` to 5% and stamps `display_value` via `synthesiseDisplayValue` (A3.1 Task 3)
+    // on the persisted GraphV3T, leaving the underlying figure in observed_state.
     const ingress = buildD1Fixture();
     const proposal: ProposalAction = {
       handler_id: 'set_factor_value',
@@ -300,53 +289,10 @@ describe('A2.2 set-then-read — handler-stamped display_value reaches the LLM d
     const persistedChurn = persistedGraph.nodes.find((n) => n.id === 'f-churn');
     expect(persistedChurn?.display_value).toBe('5%');
 
-    // Next-turn display projection of the persisted graph, uncompacted
-    // (the raw-graph path: verbatim nodes/edges plus kind indexes), fed
-    // straight to the live formatter. Track 2 deletion 8 removed the dead
-    // assembler that used to wrap this call; the formatter is unchanged.
-    const options = persistedGraph.nodes
-      .filter((n) => n.kind === 'option')
-      .map((n) => ({ id: n.id, label: n.label }));
-    const goals = persistedGraph.nodes.filter((n) => n.kind === 'goal');
-    const rawGraph: ContextPackGraph = {
-      nodes: persistedGraph.nodes,
-      edges: persistedGraph.edges,
-      options,
-      goals,
-      constraints: [],
-      counts: {
-        nodes: persistedGraph.nodes.length,
-        edges: persistedGraph.edges.length,
-        options: options.length,
-        goals: goals.length,
-        constraints: 0,
-      },
-    };
-    const displayGraph = formatGraphForContext(rawGraph);
-
-    const displayChurn = displayGraph.nodes.find((n) => n.id === 'f-churn');
-    expect(displayChurn).toBeDefined();
-    // Display-channel string surfaces verbatim from the handler write.
-    expect(displayChurn!.display_value).toBe('5%');
-
-    // A3.1 Task 6 contract preserved: no raw `value` / `raw_value` /
-    // `cap` keys reach the LLM-facing display projection, even though
-    // the handler did update the underlying observed_state.
-    expect(displayChurn).not.toHaveProperty('value');
-    expect(displayChurn).not.toHaveProperty('raw_value');
-    expect(displayChurn).not.toHaveProperty('cap');
-    expect(displayChurn).not.toHaveProperty('observed_state');
-    const json = JSON.stringify(displayGraph.nodes);
-    expect(json).not.toMatch(/"value":/);
-    expect(json).not.toMatch(/"raw_value":/);
-    expect(json).not.toMatch(/"cap":/);
-
-    // The raw graph the formatter read still retains the underlying floats
-    // for the handler / freshness / edit_graph paths — only the display
-    // channel strips them.
-    const rawNodes = rawGraph.nodes as Array<Record<string, unknown>>;
-    const rawChurn = rawNodes.find((n) => n.id === 'f-churn')!;
-    const rawObserved = rawChurn['observed_state'] as Record<string, unknown>;
+    // Deletion 11: the display projection this row once read (`formatGraphForContext`) has no runtime caller and is
+    // deleted; the row keeps the handler's write. The persisted node still holds the underlying figure for the handler,
+    // freshness and edit paths.
+    const rawObserved = persistedChurn!.observed_state as Record<string, unknown>;
     expect(rawObserved['raw_value']).toBe(5);
     expect(rawObserved['unit']).toBe('%');
   });

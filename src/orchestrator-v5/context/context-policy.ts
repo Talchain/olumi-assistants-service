@@ -257,7 +257,7 @@ export interface ContextSectionPolicy {
    */
   readonly serialised_as?: string;
   readonly source: ContextSource;
-  /** How the section is projected (projectConversation, formatGraphForContext…). */
+  /** How the section is projected (projectConversation, selectContextGraphSnapshot…). */
   readonly projection?: string;
   /**
    * Char budget. DERIVED from an enforcement constant where one exists (import
@@ -403,7 +403,7 @@ const COACH_CONVERSE: ContextPolicy = {
     // None carries an enforceable ceiling, so all are honestly `telemetry_only`
     // with a null budget rather than a false `enforced` (Q5).
     { name: 'context_budget', source: 'budget_disclosure', projection: 'applyContextBudgetToAssemblyInputs disclosure (key ABSENT when nothing was trimmed)', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
-    { name: 'compound_segments', source: 'compound', projection: 'detectCompound segments (present IFF compound_detected)', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
+    { name: 'compound_segments', source: 'compound', projection: 'compound segments (their detector, detectCompound, was deleted in deletion 11 with no runtime caller; present IFF compound_detected)', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     { name: 'coaching_context', source: 'coaching_context', projection: 'CoachingStatePack (hash-free prompt-safe canonical state; unconditional since O-7 wave 2 but absent when no freshness verdict was derived)', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     // Readiness — status + the OPEN ITEMS behind it. `coaching_context` above
     // carries a readiness STATUS and a blocker COUNT; this section is the only
@@ -420,12 +420,12 @@ const COACH_CONVERSE: ContextPolicy = {
     // tell a user it could not see unset factors while the Model tab named them.
     // Two axes kept separate on purpose (a factor can be valueless AND stamped
     // as an AI estimate); both come from existing authorities, never re-derived.
-    { name: 'factor_values', source: 'graph', projection: 'projectFactorValueRecord → factorHasExtractedValue (value presence) + structureProvenance → classifyValueSource (authorship); emitted only for graph_context canonical; key ABSENT for provisional/absent/unavailable — absence means UNKNOWN, never "nothing missing"; a fully-valued canonical graph is PRESENT with without_value_count: 0; truncation disclosed via factors_omitted', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
+    { name: 'factor_values', source: 'graph', projection: 'factor value record (its projector, projectFactorValueRecord, was deleted in deletion 11 with no runtime caller; key ABSENT means UNKNOWN, never "nothing missing")', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     // display_analysis serialises under the `analysis` key; display_graph under `graph`.
     { name: 'analysis_context', source: 'claim_safety', projection: 'fail_closed_unavailable only (absence makes no analysis-existence claim)', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     { name: 'display_analysis', serialised_as: 'analysis', source: 'analysis_enrichment', projection: `display-safe analysis projection (its formatter was deleted; declared truncation order: ${DISPLAY_ANALYSIS_TRUNCATION_ORDER.join('→')})`, char_budget: DISPLAY_ANALYSIS_CHAR_BUDGET, enforcement: 'enforced', cut_rank: null, model_facing: true },
     { name: 'graph_context', source: 'graph_authority', projection: 'selectContextGraphSnapshot (canonical|provisional|absent|unavailable; omission fails weak to unavailable)', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true, always_expected: true },
-    { name: 'display_graph', serialised_as: 'graph', source: 'graph', projection: 'formatGraphForContext', char_budget: T_ROUTING_DISPLAY_GRAPH, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
+    { name: 'display_graph', serialised_as: 'graph', source: 'graph', projection: 'display-safe graph projection (its formatter, formatGraphForContext, was deleted in deletion 11 with no runtime caller)', char_budget: T_ROUTING_DISPLAY_GRAPH, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     { name: 'conversation_summary', source: 'rolling_summary', char_budget: T_ROUTING_CONVERSATION_SUMMARY, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     // Budget slot that is NOT itself a model-facing prompt key:
     { name: 'rest', source: 'aggregate', char_budget: T_ROUTING_REST, enforcement: 'telemetry_only', cut_rank: null, model_facing: false },

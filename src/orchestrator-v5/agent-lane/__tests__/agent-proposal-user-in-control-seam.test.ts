@@ -733,30 +733,19 @@ describe('S-D slice 2 Agent proposals', () => {
   }, 120_000);
 
   // ⭐ "CHECK ESTIMATES" (DL 7 Oct, ACTION-BAR): the host-built call opens the SAME panel on factors' CURRENT figures.
+  // Deletion 11 (22 Oct): the host builder (`check-estimates.ts`) had no runtime caller and is deleted. The call it built is
+  // hand-built here, unchanged: one `propose_assumptions` keep per factor on its CURRENT figure, so every row below still
+  // drives the live panel, keep and `authorise_change` path.
   const checkEstimates = async (ids: string[]) => {
-    const { checkEstimatesCall } = await import('../proposal-object/check-estimates.js');
-    const call = checkEstimatesCall(graphNow(), ids);
-    expect(call, 'the builder opens a card for these ids').toBeDefined();
-    script = [() => fnCall(call!.name, call!.args as unknown as Record<string, unknown>), () => say('Here are Olumi\'s current estimates to check.')];
+    const assumptions = ids.map((id) => {
+      const n = (graphNow().nodes as Record<string, any>[]).find((x) => x.id === id && x.kind === 'factor')!;
+      const os = n.observed_state as Record<string, any>;
+      return { factor_id: id, factor_label: n.label, value: typeof os.raw_value === 'number' ? os.raw_value : os.value,
+        unit: typeof os.unit === 'string' ? os.unit : '', basis: 'Olumi’s current estimate, for you to check', user_stated: false, keep: true };
+    });
+    script = [() => fnCall('propose_assumptions', { assumptions }), () => say('Here are Olumi\'s current estimates to check.')];
     return turn({ message: 'Check estimates.' });
   };
-  it('CHECK ESTIMATES builder: at most 3 ids, every id a factor holding a figure, or nothing is opened', async () => {
-    seed(true);
-    const { checkEstimatesCall } = await import('../proposal-object/check-estimates.js');
-    expect(checkEstimatesCall(graphNow(), ['fac_hours', 'fac_cost'])?.args.assumptions).toEqual([
-      expect.objectContaining({ factor_label: 'Hours', value: 10, unit: 'hours', user_stated: false, keep: true }),
-      expect.objectContaining({ factor_label: 'Cost', value: 200, unit: 'GBP', user_stated: false, keep: true }),
-    ]);
-    expect(checkEstimatesCall(graphNow(), ['fac_hours', 'fac_hours'])?.args.assumptions).toHaveLength(1);
-    expect(checkEstimatesCall(graphNow(), [])).toBeUndefined();
-    // The cap, against ids that would each pass: three open a card (the control), a fourth opens nothing.
-    const four = { nodes: [...graphNow().nodes, ...['fac_c', 'fac_d'].map((id) => ({ id, kind: 'factor', label: id, observed_state: { value: 1, unit: 'units' } }))] };
-    expect(checkEstimatesCall(four, ['fac_hours', 'fac_cost', 'fac_c'])?.args.assumptions).toHaveLength(3);
-    expect(checkEstimatesCall(four, ['fac_hours', 'fac_cost', 'fac_c', 'fac_d'])).toBeUndefined();
-    expect(checkEstimatesCall(graphNow(), ['fac_hours', 'opt_a']), 'an option is not a factor').toBeUndefined();
-    seed();
-    expect(checkEstimatesCall(graphNow(), ['fac_hours']), 'a factor with no figure has no estimate to check').toBeUndefined();
-  }, 120_000);
   it('CHECK ESTIMATES RED: one held card of the current figures, no change proposed, with Not now', async () => {
     seed(true); const before = bytes();
     const b = await checkEstimates(['fac_hours', 'fac_cost']); const p = shown(b);
