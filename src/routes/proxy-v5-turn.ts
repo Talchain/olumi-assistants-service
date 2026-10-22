@@ -35,6 +35,7 @@ import { isAllowedBrowserOrigin } from "../security/browser-origin-policy.js";
 import { log } from "../utils/telemetry.js";
 import { ROUTE_TIMEOUT_MS, DRAFT_REQUEST_BUDGET_MS } from "../config/timeouts.js";
 import { recordExplicitTurnStop } from "./turn-stop.js";
+import { coreTurnStreamTimeout } from "../orchestrator-v5/core-route/contract.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -543,6 +544,12 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
       const cors = buildCorsHeaders(origin as string);
       for (const [k, v] of Object.entries(cors)) {
         reply.header(k, v);
+      }
+      // The core route's client reads only its own contract: the same timeout the streamed proxy sends (the turn keeps
+      // running and may save; the same turn id later replays its recorded answer).
+      if (internalTarget === "/agent/v1/core-turn") {
+        const turnId = (request.body as { turn_id?: unknown } | null)?.turn_id;
+        return reply.code(504).send(coreTurnStreamTimeout(typeof turnId === "string" && turnId !== "" ? turnId : null));
       }
       return reply.code(504).send({
         error: {
