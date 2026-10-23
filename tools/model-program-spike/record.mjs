@@ -36,6 +36,8 @@ export function chancesFromView(view, labels = new Map()) {
 export const hasChance = (view) => Array.isArray(view?.options) && view.options.some((o) => o.cell?.kind === 'figure');
 
 /** A plain reading of a canonical model (the spike arm). */
+/** When a setting or risk starts, in the declared count's words (#3713 starts_after_periods; an older record's from_period is the same count). */
+const startOf = (x) => { const t = x.starts_after_periods ?? x.from_period; return typeof t === 'number' ? (t === 0 ? 'from the start' : `after ${t} periods`) : `from "${t}"`; };
 export function renderCanonical(m, compile) {
   const L = [`# ${m.question}`, '', `Period: ${m.period}.`, ''];
   const fig = (q) => (q.low !== null && q.high !== null ? `${q.value !== null ? `about ${q.value}, ` : ''}${q.low} to ${q.high}${q.range_kind ? ` (${q.range_kind})` : ''}` : q.value !== null ? String(q.value) : '—');
@@ -57,8 +59,8 @@ export function renderCanonical(m, compile) {
   for (const l of m.limits) { const x = l.measure ?? (l.quantity ? l : null); L.push(`- ${l.label}: ${x ? meas(x, 'bound') : `no measure yet: ${l.question}`} [${l.author}${l.quote ? `: "${l.quote}"` : ''}]`); }
   if (m.preferences?.length) { L.push('', '## Preferences', ''); for (const p of m.preferences) L.push(`- ${p.quantity}: ${p.direction} [${p.author}${p.quote ? `: "${p.quote}"` : ''}]`); }
   L.push('', '## Options', '');
-  for (const o of m.options) L.push(`- ${o.label} (${o.status}, ${o.author}): ${o.sets.length ? o.sets.map((s) => `${s.quantity} → ${s.to ?? (s.value ?? `${s.low} to ${s.high}`)} from period ${s.from_period}`).join('; ') : 'carry on as now'}`);
-  if (m.risks.length) { L.push('', '## Risks', ''); for (const k of m.risks) L.push(`- ${k.label}: chance ${k.occurrence}, ${k.mode} ${k.severity} to ${k.effect_on} from period ${k.from_period} (${k.author})`); }
+  for (const o of m.options) L.push(`- ${o.label} (${o.status}, ${o.author}): ${o.sets.length ? o.sets.map((s) => `${s.quantity} → ${s.to ?? (s.value ?? `${s.low} to ${s.high}`)} ${startOf(s)}`).join('; ') : 'carry on as now'}`);
+  if (m.risks.length) { L.push('', '## Risks', ''); for (const k of m.risks) L.push(`- ${k.label}: chance ${k.occurrence}, ${k.mode} ${k.severity} to ${k.effect_on} ${startOf(k)} (${k.author})`); }
   for (const f of ['claims', 'evidence', 'assumptions', 'dissent', 'conditions', 'left_out']) if (m[f]?.length) {
     L.push('', `## ${f.replace('_', ' ')}`, '');
     for (const r of m[f]) L.push(`- ${r.text ?? r.position ?? ''}${r.why ? ` — why: ${r.why}` : ''}${r.holder ? ` — held by ${r.holder}` : ''} (${r.author})`);

@@ -119,7 +119,7 @@ export async function answerAsks({ facts, asks, apiKey, fetchImpl = fetch }) {
 
 const Q_INSTRUCTIONS = [
   'A reasoning tool replied to a person. You answer its questions on behalf of the person, using ONLY their numbered facts sheet.',
-  'List every question the reply asks the person (in the reply\'s own words, one per question; at most 6). For each, pick the ONE fact line that answers that same question by meaning, or null.',
+  'List EVERY question the replies ask the person, in their own words, once each (a question printed twice is one). For each, pick the ONE fact line that answers that same question by meaning, or null.',
   'A line marked [UNKNOWN] still counts as the person\'s answer (they will say they do not know). Never invent or combine facts.',
 ].join('\n');
 const Q_SCHEMA = {
@@ -129,7 +129,8 @@ const Q_SCHEMA = {
 };
 
 /**
- * CONTROL ARM: today's route asks in its reply's words, so the operator reads the reply's questions and answers each from
+ * The operator reads EVERY reply since its last message (an answer's reply and the replies to its card presses: class 3, a
+ * press reply with no question ended runs with the answer reply's questions unanswered) and answers each question from
  * the sheet in ONE call. Every answer is the matched line's own words (an [UNKNOWN] line's words say they don't know); a
  * question no line answers is "I don't know." The message is those answers, in order, as the person would type them.
  */
@@ -150,7 +151,8 @@ export async function answerQuestions({ facts, replyText, apiKey, fetchImpl = fe
   let parsed = null;
   try { parsed = JSON.parse(text ?? 'null'); } catch { parsed = null; }
   if (!parsed || !Array.isArray(parsed.questions)) return { questions: [], message: null, call, flags: ['operator_unparsed'] };
-  const questions = parsed.questions.slice(0, 6).map((q) => {
+  // Issue map class 3: a cap of 6 skipped the rest of a long first reply's questions (8–19 asked); every one is answered now.
+  const questions = parsed.questions.map((q) => {
     const fact = q.fact_line === null ? null : facts.find((f) => f.line === q.fact_line) ?? null;
     const said = fact === null ? DONT_KNOW : fact.answer;
     return { question: q.question, status: fact === null ? 'unknown' : fact.tag === 'UNKNOWN' ? 'unknown' : 'answered', answer: said, fact, flags: fact === null && q.fact_line !== null ? ['fact_line_out_of_range'] : [] };

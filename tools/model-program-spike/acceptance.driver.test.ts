@@ -180,22 +180,25 @@ describe.skipIf(OUT === '')('model-program spike acceptance (live provider)', ()
       };
 
       let last = await post({ message: brief });
+      // Every reply since the operator's last message is what the person has read (class 3: never only the last press's).
+      let unread: string[] = [last.assistant_text].filter((t): t is string => typeof t === 'string' && t.trim() !== '');
       let shown = new Set(((last.cards ?? []) as Json[]).map((c) => c.proposal_id));
       for (let k = 1; k <= Number(process.env.MP_ANSWER_TURNS ?? '3'); k += 1) {
-        if (existsSync(STOP) || typeof last.assistant_text !== 'string') break;
-        const op = await answerQuestions({ facts, replyText: last.assistant_text, apiKey, fetchImpl: globalThis.fetch });
+        if (existsSync(STOP) || unread.length === 0) break;
+        const op = await answerQuestions({ facts, replyText: unread.join('\n\n'), apiKey, fetchImpl: globalThis.fetch });
         if (op.call) { operatorCalls.push({ turn: k, ...op.call, tokens: tokensOf(op.call.usage), usd: +usdOf(op.call.usage).toFixed(4) }); spent += usdOf(op.call.usage); }
         for (const q of op.questions as Json[]) qa.push({ turn: k, question: q.question, status: q.status, answer: q.answer, fact: q.fact, flags: q.flags });
         if ((op.questions as Json[]).length === 0) qa.push({ turn: k, question: null, status: 'no_question', answer: null, flags: op.flags });
         if (op.message === null) break;
         const displayed = ((last.cards ?? []) as Json[]).filter((c) => typeof c.proposal_id === 'string').map((c) => (c.revision === undefined ? { proposal_id: c.proposal_id } : { proposal_id: c.proposal_id, revision: c.revision }));
         last = await post({ message: op.message, ...(displayed.length ? { displayed_proposals: displayed } : {}) }, 'answer');
+        unread = [last.assistant_text].filter((t): t is string => typeof t === 'string' && t.trim() !== '');
         // The cards issued in response to these answers: the person approves each once, with its own press.
         for (const card of ((last.cards ?? []) as Json[]).filter((c) => typeof c.proposal_id === 'string' && !shown.has(c.proposal_id) && c.approve_action?.id)) {
           if (existsSync(STOP)) break;
           const pressed = await post({ message: card.approve_action.message, source: 'chip_click', chip: { id: card.approve_action.id, action_type: card.approve_action.action_type } }, 'approve');
           qa.push({ turn: k, press: card.proposal_id, status: pressed.error ? 'press_refused' : 'pressed', error: pressed.error?.code ?? null });
-          if (typeof pressed.assistant_text === 'string' && pressed.assistant_text.trim() !== '') last = pressed;
+          if (typeof pressed.assistant_text === 'string' && pressed.assistant_text.trim() !== '') { last = pressed; unread.push(pressed.assistant_text); }
         }
         shown = new Set([...shown, ...((last.cards ?? []) as Json[]).map((c) => c.proposal_id)]);
       }
