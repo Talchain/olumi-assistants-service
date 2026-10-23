@@ -9,7 +9,7 @@ import { CanonicalModel, type CanonicalModelT, type CanonicalQuantityT, type Can
 import { compile, compileJson, NO_GOAL_QUESTION } from '../compile.js';
 import { project } from '../project.js';
 import { fillQuantity, setRangeKind } from '../answer.js';
-import { probeValue } from '../probe.js';
+import { probeValue } from './probe.js';
 import { parseUnit, sameDims } from '../units.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 
@@ -28,7 +28,7 @@ const set = (quantity: string, to: string | null, quote: string, f: Partial<SetT
 const option = (id: string, label: string, sets: SetT[], quote: string): CanonicalModelT['options'][number] =>
   ({ id, label, sets, status: 'live', developed_from: null, author: 'person', quote, ...base });
 const asked = (id: string, unit: string, question: string) => qty(id, unit, { status: 'asked', question });
-const derived = (id: string, unit: string) => qty(id, unit, { status: 'derived' });
+const derived = (id: string, unit: string) => qty(id, unit, { status: 'derived', kind: 'derived' });
 const who = (quote: string | null) => (quote === null ? { author: 'olumi' as const, quote: null } : { author: 'person' as const, quote });
 /** sum / product with signed or powered parts; `difference` and `ratio` are the first part against the rest. */
 const def = (id: string, defines: string, op: 'sum' | 'difference' | 'product' | 'ratio', parts: string[], quote: string | null = null): CanonicalRelationT =>
@@ -342,7 +342,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(compile(hiding).errors.map((e) => [e.code, e.items])).toEqual([['structure_value', ['costs']]]);
   });
 
-  it('phase 0b fix 2: an ask that CANCELS OUT of a goal (checked numerically) is not asked for it, and stays asked where it matters', () => {
+  it('finite numerical agreement cannot suppress an asked fact or invent its value', () => {
     const team = (goals: CanonicalGoalT[]) => model({
       question: 'Should the bakery hire a second baker?', period: 'month',
       quantities: [
@@ -365,13 +365,58 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     const r = compile(team([growth, level]));
     expect(r.errors).toEqual([]);
     const g = Object.fromEntries(r.perGoal.map((p) => [p.goal_id, p]));
-    expect(g.more_loaves).toMatchObject({ status: 'calculable', asks: [], cancelled: ['loaves_per_baker'] });
+    expect(g.more_loaves).toMatchObject({ status: 'asks', asks: ['loaves_per_baker'], cancelled: [] });
     expect(g.five_thousand).toMatchObject({ status: 'asks', asks: ['loaves_per_baker'], cancelled: [] }); // contrast: a level needs it
-    expect(r.asks).toEqual([expect.objectContaining({ quantity_id: 'loaves_per_baker', feeds: ['five_thousand'], cancels_out_of: ['more_loaves'] })]);
-    expect(r.executable!.goals.map((x) => x.id)).toEqual(['more_loaves']);
-    expect(xq(r).get('loaves_per_baker')!.dist).toEqual({ kind: 'fixed', value: 1, author: 'placeholder' });
-    // Alone, the cancelling ask is never asked at all.
-    expect(compile(team([growth])).asks).toEqual([]);
+    expect(r.asks).toEqual([expect.objectContaining({ quantity_id: 'loaves_per_baker', feeds: ['more_loaves', 'five_thousand'], cancels_out_of: [] })]);
+    expect(r.executable).toBeNull();
+    expect(compile(team([growth])).asks).toEqual([expect.objectContaining({ quantity_id: 'loaves_per_baker', feeds: ['more_loaves'], cancels_out_of: [] })]);
+  });
+
+  it('a nonlinear expression equal at both old probe points still depends on the missing fact', () => {
+    // These are the old probe points for the first ask. Equality at those two roots is not cancellation.
+    const a = 1 + 0.173, b = a * 2.3;
+    const m = model({ quantities: [asked('q', '1', 'What is q?'), person('a', '1', a, 'a is 1.173'),
+      person('b', '1', b, 'b is 2.6979'), derived('qa', '1'), derived('qb', '1'), derived('curve', '1'),
+      person('threshold', '1', 1, 'at least one'), person('one_period', 'week', 1, 'within one week')],
+      relations: [def('qa_rel', 'qa', 'difference', ['q', 'a']), def('qb_rel', 'qb', 'difference', ['q', 'b']),
+        def('curve_rel', 'curve', 'product', ['qa', 'qb'])],
+      goals: [goal('g', 'curve', '>=', 'threshold', 'end', 'one_period', 'at least one')] });
+    const r = compile(m);
+    expect(r.errors).toEqual([]);
+    expect(r.perGoal[0]).toMatchObject({ status: 'asks', asks: ['q'], cancelled: [] });
+    expect(r.executable).toBeNull();
+  });
+
+  it('an unknown denominator cannot acquire a nonzero domain from sampled agreement', () => {
+    const m = model({ quantities: [asked('q', '1', 'What is q?'), derived('ratio', '1'),
+      person('threshold', '1', 1, 'at least one'), person('one_period', 'week', 1, 'within one week')],
+      relations: [def('ratio_rel', 'ratio', 'ratio', ['q', 'q'])],
+      goals: [goal('g', 'ratio', '>=', 'threshold', 'end', 'one_period', 'at least one')] });
+    const r = compile(m);
+    expect(r.errors).toEqual([]);
+    expect(r.perGoal[0]).toMatchObject({ status: 'asks', asks: ['q'], cancelled: [] });
+    expect(r.executable).toBeNull();
+  });
+
+  it('DL (1): a derived quantity is derived, not a fact; a link\'s size stays a coefficient even when it is derived', () => {
+    // The size of the oven link is worked out from two coefficients: kind coefficient, status derived.
+    const m = bakery();
+    m.quantities = m.quantities.map((q) => (q.id === 'extra_per_oven' ? { ...derived('extra_per_oven', 'loaf/week/oven'), kind: 'coefficient' as const } : q));
+    m.quantities.push(olumi('capacity_per_oven', 'loaf/week/oven', 120, 200, 160), olumi('sell_through', '1', 0.5, 0.9, 0.7));
+    m.relations.push(def('extra_rel', 'extra_per_oven', 'product', ['capacity_per_oven', 'sell_through']));
+    const r = compile(m);
+    expect(r.errors).toEqual([]);
+    expect(xq(r).get('extra_per_oven')!.equation).toEqual({ form: 'definition', op: 'product', parts: ['capacity_per_oven', 'sell_through'] });
+    // A derived quantity marked fact, and kind derived on a figure, are both refused: schema and compiler say the same.
+    const asFact = bakery();
+    asFact.quantities = asFact.quantities.map((q) => (q.id === 'profit' ? { ...q, kind: 'fact' as const } : q));
+    expect(compile(asFact).errors.map((e) => [e.code, e.items])).toEqual([['figure_status', ['profit']]]);
+    const figure = bakery();
+    figure.quantities = figure.quantities.map((q) => (q.id === 'costs' ? { ...q, kind: 'derived' as const } : q));
+    expect(compile(figure).errors.map((e) => [e.code, e.items])).toEqual([['figure_status', ['costs']]]);
+    const schemaText = JSON.stringify(z.toJSONSchema(CanonicalModel));
+    expect(schemaText).not.toContain('A derived or structural quantity is a fact');
+    expect(schemaText).toContain('a link\'s size stays a coefficient even when it is worked out by a relation'); // contrast: the new rule is said
   });
 
   it('phase 0b fix 6: a preference is shown and reported, never a goal or a limit', () => {
@@ -412,13 +457,19 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(x.withheld).toContainEqual(expect.objectContaining({ id: 'friendly', kind: 'limit', label: 'Keep the gym friendly' }));
     expect(r.within_limits.leaves_out).toEqual(['friendly']);
     expect(r.coverage.leaves_out.map((w) => w.id)).toEqual(['friendly']);
-    // Uncertain timing waits on the PL's range-law ruling: the option is withheld with that reason, the rest still compares.
+    // DL (2): an uncertain timing goes into the run under its quantity id (S2 samples it; its whole-period reading is the PL's).
     const unsure = structuredClone(m);
-    unsure.quantities = unsure.quantities.map((q) => (q.id === 'opening_month' ? { ...q, value: null, low: 1, high: 4 } : q));
+    unsure.quantities = unsure.quantities.map((q) => (q.id === 'opening_month' ? { ...q, value: null, low: 1, high: 4, range_kind: 'bounds' as const } : q));
     const ru = compile(unsure);
-    expect(ru.perOption.find((o) => o.option_id === 'promo')).toMatchObject({ status: 'withheld' });
-    expect(ru.perOption.find((o) => o.option_id === 'promo')!.reasons.join(' ')).toContain('range-law ruling');
-    expect(ru.executable!.options.map((o) => o.id)).toEqual(['carry_on']);
+    expect(ru.errors).toEqual([]);
+    expect(ru.executable!.options.find((o) => o.id === 'promo')!.sets).toEqual([{ quantity: 'joins', to: 'promo_joins', from_period: 'opening_month' }]);
+    expect(ru.executable!.quantities.find((q) => q.id === 'opening_month')!.dist).toMatchObject({ kind: 'range', low: 1, high: 4, range_kind: 'bounds' });
+    // An unclear timing range is asked, like any person's range; the other option still compares.
+    const unclear = structuredClone(m);
+    unclear.quantities = unclear.quantities.map((q) => (q.id === 'opening_month' ? { ...q, value: null, low: 1, high: 4 } : q));
+    const rc = compile(unclear);
+    expect(rc.perOption.find((o) => o.option_id === 'promo')).toMatchObject({ status: 'asks', asks: ['opening_month'] });
+    expect(rc.executable!.options.map((o) => o.id)).toEqual(['carry_on']);
   });
 
   it('DL defect (c) + fact/coefficient: an inline option value compiles into a named quantity; a missing one is an ask that fills it', () => {

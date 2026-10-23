@@ -12,8 +12,9 @@
  *    unfaithful drafts).
  *  · ASKS are legitimate, successful outcomes: a figure only the person can give. Each ask fills EXACTLY ONE quantity
  *    (`fillQuantity` in answer.ts) and lists what it feeds; each goal lists its own asks, so "answer these and the chance
- *    appears" is true by construction. An ask that CANCELS OUT of a goal (decided numerically, `probe.ts`) is not asked for
- *    that goal, and is kept only where it matters.
+ *    appears" is true by construction. An asked fact is NEVER removed or given a value by the compiler: finite numerical
+ *    agreement cannot prove cancellation or its domain (the buddy's BLOCK, upheld by the DL). Cancellation may only ever be
+ *    PROVEN from the canonical forms with its domain conditions, and only after a PL review: not built.
  *  · WITHHELD goals rest on a quantity that is `unknown` or `unsupported`, a range the ruled law holds, or a window or timing
  *    that is a range; the reason says which. Withheld items are echoed in `executable.withheld` and `coverage`.
  *  · UNVERIFIED items are the person's by their author, but their quote is not in the person's words (`sourceText`). They
@@ -33,7 +34,6 @@ import {
 } from './canonical.js';
 import type { ExecutableModel, Quantity as XQuantity, Goal as XGoal, Limit as XLimit, Option as XOption, Risk as XRisk, Dist, Domain, Withheld, FixedAuthor } from './executable.js';
 import { parseUnit, multiply, divide, sameDims, isDimensionless, showUnit, perPeriod, isCalendarConversion, TIME_DIMS, type Unit } from './units.js';
-import { probeMargins, sameMargins } from './probe.js';
 import { rangeLaw, type RangeReading, type RangeDist } from './simulate/range-law.js';
 
 export type { RangeReading };
@@ -52,7 +52,7 @@ export type GoalOutcome = {
   reasons: string[];
   /** The asked quantities this goal waits on: answer exactly these (and nothing is withheld) and its chance appears. */
   asks: string[];
-  /** Asked quantities that cancel out of this goal (checked numerically): not asked for it. */
+  /** Reserved for a cancellation PROVEN from the canonical forms (PL review first; not built): always [] now. */
   cancelled: string[];
   /** True for an aim with no measure yet: left out of the chance, with a coaching question. */
   needs_measure: boolean;
@@ -234,7 +234,10 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
     ...model.limits.filter((l) => has(l.measure?.window)).map((l) => ({ id: l.id, w: l.measure!.window! })),
   ];
   const timings = [...model.options.flatMap((o) => o.sets.map((s) => s.from_period)), ...model.risks.map((k) => k.from_period)].filter((t): t is string => typeof t === 'string');
-  const windowQs = new Set([...windowed.flatMap(({ w }) => [w.periods, ...(has(w.origin_offset) ? [w.origin_offset] : [])]), ...timings]);
+  /** Window lengths and origin timings: whole periods, consumed into the window. */
+  const windowQs = new Set(windowed.flatMap(({ w }) => [w.periods, ...(has(w.origin_offset) ? [w.origin_offset] : [])]));
+  /** Set and risk timings that name a quantity: a fixed one resolves to a whole period; an uncertain one goes into the run. */
+  const timingQs = new Set(timings);
   /** Settings of Olumi's own options: its proposal, exact by definition. */
   const proposals = new Set(model.options.filter((o) => o.author === 'olumi').flatMap((o) => o.sets.map((s) => s.to)).filter(has));
   for (const o of model.options) if (o.author !== 'olumi') for (const s of o.sets) if (has(s.to)) proposals.delete(s.to);
@@ -260,6 +263,9 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
     const ranged = has(q.low) && has(q.high) && q.low < q.high;
     if (ranged && q.author === 'olumi' && !has(q.range_kind)) err('range_kind', `${n} is Olumi's range without its kind; say plausible (a rough span) or bounds (hard ends).`, [q.id]);
     if (!ranged && has(q.range_kind)) err('range_kind', `${n} has a range kind but no range; set range_kind null.`, [q.id]);
+    // Kind and status agree: derived status ⇔ kind derived, except a link's size, which stays a coefficient when derived.
+    if (q.status === 'derived' && q.kind === 'fact') err('figure_status', `${n} is worked out by its relation, so its kind is derived (or coefficient, when it is the size of a link), not fact.`, [q.id]);
+    if (q.kind === 'derived' && q.status !== 'derived') err('figure_status', `${n} has kind derived but status ${q.status}; a derived quantity is worked out by exactly one relation (status derived), otherwise it is a fact or a coefficient.`, [q.id]);
     if (q.status === 'derived') {
       if (!R.has(q.id)) err('no_relation', `${n} is marked derived but no relation works it out; add its definition, effect or stock, or give its figure.`, [q.id]);
       if (fig) err('figure_status', `${n} is derived, so its figures must be null (its relation works them out).`, [q.id]);
@@ -271,14 +277,14 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
       else if (!(Number.isInteger(q.value) || isPowerOfTen(Math.abs(q.value)) || (U.has(q.id) && isCalendarConversion(q.value, U.get(q.id)!)))) {
         err('structure_value', `${n} is marked structure, but ${q.value} is not a structural constant (a whole count such as 0 or 1, a power of ten, or a calendar conversion); it is the person's figure or Olumi's ranged estimate.`, [q.id]);
       }
-      if (q.kind === 'coefficient') err('structure_value', `${n} is a coefficient, the size of a mechanism, so it is never structural: it is the person's figure or Olumi's ranged estimate.`, [q.id]);
+      if (q.kind !== 'fact') err('structure_value', `${n} is a structural constant, so its kind is fact (a coefficient is a mechanism's size, never structural: the person's figure or Olumi's ranged estimate).`, [q.id]);
       continue;
     }
     if (q.status === 'known') {
       if (!fig) err('figure_status', `${n} is marked known but has no figure; give the person's figure, or mark it asked with a question.`, [q.id]);
       else if (q.author === 'olumi') {
         const point = has(q.value) && !has(q.low);
-        const dateReading = point && windowQs.has(q.id) && Number.isInteger(q.value) && has(q.basis);
+        const dateReading = point && (windowQs.has(q.id) || timingQs.has(q.id)) && Number.isInteger(q.value) && has(q.basis);
         const proposal = point && proposals.has(q.id);
         if (!dateReading && !proposal) err('olumi_no_range', `${n} is Olumi's figure marked known; Olumi's figures are estimates: mark it estimated with low and high, ask the person, or, for an exact constant such as 12 month/year or an option switch, make its author structure.`, [q.id]);
       }
@@ -386,16 +392,21 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
   };
 
   // ── timing: a whole period, or a quantity holding one ──────────────────────────────────────────────────────────────
-  const timingHeld = new Map<string, string>();
-  const timingOf = (t: number | string, at: string, item: string): number | null => {
+  const fixedTimings = new Set<string>();
+  /** A whole period; or, for an uncertain timing, the quantity's id (S2 samples it; its whole-period reading is the PL's). */
+  const timingOf = (t: number | string, at: string, item: string): number | string | null => {
     if (typeof t === 'number') { if (t < 0) err('timing', `${at} takes effect from period ${t}; periods start at 0 (now).`, [item]); return t; }
     if (!isQ(t, `${at}'s timing`, item)) return null;
     const q = Q.get(t)!;
     if (U.has(t) && !sameDims(U.get(t)!, period)) { err('timing', `${at}'s timing ${name(t)} is ${showUnit(U.get(t)!)}; it counts ${model.period}s from now.`, [item, t]); return null; }
     if (!FIGURE_STATUSES.has(q.status)) return null; // asked, unknown or unsupported: an ask or a withholding, through its closure
-    if (has(q.low) && has(q.high) && q.low !== q.high) { timingHeld.set(t, `its timing "${q.label}" is a range (${q.low}–${q.high} ${q.unit}); uncertain timing waits on the range-law ruling`); return null; }
+    if (has(q.low) && has(q.high) && q.low !== q.high) {
+      if (q.low < 0) err('timing', `${at}'s timing ${name(t)} starts at ${q.low}; a timing counts ${model.period}s from now, 0 or more.`, [item, t]);
+      return t; // uncertain: a range read through the shared law, like any other (an unclear kind is asked, a held one withholds)
+    }
     const v = q.value ?? q.low!;
     if (!Number.isInteger(v) || v < 0) { err('timing', `${at}'s timing ${name(t)} is ${v}; it must be a whole number of ${model.period}s from now, 0 or more.`, [item, t]); return null; }
+    fixedTimings.add(t);
     return v;
   };
 
@@ -503,7 +514,7 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
   const reachable = model.goals.length > 0 && model.goals.every((g) => has(g.measure)) && measured.length + measuredLimits.length > 0;
   const optionIds = new Set(model.options.map((o) => o.id));
   const labels = new Map<string, string>();
-  const setTiming = new Map<string, (number | null)[]>();
+  const setTiming = new Map<string, (number | string | null)[]>();
   for (const o of model.options) {
     const at = `The option "${o.label}" (${o.id})`;
     needQuote(o, at, o.id);
@@ -513,7 +524,7 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
     labels.set(key, o.id);
     if (has(o.developed_from) && !optionIds.has(o.developed_from)) err('undefined_ref', `${at} is developed from "${o.developed_from}", which is not an option.`, [o.id]);
     let reaches = false;
-    const times: (number | null)[] = [];
+    const times: (number | string | null)[] = [];
     o.sets.forEach((s, i) => {
       const from = timingOf(s.from_period, `${at}'s setting of ${name(s.quantity)}`, o.id);
       times.push(from);
@@ -522,7 +533,7 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
       if (Q.get(s.quantity)!.status === 'derived') err('set_derived', `${at} sets ${name(s.quantity)}, which is worked out by its relation; set one of its inputs instead.`, [o.id, s.quantity]);
       if (unitsOk(s.quantity, to) && !sameDims(U.get(s.quantity)!, U.get(to)!)) err('unit_mismatch', `${at} sets ${name(s.quantity)} (${showUnit(U.get(s.quantity)!)}) to ${name(to)} (${showUnit(U.get(to)!)}); they need one unit.`, [o.id, s.quantity, to]);
       if (o.sets.slice(0, i).some((x) => x.quantity === s.quantity && x.from_period === s.from_period)) err('option_shape', `${at} sets ${name(s.quantity)} twice from the same period; keep one.`, [o.id, s.quantity]);
-      if (horizon > 0 && from !== null && from >= horizon) err('after_horizon', `${at} sets ${name(s.quantity)} from period ${from}, after the model's last period (${horizon - 1}).`, [o.id]);
+      if (horizon > 0 && typeof from === 'number' && from >= horizon) err('after_horizon', `${at} sets ${name(s.quantity)} from period ${from}, after the model's last period (${horizon - 1}).`, [o.id]);
       if (goalReach.has(s.quantity) || limitReach.has(s.quantity)) reaches = true;
       else if (reachable) err('set_reaches_nothing', `${at} sets ${name(s.quantity)}, which reaches no goal or limit; link it to what it changes, or drop the setting.`, [o.id, s.quantity]);
     });
@@ -533,14 +544,14 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
   }
 
   // ── risks ──────────────────────────────────────────────────────────────────────────────────────────────────────────
-  const riskTiming = new Map<string, number | null>();
+  const riskTiming = new Map<string, number | string | null>();
   for (const k of model.risks) {
     const at = `The risk "${k.label}" (${k.id})`;
     needQuote(k, at, k.id);
     const from = timingOf(k.from_period, at, k.id);
     riskTiming.set(k.id, from);
     if (!isQ(k.occurrence, at, k.id) || !isQ(k.severity, at, k.id) || !isQ(k.effect_on, at, k.id)) continue;
-    if (horizon > 0 && from !== null && from >= horizon) err('after_horizon', `${at} takes effect from period ${from}, after the model's last period (${horizon - 1}).`, [k.id]);
+    if (horizon > 0 && typeof from === 'number' && from >= horizon) err('after_horizon', `${at} takes effect from period ${from}, after the model's last period (${horizon - 1}).`, [k.id]);
     const ou = U.get(k.occurrence);
     if (ou && !isDimensionless(ou)) err('risk_shape', `${at}: its chance ${name(k.occurrence)} is ${showUnit(ou)}; a chance is a pure number ("1", or "%").`, [k.id, k.occurrence]);
     const occ = Q.get(k.occurrence)!;
@@ -574,7 +585,7 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
   }
 
   /** Window lengths, origin timings and set/risk timings that nothing else reads: consumed into the windows and timings. */
-  const consumedOnly = new Set([...windowQs].filter((id) => ![...R.values()].some((r) => [...(instant.get(r.defines) ?? []), ...(lagged.get(r.defines) ?? []), r.defines].includes(id))
+  const consumedOnly = new Set([...windowQs, ...fixedTimings].filter((id) => ![...R.values()].some((r) => [...(instant.get(r.defines) ?? []), ...(lagged.get(r.defines) ?? []), r.defines].includes(id))
     && ![...measured.flatMap(goalRoots), ...measuredLimits.flatMap(limitRoots)].includes(id)
     && !model.options.some((o) => o.sets.some((x) => x.quantity === id || x.to === id))
     && !model.risks.some((k) => [k.occurrence, k.severity, k.effect_on].includes(id))));
@@ -596,7 +607,6 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
     readings.set(q.id, readRange(rangeDistOf(q, U.get(q.id)!.scale, domainOf(q)), chances.has(q.id)));
   }
   const held = new Map([...readings].filter(([, r]) => r.kind === 'held').map(([id, r]) => [id, (r as { reason: string }).reason] as const));
-  for (const [id, reason] of timingHeld) held.set(id, reason);
 
   // ── typed outcomes: what each goal, limit and option rests on ──────────────────────────────────────────────────────
   const unverifiedIds = new Set(unverified.map((u) => u.id));
@@ -605,8 +615,8 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
   const blockersOf = (closure: Iterable<string>) => [...closure].map((x) => Q.get(x)).filter((q): q is CanonicalQuantityT => !!q && (isAsk(q) || withholds(q)));
   const describe = (q: CanonicalQuantityT) => (q.status === 'asked' ? `needs "${q.label}": ${q.question}` : held.has(q.id) ? `rests on "${q.label}": ${held.get(q.id)}; give a most likely figure, or ask`
     : unresolved.has(q.id) ? `needs how to read "${q.label}": ${unresolved.get(q.id)}` : `rests on "${q.label}", which is ${q.status.replace('_', ' ')}: ${q.basis}`);
-  const outcomeOf = (closure: Set<string>, win?: WinState, cancelled: ReadonlySet<string> = new Set()): { status: Outcome; reasons: string[]; asks: string[] } => {
-    const blockers = blockersOf([...closure, ...(win?.blockers ?? [])]).filter((q) => !cancelled.has(q.id));
+  const outcomeOf = (closure: Set<string>, win?: WinState): { status: Outcome; reasons: string[]; asks: string[] } => {
+    const blockers = blockersOf([...closure, ...(win?.blockers ?? [])]);
     const withheld = [...(win?.withheld ?? []), ...blockers.filter(withholds).map(describe)];
     const asked = [...new Map(blockers.filter((q) => isAsk(q) && !withholds(q)).map((q) => [q.id, q] as const)).values()];
     const reasons = [...withheld, ...asked.map(describe), ...(win?.deadline ? [`It changes over time, so it needs a deadline: ${win.deadline}`] : [])];
@@ -659,8 +669,8 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
     conversions: [], implicit_as_stated: model.options.length === 0,
   };
 
-  // ── the executable subset (also used, with placeholders, by the cancellation probe) ────────────────────────────────
-  const build = (goals: CanonicalGoalT[], limits: CanonicalLimitT[], options: CanonicalModelT['options'], placeholders: ReadonlyMap<string, number>, conversions?: Conversion[]): ExecutableModel => {
+  // ── the executable subset: only supported goals, limits and inputs ────────────────────────────────────────────────
+  const build = (goals: CanonicalGoalT[], limits: CanonicalLimitT[], options: CanonicalModelT['options'], conversions?: Conversion[]): ExecutableModel => {
     const included = upstream([...goals.flatMap(goalRoots), ...limits.flatMap(limitRoots)]);
     const xRisks = new Set<string>();
     const xSets = new Map<string, Set<number>>();
@@ -670,11 +680,13 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
         const taken = xSets.get(o.id) ?? new Set<number>();
         if (!included.has(s.quantity) || taken.has(i)) return;
         taken.add(i); xSets.set(o.id, taken); changed = true;
-        for (const x of upstream([s.to ?? ''])) included.add(x);
+        const when = setTiming.get(o.id)?.[i];
+        for (const x of upstream([s.to ?? '', ...(typeof when === 'string' ? [when] : [])])) included.add(x);
       });
       for (const k of model.risks) if (!xRisks.has(k.id) && included.has(k.effect_on)) {
         xRisks.add(k.id); changed = true;
-        for (const x of upstream([k.occurrence, k.severity])) included.add(x);
+        const when = riskTiming.get(k.id);
+        for (const x of upstream([k.occurrence, k.severity, ...(typeof when === 'string' ? [when] : [])])) included.add(x);
       }
     }
     const quantities: XQuantity[] = [];
@@ -686,7 +698,7 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
       const law = readings.get(q.id);
       if (conversions && law) conversions.push({ kind: 'range_law', quantity: q.id, low: q.low! * u.scale, high: q.high! * u.scale, range_kind: q.range_kind ?? 'plausible', domain: domainOf(q) ?? null, reading: law, author: 'olumi', provisional: true });
       const base = { id: q.id, label: q.label, unit, reading: 'state' as const }; // readings are set by `setReadings` once the subset is final
-      if (r === undefined) quantities.push({ ...base, dist: placeholders.has(q.id) ? { kind: 'fixed', value: placeholders.get(q.id)!, author: 'placeholder' } : distOf(q, u.scale, domainOf(q)) });
+      if (r === undefined) quantities.push({ ...base, dist: distOf(q, u.scale, domainOf(q)) });
       else if (r.form === 'stock') quantities.push({ ...base, stock: { start: r.start, inflows: [...r.inflows], outflows: [...r.outflows] } });
       else if (r.form === 'effect') quantities.push({ ...base, equation: { form: 'effect', base: r.base, terms: r.terms.map((t) => ({ coefficient: t.coefficient, driver: t.driver })) } });
       else quantities.push(...lowerDefinition(base, r, (ids) => showUnit({ dims: ids.reduce((a, i) => multiply(a, U.get(i)!), { dims: {}, scale: 1 } as Unit).dims, scale: 1 })));
@@ -707,32 +719,8 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
     return { periods: horizon, period_unit: model.period, quantities, goals: xGoals, limits: xLimits, options: xOptions, risks: xRiskList, withheld: [] };
   };
 
-  // ── asks that CANCEL OUT of a goal or limit: decided numerically on the same draws (probe.ts) ──────────────────────
-  if (!errors.length) {
-    const askedIds = model.quantities.filter((q) => q.status === 'asked').map((q) => q.id);
-    const placeholderFor = new Map(askedIds.map((id, i) => [id, 1 + 0.173 * (i + 1)] as const));
-    const probeOptions = model.options.filter((o) => perOption.find((p) => p.option_id === o.id)!.status !== 'withheld' && o.status === 'live');
-    const probe = (check: { kind: 'goal'; g: CanonicalGoalT } | { kind: 'limit'; l: CanonicalLimitT }, outcome: { status: Outcome; asks: string[]; cancelled: string[] }, win: WinState | undefined) => {
-      if (outcome.status !== 'asks' || !win?.win || !outcome.asks.length) return;
-      const x = check.kind === 'goal' ? build([check.g], [], probeOptions, placeholderFor) : build([], [check.l], probeOptions, placeholderFor);
-      const target = check.kind === 'goal' ? x.goals[0] : x.limits[0];
-      for (const a of outcome.asks.filter((id) => placeholderFor.has(id))) {
-        const v = placeholderFor.get(a)!;
-        const one = probeMargins(x, target, new Map([[a, v]]));
-        const two = probeMargins(x, target, new Map([[a, v * 2.3]]));
-        if (sameMargins(one, two)) outcome.cancelled.push(a);
-      }
-    };
-    model.goals.forEach((g, i) => { if (has(g.measure)) probe({ kind: 'goal', g }, perGoal[i], goalWin.get(g.id)); });
-    model.limits.forEach((l, i) => { if (has(l.measure)) probe({ kind: 'limit', l }, perLimit[i], limitWin.get(l.id)); });
-    const recheck = (p: GoalOutcome | LimitOutcome, roots: string[], win: WinState | undefined) => {
-      if (!p.cancelled.length) return;
-      const o = outcomeOf(upstream(roots), win, new Set(p.cancelled));
-      Object.assign(p, o, { reasons: [...o.reasons, ...p.cancelled.map((a) => `"${Q.get(a)!.label}" cancels out of it, so it is not asked for it.`)] });
-    };
-    model.goals.forEach((g, i) => recheck(perGoal[i], goalRoots(g), goalWin.get(g.id)));
-    model.limits.forEach((l, i) => recheck(perLimit[i], limitRoots(l), limitWin.get(l.id)));
-  }
+  // Finite probes cannot establish an identity or its domain. Missing facts stay asked;
+  // no diagnostic agreement may remove an ask or substitute an invented production value.
 
   // ── joint, limits, coverage, asks, coaching ────────────────────────────────────────────────────────────────────────
   const worst = (xs: { status: Outcome }[]): Outcome => (xs.some((x) => x.status === 'withheld') ? 'withheld' : xs.some((x) => x.status === 'asks') ? 'asks' : 'calculable');
@@ -756,14 +744,12 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
     reasons: measuredLimitOutcomes.filter((p) => p.status !== 'calculable').map((p) => `Staying within the limits waits on "${label(p.limit_id)}".`),
   };
   const feedsOf = (id: string) => [
-    ...perGoal.filter((p) => goalClosure.get(p.goal_id)?.has(id) && !p.cancelled.includes(id)).map((p) => p.goal_id),
-    ...perLimit.filter((p) => limitClosure.get(p.limit_id)?.has(id) && !p.cancelled.includes(id)).map((p) => p.limit_id),
+    ...perGoal.filter((p) => goalClosure.get(p.goal_id)?.has(id)).map((p) => p.goal_id),
+    ...perLimit.filter((p) => limitClosure.get(p.limit_id)?.has(id)).map((p) => p.limit_id),
     ...model.options.filter((o) => o.status === 'live' && optionClosure.get(o.id)!.has(id)).map((o) => o.id),
   ];
-  const cancelsOf = (id: string) => [...perGoal.filter((p) => p.cancelled.includes(id)).map((p) => p.goal_id), ...perLimit.filter((p) => p.cancelled.includes(id)).map((p) => p.limit_id)];
   const figureAsks: Ask[] = model.quantities.filter((q) => q.status === 'asked' && has(q.question))
-    .map((q) => ({ quantity_id: q.id, label: q.label, unit: q.unit, question: q.question!, feeds: feedsOf(q.id), cancels_out_of: cancelsOf(q.id), edit: { op: 'fill_quantity' as const, quantity_id: q.id } }))
-    .filter((a) => a.feeds.length > 0 || a.cancels_out_of.length === 0); // an ask that cancels everywhere it reaches is never asked
+    .map((q) => ({ quantity_id: q.id, label: q.label, unit: q.unit, question: q.question!, feeds: feedsOf(q.id), cancels_out_of: [], edit: { op: 'fill_quantity' as const, quantity_id: q.id } }));
   const readingAsks: Ask[] = [...unresolved].map(([id, question]) => ({ quantity_id: id, label: Q.get(id)!.label, unit: Q.get(id)!.unit, question, feeds: feedsOf(id), cancels_out_of: [], edit: { op: 'set_range_kind' as const, quantity_id: id } }));
   result.asks = [...figureAsks, ...readingAsks].sort((a, b) => b.feeds.length - a.feeds.length);
   result.coaching = [
@@ -792,10 +778,8 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
   // A run needs something to check (a goal, or limits only) and something to compare.
   if ((!goodGoals.length && !goodLimits.length) || (model.options.length > 0 && !goodOptions.length)) return result;
 
-  const placeholders = new Map<string, number>();
-  for (const q of model.quantities) if (q.status === 'asked' && [...perGoal, ...perLimit].some((p) => p.cancelled.includes(q.id))) placeholders.set(q.id, 1);
   const conversions: Conversion[] = [];
-  const x = build(goodGoals, goodLimits, goodOptions, placeholders, conversions);
+  const x = build(goodGoals, goodLimits, goodOptions, conversions);
   const inRun = new Set(x.risks.map((k) => k.id));
   x.withheld = [
     ...withheldList,
