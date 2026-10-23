@@ -95,13 +95,15 @@ export function dispatchedQuestionOf(request: unknown): RunQuestionSide | null {
 }
 
 /** Shared scope check over a frozen saved model and the FINAL dispatched request. Never reads output statistics. */
-export function assessEvaluatedQuestionScope(savedGraph: unknown, dispatchedRequest: unknown, goalId: string, levelKind?: boolean): RunQuestionScope {
+export function assessEvaluatedQuestionScope(savedGraph: unknown, dispatchedRequest: unknown, goalId: string, levelKind?: boolean, primaryEventContextIds?: ReadonlySet<string>): RunQuestionScope {
   const asked = askedQuestionOf(savedGraph, goalId), calculated = dispatchedInputsOf(dispatchedRequest);
   if (asked === null) return { status: 'unverified', can_show_goal_chance: false, reasons: ['saved_question_not_recorded'] };
   const savedGoal = questionGoal(savedGraph, goalId);
   const basis = isRec(savedGoal?.goal_target_basis) ? savedGoal.goal_target_basis : undefined;
   const targetRows = isRec(savedGraph) && Array.isArray(savedGraph.goal_constraints)
-    ? savedGraph.goal_constraints.filter(isRec).filter(row => row.role === 'goal_target') : [];
+    ? savedGraph.goal_constraints.filter(isRec).filter(row => row.role === 'goal_target'
+      // A typed-held secondary is retained context beside the primary event, not another calculated target.
+      && (row.node_id === goalId || !primaryEventContextIds?.has(String(row.constraint_id)))) : [];
   // Existing over-period/condition-refusal owners keep their own calculation and truthful withholding reason.
   if (questionText(basis?.open_question) !== undefined || basis?.period_kind === 'over_period' || targetRows.length > 1
     || levelKind === false || questionNodes(savedGraph).some(n => isRec(n.nonlinear_identity) && n.nonlinear_identity.operation === 'accumulation')

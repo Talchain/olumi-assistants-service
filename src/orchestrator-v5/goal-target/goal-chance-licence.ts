@@ -598,7 +598,8 @@ function goalTargetStateOf(
 export function withEvaluatedGoalChanceInputs<E>(response: E, savedGraph: unknown, goalId: unknown,
   sentRun: SentRunInputs, brief?: string | null): { response: E; scope: RunQuestionScope } {
   const scope: RunQuestionScope = typeof goalId === 'string'
-    ? { ...assessEvaluatedQuestionScope(savedGraph, sentRun, goalId, goalKindOf(savedGraph) === 'level'),
+    ? { ...assessEvaluatedQuestionScope(savedGraph, sentRun, goalId, goalKindOf(savedGraph) === 'level',
+      primaryOnlyTargetIds(savedGraph, isRec(savedGraph) ? savedGraph.goal_constraints : undefined, isRec(sentRun) ? sentRun.goal_constraints : undefined, goalId)),
       dispatched_input_digest: sentDigest({ ...sentRun }) }
     : { status: 'unverified', can_show_goal_chance: false, reasons: ['saved_question_not_recorded'] };
   const missingTargetOrDirection = scope.reasons.some(reason =>
