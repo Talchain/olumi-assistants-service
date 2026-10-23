@@ -683,6 +683,36 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(j.receipts).toEqual([expect.objectContaining({ version_id: 'v_1', authorised_by: 'olumi' })]);
   });
 
+  it('⭐ STEP 0 (arch plan, DL 23 Oct): ONE summary log line per turn, keyed by scenario and turn, by id and code only', async () => {
+    persisted = null;
+    // The route's own logger instance (after resetModules).
+    const info = vi.spyOn((await import('../../utils/telemetry.js')).log, 'info');
+    const model = { ...structuredClone(KNOWN_ANSWER), conditions: [{ text: 'only once the board signs off', applies_to: ['f_g'], role: 'prerequisite' as const,
+      source: 'olumi' as const, party: null, quote: null }] };
+    // The person's option, quoted in words nobody said: the kernel relabels it (an authorship decision).
+    model.options[0] = { ...model.options[0]!, quote: 'or we wait a year' };
+    outputs = [[{ type: 'function_call', name: 'build_model_from_brief', call_id: 'draft', args: { brief: BRIEF, model } }],
+      [{ type: 'message', text: 'I will look at that condition again.' }]];
+    const turnId = randomUUID();
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/core-turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: turnId, message: BRIEF, source: 'composer' } });
+    expect(r.statusCode, r.body).toBe(200);
+    const lines = info.mock.calls.flatMap(([o]) => ((o as Json)?.event === 'core_turn.summary' ? [o as Json] : []));
+    info.mockRestore();
+    expect(lines).toHaveLength(1);
+    const line = lines[0]!;
+    expect(line).toMatchObject({ scenario_id: SCENARIO, turn_id: turnId, stopped_reason: 'answered' });
+    expect(line.provider_calls.length).toBeGreaterThan(0);
+    for (const c of line.provider_calls) expect(c).toMatchObject({ model: 'gpt-scripted', input_tokens: 10, output_tokens: 5, ms: expect.any(Number) });
+    expect(line.tool_calls.map((c: Json) => [c.name, c.outcome, c.refusal ?? null, c.run_ready ?? null]))
+      .toEqual([['build_model_from_brief', 'refused', 'not_run_ready', null], ['build_model_from_brief', 'ok', null, false]]);
+    expect(line.tool_calls[0].blockers).toEqual(line.tool_calls[1].blockers);
+    expect(line.tool_calls[0].blockers).toContainEqual(expect.objectContaining({ items: ['condition'] }));
+    expect(line.tool_calls[1].relabelled).toEqual([{ id: 'hold', was: 'user' }]);
+    // Ids and codes only: no brief, condition, quote or reply words.
+    const text = JSON.stringify(line);
+    for (const words of ['board signs off', 'wait a year', 'look at that condition', 'units']) expect(text).not.toContain(words);
+  });
+
   it('Codex r1 on #3675: a provider error after the refusal still leaves the draft saved, as base would; the error is the one reported', async () => {
     persisted = null;
     const model = { ...structuredClone(KNOWN_ANSWER), conditions: [{ text: 'only once the board signs off', applies_to: ['f_g'], role: 'prerequisite' as const,
