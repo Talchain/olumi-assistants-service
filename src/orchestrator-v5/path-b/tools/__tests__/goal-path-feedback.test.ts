@@ -280,7 +280,9 @@ describe('THE READINESS SELF-CHECK: a draft a Run would withhold the goal\'s cha
       return m;
     };
     const missing = (m: LivingModelT) => blockersOf(m, selfCheck(m, mapLivingModel(m))).all.filter((b) => b.code === 'MISSING_FACTOR_LEVEL');
-    expect(missing(level(null, null))).toEqual([{ code: 'MISSING_FACTOR_LEVEL', items: ['f'], ask: true }]);
+    // The ask carries the readiness authority's own question (0 AI calls).
+    expect(missing(level(null, null))).toEqual([{ code: 'MISSING_FACTOR_LEVEL', items: ['f'], ask: true,
+      question: 'What is "f" today, before any option changes it? Without a current level the analysis would treat it as zero.' }]);
     expect(missing(level(0.4, 0.6))).toEqual([{ code: 'MISSING_FACTOR_LEVEL', items: ['f'], said: true }]);
   });
 
@@ -299,7 +301,8 @@ describe('THE READINESS SELF-CHECK: a draft a Run would withhold the goal\'s cha
     ];
     const edges: Rec[] = [...['stock', 'churn', 'inflow'].map((from) => ({ from, to: 'specialists' })), ...['specialists', 'each'].map((from) => ({ from, to: 'total' }))];
     const mapped = { graph: { nodes, edges }, withheld: [], frames: new Map(), assumed: [] };
-    expect(blockersOf(KNOWN_ANSWER, selfCheck(KNOWN_ANSWER, mapped))).toMatchObject({ all: expect.arrayContaining([{ code: 'identity_zero_level', items: ['total'], ask: true }]) });
+    expect(blockersOf(KNOWN_ANSWER, selfCheck(KNOWN_ANSWER, mapped)).all.find((b) => b.code === 'identity_zero_level')).toEqual({ code: 'identity_zero_level', items: ['total'], ask: true,
+      question: '\u201cSpecialists today\u201d is 0 today, so \u201cAdditional capacity\u201d can\'t be worked out as \u201cSpecialists\u201d \u00d7 \u201cCapacity each\u201d. Is 0 right, or what is it?' });
     // CONTRAST: a stated product with no part at 0 asks nothing of its identity.
     expect(blockersOf(F1_DEFINED, selfCheck(F1_DEFINED, mapLivingModel(F1_DEFINED))).all.filter((x) => x.code.startsWith('identity_'))).toEqual([]);
   });

@@ -115,6 +115,8 @@ export interface Blocker {
   readonly fix?: string;
   readonly ask?: true;
   readonly said?: true;
+  /** An ask's question, in the host's own words where a composer has them (0 AI calls); the AI asks in its own otherwise. */
+  readonly question?: string;
 }
 
 /**
@@ -132,7 +134,7 @@ function theirsIn(model: LivingModelT, item: string | null): boolean {
 }
 
 /** A blocker found, on one item; a condition's scope is part of it, since two conditions can share their words (Codex r1 on #3672). */
-export type Found = { readonly code: string; readonly item: string | null; readonly scope?: string };
+export type Found = { readonly code: string; readonly item: string | null; readonly scope?: string; readonly question?: string };
 /**
  * A level the factor already holds, read as missing only until the mapper carries it (a bare range; B1): never asked for again
  * (DL 93d79c3e, C1). Said, so the log still shows the gap.
@@ -141,8 +143,8 @@ const holdsLevel = (model: LivingModelT, code: string, item: string | null): boo
   && model.factors.some((f) => f.id === item && (f.value !== null || (f.low !== null && f.high !== null)));
 /** Each found blocker's fix or ask, one per code and kind. */
 function said(model: LivingModelT, found: readonly Found[]): Blocker[] {
-  const out = new Map<string, { code: string; items: string[]; fix?: string; ask?: true; said?: true }>();
-  for (const { code, item } of found) {
+  const out = new Map<string, { code: string; items: string[]; fix?: string; ask?: true; said?: true; question?: string }>();
+  for (const { code, item, question } of found) {
     const kind = BLOCKER[code];
     // ⛔ A repair never alters or removes the person's own content (DL 22 Oct): a fix on it is an ask. Adding Olumi's links (`path`)
     // alters nothing of theirs.
@@ -151,6 +153,7 @@ function said(model: LivingModelT, found: readonly Found[]): Blocker[] {
     const key = `${code}\u0000${Object.keys(how)[0]}`;
     const b = out.get(key) ?? out.set(key, { code, items: [], ...how }).get(key)!;
     if (item !== null && !b.items.includes(item)) b.items.push(item);
+    if ('ask' in how && b.question === undefined && question !== undefined) b.question = question;
   }
   return [...out.values()];
 }
@@ -181,10 +184,10 @@ export function selfCheck(model: LivingModelT, mapped: Mapped): Found[] {
   // An identity the engine would refuse (a part at 0, a missing level or frame) is the composer's one ask (DL 22 Oct).
   const identities = mapped.graph.nodes.filter((n) => n.nonlinear_identity !== undefined).flatMap((n) => {
     const ask = composeIdentityAskForNode(String(n.id), postimage);
-    return ask === null ? [] : [{ code: ask.reason, item: String(n.id) }];
+    return ask === null ? [] : [{ code: ask.reason, item: String(n.id), question: ask.assistant_text }];
   });
   return [...causes.map((w) => ({ code: w.reason, item: w.id, ...(w.applies_to ? { scope: stable([...w.applies_to].sort()) } : {}) })),
-    ...issues.map((i) => ({ code: i.code, item: i.option_id ?? i.factor_id ?? null })), ...identities];
+    ...issues.map((i) => ({ code: i.code, item: i.option_id ?? i.factor_id ?? null, question: i.message })), ...identities];
 }
 
 /** The blockers of `after` to say back: a change answers only for those it adds to what `before` had (none for a draft). */
@@ -196,12 +199,12 @@ export function blockersOf(model: LivingModelT, after: readonly Found[], before:
 /** What the AI is told with a call it can repair (words for the AI, never shown to the person). */
 const REPAIR = 'A Run would withhold the goal\'s chance; blockers lists why. Make each fix, in Olumi\'s own items, labelled Olumi\'s. Never '
   + 'change or remove anything the person or a party gave (a figure, sign, range, unit, condition, target or link). Each ask is the '
-  + 'person\'s: ask them, in one question, in your reply.';
+  + 'person\'s: ask them, in one question, in your reply, in its question\'s words where it has one.';
 export const REPAIR_DRAFT = `Not saved yet. ${REPAIR} Then call build_model_from_brief once more; sent unchanged, it is saved as it is.`;
 export const REPAIR_CHANGE = `No card yet. ${REPAIR} Then call propose_change once more; sent unchanged, its card is made.`;
 /** With a save or card that a Run would still withhold the goal's chance on. */
 export const STILL_ASK = 'A Run would still withhold the goal\'s chance (blockers). In your reply, ask the person, in one question, for '
-  + 'what is marked ask; never present a chance.';
+  + 'what is marked ask, in its question\'s words where it has one; never present a chance.';
 
 /** The repair to offer, if any: a fix to make, a repair left, and not the refused call sent again unchanged. */
 export function repairOf(r: Restructure | undefined, blockers: readonly Blocker[], model: LivingModelT): boolean {
