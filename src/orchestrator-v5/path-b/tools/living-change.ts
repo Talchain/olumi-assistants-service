@@ -17,7 +17,7 @@ import { LivingModel, type LivingModelT } from '../../../schemas/living-model.js
 import { applyKernel, canonicalIds, plain } from '../living-model/kernel.js';
 import { withCalendarReadings } from '../living-model/calendar-reading.js';
 import { todayInLondon } from '../../goal-target/deadline-date.js';
-import { changeGoal, goalIdOf, mapLivingModel, savedGoal } from '../living-model/mapper.js';
+import { changeGoal, mapLivingModel, savedGoal } from '../living-model/mapper.js';
 import { blockersOf, corePostimage, KEPT_AS_REFUSED, personContentLost, repairOf, REPAIR_CHANGE, REPAIRS, selfCheck, STILL_ASK, type Restructure } from './goal-path.js';
 import { diffLivingModels, stable, type LivingChange } from '../living-model/diff.js';
 import { livingViewOf } from '../living-model/view.js';
@@ -99,22 +99,6 @@ function kernelFor(base: Exclude<Awaited<ReturnType<typeof savedLiving>>, ToolOu
   return { ...read, model: withCalendarReadings(read.model, base.model, today) };
 }
 
-/** Whether an aim's target states a figure (Olumi's suggested measure never carries one). */
-const statesFigure = (a: LivingModelT['aims'][number]): boolean => a.target !== null && a.target.source !== 'olumi'
-  && (a.target.value !== null || a.target.low !== null || a.target.high !== null);
-
-/** The goal aim a Run would test, when it states no figure while a current aim of the person's or a party's beside it does. */
-function besideNoGoal(m: LivingModelT, goal: string | undefined): LivingModelT['aims'][number] | undefined {
-  const aim = m.aims.find((a) => a.id === goal);
-  return aim !== undefined && !statesFigure(aim) && m.aims.some((a) => a.id !== goal && a.status === 'current'
-    && (a.source === 'user' || a.source === 'party') && statesFigure(a)) ? aim : undefined;
-}
-
-/** What the AI is told when its change leaves the person's stated goal beside an aim that is no goal (never shown to the person). */
-export const REPLACE_AIM = 'No card yet. A Run would test the aim in aim, which states no figure, while the person\'s own goal with a figure '
-  + 'sits beside it. If that aim is not a goal they hold (a task, an option or Olumi\'s reading of their words), replace it: name its id '
-  + 'in remove and call propose_change once more. If it is their own aim, send the call unchanged; its card is made.';
-
 async function proposeOnce(deps: Deps, ctx: Ctx, args: LivingChangeArgs): Promise<ToolOutcome> {
   const base = await savedLiving(deps, ctx);
   if ('status' in base) return base;
@@ -163,21 +147,6 @@ async function proposeOnce(deps: Deps, ctx: Ctx, args: LivingChangeArgs): Promis
   const mapped = mapLivingModel(next, goal);
   if (!mapped.graph.nodes.some((n) => n.kind !== 'decision')) return refused('model_empty');
   const baseMapped = mapLivingModel(base.model, savedGoal(base.saved.graph));
-  // ⭐ STATED GOALS REPLACE AN AIM THAT IS NO GOAL (DL 93d79c3e 01:56Z; marketing set b r1 on 05745055: the person's two goals were
-  // added beside the drafted "plan the campaign…", which states no figure and stayed the goal, so a Run withheld their chance).
-  // Whether that aim is a task or their own is the AI's to judge from their words, so the host asks once, for what this change
-  // brings; sent unchanged, the card is made and nothing is dropped. Only the saved aim, kept as saved: one the change itself
-  // adds or rewords has no removal to name (Codex r1 on #3697).
-  const beside = besideNoGoal(next, goalIdOf(mapped.graph));
-  const r = deps.restructure;
-  if (beside !== undefined && base.model.aims.some((a) => stable(a) === stable(beside))
-    && besideNoGoal(base.model, goalIdOf(baseMapped.graph)) === undefined && r !== undefined && r.repairs < REPAIRS
-    && !(r.pending !== undefined && stable(r.pending.args.model) === stable(args.model))) {
-    r.repairs += 1;
-    r.pending = { tool: 'propose_change', args };
-    r.replace = { id: beside.id, of: args };
-    return refused('goal_beside_no_goal', REPLACE_AIM, { aim: { id: beside.id, text: beside.text } });
-  }
   // ⭐ THE READINESS SELF-CHECK (`goal-path.ts`): a change that ADDS a blocker to what a Run would get is said back, before its card,
   // while a fix and a repair are left; what the saved model already held is not this change's to answer for.
   const { all: blockers, added: introduced } = blockersOf(next, selfCheck(next, mapped), selfCheck(base.model, baseMapped));
