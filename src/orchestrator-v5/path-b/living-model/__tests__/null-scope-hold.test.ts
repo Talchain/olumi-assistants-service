@@ -44,6 +44,14 @@ describe('an unstated origin or period holds only a target that has a time to pl
     Object.assign(wordsOnly.aims[0]!.target!, { by_when: 'within three months of launch', reference: null, period_kind: null });
     expect(scopeHolds(wordsOnly, 'g')).toEqual([{ id: 'g', reason: 'goal_scope_unknown' }]);
 
+    // The served marketing encoding (50f76df0 na r2): a launch origin with no window or period kind, and its converse.
+    const afterLaunch = structuredClone(KNOWN_ANSWER);
+    Object.assign(afterLaunch.aims[0]!.target!, { reference: 'launch', period_kind: null });
+    expect(scopeHolds(afterLaunch, 'g')).toEqual([{ id: 'g', reason: 'goal_scope_unknown' }]);
+    const overPeriod = structuredClone(KNOWN_ANSWER);
+    Object.assign(overPeriod.aims[0]!.target!, { reference: null, period_kind: 'over_period' });
+    expect(scopeHolds(overPeriod, 'g')).toEqual([{ id: 'g', reason: 'goal_scope_unknown' }]);
+
     const change = structuredClone(KNOWN_ANSWER);
     Object.assign(change.aims[0]!.target!, { comparator: 'increase', value: 10, change_kind: 'absolute', reference: 'today', period_kind: null });
     expect(scopeHolds(change, 'g')).toEqual([{ id: 'g', reason: 'goal_scope_unknown' }]);
