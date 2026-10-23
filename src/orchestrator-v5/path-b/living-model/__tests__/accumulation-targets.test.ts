@@ -121,8 +121,9 @@ describe('canonical accumulation and all-target compilation', () => {
     m.factors.push({ ...m.factors[0]!, id: 'cost', value: null, unit: '£', limit: { comparator: '<=', value: 20000,
       source: 'user', party: null, quote: 'spend at most £20,000' } });
     const out = mapLivingModel(m), graph = out.graph as Rec;
-    expect(graph.goal_constraints).toContainEqual(expect.objectContaining({ node_id: 'cost', value: 20000,
-      retained_unresolved_limit: expect.objectContaining({ state: 'unscored' }) }));
+    expect(graph.goal_constraints).toContainEqual(expect.objectContaining({ node_id: 'cost', value: 20000 }));
+    expect(byId(graph, 'cost').goal_rests_on).toEqual([{ id: 'cost', reason: 'limit_quantity_unknown' }]);
+    expect(graph.goal_constraints.find((c: Rec) => c.node_id === 'cost').value_frame).toBe('level');
     expect(byId(graph, 'cost')).toMatchObject({ analysis_participation: 'retained_excluded' });
     expect(byId(graph, 'cost')).not.toHaveProperty('observed_state');
   });
