@@ -271,9 +271,9 @@ export function addMechanism(model: CanonicalModelT, draft: CanonicalModelT, mea
   const assumptions = pick(draft.assumptions), conditions = pick(draft.conditions), claims = pick(draft.claims), evidence = pick(draft.evidence);
   const note = <T extends { author: string; quote: string | null }>(x: T): T => ({ ...olumis(x), approval: 'proposed' as const });
   const worked: Quantity = { ...target, kind: 'derived', status: 'derived', value: null, low: null, high: null, range_kind: null, basis: null };
-  // A structure figure stays Olumi's constant only by its meaning in the completed model (the shared admission); any other
-  // is the person's question.
-  const withRelations = { ...model, relations: [...model.relations, ...newRelations] };
+  // A structure figure stays Olumi's constant only by its meaning in the completed model, its additions included, as the
+  // first draft reads it (the shared admission); any other is the person's question.
+  const withRelations = { ...model, quantities: [...model.quantities, ...added], relations: [...model.relations, ...newRelations] };
   const admitted = added.map((q) => (q.author === 'structure' && !isStructuralConstant(withRelations, q) ? { ...structureAsked(q), approval: 'proposed' as const } : q));
   return { ok: true, model: { ...model, quantities: [...model.quantities.map((q) => (q.id === measured ? worked : q)), ...admitted],
     relations: [...model.relations, ...newRelations],
