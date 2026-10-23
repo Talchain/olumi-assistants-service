@@ -7,7 +7,7 @@
 import type { CanonicalModelT } from './canonical.js';
 import { inlineQuantityId } from './compile.js';
 
-export type Answer = { value: number; low?: null; high?: null } | { value?: number | null; low: number; high: number };
+export type Answer = { value: number; low?: null; high?: null } | { value?: number | null; low: number; high: number; range_kind?: 'bounds' | 'plausible' };
 export type FillResult = { ok: true; model: CanonicalModelT } | { ok: false; reason: string };
 
 export function fillQuantity(model: CanonicalModelT, quantityId: string, answer: Answer, quote: string): FillResult {
@@ -21,7 +21,8 @@ export function fillQuantity(model: CanonicalModelT, quantityId: string, answer:
   const value = answer.value ?? null;
   if (low !== null && high !== null && low > high) return { ok: false, reason: `The low end ${low} is above the high end ${high}.` };
   if (value === null && (low === null || high === null)) return { ok: false, reason: 'An answer needs a figure, or both ends of a range.' };
-  const filled = { ...old, value, low, high, status: 'known' as const, author: 'person' as const, party: null, quote, question: null, basis: null, approval: 'approved' as const };
+  const range_kind = 'range_kind' in answer && answer.range_kind ? answer.range_kind : null;
+  const filled = { ...old, value, low, high, range_kind: low !== null ? range_kind : null, status: 'known' as const, author: 'person' as const, party: null, quote, question: null, basis: null, approval: 'approved' as const };
   const quantities = [...model.quantities];
   quantities[i] = filled;
   return { ok: true, model: { ...model, quantities, history: [...model.history, { id: quantityId, change: 'superseded', old: JSON.stringify(old), quote, author_id: null }] } };
@@ -40,10 +41,21 @@ function fillInline(model: CanonicalModelT, quantityId: string, answer: Answer, 
     if (value === null && (low === null || high === null)) return { ok: false, reason: 'An answer needs a figure, or both ends of a range.' };
     const old = o.sets[si];
     const sets = [...o.sets];
-    sets[si] = { ...old, value, low, high, question: null, author: 'person', quote };
+    sets[si] = { ...old, value, low, high, range_kind: low !== null && 'range_kind' in answer && answer.range_kind ? answer.range_kind : null, question: null, author: 'person', quote };
     const options = [...model.options];
     options[oi] = { ...o, sets };
     return { ok: true, model: { ...model, options, history: [...model.history, { id: o.id, change: 'superseded', old: JSON.stringify(o), quote, author_id: null }] } };
   }
   return { ok: false, reason: `"${quantityId}" is not a quantity in the model.` };
+}
+
+/** The answer to an UNRESOLVED range reading (PL ruling B): the person says whether their range's ends are hard. One edit. */
+export function setRangeKind(model: CanonicalModelT, quantityId: string, kind: 'bounds' | 'plausible', quote: string): FillResult {
+  const i = model.quantities.findIndex((q) => q.id === quantityId);
+  if (i < 0) return { ok: false, reason: `"${quantityId}" is not a quantity in the model.` };
+  const old = model.quantities[i];
+  if (old.low === null || old.high === null) return { ok: false, reason: `"${old.label}" has no range to read.` };
+  const quantities = [...model.quantities];
+  quantities[i] = { ...old, range_kind: kind };
+  return { ok: true, model: { ...model, quantities, history: [...model.history, { id: quantityId, change: 'superseded', old: JSON.stringify(old), quote, author_id: null }] } };
 }
