@@ -113,6 +113,49 @@ export async function answerAsks({ facts, asks, apiKey, fetchImpl = fetch }) {
   return { answers, call };
 }
 
+const Q_INSTRUCTIONS = [
+  'A reasoning tool replied to a person. You answer its questions on behalf of the person, using ONLY their numbered facts sheet.',
+  'List every question the reply asks the person (in the reply\'s own words, one per question; at most 6). For each, pick the ONE fact line that answers that same question by meaning, or null.',
+  'A line marked [UNKNOWN] still counts as the person\'s answer (they will say they do not know). Never invent or combine facts.',
+].join('\n');
+const Q_SCHEMA = {
+  type: 'object', additionalProperties: false, required: ['questions'],
+  properties: { questions: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['question', 'fact_line'],
+    properties: { question: { type: 'string' }, fact_line: { type: ['integer', 'null'] } } } } },
+};
+
+/**
+ * CONTROL ARM: today's route asks in its reply's words, so the operator reads the reply's questions and answers each from
+ * the sheet in ONE call. Every answer is the matched line's own words (an [UNKNOWN] line's words say they don't know); a
+ * question no line answers is "I don't know." The message is those answers, in order, as the person would type them.
+ */
+export async function answerQuestions({ facts, replyText, apiKey, fetchImpl = fetch }) {
+  if (facts === null) return { questions: [], message: null, call: null, flags: ['no_facts_sheet'] };
+  if (!replyText || !replyText.includes('?')) return { questions: [], message: null, call: null, flags: ['no_question_in_reply'] };
+  const input = ['FACTS:', ...facts.map((f) => `${f.line}. ${f.question} :: ${f.answer} [${f.tag}]`), '', 'REPLY:', replyText].join('\n');
+  const t0 = Date.now();
+  const res = await fetchImpl('https://api.openai.com/v1/responses', {
+    method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: OPERATOR_MODEL, instructions: Q_INSTRUCTIONS, input, reasoning: { effort: OPERATOR_EFFORT }, max_output_tokens: 4000, store: false,
+      text: { format: { type: 'json_schema', name: 'operator_questions', strict: true, schema: Q_SCHEMA } } }),
+  });
+  const body = await res.json().catch(() => ({}));
+  const call = { model: OPERATOR_MODEL, http: res.status, ms: Date.now() - t0, usage: body.usage ?? null };
+  if (!res.ok) return { questions: [], message: null, call, flags: [`operator_http_${res.status}`] };
+  const text = (body.output ?? []).filter((o) => o.type === 'message').flatMap((o) => o.content ?? []).find((c) => c.type === 'output_text')?.text;
+  let parsed = null;
+  try { parsed = JSON.parse(text ?? 'null'); } catch { parsed = null; }
+  if (!parsed || !Array.isArray(parsed.questions)) return { questions: [], message: null, call, flags: ['operator_unparsed'] };
+  const questions = parsed.questions.slice(0, 6).map((q) => {
+    const fact = q.fact_line === null ? null : facts.find((f) => f.line === q.fact_line) ?? null;
+    const said = fact === null ? DONT_KNOW : fact.answer;
+    return { question: q.question, status: fact === null ? 'unknown' : fact.tag === 'UNKNOWN' ? 'unknown' : 'answered', answer: said, fact, flags: fact === null && q.fact_line !== null ? ['fact_line_out_of_range'] : [] };
+  });
+  const answered = questions.filter((q) => q.status === 'answered');
+  const end = (s) => (/[.!?]$/.test(s.trim()) ? s.trim() : `${s.trim()}.`);
+  return { questions, message: answered.length === 0 ? null : questions.map((q) => end(q.answer)).join(' '), call, flags: [] };
+}
+
 /** The OpenAI key from the service's .env, never printed. */
 export function envKey() {
   const env = fs.readFileSync('/Users/paulslee/Documents/GitHub/olumi-assistants-service/.env', 'utf8');

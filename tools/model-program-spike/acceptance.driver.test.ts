@@ -17,10 +17,11 @@ import { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha
 import { stableStringify } from '../../src/orchestrator/context/stable-stringify.js';
 // @ts-expect-error a plain ES module beside this driver
 import { answerAsks, envKey, loadFacts } from './operator.mjs';
+// @ts-expect-error a plain ES module beside this driver
+import { basisOf, chancesFromView, hasChance, renderCanonical, sumTokens, tokensOf, usdOf } from './record.mjs';
 
 type Json = Record<string, any>;
 const OUT = process.env.MP_ACCEPT_OUT ?? '';
-const RATES = { in: 2.0, read: 0.1, write: 2.5, out: 10.0 }; // $ per M tokens, as qrunner.mjs:25; list prices UNVERIFIED
 
 // ── per-scenario in-memory stores ──────────────────────────────────────────────────────────────────────────────────────
 const persisted = new Map<string, Json>();
@@ -69,52 +70,10 @@ function graphRead(sid: string): Json {
     current_read: { run_state: { kind: 'never_run' }, computed_against_hash: null, run_id: null } };
 }
 
-const usdOf = (u: Json | null | undefined): number => {
-  if (!u) return 0;
-  const input = u.input_tokens ?? 0; const read = u.cached_input_tokens ?? u.input_tokens_details?.cached_tokens ?? 0;
-  const write = u.raw?.input_tokens_details?.cache_write_tokens ?? 0; const out = u.output_tokens ?? 0;
-  return (Math.max(0, input - read - write) * RATES.in + read * RATES.read + write * RATES.write + out * RATES.out) / 1e6;
-};
-const tokensOf = (u: Json | null | undefined) => ({ input: u?.input_tokens ?? 0, cached: u?.cached_input_tokens ?? u?.input_tokens_details?.cached_tokens ?? 0,
-  output: u?.output_tokens ?? 0, reasoning: u?.output_tokens_details?.reasoning_tokens ?? u?.raw?.output_tokens_details?.reasoning_tokens ?? 0 });
-const basisOf = (words: unknown): string | null => (typeof words !== 'string' ? null : /on your figures\.?$/.test(words.trim()) ? 'on_your_figures' : / if /.test(words) ? 'conditional' : 'unlabelled');
-
-/** A plain reading of the canonical model, for a person (or the scorer) to read beside the JSON. */
-function render(m: Json, compile: Json | null): string {
-  const L: string[] = [`# ${m.question}`, '', `Period: ${m.period}.`, ''];
-  const fig = (q: Json) => (q.low !== null && q.high !== null ? `${q.value !== null ? `about ${q.value}, ` : ''}${q.low} to ${q.high}` : q.value !== null ? String(q.value) : '—');
-  L.push('## Quantities', '', '| id | label | unit | kind | status | figure | author | quote / question / basis |', '|---|---|---|---|---|---|---|---|');
-  for (const q of m.quantities) L.push(`| ${q.id} | ${q.label} | ${q.unit} | ${q.kind} | ${q.status} | ${fig(q)} | ${q.author}${q.approval === 'approved' ? ' (approved)' : ''} | ${(q.quote ?? q.question ?? q.basis ?? '').replace(/\|/g, '/')} |`);
-  L.push('', '## Relations', '');
-  for (const r of m.relations) {
-    const body = r.form === 'definition' ? `${r.op}(${r.parts.join(', ')})` : r.form === 'effect' ? `${r.base} + ${r.terms.map((t: Json) => `${t.coefficient} × ${t.driver}`).join(' + ') || '0'}`
-      : `stock: start ${r.start}, + ${r.inflows.join(' + ') || '0'}, − ${r.outflows.join(' − ') || '0'} per ${m.period}`;
-    L.push(`- ${r.defines} = ${body} (${r.form}, ${r.author}${r.quote ? `: "${r.quote}"` : ''})`);
-  }
-  const win = (w: Json | null) => (w === null ? 'no deadline (static level)' : `from ${w.origin_event ?? 'now'}${w.origin_offset ? ` (at ${w.origin_offset})` : ''}, start +${w.start}, over ${w.periods}`);
-  L.push('', '## Goals', '');
-  for (const g of m.goals) L.push(`- ${g.label}: ${g.measure ? `${g.measure.quantity} ${g.measure.cmp} ${g.measure.target} (${g.measure.frame}${g.measure.reference ? ` from ${g.measure.reference.kind}${g.measure.reference.option ? ` ${g.measure.reference.option}` : ''}${g.measure.reference.quantity ? ` ${g.measure.reference.quantity}` : ''}` : ''}, ${g.measure.aggregation}, ${win(g.measure.window)})` : `no measure yet: ${g.question}`} [${g.author}${g.quote ? `: "${g.quote}"` : ''}]`);
-  L.push('', '## Limits', '');
-  for (const l of m.limits) L.push(`- ${l.label}: ${l.quantity} ${l.cmp} ${l.bound} (${l.aggregation}, ${win(l.window)}) [${l.author}${l.quote ? `: "${l.quote}"` : ''}]`);
-  L.push('', '## Options', '');
-  for (const o of m.options) L.push(`- ${o.label} (${o.status}, ${o.author}): ${o.sets.length ? o.sets.map((s: Json) => `${s.quantity} → ${s.to ?? (s.value ?? `${s.low} to ${s.high}`)} from period ${s.from_period}`).join('; ') : 'carry on as now'}`);
-  if (m.risks.length) { L.push('', '## Risks', ''); for (const k of m.risks) L.push(`- ${k.label}: chance ${k.occurrence}, ${k.mode} ${k.severity} to ${k.effect_on} from period ${k.from_period} (${k.author})`); }
-  for (const f of ['claims', 'evidence', 'assumptions', 'dissent', 'conditions', 'left_out']) if (m[f].length) {
-    L.push('', `## ${f.replace('_', ' ')}`, '');
-    for (const r of m[f]) L.push(`- ${r.text ?? r.position ?? ''}${r.why ? ` — why: ${r.why}` : ''}${r.holder ? ` — held by ${r.holder}` : ''} (${r.author})`);
-  }
-  if (compile) {
-    L.push('', '## Compile', '', `compiles: ${compile.compiles}; executable: ${compile.executable}; joint: ${compile.joint?.status}; within limits: ${compile.within_limits?.status}`);
-    for (const g of compile.per_goal ?? []) L.push(`- goal ${g.goal_id}: ${g.status}${g.reasons?.length ? ` — ${g.reasons.join(' ')}` : ''}`);
-    for (const e of compile.errors ?? []) L.push(`- error ${e.code}: ${e.message}`);
-  }
-  return `${L.join('\n')}\n`;
-}
-
 describe.skipIf(OUT === '')('model-program spike acceptance (live provider)', () => {
   let app: FastifyInstance;
   let reopenFresh: (graph: unknown) => any;
-  const STOP = `${OUT}/STOP-429.txt`;
+  const STOP = process.env.MP_STOP ?? `${OUT}/STOP-429.txt`;
   const realFetch = globalThis.fetch;
   beforeAll(async () => {
     mkdirSync(OUT, { recursive: true });
@@ -172,7 +131,7 @@ describe.skipIf(OUT === '')('model-program spike acceptance (live provider)', ()
       if (existsSync(file)) return;
       const brief = briefs.find((b) => b.id === id)?.brief as string | undefined;
       if (brief === undefined) throw new Error(`no brief ${id}`);
-      const facts = loadFacts(factsFile, id);
+      const facts = loadFacts(factsFile, (briefs.find((b) => b.id === id)?.facts_key as string | undefined) ?? id);
       const sid = randomUUID();
       const t0 = Date.now();
       const turns: Json[] = []; const qa: Json[] = []; const operatorCalls: Json[] = [];
@@ -224,25 +183,18 @@ describe.skipIf(OUT === '')('model-program spike acceptance (live provider)', ()
       };
       const view = last.canonical_analysis_view as Json | null;
       const optionLabel = new Map(((last.model_program?.canonical?.options ?? []) as Json[]).map((o) => [o.id, o.label]));
-      const chances = {
-        per_option: (last.model_program?.chances ?? null) as Json[] | null,
-        cells: view?.options?.map((o: Json) => ({ option_id: o.option_id, label: optionLabel.get(o.option_id) ?? o.option_id, kind: o.cell.kind, display: o.cell.display ?? null,
-          basis: o.cell.kind === 'figure' ? basisOf(o.cell.face) : null, face: o.cell.face, why: o.cell.why ?? null })) ?? null,
-        per_target: view?.goal_chance?.targets?.per_target?.map((t: Json) => ({ goal_id: t.constraint_id, basis: basisOf(t.words), words: t.words, options: t.options })) ?? null,
-        joint: view?.goal_chance?.targets?.joint ?? null, chance_words: view?.goal_chance?.chance_words ?? null, notes: view?.goal_chance?.notes ?? [],
-        thresholds: view?.goal_chance?.thresholds ?? [],
-      };
+      const chances = { per_option: (last.model_program?.chances ?? null) as Json[] | null, ...chancesFromView(view, optionLabel) };
       const calls = turns.reduce((a, t) => a + t.calls.length, 0) + operatorCalls.length;
-      const rec = { id, rep, scenario_id: sid, at: new Date(t0).toISOString(), seconds: +((Date.now() - t0) / 1000).toFixed(1), facts_sheet: facts === null ? 'none' : `${facts.length} lines`,
+      const rec = { arm: 'spike', id, rep, scenario_id: sid, at: new Date(t0).toISOString(), seconds: +((Date.now() - t0) / 1000).toFixed(1), facts_sheet: facts === null ? 'none' : `${facts.length} lines`,
         calls, usd: +(turns.reduce((a, t) => a + t.usd, 0) + operatorCalls.reduce((a, c) => a + c.usd, 0)).toFixed(4),
-        tokens: [...turns.flatMap((t) => t.calls.map((c: Json) => c.tokens)), ...operatorCalls.map((c) => c.tokens)].reduce((a, t) => ({ input: a.input + t.input, cached: a.cached + t.cached, output: a.output + t.output, reasoning: a.reasoning + t.reasoning }), { input: 0, cached: 0, output: 0, reasoning: 0 }),
-        compile_states: turns.map((t) => ({ kind: t.kind, ...(t.compile ?? { compiles: false }) })), chances, qa, operator_calls: operatorCalls, reopen, turns,
+        tokens: sumTokens([...turns.flatMap((t) => t.calls.map((c: Json) => c.tokens)), ...operatorCalls.map((c) => c.tokens)]),
+        has_chance: hasChance(view), answer_turns: turns.filter((t) => t.kind === 'answer').length, compile_states: turns.map((t) => ({ kind: t.kind, ...(t.compile ?? { compiles: false }) })), chances, qa, operator_calls: operatorCalls, reopen, turns,
         final_saved: last.model_program?.saved ?? false };
       writeFileSync(file, JSON.stringify(rec, null, 1));
       const model = last.model_program?.canonical ?? null;
       if (model) {
         writeFileSync(`${OUT}/${id}-r${rep}.canonical.json`, JSON.stringify(model, null, 1));
-        writeFileSync(`${OUT}/${id}-r${rep}.readable.md`, render(model, last.model_program?.compile ?? null));
+        writeFileSync(`${OUT}/${id}-r${rep}.readable.md`, renderCanonical(model, last.model_program?.compile ?? null));
       }
       writeFileSync(`${OUT}/${id}-r${rep}.view.json`, JSON.stringify(view, null, 1));
       console.log(`${id}-r${rep}: ${rec.calls} calls · $${rec.usd} · ${rec.seconds}s · saved ${rec.final_saved} · reopen ${JSON.stringify(reopen)}`);
