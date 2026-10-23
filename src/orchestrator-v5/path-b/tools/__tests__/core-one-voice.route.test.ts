@@ -485,19 +485,22 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
     expect(runCount).toBe(1);
   });
 
-  it('L11: SDK science and question instructions are B-only and sent once', async () => {
+  it('L11: SDK result and question instructions are core-only and sent once (ALPHA, 23 Oct: the model-program wording)', async () => {
+    const RESULT_RULE = 'Never work out, round, combine or rank a chance yourself.';
+    const QUESTION_RULE = 'Apart from the questions that block a goal, ask at most one question, last, and only if its answer changes the next step.';
     await post({ turn_id: randomUUID(), message: 'Separately, how can we improve staff training?', source: 'composer' });
     expect(calls.length).toBeGreaterThan(0);
     for (const c of calls) {
-      expect(c.instructions.split('Illustrative calculation — uses untested Olumi assumptions.')).toHaveLength(2);
-      expect(c.instructions.split('Ask at most one focused question')).toHaveLength(2);
-      expect(c.instructions.split('use only figures that are in the model with their author')).toHaveLength(2);
+      expect(c.instructions.split(RESULT_RULE)).toHaveLength(2);
+      expect(c.instructions.split(QUESTION_RULE)).toHaveLength(2);
+      expect(c.instructions, 'the Living Model Run wording is gone').not.toContain('Illustrative calculation');
     }
     const count = calls.length;
     await post({ turn_id: randomUUID(), message: QUESTION, source: 'composer' }, {});
+    expect(calls.length, 'the non-core turn called the provider').toBeGreaterThan(count);
     for (const c of calls.slice(count)) {
-      expect(JSON.stringify(c)).not.toContain('Ask at most one focused question');
-      expect(JSON.stringify(c)).not.toContain('use only figures that are in the model with their author');
+      expect(JSON.stringify(c)).not.toContain(RESULT_RULE);
+      expect(JSON.stringify(c)).not.toContain(QUESTION_RULE);
     }
   });
 
@@ -506,7 +509,7 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
     const r = await post({ turn_id: randomUUID(), message: 'Keep staff training separate; discuss it here without changing this model.', source: 'composer' });
     expect(r.statusCode, r.body).toBe(200);
     expectCoherentInstructions(r.json());
-    expect(createHash('sha256').update(CORE_REPLY_RULES, 'utf8').digest('hex')).toBe('6f5f00c581ac4be2f1f590973e4bcf58c6eba498e5216bc3a8a21a189be5f3d6'); // 22 Oct: retire the duplicate missing-input ask; the standing core paragraph asks it once.
+    expect(createHash('sha256').update(CORE_REPLY_RULES, 'utf8').digest('hex')).toBe('312c2c4bdd66fdcd8f032437d4ad2f8e0c9c4596e958245aff0890249c5a7432'); // 23 Oct (ALPHA): the model-program reply rules; the scope rule kept verbatim.
     for (const c of calls) {
       expect(c.instructions).toContain(CORE_REPLY_RULES);
       expect(c.instructions.split(scope)).toHaveLength(2);

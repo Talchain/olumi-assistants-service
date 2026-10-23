@@ -4,7 +4,7 @@
  * a typed turn, a Run press, a card's approval, a resend of the same turn id, two turns at once, a legacy scenario, a canvas
  * edit, the first draft's streamed graph, and the contract's exact shape. SYNTHETIC wording (the KNOWN_ANSWER fixture).
  */
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { AnalysisStateV1Schema } from '@talchain/schemas/boundary';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -980,6 +980,22 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(drafting.prompt_cache_key).toBe(first.body.prompt_cache_key);
       expect(drafting.prompt_cache_key).toBe(corePromptCacheKey(String(drafting.model), STANDING));
       expect([drafting.prompt_cache_retention, first.body.prompt_cache_retention]).toEqual(['24h', '24h']);
+    });
+
+    it('(6) ALPHA (23 Oct): the provider receives the model-program instructions, these exact bytes, on a saved model’s turn and on a first turn', async () => {
+      // Pinned from the request bodies the provider received on this route, not from the module that builds them.
+      const SENT_SHA = '9e502d36340396c502cb782bb2edfd376f0c32c89e27da8c0a8b3031312c655c';
+      outputs = [[{ type: 'message', text: 'Here is what the model holds.' }]];
+      expect((await typed('What does the model hold now?')).statusCode).toBe(200);
+      SCENARIO = randomUUID(); persisted = null;
+      outputs = [[{ type: 'message', text: 'Tell me more about the situation first.' }]];
+      expect((await typed('We are weighing two ways to run the pool on weekday evenings.')).statusCode).toBe(200);
+      expect(calls, 'one provider call per turn').toHaveLength(2);
+      for (const c of calls) {
+        expect(createHash('sha256').update(String(c.instructions), 'utf8').digest('hex')).toBe(SENT_SHA);
+        expect(String(c.instructions)).toContain('draft the first model from their brief in that same turn, even when figures are missing');
+        expect(String(c.instructions)).not.toContain('POLYMATH COACHING');
+      }
     });
   });
 });
