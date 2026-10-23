@@ -28,7 +28,7 @@ import type { Relabelled } from '../living-model/kernel.js';
 import { NOTE_MAX, NOTE_ON_ITEM, NoteOnItemParams, noteOnItem } from './note-on-item.js';
 import { STRESS_TEST, StressTestParams, stressTest, type StressDeps } from './stress-tool.js';
 import { OFFER_PUBLIC_RESEARCH, OFFER_PUBLIC_RESEARCH_DESCRIPTION, OfferResearchParams, offerResearch, type ResearchDeps } from './research-tool.js';
-import { refused, traceRow, type ToolOutcome, type TraceRow } from './outcome.js';
+import { OUTCOME_TRACE, refused, traceRow, type ToolOutcome, type TraceRow } from './outcome.js';
 
 export { traceRow, type TraceRow, type ToolOutcome } from './outcome.js';
 export { readCanonicalContext } from './context-tool.js';
@@ -96,12 +96,11 @@ const listOf = (v: unknown): Record<string, unknown>[] =>
   (Array.isArray(v) ? v.filter((x): x is Record<string, unknown> => x !== null && typeof x === 'object') : []);
 /** Any tool's `blockers` (a Run's readiness has its own shape and words): only a code, and the self-check's verdict and ids. */
 function checkOf(outcome: ToolOutcome): TurnCheck | undefined {
-  const data = 'data' in outcome ? outcome.data : undefined;
-  if (data === undefined) return undefined;
+  const data: Record<string, unknown> = ('data' in outcome ? outcome.data : undefined) ?? {};
   const blockers = listOf(data.blockers).filter((b) => typeof b.code === 'string').map((b) => ({ code: b.code as string,
     ...(b.fix !== undefined ? { verdict: 'fix' as const } : b.ask === true ? { verdict: 'ask' as const } : b.said === true ? { verdict: 'said' as const } : {}),
     ...(Array.isArray(b.items) ? { items: (b.items as Blocker['items']).filter((i) => typeof i === 'string').map(idOnly) } : {}) }));
-  const relabelled = listOf((data.draft as { relabelled?: unknown } | undefined)?.relabelled ?? data.relabelled)
+  const relabelled = listOf(outcome[OUTCOME_TRACE]?.relabelled)
     .filter((r) => typeof r.id === 'string' && typeof r.was === 'string').map((r) => ({ id: idOnly(r.id as string), was: r.was as Relabelled['was'] }));
   const check: TurnCheck = { ...(typeof data.run_ready === 'boolean' ? { run_ready: data.run_ready } : {}),
     ...(blockers.length > 0 ? { blockers } : {}), ...(relabelled.length > 0 ? { relabelled } : {}) };

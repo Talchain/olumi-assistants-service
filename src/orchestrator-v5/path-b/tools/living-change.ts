@@ -23,7 +23,7 @@ import { diffLivingModels, stable, type LivingChange } from '../living-model/dif
 import { livingViewOf } from '../living-model/view.js';
 import { isNoModelYet, isSavedRead, readSaved } from './context-tool.js';
 import { changeOperationId, findOperationVersion, writeCorePostimage } from './core-write.js';
-import { ok, refused, unavailable, type ToolOutcome } from './outcome.js';
+import { ok, refused, unavailable, withTrace, type ToolOutcome } from './outcome.js';
 
 export const LivingChangeParams = z.object({
   /** What the person is asked to approve, in plain words. */
@@ -153,9 +153,10 @@ async function proposeOnce(deps: Deps, ctx: Ctx, args: LivingChangeArgs): Promis
     base_graph_identity_hash: base.saved.graphHash, base_model_identity: base.saved.identity!, operations: operationsOf(changes),
     provenance: { authored_by: 'model_proposed', basis: args.basis }, validation: { admitted: true, loss_count: 0, refusals: [] },
     public_label: args.public_label, living_model: next }));
-  return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: base.saved.graphHash,
-    changes, withheld: mapped.withheld, assumed: mapped.assumed, relabelled: kernelled.relabelled,
-    run_ready: blockers.length === 0, ...(blockers.length > 0 ? { blockers, note: STILL_ASK } : {}) });
+  // The kernel's authorship decisions are the host's, applied to the card's model; the AI is not told them (R7), only the log is.
+  return withTrace(ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: base.saved.graphHash,
+    changes, withheld: mapped.withheld, assumed: mapped.assumed,
+    run_ready: blockers.length === 0, ...(blockers.length > 0 ? { blockers, note: STILL_ASK } : {}) }), { relabelled: kernelled.relabelled });
 }
 
 /** A proposal this module prepared: it carries the complete living model it would write. */

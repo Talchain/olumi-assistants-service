@@ -13,7 +13,7 @@ import type { LivingModelT } from '../../../../schemas/living-model.js';
 import { KNOWN_ANSWER } from '../../living-model/__tests__/fixtures.js';
 import { constructionOperationId } from '../../../agent-lane/runtime/build-model.js';
 import { registrationTurnId } from '../../../graph-registration/registration-identity.js';
-import { traceRow } from '../outcome.js';
+import { OUTCOME_TRACE, traceRow } from '../outcome.js';
 import type { Rec } from './fixtures.js';
 import { computeGraphIdentityHash } from '../../../context/graph-identity.js';
 import { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha256 } from '../../../context/graph-hash.js';
@@ -102,7 +102,10 @@ describe('Olumi\'s provisional first model: the AI\'s living model, compiled by 
     expect(registerCalls(p)).toEqual([{ path: `/assist/v1/scenarios/${SID}/graph/register`, body: {
       graph: POSTIMAGE, thin_core: true, brief_text: BRIEF, operation_id: constructionOperationId(SID, BRIEF), expected_graph_identity_hash: null } }]);
     expect(out).toMatchObject({ status: 'ok', mutated: true, data: { provisional: 'olumi', save_outcome: 'VERIFIED_SAVED', model_version: SAVED.json.model_version,
-      revision: { graph_hash: MODEL.json.graph_hash }, draft: { withheld: mapped.withheld, relabelled: [] } } });
+      revision: { graph_hash: MODEL.json.graph_hash }, draft: { withheld: mapped.withheld } } });
+    // R7 (DL 93d79c3e, C2): the kernel's authorship decisions are the host's; the AI's JSON never carries them, only the trace does.
+    expect(JSON.parse(JSON.stringify(out)).data.draft).not.toHaveProperty('relabelled');
+    expect(out[OUTCOME_TRACE]).toEqual({ relabelled: [] });
     // What this slice cannot yet convert is said, never guessed: no level target, so no chance.
     expect(mapped.withheld).toEqual([{ id: 'visitors_served', reason: 'no_level_target' }]);
     // The goal is still drawn, and the unsized link to it is Olumi's placeholder (the licence withholds the chance).
