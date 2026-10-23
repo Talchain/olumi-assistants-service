@@ -202,7 +202,10 @@ const recordIds = (m: CanonicalModelT): Set<string> => new Set([...m.quantities,
 
 export function addMechanism(model: CanonicalModelT, draft: CanonicalModelT, measured: string, fresh: ReadonlySet<string>, isTheirs: (quote: string | null) => boolean): FillResult {
   const target = model.quantities.find((q) => q.id === measured);
-  if (target === undefined || !fresh.has(measured)) return { ok: false, reason: 'Only a measure named in this same answer can be worked out by Olumi\'s proposal.' };
+  // Only the blank placeholder this same answer created (status unknown, no figure): never a figure they stated, new or old.
+  if (target === undefined || !fresh.has(measured) || target.status !== 'unknown' || target.value !== null || target.low !== null || target.high !== null) {
+    return { ok: false, reason: 'Only a measure named in this same answer can be worked out by Olumi\'s proposal.' };
+  }
   if (model.relations.some((r) => r.defines === measured)) return { ok: false, reason: 'The measure is already worked out.' };
   const known = new Set(model.quantities.map((q) => q.id));
   const added: Quantity[] = [];
@@ -238,17 +241,23 @@ export function addMechanism(model: CanonicalModelT, draft: CanonicalModelT, mea
   };
   walk(measured);
   if (!model.options.some((o) => o.status === 'live' && o.sets.some((s) => upstream.has(s.quantity)))) return { ok: false, reason: 'What Olumi proposed does not connect any option to the measure.' };
-  // The new relations' companion notes, never dropped: assumptions and conditions on what is added, and the claims and
-  // evidence they name (or that are themselves about what is added).
+  // The new relations' companion notes, never dropped: every NEW assumption, condition, claim or evidence linked to what is
+  // added, to closure (a condition on a claim about a new relation; the evidence a carried note names). Old records stay as
+  // they are; nothing unrelated is taken.
   const before = recordIds(model);
-  const addedIds = new Set([...added.map((q) => q.id), ...newRelations.flatMap((r) => [r.id, ...(r.form === 'effect' ? r.terms.map((t) => `${r.id}:${t.driver}`) : [])]), measured]);
-  const isNew = (x: { id: string }) => !before.has(x.id);
-  const about = (x: { concerns: readonly string[] }) => x.concerns.some((c) => addedIds.has(c));
-  const assumptions = draft.assumptions.filter((x) => isNew(x) && about(x));
-  const conditions = draft.conditions.filter((x) => isNew(x) && about(x));
-  const named = new Set([...assumptions, ...conditions].flatMap((x) => x.concerns));
-  const claims = draft.claims.filter((x) => isNew(x) && (named.has(x.id) || about(x)));
-  const evidence = draft.evidence.filter((x) => isNew(x) && (named.has(x.id) || about(x)));
+  const linked = new Set([...added.map((q) => q.id), ...newRelations.flatMap((r) => [r.id, ...(r.form === 'effect' ? r.terms.map((t) => `${r.id}:${t.driver}`) : [])]), measured]);
+  const candidates = [...draft.assumptions, ...draft.conditions, ...draft.claims, ...draft.evidence].filter((x) => !before.has(x.id));
+  const carried = new Set<string>();
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const x of candidates) {
+      if (carried.has(x.id) || !(x.concerns.some((c) => linked.has(c)) || linked.has(x.id))) continue;
+      carried.add(x.id); linked.add(x.id); x.concerns.forEach((c) => { if (!before.has(c)) linked.add(c); });
+      grew = true;
+    }
+  }
+  const pick = <T extends { id: string }>(xs: readonly T[]) => xs.filter((x) => carried.has(x.id));
+  const assumptions = pick(draft.assumptions), conditions = pick(draft.conditions), claims = pick(draft.claims), evidence = pick(draft.evidence);
   const note = <T extends { author: string; quote: string | null }>(x: T): T => ({ ...olumis(x), approval: 'proposed' as const });
   const worked: Quantity = { ...target, kind: 'derived', status: 'derived', value: null, low: null, high: null, range_kind: null, basis: null };
   return { ok: true, model: { ...model, quantities: [...model.quantities.map((q) => (q.id === measured ? worked : q)), ...added],

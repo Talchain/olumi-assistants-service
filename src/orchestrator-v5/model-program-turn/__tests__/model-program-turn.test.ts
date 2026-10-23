@@ -582,6 +582,11 @@ describe('the model-program turn on the real core route', () => {
       // Its companion notes on the new link: an assumption, and the claim that assumption names.
       m.claims.push({ id: 'leads_unblock', text: 'A lead mostly raises output by unblocking the others.', concerns: ['lead_effect'], author: 'olumi', quote: null, ...at });
       m.assumptions.push({ id: 'hires_productive_in_window', text: 'New hires are productive within the launch window.', applied: true, concerns: ['features_rel', 'leads_unblock'], author: 'olumi', quote: null, ...at });
+      // A chain to closure: a claim about the new link, and a condition about that claim only (R ← K ← C).
+      m.claims.push({ id: 'lead_needs_scope', text: 'A lead helps most once the launch scope is clear.', concerns: ['features_rel'], author: 'olumi', quote: null, ...at });
+      m.conditions.push({ id: 'scope_agreed_first', text: 'Only once the launch scope is agreed.', kind: 'prerequisite', concerns: ['lead_needs_scope'], author: 'olumi', quote: null, ...at });
+      // Unrelated to what is added: never taken.
+      m.claims.push({ id: 'office_is_noisy', text: 'The office is noisy.', concerns: [], author: 'olumi', quote: null, ...at });
       return JSON.stringify({ ...m, ...extra });
     };
     const reply = (edit: (m: CanonicalModelT) => void) => { const m = JSON.parse(completed()) as CanonicalModelT; edit(m); return JSON.stringify(m); };
@@ -602,6 +607,11 @@ describe('the model-program turn on the real core route', () => {
     // Only the measure this same answer created may be worked out: never a quantity already in the model.
     const existing = { ...(measured as { model: CanonicalModelT }).model };
     expect(addMechanism(existing, JSON.parse(completed()) as CanonicalModelT, 'features_shipped_per_month', new Set(), () => false))
+      .toMatchObject({ ok: false, reason: expect.stringMatching(/named in this same answer/) });
+    // Nor a figure they stated in this same answer (new, but known): only the blank placeholder of the measure.
+    const statedNow = { ...existing, quantities: [...existing.quantities, q('stated_now', 'feature/month', { value: 12, quote: words })] };
+    const onStated = reply((d) => { d.quantities.push(q('stated_now', 'feature/month', { value: 12, quote: words })); (d.relations.find((r) => r.id === 'features_rel') as { defines: string }).defines = 'stated_now'; });
+    expect(addMechanism(statedNow, JSON.parse(onStated) as CanonicalModelT, 'stated_now', new Set(['stated_now']), () => false))
       .toMatchObject({ ok: false, reason: expect.stringMatching(/named in this same answer/) });
 
     // Negative: a completion that INVENTS a figure only they know (today's level as theirs) is refused whole; the card holds
@@ -625,7 +635,8 @@ describe('the model-program turn on the real core route', () => {
     const card = await propose();
     expect(card.status, JSON.stringify(card)).toBe('ok');
     expect(sent).toHaveLength(1);
-    const adds = ['relation:features_rel', 'quantity:features_now', 'quantity:lead_effect', 'quantity:developer_effect', 'assumption:hires_productive_in_window', 'claim:leads_unblock'];
+    const adds = ['relation:features_rel', 'quantity:features_now', 'quantity:lead_effect', 'quantity:developer_effect', 'assumption:hires_productive_in_window',
+      'condition:scope_agreed_first', 'claim:leads_unblock', 'claim:lead_needs_scope'];
     expect(card.data.olumi_adds).toEqual(adds);
     expect(deps.proposals.get(card.data.proposal_id)!.operations.map((o) => o.path)).toEqual(['goal:increase_productivity', ...adds]);
     expect(registered).toHaveLength(1); // proposing saves nothing
@@ -639,13 +650,15 @@ describe('the model-program turn on the real core route', () => {
     for (const id of ['lead_effect', 'developer_effect']) expect(after.quantities.find((x) => x.id === id)).toMatchObject({ author: 'olumi', status: 'estimated', approval: 'proposed', basis: expect.any(String) });
     expect(after.relations.find((r) => r.id === 'features_rel')).toMatchObject({ author: 'olumi', approval: 'proposed' });
     expect(after.assumptions.at(-1)).toMatchObject({ id: 'hires_productive_in_window', author: 'olumi', approval: 'proposed', concerns: ['features_rel', 'leads_unblock'] });
-    expect(after.claims.at(-1)).toMatchObject({ id: 'leads_unblock', author: 'olumi', approval: 'proposed' });
+    expect(after.claims.slice(before.claims.length).map((x) => [x.id, x.author, x.approval])).toEqual([['leads_unblock', 'olumi', 'proposed'], ['lead_needs_scope', 'olumi', 'proposed']]);
+    expect(after.conditions.slice(before.conditions.length).map((x) => x.id)).toEqual(['scope_agreed_first']);
     // Everything they had stays as it was: every earlier record, its author and words, and the history (two new entries).
     expect(after.quantities.filter((x) => before.quantities.some((b) => b.id === x.id) && x.id !== 'features_shipped_per_month')).toEqual(before.quantities);
     expect(after.relations.slice(0, before.relations.length)).toEqual(before.relations);
     expect(after.assumptions.slice(0, before.assumptions.length)).toEqual(before.assumptions);
     expect(after.claims.slice(0, before.claims.length)).toEqual(before.claims);
-    expect({ ...after, quantities: [], relations: [], goals: [], history: [], assumptions: [], claims: [] }).toEqual({ ...before, quantities: [], relations: [], goals: [], history: [], assumptions: [], claims: [] });
+    expect(after.conditions.slice(0, before.conditions.length)).toEqual(before.conditions);
+    expect({ ...after, quantities: [], relations: [], goals: [], history: [], assumptions: [], claims: [], conditions: [] }).toEqual({ ...before, quantities: [], relations: [], goals: [], history: [], assumptions: [], claims: [], conditions: [] });
     expect(after.history.slice(0, before.history.length)).toEqual(before.history);
     expect(after.history.slice(before.history.length).map((h) => h.id)).toEqual(['increase_productivity', 'features_shipped_per_month']);
     // An option → outcome path now: the aim waits on exactly the one figure only they know, never on a guess.
