@@ -258,7 +258,18 @@ export type CanonicalPreferenceT = z.infer<typeof CanonicalPreference>;
 // ── Options and risks ────────────────────────────────────────────────────────────────────────────────────────────────────
 
 export const OPTION_STATUSES = ['live', 'ruled_out', 'removed'] as const;
-const timing = z.union([z.number().int(), id]).describe('The period it takes effect from: a whole number (0 = now), or the id of a quantity in the model\'s period unit when the timing is the person\'s figure, asked, or differs by option ("when the extension opens").');
+/** When a setting or a risk takes effect: a DECLARED count, one meaning in the schema and in the compiler (in force from
+ *  interval k = the count). Issue map class 13: the old `from_period` ("0 = now") was written as 1 for the first period. */
+export const STARTS_AFTER_PERIODS = 'How many whole periods pass before it takes effect: 0 = from the start ("straight away", "from the first month" and "from now" are all 0), "from month 3" is 2, "in two months" is 2';
+const timing = z.union([z.number().int(), id]).describe(`${STARTS_AFTER_PERIODS}. Or the id of a quantity in the model's period unit giving that count, when the timing is the person's figure, asked, or differs by option ("when the extension opens").`);
+/** The old field, mapped ONCE, where a saved model is read (program-store): `from_period` k is `starts_after_periods` k, the
+ *  same count under its old name. A model that has both, or neither, is left for the schema to judge. */
+export function withDeclaredTiming(raw: unknown): unknown {
+  const rec = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
+  const renamed = (x: unknown) => { if (!rec(x) || !('from_period' in x) || 'starts_after_periods' in x) return x; const { from_period, ...rest } = x; return { ...rest, starts_after_periods: from_period }; };
+  if (!rec(raw) || !Array.isArray(raw['options']) || !Array.isArray(raw['risks'])) return raw;
+  return { ...raw, options: raw['options'].map((o) => (rec(o) && Array.isArray(o['sets']) ? { ...o, sets: o['sets'].map(renamed) } : o)), risks: raw['risks'].map(renamed) };
+}
 
 export const CanonicalOptionSet = z.object({
   quantity: id.describe('An input quantity (one with a figure, not a derived one) the option changes.'),
@@ -268,7 +279,7 @@ export const CanonicalOptionSet = z.object({
   high: z.number().nullable().describe('With to null: the high end of this option\'s own value, when a range. Null otherwise.'),
   range_kind: RANGE_KIND,
   question: z.string().nullable().describe('With to null and no figure: the one question to the person for this option\'s value. Null otherwise.'),
-  from_period: timing,
+  starts_after_periods: timing,
   author: z.enum(QUANTITY_AUTHORS).describe('Who gave the inline value: person, olumi, or structure (a switch: 1 for on).'),
   quote: attribution.quote,
 }).strict().describe('What the option changes, and to what: a quantity id in to, or the option\'s own inline value (value, or low and high), with who gave it. An inline value compiles into a named quantity of its own.');
@@ -291,7 +302,7 @@ export const CanonicalRisk = z.object({
   severity: id.describe('A quantity: what it does IF it happens, drawn only when it does. In the affected quantity\'s unit for add; unit "1" for multiply.'),
   effect_on: id.describe('The quantity it changes.'),
   mode: z.enum(['add', 'multiply']).describe('add: severity is added to the quantity. multiply: the quantity is multiplied by severity.'),
-  from_period: timing,
+  starts_after_periods: timing,
   ...attribution,
 }).strict();
 export type CanonicalRiskT = z.infer<typeof CanonicalRisk>;

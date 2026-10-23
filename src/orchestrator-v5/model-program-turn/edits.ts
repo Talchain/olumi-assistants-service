@@ -13,7 +13,7 @@
  * A quote must be the person's own words; the caller checks it against what they wrote (`quotedIn`).
  */
 import { z } from 'zod-v4';
-import type { CanonicalModelT } from '../model-program/canonical.js';
+import { STARTS_AFTER_PERIODS, type CanonicalModelT } from '../model-program/canonical.js';
 import { defineGoalMeasure, fillQuantity, setRangeKind, type Answer } from '../model-program/answer.js';
 
 const figure = {
@@ -29,7 +29,7 @@ export const ProgramOp = z.union([
   z.object({ op: z.enum(['set_goal_target']), goal_id: z.string(), ...figure, quote }).strict(),
   z.object({ op: z.enum(['add_option']), label: z.string().describe('The option\'s name as the person said it.'),
     sets: z.array(z.object({ quantity_id: z.string().describe('The input quantity this option changes.'), ...figure,
-      from_period: z.number().int().describe('The period it takes effect from (0 = now).') }).strict()), quote }).strict(),
+      starts_after_periods: z.number().int().describe(`${STARTS_AFTER_PERIODS}.`) }).strict()), quote }).strict(),
   z.object({ op: z.enum(['rename_option']), option_id: z.string(), label: z.string(), quote }).strict(),
   z.object({ op: z.enum(['set_range_kind']), quantity_id: z.string().describe('The quantity whose range the person is reading (an open question\'s quantity_id).'),
     range_kind: z.enum(['bounds', 'plausible']).describe('bounds: their ends are firm, it cannot fall outside; plausible: a rough span.'), quote }).strict(),
@@ -94,7 +94,7 @@ function addOption(model: CanonicalModelT, op: Extract<ProgramOpT, { op: 'add_op
   const option: CanonicalModelT['options'][number] = { id, label: op.label, status: 'live', developed_from: null, author: 'person', party: null, quote: op.quote,
     approval: 'approved', author_id: null,
     sets: op.sets.map((s) => ({ quantity: s.quantity_id, to: null, value: s.value, low: s.low, high: s.high, range_kind: s.low !== null ? s.range_kind : null,
-      question: null, from_period: s.from_period, author: 'person', quote: op.quote })) };
+      question: null, starts_after_periods: s.starts_after_periods, author: 'person', quote: op.quote })) };
   return { ok: true, model: { ...model, options: [...model.options, option] } };
 }
 

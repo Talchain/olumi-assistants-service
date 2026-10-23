@@ -32,7 +32,7 @@ export function bakery(): CanonicalModelT {
       question: null, author: 'person', quote: 'We have £3,000 to spend', ...at }],
     preferences: [],
     options: [
-      { id: 'second_oven', label: 'A second oven', sets: [{ quantity: 'ovens_added', to: 'one_oven', value: null, low: null, high: null, range_kind: null, question: null, from_period: 0, author: 'person', quote: 'A second oven' }],
+      { id: 'second_oven', label: 'A second oven', sets: [{ quantity: 'ovens_added', to: 'one_oven', value: null, low: null, high: null, range_kind: null, question: null, starts_after_periods: 0, author: 'person', quote: 'A second oven' }],
         status: 'live', developed_from: null, author: 'person', quote: 'A second oven', ...at },
       { id: 'keep_one', label: 'Keep our one oven', sets: [], status: 'live', developed_from: null, author: 'person', quote: 'keep our one oven', ...at },
     ],
@@ -86,8 +86,8 @@ export function club(): CanonicalModelT {
     preferences: [],
     options: [
       { id: 'promotion', label: 'Run a promotion', sets: [
-        { quantity: 'promo_on', to: 'one_promo', value: null, low: null, high: null, range_kind: null, question: null, from_period: 0, author: 'person', quote: 'Run a promotion' },
-        { quantity: 'spend', to: 'promo_cost', value: null, low: null, high: null, range_kind: null, question: null, from_period: 0, author: 'person', quote: 'The promotion costs £500' }],
+        { quantity: 'promo_on', to: 'one_promo', value: null, low: null, high: null, range_kind: null, question: null, starts_after_periods: 0, author: 'person', quote: 'Run a promotion' },
+        { quantity: 'spend', to: 'promo_cost', value: null, low: null, high: null, range_kind: null, question: null, starts_after_periods: 0, author: 'person', quote: 'The promotion costs £500' }],
         status: 'live', developed_from: null, author: 'person', quote: 'Run a promotion', ...at },
       { id: 'carry_on', label: 'Carry on as now', sets: [], status: 'live', developed_from: null, author: 'person', quote: 'carry on as now', ...at },
     ],

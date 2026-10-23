@@ -12,6 +12,11 @@ import { fillQuantity, setRangeKind } from '../answer.js';
 import { probeValue } from './probe.js';
 import { parseUnit, sameDims } from '../units.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
+import { simulate } from '../simulate/simulate.js';
+import { isWithheld } from '../simulate/result.js';
+import { STARTS_AFTER_PERIODS } from '../canonical.js';
+import { CANONICAL_JSON_SCHEMA } from '../../model-program-turn/prompt.js';
+import { ProgramOp } from '../../model-program-turn/edits.js';
 
 // ── builders ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 const base = { party: null, approval: 'proposed' as const, author_id: null };
@@ -24,7 +29,7 @@ const olumi = (id: string, unit: string, low: number, high: number, value: numbe
   qty(id, unit, { kind: 'coefficient', value, low, high, range_kind: 'plausible', status: 'estimated', author: 'olumi', basis: 'Typical for a small business of this kind.' });
 type SetT = CanonicalModelT['options'][number]['sets'][number];
 const set = (quantity: string, to: string | null, quote: string, f: Partial<SetT> = {}): SetT =>
-  ({ quantity, to, value: null, low: null, high: null, range_kind: null, question: null, from_period: 0, author: 'person', quote, ...f });
+  ({ quantity, to, value: null, low: null, high: null, range_kind: null, question: null, starts_after_periods: 0, author: 'person', quote, ...f });
 const option = (id: string, label: string, sets: SetT[], quote: string): CanonicalModelT['options'][number] =>
   ({ id, label, sets, status: 'live', developed_from: null, author: 'person', quote, ...base });
 const asked = (id: string, unit: string, question: string) => qty(id, unit, { status: 'asked', question });
@@ -459,7 +464,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     m.quantities.push(person('visitors', 'visitor/month', 500, '500 visitors a month'), person('conversion_target', 'member/visitor', 0.04, 'at least 4% of visitors join'), person('opening_month', 'month', 2, 'the new studio opens in two months'));
     m.goals = m.goals.map((g) => (g.id === 'reach_400' ? { ...g, measure: { ...g.measure!, aggregation: 'max' as const } } : g));
     m.goals.push({ ...goal('conversion', 'joins', '>=', 'conversion_target', 'sum', 'half_year', 'at least 4% of visitors join'), measure: { ...goal('x', 'joins', '>=', 'conversion_target', 'sum', 'half_year', 'q').measure!, per: 'visitors' } });
-    m.options = m.options.map((o) => (o.id === 'promo' ? { ...o, sets: [set('joins', 'promo_joins', 'a promotion could bring 40 a month', { from_period: 'opening_month' })] } : o));
+    m.options = m.options.map((o) => (o.id === 'promo' ? { ...o, sets: [set('joins', 'promo_joins', 'a promotion could bring 40 a month', { starts_after_periods: 'opening_month' })] } : o));
     const r = compile(m);
     expect(r.errors).toEqual([]);
     const x = r.executable!;
@@ -602,12 +607,12 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
       question: 'Should the shop raise its price?', period: 'month',
       quantities: [
         person('stock_now', 'item', 20, '20 items in stock'), person('restock', 'item/month', 2, '2 more items a month'),
-        derived('stock_level', 'item'), person('price', 'GBP/item', 10, '£10 an item'), person('dearer', 'GBP/item', 12, '£12 from month 2'),
+        derived('stock_level', 'item'), person('price', 'GBP/item', 10, '£10 an item'), person('dearer', 'GBP/item', 12, '£12 from month 3'),
         derived('stock_value', 'GBP'), person('value_target', 'GBP', 250, 'at least £250 of stock'), person('three', 'month', 3, 'in three months'),
       ],
       relations: [stock('stock_rel', 'stock_level', 'stock_now', ['restock'], []), def('value_rel', 'stock_value', 'product', ['price', 'stock_level'])],
       goals: [goal('stock_worth', 'stock_value', '>=', 'value_target', 'end', 'three', 'at least £250 of stock')],
-      options: [option('hold', 'Hold the price', [], 'hold the price'), ...(alternative ? [option('raise', 'Raise the price', [set('price', 'dearer', '£12 from month 2', { from_period: 2 })], 'raise the price')] : [])],
+      options: [option('hold', 'Hold the price', [], 'hold the price'), ...(alternative ? [option('raise', 'Raise the price', [set('price', 'dearer', '£12 from month 3', { starts_after_periods: 2 })], 'raise the price')] : [])],
     });
     const alone = compile(shop(false));
     const both = compile(shop(true));
@@ -683,7 +688,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     // Domains: a chance lies in [0, 1]; a count is never negative; money carries no invented domain.
     const m = bakery();
     m.quantities.push(olumi('breakdown_chance', '1', 0.05, 0.2), olumi('lost_loaves', 'loaf/week', -150, -50, -100));
-    m.risks.push({ id: 'breakdown', label: 'The oven breaks down', occurrence: 'breakdown_chance', severity: 'lost_loaves', effect_on: 'sales', mode: 'add', from_period: 4, author: 'olumi', quote: null, ...base });
+    m.risks.push({ id: 'breakdown', label: 'The oven breaks down', occurrence: 'breakdown_chance', severity: 'lost_loaves', effect_on: 'sales', mode: 'add', starts_after_periods: 4, author: 'olumi', quote: null, ...base });
     m.quantities = m.quantities.map((q) => (q.id === 'base_sales' ? { ...q, value: null, low: 350, high: 450, range_kind: 'plausible' as const } : q));
     const rd = compile(m);
     expect(rd.errors).toEqual([]);
@@ -708,6 +713,41 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(x.periods).toBe(9);
     expect(x.quantities.find((q) => q.id === 'members')!.reading).toBe('state');
     expect(project(bakery()).items.find((i) => i.record_id === 'extra_per_oven')!.law).toEqual({ author: 'olumi', provisional: true, range_kind: 'plausible', reading: unbounded(120, 70 / Math.sqrt(12)) });
+  });
+
+  it('issue map class 13: a start is the DECLARED count starts_after_periods, one meaning in the schema the AI writes and in the compiler: a weekly van from week 1 makes all 4 deliveries in 4 weeks (100 %); one starting after 1 week, 3 (0 %)', () => {
+    // The meaning, stated once and sent on every start the AI writes: an option's setting, a risk, and the add_option edit.
+    const sent = CANONICAL_JSON_SCHEMA as any;
+    const addOption = (z.toJSONSchema(ProgramOp) as any).anyOf.find((b: any) => JSON.stringify(b.properties.op.enum) === '["add_option"]');
+    const fields = [sent.properties.options.items.properties.sets.items.properties, sent.properties.risks.items.properties, addOption.properties.sets.items.properties];
+    expect(fields.map((f) => [f.starts_after_periods.description.startsWith(`${STARTS_AFTER_PERIODS}.`), 'from_period' in f])).toEqual([[true, false], [true, false], [true, false]]);
+    expect(STARTS_AFTER_PERIODS).toContain('0 = from the start ("straight away", "from the first month" and "from now" are all 0), "from month 3" is 2');
+    const van = (starts: number) => model({
+      question: 'Should the shop book a weekly van?',
+      quantities: [
+        person('delivered_now', 'delivery', 0, 'nothing delivered yet'),
+        person('weekly_deliveries', 'delivery/week', 0, 'no deliveries without a van'),
+        person('van_rate', 'delivery/week', 1, 'one delivery a week'),
+        derived('delivered', 'delivery'),
+        person('all_four', 'delivery', 4, 'all 4 deliveries'),
+        person('four_weeks', 'week', 4, 'within 4 weeks'),
+      ],
+      relations: [stock('delivered_rel', 'delivered', 'delivered_now', ['weekly_deliveries'], [])],
+      goals: [goal('all_delivered', 'delivered', '>=', 'all_four', 'end', 'four_weeks', 'all 4 deliveries within 4 weeks')],
+      options: [option('van', 'Book a weekly van', [set('weekly_deliveries', 'van_rate', 'a van every week from week 1', { starts_after_periods: starts })], 'book a weekly van'),
+        option('carry_on', 'Carry on as now', [], 'carry on as now')],
+    });
+    // The compiler reads only the declared count: in force from interval k = the count, the (k+1)th period.
+    const chances = (m: CanonicalModelT) => {
+      const x = compile(m).executable!;
+      expect([x.periods, x.options.find((o) => o.id === 'van')!.sets]).toEqual([4, [{ quantity: 'weekly_deliveries', to: 'van_rate', from_period: m.options[0]!.sets[0]!.starts_after_periods }]]);
+      return simulate(x, { seed: 1, draws: 50 }).options.map((o) => { const g = o.per_goal.find((y) => y.goal_id === 'all_delivered')!; return [o.option_id, isWithheld(g) ? g : g.chance]; });
+    };
+    expect(chances(van(0))).toEqual([['van', 1], ['carry_on', 0]]);
+    expect(chances(van(1))).toEqual([['van', 0], ['carry_on', 0]]); // contrast: after 1 week, 3 deliveries by week 4
+    // The old name is not read anywhere but the store's one mapping: as written, it is a schema error.
+    const old = JSON.parse(JSON.stringify(van(0)).replace('"starts_after_periods":', '"from_period":'));
+    expect([...new Set(codes(compileJson(old)))]).toEqual(['schema']);
   });
 
   it('the schema is valid as strict structured output: closed objects, every key required, anyOf unions only', () => {

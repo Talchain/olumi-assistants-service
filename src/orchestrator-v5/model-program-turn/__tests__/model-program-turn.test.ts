@@ -362,6 +362,29 @@ describe('the model-program turn on the real core route', () => {
     expect(registered.length).toBe(saves);
   });
 
+  it('class 13: a program saved under the old from_period is read ONCE as starts_after_periods, the same count and the same executable; its stored Run is not called current for the changed form', async () => {
+    replies = [JSON.stringify(club())];
+    await turn({ message: CLUB_BRIEF });
+    const lm = persisted!.living_model;
+    const stored = JSON.parse(JSON.stringify(lm.canonical).replaceAll('"starts_after_periods":', '"from_period":'));
+    expect(JSON.stringify(stored)).not.toContain('starts_after_periods');
+    // As saved before the rename: the model under the old name, and its Run's digest over that stored form.
+    const oldRun = { ...lm.runs[0], receipt: { ...lm.runs[0].receipt, revision_digest: revisionDigest(stored, lm.person_words) } };
+    const before = { ...persisted!, living_model: { ...lm, canonical: stored, runs: [oldRun] } };
+    const read = programReadOf(before);
+    expect(read.kind).toBe('program');
+    const program = (read as Extract<typeof read, { kind: 'program' }>).program;
+    expect(stableStringify(program.canonical)).toBe(stableStringify(lm.canonical));
+    const words = sourceTextOf(lm.person_words);
+    expect(stableStringify(compile(program.canonical, { sourceText: words }).executable)).toBe(stableStringify(compile(lm.canonical as CanonicalModelT, { sourceText: words }).executable));
+    // Its stored Run was made on the old form, so it is not called current for the read one: a Run again shows the chance.
+    expect([reopenProgram(before)!.run!.run_id, reopenProgram(before)!.current]).toEqual([lm.runs[0].run_id, false]);
+    expect(reopenProgram(persisted)!.current).toBe(true); // contrast: a Run made on the new form
+    // Both names on one setting is not mapped: the schema judges it, and the program is unreadable.
+    const both = JSON.parse(JSON.stringify(lm.canonical).replace('"starts_after_periods":0', '"starts_after_periods":0,"from_period":0'));
+    expect(programReadOf({ ...persisted!, living_model: { ...lm, canonical: both } }).kind).toBe('unreadable');
+  });
+
   it('an UNREADABLE program (it claims model_program but is not v1) is refused with its way on: never run as legacy or as no model', async () => {
     replies = [JSON.stringify(bakery())];
     await turn({ message: BRIEF });
@@ -419,7 +442,7 @@ describe('the model-program turn on the real core route', () => {
     expect(model.quantities.find((x: Json) => x.id === 'promo_effect')).toMatchObject({ kind: 'coefficient', author: 'olumi', low: 3, high: 7, range_kind: 'plausible',
       basis: 'Promotions at clubs this size bring a few extra joins a month.' });
     expect(model.goals[0].measure).toMatchObject({ frame: 'level', aggregation: 'end', window: { start: 0, periods: 'months' } });
-    expect(model.options[0].sets.map((x: Json) => x.from_period)).toEqual([0, 0]);
+    expect(model.options[0].sets.map((x: Json) => x.starts_after_periods)).toEqual([0, 0]);
     expect(model.dissent).toEqual([{ id: 'sam_doubts', holder: 'Sam', position: 'Promotions never last.', concerns: ['promotion'], author: 'person', quote: 'Sam thinks promotions never last', approval: 'proposed' }]);
     expect(JSON.stringify(model)).not.toContain(':null');
     // The Run's goal_chance block, as stored.
