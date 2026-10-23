@@ -12,6 +12,7 @@ import { stable } from '../living-model/diff.js';
 import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { projectCorePostimageForPersistence } from '../../persisted-graph-projection.js';
 import { composeIdentityAskForNode } from '../../coaching/identity-not-evaluated-ask.js';
+import { notTargetTestableSentence, targetTestabilityOf } from '../../admission/target-testability.js';
 
 /**
  * The turn's repairs, shared by the draft and the change; the core route makes it per turn and `pathBTools` uses it.
@@ -94,6 +95,7 @@ const FIX = {
   unit: 'State Olumi\'s figure in the unit of the item it links into; convert only where the conversion is exact.',
   law: 'Give Olumi\'s link a direction, ends that are in the model, and a figure or range a law can be drawn from.',
   option: 'Give Olumi\'s option a setting on a factor, or a sized link of Olumi\'s from it.',
+  target: 'Give Olumi\'s target one figure a Run can test: at least or at most it, never exactly equal and never a range.',
 } as const;
 /** Each blocker's fix, or `ask` for the person's input. An unlisted code is said, never repaired. */
 const BLOCKER: Readonly<Record<string, keyof typeof FIX | 'ask'>> = {
@@ -102,6 +104,12 @@ const BLOCKER: Readonly<Record<string, keyof typeof FIX | 'ask'>> = {
   link_unit_mismatch: 'unit', link_frame_unknown: 'unit', current_unit_mismatch: 'unit', UNIT_MISMATCH: 'unit',
   link_sign_unknown: 'law', link_endpoint_unknown: 'law', exact_not_drawable: 'law', link_range_no_law: 'law',
   OPTION_NEEDS_ENCODING: 'option', OPTION_NEEDS_MAPPING: 'option', setting_not_convertible: 'option', MISSING_OPTION_VALUE: 'option',
+  // The Run's own verdict on the target (`targetTestabilityOf`); a path's unsized link of Olumi's is Olumi's to size (DL 93d79c3e).
+  missing_goal_baseline: 'ask', threshold_off_scale: 'ask', comparator_unscorable: 'target', threshold_unit_mismatch: 'unit',
+  goal_path_placeholder: 'law', goal_path_unsized: 'law',
+  // Every aim reading that withholds the goal's chance reaches the loop: Olumi's is fixed, the person's asked (DL 93d79c3e, 00:48Z).
+  exact_target_not_in_slice: 'target', target_range_not_in_slice: 'target', target_not_theirs: 'ask', change_base_invalid: 'ask',
+  goal_level_not_admitted: 'ask', stay_within_base_not_theirs: 'ask',
   goal_level_unknown: 'ask', link_goal_level_unknown: 'ask', no_level_target: 'ask', link_goal_target_unknown: 'ask', change_kind_unknown: 'ask',
   change_base_not_theirs: 'ask', stay_within_unconfirmed: 'ask', MISSING_FACTOR_LEVEL: 'ask', identity_part_unknown: 'ask', FEWER_THAN_TWO_OPTIONS: 'ask',
   // The identity ask composer's own reasons (`composeIdentityAskForNode`): each is the person's to answer.
@@ -187,8 +195,18 @@ export function selfCheck(model: LivingModelT, mapped: Mapped): Found[] {
     const ask = composeIdentityAskForNode(String(n.id), postimage);
     return ask === null ? [] : [{ code: ask.reason, item: String(n.id), question: ask.assistant_text }];
   });
+  // ⭐ THE RUN'S OWN VERDICT ON THE TARGET (DL 93d79c3e, C1): what the Run withholds the goal's chance on before the engine
+  // (`targetTestabilityOf`, run-analysis.ts), on the same postimage, so `run_ready` never reads true on a failure it decides
+  // statically. An inferred identity is the engine's to judge (ISL can clear it), so it is left to the Run, never claimed here.
+  // A failure on a goal or link a cause above already holds is said by that cause.
+  const verdict = targetTestabilityOf(postimage);
+  const untestable = verdict.kind === 'not_testable' ? verdict.failures.filter((f) => f.code !== 'identity_unconfirmed') : [];
+  const targetQuestion = untestable.length > 0 ? notTargetTestableSentence(postimage, verdict) ?? undefined : undefined;
+  const target = untestable.flatMap((f) => (f.links ?? (f.link !== undefined ? [f.link] : [undefined])).map((l) => ({ code: f.code,
+    item: l === undefined ? goal ?? null : model.links.find((x) => x.from === l.from && x.to === l.to)?.id ?? null, question: targetQuestion })))
+    .filter((t) => !causes.some((w) => w.id === t.item));
   return [...causes.map((w) => ({ code: w.reason, item: w.id, ...(w.applies_to ? { scope: stable([...w.applies_to].sort()) } : {}) })),
-    ...issues.map((i) => ({ code: i.code, item: i.option_id ?? i.factor_id ?? null, question: i.message })), ...identities];
+    ...issues.map((i) => ({ code: i.code, item: i.option_id ?? i.factor_id ?? null, question: i.message })), ...identities, ...target];
 }
 
 /** The blockers of `after` to say back: a change answers only for those it adds to what `before` had (none for a draft). */
