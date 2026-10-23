@@ -108,6 +108,11 @@ describe('a relative change with no level today is measured as the change, never
       // New unresolved and explicitly other references never acquire today from a text cue.
       expect(reasons(model({ baseline: 'today', baseline_reference: null }))).toContain('tp:goal_level_unknown');
       expect(reasons(model({ baseline: 'today', baseline_reference: 'other' }))).toContain('tp:goal_level_unknown');
+      for (const baseline_reference of [null, 'other'] as const) {
+        const knownToday = model({ current: 400, current_unit: 'units per week', current_source: 'user', baseline_reference }, 'units per week');
+        expect(reasons(knownToday)).toContain('tp:change_base_invalid');
+        expect(goalOf(mapLivingModel(knownToday).graph).goal_threshold).toBeUndefined();
+      }
       // Older saved forms keep their prior reading rather than silently migrating an unknown reference.
       expect(reasons(model({ baseline }))).toContain('tp:goal_level_unknown');
     }
