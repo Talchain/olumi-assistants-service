@@ -341,9 +341,13 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   const aim = (opts.goal === undefined ? undefined : model.aims.find((a) => a.id === opts.goal && a.status === 'current'))
     ?? model.aims.find((a) => a.status === 'current' && a.target !== null) ?? model.aims.find((a) => a.status === 'current');
   const primaryAimId = aim?.id;
+  // A qualitative aim remains reasoning context, as before. Only an additional figured aim joins the calculation.
+  const compiledAims = model.aims.filter(a => a.status === 'current' && (a === aim || a.target?.value != null));
+  const expandedTargets = compiledAims.length > 1 || model.factors.some(f => f.accumulation != null);
+
   const readings = new Map<string, { aim: LivingModelT['aims'][number]; node: Rec; goal?: { id: string; cap: number; unit: string }; held?: WithheldReason }>();
   if (aim === undefined) hold('goal', 'no_level_target');
-  for (const aim of model.aims.filter(a => a.status === 'current')) {
+  for (const aim of compiledAims) {
     let goal: { id: string; cap: number; unit: string } | undefined;
     let goalHeld: WithheldReason | undefined;
     let goalNode: Rec | undefined;
@@ -451,7 +455,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
       && goalNode.goal_target_basis === undefined) goalNode.goal_horizon_months = window;
     if (t?.reference === null || t?.period_kind === null) hold(aim.id, 'goal_scope_unknown');
     const targetHolds = withheld.slice(heldBefore).filter(w => w.id === aim.id);
-    if (targetHolds.length > 0) goalNode.goal_rests_on = targetHolds;
+    if (aim.id !== primaryAimId && targetHolds.length > 0) goalNode.goal_rests_on = targetHolds;
     readings.set(aim.id, { aim, node: goalNode!, goal, held: goalHeld });
     if (aim.id !== primaryAimId) {
       goalNode!.kind = 'factor';
@@ -459,6 +463,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
       if (goal === undefined || goalNode!.observed_state === undefined && aim.defined_as === null) goalNode!.analysis_participation = 'retained_excluded';
     }
   }
+  for (const a of model.aims) if (a !== aim && a.status === 'current' && a.target !== null && !compiledAims.includes(a)) hold(a.id, 'aim_not_in_slice');
   const { goal, node: goalNode } = readings.get(aim?.id ?? '') ?? {};
 
   // ── A mitigation is a switch: one risk's step, unitless, off today, set only to 0 or 1, with no cause of its own.
@@ -975,9 +980,9 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     }
     // The items the chance rests on that the engine graph left out, each with its own held reason (Class 3: the tool says them
     // back to the AI, so a draft whose own encoding withholds its goal can be restructured in the same turn).
-    const causes = withheld.filter((w) => ((w.reason === 'link_sign_unknown' || w.reason === 'link_frame_unknown' || w.reason === 'link_endpoint_unknown' || w.reason === 'exact_not_drawable'
+    const causes = withheld.filter((w) => ((w.reason === 'link_sign_unknown' || (expandedTargets && w.reason === 'link_frame_unknown') || w.reason === 'link_endpoint_unknown' || w.reason === 'exact_not_drawable'
       || w.reason === 'identity_other_cause' || w.reason === 'identity_contradicted' || w.reason === 'risk_not_in_slice') && onPath.has(model.links.find((l) => l.id === w.id)?.to ?? ''))
-      || ((IDENTITY_REFUSED.has(w.reason) || RISK_REFUSED.has(w.reason) || w.reason === 'factor_level_unknown' || w.reason === 'level_range_not_in_slice') && onPath.has(w.id)));
+      || ((IDENTITY_REFUSED.has(w.reason) || RISK_REFUSED.has(w.reason) || (expandedTargets && (w.reason === 'factor_level_unknown' || w.reason === 'level_range_not_in_slice'))) && onPath.has(w.id)));
     const ownAim = readings.get(goal.id)!.aim;
     const badScope = accumulations.filter(f => onPath.has(f.id) && (f.accumulation!.horizon_months !== ownAim.target?.period_months
       || ownAim.target?.reference === 'launch' || ownAim.target?.reference === null
@@ -992,8 +997,10 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     const conditioned = model.conditions.filter((c) => c.role === 'prerequisite' && c.applies_to.some((id) => onPath.has(id) || pathLinks.has(id)));
     for (const c of conditioned) hold(`condition:${c.text}`, 'condition_not_in_slice');
     if (leftOut || conditioned.length > 0) {
-      // Preserve the complete stated target. Its own permission record, not erasing data, withholds its chance.
-      goalNode.goal_rests_on = [...(Array.isArray(goalNode.goal_rests_on) ? goalNode.goal_rests_on : []),
+      // Old single-aim saved forms keep their exact projection. New targets retain data and carry a scoped permission.
+      if (!expandedTargets) {
+        for (const k of Object.keys(goalNode)) if (k.startsWith('goal_threshold') || k === 'goal_direction') delete goalNode[k];
+      } else goalNode.goal_rests_on = [...(Array.isArray(goalNode.goal_rests_on) ? goalNode.goal_rests_on : []),
         ...causes, ...dropped.map(id => ({ id, reason: 'setting_not_convertible' })),
         ...conditioned.map(c => ({ id: `condition:${c.text}`, reason: 'condition_not_in_slice', applies_to: [...c.applies_to] }))];
       hold(goal.id, 'chance_rests_on_withheld');

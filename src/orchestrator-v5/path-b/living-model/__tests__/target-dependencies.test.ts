@@ -15,11 +15,35 @@ import { assertTargetHeld } from './assert-target-held.js';
 type Rec = Record<string, any>;
 const stored = (m = KNOWN_ANSWER) => GraphV3.parse({ ...mapLivingModel(m).graph, living_model: m });
 const goal = (g: Rec, id = 'g'): Rec => g.nodes.find((n: Rec) => n.id === id)!;
+function twoAims() {
+  const m = structuredClone(KNOWN_ANSWER), second = structuredClone(m.aims[0]!);
+  Object.assign(second, { id: 'second', text: 'Reach 90 units' }); second.target!.value = 90;
+  m.aims.push(second); m.links.push({ ...m.links[0]!, id: 'f_second', to: 'second' });
+  return m;
+}
 const raw = () => ({ option_comparison: [{ option_id: 'hold', probability_of_goal: 0.1 }, { option_id: 'push', probability_of_goal: 0.6 }], inference_warnings: [] });
 
 describe('stated targets survive unresolved dependencies without licensing their chance', () => {
+  it('qualitative secondary aims stay in reasoning context and never change the primary projection or its original reason', () => {
+    for (const level of [70, null]) {
+      const m = structuredClone(KNOWN_ANSWER); m.aims[0]!.target!.current = level;
+      const old = mapLivingModel(m), oldVerdict = targetTestabilityOf(old.graph);
+      for (const id of ['quality', 'spend_less', 'economy']) {
+        const next = structuredClone(m), qualitative = structuredClone(m.aims[0]!);
+        Object.assign(qualitative, { id, text: `Maintain ${id}` });
+        Object.assign(qualitative.target!, { value: null, low: null, high: null, current: null });
+        next.aims.push(qualitative);
+        const before = structuredClone(next), mapped = mapLivingModel(next);
+        expect(mapped.graph).toEqual(old.graph);
+        expect(targetTestabilityOf(mapped.graph)).toEqual(oldVerdict);
+        expect(mapped.withheld).toEqual([...old.withheld, { id, reason: 'aim_not_in_slice' }]);
+        expect(next).toEqual(before);
+      }
+    }
+  });
+
   it('keeps target, frame, comparator, current level, qualitative evidence and dissent; withholds producer-supplied chances', () => {
-    const m = structuredClone(KNOWN_ANSWER), plain = stored(m);
+    const m = twoAims(), plain = stored(m);
     m.conditions.push({ text: 'Board approval remains open', role: 'prerequisite', applies_to: ['f_g'], source: 'user',
       party: null, quote: 'Board approval remains open' });
     const before = structuredClone(m), graph = stored(m), own = goal(graph);
@@ -70,7 +94,7 @@ describe('stated targets survive unresolved dependencies without licensing their
     expect(wireRows.map(r => r.constraint_id)).not.toContain('target_second');
     expect(wireRows.map(r => r.constraint_id)).toContain('target_g');
     const projected = withGoalDependencyScores(envelope, graph, rows);
-    const verdict = deriveConstraintVerdict(projected, readRatifiedConstraints(graph), 'push');
+    const verdict = deriveConstraintVerdict(projected, readRatifiedConstraints(graph), 'push', undefined, undefined, { userBaselineIds: new Set(), userAssumptionIds: new Set() });
     expect(verdict.perLimit?.find(r => r.constraint_id === 'target_second')?.state).toBe('unscored');
     const checked = withGoalChanceLicence(envelope, graph, 'g', undefined, undefined, graph, { storedConstraints: rows, sentConstraints: rows });
     expect(checked.option_comparison[0]!.probability_of_goal).toBe(0.6);

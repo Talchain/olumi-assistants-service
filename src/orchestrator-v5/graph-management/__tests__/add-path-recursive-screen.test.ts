@@ -115,6 +115,7 @@ describe('the 27 zero-reader smuggle names — enumerated at the bytes', () => {
       'goal_horizon_stated_months',
       // + MG (29 Sep, AIQ (b)): Olumi's reading of the brief's figure as a change goal's today level, construction only.
       'goal_level_reading',
+      'goal_rests_on', // Host calculation permission: cannot be smuggled by an add.
       // + MG #2306 (29 Sep): Olumi's reading of a decrease target, written only by construction.
       'goal_scope',
       'goal_sense_reading',
@@ -154,7 +155,7 @@ describe('the 27 zero-reader smuggle names — enumerated at the bytes', () => {
     // Batch C: ruling 4 — +1 smuggle name (`goal_target_basis`), so 34 in all; the six non-smuggle names are unchanged.
     // Science PR-4 — +1 smuggle name (`cohort_forecast`), so 35 in all; the six non-smuggle names are unchanged.
     // #3441 — +1 smuggle name (`analysis_participation_reason`), so 36 in all; the six non-smuggle names are unchanged.
-    expect(all.length).toBe(36);
+    expect(all.length).toBe(37);
     expect(all.filter((k) => !SMUGGLE_NAMES.includes(k))).toEqual([
       'beliefexistssource',
       'directionsource',

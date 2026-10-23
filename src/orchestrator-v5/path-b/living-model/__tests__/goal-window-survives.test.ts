@@ -1,4 +1,3 @@
-import { assertTargetHeld } from './assert-target-held.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import { LivingModel, type LivingModelT } from '../../../../schemas/living-model.js';
@@ -73,12 +72,12 @@ describe('the aim window survives the real mapper and readiness path', () => {
     expect(risk(graph)?.horizon.months).toBe(months);
   });
 
-  it('a: withholding a dependent chance retains its target, date and window, and keeps risks current', () => {
+  it('a: withholding a dependent chance removes its threshold, preserves date and window, and keeps risks current', () => {
     const m = model(18, 'by 30 April 2028');
     m.conditions.push({ text: 'Board approval remains open', role: 'prerequisite', applies_to: ['gp'], source: 'user', party: null, quote: 'Board approval remains open' });
     const { mapped, graph, goal } = run(m);
     expect(mapped.withheld).toContainEqual({ id: 'gp', reason: 'chance_rests_on_withheld' });
-    assertTargetHeld(graph, 'gp', m.aims[0]!.target!.value!);
+    expect(goal.goal_threshold).toBeUndefined();
     expect(goal.goal_horizon).toEqual({ deadline: '2028-04-30' });
     expect(goal.goal_deadline_as_stated).toBe('by 30 April 2028');
     expect(riskOccurrenceWindowMonths(graph)).toBe(18);

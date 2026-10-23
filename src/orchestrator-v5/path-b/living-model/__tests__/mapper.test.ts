@@ -1,4 +1,3 @@
-import { assertTargetHeld } from './assert-target-held.js';
 import { describe, expect, it } from 'vitest';
 import { GraphV3, InterventionV3 } from '../../../../schemas/cee-v3.js';
 import { LivingAim, LivingModel, type LivingModelT } from '../../../../schemas/living-model.js';
@@ -246,7 +245,7 @@ describe('thin core mapper: living model → GraphV3', () => {
     unsigned.links[0]!.effect.sign = null;
     const u = mapLivingModel(unsigned);
     expect(u.withheld).toContainEqual({ id: 'g', reason: 'chance_rests_on_withheld' });
-    assertTargetHeld(u.graph, 'g', 100);
+    expect(node(u.graph, 'g')).not.toHaveProperty('goal_threshold');
     expect(node(u.graph, 'g').observed_state, 'the goal\'s level stays a fact').toMatchObject({ raw_value: 70 });
 
     const offPath: LivingModelT = structuredClone(KNOWN_ANSWER);

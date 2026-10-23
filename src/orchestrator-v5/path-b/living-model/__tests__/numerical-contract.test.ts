@@ -49,7 +49,8 @@ describe('B1: quantity-owned frames and honest range conversion', () => {
     expect(node(out.graph, 'features_price').interventions.price.raw_value).toBe(59);
     expect((edge.strength as Rec).mean * out.frames.get('mrr')!.cap / out.frames.get('price')!.cap).toBeCloseTo(300, 12);
     expect(convertingOlumiEstimate(edge, out.graph, 'mrr')).toBe(true);
-    expect((out.graph as Rec).goal_constraints).toBeUndefined(); // B1 does not change the existing off-frame-limit path.
+    expect((out.graph as Rec).goal_constraints.filter((c: Rec) => c.role !== 'goal_target')).toEqual([]); // B2a adds aims, not the off-frame budget.
+    expect((out.graph as Rec).goal_constraints.map((c: Rec) => c.node_id).sort()).toEqual(['churn', 'mrr']);
     expect(node(out.graph, 'spend').observed_state.cap).toBe(18750);
     expect(out.withheld).toContainEqual({ id: 'spend', reason: 'limit_not_in_slice' });
     expect(m).toEqual(before); // The churn aim, conditions, risk, quotes and authorship are not simplified away.
