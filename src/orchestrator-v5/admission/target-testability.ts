@@ -178,7 +178,7 @@ function locallyConvertingNaturalEffect(edge: unknown, graph: unknown): boolean 
   const beta = convertLinkEffect(natural.amount, natural.per_source_change, frames.target, frames.source);
   // naturalEffectOf persists BOTH amount and per to six significant figures, while strength_mean keeps beta.
   // Each rounding has <=5e-6 relative error; their ratio differs by <=1e-5 of the larger coefficient.
-  return beta !== null && Math.abs(mean) <= 1 && Math.abs(beta - mean) <= 1e-5 * Math.max(Math.abs(beta), Math.abs(mean));
+  return beta !== null && Math.abs(beta - mean) <= 1e-5 * Math.max(Math.abs(beta), Math.abs(mean));
 }
 
 /** Science §(i) (A): a local conversion licenses an Olumi estimate only on a converting route to the scored goal.
