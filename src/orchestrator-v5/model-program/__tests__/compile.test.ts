@@ -13,13 +13,16 @@ import { parseUnit, sameDims } from '../units.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 
 // ── builders ───────────────────────────────────────────────────────────────────────────────────────────────────────────
-const base = { party: null, approval: 'proposed' as const };
+const base = { party: null, approval: 'proposed' as const, author_id: null };
 const qty = (id: string, unit: string, f: Partial<CanonicalQuantityT>): CanonicalQuantityT => ({
-  id, label: id.replace(/_/g, ' '), unit, value: null, low: null, high: null, status: 'known', question: null, basis: null, author: 'person', quote: null, ...base, ...f,
+  id, label: id.replace(/_/g, ' '), unit, kind: 'fact', value: null, low: null, high: null, status: 'known', question: null, basis: null, author: 'person', quote: null, ...base, ...f,
 });
 const person = (id: string, unit: string, value: number, quote: string) => qty(id, unit, { value, quote });
 const olumi = (id: string, unit: string, low: number, high: number, value: number | null = null) =>
-  qty(id, unit, { value, low, high, status: 'estimated', author: 'olumi', basis: 'Typical for a small business of this kind.' });
+  qty(id, unit, { kind: 'coefficient', value, low, high, status: 'estimated', author: 'olumi', basis: 'Typical for a small business of this kind.' });
+type SetT = CanonicalModelT['options'][number]['sets'][number];
+const set = (quantity: string, to: string | null, quote: string, f: Partial<SetT> = {}): SetT =>
+  ({ quantity, to, value: null, low: null, high: null, question: null, from_period: 0, author: 'person', quote, ...f });
 const asked = (id: string, unit: string, question: string) => qty(id, unit, { status: 'asked', question });
 const derived = (id: string, unit: string) => qty(id, unit, { status: 'derived' });
 const who = (quote: string | null) => (quote === null ? { author: 'olumi' as const, quote: null } : { author: 'person' as const, quote });
@@ -30,7 +33,7 @@ const eff = (id: string, defines: string, b: string, terms: [string, string][], 
 const stock = (id: string, defines: string, start: string, inflows: string[], outflows: string[], quote: string | null = null): CanonicalRelationT =>
   ({ form: 'stock', id, defines, start, inflows, outflows, ...base, ...who(quote) });
 const goal = (id: string, quantity: string, cmp: '>=' | '<=' | '>' | '<', target: string, aggregation: 'end' | 'sum' | 'mean' | 'every', periods: string, quote: string): CanonicalGoalT => ({
-  id, label: id.replace(/_/g, ' '), measure: { quantity, cmp, target, aggregation, window: { origin_event: null, origin_offset: null, start: 0, periods }, measure_by: 'person' },
+  id, label: id.replace(/_/g, ' '), measure: { quantity, cmp, target, frame: 'level', reference: null, aggregation, window: { origin_event: null, origin_offset: null, start: 0, periods }, measure_by: 'person', assumptions: [], exclusions: [] },
   question: null, author: 'person', quote, ...base,
 });
 const model = (over: Partial<CanonicalModelT>): CanonicalModelT => ({
@@ -70,7 +73,7 @@ function bakery(): CanonicalModelT {
       goal('cash_buffer', 'cash', '>=', 'cash_target', 'end', 'quarter', 'at least £10,000 in the bank'),
     ],
     options: [
-      { id: 'buy_oven', label: 'Buy a second oven', sets: [{ quantity: 'ovens_added', to: 'one_oven', from_period: 0, author: 'person', quote: 'A second oven' }], status: 'live', developed_from: null, author: 'person', quote: 'Buy it', ...base },
+      { id: 'buy_oven', label: 'Buy a second oven', sets: [set('ovens_added', 'one_oven', 'A second oven')], status: 'live', developed_from: null, author: 'person', quote: 'Buy it', ...base },
       { id: 'keep_one', label: 'Keep one oven', sets: [], status: 'live', developed_from: null, author: 'person', quote: 'keep one oven', ...base },
     ],
   });
@@ -102,7 +105,7 @@ function gym(): CanonicalModelT {
       goal('class_income', 'class_revenue', '>=', 'revenue_floor', 'every', 'half_year', 'at least £3,000 a month from classes'),
     ],
     options: [
-      { id: 'promo', label: 'Run a summer promotion', sets: [{ quantity: 'joins', to: 'promo_joins', from_period: 0, author: 'person', quote: 'a promotion could bring 40 a month' }], status: 'live', developed_from: null, author: 'person', quote: 'run a summer promotion', ...base },
+      { id: 'promo', label: 'Run a summer promotion', sets: [set('joins', 'promo_joins', 'a promotion could bring 40 a month')], status: 'live', developed_from: null, author: 'person', quote: 'run a summer promotion', ...base },
       { id: 'carry_on', label: 'Carry on as now', sets: [], status: 'live', developed_from: null, author: 'person', quote: 'carry on as now', ...base },
     ],
   });
@@ -116,11 +119,13 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(x.periods).toBe(13);
     expect(x.period_unit).toBe('week');
     const byId = new Map(x.quantities.map((q) => [q.id, q]));
-    expect(byId.get('sales')).toEqual({ id: 'sales', unit: 'loaf/week', equation: { form: 'effect', base: 'base_sales', terms: [{ coefficient: 'extra_per_oven', driver: 'ovens_added' }] } });
-    expect(byId.get('profit')).toEqual({ id: 'profit', unit: 'GBP/week', equation: { form: 'definition', op: 'difference', parts: ['takings', 'costs'] } });
-    expect(byId.get('cash')).toEqual({ id: 'cash', unit: 'GBP', stock: { start: 'cash_now', inflows: ['profit'], outflows: [] } });
+    expect(byId.get('sales')).toEqual({ id: 'sales', unit: 'loaf/week', reading: 'state', equation: { form: 'effect', base: 'base_sales', terms: [{ coefficient: 'extra_per_oven', driver: 'ovens_added' }] } });
+    expect(byId.get('profit')).toEqual({ id: 'profit', unit: 'GBP/week', reading: 'flow', equation: { form: 'definition', op: 'difference', parts: ['takings', 'costs'] } });
+    expect(byId.get('cash')).toEqual({ id: 'cash', unit: 'GBP', reading: 'state', stock: { start: 'cash_now', inflows: ['profit'], outflows: [] } });
     expect(byId.get('extra_per_oven')!.dist).toEqual({ kind: 'range', low: 80, high: 150, mode: 120, basis: 'olumi_estimate' });
     expect(byId.get('price')!.dist).toEqual({ kind: 'fixed', value: 3 });
+    // Every range carries the ruled law, as Olumi's provisional conversion.
+    expect(r.conversions).toEqual([{ kind: 'range_law', quantity: 'extra_per_oven', low: 80, high: 150, reading: { kind: 'normal', centre: 120, sd: 70 / Math.sqrt(12) }, author: 'olumi', provisional: true }]);
     // The window's length is consumed into the window, never simulated as a quantity.
     expect(byId.has('quarter')).toBe(false);
     expect(x.goals).toEqual([
@@ -303,8 +308,9 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     m.relations.push(def('leavers_rel', 'leavers', 'product', ['members', 'churn']));
     const r = compile(m);
     expect(r.errors).toEqual([]);
-    expect(r.executable!.quantities.find((q) => q.id === 'churn')).toEqual({ id: 'churn', unit: '1/month', dist: { kind: 'fixed', value: 0.05 } });
-    expect(r.conversions).toEqual([{ quantity: 'churn', from: '%/month', to: '1/month', factor: 0.01 }]);
+    expect(r.executable!.quantities.find((q) => q.id === 'churn')).toEqual({ id: 'churn', unit: '1/month', reading: 'state', dist: { kind: 'fixed', value: 0.05 } });
+    expect(r.conversions).toEqual([{ kind: 'percent', quantity: 'churn', from: '%/month', to: '1/month', factor: 0.01, author: 'olumi' }]);
+    expect(r.executable!.quantities.find((q) => q.id === 'leavers')!.reading).toBe('flow'); // an outflow
   });
 
   it('the schema is valid as strict structured output: closed objects, every key required, anyOf unions only', () => {
@@ -326,6 +332,162 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(bad).toEqual([]);
     expect(compileJson({ version: 'canonical.v1' }).errors[0].code).toBe('schema');
     expect(CanonicalModel.safeParse(bakery()).success).toBe(true);
+  });
+
+  it('DL defect (c) + fact/coefficient: an inline option value compiles into a named quantity; a missing one is an ask that fills it', () => {
+    const m = bakery();
+    m.options.push({ id: 'raise_price', label: 'Raise the price', sets: [set('price', null, 'put the price up to £3.50', { value: 3.5 })], status: 'live', developed_from: null, author: 'person', quote: 'put the price up', ...base });
+    const r = compile(m);
+    expect(r.errors).toEqual([]);
+    expect(r.executable!.options.find((o) => o.id === 'raise_price')!.sets).toEqual([{ quantity: 'price', to: 'raise_price__price', from_period: 0 }]);
+    expect(r.executable!.quantities.find((q) => q.id === 'raise_price__price')).toEqual({ id: 'raise_price__price', unit: 'GBP/loaf', reading: 'state', dist: { kind: 'fixed', value: 3.5 } });
+    expect(project(m, r).items.find((i) => i.record_id === 'raise_price__price')).toMatchObject({ shown_as: { on_node: 'raise_price' }, in_calculation: true, author: 'person' });
+
+    const open = bakery();
+    open.options.push({ id: 'raise_price', label: 'Raise the price', sets: [set('price', null, 'put the price up', { question: 'What price would you charge?' })], status: 'live', developed_from: null, author: 'person', quote: 'put the price up', ...base });
+    const ro = compile(open);
+    expect(ro.errors).toEqual([]);
+    expect(ro.perOption.find((o) => o.option_id === 'raise_price')).toMatchObject({ status: 'asks', asks: ['raise_price__price'] });
+    expect(ro.executable!.options.map((o) => o.id)).toEqual(['buy_oven', 'keep_one']); // the other options still compare
+    const filled = fillQuantity(open, 'raise_price__price', { value: 3.5 }, '£3.50');
+    expect(filled.ok && compile(filled.model).executable!.options.map((o) => o.id)).toEqual(['buy_oven', 'keep_one', 'raise_price']);
+
+    // A fact is asked, never estimated; a coefficient may be Olumi's ranged estimate (row 1's extra_per_oven).
+    const fact = bakery();
+    fact.quantities = fact.quantities.map((q) => (q.id === 'costs' ? olumi('costs', 'GBP/week', 500, 700) : q));
+    const rf = compile({ ...fact, quantities: fact.quantities.map((q) => (q.id === 'costs' ? { ...q, kind: 'fact' as const } : q)) });
+    expect(rf.errors.map((e) => [e.code, e.items])).toEqual([['fact_estimated', ['costs']]]);
+    expect(compile(fact).errors).toEqual([]); // contrast: the same figure as a coefficient compiles
+  });
+
+  it('DL defect (b): a goal window may be null: a static level reads once at period 0; a level that moves over time asks for a deadline', () => {
+    const m = bakery();
+    m.quantities.push(person('price_floor', 'GBP/loaf', 2.5, 'never below £2.50'));
+    m.goals.push({ id: 'price_level', label: 'Keep the price at least £2.50', measure: { quantity: 'price', cmp: '>=', target: 'price_floor', frame: 'level', reference: null, aggregation: 'end', window: null, measure_by: 'person', assumptions: [], exclusions: [] }, question: null, author: 'person', quote: 'never below £2.50', ...base });
+    const r = compile(m);
+    expect(r.errors).toEqual([]);
+    expect(r.executable!.goals.find((g) => g.id === 'price_level')!.window).toEqual({ start_period: 0, periods: 1 });
+
+    const moving = bakery();
+    moving.goals = moving.goals.map((g) => (g.id === 'cash_buffer' ? { ...g, measure: { ...g.measure!, window: null } } : g));
+    const rm = compile(moving);
+    expect(rm.errors).toEqual([]);
+    expect(rm.perGoal.find((p) => p.goal_id === 'cash_buffer')).toMatchObject({ status: 'asks', needs_deadline: true, asks: [] });
+    expect(rm.coaching).toEqual([{ record_id: 'cash_buffer', kind: 'deadline', question: 'By when should "cash buffer" be met?' }]);
+    expect(rm.executable!.goals.map((g) => g.id)).toEqual(['weekly_profit']);
+  });
+
+  it('DL defect (a): an option that reaches only a limit reaches; one that reaches neither is an error', () => {
+    const m = bakery();
+    m.quantities.push(person('hours', 'hour/week', 50, '50 hours a week'), person('fewer_hours', 'hour/week', 40, 'cut to 40 hours'), person('hours_cap', 'hour/week', 45, 'no more than 45 hours'));
+    m.limits.push({ id: 'my_hours', label: 'No more than 45 hours a week', quantity: 'hours', cmp: '<=', bound: 'hours_cap', aggregation: 'every', window: { origin_event: null, origin_offset: null, start: 0, periods: 'quarter' }, author: 'person', quote: 'no more than 45 hours', ...base });
+    m.options.push({ id: 'cut_hours', label: 'Cut my hours', sets: [set('hours', 'fewer_hours', 'cut to 40 hours')], status: 'live', developed_from: null, author: 'person', quote: 'Cut my hours', ...base });
+    expect(compile(m).errors).toEqual([]);
+    const none = bakery();
+    none.quantities.push(person('hours', 'hour/week', 50, '50 hours a week'), person('fewer_hours', 'hour/week', 40, 'cut to 40 hours'));
+    none.options.push({ id: 'cut_hours', label: 'Cut my hours', sets: [set('hours', 'fewer_hours', 'cut to 40 hours')], status: 'live', developed_from: null, author: 'person', quote: 'Cut my hours', ...base });
+    expect(codes(compile(none))).toEqual(['set_reaches_nothing', 'option_reaches_no_goal']);
+  });
+
+  it('plan r3 #1: the question binds the calculation: "revenue next year", "annual revenue" and "revenue growth" compile to three different executable goals', () => {
+    const change = (g: CanonicalGoalT, frame: 'change_abs' | 'change_rel', reference: NonNullable<CanonicalGoalT['measure']>['reference']): CanonicalGoalT => ({ ...g, measure: { ...g.measure!, frame, reference } });
+    const sundays = (goals: CanonicalGoalT[]) => model({
+      question: 'Should the bakery open on Sundays?', period: 'month',
+      quantities: [
+        person('loaf_price', 'GBP/loaf', 3, 'loaves sell at £3'),
+        person('loaves_now', 'loaf/month', 1600, 'about 1,600 loaves a month'),
+        person('growth', 'loaf/month/month', 50, 'growing by about 50 loaves a month each month'),
+        person('sunday_growth', 'loaf/month/month', 80, 'Sundays could make that 80'),
+        derived('loaves', 'loaf/month'),
+        derived('revenue', 'GBP/month'),
+        qty('months_per_year', 'month/year', { value: 12, author: 'olumi', status: 'known', basis: 'A year has 12 months.' }),
+        derived('annual_run_rate', 'GBP/year'),
+        person('year_total_target', 'GBP', 60000, 'over £60,000 next year'),
+        person('run_rate_target', 'GBP/year', 65000, 'an annual revenue of £65,000'),
+        person('growth_target', '%', 10, 'grow revenue by 10%'),
+        person('lift_target', 'GBP/month', 500, '£500 a month more than if we carry on'),
+        person('year', 'month', 12, 'next year'),
+      ],
+      relations: [
+        stock('loaves_rel', 'loaves', 'loaves_now', ['growth'], []),
+        def('revenue_rel', 'revenue', 'product', ['loaf_price', 'loaves']),
+        def('run_rate_rel', 'annual_run_rate', 'product', ['revenue', 'months_per_year']),
+      ],
+      goals,
+      options: [
+        { id: 'open_sundays', label: 'Open on Sundays', sets: [set('growth', 'sunday_growth', 'Sundays could make that 80')], status: 'live', developed_from: null, author: 'person', quote: 'open on Sundays', ...base },
+        { id: 'carry_on', label: 'Carry on as now', sets: [], status: 'live', developed_from: null, author: 'person', quote: 'carry on as now', ...base },
+      ],
+    });
+    const r = compile(sundays([
+      goal('revenue_next_year', 'revenue', '>', 'year_total_target', 'sum', 'year', 'over £60,000 next year'),
+      goal('annual_revenue', 'annual_run_rate', '>=', 'run_rate_target', 'end', 'year', 'an annual revenue of £65,000'),
+      change(goal('revenue_growth', 'revenue', '>=', 'growth_target', 'end', 'year', 'grow revenue by 10%'), 'change_rel', { kind: 'now', option: null, quantity: null }),
+    ]));
+    expect(r.errors).toEqual([]);
+    const x = r.executable!;
+    const w = { start_period: 0, periods: 12 };
+    expect(x.goals).toEqual([
+      { id: 'revenue_next_year', quantity: 'revenue', cmp: '>', target: 'year_total_target', aggregation: 'sum', window: w },
+      { id: 'annual_revenue', quantity: 'annual_run_rate', cmp: '>=', target: 'run_rate_target', aggregation: 'end', window: w },
+      { id: 'revenue_growth', quantity: 'revenue_growth__change_rel', cmp: '>=', target: 'growth_target', aggregation: 'end', window: w },
+    ]);
+    const q = new Map(x.quantities.map((y) => [y.id, y]));
+    expect(q.get('revenue__today')).toEqual({ id: 'revenue__today', unit: 'GBP/month', reading: 'state', equation: { form: 'definition', op: 'product', parts: ['loaf_price', 'loaves_now'] } });
+    expect(q.get('revenue_growth__change')).toEqual({ id: 'revenue_growth__change', unit: 'GBP/month', reading: 'state', equation: { form: 'definition', op: 'difference', parts: ['revenue', 'revenue__today'] } });
+    expect(q.get('revenue_growth__change_rel')).toEqual({ id: 'revenue_growth__change_rel', unit: '1', reading: 'state', equation: { form: 'definition', op: 'ratio', parts: ['revenue_growth__change', 'revenue__today'] } });
+    expect(q.get('growth_target')!.dist).toEqual({ kind: 'fixed', value: 0.1 });
+
+    // A change from carrying on as now: the same draws, with no option's sets; the set input is split, never re-drawn.
+    const r2 = compile(sundays([change(goal('sunday_lift', 'revenue', '>=', 'lift_target', 'end', 'year', '£500 a month more than if we carry on'), 'change_abs', { kind: 'option', option: 'carry_on', quantity: null })]));
+    expect(r2.errors).toEqual([]);
+    const q2 = new Map(r2.executable!.quantities.map((y) => [y.id, y]));
+    expect(r2.executable!.goals[0].quantity).toBe('sunday_lift__change');
+    expect(q2.get('sunday_lift__change')!.equation).toEqual({ form: 'definition', op: 'difference', parts: ['revenue', 'revenue__sq'] });
+    expect(q2.get('revenue__sq')!.equation).toEqual({ form: 'definition', op: 'product', parts: ['loaf_price', 'loaves__sq'] });
+    expect(q2.get('loaves__sq')!.stock).toEqual({ start: 'loaves_now', inflows: ['growth__base'], outflows: [] });
+    expect(q2.get('growth')).toEqual({ id: 'growth', unit: 'loaf/month/month', reading: 'flow', equation: { form: 'definition', op: 'sum', parts: ['growth__base'] } });
+    expect(q2.get('growth__base')!.dist).toEqual({ kind: 'fixed', value: 50 });
+    expect(r2.executable!.options[0].sets).toEqual([{ quantity: 'growth', to: 'sunday_growth', from_period: 0 }]);
+
+    // A level names no reference; a change names one.
+    const bad = compile(sundays([change(goal('g', 'revenue', '>=', 'growth_target', 'end', 'year', 'grow revenue by 10%'), 'change_rel', null)]));
+    expect(bad.errors.map((e) => e.code)).toEqual(['goal_shape']);
+  });
+
+  it('DL ruling 1: the compiler sets each reading: an inflow and what an option changes from a later period are flows; states stay states', () => {
+    const filled = fillQuantity(gym(), 'leavers', { value: 20 }, 'about 20 leave a month');
+    if (!filled.ok) throw new Error(filled.reason);
+    const withPrice = (from: number) => {
+      const m = structuredClone(filled.model);
+      m.quantities.push(person('dearer_class', 'GBP/attendance', 9, '£9 a class from the autumn'));
+      m.options.push({ id: 'dearer', label: 'Charge £9 a class', sets: [set('class_price', 'dearer_class', '£9 a class from the autumn', { from_period: from })], status: 'live', developed_from: null, author: 'person', quote: 'charge £9 a class', ...base });
+      const x = compile(m).executable!;
+      return Object.fromEntries(x.quantities.map((q) => [q.id, q.reading]));
+    };
+    const later = withPrice(3);
+    expect(later).toMatchObject({ members: 'state', members_now: 'state', joins: 'flow', leavers: 'flow', class_price: 'flow', class_revenue: 'flow', attendances: 'state' });
+    const now = withPrice(0);
+    expect(now).toMatchObject({ class_price: 'state', class_revenue: 'state', joins: 'flow' }); // contrast: a change from period 0 is not dated
+  });
+
+  it('DL ruling 4: a bare range the ruled law cannot use is HELD (withholds what rests on it); a usable one is read; a most likely figure at an end is an error', () => {
+    const withCosts = (f: Partial<CanonicalQuantityT>) => { const m = bakery(); m.quantities = m.quantities.map((q) => (q.id === 'costs' ? { ...q, value: null, ...f } : q)); return compile(m); };
+    const heldR = withCosts({ low: 0, high: 1200 });
+    expect(heldR.errors).toEqual([]);
+    expect(heldR.perGoal.map((p) => p.status)).toEqual(['withheld', 'withheld']);
+    expect(heldR.perGoal[0].reasons.join(' ')).toContain('the range 0 to 1200 has no most likely value');
+    expect(heldR.executable).toBeNull();
+    const usable = withCosts({ low: 500, high: 700 });
+    expect(usable.perGoal.map((p) => p.status)).toEqual(['calculable', 'calculable']);
+    expect(usable.conversions).toContainEqual({ kind: 'range_law', quantity: 'costs', low: 500, high: 700, reading: { kind: 'normal', centre: 600, sd: 200 / Math.sqrt(12) }, author: 'olumi', provisional: true });
+    expect(usable.executable!.quantities.find((q) => q.id === 'costs')!.dist).toEqual({ kind: 'range', low: 500, high: 700, basis: 'person_range' });
+    const atEnd = withCosts({ value: 500, low: 500, high: 700 });
+    expect(atEnd.errors.map((e) => [e.code, e.items])).toEqual([['range_order', ['costs']]]);
+    expect(atEnd.errors[0].message).toContain('at an end of its range');
+    // The display never shows the person's bounds as their law: Olumi's reading is said, as Olumi's.
+    const m = bakery(); m.quantities = m.quantities.map((q) => (q.id === 'costs' ? { ...q, value: null, low: 500, high: 700 } : q));
+    expect(project(m).graph.nodes.find((n) => n.id === 'costs')!.display_value).toBe('500–700 GBP/week; Olumi reads it as a spread around 600 (sd 57.74), provisionally');
   });
 
   it('units: coefficient × driver makes the defined unit; plural and singular agree; multipliers are refused', () => {

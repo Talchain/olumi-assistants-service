@@ -19,7 +19,7 @@
 import { LLM_STRENGTH_STD_FLOOR } from '../../cee/constants.js';
 import type { CanonicalModelT, CanonicalQuantityT, QualitativeFamilyT } from './canonical.js';
 import { QUALITATIVE_FAMILIES } from './canonical.js';
-import { compile, type CompileResult } from './compile.js';
+import { compile, normalise, rangeReading, type CompileResult } from './compile.js';
 
 type Rec = Record<string, unknown>;
 export type DisplayAuthor = 'person' | 'olumi' | 'unverified';
@@ -47,7 +47,8 @@ const QUAL_PREFIX: Record<QualitativeFamilyT, string> = {
 const has = <T>(x: T | null | undefined): x is T => x !== null && x !== undefined;
 const fmt = (n: number) => (Number.isInteger(n) ? n.toLocaleString('en-GB') : String(Number(n.toPrecision(4))));
 
-export function project(model: CanonicalModelT, compiled: CompileResult = compile(model)): Projection {
+export function project(input: CanonicalModelT, compiled: CompileResult = compile(input)): Projection {
+  const model = normalise(input); // an option's inline value is a named quantity, drawn on its option card
   const x = compiled.executable;
   const xq = new Set(x?.quantities.map((q) => q.id) ?? []);
   const xg = new Set(x?.goals.map((g) => g.id) ?? []);
@@ -82,25 +83,32 @@ export function project(model: CanonicalModelT, compiled: CompileResult = compil
   }
   for (const g of model.goals) if (g.measure) {
     use(g.measure.quantity, 'node');
-    for (const t of [g.measure.target, g.measure.window.periods, g.measure.window.origin_offset]) if (has(t)) { use(t, 'on_goal'); hostOf.set(t, { node: g.id }); }
-    for (const t of [g.measure.window.periods, g.measure.window.origin_offset]) if (has(t)) windowOwner.set(t, g.id);
+    for (const t of [g.measure.target, g.measure.window?.periods, g.measure.window?.origin_offset]) if (has(t)) { use(t, 'on_goal'); hostOf.set(t, { node: g.id }); }
+    for (const t of [g.measure.window?.periods, g.measure.window?.origin_offset]) if (has(t)) windowOwner.set(t, g.id);
   }
   for (const l of model.limits) {
     use(l.quantity, 'node');
     for (const t of [l.bound, l.window.periods, l.window.origin_offset]) if (has(t)) { use(t, 'on_limit'); hostOf.set(t, { node: l.quantity }); }
     for (const t of [l.window.periods, l.window.origin_offset]) if (has(t)) windowOwner.set(t, l.id);
   }
-  for (const o of model.options) for (const s of o.sets) { use(s.quantity, 'node'); use(s.to, 'on_option'); hostOf.set(s.to, { node: o.id }); }
+  for (const o of model.options) for (const s of o.sets) { use(s.quantity, 'node'); if (has(s.to)) { use(s.to, 'on_option'); hostOf.set(s.to, { node: o.id }); } }
   for (const k of model.risks) { use(k.effect_on, 'node'); for (const t of [k.occurrence, k.severity]) { use(t, 'on_risk'); hostOf.set(t, { node: k.id }); } }
   const folded = (id: string) => { const u = uses.get(id); return u !== undefined && u.size === 1 && !u.has('node') && hostOf.has(id); };
 
+  const chances = new Set(model.risks.map((k) => k.occurrence));
   const display = (q: CanonicalQuantityT): string => {
     const unit = q.unit === '1' ? '' : ` ${q.unit}`;
     const owner = q.author === 'olumi' ? ', Olumi\'s estimate' : '';
     if (q.status === 'asked') return 'Not given yet';
     if (q.status === 'derived') return 'Worked out from its inputs';
     if (q.status === 'unknown' || q.status === 'unsupported' || q.status === 'not_applicable') return q.status.replace('_', ' ');
-    if (has(q.low) && has(q.high) && q.low !== q.high) return `${has(q.value) ? `about ${fmt(q.value)}, ` : ''}${fmt(q.low)}–${fmt(q.high)}${unit}${owner}`;
+    if (has(q.low) && has(q.high) && q.low !== q.high) {
+      // A range is not a law: the person's (or Olumi's) bounds, then Olumi's provisional reading of them, said as Olumi's.
+      const r = rangeReading(q.low, q.high, q.value, chances.has(q.id));
+      const law = r.kind === 'normal' ? `Olumi reads it as a spread around ${fmt(r.centre)} (sd ${fmt(r.sd)}), provisionally`
+        : r.kind === 'point' ? `Olumi uses ${fmt(r.value)}, provisionally` : 'Olumi cannot use it as a spread yet';
+      return `${has(q.value) ? `about ${fmt(q.value)}, ` : ''}${fmt(q.low)}–${fmt(q.high)}${unit}${owner}; ${law}`;
+    }
     return `${fmt(q.value ?? q.low!)}${unit}${owner}`;
   };
 
@@ -127,7 +135,7 @@ export function project(model: CanonicalModelT, compiled: CompileResult = compil
     const who = whoOf(o, o.id);
     const per = compiled.perOption.find((p) => p.option_id === o.id);
     const interventions: Rec = {};
-    for (const s of o.sets) { const to = Q.get(s.to); if (to) interventions[s.quantity] = { value: to.value, unit: to.unit, display: display(to), from_period: s.from_period }; }
+    for (const s of o.sets) { const to = has(s.to) ? Q.get(s.to) : undefined; if (to) interventions[s.quantity] = { value: to.value, unit: to.unit, display: display(to), from_period: s.from_period }; }
     nodes.push({
       id: o.id, kind: 'option', label: o.label, provenance: provenanceOf(who), ...quoteOf(o, o.id), ...participation(inCalc),
       ...(o.sets.length === 0 ? { is_baseline: true } : {}), ...(Object.keys(interventions).length ? { interventions } : {}),
