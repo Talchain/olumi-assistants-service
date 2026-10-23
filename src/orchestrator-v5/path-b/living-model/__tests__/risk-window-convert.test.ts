@@ -34,7 +34,7 @@ describe('Olumi occurrence is converted to the declared LM goal window', () => {
     const preventer = model.factors.find(f => f.id === 'dual_sourcing')!;
     preventer.limit = { comparator: '<=', value: 1, source: 'user', party: null, quote: 'Keep the stated bound' };
     const before = structuredClone(model), out = mapLivingModel(model);
-    expect(out.graph.goal_constraints).toContainEqual(expect.objectContaining({ node_id: 'dual_sourcing', value: 1 }));
+    expect((out.graph as Record<string, unknown>).goal_constraints).toContainEqual(expect.objectContaining({ node_id: 'dual_sourcing', value: 1 }));
     expect(out.graph.nodes.find(n => n.id === 'dual_sourcing')?.goal_rests_on).toEqual([{ id: 'dual_sourcing', reason: 'limit_model_disconnected' }]);
     expect(out.graph.edges.some(e => e.from === 'dual_sourcing' || e.to === 'dual_sourcing')).toBe(false);
     expect(model).toEqual(before);
