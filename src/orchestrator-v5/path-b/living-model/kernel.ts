@@ -2,7 +2,8 @@
  * THIN CORE KERNEL (20 Oct 2026): the ONE deterministic rule on the AI's living model, plus id formatting. PURE.
  *  · ATTRIBUTION ONLY. A user or party item keeps its source when its quote is found verbatim in the person's verified
  *    words; otherwise it is `unverified`, never Olumi's (a missing quote does not make Olumi the author). A quote that is
- *    found proves only who said it, not that the figure, sign or certainty follows from it: those stay with the model.
+ *    found proves only who said it, not that the figure, sign or certainty follows from it. A unitful figure absent from
+ *    the quote stays unverified independently; the native core still owns its interpretation, sign and certainty.
  *    An item carried over from the SAVED model UNCHANGED (same id, same content, same attribution) keeps it: it was checked
  *    when it was saved, and words that have since left the conversation window never downgrade it. A changed item is new.
  *  · PER-FIGURE AUTHORSHIP (21 Oct, buddy SIMPLER). Olumi's estimate (`estimate_by: 'olumi'`) is only of a WHOLLY missing
@@ -107,7 +108,7 @@ function guarded<T extends Fig>(next: T, before: Fig | undefined, keys: readonly
 }
 /** An option's own attribution is its words, not its settings: each setting carries its own (as a figure does). */
 const optionItself = <T extends { settings: unknown }>({ settings: _settings, ...rest }: T): Omit<T, 'settings'> => rest;
-/** The item with its Olumi-estimated figures put back as saved: equal to the saved item when ONLY an estimate was added. */
+/** Put the independent figure back as saved: its estimate/unknown author never erases unchanged human item words. */
 function withoutEstimates(item: Record<string, any>, before: Record<string, any> | undefined): Record<string, any> | undefined {
   if (before === undefined) return undefined;
   let changed = false;
@@ -115,7 +116,7 @@ function withoutEstimates(item: Record<string, any>, before: Record<string, any>
   const restore = (key: 'figure' | 'effect' | 'occurrence') => {
     const now = key === 'figure' ? item : item[key];
     const was = key === 'figure' ? before : before[key];
-    // Olumi's estimate where the source gave none, or a revision of Olumi's own earlier estimate: never the item's words.
+    // An independently unknown figure, or Olumi's estimate where the source gave none: never a new author for the item's words.
     if (!['olumi', 'unverified'].includes(now?.estimate_by) || was === undefined
       || (now.estimate_by === 'olumi' && given(was) && was.estimate_by == null)) return;
     changed = true;
@@ -195,14 +196,16 @@ export function applyKernel(model: LivingModelT, verifiedWords: readonly string[
         // The current level has its own quote. The aim's target/brief quote is never replaced by a later correction.
         const q = t.current_quote == null ? '' : plain(t.current_quote);
         const keptLevel = keptCurrent(a.id, t);
-        const verifiedLevel = t.current_source !== 'unverified' && t.current !== null && q !== ''
+        const verifiedLevel = t.current_source === 'user' && t.current !== null && q !== ''
           && quoteContainsFigure(q, t.current, t.current_unit ?? t.unit) && words.some(w => w.includes(q));
         if (keptLevel || verifiedLevel) {
           const chat = keptLevel && before?.said_in === 'chat' || verifiedLevel && briefWords !== null && !briefWords.includes(q);
           return { ...out, target: { ...t, current_source: 'user' as const, ...(chat ? { said_in: 'chat' as const } : {}) } };
         }
-        if (t.current_source === 'user' || t.current_quote != null) {
-          if (t.current_source !== 'unverified') relabelled.push({ id: `${a.id}:current`, was: 'user' });
+        const inheritedWithoutFigure = t.current !== null && ['user', 'party'].includes(out.source)
+          && !kept.has(attributionKey(a.id, a)) && !quoteContainsFigure(out.quote, t.current, t.current_unit ?? t.unit);
+        if (t.current_source === 'user' || t.current_quote != null || inheritedWithoutFigure) {
+          if (t.current_source !== 'unverified') relabelled.push({ id: `${a.id}:current`, was: t.current_source === 'user' ? 'user' : out.source });
           return { ...out, target: { ...t, current_source: 'unverified' as const } };
         }
         return { ...out, target: t };

@@ -41,6 +41,28 @@ describe('B3: item words and each figure retain their own author', () => {
     expect(state(out, 'g')).not.toHaveProperty('source');
   });
 
+  it('omitting the new current quote/source never makes an unstated changed level the human aim’s figure; old saved forms still read unchanged', () => {
+    const saved = mrr(), next = mrr(), aim = next.aims.find(a => a.id === 'mrr')!;
+    saved.aims.find(a => a.id === 'mrr')!.target!.current = null;
+    expect(aim.target).not.toHaveProperty('current_quote');
+    const out = applyKernel(next, [aim.quote!], saved, aim.quote).model;
+    expect(out.aims.find(a => a.id === 'mrr')).toMatchObject({ source: 'user', target: { current: 50000, current_source: 'unverified' } });
+    expect(state(out, 'mrr')).not.toHaveProperty('source');
+    const historic = mrr();
+    expect(applyKernel(historic, [], historic).model.aims).toEqual(historic.aims);
+  });
+
+  it('the host never promotes an unknown or inherited party current figure to the person just because its quote is present', () => {
+    for (const author of [null, 'unverified'] as const) {
+      const next = structuredClone(KNOWN_ANSWER);
+      Object.assign(next.aims[0]!, { source: 'party', party: 'Ops' });
+      Object.assign(next.aims[0]!.target!, { current: 70, current_source: author, current_quote: 'Ops says 70 units' });
+      const out = applyKernel(next, [next.aims[0]!.quote!, 'Ops says 70 units']).model;
+      expect(out.aims[0]).toMatchObject({ source: 'party', party: 'Ops', target: { current: 70, current_source: 'unverified' } });
+      expect(state(out, 'g')).not.toHaveProperty('source');
+    }
+  });
+
   it('the real 05745055 hiring £0 failure: a £200k budget quote does not author a £0 expenditure', () => {
     // Exact development living_model supplied by the DL, not held out; the limit and qualitative item are retained.
     const next = LivingModel.parse(JSON.parse(readFileSync(new URL('./fixtures/hiring-05745055-living-model.json', import.meta.url), 'utf8')));

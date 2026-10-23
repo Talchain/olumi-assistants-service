@@ -118,7 +118,8 @@ export const LivingAim = z.object({
       + "A count that has not started yet (sign-ups in the first six weeks after opening, orders next quarter) is 0 today by its own definition: set 0, "
       + "say why in plain words on the change's public_label (\"0 today: it counts from opening\"), and never ask for it. For a count that began earlier, never assume 0: keep a 0 the person states, and ask if it is unknown."),
     /** Today's figure has its own author: a canvas edit, or the person's verified current_quote. */
-    current_source: z.enum(['user', 'unverified']).nullable(),
+    current_source: z.enum(['user', 'unverified']).nullable().describe(
+      "'user' for today's figure the person supplied, with its exact current_quote (or an unchanged saved canvas edit). 'unverified' when its author is not established; never infer that a reported party's figure is the person's. Null uses the aim's attribution only where its quote supplies the figure."),
     current_quote: z.string().nullable().optional().describe(
       'Exact words supplying today\'s current level, especially a later chat correction (for example "£50k"). Keep the aim\'s own quote unchanged. Null when unknown; never invent a quote.'),
     /** Host-set only; a chat correction keeps its origin after save and conversation-window eviction. */
