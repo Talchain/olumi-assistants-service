@@ -7,7 +7,7 @@ import { HOST_SCIENCE_AND_SOURCE_RULES, HOST_TOOL_CONTRACT } from '../coach-rout
 import { createHash } from 'node:crypto';
 import * as drafting from '../../path-b/drafting-guidance.js';
 import * as coreInstructions from '../../core-route/instructions.js';
-import { COMPLETION_PREFIX, DRAFTING_INSTRUCTIONS } from '../../model-program-turn/prompt.js';
+import { DRAFTING_INSTRUCTIONS } from '../../model-program-turn/prompt.js';
 
 const { CORE_DRAFTER_RULES } = drafting;
 
@@ -68,10 +68,9 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
 
   it('THE PROMPTS (DL 22 Oct, priority change): the coach\u2019s reply rules and the drafter\u2019s rules, adapted as ruled; the old constants are gone', () => {
     expect(createHash('sha256').update(CORE_REPLY_RULES, 'utf8').digest('hex')).toBe('9607f2b0d95df9e7be7e040c975cd13a12ba7f60120d39c8c5fab6d2016d87dc'); // 23 Oct (ALPHA): the reply rules for the model program; P1: at most three questions a reply, each once.
-    // The model-program drafter's text and its completion request (23 Oct, P1–P5: three questions at most, every option reaches
+    // The model-program drafter's text (23 Oct, P1–P5: three questions at most, every option reaches
     // every measured goal, a deadline is its goal's window, options named in full). Prompt text changes only with this pin.
     expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('d060e9271d3fd3e004783da38a8680cf81f81b81f35ff75344c11b1070cd1a3c');
-    expect(createHash('sha256').update(COMPLETION_PREFIX, 'utf8').digest('hex')).toBe('492719690cf71ab3408d0d6c43b52f2c34bc9f72690b7fa776d2ba4ad569214c');
     expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('bed04fc58a01dbd02d8f5c8aa6ef171731a356c1cde47a85e0cd64be35416653'); // 23 Oct (DL 93d79c3e, C2 double prime): a definition's parts are factors with levels, never another definition; a STATED per-unit effect is a sized link. 22 Oct: every stated goal saved in their words, never approximated (Claude r1 on #3670); + a calendar date is Olumi's labelled reading
     // The retired constants are gone from both modules: no route can send the accreted text again.
     for (const name of ['CORE_REPLY_INSTRUCTION', 'CORE_RESPONSE_DISCIPLINE', 'CORE_NEXT_STEP']) expect(Object.keys(coreInstructions), name).not.toContain(name);
