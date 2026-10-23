@@ -25,6 +25,7 @@ const OUT = process.env.MP_ACCEPT_OUT ?? '';
 
 // ── per-scenario in-memory stores ──────────────────────────────────────────────────────────────────────────────────────
 const persisted = new Map<string, Json>();
+const snapshots = new Map<string, { graph: Json; brief: string }>();
 const registered = new Map<string, number>();
 const rowsOf = new Map<string, Map<string, any>>();
 const paused = new Map<string, any>();
@@ -46,7 +47,9 @@ const store = {
   readMostRecentPendingActions: vi.fn(async (sid: string) => [...rows(sid).values()].filter((r) => !String(r.turn_id).endsWith(':claim')).at(-1)?.pending_actions ?? []),
   releaseTurnClaim: vi.fn(async (sid: string, id: string, hash: string) => { if (rows(sid).get(id)?.request_hash === hash) rows(sid).delete(id); }),
   readAnalysisInvalidatedAt: vi.fn(async () => null),
-  readExistingScenario: vi.fn(async () => null),
+  // The scenario read's snapshot, for the REAL read route (`readShapedOf`): the stored graph as the register persisted it.
+  readExistingScenario: vi.fn(async (sid: string) => { const g = snapshots.get(sid); return g === undefined ? null : { userId: null, graph: g.graph, briefText: g.brief, analysisInvalidatedAt: null, revision: 1 }; }),
+  readScenarioRunAnalysisFactsFor: vi.fn(async () => ({ facts: [], total_count: 0 })),
   append: vi.fn(async (write: Json) => {
     const r = rows(String(write.scenario_id)); const key = String(write.turn_id); const prior = r.get(key);
     if (prior !== undefined) return prior.request_hash === write.request_hash ? { id: prior.id, replayedPriorTurn: true as const } : { id: prior.id, priorTurnConflict: true as const };
@@ -71,30 +74,26 @@ function graphRead(sid: string): Json {
 }
 
 /**
- * The scenario read's body for a program graph, composed in process from the SAME functions the read route calls for one
- * (the register's persistence projection, the analysis hash, the stored Run's view, the canonical readiness builder, the
- * admission projection). Not the route itself: the route's own Run-fact reads have nothing to read for a program.
+ * The scenario read's body for a program graph from the REAL read route (`assist.v1.scenario-graph.ts`), in process, over the
+ * stored graph as the register's persistence projection writes it: the bytes DGAI's reader receives (schema `scenario_graph.v1`).
  */
-async function readShapedOf(): Promise<(sid: string, graph: Json, brief: string) => Json> {
+async function readShapedOf(): Promise<(sid: string, graph: Json, brief: string) => Promise<Json>> {
   const { projectCorePostimageForPersistence } = await import('../../src/orchestrator-v5/persisted-graph-projection.js');
-  const { reopenProgram } = await import('../../src/orchestrator-v5/model-program-turn/program-store.js');
-  const { buildCanonicalAnalysisReadyFromGraph } = await import('../../src/orchestrator/tools/analysis-ready-helper.js');
-  const { projectAnalysisAdmission } = await import('../../src/routes/analysis-admission-projection.js');
-  return (sid, saved, brief) => {
-    const graph = projectCorePostimageForPersistence(JSON.parse(JSON.stringify(saved))) as Json;
-    const identity = computeGraphIdentityHash(graph as never);
-    return { schema: 'scenario-graph-read.composed.v1', scenario_id: sid, graph, graph_present: true, graph_hash: hashOf(graph), content_hash: identity?.value ?? null,
-      graph_identity_hash: identity, brief_text: brief, analysis_state: null, analysis_result: null,
-      canonical_analysis_view: reopenProgram(graph)?.view ?? null,
-      current_read: { analysis_ready: buildCanonicalAnalysisReadyFromGraph(graph), run_state: null, computed_against_hash: null, current_analysis_hash: null, figures: [] },
-      analysis_admission: projectAnalysisAdmission(graph, true) };
+  const readRoute = (await import('../../src/routes/assist.v1.scenario-graph.js')).default;
+  const readApp = Fastify({ logger: false });
+  await readRoute(readApp);
+  await readApp.ready();
+  return async (sid, saved, brief) => {
+    snapshots.set(sid, { graph: projectCorePostimageForPersistence(JSON.parse(JSON.stringify(saved))) as Json, brief });
+    const r = await readApp.inject({ method: 'POST', url: `/assist/v1/scenarios/${sid}/graph`, payload: {} });
+    return { _read_status: r.statusCode, ...(r.json() as Json) };
   };
 }
 
 describe.skipIf(OUT === '')('model-program spike acceptance (live provider)', () => {
   let app: FastifyInstance;
   let reopenFresh: (graph: unknown) => any;
-  let readShaped: (sid: string, graph: Json, brief: string) => Json;
+  let readShaped: (sid: string, graph: Json, brief: string) => Promise<Json>;
   const STOP = process.env.MP_STOP ?? `${OUT}/STOP-429.txt`;
   const realFetch = globalThis.fetch;
   beforeAll(async () => {
@@ -180,7 +179,7 @@ describe.skipIf(OUT === '')('model-program spike acceptance (live provider)', ()
 
       let last = await post({ message: brief });
       const attempted = new Set<string>();
-      for (let k = 1; k <= 3; k += 1) {
+      for (let k = 1; k <= Number(process.env.MP_ANSWER_TURNS ?? '3'); k += 1) {
         if (existsSync(STOP)) break;
         const asks = ((last.model_program?.asks ?? []) as Json[]).filter((a) => a.feeds.length > 0 && !attempted.has(a.quantity_id));
         if (asks.length === 0 || last.model_program?.saved !== true) break;
@@ -193,7 +192,8 @@ describe.skipIf(OUT === '')('model-program spike acceptance (live provider)', ()
         if (fills.length === 0) break;
         last = await post({ message: fills.map((f: Json) => f.words).join(' '), model_program_answers: fills });
       }
-      const coaching = (last.model_program?.compile?.coaching ?? []) as Json[];
+      const storedRun = persisted.get(sid)?.living_model?.runs?.at(-1)?.result as Json | undefined;
+      const coaching = (storedRun?.compile?.coaching ?? []) as Json[];
       for (const c of coaching) qa.push({ turn: null, record_id: c.record_id, question: c.question, status: 'not_answerable_by_a_fill', kind: c.kind });
 
       // Cold reopen: the stored JSON alone, in a fresh module instance.
@@ -201,12 +201,13 @@ describe.skipIf(OUT === '')('model-program spike acceptance (live provider)', ()
       const cold = saved === undefined ? undefined : reopenFresh(JSON.parse(JSON.stringify(saved)));
       const reopen = cold === undefined ? { saved: false } : {
         saved: true, version: cold.program.canonical.version, seed: cold.program.seed,
-        canonical_bytes_identical: JSON.stringify(cold.program.canonical) === JSON.stringify(last.model_program?.canonical),
+        // The turn's payload no longer repeats the model; the stored program (as written) is what a cold reopen must give back.
+        canonical_bytes_identical: JSON.stringify(cold.program.canonical) === JSON.stringify(saved!.living_model?.canonical),
         view_identical: stableStringify(cold.view) === stableStringify(last.canonical_analysis_view),
       };
       const view = last.canonical_analysis_view as Json | null;
-      const optionLabel = new Map(((last.model_program?.canonical?.options ?? []) as Json[]).map((o) => [o.id, o.label]));
-      const chances = { per_option: (last.model_program?.chances ?? null) as Json[] | null, ...chancesFromView(view, optionLabel) };
+      const optionLabel = new Map(((saved?.living_model?.canonical?.options ?? []) as Json[]).map((o) => [o.id, o.label]));
+      const chances = { per_option: (storedRun?.chances ?? null) as Json[] | null, ...chancesFromView(view, optionLabel) };
       const calls = turns.reduce((a, t) => a + t.calls.length, 0) + operatorCalls.length;
       const rec = { arm: 'spike', id, rep, scenario_id: sid, at: new Date(t0).toISOString(), seconds: +((Date.now() - t0) / 1000).toFixed(1), facts_sheet: facts === null ? 'none' : `${facts.length} lines`,
         calls, usd: +(turns.reduce((a, t) => a + t.usd, 0) + operatorCalls.reduce((a, c) => a + c.usd, 0)).toFixed(4),
@@ -216,13 +217,13 @@ describe.skipIf(OUT === '')('model-program spike acceptance (live provider)', ()
         has_chance: hasChance(view), answer_turns: turns.filter((t) => t.kind === 'answer').length, compile_states: turns.map((t) => ({ kind: t.kind, ...(t.compile ?? { compiles: false }) })), chances, qa, operator_calls: operatorCalls, reopen, turns,
         final_saved: last.model_program?.saved ?? false };
       writeFileSync(file, JSON.stringify(rec, null, 1));
-      const model = last.model_program?.canonical ?? null;
+      const model = saved?.living_model?.canonical ?? null;
       if (model) {
         writeFileSync(`${OUT}/${id}-r${rep}.canonical.json`, JSON.stringify(model, null, 1));
-        writeFileSync(`${OUT}/${id}-r${rep}.readable.md`, renderCanonical(model, last.model_program?.compile ?? null));
+        writeFileSync(`${OUT}/${id}-r${rep}.readable.md`, renderCanonical(model, saved?.living_model?.runs?.at(-1)?.result?.compile ?? null));
       }
       writeFileSync(`${OUT}/${id}-r${rep}.view.json`, JSON.stringify(view, null, 1));
-      if (saved !== undefined) writeFileSync(`${OUT}/${id}-r${rep}.read.json`, JSON.stringify(readShaped(sid, saved, brief), null, 1));
+      if (saved !== undefined) writeFileSync(`${OUT}/${id}-r${rep}.read.json`, JSON.stringify(await readShaped(sid, saved, brief), null, 1));
       console.log(`${id}-r${rep}: ${rec.calls} calls · $${rec.usd} · ${rec.seconds}s · saved ${rec.final_saved} · reopen ${JSON.stringify(reopen)}`);
     };
 
