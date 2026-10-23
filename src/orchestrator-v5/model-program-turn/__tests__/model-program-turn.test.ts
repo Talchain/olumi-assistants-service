@@ -13,7 +13,7 @@ import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha256 } from '../../context/graph-hash.js';
 import { stableStringify } from '../../../orchestrator/context/stable-stringify.js';
 import { APPROXIMATE_FIGURE, type CanonicalModelT } from '../../model-program/canonical.js';
-import { compile } from '../../model-program/compile.js';
+import { compile, isStructuralConstant, normalise } from '../../model-program/compile.js';
 import { addMechanism, defineGoalMeasure, fillQuantity } from '../../model-program/answer.js';
 import { project } from '../../model-program/project.js';
 import { simulate } from '../../model-program/simulate/simulate.js';
@@ -611,6 +611,15 @@ describe('the model-program turn on the real core route', () => {
     expect(sm.quantities.find((x) => x.id === 'current_output')).toMatchObject({ author: 'person', status: 'asked', value: null, quote: null, question: 'What is "current output"?' });
     expect(sm.quantities.find((x) => x.id === 'months_per_year')).toMatchObject({ author: 'structure', status: 'known', value: 12 });
     expect(compile(sm, { sourceText: `${saved.brief}\n${words}` }).perGoal.find((g) => g.goal_id === 'increase_productivity')!.asks).toContain('current_output');
+    // Codex r5: 1 in unit "1" is no unit scale, so an unstated "current utilisation = 1" is not structural; 0/1 is, only as a
+    // live option's switch; 100 % (a unit's scale) still is.
+    const base = (measured as { model: CanonicalModelT }).model;
+    expect(isStructuralConstant(base, q('current_utilisation', '1', { author: 'structure', value: 1 }))).toBe(false);
+    expect(isStructuralConstant(base, q('tech_leads_hired', 'tech_lead', { author: 'structure', value: 1 }))).toBe(true);
+    expect(isStructuralConstant(base, q('percent_scale', '%', { author: 'structure', value: 100 }))).toBe(true);
+    const util = addMechanism(base, JSON.parse(reply((d) => { d.quantities.push(q('current_utilisation', '1', { author: 'structure', value: 1 })); })) as CanonicalModelT,
+      'features_shipped_per_month', new Set(['features_shipped_per_month']), () => false);
+    expect((util as { model: CanonicalModelT }).model.quantities.find((x) => x.id === 'current_utilisation')).toMatchObject({ status: 'asked', author: 'person', value: null });
     // Refused whole: a note naming a record that is not there (its sentence goes back for the drafter's two repairs first).
     await noCompletion('dangling note', reply((m) => { m.assumptions[m.assumptions.length - 1]!.concerns.push('no_such_record'); }), 3);
     // Only the measure this same answer created may be worked out: never a quantity already in the model.
@@ -910,6 +919,32 @@ describe('the model-program turn on the real core route', () => {
     expect((persisted!.living_model.canonical as CanonicalModelT).quantities.find((x) => x.id === 'extra_per_oven'))
       .toMatchObject({ value: 110, low: 80, high: 120, range_kind: 'plausible', author: 'person', status: 'known' });
     expect(chance()).toBeGreaterThan(first);
+  });
+
+  it('Codex r4/r5 + buddy #3709: ONE structural admission on the first draft too — a figure labelled structure is Olumi\'s constant only by its meaning; any other is the person\'s question', () => {
+    const saved = JSON.parse(readFileSync(new URL('./hiring-alpha3.saved.json', import.meta.url), 'utf8')) as { brief: string; canonical: CanonicalModelT };
+    const m = JSON.parse(JSON.stringify(saved.canonical)) as CanonicalModelT;
+    m.quantities.push(q('current_output', 'feature/month', { author: 'structure', value: 12 }), q('months_per_year', 'month/year', { author: 'structure', value: 12 }),
+      q('current_utilisation', '1', { author: 'structure', value: 1 }), q('no_extra_output', 'feature/month', { author: 'structure', value: 0 }),
+      q('extra_output', 'feature/month', { kind: 'derived', status: 'derived', author: 'olumi' }),
+      q('one', '1', { author: 'structure', value: 1 }), q('growth_factor', '1', { kind: 'derived', status: 'derived', author: 'olumi' }));
+    m.relations.push({ form: 'definition', id: 'extra_output_rel', defines: 'extra_output', op: 'sum', parts: [{ id: 'no_extra_output', sign: 1 }, { id: 'current_output', sign: 1 }], author: 'olumi', quote: null, ...at },
+      { form: 'definition', id: 'growth_rel', defines: 'growth_factor', op: 'sum', parts: [{ id: 'one', sign: 1 }], author: 'olumi', quote: null, ...at });
+    const n = new Map(normalise(m).quantities.map((x) => [x.id, x] as const));
+    // Asked: an integer no one stated, and the identity 1 in unit "1".
+    for (const id of ['current_output', 'current_utilisation']) expect(n.get(id), id).toMatchObject({ author: 'person', status: 'asked', value: null, question: `What is "${id.replace(/_/g, ' ')}"?` });
+    // Kept: an option's switch (0 hires until an option sets one), a calendar conversion, and a 0 that is a sum's algebraic base.
+    // ... and 1 as a multiplicative identity in a sum ("1 + growth"), the shape the saved drafts use (structure-impact.txt).
+    for (const id of ['developers_hired', 'tech_leads_hired', 'months_per_year', 'no_extra_output', 'one']) expect(n.get(id), id).toMatchObject({ author: 'structure', status: 'known' });
+    // The compiler reads the question as one: what rests on it waits for the person, and no error asks the drafter to repair it.
+    const c = compile(m, { sourceText: saved.brief });
+    expect(c.errors).toEqual([]);
+    expect(c.asks.map((a) => a.quantity_id)).not.toContain('months_per_year');
+    // The capacity shape: a zero base of an effect stays structural.
+    const cap = bakery();
+    cap.quantities.push(q('no_extra', 'loaf/week', { author: 'structure', value: 0 }), q('extra_sales', 'loaf/week', { kind: 'derived', status: 'derived', author: 'olumi' }));
+    cap.relations.push({ form: 'effect', id: 'extra_rel', defines: 'extra_sales', base: 'no_extra', terms: [{ driver: 'ovens_added', coefficient: 'sold_per_oven', author: 'olumi', quote: null, ...at }], author: 'olumi', quote: null, ...at });
+    expect(normalise(cap).quantities.find((x) => x.id === 'no_extra')).toMatchObject({ author: 'structure', status: 'known', value: 0 });
   });
 
   it('DL 23 Oct (units on cards): every card that can hold a figure carries its quantity\'s own unit, a question\'s too; a worked-out card none', () => {

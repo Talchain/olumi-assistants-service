@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod-v4';
 import { CanonicalModel, type CanonicalModelT, type CanonicalQuantityT, type CanonicalRelationT, type CanonicalGoalT, type CanonicalLimitT } from '../canonical.js';
-import { compile, compileJson, NO_GOAL_QUESTION } from '../compile.js';
+import { compile, compileJson, normalise, NO_GOAL_QUESTION } from '../compile.js';
 import { project } from '../project.js';
 import { fillQuantity, setRangeKind } from '../answer.js';
 import { probeValue } from './probe.js';
@@ -347,7 +347,12 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(String(node.display_value)).not.toContain('Olumi');
     const hiding = bakery();
     hiding.quantities = hiding.quantities.map((q) => (q.id === 'costs' ? structure('costs', 'GBP/week', 612.5, 'Costs.') : q));
-    expect(compile(hiding).errors.map((e) => [e.code, e.items])).toEqual([['structure_value', ['costs']]]);
+    // Codex r4/r5 #3709: it cannot hide there — it is read as the person's question (never Olumi's fixed figure), and what
+    // rests on it waits for their answer.
+    const hid = compile(hiding);
+    expect(hid.errors).toEqual([]);
+    expect(normalise(hiding).quantities.find((q) => q.id === 'costs')).toMatchObject({ author: 'person', status: 'asked', value: null });
+    expect(hid.asks.map((a) => a.quantity_id)).toContain('costs');
   });
 
   it('finite numerical agreement cannot suppress an asked fact or invent its value', () => {

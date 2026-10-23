@@ -132,7 +132,7 @@ const ID_RE = /^[a-z][a-z0-9_]*$/;
 const has = <T>(x: T | null | undefined): x is T => x !== null && x !== undefined;
 const norm = (s: string) => s.toLowerCase().replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[–—]/g, '-').replace(/\s+/g, ' ').trim();
 const direction = (cmp: string) => (cmp.startsWith('>') ? 'up' : 'down');
-export const isPowerOfTen = (v: number) => v > 0 && Math.abs(Math.log10(v) - Math.round(Math.log10(v))) < 1e-12;
+const isPowerOfTen = (v: number) => v > 0 && Math.abs(Math.log10(v) - Math.round(Math.log10(v))) < 1e-12;
 
 /** Schema-check unknown JSON (the AI's raw output), then compile. A schema failure is an error the AI can act on. */
 export function compileJson(input: unknown, opts: { sourceText?: string } = {}): CompileResult {
@@ -185,8 +185,44 @@ export function normalise(model: CanonicalModelT): CanonicalModelT {
       return { ...s, to: id, value: null, low: null, high: null, range_kind: null, question: null };
     }),
   }));
-  return extra.length ? { ...model, quantities: [...model.quantities, ...extra], options } : model;
+  const named = extra.length ? { ...model, quantities: [...model.quantities, ...extra], options } : model;
+  // A figure labelled structure that is no structural constant ("current output = 12", stated by no one) is the person's
+  // to give: read as their question, never as Olumi's fixed figure (Codex r4/r5 #3709; `isStructuralConstant`).
+  const asked = named.quantities.map((q) => (q.author === 'structure' && q.kind === 'fact' && q.status === 'known' && has(q.value) && !has(q.low) && !has(q.high)
+    && !isStructuralConstant(named, q) ? structureAsked(q) : q));
+  return asked.some((q, i) => q !== named.quantities[i]) ? { ...named, quantities: asked } : named;
 }
+
+/**
+ * THE STRUCTURAL ADMISSION, shared by the first draft (here, in `normalise`) and mechanism completion (`answer.ts`): a
+ * figure is a structural constant only by its declared meaning, never because it looks like one (an integer):
+ *  · an exact calendar conversion (12 month/year, 52 week/year);
+ *  · a power of ten that IS its unit's scale (100 %, 1000 g/kg, 100 % per customer/prospect: the constant times its unit's
+ *    scale is exactly 1), never the identity 1;
+ *  · 0 or 1 on a quantity an option switches (what it sets, or its switched-on figure);
+ *  · 0 as an additive identity: an effect's base, a part of a sum, a stock's start ("nothing extra yet");
+ *  · 1 as a multiplicative identity: an effect's base (an unchanged multiplier, an index of today), a part of a sum
+ *    ("1 + growth"), or the "per one" a product divides by ("one customer").
+ * Everything a draft labelled structure in batches 1–4 meets one of these (scratchpad/s3/structure-impact.txt); a figure
+ * no one stated that meets none ("current output = 12", an unused "current utilisation = 1") is the person's question.
+ */
+export function isStructuralConstant(model: CanonicalModelT, q: CanonicalQuantityT): boolean {
+  const u = parseUnit(q.unit);
+  if (!has(q.value) || !u.ok) return false;
+  const v = q.value;
+  if (isCalendarConversion(v, u.unit)) return true;
+  if (v !== 1 && isPowerOfTen(v) && Math.abs(v * u.unit.scale - 1) < 1e-9) return true;
+  if ((v === 0 || v === 1) && model.options.some((o) => o.sets.some((s) => s.quantity === q.id || s.to === q.id))) return true;
+  const used = (as: (r: CanonicalModelT['relations'][number]) => boolean) => model.relations.some(as);
+  const base = (r: CanonicalModelT['relations'][number]) => r.form === 'effect' && r.base === q.id;
+  const sumPart = (r: CanonicalModelT['relations'][number]) => r.form === 'definition' && r.op === 'sum' && r.parts.some((p) => p.id === q.id);
+  if (v === 0) return used((r) => base(r) || sumPart(r) || (r.form === 'stock' && r.start === q.id));
+  if (v === 1) return used((r) => base(r) || sumPart(r) || (r.form === 'definition' && r.op === 'product' && r.parts.some((p) => p.id === q.id && p.power === -1)));
+  return false;
+}
+/** A figure only the person can give, as their question. */
+export const structureAsked = (q: CanonicalQuantityT): CanonicalQuantityT => ({ ...q, kind: 'fact', status: 'asked', author: 'person', value: null, low: null, high: null,
+  range_kind: null, basis: null, quote: null, question: `What is "${q.label}"?` });
 
 /** A figure the person gave as approximate (the host's mark, `APPROXIMATE_FIGURE`): theirs, a point, a range asked for. */
 export const isApproximate = (q: CanonicalQuantityT): boolean => q.author === 'person' && q.basis === APPROXIMATE_FIGURE && q.status === 'known' && q.value !== null && q.low === null;
@@ -287,10 +323,8 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
     }
     if (R.has(q.id)) { err('relation_on_figure', `${n} has a relation ("${R.get(q.id)!.id}") but is marked ${q.status}; mark it derived with null figures, or remove the relation.`, [q.id, R.get(q.id)!.id]); continue; }
     if (q.author === 'structure') {
+      // Its meaning is checked in `normalise` (`isStructuralConstant`): one that is no structural constant is already a question.
       if (q.status !== 'known' || !has(q.value) || has(q.low)) err('structure_value', `${n} is a structural constant, so it is known with one exact figure and no range.`, [q.id]);
-      else if (!(Number.isInteger(q.value) || isPowerOfTen(Math.abs(q.value)) || (U.has(q.id) && isCalendarConversion(q.value, U.get(q.id)!)))) {
-        err('structure_value', `${n} is marked structure, but ${q.value} is not a structural constant (a whole count such as 0 or 1, a power of ten, or a calendar conversion); it is the person's figure or Olumi's ranged estimate.`, [q.id]);
-      }
       if (q.kind !== 'fact') err('structure_value', `${n} is a structural constant, so its kind is fact (a coefficient is a mechanism's size, never structural: the person's figure or Olumi's ranged estimate).`, [q.id]);
       continue;
     }
