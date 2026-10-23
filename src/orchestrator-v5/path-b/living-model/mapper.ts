@@ -555,7 +555,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
         if (!setsFactor.has(f.id) && f.low! < value && value < f.high!
           && ((f.low! < 0 && f.high! > 0) || Math.abs(value) >= 2 * spread.std)) {
           Object.assign(node.observed_state as Rec, { std, std_source: 'olumi',
-            range_basis: { low: f.low, high: f.high, source: figureBy(f, f).source } });
+            range_source: figureBy(f, f).source });
           (node.observed_state as Rec).uncertainty_defaults = [{ code: REPAIR_CODES.CLAMP_STD_MINIMUM, layer: 'cee',
             field_path: `nodes[${f.id}].observed_state.std`, before: null, after: std, severity: 'info',
             reason: bare

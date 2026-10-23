@@ -167,11 +167,8 @@ export const ObservedStateV3 = z.object({
    * restated, and that module explains why it has one member.
    */
   stated_role: z.enum(OBSERVED_STATE_STATED_ROLES).optional(),
-  /** The stated bounds behind an Olumi-converted spread. Independent of the centre's source and std_source. */
-  range_basis: z.object({
-    low: z.number().finite(), high: z.number().finite(),
-    source: z.enum(['user', 'party', 'olumi', 'unverified']),
-  }).strict().refine(r => r.low < r.high).optional(),
+  /** Author of the stated range converted into std, independent of the derived centre and std_source. */
+  range_source: z.enum(['user', 'party', 'olumi', 'unverified']).optional(),
   /** Factor type classification for downstream enrichment */
   factor_type: FactorTypeV3.optional(),
   /** 1-2 short phrases explaining sources of epistemic uncertainty */

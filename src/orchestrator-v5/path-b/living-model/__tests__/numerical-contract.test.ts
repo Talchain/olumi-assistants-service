@@ -81,11 +81,14 @@ describe('B1: quantity-owned frames and honest range conversion', () => {
       const graph = GraphV3.parse({ ...mapLivingModel(m).graph, living_model: m });
       const state = node(graph, 'capacity').observed_state;
       expect(state.std_source).toBe('olumi'); // PLoT must still map this to ISL spread_source: template.
-      expect(state.range_basis).toEqual({ low: 10, high: 30, source });
+      expect(state.range_source).toBe(source);
       const author = source === 'user' ? 'user' : source === 'olumi' ? 'olumi' : 'unattributed';
       const claim = goalChanceDriverOf(record, 'push', graph, { factor_evppi: [{ factor_id: 'capacity', spread_source: 'template' }] });
       expect('driver' in claim ? claim.driver.authored_by : claim).toBe(author);
       expect(state.uncertainty_defaults[0].reason).toContain('Olumi');
+      const noModel = { ...graph, living_model: undefined };
+      const unbound = goalChanceDriverOf(record, 'push', noModel, {});
+      expect('driver' in unbound ? unbound.driver.authored_by : unbound).toBe('unattributed');
       const changed = structuredClone(graph);
       node(changed, 'capacity').observed_state.std *= 2;
       const rejected = goalChanceDriverOf(record, 'push', changed, {});
