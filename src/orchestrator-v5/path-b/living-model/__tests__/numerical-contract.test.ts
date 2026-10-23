@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { LivingModel } from '../../../../schemas/living-model.js';
 import { describe, expect, it } from 'vitest';
 import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import { goalChanceDriverOf } from '../../../goal-target/goal-chance-driver.js';
@@ -32,6 +34,22 @@ describe('B1: quantity-owned frames and honest range conversion', () => {
     expect((next.strength as Rec).mean * node(b.graph, 'g').goal_threshold_cap / f.observed_state.cap).toBeCloseTo(200, 12);
     expect(before.factors).toEqual(m.factors);
     expect(before.options).toEqual(m.options);
+  });
+
+  it('Paul’s actual 459f8bde MRR model retains the £49→£59 frame, natural effect and £20k budget', () => {
+    // User-provided export SHA256 95d5526063aa9482e65328cab41380c058cefa7518e4d296646587a67ad69192.
+    // Exact saved living_model only (no user/session identifiers or responses); this is a development regression.
+    const m = LivingModel.parse(JSON.parse(readFileSync(new URL('./fixtures/mrr-459f8bde-living-model.json', import.meta.url), 'utf8')));
+    const before = structuredClone(m), out = mapLivingModel(m);
+    const price = node(out.graph, 'price'), edge = out.graph.edges.find(e => e.id === 'price_mrr')!;
+    expect(price.observed_state).toMatchObject({ raw_value: 49, cap: 59 * 1.25, source: 'brief_extraction' });
+    expect(node(out.graph, 'features_price').interventions.price.raw_value).toBe(59);
+    expect((edge.strength as Rec).mean * out.frames.get('mrr')!.cap / out.frames.get('price')!.cap).toBeCloseTo(300, 12);
+    expect(convertingOlumiEstimate(edge, out.graph, 'mrr')).toBe(true);
+    expect((out.graph as Rec).goal_constraints).toContainEqual(expect.objectContaining({ node_id: 'spend', value: 20000, value_frame: 'level' }));
+    expect(node(out.graph, 'spend').observed_state.cap).toBeGreaterThanOrEqual(20000);
+    expect(out.withheld).not.toContainEqual({ id: 'spend', reason: 'limit_not_in_slice' });
+    expect(m).toEqual(before); // The churn aim, conditions, risk, quotes and authorship are not simplified away.
   });
 
   it('a limit participates in its own numerical frame before link conversion, without changing the limit or figure', () => {
