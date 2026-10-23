@@ -126,8 +126,9 @@ describe('C1b: every aim reading that withholds the goal\'s chance is a fix or a
     const stay = withAim({ comparator: '<=', value: 100, current: 70 });
     stay.aims[0] = { ...stay.aims[0]!, ...olumi };
     expect(check(stay)).toEqual([{ code: 'stay_within_base_not_theirs', items: ['g'], ask: true }]);
+    // Since B2a a second FIGURED aim is a target of its own; one with no figure stays out of the slice.
     const two = structuredClone(KNOWN_ANSWER);
-    two.aims.push({ ...two.aims[0]!, id: 'g2', text: 'Another aim' });
+    two.aims.push({ ...two.aims[0]!, id: 'g2', text: 'Another aim', target: { ...two.aims[0]!.target!, value: null } });
     expect(mapLivingModel(two).withheld.map((w) => w.reason)).toEqual(['aim_not_in_slice']);
     expect(check(two)).toEqual([]);
   });
