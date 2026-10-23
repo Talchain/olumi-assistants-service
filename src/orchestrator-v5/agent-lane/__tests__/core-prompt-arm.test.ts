@@ -111,22 +111,37 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       expect(b, gone).not.toContain(gone);
   });
 
-  it('ALPHA (S3 contract, DL-3.md 14:2xZ): the program tools\u2019 descriptions, which S3 imports: results only in the Run\u2019s recorded words, per option, per goal and joint; every edit op described', () => {
+  it('ALPHA (S3 contract as emitted at 2b419138, DL-3.md 15:0xZ): the program tools\u2019 descriptions, which S3 imports: results only in the Run\u2019s recorded words at their actual paths, per option, per goal and joint; every edit op described', () => {
     const { PROGRAM_TOOL_DESCRIPTIONS: d } = coreInstructions;
     expect(Object.keys(d)).toEqual(['read_canonical_context', 'propose_change', 'apply_change', 'run_analysis']);
-    // Spelled out, not imported: the PL's per-goal + joint permission, and never a figure of the agent's own.
-    const words = 'Report results only in the Run\u2019s recorded words: each option\u2019s words (run.options[].words; where shown is false, they say why no chance is shown), '
-      + 'each goal\u2019s own words with each option\u2019s display for it (run.targets.per_target), the words for meeting every goal together or the line saying why that waits (run.targets.joint), '
-      + 'and its notes, thresholds and limit lines. Quote them; never a figure, chance, rounding, combination or ranking of your own.';
+    // Spelled out, not imported: the PL's per-goal + joint permission at the emitted paths, and never a figure of the agent's own.
+    const words = 'Report results only in the Run\u2019s recorded words: each option\u2019s words (run.options[].words; where shown is false, they say why no chance is shown); '
+      + 'each goal\u2019s own words with each option\u2019s display for it (run.goal_chance.targets.per_target[].words and its options[].display); '
+      + 'for meeting every goal together, run.goal_chance.targets.joint.words, or its line saying why that waits (run.goal_chance.targets.joint.line); '
+      + 'and run.goal_chance.notes, thresholds[].words, limits[].words with each option\u2019s display, and unchecked_limits[].words. '
+      + 'Quote them; never a figure, chance, rounding, combination or ranking of your own.';
+    // The run block as S3 emits it: { run_id, options[{ option_id, shown, words }], goal_chance: the Run's own block }.
+    const PATHS = ['run.options[].words', 'run.goal_chance.targets.per_target[].words', 'run.goal_chance.targets.joint.words',
+      'run.goal_chance.targets.joint.line', 'run.goal_chance.notes, thresholds[].words, limits[].words with', 'and unchecked_limits[].words'];
     for (const [name, text] of Object.entries(d)) {
       expect(text.split(words), name).toHaveLength(2);
+      for (const path of PATHS) expect(count(text, path), `${name}: ${path}`).toBe(1);
+      // The paths S3 no longer emits (14:2xZ): no description names them.
+      for (const gone of ['run.targets', 'run.notes', 'run.thresholds', 'run.limits', 'run.unchecked_limits']) expect(text, `${name}: ${gone}`).not.toContain(gone);
       for (const banned of ['recommend', 'best', 'winner', 'you should', '18 to 22']) expect(text.toLowerCase(), `${name}: ${banned}`).not.toContain(banned);
     }
+    // read_canonical_context returns model (as authored), earlier_versions, open_questions, coaching and run.
+    for (const field of ['its revision; model, the canonical model exactly as authored (', 'earlier_versions, how many earlier versions it has;',
+      'open_questions, each with what it feeds and the edit that answers it;', 'coaching, the questions that would give an aim a measure or a deadline;',
+      'and run, the stored Run, with current and engine_current.']) expect(d.read_canonical_context, field).toContain(field);
     for (const op of ['set_quantity:', 'set_range_kind:', 'set_goal_target:', 'add_option:', 'rename_option:']) expect(count(d.propose_change, op), op).toBe(1);
+    expect(d.propose_change).toContain('set_range_kind: answers an open question whose edit is set_range_kind,');
+    expect(d.propose_change).toContain('The result shows what the card would show (would_show).');
     expect(d.propose_change).toContain('A loose figure ("about 2,000") is their one figure, exactly as said, never a range Olumi adds; then ask what range they would put on it.');
     expect(d.propose_change).toContain('each quoting the person\u2019s exact words from what they wrote, never Olumi\u2019s paraphrase.');
     expect(d.apply_change).toContain('The approval is the card\u2019s, never a typed yes.');
-    expect(d.apply_change).toContain('already_saved: this same proposal was saved before; never save it again.');
+    expect(d.apply_change).toContain('saved: the receipt, the new revision and run, the Run. already_saved: this same proposal was saved before; never save it again.');
+    expect(d.run_analysis).toContain('Show the Run of the saved model as run: the stored Run when it is current for this model (stored true), otherwise a new Run, worked out and stored (stored false).');
     expect(d.run_analysis).toContain('Use it only when the person asks; a saved change already brings its Run.');
     // The descriptions ride the tool list, not the standing instructions (whose sent bytes the sha row above pins).
     expect(b).not.toContain(words);
