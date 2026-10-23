@@ -96,6 +96,8 @@ const FIX = {
   law: 'Give Olumi\'s link a direction, ends that are in the model, and a figure or range a law can be drawn from.',
   option: 'Give Olumi\'s option a setting on a factor, or a sized link of Olumi\'s from it.',
   target: 'Give Olumi\'s target one figure a Run can test: at least or at most it, never exactly equal and never a range.',
+  size: 'Size Olumi\'s link in the goal\'s own unit per one unit of what it comes from: both ends have their units, and the figure is '
+    + 'how much the goal\'s measure moves when the source rises by 1.',
 } as const;
 /** Each blocker's fix, or `ask` for the person's input. An unlisted code is said, never repaired. */
 const BLOCKER: Readonly<Record<string, keyof typeof FIX | 'ask'>> = {
@@ -106,7 +108,7 @@ const BLOCKER: Readonly<Record<string, keyof typeof FIX | 'ask'>> = {
   OPTION_NEEDS_ENCODING: 'option', OPTION_NEEDS_MAPPING: 'option', setting_not_convertible: 'option', MISSING_OPTION_VALUE: 'option',
   // The Run's own verdict on the target (`targetTestabilityOf`); a path's unsized link of Olumi's is Olumi's to size (DL 93d79c3e).
   missing_goal_baseline: 'ask', threshold_off_scale: 'ask', comparator_unscorable: 'target', threshold_unit_mismatch: 'unit',
-  goal_path_placeholder: 'law', goal_path_unsized: 'law',
+  goal_path_placeholder: 'size', goal_path_unsized: 'size',
   // Every aim reading that withholds the goal's chance reaches the loop: Olumi's is fixed, the person's asked (DL 93d79c3e, 00:48Z).
   exact_target_not_in_slice: 'target', target_range_not_in_slice: 'target', target_not_theirs: 'ask', change_base_invalid: 'ask',
   goal_level_not_admitted: 'ask', stay_within_base_not_theirs: 'ask',

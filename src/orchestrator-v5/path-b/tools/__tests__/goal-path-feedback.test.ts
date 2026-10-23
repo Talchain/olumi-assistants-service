@@ -15,17 +15,20 @@ import { mapLivingModel } from '../../living-model/mapper.js';
 import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import { projectCorePostimageForPersistence } from '../../../persisted-graph-projection.js';
 import { assessCanonicalAnalysisReadiness } from '../../../../orchestrator/tools/analysis-ready-helper.js';
-import { KNOWN_ANSWER } from '../../living-model/__tests__/fixtures.js';
+import { KNOWN_ANSWER as KNOWN } from '../../living-model/__tests__/fixtures.js';
 import { F1_CONTRADICTED, F1_DEFINED, F1_EXACT_LINKS, F1_OTHER_CAUSE } from '../../living-model/__tests__/track2-f1-identity.fixtures.js';
 import { OLUMI_CHANCE } from '../../living-model/__tests__/track2-f2-event-risk.fixtures.js';
 import { buildModel } from '../draft-tool.js';
 import { applyLivingChange, proposeLivingChange } from '../living-change.js';
 import { pathBTools, type ToolCallResult } from '../index.js';
+import { targetTestabilityOf } from '../../../admission/target-testability.js';
 import type { TraceRow } from '../outcome.js';
 import { blockersOf, corePostimage, KEPT_AS_REFUSED, personContentLost, REPAIR_CHANGE, REPAIR_DRAFT, REPAIRS, selfCheck, STILL_ASK, type Restructure } from '../goal-path.js';
 import type { Rec } from './fixtures.js';
 
 const SID = 'scn_1';
+/** The known answer with its factor's unit stated, as every factor has one (drafting rules): an Olumi link from it can be sized per unit. */
+const KNOWN_ANSWER: LivingModelT = { ...KNOWN, factors: KNOWN.factors.map((f) => ({ ...f, unit: f.unit ?? 'level' })) };
 const BRIEF = 'we need at least 100 units; today we are at 70. f is at 0.5. push f to 1, or we hold. each +1 in f adds 50 units on average, with a standard deviation of 10';
 const postimage = (m: LivingModelT): Rec => ({ ...mapLivingModel(m).graph, living_model: m });
 const PREREQ = 'only once the board signs off';
@@ -271,6 +274,47 @@ describe('THE READINESS SELF-CHECK: a draft a Run would withhold the goal\'s cha
     expect(calls).toHaveLength(1);
     expect(calls[0]![1]).toMatchObject({ outcome: 'refused', refusal: 'analysis_not_ready' });
     expect(calls[0]![1].check).toEqual({ blockers: [{ code: 'MISSING_FACTOR_LEVEL' }] });
+  });
+
+  it('DL 93d79c3e (C1): readiness says ready, the Run\'s own target verdict withholds: run_ready is false, Olumi\'s unsized link a size fix', () => {
+    // Olumi's link from a factor with no unit: readiness admits a Run, but the Run cannot size it per unit of f, so it withholds.
+    const unsized: LivingModelT = { ...structuredClone(KNOWN), links: [{ ...KNOWN.links[0]!, ...olumi }] };
+    const mapped = mapLivingModel(unsized);
+    expect(assessCanonicalAnalysisReadiness(projectCorePostimageForPersistence(corePostimage(mapped, unsized)) as never).blockingIssues).toEqual([]);
+    expect(blockersOf(unsized, selfCheck(unsized, mapped)).all).toEqual([{ code: 'goal_path_unsized', items: ['f_g'],
+      fix: expect.stringContaining('per one unit of what it comes from') }]);
+    // CONTRAST: the same link once f has its unit is sized, so nothing is said and a Run would show the chance.
+    const sized: LivingModelT = { ...structuredClone(KNOWN_ANSWER), links: [{ ...KNOWN_ANSWER.links[0]!, ...olumi }] };
+    expect(blockersOf(sized, selfCheck(sized, mapLivingModel(sized))).all).toEqual([]);
+  });
+
+  it('DL 93d79c3e (C1, replay corpus): a path failure on an identity\'s own edge is the engine\'s to judge, never said by the dry run', () => {
+    // Synthetic: the total is the person's stated base plus an extra; the extra is Olumi's product of staff × output each; an option
+    // adds one. The Run's ISL evaluation carries that product; before it, its operand edge reads unsized.
+    const by = { source: 'user' as const, party: null, quote: 'stated' };
+    const factor = (id: string, unit: string, value: number, extra: Rec = {}) => ({ estimate_by: null, kind: 'factor' as const, limit: null, id, label: id,
+      value, low: null, high: null, unit, defined_as: null, ...by, ...extra });
+    const m = structuredClone(KNOWN_ANSWER);
+    m.aims[0] = { ...m.aims[0]!, id: 'total', defined_as: { op: 'sum', of: ['base', 'extra'], ...by },
+      target: { ...m.aims[0]!.target!, quantity: 'units per week', unit: 'units per week', value: 100, current: 80 } };
+    m.factors = [factor('base', 'units per week', 80), factor('people', 'staff', 0), factor('each', 'units per staff per week', 20),
+      factor('extra', 'units per week', 0, { kind: 'outcome', defined_as: { op: 'product', of: ['people', 'each'], ...olumi } })] as LivingModelT['factors'];
+    m.options = [{ ...m.options[0]!, settings: [] }, { ...m.options[1]!, settings: [{ ...m.options[1]!.settings[0]!, factor_id: 'people', value: 1 }] }];
+    m.links = [];
+    const verdict = targetTestabilityOf(projectCorePostimageForPersistence(corePostimage(mapLivingModel(m), m)));
+    expect(verdict.kind === "not_testable" && verdict.failures.some((f) => f.precondition === "P5"), JSON.stringify(verdict)).toBe(true);
+    expect(blockersOf(m, selfCheck(m, mapLivingModel(m))).all.filter((b) => b.code.startsWith('goal_path'))).toEqual([]);
+  });
+
+  it('DL 93d79c3e (C1, 00:48Z): an aim reading that withholds the goal\'s chance reaches the loop: Olumi\'s "=" target is fixed, the person\'s asked', () => {
+    const exact = (by: 'olumi' | 'user'): LivingModelT => {
+      const m = structuredClone(KNOWN_ANSWER);
+      m.aims[0] = { ...m.aims[0]!, ...(by === 'olumi' ? olumi : {}), target: { ...m.aims[0]!.target!, comparator: '=' as never } };
+      return m;
+    };
+    const found = (m: LivingModelT) => blockersOf(m, selfCheck(m, mapLivingModel(m))).all.filter((b) => b.code === 'exact_target_not_in_slice');
+    expect(found(exact('olumi'))).toEqual([{ code: 'exact_target_not_in_slice', items: ['g'], fix: expect.stringContaining('at least or at most it') }]);
+    expect(found(exact('user'))).toEqual([{ code: 'exact_target_not_in_slice', items: ['g'], ask: true }]);
   });
 
   it('DL 93d79c3e (C1): a level the factor already holds (a bare range) is never asked for again; a factor with none is', () => {
