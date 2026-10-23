@@ -500,14 +500,14 @@ export default async function route(app: FastifyInstance) {
           // shares — not this slice's call to make.
           .send(buildErrorV1("BAD_INPUT", message, { code, ...details }, requestId));
 
-      const unavailable = () =>
+      const unavailable = (details: Record<string, unknown> = {}) =>
         reply
           .code(503)
           .send(
             buildErrorV1(
               "INTERNAL",
               "The graph could not be registered right now.",
-              {},
+              details,
               requestId,
             ),
           );
@@ -1319,7 +1319,9 @@ export default async function route(app: FastifyInstance) {
             },
             "Graph registration — refused by the turn fence; nothing written",
           );
-          if (!conflict) return unavailable();
+          // Still a retryable 503, but named: the fence refused BEFORE anything was written (an unclaimed or unreadable
+          // place), so CEE's own core write reports "refused, nothing written", never "may have saved" (`core-write.ts`).
+          if (!conflict) return unavailable({ code: "TURN_FENCE_REFUSED" });
           return reply
             .code(409)
             .send(

@@ -96,7 +96,10 @@ import { GRAPH_MAX_EDGES, GRAPH_MAX_NODES } from "../../config/graphCaps.js";
 import { resolveCeeRateLimit } from "../../cee/config/limits.js";
 import { RATE_BUCKET_REGISTRY } from "../../cee/config/limits.js";
 import { checkPersistedGraphInvariants } from "../../orchestrator-v5/persisted-graph-invariants.js";
-import { currentTurnFenceSlot, runWithTurnFence, TurnFenceRejectedError } from "../../orchestrator-v5/session/turn-fence.js";
+import { currentTurnFenceSlot, runWithTurnFence, TurnFenceRejectedError, unclaimedTurnFenceHandle, type TurnFenceHandle } from "../../orchestrator-v5/session/turn-fence.js";
+import { writeCorePostimage } from "../../orchestrator-v5/path-b/tools/core-write.js";
+import { mapLivingModel } from "../../orchestrator-v5/path-b/living-model/mapper.js";
+import { KNOWN_ANSWER } from "../../orchestrator-v5/path-b/living-model/__tests__/fixtures.js";
 import { registrationRequestHash, registrationTurnId } from "../../orchestrator-v5/graph-registration/registration-identity.js";
 
 
@@ -1274,7 +1277,75 @@ describe("register — the write is ordered by the turn fence", () => {
     const app = await buildApp();
     const res = await post(app, SID, { graph: IMPORTED, operation_id: OP });
     expect(res.statusCode).toBe(503);
+    expect(res.json().details?.code, "named: the fence refused before anything was written").toBe("TURN_FENCE_REFUSED");
     await app.close();
+  });
+});
+
+/**
+ * ⭐ AN HONEST CORE WRITE OUTCOME (Codex r2 on #3704). The core turn's own write (`writeCorePostimage`, the one core write) goes
+ * through THIS route, dispatched in-process as the core turn dispatches it (`runAsAgentSubturn`), under the turn's fence handle.
+ * The store double reproduces the commit's gate, keyed by the BOUND handle (`supabase-store.ts`: a null generation is refused
+ * `unclaimed` before any RPC; a stopped generation is refused in the transaction, OLTF1). A refused write wrote nothing, so the
+ * outcome is `refused`, never "it may have saved"; a 503 the fence did not decide stays unknown.
+ */
+describe("register → the core write: a fence refusal is 'refused, nothing written'", () => {
+  const SID = "3d9c2f1e-7b4a-4c8e-9f0d-1a2b3c4d5e6f";
+  const TURN = "c0de0000-0000-4000-8000-000000000001";
+  const graph = { ...mapLivingModel(KNOWN_ANSWER).graph, living_model: KNOWN_ANSWER } as Record<string, unknown>;
+  const stopped = new Set<number>();
+  const stored: unknown[] = [];
+  beforeEach(() => {
+    stopped.clear(); stored.length = 0;
+    // A first model on an empty scenario: create-only, so the write reaches the commit.
+    loadGraph.mockResolvedValue(null);
+    append.mockImplementation(async (write: { graph?: unknown }) => {
+      const handle = currentTurnFenceSlot()?.handle;
+      if (handle == null || handle.generation === null) {
+        throw new TurnFenceRejectedError("refused", { verdict: "unclaimed", generation: null, maxGeneration: null });
+      }
+      if (stopped.has(handle.generation)) {
+        throw new TurnFenceRejectedError("refused", { verdict: "stopped", generation: handle.generation, maxGeneration: handle.generation });
+      }
+      stored.push(write.graph);
+      return { id: "turn-1" };
+    });
+  });
+  const write = async (handle: TurnFenceHandle) => {
+    const app = await buildApp();
+    try {
+      const dispatch = async (path: string, body: unknown) => {
+        const res = await injectAsCeeWriter(app, { method: "POST", url: path, payload: body as Record<string, unknown> });
+        return { status: res.statusCode, json: res.json() as Record<string, unknown> };
+      };
+      return await runWithTurnFence(handle, () => writeCorePostimage({ dispatch }, {
+        scenarioId: SID, graph, operationId: "5b1e9c7a-2d4f-4a6b-8c0e-9f1a2b3c4d5e", expectedIdentity: null, ownVersion: async () => null,
+      }));
+    } finally {
+      await app.close();
+    }
+  };
+
+  it("RED: a core turn whose fence claim did not land (an unclaimed handle) → refused, and nothing is in the store", async () => {
+    const outcome = await write(unclaimedTurnFenceHandle(SID, TURN));
+    expect(append, "control: the write reached the commit's gate").toHaveBeenCalledTimes(1);
+    expect(outcome).toEqual({ status: "refused" });
+    expect(stored).toEqual([]);
+  });
+
+  it("a stopped core turn's write → refused, and nothing is in the store", async () => {
+    stopped.add(7);
+    const outcome = await write({ scenarioId: SID, turnId: TURN, generation: 7 });
+    expect(append, "control: the write reached the commit's gate").toHaveBeenCalledTimes(1);
+    expect(outcome).toEqual({ status: "refused" });
+    expect(stored).toEqual([]);
+  });
+
+  it("CONTRAST: a genuine transport 503 (the commit failed, the fence never decided) stays UNKNOWN", async () => {
+    append.mockRejectedValue(new Error("fetch failed: ECONNRESET"));
+    const outcome = await write({ scenarioId: SID, turnId: TURN, generation: 7 });
+    expect(append).toHaveBeenCalledTimes(1);
+    expect(outcome).toMatchObject({ status: "unknown", outcome: { status: "unavailable", reason: "not_confirmed", write: "unknown" } });
   });
 });
 

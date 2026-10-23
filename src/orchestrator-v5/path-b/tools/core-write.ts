@@ -62,6 +62,9 @@ export async function writeCorePostimage(deps: { readonly dispatch: InternalDisp
     return unknown('not_confirmed', { check: 'ack_status', status: reg.status });
   }
   if (reg.status >= 400 && reg.status < 500) return { status: 'refused' };
+  // The turn fence refused the write before it committed (an unclaimed or unreadable place): nothing was written. Every other
+  // 503 is a write whose outcome is not known.
+  if (reg.status === 503 && code === 'TURN_FENCE_REFUSED') return { status: 'refused' };
   if (reg.status !== 200) return unknown('not_confirmed', { check: 'ack_status', status: reg.status });
 
   // The response is THIS registration's receipt; history availability is not save verification.
