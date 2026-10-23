@@ -31,6 +31,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { z } from 'zod-v4';
 import { carriesQuoteConfirmation } from './quote-confirmation.js';
 
 /** One structural change. Deliberately the estate's existing op vocabulary. */
@@ -216,7 +217,28 @@ export interface StructuredProposal {
    * the card shows; the commit writes this model and the graph regenerated from it. Part of the id when present.
    */
   readonly living_model?: unknown;
+  /**
+   * A model program's card (simplify v1, A2): EVERY change the proposed model makes, each item's plain substance before and
+   * after, rendered from its data by CEE. Part of the id when present.
+   */
+  readonly changes?: readonly ProposalChange[];
 }
+
+/**
+ * One change on a model program's card: what it is, what it was and what it becomes, and whose it is. THE contract the card
+ * reads (DGAI proposalFields.ts `proposalChangeSchema`, the same fields and limits): every entry CEE emits is parsed with it
+ * before a proposal is frozen, so the card never has to drop one.
+ */
+export const ProposalChangeSchema = z.object({
+  id: z.string().min(1),
+  kind: z.enum(['quantity', 'relation', 'goal', 'option', 'risk', 'record']),
+  action: z.enum(['add', 'change', 'remove']),
+  label: z.string().min(1),
+  before: z.string().nullable(),
+  after: z.string().nullable(),
+  author: z.enum(['person', 'olumi']),
+});
+export type ProposalChange = Readonly<z.infer<typeof ProposalChangeSchema>>;
 
 /** A typed value read from the user's own phrase, as the approve button shows it. */
 export interface ProposalInterpretation {
@@ -268,6 +290,7 @@ export function computeProposalId(c: ProposalContent): string {
     ...(c.interpretation === undefined ? [] : [c.interpretation]),
     ...(c.base_model_identity === undefined ? [] : [['base_model_identity', c.base_model_identity]]),
     ...(c.living_model === undefined ? [] : [['living_model', c.living_model]]),
+    ...(c.changes === undefined ? [] : [['changes', c.changes]]),
   ]));
   return 'prop_' + createHash('sha256').update(canonical).digest('hex').slice(0, 32);
 }

@@ -134,11 +134,11 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     for (const field of ['its revision; model, the canonical model exactly as authored (', 'earlier_versions, how many earlier versions it has;',
       'open_questions, each with what it feeds and the edit that answers it;', 'coaching, the questions that would give an aim a measure or a deadline;',
       'and run, the stored Run, with current and engine_current.']) expect(d.read_canonical_context, field).toContain(field);
-    for (const op of ['set_quantity:', 'set_range_kind:', 'set_goal_target:', 'add_option:', 'rename_option:', 'define_goal_measure:']) expect(count(d.propose_change, op), op).toBe(1);
-    expect(d.propose_change).toContain('set_range_kind: answers an open question whose edit is set_range_kind,');
+    // Simplify v1 (S2): the change in words and the ids to remove; Olumi's drafter writes the whole model; no op set.
+    for (const gone of ['set_quantity', 'set_range_kind', 'set_goal_target', 'add_option', 'rename_option', 'define_goal_measure', 'ops']) expect(d.propose_change, gone).not.toMatch(new RegExp(`\\b${gone}\\b`));
+    expect(d.propose_change).toContain('give request, the whole change in plain words with their exact words for every figure of theirs, and remove, the ids from read_canonical_context of anything they asked to remove ([] for none).');
+    expect(d.propose_change).toContain('Olumi\u2019s drafter writes the updated model, and the card shows every change, before and after.');
     expect(d.propose_change).toContain('The result shows what the card would show (would_show).');
-    expect(d.propose_change).toContain('A loose figure ("about 2,000") is their one figure, exactly as said, never a range Olumi adds; then ask what range they would put on it.');
-    expect(d.propose_change).toContain('each quoting the person\u2019s exact words from what they wrote, never Olumi\u2019s paraphrase.');
     expect(d.apply_change).toContain('The approval is the card\u2019s, never a typed yes.');
     expect(d.apply_change).toContain('saved: the receipt, the new revision and run, the Run. already_saved: this same proposal was saved before; never save it again.');
     expect(d.run_analysis).toContain('Show the Run of the saved model as run: the stored Run when it is current for this model (stored true), otherwise a new Run, worked out and stored (stored false).');

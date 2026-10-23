@@ -222,13 +222,10 @@ export const PROGRAM_TOOL_DESCRIPTIONS = {
     + 'earlier_versions, how many earlier versions it has; open_questions, each with what it feeds and the edit that answers it; coaching, the questions that would give an aim a measure or a deadline; '
     + 'and run, the stored Run, with current and engine_current. Use these saved facts and ids, never an earlier reply. A Run that is not current describes an earlier model: say so, never present it as current. ' + RUN_WORDS_RULE,
   propose_change:
-    'Prepare a change to the saved model for the person to approve on its card; nothing is saved until they do. Give ops in order, with ids from read_canonical_context, each quoting the person’s exact words from what they wrote, never Olumi’s paraphrase. '
-    + 'set_quantity: one input figure or range, as an answer to an open question or a corrected figure (a link’s strength, a goal’s target or an option’s own value, by its id). A range is theirs only when their words state both ends. '
-    + 'A loose figure ("about 2,000") is their one figure, exactly as said, never a range Olumi adds; then ask what range they would put on it. '
-    + 'set_range_kind: answers an open question whose edit is set_range_kind, whether the ends of a range they gave are hard bounds or a rough span, keeping their figures. '
-    + 'set_goal_target: the figure a goal aims at. add_option: an option they name, with what it changes and from which period. rename_option: an option’s name. '
-    + 'define_goal_measure: when they say how an aim with no measure is measured (a coaching question’s record_id), the quantity it is about (its id, or a new one by the name and unit they give), the comparison, and the target and deadline only as their words state them; a target or deadline already in the model is given by its id; what they did not state stays null and is asked; anything else their words state that this measure does not cover (another target, a deadline the model cannot hold) goes in leaves_out, copied exactly, and is named beside the chance. '
-    + 'Olumi then proposes, on the same card, what works that measure out, each part marked as Olumi’s. Put every edit in ONE propose_change: a second proposal in the same turn is refused. '
+    'Prepare a change to the saved model for the person to approve on its card; nothing is saved until they do. Only when they ask to change the model (an answer, a correction, a new item or a removal): '
+    + 'give request, the whole change in plain words with their exact words for every figure of theirs, and remove, the ids from read_canonical_context of anything they asked to remove ([] for none). '
+    + 'Olumi’s drafter writes the updated model, and the card shows every change, before and after. Anything left out without being listed, or a figure of theirs not in their words, is refused. '
+    + 'Put the whole change in ONE propose_change: a second proposal in the same turn is refused. '
     + 'Never invent a figure for them, and never put an Olumi estimate in as theirs. The result shows what the card would show (would_show). ' + RUN_WORDS_RULE + ' '
     + 'A refusal says why (their words do not contain the quote; the edit does not fit; the changed model does not calculate, with the reasons; nothing would change): say it plainly and ask for what is needed.',
   apply_change:

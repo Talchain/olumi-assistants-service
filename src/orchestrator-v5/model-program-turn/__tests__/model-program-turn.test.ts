@@ -12,16 +12,17 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha256 } from '../../context/graph-hash.js';
 import { stableStringify } from '../../../orchestrator/context/stable-stringify.js';
-import { APPROXIMATE_FIGURE, type CanonicalModelT } from '../../model-program/canonical.js';
+import { APPROXIMATE_FIGURE, type CanonicalModelT, type CanonicalQuantityT } from '../../model-program/canonical.js';
 import { compile, isStructuralConstant, normalise } from '../../model-program/compile.js';
-import { addMechanism, defineGoalMeasure, fillQuantity } from '../../model-program/answer.js';
 import { project } from '../../model-program/project.js';
 import { simulate } from '../../model-program/simulate/simulate.js';
 import { CANONICAL_JSON_SCHEMA, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX } from '../prompt.js';
 import { evaluateCanonical, seedOf, RUN_DRAWS } from '../evaluate.js';
 import { programReadOf, reopenProgram, savedProgramOf, sourceTextOf } from '../program-store.js';
-import { applyProgramChange, ProgramChangeParams, proposeProgramChange, readProgramContext, runProgram } from '../program-tools.js';
-import { ProposalStore } from '../../agent-lane/proposal.js';
+import { applyCanvasFigure, applyProgramChange, ProgramChangeParams, proposeProgramChange, readProgramContext, runProgram } from '../program-tools.js';
+import { proposalPendingAction } from '../../agent-lane/durable-proposal.js';
+import { proposalFieldsWire, proposalRecord } from '../../agent-lane/proposal-object/record.js';
+import { ProposalStore, type ProposalChange } from '../../agent-lane/proposal.js';
 import { withNewRun } from '../program-save.js';
 import { projectCorePostimageForPersistence } from '../../persisted-graph-projection.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
@@ -92,6 +93,10 @@ let app: FastifyInstance;
 /** The route's internal dispatch, into this harness's stores (for the agent's tools, called as the SDK turn calls them). */
 const dispatch = async (path: string, body: unknown) => { const r = await app.inject({ method: 'POST', url: path, payload: body as never }); return { status: r.statusCode, json: r.json() as Record<string, unknown> }; };
 const turn = (payload: Json, headers: Record<string, string> = {}) => app.inject({ method: 'POST', url: '/agent/v1/core-turn', headers, payload: { kind: 'message', scenario_id: SCENARIO, stage: 'frame', turn_class: 'frame', turn_id: randomUUID(), source: 'composer', ...payload } });
+
+/** The drafter's WHOLE updated model for a change: the saved one with `edit` applied (what a faithful update returns). */
+const savedWith = (edit: (m: CanonicalModelT) => void): string => { const m = JSON.parse(JSON.stringify(persisted!.living_model.canonical)) as CanonicalModelT; edit(m); return JSON.stringify(m); };
+const setQ = (m: CanonicalModelT, id: string, f: Partial<CanonicalQuantityT>) => { m.quantities = m.quantities.map((x) => (x.id === id ? { ...x, ...f } : x)); };
 
 describe('the model-program turn on the real core route', () => {
   beforeAll(async () => {
@@ -249,7 +254,7 @@ describe('the model-program turn on the real core route', () => {
     expect(savedProgramOf(stored)!.runs).toHaveLength(1);
   });
 
-  it('step 5, an answer in chat (the agent\'s own tools: propose, then the person approves) fills exactly ONE quantity, in their words; a new Run', async () => {
+  it('step 5, an answer in chat (the agent\'s own tools: propose, then the person approves): Olumi\'s drafter writes the WHOLE updated model; ONE figure changes, in their words, on the card; a new Run', async () => {
     replies = [JSON.stringify(bakery())];
     await turn({ message: BRIEF });
     const before = JSON.parse(JSON.stringify(persisted!.living_model.canonical)) as CanonicalModelT;
@@ -258,20 +263,31 @@ describe('the model-program turn on the real core route', () => {
     const words = 'The oven would cost about £2,500.';
     const deps = { dispatch, proposals: new ProposalStore() };
     const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] };
-    const op = { op: 'set_quantity' as const, quantity_id: 'oven_price', value: 2500, low: null, high: null, range_kind: null, quote: words };
-    // Contrast first: a quote that is not the person's words is refused, and nothing is proposed.
-    expect(await proposeProgramChange(deps, ctx, { public_label: 'Oven price', basis: 'their answer', ops: [{ ...op, quote: 'about £2,500 I think' }] }))
-      .toMatchObject({ status: 'refused', reason: 'quote_not_in_their_words' });
-    const proposed = await proposeProgramChange(deps, ctx, { public_label: 'Oven price £2,500', basis: 'their answer', ops: [op] }) as Json;
-    expect(proposed.status).toBe('ok');
+    const args = { public_label: 'Oven price £2,500', basis: 'their answer', request: 'The oven price is their answer: about £2,500.', remove: [] };
+    const answer = (quote: string) => savedWith((m) => setQ(m, 'oven_price', { status: 'known', value: 2500, question: null, quote, basis: APPROXIMATE_FIGURE }));
+    // Contrast first: a figure of theirs whose words are not theirs, verbatim, is refused, and nothing is proposed.
+    replies = [answer('about £2,500 I think')];
+    expect(await proposeProgramChange(deps, ctx, args)).toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['oven_price'] } });
+    replies = [answer(words)];
+    const proposed = await proposeProgramChange(deps, ctx, args) as Json;
+    expect(proposed.status, JSON.stringify(proposed)).toBe('ok');
+    // One drafter call per proposal: the person's words, the saved model and the change.
+    expect(sent).toHaveLength(2);
+    expect(sent[1]!.input.map((m: Json) => m.role)).toEqual(['user', 'assistant', 'user']);
+    expect(sent[1]!.input[2].content).toContain('The change: The oven price is their answer: about £2,500.\nRemove: nothing');
+    // The card shows the change's substance, before and after, and whose it is.
+    expect(proposed.data.changes).toEqual([{ id: 'oven_price', kind: 'quantity', action: 'change', label: 'oven price', before: 'figure: none; status: asked; question: "What would the second oven cost?"; basis: none; their words: none',
+      after: `figure: 2,500 GBP/oven; status: known; question: none; basis: "${APPROXIMATE_FIGURE}"; their words: "The oven would cost about £2,500."`, author: 'person' }]);
+    expect(deps.proposals.get(proposed.data.proposal_id)!.changes).toEqual(proposed.data.changes);
     expect(registered).toHaveLength(1); // proposing saves nothing
     const applied = await applyProgramChange(deps, ctx, proposed.data.proposal_id) as Json;
     expect(applied).toMatchObject({ status: 'ok', data: { saved: true } });
-    expect(sent).toHaveLength(0);
+    expect(sent).toHaveLength(2);
     const after = persisted!.living_model.canonical as CanonicalModelT;
     expect(after.quantities.find((x) => x.id === 'oven_price')).toMatchObject({ status: 'known', value: 2500, low: null, high: null, author: 'person', quote: words, approval: 'approved', question: null });
     expect(after.quantities.filter((x) => x.id !== 'oven_price')).toEqual(before.quantities.filter((x) => x.id !== 'oven_price'));
     expect({ ...after, quantities: [], history: [] }).toEqual({ ...before, quantities: [], history: [] });
+    expect(after.history).toEqual([...before.history, { id: 'oven_price', change: 'superseded', old: JSON.stringify(before.quantities.find((x) => x.id === 'oven_price')), quote: words, author_id: null }]);
     expect(persisted!.living_model.person_words).toEqual([BRIEF, words]);
     // The approved card's frozen program is what was written: model and Run.
     expect(stableStringify(persisted!.living_model)).toBe(stableStringify(deps.proposals.get(proposed.data.proposal_id)!.living_model));
@@ -337,8 +353,11 @@ describe('the model-program turn on the real core route', () => {
     const words = 'From experience a promotion brings 6 more a month.';
     const deps = { dispatch, proposals: new ProposalStore() };
     const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] };
-    const p = await proposeProgramChange(deps, ctx, { public_label: 'Promotion effect 6 a month', basis: 'their experience',
-      ops: [{ op: 'set_quantity', quantity_id: 'promo_effect', value: 6, low: null, high: null, range_kind: null, quote: 'a promotion brings 6 more a month' }] }) as Json;
+    replies = [savedWith((m) => setQ(m, 'promo_effect', { value: 6, low: null, high: null, range_kind: null, status: 'known', author: 'person', basis: null, quote: 'a promotion brings 6 more a month' }))];
+    const p = await proposeProgramChange(deps, ctx, { public_label: 'Promotion effect 6 a month', basis: 'their experience', request: 'The promotion brings 6 more a month, in their words.', remove: [] }) as Json;
+    expect(p.data.changes.map((c: Json) => [c.id, c.action, c.before, c.after])).toEqual([['promo_effect', 'change',
+      'figure: 5 member/month/promotion; low end: 3 member/month/promotion; high end: 7 member/month/promotion; range reading: plausible; status: estimated; basis: "Promotions at clubs this size bring a few extra joins a month."; whose: Olumi’s; their words: none',
+      'figure: 6 member/month/promotion; low end: none; high end: none; range reading: none; status: known; basis: none; whose: theirs; their words: "a promotion brings 6 more a month"']]);
     expect(await applyProgramChange(deps, ctx, p.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
     const m3 = persisted!.living_model.canonical as CanonicalModelT;
     expect(m3.quantities.find((x) => x.id === 'promo_effect')).toMatchObject({ value: 6, low: null, high: null, author: 'person', quote: 'a promotion brings 6 more a month' });
@@ -354,8 +373,9 @@ describe('the model-program turn on the real core route', () => {
     // Contrast (stale CAS): a chat card made on the model BEFORE another change is superseded, and writes nothing.
     const later = 'Actually we can only spend £450.';
     const ctx2 = { ...ctx, verified_user_messages: [later] };
-    const stale = await proposeProgramChange(deps, ctx2, { public_label: 'Budget £450', basis: 'they said so',
-      ops: [{ op: 'set_quantity', quantity_id: 'budget', value: 450, low: null, high: null, range_kind: null, quote: 'we can only spend £450' }] }) as Json;
+    replies = [savedWith((m) => setQ(m, 'budget', { value: 450, quote: 'we can only spend £450' }))];
+    const stale = await proposeProgramChange(deps, ctx2, { public_label: 'Budget £450', basis: 'they said so', request: 'The budget is £450.', remove: [] }) as Json;
+    expect(stale.status, JSON.stringify(stale)).toBe('ok');
     await turn({ kind: 'system_event', event: { kind: 'factor_value_edit', target_id: 'leavers', value: 11 } });
     const saves = registered.length;
     expect(await applyProgramChange(deps, ctx2, stale.data.proposal_id)).toMatchObject({ status: 'refused' });
@@ -385,6 +405,210 @@ describe('the model-program turn on the real core route', () => {
     expect(programReadOf({ ...persisted!, living_model: { ...lm, canonical: both } }).kind).toBe('unreadable');
   });
 
+  it('simplify v1 (A1, A2): the ONE validator: an omitted record is refused; a removal only when listed, on the card and in history, its id never used again; every add, change and remove on the card and its wire', async () => {
+    replies = [JSON.stringify(bakery())];
+    await turn({ message: BRIEF });
+    const deps = { dispatch, proposals: new ProposalStore() };
+    const words = 'Drop keeping our one oven: the oven is £2,000, and our landlord must agree first.';
+    const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] });
+    const args = (remove: string[]) => ({ public_label: 'Your changes', basis: 'they said so', request: 'Remove keeping one oven; the oven costs £2,000; the landlord must agree first.', remove });
+    const edited = (drop: boolean) => savedWith((d) => {
+      if (drop) d.options = d.options.filter((o) => o.id !== 'keep_one');
+      setQ(d, 'oven_price', { status: 'known', value: 2000, question: null, quote: 'the oven is £2,000' });
+      d.conditions.push({ id: 'landlord_agrees', text: 'Only once the landlord agrees.', kind: 'prerequisite', concerns: ['second_oven'], author: 'person', party: null, quote: 'our landlord must agree first', approval: 'proposed', author_id: null });
+    });
+    // Left out with no listed removal: refused, and nothing is proposed.
+    replies = [edited(true)];
+    expect(await proposeProgramChange(deps, ctx(), args([]))).toMatchObject({ status: 'refused', reason: 'omitted_record', data: { ids: ['keep_one'] } });
+    // Listed but still there; listed but no such record.
+    replies = [edited(false)];
+    expect(await proposeProgramChange(deps, ctx(), args(['keep_one']))).toMatchObject({ status: 'refused', reason: 'removal_not_applied', data: { ids: ['keep_one'] } });
+    replies = [edited(true)];
+    expect(await proposeProgramChange(deps, ctx(), args(['keep_one', 'no_such_record']))).toMatchObject({ status: 'refused', reason: 'unknown_removal', data: { ids: ['no_such_record'] } });
+    expect(registered).toHaveLength(1);
+    // Listed: the card holds EVERY change, each with its substance before and after, and whose it is.
+    replies = [edited(true)];
+    const c = ctx();
+    const p = await proposeProgramChange(deps, c, args(['keep_one'])) as Json;
+    expect(p.status, JSON.stringify(p)).toBe('ok');
+    const changes: ProposalChange[] = [
+      { id: 'oven_price', kind: 'quantity', action: 'change', label: 'oven price', before: 'figure: none; status: asked; question: "What would the second oven cost?"; their words: none',
+        after: 'figure: 2,000 GBP/oven; status: known; question: none; their words: "the oven is £2,000"', author: 'person' },
+      { id: 'keep_one', kind: 'option', action: 'remove', label: 'Keep our one oven', before: 'name: "Keep our one oven"; status: live; whose: theirs; their words: "keep our one oven"', after: null, author: 'person' },
+      { id: 'landlord_agrees', kind: 'record', action: 'add', label: 'Only once the landlord agrees.', before: null,
+        after: 'words: "Only once the landlord agrees."; kind: prerequisite; about 1: "A second oven"; whose: theirs; their words: "our landlord must agree first"', author: 'person' },
+    ];
+    expect(p.data.changes).toEqual(changes);
+    // The card the UI reads carries the same changes, on the held proposal's own projection (and in its digest).
+    const proposal = deps.proposals.get(p.data.proposal_id)!;
+    const hold = proposalPendingAction(proposal, { id: `agent-approve-proposal:${proposal.proposal_id}`, label: 'Approve', message: 'Approve.' } as never, { scenario_id: SCENARIO, emitted_at_iso: new Date().toISOString() });
+    const record = proposalRecord(hold, persisted)!;
+    expect(proposalFieldsWire([record], record.base_graph_hash)!.proposals[0]!.changes).toEqual(changes);
+    expect(proposalRecord(proposalPendingAction({ ...proposal, changes: changes.slice(1) }, { id: `agent-approve-proposal:${proposal.proposal_id}`, label: 'Approve', message: 'Approve.' } as never,
+      { scenario_id: SCENARIO, emitted_at_iso: new Date().toISOString() }), persisted)).toBeUndefined(); // a card whose changes were edited is not this proposal
+    expect(await applyProgramChange(deps, c, p.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
+    const after = persisted!.living_model.canonical as CanonicalModelT;
+    expect(after.options.map((o) => o.id)).toEqual(['second_oven']);
+    expect(after.conditions.map((x) => [x.id, x.author, x.approval])).toEqual([['landlord_agrees', 'person', 'approved']]);
+    expect(after.history.slice(-2).map((h) => [h.id, h.change])).toEqual([['oven_price', 'superseded'], ['keep_one', 'withdrawn']]);
+    expect(JSON.parse(after.history.at(-1)!.old)).toEqual(bakery().options[1]);
+    // Its id is never used again: a new item under it is refused.
+    replies = [savedWith((d) => { d.options.push({ ...bakery().options[1]!, label: 'Keep one oven after all' }); })];
+    expect(await proposeProgramChange(deps, ctx(), { ...args([]), request: 'Bring back keeping one oven.' })).toMatchObject({ status: 'refused', reason: 'recycled_id', data: { ids: ['keep_one'] } });
+  });
+
+  it('simplify v1 (buddy 21:16Z): preserve by (family, id); the card shows EVERY changed field or nothing is proposed; approval and author_id are the host\'s, never the drafter\'s', async () => {
+    const m = bakery();
+    m.quantities.push(q('opening_in', 'week', { value: 2, quote: 'We open in 2 weeks' }), q('opening_twin', 'week', { label: 'opening in', value: 2, quote: 'We open in 2 weeks' }),
+      q('opening_later', 'week', { value: 3, quote: 'or in 3 weeks' }), q('four_weeks', 'week', { value: 4, quote: 'within 4 weeks of opening' }));
+    m.goals = m.goals.map((g) => ({ ...g, measure: { ...g.measure!, window: { origin_event: 'the opening', origin_offset: 'opening_in', start: 0, periods: 'four_weeks' } } }));
+    m.conditions.push({ id: 'landlord_agrees', text: 'Only once the landlord agrees.', kind: 'prerequisite', concerns: [], author: 'olumi', quote: null, ...at });
+    replies = [JSON.stringify(m)];
+    expect((await turn({ message: `${BRIEF} We open in 2 weeks, or in 3 weeks, and want it within 4 weeks of opening.` })).json().model_program.saved).toBe(true);
+    const saved = JSON.parse(JSON.stringify(persisted!.living_model.canonical)) as CanonicalModelT;
+    const deps = { dispatch, proposals: new ProposalStore() };
+    const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: ['Make it 3 weeks to the opening.'] });
+    const propose = async (edit: (d: CanonicalModelT) => void) => {
+      replies = [savedWith(edit)];
+      return await proposeProgramChange(deps, ctx(), { public_label: 'The opening', basis: 'they said so', request: 'The opening is in 3 weeks.', remove: [] }) as Json;
+    };
+    const timing = (offset: string) => (d: CanonicalModelT) => { d.goals = d.goals.map((g) => ({ ...g, measure: { ...g.measure!, window: { ...g.measure!.window!, origin_offset: offset } } })); };
+    // (a) An existing id never moves to another family; an id is never used twice, in one family or across two.
+    expect(await propose((d) => { const c = d.conditions.pop()!; d.evidence.push({ id: c.id, text: c.text, source: null, bears: 'informs', concerns: [], author: 'olumi', quote: null, ...at }); }))
+      .toMatchObject({ status: 'refused', reason: 'moved_record', data: { ids: ['landlord_agrees'] } });
+    expect(await propose((d) => { d.quantities.push({ ...d.quantities[0]! }); })).toMatchObject({ status: 'refused', reason: 'duplicate_id', data: { ids: ['base_sales'] } });
+    expect(await propose((d) => { d.claims.push({ id: 'twin', text: 'Bread sells.', concerns: [], author: 'olumi', quote: null, ...at });
+      d.dissent.push({ id: 'twin', holder: 'Sam', position: 'It will not.', concerns: [], author: 'olumi', quote: null, ...at }); }))
+      .toMatchObject({ status: 'refused', reason: 'duplicate_id', data: { ids: ['twin'] } });
+    // (b) Every changed field is on the card: the event's timing, moved between two figures already in the model, shows both.
+    const shown = await propose(timing('opening_later'));
+    expect(shown.status, JSON.stringify(shown)).toBe('ok');
+    expect(shown.data.changes).toEqual([{ id: 'more_loaves', kind: 'goal', action: 'change', label: 'Reach 380 loaves a week', before: 'the event’s timing: "opening in" 2 week',
+      after: 'the event’s timing: "opening later" 3 week', author: 'person' }]);
+    // Words that would read the same on both sides (two timings named and sized alike): not proposed.
+    expect(await propose(timing('opening_twin'))).toMatchObject({ status: 'refused', reason: 'unshown_change', data: { ids: ['more_loaves (measure.window.origin_offset)'] } });
+    // (c) The drafter's approval and author_id are never taken: on an untouched item they change nothing; a changed item is
+    // accepted by the approving person (the host), its author unchanged.
+    const host = await propose((d) => { timing('opening_later')(d);
+      d.conditions = d.conditions.map((c) => ({ ...c, approval: 'approved', author_id: 'someone-else' })); d.goals = d.goals.map((g) => ({ ...g, author_id: 'someone-else' })); });
+    expect(host.status, JSON.stringify(host)).toBe('ok');
+    expect(host.data.changes.map((c: Json) => c.id)).toEqual(['more_loaves']);
+    const card = savedProgramOf({ living_model: deps.proposals.get(host.data.proposal_id)!.living_model })!.canonical;
+    expect(card.conditions).toEqual(saved.conditions);
+    expect(card.goals[0]).toMatchObject({ author: 'person', approval: 'approved', author_id: null });
+  });
+
+  it('simplify v1 (Codex r1 P1): the card is driven by the field-level diff: every changed field of an item is said, saved and proposed; a field that would read the same on both sides is refused by name, whatever else changes', async () => {
+    const m = bakery();
+    // Two figures named and sized alike: "sold per oven", each worked out from the same two figures.
+    m.quantities.push(q('sold_twin', 'loaf/week/oven', { label: 'sold per oven', kind: 'coefficient', status: 'derived', author: 'olumi' }));
+    m.relations.push({ form: 'definition', id: 'twin_rel', defines: 'sold_twin', op: 'product', parts: [{ id: 'extra_per_oven', power: 1 }, { id: 'sell_through', power: 1 }], author: 'olumi', quote: null, ...at });
+    replies = [JSON.stringify(m)];
+    expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
+    const deps = { dispatch, proposals: new ProposalStore() };
+    const words = 'We now bake 320 loaves a week, our baker says.';
+    const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] });
+    const propose = async (edit: (d: CanonicalModelT) => void) => {
+      replies = [savedWith(edit)];
+      return await proposeProgramChange(deps, ctx(), { public_label: 'Base sales', basis: 'their words', request: 'Base sales are now 320 a week.', remove: [] }) as Json;
+    };
+    // (1) Two fields of one item change (its figure, and the question it carries): both are on the card, each saved → proposed.
+    const both = await propose((d) => setQ(d, 'base_sales', { value: 320, question: 'Is that every week of the year?', quote: 'We now bake 320 loaves a week' }));
+    expect(both.status, JSON.stringify(both)).toBe('ok');
+    expect(both.data.changes).toEqual([{ id: 'base_sales', kind: 'quantity', action: 'change', label: 'base sales',
+      before: 'figure: 300 loaf/week; question: none; their words: "We bake 300 loaves a week"',
+      after: 'figure: 320 loaf/week; question: "Is that every week of the year?"; their words: "We now bake 320 loaves a week"', author: 'person' }]);
+    // (2) A link's size moved to the figure named and sized alike, while who it is from also changes: refused, naming the
+    // field that would read the same; the other change does not carry it through.
+    const swap = (to: string) => (d: CanonicalModelT) => {
+      d.relations = d.relations.map((r) => (r.form === 'effect' ? { ...r, terms: r.terms.map((x) => ({ ...x, coefficient: to, party: 'our baker' })) } : r));
+    };
+    expect(await propose(swap('sold_twin'))).toMatchObject({ status: 'refused', reason: 'unshown_change', data: { ids: ['sales_rel (terms.0.coefficient)'] } });
+    // Contrast: moved to a figure with its own name, both changes are on the card.
+    const named = await propose(swap('extra_per_oven'));
+    expect(named.status, JSON.stringify(named)).toBe('ok');
+    expect(named.data.changes).toEqual([{ id: 'sales_rel', kind: 'relation', action: 'change', label: 'sales',
+      before: 'link 1 size: "sold per oven"; link 1 from: none', after: 'link 1 size: "extra per oven" 100 loaf/week/oven; link 1 from: "our baker"', author: 'olumi' }]);
+  });
+
+  it('simplify v1 (buddy 22:47Z): a list of another length is compared entry by entry: a link moved to another figure of the same name is said with both figures while a link is added in full; moved to one named and sized alike, refused', async () => {
+    const m = bakery();
+    const brief = `${BRIEF} Each oven has an impact of 1 loaf, or 9 loaves.`;
+    // Three figures named "impact": 1, 9, and a twin of the 1; and Olumi's estimate of another effect.
+    m.quantities.push(q('impact_1', 'loaf/week/oven', { label: 'impact', kind: 'coefficient', value: 1, quote: 'an impact of 1 loaf' }),
+      q('impact_9', 'loaf/week/oven', { label: 'impact', kind: 'coefficient', value: 9, quote: 'or 9 loaves' }),
+      q('impact_twin', 'loaf/week/oven', { label: 'impact', kind: 'coefficient', value: 1, quote: 'an impact of 1 loaf' }),
+      q('other', 'loaf/week/oven', { kind: 'coefficient', status: 'estimated', author: 'olumi', value: 3, low: 2, high: 4, range_kind: 'plausible', basis: 'Another oven effect, for the row.' }));
+    m.relations = m.relations.map((r) => (r.form === 'effect' ? { ...r, terms: [{ driver: 'ovens_added', coefficient: 'impact_1', author: 'olumi' as const, quote: null, ...at }] } : r));
+    replies = [JSON.stringify(m)];
+    expect((await turn({ message: brief })).json().model_program.saved).toBe(true);
+    const deps = { dispatch, proposals: new ProposalStore() };
+    const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: ['Make the impact 9, and add the other effect.'] });
+    const relink = (to: string) => async () => {
+      replies = [savedWith((d) => {
+        d.relations = d.relations.map((r) => (r.form === 'effect'
+          ? { ...r, terms: [{ ...r.terms[0]!, coefficient: to }, { driver: 'one_oven', coefficient: 'other', author: 'olumi' as const, quote: null, ...at }] } : r));
+      })];
+      return await proposeProgramChange(deps, ctx(), { public_label: 'The impact', basis: 'their words', request: 'The impact is 9, with the other effect added.', remove: [] }) as Json;
+    };
+    // Link 1's size moves from the 1 to the 9 (both "impact") while link 2 is added: both figures, and the new link in full.
+    const shown = await relink('impact_9')();
+    expect(shown.status, JSON.stringify(shown)).toBe('ok');
+    expect(shown.data.changes).toEqual([{ id: 'sales_rel', kind: 'relation', action: 'change', label: 'sales',
+      before: 'link 1 size: "impact" 1 loaf/week/oven; link 2 driver: none; link 2 size: none; link 2 whose: none',
+      after: 'link 1 size: "impact" 9 loaf/week/oven; link 2 driver: "one oven" 1 oven; link 2 size: "other" 2–4 loaf/week/oven; link 2 whose: Olumi’s', author: 'olumi' }]);
+    // Moved to the twin (named and sized alike) while link 2 is added: refused, naming the field that would read the same.
+    expect(await relink('impact_twin')()).toMatchObject({ status: 'refused', reason: 'unshown_change', data: { ids: ['sales_rel (terms.0.coefficient)'] } });
+  });
+
+  it('simplify v1 (buddy 21:46Z): an item the card could not name is never proposed: an empty-label risk is refused by the card\'s own contract and by the compiler; so is a note with no words', async () => {
+    replies = [JSON.stringify(bakery())];
+    await turn({ message: BRIEF });
+    const deps = { dispatch, proposals: new ProposalStore() };
+    const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: ['The oven could break down.'] });
+    const estimate = (id: string, unit: string, low: number, high: number, value: number | null) => q(id, unit, { kind: 'coefficient', status: 'estimated', author: 'olumi', value, low, high, range_kind: 'plausible', basis: 'Synthetic.' });
+    const risky = (label: string) => savedWith((d) => {
+      d.quantities.push(estimate('breakdown_chance', '1', 0.05, 0.2, null), estimate('lost_loaves', 'loaf/week', -150, -50, -100));
+      d.risks.push({ id: 'breakdown', label, occurrence: 'breakdown_chance', severity: 'lost_loaves', effect_on: 'sales', mode: 'add', starts_after_periods: 0, author: 'olumi', quote: null, ...at });
+    });
+    const propose = async (body: string) => {
+      replies = [body];
+      return await proposeProgramChange(deps, ctx(), { public_label: 'A risk', basis: 'they said so', request: 'Add the oven breaking down as a risk.', remove: [] }) as Json;
+    };
+    expect(await propose(risky(''))).toMatchObject({ status: 'refused', reason: 'invalid_change_entry', data: { ids: ['breakdown'] } });
+    // The compiler refuses it on its own too (one form per meaning: every record's label is a name).
+    expect(compile(JSON.parse(risky('')) as CanonicalModelT, { sourceText: BRIEF }).errors.map((e) => [e.code, e.items])).toContainEqual(['label', ['breakdown']]);
+    // A note with no words: the card's contract refuses it (it has no label for the compiler to check).
+    expect(await propose(savedWith((d) => { d.claims.push({ id: 'blank', text: '', concerns: [], author: 'olumi', quote: null, ...at }); })))
+      .toMatchObject({ status: 'refused', reason: 'invalid_change_entry', data: { ids: ['blank'] } });
+    expect(registered).toHaveLength(1);
+    // Contrast: the same risk with its name is proposed, and on the card.
+    const named = await propose(risky('The oven breaks down'));
+    expect(named.status, JSON.stringify(named)).toBe('ok');
+    expect(named.data.changes.find((c: Json) => c.id === 'breakdown')).toEqual({ id: 'breakdown', kind: 'risk', action: 'add', label: 'The oven breaks down', before: null,
+      after: 'name: "The oven breaks down"; chance: "breakdown chance" 0.05–0.2 1; size: "lost loaves" -150–-50 loaf/week; affects: "sales"; how: add; starts: from the start; whose: Olumi’s', author: 'olumi' });
+  });
+
+  it('simplify v1 (A3): a typed card edit builds its postimage from its exact target and value with NO AI call, through the same validator: the change on its reply and in history', async () => {
+    replies = [JSON.stringify(bakery())];
+    await turn({ message: BRIEF });
+    sent.length = 0;
+    const before = persisted!.living_model.canonical as CanonicalModelT;
+    const r = await applyCanvasFigure({ dispatch }, SCENARIO, { target: { quantity_id: 'base_sales' }, value: 320, operation_key: randomUUID() });
+    expect(r).toMatchObject({ status: 'saved' });
+    expect(sent).toHaveLength(0);
+    expect(r.changes).toEqual([{ id: 'base_sales', kind: 'quantity', action: 'change', label: 'base sales', before: 'figure: 300 loaf/week; their words: "We bake 300 loaves a week"',
+      after: 'figure: 320 loaf/week; their words: "base sales: 320 loaf/week"', author: 'person' }]);
+    const after = persisted!.living_model.canonical as CanonicalModelT;
+    expect(after.history.at(-1)).toEqual({ id: 'base_sales', change: 'superseded', old: JSON.stringify(before.quantities.find((x) => x.id === 'base_sales')), quote: 'base sales: 320 loaf/week', author_id: null });
+    expect(after.quantities.find((x) => x.id === 'base_sales')).toMatchObject({ value: 320, author: 'person', quote: 'base sales: 320 loaf/week', approval: 'approved', status: 'known' });
+    // Through the route, a goal's target typed on its card: saved, still no AI call.
+    const t = await turn({ kind: 'system_event', event: { kind: 'goal_target_edit', goal_node_id: 'more_loaves', constraint_type: 'at_least', raw_value: 400, unit: 'loaf/week', base_graph_hash: hashOf(persisted) } });
+    expect(t.statusCode, t.body).toBe(200);
+    expect(sent).toHaveLength(0);
+    expect((persisted!.living_model.canonical as CanonicalModelT).quantities.find((x) => x.id === 'sales_target')).toMatchObject({ value: 400, author: 'person' });
+  });
+
   it('an UNREADABLE program (it claims model_program but is not v1) is refused with its way on: never run as legacy or as no model', async () => {
     replies = [JSON.stringify(bakery())];
     await turn({ message: BRIEF });
@@ -404,26 +628,21 @@ describe('the model-program turn on the real core route', () => {
     expect(programReadOf({ nodes: [], edges: [], living_model: { aims: [] } }).kind).toBe('none'); // contrast: a legacy living model
   });
 
-  it('an approximate answer ("about £2,500") is the person\'s figure, used for now: NO range is read into "about"; a range is asked for, and the words say so', () => {
+  it('an approximate answer ("about £2,500") is the person\'s figure, used for now: the compiler asks for a range on it and the words say so; their own range is their range', () => {
     const words = 'It would cost about £2,500.';
-    const f = fillQuantity(bakery(), 'oven_price', { value: 2500, low: 2250, high: 2750 }, words);
-    if (!f.ok) throw new Error(f.reason);
-    const oven = f.model.quantities.find((x) => x.id === 'oven_price')!;
-    expect(oven).toMatchObject({ value: 2500, low: null, high: null, range_kind: null, author: 'person', quote: words, basis: APPROXIMATE_FIGURE });
-    const r = compile(f.model, { sourceText: `${BRIEF}\n${words}` });
+    const answered = (f: Partial<CanonicalQuantityT>) => { const m = bakery(); setQ(m, 'oven_price', { status: 'known', question: null, approval: 'approved', ...f }); return m; };
+    const approx = answered({ value: 2500, quote: words, basis: APPROXIMATE_FIGURE });
+    const r = compile(approx, { sourceText: `${BRIEF}\n${words}` });
     expect(r.asks.find((a) => a.quantity_id === 'oven_price')!.question).toBe('You said "It would cost about £2,500." for "oven price". What range would you put on it? Olumi is using 2500 GBP/oven for now.');
     expect(r.within_limits.status).toBe('calculable'); // the range asked for holds nothing back
     expect(r.conversions.some((c) => c.quantity === 'oven_price')).toBe(false);
-    const view = evaluateCanonical(f.model, { sourceText: `${BRIEF}\n${words}`, seed: 7 }).view as Json;
+    const view = evaluateCanonical(approx, { sourceText: `${BRIEF}\n${words}`, seed: 7 }).view as Json;
     expect(JSON.stringify(view)).toContain('using £2,500 / oven for ‘oven price’ for now — you said ‘It would cost about £2,500.’');
     expect(JSON.stringify(view)).not.toContain('your range');
     expect(JSON.stringify(view)).not.toContain('as you stated it');
-    // Contrast: the ends in their own words are their range, read as theirs.
-    const ranged = fillQuantity(bakery(), 'oven_price', { value: null, low: 2250, high: 2750, range_kind: 'bounds' }, 'between £2,250 and £2,750');
-    if (!ranged.ok) throw new Error(ranged.reason);
-    expect(ranged.model.quantities.find((x) => x.id === 'oven_price')).toMatchObject({ low: 2250, high: 2750, range_kind: 'bounds', basis: null });
-    // A range their words do not state, with no figure of theirs, is refused: never Olumi's range presented as their answer.
-    expect(fillQuantity(bakery(), 'oven_price', { value: null, low: 2250, high: 2750 }, 'about £2,500')).toMatchObject({ ok: false });
+    // Contrast: the ends in their own words are their range, read as theirs, and no range is asked for.
+    const ranged = answered({ value: null, low: 2250, high: 2750, range_kind: 'bounds', quote: 'between £2,250 and £2,750' });
+    expect(compile(ranged, { sourceText: `${BRIEF}\nbetween £2,250 and £2,750` }).asks.some((a) => a.quantity_id === 'oven_price')).toBe(false);
   });
 
   it('the agent\'s context after a cold reopen is the model AS AUTHORED: relations, coefficient basis and range kind, goal windows, option timing, the qualitative records, and the Run\'s goal_chance unchanged', async () => {
@@ -478,8 +697,8 @@ describe('the model-program turn on the real core route', () => {
     const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: ['Make it 11 leaving each month.'] };
     const read = await readProgramContext(deps, ctx) as Json;
     expect(stableStringify(read.data.run.goal_chance)).toBe(stableStringify(goalChance()));
-    const p = await proposeProgramChange(deps, ctx, { public_label: 'Leavers 11', basis: 'they said so',
-      ops: [{ op: 'set_quantity', quantity_id: 'leavers', value: 11, low: null, high: null, range_kind: null, quote: '11 leaving each month' }] }) as Json;
+    replies = [savedWith((m) => setQ(m, 'leavers', { value: 11, quote: '11 leaving each month' }))];
+    const p = await proposeProgramChange(deps, ctx, { public_label: 'Leavers 11', basis: 'they said so', request: 'Leavers are 11 a month.', remove: [] }) as Json;
     const frozen = (deps.proposals.get(p.data.proposal_id)!.living_model as Json).runs.at(-1).result.canonical_analysis_view.goal_chance;
     expect(stableStringify(p.data.would_show.goal_chance)).toBe(stableStringify(frozen));
     const a = await applyProgramChange(deps, ctx, p.data.proposal_id) as Json;
@@ -488,7 +707,7 @@ describe('the model-program turn on the real core route', () => {
     expect([run.data.stored, stableStringify(run.data.run.goal_chance)]).toEqual([true, stableStringify(goalChance())]);
   });
 
-  it('an open question on how to read a range (set_range_kind) is answerable by the agent\'s own op: the range, its words and its author stay; the answer is in history', async () => {
+  it('an open question on how to read a range is answered through the same update path: only its reading changes; its ends, words and author stay; their answer is kept', async () => {
     const brief = `${BRIEF} Each extra oven brings between 80 and 120 loaves a week.`;
     const m = bakery();
     m.quantities = m.quantities.map((x) => (x.id === 'extra_per_oven' ? { ...x, value: null, low: 80, high: 120, range_kind: null, quote: 'between 80 and 120 loaves a week' } : x));
@@ -498,15 +717,17 @@ describe('the model-program turn on the real core route', () => {
     const words = 'Those are firm ends: never fewer than 80, never more than 120.';
     const deps = { dispatch, proposals: new ProposalStore() };
     const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] };
+    replies = [savedWith((d) => setQ(d, 'extra_per_oven', { range_kind: 'bounds' }))];
     // The args as the agent's tool schema admits them (the SDK parses every call with it).
-    const args = ProgramChangeParams.parse({ public_label: 'Read 80–120 as firm', basis: 'their answer',
-      ops: [{ op: 'set_range_kind', quantity_id: 'extra_per_oven', range_kind: 'bounds', quote: 'Those are firm ends' }] });
-    const p = await proposeProgramChange(deps, ctx, args) as Json;
+    const p = await proposeProgramChange(deps, ctx, ProgramChangeParams.parse({ public_label: 'Read 80–120 as firm', basis: 'their answer', request: 'Their 80 to 120 are firm ends.', remove: [] })) as Json;
     expect(p.status, JSON.stringify(p)).toBe('ok');
+    expect(p.data.changes).toEqual([{ id: 'extra_per_oven', kind: 'quantity', action: 'change', label: 'extra per oven', before: 'range reading: none',
+      after: 'range reading: bounds', author: 'person' }]);
     expect(await applyProgramChange(deps, ctx, p.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
     const after = (persisted!.living_model.canonical as CanonicalModelT).quantities.find((x) => x.id === 'extra_per_oven')!;
     expect(after).toMatchObject({ low: 80, high: 120, range_kind: 'bounds', author: 'person', quote: 'between 80 and 120 loaves a week' });
-    expect((persisted!.living_model.canonical as CanonicalModelT).history.at(-1)).toMatchObject({ id: 'extra_per_oven', change: 'superseded', quote: 'Those are firm ends' });
+    expect((persisted!.living_model.canonical as CanonicalModelT).history.at(-1)).toMatchObject({ id: 'extra_per_oven', change: 'superseded' });
+    expect(persisted!.living_model.person_words.at(-1)).toBe(words);
     const asks = (persisted!.living_model.runs.at(-1).result.compile as Json).asks as Json[];
     expect(asks.some((x) => x.quantity_id === 'extra_per_oven')).toBe(false);
   });
@@ -543,7 +764,7 @@ describe('the model-program turn on the real core route', () => {
     expect(pct).not.toMatch(/\b0\.1\b/);
   });
 
-  it('DL 23 Oct: an aim with no measure gets the one the person states (define_goal_measure), in their words; what they did not state stays asked', async () => {
+  it('an aim with no measure gets the one the person states, through the same update path: its target and window in their words, on the card; the chance appears', async () => {
     const m = bakery();
     m.goals = [{ ...m.goals[0]!, measure: null, question: 'How would you know the bakery is doing well enough?' }];
     replies = [JSON.stringify(m)];
@@ -552,119 +773,77 @@ describe('the model-program turn on the real core route', () => {
     expect((persisted!.living_model.runs.at(-1).result.compile as Json).coaching).toEqual([expect.objectContaining({ record_id: 'more_loaves', kind: 'measure' })]);
     const words = 'Success means selling at least 380 loaves a week within 4 weeks.';
     const deps = { dispatch, proposals: new ProposalStore() };
-    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] };
-    const op = { op: 'define_goal_measure', goal_id: 'more_loaves', quantity: 'sales', cmp: '>=', frame: null,
-      target: { value: 380, low: null, high: null, range_kind: null }, window: { periods: 4, start: 0 }, leaves_out: [], quote: words };
-    const propose = (o: Json) => proposeProgramChange(deps, ctx, ProgramChangeParams.parse({ public_label: 'Measure the aim', basis: 'their answer', ops: [o] })) as Promise<Json>;
-    // Negatives first: a target or a deadline their words do not state is refused (never inferred), and nothing is proposed.
-    // Codex r2 #3709: each figure in its own role: "within 4 weeks" is the deadline, never a target of 4; 380 loaves is never a deadline.
-    for (const wrong of [{ ...op, target: { value: 400, low: null, high: null, range_kind: null } }, { ...op, window: { periods: 6, start: 0 } },
-      { ...op, target: { value: 4, low: null, high: null, range_kind: null } }, { ...op, window: { periods: 380, start: 0 } }]) {
-      const r = await propose(wrong);
-      expect(r.status, JSON.stringify(r)).not.toBe('ok');
-      expect(JSON.stringify(r)).toMatch(/do not state that (target|deadline)/);
-    }
-    const p = await propose(op);
+    const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] });
+    const measured = (targetQuote: string) => savedWith((d) => {
+      d.quantities.push(q('more_loaves_target', 'loaf/week', { value: 380, quote: targetQuote }), q('more_loaves_window', 'week', { value: 4, quote: words }));
+      d.goals = d.goals.map((g) => (g.id === 'more_loaves' ? { ...g, question: null, measure: { quantity: 'sales', per: null, cmp: '>=', target: 'more_loaves_target', frame: 'level', reference: null,
+        aggregation: 'end', window: { origin_event: null, origin_offset: null, start: 0, periods: 'more_loaves_window' }, measure_by: 'person', assumptions: [], exclusions: [] } } : g));
+    });
+    const propose = (c = ctx()) => proposeProgramChange(deps, c, ProgramChangeParams.parse({ public_label: 'Measure the aim', basis: 'their answer',
+      request: 'The aim is measured by sales: at least 380 loaves a week, within 4 weeks.', remove: [] })) as Promise<Json>;
+    // Negative first: a figure of theirs under words they did not write is refused, and nothing is proposed.
+    replies = [measured('at least 400 loaves a week')];
+    expect(await propose()).toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['more_loaves_target'] } });
+    replies = [measured(words)];
+    const c = ctx();
+    const p = await propose(c);
     expect(p.status, JSON.stringify(p)).toBe('ok');
-    expect(await applyProgramChange(deps, ctx, p.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
+    expect(p.data.changes.map((x: Json) => [x.id, x.kind, x.action, x.before, x.after, x.author])).toEqual([
+      ['more_loaves_target', 'quantity', 'add', null, `name: "more loaves target"; unit: loaf/week; figure: 380 loaf/week; kind: fact; status: known; whose: theirs; their words: "${words}"`, 'person'],
+      ['more_loaves_window', 'quantity', 'add', null, `name: "more loaves window"; unit: week; figure: 4 week; kind: fact; status: known; whose: theirs; their words: "${words}"`, 'person'],
+      ['more_loaves', 'goal', 'change', 'measures: none; comparison: none; target: none; frame: none; over the window: none; window opens after (periods): none; deadline: none; measure named by: none; '
+        + 'question: "How would you know the bakery is doing well enough?"',
+        'measures: "sales"; comparison: >=; target: "more loaves target" 380 loaf/week; frame: level; over the window: end; window opens after (periods): 0; deadline: "more loaves window" 4 week; '
+        + 'measure named by: person; question: none', 'person'],
+    ]);
+    expect(await applyProgramChange(deps, c, p.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
     const after = persisted!.living_model.canonical as CanonicalModelT;
     expect(after.goals[0]).toMatchObject({ measure: { quantity: 'sales', cmp: '>=', target: 'more_loaves_target', frame: 'level', reference: null,
-      window: { start: 0, periods: 'more_loaves_window' }, measure_by: 'person' }, question: null });
-    expect(after.quantities.find((x) => x.id === 'more_loaves_target')).toMatchObject({ value: 380, unit: 'loaf/week', author: 'person', quote: words, status: 'known' });
-    expect(after.quantities.find((x) => x.id === 'more_loaves_window')).toMatchObject({ value: 4, unit: 'week', author: 'person', quote: words });
-    expect(after.history.at(-1)).toMatchObject({ id: 'more_loaves', change: 'superseded', quote: words });
+      window: { start: 0, periods: 'more_loaves_window' }, measure_by: 'person' }, question: null, approval: 'approved' });
+    expect(after.history.at(-1)).toMatchObject({ id: 'more_loaves', change: 'superseded' });
     // The new Run can now work out the aim: each option's chance of it is shown, and the measure question is gone.
     const run = persisted!.living_model.runs.at(-1).result as Json;
     expect((run.canonical_analysis_view as Json).options.map((o: Json) => o.cell.kind)).toEqual(['figure', 'figure']);
     expect((run.compile as Json).coaching).toEqual([]);
-
-    // Unstated target: it is ASKED, the aim waits for it; a new measure they named is theirs, held until the model works it out.
-    const asked = defineGoalMeasure(m, { goal_id: 'more_loaves', quantity: 'sales', cmp: '>=', frame: null, target: null, window: null, quote: 'by how many loaves we sell' });
-    expect(asked.ok).toBe(true);
-    const askedModel = (asked as { model: CanonicalModelT }).model;
-    expect(askedModel.quantities.find((x) => x.id === 'more_loaves_target')).toMatchObject({ status: 'asked', value: null, quote: null });
-    expect(compile(askedModel, { sourceText: `${BRIEF}\nby how many loaves we sell` }).asks.map((x) => x.quantity_id)).toContain('more_loaves_target');
-    const named = defineGoalMeasure(m, { goal_id: 'more_loaves', quantity: { label: 'Repeat customers', unit: 'customer/week' }, cmp: '>=', frame: null,
-      target: { value: 50, low: null, high: null, range_kind: null }, window: null, quote: 'at least 50 repeat customers a week' });
-    const namedModel = (named as { model: CanonicalModelT }).model;
-    expect(namedModel.quantities.find((x) => x.id === 'repeat_customers')).toMatchObject({ status: 'unknown', author: 'person', quote: 'at least 50 repeat customers a week' });
-    expect(compile(namedModel, { sourceText: `${BRIEF}\nat least 50 repeat customers a week` }).perGoal[0]).toMatchObject({ status: 'withheld' });
-
-    // Codex r2 #3709: a figure is theirs only as written for that quantity. A £ amount is bound by its currency prefix; a
-    // figure in another unit (60 kg) or another quantity's (4 weeks, 2 months on a weekly model) is refused, never borrowed.
-    const define = (quote: string, target: number | null, window: number | null, quantity = 'sales', leaves_out: string[] = []) => defineGoalMeasure(m, { goal_id: 'more_loaves', quantity, cmp: quantity === 'spend' ? '<=' : '>=', frame: null,
-      target: target === null ? null : { value: target, low: null, high: null, range_kind: null }, window: window === null ? null : { periods: window, start: 0 }, quote, leaves_out });
-    const money = 'Success means spending at most £2,500 within 4 weeks.';
-    expect(define(money, 2500, 4, 'spend')).toMatchObject({ ok: true });
-    expect(((define(money, 2500, 4, 'spend') as { model: CanonicalModelT }).model.quantities.find((x) => x.id === 'more_loaves_target'))).toMatchObject({ value: 2500, unit: 'GBP', author: 'person' });
-    expect(define(money, 4, 4, 'spend')).toMatchObject({ ok: false, reason: expect.stringMatching(/do not state that target/) });
-    const mixed = 'At least 380 loaves a week, about 60 kg of bread, within 4 weeks.';
-    expect(define(mixed, 380, 4, 'sales', ['about 60 kg of bread'])).toMatchObject({ ok: true });
-    expect(define(mixed, 60, 4)).toMatchObject({ ok: false, reason: expect.stringMatching(/do not state that target/) });
-    expect(define('At least 380 loaves a week within 2 months.', 380, 2)).toMatchObject({ ok: false, reason: expect.stringMatching(/do not state that deadline in weeks/) });
+    // The compiler's own reading of a measure with an unstated target, or one nothing works out yet (built exactly).
+    const asked = JSON.parse(measured(words)) as CanonicalModelT;
+    setQ(asked, 'more_loaves_target', { status: 'asked', value: null, quote: null, question: 'What figure for "sales" would count as "Reach 380 loaves a week"?' });
+    expect(compile(asked, { sourceText: `${BRIEF}\n${words}` }).asks.map((x) => x.quantity_id)).toContain('more_loaves_target');
+    const named = JSON.parse(measured(words)) as CanonicalModelT;
+    named.quantities.push(q('repeat_customers', 'customer/week', { status: 'unknown', quote: 'at least 50 repeat customers a week', label: 'Repeat customers' }));
+    named.goals = named.goals.map((g) => ({ ...g, measure: { ...g.measure!, quantity: 'repeat_customers' } }));
+    setQ(named, 'more_loaves_target', { unit: 'customer/week', value: 50, quote: 'at least 50 repeat customers a week' });
+    expect(compile(named, { sourceText: `${BRIEF}\nat least 50 repeat customers a week` }).perGoal[0]).toMatchObject({ status: 'withheld' });
   });
 
-  it('DL 23 Oct (batch 4 marketing-r2, r7 re-scope): what a measure leaves out is kept in their words and named; the chance says what it covers and what it leaves out, never that it covers everything', () => {
-    const m = bakery();
-    m.goals = [{ ...m.goals[0]!, measure: null, question: 'What would success look like?' }];
+  it('DL 23 Oct (batch 4 marketing-r2): what a measure leaves out is kept in their words and named; the chance says what it covers and what it leaves out, never that it covers everything', () => {
     const words = 'Success means selling at least 380 loaves a week and 50 new regulars within 4 weeks.';
-    const op = { goal_id: 'more_loaves', quantity: 'sales', cmp: '>=' as const, frame: null, target: { value: 380, low: null, high: null, range_kind: null }, window: { periods: 4, start: 0 }, quote: words };
-    expect(defineGoalMeasure(m, { ...op, leaves_out: ['60 new regulars'] })).toMatchObject({ ok: false, reason: expect.stringMatching(/is not in their words/) });
-    const done = defineGoalMeasure(m, { ...op, leaves_out: ['50 new regulars'] });
-    expect(done.ok).toBe(true);
-    const dm = (done as { model: CanonicalModelT }).model;
-    expect(dm.left_out.at(-1)).toMatchObject({ id: 'more_loaves_leaves_out', text: '50 new regulars', author: 'person', quote: '50 new regulars', concerns: ['more_loaves'] });
-    expect(dm.goals[0]!.measure!.exclusions).toEqual(['more_loaves_leaves_out']);
-    const notes = (model: CanonicalModelT) => (((evaluateCanonical(model, { sourceText: `${BRIEF}\n${words}`, seed: 7 }).view as Json).goal_chance as Json).notes as string[]);
-    expect(notes(dm).some((n) => /^Covers: ‘sales’ being at least 380 loaf \/ week .* · Leaves out: ‘50 new regulars’$/.test(n))).toBe(true);
+    // The measured aim exactly as an approved update writes it: their target and window, and the parts it leaves out.
+    const measured = (leaves: string[], window: boolean, quote = words): CanonicalModelT => {
+      const m = bakery();
+      m.quantities.push(q('more_loaves_target', 'loaf/week', { value: 380, quote }), ...(window ? [q('more_loaves_window', 'week', { value: 4, quote })] : []));
+      const notes = leaves.map((w, i) => ({ id: `more_loaves_leaves_out${i === 0 ? '' : `_${i + 1}`}`, text: w, why: 'It is part of the aim they stated, but it has no measure yet, so the chance does not cover it.',
+        question: `How would you measure "${w}"?`, concerns: ['more_loaves'], author: 'person' as const, party: null, quote: w, approval: 'approved' as const, author_id: null }));
+      m.left_out.push(...notes);
+      m.goals = [{ ...m.goals[0]!, question: null, measure: { quantity: 'sales', per: null, cmp: '>=', target: 'more_loaves_target', frame: 'level', reference: null, aggregation: 'end',
+        window: window ? { origin_event: null, origin_offset: null, start: 0, periods: 'more_loaves_window' } : null, measure_by: 'person', assumptions: [], exclusions: notes.map((n) => n.id) } }];
+      return m;
+    };
+    const goalChance = (model: CanonicalModelT, text = words) => (evaluateCanonical(model, { sourceText: `${BRIEF}\n${text}`, seed: 7 }).view as Json).goal_chance as Json;
+    expect((goalChance(measured(['50 new regulars'], true)).notes as string[]).some((n) => /^Covers: ‘sales’ being at least 380 loaf \/ week .* · Leaves out: ‘50 new regulars’$/.test(n))).toBe(true);
     // A deadline they stated that the model cannot hold yet is named as left out, and never asked for again.
-    const late = defineGoalMeasure(m, { ...op, window: null, leaves_out: ['50 new regulars', 'within 4 weeks'] });
-    expect(late.ok).toBe(true);
-    const ln = notes((late as { model: CanonicalModelT }).model);
+    const ln = goalChance(measured(['50 new regulars', 'within 4 weeks'], false)).notes as string[];
     expect(ln.some((n) => n.endsWith('Leaves out: ‘50 new regulars’ and ‘within 4 weeks’'))).toBe(true);
     expect(ln.some((n) => n.includes('is there one?'))).toBe(false);
     // Codex r7: an equal figure is never read as covered. "380 new regulars" beside a 380 target is not claimed: the chance
     // names only the measured target it uses, and says nothing about what it does not hold.
     const same = 'Success means selling at least 380 loaves a week and 380 new regulars within 4 weeks.';
-    const coincident = defineGoalMeasure(m, { ...op, quote: same, leaves_out: [] });
-    expect(coincident.ok).toBe(true);
-    const gc = (evaluateCanonical((coincident as { model: CanonicalModelT }).model, { sourceText: `${BRIEF}\n${same}`, seed: 7 }).view as Json).goal_chance as Json;
+    const gc = goalChance(measured([], true, same), same);
     expect(JSON.stringify(gc)).not.toContain('regulars');
     expect((gc.notes as string[]).some((n) => n.startsWith('Covers:'))).toBe(false);
-    // Codex r8: no figure in their words is required to be accounted for. "… and 50 new regulars" with nothing listed as left
-    // out is accepted as the measure they named (the deleted equal-number inference refused it).
-    const unlisted = defineGoalMeasure(m, { ...op, leaves_out: [] });
-    expect(unlisted).toMatchObject({ ok: true });
-    expect((unlisted as { model: CanonicalModelT }).model.goals[0]!.measure).toMatchObject({ quantity: 'sales', exclusions: [] });
   });
 
-  it('DL 23 Oct (batch 4 hiring 5/5): an edit with no op is left off the card and said on it; the rest is proposed; the approval applies exactly the card', async () => {
-    replies = [JSON.stringify(bakery())];
-    await turn({ message: BRIEF });
-    const words = 'The oven would cost £2,500, and code quality is judged by review comments.';
-    const deps = { dispatch, proposals: new ProposalStore() };
-    const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] });
-    const price = { op: 'set_quantity', quantity_id: 'oven_price', value: 2500, low: null, high: null, range_kind: null, quote: 'The oven would cost £2,500' };
-    const limitMeasure = { op: 'define_goal_measure', goal_id: 'within_budget', quantity: { label: 'Review comments', unit: 'comment' }, cmp: '<=', frame: null, target: null, window: null, leaves_out: [], quote: 'code quality is judged by review comments' };
-    const propose = (ops: Json[], c = ctx()) => proposeProgramChange(deps, c, ProgramChangeParams.parse({ public_label: 'Your answers', basis: 'their answers', ops })) as Promise<Json>;
-    // All of it inapplicable: no card, only the words.
-    expect(await propose([limitMeasure])).toMatchObject({ status: 'refused', reason: 'edit_not_applicable', detail: 'I can\'t record a measure for a limit yet; it stays a note.' });
-    // Mixed: the card holds the price only, and says what it leaves off.
-    const c = ctx();
-    const card = await propose([price, limitMeasure], c);
-    expect(card.status, JSON.stringify(card)).toBe('ok');
-    expect(card.data.not_included).toEqual(['I can\'t record a measure for a limit yet; it stays a note.']);
-    const p = deps.proposals.get(card.data.proposal_id)!;
-    expect(p.public_label).toBe('Your answers (not on this card: I can\'t record a measure for a limit yet; it stays a note.)');
-    expect(p.operations.map((o) => o.path)).toEqual(['quantity:oven_price']);
-    const before = JSON.parse(JSON.stringify(persisted!.living_model.canonical)) as CanonicalModelT;
-    expect(await applyProgramChange(deps, c, card.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
-    const after = persisted!.living_model.canonical as CanonicalModelT;
-    expect(after.quantities.find((x) => x.id === 'oven_price')).toMatchObject({ value: 2500, author: 'person' });
-    expect(after.limits).toEqual(before.limits);
-  });
-
-  it('DL 23 Oct (mechanism completion, the alpha3 hiring read): the measure they name gets Olumi\'s mechanism on the same card; their 10% and deadline go back onto the aim; a figure only they know is ASKED, then the chance appears', async () => {
+  it('the alpha3 hiring read, through the same update path: the measure they name gets Olumi\'s mechanism on ONE card that shows every change; a figure only they know is ASKED, then the chance appears', async () => {
     const saved = JSON.parse(readFileSync(new URL('./hiring-alpha3.saved.json', import.meta.url), 'utf8')) as { brief: string; canonical: CanonicalModelT };
     replies = [JSON.stringify(saved.canonical)];
     expect((await turn({ message: saved.brief })).json().model_program.saved).toBe(true);
@@ -673,133 +852,103 @@ describe('the model-program turn on the real core route', () => {
     const words = 'We measure productivity by the features we ship each month.';
     const deps = { dispatch, proposals: new ProposalStore() };
     const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] };
-    const op = { op: 'define_goal_measure', goal_id: 'increase_productivity', quantity: { label: 'Features shipped per month', unit: 'feature/month' }, cmp: '>=', frame: 'change_rel',
-      target: 'productivity_increase_target', window: { periods: 'launch_horizon', start: 0 }, leaves_out: [], quote: words };
     // Each attempt is its own turn (a turn shows one card).
-    const propose = () => proposeProgramChange(deps, { ...ctx, turn_id: randomUUID() }, ProgramChangeParams.parse({ public_label: 'Measure productivity', basis: 'their answer', ops: [op] })) as Promise<Json>;
-    // The drafter's whole model again, plus what works the measure out (synthetic Olumi figures, never a test sheet's).
-    const measured = defineGoalMeasure(before, op as never);
-    expect(measured.ok).toBe(true);
-    const completed = (extra: Partial<CanonicalModelT> = {}): string => {
-      const m = JSON.parse(JSON.stringify((measured as { model: CanonicalModelT }).model)) as CanonicalModelT;
-      // It also rewrites one of their figures and an option's name: additions only are taken, so both stay as they were.
-      m.quantities = m.quantities.map((x) => (x.id === 'features_shipped_per_month' ? { ...x, kind: 'derived', status: 'derived', basis: null } : x.id === 'hiring_budget' ? { ...x, value: 150000 } : x));
-      m.options = m.options.map((o) => ({ ...o, label: `${o.label} (Olumi)` }));
-      m.quantities.push(
+    const propose = () => proposeProgramChange(deps, { ...ctx, turn_id: randomUUID() }, ProgramChangeParams.parse({ public_label: 'Measure productivity', basis: 'their answer',
+      request: 'Productivity is measured by the features shipped each month; work that out from the hires.', remove: [] })) as Promise<Json>;
+    // The drafter's whole updated model: their measure on the aim, and what works it out (synthetic Olumi figures, never a test sheet's).
+    const completed = (edit: (m: CanonicalModelT) => void = () => undefined): string => {
+      const m = JSON.parse(JSON.stringify(before)) as CanonicalModelT;
+      m.quantities.push(q('features_shipped_per_month', 'feature/month', { label: 'Features shipped per month', kind: 'derived', status: 'derived', quote: words }),
         q('features_now', 'feature/month', { status: 'asked', question: 'How many features does the team ship in a month now?' }),
         q('lead_effect', 'feature/month/tech_lead', { kind: 'coefficient', status: 'estimated', author: 'olumi', value: 2, low: 0, high: 4, range_kind: 'plausible', basis: 'A lead mostly unblocks others; the size varies widely.' }),
-        q('developer_effect', 'feature/month/developer', { kind: 'coefficient', status: 'estimated', author: 'olumi', value: 1, low: 0.3, high: 1.5, range_kind: 'plausible', basis: 'A new developer adds less than an experienced one while ramping up.' }));
+        q('developer_effect', 'feature/month/developer', { kind: 'coefficient', status: 'estimated', author: 'olumi', value: 1, low: 0.3, high: 1.5, range_kind: 'plausible', basis: 'A new developer adds less than an experienced one at first.' }));
+      m.goals = m.goals.map((g) => (g.id === 'increase_productivity' ? { ...g, question: null, measure: { quantity: 'features_shipped_per_month', per: null, cmp: '>=', target: 'productivity_increase_target',
+        frame: 'change_rel', reference: { kind: 'now', option: null, quantity: null }, aggregation: 'end', window: { origin_event: null, origin_offset: null, start: 0, periods: 'launch_horizon' },
+        measure_by: 'person', assumptions: [], exclusions: [] } } : g));
       m.relations.push({ form: 'effect', id: 'features_rel', defines: 'features_shipped_per_month', base: 'features_now', author: 'olumi', quote: null, ...at,
         terms: [{ driver: 'tech_leads_hired', coefficient: 'lead_effect', author: 'olumi', quote: null, ...at }, { driver: 'developers_hired', coefficient: 'developer_effect', author: 'olumi', quote: null, ...at }] });
-      // Its companion notes on the new link: an assumption, and the claim that assumption names.
-      m.claims.push({ id: 'leads_unblock', text: 'A lead mostly raises output by unblocking the others.', concerns: ['lead_effect'], author: 'olumi', quote: null, ...at });
+      m.claims.push({ id: 'leads_unblock', text: 'A lead mostly raises output by unblocking the others.', concerns: ['lead_effect'], author: 'olumi', quote: null, ...at },
+        { id: 'lead_needs_scope', text: 'A lead helps most once the launch scope is clear.', concerns: ['features_rel'], author: 'olumi', quote: null, ...at });
       m.assumptions.push({ id: 'hires_productive_in_window', text: 'New hires are productive within the launch window.', applied: true, concerns: ['features_rel', 'leads_unblock'], author: 'olumi', quote: null, ...at });
-      // A chain to closure: a claim about the new link, and a condition about that claim only (R ← K ← C).
-      m.claims.push({ id: 'lead_needs_scope', text: 'A lead helps most once the launch scope is clear.', concerns: ['features_rel'], author: 'olumi', quote: null, ...at });
       m.conditions.push({ id: 'scope_agreed_first', text: 'Only once the launch scope is agreed.', kind: 'prerequisite', concerns: ['lead_needs_scope'], author: 'olumi', quote: null, ...at });
-      // Unrelated to what is added: never taken.
-      m.claims.push({ id: 'office_is_noisy', text: 'The office is noisy.', concerns: [], author: 'olumi', quote: null, ...at });
-      return JSON.stringify({ ...m, ...extra });
+      edit(m);
+      return JSON.stringify(m);
     };
-    const reply = (edit: (m: CanonicalModelT) => void) => { const m = JSON.parse(completed()) as CanonicalModelT; edit(m); return JSON.stringify(m); };
-    const noCompletion = async (why: string, body: string, calls = 1) => {
-      replies = Array.from({ length: calls }, () => body);
-      sent.length = 0;
-      const r = await propose();
-      expect(r.status, `${why}: ${JSON.stringify(r)}`).toBe('ok');
-      expect(sent).toHaveLength(calls);
-      expect(r.data.olumi_adds, why).toBeUndefined();
-      expect(savedProgramOf({ living_model: deps.proposals.get(r.data.proposal_id)!.living_model })!.canonical.relations, why).toEqual(before.relations);
-    };
-    // Codex r4 #3709: a figure labelled structure that is no structural constant ("current output = 12", stated by no one)
-    // comes back as the person's question, never Olumi's figure; a calendar conversion (12 month/year) stays structural.
-    const asStructure = reply((d) => { d.quantities.push(q('current_output', 'feature/month', { author: 'structure', value: 12 }), q('months_per_year', 'month/year', { author: 'structure', value: 12 }));
-      (d.relations.find((r) => r.id === 'features_rel') as { base: string }).base = 'current_output'; });
-    const structured = addMechanism((measured as { model: CanonicalModelT }).model, JSON.parse(asStructure) as CanonicalModelT, 'features_shipped_per_month',
-      new Set(['features_shipped_per_month']), () => false);
-    expect(structured.ok).toBe(true);
-    const sm = (structured as { model: CanonicalModelT }).model;
+    const cardModel = (r: Json) => savedProgramOf({ living_model: deps.proposals.get(r.data.proposal_id)!.living_model })!.canonical;
+
+    // Codex r4 #3709: the update is read as a first draft is. A figure labelled structure that is no structural constant
+    // ("current output = 12", stated by no one) comes back as the person's question; a calendar conversion stays structural.
+    replies = [completed((d) => { d.quantities.push(q('current_output', 'feature/month', { author: 'structure', value: 12 }), q('months_per_year', 'month/year', { author: 'structure', value: 12 }));
+      (d.relations.find((r) => r.id === 'features_rel') as { base: string }).base = 'current_output'; })];
+    const structured = await propose();
+    expect(structured.status, JSON.stringify(structured)).toBe('ok');
+    const sm = cardModel(structured);
     expect(sm.quantities.find((x) => x.id === 'current_output')).toMatchObject({ author: 'person', status: 'asked', value: null, quote: null, question: 'What is "current output"?' });
     expect(sm.quantities.find((x) => x.id === 'months_per_year')).toMatchObject({ author: 'structure', status: 'known', value: 12 });
     expect(compile(sm, { sourceText: `${saved.brief}\n${words}` }).perGoal.find((g) => g.goal_id === 'increase_productivity')!.asks).toContain('current_output');
     // Codex r5: 1 in unit "1" is no unit scale, so an unstated "current utilisation = 1" is not structural; 0/1 is, only as a
     // live option's switch; 100 % (a unit's scale) still is.
-    const base = (measured as { model: CanonicalModelT }).model;
+    const base = JSON.parse(completed()) as CanonicalModelT;
     expect(isStructuralConstant(base, q('current_utilisation', '1', { author: 'structure', value: 1 }))).toBe(false);
     expect(isStructuralConstant(base, q('tech_leads_hired', 'tech_lead', { author: 'structure', value: 1 }))).toBe(true);
     expect(isStructuralConstant(base, q('percent_scale', '%', { author: 'structure', value: 100 }))).toBe(true);
-    const util = addMechanism(base, JSON.parse(reply((d) => { d.quantities.push(q('current_utilisation', '1', { author: 'structure', value: 1 })); })) as CanonicalModelT,
-      'features_shipped_per_month', new Set(['features_shipped_per_month']), () => false);
-    expect((util as { model: CanonicalModelT }).model.quantities.find((x) => x.id === 'current_utilisation')).toMatchObject({ status: 'asked', author: 'person', value: null });
-    // Codex r6, the same reading as the first draft: a 1 as the effect's base ("current features = 1") is their question, or
-    // their figure where its quote is in their words; a × 1 factor stays Olumi's constant.
-    const complete = (edit: (d: CanonicalModelT) => void, isTheirs: (quote: string | null) => boolean = () => false) =>
-      addMechanism(base, JSON.parse(reply(edit)) as CanonicalModelT, 'features_shipped_per_month', new Set(['features_shipped_per_month']), isTheirs) as { ok: boolean; model: CanonicalModelT };
+    const read = (edit: (d: CanonicalModelT) => void) => normalise(JSON.parse(completed(edit)) as CanonicalModelT);
+    expect(read((d) => { d.quantities.push(q('current_utilisation', '1', { author: 'structure', value: 1 })); }).quantities.find((x) => x.id === 'current_utilisation'))
+      .toMatchObject({ status: 'asked', author: 'person', value: null });
+    // Codex r6/r7: a 1 as the effect's base ("current features = 1") is their question, even with their words beside it; a × 1 factor stays Olumi's constant.
     const onBase = (quote: string | null, value: number) => (d: CanonicalModelT) => { d.quantities.push(q('current_features', 'feature/month', { author: 'structure', value, quote }));
       (d.relations.find((r) => r.id === 'features_rel') as { base: string }).base = 'current_features'; };
-    expect(complete(onBase(null, 1)).model.quantities.find((x) => x.id === 'current_features')).toMatchObject({ status: 'asked', author: 'person', value: null });
-    // Codex r7: never read as theirs, even with their words beside it: a figure labelled structure is always asked.
-    const told = `${words} We ship 4 features a month.`;
-    expect(complete(onBase('We ship 4 features a month', 4), (x) => x !== null && told.includes(x)).model.quantities.find((x) => x.id === 'current_features'))
-      .toMatchObject({ status: 'asked', author: 'person', value: null, quote: null });
-    const times1 = complete((d) => {
+    expect(read(onBase(null, 1)).quantities.find((x) => x.id === 'current_features')).toMatchObject({ status: 'asked', author: 'person', value: null });
+    expect(read(onBase('We ship 4 features a month', 4)).quantities.find((x) => x.id === 'current_features')).toMatchObject({ status: 'asked', author: 'person', value: null, quote: null });
+    expect(read((d) => {
       d.quantities.push(q('features_scale', '1', { author: 'structure', value: 1 }), q('features_base', 'feature/month', { kind: 'derived', status: 'derived', author: 'olumi' }));
       d.relations.push({ form: 'definition', id: 'features_base_rel', defines: 'features_base', op: 'product', parts: [{ id: 'features_now', power: 1 }, { id: 'features_scale', power: 1 }], author: 'olumi', quote: null, ...at });
       (d.relations.find((r) => r.id === 'features_rel') as { base: string }).base = 'features_base';
-    });
-    expect(times1.ok).toBe(true);
-    expect(times1.model.quantities.find((x) => x.id === 'features_scale')).toMatchObject({ author: 'structure', status: 'known', value: 1 });
-    // Codex #3710: completion reads its ADDITIONS as the first draft does. A new index base 1 whose effect's coefficient is
-    // itself new (unit 1/tech_lead) stays structure on both paths.
-    const indexed = (d: CanonicalModelT) => {
+    }).quantities.find((x) => x.id === 'features_scale')).toMatchObject({ author: 'structure', status: 'known', value: 1 });
+    // Codex #3710: a new index base 1 whose effect's coefficient is itself new (unit 1/tech_lead) stays structure.
+    expect(read((d) => {
       d.quantities.push(q('features_index_now', '1', { author: 'structure', value: 1 }), q('features_index', '1', { kind: 'derived', status: 'derived', author: 'olumi' }),
         q('index_per_lead', '1/tech_lead', { kind: 'coefficient', status: 'estimated', author: 'olumi', value: 0.1, low: 0, high: 0.2, range_kind: 'plausible', basis: 'Synthetic.' }));
       d.relations.push({ form: 'effect', id: 'features_index_rel', defines: 'features_index', base: 'features_index_now',
         terms: [{ driver: 'tech_leads_hired', coefficient: 'index_per_lead', author: 'olumi', quote: null, ...at }], author: 'olumi', quote: null, ...at });
-    };
-    const viaCompletion = complete(indexed);
-    expect(viaCompletion.ok).toBe(true);
-    expect(viaCompletion.model.quantities.find((x) => x.id === 'features_index_now')).toMatchObject({ author: 'structure', status: 'known', value: 1 });
-    const asFirstDraft = JSON.parse(completed()) as CanonicalModelT;
-    indexed(asFirstDraft);
-    expect(normalise(asFirstDraft).quantities.find((x) => x.id === 'features_index_now')).toMatchObject({ author: 'structure', status: 'known', value: 1 });
-    // Refused whole: a note naming a record that is not there (its sentence goes back for the drafter's two repairs first).
-    await noCompletion('dangling note', reply((m) => { m.assumptions[m.assumptions.length - 1]!.concerns.push('no_such_record'); }), 3);
-    // Only the measure this same answer created may be worked out: never a quantity already in the model.
-    const existing = { ...(measured as { model: CanonicalModelT }).model };
-    expect(addMechanism(existing, JSON.parse(completed()) as CanonicalModelT, 'features_shipped_per_month', new Set(), () => false))
-      .toMatchObject({ ok: false, reason: expect.stringMatching(/named in this same answer/) });
-    // Nor a figure they stated in this same answer (new, but known): only the blank placeholder of the measure.
-    const statedNow = { ...existing, quantities: [...existing.quantities, q('stated_now', 'feature/month', { value: 12, quote: words })] };
-    const onStated = reply((d) => { d.quantities.push(q('stated_now', 'feature/month', { value: 12, quote: words })); (d.relations.find((r) => r.id === 'features_rel') as { defines: string }).defines = 'stated_now'; });
-    expect(addMechanism(statedNow, JSON.parse(onStated) as CanonicalModelT, 'stated_now', new Set(['stated_now']), () => false))
-      .toMatchObject({ ok: false, reason: expect.stringMatching(/named in this same answer/) });
+    }).quantities.find((x) => x.id === 'features_index_now')).toMatchObject({ author: 'structure', status: 'known', value: 1 });
 
-    // Negative: a completion that INVENTS a figure only they know (today's level as theirs) is refused whole; the card holds
-    // only their measure, which nothing works out yet, so no chance is claimed.
-    const invented = JSON.parse(completed()) as CanonicalModelT;
-    invented.quantities = invented.quantities.map((x) => (x.id === 'features_now' ? { ...x, status: 'known', value: 12, question: null, quote: 'about 12 a month' } : x));
-    replies = [JSON.stringify(invented)];
+    // Refused: a note naming a record that is not there, after the drafter's two repairs (its sentence goes back each time).
+    replies = Array.from({ length: 3 }, () => completed((d) => { d.assumptions[d.assumptions.length - 1]!.concerns.push('no_such_record'); }));
     sent.length = 0;
-    const refusedCard = await propose();
-    expect(refusedCard.status, JSON.stringify(refusedCard)).toBe('ok');
-    expect(sent).toHaveLength(1);
-    expect(refusedCard.data.olumi_adds).toBeUndefined();
-    const heldModel = savedProgramOf({ living_model: deps.proposals.get(refusedCard.data.proposal_id)!.living_model })!.canonical;
-    expect(heldModel.relations).toEqual(before.relations);
-    expect(compile(heldModel, { sourceText: `${saved.brief}\n${words}` }).perGoal.find((g) => g.goal_id === 'increase_productivity')).toMatchObject({ status: 'withheld' });
+    expect(await propose()).toMatchObject({ status: 'refused', reason: 'does_not_compile' });
+    expect(sent).toHaveLength(3);
+    // Refused: a figure only they know, INVENTED as theirs (words they never wrote).
+    replies = [completed((d) => setQ(d, 'features_now', { status: 'known', value: 12, question: null, quote: 'about 12 a month' }))];
+    expect(await propose()).toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['features_now'] } });
+    // Refused: one of their figures rewritten under their EARLIER words (their budget, quoted from the brief).
+    const budget = before.quantities.find((x) => x.author === 'person' && x.value !== null && x.kind === 'fact')!;
+    replies = [completed((d) => setQ(d, budget.id, { value: budget.value! + 1 }))];
+    expect(await propose()).toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: [budget.id] } });
+    // Refused: a record left out without a listed removal; nothing is removed unless the person asks.
+    const dropped = before.options[0]!.id;
+    replies = [completed((d) => { d.options = d.options.filter((o) => o.id !== dropped); })];
+    expect(await propose()).toMatchObject({ status: 'refused', reason: 'omitted_record', data: { ids: [dropped] } });
+    // A change the drafter makes beyond the request is never hidden: an option it renames is on the card, before and after.
+    replies = [completed((d) => { d.options = d.options.map((o) => ({ ...o, label: `${o.label} (Olumi)` })); })];
+    const renamed = await propose();
+    expect(renamed.status, JSON.stringify(renamed)).toBe('ok');
+    expect(renamed.data.changes.filter((c: Json) => c.kind === 'option').map((c: Json) => [c.id, c.action, c.label])).toEqual(before.options.map((o) => [o.id, 'change', `${o.label} (Olumi)`]));
 
-    // The completion: one drafter call; Olumi's parts are visibly Olumi's and provisional, with a basis; the person's
-    // figure it needs is a question; their 10% and their three months are the aim's target and window again.
+    // The completion: one drafter call; every change on the card, Olumi's visibly Olumi's and provisional, with a basis; the
+    // person's figure it needs is a question; their 10% and their three months are the aim's target and window again.
     replies = [completed()];
     sent.length = 0;
     const card = await propose();
     expect(card.status, JSON.stringify(card)).toBe('ok');
     expect(sent).toHaveLength(1);
-    const adds = ['relation:features_rel', 'quantity:features_now', 'quantity:lead_effect', 'quantity:developer_effect', 'assumption:hires_productive_in_window',
-      'condition:scope_agreed_first', 'claim:leads_unblock', 'claim:lead_needs_scope'];
-    expect(card.data.olumi_adds).toEqual(adds);
-    expect(deps.proposals.get(card.data.proposal_id)!.operations.map((o) => o.path)).toEqual(['goal:increase_productivity', ...adds]);
+    expect(card.data.changes.map((c: Json) => [c.id, c.kind, c.action, c.author])).toEqual([
+      ['features_shipped_per_month', 'quantity', 'add', 'person'], ['features_now', 'quantity', 'add', 'person'], ['lead_effect', 'quantity', 'add', 'olumi'], ['developer_effect', 'quantity', 'add', 'olumi'],
+      ['features_rel', 'relation', 'add', 'olumi'], ['increase_productivity', 'goal', 'change', 'person'], ['leads_unblock', 'record', 'add', 'olumi'], ['lead_needs_scope', 'record', 'add', 'olumi'],
+      ['hires_productive_in_window', 'record', 'add', 'olumi'], ['scope_agreed_first', 'record', 'add', 'olumi']]);
+    expect(card.data.changes.find((c: Json) => c.id === 'features_rel').after).toBe('form: effect; works out: "Features shipped per month"; base: "features now" (asked); '
+      + 'link 1 driver: "Tech leads hired" 0 tech_lead; link 1 size: "lead effect" 0–4 feature/month/tech_lead; link 1 whose: Olumi’s; '
+      + 'link 2 driver: "Additional developers hired" 0 developer; link 2 size: "developer effect" 0.3–1.5 feature/month/developer; link 2 whose: Olumi’s; whose: Olumi’s');
     expect(registered).toHaveLength(1); // proposing saves nothing
     expect(await applyProgramChange(deps, ctx, card.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
     const after = persisted!.living_model.canonical as CanonicalModelT;
@@ -808,30 +957,24 @@ describe('the model-program turn on the real core route', () => {
       window: { start: 0, periods: 'launch_horizon' }, measure_by: 'person' });
     expect(after.quantities.find((x) => x.id === 'features_shipped_per_month')).toMatchObject({ kind: 'derived', status: 'derived', author: 'person', quote: words });
     expect(after.quantities.find((x) => x.id === 'features_now')).toMatchObject({ status: 'asked', value: null, author: 'person', quote: null });
-    for (const id of ['lead_effect', 'developer_effect']) expect(after.quantities.find((x) => x.id === id)).toMatchObject({ author: 'olumi', status: 'estimated', approval: 'proposed', basis: expect.any(String) });
-    expect(after.relations.find((r) => r.id === 'features_rel')).toMatchObject({ author: 'olumi', approval: 'proposed' });
-    expect(after.assumptions.at(-1)).toMatchObject({ id: 'hires_productive_in_window', author: 'olumi', approval: 'proposed', concerns: ['features_rel', 'leads_unblock'] });
-    expect(after.claims.slice(before.claims.length).map((x) => [x.id, x.author, x.approval])).toEqual([['leads_unblock', 'olumi', 'proposed'], ['lead_needs_scope', 'olumi', 'proposed']]);
-    expect(after.conditions.slice(before.conditions.length).map((x) => x.id)).toEqual(['scope_agreed_first']);
-    // Everything they had stays as it was: every earlier record, its author and words, and the history (two new entries).
-    expect(after.quantities.filter((x) => before.quantities.some((b) => b.id === x.id) && x.id !== 'features_shipped_per_month')).toEqual(before.quantities);
-    expect(after.relations.slice(0, before.relations.length)).toEqual(before.relations);
-    expect(after.assumptions.slice(0, before.assumptions.length)).toEqual(before.assumptions);
-    expect(after.claims.slice(0, before.claims.length)).toEqual(before.claims);
-    expect(after.conditions.slice(0, before.conditions.length)).toEqual(before.conditions);
-    expect({ ...after, quantities: [], relations: [], goals: [], history: [], assumptions: [], claims: [], conditions: [] }).toEqual({ ...before, quantities: [], relations: [], goals: [], history: [], assumptions: [], claims: [], conditions: [] });
-    expect(after.history.slice(0, before.history.length)).toEqual(before.history);
-    expect(after.history.slice(before.history.length).map((h) => h.id)).toEqual(['increase_productivity', 'features_shipped_per_month']);
+    // Approving the card records acceptance of Olumi's parts; their author stays Olumi (host-owned, never the AI's).
+    for (const id of ['lead_effect', 'developer_effect']) expect(after.quantities.find((x) => x.id === id)).toMatchObject({ author: 'olumi', status: 'estimated', approval: 'approved', author_id: null, basis: expect.any(String) });
+    expect(after.relations.find((r) => r.id === 'features_rel')).toMatchObject({ author: 'olumi', approval: 'approved', terms: [{ author: 'olumi', approval: 'approved' }, { author: 'olumi', approval: 'approved' }] });
+    // Everything they had stays as it was, by id: every earlier record, its author and words; the history gains the one change.
+    for (const family of ['quantities', 'relations', 'limits', 'options', 'risks', 'claims', 'evidence', 'assumptions', 'dissent', 'conditions', 'left_out'] as const) {
+      for (const r of before[family] as { id: string }[]) expect((after[family] as { id: string }[]).find((x) => x.id === r.id), `${family}:${r.id}`).toEqual(r);
+    }
+    expect(after.history).toEqual([...before.history, expect.objectContaining({ id: 'increase_productivity', change: 'superseded' })]);
     // An option → outcome path now: the aim waits on exactly the one figure only they know, never on a guess.
     const waiting = compile(after, { sourceText: persisted!.living_model.person_words.join('\n') });
     expect(waiting.errors).toEqual([]);
     expect(waiting.perGoal.find((g) => g.goal_id === 'increase_productivity')).toMatchObject({ status: 'asks', asks: ['features_now'] });
-    expect(waiting.asks.map((a) => a.quantity_id)).toContain('features_now');
 
-    // Their answer to that question: each option's chance of the aim appears.
+    // Their answer to that question, through the same path: each option's chance of the aim appears.
     const now = 'We ship about 12 features a month now.';
     const ctx2 = { ...ctx, turn_id: randomUUID(), verified_user_messages: [now] };
-    const fill = await proposeProgramChange(deps, ctx2, { public_label: 'Features now', basis: 'their answer', ops: [{ op: 'set_quantity', quantity_id: 'features_now', value: 12, low: null, high: null, range_kind: null, quote: now }] }) as Json;
+    replies = [savedWith((d) => setQ(d, 'features_now', { status: 'known', value: 12, question: null, quote: now, basis: APPROXIMATE_FIGURE }))];
+    const fill = await proposeProgramChange(deps, ctx2, { public_label: 'Features now', basis: 'their answer', request: 'They ship about 12 features a month now.', remove: [] }) as Json;
     expect(fill.status, JSON.stringify(fill)).toBe('ok');
     expect(await applyProgramChange(deps, ctx2, fill.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
     const view = (persisted!.living_model.runs.at(-1).result as Json).canonical_analysis_view as Json;

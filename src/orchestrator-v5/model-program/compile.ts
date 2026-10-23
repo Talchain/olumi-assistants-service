@@ -11,7 +11,7 @@
  *    → `executable: null`. Having no goal, or an aim with no measure, is NEVER an error (phase 0b: forced goals were the only
  *    unfaithful drafts).
  *  · ASKS are legitimate, successful outcomes: a figure only the person can give. Each ask fills EXACTLY ONE quantity
- *    (`fillQuantity` in answer.ts) and lists what it feeds; each goal lists its own asks, so "answer these and the chance
+ *    (an update's postimage sets it) and lists what it feeds; each goal lists its own asks, so "answer these and the chance
  *    appears" is true by construction. An asked fact is NEVER removed or given a value by the compiler: finite numerical
  *    agreement cannot prove cancellation or its domain (the buddy's BLOCK, upheld by the DL). Cancellation may only ever be
  *    PROVEN from the canonical forms with its domain conditions, and only after a PL review: not built.
@@ -249,7 +249,7 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
     if (allIds.has(r.id)) err('duplicate_id', `The id "${r.id}" is used twice (a ${allIds.get(r.id)} and a ${family}); give each record its own id.`, [r.id]);
     else allIds.set(r.id, family);
   }
-  for (const r of [...model.quantities, ...model.goals, ...model.limits]) if (r.label.trim() === '') err('label', `"${r.id}" has no label; give it a short name in the person's words.`, [r.id]);
+  for (const r of [...model.quantities, ...model.goals, ...model.limits, ...model.risks]) if (r.label.trim() === '') err('label', `"${r.id}" has no label; give it a short name in the person's words.`, [r.id]);
   const Q = new Map(model.quantities.map((q) => [q.id, q] as const));
   const name = (id: string) => (Q.has(id) ? `"${Q.get(id)!.label}" (${id})` : `"${id}"`);
   const isQ = (ref: string, where: string, owner: string): boolean => {

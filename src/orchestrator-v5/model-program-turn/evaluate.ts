@@ -5,7 +5,7 @@
  *  · compile (S1 `compile.ts`) against the person's own words, so a quote not in them stays UNVERIFIED;
  *  · simulate (S2) the executable subset, on the scenario's seed;
  *  · present (S2 `present.ts`) to the `canonical_analysis_view.v1` fields; a goal waiting on one asked figure gets S2's
- *    tipping threshold, probed with S1's `fillQuantity` then `compile`;
+ *    tipping threshold, probed by setting the asked figure on the compiler's reading, then `compile`;
  *  · project (S1 `project.ts`) to the GraphV3 display graph, every record shown, the calculation the compiled subset.
  * When nothing calculates yet (every measured goal waits, or the draft does not compile) there is no executable model to
  * present: the view then carries each option's withheld cell with the questions, and the thresholds alone.
@@ -13,7 +13,6 @@
 import { createHash } from 'node:crypto';
 import { isApproximate, normalise, compile, type CompileResult } from '../model-program/compile.js';
 import type { CanonicalModelT } from '../model-program/canonical.js';
-import { fillQuantity } from '../model-program/answer.js';
 import { project, type Projection } from '../model-program/project.js';
 import type { ExecutableModel } from '../model-program/executable.js';
 import { simulate } from '../model-program/simulate/simulate.js';
@@ -87,9 +86,12 @@ function quantityMeta(model: CanonicalModelT, compiled: CompileResult, x: Execut
 function probeFor(model: CanonicalModelT, goalId: string, askId: string, sourceText: string): TippingProbe {
   return {
     build: (value: number) => {
-      const filled = fillQuantity(model, askId, { value }, PROBE_QUOTE);
-      if (!filled.ok) return null;
-      const x = compile(filled.model, { sourceText }).executable;
+      // A what-if on the compiler's reading, never an edit: the asked figure set to the probed value.
+      const read = normalise(model);
+      if (!read.quantities.some((q) => q.id === askId && q.status !== 'derived')) return null;
+      const filled = { ...read, quantities: read.quantities.map((q) => (q.id === askId ? { ...q, value, low: null, high: null, range_kind: null, status: 'known' as const,
+        author: 'person' as const, party: null, quote: PROBE_QUOTE, question: null, basis: null, approval: 'approved' as const } : q)) };
+      const x = compile(filled, { sourceText }).executable;
       return x !== null && x.goals.some((g) => g.id === goalId) ? x : null;
     },
   };

@@ -3,23 +3,26 @@
  * whose saved model is a program, each tool works on the canonical model:
  *  · read_canonical_context: the program as the agent reads it (quantities with their status and who gave them, the
  *    questions still open, the stored Run's words);
- *  · propose_change: canonical operations (`edits.ts`). The proposed model is compiled and evaluated now, so the card the
- *    person approves holds the exact model AND the Run it would store; nothing is saved;
+ *  · propose_change: the change the person asked for, in words, and the ids they asked to remove. Olumi's drafter writes the
+ *    WHOLE updated model (`proposePostimage`); the one validator checks it exactly (`validatePostimage`), and it is compiled
+ *    and evaluated now, so the card the person approves holds the exact model, EVERY change on it, and the Run it would
+ *    store; nothing is saved;
  *  · apply_change: on the person's approval of THAT proposal, its model and Run are written as ONE core write on the
  *    proposal's base (CAS); a model that moved since is `superseded`; this operation's own earlier save is never repeated;
  *  · run_analysis: shows the stored Run when it is current; otherwise evaluates a NEW Run and stores it.
- * The canvas's figure edits (`applyCanvasFigure`) are the person's own hand: one figure, saved with its Run, no card.
+ * The canvas's figure edits (`applyCanvasFigure`) are the person's own hand: one figure, built exactly from its target and
+ * value (no AI call), through the SAME validator, saved with its Run; the typed edit is its own approval, so no card.
  */
 import { z } from 'zod-v4';
 import type { InternalDispatch } from '../agent-lane/runtime/agent-capabilities.js';
 import type { AgentToolContext } from '../agent-lane/runtime/agent-tools.js';
-import { createProposal, type ProposalOperation, type ProposalStore, type StructuredProposal } from '../agent-lane/proposal.js';
+import { createProposal, type ProposalChange, type ProposalOperation, type ProposalStore, type StructuredProposal } from '../agent-lane/proposal.js';
 import { findOperationVersion } from '../path-b/tools/core-write.js';
 import { isNoModelYet, isSavedRead, readSaved } from '../path-b/tools/context-tool.js';
 import { ok, refused, unavailable, type ToolOutcome } from '../path-b/tools/outcome.js';
-import type { CanonicalModelT } from '../model-program/canonical.js';
-import { completeMechanism, ledgeredResponsesCall } from './draft.js';
-import { applyOps, ProgramOp, quotedIn, type ProgramOpT } from './edits.js';
+import type { CanonicalModelT, CanonicalQuantityT } from '../model-program/canonical.js';
+import { ledgeredResponsesCall, proposePostimage } from './draft.js';
+import { validatePostimage } from './postimage.js';
 import { isSaved, postimageOf, programOperationId, savePostimage, withNewRun } from './program-save.js';
 import { livingModelOf, MODEL_PROGRAM, programReadOf, reopenProgram, savedProgramOf, unreadableWords, type SavedProgram } from './program-store.js';
 import { shownRun, type StoredRun } from './run-receipt.js';
@@ -30,14 +33,16 @@ export interface ProgramToolDeps { readonly dispatch: InternalDispatch; readonly
 
 /** Said with the turn's state on a program scenario: how its tools work. The standing instructions stay byte for byte. */
 export const PROGRAM_TURN_GUIDANCE = 'This scenario\'s model is a model program: read_canonical_context gives its quantities (with who gave each figure), goals, limits, options, open questions and its stored Run. '
-  + 'To change it, call propose_change with ops: set_quantity (one input quantity\'s figure or range: an answer to an open question, or a corrected figure), set_range_kind (how to read a range they gave), set_goal_target, define_goal_measure (how an aim with no measure is measured, as they said it), add_option or rename_option, each quoting the person\'s exact words, using the ids read_canonical_context gives. '
-  + 'Put every edit the person gave in ONE propose_change, as several ops: a turn shows one card, and a second proposal in the same turn is refused. '
-  + 'The person approves the card; apply_change then saves the model with a new Run.';
+  + 'Only when the person asks to change the model (an answer, a correction, a new item or a removal), call propose_change ONCE with the whole change in request, '
+  + 'with their exact words for every figure of theirs, and in remove the ids (from read_canonical_context) of anything they asked to remove. '
+  + 'Olumi\'s drafter writes the updated model and the card shows every change. Explanations and questions need no proposal. '
+  + 'A turn shows one card; the person approves it, and apply_change then saves the model with a new Run.';
 
 export const ProgramChangeParams = z.object({
   public_label: z.string().describe('What the person is asked to approve, in plain words.'),
   basis: z.string().describe('Why Olumi proposes it.'),
-  ops: z.array(ProgramOp).describe('The edits, in order: each one figure, target or option. Use the ids read_canonical_context gives.'),
+  request: z.string().describe('The change the person asked for, in plain words, with their exact words for every figure of theirs.'),
+  remove: z.array(z.string()).describe('The ids of the items the person asked to remove, from read_canonical_context; [] for none.'),
 }).strict();
 export type ProgramChangeArgs = z.infer<typeof ProgramChangeParams>;
 
@@ -83,17 +88,6 @@ export async function readProgramContext(deps: ProgramToolDeps, ctx: Ctx): Promi
   });
 }
 
-/** The card's rows: one per edit, on the record it changes. */
-const operationsOf = (ops: readonly ProgramOpT[]): ProposalOperation[] => ops.map((o): ProposalOperation => ({ op: 'living_change',
-  path: o.op === 'set_quantity' || o.op === 'set_range_kind' ? `quantity:${o.quantity_id}` : o.op === 'set_goal_target' || o.op === 'define_goal_measure' ? `goal:${o.goal_id}` : o.op === 'add_option' ? `option:${o.label}` : `option:${o.option_id}`,
-  value: { change: o.op === 'add_option' ? 'add' : 'change', after: o } }));
-
-/** The card's rows for what Olumi's mechanism completion added: each new relation and quantity, as Olumi's. */
-const additionsOf = (before: CanonicalModelT, after: CanonicalModelT): ProposalOperation[] => (
-  [['relation', 'relations'], ['quantity', 'quantities'], ['assumption', 'assumptions'], ['condition', 'conditions'], ['claim', 'claims'], ['evidence', 'evidence']] as const)
-  .flatMap(([kind, family]) => (after[family] as readonly { id: string }[]).filter((r) => !(before[family] as readonly { id: string }[]).some((x) => x.id === r.id))
-    .map((r): ProposalOperation => ({ op: 'living_change', path: `${kind}:${r.id}`, value: { change: 'add', after: r } })));
-
 /**
  * The program card each turn has already prepared. A turn shows ONE card: with two unapproved proposals the route offers none
  * (approval-chips.ts: approving one would make the other stale), so the person could save nothing (batch 2 mrr-r3).
@@ -103,7 +97,7 @@ const preparedThisTurn = new Map<string, string>();
 const PREPARING = '';
 
 export async function proposeProgramChange(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs): Promise<ToolOutcome> {
-  if (args.ops.length === 0) return refused('no_change');
+  if (args.request.trim() === '' && args.remove.length === 0) return refused('no_change');
   const turnKey = ctx.turn_id === undefined ? undefined : `${ctx.scenario_id}:${ctx.turn_id}`;
   if (turnKey === undefined) return prepare(deps, ctx, args);
   // Claimed before the first await: the SDK runs a turn's tool calls together, so two proposals race.
@@ -122,40 +116,24 @@ export async function proposeProgramChange(deps: ProgramToolDeps, ctx: Ctx, args
 async function prepare(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs): Promise<ToolOutcome> {
   const base = await savedProgram(deps, ctx);
   if ('status' in base) return base;
+  const program = base.program;
   // A quote is the person's own words, from this conversation or what they gave before; never Olumi's paraphrase.
-  const theirs = [...base.program.person_words, ...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])];
-  const unquoted = args.ops.filter((o) => !quotedIn(o.quote, theirs));
-  if (unquoted.length > 0) return refused('quote_not_in_their_words', 'Each edit quotes the person\'s exact words; copy them from what they wrote.', { ops: unquoted.map((o) => o.op) });
-  // Each edit on its own (batch 4 hiring: one edit with no op, a limit's measure, refused every answer with it): what cannot be
-  // applied is left off the card and said on it; the card, and so the approval, holds exactly the edits applied.
-  let editedModel = base.program.canonical;
-  const ops: ProgramOpT[] = [];
-  const notIncluded: string[] = [];
-  for (const op of args.ops) {
-    const r = applyOps(editedModel, [op]);
-    if (r.ok) { editedModel = r.model; ops.push(op); } else notIncluded.push(r.reason);
-  }
-  if (ops.length === 0) return refused('edit_not_applicable', notIncluded.join(' '));
-  const edited = { model: editedModel };
-  const words = [...new Set([...base.program.person_words, ...ops.map((o) => o.quote).filter((q) => !base.program.person_words.some((w) => quotedIn(q, [w])))])];
-  // A measure they named that nothing works out yet: Olumi's drafter proposes its mechanism, on this same card.
-  let model = edited.model;
-  const fresh = new Set(edited.model.quantities.filter((q) => !base.program.canonical.quantities.some((b) => b.id === q.id)).map((q) => q.id));
-  for (const goalId of ops.flatMap((o) => (o.op === 'define_goal_measure' ? [o.goal_id] : []))) {
-    const done = await completeMechanism(model, goalId, words, ledgeredResponsesCall(), fresh, (q) => q !== null && quotedIn(q, words));
-    if (done !== null) model = done.model;
-  }
-  const next = withNewRun({ ...base.program, canonical: model, person_words: words });
+  const turnWords = [...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])].filter((w) => !program.person_words.includes(w));
+  const fresh = [...new Set(turnWords)];
+  const words = [...program.person_words, ...fresh];
+  const draft = await proposePostimage(program.canonical, words, args.request, args.remove, ledgeredResponsesCall());
+  if (draft.model === null) return refused('no_model_back', 'Olumi could not write the updated model just now; nothing changed.');
+  const v = validatePostimage(program.canonical, draft.model, { removals: args.remove, words, fresh, approver: ctx.authenticated_user_id });
+  if (!v.ok) return refused(v.code, v.reason, { ids: v.ids });
+  // The person's words this turn are kept with the model: what it was changed from, in their words.
+  const next = withNewRun({ ...program, canonical: v.model, person_words: words });
   if (next.evaluation.compiled.errors.length > 0) return refused('does_not_compile', next.evaluation.compiled.errors.slice(0, 3).map((e) => e.message).join(' '));
-  const adds = additionsOf(edited.model, model);
   const p = deps.proposals.put(createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
-    base_graph_identity_hash: base.saved.graphHash, base_model_identity: base.saved.identity!, operations: [...operationsOf(ops), ...adds],
+    base_graph_identity_hash: base.saved.graphHash, base_model_identity: base.saved.identity!,
+    operations: v.changes.map((c): ProposalOperation => ({ op: 'living_change', path: `${c.kind}:${c.id}`, value: { change: c.action } })),
     provenance: { authored_by: 'model_proposed', basis: args.basis }, validation: { admitted: true, loss_count: 0, refusals: [] },
-    public_label: notIncluded.length > 0 ? `${args.public_label} (not on this card: ${notIncluded.join(' ')})` : args.public_label,
-    living_model: livingModelOf(next.program) }));
-  return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: base.saved.graphHash, ops,
-    ...(notIncluded.length > 0 ? { not_included: notIncluded } : {}),
-    ...(adds.length > 0 ? { olumi_adds: adds.map((o) => o.path) } : {}), would_show: runWords(next.run) });
+    public_label: args.public_label, living_model: livingModelOf(next.program), changes: v.changes }));
+  return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: base.saved.graphHash, changes: v.changes, would_show: runWords(next.run) });
 }
 
 /** A proposal this module prepared: it carries the complete program (model and Run) it would write. */
@@ -222,7 +200,8 @@ export async function runProgram(deps: ProgramToolDeps, ctx: Ctx): Promise<ToolO
  */
 export type CanvasFigure = { readonly quantity_id: string } | { readonly goal_id: string };
 export async function applyCanvasFigure(deps: Pick<ProgramToolDeps, 'dispatch'>, scenarioId: string, edit: { readonly target: CanvasFigure; readonly value: number | null;
-  readonly low?: number | null; readonly high?: number | null; readonly operation_key: string }): Promise<{ readonly status: 'saved' | 'refused' | 'unknown'; readonly reason?: string; readonly receipt?: unknown }> {
+  readonly low?: number | null; readonly high?: number | null; readonly operation_key: string }): Promise<{ readonly status: 'saved' | 'refused' | 'unknown'; readonly reason?: string; readonly receipt?: unknown;
+  readonly changes?: readonly ProposalChange[] }> {
   const saved = await readSaved(deps, scenarioId);
   if (!isSavedRead(saved)) return { status: 'refused', reason: 'Your model could not be read just now.' };
   const read = programReadOf(saved.graph);
@@ -244,14 +223,25 @@ export async function applyCanvasFigure(deps: Pick<ProgramToolDeps, 'dispatch'>,
     : edit.low != null && edit.high != null ? `${edit.low} to ${edit.high} ${q.unit}` : `${edit.value} ${q.unit}`;
   // What the person typed is their words for this figure, so the compiler finds them as theirs.
   const words = `${goal !== undefined ? `${goal.label} target` : q.label}: ${shownAs}`;
-  const figure = onRange ? { value: edit.value, low: q.low, high: q.high, range_kind: q.range_kind, quote: words }
-    : { value: edit.value, low: edit.low ?? null, high: edit.high ?? null, range_kind: null, quote: words };
-  const edited = applyOps(program.canonical, [goal !== undefined ? { op: 'set_goal_target', goal_id: goal.id, ...figure } : { op: 'set_quantity', quantity_id: q.id, ...figure }]);
-  if (!edited.ok) return { status: 'refused', reason: edited.reason };
-  const next = withNewRun({ ...program, canonical: edited.model, person_words: [...program.person_words, words] });
+  // The exact postimage: this ONE figure as theirs, in the words they typed (a goal's target shared with another goal or a
+  // limit first gets its own quantity, so the other keeps its figure). No AI call; the same validator as every change.
+  if (q.status === 'derived') return { status: 'refused', reason: `"${q.label}" is worked out by its relation; change one of its inputs.` };
+  const [low, high] = onRange ? [q.low, q.high] : [edit.low ?? null, edit.high ?? null];
+  if (edit.value === null && (low === null || high === null)) return { status: 'refused', reason: 'A figure needs a value, or both ends of a range.' };
+  if (low !== null && high !== null && low > high) return { status: 'refused', reason: `The low end ${low} is above the high end ${high}.` };
+  const shared = goal !== undefined && (program.canonical.goals.some((x) => x.id !== goal.id && x.measure?.target === q.id) || program.canonical.limits.some((l) => l.measure?.bound === q.id));
+  const id = shared ? `${goal!.id}_target` : q.id;
+  const filled: CanonicalQuantityT = { ...q, id, value: edit.value, low, high, range_kind: onRange ? q.range_kind : null, status: 'known', author: 'person', party: null,
+    quote: words, question: null, basis: null, approval: 'approved' };
+  const canonical: CanonicalModelT = shared
+    ? { ...program.canonical, quantities: [...program.canonical.quantities, filled], goals: program.canonical.goals.map((g) => (g.id === goal!.id ? { ...g, measure: { ...g.measure!, target: id } } : g)) }
+    : { ...program.canonical, quantities: program.canonical.quantities.map((x) => (x.id === q.id ? filled : x)) };
+  const v = validatePostimage(program.canonical, canonical, { removals: [], words: [...program.person_words, words], fresh: [words] });
+  if (!v.ok) return { status: 'refused', reason: v.reason };
+  const next = withNewRun({ ...program, canonical: v.model, person_words: [...program.person_words, words] });
   if (next.evaluation.compiled.errors.length > 0) return { status: 'refused', reason: `That figure does not fit the model: ${next.evaluation.compiled.errors[0]!.message}` };
   const { write } = await savePostimage(deps.dispatch, { scenarioId, operationId: programOperationId(scenarioId, `card:${edit.operation_key}`), expectedIdentity: saved.identity },
     next.graph);
-  return isSaved(write) ? { status: 'saved', receipt: 'receipt' in write ? write.receipt : undefined }
+  return isSaved(write) ? { status: 'saved', receipt: 'receipt' in write ? write.receipt : undefined, changes: v.changes }
     : { status: write.status === 'unknown' ? 'unknown' : 'refused', reason: write.status === 'stale' ? 'Your model changed meanwhile; reload to see it.' : 'That change could not be saved.' };
 }

@@ -37,7 +37,7 @@ import { GM_HELD_USER_EVENT_RISK_KEY, readUserEventRiskMember } from '../../rout
 import { eventRiskCardLine } from '../stated-event-risk-draft.js';
 import { heldReliesOnRiskLines, readReliesOnRisk } from '../../routing/relies-on-risk.js';
 import { whoSized } from '../strength-authorship-words.js';
-import { computeProposalId, type ProposalOperation, type StructuredProposal } from '../proposal.js';
+import { computeProposalId, type ProposalChange, type ProposalOperation, type StructuredProposal } from '../proposal.js';
 import { heldCardAppliesAt, heldCardUnderReview } from './still-applies.js';
 import { reviewChipFor } from './reply.js';
 import type { PatchOperation } from '../../../orchestrator/types.js';
@@ -223,6 +223,8 @@ export interface ProposalRecord<F extends ProposalField = ProposalField> {
   readonly fields: readonly F[];
   /** A core proposal's new factors and links, shown (never edited); absent when it adds none. In the digest when present. */
   readonly adds?: readonly AddField[];
+  /** A model program's card: every change, with its substance before and after (simplify v1, A2). In the digest when present. */
+  readonly changes?: readonly ProposalChange[];
   readonly missing: readonly MissingDatum[];
   /**
    * ⭐ NO SILENT LAPSE (PR-2): a card kept for review carries its "Review this change" action. It is projected beside its
@@ -484,10 +486,11 @@ export function agentProposalRecord(pa: PendingAction, graph: unknown, nowMs = D
   const adds = [...shownAdds, ...coreChangeNotes(p.operations, shownAdds, fields, savedLabelOf, savedLinkOf)];
   const decline: CardAction = { id: declineChipIdFor(p.proposal_id), label: 'Not now', message: 'Not now.' };
   // A card that adds nothing keeps its digest byte-identical (a card issued before this projection still binds).
+  const changes = p.changes === undefined ? {} : { changes: p.changes };
   const digest = projectionDigest({ p: p.proposal_id, r: pa.id, g: p.base_graph_identity_hash, approve, decline, fields, missing: [],
-    ...(adds.length > 0 ? { adds } : {}) });
+    ...(adds.length > 0 ? { adds } : {}), ...changes });
   return { proposal_id: p.proposal_id, revision: pa.id, digest, dialect: 'agent', base_graph_hash: p.base_graph_identity_hash,
-    approve_action: approve, decline_action: decline, operations: p.operations, fields, ...(adds.length > 0 ? { adds } : {}), missing: [] };
+    approve_action: approve, decline_action: decline, operations: p.operations, fields, ...(adds.length > 0 ? { adds } : {}), ...changes, missing: [] };
 }
 
 /**
@@ -1040,6 +1043,8 @@ export interface ProposalFieldsWire {
     readonly fields: readonly ProposalField[];
     /** A core proposal's new factors and links (display only); absent when it adds none. */
     readonly adds?: readonly AddField[];
+    /** A model program's card: every change, before → after (simplify v1, A2); absent on any other card. */
+    readonly changes?: readonly ProposalChange[];
     readonly missing: readonly MissingDatum[];
   }[];
 }
@@ -1081,7 +1086,7 @@ export function proposalFieldsWire(
       // Wire-only context: issuing a card never changes the digest of what that card showed.
       issued_turn_id: issuedTurnIds.get(r.revision) ?? null,
       ...(r.review_action !== undefined ? { review_action: r.review_action } : {}),
-      fields: r.fields, ...(r.adds !== undefined ? { adds: r.adds } : {}), missing: r.missing,
+      fields: r.fields, ...(r.adds !== undefined ? { adds: r.adds } : {}), ...(r.changes !== undefined ? { changes: r.changes } : {}), missing: r.missing,
     })),
   };
 }

@@ -5,10 +5,9 @@
  */
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod-v4';
-import { CanonicalModel, type CanonicalModelT, type CanonicalQuantityT, type CanonicalRelationT, type CanonicalGoalT, type CanonicalLimitT } from '../canonical.js';
+import { APPROXIMATE_FIGURE, CanonicalModel, type CanonicalModelT, type CanonicalQuantityT, type CanonicalRelationT, type CanonicalGoalT, type CanonicalLimitT } from '../canonical.js';
 import { compile, compileJson, normalise, NO_GOAL_QUESTION } from '../compile.js';
 import { project } from '../project.js';
-import { fillQuantity, setRangeKind } from '../answer.js';
 import { probeValue } from './probe.js';
 import { parseUnit, sameDims } from '../units.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
@@ -16,7 +15,6 @@ import { simulate } from '../simulate/simulate.js';
 import { isWithheld } from '../simulate/result.js';
 import { STARTS_AFTER_PERIODS } from '../canonical.js';
 import { CANONICAL_JSON_SCHEMA } from '../../model-program-turn/prompt.js';
-import { ProgramOp } from '../../model-program-turn/edits.js';
 
 // ── builders ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 const base = { party: null, approval: 'proposed' as const, author_id: null };
@@ -127,7 +125,10 @@ function gym(): CanonicalModelT {
     options: [option('promo', 'Run a summer promotion', [set('joins', 'promo_joins', 'a promotion could bring 40 a month')], 'run a summer promotion'), option('carry_on', 'Carry on as now', [], 'carry on as now')],
   });
 }
-const gymFilled = () => { const f = fillQuantity(gym(), 'leavers', { value: 20 }, 'about 20 leave a month'); if (!f.ok) throw new Error(f.reason); return f.model; };
+/** An asked figure answered, exactly as an approved update writes it: the person's, in their words. */
+const answered = (m: CanonicalModelT, id: string, f: Partial<CanonicalQuantityT>): CanonicalModelT =>
+  ({ ...m, quantities: m.quantities.map((q) => (q.id === id ? { ...q, status: 'known' as const, author: 'person' as const, question: null, approval: 'approved' as const, ...f } : q)) });
+const gymFilled = () => answered(gym(), 'leavers', { value: 20, quote: 'about 20 leave a month', basis: APPROXIMATE_FIGURE });
 
 describe('spike S1: the canonical model compiles to the executable model', () => {
   it('row 1: a definition, an effect and a stock compile, with exact executable shapes, labels and authors', () => {
@@ -177,7 +178,6 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(r2.perGoal.map((p) => p.status)).toEqual(['calculable', 'calculable']);
     expect(r2.executable!.goals.map((x) => x.id)).toEqual(['reach_400', 'class_income']);
     expect(r2.joint.status).toBe('calculable');
-    expect(gymFilled().history).toHaveLength(1);
     expect(gymFilled().quantities.find((q) => q.id === 'leavers')).toMatchObject({ status: 'known', author: 'person', approval: 'approved', value: 20 });
   });
 
@@ -510,8 +510,8 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(ro.errors).toEqual([]);
     expect(ro.perOption.find((o) => o.option_id === 'raise_price')).toMatchObject({ status: 'asks', asks: ['raise_price__price'] });
     expect(ro.executable!.options.map((o) => o.id)).toEqual(['buy_oven', 'keep_one']);
-    const filled = fillQuantity(open, 'raise_price__price', { value: 3.5 }, '£3.50');
-    expect(filled.ok && compile(filled.model).executable!.options.map((o) => o.id)).toEqual(['buy_oven', 'keep_one', 'raise_price']);
+    const filled = { ...open, options: open.options.map((o) => (o.id === 'raise_price' ? { ...o, sets: [{ ...o.sets[0]!, value: 3.5, question: null, quote: '£3.50' }] } : o)) };
+    expect(compile(filled).executable!.options.map((o) => o.id)).toEqual(['buy_oven', 'keep_one', 'raise_price']);
     const fact = bakery();
     fact.quantities = fact.quantities.map((q) => (q.id === 'costs' ? olumi('costs', 'GBP/week', 500, 700) : q));
     const rf = compile({ ...fact, quantities: fact.quantities.map((q) => (q.id === 'costs' ? { ...q, kind: 'fact' as const } : q)) });
@@ -671,9 +671,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(r.errors).toEqual([]);
     expect(r.perGoal.map((p) => [p.status, p.asks])).toEqual([['asks', ['costs']], ['asks', ['costs']]]);
     expect(r.asks).toEqual([expect.objectContaining({ quantity_id: 'costs', edit: { op: 'set_range_kind', quantity_id: 'costs' }, feeds: ['weekly_profit', 'cash_buffer'] })]);
-    const fixed = setRangeKind(unclear, 'costs', 'bounds', 'between £500 and £700');
-    if (!fixed.ok) throw new Error(fixed.reason);
-    const rb = compile(fixed.model);
+    const rb = compile({ ...unclear, quantities: unclear.quantities.map((q) => (q.id === 'costs' ? { ...q, range_kind: 'bounds' as const } : q)) });
     expect(rb.perGoal.map((p) => p.status)).toEqual(['calculable', 'calculable']);
     expect(xq(rb).get('costs')!.dist).toEqual({ kind: 'range', low: 500, high: 700, basis: 'person_range', range_kind: 'bounds' });
     expect(rb.conversions.find((c) => c.quantity === 'costs')).toMatchObject({ kind: 'range_law', range_kind: 'bounds', author: 'olumi', provisional: true });
@@ -716,11 +714,10 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
   });
 
   it('issue map class 13: a start is the DECLARED count starts_after_periods, one meaning in the schema the AI writes and in the compiler: a weekly van from week 1 makes all 4 deliveries in 4 weeks (100 %); one starting after 1 week, 3 (0 %)', () => {
-    // The meaning, stated once and sent on every start the AI writes: an option's setting, a risk, and the add_option edit.
+    // The meaning, stated once and sent on every start the AI writes: an option's setting and a risk.
     const sent = CANONICAL_JSON_SCHEMA as any;
-    const addOption = (z.toJSONSchema(ProgramOp) as any).anyOf.find((b: any) => JSON.stringify(b.properties.op.enum) === '["add_option"]');
-    const fields = [sent.properties.options.items.properties.sets.items.properties, sent.properties.risks.items.properties, addOption.properties.sets.items.properties];
-    expect(fields.map((f) => [f.starts_after_periods.description.startsWith(`${STARTS_AFTER_PERIODS}.`), 'from_period' in f])).toEqual([[true, false], [true, false], [true, false]]);
+    const fields = [sent.properties.options.items.properties.sets.items.properties, sent.properties.risks.items.properties];
+    expect(fields.map((f) => [f.starts_after_periods.description.startsWith(`${STARTS_AFTER_PERIODS}.`), 'from_period' in f])).toEqual([[true, false], [true, false]]);
     expect(STARTS_AFTER_PERIODS).toContain('0 = from the start ("straight away", "from the first month" and "from now" are all 0), "from month 3" is 2');
     const van = (starts: number) => model({
       question: 'Should the shop book a weekly van?',
