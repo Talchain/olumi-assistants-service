@@ -34,6 +34,8 @@ export type ProjectedItem = {
   author: DisplayAuthor;
   approval: 'proposed' | 'approved';
   concerns?: string[];
+  /** For a range: the ruled law Olumi reads it by, always Olumi's and provisional, never the person's calibration. */
+  law?: { author: 'olumi'; provisional: true; reading: ReturnType<typeof rangeReading> };
 };
 export type Projection = {
   graph: { nodes: Rec[]; edges: Rec[]; goal_constraints: Rec[] };
@@ -96,6 +98,8 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   const folded = (id: string) => { const u = uses.get(id); return u !== undefined && u.size === 1 && !u.has('node') && hostOf.has(id); };
 
   const chances = new Set(model.risks.map((k) => k.occurrence));
+  const lawOf = (q: CanonicalQuantityT) => (has(q.low) && has(q.high) && q.low < q.high && (q.status === 'known' || q.status === 'estimated')
+    ? { law: { author: 'olumi' as const, provisional: true as const, reading: rangeReading(q.low, q.high, q.value, chances.has(q.id)) } } : {});
   const display = (q: CanonicalQuantityT): string => {
     const unit = q.unit === '1' ? '' : ` ${q.unit}`;
     const owner = q.author === 'olumi' ? ', Olumi\'s estimate' : '';
@@ -156,7 +160,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
       ? 'Nothing that can be worked out yet uses it.' : `${q.status.replace('_', ' ')}: ${q.basis}`;
     if (folded(q.id)) {
       const host = hostOf.get(q.id)!;
-      items.push({ record_id: q.id, family: 'quantity', shown_as: host.edge ? { on_edge: host.edge } : { on_node: host.node }, in_calculation: inCalc, why_out: why(inCalc, reason), author: who, approval: q.approval });
+      items.push({ record_id: q.id, family: 'quantity', shown_as: host.edge ? { on_edge: host.edge } : { on_node: host.node }, in_calculation: inCalc, why_out: why(inCalc, reason), author: who, approval: q.approval, ...lawOf(q) });
       continue;
     }
     const point = has(q.value) && !(has(q.low) && q.low !== q.high);
@@ -168,7 +172,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
       ...(has(q.basis) ? { description: q.basis } : {}),
       ...(q.status === 'asked' && has(q.question) ? { user_questions: [q.question] } : {}),
     });
-    items.push({ record_id: q.id, family: 'quantity', shown_as: { node: q.id }, in_calculation: inCalc, why_out: why(inCalc, reason), author: who, approval: q.approval });
+    items.push({ record_id: q.id, family: 'quantity', shown_as: { node: q.id }, in_calculation: inCalc, why_out: why(inCalc, reason), author: who, approval: q.approval, ...lawOf(q) });
   }
 
   // ── relations and effect terms: links ──────────────────────────────────────────────────────────────────────────────

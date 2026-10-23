@@ -490,6 +490,21 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(project(m).graph.nodes.find((n) => n.id === 'costs')!.display_value).toBe('500–700 GBP/week; Olumi reads it as a spread around 600 (sd 57.74), provisionally');
   });
 
+  it('PL BLOCK 1: window identity: "members after six months" is {0, 6} on a state; "class revenue in months 6 to 8" is {6, 3}; no extra period', () => {
+    const filled = fillQuantity(gym(), 'leavers', { value: 20 }, 'about 20 leave a month');
+    if (!filled.ok) throw new Error(filled.reason);
+    const m = filled.model;
+    m.quantities.push(person('months_three', 'month', 3, 'months 6 to 8'), person('revenue_6_8', 'GBP', 9000, 'at least £9,000 in months 6 to 8'));
+    m.goals.push({ ...goal('summer_classes', 'class_revenue', '>=', 'revenue_6_8', 'sum', 'months_three', 'at least £9,000 in months 6 to 8'), measure: { ...goal('x', 'class_revenue', '>=', 'revenue_6_8', 'sum', 'months_three', 'q').measure!, window: { origin_event: null, origin_offset: null, start: 6, periods: 'months_three' } } });
+    const x = compile(m).executable!;
+    expect(x.goals.find((g) => g.id === 'reach_400')!.window).toEqual({ start_period: 0, periods: 6 });
+    expect(x.goals.find((g) => g.id === 'summer_classes')!.window).toEqual({ start_period: 6, periods: 3 });
+    expect(x.periods).toBe(9); // covers both windows exactly: never a seventh period for "six months"
+    expect(x.quantities.find((q) => q.id === 'members')!.reading).toBe('state');
+    // Olumi's reading of a range is carried on the read path as Olumi's, provisional.
+    expect(project(bakery()).items.find((i) => i.record_id === 'extra_per_oven')!.law).toEqual({ author: 'olumi', provisional: true, reading: { kind: 'normal', centre: 120, sd: 70 / Math.sqrt(12) } });
+  });
+
   it('units: coefficient × driver makes the defined unit; plural and singular agree; multipliers are refused', () => {
     const u = (s: string) => { const p = parseUnit(s); if (!p.ok) throw new Error(p.message); return p.unit; };
     expect(sameDims(u('loaves per week'), u('loaf/week'))).toBe(true);
