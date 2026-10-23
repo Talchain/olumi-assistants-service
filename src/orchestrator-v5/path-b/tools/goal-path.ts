@@ -12,6 +12,9 @@ import { stable } from '../living-model/diff.js';
 import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { projectCorePostimageForPersistence } from '../../persisted-graph-projection.js';
 import { composeIdentityAskForNode } from '../../coaching/identity-not-evaluated-ask.js';
+import { notTargetTestableSentence, targetTestabilityOf } from '../../admission/target-testability.js';
+import { goalTargetGapOf } from '../../goal-target/goal-target-gap.js';
+import { aimTargetReading } from '../living-model/aim-reading.js';
 
 /**
  * The turn's repairs, shared by the draft and the change; the core route makes it per turn and `pathBTools` uses it.
@@ -99,6 +102,9 @@ const FIX = {
   unit: 'State Olumi\'s figure in the unit of the item it links into; convert only where the conversion is exact.',
   law: 'Give Olumi\'s link a direction, ends that are in the model, and a figure or range a law can be drawn from.',
   option: 'Give Olumi\'s option a setting on a factor, or a sized link of Olumi\'s from it.',
+  target: 'Give Olumi\'s target one figure a Run can test: at least or at most it, never exactly equal and never a range.',
+  size: 'Size Olumi\'s link in the goal\'s own unit per one unit of what it comes from: both ends have their units, and the figure is '
+    + 'how much the goal\'s measure moves when the source rises by 1.',
 } as const;
 /** Each blocker's fix, or `ask` for the person's input. An unlisted code is said, never repaired. */
 const BLOCKER: Readonly<Record<string, keyof typeof FIX | 'ask'>> = {
@@ -107,6 +113,12 @@ const BLOCKER: Readonly<Record<string, keyof typeof FIX | 'ask'>> = {
   link_unit_mismatch: 'unit', link_frame_unknown: 'unit', current_unit_mismatch: 'unit', UNIT_MISMATCH: 'unit',
   link_sign_unknown: 'law', link_endpoint_unknown: 'law', exact_not_drawable: 'law', link_range_no_law: 'law',
   OPTION_NEEDS_ENCODING: 'option', OPTION_NEEDS_MAPPING: 'option', setting_not_convertible: 'option', MISSING_OPTION_VALUE: 'option',
+  // The Run's own verdict on the target (`targetTestabilityOf`); a path's unsized link of Olumi's is Olumi's to size (DL 93d79c3e).
+  missing_goal_baseline: 'ask', threshold_off_scale: 'ask', comparator_unscorable: 'target', threshold_unit_mismatch: 'unit',
+  goal_path_placeholder: 'size', goal_path_unsized: 'size',
+  // Every aim reading that withholds the goal's chance reaches the loop: Olumi's is fixed, the person's asked (DL 93d79c3e, 00:48Z).
+  exact_target_not_in_slice: 'target', target_range_not_in_slice: 'target', target_not_theirs: 'ask', change_base_invalid: 'ask',
+  goal_level_not_admitted: 'ask', stay_within_base_not_theirs: 'ask',
   goal_level_unknown: 'ask', link_goal_level_unknown: 'ask', no_level_target: 'ask', link_goal_target_unknown: 'ask', change_kind_unknown: 'ask',
   change_base_not_theirs: 'ask', stay_within_unconfirmed: 'ask', MISSING_FACTOR_LEVEL: 'ask', identity_part_unknown: 'ask', FEWER_THAN_TWO_OPTIONS: 'ask',
   // The identity ask composer's own reasons (`composeIdentityAskForNode`): each is the person's to answer.
@@ -141,11 +153,14 @@ function theirsIn(model: LivingModelT, item: string | null): boolean {
 /** A blocker found, on one item; a condition's scope is part of it, since two conditions can share their words (Codex r1 on #3672). */
 export type Found = { readonly code: string; readonly item: string | null; readonly scope?: string; readonly question?: string };
 /**
- * A level the factor already holds, read as missing only until the mapper carries it (a bare range; B1): never asked for again
- * (DL 93d79c3e, C1). Said, so the log still shows the gap.
+ * ⛔ NEVER ASK FOR A FIGURE THE ITEM ALREADY HOLDS (DL 93d79c3e, C1): a factor's level (a bare range too, until the mapper carries
+ * it; B1), a link's size, or the aim's level today. An ask for it is said instead, so the log still shows the gap.
  */
-const holdsLevel = (model: LivingModelT, code: string, item: string | null): boolean => code === 'MISSING_FACTOR_LEVEL'
-  && model.factors.some((f) => f.id === item && (f.value !== null || (f.low !== null && f.high !== null)));
+const holdsAsked = (model: LivingModelT, code: string, item: string | null): boolean => (code === 'MISSING_FACTOR_LEVEL'
+  ? model.factors.some((f) => f.id === item && (f.value !== null || (f.low !== null && f.high !== null)))
+  : code === 'goal_path_unsized' || code === 'goal_path_placeholder'
+    ? model.links.some((l) => l.id === item && [l.effect.value, l.effect.low, l.effect.high].some((v) => v !== null))
+    : (code === 'missing_goal_baseline' || code === 'change_base_invalid') && model.aims.some((a) => a.id === item && typeof a.target?.current === 'number'));
 /** Each found blocker's fix or ask, one per code and kind. */
 function said(model: LivingModelT, found: readonly Found[]): Blocker[] {
   const out = new Map<string, { code: string; items: string[]; fix?: string; ask?: true; said?: true; question?: string }>();
@@ -153,8 +168,8 @@ function said(model: LivingModelT, found: readonly Found[]): Blocker[] {
     const kind = BLOCKER[code];
     // ⛔ A repair never alters or removes the person's own content (DL 22 Oct): a fix on it is an ask. Adding Olumi's links (`path`)
     // alters nothing of theirs.
-    const how = kind === undefined || holdsLevel(model, code, item) ? { said: true as const } : kind === 'ask' || (kind !== 'path' && theirsIn(model, item))
-      ? { ask: true as const } : { fix: FIX[kind] };
+    const ask = kind !== undefined && (kind === 'ask' || (kind !== 'path' && theirsIn(model, item)));
+    const how = kind === undefined || (ask && holdsAsked(model, code, item)) ? { said: true as const } : ask ? { ask: true as const } : { fix: FIX[kind] };
     // An ask with its own question is that item's, so no item's question is lost to another's (Codex r2 on #3691).
     const key = `${code}\u0000${Object.keys(how)[0]}${'ask' in how && question !== undefined ? `\u0000${item}` : ''}`;
     const b = out.get(key) ?? out.set(key, { code, items: [], ...how }).get(key)!;
@@ -192,8 +207,27 @@ export function selfCheck(model: LivingModelT, mapped: Mapped): Found[] {
     const ask = composeIdentityAskForNode(String(n.id), postimage);
     return ask === null ? [] : [{ code: ask.reason, item: String(n.id), question: ask.assistant_text }];
   });
-  return [...causes.map((w) => ({ code: w.reason, item: w.id, ...(w.applies_to ? { scope: stable([...w.applies_to].sort()) } : {}) })),
-    ...issues.map((i) => ({ code: i.code, item: i.option_id ?? i.factor_id ?? null, question: i.message })), ...identities];
+  // ⭐ THE RUN'S OWN VERDICT ON THE TARGET (DL 93d79c3e, C1): what the Run withholds the goal's chance on before the engine
+  // (`targetTestabilityOf`, run-analysis.ts), on the same postimage, so `run_ready` never reads true on a failure it decides
+  // statically. A path failure counts only on a link of the model: an identity's own edges (and an inferred identity) are the
+  // engine's to judge, since ISL's evaluation can clear them, so they are left to the Run (on the replay corpus, capacity's
+  // product). A failure a cause above already holds is said by that cause.
+  const verdict = targetTestabilityOf(postimage);
+  const untestable = verdict.kind === 'not_testable' ? verdict.failures.filter((f) => f.code !== 'identity_unconfirmed') : [];
+  const targetQuestion = untestable.length > 0 ? notTargetTestableSentence(postimage, verdict) : null;
+  const asked = targetQuestion === null ? {} : { question: targetQuestion };
+  const target = untestable.flatMap((f): Found[] => (f.precondition !== 'P5' ? [{ code: f.code, item: goal === undefined ? null : String(goal), ...asked }]
+    : (f.links ?? []).flatMap((l) => model.links.filter((x) => x.from === l.from && x.to === l.to)
+      .map((x) => ({ code: f.code, item: x.id, ...asked })))))
+    .filter((t) => !causes.some((w) => w.id === t.item));
+  // An aim reading the goal is held on asks in the ONE held-target composer's words (`goalTargetGapOf`, the canvas gap's), only
+  // for the reading those words are about: never its "no target" words for a goal that has one.
+  const gap = goalTargetGapOf(postimage);
+  const aim = model.aims.find((a) => a.id === goal);
+  const aimQuestion = (w: { readonly id: string; readonly reason: string }): { question?: string } => (gap !== null
+    && gap.kind !== 'goal_target_missing' && gap.goal_id === w.id && aim !== undefined && aimTargetReading(aim) === w.reason ? { question: gap.question } : {});
+  return [...causes.map((w) => ({ code: w.reason, item: w.id, ...(w.applies_to ? { scope: stable([...w.applies_to].sort()) } : {}), ...aimQuestion(w) })),
+    ...issues.map((i) => ({ code: i.code, item: i.option_id ?? i.factor_id ?? null, question: i.message })), ...identities, ...target];
 }
 
 /** The blockers of `after` to say back: a change answers only for those it adds to what `before` had (none for a draft). */
