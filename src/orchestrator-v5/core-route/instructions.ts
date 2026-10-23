@@ -82,7 +82,9 @@ const CORE_STARTING_INPUTS = 'When the user is trying to progress the model or a
 export const CORE_ALIGNED_INSTRUCTIONS = SELECTED_COACH_V02_TEMPLATE.replace(
   '{{MODE_AND_AUTHORITY}}',
   `${OLUMI_PURPOSE_INSTRUCTION}\n\n${[CORE_AUTHORITY_INSTRUCTION, HOST_SCIENCE_AND_SOURCE_RULES, REPLY_LENGTH_INSTRUCTION, REPLY_SHAPE_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION].join(' ')}`,
-).replace(LEGACY_STARTING_INPUTS, CORE_STARTING_INPUTS);
+).replace(LEGACY_STARTING_INPUTS, CORE_STARTING_INPUTS)
+  // The core's estimate rule asks for Olumi's labelled starting estimates; "no typical values" contradicted it (DL 93d79c3e, C2 (d)).
+  .replace(' Do not manufacture numerical precision, \u201ctypical\u201d values or arbitrary thresholds.', ' Do not manufacture numerical precision or arbitrary thresholds.');
 
 /**
  * The drafting guidance's arm (Paul 21 Oct: port the benchmarked drafting prompt, A/B it once): a core turn on a scenario

@@ -3,7 +3,7 @@ import { CORE_ALIGNED_INSTRUCTIONS, CORE_REPLY_RULES, NOTE_ON_ITEM_INSTRUCTION, 
   promptArmOf, coreEffortArmOf } from '../../../routes/agent-v1-turn.js';
 import { coreBudget } from '../model-budgets.js';
 import { OLUMI_PURPOSE_INSTRUCTION } from '../olumi-purpose.js';
-import { HOST_SCIENCE_AND_SOURCE_RULES, HOST_TOOL_CONTRACT } from '../coach-route-v0_2.js';
+import { HOST_SCIENCE_AND_SOURCE_RULES, HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../coach-route-v0_2.js';
 import { createHash } from 'node:crypto';
 import * as drafting from '../../path-b/drafting-guidance.js';
 import * as coreInstructions from '../../core-route/instructions.js';
@@ -40,7 +40,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
   it('arm B is the AIE\'s assembled reference, byte for byte (programme-docs #94 6303242136, static text sha256 7b6145d4…), plus the canvas-coaching sentence', () => {
     expect(b.split(NOTE_ON_ITEM_INSTRUCTION)).toHaveLength(2);
     // 7b6145d4… until 21 Oct; arm C's adoption changed only the closing core reply rule (see its row), now 56625e00….
-    expect(createHash('sha256').update(b.replace(`${NOTE_ON_ITEM_INSTRUCTION}\n\n`, ''), 'utf8').digest('hex')).toBe('055841368f958fd07a9e729b8f459e83d1793e98acbbd0b6bcefa8aba9ddf41a'); // 22 Oct: one exact blocking-input question; retire the coach's duplicate ask.
+    expect(createHash('sha256').update(b.replace(`${NOTE_ON_ITEM_INSTRUCTION}\n\n`, ''), 'utf8').digest('hex')).toBe('da2f3bc0015655b71dc21bbe40c1ec8e0397b9f7eba685b7cdf6b64223da7ede'); // 23 Oct (DL 93d79c3e, C2 (d)): "typical" values no longer forbidden on core. 22 Oct: one exact blocking-input question; retire the coach's duplicate ask.
     // Candidate-3 witnesses (21 Oct): presence checks (text only, not behaviour): WHEN to build, and Olumi's additions on a card.
     expect(b).toContain('build the first model from their brief in that same turn');
     expect(b).toContain('a list in your reply adds nothing to their model');
@@ -68,7 +68,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
 
   it('THE PROMPTS (DL 22 Oct, priority change): the coach\u2019s reply rules and the drafter\u2019s rules, adapted as ruled; the old constants are gone', () => {
     expect(createHash('sha256').update(CORE_REPLY_RULES, 'utf8').digest('hex')).toBe('6f5f00c581ac4be2f1f590973e4bcf58c6eba498e5216bc3a8a21a189be5f3d6');
-    expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('2773fda471a80e1954bc3bb2b6810d2f65ada6727b2e00e07ab3a5eb5380b791'); // 22 Oct: every stated goal saved in their words, never approximated (Claude r1 on #3670); + a calendar date is Olumi's labelled reading
+    expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('34520d85d31ec5ade23c6ec4ce6c8199ae186c07c35402783c1de284c76b1f16'); // 23 Oct (DL 93d79c3e, C2): mechanism first; leanest and stated-only retired. 22 Oct: every stated goal saved in their words, never approximated (Claude r1 on #3670); + a calendar date is Olumi's labelled reading
     // The retired constants are gone from both modules: no route can send the accreted text again.
     for (const name of ['CORE_REPLY_INSTRUCTION', 'CORE_RESPONSE_DISCIPLINE', 'CORE_NEXT_STEP']) expect(Object.keys(coreInstructions), name).not.toContain(name);
     expect(Object.keys(drafting)).toEqual(['CORE_DRAFTER_RULES']);
@@ -97,7 +97,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
   });
 
   it('the drafter saves every stated goal in their words and never approximates it, with the rule present once', () => {
-    const rule = "Save every goal the person states, in their words: keep what fits the schema, and leave the rest null (or use = or a range, which Olumi asks about). Never approximate a comparator, figure or window, and never leave a stated goal unsaved.";
+    const rule = "Save every goal the person states, in their words (what they want to reach, never an option): keep what fits the schema, and leave the rest null (or use = or a range, which Olumi asks about). Never approximate a comparator, figure or window, and never leave a stated goal unsaved.";
     expect(CORE_DRAFTER_RULES.split(rule)).toHaveLength(2);
   });
 
@@ -120,7 +120,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     for (const rule of ['Find what most limits reaching the aim (its binding constraint or critical path, e.g. time to close, approval, capacity) and model that mechanism explicitly.',
       "Offer at least one option that is structurally different (a different route, not a different split of the same levers), labelled Olumi's.",
       'Every item either lies on a path to the aim or is a condition on one; no stand-alone items.',
-      `A stated difference ("net stock is deliveries minus usage") is defined_as with op sum, all part ids in of, and the subtracted part ids in subtract. Use their stated sign, shared units and definition attribution; do not emit duplicate causal links or replace a difference with an all-positive sum.`,
+      "parts that add or net off are a defined_as sum (subtracted ids in subtract).",
       'Conditions are short, written for the person, one point each; keep working notes out of the model.',
       'A deadline is the window of the aim it belongs to, never an aim of its own: keep its words in by_when and, when it counts from today, its window in period_months (weeks \u00f7 4.35); '
         + 'for a calendar date ("by the end of September"), leave period_months null, set period_by olumi and read the date it fixes into period_deadline (YYYY-MM-DD, from today\'s date); Olumi records the day and works out its window.'])
@@ -134,12 +134,12 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
   it('the drafter modelling contract is sent once, with the blocking-input question on later turns too', () => {
     const draftRules = [
       "A qualitative worry or uncertainty is a risk, or a condition when it cannot reasonably be quantified, never an unmeasured factor.",
-      "Every factor has a stated unit and a current value or a labelled Olumi estimate under the estimate rule; only schema-defined on/off steps use unit null and a 0-or-1 level (a risk-mitigation step is 0 today and 1 under the option that takes it).",
-      "Represent mechanisms and dependencies with items and links (or defined_as for a stated sum/product), not only in condition or assumption text.",
-      "Use conditions only for what cannot be quantified; aim for at most 5 conditions in a first model, retaining material context and dissent.",
+      "Every factor has a stated unit and a current value or Olumi's labelled estimate; only schema-defined on/off steps use unit null and a 0-or-1 level (a risk-mitigation step is 0 today and 1 under the option that takes it).",
+      "Other mechanisms are items and links, never condition text alone.",
+      "Use conditions only for what cannot be quantified, at most 5 in a first model.",
       "Name the risks the brief implies: include at least one risk when the brief implies any, linked to what it would hit.",
-      "For a risk's chance and window, use supplied figures or, where reasonable, a labelled Olumi estimate under the estimate rule; if no reasonable estimate is possible, keep it unknown and say what is missing.",
-      "An option acts through settings on factors or sized option-to-item links; retain either valid form without adding an artificial factor.",
+      "For a risk's chance and window, use supplied figures or the estimate rule; if none is reasonable, keep it unknown and say what is missing.",
+      "An option acts through settings on what it changes; a person's option naming none gets Olumi's setting, estimate_by olumi.",
     ];
     const question = "Whenever a missing input leaves the Run blocked, end every reply with exactly ONE question asking for the specific input the Run needs next (today's level, a measure, a target or a time window), in plain words; use the current state and tool outcome, never re-ask a supplied input.";
     const firstTurn = `${b}\n\n${CORE_DRAFTER_RULES}`;
@@ -153,6 +153,27 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(firstTurn).toContain('never change or mix with a figure they gave');
     expect(firstTurn).toContain('user/party requires verbatim words stating that very item');
     expect(firstTurn).toContain('Adoption does not transfer authorship.');
+  });
+
+  it('DL 93d79c3e (C2): the drafter builds the mechanism first, in the engine\'s own forms; "leanest" and "only when stated" are retired', () => {
+    expect(CORE_DRAFTER_RULES).toContain("Work silently: the goal's identity first, then mechanisms, extraction, widening, audit.");
+    expect(CORE_DRAFTER_RULES).toContain("MECHANISM FIRST: where an option or stated driver acts on the goal's quantity, or it is a standard business quantity, first define it by its parts, stated or not: "
+      + "a level built up over the window is an accumulation on its own factor (stock_today, loss_rate_per_month, inflow_per_month: factor ids; horizon_months)");
+    expect(CORE_DRAFTER_RULES).toContain('a rate times a count is a defined_as product; parts that add or net off are a defined_as sum (subtracted ids in subtract). Only these forms;');
+    expect(CORE_DRAFTER_RULES).toContain("Options set levers on its parts or their drivers, never a link straight to an aim.");
+    expect(CORE_DRAFTER_RULES).toContain('A qualitative aim remains intact and takes no identity:');
+    expect(CORE_DRAFTER_RULES).toContain('a cap or minimum belongs in limit, on the identity part it bounds.');
+    expect(CORE_DRAFTER_RULES).toContain('(what they want to reach, never an option)');
+    for (const retired of ['leanest', 'for a stated sum/product', 'A stated sum/product is defined_as', 'option-to-item links', 'without adding an artificial factor',
+      'to stay small', 'Definitions must not double-count causal effects.']) expect(CORE_DRAFTER_RULES, retired).not.toContain(retired);
+    // Token-neutral or lower (DL (a)): the rules were 6,951 characters (string length) on staging 6f10ccd4 before this change.
+    expect(CORE_DRAFTER_RULES.length).toBeLessThanOrEqual(6951);
+  });
+
+  it('DL 93d79c3e (C2 (d)): the core\'s standing instructions no longer forbid "typical" values, which its estimate rule asks for; the legacy coach is unchanged', () => {
+    expect(CORE_ALIGNED_INSTRUCTIONS).not.toContain('\u201ctypical\u201d values');
+    expect(CORE_ALIGNED_INSTRUCTIONS).toContain('Do not manufacture numerical precision or arbitrary thresholds.');
+    expect(SELECTED_COACH_V02_TEMPLATE, 'control: the legacy template keeps its words').toContain('Do not manufacture numerical precision, \u201ctypical\u201d values or arbitrary thresholds.');
   });
 
   it('keeps the entire estimate rule verbatim, rather than weakening figure or author protections', () => {
