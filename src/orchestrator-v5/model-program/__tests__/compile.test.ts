@@ -807,6 +807,8 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
       // No sentence of the compiler's is a question, whatever it waits on (labels carry none here).
       expect(JSON.stringify(r), name).not.toContain('?');
     }
+    // The structure figure is asked with NO question of the code's ("What is …?" is gone): its record carries only the mark.
+    expect(normalise(cases[7]![1]).quantities.find((q) => q.id === 'costs')).toMatchObject({ status: 'asked', question: null, basis: STRUCTURE_ASKED });
     // Contrast: the probe sees a question where there is one: the AI's own, on the record, in the model it was given.
     expect(JSON.stringify(gym())).toContain('How many members leave in a typical month?');
     expect(JSON.stringify(cases[2]![1])).toContain('How would you tell the regulars are happy?');
