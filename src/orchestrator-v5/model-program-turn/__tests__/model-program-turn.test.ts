@@ -600,10 +600,18 @@ describe('the model-program turn on the real core route', () => {
       expect(r.data.olumi_adds, why).toBeUndefined();
       expect(savedProgramOf({ living_model: deps.proposals.get(r.data.proposal_id)!.living_model })!.canonical.relations, why).toEqual(before.relations);
     };
-    // Refused whole: a structural constant the compiler's own contract rejects (its sentence goes back for the drafter's two
-    // repairs first), and a note naming a record that is not there.
-    await noCompletion('structure', reply((m) => { m.quantities.push(q('odd_constant', 'feature/month', { author: 'structure', value: 0.37 }));
-      (m.relations[m.relations.length - 1] as { base: string }).base = 'odd_constant'; }), 3);
+    // Codex r4 #3709: a figure labelled structure that is no structural constant ("current output = 12", stated by no one)
+    // comes back as the person's question, never Olumi's figure; a calendar conversion (12 month/year) stays structural.
+    const asStructure = reply((d) => { d.quantities.push(q('current_output', 'feature/month', { author: 'structure', value: 12 }), q('months_per_year', 'month/year', { author: 'structure', value: 12 }));
+      (d.relations.find((r) => r.id === 'features_rel') as { base: string }).base = 'current_output'; });
+    const structured = addMechanism((measured as { model: CanonicalModelT }).model, JSON.parse(asStructure) as CanonicalModelT, 'features_shipped_per_month',
+      new Set(['features_shipped_per_month']), () => false);
+    expect(structured.ok).toBe(true);
+    const sm = (structured as { model: CanonicalModelT }).model;
+    expect(sm.quantities.find((x) => x.id === 'current_output')).toMatchObject({ author: 'person', status: 'asked', value: null, quote: null, question: 'What is "current output"?' });
+    expect(sm.quantities.find((x) => x.id === 'months_per_year')).toMatchObject({ author: 'structure', status: 'known', value: 12 });
+    expect(compile(sm, { sourceText: `${saved.brief}\n${words}` }).perGoal.find((g) => g.goal_id === 'increase_productivity')!.asks).toContain('current_output');
+    // Refused whole: a note naming a record that is not there (its sentence goes back for the drafter's two repairs first).
     await noCompletion('dangling note', reply((m) => { m.assumptions[m.assumptions.length - 1]!.concerns.push('no_such_record'); }), 3);
     // Only the measure this same answer created may be worked out: never a quantity already in the model.
     const existing = { ...(measured as { model: CanonicalModelT }).model };
@@ -739,6 +747,20 @@ describe('the model-program turn on the real core route', () => {
       expect(p.graph.edges.filter((e) => e.from === 'per_oven')).toEqual([]);
       expect(p.items.find((i) => i.record_id === 'per_oven')?.shown_as).toEqual({ on_edge: 'ovens_added__extra_sales' });
     }
+    // Codex r4 #3709: a % rate's link figure is what the compiler uses, per ONE of the driver's unit (40 % → 0.4 loaf/week per
+    // loaf/week), and it times the driver gives the compiled value; the card says it as the person gave it, 40 %.
+    const pct = bakery();
+    pct.quantities.push(q('sold_share', '%', { kind: 'coefficient', value: 40, quote: words }), q('sold', 'loaf/week', { kind: 'derived', status: 'derived', author: 'olumi' }));
+    pct.relations.push({ form: 'definition', id: 'sold_rel2', defines: 'sold', op: 'product', parts: [{ id: 'base_sales', power: 1 }, { id: 'sold_share', power: 1 }], author: 'olumi', quote: null, ...at });
+    pct.goals = [{ ...pct.goals[0]!, measure: { ...pct.goals[0]!.measure!, quantity: 'sold' } }]; // in the calculation
+    const pc = compile(pct, { sourceText: `${BRIEF}\n${words}` });
+    const pl = project(pct, pc).graph.edges.find((e) => e.id === 'base_sales__sold') as Json;
+    const fixedOf = (id: string) => ((pc.executable?.quantities ?? []) as Json[]).find((x) => x.id === id)?.dist?.value as number | undefined;
+    expect(pl).toMatchObject({ coefficient_id: 'sold_share', provenance: { natural_effect: { amount_unit: 'loaf/week', per_source_change_unit: 'loaf/week' } } });
+    expect(pl.provenance.natural_effect.amount).toBeCloseTo(0.4, 12);
+    expect(pl.provenance.natural_effect.amount).toBeCloseTo(fixedOf('sold_share')!, 12);
+    expect(pl.provenance.natural_effect.amount * 300).toBeCloseTo(120, 9);
+    expect(pl.provenance.reasoning).toMatch(/^40 % per loaf\/week/);
     // Contrast: a product of two coefficients has no one driver, so both parts stay cards with their own links, no coefficient_id.
     const pb = project(bakery(), compile(bakery(), { sourceText: BRIEF })).graph;
     const sold = pb.edges.filter((e) => e.to === 'sold_per_oven');

@@ -320,9 +320,13 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const sign = mid !== null && mid < 0 ? -1 : 1;
     const driverUnit = Q.get(driver)?.unit ?? '';
     const definedUnit = Q.get(defines)?.unit ?? '';
+    // The link's figure is what the compiler uses, per ONE of the driver's unit, in the defined quantity's unit: the
+    // coefficient's own unit scale applied (a 40 % rate moves 0.4 loaf/week per loaf/week; Codex r4 #3709), as lawFor does.
+    const scaleOf = (unit: string) => { const u = parseUnit(unit); return u.ok ? u.unit.scale : 1; };
+    const k = c ? scaleOf(c.unit) * scaleOf(driverUnit) / scaleOf(definedUnit) : 1;
     const natural = c && has(c.value)
-      ? { natural_effect: { amount: c.value, amount_unit: definedUnit, per_source_change: 1, per_source_change_unit: driverUnit, strength_mean: sign, strength_mean_frame: 'edge_strength',
-        ...(has(c.low) && has(c.high) && c.low !== c.high ? { stated_range: { low: c.low, high: c.high, text: `${fmt(c.low)}–${fmt(c.high)}`, end: 'centre' } } : {}) } }
+      ? { natural_effect: { amount: c.value * k, amount_unit: definedUnit, per_source_change: 1, per_source_change_unit: driverUnit, strength_mean: sign, strength_mean_frame: 'edge_strength',
+        ...(has(c.low) && has(c.high) && c.low !== c.high ? { stated_range: { low: c.low * k, high: c.high * k, text: `${fmt(c.low)}–${fmt(c.high)}`, end: 'centre' } } : {}) } }
       : {};
     const reasoning = c ? `${display(c)} per ${driverUnit || 'unit'}${straddles ? '; its direction is not settled' : ''}${mid === null ? '; its size is not given yet' : ''}` : '';
     return link(driver, defines, sign, who, inCalc, { ...natural, reasoning, ...(c ? { magnitude: c.author === 'olumi' ? 'olumi_estimate' : 'user_stated' } : {}) });

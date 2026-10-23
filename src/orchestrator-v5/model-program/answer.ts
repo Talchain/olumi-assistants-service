@@ -5,10 +5,10 @@
  * exactly which goals that answer unlocked.
  */
 import { APPROXIMATE_FIGURE, type CanonicalModelT } from './canonical.js';
-import { inlineQuantityId } from './compile.js';
+import { inlineQuantityId, isPowerOfTen } from './compile.js';
 import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { unitWrittenAfter } from '../agent-lane/user-statements.js';
-import { parseUnit } from './units.js';
+import { isCalendarConversion, parseUnit } from './units.js';
 
 /** Words that give a figure as approximate ("about £2,000"). */
 const APPROXIMATE_WORDS = /\b(about|around|roughly|approximately|approx|circa|nearly|almost)\b|~|≈/i;
@@ -182,8 +182,8 @@ export function defineGoalMeasure(model: CanonicalModelT, a: GoalMeasureAnswer):
 /**
  * COMPLETING A MEASURE'S MECHANISM (DL 23 Oct): once the person has said how an aim is measured, Olumi's drafter may propose
  * what works that measure out. From the drafter's whole model only ADDITIONS are taken, and only of kinds Olumi may author:
- * its own coefficients (estimated, with a range and a basis), worked-out quantities, structural constants (checked by the
- * compiler's own contract, compile.ts `structure_value`), and figures only the person can know as QUESTIONS (asked, no
+ * its own coefficients (estimated, with a range and a basis), worked-out quantities, structural constants bound to their
+ * meaning (`structuralIn`; any other "structure" figure becomes a question), and figures only the person can know as QUESTIONS (asked, no
  * figure); new relations that work out the measure or a new worked-out quantity; and their companion assumptions and
  * conditions, with the claims and evidence those name. Each is Olumi's unless its words are the person's. Only the measure
  * this same edit created (`fresh`) may become worked out: a quantity already in the model keeps its figure, kind and status.
@@ -200,6 +200,23 @@ const recordIds = (m: CanonicalModelT): Set<string> => new Set([...m.quantities,
   ...m.claims, ...m.evidence, ...m.assumptions, ...m.dissent, ...m.conditions, ...m.left_out].map((r) => r.id)
   .concat(m.relations.flatMap((r) => [r.id, ...(r.form === 'effect' ? r.terms.map((t) => `${r.id}:${t.driver}`) : [])])));
 
+/**
+ * A structural constant Olumi may add (Codex r4 #3709): one bound to its meaning, never a figure that only looks like one. A
+ * calendar conversion (12 month/year), a power of ten that IS a unit's scale (100 %, 1000 g/kg: the constant times its unit
+ * is exactly 1), or 0 or 1 on a quantity a live option switches. Anything else labelled structure ("current output = 12")
+ * is a figure only the person can give, so it comes back as their question.
+ */
+function structuralIn(model: CanonicalModelT, q: Quantity): boolean {
+  const u = parseUnit(q.unit);
+  if (q.status !== 'known' || q.value === null || q.low !== null || q.high !== null || !u.ok) return false;
+  const v = q.value;
+  const unitScale = Object.keys(u.unit.dims).length === 0 && isPowerOfTen(v) && Math.abs(v * u.unit.scale - 1) < 1e-9;
+  const optionSwitch = (v === 0 || v === 1) && model.options.some((o) => o.status === 'live' && o.sets.some((s) => s.quantity === q.id));
+  return isCalendarConversion(v, u.unit) || unitScale || optionSwitch;
+}
+const askedOf = (q: Quantity): Quantity => ({ ...q, kind: 'fact', status: 'asked', author: 'person', value: null, low: null, high: null, range_kind: null, basis: null,
+  quote: null, question: `What is "${q.label}"?`, approval: 'proposed' });
+
 export function addMechanism(model: CanonicalModelT, draft: CanonicalModelT, measured: string, fresh: ReadonlySet<string>, isTheirs: (quote: string | null) => boolean): FillResult {
   const target = model.quantities.find((q) => q.id === measured);
   // Only the blank placeholder this same answer created (status unknown, no figure): never a figure they stated, new or old.
@@ -213,7 +230,7 @@ export function addMechanism(model: CanonicalModelT, draft: CanonicalModelT, mea
     const blank = q.value === null && q.low === null && q.high === null;
     if (q.kind === 'coefficient' && q.status === 'estimated' && q.low !== null && q.high !== null && (q.basis ?? '').trim() !== '') added.push({ ...q, author: 'olumi', quote: null, approval: 'proposed' });
     else if (q.status === 'derived' && blank) added.push({ ...q, author: 'olumi', quote: null, approval: 'proposed' });
-    else if (q.author === 'structure') added.push({ ...q, quote: null, approval: 'proposed' }); // the compiler's structural contract decides
+    else if (q.author === 'structure') added.push(structuralIn(model, q) ? { ...q, quote: null, approval: 'proposed' } : askedOf(q));
     else if (q.status === 'asked' && blank && (q.question ?? '').trim() !== '') added.push({ ...q, author: 'person', quote: null, approval: 'proposed' });
     else return { ok: false, reason: `Olumi cannot add "${q.label}" as it was drafted: a figure only the person can give is asked, never estimated.` };
   }
