@@ -9,7 +9,7 @@ import { stableStringify } from '../../orchestrator/context/stable-stringify.js'
 import { writeCorePostimage, type CoreWrite } from '../path-b/tools/core-write.js';
 import { isSavedRead, readSaved } from '../path-b/tools/context-tool.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
-import type { GraphStateIngress } from '../boundary/request-extensions.js';
+import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import { compile } from '../model-program/compile.js';
 import { project } from '../model-program/project.js';
 import { chancesOf, evaluateCanonical, type Evaluation } from './evaluate.js';
@@ -34,11 +34,17 @@ export const compileBlock = (e: Evaluation) => ({
 export function withNewRun(program: SavedProgram): { readonly program: SavedProgram; readonly evaluation: Evaluation; readonly run: StoredRun; readonly graph: Rec } {
   const evaluation = evaluateCanonical(program.canonical, { sourceText: sourceTextOf(program.person_words), seed: program.seed, ...briefOf(program) });
   const run = newRun({ canonical: program.canonical, personWords: program.person_words, seed: program.seed, draws: evaluation.sim?.draws ?? null,
-    index: program.runs.length, graphHash: computeAnalysisAffectingGraphHash(evaluation.projection.graph as unknown as GraphStateIngress),
+    index: program.runs.length, graphHash: analysisHashOf(evaluation.projection.graph),
     result: { canonical_analysis_view: evaluation.view, chances: chancesOf(evaluation.sim), compile: compileBlock(evaluation) } });
   const next = { ...program, runs: [...program.runs, run] };
   return { program: next, evaluation, run, graph: { ...evaluation.projection.graph, living_model: livingModelOf(next) } };
 }
+
+/** The analysis hash the scenario read serves for this display graph (its ingress shape, checked, never cast). */
+const analysisHashOf = (graph: unknown): string | null => {
+  const parsed = GraphStateIngressSchema.safeParse(graph);
+  return parsed.success ? computeAnalysisAffectingGraphHash(parsed.data) : null;
+};
 
 const briefOf = (p: SavedProgram) => (p.person_words[0] !== undefined ? { brief: p.person_words[0] } : {});
 

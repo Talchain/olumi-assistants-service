@@ -23,6 +23,7 @@ import { corePromptCacheKey, STATE_BLOCK_PREFIX } from '../../orchestrator-v5/ag
 import { CORE_ALIGNED_INSTRUCTIONS, instructionsForMode } from '../../orchestrator-v5/core-route/instructions.js';
 import { ASK_CHALLENGE_CHIP_ID } from '../../orchestrator-v5/core-route/turn-request.js';
 import { bakery, BRIEF as BAKERY_BRIEF } from '../../orchestrator-v5/model-program-turn/__tests__/bakery.fixture.js';
+import { DRAFTING_INSTRUCTIONS } from '../../orchestrator-v5/model-program-turn/prompt.js';
 import type { LivingModelT } from '../../schemas/living-model.js';
 import { GOAL_CHANCE_LICENSED, PERIOD_END_EFFECTS_UNSTATED } from '../../orchestrator-v5/goal-target/goal-chance-licence.js';
 import { GOAL_FIGURES_TARGET_NOT_TESTABLE } from '../../orchestrator/context/option-result-source.js';
@@ -897,16 +898,21 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect([drafting.prompt_cache_retention, first.body.prompt_cache_retention]).toEqual(['24h', '24h']);
     });
 
-    it('(6) ALPHA (23 Oct): the provider receives the model-program instructions, these exact bytes, on a saved model’s turn and on a first turn', async () => {
+    it('(6) ALPHA (23 Oct): the provider receives the model-program instructions, these exact bytes, on a saved model’s turn and on a saved program’s; a first turn is the canonical drafter’s', async () => {
       // Pinned from the request bodies the provider received on this route, not from the module that builds them.
       const SENT_SHA = '08747cdea15ebf05c863822fb8776ef4a4b34f7ac001270018a1d90b529fd6a9';
       outputs = [[{ type: 'message', text: 'Here is what the model holds.' }]];
       expect((await typed('What does the model hold now?')).statusCode).toBe(200);
-      SCENARIO = randomUUID(); persisted = null;
+      // S3's switch: a scenario with no saved model is drafted by the canonical drafter (its own instructions), then the
+      // saved program's typed turns are the agent's, with the same standing instructions.
+      SCENARIO = randomUUID(); persisted = null; canonicalDraft = JSON.stringify(bakery());
+      expect((await typed(BAKERY_BRIEF)).statusCode).toBe(200);
       outputs = [[{ type: 'message', text: 'Tell me more about the situation first.' }]];
-      expect((await typed('We are weighing two ways to run the pool on weekday evenings.')).statusCode).toBe(200);
-      expect(calls, 'one provider call per turn').toHaveLength(2);
-      for (const c of calls) {
+      expect((await typed('What does the model hold now?')).statusCode).toBe(200);
+      expect(calls, 'one provider call per turn').toHaveLength(3);
+      expect(calls[1]!.text?.format?.name).toBe('canonical_model');
+      expect(calls[1]!.instructions).toBe(DRAFTING_INSTRUCTIONS);
+      for (const c of [calls[0]!, calls[2]!]) {
         expect(createHash('sha256').update(String(c.instructions), 'utf8').digest('hex')).toBe(SENT_SHA);
         expect(String(c.instructions)).toContain('draft the first model from their brief in that same turn, even when figures are missing');
         expect(String(c.instructions)).not.toContain('POLYMATH COACHING');

@@ -24,6 +24,7 @@ import { resolveGoalThresholdCapWithProvenance } from '../../utils/goal-threshol
 import type { CanonicalModelT, CanonicalQuantityT, QualitativeFamilyT } from './canonical.js';
 import { QUALITATIVE_FAMILIES } from './canonical.js';
 import { compile, isApproximate, normalise, rangeDistOf, readRange, type CompileResult, type LawReading } from './compile.js';
+import { parseUnit } from './units.js';
 
 type Rec = Record<string, unknown>;
 /** structure: an exact constant the model's form needs; never drawn as anyone's estimate. */
@@ -48,6 +49,10 @@ export type Projection = {
 };
 
 export const DECISION_NODE_ID = 'mp:decision';
+export const WAITING_WORDS = 'Waiting for your answer';
+const STRUCTURE_WORDS = 'Fixed by how the model is built';
+/** A figure no one can give yet: it is left out of the analysis, never waiting for an answer. */
+const OUT_OF_ANALYSIS = new Set(['unknown', 'unsupported', 'not_applicable']);
 const QUAL_PREFIX: Record<QualitativeFamilyT, string> = {
   claims: 'Claim', evidence: 'Evidence', assumptions: 'Assumption', dissent: 'Disagreement', conditions: 'Condition', left_out: 'Left out',
 };
@@ -70,7 +75,13 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   /** The canvas's origin vocabulary; a structural constant has none (it is nobody's figure, never "AI inferred"). */
   const provenanceOf = (who: DisplayAuthor) => (who === 'structure' ? {} : { provenance: who === 'person' ? 'from_brief' : who === 'unverified' ? 'unverified_brief' : 'ai_inferred' });
   const quoteOf = (rec: { author: string; quote: string | null }, id: string) => (whoOf(rec, id) === 'person' && has(rec.quote) ? { source_quote: rec.quote } : {});
-  const participation = (inCalc: boolean) => ({ analysis_participation: inCalc ? 'included' : 'retained_excluded' });
+  /** In the analysis (`included`): what the calculation uses now, or will once its questions are answered; only what is
+   *  genuinely left out (a note, a preference, an aim with no measure, a figure that is unknown or unsupported, a model that
+   *  does not compile) is `retained_excluded` (Lenses fit 2, DL 23 Oct). */
+  const participation = (inAnalysis: boolean) => ({ analysis_participation: inAnalysis ? 'included' : 'retained_excluded' });
+  const inModel = new Set(compiled.in_model);
+  /** A goal, limit or option the compiler keeps (calculable, or waiting on answers), never one it withholds. */
+  const kept = (outcome: { status: string } | undefined) => !notCompiling && outcome !== undefined && outcome.status !== 'withheld' && outcome.status !== 'not_compared';
   const Q = new Map(model.quantities.map((q) => [q.id, q] as const));
   const why = (inCalc: boolean, reason: string) => (inCalc ? null : notCompiling ? 'The model does not compile yet.' : reason);
   const plain = (t: string) => t.toLowerCase().replace(/\s+/g, ' ').trim();
@@ -142,8 +153,8 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   const display = (q: CanonicalQuantityT): string => {
     const unit = q.unit === '1' ? '' : ` ${q.unit}`;
     const owner = q.author === 'olumi' ? (q.status === 'estimated' ? ', Olumi\'s estimate' : ', Olumi\'s reading') : isApproximate(q) ? `, for now — you said “${q.quote}”` : '';
-    if (q.status === 'asked') return 'Not given yet';
-    if (q.status === 'derived') return 'Worked out from its inputs';
+    if (q.status === 'asked') return WAITING_WORDS;
+    if (q.status === 'derived') return workedOutWords(q.id);
     if (q.status === 'unknown' || q.status === 'unsupported' || q.status === 'not_applicable') return q.status.replace('_', ' ');
     if (has(q.low) && has(q.high) && q.low !== q.high) {
       // A range is not a law: the person's (or Olumi's) bounds, then Olumi's provisional reading of them, said as Olumi's.
@@ -159,13 +170,47 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     return `${fmt(q.value ?? q.low!)}${unit}${owner}`;
   };
 
-  /** A goal's target as today's core goal carries it: raw, its scale (the shared cap rule) and whose figure it is. */
-  const goalTarget = (raw: number, target: CanonicalQuantityT): Rec => {
-    const cap = resolveGoalThresholdCapWithProvenance(undefined, raw, target.unit, undefined);
+  /**
+   * A goal's target as today's core goal carries it: raw in its frame, its scale (the shared cap rule, for a level or an
+   * absolute change) and whose figure it is. A relative change is a FRACTION of today's level by contract (10 % → 0.1,
+   * said "up 10% from today"), never on a cap scale, and its unit is the measured quantity's (Lenses fit 2, DL 23 Oct).
+   */
+  const goalTarget = (stated: number, target: CanonicalQuantityT, frame: string): Rec => {
+    const unit = parseUnit(target.unit);
+    const relative = frame === 'change_rel';
+    const raw = relative && unit.ok ? stated * unit.unit.scale : stated;
+    const cap = relative ? null : resolveGoalThresholdCapWithProvenance(undefined, raw, target.unit, undefined);
     const src = figureSource(target)['source'];
-    return { goal_threshold_raw: raw, ...(cap !== null ? { goal_threshold: raw / cap.cap, goal_threshold_cap: cap.cap, goal_threshold_cap_provenance: cap.provenance } : {}),
+    return { goal_threshold_raw: raw,
+      ...(cap !== null ? { goal_threshold: raw / cap.cap, goal_threshold_cap: cap.cap, goal_threshold_cap_provenance: cap.provenance } : {}),
       ...(src === 'brief_extraction' ? { threshold_source: 'brief_extraction' } : src === 'user_override' ? { threshold_source: 'user', success_threshold: raw }
         : src === 'cee_inference' ? { threshold_source: 'cee_inference' } : {}) };
+  };
+
+  /** What a derived figure is worked out from, by name: its relation's parts, base and drivers, or a stock's start and flows. */
+  const partsOf = new Map(model.relations.map((r) => [r.defines, r.form === 'definition' ? r.parts.map((p) => p.id) : r.form === 'effect' ? [r.base, ...r.terms.map((t) => t.driver)] : [r.start, ...r.inflows, ...r.outflows]] as const));
+  const workedOutWords = (id: string) => {
+    const names = (partsOf.get(id) ?? []).map((p) => Q.get(p)?.label ?? p);
+    return names.length === 0 ? 'Worked out from its inputs' : `Worked out from ${names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`}`;
+  };
+  /**
+   * Whose a figure is when no person or Olumi gave it (Lenses fit 2, DL 23 Oct): worked out from its parts, fixed by how the
+   * model is built, or waiting for the person's answer. Said on the card as `value_basis`, never as anyone's estimate.
+   */
+  const basisOf = (q: CanonicalQuantityT): Rec => (q.status === 'derived' ? { value_basis: { kind: 'worked_out', from: partsOf.get(q.id) ?? [], words: workedOutWords(q.id) } }
+    : q.status === 'asked' ? { value_basis: { kind: 'waiting_for_answer', words: WAITING_WORDS, ...(has(q.question) ? { question: q.question } : {}) } }
+      : q.author === 'structure' ? { value_basis: { kind: 'structure', words: STRUCTURE_WORDS } } : {});
+  /**
+   * An option's setting in the canvas's intervention vocabulary: the figure's own author, or, for a structural switch (0 or
+   * 1, none or one), the option's, since setting it IS what the option says ("set by ‘Add one specialist’, from your brief").
+   */
+  const settingSource = (to: CanonicalQuantityT, o: CanonicalModelT['options'][number]): Rec => {
+    const own = to.author !== 'structure';
+    const who = own ? whoOf(to, to.id) : whoOf(o, o.id);
+    const words = `Set by ‘${o.label}’`;
+    if (who === 'olumi') return { source: 'cee_hypothesis', source_words: `${words}, Olumi’s figure` };
+    if (who !== 'person') return {};
+    return fromBrief(own ? to.quote : o.quote) ? { source: 'brief_extraction', source_words: `${words}, from your brief` } : { source: 'user_specified', source_words: `${words}, as you gave it` };
   };
 
   // ── the question, goals, options ───────────────────────────────────────────────────────────────────────────────────
@@ -176,11 +221,12 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const who = whoOf(g, g.id);
     const target = g.measure ? Q.get(g.measure.target) : undefined;
     const point = target && has(target.value) && !has(target.low) ? target.value : null;
+    const metricUnit = g.measure ? Q.get(g.measure.quantity)?.unit : undefined;
     nodes.push({
-      id: g.id, kind: 'goal', label: g.label, ...provenanceOf(who), ...quoteOf(g, g.id), ...participation(inCalc),
+      id: g.id, kind: 'goal', label: g.label, ...provenanceOf(who), ...quoteOf(g, g.id), ...participation(inCalc || (has(g.measure) && kept(per))),
       ...(g.measure ? { goal_direction: g.measure.cmp, goal_threshold_frame: g.measure.frame, ...(g.measure.frame === 'level' ? {} : { quantity_frame: 'level' }),
-        ...(point !== null && target ? goalTarget(point, target) : {}),
-        ...(target ? { goal_threshold_unit: target.unit, display_value: `${g.measure.cmp} ${display(target)}` } : {}) } : {}),
+        ...(target ? { goal_threshold_unit: g.measure.frame === 'change_rel' ? (metricUnit ?? '1') : target.unit, display_value: `${g.measure.cmp} ${display(target)}` } : {}),
+        ...(point !== null && target ? goalTarget(point, target, g.measure.frame) : {}) } : {}),
       ...(has(g.question) ? { user_questions: [g.question] } : {}),
     });
     items.push({ record_id: g.id, family: 'goal', shown_as: { node: g.id }, in_calculation: inCalc, why_out: why(inCalc, per?.reasons.join(' ') ?? ''), author: who, approval: g.approval });
@@ -193,9 +239,12 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const who = whoOf(o, o.id);
     const per = compiled.perOption.find((p) => p.option_id === o.id);
     const interventions: Rec = {};
-    for (const s of o.sets) { const to = has(s.to) ? Q.get(s.to) : undefined; if (to) interventions[s.quantity] = { value: to.value, unit: to.unit, display: display(to), from_period: s.from_period }; }
+    for (const s of o.sets) {
+      const to = has(s.to) ? Q.get(s.to) : undefined;
+      if (to) interventions[s.quantity] = { value: to.value, unit: to.unit, display: display(to), from_period: s.from_period, ...settingSource(to, o) };
+    }
     nodes.push({
-      id: o.id, kind: 'option', label: o.label, ...provenanceOf(who), ...quoteOf(o, o.id), ...participation(inCalc),
+      id: o.id, kind: 'option', label: o.label, ...provenanceOf(who), ...quoteOf(o, o.id), ...participation(inCalc || (o.status === 'live' && kept(per))),
       ...(o.sets.length === 0 ? { is_baseline: true } : {}), ...(Object.keys(interventions).length ? { interventions } : {}),
       ...(o.author === 'olumi' ? { proposed_by: 'olumi' } : {}),
     });
@@ -232,10 +281,12 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
       continue;
     }
     nodes.push({
-      id: q.id, kind: q.status === 'derived' ? 'outcome' : 'factor', label: q.label, ...provenanceOf(who), ...quoteOf(q, q.id), ...participation(inCalc),
+      id: q.id, kind: q.status === 'derived' ? 'outcome' : 'factor', label: q.label, ...provenanceOf(who), ...quoteOf(q, q.id),
+      ...participation(inCalc || (!notCompiling && inModel.has(q.id) && !OUT_OF_ANALYSIS.has(q.status))),
       ...(q.status !== 'derived' ? { category: controlled.has(q.id) ? 'controllable' : 'observable' } : {}),
       ...observedOf(q),
       display_value: display(q),
+      ...basisOf(q),
       ...(has(q.basis) ? { description: q.basis } : {}),
       ...(q.status === 'asked' && has(q.question) ? { user_questions: [q.question] } : {}),
     });
@@ -301,7 +352,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     } else {
       // A guardrail with no measure yet, or one whose figure is not given: a text card, never an invented scale.
       const id = `mp:limit:${l.id}`;
-      nodes.push({ id, kind: 'action', label: `Limit: ${l.label}`, description: lm ? `${l.label} (its figure is not given yet).` : `${l.label} (no measure yet, so the result does not cover it).`, ...provenanceOf(who), ...quoteOf(l, l.id), ...participation(inCalc) });
+      nodes.push({ id, kind: 'action', label: `Limit: ${l.label}`, description: lm ? `${l.label} (its figure is not given yet).` : `${l.label} (no measure yet, so the result does not cover it).`, ...provenanceOf(who), ...quoteOf(l, l.id), ...participation(inCalc || (has(lm) && kept(per))) });
       items.push({ record_id: l.id, family: 'limit', shown_as: { node: id }, in_calculation: inCalc, why_out: why(inCalc, per?.reasons.join(' ') ?? ''), author: who, approval: l.approval });
     }
   }
@@ -321,7 +372,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const occ = Q.get(k.occurrence);
     const sev = Q.get(k.severity);
     nodes.push({
-      id: k.id, kind: 'risk', label: k.label, ...provenanceOf(who), ...quoteOf(k, k.id), ...participation(inCalc),
+      id: k.id, kind: 'risk', label: k.label, ...provenanceOf(who), ...quoteOf(k, k.id), ...participation(inCalc || (!notCompiling && inModel.has(k.effect_on))),
       description: `Chance: ${occ ? display(occ) : 'not given'}. If it happens: ${k.mode === 'add' ? 'adds' : 'multiplies by'} ${sev ? display(sev) : 'not given'}, from ${typeof k.from_period === 'number' ? `period ${k.from_period}` : `"${Q.get(k.from_period)?.label ?? k.from_period}"`}.`,
     });
     items.push({ record_id: k.id, family: 'risk', shown_as: { node: k.id }, in_calculation: inCalc, why_out: why(inCalc, 'What it affects is not used by anything that can be worked out yet.'), author: who, approval: k.approval });

@@ -7,6 +7,7 @@
  * Every other turn is the core agent's own native chat, with its tools on the program (`program-tools.ts`).
  */
 import type { InternalDispatch } from '../agent-lane/runtime/agent-capabilities.js';
+import type { ToolResult } from '../agent-lane/runtime/agent-tools.js';
 import type { CanonicalModelT } from '../model-program/canonical.js';
 import { draftCanonicalModel, ledgeredResponsesCall, type ResponsesCall } from './draft.js';
 import { seedOf } from './evaluate.js';
@@ -34,7 +35,7 @@ export interface ProgramTurnInput {
 export interface ProgramTurnOutput {
   readonly assistantText: string;
   readonly toolCalls: { readonly name: string; readonly ok: boolean; readonly outcome: string; readonly refusal?: string }[];
-  readonly toolResults: Rec[];
+  readonly toolResults: ToolResult[];
   readonly mutated: boolean;
   readonly verifiedSave: boolean;
   /** The turn payload's blocks: `canonical_analysis_view` (the stored Run's) and `model_program`. */
@@ -73,14 +74,14 @@ export async function runModelProgramTurn(input: ProgramTurnInput): Promise<Prog
       const model_program = { turn: 'draft', saved: false, draft: draftMeta, canonical: draft.model, compile: draft.compiled === null ? null : { compiles: false, errors: draft.compiled.errors } };
       return { assistantText: `I couldn't build a model that calculates from this yet (${why}). Nothing was saved.`,
         toolCalls: [{ name: 'draft_canonical_model', ok: false, outcome: 'refused', refusal: draft.model === null ? 'no_draft' : 'does_not_compile' }],
-        toolResults: [model_program], mutated: false, verifiedSave: false, payload: { canonical_analysis_view: null, model_program } };
+        toolResults: [{ ok: false, mutated: false, ...model_program }], mutated: false, verifiedSave: false, payload: { canonical_analysis_view: null, model_program } };
     }
     program = { model_program: MODEL_PROGRAM, canonical: draft.model, seed: seedOf(input.scenarioId), person_words: [input.message], runs: [] };
   } else {
     // A Run press: the stored Run IS the analysis of this model on this engine, shown as stored, nothing written.
     const shown = reopenProgram(input.saved.graph);
     if (shown?.run && shown.current && shown.engine_current) {
-      return { assistantText: replyOf(prior.canonical, shown.run, 'run'), toolCalls: [{ name: 'run_program', ok: true, outcome: 'stored' }], toolResults: [{}],
+      return { assistantText: replyOf(prior.canonical, shown.run, 'run'), toolCalls: [{ name: 'run_program', ok: true, outcome: 'stored' }], toolResults: [{ ok: true, mutated: false }],
         mutated: false, verifiedSave: false, payload: { canonical_analysis_view: shown.view, model_program: { turn: 'run', saved: false, stored: true, run: runOf(shown.run) } } };
     }
     program = prior;
@@ -97,7 +98,7 @@ export async function runModelProgramTurn(input: ProgramTurnInput): Promise<Prog
   return {
     assistantText: saved ? replyOf(next.program.canonical, next.run, kind) : `The model could not be saved (${write.status}). Nothing was changed.`,
     toolCalls: [{ name: kind === 'draft' ? 'draft_canonical_model' : 'run_program', ok: saved, outcome: saved ? 'ok' : write.status, ...(saved ? {} : { refusal: `save_${write.status}` }) }],
-    toolResults: [{ ...(isRec(receipt) ? { model_version: receipt } : {}) }],
+    toolResults: [{ ok: saved, mutated: saved, ...(isRec(receipt) ? { model_version: receipt } : {}) }],
     mutated: saved, verifiedSave: write.status === 'saved',
     payload: {
       canonical_analysis_view: next.run.result.canonical_analysis_view,

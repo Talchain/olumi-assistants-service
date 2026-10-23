@@ -46,6 +46,10 @@ function present(m: ExecutableModel, labels: Record<string, PresentQuantity>, mo
 const MRR_WORDS = '‘Monthly recurring revenue’ being at least £4,800 at 1 month from now';
 const CUST_WORDS = '‘Customers’ being at least 90 customers at 1 month from now';
 const EXACT = 'Simulation precision: exact. Every simulated draw gives the same result for this option, so no sampling is involved.';
+// Lenses fit 2 (DL 23 Oct): an exact chance says the fixed value that makes it exact. Hold: £49 × 100 = £4,900 ≥ £4,800 and
+// 100 ≥ 90 (both met, both named); Raise: 100 − 1.8 × 10 = 82 < 90 (the missed one is named; £59 × 82 = £4,838 is met).
+const HOLD_WHY = 'in every simulated draw ‘Monthly recurring revenue’ is £4,900 at 1 month from now, at least £4,800 and ‘Customers’ is 100 customers at 1 month from now, at least 90 customers';
+const RAISE_WHY = 'in every simulated draw ‘Customers’ is 82 customers at 1 month from now, below 90 customers';
 const FORECAST_OR_VERDICT = /\b(will|win|wins|winner|best|recommend|recommended|should)\b|comes out on top/i;
 
 describe('present: the canonical analysis view from a simulated model', () => {
@@ -65,9 +69,9 @@ describe('present: the canonical analysis view from a simulated model', () => {
         options: [{ option_id: 'hold', display: '100%' }, { option_id: 'raise', display: '0%' }] },
     ]);
     expect(cell(v, 'hold')).toEqual({ kind: 'figure', display: '100%',
-      face: `‘Hold’: 100% chance of ${joint}, in this model, on your figures.`,
+      face: `‘Hold’: 100% chance of ${joint}, in this model, on your figures: ${HOLD_WHY}.`,
       detail: { precision_95: [1, 1], draws: 200, precision_words: EXACT } });
-    expect(cell(v, 'raise').face).toBe(`‘Raise to £59’: 0% chance of ${joint}, in this model, on your figures.`);
+    expect(cell(v, 'raise').face).toBe(`‘Raise to £59’: 0% chance of ${joint}, in this model, on your figures: ${RAISE_WHY}.`);
   });
 
   it('(b) the basis: "on your figures" only when every input is the person’s; otherwise "if" with Olumi’s assumptions listed', () => {
@@ -88,8 +92,8 @@ describe('present: the canonical analysis view from a simulated model', () => {
     // (iii) An option's own Olumi figure: only that option's chance is conditional on it; the target says which option.
     const own = present(model(MRR_QUANTITIES(fixed('per_pound', -1.8, 'customers'), fixed('price_59', 59, '£', 'state', 'olumi')), MRR_GOALS, MRR_OPTIONS),
       MRR_LABELS);
-    expect(cell(own, 'hold').face).toMatch(/, in this model, on your figures\.$/);
-    expect(cell(own, 'raise').face).toMatch(/, in this model, if ‘New price’ is £59, Olumi’s figure\.$/);
+    expect(cell(own, 'hold').face.endsWith(`, in this model, on your figures: ${HOLD_WHY}.`)).toBe(true);
+    expect(cell(own, 'raise').face.endsWith(`, in this model, if ‘New price’ is £59, Olumi’s figure: ${RAISE_WHY}.`)).toBe(true);
     expect(own.goal_chance.targets.per_target[0].words).toBe(`${MRR_WORDS}, in this model, on your figures; with ‘Raise to £59’, if ‘New price’ is £59, Olumi’s figure`);
     for (const v of [olumi, theirs, own]) expect(JSON.stringify(v)).not.toMatch(FORECAST_OR_VERDICT);
   });
@@ -190,7 +194,7 @@ describe('present: the canonical analysis view from a simulated model', () => {
     expect(v.goal_chance.notes).toContain('Not yet checked: ‘Overdraft’ — Its figure is unknown.');
     const limitOnly = present(model(MRR_QUANTITIES(fixed('per_pound', -1.8, 'customers')), MRR_GOALS, MRR_OPTIONS, [],
       [{ id: 'overdraft', kind: 'limit', label: 'Overdraft', reason: 'Its figure is unknown.' }]), MRR_LABELS);
-    expect(cell(limitOnly, 'hold').face).toBe(`‘Hold’: 100% chance of ${MRR_WORDS} and ${CUST_WORDS}, in this model, on your figures. Not yet checked: ‘Overdraft’ — Its figure is unknown.`);
+    expect(cell(limitOnly, 'hold').face).toBe(`‘Hold’: 100% chance of ${MRR_WORDS} and ${CUST_WORDS}, in this model, on your figures: ${HOLD_WHY}. Not yet checked: ‘Overdraft’ — Its figure is unknown.`);
   });
 
   it('S3 fix 1: the basis lists only Olumi\u2019s quantities, coefficients and effect relations; identities never', () => {
@@ -204,18 +208,21 @@ describe('present: the canonical analysis view from a simulated model', () => {
     [{ ...goal('g', 'year_total', '<=', 'cap'), label: 'Stay within the yearly budget' }], [option('hold', 'Hold')]);
     const plain = present(bakery(), {});
     expect(cell(plain, 'hold').display).toBe('100%');
-    expect(cell(plain, 'hold').face).toMatch(/, in this model, on your figures\.$/);
+    // (£3.50 × 40 + 0) × 12 = £1,680 in every draw, at most £2,400.
+    expect(cell(plain, 'hold').face.endsWith(', in this model, on your figures: in every simulated draw ‘year_total’ is £1,680 at 1 month from now, at most £2,400.')).toBe(true);
     // An effect whose size is Olumi's figure, and whose relation is Olumi's: both are listed, and nothing else.
     const withEffect = (relation_author?: 'person' | 'olumi') => present(bakery([fixed('base', 10, '£'), fixed('per_degree', -2, '£', 'state', 'olumi'),
       fixed('temperature', 1, 'degrees'), effect('weather', 'base', [{ coefficient: 'per_degree', driver: 'temperature' }], '£')], ['weather']),
     relation_author === undefined ? {} : { weather: { label: 'weather', author: 'person', relation_author } });
-    const basis = (v: Rec): string => cell(v, 'hold').face.split(', in this model, ')[1];
-    expect(basis(withEffect('olumi'))).toBe('if ‘per_degree’ is -£2, Olumi’s figure and ‘weather’ follows Olumi’s assumed relationship.');
-    expect(basis(withEffect('person'))).toBe('if ‘per_degree’ is -£2, Olumi’s figure.');
+    // Weather = 10 − 2 × 1 = £8, so (£140 + 0 + £8) × 12 = £1,776 in every draw: the basis, then why it is exact.
+    const WHY = ': in every simulated draw ‘year_total’ is £1,776 at 1 month from now, at most £2,400.';
+    const basis = (v: Rec): string => { const after = cell(v, 'hold').face.split(', in this model, ')[1] as string; expect(after.endsWith(WHY)).toBe(true); return after.slice(0, -WHY.length); };
+    expect(basis(withEffect('olumi'))).toBe('if ‘per_degree’ is -£2, Olumi’s figure and ‘weather’ follows Olumi’s assumed relationship');
+    expect(basis(withEffect('person'))).toBe('if ‘per_degree’ is -£2, Olumi’s figure');
     // DL ruling: a relation with NO recorded author is listed as an assumption, never read as the person's.
-    expect(basis(withEffect())).toBe('if ‘per_degree’ is -£2, Olumi’s figure and ‘weather’ follows a relationship (author not recorded).');
+    expect(basis(withEffect())).toBe('if ‘per_degree’ is -£2, Olumi’s figure and ‘weather’ follows a relationship (author not recorded)');
     // No identity, conversion or person's figure is ever named in the basis.
-    for (const v of [plain, withEffect('olumi')]) expect(basis(v)).not.toMatch(/‘(price|loaves|spend|x|zero|month_total|months|year_total|cap|base|temperature)’/);
+    for (const v of [withEffect('olumi')]) expect(basis(v)).not.toMatch(/‘(price|loaves|spend|x|zero|month_total|months|year_total|cap|base|temperature)’/);
   });
 
   it('DL ruling: a quantity, coefficient or effect relation with NO recorded author is an assumption "(author not recorded)", never "on your figures"', () => {
@@ -229,11 +236,11 @@ describe('present: the canonical analysis view from a simulated model', () => {
     const v = present(m(unrecorded(fixed('per_degree', 2, '£'))), {});
     expect(cell(v, 'hold').display).toBe('100%');
     expect(cell(v, 'hold').face).toBe('‘Hold’: 100% chance of ‘weather’ being at least £5 at 1 month from now, in this model, '
-      + 'if ‘per_degree’ is £2 (author not recorded) and ‘weather’ follows a relationship (author not recorded).');
+      + 'if ‘per_degree’ is £2 (author not recorded) and ‘weather’ follows a relationship (author not recorded): in every simulated draw ‘weather’ is £12 at 1 month from now, at least £5.');
     expect(JSON.stringify(v)).not.toContain('on your figures');
     // Contrast: the same model with both authors recorded as the person's reads "on your figures".
     const own = present(m(fixed('per_degree', 2, '£')), { weather: { label: 'weather', author: 'person', relation_author: 'person' } });
-    expect(cell(own, 'hold').face).toMatch(/, in this model, on your figures\.$/);
+    expect(cell(own, 'hold').face.endsWith(', in this model, on your figures: in every simulated draw ‘weather’ is £12 at 1 month from now, at least £5.')).toBe(true);
   });
 
   it('S3 fix 3: every limit\u2019s own outcome is in the words, and a limit waiting on an ask is named with its question', () => {
@@ -254,11 +261,38 @@ describe('present: the canonical analysis view from a simulated model', () => {
     const unchecked = 'Not yet checked: ‘Desk space’ — needs your answer: How many desks are free?';
     expect(cell(v, 'hold').face).toContain(` Each limit on its own: ${l50}: 100%; ${l30}: 100%. ${unchecked}`);
     expect(cell(v, 'add').face).toContain(` Each limit on its own: ${l50}: 100%; ${l30}: 0%. ${unchecked}`);
+    // Add's 0% is exact, and the limit that fixes it is named with its value: 1 × £40,000 = £40,000 > £30,000.
+    expect(cell(v, 'add').face).toContain(': in every simulated draw ‘Specialist cost’ is £40,000 at 1 month from now, above £30,000. Each limit on its own:');
     expect(v.goal_chance.limits).toEqual([
       { constraint_id: 'l50', words: l50, options: [{ option_id: 'hold', display: '100%' }, { option_id: 'add', display: '100%' }] },
       { constraint_id: 'l30', words: l30, options: [{ option_id: 'hold', display: '100%' }, { option_id: 'add', display: '0%' }] }]);
     expect(v.goal_chance.unchecked_limits).toEqual([{ limit_id: 'l_desks', words: '‘Desk space’ — needs your answer: How many desks are free?' }]);
     expect(v.goal_chance.notes).toContain(unchecked);
+  });
+
+  it('Lenses fit 2 (DL 23 Oct): 0% only when the outcome is FIXED, with why; 0 of N sampled draws is "less than 1%", never 0%', () => {
+    // Capacity: weekly = 80 + per_specialist × specialists. Keep sets specialists to 0, so weekly is 80 in every draw against
+    // 100 even though per_specialist is Olumi's range (10 to 30 around 20): exact, and said why. With the target at 200, Add
+    // one (80 + 10..30, a bell-shaped spread around 100, sd 20/√12 ≈ 5.8) meets it in none of 200 draws (it would need
+    // +20 sd), yet the outcome is uncertain: "less than 1%" with the sampled precision, never "0%".
+    const capacity = (target: number) => model([fixed('existing', 80, 'ticket/week'), fixed('none', 0, 'specialist'), fixed('one', 1, 'specialist'),
+      fixed('specialists', 0, 'specialist'), range('per_specialist', 10, 30, 20, 'ticket/week/specialist', 'olumi_estimate'),
+      effect('weekly', 'existing', [{ coefficient: 'per_specialist', driver: 'specialists' }], 'ticket/week'), fixed('target', target, 'ticket/week')],
+    [goal('g', 'weekly', '>=', 'target')],
+    [option('keep', 'Keep current staffing', [{ quantity: 'specialists', to: 'none', from_period: 0 }]), option('add', 'Add one specialist', [{ quantity: 'specialists', to: 'one', from_period: 0 }])]);
+    const labels = { weekly: person('Weekly support capacity', true), existing: person('Existing capacity'), target: person('Target'),
+      per_specialist: { label: 'Capacity per specialist', author: 'olumi' as const } };
+    const v = present(capacity(100), labels);
+    expect(cell(v, 'keep').display).toBe('0%');
+    expect(cell(v, 'keep').detail.precision_words).toBe(EXACT);
+    expect(cell(v, 'keep').face.endsWith(': in every simulated draw ‘Weekly support capacity’ is 80 ticket / week at 1 month from now, below 100 ticket / week.')).toBe(true);
+    const far = present(capacity(200), labels);
+    expect(cell(far, 'add').display).toBe('less than 1%');
+    expect(cell(far, 'add').detail.precision_95[0]).toBeCloseTo(0, 12);
+    expect(cell(far, 'add').detail.precision_95[1]).toBeGreaterThan(0);
+    expect(cell(far, 'add').detail.precision_words).toMatch(/^Simulation precision: 0% to [0-9.]+%, from 200 simulated draws\./);
+    expect(cell(far, 'add').face).not.toContain('in every simulated draw');
+    expect(JSON.stringify(far)).not.toMatch(/"display":"0%"[^}]*"option_id":"add"|‘Add one specialist’: 0%/);
   });
 
   it('a chance a nonfinite draw touched is a withheld cell with its count, never a figure', () => {

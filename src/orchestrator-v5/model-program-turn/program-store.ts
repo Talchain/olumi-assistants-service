@@ -28,6 +28,9 @@ export type SavedProgram = {
   readonly runs: readonly StoredRun[];
 };
 
+/** A stored Run as the store keeps it: its id, its receipt and its result (their insides are the engine's, read as stored). */
+const isStoredRun = (r: unknown): r is StoredRun => isRec(r) && typeof r['run_id'] === 'string' && isRec(r['receipt']) && isRec(r['result']);
+
 /** Whether a saved graph CLAIMS to be a program scenario's: its living model carries the discriminator, readable or not. */
 export const isProgramGraph = (graph: unknown): boolean => isRec(graph) && isRec(graph['living_model']) && 'model_program' in graph['living_model'];
 
@@ -41,9 +44,9 @@ export function programReadOf(graph: unknown): ProgramRead {
   if (!parsed.success) return { kind: 'unreadable', reason: 'its saved model does not match the model format' };
   const words = lm['person_words'];
   if (typeof lm['seed'] !== 'number' || !Array.isArray(words) || !words.every((w) => typeof w === 'string')) return { kind: 'unreadable', reason: 'its saved model is missing its seed or the person\'s words' };
-  const runs = lm['runs'];
-  if (!Array.isArray(runs) || !runs.every((r) => isRec(r) && typeof r['run_id'] === 'string' && isRec(r['receipt']) && isRec(r['result']))) return { kind: 'unreadable', reason: 'its stored Runs are not readable' };
-  return { kind: 'program', program: { model_program: MODEL_PROGRAM, canonical: parsed.data, seed: lm['seed'], person_words: words as string[], runs: runs as unknown as StoredRun[] } };
+  const runs: unknown = lm['runs'];
+  if (!Array.isArray(runs) || !runs.every(isStoredRun)) return { kind: 'unreadable', reason: 'its stored Runs are not readable' };
+  return { kind: 'program', program: { model_program: MODEL_PROGRAM, canonical: parsed.data, seed: lm['seed'], person_words: words as string[], runs } };
 }
 /** The saved program, or undefined when the graph holds none or an unreadable one (the caller tells those apart with `programReadOf`). */
 export function savedProgramOf(graph: unknown): SavedProgram | undefined {

@@ -30,6 +30,7 @@ import { STRESS_TEST, StressTestParams, stressTest, type StressDeps } from './st
 import { OFFER_PUBLIC_RESEARCH, OFFER_PUBLIC_RESEARCH_DESCRIPTION, OfferResearchParams, offerResearch, type ResearchDeps } from './research-tool.js';
 import { OUTCOME_TRACE, refused, traceRow, type ToolOutcome, type TraceRow } from './outcome.js';
 import { applyProgramChange, isProgramProposal, ProgramChangeParams, proposeProgramChange, readProgramContext, runProgram } from '../../model-program-turn/program-tools.js';
+import { PROGRAM_TOOL_DESCRIPTIONS } from '../../core-route/instructions.js';
 
 export { traceRow, type TraceRow, type ToolOutcome } from './outcome.js';
 export { readCanonicalContext } from './context-tool.js';
@@ -158,7 +159,7 @@ export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLa
 
   const read = tool({
     name: READ_CANONICAL_CONTEXT,
-    description: TOOL_DESCRIPTIONS.read_canonical_context,
+    description: scenario === 'program' ? PROGRAM_TOOL_DESCRIPTIONS.read_canonical_context : TOOL_DESCRIPTIONS.read_canonical_context,
     parameters: ReadCanonicalContextParams,
     execute: async (args) => record(READ_CANONICAL_CONTEXT, args, scenario === 'program' ? await readProgramContext(deps, ctx) : await readCanonicalContext(deps, ctx)),
     errorFunction: null,
@@ -255,14 +256,14 @@ function programTools(deps: PathBToolDeps, ctx: PathBContext, read: Tool, record
     read,
     tool({
       name: PROPOSE_CHANGE,
-      description: TOOL_DESCRIPTIONS.propose_change,
+      description: PROGRAM_TOOL_DESCRIPTIONS.propose_change,
       parameters: ProgramChangeParams,
       execute: async (args) => record(PROPOSE_CHANGE, args, await proposeProgramChange(deps, ctx, args)),
       errorFunction: null,
     }),
     tool({
       name: APPLY_CHANGE,
-      description: TOOL_DESCRIPTIONS.apply_change,
+      description: PROGRAM_TOOL_DESCRIPTIONS.apply_change,
       parameters: ApplyChangeParams,
       needsApproval: true,
       execute: async (sent) => {
@@ -274,7 +275,7 @@ function programTools(deps: PathBToolDeps, ctx: PathBContext, read: Tool, record
     }),
     tool({
       name: RUN_ANALYSIS,
-      description: TOOL_DESCRIPTIONS.run_analysis,
+      description: PROGRAM_TOOL_DESCRIPTIONS.run_analysis,
       parameters: RunAnalysisParams,
       execute: async (args) => record(RUN_ANALYSIS, args, await runProgram(deps, ctx)),
       errorFunction: null,

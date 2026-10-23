@@ -7,7 +7,7 @@
  * draft as the assistant's turn, the errors as the next user turn: phase 0b's repair shape), at most twice. Nothing here
  * edits the model: what compiles is the AI's own draft.
  */
-import { streamedLedgeredResponse } from '../../adapters/llm/openai-agents-client.js';
+import { streamedLedgeredResponse, type StreamedResponsesBody } from '../../adapters/llm/openai-agents-client.js';
 import { coreBudget } from '../agent-lane/model-budgets.js';
 import { agentRequestIdentity } from '../agent-lane/runtime/prompt-identity.js';
 import { CanonicalModel, type CanonicalModelT } from '../model-program/canonical.js';
@@ -19,11 +19,10 @@ export const DRAFT_REASONING_EFFORT = 'medium' as const;
 /** Room for a whole canonical model plus its reasoning (phase 0b's largest draft used 11.7k of 16k on a smaller format). */
 export const DRAFT_MAX_OUTPUT_TOKENS = 32_000;
 
-type Rec = Record<string, unknown>;
 export type InputMessage = { readonly role: 'user' | 'assistant'; readonly content: string };
 export type CallOutput = { readonly text: string | null; readonly status: string | null; readonly incomplete: string | null; readonly usage: unknown };
 /** One Responses call with the body as built here. Injectable, so a test can answer it without a network. */
-export type ResponsesCall = (body: Rec) => Promise<CallOutput>;
+export type ResponsesCall = (body: StreamedResponsesBody) => Promise<CallOutput>;
 
 export type DraftAttempt = {
   readonly attempt: number;
@@ -42,7 +41,7 @@ export type DraftOutcome = {
 };
 
 /** The request body: fixed instructions and schema first (the cached prefix), then the conversation. */
-export function draftRequestBody(input: readonly InputMessage[]): Rec {
+export function draftRequestBody(input: readonly InputMessage[]): StreamedResponsesBody {
   return {
     model: coreBudget(DRAFT_REASONING_EFFORT).model,
     instructions: DRAFTING_INSTRUCTIONS,
@@ -62,11 +61,8 @@ export function ledgeredResponsesCall(): ResponsesCall {
   return async (body) => {
     const final = await streamedLedgeredResponse({ site: 'model-program.draft',
       detailOf: (b) => ({ model: String(b['model']), purpose: 'canonical_draft', ...agentRequestIdentity('agent.construct', b) }) }, body);
-    const output = Array.isArray(final?.['output']) ? final!['output'] as Rec[] : [];
-    const content = output.filter((o) => o['type'] === 'message').flatMap((o) => (Array.isArray(o['content']) ? o['content'] as Rec[] : []));
-    const text = content.find((c) => c['type'] === 'output_text')?.['text'];
-    return { text: typeof text === 'string' ? text : null, status: typeof final?.['status'] === 'string' ? final['status'] as string : null,
-      incomplete: ((final?.['incomplete_details'] as Rec | undefined)?.['reason'] as string | undefined) ?? null, usage: final?.['usage'] ?? null };
+    const text = (final?.output ?? []).flatMap((o) => (o.type === 'message' ? o.content : [])).flatMap((c) => (c.type === 'output_text' ? [c.text] : []))[0];
+    return { text: text ?? null, status: final?.status ?? null, incomplete: final?.incomplete_details?.reason ?? null, usage: final?.usage ?? null };
   };
 }
 

@@ -98,6 +98,9 @@ export type CompileResult = {
   conversions: Conversion[];
   /** True when the model names no option, so the executable runs one implicit "as things stand" option. */
   implicit_as_stated: boolean;
+  /** Every quantity a measured goal, a measured limit or a live option rests on, whether or not it can be worked out yet:
+   *  what the calculation is built from once its questions are answered (the display's "in the model"). */
+  in_model: string[];
 };
 
 /**
@@ -143,7 +146,7 @@ export function compileJson(input: unknown, opts: { sourceText?: string } = {}):
     errors: parsed.error.issues.slice(0, 20).map((i) => ({
       code: 'schema' as const, message: `The model's shape is wrong at ${i.path.join('.') || 'its top level'}: ${i.message}.`, items: [],
     })),
-    asks: [], coaching: [], unverified: [], preferences: [], conversions: [], implicit_as_stated: false,
+    asks: [], coaching: [], unverified: [], preferences: [], conversions: [], implicit_as_stated: false, in_model: [],
   };
 }
 
@@ -692,6 +695,8 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
     errors, asks: [], coaching: [], unverified,
     preferences: model.preferences.map((p) => ({ id: p.id, quantity: p.quantity, direction: p.direction, label: Q.get(p.quantity)?.label ?? p.quantity })),
     conversions: [], implicit_as_stated: model.options.length === 0,
+    in_model: [...new Set([...goalClosure.values(), ...limitClosure.values(),
+      ...model.options.filter((o) => o.status === 'live').map((o) => optionClosure.get(o.id)!)].flatMap((c) => [...c]))],
   };
 
   // ── the executable subset: only supported goals, limits and inputs ────────────────────────────────────────────────

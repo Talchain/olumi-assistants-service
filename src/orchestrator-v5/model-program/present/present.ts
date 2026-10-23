@@ -30,7 +30,7 @@ import { comparatorWords } from '../../goal-target/goal-target-basis.js';
 import { displayRoundingFor } from '../../goal-target/goal-chance-driver.js';
 import { displayedPctAt } from '../../goal-target/goal-chance-display.js';
 import { sayDisplayedPct } from '../../goal-target/goal-targets-joint.js';
-import type { Aggregation, ExecutableModel, FixedAuthor, Goal, Limit, Window } from '../executable.js';
+import type { Aggregation, Cmp, ExecutableModel, FixedAuthor, Goal, Limit, Window } from '../executable.js';
 import { rangeLaw, type RangeDist } from '../simulate/range-law.js';
 import { isWithheld, type ChanceOrWithheld, type OptionResult, type SimResult, type WithheldChance } from '../simulate/result.js';
 import { readingOf, simulate } from '../simulate/simulate.js';
@@ -337,6 +337,34 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     why: `In ${w.withheld.count.toLocaleString('en-GB')} of ${result.draws.toLocaleString('en-GB')} simulated draws ${listWords(w.withheld.quantities.map((id) => q(label(id) ?? id)))} could not be worked out (for example a division by zero), so this model cannot give the chance yet.`,
     reasons: [{ code: 'invalid_domain', message: `${w.withheld.count} draws; ${w.withheld.quantities.join(', ')}` }],
   });
+  /**
+   * WHY AN EXACT CHANCE IS EXACT (Lenses fit 2, DL 23 Oct): 0% or 100% is said only where the outcome is FIXED in the model
+   * (every draw reads the same value against the same target, no risk in play: simulate's `exact`), and then with the value
+   * that fixes it: "in every simulated draw ‘Weekly capacity’ is 80 ticket / week at 1 week from now, below 100 ticket / week".
+   * A sampled 0 of N stays "less than 1%" (`shown`). Each goal or limit that decides it is named: the ones missed for 0%,
+   * every one for 100%.
+   */
+  const MISSED: Record<Cmp, string> = { '>=': 'below', '>': 'not above', '<=': 'above', '<': 'not below' };
+  const fixedLine = (c: Goal | Limit, against: string, value: number, met: boolean): string | undefined => {
+    const subject = label(c.quantity), target = byId.get(against);
+    if (subject === undefined || target?.dist?.kind !== 'fixed') return undefined;
+    const of = c.per === undefined ? q(subject) : label(c.per) === undefined ? undefined : `${q(subject)} per ${q(label(c.per)!)}`;
+    if (of === undefined) return undefined;
+    const bound = met ? comparatorWords(c.cmp) : MISSED[c.cmp];
+    return `${of} is ${say(value, target.unit)} ${horizonWords(c.aggregation, c.window, unit, readingOf(byId.get(c.quantity)!))}, ${bound} ${say(target.dist.value, target.unit)}`;
+  };
+  const fixedWhy = (o: OptionResult, met: boolean): string | undefined => {
+    const lines = [
+      ...model.goals.map((g, i) => ({ c: g as Goal | Limit, against: g.target, chance: o.per_goal[i], out: o.outcomes[i] })),
+      ...model.limits.map((l, i) => ({ c: l as Goal | Limit, against: l.bound, chance: o.per_limit[i], out: o.limit_outcomes[i] })),
+    ].flatMap(({ c, against, chance, out }) => {
+      if (chance === undefined || isWithheld(chance) || out === undefined || 'withheld' in out) return [];
+      if (chance.chance !== (met ? 1 : 0) || chance.precision_95[0] !== chance.precision_95[1]) return [];
+      const line = fixedLine(c, against, out.p50, met);
+      return line === undefined ? [] : [line];
+    });
+    return lines.length === 0 ? undefined : `in every simulated draw ${listWords(lines)}`;
+  };
   const options = result.options.map((o: OptionResult) => {
     const name = optionLabel.get(o.option_id) ?? o.option_id;
     const notRecorded = { kind: 'not_recorded' as const };
@@ -348,8 +376,9 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     const headline = o.joint_within_limits;
     if (isWithheld(headline)) return { option_id: o.option_id, cell: outsideCell(headline), main_driver: notRecorded };
     const s = shown(headline, result.draws)!;
+    const why = headline.precision_95[0] === headline.precision_95[1] ? fixedWhy(o, headline.chance === 1) : undefined;
     const cell: PresentCell = { kind: 'figure', display: s.display,
-      face: `${q(name)}: ${s.display} chance of ${jointWords}, in this model, ${basisWords(upstream(roots, o.option_id))}.`
+      face: `${q(name)}: ${s.display} chance of ${jointWords}, in this model, ${basisWords(upstream(roots, o.option_id))}${why !== undefined ? `: ${why}` : ''}.`
         + (model.limits.length > 0 ? ` Each limit on its own: ${limitLines(o).join('; ')}.` : '')
         + (uncheckedLine !== undefined ? ` ${stop(uncheckedLine)}` : ''),
       detail: { precision_95: headline.precision_95, draws: result.draws, precision_words: s.precision_words } };

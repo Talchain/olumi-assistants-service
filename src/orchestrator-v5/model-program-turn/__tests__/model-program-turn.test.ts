@@ -488,6 +488,55 @@ describe('the model-program turn on the real core route', () => {
     expect(buildCanonicalAnalysisReadyFromGraph({ ...g, living_model: {} })).toMatchObject({ goal_node_id: 'more_loaves', goal_threshold_raw: 380 });
   });
 
+  it('Lenses fit 2 (DL 23 Oct): a relative target is a fraction; what waits on an answer is in the analysis; each setting and worked-out figure says whose it is', () => {
+    const nodeOf = (g: { nodes: Json[] }) => (id: string) => g.nodes.find((n) => n.id === id) as Json;
+    // (1) "Grow sales by 10%" is change_rel 0.1 beside the measured quantity's unit (the canvas says "up 10% from today"),
+    // never 10 (read as 1000%) and never on a cap scale; the same target written as the fraction 0.1 ("1") is the same.
+    const relative = (target: Partial<CanonicalModelT['quantities'][number]>, unit: string) => {
+      const m = bakery();
+      m.quantities.push(q('growth', unit, { quote: 'grow sales by 10%', ...target }));
+      m.goals = [{ ...m.goals[0]!, measure: { ...m.goals[0]!.measure!, target: 'growth', frame: 'change_rel', reference: { kind: 'now', option: null, quantity: null } } }];
+      return nodeOf(project(m, compile(m)).graph)('more_loaves');
+    };
+    for (const goal of [relative({ value: 10 }, '%'), relative({ value: 0.1 }, '1')]) {
+      expect(goal).toMatchObject({ goal_threshold_frame: 'change_rel', quantity_frame: 'level', goal_threshold_raw: 0.1, goal_threshold_unit: 'loaf/week', threshold_source: 'brief_extraction' });
+      expect(goal).not.toHaveProperty('goal_threshold_cap');
+      expect(goal).not.toHaveProperty('goal_threshold');
+    }
+
+    // (5) The bakery's limit waits on the oven's price: the price, the spend and the limit's inputs are IN the analysis,
+    // waiting for the answer; with the extra per oven asked as well nothing can be worked out yet, and still only what is
+    // genuinely out (a note, an aim with no measure) is excluded.
+    const waiting = nodeOf(project(bakery(), compile(bakery(), { sourceText: BRIEF })).graph);
+    expect(waiting('oven_price')).toMatchObject({ analysis_participation: 'included', display_value: 'Waiting for your answer',
+      value_basis: { kind: 'waiting_for_answer', words: 'Waiting for your answer', question: 'What would the second oven cost?' } });
+    expect(waiting('spend').analysis_participation).toBe('included');
+    const none = bakery();
+    none.quantities = none.quantities.map((x) => (x.id === 'extra_per_oven' ? { ...x, status: 'asked', value: null, quote: null, question: 'How many more loaves would a second oven bake?' } : x));
+    none.goals.push({ id: 'regulars', label: 'Keep the regulars happy', measure: null, question: 'How would you know the regulars are happy?', author: 'person', quote: 'keep our one oven', ...at });
+    none.claims.push({ id: 'busy', text: 'Saturdays are the busy day.', concerns: ['sales'], author: 'olumi', quote: null, ...at });
+    const compiledNone = compile(none, { sourceText: BRIEF });
+    expect([compiledNone.errors, compiledNone.executable]).toEqual([[], null]);
+    const out = nodeOf(project(none, compiledNone).graph);
+    for (const id of ['base_sales', 'ovens_added', 'extra_per_oven', 'sales', 'oven_price', 'spend', 'more_loaves', 'second_oven', 'keep_one']) {
+      expect([id, out(id).analysis_participation]).toEqual([id, 'included']);
+    }
+    for (const id of ['regulars', 'busy']) expect([id, out(id).analysis_participation]).toEqual([id, 'retained_excluded']);
+
+    // (4) An option's setting says whose it is in the canvas's intervention vocabulary; a structural switch (on or off) is the
+    // option's own. A worked-out figure says what it is worked out from; a structural constant says it is fixed by the model.
+    const bake = nodeOf(project(bakery(), compile(bakery(), { sourceText: BRIEF }), { brief: BRIEF }).graph);
+    expect(bake('second_oven').interventions.ovens_added).toMatchObject({ source: 'brief_extraction', source_words: 'Set by ‘A second oven’, from your brief' });
+    expect(bake('sales')).toMatchObject({ display_value: 'Worked out from base sales and ovens added',
+      value_basis: { kind: 'worked_out', from: ['base_sales', 'ovens_added'], words: 'Worked out from base sales and ovens added' } });
+    const clubbed = nodeOf(project(club(), compile(club(), { sourceText: CLUB_BRIEF }), { brief: CLUB_BRIEF }).graph);
+    expect(clubbed('promotion').interventions).toMatchObject({
+      promo_on: { source: 'brief_extraction', source_words: 'Set by ‘Run a promotion’, from your brief' },
+      spend: { source: 'brief_extraction', source_words: 'Set by ‘Run a promotion’, from your brief' } });
+    expect(clubbed('promo_on').value_basis).toEqual({ kind: 'structure', words: 'Fixed by how the model is built' });
+    expect(clubbed('members').value_basis).toMatchObject({ kind: 'worked_out', from: ['members_now', 'joins', 'leavers'] });
+  });
+
   it('the stored Run names itself: run id, the analysis hash of the graph it was computed with, its time; stale once the model moves', async () => {
     replies = [JSON.stringify(bakery())];
     const r = (await turn({ message: BRIEF })).json();

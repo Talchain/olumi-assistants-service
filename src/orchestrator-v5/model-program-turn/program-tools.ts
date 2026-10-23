@@ -29,7 +29,7 @@ export interface ProgramToolDeps { readonly dispatch: InternalDispatch; readonly
 /** Said with the turn's state on a program scenario: how its tools work. The standing instructions stay byte for byte. */
 export const PROGRAM_TURN_GUIDANCE = 'This scenario\'s model is a model program: read_canonical_context gives its quantities (with who gave each figure), goals, limits, options, open questions and its stored Run. '
   + 'To change it, call propose_change with ops: set_quantity (one input quantity\'s figure or range: an answer to an open question, or a corrected figure), set_range_kind (how to read a range they gave), set_goal_target, add_option or rename_option, each quoting the person\'s exact words, using the ids read_canonical_context gives. '
-  + 'The person approves the card; apply_change then saves the model with a new Run. Report a chance only in the Run\'s own words (run.options[].words), never a figure of your own.';
+  + 'The person approves the card; apply_change then saves the model with a new Run.';
 
 export const ProgramChangeParams = z.object({
   public_label: z.string().describe('What the person is asked to approve, in plain words.'),
