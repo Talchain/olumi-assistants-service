@@ -111,6 +111,15 @@ describe('a Run is claimed only when the read selects that Run on the current mo
     expect(out).toEqual({ status: 'refused', reason: 'run_blocked', data: { ran: false, what_is_missing: 'A goal level.' } });
   });
 
+  it('DL 93d79c3e (marketing r3 on 05745055): a refusal names the engine\'s own typed reason, never only the generic code', async () => {
+    const engine = { kind: 'engine', reason: 'analysis_blocked', text: 'The engine could not proceed.', chips: [] };
+    const out = await runAnalysis(product({ ok: true, mutated: false, ran: false, run_outcome: engine }, []), ctx, ARGS, FREE);
+    expect(out).toMatchObject({ status: 'refused', reason: 'analysis_blocked', data: { run_outcome: engine } });
+    const ask = { kind: 'identity_ask', text: 'What is it today?', chips: [] };
+    expect(await runAnalysis(product({ ok: true, mutated: false, ran: false, run_outcome: ask }, []), ctx, ARGS, FREE))
+      .toMatchObject({ status: 'refused', reason: 'identity_ask' });
+  });
+
   it('the pipeline declined with its own code (a spent Run press): refused with that code', async () => {
     const out = await runAnalysis(product({ ok: false, mutated: false, ran: false, refusal: 'run_press_consumed' }, []), ctx, ARGS, FREE);
     expect(out).toMatchObject({ status: 'refused', reason: 'run_press_consumed' });
