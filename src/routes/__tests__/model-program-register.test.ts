@@ -38,7 +38,9 @@ import { stableStringify } from '../../orchestrator/context/stable-stringify.js'
 import { seedOf } from '../../orchestrator-v5/model-program-turn/evaluate.js';
 import { withNewRun } from '../../orchestrator-v5/model-program-turn/program-save.js';
 import { MODEL_PROGRAM, reopenProgram } from '../../orchestrator-v5/model-program-turn/program-store.js';
-import { bakery, BRIEF } from '../../orchestrator-v5/model-program-turn/__tests__/bakery.fixture.js';
+import { at, bakery, BRIEF, q } from '../../orchestrator-v5/model-program-turn/__tests__/bakery.fixture.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
+import type { CanonicalModelT } from '../../orchestrator-v5/model-program/canonical.js';
 
 type Rec = Record<string, unknown>;
 beforeEach(() => {
@@ -119,6 +121,46 @@ describe('a model program\'s postimage through the real /graph/register', () => 
     for (const legacy of ['readiness_issues', 'repair_proposal', 'analysis_admission', 'blocked_reason']) expect((body.current_read as Rec).analysis_ready).not.toHaveProperty(legacy);
     expect(body.analysis_admission).toBeNull();
     expect(JSON.stringify({ ...body, graph: null, canonical_analysis_view: null })).not.toMatch(/FACTOR_LEVEL_SCALE_UNRESOLVED|MODEL_HAS_BLOCKERS|ORPHAN_NODE/);
+  });
+
+  it('DL 23 Oct (UI witness on alpha3): a program capacity graph with the person\'s 10–30 range gets NO legacy readiness asks; the same graph as a Living Model still does', async () => {
+    const brief = 'Our support team handles 80 tickets a week. We need at least 100 tickets a week. Each specialist would add between 10 and 30 tickets a week. Add one specialist or keep the team as it is.';
+    const capacity: CanonicalModelT = { version: 'canonical.v1', question: 'Add a specialist?', period: 'week',
+      quantities: [q('existing', 'ticket/week', { value: 80, quote: 'handles 80 tickets a week' }),
+        q('specialists', 'specialist', { value: 0, author: 'structure', basis: 'None added today.' }), q('one', 'specialist', { value: 1, author: 'structure', basis: 'One specialist.' }),
+        q('per_specialist', 'ticket/week/specialist', { kind: 'coefficient', low: 10, high: 30, range_kind: 'plausible', quote: 'between 10 and 30 tickets a week' }),
+        q('weekly', 'ticket/week', { kind: 'derived', status: 'derived', author: 'olumi' }), q('target', 'ticket/week', { value: 100, quote: 'at least 100 tickets a week' })],
+      relations: [{ form: 'effect', id: 'weekly_rel', defines: 'weekly', base: 'existing', terms: [{ driver: 'specialists', coefficient: 'per_specialist', author: 'person', quote: 'Each specialist would add', ...at }], author: 'olumi', quote: null, ...at }],
+      goals: [{ id: 'g', label: 'At least 100 tickets a week', measure: { quantity: 'weekly', per: null, cmp: '>=', target: 'target', frame: 'level', reference: null, aggregation: 'end', window: null,
+        measure_by: 'person', assumptions: [], exclusions: [] }, question: null, author: 'person', quote: 'at least 100 tickets a week', ...at }],
+      limits: [], preferences: [],
+      options: [{ id: 'add', label: 'Add one specialist', sets: [{ quantity: 'specialists', to: 'one', value: null, low: null, high: null, range_kind: null, question: null, from_period: 0, author: 'person', quote: 'Add one specialist' }],
+        status: 'live', developed_from: null, author: 'person', quote: 'Add one specialist', ...at },
+      { id: 'keep', label: 'Keep the team', sets: [], status: 'live', developed_from: null, author: 'person', quote: 'keep the team as it is', ...at }],
+      risks: [], claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], history: [] };
+    const { graph } = withNewRun({ model_program: MODEL_PROGRAM, canonical: capacity, seed: seedOf(SCENARIO), person_words: [brief], runs: [] });
+    expect((await register({ graph, thin_core: true, brief_text: brief }, true)).statusCode).toBe(200);
+    const written = (append.mock.calls[0]![0] as Rec).graph as Rec;
+    const readOf = async (g: Rec) => {
+      store.readExistingScenario.mockResolvedValue({ userId: null, graph: JSON.parse(JSON.stringify(g)), briefText: brief, analysisInvalidatedAt: null, revision: 1 });
+      const app = Fastify();
+      await scenarioGraphRoute(app);
+      await app.ready();
+      const res = await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph`, payload: {} });
+      await app.close();
+      expect(res.statusCode, res.body).toBe(200);
+      return res.json() as Rec;
+    };
+    const LEGACY_ASKS = /FACTOR_LEVEL_SCALE_UNRESOLVED|recorded as [0-9]+ ticket\/week with no range|needs a change before it can be analysed/;
+    // The program: its readiness is the program's (a Run is current with figures), and no legacy range ask anywhere.
+    const program = await readOf(written);
+    expect(((program.canonical_analysis_view as Rec).options as Rec[]).map((o) => (o.cell as Rec).kind)).toEqual(['figure', 'figure']);
+    expect((program.current_read as Rec).analysis_ready).toMatchObject({ status: 'ready', may_run: true });
+    expect(JSON.stringify({ ...program, graph: null })).not.toMatch(LEGACY_ASKS);
+    // Contrast: the SAME graph with no program (a Living Model) still gets the legacy readiness and its range asks.
+    const { living_model: _program, ...plain } = written;
+    expect(JSON.stringify(buildCanonicalAnalysisReadyFromGraph(plain))).toMatch(LEGACY_ASKS);
+    expect(JSON.stringify({ ...(await readOf(plain)), graph: null })).toMatch(LEGACY_ASKS);
   });
 
   it('NEGATIVE: the same graph from a client (not CEE\'s writer) is refused, and nothing is stored', async () => {

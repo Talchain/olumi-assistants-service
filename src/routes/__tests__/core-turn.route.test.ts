@@ -20,7 +20,7 @@ import { streamWhenAsked } from '../../orchestrator-v5/agent-lane/__tests__/stre
 import { SELECTION_NOTE_PREFIX } from '../../orchestrator-v5/agent-lane/selection-context.js';
 import { TODAY_PREFIX } from '../../orchestrator-v5/agent-lane/turn-context.js';
 import { corePromptCacheKey, STATE_BLOCK_PREFIX } from '../../orchestrator-v5/agent-lane/core/sdk-turn.js';
-import { CORE_ALIGNED_INSTRUCTIONS, instructionsForMode, PROGRAM_TOOL_DESCRIPTIONS } from '../../orchestrator-v5/core-route/instructions.js';
+import { CORE_INSTRUCTIONS_LIVING_MODEL, CORE_REPLY_RULES_LIVING_MODEL, instructionsForMode, PROGRAM_TOOL_DESCRIPTIONS } from '../../orchestrator-v5/core-route/instructions.js';
 import { TOOL_DESCRIPTIONS } from '../../orchestrator-v5/path-b/tools/index.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import { ASK_CHALLENGE_CHIP_ID } from '../../orchestrator-v5/core-route/turn-request.js';
@@ -826,7 +826,8 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
 
   describe('⭐ CACHING (DL 22 Oct): the provider\'s cached prefix is the same bytes on every call', () => {
     /** The standing instructions: the same on every turn of every scenario; this turn's facts and guidance follow them. */
-    const STANDING = instructionsForMode('core', CORE_ALIGNED_INSTRUCTIONS);
+    // These rows run on a saved Living Model (not a program): it keeps the Living Model text, byte for byte (Codex r1 BLOCK 4 on #3709).
+    const STANDING = instructionsForMode('core', CORE_INSTRUCTIONS_LIVING_MODEL, CORE_REPLY_RULES_LIVING_MODEL);
     const challengeOn = (id: string) => post({ turn_id: randomUUID(), message: 'Challenge this', source: 'chip_click', chip: { id: ASK_CHALLENGE_CHIP_ID },
       selected_elements: { node_ids: [id] } });
 
@@ -900,25 +901,32 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect([drafting.prompt_cache_retention, first.body.prompt_cache_retention]).toEqual(['24h', '24h']);
     });
 
-    it('(6) ALPHA (23 Oct): the provider receives the model-program instructions, these exact bytes, on a saved model’s turn and on a saved program’s; a first turn is the canonical drafter’s', async () => {
+    /** Draft a saved PROGRAM scenario (the canonical drafter's first turn), then clear the calls. */
+    const savedProgram = async (): Promise<void> => {
+      SCENARIO = randomUUID(); persisted = null; canonicalDraft = JSON.stringify(bakery()); calls.length = 0;
+      expect((await typed(BAKERY_BRIEF)).statusCode).toBe(200);
+      expect(calls[0]!.text?.format?.name).toBe('canonical_model');
+      expect(calls[0]!.instructions).toBe(DRAFTING_INSTRUCTIONS);
+      calls.length = 0;
+    };
+
+    it('(6) ALPHA (23 Oct) + Codex r1 BLOCK 4 on #3709: a saved PROGRAM\'s turn gets the model-program instructions; a saved Living Model keeps the old text, byte for byte', async () => {
       // Pinned from the request bodies the provider received on this route, not from the module that builds them.
-      const SENT_SHA = '08747cdea15ebf05c863822fb8776ef4a4b34f7ac001270018a1d90b529fd6a9';
+      const PROGRAM_SHA = '08747cdea15ebf05c863822fb8776ef4a4b34f7ac001270018a1d90b529fd6a9';
+      const LIVING_MODEL_SHA = '7a1bced23a44dccc478a00d075b28bbe2dda487a4b6da868ae3a477698097e44'; // staging 646d374e's
+      const sha = (c: Json) => createHash('sha256').update(String(c.instructions), 'utf8').digest('hex');
       outputs = [[{ type: 'message', text: 'Here is what the model holds.' }]];
       expect((await typed('What does the model hold now?')).statusCode).toBe(200);
-      // S3's switch: a scenario with no saved model is drafted by the canonical drafter (its own instructions), then the
-      // saved program's typed turns are the agent's, with the same standing instructions.
-      SCENARIO = randomUUID(); persisted = null; canonicalDraft = JSON.stringify(bakery());
-      expect((await typed(BAKERY_BRIEF)).statusCode).toBe(200);
+      expect(calls).toHaveLength(1);
+      expect(sha(calls[0]!)).toBe(LIVING_MODEL_SHA);
+      expect(String(calls[0]!.instructions)).not.toContain('HOW THE MODEL WORKS');
+      await savedProgram();
       outputs = [[{ type: 'message', text: 'Tell me more about the situation first.' }]];
       expect((await typed('What does the model hold now?')).statusCode).toBe(200);
-      expect(calls, 'one provider call per turn').toHaveLength(3);
-      expect(calls[1]!.text?.format?.name).toBe('canonical_model');
-      expect(calls[1]!.instructions).toBe(DRAFTING_INSTRUCTIONS);
-      for (const c of [calls[0]!, calls[2]!]) {
-        expect(createHash('sha256').update(String(c.instructions), 'utf8').digest('hex')).toBe(SENT_SHA);
-        expect(String(c.instructions)).toContain('draft the first model from their brief in that same turn, even when figures are missing');
-        expect(String(c.instructions)).not.toContain('POLYMATH COACHING');
-      }
+      expect(calls).toHaveLength(1);
+      expect(sha(calls[0]!)).toBe(PROGRAM_SHA);
+      expect(String(calls[0]!.instructions)).toContain('draft the first model from their brief in that same turn, even when figures are missing');
+      expect(String(calls[0]!.instructions)).not.toContain('POLYMATH COACHING');
     });
 
     it('S3 (DL 23 Oct): on a program turn the provider receives the PROGRAM tool descriptions, read included, and the read it gets back carries the Run\'s goal_chance block unchanged', async () => {
@@ -946,8 +954,9 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(Object.keys(run).sort()).toEqual(['current', 'engine_current', 'goal_chance', 'options', 'run_id']);
     });
 
-    /** The instructions the provider received on one typed turn of a saved model. */
+    /** The instructions the provider received on one typed turn of a saved program (the model-program instructions). */
     const sentOnce = async (): Promise<string> => {
+      await savedProgram();
       outputs = [[{ type: 'message', text: 'Noted.' }]];
       expect((await typed('The lane hire is about 20 pounds an hour.')).statusCode).toBe(200);
       expect(calls).toHaveLength(1);

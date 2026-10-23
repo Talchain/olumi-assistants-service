@@ -67,7 +67,7 @@ import {
   appliedGraphWire, constructionDeadline, CORE_RUN_PRESS_WITHHELD, coreTurnCapabilities, coreTurnStores, coreTurnTools, graphReadyEmitter,
 } from '../orchestrator-v5/core-route/deps.js';
 import { coreActionBarOf } from '../orchestrator-v5/core-route/action-bar.js';
-import { CORE_ALIGNED_INSTRUCTIONS, instructionsForMode } from '../orchestrator-v5/core-route/instructions.js';
+import { CORE_ALIGNED_INSTRUCTIONS, CORE_INSTRUCTIONS_LIVING_MODEL, CORE_REPLY_RULES_LIVING_MODEL, instructionsForMode } from '../orchestrator-v5/core-route/instructions.js';
 import {
   AGENT_TURN_CLAIM_WAIT, agentTurnRequestHash, challengeTargetOf, chipOperationOf, claimHashFor, claimTurnIdOf, isChiplessRetry,
   recordedOutcomeOf, requestHashOfAnswer, requestHashOfClaim, sameAgentTurnRequest, typedRowProof, withChipOperation, withRecordedOutcome,
@@ -693,7 +693,9 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
             settle: async () => { await restructure.settle?.(); },
             // The standing instructions, the same bytes on every call of every scenario (the cached prefix); this turn's own
             // guidance (the drafting arm, a Challenge's note) follows its state block in the turn's input.
-            instructions: instructionsForMode(MODE, CORE_ALIGNED_INSTRUCTIONS),
+            // A program scenario gets the model-program instructions (#3707); every other scenario keeps the Living Model's,
+            // byte for byte as before (Codex r1 BLOCK 4 on #3709).
+            instructions: program ? instructionsForMode(MODE, CORE_ALIGNED_INSTRUCTIONS) : instructionsForMode(MODE, CORE_INSTRUCTIONS_LIVING_MODEL, CORE_REPLY_RULES_LIVING_MODEL),
             turnGuidance: [...(program ? [PROGRAM_TURN_GUIDANCE] : []), ...(challenge === null ? [] : [challenge.note])],
             briefText: saved.briefText,
             canonicalState: canonical.status === 'ok' ? canonical.data : undefined,
