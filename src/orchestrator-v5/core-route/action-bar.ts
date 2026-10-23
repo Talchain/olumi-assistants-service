@@ -7,7 +7,6 @@
  * reload rank one read alike: while a card awaits approval the pre-mortem stays offered and the card stays held (the core
  * route enforces approval itself). None to show is no bar, so the panel keeps its method strip.
  */
-import { readEvaluatedIdentityNodeIds } from '../agent-lane/admit-model.js';
 import type { ActionId } from '../agent-lane/actions/registry.js';
 import { actionBarOf, type ActionBarV1, type ActionOffer } from '../agent-lane/actions/rank.js';
 import { actionFactsOf } from '../agent-lane/actions/state.js';
@@ -21,12 +20,13 @@ const rec = (v: unknown): Record<string, unknown> | undefined =>
 /** The bar for a core scenario, from a body of `/assist/v1/scenarios/:id/graph`; none when nothing it offers is served. */
 export function coreActionBarOf(scenarioId: string, body: Readonly<Record<string, unknown>>): ActionBarV1 | undefined {
   try {
-    const evaluated = readEvaluatedIdentityNodeIds(body.analysis_identity_evaluated_node_ids);
+    // The identity-evaluated set is not read (its reader lives in the admission layer the thin core never imports): it feeds
+    // the guidance rows' ranking and the strengthen card, never the pre-mortem's offer, whose standard slot is fixed.
     const bar = actionBarOf(actionFactsOf({
       scenarioId, graph: body.graph ?? null, ...(typeof body.graph_hash === 'string' ? { graphHash: body.graph_hash } : {}),
       analysisState: body.analysis_state, analysisReady: body.analysis_ready ?? rec(body.current_read)?.analysis_ready,
       analysisResult: body.analysis_result, optionParticipation: body.analysis_option_participation,
-      ...(evaluated !== undefined ? { identityEvaluated: evaluated } : {}), guidance: null, pending: [],
+      guidance: null, pending: [],
     }));
     const served = (o: ActionOffer) => CORE_SERVED.has(o.action_id);
     // The bias-risk row presses offers this bar no longer carries, so it is not sent.

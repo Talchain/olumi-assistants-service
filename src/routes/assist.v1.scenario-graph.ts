@@ -488,9 +488,15 @@ export default async function route(app: FastifyInstance) {
        * history read ranks with no cooldown; a failed ranking carries no bar and never costs the read.
        */
       let actionBar: ActionBarV1 | undefined;
-      // PATH-B core ranks its own bar from this read's body, as each core turn does from its read (`core-route/action-bar.ts`).
+      // PATH-B core ranks its own bar (`core-route/action-bar.ts`) from the fields this read sends, as each core turn does from
+      // the body of its own read: the graph, its hash, the state, the current read, the result and the option participation.
       const coreLane = laneModeFor('full', req.headers['x-olumi-ai-mode'], getRuntimeEnv(), graphPresent && isLegacyGraph(graph)) === 'core';
-      if (conversationRequested && !coreLane) {
+      if (conversationRequested && coreLane) {
+        actionBar = coreActionBarOf(scenarioId, { graph: graphPresent ? graph : null,
+          graph_hash: graphPresent ? computeAnalysisAffectingGraphHash(graph as GraphStateIngress) : null,
+          analysis_state: analysis.analysis_state, current_read: currentReadWire, analysis_result: analysis.analysis_result,
+          analysis_option_participation: analysis.analysis_option_participation });
+      } else if (conversationRequested) {
         let guidance: GuidanceState | null = null;
         try { guidance = typeof store.readGuidanceHistory === 'function' ? await store.readGuidanceHistory(scenarioId) : null; } catch { guidance = null; }
         try {
@@ -535,7 +541,7 @@ export default async function route(app: FastifyInstance) {
       // Why an item is not in the calculation (canvas-lm, DL 22 Oct): the mapper's own holds on a core scenario, from the same
       // mapping every write and Run uses (`livingViewOf`). Null for an absent or legacy graph, or a living model that does not parse.
       const living = graphPresent ? livingViewOf(graph) : undefined;
-      const body = {
+      return reply.code(200).send({
         schema: SCENARIO_GRAPH_SCHEMA,
         ...(heldOffers !== undefined && heldOffers.length > 0 ? { held_proposal_offers: heldOffers } : {}),
         ...(proposalFields !== undefined ? { proposal_fields: proposalFields } : {}),
@@ -689,9 +695,7 @@ export default async function route(app: FastifyInstance) {
         ...(conversationTurns !== undefined ? { conversation_turns: conversationTurns } : {}),
         ...(actionBar !== undefined ? { action_bar: actionBar } : {}),
         request_id: requestId,
-      };
-      const coreBar = conversationRequested && coreLane ? coreActionBarOf(scenarioId, body) : undefined;
-      return reply.code(200).send(coreBar === undefined ? body : { ...body, action_bar: coreBar });
+      });
     },
   );
 }
