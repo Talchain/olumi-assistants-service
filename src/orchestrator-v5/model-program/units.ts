@@ -27,6 +27,10 @@ const TIME: Readonly<Record<string, string>> = {
   hour: 'hour', hours: 'hour', hr: 'hour', hrs: 'hour',
 };
 export const TIME_DIMS: ReadonlySet<string> = new Set(Object.values(TIME));
+/** "% monthly" is a rate per month (phase 0b: churn written as a monthly share failed every first draft). */
+const RATE_WORDS: Readonly<Record<string, string>> = {
+  daily: 'day', weekly: 'week', monthly: 'month', quarterly: 'quarter', yearly: 'year', annual: 'year', annually: 'year', hourly: 'hour',
+};
 const DIMENSIONLESS: ReadonlySet<string> = new Set(['1', 'fraction', 'ratio', 'share', 'proportion', 'probability', 'chance', 'number', 'unitless', 'dimensionless', 'x', 'times']);
 const PERCENT: ReadonlySet<string> = new Set(['%', 'percent', 'pct', 'percentage']);
 const MULTIPLIERS: ReadonlySet<string> = new Set(['k', 'm', 'bn', 'b', 'mn', 'thousand', 'thousands', 'million', 'millions', 'billion', 'billions', 'hundred']);
@@ -44,7 +48,7 @@ function stem(t: string): string {
   return t;
 }
 
-type Token = { kind: 'dim'; dim: string } | { kind: 'none' } | { kind: 'percent' } | { kind: 'bad'; message: string };
+type Token = { kind: 'dim'; dim: string } | { kind: 'per'; dim: string } | { kind: 'none' } | { kind: 'percent' } | { kind: 'bad'; message: string };
 
 function token(raw: string): Token | null {
   const t = raw.trim().toLowerCase();
@@ -53,6 +57,7 @@ function token(raw: string): Token | null {
   if (PERCENT.has(t)) return { kind: 'percent' };
   if (MULTIPLIERS.has(t)) return { kind: 'bad', message: `uses the multiplier "${raw.trim()}"; write the figure in full and drop the multiplier` };
   if (CURRENCY[t]) return { kind: 'dim', dim: CURRENCY[t] };
+  if (RATE_WORDS[t]) return { kind: 'per', dim: RATE_WORDS[t] };
   if (TIME[t]) return { kind: 'dim', dim: TIME[t] };
   if (/^[0-9.]+$/.test(t)) return { kind: 'bad', message: `contains the number "${raw.trim()}"; a unit names what is counted, the figure goes in value` };
   if (!/^[a-z][a-z_-]*$/.test(t)) return { kind: 'bad', message: `contains "${raw.trim()}", which is not a unit word` };
@@ -79,6 +84,7 @@ export function parseUnit(text: string): UnitParse {
       if (tok === null || tok.kind === 'none') continue;
       if (tok.kind === 'bad') return { ok: false, message: tok.message };
       if (tok.kind === 'percent') { scale *= power > 0 ? 0.01 ** power : 100 ** -power; continue; }
+      if (tok.kind === 'per') { dims[tok.dim] = (dims[tok.dim] ?? 0) - 1; continue; }
       dims[tok.dim] = (dims[tok.dim] ?? 0) + power;
     }
   }

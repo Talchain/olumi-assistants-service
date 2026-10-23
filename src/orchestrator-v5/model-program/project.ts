@@ -22,8 +22,9 @@ import { QUALITATIVE_FAMILIES } from './canonical.js';
 import { compile, normalise, rangeReading, type CompileResult } from './compile.js';
 
 type Rec = Record<string, unknown>;
-export type DisplayAuthor = 'person' | 'olumi' | 'unverified';
-export type ItemFamily = 'quantity' | 'relation' | 'term' | 'goal' | 'limit' | 'option' | 'risk' | QualitativeFamilyT;
+/** structure: an exact constant the model's form needs; never drawn as anyone's estimate. */
+export type DisplayAuthor = 'person' | 'olumi' | 'unverified' | 'structure';
+export type ItemFamily = 'quantity' | 'relation' | 'term' | 'goal' | 'limit' | 'preference' | 'option' | 'risk' | QualitativeFamilyT;
 export type ProjectedItem = {
   record_id: string;
   family: ItemFamily;
@@ -59,8 +60,9 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   const xr = new Set(x?.risks.map((r) => r.id) ?? []);
   const unverified = new Set(compiled.unverified.map((u) => u.id));
   const notCompiling = compiled.errors.length > 0;
-  const whoOf = (rec: { author: string }, id: string): DisplayAuthor => (rec.author === 'olumi' ? 'olumi' : unverified.has(id) ? 'unverified' : 'person');
-  const provenanceOf = (who: DisplayAuthor) => (who === 'person' ? 'from_brief' : who === 'unverified' ? 'unverified_brief' : 'ai_inferred');
+  const whoOf = (rec: { author: string }, id: string): DisplayAuthor => (rec.author === 'olumi' ? 'olumi' : rec.author === 'structure' ? 'structure' : unverified.has(id) ? 'unverified' : 'person');
+  /** The canvas's origin vocabulary; a structural constant has none (it is nobody's figure, never "AI inferred"). */
+  const provenanceOf = (who: DisplayAuthor) => (who === 'structure' ? {} : { provenance: who === 'person' ? 'from_brief' : who === 'unverified' ? 'unverified_brief' : 'ai_inferred' });
   const quoteOf = (rec: { author: string; quote: string | null }, id: string) => (whoOf(rec, id) === 'person' && has(rec.quote) ? { source_quote: rec.quote } : {});
   const participation = (inCalc: boolean) => ({ analysis_participation: inCalc ? 'included' : 'retained_excluded' });
   const Q = new Map(model.quantities.map((q) => [q.id, q] as const));
@@ -78,20 +80,23 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   /** A window's length or origin timing is consumed into its window, so it is in the calculation exactly when its owner is. */
   const windowOwner = new Map<string, string>();
   for (const r of model.relations) {
-    if (r.form === 'definition') r.parts.forEach((p) => use(p, 'node'));
+    if (r.form === 'definition') r.parts.forEach((p) => use(p.id, 'node'));
     else if (r.form === 'effect') { use(r.base, 'node'); for (const t of r.terms) { use(t.driver, 'node'); use(t.coefficient, 'coefficient'); hostOf.set(t.coefficient, { edge: `${t.driver}__${r.defines}` }); } }
     else [r.start, ...r.inflows, ...r.outflows].forEach((p) => use(p, 'node'));
     use(r.defines, 'node');
   }
   for (const g of model.goals) if (g.measure) {
     use(g.measure.quantity, 'node');
+    if (has(g.measure.per)) use(g.measure.per, 'node');
     for (const t of [g.measure.target, g.measure.window?.periods, g.measure.window?.origin_offset]) if (has(t)) { use(t, 'on_goal'); hostOf.set(t, { node: g.id }); }
     for (const t of [g.measure.window?.periods, g.measure.window?.origin_offset]) if (has(t)) windowOwner.set(t, g.id);
   }
-  for (const l of model.limits) {
-    use(l.quantity, 'node');
-    for (const t of [l.bound, l.window.periods, l.window.origin_offset]) if (has(t)) { use(t, 'on_limit'); hostOf.set(t, { node: l.quantity }); }
-    for (const t of [l.window.periods, l.window.origin_offset]) if (has(t)) windowOwner.set(t, l.id);
+  for (const l of model.limits) if (l.measure) {
+    const lm = l.measure;
+    use(lm.quantity, 'node');
+    if (has(lm.per)) use(lm.per, 'node');
+    for (const t of [lm.bound, lm.window?.periods, lm.window?.origin_offset]) if (has(t)) { use(t, 'on_limit'); hostOf.set(t, { node: lm.quantity }); }
+    for (const t of [lm.window?.periods, lm.window?.origin_offset]) if (has(t)) windowOwner.set(t, l.id);
   }
   for (const o of model.options) for (const s of o.sets) { use(s.quantity, 'node'); if (has(s.to)) { use(s.to, 'on_option'); hostOf.set(s.to, { node: o.id }); } }
   for (const k of model.risks) { use(k.effect_on, 'node'); for (const t of [k.occurrence, k.severity]) { use(t, 'on_risk'); hostOf.set(t, { node: k.id }); } }
@@ -102,7 +107,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     ? { law: { author: 'olumi' as const, provisional: true as const, reading: rangeReading(q.low, q.high, q.value, chances.has(q.id)) } } : {});
   const display = (q: CanonicalQuantityT): string => {
     const unit = q.unit === '1' ? '' : ` ${q.unit}`;
-    const owner = q.author === 'olumi' ? ', Olumi\'s estimate' : '';
+    const owner = q.author === 'olumi' ? (q.status === 'estimated' ? ', Olumi\'s estimate' : ', Olumi\'s reading') : '';
     if (q.status === 'asked') return 'Not given yet';
     if (q.status === 'derived') return 'Worked out from its inputs';
     if (q.status === 'unknown' || q.status === 'unsupported' || q.status === 'not_applicable') return q.status.replace('_', ' ');
@@ -125,7 +130,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const target = g.measure ? Q.get(g.measure.target) : undefined;
     const point = target && has(target.value) && !has(target.low) ? target.value : null;
     nodes.push({
-      id: g.id, kind: 'goal', label: g.label, provenance: provenanceOf(who), ...quoteOf(g, g.id), ...participation(inCalc),
+      id: g.id, kind: 'goal', label: g.label, ...provenanceOf(who), ...quoteOf(g, g.id), ...participation(inCalc),
       ...(g.measure ? { goal_direction: g.measure.cmp, ...(point !== null ? { goal_threshold_raw: point } : {}), ...(target ? { goal_threshold_unit: target.unit, display_value: `${g.measure.cmp} ${display(target)}` } : {}) } : {}),
       ...(has(g.question) ? { user_questions: [g.question] } : {}),
     });
@@ -141,7 +146,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const interventions: Rec = {};
     for (const s of o.sets) { const to = has(s.to) ? Q.get(s.to) : undefined; if (to) interventions[s.quantity] = { value: to.value, unit: to.unit, display: display(to), from_period: s.from_period }; }
     nodes.push({
-      id: o.id, kind: 'option', label: o.label, provenance: provenanceOf(who), ...quoteOf(o, o.id), ...participation(inCalc),
+      id: o.id, kind: 'option', label: o.label, ...provenanceOf(who), ...quoteOf(o, o.id), ...participation(inCalc),
       ...(o.sets.length === 0 ? { is_baseline: true } : {}), ...(Object.keys(interventions).length ? { interventions } : {}),
       ...(o.author === 'olumi' ? { proposed_by: 'olumi' } : {}),
     });
@@ -165,7 +170,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     }
     const point = has(q.value) && !(has(q.low) && q.low !== q.high);
     nodes.push({
-      id: q.id, kind: q.status === 'derived' ? 'outcome' : 'factor', label: q.label, provenance: provenanceOf(who), ...quoteOf(q, q.id), ...participation(inCalc),
+      id: q.id, kind: q.status === 'derived' ? 'outcome' : 'factor', label: q.label, ...provenanceOf(who), ...quoteOf(q, q.id), ...participation(inCalc),
       ...(q.status !== 'derived' ? { category: controlled.has(q.id) ? 'controllable' : 'observable' } : {}),
       ...(point ? { observed_state: { value: q.value, unit: q.unit } } : {}),
       display_value: display(q),
@@ -183,10 +188,10 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const drawn: string[] = [];
     const push = (e: Rec) => { edges.push(e); drawn.push(String(e.id)); };
     if (r.form === 'definition') {
-      r.parts.forEach((p, i) => {
-        const sign = (r.op === 'difference' || r.op === 'ratio') && i > 0 ? -1 : 1;
-        push(link(p, r.defines, sign, who, inCalc, { definitional: true, reasoning: `${r.op} (${i === 0 ? 'first part' : `part ${i + 1}`})` }));
-      });
+      for (const p of r.parts) {
+        const sign = 'sign' in p ? p.sign : p.power;
+        push(link(p.id, r.defines, sign, who, inCalc, { definitional: true, reasoning: r.op === 'sum' ? (sign > 0 ? 'added' : 'subtracted') : sign > 0 ? 'multiplied' : 'divided by' }));
+      }
     } else if (r.form === 'stock') {
       push(link(r.start, r.defines, 1, who, inCalc, { definitional: true, reasoning: 'starting level' }));
       for (const f of r.inflows) push(link(f, r.defines, 1, who, inCalc, { definitional: true, reasoning: `inflow per ${model.period}` }));
@@ -218,21 +223,31 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   for (const l of model.limits) {
     const inCalc = xl.has(l.id);
     const who = whoOf(l, l.id);
-    const bound = Q.get(l.bound);
+    const lm = l.measure;
+    const bound = lm ? Q.get(lm.bound) : undefined;
     const per = compiled.perLimit.find((p) => p.limit_id === l.id);
     const point = bound && has(bound.value) && !(has(bound.low) && bound.low !== bound.high) ? bound.value : null;
-    if (point !== null) {
+    if (lm && point !== null && !has(lm.per)) {
       goal_constraints.push({
-        constraint_id: l.id, node_id: l.quantity, operator: l.cmp.startsWith('>') ? '>=' : '<=', ...(l.cmp === '<' || l.cmp === '>' ? { operator_as_stated: l.cmp } : {}),
+        constraint_id: l.id, node_id: lm.quantity, operator: lm.cmp.startsWith('>') ? '>=' : '<=', ...(lm.cmp === '<' || lm.cmp === '>' ? { operator_as_stated: lm.cmp } : {}),
         value: point, label: l.label, unit: bound!.unit, ...(who === 'person' && has(l.quote) ? { source_quote: l.quote.slice(0, 200) } : {}),
         provenance: who === 'olumi' ? 'inferred' : 'explicit',
       });
-      items.push({ record_id: l.id, family: 'limit', shown_as: { constraint: l.id, on_node: l.quantity }, in_calculation: inCalc, why_out: why(inCalc, per?.reasons.join(' ') ?? ''), author: who, approval: l.approval });
+      items.push({ record_id: l.id, family: 'limit', shown_as: { constraint: l.id, on_node: lm.quantity }, in_calculation: inCalc, why_out: why(inCalc, per?.reasons.join(' ') ?? ''), author: who, approval: l.approval });
     } else {
+      // A guardrail with no measure yet, or one whose figure is not given: a text card, never an invented scale.
       const id = `mp:limit:${l.id}`;
-      nodes.push({ id, kind: 'action', label: `Limit: ${l.label}`, description: `${l.label} (its figure is not given yet).`, provenance: provenanceOf(who), ...quoteOf(l, l.id), ...participation(false) });
-      items.push({ record_id: l.id, family: 'limit', shown_as: { node: id }, in_calculation: false, why_out: why(false, per?.reasons.join(' ') ?? ''), author: who, approval: l.approval });
+      nodes.push({ id, kind: 'action', label: `Limit: ${l.label}`, description: lm ? `${l.label} (its figure is not given yet).` : `${l.label} (no measure yet, so the result does not cover it).`, ...provenanceOf(who), ...quoteOf(l, l.id), ...participation(inCalc) });
+      items.push({ record_id: l.id, family: 'limit', shown_as: { node: id }, in_calculation: inCalc, why_out: why(inCalc, per?.reasons.join(' ') ?? ''), author: who, approval: l.approval });
     }
+  }
+
+  // ── preferences: wishes without a threshold, drawn as text cards ─────────────────────────────────────────────────────
+  for (const p of model.preferences) {
+    const who = whoOf(p, p.id);
+    const q = Q.get(p.quantity);
+    nodes.push({ id: p.id, kind: 'action', label: `Preference: ${p.direction} ${q?.label ?? p.quantity}`, description: `Would like ${q?.label ?? p.quantity} ${p.direction}. Shown beside the result; not a goal or a limit.`, ...provenanceOf(who), ...quoteOf(p, p.id), ...participation(false) });
+    items.push({ record_id: p.id, family: 'preference', shown_as: { node: p.id }, in_calculation: false, why_out: 'A preference: shown and reported, never calculated as a goal or a limit.', author: who, approval: p.approval, concerns: [p.quantity] });
   }
 
   // ── risks ──────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -242,8 +257,8 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const occ = Q.get(k.occurrence);
     const sev = Q.get(k.severity);
     nodes.push({
-      id: k.id, kind: 'risk', label: k.label, provenance: provenanceOf(who), ...quoteOf(k, k.id), ...participation(inCalc),
-      description: `Chance: ${occ ? display(occ) : 'not given'}. If it happens: ${k.mode === 'add' ? 'adds' : 'multiplies by'} ${sev ? display(sev) : 'not given'}, from period ${k.from_period}.`,
+      id: k.id, kind: 'risk', label: k.label, ...provenanceOf(who), ...quoteOf(k, k.id), ...participation(inCalc),
+      description: `Chance: ${occ ? display(occ) : 'not given'}. If it happens: ${k.mode === 'add' ? 'adds' : 'multiplies by'} ${sev ? display(sev) : 'not given'}, from ${typeof k.from_period === 'number' ? `period ${k.from_period}` : `"${Q.get(k.from_period)?.label ?? k.from_period}"`}.`,
     });
     items.push({ record_id: k.id, family: 'risk', shown_as: { node: k.id }, in_calculation: inCalc, why_out: why(inCalc, 'What it affects is not used by anything that can be worked out yet.'), author: who, approval: k.approval });
     if (Q.has(k.effect_on)) edges.push(link(k.id, k.effect_on, k.mode === 'add' && sev && (sev.value ?? sev.high ?? 0) < 0 ? -1 : 1, who, inCalc, { reasoning: 'if it happens' }));
@@ -254,7 +269,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const who = whoOf(rec, rec.id);
     const text = f === 'dissent' ? `${String(rec.holder)}: ${String(rec.position)}` : String(rec.text);
     const extra = f === 'left_out' ? ` Why: ${String(rec.why)}` : f === 'evidence' && has(rec.source) ? ` Source: ${String(rec.source)}` : '';
-    nodes.push({ id: rec.id, kind: 'action', label: `${QUAL_PREFIX[f]}: ${text.length > 80 ? `${text.slice(0, 79)}…` : text}`, description: `${text}${extra}`, provenance: provenanceOf(who), ...quoteOf(rec, rec.id), ...participation(false) });
+    nodes.push({ id: rec.id, kind: 'action', label: `${QUAL_PREFIX[f]}: ${text.length > 80 ? `${text.slice(0, 79)}…` : text}`, description: `${text}${extra}`, ...provenanceOf(who), ...quoteOf(rec, rec.id), ...participation(false) });
     items.push({ record_id: rec.id, family: f, shown_as: { node: rec.id }, in_calculation: false, why_out: 'A note: shown beside the model, never calculated.', author: who, approval: rec.approval, concerns: [...rec.concerns] });
   }
 
