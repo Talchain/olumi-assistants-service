@@ -24,6 +24,7 @@
 import { REPAIR_CODES, type RepairEntry } from '@talchain/schemas';
 import { LivingModel, type LivingModelT, type LivingSourceT } from '../../../schemas/living-model.js';
 import { aimTargetReading, stated } from './aim-reading.js';
+import { selectCurrentAim } from './aim-selection.js';
 import { resolveGoalThresholdCapWithProvenance } from '../../../utils/goal-threshold-cap.js';
 import { isPercentScaledUnit } from '../../../cee/draft/records/unit-scale-class.js';
 import { admitGoalBaseline } from '../../../cee/factor-extraction/goal-baseline-admissibility.js';
@@ -45,7 +46,7 @@ export type WithheldReason =
   | 'identity_not_in_slice' | 'identity_part_unknown' | 'identity_unit_mismatch' | 'identity_inconsistent'
   | 'identity_other_cause' | 'identity_contradicted' | 'identity_restated'
   | 'risk_occurrence_unknown' | 'risk_unattributed' | 'risk_not_in_slice' | 'risk_window_not_goal_window' | 'limit_not_in_slice'
-  | 'target_not_theirs' | 'goal_scope_unknown';
+  | 'target_not_theirs' | 'goal_scope_unknown' | 'goal_priority_ambiguous';
 
 /** A definition that withholds the chance when its carrier is on the goal's path (it cannot be worked out as stated). */
 const IDENTITY_REFUSED: ReadonlySet<WithheldReason> = new Set(['identity_not_in_slice', 'identity_part_unknown', 'identity_unit_mismatch', 'identity_inconsistent']);
@@ -335,18 +336,17 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   /** The factors some option sets that this slice could not convert (the setting is left out of the engine graph). */
   const droppedSettings = new Set<string>();
 
-  // ── The goal: the saved graph's goal while its aim is current (so reordering aims never swaps it unseen), else the
-  // first current aim with a target. It is always on the graph; it has a threshold (so a chance) only where this slice
-  // supports its target.
-  const aim = (opts.goal === undefined ? undefined : model.aims.find((a) => a.id === opts.goal && a.status === 'current'))
-    ?? model.aims.find((a) => a.status === 'current' && a.target !== null) ?? model.aims.find((a) => a.status === 'current');
+  // The explicit priority is independent of ordering and measurable completeness.
+  // Legacy saves keep their selected goal; conflicting priorities await clarification.
+  const selection = selectCurrentAim(model, opts.goal);
+  const aim = selection.aim;
   const primaryAimId = aim?.id;
   // A qualitative aim remains reasoning context, as before. Only an additional figured aim joins the calculation.
-  const compiledAims = model.aims.filter(a => a.status === 'current' && (a === aim || a.target?.value != null));
+  const compiledAims = selection.ambiguous ? [] : model.aims.filter(a => a.status === 'current' && (a === aim || a.target?.value != null));
   const expandedTargets = compiledAims.length > 1 || model.factors.some(f => f.accumulation != null);
 
   const readings = new Map<string, { aim: LivingModelT['aims'][number]; node: Rec; goal?: { id: string; cap: number; unit: string }; held?: WithheldReason }>();
-  if (aim === undefined) hold('goal', 'no_level_target');
+  if (aim === undefined) hold('goal', selection.ambiguous ? 'goal_priority_ambiguous' : 'no_level_target');
   for (const aim of compiledAims) {
     let goal: { id: string; cap: number; unit: string } | undefined;
     let goalHeld: WithheldReason | undefined;

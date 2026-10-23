@@ -44,7 +44,10 @@ export function canonicalIds(model: LivingModelT): LivingModelT {
       ...(subtract == null ? {} : { subtract: subtract.map(ref) }) } };
   };
   return {
-    aims: model.aims.map((a) => defined({ ...a, id: ref(a.id) })),
+    aims: model.aims.map((a) => {
+      const { priority, ...item } = a;
+      return defined({ ...item, ...(priority === 'primary' ? { priority } : {}), id: ref(a.id) });
+    }),
     factors: model.factors.map((f) => defined({ ...f, id: ref(f.id), ...(f.accumulation == null ? {} : { accumulation: { ...f.accumulation,
       stock_today: ref(f.accumulation.stock_today), loss_rate_per_month: ref(f.accumulation.loss_rate_per_month),
       inflow_per_month: ref(f.accumulation.inflow_per_month) } }) })),
@@ -62,7 +65,7 @@ type Attributed = { source: LivingSourceT; party: string | null; quote: string |
 /** An item's identity and its WHOLE content, attribution included (key order never counts). */
 /** An item's attribution, as the kernel names it: never the host's own `said_in` mark, which the AI can neither set nor clear (Codex r1 on #3661). */
 const attributionKey = (id: string, item: Attributed): string => {
-  const { said_in: _host, ...rest } = item as Attributed & { said_in?: unknown };
+  const { said_in: _host, priority: _priority, ...rest } = item as Attributed & { said_in?: unknown; priority?: unknown };
   return `${id}\u0000${stable(rest)}`;
 };
 

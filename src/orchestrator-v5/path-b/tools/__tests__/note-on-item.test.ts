@@ -49,7 +49,7 @@ describe('note_on_item', () => {
     const t2 = { notes: 0 };
     expect(await noteOnItem({ dispatch }, ctx, { item_id: 'in_from_elsewhere', note: NOTE }, t2)).toMatchObject({ status: 'ok', data: { anchored_on: 'queue' } });
     // NEGATIVE: a link with no card at either end has nowhere to show.
-    expect(await noteOnItem({ dispatch }, ctx, { item_id: 'nowhere', note: NOTE }, { notes: 0 })).toMatchObject({ status: 'refused', reason: 'item_not_in_model' });
+    expect(await noteOnItem({ dispatch }, ctx, { item_id: 'nowhere', note: NOTE }, { notes: 0 })).toMatchObject({ status: 'refused', reason: 'item_not_on_canvas' });
   });
 
   it('⭐ Codex (fresh, #3548): an id naming BOTH a card and a link is refused as ambiguous, never placed on the card', async () => {
