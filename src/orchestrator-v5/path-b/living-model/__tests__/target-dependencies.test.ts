@@ -271,7 +271,11 @@ describe('the full reasoning model and the submitted calculation share one admis
     expect(mapped.withheld).toContainEqual({ id: 'mrr', reason: 'chance_rests_on_withheld' });
     expect(goalDependencyCauses(graph, 'mrr')).toContainEqual({ id: 'churn', reason: 'goal_level_unknown' });
     expect(goal(graph, 'churn').analysis_participation).not.toBe('retained_excluded');
-    expect(resolveRunAdmission(graph).willProceed).toBe(false);
+    // Structural Run admission and permission to show a goal chance are distinct. The draft's
+    // actual readiness self-check must retain the missing dependency, even when a diagnostic Run can proceed.
+    expect(blockersOf(model, selfCheck(model, mapped)).all).toContainEqual(expect.objectContaining({
+      code: 'goal_level_unknown', items: expect.arrayContaining(['churn']),
+    }));
     expect(goalChanceLicenceForAgent(withGoalChanceLicence(raw(), graph, 'mrr'))).toBeUndefined();
     expect(graph.living_model).toEqual(before);
     expect(model).toEqual(before);
