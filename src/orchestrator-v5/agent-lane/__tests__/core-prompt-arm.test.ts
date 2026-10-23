@@ -111,6 +111,27 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       expect(b, gone).not.toContain(gone);
   });
 
+  it('ALPHA (S3 contract, DL-3.md 14:2xZ): the program tools\u2019 descriptions, which S3 imports: results only in the Run\u2019s recorded words, per option, per goal and joint; every edit op described', () => {
+    const { PROGRAM_TOOL_DESCRIPTIONS: d } = coreInstructions;
+    expect(Object.keys(d)).toEqual(['read_canonical_context', 'propose_change', 'apply_change', 'run_analysis']);
+    // Spelled out, not imported: the PL's per-goal + joint permission, and never a figure of the agent's own.
+    const words = 'Report results only in the Run\u2019s recorded words: each option\u2019s words (run.options[].words; where shown is false, they say why no chance is shown), '
+      + 'each goal\u2019s own words with each option\u2019s display for it (run.targets.per_target), the words for meeting every goal together or the line saying why that waits (run.targets.joint), '
+      + 'and its notes, thresholds and limit lines. Quote them; never a figure, chance, rounding, combination or ranking of your own.';
+    for (const [name, text] of Object.entries(d)) {
+      expect(text.split(words), name).toHaveLength(2);
+      for (const banned of ['recommend', 'best', 'winner', 'you should', '18 to 22']) expect(text.toLowerCase(), `${name}: ${banned}`).not.toContain(banned);
+    }
+    for (const op of ['set_quantity:', 'set_range_kind:', 'set_goal_target:', 'add_option:', 'rename_option:']) expect(count(d.propose_change, op), op).toBe(1);
+    expect(d.propose_change).toContain('A loose figure ("about 2,000") is their one figure, exactly as said, never a range Olumi adds; then ask what range they would put on it.');
+    expect(d.propose_change).toContain('each quoting the person\u2019s exact words from what they wrote, never Olumi\u2019s paraphrase.');
+    expect(d.apply_change).toContain('The approval is the card\u2019s, never a typed yes.');
+    expect(d.apply_change).toContain('already_saved: this same proposal was saved before; never save it again.');
+    expect(d.run_analysis).toContain('Use it only when the person asks; a saved change already brings its Run.');
+    // The descriptions ride the tool list, not the standing instructions (whose sent bytes the sha row above pins).
+    expect(b).not.toContain(words);
+  });
+
   it('the drafter saves every stated goal in their words and never approximates it, with the rule present once', () => {
     const rule = "Save every goal the person states, in their words: keep what fits the schema, and leave the rest null (or use = or a range, which Olumi asks about). Never approximate a comparator, figure or window, and never leave a stated goal unsaved.";
     expect(CORE_DRAFTER_RULES.split(rule)).toHaveLength(2);

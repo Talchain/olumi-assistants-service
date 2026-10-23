@@ -135,6 +135,36 @@ export const CORE_REPLY_RULES = [
   "Keep a clearly separate situation out of the current scenario's Living Model. If the relationship to the current scenario is unclear, ask one brief scope question before building or changing the model, while continuing useful discussion. Do not ask again when the person has already made the scope clear. Ordinary expansion and what-ifs within this scenario remain allowed. If the available tools cannot create or work in a separate scenario, say so; do not claim it was created or put its facts into this model instead.",
 ].join('\n\n');
 
+/**
+ * ⭐ ALPHA: THE PROGRAM TOOLS' DESCRIPTIONS (DL 93d79c3e, 23 Oct; S3's contract, inbox/DL-3.md 14:2xZ). S3's `programTools`
+ * (`path-b/tools/index.ts`, scenario 'program') imports them: the same tool names as core, each working on the model program.
+ * Results are reported only in the Run's recorded words (S2's present): each option's, EACH goal's own with each option's
+ * display, and the joint's (PL review, 13:2xZ); never a figure of the agent's own. They describe the existing contracts only.
+ */
+const RUN_WORDS_RULE = 'Report results only in the Run’s recorded words: each option’s words (run.options[].words; where shown is false, they say why no chance is shown), '
+  + 'each goal’s own words with each option’s display for it (run.targets.per_target), the words for meeting every goal together or the line saying why that waits (run.targets.joint), '
+  + 'and its notes, thresholds and limit lines. Quote them; never a figure, chance, rounding, combination or ranking of your own.';
+export const PROGRAM_TOOL_DESCRIPTIONS = {
+  read_canonical_context:
+    'Read the saved model program: its revision, question and period; each figure with its unit, status and who gave it (the person’s, with their words, or Olumi’s estimate with its range), '
+    + 'or the question still open for it; the goals, limits and options; the open questions, each with what it feeds and the edit that answers it; what was left out; and the stored Run. '
+    + 'Use these saved facts and ids, never an earlier reply. A Run that is not current describes an earlier model: say so, never present it as current. ' + RUN_WORDS_RULE,
+  propose_change:
+    'Prepare a change to the saved model for the person to approve on its card; nothing is saved until they do. Give ops in order, with ids from read_canonical_context, each quoting the person’s exact words from what they wrote, never Olumi’s paraphrase. '
+    + 'set_quantity: one input figure or range, as an answer to an open question or a corrected figure (a link’s strength, a goal’s target or an option’s own value, by its id). A range is theirs only when their words state both ends. '
+    + 'A loose figure ("about 2,000") is their one figure, exactly as said, never a range Olumi adds; then ask what range they would put on it. '
+    + 'set_range_kind: answers whether the ends of a range they gave are hard bounds or a rough span, keeping their figures. '
+    + 'set_goal_target: the figure a goal aims at. add_option: an option they name, with what it changes and from which period. rename_option: an option’s name. '
+    + 'Never invent a figure for them, and never put an Olumi estimate in as theirs. The result shows what the card would show (would_show). ' + RUN_WORDS_RULE + ' '
+    + 'A refusal says why (their words do not contain the quote; the edit does not fit; the changed model does not calculate, with the reasons; nothing would change): say it plainly and ask for what is needed.',
+  apply_change:
+    'Save the exact proposal the person approved on its card, with the Run its card showed. The approval is the card’s, never a typed yes. '
+    + 'saved: the receipt, the new revision and the Run. already_saved: this same proposal was saved before; never save it again. '
+    + 'superseded: the model changed since it was prepared; read it again and prepare a new change. A refusal or an unknown outcome is not a save: say so, and never claim success or failure the result does not give. ' + RUN_WORDS_RULE,
+  run_analysis:
+    'Show the Run of the saved model: the stored Run when it is current for this model, otherwise a new Run, worked out and stored. Use it only when the person asks; a saved change already brings its Run. ' + RUN_WORDS_RULE,
+} as const;
+
 /** Coaching on the canvas (Lenses, #3535 `note_on_item`): one question or challenge beside the item that most deserves attention. */
 export const NOTE_ON_ITEM_INSTRUCTION = "When one item in the model most deserves the person's attention (an untested assumption a result rests on, a missing cost or risk, or a link nobody has sized), use note_on_item once to put one short question or challenge beside it, in your own words; ask, do not answer or choose for them.";
 /** The instructions for one call in this lane mode: unchanged outside `core`. */
