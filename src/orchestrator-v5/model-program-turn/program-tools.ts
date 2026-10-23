@@ -88,10 +88,10 @@ const operationsOf = (ops: readonly ProgramOpT[]): ProposalOperation[] => ops.ma
   value: { change: o.op === 'add_option' ? 'add' : 'change', after: o } }));
 
 /** The card's rows for what Olumi's mechanism completion added: each new relation and quantity, as Olumi's. */
-const additionsOf = (before: CanonicalModelT, after: CanonicalModelT): ProposalOperation[] => [
-  ...after.relations.filter((r) => !before.relations.some((x) => x.id === r.id)).map((r) => ({ id: r.id, kind: 'relation', after: r })),
-  ...after.quantities.filter((q) => !before.quantities.some((x) => x.id === q.id)).map((q) => ({ id: q.id, kind: 'quantity', after: q })),
-].map((a): ProposalOperation => ({ op: 'living_change', path: `${a.kind}:${a.id}`, value: { change: 'add', after: a.after } }));
+const additionsOf = (before: CanonicalModelT, after: CanonicalModelT): ProposalOperation[] => (
+  [['relation', 'relations'], ['quantity', 'quantities'], ['assumption', 'assumptions'], ['condition', 'conditions'], ['claim', 'claims'], ['evidence', 'evidence']] as const)
+  .flatMap(([kind, family]) => (after[family] as readonly { id: string }[]).filter((r) => !(before[family] as readonly { id: string }[]).some((x) => x.id === r.id))
+    .map((r): ProposalOperation => ({ op: 'living_change', path: `${kind}:${r.id}`, value: { change: 'add', after: r } })));
 
 export async function proposeProgramChange(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs): Promise<ToolOutcome> {
   if (args.ops.length === 0) return refused('no_change');
@@ -106,8 +106,9 @@ export async function proposeProgramChange(deps: ProgramToolDeps, ctx: Ctx, args
   const words = [...new Set([...base.program.person_words, ...args.ops.map((o) => o.quote).filter((q) => !base.program.person_words.some((w) => quotedIn(q, [w])))])];
   // A measure they named that nothing works out yet: Olumi's drafter proposes its mechanism, on this same card.
   let model = edited.model;
+  const fresh = new Set(edited.model.quantities.filter((q) => !base.program.canonical.quantities.some((b) => b.id === q.id)).map((q) => q.id));
   for (const goalId of args.ops.flatMap((o) => (o.op === 'define_goal_measure' ? [o.goal_id] : []))) {
-    const done = await completeMechanism(model, goalId, words, ledgeredResponsesCall(), (q) => q !== null && quotedIn(q, words));
+    const done = await completeMechanism(model, goalId, words, ledgeredResponsesCall(), fresh, (q) => q !== null && quotedIn(q, words));
     if (done !== null) model = done.model;
   }
   const next = withNewRun({ ...base.program, canonical: model, person_words: words });
@@ -195,10 +196,20 @@ export async function applyCanvasFigure(deps: Pick<ProgramToolDeps, 'dispatch'>,
   const qid = 'quantity_id' in edit.target ? edit.target.quantity_id : goal?.measure?.target;
   const q = program.canonical.quantities.find((x) => x.id === qid);
   if (q === undefined) return { status: 'refused', reason: 'goal_id' in edit.target ? 'That goal has no target to set yet; say it in the chat.' : 'That is not a figure in this model.' };
-  const shownAs = edit.low != null && edit.high != null ? `${edit.low} to ${edit.high} ${q.unit}` : `${edit.value} ${q.unit}`;
+  // A figure typed on the person's OWN range (DL 23 Oct): inside it, it is their new most likely figure (the draw's centre)
+  // and the range and its reading stay; outside it, nothing is saved and they are asked whether the range changes too.
+  const onRange = edit.low == null && edit.high == null && edit.value !== null && q.author === 'person' && q.low !== null && q.high !== null && q.low < q.high;
+  if (onRange) {
+    const n = (x: number) => x.toLocaleString('en-GB');
+    const where = edit.value! < q.low! || edit.value! > q.high! ? 'outside' : edit.value === q.low || edit.value === q.high ? 'at the end of, not inside,' : null;
+    if (where !== null) return { status: 'refused', reason: `${n(edit.value!)} is ${where} your range of ${n(q.low!)}–${n(q.high!)}. Change the range as well?` };
+  }
+  const shownAs = onRange ? `${edit.value} ${q.unit}, within ${q.low} to ${q.high}`
+    : edit.low != null && edit.high != null ? `${edit.low} to ${edit.high} ${q.unit}` : `${edit.value} ${q.unit}`;
   // What the person typed is their words for this figure, so the compiler finds them as theirs.
   const words = `${goal !== undefined ? `${goal.label} target` : q.label}: ${shownAs}`;
-  const figure = { value: edit.value, low: edit.low ?? null, high: edit.high ?? null, range_kind: null, quote: words };
+  const figure = onRange ? { value: edit.value, low: q.low, high: q.high, range_kind: q.range_kind, quote: words }
+    : { value: edit.value, low: edit.low ?? null, high: edit.high ?? null, range_kind: null, quote: words };
   const edited = applyOps(program.canonical, [goal !== undefined ? { op: 'set_goal_target', goal_id: goal.id, ...figure } : { op: 'set_quantity', quantity_id: q.id, ...figure }]);
   if (!edited.ok) return { status: 'refused', reason: edited.reason };
   const next = withNewRun({ ...program, canonical: edited.model, person_words: [...program.person_words, words] });

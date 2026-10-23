@@ -272,15 +272,17 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
 
   /**
    * A figure on the field the card's value line and editor read, with whose it is: a point as given; a range at its centre
-   * (the figure given, else the centre Olumi reads it around) with both ends as `range`. An asked, derived or unknown
-   * quantity has no figure, so none is drawn.
+   * (the figure given, else the centre Olumi reads it around) with both ends as `range`. An asked or unknown quantity has
+   * no figure, so only its unit is drawn; a derived one has neither.
    */
   const observedOf = (q: CanonicalQuantityT): Rec => {
-    if (q.status !== 'known' && q.status !== 'estimated') return {};
+    // Every card's figure is in its quantity's own unit (DL 23 Oct: the in-card editor reads it here, never the 0–1 model
+    // scale), a question's or an unknown's too; a worked-out figure has no editor, so none is drawn.
+    if (q.status !== 'known' && q.status !== 'estimated') return q.status === 'derived' ? {} : { observed_state: { unit: q.unit } };
     const ranged = has(q.low) && has(q.high) && q.low !== q.high;
     const r = ranged ? lawFor(q) : undefined;
     const centre = has(q.value) ? q.value : r?.kind === 'normal' ? r.mean : ranged ? (q.low! + q.high!) / 2 : null;
-    if (centre === null) return {};
+    if (centre === null) return { observed_state: { unit: q.unit } };
     return { observed_state: { value: centre, raw_value: centre, unit: q.unit, ...figureSource(q), ...(ranged ? { range: { low: q.low, high: q.high } } : {}) } };
   };
 

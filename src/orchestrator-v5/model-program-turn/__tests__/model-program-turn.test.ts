@@ -14,7 +14,7 @@ import { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha
 import { stableStringify } from '../../../orchestrator/context/stable-stringify.js';
 import { APPROXIMATE_FIGURE, type CanonicalModelT } from '../../model-program/canonical.js';
 import { compile } from '../../model-program/compile.js';
-import { defineGoalMeasure, fillQuantity } from '../../model-program/answer.js';
+import { addMechanism, defineGoalMeasure, fillQuantity } from '../../model-program/answer.js';
 import { project } from '../../model-program/project.js';
 import { simulate } from '../../model-program/simulate/simulate.js';
 import { CANONICAL_JSON_SCHEMA, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX } from '../prompt.js';
@@ -579,8 +579,30 @@ describe('the model-program turn on the real core route', () => {
         q('developer_effect', 'feature/month/developer', { kind: 'coefficient', status: 'estimated', author: 'olumi', value: 1, low: 0.3, high: 1.5, range_kind: 'plausible', basis: 'A new developer adds less than an experienced one while ramping up.' }));
       m.relations.push({ form: 'effect', id: 'features_rel', defines: 'features_shipped_per_month', base: 'features_now', author: 'olumi', quote: null, ...at,
         terms: [{ driver: 'tech_leads_hired', coefficient: 'lead_effect', author: 'olumi', quote: null, ...at }, { driver: 'developers_hired', coefficient: 'developer_effect', author: 'olumi', quote: null, ...at }] });
+      // Its companion notes on the new link: an assumption, and the claim that assumption names.
+      m.claims.push({ id: 'leads_unblock', text: 'A lead mostly raises output by unblocking the others.', concerns: ['lead_effect'], author: 'olumi', quote: null, ...at });
+      m.assumptions.push({ id: 'hires_productive_in_window', text: 'New hires are productive within the launch window.', applied: true, concerns: ['features_rel', 'leads_unblock'], author: 'olumi', quote: null, ...at });
       return JSON.stringify({ ...m, ...extra });
     };
+    const reply = (edit: (m: CanonicalModelT) => void) => { const m = JSON.parse(completed()) as CanonicalModelT; edit(m); return JSON.stringify(m); };
+    const noCompletion = async (why: string, body: string, calls = 1) => {
+      replies = Array.from({ length: calls }, () => body);
+      sent.length = 0;
+      const r = await propose();
+      expect(r.status, `${why}: ${JSON.stringify(r)}`).toBe('ok');
+      expect(sent).toHaveLength(calls);
+      expect(r.data.olumi_adds, why).toBeUndefined();
+      expect(savedProgramOf({ living_model: deps.proposals.get(r.data.proposal_id)!.living_model })!.canonical.relations, why).toEqual(before.relations);
+    };
+    // Refused whole: a structural constant the compiler's own contract rejects (its sentence goes back for the drafter's two
+    // repairs first), and a note naming a record that is not there.
+    await noCompletion('structure', reply((m) => { m.quantities.push(q('odd_constant', 'feature/month', { author: 'structure', value: 0.37 }));
+      (m.relations[m.relations.length - 1] as { base: string }).base = 'odd_constant'; }), 3);
+    await noCompletion('dangling note', reply((m) => { m.assumptions[m.assumptions.length - 1]!.concerns.push('no_such_record'); }), 3);
+    // Only the measure this same answer created may be worked out: never a quantity already in the model.
+    const existing = { ...(measured as { model: CanonicalModelT }).model };
+    expect(addMechanism(existing, JSON.parse(completed()) as CanonicalModelT, 'features_shipped_per_month', new Set(), () => false))
+      .toMatchObject({ ok: false, reason: expect.stringMatching(/named in this same answer/) });
 
     // Negative: a completion that INVENTS a figure only they know (today's level as theirs) is refused whole; the card holds
     // only their measure, which nothing works out yet, so no chance is claimed.
@@ -603,8 +625,9 @@ describe('the model-program turn on the real core route', () => {
     const card = await propose();
     expect(card.status, JSON.stringify(card)).toBe('ok');
     expect(sent).toHaveLength(1);
-    expect(card.data.olumi_adds).toEqual(['relation:features_rel', 'quantity:features_now', 'quantity:lead_effect', 'quantity:developer_effect']);
-    expect(deps.proposals.get(card.data.proposal_id)!.operations.map((o) => o.path)).toEqual(['goal:increase_productivity', 'relation:features_rel', 'quantity:features_now', 'quantity:lead_effect', 'quantity:developer_effect']);
+    const adds = ['relation:features_rel', 'quantity:features_now', 'quantity:lead_effect', 'quantity:developer_effect', 'assumption:hires_productive_in_window', 'claim:leads_unblock'];
+    expect(card.data.olumi_adds).toEqual(adds);
+    expect(deps.proposals.get(card.data.proposal_id)!.operations.map((o) => o.path)).toEqual(['goal:increase_productivity', ...adds]);
     expect(registered).toHaveLength(1); // proposing saves nothing
     expect(await applyProgramChange(deps, ctx, card.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
     const after = persisted!.living_model.canonical as CanonicalModelT;
@@ -615,10 +638,14 @@ describe('the model-program turn on the real core route', () => {
     expect(after.quantities.find((x) => x.id === 'features_now')).toMatchObject({ status: 'asked', value: null, author: 'person', quote: null });
     for (const id of ['lead_effect', 'developer_effect']) expect(after.quantities.find((x) => x.id === id)).toMatchObject({ author: 'olumi', status: 'estimated', approval: 'proposed', basis: expect.any(String) });
     expect(after.relations.find((r) => r.id === 'features_rel')).toMatchObject({ author: 'olumi', approval: 'proposed' });
+    expect(after.assumptions.at(-1)).toMatchObject({ id: 'hires_productive_in_window', author: 'olumi', approval: 'proposed', concerns: ['features_rel', 'leads_unblock'] });
+    expect(after.claims.at(-1)).toMatchObject({ id: 'leads_unblock', author: 'olumi', approval: 'proposed' });
     // Everything they had stays as it was: every earlier record, its author and words, and the history (two new entries).
     expect(after.quantities.filter((x) => before.quantities.some((b) => b.id === x.id) && x.id !== 'features_shipped_per_month')).toEqual(before.quantities);
     expect(after.relations.slice(0, before.relations.length)).toEqual(before.relations);
-    expect({ ...after, quantities: [], relations: [], goals: [], history: [] }).toEqual({ ...before, quantities: [], relations: [], goals: [], history: [] });
+    expect(after.assumptions.slice(0, before.assumptions.length)).toEqual(before.assumptions);
+    expect(after.claims.slice(0, before.claims.length)).toEqual(before.claims);
+    expect({ ...after, quantities: [], relations: [], goals: [], history: [], assumptions: [], claims: [] }).toEqual({ ...before, quantities: [], relations: [], goals: [], history: [], assumptions: [], claims: [] });
     expect(after.history.slice(0, before.history.length)).toEqual(before.history);
     expect(after.history.slice(before.history.length).map((h) => h.id)).toEqual(['increase_productivity', 'features_shipped_per_month']);
     // An option → outcome path now: the aim waits on exactly the one figure only they know, never on a guess.
@@ -822,6 +849,45 @@ describe('the model-program turn on the real core route', () => {
     expect(link.json().error).toMatchObject({ code: 'CANVAS_EDIT_REFUSED', nothing_saved: true });
     expect(link.json().error.message).toContain('change it in the chat');
     expect(registered.length).toBe(saved);
+  });
+
+  it('DL 23 Oct (in-card range edit): a figure typed inside the person\'s own range moves its centre and keeps the range, and the chance moves; outside it, nothing is saved and they are asked', async () => {
+    const m = bakery();
+    m.quantities = m.quantities.map((x) => (x.id === 'extra_per_oven' ? { ...x, low: 80, high: 120, range_kind: 'plausible' } : x));
+    replies = [JSON.stringify(m)];
+    await turn({ message: BRIEF });
+    sent.length = 0;
+    const edit = (value: number) => turn({ kind: 'system_event', turn_id: randomUUID(), event: { kind: 'factor_value_edit', target_id: 'extra_per_oven', value } });
+    const chance = () => ((persisted!.living_model.runs.at(-1).result.chances as Json[]).find((c) => c.option_id === 'second_oven')!.per_goal[0].chance as number);
+    const first = chance();
+    // Outside the range: refused with the question, nothing saved, no new Run.
+    const saves = registered.length;
+    const out = await edit(60);
+    expect(out.statusCode).toBe(409);
+    expect(out.json().error).toMatchObject({ code: 'CANVAS_EDIT_REFUSED', nothing_saved: true, message: '60 is outside your range of 80–120. Change the range as well?' });
+    expect(registered.length).toBe(saves);
+    expect(persisted!.living_model.runs).toHaveLength(1);
+    // Inside it: their new most likely figure, the range and its reading kept, and the second oven's chance goes UP.
+    const inside = await edit(110);
+    expect(inside.statusCode, inside.body).toBe(200);
+    expect(sent).toHaveLength(0);
+    expect((persisted!.living_model.canonical as CanonicalModelT).quantities.find((x) => x.id === 'extra_per_oven'))
+      .toMatchObject({ value: 110, low: 80, high: 120, range_kind: 'plausible', author: 'person', status: 'known' });
+    expect(chance()).toBeGreaterThan(first);
+  });
+
+  it('DL 23 Oct (units on cards): every card that can hold a figure carries its quantity\'s own unit, a question\'s too; a worked-out card none', () => {
+    const saved = JSON.parse(readFileSync(new URL('./hiring-alpha3.saved.json', import.meta.url), 'utf8')) as { brief: string; canonical: CanonicalModelT };
+    const node = (g: { nodes: Json[] }, id: string) => g.nodes.find((n) => n.id === id) as Json;
+    const hiring = project(saved.canonical, compile(saved.canonical, { sourceText: saved.brief })).graph;
+    expect(node(hiring, 'developer_hiring_cost').observed_state).toEqual({ unit: 'GBP/developer' });
+    expect(node(hiring, 'current_developers').observed_state).toMatchObject({ value: 6, unit: 'developer' });
+    expect(node(hiring, 'total_hiring_spend').observed_state).toBeUndefined();
+    const share = bakery();
+    share.quantities.push(q('online_share', '%', { status: 'asked', question: 'What share of your sales is online?' }), q('wholesale_share', '%', { value: 40, quote: 'We bake 300 loaves a week' }));
+    const g = project(share, compile(share, { sourceText: BRIEF })).graph;
+    expect(node(g, 'online_share').observed_state).toEqual({ unit: '%' });
+    expect(node(g, 'wholesale_share').observed_state).toMatchObject({ value: 40, unit: '%' });
   });
 
   it('a Run press on a program needs no model call: the stored Run when current; a NEW Run, stored, when the model moved since', async () => {

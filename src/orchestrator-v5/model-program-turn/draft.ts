@@ -105,16 +105,16 @@ export async function draftCanonicalModel(brief: string | readonly InputMessage[
  * the measure then stays as they named it, with its asks.
  */
 export async function completeMechanism(model: CanonicalModelT, goalId: string, personWords: readonly string[], call: ResponsesCall,
-  isTheirs: (quote: string | null) => boolean): Promise<{ readonly model: CanonicalModelT; readonly attempts: readonly DraftAttempt[] } | null> {
+  fresh: ReadonlySet<string>, isTheirs: (quote: string | null) => boolean): Promise<{ readonly model: CanonicalModelT; readonly attempts: readonly DraftAttempt[] } | null> {
   const goal = model.goals.find((g) => g.id === goalId);
   const measure = goal?.measure ?? null;
   const measured = measure === null ? undefined : model.quantities.find((q) => q.id === measure.quantity);
-  if (goal === undefined || measured === undefined || model.relations.some((r) => r.defines === measured.id)) return null;
+  if (goal === undefined || measured === undefined || !fresh.has(measured.id) || model.relations.some((r) => r.defines === measured.id)) return null;
   const ask = `${COMPLETION_PREFIX}\nThe aim: "${goal.label}" (${goal.id}), measured by "${measured.label}" (${measured.id}, in ${measured.unit}).`;
   const draft = await draftCanonicalModel([{ role: 'user', content: personWords.join('\n\n') }, { role: 'assistant', content: JSON.stringify(model) }, { role: 'user', content: ask }],
     call, personWords.join('\n'));
   if (draft.model === null) return null;
-  const merged = addMechanism(model, draft.model, measured.id, isTheirs);
+  const merged = addMechanism(model, draft.model, measured.id, fresh, isTheirs);
   if (!merged.ok || compile(merged.model, { sourceText: personWords.join('\n') }).errors.length > 0) return null;
   return { model: merged.model, attempts: draft.attempts };
 }

@@ -181,26 +181,35 @@ export function defineGoalMeasure(model: CanonicalModelT, a: GoalMeasureAnswer):
 /**
  * COMPLETING A MEASURE'S MECHANISM (DL 23 Oct): once the person has said how an aim is measured, Olumi's drafter may propose
  * what works that measure out. From the drafter's whole model only ADDITIONS are taken, and only of kinds Olumi may author:
- * its own coefficients (estimated, with a range and a basis), worked-out quantities, structural constants (0 or 1), and
- * figures only the person can know as QUESTIONS (asked, no figure); plus new relations that work out the measure or a new
- * worked-out quantity, each Olumi's unless its words are the person's. Every existing record, its author and the history
- * stay as they are; the measure becomes worked out. Refused (the measure stays as named, with its asks) when the drafter
- * invents a person's figure, redefines what the model already works out, or no option's setting reaches the measure.
+ * its own coefficients (estimated, with a range and a basis), worked-out quantities, structural constants (checked by the
+ * compiler's own contract, compile.ts `structure_value`), and figures only the person can know as QUESTIONS (asked, no
+ * figure); new relations that work out the measure or a new worked-out quantity; and their companion assumptions and
+ * conditions, with the claims and evidence those name. Each is Olumi's unless its words are the person's. Only the measure
+ * this same edit created (`fresh`) may become worked out: a quantity already in the model keeps its figure, kind and status.
+ * Every existing record, its author and the history stay as they are. Refused whole (the measure stays as named, with its
+ * asks) when the drafter invents a person's figure, redefines what the model already works out, or no option's setting
+ * reaches the measure; what the compiler refuses (a note naming a record that is not there, a constant that is not
+ * structural) is refused by the caller's compile.
  */
 type Relation = CanonicalModelT['relations'][number];
 /** What a relation works its quantity out from: its parts, its base, drivers and coefficients, or a stock's start and flows. */
 const inputsOf = (r: Relation): string[] => (r.form === 'definition' ? r.parts.map((p) => p.id) : r.form === 'effect' ? [r.base, ...r.terms.flatMap((t) => [t.driver, t.coefficient])] : [r.start, ...r.inflows, ...r.outflows]);
+/** Every record id a note's `concerns` may name, effect terms included (`relation_id:driver`). */
+const recordIds = (m: CanonicalModelT): Set<string> => new Set([...m.quantities, ...m.goals, ...m.limits, ...m.preferences, ...m.options, ...m.risks,
+  ...m.claims, ...m.evidence, ...m.assumptions, ...m.dissent, ...m.conditions, ...m.left_out].map((r) => r.id)
+  .concat(m.relations.flatMap((r) => [r.id, ...(r.form === 'effect' ? r.terms.map((t) => `${r.id}:${t.driver}`) : [])])));
 
-export function addMechanism(model: CanonicalModelT, draft: CanonicalModelT, measured: string, isTheirs: (quote: string | null) => boolean): FillResult {
+export function addMechanism(model: CanonicalModelT, draft: CanonicalModelT, measured: string, fresh: ReadonlySet<string>, isTheirs: (quote: string | null) => boolean): FillResult {
   const target = model.quantities.find((q) => q.id === measured);
-  if (target === undefined || model.relations.some((r) => r.defines === measured)) return { ok: false, reason: 'The measure is already worked out.' };
+  if (target === undefined || !fresh.has(measured)) return { ok: false, reason: 'Only a measure named in this same answer can be worked out by Olumi\'s proposal.' };
+  if (model.relations.some((r) => r.defines === measured)) return { ok: false, reason: 'The measure is already worked out.' };
   const known = new Set(model.quantities.map((q) => q.id));
   const added: Quantity[] = [];
   for (const q of draft.quantities.filter((x) => !known.has(x.id))) {
     const blank = q.value === null && q.low === null && q.high === null;
     if (q.kind === 'coefficient' && q.status === 'estimated' && q.low !== null && q.high !== null && (q.basis ?? '').trim() !== '') added.push({ ...q, author: 'olumi', quote: null, approval: 'proposed' });
     else if (q.status === 'derived' && blank) added.push({ ...q, author: 'olumi', quote: null, approval: 'proposed' });
-    else if (q.author === 'structure' && q.status === 'known' && (q.value === 0 || q.value === 1) && q.low === null) added.push({ ...q, quote: null, approval: 'proposed' });
+    else if (q.author === 'structure') added.push({ ...q, quote: null, approval: 'proposed' }); // the compiler's structural contract decides
     else if (q.status === 'asked' && blank && (q.question ?? '').trim() !== '') added.push({ ...q, author: 'person', quote: null, approval: 'proposed' });
     else return { ok: false, reason: `Olumi cannot add "${q.label}" as it was drafted: a figure only the person can give is asked, never estimated.` };
   }
@@ -228,8 +237,22 @@ export function addMechanism(model: CanonicalModelT, draft: CanonicalModelT, mea
   };
   walk(measured);
   if (!model.options.some((o) => o.status === 'live' && o.sets.some((s) => upstream.has(s.quantity)))) return { ok: false, reason: 'What Olumi proposed does not connect any option to the measure.' };
+  // The new relations' companion notes, never dropped: assumptions and conditions on what is added, and the claims and
+  // evidence they name (or that are themselves about what is added).
+  const before = recordIds(model);
+  const addedIds = new Set([...added.map((q) => q.id), ...newRelations.flatMap((r) => [r.id, ...(r.form === 'effect' ? r.terms.map((t) => `${r.id}:${t.driver}`) : [])]), measured]);
+  const isNew = (x: { id: string }) => !before.has(x.id);
+  const about = (x: { concerns: readonly string[] }) => x.concerns.some((c) => addedIds.has(c));
+  const assumptions = draft.assumptions.filter((x) => isNew(x) && about(x));
+  const conditions = draft.conditions.filter((x) => isNew(x) && about(x));
+  const named = new Set([...assumptions, ...conditions].flatMap((x) => x.concerns));
+  const claims = draft.claims.filter((x) => isNew(x) && (named.has(x.id) || about(x)));
+  const evidence = draft.evidence.filter((x) => isNew(x) && (named.has(x.id) || about(x)));
+  const note = <T extends { author: string; quote: string | null }>(x: T): T => ({ ...olumis(x), approval: 'proposed' as const });
   const worked: Quantity = { ...target, kind: 'derived', status: 'derived', value: null, low: null, high: null, range_kind: null, basis: null };
   return { ok: true, model: { ...model, quantities: [...model.quantities.map((q) => (q.id === measured ? worked : q)), ...added],
     relations: [...model.relations, ...newRelations],
+    assumptions: [...model.assumptions, ...assumptions.map(note)], conditions: [...model.conditions, ...conditions.map(note)],
+    claims: [...model.claims, ...claims.map(note)], evidence: [...model.evidence, ...evidence.map(note)],
     history: [...model.history, { id: measured, change: 'superseded', old: JSON.stringify(target), quote: null, author_id: null }] } };
 }
