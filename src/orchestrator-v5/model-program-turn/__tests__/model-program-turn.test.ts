@@ -467,7 +467,7 @@ describe('the model-program turn on the real core route', () => {
     m.quantities = m.quantities.map((x) => (x.id === 'promo_effect' ? { ...x, status: 'known', author: 'person', low: null, high: null, range_kind: null, basis: null, quote: 'five extra joins a month' } : x));
     // The joins relation and its term are the person's too, so every other input is theirs.
     m.relations = m.relations.map((r) => (r.form === 'effect' ? { ...r, author: 'person', quote: '20 join each month', terms: r.terms.map((t) => ({ ...t, author: 'person', quote: 'Run a promotion' })) } : r));
-    const face = (sourceText: string) => ((evaluateCanonical(m, { sourceText, seed: 7 }).view as Json).options as Json[]).find((o) => o.option_id === 'promotion').cell.face as string;
+    const face = (sourceText: string) => ((evaluateCanonical(m, { sourceText, seed: 7 }).view as Json).options as Json[]).find((o) => o.option_id === 'promotion')!.cell.face as string;
     expect(face(`${CLUB_BRIEF} The promotion brings five extra joins a month.`)).toContain(', in this model, on your figures');
     const unverified = face(CLUB_BRIEF);
     expect(unverified).not.toContain('on your figures');
