@@ -78,6 +78,7 @@ import {
   type CoreTurnError, type CoreTurnNote, type CoreTurnReceipt, type CoreTurnRun,
 } from '../orchestrator-v5/core-route/contract.js';
 import { CONVERSATION_ROWS_READ } from './assist.v1.scenario-graph.js';
+import { isModelProgramGraph, MODEL_PROGRAM_ARM, parseProgramAnswers, runModelProgramTurn } from '../orchestrator-v5/model-program-turn/turn.js';
 import { log } from '../utils/telemetry.js';
 
 export const CORE_TURN_PATH = '/agent/v1/core-turn';
@@ -361,8 +362,11 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
     const selected = parseSelectedElements(body.selected_elements);
     // The approval's own operation (`approve:<id>`), as the legacy route binds it, and the selection when there is one: a typed
     // message with neither hashes plain, so its row stays provably typed (`typedRowProof`).
-    const operation = approvedProposal !== undefined || selected !== null
-      ? JSON.stringify({ ...(approvedProposal !== undefined ? { approve: approvedProposal } : {}), ...(selected !== null ? { selected } : {}) })
+    // SPIKE S3: an ask card's answers are part of what the turn is, so a different set is a different request.
+    const programAnswers = parseProgramAnswers(body.model_program_answers);
+    const operation = approvedProposal !== undefined || selected !== null || programAnswers !== null
+      ? JSON.stringify({ ...(approvedProposal !== undefined ? { approve: approvedProposal } : {}), ...(selected !== null ? { selected } : {}),
+        ...(programAnswers !== null ? { model_program_answers: programAnswers } : {}) })
       : undefined;
     const requestHash = withChipOperation(agentTurnRequestHash(scenarioId, userId, message, operation),
       approvedProposal === undefined ? chipOperationOf(body) : undefined);
@@ -587,6 +591,24 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
 
       // ── THE SDK TURN (or the declined card, which needs none). ───────────────────────────────────────────────────────────
       let result: AgentTurnResult & { readonly sdk?: Awaited<ReturnType<typeof runCoreTurn>>['sdk'] };
+      /**
+       * SPIKE S3 (wip/spike-s3-integrate only): the MODEL-PROGRAM turn in place of the SDK turn, on a first turn that asks for
+       * the canonical drafting arm, and on every turn of a scenario whose saved model is a model program
+       * (`model-program-turn/turn.ts`). Its write goes through this turn's counting dispatch, so the claim, the write
+       * accounting and the answer row below are the core route's own.
+       */
+      const modelProgram = isModelProgramGraph(saved.graph) || (saved.graph === null && req.headers['x-olumi-draft-arm'] === MODEL_PROGRAM_ARM);
+      let programPayload: { readonly canonical_analysis_view: unknown; readonly model_program: Record<string, unknown> } | undefined;
+      const programTurn = async (): Promise<AgentTurnResult> => {
+        const t0 = Date.now();
+        const out = await runModelProgramTurn({ scenarioId, turnId, message, answers: programAnswers, saved: { graph: saved.graph, identity: saved.identity }, dispatch: countingDispatch });
+        if (out.verifiedSave) verifiedSave = true;
+        programPayload = out.payload;
+        const ms = Date.now() - t0;
+        return { assistant_text: out.assistantText, items: [], tool_calls: out.toolCalls.map((c) => ({ ...c, mutated: out.mutated })),
+          tool_results: out.toolResults as unknown as AgentTurnResult['tool_results'], mutated: out.mutated, hops: 0, stopped_reason: 'answered',
+          timing: { total_ms: ms, provider_ms: 0, tool_ms: ms, overhead_ms: 0, tool_provider_ms: 0, provider_calls: providerCallsMade() ?? 0, tool_calls: 1, hops: 0 } };
+      };
       if (declinedCardOnly !== undefined) {
         proposals.discard(declinedCardOnly);
         result = { assistant_text: '', items: [], tool_calls: [], tool_results: [], mutated: false, hops: 0, stopped_reason: 'answered',
@@ -597,7 +619,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         // This turn's repairs: a refusal they make is settled as base at the turn's end (`goal-path.ts`).
         const restructure: Restructure = { repairs: 0 };
         try {
-          result = await runCoreTurn({
+          result = modelProgram ? await programTurn() : await runCoreTurn({
             // One budget for every call (DL 22 Oct, M4): a press at the typed turn's effort reads the typed turns' cached prefix.
             ctx: coreCtx, message, budget: coreBudget(), userId,
             calls: seen,
@@ -742,7 +764,9 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         cards: await heldCardsOf(store, scenarioId, rowPending, after),
         notes: notesOf(result, after.identity),
         run: after.run, analysisState: after.analysisState, ...(ranThisTurn ? { analysisResult: after.analysisResult } : {}),
-        receipts: receiptsOf(result),
+        receipts: programPayload === undefined ? receiptsOf(result)
+          : collectTurnReceipts(result.tool_results).map((r) => ({ ...r, authorised_by: programPayload!.model_program['turn'] === 'draft' ? 'olumi' as const : 'person' as const })),
+        ...(programPayload !== undefined ? { modelProgram: programPayload } : {}),
         paused: paused !== undefined ? { proposal_id: paused.proposal_id } : null,
         error: noReply ? RECORDED.reply_empty.error : null,
         // A refused or unavailable call names its typed reason (DL 22 Oct: which of Class 3's offers fired was not on the wire).
