@@ -961,13 +961,13 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   // unsigned or unplaceable link, an option setting it could not convert) would change the calculation, so the chance is
   // withheld through its own dependency record, retaining the stated target and its reason (AIE, 20 Oct: withhold the dependent calculation, never compute it
   // on less). A placeholder link needs no such rule: the chance licence already withholds through it.
-  for (const { goal, node: goalNode } of readings.values()) if (goal !== undefined) {
-    // The path is read on the person's own links as well as the engine's, so an option effect lowered to a factor or to the
-    // exact sum keeps everything stated about it (buddy R1 on #3523).
-    const allLinks = [...living.links, ...model.links,
+  // Read dependencies once from the full meaning, including definitions whose calculation is held. The same paths decide
+  // which target depends on a hold and which retained secondary can safely leave only the submitted calculation.
+  const allLinks = [...living.links, ...model.links,
       ...declared.flatMap(({ item }) => item.defined_as!.of.map((part) => ({ id: `${part}__${item.id}`, from: part, to: item.id }))),
       ...accumulations.flatMap(f => [f.accumulation!.stock_today, f.accumulation!.loss_rate_per_month, f.accumulation!.inflow_per_month].map(from => ({ id: `${from}__${f.id}`, from, to: f.id }))),
       ...model.risks.flatMap((r) => r.mitigations.map((m) => ({ id: `${m.factor_id}__${r.id}`, from: m.factor_id, to: r.id })))];
+  for (const { goal, node: goalNode } of readings.values()) if (goal !== undefined) {
     const onPath = new Set([goal.id]);
     for (let grew = true; grew;) {
       grew = false;
@@ -991,6 +991,10 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     const causes = withheld.filter((w) => ((w.reason === 'link_sign_unknown' || (expandedTargets && w.reason === 'link_frame_unknown') || w.reason === 'link_endpoint_unknown' || w.reason === 'exact_not_drawable'
       || w.reason === 'identity_other_cause' || w.reason === 'identity_contradicted' || w.reason === 'risk_not_in_slice') && onPath.has(model.links.find((l) => l.id === w.id)?.to ?? ''))
       || ((IDENTITY_REFUSED.has(w.reason) || RISK_REFUSED.has(w.reason) || (expandedTargets && (w.reason === 'factor_level_unknown' || w.reason === 'level_range_not_in_slice'))) && onPath.has(w.id)));
+    // A retained target can itself feed another target. Its missing baseline/scope is then a real dependency, never
+    // permission to compute the downstream target on less after the participation projection removes that item.
+    for (const w of withheld.filter(w => readings.has(w.id) && w.id !== goal.id && onPath.has(w.id)
+      && w.reason !== 'chance_rests_on_withheld')) if (!causes.some(c => c.id === w.id && c.reason === w.reason)) causes.push(w);
     const ownAim = readings.get(goal.id)!.aim;
     const badScope = accumulations.filter(f => onPath.has(f.id) && (f.accumulation!.horizon_months !== ownAim.target?.period_months
       || ownAim.target?.reference === 'launch' || ownAim.target?.reference === null
@@ -1012,7 +1016,8 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
         ...causes, ...dropped.map(id => ({ id, reason: 'setting_not_convertible' })),
         ...conditioned.map(c => ({ id: `condition:${c.text}`, reason: 'condition_not_in_slice', applies_to: [...c.applies_to] }))];
       hold(goal.id, 'chance_rests_on_withheld');
-      restsOn.push(...causes, ...dropped.map((id) => ({ id, reason: 'setting_not_convertible' as const })),
+      // The draft self-check reads this primary-only summary. Each secondary keeps its own full goal_rests_on above.
+      if (goal.id === primaryAimId) restsOn.push(...causes, ...dropped.map((id) => ({ id, reason: 'setting_not_convertible' as const })),
         ...conditioned.map((c) => ({ id: `condition:${c.text}`, reason: 'condition_not_in_slice' as const, applies_to: [...c.applies_to] })));
     }
   }
@@ -1027,6 +1032,24 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
       value: raw.value, label: aim.text, provenance: stated(aim.source) ? 'explicit' : 'inferred', role: 'goal_target',
       ...(goal !== undefined && node.goal_threshold !== undefined && node.goal_rests_on === undefined ? { value_frame: 'level' } : {}),
       ...(raw.unit !== null ? { unit: raw.unit } : {}), ...(aim.quote !== null && aim.quote.length <= 200 ? { source_quote: aim.quote } : {}) });
+  }
+
+  // Preserve every target and reason on the saved/display graph. Only an unrelated held secondary leaves the calculation,
+  // through the existing Run participation guard. Required limits, compared interventions and still-scored targets protect
+  // their full upstream paths; a protected hold must remain visible to admission rather than silently altering the question.
+  const heldTargets = new Set([...readings.values()].filter(r => withheld.some(w => w.id === r.aim.id)).map(r => r.aim.id));
+  const required = new Set([...(primaryAimId === undefined ? [] : [primaryAimId]),
+    ...targetReadings.filter(r => !heldTargets.has(r.aim.id)).map(r => r.aim.id),
+    // A stated limit still protects its path when its own frame cannot yet be compiled.
+    ...model.factors.filter(f => f.limit !== null).map(f => f.id),
+    ...model.options.flatMap(o => o.settings.map(s => s.factor_id))]);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const l of allLinks) if (required.has(l.to) && !required.has(l.from)) { required.add(l.from); grew = true; }
+  }
+  for (const { aim, node } of readings.values()) if (aim.id !== primaryAimId && heldTargets.has(aim.id)) {
+    if (required.has(aim.id)) delete node.analysis_participation;
+    else node.analysis_participation = 'retained_excluded';
   }
 
   const frames = new Map<string, Frame>(model.factors.flatMap((f) => (caps.has(f.id) ? [[f.id, { cap: caps.get(f.id)!, unit: f.unit }] as const] : [])));

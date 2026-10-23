@@ -1678,14 +1678,17 @@ export function assessCanonicalAnalysisReadiness(
         ...(detail.factorLabel ? { factor_label: detail.factorLabel } : {}),
       });
     }
-    // ⭐ K3 (`graph/inert-risk.ts`): a risk nobody has said the direction of is left out of the Run, never a block on it.
-    const structural = validateGraphStructure(parsed.data, { leaveOutInertRisks: true });
+    const semantic = projectSemanticAnalysisReadyFromGraph(proposalGraph);
+    const submission = semantic ? runSubmission(parsed.data, graph, semantic) : undefined;
+    // The core's full reasoning graph retains held targets. Judge its structure on the SAME submitted calculation as Run,
+    // never a second exclusion policy. Conflicting participation or an invalid projection keeps the original strict checks.
+    const submitted = isPlainObject(graph) && graph.living_model !== undefined && submission?.participation.refusals.length === 0
+      ? GraphV3.safeParse(submission.graphForAnalysis) : undefined;
+    const structural = validateGraphStructure(submitted?.success ? submitted.data : parsed.data, { leaveOutInertRisks: true });
     structural.violations.forEach((violation, index) => {
       blockingIssues.push(structuralIssue(violation, index));
     });
 
-    const semantic = projectSemanticAnalysisReadyFromGraph(proposalGraph);
-    const submission = semantic ? runSubmission(parsed.data, graph, semantic) : undefined;
     const comparisonRefusal = submission && submission.userStatus.excluded.length > 0 ? submission.comparisonRefusal : null;
     if (comparisonRefusal !== null) {
       blockingIssues.push({ issue_id: 'comparison_options_1', code: 'FEWER_THAN_TWO_OPTIONS', category: 'graph_structure',
