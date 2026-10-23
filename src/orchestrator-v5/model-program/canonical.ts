@@ -39,6 +39,12 @@ const id = z.string().describe('A short lowercase snake_case id (letters, digits
 const ids = z.array(id);
 
 export const AUTHORS = ['person', 'olumi'] as const;
+/**
+ * The mark of a figure the person gave as approximate ("about £2,000"), set by the host on the quantity's `basis` when it
+ * records their answer (the DL's ruling, 23 Oct): the figure is theirs, NO range is read into "about", it is used exactly as
+ * stated, and a range is asked for.
+ */
+export const APPROXIMATE_FIGURE = 'You gave this as an approximate figure; it is used exactly as stated until you give a range.';
 export type AuthorT = (typeof AUTHORS)[number];
 /** A quantity's figure may also be STRUCTURE: an exact constant the model's form needs (phase 0b: 40 zero-width "estimates"). */
 export const QUANTITY_AUTHORS = ['person', 'olumi', 'structure'] as const;
@@ -185,7 +191,7 @@ export const AGGREGATIONS = ['end', 'sum', 'mean', 'every', 'max', 'min'] as con
 export const CanonicalWindow = z.object({
   origin_event: z.string().nullable().describe('Null when the window counts from now. Otherwise the event it counts from, as written ("the opening").'),
   origin_offset: id.nullable().describe('For an event: a quantity in the model\'s period unit giving how many periods from now it happens (asked when not stated). Null when the window counts from now.'),
-  start: z.number().int().describe('Periods after the origin the window opens: 0 = at the origin ("in the first three months after opening" is 0).'),
+  start: z.number().int().describe('Periods after the origin the window opens: 0 = at the origin ("in the first three months after opening" is 0). Counting is ordinal: "in months 6 to 8" opens at 5, with 3 periods.'),
   periods: id.describe('A quantity in the model\'s period unit giving how many periods the window lasts ("within 3 months" on a monthly model: 3 month, the person\'s quote). When no deadline was stated: an asked quantity with the question "By when?". A calendar date ("by the end of March") is Olumi\'s reading: known, author olumi, its basis naming the date.'),
 }).strict();
 export type CanonicalWindowT = z.infer<typeof CanonicalWindow>;

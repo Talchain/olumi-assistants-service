@@ -15,9 +15,12 @@
  *     quantity is evaluated, in dependency order, from the stocks' boundary levels S[k]; then (3) S[k+1] = S[k] + Σ inflows −
  *     Σ outflows, the flows of interval k. A STATE is read at boundaries, a FLOW over intervals:
  *       - `end`: a state reads S[start + periods]; a flow reads interval start + periods − 1;
- *       - `sum` / `mean` / `every` / `max` / `min`: a flow reads intervals start … start + periods − 1; a state reads
- *         boundaries start + 1 … start + periods.
- *     So the level after six months is {0, 6} on a state (S[6]); revenue in months 6–8 is {6, 3} on a flow (intervals 6–8).
+ *       - `sum` (the PL's ruling, 23 Oct: the compiler's integration-unit rule): the start-of-interval samples
+ *         start … start + periods − 1, for a state and a flow alike;
+ *       - `mean` / `every` / `max` / `min`: a flow reads intervals start … start + periods − 1; a state reads boundaries
+ *         start + 1 … start + periods.
+ *     Interval k is the (k+1)th period, so the level after six months is {0, 6} on a state (S[6]), and revenue in months
+ *     6–8 (ordinal) is {5, 3} on a flow (intervals 5–7).
  *   - A nonfinite draw (NaN, e.g. a `ratio` by zero, or ±Infinity) is outside the model's domain, never a failed outcome
  *     (DL ruling 3): any such draw in what a goal or limit reads withholds that chance, the joint (for a goal) or within_limits
  *     (for a limit), and joint_within_limits, typed 'invalid_domain' with the count and the quantities. No draw is dropped.
@@ -35,8 +38,10 @@
  *   - An option set makes the quantity read its `to` quantity from `from_period` on; with several sets on one quantity the
  *     latest started one applies. A set on a stock throws (set its start or its flows instead).
  *   - `from_period` (of a set or a risk) may name a quantity: a TIMING, a figure or a range, sampled once per draw with the
- *     other inputs (gold-model ruling 2). It takes effect from period ceil(timing) (the first period that starts at or after
- *     it), never before period 0. An option can name its own timing.
+ *     other inputs (gold-model ruling 2), ONCE per draw on the shared draw. It takes effect from period ceil(timing), strictly
+ *     (the PL's ruling, 23 Oct): a whole number stays at that boundary, a fraction waits to the next, and one beyond the
+ *     horizon never takes effect. Its range is conditioned to 0 or more by the compiler (Olumi's conversion); a draw below 0
+ *     or NaN is outside the domain (invalid_domain), never clamped. An option can name its own timing.
  *   - A risk reads its occurrence and severity at time `from_period`, under the option (so a mitigation can lower the chance).
  *     It fires where the risk's own uniform draw is below the occurrence. On a non-stock quantity the effect applies at every
  *     time from `from_period`; on a stock it is one shock to the boundary level S[from_period], which then accumulates. An
@@ -166,24 +171,28 @@ function compile(model: ExecutableModel): Compiled {
   const nodes = model.quantities.map((q, i): Node => compileNode(q, i, ref, ranged, chances.has(q.id)));
   const stocks = nodes.flatMap((n, i) => (n.kind === 'stock' ? [i] : []));
 
-  /** The time indices a window reads: intervals start … start+periods−1 for a flow, boundaries start+1 … start+periods for a state. */
-  const windowOf = (w: Window, reading: Reading, where: string): [number, number] => {
+  /**
+   * The ONE window selector, given the aggregation (a `per` denominator reads through it with the same one): a sum takes
+   * the start-of-interval samples start … start+periods−1 for a state and a flow alike; otherwise a flow reads intervals
+   * start … start+periods−1 and a state boundaries start+1 … start+periods (`end` reads the last of them).
+   */
+  const windowOf = (w: Window, reading: Reading, aggregation: Aggregation, where: string): [number, number] => {
     if (!wholeFrom(w.start_period, 0) || !wholeFrom(w.periods, 1) || w.start_period + w.periods > periods) {
       throw new Error(`${where}: window from period ${w.start_period} for ${w.periods} periods is not inside the model's ${periods} periods`);
     }
-    return reading === 'state' ? [w.start_period + 1, w.start_period + w.periods] : [w.start_period, w.start_period + w.periods - 1];
+    return reading === 'state' && aggregation !== 'sum' ? [w.start_period + 1, w.start_period + w.periods] : [w.start_period, w.start_period + w.periods - 1];
   };
   const check = (x: Goal | Limit, against: string, kind: string): Check => {
     const where = `${kind} "${x.id}"`;
     if (!CMPS.has(x.cmp)) throw new Error(`${where}: unknown comparison "${x.cmp}"`);
     if (!AGGS.has(x.aggregation)) throw new Error(`${where}: unknown aggregation "${x.aggregation}"`);
     const q = ref(x.quantity, where);
-    const [first, last] = windowOf(x.window, readingOf(model.quantities[q]!), where);
+    const [first, last] = windowOf(x.window, readingOf(model.quantities[q]!), x.aggregation, where);
     let per: Check['per'];
     if (x.per !== undefined) {
       if (x.aggregation === 'every') throw new Error(`${where}: a ratio (per) is never read with 'every'`);
       const pq = ref(x.per, `${where}'s per`);
-      const [pFirst, pLast] = windowOf(x.window, readingOf(model.quantities[pq]!), where);
+      const [pFirst, pLast] = windowOf(x.window, readingOf(model.quantities[pq]!), x.aggregation, where);
       per = { q: pq, first: pFirst, last: pLast };
     }
     return { id: x.id, q, ref: ref(against, where), cmp: x.cmp, aggregation: x.aggregation, first, last, ...(per !== undefined ? { per } : {}) };
@@ -353,19 +362,21 @@ function drawInputs(c: Compiled, seed: number, draws: number): Inputs {
 /** A chance worked out by an equation is clipped to [0, 1] where a risk reads it (DL ruling, 23 Oct). NaN stays NaN. */
 const clip01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);
 
-/** A period in draw d: a whole number, or ceil of the timing quantity's draw (never before period 0); NaN stays NaN. */
+/** A period in draw d: a whole number, or the strict ceil of the timing quantity's one draw; below 0 or NaN is NaN (invalid). */
 function periodOf(t: Timing, c: Compiled, inputs: Inputs, d: number): number {
   if ('fixed' in t) return t.fixed;
   const node = c.nodes[t.q]!;
   const v = node.kind === 'fixed' ? node.value : node.kind === 'drawn' ? inputs.drawn[node.slot]![d]! : NaN;
-  return Number.isNaN(v) ? NaN : Math.max(0, Math.ceil(v - 1e-9));
+  return Number.isNaN(v) || v < 0 ? NaN : Math.ceil(v);
 }
 
-/** The set active at k: the latest started one (ties: the later in the option's list), or -1. */
+/** The set active at k: the latest started one (ties: the later in the option's list), -1 for none, INVALID for a set whose timing is outside its domain. */
+const INVALID = -2;
 function activeSet(sets: readonly PlanSet[], froms: Float64Array, base: number, k: number): number {
   let to = -1, best = -Infinity;
   for (let i = 0; i < sets.length; i++) {
     const f = froms[base + i]!;
+    if (Number.isNaN(f)) return INVALID;
     if (f <= k && f >= best) { best = f; to = sets[i]!.to; }
   }
   return to;
@@ -497,7 +508,7 @@ function runOption(c: Compiled, p: Plan, inputs: Inputs, draws: number, thirds: 
         if (node.kind === 'stock') v = k === 0 ? vals[row + node.start]! : level[q]!;
         else {
           const to = activeSet(p.sets[q]!, setFrom, setBase[q]!, k);
-          v = to >= 0 ? vals[row + to]! : evaluate(node, vals, row, inputs, d);
+          v = to === INVALID ? NaN : to >= 0 ? vals[row + to]! : evaluate(node, vals, row, inputs, d);
         }
         for (const r of p.risksOn[q]!) {
           const risk = c.risks[r]!, from = riskFrom[r]!;

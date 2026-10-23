@@ -1,4 +1,5 @@
 import { withGoalChanceReadback } from '../orchestrator-v5/goal-target/goal-chance-licence.js';
+import { RUN_AGAIN_FOR_CHANCE } from '../orchestrator-v5/model-program-turn/run-receipt.js';
 import { readRunAnalysisOccurrence } from '../orchestrator-v5/types/handler-fact.js';
 import { readRunEvidence, runEvidenceWireOf } from '../orchestrator-v5/agent-lane/run-evidence.js';
 import { runLeaderOf, type RunLeader } from '../orchestrator-v5/agent-lane/run-facts.js';
@@ -24,7 +25,6 @@ const rec = (value: unknown): Rec | undefined => value !== null && typeof value 
 
 // MOVED bytes: DGAI src/canvas/runView/runView.ts:25, :27
 // @ 8f53cea7eb4cb04bea5bd54b3f06d2f076d5cc8c. No new copy.
-const RUN_AGAIN_FOR_CHANCE = 'Run the analysis again to see the chance.';
 const UNKNOWN_RUN_FIGURES = 'This earlier Run may be out of date. Run the analysis again.';
 const OPTION_CHANCE_WITHHELD = 'Olumi can’t yet say its chance of meeting your goal, in this model.';
 

@@ -13,13 +13,17 @@
  *    a GraphV3 link is a causal claim, and a note is not one.
  *
  * Authorship is shown as stated: the person's (with their words), Olumi's (provisional), or UNVERIFIED (said to be the
- * person's but their words were not found), which is never shown as theirs.
+ * person's but their words were not found), which is never shown as theirs. Each figure carries it in the canvas's own
+ * fields: a value's `observed_state.source` (the brief's, the person's later figure, or Olumi's estimate), a goal's
+ * `threshold_source`. Every figure an editor can change is on the field that editor reads, under its quantity's id
+ * (a coefficient's id rides its link as `coefficient_id`), so an edit maps back to that ONE quantity.
  * The projection is derived, never read back: the canonical model is the one saved meaning.
  */
 import { LLM_STRENGTH_STD_FLOOR } from '../../cee/constants.js';
+import { resolveGoalThresholdCapWithProvenance } from '../../utils/goal-threshold-cap.js';
 import type { CanonicalModelT, CanonicalQuantityT, QualitativeFamilyT } from './canonical.js';
 import { QUALITATIVE_FAMILIES } from './canonical.js';
-import { compile, normalise, rangeDistOf, readRange, type CompileResult, type LawReading } from './compile.js';
+import { compile, isApproximate, normalise, rangeDistOf, readRange, type CompileResult, type LawReading } from './compile.js';
 
 type Rec = Record<string, unknown>;
 /** structure: an exact constant the model's form needs; never drawn as anyone's estimate. */
@@ -50,7 +54,9 @@ const QUAL_PREFIX: Record<QualitativeFamilyT, string> = {
 const has = <T>(x: T | null | undefined): x is T => x !== null && x !== undefined;
 const fmt = (n: number) => (Number.isInteger(n) ? n.toLocaleString('en-GB') : String(Number(n.toPrecision(4))));
 
-export function project(input: CanonicalModelT, compiled: CompileResult = compile(input)): Projection {
+/** `brief`: the person's first words. A figure of theirs quoted from it is the brief's; one given later (an answer, a card
+ * edit) is theirs as entered. Absent: every quoted figure of theirs is read as the brief's. */
+export function project(input: CanonicalModelT, compiled: CompileResult = compile(input), opts: { readonly brief?: string } = {}): Projection {
   const model = normalise(input); // an option's inline value is a named quantity, drawn on its option card
   const x = compiled.executable;
   const xq = new Set(x?.quantities.map((q) => q.id) ?? []);
@@ -67,6 +73,25 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   const participation = (inCalc: boolean) => ({ analysis_participation: inCalc ? 'included' : 'retained_excluded' });
   const Q = new Map(model.quantities.map((q) => [q.id, q] as const));
   const why = (inCalc: boolean, reason: string) => (inCalc ? null : notCompiling ? 'The model does not compile yet.' : reason);
+  const plain = (t: string) => t.toLowerCase().replace(/\s+/g, ' ').trim();
+  const fromBrief = (quote: string | null) => opts.brief === undefined || (has(quote) && plain(opts.brief).includes(plain(quote)));
+  /** Whose figure it is, in the canvas's value vocabulary: none claimed for a structural constant or unverified words. */
+  const figureSource = (q: CanonicalQuantityT): Rec => {
+    const who = whoOf(q, q.id);
+    if (who === 'olumi') return { source: 'cee_inference', extractionType: 'inferred' };
+    if (who !== 'person') return {};
+    return fromBrief(q.quote) ? { source: 'brief_extraction', extractionType: 'explicit' } : { source: 'user_override' };
+  };
+  /** Edge ids: `from__to`, and a second link between the same two cards (a part used twice) gets its own. */
+  const edgeIds = new Map<string, number>();
+  const edgeId = (from: string, to: string) => {
+    const base = `${from}__${to}`;
+    const n = (edgeIds.get(base) ?? 0) + 1;
+    edgeIds.set(base, n);
+    return n === 1 ? base : `${base}__${n}`;
+  };
+  /** Each relation's links, in drawing order, with their ids: computed once, so a coefficient's host is its own link. */
+  const relationEdgeIds = new Map<string, string[]>();
 
   const nodes: Rec[] = [];
   const edges: Rec[] = [];
@@ -80,9 +105,11 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   /** A window's length or origin timing is consumed into its window, so it is in the calculation exactly when its owner is. */
   const windowOwner = new Map<string, string>();
   for (const r of model.relations) {
-    if (r.form === 'definition') r.parts.forEach((p) => use(p.id, 'node'));
-    else if (r.form === 'effect') { use(r.base, 'node'); for (const t of r.terms) { use(t.driver, 'node'); use(t.coefficient, 'coefficient'); hostOf.set(t.coefficient, { edge: `${t.driver}__${r.defines}` }); } }
-    else [r.start, ...r.inflows, ...r.outflows].forEach((p) => use(p, 'node'));
+    const froms = r.form === 'definition' ? r.parts.map((p) => p.id) : r.form === 'effect' ? [r.base, ...r.terms.map((t) => t.driver)] : [r.start, ...r.inflows, ...r.outflows];
+    const ids = froms.map((f) => edgeId(f, r.defines));
+    relationEdgeIds.set(r.id, ids);
+    froms.forEach((f) => use(f, 'node'));
+    if (r.form === 'effect') r.terms.forEach((t, i) => { use(t.coefficient, 'coefficient'); hostOf.set(t.coefficient, { edge: ids[i + 1]! }); });
     use(r.defines, 'node');
   }
   for (const g of model.goals) if (g.measure) {
@@ -114,7 +141,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     ? { law: { author: 'olumi' as const, provisional: true as const, range_kind: q.range_kind, reading: lawFor(q) } } : {});
   const display = (q: CanonicalQuantityT): string => {
     const unit = q.unit === '1' ? '' : ` ${q.unit}`;
-    const owner = q.author === 'olumi' ? (q.status === 'estimated' ? ', Olumi\'s estimate' : ', Olumi\'s reading') : '';
+    const owner = q.author === 'olumi' ? (q.status === 'estimated' ? ', Olumi\'s estimate' : ', Olumi\'s reading') : isApproximate(q) ? ', as you gave it (approximate; no range yet)' : '';
     if (q.status === 'asked') return 'Not given yet';
     if (q.status === 'derived') return 'Worked out from its inputs';
     if (q.status === 'unknown' || q.status === 'unsupported' || q.status === 'not_applicable') return q.status.replace('_', ' ');
@@ -132,6 +159,15 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     return `${fmt(q.value ?? q.low!)}${unit}${owner}`;
   };
 
+  /** A goal's target as today's core goal carries it: raw, its scale (the shared cap rule) and whose figure it is. */
+  const goalTarget = (raw: number, target: CanonicalQuantityT): Rec => {
+    const cap = resolveGoalThresholdCapWithProvenance(undefined, raw, target.unit, undefined);
+    const src = figureSource(target)['source'];
+    return { goal_threshold_raw: raw, ...(cap !== null ? { goal_threshold: raw / cap.cap, goal_threshold_cap: cap.cap, goal_threshold_cap_provenance: cap.provenance } : {}),
+      ...(src === 'brief_extraction' ? { threshold_source: 'brief_extraction' } : src === 'user_override' ? { threshold_source: 'user', success_threshold: raw }
+        : src === 'cee_inference' ? { threshold_source: 'cee_inference' } : {}) };
+  };
+
   // ── the question, goals, options ───────────────────────────────────────────────────────────────────────────────────
   nodes.push({ id: DECISION_NODE_ID, kind: 'decision', label: model.question });
   for (const g of model.goals) {
@@ -142,12 +178,14 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const point = target && has(target.value) && !has(target.low) ? target.value : null;
     nodes.push({
       id: g.id, kind: 'goal', label: g.label, ...provenanceOf(who), ...quoteOf(g, g.id), ...participation(inCalc),
-      ...(g.measure ? { goal_direction: g.measure.cmp, ...(point !== null ? { goal_threshold_raw: point } : {}), ...(target ? { goal_threshold_unit: target.unit, display_value: `${g.measure.cmp} ${display(target)}` } : {}) } : {}),
+      ...(g.measure ? { goal_direction: g.measure.cmp, goal_threshold_frame: g.measure.frame, ...(g.measure.frame === 'level' ? {} : { quantity_frame: 'level' }),
+        ...(point !== null && target ? goalTarget(point, target) : {}),
+        ...(target ? { goal_threshold_unit: target.unit, display_value: `${g.measure.cmp} ${display(target)}` } : {}) } : {}),
       ...(has(g.question) ? { user_questions: [g.question] } : {}),
     });
     items.push({ record_id: g.id, family: 'goal', shown_as: { node: g.id }, in_calculation: inCalc, why_out: why(inCalc, per?.reasons.join(' ') ?? ''), author: who, approval: g.approval });
     if (g.measure && Q.has(g.measure.quantity)) {
-      edges.push(link(g.measure.quantity, g.id, 1, who, inCalc, { definitional: true }));
+      edges.push({ ...link(g.measure.quantity, g.id, 1, who, inCalc, { definitional: true }), id: edgeId(g.measure.quantity, g.id) });
     }
   }
   for (const o of model.options) {
@@ -162,9 +200,23 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
       ...(o.author === 'olumi' ? { proposed_by: 'olumi' } : {}),
     });
     items.push({ record_id: o.id, family: 'option', shown_as: { node: o.id }, in_calculation: inCalc, why_out: why(inCalc, per?.reasons.join(' ') ?? ''), author: who, approval: o.approval });
-    edges.push(link(DECISION_NODE_ID, o.id, 1, who, inCalc, {}));
-    for (const s of o.sets) if (Q.has(s.quantity)) edges.push(link(o.id, s.quantity, 1, who, inCalc, {}));
+    edges.push({ ...link(DECISION_NODE_ID, o.id, 1, who, inCalc, {}), id: edgeId(DECISION_NODE_ID, o.id) });
+    for (const s of o.sets) if (Q.has(s.quantity)) edges.push({ ...link(o.id, s.quantity, 1, who, inCalc, {}), id: edgeId(o.id, s.quantity) });
   }
+
+  /**
+   * A figure on the field the card's value line and editor read, with whose it is: a point as given; a range at its centre
+   * (the figure given, else the centre Olumi reads it around) with both ends as `range`. An asked, derived or unknown
+   * quantity has no figure, so none is drawn.
+   */
+  const observedOf = (q: CanonicalQuantityT): Rec => {
+    if (q.status !== 'known' && q.status !== 'estimated') return {};
+    const ranged = has(q.low) && has(q.high) && q.low !== q.high;
+    const r = ranged ? lawFor(q) : undefined;
+    const centre = has(q.value) ? q.value : r?.kind === 'normal' ? r.mean : ranged ? (q.low! + q.high!) / 2 : null;
+    if (centre === null) return {};
+    return { observed_state: { value: centre, raw_value: centre, unit: q.unit, ...figureSource(q), ...(ranged ? { range: { low: q.low, high: q.high } } : {}) } };
+  };
 
   // ── quantities ─────────────────────────────────────────────────────────────────────────────────────────────────────
   const controlled = new Set(model.options.flatMap((o) => o.sets.map((s) => s.quantity)));
@@ -179,11 +231,10 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
       items.push({ record_id: q.id, family: 'quantity', shown_as: host.edge ? { on_edge: host.edge } : { on_node: host.node }, in_calculation: inCalc, why_out: why(inCalc, reason), author: who, approval: q.approval, ...lawOf(q) });
       continue;
     }
-    const point = has(q.value) && !(has(q.low) && q.low !== q.high);
     nodes.push({
       id: q.id, kind: q.status === 'derived' ? 'outcome' : 'factor', label: q.label, ...provenanceOf(who), ...quoteOf(q, q.id), ...participation(inCalc),
       ...(q.status !== 'derived' ? { category: controlled.has(q.id) ? 'controllable' : 'observable' } : {}),
-      ...(point ? { observed_state: { value: q.value, unit: q.unit } } : {}),
+      ...observedOf(q),
       display_value: display(q),
       ...(has(q.basis) ? { description: q.basis } : {}),
       ...(q.status === 'asked' && has(q.question) ? { user_questions: [q.question] } : {}),
@@ -197,11 +248,13 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const who = whoOf(r, r.id);
     const reason = 'What it works out is not used by anything that can be worked out yet.';
     const drawn: string[] = [];
-    const push = (e: Rec) => { edges.push(e); drawn.push(String(e.id)); };
+    const ids = [...relationEdgeIds.get(r.id)!];
+    const push = (e: Rec) => { const id = ids.shift()!; edges.push({ ...e, id }); drawn.push(id); return id; };
     if (r.form === 'definition') {
       for (const p of r.parts) {
         const sign = 'sign' in p ? p.sign : p.power;
-        push(link(p.id, r.defines, sign, who, inCalc, { definitional: true, reasoning: r.op === 'sum' ? (sign > 0 ? 'added' : 'subtracted') : sign > 0 ? 'multiplied' : 'divided by' }));
+        const words = r.op === 'sum' ? (sign > 0 ? 'added' : 'subtracted') : sign === 1 ? 'multiplied' : sign === -1 ? 'divided by' : `raised to the power ${sign}`;
+        push(link(p.id, r.defines, sign < 0 ? -1 : 1, who, inCalc, { definitional: true, reasoning: words }));
       }
     } else if (r.form === 'stock') {
       push(link(r.start, r.defines, 1, who, inCalc, { definitional: true, reasoning: 'starting level' }));
@@ -223,8 +276,8 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
           : {};
         const reasoning = c ? `${display(c)} per ${driverUnit || 'unit'}${straddles ? '; its direction is not settled' : ''}${mid === null ? '; its size is not given yet' : ''}` : '';
         const e = link(t.driver, r.defines, sign, termWho, inCalc, { ...natural, reasoning, ...(c ? { magnitude: c.author === 'olumi' ? 'olumi_estimate' : 'user_stated' } : {}) });
-        push(e);
-        items.push({ record_id: `${r.id}:${t.driver}`, family: 'term', shown_as: { edge: String(e.id) }, in_calculation: inCalc, why_out: why(inCalc, reason), author: termWho, approval: t.approval });
+        const id = push({ ...e, coefficient_id: t.coefficient });
+        items.push({ record_id: `${r.id}:${t.driver}`, family: 'term', shown_as: { edge: id }, in_calculation: inCalc, why_out: why(inCalc, reason), author: termWho, approval: t.approval });
       }
     }
     items.push({ record_id: r.id, family: 'relation', shown_as: { edge: drawn.join(' ') }, in_calculation: inCalc, why_out: why(inCalc, reason), author: who, approval: r.approval });
@@ -272,7 +325,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
       description: `Chance: ${occ ? display(occ) : 'not given'}. If it happens: ${k.mode === 'add' ? 'adds' : 'multiplies by'} ${sev ? display(sev) : 'not given'}, from ${typeof k.from_period === 'number' ? `period ${k.from_period}` : `"${Q.get(k.from_period)?.label ?? k.from_period}"`}.`,
     });
     items.push({ record_id: k.id, family: 'risk', shown_as: { node: k.id }, in_calculation: inCalc, why_out: why(inCalc, 'What it affects is not used by anything that can be worked out yet.'), author: who, approval: k.approval });
-    if (Q.has(k.effect_on)) edges.push(link(k.id, k.effect_on, k.mode === 'add' && sev && (sev.value ?? sev.high ?? 0) < 0 ? -1 : 1, who, inCalc, { reasoning: 'if it happens' }));
+    if (Q.has(k.effect_on)) edges.push({ ...link(k.id, k.effect_on, k.mode === 'add' && sev && (sev.value ?? sev.high ?? 0) < 0 ? -1 : 1, who, inCalc, { reasoning: 'if it happens' }), id: edgeId(k.id, k.effect_on) });
   }
 
   // ── qualitative records: display-only text cards ───────────────────────────────────────────────────────────────────
@@ -294,7 +347,7 @@ function link(from: string, to: string, sign: 1 | -1, who: DisplayAuthor, inCalc
     ...(has(reasoning) ? { reasoning } : {}), ...(has(magnitude) ? { magnitude } : {}), ...(definitional === true ? { definitional: true } : {}), ...rest,
   };
   return {
-    id: `${from}__${to}`, from, to, strength: { mean: sign, std: LLM_STRENGTH_STD_FLOOR }, exists_probability: 1, effect_direction: sign > 0 ? 'positive' : 'negative',
+    from, to, strength: { mean: sign, std: LLM_STRENGTH_STD_FLOOR }, exists_probability: 1, effect_direction: sign > 0 ? 'positive' : 'negative',
     ...(provenance ? { provenance } : {}), origin: inCalc ? 'model_program:calculation' : who === 'unverified' ? 'model_program:unverified' : 'model_program:display',
   };
 }

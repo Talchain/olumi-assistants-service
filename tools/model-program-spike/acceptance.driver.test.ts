@@ -70,9 +70,31 @@ function graphRead(sid: string): Json {
     current_read: { run_state: { kind: 'never_run' }, computed_against_hash: null, run_id: null } };
 }
 
+/**
+ * The scenario read's body for a program graph, composed in process from the SAME functions the read route calls for one
+ * (the register's persistence projection, the analysis hash, the stored Run's view, the canonical readiness builder, the
+ * admission projection). Not the route itself: the route's own Run-fact reads have nothing to read for a program.
+ */
+async function readShapedOf(): Promise<(sid: string, graph: Json, brief: string) => Json> {
+  const { projectCorePostimageForPersistence } = await import('../../src/orchestrator-v5/persisted-graph-projection.js');
+  const { reopenProgram } = await import('../../src/orchestrator-v5/model-program-turn/program-store.js');
+  const { buildCanonicalAnalysisReadyFromGraph } = await import('../../src/orchestrator/tools/analysis-ready-helper.js');
+  const { projectAnalysisAdmission } = await import('../../src/routes/analysis-admission-projection.js');
+  return (sid, saved, brief) => {
+    const graph = projectCorePostimageForPersistence(JSON.parse(JSON.stringify(saved))) as Json;
+    const identity = computeGraphIdentityHash(graph as never);
+    return { schema: 'scenario-graph-read.composed.v1', scenario_id: sid, graph, graph_present: true, graph_hash: hashOf(graph), content_hash: identity?.value ?? null,
+      graph_identity_hash: identity, brief_text: brief, analysis_state: null, analysis_result: null,
+      canonical_analysis_view: reopenProgram(graph)?.view ?? null,
+      current_read: { analysis_ready: buildCanonicalAnalysisReadyFromGraph(graph), run_state: null, computed_against_hash: null, current_analysis_hash: null, figures: [] },
+      analysis_admission: projectAnalysisAdmission(graph, true) };
+  };
+}
+
 describe.skipIf(OUT === '')('model-program spike acceptance (live provider)', () => {
   let app: FastifyInstance;
   let reopenFresh: (graph: unknown) => any;
+  let readShaped: (sid: string, graph: Json, brief: string) => Json;
   const STOP = process.env.MP_STOP ?? `${OUT}/STOP-429.txt`;
   const realFetch = globalThis.fetch;
   beforeAll(async () => {
@@ -93,7 +115,8 @@ describe.skipIf(OUT === '')('model-program spike acceptance (live provider)', ()
     process.env.AGENT_LANE_PREVIEW = 'false';
     const route = await import('../../src/routes/core-turn.js');
     vi.resetModules();
-    reopenFresh = (await import('../../src/orchestrator-v5/model-program-turn/turn.js')).reopenModelProgram;
+    reopenFresh = (await import('../../src/orchestrator-v5/model-program-turn/program-store.js')).reopenProgram;
+    readShaped = await readShapedOf();
     app = Fastify({ logger: false });
     app.post('/assist/v1/scenarios/:id/graph', async (req) => graphRead((req.params as Json).id));
     app.post('/assist/v1/scenarios/:id/graph/register', async (req, reply) => {
@@ -155,7 +178,7 @@ describe.skipIf(OUT === '')('model-program spike acceptance (live provider)', ()
         return body;
       };
 
-      let last = await post({ message: brief }, { 'x-olumi-draft-arm': 'canonical' });
+      let last = await post({ message: brief });
       const attempted = new Set<string>();
       for (let k = 1; k <= 3; k += 1) {
         if (existsSync(STOP)) break;
@@ -199,6 +222,7 @@ describe.skipIf(OUT === '')('model-program spike acceptance (live provider)', ()
         writeFileSync(`${OUT}/${id}-r${rep}.readable.md`, renderCanonical(model, last.model_program?.compile ?? null));
       }
       writeFileSync(`${OUT}/${id}-r${rep}.view.json`, JSON.stringify(view, null, 1));
+      if (saved !== undefined) writeFileSync(`${OUT}/${id}-r${rep}.read.json`, JSON.stringify(readShaped(sid, saved, brief), null, 1));
       console.log(`${id}-r${rep}: ${rec.calls} calls · $${rec.usd} · ${rec.seconds}s · saved ${rec.final_saved} · reopen ${JSON.stringify(reopen)}`);
     };
 

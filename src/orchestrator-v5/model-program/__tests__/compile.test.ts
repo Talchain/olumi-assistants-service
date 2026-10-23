@@ -472,6 +472,12 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(ru.errors).toEqual([]);
     expect(ru.executable!.options.find((o) => o.id === 'promo')!.sets).toEqual([{ quantity: 'joins', to: 'promo_joins', from_period: 'opening_month' }]);
     expect(ru.executable!.quantities.find((q) => q.id === 'opening_month')!.dist).toMatchObject({ kind: 'range', low: 1, high: 4, range_kind: 'bounds' });
+    // An elapsed time is 0 or more (the PL's ruling, 23 Oct): a plausible timing range is conditioned there, as Olumi's disclosed conversion.
+    const rough = structuredClone(m);
+    rough.quantities = rough.quantities.map((q) => (q.id === 'opening_month' ? { ...q, value: null, low: 0, high: 3, range_kind: 'plausible' as const } : q));
+    const rr = compile(rough);
+    expect(rr.executable!.quantities.find((q) => q.id === 'opening_month')!.dist).toMatchObject({ kind: 'range', domain: { min: 0 } });
+    expect(rr.conversions.find((c) => c.quantity === 'opening_month')).toMatchObject({ kind: 'range_law', domain: { min: 0 }, author: 'olumi', provisional: true });
     // An unclear timing range is asked, like any person's range; the other option still compares.
     const unclear = structuredClone(m);
     unclear.quantities = unclear.quantities.map((q) => (q.id === 'opening_month' ? { ...q, value: null, low: 1, high: 4 } : q));
@@ -618,13 +624,24 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     const wide = withCosts({ low: 0, high: 1200, range_kind: 'plausible' });
     expect(wide.perGoal.map((p) => p.status)).toEqual(['calculable', 'calculable']);
     expect(wide.conversions.find((c) => c.quantity === 'costs')).toMatchObject({ reading: unbounded(600, 1200 / Math.sqrt(12)) });
-    // A count range with no room inside its domain (never negative) is HELD: what rests on it is withheld, never given a figure.
+    // A count whose WHOLE range is below 0 contradicts what it can be (the PL's ruling, 23 Oct): never pinned near 0, never
+    // read as a spread. The person's is ASKED again with its words kept; Olumi's is HELD as unsupported.
     const g = gymFilled();
     g.quantities = g.quantities.map((q) => (q.id === 'members_now' ? { ...q, value: null, low: -1010, high: -990, range_kind: 'plausible' as const } : q));
-    const heldR = compile(g);
+    const theirs = compile(g);
+    expect(theirs.perGoal.find((p) => p.goal_id === 'reach_400')).toMatchObject({ status: 'asks', asks: ['members_now'] });
+    expect(theirs.asks.find((a) => a.quantity_id === 'members_now')).toMatchObject({ edit: { op: 'fill_quantity', quantity_id: 'members_now' } });
+    expect(theirs.asks.find((a) => a.quantity_id === 'members_now')!.question).toContain('is given as -1010–-990 member, but a count cannot be below 0');
+    expect(theirs.conversions.some((c) => c.quantity === 'members_now')).toBe(false);
+    expect(theirs.perGoal.find((p) => p.goal_id === 'class_income')).toMatchObject({ status: 'calculable' }); // contrast
+    const olumis = gymFilled();
+    olumis.quantities = olumis.quantities.map((q) => (q.id === 'members_now' ? { ...q, value: null, low: -1010, high: -990, range_kind: 'plausible' as const, author: 'olumi' as const, status: 'estimated' as const, quote: null, basis: 'a guess' } : q));
+    const heldR = compile(olumis);
     expect(heldR.perGoal.find((p) => p.goal_id === 'reach_400')).toMatchObject({ status: 'withheld' });
-    expect(heldR.perGoal.find((p) => p.goal_id === 'reach_400')!.reasons.join(' ')).toContain('has no room inside what it can be');
-    expect(heldR.perGoal.find((p) => p.goal_id === 'class_income')).toMatchObject({ status: 'calculable' }); // contrast
+    expect(heldR.perGoal.find((p) => p.goal_id === 'reach_400')!.reasons.join(' ')).toContain('a count cannot be below 0; Olumi\'s range is unsupported');
+    // Only a count's domain: a money range wholly below 0 (a loss) stays an ordinary spread.
+    const loss = withCosts({ low: -700, high: -500, range_kind: 'plausible' });
+    expect(loss.conversions.find((c) => c.quantity === 'costs')).toMatchObject({ kind: 'range_law', domain: null });
     const usable = withCosts({ low: 500, high: 700, range_kind: 'plausible' });
     expect(usable.perGoal.map((p) => p.status)).toEqual(['calculable', 'calculable']);
     expect(usable.conversions).toContainEqual({ kind: 'range_law', quantity: 'costs', low: 500, high: 700, range_kind: 'plausible', domain: null, reading: unbounded(600, 200 / Math.sqrt(12)), author: 'olumi', provisional: true });

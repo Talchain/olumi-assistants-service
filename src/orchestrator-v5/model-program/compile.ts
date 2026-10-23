@@ -28,7 +28,7 @@
  * (`conversions`), so the executable model has one number per unit and the person's bounds are never their law.
  */
 import {
-  CanonicalModel, FIGURE_STATUSES, WITHHOLDING_STATUSES, QUALITATIVE_FAMILIES,
+  APPROXIMATE_FIGURE, CanonicalModel, FIGURE_STATUSES, WITHHOLDING_STATUSES, QUALITATIVE_FAMILIES,
   type CanonicalModelT, type CanonicalQuantityT, type CanonicalRelationT, type CanonicalWindowT, type CanonicalOptionSetT,
   type CanonicalGoalT, type CanonicalLimitT,
 } from './canonical.js';
@@ -184,6 +184,9 @@ export function normalise(model: CanonicalModelT): CanonicalModelT {
   }));
   return extra.length ? { ...model, quantities: [...model.quantities, ...extra], options } : model;
 }
+
+/** A figure the person gave as approximate (the host's mark, `APPROXIMATE_FIGURE`): theirs, a point, a range asked for. */
+export const isApproximate = (q: CanonicalQuantityT): boolean => q.author === 'person' && q.basis === APPROXIMATE_FIGURE && q.status === 'known' && q.value !== null && q.low === null;
 
 export function compile(input: CanonicalModelT, opts: { sourceText?: string } = {}): CompileResult {
   const model = normalise(input);
@@ -600,29 +603,43 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
 
   // ── the ruled range law, for every range (a held range withholds what rests on it) ─────────────────────────────────
   const chances = new Set(model.risks.map((k) => k.occurrence));
-  /** Truncation only for a mathematical domain: a chance lies in [0, 1]; a count of things is never negative. */
-  const domainOf = (q: CanonicalQuantityT): Domain | undefined => {
-    if (chances.has(q.id)) return { min: 0, max: 1 };
+  /** A count of things (one plain unit, not time or money): never negative. */
+  const isCount = (q: CanonicalQuantityT): boolean => {
     const d = U.get(q.id) ? Object.entries(U.get(q.id)!.dims) : [];
-    return d.length === 1 && d[0][1] === 1 && !TIME_DIMS.has(d[0][0]) && !['gbp', 'usd', 'eur'].includes(d[0][0]) ? { min: 0 } : undefined;
+    return !chances.has(q.id) && d.length === 1 && d[0][1] === 1 && !TIME_DIMS.has(d[0][0]) && !['gbp', 'usd', 'eur'].includes(d[0][0]);
   };
+  /**
+   * Truncation only for a mathematical domain: a chance lies in [0, 1]; a count of things is never negative; an elapsed
+   * time (a set's or risk's timing) is 0 or more (the PL's ruling, 23 Oct). Each is Olumi's conversion, disclosed.
+   */
+  const domainOf = (q: CanonicalQuantityT): Domain | undefined => (chances.has(q.id) ? { min: 0, max: 1 } : timingQs.has(q.id) || isCount(q) ? { min: 0 } : undefined);
+  /**
+   * A count whose WHOLE range lies below 0 contradicts what it can be (the PL's ruling, 23 Oct): never pinned near 0, never
+   * made positive. Its words and range stay as given; the person's is asked again, Olumi's is held as unsupported.
+   */
+  const contradictory = new Map(model.quantities.filter((q) => FIGURE_STATUSES.has(q.status) && isCount(q) && has(q.low) && has(q.high) && q.high < 0)
+    .map((q) => [q.id, `"${q.label}" is given as ${q.low}–${q.high} ${q.unit}, but a count cannot be below 0`] as const));
   /** A person's range whose words do not say whether its ends are hard: an UNRESOLVED reading, asked (PL ruling B). */
-  const unresolved = new Map(model.quantities.filter((q) => FIGURE_STATUSES.has(q.status) && q.author === 'person' && has(q.low) && has(q.high) && q.low < q.high && !has(q.range_kind) && !windowQs.has(q.id))
+  const unresolved = new Map(model.quantities.filter((q) => FIGURE_STATUSES.has(q.status) && q.author === 'person' && has(q.low) && has(q.high) && q.low < q.high && !has(q.range_kind) && !windowQs.has(q.id) && !contradictory.has(q.id))
     .map((q) => [q.id, `Is ${q.low}–${q.high} ${q.unit} for "${q.label}" a firm range it cannot fall outside, or your rough estimate?`] as const));
   const readings = new Map<string, LawReading>();
   for (const q of model.quantities) if (FIGURE_STATUSES.has(q.status) && has(q.low) && has(q.high) && q.low < q.high && U.has(q.id) && !windowQs.has(q.id)
-    && (!has(q.value) || (q.low < q.value && q.value < q.high))) {
+    && !contradictory.has(q.id) && (!has(q.value) || (q.low < q.value && q.value < q.high))) {
     readings.set(q.id, readRange(rangeDistOf(q, U.get(q.id)!.scale, domainOf(q))));
   }
-  const held = new Map([...readings].filter(([, r]) => r.kind === 'held').map(([id, r]) => [id, (r as { reason: string }).reason] as const));
+  const held = new Map([...[...readings].filter(([, r]) => r.kind === 'held').map(([id, r]) => [id, (r as { reason: string }).reason] as const),
+    ...[...contradictory].filter(([id]) => Q.get(id)!.author !== 'person').map(([id, why]) => [id, `${why}; Olumi's range is unsupported`] as const)]);
+  /** The person's contradictory counts: asked again, in their words. */
+  const recheck = new Map([...contradictory].filter(([id]) => Q.get(id)!.author === 'person').map(([id, why]) => [id, `${why}. What is it?`] as const));
 
   // ── typed outcomes: what each goal, limit and option rests on ──────────────────────────────────────────────────────
   const unverifiedIds = new Set(unverified.map((u) => u.id));
   const withholds = (q: CanonicalQuantityT) => WITHHOLDING_STATUSES.has(q.status) || held.has(q.id);
-  const isAsk = (q: CanonicalQuantityT) => q.status === 'asked' || unresolved.has(q.id);
+  const isAsk = (q: CanonicalQuantityT) => q.status === 'asked' || unresolved.has(q.id) || recheck.has(q.id);
   const blockersOf = (closure: Iterable<string>) => [...closure].map((x) => Q.get(x)).filter((q): q is CanonicalQuantityT => !!q && (isAsk(q) || withholds(q)));
   const describe = (q: CanonicalQuantityT) => (q.status === 'asked' ? `needs "${q.label}": ${q.question}` : held.has(q.id) ? `rests on "${q.label}": ${held.get(q.id)}; give a most likely figure, or ask`
-    : unresolved.has(q.id) ? `needs how to read "${q.label}": ${unresolved.get(q.id)}` : `rests on "${q.label}", which is ${q.status.replace('_', ' ')}: ${q.basis}`);
+    : unresolved.has(q.id) ? `needs how to read "${q.label}": ${unresolved.get(q.id)}` : recheck.has(q.id) ? `needs "${q.label}" again: ${recheck.get(q.id)}`
+      : `rests on "${q.label}", which is ${q.status.replace('_', ' ')}: ${q.basis}`);
   const outcomeOf = (closure: Set<string>, win?: WinState): { status: Outcome; reasons: string[]; asks: string[] } => {
     const blockers = blockersOf([...closure, ...(win?.blockers ?? [])]);
     const withheld = [...(win?.withheld ?? []), ...blockers.filter(withholds).map(describe)];
@@ -759,7 +776,12 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
   const figureAsks: Ask[] = model.quantities.filter((q) => q.status === 'asked' && has(q.question))
     .map((q) => ({ quantity_id: q.id, label: q.label, unit: q.unit, question: q.question!, feeds: feedsOf(q.id), cancels_out_of: [], edit: { op: 'fill_quantity' as const, quantity_id: q.id } }));
   const readingAsks: Ask[] = [...unresolved].map(([id, question]) => ({ quantity_id: id, label: Q.get(id)!.label, unit: Q.get(id)!.unit, question, feeds: feedsOf(id), cancels_out_of: [], edit: { op: 'set_range_kind' as const, quantity_id: id } }));
-  result.asks = [...figureAsks, ...readingAsks].sort((a, b) => b.feeds.length - a.feeds.length);
+  // A figure they gave as approximate is used exactly as stated; a range is asked for, and nothing waits on it.
+  const rangeAsks: Ask[] = model.quantities.filter((q) => isApproximate(q))
+    .map((q) => ({ quantity_id: q.id, label: q.label, unit: q.unit, question: `You gave "${q.label}" as ${q.quote ? `"${q.quote}"` : 'an approximate figure'}. What range would you put on it? Until then it is used exactly as ${q.value} ${q.unit}.`,
+      feeds: feedsOf(q.id), cancels_out_of: [], edit: { op: 'fill_quantity' as const, quantity_id: q.id } }));
+  const recheckAsks: Ask[] = [...recheck].map(([id, question]) => ({ quantity_id: id, label: Q.get(id)!.label, unit: Q.get(id)!.unit, question, feeds: feedsOf(id), cancels_out_of: [], edit: { op: 'fill_quantity' as const, quantity_id: id } }));
+  result.asks = [...figureAsks, ...readingAsks, ...recheckAsks, ...rangeAsks].sort((a, b) => b.feeds.length - a.feeds.length);
   result.coaching = [
     ...(model.goals.length === 0 ? [{ record_id: '(model)', kind: 'measure' as const, question: NO_GOAL_QUESTION }] : []),
     ...model.goals.filter((g) => !has(g.measure)).map((g) => ({ record_id: g.id, kind: 'measure' as const, question: g.question ?? NO_GOAL_QUESTION })),

@@ -1,5 +1,5 @@
 /**
- * SPIKE S3 rows: the model-program turn on the REAL core route (`POST /agent/v1/core-turn`), in process, with in-memory
+ * Model-program rows (alpha): the model-program turn on the REAL core route (`POST /agent/v1/core-turn`), in process, with in-memory
  * stores in the core-turn route's served shapes (the C2″ harness's), so nothing reaches a database. The provider is stubbed
  * at fetch: the drafting call's answers are canned canonical models of a SYNTHETIC bakery (never a test brief's words), so
  * every row binds the real request the route sends and the real postimage it saves. One row per step, plus the
@@ -11,15 +11,21 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha256 } from '../../context/graph-hash.js';
 import { stableStringify } from '../../../orchestrator/context/stable-stringify.js';
-import type { CanonicalModelT, CanonicalQuantityT } from '../../model-program/canonical.js';
+import { APPROXIMATE_FIGURE, type CanonicalModelT } from '../../model-program/canonical.js';
 import { compile } from '../../model-program/compile.js';
+import { fillQuantity } from '../../model-program/answer.js';
 import { project } from '../../model-program/project.js';
 import { simulate } from '../../model-program/simulate/simulate.js';
 import { CANONICAL_JSON_SCHEMA, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX } from '../prompt.js';
-import { seedOf, SPIKE_DRAWS } from '../evaluate.js';
-import { reopenModelProgram, savedProgramOf } from '../turn.js';
+import { evaluateCanonical, seedOf, SPIKE_DRAWS } from '../evaluate.js';
+import { programReadOf, reopenProgram, savedProgramOf } from '../program-store.js';
+import { applyProgramChange, proposeProgramChange } from '../program-tools.js';
+import { ProposalStore } from '../../agent-lane/proposal.js';
+import { withNewRun } from '../program-save.js';
 import { projectCorePostimageForPersistence } from '../../persisted-graph-projection.js';
-import { ENGINE_VERSIONS, revisionDigest } from '../run-receipt.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
+import { ENGINE_VERSIONS, revisionDigest, RUN_AGAIN_FOR_CHANCE } from '../run-receipt.js';
+import { at, bakery, bakeryWithDefect, BRIEF, club, CLUB_BRIEF, q } from './bakery.fixture.js';
 
 type Json = Record<string, any>;
 
@@ -81,57 +87,12 @@ const sse = (text: string): Response => {
   return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } });
 };
 
-// ── the synthetic bakery ───────────────────────────────────────────────────────────────────────────────────────────────
-const BRIEF = 'We bake 300 loaves a week with our one oven and want to reach 380 loaves a week. A second oven adds about 100 loaves a week, or we could keep our one oven. We have £3,000 to spend and don\'t know the oven price yet.';
-const at = { party: null, approval: 'proposed' as const, author_id: null };
-const q = (id: string, unit: string, f: Partial<CanonicalQuantityT>): CanonicalQuantityT => ({ id, label: id.replace(/_/g, ' '), unit, kind: 'fact', value: null, low: null, high: null,
-  range_kind: null, status: 'known', question: null, basis: null, author: 'person', quote: null, ...at, ...f });
-function bakery(): CanonicalModelT {
-  return {
-    version: 'canonical.v1', question: 'Should the bakery buy a second oven?', period: 'week',
-    quantities: [
-      q('base_sales', 'loaf/week', { value: 300, quote: 'We bake 300 loaves a week' }),
-      q('ovens_added', 'oven', { value: 0, quote: 'our one oven' }),
-      q('one_oven', 'oven', { value: 1, quote: 'A second oven' }),
-      q('extra_per_oven', 'loaf/week/oven', { kind: 'coefficient', value: 100, quote: 'adds about 100 loaves a week' }),
-      q('sell_through', '1', { kind: 'coefficient', status: 'estimated', author: 'olumi', value: 0.7, low: 0.5, high: 0.9, range_kind: 'plausible', basis: 'New capacity sells only as far as demand grows.' }),
-      q('sold_per_oven', 'loaf/week/oven', { kind: 'coefficient', status: 'derived', author: 'olumi' }),
-      q('sales', 'loaf/week', { kind: 'derived', status: 'derived', author: 'olumi' }),
-      q('sales_target', 'loaf/week', { value: 380, quote: 'reach 380 loaves a week' }),
-      q('budget', 'GBP', { value: 3000, quote: 'We have £3,000 to spend' }),
-      q('oven_price', 'GBP/oven', { status: 'asked', question: 'What would the second oven cost?' }),
-      q('spend', 'GBP', { kind: 'derived', status: 'derived', author: 'olumi' }),
-    ],
-    relations: [
-      { form: 'definition', id: 'sold_rel', defines: 'sold_per_oven', op: 'product', parts: [{ id: 'extra_per_oven', power: 1 }, { id: 'sell_through', power: 1 }], author: 'olumi', quote: null, ...at },
-      { form: 'effect', id: 'sales_rel', defines: 'sales', base: 'base_sales', terms: [{ driver: 'ovens_added', coefficient: 'sold_per_oven', author: 'person', quote: 'A second oven adds about 100 loaves a week', ...at }], author: 'olumi', quote: null, ...at },
-      { form: 'definition', id: 'spend_rel', defines: 'spend', op: 'product', parts: [{ id: 'oven_price', power: 1 }, { id: 'ovens_added', power: 1 }], author: 'olumi', quote: null, ...at },
-    ],
-    goals: [{ id: 'more_loaves', label: 'Reach 380 loaves a week', measure: { quantity: 'sales', per: null, cmp: '>=', target: 'sales_target', frame: 'level', reference: null, aggregation: 'end',
-      window: null, measure_by: 'person', assumptions: [], exclusions: [] }, question: null, author: 'person', quote: 'want to reach 380 loaves a week', ...at }],
-    limits: [{ id: 'within_budget', label: 'Within the £3,000', measure: { quantity: 'spend', per: null, cmp: '<=', bound: 'budget', aggregation: 'end', window: null },
-      question: null, author: 'person', quote: 'We have £3,000 to spend', ...at }],
-    preferences: [],
-    options: [
-      { id: 'second_oven', label: 'A second oven', sets: [{ quantity: 'ovens_added', to: 'one_oven', value: null, low: null, high: null, range_kind: null, question: null, from_period: 0, author: 'person', quote: 'A second oven' }],
-        status: 'live', developed_from: null, author: 'person', quote: 'A second oven', ...at },
-      { id: 'keep_one', label: 'Keep our one oven', sets: [], status: 'live', developed_from: null, author: 'person', quote: 'keep our one oven', ...at },
-    ],
-    risks: [], claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], history: [],
-  };
-}
-/** The same bakery with one draft defect the compiler names: Olumi's estimate given without its range. */
-function bakeryWithDefect(): CanonicalModelT {
-  const m = bakery();
-  m.quantities = m.quantities.map((x) => (x.id === 'sell_through' ? { ...x, low: null, high: null, range_kind: null } : x));
-  return m;
-}
-
 let app: FastifyInstance;
+/** The route's internal dispatch, into this harness's stores (for the agent's tools, called as the SDK turn calls them). */
+const dispatch = async (path: string, body: unknown) => { const r = await app.inject({ method: 'POST', url: path, payload: body as never }); return { status: r.statusCode, json: r.json() as Record<string, unknown> }; };
 const turn = (payload: Json, headers: Record<string, string> = {}) => app.inject({ method: 'POST', url: '/agent/v1/core-turn', headers, payload: { kind: 'message', scenario_id: SCENARIO, stage: 'frame', turn_class: 'frame', turn_id: randomUUID(), source: 'composer', ...payload } });
-const ARM = { 'x-olumi-draft-arm': 'canonical' };
 
-describe('spike S3: the model-program turn on the real core route', () => {
+describe('the model-program turn on the real core route', () => {
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: any) => {
       const u = String((url as any)?.href ?? (url as any)?.url ?? url);
@@ -170,7 +131,7 @@ describe('spike S3: the model-program turn on the real core route', () => {
 
   it('step 1, drafter: the first turn sends ONE strict canonical-schema call at gpt-6.1-sol, effort medium, with the fixed prompt', async () => {
     replies = [JSON.stringify(bakery())];
-    const r = await turn({ message: BRIEF }, ARM);
+    const r = await turn({ message: BRIEF });
     expect(r.statusCode).toBe(200);
     expect(sent).toHaveLength(1);
     const body = sent[0]!;
@@ -186,16 +147,17 @@ describe('spike S3: the model-program turn on the real core route', () => {
     expect(r.json().model_program.draft.attempts.map((a: Json) => a.errors.length)).toEqual([0]);
   });
 
-  it('contrast: without the canonical arm the same first turn never makes the canonical call', async () => {
-    replies = ['{}'];
-    await turn({ message: BRIEF }).catch(() => undefined);
-    expect(sent.some((b) => b.text?.format?.name === 'canonical_model')).toBe(false);
+  it('no header, no flag: a scenario with no saved model is drafted by the canonical drafter and nothing else', async () => {
+    replies = [JSON.stringify(bakery())];
+    await turn({ message: BRIEF });
+    expect(sent.map((b) => b.text?.format?.name ?? b.model)).toEqual(['canonical_model']);
+    expect(persisted!.living_model.model_program).toBe('v1');
   });
 
   it('step 2, compile + repair: the compiler\'s own sentence goes back to the SAME conversation; at most 2 repairs', async () => {
     const bad = JSON.stringify(bakeryWithDefect());
     replies = [bad, JSON.stringify(bakery())];
-    const r = await turn({ message: BRIEF }, ARM);
+    const r = await turn({ message: BRIEF });
     expect(sent).toHaveLength(2);
     const errors = compile(bakeryWithDefect(), { sourceText: BRIEF }).errors;
     expect(errors.map((e) => e.code)).toEqual(['olumi_no_range']);
@@ -208,7 +170,7 @@ describe('spike S3: the model-program turn on the real core route', () => {
     // Three defective drafts: three calls (two repairs), and nothing is saved.
     beforeEachReset();
     replies = [bad, bad, bad];
-    const r3 = await turn({ message: BRIEF }, ARM);
+    const r3 = await turn({ message: BRIEF });
     expect(sent).toHaveLength(3);
     expect(persisted).toBeNull();
     expect(r3.json().model_program.saved).toBe(false);
@@ -217,7 +179,7 @@ describe('spike S3: the model-program turn on the real core route', () => {
 
   it('step 3, simulate + present: the view is the simulator\'s result on the scenario\'s seed; the display graph is S1\'s projection', async () => {
     replies = [JSON.stringify(bakery())];
-    const r = (await turn({ message: BRIEF }, ARM)).json();
+    const r = (await turn({ message: BRIEF })).json();
     const x = compile(bakery(), { sourceText: BRIEF }).executable!;
     const sim = simulate(x, { seed: seedOf(SCENARIO), draws: SPIKE_DRAWS });
     expect(r.model_program.seed).toBe(seedOf(SCENARIO));
@@ -240,10 +202,10 @@ describe('spike S3: the model-program turn on the real core route', () => {
 
   it('step 4, save → readback → cold reopen: the canonical model and its stored Run come back byte-identical; the reopen SHOWS that Run', async () => {
     replies = [JSON.stringify(bakery())];
-    const r = (await turn({ message: BRIEF }, ARM)).json();
+    const r = (await turn({ message: BRIEF })).json();
     expect(r.model_program.saved).toBe(true);
     expect(r.model_program.write).toBe('saved');
-    expect(r.model_program.readback).toMatchObject({ read: true, version: 'canonical.v1', seed_identical: true, runs_identical: true, canonical_bytes_identical: true, canonical_stable_identical: true });
+    expect(r.model_program.readback).toMatchObject({ read: true, version: 'canonical.v1', seed_identical: true, runs_identical: true, canonical_identical: true });
     expect(JSON.stringify(persisted!.living_model.canonical)).toBe(JSON.stringify(r.model_program.canonical));
     const runs = persisted!.living_model.runs as Json[];
     expect(runs).toHaveLength(1);
@@ -252,78 +214,278 @@ describe('spike S3: the model-program turn on the real core route', () => {
     expect(stableStringify(runs[0]!.result.canonical_analysis_view)).toBe(stableStringify(r.canonical_analysis_view));
     // Cold: the stored JSON alone, in a fresh module instance, shows the STORED Run: current, today's engine.
     vi.resetModules();
-    const fresh = await import('../turn.js');
-    const cold = fresh.reopenModelProgram(JSON.parse(JSON.stringify(persisted)))!;
+    const fresh = await import('../program-store.js');
+    const cold = fresh.reopenProgram(JSON.parse(JSON.stringify(persisted)))!;
     expect(stableStringify(cold.view)).toBe(stableStringify(r.canonical_analysis_view));
     expect([cold.run!.run_id, cold.current, cold.engine_current]).toEqual([r.model_program.run.run_id, true, true]);
     // Contrast: a NEW evaluation on another seed gives other numbers, so what the reopen shows is the stored Run, not a recompute.
     const other = fresh.savedProgramOf(JSON.parse(JSON.stringify(persisted)))!;
-    const recomputed = fresh.reevaluateModelProgram({ ...other, seed: other.seed + 1 });
+    const recomputed = withNewRun({ ...other, seed: other.seed + 1 }).evaluation;
     expect(stableStringify(recomputed.view)).not.toBe(stableStringify(cold.view));
   });
 
   it('step 4b, an engine-version bump: the reopen still shows the ORIGINAL stored result, said as from an older engine', async () => {
     replies = [JSON.stringify(bakery())];
-    const r = (await turn({ message: BRIEF }, ARM)).json();
+    const r = (await turn({ message: BRIEF })).json();
     const bumped = { ...ENGINE_VERSIONS, engine: `${ENGINE_VERSIONS.engine}-bumped` };
-    const cold = reopenModelProgram(JSON.parse(JSON.stringify(persisted)), bumped)!;
+    const cold = reopenProgram(JSON.parse(JSON.stringify(persisted)), bumped)!;
     expect(stableStringify(cold.view)).toBe(stableStringify(r.canonical_analysis_view));
     expect([cold.run!.run_id, cold.current, cold.engine_current]).toEqual([r.model_program.run.run_id, true, false]);
     expect(cold.run!.receipt.versions).toEqual({ ...ENGINE_VERSIONS });
     // What it shows is the stored bytes: a marker written into the stored Run is what comes back (a recompute would lose it).
     const marked = JSON.parse(JSON.stringify(persisted));
     marked.living_model.runs[0].result.canonical_analysis_view.options[0].cell.display = 'STORED-RUN-MARKER';
-    expect((reopenModelProgram(marked, bumped)!.view as Json).options[0].cell.display).toBe('STORED-RUN-MARKER');
+    expect((reopenProgram(marked, bumped)!.view as Json).options[0].cell.display).toBe('STORED-RUN-MARKER');
   });
 
   it('step 4c, the core postimage persistence projection the register applies keeps the model program byte for byte', async () => {
     replies = [JSON.stringify(bakery())];
-    await turn({ message: BRIEF }, ARM);
+    await turn({ message: BRIEF });
     const postimage = registered[0]!.graph as Json;
     const stored = projectCorePostimageForPersistence(JSON.parse(JSON.stringify(postimage))) as Json;
     expect(JSON.stringify(stored.living_model)).toBe(JSON.stringify(postimage.living_model));
     expect(savedProgramOf(stored)!.runs).toHaveLength(1);
   });
 
-  it('step 5, an answer fills exactly ONE quantity, as the person\'s words, with no model call; then recompile and re-simulate', async () => {
+  it('step 5, an answer in chat (the agent\'s own tools: propose, then the person approves) fills exactly ONE quantity, in their words; a new Run', async () => {
     replies = [JSON.stringify(bakery())];
-    await turn({ message: BRIEF }, ARM);
+    await turn({ message: BRIEF });
     const before = JSON.parse(JSON.stringify(persisted!.living_model.canonical)) as CanonicalModelT;
     const firstRun = JSON.stringify(persisted!.living_model.runs[0]);
     sent.length = 0;
     const words = 'The oven would cost about £2,500.';
-    // The message is the turn's text; the quote is the answer's own words (an ask card's input), never the message.
-    const r = await turn({ message: 'Here is the oven price.', model_program_answers: [{ quantity_id: 'oven_price', value: 2500, words }] });
-    expect(r.statusCode).toBe(200);
+    const deps = { dispatch, proposals: new ProposalStore() };
+    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] };
+    const op = { op: 'set_quantity' as const, quantity_id: 'oven_price', value: 2500, low: null, high: null, range_kind: null, quote: words };
+    // Contrast first: a quote that is not the person's words is refused, and nothing is proposed.
+    expect(await proposeProgramChange(deps, ctx, { public_label: 'Oven price', basis: 'their answer', ops: [{ ...op, quote: 'about £2,500 I think' }] }))
+      .toMatchObject({ status: 'refused', reason: 'quote_not_in_their_words' });
+    const proposed = await proposeProgramChange(deps, ctx, { public_label: 'Oven price £2,500', basis: 'their answer', ops: [op] }) as Json;
+    expect(proposed.status).toBe('ok');
+    expect(registered).toHaveLength(1); // proposing saves nothing
+    const applied = await applyProgramChange(deps, ctx, proposed.data.proposal_id) as Json;
+    expect(applied).toMatchObject({ status: 'ok', data: { saved: true } });
     expect(sent).toHaveLength(0);
     const after = persisted!.living_model.canonical as CanonicalModelT;
-    const filled = after.quantities.find((x) => x.id === 'oven_price')!;
-    expect(filled).toMatchObject({ status: 'known', value: 2500, low: null, high: null, author: 'person', quote: words, approval: 'approved', question: null });
+    expect(after.quantities.find((x) => x.id === 'oven_price')).toMatchObject({ status: 'known', value: 2500, low: null, high: null, author: 'person', quote: words, approval: 'approved', question: null });
     expect(after.quantities.filter((x) => x.id !== 'oven_price')).toEqual(before.quantities.filter((x) => x.id !== 'oven_price'));
     expect({ ...after, quantities: [], history: [] }).toEqual({ ...before, quantities: [], history: [] });
-    expect(after.history).toEqual([{ id: 'oven_price', change: 'superseded', old: JSON.stringify(before.quantities.find((x) => x.id === 'oven_price')), quote: words, author_id: null }]);
     expect(persisted!.living_model.person_words).toEqual([BRIEF, words]);
-    const j = r.json();
-    expect(j.model_program.fills).toEqual([{ quantity_id: 'oven_price', words, value: 2500, low: null, high: null, applied: true }]);
-    expect(j.model_program.compile.within_limits.status).toBe('calculable');
-    expect(j.model_program.compile.unverified).toEqual([]);
-    expect(j.model_program.asks).toEqual([]);
-    const x = compile(after, { sourceText: `${BRIEF}\n${words}` }).executable!;
-    expect(x.limits.map((l) => l.id)).toEqual(['within_budget']);
-    expect(j.model_program.chances).toEqual(JSON.parse(JSON.stringify(simulate(x, { seed: seedOf(SCENARIO), draws: SPIKE_DRAWS }).options
-      .map((o) => ({ option_id: o.option_id, per_goal: o.per_goal, joint: o.joint, within_limits: o.within_limits, joint_within_limits: o.joint_within_limits, outcomes: o.outcomes })))));
-    expect(j.receipts.map((x2: Json) => x2.authorised_by)).toEqual(['person']);
-    // The answer's evaluation is a NEW Run; the draft's Run stays byte for byte as it was, and the reopen shows the new one.
+    // The approved card's frozen program is what was written: model and Run.
+    expect(stableStringify(persisted!.living_model)).toBe(stableStringify(deps.proposals.get(proposed.data.proposal_id)!.living_model));
     const runs = persisted!.living_model.runs as Json[];
     expect(runs).toHaveLength(2);
     expect(JSON.stringify(runs[0])).toBe(firstRun);
     expect(runs[1]!.receipt.revision_digest).toBe(revisionDigest(after, [BRIEF, words]));
-    expect(reopenModelProgram(JSON.parse(JSON.stringify(persisted)))!.run!.run_id).toBe(runs[1]!.run_id);
-    // Contrast: an answer naming no quantity in the model changes nothing and saves nothing.
+    const x = compile(after, { sourceText: `${BRIEF}\n${words}` }).executable!;
+    expect(runs[1]!.result.chances).toEqual(JSON.parse(JSON.stringify(simulate(x, { seed: seedOf(SCENARIO), draws: SPIKE_DRAWS }).options
+      .map((o) => ({ option_id: o.option_id, per_goal: o.per_goal, joint: o.joint, within_limits: o.within_limits, joint_within_limits: o.joint_within_limits, outcomes: o.outcomes })))));
+    // The same approval again: its own earlier save is found, never written twice.
     const saves = registered.length;
-    const bad = await turn({ message: 'about 3', model_program_answers: [{ quantity_id: 'no_such_figure', value: 3, words: 'about 3' }] });
-    expect(bad.json().model_program.fills[0]).toMatchObject({ applied: false });
+    expect(await applyProgramChange(deps, ctx, proposed.data.proposal_id)).toMatchObject({ status: 'ok', data: { already_saved: true } });
     expect(registered.length).toBe(saves);
+  });
+
+  it('THE WITNESS: a stock, a limit and one Olumi estimate, with known answers, through draft, an in-card change, a chat correction, Runs and cold reopens', async () => {
+    replies = [JSON.stringify(club())];
+    const drafted = (await turn({ message: CLUB_BRIEF })).json();
+    expect(drafted.model_program.saved, JSON.stringify(drafted.model_program.compile?.errors ?? drafted.model_program.draft)).toBe(true);
+    expect(drafted.model_program).toMatchObject({ readback: { read: true, canonical_identical: true, runs_identical: true, seed_identical: true } });
+    const goalOf = (run: Json, option: string) => (run.result.chances as Json[]).find((o) => o.option_id === option)!.per_goal[0];
+    const run1 = persisted!.living_model.runs[0] as Json;
+    // Known answers on 10,000 draws: carry on exactly 0 (330 < 340); the promotion Φ(1.4434) = 0.92554 (Wilson half-width 0.0051).
+    expect([goalOf(run1, 'carry_on').chance, goalOf(run1, 'carry_on').precision_95]).toEqual([0, [0, 0]]);
+    expect(Math.abs(goalOf(run1, 'promotion').chance - 0.92554)).toBeLessThan(0.0075);
+    expect((run1.result.chances as Json[]).map((o) => [o.option_id, (o.within_limits as Json).chance])).toEqual([['promotion', 1], ['carry_on', 1]]);
+
+    // Change ONE input on its card: leavers 10 → 12. The promotion now needs an effect of 16/3: 1 − Φ(0.2887) = 0.38641.
+    const card = await turn({ kind: 'system_event', event: { kind: 'factor_value_edit', target_id: 'leavers', value: 12 } });
+    expect(card.statusCode, card.body).toBe(200);
+    const m2 = persisted!.living_model.canonical as CanonicalModelT;
+    expect(m2.quantities.find((x) => x.id === 'leavers')).toMatchObject({ value: 12, author: 'person', status: 'known' });
+    // The canonical revision and the projected value agree, and the Run is the new revision's.
+    expect((persisted!.nodes as Json[]).find((n) => n.id === 'leavers')!.observed_state).toMatchObject({ value: 12, source: 'user_override' });
+    const run2 = persisted!.living_model.runs[1] as Json;
+    expect(run2.receipt.revision_digest).toBe(revisionDigest(m2, persisted!.living_model.person_words));
+    expect(goalOf(run2, 'carry_on').chance).toBe(0);
+    expect(Math.abs(goalOf(run2, 'promotion').chance - 0.38641)).toBeLessThan(0.012);
+    expect(card.json().canonical_analysis_view.run.run_id).toBe(run2.run_id);
+
+    // Cold reopen: the SAME stored result, Run id and digest, from the stored JSON alone in a fresh module.
+    vi.resetModules();
+    const fresh = await import('../program-store.js');
+    const cold = fresh.reopenProgram(JSON.parse(JSON.stringify(persisted)))!;
+    expect([cold.run!.run_id, cold.run!.receipt.revision_digest, cold.current]).toEqual([run2.run_id, run2.receipt.revision_digest, true]);
+    expect(stableStringify(cold.view)).toBe(stableStringify(card.json().canonical_analysis_view));
+
+    // Correct Olumi's estimate in chat (the person's words, approved): ONLY that figure becomes theirs; the mechanism (the
+    // link and its relation) stays Olumi's. 300 + 3 × (20 + 6 − 12) = 342 ≥ 340: exactly 1. A new revision, a new Run.
+    const words = 'From experience a promotion brings 6 more a month.';
+    const deps = { dispatch, proposals: new ProposalStore() };
+    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] };
+    const p = await proposeProgramChange(deps, ctx, { public_label: 'Promotion effect 6 a month', basis: 'their experience',
+      ops: [{ op: 'set_quantity', quantity_id: 'promo_effect', value: 6, low: null, high: null, range_kind: null, quote: 'a promotion brings 6 more a month' }] }) as Json;
+    expect(await applyProgramChange(deps, ctx, p.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
+    const m3 = persisted!.living_model.canonical as CanonicalModelT;
+    expect(m3.quantities.find((x) => x.id === 'promo_effect')).toMatchObject({ value: 6, low: null, high: null, author: 'person', quote: 'a promotion brings 6 more a month' });
+    expect(m3.relations).toEqual(club().relations);
+    const runs = persisted!.living_model.runs as Json[];
+    expect(runs.map((r) => r.run_id)).toEqual([run1.run_id, run2.run_id, runs[2]!.run_id]);
+    expect(stableStringify(runs.slice(0, 2))).toBe(stableStringify([run1, run2]));
+    expect(new Set(runs.map((r) => r.receipt.revision_digest)).size).toBe(3);
+    expect([goalOf(runs[2]!, 'promotion'), goalOf(runs[2]!, 'carry_on')].map((g) => [g.chance, g.precision_95])).toEqual([[1, [1, 1]], [0, [0, 0]]]);
+    const reopened = reopenProgram(JSON.parse(JSON.stringify(persisted)))!;
+    expect([reopened.run!.run_id, reopened.current]).toEqual([runs[2]!.run_id, true]);
+
+    // Contrast (stale CAS): a chat card made on the model BEFORE another change is superseded, and writes nothing.
+    const later = 'Actually we can only spend £450.';
+    const ctx2 = { ...ctx, verified_user_messages: [later] };
+    const stale = await proposeProgramChange(deps, ctx2, { public_label: 'Budget £450', basis: 'they said so',
+      ops: [{ op: 'set_quantity', quantity_id: 'budget', value: 450, low: null, high: null, range_kind: null, quote: 'we can only spend £450' }] }) as Json;
+    await turn({ kind: 'system_event', event: { kind: 'factor_value_edit', target_id: 'leavers', value: 11 } });
+    const saves = registered.length;
+    expect(await applyProgramChange(deps, ctx2, stale.data.proposal_id)).toMatchObject({ status: 'refused' });
+    expect(registered.length).toBe(saves);
+  });
+
+  it('an UNREADABLE program (it claims model_program but is not v1) is refused with its way on: never run as legacy or as no model', async () => {
+    replies = [JSON.stringify(bakery())];
+    await turn({ message: BRIEF });
+    persisted = { ...persisted!, living_model: { ...persisted!.living_model, model_program: 'v9' } };
+    const saves = registered.length;
+    sent.length = 0;
+    const r = await turn({ message: 'What is the chance now?' });
+    expect(r.statusCode).toBe(409);
+    expect(r.json().error).toMatchObject({ code: 'MODEL_PROGRAM_UNREADABLE', nothing_saved: true });
+    expect(r.json().error.message).toContain('Nothing was changed. You can start a new scenario from your brief');
+    const edit = await turn({ kind: 'system_event', event: { kind: 'factor_value_edit', target_id: 'base_sales', value: 320 } });
+    expect([edit.statusCode, edit.json().error.code]).toEqual([409, 'MODEL_PROGRAM_UNREADABLE']);
+    expect([sent.length, registered.length]).toEqual([0, saves]);
+    // The store reads it as unreadable, never as a program and never as none.
+    expect(programReadOf(persisted).kind).toBe('unreadable');
+    expect(programReadOf({ ...persisted, living_model: { ...persisted!.living_model, model_program: 'v1', canonical: { version: 'canonical.v1' } } }).kind).toBe('unreadable');
+    expect(programReadOf({ nodes: [], edges: [], living_model: { aims: [] } }).kind).toBe('none'); // contrast: a legacy living model
+  });
+
+  it('an approximate answer ("about £2,500") is the person\'s figure, used exactly as stated: NO range is read into "about"; a range is asked for, and the words say so', () => {
+    const words = 'It would cost about £2,500.';
+    const f = fillQuantity(bakery(), 'oven_price', { value: 2500, low: 2250, high: 2750 }, words);
+    if (!f.ok) throw new Error(f.reason);
+    const oven = f.model.quantities.find((x) => x.id === 'oven_price')!;
+    expect(oven).toMatchObject({ value: 2500, low: null, high: null, range_kind: null, author: 'person', quote: words, basis: APPROXIMATE_FIGURE });
+    const r = compile(f.model, { sourceText: `${BRIEF}\n${words}` });
+    expect(r.asks.find((a) => a.quantity_id === 'oven_price')!.question).toBe('You gave "oven price" as "It would cost about £2,500.". What range would you put on it? Until then it is used exactly as 2500 GBP/oven.');
+    expect(r.within_limits.status).toBe('calculable'); // the range asked for holds nothing back
+    expect(r.conversions.some((c) => c.quantity === 'oven_price')).toBe(false);
+    const view = evaluateCanonical(f.model, { sourceText: `${BRIEF}\n${words}`, seed: 7 }).view as Json;
+    expect(JSON.stringify(view)).toContain('‘oven price’ is £2,500 / oven exactly, as you stated it, until you give a range');
+    expect(JSON.stringify(view)).not.toContain('your range');
+    // Contrast: the ends in their own words are their range, read as theirs.
+    const ranged = fillQuantity(bakery(), 'oven_price', { value: null, low: 2250, high: 2750, range_kind: 'bounds' }, 'between £2,250 and £2,750');
+    if (!ranged.ok) throw new Error(ranged.reason);
+    expect(ranged.model.quantities.find((x) => x.id === 'oven_price')).toMatchObject({ low: 2250, high: 2750, range_kind: 'bounds', basis: null });
+    // A range their words do not state, with no figure of theirs, is refused: never Olumi's range presented as their answer.
+    expect(fillQuantity(bakery(), 'oven_price', { value: null, low: 2250, high: 2750 }, 'about £2,500')).toMatchObject({ ok: false });
+  });
+
+  it('display fit (Lenses 23 Oct): every link its own id and sign; the goal target, each figure\'s source and every editable id on the fields the canvas reads', () => {
+    // A part used twice (a difference of one quantity with itself) is two links, each with its own sign.
+    const twice = bakery();
+    twice.quantities.push(q('net_zero', 'loaf/week', { kind: 'derived', status: 'derived', author: 'olumi' }));
+    twice.relations.push({ form: 'definition', id: 'zero_rel', defines: 'net_zero', op: 'sum', parts: [{ id: 'base_sales', sign: 1 }, { id: 'base_sales', sign: -1 }], author: 'olumi', quote: null, ...at });
+    const tg = project(twice, compile(twice, { sourceText: BRIEF })).graph;
+    const zero = tg.edges.filter((e) => e.to === 'net_zero').map((e) => [e.id, (e.strength as Json).mean, e.effect_direction]);
+    expect(zero).toEqual([['base_sales__net_zero', 1, 'positive'], ['base_sales__net_zero__2', -1, 'negative']]);
+    expect(new Set(tg.edges.map((e) => e.id)).size).toBe(tg.edges.length);
+
+    // A later answer of the person's is theirs as entered, never "from your brief".
+    const words = 'The oven would cost about £2,500.';
+    const answered = bakery();
+    answered.quantities = answered.quantities.map((x) => (x.id === 'oven_price' ? { ...x, status: 'known', value: 2500, question: null, quote: words } : x));
+    const g = project(answered, compile(answered, { sourceText: `${BRIEF}\n${words}` }), { brief: BRIEF }).graph;
+    const node = (id: string) => g.nodes.find((n) => n.id === id) as Json;
+    expect(node('more_loaves')).toMatchObject({ goal_threshold_raw: 380, goal_threshold_cap: 475, goal_threshold: 0.8, goal_threshold_cap_provenance: 'target_derived_headroom',
+      goal_threshold_frame: 'level', goal_threshold_unit: 'loaf/week', threshold_source: 'brief_extraction' });
+    expect(node('base_sales').observed_state).toEqual({ value: 300, raw_value: 300, unit: 'loaf/week', source: 'brief_extraction', extractionType: 'explicit' });
+    expect(node('sell_through').observed_state).toEqual({ value: 0.7, raw_value: 0.7, unit: '1', source: 'cee_inference', extractionType: 'inferred', range: { low: 0.5, high: 0.9 } });
+    expect(node('oven_price').observed_state).toEqual({ value: 2500, raw_value: 2500, unit: 'GBP/oven', source: 'user_override' });
+    // A derived figure has none drawn (it is worked out); the coefficient's id rides its link, so an edit maps back to it.
+    expect(node('sales').observed_state).toBeUndefined();
+    expect(g.edges.find((e) => e.id === 'ovens_added__sales')).toMatchObject({ coefficient_id: 'sold_per_oven' });
+    // The canvas's goal target on a reload: the canonical readiness builder reads it off this graph.
+    expect(buildCanonicalAnalysisReadyFromGraph({ ...g, living_model: {} })).toMatchObject({ goal_node_id: 'more_loaves', goal_threshold_raw: 380 });
+  });
+
+  it('the stored Run names itself: run id, the analysis hash of the graph it was computed with, its time; stale once the model moves', async () => {
+    replies = [JSON.stringify(bakery())];
+    const r = (await turn({ message: BRIEF })).json();
+    const run = persisted!.living_model.runs[0] as Json;
+    const view = r.canonical_analysis_view;
+    expect(view.run).toEqual({ run_id: run.run_id, graph_hash_at_run: hashOf(persisted), computed_at: run.computed_at });
+    expect([view.staleness.stale, view.staleness.reason, view.face_when_stale]).toEqual([false, 'graph_hash_match', undefined]);
+    expect(stableStringify(reopenProgram(persisted)!.view)).toBe(stableStringify(view));
+    // Contrast: the model moved with no new Run (a word of the person's added): the SAME stored result, now said stale.
+    const moved = JSON.parse(JSON.stringify(persisted));
+    moved.living_model.person_words.push('and one more thing');
+    const shown = reopenProgram(moved)! as { view: Json; current: boolean };
+    expect([shown.current, shown.view.staleness.stale, shown.view.staleness.reason, shown.view.run.graph_hash_at_run]).toEqual([false, true, 'graph_hash_diverged', view.run.graph_hash_at_run]);
+    expect(shown.view.face_when_stale).toBe(RUN_AGAIN_FOR_CHANCE);
+    expect(stableStringify(shown.view.options)).toBe(stableStringify(view.options));
+  });
+
+  it('canvas edits on a program: a card figure and a goal target each set ONE figure as the person\'s, with a new Run; a link edit and a resend change nothing', async () => {
+    replies = [JSON.stringify(bakery())];
+    await turn({ message: BRIEF });
+    sent.length = 0;
+    const edit = (event: Json, turn_id = randomUUID()) => turn({ kind: 'system_event', turn_id, event });
+    const figure = { kind: 'factor_value_edit', target_id: 'base_sales', value: 320 };
+    const id = randomUUID();
+    const r = await edit(figure, id);
+    expect(r.statusCode, r.body).toBe(200);
+    expect(sent).toHaveLength(0);
+    const after = persisted!.living_model.canonical as CanonicalModelT;
+    expect(after.quantities.find((x) => x.id === 'base_sales')).toMatchObject({ value: 320, author: 'person', quote: 'base sales: 320 loaf/week' });
+    expect(persisted!.living_model.runs).toHaveLength(2);
+    // The applied graph the canvas checks the edit against carries the typed figure, as the person's.
+    const drawn = (r.json().model.graph.nodes as Json[]).find((n) => n.id === 'base_sales')!;
+    expect(drawn.observed_state).toMatchObject({ value: 320, source: 'user_override' });
+    expect(r.json().canonical_analysis_view.run.run_id).toBe(persisted!.living_model.runs[1].run_id);
+    // The same edit resent: answered from what is saved, never applied twice.
+    const saves = registered.length;
+    const again = await edit(figure, id);
+    expect([again.statusCode, again.json().durability, registered.length]).toEqual([200, 'replayed', saves]);
+
+    const target = await edit({ kind: 'goal_target_edit', goal_node_id: 'more_loaves', constraint_type: 'at_least', raw_value: 400, unit: 'loaf/week', base_graph_hash: hashOf(persisted) });
+    expect(target.statusCode, target.body).toBe(200);
+    expect((persisted!.living_model.canonical as CanonicalModelT).quantities.find((x) => x.id === 'sales_target')).toMatchObject({ value: 400, author: 'person' });
+    expect((persisted!.nodes as Json[]).find((n) => n.id === 'more_loaves')).toMatchObject({ goal_threshold_raw: 400, threshold_source: 'user', success_threshold: 400 });
+
+    const saved = registered.length;
+    const link = await edit({ kind: 'edge_strength_edit', from: 'ovens_added', to: 'sales', magnitude: 0.5, direction_intent: 'preserve', expected: { mean: 1, effect_direction: 'positive' }, intent: 'set' });
+    expect(link.statusCode).toBe(409);
+    expect(link.json().error).toMatchObject({ code: 'CANVAS_EDIT_REFUSED', nothing_saved: true });
+    expect(link.json().error.message).toContain('change it in the chat');
+    expect(registered.length).toBe(saved);
+  });
+
+  it('a Run press on a program needs no model call: the stored Run when current; a NEW Run, stored, when the model moved since', async () => {
+    replies = [JSON.stringify(bakery())];
+    await turn({ message: BRIEF });
+    sent.length = 0;
+    const saves = registered.length;
+    const press = () => turn({ message: 'Run the analysis', chip: { id: 'run', action_type: 'run_analysis', label: 'Run' } });
+    const r = await press();
+    expect(r.statusCode, r.body).toBe(200);
+    expect([sent.length, registered.length]).toEqual([0, saves]);
+    expect(r.json().model_program).toMatchObject({ turn: 'run', stored: true });
+    expect(r.json().canonical_analysis_view.run.run_id).toBe(persisted!.living_model.runs[0].run_id);
+    // The model moved (a word of the person's added) with no Run: the press evaluates a NEW Run and stores it.
+    persisted = JSON.parse(JSON.stringify(persisted));
+    persisted!.living_model.person_words.push('We open six days a week.');
+    const moved = await press();
+    expect(moved.statusCode, moved.body).toBe(200);
+    expect([sent.length, registered.length, persisted!.living_model.runs.length]).toEqual([0, saves + 1, 2]);
+    expect(moved.json().canonical_analysis_view.run.run_id).toBe(persisted!.living_model.runs[1].run_id);
   });
 });
 

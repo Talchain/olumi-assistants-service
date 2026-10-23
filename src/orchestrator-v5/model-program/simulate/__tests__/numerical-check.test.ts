@@ -235,30 +235,41 @@ describe('numerical check: natural-unit simulator, hand-calculated rows', () => 
     expect(first(simulate(build(1, fixed('sev', -30)), { seed: SEED, draws: N })).per_goal[0].chance).toBe(0);
   });
 
-  it('row 8: window aggregation over months 6–8 matches the hand sum (a flow over intervals, a state over boundaries)', () => {
+  it('row 8: window aggregation over months 6–8 (ordinal) matches the hand sum (the PL\'s ruling: a sum takes start-of-interval samples)', () => {
     // subscribers S[k] = 100 + 10k (start 100, inflow 10 per interval); revenue in interval k = price × S[k], price 5.
-    // Revenue is a flow: {6, 3} reads intervals 6, 7, 8: S = 160, 170, 180; revenue = 800, 850, 900. sum = 2,550; mean = 850;
-    // end = 900 (interval 8); every ≥ 800 holds (worst 800), every ≥ 801 fails.
-    // Option 'later' sets price to 6 from period 7: 800 + 6 × 170 + 6 × 180 = 800 + 1,020 + 1,080 = 2,900; end 1,080.
-    // Subscribers are a state: {6, 3} reads boundaries 7, 8, 9: 170 + 180 + 190 = 540. Horizon 6 + 3 = 9 periods.
-    const w = { start_period: 6, periods: 3 };
-    const r = simulate(model(9, [fixed('s0', 100), flow(fixed('inflow', 10)), stock('subs', 's0', ['inflow'], []), fixed('price', 5), fixed('price_6', 6),
-      flow(def('revenue', 'product', ['price', 'subs'])), fixed('t2550', 2550), fixed('t850', 850), fixed('t900', 900), fixed('t800', 800), fixed('t801', 801),
-      fixed('t540', 540)],
-    [goal('sum', 'revenue', '>=', 't2550', 'sum', w), goal('mean', 'revenue', '>=', 't850', 'mean', w), goal('end', 'revenue', '>=', 't900', 'end', w),
-      goal('every800', 'revenue', '>=', 't800', 'every', w), goal('every801', 'revenue', '>=', 't801', 'every', w),
-      goal('subs_sum', 'subs', '>=', 't540', 'sum', w)],
-    [HOLD, option('later', [{ quantity: 'price', to: 'price_6', from_period: 7 }])]), { seed: SEED, draws: 10 });
+    // "Months 6–8" is ordinal: {5, 3}, intervals 5, 6, 7 (interval k is month k+1). Revenue is a flow: S = 150, 160, 170;
+    // revenue = 750, 800, 850. sum = 2,400; mean = 800; end = 850 (interval 7); every ≥ 750 holds, every ≥ 751 fails.
+    // Option 'later' sets price to 6 from period 6: 750 + 6 × 160 + 6 × 170 = 750 + 960 + 1,020 = 2,730; end 1,020.
+    // Subscribers are a state. sum: the start-of-interval samples 5, 6, 7 (as for a flow): 150 + 160 + 170 = 480.
+    // mean: boundaries 6, 7, 8: (160 + 170 + 180) / 3 = 170; end: S[8] = 180. Horizon 5 + 3 = 8 periods.
+    const w = { start_period: 5, periods: 3 };
+    const r = simulate(model(8, [fixed('s0', 100), flow(fixed('inflow', 10)), stock('subs', 's0', ['inflow'], []), fixed('price', 5), fixed('price_6', 6),
+      flow(def('revenue', 'product', ['price', 'subs'])), fixed('t2400', 2400), fixed('t800', 800), fixed('t850', 850), fixed('t750', 750), fixed('t751', 751),
+      fixed('t480', 480), fixed('t170', 170), fixed('t180', 180)],
+    [goal('sum', 'revenue', '>=', 't2400', 'sum', w), goal('mean', 'revenue', '>=', 't800', 'mean', w), goal('end', 'revenue', '>=', 't850', 'end', w),
+      goal('every750', 'revenue', '>=', 't750', 'every', w), goal('every751', 'revenue', '>=', 't751', 'every', w),
+      goal('subs_sum', 'subs', '>=', 't480', 'sum', w), goal('subs_mean', 'subs', '>=', 't170', 'mean', w), goal('subs_end', 'subs', '>=', 't180', 'end', w)],
+    [HOLD, option('later', [{ quantity: 'price', to: 'price_6', from_period: 6 }])]), { seed: SEED, draws: 10 });
     const hold = opt(r, 'hold'), later = opt(r, 'later');
-    expect(outcomeOf(hold, 'sum').p50).toBe(2550);
-    expect(outcomeOf(hold, 'mean').p50).toBe(850);
-    expect(outcomeOf(hold, 'end').p50).toBe(900);
-    expect(outcomeOf(hold, 'every800').p50).toBe(800);
-    expect(['sum', 'mean', 'end', 'every800'].map((id) => goalOf(hold, id).chance)).toEqual([1, 1, 1, 1]);
-    expect(goalOf(hold, 'every801').chance).toBe(0);
-    expect(outcomeOf(later, 'sum').p50).toBe(2900);
-    expect(outcomeOf(later, 'end').p50).toBe(1080);
-    expect(outcomeOf(hold, 'subs_sum').p50).toBe(540);
+    expect(outcomeOf(hold, 'sum').p50).toBe(2400);
+    expect(outcomeOf(hold, 'mean').p50).toBe(800);
+    expect(outcomeOf(hold, 'end').p50).toBe(850);
+    expect(outcomeOf(hold, 'every750').p50).toBe(750);
+    expect(['sum', 'mean', 'end', 'every750'].map((id) => goalOf(hold, id).chance)).toEqual([1, 1, 1, 1]);
+    expect(goalOf(hold, 'every751').chance).toBe(0);
+    expect(outcomeOf(later, 'sum').p50).toBe(2730);
+    expect(outcomeOf(later, 'end').p50).toBe(1020);
+    expect([outcomeOf(hold, 'subs_sum').p50, outcomeOf(hold, 'subs_mean').p50, outcomeOf(hold, 'subs_end').p50]).toEqual([480, 170, 180]);
+  });
+
+  it('row 8b: a ratio (per) reads its denominator through the same window selector, with the same aggregation', () => {
+    // Revenue (flow) over subscribers (state), both summed over {5, 3}: 2,400 ÷ (150 + 160 + 170) = 2,400 ÷ 480 = 5 exactly.
+    // A state denominator read at the boundaries instead (160 + 170 + 180 = 510) would give 4.706 and fail ≥ 5.
+    const w = { start_period: 5, periods: 3 };
+    const r = simulate(model(8, [fixed('s0', 100), flow(fixed('inflow', 10)), stock('subs', 's0', ['inflow'], []), fixed('price', 5),
+      flow(def('revenue', 'product', ['price', 'subs'])), fixed('t5', 5)],
+    [{ ...goal('per_sub', 'revenue', '>=', 't5', 'sum', w), per: 'subs' }], [HOLD]), { seed: SEED, draws: 10 });
+    expect([outcomeOf(opt(r, 'hold'), 'per_sub').p50, goalOf(opt(r, 'hold'), 'per_sub').chance]).toEqual([5, 1]);
   });
 
   it('row 9: common random numbers: two options that differ in one set share every other draw', () => {
@@ -388,13 +399,14 @@ describe('numerical check: natural-unit simulator, hand-calculated rows', () => 
     expect(['rmax', 'rmin', 'smax', 'smin'].map((id) => goalOf(hold, id).chance)).toEqual([1, 0, 1, 1]);
   });
 
-  it('row 12: a timing quantity: sampled once per draw, ceil to its period, per option, and for a risk', () => {
+  it('row 12: a timing quantity: sampled once per draw, strict ceil to its period, per option, and for a risk', () => {
     // Sales (a flow) are 10 a month; the option lifts them to 20 from the launch period L. Over months 1–6 (intervals 0..5):
     // total = 10 L + 20 (6 − L) = 120 − 10 L. Goal: total ≥ 90 ⇔ L ≤ 3.
     //  (a) L a figure, 3: total 90, met in every draw → exactly 1, the same as from_period 3 written as a number.
-    //  (b) L a range 2 to 6 with no most likely value: centre 4, sd 4/√12 = 1.1547 (|4| ≥ 2.309: a spread); the period is
-    //      ceil(L), so met ⇔ ceil(L) ≤ 3 ⇔ L ≤ 3: P = Φ((3 − 4)/1.1547) = Φ(−0.866) = 1 − 0.80676 = 0.19324 (row 2's table value;
-    //      Wilson half-width at 20k: 0.00547).
+    //  (b) L a range 2 to 6 with no most likely value, conditioned to 0 or more as the compiler gives it (an elapsed time):
+    //      centre 4, sd 4/√12 = 1.1547; the period is ceil(L), so met ⇔ L ≤ 3:
+    //      P = (Φ(−0.866) − Φ(−3.4641)) / (1 − Φ(−3.4641)) = (0.193238 − 0.000266) / 0.999734 = 0.19302 (Wilson half-width
+    //      at 20k: 0.00547).
     //  (c) Each option its own timing: 'early' at 2 → 100 ≥ 90 → 1; 'late' at 5 → 70 → 0.
     //  (d) A risk timed by a quantity of 3 (certain, −5 a month) is the risk timed by the number 3: 10 × 3 + 5 × 3 = 45.
     const sales = (timing: Quantity, options: Option[], risks: Risk[] = []) => model(6, [flow(fixed('sales', 10)), fixed('lifted', 20), timing,
@@ -405,9 +417,15 @@ describe('numerical check: natural-unit simulator, hand-calculated rows', () => 
     expect(first(byFigure).per_goal).toEqual(first(byNumber).per_goal);
     expect(first(byFigure).per_goal[0]).toEqual({ goal_id: 'g', chance: 1, precision_95: [1, 1] });
     expect(outcomeOf(first(byFigure), 'g').p50).toBe(90);
-    const sampled = ch(first(simulate(sales(range('launch', 2, 6), [option('launch', [timed('sales', 'lifted', 'launch')])]), { seed: SEED, draws: N })).per_goal[0]);
-    expect(inside(0.19324, sampled.precision_95)).toBe(true);
-    expect(Math.abs(sampled.chance - 0.19324)).toBeLessThanOrEqual(0.00547);
+    const elapsed = { ...range('launch', 2, 6), dist: { ...(range('launch', 2, 6).dist as RangeDist), domain: { min: 0 } } };
+    const sampled = ch(first(simulate(sales(elapsed, [option('launch', [timed('sales', 'lifted', 'launch')])]), { seed: SEED, draws: N })).per_goal[0]);
+    expect(inside(0.19302, sampled.precision_95)).toBe(true);
+    expect(Math.abs(sampled.chance - 0.19302)).toBeLessThanOrEqual(0.00547);
+    // Strict ceil (the PL's ruling): a fraction waits for the next period (2.5 → 3: total 90, met); beyond the horizon it
+    // never takes effect (6.5: sales stay 10, total 60, missed); a timing below 0 is outside the domain, never clamped to 0.
+    const at = (v: number) => first(simulate(sales(fixed('launch', v), [option('launch', [timed('sales', 'lifted', 'launch')])]), { seed: SEED, draws: 10 }));
+    expect([outcomeOf(at(2.5), 'g').p50, outcomeOf(at(2), 'g').p50, outcomeOf(at(6.5), 'g').p50]).toEqual([90, 100, 60]);
+    expect(at(-0.5).per_goal[0]).toEqual({ goal_id: 'g', withheld: { reason: 'invalid_domain', count: 10, quantities: ['sales'] } });
     const each = simulate(sales(fixed('launch', 3), [option('early', [timed('sales', 'lifted', 'early')]), option('late', [timed('sales', 'lifted', 'late')])]),
       { seed: SEED, draws: 100 });
     expect([goalOf(opt(each, 'early'), 'g').chance, goalOf(opt(each, 'late'), 'g').chance]).toEqual([1, 0]);

@@ -1,5 +1,5 @@
 /**
- * SPIKE S3: CANONICAL MODEL → compile → simulate (seed fixed per scenario) → present → the display graph. PURE: the same
+ * CANONICAL MODEL → compile → simulate (seed fixed per scenario) → present → the display graph. PURE: the same
  * model, person's words and seed give the same result byte for byte, which is what a cold reopen relies on.
  *
  *  · compile (S1 `compile.ts`) against the person's own words, so a quote not in them stays UNVERIFIED;
@@ -11,7 +11,7 @@
  * present: the view then carries each option's withheld cell with the questions, and the thresholds alone.
  */
 import { createHash } from 'node:crypto';
-import { normalise, compile, type CompileResult } from '../model-program/compile.js';
+import { isApproximate, normalise, compile, type CompileResult } from '../model-program/compile.js';
 import type { CanonicalModelT } from '../model-program/canonical.js';
 import { fillQuantity } from '../model-program/answer.js';
 import { project, type Projection } from '../model-program/project.js';
@@ -59,7 +59,7 @@ function quantityMeta(model: CanonicalModelT, compiled: CompileResult, x: Execut
   const rel = new Map(m.relations.map((r) => [r.defines, r] as const));
   const own = new Map(m.quantities.map((q) => {
     const r = rel.get(q.id);
-    return [q.id, { label: q.label, author: who(q.author, q.id), ...(r !== undefined ? { relation_author: who(r.author, r.id) } : {}) }] as const;
+    return [q.id, { label: q.label, author: who(q.author, q.id), ...(r !== undefined ? { relation_author: who(r.author, r.id) } : {}), ...(isApproximate(q) ? { approximate: true as const } : {}) }] as const;
   }));
   const goals = new Map(m.goals.map((g) => [g.id, g] as const));
   const out: Record<string, PresentQuantity> = {};
@@ -93,9 +93,10 @@ function probeFor(model: CanonicalModelT, goalId: string, askId: string, sourceT
   };
 }
 
-export function evaluateCanonical(model: CanonicalModelT, opts: { readonly sourceText: string; readonly seed: number; readonly draws?: number }): Evaluation {
+/** `brief`: the person's first words, so the display tells their brief's figures from the ones they gave later. */
+export function evaluateCanonical(model: CanonicalModelT, opts: { readonly sourceText: string; readonly seed: number; readonly draws?: number; readonly brief?: string }): Evaluation {
   const compiled = compile(model, { sourceText: opts.sourceText });
-  const projection = project(model, compiled);
+  const projection = project(model, compiled, opts.brief !== undefined ? { brief: opts.brief } : {});
   const labelOf = new Map(normalise(model).goals.map((g) => [g.id, g.label] as const));
   // Aims with no measure yet are left out of the chance (said in `leaves_out`), never a goal that waits.
   const goals: PresentGoal[] = compiled.perGoal.filter((p) => !p.needs_measure)

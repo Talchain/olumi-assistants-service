@@ -30,10 +30,12 @@ export type Stock = { start: string; inflows: string[]; outflows: string[] };   
  *    option's question. Option sets and risk effects are time-indexed overrides, active at interval t and at boundary t when
  *    t ≥ from_period.
  * Goal and limit aggregation over a window { start_period: s, periods: p }:
- *  - end:                        a state reads S[s+p]; a flow reads interval s+p−1;
- *  - sum, mean, every, max, min: a flow reads intervals s … s+p−1; a state reads boundaries s+1 … s+p.
- * So "the stock after six months" is S[6] with window {0, 6}, and "revenue in months 6 to 8" is intervals 6, 7, 8 with
- * window {6, 3}. The horizon `periods` always covers every window; never an extra period to fit a reading.
+ *  - end:                   a state reads S[s+p]; a flow reads interval s+p−1;
+ *  - sum:                   the start-of-interval samples s … s+p−1, for a state and a flow alike (the PL's ruling, 23 Oct);
+ *  - mean, every, max, min: a flow reads intervals s … s+p−1; a state reads boundaries s+1 … s+p.
+ * Interval k is the (k+1)th period: "the stock after six months" is S[6] with window {0, 6}, and "revenue in months 6 to 8"
+ * (ordinal) is intervals 5, 6, 7 with window {5, 3}. The horizon `periods` always covers every window; never an extra period
+ * to fit a reading.
  */
 export type Reading = 'state' | 'flow';
 export type Quantity = { id: string; label: string; unit: string; reading: Reading; dist?: Dist; equation?: Equation; stock?: Stock };

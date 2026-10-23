@@ -45,6 +45,8 @@ export interface PresentQuantity {
   readonly label: string;
   readonly author: Author;
   readonly relation_author?: Author;
+  /** The person gave it as approximate ("about"): used exactly as stated until they give a range, and said so. */
+  readonly approximate?: true;
 }
 /** S1's `GoalOutcome`, with the goal's label: every goal, calculable or not. */
 export interface PresentGoal {
@@ -161,7 +163,7 @@ function horizonWords(aggregation: Aggregation, w: Window, unit: string, reading
   const state = reading === 'state';
   if (aggregation === 'end' || first === last) return state ? `at ${plural(unit, last)} from now` : `in ${unit} ${last} from now`;
   const months = `${unit}s ${first} to ${last} from now`;
-  if (aggregation === 'sum') return state ? `added up at the ends of ${months}` : `in total over ${months}`;
+  if (aggregation === 'sum') return state ? `added up over ${months}, taking its level at the start of each ${unit}` : `in total over ${months}`;
   if (aggregation === 'mean') return state ? `on average at the ends of ${months}` : `on average per ${unit} over ${months}`;
   if (aggregation === 'max') return state ? `at its highest at the ends of ${months}` : `in its highest ${unit} of ${months}`;
   if (aggregation === 'min') return state ? `at its lowest at the ends of ${months}` : `in its lowest ${unit} of ${months}`;
@@ -235,6 +237,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       // DL ruling (author not recorded): a value with no recorded author is listed as an assumption, never read as the person's.
       const author: string | undefined = x.dist.author ?? m?.author;
       if (author === 'olumi') return [`${name} is ${say(x.dist.value, x.unit)}, Olumi’s figure`];
+      if (m?.approximate === true) return [`${name} is ${say(x.dist.value, x.unit)} exactly, as you stated it, until you give a range`];
       return author !== undefined && NOT_ASSUMPTIONS.has(author) ? [] : [`${name} is ${say(x.dist.value, x.unit)} ${NOT_RECORDED}`];
     }
     // S3 smoke fix 1: only an Olumi-authored EFFECT relation is an assumed relationship. A definition (an identity: a
