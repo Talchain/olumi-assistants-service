@@ -240,7 +240,13 @@ describe('the full reasoning model and the submitted calculation share one admis
       // effects-at-period-end evidence, and this transport-only Run deliberately has no brief/timing reading.
       expect(goal(graph, 'productivity').goal_target_basis.effects_at_period_end).toBe(false);
       expect(run.licence).toBeUndefined();
-      expect(run.result.enrichment.option_comparison.every((o: Rec) => o.probability_of_goal === undefined)).toBe(true);
+      // The timing withhold explicitly excludes carrying on as now: its reference row is retained.
+      // Check the affected options and the actual display consumer, rather than demanding deletion of raw reference evidence.
+      const baselineIds = new Set(graph.nodes.filter(n => n.kind === 'option' && n.is_baseline === true).map(n => n.id));
+      expect(run.result.enrichment.option_comparison.filter((o: Rec) => !baselineIds.has(o.option_id))
+        .every((o: Rec) => o.probability_of_goal === undefined)).toBe(true);
+      expect(goalChanceCellFacesForAgent(buildAnalysisResultBlock(run.fact), graph, true,
+        readRunEvidence(runEvidenceWireOf(run.fact))).size).toBe(0);
       expect(graph.living_model).toMatchObject({ aims: before.aims });
       expect(goal(graph, secondary).goal_rests_on.length).toBeGreaterThan(0);
       expect(run.result.enrichment.option_comparison.every((o: Rec) => o.probability_of_joint_goal === undefined)).toBe(true);
