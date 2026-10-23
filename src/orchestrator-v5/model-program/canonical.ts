@@ -73,6 +73,14 @@ export const WITHHOLDING_STATUSES: ReadonlySet<QuantityStatusT> = new Set(['unkn
 
 export const UNIT_RULES = 'The unit in singular words: a currency as GBP, USD or EUR (or £, $, €); a count noun ("loaf", "member"); "/" for per, read left to right ("GBP/loaf", "member/month", "GBP/member/month"); a rate per period as "/month" ("%/month" for 4 % a month; the stock it applies to × that rate is a flow per month); "1" for a pure number or a chance from 0 to 1; "%" for a percentage (its figures in percent, 20 for 20 %). Never a multiplier such as k or m: write the figure in full. A coefficient\'s unit is the defined quantity\'s unit per the driver\'s unit ("loaf/week/oven").';
 
+/**
+ * WHAT A RANGE MEANS (PL ruling B): read from the words, never assumed. bounds: the ends are hard; plausible: a rough span.
+ * A person's range whose words do not say which is an UNRESOLVED reading: asked, never guessed.
+ */
+export const RANGE_KINDS = ['bounds', 'plausible'] as const;
+const RANGE_KIND = z.enum(RANGE_KINDS).nullable().describe(
+  'For a range only. bounds: the words fix hard ends ("between 80 and 150", "no more than", "at least"), so it cannot fall outside them. plausible: a rough span ("about", "roughly", "likely", "somewhere around"); Olumi\'s own estimates are plausible. Null when there is no range, or when the person\'s words do not say which (it is then asked).');
+
 export const CanonicalQuantity = z.object({
   id,
   label: z.string().describe('A short plain name the person would recognise ("Loaves sold per week").'),
@@ -80,6 +88,7 @@ export const CanonicalQuantity = z.object({
   value: z.number().nullable().describe('One figure, in the unit; for an Olumi estimate, its most likely figure strictly inside its range (or null). Null when there is no figure.'),
   low: z.number().nullable().describe('The low end of a stated or estimated range, in the unit. Null when not a range.'),
   high: z.number().nullable().describe('The high end of a stated or estimated range, in the unit. Null when not a range.'),
+  range_kind: RANGE_KIND,
   kind: z.enum(QUANTITY_KINDS).describe(
     'fact: a figure about the person\'s own situation (their price, costs, headcount, members today, dates, targets): only they can give it, so a missing fact is asked, never estimated. '
     + 'coefficient: the size of a mechanism (each extra oven adds so many loaves; the share of visitors who join; a rate): Olumi may estimate it, labelled, with low and high. A derived or structural quantity is a fact.'),
@@ -248,6 +257,7 @@ export const CanonicalOptionSet = z.object({
   value: z.number().nullable().describe('With to null: this option\'s own value for the quantity, in its unit ("raise the price to 3.50": 3.5; switched on: 1). Null otherwise.'),
   low: z.number().nullable().describe('With to null: the low end of this option\'s own value, when a range. Null otherwise.'),
   high: z.number().nullable().describe('With to null: the high end of this option\'s own value, when a range. Null otherwise.'),
+  range_kind: RANGE_KIND,
   question: z.string().nullable().describe('With to null and no figure: the one question to the person for this option\'s value. Null otherwise.'),
   from_period: timing,
   author: z.enum(QUANTITY_AUTHORS).describe('Who gave the inline value: person, olumi, or structure (a switch: 1 for on).'),

@@ -53,6 +53,17 @@ export function probeMargins(x: ExecutableModel, check: Check, override: Readonl
   return out;
 }
 
+/** One check's aggregated value per option on the probe's first draw (fixed inputs make it exact): for structural rows. */
+export function probeValue(x: ExecutableModel, check: Check, optionId: string): number {
+  const byId = new Map(x.quantities.map((q) => [q.id, q] as const));
+  const option = x.options.find((o) => o.id === optionId)!;
+  const values = run(x, byId, option.sets, new Map(), () => 0, () => 1);
+  const { start_period: s, periods: p } = check.window;
+  const flow = byId.get(check.quantity)?.reading === 'flow';
+  const at = check.aggregation === 'end' ? (flow ? s + p - 1 : s + p) : NaN;
+  return values[at]?.get(check.quantity) ?? NaN;
+}
+
 /** True when the two margin lists are the same, value by value (non-finite values never count as the same). */
 export function sameMargins(a: readonly number[], b: readonly number[]): boolean {
   return a.length === b.length && a.every((v, i) => Number.isFinite(v) && Number.isFinite(b[i]) && Math.abs(v - b[i]) <= 1e-9 * Math.max(1, Math.abs(v), Math.abs(b[i])));

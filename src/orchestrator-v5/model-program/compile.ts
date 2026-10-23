@@ -31,16 +31,19 @@ import {
   type CanonicalModelT, type CanonicalQuantityT, type CanonicalRelationT, type CanonicalWindowT, type CanonicalOptionSetT,
   type CanonicalGoalT, type CanonicalLimitT,
 } from './canonical.js';
-import type { ExecutableModel, Quantity as XQuantity, Goal as XGoal, Limit as XLimit, Option as XOption, Risk as XRisk, Dist, Withheld, FixedAuthor } from './executable.js';
+import type { ExecutableModel, Quantity as XQuantity, Goal as XGoal, Limit as XLimit, Option as XOption, Risk as XRisk, Dist, Domain, Withheld, FixedAuthor } from './executable.js';
 import { parseUnit, multiply, divide, sameDims, isDimensionless, showUnit, perPeriod, isCalendarConversion, TIME_DIMS, type Unit } from './units.js';
 import { probeMargins, sameMargins } from './probe.js';
+import { rangeLaw, type RangeReading, type RangeDist } from './simulate/range-law.js';
+
+export type { RangeReading };
 
 export type CompileErrorCode =
   | 'schema' | 'bad_id' | 'duplicate_id' | 'undefined_ref' | 'unit_unreadable' | 'unit_mismatch' | 'figure_status'
   | 'olumi_no_range' | 'missing_quote' | 'range_order' | 'no_relation' | 'relation_on_figure' | 'two_relations'
   | 'relation_shape' | 'cycle' | 'goal_and_limit' | 'goal_shape' | 'asks_for_result' | 'window' | 'timing' | 'option_shape'
   | 'set_derived' | 'option_reaches_no_goal' | 'set_reaches_nothing' | 'risk_shape' | 'not_applicable_used'
-  | 'after_horizon' | 'fact_estimated' | 'coefficient_kind' | 'structure_value' | 'label';
+  | 'after_horizon' | 'fact_estimated' | 'coefficient_kind' | 'structure_value' | 'label' | 'range_kind';
 export type CompileError = { code: CompileErrorCode; message: string; items: string[] };
 export type Outcome = 'calculable' | 'asks' | 'withheld';
 export type GoalOutcome = {
@@ -67,12 +70,12 @@ export type GoalOutcome = {
 export type LimitOutcome = { limit_id: string; status: Outcome; reasons: string[]; asks: string[]; cancelled: string[]; needs_measure: boolean };
 export type OptionOutcome = { option_id: string; status: Outcome | 'not_compared'; reasons: string[]; asks: string[] };
 /** One question whose answer fills exactly one quantity. */
-export type Ask = { quantity_id: string; label: string; unit: string; question: string; feeds: string[]; cancels_out_of: string[]; edit: { op: 'fill_quantity'; quantity_id: string } };
+export type Ask = { quantity_id: string; label: string; unit: string; question: string; feeds: string[]; cancels_out_of: string[]; edit: { op: 'fill_quantity' | 'set_range_kind'; quantity_id: string } };
 /** A question whose answer changes the model's structure (a measure for an aim or guardrail; a deadline; a left-out item). */
 export type Coaching = { record_id: string; kind: 'measure' | 'deadline' | 'left_out'; question: string };
 export type Conversion =
   | { kind: 'percent'; quantity: string; from: string; to: string; factor: number; author: 'olumi' }
-  | { kind: 'range_law'; quantity: string; low: number; high: number; reading: RangeReading; author: 'olumi'; provisional: true };
+  | { kind: 'range_law'; quantity: string; low: number; high: number; range_kind: 'bounds' | 'plausible'; domain: Domain | null; reading: RangeReading; author: 'olumi'; provisional: true };
 export type CompileResult = {
   executable: ExecutableModel | null;
   perGoal: GoalOutcome[];
@@ -97,22 +100,19 @@ export type CompileResult = {
 };
 
 /**
- * THE RULED RANGE LAW (`rangeSpread`, path-b/living-model/mapper.ts:104-110, with the mapper's own use rule at :571-578): a
- * Normal with uniform-matched moments, sd = (high − low)/√12, centred on the most likely value or, with none, the middle;
- * used only where its draws keep their sign (the range crosses zero or |centre| ≥ 2 sd), or for a chance. Otherwise a most
- * likely value is used as the figure, and a bare range is HELD: what rests on it is withheld, never given an invented point.
- * The same reading as `simulate/range-law.ts` (S2), so the compiler and the evaluator agree. (Bounds and truncation are
- * with the PL for review: not built here.)
+ * THE RULED RANGE LAW is ONE shared function, S2's (`simulate/range-law.ts`, PL ruling B): the compiler, the simulator and
+ * every disclosure read a range through it. The compiler adds what only it can know: the range's kind from the person's words
+ * (bounds | plausible; an unclear one is asked) and its domain (a chance in [0, 1], a non-negative count). A reading that would
+ * collapse a range to one point is never used: the range is held, and what rests on it is withheld with that reason.
  */
-export type RangeReading = { kind: 'normal'; centre: number; sd: number } | { kind: 'point'; value: number } | { kind: 'held'; reason: string };
-export function rangeReading(low: number, high: number, mode: number | null, chance = false): RangeReading {
-  const sd = (high - low) / Math.sqrt(12);
-  const centre = mode ?? (low + high) / 2;
-  const inside = low < centre && centre < high;
-  const keepsSign = (low < 0 && high > 0) || Math.abs(centre) >= 2 * sd;
-  if (inside && (chance || keepsSign)) return { kind: 'normal', centre, sd };
-  if (mode !== null) return { kind: 'point', value: mode };
-  return { kind: 'held', reason: `the range ${low} to ${high} has no most likely value, and a spread matching its width would draw values on the other side of zero` };
+export const rangeDistOf = (q: Pick<CanonicalQuantityT, 'low' | 'high' | 'value' | 'author' | 'range_kind'>, scale = 1, domain?: Domain): RangeDist => ({
+  kind: 'range', low: q.low! * scale, high: q.high! * scale, ...(q.value !== null ? { mode: q.value * scale } : {}),
+  basis: q.author === 'person' ? 'person_range' : 'olumi_estimate', range_kind: q.range_kind ?? 'plausible', ...(domain ? { domain } : {}),
+});
+/** The law's reading, with no point fallback: a range is never collapsed to its most likely figure. */
+export function readRange(d: RangeDist, chance: boolean): RangeReading {
+  const r = rangeLaw(d, { chance });
+  return r.kind === 'point' ? { kind: 'held', reason: `the range ${d.low} to ${d.high} would be read as its most likely figure alone, and a range is never collapsed to one point` } : r;
 }
 
 export const AS_STATED_OPTION_ID = 'as_stated';
@@ -167,11 +167,11 @@ export function normalise(model: CanonicalModelT): CanonicalModelT {
       extra.push({
         id, label: `${o.label}: ${target?.label ?? s.quantity}`, unit: target?.unit ?? '1',
         kind: status === 'estimated' ? 'coefficient' : 'fact',
-        value: s.value, low: s.low, high: s.high, status, question: s.question,
+        value: s.value, low: s.low, high: s.high, range_kind: s.range_kind, status, question: s.question,
         basis: status === 'estimated' ? `Olumi's estimate of what "${o.label}" sets this to.` : proposal ? `Olumi's proposed setting for its option "${o.label}".` : s.author === 'structure' ? `"${o.label}" switched on.` : null,
         author: s.author, party: null, quote: s.quote, approval: o.approval, author_id: o.author_id,
       });
-      return { ...s, to: id, value: null, low: null, high: null, question: null };
+      return { ...s, to: id, value: null, low: null, high: null, range_kind: null, question: null };
     }),
   }));
   return extra.length ? { ...model, quantities: [...model.quantities, ...extra], options } : model;
@@ -257,6 +257,9 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
     else if (has(q.value) && has(q.low) && has(q.high) && q.low < q.high && (q.value === q.low || q.value === q.high)) {
       err('range_order', `${n} has its most likely figure ${q.value} at an end of its range ${q.low}–${q.high}; give a most likely figure strictly inside the range, or none (null).`, [q.id]);
     }
+    const ranged = has(q.low) && has(q.high) && q.low < q.high;
+    if (ranged && q.author === 'olumi' && !has(q.range_kind)) err('range_kind', `${n} is Olumi's range without its kind; say plausible (a rough span) or bounds (hard ends).`, [q.id]);
+    if (!ranged && has(q.range_kind)) err('range_kind', `${n} has a range kind but no range; set range_kind null.`, [q.id]);
     if (q.status === 'derived') {
       if (!R.has(q.id)) err('no_relation', `${n} is marked derived but no relation works it out; add its definition, effect or stock, or give its figure.`, [q.id]);
       if (fig) err('figure_status', `${n} is derived, so its figures must be null (its relation works them out).`, [q.id]);
@@ -578,10 +581,19 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
 
   // ── the ruled range law, for every range (a held range withholds what rests on it) ─────────────────────────────────
   const chances = new Set(model.risks.map((k) => k.occurrence));
+  /** Truncation only for a mathematical domain: a chance lies in [0, 1]; a count of things is never negative. */
+  const domainOf = (q: CanonicalQuantityT): Domain | undefined => {
+    if (chances.has(q.id)) return { min: 0, max: 1 };
+    const d = U.get(q.id) ? Object.entries(U.get(q.id)!.dims) : [];
+    return d.length === 1 && d[0][1] === 1 && !TIME_DIMS.has(d[0][0]) && !['gbp', 'usd', 'eur'].includes(d[0][0]) ? { min: 0 } : undefined;
+  };
+  /** A person's range whose words do not say whether its ends are hard: an UNRESOLVED reading, asked (PL ruling B). */
+  const unresolved = new Map(model.quantities.filter((q) => FIGURE_STATUSES.has(q.status) && q.author === 'person' && has(q.low) && has(q.high) && q.low < q.high && !has(q.range_kind) && !windowQs.has(q.id))
+    .map((q) => [q.id, `Is ${q.low}–${q.high} ${q.unit} for "${q.label}" a firm range it cannot fall outside, or your rough estimate?`] as const));
   const readings = new Map<string, RangeReading>();
-  for (const q of model.quantities) if (FIGURE_STATUSES.has(q.status) && has(q.low) && has(q.high) && q.low < q.high && U.has(q.id) && !windowQs.has(q.id)) {
-    const k = U.get(q.id)!.scale;
-    readings.set(q.id, rangeReading(q.low * k, q.high * k, has(q.value) ? q.value * k : null, chances.has(q.id)));
+  for (const q of model.quantities) if (FIGURE_STATUSES.has(q.status) && has(q.low) && has(q.high) && q.low < q.high && U.has(q.id) && !windowQs.has(q.id)
+    && (!has(q.value) || (q.low < q.value && q.value < q.high))) {
+    readings.set(q.id, readRange(rangeDistOf(q, U.get(q.id)!.scale, domainOf(q)), chances.has(q.id)));
   }
   const held = new Map([...readings].filter(([, r]) => r.kind === 'held').map(([id, r]) => [id, (r as { reason: string }).reason] as const));
   for (const [id, reason] of timingHeld) held.set(id, reason);
@@ -589,13 +601,14 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
   // ── typed outcomes: what each goal, limit and option rests on ──────────────────────────────────────────────────────
   const unverifiedIds = new Set(unverified.map((u) => u.id));
   const withholds = (q: CanonicalQuantityT) => WITHHOLDING_STATUSES.has(q.status) || held.has(q.id);
-  const blockersOf = (closure: Iterable<string>) => [...closure].map((x) => Q.get(x)).filter((q): q is CanonicalQuantityT => !!q && (q.status === 'asked' || withholds(q)));
-  const describe = (q: CanonicalQuantityT) => (q.status === 'asked' ? `needs "${q.label}": ${q.question}`
-    : held.has(q.id) ? `rests on "${q.label}": ${held.get(q.id)}; give a most likely figure, or ask` : `rests on "${q.label}", which is ${q.status.replace('_', ' ')}: ${q.basis}`);
+  const isAsk = (q: CanonicalQuantityT) => q.status === 'asked' || unresolved.has(q.id);
+  const blockersOf = (closure: Iterable<string>) => [...closure].map((x) => Q.get(x)).filter((q): q is CanonicalQuantityT => !!q && (isAsk(q) || withholds(q)));
+  const describe = (q: CanonicalQuantityT) => (q.status === 'asked' ? `needs "${q.label}": ${q.question}` : held.has(q.id) ? `rests on "${q.label}": ${held.get(q.id)}; give a most likely figure, or ask`
+    : unresolved.has(q.id) ? `needs how to read "${q.label}": ${unresolved.get(q.id)}` : `rests on "${q.label}", which is ${q.status.replace('_', ' ')}: ${q.basis}`);
   const outcomeOf = (closure: Set<string>, win?: WinState, cancelled: ReadonlySet<string> = new Set()): { status: Outcome; reasons: string[]; asks: string[] } => {
     const blockers = blockersOf([...closure, ...(win?.blockers ?? [])]).filter((q) => !cancelled.has(q.id));
     const withheld = [...(win?.withheld ?? []), ...blockers.filter(withholds).map(describe)];
-    const asked = [...new Map(blockers.filter((q) => q.status === 'asked').map((q) => [q.id, q] as const)).values()];
+    const asked = [...new Map(blockers.filter((q) => isAsk(q) && !withholds(q)).map((q) => [q.id, q] as const)).values()];
     const reasons = [...withheld, ...asked.map(describe), ...(win?.deadline ? [`It changes over time, so it needs a deadline: ${win.deadline}`] : [])];
     return { status: withheld.length ? 'withheld' : asked.length || win?.deadline ? 'asks' : 'calculable', reasons, asks: asked.map((q) => q.id) };
   };
@@ -671,9 +684,9 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
       const r = R.get(q.id);
       if (conversions && u.scale !== 1) conversions.push({ kind: 'percent', quantity: q.id, from: q.unit, to: unit, factor: u.scale, author: 'olumi' });
       const law = readings.get(q.id);
-      if (conversions && law) conversions.push({ kind: 'range_law', quantity: q.id, low: q.low! * u.scale, high: q.high! * u.scale, reading: law, author: 'olumi', provisional: true });
+      if (conversions && law) conversions.push({ kind: 'range_law', quantity: q.id, low: q.low! * u.scale, high: q.high! * u.scale, range_kind: q.range_kind ?? 'plausible', domain: domainOf(q) ?? null, reading: law, author: 'olumi', provisional: true });
       const base = { id: q.id, label: q.label, unit, reading: 'state' as const }; // readings are set by `setReadings` once the subset is final
-      if (r === undefined) quantities.push({ ...base, dist: placeholders.has(q.id) ? { kind: 'fixed', value: placeholders.get(q.id)!, author: 'placeholder' } : distOf(q, u.scale) });
+      if (r === undefined) quantities.push({ ...base, dist: placeholders.has(q.id) ? { kind: 'fixed', value: placeholders.get(q.id)!, author: 'placeholder' } : distOf(q, u.scale, domainOf(q)) });
       else if (r.form === 'stock') quantities.push({ ...base, stock: { start: r.start, inflows: [...r.inflows], outflows: [...r.outflows] } });
       else if (r.form === 'effect') quantities.push({ ...base, equation: { form: 'effect', base: r.base, terms: r.terms.map((t) => ({ coefficient: t.coefficient, driver: t.driver })) } });
       else quantities.push(...lowerDefinition(base, r, (ids) => showUnit({ dims: ids.reduce((a, i) => multiply(a, U.get(i)!), { dims: {}, scale: 1 } as Unit).dims, scale: 1 })));
@@ -690,7 +703,7 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
       cmp: l.measure!.cmp, bound: l.measure!.bound, aggregation: l.measure!.aggregation, window: limitWin.get(l.id)!.win!,
     }));
     const xRiskList: XRisk[] = model.risks.filter((k) => xRisks.has(k.id)).map((k) => ({ id: k.id, occurrence: k.occurrence, severity: k.severity, effect_on: k.effect_on, mode: k.mode, from_period: riskTiming.get(k.id) ?? 0 }));
-    setReadings(quantities, xOptions, xRiskList);
+    setReadings(quantities);
     return { periods: horizon, period_unit: model.period, quantities, goals: xGoals, limits: xLimits, options: xOptions, risks: xRiskList, withheld: [] };
   };
 
@@ -703,7 +716,7 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
       if (outcome.status !== 'asks' || !win?.win || !outcome.asks.length) return;
       const x = check.kind === 'goal' ? build([check.g], [], probeOptions, placeholderFor) : build([], [check.l], probeOptions, placeholderFor);
       const target = check.kind === 'goal' ? x.goals[0] : x.limits[0];
-      for (const a of outcome.asks) {
+      for (const a of outcome.asks.filter((id) => placeholderFor.has(id))) {
         const v = placeholderFor.get(a)!;
         const one = probeMargins(x, target, new Map([[a, v]]));
         const two = probeMargins(x, target, new Map([[a, v * 2.3]]));
@@ -748,10 +761,11 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
     ...model.options.filter((o) => o.status === 'live' && optionClosure.get(o.id)!.has(id)).map((o) => o.id),
   ];
   const cancelsOf = (id: string) => [...perGoal.filter((p) => p.cancelled.includes(id)).map((p) => p.goal_id), ...perLimit.filter((p) => p.cancelled.includes(id)).map((p) => p.limit_id)];
-  result.asks = model.quantities.filter((q) => q.status === 'asked' && has(q.question))
+  const figureAsks: Ask[] = model.quantities.filter((q) => q.status === 'asked' && has(q.question))
     .map((q) => ({ quantity_id: q.id, label: q.label, unit: q.unit, question: q.question!, feeds: feedsOf(q.id), cancels_out_of: cancelsOf(q.id), edit: { op: 'fill_quantity' as const, quantity_id: q.id } }))
-    .filter((a) => a.feeds.length > 0 || a.cancels_out_of.length === 0) // an ask that cancels everywhere it reaches is never asked
-    .sort((a, b) => b.feeds.length - a.feeds.length);
+    .filter((a) => a.feeds.length > 0 || a.cancels_out_of.length === 0); // an ask that cancels everywhere it reaches is never asked
+  const readingAsks: Ask[] = [...unresolved].map(([id, question]) => ({ quantity_id: id, label: Q.get(id)!.label, unit: Q.get(id)!.unit, question, feeds: feedsOf(id), cancels_out_of: [], edit: { op: 'set_range_kind' as const, quantity_id: id } }));
+  result.asks = [...figureAsks, ...readingAsks].sort((a, b) => b.feeds.length - a.feeds.length);
   result.coaching = [
     ...(model.goals.length === 0 ? [{ record_id: '(model)', kind: 'measure' as const, question: NO_GOAL_QUESTION }] : []),
     ...model.goals.filter((g) => !has(g.measure)).map((g) => ({ record_id: g.id, kind: 'measure' as const, question: g.question ?? NO_GOAL_QUESTION })),
@@ -867,20 +881,13 @@ function lowerChange(g: CanonicalGoalT, quantities: XQuantity[], options: XOptio
 }
 
 /**
- * THE READING CONVENTION (executable.ts; DL ruling 1): a stock is state; its inflows and outflows are flows; a quantity an
- * option sets from a period after 0, or a risk changes, is a flow (its value is dated to an interval); anything that depends,
- * within one period, on a flow is a flow; everything else (derived only from states and constants) is state.
+ * THE READING CONVENTION (executable.ts; DL ruling 1, PL ruling A): STRUCTURAL ONLY. A stock is state; its inflows and
+ * outflows are flows, and so is anything that depends, within one period, on one; everything else is state. Options and
+ * risks never change a reading, so adding an option never changes another option's question.
  */
-function setReadings(quantities: XQuantity[], options: XOption[], risks: XRisk[]): void {
-  const flow = new Set<string>([
-    ...quantities.flatMap((q) => (q.stock ? [...q.stock.inflows, ...q.stock.outflows] : [])),
-    ...options.flatMap((o) => o.sets.filter((s) => s.from_period > 0).map((s) => s.quantity)),
-    ...risks.map((k) => k.effect_on),
-  ]);
-  const deps = (q: XQuantity): string[] => [
-    ...(q.equation?.form === 'definition' ? q.equation.parts : q.equation?.form === 'effect' ? [q.equation.base, ...q.equation.terms.flatMap((t) => [t.coefficient, t.driver])] : []),
-    ...options.flatMap((o) => o.sets.filter((s) => s.quantity === q.id).map((s) => s.to)),
-  ];
+function setReadings(quantities: XQuantity[]): void {
+  const flow = new Set<string>(quantities.flatMap((q) => (q.stock ? [...q.stock.inflows, ...q.stock.outflows] : [])));
+  const deps = (q: XQuantity): string[] => (q.equation?.form === 'definition' ? q.equation.parts : q.equation?.form === 'effect' ? [q.equation.base, ...q.equation.terms.flatMap((t) => [t.coefficient, t.driver])] : []);
   for (let changed = true; changed;) {
     changed = false;
     for (const q of quantities) if (!q.stock && !flow.has(q.id) && deps(q).some((d) => flow.has(d))) { flow.add(q.id); changed = true; }
@@ -891,10 +898,7 @@ function setReadings(quantities: XQuantity[], options: XOption[], risks: XRisk[]
 const FIXED_AUTHOR: Record<CanonicalQuantityT['author'], FixedAuthor> = { person: 'person', olumi: 'olumi', structure: 'structure' };
 
 /** A figure → its description: fixed (with its author), or a range whose law S2 takes from the ruled conversion. */
-function distOf(q: CanonicalQuantityT, scale: number): Dist {
-  const s = (v: number) => v * scale;
-  if (q.low !== null && q.high !== null && q.low !== q.high) {
-    return { kind: 'range', low: s(q.low), high: s(q.high), ...(q.value !== null ? { mode: s(q.value) } : {}), basis: q.author === 'person' ? 'person_range' : 'olumi_estimate' };
-  }
-  return { kind: 'fixed', value: s(q.value ?? q.low!), author: FIXED_AUTHOR[q.author] };
+function distOf(q: CanonicalQuantityT, scale: number, domain?: Domain): Dist {
+  if (q.low !== null && q.high !== null && q.low !== q.high) return rangeDistOf(q, scale, domain);
+  return { kind: 'fixed', value: (q.value ?? q.low!) * scale, author: FIXED_AUTHOR[q.author] };
 }
