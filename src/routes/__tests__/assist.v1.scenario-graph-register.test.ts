@@ -96,7 +96,7 @@ import { GRAPH_MAX_EDGES, GRAPH_MAX_NODES } from "../../config/graphCaps.js";
 import { resolveCeeRateLimit } from "../../cee/config/limits.js";
 import { RATE_BUCKET_REGISTRY } from "../../cee/config/limits.js";
 import { checkPersistedGraphInvariants } from "../../orchestrator-v5/persisted-graph-invariants.js";
-import { currentTurnFenceSlot, TurnFenceRejectedError } from "../../orchestrator-v5/session/turn-fence.js";
+import { currentTurnFenceSlot, runWithTurnFence, TurnFenceRejectedError } from "../../orchestrator-v5/session/turn-fence.js";
 import { registrationRequestHash, registrationTurnId } from "../../orchestrator-v5/graph-registration/registration-identity.js";
 
 
@@ -1195,6 +1195,34 @@ describe("register — the write is ordered by the turn fence", () => {
     expect(claimTurnFence).toHaveBeenCalledTimes(1);
     expect(claimTurnFence).toHaveBeenCalledWith(SID, expectedTurn);
     expect(claimTurnFence.mock.invocationCallOrder[0]).toBeLessThan(append.mock.invocationCallOrder[0]);
+    await app.close();
+  });
+
+  // CONTRAST is the row above: CEE's own write with NO turn handle bound (every Agent dispatch but the core turn's) claims
+  // its own place, once, for its own identity.
+  it("DL 93d79c3e (Codex r1 on #3704): CEE's write under a core turn's ADMITTED handle commits under THAT handle and claims nothing of its own", async () => {
+    const seen: Array<ReturnType<typeof currentTurnFenceSlot>> = [];
+    append.mockImplementation(async () => { seen.push(currentTurnFenceSlot()); return { id: "turn-1" }; });
+    const app = await buildApp();
+    const turn = { scenarioId: SID, turnId: "core-turn-1", generation: 7 };
+    const res = await runWithTurnFence(turn, () => post(app, SID, { graph: IMPORTED, operation_id: OP }));
+    expect(res.statusCode, res.body).toBe(200);
+    expect(seen[0]?.handle, "the commit's gate reads the core turn's row, where its Stop is recorded").toEqual(turn);
+    expect(claimTurnFence).not.toHaveBeenCalled();
+    // The registration's own identity still names the write (its replay and version are its operation's).
+    expect(append.mock.calls[0][0].turn_id).toBe(registrationTurnId(SID, OP));
+    await app.close();
+  });
+
+  it("a turn handle bound for ANOTHER scenario is not this write's: it claims its own place", async () => {
+    const seen: Array<ReturnType<typeof currentTurnFenceSlot>> = [];
+    append.mockImplementation(async () => { seen.push(currentTurnFenceSlot()); return { id: "turn-1" }; });
+    const app = await buildApp();
+    const res = await runWithTurnFence({ scenarioId: "9e8d7c6b-5a4f-4e3d-8c2b-1a0f9e8d7c6b", turnId: "other", generation: 7 },
+      () => post(app, SID, { graph: IMPORTED, operation_id: OP }));
+    expect(res.statusCode, res.body).toBe(200);
+    expect(seen[0]?.handle?.generation).toBe(41);
+    expect(claimTurnFence).toHaveBeenCalledWith(SID, registrationTurnId(SID, OP));
     await app.close();
   });
 

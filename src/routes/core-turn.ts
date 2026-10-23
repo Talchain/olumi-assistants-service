@@ -61,6 +61,7 @@ import type { Restructure } from '../orchestrator-v5/path-b/tools/goal-path.js';
 import { livingViewOf } from '../orchestrator-v5/path-b/living-model/view.js';
 import { runAsAgentSubturn } from '../orchestrator-v5/session/agent-subturn-context.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
+import { runWithTurnFence, unclaimedTurnFenceHandle, type TurnFenceHandle } from '../orchestrator-v5/session/turn-fence.js';
 import { parsePendingAction, PENDING_ACTIONS_PER_TURN_CAP, type PendingAction } from '../orchestrator-v5/session/pending-action.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
 import {
@@ -443,12 +444,21 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       }
       catch (err) { log.warn({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'core-turn: claim release failed'); return false; }
     };
+    /**
+     * ⭐ STOP (DL 93d79c3e 09:40Z; Lenses on 50f76df0: a stopped core turn still committed). Once admitted (below) the turn holds
+     * its place in the scenario's fence, so an explicit Stop finds it and records its tombstone. Each graph write it makes then
+     * runs under that place (`fenced`): the register route commits it under the turn's handle, and the commit's own transaction
+     * refuses it once the turn is stopped (Codex r1 on #3704: never a check before the write). A claim that fails leaves an
+     * UNCLAIMED handle, so the write is refused, as on every other ingress (#759), never let through unfenced.
+     */
+    let fence: TurnFenceHandle | undefined;
+    const fenced = <T>(write: () => Promise<T>): Promise<T> => (fence === undefined ? write() : runWithTurnFence(fence, write));
     const readingDispatch: InternalDispatch = readCache.dispatch;
     const countingDispatch: InternalDispatch = async (path, b) => {
       const sendIt = async () => promoteRevisionConflictResponse(await readingDispatch(path, b));
       if (path.endsWith('/graph/register')) {
         writesDispatched += 1;
-        return undoRefusedWrite(sendIt);
+        return undoRefusedWrite(() => fenced(sendIt));
       }
       // A v2 turn can commit through several subdoors before a later refusal: its 409 cannot prove nothing was written.
       if (path === '/orchestrate/v2/turn') {
@@ -530,6 +540,14 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         && heldAtStart.some((h) => heldProposalId(h) === declinedProposal) ? declinedProposal : undefined;
       if ((approvedProposal !== undefined && press === undefined) || (declinedProposal !== undefined && !coreOwns && declinedCardOnly === undefined)) {
         return await refuseUnrun(409, 'CARD_NOT_WAITING', 'That change is no longer waiting for your approval. Nothing in your model was changed.');
+      }
+
+      if (typeof store.claimTurnFence === 'function') {
+        try { fence = (await store.claimTurnFence(scenarioId, String(turnId))) ?? unclaimedTurnFenceHandle(scenarioId, String(turnId)); }
+        catch (err) {
+          log.error({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'core-turn: fence claim threw; this turn is UNCLAIMED and its graph writes are refused');
+          fence = unclaimedTurnFenceHandle(scenarioId, String(turnId));
+        }
       }
 
       // ── THE TURN'S CONTEXT: the person's own words, the selection, the Challenge. ───────────────────────────────────────
