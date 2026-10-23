@@ -1,3 +1,4 @@
+import { goalDependencyCauses, goalDependencyWords } from '../admission/target-testability.js';
 import { linkDefaultAssumptionsOf, readLinkDefaultAssumptions, type LinkDefaultAssumptions } from '../../cee/magnitude/link-default-assumptions.js';
 import { readRecordedRunQuestion, RUN_QUESTION_EVIDENCE_KEY } from '../tools/handlers/run-input-snapshot.js';
 import { goalHorizonVerdict, withholdGoalFiguresForUntestedHorizon, withholdOptionsNotInPlaceAtPeriodEnd, withChanceReadbackWithheld } from './goal-horizon-verdict.js';
@@ -46,7 +47,7 @@ import {
   GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_WITHHELD_CODES, GOAL_FIGURES_USER_EFFECT_CLAMPED, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
   readOptionResultSources,
 } from '../../orchestrator/context/option-result-source.js';
-import { withholdOptionGoalFigures, withholdStatusQuoIntervals, type PerLimitVerdict } from '../../orchestrator/context/constraint-feasibility.js';
+import { withholdOptionGoalFigures, withholdOptionLimitScores, withholdStatusQuoIntervals, type PerLimitVerdict } from '../../orchestrator/context/constraint-feasibility.js';
 import { sayFigure, sayFigureAsWritten } from '../agent-lane/say-figure.js';
 import { midSentence } from '../agent-lane/guidance/render.js';
 import { classifyUnitScaleClass, UNIT_SCALE_CLASS_TOKENS } from '../../cee/draft/records/unit-scale-class.js';
@@ -670,7 +671,7 @@ export function goalChanceLicenceOf(
   envelope: unknown, graph: unknown, goalId: unknown, earned: (optionId: string, p: 0 | 1) => boolean = () => false,
   sentThreshold?: SentGoalThreshold, horizonGraph: unknown = graph, constraints: GoalChanceConstraintInputs = {},
 ): GoalChanceLicence | null {
-  if (!isRec(envelope) || goalChanceTargetCause(graph, goalId) !== null) return null;
+  if (!isRec(envelope) || goalChanceTargetCause(graph, goalId) !== null || goalDependencyCauses(graph, goalId).length > 0) return null;
   const evaluatedScope = isRec(constraints.sentRun) && constraints.sentRun.goal_node_id === goalId
     && constraints.evaluatedScope?.dispatched_input_digest === sentDigest(constraints.sentRun) ? constraints.evaluatedScope : undefined;
   if (evaluatedScope?.status === 'invalid') return null;
@@ -1652,7 +1653,20 @@ export function withGoalChanceLicence<E>(
   sentThreshold?: SentGoalThreshold, horizonGraph: unknown = graph, constraints: GoalChanceConstraintInputs = {},
 ): E {
   // B2 (check BLOCKING 3): a deadline goal's Run that did not test the HELD target withholds every option's chance, with words.
-  const checked = withSentTargetWithheld(envelope, graph, goalId, constraints.sentRun);
+  let dependencyChecked = envelope;
+  const heldTargets = new Set((Array.isArray(constraints.storedConstraints) ? constraints.storedConstraints.filter(isRec) : [])
+    .filter(r => r.role === GOAL_TARGET_ROLE && goalDependencyCauses(graph, r.node_id).length > 0).map(r => String(r.constraint_id)));
+  const options = isRec(envelope) ? new Set(readOptionResultSources(envelope).flat().flatMap(r =>
+    typeof r.option_id === 'string' ? [r.option_id] : typeof r.id === 'string' ? [r.id] : [])) : new Set<string>();
+  // Remove only affected target marginals and the full joint. Other targets' own chance stays available.
+  if (heldTargets.size > 0) dependencyChecked = withholdOptionLimitScores(dependencyChecked, new Map([...heldTargets].map(id => [id, options])));
+  if (goalDependencyCauses(graph, goalId).length > 0 && options.size > 0) dependencyChecked = withholdOptionGoalFigures(dependencyChecked, options, {
+    code: GOAL_FIGURES_TARGET_NOT_TESTABLE, severity: 'warning', message: goalDependencyWords(graph, goalId),
+    option_ids: [...options], node_ids: [goalId], constraint_ids: [...heldTargets].filter(id =>
+      (constraints.storedConstraints as unknown[]).some(r => isRec(r) && r.constraint_id === id && r.node_id === goalId)),
+    detail: { reason: 'model_dependency_unresolved', rests_on: goalDependencyCauses(graph, goalId) },
+  }, { keepOutcome: true, keepOrdering: true });
+  const checked = withSentTargetWithheld(dependencyChecked, graph, goalId, constraints.sentRun);
   const licence = goalTargetStateOf(checked, graph, goalId, earned, sentThreshold, horizonGraph, constraints);
   if (licence === null || !isRec(checked)) return checked;
   // Recovery Batch C, amendment 1 (DL contract ruling 3): a status quo the licence records as BY ASSUMPTION carries no

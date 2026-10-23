@@ -46,7 +46,7 @@ export type WithheldReason =
   | 'identity_not_in_slice' | 'identity_part_unknown' | 'identity_unit_mismatch' | 'identity_inconsistent'
   | 'identity_other_cause' | 'identity_contradicted' | 'identity_restated'
   | 'risk_occurrence_unknown' | 'risk_unattributed' | 'risk_not_in_slice' | 'risk_window_not_goal_window' | 'limit_not_in_slice'
-  | 'target_not_theirs';
+  | 'target_not_theirs' | 'goal_scope_unknown';
 
 /** A definition that withholds the chance when its carrier is on the goal's path (it cannot be worked out as stated). */
 const IDENTITY_REFUSED: ReadonlySet<WithheldReason> = new Set(['identity_not_in_slice', 'identity_part_unknown', 'identity_unit_mismatch', 'identity_inconsistent']);
@@ -348,6 +348,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     let goal: { id: string; cap: number; unit: string } | undefined;
     let goalHeld: WithheldReason | undefined;
     let goalNode: Rec | undefined;
+    const heldBefore = withheld.length;
     goalNode = { id: aim.id, kind: 'goal', label: aim.text, ...(aim.quote !== null ? { source_quote: aim.quote } : {}) };
     nodes.push(goalNode);
     const t = aim.target;
@@ -449,6 +450,9 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     // Retain a bounded window only without a scored target; a visible chance keeps its existing horizon disclosure.
     if (window !== undefined && window > 0 && window <= 120 && goalNode.goal_threshold === undefined
       && goalNode.goal_target_basis === undefined) goalNode.goal_horizon_months = window;
+    if (t?.reference === null || t?.period_kind === null) hold(aim.id, 'goal_scope_unknown');
+    const targetHolds = withheld.slice(heldBefore).filter(w => w.id === aim.id);
+    if (targetHolds.length > 0) goalNode.goal_rests_on = targetHolds;
     readings.set(aim.id, { aim, node: goalNode!, goal, held: goalHeld });
     if (aim.id !== primaryAimId) {
       goalNode!.kind = 'factor';
@@ -940,6 +944,17 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     goalNode.nonlinear_identity = { operation: 'sum', factor_ids: [exactSum.today, exactSum.lever], stated_in_brief: false };
   }
 
+  // Missing forecast or an off-frame limit must not fabricate a budget pass or refuse unrelated calculations.
+  // Preserve the saved limit; the existing Run projection removes its scoring frame and withholds the full joint.
+  const connected = new Set(edges.flatMap(e => [e.from, e.to]));
+  for (const c of goal_constraints) if (!('role' in c) && (!connected.has(c.node_id) || !current.has(c.node_id) || c.value < 0 || c.value > caps.get(c.node_id)!)) {
+    Object.assign(c, { retained_unresolved_limit: { state: 'unscored', role: 'original', reason: 'retained_limit_quantity_unresolved',
+      previous_constraint_id: c.constraint_id, proposed_constraint_ids: [], question: RETAINED_LIMIT_QUANTITY_QUESTION } });
+    hold(c.node_id, 'limit_not_in_slice');
+    const node = nodes.find(n => n.id === c.node_id);
+    if (node !== undefined && node.observed_state === undefined && node.nonlinear_identity === undefined) node.analysis_participation = 'retained_excluded';
+  }
+
   const restsOn: (Withheld & { readonly applies_to?: readonly string[] })[] = [];
   // A chance rests on everything on the goal's path. Anything there that this slice left out of the engine graph (an
   // unsigned or unplaceable link, an option setting it could not convert) would change the calculation, so the chance is
@@ -965,7 +980,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     // is scored on its level (PLoT drops a time limit on an outcome), so each stays a factor; the living model keeps the label.
     const anchored = (goalNode.observed_state as Rec | undefined)?.source !== undefined;
     for (const f of model.factors) if (f.kind === 'outcome' && anchored && onPath.has(f.id) && edges.some((e) => e.to === f.id)
-      && !setsFactor.has(f.id) && !goal_constraints.some((c) => c.node_id === f.id)) {
+      && !setsFactor.has(f.id) && !goal_constraints.some((c) => c.node_id === f.id && c.retained_unresolved_limit === undefined)) {
       const node = nodes.find((n) => n.id === f.id)!;
       node.kind = 'outcome';
       delete node.category;
@@ -989,7 +1004,10 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     const conditioned = model.conditions.filter((c) => c.role === 'prerequisite' && c.applies_to.some((id) => onPath.has(id) || pathLinks.has(id)));
     for (const c of conditioned) hold(`condition:${c.text}`, 'condition_not_in_slice');
     if (leftOut || conditioned.length > 0) {
-      for (const k of Object.keys(goalNode)) if (k.startsWith('goal_threshold') || k === 'goal_direction') delete goalNode[k];
+      // Preserve the complete stated target. Its own permission record, not erasing data, withholds its chance.
+      goalNode.goal_rests_on = [...(Array.isArray(goalNode.goal_rests_on) ? goalNode.goal_rests_on : []),
+        ...causes, ...dropped.map(id => ({ id, reason: 'setting_not_convertible' })),
+        ...conditioned.map(c => ({ id: `condition:${c.text}`, reason: 'condition_not_in_slice', applies_to: [...c.applies_to] }))];
       hold(goal.id, 'chance_rests_on_withheld');
       restsOn.push(...causes, ...dropped.map((id) => ({ id, reason: 'setting_not_convertible' as const })),
         ...conditioned.map((c) => ({ id: `condition:${c.text}`, reason: 'condition_not_in_slice' as const, applies_to: [...c.applies_to] })));
@@ -997,26 +1015,15 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   }
 
   const targetReadings = [...readings.values()].filter(r => r.aim.target !== null);
-  if (targetReadings.length > 1) for (const { aim, node, goal } of targetReadings) {
+  if (readings.size > 1) for (const { aim, node, goal } of targetReadings) {
     const lt = aimTargetReading(aim);
     const raw = typeof lt === 'string' ? undefined : lt;
     if (raw === undefined) continue; // Qualitative/unresolved targets stay on the Living Model; never invent a constraint value.
     goal_constraints.push({ constraint_id: `target_${aim.id}`, node_id: aim.id, operator: raw.comparator.startsWith('<') ? '<=' : '>=',
       ...(raw.comparator === '<' || raw.comparator === '>' ? { operator_as_stated: raw.comparator } : {}),
       value: raw.value, label: aim.text, provenance: stated(aim.source) ? 'explicit' : 'inferred', role: 'goal_target',
-      ...(goal !== undefined && node.goal_threshold !== undefined ? { value_frame: 'level' } : {}),
+      ...(goal !== undefined && node.goal_threshold !== undefined && node.goal_rests_on === undefined ? { value_frame: 'level' } : {}),
       ...(raw.unit !== null ? { unit: raw.unit } : {}), ...(aim.quote !== null && aim.quote.length <= 200 ? { source_quote: aim.quote } : {}) });
-  }
-
-  // Missing forecast or an off-frame limit must not fabricate a budget pass or refuse unrelated calculations.
-  // Preserve the saved limit; the existing Run projection removes its scoring frame and withholds the full joint.
-  const connected = new Set(edges.flatMap(e => [e.from, e.to]));
-  for (const c of goal_constraints) if (!('role' in c) && (!connected.has(c.node_id) || !current.has(c.node_id) || c.value < 0 || c.value > caps.get(c.node_id)!)) {
-    Object.assign(c, { retained_unresolved_limit: { state: 'unscored', role: 'original', reason: 'retained_limit_quantity_unresolved',
-      previous_constraint_id: c.constraint_id, proposed_constraint_ids: [], question: RETAINED_LIMIT_QUANTITY_QUESTION } });
-    hold(c.node_id, 'limit_not_in_slice');
-    const node = nodes.find(n => n.id === c.node_id);
-    if (node !== undefined && node.observed_state === undefined && node.nonlinear_identity === undefined) node.analysis_participation = 'retained_excluded';
   }
 
   const frames = new Map<string, Frame>(model.factors.flatMap((f) => (caps.has(f.id) ? [[f.id, { cap: caps.get(f.id)!, unit: f.unit }] as const] : [])));
