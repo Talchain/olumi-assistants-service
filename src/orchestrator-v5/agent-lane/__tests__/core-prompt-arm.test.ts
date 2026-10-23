@@ -70,7 +70,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(createHash('sha256').update(CORE_REPLY_RULES, 'utf8').digest('hex')).toBe('9607f2b0d95df9e7be7e040c975cd13a12ba7f60120d39c8c5fab6d2016d87dc'); // 23 Oct (ALPHA): the reply rules for the model program; P1: at most three questions a reply, each once.
     // The model-program drafter's text and its completion request (23 Oct, P1–P5: three questions at most, every option reaches
     // every measured goal, a deadline is its goal's window, options named in full). Prompt text changes only with this pin.
-    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('debeab1cfd0029d1c888b02b654bcc0d36fdde135962b32fd444dd34fcaa0bed');
+    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('339cb55c11c8a912a696a43843b264f278055eeb6306cc5e5eb3737e941f78dd');
     expect(createHash('sha256').update(COMPLETION_PREFIX, 'utf8').digest('hex')).toBe('492719690cf71ab3408d0d6c43b52f2c34bc9f72690b7fa776d2ba4ad569214c');
     expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('bed04fc58a01dbd02d8f5c8aa6ef171731a356c1cde47a85e0cd64be35416653'); // 23 Oct (DL 93d79c3e, C2 double prime): a definition's parts are factors with levels, never another definition; a STATED per-unit effect is a sized link. 22 Oct: every stated goal saved in their words, never approximated (Claude r1 on #3670); + a calendar date is Olumi's labelled reading
     // The retired constants are gone from both modules: no route can send the accreted text again.
