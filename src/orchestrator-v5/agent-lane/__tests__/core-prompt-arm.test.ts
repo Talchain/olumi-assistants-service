@@ -27,20 +27,20 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
   });
 
   it('ALPHA: the model-program prompt, each section once, the purpose once and the reply rules last; the coach template and the Living Model host rules are gone', () => {
-    for (const h of ['HOW THE MODEL WORKS', 'FIRST MODEL', 'ANSWERS AND CHANGES', 'RESULTS', 'WHEN NOTHING CAN BE CALCULATED YET', 'WORDS',
+    for (const h of ['HOW THE MODEL WORKS', 'FIRST MODEL', 'ANSWERS AND CHANGES', 'RESULTS', 'CALCULATION BOUNDARY', 'WHEN NOTHING CAN BE CALCULATED YET', 'WORDS',
       'EXAMPLE (a first model; synthetic)']) expect(count(b, `\n\n${h}\n`), h).toBe(1);
     for (const part of [OLUMI_PURPOSE_INSTRUCTION, CORE_REPLY_RULES]) expect(count(b, part)).toBe(1);
     expect(b.endsWith(CORE_REPLY_RULES)).toBe(true);
     for (const gone of [HOST_SCIENCE_AND_SOURCE_RULES, GOAL_CHANCE_RANKING_INSTRUCTION, MODEL_RELATIVE_NAMING_INSTRUCTION, '\nTRUTH\n', '\nREASONING\n',
-      'POLYMATH COACHING', 'CALCULATION BOUNDARY', 'saved_run_options', 'goal_chance_licence', 'decision_sensitivity', 'run_facts']) expect(b, gone.slice(0, 60)).not.toContain(gone);
-    // Shorter than the 29,512 characters it replaces (staging 646d374e).
-    expect(b.length).toBeLessThan(10_000);
+      'POLYMATH COACHING', 'saved_run_options', 'goal_chance_licence', 'decision_sensitivity', 'run_facts']) expect(b, gone.slice(0, 60)).not.toContain(gone);
+    // Under half the 29,512 characters it replaces (staging 646d374e).
+    expect(b.length).toBeLessThan(29_512 / 2);
   });
 
   it('the sent core instructions, byte for byte, plus the canvas-coaching sentence once (the route row in core-turn.route.test.ts pins the same bytes as the SDK receives them)', () => {
     expect(b.split(NOTE_ON_ITEM_INSTRUCTION)).toHaveLength(2);
     // 23 Oct (ALPHA): the model-program prompt replaces arm B's assembled reference (055841368f…, 29,512 characters sent).
-    expect(createHash('sha256').update(b, 'utf8').digest('hex')).toBe('9e502d36340396c502cb782bb2edfd376f0c32c89e27da8c0a8b3031312c655c');
+    expect(createHash('sha256').update(b, 'utf8').digest('hex')).toBe('08747cdea15ebf05c863822fb8776ef4a4b34f7ac001270018a1d90b529fd6a9');
     // Candidate-3 witness kept (21 Oct): WHEN to build. Text only, not behaviour.
     expect(b).toContain('draft the first model from their brief in that same turn, even when figures are missing');
   });
@@ -90,7 +90,8 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       'Then give ONE next step: replace an Olumi estimate the chance rests on with their own figure, find the input a threshold names, or test the assumption the result rests on. Call an input the one that matters most only when the result measured that.',
       // 3. edits in chat, never a figure invented for them; a loose figure is theirs with Olumi's labelled range
       'never invent a figure for them, and never change the model because of discussion alone.',
-      'A loose figure ("about 20") goes in as their figure with a range that reads their word (18 to 22): say that the range is Olumi\'s reading, for them to correct.',
+      // Codex r1 BLOCK on #3707: never a range Olumi invents around their loose figure; ask for theirs.
+      'A loose figure ("about 20") goes in exactly as they said it: their figure, 20, with their words quoted so the "about" stays visible. Never add a range or bounds they did not give. If that figure feeds a goal or a limit, ask what range they would put on it.',
       'A what-if question is not a change: answer from the current result, and offer to change the figure if they want it worked out.',
       'Run a new calculation only when they ask for one; a saved change may already bring its result: use that.',
       // 4. nothing calculable: what is missing in one sentence, and a science-grounded activity
