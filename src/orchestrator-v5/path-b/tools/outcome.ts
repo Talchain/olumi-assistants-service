@@ -28,7 +28,12 @@ export type DraftVerification =
   | { readonly check: 'revision_mismatch'; readonly field: 'graph_hash'; readonly expected: string | null; readonly actual: string | null }
   | { readonly check: 'postimage_diff'; readonly keys: readonly string[] }
   | { readonly check: 'readback_unavailable'; readonly code: string };
-export type ToolOutcome = z.infer<typeof ToolOutcomeSchema> & { readonly [OUTCOME_TRACE]?: Pick<TraceRow, 'draft_verification'> };
+/** What the host did that the AI is never told (R7): the kernel's authorship decisions, for the route's turn log only. */
+export interface OutcomeTrace extends Pick<TraceRow, 'draft_verification'> { readonly relabelled?: readonly { readonly id: string; readonly was: string }[] }
+export type ToolOutcome = z.infer<typeof ToolOutcomeSchema> & { readonly [OUTCOME_TRACE]?: OutcomeTrace };
+/** `outcome` with `trace` beside it, never in the JSON the AI reads. */
+export const withTrace = (outcome: ToolOutcome, trace: OutcomeTrace): ToolOutcome =>
+  Object.defineProperty(outcome, OUTCOME_TRACE, { value: { ...outcome[OUTCOME_TRACE], ...trace } });
 
 export const ok = (data: Record<string, unknown>, effect: { readonly mutated?: boolean; readonly ran?: boolean } = {}): ToolOutcome =>
   ({ status: 'ok', mutated: effect.mutated === true, ran: effect.ran === true, data });
@@ -54,7 +59,7 @@ export interface TraceRow {
 export function traceRow(name: string, outcome: ToolOutcome): TraceRow {
   return {
     name,
-    ...outcome[OUTCOME_TRACE],
+    ...(outcome[OUTCOME_TRACE]?.draft_verification !== undefined ? { draft_verification: outcome[OUTCOME_TRACE].draft_verification } : {}),
     ok: outcome.status === 'ok',
     mutated: outcome.status === 'ok' ? outcome.mutated : outcome.status === 'unavailable' && outcome.write === 'unknown' ? null : false,
     outcome: outcome.status,

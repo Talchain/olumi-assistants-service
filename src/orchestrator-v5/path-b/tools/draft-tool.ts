@@ -24,7 +24,7 @@ import { mapLivingModel } from '../living-model/mapper.js';
 import { hasGaps, structureGaps } from '../living-model/structure.js';
 import type { CritiqueT } from '../../agent-lane/core/model-critic.js';
 import { isNoModelYet, isSavedRead, readSaved } from './context-tool.js';
-import { ok, refused, OUTCOME_TRACE, type ToolOutcome } from './outcome.js';
+import { ok, refused, OUTCOME_TRACE, withTrace, type ToolOutcome } from './outcome.js';
 import { writeCorePostimage } from './core-write.js';
 import { blockersOf, corePostimage, KEPT_AS_REFUSED, personContentLost, repairOf, REPAIR_DRAFT, REPAIRS, selfCheck, STILL_ASK, type Restructure } from './goal-path.js';
 import { inTheUsersWords, type TypedWords } from './user-words.js';
@@ -142,10 +142,11 @@ async function constructUnrecorded(deps: DraftDeps, ctx: DraftContext, args: Bui
   const { receipt, after } = write;
   try { deps.onModelRegistered?.(after.graph); } catch { /* an observer never decides the outcome */ }
   const critique = await critiqued;
-  return ok({
+  // The kernel's authorship decisions are the host's, applied to the saved model; the AI is not told them (R7), only the log is.
+  return withTrace(ok({
     provisional: 'olumi', model_version: receipt, revision: { graph_hash: after.graphHash, graph_identity_hash: after.identity },
-    draft: { withheld: mapped.withheld, assumed: mapped.assumed, relabelled: kernelled.relabelled, ...(hasGaps(gaps) ? { gaps } : {}) },
+    draft: { withheld: mapped.withheld, assumed: mapped.assumed, ...(hasGaps(gaps) ? { gaps } : {}) },
     run_ready: blockers.length === 0, ...(blockers.length > 0 ? { blockers, note: STILL_ASK } : {}),
     ...(critique !== undefined ? { review: { critique, note: REVIEW_AFTER_SAVE } } : {}),
-  }, { mutated: true });
+  }, { mutated: true }), { relabelled: kernelled.relabelled });
 }

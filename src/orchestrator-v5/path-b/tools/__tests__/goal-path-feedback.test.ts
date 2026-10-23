@@ -465,6 +465,20 @@ describe('the SDK tools: the route\'s repairs per turn; a refusal never makes th
     expect(personContentLost(theirs, { ...theirs, views: [] })).toEqual(['views:Sam: thinks push is too risky']);
   });
 
+  it('Codex r1 on #3694: the kept refused change\'s authorship decisions still reach the turn log (the trace survives the fallback)', async () => {
+    const p = product(KNOWN_ANSWER);
+    const t = turn(p);
+    const args = (model: LivingModelT) => ({ public_label: 'Update the model', basis: 'The person asked for it.', model, remove: [] as string[] });
+    // The refused change adds a "user" item in words nobody said: the kernel relabels it.
+    const unsaid = { ...withCondition('prerequisite'), factors: [...withCondition('prerequisite').factors,
+      { ...KNOWN_ANSWER.factors[0]!, id: 'h', label: 'h', quote: 'h is about 3', value: 3 }] };
+    await call(t.propose, args(unsaid));
+    const out = await call(t.propose, args(withoutHold(withCondition('challenge'))));
+    expect(out).toMatchObject({ status: 'ok', data: { restructure: { kept: 'refused_call', lost: ['options:hold'] } } });
+    expect(JSON.stringify(out)).not.toContain('relabelled');
+    expect(t.calls.at(-1)![1].check?.relabelled).toEqual([{ id: 'h', was: 'user' }]);
+  });
+
   it('DL (b): a change\'s retry that leaves out the person\'s item is not carded; the refused change is', async () => {
     const p = product(KNOWN_ANSWER);
     const t = turn(p);

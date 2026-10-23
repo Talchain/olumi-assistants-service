@@ -14,6 +14,7 @@ import { mapLivingModel } from '../../living-model/mapper.js';
 import { KNOWN_ANSWER, OPTION_EFFECTS } from '../../living-model/__tests__/fixtures.js';
 import { changeOperationId } from '../core-write.js';
 import { applyLivingChange, proposeLivingChange } from '../living-change.js';
+import { OUTCOME_TRACE } from '../outcome.js';
 import { isChangeProposal } from '../change-tools.js';
 import type { Rec } from './fixtures.js';
 import { applyKernel } from '../../living-model/kernel.js';
@@ -102,7 +103,9 @@ describe('a core scenario changes through its living model', () => {
     // The brief's words are gone from this turn's window: only the saved model vouches for the carried-over items.
     const out = await proposeLivingChange({ dispatch: p.dispatch, proposals: new ProposalStore() }, { ...ctx, verified_user_messages: [] }, args(next));
     const data = (out as { data: Rec }).data;
-    expect(data.relabelled).toEqual([{ id: 'h', was: 'user' }]);
+    // R7 (DL 93d79c3e, C2): the relabel is the host's, applied to the card (below); the AI's JSON never carries it, the trace does.
+    expect(data).not.toHaveProperty('relabelled');
+    expect(out[OUTCOME_TRACE]?.relabelled).toEqual([{ id: 'h', was: 'user' }]);
     const after = (data.changes as Rec[]);
     expect(after.find((c) => c.id === 'h')).toMatchObject({ change: 'add', after: { source: 'unverified' } });
     expect(after.find((c) => c.id === 'f')).toMatchObject({ after: { source: 'user', value: 0.6 } });
@@ -350,7 +353,7 @@ describe('DL 22 Oct (Lenses\' step 3): the person\'s approved chat correction is
       source: 'user', party: null, quote: 'Also m is about 2.' });
     const out = await proposeLivingChange({ dispatch: p.dispatch, proposals }, later, args(next));
     expect(out.status, JSON.stringify(out)).toBe('ok');
-    expect(((out as { data: Rec }).data.relabelled as Rec[]).map((r) => r.id)).not.toContain('f');
+    expect((out[OUTCOME_TRACE]?.relabelled ?? []).map((r) => r.id)).not.toContain('f');
     await applyLivingChange({ dispatch: p.dispatch, proposals }, later, String((out as { data: Rec }).data.proposal_id));
     expect(factorOf(p.saved(), 'f')).toMatchObject({ source: 'user', said_in: 'chat' });
     expect(nodeOf(p.saved(), 'f').observed_state).toMatchObject({ source: 'user_override', raw_value: 0.6 });
