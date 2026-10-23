@@ -295,9 +295,12 @@ describe('the model-program turn on the real core route', () => {
     expect(drafted.model_program).toMatchObject({ readback: { read: true, canonical_identical: true, runs_identical: true, seed_identical: true } });
     const goalOf = (run: Json, option: string) => (run.result.chances as Json[]).find((o) => o.option_id === option)!.per_goal[0];
     const run1 = persisted!.living_model.runs[0] as Json;
-    // Known answers on 10,000 draws: carry on exactly 0 (330 < 340); the promotion Φ(1.4434) = 0.92554 (Wilson half-width 0.0051).
+    // Known answers on 10,000 draws: carry on exactly 0 (330 < 340); the promotion Φ(1.4434) = 0.92554. Every run draws a fresh
+    // scenario id, so a fresh seed: the bound is 4.5 standard errors of a 10,000-draw estimate at the known answer (#3712 CI:
+    // the old fixed bounds, 2.5–2.9 standard errors, failed in 1 and 5 of 300 random seeds on correct code).
+    const bound = (p: number) => 4.5 * Math.sqrt((p * (1 - p)) / RUN_DRAWS);
     expect([goalOf(run1, 'carry_on').chance, goalOf(run1, 'carry_on').precision_95]).toEqual([0, [0, 0]]);
-    expect(Math.abs(goalOf(run1, 'promotion').chance - 0.92554)).toBeLessThan(0.0075);
+    expect(Math.abs(goalOf(run1, 'promotion').chance - 0.92554)).toBeLessThan(bound(0.92554));
     expect((run1.result.chances as Json[]).map((o) => [o.option_id, (o.within_limits as Json).chance])).toEqual([['promotion', 1], ['carry_on', 1]]);
 
     // Change ONE input on its card: leavers 10 → 12. The promotion now needs an effect of 16/3: 1 − Φ(0.2887) = 0.38641.
@@ -310,7 +313,7 @@ describe('the model-program turn on the real core route', () => {
     const run2 = persisted!.living_model.runs[1] as Json;
     expect(run2.receipt.revision_digest).toBe(revisionDigest(m2, persisted!.living_model.person_words));
     expect(goalOf(run2, 'carry_on').chance).toBe(0);
-    expect(Math.abs(goalOf(run2, 'promotion').chance - 0.38641)).toBeLessThan(0.012);
+    expect(Math.abs(goalOf(run2, 'promotion').chance - 0.38641)).toBeLessThan(bound(0.38641));
     expect(card.json().canonical_analysis_view.run.run_id).toBe(run2.run_id);
 
     // Cold reopen: the SAME stored result, Run id and digest, from the stored JSON alone in a fresh module.
