@@ -6,6 +6,7 @@
  * save → readback → cold reopen identity row with its contrast control.
  */
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
@@ -550,6 +551,95 @@ describe('the model-program turn on the real core route', () => {
     expect(define(mixed, 380, 4)).toMatchObject({ ok: true });
     expect(define(mixed, 60, 4)).toMatchObject({ ok: false, reason: expect.stringMatching(/do not state that target/) });
     expect(define('At least 380 loaves a week within 2 months.', 380, 2)).toMatchObject({ ok: false, reason: expect.stringMatching(/do not state that deadline in weeks/) });
+  });
+
+  it('DL 23 Oct (mechanism completion, the alpha3 hiring read): the measure they name gets Olumi\'s mechanism on the same card; their 10% and deadline go back onto the aim; a figure only they know is ASKED, then the chance appears', async () => {
+    const saved = JSON.parse(readFileSync(new URL('./hiring-alpha3.saved.json', import.meta.url), 'utf8')) as { brief: string; canonical: CanonicalModelT };
+    replies = [JSON.stringify(saved.canonical)];
+    expect((await turn({ message: saved.brief })).json().model_program.saved).toBe(true);
+    const before = JSON.parse(JSON.stringify(persisted!.living_model.canonical)) as CanonicalModelT;
+    expect(before.goals.find((g) => g.id === 'increase_productivity')!.measure).toBeNull(); // costs-only: the aim has no measure
+    const words = 'We measure productivity by the features we ship each month.';
+    const deps = { dispatch, proposals: new ProposalStore() };
+    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] };
+    const op = { op: 'define_goal_measure', goal_id: 'increase_productivity', quantity: { label: 'Features shipped per month', unit: 'feature/month' }, cmp: '>=', frame: 'change_rel',
+      target: 'productivity_increase_target', window: { periods: 'launch_horizon', start: 0 }, quote: words };
+    const propose = () => proposeProgramChange(deps, ctx, ProgramChangeParams.parse({ public_label: 'Measure productivity', basis: 'their answer', ops: [op] })) as Promise<Json>;
+    // The drafter's whole model again, plus what works the measure out (synthetic Olumi figures, never a test sheet's).
+    const measured = defineGoalMeasure(before, op as never);
+    expect(measured.ok).toBe(true);
+    const completed = (extra: Partial<CanonicalModelT> = {}): string => {
+      const m = JSON.parse(JSON.stringify((measured as { model: CanonicalModelT }).model)) as CanonicalModelT;
+      // It also rewrites one of their figures and an option's name: additions only are taken, so both stay as they were.
+      m.quantities = m.quantities.map((x) => (x.id === 'features_shipped_per_month' ? { ...x, kind: 'derived', status: 'derived', basis: null } : x.id === 'hiring_budget' ? { ...x, value: 150000 } : x));
+      m.options = m.options.map((o) => ({ ...o, label: `${o.label} (Olumi)` }));
+      m.quantities.push(
+        q('features_now', 'feature/month', { status: 'asked', question: 'How many features does the team ship in a month now?' }),
+        q('lead_effect', 'feature/month/tech_lead', { kind: 'coefficient', status: 'estimated', author: 'olumi', value: 2, low: 0, high: 4, range_kind: 'plausible', basis: 'A lead mostly unblocks others; the size varies widely.' }),
+        q('developer_effect', 'feature/month/developer', { kind: 'coefficient', status: 'estimated', author: 'olumi', value: 1, low: 0.3, high: 1.5, range_kind: 'plausible', basis: 'A new developer adds less than an experienced one while ramping up.' }));
+      m.relations.push({ form: 'effect', id: 'features_rel', defines: 'features_shipped_per_month', base: 'features_now', author: 'olumi', quote: null, ...at,
+        terms: [{ driver: 'tech_leads_hired', coefficient: 'lead_effect', author: 'olumi', quote: null, ...at }, { driver: 'developers_hired', coefficient: 'developer_effect', author: 'olumi', quote: null, ...at }] });
+      return JSON.stringify({ ...m, ...extra });
+    };
+
+    // Negative: a completion that INVENTS a figure only they know (today's level as theirs) is refused whole; the card holds
+    // only their measure, which nothing works out yet, so no chance is claimed.
+    const invented = JSON.parse(completed()) as CanonicalModelT;
+    invented.quantities = invented.quantities.map((x) => (x.id === 'features_now' ? { ...x, status: 'known', value: 12, question: null, quote: 'about 12 a month' } : x));
+    replies = [JSON.stringify(invented)];
+    sent.length = 0;
+    const refusedCard = await propose();
+    expect(refusedCard.status, JSON.stringify(refusedCard)).toBe('ok');
+    expect(sent).toHaveLength(1);
+    expect(refusedCard.data.olumi_adds).toBeUndefined();
+    const heldModel = savedProgramOf({ living_model: deps.proposals.get(refusedCard.data.proposal_id)!.living_model })!.canonical;
+    expect(heldModel.relations).toEqual(before.relations);
+    expect(compile(heldModel, { sourceText: `${saved.brief}\n${words}` }).perGoal.find((g) => g.goal_id === 'increase_productivity')).toMatchObject({ status: 'withheld' });
+
+    // The completion: one drafter call; Olumi's parts are visibly Olumi's and provisional, with a basis; the person's
+    // figure it needs is a question; their 10% and their three months are the aim's target and window again.
+    replies = [completed()];
+    sent.length = 0;
+    const card = await propose();
+    expect(card.status, JSON.stringify(card)).toBe('ok');
+    expect(sent).toHaveLength(1);
+    expect(card.data.olumi_adds).toEqual(['relation:features_rel', 'quantity:features_now', 'quantity:lead_effect', 'quantity:developer_effect']);
+    expect(deps.proposals.get(card.data.proposal_id)!.operations.map((o) => o.path)).toEqual(['goal:increase_productivity', 'relation:features_rel', 'quantity:features_now', 'quantity:lead_effect', 'quantity:developer_effect']);
+    expect(registered).toHaveLength(1); // proposing saves nothing
+    expect(await applyProgramChange(deps, ctx, card.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
+    const after = persisted!.living_model.canonical as CanonicalModelT;
+    expect(stableStringify(persisted!.living_model)).toBe(stableStringify(deps.proposals.get(card.data.proposal_id)!.living_model));
+    expect(after.goals.find((g) => g.id === 'increase_productivity')!.measure).toMatchObject({ quantity: 'features_shipped_per_month', target: 'productivity_increase_target', frame: 'change_rel',
+      window: { start: 0, periods: 'launch_horizon' }, measure_by: 'person' });
+    expect(after.quantities.find((x) => x.id === 'features_shipped_per_month')).toMatchObject({ kind: 'derived', status: 'derived', author: 'person', quote: words });
+    expect(after.quantities.find((x) => x.id === 'features_now')).toMatchObject({ status: 'asked', value: null, author: 'person', quote: null });
+    for (const id of ['lead_effect', 'developer_effect']) expect(after.quantities.find((x) => x.id === id)).toMatchObject({ author: 'olumi', status: 'estimated', approval: 'proposed', basis: expect.any(String) });
+    expect(after.relations.find((r) => r.id === 'features_rel')).toMatchObject({ author: 'olumi', approval: 'proposed' });
+    // Everything they had stays as it was: every earlier record, its author and words, and the history (two new entries).
+    expect(after.quantities.filter((x) => before.quantities.some((b) => b.id === x.id) && x.id !== 'features_shipped_per_month')).toEqual(before.quantities);
+    expect(after.relations.slice(0, before.relations.length)).toEqual(before.relations);
+    expect({ ...after, quantities: [], relations: [], goals: [], history: [] }).toEqual({ ...before, quantities: [], relations: [], goals: [], history: [] });
+    expect(after.history.slice(0, before.history.length)).toEqual(before.history);
+    expect(after.history.slice(before.history.length).map((h) => h.id)).toEqual(['increase_productivity', 'features_shipped_per_month']);
+    // An option → outcome path now: the aim waits on exactly the one figure only they know, never on a guess.
+    const waiting = compile(after, { sourceText: persisted!.living_model.person_words.join('\n') });
+    expect(waiting.errors).toEqual([]);
+    expect(waiting.perGoal.find((g) => g.goal_id === 'increase_productivity')).toMatchObject({ status: 'asks', asks: ['features_now'] });
+    expect(waiting.asks.map((a) => a.quantity_id)).toContain('features_now');
+
+    // Their answer to that question: each option's chance of the aim appears.
+    const now = 'We ship about 12 features a month now.';
+    const ctx2 = { ...ctx, turn_id: randomUUID(), verified_user_messages: [now] };
+    const fill = await proposeProgramChange(deps, ctx2, { public_label: 'Features now', basis: 'their answer', ops: [{ op: 'set_quantity', quantity_id: 'features_now', value: 12, low: null, high: null, range_kind: null, quote: now }] }) as Json;
+    expect(fill.status, JSON.stringify(fill)).toBe('ok');
+    expect(await applyProgramChange(deps, ctx2, fill.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
+    const view = (persisted!.living_model.runs.at(-1).result as Json).canonical_analysis_view as Json;
+    // (The launch aim still has no measure, so the joint chance waits for it and says so; this aim's own chance is shown.)
+    const aim = (view.goal_chance as Json).targets.per_target.find((t: Json) => t.constraint_id === 'increase_productivity');
+    expect(aim.options.map((o: Json) => o.option_id)).toEqual(['hire_tech_lead', 'hire_two_developers']);
+    for (const o of aim.options) expect(o.display).toMatch(/^about \d+%$/);
+    expect(aim.words).toMatch(/Olumi’s assumed relationship/);
+    for (const c of persisted!.living_model.runs.at(-1).result.chances as Json[]) expect(c.per_goal).toEqual([expect.objectContaining({ goal_id: 'increase_productivity', chance: expect.any(Number) })]);
   });
 
   it('display fit (Lenses 23 Oct): every link its own id and sign; the goal target, each figure\'s source and every editable id on the fields the canvas reads', () => {

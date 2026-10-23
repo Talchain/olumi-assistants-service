@@ -38,8 +38,10 @@ export const ProgramOp = z.union([
       z.object({ label: z.string().describe('The measure as the person named it.'), unit: z.string().describe('Its unit, as in the model\'s unit rules.') }).strict()]),
     cmp: z.enum(['>=', '>', '<=', '<']).describe('>= for "at least" or "reach"; > for "more than"; <= for "at most"; < for "under".'),
     frame: z.enum(['level', 'change_abs', 'change_rel']).nullable().describe('level (the default): the quantity reaches the target; change_abs: its change from today in its unit; change_rel: its change from today in %.'),
-    target: z.object(figure).strict().nullable().describe('The target their words state; null when they did not state one (it is then asked).'),
-    window: z.object({ periods: z.number().int().positive().describe('How many periods the window lasts, as their words state it.'),
+    target: z.union([z.string().describe('The id of a quantity already in the model that holds the target they stated (from their brief).'), z.object(figure).strict()])
+      .nullable().describe('The target their words state; null when they did not state one (it is then asked).'),
+    window: z.object({ periods: z.union([z.number().int().positive().describe('How many periods the window lasts, as their words state it.'),
+      z.string().describe('The id of a quantity already in the model that holds the deadline they stated.')]),
       start: z.number().int().min(0).describe('Periods from now the window opens (0 = now).') }).strict().nullable().describe('The deadline their words state; null when they did not state one (By when? is then asked where it matters).'),
     quote }).strict(),
 ]);

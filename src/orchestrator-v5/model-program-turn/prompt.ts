@@ -44,6 +44,9 @@ export const DRAFTING_INSTRUCTIONS = [
   '- option "A second oven": sets ovens_added to one_oven from period 0; option "Local ads": sets ad_spend to its own value 1000, person, "£1,000 on local ads"',
 ].join('\n');
 
+/** Mechanism completion's request (DL 23 Oct), in the drafting conversation after the model as it stands. */
+export const COMPLETION_PREFIX = 'The person has now said how one aim is measured, but nothing in the model works that measure out. Return the whole model again with every existing record exactly as it is, adding only what works the measure out: the measure marked derived with null figures, the relations from what the options set to it, and Olumi\'s coefficients, each estimated with a range and a basis. A figure only the person can know (today\'s level, a cost, a count) is added as a fact with status asked and one question, never estimated.';
+
 /** What the compiler's sentences are returned with, in the same conversation (phase 0b's repair turn, verbatim). */
 export const REPAIR_PREFIX = 'The compiler found these errors. Return the whole model again with them fixed, keeping everything else as it was.';
 

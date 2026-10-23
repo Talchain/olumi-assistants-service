@@ -11,8 +11,9 @@ import { streamedLedgeredResponse, type StreamedResponsesBody } from '../../adap
 import { coreBudget } from '../agent-lane/model-budgets.js';
 import { agentRequestIdentity } from '../agent-lane/runtime/prompt-identity.js';
 import { CanonicalModel, type CanonicalModelT } from '../model-program/canonical.js';
-import { compileJson, type CompileError, type CompileResult } from '../model-program/compile.js';
-import { CANONICAL_JSON_SCHEMA, CANONICAL_SCHEMA_NAME, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX } from './prompt.js';
+import { compile, compileJson, type CompileError, type CompileResult } from '../model-program/compile.js';
+import { addMechanism } from '../model-program/answer.js';
+import { CANONICAL_JSON_SCHEMA, CANONICAL_SCHEMA_NAME, COMPLETION_PREFIX, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX } from './prompt.js';
 
 export const MAX_REPAIRS = 2;
 export const DRAFT_REASONING_EFFORT = 'medium' as const;
@@ -70,8 +71,8 @@ export function ledgeredResponsesCall(): ResponsesCall {
  * Draft → compile → (repair → compile) ≤ MAX_REPAIRS. `sourceText` is the person's own words (the brief), against which the
  * compiler checks every quote. A transport failure ends the loop with what it has; it is never retried here.
  */
-export async function draftCanonicalModel(brief: string, call: ResponsesCall, sourceText: string = brief): Promise<DraftOutcome> {
-  const input: InputMessage[] = [{ role: 'user', content: brief }];
+export async function draftCanonicalModel(brief: string | readonly InputMessage[], call: ResponsesCall, sourceText: string = typeof brief === 'string' ? brief : ''): Promise<DraftOutcome> {
+  const input: InputMessage[] = typeof brief === 'string' ? [{ role: 'user', content: brief }] : [...brief];
   const attempts: DraftAttempt[] = [];
   let model: CanonicalModelT | null = null;
   let compiled: CompileResult | null = null;
@@ -94,4 +95,26 @@ export async function draftCanonicalModel(brief: string, call: ResponsesCall, so
     input.push({ role: 'assistant', content: out.text }, { role: 'user', content: repairMessage(result.errors) });
   }
   return { model, compiled, attempts };
+}
+
+/**
+ * Mechanism completion (DL 23 Oct): when the person has said how an aim is measured and nothing in the model works that
+ * measure out, the SAME drafter, in a conversation holding their words, the model as it stands and the request, proposes
+ * what works it out. Only its additions of Olumi's kinds are kept (`addMechanism`); quotes are checked against the person's
+ * words only, never against the model's JSON. Null when nothing is needed, the drafter fails, or its additions are refused:
+ * the measure then stays as they named it, with its asks.
+ */
+export async function completeMechanism(model: CanonicalModelT, goalId: string, personWords: readonly string[], call: ResponsesCall,
+  isTheirs: (quote: string | null) => boolean): Promise<{ readonly model: CanonicalModelT; readonly attempts: readonly DraftAttempt[] } | null> {
+  const goal = model.goals.find((g) => g.id === goalId);
+  const measure = goal?.measure ?? null;
+  const measured = measure === null ? undefined : model.quantities.find((q) => q.id === measure.quantity);
+  if (goal === undefined || measured === undefined || model.relations.some((r) => r.defines === measured.id)) return null;
+  const ask = `${COMPLETION_PREFIX}\nThe aim: "${goal.label}" (${goal.id}), measured by "${measured.label}" (${measured.id}, in ${measured.unit}).`;
+  const draft = await draftCanonicalModel([{ role: 'user', content: personWords.join('\n\n') }, { role: 'assistant', content: JSON.stringify(model) }, { role: 'user', content: ask }],
+    call, personWords.join('\n'));
+  if (draft.model === null) return null;
+  const merged = addMechanism(model, draft.model, measured.id, isTheirs);
+  if (!merged.ok || compile(merged.model, { sourceText: personWords.join('\n') }).errors.length > 0) return null;
+  return { model: merged.model, attempts: draft.attempts };
 }

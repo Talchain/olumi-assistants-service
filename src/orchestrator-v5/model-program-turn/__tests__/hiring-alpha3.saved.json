@@ -1,0 +1,533 @@
+{
+ "source": "The saved read of the alpha3 hiring smoke (the served drafter, at f3e1a776): a costs-only model whose aim has no measure.",
+ "brief": "Should I hire a Tech lead or two developers to increase productivity by at least 10%, while maintaining code quality? We have an urgent launch date in the next three months. We currently have six mid-weight developers, so we're lacking leadership. Our budget is £200,000, but we'd like to spend less.",
+ "canonical": {
+  "version": "canonical.v1",
+  "question": "Should you hire a Tech lead or two developers to increase productivity by at least 10% before the launch within three months, while maintaining code quality and staying within £200,000?",
+  "period": "month",
+  "quantities": [
+   {
+    "id": "current_developers",
+    "label": "Current mid-weight developers",
+    "unit": "developer",
+    "value": 6,
+    "low": null,
+    "high": null,
+    "range_kind": null,
+    "kind": "fact",
+    "status": "known",
+    "question": null,
+    "basis": null,
+    "author": "person",
+    "party": null,
+    "quote": "We currently have six mid-weight developers",
+    "approval": "proposed",
+    "author_id": null
+   },
+   {
+    "id": "developers_hired",
+    "label": "Additional developers hired",
+    "unit": "developer",
+    "value": 0,
+    "low": null,
+    "high": null,
+    "range_kind": null,
+    "kind": "fact",
+    "status": "known",
+    "question": null,
+    "basis": "Zero additional developers represents the developer-hiring option switched off.",
+    "author": "structure",
+    "party": null,
+    "quote": null,
+    "approval": "proposed",
+    "author_id": null
+   },
+   {
+    "id": "tech_leads_hired",
+    "label": "Tech leads hired",
+    "unit": "tech_lead",
+    "value": 0,
+    "low": null,
+    "high": null,
+    "range_kind": null,
+    "kind": "fact",
+    "status": "known",
+    "question": null,
+    "basis": "Zero Tech leads represents the Tech lead hiring option switched off, not the number of existing leaders.",
+    "author": "structure",
+    "party": null,
+    "quote": null,
+    "approval": "proposed",
+    "author_id": null
+   },
+   {
+    "id": "developer_hiring_cost",
+    "label": "Budget cost per additional developer",
+    "unit": "GBP/developer",
+    "value": null,
+    "low": null,
+    "high": null,
+    "range_kind": null,
+    "kind": "fact",
+    "status": "asked",
+    "question": "What total cost per new developer would count against your £200,000 budget, including recruitment and employment costs for the period that budget covers?",
+    "basis": null,
+    "author": "person",
+    "party": null,
+    "quote": null,
+    "approval": "proposed",
+    "author_id": null
+   },
+   {
+    "id": "tech_lead_hiring_cost",
+    "label": "Budget cost per Tech lead",
+    "unit": "GBP/tech_lead",
+    "value": null,
+    "low": null,
+    "high": null,
+    "range_kind": null,
+    "kind": "fact",
+    "status": "asked",
+    "question": "What total cost for a Tech lead would count against your £200,000 budget, including recruitment and employment costs for the period that budget covers?",
+    "basis": null,
+    "author": "person",
+    "party": null,
+    "quote": null,
+    "approval": "proposed",
+    "author_id": null
+   },
+   {
+    "id": "developer_spend",
+    "label": "Cost of hiring developers",
+    "unit": "GBP",
+    "value": null,
+    "low": null,
+    "high": null,
+    "range_kind": null,
+    "kind": "derived",
+    "status": "derived",
+    "question": null,
+    "basis": null,
+    "author": "olumi",
+    "party": null,
+    "quote": null,
+    "approval": "proposed",
+    "author_id": null
+   },
+   {
+    "id": "tech_lead_spend",
+    "label": "Cost of hiring a Tech lead",
+    "unit": "GBP",
+    "value": null,
+    "low": null,
+    "high": null,
+    "range_kind": null,
+    "kind": "derived",
+    "status": "derived",
+    "question": null,
+    "basis": null,
+    "author": "olumi",
+    "party": null,
+    "quote": null,
+    "approval": "proposed",
+    "author_id": null
+   },
+   {
+    "id": "total_hiring_spend",
+    "label": "Total hiring cost against the budget",
+    "unit": "GBP",
+    "value": null,
+    "low": null,
+    "high": null,
+    "range_kind": null,
+    "kind": "derived",
+    "status": "derived",
+    "question": null,
+    "basis": null,
+    "author": "olumi",
+    "party": null,
+    "quote": null,
+    "approval": "proposed",
+    "author_id": null
+   },
+   {
+    "id": "hiring_budget",
+    "label": "Hiring budget",
+    "unit": "GBP",
+    "value": 200000,
+    "low": null,
+    "high": null,
+    "range_kind": null,
+    "kind": "fact",
+    "status": "known",
+    "question": null,
+    "basis": null,
+    "author": "person",
+    "party": null,
+    "quote": "Our budget is £200,000",
+    "approval": "proposed",
+    "author_id": null
+   },
+   {
+    "id": "productivity_increase_target",
+    "label": "Minimum productivity increase",
+    "unit": "%",
+    "value": 10,
+    "low": null,
+    "high": null,
+    "range_kind": null,
+    "kind": "fact",
+    "status": "known",
+    "question": null,
+    "basis": null,
+    "author": "person",
+    "party": null,
+    "quote": "increase productivity by at least 10%",
+    "approval": "proposed",
+    "author_id": null
+   },
+   {
+    "id": "launch_horizon",
+    "label": "Time available before launch",
+    "unit": "month",
+    "value": 3,
+    "low": null,
+    "high": null,
+    "range_kind": null,
+    "kind": "fact",
+    "status": "known",
+    "question": null,
+    "basis": null,
+    "author": "person",
+    "party": null,
+    "quote": "an urgent launch date in the next three months",
+    "approval": "proposed",
+    "author_id": null
+   }
+  ],
+  "relations": [
+   {
+    "form": "definition",
+    "id": "define_developer_spend",
+    "defines": "developer_spend",
+    "op": "product",
+    "parts": [
+     {
+      "id": "developers_hired",
+      "power": 1
+     },
+     {
+      "id": "developer_hiring_cost",
+      "power": 1
+     }
+    ],
+    "author": "olumi",
+    "party": null,
+    "quote": null,
+    "approval": "proposed",
+    "author_id": null
+   },
+   {
+    "form": "definition",
+    "id": "define_tech_lead_spend",
+    "defines": "tech_lead_spend",
+    "op": "product",
+    "parts": [
+     {
+      "id": "tech_leads_hired",
+      "power": 1
+     },
+     {
+      "id": "tech_lead_hiring_cost",
+      "power": 1
+     }
+    ],
+    "author": "olumi",
+    "party": null,
+    "quote": null,
+    "approval": "proposed",
+    "author_id": null
+   },
+   {
+    "form": "definition",
+    "id": "define_total_hiring_spend",
+    "defines": "total_hiring_spend",
+    "op": "sum",
+    "parts": [
+     {
+      "id": "developer_spend",
+      "sign": 1
+     },
+     {
+      "id": "tech_lead_spend",
+      "sign": 1
+     }
+    ],
+    "author": "olumi",
+    "party": null,
+    "quote": null,
+    "approval": "proposed",
+    "author_id": null
+   }
+  ],
+  "goals": [
+   {
+    "id": "increase_productivity",
+    "label": "increase productivity by at least 10%",
+    "measure": null,
+    "question": "How do you measure productivity: total team delivery, delivery per developer, or another measure?",
+    "author": "person",
+    "party": null,
+    "quote": "increase productivity by at least 10%",
+    "approval": "proposed",
+    "author_id": null
+   },
+   {
+    "id": "meet_launch_date",
+    "label": "an urgent launch date in the next three months",
+    "measure": null,
+    "question": "What work must be completed for the launch to count as ready?",
+    "author": "person",
+    "party": null,
+    "quote": "We have an urgent launch date in the next three months.",
+    "approval": "proposed",
+    "author_id": null
+   }
+  ],
+  "limits": [
+   {
+    "id": "stay_within_budget",
+    "label": "Our budget is £200,000",
+    "measure": {
+     "quantity": "total_hiring_spend",
+     "per": null,
+     "cmp": "<=",
+     "bound": "hiring_budget",
+     "aggregation": "end",
+     "window": null
+    },
+    "question": null,
+    "author": "person",
+    "party": null,
+    "quote": "Our budget is £200,000",
+    "approval": "proposed",
+    "author_id": null
+   },
+   {
+    "id": "maintain_code_quality",
+    "label": "maintaining code quality",
+    "measure": null,
+    "question": "How do you judge code quality today, and what would count as maintaining it?",
+    "author": "person",
+    "party": null,
+    "quote": "while maintaining code quality",
+    "approval": "proposed",
+    "author_id": null
+   }
+  ],
+  "preferences": [
+   {
+    "id": "prefer_lower_spend",
+    "quantity": "total_hiring_spend",
+    "direction": "lower",
+    "author": "person",
+    "party": null,
+    "quote": "we'd like to spend less",
+    "approval": "proposed",
+    "author_id": null
+   }
+  ],
+  "options": [
+   {
+    "id": "hire_tech_lead",
+    "label": "a Tech lead",
+    "sets": [
+     {
+      "quantity": "tech_leads_hired",
+      "to": null,
+      "value": 1,
+      "low": null,
+      "high": null,
+      "range_kind": null,
+      "question": null,
+      "from_period": 0,
+      "author": "person",
+      "quote": "hire a Tech lead"
+     }
+    ],
+    "status": "live",
+    "developed_from": null,
+    "author": "person",
+    "party": null,
+    "quote": "Should I hire a Tech lead or two developers",
+    "approval": "proposed",
+    "author_id": null
+   },
+   {
+    "id": "hire_two_developers",
+    "label": "two developers",
+    "sets": [
+     {
+      "quantity": "developers_hired",
+      "to": null,
+      "value": 2,
+      "low": null,
+      "high": null,
+      "range_kind": null,
+      "question": null,
+      "from_period": 0,
+      "author": "person",
+      "quote": "two developers"
+     }
+    ],
+    "status": "live",
+    "developed_from": null,
+    "author": "person",
+    "party": null,
+    "quote": "Should I hire a Tech lead or two developers",
+    "approval": "proposed",
+    "author_id": null
+   }
+  ],
+  "risks": [],
+  "claims": [
+   {
+    "id": "leadership_gap",
+    "text": "We currently have six mid-weight developers, so we're lacking leadership.",
+    "concerns": [
+     "current_developers",
+     "hire_tech_lead",
+     "increase_productivity",
+     "maintain_code_quality"
+    ],
+    "author": "person",
+    "party": null,
+    "quote": "We currently have six mid-weight developers, so we're lacking leadership.",
+    "approval": "proposed",
+    "author_id": null
+   }
+  ],
+  "evidence": [],
+  "assumptions": [
+   {
+    "id": "budget_cost_scope",
+    "text": "The comparison counts each hire's total cost over the period covered by the stated budget; it does not assume the £200,000 is an annual or three-month budget.",
+    "applied": true,
+    "concerns": [
+     "developer_hiring_cost",
+     "tech_lead_hiring_cost",
+     "stay_within_budget"
+    ],
+    "author": "olumi",
+    "party": null,
+    "quote": null,
+    "approval": "proposed",
+    "author_id": null
+   },
+   {
+    "id": "hiring_decision_not_start_date",
+    "text": "The option counts represent hiring commitments selected now, not an assumption that new hires are available or productive immediately.",
+    "applied": true,
+    "concerns": [
+     "developers_hired",
+     "tech_leads_hired",
+     "hire_tech_lead",
+     "hire_two_developers"
+    ],
+    "author": "olumi",
+    "party": null,
+    "quote": null,
+    "approval": "proposed",
+    "author_id": null
+   }
+  ],
+  "dissent": [],
+  "conditions": [],
+  "left_out": [
+   {
+    "id": "productivity_mechanism_unresolved",
+    "text": "The 10% productivity target, the six-person mid-weight team, and the leadership gap are retained, but neither option's productivity gain is calculated.",
+    "why": "Productivity needs a defined measure before additional delivery capacity and leadership support can be expressed in meaningful units without assuming that headcount equals output.",
+    "question": null,
+    "concerns": [
+     "increase_productivity",
+     "productivity_increase_target",
+     "current_developers",
+     "leadership_gap",
+     "hire_tech_lead",
+     "hire_two_developers"
+    ],
+    "author": "olumi",
+    "party": null,
+    "quote": null,
+    "approval": "proposed",
+    "author_id": null
+   },
+   {
+    "id": "launch_readiness_not_calculated",
+    "text": "Meeting the launch date within three months is not yet calculated.",
+    "why": "The required launch scope and remaining work are not specified.",
+    "question": null,
+    "concerns": [
+     "meet_launch_date",
+     "launch_horizon"
+    ],
+    "author": "olumi",
+    "party": null,
+    "quote": null,
+    "approval": "proposed",
+    "author_id": null
+   },
+   {
+    "id": "hiring_and_onboarding_timing",
+    "text": "Recruitment lead times and onboarding demands may materially reduce either option's contribution before launch.",
+    "why": "No availability dates or onboarding arrangements were given, and no delivery calculation is yet defined.",
+    "question": "How soon could a Tech lead and the two developers start, including the time your current team would need to onboard them?",
+    "concerns": [
+     "hire_tech_lead",
+     "hire_two_developers",
+     "launch_horizon",
+     "current_developers"
+    ],
+    "author": "olumi",
+    "party": null,
+    "quote": null,
+    "approval": "proposed",
+    "author_id": null
+   },
+   {
+    "id": "code_quality_not_calculated",
+    "text": "Maintaining code quality is not covered by the cost calculation.",
+    "why": "No code-quality measure or acceptable threshold has been specified.",
+    "question": null,
+    "concerns": [
+     "maintain_code_quality",
+     "hire_tech_lead",
+     "hire_two_developers"
+    ],
+    "author": "olumi",
+    "party": null,
+    "quote": null,
+    "approval": "proposed",
+    "author_id": null
+   },
+   {
+    "id": "productivity_target_timing",
+    "text": "Whether the 10% improvement must be reached by launch or sustained throughout the next three months is not specified.",
+    "why": "The launch deadline is stated, but the productivity target has no explicit measurement window.",
+    "question": "Does the 10% productivity increase need to be reached by launch, or maintained throughout the next three months?",
+    "concerns": [
+     "increase_productivity",
+     "productivity_increase_target",
+     "launch_horizon"
+    ],
+    "author": "olumi",
+    "party": null,
+    "quote": null,
+    "approval": "proposed",
+    "author_id": null
+   }
+  ],
+  "history": []
+ }
+}

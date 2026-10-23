@@ -17,6 +17,8 @@ import { createProposal, type ProposalOperation, type ProposalStore, type Struct
 import { findOperationVersion } from '../path-b/tools/core-write.js';
 import { isNoModelYet, isSavedRead, readSaved } from '../path-b/tools/context-tool.js';
 import { ok, refused, unavailable, type ToolOutcome } from '../path-b/tools/outcome.js';
+import type { CanonicalModelT } from '../model-program/canonical.js';
+import { completeMechanism, ledgeredResponsesCall } from './draft.js';
 import { applyOps, ProgramOp, quotedIn, type ProgramOpT } from './edits.js';
 import { isSaved, postimageOf, programOperationId, savePostimage, withNewRun } from './program-save.js';
 import { livingModelOf, MODEL_PROGRAM, programReadOf, reopenProgram, savedProgramOf, unreadableWords, type SavedProgram } from './program-store.js';
@@ -85,6 +87,12 @@ const operationsOf = (ops: readonly ProgramOpT[]): ProposalOperation[] => ops.ma
   path: o.op === 'set_quantity' || o.op === 'set_range_kind' ? `quantity:${o.quantity_id}` : o.op === 'set_goal_target' || o.op === 'define_goal_measure' ? `goal:${o.goal_id}` : o.op === 'add_option' ? `option:${o.label}` : `option:${o.option_id}`,
   value: { change: o.op === 'add_option' ? 'add' : 'change', after: o } }));
 
+/** The card's rows for what Olumi's mechanism completion added: each new relation and quantity, as Olumi's. */
+const additionsOf = (before: CanonicalModelT, after: CanonicalModelT): ProposalOperation[] => [
+  ...after.relations.filter((r) => !before.relations.some((x) => x.id === r.id)).map((r) => ({ id: r.id, kind: 'relation', after: r })),
+  ...after.quantities.filter((q) => !before.quantities.some((x) => x.id === q.id)).map((q) => ({ id: q.id, kind: 'quantity', after: q })),
+].map((a): ProposalOperation => ({ op: 'living_change', path: `${a.kind}:${a.id}`, value: { change: 'add', after: a.after } }));
+
 export async function proposeProgramChange(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs): Promise<ToolOutcome> {
   if (args.ops.length === 0) return refused('no_change');
   const base = await savedProgram(deps, ctx);
@@ -95,14 +103,22 @@ export async function proposeProgramChange(deps: ProgramToolDeps, ctx: Ctx, args
   if (unquoted.length > 0) return refused('quote_not_in_their_words', 'Each edit quotes the person\'s exact words; copy them from what they wrote.', { ops: unquoted.map((o) => o.op) });
   const edited = applyOps(base.program.canonical, args.ops);
   if (!edited.ok) return refused('edit_not_applicable', edited.reason);
-  const words = [...base.program.person_words, ...args.ops.map((o) => o.quote).filter((q) => !base.program.person_words.some((w) => quotedIn(q, [w])))];
-  const next = withNewRun({ ...base.program, canonical: edited.model, person_words: [...new Set(words)] });
+  const words = [...new Set([...base.program.person_words, ...args.ops.map((o) => o.quote).filter((q) => !base.program.person_words.some((w) => quotedIn(q, [w])))])];
+  // A measure they named that nothing works out yet: Olumi's drafter proposes its mechanism, on this same card.
+  let model = edited.model;
+  for (const goalId of args.ops.flatMap((o) => (o.op === 'define_goal_measure' ? [o.goal_id] : []))) {
+    const done = await completeMechanism(model, goalId, words, ledgeredResponsesCall(), (q) => q !== null && quotedIn(q, words));
+    if (done !== null) model = done.model;
+  }
+  const next = withNewRun({ ...base.program, canonical: model, person_words: words });
   if (next.evaluation.compiled.errors.length > 0) return refused('does_not_compile', next.evaluation.compiled.errors.slice(0, 3).map((e) => e.message).join(' '));
+  const adds = additionsOf(edited.model, model);
   const p = deps.proposals.put(createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
-    base_graph_identity_hash: base.saved.graphHash, base_model_identity: base.saved.identity!, operations: operationsOf(args.ops),
+    base_graph_identity_hash: base.saved.graphHash, base_model_identity: base.saved.identity!, operations: [...operationsOf(args.ops), ...adds],
     provenance: { authored_by: 'model_proposed', basis: args.basis }, validation: { admitted: true, loss_count: 0, refusals: [] },
     public_label: args.public_label, living_model: livingModelOf(next.program) }));
-  return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: base.saved.graphHash, ops: args.ops, would_show: runWords(next.run) });
+  return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: base.saved.graphHash, ops: args.ops,
+    ...(adds.length > 0 ? { olumi_adds: adds.map((o) => o.path) } : {}), would_show: runWords(next.run) });
 }
 
 /** A proposal this module prepared: it carries the complete program (model and Run) it would write. */

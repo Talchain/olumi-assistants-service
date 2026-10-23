@@ -103,8 +103,10 @@ export type GoalMeasureAnswer = {
   readonly quantity: string | { readonly label: string; readonly unit: string };
   readonly cmp: '>=' | '>' | '<=' | '<';
   readonly frame: 'level' | 'change_abs' | 'change_rel' | null;
-  readonly target: { readonly value: number | null; readonly low: number | null; readonly high: number | null; readonly range_kind: 'bounds' | 'plausible' | null } | null;
-  readonly window: { readonly periods: number; readonly start: number } | null;
+  /** Their figure, or the id of a quantity that already holds the target they stated (a brief's "at least 10%"). */
+  readonly target: string | { readonly value: number | null; readonly low: number | null; readonly high: number | null; readonly range_kind: 'bounds' | 'plausible' | null } | null;
+  /** How many periods, or the id of a quantity that already holds the deadline they stated. */
+  readonly window: { readonly periods: number | string; readonly start: number } | null;
   readonly quote: string;
 };
 type Quantity = CanonicalModelT['quantities'][number];
@@ -134,14 +136,23 @@ export function defineGoalMeasure(model: CanonicalModelT, a: GoalMeasureAnswer):
   }
 
   const frame = a.frame ?? 'level';
-  const targetId = fresh(`${g.id}_target`);
+  const t = a.target;
+  // A target or deadline already in the model is used as it stands, only when it is the person's (never Olumi's figure).
+  const notTheirs = (id: string, what: string): string | null => {
+    const q = model.quantities.find((x) => x.id === id);
+    return q === undefined ? `"${id}" is not a quantity in the model.` : q.author !== 'person' || q.status === 'derived' ? `"${q.label}" is not a ${what} the person stated.` : null;
+  };
+  const refusal = (typeof t === 'string' ? notTheirs(t, 'target') : null) ?? (typeof a.window?.periods === 'string' ? notTheirs(a.window.periods, 'deadline') : null);
+  if (refusal !== null) return { ok: false, reason: refusal };
+  const targetId = typeof t === 'string' ? t : fresh(`${g.id}_target`);
   const targetUnit = frame === 'change_rel' ? '%' : measured.unit;
   // Each figure is theirs only as written for its own quantity: the target in the target's unit, the deadline in periods.
   const stated = (x: number) => writesAs(a.quote, x, targetUnit, measured.label);
   const targetLabel = `Target for ${measured.label}`;
-  const t = a.target;
   if (t === null) {
     added.push(theirs(targetId, targetLabel, targetUnit, { status: 'asked', quote: null, question: `What figure for "${measured.label}" would count as "${g.label}"?` }));
+  } else if (typeof t === 'string') {
+    // Their target as it stands in the model.
   } else if (t.low !== null && t.high !== null) {
     if (t.low > t.high) return { ok: false, reason: `The low end ${t.low} is above the high end ${t.high}.` };
     if (!stated(t.low) || !stated(t.high)) return { ok: false, reason: 'Their words do not state that target range; leave the target out and it is asked.' };
@@ -152,7 +163,9 @@ export function defineGoalMeasure(model: CanonicalModelT, a: GoalMeasureAnswer):
   } else return { ok: false, reason: 'A target needs a figure, or both ends of a range; leave it out and it is asked.' };
 
   let window: NonNullable<CanonicalModelT['goals'][number]['measure']>['window'] = null;
-  if (a.window !== null) {
+  if (a.window !== null && typeof a.window.periods === 'string') {
+    window = { origin_event: null, origin_offset: null, start: a.window.start, periods: a.window.periods };
+  } else if (a.window !== null) {
     if (!writesAs(a.quote, a.window.periods, model.period)) return { ok: false, reason: `Their words do not state that deadline in ${model.period}s; leave the window out and "By when?" is asked.` };
     const periods = fresh(`${g.id}_window`);
     added.push(theirs(periods, `Time to meet ${g.label}`, model.period, { value: a.window.periods }));
@@ -163,4 +176,60 @@ export function defineGoalMeasure(model: CanonicalModelT, a: GoalMeasureAnswer):
   return { ok: true, model: { ...model, quantities: [...model.quantities, ...added],
     goals: model.goals.map((x) => (x.id === g.id ? { ...g, measure, question: null, approval: 'approved' as const } : x)),
     history: [...model.history, { id: g.id, change: 'superseded', old: JSON.stringify(g), quote: a.quote, author_id: null }] } };
+}
+
+/**
+ * COMPLETING A MEASURE'S MECHANISM (DL 23 Oct): once the person has said how an aim is measured, Olumi's drafter may propose
+ * what works that measure out. From the drafter's whole model only ADDITIONS are taken, and only of kinds Olumi may author:
+ * its own coefficients (estimated, with a range and a basis), worked-out quantities, structural constants (0 or 1), and
+ * figures only the person can know as QUESTIONS (asked, no figure); plus new relations that work out the measure or a new
+ * worked-out quantity, each Olumi's unless its words are the person's. Every existing record, its author and the history
+ * stay as they are; the measure becomes worked out. Refused (the measure stays as named, with its asks) when the drafter
+ * invents a person's figure, redefines what the model already works out, or no option's setting reaches the measure.
+ */
+type Relation = CanonicalModelT['relations'][number];
+/** What a relation works its quantity out from: its parts, its base, drivers and coefficients, or a stock's start and flows. */
+const inputsOf = (r: Relation): string[] => (r.form === 'definition' ? r.parts.map((p) => p.id) : r.form === 'effect' ? [r.base, ...r.terms.flatMap((t) => [t.driver, t.coefficient])] : [r.start, ...r.inflows, ...r.outflows]);
+
+export function addMechanism(model: CanonicalModelT, draft: CanonicalModelT, measured: string, isTheirs: (quote: string | null) => boolean): FillResult {
+  const target = model.quantities.find((q) => q.id === measured);
+  if (target === undefined || model.relations.some((r) => r.defines === measured)) return { ok: false, reason: 'The measure is already worked out.' };
+  const known = new Set(model.quantities.map((q) => q.id));
+  const added: Quantity[] = [];
+  for (const q of draft.quantities.filter((x) => !known.has(x.id))) {
+    const blank = q.value === null && q.low === null && q.high === null;
+    if (q.kind === 'coefficient' && q.status === 'estimated' && q.low !== null && q.high !== null && (q.basis ?? '').trim() !== '') added.push({ ...q, author: 'olumi', quote: null, approval: 'proposed' });
+    else if (q.status === 'derived' && blank) added.push({ ...q, author: 'olumi', quote: null, approval: 'proposed' });
+    else if (q.author === 'structure' && q.status === 'known' && (q.value === 0 || q.value === 1) && q.low === null) added.push({ ...q, quote: null, approval: 'proposed' });
+    else if (q.status === 'asked' && blank && (q.question ?? '').trim() !== '') added.push({ ...q, author: 'person', quote: null, approval: 'proposed' });
+    else return { ok: false, reason: `Olumi cannot add "${q.label}" as it was drafted: a figure only the person can give is asked, never estimated.` };
+  }
+  const ids = new Set([...known, ...added.map((q) => q.id)]);
+  const defined = new Set(model.relations.map((r) => r.defines));
+  const own = new Set([measured, ...added.filter((q) => q.status === 'derived').map((q) => q.id)]);
+  const relations = draft.relations.filter((r) => !model.relations.some((x) => x.id === r.id));
+  for (const r of relations) {
+    if (!own.has(r.defines) || defined.has(r.defines) || !inputsOf(r).every((u) => ids.has(u))) return { ok: false, reason: `Olumi's relation "${r.id}" does not only work out the measure from what the model holds.` };
+    defined.add(r.defines);
+  }
+  if (!relations.some((r) => r.defines === measured)) return { ok: false, reason: 'Olumi proposed nothing that works the measure out.' };
+  const olumis = <T extends { author: string; quote: string | null }>(x: T): T => (x.author === 'person' && isTheirs(x.quote) ? x : { ...x, author: 'olumi', quote: null });
+  const proposed = (r: Relation): Relation => (r.form === 'effect'
+    ? { ...olumis(r), approval: 'proposed', terms: r.terms.map((t) => ({ ...olumis(t), approval: 'proposed' as const })) } : { ...olumis(r), approval: 'proposed' });
+  const newRelations = relations.map(proposed);
+  // Reached: some option's setting is upstream of the measure, so the options can differ on it.
+  const by = new Map([...model.relations, ...newRelations].map((r) => [r.defines, r] as const));
+  const upstream = new Set<string>();
+  const walk = (id: string) => {
+    if (upstream.has(id)) return;
+    upstream.add(id);
+    const r = by.get(id);
+    if (r !== undefined) inputsOf(r).forEach(walk);
+  };
+  walk(measured);
+  if (!model.options.some((o) => o.status === 'live' && o.sets.some((s) => upstream.has(s.quantity)))) return { ok: false, reason: 'What Olumi proposed does not connect any option to the measure.' };
+  const worked: Quantity = { ...target, kind: 'derived', status: 'derived', value: null, low: null, high: null, range_kind: null, basis: null };
+  return { ok: true, model: { ...model, quantities: [...model.quantities.map((q) => (q.id === measured ? worked : q)), ...added],
+    relations: [...model.relations, ...newRelations],
+    history: [...model.history, { id: measured, change: 'superseded', old: JSON.stringify(target), quote: null, author_id: null }] } };
 }
