@@ -580,6 +580,42 @@ describe('the model-program turn on the real core route', () => {
     expect(buildCanonicalAnalysisReadyFromGraph({ ...g, living_model: {} })).toMatchObject({ goal_node_id: 'more_loaves', goal_threshold_raw: 380 });
   });
 
+  it('DL 23 Oct (alpha3 fit): a per-unit rate is drawn ONE way however the draft wrote it, on its driver\'s link with its coefficient_id, never as its own card with a second link', () => {
+    const words = 'A second oven adds about 100 loaves a week';
+    const of = (form: 'effect' | 'product'): CanonicalModelT => {
+      const m = bakery();
+      m.quantities = [...m.quantities.filter((x) => !['extra_per_oven', 'sell_through', 'sold_per_oven'].includes(x.id)),
+        q('per_oven', 'loaf/week/oven', { kind: 'coefficient', value: 100, low: 80, high: 120, range_kind: 'plausible', quote: words }),
+        q('extra_sales', 'loaf/week', { kind: 'derived', status: 'derived', author: 'olumi' }),
+        ...(form === 'effect' ? [q('no_extra', 'loaf/week', { value: 0, author: 'structure' })] : [])];
+      const rate: CanonicalModelT['relations'][number] = form === 'effect'
+        ? { form: 'effect', id: 'extra_rel', defines: 'extra_sales', base: 'no_extra', terms: [{ driver: 'ovens_added', coefficient: 'per_oven', author: 'person', quote: words, ...at }], author: 'person', quote: words, ...at }
+        : { form: 'definition', id: 'extra_rel', defines: 'extra_sales', op: 'product', parts: [{ id: 'ovens_added', power: 1 }, { id: 'per_oven', power: 1 }], author: 'person', quote: words, ...at };
+      m.relations = [rate, { form: 'definition', id: 'sales_rel', defines: 'sales', op: 'sum', parts: [{ id: 'base_sales', sign: 1 }, { id: 'extra_sales', sign: 1 }], author: 'olumi', quote: null, ...at },
+        m.relations.find((r) => r.id === 'spend_rel')!];
+      return m;
+    };
+    const shown = (form: 'effect' | 'product') => { const m = of(form); return project(m, compile(m, { sourceText: `${BRIEF}\n${words}` })); };
+    const effect = shown('effect');
+    const product = shown('product');
+    const rateLinks = (p: ReturnType<typeof project>) => p.graph.edges.filter((e) => e.to === 'extra_sales' && e.from !== 'no_extra');
+    // ONE link carries the rate in both forms: its id for the link editor, its size in natural units, its sign, whose it is.
+    expect(rateLinks(product)).toEqual(rateLinks(effect));
+    expect(rateLinks(product)).toEqual([expect.objectContaining({ id: 'ovens_added__extra_sales', coefficient_id: 'per_oven', effect_direction: 'positive', origin: 'model_program:calculation',
+      provenance: expect.objectContaining({ source: 'brief_extraction', magnitude: 'user_stated', natural_effect: expect.objectContaining({ amount: 100, amount_unit: 'loaf/week', per_source_change_unit: 'oven' }) }) })]);
+    for (const p of [effect, product]) {
+      expect(p.graph.nodes.find((n) => n.id === 'per_oven')).toBeUndefined();
+      expect(p.graph.edges.filter((e) => e.from === 'per_oven')).toEqual([]);
+      expect(p.items.find((i) => i.record_id === 'per_oven')?.shown_as).toEqual({ on_edge: 'ovens_added__extra_sales' });
+    }
+    // Contrast: a product of two coefficients has no one driver, so both parts stay cards with their own links, no coefficient_id.
+    const pb = project(bakery(), compile(bakery(), { sourceText: BRIEF })).graph;
+    const sold = pb.edges.filter((e) => e.to === 'sold_per_oven');
+    expect(sold.map((e) => e.id)).toEqual(['extra_per_oven__sold_per_oven', 'sell_through__sold_per_oven']);
+    expect(sold.some((e) => 'coefficient_id' in e)).toBe(false);
+    expect(pb.nodes.filter((n) => n.id === 'extra_per_oven' || n.id === 'sell_through')).toHaveLength(2);
+  });
+
   it('Lenses fit 2 (DL 23 Oct): a relative target is a fraction; what waits on an answer is in the analysis; each setting and worked-out figure says whose it is', () => {
     const nodeOf = (g: { nodes: Json[] }) => (id: string) => g.nodes.find((n) => n.id === id) as Json;
     // (1) "Grow sales by 10%" is change_rel 0.1 beside the measured quantity's unit (the canvas says "up 10% from today"),

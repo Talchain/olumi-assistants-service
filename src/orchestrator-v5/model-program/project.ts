@@ -115,12 +115,25 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   const hostOf = new Map<string, { node?: string; edge?: string }>();
   /** A window's length or origin timing is consumed into its window, so it is in the calculation exactly when its owner is. */
   const windowOwner = new Map<string, string>();
+  /**
+   * A per-unit rate (one coefficient times one driver) is ONE meaning however the draft wrote it, an effect term or a
+   * two-part product ("specialists × capacity per specialist"), so it is drawn ONE way: on its driver's link, its id as
+   * `coefficient_id` (DL 23 Oct: the link editor reads it there), never as a card of its own plus a second link.
+   */
+  const rateOf = (r: CanonicalModelT['relations'][number]): { driver: string; coefficient: string } | null => {
+    if (r.form !== 'definition' || r.op !== 'product' || r.parts.length !== 2 || r.parts.some((p) => p.power !== 1)) return null;
+    const [a, b] = r.parts.map((p) => p.id) as [string, string];
+    const rate = (id: string) => Q.get(id)?.kind === 'coefficient';
+    return rate(a) && !rate(b) ? { driver: b, coefficient: a } : rate(b) && !rate(a) ? { driver: a, coefficient: b } : null;
+  };
   for (const r of model.relations) {
-    const froms = r.form === 'definition' ? r.parts.map((p) => p.id) : r.form === 'effect' ? [r.base, ...r.terms.map((t) => t.driver)] : [r.start, ...r.inflows, ...r.outflows];
+    const rate = rateOf(r);
+    const froms = rate ? [rate.driver] : r.form === 'definition' ? r.parts.map((p) => p.id) : r.form === 'effect' ? [r.base, ...r.terms.map((t) => t.driver)] : [r.start, ...r.inflows, ...r.outflows];
     const ids = froms.map((f) => edgeId(f, r.defines));
     relationEdgeIds.set(r.id, ids);
     froms.forEach((f) => use(f, 'node'));
     if (r.form === 'effect') r.terms.forEach((t, i) => { use(t.coefficient, 'coefficient'); hostOf.set(t.coefficient, { edge: ids[i + 1]! }); });
+    if (rate) { use(rate.coefficient, 'coefficient'); hostOf.set(rate.coefficient, { edge: ids[0]! }); }
     use(r.defines, 'node');
   }
   for (const g of model.goals) if (g.measure) {
@@ -297,6 +310,22 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     items.push({ record_id: q.id, family: 'quantity', shown_as: { node: q.id }, in_calculation: inCalc, why_out: why(inCalc, reason), author: who, approval: q.approval, ...lawOf(q) });
   }
 
+  /** A rate's link, driver → what it moves: its size in natural units, its sign from that size, whose size it is. */
+  const rateLink = (driver: string, coefficient: string, defines: string, who: DisplayAuthor, inCalc: boolean): Rec => {
+    const c = Q.get(coefficient);
+    const mid = c ? (c.value ?? (has(c.low) && has(c.high) ? (c.low + c.high) / 2 : null)) : null;
+    const straddles = c && has(c.low) && has(c.high) && c.low < 0 && c.high > 0;
+    const sign = mid !== null && mid < 0 ? -1 : 1;
+    const driverUnit = Q.get(driver)?.unit ?? '';
+    const definedUnit = Q.get(defines)?.unit ?? '';
+    const natural = c && has(c.value)
+      ? { natural_effect: { amount: c.value, amount_unit: definedUnit, per_source_change: 1, per_source_change_unit: driverUnit, strength_mean: sign, strength_mean_frame: 'edge_strength',
+        ...(has(c.low) && has(c.high) && c.low !== c.high ? { stated_range: { low: c.low, high: c.high, text: `${fmt(c.low)}–${fmt(c.high)}`, end: 'centre' } } : {}) } }
+      : {};
+    const reasoning = c ? `${display(c)} per ${driverUnit || 'unit'}${straddles ? '; its direction is not settled' : ''}${mid === null ? '; its size is not given yet' : ''}` : '';
+    return link(driver, defines, sign, who, inCalc, { ...natural, reasoning, ...(c ? { magnitude: c.author === 'olumi' ? 'olumi_estimate' : 'user_stated' } : {}) });
+  };
+
   // ── relations and effect terms: links ──────────────────────────────────────────────────────────────────────────────
   for (const r of model.relations) {
     const inCalc = xq.has(r.defines);
@@ -305,7 +334,10 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const drawn: string[] = [];
     const ids = [...relationEdgeIds.get(r.id)!];
     const push = (e: Rec) => { const id = ids.shift()!; edges.push({ ...e, id }); drawn.push(id); return id; };
-    if (r.form === 'definition') {
+    const rate = rateOf(r);
+    if (rate) {
+      push({ ...rateLink(rate.driver, rate.coefficient, r.defines, who, inCalc), coefficient_id: rate.coefficient });
+    } else if (r.form === 'definition') {
       for (const p of r.parts) {
         const sign = 'sign' in p ? p.sign : p.power;
         const words = r.op === 'sum' ? (sign > 0 ? 'added' : 'subtracted') : sign === 1 ? 'multiplied' : sign === -1 ? 'divided by' : `raised to the power ${sign}`;
@@ -318,20 +350,8 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     } else {
       push(link(r.base, r.defines, 1, who, inCalc, { definitional: true, reasoning: 'base level' }));
       for (const t of r.terms) {
-        const c = Q.get(t.coefficient);
         const termWho = whoOf(t, `${r.id}:${t.driver}`);
-        const mid = c ? (c.value ?? (has(c.low) && has(c.high) ? (c.low + c.high) / 2 : null)) : null;
-        const straddles = c && has(c.low) && has(c.high) && c.low < 0 && c.high > 0;
-        const sign = mid !== null && mid < 0 ? -1 : 1;
-        const driverUnit = Q.get(t.driver)?.unit ?? '';
-        const definedUnit = Q.get(r.defines)?.unit ?? '';
-        const natural = c && has(c.value)
-          ? { natural_effect: { amount: c.value, amount_unit: definedUnit, per_source_change: 1, per_source_change_unit: driverUnit, strength_mean: sign, strength_mean_frame: 'edge_strength',
-            ...(has(c.low) && has(c.high) && c.low !== c.high ? { stated_range: { low: c.low, high: c.high, text: `${fmt(c.low)}–${fmt(c.high)}`, end: 'centre' } } : {}) } }
-          : {};
-        const reasoning = c ? `${display(c)} per ${driverUnit || 'unit'}${straddles ? '; its direction is not settled' : ''}${mid === null ? '; its size is not given yet' : ''}` : '';
-        const e = link(t.driver, r.defines, sign, termWho, inCalc, { ...natural, reasoning, ...(c ? { magnitude: c.author === 'olumi' ? 'olumi_estimate' : 'user_stated' } : {}) });
-        const id = push({ ...e, coefficient_id: t.coefficient });
+        const id = push({ ...rateLink(t.driver, t.coefficient, r.defines, termWho, inCalc), coefficient_id: t.coefficient });
         items.push({ record_id: `${r.id}:${t.driver}`, family: 'term', shown_as: { edge: id }, in_calculation: inCalc, why_out: why(inCalc, reason), author: termWho, approval: t.approval });
       }
     }
