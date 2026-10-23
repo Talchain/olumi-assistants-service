@@ -10,7 +10,7 @@
 import type { LivingModelT } from '../../../schemas/living-model.js';
 import { exactlyMade, mapLivingModel } from './mapper.js';
 import { stated } from './aim-reading.js';
-import { currentIsStated } from './figure-authorship.js';
+import { currentAttribution } from './figure-authorship.js';
 
 /** The canvas gestures this slice applies, in the wire's own shapes (`@talchain/schemas` turn-payload). */
 export type ExplicitEdit =
@@ -201,10 +201,10 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       // history, and Olumi asks for today's level instead.
       // On Olumi's suggested measure only a level the person set is theirs, whoever authored the aim (Codex #3585 P1).
       const olumiMeasure = prior?.source === 'olumi';
-      const keepCurrent = olumiMeasure ? prior.current_source === 'user' : currentIsStated(a);
+      const keepCurrent = olumiMeasure ? prior.current_source === 'user' : currentAttribution(a).source === 'user';
       if (!keepCurrent && prior?.current != null) {
         m.history.push({ id: a.id, change: 'superseded', quote: null,
-          old: `starting level ${prior.current}${prior.unit === null ? '' : ` ${prior.unit}`} (${a.source === 'olumi' || olumiMeasure ? 'Olumi\u2019s estimate' : 'not confirmed by you'})` });
+          old: `starting level ${prior.current}${prior.unit === null ? '' : ` ${prior.unit}`} (${currentAttribution(a).source === 'olumi' ? 'Olumi\u2019s estimate' : 'not confirmed by you'})` });
       }
       a.target = { quantity: prior?.quantity ?? a.text, comparator: edit.constraint_type === 'at_least' ? '>=' : '<=',
         value: edit.raw_value, ...noRange, unit: edit.unit, by_when: prior?.by_when ?? null, period_months: prior?.period_months ?? null,

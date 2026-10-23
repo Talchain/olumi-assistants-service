@@ -107,6 +107,20 @@ describe('B3: item words and each figure retain their own author', () => {
     }
   });
 
+  it('a target edit never turns an inherited party current into the new human aim’s baseline, or an explicitly unknown figure into Olumi’s history', () => {
+    for (const source of ['party', 'olumi'] as const) {
+      const next = structuredClone(KNOWN_ANSWER);
+      Object.assign(next.aims[0]!, { source, party: source === 'party' ? 'Ops' : null });
+      next.aims[0]!.target!.current_source = source === 'party' ? null : 'unverified';
+      const out = applyExplicitEdit(next, { kind: 'goal_target_edit', goal_node_id: 'g', constraint_type: 'at_least', raw_value: 110, unit: 'units' });
+      expect('model' in out && out.model.aims[0]!.target!.current).toBeNull();
+      if ('model' in out) {
+        expect(out.model.history.at(-1)!.old).toContain('70');
+        expect(out.model.history.at(-1)!.old).not.toContain('Olumi’s estimate');
+      }
+    }
+  });
+
   it('reuses the existing amount alphabet; unrelated scales, currencies and embedded digits never supply the requested figure', () => {
     expect(quoteContainsFigure('£50k', 50000, '£ per month')).toBe(true);
     expect(quoteContainsFigure('£50k', 50, '£k')).toBe(true);
