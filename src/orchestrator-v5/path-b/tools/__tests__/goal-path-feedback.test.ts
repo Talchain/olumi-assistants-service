@@ -261,6 +261,17 @@ describe('THE READINESS SELF-CHECK: a draft a Run would withhold the goal\'s cha
     }
   });
 
+  it('DL 93d79c3e (C1): a level the factor already holds (a bare range) is never asked for again; a factor with none is', () => {
+    const level = (low: number | null, high: number | null): LivingModelT => {
+      const m = structuredClone(KNOWN_ANSWER);
+      m.factors[0] = { ...m.factors[0]!, value: null, low, high };
+      return m;
+    };
+    const missing = (m: LivingModelT) => blockersOf(m, selfCheck(m, mapLivingModel(m))).all.filter((b) => b.code === 'MISSING_FACTOR_LEVEL');
+    expect(missing(level(null, null))).toEqual([{ code: 'MISSING_FACTOR_LEVEL', items: ['f'], ask: true }]);
+    expect(missing(level(0.4, 0.6))).toEqual([{ code: 'MISSING_FACTOR_LEVEL', items: ['f'], said: true }]);
+  });
+
   it('DL 22 Oct (#3680 row :65): an identity the engine would refuse (a part at 0) reaches the loop as the identity composer\'s ask, never a fix', () => {
     // A living model defines only sums and products, so the shape is fed as the graph the postimage carries.
     const frame = (value: number) => ({ value: value / 100, raw_value: value, cap: 100, source: 'brief_extraction' });

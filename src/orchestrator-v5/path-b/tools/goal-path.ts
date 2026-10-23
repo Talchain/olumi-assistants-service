@@ -133,6 +133,12 @@ function theirsIn(model: LivingModelT, item: string | null): boolean {
 
 /** A blocker found, on one item; a condition's scope is part of it, since two conditions can share their words (Codex r1 on #3672). */
 export type Found = { readonly code: string; readonly item: string | null; readonly scope?: string };
+/**
+ * A level the factor already holds, read as missing only until the mapper carries it (a bare range; B1): never asked for again
+ * (DL 93d79c3e, C1). Said, so the log still shows the gap.
+ */
+const holdsLevel = (model: LivingModelT, code: string, item: string | null): boolean => code === 'MISSING_FACTOR_LEVEL'
+  && model.factors.some((f) => f.id === item && (f.value !== null || (f.low !== null && f.high !== null)));
 /** Each found blocker's fix or ask, one per code and kind. */
 function said(model: LivingModelT, found: readonly Found[]): Blocker[] {
   const out = new Map<string, { code: string; items: string[]; fix?: string; ask?: true; said?: true }>();
@@ -140,7 +146,7 @@ function said(model: LivingModelT, found: readonly Found[]): Blocker[] {
     const kind = BLOCKER[code];
     // ⛔ A repair never alters or removes the person's own content (DL 22 Oct): a fix on it is an ask. Adding Olumi's links (`path`)
     // alters nothing of theirs.
-    const how = kind === undefined ? { said: true as const } : kind === 'ask' || (kind !== 'path' && theirsIn(model, item))
+    const how = kind === undefined || holdsLevel(model, code, item) ? { said: true as const } : kind === 'ask' || (kind !== 'path' && theirsIn(model, item))
       ? { ask: true as const } : { fix: FIX[kind] };
     const key = `${code}\u0000${Object.keys(how)[0]}`;
     const b = out.get(key) ?? out.set(key, { code, items: [], ...how }).get(key)!;
