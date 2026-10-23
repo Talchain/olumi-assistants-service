@@ -48,6 +48,13 @@ const REVIEWED: Readonly<Record<string, string>> = {
   // attributes to the user (source user) with a quote and said_in chat, i.e. their approved chat correction. The stamp is TRUE here.
   "orchestrator-v5/path-b/living-model/mapper.ts":
     "levelSource: user_override only when source is user, quote is set and said_in is chat (the person's approved chat correction, #3661)",
+  // MODEL PROGRAM display projection (#3709, alpha): stamps user_override only for a figure the canonical model attributes to
+  // the person whose quote the compiler FOUND in the person's own words (compile's `unverified` excludes it; the program
+  // compiles against every word they wrote, `sourceTextOf(person_words)`) and which is NOT in their brief: a later answer they
+  // approved on its card (`propose_change` checks the quote against what they wrote) or a figure they typed in the card's
+  // editor. Unverified words are never stamped as theirs. The stamp is TRUE here.
+  "orchestrator-v5/model-program/project.ts":
+    "observed_state.source user_override only for a person's figure whose quote compile verified in their own words and which is not in the brief (their approved answer or card edit, #3709)",
   // Declares USER_EDIT_SOURCE and stamps it onto `update_node` ops that carry
   // an `observed_state.value` — i.e. a value the user wrote through a
   // structured patch operation they consented to. The stamp is TRUE here.

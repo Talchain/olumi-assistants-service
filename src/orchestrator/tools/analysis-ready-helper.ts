@@ -67,6 +67,8 @@ import {
   type ObligationClass,
   type StructureProvenance,
 } from "../../cee/graph-readiness/obligation-provenance.js";
+import { isProgramGraph } from '../../orchestrator-v5/model-program-turn/program-store.js';
+import { programReadinessOf } from '../../orchestrator-v5/model-program-turn/program-readiness.js';
 
 // ============================================================================
 // Types
@@ -1972,6 +1974,8 @@ export function assessCanonicalAnalysisReadiness(
 export function buildCanonicalAnalysisReadyFromGraph(
   graph: unknown,
 ): AnalysisReadyPayload | undefined {
+  // A MODEL PROGRAM's readiness is the program's own (`program-readiness.ts`): the legacy assessor never runs on it.
+  if (isProgramGraph(graph)) return programReadinessOf(graph);
   return canonicalAnalysisReadyFrom(resolveRunAdmission(graph), graph);
 }
 

@@ -16,7 +16,8 @@ import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import { projectGraphForPersistence } from '../../../persisted-graph-projection.js';
 import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
 import { streamWhenAsked } from '../../../agent-lane/__tests__/stream-when-asked.js';
-import { CORE_REPLY_RULES } from '../../../core-route/instructions.js';
+// Codex r1 BLOCK 4 on #3709: this route's scenarios keep the Living Model text, byte for byte (staging 646d374e's reply rules).
+import { CORE_REPLY_RULES_LIVING_MODEL as CORE_REPLY_RULES } from '../../../core-route/instructions.js';
 
 type Json = Record<string, any>;
 let SCENARIO = '';
@@ -191,12 +192,15 @@ describe('PATH-B core: beside the AI\u2019s reply, only its own cards; no host g
   const hostCards = (j: Json): Json => ({ guidance: j.guidance, action_bar: j.action_bar, model_gap: j.model_gap, guided_sizing: j.guided_sizing,
     other_actions: ((j.suggested_actions ?? []) as Json[]).map((a) => String(a.id)).filter((id) => !PROPOSAL_CONTROL.test(id)) });
   const NONE = { guidance: undefined, action_bar: undefined, model_gap: undefined, guided_sizing: undefined, other_actions: [] };
+  const LIVING_MODEL_SHA = '7a1bced23a44dccc478a00d075b28bbe2dda487a4b6da868ae3a477698097e44';
   const expectCoherentInstructions = (j: Json): void => {
     expect(calls.length).toBeGreaterThan(0);
     for (const c of calls) {
       expect(typeof c.instructions).toBe('string');
       // DL 22 Oct (priority change): the coach's reply rules ride every call exactly once; the accreted discipline is gone.
       expect(c.instructions.split(CORE_REPLY_RULES), 'the reply rules ride every call exactly once').toHaveLength(2);
+      // Codex r2 #3709 (A4): the legacy route's standing instructions are staging 646d374e's, byte for byte, never the program's.
+      expect(createHash('sha256').update(c.instructions, 'utf8').digest('hex'), 'the legacy route sends the Living Model instructions unchanged').toBe(LIVING_MODEL_SHA);
       expect(c.instructions).not.toContain('<RESPONSE_DISCIPLINE>');
       expect(createHash('sha256').update(COHERENT_REPLY, 'utf8').digest('hex'), 'the replaced sentence is the one L8 signed').toBe(COHERENT_REPLY_SHA);
       expect(c.instructions, 'the prose-only sentence it replaced is gone').not.toContain(COHERENT_REPLY);

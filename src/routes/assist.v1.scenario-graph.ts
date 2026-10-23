@@ -19,6 +19,7 @@ import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-ident
 import { computeAnalysisAffectingGraphHash } from "../orchestrator-v5/context/graph-hash.js";
 import { proposalRecord, proposalFieldsWire, heldRecordsApplyAt, issuedTurnIdsForProposalRecords, proposalIssuances, type ProposalIssuingRow } from "../orchestrator-v5/agent-lane/proposal-object/record.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
+import { programReadOf, reopenProgram, unreadableWords } from "../orchestrator-v5/model-program-turn/program-store.js";
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
 import { buildErrorV1 } from "../utils/errors.js";
 import { getRequestId } from "../utils/request-id.js";
@@ -440,6 +441,10 @@ export default async function route(app: FastifyInstance) {
       // The current-read sidecar exposes its bounded identity and typed figures
       // without a second copy of raw enrichment/probability fields.
       const { result: _selectedBlock, ...currentReadWire } = analysis.current_read;
+      // A MODEL PROGRAM (alpha): its analysis is its newest STORED Run, never a recompute (its readiness is the program's own,
+      // `program-readiness.ts`). A claimed program that cannot be read shows NO analysis (never the legacy reader's) and says why.
+      const programRead = graphPresent ? programReadOf(graph) : { kind: 'none' as const };
+      const program = programRead.kind === 'program' ? reopenProgram(graph) : undefined;
       // Compatibility projection reads the common canonical claim, never the
       // issue count. The pending actions remain explanatory data only.
       const scopePermissions = claimPermissionsFrom(analysis.analysis_state, undefined);
@@ -635,7 +640,9 @@ export default async function route(app: FastifyInstance) {
         } : {}),
         analysis_result: coreLane && analysis.analysis_result?.type === 'analysis_result'
           ? { ...analysis.analysis_result, summary: '' } : analysis.analysis_result,
-        canonical_analysis_view: analysis.canonical_analysis_view,
+        // A program scenario's analysis is its newest STORED Run, exactly as computed (`program-store.ts`); never recomputed here.
+        canonical_analysis_view: programRead.kind === 'none' ? analysis.canonical_analysis_view : program?.view ?? null,
+        ...(programRead.kind === 'unreadable' ? { model_program: { readable: false, message: unreadableWords(programRead.reason) } } : {}),
         ...(analysis.run_recording === undefined ? {} : { run_recording: analysis.run_recording }),
         // CURRENT-READ-v1: one selected Run's canonical freshness and typed
         // figures. The raw graph_hash above remains the edit/CAS token; the

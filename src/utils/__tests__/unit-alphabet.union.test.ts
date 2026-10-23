@@ -105,6 +105,14 @@ const KNOWN: Readonly<Record<string, { readonly quoted: readonly string[]; reado
   "cee/draft/records/projector.ts": { quoted: ["%", "percent", "quarter", "year"], why: UNCLASSIFIED },
   "orchestrator-v5/agent-lane/option-name-truth.ts": { quoted: ["day", "month", "week", "year"], why: UNCLASSIFIED },
   "orchestrator-v5/context/cqe/rules.ts": { quoted: ["%", "percentage", "pp", "quarter"], why: UNCLASSIFIED },
+  "orchestrator-v5/model-program/canonical.ts": {
+    quoted: ["%", "month", "week", "year"],
+    why: "The model program's strict canonical schema (#3709): its PERIOD_UNITS ('week' | 'month' | 'year') and its % unit rule, the vocabulary the drafter writes units in, never read from the person's words",
+  },
+  "orchestrator-v5/model-program/units.ts": {
+    quoted: ["%", "day", "hour", "month", "pct", "percent", "percentage", "quarter", "week", "year"],
+    why: "The model program's own unit grammar (#3709): parseUnit's dimension and scale table for the canonical model's unit strings (a % is a 0.01 scale, a month a time dimension), never a rate-period list read from words",
+  },
   "orchestrator-v5/goal-target/deadline-date.ts": {
     quoted: ["day", "days", "month", "months", "week", "weeks", "year"],
     why: "S-E GOALS deadline CALENDAR (#2742), not a rate-period table: its count-unit type tags ('months' | 'weeks' | 'days') and the Intl date-part names ('year' | 'month' | 'day')",

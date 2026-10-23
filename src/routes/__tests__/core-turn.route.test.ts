@@ -4,7 +4,7 @@
  * a typed turn, a Run press, a card's approval, a resend of the same turn id, two turns at once, a legacy scenario, a canvas
  * edit, the first draft's streamed graph, and the contract's exact shape. SYNTHETIC wording (the KNOWN_ANSWER fixture).
  */
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { AnalysisStateV1Schema } from '@talchain/schemas/boundary';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -20,9 +20,12 @@ import { streamWhenAsked } from '../../orchestrator-v5/agent-lane/__tests__/stre
 import { SELECTION_NOTE_PREFIX } from '../../orchestrator-v5/agent-lane/selection-context.js';
 import { TODAY_PREFIX } from '../../orchestrator-v5/agent-lane/turn-context.js';
 import { corePromptCacheKey, STATE_BLOCK_PREFIX } from '../../orchestrator-v5/agent-lane/core/sdk-turn.js';
-import { CORE_ALIGNED_INSTRUCTIONS, instructionsForMode } from '../../orchestrator-v5/core-route/instructions.js';
+import { CORE_INSTRUCTIONS_LIVING_MODEL, CORE_REPLY_RULES_LIVING_MODEL, instructionsForMode, PROGRAM_TOOL_DESCRIPTIONS } from '../../orchestrator-v5/core-route/instructions.js';
+import { TOOL_DESCRIPTIONS } from '../../orchestrator-v5/path-b/tools/index.js';
+import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import { ASK_CHALLENGE_CHIP_ID } from '../../orchestrator-v5/core-route/turn-request.js';
-import { CORE_DRAFTER_RULES } from '../../orchestrator-v5/path-b/drafting-guidance.js';
+import { bakery, BRIEF as BAKERY_BRIEF, club, CLUB_BRIEF, q } from '../../orchestrator-v5/model-program-turn/__tests__/bakery.fixture.js';
+import { DRAFTING_INSTRUCTIONS } from '../../orchestrator-v5/model-program-turn/prompt.js';
 import type { LivingModelT } from '../../schemas/living-model.js';
 import { GOAL_CHANCE_LICENSED, PERIOD_END_EFFECTS_UNSTATED } from '../../orchestrator-v5/goal-target/goal-chance-licence.js';
 import { GOAL_FIGURES_TARGET_NOT_TESTABLE } from '../../orchestrator/context/option-result-source.js';
@@ -148,12 +151,16 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
   let app: FastifyInstance;
   let calls: Json[] = [];
   let outputs: Json[][] = [];
+  /** The canonical drafter's answer for a first turn (a scenario with no saved model). */
+  let canonicalDraft: string | undefined;
   let runWithStageStream: typeof import('../../cee/unified-pipeline/stage-stream-context.js').runWithStageStream;
   let currentTurnFence: typeof import('../../orchestrator-v5/session/turn-fence.js').currentTurnFence;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(streamWhenAsked(async (url: unknown, init?: { body?: unknown }) => {
       if (String(url).endsWith('/v1/conversations')) return json({ id: `conv_${randomUUID()}`, object: 'conversation' });
       const body = JSON.parse(String(init?.body ?? '{}')) as Json;
+      // The canonical drafter's strict call answers with the row's canned canonical model (none: no draft).
+      if (body.text?.format?.name === 'canonical_model') { calls.push(body); return json(responsesBody(canonicalDraft === undefined ? [] : [{ type: 'message', text: canonicalDraft }])); }
       // A structured side call (the model critic) answers nothing, and never takes the conversation's scripted outputs.
       if (body.text?.format?.type === 'json_schema') return json(responsesBody([]));
       calls.push(body);
@@ -234,7 +241,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   beforeEach(() => {
-    SCENARIO = randomUUID(); persisted = postimage(KNOWN_ANSWER); registered.length = 0; fenceRows.clear(); canvasForwards.length = 0; turnRows.clear(); conversationIds.clear();
+    SCENARIO = randomUUID(); persisted = postimage(KNOWN_ANSWER); canonicalDraft = undefined; registered.length = 0; fenceRows.clear(); canvasForwards.length = 0; turnRows.clear(); conversationIds.clear();
     readiness = { status: 'blocked', may_run: false, options: [], blockers: [] }; runState = undefined; carriedResult = undefined; otherRun = undefined; runs = 0; timingRun = false; runTimings.length = 0;
     pausedRun = null; calls = []; outputs = []; preparedId = ''; holdProvider = undefined; holdWhen = undefined;
   });
@@ -721,42 +728,25 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(calls, 'a canvas edit calls no model').toHaveLength(1);
   });
 
-  it('a draft saved, then the reply refused: the contract says the save is kept, the outcome is recorded, and a resend replays it', async () => {
+  it('⭐ the first draft (the canonical drafter): the streamed GRAPH_READY frame and the COMPLETE contract carry the same ids', async () => {
     persisted = null;
-    outputs = [[{ type: 'function_call', name: 'build_model_from_brief', call_id: 'draft', args: { brief: BRIEF, model: KNOWN_ANSWER } }], [{ type: 'refuse' }]];
-    const turnId = randomUUID();
-    const r = await typed(BRIEF, turnId);
-    expect(r.statusCode, r.body).toBe(502);
-    const j = r.json() as Json;
-    expect(registered).toHaveLength(1);
-    expect(j).toMatchObject({ durability: 'recorded', assistant_text: '', error: {
-      message: 'The saved change is kept, but the reply didn’t arrive. Send a new message to continue.', retry_safe: false, nothing_saved: false } });
-    const callsBefore = calls.length;
-    const again = (await typed(BRIEF, turnId)).json() as Json;
-    expect(again).toMatchObject({ durability: 'replayed', assistant_text: '', error: { code: 'REPLY_NOT_DELIVERED', nothing_saved: false } });
-    expect(calls.length, 'a replay calls no model').toBe(callsBefore);
-    expect(registered).toHaveLength(1);
-  });
-
-  it('⭐ the first draft: the streamed GRAPH_READY frame and the COMPLETE contract carry the same ids', async () => {
-    persisted = null;
-    outputs = [[{ type: 'function_call', name: 'build_model_from_brief', call_id: 'draft', args: { brief: BRIEF, model: KNOWN_ANSWER } }],
-      [{ type: 'message', text: 'Here is the first model I built.' }]];
+    canonicalDraft = JSON.stringify(bakery());
     const frames: Json[] = [];
     const r = await runWithStageStream((event) => { frames.push(event as Json); },
       // Awaited INSIDE the stage context, as the SSE wrapper does (`streamed-turn-sse.ts`): light-my-request dispatches on await.
-      async () => await app.inject({ method: 'POST', url: '/agent/v1/core-turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), message: BRIEF, source: 'composer' } }));
+      async () => await app.inject({ method: 'POST', url: '/agent/v1/core-turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), message: BAKERY_BRIEF, source: 'composer' } }));
     expect(r.statusCode, r.body).toBe(200);
     const j = r.json() as Json;
     expect(registered).toHaveLength(1);
+    expect(calls.map((c) => c.text?.format?.name ?? null), 'one canonical drafting call, and no agent call').toEqual(['canonical_model']);
     const ready = frames.filter((f) => f.kind === 'GRAPH_READY');
     expect(ready, JSON.stringify(frames.map((f) => f.kind))).toHaveLength(1);
     expect(ids(ready[0]!.graph)).toEqual(ids(j.model.graph));
     expect(ids(j.model.graph).length).toBeGreaterThan(0);
     expect(j.receipts).toEqual([expect.objectContaining({ version_id: 'v_1', authorised_by: 'olumi' })]);
     expect(j.model.scenario_revision).toBe((await freshRead()).content_hash);
+    expect((registered[0]!.graph as Json).living_model.model_program).toBe('v1');
   });
-
   it('DL 22 Oct (marketing on 7ee0d90f): a change that would cut the goal\u2019s path is said back; the AI\u2019s re-linked retry is the card', async () => {
     // f's unit stated, as every factor has one: Olumi's re-link from it can be sized per unit (the Run's own target verdict, C1).
     const united: LivingModelT = { ...structuredClone(KNOWN_ANSWER), factors: KNOWN_ANSWER.factors.map((f) => ({ ...f, unit: 'level' })) };
@@ -781,74 +771,42 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(registered, 'a card writes nothing').toHaveLength(0);
   });
 
-  it('DL (#3672 fix-forward): the AI stops after the not_run_ready refusal; the turn\u2019s end saves its draft as base, with its receipt', async () => {
-    persisted = null;
-    const model = { ...structuredClone(KNOWN_ANSWER), conditions: [{ text: 'only once the board signs off', applies_to: ['f_g'], role: 'prerequisite' as const,
-      source: 'olumi' as const, party: null, quote: null }] };
-    outputs = [[{ type: 'function_call', name: 'build_model_from_brief', call_id: 'draft', args: { brief: BRIEF, model } }],
-      [{ type: 'message', text: 'I will look at that condition again.' }]];
-    const r = await app.inject({ method: 'POST', url: '/agent/v1/core-turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), message: BRIEF, source: 'composer' } });
-    expect(r.statusCode, r.body).toBe(200);
-    const j = r.json() as Json;
-    expect(j._agent.tool_calls.map((c: Json) => [c.name, c.outcome])).toEqual([['build_model_from_brief', 'refused'], ['build_model_from_brief', 'ok']]);
-    expect(registered).toHaveLength(1);
-    expect((registered[0]!.graph as Json).living_model.conditions).toEqual(model.conditions);
-    expect(j.receipts).toEqual([expect.objectContaining({ version_id: 'v_1', authorised_by: 'olumi' })]);
-  });
-
   it('⭐ STEP 0 (arch plan, DL 23 Oct): ONE summary log line per turn, keyed by scenario and turn, by id and code only', async () => {
-    persisted = null;
-    // The route's own logger instance (after resetModules).
     const info = vi.spyOn((await import('../../utils/telemetry.js')).log, 'info');
-    const model = { ...structuredClone(KNOWN_ANSWER), conditions: [{ text: 'only once the board signs off', applies_to: ['f_g'], role: 'prerequisite' as const,
-      source: 'olumi' as const, party: null, quote: null }] };
-    // The person's option, quoted in words nobody said: the kernel relabels it (an authorship decision).
-    model.options[0] = { ...model.options[0]!, quote: 'or we wait a year' };
-    outputs = [[{ type: 'function_call', name: 'build_model_from_brief', call_id: 'draft', args: { brief: BRIEF, model } }],
-      [{ type: 'message', text: 'I will look at that condition again.' }]];
+    outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop', args: CHANGE }], [{ type: 'message', text: 'Press its card to look at that condition again.' }]];
     const turnId = randomUUID();
-    const r = await app.inject({ method: 'POST', url: '/agent/v1/core-turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: turnId, message: BRIEF, source: 'composer' } });
+    const r = await typed(SAID, turnId);
     expect(r.statusCode, r.body).toBe(200);
     const summaries = () => info.mock.calls.flatMap(([o]) => ((o as Json)?.event === 'core_turn.summary' ? [o as Json] : []));
     const lines = summaries();
     expect(lines).toHaveLength(1);
     // A resend of the same turn replays it: no AI call, so no second line (Codex r1 on #3691: one per turn that reached the AI).
-    expect((await app.inject({ method: 'POST', url: '/agent/v1/core-turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: turnId, message: BRIEF, source: 'composer' } })).statusCode).toBe(200);
+    expect((await typed(SAID, turnId)).statusCode).toBe(200);
     expect(summaries()).toHaveLength(1);
     info.mockRestore();
     const line = lines[0]!;
     expect(line).toMatchObject({ scenario_id: SCENARIO, turn_id: turnId, stopped_reason: 'answered' });
     expect(line.provider_calls.length).toBeGreaterThan(0);
     for (const c of line.provider_calls) expect(c).toMatchObject({ model: 'gpt-scripted', input_tokens: 10, output_tokens: 5, ms: expect.any(Number) });
-    expect(line.tool_calls.map((c: Json) => [c.name, c.outcome, c.refusal ?? null, c.run_ready ?? null]))
-      .toEqual([['build_model_from_brief', 'refused', 'not_run_ready', null], ['build_model_from_brief', 'ok', null, false]]);
-    expect(line.tool_calls[0].blockers).toEqual(line.tool_calls[1].blockers);
-    expect(line.tool_calls[0].blockers).toContainEqual(expect.objectContaining({ items: ['condition'] }));
-    expect(line.tool_calls[1].relabelled).toEqual([{ id: 'hold', was: 'user' }]);
-    // Ids and codes only: no brief, condition, quote or reply words.
+    expect(line.tool_calls.map((c: Json) => [c.name, c.outcome])).toEqual([['propose_change', 'ok']]);
+    // Ids and codes only: no said words or reply words.
     const text = JSON.stringify(line);
-    for (const words of ['board signs off', 'wait a year', 'look at that condition', 'units']) expect(text).not.toContain(words);
+    for (const words of [SAID, 'look at that condition']) expect(text).not.toContain(words);
   });
-
   it('Codex r1 on #3691: a failed turn writes its ONE summary line, with the calls made before it failed and no error words', async () => {
-    persisted = null;
     const info = vi.spyOn((await import('../../utils/telemetry.js')).log, 'info');
-    const model = { ...structuredClone(KNOWN_ANSWER), conditions: [{ text: 'only once the board signs off', applies_to: ['f_g'], role: 'prerequisite' as const,
-      source: 'olumi' as const, party: null, quote: null }] };
-    outputs = [[{ type: 'function_call', name: 'build_model_from_brief', call_id: 'draft', args: { brief: BRIEF, model } }], [{ type: 'refuse' }]];
+    outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop', args: CHANGE }], [{ type: 'refuse' }]];
     const turnId = randomUUID();
-    const r = await app.inject({ method: 'POST', url: '/agent/v1/core-turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: turnId, message: BRIEF, source: 'composer' } });
+    const r = await typed(SAID, turnId);
     const lines = info.mock.calls.flatMap(([o]) => ((o as Json)?.event === 'core_turn.summary' ? [o as Json] : []));
     info.mockRestore();
     expect(r.statusCode).not.toBe(200);
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatchObject({ scenario_id: SCENARIO, turn_id: turnId, failed: 'turn_failed' });
     expect(lines[0]!.provider_calls.length).toBeGreaterThan(0);
-    expect(lines[0]!.tool_calls.map((c: Json) => [c.name, c.outcome, c.refusal ?? null]))
-      .toEqual([['build_model_from_brief', 'refused', 'not_run_ready'], ['build_model_from_brief', 'ok', null]]);
+    expect(lines[0]!.tool_calls.map((c: Json) => [c.name, c.outcome])).toEqual([['propose_change', 'ok']]);
     expect(lines[0]).not.toHaveProperty('err');
   });
-
   it('Codex r2 on #3691: a withheld tool\'s refusal the SDK records itself is in a failed turn\'s line; a turn that reached no AI writes none', async () => {
     const telemetry = (await import('../../utils/telemetry.js')).log;
     const info = vi.spyOn(telemetry, 'info');
@@ -866,48 +824,10 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     info.mockRestore();
   });
 
-  it('Codex r1 on #3675: a provider error after the refusal still leaves the draft saved, as base would; the error is the one reported', async () => {
-    persisted = null;
-    const model = { ...structuredClone(KNOWN_ANSWER), conditions: [{ text: 'only once the board signs off', applies_to: ['f_g'], role: 'prerequisite' as const,
-      source: 'olumi' as const, party: null, quote: null }] };
-    outputs = [[{ type: 'function_call', name: 'build_model_from_brief', call_id: 'draft', args: { brief: BRIEF, model } }], [{ type: 'refuse' }]];
-    const r = await app.inject({ method: 'POST', url: '/agent/v1/core-turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), message: BRIEF, source: 'composer' } });
-    expect(registered).toHaveLength(1);
-    expect((registered[0]!.graph as Json).living_model.conditions).toEqual(model.conditions);
-    expect(r.statusCode).not.toBe(200);
-    expect((r.json() as Json).error ?? r.json()).toMatchObject({ nothing_saved: false });
-  });
-
-  it('⭐ ESTIMATES (DL ruling 22 Oct): a first draft keeps Olumi\'s factor and Olumi\'s estimate on the person\'s figure-less factor, each with its range; the person\'s source stays theirs; the target stays unset', async () => {
-    persisted = null;
-    const brief = 'we need more units; today we are at 70. f matters. push f to 1, or we hold. each +1 in f adds 50 units on average, with a standard deviation of 10. Sam disagrees';
-    const model = structuredClone(KNOWN_ANSWER);
-    model.aims[0] = { ...model.aims[0]!, quote: 'we need more units; today we are at 70', target: { ...model.aims[0]!.target!, value: null } };
-    // The person named f and gave no level: Olumi's starting estimate, with its range, on THEIR factor.
-    model.factors[0] = { ...model.factors[0]!, quote: 'f matters', value: 0.5, low: 0.3, high: 0.7, estimate_by: 'olumi' };
-    // Olumi's own factor, complete: a central figure with a range, in a stated unit, and a sized link to the aim.
-    model.factors.push({ estimate_by: null, kind: 'factor', limit: null, id: 'h', label: 'Hours of rework', value: 6, low: 3, high: 10, unit: 'hours',
-      defined_as: null, source: 'olumi', party: null, quote: null });
-    model.links.push({ id: 'h_g', from: 'h', to: 'g', source: 'olumi', party: null, quote: null,
-      effect: { estimate_by: null, form: 'range', value: -2, sd: null, low: -4, high: -1, unit: 'units', sign: '-' } });
-    outputs = [[{ type: 'function_call', name: 'build_model_from_brief', call_id: 'draft', args: { brief, model } }],
-      [{ type: 'message', text: "Here is a first model; the figures marked as Olumi's are starting estimates for you to correct." }]];
-    const r = await post({ turn_id: randomUUID(), message: brief, source: 'composer' });
-    expect(r.statusCode, r.body).toBe(200);
-    const j = r.json() as Json;
-    expect(j.receipts, JSON.stringify(j._agent)).toEqual([expect.objectContaining({ authorised_by: 'olumi' })]);
-    // The write itself: the graph the register call saved.
-    const saved = (registered[0]!.graph as Json).living_model as LivingModelT;
-    expect(saved.factors.find((f) => f.id === 'f'), 'the person\'s factor: theirs, with Olumi\'s labelled estimate').toMatchObject(
-      { source: 'user', quote: 'f matters', estimate_by: 'olumi', value: 0.5, low: 0.3, high: 0.7 });
-    expect(saved.factors.find((f) => f.id === 'h'), 'Olumi\'s own factor, complete').toMatchObject(
-      { source: 'olumi', quote: null, value: 6, low: 3, high: 10, unit: 'hours' });
-    expect(saved.aims[0]!.target?.value, 'the goal\'s target is asked for, never set by Olumi').toBeNull();
-  });
-
   describe('⭐ CACHING (DL 22 Oct): the provider\'s cached prefix is the same bytes on every call', () => {
     /** The standing instructions: the same on every turn of every scenario; this turn's facts and guidance follow them. */
-    const STANDING = instructionsForMode('core', CORE_ALIGNED_INSTRUCTIONS);
+    // These rows run on a saved Living Model (not a program): it keeps the Living Model text, byte for byte (Codex r1 BLOCK 4 on #3709).
+    const STANDING = instructionsForMode('core', CORE_INSTRUCTIONS_LIVING_MODEL, CORE_REPLY_RULES_LIVING_MODEL);
     const challengeOn = (id: string) => post({ turn_id: randomUUID(), message: 'Challenge this', source: 'chip_click', chip: { id: ASK_CHALLENGE_CHIP_ID },
       selected_elements: { node_ids: [id] } });
 
@@ -949,7 +869,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
         .toEqual(new Set([STANDING]));
     });
 
-    it('(5) the standing instructions open every call of two different scenarios; the Challenge note and the drafting arm follow the state block in the turn\'s input', async () => {
+    it('(5) the standing instructions open every call of two different scenarios; the Challenge note follows the state block in the turn\'s input', async () => {
       /** The turn's system items, in order: its state block, then its guidance. */
       const systemItems = (b: Json): string[] => ((b.input ?? []) as Json[]).filter((i) => i.role === 'system').map((i) => String(i.content));
       const factor = (((persisted as Json).nodes ?? []) as Json[]).find((n) => n.kind === 'factor')!;
@@ -963,23 +883,143 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(one[0]).toContain(TODAY_PREFIX);
       expect(one[1]!.startsWith(SELECTION_NOTE_PREFIX), 'the note follows the state block').toBe(true);
 
-      // A second scenario, with no saved model: the first draft's arm is on.
+      // A second scenario, another saved model: a typed turn, with no guidance of its own.
       const first = { scenario: SCENARIO, body: challenged };
-      SCENARIO = randomUUID(); persisted = null; calls = [];
+      SCENARIO = randomUUID(); persisted = postimage(KNOWN_ANSWER); calls = [];
       outputs = [[{ type: 'message', text: 'Tell me more about the situation first.' }]];
       expect((await typed('We are weighing two staffing options.')).statusCode).toBe(200);
       const drafting = calls[0]!;
       expect(SCENARIO).not.toBe(first.scenario);
       expect(drafting.instructions, 'byte-equal across the two scenarios').toBe(first.body.instructions);
-      expect(systemItems(drafting)).toEqual([expect.stringContaining(STATE_BLOCK_PREFIX), CORE_DRAFTER_RULES]);
+      expect(systemItems(drafting)).toEqual([expect.stringContaining(STATE_BLOCK_PREFIX)]);
       expect(String(challenged.instructions), 'no Challenge note in the instructions').not.toContain(SELECTION_NOTE_PREFIX);
-      expect(String(drafting.instructions), 'no drafting arm in the instructions').not.toContain(CORE_DRAFTER_RULES);
 
       // The prefix the provider caches (the tools, then the standing instructions) is byte-equal across the two scenarios.
       expect(JSON.stringify(drafting.tools)).toBe(JSON.stringify(first.body.tools));
       expect(drafting.prompt_cache_key).toBe(first.body.prompt_cache_key);
       expect(drafting.prompt_cache_key).toBe(corePromptCacheKey(String(drafting.model), STANDING));
       expect([drafting.prompt_cache_retention, first.body.prompt_cache_retention]).toEqual(['24h', '24h']);
+    });
+
+    /** Draft a saved PROGRAM scenario (the canonical drafter's first turn), then clear the calls. */
+    const savedProgram = async (): Promise<void> => {
+      SCENARIO = randomUUID(); persisted = null; canonicalDraft = JSON.stringify(bakery()); calls.length = 0;
+      expect((await typed(BAKERY_BRIEF)).statusCode).toBe(200);
+      expect(calls[0]!.text?.format?.name).toBe('canonical_model');
+      expect(calls[0]!.instructions).toBe(DRAFTING_INSTRUCTIONS);
+      calls.length = 0;
+    };
+
+    it('(6) ALPHA (23 Oct) + Codex r1 BLOCK 4 on #3709: a saved PROGRAM\'s turn gets the model-program instructions; a saved Living Model keeps the old text, byte for byte', async () => {
+      // Pinned from the request bodies the provider received on this route, not from the module that builds them.
+      const PROGRAM_SHA = '08747cdea15ebf05c863822fb8776ef4a4b34f7ac001270018a1d90b529fd6a9';
+      const LIVING_MODEL_SHA = '7a1bced23a44dccc478a00d075b28bbe2dda487a4b6da868ae3a477698097e44'; // staging 646d374e's
+      const sha = (c: Json) => createHash('sha256').update(String(c.instructions), 'utf8').digest('hex');
+      outputs = [[{ type: 'message', text: 'Here is what the model holds.' }]];
+      expect((await typed('What does the model hold now?')).statusCode).toBe(200);
+      expect(calls).toHaveLength(1);
+      expect(sha(calls[0]!)).toBe(LIVING_MODEL_SHA);
+      expect(String(calls[0]!.instructions)).not.toContain('HOW THE MODEL WORKS');
+      await savedProgram();
+      outputs = [[{ type: 'message', text: 'Tell me more about the situation first.' }]];
+      expect((await typed('What does the model hold now?')).statusCode).toBe(200);
+      expect(calls).toHaveLength(1);
+      expect(sha(calls[0]!)).toBe(PROGRAM_SHA);
+      expect(String(calls[0]!.instructions)).toContain('draft the first model from their brief in that same turn, even when figures are missing');
+      expect(String(calls[0]!.instructions)).not.toContain('POLYMATH COACHING');
+    });
+
+    it('S3 (DL 23 Oct): on a program turn the provider receives the PROGRAM tool descriptions, read included, and the read it gets back carries the Run\'s goal_chance block unchanged', async () => {
+      // Two goals, so the block has each goal's own line and the joint.
+      const m = club();
+      m.quantities.push(q('floor', 'member', { value: 320, quote: 'at least 320 members' }));
+      m.goals.push({ ...m.goals[0]!, id: 'keep_320', label: 'Keep at least 320 members', measure: { ...m.goals[0]!.measure!, target: 'floor' }, quote: 'keep at least 320 members' });
+      SCENARIO = randomUUID(); persisted = null; canonicalDraft = JSON.stringify(m);
+      expect((await typed(`${CLUB_BRIEF} And keep at least 320 members.`)).statusCode).toBe(200);
+      const stored = (persisted!.living_model.runs.at(-1).result.canonical_analysis_view as Json).goal_chance;
+      expect(stored.targets.per_target).toHaveLength(2);
+      calls.length = 0;
+      outputs = [[{ type: 'function_call', name: 'read_canonical_context', call_id: 'read', args: {} }], [{ type: 'message', text: 'The model has two goals.' }]];
+      expect((await typed('What does the model hold now?')).statusCode).toBe(200);
+      expect(calls).toHaveLength(2);
+      // The tools as the provider received them: the four program tools, each with #3707's description, none with core's.
+      const sentTools = Object.fromEntries((calls[0]!.tools as Json[]).filter((t) => t.type === 'function').map((t) => [t.name, t.description]));
+      expect(sentTools).toEqual(PROGRAM_TOOL_DESCRIPTIONS);
+      for (const [name, description] of Object.entries(sentTools)) expect(description).not.toBe((TOOL_DESCRIPTIONS as Record<string, string>)[name]);
+      // DL 23 Oct (batch 3: the agent never used the op): propose_change, as SENT, describes define_goal_measure. Spelled here.
+      const sentSha = (name: string) => createHash('sha256').update(String(sentTools[name]), 'utf8').digest('hex');
+      expect(String(sentTools.propose_change)).toContain('define_goal_measure: when they say how an aim with no measure is measured (a coaching question’s record_id), the quantity it is about (its id, or a new one by the name and unit they give), the comparison, and the target and deadline only as their words state them; a target or deadline already in the model is given by its id; what they did not state stays null and is asked; anything else their words state that this measure does not cover (another target, a deadline the model cannot hold) goes in leaves_out, copied exactly, and is named beside the chance. '
+        + 'Olumi then proposes, on the same card, what works that measure out, each part marked as Olumi’s. Put every edit in ONE propose_change: a second proposal in the same turn is refused. ');
+      expect(sentSha('propose_change')).toBe('8cfaf20c57a2632f8bb6a94b5d06cee9438a94ddc9574384eea430963b119eda');
+      // The read the agent got back: the Run's goal_chance exactly as stored (each goal's own line, the joint, the notes).
+      const output = (calls[1]!.input as Json[]).find((i) => i.type === 'function_call_output' && i.call_id === 'read')!.output;
+      const read = JSON.parse(typeof output === 'string' ? output : JSON.stringify(output)) as Json;
+      const run = (read.data ?? read).run as Json;
+      expect(stableStringify(run.goal_chance)).toBe(stableStringify(stored));
+      expect(Object.keys(run).sort()).toEqual(['current', 'engine_current', 'goal_chance', 'options', 'run_id']);
+    });
+
+    it('S3 (batch 2 mrr-r3): two program proposals in one turn still leave the person ONE card to approve; the second is refused with its way on', async () => {
+      await savedProgram();
+      const set = (quantity_id: string, value: number, quote: string, public_label: string) => ({ public_label, basis: 'their answer',
+        ops: [{ op: 'set_quantity', quantity_id, value, low: null, high: null, range_kind: null, quote }] });
+      outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'p1', args: set('oven_price', 2500, 'The oven would cost £2,500', 'Oven price £2,500') },
+        { type: 'function_call', name: 'propose_change', call_id: 'p2', args: set('base_sales', 320, 'we bake 320 loaves a week now', 'Base sales 320') }],
+      [{ type: 'message', text: 'I prepared the oven price; approve its card and I will do the rest next.' }]];
+      const r = await typed('The oven would cost £2,500 and we bake 320 loaves a week now.');
+      expect(r.statusCode, r.body).toBe(200);
+      const j = r.json() as Json;
+      const tools = (j._agent.tool_calls as Json[]).filter((c) => c.name === 'propose_change');
+      // The SDK runs the two calls together: one prepares the card, the other is refused (in either order).
+      expect(tools.map((c) => c.outcome).sort()).toEqual(['ok', 'refused']);
+      expect(JSON.stringify(tools.find((c) => c.outcome === 'refused'))).toContain('one_card_per_turn');
+      expect(j.cards as Json[]).toHaveLength(1);
+      expect(registered.length, 'proposing saves nothing').toBe(1);
+    });
+
+    it('S3 (batch 4 marketing r3–r5): a propose_change whose arguments fail its schema goes back to the model as a tool error; its retry gives ONE card, never a 502', async () => {
+      await savedProgram();
+      const good = { public_label: 'Oven price £2,500', basis: 'their answer', ops: [{ op: 'set_quantity', quantity_id: 'oven_price', value: 2500, low: null, high: null, range_kind: null, quote: 'The oven would cost £2,500' }] };
+      const bad = { ...good, ops: [{ ...good.ops[0], value: 'two and a half thousand' }] };
+      outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'bad', args: bad }],
+        [{ type: 'function_call', name: 'propose_change', call_id: 'good', args: good }], [{ type: 'message', text: 'I prepared the oven price; approve its card.' }]];
+      const r = await typed('The oven would cost £2,500.');
+      expect(r.statusCode, r.body).toBe(200);
+      const j = r.json() as Json;
+      expect(j.cards as Json[]).toHaveLength(1);
+      // The model got the schema error back as the tool's own output, in the same turn.
+      const back = (calls[1]!.input as Json[]).find((i) => i.type === 'function_call_output' && i.call_id === 'bad')!.output;
+      expect(JSON.stringify(back)).toContain('invalid_arguments');
+      // It names the failing field, never its value, so the model knows what to correct.
+      expect(JSON.stringify(back)).toContain('ops.0.value');
+      expect(JSON.stringify(back)).not.toContain('two and a half thousand');
+      expect(calls).toHaveLength(3);
+    });
+
+    /** The instructions the provider received on one typed turn of a saved program (the model-program instructions). */
+    const sentOnce = async (): Promise<string> => {
+      await savedProgram();
+      outputs = [[{ type: 'message', text: 'Noted.' }]];
+      expect((await typed('The lane hire is about 20 pounds an hour.')).statusCode).toBe(200);
+      expect(calls).toHaveLength(1);
+      return String(calls[0]!.instructions);
+    };
+
+    it('(7) Codex r1 BLOCK 1 on #3707: a loose figure goes in exactly as said, with no bounds Olumi adds; Olumi asks for their range', async () => {
+      const sent = await sentOnce();
+      expect(sent.split('A loose figure ("about 20") goes in exactly as they said it: their figure, 20, with their words quoted so the "about" stays visible. '
+        + 'Never add a range or bounds they did not give. If that figure feeds a goal or a limit, ask what range they would put on it.')).toHaveLength(2);
+      for (const gone of ['18 to 22', 'a range that reads their word', 'the range is Olumi\'s reading']) expect(sent, gone).not.toContain(gone);
+    });
+
+    it('(8) Codex r1 BLOCK 2 on #3707: the whole CALCULATION BOUNDARY rides the core instructions once, with its labelled-arithmetic permission', async () => {
+      const sent = await sentOnce();
+      expect(sent.split('\n\nCALCULATION BOUNDARY\n'
+        + "Do not calculate or forecast an option's goal outcome, probability of success, break-even, expected value, sensitivity, robustness, or other engine-owned analytical result yourself.\n"
+        + 'You may perform transparent one-step arithmetic on figures the user supplied, or evaluate a total or difference they explicitly defined, including at the end points of a range they stated, only when it is NOT presented as a model result. '
+        + 'Show the operands and units, label it as simple arithmetic, and identify the saved setting or clearly labelled what-if used. This permission excludes every engine-owned result named above and never permits inventing a response law between quantities.\n'
+        + 'If the requested implication requires modelled relationships, use only supplied current engine output. If that output is unavailable, stale or blocked, identify the missing input or offer the appropriate model/run action instead of estimating the result.\n\n'
+      )).toHaveLength(2);
     });
   });
 });

@@ -89,7 +89,7 @@ import { CORE_DRAFTER_RULES } from '../orchestrator-v5/path-b/drafting-guidance.
 import { constructionDeadline, CORE_RUN_PRESS_WITHHELD, coreTurnStores, coreTurnTools, graphReadyEmitter } from '../orchestrator-v5/core-route/deps.js';
 import { AGENT_TURN_CLAIM_WAIT, agentTurnRequestHash, challengeTargetOf, chipOperationOf, claimHashFor, claimTurnIdOf, isChiplessRetry, requestHashOfClaim,
   sameAgentTurnRequest, STRUCTURAL_CHALLENGE_HASH_TAG, typedRowProof, withChipOperation } from '../orchestrator-v5/core-route/turn-request.js';
-import { CORE_ALIGNED_INSTRUCTIONS, draftArmOf, GOAL_CHANCE_RANKING_INSTRUCTION, instructionsForMode, REPLY_LENGTH_INSTRUCTION } from '../orchestrator-v5/core-route/instructions.js';
+import { CORE_INSTRUCTIONS_LIVING_MODEL, CORE_REPLY_RULES_LIVING_MODEL, draftArmOf, GOAL_CHANCE_RANKING_INSTRUCTION, instructionsForMode, REPLY_LENGTH_INSTRUCTION } from '../orchestrator-v5/core-route/instructions.js';
 import { parseSelectedElements } from '../orchestrator-v5/boundary/request-extensions.js';
 import { agentSelectionContext, type AgentSelectionContext } from '../orchestrator-v5/agent-lane/selection-context.js';
 import { NOTE_ON_ITEM } from '../orchestrator-v5/path-b/tools/note-on-item.js';
@@ -3682,7 +3682,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const interpret = interpretBudget();
         const resp = await callModelFor(interpret)({
           // Standing unit/authorship/calculation safeguards remain; RUN_FACTS_USE is the one Run coaching instruction.
-          instructions: instructionsForMode(mode, `${AGENT_INSTRUCTIONS}\n\n${eligibleIntervention === undefined ? '' : `${ELIGIBLE_INTERVENTION_INSTRUCTION}\n\n`}${askView ? `${RUN_INTERPRETATION_VIEW_INSTRUCTION}\n\n` : ''}${INTERPRET_ONLY_CONSTRAINT}\n\n${RUN_FACTS_USE}`),
+          instructions: instructionsForMode(mode, `${AGENT_INSTRUCTIONS}\n\n${eligibleIntervention === undefined ? '' : `${ELIGIBLE_INTERVENTION_INSTRUCTION}\n\n`}${askView ? `${RUN_INTERPRETATION_VIEW_INSTRUCTION}\n\n` : ''}${INTERPRET_ONLY_CONSTRAINT}\n\n${RUN_FACTS_USE}`, CORE_REPLY_RULES_LIVING_MODEL),
           input: explanationInput,
           // No tools at all: acting is structurally impossible on this call (and no schema tokens
           // are spent on tools it may not use). Measured against the live API: accepted with the
@@ -4313,7 +4313,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             analyseAfterCommit: () => { analysisToCore = true; return analyseCommittedChange(); },
             researchShowable: (query) => researchControlShowableNow(readingDispatch, scenarioId, query),
             onVerifiedSave: () => { verifiedSave = true; } }),
-          instructions: instructionsForMode(mode, `${promptArmOf(mode, req.headers['x-olumi-prompt-arm']) === 'B' ? CORE_ALIGNED_INSTRUCTIONS : AGENT_TOOL_INSTRUCTIONS}${eligibleIntervention === undefined ? '' : `\n\n${ELIGIBLE_INTERVENTION_INSTRUCTION}`}${coreDraftArm === 'on' ? `\n\n${CORE_DRAFTER_RULES}` : ''}${challenge === null ? '' : `\n\n${challenge.note}`}`),
+          instructions: instructionsForMode(mode, `${promptArmOf(mode, req.headers['x-olumi-prompt-arm']) === 'B' ? CORE_INSTRUCTIONS_LIVING_MODEL : AGENT_TOOL_INSTRUCTIONS}${eligibleIntervention === undefined ? '' : `\n\n${ELIGIBLE_INTERVENTION_INSTRUCTION}`}${coreDraftArm === 'on' ? `\n\n${CORE_DRAFTER_RULES}` : ''}${challenge === null ? '' : `\n\n${challenge.note}`}`, CORE_REPLY_RULES_LIVING_MODEL),
           briefText: coreSaved?.brief_text,
           canonicalState: livingView === undefined ? canonicalContext?.packet?.state
             : { ...(canonicalContext?.packet?.state as Record<string, unknown> | undefined), ...livingView },
@@ -4346,7 +4346,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             instructions: instructionsForMode(mode, methodTurn?.kind === 'run' ? `${AGENT_INSTRUCTIONS}\n\n${methodTurn.directive}\n\n${premortemProducerDirective(methodTurn, methodGraph)}`
               : widenRun !== undefined ? `${AGENT_INSTRUCTIONS}\n\n${widenRun.directive}`
               : risksRun !== undefined ? `${AGENT_INSTRUCTIONS}\n\n${risksRun.directive}`
-              : eligibleIntervention === undefined ? AGENT_TOOL_INSTRUCTIONS : `${AGENT_TOOL_INSTRUCTIONS}\n\n${ELIGIBLE_INTERVENTION_INSTRUCTION}`),
+              : eligibleIntervention === undefined ? AGENT_TOOL_INSTRUCTIONS : `${AGENT_TOOL_INSTRUCTIONS}\n\n${ELIGIBLE_INTERVENTION_INSTRUCTION}`, CORE_REPLY_RULES_LIVING_MODEL),
             maxOutputTokens: budget.max_output_tokens,
             mode,
             // T3: a method turn is structurally ONE model call with NO tool (DL 5939415083 (2)): every tool withheld, one hop.

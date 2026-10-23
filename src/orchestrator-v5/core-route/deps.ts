@@ -95,7 +95,7 @@ export interface CoreTurnToolsInput {
   readonly ctx: AgentToolContext;
   readonly mode: AgentLaneMode;
   /** A scenario whose meaning is its living model (or that has no model yet) changes through the living model only. */
-  readonly scenario: 'core' | 'legacy';
+  readonly scenario: 'core' | 'legacy' | 'program';
   readonly requestId: string;
   readonly message: string;
   /** The route's counting dispatch, decorated with its held-approval writer (`capDispatch`). */

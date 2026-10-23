@@ -19,31 +19,30 @@ const count = (text: string, part: string): number => text.split(part).length - 
 describe('prompt arm B (programme-docs #94 6302769609): the core agent is told only about the tools it has', () => {
   const b = instructionsForMode('core', CORE_ALIGNED_INSTRUCTIONS);
 
-  it('names none of the legacy tools and every core tool, with the AIE authority and starting-input wording', () => {
+  it('ALPHA (DL 93d79c3e, 23 Oct): names no legacy tool and no drafting or edit tool (each tool\u2019s own description says how), and keeps the card-approval rule', () => {
     for (const t of LEGACY_TOOLS) expect(b, t).not.toContain(t);
-    for (const t of CORE_TOOLS) expect(b, t).toContain(t);
+    for (const t of CORE_TOOLS) expect(b, t).not.toContain(t);
     expect(b).toContain("Do not treat a typed yes or your own interpretation as the card's approval.");
-    expect(b).toContain('offer clearly labelled Olumi assumptions through propose_change for review');
     expect(b).not.toContain('{{MODE_AND_AUTHORITY}}');
   });
 
-  it('keeps the shared reasoning, science and reply rules, each once, and the core reply rules last', () => {
-    for (const h of ['\nTRUTH\n', '\nREASONING\n', '\nAUTHORSHIP\n', '\nIDEATION\n', 'POLYMATH COACHING', 'CALCULATION BOUNDARY']) expect(b, h).toContain(h);
-    for (const part of [OLUMI_PURPOSE_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION, MODEL_RELATIVE_NAMING_INSTRUCTION, CORE_REPLY_RULES,
-      HOST_SCIENCE_AND_SOURCE_RULES]) expect(count(b, part)).toBe(1);
-    // The host contract's science, source and freshness rules ride along byte for byte (AIE 22:17Z), naming no tool.
-    for (const rule of ['Never express the chance as a percentage of model runs.', 'Earlier assistant replies can describe a Run that was current then',
-      'that separation rests on Olumi\'s own starting estimates', "The goal\u2019s `target` is the figure the user stated"]) expect(b, rule).toContain(rule);
+  it('ALPHA: the model-program prompt, each section once, the purpose once and the reply rules last; the coach template and the Living Model host rules are gone', () => {
+    for (const h of ['HOW THE MODEL WORKS', 'FIRST MODEL', 'ANSWERS AND CHANGES', 'RESULTS', 'CALCULATION BOUNDARY', 'WHEN NOTHING CAN BE CALCULATED YET', 'WORDS',
+      'EXAMPLE (a first model; synthetic)']) expect(count(b, `\n\n${h}\n`), h).toBe(1);
+    for (const part of [OLUMI_PURPOSE_INSTRUCTION, CORE_REPLY_RULES]) expect(count(b, part)).toBe(1);
     expect(b.endsWith(CORE_REPLY_RULES)).toBe(true);
+    for (const gone of [HOST_SCIENCE_AND_SOURCE_RULES, GOAL_CHANCE_RANKING_INSTRUCTION, MODEL_RELATIVE_NAMING_INSTRUCTION, '\nTRUTH\n', '\nREASONING\n',
+      'POLYMATH COACHING', 'saved_run_options', 'goal_chance_licence', 'decision_sensitivity', 'run_facts']) expect(b, gone.slice(0, 60)).not.toContain(gone);
+    // Under half the 29,512 characters it replaces (staging 646d374e).
+    expect(b.length).toBeLessThan(29_512 / 2);
   });
 
-  it('arm B is the AIE\'s assembled reference, byte for byte (programme-docs #94 6303242136, static text sha256 7b6145d4…), plus the canvas-coaching sentence', () => {
+  it('the sent core instructions, byte for byte, plus the canvas-coaching sentence once (the route row in core-turn.route.test.ts pins the same bytes as the SDK receives them)', () => {
     expect(b.split(NOTE_ON_ITEM_INSTRUCTION)).toHaveLength(2);
-    // 7b6145d4… until 21 Oct; arm C's adoption changed only the closing core reply rule (see its row), now 56625e00….
-    expect(createHash('sha256').update(b.replace(`${NOTE_ON_ITEM_INSTRUCTION}\n\n`, ''), 'utf8').digest('hex')).toBe('055841368f958fd07a9e729b8f459e83d1793e98acbbd0b6bcefa8aba9ddf41a'); // 22 Oct: one exact blocking-input question; retire the coach's duplicate ask.
-    // Candidate-3 witnesses (21 Oct): presence checks (text only, not behaviour): WHEN to build, and Olumi's additions on a card.
-    expect(b).toContain('build the first model from their brief in that same turn');
-    expect(b).toContain('a list in your reply adds nothing to their model');
+    // 23 Oct (ALPHA): the model-program prompt replaces arm B's assembled reference (055841368f…, 29,512 characters sent).
+    expect(createHash('sha256').update(b, 'utf8').digest('hex')).toBe('08747cdea15ebf05c863822fb8776ef4a4b34f7ac001270018a1d90b529fd6a9');
+    // Candidate-3 witness kept (21 Oct): WHEN to build. Text only, not behaviour.
+    expect(b).toContain('draft the first model from their brief in that same turn, even when figures are missing');
   });
 
   it('arm A is untouched: the legacy host contract is byte-identical to staging b76bc42c', () => {
@@ -67,7 +66,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
   });
 
   it('THE PROMPTS (DL 22 Oct, priority change): the coach\u2019s reply rules and the drafter\u2019s rules, adapted as ruled; the old constants are gone', () => {
-    expect(createHash('sha256').update(CORE_REPLY_RULES, 'utf8').digest('hex')).toBe('6f5f00c581ac4be2f1f590973e4bcf58c6eba498e5216bc3a8a21a189be5f3d6');
+    expect(createHash('sha256').update(CORE_REPLY_RULES, 'utf8').digest('hex')).toBe('312c2c4bdd66fdcd8f032437d4ad2f8e0c9c4596e958245aff0890249c5a7432'); // 23 Oct (ALPHA): the reply rules for the model program.
     expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('bed04fc58a01dbd02d8f5c8aa6ef171731a356c1cde47a85e0cd64be35416653'); // 23 Oct (DL 93d79c3e, C2 double prime): a definition's parts are factors with levels, never another definition; a STATED per-unit effect is a sized link. 22 Oct: every stated goal saved in their words, never approximated (Claude r1 on #3670); + a calendar date is Olumi's labelled reading
     // The retired constants are gone from both modules: no route can send the accreted text again.
     for (const name of ['CORE_REPLY_INSTRUCTION', 'CORE_RESPONSE_DISCIPLINE', 'CORE_NEXT_STEP']) expect(Object.keys(coreInstructions), name).not.toContain(name);
@@ -79,21 +78,73 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     for (const line of ['Return only', 'NO INVENTED FIGURES', 'this sprint', 'never invent a number, range, threshold',
       'Only use numbers the supplied result actually computed', 'without raw numbers'])
       expect(`${CORE_REPLY_RULES}${CORE_DRAFTER_RULES}`, line).not.toContain(line);
-    // The coach's own rules: the chance as the headline where supported, never a recommendation, figures only with their author.
-    for (const rule of ['Lead with one plain-language headline naming the insight. Then at most three short bullets',
-      "give each option's chance of meeting the aim in this model and its stated uncertainty",
-      'Never recommend, call an option best or a winner, say \u201cyou should choose\u201d or \u201cgo with\u201d, or choose for the team',
-      "use only figures that are in the model with their author, or that the supplied result computed; never invent one. Say when a figure is Olumi's starting estimate.",
-      'If calculations use untested Olumi assumptions, say \u201cIllustrative calculation \u2014 uses untested Olumi assumptions.\u201d'])
-      expect(CORE_REPLY_RULES.split(rule), rule).toHaveLength(2);
-    // Kept from the old reply rule, each once: what the reply must report of the tools, saves and approvals.
+    // ALPHA (the brief's five behaviours), each said once in what is sent.
+    for (const rule of [
+      // 1. after a draft: what Olumi understood, then only the blocking questions, grouped, the most consequential first, never re-asked
+      "1. What Olumi understood, in two to four short lines: the question, the goals and limits, the options and the main figures. Keep their figures in their words, say which figures are Olumi's starting estimates, and say what was left out of the calculation and why.",
+      '2. Only the questions that block a goal or a limit, as one numbered list they can answer in one reply: the one that unblocks the most first, each with a few words on why it matters.',
+      'If a question asks for something they have already said, do not ask it: put their figure in with the edit tools, quoting them, and say so.',
+      // 2. a chance as the code words it, what it rests on, the limit lines, and ONE next step
+      'report each option\u2019s chance as the result words it: the figure, the goal, target and horizon it answers, and what it rests on, "on your figures" or "if" with Olumi\'s assumptions (name them briefly; never drop the "if" or turn it into a forecast).',
+      'Never work out, round, combine or rank a chance yourself.',
+      'Then give ONE next step: replace an Olumi estimate the chance rests on with their own figure, find the input a threshold names, or test the assumption the result rests on. Call an input the one that matters most only when the result measured that.',
+      // 3. edits in chat, never a figure invented for them; a loose figure is theirs with Olumi's labelled range
+      'never invent a figure for them, and never change the model because of discussion alone.',
+      // Codex r1 BLOCK on #3707: never a range Olumi invents around their loose figure; ask for theirs.
+      'A loose figure ("about 20") goes in exactly as they said it: their figure, 20, with their words quoted so the "about" stays visible. Never add a range or bounds they did not give. If that figure feeds a goal or a limit, ask what range they would put on it.',
+      'A what-if question is not a change: answer from the current result, and offer to change the figure if they want it worked out.',
+      'Run a new calculation only when they ask for one; a saved change may already bring its result: use that.',
+      // 4. nothing calculable: what is missing in one sentence, and a science-grounded activity
+      'say what is missing in one sentence. Unless it waits only on questions you have just asked, offer one science-grounded activity that helps meanwhile: a pre-mortem (imagine it has failed and list why), a reference-class check (how similar efforts usually turn out), or naming the evidence that would change their mind.',
+      // the product rules: never a recommendation; the most likely option only where the result names one
+      'Never recommend or choose an option for the user, and never call one "best", the "winner" or the one to "go with".',
+      'Name an option as the most likely to meet the goal only when the result itself names one, as a finding in this model, never as what they should choose;',
+    ]) expect(count(b, rule), rule.slice(0, 60)).toBe(1);
+    // Kept from the old reply rule, each once: what the reply must report of saves and approvals, and the AIE's scope rule (K3).
     for (const kept of ['In this mode Olumi adds nothing to your reply and rewrites none of it: the user reads exactly your words.',
-      'never your tools or what a tool response did or did not contain', 'Keep every must_say disclosure and the licences in run_facts.',
-      'approving a reading adopts it but does not make the user its author', 'Where run_comparison is given, follow its note.',
-      'or the analysis apply_change returns after a saved change), give that Run\u2019s results first, then coach on that same Run.',
-      'A Run that did not complete leaves a saved change saved: say both.', "Keep a clearly separate situation out of the current scenario's Living Model.",
+      'never your tools or what a tool returned', 'approving an estimate adopts it but does not make them its author',
+      'A calculation that fails after a save leaves the change saved: say both.', "Keep a clearly separate situation out of the current scenario's Living Model.",
       'do not claim it was created or put its facts into this model instead'])
       expect(b.split(kept), kept).toHaveLength(2);
+    // Gone with the Living Model Run path: its disclosures, comparison note and apply-then-Run reporting.
+    for (const gone of ['Keep every must_say disclosure', 'Where run_comparison is given', 'Illustrative calculation', 'Lead with one plain-language headline'])
+      expect(b, gone).not.toContain(gone);
+  });
+
+  it('ALPHA (S3 contract as emitted at 2b419138, DL-3.md 15:0xZ): the program tools\u2019 descriptions, which S3 imports: results only in the Run\u2019s recorded words at their actual paths, per option, per goal and joint; every edit op described', () => {
+    const { PROGRAM_TOOL_DESCRIPTIONS: d } = coreInstructions;
+    expect(Object.keys(d)).toEqual(['read_canonical_context', 'propose_change', 'apply_change', 'run_analysis']);
+    // Spelled out, not imported: the PL's per-goal + joint permission at the emitted paths, and never a figure of the agent's own.
+    const words = 'Report results only in the Run\u2019s recorded words: each option\u2019s words (run.options[].words; where shown is false, they say why no chance is shown); '
+      + 'each goal\u2019s own words with each option\u2019s display for it (run.goal_chance.targets.per_target[].words and its options[].display); '
+      + 'for meeting every goal together, run.goal_chance.targets.joint.words, or its line saying why that waits (run.goal_chance.targets.joint.line); '
+      + 'and run.goal_chance.notes, thresholds[].words, limits[].words with each option\u2019s display, and unchecked_limits[].words. '
+      + 'Quote them; never a figure, chance, rounding, combination or ranking of your own.';
+    // The run block as S3 emits it: { run_id, options[{ option_id, shown, words }], goal_chance: the Run's own block }.
+    const PATHS = ['run.options[].words', 'run.goal_chance.targets.per_target[].words', 'run.goal_chance.targets.joint.words',
+      'run.goal_chance.targets.joint.line', 'run.goal_chance.notes, thresholds[].words, limits[].words with', 'and unchecked_limits[].words'];
+    for (const [name, text] of Object.entries(d)) {
+      expect(text.split(words), name).toHaveLength(2);
+      for (const path of PATHS) expect(count(text, path), `${name}: ${path}`).toBe(1);
+      // The paths S3 no longer emits (14:2xZ): no description names them.
+      for (const gone of ['run.targets', 'run.notes', 'run.thresholds', 'run.limits', 'run.unchecked_limits']) expect(text, `${name}: ${gone}`).not.toContain(gone);
+      for (const banned of ['recommend', 'best', 'winner', 'you should', '18 to 22']) expect(text.toLowerCase(), `${name}: ${banned}`).not.toContain(banned);
+    }
+    // read_canonical_context returns model (as authored), earlier_versions, open_questions, coaching and run.
+    for (const field of ['its revision; model, the canonical model exactly as authored (', 'earlier_versions, how many earlier versions it has;',
+      'open_questions, each with what it feeds and the edit that answers it;', 'coaching, the questions that would give an aim a measure or a deadline;',
+      'and run, the stored Run, with current and engine_current.']) expect(d.read_canonical_context, field).toContain(field);
+    for (const op of ['set_quantity:', 'set_range_kind:', 'set_goal_target:', 'add_option:', 'rename_option:', 'define_goal_measure:']) expect(count(d.propose_change, op), op).toBe(1);
+    expect(d.propose_change).toContain('set_range_kind: answers an open question whose edit is set_range_kind,');
+    expect(d.propose_change).toContain('The result shows what the card would show (would_show).');
+    expect(d.propose_change).toContain('A loose figure ("about 2,000") is their one figure, exactly as said, never a range Olumi adds; then ask what range they would put on it.');
+    expect(d.propose_change).toContain('each quoting the person\u2019s exact words from what they wrote, never Olumi\u2019s paraphrase.');
+    expect(d.apply_change).toContain('The approval is the card\u2019s, never a typed yes.');
+    expect(d.apply_change).toContain('saved: the receipt, the new revision and run, the Run. already_saved: this same proposal was saved before; never save it again.');
+    expect(d.run_analysis).toContain('Show the Run of the saved model as run: the stored Run when it is current for this model (stored true), otherwise a new Run, worked out and stored (stored false).');
+    expect(d.run_analysis).toContain('Use it only when the person asks; a saved change already brings its Run.');
+    // The descriptions ride the tool list, not the standing instructions (whose sent bytes the sha row above pins).
+    expect(b).not.toContain(words);
   });
 
   it('the drafter saves every stated goal in their words and never approximates it, with the rule present once', () => {
@@ -131,7 +182,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(CORE_DRAFTER_RULES).not.toContain("add at most one as Olumi's when it materially changes the reasoning");
   });
 
-  it('the drafter modelling contract is sent once, with the blocking-input question on later turns too', () => {
+  it('the drafter modelling contract is sent once, and the blocking questions are asked on later turns too', () => {
     const draftRules = [
       "A qualitative worry or uncertainty is a risk, or a condition when it cannot reasonably be quantified, never an unmeasured factor.",
       "Every factor has a stated unit and a current value or a labelled Olumi estimate under the estimate rule; only schema-defined on/off steps use unit null and a 0-or-1 level (a risk-mitigation step is 0 today and 1 under the option that takes it).",
@@ -141,10 +192,12 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       "For a risk's chance and window, use supplied figures or, where reasonable, a labelled Olumi estimate under the estimate rule; if no reasonable estimate is possible, keep it unknown and say what is missing.",
       "An option acts through settings on factors or sized option-to-item links; retain either valid form without adding an artificial factor.",
     ];
-    const question = "Whenever a missing input leaves the Run blocked, end every reply with exactly ONE question asking for the specific input the Run needs next (today's level, a measure, a target or a time window), in plain words; use the current state and tool outcome, never re-ask a supplied input.";
+    const question = 'On later turns, ask the blocking questions still open in the same way.';
     const firstTurn = `${b}\n\n${CORE_DRAFTER_RULES}`;
     for (const rule of [...draftRules, question]) expect(count(firstTurn, rule), rule).toBe(1);
-    expect(count(b, question), 'the question survives after the first model').toBe(1);
+    expect(count(b, question), 'the questions survive after the first model').toBe(1);
+    // ALPHA: the one-question-per-reply rule it replaces is gone (the blocking questions are one numbered list).
+    expect(b).not.toContain('end every reply with exactly ONE question');
     for (const rule of draftRules) expect(b, 'draft-only modelling rules are not repeated in standing instructions').not.toContain(rule);
     for (const old of ['A possible event is a risk; an existing condition is a factor.',
       'Otherwise explain the missing capability or ask only for the necessary input.',
@@ -175,5 +228,65 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(coreEffortArmOf('full', 'high')).toBeUndefined();
     expect(coreBudget().reasoning_effort).toBe('medium');
     expect(coreBudget('medium')).toEqual({ ...coreBudget(), reasoning_effort: 'medium' });
+  });
+});
+
+/** The Living Model text for scenarios whose saved model is not a program (Codex BLOCK 4 on #3709): staging 646d374e's, unchanged. */
+describe('the Living Model core text, kept for old scenarios byte for byte (CORE_INSTRUCTIONS_LIVING_MODEL + CORE_REPLY_RULES_LIVING_MODEL)', () => {
+  const { CORE_INSTRUCTIONS_LIVING_MODEL, CORE_REPLY_RULES_LIVING_MODEL } = coreInstructions;
+  const old = instructionsForMode('core', CORE_INSTRUCTIONS_LIVING_MODEL, CORE_REPLY_RULES_LIVING_MODEL);
+
+  it('is the text staging 646d374e sent on every core call, byte for byte (captured from that build: 29,512 characters)', () => {
+    expect(old.length).toBe(29_512);
+    expect(createHash('sha256').update(old, 'utf8').digest('hex')).toBe('7a1bced23a44dccc478a00d075b28bbe2dda487a4b6da868ae3a477698097e44');
+    // and it is not the program text
+    expect(old).not.toBe(instructionsForMode('core', CORE_ALIGNED_INSTRUCTIONS));
+  });
+
+  it('names none of the legacy tools and every core tool, with the AIE authority and starting-input wording', () => {
+    for (const t of LEGACY_TOOLS) expect(old, t).not.toContain(t);
+    for (const t of CORE_TOOLS) expect(old, t).toContain(t);
+    expect(old).toContain("Do not treat a typed yes or your own interpretation as the card's approval.");
+    expect(old).toContain('offer clearly labelled Olumi assumptions through propose_change for review');
+    expect(old).not.toContain('{{MODE_AND_AUTHORITY}}');
+  });
+
+  it('keeps the shared reasoning, science and reply rules, each once, and the core reply rules last', () => {
+    for (const h of ['\nTRUTH\n', '\nREASONING\n', '\nAUTHORSHIP\n', '\nIDEATION\n', 'POLYMATH COACHING', 'CALCULATION BOUNDARY']) expect(old, h).toContain(h);
+    for (const part of [OLUMI_PURPOSE_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION, MODEL_RELATIVE_NAMING_INSTRUCTION, CORE_REPLY_RULES_LIVING_MODEL,
+      HOST_SCIENCE_AND_SOURCE_RULES]) expect(count(old, part)).toBe(1);
+    for (const rule of ['Never express the chance as a percentage of model runs.', 'Earlier assistant replies can describe a Run that was current then',
+      'that separation rests on Olumi\'s own starting estimates', "The goal’s `target` is the figure the user stated"]) expect(old, rule).toContain(rule);
+    expect(old.endsWith(CORE_REPLY_RULES_LIVING_MODEL)).toBe(true);
+  });
+
+  it('arm B is the AIE\'s assembled reference, byte for byte, plus the canvas-coaching sentence', () => {
+    expect(old.split(NOTE_ON_ITEM_INSTRUCTION)).toHaveLength(2);
+    expect(createHash('sha256').update(old.replace(`${NOTE_ON_ITEM_INSTRUCTION}\n\n`, ''), 'utf8').digest('hex')).toBe('055841368f958fd07a9e729b8f459e83d1793e98acbbd0b6bcefa8aba9ddf41a'); // 22 Oct: one exact blocking-input question; retire the coach's duplicate ask.
+    expect(old).toContain('build the first model from their brief in that same turn');
+    expect(old).toContain('a list in your reply adds nothing to their model');
+  });
+
+  it('its reply rules: the coach’s rules and the kept tool-reporting rules, each once', () => {
+    expect(createHash('sha256').update(CORE_REPLY_RULES_LIVING_MODEL, 'utf8').digest('hex')).toBe('6f5f00c581ac4be2f1f590973e4bcf58c6eba498e5216bc3a8a21a189be5f3d6');
+    for (const rule of ['Lead with one plain-language headline naming the insight. Then at most three short bullets',
+      "give each option's chance of meeting the aim in this model and its stated uncertainty",
+      'Never recommend, call an option best or a winner, say “you should choose” or “go with”, or choose for the team',
+      "use only figures that are in the model with their author, or that the supplied result computed; never invent one. Say when a figure is Olumi's starting estimate.",
+      'If calculations use untested Olumi assumptions, say “Illustrative calculation — uses untested Olumi assumptions.”'])
+      expect(CORE_REPLY_RULES_LIVING_MODEL.split(rule), rule).toHaveLength(2);
+    for (const kept of ['In this mode Olumi adds nothing to your reply and rewrites none of it: the user reads exactly your words.',
+      'never your tools or what a tool response did or did not contain', 'Keep every must_say disclosure and the licences in run_facts.',
+      'approving a reading adopts it but does not make the user its author', 'Where run_comparison is given, follow its note.',
+      'or the analysis apply_change returns after a saved change), give that Run’s results first, then coach on that same Run.',
+      'A Run that did not complete leaves a saved change saved: say both.', "Keep a clearly separate situation out of the current scenario's Living Model.",
+      'do not claim it was created or put its facts into this model instead'])
+      expect(old.split(kept), kept).toHaveLength(2);
+  });
+
+  it('keeps the one blocking-input question, once, and none of the drafter’s modelling rules', () => {
+    const question = "Whenever a missing input leaves the Run blocked, end every reply with exactly ONE question asking for the specific input the Run needs next (today's level, a measure, a target or a time window), in plain words; use the current state and tool outcome, never re-ask a supplied input.";
+    expect(count(old, question)).toBe(1);
+    expect(old).not.toContain("A qualitative worry or uncertainty is a risk, or a condition when it cannot reasonably be quantified, never an unmeasured factor.");
   });
 });

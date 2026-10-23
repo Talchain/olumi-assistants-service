@@ -8,7 +8,7 @@
  */
 import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
 import { runPressToolResponse } from './fixtures/run-press-model.js';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -240,6 +240,9 @@ describe('PATH-B core: the AI\'s own words are the reply; protocol, cards, resul
         expect(i).toContain("Do not treat a typed yes or your own interpretation as the card's approval.");
         // The legacy proposing writers are not core tools: the default arm A named them (propose_starting_point).
         expect(i).not.toContain('propose_starting_point');
+        // Codex r1 BLOCK 4 on #3709: this route sends exactly what staging 646d374e sent (the Living Model text, kept by
+        // #3707 as CORE_INSTRUCTIONS_LIVING_MODEL + CORE_REPLY_RULES_LIVING_MODEL), never the model-program text.
+        expect(createHash('sha256').update(i, 'utf8').digest('hex')).toBe('7a1bced23a44dccc478a00d075b28bbe2dda487a4b6da868ae3a477698097e44');
       }
     }
   });

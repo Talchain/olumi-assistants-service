@@ -68,6 +68,23 @@ function streamCarriedError(sse: string): boolean {
   });
 }
 
+/** A streamed Responses request's body, without the `stream` flag the call sets. */
+export type StreamedResponsesBody = Omit<OpenAI.Responses.ResponseCreateParamsStreaming, 'stream'>;
+
+/**
+ * ONE streamed Responses call through the SAME ledgered client, for a host's structured call outside the Agents SDK (the
+ * canonical drafter): its terminal response, after its ledger row has settled.
+ */
+export async function streamedLedgeredResponse(ledger: AgentsClientLedger, body: StreamedResponsesBody): Promise<OpenAI.Responses.Response | undefined> {
+  const pending = ledger.pending ?? [];
+  const client = ledgeredAgentsClient({ ...ledger, pending });
+  const stream = await client.responses.create({ ...body, stream: true });
+  let final: OpenAI.Responses.Response | undefined;
+  for await (const ev of stream) if (ev.type === 'response.completed' || ev.type === 'response.incomplete' || ev.type === 'response.failed') final = ev.response;
+  await Promise.all(pending);
+  return final;
+}
+
 /** The SDK's client with the ledger on its fetch. Make one per turn: the ledger is the request's. */
 export function ledgeredAgentsClient(ledger: AgentsClientLedger): OpenAI {
   if (!isProviderAllowed('openai')) throw new ForbiddenProviderError('openai', currentProviderPolicy()?.route ?? 'unknown', ledger.site);
