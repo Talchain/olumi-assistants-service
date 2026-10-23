@@ -38,6 +38,7 @@ import { answerOffersForReload } from '../orchestrator-v5/agent-lane/answer-offe
 import { executableWaitingProposal } from '../orchestrator-v5/agent-lane/held-approval-offers.js';
 import { actionFactsOf } from '../orchestrator-v5/agent-lane/actions/state.js';
 import { actionBarOf, type ActionBarV1 } from '../orchestrator-v5/agent-lane/actions/rank.js';
+import { coreActionBarOf } from '../orchestrator-v5/core-route/action-bar.js';
 import { laneModeFor } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { isLegacyGraph, livingViewOf } from '../orchestrator-v5/path-b/living-model/view.js';
 import { getRuntimeEnv } from '../config/env-resolver.js';
@@ -487,8 +488,9 @@ export default async function route(app: FastifyInstance) {
        * history read ranks with no cooldown; a failed ranking carries no bar and never costs the read.
        */
       let actionBar: ActionBarV1 | undefined;
-      // PATH-B core (#3487's rule, PL 00:18): a cold reopen in core carries no host action bar, as no core turn does.
-      if (conversationRequested && laneModeFor('full', req.headers['x-olumi-ai-mode'], getRuntimeEnv(), graphPresent && isLegacyGraph(graph)) !== 'core') {
+      // PATH-B core ranks its own bar from this read's body, as each core turn does from its read (`core-route/action-bar.ts`).
+      const coreLane = laneModeFor('full', req.headers['x-olumi-ai-mode'], getRuntimeEnv(), graphPresent && isLegacyGraph(graph)) === 'core';
+      if (conversationRequested && !coreLane) {
         let guidance: GuidanceState | null = null;
         try { guidance = typeof store.readGuidanceHistory === 'function' ? await store.readGuidanceHistory(scenarioId) : null; } catch { guidance = null; }
         try {
@@ -533,7 +535,7 @@ export default async function route(app: FastifyInstance) {
       // Why an item is not in the calculation (canvas-lm, DL 22 Oct): the mapper's own holds on a core scenario, from the same
       // mapping every write and Run uses (`livingViewOf`). Null for an absent or legacy graph, or a living model that does not parse.
       const living = graphPresent ? livingViewOf(graph) : undefined;
-      return reply.code(200).send({
+      const body = {
         schema: SCENARIO_GRAPH_SCHEMA,
         ...(heldOffers !== undefined && heldOffers.length > 0 ? { held_proposal_offers: heldOffers } : {}),
         ...(proposalFields !== undefined ? { proposal_fields: proposalFields } : {}),
@@ -625,8 +627,7 @@ export default async function route(app: FastifyInstance) {
         ...(scopePermissions.total_goal_claims_allowed === false ? {
           goal_scope_claim_permissions: { total_goal_claims_allowed: false, exploratory_work_allowed: true },
         } : {}),
-        analysis_result: laneModeFor('full', req.headers['x-olumi-ai-mode'], getRuntimeEnv(), graphPresent && isLegacyGraph(graph)) === 'core'
-          && analysis.analysis_result?.type === 'analysis_result'
+        analysis_result: coreLane && analysis.analysis_result?.type === 'analysis_result'
           ? { ...analysis.analysis_result, summary: '' } : analysis.analysis_result,
         canonical_analysis_view: analysis.canonical_analysis_view,
         ...(analysis.run_recording === undefined ? {} : { run_recording: analysis.run_recording }),
@@ -688,7 +689,9 @@ export default async function route(app: FastifyInstance) {
         ...(conversationTurns !== undefined ? { conversation_turns: conversationTurns } : {}),
         ...(actionBar !== undefined ? { action_bar: actionBar } : {}),
         request_id: requestId,
-      });
+      };
+      const coreBar = conversationRequested && coreLane ? coreActionBarOf(scenarioId, body) : undefined;
+      return reply.code(200).send(coreBar === undefined ? body : { ...body, action_bar: coreBar });
     },
   );
 }
