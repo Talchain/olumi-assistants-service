@@ -978,6 +978,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     });
 
     it('S3 (batch 4 marketing r3–r5): a propose_change whose arguments fail its schema goes back to the model as a tool error; its retry gives ONE card, never a 502', async () => {
+      const warn = vi.spyOn((await import('../../utils/telemetry.js')).log, 'warn');
       await savedProgram();
       const good = { public_label: 'Oven price £2,500', basis: 'their answer', ops: [{ op: 'set_quantity', quantity_id: 'oven_price', value: 2500, low: null, high: null, range_kind: null, quote: 'The oven would cost £2,500' }] };
       const bad = { ...good, ops: [{ ...good.ops[0], value: 'two and a half thousand' }] };
@@ -994,6 +995,12 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(JSON.stringify(back)).toContain('ops.0.value');
       expect(JSON.stringify(back)).not.toContain('two and a half thousand');
       expect(calls).toHaveLength(3);
+      // The failing field's NAME is logged by us (the SDK redacts tool input by default), never its value.
+      const logged = warn.mock.calls.filter((c) => String(c[1]).includes('arguments that fail the schema'));
+      expect(logged).toHaveLength(1);
+      expect(logged[0]![0]).toMatchObject({ tool: 'propose_change', fields: [expect.stringMatching(/^ops\.0\.value: /)] });
+      expect(JSON.stringify(logged)).not.toContain('two and a half thousand');
+      warn.mockRestore();
     });
 
     /** The instructions the provider received on one typed turn of a saved program (the model-program instructions). */
