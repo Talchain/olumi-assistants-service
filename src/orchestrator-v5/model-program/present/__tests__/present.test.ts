@@ -13,7 +13,7 @@ const ONE: Goal['window'] = { start_period: 0, periods: 1 };
 const fixed = (id: string, value: number, unit = '', reading: Reading = 'state', author: FixedAuthor = 'person'): Quantity =>
   ({ id, label: id, unit, reading, dist: { kind: 'fixed', value, author } });
 const range = (id: string, low: number, high: number, mode: number | undefined, unit: string, basis: 'person_range' | 'olumi_estimate'): Quantity =>
-  ({ id, label: id, unit, reading: 'state', dist: { kind: 'range', low, high, ...(mode !== undefined ? { mode } : {}), basis } });
+  ({ id, label: id, unit, reading: 'state', dist: { kind: 'range', low, high, ...(mode !== undefined ? { mode } : {}), basis, range_kind: 'plausible' } });
 const def = (id: string, op: 'sum' | 'difference' | 'product' | 'ratio', parts: string[], unit = ''): Quantity =>
   ({ id, label: id, unit, reading: 'state', equation: { form: 'definition', op, parts } });
 const effect = (id: string, base: string, terms: { coefficient: string; driver: string }[], unit = ''): Quantity =>

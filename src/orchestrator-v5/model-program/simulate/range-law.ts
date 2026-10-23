@@ -14,12 +14,12 @@
  * It reports the CONDITIONED moments (the mean and the post-truncation sd), which are what the draws have.
  * The law is Olumi's provisional assumption, never the person's calibration; the ends stay as stated, `basis` says whose.
  */
-import type { Dist } from '../executable.js';
+import type { Dist, Domain } from '../executable.js';
 
-/** The PL's kinds, and a domain, ahead of S1's executable.ts carrying them on the Dist. Absent kind: 'plausible'. */
-export type RangeKind = 'bounds' | 'plausible';
-export type Domain = { readonly min?: number; readonly max?: number };
-export type RangeDist = Extract<Dist, { kind: 'range' }> & { readonly range_kind?: RangeKind; readonly domain?: Domain };
+/** A range as executable.ts r4 carries it: with its range_kind (from the person's words) and its domain. */
+export type RangeDist = Extract<Dist, { kind: 'range' }>;
+export type RangeKind = RangeDist['range_kind'];
+export type { Domain };
 
 export type RangeReading =
   | {

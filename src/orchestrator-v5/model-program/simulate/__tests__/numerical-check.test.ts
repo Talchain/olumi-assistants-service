@@ -22,7 +22,7 @@ const ONE: Goal['window'] = { start_period: 0, periods: 1 };
 const fixed = (id: string, value: number, unit = '', author: FixedAuthor = 'person'): Quantity =>
   ({ id, label: id, unit, reading: 'state', dist: { kind: 'fixed', value, author } });
 const range = (id: string, low: number, high: number, mode?: number, unit = ''): Quantity =>
-  ({ id, label: id, unit, reading: 'state', dist: { kind: 'range', low, high, ...(mode !== undefined ? { mode } : {}), basis: 'person_range' } });
+  ({ id, label: id, unit, reading: 'state', dist: { kind: 'range', low, high, ...(mode !== undefined ? { mode } : {}), basis: 'person_range', range_kind: 'plausible' } });
 const def = (id: string, op: 'sum' | 'difference' | 'product' | 'ratio', parts: string[], unit = ''): Quantity =>
   ({ id, label: id, unit, reading: 'state', equation: { form: 'definition', op, parts } });
 const effect = (id: string, base: string, terms: { coefficient: string; driver: string }[], unit = ''): Quantity =>
@@ -119,7 +119,7 @@ describe('numerical check: natural-unit simulator, hand-calculated rows', () => 
     const node = (mapLivingModel(capacityLivingModel()).graph.nodes as Rec[]).find((n) => n.id === 'each')!;
     expect(node.observed_state.raw_value).toBe(20);
     expect(node.observed_state.std * node.observed_state.cap).toBeCloseTo(5.773502691896258, 12);
-    const law = rangeLaw({ kind: 'range', low: 10, high: 30, mode: 20, basis: 'person_range' });
+    const law = rangeLaw({ kind: 'range', low: 10, high: 30, mode: 20, basis: 'person_range', range_kind: 'plausible' });
     if (law.kind !== 'normal') throw new Error(`expected a spread, got ${law.kind}`);
     expect(law.centre).toBe(node.observed_state.raw_value);
     expect(law.sd).toBeCloseTo(node.observed_state.std * node.observed_state.cap, 12);
@@ -332,7 +332,7 @@ describe('numerical check: natural-unit simulator, hand-calculated rows', () => 
     expect(between.filter((v) => v < 10 || v > 30)).toEqual([]);
     expect(between.filter((v) => v === 10 || v === 30)).toEqual([]);
 
-    const olumi = (d?: Domain): Quantity => kinded({ id: 'k', label: 'k', unit: '', reading: 'state', dist: { kind: 'range', low: -2.2, high: -1.4, mode: -1.8, basis: 'olumi_estimate' } }, 'bounds', d);
+    const olumi = (d?: Domain): Quantity => kinded({ id: 'k', label: 'k', unit: '', reading: 'state', dist: { kind: 'range', low: -2.2, high: -1.4, mode: -1.8, basis: 'olumi_estimate', range_kind: 'plausible' } }, 'bounds', d);
     for (const k of [drawsOf(olumi()), drawsOf(olumi({ max: 0 }))]) {
       const outside = k.filter((v) => v < -2.2 || v > -1.4).length / N;
       expect(Math.abs(outside - 0.08326)).toBeLessThanOrEqual(0.00383);
@@ -354,7 +354,7 @@ describe('numerical check: natural-unit simulator, hand-calculated rows', () => 
     expect(Math.abs(mean - skew.mean)).toBeLessThanOrEqual(4 * 3.8075 / Math.sqrt(N));
     expect(Math.abs(sd / skew.sd_conditioned - 1)).toBeLessThanOrEqual(0.02);
 
-    const count = (d?: Domain): Quantity => kinded({ id: 'n', label: 'n', unit: 'people', reading: 'state', dist: { kind: 'range', low: 0, high: 8, basis: 'olumi_estimate' } }, 'plausible', d);
+    const count = (d?: Domain): Quantity => kinded({ id: 'n', label: 'n', unit: 'people', reading: 'state', dist: { kind: 'range', low: 0, high: 8, basis: 'olumi_estimate', range_kind: 'plausible' } }, 'plausible', d);
     const counted = law(count({ min: 0 }));
     expect(Math.abs(counted.mean - 4.2145)).toBeLessThanOrEqual(0.001);
     expect(Math.abs(counted.sd_conditioned - 2.1046)).toBeLessThanOrEqual(0.001);
