@@ -19,7 +19,7 @@ import { KNOWN_ANSWER } from '../../living-model/__tests__/fixtures.js';
 import { F1_CONTRADICTED, F1_DEFINED, F1_EXACT_LINKS, F1_OTHER_CAUSE } from '../../living-model/__tests__/track2-f1-identity.fixtures.js';
 import { OLUMI_CHANCE } from '../../living-model/__tests__/track2-f2-event-risk.fixtures.js';
 import { buildModel } from '../draft-tool.js';
-import { applyLivingChange, proposeLivingChange, REPLACE_AIM } from '../living-change.js';
+import { applyLivingChange, proposeLivingChange } from '../living-change.js';
 import { pathBTools, type ToolCallResult } from '../index.js';
 import type { TraceRow } from '../outcome.js';
 import { blockersOf, corePostimage, KEPT_AS_REFUSED, personContentLost, REPAIR_CHANGE, REPAIR_DRAFT, REPAIRS, selfCheck, STILL_ASK, type Restructure } from '../goal-path.js';
@@ -852,12 +852,16 @@ describe('DL 22 Oct (marketing on 4a4c338c): a change that adds the person\'s ow
     expect(goalOf(p.saved())?.id).toBe('g2');
   });
 
-  it('JOINT: two stated aims added: the first is the goal, the second stays out of the slice', async () => {
+  it('JOINT: two figured aims share the graph, with the first as primary and both target rows retained', async () => {
     const two = linked();
     two.aims.push({ ...stated(), id: 'g3', text: 'Reach 100 units again' });
-    const out = await proposeLivingChange({ dispatch: product(untargeted()).dispatch, proposals: new ProposalStore(), restructure: { repairs: 0 } }, ctx, args(two));
+    const p = product(untargeted()), proposals = new ProposalStore();
+    const out = await proposeLivingChange({ dispatch: p.dispatch, proposals, restructure: { repairs: 0 } }, ctx, args(two));
     expect(out, JSON.stringify(out)).toMatchObject({ status: 'ok' });
-    expect(((out as { data: Rec }).data.withheld as Rec[]).filter((w) => w.id === 'g2' || w.id === 'g3')).toEqual([{ id: 'g3', reason: 'aim_not_in_slice' }]);
+    expect(((out as { data: Rec }).data.withheld as Rec[]).filter((w) => w.id === 'g2' || w.id === 'g3')).toEqual([]);
+    await applyLivingChange({ dispatch: p.dispatch, proposals }, ctx, String((out as { data: Rec }).data.proposal_id));
+    expect(goalOf(p.saved())?.id).toBe('g2');
+    expect((p.saved()!.goal_constraints as Rec[]).map(c => c.node_id).sort()).toEqual(['g2', 'g3']);
   });
 
   it('CONTRAST: a saved goal with its own target, or an aim Olumi adds, never moves the goal and is carded at once', async () => {
@@ -865,15 +869,16 @@ describe('DL 22 Oct (marketing on 4a4c338c): a change that adds the person\'s ow
     const keeps = { ...structuredClone(KNOWN_ANSWER), aims: [...structuredClone(KNOWN_ANSWER).aims, stated()] };
     const a = await proposeLivingChange({ dispatch: product(KNOWN_ANSWER).dispatch, proposals: new ProposalStore(), restructure }, ctx, args(keeps));
     expect(a, JSON.stringify(a)).toMatchObject({ status: 'ok' });
-    expect(((a as { data: Rec }).data.withheld as Rec[]).filter((w) => w.id === 'g2')).toEqual([{ id: 'g2', reason: 'aim_not_in_slice' }]);
+    expect(((a as { data: Rec }).data.withheld as Rec[]).filter((w) => w.id === 'g2')).toEqual([]);
+    expect(((a as { data: Rec }).data.changes as Rec[])).toContainEqual(expect.objectContaining({ kind: 'aim', id: 'g2', change: 'add' }));
     const b = await proposeLivingChange({ dispatch: product(untargeted()).dispatch, proposals: new ProposalStore(), restructure }, ctx, args(added('olumi')));
     expect(b, JSON.stringify(b)).toMatchObject({ status: 'ok' });
-    expect(((b as { data: Rec }).data.withheld as Rec[]).filter((w) => w.id === 'g2')).toEqual([{ id: 'g2', reason: 'aim_not_in_slice' }]);
+    expect(((b as { data: Rec }).data.withheld as Rec[]).filter((w) => w.id === 'g2')).toEqual([]);
     expect(restructure.repairs).toBe(0);
   });
 });
 
-describe('C3 (DL 93d79c3e 01:56Z; marketing set b r1): the person\'s stated goal REPLACES a drafted aim that is no goal, never sits beside it', () => {
+describe('B2a retires C3’s obsolete primary trap without removing the person’s reasoning', () => {
   // The drafted aim: an option clause read as the goal, the person's words with Olumi's suggested measure and no figure.
   const task = (): LivingModelT['aims'][number] => ({ id: 't', text: 'push f to 1, or we hold', status: 'current', defined_as: null, source: 'user',
     party: null, quote: 'push f to 1, or we hold', target: { ...KNOWN_ANSWER.aims[0]!.target!, quantity: 'the plan settled', comparator: '=',
@@ -882,22 +887,23 @@ describe('C3 (DL 93d79c3e 01:56Z; marketing set b r1): the person\'s stated goal
   const stated = (): LivingModelT => ({ ...structuredClone(KNOWN_ANSWER), aims: [task(), structuredClone(KNOWN_ANSWER.aims[0]!)] });
   const cardOf = (out: unknown) => (out as { data: Rec }).data;
 
-  it('the replace: asked once with the aim it names; naming it in remove makes the card, and a Run tests the person\'s goal', async () => {
-    const p = product(drafted());
-    const proposals = new ProposalStore();
+  it('selects the figured primary and retains the complete figureless human aim; only approval writes anything', async () => {
+    const initial = drafted(), p = product(initial), proposals = new ProposalStore();
+    const savedBefore = structuredClone(p.saved());
     const restructure: Restructure = { repairs: 0 };
-    const first = await proposeLivingChange({ dispatch: p.dispatch, proposals, restructure }, changeCtx, change(stated()));
-    expect(first, JSON.stringify(first)).toEqual({ status: 'refused', reason: 'goal_beside_no_goal', detail: REPLACE_AIM,
-      data: { aim: { id: 't', text: 'push f to 1, or we hold' } } });
-    expect(restructure.repairs).toBe(1);
-    const card = await proposeLivingChange({ dispatch: p.dispatch, proposals, restructure }, changeCtx,
-      { ...change({ ...stated(), aims: [structuredClone(KNOWN_ANSWER.aims[0]!)] }), remove: ['t'] });
+    const card = await proposeLivingChange({ dispatch: p.dispatch, proposals, restructure }, changeCtx, change(stated()));
     expect(card, JSON.stringify(card)).toMatchObject({ status: 'ok', data: { run_ready: true } });
-    expect(cardOf(card).restructure, 'the replace is not a loss: the retry is carded').toBeUndefined();
-    expect(cardOf(card).changes).toContainEqual(expect.objectContaining({ kind: 'aim', id: 't', change: 'remove' }));
+    expect(restructure.repairs).toBe(0);
+    expect(restructure.replace).toBeUndefined();
+    expect(cardOf(card).changes).not.toContainEqual(expect.objectContaining({ kind: 'aim', id: 't', change: 'remove' }));
+    expect(p.registered).toHaveLength(0);
+    expect(p.saved()).toEqual(savedBefore);
     await applyLivingChange({ dispatch: p.dispatch, proposals }, changeCtx, String(cardOf(card).proposal_id));
+    expect(p.registered).toHaveLength(1);
     expect(goalOf(p.saved())?.id).toBe('g');
-    expect((p.saved()!.living_model as LivingModelT).aims.map((a) => a.id)).toEqual(['g']);
+    const savedModel = p.saved()!.living_model as LivingModelT;
+    expect(savedModel.aims.map(a => a.id)).toEqual(['t', 'g']);
+    expect(savedModel.aims.find(a => a.id === 't')).toEqual(initial.aims[0]);
   });
 
   it('⛔ the person\'s own aim is never dropped: sent unchanged, the card keeps it; a figured goal of theirs is never asked about', async () => {
@@ -916,14 +922,14 @@ describe('C3 (DL 93d79c3e 01:56Z; marketing set b r1): the person\'s stated goal
     expect(r2.repairs).toBe(0);
   });
 
-  it('Codex r1 on #3697 (P1): the replace is the NEXT call\'s only; after another refusal, dropping the aim the person has since given words is kept as refused', async () => {
+  it('a repair retry still cannot drop an aim the person has since given words, even though the C3 replacement prompt is retired', async () => {
     const olumiTask = { ...task(), source: 'olumi' as const, quote: null };
     const ctx = { ...changeCtx, user_turn_text: 'we need at least 200 units' };
     const p = product({ ...drafted(), aims: [olumiTask] });
     const restructure: Restructure = { repairs: 0 };
     const deps = { dispatch: p.dispatch, proposals: new ProposalStore(), restructure };
     expect(await proposeLivingChange(deps, ctx, change({ ...stated(), aims: [olumiTask, structuredClone(KNOWN_ANSWER.aims[0]!)] })))
-      .toMatchObject({ reason: 'goal_beside_no_goal' });
+      .toMatchObject({ status: 'ok' });
     const theirs = { ...structuredClone(KNOWN_ANSWER.aims[0]!), id: 't', text: 'Reach 200 units', quote: 'we need at least 200 units',
       target: { ...KNOWN_ANSWER.aims[0]!.target!, value: 200 } };
     // Another refusal between: today's goal t gets its own link and an Olumi prerequisite on it.

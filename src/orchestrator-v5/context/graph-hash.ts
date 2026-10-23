@@ -388,6 +388,9 @@ function projectNode(raw: unknown): NodeProjection {
   // Recovery Batch C (gap 2): the goal's stated target basis (reference, denominator, period, effect timing) decides which
   // goal chance may be said, so a change to it alone must stale a stored Run. CEE-local like `relies_on`: it enters ONLY
   // when present and well-formed, so every graph without one hashes byte-identically to before.
+  // A changed host-compiled dependency changes which result may be shown; absent keeps old hashes unchanged.
+  if (r.goal_rests_on !== undefined) out.goal_rests_on = r.goal_rests_on;
+
   const targetBasis = NodeV3.shape.goal_target_basis.safeParse(r.goal_target_basis);
   if (targetBasis.success && targetBasis.data !== undefined) out.goal_target_basis = targetBasis.data;
 

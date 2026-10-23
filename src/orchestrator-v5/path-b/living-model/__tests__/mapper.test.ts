@@ -124,7 +124,9 @@ describe('thin core mapper: living model → GraphV3', () => {
 
     const joint: LivingModelT = structuredClone(KNOWN_ANSWER);
     joint.aims.push({ ...structuredClone(KNOWN_ANSWER.aims[0]!), id: 'g2', text: 'Keep cost under 40' });
-    expect(mapLivingModel(joint).withheld).toEqual([{ id: 'g2', reason: 'aim_not_in_slice' }]);
+    const mappedJoint = mapLivingModel(joint);
+    expect(mappedJoint.withheld).toEqual([]);
+    expect((mappedJoint.graph as Record<string, any>).goal_constraints.map((c: Record<string, any>) => c.node_id).sort()).toEqual(['g', 'g2']);
 
     const change: LivingModelT = structuredClone(KNOWN_ANSWER);
     change.aims[0]!.target = { ...change.aims[0]!.target!, comparator: 'increase', value: 30, current: null };
@@ -269,7 +271,7 @@ describe('thin core mapper: living model → GraphV3', () => {
     two.aims.push({ ...structuredClone(KNOWN_ANSWER.aims[0]!), id: 'g2', text: 'Reach 200 units', target: { ...KNOWN_ANSWER.aims[0]!.target!, value: 200 } });
     two.links.push({ ...structuredClone(KNOWN_ANSWER.links[0]!), id: 'f_g2', to: 'g2' });
     const reversed: LivingModelT = { ...structuredClone(two), aims: [...structuredClone(two).aims].reverse() };
-    const thresholdOn = (m: ReturnType<typeof mapLivingModel>) => m.graph.nodes.find((n) => n.goal_threshold !== undefined)?.id;
+    const thresholdOn = (m: ReturnType<typeof mapLivingModel>) => m.graph.nodes.find((n) => n.kind === 'goal' && n.goal_threshold !== undefined)?.id;
     expect(thresholdOn(mapLivingModel(reversed, { goal: 'g' }))).toBe('g');
     expect(thresholdOn(mapLivingModel(reversed)), 'CONTRAST: without the saved goal, order decides').toBe('g2');
 

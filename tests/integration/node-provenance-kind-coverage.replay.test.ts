@@ -677,6 +677,9 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       // its `level` is a staleness key copied from that, and the rest is the brief's clause and Olumi's words.
       "goal_level_reading",
       "goal_period",
+      // B2a: NOT value-bearing. A dependency hold permits/withholds a calculation; it supplies no magnitude or law.
+      // It joins neither carriesValue nor NODE_QUANTITY_FIELDS. Actual figures stay on the existing target/value fields.
+      "goal_rests_on",
       "goal_scope",
       "goal_sense_reading",
       "goal_stated_as",

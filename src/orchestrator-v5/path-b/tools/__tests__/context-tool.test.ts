@@ -144,7 +144,8 @@ describe('THIN CORE: a core scenario is read as its living model', () => {
     const core = { ...read(), graph: { ...mapLivingModel(joint).graph, living_model: joint } };
     const d = await data(core);
     expect(d.living_model).toEqual(joint);
-    expect(d.withheld).toEqual([{ id: 'g2', reason: 'aim_not_in_slice' }]);
+    expect(d.withheld).toEqual([]);
+    expect(((core.graph as Rec).goal_constraints as Rec[]).map((c: Rec) => c.node_id).sort()).toEqual(['g', 'g2']);
     expect(d).not.toHaveProperty('nodes');
     expect(d).toHaveProperty('readiness');
     // CONTROL: the same graph without its living model is read by the legacy readers.

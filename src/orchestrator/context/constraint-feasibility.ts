@@ -1813,10 +1813,14 @@ export function deriveConstraintVerdict(
    * {@link STRICT_THRESHOLD_PIN_REASON} whichever option pins it. OPTIONAL, and omitted is today's verdict exactly.
    */
   strictThresholdPins?: ReadonlyMap<string, ReadonlySet<string>>,
+  /** Typed held secondary targets are context beside a single-primary presentation (DL B2a R1).
+   * Excludes target rows only from the leader claim; per-limit and full-joint evidence below still include EVERY row.
+   * Absent preserves existing callers. The handler binds IDs from this Run's saved typed records and sent rows. */
+  contextOnlyTargetIds?: ReadonlySet<string>,
 ): ConstraintVerdict {
   const leaderVerdict = deriveLeaderClaimVerdict(
     envelope,
-    ratified,
+    contextOnlyTargetIds === undefined ? ratified : ratified.filter(c => !contextOnlyTargetIds.has(c.constraint_id)),
     leadingOptionId,
     unmeasuredTargetIds,
     leaderEstimatedTargetIds,

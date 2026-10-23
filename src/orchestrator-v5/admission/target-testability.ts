@@ -50,7 +50,7 @@ export interface TargetTestabilityFailure {
   readonly precondition: TargetPrecondition;
   readonly case: TargetCase;
   readonly code: 'missing_goal_baseline' | 'threshold_off_scale' | 'comparator_unscorable' | 'threshold_unit_mismatch'
-    | 'goal_path_placeholder' | 'goal_path_unsized' | 'identity_unconfirmed';
+    | 'goal_path_placeholder' | 'goal_path_unsized' | 'identity_unconfirmed' | 'model_dependency_unresolved';
   /** For P5: the label of the FAILING link's source node (the lever case (c) names). */
   readonly lever?: string;
   /**
@@ -107,6 +107,34 @@ function sizedInGoalUnit(e: Rec, goalUnit: string | undefined, graph?: unknown):
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+
+/** One reader for a target's host-compiled dependency hold, including secondary targets. Absence preserves old Runs. */
+export function goalDependencyCauses(graph: unknown, targetId: unknown): readonly { id: string; reason: string; applies_to?: string[] }[] {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const own = nodes.filter(n => n.id === targetId);
+  if (own.length === 0 || own.every(n => n.goal_rests_on === undefined)) return [];
+  const parsed = own.length === 1 ? NodeV3.shape.goal_rests_on.safeParse(own[0]!.goal_rests_on) : undefined;
+  return parsed?.success && parsed.data !== undefined ? parsed.data
+    : [{ id: typeof targetId === 'string' ? targetId : 'target', reason: 'dependency_record_unreadable' }];
+}
+
+/** Explain the actual held dependency, never ask for the target again or invent a missing figure. */
+export function goalDependencyWords(graph: unknown, targetId: unknown): string {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const label = (id: unknown) => { const n = nodes.find(n => n.id === id); return typeof n?.label === 'string' && n.label.trim() !== ''
+    ? n.label.replace(/[\r\n]+/g, ' ').slice(0, 200) : 'the model quantity'; };
+  const model = isRec(graph) && isRec(graph.living_model) ? graph.living_model : undefined;
+  const conditions = Array.isArray(model?.conditions) ? model.conditions.filter(isRec) : [];
+  const causes = goalDependencyCauses(graph, targetId);
+  const names = causes.map(c => {
+    const condition = conditions.find(x => `condition:${x.text}` === c.id);
+    return condition !== undefined ? `the prerequisite ‘${String(condition.text).replace(/[\r\n]+/g, ' ').slice(0, 300)}’ remains unresolved`
+      : c.reason === 'goal_level_unknown' ? `today's level for ‘${label(c.id)}’ is unresolved`
+      : c.reason === 'goal_scope_unknown' ? `the origin or observation window for ‘${label(c.id)}’ is unresolved`
+      : `the model's inputs for ‘${label(c.id)}’ are unresolved`;
+  });
+  return `The target for ‘${label(targetId)}’ remains recorded. Its chance isn’t shown because ${[...new Set(names)].join('; ')}.`;
+}
 
 /** The scored identity wins; legacy graphs with exactly one goal remain unambiguous. */
 export function scoredGoalIdOf(graph: unknown, scoredGoalId?: unknown): string | undefined {
@@ -349,6 +377,8 @@ export function targetTestabilityOf(
   const effectiveFrame = share?.goal.id === goalId ? 'delta' : stated.frame;
   const levelFrame = (effectiveFrame ?? 'level') === 'level';
 
+  if (goalDependencyCauses(input, goalId).length > 0) return { kind: 'not_testable', goal_id: goalId,
+    failures: [{ precondition: 'P5', case: 'c', code: 'model_dependency_unresolved' }] };
   const failures: TargetTestabilityFailure[] = [];
   const today = isRec(goal.observed_state) ? goal.observed_state : undefined;
   // P1 — today's level where the frame requires it (`limitNeedsTodaysLevel`), as science reads it
@@ -500,6 +530,8 @@ export function targetNounOf(graph: unknown, goalId: unknown): 'your target' | '
 
 export function untestableTargetParts(graph: unknown, verdict: TargetTestability, namedLinkCount = 3): UntestableTargetParts | null {
   if (verdict.kind !== 'not_testable' || !isRec(graph) || !Array.isArray(graph.nodes)) return null;
+  // This is not a missing target, baseline or link-size ask. The shared dependency reader supplies its actual cause.
+  if (verdict.failures.some(f => f.code === 'model_dependency_unresolved')) return null;
   const goal = graph.nodes.filter(isRec).find((n) => n.id === verdict.goal_id);
   const stated = goal === undefined ? null : statedGoalTargetOf(graph, goal);
   if (goal === undefined || stated === null) return null;

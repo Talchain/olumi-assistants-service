@@ -1,3 +1,4 @@
+import { goalDependencyCauses, goalDependencyWords, scoredGoalIdOf } from '../admission/target-testability.js';
 import { linkDefaultAssumptionsOf, readLinkDefaultAssumptions, type LinkDefaultAssumptions } from '../../cee/magnitude/link-default-assumptions.js';
 import { readRecordedRunQuestion, RUN_QUESTION_EVIDENCE_KEY } from '../tools/handlers/run-input-snapshot.js';
 import { goalHorizonVerdict, withholdGoalFiguresForUntestedHorizon, withholdOptionsNotInPlaceAtPeriodEnd, withChanceReadbackWithheld } from './goal-horizon-verdict.js';
@@ -46,7 +47,7 @@ import {
   GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_WITHHELD_CODES, GOAL_FIGURES_USER_EFFECT_CLAMPED, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
   readOptionResultSources,
 } from '../../orchestrator/context/option-result-source.js';
-import { withholdOptionGoalFigures, withholdStatusQuoIntervals, type PerLimitVerdict } from '../../orchestrator/context/constraint-feasibility.js';
+import { withholdOptionGoalFigures, withholdOptionLimitScores, withholdStatusQuoIntervals, type PerLimitVerdict } from '../../orchestrator/context/constraint-feasibility.js';
 import { sayFigure, sayFigureAsWritten } from '../agent-lane/say-figure.js';
 import { midSentence } from '../agent-lane/guidance/render.js';
 import { classifyUnitScaleClass, UNIT_SCALE_CLASS_TOKENS } from '../../cee/draft/records/unit-scale-class.js';
@@ -289,6 +290,8 @@ export interface GoalChanceConstraintInputs {
   /** The handler’s one evaluation, bound to the final request; never persisted or borrowed across requests. */
   readonly evaluatedScope?: RunQuestionScope;
   readonly perLimit?: readonly PerLimitVerdict[];
+  /** This Run’s saved graph retains typed holds even when participation removes their nodes from the calculation. */
+  readonly dependencyGraph?: unknown;
   readonly storedConstraints?: unknown;
   readonly sentConstraints?: unknown;
   /** What CEE sent PLoT for this Run: binds a deadline goal's engine-read chance (`goal-own-constraint-chance.ts`). */
@@ -595,7 +598,8 @@ function goalTargetStateOf(
 export function withEvaluatedGoalChanceInputs<E>(response: E, savedGraph: unknown, goalId: unknown,
   sentRun: SentRunInputs, brief?: string | null): { response: E; scope: RunQuestionScope } {
   const scope: RunQuestionScope = typeof goalId === 'string'
-    ? { ...assessEvaluatedQuestionScope(savedGraph, sentRun, goalId, goalKindOf(savedGraph) === 'level'),
+    ? { ...assessEvaluatedQuestionScope(savedGraph, sentRun, goalId, goalKindOf(savedGraph) === 'level',
+      primaryOnlyTargetIds(savedGraph, isRec(savedGraph) ? savedGraph.goal_constraints : undefined, isRec(sentRun) ? sentRun.goal_constraints : undefined, goalId)),
       dispatched_input_digest: sentDigest({ ...sentRun }) }
     : { status: 'unverified', can_show_goal_chance: false, reasons: ['saved_question_not_recorded'] };
   const missingTargetOrDirection = scope.reasons.some(reason =>
@@ -670,7 +674,7 @@ export function goalChanceLicenceOf(
   envelope: unknown, graph: unknown, goalId: unknown, earned: (optionId: string, p: 0 | 1) => boolean = () => false,
   sentThreshold?: SentGoalThreshold, horizonGraph: unknown = graph, constraints: GoalChanceConstraintInputs = {},
 ): GoalChanceLicence | null {
-  if (!isRec(envelope) || goalChanceTargetCause(graph, goalId) !== null) return null;
+  if (!isRec(envelope) || goalChanceTargetCause(graph, goalId) !== null || goalDependencyCauses(graph, goalId).length > 0) return null;
   const evaluatedScope = isRec(constraints.sentRun) && constraints.sentRun.goal_node_id === goalId
     && constraints.evaluatedScope?.dispatched_input_digest === sentDigest(constraints.sentRun) ? constraints.evaluatedScope : undefined;
   if (evaluatedScope?.status === 'invalid') return null;
@@ -1191,8 +1195,24 @@ function eventNodeIdsOf(c: GoalChanceConstraintInputs, goalId: unknown): string[
 const sentTargetRows = (c: GoalChanceConstraintInputs): boolean => {
   const stored = Array.isArray(c.storedConstraints) ? c.storedConstraints.filter(isRec) : [];
   const sent = Array.isArray(c.sentConstraints) ? c.sentConstraints.filter(isRec) : [];
+  if (primaryOnlyTargetIds(c.dependencyGraph, stored, sent, scoredGoalIdOf(c.dependencyGraph)).size > 0) return false;
   return sent.some((r) => stored.some((s) => s.constraint_id === r.constraint_id && s.role === GOAL_TARGET_ROLE));
 };
+
+/** One event-scope predicate for the licence and leader verdict. A typed held secondary stays context beside the
+ * primary. With two admitted target rows the joint still waits on EVERY saved condition, never a subset. Old graphs no-op. */
+export function primaryOnlyTargetIds(graph: unknown, storedConstraints: unknown, sentConstraints: unknown, goalId: unknown): ReadonlySet<string> {
+  const empty = new Set<string>();
+  if (typeof goalId !== 'string' || goalDependencyCauses(graph, goalId).length > 0) return empty;
+  const targets = (Array.isArray(storedConstraints) ? storedConstraints.filter(isRec) : [])
+    .filter(r => r.role === GOAL_TARGET_ROLE && typeof r.constraint_id === 'string');
+  const held = targets.filter(r => goalDependencyCauses(graph, r.node_id).length > 0);
+  if (!held.some(r => r.node_id !== goalId)) return empty;
+  const sent = Array.isArray(sentConstraints) ? sentConstraints.filter(isRec) : [];
+  const scored = targets.filter(r => !held.includes(r) && sent.some(s => s.constraint_id === r.constraint_id));
+  if (scored.length !== 1 || scored[0]!.node_id !== goalId) return empty;
+  return new Set(targets.map(r => r.constraint_id as string));
+}
 
 /** The labels of the limits the user set that this single-target chance does not include (amendment 4). */
 function limitsOutsideTheChance(graph: unknown, c: GoalChanceConstraintInputs,
@@ -1237,6 +1257,12 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
   const nodes = isRec(c.graph) && Array.isArray(c.graph.nodes) ? c.graph.nodes.filter(isRec) : [];
   const stored = Array.isArray(c.constraints.storedConstraints) ? c.constraints.storedConstraints.filter(isRec) : [];
   const sent = Array.isArray(c.constraints.sentConstraints) ? c.constraints.sentConstraints.filter(isRec) : [];
+  const dependencyGraph = c.constraints.dependencyGraph ?? c.graph;
+  if (primaryOnlyTargetIds(dependencyGraph, stored, sent, c.goal?.id).size > 0) {
+    const heldNotes = stored.filter(r => r.role === GOAL_TARGET_ROLE && r.node_id !== c.goal?.id
+      && goalDependencyCauses(dependencyGraph, r.node_id).length > 0).map(r => goalDependencyWords(dependencyGraph, r.node_id));
+    if (heldNotes.length > 0) return { ...l, notes: [...new Set([...(l.notes ?? []), ...heldNotes])] };
+  }
   const sqId = c.statusQuoId !== undefined && c.option_ids.includes(c.statusQuoId) ? c.statusQuoId : undefined;
   const sqRecord = sqId === undefined ? undefined : ((isRec(c.envelope) ? readOptionResultSources(c.envelope) : []).find((x) => x.length > 0) ?? [])
     .find((r) => (typeof r.option_id === 'string' ? r.option_id : r.id) === sqId);
@@ -1275,7 +1301,7 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
   const fromJoint = allAssumed || jointMovedIds.size > 0
     || ((jointP === 0 || jointP === 1) && [...readings.values()].some(r => r === 'assumed'));
   let block = goalTargetsBlockOf({
-    envelope: c.envelope, graph: c.graph, storedConstraints: c.constraints.storedConstraints,
+    envelope: c.envelope, graph: dependencyGraph, storedConstraints: c.constraints.storedConstraints,
     sentConstraints: c.constraints.sentConstraints, optionIds: c.option_ids,
     perLimit: c.constraints.perLimit, primaryGoalId: c.goal?.id, primaryRefused: c.primaryRefused,
     ...(sqId !== undefined ? { statusQuo: { id: sqId, fromJoint, fromTargets: new Set([...assumedIds, ...movedIds]) } } : {}),
@@ -1646,13 +1672,59 @@ function levelDefaultsOn(graph: unknown, goalId: unknown, sentRun: unknown) {
   });
 }
 
+/** Leave unsupported condition rows out of this Run's wire copy, never out of the saved question. */
+export function goalDependencyConstraintsForRun<C>(graph: unknown, constraints: C): C {
+  if (!Array.isArray(constraints) || !constraints.some(r => isRec(r) && goalDependencyCauses(graph, r.node_id).length > 0)) return constraints;
+  return constraints.filter(r => !isRec(r) || goalDependencyCauses(graph, r.node_id).length === 0) as C;
+}
+
+/** Run-bound, per-condition suppression BEFORE the per-limit verdict as well as at the licence reader.
+ * Never removes unrelated goal chance, ordering, outcome or EVPPI. Old graphs take the byte-identical no-op path. */
+export function withGoalDependencyScores<E>(envelope: E, graph: unknown, storedConstraints: unknown): E {
+  if (!isRec(envelope)) return envelope;
+  const held = (Array.isArray(storedConstraints) ? storedConstraints.filter(isRec) : [])
+    .filter(r => typeof r.constraint_id === 'string' && goalDependencyCauses(graph, r.node_id).length > 0);
+  if (held.length === 0) return envelope;
+  const options = new Set(readOptionResultSources(envelope).flat().flatMap(r =>
+    typeof r.option_id === 'string' ? [r.option_id] : typeof r.id === 'string' ? [r.id] : []));
+  const ids = held.map(r => String(r.constraint_id));
+  const stripped = withholdOptionLimitScores(envelope, new Map(ids.map(id => [id, options]))) as Rec;
+  // The aggregate legacy joint has no condition identity: it also cannot describe the full saved question.
+  if (isRec(stripped.constraint_analysis)) {
+    const { joint_probability: _joint, joint_probability_precision: _precision, ...kept } = stripped.constraint_analysis;
+    stripped.constraint_analysis = kept;
+  }
+  const priorJoint = isRec(stripped.joint_withheld) ? stripped.joint_withheld : {};
+  stripped.joint_withheld = { ...priorJoint, reason: 'limit_unscored', constraint_ids:
+    [...new Set([...(Array.isArray(priorJoint.constraint_ids) ? priorJoint.constraint_ids : []), ...ids])] };
+  const warnings = Array.isArray(stripped.inference_warnings) ? stripped.inference_warnings : [];
+  const fresh = held.filter(r => !warnings.some(w => isRec(w) && w.code === 'CONSTRAINT_TARGET_UNRELIABLE'
+    && w.reason === 'model_dependency_unresolved' && Array.isArray(w.constraint_ids) && w.constraint_ids.includes(r.constraint_id)));
+  return { ...stripped, inference_warnings: [...warnings, ...fresh.map(r => ({ code: 'CONSTRAINT_TARGET_UNRELIABLE',
+    severity: 'warning', source: 'cee', reason: 'model_dependency_unresolved', constraint_ids: [r.constraint_id],
+    node_ids: [r.node_id], message: goalDependencyWords(graph, r.node_id) }))] } as E;
+}
+
 /** Appends the licence to the Run's `inference_warnings` when there is one; otherwise the envelope itself. Pure. */
 export function withGoalChanceLicence<E>(
   envelope: E, graph: unknown, goalId: unknown, earned?: (optionId: string, p: 0 | 1) => boolean,
   sentThreshold?: SentGoalThreshold, horizonGraph: unknown = graph, constraints: GoalChanceConstraintInputs = {},
 ): E {
   // B2 (check BLOCKING 3): a deadline goal's Run that did not test the HELD target withholds every option's chance, with words.
-  const checked = withSentTargetWithheld(envelope, graph, goalId, constraints.sentRun);
+  // The saved snapshot owns dependency meaning; the analysis graph may have pruned the held node.
+  constraints = { ...constraints, dependencyGraph: horizonGraph };
+  let dependencyChecked = withGoalDependencyScores(envelope, horizonGraph, constraints.storedConstraints);
+  const heldTargets = new Set((Array.isArray(constraints.storedConstraints) ? constraints.storedConstraints.filter(isRec) : [])
+    .filter(r => goalDependencyCauses(horizonGraph, r.node_id).length > 0).map(r => String(r.constraint_id)));
+  const options = isRec(envelope) ? new Set(readOptionResultSources(envelope).flat().flatMap(r =>
+    typeof r.option_id === 'string' ? [r.option_id] : typeof r.id === 'string' ? [r.id] : [])) : new Set<string>();
+  if (goalDependencyCauses(horizonGraph, goalId).length > 0 && options.size > 0) dependencyChecked = withholdOptionGoalFigures(dependencyChecked, options, {
+    code: GOAL_FIGURES_TARGET_NOT_TESTABLE, severity: 'warning', message: goalDependencyWords(horizonGraph, goalId),
+    option_ids: [...options], node_ids: [goalId], constraint_ids: [...heldTargets].filter(id =>
+      (constraints.storedConstraints as unknown[]).some(r => isRec(r) && r.constraint_id === id && r.node_id === goalId)),
+    detail: { reason: 'model_dependency_unresolved', rests_on: goalDependencyCauses(horizonGraph, goalId) },
+  }, { keepOutcome: true, keepOrdering: true });
+  const checked = withSentTargetWithheld(dependencyChecked, graph, goalId, constraints.sentRun);
   const licence = goalTargetStateOf(checked, graph, goalId, earned, sentThreshold, horizonGraph, constraints);
   if (licence === null || !isRec(checked)) return checked;
   // Recovery Batch C, amendment 1 (DL contract ruling 3): a status quo the licence records as BY ASSUMPTION carries no

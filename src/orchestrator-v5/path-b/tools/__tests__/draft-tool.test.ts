@@ -93,7 +93,9 @@ describe('Olumi\'s provisional first model: the AI\'s living model, compiled by 
     expect((registerCalls(p)[0]!.body as { graph: { living_model: { aims: unknown } } }).graph.living_model.aims).toEqual(m.aims);
     expect(p.onModelRegistered.mock.calls[0]![0].living_model.aims).toEqual(m.aims);
     expect(mapped.graph.nodes.filter(n => n.kind === 'goal').map(n => n.id)).toEqual(['g']);
-    expect(mapped.withheld).toEqual([{ id: 'customers', reason: 'aim_not_in_slice' }]);
+    expect(mapped.withheld).toEqual([{ id: 'customers', reason: 'goal_level_unknown' }]);
+    expect((mapped.graph as Rec).goal_constraints).toContainEqual(expect.objectContaining({ node_id: 'customers', role: 'goal_target', value: 20 }));
+    expect((mapped.graph as Rec).goal_constraints).toContainEqual(expect.objectContaining({ node_id: 'g', role: 'goal_target', value: 15, operator_as_stated: '>' }));
   });
 
   it('the living model and its compiled graph are registered create-only, as a core postimage, under the construction\'s own operation', async () => {

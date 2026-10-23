@@ -45,7 +45,9 @@ export function canonicalIds(model: LivingModelT): LivingModelT {
   };
   return {
     aims: model.aims.map((a) => defined({ ...a, id: ref(a.id) })),
-    factors: model.factors.map((f) => defined({ ...f, id: ref(f.id) })),
+    factors: model.factors.map((f) => defined({ ...f, id: ref(f.id), ...(f.accumulation == null ? {} : { accumulation: { ...f.accumulation,
+      stock_today: ref(f.accumulation.stock_today), loss_rate_per_month: ref(f.accumulation.loss_rate_per_month),
+      inflow_per_month: ref(f.accumulation.inflow_per_month) } }) })),
     options: model.options.map((o) => ({ ...o, id: ref(o.id), settings: o.settings.map((s) => ({ ...s, factor_id: ref(s.factor_id) })),
       ...(o.developed_from ? { developed_from: ref(o.developed_from) } : {}) })),
     links: model.links.map((l) => ({ ...l, id: ref(l.id), from: ref(l.from), to: ref(l.to) })),
@@ -73,6 +75,7 @@ function savedAttributions(saved: LivingModelT): Set<string> {
     ...saved.links.map((l) => attributionKey(l.id, l)),
     ...saved.risks.flatMap((r) => [attributionKey(r.id, r), ...r.mitigations.map((x) => attributionKey(`${r.id}:${x.factor_id}`, x))]),
     ...saved.conditions.map((c) => attributionKey(`condition:${c.text}`, c)),
+    ...saved.factors.flatMap(f => f.accumulation == null ? [] : [attributionKey(`${f.id}:accumulation`, f.accumulation)]),
     ...[...saved.aims, ...saved.factors].flatMap((x) => (x.defined_as ? [attributionKey(`${x.id}:defined_as`, x.defined_as)] : [])),
   ]);
 }
@@ -179,7 +182,8 @@ export function applyKernel(model: LivingModelT, verifiedWords: readonly string[
       // What the AI sent for `said_in` is dropped; the key is written only when the host reads 'chat', so an unmarked factor stays
       // byte for byte what it was.
       factors: m.factors.map((f) => {
-        const { said_in: _sent, ...out } = defined(attribute(f.id, guarded(f, savedItem.get(f.id), FIGURE)));
+        const { said_in: _sent, ...raw } = defined(attribute(f.id, guarded(f, savedItem.get(f.id), FIGURE)));
+        const out = raw.accumulation == null ? raw : { ...raw, accumulation: attribute(`${f.id}:accumulation`, raw.accumulation) };
         return saidIn(f.id, out) === 'chat' ? { ...out, said_in: 'chat' as const } : out;
       }),
       options: m.options.map((o) => ({ ...attribute(o.id, optionItself(o)),

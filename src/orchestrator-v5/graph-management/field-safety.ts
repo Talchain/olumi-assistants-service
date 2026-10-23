@@ -207,6 +207,7 @@ const CEE_ANALYSIS_OWNED_ROOTS: readonly string[] = [
   // Recovery Batch C: Olumi's validated reading of the target's semantics; written only by construction (`goal-target-basis.ts`)
   // and the approved answer to its open question (`goal-reading-write.ts`, which removes that one member).
   'goal_target_basis',
+  'goal_rests_on', // Host-compiled permission; a generic edit must not clear or mint it.
   'goal_scope',
   'goal_horizon_months',
   // The S4 deadline door and the one-off door are the only writers of these pipeline-owned fields.

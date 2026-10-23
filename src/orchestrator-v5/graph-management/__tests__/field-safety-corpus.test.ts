@@ -126,6 +126,7 @@ describe('corpus A — union assertion: the owned set covers every stamp reachab
       'goal_horizon_stated_months',
       // MG (29 Sep, AIQ (b)): Olumi's reading of the brief's figure as a change goal's today level — construction only.
       'goal_level_reading',
+      'goal_rests_on',
       // MG #2306 (29 Sep): Olumi's reading of a decrease target — CEE-owned; only construction writes it.
       'goal_scope',
       'goal_sense_reading',
@@ -195,6 +196,7 @@ const SMUGGLE_NAMES = [
   'goal_level_reading',
   // Batch C: ruling 4 — the target's stated basis, written only by construction (`admitGoalTargetBasis`).
   'goal_target_basis',
+  'goal_rests_on',
   // F1 T6 (1 Oct, CODEX #2467 P1-1): an option's lifecycle authority (proposed_by / option_status / participation).
   'proposed_by',
   'option_status',
@@ -424,6 +426,8 @@ describe('S4 temporal authority cannot be forged by an AI mutation', () => {
   it('R2: add_node and patch refuse a one-off reading, forged reference and forged stated duration', () => {
     for (const [field, value] of [
       ['goal_stock_reading', 'one_off'],
+      ['goal_rests_on', [{ id: 'g-profit', reason: 'condition_not_in_slice' }]],
+      ['goal_rests_on', []], // A generic edit cannot clear the host's calculation hold either.
       ['goal_horizon_reference_date', '2020-01-01'],
       ['goal_horizon_stated_months', 99],
       // Batch C: ruling 4 — a forged target basis would license a change goal's chance; only construction writes it.
