@@ -10,7 +10,10 @@
  *  · SAVE: the display graph with the model program in `living_model` (`{ model_program: 'v1', canonical, seed,
  *    person_words }`), through the core route's ONE write (`writeCorePostimage`: register, then an independent readback).
  *    The readback's canonical model must equal the saved one byte for byte.
- *  · REOPEN (`reopenModelProgram`): the saved model, words and seed alone reproduce the same view. Nothing derived is stored.
+ *  · RUN: every evaluation is a Run stored WITH the model in the same write (`run-receipt.ts`): its receipt (revision digest,
+ *    engine versions, seed, draws) and the result it showed. A later evaluation appends a new Run; earlier ones never change.
+ *  · REOPEN (`reopenModelProgram`): shows the newest STORED Run's result, never a recomputation, with whether it is current
+ *    for the saved model and for today's engine.
  */
 import { createHash } from 'node:crypto';
 import type { InternalDispatch } from '../agent-lane/runtime/agent-capabilities.js';
@@ -22,6 +25,7 @@ import { readSaved, isSavedRead } from '../path-b/tools/context-tool.js';
 import { draftCanonicalModel, ledgeredResponsesCall, type DraftOutcome, type ResponsesCall } from './draft.js';
 import { chancesOf, evaluateCanonical, seedOf, type Evaluation } from './evaluate.js';
 import { DRAFTING_PROMPT_SHA256, CANONICAL_SCHEMA_SHA256 } from './prompt.js';
+import { ENGINE_VERSIONS, newRun, shownRun, type EngineVersions, type StoredRun } from './run-receipt.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -29,7 +33,8 @@ const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !
 export const MODEL_PROGRAM_ARM = 'canonical';
 export const MODEL_PROGRAM_SAVE_VERSION = 'v1' as const;
 
-export type SavedProgram = { readonly model_program: typeof MODEL_PROGRAM_SAVE_VERSION; readonly canonical: CanonicalModelT; readonly seed: number; readonly person_words: readonly string[] };
+export type SavedProgram = { readonly model_program: typeof MODEL_PROGRAM_SAVE_VERSION; readonly canonical: CanonicalModelT; readonly seed: number;
+  readonly person_words: readonly string[]; readonly runs: readonly StoredRun[] };
 
 /** The saved model program on a graph, or undefined when the graph holds none (or an unreadable one). */
 export function savedProgramOf(graph: unknown): SavedProgram | undefined {
@@ -39,18 +44,26 @@ export function savedProgramOf(graph: unknown): SavedProgram | undefined {
   const seed = lm['seed'];
   const words = lm['person_words'];
   if (!parsed.success || typeof seed !== 'number' || !Array.isArray(words) || !words.every((w) => typeof w === 'string')) return undefined;
-  return { model_program: MODEL_PROGRAM_SAVE_VERSION, canonical: parsed.data, seed, person_words: words as string[] };
+  const runs = Array.isArray(lm['runs']) ? (lm['runs'] as unknown[]).filter((r): r is StoredRun => isRec(r) && isRec(r['receipt']) && isRec(r['result'])) : [];
+  return { model_program: MODEL_PROGRAM_SAVE_VERSION, canonical: parsed.data, seed, person_words: words as string[], runs };
 }
 export const isModelProgramGraph = (graph: unknown): boolean => isRec(graph) && isRec(graph['living_model']) && graph['living_model']['model_program'] !== undefined;
 
 /** The person's words the compiler checks quotes against: the brief and every answer they gave, in order. */
 const sourceTextOf = (words: readonly string[]) => words.join('\n');
 
-/** REOPEN: the saved program alone (its model, the person's words and the seed) gives the view again. */
-export function reopenModelProgram(graph: unknown): (Evaluation & { readonly program: SavedProgram }) | undefined {
+/** REOPEN: the newest STORED Run's result, exactly as it was computed; never recomputed here. */
+export function reopenModelProgram(graph: unknown, versions: EngineVersions = ENGINE_VERSIONS): { readonly program: SavedProgram; readonly view: unknown;
+  readonly run: StoredRun | null; readonly current: boolean; readonly engine_current: boolean } | undefined {
   const program = savedProgramOf(graph);
   if (program === undefined) return undefined;
-  return { program, ...evaluateCanonical(program.canonical, { sourceText: sourceTextOf(program.person_words), seed: program.seed }) };
+  const shown = shownRun(program.runs, program.canonical, program.person_words, versions);
+  return { program, view: shown?.run.result.canonical_analysis_view ?? null, run: shown?.run ?? null, current: shown?.current ?? false, engine_current: shown?.engine_current ?? false };
+}
+
+/** A NEW evaluation of the saved program (what a turn does before it stores a new Run): never what a reopen shows. */
+export function reevaluateModelProgram(program: SavedProgram): Evaluation {
+  return evaluateCanonical(program.canonical, { sourceText: sourceTextOf(program.person_words), seed: program.seed });
 }
 
 /** One answer to one ask, as an ask card sends it: the quantity it fills, the figure, and the person's own words. */
@@ -120,7 +133,8 @@ function replyOf(model: CanonicalModelT, e: Evaluation, first: boolean): string 
 }
 
 async function save(input: ProgramTurnInput, program: SavedProgram, e: Evaluation, briefText?: string): Promise<{ write: CoreWrite; readback: Rec }> {
-  const graph: Rec = { ...e.projection.graph, living_model: { model_program: program.model_program, canonical: program.canonical, seed: program.seed, person_words: program.person_words } };
+  const graph: Rec = { ...e.projection.graph, living_model: { model_program: program.model_program, canonical: program.canonical, seed: program.seed,
+    person_words: program.person_words, runs: program.runs } };
   const write = await writeCorePostimage({ dispatch: input.dispatch }, {
     scenarioId: input.scenarioId, graph, operationId: operationIdOf(input.scenarioId, input.turnId), expectedIdentity: input.saved.identity,
     ...(briefText !== undefined ? { briefText } : {}), ownVersion: async () => null,
@@ -131,6 +145,7 @@ async function save(input: ProgramTurnInput, program: SavedProgram, e: Evaluatio
   const sent = JSON.stringify(program.canonical);
   const got = back === undefined ? null : JSON.stringify(back.canonical);
   return { write, readback: { read: isSavedRead(read), version: back?.canonical.version ?? null, seed_identical: back?.seed === program.seed,
+    runs_identical: back !== undefined && JSON.stringify(back.runs) === JSON.stringify(program.runs),
     canonical_bytes_identical: got === sent, canonical_stable_identical: back !== undefined && stableStringify(back.canonical) === stableStringify(program.canonical),
     canonical_sha256: createHash('sha256').update(sent).digest('hex') } };
 }
@@ -153,7 +168,7 @@ export async function runModelProgramTurn(input: ProgramTurnInput): Promise<Prog
         payload: { canonical_analysis_view: null, model_program: { turn: 'draft', saved: false, draft: meta,
           canonical: draft.model, compile: draft.compiled === null ? null : { compiles: false, errors: draft.compiled.errors } } } };
     }
-    program = { model_program: MODEL_PROGRAM_SAVE_VERSION, canonical: draft.model, seed: seedOf(input.scenarioId), person_words: [input.message] };
+    program = { model_program: MODEL_PROGRAM_SAVE_VERSION, canonical: draft.model, seed: seedOf(input.scenarioId), person_words: [input.message], runs: [] };
   } else {
     // ANSWER TURN: each answer fills exactly one quantity, in the person's words. Nothing else changes.
     if (input.answers === null || input.answers.length === 0) {
@@ -177,6 +192,10 @@ export async function runModelProgramTurn(input: ProgramTurnInput): Promise<Prog
   }
 
   const evaluation = evaluateCanonical(program.canonical, { sourceText: sourceTextOf(program.person_words), seed: program.seed });
+  // This evaluation is a NEW Run, stored with the model; the Runs before it are kept exactly as they were.
+  const run = newRun({ canonical: program.canonical, personWords: program.person_words, seed: program.seed, draws: evaluation.sim?.draws ?? null, index: program.runs.length,
+    result: { canonical_analysis_view: evaluation.view, chances: chancesOf(evaluation.sim), compile: compileBlock(evaluation) } });
+  program = { ...program, runs: [...program.runs, run] };
   const { write, readback } = await save(input, program, evaluation, prior === undefined ? input.message : undefined);
   const saved = write.status === 'saved' || write.status === 'already_saved';
   const receipt = write.status === 'saved' || write.status === 'already_saved' ? write.receipt : null;
@@ -187,8 +206,9 @@ export async function runModelProgramTurn(input: ProgramTurnInput): Promise<Prog
     toolResults: [{ ...(receipt !== null && isRec(receipt) ? { model_version: receipt } : {}) }],
     mutated: saved, verifiedSave: write.status === 'saved',
     payload: {
-      canonical_analysis_view: evaluation.view,
+      canonical_analysis_view: run.result.canonical_analysis_view,
       model_program: {
+        run: { run_id: run.run_id, receipt: run.receipt, computed_at: run.computed_at },
         turn: prior === undefined ? 'draft' : 'answer', saved, write: write.status, readback, seed: program.seed, version: CANONICAL_VERSION,
         ...(draft !== undefined ? { draft: { arm: MODEL_PROGRAM_ARM, prompt_sha256: DRAFTING_PROMPT_SHA256, schema_sha256: CANONICAL_SCHEMA_SHA256, attempts: draft.attempts } } : {}),
         ...(prior !== undefined ? { fills } : {}),

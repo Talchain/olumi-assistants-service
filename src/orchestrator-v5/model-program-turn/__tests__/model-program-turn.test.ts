@@ -17,7 +17,9 @@ import { project } from '../../model-program/project.js';
 import { simulate } from '../../model-program/simulate/simulate.js';
 import { CANONICAL_JSON_SCHEMA, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX } from '../prompt.js';
 import { seedOf, SPIKE_DRAWS } from '../evaluate.js';
-import { reopenModelProgram } from '../turn.js';
+import { reopenModelProgram, savedProgramOf } from '../turn.js';
+import { projectCorePostimageForPersistence } from '../../persisted-graph-projection.js';
+import { ENGINE_VERSIONS, revisionDigest } from '../run-receipt.js';
 
 type Json = Record<string, any>;
 
@@ -236,28 +238,58 @@ describe('spike S3: the model-program turn on the real core route', () => {
     expect(display).toEqual(JSON.parse(JSON.stringify(project(bakery(), compile(bakery(), { sourceText: BRIEF })).graph)));
   });
 
-  it('step 4, save → readback → cold reopen: the canonical model comes back byte-identical, and the reopen reproduces the view', async () => {
+  it('step 4, save → readback → cold reopen: the canonical model and its stored Run come back byte-identical; the reopen SHOWS that Run', async () => {
     replies = [JSON.stringify(bakery())];
     const r = (await turn({ message: BRIEF }, ARM)).json();
     expect(r.model_program.saved).toBe(true);
     expect(r.model_program.write).toBe('saved');
-    expect(r.model_program.readback).toMatchObject({ read: true, version: 'canonical.v1', seed_identical: true, canonical_bytes_identical: true, canonical_stable_identical: true });
+    expect(r.model_program.readback).toMatchObject({ read: true, version: 'canonical.v1', seed_identical: true, runs_identical: true, canonical_bytes_identical: true, canonical_stable_identical: true });
     expect(JSON.stringify(persisted!.living_model.canonical)).toBe(JSON.stringify(r.model_program.canonical));
-    // Cold: the stored JSON alone, in a fresh module instance.
+    const runs = persisted!.living_model.runs as Json[];
+    expect(runs).toHaveLength(1);
+    expect(runs[0]!.run_id).toBe(r.model_program.run.run_id);
+    expect(runs[0]!.receipt).toEqual({ revision_digest: revisionDigest(bakery(), [BRIEF]), versions: { ...ENGINE_VERSIONS }, seed: seedOf(SCENARIO), draws: SPIKE_DRAWS });
+    expect(stableStringify(runs[0]!.result.canonical_analysis_view)).toBe(stableStringify(r.canonical_analysis_view));
+    // Cold: the stored JSON alone, in a fresh module instance, shows the STORED Run: current, today's engine.
     vi.resetModules();
     const fresh = await import('../turn.js');
     const cold = fresh.reopenModelProgram(JSON.parse(JSON.stringify(persisted)))!;
     expect(stableStringify(cold.view)).toBe(stableStringify(r.canonical_analysis_view));
-    // Contrast: the same model on another seed does not reproduce it, so the identity above is the seed's, not luck.
-    const other = JSON.parse(JSON.stringify(persisted));
-    other.living_model.seed += 1;
-    expect(stableStringify(reopenModelProgram(other)!.sim!.options)).not.toBe(stableStringify(cold.sim!.options));
+    expect([cold.run!.run_id, cold.current, cold.engine_current]).toEqual([r.model_program.run.run_id, true, true]);
+    // Contrast: a NEW evaluation on another seed gives other numbers, so what the reopen shows is the stored Run, not a recompute.
+    const other = fresh.savedProgramOf(JSON.parse(JSON.stringify(persisted)))!;
+    const recomputed = fresh.reevaluateModelProgram({ ...other, seed: other.seed + 1 });
+    expect(stableStringify(recomputed.view)).not.toBe(stableStringify(cold.view));
+  });
+
+  it('step 4b, an engine-version bump: the reopen still shows the ORIGINAL stored result, said as from an older engine', async () => {
+    replies = [JSON.stringify(bakery())];
+    const r = (await turn({ message: BRIEF }, ARM)).json();
+    const bumped = { ...ENGINE_VERSIONS, engine: `${ENGINE_VERSIONS.engine}-bumped` };
+    const cold = reopenModelProgram(JSON.parse(JSON.stringify(persisted)), bumped)!;
+    expect(stableStringify(cold.view)).toBe(stableStringify(r.canonical_analysis_view));
+    expect([cold.run!.run_id, cold.current, cold.engine_current]).toEqual([r.model_program.run.run_id, true, false]);
+    expect(cold.run!.receipt.versions).toEqual({ ...ENGINE_VERSIONS });
+    // What it shows is the stored bytes: a marker written into the stored Run is what comes back (a recompute would lose it).
+    const marked = JSON.parse(JSON.stringify(persisted));
+    marked.living_model.runs[0].result.canonical_analysis_view.options[0].cell.display = 'STORED-RUN-MARKER';
+    expect((reopenModelProgram(marked, bumped)!.view as Json).options[0].cell.display).toBe('STORED-RUN-MARKER');
+  });
+
+  it('step 4c, the core postimage persistence projection the register applies keeps the model program byte for byte', async () => {
+    replies = [JSON.stringify(bakery())];
+    await turn({ message: BRIEF }, ARM);
+    const postimage = registered[0]!.graph as Json;
+    const stored = projectCorePostimageForPersistence(JSON.parse(JSON.stringify(postimage))) as Json;
+    expect(JSON.stringify(stored.living_model)).toBe(JSON.stringify(postimage.living_model));
+    expect(savedProgramOf(stored)!.runs).toHaveLength(1);
   });
 
   it('step 5, an answer fills exactly ONE quantity, as the person\'s words, with no model call; then recompile and re-simulate', async () => {
     replies = [JSON.stringify(bakery())];
     await turn({ message: BRIEF }, ARM);
     const before = JSON.parse(JSON.stringify(persisted!.living_model.canonical)) as CanonicalModelT;
+    const firstRun = JSON.stringify(persisted!.living_model.runs[0]);
     sent.length = 0;
     const words = 'The oven would cost about £2,500.';
     // The message is the turn's text; the quote is the answer's own words (an ask card's input), never the message.
@@ -281,6 +313,12 @@ describe('spike S3: the model-program turn on the real core route', () => {
     expect(j.model_program.chances).toEqual(JSON.parse(JSON.stringify(simulate(x, { seed: seedOf(SCENARIO), draws: SPIKE_DRAWS }).options
       .map((o) => ({ option_id: o.option_id, per_goal: o.per_goal, joint: o.joint, within_limits: o.within_limits, joint_within_limits: o.joint_within_limits, outcomes: o.outcomes })))));
     expect(j.receipts.map((x2: Json) => x2.authorised_by)).toEqual(['person']);
+    // The answer's evaluation is a NEW Run; the draft's Run stays byte for byte as it was, and the reopen shows the new one.
+    const runs = persisted!.living_model.runs as Json[];
+    expect(runs).toHaveLength(2);
+    expect(JSON.stringify(runs[0])).toBe(firstRun);
+    expect(runs[1]!.receipt.revision_digest).toBe(revisionDigest(after, [BRIEF, words]));
+    expect(reopenModelProgram(JSON.parse(JSON.stringify(persisted)))!.run!.run_id).toBe(runs[1]!.run_id);
     // Contrast: an answer naming no quantity in the model changes nothing and saves nothing.
     const saves = registered.length;
     const bad = await turn({ message: 'about 3', model_program_answers: [{ quantity_id: 'no_such_figure', value: 3, words: 'about 3' }] });
