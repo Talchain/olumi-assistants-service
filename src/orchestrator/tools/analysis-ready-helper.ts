@@ -7,7 +7,9 @@
  * remains exported only for compatibility tests and per-option diagnostics.
  */
 
-import type { DoorSubject } from '../../orchestrator-v5/statement-door/subject.js';
+import { subjectKey, type DoorSubject } from '../../orchestrator-v5/statement-door/subject.js';
+import { recordsWithUnknownSpeakerOn } from '../../orchestrator-v5/statement-door/statements.js';
+import { INTAKE_OPTION_LABEL_MAX_CHARS } from '../../orchestrator-v5/coaching/intake-option-disclosure.js';
 import { statedIdentityFrameGaps } from '../../cee/graph-readiness/identity-frames.js';
 import { GraphV3, OptionStatusV3 } from "../../schemas/cee-v3.js";
 import type { GraphV3T, OptionV3T } from "../../schemas/cee-v3.js";
@@ -1372,8 +1374,19 @@ function hasSampledPrior(prior: unknown): boolean {
     && min !== max;
 }
 
+/**
+ * ⭐ ONE quotable-label rule for the level asks: an ALLOWLIST (Codex R1 and R2 on #3454: a schema-valid label ended its quotation and
+ * spoke for Olumi; a denylist of quotation marks lost to `’s` and Unicode line separators). A label is quoted only when it holds a
+ * letter or digit, fits the shared label-slot cap (`INTAKE_OPTION_LABEL_MAX_CHARS`), and every character is a letter (not a modifier
+ * letter, which can look like a quotation mark), a digit, a plain space or one of . , : % ( ) £ $ € & / -. Any other label is named
+ * "this factor", unquoted: no label can end its quotation or begin a line.
+ */
+const QUOTABLE_LABEL = /^[\p{Lu}\p{Ll}\p{Lt}\p{Lo}\p{Nd} .,:%()£$€&/-]+$/u;
+const quotable = (label: string): boolean =>
+  label.length <= INTAKE_OPTION_LABEL_MAX_CHARS && /[\p{L}\p{Nd}]/u.test(label) && QUOTABLE_LABEL.test(label);
+
 const statusQuoLevelAsk = (label: string): string =>
-  `What is "${label}" today, before any option changes it? Without a current level the analysis would treat it as zero.`;
+  `What is ${quotable(label) ? `"${label}"` : 'this factor’s level'} today, before any option changes it? Without a current level the analysis would treat it as zero.`;
 
 /**
  * ⭐ EBD E1 — ONE READINESS AUTHORITY FOR THE DEADLINE MODEL (Paul, 12 Oct, scenario 4184e877). Its team part
@@ -1396,9 +1409,9 @@ const levelGapAsk = (gap: { id: string; label: string; kind?: string }, rawGraph
    * route offers it (`briefHoldsNowArgs`: the event path, over a window from today); otherwise the reading stays and the ACTUAL
    * remaining blocker is said once. No "can’t run the numbers" promise: recording it can leave its effect unresolved.
    */
-  const riskNode = gap.kind === 'risk' && rawGraph !== null && typeof rawGraph === 'object' && Array.isArray((rawGraph as { nodes?: unknown }).nodes)
+  const node = rawGraph !== null && typeof rawGraph === 'object' && Array.isArray((rawGraph as { nodes?: unknown }).nodes)
     ? ((rawGraph as { nodes: unknown[] }).nodes).find((n) => n !== null && typeof n === 'object' && (n as { id?: unknown }).id === gap.id) : undefined;
-  const said = alreadyTrueQuoteOf(riskNode);
+  const said = gap.kind === 'risk' ? alreadyTrueQuoteOf(node) : undefined;
   if (said !== undefined) {
     const reading = `Your brief says: “${said}”${/[.!?…]$/.test(said) ? '' : '.'} Olumi reads this as ‘${gap.label.trim()}’ already being true now.`;
     if (eventPath?.kind === 'eligible' && riskOccurrenceWindowFromToday(rawGraph)) {
@@ -1422,6 +1435,24 @@ const levelGapAsk = (gap: { id: string; label: string; kind?: string }, rawGraph
   // window, so no card, and the ask never promises one.
   if (gap.kind === 'risk') return `${question} Olumi can’t run the numbers until this risk has a figure.`
     + (eventPath?.kind === 'eligible' ? ' Or ask Olumi to suggest a starting estimate for you to review.' : '');
+  /**
+   * ⭐ A KEPT LEVEL RECORD IS NEVER ASKED FOR AGAIN (AIE 12:25Z, packet AIE-COUNT-VERSUS-SWITCH-FRAME-AND-EQUIVALENCE-RULING-20261019-v1
+   * `neutral_existing_level_gap_words`, exact; supersedes #3451). Where this factor's OWN level record keeps information (the user's
+   * statements or the brief's speaker-unknown words) and readiness still finds no supported level, the ask claims neither cases nor a
+   * limitation, and never offers zero. The slot is the node's label, as the status-quo ask renders it: no stored statement text reaches
+   * it (Codex R2 on #3451), and no writer sets a level statement's period; it is quoted only where `quotable`.
+   */
+  // Only a VALID kept record, bound by IDENTITY (Codex R1 and R2 on #3454): its key and field name this factor's level, and every
+  // statement is bound to THIS node by the id its writer stamped (`subject.node_id`, never an option's setting) and keeps words (a
+  // non-blank quote and source line). No label or drafted-quantity text is matched: a statement without that id does not count.
+  const ownLevel = subjectKey({ kind: 'factor', id: gap.id, field: 'level' });
+  const kept = recordsWithUnknownSpeakerOn(node).some((r) => r.subject_key === ownLevel && r.field === 'level'
+    && r.statements.every((st) => st.subject.node_id === gap.id && st.subject.option_id === undefined
+      && st.quote.trim() !== '' && st.source.trim() !== ''));
+  if (gap.kind === 'factor' && kept) {
+    return `This calculation does not yet have a supported starting level for ${quotable(gap.label) ? `‘${gap.label.trim()}’` : 'this factor'}. `
+      + 'We can still reason through what is already recorded.';
+  }
   return statusQuoLevelAsk(gap.label);
 };
 
