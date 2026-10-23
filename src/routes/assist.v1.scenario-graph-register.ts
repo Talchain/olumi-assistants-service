@@ -41,7 +41,7 @@ import { useAppendV6 } from "../orchestrator-v5/session/supabase-store.js";
 import { registrationRequestHash, registrationTurnId } from "../orchestrator-v5/graph-registration/registration-identity.js";
 import { GraphStaleWriteError } from "../orchestrator-v5/session/store.js";
 import { readRevisionConflictDetails, withRevisionConflictWire } from "../orchestrator-v5/graph-revision-conflict.js";
-import { runWithPendingTurnFence, TurnFenceRejectedError } from "../orchestrator-v5/session/turn-fence.js";
+import { currentTurnFence, runWithPendingTurnFence, runWithTurnFence, TurnFenceRejectedError } from "../orchestrator-v5/session/turn-fence.js";
 import { admitCurrentTurnFence } from "../orchestrator/turn-fence-prehandler.js";
 import { normaliseBriefText } from "../orchestrator-v5/session/normalise-brief-text.js";
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
@@ -1225,8 +1225,15 @@ export default async function route(app: FastifyInstance) {
           baseGraphForInvariants,
           source: "graph_registration",
         });
-        appendOutcome = await runWithPendingTurnFence(scenarioId, turnId, async () => {
-          await admitCurrentTurnFence();
+        /**
+         * ⭐ A TURN'S OWN WRITE IS THAT TURN'S (DL 93d79c3e 09:40Z; Codex r1 on #3704). A registration made inside an Agent dispatch
+         * that runs under its turn's ADMITTED fence handle (today only the core turn binds one, `core-turn.ts`) commits under that
+         * handle, not a claim of its own: the commit's gate is keyed by generation (20260806120000), so an explicit Stop of the
+         * turn, recorded on its row, refuses the write in the commit's own transaction. Every other registration claims its own
+         * place, as before (the legacy Agent route's dispatches bind no fence).
+         */
+        const outer = isAgentSubturnFor(scenarioId) ? currentTurnFence() : undefined;
+        const commitInFence = async () => {
           // Inside the fence, so no turn can commit a newer hold between this
           // read and the write that carries it.
           const threadedPendings = await threadLiveHoldsThroughRegistration({
@@ -1285,7 +1292,10 @@ export default async function route(app: FastifyInstance) {
             ...(expectedRevision !== undefined ? { expectedRevision } : {}),
           },
           });
-        });
+        };
+        appendOutcome = outer !== undefined && outer.scenarioId === scenarioId
+          ? await runWithTurnFence(outer, commitInFence)
+          : await runWithPendingTurnFence(scenarioId, turnId, async () => { await admitCurrentTurnFence(); return commitInFence(); });
       } catch (err) {
         if (err instanceof ModelWriteOwnershipRefused) {
           await markDraftGraphWriteFailed(scenarioId, turnId, err.code, requestId, 'turn_dead_only');

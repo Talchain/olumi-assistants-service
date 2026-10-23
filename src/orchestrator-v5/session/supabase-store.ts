@@ -1055,20 +1055,6 @@ export class SupabaseSessionStore implements SessionStore {
    * with RLS on and this client IS the service role; the RPCs exist for
    * write-path atomicity, which a single read does not need. No migration.
    */
-  /** The core turn's Stop read (`SessionStore.turnWasStopped`): this exact row's tombstone, by the same direct read. */
-  async turnWasStopped(scenarioId: string, turnId: string): Promise<boolean> {
-    const { data, error } = await this.client
-      .from('v5_turn_fence')
-      .select('stopped_at')
-      .eq('scenario_id', scenarioId)
-      .eq('turn_id', turnId)
-      .maybeSingle();
-    if (error) {
-      throw new Error(`v5_turn_fence stop read failed: ${errMsg(error)}`);
-    }
-    return data !== null && (data as { stopped_at?: unknown }).stopped_at != null;
-  }
-
   async turnFenceRowExists(scenarioId: string, turnId: string): Promise<boolean> {
     const { data, error } = await this.client
       .from('v5_turn_fence')

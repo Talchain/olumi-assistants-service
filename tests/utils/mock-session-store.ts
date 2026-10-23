@@ -97,8 +97,6 @@ export function createMockSessionStore(
     // suite keeps recording Stops unless it seeds an un-admitted turn id
     // deliberately.
     turnFenceRowExists: async () => true,
-    // No turn is stopped unless a test says so: the core turn's pre-write read (`turnWasStopped`) lets every write through.
-    turnWasStopped: async () => false,
     // The drift alarm fired again here, as designed: `committedTurnRowId` was
     // added to `SessionStore` and this helper was not updated. Benign default =
     // this turn has NOT committed, which is the state an ordinary in-flight turn

@@ -544,12 +544,6 @@ export interface SessionStore {
    */
   turnFenceRowExists?(scenarioId: string, turnId: string): Promise<boolean>;
   /**
-   * Does this exact (scenario, turn) carry an explicit Stop tombstone (`stopped_at`)? Read by the core turn before each graph
-   * write it makes, since its registrations fence under their own operation ids. Throws on a FAILED read (the caller decides);
-   * no row is `false`. Optional for the same reason as {@link claimTurnFence}.
-   */
-  turnWasStopped?(scenarioId: string, turnId: string): Promise<boolean>;
-  /**
    * ⭐⭐ DID THIS EXACT (scenario, turn) ALREADY COMMIT, AND WHAT IS ITS ROW ID?
    *
    * ⚠⚠ THIS IS NOT {@link turnFenceRowExists}, WHICH SITS DIRECTLY ABOVE IT AND

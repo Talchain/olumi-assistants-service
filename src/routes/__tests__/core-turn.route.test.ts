@@ -108,7 +108,6 @@ const store = {
     fenceRows.set(`${sid}:${tid}`, { generation: row?.generation ?? ++fenceGeneration, stopped_at: '2026-10-23T10:00:00.000Z' });
     return { stopped: true, claimed: row !== undefined, alreadyCommitted: false };
   }),
-  turnWasStopped: vi.fn(async (sid: string, tid: string) => fenceRows.get(`${sid}:${tid}`)?.stopped_at != null),
 };
 vi.mock('../../orchestrator-v5/session/index.js', () => ({ getSessionStore: () => store, resetSessionStoreForTests: () => {}, SessionReadError: class SessionReadError extends Error {} }));
 vi.mock('../../orchestrator/user-identity.js', async (original) => ({
@@ -150,6 +149,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
   let calls: Json[] = [];
   let outputs: Json[][] = [];
   let runWithStageStream: typeof import('../../cee/unified-pipeline/stage-stream-context.js').runWithStageStream;
+  let currentTurnFence: typeof import('../../orchestrator-v5/session/turn-fence.js').currentTurnFence;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(streamWhenAsked(async (url: unknown, init?: { body?: unknown }) => {
       if (String(url).endsWith('/v1/conversations')) return json({ id: `conv_${randomUUID()}`, object: 'conversation' });
@@ -169,10 +169,17 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     const route = await import('../core-turn.js');
     // The route's own instance (after resetModules): the stage context must be the one the route reads.
     ({ runWithStageStream } = await import('../../cee/unified-pipeline/stage-stream-context.js'));
+    ({ currentTurnFence } = await import('../../orchestrator-v5/session/turn-fence.js'));
     app = Fastify({ logger: false });
     app.post('/assist/v1/scenarios/:id/graph', async () => graphRead());
     app.post('/assist/v1/scenarios/:id/graph/register', async (req, reply) => {
       const b = req.body as Json;
+      // The commit's own gate (append_turn_atomic_v4, 20260806120000): keyed by the BOUND fence handle's generation, a
+      // stopped row refuses in the transaction. The real route commits a core turn's write under the turn's handle.
+      const bound = currentTurnFence();
+      if (bound !== undefined && [...fenceRows.values()].some((r) => r.generation === bound.generation && r.stopped_at !== null)) {
+        return reply.code(409).send({ details: { code: 'TURN_STOPPED' } });
+      }
       const current = persisted === null ? null : computeGraphIdentityHash(persisted as never)!.value;
       if ((b.expected_graph_identity_hash ?? null) !== current) return reply.code(409).send({ details: { code: 'GRAPH_STALE' } });
       persisted = b.graph as Json;
