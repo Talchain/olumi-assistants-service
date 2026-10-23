@@ -264,7 +264,7 @@ export const POLICY = {
       ],
       "priority": "P2",
       "reasoning_question": {
-        "range_olumi_assumed": "Do you know {factor_label} more precisely? Within the range Olumi assumed, it could change how the options compare.",
+        "range_olumi_assumed": "Do you know {factor_label} more precisely? Within Olumi's assumed range it could change how the options compare.",
         "range_yours_or_unknown": "Would {leader_label} still score highest in this model if {factor_label} changed?"
       },
       "short_copy": "{factor_label} could change how the options compare.",
