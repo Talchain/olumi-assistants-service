@@ -714,6 +714,20 @@ describe('the model-program turn on the real core route', () => {
     });
     expect(times1.ok).toBe(true);
     expect(times1.model.quantities.find((x) => x.id === 'features_scale')).toMatchObject({ author: 'structure', status: 'known', value: 1 });
+    // Codex #3710: completion reads its ADDITIONS as the first draft does. A new index base 1 whose effect's coefficient is
+    // itself new (unit 1/tech_lead) stays structure on both paths.
+    const indexed = (d: CanonicalModelT) => {
+      d.quantities.push(q('features_index_now', '1', { author: 'structure', value: 1 }), q('features_index', '1', { kind: 'derived', status: 'derived', author: 'olumi' }),
+        q('index_per_lead', '1/tech_lead', { kind: 'coefficient', status: 'estimated', author: 'olumi', value: 0.1, low: 0, high: 0.2, range_kind: 'plausible', basis: 'Synthetic.' }));
+      d.relations.push({ form: 'effect', id: 'features_index_rel', defines: 'features_index', base: 'features_index_now',
+        terms: [{ driver: 'tech_leads_hired', coefficient: 'index_per_lead', author: 'olumi', quote: null, ...at }], author: 'olumi', quote: null, ...at });
+    };
+    const viaCompletion = complete(indexed);
+    expect(viaCompletion.ok).toBe(true);
+    expect(viaCompletion.model.quantities.find((x) => x.id === 'features_index_now')).toMatchObject({ author: 'structure', status: 'known', value: 1 });
+    const asFirstDraft = JSON.parse(completed()) as CanonicalModelT;
+    indexed(asFirstDraft);
+    expect(normalise(asFirstDraft).quantities.find((x) => x.id === 'features_index_now')).toMatchObject({ author: 'structure', status: 'known', value: 1 });
     // Refused whole: a note naming a record that is not there (its sentence goes back for the drafter's two repairs first).
     await noCompletion('dangling note', reply((m) => { m.assumptions[m.assumptions.length - 1]!.concerns.push('no_such_record'); }), 3);
     // Only the measure this same answer created may be worked out: never a quantity already in the model.
@@ -1015,7 +1029,7 @@ describe('the model-program turn on the real core route', () => {
     expect(chance()).toBeGreaterThan(first);
   });
 
-  it('Codex r4–r6 + buddy #3709: ONE structural admission on the first draft — 0 is the only additive identity, 1 only a product\'s factor or divisor; a figure in their words is theirs; any other is their question', () => {
+  it('Codex r4–r8 + buddy #3709: ONE structural admission on the first draft — 0 is the only additive identity; 1 only in unit "1", by exact unit algebra; any other is their question', () => {
     const saved = JSON.parse(readFileSync(new URL('./hiring-alpha3.saved.json', import.meta.url), 'utf8')) as { brief: string; canonical: CanonicalModelT };
     const m = JSON.parse(JSON.stringify(saved.canonical)) as CanonicalModelT;
     const derived = (id: string, unit: string) => q(id, unit, { kind: 'derived', status: 'derived', author: 'olumi' });
@@ -1024,25 +1038,40 @@ describe('the model-program turn on the real core route', () => {
       q('current_utilisation', '1', { author: 'structure', value: 1 }), q('no_extra_output', 'feature/month', { author: 'structure', value: 0 }), derived('extra_output', 'feature/month'),
       // Codex r6: an unstated "current customers = 1" added in a sum is the person's figure, not an identity.
       q('current_customers', 'customer', { author: 'structure', value: 1 }), q('new_customers', 'customer', { author: 'structure', value: 0 }), derived('customers', 'customer'),
-      // × 1 (the hiring read's declared normalisation: one output unit per developer) and the "per one" a product divides by.
+      // A 1 WITH a unit in a product (× 1 output unit per developer, ÷ 1 customer) is a level only the person gives (buddy, r8).
       q('output_per_developer', 'feature/month/developer', { author: 'structure', value: 1 }), derived('team_output', 'feature/month'),
       q('one_customer', 'customer', { author: 'structure', value: 1 }), derived('output_per_customer', 'feature/month/customer'),
-      // Codex r7: a 1 added in a sum is never an identity, even unit-free ("1 + growth").
+      // The unit-free 1: × 1, "1 + growth", and the base of a dimensionless index ("current productivity, indexed").
+      q('output_scale', '1', { author: 'structure', value: 1 }), derived('scaled_output', 'feature/month'),
+      // Codex #3710: "1" exactly, never another dimensionless unit: a structural 1 % product factor is a figure to ask for.
+      q('one_percent', '%', { author: 'structure', value: 1 }), derived('scaled_percent', 'feature/month'),
+      q('productivity_indexed', '1', { author: 'structure', value: 1 }), derived('productivity_index', '1'),
+      q('index_per_developer', '1/developer', { kind: 'coefficient', status: 'estimated', author: 'olumi', value: 0.1, low: 0, high: 0.2, range_kind: 'plausible', basis: 'Synthetic.' }),
       q('one', '1', { author: 'structure', value: 1 }), q('growth', '1', { kind: 'coefficient', status: 'estimated', author: 'olumi', value: 0.1, low: 0, high: 0.2, range_kind: 'plausible', basis: 'Synthetic.' }), derived('growth_factor', '1'));
     m.relations.push({ form: 'definition', id: 'extra_output_rel', defines: 'extra_output', op: 'sum', parts: [{ id: 'no_extra_output', sign: 1 }, { id: 'current_output', sign: 1 }], author: 'olumi', quote: null, ...at },
       { form: 'definition', id: 'customers_rel', defines: 'customers', op: 'sum', parts: [{ id: 'current_customers', sign: 1 }, { id: 'new_customers', sign: 1 }], author: 'olumi', quote: null, ...at },
       product('team_output_rel', 'team_output', [['current_developers', 1], ['output_per_developer', 1]]),
       product('per_customer_rel', 'output_per_customer', [['extra_output', 1], ['one_customer', -1]]),
+      product('scaled_output_rel', 'scaled_output', [['extra_output', 1], ['output_scale', 1]]),
+      product('scaled_percent_rel', 'scaled_percent', [['extra_output', 1], ['one_percent', 1]]),
+      { form: 'effect', id: 'index_rel', defines: 'productivity_index', base: 'productivity_indexed', terms: [{ driver: 'developers_hired', coefficient: 'index_per_developer', author: 'olumi', quote: null, ...at }], author: 'olumi', quote: null, ...at },
       { form: 'definition', id: 'growth_rel', defines: 'growth_factor', op: 'sum', parts: [{ id: 'one', sign: 1 }, { id: 'growth', sign: 1 }], author: 'olumi', quote: null, ...at });
     const n = new Map(normalise(m).quantities.map((x) => [x.id, x] as const));
-    // Asked: an integer no one stated, the identity 1 in unit "1", and a 1 added in a sum.
-    for (const id of ['current_output', 'current_utilisation', 'current_customers', 'one']) expect(n.get(id), id).toMatchObject({ author: 'person', status: 'asked', value: null, question: `What is "${id.replace(/_/g, ' ')}"?` });
-    // Kept: an option's switch (0 hires until an option sets one), a calendar conversion, 0 as a sum's part, × 1 and ÷ 1.
-    for (const id of ['developers_hired', 'tech_leads_hired', 'months_per_year', 'no_extra_output', 'new_customers', 'output_per_developer', 'one_customer']) expect(n.get(id), id).toMatchObject({ author: 'structure', status: 'known' });
+    // Asked: an integer no one stated, an unused 1 in unit "1", a 1 with a unit added in a sum, and a 1 with a unit in a product.
+    for (const id of ['current_output', 'current_utilisation', 'current_customers', 'output_per_developer', 'one_customer', 'one_percent']) expect(n.get(id), id).toMatchObject({ author: 'person', status: 'asked', value: null, question: `What is "${id.replace(/_/g, ' ')}"?` });
+    // Kept: an option's switch (0 hires until an option sets one), a calendar conversion, 0 as a sum's part, and the unit-free 1.
+    for (const id of ['developers_hired', 'tech_leads_hired', 'months_per_year', 'no_extra_output', 'new_customers', 'output_scale', 'productivity_indexed', 'one']) expect(n.get(id), id).toMatchObject({ author: 'structure', status: 'known' });
     // The compiler reads the question as one: what rests on it waits for the person, and no error asks the drafter to repair it.
     const c = compile(m, { sourceText: saved.brief });
     expect(c.errors).toEqual([]);
     expect(c.asks.map((a) => a.quantity_id)).not.toContain('months_per_year');
+    // Exact unit algebra: a unit-free 1 beside a term with a unit (a sum with loaves, an effect adding loaves) is no identity.
+    const mixed = bakery();
+    mixed.quantities.push(q('base_one', '1', { author: 'structure', value: 1 }), derived('mixed_sum', 'loaf/week'), derived('mixed_effect', 'loaf/week'));
+    mixed.relations.push({ form: 'definition', id: 'mixed_sum_rel', defines: 'mixed_sum', op: 'sum', parts: [{ id: 'base_one', sign: 1 }, { id: 'sales', sign: 1 }], author: 'olumi', quote: null, ...at });
+    expect(isStructuralConstant(mixed, mixed.quantities.find((x) => x.id === 'base_one')!)).toBe(false);
+    mixed.relations = [...mixed.relations.filter((r) => r.id !== 'mixed_sum_rel'), { form: 'effect', id: 'mixed_effect_rel', defines: 'mixed_effect', base: 'base_one', terms: [{ driver: 'ovens_added', coefficient: 'sold_per_oven', author: 'olumi', quote: null, ...at }], author: 'olumi', quote: null, ...at }];
+    expect(isStructuralConstant(mixed, mixed.quantities.find((x) => x.id === 'base_one')!)).toBe(false);
     // The capacity shape: a zero base of an effect stays structural; a 1 as an effect's base is the person's figure.
     const cap = bakery();
     cap.quantities.push(q('no_extra', 'loaf/week', { author: 'structure', value: 0 }), derived('extra_sales', 'loaf/week'),

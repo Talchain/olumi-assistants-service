@@ -33,7 +33,7 @@ import {
   type CanonicalGoalT, type CanonicalLimitT,
 } from './canonical.js';
 import type { ExecutableModel, Quantity as XQuantity, Goal as XGoal, Limit as XLimit, Option as XOption, Risk as XRisk, Dist, Domain, Withheld, FixedAuthor } from './executable.js';
-import { parseUnit, multiply, divide, sameDims, isDimensionless, showUnit, perPeriod, isCalendarConversion, TIME_DIMS, type Unit } from './units.js';
+import { parseUnit, multiply, divide, sameDims, isDimensionless, showUnit, perPeriod, isCalendarConversion, TIME_DIMS, DIMENSIONLESS_UNIT, type Unit } from './units.js';
 import { rangeLaw, type RangeReading, type RangeDist } from './simulate/range-law.js';
 
 /** The law's reading of an uncertain range, or HELD when the law has no room for it (its domain leaves no probability). */
@@ -200,9 +200,10 @@ export function normalise(model: CanonicalModelT): CanonicalModelT {
  *  · a power of ten that IS its unit's scale (100 %, 1000 g/kg: the constant times its unit's scale is exactly 1), never 1;
  *  · 0 or 1 on a quantity an option switches (what it sets, or its switched-on figure);
  *  · 0 as an additive identity: an effect's base, a part of a sum, a stock's start ("nothing extra yet");
- *  · 1 only as a part of a product: × 1, or the "per one" it divides by ("one customer").
- * Any other figure labelled structure ("current output = 12", "current customers = 1", "budget for the year" = 1 year) is
- * the person's question.
+ *  · 1 in unit "1" only, by exact unit algebra: a part of a product, or the base of an effect or a part of a sum whose every
+ *    other term is dimensionless ("current productivity, indexed" = 1, the 1 of "1 + growth"); 1 with any unit ("one
+ *    customer", "current customers = 1") never is one.
+ * Any other figure labelled structure ("current output = 12", "budget for the year" = 1 year) is the person's question.
  */
 export function isStructuralConstant(model: CanonicalModelT, q: CanonicalQuantityT): boolean {
   const u = parseUnit(q.unit);
@@ -215,8 +216,14 @@ export function isStructuralConstant(model: CanonicalModelT, q: CanonicalQuantit
   const base = (r: CanonicalModelT['relations'][number]) => r.form === 'effect' && r.base === q.id;
   const sumPart = (r: CanonicalModelT['relations'][number]) => r.form === 'definition' && r.op === 'sum' && r.parts.some((p) => p.id === q.id);
   if (v === 0) return used((r) => base(r) || sumPart(r) || (r.form === 'stock' && r.start === q.id));
-  if (v === 1) return used((r) => r.form === 'definition' && r.op === 'product' && r.parts.some((p) => p.id === q.id));
-  return false;
+  if (v !== 1 || !(isDimensionless(u.unit) && u.unit.scale === 1)) return false;
+  // 1 in unit "1", by exact unit algebra: a product's part, or the base of an effect or a part of a sum whose every other
+  // term is dimensionless too (an index or multiplier built from today's 1). Any unit on it is a count or level.
+  const unitOf = (id: string): Unit | undefined => { const x = model.quantities.find((y) => y.id === id); const p = x === undefined ? undefined : parseUnit(x.unit); return p?.ok === true ? p.unit : undefined; };
+  const free = (...ids: string[]) => { const us = ids.map(unitOf); return us.every((x) => x !== undefined) && isDimensionless(us.reduce((a, b) => multiply(a!, b!), DIMENSIONLESS_UNIT)!); };
+  return used((r) => (r.form === 'definition' && r.op === 'product' && r.parts.some((p) => p.id === q.id))
+    || (r.form === 'definition' && r.op === 'sum' && r.parts.some((p) => p.id === q.id) && r.parts.every((p) => p.id === q.id || free(p.id)))
+    || (r.form === 'effect' && r.base === q.id && r.terms.every((t) => free(t.driver, t.coefficient))));
 }
 /** A figure only the person can give, as their question. */
 export const structureAsked = (q: CanonicalQuantityT): CanonicalQuantityT => ({ ...q, kind: 'fact', status: 'asked', author: 'person', value: null, low: null, high: null,
