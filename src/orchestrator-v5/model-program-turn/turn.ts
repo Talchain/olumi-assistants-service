@@ -6,12 +6,16 @@
  *  · a Run press: no model call. The stored Run when it is current for this model and engine, else a new Run, saved.
  * Every other turn is the core agent's own native chat, with its tools on the program (`program-tools.ts`).
  */
+import { CONFIRM_READING } from '../agent-lane/approval-chips.js';
+import type { ProposalStore } from '../agent-lane/proposal.js';
 import type { InternalDispatch } from '../agent-lane/runtime/agent-capabilities.js';
 import type { ToolResult } from '../agent-lane/runtime/agent-tools.js';
 import type { CanonicalModelT } from '../model-program/canonical.js';
 import { compile, normalise, type Blocker } from '../model-program/compile.js';
 import { draftCanonicalModel, ledgeredResponsesCall, type ResponsesCall } from './draft.js';
 import { seedOf } from './evaluate.js';
+import { asDrafted, readingOf } from './postimage.js';
+import { holdProgramCard } from './program-tools.js';
 import { isSaved, programOperationId, savePostimage, withNewRun } from './program-save.js';
 import { MODEL_PROGRAM, reopenProgram, savedProgramOf, type SavedProgram } from './program-store.js';
 import { CANONICAL_SCHEMA_SHA256, DRAFTING_PROMPT_SHA256 } from './prompt.js';
@@ -32,10 +36,13 @@ export interface ProgramTurnInput {
   readonly onModelRegistered?: (graph: Rec) => void;
   /** Test seam only; the route passes nothing and gets the ledgered client. */
   readonly call?: ResponsesCall;
+  /** Where the first draft's reading card is held (the route's store), and who would approve it. No store: no card. */
+  readonly proposals?: ProposalStore;
+  readonly userId?: string | null;
 }
 export interface ProgramTurnOutput {
   readonly assistantText: string;
-  readonly toolCalls: { readonly name: string; readonly ok: boolean; readonly outcome: string; readonly refusal?: string }[];
+  readonly toolCalls: { readonly name: string; readonly ok: boolean; readonly outcome: string; readonly refusal?: string; readonly mutated?: boolean; readonly proposal_id?: string }[];
   readonly toolResults: ToolResult[];
   readonly mutated: boolean;
   readonly verifiedSave: boolean;
@@ -44,6 +51,8 @@ export interface ProgramTurnOutput {
 }
 
 type TurnKind = 'draft' | 'run';
+/** The reading card's name for what it asks (the card's own heading is the UI's). */
+const READING_LABEL = 'Your situation as I understood it';
 const OPENING: Record<TurnKind, (m: CanonicalModelT) => string> = {
   draft: (m) => `I've drafted a first model of: ${m.question}`,
   run: () => 'Here is the analysis of the model as it stands.',
@@ -93,7 +102,8 @@ export async function runModelProgramTurn(input: ProgramTurnInput): Promise<Prog
         toolCalls: [{ name: 'draft_canonical_model', ok: false, outcome: 'refused', refusal: draft.model === null ? 'no_draft' : 'does_not_compile' }],
         toolResults: [{ ok: false, mutated: false, ...model_program }], mutated: false, verifiedSave: false, payload: { canonical_analysis_view: null, model_program } };
     }
-    program = { model_program: MODEL_PROGRAM, canonical: draft.model, seed: seedOf(input.scenarioId), person_words: [input.message], runs: [] };
+    // Host-owned: a draft is Olumi's reading until the person confirms it, so nothing in it is approved yet (step 2).
+    program = { model_program: MODEL_PROGRAM, canonical: asDrafted(draft.model), seed: seedOf(input.scenarioId), person_words: [input.message], runs: [] };
   } else {
     // A Run press: the stored Run IS the analysis of this model on this engine, shown as stored, nothing written.
     const shown = reopenProgram(input.saved.graph);
@@ -112,10 +122,20 @@ export async function runModelProgramTurn(input: ProgramTurnInput): Promise<Prog
   const saved = isSaved(write);
   if (write.status === 'saved') { try { input.onModelRegistered?.(write.after.graph); } catch { /* an observer never decides the outcome */ } }
   const receipt = saved && 'receipt' in write ? write.receipt : null;
+  // STEP 2, "Check what I understood": the saved draft read back on ONE held card, every item an add, for the person to confirm
+  // ("Yes, that’s what I meant") or correct. Its model is the draft accepted by them, with a new Run; nothing more is saved now.
+  const reading = kind === 'draft' && write.status === 'saved' && write.after.identity !== null && input.proposals !== undefined ? (() => {
+    const v = readingOf(next.program.canonical, { words: next.program.person_words, approver: input.userId ?? null });
+    if (!v.ok) return { call: { name: CONFIRM_READING, ok: false, outcome: 'refused', refusal: v.code, mutated: false }, result: { ok: false, mutated: false, refusal: v.code, ids: v.ids } };
+    const p = holdProgramCard(input.proposals!, { scenarioId: input.scenarioId, userId: input.userId ?? null, graphHash: write.after.graphHash, identity: write.after.identity! },
+      { label: READING_LABEL, basis: 'Olumi’s reading of the brief, for the person to confirm or correct.', program: withNewRun({ ...next.program, canonical: v.model }).program, changes: v.changes, reading: true });
+    return { call: { name: CONFIRM_READING, ok: true, outcome: 'ok', mutated: false, proposal_id: p.proposal_id }, result: { ok: true, mutated: false, proposal_id: p.proposal_id, public_label: p.public_label } };
+  })() : undefined;
   return {
     assistantText: saved ? replyOf(next.program.canonical, next.run, kind) : `The model could not be saved (${write.status}). Nothing was changed.`,
-    toolCalls: [{ name: kind === 'draft' ? 'draft_canonical_model' : 'run_program', ok: saved, outcome: saved ? 'ok' : write.status, ...(saved ? {} : { refusal: `save_${write.status}` }) }],
-    toolResults: [{ ok: saved, mutated: saved, ...(isRec(receipt) ? { model_version: receipt } : {}) }],
+    toolCalls: [{ name: kind === 'draft' ? 'draft_canonical_model' : 'run_program', ok: saved, outcome: saved ? 'ok' : write.status, mutated: saved, ...(saved ? {} : { refusal: `save_${write.status}` }) },
+      ...(reading !== undefined ? [reading.call] : [])],
+    toolResults: [{ ok: saved, mutated: saved, ...(isRec(receipt) ? { model_version: receipt } : {}) }, ...(reading !== undefined ? [reading.result] : [])],
     mutated: saved, verifiedSave: write.status === 'saved',
     payload: {
       canonical_analysis_view: next.run.result.canonical_analysis_view,

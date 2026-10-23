@@ -67,6 +67,14 @@ const doorButtonOf = (op: { readonly value?: unknown }): { readonly label: strin
 /** The user's own cohort forecast (science PR-4b): recorded from their words, so the button says record, never "use Olumi's". */
 const COHORT_FORECAST_APPROVE = { label: 'Record this forecast', message: 'Yes, record that forecast.' } as const;
 
+/**
+ * The first draft's "Check what I understood" card (step 2, `model-program-turn/turn.ts`): its approve confirms Olumi's
+ * reading of the brief, in the person's voice (DGAI 128bd2db renders this label as sent). "Change something first" and
+ * "Not now" are every card's.
+ */
+export const CONFIRM_READING = 'confirm_reading';
+export const READING_APPROVE = { label: 'Yes, that’s what I meant', message: 'Yes, that’s what I meant.' } as const;
+
 /** The revised-draft card's own button (B restated goal, `runtime/draft-replacement.ts`); the card's words ride in `detail`. */
 const REPLACE_DRAFT_APPROVE = { label: 'Use the revised draft', message: 'Yes, use the revised draft.' } as const;
 
@@ -103,6 +111,8 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_option_status: { label: 'Make this change', message: 'Yes, make that change.' },
   // S5: the ONE generic change tool; its card's button is its op's (`changeApproveOf`).
   propose_change: { label: 'Make this change', message: 'Yes, make that change.' },
+  // Step 2: the host's own reading card after a program's first draft.
+  [CONFIRM_READING]: READING_APPROVE,
   // SLICE C2: a new risk, held on the product's own seam like the add-option (`gmh_`, the product's words on the button).
   propose_new_risk: { label: 'Add this risk', message: 'Yes, add that risk.' },
   // PJ-E-FIG: new factors carrying the user's figures, held on the same seam as the add-risk (`gmh_`).

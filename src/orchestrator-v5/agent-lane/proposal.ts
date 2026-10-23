@@ -222,6 +222,11 @@ export interface StructuredProposal {
    * after, rendered from its data by CEE. Part of the id when present.
    */
   readonly changes?: readonly ProposalChange[];
+  /**
+   * The first draft's "Check what I understood" card (step 2): Olumi's reading of the brief, every item an add, for the person
+   * to confirm or correct. CEE's own flag; the card never infers it. Part of the id when present.
+   */
+  readonly reading?: true;
 }
 
 /**
@@ -231,7 +236,8 @@ export interface StructuredProposal {
  */
 export const ProposalChangeSchema = z.object({
   id: z.string().min(1),
-  kind: z.enum(['quantity', 'relation', 'goal', 'option', 'risk', 'record']),
+  // `left_out`: something that matters but is not in the calculation; on an add, `after` says why (DGAI 128bd2db).
+  kind: z.enum(['quantity', 'relation', 'goal', 'option', 'risk', 'record', 'left_out']),
   action: z.enum(['add', 'change', 'remove']),
   label: z.string().min(1),
   before: z.string().nullable(),
@@ -291,6 +297,7 @@ export function computeProposalId(c: ProposalContent): string {
     ...(c.base_model_identity === undefined ? [] : [['base_model_identity', c.base_model_identity]]),
     ...(c.living_model === undefined ? [] : [['living_model', c.living_model]]),
     ...(c.changes === undefined ? [] : [['changes', c.changes]]),
+    ...(c.reading === undefined ? [] : [['reading', c.reading]]),
   ]));
   return 'prop_' + createHash('sha256').update(canonical).digest('hex').slice(0, 32);
 }

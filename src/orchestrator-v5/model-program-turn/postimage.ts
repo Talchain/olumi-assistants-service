@@ -24,7 +24,7 @@ type Rec = Record<string, unknown>;
 type Family = Exclude<keyof CanonicalModelT, 'version' | 'question' | 'period' | 'history'>;
 const FAMILIES: readonly (readonly [Family, ProposalChange['kind']])[] = [
   ['quantities', 'quantity'], ['relations', 'relation'], ['goals', 'goal'], ['limits', 'record'], ['preferences', 'record'], ['options', 'option'],
-  ['risks', 'risk'], ['claims', 'record'], ['evidence', 'record'], ['assumptions', 'record'], ['dissent', 'record'], ['conditions', 'record'], ['left_out', 'record'],
+  ['risks', 'risk'], ['claims', 'record'], ['evidence', 'record'], ['assumptions', 'record'], ['dissent', 'record'], ['conditions', 'record'], ['left_out', 'left_out'],
 ];
 
 /** Set by the host, never taken from a proposed model. */
@@ -82,9 +82,14 @@ const personAttributions = (v: unknown): Rec[] => (Array.isArray(v) ? v.flatMap(
   : isRec(v) ? [...(v['author'] === 'person' && 'quote' in v && !(v['status'] === 'asked' && v['quote'] === null) ? [v] : []), ...Object.values(v).flatMap(personAttributions)] : []);
 const withoutHost = (v: unknown): unknown => (Array.isArray(v) ? v.map(withoutHost)
   : isRec(v) ? Object.fromEntries(Object.entries(v).filter(([k]) => !HOST_FIELDS.has(k)).map(([k, x]) => [k, withoutHost(x)])) : v);
-/** On an approved card: accepted, by the approving person; who authored it is unchanged. */
-const accepted = (v: unknown, by: string | null): unknown => (Array.isArray(v) ? v.map((x) => accepted(x, by))
-  : isRec(v) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, k === 'approval' ? 'approved' : k === 'author_id' ? by : accepted(x, by)])) : v);
+/** The host's own fields, set all the way down a record: its approval, and who approved it. Who authored it is unchanged. */
+const hostSet = (v: unknown, approval: 'proposed' | 'approved', by: string | null): unknown => (Array.isArray(v) ? v.map((x) => hostSet(x, approval, by))
+  : isRec(v) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, k === 'approval' ? approval : k === 'author_id' ? by : hostSet(x, approval, by)])) : v);
+/** On an approved card: accepted, by the approving person. */
+const accepted = (v: unknown, by: string | null): unknown => hostSet(v, 'approved', by);
+/** A first draft, as the host saves it: every record proposed and approved by no one, whatever the drafter wrote (step 2). */
+export const asDrafted = (m: CanonicalModelT): CanonicalModelT =>
+  ({ ...m, ...Object.fromEntries(FAMILIES.map(([f]) => [f, hostSet(m[f], 'proposed', null)])) }) as CanonicalModelT;
 /** One changed field: its path (`*` for a position in a list), where in lists it sits, and its saved and proposed values. */
 type Delta = { readonly path: string; readonly pattern: string; readonly at: readonly number[]; readonly old: unknown; readonly now: unknown };
 /**
@@ -157,8 +162,12 @@ export function validatePostimage(base: CanonicalModelT, raw: unknown,
       if (hidden.length > 0) unshown.push(`${id} (${hidden.join(', ')})`);
       return out.filter((x) => x !== null);
     };
-    const entry = (id: string, action: ProposalChange['action'], fields: ReturnType<typeof said>, label: string, author: ProposalChange['author']): ProposalChange => ({ id, kind, action, label,
-      before: action === 'add' ? null : fields.map((x) => `${x.name}: ${x.old}`).join('; '), after: action === 'remove' ? null : fields.map((x) => `${x.name}: ${x.now}`).join('; '), author });
+    // An added left-out item says WHY first (the card reads "Leaves out ‘its words’ (why)"), then any other field it has;
+    // its words are the label and whose it is the author, so neither is said twice.
+    const leftOut = (r: Rec, fields: ReturnType<typeof said>) => [String(r['why']), ...fields.filter((x) => !['words', 'why', 'whose'].includes(x.name)).map((x) => `${x.name}: ${x.now}`)].join('; ');
+    const entry = (id: string, action: ProposalChange['action'], fields: ReturnType<typeof said>, label: string, author: ProposalChange['author'], r?: Rec): ProposalChange => ({ id, kind, action, label,
+      before: action === 'add' ? null : fields.map((x) => `${x.name}: ${x.old}`).join('; '),
+      after: action === 'remove' ? null : action === 'add' && family === 'left_out' ? leftOut(r!, fields) : fields.map((x) => `${x.name}: ${x.now}`).join('; '), author });
     const records = (post[family] as readonly Rec[]).map((r) => {
       const old = before.get(String(r['id']));
       const fields = said(String(r['id']), old, r);
@@ -167,7 +176,7 @@ export function validatePostimage(base: CanonicalModelT, raw: unknown,
       const refigured = family === 'quantities' && old !== undefined && r['author'] === 'person' && (['value', 'low', 'high'] as const).some((k) => old[k] !== r[k]);
       if (personAttributions(r).some((a) => !verbatimIn(a['quote'], opts.words)) || (refigured && !verbatimIn(r['quote'], opts.fresh))) unverified.push(String(r['id']));
       const record = accepted(r, opts.approver ?? null) as Rec;
-      changes.push(entry(String(r['id']), old === undefined ? 'add' : 'change', fields, now.title(family, record), authorOf(record)));
+      changes.push(entry(String(r['id']), old === undefined ? 'add' : 'change', fields, now.title(family, record), authorOf(record), r));
       if (old !== undefined) history.push({ id: String(r['id']), change: 'superseded', old: JSON.stringify(old), quote: typeof r['quote'] === 'string' ? r['quote'] : null, author_id: opts.approver ?? null });
       return record;
     });
@@ -187,6 +196,22 @@ export function validatePostimage(base: CanonicalModelT, raw: unknown,
   const invalid = changes.filter((c) => !ProposalChangeSchema.safeParse(c).success).map((c) => c.id);
   if (invalid.length > 0) return refuse('invalid_change_entry', invalid, `The card cannot show ${invalid.join(', ')} (an item needs a name); nothing is proposed.`);
   return { ok: true, model: { ...post, ...families, history }, changes };
+}
+
+/** The reading card's order: what they want and what they could do first, then the structure, then the figures. */
+const READING_ORDER: readonly Family[] = ['goals', 'limits', 'options', 'left_out', 'relations', 'preferences', 'risks', 'claims', 'evidence', 'assumptions', 'dissent', 'conditions', 'quantities'];
+/**
+ * "CHECK WHAT I UNDERSTOOD" (step 2): a saved first draft as ONE card, every record an add against an empty model, through
+ * the same validator and the same diff as every change, in the reading order. Its model is the draft accepted by the
+ * approving person (approval and author_id the host's; author, party and words untouched).
+ */
+export function readingOf(model: CanonicalModelT, opts: { readonly words: readonly string[]; readonly approver: string | null }): PostimageResult {
+  const empty = { ...model, ...Object.fromEntries(FAMILIES.map(([f]) => [f, []])) } as CanonicalModelT;
+  const v = validatePostimage(empty, model, { removals: [], words: opts.words, fresh: [], approver: opts.approver });
+  if (!v.ok) return v;
+  const rank = new Map(READING_ORDER.flatMap((f, i) => idsOf(model, f).map((id) => [id, i] as const)));
+  const at = (id: string) => rank.get(id) ?? READING_ORDER.length;
+  return { ...v, changes: [...v.changes].sort((a, b) => at(a.id) - at(b.id)) };
 }
 
 // ── The card's words, rendered from the data (no wording invented) ────────────────────────────────────────────────────

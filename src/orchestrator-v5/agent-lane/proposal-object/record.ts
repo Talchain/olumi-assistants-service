@@ -225,6 +225,8 @@ export interface ProposalRecord<F extends ProposalField = ProposalField> {
   readonly adds?: readonly AddField[];
   /** A model program's card: every change, with its substance before and after (simplify v1, A2). In the digest when present. */
   readonly changes?: readonly ProposalChange[];
+  /** The first draft's "Check what I understood" card (CEE's own flag, `true` only). In the digest when present. */
+  readonly reading?: true;
   readonly missing: readonly MissingDatum[];
   /**
    * ⭐ NO SILENT LAPSE (PR-2): a card kept for review carries its "Review this change" action. It is projected beside its
@@ -486,7 +488,7 @@ export function agentProposalRecord(pa: PendingAction, graph: unknown, nowMs = D
   const adds = [...shownAdds, ...coreChangeNotes(p.operations, shownAdds, fields, savedLabelOf, savedLinkOf)];
   const decline: CardAction = { id: declineChipIdFor(p.proposal_id), label: 'Not now', message: 'Not now.' };
   // A card that adds nothing keeps its digest byte-identical (a card issued before this projection still binds).
-  const changes = p.changes === undefined ? {} : { changes: p.changes };
+  const changes = { ...(p.changes === undefined ? {} : { changes: p.changes }), ...(p.reading === true ? { reading: true as const } : {}) };
   const digest = projectionDigest({ p: p.proposal_id, r: pa.id, g: p.base_graph_identity_hash, approve, decline, fields, missing: [],
     ...(adds.length > 0 ? { adds } : {}), ...changes });
   return { proposal_id: p.proposal_id, revision: pa.id, digest, dialect: 'agent', base_graph_hash: p.base_graph_identity_hash,
@@ -1045,6 +1047,8 @@ export interface ProposalFieldsWire {
     readonly adds?: readonly AddField[];
     /** A model program's card: every change, before → after (simplify v1, A2); absent on any other card. */
     readonly changes?: readonly ProposalChange[];
+    /** The first draft's "Check what I understood" card: the literal `true`; absent on any other card. */
+    readonly reading?: true;
     readonly missing: readonly MissingDatum[];
   }[];
 }
@@ -1086,7 +1090,7 @@ export function proposalFieldsWire(
       // Wire-only context: issuing a card never changes the digest of what that card showed.
       issued_turn_id: issuedTurnIds.get(r.revision) ?? null,
       ...(r.review_action !== undefined ? { review_action: r.review_action } : {}),
-      fields: r.fields, ...(r.adds !== undefined ? { adds: r.adds } : {}), ...(r.changes !== undefined ? { changes: r.changes } : {}), missing: r.missing,
+      fields: r.fields, ...(r.adds !== undefined ? { adds: r.adds } : {}), ...(r.changes !== undefined ? { changes: r.changes } : {}), ...(r.reading === true ? { reading: true as const } : {}), missing: r.missing,
     })),
   };
 }
