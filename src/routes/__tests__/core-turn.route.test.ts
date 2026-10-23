@@ -20,9 +20,11 @@ import { streamWhenAsked } from '../../orchestrator-v5/agent-lane/__tests__/stre
 import { SELECTION_NOTE_PREFIX } from '../../orchestrator-v5/agent-lane/selection-context.js';
 import { TODAY_PREFIX } from '../../orchestrator-v5/agent-lane/turn-context.js';
 import { corePromptCacheKey, STATE_BLOCK_PREFIX } from '../../orchestrator-v5/agent-lane/core/sdk-turn.js';
-import { CORE_ALIGNED_INSTRUCTIONS, instructionsForMode } from '../../orchestrator-v5/core-route/instructions.js';
+import { CORE_ALIGNED_INSTRUCTIONS, instructionsForMode, PROGRAM_TOOL_DESCRIPTIONS } from '../../orchestrator-v5/core-route/instructions.js';
+import { TOOL_DESCRIPTIONS } from '../../orchestrator-v5/path-b/tools/index.js';
+import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import { ASK_CHALLENGE_CHIP_ID } from '../../orchestrator-v5/core-route/turn-request.js';
-import { bakery, BRIEF as BAKERY_BRIEF } from '../../orchestrator-v5/model-program-turn/__tests__/bakery.fixture.js';
+import { bakery, BRIEF as BAKERY_BRIEF, club, CLUB_BRIEF, q } from '../../orchestrator-v5/model-program-turn/__tests__/bakery.fixture.js';
 import { DRAFTING_INSTRUCTIONS } from '../../orchestrator-v5/model-program-turn/prompt.js';
 import type { LivingModelT } from '../../schemas/living-model.js';
 import { GOAL_CHANCE_LICENSED, PERIOD_END_EFFECTS_UNSTATED } from '../../orchestrator-v5/goal-target/goal-chance-licence.js';
@@ -917,6 +919,31 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
         expect(String(c.instructions)).toContain('draft the first model from their brief in that same turn, even when figures are missing');
         expect(String(c.instructions)).not.toContain('POLYMATH COACHING');
       }
+    });
+
+    it('S3 (DL 23 Oct): on a program turn the provider receives the PROGRAM tool descriptions, read included, and the read it gets back carries the Run\'s goal_chance block unchanged', async () => {
+      // Two goals, so the block has each goal's own line and the joint.
+      const m = club();
+      m.quantities.push(q('floor', 'member', { value: 320, quote: 'at least 320 members' }));
+      m.goals.push({ ...m.goals[0]!, id: 'keep_320', label: 'Keep at least 320 members', measure: { ...m.goals[0]!.measure!, target: 'floor' }, quote: 'keep at least 320 members' });
+      SCENARIO = randomUUID(); persisted = null; canonicalDraft = JSON.stringify(m);
+      expect((await typed(`${CLUB_BRIEF} And keep at least 320 members.`)).statusCode).toBe(200);
+      const stored = (persisted!.living_model.runs.at(-1).result.canonical_analysis_view as Json).goal_chance;
+      expect(stored.targets.per_target).toHaveLength(2);
+      calls.length = 0;
+      outputs = [[{ type: 'function_call', name: 'read_canonical_context', call_id: 'read', args: {} }], [{ type: 'message', text: 'The model has two goals.' }]];
+      expect((await typed('What does the model hold now?')).statusCode).toBe(200);
+      expect(calls).toHaveLength(2);
+      // The tools as the provider received them: the four program tools, each with #3707's description, none with core's.
+      const sentTools = Object.fromEntries((calls[0]!.tools as Json[]).filter((t) => t.type === 'function').map((t) => [t.name, t.description]));
+      expect(sentTools).toEqual(PROGRAM_TOOL_DESCRIPTIONS);
+      for (const [name, description] of Object.entries(sentTools)) expect(description).not.toBe((TOOL_DESCRIPTIONS as Record<string, string>)[name]);
+      // The read the agent got back: the Run's goal_chance exactly as stored (each goal's own line, the joint, the notes).
+      const output = (calls[1]!.input as Json[]).find((i) => i.type === 'function_call_output' && i.call_id === 'read')!.output;
+      const read = JSON.parse(typeof output === 'string' ? output : JSON.stringify(output)) as Json;
+      const run = (read.data ?? read).run as Json;
+      expect(stableStringify(run.goal_chance)).toBe(stableStringify(stored));
+      expect(Object.keys(run).sort()).toEqual(['current', 'engine_current', 'goal_chance', 'options', 'run_id']);
     });
 
     /** The instructions the provider received on one typed turn of a saved model. */
