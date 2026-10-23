@@ -144,7 +144,11 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   /** The shared law's reading: the compiler's disclosure (with the domain) when the quantity is in the run, else the same law. */
   const lawFor = (q: CanonicalQuantityT): LawReading => {
     const c = compiled.conversions.find((x) => x.kind === 'range_law' && x.quantity === q.id);
-    if (c && c.kind === 'range_law') return c.reading;
+    if (c && c.kind === 'range_law') {
+      // The compiler reads a % range as a fraction (20–40 % is 0.2–0.4); the card says it in the unit it labels (Codex r1 #3709).
+      const u = parseUnit(q.unit), k = u.ok ? u.unit.scale : 1, r = c.reading;
+      return k === 1 ? r : { ...r, centre: r.centre / k, sd: r.sd / k, lower: r.lower / k, upper: r.upper / k, mean: r.mean / k, sd_conditioned: r.sd_conditioned / k };
+    }
     const inside = !has(q.value) || (q.low! < q.value && q.value < q.high!);
     return inside ? readRange(rangeDistOf(q, 1, chances.has(q.id) ? { min: 0, max: 1 } : undefined)) : { kind: 'held', reason: 'its most likely figure is not inside its range' };
   };

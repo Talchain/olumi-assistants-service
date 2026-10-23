@@ -55,7 +55,7 @@ function quantityMeta(model: CanonicalModelT, compiled: CompileResult, x: Execut
   const m = normalise(model);
   const unverified = new Set(compiled.unverified.map((u) => u.id));
   // A quote not found in the person's words is never shown as theirs: S2 says "whose source is not confirmed" for it.
-  const who = (author: 'person' | 'olumi' | 'structure', id: string) => (author === 'person' && unverified.has(id) ? 'unverified' : author) as PresentQuantity['author'];
+  const who = (author: 'person' | 'olumi' | 'structure', id: string): PresentQuantity['author'] => (author === 'person' && unverified.has(id) ? 'unverified' : author);
   const rel = new Map(m.relations.map((r) => [r.defines, r] as const));
   const own = new Map(m.quantities.map((q) => {
     const r = rel.get(q.id);

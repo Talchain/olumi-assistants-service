@@ -35,10 +35,13 @@ import { rangeLaw, type RangeDist } from '../simulate/range-law.js';
 import { isWithheld, type ChanceOrWithheld, type OptionResult, type SimResult, type WithheldChance } from '../simulate/result.js';
 import { readingOf, simulate } from '../simulate/simulate.js';
 
-type Author = 'person' | 'olumi';
+/** Whose a figure is: unverified is said to be the person's but their words were not found (compile's `unverified`). */
+type Author = 'person' | 'olumi' | 'structure' | 'unverified';
 /** Recorded authors whose fixed values are no one's assumption: the person's own figure, a structural constant. */
 const NOT_ASSUMPTIONS: ReadonlySet<string> = new Set<FixedAuthor>(['person', 'structure']);
 const NOT_RECORDED = '(author not recorded)';
+/** Said to be the person's, but their words for it were not found (compile's `unverified`): never "on your figures". */
+const NOT_IN_THEIR_WORDS = '(not found in your words)';
 
 /** The canonical model's label and author for a quantity (S1 `CanonicalQuantity`), and the author of the relation defining it. */
 export interface PresentQuantity {
@@ -223,9 +226,10 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       const ends = `${say(d.low, x.unit)} to ${say(d.high, x.unit)}`;
       // DL ruling (author not recorded): a range whose basis is neither the person's nor Olumi's is listed as such, never
       // passed as the person's; `rangeLaw` draws it unbounded (only a person's stated bounds condition the draw).
-      const whose = d.basis === 'person_range' ? 'your range' : d.basis === 'olumi_estimate' ? 'Olumi’s own estimated range' : `a range ${NOT_RECORDED}`;
+      const unverified = m?.author === 'unverified';
+      const whose = unverified ? `a range ${NOT_IN_THEIR_WORDS}` : d.basis === 'person_range' ? 'your range' : d.basis === 'olumi_estimate' ? 'Olumi’s own estimated range' : `a range ${NOT_RECORDED}`;
       if (reading.kind === 'point') {
-        return d.basis === 'person_range' ? [] : [`${name} is ${say(reading.value, x.unit)}${d.basis === 'olumi_estimate' ? ', Olumi’s estimate' : ` ${NOT_RECORDED}`}`];
+        return d.basis === 'person_range' && !unverified ? [] : [`${name} is ${say(reading.value, x.unit)}${unverified ? ` ${NOT_IN_THEIR_WORDS}` : d.basis === 'olumi_estimate' ? ', Olumi’s estimate' : ` ${NOT_RECORDED}`}`];
       }
       const held = reading.lower === d.low && reading.upper === d.high ? ', held within those bounds'
         : Number.isFinite(reading.lower) || Number.isFinite(reading.upper) ? ', kept to the values it can take' : '';
@@ -235,6 +239,8 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       // executable.ts r3: the author of every fixed value. A structural constant (a conversion, a switch, a count) and a
       // placeholder that cancels out of every result are no one's assumption.
       // DL ruling (author not recorded): a value with no recorded author is listed as an assumption, never read as the person's.
+      // Codex r1 #3709: words said to be the person's but not found in what they wrote outrank the figure's recorded author.
+      if (m?.author === 'unverified') return [`${name} is ${say(x.dist.value, x.unit)} ${NOT_IN_THEIR_WORDS}`];
       const author: string | undefined = x.dist.author ?? m?.author;
       if (author === 'olumi') return [`${name} is ${say(x.dist.value, x.unit)}, Olumi’s figure`];
       if (m?.approximate !== undefined) return [`using ${say(x.dist.value, x.unit)} for ${name} for now — you said ‘${m.approximate.quote}’`];

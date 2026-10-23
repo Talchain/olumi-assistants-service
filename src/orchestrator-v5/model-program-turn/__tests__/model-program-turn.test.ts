@@ -460,6 +460,20 @@ describe('the model-program turn on the real core route', () => {
     expect(asks.some((x) => x.quantity_id === 'extra_per_oven')).toBe(false);
   });
 
+  it('Codex r1 #3709 (2): the PRESENTED Run never says "on your figures" for a figure said to be theirs whose words were not found', () => {
+    // The club with the promotion's effect given as the person's own figure (5 a month): on their words it is theirs; with
+    // words that are not in what they wrote it is listed as not found, in the Run's own sentence, never "on your figures".
+    const m = club();
+    m.quantities = m.quantities.map((x) => (x.id === 'promo_effect' ? { ...x, status: 'known', author: 'person', low: null, high: null, range_kind: null, basis: null, quote: 'five extra joins a month' } : x));
+    // The joins relation and its term are the person's too, so every other input is theirs.
+    m.relations = m.relations.map((r) => (r.form === 'effect' ? { ...r, author: 'person', quote: '20 join each month', terms: r.terms.map((t) => ({ ...t, author: 'person', quote: 'Run a promotion' })) } : r));
+    const face = (sourceText: string) => ((evaluateCanonical(m, { sourceText, seed: 7 }).view as Json).options as Json[]).find((o) => o.option_id === 'promotion').cell.face as string;
+    expect(face(`${CLUB_BRIEF} The promotion brings five extra joins a month.`)).toContain(', in this model, on your figures');
+    const unverified = face(CLUB_BRIEF);
+    expect(unverified).not.toContain('on your figures');
+    expect(unverified).toContain('‘promo effect’ is 5 member / month / promotion (not found in your words)');
+  });
+
   it('DL 23 Oct: an aim with no measure gets the one the person states (define_goal_measure), in their words; what they did not state stays asked', async () => {
     const m = bakery();
     m.goals = [{ ...m.goals[0]!, measure: null, question: 'How would you know the bakery is doing well enough?' }];
@@ -581,6 +595,23 @@ describe('the model-program turn on the real core route', () => {
       spend: { source: 'brief_extraction', source_words: 'Set by ‘Run a promotion’, from your brief' } });
     expect(clubbed('promo_on').value_basis).toEqual({ kind: 'structure', words: 'Fixed by how the model is built' });
     expect(clubbed('members').value_basis).toMatchObject({ kind: 'worked_out', from: ['members_now', 'joins', 'leavers'] });
+
+    // Codex r1 #3709 (1): a % range with no point is projected in the unit it is labelled with: 50–90 % sits at 70 %, never
+    // the compiler's fraction 0.7 beside "%".
+    const pct = bakery();
+    pct.quantities = pct.quantities.map((x) => (x.id === 'sell_through' ? { ...x, unit: '%', value: null, low: 50, high: 90 } : x));
+    const pctNode = nodeOf(project(pct, compile(pct, { sourceText: BRIEF })).graph)('sell_through');
+    expect(pctNode.observed_state).toMatchObject({ value: 70, raw_value: 70, unit: '%', range: { low: 50, high: 90 } });
+    expect(pctNode.display_value).toMatch(/^50–90 %, Olumi's estimate; Olumi reads it as a spread around 70 \(sd 11\.55\)/);
+
+    // Codex r1 #3709 (5): "yours" (user_override) only for words found in what the person wrote. The same later answer,
+    // compiled against the brief alone, is unverified and carries no source at all.
+    const words = 'The oven would cost about £2,500.';
+    const answered = bakery();
+    answered.quantities = answered.quantities.map((x) => (x.id === 'oven_price' ? { ...x, status: 'known', value: 2500, question: null, quote: words } : x));
+    const sourceOf = (text: string) => nodeOf(project(answered, compile(answered, { sourceText: text }), { brief: BRIEF }).graph)('oven_price').observed_state;
+    expect(sourceOf(`${BRIEF}\n${words}`)).toMatchObject({ source: 'user_override' });
+    expect(sourceOf(BRIEF)).not.toHaveProperty('source');
   });
 
   it('the stored Run names itself: run id, the analysis hash of the graph it was computed with, its time; stale once the model moves', async () => {

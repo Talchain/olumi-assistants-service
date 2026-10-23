@@ -516,8 +516,10 @@ function runOption(c: Compiled, p: Plan, inputs: Inputs, draws: number, thirds: 
           // A stock takes its one shock at boundary from_period, which the next boundaries then carry.
           if (k < from || (node.kind === 'stock' && k !== from)) continue;
           if (fired[r]! < 0) {
-            // Read once, at from_period, under this option. A chance is clipped to [0, 1].
-            const chance = clip01(vals[row + risk.occurrence]!);
+            // Read once, at from_period, under this option. A finite chance is clipped to [0, 1]; a nonfinite one (an overflow
+            // such as 1e200 × 1e200) is outside the domain, never a certain or an impossible event (Codex r1 #3709).
+            const raw = vals[row + risk.occurrence]!;
+            const chance = Number.isFinite(raw) ? clip01(raw) : NaN;
             fired[r] = Number.isNaN(chance) ? 2 : inputs.riskU[r]![d]! < chance ? 1 : 0;
             severity[r] = vals[row + risk.severity]!;
           }

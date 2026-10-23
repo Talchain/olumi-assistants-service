@@ -270,6 +270,19 @@ describe('present: the canonical analysis view from a simulated model', () => {
     expect(v.goal_chance.notes).toContain(unchecked);
   });
 
+  it('Codex r1 #3709: a figure said to be the person\u2019s whose words were not found is never "on your figures", whatever its recorded author', () => {
+    // Weather = 10 + 2 × 1 = £12 ≥ £5 (exact). The coefficient's dist says person, but its words were not found (unverified).
+    const m = model([fixed('base', 10, '£'), fixed('per_degree', 2, '£'), fixed('temperature', 1, 'degrees'),
+      effect('weather', 'base', [{ coefficient: 'per_degree', driver: 'temperature' }], '£'), fixed('floor', 5, '£')],
+    [{ ...goal('g', 'weather', '>=', 'floor'), label: 'Weather takings' }], [option('hold', 'Hold')]);
+    const relation = { weather: { label: 'weather', author: 'person' as const, relation_author: 'person' as const } };
+    const v = present(m, { ...relation, per_degree: { label: 'per_degree', author: 'unverified' as const } });
+    expect(cell(v, 'hold').face).toBe('‘Hold’: 100% chance of ‘weather’ being at least £5 at 1 month from now, in this model, '
+      + 'if ‘per_degree’ is £2 (not found in your words): in every simulated draw ‘weather’ is £12 at 1 month from now, at least £5.');
+    // Contrast: the same figure, its words found, is theirs.
+    expect(cell(present(m, { ...relation, per_degree: person('per_degree') }), 'hold').face).toContain(', in this model, on your figures:');
+  });
+
   it('Lenses fit 2 (DL 23 Oct): 0% only when the outcome is FIXED, with why; 0 of N sampled draws is "less than 1%", never 0%', () => {
     // Capacity: weekly = 80 + per_specialist × specialists. Keep sets specialists to 0, so weekly is 80 in every draw against
     // 100 even though per_specialist is Olumi's range (10 to 30 around 20): exact, and said why. With the target at 200, Add
