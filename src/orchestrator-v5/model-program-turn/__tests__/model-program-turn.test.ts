@@ -957,7 +957,9 @@ describe('the model-program turn on the real core route', () => {
 
   it('canvas edits on a program: a card figure and a goal target each set ONE figure as the person\'s, with a new Run; a link edit and a resend change nothing', async () => {
     replies = [JSON.stringify(bakery())];
-    await turn({ message: BRIEF });
+    const drafted = await turn({ message: BRIEF });
+    // DL 23 Oct (served capacity, stale card): a reply whose turn stored a Run names it in \`run\`, so the UI reads it after the write.
+    expect(drafted.json().run).toMatchObject({ run_id: persisted!.living_model.runs[0].run_id, run_key: persisted!.living_model.runs[0].run_id, state: { kind: 'complete_current' } });
     sent.length = 0;
     const edit = (event: Json, turn_id = randomUUID()) => turn({ kind: 'system_event', turn_id, event });
     const figure = { kind: 'factor_value_edit', target_id: 'base_sales', value: 320 };
@@ -972,10 +974,13 @@ describe('the model-program turn on the real core route', () => {
     const drawn = (r.json().model.graph.nodes as Json[]).find((n) => n.id === 'base_sales')!;
     expect(drawn.observed_state).toMatchObject({ value: 320, source: 'user_override' });
     expect(r.json().canonical_analysis_view.run.run_id).toBe(persisted!.living_model.runs[1].run_id);
-    // The same edit resent: answered from what is saved, never applied twice.
+    expect(r.json().run).toMatchObject({ run_id: persisted!.living_model.runs[1].run_id, state: { kind: 'complete_current', computed_at: persisted!.living_model.runs[1].computed_at } });
+    expect(r.json().run.run_id).not.toBe(drafted.json().run.run_id);
+    // The same edit resent: answered from what is saved, never applied twice; it stored no Run, so it names none.
     const saves = registered.length;
     const again = await edit(figure, id);
     expect([again.statusCode, again.json().durability, registered.length]).toEqual([200, 'replayed', saves]);
+    expect(again.json().run).toBeNull();
 
     const target = await edit({ kind: 'goal_target_edit', goal_node_id: 'more_loaves', constraint_type: 'at_least', raw_value: 400, unit: 'loaf/week', base_graph_hash: hashOf(persisted) });
     expect(target.statusCode, target.body).toBe(200);
@@ -988,6 +993,7 @@ describe('the model-program turn on the real core route', () => {
     expect(link.json().error).toMatchObject({ code: 'CANVAS_EDIT_REFUSED', nothing_saved: true });
     expect(link.json().error.message).toContain('change it in the chat');
     expect(registered.length).toBe(saved);
+    expect(link.json().run).toBeNull();
   });
 
   it('DL 23 Oct (in-card range edit): a figure typed inside the person\'s own range moves its centre and keeps the range, and the chance moves; outside it, nothing is saved and they are asked', async () => {
