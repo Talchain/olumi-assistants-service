@@ -100,6 +100,19 @@ describe('a relative change with no level today is measured as the change, never
     expect(goalTargetGapOf(stored(absolute))?.kind).toBe('goal_level_missing');
   });
 
+  it('a typed current reference reads descriptive baseline words; other/unresolved references stay held', () => {
+    for (const baseline of ['Productivity before hiring', 'Throughput without changing staffing']) {
+      const m = model({ baseline, baseline_reference: 'today' });
+      expect(goalOf(stored(m)).quantity_frame).toBe('change');
+      expect(m.aims[0]!.target!.baseline).toBe(baseline);
+      // New unresolved and explicitly other references never acquire today from a text cue.
+      expect(reasons(model({ baseline: 'today', baseline_reference: null }))).toContain('tp:goal_level_unknown');
+      expect(reasons(model({ baseline: 'today', baseline_reference: 'other' }))).toContain('tp:goal_level_unknown');
+      // Older saved forms keep their prior reading rather than silently migrating an unknown reference.
+      expect(reasons(model({ baseline }))).toContain('tp:goal_level_unknown');
+    }
+  });
+
   it('a stated period goes with the reading, so the licence reads it; with none, the reading waits for the period (never guessed)', () => {
     const withPeriod = goalOf(mapLivingModel(model({ period_months: 6 })).graph);
     expect(withPeriod.goal_target_basis.period_months).toBe(6);

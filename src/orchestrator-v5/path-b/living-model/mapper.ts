@@ -364,7 +364,8 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
      */
     const into = model.links.filter((l) => l.to === aim.id && [l.effect.value, l.effect.low, l.effect.high].some((v) => v !== null));
     const relative = lt === 'goal_level_unknown' && t !== null && t.change_kind === 'relative' && t.unit === '%' && t.quantity.trim() !== ''
-      && (t.baseline === null || /^\s*(the\s+)?(today|now|current|present)\b/i.test(t.baseline)) && !(t.current_unit !== null && isPercentScaledUnit(t.current_unit))
+      && (t.baseline_reference === 'today' || (t.baseline_reference === undefined
+        && (t.baseline === null || /^\s*(the\s+)?(today|now|current|present)\b/i.test(t.baseline)))) && !(t.current_unit !== null && isPercentScaledUnit(t.current_unit))
       && t.value !== null && !(t.comparator === 'decrease' && Math.abs(t.value) > 100) && into.every((l) => l.effect.unit === '%')
       ? resolveGoalThresholdCapWithProvenance(undefined, Math.abs(t.value), '%', undefined) : null;
     if (relative !== null && t !== null && t.value !== null) {
@@ -553,7 +554,8 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
         const std = spread.std / cap;
         if (!setsFactor.has(f.id) && f.low! < value && value < f.high!
           && ((f.low! < 0 && f.high! > 0) || Math.abs(value) >= 2 * spread.std)) {
-          Object.assign(node.observed_state as Rec, { std, std_source: 'olumi' });
+          Object.assign(node.observed_state as Rec, { std, std_source: 'olumi',
+            range_basis: { low: f.low, high: f.high, source: figureBy(f, f).source } });
           (node.observed_state as Rec).uncertainty_defaults = [{ code: REPAIR_CODES.CLAMP_STD_MINIMUM, layer: 'cee',
             field_path: `nodes[${f.id}].observed_state.std`, before: null, after: std, severity: 'info',
             reason: bare

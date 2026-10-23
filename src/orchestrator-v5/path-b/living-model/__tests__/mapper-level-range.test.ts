@@ -45,7 +45,8 @@ describe('a stated level range supplies its own provisional spread', () => {
     expect(mapped.withheld).toEqual([]);
     const graph = projectCorePostimageForPersistence(GraphV3.parse({ ...mapped.graph, living_model: model })) as Rec;
     const each = node(graph), cap = each.observed_state.cap;
-    const { uncertainty_defaults, ...observed } = each.observed_state;
+    const { uncertainty_defaults, range_basis, ...observed } = each.observed_state;
+    expect(range_basis).toEqual({ low: 10, high: 30, source: 'user' });
     expect(observed).toEqual({ value: 20 / cap, raw_value: 20, cap, unit: `${subject} per specialist`,
       source: 'brief_extraction', extractionType: 'explicit', std: (30 - 10) / Math.sqrt(12) / cap, std_source: 'olumi' });
     expect(each.observed_state.std * cap).toBeCloseTo(5.773502691896258, 12);
@@ -109,29 +110,24 @@ describe('a stated level range supplies its own provisional spread', () => {
     const noRange = structuredClone(model);
     Object.assign(noRange.factors[2]!, { low: null, high: null });
     const mapped = mapLivingModel(model), base = mapLivingModel(noRange), level = node(mapped.graph);
-    const { std, std_source, uncertainty_defaults, ...observed } = level.observed_state;
+    const { std, std_source, uncertainty_defaults, range_basis, ...observed } = level.observed_state;
     const baseState = node(base.graph).observed_state;
     const { value: _value, cap: _cap, ...physical } = observed;
     const { value: _oldValue, cap: _oldCap, ...oldPhysical } = baseState;
     expect(physical).toEqual(oldPhysical);
     expect(observed.value * observed.cap).toBeCloseTo(baseState.value * baseState.cap, 12);
-    // A wider own range may change the numerical frame, never the effect per natural unit.
-    for (const e of mapped.graph.edges) {
-      const from = mapped.frames.get(String(e.from)), to = mapped.frames.get(String(e.to));
-      const oldFrom = base.frames.get(String(e.from)), oldTo = base.frames.get(String(e.to));
-      if (!from || !to || !oldFrom || !oldTo) continue;
-      const old = base.graph.edges.find(x => x.id === e.id)!;
-      expect((e.strength as Rec).mean * to.cap / from.cap).toBeCloseTo((old.strength as Rec).mean * oldTo.cap / oldFrom.cap, 12);
-      expect((e.strength as Rec).std * to.cap / from.cap).toBeCloseTo((old.strength as Rec).std * oldTo.cap / oldFrom.cap, 12);
-    }
+    // These are definition markers, not uncertain per-unit effects. The engine evaluates the identity from its parts.
+    expect(mapped.graph.edges).toEqual(base.graph.edges);
     if (eligible) {
       expect(std).toBe((high - low) / Math.sqrt(12) / observed.cap);
       expect(std_source).toBe('olumi');
+      expect(range_basis).toEqual({ low, high, source: 'user' });
       expect(uncertainty_defaults).toEqual(linkDefaultAssumptionsOf(level));
       expect(licence(run(mapped.graph)).provisional).toBe(true);
     } else {
       expect(std).toBeUndefined();
       expect(std_source).toBeUndefined();
+      expect(range_basis).toBeUndefined();
       expect(uncertainty_defaults).toBeUndefined();
       expect(observed.raw_value).toBe(baseState.raw_value);
       expect(mapped.assumed.filter(a => a.id === 'each')).toEqual([{ id: 'each', text:

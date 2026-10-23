@@ -132,22 +132,23 @@ describe('a stated defined quantity with no level is framed by its parts, never 
     links: [exact('revenue_net', 'revenue', 1), exact('costs_net', 'costs', -1)],
     risks: [], conditions: [], views: [], history: [],
   });
-  it('it is framed as it would be with its level stated (on the goal\'s frame here), carried as scale_frame; no level is sent; the Run is not refused', () => {
+  it('its own derived levels frame scale_frame; the natural link stays one, with no stated level and no Run refusal', () => {
     const { mapped, ready } = readiness(model());
     const nodes = mapped.graph.nodes as Rec[];
     const revenue = nodes.find((n) => n.id === 'revenue')!;
     expect(revenue).toMatchObject({ nonlinear_identity: { operation: 'product', factor_ids: ['items', 'unit_price'] } });
-    // The same frame as the stated-level CONTRAST below: the levels its parts make (1,200 today, 1,300 raised) sit on the goal's frame.
-    expect(revenue.scale_frame).toBe(((readiness(model(1200)).mapped.graph.nodes as Rec[]).find((n) => n.id === 'revenue')!.observed_state as Rec).cap);
-    // Codex on #3664: the link of 1 into the goal reaches the engine as 1, never above it (PLoT clamps a coefficient above 1).
-    expect((mapped.graph.edges as Rec[]).find((e) => e.from === 'revenue' && e.to === 'net')!.strength.mean).toBe(1);
+    // Own possible levels are 1,200 today and 1,300 under Raise, independent of the goal's numerical frame.
+    expect(revenue.scale_frame).toBe(1300 * 1.25);
+    const goalCap = nodes.find(n => n.id === 'net')!.goal_threshold_cap;
+    const edge = (mapped.graph.edges as Rec[]).find(e => e.from === 'revenue' && e.to === 'net')!;
+    expect(edge.strength.mean * goalCap / revenue.scale_frame).toBeCloseTo(1, 12);
     expect(revenue.observed_state, 'a frame only, never a level').toBeUndefined();
     expect(ready.blockingIssues.map((i) => i.code)).not.toContain('IDENTITY_FRAME_MISSING');
     // The saved graph the Run sends keeps it (NodeV3 declares `scale_frame`; an undeclared key would be stripped).
     const saved = projectCorePostimageForPersistence(GraphV3.parse({ ...mapped.graph, living_model: model() })) as Rec;
     expect((saved.nodes as Rec[]).find((n) => n.id === 'revenue')!.scale_frame).toBe(revenue.scale_frame);
   });
-  it('Codex\'s probe (a sum, both parts on the goal\'s frame): a link of 1 into the goal reaches the engine as 1, so raising a part by £1 adds £1', () => {
+  it('a defined sum keeps its natural coefficient: raising a part by £1 adds £1 regardless of the goal frame', () => {
     const m = model();
     m.factors = [level('a', 700, '£ per week'), level('b', 500, '£ per week'),
       level('q', null, '£ per week', { op: 'sum', of: ['a', 'b'], ...who('q is a plus b') })];
@@ -159,9 +160,11 @@ describe('a stated defined quantity with no level is framed by its parts, never 
     const capOf = (id: string) => (nodes.find((n) => n.id === id)!.observed_state as Rec).cap as number;
     const q = nodes.find((n) => n.id === 'q')!;
     expect(typeof q.scale_frame).toBe('number');
-    expect(q.scale_frame).toBe(nodes.find((n) => n.id === 'net')!.goal_threshold_cap);
+    expect(q.scale_frame).toBe(1201 * 1.25);
     expect(q.scale_frame, 'never the sum of its parts\' frames').not.toBe(capOf('a') + capOf('b'));
-    expect((mapped.graph.edges as Rec[]).find((e) => e.id === 'q_net')!.strength.mean).toBe(1);
+    const edge = (mapped.graph.edges as Rec[]).find(e => e.id === 'q_net')!;
+    expect(edge.strength.mean * nodes.find(n => n.id === 'net')!.goal_threshold_cap / q.scale_frame).toBeCloseTo(1, 12);
+    expect(edge.strength.std * nodes.find(n => n.id === 'net')!.goal_threshold_cap / q.scale_frame).toBeCloseTo(0.1, 12);
   });
   it('CONTRAST: a defined quantity with its own stated level keeps its own frame, with no scale_frame', () => {
     const revenue = (readiness(model(1200)).mapped.graph.nodes as Rec[]).find((n) => n.id === 'revenue')!;

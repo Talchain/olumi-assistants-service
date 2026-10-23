@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { GraphV3 } from '../../../../schemas/cee-v3.js';
+import { goalChanceDriverOf } from '../../../goal-target/goal-chance-driver.js';
 import { convertingOlumiEstimate } from '../../../admission/target-testability.js';
 import { mapLivingModel } from '../mapper.js';
 import { KNOWN_ANSWER } from './fixtures.js';
@@ -65,6 +66,31 @@ describe('B1: quantity-owned frames and honest range conversion', () => {
     expect(m).toEqual(before);
     expect(GraphV3.parse({ ...out.graph, living_model: m }).living_model).toEqual(before);
     expect(GraphV3.parse({ ...out.graph, living_model: m }).nodes.find(n => n.id === 'context')!.observed_state).toEqual(context.observed_state);
+  });
+
+  it('the real mapper → saved graph → driver preserves the person’s range author, separately from Normal conversion', () => {
+    const m = structuredClone(KNOWN_ANSWER);
+    m.factors.push({ ...m.factors[0]!, id: 'capacity', label: 'Capacity', value: 20, low: 10, high: 30, unit: 'cases', quote: 'Capacity is 20 cases, between 10 and 30.' });
+    const row = { quantity_id: 'capacity', kind: 'factor_value', p_goal_if_low: 0.3, p_goal_if_high: 0.6,
+      n_low: 333, n_high: 333, spread: 0.3, status: 'resolved', spread_noise_floor: 0.08, correlated: false,
+      low_upper_display: 15, high_lower_display: 25, display_unit: 'cases' };
+    const record = { probability_of_goal_drivers: { method: 'tercile_conditional_v1', min_group_n: 30,
+      n_candidates: 1, n_compared: 1, n_dropped: 0, dropped_by_reason: {}, drivers: [row] } };
+    for (const value of [20, null]) for (const source of ['user', 'olumi', 'party', 'unverified'] as const) {
+      Object.assign(m.factors[1]!, { value, source, party: source === 'party' ? 'Operations' : null });
+      const graph = GraphV3.parse({ ...mapLivingModel(m).graph, living_model: m });
+      const state = node(graph, 'capacity').observed_state;
+      expect(state.std_source).toBe('olumi'); // PLoT must still map this to ISL spread_source: template.
+      expect(state.range_basis).toEqual({ low: 10, high: 30, source });
+      const author = source === 'user' ? 'user' : source === 'olumi' ? 'olumi' : 'unattributed';
+      const claim = goalChanceDriverOf(record, 'push', graph, { factor_evppi: [{ factor_id: 'capacity', spread_source: 'template' }] });
+      expect('driver' in claim ? claim.driver.authored_by : claim).toBe(author);
+      expect(state.uncertainty_defaults[0].reason).toContain('Olumi');
+      const changed = structuredClone(graph);
+      node(changed, 'capacity').observed_state.std *= 2;
+      const rejected = goalChanceDriverOf(record, 'push', changed, {});
+      expect('driver' in rejected ? rejected.driver.authored_by : rejected).toBe('unattributed');
+    }
   });
 
   it('does not turn a bare intervention range, one-sided range or unsafe positive Normal into a point assumption', () => {
