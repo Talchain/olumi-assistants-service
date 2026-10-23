@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { LivingModel } from '../../../../schemas/living-model.js';
+import { assessCanonicalAnalysisReadiness } from '../../../../orchestrator/tools/analysis-ready-helper.js';
 import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import { applyKernel, canonicalIds } from '../kernel.js';
 import { changeGoal, mapLivingModel } from '../mapper.js';
@@ -95,6 +96,24 @@ describe('canonical accumulation and all-target compilation', () => {
     expect(out.withheld).not.toContainEqual({ id: 'churn', reason: 'aim_not_in_slice' });
     expect(GraphV3.parse({ ...graph, living_model: m }).living_model).toEqual(before);
     expect(m).toEqual(before);
+  });
+
+  it('the existing real path referee accepts a separate target branch without a fabricated link to the primary aim', () => {
+    const m = structuredClone(KNOWN_ANSWER);
+    const churn = structuredClone(m.aims[0]!);
+    Object.assign(churn, { id: 'churn', text: 'Keep monthly churn under 4%', quote: 'keep monthly churn under 4%' });
+    Object.assign(churn.target!, { comparator: '<', value: 4, current: 3, unit: '%' });
+    m.aims.push(churn);
+    m.factors.push({ ...m.factors[0]!, id: 'retention', label: 'Retention work', value: 0, unit: null });
+    m.options[1]!.settings.push({ ...m.options[1]!.settings[0]!, factor_id: 'retention', value: 1, unit: null });
+    m.links.push({ ...m.links[0]!, id: 'retention_churn', from: 'retention', to: 'churn', source: 'olumi', quote: null,
+      effect: { ...m.links[0]!.effect, form: 'normal', value: 0.5, sd: 0.1, sign: '-', unit: '%' } });
+    const graph = GraphV3.parse({ ...mapLivingModel(m).graph, living_model: m });
+    const verdict = assessCanonicalAnalysisReadiness(graph);
+    expect(verdict.blockingIssues.filter(i => i.code === 'NO_PATH_TO_GOAL' || i.code === 'ORPHAN_NODE')).toEqual([]);
+    expect(graph.edges.some(e => e.from === 'churn' && e.to === 'g')).toBe(false);
+    expect(graph.edges.some(e => e.from === 'retention' && e.to === 'g')).toBe(false);
+    expect(graph.goal_constraints!.filter(c => c.role === 'goal_target').map(c => c.node_id).sort()).toEqual(['churn', 'g']);
   });
 
   it('retains an unknown limit unscored instead of omitting it from the full joint', () => {
