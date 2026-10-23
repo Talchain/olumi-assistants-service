@@ -68,7 +68,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
 
   it('THE PROMPTS (DL 22 Oct, priority change): the coach\u2019s reply rules and the drafter\u2019s rules, adapted as ruled; the old constants are gone', () => {
     expect(createHash('sha256').update(CORE_REPLY_RULES, 'utf8').digest('hex')).toBe('6f5f00c581ac4be2f1f590973e4bcf58c6eba498e5216bc3a8a21a189be5f3d6');
-    expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('2773fda471a80e1954bc3bb2b6810d2f65ada6727b2e00e07ab3a5eb5380b791'); // 22 Oct: every stated goal saved in their words, never approximated (Claude r1 on #3670); + a calendar date is Olumi's labelled reading
+    expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('bed04fc58a01dbd02d8f5c8aa6ef171731a356c1cde47a85e0cd64be35416653'); // 23 Oct (DL 93d79c3e, C2 double prime): a definition's parts are factors with levels, never another definition; a STATED per-unit effect is a sized link. 22 Oct: every stated goal saved in their words, never approximated (Claude r1 on #3670); + a calendar date is Olumi's labelled reading
     // The retired constants are gone from both modules: no route can send the accreted text again.
     for (const name of ['CORE_REPLY_INSTRUCTION', 'CORE_RESPONSE_DISCIPLINE', 'CORE_NEXT_STEP']) expect(Object.keys(coreInstructions), name).not.toContain(name);
     expect(Object.keys(drafting)).toEqual(['CORE_DRAFTER_RULES']);
@@ -120,7 +120,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     for (const rule of ['Find what most limits reaching the aim (its binding constraint or critical path, e.g. time to close, approval, capacity) and model that mechanism explicitly.',
       "Offer at least one option that is structurally different (a different route, not a different split of the same levers), labelled Olumi's.",
       'Every item either lies on a path to the aim or is a condition on one; no stand-alone items.',
-      `A stated difference ("net stock is deliveries minus usage") is defined_as with op sum, all part ids in of, and the subtracted part ids in subtract. Use their stated sign, shared units and definition attribution; do not emit duplicate causal links or replace a difference with an all-positive sum.`,
+      "A stated sum, difference (subtracted ids in subtract) or two-part product is defined_as, not causal links from its parts, with their sign, units and attribution;",
       'Conditions are short, written for the person, one point each; keep working notes out of the model.',
       'A deadline is the window of the aim it belongs to, never an aim of its own: keep its words in by_when and, when it counts from today, its window in period_months (weeks \u00f7 4.35); '
         + 'for a calendar date ("by the end of September"), leave period_months null, set period_by olumi and read the date it fixes into period_deadline (YYYY-MM-DD, from today\'s date); Olumi records the day and works out its window.'])
@@ -153,6 +153,14 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(firstTurn).toContain('never change or mix with a figure they gave');
     expect(firstTurn).toContain('user/party requires verbatim words stating that very item');
     expect(firstTurn).toContain('Adoption does not transfer authorship.');
+  });
+
+  it('DL 93d79c3e (C2 double prime, after the C2 revert #3700): a definition never nests another; only a stated per-unit effect becomes a sized link', () => {
+    // The host holds a defined part (identity_part_unknown, factor_level_unknown), so a nested identity leaves the goal with no path.
+    expect(CORE_DRAFTER_RULES.split("each part is a factor with its own level, never another definition.")).toHaveLength(2);
+    // Buddy BLOCK + DL ruling: a stated definition is never turned into an estimated causal law to be admitted.
+    expect(CORE_DRAFTER_RULES).toContain("is a sized link in its own unit, with their figure and range; never turn a stated definition into an estimated link.");
+    for (const gone of ['a part made of others is a sized link', 'MECHANISM FIRST']) expect(CORE_DRAFTER_RULES, gone).not.toContain(gone);
   });
 
   it('keeps the entire estimate rule verbatim, rather than weakening figure or author protections', () => {
