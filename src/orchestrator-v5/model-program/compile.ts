@@ -163,7 +163,7 @@ export const inlineQuantityId = (optionId: string, quantity: string) => `${optio
  * known (author structure), Olumi's setting on its OWN option is its proposal (known), Olumi's figure on a person's option
  * is an estimate (ranged), and no figure is an ask.
  */
-export function normalise(model: CanonicalModelT): CanonicalModelT {
+export function normalise(model: CanonicalModelT, statesIt?: (q: CanonicalQuantityT) => boolean): CanonicalModelT {
   const Q = new Map(model.quantities.map((q) => [q.id, q] as const));
   const extra: CanonicalQuantityT[] = [];
   const options = model.options.map((o) => ({
@@ -186,25 +186,41 @@ export function normalise(model: CanonicalModelT): CanonicalModelT {
     }),
   }));
   const named = extra.length ? { ...model, quantities: [...model.quantities, ...extra], options } : model;
-  // A figure labelled structure that is no structural constant ("current output = 12", stated by no one) is the person's
-  // to give: read as their question, never as Olumi's fixed figure (Codex r4/r5 #3709; `isStructuralConstant`).
-  const asked = named.quantities.map((q) => (q.author === 'structure' && q.kind === 'fact' && q.status === 'known' && has(q.value) && !has(q.low) && !has(q.high)
-    && !isStructuralConstant(named, q) ? structureAsked(q) : q));
-  return asked.some((q, i) => q !== named.quantities[i]) ? { ...named, quantities: asked } : named;
+  // A figure labelled structure is read by its meaning (`admitStructure`): "current output = 12", stated by no one, is the
+  // person's question, never Olumi's fixed figure (Codex r4–r6 #3709).
+  const read = named.quantities.map((q) => (q.author === 'structure' && q.kind === 'fact' && q.status === 'known' && has(q.value) && !has(q.low) && !has(q.high)
+    ? admitStructure(named, q, statesIt) : q));
+  return read.some((q, i) => q !== named.quantities[i]) ? { ...named, quantities: read } : named;
 }
 
 /**
- * THE STRUCTURAL ADMISSION, shared by the first draft (here, in `normalise`) and mechanism completion (`answer.ts`): a
- * figure is a structural constant only by its declared meaning, never because it looks like one (an integer):
+ * HOW A FIGURE LABELLED STRUCTURE IS READ, shared by the first draft (`normalise`, then saved as read: `draft.ts`) and
+ * mechanism completion (`answer.ts`): a structural constant stays Olumi's constant; a figure their words STATE is the
+ * PERSON's (`statesIt`: its quote is in their words and writes this figure bound to its unit, `answer.ts` `statesFigure`,
+ * the r2 target binding; a quote that is merely theirs is not enough); anything else is their question. With nothing to
+ * check against (a saved model read again), it is their question.
+ */
+export function admitStructure(model: CanonicalModelT, q: CanonicalQuantityT, statesIt?: (q: CanonicalQuantityT) => boolean): CanonicalQuantityT {
+  if (isStructuralConstant(model, q)) return q;
+  if (statesIt?.(q) === true) return { ...q, author: 'person', party: null, basis: null };
+  return structureAsked(q);
+}
+/** Whether a quote is in the person's words (the compiler's own quote check: `needQuote`). */
+export const quoteIn = (sourceText: string) => (quote: string | null): boolean => has(quote) && quote.trim() !== '' && norm(sourceText).includes(norm(quote));
+
+/**
+ * THE STRUCTURAL CONSTANTS (`admitStructure`): a figure is one only by its declared meaning, never because it looks like
+ * one (an integer):
  *  · an exact calendar conversion (12 month/year, 52 week/year);
  *  · a power of ten that IS its unit's scale (100 %, 1000 g/kg, 100 % per customer/prospect: the constant times its unit's
  *    scale is exactly 1), never the identity 1;
  *  · 0 or 1 on a quantity an option switches (what it sets, or its switched-on figure);
- *  · 0 as an additive identity: an effect's base, a part of a sum, a stock's start ("nothing extra yet");
- *  · 1 as a multiplicative identity: an effect's base (an unchanged multiplier, an index of today), a part of a sum
- *    ("1 + growth"), or the "per one" a product divides by ("one customer").
- * Everything a draft labelled structure in batches 1–4 meets one of these (scratchpad/s3/structure-impact.txt); a figure
- * no one stated that meets none ("current output = 12", an unused "current utilisation = 1") is the person's question.
+ *  · 0, the additive identity: an effect's base, a part of a sum, a stock's start ("nothing extra yet"); a 1 with a unit
+ *    added or as a base never is one ("current customers = 1" is the person's figure);
+ *  · 1, the multiplicative identity: a part of a product, as a factor (× 1, "output per developer = 1 output unit") or the
+ *    "per one" it divides by ("one customer"); and the unit-free 1 a multiplier or index is built from (an unchanged
+ *    multiplier's base, "1 + growth": 19 figures in the saved drafts of batches 1–4).
+ * A figure no one stated that meets none ("current output = 12", an unused "current utilisation = 1") is not a constant.
  */
 export function isStructuralConstant(model: CanonicalModelT, q: CanonicalQuantityT): boolean {
   const u = parseUnit(q.unit);
@@ -217,7 +233,12 @@ export function isStructuralConstant(model: CanonicalModelT, q: CanonicalQuantit
   const base = (r: CanonicalModelT['relations'][number]) => r.form === 'effect' && r.base === q.id;
   const sumPart = (r: CanonicalModelT['relations'][number]) => r.form === 'definition' && r.op === 'sum' && r.parts.some((p) => p.id === q.id);
   if (v === 0) return used((r) => base(r) || sumPart(r) || (r.form === 'stock' && r.start === q.id));
-  if (v === 1) return used((r) => base(r) || sumPart(r) || (r.form === 'definition' && r.op === 'product' && r.parts.some((p) => p.id === q.id && p.power === -1)));
+  const factor = (r: CanonicalModelT['relations'][number]) => r.form === 'definition' && r.op === 'product' && r.parts.some((p) => p.id === q.id && p.power === 1);
+  const divisor = (r: CanonicalModelT['relations'][number]) => r.form === 'definition' && r.op === 'product' && r.parts.some((p) => p.id === q.id && p.power === -1);
+  // The unit-free 1 a multiplier or index is built from ("1 + growth", an unchanged multiplier's base) is the identity too;
+  // a 1 WITH a unit added in a sum or as a base ("current customers = 1") is a count only the person can give.
+  const unitFree = Object.keys(u.unit.dims).length === 0 && u.unit.scale === 1;
+  if (v === 1) return used((r) => factor(r) || divisor(r) || (unitFree && (base(r) || sumPart(r))));
   return false;
 }
 /** A figure only the person can give, as their question. */

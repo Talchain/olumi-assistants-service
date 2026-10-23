@@ -60,6 +60,8 @@ export interface PresentGoal {
   readonly status: 'calculable' | 'asks' | 'withheld';
   readonly reasons: readonly string[];
   readonly asks: readonly string[];
+  /** The parts of the person's aim this measure does not cover, in their words (S1 `excludes`): named beside its chance. */
+  readonly excludes?: readonly string[];
 }
 /** S1's `LimitOutcome`, with the limit's label: every limit, checked or not. */
 export interface PresentLimit {
@@ -198,8 +200,8 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     const s = meta(id)?.shown_in;
     return s === undefined ? say(value, unit) : say(value / s.factor, s.unit);
   };
-  /** When the window opens: "with no deadline" for an aim that states none (read once, every option in effect). */
-  const whenWords = (c: Goal | Limit): string => (c.no_deadline === true ? 'with no deadline' : horizonWords(c.aggregation, c.window, unit, readingOf(byId.get(c.quantity)!)));
+  /** When the window opens; for an aim with none, never "no deadline" as a fact: none is recorded yet (DL 23 Oct, batch 4). */
+  const whenWords = (c: Goal | Limit): string => (c.no_deadline === true ? 'with no deadline recorded yet' : horizonWords(c.aggregation, c.window, unit, readingOf(byId.get(c.quantity)!)));
   const label = (id: string): string | undefined => meta(id)?.label ?? byId.get(id)?.label;
   const optionLabel = new Map(model.options.map((o) => [o.id, o.label] as const));
   const unit = model.period_unit;
@@ -303,7 +305,11 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   /** Options and risks the compiler left out: said in the words of every chance, with their reasons in the notes. */
   const notInRun = (model.withheld ?? []).filter((w) => w.kind === 'option' || w.kind === 'risk');
   const sayable = [...goalWords.values(), ...limitWords].every((w) => w !== undefined);
+  // What the chance does not cover, every time: aims with no measure, and what the person said that a measured aim's measure
+  // leaves out, as what they said (never "no measure" or "no deadline" for something they stated: buddy, batches 3/4).
+  const said = given.flatMap((g) => g.excludes ?? []);
   const leftOut = ((input.leaves_out ?? []).length > 0 ? `, leaving out ${listWords(input.leaves_out!.map(q))}, which ${input.leaves_out!.length === 1 ? 'has' : 'have'} no measure yet` : '')
+    + (said.length > 0 ? `, leaving out what you said that is not in the model yet (${listWords(said.map(q))})` : '')
     + (notInRun.length > 0 ? `, without ${listWords(notInRun.map((w) => `the ${w.kind} ${q(w.label)}`))}, which ${notInRun.length === 1 ? 'is' : 'are'} not in this run` : '');
   const jointWords = sayable
     ? `${listWords(model.goals.map((g) => goalWords.get(g.id)!))}${limitWords.length > 0 ? `, while ${listWords(limitWords as string[])}` : ''}${leftOut}`
@@ -406,6 +412,12 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       ? [`${q(allGoals.find((x) => x.goal_id === g.goal_id)?.label ?? g.goal_id)} with ${q(optionLabel.get(o.option_id) ?? o.option_id)} is not shown: in ${g.withheld.count.toLocaleString('en-GB')} of ${result.draws.toLocaleString('en-GB')} simulated draws ${listWords(g.withheld.quantities.map((id) => q(label(id) ?? id)))} could not be worked out.`]
       : []))),
     ...waiting.map((g) => `${q(g.label)} is not in the chance yet: ${g.asks.length > 0 ? listWords(g.asks.map((id) => askOf.get(id)?.question ?? q(id))) : g.reasons.join(' ')}`),
+    // The 11 Oct decision (:74): a chance says what it covers and what it leaves out.
+    ...given.filter((g) => (g.excludes ?? []).length > 0 && goalWords.get(g.goal_id) !== undefined)
+      .map((g) => `Covers: ${goalWords.get(g.goal_id)!} · Leaves out: you said ${listWords(g.excludes!.map(q))}; ${g.excludes!.length === 1 ? 'it is' : 'they are'} not in the model yet`),
+    // Asked only where nothing they said is left out: a deadline they stated is named above, never asked for again.
+    ...model.goals.filter((g) => g.no_deadline === true && (given.find((x) => x.goal_id === g.id)?.excludes ?? []).length === 0)
+      .map((g) => `No deadline is recorded yet for ${q(allGoals.find((x) => x.goal_id === g.id)?.label ?? g.id)}: is there one?`),
     ...notInRun.map((w) => `The ${w.kind} ${q(w.label)} is not in this run: ${w.reason}`),
     ...(uncheckedLine !== undefined ? [stop(uncheckedLine)] : []),
     ...thresholds.map((t) => t.words),

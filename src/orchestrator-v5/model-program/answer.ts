@@ -5,7 +5,7 @@
  * exactly which goals that answer unlocked.
  */
 import { APPROXIMATE_FIGURE, type CanonicalModelT } from './canonical.js';
-import { inlineQuantityId, isStructuralConstant, structureAsked } from './compile.js';
+import { admitStructure, inlineQuantityId } from './compile.js';
 import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { unitWrittenAfter } from '../agent-lane/user-statements.js';
 import { parseUnit } from './units.js';
@@ -26,6 +26,12 @@ const writesAs = (words: string, x: number, unit: string, label?: string): boole
   const noun = unit.split('/')[0]!.trim();
   return [noun, noun.replace(/fe?$/u, 'ves'), noun.replace(/([^aeiou])y$/u, '$1ies'), ...(label !== undefined ? [label] : [])].some((u) => unitWrittenAfter(words, x, u));
 };
+/**
+ * Whether a quantity's figure is one their words STATE: its quote is theirs (`isTheirs`) and writes that figure bound to the
+ * quantity's unit or name (`writesAs`). A structure-labelled figure is the person's only so (`admitStructure`, Codex r6).
+ */
+export const statesFigure = (isTheirs: (quote: string | null) => boolean) => (q: Quantity): boolean =>
+  q.quote !== null && q.value !== null && isTheirs(q.quote) && writesAs(q.quote, q.value, q.unit, q.label);
 /** Whether their words state both ends of a range: a range they did not state is never theirs. */
 const statesEnds = (words: string, low: number, high: number): boolean => {
   const f = figuresIn(words);
@@ -108,11 +114,15 @@ export type GoalMeasureAnswer = {
   /** How many periods, or the id of a quantity that already holds the deadline they stated. */
   readonly window: { readonly periods: number | string; readonly start: number } | null;
   readonly quote: string;
+  /** The parts of their words this measure does not cover (another target, a deadline the model cannot hold), copied exactly. */
+  readonly leaves_out?: readonly string[];
 };
 type Quantity = CanonicalModelT['quantities'][number];
+const plainWords = (w: string) => w.toLowerCase().replace(/[‘’]/g, "'").replace(/\s+/g, ' ').trim();
 
 export function defineGoalMeasure(model: CanonicalModelT, a: GoalMeasureAnswer): FillResult {
   const g = model.goals.find((x) => x.id === a.goal_id);
+  if (g === undefined && model.limits.some((l) => l.id === a.goal_id)) return { ok: false, reason: 'I can\'t record a measure for a limit yet; it stays a note.' };
   if (g === undefined) return { ok: false, reason: `"${a.goal_id}" is not a goal in the model.` };
   if (g.measure !== null) return { ok: false, reason: `"${g.label}" already has a measure; change its target instead.` };
   if (a.quote.trim() === '') return { ok: false, reason: 'A measure needs the person\'s own words.' };
@@ -172,9 +182,23 @@ export function defineGoalMeasure(model: CanonicalModelT, a: GoalMeasureAnswer):
     added.push(theirs(periods, `Time to meet ${g.label}`, model.period, { value: span }));
     window = { origin_event: null, origin_offset: null, start: a.window.start, periods };
   }
+  // Nothing they said is dropped silently (DL 23 Oct, batch 4 marketing-r2: "and 20 new customers" vanished): every figure in
+  // their words is this measure's target or deadline, or sits in a part they said this measure leaves out.
+  const leaves = (a.leaves_out ?? []).map((w) => w.trim()).filter((w) => w !== '');
+  const missing = leaves.find((w) => !plainWords(a.quote).includes(plainWords(w)));
+  if (missing !== undefined) return { ok: false, reason: `"${missing}" is not in their words; copy the part the measure leaves out exactly.` };
+  const valuesOf = (id: string) => { const q = model.quantities.find((x) => x.id === id) ?? added.find((x) => x.id === id); return [q?.value, q?.low, q?.high].filter((v): v is number => typeof v === 'number'); };
+  const used = [...(typeof t === 'string' ? valuesOf(t) : t === null ? [] : [t.value, t.low, t.high].filter((v): v is number => v !== null)),
+    ...(a.window === null ? [] : typeof a.window.periods === 'string' ? valuesOf(a.window.periods) : [a.window.periods])];
+  const rest = leaves.reduce((w, part) => w.replace(new RegExp(part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), ' '), a.quote);
+  const unaccounted = figuresIn(rest).filter((v) => !used.some((u) => Math.abs(u - v) < 1e-9 || Math.abs(Math.abs(u) - v) < 1e-9));
+  if (unaccounted.length > 0) return { ok: false, reason: `Their words also give ${unaccounted.join(', ')}: give it as its own aim, or list the words it is in under leaves_out.` };
+  const notes = leaves.map((w, i) => ({ id: fresh(`${g.id}_leaves_out${i === 0 ? '' : `_${i + 1}`}`), text: w,
+    why: 'It is part of the aim they stated, but it has no measure yet, so the chance does not cover it.', question: `How would you measure "${w}"?`,
+    concerns: [g.id], author: 'person' as const, party: null, quote: w, approval: 'approved' as const, author_id: null }));
   const measure = { quantity: measured.id, per: null, cmp: a.cmp, target: targetId, frame, reference: frame === 'level' ? null : { kind: 'now' as const, option: null, quantity: null },
-    aggregation: 'end' as const, window, measure_by: 'person' as const, assumptions: [], exclusions: [] };
-  return { ok: true, model: { ...model, quantities: [...model.quantities, ...added],
+    aggregation: 'end' as const, window, measure_by: 'person' as const, assumptions: [], exclusions: notes.map((n) => n.id) };
+  return { ok: true, model: { ...model, quantities: [...model.quantities, ...added], left_out: [...model.left_out, ...notes],
     goals: model.goals.map((x) => (x.id === g.id ? { ...g, measure, question: null, approval: 'approved' as const } : x)),
     history: [...model.history, { id: g.id, change: 'superseded', old: JSON.stringify(g), quote: a.quote, author_id: null }] } };
 }
@@ -183,7 +207,7 @@ export function defineGoalMeasure(model: CanonicalModelT, a: GoalMeasureAnswer):
  * COMPLETING A MEASURE'S MECHANISM (DL 23 Oct): once the person has said how an aim is measured, Olumi's drafter may propose
  * what works that measure out. From the drafter's whole model only ADDITIONS are taken, and only of kinds Olumi may author:
  * its own coefficients (estimated, with a range and a basis), worked-out quantities, structural constants by their
- * meaning (compile.ts `isStructuralConstant`; any other "structure" figure becomes a question), and figures only the person can know as QUESTIONS (asked, no
+ * meaning (compile.ts `admitStructure`: else the person's figure where their words state it, or their question), and figures only the person can know as QUESTIONS (asked, no
  * figure); new relations that work out the measure or a new worked-out quantity; and their companion assumptions and
  * conditions, with the claims and evidence those name. Each is Olumi's unless its words are the person's. Only the measure
  * this same edit created (`fresh`) may become worked out: a quantity already in the model keeps its figure, kind and status.
@@ -213,7 +237,7 @@ export function addMechanism(model: CanonicalModelT, draft: CanonicalModelT, mea
     const blank = q.value === null && q.low === null && q.high === null;
     if (q.kind === 'coefficient' && q.status === 'estimated' && q.low !== null && q.high !== null && (q.basis ?? '').trim() !== '') added.push({ ...q, author: 'olumi', quote: null, approval: 'proposed' });
     else if (q.status === 'derived' && blank) added.push({ ...q, author: 'olumi', quote: null, approval: 'proposed' });
-    else if (q.author === 'structure') added.push({ ...q, quote: null, approval: 'proposed' }); // admitted below by its meaning, with the new relations
+    else if (q.author === 'structure') added.push({ ...q, approval: 'proposed' }); // read below by its meaning, with the new relations
     else if (q.status === 'asked' && blank && (q.question ?? '').trim() !== '') added.push({ ...q, author: 'person', quote: null, approval: 'proposed' });
     else return { ok: false, reason: `Olumi cannot add "${q.label}" as it was drafted: a figure only the person can give is asked, never estimated.` };
   }
@@ -260,10 +284,14 @@ export function addMechanism(model: CanonicalModelT, draft: CanonicalModelT, mea
   const assumptions = pick(draft.assumptions), conditions = pick(draft.conditions), claims = pick(draft.claims), evidence = pick(draft.evidence);
   const note = <T extends { author: string; quote: string | null }>(x: T): T => ({ ...olumis(x), approval: 'proposed' as const });
   const worked: Quantity = { ...target, kind: 'derived', status: 'derived', value: null, low: null, high: null, range_kind: null, basis: null };
-  // A structure figure stays Olumi's constant only by its meaning in the completed model (the shared admission); any other
-  // is the person's question.
+  // A structure figure is read by its meaning in the completed model, the first draft's own reading (`admitStructure`):
+  // Olumi's constant, the person's figure where its quote is in their words, else their question. All proposed.
   const withRelations = { ...model, relations: [...model.relations, ...newRelations] };
-  const admitted = added.map((q) => (q.author === 'structure' && !isStructuralConstant(withRelations, q) ? { ...structureAsked(q), approval: 'proposed' as const } : q));
+  const admitted = added.map((q): Quantity => {
+    if (q.author !== 'structure') return q;
+    const read = admitStructure(withRelations, q, statesFigure(isTheirs));
+    return { ...read, ...(read.author === 'structure' ? { quote: null } : {}), approval: 'proposed' };
+  });
   return { ok: true, model: { ...model, quantities: [...model.quantities.map((q) => (q.id === measured ? worked : q)), ...admitted],
     relations: [...model.relations, ...newRelations],
     assumptions: [...model.assumptions, ...assumptions.map(note)], conditions: [...model.conditions, ...conditions.map(note)],

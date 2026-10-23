@@ -101,8 +101,10 @@ export function evaluateCanonical(model: CanonicalModelT, opts: { readonly sourc
   const projection = project(model, compiled, opts.brief !== undefined ? { brief: opts.brief } : {});
   const labelOf = new Map(normalise(model).goals.map((g) => [g.id, g.label] as const));
   // Aims with no measure yet are left out of the chance (said in `leaves_out`), never a goal that waits.
+  const leftOutText = new Map(model.left_out.map((r) => [r.id, r.text] as const));
   const goals: PresentGoal[] = compiled.perGoal.filter((p) => !p.needs_measure)
-    .map((p) => ({ goal_id: p.goal_id, label: labelOf.get(p.goal_id) ?? p.goal_id, status: p.status, reasons: p.reasons, asks: p.asks }));
+    .map((p) => ({ goal_id: p.goal_id, label: labelOf.get(p.goal_id) ?? p.goal_id, status: p.status, reasons: p.reasons, asks: p.asks,
+      ...(p.excludes.length > 0 ? { excludes: p.excludes.map((id) => leftOutText.get(id) ?? id) } : {}) }));
   const asks: PresentAsk[] = compiled.asks.map((a) => ({ quantity_id: a.quantity_id, label: a.label, unit: a.unit, question: a.question }));
   const tipping: Record<string, TippingProbe> = Object.fromEntries(goals.filter((g) => g.status === 'asks' && g.asks.length === 1)
     .map((g) => [g.goal_id, probeFor(model, g.goal_id, g.asks[0]!, opts.sourceText)] as const));
@@ -125,12 +127,21 @@ function waitingView(model: CanonicalModelT, compiled: CompileResult, goals: rea
   const optionLabel = new Map(m.options.map((o) => [o.id, o.label] as const));
   const askOf = new Map(asks.map((a) => [a.quantity_id, a] as const));
   const failing = compiled.errors.length > 0;
-  const questions = [...new Set(goals.flatMap((g) => g.asks.map((id) => askOf.get(id)?.question).filter((q): q is string => q !== undefined)))];
-  const why = failing ? 'The model does not compile yet, so no chance can be worked out.'
-    : questions.length > 0 ? `The chance waits for your answer: ${questions.join(' ')}` : goals.flatMap((g) => g.reasons).join(' ') || 'No aim has a measure yet.';
-  const cell = { kind: 'withheld' as const, face: questions.length > 0 && !failing ? 'Not shown yet: needs your answer' : 'Chance not shown yet', why,
-    reasons: failing ? [{ code: 'does_not_compile', message: compiled.errors.slice(0, 5).map((e) => e.message).join(' ') }]
-      : goals.filter((g) => g.status !== 'calculable').map((g) => ({ code: g.status === 'asks' ? 'goal_asks' : 'goal_withheld', message: g.reasons.join(' ') || null })) };
+  const questionsOf = (ids: readonly string[]) => ids.map((id) => askOf.get(id)?.question).filter((q): q is string => q !== undefined);
+  const goalQuestions = goals.flatMap((g) => questionsOf(g.asks));
+  // Each option's cell also says what THAT option waits on (its own setting or timing): a measured aim is never said to have
+  // no measure because an option's figure is missing (batch 4 hiring-r1).
+  const cellOf = (optionId: string) => {
+    const own = compiled.perOption.find((p) => p.option_id === optionId);
+    const questions = [...new Set([...goalQuestions, ...questionsOf(own?.asks ?? [])])];
+    const measured = goals.length > 0; // the aims with a measure (those without are left out above)
+    const why = failing ? 'The model does not compile yet, so no chance can be worked out.'
+      : questions.length > 0 ? `The chance waits for your answer: ${questions.join(' ')}`
+        : goals.flatMap((g) => g.reasons).join(' ') || own?.reasons.join(' ') || (measured ? 'The chance cannot be worked out yet.' : 'No aim has a measure yet.');
+    return { kind: 'withheld' as const, face: questions.length > 0 && !failing ? 'Not shown yet: needs your answer' : 'Chance not shown yet', why,
+      reasons: failing ? [{ code: 'does_not_compile', message: compiled.errors.slice(0, 5).map((e) => e.message).join(' ') }]
+        : goals.filter((g) => g.status !== 'calculable').map((g) => ({ code: g.status === 'asks' ? 'goal_asks' : 'goal_withheld', message: g.reasons.join(' ') || null })) };
+  };
   const thresholds = failing ? [] : goals.flatMap((g) => {
     const probe = tipping[g.goal_id];
     const ask = g.asks.length === 1 ? askOf.get(g.asks[0]!) : undefined;
@@ -141,7 +152,7 @@ function waitingView(model: CanonicalModelT, compiled: CompileResult, goals: rea
     schema: 'canonical_analysis_view.v1', source: 'stored_run_facts', run: null,
     staleness: { stale: null, revision: null, run_revision: null, basis: 'analysis_graph_hash_interim', reason: null, limitation: 'Currentness is unknown because an analysis hash is unavailable.' },
     leader_licence: 'withheld',
-    options: ids.map((option_id) => ({ option_id, cell, main_driver: { kind: 'not_recorded' as const } })),
+    options: ids.map((option_id) => ({ option_id, cell: cellOf(option_id), main_driver: { kind: 'not_recorded' as const } })),
     goal_chance: { notes: [...goals.filter((g) => g.status !== 'calculable').map((g) => `‘${g.label}’ is not in the chance yet: ${g.reasons.join(' ')}`),
       ...thresholds.map((t) => t.words)], ...(thresholds.length > 0 ? { thresholds } : {}) },
   };

@@ -67,7 +67,7 @@ export async function runModelProgramTurn(input: ProgramTurnInput): Promise<Prog
   let program: SavedProgram;
   let draftMeta: Rec | undefined;
   if (prior === undefined) {
-    const draft = await draftCanonicalModel(input.message, input.call ?? ledgeredResponsesCall());
+    const draft = await draftCanonicalModel(input.message, input.call ?? ledgeredResponsesCall(), input.message, { interpret: true });
     draftMeta = { prompt_sha256: DRAFTING_PROMPT_SHA256, schema_sha256: CANONICAL_SCHEMA_SHA256, attempts: draft.attempts };
     if (draft.model === null || draft.compiled === null || draft.compiled.errors.length > 0) {
       const why = draft.model === null ? (draft.attempts.at(-1)?.failed ?? 'no draft came back') : `${draft.compiled!.errors.length} compile error(s) remain after ${draft.attempts.length - 1} repair(s)`;

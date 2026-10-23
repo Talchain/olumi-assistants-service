@@ -11,8 +11,8 @@ import { streamedLedgeredResponse, type StreamedResponsesBody } from '../../adap
 import { coreBudget } from '../agent-lane/model-budgets.js';
 import { agentRequestIdentity } from '../agent-lane/runtime/prompt-identity.js';
 import { CanonicalModel, type CanonicalModelT } from '../model-program/canonical.js';
-import { compile, compileJson, type CompileError, type CompileResult } from '../model-program/compile.js';
-import { addMechanism } from '../model-program/answer.js';
+import { compile, compileJson, normalise, quoteIn, type CompileError, type CompileResult } from '../model-program/compile.js';
+import { addMechanism, statesFigure } from '../model-program/answer.js';
 import { CANONICAL_JSON_SCHEMA, CANONICAL_SCHEMA_NAME, COMPLETION_PREFIX, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX } from './prompt.js';
 
 export const MAX_REPAIRS = 2;
@@ -35,7 +35,7 @@ export type DraftAttempt = {
   readonly ms: number;
 };
 export type DraftOutcome = {
-  /** The last schema-valid draft (compiling or not); null when no attempt returned one. */
+  /** The last schema-valid draft (compiling or not), as the compiler read it when `interpret` (a first draft's saved form); null when no attempt returned one. */
   readonly model: CanonicalModelT | null;
   readonly compiled: CompileResult | null;
   readonly attempts: readonly DraftAttempt[];
@@ -70,8 +70,12 @@ export function ledgeredResponsesCall(): ResponsesCall {
 /**
  * Draft → compile → (repair → compile) ≤ MAX_REPAIRS. `sourceText` is the person's own words (the brief), against which the
  * compiler checks every quote. A transport failure ends the loop with what it has; it is never retried here.
+ * `interpret` (a FIRST draft): the model returned, compiled, saved and sent back to the agent is the compiler's reading of
+ * the draft (`normalise` with their words: a structure figure their words do not state is their question), never the raw draft
+ * (buddy, #3709 r7). Completion takes the raw draft: it reads its own additions (`addMechanism`).
  */
-export async function draftCanonicalModel(brief: string | readonly InputMessage[], call: ResponsesCall, sourceText: string = typeof brief === 'string' ? brief : ''): Promise<DraftOutcome> {
+export async function draftCanonicalModel(brief: string | readonly InputMessage[], call: ResponsesCall, sourceText: string = typeof brief === 'string' ? brief : '',
+  opts: { readonly interpret?: boolean } = {}): Promise<DraftOutcome> {
   const input: InputMessage[] = typeof brief === 'string' ? [{ role: 'user', content: brief }] : [...brief];
   const attempts: DraftAttempt[] = [];
   let model: CanonicalModelT | null = null;
@@ -87,9 +91,10 @@ export async function draftCanonicalModel(brief: string | readonly InputMessage[
     if (out.text === null) { attempts.push({ attempt: a, errors: null, failed: `no output (${out.status ?? 'unknown'}${out.incomplete ? `: ${out.incomplete}` : ''})`, status: out.status, usage: out.usage, ms }); break; }
     let json: unknown;
     try { json = JSON.parse(out.text); } catch { attempts.push({ attempt: a, errors: null, failed: 'output is not JSON', status: out.status, usage: out.usage, ms }); break; }
-    const result = compileJson(json, { sourceText });
     const parsed = CanonicalModel.safeParse(json);
-    if (parsed.success) { model = parsed.data; compiled = result; }
+    const read = parsed.success && opts.interpret === true ? normalise(parsed.data, statesFigure(quoteIn(sourceText))) : undefined;
+    const result = read !== undefined ? compile(read, { sourceText }) : compileJson(json, { sourceText });
+    if (parsed.success) { model = read ?? parsed.data; compiled = result; }
     attempts.push({ attempt: a, errors: result.errors, status: out.status, usage: out.usage, ms });
     if (result.errors.length === 0 || a === MAX_REPAIRS) break;
     input.push({ role: 'assistant', content: out.text }, { role: 'user', content: repairMessage(result.errors) });

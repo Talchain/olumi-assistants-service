@@ -126,13 +126,22 @@ async function prepare(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs)
   const theirs = [...base.program.person_words, ...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])];
   const unquoted = args.ops.filter((o) => !quotedIn(o.quote, theirs));
   if (unquoted.length > 0) return refused('quote_not_in_their_words', 'Each edit quotes the person\'s exact words; copy them from what they wrote.', { ops: unquoted.map((o) => o.op) });
-  const edited = applyOps(base.program.canonical, args.ops);
-  if (!edited.ok) return refused('edit_not_applicable', edited.reason);
-  const words = [...new Set([...base.program.person_words, ...args.ops.map((o) => o.quote).filter((q) => !base.program.person_words.some((w) => quotedIn(q, [w])))])];
+  // Each edit on its own (batch 4 hiring: one edit with no op, a limit's measure, refused every answer with it): what cannot be
+  // applied is left off the card and said on it; the card, and so the approval, holds exactly the edits applied.
+  let editedModel = base.program.canonical;
+  const ops: ProgramOpT[] = [];
+  const notIncluded: string[] = [];
+  for (const op of args.ops) {
+    const r = applyOps(editedModel, [op]);
+    if (r.ok) { editedModel = r.model; ops.push(op); } else notIncluded.push(r.reason);
+  }
+  if (ops.length === 0) return refused('edit_not_applicable', notIncluded.join(' '));
+  const edited = { model: editedModel };
+  const words = [...new Set([...base.program.person_words, ...ops.map((o) => o.quote).filter((q) => !base.program.person_words.some((w) => quotedIn(q, [w])))])];
   // A measure they named that nothing works out yet: Olumi's drafter proposes its mechanism, on this same card.
   let model = edited.model;
   const fresh = new Set(edited.model.quantities.filter((q) => !base.program.canonical.quantities.some((b) => b.id === q.id)).map((q) => q.id));
-  for (const goalId of args.ops.flatMap((o) => (o.op === 'define_goal_measure' ? [o.goal_id] : []))) {
+  for (const goalId of ops.flatMap((o) => (o.op === 'define_goal_measure' ? [o.goal_id] : []))) {
     const done = await completeMechanism(model, goalId, words, ledgeredResponsesCall(), fresh, (q) => q !== null && quotedIn(q, words));
     if (done !== null) model = done.model;
   }
@@ -140,10 +149,12 @@ async function prepare(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs)
   if (next.evaluation.compiled.errors.length > 0) return refused('does_not_compile', next.evaluation.compiled.errors.slice(0, 3).map((e) => e.message).join(' '));
   const adds = additionsOf(edited.model, model);
   const p = deps.proposals.put(createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
-    base_graph_identity_hash: base.saved.graphHash, base_model_identity: base.saved.identity!, operations: [...operationsOf(args.ops), ...adds],
+    base_graph_identity_hash: base.saved.graphHash, base_model_identity: base.saved.identity!, operations: [...operationsOf(ops), ...adds],
     provenance: { authored_by: 'model_proposed', basis: args.basis }, validation: { admitted: true, loss_count: 0, refusals: [] },
-    public_label: args.public_label, living_model: livingModelOf(next.program) }));
-  return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: base.saved.graphHash, ops: args.ops,
+    public_label: notIncluded.length > 0 ? `${args.public_label} (not on this card: ${notIncluded.join(' ')})` : args.public_label,
+    living_model: livingModelOf(next.program) }));
+  return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: base.saved.graphHash, ops,
+    ...(notIncluded.length > 0 ? { not_included: notIncluded } : {}),
     ...(adds.length > 0 ? { olumi_adds: adds.map((o) => o.path) } : {}), would_show: runWords(next.run) });
 }
 

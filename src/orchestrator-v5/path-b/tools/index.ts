@@ -15,7 +15,8 @@
  * The adapters return outcomes and do not throw; anything that does throw (arguments a strict schema should have stopped,
  * a defect) ends the turn with the route's own handlers, as on the existing loop (`errorFunction: null`).
  */
-import { tool, type Tool } from '@openai/agents';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { ModelBehaviorError, tool, type FunctionTool, type Tool } from '@openai/agents';
 import { toolArgumentsAsSent } from '../../agent-lane/runtime/agent-loop.js';
 import type { AgentLaneMode, AgentToolContext } from '../../agent-lane/runtime/agent-tools.js';
 import { READ_CANONICAL_CONTEXT, ReadCanonicalContextParams, readCanonicalContext } from './context-tool.js';
@@ -28,6 +29,7 @@ import type { Relabelled } from '../living-model/kernel.js';
 import { NOTE_MAX, NOTE_ON_ITEM, NoteOnItemParams, noteOnItem } from './note-on-item.js';
 import { STRESS_TEST, StressTestParams, stressTest, type StressDeps } from './stress-tool.js';
 import { OFFER_PUBLIC_RESEARCH, OFFER_PUBLIC_RESEARCH_DESCRIPTION, OfferResearchParams, offerResearch, type ResearchDeps } from './research-tool.js';
+import { log } from '../../../utils/telemetry.js';
 import { OUTCOME_TRACE, refused, traceRow, type ToolOutcome, type TraceRow } from './outcome.js';
 import { applyProgramChange, isProgramProposal, ProgramChangeParams, proposeProgramChange, readProgramContext, runProgram } from '../../model-program-turn/program-tools.js';
 import { PROGRAM_TOOL_DESCRIPTIONS } from '../../core-route/instructions.js';
@@ -247,6 +249,35 @@ export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLa
 }
 
 /**
+ * A call whose arguments fail the tool's schema goes back to the model as that tool's own error, through the SDK's tool-error
+ * path (`errorFunction`), so it corrects its call in the same turn (batch 4 marketing r3–r5: the turn ended as a 502).
+ * The SDK redacts the input it hands the error function by default, so the call's arguments are kept for it here
+ * (`withSentArguments`): the failing fields (paths and the schema's words, never the values) are logged and named to the model.
+ * Any other failure still ends the turn, as before.
+ */
+const sentArguments = new AsyncLocalStorage<string>();
+const withSentArguments = <T extends FunctionTool<any, any, any>>(t: T): T =>
+  ({ ...t, invoke: (runContext, input, details) => sentArguments.run(input, () => t.invoke(runContext, input, details)) });
+type Issue = { readonly path: readonly PropertyKey[]; readonly message: string; readonly code?: string; readonly errors?: readonly (readonly Issue[])[] };
+/** Each failing field's path and the schema's words; inside an op, the branch its own `op` names (a union reports only "Invalid input"). */
+const issueWords = (issues: readonly Issue[], prefix: readonly PropertyKey[] = []): string[] => issues.flatMap((i) => {
+  const path = [...prefix, ...i.path];
+  const branch = i.code === 'invalid_union' ? i.errors?.find((b) => b.length > 0 && !b.some((e) => e.path[0] === 'op')) : undefined;
+  return branch !== undefined ? issueWords(branch, path) : [`${path.map(String).join('.') || '(root)'}: ${i.message}`];
+});
+const schemaErrorToModel = (name: string, schema: typeof ProgramChangeParams) => (_ctx: unknown, error: unknown): string => {
+  if (!(error instanceof ModelBehaviorError) || error.name !== 'InvalidToolInputError') throw error;
+  let fields: string[] = [];
+  try {
+    const parsed = schema.safeParse(JSON.parse(sentArguments.getStore() ?? ''));
+    if (!parsed.success) fields = issueWords(parsed.error.issues);
+  } catch { /* not JSON: the SDK's own parse error */ }
+  log.warn({ tool: name, fields }, 'program tool: arguments that fail the schema returned to the model');
+  return JSON.stringify(refused('invalid_arguments', `That ${name} call did not match its schema${fields.length > 0 ? ` (${fields.join('; ')})` : ''}. `
+    + 'Nothing was proposed. Call it again with every field as its description asks.'));
+};
+
+/**
  * A PROGRAM scenario's tools (alpha): the same names and approval contract, on the canonical model
  * (`model-program-turn/program-tools.ts`). Its model exists from the first turn, so there is no build; a change carries its
  * own Run, so apply_change reports that Run instead of starting the automatic one.
@@ -254,13 +285,13 @@ export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLa
 function programTools(deps: PathBToolDeps, ctx: PathBContext, read: Tool, record: (name: string, input: Record<string, unknown>, outcome: ToolOutcome, proposalId?: string) => string): Tool[] {
   return [
     read,
-    tool({
+    withSentArguments(tool({
       name: PROPOSE_CHANGE,
       description: PROGRAM_TOOL_DESCRIPTIONS.propose_change,
       parameters: ProgramChangeParams,
       execute: async (args) => record(PROPOSE_CHANGE, args, await proposeProgramChange(deps, ctx, args)),
-      errorFunction: null,
-    }),
+      errorFunction: schemaErrorToModel(PROPOSE_CHANGE, ProgramChangeParams),
+    })),
     tool({
       name: APPLY_CHANGE,
       description: PROGRAM_TOOL_DESCRIPTIONS.apply_change,

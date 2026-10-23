@@ -13,8 +13,8 @@ import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha256 } from '../../context/graph-hash.js';
 import { stableStringify } from '../../../orchestrator/context/stable-stringify.js';
 import { APPROXIMATE_FIGURE, type CanonicalModelT } from '../../model-program/canonical.js';
-import { compile, isStructuralConstant, normalise } from '../../model-program/compile.js';
-import { addMechanism, defineGoalMeasure, fillQuantity } from '../../model-program/answer.js';
+import { compile, isStructuralConstant, normalise, quoteIn } from '../../model-program/compile.js';
+import { addMechanism, defineGoalMeasure, fillQuantity, statesFigure } from '../../model-program/answer.js';
 import { project } from '../../model-program/project.js';
 import { simulate } from '../../model-program/simulate/simulate.js';
 import { CANONICAL_JSON_SCHEMA, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX } from '../prompt.js';
@@ -415,6 +415,21 @@ describe('the model-program turn on the real core route', () => {
     expect(stableStringify(read.data.run.goal_chance)).toBe(stableStringify(stored.goal_chance));
   });
 
+  it('buddy #3709 r7: a first draft is saved, receipted and read back AS THE COMPILER READ IT — a structure figure no one stated is their question, never known/structure/12', async () => {
+    const m = bakery();
+    m.quantities.push(q('current_output', 'loaf/week', { author: 'structure', value: 12 }), q('extra', 'loaf/week', { kind: 'derived', status: 'derived', author: 'olumi' }));
+    m.relations.push({ form: 'definition', id: 'extra_rel', defines: 'extra', op: 'sum', parts: [{ id: 'current_output', sign: 1 }], author: 'olumi', quote: null, ...at });
+    replies = [JSON.stringify(m)];
+    expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
+    const asked = { author: 'person', status: 'asked', value: null, question: 'What is "current output"?' };
+    expect(persisted!.living_model.canonical.quantities.find((x: Json) => x.id === 'current_output')).toMatchObject(asked);
+    vi.resetModules();
+    const tools = await import('../program-tools.js');
+    const read = await tools.readProgramContext({ dispatch, proposals: new ProposalStore() }, { scenario_id: SCENARIO, authenticated_user_id: null }) as Json;
+    expect((read.data.model as Json).quantities.find((x: Json) => x.id === 'current_output')).toMatchObject({ author: 'person', status: 'asked', question: 'What is "current output"?' });
+    expect(JSON.stringify(read.data.model)).not.toMatch(/"id":"current_output"[^}]*"author":"structure"/);
+  });
+
   it('several goals: each goal\'s own chance and the joint ride the Run\'s goal_chance unchanged through read, propose, apply and run', async () => {
     const brief = `${CLUB_BRIEF} And keep at least 320 members.`;
     const m = club();
@@ -475,11 +490,12 @@ describe('the model-program turn on the real core route', () => {
     expect(unverified).toContain('‘promo effect’ is 5 member / month / promotion (not found in your words)');
   });
 
-  it('DL 23 Oct (batch 1 score): an aim with no deadline reads "with no deadline", and a % target is said in %, never as its fraction', () => {
+  it('DL 23 Oct (batch 1 + batch 4): an aim with no deadline never states "no deadline" as a fact; it says none is recorded yet and asks; a % target is said in %', () => {
     const goalWords = (m: CanonicalModelT, text: string) => String(((evaluateCanonical(m, { sourceText: text, seed: 7 }).view as Json).goal_chance as Json).chance_words);
     // The bakery's aim states no window: read once with every option in effect, and said so.
     const noDeadline = goalWords(bakery(), BRIEF);
-    expect(noDeadline).toContain('‘sales’ being at least 380 loaf / week with no deadline');
+    expect(noDeadline).toContain('‘sales’ being at least 380 loaf / week with no deadline recorded yet');
+    expect(((evaluateCanonical(bakery(), { sourceText: BRIEF, seed: 7 }).view as Json).goal_chance as Json).notes).toContain('No deadline is recorded yet for ‘Reach 380 loaves a week’: is there one?');
     expect(noDeadline).not.toMatch(/from now/);
     // Contrast: the club's aim states three months, and says it.
     expect(goalWords(club(), CLUB_BRIEF)).toContain('at 3 months from now');
@@ -503,7 +519,7 @@ describe('the model-program turn on the real core route', () => {
     const deps = { dispatch, proposals: new ProposalStore() };
     const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] };
     const op = { op: 'define_goal_measure', goal_id: 'more_loaves', quantity: 'sales', cmp: '>=', frame: null,
-      target: { value: 380, low: null, high: null, range_kind: null }, window: { periods: 4, start: 0 }, quote: words };
+      target: { value: 380, low: null, high: null, range_kind: null }, window: { periods: 4, start: 0 }, leaves_out: [], quote: words };
     const propose = (o: Json) => proposeProgramChange(deps, ctx, ProgramChangeParams.parse({ public_label: 'Measure the aim', basis: 'their answer', ops: [o] })) as Promise<Json>;
     // Negatives first: a target or a deadline their words do not state is refused (never inferred), and nothing is proposed.
     // Codex r2 #3709: each figure in its own role: "within 4 weeks" is the deadline, never a target of 4; 380 loaves is never a deadline.
@@ -541,16 +557,69 @@ describe('the model-program turn on the real core route', () => {
 
     // Codex r2 #3709: a figure is theirs only as written for that quantity. A £ amount is bound by its currency prefix; a
     // figure in another unit (60 kg) or another quantity's (4 weeks, 2 months on a weekly model) is refused, never borrowed.
-    const define = (quote: string, target: number | null, window: number | null, quantity = 'sales') => defineGoalMeasure(m, { goal_id: 'more_loaves', quantity, cmp: quantity === 'spend' ? '<=' : '>=', frame: null,
-      target: target === null ? null : { value: target, low: null, high: null, range_kind: null }, window: window === null ? null : { periods: window, start: 0 }, quote });
+    const define = (quote: string, target: number | null, window: number | null, quantity = 'sales', leaves_out: string[] = []) => defineGoalMeasure(m, { goal_id: 'more_loaves', quantity, cmp: quantity === 'spend' ? '<=' : '>=', frame: null,
+      target: target === null ? null : { value: target, low: null, high: null, range_kind: null }, window: window === null ? null : { periods: window, start: 0 }, quote, leaves_out });
     const money = 'Success means spending at most £2,500 within 4 weeks.';
     expect(define(money, 2500, 4, 'spend')).toMatchObject({ ok: true });
     expect(((define(money, 2500, 4, 'spend') as { model: CanonicalModelT }).model.quantities.find((x) => x.id === 'more_loaves_target'))).toMatchObject({ value: 2500, unit: 'GBP', author: 'person' });
     expect(define(money, 4, 4, 'spend')).toMatchObject({ ok: false, reason: expect.stringMatching(/do not state that target/) });
     const mixed = 'At least 380 loaves a week, about 60 kg of bread, within 4 weeks.';
-    expect(define(mixed, 380, 4)).toMatchObject({ ok: true });
+    expect(define(mixed, 380, 4, 'sales', ['about 60 kg of bread'])).toMatchObject({ ok: true });
+    expect(define(mixed, 380, 4)).toMatchObject({ ok: false, reason: expect.stringMatching(/also give 60/) });
     expect(define(mixed, 60, 4)).toMatchObject({ ok: false, reason: expect.stringMatching(/do not state that target/) });
     expect(define('At least 380 loaves a week within 2 months.', 380, 2)).toMatchObject({ ok: false, reason: expect.stringMatching(/do not state that deadline in weeks/) });
+  });
+
+  it('DL 23 Oct (batch 4 marketing-r2): a measure never drops part of what they said — a second target goes in leaves_out and the chance names it: covers X · leaves out Y', () => {
+    const m = bakery();
+    m.goals = [{ ...m.goals[0]!, measure: null, question: 'What would success look like?' }];
+    const words = 'Success means selling at least 380 loaves a week and 50 new regulars within 4 weeks.';
+    const op = { goal_id: 'more_loaves', quantity: 'sales', cmp: '>=' as const, frame: null, target: { value: 380, low: null, high: null, range_kind: null }, window: { periods: 4, start: 0 }, quote: words };
+    // Their 50 new regulars cannot vanish: a measure that neither uses nor lists it is refused.
+    expect(defineGoalMeasure(m, { ...op, leaves_out: [] })).toMatchObject({ ok: false, reason: expect.stringMatching(/also give 50/) });
+    expect(defineGoalMeasure(m, { ...op, leaves_out: ['60 new regulars'] })).toMatchObject({ ok: false, reason: expect.stringMatching(/is not in their words/) });
+    const done = defineGoalMeasure(m, { ...op, leaves_out: ['50 new regulars'] });
+    expect(done.ok).toBe(true);
+    const dm = (done as { model: CanonicalModelT }).model;
+    expect(dm.left_out.at(-1)).toMatchObject({ id: 'more_loaves_leaves_out', text: '50 new regulars', author: 'person', quote: '50 new regulars', concerns: ['more_loaves'] });
+    expect(dm.goals[0]!.measure!.exclusions).toEqual(['more_loaves_leaves_out']);
+    const gc = (evaluateCanonical(dm, { sourceText: `${BRIEF}\n${words}`, seed: 7 }).view as Json).goal_chance as Json;
+    expect(gc.chance_words).toContain('leaving out what you said that is not in the model yet (‘50 new regulars’)');
+    expect((gc.notes as string[]).some((n) => /^Covers: ‘sales’ being at least 380 loaf \/ week .* · Leaves out: you said ‘50 new regulars’; it is not in the model yet$/.test(n))).toBe(true);
+    // Never "no measure" for something they stated (buddy, batches 3/4).
+    expect(JSON.stringify(gc)).not.toMatch(/regulars’[^.]*no measure/);
+    // A deadline they stated that the model cannot hold yet is named as theirs, and never asked for again.
+    const late = defineGoalMeasure(m, { ...op, window: null, leaves_out: ['50 new regulars', 'within 4 weeks'] });
+    expect(late.ok).toBe(true);
+    const lc = (evaluateCanonical((late as { model: CanonicalModelT }).model, { sourceText: `${BRIEF}\n${words}`, seed: 7 }).view as Json).goal_chance as Json;
+    expect((lc.notes as string[]).some((n) => n.endsWith('Leaves out: you said ‘50 new regulars’ and ‘within 4 weeks’; they are not in the model yet'))).toBe(true);
+    expect((lc.notes as string[]).some((n) => n.includes('is there one?'))).toBe(false);
+  });
+
+  it('DL 23 Oct (batch 4 hiring 5/5): an edit with no op is left off the card and said on it; the rest is proposed; the approval applies exactly the card', async () => {
+    replies = [JSON.stringify(bakery())];
+    await turn({ message: BRIEF });
+    const words = 'The oven would cost £2,500, and code quality is judged by review comments.';
+    const deps = { dispatch, proposals: new ProposalStore() };
+    const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] });
+    const price = { op: 'set_quantity', quantity_id: 'oven_price', value: 2500, low: null, high: null, range_kind: null, quote: 'The oven would cost £2,500' };
+    const limitMeasure = { op: 'define_goal_measure', goal_id: 'within_budget', quantity: { label: 'Review comments', unit: 'comment' }, cmp: '<=', frame: null, target: null, window: null, leaves_out: [], quote: 'code quality is judged by review comments' };
+    const propose = (ops: Json[], c = ctx()) => proposeProgramChange(deps, c, ProgramChangeParams.parse({ public_label: 'Your answers', basis: 'their answers', ops })) as Promise<Json>;
+    // All of it inapplicable: no card, only the words.
+    expect(await propose([limitMeasure])).toMatchObject({ status: 'refused', reason: 'edit_not_applicable', detail: 'I can\'t record a measure for a limit yet; it stays a note.' });
+    // Mixed: the card holds the price only, and says what it leaves off.
+    const c = ctx();
+    const card = await propose([price, limitMeasure], c);
+    expect(card.status, JSON.stringify(card)).toBe('ok');
+    expect(card.data.not_included).toEqual(['I can\'t record a measure for a limit yet; it stays a note.']);
+    const p = deps.proposals.get(card.data.proposal_id)!;
+    expect(p.public_label).toBe('Your answers (not on this card: I can\'t record a measure for a limit yet; it stays a note.)');
+    expect(p.operations.map((o) => o.path)).toEqual(['quantity:oven_price']);
+    const before = JSON.parse(JSON.stringify(persisted!.living_model.canonical)) as CanonicalModelT;
+    expect(await applyProgramChange(deps, c, card.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
+    const after = persisted!.living_model.canonical as CanonicalModelT;
+    expect(after.quantities.find((x) => x.id === 'oven_price')).toMatchObject({ value: 2500, author: 'person' });
+    expect(after.limits).toEqual(before.limits);
   });
 
   it('DL 23 Oct (mechanism completion, the alpha3 hiring read): the measure they name gets Olumi\'s mechanism on the same card; their 10% and deadline go back onto the aim; a figure only they know is ASKED, then the chance appears', async () => {
@@ -563,7 +632,7 @@ describe('the model-program turn on the real core route', () => {
     const deps = { dispatch, proposals: new ProposalStore() };
     const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] };
     const op = { op: 'define_goal_measure', goal_id: 'increase_productivity', quantity: { label: 'Features shipped per month', unit: 'feature/month' }, cmp: '>=', frame: 'change_rel',
-      target: 'productivity_increase_target', window: { periods: 'launch_horizon', start: 0 }, quote: words };
+      target: 'productivity_increase_target', window: { periods: 'launch_horizon', start: 0 }, leaves_out: [], quote: words };
     // Each attempt is its own turn (a turn shows one card).
     const propose = () => proposeProgramChange(deps, { ...ctx, turn_id: randomUUID() }, ProgramChangeParams.parse({ public_label: 'Measure productivity', basis: 'their answer', ops: [op] })) as Promise<Json>;
     // The drafter's whole model again, plus what works the measure out (synthetic Olumi figures, never a test sheet's).
@@ -620,6 +689,26 @@ describe('the model-program turn on the real core route', () => {
     const util = addMechanism(base, JSON.parse(reply((d) => { d.quantities.push(q('current_utilisation', '1', { author: 'structure', value: 1 })); })) as CanonicalModelT,
       'features_shipped_per_month', new Set(['features_shipped_per_month']), () => false);
     expect((util as { model: CanonicalModelT }).model.quantities.find((x) => x.id === 'current_utilisation')).toMatchObject({ status: 'asked', author: 'person', value: null });
+    // Codex r6, the same reading as the first draft: a 1 as the effect's base ("current features = 1") is their question, or
+    // their figure where its quote is in their words; a × 1 factor stays Olumi's constant.
+    const complete = (edit: (d: CanonicalModelT) => void, isTheirs: (quote: string | null) => boolean = () => false) =>
+      addMechanism(base, JSON.parse(reply(edit)) as CanonicalModelT, 'features_shipped_per_month', new Set(['features_shipped_per_month']), isTheirs) as { ok: boolean; model: CanonicalModelT };
+    const onBase = (quote: string | null, value: number) => (d: CanonicalModelT) => { d.quantities.push(q('current_features', 'feature/month', { author: 'structure', value, quote }));
+      (d.relations.find((r) => r.id === 'features_rel') as { base: string }).base = 'current_features'; };
+    expect(complete(onBase(null, 1)).model.quantities.find((x) => x.id === 'current_features')).toMatchObject({ status: 'asked', author: 'person', value: null });
+    // Their figure only where their words state it with its unit; their words alone ("the features we ship each month") are not a figure.
+    const told = `${words} We ship 4 features a month.`;
+    const theirsIn = (x: string | null) => x !== null && told.includes(x);
+    expect(complete(onBase('the features we ship each month', 1), theirsIn).model.quantities.find((x) => x.id === 'current_features')).toMatchObject({ status: 'asked', author: 'person', value: null });
+    expect(complete(onBase('We ship 4 features a month', 4), theirsIn).model.quantities.find((x) => x.id === 'current_features'))
+      .toMatchObject({ status: 'known', author: 'person', value: 4, quote: 'We ship 4 features a month', approval: 'proposed' });
+    const times1 = complete((d) => {
+      d.quantities.push(q('features_scale', '1', { author: 'structure', value: 1 }), q('features_base', 'feature/month', { kind: 'derived', status: 'derived', author: 'olumi' }));
+      d.relations.push({ form: 'definition', id: 'features_base_rel', defines: 'features_base', op: 'product', parts: [{ id: 'features_now', power: 1 }, { id: 'features_scale', power: 1 }], author: 'olumi', quote: null, ...at });
+      (d.relations.find((r) => r.id === 'features_rel') as { base: string }).base = 'features_base';
+    });
+    expect(times1.ok).toBe(true);
+    expect(times1.model.quantities.find((x) => x.id === 'features_scale')).toMatchObject({ author: 'structure', status: 'known', value: 1 });
     // Refused whole: a note naming a record that is not there (its sentence goes back for the drafter's two repairs first).
     await noCompletion('dangling note', reply((m) => { m.assumptions[m.assumptions.length - 1]!.concerns.push('no_such_record'); }), 3);
     // Only the measure this same answer created may be worked out: never a quantity already in the model.
@@ -921,30 +1010,68 @@ describe('the model-program turn on the real core route', () => {
     expect(chance()).toBeGreaterThan(first);
   });
 
-  it('Codex r4/r5 + buddy #3709: ONE structural admission on the first draft too — a figure labelled structure is Olumi\'s constant only by its meaning; any other is the person\'s question', () => {
+  it('Codex r4–r6 + buddy #3709: ONE structural admission on the first draft — 0 is the only additive identity, 1 only a product\'s factor or divisor; a figure in their words is theirs; any other is their question', () => {
     const saved = JSON.parse(readFileSync(new URL('./hiring-alpha3.saved.json', import.meta.url), 'utf8')) as { brief: string; canonical: CanonicalModelT };
     const m = JSON.parse(JSON.stringify(saved.canonical)) as CanonicalModelT;
+    const derived = (id: string, unit: string) => q(id, unit, { kind: 'derived', status: 'derived', author: 'olumi' });
+    const product = (id: string, defines: string, parts: [string, 1 | -1][]) => ({ form: 'definition' as const, id, defines, op: 'product' as const, parts: parts.map(([pid, power]) => ({ id: pid, power })), author: 'olumi' as const, quote: null, ...at });
     m.quantities.push(q('current_output', 'feature/month', { author: 'structure', value: 12 }), q('months_per_year', 'month/year', { author: 'structure', value: 12 }),
-      q('current_utilisation', '1', { author: 'structure', value: 1 }), q('no_extra_output', 'feature/month', { author: 'structure', value: 0 }),
-      q('extra_output', 'feature/month', { kind: 'derived', status: 'derived', author: 'olumi' }),
-      q('one', '1', { author: 'structure', value: 1 }), q('growth_factor', '1', { kind: 'derived', status: 'derived', author: 'olumi' }));
+      q('current_utilisation', '1', { author: 'structure', value: 1 }), q('no_extra_output', 'feature/month', { author: 'structure', value: 0 }), derived('extra_output', 'feature/month'),
+      // Codex r6: an unstated "current customers = 1" added in a sum is the person's figure, not an identity.
+      q('current_customers', 'customer', { author: 'structure', value: 1 }), q('new_customers', 'customer', { author: 'structure', value: 0 }), derived('customers', 'customer'),
+      // × 1 (the hiring read's declared normalisation: one output unit per developer) and the "per one" a product divides by.
+      q('output_per_developer', 'feature/month/developer', { author: 'structure', value: 1 }), derived('team_output', 'feature/month'),
+      q('one_customer', 'customer', { author: 'structure', value: 1 }), derived('output_per_customer', 'feature/month/customer'),
+      // The unit-free 1 a multiplier is built from ("1 + growth"), as 19 saved drafts in batches 1–4 use it.
+      q('one', '1', { author: 'structure', value: 1 }), q('growth', '1', { kind: 'coefficient', status: 'estimated', author: 'olumi', value: 0.1, low: 0, high: 0.2, range_kind: 'plausible', basis: 'Synthetic.' }), derived('growth_factor', '1'));
     m.relations.push({ form: 'definition', id: 'extra_output_rel', defines: 'extra_output', op: 'sum', parts: [{ id: 'no_extra_output', sign: 1 }, { id: 'current_output', sign: 1 }], author: 'olumi', quote: null, ...at },
-      { form: 'definition', id: 'growth_rel', defines: 'growth_factor', op: 'sum', parts: [{ id: 'one', sign: 1 }], author: 'olumi', quote: null, ...at });
+      { form: 'definition', id: 'customers_rel', defines: 'customers', op: 'sum', parts: [{ id: 'current_customers', sign: 1 }, { id: 'new_customers', sign: 1 }], author: 'olumi', quote: null, ...at },
+      product('team_output_rel', 'team_output', [['current_developers', 1], ['output_per_developer', 1]]),
+      product('per_customer_rel', 'output_per_customer', [['extra_output', 1], ['one_customer', -1]]),
+      { form: 'definition', id: 'growth_rel', defines: 'growth_factor', op: 'sum', parts: [{ id: 'one', sign: 1 }, { id: 'growth', sign: 1 }], author: 'olumi', quote: null, ...at });
     const n = new Map(normalise(m).quantities.map((x) => [x.id, x] as const));
-    // Asked: an integer no one stated, and the identity 1 in unit "1".
-    for (const id of ['current_output', 'current_utilisation']) expect(n.get(id), id).toMatchObject({ author: 'person', status: 'asked', value: null, question: `What is "${id.replace(/_/g, ' ')}"?` });
-    // Kept: an option's switch (0 hires until an option sets one), a calendar conversion, and a 0 that is a sum's algebraic base.
-    // ... and 1 as a multiplicative identity in a sum ("1 + growth"), the shape the saved drafts use (structure-impact.txt).
-    for (const id of ['developers_hired', 'tech_leads_hired', 'months_per_year', 'no_extra_output', 'one']) expect(n.get(id), id).toMatchObject({ author: 'structure', status: 'known' });
+    // Asked: an integer no one stated, the identity 1 in unit "1", and a 1 added in a sum.
+    for (const id of ['current_output', 'current_utilisation', 'current_customers']) expect(n.get(id), id).toMatchObject({ author: 'person', status: 'asked', value: null, question: `What is "${id.replace(/_/g, ' ')}"?` });
+    // Kept: an option's switch (0 hires until an option sets one), a calendar conversion, 0 as a sum's part, × 1, ÷ 1, and
+    // the unit-free 1 of "1 + growth".
+    for (const id of ['developers_hired', 'tech_leads_hired', 'months_per_year', 'no_extra_output', 'new_customers', 'output_per_developer', 'one_customer', 'one']) expect(n.get(id), id).toMatchObject({ author: 'structure', status: 'known' });
     // The compiler reads the question as one: what rests on it waits for the person, and no error asks the drafter to repair it.
     const c = compile(m, { sourceText: saved.brief });
     expect(c.errors).toEqual([]);
     expect(c.asks.map((a) => a.quantity_id)).not.toContain('months_per_year');
-    // The capacity shape: a zero base of an effect stays structural.
+    // The capacity shape: a zero base of an effect stays structural; a 1 as an effect's base is the person's figure.
     const cap = bakery();
-    cap.quantities.push(q('no_extra', 'loaf/week', { author: 'structure', value: 0 }), q('extra_sales', 'loaf/week', { kind: 'derived', status: 'derived', author: 'olumi' }));
-    cap.relations.push({ form: 'effect', id: 'extra_rel', defines: 'extra_sales', base: 'no_extra', terms: [{ driver: 'ovens_added', coefficient: 'sold_per_oven', author: 'olumi', quote: null, ...at }], author: 'olumi', quote: null, ...at });
+    cap.quantities.push(q('no_extra', 'loaf/week', { author: 'structure', value: 0 }), derived('extra_sales', 'loaf/week'),
+      q('sales_index', 'loaf/week', { author: 'structure', value: 1 }), derived('indexed_sales', 'loaf/week'));
+    cap.relations.push({ form: 'effect', id: 'extra_rel', defines: 'extra_sales', base: 'no_extra', terms: [{ driver: 'ovens_added', coefficient: 'sold_per_oven', author: 'olumi', quote: null, ...at }], author: 'olumi', quote: null, ...at },
+      { form: 'effect', id: 'indexed_rel', defines: 'indexed_sales', base: 'sales_index', terms: [{ driver: 'ovens_added', coefficient: 'sold_per_oven', author: 'olumi', quote: null, ...at }], author: 'olumi', quote: null, ...at });
     expect(normalise(cap).quantities.find((x) => x.id === 'no_extra')).toMatchObject({ author: 'structure', status: 'known', value: 0 });
+    expect(normalise(cap).quantities.find((x) => x.id === 'sales_index')).toMatchObject({ author: 'person', status: 'asked', value: null });
+    // A figure labelled structure is THEIRS only where their words STATE it, bound to its unit (the r2 target binding): a
+    // quote that is theirs but writes no such figure leaves it asked, as do words that are not theirs or no words at all.
+    const words = `${BRIEF} We'll run out of money soon.`;
+    cap.quantities.push(q('weekly_bake', 'loaf/week', { author: 'structure', value: 300, quote: 'We bake 300 loaves a week' }),
+      q('months_of_cash', 'month', { author: 'structure', value: 12, quote: 'We\'ll run out of money soon' }), q('ovens_said', 'oven', { author: 'structure', value: 2, quote: 'our two ovens' }));
+    const theirs = new Map(normalise(cap, statesFigure(quoteIn(words))).quantities.map((x) => [x.id, x] as const));
+    expect(theirs.get('weekly_bake')).toMatchObject({ author: 'person', status: 'known', value: 300, quote: 'We bake 300 loaves a week' });
+    expect(theirs.get('months_of_cash')).toMatchObject({ author: 'person', status: 'asked', value: null });
+    expect(theirs.get('ovens_said')).toMatchObject({ author: 'person', status: 'asked', value: null });
+    expect(normalise(cap).quantities.find((x) => x.id === 'weekly_bake')).toMatchObject({ author: 'person', status: 'asked', value: null });
+  });
+
+  it('batch 4 hiring-r1: a measured aim whose options wait on their own figures says THAT question, never "No aim has a measure yet"', () => {
+    const m = bakery();
+    // The aim is measured and calculable; the one option waits on its own setting (how many ovens it adds), as hiring-r1's
+    // options waited on their start times.
+    m.options = m.options.filter((o) => o.id === 'second_oven');
+    m.quantities = m.quantities.map((x) => (x.id === 'one_oven' ? { ...x, status: 'asked', value: null, quote: null, question: 'How many ovens would you add?' } : x));
+    const e = evaluateCanonical(m, { sourceText: BRIEF, seed: 7 });
+    expect(e.compiled.perGoal[0]).toMatchObject({ status: 'calculable', needs_measure: false });
+    expect(e.compiled.executable).toBeNull();
+    const cell = (id: string) => ((e.view as Json).options as Json[]).find((o) => o.option_id === id)!.cell;
+    expect(cell('second_oven').why).toBe('The chance waits for your answer: How many ovens would you add?');
+    expect(cell('second_oven').face).toBe('Not shown yet: needs your answer');
+    expect(cell('second_oven').why).not.toContain('No aim has a measure yet');
   });
 
   it('DL 23 Oct (units on cards): every card that can hold a figure carries its quantity\'s own unit, a question\'s too; a worked-out card none', () => {

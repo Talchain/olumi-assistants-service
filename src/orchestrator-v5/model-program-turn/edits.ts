@@ -43,6 +43,7 @@ export const ProgramOp = z.union([
     window: z.object({ periods: z.union([z.number().int().positive().describe('How many periods the window lasts, as their words state it.'),
       z.string().describe('The id of a quantity already in the model that holds the deadline they stated.')]),
       start: z.number().int().min(0).describe('Periods from now the window opens (0 = now).') }).strict().nullable().describe('The deadline their words state; null when they did not state one (By when? is then asked where it matters).'),
+    leaves_out: z.array(z.string()).describe('Each part of their words this measure does not cover (another target, or a deadline in units the model cannot hold), copied exactly from the quote; [] when it covers everything they said. It is named beside the chance as left out.'),
     quote }).strict(),
 ]);
 export type ProgramOpT = z.infer<typeof ProgramOp>;
