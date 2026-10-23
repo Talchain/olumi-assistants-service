@@ -3,8 +3,9 @@
  * reload use (`actionBarOf(actionFactsOf(…))`), over ONE scenario-graph read's own body, keeping only the actions a press on
  * the core route serves: a core press reaches the AI as the action's user line (`core-turn.ts`), and only the pre-mortem is
  * witnessed there (café, 23 Oct). An action core cannot serve is absent, never a dead button (`rank.ts`: an offer is present
- * only while its contract can be offered). Core writes no guidance history or pending carrier, so neither is read: the turn
- * and its reload rank the same read alike. None to show is no bar, so the panel keeps its method strip.
+ * only while its contract can be offered). Neither the guidance history nor the pending carrier is read, so the turn and its
+ * reload rank one read alike: while a card awaits approval the pre-mortem stays offered and the card stays held (the core
+ * route enforces approval itself). None to show is no bar, so the panel keeps its method strip.
  */
 import { readEvaluatedIdentityNodeIds } from '../agent-lane/admit-model.js';
 import type { ActionId } from '../agent-lane/actions/registry.js';
