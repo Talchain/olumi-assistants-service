@@ -67,6 +67,8 @@ export interface CoreTurnContract {
   readonly receipts: readonly CoreTurnReceipt[];
   readonly paused: { readonly proposal_id: string | null } | null;
   readonly error: CoreTurnError | null;
+  /** The panel's action bar (`action-bar.ts`), ranked from the turn's own final read; null when it offers nothing. */
+  readonly action_bar: unknown;
   readonly _agent?: Readonly<Record<string, unknown>>;
   readonly _provider_calls?: unknown;
 }
@@ -90,6 +92,7 @@ export interface CoreTurnContractInput {
   readonly receipts?: readonly CoreTurnReceipt[];
   readonly paused?: { readonly proposal_id: string | null } | null;
   readonly error?: CoreTurnError | null;
+  readonly actionBar?: unknown;
   readonly agent?: Readonly<Record<string, unknown>>;
   readonly providerCalls?: unknown;
 }
@@ -110,6 +113,7 @@ export function coreTurnContract(i: CoreTurnContractInput): CoreTurnContract {
     receipts: i.receipts ?? [],
     paused: i.paused ?? null,
     error: i.error ?? null,
+    action_bar: i.actionBar ?? null,
     ...(i.agent !== undefined ? { _agent: i.agent } : {}),
     ...(i.providerCalls !== undefined ? { _provider_calls: i.providerCalls } : {}),
   };

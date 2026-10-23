@@ -61,11 +61,13 @@ import type { Restructure } from '../orchestrator-v5/path-b/tools/goal-path.js';
 import { livingViewOf } from '../orchestrator-v5/path-b/living-model/view.js';
 import { runAsAgentSubturn } from '../orchestrator-v5/session/agent-subturn-context.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
+import { runWithTurnFence, unclaimedTurnFenceHandle, type TurnFenceHandle } from '../orchestrator-v5/session/turn-fence.js';
 import { parsePendingAction, PENDING_ACTIONS_PER_TURN_CAP, type PendingAction } from '../orchestrator-v5/session/pending-action.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
 import {
   appliedGraphWire, constructionDeadline, CORE_RUN_PRESS_WITHHELD, coreTurnCapabilities, coreTurnStores, coreTurnTools, graphReadyEmitter,
 } from '../orchestrator-v5/core-route/deps.js';
+import { coreActionBarOf } from '../orchestrator-v5/core-route/action-bar.js';
 import { CORE_ALIGNED_INSTRUCTIONS, draftArmOf, instructionsForMode } from '../orchestrator-v5/core-route/instructions.js';
 import {
   AGENT_TURN_CLAIM_WAIT, agentTurnRequestHash, challengeTargetOf, chipOperationOf, claimHashFor, claimTurnIdOf, isChiplessRetry,
@@ -121,6 +123,8 @@ interface SavedScenario {
   readonly run: CoreTurnRun | null;
   /** The selected Run, only while it is current and identified (what `readRecordedRun` binds a recovered Run to). */
   readonly currentRun?: { readonly runId: string; readonly graphHashAtRun: string; readonly computedAt: string };
+  /** The read's own body: what the panel's action bar is ranked from (`coreActionBarOf`), as the reload ranks it. */
+  readonly body: Rec;
 }
 
 function savedScenarioOf(read: { readonly status: number; readonly json: Rec }): SavedScenario {
@@ -139,7 +143,7 @@ function savedScenarioOf(read: { readonly status: number; readonly json: Rec }):
     runId: str(currentRead?.run_id), graphHashAtRun: str(currentRead?.computed_against_hash), computedAt: str(runState.computed_at),
   } : undefined;
   return {
-    status: read.status, graph, revision: str(json.graph_hash),
+    status: read.status, graph, revision: str(json.graph_hash), body: json,
     identity: isRec(json.graph_identity_hash) ? str(json.graph_identity_hash.value) : str(json.graph_identity_hash), briefText: json.brief_text,
     analysisState: isRec(json.analysis_state) ? json.analysis_state : null,
     analysisResult: isRec(json.analysis_result) ? json.analysis_result : undefined,
@@ -342,6 +346,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
           revision: after.revision, scenarioRevision: after.identity, graph: appliedGraphWire(after.graph),
           cards: await heldCardsOf(store, scenarioId, pending, after), run: after.run, analysisState: after.analysisState,
           receipts: collectTurnReceipts([forwarded.json]).map((r) => ({ ...r, authorised_by: 'person' as const })),
+          actionBar: coreActionBarOf(scenarioId, after.body),
           error: forwarded.status === 200 ? null : {
             code: str(refusal?.code) ?? str(forwarded.json.error) ?? str(forwarded.json.code) ?? 'CANVAS_EDIT_REFUSED',
             message: str(refusal?.message) ?? str(forwarded.json.message) ?? str(forwarded.json.detail) ?? 'That change could not be saved.',
@@ -388,7 +393,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         cards: await heldCardsOf(store, scenarioId, pending, now),
         run: now.run, analysisState: now.analysisState, ...(runPress ? { analysisResult: now.analysisResult } : {}),
         paused: paused != null ? { proposal_id: paused.proposal_id } : null, error: outcome === undefined ? null : RECORDED[outcome].error,
-        agent: { replayed: true }, providerCalls: recordedProviderCalls(),
+        actionBar: coreActionBarOf(scenarioId, now.body), agent: { replayed: true }, providerCalls: recordedProviderCalls(),
       }));
     };
 
@@ -443,12 +448,21 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       }
       catch (err) { log.warn({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'core-turn: claim release failed'); return false; }
     };
+    /**
+     * ⭐ STOP (DL 93d79c3e 09:40Z; Lenses on 50f76df0: a stopped core turn still committed). Once admitted (below) the turn holds
+     * its place in the scenario's fence, so an explicit Stop finds it and records its tombstone. Each graph write it makes then
+     * runs under that place (`fenced`): the register route commits it under the turn's handle, and the commit's own transaction
+     * refuses it once the turn is stopped (Codex r1 on #3704: never a check before the write). A claim that fails leaves an
+     * UNCLAIMED handle, so the write is refused, as on every other ingress (#759), never let through unfenced.
+     */
+    let fence: TurnFenceHandle | undefined;
+    const fenced = <T>(write: () => Promise<T>): Promise<T> => (fence === undefined ? write() : runWithTurnFence(fence, write));
     const readingDispatch: InternalDispatch = readCache.dispatch;
     const countingDispatch: InternalDispatch = async (path, b) => {
       const sendIt = async () => promoteRevisionConflictResponse(await readingDispatch(path, b));
       if (path.endsWith('/graph/register')) {
         writesDispatched += 1;
-        return undoRefusedWrite(sendIt);
+        return undoRefusedWrite(() => fenced(sendIt));
       }
       // A v2 turn can commit through several subdoors before a later refusal: its 409 cannot prove nothing was written.
       if (path === '/orchestrate/v2/turn') {
@@ -530,6 +544,14 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         && heldAtStart.some((h) => heldProposalId(h) === declinedProposal) ? declinedProposal : undefined;
       if ((approvedProposal !== undefined && press === undefined) || (declinedProposal !== undefined && !coreOwns && declinedCardOnly === undefined)) {
         return await refuseUnrun(409, 'CARD_NOT_WAITING', 'That change is no longer waiting for your approval. Nothing in your model was changed.');
+      }
+
+      if (typeof store.claimTurnFence === 'function') {
+        try { fence = (await store.claimTurnFence(scenarioId, String(turnId))) ?? unclaimedTurnFenceHandle(scenarioId, String(turnId)); }
+        catch (err) {
+          log.error({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'core-turn: fence claim threw; this turn is UNCLAIMED and its graph writes are refused');
+          fence = unclaimedTurnFenceHandle(scenarioId, String(turnId));
+        }
       }
 
       // ── THE TURN'S CONTEXT: the person's own words, the selection, the Challenge. ───────────────────────────────────────
@@ -769,6 +791,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         ...(programPayload !== undefined ? { modelProgram: programPayload } : {}),
         paused: paused !== undefined ? { proposal_id: paused.proposal_id } : null,
         error: noReply ? RECORDED.reply_empty.error : null,
+        actionBar: coreActionBarOf(scenarioId, after.body),
         // A refused or unavailable call names its typed reason (DL 22 Oct: which of Class 3's offers fired was not on the wire).
         agent: { mode: MODE, stopped_reason: result.stopped_reason, tool_calls: toolCallsOf(result), ...(result.sdk !== undefined ? { sdk: result.sdk } : {}) },
         providerCalls: recordedProviderCalls(),
