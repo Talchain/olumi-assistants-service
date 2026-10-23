@@ -1,4 +1,5 @@
-// model-program/executable.ts. S1 writes this file FIRST, exactly as below, and pushes it; S2 copies it byte-identical until S1's push exists.
+// model-program/executable.ts. The S1/S2 interface (DL spike interface, 23 Oct). S1 owns it; S2 imports it.
+// r2 (DL rulings on the seam, 23 Oct): every Quantity carries its READING, set by the compiler.
 export type Dist =
   | { kind: 'fixed'; value: number }
   | { kind: 'range'; low: number; high: number; mode?: number; basis: 'person_range' | 'olumi_estimate' };
@@ -6,7 +7,20 @@ export type Equation =
   | { form: 'definition'; op: 'sum' | 'difference' | 'product' | 'ratio'; parts: string[] }      // difference/ratio: parts[0] − / ÷ the rest
   | { form: 'effect'; base: string; terms: { coefficient: string; driver: string }[] };         // base + Σ coefficient × driver
 export type Stock = { start: string; inflows: string[]; outflows: string[] };                    // per period
-export type Quantity = { id: string; unit: string; dist?: Dist; equation?: Equation; stock?: Stock };
+/**
+ * READING CONVENTION (DL ruling on the S1/S2 seam, 23 Oct; S1 owns it, the compiler sets it).
+ *  - state: a BOUNDARY reading. S[0] is the initial value; S[t+1] = S[t] + flows(t). Stocks are state; so is anything derived
+ *    only from states and constants.
+ *  - flow: an INTERVAL reading. Interval t is computed from the start-of-t state. A stock's inflows and outflows are flows; so
+ *    is anything depending on a flow, or on a period-dated effect (an option set from a period after 0, or a risk effect).
+ * Goal and limit aggregation over a window { start_period: s, periods: p }:
+ *  - end:              a state reads S[s+p]; a flow reads interval s+p−1;
+ *  - sum, mean, every: a flow reads intervals s … s+p−1; a state reads boundaries s+1 … s+p.
+ * So "the stock after six months" is S[6] with window {0, 6}, and "revenue in months 6 to 8" is intervals 6, 7, 8 with
+ * window {6, 3}. The horizon `periods` always covers every window; never an extra period to fit a reading.
+ */
+export type Reading = 'state' | 'flow';
+export type Quantity = { id: string; unit: string; reading: Reading; dist?: Dist; equation?: Equation; stock?: Stock };
 // Exactly one of dist / equation / stock. An ASKED or UNKNOWN quantity never reaches the executable model: the compiler withholds the goals it feeds.
 export type Cmp = '>=' | '<=' | '>' | '<';
 export type Window = { start_period: number; periods: number };                                  // 0-based; window measured from the model's period 0

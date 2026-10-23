@@ -6,32 +6,49 @@
  *   - Common random numbers: every uncertain quantity is drawn ONCE per draw index, from its own stream keyed by (seed, id),
  *     and those draws are shared by ALL options. Option switches are never randomised.
  *   - Every goal, the joint and the limits read the SAME draws; the joint is counted draw by draw, never a product of marginals.
- *   - A `range` is drawn with CEE's existing range conversion, reused (`range-law.ts`, which cites mapper.ts).
- *   - Per period t = 0..periods−1: (1) the option's sets and the risk effects active at t apply; (2) every non-stock quantity
- *     is evaluated, in dependency order, from the stocks at t; (3) stock[t+1] = stock[t] + Σ inflows − Σ outflows.
- *   - `ratio` by zero makes that draw NaN; NaN never meets a goal or a limit, and the count is reported (`nan_draws`).
+ *   - A `range` is read with CEE's existing range conversion and its sign rule, reused (`range-law.ts`, which cites mapper.ts):
+ *     a Normal draw, the figure alone, or held (a plain Error: the compiler withholds what rests on it). A chance (a risk's
+ *     occurrence) is clipped to [0, 1].
+ *   - Time (DL ruling 1, 23 Oct; a quantity's `reading` is 'state' or 'flow'): a model of N periods has boundaries 0..N and
+ *     intervals 0..N−1. At each time k = 0..N, (1) the option's sets and the risk effects active at k apply, and (2) every
+ *     quantity is evaluated, in dependency order, from the stocks' boundary levels S[k]; then (3) S[k+1] = S[k] + Σ inflows −
+ *     Σ outflows, the flows of interval k. A STATE is read at boundaries, a FLOW over intervals:
+ *       - `end`: a state reads S[start + periods]; a flow reads interval start + periods − 1;
+ *       - `sum` / `mean` / `every`: a flow reads intervals start … start + periods − 1; a state reads boundaries
+ *         start + 1 … start + periods.
+ *     So the level after six months is {0, 6} on a state (S[6]); revenue in months 6–8 is {6, 3} on a flow (intervals 6–8).
+ *   - A nonfinite draw (NaN, e.g. a `ratio` by zero, or ±Infinity) is outside the model's domain, never a failed outcome
+ *     (DL ruling 3): any such draw in what a goal or limit reads withholds that chance, the joint (for a goal) or within_limits
+ *     (for a limit), and joint_within_limits, typed 'invalid_domain' with the count and the quantities. No draw is dropped.
  *   - Fixed inputs only: every draw is the same, the chance is exactly 0 or 1, and its precision is that point.
  *
  * Where the interface is silent, this file decides as follows (and throws a plain Error where no meaning can be given):
- *   - A stock's value at period t is its level at the start of t, before t's flows: period 0 reads `start`, period T reads the
- *     level after T periods of flows (so a reading after T periods needs periods ≥ T + 1).
  *   - Only stocks may close a loop: a same-period cycle (including one made by an option's set or a risk) throws.
  *   - An option set makes the quantity read its `to` quantity from `from_period` on; with several sets on one quantity the
  *     latest started one applies. A set on a stock throws (set its start or its flows instead).
- *   - A risk reads its occurrence and severity at its `from_period`, under the option (so a mitigation can lower the chance).
- *     It fires where the risk's own uniform draw is below the occurrence. On a non-stock quantity the effect applies to every
- *     period from `from_period`; on a stock it is one shock to the level at `from_period`, which then accumulates. An
- *     uncertain severity is drawn in every draw (its stream must not shift) but applied only where the risk fires.
- *   - A goal's target and a limit's bound are read at the window's last period. `every` holds when every period in the window
- *     holds; its aggregated value (for outcomes) is the window's worst period (min for > / >=, max for < / <=).
+ *   - A risk reads its occurrence and severity at time `from_period`, under the option (so a mitigation can lower the chance).
+ *     It fires where the risk's own uniform draw is below the occurrence. On a non-stock quantity the effect applies at every
+ *     time from `from_period`; on a stock it is one shock to the boundary level S[from_period], which then accumulates. An uncertain severity is drawn in every draw (its stream must not shift) but applied only where the
+ *     risk fires.
+ *   - A goal's target and a limit's bound are read where the window ends (its last boundary or interval). `every` holds when
+ *     every reading in the window holds; its aggregated value (for outcomes) is the worst one (min for > / >=, max for < / <=).
  *   - Drivers: each uncertain quantity the option's goals and limits depend on, and whose own draw the option uses (not one it
  *     sets from period 0), in model order. joint_if_low / joint_if_high are joint_within_limits over the bottom and top third
  *     of that quantity's draws.
  */
-import type { Aggregation, Cmp, ExecutableModel, Option, Quantity, Window } from '../executable.js';
+import type { Aggregation, Cmp, ExecutableModel, Option, Quantity, Reading, Window } from '../executable.js';
 import { standardNormals, uniforms } from './prng.js';
-import { rangeLaw, type NormalLaw } from './range-law.js';
-import type { Chance, OptionResult, RecordedDraw, SimResult } from './result.js';
+import { rangeLaw } from './range-law.js';
+import type { Chance, OptionResult, RecordedDraw, SimResult, Withheld } from './result.js';
+
+interface NormalLaw {
+  readonly centre: number;
+  readonly sd: number;
+  /** A chance's draws are clipped to [0, 1]. */
+  readonly chance: boolean;
+}
+/** A quantity's reading, as the compiler set it (executable.ts r2, S1). */
+export const readingOf = (q: Quantity): Reading => q.reading;
 
 export interface SimulateOptions {
   draws?: number;
@@ -119,21 +136,24 @@ function compile(model: ExecutableModel): Compiled {
     return i;
   };
   const ranged: { q: number; law: NormalLaw }[] = [];
-  const nodes = model.quantities.map((q, i): Node => compileNode(q, i, ref, ranged));
+  const chances = new Set(model.risks.map((r) => r.occurrence));
+  const nodes = model.quantities.map((q, i): Node => compileNode(q, i, ref, ranged, chances.has(q.id)));
   const stocks = nodes.flatMap((n, i) => (n.kind === 'stock' ? [i] : []));
 
-  const windowOf = (w: Window, where: string): [number, number] => {
+  /** The time indices a window reads: intervals start … start+periods−1 for a flow, boundaries start+1 … start+periods for a state. */
+  const windowOf = (w: Window, reading: Reading, where: string): [number, number] => {
     if (!wholeFrom(w.start_period, 0) || !wholeFrom(w.periods, 1) || w.start_period + w.periods > periods) {
-      throw new Error(`${where}: window from period ${w.start_period} for ${w.periods} periods is not inside periods 0..${periods - 1}`);
+      throw new Error(`${where}: window from period ${w.start_period} for ${w.periods} periods is not inside the model's ${periods} periods`);
     }
-    return [w.start_period, w.start_period + w.periods - 1];
+    return reading === 'state' ? [w.start_period + 1, w.start_period + w.periods] : [w.start_period, w.start_period + w.periods - 1];
   };
   const check = (id: string, quantity: string, cmp: Cmp, against: string, aggregation: Aggregation, w: Window, kind: string): Check => {
     const where = `${kind} "${id}"`;
     if (!CMPS.has(cmp)) throw new Error(`${where}: unknown comparison "${cmp}"`);
     if (!AGGS.has(aggregation)) throw new Error(`${where}: unknown aggregation "${aggregation}"`);
-    const [first, last] = windowOf(w, where);
-    return { id, q: ref(quantity, where), ref: ref(against, where), cmp, aggregation, first, last };
+    const q = ref(quantity, where);
+    const [first, last] = windowOf(w, readingOf(model.quantities[q]!), where);
+    return { id, q, ref: ref(against, where), cmp, aggregation, first, last };
   };
   if (model.goals.length === 0) throw new Error('the model has no goals to simulate');
   const goals = model.goals.map((g) => check(g.id, g.quantity, g.cmp, g.target, g.aggregation, g.window, 'goal'));
@@ -162,8 +182,11 @@ function unique(ids: readonly string[], what: string): void {
   }
 }
 
-function compileNode(q: Quantity, i: number, ref: (id: string, where: string) => number, ranged: { q: number; law: NormalLaw }[]): Node {
+function compileNode(q: Quantity, i: number, ref: (id: string, where: string) => number, ranged: { q: number; law: NormalLaw }[],
+  chance: boolean): Node {
   const where = `quantity "${q.id}"`;
+  if (q.reading !== 'state' && q.reading !== 'flow') throw new Error(`${where}: reading must be 'state' or 'flow'`);
+  if (q.stock !== undefined && q.reading !== 'state') throw new Error(`${where} is a stock, so it reads as a state`);
   const forms = [q.dist, q.equation, q.stock].filter((x) => x !== undefined).length;
   if (forms !== 1) throw new Error(`${where} must have exactly one of dist, equation, stock (it has ${forms})`);
   if (q.dist !== undefined) {
@@ -172,7 +195,10 @@ function compileNode(q: Quantity, i: number, ref: (id: string, where: string) =>
       return { kind: 'fixed', value: q.dist.value };
     }
     if (q.dist.kind !== 'range') throw new Error(`${where}: unknown dist kind`);
-    ranged.push({ q: i, law: rangeLaw(q.dist) });
+    const reading = rangeLaw(q.dist, { chance });
+    if (reading.kind === 'held') throw new Error(`${where} is held: ${reading.reason}; the compiler must withhold what rests on it`);
+    if (reading.kind === 'point') return { kind: 'fixed', value: reading.value };
+    ranged.push({ q: i, law: { centre: reading.centre, sd: reading.sd, chance } });
     return { kind: 'drawn', slot: ranged.length - 1 };
   }
   if (q.equation !== undefined) {
@@ -252,11 +278,15 @@ function drawInputs(c: Compiled, seed: number, draws: number): Inputs {
     drawn: c.ranged.map(({ q, law }) => {
       const z = standardNormals(seed, `q:${c.ids[q]}`, draws);
       for (let i = 0; i < draws; i++) z[i] = law.centre + law.sd * z[i]!;
+      if (law.chance) for (let i = 0; i < draws; i++) z[i] = clip01(z[i]!);
       return z;
     }),
     riskU: c.risks.map((r) => uniforms(seed, `r:${r.id}`, draws)),
   };
 }
+
+/** A chance is clipped to [0, 1] (DL ruling, 23 Oct). NaN stays NaN. */
+const clip01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);
 
 function activeSet(sets: readonly { from: number; to: number }[] | undefined, t: number): number {
   let to = -1;
@@ -292,21 +322,24 @@ function evaluate(node: Exclude<Node, StockNode>, vals: Float64Array, row: numbe
 const below = (cmp: Cmp): boolean => cmp === '<=' || cmp === '<';
 const holds = (x: number, cmp: Cmp, y: number): boolean => (cmp === '>=' ? x >= y : cmp === '<=' ? x <= y : cmp === '>' ? x > y : x < y);
 
-function aggregate(k: Check, vals: Float64Array, n: number): number {
-  if (k.aggregation === 'end') return vals[k.last * n + k.q]!;
+/**
+ * A condition's aggregated value in one draw, or `null` when a value it reads (in its window, or its target or bound) is
+ * NaN or ±Infinity: a nonfinite draw is outside the model's domain, never a failed outcome (DL ruling 3, 23 Oct).
+ */
+function aggregate(k: Check, vals: Float64Array, n: number): number | null {
   const every = k.aggregation === 'every', worstIsMax = below(k.cmp);
   let acc = every ? (worstIsMax ? -Infinity : Infinity) : 0;
-  for (let t = k.first; t <= k.last; t++) {
+  for (let t = k.aggregation === 'end' ? k.last : k.first; t <= k.last; t++) {
     const v = vals[t * n + k.q]!;
-    if (Number.isNaN(v)) return NaN;
-    acc = !every ? acc + v : worstIsMax ? Math.max(acc, v) : Math.min(acc, v);
+    if (!Number.isFinite(v)) return null;
+    acc = k.aggregation === 'end' ? v : !every ? acc + v : worstIsMax ? Math.max(acc, v) : Math.min(acc, v);
   }
   return k.aggregation === 'mean' ? acc / (k.last - k.first + 1) : acc;
 }
 
+/** Type-7 quantiles of every draw (none is dropped: a condition with a nonfinite draw is withheld before this). */
 function quantiles(a: Float64Array): { p10: number; p50: number; p90: number } {
-  const s = a.filter((x) => !Number.isNaN(x)).sort();
-  if (s.length === 0) return { p10: NaN, p50: NaN, p90: NaN };
+  const s = a.slice().sort();
   const at = (p: number): number => {
     const h = (s.length - 1) * p, lo = Math.floor(h);
     return lo + 1 < s.length && h > lo ? s[lo]! + (h - lo) * (s[lo + 1]! - s[lo]!) : s[lo]!;
@@ -325,75 +358,95 @@ function terciles(inputs: Inputs, draws: number): { low: Int32Array; high: Int32
 
 function runOption(c: Compiled, p: Plan, inputs: Inputs, draws: number, thirds: { low: Int32Array; high: Int32Array }[],
   record: ReadonlySet<number>, recorded: RecordedDraw[]): OptionResult {
-  const n = c.nodes.length, P = c.periods;
-  const vals = new Float64Array(P * n);
+  const n = c.nodes.length, N = c.periods;
+  /** Every quantity at each time k = 0..N, evaluated from the stocks' boundary levels S[k]: boundaries for a state, intervals for a flow. */
+  const vals = new Float64Array((N + 1) * n);
+  /** Each stock's boundary level S[k] for the time being evaluated. */
   const level = new Float64Array(n);
   const fired = new Int8Array(c.risks.length);
+  const severity = new Float64Array(c.risks.length);
   const goalMet = c.goals.map(() => new Uint8Array(draws));
   const goalAgg = c.goals.map(() => new Float64Array(draws));
+  const goalBad = c.goals.map(() => 0), limitBad = c.limits.map(() => 0);
+  /** Which quantities a condition read a nonfinite value from (its own, or its target or bound). */
+  const goalBadIds = c.goals.map(() => new Set<string>()), limitBadIds = c.limits.map(() => new Set<string>());
   const joint = new Uint8Array(draws), within = new Uint8Array(draws), both = new Uint8Array(draws);
-  let nanDraws = 0;
+  let jointBad = 0, withinBad = 0, bothBadDraws = 0;
 
   for (let d = 0; d < draws; d++) {
     fired.fill(-1);
-    for (let t = 0; t < P; t++) {
-      const row = t * n;
-      // (1) + (2): sets and risk effects active at t, then every quantity in dependency order from the stocks at t.
+    for (let k = 0; k <= N; k++) {
+      const row = k * n;
+      // (1) + (2): the sets and risk effects active at k, then every quantity in dependency order from the stocks at S[k].
       for (const q of p.order) {
         const node = c.nodes[q]!;
         let v: number;
-        if (node.kind === 'stock') v = t === 0 ? vals[row + node.start]! : level[q]!;
+        if (node.kind === 'stock') v = k === 0 ? vals[row + node.start]! : level[q]!;
         else {
-          const to = activeSet(p.sets[q], t);
+          const to = activeSet(p.sets[q], k);
           v = to >= 0 ? vals[row + to]! : evaluate(node, vals, row, inputs, d);
         }
         for (const r of p.risksOn[q]!) {
           const risk = c.risks[r]!;
-          if (t < risk.from || (node.kind === 'stock' && t !== risk.from)) continue;
+          // A stock takes its one shock at boundary from_period, which the next boundaries then carry.
+          if (k < risk.from || (node.kind === 'stock' && k !== risk.from)) continue;
           if (fired[r]! < 0) {
-            const chance = vals[risk.from * n + risk.occurrence]!;
+            // Read once, at from_period, under this option. A chance is clipped to [0, 1].
+            const chance = clip01(vals[row + risk.occurrence]!);
             fired[r] = Number.isNaN(chance) ? 2 : inputs.riskU[r]![d]! < chance ? 1 : 0;
+            severity[r] = vals[row + risk.severity]!;
           }
           if (fired[r] === 2) v = NaN;
-          else if (fired[r] === 1) {
-            const s = vals[risk.from * n + risk.severity]!;
-            v = risk.add ? v + s : v * s;
-          }
+          else if (fired[r] === 1) v = risk.add ? v + severity[r]! : v * severity[r]!;
         }
         vals[row + q] = v;
       }
-      // (3) stock[t+1] = stock[t] + Σ inflows − Σ outflows, all read at t.
-      for (const q of c.stocks) {
-        const s = c.nodes[q] as StockNode;
-        let next = vals[row + q]!;
-        for (const i of s.inflows) next += vals[row + i]!;
-        for (const o of s.outflows) next -= vals[row + o]!;
-        level[q] = next;
+      // (3) S[k+1] = S[k] + Σ inflows − Σ outflows, every flow read in interval k (from S[k]).
+      if (k < N) {
+        for (const q of c.stocks) {
+          const s = c.nodes[q] as StockNode;
+          let next = vals[row + q]!;
+          for (const i of s.inflows) next += vals[row + i]!;
+          for (const o of s.outflows) next -= vals[row + o]!;
+          level[q] = next;
+        }
       }
     }
 
-    let allGoals = 1, allLimits = 1, nan = false;
+    let allGoals = 1, allLimits = 1, badGoal = false, badLimit = false;
     c.goals.forEach((g, i) => {
       const a = aggregate(g, vals, n), target = vals[g.last * n + g.ref]!;
-      if (Number.isNaN(a) || Number.isNaN(target)) nan = true;
+      if (a === null || !Number.isFinite(target)) {
+        goalBad[i]!++; badGoal = true;
+        if (a === null) goalBadIds[i]!.add(c.ids[g.q]!);
+        if (!Number.isFinite(target)) goalBadIds[i]!.add(c.ids[g.ref]!);
+        return;
+      }
       const met = holds(a, g.cmp, target) ? 1 : 0;
       goalMet[i]![d] = met;
       goalAgg[i]![d] = a;
       allGoals &= met;
     });
-    for (const l of c.limits) {
+    c.limits.forEach((l, i) => {
       const a = aggregate(l, vals, n), bound = vals[l.last * n + l.ref]!;
-      if (Number.isNaN(a) || Number.isNaN(bound)) nan = true;
+      if (a === null || !Number.isFinite(bound)) {
+        limitBad[i]!++; badLimit = true;
+        if (a === null) limitBadIds[i]!.add(c.ids[l.q]!);
+        if (!Number.isFinite(bound)) limitBadIds[i]!.add(c.ids[l.ref]!);
+        return;
+      }
       allLimits &= holds(a, l.cmp, bound) ? 1 : 0;
-    }
+    });
+    if (badGoal) jointBad++;
+    if (badLimit) withinBad++;
+    if (badGoal || badLimit) bothBadDraws++;
     joint[d] = allGoals;
     within[d] = allLimits;
     both[d] = allGoals & allLimits;
-    if (nan) nanDraws++;
 
     if (record.has(d)) {
       const values: Record<string, number[]> = {};
-      c.ids.forEach((id, q) => { values[id] = Array.from({ length: P }, (_, t) => vals[t * n + q]!); });
+      c.ids.forEach((id, q) => { values[id] = Array.from({ length: N + 1 }, (_, k) => vals[k * n + q]!); });
       const risks_fired: Record<string, boolean | null> = {};
       c.risks.forEach((r, i) => { risks_fired[r.id] = fired[i] === 1 ? true : fired[i] === 0 ? false : null; });
       recorded.push({ option_id: p.option_id, draw: d, values, risks_fired });
@@ -406,20 +459,28 @@ function runOption(c: Compiled, p: Plan, inputs: Inputs, draws: number, thirds: 
     const chance = k / draws;
     return { chance, precision_95: stochastic ? wilson95(k, draws) : [chance, chance] };
   };
+  const invalid = (bad: number, quantities: readonly string[]): Withheld =>
+    ({ withheld: { reason: 'invalid_domain', count: bad, quantities: [...new Set(quantities)] } });
+  const badGoalIds = goalBadIds.flatMap((x) => [...x]);
+  const badLimitIds = limitBadIds.flatMap((x) => [...x]);
+  const jointW = jointBad > 0 ? invalid(jointBad, badGoalIds) : chanceOf(count(joint));
+  const withinW = withinBad > 0 ? invalid(withinBad, badLimitIds) : chanceOf(count(within));
+  const bothBad = jointBad > 0 || withinBad > 0;
   const meanOver = (a: Uint8Array, idx: Int32Array): number => idx.reduce((s, i) => s + a[i]!, 0) / idx.length;
   return {
     option_id: p.option_id,
-    per_goal: c.goals.map((g, i) => ({ goal_id: g.id, ...chanceOf(count(goalMet[i]!)) })),
-    joint: chanceOf(count(joint)),
-    within_limits: chanceOf(count(within)),
-    joint_within_limits: chanceOf(count(both)),
-    outcomes: c.goals.map((g, i) => ({ goal_id: g.id, ...quantiles(goalAgg[i]!) })),
-    drivers: thirds.length === 0 || Math.floor(draws / 3) === 0 ? [] : p.drivers.map((slot) => ({
+    per_goal: c.goals.map((g, i) => ({ goal_id: g.id,
+      ...(goalBad[i]! > 0 ? invalid(goalBad[i]!, [...goalBadIds[i]!]) : chanceOf(count(goalMet[i]!))) })),
+    joint: jointW,
+    within_limits: withinW,
+    joint_within_limits: bothBad ? invalid(bothBadDraws, [...badGoalIds, ...badLimitIds]) : chanceOf(count(both)),
+    outcomes: c.goals.map((g, i) => ({ goal_id: g.id,
+      ...(goalBad[i]! > 0 ? invalid(goalBad[i]!, [...goalBadIds[i]!]) : quantiles(goalAgg[i]!)) })),
+    drivers: bothBad || thirds.length === 0 || Math.floor(draws / 3) === 0 ? [] : p.drivers.map((slot) => ({
       quantity: c.ids[c.ranged[slot]!.q]!,
       joint_if_low: meanOver(both, thirds[slot]!.low),
       joint_if_high: meanOver(both, thirds[slot]!.high),
     })),
-    nan_draws: nanDraws,
   };
 }
 
