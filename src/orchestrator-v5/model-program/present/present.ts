@@ -76,7 +76,7 @@ export interface PresentAsk {
   readonly unit: string;
   readonly question: string;
 }
-/** How to try a value for a goal's one asked quantity: the model compiled with it filled (S1 `fillQuantity` then `compile`). */
+/** How to try a value for a goal's one asked quantity: the model compiled with it set to the value tried. */
 export interface TippingProbe {
   readonly build: (value: number) => ExecutableModel | null;
   /** The asked quantity's natural domain, in its unit. Default from 0 upward, with no upper end. */

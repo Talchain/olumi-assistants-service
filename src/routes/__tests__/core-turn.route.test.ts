@@ -946,11 +946,11 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       const sentTools = Object.fromEntries((calls[0]!.tools as Json[]).filter((t) => t.type === 'function').map((t) => [t.name, t.description]));
       expect(sentTools).toEqual(PROGRAM_TOOL_DESCRIPTIONS);
       for (const [name, description] of Object.entries(sentTools)) expect(description).not.toBe((TOOL_DESCRIPTIONS as Record<string, string>)[name]);
-      // DL 23 Oct (batch 3: the agent never used the op): propose_change, as SENT, describes define_goal_measure. Spelled here.
+      // Simplify v1 (S2): propose_change, as SENT, asks for the change in words and the ids to remove. Spelled here.
       const sentSha = (name: string) => createHash('sha256').update(String(sentTools[name]), 'utf8').digest('hex');
-      expect(String(sentTools.propose_change)).toContain('define_goal_measure: when they say how an aim with no measure is measured (a coaching question’s record_id), the quantity it is about (its id, or a new one by the name and unit they give), the comparison, and the target and deadline only as their words state them; a target or deadline already in the model is given by its id; what they did not state stays null and is asked; anything else their words state that this measure does not cover (another target, a deadline the model cannot hold) goes in leaves_out, copied exactly, and is named beside the chance. '
-        + 'Olumi then proposes, on the same card, what works that measure out, each part marked as Olumi’s. Put every edit in ONE propose_change: a second proposal in the same turn is refused. ');
-      expect(sentSha('propose_change')).toBe('8cfaf20c57a2632f8bb6a94b5d06cee9438a94ddc9574384eea430963b119eda');
+      expect(String(sentTools.propose_change)).toContain('give request, the whole change in plain words with their exact words for every figure of theirs, and remove, the ids from read_canonical_context of anything they asked to remove ([] for none). '
+        + 'Olumi’s drafter writes the updated model, and the card shows every change, before and after. Anything left out without being listed, or a figure of theirs not in their words, is refused. ');
+      expect(sentSha('propose_change')).toBe('0dd7084f03bf6c3da41f68061c414b6786106626b433de68d6d427ef229581cb');
       // The read the agent got back: the Run's goal_chance exactly as stored (each goal's own line, the joint, the notes).
       const output = (calls[1]!.input as Json[]).find((i) => i.type === 'function_call_output' && i.call_id === 'read')!.output;
       const read = JSON.parse(typeof output === 'string' ? output : JSON.stringify(output)) as Json;
@@ -961,7 +961,10 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
 
     it('DL 23 Oct (served capacity: a new Run unseen until reload): a program reply names the Run its turn stored in `run`, and only that Run', async () => {
       await savedProgram();
-      const set = { public_label: 'Oven price £2,500', basis: 'their answer', ops: [{ op: 'set_quantity', quantity_id: 'oven_price', value: 2500, low: null, high: null, range_kind: null, quote: 'The oven would cost £2,500' }] };
+      const updated = bakery();
+      updated.quantities = updated.quantities.map((x) => (x.id === 'oven_price' ? { ...x, status: 'known' as const, value: 2500, question: null, quote: 'The oven would cost £2,500' } : x));
+      canonicalDraft = JSON.stringify(updated);
+      const set = { public_label: 'Oven price £2,500', basis: 'their answer', request: 'The oven price is £2,500.', remove: [] };
       outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'p1', args: set }], [{ type: 'message', text: 'I prepared the oven price; approve its card.' }]];
       const proposed = (await typed('The oven would cost £2,500.')).json() as Json;
       expect(proposed.cards as Json[]).toHaveLength(1);
@@ -980,10 +983,13 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
 
     it('S3 (batch 2 mrr-r3): two program proposals in one turn still leave the person ONE card to approve; the second is refused with its way on', async () => {
       await savedProgram();
-      const set = (quantity_id: string, value: number, quote: string, public_label: string) => ({ public_label, basis: 'their answer',
-        ops: [{ op: 'set_quantity', quantity_id, value, low: null, high: null, range_kind: null, quote }] });
-      outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'p1', args: set('oven_price', 2500, 'The oven would cost £2,500', 'Oven price £2,500') },
-        { type: 'function_call', name: 'propose_change', call_id: 'p2', args: set('base_sales', 320, 'we bake 320 loaves a week now', 'Base sales 320') }],
+      // The drafter's updated model for whichever proposal runs: the oven price, in their words.
+      const updated = bakery();
+      updated.quantities = updated.quantities.map((x) => (x.id === 'oven_price' ? { ...x, status: 'known' as const, value: 2500, question: null, quote: 'The oven would cost £2,500' } : x));
+      canonicalDraft = JSON.stringify(updated);
+      const set = (request: string, public_label: string) => ({ public_label, basis: 'their answer', request, remove: [] });
+      outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'p1', args: set('The oven price is £2,500.', 'Oven price £2,500') },
+        { type: 'function_call', name: 'propose_change', call_id: 'p2', args: set('Base sales are 320 a week now.', 'Base sales 320') }],
       [{ type: 'message', text: 'I prepared the oven price; approve its card and I will do the rest next.' }]];
       const r = await typed('The oven would cost £2,500 and we bake 320 loaves a week now.');
       expect(r.statusCode, r.body).toBe(200);
@@ -998,8 +1004,11 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
 
     it('S3 (batch 4 marketing r3–r5): a propose_change whose arguments fail its schema goes back to the model as a tool error; its retry gives ONE card, never a 502', async () => {
       await savedProgram();
-      const good = { public_label: 'Oven price £2,500', basis: 'their answer', ops: [{ op: 'set_quantity', quantity_id: 'oven_price', value: 2500, low: null, high: null, range_kind: null, quote: 'The oven would cost £2,500' }] };
-      const bad = { ...good, ops: [{ ...good.ops[0], value: 'two and a half thousand' }] };
+      const updated = bakery();
+      updated.quantities = updated.quantities.map((x) => (x.id === 'oven_price' ? { ...x, status: 'known' as const, value: 2500, question: null, quote: 'The oven would cost £2,500' } : x));
+      canonicalDraft = JSON.stringify(updated);
+      const good = { public_label: 'Oven price £2,500', basis: 'their answer', request: 'The oven price is £2,500.', remove: [] };
+      const bad = { ...good, remove: 'two and a half thousand' };
       outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'bad', args: bad }],
         [{ type: 'function_call', name: 'propose_change', call_id: 'good', args: good }], [{ type: 'message', text: 'I prepared the oven price; approve its card.' }]];
       const r = await typed('The oven would cost £2,500.');
@@ -1010,9 +1019,10 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       const back = (calls[1]!.input as Json[]).find((i) => i.type === 'function_call_output' && i.call_id === 'bad')!.output;
       expect(JSON.stringify(back)).toContain('invalid_arguments');
       // It names the failing field, never its value, so the model knows what to correct.
-      expect(JSON.stringify(back)).toContain('ops.0.value');
+      expect(JSON.stringify(back)).toContain('remove: ');
       expect(JSON.stringify(back)).not.toContain('two and a half thousand');
-      expect(calls).toHaveLength(3);
+      // Three agent calls and ONE drafter call, for the good proposal's whole updated model.
+      expect(calls.map((c) => (c.text?.format?.name === 'canonical_model' ? 'drafter' : 'agent'))).toEqual(['agent', 'agent', 'drafter', 'agent']);
     });
 
     /** The instructions the provider received on one typed turn of a saved program (the model-program instructions). */
