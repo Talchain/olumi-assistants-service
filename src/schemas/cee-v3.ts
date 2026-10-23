@@ -423,6 +423,10 @@ export const NodeV3 = z.object({
    * removes that one member (`goal-reading-write.ts`); CEE-owned (`field-safety.ts`); in the analysis hash (Batch C gap 2:
    * a change to it stales a stored Run, though it changes only what may be SAID about one); a malformed value is absence.
    */
+  /** Host-compiled reasons this target's calculation is withheld; the stated target itself remains intact. */
+  goal_rests_on: z.array(z.object({
+    id: z.string().min(1), reason: z.string().min(1), applies_to: z.array(z.string()).optional(),
+  }).strict()).min(1).optional(),
   goal_target_basis: z.object({
     quantity_frame: z.enum(['level', 'change']),
     target_frame: z.enum(['level', 'change_abs', 'change_rel']),

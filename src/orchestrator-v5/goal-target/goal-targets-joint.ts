@@ -1,3 +1,4 @@
+import { goalDependencyCauses, goalDependencyWords } from '../admission/target-testability.js';
 /**
  * ⭐ RECOVERY BATCH C — SEVERAL TARGETS: EACH TARGET'S OWN CHANCE, AND THE CHANCE OF MEETING THEM ALL ON THE SAME DRAWS
  * (Batch 0 change-goal decision rulings 15–17 and 22; amendments 5–6; DL amendment 22:15Z: C includes the minimum joint AND).
@@ -277,6 +278,9 @@ export function goalTargetsBlockOf(args: {
   }
   const ordered = [...conditions.filter((c) => c.role === 'target'), ...conditions.filter((c) => c.role === 'limit')];
   const targets = ordered.filter((c) => c.role === 'target');
+  const model = isRec(args.graph) && isRec(args.graph.living_model) ? args.graph.living_model : undefined;
+  const currentAims = Array.isArray(model?.aims) ? model.aims.filter(isRec).filter(a => a.status === 'current').map(a => a.id) : [];
+  const dependencyHeld = new Set([...targets.map(t => t.node_id), ...currentAims].filter(id => goalDependencyCauses(args.graph, id).length > 0));
   // ⛔ RE-SCOPE 2 (R5-5 (b); DL ruling): a stated TARGET the Run did not send (no row, so no threshold reached the engine) is
   // never left out of a joint that claims every target — the joint waits, as for a figure not preserved.
   const unsentTargets = stored.filter((r) => typeof r.constraint_id === 'string' && targetIds.has(r.constraint_id)
@@ -308,7 +312,7 @@ export function goalTargetsBlockOf(args: {
   // threshold. An option without one is named, never filled in. The joint covers the targets only; each limit keeps its reason.
   const storedTargetRows = stored.filter((r) => r.role === GOAL_TARGET_ROLE);
   // A LIMIT sent on another scale or comparison is no part of this joint (it is named as left out); a TARGET must be exact.
-  const forecastMode = targetIds.size === 2 && targets.length === 2 && unsupported.length === 0 && !unnamed
+  const forecastMode = dependencyHeld.size === 0 && targetIds.size === 2 && targets.length === 2 && unsupported.length === 0 && !unnamed
     && ![...targetIds].some((id) => strictLostIds.has(id) || figureLostIds.has(id)) && unsentTargets.length === 0 && olumiBase.size === 0
     && args.optionIds.some((id) => isRec(recordOf.get(id)?.target_forecast));
   const forecastOf = (id: string): { forecast: CohortForecast; marginal: Map<string, { p: number; n: number }>; joint: { p: number; n: number } } | null => {
@@ -342,7 +346,7 @@ export function goalTargetsBlockOf(args: {
   const comparedFor = (constraintId: string): string[] => args.optionIds.filter((id) => !(sq?.fromTargets.has(constraintId) === true && id === sq.id));
 
   const upstream = isRec(args.envelope) ? goalFiguresWithheldWarnings(args.envelope) : [];
-  const notes: string[] = [];
+  const notes: string[] = [...dependencyHeld].map(id => goalDependencyWords(args.graph, id));
   const limitNotes = new Set<string>();
   const causes = new Map<string, { reason: string; clauses: Set<string>; notes: Set<string>; options?: readonly string[] }>();
   const recordCause = (c: GoalCondition, note: string, code: unknown, reason: string, options?: readonly string[]) => {
@@ -356,7 +360,7 @@ export function goalTargetsBlockOf(args: {
   const retainedIds = new Set(unresolvedRetainedLimits(args.graph).map((r) => r.constraint_id));
   const targetWarnings = (t: GoalCondition) => upstream.filter((w) =>
     !Array.isArray(w.constraint_ids) || w.constraint_ids.length === 0 || w.constraint_ids.includes(t.constraint_id));
-  const refusedTargets = new Set(targets.filter((t) => (args.primaryRefused && t.node_id === args.primaryGoalId)
+  const refusedTargets = new Set(targets.filter((t) => dependencyHeld.has(t.node_id) || (args.primaryRefused && t.node_id === args.primaryGoalId)
     || !sent.some((r) => r.constraint_id === t.constraint_id)).map((t) => t.constraint_id));
   for (const c of ordered) {
     if (forecastMode && c.role === 'target') continue;
@@ -473,7 +477,8 @@ export function goalTargetsBlockOf(args: {
       && compared.every((id) => perTarget.every((t) => Object.hasOwn(t.pct_by_option, id))) ? { frechet_line: frechetLine(targets.length) } : {}),
   });
   let joint: GoalJoint;
-  if (forecastMode) {
+  if (dependencyHeld.size > 0) joint = withheld('condition_withheld');
+  else if (forecastMode) {
     const pct: Record<string, number> = {};
     const rounding: Record<string, GoalChanceDisplayRounding> = {};
     for (const [id, f] of figures) {

@@ -1,3 +1,4 @@
+import { assertTargetHeld } from './assert-target-held.js';
 import { describe, expect, it } from 'vitest';
 import { EventRiskV1, type EventRiskV1T } from '../../../../schemas/event-risk.js';
 import { GraphV3 } from '../../../../schemas/cee-v3.js';
@@ -233,8 +234,8 @@ describe('Olumi occurrence is converted to the declared LM goal window', () => {
     const mapped = mapLivingModel(model);
     const graph = projectCorePostimageForPersistence(GraphV3.parse({ ...mapped.graph, living_model: model }));
     const goal = graph.nodes.find((n) => n.kind === 'goal')!;
-    expect(goal.goal_threshold_raw).toBeUndefined();
-    expect(goalTargetBasisOf(goal)).toBeUndefined();
+    assertTargetHeld(graph, 'gp', model.aims[0]!.target!.value!);
+    expect(goalTargetBasisOf(goal)).toMatchObject({ period_months: 6 });
     expect(goal.goal_target_basis?.period_months).toBe(6);
     expect(riskOccurrenceWindowMonths(graph)).toBe(6);
     expect(mapped.withheld).toContainEqual({ id: 'gp', reason: 'chance_rests_on_withheld' });

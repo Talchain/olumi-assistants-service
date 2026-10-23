@@ -1,3 +1,4 @@
+import { assertTargetHeld } from './assert-target-held.js';
 /**
  * TRACK 2 F1 (21 Oct 2026), CEE half: a person's definitions ("total = UK + EU; revenue = total × price") through the
  * real mapper, the core persistence projection, the Run snapshot loader and `run_analysis`, up to the request PLoT
@@ -53,17 +54,17 @@ async function requestTheRunSends(name: string, model: LivingModelT): Promise<Re
 
 /**
  * A negative row, checked at both ends (the twin of F2's, codex integration review 3: accepting any readiness error never
- * reached the threshold). At the source, the mapper's goal carries no threshold. At the Run, the outcome is exactly the
- * one named: refused with those readiness codes, or sent with no threshold.
+ * reached the threshold). At the source, the mapper preserves the target and records its dependency hold. At the Run, the outcome is exactly the
+ * one named: refused with those readiness codes, or sent retaining the target and its hold. A producer-supplied chance is still denied.
  */
 async function noChanceSent(name: string, model: LivingModelT, run: 'sent' | 'ORPHAN_NODE,NO_PATH_TO_GOAL' | 'NO_PATH_TO_GOAL'): Promise<void> {
-  const goal = (mapLivingModel(model).graph.nodes as Rec[]).find((n) => n.kind === 'goal')!;
-  expect(goal, name).not.toHaveProperty('goal_threshold_raw');
-  expect(goal, name).not.toHaveProperty('goal_threshold');
+  const compiled = mapLivingModel(model).graph;
+  const goal = (compiled.nodes as Rec[]).find((n) => n.kind === 'goal')!;
+  assertTargetHeld(compiled, String(goal.id), model.aims.find(a => a.id === goal.id)?.target?.value ?? undefined);
   const sent = await requestTheRunSends(name, model).then((r) => r, (e: Error) => e.message);
   if (run !== 'sent') expect(sent, name).toBe(`Persisted graph is not analysis-ready: ${run}`);
   else if (typeof sent === 'string') expect.fail(`${name}: expected the Run to reach PLoT, got "${sent}"`);
-  else expect(goalOf(sent), name).not.toHaveProperty('goal_threshold_raw');
+  else assertTargetHeld(sent.graph, sent.goal_node_id, goal.goal_threshold_raw);
 }
 
 const node = (r: Rec, id: string) => (r.graph.nodes as Rec[]).find((n) => n.id === id)!;
@@ -102,7 +103,8 @@ describe('Track 2 F1: a defined quantity reaches the engine as its definition, w
 
   it('CONTROL (unchanged): the breakdown written only as exact links still withholds the chance (exact_not_drawable)', async () => {
     expect(reasons(F1_EXACT_LINKS)).toContain('rev:chance_rests_on_withheld');
-    expect(goalOf(await requestTheRunSends('exact-links', F1_EXACT_LINKS)).goal_threshold_raw).toBeUndefined();
+    const sent = await requestTheRunSends('exact-links', F1_EXACT_LINKS);
+    assertTargetHeld(sent.graph, sent.goal_node_id, F1_EXACT_LINKS.aims[0]!.target!.value!);
   });
 
   it('NEGATIVE: a missing component is refused by name, never filled: a part with no level, or a definition that leaves one out', async () => {

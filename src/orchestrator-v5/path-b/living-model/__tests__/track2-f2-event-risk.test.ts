@@ -1,3 +1,4 @@
+import { assertTargetHeld } from './assert-target-held.js';
 /**
  * TRACK 2 F2 (21 Oct 2026), CEE half: an event that may happen within a window ("a 5–15% chance our key supplier fails
  * within 12 months"), stated on the core living model, through the real mapper, the stored projection and the Run
@@ -50,21 +51,20 @@ async function requestTheRunSends(name: string, model: LivingModelT): Promise<Re
 
 /**
  * A negative row, checked at both ends (codex integration review, 21 Oct, item 3: the old helper accepted any error and so
- * never reached the threshold). At the source, the mapper's goal carries no threshold, whatever the Run then does. At
+ * never reached the threshold). At the source, the mapper preserves the target and records a hold, whatever the Run then does. At
  * the Run, the outcome is exactly the one named: refused with that readiness code (never any error), or sent with no
- * threshold in the payload.
+ * target and its hold in the payload; the licence must deny a producer-supplied chance.
  */
 async function noChanceSent(name: string, model: LivingModelT, run: 'NO_PATH_TO_GOAL' | 'ORPHAN_NODE' | 'sent'): Promise<void> {
   expect(LivingModel.safeParse(model).success, `${name} is a valid living model`).toBe(true);
-  const goal = (mapLivingModel(model).graph.nodes as Rec[]).find((n) => n.kind === 'goal')!;
-  expect(goal, name).not.toHaveProperty('goal_threshold_raw');
-  expect(goal, name).not.toHaveProperty('goal_threshold');
+  const compiled = mapLivingModel(model).graph;
+  const goal = (compiled.nodes as Rec[]).find((n) => n.kind === 'goal')!;
+  assertTargetHeld(compiled, String(goal.id), model.aims.find(a => a.id === goal.id)?.target?.value ?? undefined);
   const sent = await requestTheRunSends(name, model).then((r) => r, (e: Error) => e.message);
   if (run !== 'sent') expect(sent, name).toBe(`Persisted graph is not analysis-ready: ${run}`);
   else if (typeof sent === 'string') expect.fail(`${name}: expected the Run to reach PLoT, got "${sent}"`);
   else {
-    expect(node(sent, sent.goal_node_id), name).not.toHaveProperty('goal_threshold_raw');
-    expect(node(sent, sent.goal_node_id), name).not.toHaveProperty('goal_threshold');
+    assertTargetHeld(sent.graph, sent.goal_node_id, goal.goal_threshold_raw);
   }
 }
 
@@ -201,7 +201,7 @@ describe('Track 2 F2: an event risk reaches the engine as event_risk.v1, with it
       const graph = mapLivingModel(m).graph;
       expect((graph.edges as Rec[]).find((e) => e.id === 'cost_gp'), name).toMatchObject({ from: 'dual_sourcing', to: 'gp' });
       expect((graph.nodes as Rec[]).map((n) => n.id), name).not.toContain('dual_source__on');
-      expect((graph.nodes as Rec[]).find((n) => n.kind === 'goal'), name).not.toHaveProperty('goal_threshold_raw');
+      assertTargetHeld(graph, String((graph.nodes as Rec[]).find(n => n.kind === 'goal')!.id));
     }
     // In place today, both options set the same level, so the Run is refused before PLoT whatever this rule does.
     await noChanceSent('costed-half-switch', COSTED_HALF_SWITCH, 'sent');
