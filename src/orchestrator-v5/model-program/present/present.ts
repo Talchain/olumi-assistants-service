@@ -60,8 +60,6 @@ export interface PresentGoal {
   readonly status: 'calculable' | 'asks' | 'withheld';
   readonly reasons: readonly string[];
   readonly asks: readonly string[];
-  /** The parts of the person's aim this measure does not cover, in their words (S1 `excludes`): named beside its chance. */
-  readonly excludes?: readonly string[];
 }
 /** S1's `LimitOutcome`, with the limit's label: every limit, checked or not. */
 export interface PresentLimit {
@@ -96,6 +94,8 @@ export interface PresentInput {
   readonly asks?: readonly PresentAsk[];
   /** Aims left out of the chance because they have no measure yet, by label (S1 `joint.leaves_out`). */
   readonly leaves_out?: readonly string[];
+  /** The model's left-out records (what it does not represent), in their own words, with what each concerns. */
+  readonly left_out?: readonly { readonly text: string; readonly concerns: readonly string[] }[];
   /** Per withheld goal id: how to probe its one asked quantity. */
   readonly tipping?: Readonly<Record<string, TippingProbe>>;
   /** The Run's own record. Absent: `run` is null. */
@@ -305,12 +305,10 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   /** Options and risks the compiler left out: said in the words of every chance, with their reasons in the notes. */
   const notInRun = (model.withheld ?? []).filter((w) => w.kind === 'option' || w.kind === 'risk');
   const sayable = [...goalWords.values(), ...limitWords].every((w) => w !== undefined);
-  // What the chance does not cover, every time: aims with no measure, and what the person said that a measured aim's measure
-  // leaves out, as what they said (never "no measure" or "no deadline" for something they stated: buddy, batches 3/4).
-  const said = given.flatMap((g) => g.excludes ?? []);
   const leftOut = ((input.leaves_out ?? []).length > 0 ? `, leaving out ${listWords(input.leaves_out!.map(q))}, which ${input.leaves_out!.length === 1 ? 'has' : 'have'} no measure yet` : '')
-    + (said.length > 0 ? `, leaving out what you said that is not in the model yet (${listWords(said.map(q))})` : '')
     + (notInRun.length > 0 ? `, without ${listWords(notInRun.map((w) => `the ${w.kind} ${q(w.label)}`))}, which ${notInRun.length === 1 ? 'is' : 'are'} not in this run` : '');
+  const covered = model.goals.flatMap((g) => (goalWords.get(g.id) !== undefined ? [goalWords.get(g.id)!] : []));
+  const notCovered = [...(input.leaves_out ?? []), ...(input.left_out ?? []).map((r) => r.text)];
   const jointWords = sayable
     ? `${listWords(model.goals.map((g) => goalWords.get(g.id)!))}${limitWords.length > 0 ? `, while ${listWords(limitWords as string[])}` : ''}${leftOut}`
     : undefined;
@@ -412,11 +410,11 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       ? [`${q(allGoals.find((x) => x.goal_id === g.goal_id)?.label ?? g.goal_id)} with ${q(optionLabel.get(o.option_id) ?? o.option_id)} is not shown: in ${g.withheld.count.toLocaleString('en-GB')} of ${result.draws.toLocaleString('en-GB')} simulated draws ${listWords(g.withheld.quantities.map((id) => q(label(id) ?? id)))} could not be worked out.`]
       : []))),
     ...waiting.map((g) => `${q(g.label)} is not in the chance yet: ${g.asks.length > 0 ? listWords(g.asks.map((id) => askOf.get(id)?.question ?? q(id))) : g.reasons.join(' ')}`),
-    // The 11 Oct decision (:74): a chance says what it covers and what it leaves out.
-    ...given.filter((g) => (g.excludes ?? []).length > 0 && goalWords.get(g.goal_id) !== undefined)
-      .map((g) => `Covers: ${goalWords.get(g.goal_id)!} · Leaves out: you said ${listWords(g.excludes!.map(q))}; ${g.excludes!.length === 1 ? 'it is' : 'they are'} not in the model yet`),
-    // Asked only where nothing they said is left out: a deadline they stated is named above, never asked for again.
-    ...model.goals.filter((g) => g.no_deadline === true && (given.find((x) => x.goal_id === g.id)?.excludes ?? []).length === 0)
+    // The 11 Oct decision (:74): what the chance covers (the measured aims it uses) and what it leaves out (aims with no
+    // measure, the model's left-out records); never a claim that it covers everything.
+    ...(covered.length > 0 && notCovered.length > 0 ? [`Covers: ${listWords(covered)} · Leaves out: ${listWords(notCovered.map(q))}`] : []),
+    // Asked only where nothing left out concerns the aim: a deadline they stated and the model cannot hold is never asked again.
+    ...model.goals.filter((g) => g.no_deadline === true && !(input.left_out ?? []).some((r) => r.concerns.includes(g.id)))
       .map((g) => `No deadline is recorded yet for ${q(allGoals.find((x) => x.goal_id === g.id)?.label ?? g.id)}: is there one?`),
     ...notInRun.map((w) => `The ${w.kind} ${q(w.label)} is not in this run: ${w.reason}`),
     ...(uncheckedLine !== undefined ? [stop(uncheckedLine)] : []),

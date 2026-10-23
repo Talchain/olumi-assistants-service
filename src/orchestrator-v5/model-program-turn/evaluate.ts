@@ -101,10 +101,8 @@ export function evaluateCanonical(model: CanonicalModelT, opts: { readonly sourc
   const projection = project(model, compiled, opts.brief !== undefined ? { brief: opts.brief } : {});
   const labelOf = new Map(normalise(model).goals.map((g) => [g.id, g.label] as const));
   // Aims with no measure yet are left out of the chance (said in `leaves_out`), never a goal that waits.
-  const leftOutText = new Map(model.left_out.map((r) => [r.id, r.text] as const));
   const goals: PresentGoal[] = compiled.perGoal.filter((p) => !p.needs_measure)
-    .map((p) => ({ goal_id: p.goal_id, label: labelOf.get(p.goal_id) ?? p.goal_id, status: p.status, reasons: p.reasons, asks: p.asks,
-      ...(p.excludes.length > 0 ? { excludes: p.excludes.map((id) => leftOutText.get(id) ?? id) } : {}) }));
+    .map((p) => ({ goal_id: p.goal_id, label: labelOf.get(p.goal_id) ?? p.goal_id, status: p.status, reasons: p.reasons, asks: p.asks }));
   const asks: PresentAsk[] = compiled.asks.map((a) => ({ quantity_id: a.quantity_id, label: a.label, unit: a.unit, question: a.question }));
   const tipping: Record<string, TippingProbe> = Object.fromEntries(goals.filter((g) => g.status === 'asks' && g.asks.length === 1)
     .map((g) => [g.goal_id, probeFor(model, g.goal_id, g.asks[0]!, opts.sourceText)] as const));
@@ -116,7 +114,8 @@ export function evaluateCanonical(model: CanonicalModelT, opts: { readonly sourc
   }
   const sim = simulate(x, { seed: opts.seed, draws: opts.draws ?? RUN_DRAWS });
   // A limit, option or risk left out of this run is said by S2's present itself (S1's `executable.withheld`, r3).
-  const view = presentAnalysisView({ model: x, result: sim, quantities: quantityMeta(model, compiled, x), goals, asks, leaves_out, tipping });
+  const view = presentAnalysisView({ model: x, result: sim, quantities: quantityMeta(model, compiled, x), goals, asks, leaves_out, tipping,
+    left_out: model.left_out.map((r) => ({ text: r.text, concerns: r.concerns })) });
   return { compiled, sim, projection, view };
 }
 
