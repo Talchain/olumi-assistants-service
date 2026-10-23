@@ -1,0 +1,484 @@
+{
+  "aims": [
+    {
+      "id": "mrr",
+      "text": "reach £100k MRR within 6 months",
+      "party": null,
+      "quote": "reach £100k MRR within 6 months",
+      "source": "user",
+      "status": "current",
+      "target": {
+        "low": null,
+        "high": null,
+        "unit": "£ per month",
+        "value": 100000,
+        "source": null,
+        "by_when": "within 6 months",
+        "current": null,
+        "baseline": null,
+        "quantity": "MRR",
+        "period_by": null,
+        "reference": "today",
+        "comparator": ">=",
+        "change_kind": null,
+        "period_kind": "at_end",
+        "current_unit": null,
+        "period_months": 6,
+        "current_source": null,
+        "period_read_on": null,
+        "period_deadline": null
+      },
+      "defined_as": null
+    },
+    {
+      "id": "churn",
+      "text": "keeping monthly churn under 4%",
+      "party": null,
+      "quote": "keeping monthly churn under 4%",
+      "source": "user",
+      "status": "current",
+      "target": {
+        "low": null,
+        "high": null,
+        "unit": "%",
+        "value": 4,
+        "source": null,
+        "by_when": "within 6 months",
+        "current": null,
+        "baseline": null,
+        "quantity": "monthly churn",
+        "period_by": null,
+        "reference": "today",
+        "comparator": "<",
+        "change_kind": null,
+        "period_kind": "over_period",
+        "current_unit": null,
+        "period_months": 6,
+        "current_source": null,
+        "period_read_on": null,
+        "period_deadline": null
+      },
+      "defined_as": null
+    }
+  ],
+  "links": [
+    {
+      "id": "features_acquisition",
+      "to": "new_mrr",
+      "from": "features_price",
+      "party": null,
+      "quote": null,
+      "effect": {
+        "sd": null,
+        "low": 0,
+        "form": "range",
+        "high": 10000,
+        "sign": "+",
+        "unit": "£ per month",
+        "value": 2000,
+        "estimate_by": null
+      },
+      "source": "olumi"
+    },
+    {
+      "id": "ads_acquisition",
+      "to": "new_mrr",
+      "from": "advertising",
+      "party": null,
+      "quote": null,
+      "effect": {
+        "sd": null,
+        "low": 0,
+        "form": "range",
+        "high": 15000,
+        "sign": "+",
+        "unit": "£ per month",
+        "value": 3000,
+        "estimate_by": null
+      },
+      "source": "olumi"
+    },
+    {
+      "id": "acquisition_mrr",
+      "to": "mrr",
+      "from": "new_mrr",
+      "party": null,
+      "quote": null,
+      "effect": {
+        "sd": null,
+        "low": 0,
+        "form": "range",
+        "high": 6,
+        "sign": "+",
+        "unit": "£ per month",
+        "value": 3,
+        "estimate_by": null
+      },
+      "source": "olumi"
+    },
+    {
+      "id": "price_mrr",
+      "to": "mrr",
+      "from": "price",
+      "party": null,
+      "quote": null,
+      "effect": {
+        "sd": null,
+        "low": 0,
+        "form": "range",
+        "high": 2000,
+        "sign": "+",
+        "unit": "£ per month",
+        "value": 300,
+        "estimate_by": null
+      },
+      "source": "olumi"
+    },
+    {
+      "id": "price_churn",
+      "to": "churn",
+      "from": "price",
+      "party": null,
+      "quote": null,
+      "effect": {
+        "sd": null,
+        "low": 0,
+        "form": "range",
+        "high": 0.5,
+        "sign": "+",
+        "unit": "%",
+        "value": 0.1,
+        "estimate_by": null
+      },
+      "source": "olumi"
+    },
+    {
+      "id": "features_churn",
+      "to": "churn",
+      "from": "features_price",
+      "party": null,
+      "quote": null,
+      "effect": {
+        "sd": null,
+        "low": -2,
+        "form": "range",
+        "high": 0,
+        "sign": "-",
+        "unit": "%",
+        "value": -0.5,
+        "estimate_by": null
+      },
+      "source": "olumi"
+    },
+    {
+      "id": "churn_mrr",
+      "to": "mrr",
+      "from": "churn",
+      "party": null,
+      "quote": null,
+      "effect": {
+        "sd": null,
+        "low": -15000,
+        "form": "range",
+        "high": -100,
+        "sign": "-",
+        "unit": "£ per month",
+        "value": -3000,
+        "estimate_by": null
+      },
+      "source": "olumi"
+    },
+    {
+      "id": "features_cost",
+      "to": "cost",
+      "from": "features_price",
+      "party": null,
+      "quote": null,
+      "effect": {
+        "sd": null,
+        "low": 5000,
+        "form": "range",
+        "high": 30000,
+        "sign": "+",
+        "unit": "£",
+        "value": 15000,
+        "estimate_by": null
+      },
+      "source": "olumi"
+    },
+    {
+      "id": "ads_cost",
+      "to": "cost",
+      "from": "advertising",
+      "party": null,
+      "quote": null,
+      "effect": {
+        "sd": null,
+        "low": 5000,
+        "form": "range",
+        "high": 25000,
+        "sign": "+",
+        "unit": "£",
+        "value": 15000,
+        "estimate_by": null
+      },
+      "source": "olumi"
+    },
+    {
+      "id": "delay_acquisition",
+      "to": "new_mrr",
+      "from": "release_delay",
+      "party": null,
+      "quote": null,
+      "effect": {
+        "sd": null,
+        "low": -1500,
+        "form": "range",
+        "high": 0,
+        "sign": "-",
+        "unit": "£ per month",
+        "value": -300,
+        "estimate_by": null
+      },
+      "source": "olumi"
+    },
+    {
+      "id": "retention_churn",
+      "to": "churn",
+      "from": "retention",
+      "party": null,
+      "quote": null,
+      "effect": {
+        "sd": null,
+        "low": -2,
+        "form": "range",
+        "high": 0,
+        "sign": "-",
+        "unit": "%",
+        "value": -0.7,
+        "estimate_by": null
+      },
+      "source": "olumi"
+    },
+    {
+      "id": "retention_cost",
+      "to": "cost",
+      "from": "retention",
+      "party": null,
+      "quote": null,
+      "effect": {
+        "sd": null,
+        "low": 2000,
+        "form": "range",
+        "high": 20000,
+        "sign": "+",
+        "unit": "£",
+        "value": 8000,
+        "estimate_by": null
+      },
+      "source": "olumi"
+    },
+    {
+      "id": "slip_delay",
+      "to": "release_delay",
+      "from": "release_slip",
+      "party": null,
+      "quote": null,
+      "effect": {
+        "sd": null,
+        "low": 1,
+        "form": "range",
+        "high": 4,
+        "sign": "+",
+        "unit": "months",
+        "value": 2,
+        "estimate_by": null
+      },
+      "source": "olumi"
+    }
+  ],
+  "risks": [
+    {
+      "id": "release_slip",
+      "label": "Next release slips, reducing the time to earn additional revenue",
+      "party": null,
+      "quote": null,
+      "source": "olumi",
+      "horizon_by": null,
+      "occurrence": {
+        "low": 0.1,
+        "high": 0.6,
+        "estimate_by": null
+      },
+      "mitigations": [],
+      "horizon_months": 6
+    }
+  ],
+  "views": [],
+  "factors": [
+    {
+      "id": "price",
+      "low": null,
+      "high": null,
+      "kind": "factor",
+      "unit": "£ per month",
+      "label": "Pro plan monthly price",
+      "limit": null,
+      "party": null,
+      "quote": "increase our Pro plan price from £49 to £59 per month in the next release",
+      "value": 49,
+      "source": "user",
+      "defined_as": null,
+      "estimate_by": null,
+      "accumulation": null
+    },
+    {
+      "id": "cost",
+      "low": 0,
+      "high": 20000,
+      "kind": "factor",
+      "unit": "£",
+      "label": "Total spend against the six-month budget",
+      "limit": {
+        "party": null,
+        "quote": "with a £20k budget",
+        "value": 20000,
+        "source": "user",
+        "comparator": "<="
+      },
+      "party": null,
+      "quote": null,
+      "value": 5000,
+      "source": "olumi",
+      "defined_as": null,
+      "estimate_by": null,
+      "accumulation": null
+    },
+    {
+      "id": "new_mrr",
+      "low": 0,
+      "high": 20000,
+      "kind": "outcome",
+      "unit": "£ per month",
+      "label": "New recurring revenue acquired each month",
+      "limit": null,
+      "party": null,
+      "quote": null,
+      "value": 3000,
+      "source": "olumi",
+      "defined_as": null,
+      "estimate_by": null,
+      "accumulation": null
+    },
+    {
+      "id": "release_delay",
+      "low": 0,
+      "high": 6,
+      "kind": "factor",
+      "unit": "months",
+      "label": "Time until next release delivers its effects",
+      "limit": null,
+      "party": null,
+      "quote": null,
+      "value": 2,
+      "source": "olumi",
+      "defined_as": null,
+      "estimate_by": null,
+      "accumulation": null
+    }
+  ],
+  "history": [],
+  "options": [
+    {
+      "id": "features_price",
+      "label": "Develop new features and increase Pro price in the next release",
+      "party": null,
+      "quote": "develop new features and increase our Pro plan price from £49 to £59 per month in the next release",
+      "source": "user",
+      "status": "feasible",
+      "settings": [
+        {
+          "low": null,
+          "high": null,
+          "unit": "£ per month",
+          "party": null,
+          "quote": "increase our Pro plan price from £49 to £59 per month in the next release",
+          "value": 59,
+          "source": "user",
+          "factor_id": "price",
+          "estimate_by": null
+        }
+      ],
+      "developed_from": null
+    },
+    {
+      "id": "advertising",
+      "label": "Invest in additional advertising",
+      "party": null,
+      "quote": "invest in additional advertising",
+      "source": "user",
+      "status": "feasible",
+      "settings": [],
+      "developed_from": null
+    },
+    {
+      "id": "baseline",
+      "label": "Carry on as now",
+      "party": null,
+      "quote": null,
+      "source": "olumi",
+      "status": "feasible",
+      "settings": [],
+      "developed_from": null
+    },
+    {
+      "id": "retention",
+      "label": "Improve onboarding and retention instead — Olumi alternative",
+      "party": null,
+      "quote": null,
+      "source": "olumi",
+      "status": "feasible",
+      "settings": [],
+      "developed_from": null
+    }
+  ],
+  "conditions": [
+    {
+      "role": "assumption",
+      "text": "The next-release delay qualifies the feature and price effects, not the advertising or retention alternatives.",
+      "party": null,
+      "quote": null,
+      "source": "olumi",
+      "applies_to": [
+        "features_acquisition",
+        "features_churn",
+        "price_mrr",
+        "price_churn",
+        "release_delay",
+        "delay_acquisition"
+      ]
+    },
+    {
+      "role": "challenge",
+      "text": "How many existing Pro customers would actually pay the new price, and when, remains untested.",
+      "party": null,
+      "quote": null,
+      "source": "olumi",
+      "applies_to": [
+        "price_mrr",
+        "price_churn"
+      ]
+    },
+    {
+      "role": "challenge",
+      "text": "Advertising may attract customers with different retention; the direction and size are not established.",
+      "party": null,
+      "quote": null,
+      "source": "olumi",
+      "applies_to": [
+        "advertising",
+        "churn"
+      ]
+    }
+  ]
+}

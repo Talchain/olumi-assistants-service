@@ -262,6 +262,21 @@ describe('the full reasoning model and the submitted calculation share one admis
     return model;
   };
 
+  it('actual MRR 50f76df0 nb/r2: unknown churn feeds MRR, so the added dependent hold is required', () => {
+    const model = LivingModel.parse(JSON.parse(readFileSync(new URL('./fixtures/mrr-50f76df0-nb-r2-living-model.json', import.meta.url), 'utf8')));
+    const before = structuredClone(model), mapped = mapLivingModel(model), graph = corePostimage(mapped, model);
+    expect(model.links).toContainEqual(expect.objectContaining({ id: 'churn_mrr', from: 'churn', to: 'mrr' }));
+    expect(model.aims.find(a => a.id === 'churn')!.target!.current).toBeNull();
+    expect(mapped.withheld).toContainEqual({ id: 'churn', reason: 'goal_level_unknown' });
+    expect(mapped.withheld).toContainEqual({ id: 'mrr', reason: 'chance_rests_on_withheld' });
+    expect(goalDependencyCauses(graph, 'mrr')).toContainEqual({ id: 'churn', reason: 'goal_level_unknown' });
+    expect(goal(graph, 'churn').analysis_participation).not.toBe('retained_excluded');
+    expect(resolveRunAdmission(graph).willProceed).toBe(false);
+    expect(goalChanceLicenceForAgent(withGoalChanceLicence(raw(), graph, 'mrr'))).toBeUndefined();
+    expect(graph.living_model).toEqual(before);
+    expect(model).toEqual(before);
+  });
+
   it('a primary depending on a held secondary remains held and is never calculated on less', () => {
     const model = withHeldSecondary();
     model.links.push({ ...model.links[0]!, id: 'second_g', from: 'second', to: 'g' });
