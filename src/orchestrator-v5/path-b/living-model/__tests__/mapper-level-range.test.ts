@@ -110,9 +110,20 @@ describe('a stated level range supplies its own provisional spread', () => {
     Object.assign(noRange.factors[2]!, { low: null, high: null });
     const mapped = mapLivingModel(model), base = mapLivingModel(noRange), level = node(mapped.graph);
     const { std, std_source, uncertainty_defaults, ...observed } = level.observed_state;
-    expect(observed).toEqual(node(base.graph).observed_state);
-    expect(mapped.frames).toEqual(base.frames);
-    expect(mapped.graph.edges).toEqual(base.graph.edges);
+    const baseState = node(base.graph).observed_state;
+    const { value: _value, cap: _cap, ...physical } = observed;
+    const { value: _oldValue, cap: _oldCap, ...oldPhysical } = baseState;
+    expect(physical).toEqual(oldPhysical);
+    expect(observed.value * observed.cap).toBeCloseTo(baseState.value * baseState.cap, 12);
+    // A wider own range may change the numerical frame, never the effect per natural unit.
+    for (const e of mapped.graph.edges) {
+      const from = mapped.frames.get(String(e.from)), to = mapped.frames.get(String(e.to));
+      const oldFrom = base.frames.get(String(e.from)), oldTo = base.frames.get(String(e.to));
+      if (!from || !to || !oldFrom || !oldTo) continue;
+      const old = base.graph.edges.find(x => x.id === e.id)!;
+      expect((e.strength as Rec).mean * to.cap / from.cap).toBeCloseTo((old.strength as Rec).mean * oldTo.cap / oldFrom.cap, 12);
+      expect((e.strength as Rec).std * to.cap / from.cap).toBeCloseTo((old.strength as Rec).std * oldTo.cap / oldFrom.cap, 12);
+    }
     if (eligible) {
       expect(std).toBe((high - low) / Math.sqrt(12) / observed.cap);
       expect(std_source).toBe('olumi');
@@ -122,7 +133,7 @@ describe('a stated level range supplies its own provisional spread', () => {
       expect(std).toBeUndefined();
       expect(std_source).toBeUndefined();
       expect(uncertainty_defaults).toBeUndefined();
-      expect(mapped.graph).toEqual(base.graph);
+      expect(observed.raw_value).toBe(baseState.raw_value);
       expect(mapped.assumed.filter(a => a.id === 'each')).toEqual([{ id: 'each', text:
         `The calculation uses ${value} cases per specialist for each. The range, ${low} cases per specialist to ${high} cases per specialist, is kept with the model but is not used as a spread.` }]);
       expect(licence(run(mapped.graph))).toEqual(licence(run(base.graph)));

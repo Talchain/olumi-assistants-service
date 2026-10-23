@@ -40,7 +40,7 @@ describe('B1: quantity-owned frames and honest range conversion', () => {
     Object.assign(m.options[1]!.settings[0]!, { unit: '£', value: 15000 });
     const before = structuredClone(m), out = mapLivingModel(m);
     expect(node(out.graph, 'f').observed_state.cap).toBe(25000);
-    expect(out.graph.goal_constraints).toContainEqual(expect.objectContaining({ node_id: 'f', value: 20000, value_frame: 'level', provenance: 'explicit' }));
+    expect((out.graph as Rec).goal_constraints).toContainEqual(expect.objectContaining({ node_id: 'f', value: 20000, value_frame: 'level', provenance: 'explicit' }));
     expect(out.withheld).not.toContainEqual({ id: 'f', reason: 'limit_not_in_slice' });
     expect(m).toEqual(before);
     // A real percentage domain is not widened to make an invalid limit fit.

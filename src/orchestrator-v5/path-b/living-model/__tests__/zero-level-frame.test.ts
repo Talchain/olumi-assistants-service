@@ -27,7 +27,7 @@ function withDelay(value: number, low: number | null, high: number | null, unit:
 describe('a factor whose every level is 0 gets a frame, so its level is a fact, not "not set yet"', () => {
   it('the served shape (0 weeks, range 0 to 8, Olumi\'s estimate) reads 0 on the range\'s top, and its link reaches the engine', () => {
     const { graph, withheld } = mapLivingModel(withDelay(0, 0, 8));
-    expect(node(graph, 'delay').observed_state).toMatchObject({ value: 0, raw_value: 0, cap: 8, unit: 'weeks', source: 'cee_inference' });
+    expect(node(graph, 'delay').observed_state).toMatchObject({ value: 0, raw_value: 0, cap: 10, unit: 'weeks', source: 'cee_inference' });
     expect(withheld.filter((w) => w.id === 'delay' || w.id === 'delay_g')).toEqual([]);
     // The link is sized from its own stated effect (−5 units per week), never Olumi's placeholder (Codex r1).
     expect(edge(graph, 'delay')!.provenance).toMatchObject({ magnitude: 'olumi_estimate',
@@ -41,8 +41,8 @@ describe('a factor whose every level is 0 gets a frame, so its level is a fact, 
   it('a one-sign range near zero keeps base behaviour, including at either end (DL Round 5)', () => {
     for (const value of [0, 2, 8]) {
       const mapped = mapLivingModel(withDelay(value, 0, 8)), level = node(mapped.graph, 'delay');
-      expect(level.observed_state).toEqual({ value: value / (value === 0 ? 8 : value * 1.25), raw_value: value,
-        cap: value === 0 ? 8 : value * 1.25, unit: 'weeks', source: 'cee_inference' });
+      expect(level.observed_state).toEqual({ value: value / 10, raw_value: value,
+        cap: 10, unit: 'weeks', source: 'cee_inference' });
       expect(linkDefaultAssumptionsOf(level)).toEqual([]);
       expect(mapped.assumed.filter(a => a.id === 'delay')).toEqual([{ id: 'delay', text:
         `The calculation uses ${value} weeks for Client delivery delay. The range, 0 weeks to 8 weeks, is kept with the model but is not used as a spread.` }]);
@@ -63,19 +63,24 @@ describe('a factor whose every level is 0 gets a frame, so its level is a fact, 
     expect(on16.strength.std).toBeCloseTo(2 * on8.strength.std, 10);
   });
 
-  it('invariance: a factor with a level above 0 keeps its frame (headroom), whatever its range says', () => {
+  it('invariance: its own range may change a frame but never a raw level or effect', () => {
     const at4 = mapLivingModel(withDelay(4, 0, 8));
-    expect(node(at4.graph, 'delay').observed_state).toMatchObject({ raw_value: 4, cap: 5 });
+    expect(node(at4.graph, 'delay').observed_state).toMatchObject({ raw_value: 4, cap: 10 });
     const on64 = mapLivingModel(withDelay(4, 0, 64));
-    expect(on64.frames).toEqual(at4.frames);
+    expect(node(on64.graph, 'delay').observed_state.cap).toBe(80);
     // Both widths fail the two-SD sign rule. Keep the entire base graph and the truthful base notes.
     for (const [mapped, high] of [[at4, 8], [on64, 64]] as const) {
-      expect(node(mapped.graph, 'delay').observed_state).toEqual({ value: 0.8, raw_value: 4, cap: 5, unit: 'weeks', source: 'cee_inference' });
+      expect(node(mapped.graph, 'delay').observed_state).toEqual({ value: 4 / (high * 1.25), raw_value: 4, cap: high * 1.25, unit: 'weeks', source: 'cee_inference' });
       expect(linkDefaultAssumptionsOf(node(mapped.graph, 'delay'))).toEqual([]);
       expect(mapped.assumed.filter(a => a.id === 'delay')).toEqual([{ id: 'delay', text:
         `The calculation uses 4 weeks for Client delivery delay. The range, 0 weeks to ${high} weeks, is kept with the model but is not used as a spread.` }]);
     }
-    expect(on64.graph).toEqual(at4.graph);
+    const natural = (m: ReturnType<typeof mapLivingModel>) => {
+      const link = edge(m.graph, 'delay')!;
+      return link.strength.mean * m.frames.get(String(link.to))!.cap / m.frames.get('delay')!.cap;
+    };
+    expect(natural(on64)).toBeCloseTo(natural(at4), 12);
+    expect(on64.withheld).toEqual(at4.withheld);
     // The known answer's own unitless factor keeps its frame of 1.
     expect(node(mapLivingModel(KNOWN_ANSWER).graph, 'f').observed_state).toMatchObject({ raw_value: 0.5, cap: 1 });
   });
