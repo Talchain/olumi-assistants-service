@@ -1040,7 +1040,8 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   const heldTargets = new Set([...readings.values()].filter(r => withheld.some(w => w.id === r.aim.id)).map(r => r.aim.id));
   const required = new Set([...(primaryAimId === undefined ? [] : [primaryAimId]),
     ...targetReadings.filter(r => !heldTargets.has(r.aim.id)).map(r => r.aim.id),
-    ...goal_constraints.filter(c => c.role !== 'goal_target').map(c => String(c.node_id)),
+    // A stated limit still protects its path when its own frame cannot yet be compiled.
+    ...model.factors.filter(f => f.limit !== null).map(f => f.id),
     ...model.options.flatMap(o => o.settings.map(s => s.factor_id))]);
   for (let grew = true; grew;) {
     grew = false;

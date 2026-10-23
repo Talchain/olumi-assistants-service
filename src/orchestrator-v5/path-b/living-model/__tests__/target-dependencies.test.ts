@@ -236,7 +236,11 @@ describe('the full reasoning model and the submitted calculation share one admis
       const run = await runTargetModel(model, graph);
       expect(run.wire.graph.nodes.some((n: Rec) => n.id === secondary)).toBe(false);
       expect(run.wire.goal_constraints.some((r: Rec) => r.node_id === secondary)).toBe(false);
-      expect(run.licence).toBeDefined();
+      // This admission regression is not a numerical or timing attestation. The fixture's date has no
+      // effects-at-period-end evidence, and this transport-only Run deliberately has no brief/timing reading.
+      expect(goal(graph, 'productivity').goal_target_basis.effects_at_period_end).toBe(false);
+      expect(run.licence).toBeUndefined();
+      expect(run.result.enrichment.option_comparison.every((o: Rec) => o.probability_of_goal === undefined)).toBe(true);
       expect(graph.living_model).toMatchObject({ aims: before.aims });
       expect(goal(graph, secondary).goal_rests_on.length).toBeGreaterThan(0);
       expect(run.result.enrichment.option_comparison.every((o: Rec) => o.probability_of_joint_goal === undefined)).toBe(true);
@@ -267,7 +271,8 @@ describe('the full reasoning model and the submitted calculation share one admis
     model.factors.push({ ...model.factors[0]!, id: 'budget_level', label: 'Budget used', value: 5, unit: 'units',
       limit: { comparator: '<=', value: 8, source: 'user', party: null, quote: 'at most 8 units' } });
     model.links.push({ ...model.links[0]!, id: 'second_budget', from: 'second', to: 'budget_level' });
-    const graph = corePostimage(mapLivingModel(model), model);
+    const mapped = mapLivingModel(model), graph = corePostimage(mapped, model);
+    expect(mapped.withheld).toContainEqual({ id: 'budget_level', reason: 'limit_not_in_slice' });
     expect(goal(graph, 'second').analysis_participation).not.toBe('retained_excluded');
     goal(graph, 'second').analysis_participation = 'retained_excluded';
     const guarded = guardAnalysisParticipation(graph, { goalNodeId: 'g', submittedOptionIds: ['push', 'hold'],
