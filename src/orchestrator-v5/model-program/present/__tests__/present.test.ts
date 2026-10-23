@@ -212,9 +212,28 @@ describe('present: the canonical analysis view from a simulated model', () => {
     const basis = (v: Rec): string => cell(v, 'hold').face.split(', in this model, ')[1];
     expect(basis(withEffect('olumi'))).toBe('if ‘per_degree’ is -£2, Olumi’s figure and ‘weather’ follows Olumi’s assumed relationship.');
     expect(basis(withEffect('person'))).toBe('if ‘per_degree’ is -£2, Olumi’s figure.');
-    expect(basis(withEffect())).toBe('if ‘per_degree’ is -£2, Olumi’s figure.');
+    // DL ruling: a relation with NO recorded author is listed as an assumption, never read as the person's.
+    expect(basis(withEffect())).toBe('if ‘per_degree’ is -£2, Olumi’s figure and ‘weather’ follows a relationship (author not recorded).');
     // No identity, conversion or person's figure is ever named in the basis.
     for (const v of [plain, withEffect('olumi')]) expect(basis(v)).not.toMatch(/‘(price|loaves|spend|x|zero|month_total|months|year_total|cap|base|temperature)’/);
+  });
+
+  it('DL ruling: a quantity, coefficient or effect relation with NO recorded author is an assumption "(author not recorded)", never "on your figures"', () => {
+    // Weather = base + per_degree × temperature = 10 + 2 × 1 = £12 ≥ £5 in every draw → exactly 100%. Every value is the
+    // person's except the coefficient, whose author is not recorded (absent from the model and from the labels), and the
+    // relation has no recorded author either. Both are listed; the chance never reads "on your figures".
+    const unrecorded = (q: Quantity): Quantity => { const c = JSON.parse(JSON.stringify(q)) as Quantity; Reflect.deleteProperty(c.dist!, 'author'); return c; };
+    const m = (coefficient: Quantity) => model([fixed('base', 10, '£'), coefficient, fixed('temperature', 1, 'degrees'),
+      effect('weather', 'base', [{ coefficient: 'per_degree', driver: 'temperature' }], '£'), fixed('floor', 5, '£')],
+    [{ ...goal('g', 'weather', '>=', 'floor'), label: 'Weather takings' }], [option('hold', 'Hold')]);
+    const v = present(m(unrecorded(fixed('per_degree', 2, '£'))), {});
+    expect(cell(v, 'hold').display).toBe('100%');
+    expect(cell(v, 'hold').face).toBe('‘Hold’: 100% chance of ‘weather’ being at least £5 at 1 month from now, in this model, '
+      + 'if ‘per_degree’ is £2 (author not recorded) and ‘weather’ follows a relationship (author not recorded).');
+    expect(JSON.stringify(v)).not.toContain('on your figures');
+    // Contrast: the same model with both authors recorded as the person's reads "on your figures".
+    const own = present(m(fixed('per_degree', 2, '£')), { weather: { label: 'weather', author: 'person', relation_author: 'person' } });
+    expect(cell(own, 'hold').face).toMatch(/, in this model, on your figures\.$/);
   });
 
   it('S3 fix 3: every limit\u2019s own outcome is in the words, and a limit waiting on an ask is named with its question', () => {

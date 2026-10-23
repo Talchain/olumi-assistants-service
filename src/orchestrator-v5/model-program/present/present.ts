@@ -30,12 +30,15 @@ import { comparatorWords } from '../../goal-target/goal-target-basis.js';
 import { displayRoundingFor } from '../../goal-target/goal-chance-driver.js';
 import { displayedPctAt } from '../../goal-target/goal-chance-display.js';
 import { sayDisplayedPct } from '../../goal-target/goal-targets-joint.js';
-import type { Aggregation, ExecutableModel, Goal, Limit, Window } from '../executable.js';
+import type { Aggregation, ExecutableModel, FixedAuthor, Goal, Limit, Window } from '../executable.js';
 import { rangeLaw, type RangeDist } from '../simulate/range-law.js';
 import { isWithheld, type ChanceOrWithheld, type OptionResult, type SimResult, type WithheldChance } from '../simulate/result.js';
 import { readingOf, simulate } from '../simulate/simulate.js';
 
 type Author = 'person' | 'olumi';
+/** Recorded authors whose fixed values are no one's assumption: the person's own figure, a structural constant, a placeholder. */
+const NOT_ASSUMPTIONS: ReadonlySet<string> = new Set<FixedAuthor>(['person', 'structure', 'placeholder']);
+const NOT_RECORDED = '(author not recorded)';
 
 /** The canonical model's label and author for a quantity (S1 `CanonicalQuantity`), and the author of the relation defining it. */
 export interface PresentQuantity {
@@ -216,8 +219,12 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       const d: RangeDist = x.dist;
       const reading = rangeLaw(d, model.risks.some((r) => r.occurrence === x.id) ? { domain: { min: 0, max: 1 } } : {});
       const ends = `${say(d.low, x.unit)} to ${say(d.high, x.unit)}`;
-      const whose = d.basis === 'person_range' ? 'your range' : 'Olumi’s own estimated range';
-      if (reading.kind === 'point') return d.basis === 'person_range' ? [] : [`${name} is ${say(reading.value, x.unit)}, Olumi’s estimate`];
+      // DL ruling (author not recorded): a range whose basis is neither the person's nor Olumi's is listed as such, never
+      // passed as the person's; `rangeLaw` draws it unbounded (only a person's stated bounds condition the draw).
+      const whose = d.basis === 'person_range' ? 'your range' : d.basis === 'olumi_estimate' ? 'Olumi’s own estimated range' : `a range ${NOT_RECORDED}`;
+      if (reading.kind === 'point') {
+        return d.basis === 'person_range' ? [] : [`${name} is ${say(reading.value, x.unit)}${d.basis === 'olumi_estimate' ? ', Olumi’s estimate' : ` ${NOT_RECORDED}`}`];
+      }
       const held = reading.lower === d.low && reading.upper === d.high ? ', held within those bounds'
         : Number.isFinite(reading.lower) || Number.isFinite(reading.upper) ? ', kept to the values it can take' : '';
       return [`${name} follows Olumi’s provisional conversion of ${whose}, ${ends}, into a bell-shaped spread${held}`];
@@ -225,12 +232,17 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     if (x.dist?.kind === 'fixed') {
       // executable.ts r3: the author of every fixed value. A structural constant (a conversion, a switch, a count) and a
       // placeholder that cancels out of every result are no one's assumption.
-      return (x.dist.author ?? m?.author) === 'olumi' ? [`${name} is ${say(x.dist.value, x.unit)}, Olumi’s figure`] : [];
+      // DL ruling (author not recorded): a value with no recorded author is listed as an assumption, never read as the person's.
+      const author: string | undefined = x.dist.author ?? m?.author;
+      if (author === 'olumi') return [`${name} is ${say(x.dist.value, x.unit)}, Olumi’s figure`];
+      return author !== undefined && NOT_ASSUMPTIONS.has(author) ? [] : [`${name} is ${say(x.dist.value, x.unit)} ${NOT_RECORDED}`];
     }
     // S3 smoke fix 1: only an Olumi-authored EFFECT relation is an assumed relationship. A definition (an identity: a
     // product, a sum, a difference such as x − x for a zero start) and a stock's accumulation are never assumptions,
     // whoever wrote them; a unit conversion is a structural constant (above).
-    return x.equation?.form === 'effect' && m?.relation_author === 'olumi' ? [`${name} follows Olumi’s assumed relationship`] : [];
+    // DL ruling (author not recorded): an effect relation with no recorded author is listed, never read as the person's.
+    if (x.equation?.form !== 'effect' || m?.relation_author === 'person') return [];
+    return [m?.relation_author === 'olumi' ? `${name} follows Olumi’s assumed relationship` : `${name} follows a relationship ${NOT_RECORDED}`];
   });
   const basisWords = (ids: ReadonlySet<string>): string => {
     const a = assumptions(ids);
