@@ -15,7 +15,7 @@ import { mapLivingModel } from '../../living-model/mapper.js';
 import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import { projectCorePostimageForPersistence } from '../../../persisted-graph-projection.js';
 import { assessCanonicalAnalysisReadiness } from '../../../../orchestrator/tools/analysis-ready-helper.js';
-import { KNOWN_ANSWER } from '../../living-model/__tests__/fixtures.js';
+import { KNOWN_ANSWER as KNOWN } from '../../living-model/__tests__/fixtures.js';
 import { F1_CONTRADICTED, F1_DEFINED, F1_EXACT_LINKS, F1_OTHER_CAUSE } from '../../living-model/__tests__/track2-f1-identity.fixtures.js';
 import { OLUMI_CHANCE } from '../../living-model/__tests__/track2-f2-event-risk.fixtures.js';
 import { buildModel } from '../draft-tool.js';
@@ -26,6 +26,8 @@ import { blockersOf, corePostimage, KEPT_AS_REFUSED, personContentLost, REPAIR_C
 import type { Rec } from './fixtures.js';
 
 const SID = 'scn_1';
+/** The known answer with its factor's unit stated, as every factor has one (drafting rules): an Olumi link from it can be sized per unit. */
+const KNOWN_ANSWER: LivingModelT = { ...KNOWN, factors: KNOWN.factors.map((f) => ({ ...f, unit: f.unit ?? 'level' })) };
 const BRIEF = 'we need at least 100 units; today we are at 70. f is at 0.5. push f to 1, or we hold. each +1 in f adds 50 units on average, with a standard deviation of 10';
 const postimage = (m: LivingModelT): Rec => ({ ...mapLivingModel(m).graph, living_model: m });
 const PREREQ = 'only once the board signs off';

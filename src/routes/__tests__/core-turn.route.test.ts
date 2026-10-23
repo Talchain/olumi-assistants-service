@@ -701,7 +701,10 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
   });
 
   it('DL 22 Oct (marketing on 7ee0d90f): a change that would cut the goal\u2019s path is said back; the AI\u2019s re-linked retry is the card', async () => {
-    const remeasured = structuredClone(KNOWN_ANSWER);
+    // f's unit stated, as every factor has one: Olumi's re-link from it can be sized per unit (the Run's own target verdict, C1).
+    const united: LivingModelT = { ...structuredClone(KNOWN_ANSWER), factors: KNOWN_ANSWER.factors.map((f) => ({ ...f, unit: 'level' })) };
+    persisted = postimage(united);
+    const remeasured = structuredClone(united);
     remeasured.aims[0]!.target = { ...remeasured.aims[0]!.target!, quantity: 'new customers', unit: 'customers', value: 20, current: null };
     remeasured.links = [];
     const relinked = { ...structuredClone(remeasured), links: [{ id: 'f_customers', from: 'f', to: 'g', source: 'olumi' as const, party: null, quote: null,
