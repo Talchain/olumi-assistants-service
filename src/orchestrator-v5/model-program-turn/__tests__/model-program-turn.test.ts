@@ -94,11 +94,11 @@ function bakery(): CanonicalModelT {
       q('extra_per_oven', 'loaf/week/oven', { kind: 'coefficient', value: 100, quote: 'adds about 100 loaves a week' }),
       q('sell_through', '1', { kind: 'coefficient', status: 'estimated', author: 'olumi', value: 0.7, low: 0.5, high: 0.9, range_kind: 'plausible', basis: 'New capacity sells only as far as demand grows.' }),
       q('sold_per_oven', 'loaf/week/oven', { kind: 'coefficient', status: 'derived', author: 'olumi' }),
-      q('sales', 'loaf/week', { status: 'derived', author: 'olumi' }),
+      q('sales', 'loaf/week', { kind: 'derived', status: 'derived', author: 'olumi' }),
       q('sales_target', 'loaf/week', { value: 380, quote: 'reach 380 loaves a week' }),
       q('budget', 'GBP', { value: 3000, quote: 'We have £3,000 to spend' }),
       q('oven_price', 'GBP/oven', { status: 'asked', question: 'What would the second oven cost?' }),
-      q('spend', 'GBP', { status: 'derived', author: 'olumi' }),
+      q('spend', 'GBP', { kind: 'derived', status: 'derived', author: 'olumi' }),
     ],
     relations: [
       { form: 'definition', id: 'sold_rel', defines: 'sold_per_oven', op: 'product', parts: [{ id: 'extra_per_oven', power: 1 }, { id: 'sell_through', power: 1 }], author: 'olumi', quote: null, ...at },

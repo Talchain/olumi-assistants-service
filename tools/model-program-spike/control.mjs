@@ -88,6 +88,9 @@ export async function runControl({ target, assistKey, apiKey, id, rep, brief, fa
   const rec = { arm: 'control', id, rep, scenario_id: sid, at: new Date(t0).toISOString(), seconds: +((Date.now() - t0) / 1000).toFixed(1), facts_sheet: facts === null ? 'none' : `${facts.length} lines`,
     calls, usd: +(turns.reduce((a, t) => a + t.usd, 0) + operatorCalls.reduce((a, c) => a + c.usd, 0)).toFixed(4),
     tokens: sumTokens([...turns.flatMap((t) => t.calls.map((c) => c.tokens)), ...operatorCalls.map((c) => c.tokens)]),
+    // The draft turn's FIRST construction attempt, and its outcome after the route's own repairs (its self-check loop).
+    first_attempt: (() => { const b = (turns[0]?.tool_calls ?? []).filter((c) => c.name === 'build_model_from_brief'); return b.length ? { outcome: b[0].outcome, refusal: b[0].refusal ?? null } : { outcome: 'no_build_call' }; })(),
+    post_repair: (() => { const b = (turns[0]?.tool_calls ?? []).filter((c) => c.name === 'build_model_from_brief'); return { build_calls: b.length, saved: b.some((c) => c.outcome === 'ok'), last: b.at(-1)?.outcome ?? null, last_refusal: b.at(-1)?.refusal ?? null }; })(),
     has_chance: hasChance(view), chances: chancesFromView(view, labels), run_state: final.analysis_state?.run_state ?? null,
     qa, operator_calls: operatorCalls, reads, turns, final_saved: final.graph != null, answer_turns: turns.filter((t) => t.kind === 'answer').length };
   fs.writeFileSync(file, JSON.stringify(rec, null, 1));

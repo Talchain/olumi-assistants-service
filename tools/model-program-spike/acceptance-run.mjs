@@ -65,6 +65,7 @@ if (ARMS.includes('control')) {
   tasks.push(Promise.all(Array.from({ length: width }, async () => {
     while (next < jobs.length && !fs.existsSync(STOP) && spent < (ARMS.length > 1 ? MAX_USD / 2 : MAX_USD)) {
       await waitLoad();
+      if (next >= jobs.length) break;
       const { id, rep } = jobs[next++];
       const b = briefs.find((x) => x.id === id);
       try {

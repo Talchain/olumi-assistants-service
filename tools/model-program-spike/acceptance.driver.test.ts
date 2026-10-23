@@ -188,6 +188,8 @@ describe.skipIf(OUT === '')('model-program spike acceptance (live provider)', ()
       const rec = { arm: 'spike', id, rep, scenario_id: sid, at: new Date(t0).toISOString(), seconds: +((Date.now() - t0) / 1000).toFixed(1), facts_sheet: facts === null ? 'none' : `${facts.length} lines`,
         calls, usd: +(turns.reduce((a, t) => a + t.usd, 0) + operatorCalls.reduce((a, c) => a + c.usd, 0)).toFixed(4),
         tokens: sumTokens([...turns.flatMap((t) => t.calls.map((c: Json) => c.tokens)), ...operatorCalls.map((c) => c.tokens)]),
+        first_attempt: (() => { const a0 = turns[0]?.draft_attempts?.[0]; return a0 ? { compiles: a0.errors !== null && a0.errors.length === 0, errors: a0.errors?.length ?? null, failed: a0.failed } : null; })(),
+        post_repair: (() => { const at = turns[0]?.draft_attempts ?? []; const z = at.at(-1); return { repairs: Math.max(0, at.length - 1), compiles: z ? z.errors !== null && z.errors.length === 0 : false, errors: z?.errors?.length ?? null, saved: turns[0]?.saved ?? false }; })(),
         has_chance: hasChance(view), answer_turns: turns.filter((t) => t.kind === 'answer').length, compile_states: turns.map((t) => ({ kind: t.kind, ...(t.compile ?? { compiles: false }) })), chances, qa, operator_calls: operatorCalls, reopen, turns,
         final_saved: last.model_program?.saved ?? false };
       writeFileSync(file, JSON.stringify(rec, null, 1));
@@ -206,6 +208,7 @@ describe.skipIf(OUT === '')('model-program spike acceptance (live provider)', ()
         if (existsSync(STOP)) return;
         if (spent >= maxUsd) { console.log(`spend cap $${maxUsd} reached at $${spent.toFixed(2)}`); return; }
         while (loadavg()[0] >= 25) await new Promise((r) => setTimeout(r, 30_000));
+        if (next >= jobs.length) return;
         const job = jobs[next++]!;
         try { await runOne(job.id, job.rep); } catch (err) { writeFileSync(`${OUT}/${job.id}-r${job.rep}.FAILED.txt`, String(err instanceof Error ? err.stack : err)); }
       }
