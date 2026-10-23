@@ -4,7 +4,7 @@
  * a typed turn, a Run press, a card's approval, a resend of the same turn id, two turns at once, a legacy scenario, a canvas
  * edit, the first draft's streamed graph, and the contract's exact shape. SYNTHETIC wording (the KNOWN_ANSWER fixture).
  */
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { AnalysisStateV1Schema } from '@talchain/schemas/boundary';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -895,6 +895,47 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(drafting.prompt_cache_key).toBe(first.body.prompt_cache_key);
       expect(drafting.prompt_cache_key).toBe(corePromptCacheKey(String(drafting.model), STANDING));
       expect([drafting.prompt_cache_retention, first.body.prompt_cache_retention]).toEqual(['24h', '24h']);
+    });
+
+    it('(6) ALPHA (23 Oct): the provider receives the model-program instructions, these exact bytes, on a saved model’s turn and on a first turn', async () => {
+      // Pinned from the request bodies the provider received on this route, not from the module that builds them.
+      const SENT_SHA = '08747cdea15ebf05c863822fb8776ef4a4b34f7ac001270018a1d90b529fd6a9';
+      outputs = [[{ type: 'message', text: 'Here is what the model holds.' }]];
+      expect((await typed('What does the model hold now?')).statusCode).toBe(200);
+      SCENARIO = randomUUID(); persisted = null;
+      outputs = [[{ type: 'message', text: 'Tell me more about the situation first.' }]];
+      expect((await typed('We are weighing two ways to run the pool on weekday evenings.')).statusCode).toBe(200);
+      expect(calls, 'one provider call per turn').toHaveLength(2);
+      for (const c of calls) {
+        expect(createHash('sha256').update(String(c.instructions), 'utf8').digest('hex')).toBe(SENT_SHA);
+        expect(String(c.instructions)).toContain('draft the first model from their brief in that same turn, even when figures are missing');
+        expect(String(c.instructions)).not.toContain('POLYMATH COACHING');
+      }
+    });
+
+    /** The instructions the provider received on one typed turn of a saved model. */
+    const sentOnce = async (): Promise<string> => {
+      outputs = [[{ type: 'message', text: 'Noted.' }]];
+      expect((await typed('The lane hire is about 20 pounds an hour.')).statusCode).toBe(200);
+      expect(calls).toHaveLength(1);
+      return String(calls[0]!.instructions);
+    };
+
+    it('(7) Codex r1 BLOCK 1 on #3707: a loose figure goes in exactly as said, with no bounds Olumi adds; Olumi asks for their range', async () => {
+      const sent = await sentOnce();
+      expect(sent.split('A loose figure ("about 20") goes in exactly as they said it: their figure, 20, with their words quoted so the "about" stays visible. '
+        + 'Never add a range or bounds they did not give. If that figure feeds a goal or a limit, ask what range they would put on it.')).toHaveLength(2);
+      for (const gone of ['18 to 22', 'a range that reads their word', 'the range is Olumi\'s reading']) expect(sent, gone).not.toContain(gone);
+    });
+
+    it('(8) Codex r1 BLOCK 2 on #3707: the whole CALCULATION BOUNDARY rides the core instructions once, with its labelled-arithmetic permission', async () => {
+      const sent = await sentOnce();
+      expect(sent.split('\n\nCALCULATION BOUNDARY\n'
+        + "Do not calculate or forecast an option's goal outcome, probability of success, break-even, expected value, sensitivity, robustness, or other engine-owned analytical result yourself.\n"
+        + 'You may perform transparent one-step arithmetic on figures the user supplied, or evaluate a total or difference they explicitly defined, including at the end points of a range they stated, only when it is NOT presented as a model result. '
+        + 'Show the operands and units, label it as simple arithmetic, and identify the saved setting or clearly labelled what-if used. This permission excludes every engine-owned result named above and never permits inventing a response law between quantities.\n'
+        + 'If the requested implication requires modelled relationships, use only supplied current engine output. If that output is unavailable, stale or blocked, identify the missing input or offer the appropriate model/run action instead of estimating the result.\n\n'
+      )).toHaveLength(2);
     });
   });
 });
