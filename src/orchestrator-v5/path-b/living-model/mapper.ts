@@ -108,18 +108,17 @@ function rangeSpread(low: number, high: number, source: LivingSourceT, party: st
 }
 
 /**
- * The frame a factor's levels are read on: '%' → 100, unitless [0,1] → 1, the goal's when the unit matches, else headroom.
+ * The frame a factor's levels are read on: '%' → 100, unitless [0,1] → 1, otherwise its own headroom.
  * Every level 0 (DL lease 22 Oct, served eb481e4a "Client delivery delay", 0 weeks, range 0 to 8): the stated range's top if
  * positive, else 1. A level of 0 reads 0 on any frame and links scale by the frame, so the figures do not move; without a
  * frame the level was held and the card read "Value not set yet".
  */
-function capFor(levels: readonly number[], unit: string | null, goal: { cap: number; unit: string } | undefined,
+function capFor(levels: readonly number[], unit: string | null,
   range: readonly (number | null)[] = []): number | undefined {
   const finite = levels.filter((v) => Number.isFinite(v));
   if (finite.length === 0) return undefined;
   const top = Math.max(...finite.map(Math.abs));
   if (unit === '%') return 100;
-  if (goal !== undefined && unit !== null && unit === goal.unit && goal.cap >= top) return goal.cap;
   if (unit === null && finite.every((v) => v >= 0 && v <= 1)) return 1;
   if (top > 0) return top * 1.25;
   const rangeTop = Math.max(0, ...range.filter((v): v is number => v !== null && Number.isFinite(v)));
@@ -538,7 +537,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     const levels = [f.value, ...model.options.flatMap((o) => o.settings.filter((s) => s.factor_id === f.id).map((s) => s.value))]
       .filter((v): v is number => v !== null);
     // The exact sum's change is read on the goal's own frame, so the goal is its parts added in the goal's units.
-    const cap = exactSum !== undefined && f.id === exactSum.lever ? goal!.cap : capFor(levels, f.unit, goal, [f.low, f.high]);
+    const cap = exactSum !== undefined && f.id === exactSum.lever ? goal!.cap : capFor(levels, f.unit, [f.low, f.high]);
     if (cap !== undefined) caps.set(f.id, cap);
     const node: Rec = { id: f.id, kind: 'factor', label: f.label, category: setsFactor.has(f.id) ? 'controllable' : 'observable',
       // The exact sum's change: 0 today by definition (the contract's marker), so the engine holds it exact.
@@ -553,7 +552,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
         const spread = rangeSpread(f.low, f.high, figureBy(f, f).source, f.party), std = spread.std / cap;
         if (!setsFactor.has(f.id) && f.low < f.value && f.value < f.high
           && ((f.low < 0 && f.high > 0) || Math.abs(f.value) >= 2 * spread.std)) {
-          Object.assign(node.observed_state as Rec, { std, std_source: 'olumi' });
+          Object.assign(node.observed_state as Rec, { std, std_source: 'olumi', range_source: figureBy(f, f).source });
           (node.observed_state as Rec).uncertainty_defaults = [{ code: REPAIR_CODES.CLAMP_STD_MINIMUM, layer: 'cee',
             field_path: `nodes[${f.id}].observed_state.std`, before: null, after: std, severity: 'info',
             reason: `The calculation uses ${sayFigureAsWritten(f.value, f.unit ?? '')} for ${f.label}, with a spread matching ${spread.who} range, ${sayFigureAsWritten(f.low, f.unit ?? '')} to ${sayFigureAsWritten(f.high, f.unit ?? '')}; the spread is Olumi's assumption.` }];
@@ -578,7 +577,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     if (d === null || f.value !== null || caps.has(f.id) || d.of.length === 0 || !d.of.every((p) => current.has(p) && caps.has(p))) continue;
     const made = (level: (p: string) => number) => (d.op === 'sum' ? d.of.reduce((a, p) => a + (d.subtract?.includes(p) ? -1 : 1) * level(p), 0) : d.of.reduce((a, p) => a * level(p), 1));
     const levels = [made((p) => current.get(p)!), ...model.options.map((o) => made((p) => o.settings.find((s) => s.factor_id === p)?.value ?? current.get(p)!))];
-    const cap = capFor(levels, f.unit, goal);
+    const cap = capFor(levels, f.unit);
     if (cap === undefined || !Number.isFinite(cap) || cap <= 0) continue;
     caps.set(f.id, cap);
     nodes.find((n) => n.id === f.id)!.scale_frame = cap;

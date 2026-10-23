@@ -179,7 +179,30 @@ function optionSets(graph: unknown, optionId: string, factorId: string): boolean
   return interventions !== undefined && Object.hasOwn(interventions, factorId);
 }
 
+/** A range stamp is useful only when bound to this graph's own saved range and compiled spread. */
+export function factorRangeAuthorOf(graph: unknown, factorId: string): GoalChanceAuthor | undefined {
+  // Range ownership is not Normal-conversion ownership. Bind the compiler's stamp to this Run's OWN saved range.
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const state = nodes.find(n => n.id === factorId && n.kind === 'factor')?.observed_state;
+  if (isRec(state) && state.range_source !== undefined) {
+    const model = isRec(graph) && isRec(graph.living_model) ? graph.living_model : undefined;
+    const factor = Array.isArray(model?.factors) ? model.factors.filter(isRec).find(f => f.id === factorId) : undefined;
+    const { low, high } = factor ?? {};
+    if (factor === undefined || !finite(low) || !finite(high) || low >= high || !finite(state.cap) || state.cap <= 0
+      || !finite(state.raw_value) || state.raw_value <= low || state.raw_value >= high
+      || !finite(state.std) || state.std <= 0 || state.std_source !== 'olumi'
+      || state.range_source !== (factor.estimate_by === 'olumi' ? 'olumi' : factor.source)) return 'unattributed';
+    const expected = (high - low) / Math.sqrt(12) / state.cap;
+    if (Math.abs(expected - state.std) > 1e-9 * Math.max(expected, state.std)) return 'unattributed';
+    // A colleague's range is not claimed as "yours"; the named source remains in the conversion ledger.
+    return state.range_source === 'user' ? 'user' : state.range_source === 'olumi' ? 'olumi' : 'unattributed';
+  }
+  return undefined;
+}
+
 function factorAuthor(graph: unknown, envelope: unknown, factorId: string, row: Rec): GoalChanceAuthor {
+  const rangeAuthor = factorRangeAuthorOf(graph, factorId);
+  if (rangeAuthor !== undefined) return rangeAuthor;
   if (deriveInferredValues(graph).some((v) => v.factor_id === factorId)) return 'olumi';
   const evppi = isRec(envelope) && Array.isArray(envelope.factor_evppi)
     ? envelope.factor_evppi.filter(isRec).find((r) => r.factor_id === factorId) : undefined;

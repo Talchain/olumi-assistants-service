@@ -167,6 +167,8 @@ export const ObservedStateV3 = z.object({
    * restated, and that module explains why it has one member.
    */
   stated_role: z.enum(OBSERVED_STATE_STATED_ROLES).optional(),
+  /** Author of the stated range converted into std, independent of the derived centre and std_source. */
+  range_source: z.enum(['user', 'party', 'olumi', 'unverified']).optional(),
   /** Factor type classification for downstream enrichment */
   factor_type: FactorTypeV3.optional(),
   /** 1-2 short phrases explaining sources of epistemic uncertainty */

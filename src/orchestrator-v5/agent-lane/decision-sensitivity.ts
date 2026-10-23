@@ -25,6 +25,7 @@
  *         `readOptionResultSources` refuses to read them (PR Review CR @ 0e1fd8c1).
  * The user-facing blocks are untouched; this is the Agent's view only.
  */
+import { factorRangeAuthorOf } from '../goal-target/goal-chance-driver.js';
 import { selectFactorEvppiPriority } from '../coaching/select-factor-evppi.js';
 import { goalChanceDriverAvailabilityForAgent, goalChancePointForAgent, nearestFiveGoalChancesForAgent } from '../goal-target/goal-chance-licence.js';
 import { goalChanceFactsForAgent, runHasGoalChanceLicenceRecord } from '../goal-target/goal-chance-range-agent.js';
@@ -67,7 +68,7 @@ export function withoutStrongestDriverClause(summary: string): string {
   return summary.replace(/ because (?:(?! because ).)*? is the strongest driver\./g, '.');
 }
 
-export function decisionSensitivityOf(enrichment: unknown): DecisionSensitivity {
+export function decisionSensitivityOf(enrichment: unknown, graph?: unknown): DecisionSensitivity {
   const d = selectFactorEvppiPriority(enrichment);
   if (d.outcome === 'selected') {
     const rows = recordOf(enrichment)?.factor_sensitivity;
@@ -79,7 +80,11 @@ export function decisionSensitivityOf(enrichment: unknown): DecisionSensitivity 
     const own = Array.isArray(evppi) ? evppi.map(recordOf).find((r) => r?.factor_id === d.factorId) : undefined;
     // Own keys only (DL nit on #2246): a plain-object lookup would hand back `constructor` / `toString` as a "range".
     const source = own?.spread_source;
-    const range = typeof source === 'string' && Object.hasOwn(RANGE_OF, source) ? RANGE_OF[source] : undefined;
+    // PLoT's template stamp names the Normal conversion, not the author of the source range.
+    const author = factorRangeAuthorOf(graph, d.factorId);
+    const range = author !== undefined
+      ? author === 'user' ? 'yours' : author === 'olumi' ? 'olumi_assumed' : undefined
+      : typeof source === 'string' && Object.hasOwn(RANGE_OF, source) ? RANGE_OF[source] : undefined;
     if (range === undefined) return { status: 'measured', most_sensitive: { factor_id: d.factorId, label } };
     return {
       status: 'measured',
@@ -234,7 +239,7 @@ export function analysisResultForAgent(result: unknown, graph?: unknown, current
     if (limitsRenamed) out.limits_note = ALL_LIMITS_HOLD_NOTE;
   }
   const shown = screenShowsSensitivity(block, graph ?? screenGraph, current);
-  const sensitivity = decisionSensitivityOf(enrichment);
+  const sensitivity = decisionSensitivityOf(enrichment, graph);
   const projected = recordOf(out.enrichment);
   if (!shown || sensitivity.status === 'measured') out.decision_sensitivity = sensitivity;
   else if (projected !== undefined && 'factor_evppi' in projected) {
