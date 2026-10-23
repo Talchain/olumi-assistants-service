@@ -134,7 +134,7 @@ describe('a model program\'s postimage through the real /graph/register', () => 
       goals: [{ id: 'g', label: 'At least 100 tickets a week', measure: { quantity: 'weekly', per: null, cmp: '>=', target: 'target', frame: 'level', reference: null, aggregation: 'end', window: null,
         measure_by: 'person', assumptions: [], exclusions: [] }, question: null, author: 'person', quote: 'at least 100 tickets a week', ...at }],
       limits: [], preferences: [],
-      options: [{ id: 'add', label: 'Add one specialist', sets: [{ quantity: 'specialists', to: 'one', value: null, low: null, high: null, range_kind: null, question: null, from_period: 0, author: 'person', quote: 'Add one specialist' }],
+      options: [{ id: 'add', label: 'Add one specialist', sets: [{ quantity: 'specialists', to: 'one', value: null, low: null, high: null, range_kind: null, question: null, starts_after_periods: 0, author: 'person', quote: 'Add one specialist' }],
         status: 'live', developed_from: null, author: 'person', quote: 'Add one specialist', ...at },
       { id: 'keep', label: 'Keep the team', sets: [], status: 'live', developed_from: null, author: 'person', quote: 'keep the team as it is', ...at }],
       risks: [], claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], history: [] };

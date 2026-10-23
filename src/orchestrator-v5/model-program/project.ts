@@ -258,7 +258,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const interventions: Rec = {};
     for (const s of o.sets) {
       const to = has(s.to) ? Q.get(s.to) : undefined;
-      if (to) interventions[s.quantity] = { value: to.value, unit: to.unit, display: display(to), from_period: s.from_period, ...settingSource(to, o) };
+      if (to) interventions[s.quantity] = { value: to.value, unit: to.unit, display: display(to), from_period: s.starts_after_periods, ...settingSource(to, o) };
     }
     nodes.push({
       id: o.id, kind: 'option', label: o.label, ...provenanceOf(who), ...quoteOf(o, o.id), ...participation(inCalc || (o.status === 'live' && kept(per))),
@@ -403,7 +403,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const sev = Q.get(k.severity);
     nodes.push({
       id: k.id, kind: 'risk', label: k.label, ...provenanceOf(who), ...quoteOf(k, k.id), ...participation(inCalc || (!notCompiling && inModel.has(k.effect_on))),
-      description: `Chance: ${occ ? display(occ) : 'not given'}. If it happens: ${k.mode === 'add' ? 'adds' : 'multiplies by'} ${sev ? display(sev) : 'not given'}, from ${typeof k.from_period === 'number' ? `period ${k.from_period}` : `"${Q.get(k.from_period)?.label ?? k.from_period}"`}.`,
+      description: `Chance: ${occ ? display(occ) : 'not given'}. If it happens: ${k.mode === 'add' ? 'adds' : 'multiplies by'} ${sev ? display(sev) : 'not given'}, ${typeof k.starts_after_periods === 'number' ? (k.starts_after_periods === 0 ? 'from the start' : `after ${k.starts_after_periods} ${model.period}s`) : `from "${Q.get(k.starts_after_periods)?.label ?? k.starts_after_periods}"`}.`,
     });
     items.push({ record_id: k.id, family: 'risk', shown_as: { node: k.id }, in_calculation: inCalc, why_out: why(inCalc, 'What it affects is not used by anything that can be worked out yet.'), author: who, approval: k.approval });
     if (Q.has(k.effect_on)) edges.push({ ...link(k.id, k.effect_on, k.mode === 'add' && sev && (sev.value ?? sev.high ?? 0) < 0 ? -1 : 1, who, inCalc, { reasoning: 'if it happens' }), id: edgeId(k.id, k.effect_on) });

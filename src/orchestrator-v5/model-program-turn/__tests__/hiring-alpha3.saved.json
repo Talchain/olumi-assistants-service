@@ -350,7 +350,7 @@
       "high": null,
       "range_kind": null,
       "question": null,
-      "from_period": 0,
+      "starts_after_periods": 0,
       "author": "person",
       "quote": "hire a Tech lead"
      }
@@ -375,7 +375,7 @@
       "high": null,
       "range_kind": null,
       "question": null,
-      "from_period": 0,
+      "starts_after_periods": 0,
       "author": "person",
       "quote": "two developers"
      }

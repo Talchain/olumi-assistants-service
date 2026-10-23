@@ -288,7 +288,7 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
     ...model.goals.filter((g) => has(g.measure?.window)).map((g) => ({ id: g.id, w: g.measure!.window! })),
     ...model.limits.filter((l) => has(l.measure?.window)).map((l) => ({ id: l.id, w: l.measure!.window! })),
   ];
-  const timings = [...model.options.flatMap((o) => o.sets.map((s) => s.from_period)), ...model.risks.map((k) => k.from_period)].filter((t): t is string => typeof t === 'string');
+  const timings = [...model.options.flatMap((o) => o.sets.map((s) => s.starts_after_periods)), ...model.risks.map((k) => k.starts_after_periods)].filter((t): t is string => typeof t === 'string');
   /** Window lengths and origin timings: whole periods, consumed into the window. */
   const windowQs = new Set(windowed.flatMap(({ w }) => [w.periods, ...(has(w.origin_offset) ? [w.origin_offset] : [])]));
   /** Set and risk timings that name a quantity: a fixed one resolves to a whole period; an uncertain one goes into the run. */
@@ -430,7 +430,7 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
   const risksOn = new Map<string, string[]>();
   for (const k of model.risks) if (Q.has(k.effect_on)) risksOn.set(k.effect_on, [...(risksOn.get(k.effect_on) ?? []), k.id]);
   const riskById = new Map(model.risks.map((k) => [k.id, k] as const));
-  const riskInputs = (k: CanonicalModelT['risks'][number]) => [k.occurrence, k.severity, ...(typeof k.from_period === 'string' ? [k.from_period] : [])].filter((x) => Q.has(x));
+  const riskInputs = (k: CanonicalModelT['risks'][number]) => [k.occurrence, k.severity, ...(typeof k.starts_after_periods === 'string' ? [k.starts_after_periods] : [])].filter((x) => Q.has(x));
   const upstream = (roots: readonly string[]): Set<string> => {
     const seen = new Set<string>();
     const stack = roots.filter((r) => Q.has(r));
@@ -448,7 +448,7 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
   const fixedTimings = new Set<string>();
   /** A whole period; or, for an uncertain timing, the quantity's id (S2 samples it; its whole-period reading is the PL's). */
   const timingOf = (t: number | string, at: string, item: string): number | string | null => {
-    if (typeof t === 'number') { if (t < 0) err('timing', `${at} takes effect from period ${t}; periods start at 0 (now).`, [item]); return t; }
+    if (typeof t === 'number') { if (t < 0) err('timing', `${at} starts after ${t} periods; the count starts at 0 (from the start).`, [item]); return t; }
     if (!isQ(t, `${at}'s timing`, item)) return null;
     const q = Q.get(t)!;
     if (U.has(t) && !sameDims(U.get(t)!, period)) { err('timing', `${at}'s timing ${name(t)} is ${showUnit(U.get(t)!)}; it counts ${model.period}s from now.`, [item, t]); return null; }
@@ -579,14 +579,14 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
     let reaches = false;
     const times: (number | string | null)[] = [];
     o.sets.forEach((s, i) => {
-      const from = timingOf(s.from_period, `${at}'s setting of ${name(s.quantity)}`, o.id);
+      const from = timingOf(s.starts_after_periods, `${at}'s setting of ${name(s.quantity)}`, o.id);
       times.push(from);
       const to = s.to ?? '';
       if (!isQ(s.quantity, at, o.id) || !isQ(to, at, o.id)) return;
       if (Q.get(s.quantity)!.status === 'derived') err('set_derived', `${at} sets ${name(s.quantity)}, which is worked out by its relation; set one of its inputs instead.`, [o.id, s.quantity]);
       if (unitsOk(s.quantity, to) && !sameDims(U.get(s.quantity)!, U.get(to)!)) err('unit_mismatch', `${at} sets ${name(s.quantity)} (${showUnit(U.get(s.quantity)!)}) to ${name(to)} (${showUnit(U.get(to)!)}); they need one unit.`, [o.id, s.quantity, to]);
-      if (o.sets.slice(0, i).some((x) => x.quantity === s.quantity && x.from_period === s.from_period)) err('option_shape', `${at} sets ${name(s.quantity)} twice from the same period; keep one.`, [o.id, s.quantity]);
-      if (horizon > 0 && typeof from === 'number' && from >= horizon) err('after_horizon', `${at} sets ${name(s.quantity)} from period ${from}, after the model's last period (${horizon - 1}).`, [o.id]);
+      if (o.sets.slice(0, i).some((x) => x.quantity === s.quantity && x.starts_after_periods === s.starts_after_periods)) err('option_shape', `${at} sets ${name(s.quantity)} twice from the same period; keep one.`, [o.id, s.quantity]);
+      if (horizon > 0 && typeof from === 'number' && from >= horizon) err('after_horizon', `${at} sets ${name(s.quantity)} after ${from} ${model.period}s, beyond the model's ${horizon}.`, [o.id]);
       if (goalReach.has(s.quantity) || limitReach.has(s.quantity)) reaches = true;
       else if (reachable) err('set_reaches_nothing', `${at} sets ${name(s.quantity)}, which reaches no goal or limit; link it to what it changes, or drop the setting.`, [o.id, s.quantity]);
     });
@@ -601,10 +601,10 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
   for (const k of model.risks) {
     const at = `The risk "${k.label}" (${k.id})`;
     needQuote(k, at, k.id);
-    const from = timingOf(k.from_period, at, k.id);
+    const from = timingOf(k.starts_after_periods, at, k.id);
     riskTiming.set(k.id, from);
     if (!isQ(k.occurrence, at, k.id) || !isQ(k.severity, at, k.id) || !isQ(k.effect_on, at, k.id)) continue;
-    if (horizon > 0 && typeof from === 'number' && from >= horizon) err('after_horizon', `${at} takes effect from period ${from}, after the model's last period (${horizon - 1}).`, [k.id]);
+    if (horizon > 0 && typeof from === 'number' && from >= horizon) err('after_horizon', `${at} takes effect after ${from} ${model.period}s, beyond the model's ${horizon}.`, [k.id]);
     const ou = U.get(k.occurrence);
     if (ou && !isDimensionless(ou)) err('risk_shape', `${at}: its chance ${name(k.occurrence)} is ${showUnit(ou)}; a chance is a pure number ("1", or "%").`, [k.id, k.occurrence]);
     const occ = Q.get(k.occurrence)!;
@@ -720,7 +720,7 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
     limitClosure.set(l.id, new Set([...closure, ...(w?.blockers ?? [])]));
     return { limit_id: l.id, ...outcomeOf(closure, w), cancelled: [], needs_measure: false };
   });
-  const optionClosure = new Map(model.options.map((o) => [o.id, upstream([...o.sets.map((s) => s.to).filter(has), ...o.sets.map((s) => s.from_period).filter((t): t is string => typeof t === 'string')])] as const));
+  const optionClosure = new Map(model.options.map((o) => [o.id, upstream([...o.sets.map((s) => s.to).filter(has), ...o.sets.map((s) => s.starts_after_periods).filter((t): t is string => typeof t === 'string')])] as const));
   const perOption: OptionOutcome[] = model.options.map((o) => {
     if (o.status !== 'live') return { option_id: o.id, status: 'not_compared', reasons: [o.status === 'ruled_out' ? `"${o.label}" is ruled out, kept in view.` : `"${o.label}" is removed from the comparison.`], asks: [] };
     return { option_id: o.id, ...outcomeOf(optionClosure.get(o.id)!) };

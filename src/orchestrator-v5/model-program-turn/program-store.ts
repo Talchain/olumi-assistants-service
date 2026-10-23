@@ -12,7 +12,7 @@
  * A living model that CLAIMS a program (it carries `model_program`) but cannot be read as v1 is UNREADABLE: refused with a
  * way forward, never treated as a legacy model or as no model.
  */
-import { CanonicalModel, type CanonicalModelT } from '../model-program/canonical.js';
+import { CanonicalModel, withDeclaredTiming, type CanonicalModelT } from '../model-program/canonical.js';
 import { ENGINE_VERSIONS, shownRun, shownView, type EngineVersions, type StoredRun } from './run-receipt.js';
 
 type Rec = Record<string, unknown>;
@@ -40,7 +40,7 @@ export function programReadOf(graph: unknown): ProgramRead {
   if (!isProgramGraph(graph)) return { kind: 'none' };
   const lm = (graph as Rec)['living_model'] as Rec;
   if (lm['model_program'] !== MODEL_PROGRAM) return { kind: 'unreadable', reason: `its model is in a form this version cannot read (${JSON.stringify(lm['model_program'])})` };
-  const parsed = CanonicalModel.safeParse(lm['canonical']);
+  const parsed = CanonicalModel.safeParse(withDeclaredTiming(lm['canonical']));
   if (!parsed.success) return { kind: 'unreadable', reason: 'its saved model does not match the model format' };
   const words = lm['person_words'];
   if (typeof lm['seed'] !== 'number' || !Array.isArray(words) || !words.every((w) => typeof w === 'string')) return { kind: 'unreadable', reason: 'its saved model is missing its seed or the person\'s words' };
