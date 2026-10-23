@@ -453,7 +453,13 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     // Retain a bounded window only without a scored target; a visible chance keeps its existing horizon disclosure.
     if (window !== undefined && window > 0 && window <= 120 && goalNode.goal_threshold === undefined
       && goalNode.goal_target_basis === undefined) goalNode.goal_horizon_months = window;
-    if (t?.reference === null || t?.period_kind === null) hold(aim.id, 'goal_scope_unknown');
+    // An origin and an observation period place a target in time, so they are needed only where it has a time to place: a
+    // window (a duration, or Olumi's calendar reading), words for when, a change from a base, or an accumulation it is made of.
+    // A static level target ("at least 100 tickets a week") has none, so the AI's null for both leaves it as before B2a
+    // (hotfix 23 Oct: every served goal was held). Where scope is needed, an unstated one stays held, never read as today.
+    const needsScope = t !== null && (window !== undefined || t.period_months != null || t.by_when != null || isChange
+      || t.change_kind != null || model.factors.some((f) => f.accumulation != null && aim.defined_as?.of.includes(f.id) === true));
+    if (needsScope && (t.reference === null || t.period_kind === null)) hold(aim.id, 'goal_scope_unknown');
     const targetHolds = withheld.slice(heldBefore).filter(w => w.id === aim.id);
     if (aim.id !== primaryAimId && targetHolds.length > 0) goalNode.goal_rests_on = targetHolds;
     readings.set(aim.id, { aim, node: goalNode!, goal, held: goalHeld });

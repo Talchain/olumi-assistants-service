@@ -1,0 +1,169 @@
+{
+  "aims": [
+    {
+      "id": "weekly_support_capacity",
+      "text": "Weekly support capacity",
+      "party": null,
+      "quote": "Use the exact goal label \"Weekly support capacity\".",
+      "source": "user",
+      "status": "current",
+      "target": {
+        "low": null,
+        "high": null,
+        "unit": "tickets per week",
+        "value": 100,
+        "source": null,
+        "by_when": null,
+        "current": 80,
+        "baseline": null,
+        "quantity": "weekly support capacity",
+        "period_by": null,
+        "reference": null,
+        "comparator": ">=",
+        "change_kind": null,
+        "period_kind": null,
+        "current_unit": null,
+        "period_months": null,
+        "current_source": null,
+        "period_read_on": null,
+        "period_deadline": null
+      },
+      "defined_as": {
+        "of": [
+          "existing_capacity",
+          "additional_capacity"
+        ],
+        "op": "sum",
+        "party": null,
+        "quote": "Total weekly support capacity is defined as the existing 80 tickets per week plus the additional specialist capacity.",
+        "source": "user"
+      }
+    }
+  ],
+  "links": [],
+  "risks": [],
+  "views": [],
+  "factors": [
+    {
+      "id": "existing_capacity",
+      "low": null,
+      "high": null,
+      "kind": "factor",
+      "unit": "tickets per week",
+      "label": "Existing team capacity",
+      "limit": null,
+      "party": null,
+      "quote": "Our existing team resolves 80 tickets per week.",
+      "value": 80,
+      "source": "user",
+      "defined_as": null,
+      "estimate_by": null,
+      "accumulation": null
+    },
+    {
+      "id": "additional_specialists",
+      "low": null,
+      "high": null,
+      "kind": "factor",
+      "unit": "specialists",
+      "label": "Additional specialists",
+      "limit": null,
+      "party": null,
+      "quote": "Keep current staffing adds no specialist.",
+      "value": 0,
+      "source": "user",
+      "defined_as": null,
+      "estimate_by": null,
+      "accumulation": null
+    },
+    {
+      "id": "capacity_per_specialist",
+      "low": 10,
+      "high": 30,
+      "kind": "factor",
+      "unit": "tickets per week per specialist",
+      "label": "Weekly capacity per additional specialist",
+      "limit": null,
+      "party": null,
+      "quote": "Each additional specialist resolves about 20 tickets per week, between 10 and 30.",
+      "value": 20,
+      "source": "user",
+      "defined_as": null,
+      "estimate_by": null,
+      "accumulation": null
+    },
+    {
+      "id": "additional_capacity",
+      "low": null,
+      "high": null,
+      "kind": "outcome",
+      "unit": "tickets per week",
+      "label": "Additional specialist capacity",
+      "limit": null,
+      "party": null,
+      "quote": "Total weekly support capacity is defined as the existing 80 tickets per week plus the additional specialist capacity.",
+      "value": null,
+      "source": "user",
+      "defined_as": {
+        "of": [
+          "additional_specialists",
+          "capacity_per_specialist"
+        ],
+        "op": "product",
+        "party": null,
+        "quote": "Each additional specialist resolves about 20 tickets per week, between 10 and 30.",
+        "source": "user"
+      },
+      "estimate_by": null,
+      "accumulation": null
+    }
+  ],
+  "history": [],
+  "options": [
+    {
+      "id": "keep_staffing",
+      "label": "Keep current staffing",
+      "party": null,
+      "quote": "Keep current staffing adds no specialist.",
+      "source": "user",
+      "status": "feasible",
+      "settings": [
+        {
+          "low": null,
+          "high": null,
+          "unit": "specialists",
+          "party": null,
+          "quote": "Keep current staffing adds no specialist.",
+          "value": 0,
+          "source": "user",
+          "factor_id": "additional_specialists",
+          "estimate_by": null
+        }
+      ],
+      "developed_from": null
+    },
+    {
+      "id": "add_specialist",
+      "label": "Add one specialist",
+      "party": null,
+      "quote": "Add one specialist adds one specialist.",
+      "source": "user",
+      "status": "feasible",
+      "settings": [
+        {
+          "low": null,
+          "high": null,
+          "unit": "specialists",
+          "party": null,
+          "quote": "Add one specialist adds one specialist.",
+          "value": 1,
+          "source": "user",
+          "factor_id": "additional_specialists",
+          "estimate_by": null
+        }
+      ],
+      "developed_from": null
+    }
+  ],
+  "conditions": []
+}
