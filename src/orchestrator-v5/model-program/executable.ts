@@ -2,6 +2,7 @@
 // r2 (DL rulings on the seam, 23 Oct): every Quantity carries its READING, set by the compiler.
 // r3 (DL, phase 0b + gold-model format gaps, 23 Oct): labels; the author of every fixed value; max/min aggregation; a goal
 //    or limit read as a ratio of two window aggregates (`per`); `withheld[]` echoed through to the result; limits-only runs.
+// r5 (DL, 23 Oct): from_period on OptionSet and Risk may name a quantity (uncertain or per-option timing).
 // r4 (PL rulings A and B, 23 Oct): readings are STRUCTURAL only (options and risks never change one); a range carries
 //    range_kind (bounds | plausible, from the person's words) and its domain (a stated hard restriction or a mathematical one).
 export type FixedAuthor = 'person' | 'olumi' | 'structure';
@@ -45,9 +46,11 @@ export type Aggregation = 'end' | 'sum' | 'mean' | 'every' | 'max' | 'min';
 //   by its own reading ("conversion over the first three months" = sum(sign-ups) ÷ sum(visitors)). Never with `every`.
 export type Goal = { id: string; label: string; quantity: string; per?: string; cmp: Cmp; target: string; aggregation: Aggregation; window: Window };
 export type Limit = { id: string; label: string; quantity: string; per?: string; cmp: Cmp; bound: string; aggregation: Aggregation; window: Window };
-export type OptionSet = { quantity: string; to: string; from_period: number };                   // `to` is a quantity id (no bare numbers)
+// from_period: a whole period, or the id of a quantity in the period unit when the timing is uncertain or per option (S2
+//   samples it on the same draws; its whole-period reading, e.g. ceil, is with the PL). A fixed timing is always a number.
+export type OptionSet = { quantity: string; to: string; from_period: number | string };          // `to` is a quantity id (no bare numbers)
 export type Option = { id: string; label: string; sets: OptionSet[] };
-export type Risk = { id: string; occurrence: string; severity: string; effect_on: string; mode: 'add' | 'multiply'; from_period: number };
+export type Risk = { id: string; occurrence: string; severity: string; effect_on: string; mode: 'add' | 'multiply'; from_period: number | string };
 // occurrence = a chance quantity (0..1) over the whole horizon; severity is drawn ONLY when it occurs; the effect applies from from_period.
 // withheld: every goal, limit, option or risk of the person's model that is NOT in this run, with its reason, echoed unchanged
 //   into the result so it can say what the chances cover ("covers productivity and budget only").

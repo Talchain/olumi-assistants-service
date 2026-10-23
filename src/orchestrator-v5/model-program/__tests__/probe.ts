@@ -23,8 +23,16 @@ export function probeValue(x: ExecutableModel, check: Check, optionId: string): 
 function run(x: ExecutableModel, byId: Map<string, Quantity>, sets: ExecutableModel['options'][number]['sets'],
   override: ReadonlyMap<string, number>, draw: (qi: number) => number, riskDraw: (ri: number) => number): Map<string, number>[] {
   const index = new Map(x.quantities.map((q, i) => [q.id, i] as const));
+  const input = (q: Quantity): number => {
+    if (override.has(q.id)) return override.get(q.id)!;
+    const dist = q.dist!;
+    return dist.kind === 'fixed' ? dist.value : dist.low + draw(index.get(q.id)!) * (dist.high - dist.low);
+  };
+  // A timing that names a quantity reads that quantity's draw, rounded up to a whole period (a probe convention only: the
+  // simulator's reading of a sampled timing is the PL's).
+  const fromOf = (f: number | string) => (typeof f === 'number' ? f : Math.ceil(input(byId.get(f)!)));
   const setsOn = new Map<string, { from: number; to: string }[]>();
-  for (const s of sets) setsOn.set(s.quantity, [...(setsOn.get(s.quantity) ?? []), { from: s.from_period, to: s.to }].sort((a, b) => a.from - b.from));
+  for (const s of sets) setsOn.set(s.quantity, [...(setsOn.get(s.quantity) ?? []), { from: fromOf(s.from_period), to: s.to }].sort((a, b) => a.from - b.from));
   const risksOn = new Map<string, number[]>();
   x.risks.forEach((r, i) => risksOn.set(r.effect_on, [...(risksOn.get(r.effect_on) ?? []), i]));
   const deps = (q: Quantity): string[] => [
@@ -42,11 +50,7 @@ function run(x: ExecutableModel, byId: Map<string, Quantity>, sets: ExecutableMo
     order.push(q);
   };
   for (const q of x.quantities) visit(q);
-  const input = (q: Quantity): number => {
-    if (override.has(q.id)) return override.get(q.id)!;
-    const dist = q.dist!;
-    return dist.kind === 'fixed' ? dist.value : dist.low + draw(index.get(q.id)!) * (dist.high - dist.low);
-  };
+  const riskFrom = x.risks.map((r) => fromOf(r.from_period));
   const fired = x.risks.map((_, i) => riskDraw(i));
   const stocks = new Map<string, number>();
   const pass = (t: number, v: Map<string, number>) => {
@@ -55,7 +59,7 @@ function run(x: ExecutableModel, byId: Map<string, Quantity>, sets: ExecutableMo
       let val = q.stock ? stocks.get(q.id) ?? NaN : active ? v.get(active.to) ?? NaN : q.dist || override.has(q.id) ? input(q) : evaluate(q, v);
       for (const i of risksOn.get(q.id) ?? []) {
         const r = x.risks[i];
-        if (t >= r.from_period && fired[i] < (v.get(r.occurrence) ?? 0)) val = r.mode === 'add' ? val + (v.get(r.severity) ?? NaN) : val * (v.get(r.severity) ?? NaN);
+        if (t >= riskFrom[i] && fired[i] < (v.get(r.occurrence) ?? 0)) val = r.mode === 'add' ? val + (v.get(r.severity) ?? NaN) : val * (v.get(r.severity) ?? NaN);
       }
       v.set(q.id, val);
     }

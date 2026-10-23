@@ -28,7 +28,7 @@ const set = (quantity: string, to: string | null, quote: string, f: Partial<SetT
 const option = (id: string, label: string, sets: SetT[], quote: string): CanonicalModelT['options'][number] =>
   ({ id, label, sets, status: 'live', developed_from: null, author: 'person', quote, ...base });
 const asked = (id: string, unit: string, question: string) => qty(id, unit, { status: 'asked', question });
-const derived = (id: string, unit: string) => qty(id, unit, { status: 'derived' });
+const derived = (id: string, unit: string) => qty(id, unit, { status: 'derived', kind: 'derived' });
 const who = (quote: string | null) => (quote === null ? { author: 'olumi' as const, quote: null } : { author: 'person' as const, quote });
 /** sum / product with signed or powered parts; `difference` and `ratio` are the first part against the rest. */
 const def = (id: string, defines: string, op: 'sum' | 'difference' | 'product' | 'ratio', parts: string[], quote: string | null = null): CanonicalRelationT =>
@@ -398,6 +398,27 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(r.executable).toBeNull();
   });
 
+  it('DL (1): a derived quantity is derived, not a fact; a link\'s size stays a coefficient even when it is derived', () => {
+    // The size of the oven link is worked out from two coefficients: kind coefficient, status derived.
+    const m = bakery();
+    m.quantities = m.quantities.map((q) => (q.id === 'extra_per_oven' ? { ...derived('extra_per_oven', 'loaf/week/oven'), kind: 'coefficient' as const } : q));
+    m.quantities.push(olumi('capacity_per_oven', 'loaf/week/oven', 120, 200, 160), olumi('sell_through', '1', 0.5, 0.9, 0.7));
+    m.relations.push(def('extra_rel', 'extra_per_oven', 'product', ['capacity_per_oven', 'sell_through']));
+    const r = compile(m);
+    expect(r.errors).toEqual([]);
+    expect(xq(r).get('extra_per_oven')!.equation).toEqual({ form: 'definition', op: 'product', parts: ['capacity_per_oven', 'sell_through'] });
+    // A derived quantity marked fact, and kind derived on a figure, are both refused: schema and compiler say the same.
+    const asFact = bakery();
+    asFact.quantities = asFact.quantities.map((q) => (q.id === 'profit' ? { ...q, kind: 'fact' as const } : q));
+    expect(compile(asFact).errors.map((e) => [e.code, e.items])).toEqual([['figure_status', ['profit']]]);
+    const figure = bakery();
+    figure.quantities = figure.quantities.map((q) => (q.id === 'costs' ? { ...q, kind: 'derived' as const } : q));
+    expect(compile(figure).errors.map((e) => [e.code, e.items])).toEqual([['figure_status', ['costs']]]);
+    const schemaText = JSON.stringify(z.toJSONSchema(CanonicalModel));
+    expect(schemaText).not.toContain('A derived or structural quantity is a fact');
+    expect(schemaText).toContain('a link\'s size stays a coefficient even when it is worked out by a relation'); // contrast: the new rule is said
+  });
+
   it('phase 0b fix 6: a preference is shown and reported, never a goal or a limit', () => {
     const m = bakery();
     m.preferences.push({ id: 'spend_less', quantity: 'costs', direction: 'lower', author: 'person', quote: "we'd like to spend less", ...base });
@@ -436,13 +457,19 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(x.withheld).toContainEqual(expect.objectContaining({ id: 'friendly', kind: 'limit', label: 'Keep the gym friendly' }));
     expect(r.within_limits.leaves_out).toEqual(['friendly']);
     expect(r.coverage.leaves_out.map((w) => w.id)).toEqual(['friendly']);
-    // Uncertain timing waits on the PL's range-law ruling: the option is withheld with that reason, the rest still compares.
+    // DL (2): an uncertain timing goes into the run under its quantity id (S2 samples it; its whole-period reading is the PL's).
     const unsure = structuredClone(m);
-    unsure.quantities = unsure.quantities.map((q) => (q.id === 'opening_month' ? { ...q, value: null, low: 1, high: 4 } : q));
+    unsure.quantities = unsure.quantities.map((q) => (q.id === 'opening_month' ? { ...q, value: null, low: 1, high: 4, range_kind: 'bounds' as const } : q));
     const ru = compile(unsure);
-    expect(ru.perOption.find((o) => o.option_id === 'promo')).toMatchObject({ status: 'withheld' });
-    expect(ru.perOption.find((o) => o.option_id === 'promo')!.reasons.join(' ')).toContain('range-law ruling');
-    expect(ru.executable!.options.map((o) => o.id)).toEqual(['carry_on']);
+    expect(ru.errors).toEqual([]);
+    expect(ru.executable!.options.find((o) => o.id === 'promo')!.sets).toEqual([{ quantity: 'joins', to: 'promo_joins', from_period: 'opening_month' }]);
+    expect(ru.executable!.quantities.find((q) => q.id === 'opening_month')!.dist).toMatchObject({ kind: 'range', low: 1, high: 4, range_kind: 'bounds' });
+    // An unclear timing range is asked, like any person's range; the other option still compares.
+    const unclear = structuredClone(m);
+    unclear.quantities = unclear.quantities.map((q) => (q.id === 'opening_month' ? { ...q, value: null, low: 1, high: 4 } : q));
+    const rc = compile(unclear);
+    expect(rc.perOption.find((o) => o.option_id === 'promo')).toMatchObject({ status: 'asks', asks: ['opening_month'] });
+    expect(rc.executable!.options.map((o) => o.id)).toEqual(['carry_on']);
   });
 
   it('DL defect (c) + fact/coefficient: an inline option value compiles into a named quantity; a missing one is an ask that fills it', () => {

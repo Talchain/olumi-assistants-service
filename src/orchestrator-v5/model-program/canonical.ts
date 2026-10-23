@@ -60,11 +60,13 @@ const attribution = {
 
 export const QUANTITY_STATUSES = ['known', 'estimated', 'asked', 'derived', 'unknown', 'not_applicable', 'unsupported'] as const;
 /**
- * FACT vs COEFFICIENT (DL, from the blind phase 0 score): a fact is about the person's own situation (their price, costs,
- * headcount, dates, members today) and only they can give it, so a missing fact is ASKED, never estimated. A coefficient is
- * a mechanism's size (how much a driver moves what it drives, a rate, a share): Olumi may estimate it, labelled and ranged.
+ * FACT vs COEFFICIENT vs DERIVED (DL, from the blind phase 0 score; contradiction fixed 23 Oct): a fact is about the person's
+ * own situation (their price, costs, headcount, dates, members today) and only they can give it, so a missing fact is ASKED,
+ * never estimated. A coefficient is a mechanism's size (how much a driver moves what it drives, a rate, a share): Olumi may
+ * estimate it, labelled and ranged, and it stays a coefficient even when it is worked out from other quantities. A derived
+ * quantity that is not a link's size is neither: it is derived (worked out by its relation).
  */
-export const QUANTITY_KINDS = ['fact', 'coefficient'] as const;
+export const QUANTITY_KINDS = ['fact', 'coefficient', 'derived'] as const;
 export type QuantityStatusT = (typeof QUANTITY_STATUSES)[number];
 /** The statuses whose figure is in hand: the only ones that reach the executable model as a value or range. */
 export const FIGURE_STATUSES: ReadonlySet<QuantityStatusT> = new Set(['known', 'estimated']);
@@ -91,7 +93,8 @@ export const CanonicalQuantity = z.object({
   range_kind: RANGE_KIND,
   kind: z.enum(QUANTITY_KINDS).describe(
     'fact: a figure about the person\'s own situation (their price, costs, headcount, members today, dates, targets): only they can give it, so a missing fact is asked, never estimated. '
-    + 'coefficient: the size of a mechanism (each extra oven adds so many loaves; the share of visitors who join; a rate): Olumi may estimate it, labelled, with low and high. A derived or structural quantity is a fact.'),
+    + 'coefficient: the size of a mechanism (each extra oven adds so many loaves; the share of visitors who join; a rate): Olumi may estimate it, labelled, with low and high; a link\'s size stays a coefficient even when it is worked out by a relation. '
+    + 'derived: worked out by its relation and not a link\'s size (profit, total members): its status is derived. A structural constant is a fact.'),
   status: z.enum(QUANTITY_STATUSES).describe(
     'known: a figure in hand that is not an estimate: the person\'s (quoted), a structural constant (author structure), or Olumi\'s reading of a stated calendar date as a window\'s whole number of periods (basis names the date). '
     + 'estimated: Olumi\'s provisional estimate of a coefficient, always with low and high, as wide as what is genuinely unknown. Never a fact. '
