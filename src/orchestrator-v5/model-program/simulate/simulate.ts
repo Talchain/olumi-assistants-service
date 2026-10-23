@@ -6,49 +6,65 @@
  *   - Common random numbers: every uncertain quantity is drawn ONCE per draw index, from its own stream keyed by (seed, id),
  *     and those draws are shared by ALL options. Option switches are never randomised.
  *   - Every goal, the joint and the limits read the SAME draws; the joint is counted draw by draw, never a product of marginals.
- *   - A `range` is read with CEE's existing range conversion and its sign rule, reused (`range-law.ts`, which cites mapper.ts):
- *     a Normal draw, the figure alone, or held (a plain Error: the compiler withholds what rests on it). A chance (a risk's
- *     occurrence) is clipped to [0, 1].
+ *   - A `range` is read with CEE's existing range conversion, reused (`range-law.ts`, which cites mapper.ts), as the PL ruled
+ *     (AMEND, 23 Oct): a person's 'bounds' conditioned on [low, high]; otherwise unbounded unless a domain applies, and a
+ *     risk's occurrence is conditioned on [0, 1]; low = high is that figure. A chance worked out by an equation is clipped to
+ *     [0, 1] where a risk reads it.
  *   - Time (DL ruling 1, 23 Oct; a quantity's `reading` is 'state' or 'flow'): a model of N periods has boundaries 0..N and
  *     intervals 0..N−1. At each time k = 0..N, (1) the option's sets and the risk effects active at k apply, and (2) every
  *     quantity is evaluated, in dependency order, from the stocks' boundary levels S[k]; then (3) S[k+1] = S[k] + Σ inflows −
  *     Σ outflows, the flows of interval k. A STATE is read at boundaries, a FLOW over intervals:
  *       - `end`: a state reads S[start + periods]; a flow reads interval start + periods − 1;
- *       - `sum` / `mean` / `every`: a flow reads intervals start … start + periods − 1; a state reads boundaries
- *         start + 1 … start + periods.
+ *       - `sum` / `mean` / `every` / `max` / `min`: a flow reads intervals start … start + periods − 1; a state reads
+ *         boundaries start + 1 … start + periods.
  *     So the level after six months is {0, 6} on a state (S[6]); revenue in months 6–8 is {6, 3} on a flow (intervals 6–8).
  *   - A nonfinite draw (NaN, e.g. a `ratio` by zero, or ±Infinity) is outside the model's domain, never a failed outcome
  *     (DL ruling 3): any such draw in what a goal or limit reads withholds that chance, the joint (for a goal) or within_limits
  *     (for a limit), and joint_within_limits, typed 'invalid_domain' with the count and the quantities. No draw is dropped.
- *   - Fixed inputs only: every draw is the same, the chance is exactly 0 or 1, and its precision is that point.
+ *     Every chance the simulator withholds is listed once in `SimResult.withheld_chances`; the compiler's `withheld[]` (what
+ *     is not in this run) is echoed unchanged into `SimResult.withheld` (executable.ts r3).
+ *   - `per` (executable.ts r3): a goal or limit read as agg(quantity) ÷ agg(per), the same aggregation over the same window,
+ *     each by its own reading. A zero or nonfinite denominator is outside the domain (withheld). Never with `every`.
+ *   - A limits-only run (no goals) has no joint: it is withheld as 'no_goals', and joint_within_limits is within_limits.
+ *   - EXACT chances (gold-model ruling 4): a condition whose every draw gives the same reading and the same target, with no
+ *     risk in what it rests on, is exact for that option (e.g. "Keep", which adds exactly 0 to an uncertain effect): its
+ *     chance is 0 or 1 and its precision is that point, with no Monte Carlo interval. Otherwise the Wilson interval.
  *
  * Where the interface is silent, this file decides as follows (and throws a plain Error where no meaning can be given):
  *   - Only stocks may close a loop: a same-period cycle (including one made by an option's set or a risk) throws.
  *   - An option set makes the quantity read its `to` quantity from `from_period` on; with several sets on one quantity the
  *     latest started one applies. A set on a stock throws (set its start or its flows instead).
+ *   - `from_period` (of a set or a risk) may name a quantity: a TIMING, a figure or a range, sampled once per draw with the
+ *     other inputs (gold-model ruling 2). It takes effect from period ceil(timing) (the first period that starts at or after
+ *     it), never before period 0. An option can name its own timing.
  *   - A risk reads its occurrence and severity at time `from_period`, under the option (so a mitigation can lower the chance).
  *     It fires where the risk's own uniform draw is below the occurrence. On a non-stock quantity the effect applies at every
- *     time from `from_period`; on a stock it is one shock to the boundary level S[from_period], which then accumulates. An uncertain severity is drawn in every draw (its stream must not shift) but applied only where the
- *     risk fires.
+ *     time from `from_period`; on a stock it is one shock to the boundary level S[from_period], which then accumulates. An
+ *     uncertain severity is drawn in every draw (its stream must not shift) but applied only where the risk fires.
  *   - A goal's target and a limit's bound are read where the window ends (its last boundary or interval). `every` holds when
  *     every reading in the window holds; its aggregated value (for outcomes) is the worst one (min for > / >=, max for < / <=).
- *   - Drivers: each uncertain quantity the option's goals and limits depend on, and whose own draw the option uses (not one it
- *     sets from period 0), in model order. joint_if_low / joint_if_high are joint_within_limits over the bottom and top third
- *     of that quantity's draws.
+ *     `max` / `min` are the window's highest / lowest reading (gold-model ruling 1, executable.ts r3).
+ *   - Drivers: each uncertain quantity the option's goals and limits depend on, in model order, except any quantity an option
+ *     sets (a switch is a choice, never an uncertainty: gold-model ruling 5). joint_if_low / joint_if_high are
+ *     joint_within_limits over the bottom and top third of that quantity's draws.
  */
-import type { Aggregation, Cmp, ExecutableModel, Option, Quantity, Reading, Window } from '../executable.js';
+import type { Aggregation, Cmp, ExecutableModel, Goal, Limit, Option, OptionSet, Quantity, Reading, Risk, Window } from '../executable.js';
 import { standardNormals, uniforms } from './prng.js';
-import { rangeLaw } from './range-law.js';
-import type { Chance, OptionResult, RecordedDraw, SimResult, Withheld } from './result.js';
+import { rangeLaw, truncatedStandardNormal, type RangeDist } from './range-law.js';
+import type { Chance, ChanceOrWithheld, OptionResult, RecordedDraw, SimResult, WithheldChance, WithheldChanceEntry } from './result.js';
 
 interface NormalLaw {
   readonly centre: number;
   readonly sd: number;
-  /** A chance's draws are clipped to [0, 1]. */
-  readonly chance: boolean;
+  /** Where the draws are conditioned (±Infinity when they are not). */
+  readonly lower: number;
+  readonly upper: number;
 }
 /** A quantity's reading, as the compiler set it (executable.ts r2, S1). */
 export const readingOf = (q: Quantity): Reading => q.reading;
+/** Gold-model ruling 2, ahead of S1's executable.ts: a `from_period` that names a timing quantity. */
+type FromPeriod = number | string;
+const fromOf = (x: OptionSet | Risk): FromPeriod => (x as { from_period: FromPeriod }).from_period;
 
 export interface SimulateOptions {
   draws?: number;
@@ -75,6 +91,8 @@ type Node =
   | { readonly kind: 'definition'; readonly op: Op; readonly parts: readonly number[] }
   | { readonly kind: 'effect'; readonly base: number; readonly coefficients: readonly number[]; readonly drivers: readonly number[] }
   | StockNode;
+/** A period: a whole number, or a timing quantity (a figure or a range) read per draw. */
+type Timing = { readonly fixed: number } | { readonly q: number };
 
 interface Check {
   readonly id: string;
@@ -84,6 +102,8 @@ interface Check {
   readonly aggregation: Aggregation;
   readonly first: number;
   readonly last: number;
+  /** executable.ts r3 `per`: the denominator quantity, read over the same window by its own reading. */
+  readonly per?: { readonly q: number; readonly first: number; readonly last: number };
 }
 interface CompiledRisk {
   readonly id: string;
@@ -91,7 +111,7 @@ interface CompiledRisk {
   readonly severity: number;
   readonly on: number;
   readonly add: boolean;
-  readonly from: number;
+  readonly from: Timing;
 }
 interface Compiled {
   readonly ids: readonly string[];
@@ -102,15 +122,21 @@ interface Compiled {
   readonly goals: readonly Check[];
   readonly limits: readonly Check[];
   readonly risks: readonly CompiledRisk[];
+  /** Every quantity any option sets: a switch, never a driver. */
+  readonly switches: ReadonlySet<number>;
   readonly periods: number;
 }
+interface PlanSet { readonly from: Timing; readonly to: number }
 interface Plan {
   readonly option_id: string;
   readonly order: readonly number[];
-  readonly sets: readonly (readonly { readonly from: number; readonly to: number }[] | undefined)[];
+  readonly sets: readonly (readonly PlanSet[])[];
   readonly risksOn: readonly (readonly number[])[];
   /** Slots (into `Compiled.ranged`) reported as drivers for this option. */
   readonly drivers: readonly number[];
+  /** Per goal and per limit: whether what it rests on, under this option, includes a risk (then never exact). */
+  readonly goalRisky: readonly boolean[];
+  readonly limitRisky: readonly boolean[];
 }
 interface Inputs {
   readonly drawn: readonly Float64Array[];
@@ -119,7 +145,7 @@ interface Inputs {
 
 const OPS: ReadonlySet<string> = new Set(['sum', 'difference', 'product', 'ratio']);
 const CMPS: ReadonlySet<string> = new Set(['>=', '<=', '>', '<']);
-const AGGS: ReadonlySet<string> = new Set(['end', 'sum', 'mean', 'every']);
+const AGGS: ReadonlySet<string> = new Set(['end', 'sum', 'mean', 'every', 'max', 'min']);
 const wholeFrom = (n: number, min: number): boolean => Number.isInteger(n) && n >= min;
 
 function compile(model: ExecutableModel): Compiled {
@@ -147,31 +173,48 @@ function compile(model: ExecutableModel): Compiled {
     }
     return reading === 'state' ? [w.start_period + 1, w.start_period + w.periods] : [w.start_period, w.start_period + w.periods - 1];
   };
-  const check = (id: string, quantity: string, cmp: Cmp, against: string, aggregation: Aggregation, w: Window, kind: string): Check => {
-    const where = `${kind} "${id}"`;
-    if (!CMPS.has(cmp)) throw new Error(`${where}: unknown comparison "${cmp}"`);
-    if (!AGGS.has(aggregation)) throw new Error(`${where}: unknown aggregation "${aggregation}"`);
-    const q = ref(quantity, where);
-    const [first, last] = windowOf(w, readingOf(model.quantities[q]!), where);
-    return { id, q, ref: ref(against, where), cmp, aggregation, first, last };
+  const check = (x: Goal | Limit, against: string, kind: string): Check => {
+    const where = `${kind} "${x.id}"`;
+    if (!CMPS.has(x.cmp)) throw new Error(`${where}: unknown comparison "${x.cmp}"`);
+    if (!AGGS.has(x.aggregation)) throw new Error(`${where}: unknown aggregation "${x.aggregation}"`);
+    const q = ref(x.quantity, where);
+    const [first, last] = windowOf(x.window, readingOf(model.quantities[q]!), where);
+    let per: Check['per'];
+    if (x.per !== undefined) {
+      if (x.aggregation === 'every') throw new Error(`${where}: a ratio (per) is never read with 'every'`);
+      const pq = ref(x.per, `${where}'s per`);
+      const [pFirst, pLast] = windowOf(x.window, readingOf(model.quantities[pq]!), where);
+      per = { q: pq, first: pFirst, last: pLast };
+    }
+    return { id: x.id, q, ref: ref(against, where), cmp: x.cmp, aggregation: x.aggregation, first, last, ...(per !== undefined ? { per } : {}) };
   };
-  if (model.goals.length === 0) throw new Error('the model has no goals to simulate');
-  const goals = model.goals.map((g) => check(g.id, g.quantity, g.cmp, g.target, g.aggregation, g.window, 'goal'));
-  const limits = model.limits.map((l) => check(l.id, l.quantity, l.cmp, l.bound, l.aggregation, l.window, 'limit'));
+  if (model.goals.length === 0 && model.limits.length === 0) throw new Error('the model has no goals or limits to simulate');
+  const goals = model.goals.map((g) => check(g, g.target, 'goal'));
+  const limits = model.limits.map((l) => check(l, l.bound, 'limit'));
   unique([...model.goals, ...model.limits].map((x) => x.id), 'goal or limit');
 
+  /** A `from_period`: a whole number, or a timing quantity that has its own figure or range (read per draw). */
+  const timing = (from: FromPeriod, where: string): Timing => {
+    if (typeof from === 'number') {
+      if (!wholeFrom(from, 0)) throw new Error(`${where}: from_period must be a whole number of at least 0`);
+      return { fixed: from };
+    }
+    const q = ref(from, `${where}'s timing`);
+    if (model.quantities[q]!.dist === undefined) throw new Error(`${where}: its timing "${from}" must be a figure or a range, not worked out`);
+    return { q };
+  };
   unique(model.risks.map((r) => r.id), 'risk');
   const risks = model.risks.map((r): CompiledRisk => {
     const where = `risk "${r.id}"`;
     if (r.mode !== 'add' && r.mode !== 'multiply') throw new Error(`${where}: unknown mode "${String(r.mode)}"`);
-    if (!wholeFrom(r.from_period, 0)) throw new Error(`${where}: from_period must be a whole number of at least 0`);
     const occurrence = ref(r.occurrence, where);
     const dist = model.quantities[occurrence]!.dist;
     if (dist?.kind === 'fixed' && !(dist.value >= 0 && dist.value <= 1)) throw new Error(`${where}: occurrence ${dist.value} is not a chance in 0..1`);
     if (dist?.kind === 'range' && !(dist.low >= 0 && dist.high <= 1)) throw new Error(`${where}: occurrence range ${dist.low} to ${dist.high} is not inside 0..1`);
-    return { id: r.id, occurrence, severity: ref(r.severity, where), on: ref(r.effect_on, where), add: r.mode === 'add', from: r.from_period };
+    return { id: r.id, occurrence, severity: ref(r.severity, where), on: ref(r.effect_on, where), add: r.mode === 'add', from: timing(fromOf(r), where) };
   });
-  return { ids: model.quantities.map((q) => q.id), index, nodes, ranged, stocks, goals, limits, risks, periods };
+  const switches = new Set(model.options.flatMap((o) => o.sets.flatMap((s) => (index.has(s.quantity) ? [index.get(s.quantity)!] : []))));
+  return { ids: model.quantities.map((q) => q.id), index, nodes, ranged, stocks, goals, limits, risks, switches, periods };
 }
 
 function unique(ids: readonly string[], what: string): void {
@@ -195,10 +238,10 @@ function compileNode(q: Quantity, i: number, ref: (id: string, where: string) =>
       return { kind: 'fixed', value: q.dist.value };
     }
     if (q.dist.kind !== 'range') throw new Error(`${where}: unknown dist kind`);
-    const reading = rangeLaw(q.dist, { chance });
-    if (reading.kind === 'held') throw new Error(`${where} is held: ${reading.reason}; the compiler must withhold what rests on it`);
+    // A risk's occurrence is a chance: its mathematical domain is [0, 1].
+    const reading = rangeLaw(q.dist as RangeDist, chance ? { domain: { min: 0, max: 1 } } : {});
     if (reading.kind === 'point') return { kind: 'fixed', value: reading.value };
-    ranged.push({ q: i, law: { centre: reading.centre, sd: reading.sd, chance } });
+    ranged.push({ q: i, law: { centre: reading.centre, sd: reading.sd, lower: reading.lower, upper: reading.upper } });
     return { kind: 'drawn', slot: ranged.length - 1 };
   }
   if (q.equation !== undefined) {
@@ -219,21 +262,30 @@ function compileNode(q: Quantity, i: number, ref: (id: string, where: string) =>
 
 function planOption(c: Compiled, option: Option): Plan {
   const n = c.nodes.length;
-  const sets: { from: number; to: number }[][] = Array.from({ length: n }, () => []);
+  const where = `option "${option.id}"`;
+  const sets: PlanSet[][] = Array.from({ length: n }, () => []);
   for (const s of option.sets) {
-    const where = `option "${option.id}"`;
     const q = c.index.get(s.quantity), to = c.index.get(s.to);
     if (q === undefined || to === undefined) throw new Error(`${where} sets unknown quantity "${q === undefined ? s.quantity : s.to}"`);
     if (c.nodes[q]!.kind === 'stock') throw new Error(`${where} sets stock "${s.quantity}"; set its start or its flows instead`);
-    if (!wholeFrom(s.from_period, 0)) throw new Error(`${where}: from_period must be a whole number of at least 0`);
-    if (sets[q]!.some((x) => x.from === s.from_period)) throw new Error(`${where} sets "${s.quantity}" twice from period ${s.from_period}`);
-    sets[q]!.push({ from: s.from_period, to });
+    const raw = fromOf(s);
+    let from: Timing;
+    if (typeof raw === 'number') {
+      if (!wholeFrom(raw, 0)) throw new Error(`${where}: from_period must be a whole number of at least 0`);
+      if (sets[q]!.some((x) => 'fixed' in x.from && x.from.fixed === raw)) throw new Error(`${where} sets "${s.quantity}" twice from period ${raw}`);
+      from = { fixed: raw };
+    } else {
+      const t = c.index.get(raw);
+      if (t === undefined) throw new Error(`${where}'s timing names unknown quantity "${raw}"`);
+      if (c.nodes[t]!.kind !== 'fixed' && c.nodes[t]!.kind !== 'drawn') throw new Error(`${where}: its timing "${raw}" must be a figure or a range, not worked out`);
+      from = { q: t };
+    }
+    sets[q]!.push({ from, to });
   }
-  for (const list of sets) list.sort((a, b) => a.from - b.from);
   const risksOn: number[][] = Array.from({ length: n }, () => []);
   c.risks.forEach((r, i) => risksOn[r.on]!.push(i));
 
-  /** Same-period dependencies: what q's value at t is computed from at t. A stock's flows act one period later, so they are not. */
+  /** Same-period dependencies: what q's value at k is computed from at k. A stock's flows act one period later, so they are not. */
   const deps = (q: number): number[] => {
     const node = c.nodes[q]!;
     const own = node.kind === 'definition' ? [...node.parts]
@@ -248,7 +300,7 @@ function planOption(c: Compiled, option: Option): Plan {
     if (state[q] === 2) return;
     if (state[q] === 1) {
       const loop = [...stack.slice(stack.indexOf(q)), q].map((i) => c.ids[i]).join(' → ');
-      throw new Error(`option "${option.id}": cycle not through a stock: ${loop}`);
+      throw new Error(`${where}: cycle not through a stock: ${loop}`);
     }
     state[q] = 1;
     stack.push(q);
@@ -259,38 +311,63 @@ function planOption(c: Compiled, option: Option): Plan {
   };
   for (let q = 0; q < n; q++) visit(q);
 
-  // What the goals and limits depend on, through every edge (a stock's flows included).
-  const reach = new Set<number>();
-  const pending = [...c.goals, ...c.limits].flatMap((k) => [k.q, k.ref]);
-  while (pending.length > 0) {
-    const q = pending.pop()!;
-    if (reach.has(q)) continue;
-    reach.add(q);
-    const node = c.nodes[q]!;
-    pending.push(...deps(q), ...(node.kind === 'stock' ? [...node.inflows, ...node.outflows] : []));
-  }
-  const drivers = c.ranged.flatMap((r, slot) => (reach.has(r.q) && sets[r.q]![0]?.from !== 0 ? [slot] : []));
-  return { option_id: option.id, order, sets, risksOn, drivers };
+  /** What a quantity rests on through every edge (a stock's flows, a set's timing, a risk's timing included). */
+  const timingOf = (t: Timing): number[] => ('q' in t ? [t.q] : []);
+  const closure = (roots: readonly number[]): Set<number> => {
+    const reach = new Set<number>();
+    const pending = [...roots];
+    while (pending.length > 0) {
+      const q = pending.pop()!;
+      if (reach.has(q)) continue;
+      reach.add(q);
+      const node = c.nodes[q]!;
+      pending.push(...deps(q), ...(node.kind === 'stock' ? [...node.inflows, ...node.outflows] : []),
+        ...sets[q]!.flatMap((s) => timingOf(s.from)), ...risksOn[q]!.flatMap((r) => timingOf(c.risks[r]!.from)));
+    }
+    return reach;
+  };
+  const risky = (k: Check): boolean => [...closure([k.q, k.ref])].some((q) => risksOn[q]!.length > 0);
+  const reach = closure([...c.goals, ...c.limits].flatMap((k) => [k.q, k.ref]));
+  const drivers = c.ranged.flatMap((r, slot) => (reach.has(r.q) && !c.switches.has(r.q) ? [slot] : []));
+  return { option_id: option.id, order, sets, risksOn, drivers, goalRisky: c.goals.map(risky), limitRisky: c.limits.map(risky) };
 }
 
 function drawInputs(c: Compiled, seed: number, draws: number): Inputs {
   return {
     drawn: c.ranged.map(({ q, law }) => {
-      const z = standardNormals(seed, `q:${c.ids[q]}`, draws);
-      for (let i = 0; i < draws; i++) z[i] = law.centre + law.sd * z[i]!;
-      if (law.chance) for (let i = 0; i < draws; i++) z[i] = clip01(z[i]!);
-      return z;
+      const key = `q:${c.ids[q]}`;
+      if (law.lower === -Infinity && law.upper === Infinity) {
+        const z = standardNormals(seed, key, draws);
+        for (let i = 0; i < draws; i++) z[i] = law.centre + law.sd * z[i]!;
+        return z;
+      }
+      // Conditioned on [lower, upper] by inverse CDF, one uniform per draw: no draw outside, none piled on an end.
+      const u = uniforms(seed, key, draws), alpha = (law.lower - law.centre) / law.sd, beta = (law.upper - law.centre) / law.sd;
+      for (let i = 0; i < draws; i++) u[i] = law.centre + law.sd * truncatedStandardNormal(u[i]!, alpha, beta);
+      return u;
     }),
     riskU: c.risks.map((r) => uniforms(seed, `r:${r.id}`, draws)),
   };
 }
 
-/** A chance is clipped to [0, 1] (DL ruling, 23 Oct). NaN stays NaN. */
+/** A chance worked out by an equation is clipped to [0, 1] where a risk reads it (DL ruling, 23 Oct). NaN stays NaN. */
 const clip01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);
 
-function activeSet(sets: readonly { from: number; to: number }[] | undefined, t: number): number {
-  let to = -1;
-  if (sets !== undefined) for (const s of sets) { if (s.from > t) break; to = s.to; }
+/** A period in draw d: a whole number, or ceil of the timing quantity's draw (never before period 0); NaN stays NaN. */
+function periodOf(t: Timing, c: Compiled, inputs: Inputs, d: number): number {
+  if ('fixed' in t) return t.fixed;
+  const node = c.nodes[t.q]!;
+  const v = node.kind === 'fixed' ? node.value : node.kind === 'drawn' ? inputs.drawn[node.slot]![d]! : NaN;
+  return Number.isNaN(v) ? NaN : Math.max(0, Math.ceil(v - 1e-9));
+}
+
+/** The set active at k: the latest started one (ties: the later in the option's list), or -1. */
+function activeSet(sets: readonly PlanSet[], froms: Float64Array, base: number, k: number): number {
+  let to = -1, best = -Infinity;
+  for (let i = 0; i < sets.length; i++) {
+    const f = froms[base + i]!;
+    if (f <= k && f >= best) { best = f; to = sets[i]!.to; }
+  }
   return to;
 }
 
@@ -326,15 +403,17 @@ const holds = (x: number, cmp: Cmp, y: number): boolean => (cmp === '>=' ? x >= 
  * A condition's aggregated value in one draw, or `null` when a value it reads (in its window, or its target or bound) is
  * NaN or ±Infinity: a nonfinite draw is outside the model's domain, never a failed outcome (DL ruling 3, 23 Oct).
  */
-function aggregate(k: Check, vals: Float64Array, n: number): number | null {
-  const every = k.aggregation === 'every', worstIsMax = below(k.cmp);
-  let acc = every ? (worstIsMax ? -Infinity : Infinity) : 0;
-  for (let t = k.aggregation === 'end' ? k.last : k.first; t <= k.last; t++) {
-    const v = vals[t * n + k.q]!;
+function aggregate(k: Check, vals: Float64Array, n: number, over: { readonly q: number; readonly first: number; readonly last: number } = k): number | null {
+  const a = k.aggregation;
+  const highest = a === 'max' || (a === 'every' && below(k.cmp));
+  const lowest = a === 'min' || (a === 'every' && !below(k.cmp));
+  let acc = highest ? -Infinity : lowest ? Infinity : 0;
+  for (let t = a === 'end' ? over.last : over.first; t <= over.last; t++) {
+    const v = vals[t * n + over.q]!;
     if (!Number.isFinite(v)) return null;
-    acc = k.aggregation === 'end' ? v : !every ? acc + v : worstIsMax ? Math.max(acc, v) : Math.min(acc, v);
+    acc = a === 'end' ? v : highest ? Math.max(acc, v) : lowest ? Math.min(acc, v) : acc + v;
   }
-  return k.aggregation === 'mean' ? acc / (k.last - k.first + 1) : acc;
+  return a === 'mean' ? acc / (over.last - over.first + 1) : acc;
 }
 
 /** Type-7 quantiles of every draw (none is dropped: a condition with a nonfinite draw is withheld before this). */
@@ -356,6 +435,36 @@ function terciles(inputs: Inputs, draws: number): { low: Int32Array; high: Int32
   });
 }
 
+/** One condition's tally over the draws: met per draw, its aggregated values, nonfinite draws, and whether it is exact. */
+class Tally {
+  readonly met: Uint8Array;
+  readonly agg: Float64Array;
+  bad = 0;
+  readonly badIds = new Set<string>();
+  private lo = Infinity; private hi = -Infinity; private tLo = Infinity; private tHi = -Infinity;
+  constructor(draws: number) { this.met = new Uint8Array(draws); this.agg = new Float64Array(draws); }
+  /** Records draw d; returns 1 met, 0 not met, -1 outside the domain. */
+  add(k: Check, vals: Float64Array, n: number, d: number, ids: readonly string[]): number {
+    const top = aggregate(k, vals, n), bottom = k.per === undefined ? 1 : aggregate(k, vals, n, k.per);
+    const ratio = top === null || bottom === null || bottom === 0 ? null : top / bottom;
+    const a = ratio !== null && Number.isFinite(ratio) ? ratio : null, target = vals[k.last * n + k.ref]!;
+    if (a === null || !Number.isFinite(target)) {
+      this.bad++;
+      if (top === null || (a === null && bottom !== null && bottom !== 0)) this.badIds.add(ids[k.q]!);
+      if (k.per !== undefined && (bottom === null || bottom === 0)) this.badIds.add(ids[k.per.q]!);
+      if (!Number.isFinite(target)) this.badIds.add(ids[k.ref]!);
+      return -1;
+    }
+    this.lo = Math.min(this.lo, a); this.hi = Math.max(this.hi, a); this.tLo = Math.min(this.tLo, target); this.tHi = Math.max(this.tHi, target);
+    const met = holds(a, k.cmp, target) ? 1 : 0;
+    this.met[d] = met;
+    this.agg[d] = a;
+    return met;
+  }
+  /** Every draw read the same value against the same target. */
+  get constant(): boolean { return this.lo === this.hi && this.tLo === this.tHi; }
+}
+
 function runOption(c: Compiled, p: Plan, inputs: Inputs, draws: number, thirds: { low: Int32Array; high: Int32Array }[],
   record: ReadonlySet<number>, recorded: RecordedDraw[]): OptionResult {
   const n = c.nodes.length, N = c.periods;
@@ -365,16 +474,20 @@ function runOption(c: Compiled, p: Plan, inputs: Inputs, draws: number, thirds: 
   const level = new Float64Array(n);
   const fired = new Int8Array(c.risks.length);
   const severity = new Float64Array(c.risks.length);
-  const goalMet = c.goals.map(() => new Uint8Array(draws));
-  const goalAgg = c.goals.map(() => new Float64Array(draws));
-  const goalBad = c.goals.map(() => 0), limitBad = c.limits.map(() => 0);
-  /** Which quantities a condition read a nonfinite value from (its own, or its target or bound). */
-  const goalBadIds = c.goals.map(() => new Set<string>()), limitBadIds = c.limits.map(() => new Set<string>());
+  const riskFrom = new Float64Array(c.risks.length);
+  // Each quantity's sets, resolved per draw (a timing quantity is sampled with the draw).
+  const setBase = new Int32Array(n);
+  let nSets = 0;
+  for (let q = 0; q < n; q++) { setBase[q] = nSets; nSets += p.sets[q]!.length; }
+  const setFrom = new Float64Array(nSets);
+  const goals = c.goals.map(() => new Tally(draws)), limits = c.limits.map(() => new Tally(draws));
   const joint = new Uint8Array(draws), within = new Uint8Array(draws), both = new Uint8Array(draws);
-  let jointBad = 0, withinBad = 0, bothBadDraws = 0;
+  let jointBad = 0, withinBad = 0, bothBad = 0;
 
   for (let d = 0; d < draws; d++) {
     fired.fill(-1);
+    for (let q = 0; q < n; q++) p.sets[q]!.forEach((s, i) => { setFrom[setBase[q]! + i] = periodOf(s.from, c, inputs, d); });
+    c.risks.forEach((r, i) => { riskFrom[i] = periodOf(r.from, c, inputs, d); });
     for (let k = 0; k <= N; k++) {
       const row = k * n;
       // (1) + (2): the sets and risk effects active at k, then every quantity in dependency order from the stocks at S[k].
@@ -383,13 +496,14 @@ function runOption(c: Compiled, p: Plan, inputs: Inputs, draws: number, thirds: 
         let v: number;
         if (node.kind === 'stock') v = k === 0 ? vals[row + node.start]! : level[q]!;
         else {
-          const to = activeSet(p.sets[q], k);
+          const to = activeSet(p.sets[q]!, setFrom, setBase[q]!, k);
           v = to >= 0 ? vals[row + to]! : evaluate(node, vals, row, inputs, d);
         }
         for (const r of p.risksOn[q]!) {
-          const risk = c.risks[r]!;
+          const risk = c.risks[r]!, from = riskFrom[r]!;
+          if (Number.isNaN(from)) { v = NaN; continue; }
           // A stock takes its one shock at boundary from_period, which the next boundaries then carry.
-          if (k < risk.from || (node.kind === 'stock' && k !== risk.from)) continue;
+          if (k < from || (node.kind === 'stock' && k !== from)) continue;
           if (fired[r]! < 0) {
             // Read once, at from_period, under this option. A chance is clipped to [0, 1].
             const chance = clip01(vals[row + risk.occurrence]!);
@@ -414,32 +528,11 @@ function runOption(c: Compiled, p: Plan, inputs: Inputs, draws: number, thirds: 
     }
 
     let allGoals = 1, allLimits = 1, badGoal = false, badLimit = false;
-    c.goals.forEach((g, i) => {
-      const a = aggregate(g, vals, n), target = vals[g.last * n + g.ref]!;
-      if (a === null || !Number.isFinite(target)) {
-        goalBad[i]!++; badGoal = true;
-        if (a === null) goalBadIds[i]!.add(c.ids[g.q]!);
-        if (!Number.isFinite(target)) goalBadIds[i]!.add(c.ids[g.ref]!);
-        return;
-      }
-      const met = holds(a, g.cmp, target) ? 1 : 0;
-      goalMet[i]![d] = met;
-      goalAgg[i]![d] = a;
-      allGoals &= met;
-    });
-    c.limits.forEach((l, i) => {
-      const a = aggregate(l, vals, n), bound = vals[l.last * n + l.ref]!;
-      if (a === null || !Number.isFinite(bound)) {
-        limitBad[i]!++; badLimit = true;
-        if (a === null) limitBadIds[i]!.add(c.ids[l.q]!);
-        if (!Number.isFinite(bound)) limitBadIds[i]!.add(c.ids[l.ref]!);
-        return;
-      }
-      allLimits &= holds(a, l.cmp, bound) ? 1 : 0;
-    });
+    c.goals.forEach((g, i) => { const m = goals[i]!.add(g, vals, n, d, c.ids); if (m < 0) badGoal = true; else allGoals &= m; });
+    c.limits.forEach((l, i) => { const m = limits[i]!.add(l, vals, n, d, c.ids); if (m < 0) badLimit = true; else allLimits &= m; });
     if (badGoal) jointBad++;
     if (badLimit) withinBad++;
-    if (badGoal || badLimit) bothBadDraws++;
+    if (badGoal || badLimit) bothBad++;
     joint[d] = allGoals;
     within[d] = allLimits;
     both[d] = allGoals & allLimits;
@@ -453,35 +546,49 @@ function runOption(c: Compiled, p: Plan, inputs: Inputs, draws: number, thirds: 
     }
   }
 
-  const stochastic = c.ranged.length > 0 || c.risks.length > 0;
   const count = (a: Uint8Array): number => a.reduce((s, x) => s + x, 0);
-  const chanceOf = (k: number): Chance => {
+  /** Gold-model ruling 4: exact (0 or 1, no interval) where every draw is the same and no risk is in play; else Wilson. */
+  const chanceOf = (k: number, exact: boolean): Chance => {
     const chance = k / draws;
-    return { chance, precision_95: stochastic ? wilson95(k, draws) : [chance, chance] };
+    return { chance, precision_95: exact ? [chance, chance] : wilson95(k, draws) };
   };
-  const invalid = (bad: number, quantities: readonly string[]): Withheld =>
+  const invalid = (bad: number, quantities: Iterable<string>): WithheldChance =>
     ({ withheld: { reason: 'invalid_domain', count: bad, quantities: [...new Set(quantities)] } });
-  const badGoalIds = goalBadIds.flatMap((x) => [...x]);
-  const badLimitIds = limitBadIds.flatMap((x) => [...x]);
-  const jointW = jointBad > 0 ? invalid(jointBad, badGoalIds) : chanceOf(count(joint));
-  const withinW = withinBad > 0 ? invalid(withinBad, badLimitIds) : chanceOf(count(within));
-  const bothBad = jointBad > 0 || withinBad > 0;
+  const exactGoal = goals.map((t, i) => t.constant && !p.goalRisky[i]);
+  const exactLimit = limits.map((t, i) => t.constant && !p.limitRisky[i]);
+  const goalIds = goals.flatMap((t) => [...t.badIds]), limitIds = limits.flatMap((t) => [...t.badIds]);
+  const condition = (t: Tally, exact: boolean): ChanceOrWithheld => (t.bad > 0 ? invalid(t.bad, t.badIds) : chanceOf(count(t.met), exact));
+  const summary = (t: Tally) => (t.bad > 0 ? invalid(t.bad, t.badIds) : quantiles(t.agg));
   const meanOver = (a: Uint8Array, idx: Int32Array): number => idx.reduce((s, i) => s + a[i]!, 0) / idx.length;
+  const allExactGoals = exactGoal.every(Boolean), allExactLimits = exactLimit.every(Boolean);
   return {
     option_id: p.option_id,
-    per_goal: c.goals.map((g, i) => ({ goal_id: g.id,
-      ...(goalBad[i]! > 0 ? invalid(goalBad[i]!, [...goalBadIds[i]!]) : chanceOf(count(goalMet[i]!))) })),
-    joint: jointW,
-    within_limits: withinW,
-    joint_within_limits: bothBad ? invalid(bothBadDraws, [...badGoalIds, ...badLimitIds]) : chanceOf(count(both)),
-    outcomes: c.goals.map((g, i) => ({ goal_id: g.id,
-      ...(goalBad[i]! > 0 ? invalid(goalBad[i]!, [...goalBadIds[i]!]) : quantiles(goalAgg[i]!)) })),
-    drivers: bothBad || thirds.length === 0 || Math.floor(draws / 3) === 0 ? [] : p.drivers.map((slot) => ({
+    per_goal: c.goals.map((g, i) => ({ goal_id: g.id, ...condition(goals[i]!, exactGoal[i]!) })),
+    joint: c.goals.length === 0 ? { withheld: { reason: 'no_goals', count: 0, quantities: [] } }
+      : jointBad > 0 ? invalid(jointBad, goalIds) : chanceOf(count(joint), allExactGoals),
+    within_limits: withinBad > 0 ? invalid(withinBad, limitIds) : chanceOf(count(within), allExactLimits),
+    joint_within_limits: bothBad > 0 ? invalid(bothBad, [...goalIds, ...limitIds]) : chanceOf(count(both), allExactGoals && allExactLimits),
+    outcomes: c.goals.map((g, i) => ({ goal_id: g.id, ...summary(goals[i]!) })),
+    per_limit: c.limits.map((l, i) => ({ limit_id: l.id, ...condition(limits[i]!, exactLimit[i]!) })),
+    limit_outcomes: c.limits.map((l, i) => ({ limit_id: l.id, ...summary(limits[i]!) })),
+    drivers: bothBad > 0 || thirds.length === 0 || Math.floor(draws / 3) === 0 ? [] : p.drivers.map((slot) => ({
       quantity: c.ids[c.ranged[slot]!.q]!,
       joint_if_low: meanOver(both, thirds[slot]!.low),
       joint_if_high: meanOver(both, thirds[slot]!.high),
     })),
   };
+}
+
+/** Every chance the simulator withheld, once. */
+function withheldList(options: readonly OptionResult[]): WithheldChanceEntry[] {
+  const w = (option_id: string, scope: WithheldChanceEntry['scope'], x: ChanceOrWithheld, id?: string): WithheldChanceEntry[] =>
+    ('withheld' in x ? [{ option_id, scope, ...(id === undefined ? {} : { id }), ...x.withheld }] : []);
+  return options.flatMap((o) => [
+    ...o.per_goal.flatMap((g) => w(o.option_id, 'goal', g, g.goal_id)),
+    ...o.per_limit.flatMap((l) => w(o.option_id, 'limit', l, l.limit_id)),
+    ...w(o.option_id, 'joint', o.joint), ...w(o.option_id, 'within_limits', o.within_limits),
+    ...w(o.option_id, 'joint_within_limits', o.joint_within_limits),
+  ]);
 }
 
 export function simulate(model: ExecutableModel, opts: SimulateOptions): SimResult {
@@ -498,5 +605,7 @@ export function simulate(model: ExecutableModel, opts: SimulateOptions): SimResu
   const record = new Set(opts.record ?? []);
   const recorded: RecordedDraw[] = [];
   const options = plans.map((p) => runOption(c, p, inputs, draws, thirds, record, recorded));
-  return { draws, seed: opts.seed, options, ...(opts.record !== undefined ? { recorded } : {}) };
+  // The compiler's withheld[] is echoed unchanged (executable.ts r3); an older model without it echoes none.
+  const echoed = (model.withheld ?? []).map((x) => ({ ...x }));
+  return { draws, seed: opts.seed, options, withheld: echoed, withheld_chances: withheldList(options), ...(opts.record !== undefined ? { recorded } : {}) };
 }

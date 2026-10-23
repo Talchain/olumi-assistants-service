@@ -4,23 +4,24 @@
  * under test. Stochastic rows assert the labels and the invariance, not a sampled number.
  */
 import { describe, expect, it } from 'vitest';
-import type { ExecutableModel, Goal, Limit, Option, Quantity, Reading } from '../../executable.js';
+import type { ExecutableModel, FixedAuthor, Goal, Limit, Option, Quantity, Reading, Withheld } from '../../executable.js';
 import { simulate } from '../../simulate/simulate.js';
 import { presentAnalysisView, type PresentInput, type PresentQuantity } from '../present.js';
 
 type Rec = Record<string, any>;
 const ONE: Goal['window'] = { start_period: 0, periods: 1 };
-const fixed = (id: string, value: number, unit = '', reading: Reading = 'state'): Quantity => ({ id, unit, reading, dist: { kind: 'fixed', value } });
+const fixed = (id: string, value: number, unit = '', reading: Reading = 'state', author: FixedAuthor = 'person'): Quantity =>
+  ({ id, label: id, unit, reading, dist: { kind: 'fixed', value, author } });
 const range = (id: string, low: number, high: number, mode: number | undefined, unit: string, basis: 'person_range' | 'olumi_estimate'): Quantity =>
-  ({ id, unit, reading: 'state', dist: { kind: 'range', low, high, ...(mode !== undefined ? { mode } : {}), basis } });
+  ({ id, label: id, unit, reading: 'state', dist: { kind: 'range', low, high, ...(mode !== undefined ? { mode } : {}), basis, range_kind: 'plausible' } });
 const def = (id: string, op: 'sum' | 'difference' | 'product' | 'ratio', parts: string[], unit = ''): Quantity =>
-  ({ id, unit, reading: 'state', equation: { form: 'definition', op, parts } });
+  ({ id, label: id, unit, reading: 'state', equation: { form: 'definition', op, parts } });
 const effect = (id: string, base: string, terms: { coefficient: string; driver: string }[], unit = ''): Quantity =>
-  ({ id, unit, reading: 'state', equation: { form: 'effect', base, terms } });
-const goal = (id: string, quantity: string, cmp: Goal['cmp'], target: string): Goal => ({ id, quantity, cmp, target, aggregation: 'end', window: ONE });
+  ({ id, label: id, unit, reading: 'state', equation: { form: 'effect', base, terms } });
+const goal = (id: string, quantity: string, cmp: Goal['cmp'], target: string): Goal => ({ id, label: id, quantity, cmp, target, aggregation: 'end', window: ONE });
 const option = (id: string, label: string, sets: Option['sets'] = []): Option => ({ id, label, sets });
-const model = (quantities: Quantity[], goals: Goal[], options: Option[], limits: Limit[] = []): ExecutableModel =>
-  ({ periods: 1, period_unit: 'month', quantities, goals, limits, options, risks: [] });
+const model = (quantities: Quantity[], goals: Goal[], options: Option[], limits: Limit[] = [], withheld: Withheld[] = []): ExecutableModel =>
+  ({ periods: 1, period_unit: 'month', quantities, goals, limits, options, risks: [], withheld });
 const person = (label: string, relation = false): PresentQuantity => ({ label, author: 'person', ...(relation ? { relation_author: 'person' as const } : {}) });
 const cell = (v: Rec, id: string): Rec => v.options.find((o: Rec) => o.option_id === id).cell;
 
@@ -44,7 +45,7 @@ function present(m: ExecutableModel, labels: Record<string, PresentQuantity>, mo
 // Hand-written words (the level template of goal-target-basis.ts `targetChanceWords`, the end of month 1 for a state):
 const MRR_WORDS = '‘Monthly recurring revenue’ being at least £4,800 at 1 month from now';
 const CUST_WORDS = '‘Customers’ being at least 90 customers at 1 month from now';
-const EXACT = 'Simulation precision: exact. Every input is a fixed figure, so every simulated draw gives the same result.';
+const EXACT = 'Simulation precision: exact. Every simulated draw gives the same result for this option, so no sampling is involved.';
 const FORECAST_OR_VERDICT = /\b(will|win|wins|winner|best|recommend|recommended|should)\b|comes out on top/i;
 
 describe('present: the canonical analysis view from a simulated model', () => {
@@ -85,8 +86,8 @@ describe('present: the canonical analysis view from a simulated model', () => {
       range('price', 39, 59, 49, '£', 'person_range')], MRR_GOALS, MRR_OPTIONS), MRR_LABELS);
     expect(cell(theirs, 'hold').face).toContain(', in this model, if ‘Price’ follows Olumi’s provisional conversion of your range, £39 to £59, into a bell-shaped spread.');
     // (iii) An option's own Olumi figure: only that option's chance is conditional on it; the target says which option.
-    const own = present(model(MRR_QUANTITIES(fixed('per_pound', -1.8, 'customers')), MRR_GOALS, MRR_OPTIONS),
-      { ...MRR_LABELS, price_59: { label: 'New price', author: 'olumi' } });
+    const own = present(model(MRR_QUANTITIES(fixed('per_pound', -1.8, 'customers'), fixed('price_59', 59, '£', 'state', 'olumi')), MRR_GOALS, MRR_OPTIONS),
+      MRR_LABELS);
     expect(cell(own, 'hold').face).toMatch(/, in this model, on your figures\.$/);
     expect(cell(own, 'raise').face).toMatch(/, in this model, if ‘New price’ is £59, Olumi’s figure\.$/);
     expect(own.goal_chance.targets.per_target[0].words).toBe(`${MRR_WORDS}, in this model, on your figures; with ‘Raise to £59’, if ‘New price’ is £59, Olumi’s figure`);
@@ -137,7 +138,7 @@ describe('present: the canonical analysis view from a simulated model', () => {
       range('customers', 80, 120, 100, 'customers', 'person_range'), def('mrr', 'product', ['price', 'customers'], k === 1 ? '£' : '£k'),
       fixed('unit_cost', 10 / k, k === 1 ? '£' : '£k'), def('cost', 'product', ['customers', 'unit_cost'], k === 1 ? '£' : '£k'),
       fixed('target', 5000 / k, k === 1 ? '£' : '£k'), fixed('budget', 1100 / k, k === 1 ? '£' : '£k')],
-    [goal('g', 'mrr', '>=', 'target')], [option('hold', 'Hold')], [{ id: 'l', quantity: 'cost', cmp: '<=', bound: 'budget', aggregation: 'end', window: ONE }]);
+    [goal('g', 'mrr', '>=', 'target')], [option('hold', 'Hold')], [{ id: 'l', label: 'Budget limit', quantity: 'cost', cmp: '<=', bound: 'budget', aggregation: 'end', window: ONE }]);
     const labels: Record<string, PresentQuantity> = { price: person('Price'), customers: person('Customers'), mrr: person('Monthly recurring revenue', true),
       unit_cost: person('Cost per customer'), cost: person('Customer cost', true), target: person('Target'), budget: person('Budget') };
     const pounds = JSON.stringify(present(build(1), labels, {}, 20000));
@@ -173,6 +174,23 @@ describe('present: the canonical analysis view from a simulated model', () => {
       { run: { run_id: 'r1', graph_hash_at_run: 'h1', computed_at: '2026-10-23T12:00:00Z' }, current: true, revision: 4 });
     expect(known.staleness).toEqual({ stale: false, revision: 4, run_revision: null, basis: 'analysis_graph_hash_interim', reason: null,
       limitation: 'Hash equality cannot detect brief, framing or stage changes.' });
+  });
+
+  it('what the compiler left out (withheld[]): a goal waits, so the joint is never partial; a limit is named as not in this run', () => {
+    // The MRR model with 'Keep the regulars happy' (a goal with no measure) and the 'Overdraft' limit left out by the compiler.
+    const v = present(model(MRR_QUANTITIES(fixed('per_pound', -1.8, 'customers')), MRR_GOALS, MRR_OPTIONS, [], [
+      { id: 'regulars', kind: 'goal', label: 'Keep the regulars happy', reason: 'It has no measure yet.' },
+      { id: 'overdraft', kind: 'limit', label: 'Overdraft', reason: 'Its figure is unknown.' }]), MRR_LABELS);
+    expect(cell(v, 'hold')).toEqual({ kind: 'withheld', face: 'Chance not shown yet',
+      why: '‘Keep the regulars happy’ is not in the chance yet: It has no measure yet.',
+      reasons: [{ code: 'goal_withheld', message: 'It has no measure yet.' }] });
+    expect(v.goal_chance.targets.joint.status).toBe('withheld');
+    expect(v.goal_chance.targets.per_target.map((t: Rec) => t.constraint_id)).toEqual(['g_mrr', 'g_cust']);
+    expect(v.goal_chance.targets.per_target[0].words).toBe(`${MRR_WORDS}, in this model, on your figures`);
+    expect(v.goal_chance.notes).toContain('The limit ‘Overdraft’ is not in this run: Its figure is unknown.');
+    const limitOnly = present(model(MRR_QUANTITIES(fixed('per_pound', -1.8, 'customers')), MRR_GOALS, MRR_OPTIONS, [],
+      [{ id: 'overdraft', kind: 'limit', label: 'Overdraft', reason: 'Its figure is unknown.' }]), MRR_LABELS);
+    expect(cell(limitOnly, 'hold').face).toBe(`‘Hold’: more than 99% chance of ${MRR_WORDS} and ${CUST_WORDS}, without the limit ‘Overdraft’, which is not in this run, in this model, on your figures.`);
   });
 
   it('a chance a nonfinite draw touched is a withheld cell with its count, never a figure', () => {
