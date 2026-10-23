@@ -33,6 +33,8 @@ import { quantityUnitsCompose, readUnitParts, sameUnit, singular, unitsCompose, 
 import { periodAdverb, periodNoun } from '../../../utils/unit-alphabet.js';
 import { EventRiskV1 } from '../../../schemas/event-risk.js';
 import { riskOccurrenceIsCurrent, riskOccurrenceWindowMonths } from '../../agent-lane/risk-occurrence.js';
+import { admitAccumulationIdentities, withAdmittedAccumulations } from '../../agent-lane/accumulation-identity.js';
+import { RETAINED_LIMIT_QUANTITY_QUESTION } from '../../../graph/retained-limit.js';
 import { isCalendarDate, readStatedDeadline, wholeMonthsBetween } from '../../goal-target/deadline-date.js';
 
 export type WithheldReason =
@@ -239,7 +241,8 @@ function definitionCheck(model: LivingModelT, def: Definition, itemId: string, u
   { readonly reason?: WithheldReason; readonly made: number; readonly parts: readonly LivingModelT['factors'][number][] } {
   const { op, of } = def;
   const found = of.map((id) => model.factors.find((f) => f.id === id));
-  const values = found.map((p) => p?.value ?? null);
+  const values = found.map(p => p?.accumulation != null
+    ? model.factors.find(f => f.id === p.accumulation!.stock_today)?.value ?? null : p?.value ?? null);
   // Exact: a definition's stated level is what its parts make. The engine would rescale a product to fit (ISL's k).
   const made = op === 'sum' ? values.reduce<number>((a, v, i) => a + (def.subtract?.includes(of[i]!) ? -1 : 1) * (v ?? 0), 0) : values.reduce<number>((a, v) => a * (v ?? 0), 1);
   if (of.length < 2 || new Set(of).size !== of.length || of.includes(itemId) || found.some((p) => p === undefined)
@@ -337,11 +340,13 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   // supports its target.
   const aim = (opts.goal === undefined ? undefined : model.aims.find((a) => a.id === opts.goal && a.status === 'current'))
     ?? model.aims.find((a) => a.status === 'current' && a.target !== null) ?? model.aims.find((a) => a.status === 'current');
-  let goal: { id: string; cap: number; unit: string } | undefined;
-  let goalHeld: WithheldReason | undefined;
-  let goalNode: Rec | undefined;
+  const primaryAimId = aim?.id;
+  const readings = new Map<string, { aim: LivingModelT['aims'][number]; node: Rec; goal?: { id: string; cap: number; unit: string }; held?: WithheldReason }>();
   if (aim === undefined) hold('goal', 'no_level_target');
-  else {
+  for (const aim of model.aims.filter(a => a.status === 'current')) {
+    let goal: { id: string; cap: number; unit: string } | undefined;
+    let goalHeld: WithheldReason | undefined;
+    let goalNode: Rec | undefined;
     goalNode = { id: aim.id, kind: 'goal', label: aim.text, ...(aim.quote !== null ? { source_quote: aim.quote } : {}) };
     nodes.push(goalNode);
     const t = aim.target;
@@ -375,7 +380,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
       && (t.baseline === null || /^\s*(the\s+)?(today|now|current|present)\b/i.test(t.baseline)) && !(t.current_unit !== null && isPercentScaledUnit(t.current_unit))
       && t.value !== null && !(t.comparator === 'decrease' && Math.abs(t.value) > 100) && into.every((l) => l.effect.unit === '%')
       ? resolveGoalThresholdCapWithProvenance(undefined, Math.abs(t.value), '%', undefined) : null;
-    if (relative !== null && t !== null && t.value !== null) {
+    if (relative !== null && t !== null && t.value !== null && t.reference !== null && t.period_kind !== null) {
       const signed = t.comparator === 'increase' ? Math.abs(t.value) : -Math.abs(t.value);
       const today = `today's ${t.quantity}`;
       goal = { id: aim.id, cap: relative.cap, unit: '%' };
@@ -383,9 +388,9 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
         goal_direction: signed > 0 ? '>=' : '<=', quantity_frame: 'change',
         goal_threshold_raw: signed, goal_threshold_unit: '%', goal_threshold_cap: relative.cap, goal_threshold_cap_provenance: relative.provenance,
         goal_threshold: signed / relative.cap, goal_threshold_frame: 'change_abs',
-        goal_target_basis: { source: 'olumi_reading', quantity_frame: 'change', target_frame: 'change_abs', target_raw: signed, reference: 'today',
+        goal_target_basis: { source: 'olumi_reading', quantity_frame: 'change', target_frame: 'change_abs', target_raw: signed, reference: t.reference ?? 'today',
           denominator: today, ...(window !== undefined && Number.isInteger(window) && window >= 1 && window <= 120
-            ? { period_months: window } : {}), period_kind: 'at_end', effect_unit: `% of ${today}`, effects_at_period_end: false },
+            ? { period_months: window } : {}), period_kind: t.period_kind ?? 'at_end', effect_unit: `% of ${today}`, effects_at_period_end: false },
       });
       assumed.push({ id: aim.id, text: `Carrying on as now leaves ${t.quantity} unchanged, so the change is measured from today's level, whatever it is.` });
       assumed.push({ id: aim.id, text: `Every effect on ${t.quantity} is a % of today's level, and the effects add rather than compound.` });
@@ -407,8 +412,8 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
           // (`riskOccurrenceWindowMonths`). Effects are not assumed in place by its end. Duration-only goals keep their
           // static reading; calendar deadlines retain the existing horizon gate. Other aims retain their window below.
           ...(!isChange && window !== undefined && Number.isFinite(window) && window > 0 && window <= 120
-            && lt.unit !== null && lt.unit.trim() !== '' ? { goal_target_basis: { source: 'olumi_reading', quantity_frame: 'level', target_frame: 'level',
-              target_raw: lt.value, reference: 'today', period_months: window, period_kind: 'at_end', effect_unit: lt.unit,
+            && t!.reference !== null && t!.period_kind !== null && lt.unit !== null && lt.unit.trim() !== '' ? { goal_target_basis: { source: 'olumi_reading', quantity_frame: 'level', target_frame: 'level',
+              target_raw: lt.value, reference: t!.reference ?? 'today', period_months: window, period_kind: t!.period_kind ?? 'at_end', effect_unit: lt.unit,
               effects_at_period_end: false } } : {}),
         });
         if (current === null) hold(aim.id, 'goal_level_unknown');
@@ -443,10 +448,14 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     // Retain a bounded window only without a scored target; a visible chance keeps its existing horizon disclosure.
     if (window !== undefined && window > 0 && window <= 120 && goalNode.goal_threshold === undefined
       && goalNode.goal_target_basis === undefined) goalNode.goal_horizon_months = window;
+    readings.set(aim.id, { aim, node: goalNode!, goal, held: goalHeld });
+    if (aim.id !== primaryAimId) {
+      goalNode!.kind = 'factor';
+      goalNode!.category = 'observable';
+      if (goal === undefined || goalNode!.observed_state === undefined && aim.defined_as === null) goalNode!.analysis_participation = 'retained_excluded';
+    }
   }
-
-  // Joint goals are not in this slice: every other current aim with a target is kept in the living model, withheld here.
-  for (const a of model.aims) if (a !== aim && a.status === 'current' && a.target !== null) hold(a.id, 'aim_not_in_slice');
+  const { goal, node: goalNode } = readings.get(aim?.id ?? '') ?? {};
 
   // ── A mitigation is a switch: one risk's step, unitless, off today, set only to 0 or 1, with no cause of its own.
   const isRisk = (id: string) => model.risks.some((r) => r.id === id);
@@ -529,8 +538,9 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
    * The Run proceeds on the rest, and a chance it would feed is withheld below (`chance_rests_on_withheld`).
    */
   const usedHere = new Set([...setsFactor, ...model.links.map((l) => l.to), ...model.factors.flatMap((f) => f.defined_as?.of ?? []),
-    ...model.aims.flatMap((a) => a.defined_as?.of ?? []), ...model.risks.flatMap((r) => r.mitigations.map((m) => m.factor_id))]);
-  const unmeasured = new Set(model.factors.filter((f) => f.value === null && !f.defined_as && f.limit === null && !usedHere.has(f.id)).map((f) => f.id));
+    ...model.aims.flatMap((a) => a.defined_as?.of ?? []),
+    ...model.factors.flatMap(f => f.accumulation == null ? [] : [f.accumulation.stock_today, f.accumulation.loss_rate_per_month, f.accumulation.inflow_per_month]), ...model.risks.flatMap((r) => r.mitigations.map((m) => m.factor_id))]);
+  const unmeasured = new Set(model.factors.filter((f) => f.value === null && !f.defined_as && f.accumulation == null && f.limit === null && !usedHere.has(f.id)).map((f) => f.id));
   const caps = new Map<string, number>();
   const current = new Map<string, number>();
   for (const f of model.factors) {
@@ -558,7 +568,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
             reason: `The calculation uses ${sayFigureAsWritten(f.value, f.unit ?? '')} for ${f.label}, with a spread matching ${spread.who} range, ${sayFigureAsWritten(f.low, f.unit ?? '')} to ${sayFigureAsWritten(f.high, f.unit ?? '')}; the spread is Olumi's assumption.` }];
         } else assumed.push({ id: f.id, text: `The calculation uses ${sayFigureAsWritten(f.value, f.unit ?? '')} for ${f.label}. The range, ${sayFigureAsWritten(f.low, f.unit ?? '')} to ${sayFigureAsWritten(f.high, f.unit ?? '')}, is kept with the model but is not used as a spread.` });
       }
-    } else hold(f.id, f.low !== null || f.high !== null ? 'level_range_not_in_slice' : 'factor_level_unknown');
+    } else if (f.accumulation == null) hold(f.id, f.low !== null || f.high !== null ? 'level_range_not_in_slice' : 'factor_level_unknown');
     nodes.push(node);
   }
 
@@ -584,11 +594,11 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   }
 
   // ── Limits (Track 2): a bound beside the aim, as the legacy lane's limit row (`add_constraint`), read on the factor's frame.
-  // Never widened to fit (that rescales the factor's links, Codex r1): a limit off the frame is held, as add_constraint refuses it.
-  const goal_constraints = model.factors.flatMap((f) => {
+  // Never widen the frame to fit a limit: that changes PLoT's default uncertainty. Retain off-frame money/count limits
+  // unscored below, using the existing retained-limit projection; the real consumer refuses clamped thresholds.
+  const goal_constraints: (Rec & { node_id: string; value: number })[] = model.factors.flatMap((f) => {
     const l = f.limit ?? null;
     if (l === null) return [];
-    if (!current.has(f.id) || l.value < 0 || l.value > caps.get(f.id)!) { hold(f.id, 'limit_not_in_slice'); return []; }
     const strict = l.comparator === '<' || l.comparator === '>';
     return [{ constraint_id: `limit_${f.id}`, node_id: f.id, operator: l.comparator.startsWith('<') ? '<=' : '>=',
       ...(strict ? { operator_as_stated: l.comparator } : {}), value: l.value, label: f.label, provenance: stated(l.source) ? 'explicit' : 'inferred',
@@ -646,8 +656,8 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   // it is never filled in, rescaled or approximated by a drawn link.
   const declared = [
     ...model.factors.map((f) => ({ item: f, carrier: nodes.find((n) => n.id === f.id), unit: f.unit, label: f.label, level: f.value })),
-    ...(aim === undefined ? [] : [{ item: aim, carrier: goalNode, unit: aim.target?.unit ?? null, label: aim.target?.quantity ?? aim.text,
-      level: aim.target?.current ?? null }]),
+    ...[...readings.values()].map(({ aim, node }) => ({ item: aim, carrier: node, unit: aim.target?.unit ?? null, label: aim.target?.quantity ?? aim.text,
+      level: aim.target?.current ?? null })),
   ].filter((d) => d.item.defined_as);
   const partsOf = new Map(declared.map((d) => [d.item.id, d.item.defined_as!.of] as const));
   const inCycle = (id: string, seen: ReadonlySet<string> = new Set()): boolean =>
@@ -668,6 +678,39 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
       const negative = def.subtract?.includes(part) === true;
       edges.push({ id: `${part}__${item.id}`, from: part, to: item.id, strength: { mean: negative ? -1 : 1, std: LLM_STRENGTH_STD_FLOOR }, exists_probability: 1,
         effect_direction: negative ? 'negative' : 'positive', provenance: { ...who, definitional: true } });
+    }
+  }
+  const accumulations = model.factors.filter(f => f.accumulation != null);
+  if (accumulations.length > 0 && goalNode !== undefined) {
+    // The existing writer resolves by label. Use ids as transient labels so duplicate display names cannot alias inputs.
+    for (const f of accumulations) {
+      const d = f.accumulation!;
+      const parts = [d.stock_today, d.loss_rate_per_month, d.inflow_per_month];
+      const carrier = nodes.find(n => n.id === f.id)!;
+      const ownEdges = parts.map(from => ({ id: `${from}__${f.id}`, from, to: f.id, ...STRUCTURAL,
+        provenance: { ...(stated(d.source) ? { source: 'brief_extraction' } : d.source === 'olumi' ? { source: 'cee_hypothesis' } : {}), definitional: true } }));
+      const owner = [...readings.values()].find(r => r.aim.defined_as?.op === 'product' && r.aim.defined_as.of.includes(f.id)
+        && r.aim.target?.period_months === d.horizon_months && r.aim.target.reference !== 'launch' && r.aim.target.reference !== null
+        && r.aim.target.period_kind !== 'over_period' && r.aim.target.period_kind !== null);
+      const primaryWindow = owner?.aim.target?.period_months;
+      if (owner !== undefined) owner.node.goal_horizon_months = primaryWindow;
+      const ownNodes = nodes.map(n => ({ ...n, id: String(n.id), label: String(n.id),
+        kind: n.id === owner?.node.id ? 'goal' : n.kind === 'goal' ? 'factor' : n.kind }));
+      const stock = model.factors.find(f => f.id === d.stock_today);
+      const inflow = model.factors.find(f => f.id === d.inflow_per_month);
+      const flowUnit = unitShapeOf(inflow?.unit ?? null);
+      const unitsFit = stock !== undefined && flowUnit?.period === 'month' && sameUnit(stock.unit, f.unit)
+        && sameUnit(stock.unit, flowUnit.head.join(' '));
+      const admission = owner === undefined || !unitsFit || d.horizon_months !== primaryWindow || f.value !== null || setsFactor.has(f.id)
+        ? undefined : admitAccumulationIdentities(ownNodes, [...edges, ...ownEdges, ...model.links].map(e => ({ from: String(e.from), to: String(e.to) })),
+          [{ outcome: f.id, operation: 'accumulation', factors: parts, provenance: stated(d.source) ? 'explicit' : 'inferred' }]);
+      if (admission?.carriers.has(f.id) !== true) { hold(f.id, 'identity_not_in_slice'); continue; }
+      const written = withAdmittedAccumulations(ownNodes, [], admission).nodes.find(n => n.id === f.id)! as Rec;
+      carrier.nonlinear_identity = { ...(written.nonlinear_identity as Rec), stated_in_brief: stated(d.source) };
+      carrier.scale_frame = written.scale_frame;
+      carrier.kind = 'outcome'; delete carrier.category; delete carrier.observed_state;
+      caps.set(f.id, written.scale_frame as number);
+      edges.push(...ownEdges);
     }
   }
   /**
@@ -767,14 +810,15 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
 
   // ── Causal links, sized on their endpoints' frames.
   const frameOf = (id: string): { cap: number; unit: string | null } | undefined => {
-    if (goal !== undefined && id === goal.id) return { cap: goal.cap, unit: goal.unit === '' ? null : goal.unit };
+    const reading = readings.get(id)?.goal;
+    if (reading !== undefined) return { cap: reading.cap, unit: reading.unit === '' ? null : reading.unit };
     // An event is 0 (it does not happen) or 1 (it happens): what it does is the change per +1, on a frame of 1.
     if (risks.has(id)) return { cap: 1, unit: null };
     const f = model.factors.find((x) => x.id === id);
     const cap = caps.get(id);
     return f !== undefined && cap !== undefined ? { cap, unit: f.unit } : undefined;
   };
-  const causal = new Set([...model.factors.map((f) => f.id).filter((id) => !unmeasured.has(id)), ...risks, ...(goalNode === undefined ? [] : [String(goalNode.id)])]);
+  const causal = new Set([...model.factors.map((f) => f.id).filter((id) => !unmeasured.has(id)), ...risks, ...readings.keys()]);
   const hedged = new Set(model.conditions.filter((c) => c.role === 'assumption').flatMap((c) => c.applies_to));
   for (const l of model.links) {
     // What a refused risk would do is said once, by the risk's own reason; a cause INTO an event is not in this slice.
@@ -783,6 +827,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     if (!causal.has(l.from) || !causal.has(l.to)) { hold(l.id, 'link_endpoint_unknown'); continue; }
     // A defined quantity is its definition: a link from one of its parts restates it (kept in the living model, never
     // counted twice); a link from anything else is a cause the definition leaves out, so the chance on it is withheld.
+    if (accumulations.some(f => f.id === l.to)) { hold(l.id, 'identity_other_cause'); continue; }
     const definition = identities.get(l.to);
     if (definition !== undefined) {
       hold(l.id, !definition.of.includes(l.from) ? 'identity_other_cause' : restates(l, definition) ? 'identity_restated' : 'identity_contradicted');
@@ -823,15 +868,16 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     // A figure INTO the goal while the goal has no scale yet, because its target states no figure or its change target has no
     // level today to be measured from: the figure is kept and used once that input is given (DL 23 Oct, Q2 coaching zeros;
     // Track 3 funding/hiring). It is never called "not sized" (`linksAwaitingGoalInput`).
-    const target = aim?.target ?? null;
-    const intoFramelessGoal = from !== undefined && goal === undefined && goalNode !== undefined && l.to === goalNode.id;
+    const targetReading = readings.get(l.to);
+    const target = targetReading?.aim.target ?? null;
+    const intoFramelessGoal = from !== undefined && targetReading !== undefined && targetReading.goal === undefined;
     // Only a figure that would be sized once the goal has its scale (the branches of `sized` above); a link with no figure
     // of its own is unsized, and keeps that reason (Codex r1 on this fix).
     const drawable = ((e.form === 'point' || centred) && e.value !== null) || (e.form === 'normal' && e.value !== null && e.sd !== null && e.sd > 0)
       || (e.form === 'exact' && e.value !== null) || uncentred;
     const awaiting = !intoFramelessGoal || !drawable ? undefined
       : target === null || [target.value, target.low, target.high].every((v) => v === null) ? 'link_goal_target_unknown' as const
-        : goalHeld === 'goal_level_unknown' ? 'link_goal_level_unknown' as const : undefined;
+        : targetReading?.held === 'goal_level_unknown' ? 'link_goal_level_unknown' as const : undefined;
     if (ratio === undefined && (e.form === 'point' || e.form === 'normal' || e.form === 'exact' || centred || uncentred)) hold(l.id, awaiting ?? 'link_frame_unknown');
     if (e.form === 'exact') hold(l.id, 'exact_not_drawable');
     if (e.form === 'range' && !centred && !uncentred) hold(l.id, 'link_range_no_law');
@@ -898,11 +944,12 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   // unsigned or unplaceable link, an option setting it could not convert) would change the calculation, so the chance is
   // withheld: the goal keeps no threshold, and says why (AIE, 20 Oct: withhold the dependent calculation, never compute it
   // on less). A placeholder link needs no such rule: the chance licence already withholds through it.
-  if (goal !== undefined && goalNode !== undefined) {
+  for (const { goal, node: goalNode } of readings.values()) if (goal !== undefined) {
     // The path is read on the person's own links as well as the engine's, so an option effect lowered to a factor or to the
     // exact sum keeps everything stated about it (buddy R1 on #3523).
     const allLinks = [...living.links, ...model.links,
       ...declared.flatMap(({ item }) => item.defined_as!.of.map((part) => ({ id: `${part}__${item.id}`, from: part, to: item.id }))),
+      ...accumulations.flatMap(f => [f.accumulation!.stock_today, f.accumulation!.loss_rate_per_month, f.accumulation!.inflow_per_month].map(from => ({ id: `${from}__${f.id}`, from, to: f.id }))),
       ...model.risks.flatMap((r) => r.mitigations.map((m) => ({ id: `${m.factor_id}__${r.id}`, from: m.factor_id, to: r.id })))];
     const onPath = new Set([goal.id]);
     for (let grew = true; grew;) {
@@ -924,9 +971,14 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     }
     // The items the chance rests on that the engine graph left out, each with its own held reason (Class 3: the tool says them
     // back to the AI, so a draft whose own encoding withholds its goal can be restructured in the same turn).
-    const causes = withheld.filter((w) => ((w.reason === 'link_sign_unknown' || w.reason === 'link_endpoint_unknown' || w.reason === 'exact_not_drawable'
+    const causes = withheld.filter((w) => ((w.reason === 'link_sign_unknown' || w.reason === 'link_frame_unknown' || w.reason === 'link_endpoint_unknown' || w.reason === 'exact_not_drawable'
       || w.reason === 'identity_other_cause' || w.reason === 'identity_contradicted' || w.reason === 'risk_not_in_slice') && onPath.has(model.links.find((l) => l.id === w.id)?.to ?? ''))
-      || ((IDENTITY_REFUSED.has(w.reason) || RISK_REFUSED.has(w.reason)) && onPath.has(w.id)));
+      || ((IDENTITY_REFUSED.has(w.reason) || RISK_REFUSED.has(w.reason) || w.reason === 'factor_level_unknown' || w.reason === 'level_range_not_in_slice') && onPath.has(w.id)));
+    const ownAim = readings.get(goal.id)!.aim;
+    const badScope = accumulations.filter(f => onPath.has(f.id) && (f.accumulation!.horizon_months !== ownAim.target?.period_months
+      || ownAim.target?.reference === 'launch' || ownAim.target?.reference === null
+      || ownAim.target?.period_kind === 'over_period' || ownAim.target?.period_kind === null));
+    for (const f of badScope) causes.push({ id: f.id, reason: 'identity_not_in_slice' });
     const dropped = [...droppedSettings].filter((id) => onPath.has(id));
     const leftOut = causes.length > 0 || dropped.length > 0;
     // An unresolved PREREQUISITE on anything the chance rests on (the engine cannot hold one) withholds it, whoever raised it.
@@ -943,8 +995,31 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     }
   }
 
+  const targetReadings = [...readings.values()].filter(r => r.aim.target !== null);
+  if (targetReadings.length > 1) for (const { aim, node, goal } of targetReadings) {
+    const lt = aimTargetReading(aim);
+    const raw = typeof lt === 'string' ? undefined : lt;
+    if (raw === undefined) continue; // Qualitative/unresolved targets stay on the Living Model; never invent a constraint value.
+    goal_constraints.push({ constraint_id: `target_${aim.id}`, node_id: aim.id, operator: raw.comparator.startsWith('<') ? '<=' : '>=',
+      ...(raw.comparator === '<' || raw.comparator === '>' ? { operator_as_stated: raw.comparator } : {}),
+      value: raw.value, label: aim.text, provenance: stated(aim.source) ? 'explicit' : 'inferred', role: 'goal_target',
+      ...(goal !== undefined && node.goal_threshold !== undefined ? { value_frame: 'level' } : {}),
+      ...(raw.unit !== null ? { unit: raw.unit } : {}), ...(aim.quote !== null && aim.quote.length <= 200 ? { source_quote: aim.quote } : {}) });
+  }
+
+  // Missing forecast or an off-frame limit must not fabricate a budget pass or refuse unrelated calculations.
+  // Preserve the saved limit; the existing Run projection removes its scoring frame and withholds the full joint.
+  const connected = new Set(edges.flatMap(e => [e.from, e.to]));
+  for (const c of goal_constraints) if (!('role' in c) && (!connected.has(c.node_id) || !current.has(c.node_id) || c.value < 0 || c.value > caps.get(c.node_id)!)) {
+    Object.assign(c, { retained_unresolved_limit: { state: 'unscored', role: 'original', reason: 'retained_limit_quantity_unresolved',
+      previous_constraint_id: c.constraint_id, proposed_constraint_ids: [], question: RETAINED_LIMIT_QUANTITY_QUESTION } });
+    hold(c.node_id, 'limit_not_in_slice');
+    const node = nodes.find(n => n.id === c.node_id);
+    if (node !== undefined && node.observed_state === undefined && node.nonlinear_identity === undefined) node.analysis_participation = 'retained_excluded';
+  }
+
   const frames = new Map<string, Frame>(model.factors.flatMap((f) => (caps.has(f.id) ? [[f.id, { cap: caps.get(f.id)!, unit: f.unit }] as const] : [])));
-  if (goal !== undefined) frames.set(goal.id, { cap: goal.cap, unit: goal.unit === '' ? null : goal.unit });
+  for (const { goal } of readings.values()) if (goal !== undefined) frames.set(goal.id, { cap: goal.cap, unit: goal.unit === '' ? null : goal.unit });
   return { graph: { nodes, edges, ...(goal_constraints.length > 0 ? { goal_constraints } : {}) }, withheld, frames, assumed,
     ...(restsOn.length > 0 ? { rests_on: restsOn } : {}) };
 }

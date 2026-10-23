@@ -83,6 +83,8 @@ export const LivingAim = z.object({
   text: z.string(),
   status: z.enum(['current', 'later', 'withdrawn']),
   target: z.object({
+    reference: z.enum(['today', 'launch']).nullable().optional().describe('The origin of the observation window: today or launch, as the scenario states; null if unresolved. The launch date is separate from the duration. Older saved targets may omit this.'),
+    period_kind: z.enum(['at_end', 'over_period']).nullable().optional().describe('Whether this target is measured at the end of the window or over that window. Never replace a first-three-month rate by its level at month three. Null if unresolved; older saved targets may omit it.'),
     /** The quantity the aim is about, as written. */
     quantity: z.string(),
     comparator: z.enum(['>=', '<=', '>', '<', '=', 'increase', 'decrease']).describe(
