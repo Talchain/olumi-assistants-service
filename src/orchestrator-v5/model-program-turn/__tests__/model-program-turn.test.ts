@@ -596,6 +596,11 @@ describe('the model-program turn on the real core route', () => {
     const gc = (evaluateCanonical((coincident as { model: CanonicalModelT }).model, { sourceText: `${BRIEF}\n${same}`, seed: 7 }).view as Json).goal_chance as Json;
     expect(JSON.stringify(gc)).not.toContain('regulars');
     expect((gc.notes as string[]).some((n) => n.startsWith('Covers:'))).toBe(false);
+    // Codex r8: no figure in their words is required to be accounted for. "… and 50 new regulars" with nothing listed as left
+    // out is accepted as the measure they named (the deleted equal-number inference refused it).
+    const unlisted = defineGoalMeasure(m, { ...op, leaves_out: [] });
+    expect(unlisted).toMatchObject({ ok: true });
+    expect((unlisted as { model: CanonicalModelT }).model.goals[0]!.measure).toMatchObject({ quantity: 'sales', exclusions: [] });
   });
 
   it('DL 23 Oct (batch 4 hiring 5/5): an edit with no op is left off the card and said on it; the rest is proposed; the approval applies exactly the card', async () => {
