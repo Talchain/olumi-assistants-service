@@ -26,7 +26,7 @@ export const DRAFTING_INSTRUCTIONS = [
   '- Goals: every target they stated, each a level or a change from a stated reference. Options: every option they named, by its exact name in full; sets change an input quantity from a period, to another quantity or to the option\'s own inline value with its author and quote; [] = carry on as now. Never ask which option applies.',
   '- Risk: occurrence is a chance quantity (unit "1"); severity is in the affected quantity\'s unit (add) or "1" (multiply).',
   '- Important but uncalculable → left_out. A disagreement → dissent. A premise the calculation rests on → assumptions. history is [].',
-  '- At most three questions in the whole model, the one that most changes the result first: only what the result needs, one thing each, never two alike, never what their words state. Ask a total, not its parts; a start date is a labelled assumption. Left_out asks only for an unsized link or a missing aim.',
+  '- At most three questions asked now, the one that most changes the result first: only what the result needs, one thing each, never two alike, never what their words state. Every other figure it needs stays null, waiting in left_out with its question, never an Olumi estimate or assumption.',
   '',
   'Example: "We sell 400 loaves a week from our one oven, with no advertising, and have £5,000 to spend. A second oven adds 150 loaves a week of capacity, or we could spend £1,000 on local ads. We want to sell 500 loaves a week without going over budget."',
   'Sketch (period week; author person with their quote unless marked):',
