@@ -87,20 +87,24 @@ export interface ToolCallResult {
 }
 export interface TurnCheck {
   readonly run_ready?: boolean;
-  readonly blockers?: readonly { readonly code: string; readonly verdict: 'fix' | 'ask' | 'said'; readonly items: readonly string[] }[];
+  readonly blockers?: readonly { readonly code: string; readonly verdict?: 'fix' | 'ask' | 'said'; readonly items?: readonly string[] }[];
   readonly relabelled?: readonly Relabelled[];
 }
 // A condition is keyed by its words (`condition:<text>`): a log names only that it was one.
 const idOnly = (id: string): string => (id.startsWith('condition:') ? 'condition' : id);
+const listOf = (v: unknown): Record<string, unknown>[] =>
+  (Array.isArray(v) ? v.filter((x): x is Record<string, unknown> => x !== null && typeof x === 'object') : []);
+/** Any tool's `blockers` (a Run's readiness has its own shape and words): only a code, and the self-check's verdict and ids. */
 function checkOf(outcome: ToolOutcome): TurnCheck | undefined {
   const data = 'data' in outcome ? outcome.data : undefined;
   if (data === undefined) return undefined;
-  const blockers = data.blockers as readonly Blocker[] | undefined;
-  const relabelled = ((data.draft as { relabelled?: unknown } | undefined)?.relabelled ?? data.relabelled) as readonly Relabelled[] | undefined;
+  const blockers = listOf(data.blockers).filter((b) => typeof b.code === 'string').map((b) => ({ code: b.code as string,
+    ...(b.fix !== undefined ? { verdict: 'fix' as const } : b.ask === true ? { verdict: 'ask' as const } : b.said === true ? { verdict: 'said' as const } : {}),
+    ...(Array.isArray(b.items) ? { items: (b.items as Blocker['items']).filter((i) => typeof i === 'string').map(idOnly) } : {}) }));
+  const relabelled = listOf((data.draft as { relabelled?: unknown } | undefined)?.relabelled ?? data.relabelled)
+    .filter((r) => typeof r.id === 'string' && typeof r.was === 'string').map((r) => ({ id: idOnly(r.id as string), was: r.was as Relabelled['was'] }));
   const check: TurnCheck = { ...(typeof data.run_ready === 'boolean' ? { run_ready: data.run_ready } : {}),
-    ...(blockers?.length ? { blockers: blockers.map((b) => ({ code: b.code, verdict: b.fix !== undefined ? 'fix' as const : b.ask ? 'ask' as const : 'said' as const,
-      items: b.items.map(idOnly) })) } : {}),
-    ...(relabelled?.length ? { relabelled: relabelled.map((r) => ({ id: idOnly(r.id), was: r.was })) } : {}) };
+    ...(blockers.length > 0 ? { blockers } : {}), ...(relabelled.length > 0 ? { relabelled } : {}) };
   return Object.keys(check).length > 0 ? check : undefined;
 }
 export type OnToolCall = (row: TraceRow, result: ToolCallResult) => void;

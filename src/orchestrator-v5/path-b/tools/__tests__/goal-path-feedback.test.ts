@@ -261,6 +261,18 @@ describe('THE READINESS SELF-CHECK: a draft a Run would withhold the goal\'s cha
     }
   });
 
+  it('Codex r1 on #3691: a Run\'s readiness blockers (their own shape and words) never cost the call its row; its check keeps codes only', async () => {
+    const calls: [TraceRow, ToolCallResult][] = [];
+    const runAnalysis = vi.fn(async () => ({ ok: false, mutated: false, ran: false, refusal: 'analysis_not_ready',
+      blockers: [{ code: 'MISSING_FACTOR_LEVEL', message: 'Say what f is today', factor_id: 'f' }, 'loose words', { message: 'no code here' }] }));
+    const tools = pathBTools({ dispatch: product(KNOWN_ANSWER).dispatch, proposals: new ProposalStore(), runAnalysis },
+      { ...draftCtx, authenticated_user_id: 'user-a', turn_id: 'turn-1' }, 'core', (row, result) => { calls.push([row, result]); }, 'core');
+    await (tools.find((t) => t.name === 'run_analysis') as FunctionTool).invoke(new RunContext(), JSON.stringify({ reason: 'Analyse it.', effects_timing: null }));
+    expect(calls).toHaveLength(1);
+    expect(calls[0]![1]).toMatchObject({ outcome: 'refused', refusal: 'analysis_not_ready' });
+    expect(calls[0]![1].check).toEqual({ blockers: [{ code: 'MISSING_FACTOR_LEVEL' }] });
+  });
+
   it('DL 93d79c3e (C1): a level the factor already holds (a bare range) is never asked for again; a factor with none is', () => {
     const level = (low: number | null, high: number | null): LivingModelT => {
       const m = structuredClone(KNOWN_ANSWER);

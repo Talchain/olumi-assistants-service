@@ -201,13 +201,15 @@ const toolCallsOf = (result: Pick<AgentTurnResult, 'tool_calls'>) => result.tool
  * ⭐ ONE LOG LINE PER TURN (arch plan Step 0, DL 23 Oct): each provider call (model, ms, tokens) and each tool call (outcome,
  * refusal code, the self-check's verdict and `run_ready`, the authorship decisions), by id and code only, never content.
  */
-function turnLog(result: AgentTurnResult | undefined): Record<string, unknown> {
+function turnLog(result: AgentTurnResult | undefined, seen: Pick<AgentTurnResult, 'tool_calls' | 'tool_results'>): Record<string, unknown> {
+  // A failed turn has no result: its calls are the ones the route saw recorded before it failed.
+  const calls = result ?? seen;
   return {
     provider_calls: recordedProviderCalls().map((c) => ({ model: c.returned_model ?? c.model, purpose: c.purpose,
       outcome: c.attempt?.outcome ?? c.outcome, ms: c.duration_ms, input_tokens: c.usage?.input_tokens,
       output_tokens: c.usage?.output_tokens, cached_input_tokens: c.usage?.cached_input_tokens })),
-    ...(result === undefined ? {} : { stopped_reason: result.stopped_reason, timing: result.timing,
-      tool_calls: toolCallsOf(result).map((c, i) => ({ ...c, ...(result.tool_results[i] as { check?: TurnCheck } | undefined)?.check })) }),
+    ...(result === undefined ? {} : { stopped_reason: result.stopped_reason, timing: result.timing }),
+    tool_calls: toolCallsOf(calls).map((c, i) => ({ ...c, ...(calls.tool_results[i] as { check?: TurnCheck } | undefined)?.check })),
   };
 }
 
@@ -463,6 +465,9 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
 
     // ── ONE TURN AT A TIME PER SCENARIO, held until the answer is persisted and read back. ───────────────────────────────
     const slot = await acquireCoreTurnSlot(scenarioId);
+    // The turn's summary line, once, at its end (`turnLog`): every turn that reached the AI, whichever way it returns.
+    let summary: { readonly result?: AgentTurnResult; readonly failed?: string } | undefined;
+    const seen: { tool_calls: AgentTurnResult['tool_calls'][number][]; tool_results: AgentTurnResult['tool_results'][number][] } = { tool_calls: [], tool_results: [] };
     try {
       // The model as this turn starts from: read AFTER the slot, so a turn that waited sees what the turn before it saved.
       const start = await readingDispatch(graphPath, { ...FRESH_READ }).catch(() => undefined);
@@ -592,7 +597,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
           result = await runCoreTurn({
             // One budget for every call (DL 22 Oct, M4): a press at the typed turn's effort reads the typed turns' cached prefix.
             ctx: coreCtx, message, budget: coreBudget(), userId,
-            tools: coreTurnTools({ ctx: coreCtx, mode: MODE, scenario: 'core', requestId: String(req.id), message,
+            tools: (onCall) => coreTurnTools({ ctx: coreCtx, mode: MODE, scenario: 'core', requestId: String(req.id), message,
               dispatch: capDispatch, proposals, deadlineAt: constructionDeadlineAt, capabilities,
               ...(challenge !== null ? { noteOnlyOn: challenge.grounded.element_ids[0] } : {}),
               onModelRegistered: graphReadyEmitter(startedAt),
@@ -600,7 +605,12 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
               analyseAfterCommit: analyseCommittedChange,
               // No research control is in this contract, so no search may be promised (fail closed).
               researchShowable: async () => false,
-              onVerifiedSave: () => { verifiedSave = true; }, restructure }),
+              onVerifiedSave: () => { verifiedSave = true; }, restructure })((row, r) => {
+              seen.tool_calls.push({ name: row.name, ok: row.ok, mutated: row.mutated === true, outcome: row.outcome,
+                ...(row.refusal !== null ? { refusal: row.refusal } : {}) });
+              seen.tool_results.push(r);
+              onCall(row, r);
+            }),
             settle: async () => { await restructure.settle?.(); },
             // The standing instructions, the same bytes on every call of every scenario (the cached prefix); this turn's own
             // guidance (the drafting arm, a Challenge's note) follows its state block in the turn's input.
@@ -617,10 +627,10 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
             ...coreTurnStores(store),
           });
         } catch (err) {
-          log.error({ event: 'core_turn.summary', err: String(err), scenario_id: scenarioId, turn_id: turnId, request_id: String(req.id),
-            ...turnLog(undefined) }, 'core-turn: the turn failed');
+          log.error({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'core-turn: the turn failed');
           // A core call whose provider delivery is unknown keeps its claim: Olumi wrote nothing, but the call may still be running.
           const deliveryUnknown = err instanceof CoreDeliveryUnknownError;
+          summary = { failed: deliveryUnknown ? 'delivery_unknown' : 'turn_failed' };
           const released = deliveryUnknown ? false : await releaseUnwrittenTurnClaim();
           const lost: RecordedOutcome = verifiedSave ? 'reply_lost_saved' : deliveryUnknown && writesDispatched === 0 ? 'reply_lost_may_finish' : 'reply_lost';
           // A possible save keeps its claim: record the outcome as the answer, so a resend replays it and reads current state.
@@ -655,6 +665,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
           return fail(502, { code: String(failure.error), message: RECORDED[lost].error.message, retry_safe: released, nothing_saved: nothingSaved }, durable);
         }
       }
+      summary = { result };
 
       // ── THE ANSWER: the saved state as it now stands, the held cards, and the row a replay reads. ──────────────────────
       const after = savedScenarioOf(await readingDispatch(graphPath, { ...FRESH_READ }));
@@ -726,7 +737,6 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       // the reply was written is not this turn's (Codex r1 on #3668).
       const confirmed = result.tool_results.flatMap((r) => (r.ran === true && typeof r.run_id === 'string' ? [r.run_id] : []));
       const ranThisTurn = runPress || (confirmed.length > 0 && confirmed[confirmed.length - 1] === after.run?.run_id);
-      log.info({ event: 'core_turn.summary', scenario_id: scenarioId, turn_id: turnId, request_id: String(req.id), ...turnLog(result) }, 'core-turn: summary');
       return send(200, coreTurnContract({
         turnId, durability, assistantText,
         revision: after.revision, scenarioRevision: after.identity, graph: appliedGraphWire(after.graph),
@@ -741,6 +751,12 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         providerCalls: recordedProviderCalls(),
       }));
     } finally {
+      if (summary !== undefined) {
+        try {
+          log.info({ event: 'core_turn.summary', scenario_id: scenarioId, turn_id: turnId, request_id: String(req.id),
+            ...(summary.failed !== undefined ? { failed: summary.failed } : {}), ...turnLog(summary.result, seen) }, 'core-turn: summary');
+        } catch { /* a log line never decides the reply */ }
+      }
       slot.release();
     }
   };

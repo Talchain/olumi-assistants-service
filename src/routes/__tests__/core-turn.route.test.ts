@@ -696,9 +696,13 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     const turnId = randomUUID();
     const r = await app.inject({ method: 'POST', url: '/agent/v1/core-turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: turnId, message: BRIEF, source: 'composer' } });
     expect(r.statusCode, r.body).toBe(200);
-    const lines = info.mock.calls.flatMap(([o]) => ((o as Json)?.event === 'core_turn.summary' ? [o as Json] : []));
-    info.mockRestore();
+    const summaries = () => info.mock.calls.flatMap(([o]) => ((o as Json)?.event === 'core_turn.summary' ? [o as Json] : []));
+    const lines = summaries();
     expect(lines).toHaveLength(1);
+    // A resend of the same turn replays it: no AI call, so no second line (Codex r1 on #3691: one per turn that reached the AI).
+    expect((await app.inject({ method: 'POST', url: '/agent/v1/core-turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: turnId, message: BRIEF, source: 'composer' } })).statusCode).toBe(200);
+    expect(summaries()).toHaveLength(1);
+    info.mockRestore();
     const line = lines[0]!;
     expect(line).toMatchObject({ scenario_id: SCENARIO, turn_id: turnId, stopped_reason: 'answered' });
     expect(line.provider_calls.length).toBeGreaterThan(0);
@@ -711,6 +715,25 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     // Ids and codes only: no brief, condition, quote or reply words.
     const text = JSON.stringify(line);
     for (const words of ['board signs off', 'wait a year', 'look at that condition', 'units']) expect(text).not.toContain(words);
+  });
+
+  it('Codex r1 on #3691: a failed turn writes its ONE summary line, with the calls made before it failed and no error words', async () => {
+    persisted = null;
+    const info = vi.spyOn((await import('../../utils/telemetry.js')).log, 'info');
+    const model = { ...structuredClone(KNOWN_ANSWER), conditions: [{ text: 'only once the board signs off', applies_to: ['f_g'], role: 'prerequisite' as const,
+      source: 'olumi' as const, party: null, quote: null }] };
+    outputs = [[{ type: 'function_call', name: 'build_model_from_brief', call_id: 'draft', args: { brief: BRIEF, model } }], [{ type: 'refuse' }]];
+    const turnId = randomUUID();
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/core-turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: turnId, message: BRIEF, source: 'composer' } });
+    const lines = info.mock.calls.flatMap(([o]) => ((o as Json)?.event === 'core_turn.summary' ? [o as Json] : []));
+    info.mockRestore();
+    expect(r.statusCode).not.toBe(200);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ scenario_id: SCENARIO, turn_id: turnId, failed: 'turn_failed' });
+    expect(lines[0]!.provider_calls.length).toBeGreaterThan(0);
+    expect(lines[0]!.tool_calls.map((c: Json) => [c.name, c.outcome, c.refusal ?? null]))
+      .toEqual([['build_model_from_brief', 'refused', 'not_run_ready'], ['build_model_from_brief', 'ok', null]]);
+    expect(lines[0]).not.toHaveProperty('err');
   });
 
   it('Codex r1 on #3675: a provider error after the refusal still leaves the draft saved, as base would; the error is the one reported', async () => {
