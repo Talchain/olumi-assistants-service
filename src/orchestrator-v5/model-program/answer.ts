@@ -163,12 +163,13 @@ export function defineGoalMeasure(model: CanonicalModelT, a: GoalMeasureAnswer):
   } else return { ok: false, reason: 'A target needs a figure, or both ends of a range; leave it out and it is asked.' };
 
   let window: NonNullable<CanonicalModelT['goals'][number]['measure']>['window'] = null;
-  if (a.window !== null && typeof a.window.periods === 'string') {
-    window = { origin_event: null, origin_offset: null, start: a.window.start, periods: a.window.periods };
-  } else if (a.window !== null) {
-    if (!writesAs(a.quote, a.window.periods, model.period)) return { ok: false, reason: `Their words do not state that deadline in ${model.period}s; leave the window out and "By when?" is asked.` };
+  const span = a.window?.periods;
+  if (a.window !== null && typeof span === 'string') {
+    window = { origin_event: null, origin_offset: null, start: a.window.start, periods: span };
+  } else if (a.window !== null && typeof span === 'number') {
+    if (!writesAs(a.quote, span, model.period)) return { ok: false, reason: `Their words do not state that deadline in ${model.period}s; leave the window out and "By when?" is asked.` };
     const periods = fresh(`${g.id}_window`);
-    added.push(theirs(periods, `Time to meet ${g.label}`, model.period, { value: a.window.periods }));
+    added.push(theirs(periods, `Time to meet ${g.label}`, model.period, { value: span }));
     window = { origin_event: null, origin_offset: null, start: a.window.start, periods };
   }
   const measure = { quantity: measured.id, per: null, cmp: a.cmp, target: targetId, frame, reference: frame === 'level' ? null : { kind: 'now' as const, option: null, quantity: null },
