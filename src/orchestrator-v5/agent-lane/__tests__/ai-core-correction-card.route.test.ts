@@ -318,14 +318,17 @@ describe('PATH-B: a core correction shows its card in THAT turn; a press on it c
     expect(calls.length, 'no model call').toBe(0);
   });
 
-  it('⛔ the first call naming ANOTHER proposal is not approved by this press: nothing is committed', async () => {
+  // DL 93d79c3e (set a, 05745055: a press whose call named '' lost the person's goals): the host binds a press's apply to the PRESSED
+  // card and never trusts the AI's argument. The protection this row holds is unchanged: the id the AI named is never applied.
+  it('⛔ the first call naming ANOTHER proposal never applies that one: the press commits the PRESSED card, once', async () => {
     const { card, rec } = await corrected();
     outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply_call', args: { proposal_id: 'prop_00000000000000000000000000000000' } }],
-      [{ type: 'message', text: 'Nothing was applied.' }]];
+      [{ type: 'message', text: 'Saved.' }]];
     const r = await post({ turn_id: randomUUID(), message: card.message, source: 'chip_click', chip: { id: card.id },
       displayed_proposals: [{ proposal_id: rec.proposal_id, revision: rec.revision }] });
     expect(r.statusCode, r.body).toBe(200);
-    expect(outputOf('apply_call'), 'that call never ran').toBeUndefined();
-    expect(commits()).toHaveLength(0);
+    expect(outputOf('apply_call'), JSON.stringify(outputOf('apply_call'))).toMatchObject({ status: 'ok', mutated: true });
+    expect(commits(), 'ONE commit').toHaveLength(1);
+    expect(queueRaw(), 'the pressed correction is what landed').toBe(20);
   });
 });

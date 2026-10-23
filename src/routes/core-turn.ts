@@ -499,7 +499,9 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       // ── A CARD PRESS (the legacy route's ONE consent check for a core change, ported). ──────────────────────────────────
       const corePaused = approvedProposal !== undefined || declinedProposal !== undefined
         ? await store.readOpenAiPausedRun?.(scenarioId).catch(() => undefined) : undefined;
-      const coreCardOnly = corePaused == null && approvedProposal !== undefined && isChangeProposal(proposals.get(approvedProposal));
+      // A pause on no card this scenario holds (an apply the AI sent with an empty id) never keeps a held card from its press.
+      const stalePause = corePaused != null && !heldAtStart.some((h) => heldProposalId(h) === corePaused.proposal_id);
+      const coreCardOnly = (corePaused == null || stalePause) && approvedProposal !== undefined && isChangeProposal(proposals.get(approvedProposal));
       const coreOwns = coreCardOnly || (corePaused != null
         && ((approvedProposal !== undefined && approvedProposal === corePaused.proposal_id) || (declinedProposal !== undefined && declinedProposal === corePaused.proposal_id)));
       const sentEdits = coreOwns && approvedProposal !== undefined ? parseProposalEdits(body.proposal_edits) : undefined;

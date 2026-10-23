@@ -427,6 +427,18 @@ describe('PATH-B core turn on the Agents SDK', () => {
       expect(applied, 'applied once in all').toBe(1);
     });
 
+    it('Codex r1 on #3695: an approving press binds the tools to its card for EVERY caller (both routes build tools here); no other turn does', async () => {
+      const bound: unknown[] = [];
+      const tools = (_onCall: unknown, press?: { approves: string }) => { bound.push(press); return applyTool(); };
+      scripted = [[{ type: 'message', text: 'Noted.' }]];
+      await turn('Please drop option B.', caps(), { tools, pausedRunStore: pausedStore() });
+      scripted = [[{ type: 'message', text: 'Noted.' }]];
+      await turn('Decline', caps(), { tools, pausedRunStore: pausedStore(), press: { decision: 'decline', proposal_id: PID } });
+      scripted = [[{ type: 'message', text: 'Noted.' }]];
+      await turn('Approve', caps(), { tools, pausedRunStore: pausedStore(), press: { decision: 'approve', proposal_id: PID } });
+      expect(bound).toEqual([undefined, undefined, { approves: PID }]);
+    });
+
     it('a decline on the card answers the paused call with the decline; nothing is applied', async () => {
       scripted = [pausing()];
       await turn('Please drop option B.', caps(), { tools: () => applyTool(), pausedRunStore: pausedStore() });

@@ -61,6 +61,8 @@ export type PathBToolDeps = ChangeDeps & DraftDeps & RunDeps & Pick<StressDeps, 
   readonly analyseAfterCommit?: () => Promise<{ readonly run?: Record<string, unknown>; readonly ready?: unknown; readonly awaitsTiming?: true }>;
   /** A Challenge on one card (the route's `challengeTargetOf`): this turn's note may sit only beside that card (Codex r2 #3634). */
   readonly noteOnlyOn?: string;
+  /** The card a press approves: on that turn the apply is bound to it, never to the AI's argument (DL 93d79c3e). */
+  readonly pressedProposal?: string;
 };
 export type PathBContext = Pick<AgentToolContext, 'scenario_id' | 'authenticated_user_id' | 'turn_id' | 'verified_user_messages' | 'user_turn_text'>;
 /** The route's tool result for one call: what `tool_results[i]` reads. `mutated` is false for an unknown write (the row says null). */
@@ -189,7 +191,9 @@ export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLa
       description: TOOL_DESCRIPTIONS.apply_change,
       parameters: ApplyChangeParams,
       needsApproval: true,
-      execute: async (args) => {
+      execute: async (sent) => {
+        // A press applies the card pressed, whatever id the AI sent (marketing on 05745055: it sent '', and the card was lost).
+        const args = deps.pressedProposal !== undefined ? { ...sent, proposal_id: deps.pressedProposal } : sent;
         const outcome = isLivingProposal(deps.proposals.get(args.proposal_id))
           ? await applyLivingChange(deps, ctx, args.proposal_id) : await applyChange(deps, ctx, args);
         if (outcome.status === 'ok') approvalApplied = true;

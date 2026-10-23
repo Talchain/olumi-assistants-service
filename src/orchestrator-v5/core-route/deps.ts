@@ -122,8 +122,9 @@ export interface CoreTurnToolsInput {
 
 /** The SDK turn's tools: the typed adapters over the route's primitives, each call recorded once. */
 export function coreTurnTools(i: CoreTurnToolsInput): CoreTurnInput['tools'] {
-  return (onCall) => pathBTools({ dispatch: i.dispatch, proposals: i.proposals, critique: modelCritic(coreBudget()), deadlineAt: i.deadlineAt,
+  return (onCall, press) => pathBTools({ dispatch: i.dispatch, proposals: i.proposals, critique: modelCritic(coreBudget()), deadlineAt: i.deadlineAt,
     ...(i.noteOnlyOn !== undefined ? { noteOnlyOn: i.noteOnlyOn } : {}), ...(i.restructure !== undefined ? { restructure: i.restructure } : {}),
+    ...(press !== undefined ? { pressedProposal: press.approves } : {}),
     proposeLinkStrengths: (c, a) => dispatchTool('propose_link_strengths', JSON.stringify(a), { ...i.ctx, ...c }, i.capabilities, i.mode),
     ...(i.commitOptionLevels !== undefined ? { commitOptionLevels: i.commitOptionLevels } : {}), onModelRegistered: (raw) => i.onModelRegistered(raw),
     runAnalysis: i.runAnalysis,

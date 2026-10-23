@@ -198,7 +198,8 @@ export interface CoreTurnInput {
    * The agent's tools: the typed adapters (`path-b/tools` `pathBTools`), given the recorder each tool calls once with its
    * kit row and result.
    */
-  readonly tools: (onCall: CoreToolRecorder) => readonly Tool[];
+  /** The turn's tools. On a press that approves a card, `press` binds the apply to that card, for every caller (Codex r1 on #3695). */
+  readonly tools: (onCall: CoreToolRecorder, press?: { readonly approves: string }) => readonly Tool[];
   /** Where the turn records its calls, so a caller still has them if the turn throws (the route's turn log). */
   readonly calls?: CoreTurnCalls;
   /**
@@ -299,7 +300,7 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
    * called anyway: no approval, nothing written.
    */
   const blocked = (name: string): boolean => withheld.has(name) || (replyOnly && MODEL_WRITING_TOOLS.has(name));
-  const allTools = input.tools(record);
+  const allTools = input.tools(record, input.press?.decision === 'approve' ? { approves: input.press.proposal_id } : undefined);
   const allowedNames = allTools.flatMap((t) => ('name' in t && !blocked(t.name) ? [t.name] : []));
   const tools = allTools.map((t): Tool => {
     if (!('name' in t) || !blocked(t.name) || t.type !== 'function') return t;
@@ -404,10 +405,11 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
     }
   }
   /**
-   * A press on a card whose change never paused (the AI prepared it and said so): the run's first call is that change's own
-   * apply_change (`firstTool`), and THIS press is the approval of the interruption it raises, for that proposal only.
+   * A press on a card whose change never paused (the AI prepared it and said so), or whose pause was on another id: the run's
+   * first call is that change's own apply_change (`firstTool`), and THIS press is the approval of the interruption it raises.
+   * The route binds that apply to the pressed card, so the AI's argument never decides which card is applied (DL 93d79c3e).
    */
-  const approvesNow = held == null && input.press?.decision === 'approve' ? input.press.proposal_id : undefined;
+  const approvesNow = (held == null || resumed?.answer === 'superseded') && input.press?.decision === 'approve' ? input.press.proposal_id : undefined;
   let paused: CoreTurnSdk['paused'];
 
   let traceId = `trace_${randomUUID().replace(/-/g, '')}`;
@@ -484,7 +486,7 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
       let result = await goAnswering(turnInput);
       let calls = result.rawResponses.length;
       const pressed = result.interruptions.length === 1 ? result.interruptions[0] : undefined;
-      if (pressed !== undefined && approvesNow !== undefined && argsOf(pressed)['proposal_id'] === approvesNow) {
+      if (pressed !== undefined && approvesNow !== undefined) {
         result.state.approve(pressed);
         resumed = { pause_id: callIdOf(pressed) ?? '', answer: 'approved' };
         result = await go(result.state);

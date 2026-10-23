@@ -72,7 +72,11 @@ export async function recordedRun(deps: { readonly dispatch: InternalDispatch },
   const code = typeof r.refusal === 'string' && CODE.test(r.refusal) ? r.refusal : undefined;
   if (r.ran !== true) {
     if (code === 'run_failed' || (code === undefined && r.ok !== true)) return unavailable('run_failed', 'none', undefined, facts);
-    return refused(code ?? 'run_blocked', undefined, facts);
+    // Every refusal names its own reason (DL 93d79c3e: marketing r3 came back a bare run_blocked): the engine's or the moved
+    // Run's typed reason, or the outcome's kind, before the generic code.
+    const outcome = isRec(r.run_outcome) ? r.run_outcome : undefined;
+    const typed = [outcome?.reason, outcome?.kind].find((c): c is string => typeof c === 'string' && CODE.test(c));
+    return refused(code ?? typed ?? 'run_blocked', undefined, facts);
   }
   const id = isRec(r.run_identity) ? r.run_identity : undefined;
   const after = await readCanonicalContext(deps, ctx);

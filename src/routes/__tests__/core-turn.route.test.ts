@@ -291,6 +291,59 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(registered, 'and writes nothing').toHaveLength(1);
   });
 
+  describe('DL 93d79c3e (marketing on 05745055): a card press applies THAT card, whatever id the AI sends', () => {
+    const propose = async () => {
+      outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop', args: CHANGE }], [{ type: 'message', text: 'I prepared that change.' }]];
+      const card = ((await typed(SAID)).json() as Json).cards[0];
+      preparedId = String(card.proposal_id);
+      return { turn_id: randomUUID(), message: card.approve_action.message, source: 'chip_click', chip: { id: card.approve_action.id, action_type: card.approve_action.action_type } };
+    };
+    it('the AI sends an empty id on the press: the pressed card is applied, once, with the person\'s receipt; nothing is left paused', async () => {
+      const press = await propose();
+      outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply', args: { proposal_id: '' } }], [{ type: 'message', text: 'Saved.' }]];
+      const r = await post(press);
+      expect(r.statusCode, r.body).toBe(200);
+      const a = r.json() as Json;
+      expect(registered, JSON.stringify(a._agent)).toHaveLength(1);
+      expect(((persisted as Json).living_model as LivingModelT).factors[0]).toMatchObject({ value: 0.6 });
+      expect(a.receipts).toEqual([expect.objectContaining({ version_id: 'v_1', authorised_by: 'person' })]);
+      expect(a.cards).toEqual([]);
+      expect(a.paused).toBeNull();
+      expect(pausedRun).toBeNull();
+    });
+    it('Codex r1 on #3695: two held cards; the AI applies the OTHER one on the press of the first: the pressed card is the one applied', async () => {
+      const pressA = await propose();
+      const idA = preparedId;
+      const sevenSaid = 'f is at 0.7 by now.';
+      const seven = structuredClone(KNOWN_ANSWER);
+      seven.factors[0] = { ...seven.factors[0]!, value: 0.7, quote: sevenSaid };
+      outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'propB', args: { ...CHANGE, public_label: 'Set f to 0.7', model: seven } }],
+        [{ type: 'message', text: 'I prepared that change too.' }]];
+      const held = ((await typed(sevenSaid)).json() as Json).cards.map((c: Json) => String(c.proposal_id));
+      const idB = held.find((id: string) => id !== idA)!;
+      expect(held, 'both cards are held').toEqual(expect.arrayContaining([idA, idB]));
+      outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply', args: { proposal_id: idB } }], [{ type: 'message', text: 'Saved.' }]];
+      const r = await post(pressA);
+      expect(r.statusCode, r.body).toBe(200);
+      expect(registered).toHaveLength(1);
+      expect(((persisted as Json).living_model as LivingModelT).factors[0], 'A, the pressed card, never B').toMatchObject({ value: 0.6 });
+    });
+
+    it('a pause the AI left on an empty id never keeps the held card from its press: the re-press applies it', async () => {
+      const press = await propose();
+      // A typed turn on which the AI applied with an empty id: its call waits on no card this scenario holds.
+      outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'stray', args: { proposal_id: '' } }]];
+      expect((await typed('Go ahead with it.')).statusCode).toBe(200);
+      expect(pausedRun, 'the stray pause is kept, on no card').toMatchObject({ proposal_id: '' });
+      outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply', args: { proposal_id: '' } }], [{ type: 'message', text: 'Saved.' }]];
+      const r = await post(press);
+      expect(r.statusCode, r.body).toBe(200);
+      expect(registered).toHaveLength(1);
+      expect(((persisted as Json).living_model as LivingModelT).factors[0]).toMatchObject({ value: 0.6 });
+      expect((r.json() as Json).receipts).toEqual([expect.objectContaining({ authorised_by: 'person' })]);
+    });
+  });
+
   it('Lenses 22 Oct (15c72e9d): an approval whose saved model admits a Run carries that automatic Run\u2019s analysis_result in the contract, as a Run press does', async () => {
     outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop', args: CHANGE }], [{ type: 'message', text: 'I prepared that change; press its card to save it.' }]];
     const card = ((await typed(SAID)).json() as Json).cards[0];
