@@ -230,3 +230,63 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(coreBudget('medium')).toEqual({ ...coreBudget(), reasoning_effort: 'medium' });
   });
 });
+
+/** The Living Model text for scenarios whose saved model is not a program (Codex BLOCK 4 on #3709): staging 646d374e's, unchanged. */
+describe('the Living Model core text, kept for old scenarios byte for byte (CORE_INSTRUCTIONS_LIVING_MODEL + CORE_REPLY_RULES_LIVING_MODEL)', () => {
+  const { CORE_INSTRUCTIONS_LIVING_MODEL, CORE_REPLY_RULES_LIVING_MODEL } = coreInstructions;
+  const old = instructionsForMode('core', CORE_INSTRUCTIONS_LIVING_MODEL, CORE_REPLY_RULES_LIVING_MODEL);
+
+  it('is the text staging 646d374e sent on every core call, byte for byte (captured from that build: 29,512 characters)', () => {
+    expect(old.length).toBe(29_512);
+    expect(createHash('sha256').update(old, 'utf8').digest('hex')).toBe('7a1bced23a44dccc478a00d075b28bbe2dda487a4b6da868ae3a477698097e44');
+    // and it is not the program text
+    expect(old).not.toBe(instructionsForMode('core', CORE_ALIGNED_INSTRUCTIONS));
+  });
+
+  it('names none of the legacy tools and every core tool, with the AIE authority and starting-input wording', () => {
+    for (const t of LEGACY_TOOLS) expect(old, t).not.toContain(t);
+    for (const t of CORE_TOOLS) expect(old, t).toContain(t);
+    expect(old).toContain("Do not treat a typed yes or your own interpretation as the card's approval.");
+    expect(old).toContain('offer clearly labelled Olumi assumptions through propose_change for review');
+    expect(old).not.toContain('{{MODE_AND_AUTHORITY}}');
+  });
+
+  it('keeps the shared reasoning, science and reply rules, each once, and the core reply rules last', () => {
+    for (const h of ['\nTRUTH\n', '\nREASONING\n', '\nAUTHORSHIP\n', '\nIDEATION\n', 'POLYMATH COACHING', 'CALCULATION BOUNDARY']) expect(old, h).toContain(h);
+    for (const part of [OLUMI_PURPOSE_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION, MODEL_RELATIVE_NAMING_INSTRUCTION, CORE_REPLY_RULES_LIVING_MODEL,
+      HOST_SCIENCE_AND_SOURCE_RULES]) expect(count(old, part)).toBe(1);
+    for (const rule of ['Never express the chance as a percentage of model runs.', 'Earlier assistant replies can describe a Run that was current then',
+      'that separation rests on Olumi\'s own starting estimates', "The goal’s `target` is the figure the user stated"]) expect(old, rule).toContain(rule);
+    expect(old.endsWith(CORE_REPLY_RULES_LIVING_MODEL)).toBe(true);
+  });
+
+  it('arm B is the AIE\'s assembled reference, byte for byte, plus the canvas-coaching sentence', () => {
+    expect(old.split(NOTE_ON_ITEM_INSTRUCTION)).toHaveLength(2);
+    expect(createHash('sha256').update(old.replace(`${NOTE_ON_ITEM_INSTRUCTION}\n\n`, ''), 'utf8').digest('hex')).toBe('055841368f958fd07a9e729b8f459e83d1793e98acbbd0b6bcefa8aba9ddf41a'); // 22 Oct: one exact blocking-input question; retire the coach's duplicate ask.
+    expect(old).toContain('build the first model from their brief in that same turn');
+    expect(old).toContain('a list in your reply adds nothing to their model');
+  });
+
+  it('its reply rules: the coach’s rules and the kept tool-reporting rules, each once', () => {
+    expect(createHash('sha256').update(CORE_REPLY_RULES_LIVING_MODEL, 'utf8').digest('hex')).toBe('6f5f00c581ac4be2f1f590973e4bcf58c6eba498e5216bc3a8a21a189be5f3d6');
+    for (const rule of ['Lead with one plain-language headline naming the insight. Then at most three short bullets',
+      "give each option's chance of meeting the aim in this model and its stated uncertainty",
+      'Never recommend, call an option best or a winner, say “you should choose” or “go with”, or choose for the team',
+      "use only figures that are in the model with their author, or that the supplied result computed; never invent one. Say when a figure is Olumi's starting estimate.",
+      'If calculations use untested Olumi assumptions, say “Illustrative calculation — uses untested Olumi assumptions.”'])
+      expect(CORE_REPLY_RULES_LIVING_MODEL.split(rule), rule).toHaveLength(2);
+    for (const kept of ['In this mode Olumi adds nothing to your reply and rewrites none of it: the user reads exactly your words.',
+      'never your tools or what a tool response did or did not contain', 'Keep every must_say disclosure and the licences in run_facts.',
+      'approving a reading adopts it but does not make the user its author', 'Where run_comparison is given, follow its note.',
+      'or the analysis apply_change returns after a saved change), give that Run’s results first, then coach on that same Run.',
+      'A Run that did not complete leaves a saved change saved: say both.', "Keep a clearly separate situation out of the current scenario's Living Model.",
+      'do not claim it was created or put its facts into this model instead'])
+      expect(old.split(kept), kept).toHaveLength(2);
+  });
+
+  it('keeps the one blocking-input question, once, and none of the drafter’s modelling rules', () => {
+    const question = "Whenever a missing input leaves the Run blocked, end every reply with exactly ONE question asking for the specific input the Run needs next (today's level, a measure, a target or a time window), in plain words; use the current state and tool outcome, never re-ask a supplied input.";
+    expect(count(old, question)).toBe(1);
+    expect(old).not.toContain("A qualitative worry or uncertainty is a risk, or a condition when it cannot reasonably be quantified, never an unmeasured factor.");
+  });
+});
