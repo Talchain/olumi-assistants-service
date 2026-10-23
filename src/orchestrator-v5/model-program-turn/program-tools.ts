@@ -31,6 +31,7 @@ export interface ProgramToolDeps { readonly dispatch: InternalDispatch; readonly
 /** Said with the turn's state on a program scenario: how its tools work. The standing instructions stay byte for byte. */
 export const PROGRAM_TURN_GUIDANCE = 'This scenario\'s model is a model program: read_canonical_context gives its quantities (with who gave each figure), goals, limits, options, open questions and its stored Run. '
   + 'To change it, call propose_change with ops: set_quantity (one input quantity\'s figure or range: an answer to an open question, or a corrected figure), set_range_kind (how to read a range they gave), set_goal_target, define_goal_measure (how an aim with no measure is measured, as they said it), add_option or rename_option, each quoting the person\'s exact words, using the ids read_canonical_context gives. '
+  + 'Put every edit the person gave in ONE propose_change, as several ops: a turn shows one card, and a second proposal in the same turn is refused. '
   + 'The person approves the card; apply_change then saves the model with a new Run.';
 
 export const ProgramChangeParams = z.object({
@@ -93,8 +94,32 @@ const additionsOf = (before: CanonicalModelT, after: CanonicalModelT): ProposalO
   .flatMap(([kind, family]) => (after[family] as readonly { id: string }[]).filter((r) => !(before[family] as readonly { id: string }[]).some((x) => x.id === r.id))
     .map((r): ProposalOperation => ({ op: 'living_change', path: `${kind}:${r.id}`, value: { change: 'add', after: r } })));
 
+/**
+ * The program card each turn has already prepared. A turn shows ONE card: with two unapproved proposals the route offers none
+ * (approval-chips.ts: approving one would make the other stale), so the person could save nothing (batch 2 mrr-r3).
+ */
+const preparedThisTurn = new Map<string, string>();
+
+const PREPARING = '';
+
 export async function proposeProgramChange(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs): Promise<ToolOutcome> {
   if (args.ops.length === 0) return refused('no_change');
+  const turnKey = ctx.turn_id === undefined ? undefined : `${ctx.scenario_id}:${ctx.turn_id}`;
+  if (turnKey === undefined) return prepare(deps, ctx, args);
+  // Claimed before the first await: the SDK runs a turn's tool calls together, so two proposals race.
+  const earlier = preparedThisTurn.get(turnKey);
+  if (earlier === PREPARING || (earlier !== undefined && deps.proposals.get(earlier) !== undefined && !deps.proposals.isApplied(earlier))) {
+    return refused('one_card_per_turn', 'This turn already prepared a card. Ask the person to approve it; propose these edits after that, all in one propose_change.');
+  }
+  preparedThisTurn.set(turnKey, PREPARING);
+  if (preparedThisTurn.size > 1000) preparedThisTurn.delete(preparedThisTurn.keys().next().value!);
+  const outcome = await prepare(deps, ctx, args).catch((err: unknown) => { preparedThisTurn.delete(turnKey); throw err; });
+  const id = outcome.status === 'ok' ? (outcome.data as { proposal_id?: unknown } | undefined)?.proposal_id : undefined;
+  if (typeof id === 'string') preparedThisTurn.set(turnKey, id); else preparedThisTurn.delete(turnKey);
+  return outcome;
+}
+
+async function prepare(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs): Promise<ToolOutcome> {
   const base = await savedProgram(deps, ctx);
   if ('status' in base) return base;
   // A quote is the person's own words, from this conversation or what they gave before; never Olumi's paraphrase.

@@ -564,7 +564,8 @@ describe('the model-program turn on the real core route', () => {
     const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] };
     const op = { op: 'define_goal_measure', goal_id: 'increase_productivity', quantity: { label: 'Features shipped per month', unit: 'feature/month' }, cmp: '>=', frame: 'change_rel',
       target: 'productivity_increase_target', window: { periods: 'launch_horizon', start: 0 }, quote: words };
-    const propose = () => proposeProgramChange(deps, ctx, ProgramChangeParams.parse({ public_label: 'Measure productivity', basis: 'their answer', ops: [op] })) as Promise<Json>;
+    // Each attempt is its own turn (a turn shows one card).
+    const propose = () => proposeProgramChange(deps, { ...ctx, turn_id: randomUUID() }, ProgramChangeParams.parse({ public_label: 'Measure productivity', basis: 'their answer', ops: [op] })) as Promise<Json>;
     // The drafter's whole model again, plus what works the measure out (synthetic Olumi figures, never a test sheet's).
     const measured = defineGoalMeasure(before, op as never);
     expect(measured.ok).toBe(true);

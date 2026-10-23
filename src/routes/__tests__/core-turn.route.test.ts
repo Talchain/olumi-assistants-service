@@ -954,6 +954,24 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(Object.keys(run).sort()).toEqual(['current', 'engine_current', 'goal_chance', 'options', 'run_id']);
     });
 
+    it('S3 (batch 2 mrr-r3): two program proposals in one turn still leave the person ONE card to approve; the second is refused with its way on', async () => {
+      await savedProgram();
+      const set = (quantity_id: string, value: number, quote: string, public_label: string) => ({ public_label, basis: 'their answer',
+        ops: [{ op: 'set_quantity', quantity_id, value, low: null, high: null, range_kind: null, quote }] });
+      outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'p1', args: set('oven_price', 2500, 'The oven would cost £2,500', 'Oven price £2,500') },
+        { type: 'function_call', name: 'propose_change', call_id: 'p2', args: set('base_sales', 320, 'we bake 320 loaves a week now', 'Base sales 320') }],
+      [{ type: 'message', text: 'I prepared the oven price; approve its card and I will do the rest next.' }]];
+      const r = await typed('The oven would cost £2,500 and we bake 320 loaves a week now.');
+      expect(r.statusCode, r.body).toBe(200);
+      const j = r.json() as Json;
+      const tools = (j._agent.tool_calls as Json[]).filter((c) => c.name === 'propose_change');
+      // The SDK runs the two calls together: one prepares the card, the other is refused (in either order).
+      expect(tools.map((c) => c.outcome).sort()).toEqual(['ok', 'refused']);
+      expect(JSON.stringify(tools.find((c) => c.outcome === 'refused'))).toContain('one_card_per_turn');
+      expect(j.cards as Json[]).toHaveLength(1);
+      expect(registered.length, 'proposing saves nothing').toBe(1);
+    });
+
     /** The instructions the provider received on one typed turn of a saved program (the model-program instructions). */
     const sentOnce = async (): Promise<string> => {
       await savedProgram();
