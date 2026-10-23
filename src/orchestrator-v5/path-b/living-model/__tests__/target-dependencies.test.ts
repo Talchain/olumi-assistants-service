@@ -6,7 +6,13 @@ import { goalDependencyCauses, targetTestabilityOf } from '../../../admission/ta
 import { goalChanceLicenceForAgent, withGoalChanceLicence, primaryOnlyTargetIds } from '../../../goal-target/goal-chance-licence.js';
 import { goalTargetsBlockOf } from '../../../goal-target/goal-targets-joint.js';
 import { mapLivingModel } from '../mapper.js';
-import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
+import { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha256 } from '../../../context/graph-hash.js';
+import { computeGraphIdentityHash } from '../../../context/graph-identity.js';
+import { buildModel } from '../../tools/draft-tool.js';
+import { blockersOf, corePostimage, REPAIRS, selfCheck } from '../../tools/goal-path.js';
+import { resolveRunAdmission } from '../../../tools/handlers/analysis-ready-core.js';
+import { validateGraphStructure } from '../../../../orchestrator/graph-structure-validator.js';
+import { guardAnalysisParticipation } from '../../../tools/handlers/run-analysis-participation-guard.js';
 import { withGoalDependencyScores, goalDependencyConstraintsForRun } from '../../../goal-target/goal-chance-licence.js';
 import { deriveConstraintVerdict, readRatifiedConstraints } from '../../../../orchestrator/context/constraint-feasibility.js';
 import { KNOWN_ANSWER } from './fixtures.js';
@@ -157,8 +163,8 @@ describe('stated targets survive unresolved dependencies without licensing their
 
 
 /** Transport double answers ONLY rows sent by the real handler; no provider/engine or borrowed question evidence. */
-async function runTargetModel(model: Parameters<typeof mapLivingModel>[0]) {
-  const graph = stored(model), scenario = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+async function runTargetModel(model: Parameters<typeof mapLivingModel>[0], savedGraph?: ReturnType<typeof stored>) {
+  const graph = savedGraph ?? stored(model), scenario = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
   const before = structuredClone(graph);
   const snapshot = await loadScenarioSnapshotForRunAnalysis(scenario, 'b2-target-presentation', {
     loadGraphAndBriefText: async () => ({ graph, briefText: null }), readMostRecentPendingActions: async () => [],
@@ -190,6 +196,86 @@ async function runTargetModel(model: Parameters<typeof mapLivingModel>[0]) {
   return { graph, result, fact, wire: run.mock.calls[0]![0],
     licence: result.enrichment.inference_warnings.find((w: Rec) => w.code === 'GOAL_CHANCE_LICENSED') as Rec };
 }
+
+describe('the full reasoning model and the submitted calculation share one admission contract', () => {
+  const brief = readFileSync(new URL('./fixtures/hiring-05745055-brief.txt', import.meta.url), 'utf8');
+  const hiring = (round: 1 | 2) => LivingModel.parse(JSON.parse(readFileSync(new URL(round === 1
+    ? './fixtures/hiring-05745055-living-model.json' : './fixtures/hiring-05745055-r2-living-model.json', import.meta.url), 'utf8')));
+
+  /** Stateful graph-route double only: the real draft, kernel, mapper, write/readback, self-check, admission and Run run. */
+  async function savedDraft(model: ReturnType<typeof hiring>) {
+    let graph: Rec | null = null;
+    const identity = () => computeGraphIdentityHash(graph as never)!;
+    const dispatch = vi.fn(async (path: string, body?: unknown) => {
+      const b = (body ?? {}) as Rec;
+      if (path.endsWith('/graph/register')) {
+        if (b.expected_graph_identity_hash !== null || graph !== null) return { status: 409, json: { details: { code: 'GRAPH_STALE' } } };
+        graph = structuredClone(b.graph as Rec);
+        return { status: 200, json: { graph_identity_hash: identity(), graph_hash: computeAnalysisAffectingGraphHash(graph as never),
+          model_version: { version_id: 'v_draft', version_number: 1, mutation_id: 'm_draft', creation_kind: 'committed_mutation',
+            graph_identity_hash: identity().value, analysis_affecting_hash: computeAnalysisAffectingGraphHashSha256(graph as never) } } };
+      }
+      return graph === null ? { status: 200, json: { graph: null, graph_present: false, graph_hash: null, graph_identity_hash: null } }
+        : { status: 200, json: { graph, brief_text: brief, graph_hash: computeAnalysisAffectingGraphHash(graph as never), graph_identity_hash: identity() } };
+    });
+    const out = await buildModel({ dispatch, restructure: { repairs: REPAIRS } },
+      { scenario_id: 'scn_secondary_admission', verified_user_messages: [brief], user_turn_text: brief }, { brief, model });
+    expect(out).toMatchObject({ status: 'ok', data: { run_ready: true } });
+    expect(graph).not.toBeNull();
+    return GraphV3.parse(JSON.parse(JSON.stringify(graph)));
+  }
+
+  for (const [round, secondary, oldBlock] of [[1, 'spend', 'ORPHAN_NODE'], [2, 'spend_less', 'NO_PATH_TO_GOAL']] as const) {
+    it(`real hiring r${round}: ${oldBlock} belongs to a held secondary, not the primary; actual draft/admission then Run`, async () => {
+      const model = hiring(round), before = structuredClone(model), graph = await savedDraft(model);
+      expect(graph.living_model).toMatchObject({ aims: before.aims });
+      expect(model).toEqual(before);
+      expect(goal(graph, secondary)).toMatchObject({ analysis_participation: 'retained_excluded', goal_rests_on: expect.any(Array) });
+      expect(validateGraphStructure(graph, { leaveOutInertRisks: true }).violations.some(v => v.code === oldBlock)).toBe(true);
+      expect(resolveRunAdmission(graph).willProceed).toBe(true);
+      const run = await runTargetModel(model, graph);
+      expect(run.wire.graph.nodes.some((n: Rec) => n.id === secondary)).toBe(false);
+      expect(run.wire.goal_constraints.some((r: Rec) => r.node_id === secondary)).toBe(false);
+      expect(run.licence).toBeDefined();
+      expect(graph.living_model).toMatchObject({ aims: before.aims });
+      expect(goal(graph, secondary).goal_rests_on.length).toBeGreaterThan(0);
+      expect(run.result.enrichment.option_comparison.every((o: Rec) => o.probability_of_joint_goal === undefined)).toBe(true);
+    });
+  }
+
+  const withHeldSecondary = () => {
+    const model = structuredClone(KNOWN_ANSWER), second = structuredClone(model.aims[0]!);
+    model.factors[0]!.unit = 'level';
+    Object.assign(second, { id: 'second', text: 'Reach 90 units' });
+    Object.assign(second.target!, { value: 90, current: null });
+    model.aims.push(second);
+    return model;
+  };
+
+  it('a primary depending on a held secondary remains held and is never calculated on less', () => {
+    const model = withHeldSecondary();
+    model.links.push({ ...model.links[0]!, id: 'second_g', from: 'second', to: 'g' });
+    const mapped = mapLivingModel(model), graph = corePostimage(mapped, model);
+    expect(goal(graph, 'second').analysis_participation).not.toBe('retained_excluded');
+    expect(goalDependencyCauses(graph, 'g')).toContainEqual({ id: 'second', reason: 'goal_level_unknown' });
+    expect(blockersOf(model, selfCheck(model, mapped)).all.length).toBeGreaterThan(0);
+    expect(goalChanceLicenceForAgent(withGoalChanceLicence(raw(), graph, 'g'))).toBeUndefined();
+  });
+
+  it('a required limit protects its upstream held target; the existing guard still refuses an excluded intervention target', () => {
+    const model = withHeldSecondary();
+    model.factors.push({ ...model.factors[0]!, id: 'budget_level', label: 'Budget used', value: 5, unit: 'units',
+      limit: { comparator: '<=', value: 8, source: 'user', party: null, quote: 'at most 8 units' } });
+    model.links.push({ ...model.links[0]!, id: 'second_budget', from: 'second', to: 'budget_level' });
+    const graph = corePostimage(mapLivingModel(model), model);
+    expect(goal(graph, 'second').analysis_participation).not.toBe('retained_excluded');
+    goal(graph, 'second').analysis_participation = 'retained_excluded';
+    const guarded = guardAnalysisParticipation(graph, { goalNodeId: 'g', submittedOptionIds: ['push', 'hold'],
+      optionInterventionTargetIds: ['second'] });
+    expect(guarded.refusals).toContainEqual({ node_id: 'second', reason: 'option_intervention_target' });
+    expect(guarded.excludedNodeIds).toEqual([]);
+  });
+});
 
 describe('the real Run preserves the primary presentation beside a held secondary aim', () => {
   it('no secondary aim: the verdict is byte-identical to the frozen staging no-constraint result', () => {
