@@ -122,9 +122,9 @@ function enrichmentOf(block: unknown): unknown {
   return b === undefined ? undefined : (b.enrichment ?? rec(b.data)?.enrichment);
 }
 
-function sensitivityOf(block: unknown): DecisionSensitivitySignal {
+function sensitivityOf(block: unknown, graph: unknown): DecisionSensitivitySignal {
   try {
-    const d = decisionSensitivityOf(enrichmentOf(block));
+    const d = decisionSensitivityOf(enrichmentOf(block), graph);
     if (d.status === 'measured') {
       const m = d.most_sensitive;
       return { status: 'measured', most_sensitive: { factor_id: m.factor_id, label: m.label, ...(m.range !== undefined ? { range: m.range } : {}) } };
@@ -339,7 +339,7 @@ export function assembleGuidanceSignals(i: GuidanceSignalInputs): GuidanceSignal
     'run.leader_licensed': leaderLicensed,
     'run.withheld_reason': str(claim?.withheld_reason),
     'run.leader_option_id': leader,
-    'run.decision_sensitivity': sensitivityOf(block),
+    'run.decision_sensitivity': sensitivityOf(block, i.graph),
     'run.tipping_point': tippingPointOf(enrichmentOf(block)),
     'model.goal_present': goal !== undefined,
     'model.goal_label': typeof goal?.label === 'string' ? goal.label : null,

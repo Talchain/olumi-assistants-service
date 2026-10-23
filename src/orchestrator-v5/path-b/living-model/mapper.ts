@@ -33,8 +33,8 @@ import { quantityUnitsCompose, readUnitParts, sameUnit, singular, unitsCompose, 
 import { periodAdverb, periodNoun } from '../../../utils/unit-alphabet.js';
 import { EventRiskV1 } from '../../../schemas/event-risk.js';
 import { riskOccurrenceIsCurrent, riskOccurrenceWindowMonths } from '../../agent-lane/risk-occurrence.js';
-import { isCalendarDate, readStatedDeadline, wholeMonthsBetween } from '../../goal-target/deadline-date.js';
 import { RETAINED_LIMIT_QUANTITY_QUESTION } from '../../../graph/retained-limit.js';
+import { isCalendarDate, readStatedDeadline, wholeMonthsBetween } from '../../goal-target/deadline-date.js';
 
 export type WithheldReason =
   | 'no_level_target' | 'aim_not_in_slice' | 'change_kind_unknown' | 'change_base_invalid' | 'change_base_not_theirs' | 'current_unit_mismatch' | 'exact_target_not_in_slice' | 'target_range_not_in_slice'
@@ -108,14 +108,22 @@ function rangeSpread(low: number, high: number, source: LivingSourceT, party: st
       : `The calculation uses ${who} range` };
 }
 
-/** A numerical frame belongs to the quantity, never another quantity with the same unit text. */
-function capFor(levels: readonly number[], unit: string | null, range: readonly (number | null)[] = []): number | undefined {
-  const finite = [...levels, ...range].filter((v): v is number => v !== null && Number.isFinite(v));
+/**
+ * The frame a factor's levels are read on: '%' → 100, unitless [0,1] → 1, otherwise its own headroom.
+ * Every level 0 (DL lease 22 Oct, served eb481e4a "Client delivery delay", 0 weeks, range 0 to 8): the stated range's top if
+ * positive, else 1. A level of 0 reads 0 on any frame and links scale by the frame, so the figures do not move; without a
+ * frame the level was held and the card read "Value not set yet".
+ */
+function capFor(levels: readonly number[], unit: string | null,
+  range: readonly (number | null)[] = []): number | undefined {
+  const finite = levels.filter((v) => Number.isFinite(v));
   if (finite.length === 0) return undefined;
   const top = Math.max(...finite.map(Math.abs));
   if (unit === '%') return 100;
   if (unit === null && finite.every((v) => v >= 0 && v <= 1)) return 1;
-  return top > 0 ? top * 1.25 : 1;
+  if (top > 0) return top * 1.25;
+  const rangeTop = Math.max(0, ...range.filter((v): v is number => v !== null && Number.isFinite(v)));
+  return rangeTop > 0 ? rangeTop : 1;
 }
 
 /**
@@ -365,8 +373,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
      */
     const into = model.links.filter((l) => l.to === aim.id && [l.effect.value, l.effect.low, l.effect.high].some((v) => v !== null));
     const relative = lt === 'goal_level_unknown' && t !== null && t.change_kind === 'relative' && t.unit === '%' && t.quantity.trim() !== ''
-      && (t.baseline_reference === 'today' || (t.baseline_reference === undefined
-        && (t.baseline === null || /^\s*(the\s+)?(today|now|current|present)\b/i.test(t.baseline)))) && !(t.current_unit !== null && isPercentScaledUnit(t.current_unit))
+      && (t.baseline === null || /^\s*(the\s+)?(today|now|current|present)\b/i.test(t.baseline)) && !(t.current_unit !== null && isPercentScaledUnit(t.current_unit))
       && t.value !== null && !(t.comparator === 'decrease' && Math.abs(t.value) > 100) && into.every((l) => l.effect.unit === '%')
       ? resolveGoalThresholdCapWithProvenance(undefined, Math.abs(t.value), '%', undefined) : null;
     if (relative !== null && t !== null && t.value !== null) {
@@ -524,23 +531,14 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
    */
   const usedHere = new Set([...setsFactor, ...model.links.map((l) => l.to), ...model.factors.flatMap((f) => f.defined_as?.of ?? []),
     ...model.aims.flatMap((a) => a.defined_as?.of ?? []), ...model.risks.flatMap((r) => r.mitigations.map((m) => m.factor_id))]);
-  const unmeasured = new Set(model.factors.filter((f) => f.value === null && (f.low === null || f.high === null || !(f.low < f.high))
-    && !f.defined_as && f.limit === null && !usedHere.has(f.id)).map((f) => f.id));
+  const unmeasured = new Set(model.factors.filter((f) => f.value === null && !f.defined_as && f.limit === null && !usedHere.has(f.id)).map((f) => f.id));
   const caps = new Map<string, number>();
   const current = new Map<string, number>();
   for (const f of model.factors) {
-    // A bare range has no person-stated centre. Reuse the existing range-matched Normal moments only where that
-    // conversion is supported; the derived centre and spread are Olumi's, never a new fact in the Living Model.
-    const spread = f.low !== null && f.high !== null && f.low < f.high
-      ? rangeSpread(f.low, f.high, figureBy(f, f).source, f.party) : undefined;
-    const middle = spread !== undefined ? f.low! / 2 + f.high! / 2 : null;
-    const bare = f.value === null && f.defined_as === null && spread !== undefined && middle !== null && Number.isFinite(middle) && Number.isFinite(spread.std) && spread.std > 0
-      && !setsFactor.has(f.id) && ((f.low! < 0 && f.high! > 0) || Math.abs(middle) >= 2 * spread.std);
-    const value = bare ? middle : f.value;
-    const levels = [value, ...model.options.flatMap((o) => o.settings.filter((s) => s.factor_id === f.id).map((s) => s.value))]
+    const levels = [f.value, ...model.options.flatMap((o) => o.settings.filter((s) => s.factor_id === f.id).map((s) => s.value))]
       .filter((v): v is number => v !== null);
     // The exact sum's change is read on the goal's own frame, so the goal is its parts added in the goal's units.
-    const cap = exactSum !== undefined && f.id === exactSum.lever ? goal!.cap : capFor(levels, f.unit, [f.low, f.high, f.limit?.value ?? null]);
+    const cap = exactSum !== undefined && f.id === exactSum.lever ? goal!.cap : capFor(levels, f.unit, [f.low, f.high]);
     if (cap !== undefined) caps.set(f.id, cap);
     const node: Rec = { id: f.id, kind: 'factor', label: f.label, category: setsFactor.has(f.id) ? 'controllable' : 'observable',
       // The exact sum's change: 0 today by definition (the contract's marker), so the engine holds it exact.
@@ -548,21 +546,18 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
       // Set aside from the calculation, kept on the canvas (the Run's participation guard withholds it; readiness judges the
       // graph the Run sends, so it owes no level and is never an orphan there).
       ...(unmeasured.has(f.id) ? { analysis_participation: 'retained_excluded' } : {}) };
-    if (value !== null && cap !== undefined) {
-      current.set(f.id, value);
-      node.observed_state = withSource({ value: value / cap, raw_value: value, cap, unit: f.unit ?? '' }, bare ? OLUMI_FIGURE : figureBy(f, f));
-      if (spread !== undefined) {
-        const std = spread.std / cap;
-        if (!setsFactor.has(f.id) && f.low! < value && value < f.high!
-          && ((f.low! < 0 && f.high! > 0) || Math.abs(value) >= 2 * spread.std)) {
-          Object.assign(node.observed_state as Rec, { std, std_source: 'olumi',
-            range_source: figureBy(f, f).source });
+    if (f.value !== null && cap !== undefined) {
+      current.set(f.id, f.value);
+      node.observed_state = withSource({ value: f.value / cap, raw_value: f.value, cap, unit: f.unit ?? '' }, figureBy(f, f));
+      if (f.low !== null && f.high !== null) {
+        const spread = rangeSpread(f.low, f.high, figureBy(f, f).source, f.party), std = spread.std / cap;
+        if (!setsFactor.has(f.id) && f.low < f.value && f.value < f.high
+          && ((f.low < 0 && f.high > 0) || Math.abs(f.value) >= 2 * spread.std)) {
+          Object.assign(node.observed_state as Rec, { std, std_source: 'olumi', range_source: figureBy(f, f).source });
           (node.observed_state as Rec).uncertainty_defaults = [{ code: REPAIR_CODES.CLAMP_STD_MINIMUM, layer: 'cee',
             field_path: `nodes[${f.id}].observed_state.std`, before: null, after: std, severity: 'info',
-            reason: bare
-              ? `${spread.introduction}, ${sayFigureAsWritten(f.low!, f.unit ?? '')} to ${sayFigureAsWritten(f.high!, f.unit ?? '')}, without a central figure. Olumi centres the calculation on the middle, ${sayFigureAsWritten(value, f.unit ?? '')}, with a spread matching the range's width. This bell-shaped (Normal) calculation is Olumi's assumption, not bounds on the draws; your saved range is unchanged.`
-              : `The calculation uses ${sayFigureAsWritten(value, f.unit ?? '')} for ${f.label}, with a spread matching ${spread.who} range, ${sayFigureAsWritten(f.low!, f.unit ?? '')} to ${sayFigureAsWritten(f.high!, f.unit ?? '')}; the spread is Olumi's assumption.` }];
-        } else assumed.push({ id: f.id, text: `The calculation uses ${sayFigureAsWritten(value, f.unit ?? '')} for ${f.label}. The range, ${sayFigureAsWritten(f.low!, f.unit ?? '')} to ${sayFigureAsWritten(f.high!, f.unit ?? '')}, is kept with the model but is not used as a spread.` });
+            reason: `The calculation uses ${sayFigureAsWritten(f.value, f.unit ?? '')} for ${f.label}, with a spread matching ${spread.who} range, ${sayFigureAsWritten(f.low, f.unit ?? '')} to ${sayFigureAsWritten(f.high, f.unit ?? '')}; the spread is Olumi's assumption.` }];
+        } else assumed.push({ id: f.id, text: `The calculation uses ${sayFigureAsWritten(f.value, f.unit ?? '')} for ${f.label}. The range, ${sayFigureAsWritten(f.low, f.unit ?? '')} to ${sayFigureAsWritten(f.high, f.unit ?? '')}, is kept with the model but is not used as a spread.` });
       }
     } else hold(f.id, f.low !== null || f.high !== null ? 'level_range_not_in_slice' : 'factor_level_unknown');
     nodes.push(node);
@@ -583,18 +578,19 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     if (d === null || f.value !== null || caps.has(f.id) || d.of.length === 0 || !d.of.every((p) => current.has(p) && caps.has(p))) continue;
     const made = (level: (p: string) => number) => (d.op === 'sum' ? d.of.reduce((a, p) => a + (d.subtract?.includes(p) ? -1 : 1) * level(p), 0) : d.of.reduce((a, p) => a * level(p), 1));
     const levels = [made((p) => current.get(p)!), ...model.options.map((o) => made((p) => o.settings.find((s) => s.factor_id === p)?.value ?? current.get(p)!))];
-    const cap = capFor(levels, f.unit, [f.low, f.high, f.limit?.value ?? null]);
+    const cap = capFor(levels, f.unit);
     if (cap === undefined || !Number.isFinite(cap) || cap <= 0) continue;
     caps.set(f.id, cap);
     nodes.find((n) => n.id === f.id)!.scale_frame = cap;
   }
 
   // ── Limits (Track 2): a bound beside the aim, as the legacy lane's limit row (`add_constraint`), read on the factor's frame.
-  // The quantity's frame includes its own limit before links are converted, so a numerical frame never drops that limit.
+  // Never widen the frame to fit a limit: that changes PLoT's default uncertainty. Retain off-frame money/count limits
+  // unscored below, using the existing retained-limit projection; the real consumer refuses clamped thresholds.
   const goal_constraints = model.factors.flatMap((f) => {
     const l = f.limit ?? null;
     if (l === null) return [];
-    if (!current.has(f.id) || l.value < 0 || l.value > caps.get(f.id)!) { hold(f.id, 'limit_not_in_slice'); return []; }
+    if (!current.has(f.id) || l.value < 0 || (f.unit === '%' && l.value > caps.get(f.id)!)) { hold(f.id, 'limit_not_in_slice'); return []; }
     const strict = l.comparator === '<' || l.comparator === '>';
     return [{ constraint_id: `limit_${f.id}`, node_id: f.id, operator: l.comparator.startsWith('<') ? '<=' : '>=',
       ...(strict ? { operator_as_stated: l.comparator } : {}), value: l.value, label: f.label, provenance: stated(l.source) ? 'explicit' : 'inferred',
@@ -949,10 +945,10 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     }
   }
 
-  // A limit without a supported connection has no forecast, not a reason to refuse every other calculation.
-  // Reuse the retained-unscored limit contract: saved bounds remain visible; Run omits its scoring frame and joint score.
+  // Missing forecast or an off-frame limit must not fabricate a budget pass or refuse unrelated calculations.
+  // Preserve the saved limit; the existing Run projection removes its scoring frame and withholds the full joint.
   const connected = new Set(edges.flatMap(e => [e.from, e.to]));
-  for (const c of goal_constraints) if (!connected.has(c.node_id)) {
+  for (const c of goal_constraints) if (!connected.has(c.node_id) || c.value > caps.get(c.node_id)!) {
     Object.assign(c, { retained_unresolved_limit: { state: 'unscored', role: 'original', reason: 'retained_limit_quantity_unresolved',
       previous_constraint_id: c.constraint_id, proposed_constraint_ids: [], question: RETAINED_LIMIT_QUANTITY_QUESTION } });
     hold(c.node_id, 'limit_not_in_slice');

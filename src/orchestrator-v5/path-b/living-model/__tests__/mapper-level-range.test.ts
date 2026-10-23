@@ -111,12 +111,8 @@ describe('a stated level range supplies its own provisional spread', () => {
     Object.assign(noRange.factors[2]!, { low: null, high: null });
     const mapped = mapLivingModel(model), base = mapLivingModel(noRange), level = node(mapped.graph);
     const { std, std_source, uncertainty_defaults, range_source, ...observed } = level.observed_state;
-    const baseState = node(base.graph).observed_state;
-    const { value: _value, cap: _cap, ...physical } = observed;
-    const { value: _oldValue, cap: _oldCap, ...oldPhysical } = baseState;
-    expect(physical).toEqual(oldPhysical);
-    expect(observed.value * observed.cap).toBeCloseTo(baseState.value * baseState.cap, 12);
-    // These are definition markers, not uncertain per-unit effects. The engine evaluates the identity from its parts.
+    expect(observed).toEqual(node(base.graph).observed_state);
+    expect(mapped.frames).toEqual(base.frames);
     expect(mapped.graph.edges).toEqual(base.graph.edges);
     if (eligible) {
       expect(std).toBe((high - low) / Math.sqrt(12) / observed.cap);
@@ -129,7 +125,7 @@ describe('a stated level range supplies its own provisional spread', () => {
       expect(std_source).toBeUndefined();
       expect(range_source).toBeUndefined();
       expect(uncertainty_defaults).toBeUndefined();
-      expect(observed.raw_value).toBe(baseState.raw_value);
+      expect(mapped.graph).toEqual(base.graph);
       expect(mapped.assumed.filter(a => a.id === 'each')).toEqual([{ id: 'each', text:
         `The calculation uses ${value} cases per specialist for each. The range, ${low} cases per specialist to ${high} cases per specialist, is kept with the model but is not used as a spread.` }]);
       expect(licence(run(mapped.graph))).toEqual(licence(run(base.graph)));
@@ -169,11 +165,10 @@ describe('a stated level range supplies its own provisional spread', () => {
     expect(licence(run(off)).provisional).not.toBe(true);
   });
 
-  it('a supported bare range is Olumi-derived; no-range/point and every link form stay byte-identical to base', () => {
+  it('bare ranges stay held; no-range/point and every link form stay byte-identical to base', () => {
     const bare = capacity();
     bare.factors[2]!.value = null;
-    expect(mapLivingModel(bare).withheld).not.toContainEqual({ id: 'each', reason: 'level_range_not_in_slice' });
-    expect(node(mapLivingModel(bare).graph).observed_state).toMatchObject({ raw_value: 20, source: 'cee_inference', std_source: 'olumi' });
+    expect(mapLivingModel(bare).withheld).toContainEqual({ id: 'each', reason: 'level_range_not_in_slice' });
     for (const form of ['point', 'normal', 'exact', 'range'] as const) {
       const model = structuredClone(KNOWN_ANSWER);
       Object.assign(model.links[0]!.effect, { form, value: form === 'range' ? null : 50, low: form === 'range' ? 30 : null, high: form === 'range' ? 70 : null });

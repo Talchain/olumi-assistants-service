@@ -35,6 +35,7 @@ describe('a retained limit without a supported forecast never refuses the rest o
   it('a supported connection or a direct option setting keeps the limit evaluable', () => {
     for (const connection of ['link', 'setting']) {
       const model = hiring();
+      model.factors.find(f => f.id === 'cost')!.value = 200000;
       if (connection === 'link') {
         const link = model.links.find(l => l.id === 'lead_cost')!;
         Object.assign(link.effect, { sign: '+', form: 'normal', value: 10000, sd: 2000 });

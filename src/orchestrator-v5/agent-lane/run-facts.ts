@@ -201,7 +201,7 @@ export function runFactsOf(analysisResult: unknown, graph: unknown, current: boo
   const zeroSpread = Object.entries(licence?.withheld_reason_by_option ?? {}).flatMap(([option_id, r]) => r.reason !== 'zero_spread' ? []
     : [{ option_id, basis: r.basis === 'fixed_baseline' ? 'fixed_baseline' as const : 'measured_spread' as const }]);
   const enrichment = isRec(analysisResult) ? analysisResult.enrichment : undefined;
-  const s = current ? decisionSensitivityOf(enrichment) : { status: 'not_measured' as const };
+  const s = current ? decisionSensitivityOf(enrichment, graph) : { status: 'not_measured' as const };
   const margins = goalMarginsOf(analysisResult, graph, current, state.runEvidence, state.selectedRunId);
   const implied = current ? impliedByDeadlineOf(readStoredImpliedQuantity({ [IMPLIED_QUANTITY_KEY]: state.impliedQuantity })) : undefined;
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];

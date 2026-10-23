@@ -28,8 +28,6 @@ export function levelTargetOf(t: Target): LevelTarget | AimTargetHeld {
     if (t.current !== null && t.current_unit !== null && t.current_unit !== t.unit) return 'current_unit_mismatch';
     return { comparator: t.comparator, value: t.value, unit: t.unit };
   }
-  // `current` is today's level, so a newly declared other/unresolved reference cannot use it as that other base.
-  if (t.current !== null && t.baseline_reference !== undefined && t.baseline_reference !== 'today') return 'change_base_invalid';
   if (t.current === null) return 'goal_level_unknown';
   const levelUnit = t.current_unit ?? t.unit;
   const kind = t.change_kind ?? (levelUnit === '%' ? null : t.unit === levelUnit ? 'absolute' : t.unit === '%' ? 'relative' : null);

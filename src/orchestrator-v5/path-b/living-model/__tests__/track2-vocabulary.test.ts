@@ -84,33 +84,24 @@ describe('Track 2: a limit beside the aim is the legacy limit row', () => {
     expect(node(request.graph, 'profit')).toMatchObject({ goal_threshold_raw: 2000, goal_threshold_unit: '£' });
   });
 
-  it('the own limit may change a frame, while all stated natural effects and levels remain unchanged', () => {
+  // Codex r1: widening the factor's frame to fit a limit rescales its links (PLoT then clamps them), so the frame never moves.
+  it('a limit never moves the factor\'s frame: the graph is the one without it, plus the row', () => {
     const m = deliveries('factor');
-    const without: LivingModelT = { ...m, factors: m.factors.map(f => ({ ...f, limit: null })) };
-    const withLimit = mapLivingModel(m), base = mapLivingModel(without);
-    expect((withLimit.graph as Rec).goal_constraints).toHaveLength(1);
-    expect(node(withLimit.graph, 'monthly_cost')!.observed_state.raw_value).toBe(node(base.graph, 'monthly_cost')!.observed_state.raw_value);
-    for (const edge of withLimit.graph.edges as Rec[]) {
-      if (!edge.provenance?.natural_effect) continue;
-      const old = (base.graph.edges as Rec[]).find(e => e.id === edge.id)!;
-      const from = withLimit.frames.get(edge.from)!, to = withLimit.frames.get(edge.to)!;
-      const oldFrom = base.frames.get(edge.from)!, oldTo = base.frames.get(edge.to)!;
-      expect(edge.strength.mean * to.cap / from.cap).toBeCloseTo(old.strength.mean * oldTo.cap / oldFrom.cap, 12);
-      expect(edge.strength.std * to.cap / from.cap).toBeCloseTo(old.strength.std * oldTo.cap / oldFrom.cap, 12);
-    }
+    const without: LivingModelT = { ...m, factors: m.factors.map((f) => ({ ...f, limit: null })) };
+    const { goal_constraints, ...rest } = mapLivingModel(m).graph as Rec;
+    expect(goal_constraints).toHaveLength(1);
+    expect(rest).toEqual(mapLivingModel(without).graph);
   });
 
-  it('a larger natural limit receives its own frame; an unknown level still does not acquire a level from its limit', () => {
-    const m = deliveries('factor');
-    m.factors[2]!.limit = { comparator: '<=', value: 20000, ...who(LIMIT_WORDS) };
-    const mapped = mapLivingModel(m);
-    expect((mapped.graph as Rec).goal_constraints).toContainEqual(expect.objectContaining({ node_id: 'monthly_cost', value: 20000 }));
-    expect(node(mapped.graph, 'monthly_cost')!.observed_state.cap).toBeGreaterThanOrEqual(20000);
-    m.factors[2]!.value = null;
-    const unknown = mapLivingModel(m);
-    expect(unknown.graph).not.toHaveProperty('goal_constraints');
-    expect(node(unknown.graph, 'monthly_cost')!.observed_state).toBeUndefined();
-    expect(unknown.withheld).toContainEqual({ id: 'monthly_cost', reason: 'limit_not_in_slice' });
+  it('a missing level is held and an off-frame limit is retained unscored, never clamped', () => {
+    for (const patch of [{ value: null }, { limit: { comparator: '<=' as const, value: 20000, ...who(LIMIT_WORDS) } }]) {
+      const m = deliveries('factor');
+      m.factors[2] = { ...m.factors[2]!, ...patch };
+      const mapped = mapLivingModel(m);
+      if (patch.value === null) expect(mapped.graph, JSON.stringify(patch)).not.toHaveProperty('goal_constraints');
+      else expect((mapped.graph as Rec).goal_constraints[0]).toMatchObject({ value: 20000, retained_unresolved_limit: { state: 'unscored' } });
+      expect(mapped.withheld.map((w) => `${w.id}:${w.reason}`)).toContain('monthly_cost:limit_not_in_slice');
+    }
   });
 });
 

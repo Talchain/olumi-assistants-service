@@ -106,9 +106,6 @@ export const LivingAim = z.object({
       'The day Olumi read the date, as YYYY-MM-DD. Olumi records it: keep a saved one unchanged; null for a new reading.'),
     /** The reference the target is measured from, as written ("today", "last quarter"); null when none. */
     baseline: z.string().nullable(),
-    /** Structured reference for a change; baseline keeps the person's words. Missing on older saved forms. */
-    baseline_reference: z.enum(['today', 'other']).nullable().optional().describe(
-      'For a change: today when it is relative to the current state (including a descriptive baseline such as productivity before hiring); other for a different stated reference such as last quarter. Keep baseline as written. Null when the reference is unresolved or this is a level target. Never replace a stated other reference with today.'),
     /**
      * The quantity's current level, in the target's unit, when stated. Unknown is null, never 0. DL 22 Oct (served marketing
      * on 68ca54f0-b, a count from launch held as goal_level_unknown): a count not yet started is 0 by the person's own words,

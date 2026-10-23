@@ -2,6 +2,9 @@ import { readFileSync } from 'node:fs';
 import { LivingModel } from '../../../../schemas/living-model.js';
 import { describe, expect, it } from 'vitest';
 import { GraphV3 } from '../../../../schemas/cee-v3.js';
+import { decisionSensitivityOf, analysisResultForAgent } from '../../../agent-lane/decision-sensitivity.js';
+import { assembleGuidanceSignals } from '../../../agent-lane/turn-context/guidance-signals.js';
+import { runFactsOf } from '../../../agent-lane/run-facts.js';
 import { goalChanceDriverOf } from '../../../goal-target/goal-chance-driver.js';
 import { convertingOlumiEstimate } from '../../../admission/target-testability.js';
 import { mapLivingModel } from '../mapper.js';
@@ -47,43 +50,31 @@ describe('B1: quantity-owned frames and honest range conversion', () => {
     expect((edge.strength as Rec).mean * out.frames.get('mrr')!.cap / out.frames.get('price')!.cap).toBeCloseTo(300, 12);
     expect(convertingOlumiEstimate(edge, out.graph, 'mrr')).toBe(true);
     expect((out.graph as Rec).goal_constraints).toContainEqual(expect.objectContaining({ node_id: 'spend', value: 20000, value_frame: 'level' }));
-    expect(node(out.graph, 'spend').observed_state.cap).toBeGreaterThanOrEqual(20000);
-    expect(out.withheld).not.toContainEqual({ id: 'spend', reason: 'limit_not_in_slice' });
+    expect(node(out.graph, 'spend').observed_state.cap).toBe(18750);
+    expect((out.graph as Rec).goal_constraints.find((c: Rec) => c.node_id === 'spend').retained_unresolved_limit.state).toBe('unscored');
+    expect(out.withheld).toContainEqual({ id: 'spend', reason: 'limit_not_in_slice' });
     expect(m).toEqual(before); // The churn aim, conditions, risk, quotes and authorship are not simplified away.
   });
 
-  it('a limit participates in its own numerical frame before link conversion, without changing the limit or figure', () => {
+  it('an off-frame budget is retained unscored without changing any numerical frame, level, spread or link', () => {
     const m = money();
     Object.assign(m.factors[0]!, { unit: '£', value: 0, low: 0, high: 20000,
       limit: { comparator: '<=', value: 20000, source: 'user', party: null, quote: 'spend at most £20,000' } });
     Object.assign(m.options[1]!.settings[0]!, { unit: '£', value: 15000 });
     const before = structuredClone(m), out = mapLivingModel(m);
-    expect(node(out.graph, 'f').observed_state.cap).toBe(25000);
-    expect((out.graph as Rec).goal_constraints).toContainEqual(expect.objectContaining({ node_id: 'f', value: 20000, value_frame: 'level', provenance: 'explicit' }));
-    expect(out.withheld).not.toContainEqual({ id: 'f', reason: 'limit_not_in_slice' });
+    const without = structuredClone(m); without.factors[0]!.limit = null;
+    const { goal_constraints, ...rest } = out.graph as Rec;
+    expect(rest).toEqual(mapLivingModel(without).graph);
+    expect(out.frames).toEqual(mapLivingModel(without).frames);
+    expect(node(out.graph, 'f').observed_state.cap).toBe(18750);
+    expect(goal_constraints).toContainEqual(expect.objectContaining({ node_id: 'f', value: 20000, value_frame: 'level',
+      provenance: 'explicit', retained_unresolved_limit: expect.objectContaining({ state: 'unscored' }) }));
+    expect(out.withheld).toContainEqual({ id: 'f', reason: 'limit_not_in_slice' });
     expect(m).toEqual(before);
-    // A real percentage domain is not widened to make an invalid limit fit.
     Object.assign(m.factors[0]!, { unit: '%', low: null, high: null, limit: { ...m.factors[0]!.limit!, value: 150 } });
     Object.assign(m.options[1]!.settings[0]!, { unit: '%', value: 40 });
     expect(node(mapLivingModel(m).graph, 'f').observed_state.cap).toBe(100);
     expect(mapLivingModel(m).withheld).toContainEqual({ id: 'f', reason: 'limit_not_in_slice' });
-  });
-
-  it('a bare observed range keeps its source words and bounds; only the derived centre and Normal moments are Olumi’s', () => {
-    const m = structuredClone(KNOWN_ANSWER);
-    m.factors.push({ ...m.factors[0]!, id: 'context', label: 'Available time', value: null, low: 20, high: 30, unit: '%', quote: 'available time is 20–30%' });
-    m.links.push({ ...m.links[0]!, id: 'context_g', from: 'context', effect: { ...m.links[0]!.effect, value: 10, sd: 2 } });
-    const before = structuredClone(m), out = mapLivingModel(m), context = node(out.graph, 'context');
-    expect(context.observed_state).toMatchObject({ raw_value: 25, value: 0.25, cap: 100, source: 'cee_inference', std_source: 'olumi' });
-    expect(context.observed_state).not.toHaveProperty('extractionType', 'explicit');
-    expect(context.observed_state.std).toBeCloseTo(10 / Math.sqrt(12) / 100, 14);
-    expect(context.observed_state.uncertainty_defaults[0].reason).toContain('without a central figure');
-    expect(context.observed_state.uncertainty_defaults[0].reason).toContain('Normal');
-    expect(context.observed_state.uncertainty_defaults[0].reason).toContain('not bounds on the draws');
-    expect(out.withheld).not.toContainEqual({ id: 'context', reason: 'level_range_not_in_slice' });
-    expect(m).toEqual(before);
-    expect(GraphV3.parse({ ...out.graph, living_model: m }).living_model).toEqual(before);
-    expect(GraphV3.parse({ ...out.graph, living_model: m }).nodes.find(n => n.id === 'context')!.observed_state).toEqual(context.observed_state);
   });
 
   it('the real mapper → saved graph → driver preserves the person’s range author, separately from Normal conversion', () => {
@@ -94,8 +85,8 @@ describe('B1: quantity-owned frames and honest range conversion', () => {
       low_upper_display: 15, high_lower_display: 25, display_unit: 'cases' };
     const record = { probability_of_goal_drivers: { method: 'tercile_conditional_v1', min_group_n: 30,
       n_candidates: 1, n_compared: 1, n_dropped: 0, dropped_by_reason: {}, drivers: [row] } };
-    for (const value of [20, null]) for (const source of ['user', 'olumi', 'party', 'unverified'] as const) {
-      Object.assign(m.factors[1]!, { value, source, party: source === 'party' ? 'Operations' : null });
+    for (const source of ['user', 'olumi', 'party', 'unverified'] as const) {
+      Object.assign(m.factors[1]!, { source, party: source === 'party' ? 'Operations' : null });
       const graph = GraphV3.parse({ ...mapLivingModel(m).graph, living_model: m });
       const state = node(graph, 'capacity').observed_state;
       expect(state.std_source).toBe('olumi'); // PLoT must still map this to ISL spread_source: template.
@@ -104,9 +95,26 @@ describe('B1: quantity-owned frames and honest range conversion', () => {
       const claim = goalChanceDriverOf(record, 'push', graph, { factor_evppi: [{ factor_id: 'capacity', spread_source: 'template' }] });
       expect('driver' in claim ? claim.driver.authored_by : claim).toBe(author);
       expect(state.uncertainty_defaults[0].reason).toContain('Olumi');
+      const enrichment = { factor_evppi: [{ factor_id: 'capacity', evppi: 0.1, status: 'resolved', spread_source: 'template' }],
+        factor_sensitivity: [{ factor_id: 'capacity', factor_label: 'Capacity' }] };
+      const expectedRange = source === 'user' ? 'yours' : source === 'olumi' ? 'olumi_assumed' : undefined;
+      const selected = decisionSensitivityOf(enrichment, graph);
+      expect(selected.status).toBe('measured');
+      expect('most_sensitive' in selected ? selected.most_sensitive.range : null).toBe(expectedRange);
+      const block = { enrichment };
+      expect((analysisResultForAgent(block, graph) as Rec).decision_sensitivity).toEqual(selected);
+      const guidance = assembleGuidanceSignals({ request: 'turn', graph, analysisResult: block,
+        analysisState: { run_state: { kind: 'complete_current' } }, offeredSpecific: [], leaderLicensed: true });
+      expect(guidance['run.decision_sensitivity']).toEqual({ status: 'measured', most_sensitive: {
+        factor_id: 'capacity', label: 'Capacity', ...(expectedRange === undefined ? {} : { range: expectedRange }) } });
+      expect(runFactsOf(block, graph, true).sensitivity).toEqual({ measured: true, most_sensitive: 'Capacity' });
+      expect(runFactsOf(block, graph, false).sensitivity).toEqual({ measured: false });
+
       const noModel = { ...graph, living_model: undefined };
       const unbound = goalChanceDriverOf(record, 'push', noModel, {});
       expect('driver' in unbound ? unbound.driver.authored_by : unbound).toBe('unattributed');
+      const unboundSensitivity = decisionSensitivityOf(enrichment, noModel);
+      expect('most_sensitive' in unboundSensitivity ? unboundSensitivity.most_sensitive.range : null).toBeUndefined();
       const changed = structuredClone(graph);
       node(changed, 'capacity').observed_state.std *= 2;
       const rejected = goalChanceDriverOf(record, 'push', changed, {});
