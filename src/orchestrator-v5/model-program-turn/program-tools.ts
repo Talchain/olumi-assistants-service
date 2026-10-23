@@ -82,8 +82,9 @@ export async function readProgramContext(deps: ProgramToolDeps, ctx: Ctx): Promi
     // The model AS AUTHORED, every record whole (its author, words, basis, ranges, timing, windows, relations, risks and the
     // qualitative records), compact only by leaving out what is not given (null). Never a summary of it.
     model: compactRecords(authored), earlier_versions: history.length,
-    open_questions: Array.isArray(compile['asks']) ? compile['asks'] : [],
-    coaching: Array.isArray(compile['coaching']) ? compile['coaching'] : [],
+    // What the stored Run waits on, typed (A4): the AI asks in its own words. A Run stored before blockers keeps its own lists.
+    ...(Array.isArray(compile['blockers']) ? { blockers: compile['blockers'] }
+      : { open_questions: Array.isArray(compile['asks']) ? compile['asks'] : [], coaching: Array.isArray(compile['coaching']) ? compile['coaching'] : [] }),
     run: shown === undefined ? null : { ...runWords(shown.run), current: shown.current, engine_current: shown.engine_current },
   });
 }
@@ -212,12 +213,12 @@ export async function applyCanvasFigure(deps: Pick<ProgramToolDeps, 'dispatch'>,
   const q = program.canonical.quantities.find((x) => x.id === qid);
   if (q === undefined) return { status: 'refused', reason: 'goal_id' in edit.target ? 'That goal has no target to set yet; say it in the chat.' : 'That is not a figure in this model.' };
   // A figure typed on the person's OWN range (DL 23 Oct): inside it, it is their new most likely figure (the draw's centre)
-  // and the range and its reading stay; outside it, nothing is saved and they are asked whether the range changes too.
+  // and the range and its reading stay; outside it, nothing is saved, and the refusal says the range must change with it.
   const onRange = edit.low == null && edit.high == null && edit.value !== null && q.author === 'person' && q.low !== null && q.high !== null && q.low < q.high;
   if (onRange) {
     const n = (x: number) => x.toLocaleString('en-GB');
     const where = edit.value! < q.low! || edit.value! > q.high! ? 'outside' : edit.value === q.low || edit.value === q.high ? 'at the end of, not inside,' : null;
-    if (where !== null) return { status: 'refused', reason: `${n(edit.value!)} is ${where} your range of ${n(q.low!)}–${n(q.high!)}. Change the range as well?` };
+    if (where !== null) return { status: 'refused', reason: `${n(edit.value!)} is ${where} your range of ${n(q.low!)}–${n(q.high!)}, so nothing was saved: change the range with it.` };
   }
   const shownAs = onRange ? `${edit.value} ${q.unit}, within ${q.low} to ${q.high}`
     : edit.low != null && edit.high != null ? `${edit.low} to ${edit.high} ${q.unit}` : `${edit.value} ${q.unit}`;
