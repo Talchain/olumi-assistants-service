@@ -226,6 +226,20 @@ describe('the model-program turn on the real core route', () => {
     expect(stableStringify(recomputed.view)).not.toBe(stableStringify(cold.view));
   });
 
+  it('step 4 (DL 23 Oct, batch 5 hiring): a first draft with an option\'s own value reopens cold to the SAME BYTES — the model is stored in the schema\'s own key order', async () => {
+    const m = club();
+    // The promotion's cost as its own inline value: the compiler names it as a quantity of its own when the draft is read.
+    m.options[0]!.sets[1] = { ...m.options[0]!.sets[1]!, to: null, value: 500 };
+    replies = [JSON.stringify(m)];
+    expect((await turn({ message: CLUB_BRIEF })).json().model_program.saved).toBe(true);
+    const stored = persisted!.living_model.canonical as Json;
+    expect(stored.quantities.some((x: Json) => x.id === 'promotion__spend')).toBe(true);
+    vi.resetModules();
+    const fresh = await import('../program-store.js');
+    const cold = fresh.reopenProgram(JSON.parse(JSON.stringify(persisted)))!;
+    expect(JSON.stringify(cold.program.canonical)).toBe(JSON.stringify(stored));
+  });
+
   it('step 4b, an engine-version bump: the reopen still shows the ORIGINAL stored result, said as from an older engine', async () => {
     replies = [JSON.stringify(bakery())];
     const r = (await turn({ message: BRIEF })).json();

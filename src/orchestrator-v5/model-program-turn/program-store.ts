@@ -58,8 +58,11 @@ export function savedProgramOf(graph: unknown): SavedProgram | undefined {
 export const unreadableWords = (reason: string): string =>
   `This scenario's model can't be opened here: ${reason}. Nothing was changed. You can start a new scenario from your brief, and this one stays as it was.`;
 
-/** The living model a write stores: exactly the program, nothing derived beyond its stored Runs. */
-export const livingModelOf = (p: SavedProgram): Rec => ({ model_program: p.model_program, canonical: p.canonical, seed: p.seed, person_words: p.person_words, runs: p.runs });
+/**
+ * The living model a write stores: exactly the program, nothing derived beyond its stored Runs. Its model is stored as the
+ * schema reads it back (`CanonicalModel.parse`: the schema's own key order), so a cold reopen gives the same bytes.
+ */
+export const livingModelOf = (p: SavedProgram): Rec => ({ model_program: p.model_program, canonical: CanonicalModel.parse(p.canonical), seed: p.seed, person_words: p.person_words, runs: p.runs });
 
 /** The person's words the compiler checks quotes against: the brief and every answer they gave, in order. */
 export const sourceTextOf = (words: readonly string[]): string => words.join('\n');
