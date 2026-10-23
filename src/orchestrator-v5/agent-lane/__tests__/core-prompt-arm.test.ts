@@ -68,7 +68,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
 
   it('THE PROMPTS (DL 22 Oct, priority change): the coach\u2019s reply rules and the drafter\u2019s rules, adapted as ruled; the old constants are gone', () => {
     expect(createHash('sha256').update(CORE_REPLY_RULES, 'utf8').digest('hex')).toBe('6f5f00c581ac4be2f1f590973e4bcf58c6eba498e5216bc3a8a21a189be5f3d6');
-    expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('34520d85d31ec5ade23c6ec4ce6c8199ae186c07c35402783c1de284c76b1f16'); // 23 Oct (DL 93d79c3e, C2): mechanism first; leanest and stated-only retired. 22 Oct: every stated goal saved in their words, never approximated (Claude r1 on #3670); + a calendar date is Olumi's labelled reading
+    expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('e400deb1e747b1716c5c6310e13c2019e275481fc0c97c95e58750f5f941c1fc'); // 23 Oct (DL 93d79c3e, C2): mechanism first; leanest and stated-only retired; the soft conditions guideline kept (Codex r1 on #3698). 22 Oct: every stated goal saved in their words, never approximated (Claude r1 on #3670); + a calendar date is Olumi's labelled reading
     // The retired constants are gone from both modules: no route can send the accreted text again.
     for (const name of ['CORE_REPLY_INSTRUCTION', 'CORE_RESPONSE_DISCIPLINE', 'CORE_NEXT_STEP']) expect(Object.keys(coreInstructions), name).not.toContain(name);
     expect(Object.keys(drafting)).toEqual(['CORE_DRAFTER_RULES']);
@@ -136,7 +136,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       "A qualitative worry or uncertainty is a risk, or a condition when it cannot reasonably be quantified, never an unmeasured factor.",
       "Every factor has a stated unit and a current value or Olumi's labelled estimate; only schema-defined on/off steps use unit null and a 0-or-1 level (a risk-mitigation step is 0 today and 1 under the option that takes it).",
       "Other mechanisms are items and links, never condition text alone.",
-      "Use conditions only for what cannot be quantified, at most 5 in a first model.",
+      "Use conditions only for what cannot be quantified; aim for at most 5 conditions in a first model, retaining material context and dissent.",
       "Name the risks the brief implies: include at least one risk when the brief implies any, linked to what it would hit.",
       "For a risk's chance and window, use supplied figures or the estimate rule; if none is reasonable, keep it unknown and say what is missing.",
       "An option acts through settings on what it changes; a person's option naming none gets Olumi's setting, estimate_by olumi.",

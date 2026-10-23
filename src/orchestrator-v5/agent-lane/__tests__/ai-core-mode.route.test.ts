@@ -246,7 +246,7 @@ describe('PATH-B core: the AI\'s own words are the reply; protocol, cards, resul
 
   it('drafting guidance (Paul 21 Oct, the benchmarked drafting prompt): a core turn with no saved model sends it and says so; the off arm withholds it; a saved model is n/a', async () => {
     // Copied from the guidance's opening, never imported: a change to either side turns the row RED.
-    const DRAFTING = 'Turn the supplied brief into one provisional Living Model, using the supplied existing schema. Work through extraction, widening, mechanisms and audit silently.';
+    const DRAFTING = "Turn the supplied brief into one provisional Living Model, using the supplied schema. Work silently: the goal's identity first, then mechanisms, extraction, widening, audit.";
     const instructionsSent = (): string[] => sent.filter((b) => b.includes(CORE_RULE)).map((b) => (JSON.parse(b) as Json).instructions as string);
     graph = null as never;
     const on = await typed('We are weighing two ways to grow next year.', CORE);
