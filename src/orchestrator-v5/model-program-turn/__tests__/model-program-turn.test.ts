@@ -13,7 +13,7 @@ import { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha
 import { stableStringify } from '../../../orchestrator/context/stable-stringify.js';
 import { APPROXIMATE_FIGURE, type CanonicalModelT } from '../../model-program/canonical.js';
 import { compile } from '../../model-program/compile.js';
-import { fillQuantity } from '../../model-program/answer.js';
+import { defineGoalMeasure, fillQuantity } from '../../model-program/answer.js';
 import { project } from '../../model-program/project.js';
 import { simulate } from '../../model-program/simulate/simulate.js';
 import { CANONICAL_JSON_SCHEMA, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX } from '../prompt.js';
@@ -458,6 +458,52 @@ describe('the model-program turn on the real core route', () => {
     expect((persisted!.living_model.canonical as CanonicalModelT).history.at(-1)).toMatchObject({ id: 'extra_per_oven', change: 'superseded', quote: 'Those are firm ends' });
     const asks = (persisted!.living_model.runs.at(-1).result.compile as Json).asks as Json[];
     expect(asks.some((x) => x.quantity_id === 'extra_per_oven')).toBe(false);
+  });
+
+  it('DL 23 Oct: an aim with no measure gets the one the person states (define_goal_measure), in their words; what they did not state stays asked', async () => {
+    const m = bakery();
+    m.goals = [{ ...m.goals[0]!, measure: null, question: 'How would you know the bakery is doing well enough?' }];
+    replies = [JSON.stringify(m)];
+    const drafted = (await turn({ message: BRIEF })).json();
+    expect(drafted.model_program.saved).toBe(true);
+    expect((persisted!.living_model.runs.at(-1).result.compile as Json).coaching).toEqual([expect.objectContaining({ record_id: 'more_loaves', kind: 'measure' })]);
+    const words = 'Success means selling at least 380 loaves a week within 4 weeks.';
+    const deps = { dispatch, proposals: new ProposalStore() };
+    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] };
+    const op = { op: 'define_goal_measure', goal_id: 'more_loaves', quantity: 'sales', cmp: '>=', frame: null,
+      target: { value: 380, low: null, high: null, range_kind: null }, window: { periods: 4, start: 0 }, quote: words };
+    const propose = (o: Json) => proposeProgramChange(deps, ctx, ProgramChangeParams.parse({ public_label: 'Measure the aim', basis: 'their answer', ops: [o] })) as Promise<Json>;
+    // Negatives first: a target or a deadline their words do not state is refused (never inferred), and nothing is proposed.
+    for (const wrong of [{ ...op, target: { value: 400, low: null, high: null, range_kind: null } }, { ...op, window: { periods: 6, start: 0 } }]) {
+      const r = await propose(wrong);
+      expect(r.status, JSON.stringify(r)).not.toBe('ok');
+      expect(JSON.stringify(r)).toMatch(/do not state that (target|deadline)/);
+    }
+    const p = await propose(op);
+    expect(p.status, JSON.stringify(p)).toBe('ok');
+    expect(await applyProgramChange(deps, ctx, p.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
+    const after = persisted!.living_model.canonical as CanonicalModelT;
+    expect(after.goals[0]).toMatchObject({ measure: { quantity: 'sales', cmp: '>=', target: 'more_loaves_target', frame: 'level', reference: null,
+      window: { start: 0, periods: 'more_loaves_window' }, measure_by: 'person' }, question: null });
+    expect(after.quantities.find((x) => x.id === 'more_loaves_target')).toMatchObject({ value: 380, unit: 'loaf/week', author: 'person', quote: words, status: 'known' });
+    expect(after.quantities.find((x) => x.id === 'more_loaves_window')).toMatchObject({ value: 4, unit: 'week', author: 'person', quote: words });
+    expect(after.history.at(-1)).toMatchObject({ id: 'more_loaves', change: 'superseded', quote: words });
+    // The new Run can now work out the aim: each option's chance of it is shown, and the measure question is gone.
+    const run = persisted!.living_model.runs.at(-1).result as Json;
+    expect((run.canonical_analysis_view as Json).options.map((o: Json) => o.cell.kind)).toEqual(['figure', 'figure']);
+    expect((run.compile as Json).coaching).toEqual([]);
+
+    // Unstated target: it is ASKED, the aim waits for it; a new measure they named is theirs, held until the model works it out.
+    const asked = defineGoalMeasure(m, { goal_id: 'more_loaves', quantity: 'sales', cmp: '>=', frame: null, target: null, window: null, quote: 'by how many loaves we sell' });
+    expect(asked.ok).toBe(true);
+    const askedModel = (asked as { model: CanonicalModelT }).model;
+    expect(askedModel.quantities.find((x) => x.id === 'more_loaves_target')).toMatchObject({ status: 'asked', value: null, quote: null });
+    expect(compile(askedModel, { sourceText: `${BRIEF}\nby how many loaves we sell` }).asks.map((x) => x.quantity_id)).toContain('more_loaves_target');
+    const named = defineGoalMeasure(m, { goal_id: 'more_loaves', quantity: { label: 'Repeat customers', unit: 'customer/week' }, cmp: '>=', frame: null,
+      target: { value: 50, low: null, high: null, range_kind: null }, window: null, quote: 'at least 50 repeat customers a week' });
+    const namedModel = (named as { model: CanonicalModelT }).model;
+    expect(namedModel.quantities.find((x) => x.id === 'repeat_customers')).toMatchObject({ status: 'unknown', author: 'person', quote: 'at least 50 repeat customers a week' });
+    expect(compile(namedModel, { sourceText: `${BRIEF}\nat least 50 repeat customers a week` }).perGoal[0]).toMatchObject({ status: 'withheld' });
   });
 
   it('display fit (Lenses 23 Oct): every link its own id and sign; the goal target, each figure\'s source and every editable id on the fields the canvas reads', () => {

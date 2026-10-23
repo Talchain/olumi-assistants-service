@@ -20,7 +20,6 @@ import { computeAnalysisAffectingGraphHash } from "../orchestrator-v5/context/gr
 import { proposalRecord, proposalFieldsWire, heldRecordsApplyAt, issuedTurnIdsForProposalRecords, proposalIssuances, type ProposalIssuingRow } from "../orchestrator-v5/agent-lane/proposal-object/record.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
 import { programReadOf, reopenProgram, unreadableWords } from "../orchestrator-v5/model-program-turn/program-store.js";
-import { buildCanonicalAnalysisReadyFromGraph } from "../orchestrator/tools/analysis-ready-helper.js";
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
 import { buildErrorV1 } from "../utils/errors.js";
 import { getRequestId } from "../utils/request-id.js";
@@ -441,17 +440,11 @@ export default async function route(app: FastifyInstance) {
       // The selected block already has one public carrier, `analysis_result`.
       // The current-read sidecar exposes its bounded identity and typed figures
       // without a second copy of raw enrichment/probability fields.
-      const { result: _selectedBlock, ...selectedReadWire } = analysis.current_read;
-      // A MODEL PROGRAM (alpha): its analysis is its newest STORED Run, never a recompute; its readiness (the goal's target
-      // among it) is the canonical builder's over the saved graph, as a core turn reads it when the read carries none.
-      // A claimed program that cannot be read shows NO analysis (never the legacy reader's) and says why.
+      const { result: _selectedBlock, ...currentReadWire } = analysis.current_read;
+      // A MODEL PROGRAM (alpha): its analysis is its newest STORED Run, never a recompute (its readiness is the program's own,
+      // `program-readiness.ts`). A claimed program that cannot be read shows NO analysis (never the legacy reader's) and says why.
       const programRead = graphPresent ? programReadOf(graph) : { kind: 'none' as const };
       const program = programRead.kind === 'program' ? reopenProgram(graph) : undefined;
-      let programReady: ReturnType<typeof buildCanonicalAnalysisReadyFromGraph>;
-      if (program !== undefined && selectedReadWire.analysis_ready === undefined) {
-        try { programReady = buildCanonicalAnalysisReadyFromGraph(graph); } catch { programReady = undefined; }
-      }
-      const currentReadWire = programReady === undefined ? selectedReadWire : { ...selectedReadWire, analysis_ready: programReady };
       // Compatibility projection reads the common canonical claim, never the
       // issue count. The pending actions remain explanatory data only.
       const scopePermissions = claimPermissionsFrom(analysis.analysis_state, undefined);

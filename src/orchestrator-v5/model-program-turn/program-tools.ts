@@ -28,7 +28,7 @@ export interface ProgramToolDeps { readonly dispatch: InternalDispatch; readonly
 
 /** Said with the turn's state on a program scenario: how its tools work. The standing instructions stay byte for byte. */
 export const PROGRAM_TURN_GUIDANCE = 'This scenario\'s model is a model program: read_canonical_context gives its quantities (with who gave each figure), goals, limits, options, open questions and its stored Run. '
-  + 'To change it, call propose_change with ops: set_quantity (one input quantity\'s figure or range: an answer to an open question, or a corrected figure), set_range_kind (how to read a range they gave), set_goal_target, add_option or rename_option, each quoting the person\'s exact words, using the ids read_canonical_context gives. '
+  + 'To change it, call propose_change with ops: set_quantity (one input quantity\'s figure or range: an answer to an open question, or a corrected figure), set_range_kind (how to read a range they gave), set_goal_target, define_goal_measure (how an aim with no measure is measured, as they said it), add_option or rename_option, each quoting the person\'s exact words, using the ids read_canonical_context gives. '
   + 'The person approves the card; apply_change then saves the model with a new Run.';
 
 export const ProgramChangeParams = z.object({
@@ -82,7 +82,7 @@ export async function readProgramContext(deps: ProgramToolDeps, ctx: Ctx): Promi
 
 /** The card's rows: one per edit, on the record it changes. */
 const operationsOf = (ops: readonly ProgramOpT[]): ProposalOperation[] => ops.map((o): ProposalOperation => ({ op: 'living_change',
-  path: o.op === 'set_quantity' || o.op === 'set_range_kind' ? `quantity:${o.quantity_id}` : o.op === 'set_goal_target' ? `goal:${o.goal_id}` : o.op === 'add_option' ? `option:${o.label}` : `option:${o.option_id}`,
+  path: o.op === 'set_quantity' || o.op === 'set_range_kind' ? `quantity:${o.quantity_id}` : o.op === 'set_goal_target' || o.op === 'define_goal_measure' ? `goal:${o.goal_id}` : o.op === 'add_option' ? `option:${o.label}` : `option:${o.option_id}`,
   value: { change: o.op === 'add_option' ? 'add' : 'change', after: o } }));
 
 export async function proposeProgramChange(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs): Promise<ToolOutcome> {

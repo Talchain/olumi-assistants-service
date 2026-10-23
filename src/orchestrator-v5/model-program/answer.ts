@@ -6,6 +6,7 @@
  */
 import { APPROXIMATE_FIGURE, type CanonicalModelT } from './canonical.js';
 import { inlineQuantityId } from './compile.js';
+import { parseUnit } from './units.js';
 
 /** Words that give a figure as approximate ("about £2,000"). */
 const APPROXIMATE_WORDS = /\b(about|around|roughly|approximately|approx|circa|nearly|almost)\b|~|≈/i;
@@ -73,4 +74,79 @@ export function setRangeKind(model: CanonicalModelT, quantityId: string, kind: '
   const quantities = [...model.quantities];
   quantities[i] = { ...old, range_kind: kind };
   return { ok: true, model: { ...model, quantities, history: [...model.history, { id: quantityId, change: 'superseded', old: JSON.stringify(old), quote, author_id: null }] } };
+}
+
+/**
+ * GIVING AN AIM ITS MEASURE (DL 23 Oct): the person's answer to "what does success mean, how do you measure it?" is ONE edit
+ * on ONE goal with no measure yet, in their words: the quantity it is about (one already in the model, or a new one they
+ * named, theirs), how it is compared, its target and its window. Nothing is inferred: a target or a deadline their words do
+ * not state stays asked (the target an asked quantity; the window left for the compiler's "By when?"), and a figure is
+ * theirs only when their words state it. A new measured quantity is theirs but nothing works it out yet, so the aim is
+ * held, saying so, until the model says how the options change it.
+ */
+export type GoalMeasureAnswer = {
+  readonly goal_id: string;
+  readonly quantity: string | { readonly label: string; readonly unit: string };
+  readonly cmp: '>=' | '>' | '<=' | '<';
+  readonly frame: 'level' | 'change_abs' | 'change_rel' | null;
+  readonly target: { readonly value: number | null; readonly low: number | null; readonly high: number | null; readonly range_kind: 'bounds' | 'plausible' | null } | null;
+  readonly window: { readonly periods: number; readonly start: number } | null;
+  readonly quote: string;
+};
+type Quantity = CanonicalModelT['quantities'][number];
+
+export function defineGoalMeasure(model: CanonicalModelT, a: GoalMeasureAnswer): FillResult {
+  const g = model.goals.find((x) => x.id === a.goal_id);
+  if (g === undefined) return { ok: false, reason: `"${a.goal_id}" is not a goal in the model.` };
+  if (g.measure !== null) return { ok: false, reason: `"${g.label}" already has a measure; change its target instead.` };
+  if (a.quote.trim() === '') return { ok: false, reason: 'A measure needs the person\'s own words.' };
+  const said = figuresIn(a.quote);
+  const stated = (x: number) => said.some((y) => Math.abs(y - Math.abs(x)) < 1e-9);
+  const taken = new Set([...model.quantities.map((q) => q.id), ...model.goals.map((x) => x.id), ...model.limits.map((l) => l.id), ...model.options.map((o) => o.id)]);
+  const fresh = (base: string) => { let id = base; for (let n = 2; taken.has(id); n += 1) id = `${base}_${n}`; taken.add(id); return id; };
+  const theirs = (id: string, label: string, unit: string, f: Partial<Quantity>): Quantity => ({ id, label, unit, kind: 'fact', value: null, low: null, high: null,
+    range_kind: null, status: 'known', question: null, basis: null, author: 'person', party: null, quote: a.quote, approval: 'approved', author_id: null, ...f });
+  const added: Quantity[] = [];
+
+  let measured: { id: string; label: string; unit: string };
+  if (typeof a.quantity === 'string') {
+    const q = model.quantities.find((x) => x.id === a.quantity);
+    if (q === undefined) return { ok: false, reason: `"${a.quantity}" is not a quantity in the model.` };
+    if (q.status === 'asked') return { ok: false, reason: `"${q.label}" is still a question: an aim measures a figure the model holds or works out, never the result asked for.` };
+    measured = { id: q.id, label: q.label, unit: q.unit };
+  } else {
+    const label = a.quantity.label.trim();
+    if (label === '' || !parseUnit(a.quantity.unit).ok) return { ok: false, reason: 'A new measure needs a name and a unit.' };
+    measured = { id: fresh(label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').replace(/^(?=[0-9]|$)/, 'm_')), label, unit: a.quantity.unit };
+    added.push(theirs(measured.id, label, measured.unit, { status: 'unknown', basis: 'You named this as how the aim is measured; nothing in the model works it out yet.' }));
+  }
+
+  const frame = a.frame ?? 'level';
+  const targetId = fresh(`${g.id}_target`);
+  const targetUnit = frame === 'change_rel' ? '%' : measured.unit;
+  const targetLabel = `Target for ${measured.label}`;
+  const t = a.target;
+  if (t === null) {
+    added.push(theirs(targetId, targetLabel, targetUnit, { status: 'asked', quote: null, question: `What figure for "${measured.label}" would count as "${g.label}"?` }));
+  } else if (t.low !== null && t.high !== null) {
+    if (t.low > t.high) return { ok: false, reason: `The low end ${t.low} is above the high end ${t.high}.` };
+    if (!stated(t.low) || !stated(t.high)) return { ok: false, reason: 'Their words do not state that target range; leave the target out and it is asked.' };
+    added.push(theirs(targetId, targetLabel, targetUnit, { value: t.value !== null && stated(t.value) ? t.value : null, low: t.low, high: t.high, range_kind: t.range_kind }));
+  } else if (t.value !== null) {
+    if (!stated(t.value)) return { ok: false, reason: 'Their words do not state that target; leave the target out and it is asked.' };
+    added.push(theirs(targetId, targetLabel, targetUnit, { value: t.value }));
+  } else return { ok: false, reason: 'A target needs a figure, or both ends of a range; leave it out and it is asked.' };
+
+  let window: NonNullable<CanonicalModelT['goals'][number]['measure']>['window'] = null;
+  if (a.window !== null) {
+    if (!stated(a.window.periods)) return { ok: false, reason: 'Their words do not state that deadline; leave the window out and "By when?" is asked.' };
+    const periods = fresh(`${g.id}_window`);
+    added.push(theirs(periods, `Time to meet ${g.label}`, model.period, { value: a.window.periods }));
+    window = { origin_event: null, origin_offset: null, start: a.window.start, periods };
+  }
+  const measure = { quantity: measured.id, per: null, cmp: a.cmp, target: targetId, frame, reference: frame === 'level' ? null : { kind: 'now' as const, option: null, quantity: null },
+    aggregation: 'end' as const, window, measure_by: 'person' as const, assumptions: [], exclusions: [] };
+  return { ok: true, model: { ...model, quantities: [...model.quantities, ...added],
+    goals: model.goals.map((x) => (x.id === g.id ? { ...g, measure, question: null, approval: 'approved' as const } : x)),
+    history: [...model.history, { id: g.id, change: 'superseded', old: JSON.stringify(g), quote: a.quote, author_id: null }] } };
 }

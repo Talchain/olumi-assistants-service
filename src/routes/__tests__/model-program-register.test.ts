@@ -112,6 +112,13 @@ describe('a model program\'s postimage through the real /graph/register', () => 
     expect(node('sales').value_basis).toMatchObject({ kind: 'worked_out' });
     expect(node('oven_price')).toMatchObject({ analysis_participation: 'included', display_value: 'Waiting for your answer' });
     expect(((body.current_read as Rec).analysis_ready as Rec).goal_threshold_raw).toBe(380);
+    // DL 23 Oct: the legacy readiness and blocker producers never run on a program. Its readiness is the program's own:
+    // the bakery's goal can be worked out now (its limit waits on the oven's price), so a Run may run; no legacy verdict.
+    expect((body.current_read as Rec).analysis_ready).toMatchObject({ goal_node_id: 'more_loaves', status: 'ready', may_run: true,
+      options: [{ option_id: 'second_oven', status: 'ready', interventions: { ovens_added: 1 } }, { option_id: 'keep_one', status: 'ready', is_baseline: true }] });
+    for (const legacy of ['readiness_issues', 'repair_proposal', 'analysis_admission', 'blocked_reason']) expect((body.current_read as Rec).analysis_ready).not.toHaveProperty(legacy);
+    expect(body.analysis_admission).toBeNull();
+    expect(JSON.stringify({ ...body, graph: null, canonical_analysis_view: null })).not.toMatch(/FACTOR_LEVEL_SCALE_UNRESOLVED|MODEL_HAS_BLOCKERS|ORPHAN_NODE/);
   });
 
   it('NEGATIVE: the same graph from a client (not CEE\'s writer) is refused, and nothing is stored', async () => {

@@ -45,6 +45,7 @@ import {
   type AdmissionReasonCode,
   type PermittedAnalysisMode,
 } from '../orchestrator-v5/admission/analysis-admission.js';
+import { isProgramGraph } from '../orchestrator-v5/model-program-turn/program-store.js';
 
 /** Admissibility as a reload may learn it: verdicts and codes, never prose. */
 export interface AnalysisAdmissionProjection {
@@ -106,7 +107,8 @@ export function projectAnalysisAdmission(
   graph: unknown,
   graphPresent: boolean,
 ): AnalysisAdmissionProjection | null {
-  if (!graphPresent) return null;
+  // A MODEL PROGRAM has no legacy admission verdict: its readiness is the program's own (`program-readiness.ts`).
+  if (!graphPresent || isProgramGraph(graph)) return null;
   const a = resolveAnalysisAdmission(graph);
 
   const seen = new Set<AdmissionReasonCode>();

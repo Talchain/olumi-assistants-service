@@ -7,12 +7,14 @@
  *    another goal or limit is first given its own quantity, so the other keeps its figure);
  *  · add_option: a new option the person named, each setting either another quantity or its own inline value;
  *  · rename_option: an option's name;
- *  · set_range_kind: how to read a range the person gave (firm bounds, or a rough span), the answer to that open question.
+ *  · set_range_kind: how to read a range the person gave (firm bounds, or a rough span), the answer to that open question;
+ *  · define_goal_measure: an aim with no measure gets the one the person states (S1 `defineGoalMeasure`); what they did not
+ *    state stays asked.
  * A quote must be the person's own words; the caller checks it against what they wrote (`quotedIn`).
  */
 import { z } from 'zod-v4';
 import type { CanonicalModelT } from '../model-program/canonical.js';
-import { fillQuantity, setRangeKind, type Answer } from '../model-program/answer.js';
+import { defineGoalMeasure, fillQuantity, setRangeKind, type Answer } from '../model-program/answer.js';
 
 const figure = {
   value: z.number().nullable().describe('One figure in the quantity\'s unit, or null when giving a range.'),
@@ -31,6 +33,15 @@ export const ProgramOp = z.union([
   z.object({ op: z.enum(['rename_option']), option_id: z.string(), label: z.string(), quote }).strict(),
   z.object({ op: z.enum(['set_range_kind']), quantity_id: z.string().describe('The quantity whose range the person is reading (an open question\'s quantity_id).'),
     range_kind: z.enum(['bounds', 'plausible']).describe('bounds: their ends are firm, it cannot fall outside; plausible: a rough span.'), quote }).strict(),
+  z.object({ op: z.enum(['define_goal_measure']), goal_id: z.string().describe('A goal with no measure yet (an open coaching question\'s record_id).'),
+    quantity: z.union([z.string().describe('The id of the quantity already in the model that the aim is about.'),
+      z.object({ label: z.string().describe('The measure as the person named it.'), unit: z.string().describe('Its unit, as in the model\'s unit rules.') }).strict()]),
+    cmp: z.enum(['>=', '>', '<=', '<']).describe('>= for "at least" or "reach"; > for "more than"; <= for "at most"; < for "under".'),
+    frame: z.enum(['level', 'change_abs', 'change_rel']).nullable().describe('level (the default): the quantity reaches the target; change_abs: its change from today in its unit; change_rel: its change from today in %.'),
+    target: z.object(figure).strict().nullable().describe('The target their words state; null when they did not state one (it is then asked).'),
+    window: z.object({ periods: z.number().int().positive().describe('How many periods the window lasts, as their words state it.'),
+      start: z.number().int().min(0).describe('Periods from now the window opens (0 = now).') }).strict().nullable().describe('The deadline their words state; null when they did not state one (By when? is then asked where it matters).'),
+    quote }).strict(),
 ]);
 export type ProgramOpT = z.infer<typeof ProgramOp>;
 type Figure = { value: number | null; low: number | null; high: number | null; range_kind: 'bounds' | 'plausible' | null };
@@ -101,6 +112,7 @@ export function applyOps(model: CanonicalModelT, ops: readonly ProgramOpT[]): Ed
     const r = op.op === 'set_quantity' ? setQuantity(m, op.quantity_id, op, op.quote)
       : op.op === 'set_goal_target' ? setGoalTarget(m, op.goal_id, op, op.quote)
       : op.op === 'add_option' ? addOption(m, op) : op.op === 'rename_option' ? renameOption(m, op)
+      : op.op === 'define_goal_measure' ? defineGoalMeasure(m, op)
       // How to read a range they gave: the range, its words and its author stay as they were; the answer is kept in history.
       : setRangeKind(m, op.quantity_id, op.range_kind, op.quote);
     if (!r.ok) return r;
