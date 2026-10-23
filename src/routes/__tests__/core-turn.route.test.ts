@@ -736,6 +736,23 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(lines[0]).not.toHaveProperty('err');
   });
 
+  it('Codex r2 on #3691: a withheld tool\'s refusal the SDK records itself is in a failed turn\'s line; a turn that reached no AI writes none', async () => {
+    const telemetry = (await import('../../utils/telemetry.js')).log;
+    const info = vi.spyOn(telemetry, 'info');
+    const summaries = () => info.mock.calls.flatMap(([o]) => ((o as Json)?.event === 'core_turn.summary' ? [o as Json] : []));
+    outputs = [[{ type: 'function_call', name: 'offer_public_research', call_id: 'withheld', args: { query: 'synthetic query' } }], [{ type: 'refuse' }]];
+    const failed = await typed('Look this up for me.');
+    expect(failed.statusCode).not.toBe(200);
+    expect(summaries().map((l) => [l.failed, l.tool_calls.map((c: Json) => [c.name, c.outcome])]))
+      .toEqual([['turn_failed', [['offer_public_research', 'refused']]]]);
+    // The conversation cannot be read: refused before any AI call, so no line.
+    store.readOpenAiConversationId.mockRejectedValueOnce(new Error('store down'));
+    const unread = await typed('Anything new?');
+    expect(unread.statusCode).toBe(503);
+    expect(summaries()).toHaveLength(1);
+    info.mockRestore();
+  });
+
   it('Codex r1 on #3675: a provider error after the refusal still leaves the draft saved, as base would; the error is the one reported', async () => {
     persisted = null;
     const model = { ...structuredClone(KNOWN_ANSWER), conditions: [{ text: 'only once the board signs off', applies_to: ['f_g'], role: 'prerequisite' as const,

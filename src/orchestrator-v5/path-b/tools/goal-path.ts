@@ -150,7 +150,8 @@ function said(model: LivingModelT, found: readonly Found[]): Blocker[] {
     // alters nothing of theirs.
     const how = kind === undefined || holdsLevel(model, code, item) ? { said: true as const } : kind === 'ask' || (kind !== 'path' && theirsIn(model, item))
       ? { ask: true as const } : { fix: FIX[kind] };
-    const key = `${code}\u0000${Object.keys(how)[0]}`;
+    // An ask with its own question is that item's, so no item's question is lost to another's (Codex r2 on #3691).
+    const key = `${code}\u0000${Object.keys(how)[0]}${'ask' in how && question !== undefined ? `\u0000${item}` : ''}`;
     const b = out.get(key) ?? out.set(key, { code, items: [], ...how }).get(key)!;
     if (item !== null && !b.items.includes(item)) b.items.push(item);
     if ('ask' in how && b.question === undefined && question !== undefined) b.question = question;

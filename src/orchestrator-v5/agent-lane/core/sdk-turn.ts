@@ -199,6 +199,8 @@ export interface CoreTurnInput {
    * kit row and result.
    */
   readonly tools: (onCall: CoreToolRecorder) => readonly Tool[];
+  /** Where the turn records its calls, so a caller still has them if the turn throws (the route's turn log). */
+  readonly calls?: CoreTurnCalls;
   /**
    * Run once when the SDK run has ended, before the result is built: a call Class 3's offer left refused runs as base would,
    * recorded like any call, so a refusal never makes a turn worse (DL, #3672 fix-forward; `goal-path.ts`).
@@ -259,14 +261,19 @@ export async function acquireCoreTurnSlot(scenarioId: string): Promise<{ readonl
   } };
 }
 
+export interface CoreTurnCalls {
+  readonly tool_calls: (AgentTurnResult['tool_calls'][number] & { readonly args?: Readonly<Record<string, unknown>>;
+    readonly draft_verification?: DraftVerification })[];
+  readonly tool_results: ToolResult[];
+}
+
 /** One ordinary `core` turn: the agent, its tools and its memory, run by the SDK. Returns the loop's result shape. */
 export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult & { readonly sdk: CoreTurnSdk }> {
   const now = input.now ?? (() => Date.now());
   const startedAt = now();
   const withheld = new Set(input.withheldTools ?? []);
-  const toolCalls: (AgentTurnResult['tool_calls'][number] & { readonly args?: Readonly<Record<string, unknown>>;
-    readonly draft_verification?: DraftVerification })[] = [];
-  const toolResults: ToolResult[] = [];
+  const toolCalls = input.calls?.tool_calls ?? [];
+  const toolResults = input.calls?.tool_results ?? [];
   let toolMs = 0;
 
   // A typed adapter's row goes on the wire as the kit reads it; an unknown write (`mutated: null`) is never a claimed one.

@@ -286,6 +286,18 @@ describe('THE READINESS SELF-CHECK: a draft a Run would withhold the goal\'s cha
     expect(missing(level(0.4, 0.6))).toEqual([{ code: 'MISSING_FACTOR_LEVEL', items: ['f'], said: true }]);
   });
 
+  it('Codex r2 on #3691: two items missing their levels are two asks, each with its own question; none is lost to the other', () => {
+    const m = structuredClone(KNOWN_ANSWER);
+    m.factors[0] = { ...m.factors[0]!, value: null };
+    m.factors.push({ ...m.factors[0]!, id: 'h', label: 'h', source: 'olumi', quote: null });
+    m.links.push({ ...m.links[0]!, id: 'h_g', from: 'h', source: 'olumi', quote: null });
+    m.options[1]!.settings.push({ ...m.options[1]!.settings[0]!, factor_id: 'h', source: 'olumi', quote: null });
+    const asks = blockersOf(m, selfCheck(m, mapLivingModel(m))).all.filter((b) => b.code === 'MISSING_FACTOR_LEVEL');
+    expect(asks.map((b) => [b.items, b.question])).toEqual([
+      [['f'], 'What is "f" today, before any option changes it? Without a current level the analysis would treat it as zero.'],
+      [['h'], 'What is "h" today, before any option changes it? Without a current level the analysis would treat it as zero.']]);
+  });
+
   it('DL 22 Oct (#3680 row :65): an identity the engine would refuse (a part at 0) reaches the loop as the identity composer\'s ask, never a fix', () => {
     // A living model defines only sums and products, so the shape is fed as the graph the postimage carries.
     const frame = (value: number) => ({ value: value / 100, raw_value: value, cap: 100, source: 'brief_extraction' });

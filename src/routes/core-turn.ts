@@ -24,7 +24,7 @@ import { getRuntimeEnv } from '../config/env-resolver.js';
 import { OPENAI_ONLY, providerCallsMade, recordedProviderCalls, runWithProviderPolicy } from '../adapters/llm/provider-policy.js';
 import { requestWasTyped } from '../cee/provenance/provenance-of.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
-import { acquireCoreTurnSlot, CoreDeliveryUnknownError, CoreStateUnavailableError, runCoreTurn } from '../orchestrator-v5/agent-lane/core/sdk-turn.js';
+import { acquireCoreTurnSlot, CoreDeliveryUnknownError, CoreStateUnavailableError, runCoreTurn, type CoreTurnCalls } from '../orchestrator-v5/agent-lane/core/sdk-turn.js';
 import { coreBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { AI_CORE_MODE, laneModeFor, type AgentLaneMode, type AgentToolContext } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import type { InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
@@ -465,9 +465,10 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
 
     // ── ONE TURN AT A TIME PER SCENARIO, held until the answer is persisted and read back. ───────────────────────────────
     const slot = await acquireCoreTurnSlot(scenarioId);
-    // The turn's summary line, once, at its end (`turnLog`): every turn that reached the AI, whichever way it returns.
+    // The turn's summary line, once, at its end (`turnLog`): every turn that reached the AI, whichever way it returns. The SDK
+    // turn records its calls here, so a turn that throws still has them.
     let summary: { readonly result?: AgentTurnResult; readonly failed?: string } | undefined;
-    const seen: { tool_calls: AgentTurnResult['tool_calls'][number][]; tool_results: AgentTurnResult['tool_results'][number][] } = { tool_calls: [], tool_results: [] };
+    const seen: CoreTurnCalls = { tool_calls: [], tool_results: [] };
     try {
       // The model as this turn starts from: read AFTER the slot, so a turn that waited sees what the turn before it saved.
       const start = await readingDispatch(graphPath, { ...FRESH_READ }).catch(() => undefined);
@@ -597,7 +598,8 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
           result = await runCoreTurn({
             // One budget for every call (DL 22 Oct, M4): a press at the typed turn's effort reads the typed turns' cached prefix.
             ctx: coreCtx, message, budget: coreBudget(), userId,
-            tools: (onCall) => coreTurnTools({ ctx: coreCtx, mode: MODE, scenario: 'core', requestId: String(req.id), message,
+            calls: seen,
+            tools: coreTurnTools({ ctx: coreCtx, mode: MODE, scenario: 'core', requestId: String(req.id), message,
               dispatch: capDispatch, proposals, deadlineAt: constructionDeadlineAt, capabilities,
               ...(challenge !== null ? { noteOnlyOn: challenge.grounded.element_ids[0] } : {}),
               onModelRegistered: graphReadyEmitter(startedAt),
@@ -605,12 +607,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
               analyseAfterCommit: analyseCommittedChange,
               // No research control is in this contract, so no search may be promised (fail closed).
               researchShowable: async () => false,
-              onVerifiedSave: () => { verifiedSave = true; }, restructure })((row, r) => {
-              seen.tool_calls.push({ name: row.name, ok: row.ok, mutated: row.mutated === true, outcome: row.outcome,
-                ...(row.refusal !== null ? { refusal: row.refusal } : {}) });
-              seen.tool_results.push(r);
-              onCall(row, r);
-            }),
+              onVerifiedSave: () => { verifiedSave = true; }, restructure }),
             settle: async () => { await restructure.settle?.(); },
             // The standing instructions, the same bytes on every call of every scenario (the cached prefix); this turn's own
             // guidance (the drafting arm, a Challenge's note) follows its state block in the turn's input.
@@ -751,7 +748,8 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         providerCalls: recordedProviderCalls(),
       }));
     } finally {
-      if (summary !== undefined) {
+      // Only a turn that reached the AI: a refusal before any call (the declined card, an unreadable conversation) logs none.
+      if (summary !== undefined && recordedProviderCalls().some((c) => c.outcome === 'allowed')) {
         try {
           log.info({ event: 'core_turn.summary', scenario_id: scenarioId, turn_id: turnId, request_id: String(req.id),
             ...(summary.failed !== undefined ? { failed: summary.failed } : {}), ...turnLog(summary.result, seen) }, 'core-turn: summary');
