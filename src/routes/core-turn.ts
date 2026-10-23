@@ -107,6 +107,9 @@ const RECORDED: Readonly<Record<RecordedOutcome, { readonly said?: string; reado
     retry_safe: false, nothing_saved: false } },
 };
 
+/** What a graph write a stopped turn tried answers: the register route's own refusal of a stopped write (nothing was written). */
+const TURN_STOPPED = { status: 409, json: { code: 'BAD_INPUT', message: 'This change was stopped, so nothing was saved.', details: { code: 'TURN_STOPPED' } } };
+
 /** The saved scenario as one graph read gives it, in the contract's terms. */
 interface SavedScenario {
   readonly status: number;
@@ -443,10 +446,24 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       }
       catch (err) { log.warn({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'core-turn: claim release failed'); return false; }
     };
+    /**
+     * ⭐ STOP (DL 93d79c3e 09:40Z; Lenses on 50f76df0: a stopped core turn still committed). The turn claims its place in the
+     * scenario's fence once admitted (below), so an explicit Stop finds it and records its tombstone; every graph write it makes
+     * first reads that tombstone. A registration fences under its own operation's id (`assist.v1.scenario-graph-register.ts`), so
+     * this turn's tombstone is read here, at the write. A read that fails proceeds, as Stop itself fails open on one: the
+     * registration's own fence still holds.
+     */
+    let fenceAdmitted = false;
+    const stoppedNow = async (): Promise<boolean> => {
+      if (!fenceAdmitted || typeof store.turnWasStopped !== 'function') return false;
+      try { return await store.turnWasStopped(scenarioId, String(turnId)); }
+      catch (err) { log.warn({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'core-turn: Stop read failed; the write proceeds'); return false; }
+    };
     const readingDispatch: InternalDispatch = readCache.dispatch;
     const countingDispatch: InternalDispatch = async (path, b) => {
       const sendIt = async () => promoteRevisionConflictResponse(await readingDispatch(path, b));
       if (path.endsWith('/graph/register')) {
+        if (await stoppedNow()) return TURN_STOPPED;
         writesDispatched += 1;
         return undoRefusedWrite(sendIt);
       }
@@ -457,7 +474,8 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       }
       return readingDispatch(path, b);
     };
-    const capDispatch = bindHeldApprovalWriter(countingDispatch, (input) => {
+    const capDispatch = bindHeldApprovalWriter(countingDispatch, async (input) => {
+      if (await stoppedNow()) return TURN_STOPPED;
       writesDispatched += 1;
       return undoRefusedWrite(() => readCache.around(async () => promoteRevisionConflictResponse(await commitHeldProposalInProcess(input, String(req.id)))));
     });
@@ -530,6 +548,11 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         && heldAtStart.some((h) => heldProposalId(h) === declinedProposal) ? declinedProposal : undefined;
       if ((approvedProposal !== undefined && press === undefined) || (declinedProposal !== undefined && !coreOwns && declinedCardOnly === undefined)) {
         return await refuseUnrun(409, 'CARD_NOT_WAITING', 'That change is no longer waiting for your approval. Nothing in your model was changed.');
+      }
+
+      if (typeof store.claimTurnFence === 'function') {
+        try { fenceAdmitted = (await store.claimTurnFence(scenarioId, String(turnId))) !== null; }
+        catch (err) { log.warn({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'core-turn: fence claim failed; Stop cannot find this turn'); }
       }
 
       // ── THE TURN'S CONTEXT: the person's own words, the selection, the Challenge. ───────────────────────────────────────

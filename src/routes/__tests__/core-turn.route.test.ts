@@ -56,6 +56,9 @@ const runTimings: unknown[] = [];
 const registered: Json[] = [];
 const canvasForwards: { headers: Json; body: Json }[] = [];
 const turnRows = new Map<string, any>();
+/** The scenario's turn fence (`v5_turn_fence`): a claim takes the next generation; a Stop sets the row's tombstone. */
+const fenceRows = new Map<string, { generation: number; stopped_at: string | null }>();
+let fenceGeneration = 0;
 let pausedRun: any = null;
 const conversationIds = new Map<string, string>();
 const hashOf = (g: unknown): string => computeAnalysisAffectingGraphHash(g as never) ?? '';
@@ -95,6 +98,17 @@ const store = {
   invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
   invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
+  claimTurnFence: vi.fn(async (sid: string, tid: string) => {
+    if (!fenceRows.has(`${sid}:${tid}`)) fenceRows.set(`${sid}:${tid}`, { generation: ++fenceGeneration, stopped_at: null });
+    return { scenarioId: sid, turnId: tid, generation: fenceRows.get(`${sid}:${tid}`)!.generation };
+  }),
+  turnFenceRowExists: vi.fn(async (sid: string, tid: string) => fenceRows.has(`${sid}:${tid}`)),
+  markTurnStopped: vi.fn(async (sid: string, tid: string) => {
+    const row = fenceRows.get(`${sid}:${tid}`);
+    fenceRows.set(`${sid}:${tid}`, { generation: row?.generation ?? ++fenceGeneration, stopped_at: '2026-10-23T10:00:00.000Z' });
+    return { stopped: true, claimed: row !== undefined, alreadyCommitted: false };
+  }),
+  turnWasStopped: vi.fn(async (sid: string, tid: string) => fenceRows.get(`${sid}:${tid}`)?.stopped_at != null),
 };
 vi.mock('../../orchestrator-v5/session/index.js', () => ({ getSessionStore: () => store, resetSessionStoreForTests: () => {}, SessionReadError: class SessionReadError extends Error {} }));
 vi.mock('../../orchestrator/user-identity.js', async (original) => ({
@@ -205,12 +219,15 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       runState = { run_state: { kind: 'complete_current', computed_at: '2026-10-22T10:00:00.000Z' } };
       return { response_version: 2, assistant_text: '', blocks: [carriedResult], analysis_state: runState, analysis_ready: readiness, graph_hash: hashOf(persisted) };
     });
+    // The real Stop handler (route-v2's `/orchestrate/v2/turn/stop` body), over the same store.
+    const { recordExplicitTurnStop } = await import('../turn-stop.js');
+    app.post('/orchestrate/v2/turn/stop', async (req, reply) => { const r = await recordExplicitTurnStop(req, 'req-stop'); return reply.code(r.status).send(r.body as never); });
     await app.register(route.coreTurnRoute);
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   beforeEach(() => {
-    SCENARIO = randomUUID(); persisted = postimage(KNOWN_ANSWER); registered.length = 0; canvasForwards.length = 0; turnRows.clear(); conversationIds.clear();
+    SCENARIO = randomUUID(); persisted = postimage(KNOWN_ANSWER); registered.length = 0; fenceRows.clear(); canvasForwards.length = 0; turnRows.clear(); conversationIds.clear();
     readiness = { status: 'blocked', may_run: false, options: [], blockers: [] }; runState = undefined; carriedResult = undefined; otherRun = undefined; runs = 0; timingRun = false; runTimings.length = 0;
     pausedRun = null; calls = []; outputs = []; preparedId = ''; holdProvider = undefined; holdWhen = undefined;
   });
@@ -298,6 +315,30 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(again).toMatchObject({ durability: 'replayed', assistant_text: 'Saved: f is 0.6 now.', error: null });
     expect(calls.length, 'a replay calls no model').toBe(callsBefore);
     expect(registered, 'and writes nothing').toHaveLength(1);
+  });
+
+  it('DL 93d79c3e 09:40Z (Lenses on 50f76df0): a Stop during a core turn is recorded as its tombstone, and the write the AI then makes commits nothing', async () => {
+    outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop', args: CHANGE }], [{ type: 'message', text: 'Prepared.' }]];
+    const card = ((await typed(SAID)).json() as Json).cards[0];
+    preparedId = String(card.proposal_id);
+    let release!: () => void;
+    holdProvider = new Promise<void>((resolve) => { release = resolve; });
+    outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: 'Saved.' }]];
+    const pressId = randomUUID();
+    const before = calls.length;
+    const approval = post({ turn_id: pressId, message: card.approve_action.message, source: 'chip_click', chip: { id: card.approve_action.id, action_type: card.approve_action.action_type } });
+    // The press's first call is held: the turn is admitted, and nothing is written yet.
+    await vi.waitFor(() => expect(calls.length).toBe(before + 1));
+    const stop = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn/stop', payload: { scenario_id: SCENARIO, turn_id: pressId } });
+    expect(stop.statusCode, stop.body).toBe(200);
+    expect(stop.json()).toMatchObject({ stopped: true, claimed: true, turn_id: pressId });
+    expect(fenceRows.get(`${SCENARIO}:${pressId}`)?.stopped_at, 'the tombstone').not.toBeNull();
+    release();
+    const a = (await approval).json() as Json;
+    expect(calls.at(-2)?.tool_choice, 'control: the AI did send its apply').toMatchObject({ type: 'function', name: 'apply_change' });
+    expect(registered, 'nothing committed after the Stop').toHaveLength(0);
+    expect(((persisted as Json).living_model as LivingModelT).factors[0]).toMatchObject({ value: 0.5 });
+    expect(a.receipts).toEqual([]);
   });
 
   describe('DL 93d79c3e (marketing on 05745055): a card press applies THAT card, whatever id the AI sends', () => {
