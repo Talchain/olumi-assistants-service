@@ -739,10 +739,12 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
     const xGoals: XGoal[] = goals.map((g) => ({
       id: g.id, label: g.label, quantity: lowerChange(g, quantities, xOptions), ...(has(g.measure!.per) ? { per: g.measure!.per } : {}),
       cmp: g.measure!.cmp, target: g.measure!.target, aggregation: g.measure!.aggregation, window: goalWin.get(g.id)!.win!,
+      ...(g.measure!.window === null ? { no_deadline: true as const } : {}),
     }));
     const xLimits: XLimit[] = limits.map((l) => ({
       id: l.id, label: l.label, quantity: l.measure!.quantity, ...(has(l.measure!.per) ? { per: l.measure!.per } : {}),
       cmp: l.measure!.cmp, bound: l.measure!.bound, aggregation: l.measure!.aggregation, window: limitWin.get(l.id)!.win!,
+      ...(l.measure!.window === null ? { no_deadline: true as const } : {}),
     }));
     const xRiskList: XRisk[] = model.risks.filter((k) => xRisks.has(k.id)).map((k) => ({ id: k.id, occurrence: k.occurrence, severity: k.severity, effect_on: k.effect_on, mode: k.mode, from_period: riskTiming.get(k.id) ?? 0 }));
     setReadings(quantities);

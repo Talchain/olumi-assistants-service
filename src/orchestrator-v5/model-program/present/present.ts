@@ -50,6 +50,8 @@ export interface PresentQuantity {
   readonly relation_author?: Author;
   /** The person gave it as approximate ("about"): used for now until they give a range, said with their words. */
   readonly approximate?: { readonly quote: string };
+  /** A figure the compiler converted (25 % → 0.25): said in the unit it was given in, never as the fraction. */
+  readonly shown_in?: { readonly unit: string; readonly factor: number };
 }
 /** S1's `GoalOutcome`, with the goal's label: every goal, calculable or not. */
 export interface PresentGoal {
@@ -191,6 +193,13 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   const { model, result } = input;
   const byId = new Map(model.quantities.map((x) => [x.id, x] as const));
   const meta = (id: string): PresentQuantity | undefined => input.quantities?.[id];
+  /** A figure in the unit the person gave it in (a % stays a %), else in the executable's unit. */
+  const sayOf = (id: string, value: number, unit: string): string => {
+    const s = meta(id)?.shown_in;
+    return s === undefined ? say(value, unit) : say(value / s.factor, s.unit);
+  };
+  /** When the window opens: "with no deadline" for an aim that states none (read once, every option in effect). */
+  const whenWords = (c: Goal | Limit): string => (c.no_deadline === true ? 'with no deadline' : horizonWords(c.aggregation, c.window, unit, readingOf(byId.get(c.quantity)!)));
   const label = (id: string): string | undefined => meta(id)?.label ?? byId.get(id)?.label;
   const optionLabel = new Map(model.options.map((o) => [o.id, o.label] as const));
   const unit = model.period_unit;
@@ -223,13 +232,13 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       // The PL's range law (AMEND): conditioned on the person's bounds, or on a domain, as the simulator draws it.
       const d: RangeDist = x.dist;
       const reading = rangeLaw(d, model.risks.some((r) => r.occurrence === x.id) ? { domain: { min: 0, max: 1 } } : {});
-      const ends = `${say(d.low, x.unit)} to ${say(d.high, x.unit)}`;
+      const ends = `${sayOf(x.id, d.low, x.unit)} to ${sayOf(x.id, d.high, x.unit)}`;
       // DL ruling (author not recorded): a range whose basis is neither the person's nor Olumi's is listed as such, never
       // passed as the person's; `rangeLaw` draws it unbounded (only a person's stated bounds condition the draw).
       const unverified = m?.author === 'unverified';
       const whose = unverified ? `a range ${NOT_IN_THEIR_WORDS}` : d.basis === 'person_range' ? 'your range' : d.basis === 'olumi_estimate' ? 'Olumi’s own estimated range' : `a range ${NOT_RECORDED}`;
       if (reading.kind === 'point') {
-        return d.basis === 'person_range' && !unverified ? [] : [`${name} is ${say(reading.value, x.unit)}${unverified ? ` ${NOT_IN_THEIR_WORDS}` : d.basis === 'olumi_estimate' ? ', Olumi’s estimate' : ` ${NOT_RECORDED}`}`];
+        return d.basis === 'person_range' && !unverified ? [] : [`${name} is ${sayOf(x.id, reading.value, x.unit)}${unverified ? ` ${NOT_IN_THEIR_WORDS}` : d.basis === 'olumi_estimate' ? ', Olumi’s estimate' : ` ${NOT_RECORDED}`}`];
       }
       const held = reading.lower === d.low && reading.upper === d.high ? ', held within those bounds'
         : Number.isFinite(reading.lower) || Number.isFinite(reading.upper) ? ', kept to the values it can take' : '';
@@ -240,11 +249,11 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       // placeholder that cancels out of every result are no one's assumption.
       // DL ruling (author not recorded): a value with no recorded author is listed as an assumption, never read as the person's.
       // Codex r1 #3709: words said to be the person's but not found in what they wrote outrank the figure's recorded author.
-      if (m?.author === 'unverified') return [`${name} is ${say(x.dist.value, x.unit)} ${NOT_IN_THEIR_WORDS}`];
+      if (m?.author === 'unverified') return [`${name} is ${sayOf(x.id, x.dist.value, x.unit)} ${NOT_IN_THEIR_WORDS}`];
       const author: string | undefined = x.dist.author ?? m?.author;
-      if (author === 'olumi') return [`${name} is ${say(x.dist.value, x.unit)}, Olumi’s figure`];
-      if (m?.approximate !== undefined) return [`using ${say(x.dist.value, x.unit)} for ${name} for now — you said ‘${m.approximate.quote}’`];
-      return author !== undefined && NOT_ASSUMPTIONS.has(author) ? [] : [`${name} is ${say(x.dist.value, x.unit)} ${NOT_RECORDED}`];
+      if (author === 'olumi') return [`${name} is ${sayOf(x.id, x.dist.value, x.unit)}, Olumi’s figure`];
+      if (m?.approximate !== undefined) return [`using ${sayOf(x.id, x.dist.value, x.unit)} for ${name} for now — you said ‘${m.approximate.quote}’`];
+      return author !== undefined && NOT_ASSUMPTIONS.has(author) ? [] : [`${name} is ${sayOf(x.id, x.dist.value, x.unit)} ${NOT_RECORDED}`];
     }
     // S3 smoke fix 1: only an Olumi-authored EFFECT relation is an assumed relationship. A definition (an identity: a
     // product, a sum, a difference such as x − x for a zero start) and a stock's accumulation are never assumptions,
@@ -275,12 +284,12 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     const subject = label(c.quantity), bound = comparatorWords(c.cmp), target = byId.get(against);
     if (subject === undefined || bound === undefined || target === undefined) return undefined;
     // The level template of `targetChanceWords` (goal-target-basis.ts): ‘X’ being at least T; a limit's subject "is".
-    const figure = target.dist?.kind === 'fixed' ? say(target.dist.value, target.unit) : label(against) === undefined ? undefined : q(label(against)!);
+    const figure = target.dist?.kind === 'fixed' ? sayOf(against, target.dist.value, target.unit) : label(against) === undefined ? undefined : q(label(against)!);
     if (figure === undefined) return undefined;
     // A ratio (executable.ts r3 `per`) names both quantities: "‘Sign-ups’ per ‘Visitors’ being at least 0.05 …".
     const of = c.per === undefined ? q(subject) : label(c.per) === undefined ? undefined : `${q(subject)} per ${q(label(c.per)!)}`;
     if (of === undefined) return undefined;
-    return `${of} ${role === 'goal' ? 'being' : 'is'} ${bound} ${figure} ${horizonWords(c.aggregation, c.window, unit, readingOf(byId.get(c.quantity)!))}`;
+    return `${of} ${role === 'goal' ? 'being' : 'is'} ${bound} ${figure} ${whenWords(c)}`;
   };
   const goalWords = new Map(model.goals.map((g) => [g.id, conditionWords(g, g.target, 'goal')] as const));
   const limitWords = model.limits.map((l) => conditionWords(l, l.bound, 'limit'));
@@ -357,7 +366,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     const of = c.per === undefined ? q(subject) : label(c.per) === undefined ? undefined : `${q(subject)} per ${q(label(c.per)!)}`;
     if (of === undefined) return undefined;
     const bound = met ? comparatorWords(c.cmp) : MISSED[c.cmp];
-    return `${of} is ${say(value, target.unit)} ${horizonWords(c.aggregation, c.window, unit, readingOf(byId.get(c.quantity)!))}, ${bound} ${say(target.dist.value, target.unit)}`;
+    return `${of} is ${sayOf(against, value, target.unit)}${c.no_deadline === true ? '' : ` ${whenWords(c)}`}, ${bound} ${sayOf(against, target.dist.value, target.unit)}`;
   };
   const fixedWhy = (o: OptionResult, met: boolean): string | undefined => {
     const lines = [

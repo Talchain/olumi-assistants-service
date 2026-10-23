@@ -474,6 +474,23 @@ describe('the model-program turn on the real core route', () => {
     expect(unverified).toContain('‘promo effect’ is 5 member / month / promotion (not found in your words)');
   });
 
+  it('DL 23 Oct (batch 1 score): an aim with no deadline reads "with no deadline", and a % target is said in %, never as its fraction', () => {
+    const goalWords = (m: CanonicalModelT, text: string) => String(((evaluateCanonical(m, { sourceText: text, seed: 7 }).view as Json).goal_chance as Json).chance_words);
+    // The bakery's aim states no window: read once with every option in effect, and said so.
+    const noDeadline = goalWords(bakery(), BRIEF);
+    expect(noDeadline).toContain('‘sales’ being at least 380 loaf / week with no deadline');
+    expect(noDeadline).not.toMatch(/from now/);
+    // Contrast: the club's aim states three months, and says it.
+    expect(goalWords(club(), CLUB_BRIEF)).toContain('at 3 months from now');
+    // "Grow sales by 10%": the target is said as 10%, never as the compiler's 0.1.
+    const rel = bakery();
+    rel.quantities.push(q('growth', '%', { value: 10, quote: 'grow sales by 10%' }));
+    rel.goals = [{ ...rel.goals[0]!, measure: { ...rel.goals[0]!.measure!, target: 'growth', frame: 'change_rel', reference: { kind: 'now', option: null, quantity: null } } }];
+    const pct = goalWords(rel, `${BRIEF} We want to grow sales by 10%.`);
+    expect(pct).toContain('at least 10%');
+    expect(pct).not.toMatch(/\b0\.1\b/);
+  });
+
   it('DL 23 Oct: an aim with no measure gets the one the person states (define_goal_measure), in their words; what they did not state stays asked', async () => {
     const m = bakery();
     m.goals = [{ ...m.goals[0]!, measure: null, question: 'How would you know the bakery is doing well enough?' }];

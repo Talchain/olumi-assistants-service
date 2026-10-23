@@ -46,8 +46,9 @@ export type Aggregation = 'end' | 'sum' | 'mean' | 'every' | 'max' | 'min';
 // max / min: the highest / lowest reading in the window ("reach 400 members within six months" is max ≥ 400).
 // per (optional): the goal's value is agg(quantity) ÷ agg(per), both aggregated the same way over the same window, each read
 //   by its own reading ("conversion over the first three months" = sum(sign-ups) ÷ sum(visitors)). Never with `every`.
-export type Goal = { id: string; label: string; quantity: string; per?: string; cmp: Cmp; target: string; aggregation: Aggregation; window: Window };
-export type Limit = { id: string; label: string; quantity: string; per?: string; cmp: Cmp; bound: string; aggregation: Aggregation; window: Window };
+/** no_deadline: the aim states no window, so it is read once with every option in effect, and said "with no deadline". */
+export type Goal = { id: string; label: string; quantity: string; per?: string; cmp: Cmp; target: string; aggregation: Aggregation; window: Window; no_deadline?: true };
+export type Limit = { id: string; label: string; quantity: string; per?: string; cmp: Cmp; bound: string; aggregation: Aggregation; window: Window; no_deadline?: true };
 // from_period: a whole period, or the id of a quantity in the period unit when the timing is uncertain or per option (S2
 //   samples it on the same draws; its whole-period reading, e.g. ceil, is with the PL). A fixed timing is always a number.
 export type OptionSet = { quantity: string; to: string; from_period: number | string };          // `to` is a quantity id (no bare numbers)

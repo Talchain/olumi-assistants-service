@@ -65,7 +65,9 @@ function quantityMeta(model: CanonicalModelT, compiled: CompileResult, x: Execut
   const out: Record<string, PresentQuantity> = {};
   for (const q of x.quantities) {
     const mine = own.get(q.id);
-    if (mine !== undefined) { out[q.id] = mine; continue; }
+    // A figure the compiler converted (25 % → 0.25) is said in the unit it was given in.
+    const percent = compiled.conversions.find((c) => c.kind === 'percent' && c.quantity === q.id);
+    if (mine !== undefined) { out[q.id] = percent?.kind === 'percent' ? { ...mine, shown_in: { unit: percent.from, factor: percent.factor } } : mine; continue; }
     const [root, suffix] = q.id.split(/__(?=[a-z_]+$)/);
     const g = goals.get(root ?? '');
     if (g !== undefined && (suffix === 'change' || suffix === 'change_rel')) {
