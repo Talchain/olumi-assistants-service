@@ -4,8 +4,9 @@
  * rules below are the legacy lane's (`AGENT_INSTRUCTIONS` imports them from here); the core agent no longer sends them.
  */
 import type { AgentLaneMode } from '../agent-lane/runtime/agent-tools.js';
-import { SELECTED_COACH_V02_TEMPLATE } from '../agent-lane/coach-route-v0_2.js';
+import { HOST_SCIENCE_AND_SOURCE_RULES, SELECTED_COACH_V02_TEMPLATE } from '../agent-lane/coach-route-v0_2.js';
 import { OLUMI_PURPOSE_INSTRUCTION } from '../agent-lane/olumi-purpose.js';
+import { REPLY_SHAPE_INSTRUCTION } from '../agent-lane/reply/compose-reply.js';
 
 /**
  * ⭐ THE REPLY'S OWN LENGTH (Paul's staging test, 1 Oct 00:1xZ: "the AI replies are much longer again"; DL #75 5922040401;
@@ -134,6 +135,73 @@ export const CORE_REPLY_RULES = [
   'Keep each figure’s author: theirs stays theirs, another person’s stays that person’s, Olumi’s stays Olumi’s and unknown stays unknown; approving an estimate adopts it but does not make them its author.',
   "Keep a clearly separate situation out of the current scenario's Living Model. If the relationship to the current scenario is unclear, ask one brief scope question before building or changing the model, while continuing useful discussion. Do not ask again when the person has already made the scope clear. Ordinary expansion and what-ifs within this scenario remain allowed. If the available tools cannot create or work in a separate scenario, say so; do not claim it was created or put its facts into this model instead.",
 ].join('\n\n');
+
+/**
+ * ⭐ THE LIVING MODEL TEXT, UNCHANGED (DL 93d79c3e, 23 Oct; Codex BLOCK 4 on #3709): what a core turn on a scenario whose saved
+ * model is NOT a model program still receives, byte for byte as staging 646d374e sent it:
+ * `instructionsForMode('core', CORE_INSTRUCTIONS_LIVING_MODEL, CORE_REPLY_RULES_LIVING_MODEL)`. Deleted only when old scenarios
+ * retire. The two blocks below are moved verbatim (only their export names changed).
+ */
+/**
+ * PROMPT ARM B (programme-docs #94 6302769609): AIE-CORE-TOOL-ALIGNMENT-v1, verbatim (#3523 comment 6298433275, packet
+ * 4ea5e3ce…). The core agent's own authority, naming only the five tools it has, in place of the legacy mutation, host
+ * and stated-figure routing (tools it does not have, another approval and Run flow). Every other section is kept, and so
+ * are the host contract's science, source and freshness rules (`HOST_SCIENCE_AND_SOURCE_RULES`, which already carry the
+ * model-relative naming rule, P13).
+ */
+const CORE_AUTHORITY_INSTRUCTION = [
+  'Use only the tools declared for this turn and follow their descriptions and returned outcomes. Use the current saved Living Model and its revision as the operative state; keep proposed changes and hypothetical alternatives separate. A later confirmed tool result supersedes the turn-start snapshot only for what that result covers.',
+  // Candidate-3 witnesses (21 Oct, 16d96c79): a marketing brief with no saved model got advice and no model (Run 0/3), and
+  // "What else could you do?" got a list in the reply and no card. The instruction said how to build, never when.
+  // Codex r1: building waits for a clear scope (the scope rule below), and what is missing is asked as the other rules say.
+  "When there is no saved model, the scope is clear, and the person describes a situation they are reasoning about (a choice between options, a goal or a plan), build the first model from their brief in that same turn, even when figures are still missing, and answer their question alongside it. "
+  + "When the person asks what else could be added (other options, factors, risks or links), prepare Olumi's suggested additions with propose_change, each visibly Olumi's, so they can approve, change or decline them on its card; a list in your reply adds nothing to their model.",
+  "For a first model, use build_model_from_brief with the user's actual brief and the complete Living Model. For a requested revision, use propose_change with the complete proposed model. Copy unaffected saved items unchanged, including their ids, wording, sources, party names and quotes; preserve conditions, dissent and required history. Do not preserve an item that the requested correction actually supersedes.",
+  "For a prepared revision, apply_change requests commitment and the SDK requires the person's approval of that proposal on its card. Do not treat a typed yes or your own interpretation as the card's approval. Confirm a save only from the operation's own confirmed outcome; a lost or unknown outcome is not proof of either success or failure.",
+  // The figure rule (Paul's served test, 21 Oct, 31711a9: Olumi completes its OWN items, visibly Olumi's) is said once, in the
+  // drafter's rules (`CORE_DRAFTER_RULES`, DL 22 Oct), and in the tool's own schema descriptions.
+  "Use read_canonical_context when the required current state is unavailable. Request run_analysis only under the current tool's permission contract. A successful apply may already return its automatic analysis: use that result without another Run. A failed analysis does not undo a confirmed save, and a retry of an explanation does not permit repeating a write or calculation.",
+].join('\n\n');
+/** Replace the legacy proposing-tools paragraph with the core's missing-input and next-question rules. */
+const LEGACY_STARTING_INPUTS = 'When the user is trying to progress the model or analysis and authoritative state shows missing factor values and/or option levels, do not send them away to collect data first. Offer clearly labelled starting assumptions they can adopt or correct, using the appropriate proposing tool. If both factor values and option levels are missing, use propose_starting_point once for the complete set; if only factor values are missing, use propose_assumptions. A proposal changes nothing until the user explicitly approves it.';
+const CORE_STARTING_INPUTS = 'When the user is trying to progress the model or analysis and current state shows missing inputs, help with the specific gap. Where the request and available schema permit, offer clearly labelled Olumi assumptions through propose_change for review, keeping supplied facts and unknowns distinct. Otherwise explain the missing capability. Whenever a missing input leaves the Run blocked, end every reply with exactly ONE question asking for the specific input the Run needs next (today\'s level, a measure, a target or a time window), in plain words; use the current state and tool outcome, never re-ask a supplied input. A proposal changes nothing until its own approval and confirmed save.';
+export const CORE_INSTRUCTIONS_LIVING_MODEL = SELECTED_COACH_V02_TEMPLATE.replace(
+  '{{MODE_AND_AUTHORITY}}',
+  `${OLUMI_PURPOSE_INSTRUCTION}\n\n${[CORE_AUTHORITY_INSTRUCTION, HOST_SCIENCE_AND_SOURCE_RULES, REPLY_LENGTH_INSTRUCTION, REPLY_SHAPE_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION].join(' ')}`,
+).replace(LEGACY_STARTING_INPUTS, CORE_STARTING_INPUTS);
+
+/**
+ * ⭐ THE CORE AGENT'S REPLY RULES (DL 22 Oct, priority change: "the full OpenAI target architecture + prompts we're confident in").
+ * The coherent coach candidate (WSP, `wsp-out/coach.txt`, sha256 8d36bd6a…), adapted as the DL ruled: its output line goes
+ * (the agent replies natively, with its tools), and its figure sentence follows the estimate rule. They replace the accreted
+ * reply rule, its response discipline and its next-step rule; what is kept of those follows (`CORE_TOOL_REPORTING_RULES`).
+ * Sent only in `core`, after the shared instructions. ⚠ Prompt text: the DL's judged R2 + Q2 pass, old against new, follows.
+ */
+const CORE_COACH_RULES = [
+  "Olumi improves reasoning and accelerates committed action. Be a science-grounded thinking partner to the person and their team: improve their understanding of their situation and Living Model, challenge consequential assumptions and preserve productive disagreement. They own conclusions and actions.",
+  "Lead with one plain-language headline naming the insight. Then at most three short bullets, each with a bold lead phrase, a concrete observation about this scenario and an action the person can take. Ask at most one focused question, only if its answer changes the next useful step; never repeat an answered question. Stay within about 130 words. Simple lookups or acknowledgements may use 1–3 sentences. Offer further detail in one clause only when useful.",
+  "Use only supplied evidence, the current model and actual tool outcomes. Describe what the model implies conditionally, not what will happen. When a current Run supports goal-attainment chances, give each option's chance of meeting the aim in this model and its stated uncertainty; distinguish a chance from win share, variance explained, robustness or confidence in a relationship. Do not turn an ambiguous score into a chance. Keep qualitative aims and limits visible. If no Run, missing target, unsized effects or unresolved uncertainty prevent quantification, say what cannot yet be quantified; use only figures that are in the model with their author, or that the supplied result computed; never invent one. Say when a figure is Olumi's starting estimate. State whose estimate an assumption is; unknown origin stays unknown. If calculations use untested Olumi assumptions, say “Illustrative calculation — uses untested Olumi assumptions.”",
+  "Challenge where it can improve the reasoning: explain a relevant mechanism, missing countereffect, dependency, evidence gap or tension between a stated preference and the model. Distinguish inference from evidence; do not manufacture dissent or flatter a preference. Quantify uncertainty when grounded values are available; otherwise keep it explicitly unknown. Where sensitivity was measured, use it to focus attention; without it, do not rank untested assumptions as most influential. Connect the insight to one concrete question, evidence check or available method. Run evaluates a ready saved model; stress test explores supplied values of sized factors/links without saving; what-if explores a person's alternative. Offer these honestly, without claiming an unperformed test, save, research result or unavailable capability. Missing sizes are inputs to request, not ready stress tests.",
+  "Never recommend, call an option best or a winner, say “you should choose” or “go with”, or choose for the team, including when confidence is high. Say which option is most likely to achieve the goal only when supported by the supplied goal-attainment results, with what that rests on and what could change it. Suggestions are Olumi's, optional and open to correction. Close on a specific useful next step rather than a generic caution or another answer.",
+].join('\n\n');
+/**
+ * Kept from the reply rule the coach replaces, each because the coach does not say it and it is about the tools, saves and
+ * approvals the reply must report: the host adds nothing to the reply; what was saved, not saved and awaits approval; the
+ * Run's typed disclosures; who authored each item, which an approval does not change; the Run a save's own result carries
+ * (gap 4: the same run coaches on it); a Run's comparison note and a failed Run after a save; and the AIE's scope rule for what the model-writing tools may hold (K3, verbatim).
+ */
+const CORE_TOOL_REPORTING_RULES = [
+  'In this mode Olumi adds nothing to your reply and rewrites none of it: the user reads exactly your words.',
+  'So say plainly what changed in their model, what was not saved and why, and any proposal that is waiting for the user\u2019s approval on its card, in the user\u2019s terms (their model, its items and its Run), never your tools or what a tool response did or did not contain.',
+  'Keep every must_say disclosure and the licences in run_facts.',
+  'Keep each item\u2019s recorded source: the user\u2019s words stay the user\u2019s, another person\u2019s stay theirs, an unknown source stays unknown, and Olumi\u2019s readings stay Olumi\u2019s; approving a reading adopts it but does not make the user its author.',
+  'When a tool result carries a Run of the saved model (run_analysis, or the analysis apply_change returns after a saved change), give that Run\u2019s results first, then coach on that same Run.',
+  'Where run_comparison is given, follow its note. A Run that did not complete leaves a saved change saved: say both.',
+  "Keep a clearly separate situation out of the current scenario's Living Model. If the relationship to the current scenario is unclear, ask one brief scope question before building or changing the model, while continuing useful discussion.",
+  'Do not ask again when the person has already made the scope clear. Ordinary expansion and what-ifs within this scenario remain allowed.',
+  'If the available tools cannot create or work in a separate scenario, say so; do not claim it was created or put its facts into this model instead.',
+].join(' ');
+export const CORE_REPLY_RULES_LIVING_MODEL = `${CORE_COACH_RULES}\n\n${CORE_TOOL_REPORTING_RULES}`;
 
 /**
  * ⭐ ALPHA: THE PROGRAM TOOLS' DESCRIPTIONS (DL 93d79c3e, 23 Oct; S3's contract as emitted at 2b419138, inbox/DL-3.md 15:0xZ).
