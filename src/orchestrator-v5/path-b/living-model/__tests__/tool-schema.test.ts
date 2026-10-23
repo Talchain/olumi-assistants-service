@@ -13,7 +13,7 @@ describe('thin core: the link-unit convention reaches the AI in the tool schema 
 
   it('KA1 served 20 Oct: a link\'s unit is the `to` item\'s own unit, never "per +1 …"', () => {
     expect(sent).toContain('never add \\"per …\\"');
-    expect(sent).toContain('The change in `to` for each +1 of `from`, in the unit of `to`.');
+    expect(sent).toContain('The change in `to` for each +1 of `from`, in the unit of `to`');
   });
 
   it('an exact effect is told apart from a stated figure, in the schema the AI is sent', () => {

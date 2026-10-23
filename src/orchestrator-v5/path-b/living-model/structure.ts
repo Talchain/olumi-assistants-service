@@ -5,6 +5,7 @@
  * may rightly stay unconnected, and a missing figure is the person's to give. PURE.
  */
 import type { LivingModelT } from '../../../schemas/living-model.js';
+import { selectCurrentAim } from './aim-selection.js';
 
 export interface StructureGaps {
   /** No current aim carries a target, so nothing can be measured against it. */
@@ -19,8 +20,7 @@ export const hasGaps = (g: StructureGaps): boolean =>
   g.goal_not_measurable || g.unreachable.length > 0 || g.risk_without_chance.length > 0;
 
 export function structureGaps(model: LivingModelT): StructureGaps {
-  const current = model.aims.filter((a) => a.status === 'current');
-  const goal = current.find((a) => a.target !== null) ?? current[0];
+  const goal = selectCurrentAim(model).aim;
   // Each edge runs from a cause to what it acts on: links, a definition's parts, a mitigation's step, an option's settings.
   const into = new Map<string, string[]>();
   const edge = (from: string, to: string) => into.set(to, [...(into.get(to) ?? []), from]);

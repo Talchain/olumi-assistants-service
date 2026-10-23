@@ -1,0 +1,467 @@
+{
+  "aims": [
+    {
+      "id": "aim_choice",
+      "text": "choose between two offices",
+      "status": "current",
+      "target": {
+        "quantity": "office choice completed",
+        "comparator": "=",
+        "value": null,
+        "low": null,
+        "high": null,
+        "unit": null,
+        "by_when": "in 3 months",
+        "period_months": 3,
+        "period_by": null,
+        "period_deadline": null,
+        "period_read_on": null,
+        "baseline": null,
+        "current": null,
+        "current_source": null,
+        "current_unit": null,
+        "change_kind": null,
+        "source": "olumi"
+      },
+      "defined_as": null,
+      "source": "user",
+      "party": null,
+      "quote": "Our lease expires in 3 months and we must choose between two offices."
+    },
+    {
+      "id": "aim_collaboration",
+      "text": "Team collaboration is our top priority.",
+      "status": "current",
+      "target": {
+        "quantity": "effective team collaboration time",
+        "comparator": ">=",
+        "value": null,
+        "low": null,
+        "high": null,
+        "unit": "hours per employee per week",
+        "by_when": null,
+        "period_months": null,
+        "period_by": null,
+        "period_deadline": null,
+        "period_read_on": null,
+        "baseline": null,
+        "current": null,
+        "current_source": null,
+        "current_unit": null,
+        "change_kind": null,
+        "source": "olumi"
+      },
+      "defined_as": null,
+      "source": "user",
+      "party": null,
+      "quote": "Team collaboration is our top priority."
+    }
+  ],
+  "factors": [
+    {
+      "id": "employees",
+      "label": "Employees",
+      "kind": "factor",
+      "estimate_by": null,
+      "value": 45,
+      "low": null,
+      "high": null,
+      "unit": "employees",
+      "defined_as": null,
+      "limit": null,
+      "source": "user",
+      "party": null,
+      "quote": "We have 45 employees, 60% commute by train and 40% drive."
+    },
+    {
+      "id": "train_share",
+      "label": "Employees commuting by train",
+      "kind": "factor",
+      "estimate_by": null,
+      "value": 60,
+      "low": null,
+      "high": null,
+      "unit": "%",
+      "defined_as": null,
+      "limit": null,
+      "source": "user",
+      "party": null,
+      "quote": "We have 45 employees, 60% commute by train and 40% drive."
+    },
+    {
+      "id": "drive_share",
+      "label": "Employees driving",
+      "kind": "factor",
+      "estimate_by": null,
+      "value": 40,
+      "low": null,
+      "high": null,
+      "unit": "%",
+      "defined_as": null,
+      "limit": null,
+      "source": "user",
+      "party": null,
+      "quote": "We have 45 employees, 60% commute by train and 40% drive."
+    },
+    {
+      "id": "area",
+      "label": "Office floor area",
+      "kind": "factor",
+      "estimate_by": null,
+      "value": null,
+      "low": null,
+      "high": null,
+      "unit": "sq ft",
+      "defined_as": null,
+      "limit": null,
+      "source": "user",
+      "party": null,
+      "quote": "Office A is in the city centre, 2,000 sq ft at \u00a355 per sq ft, 5-minute walk from the train station, but no parking."
+    },
+    {
+      "id": "rent",
+      "label": "Rent per square foot \u2014 charging period not stated",
+      "kind": "factor",
+      "estimate_by": null,
+      "value": null,
+      "low": null,
+      "high": null,
+      "unit": "\u00a3 per sq ft",
+      "defined_as": null,
+      "limit": null,
+      "source": "user",
+      "party": null,
+      "quote": "Office A is in the city centre, 2,000 sq ft at \u00a355 per sq ft, 5-minute walk from the train station, but no parking."
+    },
+    {
+      "id": "transport_time",
+      "label": "Time between office and public transport",
+      "kind": "factor",
+      "estimate_by": null,
+      "value": null,
+      "low": null,
+      "high": null,
+      "unit": "minutes",
+      "defined_as": null,
+      "limit": null,
+      "source": "user",
+      "party": null,
+      "quote": "Office B is in a business park, 3,500 sq ft at \u00a328 per sq ft, free parking for 40 cars, but 30 minutes from public transport."
+    },
+    {
+      "id": "parking",
+      "label": "On-site parking capacity",
+      "kind": "factor",
+      "estimate_by": null,
+      "value": null,
+      "low": null,
+      "high": null,
+      "unit": "cars",
+      "defined_as": null,
+      "limit": null,
+      "source": "user",
+      "party": null,
+      "quote": "Office B is in a business park, 3,500 sq ft at \u00a328 per sq ft, free parking for 40 cars, but 30 minutes from public transport."
+    },
+    {
+      "id": "overlap",
+      "label": "Time relevant colleagues are together in the office",
+      "kind": "outcome",
+      "estimate_by": null,
+      "value": null,
+      "low": null,
+      "high": null,
+      "unit": "hours per employee per week",
+      "defined_as": null,
+      "limit": null,
+      "source": "olumi",
+      "party": null,
+      "quote": null
+    }
+  ],
+  "options": [
+    {
+      "id": "office_a",
+      "label": "Office A \u2014 city centre",
+      "status": "feasible",
+      "developed_from": null,
+      "source": "user",
+      "party": null,
+      "quote": "Office A is in the city centre, 2,000 sq ft at \u00a355 per sq ft, 5-minute walk from the train station, but no parking.",
+      "settings": [
+        {
+          "factor_id": "area",
+          "estimate_by": null,
+          "value": 2000,
+          "low": null,
+          "high": null,
+          "unit": "sq ft",
+          "source": "user",
+          "party": null,
+          "quote": "Office A is in the city centre, 2,000 sq ft at \u00a355 per sq ft, 5-minute walk from the train station, but no parking."
+        },
+        {
+          "factor_id": "rent",
+          "estimate_by": null,
+          "value": 55,
+          "low": null,
+          "high": null,
+          "unit": "\u00a3 per sq ft",
+          "source": "user",
+          "party": null,
+          "quote": "Office A is in the city centre, 2,000 sq ft at \u00a355 per sq ft, 5-minute walk from the train station, but no parking."
+        },
+        {
+          "factor_id": "transport_time",
+          "estimate_by": null,
+          "value": 5,
+          "low": null,
+          "high": null,
+          "unit": "minutes",
+          "source": "user",
+          "party": null,
+          "quote": "Office A is in the city centre, 2,000 sq ft at \u00a355 per sq ft, 5-minute walk from the train station, but no parking."
+        },
+        {
+          "factor_id": "parking",
+          "estimate_by": null,
+          "value": 0,
+          "low": null,
+          "high": null,
+          "unit": "cars",
+          "source": "user",
+          "party": null,
+          "quote": "Office A is in the city centre, 2,000 sq ft at \u00a355 per sq ft, 5-minute walk from the train station, but no parking."
+        }
+      ]
+    },
+    {
+      "id": "office_b",
+      "label": "Office B \u2014 business park",
+      "status": "feasible",
+      "developed_from": null,
+      "source": "user",
+      "party": null,
+      "quote": "Office B is in a business park, 3,500 sq ft at \u00a328 per sq ft, free parking for 40 cars, but 30 minutes from public transport.",
+      "settings": [
+        {
+          "factor_id": "area",
+          "estimate_by": null,
+          "value": 3500,
+          "low": null,
+          "high": null,
+          "unit": "sq ft",
+          "source": "user",
+          "party": null,
+          "quote": "Office B is in a business park, 3,500 sq ft at \u00a328 per sq ft, free parking for 40 cars, but 30 minutes from public transport."
+        },
+        {
+          "factor_id": "rent",
+          "estimate_by": null,
+          "value": 28,
+          "low": null,
+          "high": null,
+          "unit": "\u00a3 per sq ft",
+          "source": "user",
+          "party": null,
+          "quote": "Office B is in a business park, 3,500 sq ft at \u00a328 per sq ft, free parking for 40 cars, but 30 minutes from public transport."
+        },
+        {
+          "factor_id": "transport_time",
+          "estimate_by": null,
+          "value": 30,
+          "low": null,
+          "high": null,
+          "unit": "minutes",
+          "source": "user",
+          "party": null,
+          "quote": "Office B is in a business park, 3,500 sq ft at \u00a328 per sq ft, free parking for 40 cars, but 30 minutes from public transport."
+        },
+        {
+          "factor_id": "parking",
+          "estimate_by": null,
+          "value": 40,
+          "low": null,
+          "high": null,
+          "unit": "cars",
+          "source": "user",
+          "party": null,
+          "quote": "Office B is in a business park, 3,500 sq ft at \u00a328 per sq ft, free parking for 40 cars, but 30 minutes from public transport."
+        }
+      ]
+    }
+  ],
+  "links": [
+    {
+      "id": "transport_overlap",
+      "from": "transport_time",
+      "to": "overlap",
+      "effect": {
+        "form": "direction_only",
+        "estimate_by": null,
+        "value": null,
+        "low": null,
+        "high": null,
+        "unit": "hours per employee per week",
+        "sd": null,
+        "sign": "-"
+      },
+      "source": "olumi",
+      "party": null,
+      "quote": null
+    },
+    {
+      "id": "parking_overlap",
+      "from": "parking",
+      "to": "overlap",
+      "effect": {
+        "form": "direction_only",
+        "estimate_by": null,
+        "value": null,
+        "low": null,
+        "high": null,
+        "unit": "hours per employee per week",
+        "sd": null,
+        "sign": "+"
+      },
+      "source": "olumi",
+      "party": null,
+      "quote": null
+    },
+    {
+      "id": "overlap_collaboration",
+      "from": "overlap",
+      "to": "aim_collaboration",
+      "effect": {
+        "form": "direction_only",
+        "estimate_by": null,
+        "value": null,
+        "low": null,
+        "high": null,
+        "unit": "hours per employee per week",
+        "sd": null,
+        "sign": "+"
+      },
+      "source": "olumi",
+      "party": null,
+      "quote": null
+    },
+    {
+      "id": "area_collaboration",
+      "from": "area",
+      "to": "aim_collaboration",
+      "effect": {
+        "form": "unknown",
+        "estimate_by": null,
+        "value": null,
+        "low": null,
+        "high": null,
+        "unit": "hours per employee per week",
+        "sd": null,
+        "sign": null
+      },
+      "source": "olumi",
+      "party": null,
+      "quote": null
+    }
+  ],
+  "risks": [],
+  "conditions": [
+    {
+      "text": "The lease expires in 3 months; the office choice must fit that deadline.",
+      "applies_to": [
+        "aim_choice",
+        "office_a",
+        "office_b"
+      ],
+      "role": "prerequisite",
+      "source": "user",
+      "party": null,
+      "quote": "Our lease expires in 3 months and we must choose between two offices."
+    },
+    {
+      "text": "Collaboration is the top priority; the suggested measure is Olumi's and has not been agreed.",
+      "applies_to": [
+        "aim_collaboration"
+      ],
+      "role": "challenge",
+      "source": "olumi",
+      "party": null,
+      "quote": null
+    },
+    {
+      "text": "Office A's five minutes is a walk from the train station; Office B's 30 minutes has no stated travel mode or public transport type, so the times may not be directly comparable.",
+      "applies_to": [
+        "transport_time",
+        "transport_overlap"
+      ],
+      "role": "challenge",
+      "source": "olumi",
+      "party": null,
+      "quote": null
+    },
+    {
+      "text": "Access may affect attendance differently for train users and drivers; the effects are unmeasured and commuting habits may change.",
+      "applies_to": [
+        "train_share",
+        "drive_share",
+        "transport_overlap",
+        "parking_overlap"
+      ],
+      "role": "challenge",
+      "source": "olumi",
+      "party": null,
+      "quote": null
+    },
+    {
+      "text": "More space need not improve collaboration: layout, capacity for simultaneous attendance and working patterns remain unknown.",
+      "applies_to": [
+        "area",
+        "area_collaboration",
+        "overlap_collaboration"
+      ],
+      "role": "challenge",
+      "source": "olumi",
+      "party": null,
+      "quote": null
+    },
+    {
+      "text": "Office B's parking is free; Office A has no parking. Nearby alternatives and their costs are unknown.",
+      "applies_to": [
+        "office_a",
+        "office_b",
+        "parking"
+      ],
+      "role": "challenge",
+      "source": "olumi",
+      "party": null,
+      "quote": null
+    },
+    {
+      "text": "Rent charging periods, service charges, fit-out and moving costs are unknown; the quoted rent rates are not total occupancy costs.",
+      "applies_to": [
+        "rent",
+        "office_a",
+        "office_b"
+      ],
+      "role": "challenge",
+      "source": "olumi",
+      "party": null,
+      "quote": null
+    },
+    {
+      "text": "Continuing unchanged beyond lease expiry is not included because no renewal or extension has been offered in the brief.",
+      "applies_to": [
+        "aim_choice",
+        "office_a",
+        "office_b"
+      ],
+      "role": "challenge",
+      "source": "olumi",
+      "party": null,
+      "quote": null
+    }
+  ],
+  "views": [],
+  "history": []
+}

@@ -21,7 +21,7 @@ export const Critique = z.object({
     why_it_matters: z.string(),
   }).strict()).describe('At most three, the most consequential first. Specific to this situation, never generic advice.'),
   connect: z.array(z.object({ item_id: z.string(), to_id: z.string(), sign: z.enum(['+', '-']), why: z.string() }).strict())
-    .describe('For each item in the draft that does not reach the goal: the link that would connect it.'),
+    .describe('Only justified causal links for stranded causal items. Return [] when no link is justified; context, views, definitions and unresolved relationships do not require a new link merely for connectivity.'),
   question: z.string().describe('The ONE input from the person that would most change the result.'),
 }).strict();
 export type CritiqueT = z.infer<typeof Critique>;
