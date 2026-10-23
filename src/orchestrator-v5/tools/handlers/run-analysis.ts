@@ -215,7 +215,7 @@ import { heldGoalPointsUp, readGoalLabel, resolveGoalDirection, resolveGoalThres
 import { goalChanceTargetCause, withholdForOpenTargetQuestion, withholdUnusableGoalChances } from '../../goal-target/goal-chance-gate.js';
 import { IMPLIED_QUANTITY_KEY, livingFramesOf, readImpliedQuantity } from '../../goal-target/implied-quantity.js';
 import { effectsTimingOf } from '../../goal-target/period-end-assumption.js';
-import { goalDependencyConstraintsForRun, withGoalDependencyScores, withGoalChanceReadback, withEvaluatedGoalChanceInputs, sentGoalThresholdOf, withGoalChanceLicence, withholdForOlumiGoalLevel, withholdForPeriodEndEffects } from '../../goal-target/goal-chance-licence.js';
+import { primaryOnlyTargetIds, goalDependencyConstraintsForRun, withGoalDependencyScores, withGoalChanceReadback, withEvaluatedGoalChanceInputs, sentGoalThresholdOf, withGoalChanceLicence, withholdForOlumiGoalLevel, withholdForPeriodEndEffects } from '../../goal-target/goal-chance-licence.js';
 import { capacityRatioOptionIds, shareChanceRunBlock, withShareByDateFrame } from '../../goal-target/share-by-date-run.js';
 import { withShareByDateChanceGate } from '../../goal-target/goal-chance-range.js';
 import { withIndexGoalWeightsNote } from '../../goal-target/index-goal-weights-note.js';
@@ -2315,6 +2315,10 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // R-c: with the options PLoT scores, so a change limit moved only through unsized parts is withheld.
       collectLimitLevelOwners(graphForAnalysis, ratifiedConstraints, finalWireOptions, limitIdentityEvaluations),
       strictThresholdPins,
+      // A held secondary target remains recorded, but does not replace the primary event or become a hard limit.
+      // The single verdict below still records every row in perLimit/joint; genuine limit rows remain in leader safety.
+      primaryOnlyTargetIds(snapshot.rawPersistedGraph ?? snapshot.graph, storedGoalRows,
+        plotPayload.goal_constraints, snapshot.goal_node_id),
     );
     // ⚠ NO TELEMETRY EVENT FOR THE UNMEASURED-TARGET PARTITION, AND THAT IS A
     // DISCLOSED GAP RATHER THAN AN OVERSIGHT — the same call, for the same

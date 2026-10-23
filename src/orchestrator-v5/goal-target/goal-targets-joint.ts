@@ -363,7 +363,8 @@ export function goalTargetsBlockOf(args: {
   const refusedTargets = new Set(targets.filter((t) => dependencyHeld.has(t.node_id) || (args.primaryRefused && t.node_id === args.primaryGoalId)
     || !sent.some((r) => r.constraint_id === t.constraint_id)).map((t) => t.constraint_id));
   for (const c of ordered) {
-    if (forecastMode && c.role === 'target') continue;
+    // The typed dependency note above is the reason; absence from the wire is its consequence.
+    if (dependencyHeld.has(c.node_id) || (forecastMode && c.role === 'target')) continue;
     const verdict = args.perLimit?.find((v) => v.constraint_id === c.constraint_id);
     if (verdict?.state === 'unscored') {
       const reason = retainedIds.has(c.constraint_id) ? retainedLimitWithheldLine(args.graph) : verdict.reason === 'parts_links_placeholder'

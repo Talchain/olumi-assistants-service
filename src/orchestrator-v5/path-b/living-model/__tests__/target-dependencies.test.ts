@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { LivingModel } from '../../../../schemas/living-model.js';
 import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import { goalDependencyCauses, targetTestabilityOf } from '../../../admission/target-testability.js';
-import { goalChanceLicenceForAgent, withGoalChanceLicence } from '../../../goal-target/goal-chance-licence.js';
+import { goalChanceLicenceForAgent, withGoalChanceLicence, primaryOnlyTargetIds } from '../../../goal-target/goal-chance-licence.js';
 import { goalTargetsBlockOf } from '../../../goal-target/goal-targets-joint.js';
 import { mapLivingModel } from '../mapper.js';
 import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
@@ -11,6 +13,9 @@ import { KNOWN_ANSWER } from './fixtures.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.js';
 import { createRunAnalysisHandler } from '../../../tools/handlers/run-analysis.js';
 import { assertTargetHeld } from './assert-target-held.js';
+import { buildAnalysisResultBlock } from '../../../compose.js';
+import { goalChanceCellFacesForAgent } from '../../../agent-lane/goal-chance-screen-lines.js';
+import { readRunEvidence, runEvidenceWireOf } from '../../../agent-lane/run-evidence.js';
 
 type Rec = Record<string, any>;
 const stored = (m = KNOWN_ANSWER) => GraphV3.parse({ ...mapLivingModel(m).graph, living_model: m });
@@ -147,5 +152,132 @@ describe('stated targets survive unresolved dependencies without licensing their
     goal(graph).goal_rests_on = [{ id: 'f', reason: 'identity_part_unknown' }];
     graph.nodes.push(structuredClone(goal(graph)));
     expect(goalDependencyCauses(graph, 'g')[0]?.reason).toBe('dependency_record_unreadable');
+  });
+});
+
+
+/** Transport double answers ONLY rows sent by the real handler; no provider/engine or borrowed question evidence. */
+async function runTargetModel(model: Parameters<typeof mapLivingModel>[0]) {
+  const graph = stored(model), scenario = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+  const before = structuredClone(graph);
+  const snapshot = await loadScenarioSnapshotForRunAnalysis(scenario, 'b2-target-presentation', {
+    loadGraphAndBriefText: async () => ({ graph, briefText: null }), readMostRecentPendingActions: async () => [],
+  } as never);
+  const run = vi.fn(async (payload: Rec) => {
+    const rows: Rec[] = payload.goal_constraints ?? [];
+    return { analysis_status: 'completed', constraints_status: 'computed', response_hash: 'own',
+      meta: { seed_used: 42, n_samples: 1000, response_hash: 'own' },
+      constraint_results: rows.map(r => ({ ...r, frame_verdict: 'scored',
+        scale_provenance: { source: 'test_transport_own_node_cap', range_unified: true, decision_grade: true } })),
+      option_comparison: payload.options.map((o: Rec, i: number) => {
+        const p = (i + 2) / 10;
+        return { option_id: o.id ?? o.option_id, option_label: o.label, probability_of_goal: p,
+          win_probability: p, evppi: 7, probability_of_goal_precision: { n_met: Math.round(p * 1000), n_informative: 1000 },
+          ...(rows.length === 0 ? {} : { constraint_probabilities: Object.fromEntries(rows.map(r => [r.constraint_id, p])),
+            constraint_probabilities_precision: Object.fromEntries(rows.map(r => [r.constraint_id, { n_informative: 1000, standard_error: 0.02 }])),
+            probability_of_joint_goal: p / 2,
+            probability_of_joint_goal_precision: { n_informative: 1000, standard_error: 0.02 } }) };
+      }), inference_warnings: [] };
+  });
+  const outcome = await createRunAnalysisHandler({ scenarioReader: async () => snapshot,
+    plotClient: { run, validatePatch: vi.fn() } as never })({ requestId: 'b2-target-presentation', context: {},
+    payload: { kind: 'message', scenario_id: scenario, turn_id: 'b2-target-presentation', message: 'Run analysis.' },
+    signal: new AbortController().signal, orientationText: '' } as never);
+  expect(run).toHaveBeenCalledOnce(); expect(graph).toEqual(before);
+  const fact = outcome.handler_facts.find(f => f.fact_type === 'run_analysis');
+  if (fact?.fact_type !== 'run_analysis') throw new Error('Run fact missing');
+  const result = fact.result as Rec;
+  return { graph, result, fact, wire: run.mock.calls[0]![0],
+    licence: result.enrichment.inference_warnings.find((w: Rec) => w.code === 'GOAL_CHANCE_LICENSED') as Rec };
+}
+
+describe('the real Run preserves the primary presentation beside a held secondary aim', () => {
+  it('no secondary aim: the verdict is byte-identical to the frozen staging no-constraint result', () => {
+    const graph = stored(), contextOnly = primaryOnlyTargetIds(graph, [], [], 'g');
+    expect(contextOnly.size).toBe(0);
+    const legacy = deriveConstraintVerdict(raw(), [], 'push');
+    const next = deriveConstraintVerdict(raw(), [], 'push', undefined, undefined, undefined, undefined, contextOnly);
+    // Frozen from staging 6f10ccd4's unchanged verdict('not_applicable') shape, rather than a repinned model hash.
+    const staging = { state: 'not_applicable', mayNameLeadingOption: true, codes: [], constraints: [],
+      leaderInfeasibility: null, outOfScopeConstraints: [], unmeasuredTargetConstraints: [] };
+    expect(JSON.stringify(next)).toBe(JSON.stringify(staging));
+    expect(JSON.stringify(next)).toBe(JSON.stringify(legacy));
+    const limits = [{ constraint_id: 'budget', node_id: 'f', label: 'Budget', unit: '£', source_quote: null }];
+    expect(JSON.stringify(deriveConstraintVerdict(raw(), limits, 'push', undefined, undefined, undefined, undefined, contextOnly)))
+      .toBe(JSON.stringify(deriveConstraintVerdict(raw(), limits, 'push')));
+  });
+
+  it('actual MRR: the full primary licence, status quo, leader permission and static horizon survive; churn gets its true reason once', async () => {
+    const model = LivingModel.parse(JSON.parse(readFileSync(new URL('./fixtures/mrr-459f8bde-living-model.json', import.meta.url), 'utf8')));
+    const primary = structuredClone(model); primary.aims = primary.aims.filter(a => a.id === 'mrr');
+    // Staging's single-scored-aim slice: same MRR facts and producer; the current model keeps the person's churn aim too.
+    const base = await runTargetModel(primary), head = await runTargetModel(model);
+    expect(base.licence).toBeDefined(); expect(head.licence).toBeDefined();
+    expect(base.licence.pct_by_option).toEqual({ features_price: 20, advertising: 30, status_quo: 40, retention: 50 });
+    const held = head.licence.notes.filter((n: string) => n.includes('keeping monthly churn under 4%'));
+    expect(held).toHaveLength(1);
+    expect(held[0]).toContain("today's level");
+    expect(held[0]).not.toMatch(/scoring frame|quantity.*resolved/);
+    expect({ ...head.licence, notes: head.licence.notes.filter((n: string) => n !== held[0]) }).toEqual(base.licence);
+    expect(head.licence).not.toHaveProperty('targets');
+    expect(head.licence.horizon_line).toContain("doesn't project");
+    expect(head.licence.notes).toContain('Static model; not a forecast to a date.');
+    const horizon = (r: Rec) => r.enrichment.inference_warnings.filter((w: Rec) => w.code === 'GOAL_HORIZON_NOT_TESTED');
+    expect(horizon(head.result)).toEqual(horizon(base.result));
+    expect(head.result.constraint_verdict.may_name_leading_option).toBe(base.result.constraint_verdict.may_name_leading_option);
+    expect(base.result.constraint_verdict.may_name_leading_option).toBe(true);
+    expect(head.result.constraint_verdict.per_limit).toContainEqual(expect.objectContaining({ constraint_id: 'target_churn', state: 'unscored' }));
+    expect(head.wire.goal_constraints.map((r: Rec) => r.constraint_id)).toEqual(['target_mrr']);
+    expect(head.wire.graph.nodes.some((n: Rec) => n.id === 'churn')).toBe(false);
+    expect(goal(head.graph, 'churn').goal_rests_on).toContainEqual({ id: 'churn', reason: 'goal_level_unknown' });
+    const primaryFigures = (r: Rec) => r.enrichment.option_comparison.map((o: Rec) => ({ id: o.option_id,
+      chance: o.probability_of_goal, precision: o.probability_of_goal_precision, share: o.win_probability, evppi: o.evppi }));
+    expect(primaryFigures(head.result)).toEqual(primaryFigures(base.result));
+    const baseAgent = goalChanceLicenceForAgent(base.result.enrichment), headAgent = goalChanceLicenceForAgent(head.result.enrichment);
+    expect(baseAgent).toBeDefined(); expect(headAgent).toBeDefined();
+    expect({ ...headAgent, notes: headAgent!.notes!.filter(n => n !== held[0]) }).toEqual(baseAgent);
+    const faces = (r: typeof head) => goalChanceCellFacesForAgent(buildAnalysisResultBlock(r.fact), r.graph, true,
+      readRunEvidence(runEvidenceWireOf(r.fact)));
+    expect(faces(head)).toEqual(faces(base));
+    const baseBlock = buildAnalysisResultBlock(base.fact), headBlock = buildAnalysisResultBlock(head.fact);
+    expect(headBlock.leading_option_id).toBe(baseBlock.leading_option_id);
+    expect(headBlock.win_probabilities).toEqual(baseBlock.win_probabilities);
+    // The actual writer's primary opening/headline survives; later disclosure may name the held part and its links.
+    expect(head.result.summary).toContain(base.result.summary.split(/(?<=[.!?])\s+/).slice(0, 2).join(' '));
+    expect(JSON.stringify(head.result)).not.toContain('Its quantity and scoring frame need to be resolved');
+  });
+
+  it('primary-only scope cannot discard a hard limit, hide a held primary, or license a partial-subset joint', () => {
+    const graph = stored(twoAims()) as Rec;
+    goal(graph, 'second').goal_rests_on = [{ id: 'second', reason: 'goal_level_unknown' }];
+    const rows = [...graph.goal_constraints, { constraint_id: 'budget', node_id: 'f', role: 'limit', value: 20 }];
+    const sent = rows.filter(r => r.constraint_id !== 'target_second');
+    expect([...primaryOnlyTargetIds(graph, rows, sent, 'g')]).toEqual(['target_g', 'target_second']);
+    expect(primaryOnlyTargetIds(graph, rows, sent, 'g').has('budget')).toBe(false);
+    expect(primaryOnlyTargetIds(graph, rows, [], 'g').size).toBe(0); // No scored primary cannot acquire its permission.
+    const verdict = deriveConstraintVerdict(raw(), readRatifiedConstraints({ goal_constraints: rows }), 'push',
+      undefined, undefined, { userBaselineIds: new Set(), userAssumptionIds: new Set() }, undefined,
+      primaryOnlyTargetIds(graph, rows, sent, 'g'));
+    expect(verdict.mayNameLeadingOption).toBe(false); // The genuine budget has no score; it still blocks.
+    expect(verdict.perLimit?.map(r => r.constraint_id)).toEqual(['target_g', 'target_second', 'budget']);
+    expect(verdict.joint).toMatchObject({ state: 'withheld' });
+    goal(graph).goal_rests_on = [{ id: 'g', reason: 'goal_level_unknown' }];
+    expect(primaryOnlyTargetIds(graph, rows, sent, 'g').size).toBe(0);
+    delete goal(graph).goal_rests_on;
+    // Two scored aims plus a third held aim still require the full saved joint, never a two-aim subset.
+    const third = { constraint_id: 'target_third', node_id: 'third', role: 'goal_target', value: 80 };
+    const three = [...rows, third];
+    expect(primaryOnlyTargetIds(graph, three, [...sent, third], 'g').size).toBe(0);
+    delete goal(graph, 'second').goal_rests_on;
+    expect(primaryOnlyTargetIds(graph, rows, sent, 'g').size).toBe(0);
+  });
+
+  it('two actually scored aims still use the per-target and full same-draw joint presentation', async () => {
+    const { result, licence, wire } = await runTargetModel(twoAims());
+    expect(wire.goal_constraints.map((r: Rec) => r.constraint_id)).toEqual(['target_g', 'target_second']);
+    expect(licence.targets.per_target.map((r: Rec) => r.constraint_id)).toEqual(['target_g', 'target_second']);
+    expect(licence.targets.joint).toMatchObject({ status: 'licensed', pct_by_option: { push: 15 } });
+    expect(licence.pct_by_option).toEqual(licence.targets.joint.pct_by_option);
+    expect(result.constraint_verdict.per_limit.every((r: Rec) => r.state === 'scored')).toBe(true);
   });
 });
