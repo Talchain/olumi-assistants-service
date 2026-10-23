@@ -499,7 +499,9 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       // ── A CARD PRESS (the legacy route's ONE consent check for a core change, ported). ──────────────────────────────────
       const corePaused = approvedProposal !== undefined || declinedProposal !== undefined
         ? await store.readOpenAiPausedRun?.(scenarioId).catch(() => undefined) : undefined;
-      const coreCardOnly = corePaused == null && approvedProposal !== undefined && isChangeProposal(proposals.get(approvedProposal));
+      // A pause on no card this scenario holds (an apply the AI sent with an empty id) never keeps a held card from its press.
+      const stalePause = corePaused != null && !heldAtStart.some((h) => heldProposalId(h) === corePaused.proposal_id);
+      const coreCardOnly = (corePaused == null || stalePause) && approvedProposal !== undefined && isChangeProposal(proposals.get(approvedProposal));
       const coreOwns = coreCardOnly || (corePaused != null
         && ((approvedProposal !== undefined && approvedProposal === corePaused.proposal_id) || (declinedProposal !== undefined && declinedProposal === corePaused.proposal_id)));
       const sentEdits = coreOwns && approvedProposal !== undefined ? parseProposalEdits(body.proposal_edits) : undefined;
@@ -607,7 +609,8 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
               analyseAfterCommit: analyseCommittedChange,
               // No research control is in this contract, so no search may be promised (fail closed).
               researchShowable: async () => false,
-              onVerifiedSave: () => { verifiedSave = true; }, restructure }),
+              onVerifiedSave: () => { verifiedSave = true; }, restructure,
+              ...(press?.decision === 'approve' ? { pressedProposal: press.proposal_id } : {}) }),
             settle: async () => { await restructure.settle?.(); },
             // The standing instructions, the same bytes on every call of every scenario (the cached prefix); this turn's own
             // guidance (the drafting arm, a Challenge's note) follows its state block in the turn's input.

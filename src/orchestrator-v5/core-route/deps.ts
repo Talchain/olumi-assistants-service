@@ -118,12 +118,15 @@ export interface CoreTurnToolsInput {
   readonly onVerifiedSave: () => void;
   /** This turn's repairs, made by the route, which settles them at the turn's end (`goal-path.ts`). */
   readonly restructure?: PathBToolDeps['restructure'];
+  /** The card this turn's press approves: its apply is bound to it. */
+  readonly pressedProposal?: string;
 }
 
 /** The SDK turn's tools: the typed adapters over the route's primitives, each call recorded once. */
 export function coreTurnTools(i: CoreTurnToolsInput): CoreTurnInput['tools'] {
   return (onCall) => pathBTools({ dispatch: i.dispatch, proposals: i.proposals, critique: modelCritic(coreBudget()), deadlineAt: i.deadlineAt,
     ...(i.noteOnlyOn !== undefined ? { noteOnlyOn: i.noteOnlyOn } : {}), ...(i.restructure !== undefined ? { restructure: i.restructure } : {}),
+    ...(i.pressedProposal !== undefined ? { pressedProposal: i.pressedProposal } : {}),
     proposeLinkStrengths: (c, a) => dispatchTool('propose_link_strengths', JSON.stringify(a), { ...i.ctx, ...c }, i.capabilities, i.mode),
     ...(i.commitOptionLevels !== undefined ? { commitOptionLevels: i.commitOptionLevels } : {}), onModelRegistered: (raw) => i.onModelRegistered(raw),
     runAnalysis: i.runAnalysis,
