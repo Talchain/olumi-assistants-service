@@ -68,7 +68,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
 
   it('THE PROMPTS (DL 22 Oct, priority change): the coach\u2019s reply rules and the drafter\u2019s rules, adapted as ruled; the old constants are gone', () => {
     expect(createHash('sha256').update(CORE_REPLY_RULES, 'utf8').digest('hex')).toBe('6f5f00c581ac4be2f1f590973e4bcf58c6eba498e5216bc3a8a21a189be5f3d6');
-    expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('e400deb1e747b1716c5c6310e13c2019e275481fc0c97c95e58750f5f941c1fc'); // 23 Oct (DL 93d79c3e, C2): mechanism first; leanest and stated-only retired; the soft conditions guideline kept (Codex r1 on #3698). 22 Oct: every stated goal saved in their words, never approximated (Claude r1 on #3670); + a calendar date is Olumi's labelled reading
+    expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('0f09b8b3fc6647dca4826d84deed707f9ac48b86cd44df4db2b5af59be03d692'); // 23 Oct (DL 93d79c3e, C2): mechanism first; leanest and stated-only retired; the soft conditions guideline kept (Codex r1 on #3698); an accumulation only as a product's count, as B2a #3696 admits it. 22 Oct: every stated goal saved in their words, never approximated (Claude r1 on #3670); + a calendar date is Olumi's labelled reading
     // The retired constants are gone from both modules: no route can send the accreted text again.
     for (const name of ['CORE_REPLY_INSTRUCTION', 'CORE_RESPONSE_DISCIPLINE', 'CORE_NEXT_STEP']) expect(Object.keys(coreInstructions), name).not.toContain(name);
     expect(Object.keys(drafting)).toEqual(['CORE_DRAFTER_RULES']);
@@ -158,8 +158,10 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
   it('DL 93d79c3e (C2): the drafter builds the mechanism first, in the engine\'s own forms; "leanest" and "only when stated" are retired', () => {
     expect(CORE_DRAFTER_RULES).toContain("Work silently: the goal's identity first, then mechanisms, extraction, widening, audit.");
     expect(CORE_DRAFTER_RULES).toContain("MECHANISM FIRST: where an option or stated driver acts on the goal's quantity, or it is a standard business quantity, first define it by its parts, stated or not: "
-      + "a level built up over the window is an accumulation on its own factor (stock_today, loss_rate_per_month, inflow_per_month: factor ids; horizon_months)");
-    expect(CORE_DRAFTER_RULES).toContain('a rate times a count is a defined_as product; parts that add or net off are a defined_as sum (subtracted ids in subtract). Only these forms;');
+      + "a rate times a count is a defined_as product, whose count, if it builds up over the goal's window, is an accumulation factor, value null (stock_today, loss_rate_per_month, inflow_per_month: factor ids; horizon_months: that window)");
+    expect(CORE_DRAFTER_RULES).toContain('× fee; parts that add or net off are a defined_as sum (subtracted ids in subtract). Only these forms;');
+    // B2a #3696 admits an accumulation only as one part of a two-part product goal (mapper.ts owner), never a goal that is the stock itself.
+    expect(CORE_DRAFTER_RULES).not.toContain('a level built up over the window is an accumulation');
     expect(CORE_DRAFTER_RULES).toContain("Options set levers on its parts or their drivers, never a link straight to an aim.");
     expect(CORE_DRAFTER_RULES).toContain('A qualitative aim remains intact and takes no identity:');
     expect(CORE_DRAFTER_RULES).toContain('a cap or minimum belongs in limit, on the identity part it bounds.');
