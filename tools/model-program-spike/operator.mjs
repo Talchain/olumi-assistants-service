@@ -24,9 +24,9 @@ export const DONT_KNOW = "I don't know.";
 
 const INSTRUCTIONS = [
   'You answer a reasoning tool\'s questions on behalf of a person, using ONLY their numbered facts sheet.',
-  'For each question: pick the ONE fact line that answers that same question by meaning (the same thing being asked, not a related figure). If no line does, fact_line is null.',
+  'For each question: pick the ONE fact line that answers that same question by meaning (the same thing being asked, not a related figure), however it is worded and in whatever form it gives the answer (a date or a delay, a share or a count, other units). A question about how firm a figure or range is (firm limits or a rough estimate?) is answered by the line that gives that figure. If no line does, fact_line is null.',
   'Then give the figure in the question\'s unit: value for a single figure; low and high for a range the line gives (value null unless the line also gives a most likely figure).',
-  'Convert only when the unit demands it and the conversion is exact: per month to per year (×12), per week to per year (×52), a percentage to a fraction (÷100) when the unit is "1", "k" as thousands. Any other conversion, or a figure the line does not state: fact_line null.',
+  'Convert only when the unit demands it and the conversion is exact: per month to per year (×12), per week to per year (×52), a percentage to a fraction (÷100) when the unit is "1", "k" as thousands. When the line answers the question but states no figure that converts exactly into its unit (a date for "months from now", "a rough guess" for "firm or rough?"), keep its fact_line and leave value, low and high null: the person then answers in that line\'s own words.',
   'Never invent, estimate, average or combine figures. A line marked [UNKNOWN] answers nothing: fact_line null.',
 ].join('\n');
 
@@ -105,9 +105,13 @@ export async function answerAsks({ facts, asks, apiKey, fetchImpl = fetch }) {
     if (!fact) return { ...base, status: 'unknown', said: DONT_KNOW, flags: ['fact_line_out_of_range'] };
     if (fact.tag === 'UNKNOWN') return { ...base, status: 'unknown', said: fact.answer, fact, flags: ['fact_unknown'] };
     const ranged = a.low !== null && a.high !== null;
-    if (!ranged && a.value === null) return { ...base, status: 'unknown', said: DONT_KNOW, fact, flags: ['no_figure'] };
+    // DL 23 Oct (batch-1 score): a line that answers the question is the person's answer even when no exact figure in the
+    // ask's unit can be read off it (a date for "months from now", "firm or rough?"): they say the line's own words, and the
+    // tool reads them; "I don't know" is only for a question the sheet truly lacks.
+    const inWords = (flag) => ({ ...base, status: 'answered_in_words', said: fact.answer, words: fact.answer, fact, flags: [flag], proposed: { value: a.value, low: a.low, high: a.high } });
+    if (!ranged && a.value === null) return inWords('no_figure');
     const figures = ranged ? [a.low, a.high, a.value] : [a.value];
-    if (!figures.every((v) => traceable(v, fact.answer))) return { ...base, status: 'unknown', said: DONT_KNOW, fact, flags: ['untraceable'], proposed: { value: a.value, low: a.low, high: a.high } };
+    if (!figures.every((v) => traceable(v, fact.answer))) return inWords('untraceable');
     return { ...base, status: 'answered', said: fact.answer, words: fact.answer, value: a.value, low: ranged ? a.low : null, high: ranged ? a.high : null, fact, flags: [] };
   });
   return { answers, call };

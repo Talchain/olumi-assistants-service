@@ -3,7 +3,9 @@
  * The REAL core route in process, with the REAL provider (key from the service's .env, never printed) and in-memory stores
  * in the route's served shapes, keyed by scenario so two runs can be in flight: 0 database writes. Per run:
  *   draft (canonical arm) → compile/repair → simulate → present, then ≤ 3 answer turns from the operator (facts sheet by
- *   path), then save → readback → cold reopen from the stored JSON in a fresh module instance.
+ *   path) through the core agent's own chat on #3709 (the operator answers the reply's questions, as the control arm's does;
+ *   each card issued in response is approved once, by its own press), then save → readback → cold reopen from the stored
+ *   JSON in a fresh module instance. (Batch 1's answer-only turns were a probe the PL retired; #3709 has none.)
  * env: MP_ACCEPT_OUT (dir) · MP_BRIEFS (json {briefs:[{id,brief}]}) · MP_IDS (comma list) · MP_RUNS (default 1) ·
  *      MP_FACTS (facts sheet path; absent → every ask is "I don't know") · MP_PARALLEL (default 2, max 2) · MP_MAX_USD (default 5)
  */
@@ -16,7 +18,7 @@ import { computeGraphIdentityHash } from '../../src/orchestrator-v5/context/grap
 import { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha256 } from '../../src/orchestrator-v5/context/graph-hash.js';
 import { stableStringify } from '../../src/orchestrator/context/stable-stringify.js';
 // @ts-expect-error a plain ES module beside this driver
-import { answerAsks, envKey, loadFacts } from './operator.mjs';
+import { answerQuestions, envKey, loadFacts } from './operator.mjs';
 // @ts-expect-error a plain ES module beside this driver
 import { basisOf, chancesFromView, hasChance, renderCanonical, sumTokens, tokensOf, usdOf } from './record.mjs';
 
@@ -157,16 +159,16 @@ describe.skipIf(OUT === '')('model-program spike acceptance (live provider)', ()
       const sid = randomUUID();
       const t0 = Date.now();
       const turns: Json[] = []; const qa: Json[] = []; const operatorCalls: Json[] = [];
-      const post = async (payload: Json, headers: Record<string, string> = {}) => {
+      const post = async (payload: Json, kind: 'draft' | 'answer' | 'approve' = 'draft') => {
         const s = Date.now();
-        const r = await app.inject({ method: 'POST', url: '/agent/v1/core-turn', headers,
+        const r = await app.inject({ method: 'POST', url: '/agent/v1/core-turn',
           payload: { kind: 'message', scenario_id: sid, stage: 'frame', turn_class: 'frame', turn_id: randomUUID(), source: 'composer', ...payload } });
         let body: Json = {}; try { body = r.json() as Json; } catch { body = { raw: r.body.slice(0, 2000) }; }
         const calls = (body._provider_calls ?? []).map((c: Json) => ({ purpose: c.purpose ?? null, alias: c.prompt_alias ?? null, model: c.returned_model ?? c.model ?? null,
           effort: c.reasoning_effort ?? null, outcome: c.attempt?.outcome ?? c.outcome ?? null, ms: c.duration_ms ?? null, tokens: tokensOf(c.usage), usd: +usdOf(c.usage).toFixed(4) }));
         const usd = calls.reduce((a: number, c: Json) => a + c.usd, 0); spent += usd;
         const mp = body.model_program ?? {};
-        turns.push({ kind: payload.model_program_answers ? 'answer' : 'draft', status: r.statusCode, ms: Date.now() - s, calls, usd: +usd.toFixed(4),
+        turns.push({ kind, status: r.statusCode, cards: (body.cards ?? []).map((c: Json) => ({ proposal_id: c.proposal_id ?? null, approve: c.approve_action?.message ?? null })), ms: Date.now() - s, calls, usd: +usd.toFixed(4),
           tool_calls: body._agent?.tool_calls ?? null, error: body.error ?? null, saved: mp.saved ?? null, write: mp.write ?? null, readback: mp.readback ?? null,
           draft_attempts: mp.draft?.attempts?.map((a: Json) => ({ attempt: a.attempt, errors: a.errors?.map((e: Json) => `${e.code}: ${e.message}`) ?? null, failed: a.failed ?? null, ms: a.ms, status: a.status })) ?? null,
           fills: mp.fills ?? null, compile: mp.compile ? { compiles: mp.compile.compiles, executable: mp.compile.executable, errors: mp.compile.errors?.length ?? null,
@@ -178,19 +180,24 @@ describe.skipIf(OUT === '')('model-program spike acceptance (live provider)', ()
       };
 
       let last = await post({ message: brief });
-      const attempted = new Set<string>();
+      let shown = new Set(((last.cards ?? []) as Json[]).map((c) => c.proposal_id));
       for (let k = 1; k <= Number(process.env.MP_ANSWER_TURNS ?? '3'); k += 1) {
-        if (existsSync(STOP)) break;
-        const asks = ((last.model_program?.asks ?? []) as Json[]).filter((a) => a.feeds.length > 0 && !attempted.has(a.quantity_id));
-        if (asks.length === 0 || last.model_program?.saved !== true) break;
-        for (const a of asks) attempted.add(a.quantity_id);
-        const op = await answerAsks({ facts, asks, apiKey, fetchImpl: globalThis.fetch });
+        if (existsSync(STOP) || typeof last.assistant_text !== 'string') break;
+        const op = await answerQuestions({ facts, replyText: last.assistant_text, apiKey, fetchImpl: globalThis.fetch });
         if (op.call) { operatorCalls.push({ turn: k, ...op.call, tokens: tokensOf(op.call.usage), usd: +usdOf(op.call.usage).toFixed(4) }); spent += usdOf(op.call.usage); }
-        for (const a of op.answers) qa.push({ turn: k, quantity_id: a.quantity_id, question: a.question, unit: a.unit, status: a.status, answer: a.said,
-          value: a.value ?? null, low: a.low ?? null, high: a.high ?? null, fact: a.fact ?? null, flags: a.flags });
-        const fills = op.answers.filter((a: Json) => a.status === 'answered').map((a: Json) => ({ quantity_id: a.quantity_id, value: a.value, low: a.low, high: a.high, words: a.words }));
-        if (fills.length === 0) break;
-        last = await post({ message: fills.map((f: Json) => f.words).join(' '), model_program_answers: fills });
+        for (const q of op.questions as Json[]) qa.push({ turn: k, question: q.question, status: q.status, answer: q.answer, fact: q.fact, flags: q.flags });
+        if ((op.questions as Json[]).length === 0) qa.push({ turn: k, question: null, status: 'no_question', answer: null, flags: op.flags });
+        if (op.message === null) break;
+        const displayed = ((last.cards ?? []) as Json[]).filter((c) => typeof c.proposal_id === 'string').map((c) => (c.revision === undefined ? { proposal_id: c.proposal_id } : { proposal_id: c.proposal_id, revision: c.revision }));
+        last = await post({ message: op.message, ...(displayed.length ? { displayed_proposals: displayed } : {}) }, 'answer');
+        // The cards issued in response to these answers: the person approves each once, with its own press.
+        for (const card of ((last.cards ?? []) as Json[]).filter((c) => typeof c.proposal_id === 'string' && !shown.has(c.proposal_id) && c.approve_action?.id)) {
+          if (existsSync(STOP)) break;
+          const pressed = await post({ message: card.approve_action.message, source: 'chip_click', chip: { id: card.approve_action.id, action_type: card.approve_action.action_type } }, 'approve');
+          qa.push({ turn: k, press: card.proposal_id, status: pressed.error ? 'press_refused' : 'pressed', error: pressed.error?.code ?? null });
+          if (typeof pressed.assistant_text === 'string' && pressed.assistant_text.trim() !== '') last = pressed;
+        }
+        shown = new Set([...shown, ...((last.cards ?? []) as Json[]).map((c) => c.proposal_id)]);
       }
       const storedRun = persisted.get(sid)?.living_model?.runs?.at(-1)?.result as Json | undefined;
       const coaching = (storedRun?.compile?.coaching ?? []) as Json[];
@@ -205,7 +212,7 @@ describe.skipIf(OUT === '')('model-program spike acceptance (live provider)', ()
         canonical_bytes_identical: JSON.stringify(cold.program.canonical) === JSON.stringify(saved!.living_model?.canonical),
         view_identical: stableStringify(cold.view) === stableStringify(last.canonical_analysis_view),
       };
-      const view = last.canonical_analysis_view as Json | null;
+      const view = (cold?.view ?? last.canonical_analysis_view ?? null) as Json | null;
       const optionLabel = new Map(((saved?.living_model?.canonical?.options ?? []) as Json[]).map((o) => [o.id, o.label]));
       const chances = { per_option: (storedRun?.chances ?? null) as Json[] | null, ...chancesFromView(view, optionLabel) };
       const calls = turns.reduce((a, t) => a + t.calls.length, 0) + operatorCalls.length;
