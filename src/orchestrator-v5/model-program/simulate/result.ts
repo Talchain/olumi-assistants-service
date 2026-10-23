@@ -14,11 +14,18 @@ export type OptionResult = {
   joint_within_limits: ChanceOrWithheld;
   outcomes: ({ goal_id: string } & ({ p10: number; p50: number; p90: number } | Withheld))[];  // the goal quantity's aggregated value; never a dropped draw
   drivers: { quantity: string; joint_if_low: number; joint_if_high: number }[];  // tercile-conditional on joint_within_limits; presentation follows the #87 rules later, not here
+  // ── Additive (gold-model ruling 3): each limit's own chance, and its quantity's aggregated value (e.g. the cost) over the draws.
+  per_limit: (ChanceOrWithheld & { limit_id: string })[];
+  limit_outcomes: ({ limit_id: string } & ({ p10: number; p50: number; p90: number } | Withheld))[];
 };
+/** One withheld chance, listed once at the top of the result (gold-model ruling 6). */
+export type SimWithheld = { option_id: string; scope: 'goal' | 'limit' | 'joint' | 'within_limits' | 'joint_within_limits'; id?: string } & Withheld['withheld'];
 export type SimResult = {
   draws: number;
   seed: number;
   options: OptionResult[];
+  /** Every withheld chance across the options (empty when none). */
+  withheld: SimWithheld[];
   // ── Additive (S2): only when `record` asks for draw indices. Every quantity's value at times 0..periods (boundaries for a
   // state, intervals for a flow), per option, and which risks fired: the evidence that options share their draws and that a
   // risk acts only where it fires.

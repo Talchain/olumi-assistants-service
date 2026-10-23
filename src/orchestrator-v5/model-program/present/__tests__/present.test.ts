@@ -44,7 +44,7 @@ function present(m: ExecutableModel, labels: Record<string, PresentQuantity>, mo
 // Hand-written words (the level template of goal-target-basis.ts `targetChanceWords`, the end of month 1 for a state):
 const MRR_WORDS = '‘Monthly recurring revenue’ being at least £4,800 at 1 month from now';
 const CUST_WORDS = '‘Customers’ being at least 90 customers at 1 month from now';
-const EXACT = 'Simulation precision: exact. Every input is a fixed figure, so every simulated draw gives the same result.';
+const EXACT = 'Simulation precision: exact. Every simulated draw gives the same result for this option, so no sampling is involved.';
 const FORECAST_OR_VERDICT = /\b(will|win|wins|winner|best|recommend|recommended|should)\b|comes out on top/i;
 
 describe('present: the canonical analysis view from a simulated model', () => {

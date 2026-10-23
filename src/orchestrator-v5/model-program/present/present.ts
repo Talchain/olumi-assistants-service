@@ -30,10 +30,10 @@ import { comparatorWords } from '../../goal-target/goal-target-basis.js';
 import { displayRoundingFor } from '../../goal-target/goal-chance-driver.js';
 import { displayedPctAt } from '../../goal-target/goal-chance-display.js';
 import { sayDisplayedPct } from '../../goal-target/goal-targets-joint.js';
-import type { Aggregation, ExecutableModel, Goal, Limit, Quantity, Window } from '../executable.js';
+import type { ExecutableModel, Goal, Limit, Quantity, Window } from '../executable.js';
 import { rangeLaw } from '../simulate/range-law.js';
 import { isWithheld, type ChanceOrWithheld, type OptionResult, type SimResult, type Withheld } from '../simulate/result.js';
-import { readingOf, simulate } from '../simulate/simulate.js';
+import { readingOf, simulate, type AggregationX } from '../simulate/simulate.js';
 
 type Author = 'person' | 'olumi';
 
@@ -137,13 +137,15 @@ const plural = (unit: string, n: number): string => `${n} ${unit}${n === 1 ? '' 
  * The horizon, counted from now, with the aggregation (DL ruling 1). Interval k is "month k+1"; boundary k is "the end of
  * month k". So a flow over {start, periods} reads months start+1 … start+periods, and a state reads their ends.
  */
-function horizonWords(aggregation: Aggregation, w: Window, unit: string, reading: 'state' | 'flow'): string {
+function horizonWords(aggregation: AggregationX, w: Window, unit: string, reading: 'state' | 'flow'): string {
   const first = w.start_period + 1, last = w.start_period + w.periods;
   const state = reading === 'state';
   if (aggregation === 'end' || first === last) return state ? `at ${plural(unit, last)} from now` : `in ${unit} ${last} from now`;
   const months = `${unit}s ${first} to ${last} from now`;
   if (aggregation === 'sum') return state ? `added up at the ends of ${months}` : `in total over ${months}`;
   if (aggregation === 'mean') return state ? `on average at the ends of ${months}` : `on average per ${unit} over ${months}`;
+  if (aggregation === 'max') return state ? `at its highest at the ends of ${months}` : `in its highest ${unit} of ${months}`;
+  if (aggregation === 'min') return state ? `at its lowest at the ends of ${months}` : `in its lowest ${unit} of ${months}`;
   return state ? `at the end of every ${unit} from ${unit} ${first} to ${unit} ${last} from now` : `in every ${unit} from ${unit} ${first} to ${unit} ${last} from now`;
 }
 
@@ -154,7 +156,7 @@ function shown(c: ChanceOrWithheld, draws: number): { display: string; precision
   const display = sayDisplayedPct(displayedPctAt(c.chance, displayRoundingFor(((hi - lo) / 2) * 100)));
   const pct = (x: number): string => `${Number((x * 100).toFixed(1))}%`;
   const precision_words = lo === hi
-    ? 'Simulation precision: exact. Every input is a fixed figure, so every simulated draw gives the same result.'
+    ? 'Simulation precision: exact. Every simulated draw gives the same result for this option, so no sampling is involved.'
     : `Simulation precision: ${pct(lo)} to ${pct(hi)}, from ${draws.toLocaleString('en-GB')} simulated draws. This is how exactly the simulation measured the chance, not a range the chance could take.`;
   return { display, precision_words };
 }
@@ -227,7 +229,8 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     // The level template of `targetChanceWords` (goal-target-basis.ts): ‘X’ being at least T; a limit's subject "is".
     const figure = target.dist?.kind === 'fixed' ? say(target.dist.value, target.unit) : label(against) === undefined ? undefined : q(label(against)!);
     if (figure === undefined) return undefined;
-    return `${q(subject)} ${role === 'goal' ? 'being' : 'is'} ${bound} ${figure} ${horizonWords(c.aggregation, c.window, unit, readingOf(byId.get(c.quantity)!))}`;
+    const aggregation = (c as { aggregation: AggregationX }).aggregation;
+    return `${q(subject)} ${role === 'goal' ? 'being' : 'is'} ${bound} ${figure} ${horizonWords(aggregation, c.window, unit, readingOf(byId.get(c.quantity)!))}`;
   };
   const goalWords = new Map(model.goals.map((g) => [g.id, conditionWords(g, g.target, 'goal')] as const));
   const limitWords = model.limits.map((l) => conditionWords(l, l.bound, 'limit'));

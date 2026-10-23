@@ -5,8 +5,8 @@
  * the hand value.
  */
 import { describe, expect, it } from 'vitest';
-import type { ExecutableModel, Goal, Limit, Option, Quantity, Risk } from '../../executable.js';
-import { simulate } from '../simulate.js';
+import type { ExecutableModel, Goal, Limit, Option, OptionSet, Quantity, Risk } from '../../executable.js';
+import { simulate, type AggregationX } from '../simulate.js';
 import { rangeLaw } from '../range-law.js';
 import { isWithheld, type Chance, type ChanceOrWithheld, type SimResult } from '../result.js';
 import { mapLivingModel } from '../../../path-b/living-model/mapper.js';
@@ -29,6 +29,16 @@ const effect = (id: string, base: string, terms: { coefficient: string; driver: 
 const stock = (id: string, start: string, inflows: string[], outflows: string[], unit = ''): Quantity =>
   ({ id, unit, reading: 'state', stock: { start, inflows, outflows } });
 const flow = (x: Quantity): Quantity => ({ ...x, reading: 'flow' });
+// Gold-model rulings 1 and 2, ahead of S1's executable.ts types: a `max`/`min` aggregation, and a `from_period` naming a timing.
+const aggregated = (g: Goal, a: AggregationX): Goal => ({ ...g, aggregation: a as Goal['aggregation'] });
+const timed = (quantity: string, to: string, timing: string): OptionSet => {
+  const set: { quantity: string; to: string; from_period: number | string } = { quantity, to, from_period: timing };
+  return set as OptionSet;
+};
+const timedRisk = (r: Risk, timing: string): Risk => {
+  const risk: Omit<Risk, 'from_period'> & { from_period: number | string } = { ...r, from_period: timing };
+  return risk as Risk;
+};
 const goal = (id: string, quantity: string, cmp: Goal['cmp'], target: string, aggregation: Goal['aggregation'] = 'end',
   window: Goal['window'] = ONE): Goal => ({ id, quantity, cmp, target, aggregation, window });
 const option = (id: string, sets: Option['sets'] = []): Option => ({ id, label: id, sets });
@@ -310,6 +320,115 @@ describe('numerical check: natural-unit simulator, hand-calculated rows', () => 
     expect(Math.abs(le0.chance - 0.04163)).toBeLessThanOrEqual(0.00565);
     expect(inside(0.5, mid.precision_95)).toBe(true);
     expect([goalOf(c, 'ge0').chance, goalOf(c, 'le1').chance]).toEqual([1, 1]);
+  });
+
+  it('row 11: max and min over a window: a flow\u2019s highest and lowest interval, a state\u2019s highest and lowest boundary', () => {
+    // Row 8's model. Revenue intervals 6, 7, 8: 800, 850, 900 → max 900, min 800; with 'later' (price 6 from period 7):
+    // 800, 1,020, 1,080 → max 1,080, min 800. Subscribers' boundaries 7, 8, 9: 170, 180, 190 → max 190, min 170.
+    const w = { start_period: 6, periods: 3 };
+    const r = simulate(model(9, [fixed('s0', 100), flow(fixed('inflow', 10)), stock('subs', 's0', ['inflow'], []), fixed('price', 5), fixed('price_6', 6),
+      flow(def('revenue', 'product', ['price', 'subs'])), fixed('t900', 900), fixed('t170', 170)],
+    [aggregated(goal('rmax', 'revenue', '>=', 't900', 'end', w), 'max'), aggregated(goal('rmin', 'revenue', '>=', 't900', 'end', w), 'min'),
+      aggregated(goal('smax', 'subs', '>=', 't170', 'end', w), 'max'), aggregated(goal('smin', 'subs', '>=', 't170', 'end', w), 'min')],
+    [HOLD, option('later', [{ quantity: 'price', to: 'price_6', from_period: 7 }])]), { seed: SEED, draws: 10 });
+    const hold = opt(r, 'hold'), later = opt(r, 'later');
+    expect(['rmax', 'rmin', 'smax', 'smin'].map((id) => outcomeOf(hold, id).p50)).toEqual([900, 800, 190, 170]);
+    expect(['rmax', 'rmin'].map((id) => outcomeOf(later, id).p50)).toEqual([1080, 800]);
+    expect(['rmax', 'rmin', 'smax', 'smin'].map((id) => goalOf(hold, id).chance)).toEqual([1, 0, 1, 1]);
+  });
+
+  it('row 12: a timing quantity: sampled once per draw, ceil to its period, per option, and for a risk', () => {
+    // Sales (a flow) are 10 a month; the option lifts them to 20 from the launch period L. Over months 1–6 (intervals 0..5):
+    // total = 10 L + 20 (6 − L) = 120 − 10 L. Goal: total ≥ 90 ⇔ L ≤ 3.
+    //  (a) L a figure, 3: total 90, met in every draw → exactly 1, the same as from_period 3 written as a number.
+    //  (b) L a range 2 to 6 with no most likely value: centre 4, sd 4/√12 = 1.1547 (|4| ≥ 2.309: a spread); the period is
+    //      ceil(L), so met ⇔ ceil(L) ≤ 3 ⇔ L ≤ 3: P = Φ((3 − 4)/1.1547) = Φ(−0.866) = 1 − 0.80676 = 0.19324 (row 2's table value;
+    //      Wilson half-width at 20k: 0.00547).
+    //  (c) Each option its own timing: 'early' at 2 → 100 ≥ 90 → 1; 'late' at 5 → 70 → 0.
+    //  (d) A risk timed by a quantity of 3 (certain, −5 a month) is the risk timed by the number 3: 10 × 3 + 5 × 3 = 45.
+    const sales = (timing: Quantity, options: Option[], risks: Risk[] = []) => model(6, [flow(fixed('sales', 10)), fixed('lifted', 20), timing,
+      fixed('early', 2), fixed('late', 5), fixed('t90', 90), fixed('one', 1), fixed('cut', -5)],
+    [goal('g', 'sales', '>=', 't90', 'sum', { start_period: 0, periods: 6 })], options, { risks });
+    const byNumber = simulate(sales(fixed('launch', 3), [option('launch', [{ quantity: 'sales', to: 'lifted', from_period: 3 }])]), { seed: SEED, draws: 100 });
+    const byFigure = simulate(sales(fixed('launch', 3), [option('launch', [timed('sales', 'lifted', 'launch')])]), { seed: SEED, draws: 100 });
+    expect(first(byFigure).per_goal).toEqual(first(byNumber).per_goal);
+    expect(first(byFigure).per_goal[0]).toEqual({ goal_id: 'g', chance: 1, precision_95: [1, 1] });
+    expect(outcomeOf(first(byFigure), 'g').p50).toBe(90);
+    const sampled = ch(first(simulate(sales(range('launch', 2, 6), [option('launch', [timed('sales', 'lifted', 'launch')])]), { seed: SEED, draws: N })).per_goal[0]);
+    expect(inside(0.19324, sampled.precision_95)).toBe(true);
+    expect(Math.abs(sampled.chance - 0.19324)).toBeLessThanOrEqual(0.00547);
+    const each = simulate(sales(fixed('launch', 3), [option('early', [timed('sales', 'lifted', 'early')]), option('late', [timed('sales', 'lifted', 'late')])]),
+      { seed: SEED, draws: 100 });
+    expect([goalOf(opt(each, 'early'), 'g').chance, goalOf(opt(each, 'late'), 'g').chance]).toEqual([1, 0]);
+    const risk: Risk = { id: 'r', occurrence: 'one', severity: 'cut', effect_on: 'sales', mode: 'add', from_period: 3 };
+    const riskByNumber = simulate(sales(fixed('launch', 3), [HOLD], [risk]), { seed: SEED, draws: 100 });
+    const riskByFigure = simulate(sales(fixed('launch', 3), [HOLD], [timedRisk(risk, 'launch')]), { seed: SEED, draws: 100 });
+    expect(outcomeOf(first(riskByFigure), 'g').p50).toBe(45);
+    expect(first(riskByFigure).outcomes).toEqual(first(riskByNumber).outcomes);
+  });
+
+  it('row 13: each limit\u2019s own chance and its quantity\u2019s summary (the cost)', () => {
+    // cost = specialists × salary. Fixed salary £40,000: limits cost ≤ £50,000 and cost ≤ £30,000.
+    //   hold (0): 0 ≤ both → 1, 1; add (1): 40,000 ≤ 50,000 → 1, 40,000 > 30,000 → 0; within_limits add = 0. All exact.
+    // Uncertain salary, £30,000 to £50,000 around £40,000 (sd 20,000/√12 = 5,773.5): P(cost ≤ £45,000) for add =
+    //   Φ(5,000/5,773.5) = Φ(0.866) = 0.80676 (Wilson half-width at 20k: 0.00547); its median cost is £40,000 (the sample
+    //   median's standard error 1.2533 × 5,773.5/√20000 = 51, so within 4 × 51 = 204).
+    const build = (salary: Quantity, limits: [string, string][]) => model(1, [fixed('count', 0), fixed('one', 1), salary,
+      def('cost', 'product', ['count', 'salary']), fixed('b50', 50000), fixed('b45', 45000), fixed('b30', 30000), fixed('zero', 0)],
+    [goal('g', 'count', '>=', 'zero')], [HOLD, option('add', [{ quantity: 'count', to: 'one', from_period: 0 }])],
+    { limits: limits.map(([id, bound]) => ({ id, quantity: 'cost', cmp: '<=', bound, aggregation: 'end', window: ONE })) });
+    const r = simulate(build(fixed('salary', 40000), [['l50', 'b50'], ['l30', 'b30']]), { seed: SEED, draws: 100 });
+    expect(opt(r, 'hold').per_limit).toEqual([{ limit_id: 'l50', chance: 1, precision_95: [1, 1] }, { limit_id: 'l30', chance: 1, precision_95: [1, 1] }]);
+    expect(opt(r, 'add').per_limit).toEqual([{ limit_id: 'l50', chance: 1, precision_95: [1, 1] }, { limit_id: 'l30', chance: 0, precision_95: [0, 0] }]);
+    expect(opt(r, 'add').within_limits).toEqual({ chance: 0, precision_95: [0, 0] });
+    expect(opt(r, 'add').limit_outcomes[0]).toEqual({ limit_id: 'l50', p10: 40000, p50: 40000, p90: 40000 });
+    const u = opt(simulate(build(range('salary', 30000, 50000, 40000), [['l45', 'b45']]), { seed: SEED, draws: N }), 'add');
+    expect(inside(0.80676, u.per_limit[0].precision_95)).toBe(true);
+    expect(Math.abs(u.per_limit[0].chance - 0.80676)).toBeLessThanOrEqual(0.00547);
+    expect(Math.abs(u.limit_outcomes[0].p50 - 40000)).toBeLessThanOrEqual(204);
+  });
+
+  it('row 14: a fixed-only option is exact (no Monte Carlo interval); an uncertain one or one with a risk is not', () => {
+    // Capacity: today 80 + specialists × X, X ~ 10..30 around 20. 'Keep' sets no specialist: 80 + 0 × X = 80 in every draw,
+    // so its chance of ≥ 100 is exactly 0 with precision [0, 0]. 'Add one' rests on X: about 0.5 with a Wilson interval.
+    // A risk in play (occurrence 0.0001, −1 case) is never exact, even where no draw happens to fire it.
+    const build = (risks: Risk[] = []) => model(1, [fixed('today', 80), range('each', 10, 30, 20), fixed('count', 0), fixed('one', 1),
+      effect('capacity', 'today', [{ coefficient: 'each', driver: 'count' }]), fixed('t', 100), fixed('rare', 0.0001), fixed('minus1', -1)],
+    [goal('g', 'capacity', '>=', 't')], [option('keep'), option('add', [{ quantity: 'count', to: 'one', from_period: 0 }])], { risks });
+    const r = simulate(build(), { seed: SEED, draws: N });
+    expect(opt(r, 'keep').per_goal[0]).toEqual({ goal_id: 'g', chance: 0, precision_95: [0, 0] });
+    expect(opt(r, 'keep').joint_within_limits).toEqual({ chance: 0, precision_95: [0, 0] });
+    const add = opt(r, 'add').per_goal[0];
+    expect(add.precision_95[0]).toBeLessThan(add.chance);
+    expect(add.precision_95[1]).toBeGreaterThan(add.chance);
+    const risky = opt(simulate(build([{ id: 'r', occurrence: 'rare', severity: 'minus1', effect_on: 'capacity', mode: 'add', from_period: 0 }]),
+      { seed: SEED, draws: 1000 }), 'keep').per_goal[0];
+    expect(risky.chance).toBe(0);
+    expect(risky.precision_95[1]).toBeGreaterThan(0);
+  });
+
+  it('row 15: drivers exclude option switches, even uncertain ones; an uncertain input stays a driver', () => {
+    // c = a + spend; spend has a range (4 to 10 around 7: sd 1.732, |7| ≥ 3.46, so drawn) but options set it: a switch, never
+    // an uncertainty to rank. a (10 to 30) is the only driver, for every option.
+    const r = simulate(model(2, [range('a', 10, 30), range('spend', 4, 10, 7), fixed('s9', 9), flow(def('c', 'sum', ['a', 'spend'])), fixed('t25', 25)],
+      [goal('g', 'c', '>=', 't25', 'end', { start_period: 0, periods: 2 })],
+      [HOLD, option('high', [{ quantity: 'spend', to: 's9', from_period: 1 }])]), { seed: SEED, draws: 3000 });
+    for (const id of ['hold', 'high']) expect(opt(r, id).drivers.map((x: Rec) => x.quantity)).toEqual(['a']);
+  });
+
+  it('row 16: every withheld chance is listed once in SimResult.withheld', () => {
+    // Row 10's ratio: the goal on q, the joint and joint_within_limits are withheld for 'hold'; nothing else is.
+    const m = model(1, [fixed('a', 10), flow(fixed('denominator', 10)), fixed('occ', 0.5), fixed('sev', -10), fixed('zero', 0),
+      flow(def('q', 'ratio', ['a', 'denominator']))], [goal('gq', 'q', '>=', 'zero'), goal('ga', 'a', '>=', 'zero')], [HOLD],
+    { risks: [{ id: 'cut', occurrence: 'occ', severity: 'sev', effect_on: 'denominator', mode: 'add', from_period: 0 }] });
+    const r = simulate(m, { seed: SEED, draws: 2000 });
+    const count = goalOf(first(r), 'gq').withheld.count;
+    expect(r.withheld).toEqual([
+      { option_id: 'hold', scope: 'goal', id: 'gq', reason: 'invalid_domain', count, quantities: ['q'] },
+      { option_id: 'hold', scope: 'joint', reason: 'invalid_domain', count, quantities: ['q'] },
+      { option_id: 'hold', scope: 'joint_within_limits', reason: 'invalid_domain', count, quantities: ['q'] },
+    ]);
+    expect(simulate(model(1, [fixed('x', 1)], [goal('g', 'x', '>=', 'x')]), { seed: 1, draws: 10 }).withheld).toEqual([]);
   });
 
   it('row 10: a nonfinite draw is outside the domain: the chance it touches is withheld, typed, with its count — never a failure', () => {
