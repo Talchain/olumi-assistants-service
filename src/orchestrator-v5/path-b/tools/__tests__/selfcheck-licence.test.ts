@@ -69,7 +69,8 @@ describe('C1b: run_ready is the Run\'s own licence dry run (DL 93d79c3e)', () =>
       failures: [{ precondition: 'P5', code: 'goal_path_unsized', links: [{ from: 'f', to: 'g' }] }] });
     const { out, p } = await draft(unsized);
     expect(out, JSON.stringify(out)).toMatchObject({ status: 'ok', data: { run_ready: false, note: STILL_ASK } });
-    expect(out.data.blockers).toEqual([{ code: 'goal_path_unsized', items: ['f_g'], fix: expect.stringContaining('per one unit of what it comes from') }]);
+    expect(out.data.blockers).toEqual([{ code: 'goal_path_unsized', items: ['f_g'],
+      fix: 'Size Olumi\'s link f_g in the own unit of g (units) per one unit of f (none yet: state it): the figure is how much g moves when f rises by 1.' }]);
     expect(p.registered).toHaveLength(1);
     // CONTRAST: the same link once f has its unit is sized: Run-ready, nothing said.
     const sized = await draft(withLink({}, 'olumi'));
@@ -82,7 +83,38 @@ describe('C1b: run_ready is the Run\'s own licence dry run (DL 93d79c3e)', () =>
       + 'for the link from f to Reach 100 units. Roughly how much Reach 100 units in units does a change in f bring?';
     expect(check(withLink({ form: 'direction_only', value: null, sd: null }))).toEqual([{ code: 'goal_path_placeholder', items: ['f_g'], ask: true, question }]);
     expect(check(withLink({ form: 'direction_only', value: null, sd: null }, 'olumi'))).toEqual([{ code: 'goal_path_placeholder', items: ['f_g'],
-      fix: expect.stringContaining('Size Olumi\'s link in the goal\'s own unit') }]);
+      fix: 'Size Olumi\'s link f_g in the own unit of g (units) per one unit of f (level): the figure is how much g moves when f rises by 1.' }]);
+  });
+
+  it('Codex R1 on #3699 (2): each failing link is asked about itself only: f→g holds the person\'s 50 (said); the unsized h→g is asked about h→g', () => {
+    const h = { ...KNOWN_ANSWER.factors[0]!, id: 'h', label: 'h', unit: 'staff', value: 2, quote: 'h is at 2' };
+    const m = structuredClone(KNOWN_ANSWER);
+    m.factors.push(h);
+    m.options[1]!.settings.push({ ...m.options[1]!.settings[0]!, factor_id: 'h', value: 3, quote: 'push h to 3' });
+    m.links = [{ ...KNOWN_ANSWER.links[0]!, effect: { ...KNOWN_ANSWER.links[0]!.effect, form: 'unknown', sd: null } },
+      { ...KNOWN_ANSWER.links[0]!, id: 'h_g', from: 'h', quote: 'h raises units', effect: { ...KNOWN_ANSWER.links[0]!.effect, form: 'direction_only', value: null, sd: null } }];
+    expect(check(m)).toEqual([{ code: 'goal_path_placeholder', items: ['f_g'], said: true }, { code: 'goal_path_placeholder', items: ['h_g'], ask: true,
+      question: 'Olumi can compare your options, but can\'t yet test them against your target (at least 100 units), because it needs a size for the '
+        + 'link from h to Reach 100 units. Roughly how much Reach 100 units in units does a change in h bring?' }]);
+  });
+
+  it('Codex R1 on #3699 (3): an upstream link\'s size fix is in ITS target\'s unit per unit of its source (f→h in h\'s unit), never the goal\'s', () => {
+    const m = structuredClone(KNOWN);
+    m.factors.push({ ...KNOWN.factors[0]!, id: 'h', label: 'h', unit: 'staff', value: 2, quote: 'h is at 2' });
+    m.links = [{ id: 'f_h', from: 'f', to: 'h', ...olumi, effect: { estimate_by: 'olumi', form: 'range', value: 2, sd: null, low: 1, high: 3, unit: 'staff', sign: '+' } },
+      { ...KNOWN.links[0]!, id: 'h_g', from: 'h' }];
+    expect(check(m)).toEqual([{ code: 'goal_path_unsized', items: ['f_h'],
+      fix: 'Size Olumi\'s link f_h in the own unit of h (staff) per one unit of f (none yet: state it): the figure is how much h moves when f rises by 1.' }]);
+  });
+
+  it('Codex R1 on #3699 (4): Olumi\'s placeholder on an option\'s own link to the goal (lowered onto push__on) makes run_ready false', async () => {
+    const m = structuredClone(KNOWN_ANSWER);
+    m.links.push({ id: 'push_g', from: 'push', to: 'g', ...olumi, effect: { ...KNOWN_ANSWER.links[0]!.effect, form: 'direction_only', value: null, sd: null } });
+    expect(mapLivingModel(m).graph.edges).toContainEqual(expect.objectContaining({ id: 'push_g', from: 'push__on', to: 'g' }));
+    const { out } = await draft(m);
+    expect(out, JSON.stringify(out)).toMatchObject({ status: 'ok', data: { run_ready: false } });
+    expect(out.data.blockers).toEqual([{ code: 'goal_path_placeholder', items: ['push_g'], fix: 'Size Olumi\'s link push_g in the own unit of g (units) '
+      + 'per one unit of push (on or off: 1 once it is in place): the figure is how much g moves when push rises by 1.' }]);
   });
 
   it('a path failure on an identity\'s own edge is the engine\'s to judge, never said by the dry run (the P5 checks that need the engine are left out)', () => {
@@ -122,10 +154,19 @@ describe('C1b: every aim reading that withholds the goal\'s chance is a fix or a
     expect(check(model).find((b) => b.code === code)).toEqual({ code, items: ['g'], ask: true, question });
   });
 
-  it('stay_within_base_not_theirs is an ask (no composer has words for it, so none is invented); aim_not_in_slice stays out of the loop', () => {
-    const stay = withAim({ comparator: '<=', value: 100, current: 70 });
-    stay.aims[0] = { ...stay.aims[0]!, ...olumi };
-    expect(check(stay)).toEqual([{ code: 'stay_within_base_not_theirs', items: ['g'], ask: true }]);
+  it('Codex R1 on #3699 (1): ownership selects the route: on Olumi\'s aim each reading is a fix; on the person\'s, an ask with no composer words is said', () => {
+    const level = 'Give Olumi\'s target a level that today\'s level does not already meet, in the unit and scale of today\'s level. A change is in '
+      + 'the quantity\'s own unit, never a percentage of a level of 0 or below.';
+    const ofOlumi = (t: Parameters<typeof withAim>[0]) => withAim(t, 'olumi');
+    expect(check(ofOlumi({ comparator: '<=', value: 100, current: 70 }))).toEqual([{ code: 'stay_within_base_not_theirs', items: ['g'], fix: level }]);
+    expect(check(ofOlumi({ current: -20 }))).toEqual([{ code: 'goal_level_not_admitted', items: ['g'], fix: level }]);
+    expect(check(ofOlumi({ source: 'olumi' })).find((b) => b.code === 'target_not_theirs')).toEqual({ code: 'target_not_theirs', items: ['g'],
+      fix: 'Olumi\'s suggested measure carries no figure of its own: set its figures null. The figure that would count as meeting the goal is the person\'s to give.' });
+    // The person's: today's level off the target's scale has no composer words, so it is said, never a wordless ask.
+    expect(check(withAim({ current: -20 }))).toEqual([{ code: 'goal_level_not_admitted', items: ['g'], said: true }]);
+  });
+
+  it('aim_not_in_slice stays out of the loop', () => {
     // Since B2a a second FIGURED aim is a target of its own; one with no figure stays out of the slice.
     const two = structuredClone(KNOWN_ANSWER);
     two.aims.push({ ...two.aims[0]!, id: 'g2', text: 'Another aim', target: { ...two.aims[0]!.target!, value: null } });

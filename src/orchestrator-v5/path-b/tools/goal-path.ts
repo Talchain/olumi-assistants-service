@@ -15,6 +15,7 @@ import { composeIdentityAskForNode } from '../../coaching/identity-not-evaluated
 import { notTargetTestableSentence, targetTestabilityOf } from '../../admission/target-testability.js';
 import { goalTargetGapOf } from '../../goal-target/goal-target-gap.js';
 import { aimTargetReading } from '../living-model/aim-reading.js';
+import { nodeUnitOf } from '../../../orchestrator/context/placeholder-parts.js';
 
 /**
  * The turn's repairs, shared by the draft and the change; the core route makes it per turn and `pathBTools` uses it.
@@ -103,8 +104,12 @@ const FIX = {
   law: 'Give Olumi\'s link a direction, ends that are in the model, and a figure or range a law can be drawn from.',
   option: 'Give Olumi\'s option a setting on a factor, or a sized link of Olumi\'s from it.',
   target: 'Give Olumi\'s target one figure a Run can test: at least or at most it, never exactly equal and never a range.',
-  size: 'Size Olumi\'s link in the goal\'s own unit per one unit of what it comes from: both ends have their units, and the figure is '
-    + 'how much the goal\'s measure moves when the source rises by 1.',
+  measure: 'Olumi\'s suggested measure carries no figure of its own: set its figures null. The figure that would count as meeting the '
+    + 'goal is the person\'s to give.',
+  level: 'Give Olumi\'s target a level that today\'s level does not already meet, in the unit and scale of today\'s level. A change is in '
+    + 'the quantity\'s own unit, never a percentage of a level of 0 or below.',
+  size: 'Size Olumi\'s link in the own unit of the item it links into, per one unit of what it comes from: both ends have their units, '
+    + 'and the figure is how much that item moves when the source rises by 1.',
 } as const;
 /** Each blocker's fix, or `ask` for the person's input. An unlisted code is said, never repaired. */
 const BLOCKER: Readonly<Record<string, keyof typeof FIX | 'ask'>> = {
@@ -116,9 +121,10 @@ const BLOCKER: Readonly<Record<string, keyof typeof FIX | 'ask'>> = {
   // The Run's own verdict on the target (`targetTestabilityOf`); a path's unsized link of Olumi's is Olumi's to size (DL 93d79c3e).
   missing_goal_baseline: 'ask', threshold_off_scale: 'ask', comparator_unscorable: 'target', threshold_unit_mismatch: 'unit',
   goal_path_placeholder: 'size', goal_path_unsized: 'size',
-  // Every aim reading that withholds the goal's chance reaches the loop: Olumi's is fixed, the person's asked (DL 93d79c3e, 00:48Z).
-  exact_target_not_in_slice: 'target', target_range_not_in_slice: 'target', target_not_theirs: 'ask', change_base_invalid: 'ask',
-  goal_level_not_admitted: 'ask', stay_within_base_not_theirs: 'ask',
+  // Every aim reading that withholds the goal's chance reaches the loop: Olumi's is fixed, the person's asked (DL 93d79c3e, 00:48Z),
+  // ownership choosing which (Codex R1 on #3699).
+  exact_target_not_in_slice: 'target', target_range_not_in_slice: 'target', target_not_theirs: 'measure', change_base_invalid: 'level',
+  goal_level_not_admitted: 'level', stay_within_base_not_theirs: 'level',
   goal_level_unknown: 'ask', link_goal_level_unknown: 'ask', no_level_target: 'ask', link_goal_target_unknown: 'ask', change_kind_unknown: 'ask',
   change_base_not_theirs: 'ask', stay_within_unconfirmed: 'ask', MISSING_FACTOR_LEVEL: 'ask', identity_part_unknown: 'ask', FEWER_THAN_TWO_OPTIONS: 'ask',
   // The identity ask composer's own reasons (`composeIdentityAskForNode`): each is the person's to answer.
@@ -151,7 +157,12 @@ function theirsIn(model: LivingModelT, item: string | null): boolean {
 }
 
 /** A blocker found, on one item; a condition's scope is part of it, since two conditions can share their words (Codex r1 on #3672). */
-export type Found = { readonly code: string; readonly item: string | null; readonly scope?: string; readonly question?: string };
+export type Found = { readonly code: string; readonly item: string | null; readonly scope?: string; readonly question?: string;
+  /** This item's own fix words, where they name its ends (a link's size); else its kind's. */
+  readonly fix?: string };
+/** The aim readings whose ask is the held-target composer's question or none: one with no words for it is said (Codex R1 on #3699). */
+const WORDED = new Set(['exact_target_not_in_slice', 'target_range_not_in_slice', 'target_not_theirs', 'change_base_invalid',
+  'goal_level_not_admitted', 'stay_within_base_not_theirs']);
 /**
  * ⛔ NEVER ASK FOR A FIGURE THE ITEM ALREADY HOLDS (DL 93d79c3e, C1): a factor's level (a bare range too, until the mapper carries
  * it; B1), a link's size, or the aim's level today. An ask for it is said instead, so the log still shows the gap.
@@ -164,19 +175,36 @@ const holdsAsked = (model: LivingModelT, code: string, item: string | null): boo
 /** Each found blocker's fix or ask, one per code and kind. */
 function said(model: LivingModelT, found: readonly Found[]): Blocker[] {
   const out = new Map<string, { code: string; items: string[]; fix?: string; ask?: true; said?: true; question?: string }>();
-  for (const { code, item, question } of found) {
+  for (const { code, item, question, fix } of found) {
     const kind = BLOCKER[code];
     // ⛔ A repair never alters or removes the person's own content (DL 22 Oct): a fix on it is an ask. Adding Olumi's links (`path`)
     // alters nothing of theirs.
     const ask = kind !== undefined && (kind === 'ask' || (kind !== 'path' && theirsIn(model, item)));
-    const how = kind === undefined || (ask && holdsAsked(model, code, item)) ? { said: true as const } : ask ? { ask: true as const } : { fix: FIX[kind] };
-    // An ask with its own question is that item's, so no item's question is lost to another's (Codex r2 on #3691).
-    const key = `${code}\u0000${Object.keys(how)[0]}${'ask' in how && question !== undefined ? `\u0000${item}` : ''}`;
+    const unasked = ask && (holdsAsked(model, code, item) || (WORDED.has(code) && question === undefined));
+    const how = kind === undefined || unasked ? { said: true as const } : ask ? { ask: true as const } : { fix: fix ?? FIX[kind] };
+    // An ask with its own question, or a fix with its own words, is that item's, so none is lost to another's (Codex r2 on #3691).
+    const own = ('ask' in how && question !== undefined) || ('fix' in how && fix !== undefined);
+    const key = `${code}\u0000${Object.keys(how)[0]}${own ? `\u0000${item}` : ''}`;
     const b = out.get(key) ?? out.set(key, { code, items: [], ...how }).get(key)!;
     if (item !== null && !b.items.includes(item)) b.items.push(item);
     if ('ask' in how && b.question === undefined && question !== undefined) b.question = question;
   }
   return [...out.values()];
+}
+
+/**
+ * Olumi's link's size fix in ITS OWN ends' units (Codex R1 on #3699): the item it links into, per one unit of what it comes from.
+ * The goal's unit only when it links into the goal (the unit the Run reads it in); an option is on or off.
+ */
+function sizeFix(model: LivingModelT, mapped: Mapped, x: LivingModelT['links'][number]): string {
+  const goal = mapped.graph.nodes.find((n) => n.kind === 'goal' && n.id === x.to);
+  const unitOf = nodeUnitOf(mapped.graph.nodes);
+  const to = goal !== undefined ? [goal.goal_threshold_unit, (goal.observed_state as Rec | undefined)?.unit].find((u): u is string => typeof u === 'string' && u !== '')
+    : unitOf(x.to);
+  const from = model.options.some((o) => o.id === x.from) ? 'on or off: 1 once it is in place' : unitOf(x.from);
+  const none = 'none yet: state it';
+  return `Size Olumi's link ${x.id} in the own unit of ${x.to} (${to ?? none}) per one unit of ${x.from} (${from ?? none}): the figure is how much `
+    + `${x.to} moves when ${x.from} rises by 1.`;
 }
 
 /**
@@ -214,11 +242,20 @@ export function selfCheck(model: LivingModelT, mapped: Mapped): Found[] {
   // product). A failure a cause above already holds is said by that cause.
   const verdict = targetTestabilityOf(postimage);
   const untestable = verdict.kind === 'not_testable' ? verdict.failures.filter((f) => f.code !== 'identity_unconfirmed') : [];
-  const targetQuestion = untestable.length > 0 ? notTargetTestableSentence(postimage, verdict) : null;
-  const asked = targetQuestion === null ? {} : { question: targetQuestion };
-  const target = untestable.flatMap((f): Found[] => (f.precondition !== 'P5' ? [{ code: f.code, item: goal === undefined ? null : String(goal), ...asked }]
-    : (f.links ?? []).flatMap((l) => model.links.filter((x) => x.from === l.from && x.to === l.to)
-      .map((x) => ({ code: f.code, item: x.id, ...asked })))))
+  // Each failure, and each failing link, gets the Run's sentence for that ONE item, never the first failing link's (Codex R1 on #3699).
+  const sentence = (f: (typeof untestable)[number]): { question?: string } => {
+    const q = verdict.kind === 'not_testable' ? notTargetTestableSentence(postimage, { ...verdict, failures: [f] }) : null;
+    return q === null ? {} : { question: q };
+  };
+  const nodes = mapped.graph.nodes;
+  const labelOf = (id: string): string => { const n = nodes.find((x) => x.id === id); return typeof n?.label === 'string' && n.label.trim() !== '' ? n.label.trim() : id; };
+  const target = untestable.flatMap((f): Found[] => (f.precondition !== 'P5' ? [{ code: f.code, item: goal === undefined ? null : String(goal), ...sentence(f) }]
+    : (f.links ?? []).flatMap((l) => {
+      // The mapped edge carries the model link's id, also where an option's own link runs from its switch (`<option>__on`, mapper).
+      const ids = new Set(mapped.graph.edges.filter((e) => e.from === l.from && e.to === l.to).map((e) => e.id));
+      const one = { ...f, links: [l], lever: labelOf(l.from), link_to: labelOf(l.to), link: { from: l.from, to: l.to } };
+      return model.links.filter((x) => ids.has(x.id)).map((x) => ({ code: f.code, item: x.id, ...sentence(one), fix: sizeFix(model, mapped, x) }));
+    })))
     .filter((t) => !causes.some((w) => w.id === t.item));
   // An aim reading the goal is held on asks in the ONE held-target composer's words (`goalTargetGapOf`, the canvas gap's), only
   // for the reading those words are about: never its "no target" words for a goal that has one.
