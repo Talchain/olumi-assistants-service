@@ -22,7 +22,7 @@ import { TODAY_PREFIX } from '../../orchestrator-v5/agent-lane/turn-context.js';
 import { corePromptCacheKey, STATE_BLOCK_PREFIX } from '../../orchestrator-v5/agent-lane/core/sdk-turn.js';
 import { CORE_ALIGNED_INSTRUCTIONS, instructionsForMode } from '../../orchestrator-v5/core-route/instructions.js';
 import { ASK_CHALLENGE_CHIP_ID } from '../../orchestrator-v5/core-route/turn-request.js';
-import { CORE_DRAFTER_RULES } from '../../orchestrator-v5/path-b/drafting-guidance.js';
+import { bakery, BRIEF as BAKERY_BRIEF } from '../../orchestrator-v5/model-program-turn/__tests__/bakery.fixture.js';
 import type { LivingModelT } from '../../schemas/living-model.js';
 import { GOAL_CHANCE_LICENSED, PERIOD_END_EFFECTS_UNSTATED } from '../../orchestrator-v5/goal-target/goal-chance-licence.js';
 import { GOAL_FIGURES_TARGET_NOT_TESTABLE } from '../../orchestrator/context/option-result-source.js';
@@ -148,12 +148,16 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
   let app: FastifyInstance;
   let calls: Json[] = [];
   let outputs: Json[][] = [];
+  /** The canonical drafter's answer for a first turn (a scenario with no saved model). */
+  let canonicalDraft: string | undefined;
   let runWithStageStream: typeof import('../../cee/unified-pipeline/stage-stream-context.js').runWithStageStream;
   let currentTurnFence: typeof import('../../orchestrator-v5/session/turn-fence.js').currentTurnFence;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(streamWhenAsked(async (url: unknown, init?: { body?: unknown }) => {
       if (String(url).endsWith('/v1/conversations')) return json({ id: `conv_${randomUUID()}`, object: 'conversation' });
       const body = JSON.parse(String(init?.body ?? '{}')) as Json;
+      // The canonical drafter's strict call answers with the row's canned canonical model (none: no draft).
+      if (body.text?.format?.name === 'canonical_model') { calls.push(body); return json(responsesBody(canonicalDraft === undefined ? [] : [{ type: 'message', text: canonicalDraft }])); }
       // A structured side call (the model critic) answers nothing, and never takes the conversation's scripted outputs.
       if (body.text?.format?.type === 'json_schema') return json(responsesBody([]));
       calls.push(body);
@@ -234,7 +238,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   beforeEach(() => {
-    SCENARIO = randomUUID(); persisted = postimage(KNOWN_ANSWER); registered.length = 0; fenceRows.clear(); canvasForwards.length = 0; turnRows.clear(); conversationIds.clear();
+    SCENARIO = randomUUID(); persisted = postimage(KNOWN_ANSWER); canonicalDraft = undefined; registered.length = 0; fenceRows.clear(); canvasForwards.length = 0; turnRows.clear(); conversationIds.clear();
     readiness = { status: 'blocked', may_run: false, options: [], blockers: [] }; runState = undefined; carriedResult = undefined; otherRun = undefined; runs = 0; timingRun = false; runTimings.length = 0;
     pausedRun = null; calls = []; outputs = []; preparedId = ''; holdProvider = undefined; holdWhen = undefined;
   });
@@ -721,42 +725,25 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(calls, 'a canvas edit calls no model').toHaveLength(1);
   });
 
-  it('a draft saved, then the reply refused: the contract says the save is kept, the outcome is recorded, and a resend replays it', async () => {
+  it('⭐ the first draft (the canonical drafter): the streamed GRAPH_READY frame and the COMPLETE contract carry the same ids', async () => {
     persisted = null;
-    outputs = [[{ type: 'function_call', name: 'build_model_from_brief', call_id: 'draft', args: { brief: BRIEF, model: KNOWN_ANSWER } }], [{ type: 'refuse' }]];
-    const turnId = randomUUID();
-    const r = await typed(BRIEF, turnId);
-    expect(r.statusCode, r.body).toBe(502);
-    const j = r.json() as Json;
-    expect(registered).toHaveLength(1);
-    expect(j).toMatchObject({ durability: 'recorded', assistant_text: '', error: {
-      message: 'The saved change is kept, but the reply didn’t arrive. Send a new message to continue.', retry_safe: false, nothing_saved: false } });
-    const callsBefore = calls.length;
-    const again = (await typed(BRIEF, turnId)).json() as Json;
-    expect(again).toMatchObject({ durability: 'replayed', assistant_text: '', error: { code: 'REPLY_NOT_DELIVERED', nothing_saved: false } });
-    expect(calls.length, 'a replay calls no model').toBe(callsBefore);
-    expect(registered).toHaveLength(1);
-  });
-
-  it('⭐ the first draft: the streamed GRAPH_READY frame and the COMPLETE contract carry the same ids', async () => {
-    persisted = null;
-    outputs = [[{ type: 'function_call', name: 'build_model_from_brief', call_id: 'draft', args: { brief: BRIEF, model: KNOWN_ANSWER } }],
-      [{ type: 'message', text: 'Here is the first model I built.' }]];
+    canonicalDraft = JSON.stringify(bakery());
     const frames: Json[] = [];
     const r = await runWithStageStream((event) => { frames.push(event as Json); },
       // Awaited INSIDE the stage context, as the SSE wrapper does (`streamed-turn-sse.ts`): light-my-request dispatches on await.
-      async () => await app.inject({ method: 'POST', url: '/agent/v1/core-turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), message: BRIEF, source: 'composer' } }));
+      async () => await app.inject({ method: 'POST', url: '/agent/v1/core-turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), message: BAKERY_BRIEF, source: 'composer' } }));
     expect(r.statusCode, r.body).toBe(200);
     const j = r.json() as Json;
     expect(registered).toHaveLength(1);
+    expect(calls.map((c) => c.text?.format?.name ?? null), 'one canonical drafting call, and no agent call').toEqual(['canonical_model']);
     const ready = frames.filter((f) => f.kind === 'GRAPH_READY');
     expect(ready, JSON.stringify(frames.map((f) => f.kind))).toHaveLength(1);
     expect(ids(ready[0]!.graph)).toEqual(ids(j.model.graph));
     expect(ids(j.model.graph).length).toBeGreaterThan(0);
     expect(j.receipts).toEqual([expect.objectContaining({ version_id: 'v_1', authorised_by: 'olumi' })]);
     expect(j.model.scenario_revision).toBe((await freshRead()).content_hash);
+    expect((registered[0]!.graph as Json).living_model.model_program).toBe('v1');
   });
-
   it('DL 22 Oct (marketing on 7ee0d90f): a change that would cut the goal\u2019s path is said back; the AI\u2019s re-linked retry is the card', async () => {
     // f's unit stated, as every factor has one: Olumi's re-link from it can be sized per unit (the Run's own target verdict, C1).
     const united: LivingModelT = { ...structuredClone(KNOWN_ANSWER), factors: KNOWN_ANSWER.factors.map((f) => ({ ...f, unit: 'level' })) };
@@ -781,74 +768,42 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(registered, 'a card writes nothing').toHaveLength(0);
   });
 
-  it('DL (#3672 fix-forward): the AI stops after the not_run_ready refusal; the turn\u2019s end saves its draft as base, with its receipt', async () => {
-    persisted = null;
-    const model = { ...structuredClone(KNOWN_ANSWER), conditions: [{ text: 'only once the board signs off', applies_to: ['f_g'], role: 'prerequisite' as const,
-      source: 'olumi' as const, party: null, quote: null }] };
-    outputs = [[{ type: 'function_call', name: 'build_model_from_brief', call_id: 'draft', args: { brief: BRIEF, model } }],
-      [{ type: 'message', text: 'I will look at that condition again.' }]];
-    const r = await app.inject({ method: 'POST', url: '/agent/v1/core-turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), message: BRIEF, source: 'composer' } });
-    expect(r.statusCode, r.body).toBe(200);
-    const j = r.json() as Json;
-    expect(j._agent.tool_calls.map((c: Json) => [c.name, c.outcome])).toEqual([['build_model_from_brief', 'refused'], ['build_model_from_brief', 'ok']]);
-    expect(registered).toHaveLength(1);
-    expect((registered[0]!.graph as Json).living_model.conditions).toEqual(model.conditions);
-    expect(j.receipts).toEqual([expect.objectContaining({ version_id: 'v_1', authorised_by: 'olumi' })]);
-  });
-
   it('⭐ STEP 0 (arch plan, DL 23 Oct): ONE summary log line per turn, keyed by scenario and turn, by id and code only', async () => {
-    persisted = null;
-    // The route's own logger instance (after resetModules).
     const info = vi.spyOn((await import('../../utils/telemetry.js')).log, 'info');
-    const model = { ...structuredClone(KNOWN_ANSWER), conditions: [{ text: 'only once the board signs off', applies_to: ['f_g'], role: 'prerequisite' as const,
-      source: 'olumi' as const, party: null, quote: null }] };
-    // The person's option, quoted in words nobody said: the kernel relabels it (an authorship decision).
-    model.options[0] = { ...model.options[0]!, quote: 'or we wait a year' };
-    outputs = [[{ type: 'function_call', name: 'build_model_from_brief', call_id: 'draft', args: { brief: BRIEF, model } }],
-      [{ type: 'message', text: 'I will look at that condition again.' }]];
+    outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop', args: CHANGE }], [{ type: 'message', text: 'Press its card to look at that condition again.' }]];
     const turnId = randomUUID();
-    const r = await app.inject({ method: 'POST', url: '/agent/v1/core-turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: turnId, message: BRIEF, source: 'composer' } });
+    const r = await typed(SAID, turnId);
     expect(r.statusCode, r.body).toBe(200);
     const summaries = () => info.mock.calls.flatMap(([o]) => ((o as Json)?.event === 'core_turn.summary' ? [o as Json] : []));
     const lines = summaries();
     expect(lines).toHaveLength(1);
     // A resend of the same turn replays it: no AI call, so no second line (Codex r1 on #3691: one per turn that reached the AI).
-    expect((await app.inject({ method: 'POST', url: '/agent/v1/core-turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: turnId, message: BRIEF, source: 'composer' } })).statusCode).toBe(200);
+    expect((await typed(SAID, turnId)).statusCode).toBe(200);
     expect(summaries()).toHaveLength(1);
     info.mockRestore();
     const line = lines[0]!;
     expect(line).toMatchObject({ scenario_id: SCENARIO, turn_id: turnId, stopped_reason: 'answered' });
     expect(line.provider_calls.length).toBeGreaterThan(0);
     for (const c of line.provider_calls) expect(c).toMatchObject({ model: 'gpt-scripted', input_tokens: 10, output_tokens: 5, ms: expect.any(Number) });
-    expect(line.tool_calls.map((c: Json) => [c.name, c.outcome, c.refusal ?? null, c.run_ready ?? null]))
-      .toEqual([['build_model_from_brief', 'refused', 'not_run_ready', null], ['build_model_from_brief', 'ok', null, false]]);
-    expect(line.tool_calls[0].blockers).toEqual(line.tool_calls[1].blockers);
-    expect(line.tool_calls[0].blockers).toContainEqual(expect.objectContaining({ items: ['condition'] }));
-    expect(line.tool_calls[1].relabelled).toEqual([{ id: 'hold', was: 'user' }]);
-    // Ids and codes only: no brief, condition, quote or reply words.
+    expect(line.tool_calls.map((c: Json) => [c.name, c.outcome])).toEqual([['propose_change', 'ok']]);
+    // Ids and codes only: no said words or reply words.
     const text = JSON.stringify(line);
-    for (const words of ['board signs off', 'wait a year', 'look at that condition', 'units']) expect(text).not.toContain(words);
+    for (const words of [SAID, 'look at that condition']) expect(text).not.toContain(words);
   });
-
   it('Codex r1 on #3691: a failed turn writes its ONE summary line, with the calls made before it failed and no error words', async () => {
-    persisted = null;
     const info = vi.spyOn((await import('../../utils/telemetry.js')).log, 'info');
-    const model = { ...structuredClone(KNOWN_ANSWER), conditions: [{ text: 'only once the board signs off', applies_to: ['f_g'], role: 'prerequisite' as const,
-      source: 'olumi' as const, party: null, quote: null }] };
-    outputs = [[{ type: 'function_call', name: 'build_model_from_brief', call_id: 'draft', args: { brief: BRIEF, model } }], [{ type: 'refuse' }]];
+    outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop', args: CHANGE }], [{ type: 'refuse' }]];
     const turnId = randomUUID();
-    const r = await app.inject({ method: 'POST', url: '/agent/v1/core-turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: turnId, message: BRIEF, source: 'composer' } });
+    const r = await typed(SAID, turnId);
     const lines = info.mock.calls.flatMap(([o]) => ((o as Json)?.event === 'core_turn.summary' ? [o as Json] : []));
     info.mockRestore();
     expect(r.statusCode).not.toBe(200);
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatchObject({ scenario_id: SCENARIO, turn_id: turnId, failed: 'turn_failed' });
     expect(lines[0]!.provider_calls.length).toBeGreaterThan(0);
-    expect(lines[0]!.tool_calls.map((c: Json) => [c.name, c.outcome, c.refusal ?? null]))
-      .toEqual([['build_model_from_brief', 'refused', 'not_run_ready'], ['build_model_from_brief', 'ok', null]]);
+    expect(lines[0]!.tool_calls.map((c: Json) => [c.name, c.outcome])).toEqual([['propose_change', 'ok']]);
     expect(lines[0]).not.toHaveProperty('err');
   });
-
   it('Codex r2 on #3691: a withheld tool\'s refusal the SDK records itself is in a failed turn\'s line; a turn that reached no AI writes none', async () => {
     const telemetry = (await import('../../utils/telemetry.js')).log;
     const info = vi.spyOn(telemetry, 'info');
@@ -864,45 +819,6 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(unread.statusCode).toBe(503);
     expect(summaries()).toHaveLength(1);
     info.mockRestore();
-  });
-
-  it('Codex r1 on #3675: a provider error after the refusal still leaves the draft saved, as base would; the error is the one reported', async () => {
-    persisted = null;
-    const model = { ...structuredClone(KNOWN_ANSWER), conditions: [{ text: 'only once the board signs off', applies_to: ['f_g'], role: 'prerequisite' as const,
-      source: 'olumi' as const, party: null, quote: null }] };
-    outputs = [[{ type: 'function_call', name: 'build_model_from_brief', call_id: 'draft', args: { brief: BRIEF, model } }], [{ type: 'refuse' }]];
-    const r = await app.inject({ method: 'POST', url: '/agent/v1/core-turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), message: BRIEF, source: 'composer' } });
-    expect(registered).toHaveLength(1);
-    expect((registered[0]!.graph as Json).living_model.conditions).toEqual(model.conditions);
-    expect(r.statusCode).not.toBe(200);
-    expect((r.json() as Json).error ?? r.json()).toMatchObject({ nothing_saved: false });
-  });
-
-  it('⭐ ESTIMATES (DL ruling 22 Oct): a first draft keeps Olumi\'s factor and Olumi\'s estimate on the person\'s figure-less factor, each with its range; the person\'s source stays theirs; the target stays unset', async () => {
-    persisted = null;
-    const brief = 'we need more units; today we are at 70. f matters. push f to 1, or we hold. each +1 in f adds 50 units on average, with a standard deviation of 10. Sam disagrees';
-    const model = structuredClone(KNOWN_ANSWER);
-    model.aims[0] = { ...model.aims[0]!, quote: 'we need more units; today we are at 70', target: { ...model.aims[0]!.target!, value: null } };
-    // The person named f and gave no level: Olumi's starting estimate, with its range, on THEIR factor.
-    model.factors[0] = { ...model.factors[0]!, quote: 'f matters', value: 0.5, low: 0.3, high: 0.7, estimate_by: 'olumi' };
-    // Olumi's own factor, complete: a central figure with a range, in a stated unit, and a sized link to the aim.
-    model.factors.push({ estimate_by: null, kind: 'factor', limit: null, id: 'h', label: 'Hours of rework', value: 6, low: 3, high: 10, unit: 'hours',
-      defined_as: null, source: 'olumi', party: null, quote: null });
-    model.links.push({ id: 'h_g', from: 'h', to: 'g', source: 'olumi', party: null, quote: null,
-      effect: { estimate_by: null, form: 'range', value: -2, sd: null, low: -4, high: -1, unit: 'units', sign: '-' } });
-    outputs = [[{ type: 'function_call', name: 'build_model_from_brief', call_id: 'draft', args: { brief, model } }],
-      [{ type: 'message', text: "Here is a first model; the figures marked as Olumi's are starting estimates for you to correct." }]];
-    const r = await post({ turn_id: randomUUID(), message: brief, source: 'composer' });
-    expect(r.statusCode, r.body).toBe(200);
-    const j = r.json() as Json;
-    expect(j.receipts, JSON.stringify(j._agent)).toEqual([expect.objectContaining({ authorised_by: 'olumi' })]);
-    // The write itself: the graph the register call saved.
-    const saved = (registered[0]!.graph as Json).living_model as LivingModelT;
-    expect(saved.factors.find((f) => f.id === 'f'), 'the person\'s factor: theirs, with Olumi\'s labelled estimate').toMatchObject(
-      { source: 'user', quote: 'f matters', estimate_by: 'olumi', value: 0.5, low: 0.3, high: 0.7 });
-    expect(saved.factors.find((f) => f.id === 'h'), 'Olumi\'s own factor, complete').toMatchObject(
-      { source: 'olumi', quote: null, value: 6, low: 3, high: 10, unit: 'hours' });
-    expect(saved.aims[0]!.target?.value, 'the goal\'s target is asked for, never set by Olumi').toBeNull();
   });
 
   describe('⭐ CACHING (DL 22 Oct): the provider\'s cached prefix is the same bytes on every call', () => {
@@ -949,7 +865,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
         .toEqual(new Set([STANDING]));
     });
 
-    it('(5) the standing instructions open every call of two different scenarios; the Challenge note and the drafting arm follow the state block in the turn\'s input', async () => {
+    it('(5) the standing instructions open every call of two different scenarios; the Challenge note follows the state block in the turn\'s input', async () => {
       /** The turn's system items, in order: its state block, then its guidance. */
       const systemItems = (b: Json): string[] => ((b.input ?? []) as Json[]).filter((i) => i.role === 'system').map((i) => String(i.content));
       const factor = (((persisted as Json).nodes ?? []) as Json[]).find((n) => n.kind === 'factor')!;
@@ -963,17 +879,16 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(one[0]).toContain(TODAY_PREFIX);
       expect(one[1]!.startsWith(SELECTION_NOTE_PREFIX), 'the note follows the state block').toBe(true);
 
-      // A second scenario, with no saved model: the first draft's arm is on.
+      // A second scenario, another saved model: a typed turn, with no guidance of its own.
       const first = { scenario: SCENARIO, body: challenged };
-      SCENARIO = randomUUID(); persisted = null; calls = [];
+      SCENARIO = randomUUID(); persisted = postimage(KNOWN_ANSWER); calls = [];
       outputs = [[{ type: 'message', text: 'Tell me more about the situation first.' }]];
       expect((await typed('We are weighing two staffing options.')).statusCode).toBe(200);
       const drafting = calls[0]!;
       expect(SCENARIO).not.toBe(first.scenario);
       expect(drafting.instructions, 'byte-equal across the two scenarios').toBe(first.body.instructions);
-      expect(systemItems(drafting)).toEqual([expect.stringContaining(STATE_BLOCK_PREFIX), CORE_DRAFTER_RULES]);
+      expect(systemItems(drafting)).toEqual([expect.stringContaining(STATE_BLOCK_PREFIX)]);
       expect(String(challenged.instructions), 'no Challenge note in the instructions').not.toContain(SELECTION_NOTE_PREFIX);
-      expect(String(drafting.instructions), 'no drafting arm in the instructions').not.toContain(CORE_DRAFTER_RULES);
 
       // The prefix the provider caches (the tools, then the standing instructions) is byte-equal across the two scenarios.
       expect(JSON.stringify(drafting.tools)).toBe(JSON.stringify(first.body.tools));

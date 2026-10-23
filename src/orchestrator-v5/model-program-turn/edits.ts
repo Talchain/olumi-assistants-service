@@ -6,12 +6,13 @@
  *  · set_goal_target: the figure a goal aims at: set_quantity on the goal's own target quantity (a target shared with
  *    another goal or limit is first given its own quantity, so the other keeps its figure);
  *  · add_option: a new option the person named, each setting either another quantity or its own inline value;
- *  · rename_option: an option's name.
+ *  · rename_option: an option's name;
+ *  · set_range_kind: how to read a range the person gave (firm bounds, or a rough span), the answer to that open question.
  * A quote must be the person's own words; the caller checks it against what they wrote (`quotedIn`).
  */
 import { z } from 'zod-v4';
 import type { CanonicalModelT } from '../model-program/canonical.js';
-import { fillQuantity, type Answer } from '../model-program/answer.js';
+import { fillQuantity, setRangeKind, type Answer } from '../model-program/answer.js';
 
 const figure = {
   value: z.number().nullable().describe('One figure in the quantity\'s unit, or null when giving a range.'),
@@ -28,6 +29,8 @@ export const ProgramOp = z.union([
     sets: z.array(z.object({ quantity_id: z.string().describe('The input quantity this option changes.'), ...figure,
       from_period: z.number().int().describe('The period it takes effect from (0 = now).') }).strict()), quote }).strict(),
   z.object({ op: z.enum(['rename_option']), option_id: z.string(), label: z.string(), quote }).strict(),
+  z.object({ op: z.enum(['set_range_kind']), quantity_id: z.string().describe('The quantity whose range the person is reading (an open question\'s quantity_id).'),
+    range_kind: z.enum(['bounds', 'plausible']).describe('bounds: their ends are firm, it cannot fall outside; plausible: a rough span.'), quote }).strict(),
 ]);
 export type ProgramOpT = z.infer<typeof ProgramOp>;
 type Figure = { value: number | null; low: number | null; high: number | null; range_kind: 'bounds' | 'plausible' | null };
@@ -97,7 +100,9 @@ export function applyOps(model: CanonicalModelT, ops: readonly ProgramOpT[]): Ed
   for (const op of ops) {
     const r = op.op === 'set_quantity' ? setQuantity(m, op.quantity_id, op, op.quote)
       : op.op === 'set_goal_target' ? setGoalTarget(m, op.goal_id, op, op.quote)
-      : op.op === 'add_option' ? addOption(m, op) : renameOption(m, op);
+      : op.op === 'add_option' ? addOption(m, op) : op.op === 'rename_option' ? renameOption(m, op)
+      // How to read a range they gave: the range, its words and its author stay as they were; the answer is kept in history.
+      : setRangeKind(m, op.quantity_id, op.range_kind, op.quote);
     if (!r.ok) return r;
     m = r.model;
   }

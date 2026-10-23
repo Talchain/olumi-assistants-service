@@ -141,7 +141,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     ? { law: { author: 'olumi' as const, provisional: true as const, range_kind: q.range_kind, reading: lawFor(q) } } : {});
   const display = (q: CanonicalQuantityT): string => {
     const unit = q.unit === '1' ? '' : ` ${q.unit}`;
-    const owner = q.author === 'olumi' ? (q.status === 'estimated' ? ', Olumi\'s estimate' : ', Olumi\'s reading') : isApproximate(q) ? ', as you gave it (approximate; no range yet)' : '';
+    const owner = q.author === 'olumi' ? (q.status === 'estimated' ? ', Olumi\'s estimate' : ', Olumi\'s reading') : isApproximate(q) ? `, for now — you said “${q.quote}”` : '';
     if (q.status === 'asked') return 'Not given yet';
     if (q.status === 'derived') return 'Worked out from its inputs';
     if (q.status === 'unknown' || q.status === 'unsupported' || q.status === 'not_applicable') return q.status.replace('_', ' ');

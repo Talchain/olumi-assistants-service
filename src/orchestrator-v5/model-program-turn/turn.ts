@@ -26,6 +26,8 @@ export interface ProgramTurnInput {
   readonly saved: { readonly graph: Rec | null; readonly identity: string | null };
   /** The route's counting dispatch (register + reads), so the write is accounted as every core write is. */
   readonly dispatch: InternalDispatch;
+  /** Told the saved graph once a draft is registered (the route streams it as GRAPH_READY, as a core draft's is). */
+  readonly onModelRegistered?: (graph: Rec) => void;
   /** Test seam only; the route passes nothing and gets the ledgered client. */
   readonly call?: ResponsesCall;
 }
@@ -90,6 +92,7 @@ export async function runModelProgramTurn(input: ProgramTurnInput): Promise<Prog
   const { write, readback } = await savePostimage(input.dispatch, { scenarioId: input.scenarioId, operationId: programOperationId(input.scenarioId, `turn:${input.turnId}`),
     expectedIdentity: input.saved.identity, ...(kind === 'draft' ? { briefText: input.message } : {}) }, next.graph);
   const saved = isSaved(write);
+  if (write.status === 'saved') { try { input.onModelRegistered?.(write.after.graph); } catch { /* an observer never decides the outcome */ } }
   const receipt = saved && 'receipt' in write ? write.receipt : null;
   return {
     assistantText: saved ? replyOf(next.program.canonical, next.run, kind) : `The model could not be saved (${write.status}). Nothing was changed.`,

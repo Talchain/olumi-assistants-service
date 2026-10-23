@@ -778,7 +778,7 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
   const readingAsks: Ask[] = [...unresolved].map(([id, question]) => ({ quantity_id: id, label: Q.get(id)!.label, unit: Q.get(id)!.unit, question, feeds: feedsOf(id), cancels_out_of: [], edit: { op: 'set_range_kind' as const, quantity_id: id } }));
   // A figure they gave as approximate is used exactly as stated; a range is asked for, and nothing waits on it.
   const rangeAsks: Ask[] = model.quantities.filter((q) => isApproximate(q))
-    .map((q) => ({ quantity_id: q.id, label: q.label, unit: q.unit, question: `You gave "${q.label}" as ${q.quote ? `"${q.quote}"` : 'an approximate figure'}. What range would you put on it? Until then it is used exactly as ${q.value} ${q.unit}.`,
+    .map((q) => ({ quantity_id: q.id, label: q.label, unit: q.unit, question: `You said "${q.quote ?? q.value}" for "${q.label}". What range would you put on it? Olumi is using ${q.value} ${q.unit} for now.`,
       feeds: feedsOf(q.id), cancels_out_of: [], edit: { op: 'fill_quantity' as const, quantity_id: q.id } }));
   const recheckAsks: Ask[] = [...recheck].map(([id, question]) => ({ quantity_id: id, label: Q.get(id)!.label, unit: Q.get(id)!.unit, question, feeds: feedsOf(id), cancels_out_of: [], edit: { op: 'fill_quantity' as const, quantity_id: id } }));
   result.asks = [...figureAsks, ...readingAsks, ...recheckAsks, ...rangeAsks].sort((a, b) => b.feeds.length - a.feeds.length);

@@ -55,11 +55,11 @@ function quantityMeta(model: CanonicalModelT, compiled: CompileResult, x: Execut
   const m = normalise(model);
   const unverified = new Set(compiled.unverified.map((u) => u.id));
   // A quote not found in the person's words is never shown as theirs: S2 says "whose source is not confirmed" for it.
-  const who = (author: 'person' | 'olumi', id: string) => (author === 'person' && unverified.has(id) ? 'unverified' : author) as PresentQuantity['author'];
+  const who = (author: 'person' | 'olumi' | 'structure', id: string) => (author === 'person' && unverified.has(id) ? 'unverified' : author) as PresentQuantity['author'];
   const rel = new Map(m.relations.map((r) => [r.defines, r] as const));
   const own = new Map(m.quantities.map((q) => {
     const r = rel.get(q.id);
-    return [q.id, { label: q.label, author: who(q.author, q.id), ...(r !== undefined ? { relation_author: who(r.author, r.id) } : {}), ...(isApproximate(q) ? { approximate: true as const } : {}) }] as const;
+    return [q.id, { label: q.label, author: who(q.author, q.id), ...(r !== undefined ? { relation_author: who(r.author, r.id) } : {}), ...(isApproximate(q) ? { approximate: { quote: q.quote ?? String(q.value) } } : {}) }] as const;
   }));
   const goals = new Map(m.goals.map((g) => [g.id, g] as const));
   const out: Record<string, PresentQuantity> = {};

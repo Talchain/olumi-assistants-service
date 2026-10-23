@@ -7,7 +7,7 @@
  * draft as the assistant's turn, the errors as the next user turn: phase 0b's repair shape), at most twice. Nothing here
  * edits the model: what compiles is the AI's own draft.
  */
-import { ledgeredAgentsClient } from '../../adapters/llm/openai-agents-client.js';
+import { streamedLedgeredResponse } from '../../adapters/llm/openai-agents-client.js';
 import { coreBudget } from '../agent-lane/model-budgets.js';
 import { agentRequestIdentity } from '../agent-lane/runtime/prompt-identity.js';
 import { CanonicalModel, type CanonicalModelT } from '../model-program/canonical.js';
@@ -59,16 +59,9 @@ export const repairMessage = (errors: readonly CompileError[]): string => `${REP
 
 /** The ledgered client's Responses call, streamed (two unstreamed phase-0 calls were cut at 180 s); one per turn. */
 export function ledgeredResponsesCall(): ResponsesCall {
-  const pending: Promise<void>[] = [];
-  const client = ledgeredAgentsClient({ site: 'model-program.draft', pending,
-    detailOf: (body) => ({ model: String(body['model']), purpose: 'canonical_draft', ...agentRequestIdentity('agent.construct', body) }) });
   return async (body) => {
-    const stream = await client.responses.create({ ...body, stream: true } as never) as unknown as AsyncIterable<{ type?: string; response?: Rec }>;
-    let final: Rec | undefined;
-    for await (const ev of stream) {
-      if (ev.type === 'response.completed' || ev.type === 'response.incomplete' || ev.type === 'response.failed') final = ev.response;
-    }
-    await Promise.all(pending);
+    const final = await streamedLedgeredResponse({ site: 'model-program.draft',
+      detailOf: (b) => ({ model: String(b['model']), purpose: 'canonical_draft', ...agentRequestIdentity('agent.construct', b) }) }, body);
     const output = Array.isArray(final?.['output']) ? final!['output'] as Rec[] : [];
     const content = output.filter((o) => o['type'] === 'message').flatMap((o) => (Array.isArray(o['content']) ? o['content'] as Rec[] : []));
     const text = content.find((c) => c['type'] === 'output_text')?.['text'];

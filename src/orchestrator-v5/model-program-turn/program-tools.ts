@@ -17,7 +17,6 @@ import { createProposal, type ProposalOperation, type ProposalStore, type Struct
 import { findOperationVersion } from '../path-b/tools/core-write.js';
 import { isNoModelYet, isSavedRead, readSaved } from '../path-b/tools/context-tool.js';
 import { ok, refused, unavailable, type ToolOutcome } from '../path-b/tools/outcome.js';
-import { normalise } from '../model-program/compile.js';
 import { applyOps, ProgramOp, quotedIn, type ProgramOpT } from './edits.js';
 import { isSaved, postimageOf, programOperationId, savePostimage, withNewRun } from './program-save.js';
 import { livingModelOf, MODEL_PROGRAM, programReadOf, reopenProgram, savedProgramOf, unreadableWords, type SavedProgram } from './program-store.js';
@@ -29,7 +28,7 @@ export interface ProgramToolDeps { readonly dispatch: InternalDispatch; readonly
 
 /** Said with the turn's state on a program scenario: how its tools work. The standing instructions stay byte for byte. */
 export const PROGRAM_TURN_GUIDANCE = 'This scenario\'s model is a model program: read_canonical_context gives its quantities (with who gave each figure), goals, limits, options, open questions and its stored Run. '
-  + 'To change it, call propose_change with ops: set_quantity (one input quantity\'s figure or range: an answer to an open question, or a corrected figure), set_goal_target, add_option or rename_option, each quoting the person\'s exact words, using the ids read_canonical_context gives. '
+  + 'To change it, call propose_change with ops: set_quantity (one input quantity\'s figure or range: an answer to an open question, or a corrected figure), set_range_kind (how to read a range they gave), set_goal_target, add_option or rename_option, each quoting the person\'s exact words, using the ids read_canonical_context gives. '
   + 'The person approves the card; apply_change then saves the model with a new Run. Report a chance only in the Run\'s own words (run.options[].words), never a figure of your own.';
 
 export const ProgramChangeParams = z.object({
@@ -39,15 +38,15 @@ export const ProgramChangeParams = z.object({
 }).strict();
 export type ProgramChangeArgs = z.infer<typeof ProgramChangeParams>;
 
-/** The words a Run's chances are said in, per option, and beside them (notes, tipping thresholds, each limit): what the agent may report. */
+/**
+ * What the agent may report of a Run: each option's own sentence, and the Run's `goal_chance` block UNCHANGED (its notes,
+ * thresholds, each limit, the unchecked limits, and with several goals each goal's own chance and the joint).
+ */
 function runWords(run: StoredRun | null): Rec | null {
   if (run === null) return null;
-  const v = run.result.canonical_analysis_view as { options?: { option_id: string; cell: { kind: string; face?: string; why?: string } }[];
-    goal_chance?: { notes?: string[]; thresholds?: { words: string }[]; limits?: { constraint_id: string; words: string; options: { option_id: string; display: string }[] }[];
-      unchecked_limits?: { limit_id: string; words: string }[] } } | null;
-  const g = v?.goal_chance;
+  const v = run.result.canonical_analysis_view as { options?: { option_id: string; cell: { kind: string; face?: string; why?: string } }[]; goal_chance?: unknown } | null;
   return { run_id: run.run_id, options: (v?.options ?? []).map((o) => ({ option_id: o.option_id, shown: o.cell.kind === 'figure', words: o.cell.face ?? o.cell.why ?? null })),
-    notes: g?.notes ?? [], thresholds: (g?.thresholds ?? []).map((t) => t.words), limits: g?.limits ?? [], unchecked_limits: g?.unchecked_limits ?? [] };
+    ...(v?.goal_chance !== undefined ? { goal_chance: v.goal_chance } : {}) };
 }
 
 /** The saved program and the read it came from, or the outcome that says why there is none. */
@@ -60,29 +59,30 @@ async function savedProgram(deps: ProgramToolDeps, ctx: Ctx) {
     : read.kind === 'unreadable' ? refused('model_program_unreadable', unreadableWords(read.reason)) : refused('not_a_program_scenario');
 }
 
+/** A record with the keys that are not given (null) left out, all the way down; nothing else changes. */
+const compactRecords = (v: unknown): unknown => (Array.isArray(v) ? v.map(compactRecords)
+  : v !== null && typeof v === 'object' ? Object.fromEntries(Object.entries(v).filter(([, x]) => x !== null).map(([k, x]) => [k, compactRecords(x)])) : v);
+
 export async function readProgramContext(deps: ProgramToolDeps, ctx: Ctx): Promise<ToolOutcome> {
   const base = await savedProgram(deps, ctx);
   if ('status' in base) return base;
-  const m = normalise(base.program.canonical);
   const shown = shownRun(base.program.runs, base.program.canonical, base.program.person_words);
   const compile = (shown?.run.result.compile ?? {}) as Rec;
+  const { history, ...authored } = base.program.canonical;
   return ok({
     model_program: MODEL_PROGRAM, revision: { graph_hash: base.saved.graphHash, graph_identity_hash: base.saved.identity },
-    question: m.question, period: m.period,
-    quantities: m.quantities.map((q) => ({ id: q.id, label: q.label, unit: q.unit, kind: q.kind, status: q.status, value: q.value, low: q.low, high: q.high,
-      author: q.author, ...(q.question ? { question: q.question } : {}), ...(q.quote ? { quote: q.quote } : {}) })),
-    goals: m.goals.map((g) => ({ id: g.id, label: g.label, ...(g.measure ? { quantity: g.measure.quantity, cmp: g.measure.cmp, target: g.measure.target } : { measure: null, question: g.question }) })),
-    limits: m.limits.map((l) => ({ id: l.id, label: l.label, ...(l.measure ? { quantity: l.measure.quantity, cmp: l.measure.cmp, bound: l.measure.bound } : { measure: null }) })),
-    options: m.options.map((o) => ({ id: o.id, label: o.label, status: o.status, sets: o.sets.map((s) => ({ quantity: s.quantity, to: s.to })) })),
+    // The model AS AUTHORED, every record whole (its author, words, basis, ranges, timing, windows, relations, risks and the
+    // qualitative records), compact only by leaving out what is not given (null). Never a summary of it.
+    model: compactRecords(authored), earlier_versions: history.length,
     open_questions: Array.isArray(compile['asks']) ? compile['asks'] : [],
-    left_out: m.left_out.map((x) => ({ id: x.id, text: x.text, question: x.question })),
+    coaching: Array.isArray(compile['coaching']) ? compile['coaching'] : [],
     run: shown === undefined ? null : { ...runWords(shown.run), current: shown.current, engine_current: shown.engine_current },
   });
 }
 
 /** The card's rows: one per edit, on the record it changes. */
 const operationsOf = (ops: readonly ProgramOpT[]): ProposalOperation[] => ops.map((o): ProposalOperation => ({ op: 'living_change',
-  path: o.op === 'set_quantity' ? `quantity:${o.quantity_id}` : o.op === 'set_goal_target' ? `goal:${o.goal_id}` : o.op === 'add_option' ? `option:${o.label}` : `option:${o.option_id}`,
+  path: o.op === 'set_quantity' || o.op === 'set_range_kind' ? `quantity:${o.quantity_id}` : o.op === 'set_goal_target' ? `goal:${o.goal_id}` : o.op === 'add_option' ? `option:${o.label}` : `option:${o.option_id}`,
   value: { change: o.op === 'add_option' ? 'add' : 'change', after: o } }));
 
 export async function proposeProgramChange(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs): Promise<ToolOutcome> {

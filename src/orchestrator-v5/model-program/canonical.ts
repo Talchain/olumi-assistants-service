@@ -44,7 +44,7 @@ export const AUTHORS = ['person', 'olumi'] as const;
  * records their answer (the DL's ruling, 23 Oct): the figure is theirs, NO range is read into "about", it is used exactly as
  * stated, and a range is asked for.
  */
-export const APPROXIMATE_FIGURE = 'You gave this as an approximate figure; it is used exactly as stated until you give a range.';
+export const APPROXIMATE_FIGURE = 'You gave this as an approximate figure; Olumi uses it for now, until you give a range.';
 export type AuthorT = (typeof AUTHORS)[number];
 /** A quantity's figure may also be STRUCTURE: an exact constant the model's form needs (phase 0b: 40 zero-width "estimates"). */
 export const QUANTITY_AUTHORS = ['person', 'olumi', 'structure'] as const;

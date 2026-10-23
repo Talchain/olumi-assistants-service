@@ -36,8 +36,8 @@ import { isWithheld, type ChanceOrWithheld, type OptionResult, type SimResult, t
 import { readingOf, simulate } from '../simulate/simulate.js';
 
 type Author = 'person' | 'olumi';
-/** Recorded authors whose fixed values are no one's assumption: the person's own figure, a structural constant, a placeholder. */
-const NOT_ASSUMPTIONS: ReadonlySet<string> = new Set<FixedAuthor>(['person', 'structure', 'placeholder']);
+/** Recorded authors whose fixed values are no one's assumption: the person's own figure, a structural constant. */
+const NOT_ASSUMPTIONS: ReadonlySet<string> = new Set<FixedAuthor>(['person', 'structure']);
 const NOT_RECORDED = '(author not recorded)';
 
 /** The canonical model's label and author for a quantity (S1 `CanonicalQuantity`), and the author of the relation defining it. */
@@ -45,8 +45,8 @@ export interface PresentQuantity {
   readonly label: string;
   readonly author: Author;
   readonly relation_author?: Author;
-  /** The person gave it as approximate ("about"): used exactly as stated until they give a range, and said so. */
-  readonly approximate?: true;
+  /** The person gave it as approximate ("about"): used for now until they give a range, said with their words. */
+  readonly approximate?: { readonly quote: string };
 }
 /** S1's `GoalOutcome`, with the goal's label: every goal, calculable or not. */
 export interface PresentGoal {
@@ -237,7 +237,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       // DL ruling (author not recorded): a value with no recorded author is listed as an assumption, never read as the person's.
       const author: string | undefined = x.dist.author ?? m?.author;
       if (author === 'olumi') return [`${name} is ${say(x.dist.value, x.unit)}, Olumi’s figure`];
-      if (m?.approximate === true) return [`${name} is ${say(x.dist.value, x.unit)} exactly, as you stated it, until you give a range`];
+      if (m?.approximate !== undefined) return [`using ${say(x.dist.value, x.unit)} for ${name} for now — you said ‘${m.approximate.quote}’`];
       return author !== undefined && NOT_ASSUMPTIONS.has(author) ? [] : [`${name} is ${say(x.dist.value, x.unit)} ${NOT_RECORDED}`];
     }
     // S3 smoke fix 1: only an Olumi-authored EFFECT relation is an assumed relationship. A definition (an identity: a

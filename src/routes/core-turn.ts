@@ -658,7 +658,8 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       let programPayload: { readonly canonical_analysis_view: unknown; readonly model_program: Record<string, unknown> } | undefined;
       const programTurn = async (): Promise<AgentTurnResult> => {
         const t0 = Date.now();
-        const out = await runModelProgramTurn({ scenarioId, turnId, message, saved: { graph: saved.graph, identity: saved.identity }, dispatch: countingDispatch });
+        const out = await runModelProgramTurn({ scenarioId, turnId, message, saved: { graph: saved.graph, identity: saved.identity }, dispatch: countingDispatch,
+          onModelRegistered: graphReadyEmitter(startedAt) });
         if (out.verifiedSave) verifiedSave = true;
         programPayload = out.payload;
         const ms = Date.now() - t0;

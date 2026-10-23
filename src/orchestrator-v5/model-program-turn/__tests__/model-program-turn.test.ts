@@ -19,7 +19,7 @@ import { simulate } from '../../model-program/simulate/simulate.js';
 import { CANONICAL_JSON_SCHEMA, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX } from '../prompt.js';
 import { evaluateCanonical, seedOf, RUN_DRAWS } from '../evaluate.js';
 import { programReadOf, reopenProgram, savedProgramOf } from '../program-store.js';
-import { applyProgramChange, proposeProgramChange } from '../program-tools.js';
+import { applyProgramChange, ProgramChangeParams, proposeProgramChange, readProgramContext, runProgram } from '../program-tools.js';
 import { ProposalStore } from '../../agent-lane/proposal.js';
 import { withNewRun } from '../program-save.js';
 import { projectCorePostimageForPersistence } from '../../persisted-graph-projection.js';
@@ -368,25 +368,96 @@ describe('the model-program turn on the real core route', () => {
     expect(programReadOf({ nodes: [], edges: [], living_model: { aims: [] } }).kind).toBe('none'); // contrast: a legacy living model
   });
 
-  it('an approximate answer ("about £2,500") is the person\'s figure, used exactly as stated: NO range is read into "about"; a range is asked for, and the words say so', () => {
+  it('an approximate answer ("about £2,500") is the person\'s figure, used for now: NO range is read into "about"; a range is asked for, and the words say so', () => {
     const words = 'It would cost about £2,500.';
     const f = fillQuantity(bakery(), 'oven_price', { value: 2500, low: 2250, high: 2750 }, words);
     if (!f.ok) throw new Error(f.reason);
     const oven = f.model.quantities.find((x) => x.id === 'oven_price')!;
     expect(oven).toMatchObject({ value: 2500, low: null, high: null, range_kind: null, author: 'person', quote: words, basis: APPROXIMATE_FIGURE });
     const r = compile(f.model, { sourceText: `${BRIEF}\n${words}` });
-    expect(r.asks.find((a) => a.quantity_id === 'oven_price')!.question).toBe('You gave "oven price" as "It would cost about £2,500.". What range would you put on it? Until then it is used exactly as 2500 GBP/oven.');
+    expect(r.asks.find((a) => a.quantity_id === 'oven_price')!.question).toBe('You said "It would cost about £2,500." for "oven price". What range would you put on it? Olumi is using 2500 GBP/oven for now.');
     expect(r.within_limits.status).toBe('calculable'); // the range asked for holds nothing back
     expect(r.conversions.some((c) => c.quantity === 'oven_price')).toBe(false);
     const view = evaluateCanonical(f.model, { sourceText: `${BRIEF}\n${words}`, seed: 7 }).view as Json;
-    expect(JSON.stringify(view)).toContain('‘oven price’ is £2,500 / oven exactly, as you stated it, until you give a range');
+    expect(JSON.stringify(view)).toContain('using £2,500 / oven for ‘oven price’ for now — you said ‘It would cost about £2,500.’');
     expect(JSON.stringify(view)).not.toContain('your range');
+    expect(JSON.stringify(view)).not.toContain('as you stated it');
     // Contrast: the ends in their own words are their range, read as theirs.
     const ranged = fillQuantity(bakery(), 'oven_price', { value: null, low: 2250, high: 2750, range_kind: 'bounds' }, 'between £2,250 and £2,750');
     if (!ranged.ok) throw new Error(ranged.reason);
     expect(ranged.model.quantities.find((x) => x.id === 'oven_price')).toMatchObject({ low: 2250, high: 2750, range_kind: 'bounds', basis: null });
     // A range their words do not state, with no figure of theirs, is refused: never Olumi's range presented as their answer.
     expect(fillQuantity(bakery(), 'oven_price', { value: null, low: 2250, high: 2750 }, 'about £2,500')).toMatchObject({ ok: false });
+  });
+
+  it('the agent\'s context after a cold reopen is the model AS AUTHORED: relations, coefficient basis and range kind, goal windows, option timing, the qualitative records, and the Run\'s goal_chance unchanged', async () => {
+    const brief = `${CLUB_BRIEF} Sam thinks promotions never last.`;
+    const m = club();
+    m.dissent = [{ id: 'sam_doubts', holder: 'Sam', position: 'Promotions never last.', concerns: ['promotion'], author: 'person', party: null, quote: 'Sam thinks promotions never last', approval: 'proposed', author_id: null }];
+    replies = [JSON.stringify(m)];
+    expect((await turn({ message: brief })).json().model_program.saved).toBe(true);
+    vi.resetModules();
+    const tools = await import('../program-tools.js');
+    const read = await tools.readProgramContext({ dispatch, proposals: new ProposalStore() }, { scenario_id: SCENARIO, authenticated_user_id: null }) as Json;
+    expect(read.status).toBe('ok');
+    const model = read.data.model as Json;
+    expect(model.relations).toEqual(JSON.parse(JSON.stringify(m.relations, (_k, v) => (v === null ? undefined : v))));
+    expect(model.relations[0].terms[0]).toEqual({ driver: 'promo_on', coefficient: 'promo_effect', author: 'olumi', approval: 'proposed' });
+    expect(model.quantities.find((x: Json) => x.id === 'promo_effect')).toMatchObject({ kind: 'coefficient', author: 'olumi', low: 3, high: 7, range_kind: 'plausible',
+      basis: 'Promotions at clubs this size bring a few extra joins a month.' });
+    expect(model.goals[0].measure).toMatchObject({ frame: 'level', aggregation: 'end', window: { start: 0, periods: 'months' } });
+    expect(model.options[0].sets.map((x: Json) => x.from_period)).toEqual([0, 0]);
+    expect(model.dissent).toEqual([{ id: 'sam_doubts', holder: 'Sam', position: 'Promotions never last.', concerns: ['promotion'], author: 'person', quote: 'Sam thinks promotions never last', approval: 'proposed' }]);
+    expect(JSON.stringify(model)).not.toContain(':null');
+    // The Run's goal_chance block, as stored.
+    const stored = persisted!.living_model.runs[0].result.canonical_analysis_view as Json;
+    expect(stableStringify(read.data.run.goal_chance)).toBe(stableStringify(stored.goal_chance));
+  });
+
+  it('several goals: each goal\'s own chance and the joint ride the Run\'s goal_chance unchanged through read, propose, apply and run', async () => {
+    const brief = `${CLUB_BRIEF} And keep at least 320 members.`;
+    const m = club();
+    m.quantities.push(q('floor', 'member', { value: 320, quote: 'at least 320 members' }));
+    m.goals.push({ ...m.goals[0]!, id: 'keep_320', label: 'Keep at least 320 members', measure: { ...m.goals[0]!.measure!, target: 'floor' }, quote: 'keep at least 320 members' });
+    replies = [JSON.stringify(m)];
+    expect((await turn({ message: brief })).json().model_program.saved).toBe(true);
+    const goalChance = () => (persisted!.living_model.runs.at(-1).result.canonical_analysis_view as Json).goal_chance;
+    expect(goalChance().targets.per_target).toHaveLength(2);
+    const deps = { dispatch, proposals: new ProposalStore() };
+    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: ['Make it 11 leaving each month.'] };
+    const read = await readProgramContext(deps, ctx) as Json;
+    expect(stableStringify(read.data.run.goal_chance)).toBe(stableStringify(goalChance()));
+    const p = await proposeProgramChange(deps, ctx, { public_label: 'Leavers 11', basis: 'they said so',
+      ops: [{ op: 'set_quantity', quantity_id: 'leavers', value: 11, low: null, high: null, range_kind: null, quote: '11 leaving each month' }] }) as Json;
+    const frozen = (deps.proposals.get(p.data.proposal_id)!.living_model as Json).runs.at(-1).result.canonical_analysis_view.goal_chance;
+    expect(stableStringify(p.data.would_show.goal_chance)).toBe(stableStringify(frozen));
+    const a = await applyProgramChange(deps, ctx, p.data.proposal_id) as Json;
+    expect(stableStringify(a.data.run.goal_chance)).toBe(stableStringify(goalChance()));
+    const run = await runProgram(deps, ctx) as Json;
+    expect([run.data.stored, stableStringify(run.data.run.goal_chance)]).toEqual([true, stableStringify(goalChance())]);
+  });
+
+  it('an open question on how to read a range (set_range_kind) is answerable by the agent\'s own op: the range, its words and its author stay; the answer is in history', async () => {
+    const brief = `${BRIEF} Each extra oven brings between 80 and 120 loaves a week.`;
+    const m = bakery();
+    m.quantities = m.quantities.map((x) => (x.id === 'extra_per_oven' ? { ...x, value: null, low: 80, high: 120, range_kind: null, quote: 'between 80 and 120 loaves a week' } : x));
+    replies = [JSON.stringify(m)];
+    const drafted = (await turn({ message: brief })).json();
+    expect(drafted.model_program.asks.find((x: Json) => x.quantity_id === 'extra_per_oven')).toMatchObject({ edit: { op: 'set_range_kind', quantity_id: 'extra_per_oven' } });
+    const words = 'Those are firm ends: never fewer than 80, never more than 120.';
+    const deps = { dispatch, proposals: new ProposalStore() };
+    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] };
+    // The args as the agent's tool schema admits them (the SDK parses every call with it).
+    const args = ProgramChangeParams.parse({ public_label: 'Read 80–120 as firm', basis: 'their answer',
+      ops: [{ op: 'set_range_kind', quantity_id: 'extra_per_oven', range_kind: 'bounds', quote: 'Those are firm ends' }] });
+    const p = await proposeProgramChange(deps, ctx, args) as Json;
+    expect(p.status, JSON.stringify(p)).toBe('ok');
+    expect(await applyProgramChange(deps, ctx, p.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
+    const after = (persisted!.living_model.canonical as CanonicalModelT).quantities.find((x) => x.id === 'extra_per_oven')!;
+    expect(after).toMatchObject({ low: 80, high: 120, range_kind: 'bounds', author: 'person', quote: 'between 80 and 120 loaves a week' });
+    expect((persisted!.living_model.canonical as CanonicalModelT).history.at(-1)).toMatchObject({ id: 'extra_per_oven', change: 'superseded', quote: 'Those are firm ends' });
+    const asks = (persisted!.living_model.runs.at(-1).result.compile as Json).asks as Json[];
+    expect(asks.some((x) => x.quantity_id === 'extra_per_oven')).toBe(false);
   });
 
   it('display fit (Lenses 23 Oct): every link its own id and sign; the goal target, each figure\'s source and every editable id on the fields the canvas reads', () => {
