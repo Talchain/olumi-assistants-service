@@ -170,17 +170,18 @@ export const savedGoal = (graph: unknown): { goal?: string } => { const goal = g
 /**
  * The goal a change maps under (DL 22 Oct, marketing on 4a4c338c: the person's two aims with their targets were added beside a
  * goal with no target, which stayed the goal, so the Run tested an aim nothing could be scored on). The saved goal, unless its
- * aim has no target after the change and the change ADDS the person's own aim (user or party) with one: then the first such
- * aim, in the model's order. Several stay out of the slice (the joint AND), as on a draft. Read from the saved graph and the
+ * aim has no target figure after the change and the change ADDS the person's own aim (user or party) with one: then the first such
+ * aim, in the model's order. Every other aim remains on the shared model; this selects only the Run's primary target. Read from the saved graph and the
  * change alone, so the card and its write agree; once written, the saved goal is that aim.
  */
 export function changeGoal(graph: unknown, next: LivingModelT): { goal?: string } {
   const saved = savedGoal(graph);
   const kept = next.aims.find((a) => a.id === saved.goal && a.status === 'current');
+  const figured = (a: LivingModelT['aims'][number]) => a.target !== null && [a.target.value, a.target.low, a.target.high].some(v => v !== null);
   const aims = (graph as { living_model?: { aims?: unknown } } | null | undefined)?.living_model?.aims;
-  if (kept === undefined || kept.target !== null || !Array.isArray(aims)) return saved;
+  if (kept === undefined || figured(kept) || !Array.isArray(aims)) return saved;
   const had = new Set(aims.map((a) => (a as { id?: unknown } | null)?.id));
-  const added = next.aims.find((a) => !had.has(a.id) && a.status === 'current' && a.target !== null && (a.source === 'user' || a.source === 'party'));
+  const added = next.aims.find((a) => !had.has(a.id) && a.status === 'current' && figured(a) && (a.source === 'user' || a.source === 'party'));
   return added === undefined ? saved : { goal: added.id };
 }
 

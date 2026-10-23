@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { LivingModel } from '../../../../schemas/living-model.js';
 import { GraphV3 } from '../../../../schemas/cee-v3.js';
 import { applyKernel, canonicalIds } from '../kernel.js';
-import { mapLivingModel } from '../mapper.js';
+import { changeGoal, mapLivingModel } from '../mapper.js';
 import { KNOWN_ANSWER } from './fixtures.js';
 
 type Rec = Record<string, any>;
@@ -106,6 +106,22 @@ describe('canonical accumulation and all-target compilation', () => {
       retained_unresolved_limit: expect.objectContaining({ state: 'unscored' }) }));
     expect(byId(graph, 'cost')).toMatchObject({ analysis_participation: 'retained_excluded' });
     expect(byId(graph, 'cost')).not.toHaveProperty('observed_state');
+  });
+
+  it('a kept figureless suggested measure does not trap the Run ahead of a newly stated figured aim', () => {
+    const saved = structuredClone(KNOWN_ANSWER);
+    Object.assign(saved.aims[0]!.target!, { value: null, source: 'olumi' });
+    const graph = { ...mapLivingModel(saved).graph, living_model: saved };
+    const next = structuredClone(saved);
+    const added = structuredClone(KNOWN_ANSWER.aims[0]!); added.id = 'person_goal';
+    next.aims.push(added);
+    expect(changeGoal(graph, next)).toEqual({ goal: 'person_goal' });
+    expect(next.aims[0]).toEqual(saved.aims[0]);
+    // A figured saved target stays selected; a new figureless aim never displaces it.
+    saved.aims[0]!.target!.value = 1;
+    expect(changeGoal({ ...graph, living_model: saved }, { ...next, aims: [saved.aims[0]!, added] })).toEqual({ goal: 'g' });
+    added.target!.value = null;
+    expect(changeGoal(graph, { ...next, aims: [next.aims[0]!, added] })).toEqual({ goal: 'g' });
   });
 
   it('keeps launch origin separate from a first-three-month observation window', () => {
