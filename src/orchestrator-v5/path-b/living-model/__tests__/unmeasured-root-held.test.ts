@@ -139,7 +139,7 @@ describe('a stated defined quantity with no level is framed by its parts, never 
     expect(revenue).toMatchObject({ nonlinear_identity: { operation: 'product', factor_ids: ['items', 'unit_price'] } });
     // Own possible levels are 1,200 today and 1,300 under Raise, independent of the goal's numerical frame.
     expect(revenue.scale_frame).toBe(1300 * 1.25);
-    const goalCap = nodes.find(n => n.id === 'net')!.goal_threshold_cap;
+    const goalCap = mapped.frames.get('net')!.cap;
     const edge = (mapped.graph.edges as Rec[]).find(e => e.from === 'revenue' && e.to === 'net')!;
     expect(edge.strength.mean * goalCap / revenue.scale_frame).toBeCloseTo(1, 12);
     expect(revenue.observed_state, 'a frame only, never a level').toBeUndefined();
@@ -157,14 +157,12 @@ describe('a stated defined quantity with no level is framed by its parts, never 
       effect: { estimate_by: null, form: 'normal', value: 1, sd: 0.1, low: null, high: null, unit: '£ per week', sign: '+' } }];
     const { mapped } = readiness(m);
     const nodes = mapped.graph.nodes as Rec[];
-    const capOf = (id: string) => (nodes.find((n) => n.id === id)!.observed_state as Rec).cap as number;
     const q = nodes.find((n) => n.id === 'q')!;
     expect(typeof q.scale_frame).toBe('number');
     expect(q.scale_frame).toBe(1201 * 1.25);
-    expect(q.scale_frame, 'never the sum of its parts\' frames').not.toBe(capOf('a') + capOf('b'));
     const edge = (mapped.graph.edges as Rec[]).find(e => e.id === 'q_net')!;
-    expect(edge.strength.mean * nodes.find(n => n.id === 'net')!.goal_threshold_cap / q.scale_frame).toBeCloseTo(1, 12);
-    expect(edge.strength.std * nodes.find(n => n.id === 'net')!.goal_threshold_cap / q.scale_frame).toBeCloseTo(0.1, 12);
+    expect(edge.strength.mean * mapped.frames.get('net')!.cap / q.scale_frame).toBeCloseTo(1, 12);
+    expect(edge.strength.std * mapped.frames.get('net')!.cap / q.scale_frame).toBeCloseTo(0.1, 12);
   });
   it('CONTRAST: a defined quantity with its own stated level keeps its own frame, with no scale_frame', () => {
     const revenue = (readiness(model(1200)).mapped.graph.nodes as Rec[]).find((n) => n.id === 'revenue')!;

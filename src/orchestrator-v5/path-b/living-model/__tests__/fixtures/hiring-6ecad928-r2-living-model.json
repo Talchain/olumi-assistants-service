@@ -1,0 +1,579 @@
+{
+  "aims": [
+    {
+      "id": "productivity",
+      "text": "increase productivity by at least 10%",
+      "party": null,
+      "quote": "increase productivity by at least 10%",
+      "source": "user",
+      "status": "current",
+      "target": {
+        "low": null,
+        "high": null,
+        "unit": "%",
+        "value": 10,
+        "source": null,
+        "by_when": "in the next three months",
+        "current": null,
+        "baseline": null,
+        "quantity": "Productivity",
+        "period_by": null,
+        "comparator": "increase",
+        "change_kind": "relative",
+        "current_unit": null,
+        "period_months": 3,
+        "current_source": null,
+        "period_read_on": null,
+        "period_deadline": null
+      },
+      "defined_as": null
+    },
+    {
+      "id": "quality",
+      "text": "maintaining code quality",
+      "party": null,
+      "quote": "maintaining code quality",
+      "source": "user",
+      "status": "current",
+      "target": {
+        "low": null,
+        "high": null,
+        "unit": "defects per release",
+        "value": null,
+        "source": "olumi",
+        "by_when": "in the next three months",
+        "current": null,
+        "baseline": null,
+        "quantity": "Escaped defects per release",
+        "period_by": null,
+        "comparator": "<=",
+        "change_kind": null,
+        "current_unit": null,
+        "period_months": 3,
+        "current_source": null,
+        "period_read_on": null,
+        "period_deadline": null
+      },
+      "defined_as": null
+    },
+    {
+      "id": "economy",
+      "text": "we'd like to spend less",
+      "party": null,
+      "quote": "we'd like to spend less",
+      "source": "user",
+      "status": "current",
+      "target": {
+        "low": null,
+        "high": null,
+        "unit": "£",
+        "value": null,
+        "source": "olumi",
+        "by_when": null,
+        "current": null,
+        "baseline": null,
+        "quantity": "Unused hiring budget",
+        "period_by": null,
+        "comparator": ">=",
+        "change_kind": null,
+        "current_unit": null,
+        "period_months": null,
+        "current_source": null,
+        "period_read_on": null,
+        "period_deadline": null
+      },
+      "defined_as": {
+        "of": [
+          "budget",
+          "cost"
+        ],
+        "op": "sum",
+        "party": null,
+        "quote": null,
+        "source": "olumi",
+        "subtract": [
+          "cost"
+        ]
+      }
+    }
+  ],
+  "links": [
+    {
+      "id": "capacity_productivity",
+      "to": "productivity",
+      "from": "team",
+      "party": null,
+      "quote": null,
+      "effect": {
+        "sd": null,
+        "low": 0,
+        "form": "range",
+        "high": 17,
+        "sign": "+",
+        "unit": "%",
+        "value": 8,
+        "estimate_by": null
+      },
+      "source": "olumi"
+    },
+    {
+      "id": "delay_productivity",
+      "to": "productivity",
+      "from": "coordination",
+      "party": null,
+      "quote": null,
+      "effect": {
+        "sd": null,
+        "low": -1,
+        "form": "range",
+        "high": 0,
+        "sign": "-",
+        "unit": "%",
+        "value": -0.4,
+        "estimate_by": null
+      },
+      "source": "olumi"
+    },
+    {
+      "id": "onboarding_productivity",
+      "to": "productivity",
+      "from": "onboarding",
+      "party": null,
+      "quote": null,
+      "effect": {
+        "sd": null,
+        "low": -1,
+        "form": "range",
+        "high": 0,
+        "sign": "-",
+        "unit": "%",
+        "value": -0.4,
+        "estimate_by": null
+      },
+      "source": "olumi"
+    },
+    {
+      "id": "lead_delay",
+      "to": "coordination",
+      "from": "lead",
+      "party": null,
+      "quote": null,
+      "effect": {
+        "sd": null,
+        "low": -12,
+        "form": "range",
+        "high": 0,
+        "sign": "-",
+        "unit": "team hours per week",
+        "value": -8,
+        "estimate_by": null
+      },
+      "source": "olumi"
+    },
+    {
+      "id": "fractional_delay",
+      "to": "coordination",
+      "from": "fractional",
+      "party": null,
+      "quote": null,
+      "effect": {
+        "sd": null,
+        "low": -12,
+        "form": "range",
+        "high": 0,
+        "sign": "-",
+        "unit": "team hours per week",
+        "value": -6,
+        "estimate_by": null
+      },
+      "source": "olumi"
+    },
+    {
+      "id": "lead_onboarding",
+      "to": "onboarding",
+      "from": "lead",
+      "party": null,
+      "quote": null,
+      "effect": {
+        "sd": null,
+        "low": 0,
+        "form": "range",
+        "high": 15,
+        "sign": "+",
+        "unit": "team hours per week",
+        "value": 5,
+        "estimate_by": null
+      },
+      "source": "olumi"
+    },
+    {
+      "id": "developers_onboarding",
+      "to": "onboarding",
+      "from": "developers",
+      "party": null,
+      "quote": null,
+      "effect": {
+        "sd": null,
+        "low": 0,
+        "form": "range",
+        "high": 25,
+        "sign": "+",
+        "unit": "team hours per week",
+        "value": 10,
+        "estimate_by": null
+      },
+      "source": "olumi"
+    },
+    {
+      "id": "fractional_onboarding",
+      "to": "onboarding",
+      "from": "fractional",
+      "party": null,
+      "quote": null,
+      "effect": {
+        "sd": null,
+        "low": 0,
+        "form": "range",
+        "high": 12,
+        "sign": "+",
+        "unit": "team hours per week",
+        "value": 3,
+        "estimate_by": null
+      },
+      "source": "olumi"
+    },
+    {
+      "id": "lead_quality",
+      "to": "quality",
+      "from": "lead",
+      "party": null,
+      "quote": null,
+      "effect": {
+        "sd": null,
+        "low": -4,
+        "form": "range",
+        "high": 0,
+        "sign": "-",
+        "unit": "defects per release",
+        "value": -1,
+        "estimate_by": null
+      },
+      "source": "olumi"
+    },
+    {
+      "id": "developers_quality",
+      "to": "quality",
+      "from": "developers",
+      "party": null,
+      "quote": null,
+      "effect": {
+        "sd": null,
+        "low": 0,
+        "form": "range",
+        "high": 5,
+        "sign": "+",
+        "unit": "defects per release",
+        "value": 1,
+        "estimate_by": null
+      },
+      "source": "olumi"
+    },
+    {
+      "id": "fractional_quality",
+      "to": "quality",
+      "from": "fractional",
+      "party": null,
+      "quote": null,
+      "effect": {
+        "sd": null,
+        "low": -3,
+        "form": "range",
+        "high": 0,
+        "sign": "-",
+        "unit": "defects per release",
+        "value": -1,
+        "estimate_by": null
+      },
+      "source": "olumi"
+    },
+    {
+      "id": "lead_cost",
+      "to": "cost",
+      "from": "lead",
+      "party": null,
+      "quote": null,
+      "effect": {
+        "sd": null,
+        "low": null,
+        "form": "unknown",
+        "high": null,
+        "sign": null,
+        "unit": "£",
+        "value": null,
+        "estimate_by": null
+      },
+      "source": "olumi"
+    },
+    {
+      "id": "developers_cost",
+      "to": "cost",
+      "from": "developers",
+      "party": null,
+      "quote": null,
+      "effect": {
+        "sd": null,
+        "low": null,
+        "form": "unknown",
+        "high": null,
+        "sign": null,
+        "unit": "£",
+        "value": null,
+        "estimate_by": null
+      },
+      "source": "olumi"
+    },
+    {
+      "id": "fractional_cost",
+      "to": "cost",
+      "from": "fractional",
+      "party": null,
+      "quote": null,
+      "effect": {
+        "sd": null,
+        "low": null,
+        "form": "unknown",
+        "high": null,
+        "sign": null,
+        "unit": "£",
+        "value": null,
+        "estimate_by": null
+      },
+      "source": "olumi"
+    },
+    {
+      "id": "late_productivity",
+      "to": "productivity",
+      "from": "late_hire",
+      "party": null,
+      "quote": null,
+      "effect": {
+        "sd": null,
+        "low": -25,
+        "form": "range",
+        "high": 0,
+        "sign": "-",
+        "unit": "%",
+        "value": -10,
+        "estimate_by": null
+      },
+      "source": "olumi"
+    }
+  ],
+  "risks": [
+    {
+      "id": "late_hire",
+      "label": "Recruitment or ramp-up consumes the launch window",
+      "party": null,
+      "quote": null,
+      "source": "olumi",
+      "horizon_by": null,
+      "occurrence": {
+        "low": 0.2,
+        "high": 0.7,
+        "estimate_by": null
+      },
+      "mitigations": [],
+      "horizon_months": 3
+    }
+  ],
+  "views": [],
+  "factors": [
+    {
+      "id": "team",
+      "low": null,
+      "high": null,
+      "kind": "factor",
+      "unit": "developers",
+      "label": "Mid-weight developer capacity",
+      "limit": null,
+      "party": null,
+      "quote": "We currently have six mid-weight developers",
+      "value": 6,
+      "source": "user",
+      "defined_as": null,
+      "estimate_by": null
+    },
+    {
+      "id": "coordination",
+      "low": 0,
+      "high": 40,
+      "kind": "factor",
+      "unit": "team hours per week",
+      "label": "Time lost to unresolved technical decisions",
+      "limit": null,
+      "party": null,
+      "quote": null,
+      "value": 12,
+      "source": "olumi",
+      "defined_as": null,
+      "estimate_by": null
+    },
+    {
+      "id": "onboarding",
+      "low": 0,
+      "high": 8,
+      "kind": "factor",
+      "unit": "team hours per week",
+      "label": "Existing team time spent onboarding hires",
+      "limit": null,
+      "party": null,
+      "quote": null,
+      "value": 0,
+      "source": "olumi",
+      "defined_as": null,
+      "estimate_by": null
+    },
+    {
+      "id": "budget",
+      "low": null,
+      "high": null,
+      "kind": "factor",
+      "unit": "£",
+      "label": "Available hiring budget",
+      "limit": null,
+      "party": null,
+      "quote": "Our budget is £200,000",
+      "value": 200000,
+      "source": "user",
+      "defined_as": null,
+      "estimate_by": null
+    },
+    {
+      "id": "cost",
+      "low": 0,
+      "high": 0,
+      "kind": "factor",
+      "unit": "£",
+      "label": "Additional hiring expenditure on the budget's accounting basis",
+      "limit": {
+        "party": null,
+        "quote": "Our budget is £200,000",
+        "value": 200000,
+        "source": "user",
+        "comparator": "<="
+      },
+      "party": null,
+      "quote": null,
+      "value": 0,
+      "source": "olumi",
+      "defined_as": null,
+      "estimate_by": null
+    }
+  ],
+  "history": [],
+  "options": [
+    {
+      "id": "lead",
+      "label": "Hire a Tech lead",
+      "party": null,
+      "quote": "hire a Tech lead",
+      "source": "user",
+      "status": "feasible",
+      "settings": [],
+      "developed_from": null
+    },
+    {
+      "id": "developers",
+      "label": "Hire two developers",
+      "party": null,
+      "quote": "two developers",
+      "source": "user",
+      "status": "feasible",
+      "settings": [
+        {
+          "low": null,
+          "high": null,
+          "unit": "developers",
+          "party": null,
+          "quote": null,
+          "value": 8,
+          "source": "olumi",
+          "factor_id": "team",
+          "estimate_by": null
+        }
+      ],
+      "developed_from": null
+    },
+    {
+      "id": "unchanged",
+      "label": "Carry on with the current team",
+      "party": null,
+      "quote": null,
+      "source": "olumi",
+      "status": "feasible",
+      "settings": [],
+      "developed_from": null
+    },
+    {
+      "id": "fractional",
+      "label": "Use a fractional technical lead for the launch",
+      "party": null,
+      "quote": null,
+      "source": "olumi",
+      "status": "feasible",
+      "settings": [],
+      "developed_from": null
+    }
+  ],
+  "conditions": [
+    {
+      "role": "challenge",
+      "text": "The current team lacks leadership; whether this is the actual productivity bottleneck remains untested.",
+      "party": null,
+      "quote": "We currently have six mid-weight developers, so we're lacking leadership.",
+      "source": "user",
+      "applies_to": [
+        "team",
+        "coordination",
+        "lead"
+      ]
+    },
+    {
+      "role": "challenge",
+      "text": "The launch is urgent: recruitment and onboarding must leave time for useful delivery within the next three months.",
+      "party": null,
+      "quote": "We have an urgent launch date in the next three months.",
+      "source": "user",
+      "applies_to": [
+        "productivity",
+        "lead",
+        "developers",
+        "fractional"
+      ]
+    },
+    {
+      "role": "assumption",
+      "text": "Olumi's developer-capacity estimate assumes the two new developers offer broadly comparable usable capacity to the existing mid-weight developers.",
+      "party": null,
+      "quote": null,
+      "source": "olumi",
+      "applies_to": [
+        "developers",
+        "capacity_productivity"
+      ]
+    },
+    {
+      "role": "challenge",
+      "text": "The shared recruitment-delay risk is an initial simplification; its relevance and impact may differ between permanent and fractional hires.",
+      "party": null,
+      "quote": null,
+      "source": "olumi",
+      "applies_to": [
+        "lead",
+        "developers",
+        "fractional",
+        "late_productivity"
+      ]
+    }
+  ]
+}

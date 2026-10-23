@@ -34,6 +34,7 @@ import { periodAdverb, periodNoun } from '../../../utils/unit-alphabet.js';
 import { EventRiskV1 } from '../../../schemas/event-risk.js';
 import { riskOccurrenceIsCurrent, riskOccurrenceWindowMonths } from '../../agent-lane/risk-occurrence.js';
 import { isCalendarDate, readStatedDeadline, wholeMonthsBetween } from '../../goal-target/deadline-date.js';
+import { RETAINED_LIMIT_QUANTITY_QUESTION } from '../../../graph/retained-limit.js';
 
 export type WithheldReason =
   | 'no_level_target' | 'aim_not_in_slice' | 'change_kind_unknown' | 'change_base_invalid' | 'change_base_not_theirs' | 'current_unit_mismatch' | 'exact_target_not_in_slice' | 'target_range_not_in_slice'
@@ -946,6 +947,15 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
       restsOn.push(...causes, ...dropped.map((id) => ({ id, reason: 'setting_not_convertible' as const })),
         ...conditioned.map((c) => ({ id: `condition:${c.text}`, reason: 'condition_not_in_slice' as const, applies_to: [...c.applies_to] })));
     }
+  }
+
+  // A limit without a supported connection has no forecast, not a reason to refuse every other calculation.
+  // Reuse the retained-unscored limit contract: saved bounds remain visible; Run omits its scoring frame and joint score.
+  const connected = new Set(edges.flatMap(e => [e.from, e.to]));
+  for (const c of goal_constraints) if (!connected.has(c.node_id)) {
+    Object.assign(c, { retained_unresolved_limit: { state: 'unscored', role: 'original', reason: 'retained_limit_quantity_unresolved',
+      previous_constraint_id: c.constraint_id, proposed_constraint_ids: [], question: RETAINED_LIMIT_QUANTITY_QUESTION } });
+    hold(c.node_id, 'limit_not_in_slice');
   }
 
   const frames = new Map<string, Frame>(model.factors.flatMap((f) => (caps.has(f.id) ? [[f.id, { cap: caps.get(f.id)!, unit: f.unit }] as const] : [])));
