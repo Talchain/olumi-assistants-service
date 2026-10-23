@@ -598,10 +598,11 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   }
 
   // ── Limits (Track 2): a bound beside the aim, as the legacy lane's limit row (`add_constraint`), read on the factor's frame.
-  // Never widen the quantity's frame to fit its bound. Unsupported bounds stay recorded and explicitly held; the Run omits only their calculation rows.
+  // Never widened to fit (that rescales the factor's links, Codex r1): a limit off the frame is held, as add_constraint refuses it.
   const goal_constraints: (Rec & { node_id: string; value: number })[] = model.factors.flatMap((f) => {
     const l = f.limit ?? null;
     if (l === null) return [];
+    if (!current.has(f.id) || l.value < 0 || l.value > caps.get(f.id)!) { hold(f.id, 'limit_not_in_slice'); return []; }
     const strict = l.comparator === '<' || l.comparator === '>';
     return [{ constraint_id: `limit_${f.id}`, node_id: f.id, operator: l.comparator.startsWith('<') ? '<=' : '>=',
       ...(strict ? { operator_as_stated: l.comparator } : {}), value: l.value, label: f.label, provenance: stated(l.source) ? 'explicit' : 'inferred',
@@ -776,15 +777,15 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
           : !riskOccurrenceIsCurrent(node, { nodes, edges }) ? 'risk_window_not_goal_window' : undefined;
     if (reason === 'risk_window_not_goal_window') {
       // The preventer goes with its risk: a switch whose only child is this risk (`switchOk`) would otherwise reach nothing
-      // (NO_PATH_TO_GOAL). Its node, every option's setting on it, its links and any line said about its
+      // (NO_PATH_TO_GOAL). Its node, every option's setting on it, its links, any limit on it and any line said about its
       // figure leave the engine graph and the AI's assumptions, and it is held by name. A switch that is also a part of a
-      // definition reaches the goal through it, so it stays (Codex r1). A limited quantity remains saved; its disconnected limit is held below.
+      // definition reaches the goal through it, so it stays (Codex r1).
       for (const m of r.mitigations) {
         const id = m.factor_id;
         if (declared.some(({ item }) => item.defined_as!.of.includes(id))) continue;
-        const hasLimit = goal_constraints.some(c => c.node_id === id);
+        goal_constraints.splice(0, goal_constraints.length, ...goal_constraints.filter((c) => c.node_id !== id));
         assumed.splice(0, assumed.length, ...assumed.filter((x) => x.id !== id));
-        if (!hasLimit) nodes.splice(0, nodes.length, ...nodes.filter((n) => n.id !== id));
+        nodes.splice(0, nodes.length, ...nodes.filter((n) => n.id !== id));
         for (const n of nodes) {
           const iv = n.kind === 'option' && typeof n.interventions === 'object' && n.interventions !== null ? n.interventions as Rec : undefined;
           if (iv === undefined || !(id in iv)) continue;
@@ -792,7 +793,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
           if (Object.keys(iv).length === 0) delete n.interventions;
         }
         edges.splice(0, edges.length, ...edges.filter((e) => e.to !== id && e.from !== id));
-        if (!hasLimit) { caps.delete(id); current.delete(id); }
+        caps.delete(id); current.delete(id);
         hold(id, 'risk_window_not_goal_window');
       }
     }
@@ -942,20 +943,6 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     goalNode.nonlinear_identity = { operation: 'sum', factor_ids: [exactSum.today, exactSum.lever], stated_in_brief: false };
   }
 
-  // A limit's missing model quantity and an off-frame bound are DIFFERENT causes. Neither changes the goal's licence.
-  // Keep the full stored row. The Run omits its held calculation row; a subset joint is never licensed as the full question.
-  const connected = new Set(edges.flatMap(e => [e.from, e.to]));
-  for (const c of goal_constraints) {
-    const node = nodes.find(n => n.id === c.node_id)!;
-    const reason = !current.has(c.node_id) ? 'limit_quantity_unknown'
-      : c.value < 0 || c.value > caps.get(c.node_id)! ? 'limit_frame_unsupported'
-      : !connected.has(c.node_id) ? 'limit_model_disconnected' : undefined;
-    if (reason === undefined) continue;
-    node.goal_rests_on = [...(Array.isArray(node.goal_rests_on) ? node.goal_rests_on : []), { id: c.node_id, reason }];
-    hold(c.node_id, 'limit_not_in_slice');
-    if (!connected.has(c.node_id) && !setsFactor.has(c.node_id)) node.analysis_participation = 'retained_excluded';
-  }
-
   const restsOn: (Withheld & { readonly applies_to?: readonly string[] })[] = [];
   // A chance rests on everything on the goal's path. Anything there that this slice left out of the engine graph (an
   // unsigned or unplaceable link, an option setting it could not convert) would change the calculation, so the chance is
@@ -981,7 +968,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     // is scored on its level (PLoT drops a time limit on an outcome), so each stays a factor; the living model keeps the label.
     const anchored = (goalNode.observed_state as Rec | undefined)?.source !== undefined;
     for (const f of model.factors) if (f.kind === 'outcome' && anchored && onPath.has(f.id) && edges.some((e) => e.to === f.id)
-      && !setsFactor.has(f.id) && !goal_constraints.some((c) => c.node_id === f.id && nodes.find(n => n.id === c.node_id)?.goal_rests_on === undefined)) {
+      && !setsFactor.has(f.id) && !goal_constraints.some((c) => c.node_id === f.id)) {
       const node = nodes.find((n) => n.id === f.id)!;
       node.kind = 'outcome';
       delete node.category;
@@ -1016,7 +1003,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   }
 
   const targetReadings = [...readings.values()].filter(r => r.aim.target !== null);
-  if (readings.size > 1 || goal_constraints.length > 0) for (const { aim, node, goal } of targetReadings) {
+  if (readings.size > 1) for (const { aim, node, goal } of targetReadings) {
     const lt = aimTargetReading(aim);
     const raw = typeof lt === 'string' ? undefined : lt;
     if (raw === undefined) continue; // Qualitative/unresolved targets stay on the Living Model; never invent a constraint value.

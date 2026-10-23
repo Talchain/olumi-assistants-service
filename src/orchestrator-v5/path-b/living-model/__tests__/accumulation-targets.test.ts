@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { LivingModel } from '../../../../schemas/living-model.js';
 import { assessCanonicalAnalysisReadiness } from '../../../../orchestrator/tools/analysis-ready-helper.js';
@@ -23,6 +24,16 @@ function recurring() {
 }
 
 describe('canonical accumulation and all-target compilation', () => {
+  it('the actual MRR regression retains revenue and churn as distinct target rows without fabricating accumulation inputs', () => {
+    const model = LivingModel.parse(JSON.parse(readFileSync(new URL('./fixtures/mrr-459f8bde-living-model.json', import.meta.url), 'utf8')));
+    const before = structuredClone(model), mapped = mapLivingModel(model), graph = GraphV3.parse({ ...mapped.graph, living_model: model });
+    expect(graph.goal_constraints).toContainEqual(expect.objectContaining({ node_id: 'mrr', role: 'goal_target', value: 100000 }));
+    expect(graph.goal_constraints).toContainEqual(expect.objectContaining({ node_id: 'churn', role: 'goal_target', value: 4, operator_as_stated: '<' }));
+    expect(graph.nodes.some(n => n.nonlinear_identity?.operation === 'accumulation')).toBe(false);
+    expect(graph.living_model).toEqual(before);
+    expect(model).toEqual(before);
+  });
+
   it('keeps old saved forms unchanged and refuses competing or self-referencing mechanisms', () => {
     const old = structuredClone(KNOWN_ANSWER);
     expect(LivingModel.parse(old)).toEqual(old);
@@ -114,18 +125,6 @@ describe('canonical accumulation and all-target compilation', () => {
     expect(graph.edges.some(e => e.from === 'churn' && e.to === 'g')).toBe(false);
     expect(graph.edges.some(e => e.from === 'retention' && e.to === 'g')).toBe(false);
     expect(graph.goal_constraints!.filter(c => c.role === 'goal_target').map(c => c.node_id).sort()).toEqual(['churn', 'g']);
-  });
-
-  it('retains an unknown limit unscored instead of omitting it from the full joint', () => {
-    const m = structuredClone(KNOWN_ANSWER);
-    m.factors.push({ ...m.factors[0]!, id: 'cost', value: null, unit: '£', limit: { comparator: '<=', value: 20000,
-      source: 'user', party: null, quote: 'spend at most £20,000' } });
-    const out = mapLivingModel(m), graph = out.graph as Rec;
-    expect(graph.goal_constraints).toContainEqual(expect.objectContaining({ node_id: 'cost', value: 20000 }));
-    expect(byId(graph, 'cost').goal_rests_on).toEqual([{ id: 'cost', reason: 'limit_quantity_unknown' }]);
-    expect(graph.goal_constraints.find((c: Rec) => c.node_id === 'cost').value_frame).toBe('level');
-    expect(byId(graph, 'cost')).toMatchObject({ analysis_participation: 'retained_excluded' });
-    expect(byId(graph, 'cost')).not.toHaveProperty('observed_state');
   });
 
   it('a kept figureless suggested measure does not trap the Run ahead of a newly stated figured aim', () => {

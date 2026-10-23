@@ -215,7 +215,7 @@ import { heldGoalPointsUp, readGoalLabel, resolveGoalDirection, resolveGoalThres
 import { goalChanceTargetCause, withholdForOpenTargetQuestion, withholdUnusableGoalChances } from '../../goal-target/goal-chance-gate.js';
 import { IMPLIED_QUANTITY_KEY, livingFramesOf, readImpliedQuantity } from '../../goal-target/implied-quantity.js';
 import { effectsTimingOf } from '../../goal-target/period-end-assumption.js';
-import { withGoalChanceReadback, withEvaluatedGoalChanceInputs, sentGoalThresholdOf, withGoalChanceLicence, withholdForOlumiGoalLevel, withholdForPeriodEndEffects } from '../../goal-target/goal-chance-licence.js';
+import { goalDependencyConstraintsForRun, withGoalDependencyScores, withGoalChanceReadback, withEvaluatedGoalChanceInputs, sentGoalThresholdOf, withGoalChanceLicence, withholdForOlumiGoalLevel, withholdForPeriodEndEffects } from '../../goal-target/goal-chance-licence.js';
 import { capacityRatioOptionIds, shareChanceRunBlock, withShareByDateFrame } from '../../goal-target/share-by-date-run.js';
 import { withShareByDateChanceGate } from '../../goal-target/goal-chance-range.js';
 import { withIndexGoalWeightsNote } from '../../goal-target/index-goal-weights-note.js';
@@ -1028,7 +1028,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // A framed percent limit on a level PLoT would read on another scale is sent UNFRAMED on this wire copy, so it
       // fails closed instead of being scored against the wrong number (`level-limit-baseline.ts`). The record is untouched.
       const wireRows = wireGoalConstraints(withholdRetainedLimitFrames(snapshot.rawPersistedGraph ?? snapshot.graph,
-        withholdUnprovablePercentFrames(graphForAnalysis, snapshot.goal_constraints)));
+        goalDependencyConstraintsForRun(snapshot.rawPersistedGraph ?? snapshot.graph,
+          withholdUnprovablePercentFrames(graphForAnalysis, snapshot.goal_constraints))));
       plotPayload.goal_constraints = wireRows;
       // AIE same-cohort law (science PR-4, `cohort-forecast.ts`): an option holding a cohort forecast for exactly the goal's two
       // targets sends it beside its interventions, so ISL scores both targets and their joint on ONE cohort's draws. Sent only
@@ -1822,6 +1823,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
 
     // ⛔ DL gate 1 v2 (`identical-arms.ts`): read the engine's INTACT outcomes, before any withholder deletes
     // `downside` or the shares. Applied after every other withhold (below), so each keeps its own reason.
+    response = withGoalDependencyScores(response, snapshot.rawPersistedGraph ?? snapshot.graph, snapshot.goal_constraints);
     const unresolvedLimits = unresolvedRetainedLimits(snapshot.rawPersistedGraph ?? snapshot.graph);
     const retainedLimitReason = retainedLimitWithheldLine(snapshot.rawPersistedGraph ?? snapshot.graph);
     if (unresolvedLimits.length > 0) {

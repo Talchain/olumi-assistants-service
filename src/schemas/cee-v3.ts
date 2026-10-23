@@ -412,6 +412,10 @@ export const NodeV3 = z.object({
      */
     derived: z.literal(true).optional(),
   }).optional().catch(undefined),
+  /** Host-compiled reasons this target's calculation is withheld; the stated target itself remains intact. */
+  goal_rests_on: z.array(z.object({
+    id: z.string().min(1), reason: z.string().min(1), applies_to: z.array(z.string()).optional(),
+  }).strict()).min(1).optional(),
   /**
    * ⭐ RECOVERY BATCH C — WHAT THE GOAL'S TARGET IS MEASURED AGAINST (goal nodes only; Batch 0 change-goal decision rulings
    * 1–14, amendments 1–7). Olumi's validated reading of the drafter's stated semantics (`goal-target-basis.ts`): the
@@ -423,10 +427,6 @@ export const NodeV3 = z.object({
    * removes that one member (`goal-reading-write.ts`); CEE-owned (`field-safety.ts`); in the analysis hash (Batch C gap 2:
    * a change to it stales a stored Run, though it changes only what may be SAID about one); a malformed value is absence.
    */
-  /** Host-compiled reasons this target's calculation is withheld; the stated target itself remains intact. */
-  goal_rests_on: z.array(z.object({
-    id: z.string().min(1), reason: z.string().min(1), applies_to: z.array(z.string()).optional(),
-  }).strict()).min(1).optional(),
   goal_target_basis: z.object({
     quantity_frame: z.enum(['level', 'change']),
     target_frame: z.enum(['level', 'change_abs', 'change_rel']),
