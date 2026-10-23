@@ -153,6 +153,14 @@ export const LivingFactor = z.object({
     + "For the person's or a party's factor, the figures they gave; where they gave none, Olumi's provisional central estimate with a range, with estimate_by olumi, never mixed with theirs. "
     + "For Olumi's own factor (source olumi), give Olumi's central estimate in value, with low and high around it as wide as what is genuinely unknown, in a stated unit."),
   defined_as: definedAs,
+  accumulation: z.object({
+    stock_today: id,
+    loss_rate_per_month: id,
+    inflow_per_month: id,
+    horizon_months: z.number().int().min(1).max(120),
+    ...attribution,
+  }).strict().nullable().optional().describe(
+    'A stock at the stated month, using the existing accumulation calculation: ids of its level today, loss percentage per month and inflow per month, plus the integer month horizon and who states this mechanism. Never also defined_as. Its future value stays null: the engine works it out. No invented zero stock, converted rate period or rounded horizon.'),
   /** TRACK 2 (21 Oct): a limit beside the aim, sent as the legacy lane's limit row (one per quantity). Saved before: null. */
   limit: z.object({
     comparator: z.enum(['<=', '>=', '<', '>']),
@@ -167,7 +175,12 @@ export const LivingFactor = z.object({
    */
   said_in: z.enum(['chat']).nullable().optional(),
   ...attribution,
-}).strict();
+}).strict().superRefine((f, ctx) => {
+  if (f.accumulation != null && (f.defined_as !== null || new Set([f.id, f.accumulation.stock_today,
+    f.accumulation.loss_rate_per_month, f.accumulation.inflow_per_month]).size !== 4)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['accumulation'], message: 'accumulation requires three distinct other factors and no defined_as' });
+  }
+});
 
 export const LivingSetting = z.object({
   factor_id: id,
