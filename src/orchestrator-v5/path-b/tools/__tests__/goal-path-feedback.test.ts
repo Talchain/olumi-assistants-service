@@ -916,6 +916,34 @@ describe('C3 (DL 93d79c3e 01:56Z; marketing set b r1): the person\'s stated goal
     expect(r2.repairs).toBe(0);
   });
 
+  it('Codex r1 on #3697 (P1): the replace is the NEXT call\'s only; after another refusal, dropping the aim the person has since given words is kept as refused', async () => {
+    const olumiTask = { ...task(), source: 'olumi' as const, quote: null };
+    const ctx = { ...changeCtx, user_turn_text: 'we need at least 200 units' };
+    const p = product({ ...drafted(), aims: [olumiTask] });
+    const restructure: Restructure = { repairs: 0 };
+    const deps = { dispatch: p.dispatch, proposals: new ProposalStore(), restructure };
+    expect(await proposeLivingChange(deps, ctx, change({ ...stated(), aims: [olumiTask, structuredClone(KNOWN_ANSWER.aims[0]!)] })))
+      .toMatchObject({ reason: 'goal_beside_no_goal' });
+    const theirs = { ...structuredClone(KNOWN_ANSWER.aims[0]!), id: 't', text: 'Reach 200 units', quote: 'we need at least 200 units',
+      target: { ...KNOWN_ANSWER.aims[0]!.target!, value: 200 } };
+    // Another refusal between: today's goal t gets its own link and an Olumi prerequisite on it.
+    const toT = { ...structuredClone(KNOWN_ANSWER.links[0]!), id: 'f_t', to: 't' };
+    const between = { ...stated(), aims: [theirs, structuredClone(KNOWN_ANSWER.aims[0]!)], links: [...stated().links, toT],
+      conditions: [{ text: PREREQ, applies_to: ['f_t'], role: 'prerequisite' as const, ...olumi }] };
+    expect(await proposeLivingChange(deps, ctx, change(between))).toMatchObject({ reason: 'not_run_ready' });
+    const dropped = await proposeLivingChange(deps, ctx, { ...change({ ...stated(), aims: [structuredClone(KNOWN_ANSWER.aims[0]!)] }), remove: ['t'] });
+    expect(dropped, JSON.stringify(dropped)).toMatchObject({ status: 'ok', data: { restructure: { kept: 'refused_call', lost: expect.arrayContaining(['aims:t']) } } });
+    expect(cardOf(dropped).changes).not.toContainEqual(expect.objectContaining({ kind: 'aim', id: 't', change: 'remove' }));
+  });
+
+  it('Codex r1 on #3697 (P2): an aim the change itself adds is never asked to be removed (there is no saved one to name)', async () => {
+    const p = product({ ...drafted(), aims: [] });
+    const restructure: Restructure = { repairs: 0 };
+    const out = await proposeLivingChange({ dispatch: p.dispatch, proposals: new ProposalStore(), restructure }, changeCtx, change(stated()));
+    expect((out as { reason?: string }).reason, JSON.stringify(out).slice(0, 300)).not.toBe('goal_beside_no_goal');
+    expect(restructure.replace).toBeUndefined();
+  });
+
   it('only what the change brings: a model that already held the drafted aim beside the person\'s goal is not held up', async () => {
     const p = product(stated());
     const restructure: Restructure = { repairs: 0 };

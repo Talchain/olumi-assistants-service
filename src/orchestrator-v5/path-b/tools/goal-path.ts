@@ -24,8 +24,11 @@ export interface Restructure {
   pending?: { readonly tool: 'build_model_from_brief'; readonly args: { brief: string; model: LivingModelT } }
     | { readonly tool: 'propose_change'; readonly args: { public_label: string; basis: string; model: LivingModelT; remove: string[] } };
   settle?: () => Promise<void>;
-  /** The aim a change was asked to replace (`living-change.ts`): naming it in remove is the replace, never a loss. */
-  replace?: string;
+  /**
+   * The saved aim a change was asked to replace (`living-change.ts`), with the refused call that asked (`of`, pending's own args):
+   * naming it in remove in the next call is the replace, never a loss. Any later refusal replaces pending, and so ends it.
+   */
+  replace?: { readonly id: string; readonly of: object };
 }
 
 /** At most this many refusals a turn; then the call is saved as it is and the AI asks (DL 22 Oct). */

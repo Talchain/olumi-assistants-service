@@ -68,8 +68,10 @@ export async function proposeLivingChange(deps: Deps, ctx: Ctx, args: LivingChan
   const r = deps.restructure;
   const first = r?.pending?.tool === 'propose_change' ? r.pending.args : undefined;
   const base = first === undefined ? undefined : await savedLiving(deps, ctx);
-  // The aim the host asked to be replaced, named in remove, is the replace, never a loss.
-  const replaced = r?.replace !== undefined && args.remove.includes(r.replace) ? `aims:${r.replace}` : undefined;
+  // The saved aim the host asked to be replaced, named in remove by the call right after that refusal, is the replace, never a
+  // loss (Codex r1 on #3697: never once another refusal came between, which may have given the aim the person's words).
+  const invited = r?.replace !== undefined && r.replace.of === first ? r.replace.id : undefined;
+  const replaced = invited !== undefined && args.remove.includes(invited) ? `aims:${invited}` : undefined;
   const lost = first === undefined || base === undefined || 'status' in base ? []
     : personContentLost(kernelFor(base, ctx, first.model).model, kernelFor(base, ctx, args.model).model).filter((l) => l !== replaced);
   // The refused change is used as it is: no repair is left for it.
@@ -164,14 +166,16 @@ async function proposeOnce(deps: Deps, ctx: Ctx, args: LivingChangeArgs): Promis
   // ⭐ STATED GOALS REPLACE AN AIM THAT IS NO GOAL (DL 93d79c3e 01:56Z; marketing set b r1 on 05745055: the person's two goals were
   // added beside the drafted "plan the campaign…", which states no figure and stayed the goal, so a Run withheld their chance).
   // Whether that aim is a task or their own is the AI's to judge from their words, so the host asks once, for what this change
-  // brings; sent unchanged, the card is made and nothing is dropped.
+  // brings; sent unchanged, the card is made and nothing is dropped. Only the saved aim, kept as saved: one the change itself
+  // adds or rewords has no removal to name (Codex r1 on #3697).
   const beside = besideNoGoal(next, goalIdOf(mapped.graph));
   const r = deps.restructure;
-  if (beside !== undefined && besideNoGoal(base.model, goalIdOf(baseMapped.graph)) === undefined && r !== undefined && r.repairs < REPAIRS
+  if (beside !== undefined && base.model.aims.some((a) => stable(a) === stable(beside))
+    && besideNoGoal(base.model, goalIdOf(baseMapped.graph)) === undefined && r !== undefined && r.repairs < REPAIRS
     && !(r.pending !== undefined && stable(r.pending.args.model) === stable(args.model))) {
     r.repairs += 1;
     r.pending = { tool: 'propose_change', args };
-    r.replace = beside.id;
+    r.replace = { id: beside.id, of: args };
     return refused('goal_beside_no_goal', REPLACE_AIM, { aim: { id: beside.id, text: beside.text } });
   }
   // ⭐ THE READINESS SELF-CHECK (`goal-path.ts`): a change that ADDS a blocker to what a Run would get is said back, before its card,
