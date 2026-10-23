@@ -198,7 +198,8 @@ export interface CoreTurnInput {
    * The agent's tools: the typed adapters (`path-b/tools` `pathBTools`), given the recorder each tool calls once with its
    * kit row and result.
    */
-  readonly tools: (onCall: CoreToolRecorder) => readonly Tool[];
+  /** The turn's tools. On a press that approves a card, `press` binds the apply to that card, for every caller (Codex r1 on #3695). */
+  readonly tools: (onCall: CoreToolRecorder, press?: { readonly approves: string }) => readonly Tool[];
   /** Where the turn records its calls, so a caller still has them if the turn throws (the route's turn log). */
   readonly calls?: CoreTurnCalls;
   /**
@@ -299,7 +300,7 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
    * called anyway: no approval, nothing written.
    */
   const blocked = (name: string): boolean => withheld.has(name) || (replyOnly && MODEL_WRITING_TOOLS.has(name));
-  const allTools = input.tools(record);
+  const allTools = input.tools(record, input.press?.decision === 'approve' ? { approves: input.press.proposal_id } : undefined);
   const allowedNames = allTools.flatMap((t) => ('name' in t && !blocked(t.name) ? [t.name] : []));
   const tools = allTools.map((t): Tool => {
     if (!('name' in t) || !blocked(t.name) || t.type !== 'function') return t;

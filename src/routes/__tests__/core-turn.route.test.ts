@@ -311,6 +311,24 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(a.paused).toBeNull();
       expect(pausedRun).toBeNull();
     });
+    it('Codex r1 on #3695: two held cards; the AI applies the OTHER one on the press of the first: the pressed card is the one applied', async () => {
+      const pressA = await propose();
+      const idA = preparedId;
+      const sevenSaid = 'f is at 0.7 by now.';
+      const seven = structuredClone(KNOWN_ANSWER);
+      seven.factors[0] = { ...seven.factors[0]!, value: 0.7, quote: sevenSaid };
+      outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'propB', args: { ...CHANGE, public_label: 'Set f to 0.7', model: seven } }],
+        [{ type: 'message', text: 'I prepared that change too.' }]];
+      const held = ((await typed(sevenSaid)).json() as Json).cards.map((c: Json) => String(c.proposal_id));
+      const idB = held.find((id: string) => id !== idA)!;
+      expect(held, 'both cards are held').toEqual(expect.arrayContaining([idA, idB]));
+      outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply', args: { proposal_id: idB } }], [{ type: 'message', text: 'Saved.' }]];
+      const r = await post(pressA);
+      expect(r.statusCode, r.body).toBe(200);
+      expect(registered).toHaveLength(1);
+      expect(((persisted as Json).living_model as LivingModelT).factors[0], 'A, the pressed card, never B').toMatchObject({ value: 0.6 });
+    });
+
     it('a pause the AI left on an empty id never keeps the held card from its press: the re-press applies it', async () => {
       const press = await propose();
       // A typed turn on which the AI applied with an empty id: its call waits on no card this scenario holds.

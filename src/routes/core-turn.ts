@@ -609,8 +609,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
               analyseAfterCommit: analyseCommittedChange,
               // No research control is in this contract, so no search may be promised (fail closed).
               researchShowable: async () => false,
-              onVerifiedSave: () => { verifiedSave = true; }, restructure,
-              ...(press?.decision === 'approve' ? { pressedProposal: press.proposal_id } : {}) }),
+              onVerifiedSave: () => { verifiedSave = true; }, restructure }),
             settle: async () => { await restructure.settle?.(); },
             // The standing instructions, the same bytes on every call of every scenario (the cached prefix); this turn's own
             // guidance (the drafting arm, a Challenge's note) follows its state block in the turn's input.
