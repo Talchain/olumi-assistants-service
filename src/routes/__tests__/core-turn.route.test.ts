@@ -959,6 +959,25 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(Object.keys(run).sort()).toEqual(['current', 'engine_current', 'goal_chance', 'options', 'run_id']);
     });
 
+    it('DL 23 Oct (served capacity: a new Run unseen until reload): a program reply names the Run its turn stored in `run`, and only that Run', async () => {
+      await savedProgram();
+      const set = { public_label: 'Oven price £2,500', basis: 'their answer', ops: [{ op: 'set_quantity', quantity_id: 'oven_price', value: 2500, low: null, high: null, range_kind: null, quote: 'The oven would cost £2,500' }] };
+      outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'p1', args: set }], [{ type: 'message', text: 'I prepared the oven price; approve its card.' }]];
+      const proposed = (await typed('The oven would cost £2,500.')).json() as Json;
+      expect(proposed.cards as Json[]).toHaveLength(1);
+      // A card stores no Run, so the reply names none.
+      expect(proposed.run).toBeNull();
+      const card = (proposed.cards as Json[])[0]!;
+      outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: 'Saved: the oven price is £2,500.' }]];
+      const approved = await post({ turn_id: randomUUID(), message: card.approve_action.message, source: 'chip_click', chip: { id: card.approve_action.id, action_type: card.approve_action.action_type } });
+      expect(approved.statusCode, approved.body).toBe(200);
+      const runs = persisted!.living_model.runs as Json[];
+      expect(runs).toHaveLength(2);
+      // The approval stored Run 2: the reply names it, so the UI reads it after the write (coreTurnContract run.run_id).
+      expect((approved.json() as Json).run).toMatchObject({ run_id: runs[1]!.run_id, run_key: runs[1]!.run_id, state: { kind: 'complete_current', computed_at: runs[1]!.computed_at } });
+      expect(((approved.json() as Json).canonical_analysis_view as Json).run.run_id).toBe(runs[1]!.run_id);
+    });
+
     it('S3 (batch 2 mrr-r3): two program proposals in one turn still leave the person ONE card to approve; the second is refused with its way on', async () => {
       await savedProgram();
       const set = (quantity_id: string, value: number, quote: string, public_label: string) => ({ public_label, basis: 'their answer',

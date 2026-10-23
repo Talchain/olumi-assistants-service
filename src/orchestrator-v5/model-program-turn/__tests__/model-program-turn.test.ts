@@ -19,7 +19,7 @@ import { project } from '../../model-program/project.js';
 import { simulate } from '../../model-program/simulate/simulate.js';
 import { CANONICAL_JSON_SCHEMA, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX } from '../prompt.js';
 import { evaluateCanonical, seedOf, RUN_DRAWS } from '../evaluate.js';
-import { programReadOf, reopenProgram, savedProgramOf } from '../program-store.js';
+import { programReadOf, reopenProgram, savedProgramOf, sourceTextOf } from '../program-store.js';
 import { applyProgramChange, ProgramChangeParams, proposeProgramChange, readProgramContext, runProgram } from '../program-tools.js';
 import { ProposalStore } from '../../agent-lane/proposal.js';
 import { withNewRun } from '../program-save.js';
@@ -295,9 +295,20 @@ describe('the model-program turn on the real core route', () => {
     expect(drafted.model_program).toMatchObject({ readback: { read: true, canonical_identical: true, runs_identical: true, seed_identical: true } });
     const goalOf = (run: Json, option: string) => (run.result.chances as Json[]).find((o) => o.option_id === option)!.per_goal[0];
     const run1 = persisted!.living_model.runs[0] as Json;
-    // Known answers on 10,000 draws: carry on exactly 0 (330 < 340); the promotion Φ(1.4434) = 0.92554 (Wilson half-width 0.0051).
+    // Known answers, DETERMINISTIC: each stored Run is exactly its stored model simulated on the scenario's seed, and the known
+    // answers are read off that same stored model on seed 1 (GOLD-4's documented seed), 10,000 draws. The scenario's own seed is
+    // fresh per run (a random scenario id), so the fixed bounds are never read on it (#3712 CI: on correct code they failed in
+    // 1 and 5 of 300 random seeds).
+    const chancesOf = (seed: number) => {
+      const lm = persisted!.living_model;
+      return JSON.parse(JSON.stringify(simulate(compile(lm.canonical, { sourceText: sourceTextOf(lm.person_words) }).executable!, { seed, draws: RUN_DRAWS }).options
+        .map((o) => ({ option_id: o.option_id, per_goal: o.per_goal, joint: o.joint, within_limits: o.within_limits, joint_within_limits: o.joint_within_limits, outcomes: o.outcomes })))) as Json[];
+    };
+    const atSeed1 = (option: string) => chancesOf(1).find((o) => o.option_id === option)!.per_goal[0];
+    // Carry on exactly 0 (330 < 340); the promotion Φ(1.4434) = 0.92554 (Wilson half-width 0.0051).
+    expect(run1.result.chances).toEqual(chancesOf(seedOf(SCENARIO)));
     expect([goalOf(run1, 'carry_on').chance, goalOf(run1, 'carry_on').precision_95]).toEqual([0, [0, 0]]);
-    expect(Math.abs(goalOf(run1, 'promotion').chance - 0.92554)).toBeLessThan(0.0075);
+    expect(Math.abs(atSeed1('promotion').chance - 0.92554)).toBeLessThan(0.0075);
     expect((run1.result.chances as Json[]).map((o) => [o.option_id, (o.within_limits as Json).chance])).toEqual([['promotion', 1], ['carry_on', 1]]);
 
     // Change ONE input on its card: leavers 10 → 12. The promotion now needs an effect of 16/3: 1 − Φ(0.2887) = 0.38641.
@@ -310,7 +321,8 @@ describe('the model-program turn on the real core route', () => {
     const run2 = persisted!.living_model.runs[1] as Json;
     expect(run2.receipt.revision_digest).toBe(revisionDigest(m2, persisted!.living_model.person_words));
     expect(goalOf(run2, 'carry_on').chance).toBe(0);
-    expect(Math.abs(goalOf(run2, 'promotion').chance - 0.38641)).toBeLessThan(0.012);
+    expect(run2.result.chances).toEqual(chancesOf(seedOf(SCENARIO)));
+    expect(Math.abs(atSeed1('promotion').chance - 0.38641)).toBeLessThan(0.012);
     expect(card.json().canonical_analysis_view.run.run_id).toBe(run2.run_id);
 
     // Cold reopen: the SAME stored result, Run id and digest, from the stored JSON alone in a fresh module.
@@ -971,7 +983,9 @@ describe('the model-program turn on the real core route', () => {
 
   it('canvas edits on a program: a card figure and a goal target each set ONE figure as the person\'s, with a new Run; a link edit and a resend change nothing', async () => {
     replies = [JSON.stringify(bakery())];
-    await turn({ message: BRIEF });
+    const drafted = await turn({ message: BRIEF });
+    // DL 23 Oct (served capacity, stale card): a reply whose turn stored a Run names it in \`run\`, so the UI reads it after the write.
+    expect(drafted.json().run).toMatchObject({ run_id: persisted!.living_model.runs[0].run_id, run_key: persisted!.living_model.runs[0].run_id, state: { kind: 'complete_current' } });
     sent.length = 0;
     const edit = (event: Json, turn_id = randomUUID()) => turn({ kind: 'system_event', turn_id, event });
     const figure = { kind: 'factor_value_edit', target_id: 'base_sales', value: 320 };
@@ -986,10 +1000,13 @@ describe('the model-program turn on the real core route', () => {
     const drawn = (r.json().model.graph.nodes as Json[]).find((n) => n.id === 'base_sales')!;
     expect(drawn.observed_state).toMatchObject({ value: 320, source: 'user_override' });
     expect(r.json().canonical_analysis_view.run.run_id).toBe(persisted!.living_model.runs[1].run_id);
-    // The same edit resent: answered from what is saved, never applied twice.
+    expect(r.json().run).toMatchObject({ run_id: persisted!.living_model.runs[1].run_id, state: { kind: 'complete_current', computed_at: persisted!.living_model.runs[1].computed_at } });
+    expect(r.json().run.run_id).not.toBe(drafted.json().run.run_id);
+    // The same edit resent: answered from what is saved, never applied twice; it stored no Run, so it names none.
     const saves = registered.length;
     const again = await edit(figure, id);
     expect([again.statusCode, again.json().durability, registered.length]).toEqual([200, 'replayed', saves]);
+    expect(again.json().run).toBeNull();
 
     const target = await edit({ kind: 'goal_target_edit', goal_node_id: 'more_loaves', constraint_type: 'at_least', raw_value: 400, unit: 'loaf/week', base_graph_hash: hashOf(persisted) });
     expect(target.statusCode, target.body).toBe(200);
@@ -1002,6 +1019,7 @@ describe('the model-program turn on the real core route', () => {
     expect(link.json().error).toMatchObject({ code: 'CANVAS_EDIT_REFUSED', nothing_saved: true });
     expect(link.json().error.message).toContain('change it in the chat');
     expect(registered.length).toBe(saved);
+    expect(link.json().run).toBeNull();
   });
 
   it('DL 23 Oct (in-card range edit): a figure typed inside the person\'s own range moves its centre and keeps the range, and the chance moves; outside it, nothing is saved and they are asked', async () => {

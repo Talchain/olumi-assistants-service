@@ -158,6 +158,21 @@ function savedScenarioOf(read: { readonly status: number; readonly json: Rec }):
   };
 }
 
+/**
+ * A program's Run as the reply's `run`, in the shape the scenario read gives a legacy Run, ONLY when this turn stored it (its
+ * newest stored Run is not the one it started from): the UI adopts a new analysis from \`turn.run.run_id\` (read-after-write),
+ * so a program reply whose turn made a Run must name it (DL 23 Oct: an in-card edit's new Run stayed unseen until a reload).
+ */
+function programRunOf(graph: unknown, before: string | null): CoreTurnRun | null {
+  const shown = reopenProgram(graph);
+  const run = shown?.run ?? null;
+  if (run === null || run.run_id === before) return null;
+  const at = (run.result.canonical_analysis_view as { run?: { graph_hash_at_run?: unknown } } | undefined)?.run?.graph_hash_at_run;
+  return { run_key: run.run_id, run_id: run.run_id, computed_against: typeof at === 'string' ? at : null,
+    state: { kind: shown!.current ? 'complete_current' : 'complete_stale', computed_at: run.computed_at } };
+}
+const newestRunId = (read: ReturnType<typeof programReadOf>): string | null => (read.kind === 'program' ? read.program.runs.at(-1)?.run_id ?? null : null);
+
 /** Whether readiness admits a Run: `may_run` when present, else `status === 'ready'` (the legacy route's `admitsRunOffer`). */
 const admitsRun = (analysisReady: unknown): boolean => {
   const ar = (analysisReady ?? {}) as { may_run?: unknown; status?: unknown };
@@ -361,7 +376,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
           const after = savedScenarioOf(await internal(graphPath, { ...FRESH_READ }));
           return send(edited.status === 'saved' ? 200 : edited.status === 'unknown' ? 503 : 409, coreTurnContract({
             turnId, durability: claim.held === 'same' ? 'replayed' : edited.status === 'saved' ? 'recorded' : edited.status === 'unknown' ? 'unknown' : 'not_recorded',
-            revision: after.revision, scenarioRevision: after.identity, graph: appliedGraphWire(after.graph), run: after.run, analysisState: after.analysisState,
+            revision: after.revision, scenarioRevision: after.identity, graph: appliedGraphWire(after.graph), run: programRunOf(after.graph, newestRunId(currentProgram)), analysisState: after.analysisState,
             receipts: edited.status === 'saved' && 'receipt' in edited && edited.receipt !== undefined ? collectTurnReceipts([{ model_version: edited.receipt }]).map((r) => ({ ...r, authorised_by: 'person' as const })) : [],
             error: edited.status === 'saved' ? null : { code: 'CANVAS_EDIT_REFUSED', message: edited.reason ?? 'That change could not be saved.', retry_safe: false, nothing_saved: edited.status !== 'unknown' },
             modelProgram: { canonical_analysis_view: reopenProgram(after.graph)?.view ?? null, model_program: { turn: 'card_edit', saved: edited.status === 'saved' } },
@@ -823,7 +838,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         revision: after.revision, scenarioRevision: after.identity, graph: appliedGraphWire(after.graph),
         cards: await heldCardsOf(store, scenarioId, rowPending, after),
         notes: notesOf(result, after.identity),
-        run: after.run, analysisState: after.analysisState, ...(ranThisTurn ? { analysisResult: after.analysisResult } : {}),
+        run: isProgramGraph(after.graph) ? programRunOf(after.graph, newestRunId(programRead)) : after.run, analysisState: after.analysisState, ...(ranThisTurn ? { analysisResult: after.analysisResult } : {}),
         receipts: programPayload === undefined ? receiptsOf(result)
           : collectTurnReceipts(result.tool_results).map((r) => ({ ...r, authorised_by: programPayload!.model_program['turn'] === 'draft' ? 'olumi' as const : 'person' as const })),
         // A program scenario's analysis is its newest STORED Run as the scenario read serves it (never a recompute), on every turn.
