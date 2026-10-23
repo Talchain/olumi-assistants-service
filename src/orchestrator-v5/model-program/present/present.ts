@@ -348,8 +348,10 @@ export function tippingThresholds(goal: PresentGoal, ask: PresentAsk, probe: Tip
   const exact = (v: number): boolean => probed(v)?.exact === true;
   const metAt = (v: number, optionId: string): boolean | undefined => {
     const r = run(v);
-    const c = r?.options.find((o) => o.option_id === optionId)?.per_goal.find((g) => g.goal_id === goal.goal_id)?.chance;
-    return c === undefined ? undefined : exact(v) ? c === 1 : c >= 0.5;
+    const g = r?.options.find((o) => o.option_id === optionId)?.per_goal.find((x) => x.goal_id === goal.goal_id);
+    // A probe whose goal is withheld (a nonfinite draw) says nothing about the threshold.
+    if (g === undefined || isWithheld(g)) return undefined;
+    return exact(v) ? g.chance === 1 : g.chance >= 0.5;
   };
   const first = run(Number.isFinite(lo0) ? lo0 : 0);
   if (first === null) return [];
