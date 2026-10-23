@@ -33,7 +33,6 @@ import { quantityUnitsCompose, readUnitParts, sameUnit, singular, unitsCompose, 
 import { periodAdverb, periodNoun } from '../../../utils/unit-alphabet.js';
 import { EventRiskV1 } from '../../../schemas/event-risk.js';
 import { riskOccurrenceIsCurrent, riskOccurrenceWindowMonths } from '../../agent-lane/risk-occurrence.js';
-import { RETAINED_LIMIT_QUANTITY_QUESTION } from '../../../graph/retained-limit.js';
 import { isCalendarDate, readStatedDeadline, wholeMonthsBetween } from '../../goal-target/deadline-date.js';
 
 export type WithheldReason =
@@ -585,12 +584,11 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   }
 
   // ── Limits (Track 2): a bound beside the aim, as the legacy lane's limit row (`add_constraint`), read on the factor's frame.
-  // Never widen the frame to fit a limit: that changes PLoT's default uncertainty. Retain off-frame money/count limits
-  // unscored below, using the existing retained-limit projection; the real consumer refuses clamped thresholds.
+  // Never widened to fit (that rescales the factor's links, Codex r1): a limit off the frame is held, as add_constraint refuses it.
   const goal_constraints = model.factors.flatMap((f) => {
     const l = f.limit ?? null;
     if (l === null) return [];
-    if (!current.has(f.id) || l.value < 0 || (f.unit === '%' && l.value > caps.get(f.id)!)) { hold(f.id, 'limit_not_in_slice'); return []; }
+    if (!current.has(f.id) || l.value < 0 || l.value > caps.get(f.id)!) { hold(f.id, 'limit_not_in_slice'); return []; }
     const strict = l.comparator === '<' || l.comparator === '>';
     return [{ constraint_id: `limit_${f.id}`, node_id: f.id, operator: l.comparator.startsWith('<') ? '<=' : '>=',
       ...(strict ? { operator_as_stated: l.comparator } : {}), value: l.value, label: f.label, provenance: stated(l.source) ? 'explicit' : 'inferred',
@@ -943,15 +941,6 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
       restsOn.push(...causes, ...dropped.map((id) => ({ id, reason: 'setting_not_convertible' as const })),
         ...conditioned.map((c) => ({ id: `condition:${c.text}`, reason: 'condition_not_in_slice' as const, applies_to: [...c.applies_to] })));
     }
-  }
-
-  // Missing forecast or an off-frame limit must not fabricate a budget pass or refuse unrelated calculations.
-  // Preserve the saved limit; the existing Run projection removes its scoring frame and withholds the full joint.
-  const connected = new Set(edges.flatMap(e => [e.from, e.to]));
-  for (const c of goal_constraints) if (!connected.has(c.node_id) || c.value > caps.get(c.node_id)!) {
-    Object.assign(c, { retained_unresolved_limit: { state: 'unscored', role: 'original', reason: 'retained_limit_quantity_unresolved',
-      previous_constraint_id: c.constraint_id, proposed_constraint_ids: [], question: RETAINED_LIMIT_QUANTITY_QUESTION } });
-    hold(c.node_id, 'limit_not_in_slice');
   }
 
   const frames = new Map<string, Frame>(model.factors.flatMap((f) => (caps.has(f.id) ? [[f.id, { cap: caps.get(f.id)!, unit: f.unit }] as const] : [])));

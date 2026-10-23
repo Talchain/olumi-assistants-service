@@ -39,7 +39,7 @@ describe('B1: quantity-owned frames and honest range conversion', () => {
     expect(before.options).toEqual(m.options);
   });
 
-  it('Paul’s actual 459f8bde MRR model retains the £49→£59 frame, natural effect and £20k budget', () => {
+  it('Paul’s actual 459f8bde MRR model retains the £49→£59 frame and natural effect without changing budget handling', () => {
     // User-provided export SHA256 95d5526063aa9482e65328cab41380c058cefa7518e4d296646587a67ad69192.
     // Exact saved living_model only (no user/session identifiers or responses); this is a development regression.
     const m = LivingModel.parse(JSON.parse(readFileSync(new URL('./fixtures/mrr-459f8bde-living-model.json', import.meta.url), 'utf8')));
@@ -49,32 +49,10 @@ describe('B1: quantity-owned frames and honest range conversion', () => {
     expect(node(out.graph, 'features_price').interventions.price.raw_value).toBe(59);
     expect((edge.strength as Rec).mean * out.frames.get('mrr')!.cap / out.frames.get('price')!.cap).toBeCloseTo(300, 12);
     expect(convertingOlumiEstimate(edge, out.graph, 'mrr')).toBe(true);
-    expect((out.graph as Rec).goal_constraints).toContainEqual(expect.objectContaining({ node_id: 'spend', value: 20000, value_frame: 'level' }));
+    expect((out.graph as Rec).goal_constraints).toBeUndefined(); // B1 does not change the existing off-frame-limit path.
     expect(node(out.graph, 'spend').observed_state.cap).toBe(18750);
-    expect((out.graph as Rec).goal_constraints.find((c: Rec) => c.node_id === 'spend').retained_unresolved_limit.state).toBe('unscored');
     expect(out.withheld).toContainEqual({ id: 'spend', reason: 'limit_not_in_slice' });
     expect(m).toEqual(before); // The churn aim, conditions, risk, quotes and authorship are not simplified away.
-  });
-
-  it('an off-frame budget is retained unscored without changing any numerical frame, level, spread or link', () => {
-    const m = money();
-    Object.assign(m.factors[0]!, { unit: '£', value: 0, low: 0, high: 20000,
-      limit: { comparator: '<=', value: 20000, source: 'user', party: null, quote: 'spend at most £20,000' } });
-    Object.assign(m.options[1]!.settings[0]!, { unit: '£', value: 15000 });
-    const before = structuredClone(m), out = mapLivingModel(m);
-    const without = structuredClone(m); without.factors[0]!.limit = null;
-    const { goal_constraints, ...rest } = out.graph as Rec;
-    expect(rest).toEqual(mapLivingModel(without).graph);
-    expect(out.frames).toEqual(mapLivingModel(without).frames);
-    expect(node(out.graph, 'f').observed_state.cap).toBe(18750);
-    expect(goal_constraints).toContainEqual(expect.objectContaining({ node_id: 'f', value: 20000, value_frame: 'level',
-      provenance: 'explicit', retained_unresolved_limit: expect.objectContaining({ state: 'unscored' }) }));
-    expect(out.withheld).toContainEqual({ id: 'f', reason: 'limit_not_in_slice' });
-    expect(m).toEqual(before);
-    Object.assign(m.factors[0]!, { unit: '%', low: null, high: null, limit: { ...m.factors[0]!.limit!, value: 150 } });
-    Object.assign(m.options[1]!.settings[0]!, { unit: '%', value: 40 });
-    expect(node(mapLivingModel(m).graph, 'f').observed_state.cap).toBe(100);
-    expect(mapLivingModel(m).withheld).toContainEqual({ id: 'f', reason: 'limit_not_in_slice' });
   });
 
   it('the real mapper → saved graph → driver preserves the person’s range author, separately from Normal conversion', () => {

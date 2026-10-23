@@ -93,13 +93,12 @@ describe('Track 2: a limit beside the aim is the legacy limit row', () => {
     expect(rest).toEqual(mapLivingModel(without).graph);
   });
 
-  it('a missing level is held and an off-frame limit is retained unscored, never clamped', () => {
+  it('NEGATIVE: a limit with no known level, or off the factor\'s frame, is held with its reason, never sent unscaled or clamped', () => {
     for (const patch of [{ value: null }, { limit: { comparator: '<=' as const, value: 20000, ...who(LIMIT_WORDS) } }]) {
       const m = deliveries('factor');
       m.factors[2] = { ...m.factors[2]!, ...patch };
       const mapped = mapLivingModel(m);
-      if (patch.value === null) expect(mapped.graph, JSON.stringify(patch)).not.toHaveProperty('goal_constraints');
-      else expect((mapped.graph as Rec).goal_constraints[0]).toMatchObject({ value: 20000, retained_unresolved_limit: { state: 'unscored' } });
+      expect(mapped.graph, JSON.stringify(patch)).not.toHaveProperty('goal_constraints');
       expect(mapped.withheld.map((w) => `${w.id}:${w.reason}`)).toContain('monthly_cost:limit_not_in_slice');
     }
   });
