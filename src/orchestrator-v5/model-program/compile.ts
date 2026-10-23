@@ -12,8 +12,9 @@
  *    unfaithful drafts).
  *  · ASKS are legitimate, successful outcomes: a figure only the person can give. Each ask fills EXACTLY ONE quantity
  *    (`fillQuantity` in answer.ts) and lists what it feeds; each goal lists its own asks, so "answer these and the chance
- *    appears" is true by construction. An ask that CANCELS OUT of a goal (decided numerically, `probe.ts`) is not asked for
- *    that goal, and is kept only where it matters.
+ *    appears" is true by construction. An asked fact is NEVER removed or given a value by the compiler: finite numerical
+ *    agreement cannot prove cancellation or its domain (the buddy's BLOCK, upheld by the DL). Cancellation may only ever be
+ *    PROVEN from the canonical forms with its domain conditions, and only after a PL review: not built.
  *  · WITHHELD goals rest on a quantity that is `unknown` or `unsupported`, a range the ruled law holds, or a window or timing
  *    that is a range; the reason says which. Withheld items are echoed in `executable.withheld` and `coverage`.
  *  · UNVERIFIED items are the person's by their author, but their quote is not in the person's words (`sourceText`). They
@@ -33,7 +34,6 @@ import {
 } from './canonical.js';
 import type { ExecutableModel, Quantity as XQuantity, Goal as XGoal, Limit as XLimit, Option as XOption, Risk as XRisk, Dist, Domain, Withheld, FixedAuthor } from './executable.js';
 import { parseUnit, multiply, divide, sameDims, isDimensionless, showUnit, perPeriod, isCalendarConversion, TIME_DIMS, type Unit } from './units.js';
-import { probeMargins, sameMargins } from './probe.js';
 import { rangeLaw, type RangeReading, type RangeDist } from './simulate/range-law.js';
 
 export type { RangeReading };
@@ -52,7 +52,7 @@ export type GoalOutcome = {
   reasons: string[];
   /** The asked quantities this goal waits on: answer exactly these (and nothing is withheld) and its chance appears. */
   asks: string[];
-  /** Asked quantities that cancel out of this goal (checked numerically): not asked for it. */
+  /** Reserved for a cancellation PROVEN from the canonical forms (PL review first; not built): always [] now. */
   cancelled: string[];
   /** True for an aim with no measure yet: left out of the chance, with a coaching question. */
   needs_measure: boolean;
@@ -605,8 +605,8 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
   const blockersOf = (closure: Iterable<string>) => [...closure].map((x) => Q.get(x)).filter((q): q is CanonicalQuantityT => !!q && (isAsk(q) || withholds(q)));
   const describe = (q: CanonicalQuantityT) => (q.status === 'asked' ? `needs "${q.label}": ${q.question}` : held.has(q.id) ? `rests on "${q.label}": ${held.get(q.id)}; give a most likely figure, or ask`
     : unresolved.has(q.id) ? `needs how to read "${q.label}": ${unresolved.get(q.id)}` : `rests on "${q.label}", which is ${q.status.replace('_', ' ')}: ${q.basis}`);
-  const outcomeOf = (closure: Set<string>, win?: WinState, cancelled: ReadonlySet<string> = new Set()): { status: Outcome; reasons: string[]; asks: string[] } => {
-    const blockers = blockersOf([...closure, ...(win?.blockers ?? [])]).filter((q) => !cancelled.has(q.id));
+  const outcomeOf = (closure: Set<string>, win?: WinState): { status: Outcome; reasons: string[]; asks: string[] } => {
+    const blockers = blockersOf([...closure, ...(win?.blockers ?? [])]);
     const withheld = [...(win?.withheld ?? []), ...blockers.filter(withholds).map(describe)];
     const asked = [...new Map(blockers.filter((q) => isAsk(q) && !withholds(q)).map((q) => [q.id, q] as const)).values()];
     const reasons = [...withheld, ...asked.map(describe), ...(win?.deadline ? [`It changes over time, so it needs a deadline: ${win.deadline}`] : [])];
@@ -659,8 +659,8 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
     conversions: [], implicit_as_stated: model.options.length === 0,
   };
 
-  // ── the executable subset (also used, with placeholders, by the cancellation probe) ────────────────────────────────
-  const build = (goals: CanonicalGoalT[], limits: CanonicalLimitT[], options: CanonicalModelT['options'], placeholders: ReadonlyMap<string, number>, conversions?: Conversion[]): ExecutableModel => {
+  // ── the executable subset: only supported goals, limits and inputs ────────────────────────────────────────────────
+  const build = (goals: CanonicalGoalT[], limits: CanonicalLimitT[], options: CanonicalModelT['options'], conversions?: Conversion[]): ExecutableModel => {
     const included = upstream([...goals.flatMap(goalRoots), ...limits.flatMap(limitRoots)]);
     const xRisks = new Set<string>();
     const xSets = new Map<string, Set<number>>();
@@ -686,7 +686,7 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
       const law = readings.get(q.id);
       if (conversions && law) conversions.push({ kind: 'range_law', quantity: q.id, low: q.low! * u.scale, high: q.high! * u.scale, range_kind: q.range_kind ?? 'plausible', domain: domainOf(q) ?? null, reading: law, author: 'olumi', provisional: true });
       const base = { id: q.id, label: q.label, unit, reading: 'state' as const }; // readings are set by `setReadings` once the subset is final
-      if (r === undefined) quantities.push({ ...base, dist: placeholders.has(q.id) ? { kind: 'fixed', value: placeholders.get(q.id)!, author: 'placeholder' } : distOf(q, u.scale, domainOf(q)) });
+      if (r === undefined) quantities.push({ ...base, dist: distOf(q, u.scale, domainOf(q)) });
       else if (r.form === 'stock') quantities.push({ ...base, stock: { start: r.start, inflows: [...r.inflows], outflows: [...r.outflows] } });
       else if (r.form === 'effect') quantities.push({ ...base, equation: { form: 'effect', base: r.base, terms: r.terms.map((t) => ({ coefficient: t.coefficient, driver: t.driver })) } });
       else quantities.push(...lowerDefinition(base, r, (ids) => showUnit({ dims: ids.reduce((a, i) => multiply(a, U.get(i)!), { dims: {}, scale: 1 } as Unit).dims, scale: 1 })));
@@ -707,32 +707,8 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
     return { periods: horizon, period_unit: model.period, quantities, goals: xGoals, limits: xLimits, options: xOptions, risks: xRiskList, withheld: [] };
   };
 
-  // ── asks that CANCEL OUT of a goal or limit: decided numerically on the same draws (probe.ts) ──────────────────────
-  if (!errors.length) {
-    const askedIds = model.quantities.filter((q) => q.status === 'asked').map((q) => q.id);
-    const placeholderFor = new Map(askedIds.map((id, i) => [id, 1 + 0.173 * (i + 1)] as const));
-    const probeOptions = model.options.filter((o) => perOption.find((p) => p.option_id === o.id)!.status !== 'withheld' && o.status === 'live');
-    const probe = (check: { kind: 'goal'; g: CanonicalGoalT } | { kind: 'limit'; l: CanonicalLimitT }, outcome: { status: Outcome; asks: string[]; cancelled: string[] }, win: WinState | undefined) => {
-      if (outcome.status !== 'asks' || !win?.win || !outcome.asks.length) return;
-      const x = check.kind === 'goal' ? build([check.g], [], probeOptions, placeholderFor) : build([], [check.l], probeOptions, placeholderFor);
-      const target = check.kind === 'goal' ? x.goals[0] : x.limits[0];
-      for (const a of outcome.asks.filter((id) => placeholderFor.has(id))) {
-        const v = placeholderFor.get(a)!;
-        const one = probeMargins(x, target, new Map([[a, v]]));
-        const two = probeMargins(x, target, new Map([[a, v * 2.3]]));
-        if (sameMargins(one, two)) outcome.cancelled.push(a);
-      }
-    };
-    model.goals.forEach((g, i) => { if (has(g.measure)) probe({ kind: 'goal', g }, perGoal[i], goalWin.get(g.id)); });
-    model.limits.forEach((l, i) => { if (has(l.measure)) probe({ kind: 'limit', l }, perLimit[i], limitWin.get(l.id)); });
-    const recheck = (p: GoalOutcome | LimitOutcome, roots: string[], win: WinState | undefined) => {
-      if (!p.cancelled.length) return;
-      const o = outcomeOf(upstream(roots), win, new Set(p.cancelled));
-      Object.assign(p, o, { reasons: [...o.reasons, ...p.cancelled.map((a) => `"${Q.get(a)!.label}" cancels out of it, so it is not asked for it.`)] });
-    };
-    model.goals.forEach((g, i) => recheck(perGoal[i], goalRoots(g), goalWin.get(g.id)));
-    model.limits.forEach((l, i) => recheck(perLimit[i], limitRoots(l), limitWin.get(l.id)));
-  }
+  // Finite probes cannot establish an identity or its domain. Missing facts stay asked;
+  // no diagnostic agreement may remove an ask or substitute an invented production value.
 
   // ── joint, limits, coverage, asks, coaching ────────────────────────────────────────────────────────────────────────
   const worst = (xs: { status: Outcome }[]): Outcome => (xs.some((x) => x.status === 'withheld') ? 'withheld' : xs.some((x) => x.status === 'asks') ? 'asks' : 'calculable');
@@ -756,14 +732,12 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
     reasons: measuredLimitOutcomes.filter((p) => p.status !== 'calculable').map((p) => `Staying within the limits waits on "${label(p.limit_id)}".`),
   };
   const feedsOf = (id: string) => [
-    ...perGoal.filter((p) => goalClosure.get(p.goal_id)?.has(id) && !p.cancelled.includes(id)).map((p) => p.goal_id),
-    ...perLimit.filter((p) => limitClosure.get(p.limit_id)?.has(id) && !p.cancelled.includes(id)).map((p) => p.limit_id),
+    ...perGoal.filter((p) => goalClosure.get(p.goal_id)?.has(id)).map((p) => p.goal_id),
+    ...perLimit.filter((p) => limitClosure.get(p.limit_id)?.has(id)).map((p) => p.limit_id),
     ...model.options.filter((o) => o.status === 'live' && optionClosure.get(o.id)!.has(id)).map((o) => o.id),
   ];
-  const cancelsOf = (id: string) => [...perGoal.filter((p) => p.cancelled.includes(id)).map((p) => p.goal_id), ...perLimit.filter((p) => p.cancelled.includes(id)).map((p) => p.limit_id)];
   const figureAsks: Ask[] = model.quantities.filter((q) => q.status === 'asked' && has(q.question))
-    .map((q) => ({ quantity_id: q.id, label: q.label, unit: q.unit, question: q.question!, feeds: feedsOf(q.id), cancels_out_of: cancelsOf(q.id), edit: { op: 'fill_quantity' as const, quantity_id: q.id } }))
-    .filter((a) => a.feeds.length > 0 || a.cancels_out_of.length === 0); // an ask that cancels everywhere it reaches is never asked
+    .map((q) => ({ quantity_id: q.id, label: q.label, unit: q.unit, question: q.question!, feeds: feedsOf(q.id), cancels_out_of: [], edit: { op: 'fill_quantity' as const, quantity_id: q.id } }));
   const readingAsks: Ask[] = [...unresolved].map(([id, question]) => ({ quantity_id: id, label: Q.get(id)!.label, unit: Q.get(id)!.unit, question, feeds: feedsOf(id), cancels_out_of: [], edit: { op: 'set_range_kind' as const, quantity_id: id } }));
   result.asks = [...figureAsks, ...readingAsks].sort((a, b) => b.feeds.length - a.feeds.length);
   result.coaching = [
@@ -792,10 +766,8 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
   // A run needs something to check (a goal, or limits only) and something to compare.
   if ((!goodGoals.length && !goodLimits.length) || (model.options.length > 0 && !goodOptions.length)) return result;
 
-  const placeholders = new Map<string, number>();
-  for (const q of model.quantities) if (q.status === 'asked' && [...perGoal, ...perLimit].some((p) => p.cancelled.includes(q.id))) placeholders.set(q.id, 1);
   const conversions: Conversion[] = [];
-  const x = build(goodGoals, goodLimits, goodOptions, placeholders, conversions);
+  const x = build(goodGoals, goodLimits, goodOptions, conversions);
   const inRun = new Set(x.risks.map((k) => k.id));
   x.withheld = [
     ...withheldList,

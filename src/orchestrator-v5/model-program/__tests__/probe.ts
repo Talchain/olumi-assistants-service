@@ -1,57 +1,13 @@
 /**
- * A STRUCTURAL PROBE (spike S1; DL, phase 0b fix 2): does an asked figure CANCEL OUT of a goal? Decided numerically, never
- * symbolically: evaluate the goal's per-draw outcome margins twice on the same draws, with the asked figure at two different
- * values; identical margins mean it cancels ("today's output per developer" under a "+10 % on today" goal).
- *
- * This is NOT the simulator and never produces a chance: draws are deterministic points across each range (the range law is
- * irrelevant to an identity), and only margins are compared. It follows the executable model's reading convention
- * (executable.ts): values[t] are computed from the stocks at boundary t; a flow reads intervals, a state reads boundaries.
+ * A TEST-ONLY DIAGNOSTIC EVALUATOR (spike S1). It is never part of admission: the compiler never removes an ask or gives a
+ * fact a value from a probe (buddy BLOCK upheld by the DL, 23 Oct: two-value agreement proves no identity and no domain).
+ * The one production evaluator is S2's simulator. This helper only lets S1's rows read a structural fact on fixed inputs
+ * (the PL's inventory counterexample); it should be replaced by S2's simulate once the branches meet.
+ * It follows the reading convention (executable.ts): values[t] are computed from the stocks at boundary t.
  */
-import type { ExecutableModel, Goal, Limit, Quantity } from './executable.js';
+import type { ExecutableModel, Goal, Limit, Quantity } from '../executable.js';
 
 type Check = Goal | Limit;
-
-/** Deterministic points in [0, 1): a fixed LCG, so both runs of a probe see the same draws. */
-function points(seed: number, n: number): number[] {
-  let s = (seed * 2654435761) >>> 0 || 1;
-  return Array.from({ length: n }, () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 2 ** 32; });
-}
-
-/** The margins of one check, per option and draw (and per period for `every`), with `override` fixing the given inputs. */
-export function probeMargins(x: ExecutableModel, check: Check, override: ReadonlyMap<string, number>, draws = 8): number[] {
-  const byId = new Map(x.quantities.map((q) => [q.id, q] as const));
-  const target = 'target' in check ? check.target : check.bound;
-  const out: number[] = [];
-  const u = x.quantities.map((q, i) => points(i + 1, draws));
-  const ru = x.risks.map((_, i) => points(1000 + i, draws));
-  for (const option of x.options) for (let d = 0; d < draws; d++) {
-    const values = run(x, byId, option.sets, override, (qi) => u[qi][d], (ri) => ru[ri][d]);
-    const read = (id: string, t: number) => values[t].get(id) ?? NaN;
-    const reading = (id: string) => byId.get(id)?.reading ?? 'state';
-    const { start_period: s, periods: p } = check.window;
-    const span = (id: string) => (reading(id) === 'flow' ? range(s, s + p - 1) : range(s + 1, s + p));
-    const endAt = (id: string) => (reading(id) === 'flow' ? s + p - 1 : s + p);
-    const agg = (id: string): number => {
-      const xs = span(id).map((t) => read(id, t));
-      switch (check.aggregation) {
-        case 'end': return read(id, endAt(id));
-        case 'sum': return xs.reduce((a, b) => a + b, 0);
-        case 'mean': return xs.reduce((a, b) => a + b, 0) / p;
-        case 'max': return Math.max(...xs);
-        case 'min': return Math.min(...xs);
-        default: return NaN;
-      }
-    };
-    const rhs = read(target, endAt(target));
-    if (check.aggregation === 'every') {
-      for (const t of span(check.quantity)) out.push(margin(read(check.quantity, t), read(target, t)));
-    } else {
-      const lhs = check.per ? agg(check.quantity) / agg(check.per) : agg(check.quantity);
-      out.push(margin(lhs, rhs));
-    }
-  }
-  return out;
-}
 
 /** One check's aggregated value per option on the probe's first draw (fixed inputs make it exact): for structural rows. */
 export function probeValue(x: ExecutableModel, check: Check, optionId: string): number {
@@ -63,14 +19,6 @@ export function probeValue(x: ExecutableModel, check: Check, optionId: string): 
   const at = check.aggregation === 'end' ? (flow ? s + p - 1 : s + p) : NaN;
   return values[at]?.get(check.quantity) ?? NaN;
 }
-
-/** True when the two margin lists are the same, value by value (non-finite values never count as the same). */
-export function sameMargins(a: readonly number[], b: readonly number[]): boolean {
-  return a.length === b.length && a.every((v, i) => Number.isFinite(v) && Number.isFinite(b[i]) && Math.abs(v - b[i]) <= 1e-9 * Math.max(1, Math.abs(v), Math.abs(b[i])));
-}
-
-const margin = (l: number, r: number) => (r !== 0 ? (l - r) / Math.abs(r) : l - r);
-const range = (a: number, b: number) => Array.from({ length: Math.max(0, b - a + 1) }, (_, i) => a + i);
 
 function run(x: ExecutableModel, byId: Map<string, Quantity>, sets: ExecutableModel['options'][number]['sets'],
   override: ReadonlyMap<string, number>, draw: (qi: number) => number, riskDraw: (ri: number) => number): Map<string, number>[] {

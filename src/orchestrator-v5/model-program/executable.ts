@@ -4,10 +4,9 @@
 //    or limit read as a ratio of two window aggregates (`per`); `withheld[]` echoed through to the result; limits-only runs.
 // r4 (PL rulings A and B, 23 Oct): readings are STRUCTURAL only (options and risks never change one); a range carries
 //    range_kind (bounds | plausible, from the person's words) and its domain (a stated hard restriction or a mathematical one).
-export type FixedAuthor = 'person' | 'olumi' | 'structure' | 'placeholder';
+export type FixedAuthor = 'person' | 'olumi' | 'structure';
 // structure: an exact constant that defines the model's structure (a unit conversion, a 0/1 switch, a count); never an estimate.
-// placeholder: a value for an asked figure that CANCELS out of every goal and limit in this model (checked numerically by the
-//              compiler); it can change no result, and is never shown as anyone's figure.
+// (r5: no 'placeholder': the compiler never gives an asked fact a value. An asked fact never reaches the executable model.)
 export type Dist =
   | { kind: 'fixed'; value: number; author: FixedAuthor }
   | { kind: 'range'; low: number; high: number; mode?: number; basis: 'person_range' | 'olumi_estimate'; range_kind: 'bounds' | 'plausible'; domain?: Domain };

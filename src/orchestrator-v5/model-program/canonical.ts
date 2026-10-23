@@ -15,7 +15,7 @@
  *  · a quantity is a FACT (the person's own situation: asked when missing, never estimated) or a COEFFICIENT (a mechanism's
  *    size: Olumi may estimate it, labelled and ranged);
  *  · a figure only the person can give and did not is `asked` (null + a question). Asking is a legitimate, successful outcome:
- *    it withholds only what that figure feeds, and an ask that cancels out of a goal is not asked for that goal;
+ *    it withholds only what that figure feeds, and the compiler never removes it or gives it a value;
  *  · relations are canonical forms only: a definition (a signed SUM, or a PRODUCT of powers ±1: difference, ratio and mixed
  *    signs in one op), an effect (base + Σ coefficient × driver, each coefficient an uncertain mechanism size in natural units)
  *    or a stock (start, inflows, outflows per period). An exact identity is a definition, never an effect;

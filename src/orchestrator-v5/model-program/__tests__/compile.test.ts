@@ -9,7 +9,7 @@ import { CanonicalModel, type CanonicalModelT, type CanonicalQuantityT, type Can
 import { compile, compileJson, NO_GOAL_QUESTION } from '../compile.js';
 import { project } from '../project.js';
 import { fillQuantity, setRangeKind } from '../answer.js';
-import { probeValue } from '../probe.js';
+import { probeValue } from './probe.js';
 import { parseUnit, sameDims } from '../units.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 
@@ -342,7 +342,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(compile(hiding).errors.map((e) => [e.code, e.items])).toEqual([['structure_value', ['costs']]]);
   });
 
-  it('phase 0b fix 2: an ask that CANCELS OUT of a goal (checked numerically) is not asked for it, and stays asked where it matters', () => {
+  it('finite numerical agreement cannot suppress an asked fact or invent its value', () => {
     const team = (goals: CanonicalGoalT[]) => model({
       question: 'Should the bakery hire a second baker?', period: 'month',
       quantities: [
@@ -365,13 +365,37 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     const r = compile(team([growth, level]));
     expect(r.errors).toEqual([]);
     const g = Object.fromEntries(r.perGoal.map((p) => [p.goal_id, p]));
-    expect(g.more_loaves).toMatchObject({ status: 'calculable', asks: [], cancelled: ['loaves_per_baker'] });
+    expect(g.more_loaves).toMatchObject({ status: 'asks', asks: ['loaves_per_baker'], cancelled: [] });
     expect(g.five_thousand).toMatchObject({ status: 'asks', asks: ['loaves_per_baker'], cancelled: [] }); // contrast: a level needs it
-    expect(r.asks).toEqual([expect.objectContaining({ quantity_id: 'loaves_per_baker', feeds: ['five_thousand'], cancels_out_of: ['more_loaves'] })]);
-    expect(r.executable!.goals.map((x) => x.id)).toEqual(['more_loaves']);
-    expect(xq(r).get('loaves_per_baker')!.dist).toEqual({ kind: 'fixed', value: 1, author: 'placeholder' });
-    // Alone, the cancelling ask is never asked at all.
-    expect(compile(team([growth])).asks).toEqual([]);
+    expect(r.asks).toEqual([expect.objectContaining({ quantity_id: 'loaves_per_baker', feeds: ['more_loaves', 'five_thousand'], cancels_out_of: [] })]);
+    expect(r.executable).toBeNull();
+    expect(compile(team([growth])).asks).toEqual([expect.objectContaining({ quantity_id: 'loaves_per_baker', feeds: ['more_loaves'], cancels_out_of: [] })]);
+  });
+
+  it('a nonlinear expression equal at both old probe points still depends on the missing fact', () => {
+    // These are the old probe points for the first ask. Equality at those two roots is not cancellation.
+    const a = 1 + 0.173, b = a * 2.3;
+    const m = model({ quantities: [asked('q', '1', 'What is q?'), person('a', '1', a, 'a is 1.173'),
+      person('b', '1', b, 'b is 2.6979'), derived('qa', '1'), derived('qb', '1'), derived('curve', '1'),
+      person('threshold', '1', 1, 'at least one'), person('one_period', 'week', 1, 'within one week')],
+      relations: [def('qa_rel', 'qa', 'difference', ['q', 'a']), def('qb_rel', 'qb', 'difference', ['q', 'b']),
+        def('curve_rel', 'curve', 'product', ['qa', 'qb'])],
+      goals: [goal('g', 'curve', '>=', 'threshold', 'end', 'one_period', 'at least one')] });
+    const r = compile(m);
+    expect(r.errors).toEqual([]);
+    expect(r.perGoal[0]).toMatchObject({ status: 'asks', asks: ['q'], cancelled: [] });
+    expect(r.executable).toBeNull();
+  });
+
+  it('an unknown denominator cannot acquire a nonzero domain from sampled agreement', () => {
+    const m = model({ quantities: [asked('q', '1', 'What is q?'), derived('ratio', '1'),
+      person('threshold', '1', 1, 'at least one'), person('one_period', 'week', 1, 'within one week')],
+      relations: [def('ratio_rel', 'ratio', 'ratio', ['q', 'q'])],
+      goals: [goal('g', 'ratio', '>=', 'threshold', 'end', 'one_period', 'at least one')] });
+    const r = compile(m);
+    expect(r.errors).toEqual([]);
+    expect(r.perGoal[0]).toMatchObject({ status: 'asks', asks: ['q'], cancelled: [] });
+    expect(r.executable).toBeNull();
   });
 
   it('phase 0b fix 6: a preference is shown and reported, never a goal or a limit', () => {
