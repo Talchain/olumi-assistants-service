@@ -53,7 +53,6 @@ import { bindHeldApprovalWriter, commitHeldProposalInProcess } from '../orchestr
 import { isRevisionConflict, ModelReadFailedError, promoteRevisionConflictResponse } from '../orchestrator-v5/graph-revision-conflict.js';
 import { MODEL_WRITE_OWNERSHIP_REFUSAL_BODY, ModelWriteOwnershipRefused, readSuccessfulDoorEntries, readUnsavableEffects, recordReleasedTurnClaim } from '../orchestrator-v5/ownership/door-ownership.js';
 import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
-import { CORE_DRAFTER_RULES } from '../orchestrator-v5/path-b/drafting-guidance.js';
 import { readCanonicalContext, type TurnCheck } from '../orchestrator-v5/path-b/tools/index.js';
 import { APPLY_CHANGE, isChangeProposal } from '../orchestrator-v5/path-b/tools/change-tools.js';
 import { NOTE_ON_ITEM } from '../orchestrator-v5/path-b/tools/note-on-item.js';
@@ -68,7 +67,7 @@ import {
   appliedGraphWire, constructionDeadline, CORE_RUN_PRESS_WITHHELD, coreTurnCapabilities, coreTurnStores, coreTurnTools, graphReadyEmitter,
 } from '../orchestrator-v5/core-route/deps.js';
 import { coreActionBarOf } from '../orchestrator-v5/core-route/action-bar.js';
-import { CORE_ALIGNED_INSTRUCTIONS, draftArmOf, instructionsForMode } from '../orchestrator-v5/core-route/instructions.js';
+import { CORE_ALIGNED_INSTRUCTIONS, instructionsForMode } from '../orchestrator-v5/core-route/instructions.js';
 import {
   AGENT_TURN_CLAIM_WAIT, agentTurnRequestHash, challengeTargetOf, chipOperationOf, claimHashFor, claimTurnIdOf, isChiplessRetry,
   recordedOutcomeOf, requestHashOfAnswer, requestHashOfClaim, sameAgentTurnRequest, typedRowProof, withChipOperation, withRecordedOutcome,
@@ -80,6 +79,9 @@ import {
   type CoreTurnError, type CoreTurnNote, type CoreTurnReceipt, type CoreTurnRun,
 } from '../orchestrator-v5/core-route/contract.js';
 import { CONVERSATION_ROWS_READ } from './assist.v1.scenario-graph.js';
+import { runModelProgramTurn } from '../orchestrator-v5/model-program-turn/turn.js';
+import { isProgramGraph, programReadOf, reopenProgram, unreadableWords } from '../orchestrator-v5/model-program-turn/program-store.js';
+import { applyCanvasFigure, PROGRAM_TURN_GUIDANCE, readProgramContext } from '../orchestrator-v5/model-program-turn/program-tools.js';
 import { log } from '../utils/telemetry.js';
 
 export const CORE_TURN_PATH = '/agent/v1/core-turn';
@@ -335,6 +337,37 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       // it from its own record: the store replays a turn id it committed and never writes it twice.
       const slot = await acquireCoreTurnSlot(scenarioId);
       try {
+        // ⭐ A PROGRAM scenario's canvas figure edit (alpha): the person's own hand on ONE figure, by the id it is drawn under,
+        // saved with a new Run (`applyCanvasFigure`). Any other canvas edit on a program is refused with its reason, never a 500.
+        const current = savedScenarioOf(await internal(graphPath, { ...FRESH_READ }));
+        const currentProgram = programReadOf(current.graph);
+        if (currentProgram.kind === 'unreadable') {
+          return send(409, coreTurnContract({ turnId, durability: 'not_recorded', revision: current.revision, scenarioRevision: current.identity, graph: appliedGraphWire(current.graph),
+            error: { code: 'MODEL_PROGRAM_UNREADABLE', message: unreadableWords(currentProgram.reason), retry_safe: false, nothing_saved: true }, agent: { forwarded_kind: kind, program: true } }));
+        }
+        if (currentProgram.kind === 'program') {
+          const ev = isRec(body.event) ? body.event : isRec(body.system_event) ? body.system_event : {};
+          const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+          // A card's figure (by its quantity id) or a goal's target; a resend of the same edit is answered from what is saved.
+          const figure = ev.kind === 'factor_value_edit' && typeof ev.target_id === 'string' && num(ev.raw_value ?? ev.value) !== undefined
+            ? { target: { quantity_id: ev.target_id }, value: num(ev.raw_value ?? ev.value)! }
+            : ev.kind === 'goal_target_edit' && typeof ev.goal_node_id === 'string' && num(ev.raw_value) !== undefined
+              ? { target: { goal_id: ev.goal_node_id }, value: num(ev.raw_value)! } : undefined;
+          const edited = claim.held === 'same' ? { status: 'saved' as const }
+            : figure !== undefined ? await applyCanvasFigure({ dispatch }, scenarioId, { ...figure, operation_key: turnId })
+            : { status: 'refused' as const, reason: ev.kind === 'edge_strength_edit'
+              ? 'A link\'s size on this model is a figure in its own units; change it in the chat for now.'
+              : 'Only a figure on a card or a goal\'s target can be edited here on this model; ask Olumi in the chat for other changes.' };
+          const after = savedScenarioOf(await internal(graphPath, { ...FRESH_READ }));
+          return send(edited.status === 'saved' ? 200 : edited.status === 'unknown' ? 503 : 409, coreTurnContract({
+            turnId, durability: claim.held === 'same' ? 'replayed' : edited.status === 'saved' ? 'recorded' : edited.status === 'unknown' ? 'unknown' : 'not_recorded',
+            revision: after.revision, scenarioRevision: after.identity, graph: appliedGraphWire(after.graph), run: after.run, analysisState: after.analysisState,
+            receipts: edited.status === 'saved' && 'receipt' in edited && edited.receipt !== undefined ? collectTurnReceipts([{ model_version: edited.receipt }]).map((r) => ({ ...r, authorised_by: 'person' as const })) : [],
+            error: edited.status === 'saved' ? null : { code: 'CANVAS_EDIT_REFUSED', message: edited.reason ?? 'That change could not be saved.', retry_safe: false, nothing_saved: edited.status !== 'unknown' },
+            modelProgram: { canonical_analysis_view: reopenProgram(after.graph)?.view ?? null, model_program: { turn: 'card_edit', saved: edited.status === 'saved' } },
+            agent: { forwarded_kind: kind, program: true },
+          }));
+        }
         const forwarded = await dispatchFor(authorization, { 'x-olumi-ai-mode': AI_CORE_MODE })('/orchestrate/v2/turn', body);
         const after = savedScenarioOf(await internal(graphPath, { ...FRESH_READ }));
         let pending: readonly PendingAction[] = [];
@@ -490,6 +523,9 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         return await refuseUnrun(503, 'MODEL_READ_FAILED', 'Your model could not be read just now. Nothing was changed; please try again.');
       }
       const saved = savedScenarioOf(start);
+      // A model program that cannot be read is refused with its way on, never run as a legacy model or as no model.
+      const programRead = programReadOf(saved.graph);
+      if (programRead.kind === 'unreadable') return await refuseUnrun(409, 'MODEL_PROGRAM_UNREADABLE', unreadableWords(programRead.reason));
       if (saved.graph !== null && livingViewOf(saved.graph) === undefined) {
         return await refuseUnrun(409, 'legacy_scenario', 'This scenario was saved before the current Olumi model and cannot be opened on this route. Nothing was changed.');
       }
@@ -609,21 +645,42 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
 
       // ── THE SDK TURN (or the declined card, which needs none). ───────────────────────────────────────────────────────────
       let result: AgentTurnResult & { readonly sdk?: Awaited<ReturnType<typeof runCoreTurn>>['sdk'] };
+      /**
+       * ⭐ THE CANONICAL DRAFTER (alpha, 23 Oct): a scenario with no saved model is drafted as a MODEL PROGRAM
+       * (`model-program-turn/turn.ts`), in place of the core agent's drafting; so is an ask card's structured answer on one.
+       * Every other turn of a program scenario is the core agent's own, with its tools on the program (`scenario: 'program'`).
+       * The write goes through this turn's counting dispatch, so the claim, the write accounting and the answer row below are
+       * the core route's own.
+       */
+      const program = programRead.kind === 'program';
+      // A Run press on a program is the host's own (the stored Run, or a new one): no model call.
+      const modelProgram = saved.graph === null || (program && runPress);
+      let programPayload: { readonly canonical_analysis_view: unknown; readonly model_program: Record<string, unknown> } | undefined;
+      const programTurn = async (): Promise<AgentTurnResult> => {
+        const t0 = Date.now();
+        const out = await runModelProgramTurn({ scenarioId, turnId, message, saved: { graph: saved.graph, identity: saved.identity }, dispatch: countingDispatch });
+        if (out.verifiedSave) verifiedSave = true;
+        programPayload = out.payload;
+        const ms = Date.now() - t0;
+        return { assistant_text: out.assistantText, items: [], tool_calls: out.toolCalls.map((c) => ({ ...c, mutated: out.mutated })),
+          tool_results: out.toolResults as unknown as AgentTurnResult['tool_results'], mutated: out.mutated, hops: 0, stopped_reason: 'answered',
+          timing: { total_ms: ms, provider_ms: 0, tool_ms: ms, overhead_ms: 0, tool_provider_ms: 0, provider_calls: providerCallsMade() ?? 0, tool_calls: 1, hops: 0 } };
+      };
       if (declinedCardOnly !== undefined) {
         proposals.discard(declinedCardOnly);
         result = { assistant_text: '', items: [], tool_calls: [], tool_results: [], mutated: false, hops: 0, stopped_reason: 'answered',
           timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 } };
       } else {
-        const canonical = await readCanonicalContext({ dispatch: readingDispatch }, { scenario_id: scenarioId });
-        const draftArm = draftArmOf(MODE, saved.graph === null, req.headers['x-olumi-draft-arm']);
+        const canonical = program ? await readProgramContext({ dispatch: readingDispatch, proposals }, { scenario_id: scenarioId, authenticated_user_id: userId })
+          : await readCanonicalContext({ dispatch: readingDispatch }, { scenario_id: scenarioId });
         // This turn's repairs: a refusal they make is settled as base at the turn's end (`goal-path.ts`).
         const restructure: Restructure = { repairs: 0 };
         try {
-          result = await runCoreTurn({
+          result = modelProgram ? await programTurn() : await runCoreTurn({
             // One budget for every call (DL 22 Oct, M4): a press at the typed turn's effort reads the typed turns' cached prefix.
             ctx: coreCtx, message, budget: coreBudget(), userId,
             calls: seen,
-            tools: coreTurnTools({ ctx: coreCtx, mode: MODE, scenario: 'core', requestId: String(req.id), message,
+            tools: coreTurnTools({ ctx: coreCtx, mode: MODE, scenario: program ? 'program' : 'core', requestId: String(req.id), message,
               dispatch: capDispatch, proposals, deadlineAt: constructionDeadlineAt, capabilities,
               ...(challenge !== null ? { noteOnlyOn: challenge.grounded.element_ids[0] } : {}),
               onModelRegistered: graphReadyEmitter(startedAt),
@@ -636,7 +693,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
             // The standing instructions, the same bytes on every call of every scenario (the cached prefix); this turn's own
             // guidance (the drafting arm, a Challenge's note) follows its state block in the turn's input.
             instructions: instructionsForMode(MODE, CORE_ALIGNED_INSTRUCTIONS),
-            turnGuidance: [...(draftArm === 'on' ? [CORE_DRAFTER_RULES] : []), ...(challenge === null ? [] : [challenge.note])],
+            turnGuidance: [...(program ? [PROGRAM_TURN_GUIDANCE] : []), ...(challenge === null ? [] : [challenge.note])],
             briefText: saved.briefText,
             canonicalState: canonical.status === 'ok' ? canonical.data : undefined,
             // A Run press permits calculation and reading only; any other press carries no consent to Run.
@@ -764,7 +821,12 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         cards: await heldCardsOf(store, scenarioId, rowPending, after),
         notes: notesOf(result, after.identity),
         run: after.run, analysisState: after.analysisState, ...(ranThisTurn ? { analysisResult: after.analysisResult } : {}),
-        receipts: receiptsOf(result),
+        receipts: programPayload === undefined ? receiptsOf(result)
+          : collectTurnReceipts(result.tool_results).map((r) => ({ ...r, authorised_by: programPayload!.model_program['turn'] === 'draft' ? 'olumi' as const : 'person' as const })),
+        // A program scenario's analysis is its newest STORED Run as the scenario read serves it (never a recompute), on every turn.
+        ...(programPayload !== undefined || isProgramGraph(after.graph) ? { modelProgram: {
+          canonical_analysis_view: reopenProgram(after.graph)?.view ?? programPayload?.canonical_analysis_view ?? null,
+          model_program: programPayload?.model_program ?? { turn: 'agent' } } } : {}),
         paused: paused !== undefined ? { proposal_id: paused.proposal_id } : null,
         error: noReply ? RECORDED.reply_empty.error : null,
         actionBar: coreActionBarOf(scenarioId, after.body),

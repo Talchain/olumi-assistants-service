@@ -61,6 +61,9 @@ export interface CoreTurnContract {
   readonly run: CoreTurnRun | null;
   readonly analysis_state: unknown;
   readonly analysis_result?: unknown;
+  /** A model-program turn's (alpha): the stored Run's view, and the turn's own record (its Run, asks and readback). */
+  readonly canonical_analysis_view?: unknown;
+  readonly model_program?: unknown;
   readonly receipts: readonly CoreTurnReceipt[];
   readonly paused: { readonly proposal_id: string | null } | null;
   readonly error: CoreTurnError | null;
@@ -84,6 +87,8 @@ export interface CoreTurnContractInput {
   readonly analysisState?: unknown;
   /** Only on a turn that ran (or replayed) a Run. */
   readonly analysisResult?: unknown;
+  /** A model-program turn's payload blocks (alpha). */
+  readonly modelProgram?: { readonly canonical_analysis_view: unknown; readonly model_program: unknown };
   readonly receipts?: readonly CoreTurnReceipt[];
   readonly paused?: { readonly proposal_id: string | null } | null;
   readonly error?: CoreTurnError | null;
@@ -104,6 +109,7 @@ export function coreTurnContract(i: CoreTurnContractInput): CoreTurnContract {
     run: i.run ?? null,
     analysis_state: i.analysisState ?? null,
     ...(i.analysisResult !== undefined && i.analysisResult !== null ? { analysis_result: i.analysisResult } : {}),
+    ...(i.modelProgram !== undefined ? { canonical_analysis_view: i.modelProgram.canonical_analysis_view, model_program: i.modelProgram.model_program } : {}),
     receipts: i.receipts ?? [],
     paused: i.paused ?? null,
     error: i.error ?? null,

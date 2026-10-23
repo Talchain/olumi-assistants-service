@@ -29,6 +29,7 @@ import { NOTE_MAX, NOTE_ON_ITEM, NoteOnItemParams, noteOnItem } from './note-on-
 import { STRESS_TEST, StressTestParams, stressTest, type StressDeps } from './stress-tool.js';
 import { OFFER_PUBLIC_RESEARCH, OFFER_PUBLIC_RESEARCH_DESCRIPTION, OfferResearchParams, offerResearch, type ResearchDeps } from './research-tool.js';
 import { OUTCOME_TRACE, refused, traceRow, type ToolOutcome, type TraceRow } from './outcome.js';
+import { applyProgramChange, isProgramProposal, ProgramChangeParams, proposeProgramChange, readProgramContext, runProgram } from '../../model-program-turn/program-tools.js';
 
 export { traceRow, type TraceRow, type ToolOutcome } from './outcome.js';
 export { readCanonicalContext } from './context-tool.js';
@@ -115,7 +116,7 @@ const AWAITS_TIMING = 'Saved. No analysis ran: this goal\'s chance rests on when
   + 'is recorded yet. Invite the person to press Run; give your reading of the timing (effects_timing) with that Run.';
 
 export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLaneMode, onCall: OnToolCall = () => {},
-  scenario: 'core' | 'legacy' = 'legacy'): Tool[] {
+  scenario: 'core' | 'legacy' | 'program' = 'legacy'): Tool[] {
   let approvalApplied = false;
   const notes = { notes: 0, ...(deps.noteOnlyOn !== undefined ? { only: deps.noteOnlyOn } : {}) };
   const review = { done: false };
@@ -159,10 +160,11 @@ export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLa
     name: READ_CANONICAL_CONTEXT,
     description: TOOL_DESCRIPTIONS.read_canonical_context,
     parameters: ReadCanonicalContextParams,
-    execute: async (args) => record(READ_CANONICAL_CONTEXT, args, await readCanonicalContext(deps, ctx)),
+    execute: async (args) => record(READ_CANONICAL_CONTEXT, args, scenario === 'program' ? await readProgramContext(deps, ctx) : await readCanonicalContext(deps, ctx)),
     errorFunction: null,
   });
   if (mode === 'preview') return [read];
+  if (scenario === 'program') return programTools(deps, ctx, read, record);
 
   return [
     read,
@@ -238,6 +240,43 @@ export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLa
       description: OFFER_PUBLIC_RESEARCH_DESCRIPTION,
       parameters: OfferResearchParams,
       execute: async (args) => record(OFFER_PUBLIC_RESEARCH, args, await offerResearch(deps, args)),
+      errorFunction: null,
+    }),
+  ];
+}
+
+/**
+ * A PROGRAM scenario's tools (alpha): the same names and approval contract, on the canonical model
+ * (`model-program-turn/program-tools.ts`). Its model exists from the first turn, so there is no build; a change carries its
+ * own Run, so apply_change reports that Run instead of starting the automatic one.
+ */
+function programTools(deps: PathBToolDeps, ctx: PathBContext, read: Tool, record: (name: string, input: Record<string, unknown>, outcome: ToolOutcome, proposalId?: string) => string): Tool[] {
+  return [
+    read,
+    tool({
+      name: PROPOSE_CHANGE,
+      description: TOOL_DESCRIPTIONS.propose_change,
+      parameters: ProgramChangeParams,
+      execute: async (args) => record(PROPOSE_CHANGE, args, await proposeProgramChange(deps, ctx, args)),
+      errorFunction: null,
+    }),
+    tool({
+      name: APPLY_CHANGE,
+      description: TOOL_DESCRIPTIONS.apply_change,
+      parameters: ApplyChangeParams,
+      needsApproval: true,
+      execute: async (sent) => {
+        const args = deps.pressedProposal !== undefined ? { ...sent, proposal_id: deps.pressedProposal } : sent;
+        const outcome = isProgramProposal(deps.proposals.get(args.proposal_id)) ? await applyProgramChange(deps, ctx, args.proposal_id) : refused('not_a_change_proposal');
+        return record(APPLY_CHANGE, args, outcome, args.proposal_id);
+      },
+      errorFunction: null,
+    }),
+    tool({
+      name: RUN_ANALYSIS,
+      description: TOOL_DESCRIPTIONS.run_analysis,
+      parameters: RunAnalysisParams,
+      execute: async (args) => record(RUN_ANALYSIS, args, await runProgram(deps, ctx)),
       errorFunction: null,
     }),
   ];
