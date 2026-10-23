@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ExecutableModel, Goal, Limit, Option, OptionSet, Quantity, Risk } from '../../executable.js';
 import { simulate, type AggregationX } from '../simulate.js';
-import { rangeLaw } from '../range-law.js';
+import { rangeLaw, type Domain, type RangeDist, type RangeKind } from '../range-law.js';
 import { isWithheld, type Chance, type ChanceOrWithheld, type SimResult } from '../result.js';
 import { mapLivingModel } from '../../../path-b/living-model/mapper.js';
 import { KNOWN_ANSWER } from '../../../path-b/living-model/__tests__/fixtures.js';
@@ -287,39 +287,87 @@ describe('numerical check: natural-unit simulator, hand-calculated rows', () => 
     expect(() => simulate(model(1, [range('x', 10, 30, 30), fixed('t', 0)], [goal('g', 'x', '>=', 't')]), { seed: 1 })).toThrow(/strictly inside/);
   });
 
-  it('row 2b: the mapper\u2019s sign rule: a spread only where its draws keep their sign; a chance is clipped to [0, 1]', () => {
-    // mapper.ts:572-573: spread only when the range crosses zero or |centre| ≥ 2 sd; else the figure alone (:578), else held.
-    //  (a) 0 to 8, most likely 4: sd = 8/√12 = 2.3094, 2 sd = 4.6188 > 4, no zero crossing → the figure 4 alone:
-    //      P(X ≥ 4) = 1 and P(X ≥ 4.01) = 0 exactly, with exact precision (nothing is drawn).
-    //  (b) −30 to 10, most likely −5: crosses zero → spread, centre −5: P(X ≥ −5) = 0.5 (Wilson half-width at 20k: 0.00693).
-    //  (c) 2 to 8, no most likely value: centre 5, sd = 6/√12 = 1.7321, 2 sd = 3.4641 ≤ 5 → spread: P(X ≥ 5) = 0.5.
-    //  (d) 0 to 8, no most likely value: centre 4 < 4.6188, no crossing, no figure to fall back on → held (throws).
-    //  (e) a risk's occurrence, 0 to 0.2 with no most likely value: as a level it would be held (0.1 < 2 × 0.057735), but a
-    //      chance keeps its spread and is clipped: P(draw ≤ 0) = Φ(−0.1/0.057735) = Φ(−1.7321). Table Φ(1.73) = 0.95818,
-    //      Φ(1.74) = 0.95907 → Φ(1.7321) = 0.95837, so 0.04163 of draws are clipped to exactly 0; every draw lies in [0, 1] →
-    //      P(≥ 0) = P(≤ 1) = 1 exactly; and its centre is 0.1, so P(≤ 0.1) = 0.5 (Wilson half-width at 20k: 0.00693).
-    //      The tail check uses 4 standard errors, 4 × √(0.04163 × 0.95837 / 20000) = 0.00565, NOT the 95% interval: at this seed
-    //      the first 20,000 draws of this stream sit 3.5 standard errors high (0.04655), while the same generator gives
-    //      0.04164 over 2,000,000 draws and a z spread of 1.04 over 400 streams (S2 hand-back, 23 Oct).
-    const a = first(simulate(model(1, [range('x', 0, 8, 4), fixed('t4', 4), fixed('t401', 4.01)],
-      [goal('g4', 'x', '>=', 't4'), goal('g401', 'x', '>=', 't401')]), { seed: SEED, draws: N }));
-    expect(goalOf(a, 'g4')).toEqual({ goal_id: 'g4', chance: 1, precision_95: [1, 1] });
-    expect(goalOf(a, 'g401')).toEqual({ goal_id: 'g401', chance: 0, precision_95: [0, 0] });
-    for (const [x, t] of [[range('x', -30, 10, -5), -5], [range('x', 2, 8), 5]] as [Quantity, number][]) {
-      const g = ch(first(simulate(model(1, [x, fixed('t', t)], [goal('g', 'x', '>=', 't')]), { seed: SEED, draws: N })).per_goal[0]);
-      expect(inside(0.5, g.precision_95)).toBe(true);
-      expect(Math.abs(g.chance - 0.5)).toBeLessThanOrEqual(0.00693);
+  it('row 2b: the PL\u2019s range law: a person\u2019s bounds condition the spread; other ranges only a domain; no point fallback', () => {
+    // The law is rangeSpread's Normal (centre = most likely value, else the middle; sd = (high − low)/√12), conditioned:
+    //  (a) Capacity 80 + 1 × X against a target of 110, X the person's range 10 to 30 around 20 (sd 5.7735).
+    //      As 'bounds', X < 30 in every draw, so capacity < 110: the chance is exactly 0 (no draw meets it).
+    //      As 'plausible' (unbounded): P(X ≥ 30) = 1 − Φ(10/5.7735) = 1 − Φ(1.7321) = 1 − 0.95837 = 0.04163
+    //      (table Φ(1.73) = 0.95818, Φ(1.74) = 0.95907, interpolated); Wilson half-width at 20k: 0.00277.
+    //  (b) "Between 10 and 30" as 'bounds': 0 of 20,000 draws outside [10, 30], and none sits on an end (no clamping).
+    //  (c) Olumi's one-signed coefficient, −2.2 to −1.4 around −1.8 (sd 0.8/√12 = 0.23094), stays UNBOUNDED even if marked
+    //      'bounds' (only a person's bounds bound): P(outside) = 2 × (1 − Φ(0.4/0.23094)) = 2 × 0.04163 = 0.08326 (Wilson
+    //      half-width at 20k: 0.00383). With a stated sign restriction (≤ 0) it is conditioned on (−∞, 0]: no draw above 0,
+    //      and P(> 0) = 1 − Φ(7.79) ≈ 3e-15, so the share outside the range is the same 0.08326.
+    //  (d) Hard-bound control, the conditioned moments: [10, 30] around 20: α = −1.7321, β = 1.7321; φ(1.7321) =
+    //      0.39894 × e^−1.5 = 0.089016; Z = 2 × 0.95837 − 1 = 0.91674; mean 20 (symmetric); variance factor
+    //      1 − 2 × 1.7321 × 0.089016 / 0.91674 = 0.66363 → sd = 5.7735 × 0.81464 = 4.7033.
+    //      [10, 30] around 12: α = −0.34641, β = 3.1177; Φ(α) = 1 − Φ(0.3464) = 1 − 0.63548 = 0.36452, Φ(β) = 0.99909,
+    //      Z = 0.63457; φ(α) = 0.39894 × e^−0.06 = 0.37571, φ(β) = 0.39894 × e^−4.86 = 0.003091;
+    //      mean = 12 + 5.7735 × (0.37571 − 0.003091) / 0.63457 = 15.390;
+    //      variance factor 1 + (−0.34641 × 0.37571 − 3.1177 × 0.003091) / 0.63457 − 0.58720² = 0.43491 → sd = 3.8075.
+    //  (e) Domain control: Olumi's 0 to 8 (no most likely value; centre 4, sd 2.3094) for a count (≥ 0): α = −1.7321,
+    //      Z = 0.95837, mean = 4 + 2.3094 × 0.089016 / 0.95837 = 4.2145, variance factor 1 − 1.7321 × 0.089016 / 0.95837
+    //      − (0.089016 / 0.95837)² = 0.83049 → sd = 2.1046; no draw below 0 (unbounded, about 4% are).
+    //      A risk's occurrence 0 to 0.2 is a chance, conditioned on [0, 1]: mean 0.1 + 0.057735 × 0.092883 = 0.10536,
+    //      sd 0.057735 × 0.91131 = 0.052615; P(≤ 0) = 0 exactly and P(≥ 0) = 1 exactly.
+    //  (f) Degenerate control, low = high = 20: not uncertain, exactly 20: P(X ≥ 20) = 1 and P(X > 20) = 0, exact.
+    const kinded = (q: Quantity, range_kind: RangeKind, domain?: Domain): Quantity => {
+      const dist: RangeDist = { ...(q.dist as RangeDist), range_kind, ...(domain !== undefined ? { domain } : {}) };
+      return { ...q, dist };
+    };
+    const capacity = (each: Quantity) => model(1, [fixed('today', 80), each, fixed('count', 1),
+      effect('capacity', 'today', [{ coefficient: 'each', driver: 'count' }]), fixed('t110', 110)], [goal('g', 'capacity', '>=', 't110')]);
+    expect(first(simulate(capacity(kinded(range('each', 10, 30, 20), 'bounds')), { seed: SEED, draws: N })).per_goal[0].chance).toBe(0);
+    const plausible = ch(first(simulate(capacity(kinded(range('each', 10, 30, 20), 'plausible')), { seed: SEED, draws: N })).per_goal[0]);
+    expect(inside(0.04163, plausible.precision_95)).toBe(true);
+    expect(Math.abs(plausible.chance - 0.04163)).toBeLessThanOrEqual(0.00277);
+
+    const all = Array.from({ length: N }, (_, i) => i);
+    const drawsOf = (x: Quantity): number[] => simulate(model(1, [x, fixed('t', 0)], [goal('g', x.id, '>=', 't')]), { seed: SEED, draws: N, record: all })
+      .recorded!.map((d) => d.values[x.id]![0]!);
+    const between = drawsOf(kinded(range('x', 10, 30, 20), 'bounds'));
+    expect(between.filter((v) => v < 10 || v > 30)).toEqual([]);
+    expect(between.filter((v) => v === 10 || v === 30)).toEqual([]);
+
+    const olumi = (d?: Domain): Quantity => kinded({ id: 'k', unit: '', reading: 'state', dist: { kind: 'range', low: -2.2, high: -1.4, mode: -1.8, basis: 'olumi_estimate' } }, 'bounds', d);
+    for (const k of [drawsOf(olumi()), drawsOf(olumi({ max: 0 }))]) {
+      const outside = k.filter((v) => v < -2.2 || v > -1.4).length / N;
+      expect(Math.abs(outside - 0.08326)).toBeLessThanOrEqual(0.00383);
     }
-    expect(() => simulate(model(1, [range('x', 0, 8), fixed('t', 0)], [goal('g', 'x', '>=', 't')]), { seed: 1 })).toThrow(/is held/);
-    const c = first(simulate(model(1, [fixed('level', 100), range('occ', 0, 0.2), fixed('sev', -30), fixed('zero', 0), fixed('one', 1),
-      fixed('tenth', 0.1)], [goal('le0', 'occ', '<=', 'zero'), goal('ge0', 'occ', '>=', 'zero'), goal('le1', 'occ', '<=', 'one'),
-      goal('mid', 'occ', '<=', 'tenth')], [HOLD],
+    expect(Math.max(...drawsOf(olumi({ max: 0 })))).toBeLessThanOrEqual(0);
+
+    const law = (q: Quantity, opts = {}) => {
+      const r = rangeLaw(q.dist as RangeDist, opts);
+      if (r.kind !== 'normal') throw new Error('expected a spread');
+      return r;
+    };
+    const sym = law(kinded(range('x', 10, 30, 20), 'bounds')), skew = law(kinded(range('x', 10, 30, 12), 'bounds'));
+    expect(sym.mean).toBeCloseTo(20, 9);
+    expect(Math.abs(sym.sd_conditioned - 4.7033)).toBeLessThanOrEqual(0.001);
+    expect(Math.abs(skew.mean - 15.390)).toBeLessThanOrEqual(0.005);
+    expect(Math.abs(skew.sd_conditioned - 3.8075)).toBeLessThanOrEqual(0.005);
+    const skewDraws = drawsOf(kinded(range('x', 10, 30, 12), 'bounds'));
+    const mean = skewDraws.reduce((a, v) => a + v, 0) / N, sd = Math.sqrt(skewDraws.reduce((a, v) => a + (v - mean) ** 2, 0) / (N - 1));
+    expect(Math.abs(mean - skew.mean)).toBeLessThanOrEqual(4 * 3.8075 / Math.sqrt(N));
+    expect(Math.abs(sd / skew.sd_conditioned - 1)).toBeLessThanOrEqual(0.02);
+
+    const count = (d?: Domain): Quantity => kinded({ id: 'n', unit: 'people', reading: 'state', dist: { kind: 'range', low: 0, high: 8, basis: 'olumi_estimate' } }, 'plausible', d);
+    const counted = law(count({ min: 0 }));
+    expect(Math.abs(counted.mean - 4.2145)).toBeLessThanOrEqual(0.001);
+    expect(Math.abs(counted.sd_conditioned - 2.1046)).toBeLessThanOrEqual(0.001);
+    expect(Math.min(...drawsOf(count({ min: 0 })))).toBeGreaterThanOrEqual(0);
+    expect(drawsOf(count()).filter((v) => v < 0).length).toBeGreaterThan(0);
+    const occ = law(range('occ', 0, 0.2), { domain: { min: 0, max: 1 } });
+    expect(Math.abs(occ.mean - 0.10536)).toBeLessThanOrEqual(0.0001);
+    expect(Math.abs(occ.sd_conditioned - 0.052615)).toBeLessThanOrEqual(0.0001);
+    const c = first(simulate(model(1, [fixed('level', 100), range('occ', 0, 0.2), fixed('sev', -30), fixed('zero', 0)],
+      [goal('le0', 'occ', '<=', 'zero'), goal('ge0', 'occ', '>=', 'zero')], [HOLD],
       { risks: [{ id: 'loss', occurrence: 'occ', severity: 'sev', effect_on: 'level', mode: 'add', from_period: 0 }] }), { seed: SEED, draws: N }));
-    const le0 = ch(goalOf(c, 'le0') as ChanceOrWithheld), mid = ch(goalOf(c, 'mid') as ChanceOrWithheld);
-    expect(le0.chance).toBeGreaterThan(0);
-    expect(Math.abs(le0.chance - 0.04163)).toBeLessThanOrEqual(0.00565);
-    expect(inside(0.5, mid.precision_95)).toBe(true);
-    expect([goalOf(c, 'ge0').chance, goalOf(c, 'le1').chance]).toEqual([1, 1]);
+    expect([goalOf(c, 'le0').chance, goalOf(c, 'ge0').chance]).toEqual([0, 1]);
+
+    const flat = first(simulate(model(1, [range('x', 20, 20), fixed('t', 20)], [goal('ge', 'x', '>=', 't'), goal('gt', 'x', '>', 't')]), { seed: SEED, draws: 100 }));
+    expect(goalOf(flat, 'ge')).toEqual({ goal_id: 'ge', chance: 1, precision_95: [1, 1] });
+    expect(goalOf(flat, 'gt')).toEqual({ goal_id: 'gt', chance: 0, precision_95: [0, 0] });
   });
 
   it('row 11: max and min over a window: a flow\u2019s highest and lowest interval, a state\u2019s highest and lowest boundary', () => {

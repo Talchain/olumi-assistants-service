@@ -6,9 +6,10 @@
  *   - Common random numbers: every uncertain quantity is drawn ONCE per draw index, from its own stream keyed by (seed, id),
  *     and those draws are shared by ALL options. Option switches are never randomised.
  *   - Every goal, the joint and the limits read the SAME draws; the joint is counted draw by draw, never a product of marginals.
- *   - A `range` is read with CEE's existing range conversion and its sign rule, reused (`range-law.ts`, which cites mapper.ts):
- *     a Normal draw, the figure alone, or held (a plain Error: the compiler withholds what rests on it). A chance (a risk's
- *     occurrence) is clipped to [0, 1].
+ *   - A `range` is read with CEE's existing range conversion, reused (`range-law.ts`, which cites mapper.ts), as the PL ruled
+ *     (AMEND, 23 Oct): a person's 'bounds' conditioned on [low, high]; otherwise unbounded unless a domain applies, and a
+ *     risk's occurrence is conditioned on [0, 1]; low = high is that figure. A chance worked out by an equation is clipped to
+ *     [0, 1] where a risk reads it.
  *   - Time (DL ruling 1, 23 Oct; a quantity's `reading` is 'state' or 'flow'): a model of N periods has boundaries 0..N and
  *     intervals 0..N−1. At each time k = 0..N, (1) the option's sets and the risk effects active at k apply, and (2) every
  *     quantity is evaluated, in dependency order, from the stocks' boundary levels S[k]; then (3) S[k+1] = S[k] + Σ inflows −
@@ -45,14 +46,15 @@
  */
 import type { Aggregation, Cmp, ExecutableModel, Option, OptionSet, Quantity, Reading, Risk, Window } from '../executable.js';
 import { standardNormals, uniforms } from './prng.js';
-import { rangeLaw } from './range-law.js';
+import { rangeLaw, truncatedStandardNormal, type RangeDist } from './range-law.js';
 import type { Chance, ChanceOrWithheld, OptionResult, RecordedDraw, SimResult, SimWithheld, Withheld } from './result.js';
 
 interface NormalLaw {
   readonly centre: number;
   readonly sd: number;
-  /** A chance's draws are clipped to [0, 1]. */
-  readonly chance: boolean;
+  /** Where the draws are conditioned (±Infinity when they are not). */
+  readonly lower: number;
+  readonly upper: number;
 }
 /** A quantity's reading, as the compiler set it (executable.ts r2, S1). */
 export const readingOf = (q: Quantity): Reading => q.reading;
@@ -225,10 +227,10 @@ function compileNode(q: Quantity, i: number, ref: (id: string, where: string) =>
       return { kind: 'fixed', value: q.dist.value };
     }
     if (q.dist.kind !== 'range') throw new Error(`${where}: unknown dist kind`);
-    const reading = rangeLaw(q.dist, { chance });
-    if (reading.kind === 'held') throw new Error(`${where} is held: ${reading.reason}; the compiler must withhold what rests on it`);
+    // A risk's occurrence is a chance: its mathematical domain is [0, 1].
+    const reading = rangeLaw(q.dist as RangeDist, chance ? { domain: { min: 0, max: 1 } } : {});
     if (reading.kind === 'point') return { kind: 'fixed', value: reading.value };
-    ranged.push({ q: i, law: { centre: reading.centre, sd: reading.sd, chance } });
+    ranged.push({ q: i, law: { centre: reading.centre, sd: reading.sd, lower: reading.lower, upper: reading.upper } });
     return { kind: 'drawn', slot: ranged.length - 1 };
   }
   if (q.equation !== undefined) {
@@ -322,16 +324,22 @@ function planOption(c: Compiled, option: Option): Plan {
 function drawInputs(c: Compiled, seed: number, draws: number): Inputs {
   return {
     drawn: c.ranged.map(({ q, law }) => {
-      const z = standardNormals(seed, `q:${c.ids[q]}`, draws);
-      for (let i = 0; i < draws; i++) z[i] = law.centre + law.sd * z[i]!;
-      if (law.chance) for (let i = 0; i < draws; i++) z[i] = clip01(z[i]!);
-      return z;
+      const key = `q:${c.ids[q]}`;
+      if (law.lower === -Infinity && law.upper === Infinity) {
+        const z = standardNormals(seed, key, draws);
+        for (let i = 0; i < draws; i++) z[i] = law.centre + law.sd * z[i]!;
+        return z;
+      }
+      // Conditioned on [lower, upper] by inverse CDF, one uniform per draw: no draw outside, none piled on an end.
+      const u = uniforms(seed, key, draws), alpha = (law.lower - law.centre) / law.sd, beta = (law.upper - law.centre) / law.sd;
+      for (let i = 0; i < draws; i++) u[i] = law.centre + law.sd * truncatedStandardNormal(u[i]!, alpha, beta);
+      return u;
     }),
     riskU: c.risks.map((r) => uniforms(seed, `r:${r.id}`, draws)),
   };
 }
 
-/** A chance is clipped to [0, 1] (DL ruling, 23 Oct). NaN stays NaN. */
+/** A chance worked out by an equation is clipped to [0, 1] where a risk reads it (DL ruling, 23 Oct). NaN stays NaN. */
 const clip01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);
 
 /** A period in draw d: a whole number, or ceil of the timing quantity's draw (never before period 0); NaN stays NaN. */

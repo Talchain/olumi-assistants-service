@@ -30,8 +30,8 @@ import { comparatorWords } from '../../goal-target/goal-target-basis.js';
 import { displayRoundingFor } from '../../goal-target/goal-chance-driver.js';
 import { displayedPctAt } from '../../goal-target/goal-chance-display.js';
 import { sayDisplayedPct } from '../../goal-target/goal-targets-joint.js';
-import type { ExecutableModel, Goal, Limit, Quantity, Window } from '../executable.js';
-import { rangeLaw } from '../simulate/range-law.js';
+import type { ExecutableModel, Goal, Limit, Window } from '../executable.js';
+import { rangeLaw, type RangeDist } from '../simulate/range-law.js';
 import { isWithheld, type ChanceOrWithheld, type OptionResult, type SimResult, type Withheld } from '../simulate/result.js';
 import { readingOf, simulate, type AggregationX } from '../simulate/simulate.js';
 
@@ -194,11 +194,15 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     if (x.dist?.kind === 'range') {
       // DL ruling 4: every range's law is Olumi's provisional conversion (`rangeSpread`, mapper.ts:104-110), never the person's
       // probability law; the person's bounds stay theirs and are named as such.
-      const reading = rangeLaw(x.dist, { chance: model.risks.some((r) => r.occurrence === x.id) });
-      const ends = `${say(x.dist.low, x.unit)} to ${say(x.dist.high, x.unit)}`;
-      const whose = x.dist.basis === 'person_range' ? 'your range' : 'Olumi’s own estimated range';
-      if (reading.kind === 'normal') return [`${name} follows Olumi’s provisional conversion of ${whose}, ${ends}, into a bell-shaped spread`];
-      return reading.kind === 'point' && x.dist.basis !== 'person_range' ? [`${name} is ${say(reading.value, x.unit)}, Olumi’s estimate`] : [];
+      // The PL's range law (AMEND): conditioned on the person's bounds, or on a domain, as the simulator draws it.
+      const d: RangeDist = x.dist;
+      const reading = rangeLaw(d, model.risks.some((r) => r.occurrence === x.id) ? { domain: { min: 0, max: 1 } } : {});
+      const ends = `${say(d.low, x.unit)} to ${say(d.high, x.unit)}`;
+      const whose = d.basis === 'person_range' ? 'your range' : 'Olumi’s own estimated range';
+      if (reading.kind === 'point') return d.basis === 'person_range' ? [] : [`${name} is ${say(reading.value, x.unit)}, Olumi’s estimate`];
+      const held = reading.lower === d.low && reading.upper === d.high ? ', held within those bounds'
+        : Number.isFinite(reading.lower) || Number.isFinite(reading.upper) ? ', kept to the values it can take' : '';
+      return [`${name} follows Olumi’s provisional conversion of ${whose}, ${ends}, into a bell-shaped spread${held}`];
     }
     if (x.dist?.kind === 'fixed') {
       return m?.author === 'person' ? [] : [`${name} is ${say(x.dist.value, x.unit)}${m?.author === 'olumi' ? ', Olumi’s figure' : ', whose source is not confirmed'}`];
@@ -281,12 +285,6 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
 
   // ── The detail said once beside the chances ───────────────────────────────────────────────────────────────────────────
   const notes: string[] = [
-    // A range whose spread would draw across zero keeps its figure; the range stays with the model (mapper.ts:578's words).
-    ...model.quantities.filter((x) => x.dist?.kind === 'range' && model.options.some((o) => upstream(roots, o.id).has(x.id))).flatMap((x) => {
-      const d = x.dist as Extract<Quantity['dist'], { kind: 'range' }>;
-      const reading = rangeLaw(d, { chance: model.risks.some((r) => r.occurrence === x.id) });
-      return reading.kind === 'point' ? [`The calculation uses ${say(reading.value, x.unit)} for ${q(label(x.id) ?? x.id)}. The range, ${say(d.low, x.unit)} to ${say(d.high, x.unit)}, is kept with the model but is not used as a spread.`] : [];
-    }),
     ...result.options.flatMap((o) => o.per_goal.flatMap((g) => (isWithheld(g)
       ? [`${q(allGoals.find((x) => x.goal_id === g.goal_id)?.label ?? g.goal_id)} with ${q(optionLabel.get(o.option_id) ?? o.option_id)} is not shown: in ${g.withheld.count.toLocaleString('en-GB')} of ${result.draws.toLocaleString('en-GB')} simulated draws ${listWords(g.withheld.quantities.map((id) => q(label(id) ?? id)))} could not be worked out.`]
       : []))),
