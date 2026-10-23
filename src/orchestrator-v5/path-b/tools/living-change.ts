@@ -23,7 +23,7 @@ import { diffLivingModels, stable, type LivingChange } from '../living-model/dif
 import { livingViewOf } from '../living-model/view.js';
 import { isNoModelYet, isSavedRead, readSaved } from './context-tool.js';
 import { changeOperationId, findOperationVersion, writeCorePostimage } from './core-write.js';
-import { ok, refused, unavailable, withTrace, type ToolOutcome } from './outcome.js';
+import { ok, OUTCOME_TRACE, refused, unavailable, withTrace, type ToolOutcome } from './outcome.js';
 
 export const LivingChangeParams = z.object({
   /** What the person is asked to approve, in plain words. */
@@ -75,8 +75,10 @@ export async function proposeLivingChange(deps: Deps, ctx: Ctx, args: LivingChan
   const outcome = await proposeOnce(deps, ctx, first !== undefined && lost.length > 0 ? first : args);
   // Only a card settles a pending change: another tool's result never discards it (Codex r1 on #3675).
   if (outcome.status === 'ok' && r?.pending?.tool === 'propose_change') r.pending = undefined;
+  // A spread drops the trace (a symbol key): it is carried over, so the log keeps the kept call's authorship (Codex r1 on #3694).
   return outcome.status === 'ok' && lost.length > 0
-    ? { ...outcome, data: { ...outcome.data, restructure: { kept: 'refused_call', lost, note: KEPT_AS_REFUSED } } } : outcome;
+    ? withTrace({ ...outcome, data: { ...outcome.data, restructure: { kept: 'refused_call', lost, note: KEPT_AS_REFUSED } } }, outcome[OUTCOME_TRACE] ?? {})
+    : outcome;
 }
 
 /**
