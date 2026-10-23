@@ -162,10 +162,11 @@ describe('a stated level range supplies its own provisional spread', () => {
     expect(licence(run(off)).provisional).not.toBe(true);
   });
 
-  it('bare ranges stay held; no-range/point and every link form stay byte-identical to base', () => {
+  it('a supported bare range is Olumi-derived; no-range/point and every link form stay byte-identical to base', () => {
     const bare = capacity();
     bare.factors[2]!.value = null;
-    expect(mapLivingModel(bare).withheld).toContainEqual({ id: 'each', reason: 'level_range_not_in_slice' });
+    expect(mapLivingModel(bare).withheld).not.toContainEqual({ id: 'each', reason: 'level_range_not_in_slice' });
+    expect(node(mapLivingModel(bare).graph).observed_state).toMatchObject({ raw_value: 20, source: 'cee_inference', std_source: 'olumi' });
     for (const form of ['point', 'normal', 'exact', 'range'] as const) {
       const model = structuredClone(KNOWN_ANSWER);
       Object.assign(model.links[0]!.effect, { form, value: form === 'range' ? null : 50, low: form === 'range' ? 30 : null, high: form === 'range' ? 70 : null });
