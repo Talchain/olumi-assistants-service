@@ -452,7 +452,7 @@ export function agentProposalRecord(pa: PendingAction, graph: unknown, nowMs = D
       const id = o.path.slice('factor:'.length);
       // Olumi's labelled estimate on anyone's item is Olumi's figure, never "yours" (Codex r2 on #3632).
       const olumis = a['source'] === 'olumi' || a['estimate_by'] === 'olumi';
-      const theirs = a['source'] === 'user' && typeof a['quote'] === 'string' && a['quote'] !== '' && a['quote'] !== b['quote'];
+      const theirs = a['estimate_by'] !== 'unverified' && a['source'] === 'user' && typeof a['quote'] === 'string' && a['quote'] !== '' && a['quote'] !== b['quote'];
       if (typeof a['value'] !== 'number' || !Number.isFinite(a['value']) || a['low'] != null || a['high'] != null
         || typeof a['unit'] !== 'string' || a['unit'] === '' || a['value'] === b['value']
         || (!olumis && !theirs)) continue;
@@ -527,7 +527,7 @@ function coreAdds(operations: readonly HeldOp[], savedLabel: (id: string) => str
       const point = typeof a['value'] === 'number' && Number.isFinite(a['value']) && a['low'] == null && a['high'] == null
         && typeof a['unit'] === 'string' && a['unit'] !== '';
       adds.push({ field_id: `factor_add:${id}`, kind: 'factor_add', node_id: id, label,
-        value: point ? { value: a['value'] as number, unit: a['unit'] as string } : null,
+        value: point && a['estimate_by'] !== 'unverified' ? { value: a['value'] as number, unit: a['unit'] as string } : null,
         source: point && a['estimate_by'] === 'olumi' ? 'estimate' : by, editable: false });
     } else if (o.path.startsWith('link:')) {
       const sign = isRec(a['effect']) ? a['effect']['sign'] : null;
@@ -564,7 +564,7 @@ function whoseOf(r: Rec): Who {
 const KEY_WORDS: Readonly<Record<string, string>> = { label: 'name', text: 'wording', quote: 'quoting', value: 'figure',
   low: 'low end', high: 'high end', sd: 'spread', unit: 'unit', form: 'form', sign: 'direction', target: 'target', quantity: 'measure',
   comparator: 'comparison', by_when: 'date', period_months: 'period', period_deadline: 'date Olumi read', period_read_on: 'day the date was read', baseline: 'baseline', current: 'today’s level',
-  current_unit: 'today’s unit', change_kind: 'kind of change', status: 'status', kind: 'type', limit: 'limit', defined_as: 'definition',
+  current_quote: 'quoting today’s level', said_in: 'stated in', current_unit: 'today’s unit', change_kind: 'kind of change', status: 'status', kind: 'type', limit: 'limit', defined_as: 'definition',
   op: 'kind', of: 'parts', occurrence: 'chance', horizon_months: 'window', effect: 'effect', from: 'from', to: 'to',
   applies_to: 'applies to', role: 'role', developed_from: 'developed from', holder: 'holder', position: 'view', reduction: '' };
 const VALUE_WORDS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
@@ -585,7 +585,7 @@ const REF_KEYS: ReadonlySet<string> = new Set(['from', 'to', 'factor_id', 'of', 
 const OWNER_KEYS: Readonly<Record<string, { readonly words: string; readonly parts: readonly string[] }>> = {
   // Olumi's WHOLE figure on another's item (schema `estimateBy`): its size, never the direction the source stated (Codex r4).
   estimate_by: { words: 'figure', parts: ['value', 'low', 'high', 'sd', 'unit', 'form'] },
-  current_source: { words: 'today’s level', parts: ['current', 'current_unit'] }, horizon_by: { words: 'window', parts: ['horizon_months'] },
+  current_source: { words: 'today’s level', parts: ['current', 'current_unit', 'current_quote'] }, horizon_by: { words: 'window', parts: ['horizon_months'] },
   // Olumi's reading of a calendar date (`period_by`): the date read and the day it was read are Olumi's; the words stay the aim's.
   period_by: { words: 'window', parts: ['period_deadline', 'period_read_on'] } };
 const WHO_KEYS: ReadonlySet<string> = new Set(['source', 'party', ...Object.keys(OWNER_KEYS)]);
@@ -655,6 +655,7 @@ function coreChangeNotes(operations: readonly HeldOp[], adds: readonly AddField[
   const whoOf = (chain: readonly Rec[], key?: string): Who => {
     const own = chain[chain.length - 1]!;
     for (const [k, o] of Object.entries(OWNER_KEYS)) {
+      if (key !== undefined && o.parts.includes(key) && own[k] === 'unverified') return whoseOf({ source: 'unverified' });
       if (key !== undefined && o.parts.includes(key) && own[k] === 'olumi') return OLUMI;
       if (key !== undefined && o.parts.includes(key) && own[k] === 'user') return { tag: 'yours', source: 'yours' };
     }

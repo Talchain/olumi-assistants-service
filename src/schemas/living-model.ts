@@ -37,10 +37,11 @@ const attribution = {
  * Q2 factors were the person's with no level, so nothing could be worked out, and the schema could not say "your factor,
  * Olumi's starting estimate". A saved model without it reads null: unchanged.
  */
-const estimateBy = z.enum(['olumi']).nullable().default(null).describe(
+const estimateBy = z.enum(['olumi', 'unverified']).nullable().default(null).describe(
   "'olumi' when Olumi supplies this WHOLE figure (value, range and unit) for an item the person or a party named without one: "
   + 'its provisional estimate, as wide as what is genuinely unknown. Null when the item\'s own source gave the figure, and on '
-  + 'Olumi\'s own items (their source already says so). Never on or mixed with a figure the person or a party gave.');
+  + 'Olumi\'s own items (their source already says so). Unverified when the figure is not supported by its quoted source; '
+  + 'the item\'s words keep their own author. Never on or mixed with a figure the person or a party gave.');
 
 /** A figure as stated: a point (`value`) or a range (`low`/`high`), never a range collapsed to its midpoint. */
 const figure = {
@@ -116,8 +117,12 @@ export const LivingAim = z.object({
     current: z.number().nullable().describe("Today's level of the quantity, in the target's unit, when stated. Unknown is null, never 0. "
       + "A count that has not started yet (sign-ups in the first six weeks after opening, orders next quarter) is 0 today by its own definition: set 0, "
       + "say why in plain words on the change's public_label (\"0 today: it counts from opening\"), and never ask for it. For a count that began earlier, never assume 0: keep a 0 the person states, and ask if it is unknown."),
-    /** 'user' only when the person set today's level themselves (a canvas edit); otherwise null: the aim's attribution covers it. */
-    current_source: z.enum(['user']).nullable(),
+    /** Today's figure has its own author: a canvas edit, or the person's verified current_quote. */
+    current_source: z.enum(['user', 'unverified']).nullable(),
+    current_quote: z.string().nullable().optional().describe(
+      'Exact words supplying today\'s current level, especially a later chat correction (for example "£50k"). Keep the aim\'s own quote unchanged. Null when unknown; never invent a quote.'),
+    /** Host-set only; a chat correction keeps its origin after save and conversation-window eviction. */
+    said_in: z.enum(['chat']).nullable().optional(),
     /** Today's level's own unit when it differs from the target's ("+10%" on "£ per month"). A model saved before reads null. */
     current_unit: z.string().nullable().default(null).describe(
       "The unit today's level is in, when it differs from `unit` (a change of \"10 %\" on revenue in \"£ per month\" has unit \"%\" and current_unit \"£ per month\"). Null when they are the same."),

@@ -24,6 +24,7 @@
 import { REPAIR_CODES, type RepairEntry } from '@talchain/schemas';
 import { LivingModel, type LivingModelT, type LivingSourceT } from '../../../schemas/living-model.js';
 import { aimTargetReading, stated } from './aim-reading.js';
+import { currentAttribution, currentIsStated } from './figure-authorship.js';
 import { resolveGoalThresholdCapWithProvenance } from '../../../utils/goal-threshold-cap.js';
 import { isPercentScaledUnit } from '../../../cee/draft/records/unit-scale-class.js';
 import { admitGoalBaseline } from '../../../cee/factor-extraction/goal-baseline-admissibility.js';
@@ -92,8 +93,8 @@ const settingSource = (a: { source: LivingSourceT; quote: string | null }): 'bri
   edited(a) ? 'user_specified' : stated(a.source) ? 'brief_extraction' : a.source === 'olumi' ? 'cee_hypothesis' : undefined;
 /** Per-figure authorship: a figure Olumi estimated on another's item is Olumi's, whatever the item's source (`estimate_by`). */
 const OLUMI_FIGURE = { source: 'olumi' as LivingSourceT, quote: null };
-const figureBy = (fig: { estimate_by?: 'olumi' | null }, item: { source: LivingSourceT; quote: string | null; said_in?: 'chat' | null }) =>
-  (fig.estimate_by === 'olumi' ? OLUMI_FIGURE : item);
+const figureBy = (fig: { estimate_by?: 'olumi' | 'unverified' | null }, item: { source: LivingSourceT; quote: string | null; said_in?: 'chat' | null }) =>
+  (fig.estimate_by === 'olumi' ? OLUMI_FIGURE : fig.estimate_by === 'unverified' ? UNSTAMPED : item);
 const withSource = (o: Rec, a: { source: LivingSourceT; quote: string | null; said_in?: 'chat' | null }): Rec => {
   const source = levelSource(a);
   return source === undefined ? o : { ...o, source, ...(stated(a.source) ? { extractionType: 'explicit' } : {}) };
@@ -313,7 +314,7 @@ function levelFromDefinition(model: LivingModelT, aim: LivingModelT['aims'][numb
   if (def.of.some((id) => model.factors.find((f) => f.id === id)?.defined_as)) return undefined;
   const check = definitionCheck(model, def, aim.id, t.unit, t.quantity ?? aim.text, null);
   if (check.reason !== undefined || !check.parts.every((p) => p.value !== null && p.low === null && p.high === null
-    && p.estimate_by !== 'olumi' && stated(p.source))) return undefined;
+    && p.estimate_by === null && stated(p.source))) return undefined;
   const made = exactlyMade(def.op, check.parts.map((p) => (def.subtract?.includes(p.id) ? -1 : 1) * p.value!));
   if (made === undefined) return undefined;
   const expression = check.parts.map((p, i) => {
@@ -428,7 +429,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
           // (an Olumi estimate is asked for), and read silently only when their words say so; otherwise Olumi asks once.
           const ceiling = lt.comparator === '<=' || lt.comparator === '<';
           const stays = ceiling ? current <= lt.value : current >= lt.value;
-          const level = stays && !(t!.current_source === 'user' || stated(aim.source)) ? 'stay_within_base_not_theirs' as const
+          const level = stays && !currentIsStated(aim) ? 'stay_within_base_not_theirs' as const
             : stays && !STAY_CUE[ceiling ? '<=' : '>='].test(aim.quote ?? '') ? 'stay_within_unconfirmed' as const
             : admitGoalBaseline({ rawTarget: lt.value, rawBaseline: current, cap: resolved.cap, ...(ceiling ? { ceiling: true } : {}),
               ...(stays ? { stayWithin: true } : {}) });
@@ -437,7 +438,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
           else {
             goalNode.observed_state = withSource({ value: level.normalised, baseline: level.normalised, raw_value: current, cap: resolved.cap, unit: lt.unit ?? '' },
               // A worked-out level is no one's statement: unstamped, and said beside the result how it was worked out.
-              derived !== undefined ? UNSTAMPED : t!.current_source === 'user' ? { source: 'user', quote: null } : aim);
+              derived !== undefined ? UNSTAMPED : currentAttribution(aim));
             if (derived !== undefined) assumed.push({ id: aim.id, text: derived.said });
             // A change is measured from today only if carrying on as now leaves the quantity there (amendment 1): said beside it.
             if (stays) {
@@ -492,7 +493,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
   // A goal the person defines (Track 2) is worked out from its definition, so an option's own effect on it is another cause.
   if (direct.length > 0 && goal !== undefined && goalNode?.observed_state !== undefined && !aim!.defined_as) {
     const g = goal;
-    const todayIsTheirs = aim!.target!.current_source === 'user' || stated(aim!.source);
+    const todayIsTheirs = currentIsStated(aim!);
     const exact = todayIsTheirs && new Set(direct.map((l) => l.from)).size === direct.length
       && model.links.every((l) => l.to !== g.id || optionIds.has(l.from))
       && direct.every((l) => l.effect.form === 'exact' && l.effect.value !== null && l.effect.sign !== null
@@ -754,7 +755,7 @@ export function mapLivingModel(living: LivingModelT, opts: { readonly goal?: str
     let { low, high } = r.occurrence;
     let months = r.horizon_months;
     // The chance is owned FOR its window: Olumi's estimate of either makes the chance Olumi's (buddy, per-figure authorship).
-    const basis = r.occurrence.estimate_by === 'olumi' || r.horizon_by === 'olumi' ? 'olumi' as const
+    const basis = r.occurrence.estimate_by === 'unverified' ? undefined : r.occurrence.estimate_by === 'olumi' || r.horizon_by === 'olumi' ? 'olumi' as const
       : stated(r.source) ? 'user' as const : r.source === 'olumi' ? 'olumi' as const : undefined;
     // Convert only Olumi's CHANCE: the joint basis can also be Olumi's solely because it supplied the window.
     // v1 cannot carry per-end mitigation reductions; certainty cannot license a shorter window, nor zero a longer one.

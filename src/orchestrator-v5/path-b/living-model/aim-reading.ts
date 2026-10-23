@@ -4,6 +4,7 @@
  * ONE "no target" gap (`goal-target-gap.ts`), which says that reason's own words. A leaf: types only, no runtime imports.
  */
 import type { LivingModelT, LivingSourceT } from '../../../schemas/living-model.js';
+import { currentIsStated } from './figure-authorship.js';
 
 export const stated = (s: LivingSourceT): boolean => s === 'user' || s === 'party';
 
@@ -52,5 +53,5 @@ export function aimTargetReading(aim: { readonly source: LivingSourceT; readonly
   const isChange = t !== null && (t.comparator === 'increase' || t.comparator === 'decrease');
   return t === null ? 'no_level_target'
     : t.source === 'olumi' && [t.value, t.low, t.high, t.current].some((v) => v !== null) ? 'target_not_theirs'
-    : isChange && t.current !== null && !(t.current_source === 'user' || stated(aim.source)) ? 'change_base_not_theirs' : levelTargetOf(t);
+    : isChange && t.current !== null && !currentIsStated(aim) ? 'change_base_not_theirs' : levelTargetOf(t);
 }

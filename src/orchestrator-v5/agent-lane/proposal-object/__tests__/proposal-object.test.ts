@@ -559,6 +559,39 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
     const other = agentProposalRecord(carrier, { ...g, living_model: { aims: [{ id: 'productivity', text: 'Output up 10%' }] } })!;
     expect(other.digest).not.toBe(record.digest);
   });
+  it('B3: an unsupported figure is never yours on an add, change field or current-level note; the complete postimage stays frozen', async () => {
+    const { createProposal } = await import('../../proposal.js');
+    const { proposalPendingAction } = await import('../../durable-proposal.js');
+    const { agentProposalRecord } = await import('../record.js');
+    const card = (operations: unknown[]) => {
+      const p = createProposal({ scenario_id: SID, user_id: null, base_graph_identity_hash: 'pin', operations: operations as never,
+        provenance: { authored_by: 'model_proposed' }, validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: 'Core change' });
+      return agentProposalRecord(proposalPendingAction(p, { id: `agent-approve-proposal:${p.proposal_id}`, label: p.public_label, message: 'Apply.' },
+        { scenario_id: SID, emitted_at_iso: new Date().toISOString() }), { nodes: [{ id: 'cost', label: 'Hiring expenditure' }] })!;
+    };
+    const before = { id: 'cost', label: 'Hiring expenditure', value: null, low: null, high: null, unit: '£',
+      source: 'user', party: null, quote: 'We are hiring', estimate_by: null };
+    const after = { ...before, value: 0, quote: "Our budget is £200,000, but we'd like to spend less.", estimate_by: 'unverified' };
+    for (const change of ['add', 'change']) {
+      const operations = [{ op: 'living_change', path: 'factor:cost', value: { change, before, after } }];
+      const frozen = structuredClone(operations), r = card(operations);
+      expect(r.fields.some(f => f.kind === 'factor_value')).toBe(false);
+      expect(r.adds?.filter(a => a.kind === 'factor_add').every(a => a.value === null)).toBe(true);
+      const text = r.adds?.flatMap(a => a.kind === 'change_note' ? [a.text] : []).join(' ');
+      expect(text).toContain('source not yet confirmed');
+      expect(text).toContain('£0');
+      expect(operations).toEqual(frozen);
+    }
+    const aim = { id: 'mrr', text: 'Reach £100k MRR', source: 'user', party: null, quote: 'Reach £100k MRR',
+      target: { current: null, current_source: null, unit: '£ per month' } };
+    const next = { ...aim, target: { ...aim.target, current: 50000, current_source: 'unverified', current_quote: '£60k' } };
+    const unknown = card([{ op: 'living_change', path: 'aim:mrr', value: { change: 'change', before: aim, after: next } }]);
+    expect(unknown.adds?.some(a => a.kind === 'change_note' && a.text.includes('today’s level') && a.text.includes('source not yet confirmed'))).toBe(true);
+    const yours = card([{ op: 'living_change', path: 'aim:mrr', value: { change: 'change', before: aim,
+      after: { ...next, target: { ...next.target, current_source: 'user', current_quote: '£50k', said_in: 'chat' } } } }]);
+    expect(yours.adds?.some(a => a.kind === 'change_note' && a.text.includes('today’s level') && a.text.includes('(yours)'))).toBe(true);
+    expect(yours.digest).not.toBe(unknown.digest);
+  });
   it('Codex r1 on #3632: whose a figure is, a signed or unsigned effect, an add\'s limit and definition, long lists and key order', async () => {
     const { createProposal } = await import('../../proposal.js');
     const { proposalPendingAction } = await import('../../durable-proposal.js');

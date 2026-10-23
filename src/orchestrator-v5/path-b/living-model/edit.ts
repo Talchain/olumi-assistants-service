@@ -10,6 +10,7 @@
 import type { LivingModelT } from '../../../schemas/living-model.js';
 import { exactlyMade, mapLivingModel } from './mapper.js';
 import { stated } from './aim-reading.js';
+import { currentIsStated } from './figure-authorship.js';
 
 /** The canvas gestures this slice applies, in the wire's own shapes (`@talchain/schemas` turn-payload). */
 export type ExplicitEdit =
@@ -104,7 +105,7 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
           points.set(id, false); // A visiting node cannot justify itself through a cycle.
           const p = before.get(id);
           const counts = p !== undefined && p.value !== null
-            && ((p.low === null && p.high === null && p.estimate_by !== 'olumi' && stated(p.source))
+            && ((p.low === null && p.high === null && p.estimate_by === null && stated(p.source))
               || (admitted.has(id) && p.defined_as !== null && p.defined_as.of.every(theirPoint)));
           points.set(id, counts);
           return counts;
@@ -134,7 +135,8 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
         // A goal already has a derived-level route: retire only its stale current figure, keeping the aim and target theirs.
         for (const a of m.aims) if (a.target !== null && a.target.current !== null && admitted.has(a.id) && a.defined_as?.of.some((id) => changed.has(id))) {
           m.history.push({ id: a.id, change: 'superseded', old: JSON.stringify(a), quote: null });
-          a.target = { ...a.target, current: null, current_source: null };
+          const { current_quote: _quote, said_in: _chat, ...target } = a.target;
+          a.target = { ...target, current: null, current_source: null };
         }
       }
       else if (a!.target === null) return { refused: 'no_target' };
@@ -146,7 +148,8 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
         // the figure they set is adopted, and any target figure Olumi left on it goes to history as Olumi's (Codex #3585 P1).
         const olumiMeasure = a!.target.source === 'olumi';
         if (olumiMeasure) supersedeOlumiTarget(m, a!);
-        a!.target = { ...a!.target, ...(olumiMeasure ? { value: null, ...noRange } : {}), current: raw, current_source: 'user',
+        const { current_quote: _quote, said_in: _chat, ...target } = a!.target;
+        a!.target = { ...target, ...(olumiMeasure ? { value: null, ...noRange } : {}), current: raw, current_source: 'user',
           current_unit: levelUnit === a!.target.unit ? null : levelUnit, source: null };
       }
       return { model: m };
@@ -170,7 +173,7 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       // numbers, never a gap a person could mean (Codex R2/R3: a shared or floored allowance kept 1 out of [2, 1e15]).
       const atMost = (a: number, b: number) => a <= b || roundTripEqual(a, b);
       // Olumi's estimate on the person's factor is Olumi's, so a range around it never keeps it as theirs (per-figure authorship).
-      const keep = f.value !== null && f.source === 'user' && f.estimate_by !== 'olumi' && atMost(low, f.value) && atMost(f.value, high);
+      const keep = f.value !== null && f.source === 'user' && f.estimate_by === null && atMost(low, f.value) && atMost(f.value, high);
       Object.assign(f, { ...theirFigure, value: keep ? f.value : null, low, high, ...theirs });
       return { model: m };
     }
@@ -198,7 +201,7 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
       // history, and Olumi asks for today's level instead.
       // On Olumi's suggested measure only a level the person set is theirs, whoever authored the aim (Codex #3585 P1).
       const olumiMeasure = prior?.source === 'olumi';
-      const keepCurrent = olumiMeasure ? prior.current_source === 'user' : a.source === 'user' || prior?.current_source === 'user';
+      const keepCurrent = olumiMeasure ? prior.current_source === 'user' : currentIsStated(a);
       if (!keepCurrent && prior?.current != null) {
         m.history.push({ id: a.id, change: 'superseded', quote: null,
           old: `starting level ${prior.current}${prior.unit === null ? '' : ` ${prior.unit}`} (${a.source === 'olumi' || olumiMeasure ? 'Olumi\u2019s estimate' : 'not confirmed by you'})` });
@@ -207,7 +210,9 @@ export function applyExplicitEdit(model: LivingModelT, edit: ExplicitEdit, goal?
         value: edit.raw_value, ...noRange, unit: edit.unit, by_when: prior?.by_when ?? null, period_months: prior?.period_months ?? null,
         period_by: prior?.period_by ?? null, period_deadline: prior?.period_deadline ?? null, period_read_on: prior?.period_read_on ?? null,
         baseline: prior?.baseline ?? null, current: keepCurrent ? prior?.current ?? null : null,
-        current_source: keepCurrent ? prior?.current_source ?? null : null, current_unit: null, change_kind: null, source: null };
+        current_source: keepCurrent ? prior?.current_source ?? null : null,
+        ...(keepCurrent && prior?.current_quote !== undefined ? { current_quote: prior.current_quote } : {}),
+        ...(keepCurrent && prior?.said_in === 'chat' ? { said_in: 'chat' as const } : {}), current_unit: null, change_kind: null, source: null };
       Object.assign(a, theirs);
       return { model: m };
     }

@@ -14,6 +14,7 @@
  */
 import type { LivingModelT, LivingSourceT } from '../../../schemas/living-model.js';
 import { stable } from './diff.js';
+import { quoteContainsFigure } from './figure-authorship.js';
 
 export interface Relabelled { readonly id: string; readonly was: LivingSourceT }
 export interface Kernelled { readonly model: LivingModelT; readonly relabelled: readonly Relabelled[] }
@@ -63,6 +64,10 @@ type Attributed = { source: LivingSourceT; party: string | null; quote: string |
 /** An item's attribution, as the kernel names it: never the host's own `said_in` mark, which the AI can neither set nor clear (Codex r1 on #3661). */
 const attributionKey = (id: string, item: Attributed): string => {
   const { said_in: _host, ...rest } = item as Attributed & { said_in?: unknown };
+  if ('target' in rest && rest.target != null) {
+    const { said_in: _targetHost, ...target } = rest.target as Record<string, unknown>;
+    return `${id}\u0000${stable({ ...rest, target })}`;
+  }
   return `${id}\u0000${stable(rest)}`;
 };
 
@@ -93,10 +98,11 @@ const OCCURRENCE = ['estimate_by', 'low', 'high'] as const;
  */
 function guarded<T extends Fig>(next: T, before: Fig | undefined, keys: readonly string[]): T {
   if (before === undefined) return next;
-  if (next.estimate_by === 'olumi' && before.estimate_by !== 'olumi' && given(before as { low: number | null; high: number | null })) {
+  if (next.estimate_by === 'olumi' && before.estimate_by == null && given(before as { low: number | null; high: number | null })) {
     return { ...next, ...Object.fromEntries(keys.map((k) => [k, before[k] ?? null])) };
   }
   const unchanged = keys.every((k) => k === 'estimate_by' || (next[k] ?? null) === (before[k] ?? null));
+  if (before.estimate_by === 'unverified' && next.estimate_by === null && unchanged && next.quote === before.quote) return { ...next, estimate_by: 'unverified' };
   return before.estimate_by === 'olumi' && next.estimate_by !== 'olumi' && unchanged ? { ...next, estimate_by: 'olumi' } : next;
 }
 /** An option's own attribution is its words, not its settings: each setting carries its own (as a figure does). */
@@ -110,7 +116,8 @@ function withoutEstimates(item: Record<string, any>, before: Record<string, any>
     const now = key === 'figure' ? item : item[key];
     const was = key === 'figure' ? before : before[key];
     // Olumi's estimate where the source gave none, or a revision of Olumi's own earlier estimate: never the item's words.
-    if (now?.estimate_by !== 'olumi' || was === undefined || (given(was) && was.estimate_by !== 'olumi')) return;
+    if (!['olumi', 'unverified'].includes(now?.estimate_by) || was === undefined
+      || (now.estimate_by === 'olumi' && given(was) && was.estimate_by == null)) return;
     changed = true;
     const back = { estimate_by: was.estimate_by ?? null, value: was.value ?? null, low: was.low, high: was.high, unit: was.unit ?? null };
     if (key === 'figure') Object.assign(out, back);
@@ -135,9 +142,10 @@ export function applyKernel(model: LivingModelT, verifiedWords: readonly string[
     ...saved.factors.map((f) => [f.id, f] as const), ...saved.links.map((l) => [l.id, l] as const), ...saved.risks.map((r) => [r.id, r] as const),
     ...saved.options.flatMap((o) => o.settings.map((x) => [`${o.id}:${x.factor_id}`, x] as const)),
   ]);
-  const keptCurrent = (id: string, current: number | null): boolean => {
+  const keptCurrent = (id: string, next: NonNullable<LivingModelT['aims'][number]['target']>): boolean => {
     const t = saved?.aims.find((a) => a.id === id)?.target;
-    return t?.current_source === 'user' && t.current === current;
+    return t?.current_source === 'user' && t.current === next.current && t.quantity === next.quantity
+      && (t.current_unit ?? t.unit) === (next.current_unit ?? next.unit) && (t.current_quote ?? null) === (next.current_quote ?? null);
   };
   // ⭐ WHERE THE PERSON SAID IT (DL 22 Oct, Lenses' step 3: an approved chat correction was saved as the brief's figure). The
   // thin-core plan's authorship rule (20 Oct): a label, never a gate, and never figure-matching. An item of the person's (never
@@ -163,6 +171,15 @@ export function applyKernel(model: LivingModelT, verifiedWords: readonly string[
     relabelled.push({ id, was: item.source });
     return { ...item, source: 'unverified' };
   };
+  // An item's verified words do not author a figure absent from those words. Unitless option switches keep their declared
+  // on/off semantics; this is attribution only, never a natural-language calculator or a reason to discard the person's item.
+  const figure = <T extends Attributed & { estimate_by: 'olumi' | 'unverified' | null; value: number | null; low: number | null; high: number | null; unit: string | null }>(id: string, item: T): T => {
+    if (!['user', 'party'].includes(item.source) || item.estimate_by !== null || item.unit === null || item.unit.trim() === ''
+      || kept.has(attributionKey(id, item))) return item;
+    if ([item.value, item.low, item.high].every(v => v === null || quoteContainsFigure(item.quote, v, item.unit))) return item;
+    relabelled.push({ id: `${id}:figure`, was: item.source });
+    return { ...item, estimate_by: 'unverified' };
+  };
   // A definition carries its own attribution: the person's words for the quantity are not their words for what it is.
   const defined = <T extends { id: string; defined_as: (Attributed & { op: 'sum' | 'product'; of: string[] }) | null }>(x: T): T =>
     (x.defined_as ? { ...x, defined_as: attribute(`${x.id}:defined_as`, x.defined_as) } : x);
@@ -172,22 +189,33 @@ export function applyKernel(model: LivingModelT, verifiedWords: readonly string[
       ...m,
       aims: m.aims.map((a) => {
         const out = defined(attribute(a.id, a));
-        // Today's level set by the person on the canvas: theirs only while it is the saved one, unchanged.
-        if (out.target?.current_source === 'user' && !keptCurrent(a.id, out.target.current)) {
-          relabelled.push({ id: `${a.id}:current`, was: 'user' });
-          return { ...out, target: { ...out.target, current_source: null } };
+        if (out.target === null) return out;
+        const { said_in: _sent, ...t } = out.target;
+        const before = saved?.aims.find(x => x.id === a.id)?.target;
+        // The current level has its own quote. The aim's target/brief quote is never replaced by a later correction.
+        const q = t.current_quote == null ? '' : plain(t.current_quote);
+        const keptLevel = keptCurrent(a.id, t);
+        const verifiedLevel = t.current_source !== 'unverified' && t.current !== null && q !== ''
+          && quoteContainsFigure(q, t.current, t.current_unit ?? t.unit) && words.some(w => w.includes(q));
+        if (keptLevel || verifiedLevel) {
+          const chat = keptLevel && before?.said_in === 'chat' || verifiedLevel && briefWords !== null && !briefWords.includes(q);
+          return { ...out, target: { ...t, current_source: 'user' as const, ...(chat ? { said_in: 'chat' as const } : {}) } };
         }
-        return out;
+        if (t.current_source === 'user' || t.current_quote != null) {
+          if (t.current_source !== 'unverified') relabelled.push({ id: `${a.id}:current`, was: 'user' });
+          return { ...out, target: { ...t, current_source: 'unverified' as const } };
+        }
+        return { ...out, target: t };
       }),
       // What the AI sent for `said_in` is dropped; the key is written only when the host reads 'chat', so an unmarked factor stays
       // byte for byte what it was.
       factors: m.factors.map((f) => {
-        const { said_in: _sent, ...raw } = defined(attribute(f.id, guarded(f, savedItem.get(f.id), FIGURE)));
+        const { said_in: _sent, ...raw } = defined(attribute(f.id, figure(f.id, guarded(f, savedItem.get(f.id), FIGURE))));
         const out = raw.accumulation == null ? raw : { ...raw, accumulation: attribute(`${f.id}:accumulation`, raw.accumulation) };
         return saidIn(f.id, out) === 'chat' ? { ...out, said_in: 'chat' as const } : out;
       }),
       options: m.options.map((o) => ({ ...attribute(o.id, optionItself(o)),
-        settings: o.settings.map((s) => attribute(`${o.id}:${s.factor_id}`, guarded(s, savedItem.get(`${o.id}:${s.factor_id}`), FIGURE))) })),
+        settings: o.settings.map((s) => attribute(`${o.id}:${s.factor_id}`, figure(`${o.id}:${s.factor_id}`, guarded(s, savedItem.get(`${o.id}:${s.factor_id}`), FIGURE)))) })),
       links: m.links.map((l) => attribute(l.id, { ...l, effect: guarded(l.effect, savedItem.get(l.id)?.effect, EFFECT) })),
       // A mitigation carries its own attribution, as an option's setting does: the person's risk is not their reduction.
       risks: m.risks.map((r) => {

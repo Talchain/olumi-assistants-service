@@ -26,7 +26,8 @@ describe('thin core kernel: a saved attribution is kept only for an unchanged it
     expect(applyKernel(structuredClone(savedLevel), [], savedLevel).model.aims[0]!.target!.current_source).toBe('user');
     const changed: LivingModelT = structuredClone(savedLevel);
     changed.aims[0]!.target!.current = 80;
-    expect(applyKernel(changed, [], savedLevel).model.aims[0]!.target!.current_source).toBeNull();
+    // Explicit unknown figure author, so the reader cannot fall back to the unchanged human aim's author.
+    expect(applyKernel(changed, [], savedLevel).model.aims[0]!.target!.current_source).toBe('unverified');
   });
 });
 

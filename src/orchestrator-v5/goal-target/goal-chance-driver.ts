@@ -191,7 +191,7 @@ export function factorRangeAuthorOf(graph: unknown, factorId: string): GoalChanc
     if (factor === undefined || !finite(low) || !finite(high) || low >= high || !finite(state.cap) || state.cap <= 0
       || !finite(state.raw_value) || state.raw_value <= low || state.raw_value >= high
       || !finite(state.std) || state.std <= 0 || state.std_source !== 'olumi'
-      || state.range_source !== (factor.estimate_by === 'olumi' ? 'olumi' : factor.source)) return 'unattributed';
+      || state.range_source !== (factor.estimate_by ?? factor.source)) return 'unattributed';
     const expected = (high - low) / Math.sqrt(12) / state.cap;
     if (Math.abs(expected - state.std) > 1e-9 * Math.max(expected, state.std)) return 'unattributed';
     // A colleague's range is not claimed as "yours"; the named source remains in the conversion ledger.
