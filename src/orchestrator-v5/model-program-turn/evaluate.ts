@@ -110,14 +110,8 @@ export function evaluateCanonical(model: CanonicalModelT, opts: { readonly sourc
     return { compiled, sim: null, projection, view: waitingView(model, compiled, goals, asks, tipping, opts.seed) };
   }
   const sim = simulate(x, { seed: opts.seed, draws: opts.draws ?? SPIKE_DRAWS });
-  const presented = presentAnalysisView({ model: x, result: sim, quantities: quantityMeta(model, compiled, x), goals, asks, leaves_out, tipping });
-  // SEAM GAP (S2's PresentInput carries no limit outcomes): a limit that waits on an ask is outside the executable model, so
-  // its chance words cannot name it. It is said beside the chance here, never silently dropped.
-  const limitLabel = new Map(normalise(model).limits.map((l) => [l.id, l.label] as const));
-  const limitNotes = compiled.perLimit.filter((l) => l.status !== 'calculable')
-    .map((l) => `‘${limitLabel.get(l.limit_id) ?? l.limit_id}’ is not checked in this chance yet: ${l.reasons.join(' ')}`);
-  const view = limitNotes.length === 0 ? presented
-    : { ...presented, goal_chance: { ...(presented.goal_chance ?? {}), notes: [...(presented.goal_chance?.notes ?? []), ...limitNotes] } };
+  // A limit, option or risk left out of this run is said by S2's present itself (S1's `executable.withheld`, r3).
+  const view = presentAnalysisView({ model: x, result: sim, quantities: quantityMeta(model, compiled, x), goals, asks, leaves_out, tipping });
   return { compiled, sim, projection, view };
 }
 

@@ -83,7 +83,7 @@ const sse = (text: string): Response => {
 const BRIEF = 'We bake 300 loaves a week with our one oven and want to reach 380 loaves a week. A second oven adds about 100 loaves a week, or we could keep our one oven. We have £3,000 to spend and don\'t know the oven price yet.';
 const at = { party: null, approval: 'proposed' as const, author_id: null };
 const q = (id: string, unit: string, f: Partial<CanonicalQuantityT>): CanonicalQuantityT => ({ id, label: id.replace(/_/g, ' '), unit, kind: 'fact', value: null, low: null, high: null,
-  status: 'known', question: null, basis: null, author: 'person', quote: null, ...at, ...f });
+  range_kind: null, status: 'known', question: null, basis: null, author: 'person', quote: null, ...at, ...f });
 function bakery(): CanonicalModelT {
   return {
     version: 'canonical.v1', question: 'Should the bakery buy a second oven?', period: 'week',
@@ -92,26 +92,26 @@ function bakery(): CanonicalModelT {
       q('ovens_added', 'oven', { value: 0, quote: 'our one oven' }),
       q('one_oven', 'oven', { value: 1, quote: 'A second oven' }),
       q('extra_per_oven', 'loaf/week/oven', { kind: 'coefficient', value: 100, quote: 'adds about 100 loaves a week' }),
-      q('sell_through', '1', { kind: 'coefficient', status: 'estimated', author: 'olumi', value: 0.7, low: 0.5, high: 0.9, basis: 'New capacity sells only as far as demand grows.' }),
+      q('sell_through', '1', { kind: 'coefficient', status: 'estimated', author: 'olumi', value: 0.7, low: 0.5, high: 0.9, range_kind: 'plausible', basis: 'New capacity sells only as far as demand grows.' }),
       q('sold_per_oven', 'loaf/week/oven', { kind: 'coefficient', status: 'derived', author: 'olumi' }),
       q('sales', 'loaf/week', { status: 'derived', author: 'olumi' }),
       q('sales_target', 'loaf/week', { value: 380, quote: 'reach 380 loaves a week' }),
       q('budget', 'GBP', { value: 3000, quote: 'We have £3,000 to spend' }),
       q('oven_price', 'GBP/oven', { status: 'asked', question: 'What would the second oven cost?' }),
       q('spend', 'GBP', { status: 'derived', author: 'olumi' }),
-      q('check_period', 'week', { value: 1, author: 'olumi', basis: 'A one-off spend, checked once.' }),
     ],
     relations: [
-      { form: 'definition', id: 'sold_rel', defines: 'sold_per_oven', op: 'product', parts: ['extra_per_oven', 'sell_through'], author: 'olumi', quote: null, ...at },
+      { form: 'definition', id: 'sold_rel', defines: 'sold_per_oven', op: 'product', parts: [{ id: 'extra_per_oven', power: 1 }, { id: 'sell_through', power: 1 }], author: 'olumi', quote: null, ...at },
       { form: 'effect', id: 'sales_rel', defines: 'sales', base: 'base_sales', terms: [{ driver: 'ovens_added', coefficient: 'sold_per_oven', author: 'person', quote: 'A second oven adds about 100 loaves a week', ...at }], author: 'olumi', quote: null, ...at },
-      { form: 'definition', id: 'spend_rel', defines: 'spend', op: 'product', parts: ['oven_price', 'ovens_added'], author: 'olumi', quote: null, ...at },
+      { form: 'definition', id: 'spend_rel', defines: 'spend', op: 'product', parts: [{ id: 'oven_price', power: 1 }, { id: 'ovens_added', power: 1 }], author: 'olumi', quote: null, ...at },
     ],
-    goals: [{ id: 'more_loaves', label: 'Reach 380 loaves a week', measure: { quantity: 'sales', cmp: '>=', target: 'sales_target', frame: 'level', reference: null, aggregation: 'end',
+    goals: [{ id: 'more_loaves', label: 'Reach 380 loaves a week', measure: { quantity: 'sales', per: null, cmp: '>=', target: 'sales_target', frame: 'level', reference: null, aggregation: 'end',
       window: null, measure_by: 'person', assumptions: [], exclusions: [] }, question: null, author: 'person', quote: 'want to reach 380 loaves a week', ...at }],
-    limits: [{ id: 'within_budget', label: 'Within the £3,000', quantity: 'spend', cmp: '<=', bound: 'budget', aggregation: 'end',
-      window: { origin_event: null, origin_offset: null, start: 0, periods: 'check_period' }, author: 'person', quote: 'We have £3,000 to spend', ...at }],
+    limits: [{ id: 'within_budget', label: 'Within the £3,000', measure: { quantity: 'spend', per: null, cmp: '<=', bound: 'budget', aggregation: 'end', window: null },
+      question: null, author: 'person', quote: 'We have £3,000 to spend', ...at }],
+    preferences: [],
     options: [
-      { id: 'second_oven', label: 'A second oven', sets: [{ quantity: 'ovens_added', to: 'one_oven', value: null, low: null, high: null, question: null, from_period: 0, author: 'person', quote: 'A second oven' }],
+      { id: 'second_oven', label: 'A second oven', sets: [{ quantity: 'ovens_added', to: 'one_oven', value: null, low: null, high: null, range_kind: null, question: null, from_period: 0, author: 'person', quote: 'A second oven' }],
         status: 'live', developed_from: null, author: 'person', quote: 'A second oven', ...at },
       { id: 'keep_one', label: 'Keep our one oven', sets: [], status: 'live', developed_from: null, author: 'person', quote: 'keep our one oven', ...at },
     ],
@@ -121,7 +121,7 @@ function bakery(): CanonicalModelT {
 /** The same bakery with one draft defect the compiler names: Olumi's estimate given without its range. */
 function bakeryWithDefect(): CanonicalModelT {
   const m = bakery();
-  m.quantities = m.quantities.map((x) => (x.id === 'sell_through' ? { ...x, low: null, high: null } : x));
+  m.quantities = m.quantities.map((x) => (x.id === 'sell_through' ? { ...x, low: null, high: null, range_kind: null } : x));
   return m;
 }
 
@@ -231,6 +231,7 @@ describe('spike S3: the model-program turn on the real core route', () => {
     // The budget limit waits on the oven price: it is never folded silently into the chance.
     expect(r.model_program.compile.within_limits.status).toBe('asks');
     expect(r.model_program.asks.map((a: Json) => a.quantity_id)).toEqual(['oven_price']);
+    expect(view.options.every((o: Json) => o.cell.face.includes('Not yet checked: ‘Within the £3,000’'))).toBe(true);
     const { living_model: _lm, ...display } = persisted!;
     expect(display).toEqual(JSON.parse(JSON.stringify(project(bakery(), compile(bakery(), { sourceText: BRIEF })).graph)));
   });
