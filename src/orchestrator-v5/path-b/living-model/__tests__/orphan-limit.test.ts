@@ -23,7 +23,7 @@ describe('a retained limit without a supported forecast never refuses the rest o
     expect(saved.nodes.find((n: Rec) => n.id === 'cost').observed_state).toMatchObject({ raw_value: 0, source: 'cee_inference' });
     expect(saved.edges.some((e: Rec) => e.from === 'cost' || e.to === 'cost')).toBe(false);
     expect(mapped.withheld).toContainEqual({ id: 'cost', reason: 'limit_not_in_slice' });
-    expect(assessCanonicalAnalysisReadiness(saved).status).toBe('ready');
+    expect(assessCanonicalAnalysisReadiness(saved).analysisReady?.status).toBe('ready');
     expect(unresolvedRetainedLimits(saved).map(c => c.constraint_id)).toEqual(['limit_cost']);
     // The stored frame is kept; the existing Run projection removes only the scoring frame, so no budget/joint pass is fabricated.
     const wire = withholdRetainedLimitFrames(saved, saved.goal_constraints);
