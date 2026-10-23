@@ -331,12 +331,18 @@ describe('action_bar v1 on every turn, and the reload derives the same bar (amen
     const again = await reload();
     expect(JSON.stringify(again.action_bar)).toBe(JSON.stringify(live.action_bar));
   });
-  it('PATH-B core (PL 00:18): a cold reopen with the core header carries no host action bar; the same reopen without it still does', async () => {
+  // DL 93d79c3e 09:24Z (Lenses' panel bar on core): a core press reaches the AI as the action's user line, so the bar keeps
+  // only what that serves. PL 00:18's protection stands: no host-typed action on core, the AI stays the one voice.
+  it('PATH-B core: a cold reopen with the core header carries only the pre-mortem, on the same read\'s ranking; without it, the full bar', async () => {
     setState('licensed');
     await turn({ message: 'Where are we?' });
     coldStore();
-    expect((await reload({ 'x-olumi-ai-mode': 'core' })).action_bar, 'core: the AI is the one voice').toBeUndefined();
-    expect((await reload()).action_bar?.v, 'the A lane is unchanged').toBe(1);
+    const core = (await reload({ 'x-olumi-ai-mode': 'core' })).action_bar!;
+    const full = (await reload()).action_bar!;
+    expect(offersOf(full).map((o) => o.action_id), 'the A lane is unchanged').toEqual(expect.arrayContaining(['review', 'what_changes', 'strengthen', 'pre_mortem']));
+    expect(offersOf(core).map((o) => o.action_id), 'core: only what a core press serves').toEqual(['pre_mortem']);
+    expect(offersOf(core)[0]).toMatchObject({ press_id: 'agent-next-pre-mortem', enabled: true });
+    expect(core.revision, 'ranked from the same read').toEqual(full.revision);
   });
   it('RED (Codex r1 P2-4): live === reload also when this answer pushes an older guidance event out of the history window', async () => {
     // One own option besides doing nothing: RC-WIDEN W2 ranks More options into priority unless pressed at this state.

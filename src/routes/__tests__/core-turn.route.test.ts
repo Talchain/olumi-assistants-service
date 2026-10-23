@@ -41,7 +41,7 @@ const corrected = (): LivingModelT => {
 const CHANGE = { public_label: 'Set f to 0.6, as you said', basis: 'The person corrected f.', model: corrected(), remove: [] as string[] };
 /** The SDK's final output, with the bytes a host "tidy" would touch: leading space, markdown, a trailing newline. */
 const ANSWER = '  The model holds **f at 0.5** today:\n\n- Push sets it to 1\n- Hold keeps it\n';
-const CONTRACT_KEYS = ['turn_id', 'durability', 'assistant_text', 'model', 'cards', 'notes', 'run', 'analysis_state', 'receipts', 'paused', 'error', '_agent', '_provider_calls'];
+const CONTRACT_KEYS = ['turn_id', 'durability', 'assistant_text', 'model', 'cards', 'notes', 'run', 'analysis_state', 'receipts', 'paused', 'error', 'action_bar', '_agent', '_provider_calls'];
 const LEGACY_ENVELOPE = ['response_version', 'blocks', 'suggested_actions', 'insights', 'stage_indicator'];
 
 let persisted: Json | null = null;
@@ -237,6 +237,15 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(ids(j.model.graph)).toEqual(ids(read.graph));
     expect(calls).toHaveLength(1);
     expect(turnRows.get(j.turn_id)?.assistant_message, 'the answer row records the same words').toBe(ANSWER);
+  });
+
+  it('DL 93d79c3e 09:24Z: the turn carries the panel\'s action bar, ranked from its own read: only the pre-mortem a core press serves', async () => {
+    const j = (await typed('What does the model hold for f today?')).json() as Json;
+    const read = await freshRead();
+    const offers = [...j.action_bar.priority, ...j.action_bar.standard, ...j.action_bar.more] as Json[];
+    expect(offers.map((o) => o.action_id)).toEqual(['pre_mortem']);
+    expect(offers[0]).toMatchObject({ press_id: 'agent-next-pre-mortem', enabled: true });
+    expect(j.action_bar.revision.graph_hash, 'bound to the saved model the turn answered on').toBe(read.graph_hash);
   });
 
   it('a Run press: run_analysis is the first call’s forced tool, ONE Run, and the fresh analysis_result rides the contract', async () => {

@@ -66,6 +66,7 @@ import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
 import {
   appliedGraphWire, constructionDeadline, CORE_RUN_PRESS_WITHHELD, coreTurnCapabilities, coreTurnStores, coreTurnTools, graphReadyEmitter,
 } from '../orchestrator-v5/core-route/deps.js';
+import { coreActionBarOf } from '../orchestrator-v5/core-route/action-bar.js';
 import { CORE_ALIGNED_INSTRUCTIONS, draftArmOf, instructionsForMode } from '../orchestrator-v5/core-route/instructions.js';
 import {
   AGENT_TURN_CLAIM_WAIT, agentTurnRequestHash, challengeTargetOf, chipOperationOf, claimHashFor, claimTurnIdOf, isChiplessRetry,
@@ -120,6 +121,8 @@ interface SavedScenario {
   readonly run: CoreTurnRun | null;
   /** The selected Run, only while it is current and identified (what `readRecordedRun` binds a recovered Run to). */
   readonly currentRun?: { readonly runId: string; readonly graphHashAtRun: string; readonly computedAt: string };
+  /** The read's own body: what the panel's action bar is ranked from (`coreActionBarOf`), as the reload ranks it. */
+  readonly body: Rec;
 }
 
 function savedScenarioOf(read: { readonly status: number; readonly json: Rec }): SavedScenario {
@@ -138,7 +141,7 @@ function savedScenarioOf(read: { readonly status: number; readonly json: Rec }):
     runId: str(currentRead?.run_id), graphHashAtRun: str(currentRead?.computed_against_hash), computedAt: str(runState.computed_at),
   } : undefined;
   return {
-    status: read.status, graph, revision: str(json.graph_hash),
+    status: read.status, graph, revision: str(json.graph_hash), body: json,
     identity: isRec(json.graph_identity_hash) ? str(json.graph_identity_hash.value) : str(json.graph_identity_hash), briefText: json.brief_text,
     analysisState: isRec(json.analysis_state) ? json.analysis_state : null,
     analysisResult: isRec(json.analysis_result) ? json.analysis_result : undefined,
@@ -341,6 +344,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
           revision: after.revision, scenarioRevision: after.identity, graph: appliedGraphWire(after.graph),
           cards: await heldCardsOf(store, scenarioId, pending, after), run: after.run, analysisState: after.analysisState,
           receipts: collectTurnReceipts([forwarded.json]).map((r) => ({ ...r, authorised_by: 'person' as const })),
+          actionBar: coreActionBarOf(scenarioId, after.body),
           error: forwarded.status === 200 ? null : {
             code: str(refusal?.code) ?? str(forwarded.json.error) ?? str(forwarded.json.code) ?? 'CANVAS_EDIT_REFUSED',
             message: str(refusal?.message) ?? str(forwarded.json.message) ?? str(forwarded.json.detail) ?? 'That change could not be saved.',
@@ -384,7 +388,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         cards: await heldCardsOf(store, scenarioId, pending, now),
         run: now.run, analysisState: now.analysisState, ...(runPress ? { analysisResult: now.analysisResult } : {}),
         paused: paused != null ? { proposal_id: paused.proposal_id } : null, error: outcome === undefined ? null : RECORDED[outcome].error,
-        agent: { replayed: true }, providerCalls: recordedProviderCalls(),
+        actionBar: coreActionBarOf(scenarioId, now.body), agent: { replayed: true }, providerCalls: recordedProviderCalls(),
       }));
     };
 
@@ -745,6 +749,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         receipts: receiptsOf(result),
         paused: paused !== undefined ? { proposal_id: paused.proposal_id } : null,
         error: noReply ? RECORDED.reply_empty.error : null,
+        actionBar: coreActionBarOf(scenarioId, after.body),
         // A refused or unavailable call names its typed reason (DL 22 Oct: which of Class 3's offers fired was not on the wire).
         agent: { mode: MODE, stopped_reason: result.stopped_reason, tool_calls: toolCallsOf(result), ...(result.sdk !== undefined ? { sdk: result.sdk } : {}) },
         providerCalls: recordedProviderCalls(),
