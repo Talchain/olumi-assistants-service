@@ -280,7 +280,7 @@ export function goalTargetsBlockOf(args: {
   const targets = ordered.filter((c) => c.role === 'target');
   const model = isRec(args.graph) && isRec(args.graph.living_model) ? args.graph.living_model : undefined;
   const currentAims = Array.isArray(model?.aims) ? model.aims.filter(isRec).filter(a => a.status === 'current').map(a => a.id) : [];
-  const dependencyHeld = new Set([...targets.map(t => t.node_id), ...currentAims].filter(id => goalDependencyCauses(args.graph, id).length > 0));
+  const dependencyHeld = new Set([...ordered.map(t => t.node_id), ...currentAims].filter(id => goalDependencyCauses(args.graph, id).length > 0));
   // ⛔ RE-SCOPE 2 (R5-5 (b); DL ruling): a stated TARGET the Run did not send (no row, so no threshold reached the engine) is
   // never left out of a joint that claims every target — the joint waits, as for a figure not preserved.
   const unsentTargets = stored.filter((r) => typeof r.constraint_id === 'string' && targetIds.has(r.constraint_id)

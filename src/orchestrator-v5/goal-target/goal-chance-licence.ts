@@ -1647,19 +1647,50 @@ function levelDefaultsOn(graph: unknown, goalId: unknown, sentRun: unknown) {
   });
 }
 
+/** Leave unsupported condition rows out of this Run's wire copy, never out of the saved question. */
+export function goalDependencyConstraintsForRun<C>(graph: unknown, constraints: C): C {
+  if (!Array.isArray(constraints) || !constraints.some(r => isRec(r) && goalDependencyCauses(graph, r.node_id).length > 0)) return constraints;
+  return constraints.filter(r => !isRec(r) || goalDependencyCauses(graph, r.node_id).length === 0) as C;
+}
+
+/** Run-bound, per-condition suppression BEFORE the per-limit verdict as well as at the licence reader.
+ * Never removes unrelated goal chance, ordering, outcome or EVPPI. Old graphs take the byte-identical no-op path. */
+export function withGoalDependencyScores<E>(envelope: E, graph: unknown, storedConstraints: unknown): E {
+  if (!isRec(envelope)) return envelope;
+  const held = (Array.isArray(storedConstraints) ? storedConstraints.filter(isRec) : [])
+    .filter(r => typeof r.constraint_id === 'string' && goalDependencyCauses(graph, r.node_id).length > 0);
+  if (held.length === 0) return envelope;
+  const options = new Set(readOptionResultSources(envelope).flat().flatMap(r =>
+    typeof r.option_id === 'string' ? [r.option_id] : typeof r.id === 'string' ? [r.id] : []));
+  const ids = held.map(r => String(r.constraint_id));
+  const stripped = withholdOptionLimitScores(envelope, new Map(ids.map(id => [id, options]))) as Rec;
+  // The aggregate legacy joint has no condition identity: it also cannot describe the full saved question.
+  if (isRec(stripped.constraint_analysis)) {
+    const { joint_probability: _joint, joint_probability_precision: _precision, ...kept } = stripped.constraint_analysis;
+    stripped.constraint_analysis = kept;
+  }
+  const priorJoint = isRec(stripped.joint_withheld) ? stripped.joint_withheld : {};
+  stripped.joint_withheld = { ...priorJoint, reason: 'limit_unscored', constraint_ids:
+    [...new Set([...(Array.isArray(priorJoint.constraint_ids) ? priorJoint.constraint_ids : []), ...ids])] };
+  const warnings = Array.isArray(stripped.inference_warnings) ? stripped.inference_warnings : [];
+  const fresh = held.filter(r => !warnings.some(w => isRec(w) && w.code === 'CONSTRAINT_TARGET_UNRELIABLE'
+    && w.reason === 'model_dependency_unresolved' && Array.isArray(w.constraint_ids) && w.constraint_ids.includes(r.constraint_id)));
+  return { ...stripped, inference_warnings: [...warnings, ...fresh.map(r => ({ code: 'CONSTRAINT_TARGET_UNRELIABLE',
+    severity: 'warning', source: 'cee', reason: 'model_dependency_unresolved', constraint_ids: [r.constraint_id],
+    node_ids: [r.node_id], message: goalDependencyWords(graph, r.node_id) }))] } as E;
+}
+
 /** Appends the licence to the Run's `inference_warnings` when there is one; otherwise the envelope itself. Pure. */
 export function withGoalChanceLicence<E>(
   envelope: E, graph: unknown, goalId: unknown, earned?: (optionId: string, p: 0 | 1) => boolean,
   sentThreshold?: SentGoalThreshold, horizonGraph: unknown = graph, constraints: GoalChanceConstraintInputs = {},
 ): E {
   // B2 (check BLOCKING 3): a deadline goal's Run that did not test the HELD target withholds every option's chance, with words.
-  let dependencyChecked = envelope;
+  let dependencyChecked = withGoalDependencyScores(envelope, graph, constraints.storedConstraints);
   const heldTargets = new Set((Array.isArray(constraints.storedConstraints) ? constraints.storedConstraints.filter(isRec) : [])
-    .filter(r => r.role === GOAL_TARGET_ROLE && goalDependencyCauses(graph, r.node_id).length > 0).map(r => String(r.constraint_id)));
+    .filter(r => goalDependencyCauses(graph, r.node_id).length > 0).map(r => String(r.constraint_id)));
   const options = isRec(envelope) ? new Set(readOptionResultSources(envelope).flat().flatMap(r =>
     typeof r.option_id === 'string' ? [r.option_id] : typeof r.id === 'string' ? [r.id] : [])) : new Set<string>();
-  // Remove only affected target marginals and the full joint. Other targets' own chance stays available.
-  if (heldTargets.size > 0) dependencyChecked = withholdOptionLimitScores(dependencyChecked, new Map([...heldTargets].map(id => [id, options])));
   if (goalDependencyCauses(graph, goalId).length > 0 && options.size > 0) dependencyChecked = withholdOptionGoalFigures(dependencyChecked, options, {
     code: GOAL_FIGURES_TARGET_NOT_TESTABLE, severity: 'warning', message: goalDependencyWords(graph, goalId),
     option_ids: [...options], node_ids: [goalId], constraint_ids: [...heldTargets].filter(id =>

@@ -76,7 +76,7 @@ async function requestTheRunSends(name: string, model: LivingModelT): Promise<Re
 describe('Track 2: a limit beside the aim is the legacy limit row', () => {
   it('"cannot spend more than £10,000" reaches PLoT as the limit row on monthly cost, inside the frame PLoT reads it on', async () => {
     const request = await requestTheRunSends('limit', deliveries('factor'));
-    expect(request.goal_constraints).toEqual([{ constraint_id: 'limit_monthly_cost', node_id: 'monthly_cost', operator: '<=', value: 10000, unit: '£',
+    expect(request.goal_constraints.filter((c: Rec) => c.constraint_id.startsWith('limit_'))).toEqual([{ constraint_id: 'limit_monthly_cost', node_id: 'monthly_cost', operator: '<=', value: 10000, unit: '£',
       label: 'Monthly cost', provenance: 'explicit', source_quote: LIMIT_WORDS, value_frame: 'level' }]);
     const cap = node(request.graph, 'monthly_cost')!.observed_state.cap;
     expect(cap).toBeGreaterThanOrEqual(10000);
@@ -89,7 +89,7 @@ describe('Track 2: a limit beside the aim is the legacy limit row', () => {
     const m = deliveries('factor');
     const without: LivingModelT = { ...m, factors: m.factors.map((f) => ({ ...f, limit: null })) };
     const { goal_constraints, ...rest } = mapLivingModel(m).graph as Rec;
-    expect(goal_constraints).toHaveLength(1);
+    expect(goal_constraints.filter((c: Rec) => c.constraint_id.startsWith('limit_'))).toHaveLength(1);
     expect(rest).toEqual(mapLivingModel(without).graph);
   });
 
@@ -98,7 +98,9 @@ describe('Track 2: a limit beside the aim is the legacy limit row', () => {
       const m = deliveries('factor');
       m.factors[2] = { ...m.factors[2]!, ...patch };
       const mapped = mapLivingModel(m);
-      expect((mapped.graph as Rec).goal_constraints[0]).toMatchObject({ value: patch.value === null ? 10000 : 20000, retained_unresolved_limit: { state: 'unscored' } });
+      expect((mapped.graph as Rec).goal_constraints[0]).toMatchObject({ value: patch.value === null ? 10000 : 20000 });
+      expect((mapped.graph as Rec).goal_constraints[0].value_frame).toBe('level');
+      expect(node(mapped.graph, 'monthly_cost')!.goal_rests_on).toEqual([{ id: 'monthly_cost', reason: patch.value === null ? 'limit_quantity_unknown' : 'limit_frame_unsupported' }]);
       expect(mapped.withheld.map((w) => `${w.id}:${w.reason}`)).toContain('monthly_cost:limit_not_in_slice');
     }
   });

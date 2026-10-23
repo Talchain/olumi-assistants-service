@@ -125,14 +125,19 @@ export function goalDependencyWords(graph: unknown, targetId: unknown): string {
     ? n.label.replace(/[\r\n]+/g, ' ').slice(0, 200) : 'the model quantity'; };
   const model = isRec(graph) && isRec(graph.living_model) ? graph.living_model : undefined;
   const conditions = Array.isArray(model?.conditions) ? model.conditions.filter(isRec) : [];
-  const names = goalDependencyCauses(graph, targetId).map(c => {
+  const causes = goalDependencyCauses(graph, targetId);
+  const limit = causes.some(c => c.reason.startsWith('limit_'));
+  const names = causes.map(c => {
     const condition = conditions.find(x => `condition:${x.text}` === c.id);
     return condition !== undefined ? `the prerequisite ‘${String(condition.text).replace(/[\r\n]+/g, ' ').slice(0, 300)}’`
-      : c.reason === 'goal_level_unknown' ? `today's level for ‘${label(c.id)}’`
-      : c.reason === 'goal_scope_unknown' ? `the origin or observation window for ‘${label(c.id)}’`
-      : `the model's unresolved inputs for ‘${label(c.id)}’`;
+      : c.reason === 'limit_frame_unsupported' ? `the stated bound lies outside the current calculation frame for ‘${label(c.id)}’`
+      : c.reason === 'limit_model_disconnected' ? `‘${label(c.id)}’ has no calculation path in this model`
+      : c.reason === 'limit_quantity_unknown' ? `the model does not yet hold the quantity needed to evaluate ‘${label(c.id)}’`
+      : c.reason === 'goal_level_unknown' ? `today's level for ‘${label(c.id)}’ is unresolved`
+      : c.reason === 'goal_scope_unknown' ? `the origin or observation window for ‘${label(c.id)}’ is unresolved`
+      : `the model's inputs for ‘${label(c.id)}’ are unresolved`;
   });
-  return `The target for ‘${label(targetId)}’ remains recorded. Its chance isn’t shown while ${[...new Set(names)].join('; ')} remain unresolved.`;
+  return `The ${limit ? 'limit' : 'target'} for ‘${label(targetId)}’ remains recorded. Its chance isn’t shown because ${[...new Set(names)].join('; ')}.`;
 }
 
 /** The scored identity wins; legacy graphs with exactly one goal remain unambiguous. */
