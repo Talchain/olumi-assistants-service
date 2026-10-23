@@ -946,6 +946,11 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       const sentTools = Object.fromEntries((calls[0]!.tools as Json[]).filter((t) => t.type === 'function').map((t) => [t.name, t.description]));
       expect(sentTools).toEqual(PROGRAM_TOOL_DESCRIPTIONS);
       for (const [name, description] of Object.entries(sentTools)) expect(description).not.toBe((TOOL_DESCRIPTIONS as Record<string, string>)[name]);
+      // DL 23 Oct (batch 3: the agent never used the op): propose_change, as SENT, describes define_goal_measure. Spelled here.
+      const sentSha = (name: string) => createHash('sha256').update(String(sentTools[name]), 'utf8').digest('hex');
+      expect(String(sentTools.propose_change)).toContain('define_goal_measure: when they say how an aim with no measure is measured (a coaching question’s record_id), the quantity it is about (its id, or a new one by the name and unit they give), the comparison, and the target and deadline only as their words state them; a target or deadline already in the model is given by its id; what they did not state stays null and is asked. '
+        + 'Olumi then proposes, on the same card, what works that measure out, each part marked as Olumi’s. Put every edit in ONE propose_change: a second proposal in the same turn is refused. ');
+      expect(sentSha('propose_change')).toBe('91b0dd1f2b78c2faa9772f9824716c30e3b16eaffec949deaff9a751c611cb8d');
       // The read the agent got back: the Run's goal_chance exactly as stored (each goal's own line, the joint, the notes).
       const output = (calls[1]!.input as Json[]).find((i) => i.type === 'function_call_output' && i.call_id === 'read')!.output;
       const read = JSON.parse(typeof output === 'string' ? output : JSON.stringify(output)) as Json;

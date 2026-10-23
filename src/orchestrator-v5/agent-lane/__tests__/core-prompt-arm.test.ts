@@ -134,7 +134,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     for (const field of ['its revision; model, the canonical model exactly as authored (', 'earlier_versions, how many earlier versions it has;',
       'open_questions, each with what it feeds and the edit that answers it;', 'coaching, the questions that would give an aim a measure or a deadline;',
       'and run, the stored Run, with current and engine_current.']) expect(d.read_canonical_context, field).toContain(field);
-    for (const op of ['set_quantity:', 'set_range_kind:', 'set_goal_target:', 'add_option:', 'rename_option:']) expect(count(d.propose_change, op), op).toBe(1);
+    for (const op of ['set_quantity:', 'set_range_kind:', 'set_goal_target:', 'add_option:', 'rename_option:', 'define_goal_measure:']) expect(count(d.propose_change, op), op).toBe(1);
     expect(d.propose_change).toContain('set_range_kind: answers an open question whose edit is set_range_kind,');
     expect(d.propose_change).toContain('The result shows what the card would show (would_show).');
     expect(d.propose_change).toContain('A loose figure ("about 2,000") is their one figure, exactly as said, never a range Olumi adds; then ask what range they would put on it.');

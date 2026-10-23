@@ -227,6 +227,8 @@ export const PROGRAM_TOOL_DESCRIPTIONS = {
     + 'A loose figure ("about 2,000") is their one figure, exactly as said, never a range Olumi adds; then ask what range they would put on it. '
     + 'set_range_kind: answers an open question whose edit is set_range_kind, whether the ends of a range they gave are hard bounds or a rough span, keeping their figures. '
     + 'set_goal_target: the figure a goal aims at. add_option: an option they name, with what it changes and from which period. rename_option: an option’s name. '
+    + 'define_goal_measure: when they say how an aim with no measure is measured (a coaching question’s record_id), the quantity it is about (its id, or a new one by the name and unit they give), the comparison, and the target and deadline only as their words state them; a target or deadline already in the model is given by its id; what they did not state stays null and is asked. '
+    + 'Olumi then proposes, on the same card, what works that measure out, each part marked as Olumi’s. Put every edit in ONE propose_change: a second proposal in the same turn is refused. '
     + 'Never invent a figure for them, and never put an Olumi estimate in as theirs. The result shows what the card would show (would_show). ' + RUN_WORDS_RULE + ' '
     + 'A refusal says why (their words do not contain the quote; the edit does not fit; the changed model does not calculate, with the reasons; nothing would change): say it plainly and ask for what is needed.',
   apply_change:
