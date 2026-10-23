@@ -19,7 +19,7 @@
 import { LLM_STRENGTH_STD_FLOOR } from '../../cee/constants.js';
 import type { CanonicalModelT, CanonicalQuantityT, QualitativeFamilyT } from './canonical.js';
 import { QUALITATIVE_FAMILIES } from './canonical.js';
-import { compile, normalise, rangeDistOf, readRange, type CompileResult, type RangeReading } from './compile.js';
+import { compile, normalise, rangeDistOf, readRange, type CompileResult, type LawReading } from './compile.js';
 
 type Rec = Record<string, unknown>;
 /** structure: an exact constant the model's form needs; never drawn as anyone's estimate. */
@@ -36,7 +36,7 @@ export type ProjectedItem = {
   approval: 'proposed' | 'approved';
   concerns?: string[];
   /** For a range: the ruled law Olumi reads it by, always Olumi's and provisional, never the person's calibration. */
-  law?: { author: 'olumi'; provisional: true; range_kind: 'bounds' | 'plausible' | null; reading: RangeReading };
+  law?: { author: 'olumi'; provisional: true; range_kind: 'bounds' | 'plausible' | null; reading: LawReading };
 };
 export type Projection = {
   graph: { nodes: Rec[]; edges: Rec[]; goal_constraints: Rec[] };
@@ -104,11 +104,11 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
 
   const chances = new Set(model.risks.map((k) => k.occurrence));
   /** The shared law's reading: the compiler's disclosure (with the domain) when the quantity is in the run, else the same law. */
-  const lawFor = (q: CanonicalQuantityT): RangeReading => {
+  const lawFor = (q: CanonicalQuantityT): LawReading => {
     const c = compiled.conversions.find((x) => x.kind === 'range_law' && x.quantity === q.id);
     if (c && c.kind === 'range_law') return c.reading;
     const inside = !has(q.value) || (q.low! < q.value && q.value < q.high!);
-    return inside ? readRange(rangeDistOf(q), chances.has(q.id)) : { kind: 'held', reason: 'its most likely figure is not inside its range' };
+    return inside ? readRange(rangeDistOf(q, 1, chances.has(q.id) ? { min: 0, max: 1 } : undefined)) : { kind: 'held', reason: 'its most likely figure is not inside its range' };
   };
   const lawOf = (q: CanonicalQuantityT) => (has(q.low) && has(q.high) && q.low < q.high && (q.status === 'known' || q.status === 'estimated')
     ? { law: { author: 'olumi' as const, provisional: true as const, range_kind: q.range_kind, reading: lawFor(q) } } : {});
@@ -121,9 +121,11 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     if (has(q.low) && has(q.high) && q.low !== q.high) {
       // A range is not a law: the person's (or Olumi's) bounds, then Olumi's provisional reading of them, said as Olumi's.
       const r = lawFor(q);
-      const within = q.range_kind === 'bounds' ? ', kept within its ends' : '';
+      // The disclosure says the CONDITIONED moments (what the draws have) and where the spread is kept, as Olumi's.
+      const kept = (lo: number, hi: number) => (Number.isFinite(lo) && Number.isFinite(hi) ? `, kept between ${fmt(lo)} and ${fmt(hi)}`
+        : Number.isFinite(lo) ? `, never below ${fmt(lo)}` : Number.isFinite(hi) ? `, never above ${fmt(hi)}` : '');
       const law = q.author === 'person' && !has(q.range_kind) ? 'how to read it is asked'
-        : r.kind === 'normal' ? `Olumi reads it as a spread around ${fmt(r.centre)} (sd ${fmt('sd_after' in r && typeof r.sd_after === 'number' ? r.sd_after : r.sd)})${within}, provisionally`
+        : r.kind === 'normal' ? `Olumi reads it as a spread around ${fmt(r.mean)} (sd ${fmt(r.sd_conditioned)})${kept(r.lower, r.upper)}, provisionally`
           : 'Olumi cannot use it as a spread yet';
       return `${has(q.value) ? `about ${fmt(q.value)}, ` : ''}${fmt(q.low)}–${fmt(q.high)}${unit}${owner}; ${law}`;
     }
