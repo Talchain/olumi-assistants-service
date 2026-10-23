@@ -50,8 +50,8 @@ const FORECAST_OR_VERDICT = /\b(will|win|wins|winner|best|recommend|recommended|
 
 describe('present: the canonical analysis view from a simulated model', () => {
   it('a 2-target model renders a per-target line for each, and the joint, each restating its question and its basis', () => {
-    // Hold: MRR 49 × 100 = 4,900 ≥ 4,800 ✓; customers 100 ≥ 90 ✓ → joint 1 → "more than 99%".
-    // Raise: customers 100 − 1.8 × 10 = 82; MRR 59 × 82 = 4,838 ≥ 4,800 ✓; 82 ≥ 90 ✗ → joint 0 → "less than 1%".
+    // Hold: MRR 49 × 100 = 4,900 ≥ 4,800 ✓; customers 100 ≥ 90 ✓ → joint 1, from fixed inputs only → exactly "100%".
+    // Raise: customers 100 − 1.8 × 10 = 82; MRR 59 × 82 = 4,838 ≥ 4,800 ✓; 82 ≥ 90 ✗ → joint 0 → exactly "0%".
     // Every input is the person's figure and every relation theirs → "on your figures". One aim has no measure: left out, said.
     const v = present(model(MRR_QUANTITIES(fixed('per_pound', -1.8, 'customers')), MRR_GOALS, MRR_OPTIONS), MRR_LABELS,
       { leaves_out: ['Keep the regulars happy'] });
@@ -60,14 +60,14 @@ describe('present: the canonical analysis view from a simulated model', () => {
     expect(v.goal_chance.targets.joint).toEqual({ status: 'licensed', words: joint });
     expect(v.goal_chance.targets.per_target).toEqual([
       { constraint_id: 'g_mrr', words: `${MRR_WORDS}, in this model, on your figures`,
-        options: [{ option_id: 'hold', display: 'more than 99%' }, { option_id: 'raise', display: 'more than 99%' }] },
+        options: [{ option_id: 'hold', display: '100%' }, { option_id: 'raise', display: '100%' }] },
       { constraint_id: 'g_cust', words: `${CUST_WORDS}, in this model, on your figures`,
-        options: [{ option_id: 'hold', display: 'more than 99%' }, { option_id: 'raise', display: 'less than 1%' }] },
+        options: [{ option_id: 'hold', display: '100%' }, { option_id: 'raise', display: '0%' }] },
     ]);
-    expect(cell(v, 'hold')).toEqual({ kind: 'figure', display: 'more than 99%',
-      face: `‘Hold’: more than 99% chance of ${joint}, in this model, on your figures.`,
+    expect(cell(v, 'hold')).toEqual({ kind: 'figure', display: '100%',
+      face: `‘Hold’: 100% chance of ${joint}, in this model, on your figures.`,
       detail: { precision_95: [1, 1], draws: 200, precision_words: EXACT } });
-    expect(cell(v, 'raise').face).toBe(`‘Raise to £59’: less than 1% chance of ${joint}, in this model, on your figures.`);
+    expect(cell(v, 'raise').face).toBe(`‘Raise to £59’: 0% chance of ${joint}, in this model, on your figures.`);
   });
 
   it('(b) the basis: "on your figures" only when every input is the person’s; otherwise "if" with Olumi’s assumptions listed', () => {
@@ -96,7 +96,7 @@ describe('present: the canonical analysis view from a simulated model', () => {
 
   it('(c)+(d) a goal waiting on ONE asked quantity: only it waits, and it gets a threshold, said as a threshold, never a chance', () => {
     // The compiled model holds the budget goal only: 'Reach 100 cases' waits on 'Cases per specialist' (asked).
-    // Budget: cost = specialists × £40,000 ≤ £50,000. Hold 0 ✓, Add one 40,000 ✓ → each "more than 99%".
+    // Budget: cost = specialists × £40,000 ≤ £50,000. Hold 0 ✓, Add one 40,000 ✓ → each exactly "100%".
     // Threshold: capacity = 80 + 1 × X ≥ 100 ⇔ X ≥ 20 (Add one); Hold stays at 80 whatever X is, so it has no threshold.
     const base = (each?: number): ExecutableModel => model([fixed('count', 0, 'specialists'), fixed('one', 1, 'specialists'),
       fixed('salary', 40000, '£'), def('cost', 'product', ['count', 'salary'], '£'), fixed('budget', 50000, '£'),
@@ -123,7 +123,7 @@ describe('present: the canonical analysis view from a simulated model', () => {
       line: 'The chance of meeting all 2 goals together waits for ‘Reach 100 cases’; each goal that can be worked out is shown on its own.' });
     expect(v.goal_chance.targets.per_target).toEqual([{ constraint_id: 'g_cost',
       words: '‘Specialist cost’ being at most £50,000 at 1 month from now, in this model, on your figures',
-      options: [{ option_id: 'hold', display: 'more than 99%' }, { option_id: 'add', display: 'more than 99%' }] }]);
+      options: [{ option_id: 'hold', display: '100%' }, { option_id: 'add', display: '100%' }] }]);
     const words = 'Threshold: in this model, ‘Reach 100 cases’ is met with ‘Add one specialist’ if ‘Cases per specialist’ is at least 20 cases.';
     expect(v.goal_chance.thresholds).toEqual([{ kind: 'threshold', goal_id: 'g_cap', option_id: 'add', quantity: 'each', cmp: '>=', value: 20, words }]);
     expect(v.goal_chance.notes).toContain(words);
@@ -176,7 +176,7 @@ describe('present: the canonical analysis view from a simulated model', () => {
       limitation: 'Hash equality cannot detect brief, framing or stage changes.' });
   });
 
-  it('what the compiler left out (withheld[]): a goal waits, so the joint is never partial; a limit is named as not in this run', () => {
+  it('what the compiler left out (withheld[]): a goal waits, so the joint is never partial; a limit is named as not yet checked', () => {
     // The MRR model with 'Keep the regulars happy' (a goal with no measure) and the 'Overdraft' limit left out by the compiler.
     const v = present(model(MRR_QUANTITIES(fixed('per_pound', -1.8, 'customers')), MRR_GOALS, MRR_OPTIONS, [], [
       { id: 'regulars', kind: 'goal', label: 'Keep the regulars happy', reason: 'It has no measure yet.' },
@@ -187,10 +187,59 @@ describe('present: the canonical analysis view from a simulated model', () => {
     expect(v.goal_chance.targets.joint.status).toBe('withheld');
     expect(v.goal_chance.targets.per_target.map((t: Rec) => t.constraint_id)).toEqual(['g_mrr', 'g_cust']);
     expect(v.goal_chance.targets.per_target[0].words).toBe(`${MRR_WORDS}, in this model, on your figures`);
-    expect(v.goal_chance.notes).toContain('The limit ‘Overdraft’ is not in this run: Its figure is unknown.');
+    expect(v.goal_chance.notes).toContain('Not yet checked: ‘Overdraft’ — Its figure is unknown.');
     const limitOnly = present(model(MRR_QUANTITIES(fixed('per_pound', -1.8, 'customers')), MRR_GOALS, MRR_OPTIONS, [],
       [{ id: 'overdraft', kind: 'limit', label: 'Overdraft', reason: 'Its figure is unknown.' }]), MRR_LABELS);
-    expect(cell(limitOnly, 'hold').face).toBe(`‘Hold’: more than 99% chance of ${MRR_WORDS} and ${CUST_WORDS}, without the limit ‘Overdraft’, which is not in this run, in this model, on your figures.`);
+    expect(cell(limitOnly, 'hold').face).toBe(`‘Hold’: 100% chance of ${MRR_WORDS} and ${CUST_WORDS}, in this model, on your figures. Not yet checked: ‘Overdraft’ — Its figure is unknown.`);
+  });
+
+  it('S3 fix 1: the basis lists only Olumi\u2019s quantities, coefficients and effect relations; identities never', () => {
+    // Bakery: spend = price × loaves (a definition) on the person's figures, £3.50 × 40 = £140; a zero start built as
+    // difference(x, x) = 0; a year's spend = (spend + zero) × 12 months a year (a unit conversion, structure).
+    // £1,680 ≤ £2,400 in every draw → exactly 100%, "on your figures": no identity or conversion is an assumption.
+    const bakery = (more: Quantity[] = [], extra: string[] = []) => model([fixed('price', 3.5, '£'), fixed('loaves', 40, 'loaves'),
+      def('spend', 'product', ['price', 'loaves'], '£'), fixed('x', 7, '£'), def('zero', 'difference', ['x', 'x'], '£'),
+      def('month_total', 'sum', ['spend', 'zero', ...extra], '£'), fixed('months', 12, 'month/year', 'state', 'structure'),
+      def('year_total', 'product', ['month_total', 'months'], '£'), fixed('cap', 2400, '£'), ...more],
+    [{ ...goal('g', 'year_total', '<=', 'cap'), label: 'Stay within the yearly budget' }], [option('hold', 'Hold')]);
+    const plain = present(bakery(), {});
+    expect(cell(plain, 'hold').display).toBe('100%');
+    expect(cell(plain, 'hold').face).toMatch(/, in this model, on your figures\.$/);
+    // An effect whose size is Olumi's figure, and whose relation is Olumi's: both are listed, and nothing else.
+    const withEffect = (relation_author?: 'person' | 'olumi') => present(bakery([fixed('base', 10, '£'), fixed('per_degree', -2, '£', 'state', 'olumi'),
+      fixed('temperature', 1, 'degrees'), effect('weather', 'base', [{ coefficient: 'per_degree', driver: 'temperature' }], '£')], ['weather']),
+    relation_author === undefined ? {} : { weather: { label: 'weather', author: 'person', relation_author } });
+    const basis = (v: Rec): string => cell(v, 'hold').face.split(', in this model, ')[1];
+    expect(basis(withEffect('olumi'))).toBe('if ‘per_degree’ is -£2, Olumi’s figure and ‘weather’ follows Olumi’s assumed relationship.');
+    expect(basis(withEffect('person'))).toBe('if ‘per_degree’ is -£2, Olumi’s figure.');
+    expect(basis(withEffect())).toBe('if ‘per_degree’ is -£2, Olumi’s figure.');
+    // No identity, conversion or person's figure is ever named in the basis.
+    for (const v of [plain, withEffect('olumi')]) expect(basis(v)).not.toMatch(/‘(price|loaves|spend|x|zero|month_total|months|year_total|cap|base|temperature)’/);
+  });
+
+  it('S3 fix 3: every limit\u2019s own outcome is in the words, and a limit waiting on an ask is named with its question', () => {
+    // Specialist cost = specialists × £40,000 against two limits: ≤ £50,000 (hold 0 ✓, add 40,000 ✓ → 100%, 100%) and
+    // ≤ £30,000 (hold ✓ 100%, add ✗ 0%). 'Desk space' waits on 'How many desks are free?': named, never dropped.
+    const m = model([fixed('count', 0, 'specialists'), fixed('one', 1, 'specialists'), fixed('salary', 40000, '£'),
+      def('cost', 'product', ['count', 'salary'], '£'), fixed('b50', 50000, '£'), fixed('b30', 30000, '£'), fixed('zero', 0, 'specialists')],
+    [goal('g', 'count', '>=', 'zero')], [option('hold', 'Hold'), option('add', 'Add one specialist', [{ quantity: 'count', to: 'one', from_period: 0 }])],
+    [{ id: 'l50', label: 'Budget', quantity: 'cost', cmp: '<=', bound: 'b50', aggregation: 'end', window: ONE },
+      { id: 'l30', label: 'Hard cap', quantity: 'cost', cmp: '<=', bound: 'b30', aggregation: 'end', window: ONE }]);
+    const v = present(m, { cost: person('Specialist cost', true), count: person('Specialists') }, {
+      limits: [{ limit_id: 'l50', label: 'Budget', status: 'calculable', reasons: [], asks: [] },
+        { limit_id: 'l30', label: 'Hard cap', status: 'calculable', reasons: [], asks: [] },
+        { limit_id: 'l_desks', label: 'Desk space', status: 'asks', reasons: [], asks: ['desks'] }],
+      asks: [{ quantity_id: 'desks', label: 'Desks free', unit: 'desks', question: 'How many desks are free?' }],
+    });
+    const l50 = '‘Specialist cost’ is at most £50,000 at 1 month from now', l30 = '‘Specialist cost’ is at most £30,000 at 1 month from now';
+    const unchecked = 'Not yet checked: ‘Desk space’ — needs your answer: How many desks are free?';
+    expect(cell(v, 'hold').face).toContain(` Each limit on its own: ${l50}: 100%; ${l30}: 100%. ${unchecked}`);
+    expect(cell(v, 'add').face).toContain(` Each limit on its own: ${l50}: 100%; ${l30}: 0%. ${unchecked}`);
+    expect(v.goal_chance.limits).toEqual([
+      { constraint_id: 'l50', words: l50, options: [{ option_id: 'hold', display: '100%' }, { option_id: 'add', display: '100%' }] },
+      { constraint_id: 'l30', words: l30, options: [{ option_id: 'hold', display: '100%' }, { option_id: 'add', display: '0%' }] }]);
+    expect(v.goal_chance.unchecked_limits).toEqual([{ limit_id: 'l_desks', words: '‘Desk space’ — needs your answer: How many desks are free?' }]);
+    expect(v.goal_chance.notes).toContain(unchecked);
   });
 
   it('a chance a nonfinite draw touched is a withheld cell with its count, never a figure', () => {

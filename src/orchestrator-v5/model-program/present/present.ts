@@ -51,6 +51,14 @@ export interface PresentGoal {
   readonly reasons: readonly string[];
   readonly asks: readonly string[];
 }
+/** S1's `LimitOutcome`, with the limit's label: every limit, checked or not. */
+export interface PresentLimit {
+  readonly limit_id: string;
+  readonly label: string;
+  readonly status: 'calculable' | 'asks' | 'withheld';
+  readonly reasons: readonly string[];
+  readonly asks: readonly string[];
+}
 /** S1's `Ask`. */
 export interface PresentAsk {
   readonly quantity_id: string;
@@ -71,6 +79,8 @@ export interface PresentInput {
   readonly quantities?: Readonly<Record<string, PresentQuantity>>;
   /** Every goal (S1 `perGoal` with labels). Absent: the executable model's goals are all the goals. */
   readonly goals?: readonly PresentGoal[];
+  /** Every limit (S1 `perLimit` with labels). A limit waiting on an ask is named as not yet checked, never dropped. */
+  readonly limits?: readonly PresentLimit[];
   readonly asks?: readonly PresentAsk[];
   /** Aims left out of the chance because they have no measure yet, by label (S1 `joint.leaves_out`). */
   readonly leaves_out?: readonly string[];
@@ -119,6 +129,9 @@ export interface PresentedAnalysisView {
         readonly options: readonly { readonly option_id: string; readonly display: string }[] }[];
     };
     readonly thresholds?: readonly PresentThreshold[];
+    readonly limits?: readonly { readonly constraint_id: string; readonly words: string;
+      readonly options: readonly { readonly option_id: string; readonly display: string }[] }[];
+    readonly unchecked_limits?: readonly { readonly limit_id: string; readonly words: string }[];
   };
 }
 
@@ -130,6 +143,8 @@ function listWords(parts: readonly string[]): string {
   return parts.length <= 1 ? (parts[0] ?? '') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
 }
 const q = (label: string): string => `‘${label.trim()}’`;
+/** A sentence's full stop, unless it already ends in one (a question keeps its "?"). */
+const stop = (x: string): string => (/[.?!]$/.test(x) ? x : `${x}.`);
 /** A figure in its unit; a pure number (unit "1") is said alone. */
 const say = (value: number, unit: string): string => (unit.trim() === '' || unit.trim() === '1' ? sayFigureAsWritten(value, '') : sayFigureAsWritten(value, unit));
 const plural = (unit: string, n: number): string => `${n} ${unit}${n === 1 ? '' : 's'}`;
@@ -154,7 +169,9 @@ function horizonWords(aggregation: Aggregation, w: Window, unit: string, reading
 function shown(c: ChanceOrWithheld, draws: number): { display: string; precision_words: string } | undefined {
   if (isWithheld(c)) return undefined;
   const [lo, hi] = c.precision_95;
-  const display = sayDisplayedPct(displayedPctAt(c.chance, displayRoundingFor(((hi - lo) / 2) * 100)));
+  // S3 smoke fix 2: a chance from fixed inputs only (exact: no interval) is said exactly, 100% or 0%, never "more than 99%".
+  const display = lo === hi && (c.chance === 1 || c.chance === 0) ? `${c.chance * 100}%`
+    : sayDisplayedPct(displayedPctAt(c.chance, displayRoundingFor(((hi - lo) / 2) * 100)));
   const pct = (x: number): string => `${Number((x * 100).toFixed(1))}%`;
   const precision_words = lo === hi
     ? 'Simulation precision: exact. Every simulated draw gives the same result for this option, so no sampling is involved.'
@@ -208,11 +225,12 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     if (x.dist?.kind === 'fixed') {
       // executable.ts r3: the author of every fixed value. A structural constant (a conversion, a switch, a count) and a
       // placeholder that cancels out of every result are no one's assumption.
-      const author = x.dist.author ?? m?.author;
-      return author === 'person' || author === 'structure' || author === 'placeholder' ? []
-        : [`${name} is ${say(x.dist.value, x.unit)}${author === 'olumi' ? ', Olumi’s figure' : ', whose source is not confirmed'}`];
+      return (x.dist.author ?? m?.author) === 'olumi' ? [`${name} is ${say(x.dist.value, x.unit)}, Olumi’s figure`] : [];
     }
-    return m?.relation_author === 'person' ? [] : [`${name} follows ${m?.relation_author === 'olumi' ? 'Olumi’s assumed relationship' : 'a relationship whose source is not confirmed'}`];
+    // S3 smoke fix 1: only an Olumi-authored EFFECT relation is an assumed relationship. A definition (an identity: a
+    // product, a sum, a difference such as x − x for a zero start) and a stock's accumulation are never assumptions,
+    // whoever wrote them; a unit conversion is a structural constant (above).
+    return x.equation?.form === 'effect' && m?.relation_author === 'olumi' ? [`${name} follows Olumi’s assumed relationship`] : [];
   });
   const basisWords = (ids: ReadonlySet<string>): string => {
     const a = assumptions(ids);
@@ -252,8 +270,8 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     .map((w) => ({ goal_id: w.id, label: w.label, status: 'withheld', reasons: [w.reason], asks: [] }));
   const allGoals: readonly PresentGoal[] = [...given, ...leftOutGoals];
   const waiting = allGoals.filter((g) => g.status !== 'calculable');
-  /** Limits, options and risks the compiler left out: said in the words of every chance, with their reasons in the notes. */
-  const notInRun = (model.withheld ?? []).filter((w) => w.kind !== 'goal');
+  /** Options and risks the compiler left out: said in the words of every chance, with their reasons in the notes. */
+  const notInRun = (model.withheld ?? []).filter((w) => w.kind === 'option' || w.kind === 'risk');
   const sayable = [...goalWords.values(), ...limitWords].every((w) => w !== undefined);
   const leftOut = ((input.leaves_out ?? []).length > 0 ? `, leaving out ${listWords(input.leaves_out!.map(q))}, which ${input.leaves_out!.length === 1 ? 'has' : 'have'} no measure yet` : '')
     + (notInRun.length > 0 ? `, without ${listWords(notInRun.map((w) => `the ${w.kind} ${q(w.label)}`))}, which ${notInRun.length === 1 ? 'is' : 'are'} not in this run` : '');
@@ -268,6 +286,23 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   const thresholds: PresentThreshold[] = waiting.flatMap((g) => {
     const probe = input.tipping?.[g.goal_id], ask = g.asks.length === 1 ? askOf.get(g.asks[0]!) : undefined;
     return probe === undefined || ask === undefined ? [] : tippingThresholds(g, ask, probe, result.seed, optionLabel);
+  });
+
+  // ── Limits (S3 smoke fix 3): each limit's own outcome is said, and a limit not yet checked is named with what it needs ─
+  const givenLimits: readonly PresentLimit[] = input.limits ?? [];
+  const unchecked: PresentLimit[] = [...givenLimits.filter((l) => l.status !== 'calculable'),
+    ...(model.withheld ?? []).filter((w) => w.kind === 'limit' && !givenLimits.some((l) => l.limit_id === w.id))
+      .map((w) => ({ limit_id: w.id, label: w.label, status: 'withheld' as const, reasons: [w.reason], asks: [] }))];
+  const uncheckedWords = unchecked.map((l) => {
+    const qs = l.asks.map((id) => askOf.get(id)?.question).filter((x): x is string => x !== undefined);
+    return `${q(l.label)} — ${qs.length > 0 ? `needs your answer: ${qs.join(' ')}` : l.reasons.join(' ')}`;
+  });
+  const uncheckedLine = uncheckedWords.length > 0 ? `Not yet checked: ${uncheckedWords.join('; ')}` : undefined;
+  /** "‘Customer cost’ is at most £1,100 at 1 month from now: about 81%", one per limit, for one option. */
+  const limitLines = (o: OptionResult): string[] => model.limits.map((l, i) => {
+    const pl = o.per_limit.find((x) => x.limit_id === l.id)!;
+    const s = shown(pl, result.draws);
+    return `${limitWords[i] ?? q(l.label)}: ${s?.display ?? `not shown, as ${isWithheld(pl) ? pl.withheld.count.toLocaleString('en-GB') : 0} simulated draws could not be worked out`}`;
   });
 
   // ── Cells ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -299,7 +334,9 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     if (isWithheld(headline)) return { option_id: o.option_id, cell: outsideCell(headline), main_driver: notRecorded };
     const s = shown(headline, result.draws)!;
     const cell: PresentCell = { kind: 'figure', display: s.display,
-      face: `${q(name)}: ${s.display} chance of ${jointWords}, in this model, ${basisWords(upstream(roots, o.option_id))}.`,
+      face: `${q(name)}: ${s.display} chance of ${jointWords}, in this model, ${basisWords(upstream(roots, o.option_id))}.`
+        + (model.limits.length > 0 ? ` Each limit on its own: ${limitLines(o).join('; ')}.` : '')
+        + (uncheckedLine !== undefined ? ` ${stop(uncheckedLine)}` : ''),
       detail: { precision_95: headline.precision_95, draws: result.draws, precision_words: s.precision_words } };
     return { option_id: o.option_id, cell, main_driver: notRecorded };
   });
@@ -311,6 +348,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       : []))),
     ...waiting.map((g) => `${q(g.label)} is not in the chance yet: ${g.asks.length > 0 ? listWords(g.asks.map((id) => askOf.get(id)?.question ?? q(id))) : g.reasons.join(' ')}`),
     ...notInRun.map((w) => `The ${w.kind} ${q(w.label)} is not in this run: ${w.reason}`),
+    ...(uncheckedLine !== undefined ? [stop(uncheckedLine)] : []),
     ...thresholds.map((t) => t.words),
   ];
   const several = allGoals.length >= 2;
@@ -332,6 +370,13 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       per_target: perTarget,
     } } : {}),
     ...(thresholds.length > 0 ? { thresholds } : {}),
+    // Each limit's own chance per option (additive; the DGAI reads the words in the cell and the notes).
+    ...(model.limits.length > 0 ? { limits: model.limits.flatMap((l, i) => limitWords[i] === undefined ? [] : [{ constraint_id: l.id, words: limitWords[i]!,
+      options: result.options.flatMap((o) => {
+        const s = shown(o.per_limit.find((x) => x.limit_id === l.id)!, result.draws);
+        return s === undefined ? [] : [{ option_id: o.option_id, display: s.display }];
+      }) }]) } : {}),
+    ...(unchecked.length > 0 ? { unchecked_limits: unchecked.map((l, i) => ({ limit_id: l.limit_id, words: uncheckedWords[i]! })) } : {}),
   };
   const known = input.current !== undefined && input.run !== undefined;
   return {
