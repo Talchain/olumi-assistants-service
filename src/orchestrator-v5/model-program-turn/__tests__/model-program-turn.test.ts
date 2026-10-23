@@ -19,7 +19,7 @@ import { project } from '../../model-program/project.js';
 import { simulate } from '../../model-program/simulate/simulate.js';
 import { CANONICAL_JSON_SCHEMA, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX } from '../prompt.js';
 import { evaluateCanonical, seedOf, RUN_DRAWS } from '../evaluate.js';
-import { programReadOf, reopenProgram, savedProgramOf } from '../program-store.js';
+import { programReadOf, reopenProgram, savedProgramOf, sourceTextOf } from '../program-store.js';
 import { applyProgramChange, ProgramChangeParams, proposeProgramChange, readProgramContext, runProgram } from '../program-tools.js';
 import { ProposalStore } from '../../agent-lane/proposal.js';
 import { withNewRun } from '../program-save.js';
@@ -295,12 +295,20 @@ describe('the model-program turn on the real core route', () => {
     expect(drafted.model_program).toMatchObject({ readback: { read: true, canonical_identical: true, runs_identical: true, seed_identical: true } });
     const goalOf = (run: Json, option: string) => (run.result.chances as Json[]).find((o) => o.option_id === option)!.per_goal[0];
     const run1 = persisted!.living_model.runs[0] as Json;
-    // Known answers on 10,000 draws: carry on exactly 0 (330 < 340); the promotion Φ(1.4434) = 0.92554. Every run draws a fresh
-    // scenario id, so a fresh seed: the bound is 4.5 standard errors of a 10,000-draw estimate at the known answer (#3712 CI:
-    // the old fixed bounds, 2.5–2.9 standard errors, failed in 1 and 5 of 300 random seeds on correct code).
-    const bound = (p: number) => 4.5 * Math.sqrt((p * (1 - p)) / RUN_DRAWS);
+    // Known answers, DETERMINISTIC: each stored Run is exactly its stored model simulated on the scenario's seed, and the known
+    // answers are read off that same stored model on seed 1 (GOLD-4's documented seed), 10,000 draws. The scenario's own seed is
+    // fresh per run (a random scenario id), so the fixed bounds are never read on it (#3712 CI: on correct code they failed in
+    // 1 and 5 of 300 random seeds).
+    const chancesOf = (seed: number) => {
+      const lm = persisted!.living_model;
+      return JSON.parse(JSON.stringify(simulate(compile(lm.canonical, { sourceText: sourceTextOf(lm.person_words) }).executable!, { seed, draws: RUN_DRAWS }).options
+        .map((o) => ({ option_id: o.option_id, per_goal: o.per_goal, joint: o.joint, within_limits: o.within_limits, joint_within_limits: o.joint_within_limits, outcomes: o.outcomes })))) as Json[];
+    };
+    const atSeed1 = (option: string) => chancesOf(1).find((o) => o.option_id === option)!.per_goal[0];
+    // Carry on exactly 0 (330 < 340); the promotion Φ(1.4434) = 0.92554 (Wilson half-width 0.0051).
+    expect(run1.result.chances).toEqual(chancesOf(seedOf(SCENARIO)));
     expect([goalOf(run1, 'carry_on').chance, goalOf(run1, 'carry_on').precision_95]).toEqual([0, [0, 0]]);
-    expect(Math.abs(goalOf(run1, 'promotion').chance - 0.92554)).toBeLessThan(bound(0.92554));
+    expect(Math.abs(atSeed1('promotion').chance - 0.92554)).toBeLessThan(0.0075);
     expect((run1.result.chances as Json[]).map((o) => [o.option_id, (o.within_limits as Json).chance])).toEqual([['promotion', 1], ['carry_on', 1]]);
 
     // Change ONE input on its card: leavers 10 → 12. The promotion now needs an effect of 16/3: 1 − Φ(0.2887) = 0.38641.
@@ -313,7 +321,8 @@ describe('the model-program turn on the real core route', () => {
     const run2 = persisted!.living_model.runs[1] as Json;
     expect(run2.receipt.revision_digest).toBe(revisionDigest(m2, persisted!.living_model.person_words));
     expect(goalOf(run2, 'carry_on').chance).toBe(0);
-    expect(Math.abs(goalOf(run2, 'promotion').chance - 0.38641)).toBeLessThan(bound(0.38641));
+    expect(run2.result.chances).toEqual(chancesOf(seedOf(SCENARIO)));
+    expect(Math.abs(atSeed1('promotion').chance - 0.38641)).toBeLessThan(0.012);
     expect(card.json().canonical_analysis_view.run.run_id).toBe(run2.run_id);
 
     // Cold reopen: the SAME stored result, Run id and digest, from the stored JSON alone in a fresh module.
