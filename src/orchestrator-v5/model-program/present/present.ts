@@ -30,10 +30,10 @@ import { comparatorWords } from '../../goal-target/goal-target-basis.js';
 import { displayRoundingFor } from '../../goal-target/goal-chance-driver.js';
 import { displayedPctAt } from '../../goal-target/goal-chance-display.js';
 import { sayDisplayedPct } from '../../goal-target/goal-targets-joint.js';
-import type { ExecutableModel, Goal, Limit, Window } from '../executable.js';
+import type { Aggregation, ExecutableModel, Goal, Limit, Window } from '../executable.js';
 import { rangeLaw, type RangeDist } from '../simulate/range-law.js';
-import { isWithheld, type ChanceOrWithheld, type OptionResult, type SimResult, type Withheld } from '../simulate/result.js';
-import { readingOf, simulate, type AggregationX } from '../simulate/simulate.js';
+import { isWithheld, type ChanceOrWithheld, type OptionResult, type SimResult, type WithheldChance } from '../simulate/result.js';
+import { readingOf, simulate } from '../simulate/simulate.js';
 
 type Author = 'person' | 'olumi';
 
@@ -67,7 +67,8 @@ export interface TippingProbe {
 export interface PresentInput {
   readonly model: ExecutableModel;
   readonly result: SimResult;
-  readonly quantities: Readonly<Record<string, PresentQuantity>>;
+  /** Labels (overriding the executable model's own) and the authors of relations, by quantity id. */
+  readonly quantities?: Readonly<Record<string, PresentQuantity>>;
   /** Every goal (S1 `perGoal` with labels). Absent: the executable model's goals are all the goals. */
   readonly goals?: readonly PresentGoal[];
   readonly asks?: readonly PresentAsk[];
@@ -137,7 +138,7 @@ const plural = (unit: string, n: number): string => `${n} ${unit}${n === 1 ? '' 
  * The horizon, counted from now, with the aggregation (DL ruling 1). Interval k is "month k+1"; boundary k is "the end of
  * month k". So a flow over {start, periods} reads months start+1 … start+periods, and a state reads their ends.
  */
-function horizonWords(aggregation: AggregationX, w: Window, unit: string, reading: 'state' | 'flow'): string {
+function horizonWords(aggregation: Aggregation, w: Window, unit: string, reading: 'state' | 'flow'): string {
   const first = w.start_period + 1, last = w.start_period + w.periods;
   const state = reading === 'state';
   if (aggregation === 'end' || first === last) return state ? `at ${plural(unit, last)} from now` : `in ${unit} ${last} from now`;
@@ -164,8 +165,8 @@ function shown(c: ChanceOrWithheld, draws: number): { display: string; precision
 export function presentAnalysisView(input: PresentInput): PresentedAnalysisView {
   const { model, result } = input;
   const byId = new Map(model.quantities.map((x) => [x.id, x] as const));
-  const meta = (id: string): PresentQuantity | undefined => input.quantities[id];
-  const label = (id: string): string | undefined => meta(id)?.label;
+  const meta = (id: string): PresentQuantity | undefined => input.quantities?.[id];
+  const label = (id: string): string | undefined => meta(id)?.label ?? byId.get(id)?.label;
   const optionLabel = new Map(model.options.map((o) => [o.id, o.label] as const));
   const unit = model.period_unit;
 
@@ -205,7 +206,11 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       return [`${name} follows Olumi’s provisional conversion of ${whose}, ${ends}, into a bell-shaped spread${held}`];
     }
     if (x.dist?.kind === 'fixed') {
-      return m?.author === 'person' ? [] : [`${name} is ${say(x.dist.value, x.unit)}${m?.author === 'olumi' ? ', Olumi’s figure' : ', whose source is not confirmed'}`];
+      // executable.ts r3: the author of every fixed value. A structural constant (a conversion, a switch, a count) and a
+      // placeholder that cancels out of every result are no one's assumption.
+      const author = x.dist.author ?? m?.author;
+      return author === 'person' || author === 'structure' || author === 'placeholder' ? []
+        : [`${name} is ${say(x.dist.value, x.unit)}${author === 'olumi' ? ', Olumi’s figure' : ', whose source is not confirmed'}`];
     }
     return m?.relation_author === 'person' ? [] : [`${name} follows ${m?.relation_author === 'olumi' ? 'Olumi’s assumed relationship' : 'a relationship whose source is not confirmed'}`];
   });
@@ -233,19 +238,30 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     // The level template of `targetChanceWords` (goal-target-basis.ts): ‘X’ being at least T; a limit's subject "is".
     const figure = target.dist?.kind === 'fixed' ? say(target.dist.value, target.unit) : label(against) === undefined ? undefined : q(label(against)!);
     if (figure === undefined) return undefined;
-    const aggregation = (c as { aggregation: AggregationX }).aggregation;
-    return `${q(subject)} ${role === 'goal' ? 'being' : 'is'} ${bound} ${figure} ${horizonWords(aggregation, c.window, unit, readingOf(byId.get(c.quantity)!))}`;
+    // A ratio (executable.ts r3 `per`) names both quantities: "‘Sign-ups’ per ‘Visitors’ being at least 0.05 …".
+    const of = c.per === undefined ? q(subject) : label(c.per) === undefined ? undefined : `${q(subject)} per ${q(label(c.per)!)}`;
+    if (of === undefined) return undefined;
+    return `${of} ${role === 'goal' ? 'being' : 'is'} ${bound} ${figure} ${horizonWords(c.aggregation, c.window, unit, readingOf(byId.get(c.quantity)!))}`;
   };
   const goalWords = new Map(model.goals.map((g) => [g.id, conditionWords(g, g.target, 'goal')] as const));
   const limitWords = model.limits.map((l) => conditionWords(l, l.bound, 'limit'));
-  const allGoals: readonly PresentGoal[] = input.goals ?? model.goals.map((g) => ({ goal_id: g.id, label: label(g.quantity) ?? g.id, status: 'calculable', reasons: [], asks: [] }));
+  // Every goal: the caller's (with its asks), else the run's own; a goal the compiler left out of this run (executable.ts r3
+  // `withheld[]`) waits too, so the joint is never a partial one.
+  const given: readonly PresentGoal[] = input.goals ?? model.goals.map((g) => ({ goal_id: g.id, label: g.label, status: 'calculable', reasons: [], asks: [] }));
+  const leftOutGoals: PresentGoal[] = (model.withheld ?? []).filter((w) => w.kind === 'goal' && !given.some((g) => g.goal_id === w.id))
+    .map((w) => ({ goal_id: w.id, label: w.label, status: 'withheld', reasons: [w.reason], asks: [] }));
+  const allGoals: readonly PresentGoal[] = [...given, ...leftOutGoals];
   const waiting = allGoals.filter((g) => g.status !== 'calculable');
+  /** Limits, options and risks the compiler left out: said in the words of every chance, with their reasons in the notes. */
+  const notInRun = (model.withheld ?? []).filter((w) => w.kind !== 'goal');
   const sayable = [...goalWords.values(), ...limitWords].every((w) => w !== undefined);
-  const leftOut = (input.leaves_out ?? []).length > 0 ? `, leaving out ${listWords(input.leaves_out!.map(q))}, which ${input.leaves_out!.length === 1 ? 'has' : 'have'} no measure yet` : '';
+  const leftOut = ((input.leaves_out ?? []).length > 0 ? `, leaving out ${listWords(input.leaves_out!.map(q))}, which ${input.leaves_out!.length === 1 ? 'has' : 'have'} no measure yet` : '')
+    + (notInRun.length > 0 ? `, without ${listWords(notInRun.map((w) => `the ${w.kind} ${q(w.label)}`))}, which ${notInRun.length === 1 ? 'is' : 'are'} not in this run` : '');
   const jointWords = sayable
     ? `${listWords(model.goals.map((g) => goalWords.get(g.id)!))}${limitWords.length > 0 ? `, while ${listWords(limitWords as string[])}` : ''}${leftOut}`
     : undefined;
-  const roots = [...model.goals.flatMap((g) => [g.quantity, g.target]), ...model.limits.flatMap((l) => [l.quantity, l.bound])];
+  const roots = [...model.goals.flatMap((g) => [g.quantity, g.target, ...(g.per !== undefined ? [g.per] : [])]),
+    ...model.limits.flatMap((l) => [l.quantity, l.bound, ...(l.per !== undefined ? [l.per] : [])])];
 
   // ── The thresholds: a goal waiting on exactly one asked quantity ─────────────────────────────────────────────────────────
   const askOf = new Map((input.asks ?? []).map((a) => [a.quantity_id, a] as const));
@@ -259,13 +275,14 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   const withheldCell = (): PresentCell => ({
     kind: 'withheld', face: questions.length > 0 ? NEEDS_ANSWER_FACE : NOT_SHOWN_FACE,
     why: waiting.length > 0
-      ? `${listWords(waiting.map((g) => q(g.label)))} ${waiting.length === 1 ? 'waits' : 'wait'} for ${questions.length > 0 ? `your answer: ${questions.join(' ')}` : `${listWords(waiting.flatMap((g) => g.reasons))}`}`
+      ? questions.length > 0 ? `${listWords(waiting.map((g) => q(g.label)))} ${waiting.length === 1 ? 'waits' : 'wait'} for your answer: ${questions.join(' ')}`
+        : `${listWords(waiting.map((g) => q(g.label)))} ${waiting.length === 1 ? 'is' : 'are'} not in the chance yet: ${waiting.flatMap((g) => g.reasons).join(' ')}`
       : 'The words for this chance cannot be said exactly, so it is not shown.',
     reasons: waiting.length > 0 ? waiting.map((g) => ({ code: g.status === 'asks' ? 'goal_asks' : 'goal_withheld', message: g.reasons.join(' ') || null }))
       : [{ code: 'words_not_sayable', message: null }],
   });
   /** DL ruling 3: a chance a nonfinite draw touched is withheld, typed, with its count and quantities; never a figure. */
-  const outsideCell = (w: Withheld): PresentCell => ({
+  const outsideCell = (w: WithheldChance): PresentCell => ({
     kind: 'withheld', face: NOT_SHOWN_FACE,
     why: `In ${w.withheld.count.toLocaleString('en-GB')} of ${result.draws.toLocaleString('en-GB')} simulated draws ${listWords(w.withheld.quantities.map((id) => q(label(id) ?? id)))} could not be worked out (for example a division by zero), so this model cannot give the chance yet.`,
     reasons: [{ code: 'invalid_domain', message: `${w.withheld.count} draws; ${w.withheld.quantities.join(', ')}` }],
@@ -273,6 +290,10 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   const options = result.options.map((o: OptionResult) => {
     const name = optionLabel.get(o.option_id) ?? o.option_id;
     const notRecorded = { kind: 'not_recorded' as const };
+    if (model.goals.length === 0) {
+      return { option_id: o.option_id, main_driver: notRecorded, cell: { kind: 'withheld' as const, face: NOT_SHOWN_FACE,
+        why: 'This run checks the limits only, so there is no chance of meeting a goal to show.', reasons: [{ code: 'no_goals', message: null }] } };
+    }
     if (waiting.length > 0 || jointWords === undefined) return { option_id: o.option_id, cell: withheldCell(), main_driver: notRecorded };
     const headline = o.joint_within_limits;
     if (isWithheld(headline)) return { option_id: o.option_id, cell: outsideCell(headline), main_driver: notRecorded };
@@ -289,13 +310,14 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       ? [`${q(allGoals.find((x) => x.goal_id === g.goal_id)?.label ?? g.goal_id)} with ${q(optionLabel.get(o.option_id) ?? o.option_id)} is not shown: in ${g.withheld.count.toLocaleString('en-GB')} of ${result.draws.toLocaleString('en-GB')} simulated draws ${listWords(g.withheld.quantities.map((id) => q(label(id) ?? id)))} could not be worked out.`]
       : []))),
     ...waiting.map((g) => `${q(g.label)} is not in the chance yet: ${g.asks.length > 0 ? listWords(g.asks.map((id) => askOf.get(id)?.question ?? q(id))) : g.reasons.join(' ')}`),
+    ...notInRun.map((w) => `The ${w.kind} ${q(w.label)} is not in this run: ${w.reason}`),
     ...thresholds.map((t) => t.words),
   ];
   const several = allGoals.length >= 2;
   const perTarget = !several ? [] : model.goals.flatMap((g) => {
     const words = goalWords.get(g.id);
     if (words === undefined) return [];
-    return [{ constraint_id: g.id, words: `${words}, in this model, ${sharedBasisWords([g.quantity, g.target])}`,
+    return [{ constraint_id: g.id, words: `${words}, in this model, ${sharedBasisWords([g.quantity, g.target, ...(g.per !== undefined ? [g.per] : [])])}`,
       options: result.options.flatMap((o) => {
         const s = shown(o.per_goal.find((x) => x.goal_id === g.id)!, result.draws);
         return s === undefined ? [] : [{ option_id: o.option_id, display: s.display }];

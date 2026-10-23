@@ -21,7 +21,11 @@
  *   - A nonfinite draw (NaN, e.g. a `ratio` by zero, or ±Infinity) is outside the model's domain, never a failed outcome
  *     (DL ruling 3): any such draw in what a goal or limit reads withholds that chance, the joint (for a goal) or within_limits
  *     (for a limit), and joint_within_limits, typed 'invalid_domain' with the count and the quantities. No draw is dropped.
- *     Every withheld chance is also listed once in `SimResult.withheld`.
+ *     Every chance the simulator withholds is listed once in `SimResult.withheld_chances`; the compiler's `withheld[]` (what
+ *     is not in this run) is echoed unchanged into `SimResult.withheld` (executable.ts r3).
+ *   - `per` (executable.ts r3): a goal or limit read as agg(quantity) ÷ agg(per), the same aggregation over the same window,
+ *     each by its own reading. A zero or nonfinite denominator is outside the domain (withheld). Never with `every`.
+ *   - A limits-only run (no goals) has no joint: it is withheld as 'no_goals', and joint_within_limits is within_limits.
  *   - EXACT chances (gold-model ruling 4): a condition whose every draw gives the same reading and the same target, with no
  *     risk in what it rests on, is exact for that option (e.g. "Keep", which adds exactly 0 to an uncertain effect): its
  *     chance is 0 or 1 and its precision is that point, with no Monte Carlo interval. Otherwise the Wilson interval.
@@ -39,15 +43,15 @@
  *     uncertain severity is drawn in every draw (its stream must not shift) but applied only where the risk fires.
  *   - A goal's target and a limit's bound are read where the window ends (its last boundary or interval). `every` holds when
  *     every reading in the window holds; its aggregated value (for outcomes) is the worst one (min for > / >=, max for < / <=).
- *     `max` / `min` are the window's highest / lowest reading (gold-model ruling 1).
+ *     `max` / `min` are the window's highest / lowest reading (gold-model ruling 1, executable.ts r3).
  *   - Drivers: each uncertain quantity the option's goals and limits depend on, in model order, except any quantity an option
  *     sets (a switch is a choice, never an uncertainty: gold-model ruling 5). joint_if_low / joint_if_high are
  *     joint_within_limits over the bottom and top third of that quantity's draws.
  */
-import type { Aggregation, Cmp, ExecutableModel, Option, OptionSet, Quantity, Reading, Risk, Window } from '../executable.js';
+import type { Aggregation, Cmp, ExecutableModel, Goal, Limit, Option, OptionSet, Quantity, Reading, Risk, Window } from '../executable.js';
 import { standardNormals, uniforms } from './prng.js';
 import { rangeLaw, truncatedStandardNormal, type RangeDist } from './range-law.js';
-import type { Chance, ChanceOrWithheld, OptionResult, RecordedDraw, SimResult, SimWithheld, Withheld } from './result.js';
+import type { Chance, ChanceOrWithheld, OptionResult, RecordedDraw, SimResult, WithheldChance, WithheldChanceEntry } from './result.js';
 
 interface NormalLaw {
   readonly centre: number;
@@ -58,11 +62,9 @@ interface NormalLaw {
 }
 /** A quantity's reading, as the compiler set it (executable.ts r2, S1). */
 export const readingOf = (q: Quantity): Reading => q.reading;
-/** Gold-model rulings 1 and 2, ahead of S1's executable.ts: `max` / `min`, and a `from_period` that names a timing quantity. */
-export type AggregationX = Aggregation | 'max' | 'min';
+/** Gold-model ruling 2, ahead of S1's executable.ts: a `from_period` that names a timing quantity. */
 type FromPeriod = number | string;
 const fromOf = (x: OptionSet | Risk): FromPeriod => (x as { from_period: FromPeriod }).from_period;
-const aggregationOf = (x: { aggregation: Aggregation }): AggregationX => (x as { aggregation: AggregationX }).aggregation;
 
 export interface SimulateOptions {
   draws?: number;
@@ -97,9 +99,11 @@ interface Check {
   readonly q: number;
   readonly ref: number;
   readonly cmp: Cmp;
-  readonly aggregation: AggregationX;
+  readonly aggregation: Aggregation;
   readonly first: number;
   readonly last: number;
+  /** executable.ts r3 `per`: the denominator quantity, read over the same window by its own reading. */
+  readonly per?: { readonly q: number; readonly first: number; readonly last: number };
 }
 interface CompiledRisk {
   readonly id: string;
@@ -169,17 +173,24 @@ function compile(model: ExecutableModel): Compiled {
     }
     return reading === 'state' ? [w.start_period + 1, w.start_period + w.periods] : [w.start_period, w.start_period + w.periods - 1];
   };
-  const check = (id: string, quantity: string, cmp: Cmp, against: string, aggregation: AggregationX, w: Window, kind: string): Check => {
-    const where = `${kind} "${id}"`;
-    if (!CMPS.has(cmp)) throw new Error(`${where}: unknown comparison "${cmp}"`);
-    if (!AGGS.has(aggregation)) throw new Error(`${where}: unknown aggregation "${aggregation}"`);
-    const q = ref(quantity, where);
-    const [first, last] = windowOf(w, readingOf(model.quantities[q]!), where);
-    return { id, q, ref: ref(against, where), cmp, aggregation, first, last };
+  const check = (x: Goal | Limit, against: string, kind: string): Check => {
+    const where = `${kind} "${x.id}"`;
+    if (!CMPS.has(x.cmp)) throw new Error(`${where}: unknown comparison "${x.cmp}"`);
+    if (!AGGS.has(x.aggregation)) throw new Error(`${where}: unknown aggregation "${x.aggregation}"`);
+    const q = ref(x.quantity, where);
+    const [first, last] = windowOf(x.window, readingOf(model.quantities[q]!), where);
+    let per: Check['per'];
+    if (x.per !== undefined) {
+      if (x.aggregation === 'every') throw new Error(`${where}: a ratio (per) is never read with 'every'`);
+      const pq = ref(x.per, `${where}'s per`);
+      const [pFirst, pLast] = windowOf(x.window, readingOf(model.quantities[pq]!), where);
+      per = { q: pq, first: pFirst, last: pLast };
+    }
+    return { id: x.id, q, ref: ref(against, where), cmp: x.cmp, aggregation: x.aggregation, first, last, ...(per !== undefined ? { per } : {}) };
   };
-  if (model.goals.length === 0) throw new Error('the model has no goals to simulate');
-  const goals = model.goals.map((g) => check(g.id, g.quantity, g.cmp, g.target, aggregationOf(g), g.window, 'goal'));
-  const limits = model.limits.map((l) => check(l.id, l.quantity, l.cmp, l.bound, aggregationOf(l), l.window, 'limit'));
+  if (model.goals.length === 0 && model.limits.length === 0) throw new Error('the model has no goals or limits to simulate');
+  const goals = model.goals.map((g) => check(g, g.target, 'goal'));
+  const limits = model.limits.map((l) => check(l, l.bound, 'limit'));
   unique([...model.goals, ...model.limits].map((x) => x.id), 'goal or limit');
 
   /** A `from_period`: a whole number, or a timing quantity that has its own figure or range (read per draw). */
@@ -392,17 +403,17 @@ const holds = (x: number, cmp: Cmp, y: number): boolean => (cmp === '>=' ? x >= 
  * A condition's aggregated value in one draw, or `null` when a value it reads (in its window, or its target or bound) is
  * NaN or ±Infinity: a nonfinite draw is outside the model's domain, never a failed outcome (DL ruling 3, 23 Oct).
  */
-function aggregate(k: Check, vals: Float64Array, n: number): number | null {
+function aggregate(k: Check, vals: Float64Array, n: number, over: { readonly q: number; readonly first: number; readonly last: number } = k): number | null {
   const a = k.aggregation;
   const highest = a === 'max' || (a === 'every' && below(k.cmp));
   const lowest = a === 'min' || (a === 'every' && !below(k.cmp));
   let acc = highest ? -Infinity : lowest ? Infinity : 0;
-  for (let t = a === 'end' ? k.last : k.first; t <= k.last; t++) {
-    const v = vals[t * n + k.q]!;
+  for (let t = a === 'end' ? over.last : over.first; t <= over.last; t++) {
+    const v = vals[t * n + over.q]!;
     if (!Number.isFinite(v)) return null;
     acc = a === 'end' ? v : highest ? Math.max(acc, v) : lowest ? Math.min(acc, v) : acc + v;
   }
-  return a === 'mean' ? acc / (k.last - k.first + 1) : acc;
+  return a === 'mean' ? acc / (over.last - over.first + 1) : acc;
 }
 
 /** Type-7 quantiles of every draw (none is dropped: a condition with a nonfinite draw is withheld before this). */
@@ -434,10 +445,13 @@ class Tally {
   constructor(draws: number) { this.met = new Uint8Array(draws); this.agg = new Float64Array(draws); }
   /** Records draw d; returns 1 met, 0 not met, -1 outside the domain. */
   add(k: Check, vals: Float64Array, n: number, d: number, ids: readonly string[]): number {
-    const a = aggregate(k, vals, n), target = vals[k.last * n + k.ref]!;
+    const top = aggregate(k, vals, n), bottom = k.per === undefined ? 1 : aggregate(k, vals, n, k.per);
+    const ratio = top === null || bottom === null || bottom === 0 ? null : top / bottom;
+    const a = ratio !== null && Number.isFinite(ratio) ? ratio : null, target = vals[k.last * n + k.ref]!;
     if (a === null || !Number.isFinite(target)) {
       this.bad++;
-      if (a === null) this.badIds.add(ids[k.q]!);
+      if (top === null || (a === null && bottom !== null && bottom !== 0)) this.badIds.add(ids[k.q]!);
+      if (k.per !== undefined && (bottom === null || bottom === 0)) this.badIds.add(ids[k.per.q]!);
       if (!Number.isFinite(target)) this.badIds.add(ids[k.ref]!);
       return -1;
     }
@@ -538,7 +552,7 @@ function runOption(c: Compiled, p: Plan, inputs: Inputs, draws: number, thirds: 
     const chance = k / draws;
     return { chance, precision_95: exact ? [chance, chance] : wilson95(k, draws) };
   };
-  const invalid = (bad: number, quantities: Iterable<string>): Withheld =>
+  const invalid = (bad: number, quantities: Iterable<string>): WithheldChance =>
     ({ withheld: { reason: 'invalid_domain', count: bad, quantities: [...new Set(quantities)] } });
   const exactGoal = goals.map((t, i) => t.constant && !p.goalRisky[i]);
   const exactLimit = limits.map((t, i) => t.constant && !p.limitRisky[i]);
@@ -550,7 +564,8 @@ function runOption(c: Compiled, p: Plan, inputs: Inputs, draws: number, thirds: 
   return {
     option_id: p.option_id,
     per_goal: c.goals.map((g, i) => ({ goal_id: g.id, ...condition(goals[i]!, exactGoal[i]!) })),
-    joint: jointBad > 0 ? invalid(jointBad, goalIds) : chanceOf(count(joint), allExactGoals),
+    joint: c.goals.length === 0 ? { withheld: { reason: 'no_goals', count: 0, quantities: [] } }
+      : jointBad > 0 ? invalid(jointBad, goalIds) : chanceOf(count(joint), allExactGoals),
     within_limits: withinBad > 0 ? invalid(withinBad, limitIds) : chanceOf(count(within), allExactLimits),
     joint_within_limits: bothBad > 0 ? invalid(bothBad, [...goalIds, ...limitIds]) : chanceOf(count(both), allExactGoals && allExactLimits),
     outcomes: c.goals.map((g, i) => ({ goal_id: g.id, ...summary(goals[i]!) })),
@@ -564,9 +579,9 @@ function runOption(c: Compiled, p: Plan, inputs: Inputs, draws: number, thirds: 
   };
 }
 
-/** Every withheld chance, once (gold-model ruling 6). */
-function withheldList(options: readonly OptionResult[]): SimWithheld[] {
-  const w = (option_id: string, scope: SimWithheld['scope'], x: ChanceOrWithheld, id?: string): SimWithheld[] =>
+/** Every chance the simulator withheld, once. */
+function withheldList(options: readonly OptionResult[]): WithheldChanceEntry[] {
+  const w = (option_id: string, scope: WithheldChanceEntry['scope'], x: ChanceOrWithheld, id?: string): WithheldChanceEntry[] =>
     ('withheld' in x ? [{ option_id, scope, ...(id === undefined ? {} : { id }), ...x.withheld }] : []);
   return options.flatMap((o) => [
     ...o.per_goal.flatMap((g) => w(o.option_id, 'goal', g, g.goal_id)),
@@ -590,5 +605,7 @@ export function simulate(model: ExecutableModel, opts: SimulateOptions): SimResu
   const record = new Set(opts.record ?? []);
   const recorded: RecordedDraw[] = [];
   const options = plans.map((p) => runOption(c, p, inputs, draws, thirds, record, recorded));
-  return { draws, seed: opts.seed, options, withheld: withheldList(options), ...(opts.record !== undefined ? { recorded } : {}) };
+  // The compiler's withheld[] is echoed unchanged (executable.ts r3); an older model without it echoes none.
+  const echoed = (model.withheld ?? []).map((x) => ({ ...x }));
+  return { draws, seed: opts.seed, options, withheld: echoed, withheld_chances: withheldList(options), ...(opts.record !== undefined ? { recorded } : {}) };
 }

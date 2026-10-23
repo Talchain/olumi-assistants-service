@@ -5,8 +5,8 @@
  * the hand value.
  */
 import { describe, expect, it } from 'vitest';
-import type { ExecutableModel, Goal, Limit, Option, OptionSet, Quantity, Risk } from '../../executable.js';
-import { simulate, type AggregationX } from '../simulate.js';
+import type { ExecutableModel, FixedAuthor, Goal, Limit, Option, OptionSet, Quantity, Risk, Withheld } from '../../executable.js';
+import { simulate } from '../simulate.js';
 import { rangeLaw, type Domain, type RangeDist, type RangeKind } from '../range-law.js';
 import { isWithheld, type Chance, type ChanceOrWithheld, type SimResult } from '../result.js';
 import { mapLivingModel } from '../../../path-b/living-model/mapper.js';
@@ -19,18 +19,19 @@ const SEED = 20261023;
 const ONE: Goal['window'] = { start_period: 0, periods: 1 };
 
 // Every quantity reads as a state (a boundary) unless `flow()` marks it as read over intervals (executable.ts r2).
-const fixed = (id: string, value: number, unit = ''): Quantity => ({ id, unit, reading: 'state', dist: { kind: 'fixed', value } });
+const fixed = (id: string, value: number, unit = '', author: FixedAuthor = 'person'): Quantity =>
+  ({ id, label: id, unit, reading: 'state', dist: { kind: 'fixed', value, author } });
 const range = (id: string, low: number, high: number, mode?: number, unit = ''): Quantity =>
-  ({ id, unit, reading: 'state', dist: { kind: 'range', low, high, ...(mode !== undefined ? { mode } : {}), basis: 'person_range' } });
+  ({ id, label: id, unit, reading: 'state', dist: { kind: 'range', low, high, ...(mode !== undefined ? { mode } : {}), basis: 'person_range' } });
 const def = (id: string, op: 'sum' | 'difference' | 'product' | 'ratio', parts: string[], unit = ''): Quantity =>
-  ({ id, unit, reading: 'state', equation: { form: 'definition', op, parts } });
+  ({ id, label: id, unit, reading: 'state', equation: { form: 'definition', op, parts } });
 const effect = (id: string, base: string, terms: { coefficient: string; driver: string }[], unit = ''): Quantity =>
-  ({ id, unit, reading: 'state', equation: { form: 'effect', base, terms } });
+  ({ id, label: id, unit, reading: 'state', equation: { form: 'effect', base, terms } });
 const stock = (id: string, start: string, inflows: string[], outflows: string[], unit = ''): Quantity =>
-  ({ id, unit, reading: 'state', stock: { start, inflows, outflows } });
+  ({ id, label: id, unit, reading: 'state', stock: { start, inflows, outflows } });
 const flow = (x: Quantity): Quantity => ({ ...x, reading: 'flow' });
-// Gold-model rulings 1 and 2, ahead of S1's executable.ts types: a `max`/`min` aggregation, and a `from_period` naming a timing.
-const aggregated = (g: Goal, a: AggregationX): Goal => ({ ...g, aggregation: a as Goal['aggregation'] });
+const aggregated = (g: Goal, aggregation: Goal['aggregation']): Goal => ({ ...g, aggregation });
+// Gold-model ruling 2, ahead of S1's executable.ts type: a `from_period` naming a timing quantity.
 const timed = (quantity: string, to: string, timing: string): OptionSet => {
   const set: { quantity: string; to: string; from_period: number | string } = { quantity, to, from_period: timing };
   return set as OptionSet;
@@ -40,12 +41,14 @@ const timedRisk = (r: Risk, timing: string): Risk => {
   return risk as Risk;
 };
 const goal = (id: string, quantity: string, cmp: Goal['cmp'], target: string, aggregation: Goal['aggregation'] = 'end',
-  window: Goal['window'] = ONE): Goal => ({ id, quantity, cmp, target, aggregation, window });
+  window: Goal['window'] = ONE): Goal => ({ id, label: id, quantity, cmp, target, aggregation, window });
+const limit = (id: string, quantity: string, cmp: Limit['cmp'], bound: string, window: Limit['window'] = ONE): Limit =>
+  ({ id, label: id, quantity, cmp, bound, aggregation: 'end', window });
 const option = (id: string, sets: Option['sets'] = []): Option => ({ id, label: id, sets });
 const HOLD = option('hold');
 function model(periods: number, quantities: Quantity[], goals: Goal[], options: Option[] = [HOLD],
-  more: { limits?: Limit[]; risks?: Risk[] } = {}): ExecutableModel {
-  return { periods, period_unit: 'month', quantities, goals, limits: more.limits ?? [], options, risks: more.risks ?? [] };
+  more: { limits?: Limit[]; risks?: Risk[]; withheld?: Withheld[] } = {}): ExecutableModel {
+  return { periods, period_unit: 'month', quantities, goals, limits: more.limits ?? [], options, risks: more.risks ?? [], withheld: more.withheld ?? [] };
 }
 const opt = (r: { options: Rec[] }, id: string): Rec => r.options.find((o) => o.option_id === id)!;
 const goalOf = (o: Rec, id: string): Rec => o.per_goal.find((g: Rec) => g.goal_id === id)!;
@@ -191,7 +194,7 @@ describe('numerical check: natural-unit simulator, hand-calculated rows', () => 
     const build = (k: number) => model(1, [range('price', 39 / k, 59 / k, 49 / k, k === 1 ? '£' : '£k'), range('customers', 80, 120, 100),
       def('mrr', 'product', ['price', 'customers']), fixed('unit_cost', 10 / k), def('cost', 'product', ['customers', 'unit_cost']),
       fixed('target', 5000 / k), fixed('budget', 1100 / k)], [goal('g', 'mrr', '>=', 'target')], [HOLD],
-    { limits: [{ id: 'l', quantity: 'cost', cmp: '<=', bound: 'budget', aggregation: 'end', window: ONE }] });
+    { limits: [limit('l', 'cost', '<=', 'budget')] });
     const pounds = first(simulate(build(1), { seed: SEED, draws: N }));
     const thousands = first(simulate(build(1000), { seed: SEED, draws: N }));
     expect(pounds.per_goal[0].chance).toBeGreaterThan(0.05);
@@ -329,7 +332,7 @@ describe('numerical check: natural-unit simulator, hand-calculated rows', () => 
     expect(between.filter((v) => v < 10 || v > 30)).toEqual([]);
     expect(between.filter((v) => v === 10 || v === 30)).toEqual([]);
 
-    const olumi = (d?: Domain): Quantity => kinded({ id: 'k', unit: '', reading: 'state', dist: { kind: 'range', low: -2.2, high: -1.4, mode: -1.8, basis: 'olumi_estimate' } }, 'bounds', d);
+    const olumi = (d?: Domain): Quantity => kinded({ id: 'k', label: 'k', unit: '', reading: 'state', dist: { kind: 'range', low: -2.2, high: -1.4, mode: -1.8, basis: 'olumi_estimate' } }, 'bounds', d);
     for (const k of [drawsOf(olumi()), drawsOf(olumi({ max: 0 }))]) {
       const outside = k.filter((v) => v < -2.2 || v > -1.4).length / N;
       expect(Math.abs(outside - 0.08326)).toBeLessThanOrEqual(0.00383);
@@ -351,7 +354,7 @@ describe('numerical check: natural-unit simulator, hand-calculated rows', () => 
     expect(Math.abs(mean - skew.mean)).toBeLessThanOrEqual(4 * 3.8075 / Math.sqrt(N));
     expect(Math.abs(sd / skew.sd_conditioned - 1)).toBeLessThanOrEqual(0.02);
 
-    const count = (d?: Domain): Quantity => kinded({ id: 'n', unit: 'people', reading: 'state', dist: { kind: 'range', low: 0, high: 8, basis: 'olumi_estimate' } }, 'plausible', d);
+    const count = (d?: Domain): Quantity => kinded({ id: 'n', label: 'n', unit: 'people', reading: 'state', dist: { kind: 'range', low: 0, high: 8, basis: 'olumi_estimate' } }, 'plausible', d);
     const counted = law(count({ min: 0 }));
     expect(Math.abs(counted.mean - 4.2145)).toBeLessThanOrEqual(0.001);
     expect(Math.abs(counted.sd_conditioned - 2.1046)).toBeLessThanOrEqual(0.001);
@@ -424,7 +427,7 @@ describe('numerical check: natural-unit simulator, hand-calculated rows', () => 
     const build = (salary: Quantity, limits: [string, string][]) => model(1, [fixed('count', 0), fixed('one', 1), salary,
       def('cost', 'product', ['count', 'salary']), fixed('b50', 50000), fixed('b45', 45000), fixed('b30', 30000), fixed('zero', 0)],
     [goal('g', 'count', '>=', 'zero')], [HOLD, option('add', [{ quantity: 'count', to: 'one', from_period: 0 }])],
-    { limits: limits.map(([id, bound]) => ({ id, quantity: 'cost', cmp: '<=', bound, aggregation: 'end', window: ONE })) });
+    { limits: limits.map(([id, bound]) => limit(id, 'cost', '<=', bound)) });
     const r = simulate(build(fixed('salary', 40000), [['l50', 'b50'], ['l30', 'b30']]), { seed: SEED, draws: 100 });
     expect(opt(r, 'hold').per_limit).toEqual([{ limit_id: 'l50', chance: 1, precision_95: [1, 1] }, { limit_id: 'l30', chance: 1, precision_95: [1, 1] }]);
     expect(opt(r, 'add').per_limit).toEqual([{ limit_id: 'l50', chance: 1, precision_95: [1, 1] }, { limit_id: 'l30', chance: 0, precision_95: [0, 0] }]);
@@ -464,19 +467,42 @@ describe('numerical check: natural-unit simulator, hand-calculated rows', () => 
     for (const id of ['hold', 'high']) expect(opt(r, id).drivers.map((x: Rec) => x.quantity)).toEqual(['a']);
   });
 
-  it('row 16: every withheld chance is listed once in SimResult.withheld', () => {
+  it('row 16: every chance the simulator withheld is listed once (withheld_chances); the compiler\u2019s withheld[] is echoed unchanged', () => {
     // Row 10's ratio: the goal on q, the joint and joint_within_limits are withheld for 'hold'; nothing else is.
     const m = model(1, [fixed('a', 10), flow(fixed('denominator', 10)), fixed('occ', 0.5), fixed('sev', -10), fixed('zero', 0),
       flow(def('q', 'ratio', ['a', 'denominator']))], [goal('gq', 'q', '>=', 'zero'), goal('ga', 'a', '>=', 'zero')], [HOLD],
     { risks: [{ id: 'cut', occurrence: 'occ', severity: 'sev', effect_on: 'denominator', mode: 'add', from_period: 0 }] });
     const r = simulate(m, { seed: SEED, draws: 2000 });
     const count = goalOf(first(r), 'gq').withheld.count;
-    expect(r.withheld).toEqual([
+    expect(r.withheld_chances).toEqual([
       { option_id: 'hold', scope: 'goal', id: 'gq', reason: 'invalid_domain', count, quantities: ['q'] },
       { option_id: 'hold', scope: 'joint', reason: 'invalid_domain', count, quantities: ['q'] },
       { option_id: 'hold', scope: 'joint_within_limits', reason: 'invalid_domain', count, quantities: ['q'] },
     ]);
-    expect(simulate(model(1, [fixed('x', 1)], [goal('g', 'x', '>=', 'x')]), { seed: 1, draws: 10 }).withheld).toEqual([]);
+    expect(r.withheld).toEqual([]);
+    const clean = simulate(model(1, [fixed('x', 1)], [goal('g', 'x', '>=', 'x')], [HOLD],
+      { withheld: [{ id: 'morale', kind: 'goal', label: 'Keep the team happy', reason: 'It has no measure yet.' }] }), { seed: 1, draws: 10 });
+    expect(clean.withheld_chances).toEqual([]);
+    expect(clean.withheld).toEqual([{ id: 'morale', kind: 'goal', label: 'Keep the team happy', reason: 'It has no measure yet.' }]);
+  });
+
+  it('row 17: a ratio of two window aggregates (per), and a limits-only run', () => {
+    // Sign-ups 10 a month and visitors 200 a month (flows). Conversion over the first three months = sum(sign-ups) ÷
+    // sum(visitors) = 30 ÷ 600 = 0.05: ≥ 0.05 holds (exactly 1), > 0.05 fails (exactly 0); its outcome is 0.05.
+    // With no visitors the ratio has no value: the goal is withheld (invalid_domain, 'visitors', every draw), never failed.
+    // Limits only: no goals; the joint is withheld as 'no_goals' and joint_within_limits is within_limits
+    // (cost 40 ≤ 50 → exactly 1).
+    const w = { start_period: 0, periods: 3 };
+    const conv = (visitors: number) => model(3, [flow(fixed('signups', 10)), flow(fixed('visitors', visitors)), fixed('t', 0.05)],
+      [{ ...goal('ge', 'signups', '>=', 't', 'sum', w), per: 'visitors' }, { ...goal('gt', 'signups', '>', 't', 'sum', w), per: 'visitors' }]);
+    const r = first(simulate(conv(200), { seed: SEED, draws: 50 }));
+    expect([goalOf(r, 'ge').chance, goalOf(r, 'gt').chance]).toEqual([1, 0]);
+    expect(outcomeOf(r, 'ge').p50).toBeCloseTo(0.05, 12);
+    expect(goalOf(first(simulate(conv(0), { seed: SEED, draws: 50 })), 'ge').withheld).toEqual({ reason: 'invalid_domain', count: 50, quantities: ['visitors'] });
+    const only = first(simulate(model(1, [fixed('cost', 40), fixed('cap', 50)], [], [HOLD], { limits: [limit('l', 'cost', '<=', 'cap')] }), { seed: SEED, draws: 50 }));
+    expect(only.joint).toEqual({ withheld: { reason: 'no_goals', count: 0, quantities: [] } });
+    expect(only.within_limits).toEqual({ chance: 1, precision_95: [1, 1] });
+    expect(only.joint_within_limits).toEqual(only.within_limits);
   });
 
   it('row 10: a nonfinite draw is outside the domain: the chance it touches is withheld, typed, with its count — never a failure', () => {
@@ -503,7 +529,7 @@ describe('numerical check: natural-unit simulator, hand-calculated rows', () => 
     expect(goalOf(first(simulate(ratio(0), { seed: SEED, draws: N })), 'gq').chance).toBe(1);
 
     const inf = first(simulate(model(1, [fixed('a', 10), fixed('zero', 0), fixed('e200', 1e200), def('big', 'product', ['e200', 'e200']), fixed('cap', 1)],
-      [goal('ga', 'a', '>=', 'zero')], [HOLD], { limits: [{ id: 'l', quantity: 'big', cmp: '<=', bound: 'cap', aggregation: 'end', window: ONE }] }),
+      [goal('ga', 'a', '>=', 'zero')], [HOLD], { limits: [limit('l', 'big', '<=', 'cap')] }),
     { seed: 1, draws: 50 }));
     expect(inf.joint).toEqual({ chance: 1, precision_95: [1, 1] });
     expect(inf.within_limits).toEqual({ withheld: { reason: 'invalid_domain', count: 50, quantities: ['big'] } });
