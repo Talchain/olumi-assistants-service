@@ -40,7 +40,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
   it('arm B is the AIE\'s assembled reference, byte for byte (programme-docs #94 6303242136, static text sha256 7b6145d4…), plus the canvas-coaching sentence', () => {
     expect(b.split(NOTE_ON_ITEM_INSTRUCTION)).toHaveLength(2);
     // 7b6145d4… until 21 Oct; arm C's adoption changed only the closing core reply rule (see its row), now 56625e00….
-    expect(createHash('sha256').update(b.replace(`${NOTE_ON_ITEM_INSTRUCTION}\n\n`, ''), 'utf8').digest('hex')).toBe('da2f3bc0015655b71dc21bbe40c1ec8e0397b9f7eba685b7cdf6b64223da7ede'); // 23 Oct (DL 93d79c3e, C2 (d)): "typical" values no longer forbidden on core. 22 Oct: one exact blocking-input question; retire the coach's duplicate ask.
+    expect(createHash('sha256').update(b.replace(`${NOTE_ON_ITEM_INSTRUCTION}\n\n`, ''), 'utf8').digest('hex')).toBe('d707c6d5d5f9595ede9f7dc06e6b21fbc21f9dec701777d7639268f716dd3501'); // 23 Oct (DL 93d79c3e, C2): "typical" values no longer forbidden on core (d); stated goals replace an aim that is no goal. 22 Oct: one exact blocking-input question; retire the coach's duplicate ask.
     // Candidate-3 witnesses (21 Oct): presence checks (text only, not behaviour): WHEN to build, and Olumi's additions on a card.
     expect(b).toContain('build the first model from their brief in that same turn');
     expect(b).toContain('a list in your reply adds nothing to their model');
@@ -173,6 +173,11 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(CORE_ALIGNED_INSTRUCTIONS).not.toContain('\u201ctypical\u201d values');
     expect(CORE_ALIGNED_INSTRUCTIONS).toContain('Do not manufacture numerical precision or arbitrary thresholds.');
     expect(SELECTED_COACH_V02_TEMPLATE, 'control: the legacy template keeps its words').toContain('Do not manufacture numerical precision, \u201ctypical\u201d values or arbitrary thresholds.');
+  });
+
+  it('DL 93d79c3e (00:48Z, marketing on 05745055 nb): goals the person states replace an aim that is no goal, never sit beside it', () => {
+    expect(b.split('Do not preserve what the correction supersedes: goals the person states lead the aims, first, and replace an aim that is no goal (a task or an option), never sit beside it.')).toHaveLength(2);
+    expect(b).not.toContain('Do not preserve an item that the requested correction actually supersedes.');
   });
 
   it('keeps the entire estimate rule verbatim, rather than weakening figure or author protections', () => {
