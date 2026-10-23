@@ -36,7 +36,8 @@ import type { ExecutableModel, Quantity as XQuantity, Goal as XGoal, Limit as XL
 import { parseUnit, multiply, divide, sameDims, isDimensionless, showUnit, perPeriod, isCalendarConversion, TIME_DIMS, type Unit } from './units.js';
 import { rangeLaw, type RangeReading, type RangeDist } from './simulate/range-law.js';
 
-export type { RangeReading };
+/** The law's reading of an uncertain range, or HELD when the law has no room for it (its domain leaves no probability). */
+export type LawReading = Extract<RangeReading, { kind: 'normal' }> | { kind: 'held'; reason: string };
 
 export type CompileErrorCode =
   | 'schema' | 'bad_id' | 'duplicate_id' | 'undefined_ref' | 'unit_unreadable' | 'unit_mismatch' | 'figure_status'
@@ -75,7 +76,7 @@ export type Ask = { quantity_id: string; label: string; unit: string; question: 
 export type Coaching = { record_id: string; kind: 'measure' | 'deadline' | 'left_out'; question: string };
 export type Conversion =
   | { kind: 'percent'; quantity: string; from: string; to: string; factor: number; author: 'olumi' }
-  | { kind: 'range_law'; quantity: string; low: number; high: number; range_kind: 'bounds' | 'plausible'; domain: Domain | null; reading: RangeReading; author: 'olumi'; provisional: true };
+  | { kind: 'range_law'; quantity: string; low: number; high: number; range_kind: 'bounds' | 'plausible'; domain: Domain | null; reading: Extract<RangeReading, { kind: 'normal' }>; author: 'olumi'; provisional: true };
 export type CompileResult = {
   executable: ExecutableModel | null;
   perGoal: GoalOutcome[];
@@ -102,17 +103,24 @@ export type CompileResult = {
 /**
  * THE RULED RANGE LAW is ONE shared function, S2's (`simulate/range-law.ts`, PL ruling B): the compiler, the simulator and
  * every disclosure read a range through it. The compiler adds what only it can know: the range's kind from the person's words
- * (bounds | plausible; an unclear one is asked) and its domain (a chance in [0, 1], a non-negative count). A reading that would
- * collapse a range to one point is never used: the range is held, and what rests on it is withheld with that reason.
+ * (bounds | plausible; an unclear one is asked) and its domain (a chance in [0, 1], a non-negative count), both carried on the
+ * range itself. The law (S2 9d34ef05 onward) has no point fallback: an uncertain range is always a spread, conditioned on a
+ * person's bounds or on its domain, and its disclosure reports the CONDITIONED moments (`mean`, `sd_conditioned`).
  */
 export const rangeDistOf = (q: Pick<CanonicalQuantityT, 'low' | 'high' | 'value' | 'author' | 'range_kind'>, scale = 1, domain?: Domain): RangeDist => ({
   kind: 'range', low: q.low! * scale, high: q.high! * scale, ...(q.value !== null ? { mode: q.value * scale } : {}),
   basis: q.author === 'person' ? 'person_range' : 'olumi_estimate', range_kind: q.range_kind ?? 'plausible', ...(domain ? { domain } : {}),
 });
-/** The law's reading, with no point fallback: a range is never collapsed to its most likely figure. */
-export function readRange(d: RangeDist, chance: boolean): RangeReading {
-  const r = rangeLaw(d, { chance });
-  return r.kind === 'point' ? { kind: 'held', reason: `the range ${d.low} to ${d.high} would be read as its most likely figure alone, and a range is never collapsed to one point` } : r;
+/** The shared law's reading of an uncertain range (low < high). Where the law has no room (no probability inside the range's
+ *  domain) it refuses, and the range is HELD: what rests on it is withheld with that reason, never given a figure. */
+export function readRange(d: RangeDist): LawReading {
+  try {
+    const r = rangeLaw(d);
+    if (r.kind === 'normal') return r;
+    return { kind: 'held', reason: `the range ${d.low} to ${d.high} is not uncertain, so it cannot be read as a spread` }; // the law's point is only low = high
+  } catch {
+    return { kind: 'held', reason: `the range ${d.low} to ${d.high} has no room inside what it can be (${d.domain?.min ?? '−∞'} to ${d.domain?.max ?? '∞'})` };
+  }
 }
 
 export const AS_STATED_OPTION_ID = 'as_stated';
@@ -601,10 +609,10 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
   /** A person's range whose words do not say whether its ends are hard: an UNRESOLVED reading, asked (PL ruling B). */
   const unresolved = new Map(model.quantities.filter((q) => FIGURE_STATUSES.has(q.status) && q.author === 'person' && has(q.low) && has(q.high) && q.low < q.high && !has(q.range_kind) && !windowQs.has(q.id))
     .map((q) => [q.id, `Is ${q.low}–${q.high} ${q.unit} for "${q.label}" a firm range it cannot fall outside, or your rough estimate?`] as const));
-  const readings = new Map<string, RangeReading>();
+  const readings = new Map<string, LawReading>();
   for (const q of model.quantities) if (FIGURE_STATUSES.has(q.status) && has(q.low) && has(q.high) && q.low < q.high && U.has(q.id) && !windowQs.has(q.id)
     && (!has(q.value) || (q.low < q.value && q.value < q.high))) {
-    readings.set(q.id, readRange(rangeDistOf(q, U.get(q.id)!.scale, domainOf(q)), chances.has(q.id)));
+    readings.set(q.id, readRange(rangeDistOf(q, U.get(q.id)!.scale, domainOf(q))));
   }
   const held = new Map([...readings].filter(([, r]) => r.kind === 'held').map(([id, r]) => [id, (r as { reason: string }).reason] as const));
 
@@ -696,7 +704,7 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
       const r = R.get(q.id);
       if (conversions && u.scale !== 1) conversions.push({ kind: 'percent', quantity: q.id, from: q.unit, to: unit, factor: u.scale, author: 'olumi' });
       const law = readings.get(q.id);
-      if (conversions && law) conversions.push({ kind: 'range_law', quantity: q.id, low: q.low! * u.scale, high: q.high! * u.scale, range_kind: q.range_kind ?? 'plausible', domain: domainOf(q) ?? null, reading: law, author: 'olumi', provisional: true });
+      if (conversions && law?.kind === 'normal') conversions.push({ kind: 'range_law', quantity: q.id, low: q.low! * u.scale, high: q.high! * u.scale, range_kind: q.range_kind ?? 'plausible', domain: domainOf(q) ?? null, reading: law, author: 'olumi', provisional: true });
       const base = { id: q.id, label: q.label, unit, reading: 'state' as const }; // readings are set by `setReadings` once the subset is final
       if (r === undefined) quantities.push({ ...base, dist: distOf(q, u.scale, domainOf(q)) });
       else if (r.form === 'stock') quantities.push({ ...base, stock: { start: r.start, inflows: [...r.inflows], outflows: [...r.outflows] } });

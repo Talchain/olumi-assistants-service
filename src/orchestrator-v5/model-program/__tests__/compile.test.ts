@@ -54,7 +54,15 @@ const model = (over: Partial<CanonicalModelT>): CanonicalModelT => ({
   claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], history: [], ...over,
 });
 const codes = (r: ReturnType<typeof compile>) => r.errors.map((e) => e.code);
+/** The shared law's reading of an unbounded range: its conditioned moments equal rangeSpread's centre and sd. */
+const unbounded = (centre: number, sd: number) => ({ kind: 'normal', centre, sd, lower: -Infinity, upper: Infinity, mean: centre, sd_conditioned: sd });
 const xq = (r: ReturnType<typeof compile>) => new Map(r.executable!.quantities.map((q) => [q.id, q]));
+/** The range-law disclosure for one quantity (a typed find: a % conversion has no reading). */
+const lawIn = (r: ReturnType<typeof compile>, id: string) => {
+  const c = r.conversions.find((x) => x.quantity === id && x.kind === 'range_law');
+  if (!c || c.kind !== 'range_law') throw new Error(`no range-law disclosure for ${id}`);
+  return c;
+};
 
 /** The bakery: a definition (profit), an effect (sales from ovens) and a stock (cash), with two goals. */
 function bakery(): CanonicalModelT {
@@ -129,7 +137,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(q.get('cash')).toEqual({ id: 'cash', label: 'cash', unit: 'GBP', reading: 'state', stock: { start: 'cash_now', inflows: ['profit'], outflows: [] } });
     expect(q.get('extra_per_oven')!.dist).toEqual({ kind: 'range', low: 80, high: 150, mode: 120, basis: 'olumi_estimate', range_kind: 'plausible' });
     expect(q.get('price')!.dist).toEqual({ kind: 'fixed', value: 3, author: 'person' });
-    expect(r.conversions).toEqual([{ kind: 'range_law', quantity: 'extra_per_oven', low: 80, high: 150, range_kind: 'plausible', domain: null, reading: { kind: 'normal', centre: 120, sd: 70 / Math.sqrt(12) }, author: 'olumi', provisional: true }]);
+    expect(r.conversions).toEqual([{ kind: 'range_law', quantity: 'extra_per_oven', low: 80, high: 150, range_kind: 'plausible', domain: null, reading: unbounded(120, 70 / Math.sqrt(12)), author: 'olumi', provisional: true }]);
     expect(q.has('quarter')).toBe(false); // a window's length is consumed into the window
     expect(x.goals).toEqual([
       { id: 'weekly_profit', label: 'weekly profit', quantity: 'profit', cmp: '>', target: 'profit_target', aggregation: 'end', window: { start_period: 0, periods: 13 } },
@@ -604,16 +612,22 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(probeValue(both.executable!, both.executable!.goals[0], 'raise')).toBe(312); // 12 × 26: the set is active at boundary 3
   });
 
-  it('DL ruling 4: a bare range the ruled law cannot use is HELD (withholds what rests on it); a usable one is read; a most likely figure at an end is an error', () => {
+  it('DL ruling 4 (S2 law 9d34ef05+): a plausible range is a spread, never a point and never an invented domain; one with no room is HELD; a most likely figure at an end is an error', () => {
     const withCosts = (f: Partial<CanonicalQuantityT>) => { const m = bakery(); m.quantities = m.quantities.map((q) => (q.id === 'costs' ? { ...q, value: null, ...f } : q)); return compile(m); };
-    const heldR = withCosts({ low: 0, high: 1200, range_kind: 'plausible' });
-    expect(heldR.errors).toEqual([]);
-    expect(heldR.perGoal.map((p) => p.status)).toEqual(['withheld', 'withheld']);
-    expect(heldR.perGoal[0].reasons.join(' ')).toContain('the range 0 to 1200 has no most likely value');
-    expect(heldR.executable).toBeNull();
+    // A wide money range with no most likely figure: read unbounded (money carries no invented domain), so it calculates.
+    const wide = withCosts({ low: 0, high: 1200, range_kind: 'plausible' });
+    expect(wide.perGoal.map((p) => p.status)).toEqual(['calculable', 'calculable']);
+    expect(wide.conversions.find((c) => c.quantity === 'costs')).toMatchObject({ reading: unbounded(600, 1200 / Math.sqrt(12)) });
+    // A count range with no room inside its domain (never negative) is HELD: what rests on it is withheld, never given a figure.
+    const g = gymFilled();
+    g.quantities = g.quantities.map((q) => (q.id === 'members_now' ? { ...q, value: null, low: -1010, high: -990, range_kind: 'plausible' as const } : q));
+    const heldR = compile(g);
+    expect(heldR.perGoal.find((p) => p.goal_id === 'reach_400')).toMatchObject({ status: 'withheld' });
+    expect(heldR.perGoal.find((p) => p.goal_id === 'reach_400')!.reasons.join(' ')).toContain('has no room inside what it can be');
+    expect(heldR.perGoal.find((p) => p.goal_id === 'class_income')).toMatchObject({ status: 'calculable' }); // contrast
     const usable = withCosts({ low: 500, high: 700, range_kind: 'plausible' });
     expect(usable.perGoal.map((p) => p.status)).toEqual(['calculable', 'calculable']);
-    expect(usable.conversions).toContainEqual({ kind: 'range_law', quantity: 'costs', low: 500, high: 700, range_kind: 'plausible', domain: null, reading: { kind: 'normal', centre: 600, sd: 200 / Math.sqrt(12) }, author: 'olumi', provisional: true });
+    expect(usable.conversions).toContainEqual({ kind: 'range_law', quantity: 'costs', low: 500, high: 700, range_kind: 'plausible', domain: null, reading: unbounded(600, 200 / Math.sqrt(12)), author: 'olumi', provisional: true });
     expect(xq(usable).get('costs')!.dist).toEqual({ kind: 'range', low: 500, high: 700, basis: 'person_range', range_kind: 'plausible' });
     const atEnd = withCosts({ value: 500, low: 500, high: 700, range_kind: 'plausible' });
     expect(atEnd.errors.map((e) => [e.code, e.items])).toEqual([['range_order', ['costs']]]);
@@ -636,10 +650,14 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(rb.perGoal.map((p) => p.status)).toEqual(['calculable', 'calculable']);
     expect(xq(rb).get('costs')!.dist).toEqual({ kind: 'range', low: 500, high: 700, basis: 'person_range', range_kind: 'bounds' });
     expect(rb.conversions.find((c) => c.quantity === 'costs')).toMatchObject({ kind: 'range_law', range_kind: 'bounds', author: 'olumi', provisional: true });
-    // Never a point: a range the law would read as its most likely figure alone is held, so what rests on it is withheld.
-    const collapse = compile(withCosts({ value: 100, low: 0, high: 1200, range_kind: 'plausible' }));
-    expect(collapse.perGoal.map((p) => p.status)).toEqual(['withheld', 'withheld']);
-    expect(collapse.perGoal[0].reasons.join(' ')).toContain('never collapsed to one point');
+    // Never a point: a skewed range stays a spread around its most likely figure (S2's law has no point fallback).
+    const skewed = compile(withCosts({ value: 100, low: 0, high: 1200, range_kind: 'plausible' }));
+    expect(skewed.perGoal.map((p) => p.status)).toEqual(['calculable', 'calculable']);
+    expect(lawIn(skewed, 'costs').reading).toMatchObject({ kind: 'normal', centre: 100 }); // a spread, never its mode alone
+    // Bounds condition the spread on the person's ends: the disclosure reports the CONDITIONED sd, never the unconditioned one.
+    const law = lawIn(rb, 'costs');
+    expect(law.reading).toMatchObject({ lower: 500, upper: 700 });
+    expect(law.reading.sd_conditioned).toBeLessThan(law.reading.sd);
     // Domains: a chance lies in [0, 1]; a count is never negative; money carries no invented domain.
     const m = bakery();
     m.quantities.push(olumi('breakdown_chance', '1', 0.05, 0.2), olumi('lost_loaves', 'loaf/week', -150, -50, -100));
@@ -648,6 +666,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     const rd = compile(m);
     expect(rd.errors).toEqual([]);
     expect(xq(rd).get('breakdown_chance')!.dist).toMatchObject({ domain: { min: 0, max: 1 } });
+    expect(lawIn(rd, 'breakdown_chance').reading).toMatchObject({ lower: 0, upper: 1 });
     expect(xq(rd).get('extra_per_oven')!.dist).not.toHaveProperty('domain');
     const counts = compile(model({ ...gymFilled(), quantities: gymFilled().quantities.map((q) => (q.id === 'members_now' ? { ...q, value: null, low: 280, high: 320, range_kind: 'bounds' as const } : q)) }));
     expect(xq(counts).get('members_now')!.dist).toMatchObject({ range_kind: 'bounds', domain: { min: 0 } });
@@ -666,7 +685,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(x.goals.find((g) => g.id === 'summer_classes')!.window).toEqual({ start_period: 6, periods: 3 });
     expect(x.periods).toBe(9);
     expect(x.quantities.find((q) => q.id === 'members')!.reading).toBe('state');
-    expect(project(bakery()).items.find((i) => i.record_id === 'extra_per_oven')!.law).toEqual({ author: 'olumi', provisional: true, range_kind: 'plausible', reading: { kind: 'normal', centre: 120, sd: 70 / Math.sqrt(12) } });
+    expect(project(bakery()).items.find((i) => i.record_id === 'extra_per_oven')!.law).toEqual({ author: 'olumi', provisional: true, range_kind: 'plausible', reading: unbounded(120, 70 / Math.sqrt(12)) });
   });
 
   it('the schema is valid as strict structured output: closed objects, every key required, anyOf unions only', () => {
