@@ -19,7 +19,7 @@ import { KNOWN_ANSWER } from '../../living-model/__tests__/fixtures.js';
 import { F1_CONTRADICTED, F1_DEFINED, F1_EXACT_LINKS, F1_OTHER_CAUSE } from '../../living-model/__tests__/track2-f1-identity.fixtures.js';
 import { OLUMI_CHANCE } from '../../living-model/__tests__/track2-f2-event-risk.fixtures.js';
 import { buildModel } from '../draft-tool.js';
-import { applyLivingChange, proposeLivingChange } from '../living-change.js';
+import { applyLivingChange, proposeLivingChange, REPLACE_AIM } from '../living-change.js';
 import { pathBTools, type ToolCallResult } from '../index.js';
 import type { TraceRow } from '../outcome.js';
 import { blockersOf, corePostimage, KEPT_AS_REFUSED, personContentLost, REPAIR_CHANGE, REPAIR_DRAFT, REPAIRS, selfCheck, STILL_ASK, type Restructure } from '../goal-path.js';
@@ -869,6 +869,60 @@ describe('DL 22 Oct (marketing on 4a4c338c): a change that adds the person\'s ow
     const b = await proposeLivingChange({ dispatch: product(untargeted()).dispatch, proposals: new ProposalStore(), restructure }, ctx, args(added('olumi')));
     expect(b, JSON.stringify(b)).toMatchObject({ status: 'ok' });
     expect(((b as { data: Rec }).data.withheld as Rec[]).filter((w) => w.id === 'g2')).toEqual([{ id: 'g2', reason: 'aim_not_in_slice' }]);
+    expect(restructure.repairs).toBe(0);
+  });
+});
+
+describe('C3 (DL 93d79c3e 01:56Z; marketing set b r1): the person\'s stated goal REPLACES a drafted aim that is no goal, never sits beside it', () => {
+  // The drafted aim: an option clause read as the goal, the person's words with Olumi's suggested measure and no figure.
+  const task = (): LivingModelT['aims'][number] => ({ id: 't', text: 'push f to 1, or we hold', status: 'current', defined_as: null, source: 'user',
+    party: null, quote: 'push f to 1, or we hold', target: { ...KNOWN_ANSWER.aims[0]!.target!, quantity: 'the plan settled', comparator: '=',
+      value: null, unit: null, baseline: null, current: null, source: 'olumi' } });
+  const drafted = (): LivingModelT => ({ ...structuredClone(KNOWN_ANSWER), aims: [task()], links: [] });
+  const stated = (): LivingModelT => ({ ...structuredClone(KNOWN_ANSWER), aims: [task(), structuredClone(KNOWN_ANSWER.aims[0]!)] });
+  const cardOf = (out: unknown) => (out as { data: Rec }).data;
+
+  it('the replace: asked once with the aim it names; naming it in remove makes the card, and a Run tests the person\'s goal', async () => {
+    const p = product(drafted());
+    const proposals = new ProposalStore();
+    const restructure: Restructure = { repairs: 0 };
+    const first = await proposeLivingChange({ dispatch: p.dispatch, proposals, restructure }, changeCtx, change(stated()));
+    expect(first, JSON.stringify(first)).toEqual({ status: 'refused', reason: 'goal_beside_no_goal', detail: REPLACE_AIM,
+      data: { aim: { id: 't', text: 'push f to 1, or we hold' } } });
+    expect(restructure.repairs).toBe(1);
+    const card = await proposeLivingChange({ dispatch: p.dispatch, proposals, restructure }, changeCtx,
+      { ...change({ ...stated(), aims: [structuredClone(KNOWN_ANSWER.aims[0]!)] }), remove: ['t'] });
+    expect(card, JSON.stringify(card)).toMatchObject({ status: 'ok', data: { run_ready: true } });
+    expect(cardOf(card).restructure, 'the replace is not a loss: the retry is carded').toBeUndefined();
+    expect(cardOf(card).changes).toContainEqual(expect.objectContaining({ kind: 'aim', id: 't', change: 'remove' }));
+    await applyLivingChange({ dispatch: p.dispatch, proposals }, changeCtx, String(cardOf(card).proposal_id));
+    expect(goalOf(p.saved())?.id).toBe('g');
+    expect((p.saved()!.living_model as LivingModelT).aims.map((a) => a.id)).toEqual(['g']);
+  });
+
+  it('⛔ the person\'s own aim is never dropped: sent unchanged, the card keeps it; a figured goal of theirs is never asked about', async () => {
+    const p = product(drafted());
+    const restructure: Restructure = { repairs: 0 };
+    await proposeLivingChange({ dispatch: p.dispatch, proposals: new ProposalStore(), restructure }, changeCtx, change(stated()));
+    const kept = await proposeLivingChange({ dispatch: p.dispatch, proposals: new ProposalStore(), restructure }, changeCtx, change(stated()));
+    expect(kept, JSON.stringify(kept)).toMatchObject({ status: 'ok' });
+    expect(cardOf(kept).changes).not.toContainEqual(expect.objectContaining({ kind: 'aim', id: 't' }));
+    const q = product(structuredClone(KNOWN_ANSWER));
+    const second = { ...structuredClone(KNOWN_ANSWER.aims[0]!), id: 'g2', text: 'Reach 70 units', quote: 'today we are at 70' };
+    const r2: Restructure = { repairs: 0 };
+    const both = await proposeLivingChange({ dispatch: q.dispatch, proposals: new ProposalStore(), restructure: r2 }, changeCtx,
+      change({ ...structuredClone(KNOWN_ANSWER), aims: [structuredClone(KNOWN_ANSWER.aims[0]!), second] }));
+    expect(both, JSON.stringify(both)).toMatchObject({ status: 'ok' });
+    expect(r2.repairs).toBe(0);
+  });
+
+  it('only what the change brings: a model that already held the drafted aim beside the person\'s goal is not held up', async () => {
+    const p = product(stated());
+    const restructure: Restructure = { repairs: 0 };
+    const next = stated();
+    next.factors[0] = { ...next.factors[0]!, value: 0.6, quote: 'Actually f is at 0.6 now.' };
+    expect(await proposeLivingChange({ dispatch: p.dispatch, proposals: new ProposalStore(), restructure }, changeCtx, change(next)))
+      .toMatchObject({ status: 'ok' });
     expect(restructure.repairs).toBe(0);
   });
 });

@@ -17,7 +17,7 @@ import { LivingModel, type LivingModelT } from '../../../schemas/living-model.js
 import { applyKernel, canonicalIds, plain } from '../living-model/kernel.js';
 import { withCalendarReadings } from '../living-model/calendar-reading.js';
 import { todayInLondon } from '../../goal-target/deadline-date.js';
-import { changeGoal, mapLivingModel, savedGoal } from '../living-model/mapper.js';
+import { changeGoal, goalIdOf, mapLivingModel, savedGoal } from '../living-model/mapper.js';
 import { blockersOf, corePostimage, KEPT_AS_REFUSED, personContentLost, repairOf, REPAIR_CHANGE, REPAIRS, selfCheck, STILL_ASK, type Restructure } from './goal-path.js';
 import { diffLivingModels, stable, type LivingChange } from '../living-model/diff.js';
 import { livingViewOf } from '../living-model/view.js';
@@ -68,13 +68,15 @@ export async function proposeLivingChange(deps: Deps, ctx: Ctx, args: LivingChan
   const r = deps.restructure;
   const first = r?.pending?.tool === 'propose_change' ? r.pending.args : undefined;
   const base = first === undefined ? undefined : await savedLiving(deps, ctx);
+  // The aim the host asked to be replaced, named in remove, is the replace, never a loss.
+  const replaced = r?.replace !== undefined && args.remove.includes(r.replace) ? `aims:${r.replace}` : undefined;
   const lost = first === undefined || base === undefined || 'status' in base ? []
-    : personContentLost(kernelFor(base, ctx, first.model).model, kernelFor(base, ctx, args.model).model);
+    : personContentLost(kernelFor(base, ctx, first.model).model, kernelFor(base, ctx, args.model).model).filter((l) => l !== replaced);
   // The refused change is used as it is: no repair is left for it.
   if (lost.length > 0) r!.repairs = REPAIRS;
   const outcome = await proposeOnce(deps, ctx, first !== undefined && lost.length > 0 ? first : args);
   // Only a card settles a pending change: another tool's result never discards it (Codex r1 on #3675).
-  if (outcome.status === 'ok' && r?.pending?.tool === 'propose_change') r.pending = undefined;
+  if (outcome.status === 'ok' && r?.pending?.tool === 'propose_change') { r.pending = undefined; r.replace = undefined; }
   // A spread drops the trace (a symbol key): it is carried over, so the log keeps the kept call's authorship (Codex r1 on #3694).
   return outcome.status === 'ok' && lost.length > 0
     ? withTrace({ ...outcome, data: { ...outcome.data, restructure: { kept: 'refused_call', lost, note: KEPT_AS_REFUSED } } }, outcome[OUTCOME_TRACE] ?? {})
@@ -94,6 +96,22 @@ function kernelFor(base: Exclude<Awaited<ReturnType<typeof savedLiving>>, ToolOu
     ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])], base.model, brief[0] ?? null);
   return { ...read, model: withCalendarReadings(read.model, base.model, today) };
 }
+
+/** Whether an aim's target states a figure (Olumi's suggested measure never carries one). */
+const statesFigure = (a: LivingModelT['aims'][number]): boolean => a.target !== null && a.target.source !== 'olumi'
+  && (a.target.value !== null || a.target.low !== null || a.target.high !== null);
+
+/** The goal aim a Run would test, when it states no figure while a current aim of the person's or a party's beside it does. */
+function besideNoGoal(m: LivingModelT, goal: string | undefined): LivingModelT['aims'][number] | undefined {
+  const aim = m.aims.find((a) => a.id === goal);
+  return aim !== undefined && !statesFigure(aim) && m.aims.some((a) => a.id !== goal && a.status === 'current'
+    && (a.source === 'user' || a.source === 'party') && statesFigure(a)) ? aim : undefined;
+}
+
+/** What the AI is told when its change leaves the person's stated goal beside an aim that is no goal (never shown to the person). */
+export const REPLACE_AIM = 'No card yet. A Run would test the aim in aim, which states no figure, while the person\'s own goal with a figure '
+  + 'sits beside it. If that aim is not a goal they hold (a task, an option or Olumi\'s reading of their words), replace it: name its id '
+  + 'in remove and call propose_change once more. If it is their own aim, send the call unchanged; its card is made.';
 
 async function proposeOnce(deps: Deps, ctx: Ctx, args: LivingChangeArgs): Promise<ToolOutcome> {
   const base = await savedLiving(deps, ctx);
@@ -142,10 +160,23 @@ async function proposeOnce(deps: Deps, ctx: Ctx, args: LivingChangeArgs): Promis
   const goal = changeGoal(base.saved.graph, next);
   const mapped = mapLivingModel(next, goal);
   if (!mapped.graph.nodes.some((n) => n.kind !== 'decision')) return refused('model_empty');
+  const baseMapped = mapLivingModel(base.model, savedGoal(base.saved.graph));
+  // ⭐ STATED GOALS REPLACE AN AIM THAT IS NO GOAL (DL 93d79c3e 01:56Z; marketing set b r1 on 05745055: the person's two goals were
+  // added beside the drafted "plan the campaign…", which states no figure and stayed the goal, so a Run withheld their chance).
+  // Whether that aim is a task or their own is the AI's to judge from their words, so the host asks once, for what this change
+  // brings; sent unchanged, the card is made and nothing is dropped.
+  const beside = besideNoGoal(next, goalIdOf(mapped.graph));
+  const r = deps.restructure;
+  if (beside !== undefined && besideNoGoal(base.model, goalIdOf(baseMapped.graph)) === undefined && r !== undefined && r.repairs < REPAIRS
+    && !(r.pending !== undefined && stable(r.pending.args.model) === stable(args.model))) {
+    r.repairs += 1;
+    r.pending = { tool: 'propose_change', args };
+    r.replace = beside.id;
+    return refused('goal_beside_no_goal', REPLACE_AIM, { aim: { id: beside.id, text: beside.text } });
+  }
   // ⭐ THE READINESS SELF-CHECK (`goal-path.ts`): a change that ADDS a blocker to what a Run would get is said back, before its card,
   // while a fix and a repair are left; what the saved model already held is not this change's to answer for.
-  const { all: blockers, added: introduced } = blockersOf(next, selfCheck(next, mapped),
-    selfCheck(base.model, mapLivingModel(base.model, savedGoal(base.saved.graph))));
+  const { all: blockers, added: introduced } = blockersOf(next, selfCheck(next, mapped), selfCheck(base.model, baseMapped));
   if (repairOf(deps.restructure, introduced, args.model)) {
     deps.restructure!.repairs += 1;
     deps.restructure!.pending = { tool: 'propose_change', args };
