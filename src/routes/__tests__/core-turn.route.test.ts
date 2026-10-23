@@ -683,6 +683,76 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     expect(j.receipts).toEqual([expect.objectContaining({ version_id: 'v_1', authorised_by: 'olumi' })]);
   });
 
+  it('⭐ STEP 0 (arch plan, DL 23 Oct): ONE summary log line per turn, keyed by scenario and turn, by id and code only', async () => {
+    persisted = null;
+    // The route's own logger instance (after resetModules).
+    const info = vi.spyOn((await import('../../utils/telemetry.js')).log, 'info');
+    const model = { ...structuredClone(KNOWN_ANSWER), conditions: [{ text: 'only once the board signs off', applies_to: ['f_g'], role: 'prerequisite' as const,
+      source: 'olumi' as const, party: null, quote: null }] };
+    // The person's option, quoted in words nobody said: the kernel relabels it (an authorship decision).
+    model.options[0] = { ...model.options[0]!, quote: 'or we wait a year' };
+    outputs = [[{ type: 'function_call', name: 'build_model_from_brief', call_id: 'draft', args: { brief: BRIEF, model } }],
+      [{ type: 'message', text: 'I will look at that condition again.' }]];
+    const turnId = randomUUID();
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/core-turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: turnId, message: BRIEF, source: 'composer' } });
+    expect(r.statusCode, r.body).toBe(200);
+    const summaries = () => info.mock.calls.flatMap(([o]) => ((o as Json)?.event === 'core_turn.summary' ? [o as Json] : []));
+    const lines = summaries();
+    expect(lines).toHaveLength(1);
+    // A resend of the same turn replays it: no AI call, so no second line (Codex r1 on #3691: one per turn that reached the AI).
+    expect((await app.inject({ method: 'POST', url: '/agent/v1/core-turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: turnId, message: BRIEF, source: 'composer' } })).statusCode).toBe(200);
+    expect(summaries()).toHaveLength(1);
+    info.mockRestore();
+    const line = lines[0]!;
+    expect(line).toMatchObject({ scenario_id: SCENARIO, turn_id: turnId, stopped_reason: 'answered' });
+    expect(line.provider_calls.length).toBeGreaterThan(0);
+    for (const c of line.provider_calls) expect(c).toMatchObject({ model: 'gpt-scripted', input_tokens: 10, output_tokens: 5, ms: expect.any(Number) });
+    expect(line.tool_calls.map((c: Json) => [c.name, c.outcome, c.refusal ?? null, c.run_ready ?? null]))
+      .toEqual([['build_model_from_brief', 'refused', 'not_run_ready', null], ['build_model_from_brief', 'ok', null, false]]);
+    expect(line.tool_calls[0].blockers).toEqual(line.tool_calls[1].blockers);
+    expect(line.tool_calls[0].blockers).toContainEqual(expect.objectContaining({ items: ['condition'] }));
+    expect(line.tool_calls[1].relabelled).toEqual([{ id: 'hold', was: 'user' }]);
+    // Ids and codes only: no brief, condition, quote or reply words.
+    const text = JSON.stringify(line);
+    for (const words of ['board signs off', 'wait a year', 'look at that condition', 'units']) expect(text).not.toContain(words);
+  });
+
+  it('Codex r1 on #3691: a failed turn writes its ONE summary line, with the calls made before it failed and no error words', async () => {
+    persisted = null;
+    const info = vi.spyOn((await import('../../utils/telemetry.js')).log, 'info');
+    const model = { ...structuredClone(KNOWN_ANSWER), conditions: [{ text: 'only once the board signs off', applies_to: ['f_g'], role: 'prerequisite' as const,
+      source: 'olumi' as const, party: null, quote: null }] };
+    outputs = [[{ type: 'function_call', name: 'build_model_from_brief', call_id: 'draft', args: { brief: BRIEF, model } }], [{ type: 'refuse' }]];
+    const turnId = randomUUID();
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/core-turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: turnId, message: BRIEF, source: 'composer' } });
+    const lines = info.mock.calls.flatMap(([o]) => ((o as Json)?.event === 'core_turn.summary' ? [o as Json] : []));
+    info.mockRestore();
+    expect(r.statusCode).not.toBe(200);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ scenario_id: SCENARIO, turn_id: turnId, failed: 'turn_failed' });
+    expect(lines[0]!.provider_calls.length).toBeGreaterThan(0);
+    expect(lines[0]!.tool_calls.map((c: Json) => [c.name, c.outcome, c.refusal ?? null]))
+      .toEqual([['build_model_from_brief', 'refused', 'not_run_ready'], ['build_model_from_brief', 'ok', null]]);
+    expect(lines[0]).not.toHaveProperty('err');
+  });
+
+  it('Codex r2 on #3691: a withheld tool\'s refusal the SDK records itself is in a failed turn\'s line; a turn that reached no AI writes none', async () => {
+    const telemetry = (await import('../../utils/telemetry.js')).log;
+    const info = vi.spyOn(telemetry, 'info');
+    const summaries = () => info.mock.calls.flatMap(([o]) => ((o as Json)?.event === 'core_turn.summary' ? [o as Json] : []));
+    outputs = [[{ type: 'function_call', name: 'offer_public_research', call_id: 'withheld', args: { query: 'synthetic query' } }], [{ type: 'refuse' }]];
+    const failed = await typed('Look this up for me.');
+    expect(failed.statusCode).not.toBe(200);
+    expect(summaries().map((l) => [l.failed, l.tool_calls.map((c: Json) => [c.name, c.outcome])]))
+      .toEqual([['turn_failed', [['offer_public_research', 'refused']]]]);
+    // The conversation cannot be read: refused before any AI call, so no line.
+    store.readOpenAiConversationId.mockRejectedValueOnce(new Error('store down'));
+    const unread = await typed('Anything new?');
+    expect(unread.statusCode).toBe(503);
+    expect(summaries()).toHaveLength(1);
+    info.mockRestore();
+  });
+
   it('Codex r1 on #3675: a provider error after the refusal still leaves the draft saved, as base would; the error is the one reported', async () => {
     persisted = null;
     const model = { ...structuredClone(KNOWN_ANSWER), conditions: [{ text: 'only once the board signs off', applies_to: ['f_g'], role: 'prerequisite' as const,

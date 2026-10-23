@@ -24,7 +24,7 @@ import { getRuntimeEnv } from '../config/env-resolver.js';
 import { OPENAI_ONLY, providerCallsMade, recordedProviderCalls, runWithProviderPolicy } from '../adapters/llm/provider-policy.js';
 import { requestWasTyped } from '../cee/provenance/provenance-of.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
-import { acquireCoreTurnSlot, CoreDeliveryUnknownError, CoreStateUnavailableError, runCoreTurn } from '../orchestrator-v5/agent-lane/core/sdk-turn.js';
+import { acquireCoreTurnSlot, CoreDeliveryUnknownError, CoreStateUnavailableError, runCoreTurn, type CoreTurnCalls } from '../orchestrator-v5/agent-lane/core/sdk-turn.js';
 import { coreBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { AI_CORE_MODE, laneModeFor, type AgentLaneMode, type AgentToolContext } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import type { InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
@@ -54,7 +54,7 @@ import { isRevisionConflict, ModelReadFailedError, promoteRevisionConflictRespon
 import { MODEL_WRITE_OWNERSHIP_REFUSAL_BODY, ModelWriteOwnershipRefused, readSuccessfulDoorEntries, readUnsavableEffects, recordReleasedTurnClaim } from '../orchestrator-v5/ownership/door-ownership.js';
 import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
 import { CORE_DRAFTER_RULES } from '../orchestrator-v5/path-b/drafting-guidance.js';
-import { readCanonicalContext } from '../orchestrator-v5/path-b/tools/index.js';
+import { readCanonicalContext, type TurnCheck } from '../orchestrator-v5/path-b/tools/index.js';
 import { APPLY_CHANGE, isChangeProposal } from '../orchestrator-v5/path-b/tools/change-tools.js';
 import { NOTE_ON_ITEM } from '../orchestrator-v5/path-b/tools/note-on-item.js';
 import type { Restructure } from '../orchestrator-v5/path-b/tools/goal-path.js';
@@ -191,6 +191,26 @@ function receiptsOf(result: Pick<AgentTurnResult, 'tool_calls' | 'tool_results'>
     for (const r of collectTurnReceipts([result.tool_results[i], ...own.map((model_version) => ({ model_version }))])) byVersion.set(r.version_id, { ...r, authorised_by: by });
   });
   return [...byVersion.values()];
+}
+
+/** Each call's name, outcome and typed refusal reason, as the wire and the turn log name them. */
+const toolCallsOf = (result: Pick<AgentTurnResult, 'tool_calls'>) => result.tool_calls.map((c) => ({ name: c.name,
+  outcome: c.outcome ?? (c.ok ? 'ok' : 'refused'), ...(typeof c.refusal === 'string' ? { refusal: c.refusal } : {}) }));
+
+/**
+ * ⭐ ONE LOG LINE PER TURN (arch plan Step 0, DL 23 Oct): each provider call (model, ms, tokens) and each tool call (outcome,
+ * refusal code, the self-check's verdict and `run_ready`, the authorship decisions), by id and code only, never content.
+ */
+function turnLog(result: AgentTurnResult | undefined, seen: Pick<AgentTurnResult, 'tool_calls' | 'tool_results'>): Record<string, unknown> {
+  // A failed turn has no result: its calls are the ones the route saw recorded before it failed.
+  const calls = result ?? seen;
+  return {
+    provider_calls: recordedProviderCalls().map((c) => ({ model: c.returned_model ?? c.model, purpose: c.purpose,
+      outcome: c.attempt?.outcome ?? c.outcome, ms: c.duration_ms, input_tokens: c.usage?.input_tokens,
+      output_tokens: c.usage?.output_tokens, cached_input_tokens: c.usage?.cached_input_tokens })),
+    ...(result === undefined ? {} : { stopped_reason: result.stopped_reason, timing: result.timing }),
+    tool_calls: toolCallsOf(calls).map((c, i) => ({ ...c, ...(calls.tool_results[i] as { check?: TurnCheck } | undefined)?.check })),
+  };
 }
 
 /** note_on_item's note, only while the saved model is still the one it was read on (its identity.v1 basis). */
@@ -445,6 +465,10 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
 
     // ── ONE TURN AT A TIME PER SCENARIO, held until the answer is persisted and read back. ───────────────────────────────
     const slot = await acquireCoreTurnSlot(scenarioId);
+    // The turn's summary line, once, at its end (`turnLog`): every turn that reached the AI, whichever way it returns. The SDK
+    // turn records its calls here, so a turn that throws still has them.
+    let summary: { readonly result?: AgentTurnResult; readonly failed?: string } | undefined;
+    const seen: CoreTurnCalls = { tool_calls: [], tool_results: [] };
     try {
       // The model as this turn starts from: read AFTER the slot, so a turn that waited sees what the turn before it saved.
       const start = await readingDispatch(graphPath, { ...FRESH_READ }).catch(() => undefined);
@@ -574,6 +598,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
           result = await runCoreTurn({
             // One budget for every call (DL 22 Oct, M4): a press at the typed turn's effort reads the typed turns' cached prefix.
             ctx: coreCtx, message, budget: coreBudget(), userId,
+            calls: seen,
             tools: coreTurnTools({ ctx: coreCtx, mode: MODE, scenario: 'core', requestId: String(req.id), message,
               dispatch: capDispatch, proposals, deadlineAt: constructionDeadlineAt, capabilities,
               ...(challenge !== null ? { noteOnlyOn: challenge.grounded.element_ids[0] } : {}),
@@ -602,6 +627,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
           log.error({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'core-turn: the turn failed');
           // A core call whose provider delivery is unknown keeps its claim: Olumi wrote nothing, but the call may still be running.
           const deliveryUnknown = err instanceof CoreDeliveryUnknownError;
+          summary = { failed: deliveryUnknown ? 'delivery_unknown' : 'turn_failed' };
           const released = deliveryUnknown ? false : await releaseUnwrittenTurnClaim();
           const lost: RecordedOutcome = verifiedSave ? 'reply_lost_saved' : deliveryUnknown && writesDispatched === 0 ? 'reply_lost_may_finish' : 'reply_lost';
           // A possible save keeps its claim: record the outcome as the answer, so a resend replays it and reads current state.
@@ -636,6 +662,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
           return fail(502, { code: String(failure.error), message: RECORDED[lost].error.message, retry_safe: released, nothing_saved: nothingSaved }, durable);
         }
       }
+      summary = { result };
 
       // ── THE ANSWER: the saved state as it now stands, the held cards, and the row a replay reads. ──────────────────────
       const after = savedScenarioOf(await readingDispatch(graphPath, { ...FRESH_READ }));
@@ -717,13 +744,17 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
         paused: paused !== undefined ? { proposal_id: paused.proposal_id } : null,
         error: noReply ? RECORDED.reply_empty.error : null,
         // A refused or unavailable call names its typed reason (DL 22 Oct: which of Class 3's offers fired was not on the wire).
-        agent: { mode: MODE, stopped_reason: result.stopped_reason, tool_calls: result.tool_calls.map((c) => ({ name: c.name,
-          outcome: (c as { outcome?: unknown }).outcome ?? (c.ok ? 'ok' : 'refused'),
-          ...(typeof (c as { refusal?: unknown }).refusal === 'string' ? { refusal: (c as { refusal: string }).refusal } : {}) })),
-          ...(result.sdk !== undefined ? { sdk: result.sdk } : {}) },
+        agent: { mode: MODE, stopped_reason: result.stopped_reason, tool_calls: toolCallsOf(result), ...(result.sdk !== undefined ? { sdk: result.sdk } : {}) },
         providerCalls: recordedProviderCalls(),
       }));
     } finally {
+      // Only a turn that reached the AI: a refusal before any call (the declined card, an unreadable conversation) logs none.
+      if (summary !== undefined && recordedProviderCalls().some((c) => c.outcome === 'allowed')) {
+        try {
+          log.info({ event: 'core_turn.summary', scenario_id: scenarioId, turn_id: turnId, request_id: String(req.id),
+            ...(summary.failed !== undefined ? { failed: summary.failed } : {}), ...turnLog(summary.result, seen) }, 'core-turn: summary');
+        } catch { /* a log line never decides the reply */ }
+      }
       slot.release();
     }
   };

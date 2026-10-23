@@ -23,7 +23,8 @@ import { BUILD_MODEL_FROM_BRIEF, BuildModelParams, buildModel, type DraftDeps } 
 import { RUN_ANALYSIS, RunAnalysisParams, recordedRun, runAnalysis, type RunDeps } from './run-tool.js';
 import { APPLY_CHANGE, ApplyChangeParams, PROPOSE_CHANGE, ProposeChangeParams, applyChange, proposeChange, type ChangeDeps } from './change-tools.js';
 import { LivingChangeParams, applyLivingChange, isLivingProposal, proposeLivingChange } from './living-change.js';
-import { REPAIRS } from './goal-path.js';
+import { REPAIRS, type Blocker } from './goal-path.js';
+import type { Relabelled } from '../living-model/kernel.js';
 import { NOTE_MAX, NOTE_ON_ITEM, NoteOnItemParams, noteOnItem } from './note-on-item.js';
 import { STRESS_TEST, StressTestParams, stressTest, type StressDeps } from './stress-tool.js';
 import { OFFER_PUBLIC_RESEARCH, OFFER_PUBLIC_RESEARCH_DESCRIPTION, OfferResearchParams, offerResearch, type ResearchDeps } from './research-tool.js';
@@ -81,6 +82,30 @@ export interface ToolCallResult {
   readonly note_basis?: string;
   /** `offer_public_research`'s accepted query: the route ships the one control that can send it (`researchChipFor`). */
   readonly offered_query?: string;
+  /** The self-check's verdict and the authorship decisions the call reports, by code and id only (the route's turn log). */
+  readonly check?: TurnCheck;
+}
+export interface TurnCheck {
+  readonly run_ready?: boolean;
+  readonly blockers?: readonly { readonly code: string; readonly verdict?: 'fix' | 'ask' | 'said'; readonly items?: readonly string[] }[];
+  readonly relabelled?: readonly Relabelled[];
+}
+// A condition is keyed by its words (`condition:<text>`): a log names only that it was one.
+const idOnly = (id: string): string => (id.startsWith('condition:') ? 'condition' : id);
+const listOf = (v: unknown): Record<string, unknown>[] =>
+  (Array.isArray(v) ? v.filter((x): x is Record<string, unknown> => x !== null && typeof x === 'object') : []);
+/** Any tool's `blockers` (a Run's readiness has its own shape and words): only a code, and the self-check's verdict and ids. */
+function checkOf(outcome: ToolOutcome): TurnCheck | undefined {
+  const data = 'data' in outcome ? outcome.data : undefined;
+  if (data === undefined) return undefined;
+  const blockers = listOf(data.blockers).filter((b) => typeof b.code === 'string').map((b) => ({ code: b.code as string,
+    ...(b.fix !== undefined ? { verdict: 'fix' as const } : b.ask === true ? { verdict: 'ask' as const } : b.said === true ? { verdict: 'said' as const } : {}),
+    ...(Array.isArray(b.items) ? { items: (b.items as Blocker['items']).filter((i) => typeof i === 'string').map(idOnly) } : {}) }));
+  const relabelled = listOf((data.draft as { relabelled?: unknown } | undefined)?.relabelled ?? data.relabelled)
+    .filter((r) => typeof r.id === 'string' && typeof r.was === 'string').map((r) => ({ id: idOnly(r.id as string), was: r.was as Relabelled['was'] }));
+  const check: TurnCheck = { ...(typeof data.run_ready === 'boolean' ? { run_ready: data.run_ready } : {}),
+    ...(blockers.length > 0 ? { blockers } : {}), ...(relabelled.length > 0 ? { relabelled } : {}) };
+  return Object.keys(check).length > 0 ? check : undefined;
 }
 export type OnToolCall = (row: TraceRow, result: ToolCallResult) => void;
 
@@ -100,6 +125,7 @@ export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLa
     // The draft reports its commit as `model_version` (`draft-tool.ts`), a change as `receipt`: either is this call's own receipt.
     const receipt = outcome.status === 'ok' ? outcome.data.receipt ?? outcome.data.model_version : undefined;
     try {
+      const check = checkOf(outcome);
       onCall(row, { args, ok: row.ok, mutated: row.mutated === true, ...(row.ran === true ? { ran: true as const } : {}),
         ...(row.ran === true && outcome.status === 'ok' && typeof outcome.data.run_id === 'string' ? { run_id: outcome.data.run_id } : {}),
         ...(pid === undefined ? {} : { proposal_id: pid }),
@@ -107,7 +133,8 @@ export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLa
         ...(receipt !== null && typeof receipt === 'object' ? { receipts: [receipt as Record<string, unknown>] } : {}),
         ...(outcome.status === 'ok' && outcome.data.ui_directive !== null && typeof outcome.data.ui_directive === 'object'
           ? { ui_directive: outcome.data.ui_directive as Record<string, unknown>, note_basis: String(outcome.data.graph_identity) } : {}),
-        ...(outcome.status === 'ok' && typeof outcome.data.offered_query === 'string' ? { offered_query: outcome.data.offered_query } : {}) });
+        ...(outcome.status === 'ok' && typeof outcome.data.offered_query === 'string' ? { offered_query: outcome.data.offered_query } : {}),
+        ...(check === undefined ? {} : { check }) });
     } catch { /* a recorder never decides the outcome */ }
     return JSON.stringify(outcome);
   };
