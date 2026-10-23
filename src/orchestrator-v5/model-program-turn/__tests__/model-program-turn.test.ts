@@ -505,7 +505,9 @@ describe('the model-program turn on the real core route', () => {
       target: { value: 380, low: null, high: null, range_kind: null }, window: { periods: 4, start: 0 }, quote: words };
     const propose = (o: Json) => proposeProgramChange(deps, ctx, ProgramChangeParams.parse({ public_label: 'Measure the aim', basis: 'their answer', ops: [o] })) as Promise<Json>;
     // Negatives first: a target or a deadline their words do not state is refused (never inferred), and nothing is proposed.
-    for (const wrong of [{ ...op, target: { value: 400, low: null, high: null, range_kind: null } }, { ...op, window: { periods: 6, start: 0 } }]) {
+    // Codex r2 #3709: each figure in its own role: "within 4 weeks" is the deadline, never a target of 4; 380 loaves is never a deadline.
+    for (const wrong of [{ ...op, target: { value: 400, low: null, high: null, range_kind: null } }, { ...op, window: { periods: 6, start: 0 } },
+      { ...op, target: { value: 4, low: null, high: null, range_kind: null } }, { ...op, window: { periods: 380, start: 0 } }]) {
       const r = await propose(wrong);
       expect(r.status, JSON.stringify(r)).not.toBe('ok');
       expect(JSON.stringify(r)).toMatch(/do not state that (target|deadline)/);
@@ -535,6 +537,19 @@ describe('the model-program turn on the real core route', () => {
     const namedModel = (named as { model: CanonicalModelT }).model;
     expect(namedModel.quantities.find((x) => x.id === 'repeat_customers')).toMatchObject({ status: 'unknown', author: 'person', quote: 'at least 50 repeat customers a week' });
     expect(compile(namedModel, { sourceText: `${BRIEF}\nat least 50 repeat customers a week` }).perGoal[0]).toMatchObject({ status: 'withheld' });
+
+    // Codex r2 #3709: a figure is theirs only as written for that quantity. A £ amount is bound by its currency prefix; a
+    // figure in another unit (60 kg) or another quantity's (4 weeks, 2 months on a weekly model) is refused, never borrowed.
+    const define = (quote: string, target: number | null, window: number | null, quantity = 'sales') => defineGoalMeasure(m, { goal_id: 'more_loaves', quantity, cmp: quantity === 'spend' ? '<=' : '>=', frame: null,
+      target: target === null ? null : { value: target, low: null, high: null, range_kind: null }, window: window === null ? null : { periods: window, start: 0 }, quote });
+    const money = 'Success means spending at most £2,500 within 4 weeks.';
+    expect(define(money, 2500, 4, 'spend')).toMatchObject({ ok: true });
+    expect(((define(money, 2500, 4, 'spend') as { model: CanonicalModelT }).model.quantities.find((x) => x.id === 'more_loaves_target'))).toMatchObject({ value: 2500, unit: 'GBP', author: 'person' });
+    expect(define(money, 4, 4, 'spend')).toMatchObject({ ok: false, reason: expect.stringMatching(/do not state that target/) });
+    const mixed = 'At least 380 loaves a week, about 60 kg of bread, within 4 weeks.';
+    expect(define(mixed, 380, 4)).toMatchObject({ ok: true });
+    expect(define(mixed, 60, 4)).toMatchObject({ ok: false, reason: expect.stringMatching(/do not state that target/) });
+    expect(define('At least 380 loaves a week within 2 months.', 380, 2)).toMatchObject({ ok: false, reason: expect.stringMatching(/do not state that deadline in weeks/) });
   });
 
   it('display fit (Lenses 23 Oct): every link its own id and sign; the goal target, each figure\'s source and every editable id on the fields the canvas reads', () => {

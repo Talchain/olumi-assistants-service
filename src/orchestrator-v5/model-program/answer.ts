@@ -6,12 +6,26 @@
  */
 import { APPROXIMATE_FIGURE, type CanonicalModelT } from './canonical.js';
 import { inlineQuantityId } from './compile.js';
+import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
+import { unitWrittenAfter } from '../agent-lane/user-statements.js';
 import { parseUnit } from './units.js';
 
 /** Words that give a figure as approximate ("about £2,000"). */
 const APPROXIMATE_WORDS = /\b(about|around|roughly|approximately|approx|circa|nearly|almost)\b|~|≈/i;
 /** The figures written in their words (thousands separators read; a sign is not read, so "5-8" is 5 and 8). */
 const figuresIn = (words: string): number[] => (words.replace(/(\d),(?=\d{3}\b)/g, '$1').match(/\d+(?:\.\d+)?/g) ?? []).map(Number);
+/**
+ * Whether their words write `x` AS a figure in `unit`, or of the quantity named `label` (Codex r2 #3709, the rule of
+ * feedback_range_end_needs_unit): the unit or the name straight after it, by the verifier's own matcher (`unitWrittenAfter`: whole word, plural, "10%"), with the plural of a unit
+ * noun ending in f or y ("loaf" → "loaves"); or, for money, the same currency on that amount ("£2,500"). A figure of another
+ * quantity or unit in the same words ("within 4 weeks", "60 kg") is never this one.
+ */
+const writesAs = (words: string, x: number, unit: string, label?: string): boolean => {
+  const currency = readCurrencyUnitWithQualifiers(unit);
+  if (currency.kind === 'currency') return findStatedAmounts(words).some((a) => a.kind === 'currency' && a.currencyCode === currency.currencyCode && Math.abs(a.magnitude) === Math.abs(x));
+  const noun = unit.split('/')[0]!.trim();
+  return [noun, noun.replace(/fe?$/u, 'ves'), noun.replace(/([^aeiou])y$/u, '$1ies'), ...(label !== undefined ? [label] : [])].some((u) => unitWrittenAfter(words, x, u));
+};
 /** Whether their words state both ends of a range: a range they did not state is never theirs. */
 const statesEnds = (words: string, low: number, high: number): boolean => {
   const f = figuresIn(words);
@@ -100,8 +114,6 @@ export function defineGoalMeasure(model: CanonicalModelT, a: GoalMeasureAnswer):
   if (g === undefined) return { ok: false, reason: `"${a.goal_id}" is not a goal in the model.` };
   if (g.measure !== null) return { ok: false, reason: `"${g.label}" already has a measure; change its target instead.` };
   if (a.quote.trim() === '') return { ok: false, reason: 'A measure needs the person\'s own words.' };
-  const said = figuresIn(a.quote);
-  const stated = (x: number) => said.some((y) => Math.abs(y - Math.abs(x)) < 1e-9);
   const taken = new Set([...model.quantities.map((q) => q.id), ...model.goals.map((x) => x.id), ...model.limits.map((l) => l.id), ...model.options.map((o) => o.id)]);
   const fresh = (base: string) => { let id = base; for (let n = 2; taken.has(id); n += 1) id = `${base}_${n}`; taken.add(id); return id; };
   const theirs = (id: string, label: string, unit: string, f: Partial<Quantity>): Quantity => ({ id, label, unit, kind: 'fact', value: null, low: null, high: null,
@@ -124,6 +136,8 @@ export function defineGoalMeasure(model: CanonicalModelT, a: GoalMeasureAnswer):
   const frame = a.frame ?? 'level';
   const targetId = fresh(`${g.id}_target`);
   const targetUnit = frame === 'change_rel' ? '%' : measured.unit;
+  // Each figure is theirs only as written for its own quantity: the target in the target's unit, the deadline in periods.
+  const stated = (x: number) => writesAs(a.quote, x, targetUnit, measured.label);
   const targetLabel = `Target for ${measured.label}`;
   const t = a.target;
   if (t === null) {
@@ -139,7 +153,7 @@ export function defineGoalMeasure(model: CanonicalModelT, a: GoalMeasureAnswer):
 
   let window: NonNullable<CanonicalModelT['goals'][number]['measure']>['window'] = null;
   if (a.window !== null) {
-    if (!stated(a.window.periods)) return { ok: false, reason: 'Their words do not state that deadline; leave the window out and "By when?" is asked.' };
+    if (!writesAs(a.quote, a.window.periods, model.period)) return { ok: false, reason: `Their words do not state that deadline in ${model.period}s; leave the window out and "By when?" is asked.` };
     const periods = fresh(`${g.id}_window`);
     added.push(theirs(periods, `Time to meet ${g.label}`, model.period, { value: a.window.periods }));
     window = { origin_event: null, origin_offset: null, start: a.window.start, periods };
