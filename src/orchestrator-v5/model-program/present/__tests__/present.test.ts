@@ -22,8 +22,11 @@ const goal = (id: string, quantity: string, cmp: Goal['cmp'], target: string): G
 const option = (id: string, label: string, sets: Option['sets'] = []): Option => ({ id, label, sets });
 const model = (quantities: Quantity[], goals: Goal[], options: Option[], limits: Limit[] = [], withheld: Withheld[] = []): ExecutableModel =>
   ({ periods: 1, period_unit: 'month', quantities, goals, limits, options, risks: [], withheld });
-const person = (label: string, relation = false): PresentQuantity => ({ label, author: 'person', ...(relation ? { relation_author: 'person' as const } : {}) });
+const person = (label: string, relation = false): PresentQuantity => ({ label, author: 'person', confirmed: true, ...(relation ? { relation_author: 'person' as const } : {}) });
 const cell = (v: Rec, id: string): Rec => v.options.find((o: Rec) => o.option_id === id).cell;
+/** R8 (default deny): the person's own fixed figures and identities, said confirmed; an effect, an Olumi or unrecorded figure has no meta. */
+const confirmedFigures = (m: ExecutableModel): Record<string, PresentQuantity> => Object.fromEntries(m.quantities
+  .filter((x) => (x.dist?.kind === 'fixed' && x.dist.author === 'person') || x.equation?.form === 'definition').map((x) => [x.id, person(x.id)]));
 
 // ── The MRR model: MRR = price × customers; raising the price to £59 loses 1.8 customers per £1 (row 3 of the numerical check).
 const MRR_QUANTITIES = (perPound: Quantity, newPrice: Quantity = fixed('price_59', 59, '£')): Quantity[] => [
@@ -212,14 +215,16 @@ describe('present: the canonical analysis view from a simulated model', () => {
       def('month_total', 'sum', ['spend', 'zero', ...extra], '£'), fixed('months', 12, 'month/year', 'state', 'structure'),
       def('year_total', 'product', ['month_total', 'months'], '£'), fixed('cap', 2400, '£'), ...more],
     [{ ...goal('g', 'year_total', '<=', 'cap'), label: 'Stay within the yearly budget' }], [option('hold', 'Hold')]);
-    const plain = present(bakery(), {});
+    const plain = present(bakery(), confirmedFigures(bakery()));
     expect(cell(plain, 'hold').display).toBe('100%');
     // (£3.50 × 40 + 0) × 12 = £1,680 in every draw, at most £2,400.
     expect(cell(plain, 'hold').face.endsWith(', in this model, on your figures: in every simulated draw ‘year_total’ is £1,680 at 1 month from now, at most £2,400.')).toBe(true);
     // An effect whose size is Olumi's figure, and whose relation is Olumi's: both are listed, and nothing else.
-    const withEffect = (relation_author?: 'person' | 'olumi') => present(bakery([fixed('base', 10, '£'), fixed('per_degree', -2, '£', 'state', 'olumi'),
-      fixed('temperature', 1, 'degrees'), effect('weather', 'base', [{ coefficient: 'per_degree', driver: 'temperature' }], '£')], ['weather']),
-    relation_author === undefined ? {} : { weather: { label: 'weather', author: 'person', relation_author } });
+    const withEffect = (relation_author?: 'person' | 'olumi') => {
+      const m = bakery([fixed('base', 10, '£'), fixed('per_degree', -2, '£', 'state', 'olumi'),
+        fixed('temperature', 1, 'degrees'), effect('weather', 'base', [{ coefficient: 'per_degree', driver: 'temperature' }], '£')], ['weather']);
+      return present(m, { ...confirmedFigures(m), ...(relation_author === undefined ? {} : { weather: { label: 'weather', author: 'person', relation_author, confirmed: relation_author === 'person' } }) });
+    };
     // Weather = 10 − 2 × 1 = £8, so (£140 + 0 + £8) × 12 = £1,776 in every draw: the basis, then why it is exact.
     const WHY = ': in every simulated draw ‘year_total’ is £1,776 at 1 month from now, at most £2,400.';
     const basis = (v: Rec): string => { const after = cell(v, 'hold').face.split(', in this model, ')[1] as string; expect(after.endsWith(WHY)).toBe(true); return after.slice(0, -WHY.length); };
@@ -239,13 +244,13 @@ describe('present: the canonical analysis view from a simulated model', () => {
     const m = (coefficient: Quantity) => model([fixed('base', 10, '£'), coefficient, fixed('temperature', 1, 'degrees'),
       effect('weather', 'base', [{ coefficient: 'per_degree', driver: 'temperature' }], '£'), fixed('floor', 5, '£')],
     [{ ...goal('g', 'weather', '>=', 'floor'), label: 'Weather takings' }], [option('hold', 'Hold')]);
-    const v = present(m(unrecorded(fixed('per_degree', 2, '£'))), {});
+    const v = present(m(unrecorded(fixed('per_degree', 2, '£'))), confirmedFigures(m(unrecorded(fixed('per_degree', 2, '£')))));
     expect(cell(v, 'hold').display).toBe('100%');
     expect(cell(v, 'hold').face).toBe('‘Hold’: 100% chance of ‘weather’ being at least £5 at 1 month from now, in this model, '
       + 'if ‘per_degree’ is £2 (author not recorded) and ‘weather’ follows a relationship (author not recorded): in every simulated draw ‘weather’ is £12 at 1 month from now, at least £5.');
     expect(JSON.stringify(v)).not.toContain('on your figures');
     // Contrast: the same model with both authors recorded as the person's reads "on your figures".
-    const own = present(m(fixed('per_degree', 2, '£')), { weather: { label: 'weather', author: 'person', relation_author: 'person' } });
+    const own = present(m(fixed('per_degree', 2, '£')), { ...confirmedFigures(m(fixed('per_degree', 2, '£'))), weather: { label: 'weather', author: 'person', relation_author: 'person', confirmed: true } });
     expect(cell(own, 'hold').face.endsWith(', in this model, on your figures: in every simulated draw ‘weather’ is £12 at 1 month from now, at least £5.')).toBe(true);
   });
 
@@ -281,7 +286,7 @@ describe('present: the canonical analysis view from a simulated model', () => {
     const m = model([fixed('base', 10, '£'), fixed('per_degree', 2, '£'), fixed('temperature', 1, 'degrees'),
       effect('weather', 'base', [{ coefficient: 'per_degree', driver: 'temperature' }], '£'), fixed('floor', 5, '£')],
     [{ ...goal('g', 'weather', '>=', 'floor'), label: 'Weather takings' }], [option('hold', 'Hold')]);
-    const relation = { weather: { label: 'weather', author: 'person' as const, relation_author: 'person' as const } };
+    const relation = { ...confirmedFigures(m), weather: { label: 'weather', author: 'person' as const, relation_author: 'person' as const, confirmed: true } };
     const v = present(m, { ...relation, per_degree: { label: 'per_degree', author: 'unverified' as const } });
     expect(cell(v, 'hold').face).toBe('‘Hold’: 100% chance of ‘weather’ being at least £5 at 1 month from now, in this model, '
       + 'if ‘per_degree’ is £2 (not found in your words): in every simulated draw ‘weather’ is £12 at 1 month from now, at least £5.');

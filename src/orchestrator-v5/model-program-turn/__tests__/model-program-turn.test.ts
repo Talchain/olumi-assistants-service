@@ -1044,8 +1044,9 @@ describe('the model-program turn on the real core route', () => {
     // words that are not in what they wrote it is listed as not found, in the Run's own sentence, never "on your figures".
     const m = club();
     m.quantities = m.quantities.map((x) => (x.id === 'promo_effect' ? { ...x, status: 'known', author: 'person', low: null, high: null, range_kind: null, basis: null, quote: 'five extra joins a month' } : x));
-    // The joins relation and its term are the person's too, so every other input is theirs.
-    m.relations = m.relations.map((r) => (r.form === 'effect' ? { ...r, author: 'person', quote: '20 join each month', terms: r.terms.map((t) => ({ ...t, author: 'person', quote: 'Run a promotion' })) } : r));
+    // Both relations and the term are the person's too, so every other input is theirs.
+    m.relations = m.relations.map((r) => (r.form === 'effect' ? { ...r, author: 'person', quote: '20 join each month', terms: r.terms.map((t) => ({ ...t, author: 'person', quote: 'Run a promotion' })) }
+      : { ...r, author: 'person', quote: '20 join each month and 10 leave each month' }));
     // R8: "on your figures" needs their reading confirmed too, so the contrast is the model as accepted.
     const confirmed = JSON.parse(JSON.stringify(m).replaceAll('"approval":"proposed"', '"approval":"approved"')) as CanonicalModelT;
     const face = (sourceText: string) => ((evaluateCanonical(confirmed, { sourceText, seed: 7 }).view as Json).options as Json[]).find((o) => o.option_id === 'promotion')!.cell.face as string;
@@ -1061,23 +1062,26 @@ describe('the model-program turn on the real core route', () => {
     const faceOf = (m: CanonicalModelT, sourceText: string, option = 'promotion') =>
       ((evaluateCanonical(m, { sourceText, seed: 7 }).view as Json).options as Json[]).find((o) => o.option_id === option)!.cell.face as string;
     const approved = (m: CanonicalModelT) => JSON.parse(JSON.stringify(m).replaceAll('"approval":"proposed"', '"approval":"approved"')) as CanonicalModelT;
-    /** The club with every figure and relation the person's own (the promotion's effect given in their words). */
+    /** The club with every figure, relation and link the person's own (the promotion's effect given in their words). */
     const allTheirs = () => {
       const m = club();
       m.quantities = m.quantities.map((x) => (x.id === 'promo_effect' ? { ...x, status: 'known', author: 'person', low: null, high: null, range_kind: null, basis: null, quote: 'five extra joins a month' } : x));
-      m.relations = m.relations.map((r) => (r.form === 'effect' ? { ...r, author: 'person', quote: '20 join each month', terms: r.terms.map((t) => ({ ...t, author: 'person', quote: 'Run a promotion' })) } : r));
+      m.relations = m.relations.map((r) => (r.form === 'effect' ? { ...r, author: 'person', quote: '20 join each month', terms: r.terms.map((t) => ({ ...t, author: 'person', quote: 'Run a promotion' })) }
+        : { ...r, author: 'person', quote: '20 join each month and 10 leave each month' }));
       return m;
     };
-    const hall = { id: 'hall', text: 'The council must let us use the hall.', kind: 'prerequisite' as const, concerns: ['reach_340'], author: 'person' as const, quote: 'The council must let us use the hall', ...at };
+    /** Their prerequisite, accepted. */
+    const hall = { id: 'hall', text: 'The council must let us use the hall.', kind: 'prerequisite' as const, concerns: ['reach_340'], author: 'person' as const, quote: 'The council must let us use the hall', ...at, approval: 'approved' as const };
 
     it('a stated condition and an Olumi estimate: the basis names both, never "on your figures"', () => {
       const m = approved(club());
       m.conditions.push(hall);
       const face = faceOf(m, HALL);
-      expect(face).toContain(', in this model, if your condition ‘The council must let us use the hall’ is met, ‘promo effect’ follows Olumi’s provisional conversion of Olumi’s own estimated range, 3 member / month / promotion to 7 member / month / promotion, into a bell-shaped spread and ‘joins’ follows Olumi’s assumed relationship.');
+      // The club's members stock is Olumi's (accepted, but never theirs): Olumi's reading, named.
+      expect(face).toContain(', in this model, on Olumi’s reading of ‘members’ (not yet confirmed), if your condition ‘The council must let us use the hall’ is met, ‘promo effect’ follows Olumi’s provisional conversion of Olumi’s own estimated range, 3 member / month / promotion to 7 member / month / promotion, into a bell-shaped spread and ‘joins’ follows Olumi’s assumed relationship.');
       expect(face).not.toContain('on your figures');
       // The exact 0% names it too, before what fixes it.
-      expect(faceOf(m, HALL, 'carry_on')).toContain(', in this model, if your condition ‘The council must let us use the hall’ is met, ‘promo effect’');
+      expect(faceOf(m, HALL, 'carry_on')).toContain(', in this model, on Olumi’s reading of ‘members’ (not yet confirmed), if your condition ‘The council must let us use the hall’ is met, ‘promo effect’');
     });
 
     it('a situation-wide assumption (concerns []) is named: it bears on every goal', () => {
@@ -1113,17 +1117,27 @@ describe('the model-program turn on the real core route', () => {
       expect(faceOf(both, `${OWN} The council must let us use the hall.`)).toContain(', in this model, on Olumi’s reading of your figures (not yet confirmed), if your condition ‘The council must let us use the hall’ is met: in every simulated draw');
     });
 
-    it('Codex #3738: a relation they have not confirmed is Olumi\'s reading; a link of Olumi\'s in their relation is Olumi\'s assumed relationship', () => {
-      const rel = approved(allTheirs());
-      rel.relations = rel.relations.map((r) => (r.id === 'joins_rel' ? { ...r, approval: 'proposed' } : r));
-      const relFace = faceOf(rel, OWN);
-      expect(relFace).toContain(', in this model, on Olumi’s reading of ‘joins’ (not yet confirmed): in every simulated draw');
-      expect(relFace).not.toContain('on your figures');
-      const link = approved(allTheirs());
-      link.relations = link.relations.map((r) => (r.form === 'effect' ? { ...r, terms: r.terms.map((t) => ({ ...t, author: 'olumi', quote: null })) } : r));
-      const linkFace = faceOf(link, OWN);
-      expect(linkFace).toContain(', in this model, if ‘joins’ follows Olumi’s assumed relationship: in every simulated draw');
-      expect(linkFace).not.toContain('on your figures');
+    it('Codex #3738: their relation not yet accepted, a link of Olumi\'s in it, and their link not yet accepted are each Olumi\'s reading', () => {
+      const joins = (f: (r: CanonicalModelT['relations'][number]) => CanonicalModelT['relations'][number]) => {
+        const m = approved(allTheirs());
+        m.relations = m.relations.map((r) => (r.id === 'joins_rel' ? f(r) : r));
+        return faceOf(m, OWN);
+      };
+      const terms = (t: { author?: 'person' | 'olumi'; quote?: string | null; approval?: 'proposed' | 'approved' }) =>
+        (r: CanonicalModelT['relations'][number]) => (r.form === 'effect' ? { ...r, terms: r.terms.map((x) => ({ ...x, ...t })) } : r);
+      for (const face of [joins((r) => ({ ...r, approval: 'proposed' })), joins(terms({ author: 'olumi', quote: null })), joins(terms({ approval: 'proposed' }))]) {
+        expect(face).toContain(', in this model, on Olumi’s reading of ‘joins’ (not yet confirmed): in every simulated draw');
+        expect(face).not.toContain('on your figures');
+      }
+    });
+
+    it('buddy #3738: their premise not found in their words, or not yet accepted, is never "your" and never Olumi\'s', () => {
+      for (const [m, words] of [[approved(allTheirs()), OWN], [approved(allTheirs()), `${OWN} The council must let us use the hall.`]] as const) {
+        m.conditions.push(words === OWN ? hall : { ...hall, approval: 'proposed' });
+        const face = faceOf(m, words);
+        expect(face).toContain(', in this model, if the condition ‘The council must let us use the hall’ is met (not yet confirmed): in every simulated draw');
+        expect(face).not.toMatch(/your condition|Olumi’s condition|on your figures/);
+      }
     });
 
     it('Codex #3738: the same premise reaching the chance twice (both goals rest on it, one also names it) is named once', () => {
