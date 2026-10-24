@@ -151,7 +151,9 @@ describe('the model-program turn on the real core route', () => {
 
   it('step 1, drafter: the first turn sends ONE strict canonical-schema call at gpt-6.1-sol, effort medium, with the fixed prompt', async () => {
     replies = [JSON.stringify(bakery())];
-    const r = await turn({ message: BRIEF });
+    // 23:30 UTC on 6 April is 7 April in London (BST): the drafter is told the London day, as the conversation agent is.
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2027-04-06T23:30:00Z') });
+    const r = await turn({ message: BRIEF }).finally(() => vi.useRealTimers());
     expect(r.statusCode).toBe(200);
     expect(sent).toHaveLength(1);
     const body = sent[0]!;
@@ -160,7 +162,7 @@ describe('the model-program turn on the real core route', () => {
     expect(body.instructions).toBe(DRAFTING_INSTRUCTIONS);
     expect(body.text.format).toMatchObject({ type: 'json_schema', name: 'canonical_model', strict: true });
     expect(stableStringify(body.text.format.schema)).toBe(stableStringify(CANONICAL_JSON_SCHEMA));
-    expect(body.input).toEqual([{ role: 'user', content: BRIEF }]);
+    expect(body.input).toEqual([{ role: 'developer', content: 'Today is 2027-04-07 (Wednesday 7 April 2027); period 0 is today.' }, { role: 'user', content: BRIEF }]);
     expect(body.tools ?? []).toEqual([]);
     // The saved model is the AI's own draft, unedited.
     expect(persisted!.living_model.canonical).toEqual(bakery());
@@ -181,7 +183,7 @@ describe('the model-program turn on the real core route', () => {
     expect(sent).toHaveLength(2);
     const errors = compile(bakeryWithDefect(), { sourceText: BRIEF }).errors;
     expect(errors.map((e) => e.code)).toEqual(['olumi_no_range']);
-    expect(sent[1]!.input).toEqual([{ role: 'user', content: BRIEF }, { role: 'assistant', content: bad },
+    expect(sent[1]!.input).toEqual([sent[0]!.input[0], { role: 'user', content: BRIEF }, { role: 'assistant', content: bad },
       { role: 'user', content: `${REPAIR_PREFIX}\n- ${errors[0]!.message}` }]);
     expect(sent[1]!.instructions).toBe(sent[0]!.instructions);
     expect(r.json().model_program.draft.attempts.map((a: Json) => a.errors.length)).toEqual([1, 0]);
@@ -670,9 +672,9 @@ describe('the model-program turn on the real core route', () => {
     expect(proposed.status, JSON.stringify(proposed)).toBe('ok');
     // One drafter call per proposal: the person's words, the saved model and the change.
     expect(sent).toHaveLength(2);
-    expect(sent[1]!.input.map((m: Json) => m.role)).toEqual(['user', 'assistant', 'user']);
+    expect(sent[1]!.input.map((m: Json) => m.role)).toEqual(['developer', 'user', 'assistant', 'user']);
     // The update's request is prompt.ts's text, then the change (DL 24 Oct: the update text is prompt code).
-    expect(sent[1]!.input[2].content).toBe(`${UPDATE_PREFIX}\nThe change: The oven price is their answer: about £2,500.\nRemove: nothing`);
+    expect(sent[1]!.input[3].content).toBe(`${UPDATE_PREFIX}\nThe change: The oven price is their answer: about £2,500.\nRemove: nothing`);
     // The card shows the change's substance, before and after, and whose it is.
     expect(proposed.data.changes).toEqual([{ id: 'oven_price', kind: 'quantity', action: 'change', label: 'oven price', before: 'no figure yet (in GBP/oven), still to be given, Olumi asks "What would the second oven cost?", no basis given, not in your words',
       after: `2,500 GBP/oven, known, no question, based on "${APPROXIMATE_FIGURE}", in your words "The oven would cost about £2,500."`, author: 'person' }]);
@@ -1423,7 +1425,7 @@ describe('the model-program turn on the real core route', () => {
     expect(p.status, JSON.stringify(p)).toBe('ok');
     // ONE drafter call, given the model WITH the answer set exactly: nothing they said is lost to the redraft.
     expect(sent).toHaveLength(1);
-    const given = JSON.parse(String((sent[0]!.input as Json[])[1]!.content)) as CanonicalModelT;
+    const given = JSON.parse(String((sent[0]!.input as Json[])[2]!.content)) as CanonicalModelT;
     expect(given.quantities.find((x) => x.id === 'oven_price')).toMatchObject(price);
     // ONE card with every change: their figure, the new target and the new goal.
     expect(p.data.changes.map((c: Json) => [c.id, c.action, c.author]).sort()).toEqual([['oven_price', 'change', 'person'], ['stretch', 'add', 'person'], ['stretch_target', 'add', 'person']]);
