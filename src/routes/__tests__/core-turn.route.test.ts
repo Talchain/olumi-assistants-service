@@ -954,6 +954,25 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
         'the Challenge note reached the turn').toBe(true);
     });
 
+    it('a program\'s first agent turn holds the host-written draft reply (prompt audit 24 Oct: "which question did your \'I don\'t know\' answer?"): its Conversation opens with the brief, then that reply with its numbered questions, then the message', async () => {
+      await savedProgram();
+      outputs = [[{ type: 'message', text: 'Thanks; I will put that on the oven price.' }]];
+      expect((await typed('About £2,500 for the oven.')).statusCode).toBe(200);
+      const input = (calls[0]!.input ?? []) as Json[];
+      const said = input.filter((i) => i.role === 'assistant').map((i) => (i.content as Json[]).map((c) => String(c.text)).join(''));
+      expect(said, 'the draft reply, as the person saw it').toHaveLength(1);
+      expect(said[0]).toMatch(/^I've drafted a first model of: /);
+      expect(said[0]).toMatch(/\n1\. \S/);
+      const users = input.filter((i) => i.role === 'user').map((i) => String(i.content));
+      expect(users[0]).toContain(BAKERY_BRIEF);
+      expect(users.at(-1)).toBe('About £2,500 for the oven.');
+      // Contrast: the turn after it carries no seed again (the Conversation holds it now).
+      calls.length = 0;
+      outputs = [[{ type: 'message', text: 'Noted.' }]];
+      expect((await typed('And it takes a week to install.')).statusCode).toBe(200);
+      expect(((calls[0]!.input ?? []) as Json[]).filter((i) => i.role === 'assistant')).toEqual([]);
+    });
+
     it('S3 (DL 23 Oct): on a program turn the provider receives the PROGRAM tool descriptions, read included, and the read it gets back carries the Run\'s goal_chance block unchanged', async () => {
       // Two goals, so the block has each goal's own line and the joint.
       const m = club();

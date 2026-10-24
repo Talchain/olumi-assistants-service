@@ -605,9 +605,14 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       const typedNow = requestWasTyped(body) ? message : null;
       const history = new HistoryStore();
       const sessionKey = `core_${scenarioId}`;
+      let earlierTurns: { role: 'user' | 'assistant'; text: string }[] = [];
       try {
         const rows = await store.readRecent(scenarioId, DURABLE_SEED_ROWS_READ);
-        history.seed(sessionKey, historyFromDurableTurns(rows), [], rows, typedRowProof(scenarioId, userId));
+        const items = historyFromDurableTurns(rows);
+        history.seed(sessionKey, items, [], rows, typedRowProof(scenarioId, userId));
+        earlierTurns = items.flatMap((it) => { const r = it as { role?: unknown; content?: unknown };
+          const text = typeof r.content === 'string' ? r.content : Array.isArray(r.content) ? r.content.map((p) => String((p as { text?: unknown }).text ?? '')).join('') : '';
+          return (r.role === 'user' || r.role === 'assistant') && text !== '' ? [{ role: r.role, text }] : []; });
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'core-turn: durable conversation unreadable; earlier words stay unknown');
       }
@@ -713,6 +718,8 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
             instructions: program ? instructionsForMode(MODE, CORE_ALIGNED_INSTRUCTIONS) : instructionsForMode(MODE, CORE_INSTRUCTIONS_LIVING_MODEL, CORE_REPLY_RULES_LIVING_MODEL),
             turnGuidance: [...(program ? [PROGRAM_TURN_GUIDANCE] : []), ...(challenge === null ? [] : [challenge.note])],
             briefText: saved.briefText,
+            // A program's first agent turn opens its Conversation with the turns before it, the host-written draft reply included.
+            ...(program ? { earlierTurns } : {}),
             canonicalState: canonical.status === 'ok' ? canonical.data : undefined,
             // A Run press permits calculation and reading only; any other press carries no consent to Run.
             withheldTools: runPress ? CORE_RUN_PRESS_WITHHELD : [...(chip !== null ? ['run_analysis'] : []), 'offer_public_research'],
