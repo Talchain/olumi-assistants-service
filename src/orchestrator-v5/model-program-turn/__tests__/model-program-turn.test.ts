@@ -525,7 +525,7 @@ describe('the model-program turn on the real core route', () => {
     const answer = (quote: string) => savedWith((m) => setQ(m, 'oven_price', { status: 'known', value: 2500, question: null, quote, basis: APPROXIMATE_FIGURE }));
     // Contrast first: a figure of theirs whose words are not theirs, verbatim, is refused, and nothing is proposed.
     replies = [answer('about £2,500 I think')];
-    expect(await proposeProgramChange(deps, ctx, args)).toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['oven_price'] } });
+    expect(await proposeProgramChange(deps, ctx, args)).toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['oven_price'], check: 'their_words' } });
     replies = [answer(words)];
     const proposed = await proposeProgramChange(deps, ctx, args) as Json;
     expect(proposed.status, JSON.stringify(proposed)).toBe('ok');
@@ -1313,6 +1313,76 @@ describe('the model-program turn on the real core route', () => {
     expect(removed).toMatchObject({ status: 'refused', reason: 'not_an_answer', detail: '"oven price" (oven_price): the change removed what you answered, so nothing changed.', data: { ids: ['oven_price'] } });
   });
 
+  it('issue 37 (marketing at 485ee1af, 3 of 5 runs): a figure of theirs said EXACTLY in another calendar unit (their 1 year as 12 month, the time step moved to month for a 3-month goal) is the same figure, so the goals are saved; any other change of its amount still needs their words this turn, and the refusal names the check and the id', async () => {
+    const brief = `${BRIEF} The £3,000 is for 1 year.`;
+    const m = bakery();
+    m.period = 'year';
+    m.quantities.push(q('budget_window', 'year', { value: 1, quote: 'The £3,000 is for 1 year' }));
+    m.limits = m.limits.map((l) => ({ ...l, measure: { ...l.measure!, window: { origin_event: null, origin_offset: null, start: 0, periods: 'budget_window' } } }));
+    replies = [JSON.stringify(m)];
+    expect((await turn({ message: brief })).json().model_program.saved).toBe(true);
+    const deps = { dispatch, proposals: new ProposalStore() };
+    const words = 'We want 340 loaves a week within the first 3 months.';
+    // The drafter's whole updated model: their new goal with its 3-month window, so the time step is a month and their budget
+    // window is said in months.
+    const early = (window: Partial<CanonicalQuantityT>) => savedWith((d) => {
+      d.period = 'month';
+      setQ(d, 'budget_window', window);
+      d.quantities.push(q('early_target', 'loaf/week', { value: 340, quote: 'We want 340 loaves a week' }), q('early_months', 'month', { value: 3, quote: 'within the first 3 months' }));
+      d.goals.push({ ...d.goals[0]!, id: 'early_loaves', label: '340 loaves a week within 3 months', quote: words.slice(0, -1),
+        measure: { ...d.goals[0]!.measure!, target: 'early_target', window: { origin_event: null, origin_offset: null, start: 0, periods: 'early_months' } } });
+    });
+    const propose = (reply: string) => { replies = [reply]; return proposeProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words],
+      user_turn_text: words }, ProgramChangeParams.parse({ public_label: 'An early goal', basis: 'their goal', request: 'Add their goal: 340 loaves a week within the first 3 months.', remove: [] })) as Promise<Json>; };
+    // Refused, by check and id: their 1 year said as 1 month (only the unit changes, so the amount does), as 13 months, or as
+    // 52 weeks (weeks in a year is an average, not exact); and their figure turned into a question.
+    for (const moved of [{ unit: 'month' }, { unit: 'month', value: 13 }, { unit: 'week', value: 52 }, { unit: 'month', status: 'asked' as const, value: null, quote: null }]) {
+      expect(await propose(early(moved)), JSON.stringify(moved)).toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['budget_window'], check: 'this_turn' } });
+    }
+    // The same figure, said exactly in months: the card goes ahead and shows it, still theirs in their words.
+    const p = await propose(early({ unit: 'month', value: 12 }));
+    expect(p.status, JSON.stringify(p)).toBe('ok');
+    expect(p.data.changes.map((c: Json) => [c.id, c.action, c.author])).toEqual([['budget_window', 'change', 'person'], ['early_target', 'add', 'person'], ['early_months', 'add', 'person'],
+      ['early_loaves', 'add', 'person'], ['period', 'change', 'olumi']]);
+    expect(p.data.changes.find((c: Json) => c.id === 'budget_window')).toMatchObject({ before: '1 year', after: '12 month' });
+    expect(await applyProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID() }, p.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
+    const saved = persisted!.living_model.canonical as CanonicalModelT;
+    expect(saved.goals.map((g) => g.id)).toEqual(['more_loaves', 'early_loaves']);
+    expect(saved.period).toBe('month');
+    expect(saved.quantities.find((x) => x.id === 'budget_window')).toMatchObject({ unit: 'month', value: 12, low: null, high: null, status: 'known', author: 'person', quote: 'The £3,000 is for 1 year' });
+    // The one validator, unit by unit: 1 week said as 7 day is the same figure; 13 weeks as 3 months is an average (weeks in a
+    // month), so it is a change that needs their words this turn.
+    const said = (from: Partial<CanonicalQuantityT>, to: Partial<CanonicalQuantityT>) => {
+      const was = JSON.parse(JSON.stringify(saved)) as CanonicalModelT; setQ(was, 'budget_window', from);
+      const now = JSON.parse(JSON.stringify(was)) as CanonicalModelT; setQ(now, 'budget_window', to);
+      return validatePostimage(was, now, { removals: [], words: [brief, words], fresh: [words] });
+    };
+    expect(said({ unit: 'week', value: 1 }, { unit: 'day', value: 7 })).toMatchObject({ ok: true, changes: [{ id: 'budget_window', action: 'change', before: '1 week', after: '7 day' }] });
+    expect(said({ unit: 'week', value: 13 }, { unit: 'month', value: 3 })).toMatchObject({ ok: false, code: 'unverified_person_words', ids: ['budget_window'], check: 'this_turn' });
+    // A range converts end by end: every one of value, low and high exactly, or it is a change (Codex BLOCK on #3739).
+    const range = { unit: 'year', value: 1, low: 1, high: 2 };
+    expect(said(range, { unit: 'month', value: 12, low: 12, high: 24 }).ok).toBe(true);
+    expect(said({ ...range, value: null }, { unit: 'month', value: null, low: 12, high: 24 }).ok).toBe(true);
+    for (const to of [{ value: 12, low: 12, high: 25 }, { value: 12, low: 11, high: 24 }, { value: 13, low: 12, high: 24 }, { value: 12, low: null, high: null }]) {
+      expect(said(range, { unit: 'month', ...to }), JSON.stringify(to)).toMatchObject({ ok: false, code: 'unverified_person_words', ids: ['budget_window'], check: 'this_turn' });
+    }
+    // Exact is the float product in the conversion's direction, nothing looser (Codex BLOCK ×2 on #3739): 1 year as 12 month and
+    // 6 month as 0.5 year are the same figure; 10^15 years as 12×10^15 + 8 or + 100 months is not, as a value or as either end of
+    // a range. Nor is 0.1 year as 1.2 month (0.1 × 12 is not 1.2 in binary): refusing it is the safe base behaviour, their
+    // words this turn asked for as for any change of their figure.
+    expect(said({ unit: 'year', value: 1 }, { unit: 'month', value: 12 }).ok).toBe(true);
+    expect(said({ unit: 'month', value: 6 }, { unit: 'year', value: 0.5 }).ok).toBe(true);
+    expect(0.1 * 12).not.toBe(1.2);
+    expect(said({ unit: 'year', value: 0.1 }, { unit: 'month', value: 1.2 })).toMatchObject({ ok: false, code: 'unverified_person_words', ids: ['budget_window'], check: 'this_turn' });
+    for (const plus of [8, 100]) {
+      for (const [from, to] of [[{ value: 1e15 }, { value: 12e15 + plus }], [{ value: null, low: 1e15, high: 2e15 }, { value: null, low: 12e15 + plus, high: 24e15 }],
+        [{ value: null, low: 1e15, high: 2e15 }, { value: null, low: 12e15, high: 24e15 + plus }]] as const) {
+        expect(said({ unit: 'year', ...from }, { unit: 'month', ...to }), JSON.stringify(to)).toMatchObject({ ok: false, code: 'unverified_person_words', ids: ['budget_window'], check: 'this_turn' });
+        expect(said({ unit: 'year', ...from }, { unit: 'month', ...Object.fromEntries(Object.entries(from).map(([k, v]) => [k, v === null ? null : v * 12])) }).ok, `${JSON.stringify(from)} ×12`).toBe(true);
+      }
+    }
+  });
+
   it('targeted answers: whose an answer is comes from what the AI declares, checked literally (Codex r1 #3727): Olumi\'s estimate stays Olumi\'s, ranged, never in their words; a mismatch is refused, never re-authored', async () => {
     replies = [JSON.stringify(bakery())];
     expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
@@ -1417,7 +1487,7 @@ describe('the model-program turn on the real core route', () => {
     // Refused: one of their figures rewritten under their EARLIER words (their budget, quoted from the brief).
     const budget = before.quantities.find((x) => x.author === 'person' && x.value !== null && x.kind === 'fact')!;
     replies = [completed((d) => setQ(d, budget.id, { value: budget.value! + 1 }))];
-    expect(await propose()).toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: [budget.id] } });
+    expect(await propose()).toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: [budget.id], check: 'this_turn' } });
     // Refused: a record left out without a listed removal; nothing is removed unless the person asks.
     const dropped = before.options[0]!.id;
     replies = [completed((d) => { d.options = d.options.filter((o) => o.id !== dropped); })];

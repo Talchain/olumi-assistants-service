@@ -159,3 +159,15 @@ export function isCalendarConversion(value: number, u: Unit): boolean {
     return want !== null && Math.abs(value - want) <= want * c.tolerance + 1e-12;
   });
 }
+
+/**
+ * True when `to` in `toUnit` is `from` in `fromUnit` said EXACTLY in another calendar unit (1 year as 12 month, 6 month as
+ * 0.5 year): a conversion with no tolerance, whose float product is equal in its direction (from × 12 === to for year → month,
+ * to × 12 === from for month → year). Anything else, a rounding included, is another figure.
+ */
+export function isExactCalendarReexpression(from: number, fromUnit: Unit, to: number, toUnit: Unit): boolean {
+  const per = divide(toUnit, fromUnit);
+  const unit = (up: string, down: string): Unit => ({ dims: { [up]: 1, [down]: -1 }, scale: 1 });
+  return per.scale === 1 && CONVERSIONS.some((c) => c.tolerance === 0
+    && ((sameDims(per, unit(c.of, c.per)) && from * c.value === to) || (sameDims(per, unit(c.per, c.of)) && to * c.value === from)));
+}
