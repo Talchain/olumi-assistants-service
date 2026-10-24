@@ -384,7 +384,7 @@ describe('the model-program turn on the real core route', () => {
         second_oven: 'compared, sets "ovens added" 0 oven to "one oven" 1 oven from the start, in your words "A second oven"',
         keep_one: 'carries on as now, compared, in your words "keep our one oven"',
         sold_rel: '"sold per oven" is "extra per oven" 100 loaf/week/oven multiplied by "sell through" 0.5–0.9',
-        sales_rel: 'an effect on "sales", starting from "base sales" 300 loaf/week, raised by "sold per oven" for each "ovens added" 0 oven, link 1 is yours, in your words "A second oven adds about 100 loaves a week"',
+        sales_rel: 'an effect on "sales", starting from "base sales" 300 loaf/week, changes by "sold per oven" for each "ovens added" 0 oven, link 1 is yours, in your words "A second oven adds about 100 loaves a week"',
         spend_rel: '"spend" is "oven price" (still to be given) multiplied by "ovens added" 0 oven',
         sell_through: 'from 0.5 to 0.9, most likely 0.7 (a plausible range), a rate, an estimate, based on "New capacity sells only as far as demand grows."',
         oven_price: 'no figure yet (in GBP/oven), a fact, still to be given, Olumi asks "What would the second oven cost?"',
@@ -741,8 +741,8 @@ describe('the model-program turn on the real core route', () => {
     const named = await propose(swap('extra_per_oven'));
     expect(named.status, JSON.stringify(named)).toBe('ok');
     expect(named.data.changes).toEqual([{ id: 'sales_rel', kind: 'relation', action: 'change', label: 'sales',
-      before: 'an effect on "sales", starting from "base sales" 300 loaf/week, raised by "sold per oven" for each "ovens added" 0 oven, link 1 is yours, in your words "A second oven adds about 100 loaves a week"',
-      after: 'an effect on "sales", starting from "base sales" 300 loaf/week, raised by "extra per oven" 100 loaf/week/oven for each "ovens added" 0 oven, link 1 is yours, '
+      before: 'an effect on "sales", starting from "base sales" 300 loaf/week, changes by "sold per oven" for each "ovens added" 0 oven, link 1 is yours, in your words "A second oven adds about 100 loaves a week"',
+      after: 'an effect on "sales", starting from "base sales" 300 loaf/week, changes by "extra per oven" 100 loaf/week/oven for each "ovens added" 0 oven, link 1 is yours, '
         + 'in our baker’s words "A second oven adds about 100 loaves a week"', author: 'olumi' }]);
   });
 
@@ -770,13 +770,45 @@ describe('the model-program turn on the real core route', () => {
     const shown = await relink('impact_9')();
     expect(shown.status, JSON.stringify(shown)).toBe('ok');
     expect(shown.data.changes).toEqual([{ id: 'sales_rel', kind: 'relation', action: 'change', label: 'sales',
-      before: 'an effect on "sales", starting from "base sales" 300 loaf/week, raised by "impact" 1 loaf/week/oven for each "ovens added" 0 oven, no link 2',
-      after: 'an effect on "sales", starting from "base sales" 300 loaf/week, raised by "impact" 9 loaf/week/oven for each "ovens added" 0 oven, '
-        + 'raised by "other" 2–4 loaf/week/oven for each "one oven" 1 oven', author: 'olumi' }]);
+      before: 'an effect on "sales", starting from "base sales" 300 loaf/week, changes by "impact" 1 loaf/week/oven for each "ovens added" 0 oven, no link 2',
+      after: 'an effect on "sales", starting from "base sales" 300 loaf/week, changes by "impact" 9 loaf/week/oven for each "ovens added" 0 oven, '
+        + 'changes by "other" 2–4 loaf/week/oven for each "one oven" 1 oven', author: 'olumi' }]);
     // Moved to the twin (named and sized alike) while link 2 is added: refused, naming the field that would read the same.
     expect(await relink('impact_twin')()).toMatchObject({ status: 'refused', reason: 'unshown_change', data: { ids: ['sales_rel (terms.0.coefficient)'] } });
   });
 
+  it('the card in plain words (Codex r1 #3718): a figure given where there was none is said or refused, never carried beside another change; a deadline or a setting taken away is said; a link reads "changes by" its own signed figure', () => {
+    const words = [CLUB_BRIEF];
+    const check = (base: CanonicalModelT, edit: (m: CanonicalModelT) => void, said = words) => {
+      const m = JSON.parse(JSON.stringify(base)) as CanonicalModelT;
+      edit(m);
+      return validatePostimage(base, m, { removals: [], words: said, fresh: said });
+    };
+    const unshown = (ids: string[]) => ({ ok: false, code: 'unshown_change', ids });
+    // Codex's case: a figure set on a switch (which reads its "one promo", never the figure) beside a timing change: refused by name.
+    expect(check(club(), (m) => { m.options[0]!.sets[0]!.starts_after_periods = 2; m.options[0]!.sets[0]!.value = 99; })).toMatchObject(unshown(['promotion (sets.0.value)']));
+    // Contrast: the timing alone is on the card, before and after.
+    const timing = check(club(), (m) => { m.options[0]!.sets[0]!.starts_after_periods = 2; });
+    expect(timing.ok ? timing.changes : timing).toEqual([{ id: 'promotion', kind: 'option', action: 'change', label: 'Run a promotion',
+      before: 'sets "promo on" 0 promotion to "one promo" 1 promotion from the start', after: 'sets "promo on" 0 promotion to "one promo" 1 promotion after 2 months', author: 'person' }]);
+    // The same figure on a setting that arrives with its own entry, or with a whole new option: refused too.
+    expect(check(club(), (m) => { m.options[0]!.sets.push({ ...m.options[0]!.sets[0]!, value: 99 }); })).toMatchObject(unshown(['promotion (sets.2.value)']));
+    expect(check(club(), (m) => { m.options.push({ ...m.options[0]!, id: 'promo_twice', label: 'Run two promotions', author: 'olumi', quote: null, sets: [{ ...m.options[0]!.sets[0]!, value: 99, author: 'olumi', quote: null }] }); }))
+      .toMatchObject(unshown(['promo_twice (sets.0.value)']));
+    // A deadline taken away, and a setting taken away, are each said (nothing is left to set back alone).
+    const timed = check(bakery(), (m) => { m.goals[0]!.measure!.window = { origin_event: null, origin_offset: null, start: 0, periods: 'one_oven' }; }, [BRIEF]) as { ok: true; model: CanonicalModelT };
+    const untimed = check(timed.model, (m) => { m.goals[0]!.measure!.window = null; }, [BRIEF]);
+    expect(untimed.ok ? untimed.changes.map((c) => [c.before, c.after]) : untimed).toEqual([['by the end of "one oven" 1 oven', 'no deadline set']]);
+    const fewer = check(club(), (m) => { m.options[0]!.sets.pop(); });
+    expect(fewer.ok ? fewer.changes.map((c) => [c.before, c.after]) : fewer).toEqual([['sets "spend" 0 GBP to "promo cost" 500 GBP from the start, in your words "The promotion costs £500"', 'without this setting']]);
+    // A link whose size is a fall of 3 to 7 (compiler-valid) reads "changes by" its own signed figure, never "raised by".
+    const falls = club();
+    setQ(falls, 'promo_effect', { value: -5, low: -7, high: -3 });
+    expect(compile(falls, { sourceText: CLUB_BRIEF }).errors).toEqual([]);
+    const read = readingOf(falls, { words, approver: null });
+    expect(read.ok ? read.changes.find((c) => c.id === 'joins_rel')?.after : read)
+      .toBe('an effect on "joins", starting from "base joins" 20 member/month, changes by "promo effect" -7–-3 member/month/promotion for each "promo on" 0 promotion');
+  });
   it('simplify v1 (buddy 21:46Z): an item the card could not name is never proposed: an empty-label risk is refused by the card\'s own contract and by the compiler; so is a note with no words', async () => {
     replies = [JSON.stringify(bakery())];
     await turn({ message: BRIEF });
@@ -1167,8 +1199,8 @@ describe('the model-program turn on the real core route', () => {
       ['features_rel', 'relation', 'add', 'olumi'], ['increase_productivity', 'goal', 'change', 'person'], ['leads_unblock', 'record', 'add', 'olumi'], ['lead_needs_scope', 'record', 'add', 'olumi'],
       ['hires_productive_in_window', 'record', 'add', 'olumi'], ['scope_agreed_first', 'record', 'add', 'olumi']]);
     expect(card.data.changes.find((c: Json) => c.id === 'features_rel').after).toBe('an effect on "Features shipped per month", starting from "features now" (still to be given), '
-      + 'raised by "lead effect" 0–4 feature/month/tech lead for each "Tech leads hired" 0 tech lead, '
-      + 'raised by "developer effect" 0.3–1.5 feature/month/developer for each "Additional developers hired" 0 developer');
+      + 'changes by "lead effect" 0–4 feature/month/tech lead for each "Tech leads hired" 0 tech lead, '
+      + 'changes by "developer effect" 0.3–1.5 feature/month/developer for each "Additional developers hired" 0 developer');
     expect(registered).toHaveLength(1); // proposing saves nothing
     expect(await applyProgramChange(deps, ctx, card.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
     const after = persisted!.living_model.canonical as CanonicalModelT;

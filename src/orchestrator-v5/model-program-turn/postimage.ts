@@ -177,11 +177,15 @@ export function validatePostimage(base: CanonicalModelT, raw: unknown,
       // A whole item's name and whose it is are the card's label and mark (its schema refuses an empty name), not its text.
       const whole = old === undefined || r === undefined;
       for (const x of out) if (x.old === x.now && !(whole && (x.group === 'name' || x.group === 'author'))) hidden.push(...x.paths);
-      // Per field, never per group (Codex P1): on a change, each field that HAD a value, set back alone, must change its
-      // group's words, or that switch would ride unseen beside another (a link moved to a twin while a link is added). A field
-      // that appears with its container (a measure first given) has nothing to switch back to: its group's words say it.
-      if (!whole) for (const x of out) if (x.old !== x.now) for (const d of diff.filter((y) => x.paths.includes(y.path) && y.old != null)) {
-        if (now.phrase(family, x.group, withPath(r!, d.path, d.old), x.at) === x.now) hidden.push(d.path);
+      // Per field, never per group (Codex P1 ×2): each field, set back alone, must change its group's words, or it would ride
+      // unseen beside another change: a link moved to a twin while a link is added, or a figure given where there was none
+      // beside a timing the words say. A field that appears with its container is set back to empty, where empty is a state
+      // the item can be in (a window's start appears with the window and has no empty); one that leaves with its container
+      // (a deadline or a setting taken away) has nowhere to go back to. Either way the container's words say it.
+      if (r !== undefined) for (const x of out) if (x.old !== x.now) for (const d of diff.filter((y) => x.paths.includes(y.path))) {
+        const back = withPath(r, d.path, d.old ?? null);
+        if (d.now === undefined || (d.old === undefined && (d.now === null || !CanonicalModel.shape[family].element.safeParse(back).success))) continue;
+        if (now.phrase(family, x.group, back, x.at) === x.now) hidden.push(d.path);
       }
       if (hidden.length > 0) unshown.push(`${id} (${hidden.join(', ')})`);
       return out;
@@ -322,7 +326,7 @@ function wordsIn(m: CanonicalModelT) {
         const parts = Array.isArray(r['parts']) ? (r['parts'] as Rec[]) : [];
         const terms = Array.isArray(r['terms']) ? (r['terms'] as Rec[]) : [];
         const each = (ids: unknown, verb: string) => (Array.isArray(ids) ? ids.map((id) => `, ${verb} ${timed(String(id))}`).join('') : '');
-        if (r['form'] === 'effect') return `an effect on ${q('defines')}, starting from ${q('base')}${terms.map((t) => `, raised by ${timed(String(t['coefficient']))} for each ${timed(String(t['driver']))}`).join('')}`;
+        if (r['form'] === 'effect') return `an effect on ${q('defines')}, starting from ${q('base')}${terms.map((t) => `, changes by ${timed(String(t['coefficient']))} for each ${timed(String(t['driver']))}`).join('')}`;
         if (r['form'] === 'stock') return `a running total of ${q('defines')}, starting at ${q('start')}${each(r['inflows'], 'adding')}${each(r['outflows'], 'taking away')}, each ${m.period}`;
         if (r['form'] !== 'definition') return 'no calculation';
         const said = parts.map((x, i) => (r['op'] === 'product'
@@ -358,7 +362,7 @@ function wordsIn(m: CanonicalModelT) {
         if (x === undefined) return 'without this setting';
         const to = typeof x['to'] === 'string' ? timed(x['to']) : figure({ ...x, unit: Q.get(String(x['quantity']))?.unit });
         return `sets ${timed(String(x['quantity']))} to ${to} ${start(x['starts_after_periods'] as number | string)}${typeof x['question'] === 'string' ? `, Olumi asks "${x['question']}"` : ''}`
-          + `${x['author'] === 'structure' ? ', as a switch' : x['author'] !== r['author'] ? `, as ${of(WHO_WORDS, x['author'])}` : ''}${typeof x['quote'] === 'string' && x['quote'] !== r['quote'] ? `, in your words "${x['quote']}"` : ''}`;
+          + `${x['author'] === 'structure' ? ', as a switch' : x['author'] !== r['author'] ? `, as ${of(WHO_WORDS, x['author'])}` : ''}${x['quote'] === r['quote'] ? '' : typeof x['quote'] === 'string' ? `, in your words "${x['quote']}"` : ', not in your words'}`;
       }
       case 'chance': return `with a chance of ${q('occurrence')}`;
       case 'effect': return r['mode'] === 'multiply' ? `multiplying ${q('effect_on')} by ${q('severity')}` : `adding ${q('severity')} to ${q('effect_on')}`;
