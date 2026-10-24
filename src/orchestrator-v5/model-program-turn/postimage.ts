@@ -29,38 +29,36 @@ const FAMILIES: readonly (readonly [Family, ProposalChange['kind']])[] = [
 
 /** Set by the host, never taken from a proposed model. */
 const HOST_FIELDS: ReadonlySet<string> = new Set(['approval', 'author_id']);
-/** How a changed field is said on the card: its plain name (`{n}`: its position in a list) and how its value reads. */
-type Say = 'q' | 'rec' | 'num' | 'amount' | 'text' | 'word' | 'who' | 'flag' | 'timing';
-type Field = readonly [name: string, say: Say];
-const WHO: Record<string, Field> = { author: ['whose', 'who'], party: ['from', 'text'], quote: ['their words', 'text'] };
-const within = (prefix: string, name: string, fields: Record<string, Field>): Record<string, Field> =>
-  Object.fromEntries(Object.entries(fields).map(([k, [nm, say]]) => [`${prefix}.${k}`, [`${name} ${nm}`, say] as const]));
-const MEASURED: Record<string, Field> = { 'measure.quantity': ['measures', 'q'], 'measure.per': ['per', 'q'], 'measure.cmp': ['comparison', 'word'],
-  'measure.aggregation': ['over the window', 'word'], 'measure.window.start': ['window opens after (periods)', 'num'],
-  'measure.window.periods': ['deadline', 'q'], 'measure.window.origin_event': ['counted from', 'text'], 'measure.window.origin_offset': ['the event’s timing', 'q'] };
-const ABOUT: Record<string, Field> = { 'concerns.*': ['about {n}', 'rec'] };
-/** Every field a change can touch, per family (lists by entry: `*`); a changed path not listed here has no plain rendering, and is refused. */
-const FIELDS: Readonly<Record<Family, Readonly<Record<string, Field>>>> = {
-  quantities: { label: ['name', 'text'], unit: ['unit', 'word'], kind: ['kind', 'word'], status: ['status', 'word'], question: ['question', 'text'], value: ['figure', 'amount'],
-    low: ['low end', 'amount'], high: ['high end', 'amount'], range_kind: ['range reading', 'word'], basis: ['basis', 'text'], ...WHO },
-  relations: { defines: ['works out', 'q'], form: ['form', 'word'], op: ['operation', 'word'], 'parts.*.id': ['part {n}', 'q'], 'parts.*.sign': ['part {n} sign', 'num'],
-    'parts.*.power': ['part {n} power', 'num'], base: ['base', 'q'], 'terms.*.driver': ['link {n} driver', 'q'], 'terms.*.coefficient': ['link {n} size', 'q'],
-    ...within('terms.*', 'link {n}', WHO), start: ['starts at', 'q'], 'inflows.*': ['inflow {n}', 'q'], 'outflows.*': ['outflow {n}', 'q'], ...WHO },
-  goals: { label: ['name', 'text'], question: ['question', 'text'], ...MEASURED, 'measure.target': ['target', 'q'], 'measure.frame': ['frame', 'word'],
-    'measure.reference.kind': ['reference', 'word'], 'measure.reference.option': ['reference option', 'rec'], 'measure.reference.quantity': ['reference figure', 'q'],
-    'measure.measure_by': ['measure named by', 'word'], 'measure.assumptions.*': ['rests on {n}', 'rec'], 'measure.exclusions.*': ['leaves out {n}', 'rec'], ...WHO },
-  limits: { label: ['name', 'text'], question: ['question', 'text'], ...MEASURED, 'measure.bound': ['limit', 'q'], ...WHO },
-  preferences: { quantity: ['figure', 'q'], direction: ['direction', 'word'], ...WHO },
-  options: { label: ['name', 'text'], status: ['status', 'word'], developed_from: ['a variant of', 'rec'],
-    ...within('sets.*', 'setting {n}', { quantity: ['changes', 'q'], to: ['to', 'q'], value: ['figure', 'num'], low: ['low end', 'num'], high: ['high end', 'num'], range_kind: ['range reading', 'word'],
-      question: ['question', 'text'], starts_after_periods: ['starts', 'timing'], author: ['whose', 'who'], quote: ['their words', 'text'] }), ...WHO },
-  risks: { label: ['name', 'text'], occurrence: ['chance', 'q'], severity: ['size', 'q'], effect_on: ['affects', 'q'], mode: ['how', 'word'], starts_after_periods: ['starts', 'timing'], ...WHO },
-  claims: { text: ['words', 'text'], ...ABOUT, ...WHO },
-  evidence: { text: ['words', 'text'], source: ['source', 'text'], bears: ['bears', 'word'], ...ABOUT, ...WHO },
-  assumptions: { text: ['words', 'text'], applied: ['applied', 'flag'], ...ABOUT, ...WHO },
-  dissent: { holder: ['held by', 'text'], position: ['view', 'text'], ...ABOUT, ...WHO },
-  conditions: { text: ['words', 'text'], kind: ['kind', 'word'], ...ABOUT, ...WHO },
-  left_out: { text: ['words', 'text'], why: ['why', 'text'], question: ['question', 'text'], ...ABOUT, ...WHO },
+/**
+ * How a changed field is said on the card: the fields of an item that read together are ONE group (a figure's value, range
+ * and unit; a goal's measure; its window), said as one plain phrase from the item itself. Every field a change can touch
+ * belongs to a group here, per family (lists by entry: `*`); a changed path in no group has no plain rendering, and a group
+ * that reads the same before and after cannot show its change: either refuses the proposal. A group marked `#` is one per
+ * list entry (a link, a setting).
+ */
+const WORDS = ['author', 'party', 'quote'] as const;
+const by = (group: string, ...paths: string[]) => Object.fromEntries(paths.map((p) => [p, group] as const));
+const MEASURE = ['measure.quantity', 'measure.per', 'measure.cmp'];
+const WHEN = ['measure.aggregation', 'measure.window.start', 'measure.window.periods', 'measure.window.origin_event', 'measure.window.origin_offset'];
+const OWN = { ...by('author', 'author'), ...by('words', 'party', 'quote') };
+const GROUPS: Readonly<Record<Family, Readonly<Record<string, string>>>> = {
+  quantities: { ...by('name', 'label'), ...by('figure', 'value', 'low', 'high', 'range_kind', 'unit'), ...by('kind', 'kind'), ...by('status', 'status'),
+    ...by('question', 'question'), ...by('basis', 'basis'), ...OWN },
+  relations: { ...by('name', 'defines'), ...by('how', 'form', 'op', 'base', 'start', 'parts.*.id', 'parts.*.sign', 'parts.*.power', 'terms.*.driver', 'terms.*.coefficient', 'inflows.*', 'outflows.*'),
+    ...by('link#', ...WORDS.map((k) => `terms.*.${k}`)), ...OWN },
+  goals: { ...by('name', 'label'), ...by('measure', ...MEASURE, 'measure.target', 'measure.frame', 'measure.reference.kind', 'measure.reference.option', 'measure.reference.quantity'),
+    ...by('when', ...WHEN), ...by('measure_by', 'measure.measure_by'), ...by('rests', 'measure.assumptions.*'), ...by('excludes', 'measure.exclusions.*'), ...by('question', 'question'), ...OWN },
+  limits: { ...by('name', 'label'), ...by('measure', ...MEASURE, 'measure.bound'), ...by('when', ...WHEN), ...by('question', 'question'), ...OWN },
+  preferences: { ...by('name', 'quantity'), ...by('direction', 'direction'), ...OWN },
+  options: { ...by('name', 'label'), ...by('status', 'status'), ...by('variant', 'developed_from'),
+    ...by('setting#', ...['quantity', 'to', 'value', 'low', 'high', 'range_kind', 'question', 'starts_after_periods', 'author', 'quote'].map((k) => `sets.*.${k}`)), ...OWN },
+  risks: { ...by('name', 'label'), ...by('chance', 'occurrence'), ...by('effect', 'severity', 'effect_on', 'mode'), ...by('starts', 'starts_after_periods'), ...OWN },
+  claims: { ...by('name', 'text'), ...by('about', 'concerns.*'), ...OWN },
+  evidence: { ...by('name', 'text'), ...by('source', 'source'), ...by('bears', 'bears'), ...by('about', 'concerns.*'), ...OWN },
+  assumptions: { ...by('name', 'text'), ...by('applied', 'applied'), ...by('about', 'concerns.*'), ...OWN },
+  dissent: { ...by('name', 'holder'), ...by('position', 'position'), ...by('about', 'concerns.*'), ...OWN },
+  conditions: { ...by('name', 'text'), ...by('kind', 'kind'), ...by('about', 'concerns.*'), ...OWN },
+  left_out: { ...by('name', 'text'), ...by('why', 'why'), ...by('question', 'question'), ...by('about', 'concerns.*'), ...OWN },
 };
 
 export type PostimageResult =
@@ -109,6 +107,15 @@ const deltas = (a: unknown, b: unknown, path = '', pattern = '', at: readonly nu
   }
   return Object.is(a, b) ? [] : [{ path, pattern, at, old: a, now: b }];
 };
+/** A copy of a record with one field (a dotted path, list entries by position) set to a value, or removed when undefined. */
+const withPath = (r: Rec, path: string, value: unknown): Rec => {
+  const copy = JSON.parse(JSON.stringify(r)) as Rec;
+  const keys = path.split('.');
+  let at: unknown = copy;
+  for (const k of keys.slice(0, -1)) at = isRec(at) || Array.isArray(at) ? (at as Rec)[k] : undefined;
+  if (isRec(at) || Array.isArray(at)) { if (value === undefined) delete (at as Rec)[keys.at(-1)!]; else (at as Rec)[keys.at(-1)!] = value; }
+  return copy;
+};
 /** A record as the card compares it: without its id (the change's own) and what the host owns. */
 const bare = (r: Rec | undefined): unknown => (r === undefined ? undefined : withoutHost(Object.fromEntries(Object.entries(r).filter(([k]) => k !== 'id'))));
 const idsOf = (m: CanonicalModelT, f: Family): string[] => (m[f] as readonly { id: string }[]).map((r) => r.id);
@@ -151,16 +158,33 @@ export function validatePostimage(base: CanonicalModelT, raw: unknown,
   const unshown: string[] = [];
   const families = Object.fromEntries(FAMILIES.map(([family, kind]) => {
     const before = new Map((base[family] as readonly Rec[]).map((r) => [String(r['id']), r] as const));
-    // Each changed path said in plain words, saved → proposed; one with no rendering, or that reads the same, is refused.
+    // Each changed group said in plain words, saved → proposed: a path in no group, or a group that reads the same, is refused.
     const said = (id: string, old: Rec | undefined, r: Rec | undefined) => {
       const diff = deltas(bare(old), bare(r));
-      const out = diff.map((d) => {
-        const f = FIELDS[family][d.pattern];
-        return f === undefined ? null : { name: f[0].replace('{n}', String((d.at.at(-1) ?? 0) + 1)), old: was.say(f[1], d.old, old ?? {}), now: now.say(f[1], d.now, r ?? {}) };
-      });
-      const hidden = diff.filter((_, i) => out[i] === null || out[i]!.old === out[i]!.now).map((d) => d.path);
+      const groups = new Map<string, { readonly group: string; readonly at: number; readonly paths: string[] }>();
+      const hidden: string[] = [];
+      for (const d of diff) {
+        const g = GROUPS[family][d.pattern];
+        if (g === undefined) { hidden.push(d.path); continue; }
+        const at = g.endsWith('#') ? d.at[0]! : -1;
+        const key = `${g}${at}`;
+        if (!groups.has(key)) groups.set(key, { group: g, at, paths: [] });
+        groups.get(key)!.paths.push(d.path);
+      }
+      const order = Object.values(GROUPS[family]);
+      const out = [...groups.values()].sort((a, b) => order.indexOf(a.group) - order.indexOf(b.group) || a.at - b.at)
+        .map((x) => ({ ...x, old: was.phrase(family, x.group, old ?? {}, x.at), now: now.phrase(family, x.group, r ?? {}, x.at) }));
+      // A whole item's name and whose it is are the card's label and mark (its schema refuses an empty name), not its text.
+      const whole = old === undefined || r === undefined;
+      for (const x of out) if (x.old === x.now && !(whole && (x.group === 'name' || x.group === 'author'))) hidden.push(...x.paths);
+      // Per field, never per group (Codex P1): on a change, each field that HAD a value, set back alone, must change its
+      // group's words, or that switch would ride unseen beside another (a link moved to a twin while a link is added). A field
+      // that appears with its container (a measure first given) has nothing to switch back to: its group's words say it.
+      if (!whole) for (const x of out) if (x.old !== x.now) for (const d of diff.filter((y) => x.paths.includes(y.path) && y.old != null)) {
+        if (now.phrase(family, x.group, withPath(r!, d.path, d.old), x.at) === x.now) hidden.push(d.path);
+      }
       if (hidden.length > 0) unshown.push(`${id} (${hidden.join(', ')})`);
-      return out.filter((x) => x !== null);
+      return out;
     };
     // An added left-out item is its substance in plain words, starting with its why (the card reads "Leaves out ‘its words’
     // (after)"): then what Olumi asks, what it concerns and whose words it is in, each only when present: "Your words" only
@@ -172,9 +196,15 @@ export function validatePostimage(base: CanonicalModelT, raw: unknown,
       ...(typeof r['quote'] === 'string' ? [typeof r['party'] === 'string' ? `${r['party']}’s words: “${r['quote']}”` : `Your words: “${r['quote']}”`]
         : typeof r['party'] === 'string' ? [`From ${r['party']}`] : [])]
       .reduce((said, part) => `${said}${/[.!?]$/.test(said) ? ' ' : '. '}${part}`);
-    const entry = (id: string, action: ProposalChange['action'], fields: ReturnType<typeof said>, label: string, author: ProposalChange['author'], r?: Rec): ProposalChange => ({ id, kind, action, label,
-      before: action === 'add' ? null : fields.map((x) => `${x.name}: ${x.old}`).join('; '),
-      after: action === 'remove' ? null : action === 'add' && family === 'left_out' ? leftOut(r!) : fields.map((x) => `${x.name}: ${x.now}`).join('; '), author });
+    // A whole item added or removed: its name is the card's label and whose it is (theirs or Olumi's) the card's mark, so
+    // neither is said again; a fixed part of the model's structure is said.
+    const onCard = (x: ReturnType<typeof said>[number], r: Rec) => x.group === 'name' || (x.group === 'author' && r['author'] !== 'structure');
+    const phrase = (fields: ReturnType<typeof said>, side: 'old' | 'now', r: Rec, whole: boolean) =>
+      [...new Set([...(family === 'options' && whole && Array.isArray(r['sets']) && r['sets'].length === 0 ? ['carries on as now'] : []),
+        ...fields.filter((x) => !(whole && onCard(x, r))).map((x) => x[side])].filter((x) => x !== ''))].join(', ');
+    const entry = (id: string, action: ProposalChange['action'], fields: ReturnType<typeof said>, label: string, author: ProposalChange['author'], r: Rec): ProposalChange => ({ id, kind, action, label,
+      before: action === 'add' ? null : phrase(fields, 'old', r, action === 'remove'),
+      after: action === 'remove' ? null : action === 'add' && family === 'left_out' ? leftOut(r) : phrase(fields, 'now', r, action === 'add'), author });
     const records = (post[family] as readonly Rec[]).map((r) => {
       const old = before.get(String(r['id']));
       const fields = said(String(r['id']), old, r);
@@ -188,7 +218,7 @@ export function validatePostimage(base: CanonicalModelT, raw: unknown,
       return record;
     });
     for (const [id, old] of before) if (removals.has(id)) {
-      changes.push(entry(id, 'remove', said(id, old, undefined), was.title(family, old), authorOf(old)));
+      changes.push(entry(id, 'remove', said(id, old, undefined), was.title(family, old), authorOf(old), old));
       history.push({ id, change: 'withdrawn', old: JSON.stringify(old), quote: null, author_id: opts.approver ?? null });
     }
     return [family, records];
@@ -222,6 +252,13 @@ export function readingOf(model: CanonicalModelT, opts: { readonly words: readon
 }
 
 // ── The card's words, rendered from the data (no wording invented) ────────────────────────────────────────────────────
+/** Each value of a field said in plain words: the one phrase table (never an operator or a code on the card). */
+const CMP_WORDS: Record<string, string> = { '>=': 'at least', '<=': 'at most', '>': 'more than', '<': 'less than' };
+const RANGE_WORDS: Record<string, string> = { bounds: 'firm ends', plausible: 'a plausible range' };
+const WHO_WORDS: Record<string, string> = { person: 'yours', olumi: 'Olumi’s', structure: 'a fixed part of the model’s structure' };
+const AGG_WORDS: Record<string, string> = { end: 'by the end of', sum: 'in total over', mean: 'on average over', every: 'in every period of', max: 'at its highest over', min: 'at its lowest over' };
+const AGG_ALONE: Record<string, string> = { end: '', sum: 'in total', mean: 'on average', every: 'in every period', max: 'at its highest', min: 'at its lowest' };
+const of = (words: Readonly<Record<string, string>>, v: unknown): string => (typeof v === 'string' && words[v] !== undefined ? words[v]! : 'not given');
 const n = (x: number) => x.toLocaleString('en-GB', { maximumFractionDigits: 6 });
 const authorOf = (r: Rec): ProposalChange['author'] => (r['author'] === 'person' ? 'person' : 'olumi');
 
@@ -237,30 +274,106 @@ function wordsIn(m: CanonicalModelT) {
     }
     return id;
   };
-  /** A quantity as it is referred to: by name, with its value or range and unit, or that it is asked or worked out. */
+  /** A unit as words: a pure number has none; an identifier's underscores read as spaces ("tech_lead" → "tech lead"). */
+  const unitOf = (u: unknown) => (u === '1' || u === '' || typeof u !== 'string' ? '' : ` ${u.replace(/_/g, ' ')}`);
+  /** A quantity as it is referred to: by name, with its value or range, or that it is asked or worked out. */
   const timed = (id: string) => {
     const q = Q.get(id);
-    return q === undefined ? `"${id}"` : q.status === 'asked' ? `"${q.label}" (asked)` : q.status === 'derived' ? `"${q.label}"`
-      : `"${q.label}" ${q.low !== null && q.high !== null ? `${n(q.low)}–${n(q.high)} ${q.unit}` : q.value !== null ? `${n(q.value)} ${q.unit}` : `(no figure, ${q.unit})`}`;
+    return q === undefined ? `"${id}"` : q.status === 'asked' ? `"${q.label}" (still to be given)` : q.status === 'derived' ? `"${q.label}"`
+      : `"${q.label}" ${q.low !== null && q.high !== null ? `${n(q.low)}–${n(q.high)}${unitOf(q.unit)}` : q.value !== null ? `${n(q.value)}${unitOf(q.unit)}` : `(no figure yet${unitOf(q.unit)})`}`;
   };
   const start = (t: number | string) => (typeof t === 'number' ? (t === 0 ? 'from the start' : `after ${t} ${m.period}s`) : `from ${timed(t)}`);
-  /** One value, as a changed field says it. */
-  const say = (as: Say, v: unknown, r: Rec): string => {
-    if (v === null || v === undefined) return 'none';
-    switch (as) {
-      case 'q': return timed(String(v));
-      case 'rec': return `"${named(String(v))}"`;
-      case 'num': return typeof v === 'number' ? n(v) : String(v);
-      case 'amount': return typeof v === 'number' ? `${n(v)} ${String(r['unit'])}` : String(v);
-      case 'text': return `"${String(v)}"`;
-      case 'word': return String(v);
-      case 'who': return v === 'person' ? 'theirs' : v === 'olumi' ? 'Olumi’s' : 'the model’s structure';
-      case 'flag': return v === true ? 'yes' : 'no';
-      case 'timing': return start(v as number | string);
+  const list = (ids: unknown) => (Array.isArray(ids) ? ids.map((id) => `"${named(String(id))}"`) : []);
+  const and = (xs: readonly string[]) => (xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
+  /** A figure from its value, range, reading and unit, all together. */
+  const figure = (r: Rec) => {
+    const u = unitOf(r['unit']), at = (k: string) => (typeof r[k] === 'number' ? `${n(r[k] as number)}${u}` : null);
+    const bare = (k: string) => n(r[k] as number);
+    const reading = typeof r['range_kind'] === 'string' ? ` (${of(RANGE_WORDS, r['range_kind'])})` : '';
+    if (at('low') !== null && at('high') !== null) return `from ${bare('low')} to ${at('high')}${at('value') !== null ? `, most likely ${bare('value')}` : ''}${reading}`;
+    const ends = [...(at('low') !== null ? [`no lower than ${at('low')}`] : []), ...(at('high') !== null ? [`no higher than ${at('high')}`] : [])].join(', ');
+    // A worked-out figure has no figure of its own to give: only its unit.
+    const none = r['status'] === 'derived' ? (u === '' ? '' : `in${u}`) : `no figure yet${u === '' ? '' : ` (in${u})`}`;
+    return [at('value') ?? none, ...(ends === '' ? [] : [ends])].filter((x) => x !== '').join(', ') + reading;
+  };
+  /** Whose words an item is in: the person's own, or someone they report, by name. */
+  const words = (r: Rec) => (typeof r['quote'] === 'string' ? `in ${typeof r['party'] === 'string' ? `${r['party']}’s` : 'your'} words "${r['quote']}"`
+    : typeof r['party'] === 'string' ? `said by ${r['party']}` : 'not in your words');
+  const measured = (r: Rec, say: (mm: Rec) => string) => (isRec(r['measure']) ? say(r['measure']) : 'no measure yet');
+  const reference = (ref: unknown) => (!isRec(ref) || ref['kind'] === 'now' ? 'now' : ref['kind'] === 'option' ? `"${named(String(ref['option']))}"` : timed(String(ref['quantity'])));
+  /** One group of an item's fields, said as one plain phrase from the item itself (`at`: its list entry, for `#`). */
+  const phrase = (family: Family, group: string, r: Rec, at: number): string => {
+    // The side of an add or a removal where the item does not exist: never the words of any value it could have.
+    if (Object.keys(r).length === 0) return '(not there)';
+    const q = (k: string) => (typeof r[k] === 'string' ? timed(r[k] as string) : 'nothing');
+    switch (group) {
+      case 'name': return family === 'relations' ? `for ${q('defines')}` : family === 'preferences' ? `about ${q('quantity')}` : family === 'dissent' ? `held by "${String(r['holder'] ?? '')}"`
+        : family === 'quantities' || family === 'goals' || family === 'limits' || family === 'options' || family === 'risks' ? `named "${String(r['label'] ?? '')}"` : `worded "${String(r['text'] ?? '')}"`;
+      case 'figure': return figure(r);
+      case 'kind': return family === 'conditions' ? of({ prerequisite: 'a prerequisite', challenge: 'a challenge' }, r['kind']) : of({ fact: 'a fact', coefficient: 'a rate', derived: 'a result' }, r['kind']);
+      case 'status': return family === 'options' ? of({ live: 'compared', ruled_out: 'ruled out, kept in view', removed: 'taken out of the comparison' }, r['status'])
+        : of({ known: 'known', estimated: 'an estimate', asked: 'still to be given', derived: 'worked out from the model', unknown: 'not known yet', not_applicable: 'does not apply',
+          unsupported: 'outside what the model can use' }, r['status']);
+      case 'question': return typeof r['question'] === 'string' ? `Olumi asks "${r['question']}"` : 'no question';
+      case 'basis': return typeof r['basis'] === 'string' ? `based on "${r['basis']}"` : 'no basis given';
+      case 'author': return of(WHO_WORDS, r['author']);
+      case 'words': return words(r);
+      case 'how': {
+        const parts = Array.isArray(r['parts']) ? (r['parts'] as Rec[]) : [];
+        const terms = Array.isArray(r['terms']) ? (r['terms'] as Rec[]) : [];
+        const each = (ids: unknown, verb: string) => (Array.isArray(ids) ? ids.map((id) => `, ${verb} ${timed(String(id))}`).join('') : '');
+        if (r['form'] === 'effect') return `an effect on ${q('defines')}, starting from ${q('base')}${terms.map((t) => `, raised by ${timed(String(t['coefficient']))} for each ${timed(String(t['driver']))}`).join('')}`;
+        if (r['form'] === 'stock') return `a running total of ${q('defines')}, starting at ${q('start')}${each(r['inflows'], 'adding')}${each(r['outflows'], 'taking away')}, each ${m.period}`;
+        if (r['form'] !== 'definition') return 'no calculation';
+        const said = parts.map((x, i) => (r['op'] === 'product'
+          ? `${i === 0 ? (x['power'] === -1 ? 'one divided by ' : '') : x['power'] === -1 ? ' divided by ' : ' multiplied by '}${timed(String(x['id']))}`
+          : `${i === 0 ? (x['sign'] === -1 ? 'less ' : '') : x['sign'] === -1 ? ', lowered by ' : ', raised by '}${timed(String(x['id']))}`)).join('');
+        return `${q('defines')} is ${r['op'] === 'product' ? said : `the sum of ${said}`}`;
+      }
+      case 'link#': {
+        // A link's own authorship is said where it is not the item's (the card's mark), and its words where it has them.
+        const t = Array.isArray(r['terms']) ? (r['terms'] as Rec[])[at] : undefined;
+        if (t === undefined) return `no link ${at + 1}`;
+        const own = [...(t['author'] !== r['author'] ? [`is ${of(WHO_WORDS, t['author'])}`] : []), ...(typeof t['quote'] === 'string' || typeof t['party'] === 'string' ? [words(t)] : [])];
+        return own.length === 0 ? '' : `link ${at + 1} ${own.join(', ')}`;
+      }
+      case 'measure': return measured(r, (mm) => {
+        const frame = mm['frame'] === 'change_abs' ? `, as a change from ${reference(mm['reference'])}` : mm['frame'] === 'change_rel' ? `, as a relative change from ${reference(mm['reference'])}`
+          : isRec(mm['reference']) ? `, compared with ${reference(mm['reference'])}` : '';
+        return `${timed(String(mm['quantity']))}${typeof mm['per'] === 'string' ? ` per ${timed(mm['per'])}` : ''} ${of(CMP_WORDS, mm['cmp'])} ${timed(String(mm['target'] ?? mm['bound']))}${frame}`;
+      });
+      case 'when': return measured(r, (mm) => {
+        const w = isRec(mm['window']) ? mm['window'] : null, agg = String(mm['aggregation']);
+        if (w === null) return `${agg === 'end' ? '' : `${of(AGG_ALONE, agg)}, `}no deadline set`;
+        return `${of(AGG_WORDS, agg)} ${timed(String(w['periods']))}${typeof w['start'] === 'number' && w['start'] > 0 ? `, starting after ${w['start']} ${m.period}s` : ''}`
+          + `${typeof w['origin_event'] === 'string' ? `, counted from "${w['origin_event']}"` : ''}${typeof w['origin_offset'] === 'string' ? `, which is ${timed(w['origin_offset'])} from now` : ''}`;
+      });
+      case 'measure_by': return measured(r, (mm) => (mm['measure_by'] === 'olumi' ? 'Olumi’s suggested measure' : 'the measure you named'));
+      case 'rests': return measured(r, (mm) => (list(mm['assumptions']).length > 0 ? `resting on ${and(list(mm['assumptions']))}` : 'resting on nothing stated'));
+      case 'excludes': return measured(r, (mm) => (list(mm['exclusions']).length > 0 ? `leaving out ${and(list(mm['exclusions']))}` : 'leaving nothing out'));
+      case 'direction': return of({ lower: 'lower is better', higher: 'higher is better' }, r['direction']);
+      case 'variant': return typeof r['developed_from'] === 'string' ? `a variant of "${named(r['developed_from'])}"` : 'not a variant of another option';
+      case 'setting#': {
+        const x = Array.isArray(r['sets']) ? (r['sets'] as Rec[])[at] : undefined;
+        if (x === undefined) return 'without this setting';
+        const to = typeof x['to'] === 'string' ? timed(x['to']) : figure({ ...x, unit: Q.get(String(x['quantity']))?.unit });
+        return `sets ${timed(String(x['quantity']))} to ${to} ${start(x['starts_after_periods'] as number | string)}${typeof x['question'] === 'string' ? `, Olumi asks "${x['question']}"` : ''}`
+          + `${x['author'] === 'structure' ? ', as a switch' : x['author'] !== r['author'] ? `, as ${of(WHO_WORDS, x['author'])}` : ''}${typeof x['quote'] === 'string' && x['quote'] !== r['quote'] ? `, in your words "${x['quote']}"` : ''}`;
+      }
+      case 'chance': return `with a chance of ${q('occurrence')}`;
+      case 'effect': return r['mode'] === 'multiply' ? `multiplying ${q('effect_on')} by ${q('severity')}` : `adding ${q('severity')} to ${q('effect_on')}`;
+      case 'starts': return start(r['starts_after_periods'] as number | string);
+      case 'about': return list(r['concerns']).length > 0 ? `about ${and(list(r['concerns']))}` : 'about nothing in particular';
+      case 'source': return typeof r['source'] === 'string' ? `from "${r['source']}"` : 'no source given';
+      case 'bears': return of({ supports: 'in support', challenges: 'as a challenge', informs: 'for information' }, r['bears']);
+      case 'applied': return r['applied'] === true ? 'applied in the model' : 'not applied in the model';
+      case 'position': return `who says "${String(r['position'] ?? '')}"`;
+      case 'why': return `left out because "${String(r['why'] ?? '')}"`;
+      default: return `${group} (no plain words)`;
     }
   };
   /** An item's name on the card. */
   const title = (family: Family, r: Rec): string => String(family === 'relations' ? label(String(r['defines'])) : family === 'preferences' ? label(String(r['quantity']))
     : r['label'] ?? r['text'] ?? r['holder']);
-  return { title, say, named };
+  return { title, phrase, named };
 }
