@@ -17,7 +17,7 @@ import { compile, isStructuralConstant, normalise } from '../../model-program/co
 import { CORE_ALIGNED_INSTRUCTIONS } from '../../core-route/instructions.js';
 import { project } from '../../model-program/project.js';
 import { simulate } from '../../model-program/simulate/simulate.js';
-import { CANONICAL_JSON_SCHEMA, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX } from '../prompt.js';
+import { CANONICAL_JSON_SCHEMA, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX, UPDATE_PREFIX } from '../prompt.js';
 import { evaluateCanonical, seedOf, RUN_DRAWS } from '../evaluate.js';
 import { programReadOf, reopenProgram, savedProgramOf, sourceTextOf } from '../program-store.js';
 import { applyCanvasFigure, applyProgramChange, ProgramChangeParams, proposeProgramChange, readProgramContext, runProgram } from '../program-tools.js';
@@ -487,7 +487,8 @@ describe('the model-program turn on the real core route', () => {
     // One drafter call per proposal: the person's words, the saved model and the change.
     expect(sent).toHaveLength(2);
     expect(sent[1]!.input.map((m: Json) => m.role)).toEqual(['user', 'assistant', 'user']);
-    expect(sent[1]!.input[2].content).toContain('The change: The oven price is their answer: about £2,500.\nRemove: nothing');
+    // The update's request is prompt.ts's text, then the change (DL 24 Oct: the update text is prompt code).
+    expect(sent[1]!.input[2].content).toBe(`${UPDATE_PREFIX}\nThe change: The oven price is their answer: about £2,500.\nRemove: nothing`);
     // The card shows the change's substance, before and after, and whose it is.
     expect(proposed.data.changes).toEqual([{ id: 'oven_price', kind: 'quantity', action: 'change', label: 'oven price', before: 'no figure yet (in GBP/oven), still to be given, Olumi asks "What would the second oven cost?", no basis given, not in your words',
       after: `2,500 GBP/oven, known, no question, based on "${APPROXIMATE_FIGURE}", in your words "The oven would cost about £2,500."`, author: 'person' }]);

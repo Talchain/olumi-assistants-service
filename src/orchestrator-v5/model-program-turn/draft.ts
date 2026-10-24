@@ -12,7 +12,7 @@ import { coreBudget } from '../agent-lane/model-budgets.js';
 import { agentRequestIdentity } from '../agent-lane/runtime/prompt-identity.js';
 import { CanonicalModel, type CanonicalModelT } from '../model-program/canonical.js';
 import { compile, compileJson, normalise, type CompileError, type CompileResult } from '../model-program/compile.js';
-import { CANONICAL_JSON_SCHEMA, CANONICAL_SCHEMA_NAME, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX } from './prompt.js';
+import { CANONICAL_JSON_SCHEMA, CANONICAL_SCHEMA_NAME, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX, UPDATE_PREFIX } from './prompt.js';
 
 export const MAX_REPAIRS = 2;
 export const DRAFT_REASONING_EFFORT = 'medium' as const;
@@ -100,12 +100,6 @@ export async function draftCanonicalModel(brief: string | readonly InputMessage[
   }
   return { model, compiled, attempts };
 }
-
-/**
- * The request for an update (simplify v1, A3). Contract text, kept beside the call until the prompt builder places it in
- * prompt.ts: keep every record and id, leave out only what is listed, a new item gets a new id, the person's words exact.
- */
-export const UPDATE_PREFIX = 'Update the model above for the change below, and return the WHOLE model. Keep every record, with its id, exactly as it is unless the change is to it. Leave out only the ids listed to remove. A new item gets a new id. The person\'s own figures quote their words exactly; anything you add yourself is olumi\'s. Keep the history as it is.';
 
 /**
  * THE AI'S POSTIMAGE (simplify v1: every intended update, the path mechanism completion began): the SAME drafter, in a
