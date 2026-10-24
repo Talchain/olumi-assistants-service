@@ -43,7 +43,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
   it('the sent core instructions, byte for byte, plus the canvas-coaching sentence once (the route row in core-turn.route.test.ts pins the same bytes as the SDK receives them)', () => {
     expect(b.split(NOTE_ON_ITEM_INSTRUCTION)).toHaveLength(2);
     // 23 Oct (ALPHA): the model-program prompt replaces arm B's assembled reference (055841368f…, 29,512 characters sent).
-    expect(createHash('sha256').update(b, 'utf8').digest('hex')).toBe('e2fdcbef201e7217062abcb03d3ba21f3b948a298e5ab8dae46485aaf552b65c'); // 23 Oct (prompt builder, P1/P4): at most three questions, each once, never what their words state.
+    expect(createHash('sha256').update(b, 'utf8').digest('hex')).toBe('7a9bb9088ce4e3c0175c6ae53f66c9333d580472a2b84e0936308afff148c817'); // 24 Oct: remodel coaching (after 23 Oct P1/P4: at most three questions), each once, never what their words state.
     // Candidate-3 witness kept (21 Oct): WHEN to build. Text only, not behaviour.
     expect(b).toContain('draft the first model from their brief in that same turn, even when figures are missing');
   });

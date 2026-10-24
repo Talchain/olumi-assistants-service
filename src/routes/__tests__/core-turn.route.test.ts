@@ -920,7 +920,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
 
     it('(6) ALPHA (23 Oct) + Codex r1 BLOCK 4 on #3709: a saved PROGRAM\'s turn gets the model-program instructions; a saved Living Model keeps the old text, byte for byte', async () => {
       // Pinned from the request bodies the provider received on this route, not from the module that builds them.
-      const PROGRAM_SHA = 'e2fdcbef201e7217062abcb03d3ba21f3b948a298e5ab8dae46485aaf552b65c'; // 23 Oct: P1/P4 question rules
+      const PROGRAM_SHA = '7a9bb9088ce4e3c0175c6ae53f66c9333d580472a2b84e0936308afff148c817'; // 24 Oct: remodel coaching (after P1/P4)
       const LIVING_MODEL_SHA = '7a1bced23a44dccc478a00d075b28bbe2dda487a4b6da868ae3a477698097e44'; // staging 646d374e's
       const sha = (c: Json) => createHash('sha256').update(String(c.instructions), 'utf8').digest('hex');
       outputs = [[{ type: 'message', text: 'Here is what the model holds.' }]];
@@ -935,6 +935,12 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(sha(calls[0]!)).toBe(PROGRAM_SHA);
       expect(String(calls[0]!.instructions)).toContain('draft the first model from their brief in that same turn, even when figures are missing');
       expect(String(calls[0]!.instructions)).not.toContain('POLYMATH COACHING');
+      // Remodel coaching (DL 24 Oct, Paul's rule): a person can always choose to remodel; Olumi coaches the restatement and
+      // never starts a new scenario or redrafts this one for them. Spelled as SENT.
+      expect(String(calls[0]!.instructions)).toContain('When they say Olumi has misread their situation, or you cannot tell what their brief means without guessing, say in one line '
+        + 'what may have been misread, ask them to restate it in their own words (the outcome they want, the options, what they know), and tell them they can start a new '
+        + 'scenario from that clarified brief while this one stays as it was; never start one for them or redraft this model instead, and never raise it while they are '
+        + 'answering or editing.');
     });
 
     it('Challenge on a PROGRAM board (served 502 on board 5715db98, 24 Oct): no first tool is forced, as its tools have no note_on_item; the note rides the turn and a reply comes back. A Living Model board keeps note_on_item', async () => {
