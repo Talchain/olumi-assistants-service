@@ -1,0 +1,305 @@
+{
+ "source": "served reading-card run, scenario fc9ab632-e368-429d-8414-8c0e3accaf98 (CEE 1fd6f8cb, UI 1e23ded3), the first draft as saved",
+ "brief": "We are comparing two staffing options, labelled exactly \"Keep current staffing\" and \"Add one specialist\". Use the exact goal label \"Weekly support capacity\". Our existing team resolves 80 tickets per week. Keep current staffing adds no specialist. Add one specialist adds one specialist. Each additional specialist resolves about 20 tickets per week, between 10 and 30. Total weekly support capacity is defined as the existing 80 tickets per week plus the additional specialist capacity. Goal: weekly support capacity of at least 100 tickets per week. This target is an absolute level, with no deadline.",
+ "canonical": {
+  "goals": [
+   {
+    "id": "support_capacity_goal",
+    "label": "Weekly support capacity",
+    "party": null,
+    "quote": "Goal: weekly support capacity of at least 100 tickets per week.",
+    "author": "person",
+    "measure": {
+     "cmp": ">=",
+     "per": null,
+     "frame": "level",
+     "target": "capacity_target",
+     "window": null,
+     "quantity": "weekly_support_capacity",
+     "reference": null,
+     "exclusions": [],
+     "measure_by": "person",
+     "aggregation": "end",
+     "assumptions": []
+    },
+    "approval": "proposed",
+    "question": null,
+    "author_id": null
+   }
+  ],
+  "risks": [],
+  "claims": [],
+  "limits": [],
+  "period": "week",
+  "dissent": [],
+  "history": [],
+  "options": [
+   {
+    "id": "keep_current_staffing",
+    "sets": [
+     {
+      "to": "keep_current_staffing__additional_specialists",
+      "low": null,
+      "high": null,
+      "quote": "Keep current staffing adds no specialist.",
+      "value": null,
+      "author": "person",
+      "quantity": "additional_specialists",
+      "question": null,
+      "range_kind": null,
+      "starts_after_periods": 0
+     }
+    ],
+    "label": "Keep current staffing",
+    "party": null,
+    "quote": "Keep current staffing adds no specialist.",
+    "author": "person",
+    "status": "live",
+    "approval": "proposed",
+    "author_id": null,
+    "developed_from": null
+   },
+   {
+    "id": "add_one_specialist",
+    "sets": [
+     {
+      "to": "add_one_specialist__additional_specialists",
+      "low": null,
+      "high": null,
+      "quote": "Add one specialist adds one specialist.",
+      "value": null,
+      "author": "person",
+      "quantity": "additional_specialists",
+      "question": null,
+      "range_kind": null,
+      "starts_after_periods": 0
+     }
+    ],
+    "label": "Add one specialist",
+    "party": null,
+    "quote": "Add one specialist adds one specialist.",
+    "author": "person",
+    "status": "live",
+    "approval": "proposed",
+    "author_id": null,
+    "developed_from": null
+   }
+  ],
+  "version": "canonical.v1",
+  "evidence": [],
+  "left_out": [],
+  "question": "Which staffing option meets weekly support capacity of at least 100 tickets per week?",
+  "relations": [
+   {
+    "id": "specialist_capacity_effect",
+    "base": "zero_additional_capacity",
+    "form": "effect",
+    "party": null,
+    "quote": "Each additional specialist resolves about 20 tickets per week, between 10 and 30.",
+    "terms": [
+     {
+      "party": null,
+      "quote": "Each additional specialist resolves about 20 tickets per week, between 10 and 30.",
+      "author": "person",
+      "driver": "additional_specialists",
+      "approval": "proposed",
+      "author_id": null,
+      "coefficient": "capacity_per_specialist"
+     }
+    ],
+    "author": "person",
+    "defines": "additional_capacity",
+    "approval": "proposed",
+    "author_id": null
+   },
+   {
+    "id": "total_capacity_definition",
+    "op": "sum",
+    "form": "definition",
+    "parts": [
+     {
+      "id": "existing_capacity",
+      "sign": 1
+     },
+     {
+      "id": "additional_capacity",
+      "sign": 1
+     }
+    ],
+    "party": null,
+    "quote": "Total weekly support capacity is defined as the existing 80 tickets per week plus the additional specialist capacity.",
+    "author": "person",
+    "defines": "weekly_support_capacity",
+    "approval": "proposed",
+    "author_id": null
+   }
+  ],
+  "conditions": [],
+  "quantities": [
+   {
+    "id": "existing_capacity",
+    "low": null,
+    "high": null,
+    "kind": "fact",
+    "unit": "ticket/week",
+    "basis": null,
+    "label": "Existing team capacity",
+    "party": null,
+    "quote": "Our existing team resolves 80 tickets per week.",
+    "value": 80,
+    "author": "person",
+    "status": "known",
+    "approval": "proposed",
+    "question": null,
+    "author_id": null,
+    "range_kind": null
+   },
+   {
+    "id": "additional_specialists",
+    "low": null,
+    "high": null,
+    "kind": "fact",
+    "unit": "specialist",
+    "basis": null,
+    "label": "Additional specialists",
+    "party": null,
+    "quote": "Keep current staffing adds no specialist.",
+    "value": 0,
+    "author": "person",
+    "status": "known",
+    "approval": "proposed",
+    "question": null,
+    "author_id": null,
+    "range_kind": null
+   },
+   {
+    "id": "capacity_per_specialist",
+    "low": 10,
+    "high": 30,
+    "kind": "coefficient",
+    "unit": "ticket/week/specialist",
+    "basis": null,
+    "label": "Weekly capacity per additional specialist",
+    "party": null,
+    "quote": "Each additional specialist resolves about 20 tickets per week, between 10 and 30.",
+    "value": 20,
+    "author": "person",
+    "status": "known",
+    "approval": "proposed",
+    "question": null,
+    "author_id": null,
+    "range_kind": "bounds"
+   },
+   {
+    "id": "zero_additional_capacity",
+    "low": null,
+    "high": null,
+    "kind": "fact",
+    "unit": "ticket/week",
+    "basis": "Zero additional specialist capacity when no additional specialist is added.",
+    "label": "Additional capacity with no additional specialists",
+    "party": null,
+    "quote": null,
+    "value": 0,
+    "author": "structure",
+    "status": "known",
+    "approval": "proposed",
+    "question": null,
+    "author_id": null,
+    "range_kind": null
+   },
+   {
+    "id": "additional_capacity",
+    "low": null,
+    "high": null,
+    "kind": "derived",
+    "unit": "ticket/week",
+    "basis": null,
+    "label": "Additional specialist capacity",
+    "party": null,
+    "quote": null,
+    "value": null,
+    "author": "olumi",
+    "status": "derived",
+    "approval": "proposed",
+    "question": null,
+    "author_id": null,
+    "range_kind": null
+   },
+   {
+    "id": "weekly_support_capacity",
+    "low": null,
+    "high": null,
+    "kind": "derived",
+    "unit": "ticket/week",
+    "basis": null,
+    "label": "Weekly support capacity",
+    "party": null,
+    "quote": "Total weekly support capacity is defined as the existing 80 tickets per week plus the additional specialist capacity.",
+    "value": null,
+    "author": "person",
+    "status": "derived",
+    "approval": "proposed",
+    "question": null,
+    "author_id": null,
+    "range_kind": null
+   },
+   {
+    "id": "capacity_target",
+    "low": null,
+    "high": null,
+    "kind": "fact",
+    "unit": "ticket/week",
+    "basis": null,
+    "label": "Weekly support capacity target",
+    "party": null,
+    "quote": "Goal: weekly support capacity of at least 100 tickets per week.",
+    "value": 100,
+    "author": "person",
+    "status": "known",
+    "approval": "proposed",
+    "question": null,
+    "author_id": null,
+    "range_kind": null
+   },
+   {
+    "id": "keep_current_staffing__additional_specialists",
+    "low": null,
+    "high": null,
+    "kind": "fact",
+    "unit": "specialist",
+    "basis": null,
+    "label": "Keep current staffing: Additional specialists",
+    "party": null,
+    "quote": "Keep current staffing adds no specialist.",
+    "value": 0,
+    "author": "person",
+    "status": "known",
+    "approval": "proposed",
+    "question": null,
+    "author_id": null,
+    "range_kind": null
+   },
+   {
+    "id": "add_one_specialist__additional_specialists",
+    "low": null,
+    "high": null,
+    "kind": "fact",
+    "unit": "specialist",
+    "basis": null,
+    "label": "Add one specialist: Additional specialists",
+    "party": null,
+    "quote": "Add one specialist adds one specialist.",
+    "value": 1,
+    "author": "person",
+    "status": "known",
+    "approval": "proposed",
+    "question": null,
+    "author_id": null,
+    "range_kind": null
+   }
+  ],
+  "assumptions": [],
+  "preferences": []
+ }
+}
