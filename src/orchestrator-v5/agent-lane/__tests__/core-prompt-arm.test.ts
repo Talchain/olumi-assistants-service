@@ -76,7 +76,8 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     // default, a direction-only one kept in words with its size unknown; never a forced number; quotes copied exactly; the
     // update's own text lives here with the draft's goal rule; periods counted as starts_after_periods (#3713).
     // 24 Oct (AIE 6386018855 §5, accepted by the DL): Olumi may propose a measure, options and missing drivers, at first drafting only.
-    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('c5a7b55ac7b2701fce79405bb562337dbaf67b1917dcc2bbcc1867c63e993c97');
+    // 25 Oct (AIE programme-docs 6389288710): the AIE's effect-sizing policy replaces the sizing rules, in one place (was c5a7b55a…).
+    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('a64645635e49e55d75f6159a6461b028134e3d09071d6c07149d0bbd5d019838');
     expect(createHash('sha256').update(UPDATE_PREFIX, 'utf8').digest('hex')).toBe('3fc74a39f5db5290b72b37b7e2228c696a0fdeb5c2b017f96f3883bfedf3e0fb');
     expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('bed04fc58a01dbd02d8f5c8aa6ef171731a356c1cde47a85e0cd64be35416653'); // 23 Oct (DL 93d79c3e, C2 double prime): a definition's parts are factors with levels, never another definition; a STATED per-unit effect is a sized link. 22 Oct: every stated goal saved in their words, never approximated (Claude r1 on #3670); + a calendar date is Olumi's labelled reading
     // The retired constants are gone from both modules: no route can send the accreted text again.
@@ -168,13 +169,14 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(b).not.toContain(words);
   });
 
-  it('the model-program drafter (DL 24 Oct): only their facts wait, link sizes stay Olumi\u2019s estimates, quotes are copied exactly, and an update keeps every option reaching every goal', () => {
+  it('the model-program drafter (DL 24 Oct; AIE 25 Oct): only their facts wait, a link Olumi adds is sized where a scale is supported and otherwise kept with its direction, quotes are copied exactly, and an update keeps every option reaching every goal', () => {
     for (const rule of [
       'its quote is their words copied exactly, one unbroken stretch, never reworded or joined.',
       'what they know or decide: current levels, prices, costs, budgets and how they split them, headcount, dates, durations, targets.',
       'Never ask them for a link\'s size or an option\'s effect.',
       // DL 24 Oct (blind score of 1510a008, mrr structure): an identity is a definition; a missing figure is asked on its item.
-      'Mechanism: every option reaches every measured goal through relations from what it sets; a quantity that is by definition a product or sum of others is a definition, never an effect; each other link is sized by their coefficient or Olumi\'s estimate.',
+      // AIE 6389288710 (25 Oct): the link-sizing clause is gone from here; the Mechanisms rule is the one sizing policy.
+      'Mechanism: every option reaches every measured goal through relations from what it sets; a quantity that is by definition a product or sum of others is a definition, never an effect. Model',
       // AIE 6386018855 §5 (DL 24 Oct): the capture-only clauses replaced, each permission once, attributed and grounded.
       'Olumi\'s own additions (a suggested measure, options, drivers, risks) are made when the model is first drafted; a repair or an update changes only what it asks.',
       'Model the main reason each option could succeed and the main reason it could fail.',
@@ -198,13 +200,12 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       // Buddy 24 Oct 08:48Z (accepted): the frame follows their words, as canonical.ts GOAL_FRAMES and compile.lowerChange do.
       'A goal\'s frame follows their words: a change stated as a percentage or share ("8 % more") is change_rel from now, and where they give no figure for today, today is 1, carrying on keeps it there (an assumption) and each effect is a proportional change, so today\'s level is not asked;',
       'a change stated in units ("12 more parcels a day than now") is change_abs in those units; a target stated as a level stays a level.',
-      'A level the result does need is their fact, asked as a recent measured figure ("last month\'s"), saying how they could measure it.',
-      // DL 24 Oct (milestone blind score, effects-not-estimated): a range is defensible when its order of magnitude is knowable.
-      'A link or effect (an option\'s added effect included) is theirs or, by default, Olumi\'s provisional estimate with a defensible range in natural units and a plain basis.',
-      // Buddy 24 Oct 08:17Z (accepted): capacity is not output.
-      'A range is defensible when general knowledge of how such things work gives its order of magnitude, however wide the span (a second matched, staffed van roughly doubles available vehicle capacity, give or take; completed deliveries also depend on demand and other bottlenecks).',
+      // AIE 6389288710 (25 Oct): the later sizing sentences are gone; the Questions rule ends on the measured level.
+      'A level the result does need is their fact, asked as a recent measured figure ("last month\'s"), saying how they could measure it.\n\nExample: ',
+      // AIE 6389288710 (25 Oct): the effect-sizing policy, verbatim, once, in the Mechanisms rule, then how it is written in the schema.
+      '- Mechanisms (kind "coefficient"): how much a driver moves what it drives. Keep supplied effects and their sources. For an effect Olumi adds, give a provisional natural-unit estimate and a plausible low/high range when the mechanism and available knowledge support a scale; record the concrete basis and important conditions. A missing local study alone does not make an effect unknown. If no defensible scale is available, retain its direction, explain why its size is unknown and name the evidence that would size it. Never invent a range merely to produce a chance, and never estimate a missing person-specific fact.',
       // DL 24 Oct (with S3's issue 39): an unsized link's direction goes in direction; one with no direction anyone can give is a note.
-      'Only an effect with no knowable scale keeps its size unknown, its direction in direction (raises or lowers) and what would size it in its basis; an effect whose direction no one can say is a note, not a link. Never force a number to get a chance.',
+      'Olumi\'s estimate is status "estimated", author "olumi", range_kind "plausible", in natural units per natural unit; a size that stays unknown is status "unknown", its direction in direction (raises or lowers), why and what would size it in its basis; an effect whose direction no one can say is a note, not a link. Never ask them for a link\'s size or an option\'s effect.',
       'A stock\'s level after n periods is its start plus n periods of its flows.',
       'sets ovens_added to one_oven, starts_after_periods 0;',
     ]) expect(count(DRAFTING_INSTRUCTIONS, rule), rule).toBe(1);
@@ -227,6 +228,10 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(count(PROGRAM_TURN_GUIDANCE, 'call propose_change ONCE: an answer to a listed question goes in answers, on that item\'s id; any other change goes in request,')).toBe(1);
     for (const old of ['If only its direction can be defended', 'uncertainty alone is not a reason to withhold', 'what they expect without the options included', 'roughly doubles daily deliveries',
       'A goal or limit stated against today is relative to today']) expect(DRAFTING_INSTRUCTIONS, old).not.toContain(old);
+    // AIE 6389288710 (25 Oct): the sizing sentences the policy supersedes are gone from the prompt, so "estimate" and "unknown" no longer compete.
+    for (const old of ['is Olumi\'s estimate unless they gave it', 'an honest low and high', 'a one-line basis', 'each other link is sized by their coefficient or Olumi\'s estimate',
+      'by default, Olumi\'s provisional estimate with a defensible range', 'A range is defensible when', 'order of magnitude', 'roughly doubles available vehicle capacity',
+      'Only an effect with no knowable scale', 'Never force a number to get a chance']) expect(DRAFTING_INSTRUCTIONS, old).not.toContain(old);
     // Buddy 08:48Z: a level target and a change in units are never turned into a ratio. Only the change_rel clause sets today
     // to 1 or makes effects proportional; the change_abs and level clauses carry neither.
     const frames = DRAFTING_INSTRUCTIONS.slice(DRAFTING_INSTRUCTIONS.indexOf('A goal\'s frame follows their words:'));
@@ -238,7 +243,16 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(Object.keys(programDraft)).not.toContain('UPDATE_PREFIX');
     // The schema is prompt text too (sent on every drafting call): `unknown` only where nothing rests on it (served funding dead end).
     const sentSchema = JSON.stringify(CANONICAL_JSON_SCHEMA);
-    expect(count(sentSchema, 'unknown: it matters, but no defensible range can be given yet (at most its direction, in direction): every figure null; basis says why and what would size it.')).toBe(1);
+    // AIE 6389288710 (25 Oct): the schema says the same sizing policy as the prompt: estimated where a scale is supported, unknown with its direction otherwise.
+    for (const rule of [
+      'unknown: it matters, but no defensible scale is available (a missing local study alone does not make it unknown): every figure null, its direction kept in direction where it has one; basis says why its size is unknown and names the evidence that would size it.',
+      'the person\'s when they gave it; otherwise Olumi\'s labelled estimate, with low and high, when the mechanism and available knowledge support a scale, or unknown with its direction when no defensible scale is available;',
+      'For estimated: the concrete basis the estimate rests on, with any important conditions, in plain words.',
+      'For unknown: why its size is unknown and the evidence that would size it. For not_applicable or unsupported: why.',
+      'with its own author and its range, or, where no defensible scale is available, its size unknown with its direction.'])
+      expect(count(sentSchema, rule), rule).toBe(1);
+    for (const old of ['no defensible range can be given yet', 'Olumi may estimate it, labelled, with low and high', 'one plain sentence on what the estimate rests on',
+      'For unknown, not_applicable or unsupported', 'with its own range and author']) expect(sentSchema, old).not.toContain(old);
     // Issue 39 (DL 24 Oct): an unsized link's direction has its own field, said once as sent.
     expect(count(sentSchema, 'For a link\'s size (a coefficient), used only when no figure is given (no most likely figure, and no range or one that spans zero): raises when more of the driver means more of what it moves, lowers when it means less; null when no one can say which. Null for every other quantity.')).toBe(1);
     // Neither the old open-ended text nor a rule that forces an estimate (buddy science BLOCK, 24 Oct) is sent.

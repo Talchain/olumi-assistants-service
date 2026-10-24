@@ -99,19 +99,19 @@ export const CanonicalQuantity = z.object({
   range_kind: RANGE_KIND,
   kind: z.enum(QUANTITY_KINDS).describe(
     'fact: a figure about the person\'s own situation (their price, costs, headcount, members today, dates, targets): only they can give it, so a missing fact is asked, never estimated. '
-    + 'coefficient: the size of a mechanism (each extra oven adds so many loaves; the share of visitors who join; a rate): Olumi may estimate it, labelled, with low and high; a link\'s size stays a coefficient even when it is worked out by a relation. '
+    + 'coefficient: the size of a mechanism (each extra oven adds so many loaves; the share of visitors who join; a rate): the person\'s when they gave it; otherwise Olumi\'s labelled estimate, with low and high, when the mechanism and available knowledge support a scale, or unknown with its direction when no defensible scale is available; a link\'s size stays a coefficient even when it is worked out by a relation. '
     + 'derived: worked out by its relation and not a link\'s size (profit, total members): its status is derived. A structural constant is a fact.'),
   status: z.enum(QUANTITY_STATUSES).describe(
     'known: a figure in hand that is not an estimate: the person\'s (quoted), a structural constant (author structure), or Olumi\'s reading of a stated calendar date as a window\'s whole number of periods (basis names the date). '
     + 'estimated: Olumi\'s provisional estimate of a coefficient, always with low and high, as wide as what is genuinely unknown. Never a fact. '
     + 'asked: a figure only the person can know (their own costs, prices, headcount, dates) that they did not give: every figure null, with a question. Never estimate it, and never ask for the result itself (a goal\'s own quantity). '
     + 'derived: worked out by exactly one relation (a definition, effect or stock): every figure null. '
-    + 'unknown: it matters, but no defensible range can be given yet (at most its direction, in direction): every figure null; basis says why and what would size it. '
+    + 'unknown: it matters, but no defensible scale is available (a missing local study alone does not make it unknown): every figure null, its direction kept in direction where it has one; basis says why its size is unknown and names the evidence that would size it. '
     + 'not_applicable: it does not apply to this situation, so nothing uses it. '
     + 'unsupported: the person stated it but these forms cannot express it: every figure null, basis says what is missing.'),
   question: z.string().nullable().describe('For asked: the one plain question to the person that would give this figure, in their words, never internal terms. Null otherwise.'),
   basis: z.string().nullable().describe(
-    'For estimated: one plain sentence on what the estimate rests on. For structure: what the constant is ("12 months in a year"). For unknown, not_applicable or unsupported: why. Null otherwise.'),
+    'For estimated: the concrete basis the estimate rests on, with any important conditions, in plain words. For structure: what the constant is ("12 months in a year"). For unknown: why its size is unknown and the evidence that would size it. For not_applicable or unsupported: why. Null otherwise.'),
   direction: z.enum(['raises', 'lowers']).nullable().describe(
     'For a link\'s size (a coefficient), used only when no figure is given (no most likely figure, and no range or one that spans zero): raises when more of the driver means more of what it moves, lowers when it means less; null when no one can say which. Null for every other quantity.'),
   author: z.enum(QUANTITY_AUTHORS).describe(
@@ -147,7 +147,7 @@ const ProductDefinition = z.object({
 
 export const EffectTerm = z.object({
   driver: id.describe('The quantity whose change moves the defined quantity.'),
-  coefficient: id.describe('A coefficient quantity: the uncertain size of the mechanism, the change in the defined quantity per one unit of the driver, in natural units ("150 loaf/week/oven"), with its own range and author. Never exact: an exact relation is a definition.'),
+  coefficient: id.describe('A coefficient quantity: the uncertain size of the mechanism, the change in the defined quantity per one unit of the driver, in natural units ("150 loaf/week/oven"), with its own author and its range, or, where no defensible scale is available, its size unknown with its direction. Never exact: an exact relation is a definition.'),
   ...attribution,
 }).strict().describe('One link: coefficient × driver. Its author is who asserted that the driver moves it; the coefficient quantity carries who gave the size.');
 export type EffectTermT = z.infer<typeof EffectTerm>;
