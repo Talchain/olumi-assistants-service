@@ -34,6 +34,15 @@ const paused = new Map<string, any>();
 const convIds = new Map<string, string>();
 const rows = (sid: string) => { if (!rowsOf.has(sid)) rowsOf.set(sid, new Map()); return rowsOf.get(sid)!; };
 const hashOf = (g: unknown): string => computeAnalysisAffectingGraphHash(g as never) ?? '';
+// Since #3716 the compiler emits typed blockers { id, code, scope } and writes no question; a record made before it
+// carries asks (per quantity) and coaching (per goal, guardrail or note). Both read into the same shapes.
+const QUANTITY_BLOCKER = new Set(['asked', 'range_kind', 'recount']);
+const asksOf = (mp: Json): Json[] => (Array.isArray(mp.blockers)
+  ? mp.blockers.filter((b: Json) => QUANTITY_BLOCKER.has(b.code)).map((b: Json) => ({ quantity_id: b.id, question: null, unit: null, feeds: b.scope, code: b.code }))
+  : (mp.asks ?? []).map((a: Json) => ({ quantity_id: a.quantity_id, question: a.question, unit: a.unit, feeds: a.feeds })));
+const coachingOf = (compile: Json | undefined): Json[] => (Array.isArray(compile?.blockers)
+  ? compile!.blockers.filter((b: Json) => !QUANTITY_BLOCKER.has(b.code)).map((b: Json) => ({ record_id: b.id, question: null, kind: b.code }))
+  : (compile?.coaching ?? []));
 const store = {
   readOpenAiPausedRun: vi.fn(async (sid: string) => paused.get(sid) ?? null),
   saveOpenAiPausedRun: vi.fn(async (sid: string, r: any) => { if (paused.has(sid)) return false; paused.set(sid, r); return true; }),
@@ -174,7 +183,7 @@ describe.skipIf(OUT === '')('model-program spike acceptance (live provider)', ()
           fills: mp.fills ?? null, compile: mp.compile ? { compiles: mp.compile.compiles, executable: mp.compile.executable, errors: mp.compile.errors?.length ?? null,
             per_goal: mp.compile.per_goal?.map((g: Json) => ({ goal_id: g.goal_id, status: g.status, asks: g.asks, needs_measure: g.needs_measure, needs_deadline: g.needs_deadline })),
             per_limit: mp.compile.per_limit?.map((l: Json) => ({ limit_id: l.limit_id, status: l.status, asks: l.asks })), joint: mp.compile.joint?.status, within_limits: mp.compile.within_limits?.status } : null,
-          asks: (mp.asks ?? []).map((a: Json) => ({ quantity_id: a.quantity_id, question: a.question, unit: a.unit, feeds: a.feeds })),
+          asks: asksOf(mp),
           assistant_text: body.assistant_text ?? null });
         return body;
       };
@@ -203,7 +212,7 @@ describe.skipIf(OUT === '')('model-program spike acceptance (live provider)', ()
         shown = new Set([...shown, ...((last.cards ?? []) as Json[]).map((c) => c.proposal_id)]);
       }
       const storedRun = persisted.get(sid)?.living_model?.runs?.at(-1)?.result as Json | undefined;
-      const coaching = (storedRun?.compile?.coaching ?? []) as Json[];
+      const coaching = coachingOf(storedRun?.compile);
       for (const c of coaching) qa.push({ turn: null, record_id: c.record_id, question: c.question, status: 'not_answerable_by_a_fill', kind: c.kind });
 
       // Cold reopen: the stored JSON alone, in a fresh module instance.
