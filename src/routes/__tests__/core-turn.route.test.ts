@@ -934,6 +934,26 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(String(calls[0]!.instructions)).not.toContain('POLYMATH COACHING');
     });
 
+    it('Challenge on a PROGRAM board (served 502 on board 5715db98, 24 Oct): no first tool is forced, as its tools have no note_on_item; the note rides the turn and a reply comes back. A Living Model board keeps note_on_item', async () => {
+      // Contrast first: a saved Living Model's Challenge opens on its note tool, as before.
+      const factor = (((persisted as Json).nodes ?? []) as Json[]).find((n) => n.kind === 'factor')!;
+      outputs = [[{ type: 'message', text: 'Here is the strongest case against that figure.' }]];
+      expect((await challengeOn(String(factor.id))).statusCode).toBe(200);
+      expect(calls.at(-1)!.tool_choice).toMatchObject({ type: 'function', name: 'note_on_item' });
+      // A program board: the four program tools, none forced; the Challenge note follows the state block; the AI answers in words.
+      await savedProgram();
+      const item = (((persisted as Json).nodes ?? []) as Json[]).find((n) => n.kind === 'factor') ?? ((persisted as Json).nodes as Json[])[0]!;
+      outputs = [[{ type: 'message', text: 'The strongest case against it is that demand may not grow.' }]];
+      const r = await challengeOn(String(item.id));
+      expect(r.statusCode, r.body).toBe(200);
+      expect((r.json() as Json).assistant_text).toBe('The strongest case against it is that demand may not grow.');
+      expect(calls).toHaveLength(1);
+      expect((calls[0]!.tools as Json[]).map((t) => t.name), 'the program tools have no note tool').not.toContain('note_on_item');
+      expect((calls[0]!.tool_choice as Json | undefined)?.type, 'no first tool forced').not.toBe('function');
+      expect(((calls[0]!.input ?? []) as Json[]).filter((i) => i.role === 'system').some((i) => String(i.content).startsWith(SELECTION_NOTE_PREFIX)),
+        'the Challenge note reached the turn').toBe(true);
+    });
+
     it('S3 (DL 23 Oct): on a program turn the provider receives the PROGRAM tool descriptions, read included, and the read it gets back carries the Run\'s goal_chance block unchanged', async () => {
       // Two goals, so the block has each goal's own line and the joint.
       const m = club();
