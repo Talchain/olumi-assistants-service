@@ -113,7 +113,7 @@ export const CanonicalQuantity = z.object({
   basis: z.string().nullable().describe(
     'For estimated: one plain sentence on what the estimate rests on. For structure: what the constant is ("12 months in a year"). For unknown, not_applicable or unsupported: why. Null otherwise.'),
   direction: z.enum(['raises', 'lowers']).nullable().describe(
-    'For a link\'s size (a coefficient) with no figure, or with a range that spans zero: raises when more of the driver means more of what it moves, lowers when it means less; null when no one can say which. Null for every other quantity.'),
+    'For a link\'s size (a coefficient), used only when no figure is given (no most likely figure, and no range or one that spans zero): raises when more of the driver means more of what it moves, lowers when it means less; null when no one can say which. Null for every other quantity.'),
   author: z.enum(QUANTITY_AUTHORS).describe(
     "Who gave the figure. person: the person's own figure (or someone they report, in party), quoted. olumi: Olumi's estimate (ranged) or reading. structure: an exact constant the model's form needs (12 month/year, 100 for a percentage scale, 0 or 1 for an option switched off or on, a count that defines the structure): never an estimate, never shown as Olumi's, no range."),
   party: attribution.party,

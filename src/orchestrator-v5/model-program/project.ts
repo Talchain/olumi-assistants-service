@@ -327,8 +327,9 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const c = Q.get(coefficient);
     const mid = c ? (c.value ?? (has(c.low) && has(c.high) ? (c.low + c.high) / 2 : null)) : null;
     const straddles = c && has(c.low) && has(c.high) && c.low < 0 && c.high > 0;
-    // A size with no figure, or a range across zero, has no sign of its own: the link takes its stated direction (issue 39).
-    const stated = c && (mid === null || straddles) ? c.direction : null;
+    // A size with no figure (no value; no range, or one across zero) has no sign of its own: the link takes its stated
+    // direction (issue 39). A given value always keeps its own sign (Codex r1 #3734).
+    const stated = c && !has(c.value) && (mid === null || straddles) ? c.direction : null;
     const sign = stated === 'lowers' ? -1 : stated === 'raises' ? 1 : mid !== null && mid < 0 ? -1 : 1;
     const driverUnit = Q.get(driver)?.unit ?? '';
     const definedUnit = Q.get(defines)?.unit ?? '';

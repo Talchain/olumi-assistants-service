@@ -856,6 +856,12 @@ describe('issue 39: an unsized link is drawn with its stated direction, never a 
     expect(linkOf(priced({ ...STRADDLES, direction: 'raises' }))).toEqual({ direction: 'positive', mean: 1 });
   });
 
+  it('a range across zero with a most likely figure keeps that figure\'s sign, whatever the direction says (Codex r1 #3734)', () => {
+    const across = { status: 'estimated' as const, low: -1, high: 1, range_kind: 'plausible' as const, basis: 'It could go either way, most likely a little down.' };
+    expect(linkOf(priced({ ...across, value: -0.2, direction: 'raises' }))).toEqual({ direction: 'negative', mean: -1 });
+    expect(linkOf(priced({ ...across, value: 0.2, direction: 'lowers' }))).toEqual({ direction: 'positive', mean: 1 });
+  });
+
   it('a figure keeps its own sign: a stated direction never overrides it', () => {
     expect(linkOf(priced({ status: 'estimated', low: -60, high: -10, value: -30, range_kind: 'plausible', basis: 'Fewer loaves sell at a higher price.', direction: 'raises' })))
       .toEqual({ direction: 'negative', mean: -1 });
