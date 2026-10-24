@@ -9,7 +9,7 @@
 import type { InternalDispatch } from '../agent-lane/runtime/agent-capabilities.js';
 import type { ToolResult } from '../agent-lane/runtime/agent-tools.js';
 import type { CanonicalModelT } from '../model-program/canonical.js';
-import { normalise, type Blocker } from '../model-program/compile.js';
+import { compile, normalise, type Blocker } from '../model-program/compile.js';
 import { draftCanonicalModel, ledgeredResponsesCall, type ResponsesCall } from './draft.js';
 import { seedOf } from './evaluate.js';
 import { isSaved, programOperationId, savePostimage, withNewRun } from './program-save.js';
@@ -50,23 +50,26 @@ const OPENING: Record<TurnKind, (m: CanonicalModelT) => string> = {
 };
 /** The most of the AI's own questions the first reply prints (simplify v1 A4); the rest are counted, and listed on the result. */
 export const REPLY_QUESTIONS = 3;
+/** The id of the drafter's left-out note on an aim not stated (the drafting prompt declares it): its question is the AI's. */
+export const NO_AIM_NOTE = 'aim';
 /**
  * The reply: what calculates (S2's own words per option); then at most three of the AI's OWN questions on what the Run waits
  * on, in the model's order (the drafter puts the most consequential first; no code ranking); then one line counting the rest. The code
- * writes no question: a blocker with no question of the AI's (a reading, a structural figure) is counted, never worded.
+ * writes no question: a blocker with no question of the AI's (a reading, a recount) is counted, never worded.
  */
 function replyOf(model: CanonicalModelT, run: StoredRun, kind: TurnKind): string {
   const lines: string[] = [OPENING[kind](model)];
   const view = run.result.canonical_analysis_view as { options?: readonly { cell: { kind: string; face?: string } }[] };
   for (const o of view.options ?? []) if (o.cell.kind === 'figure' && typeof o.cell.face === 'string') lines.push(o.cell.face);
   const compiled = run.result.compile as { blockers?: readonly Blocker[] };
-  const blockers = compiled.blockers ?? [];
+  // A Run stored before blockers (reused while current) gets them from the model as it stands: the same compiler, typed.
+  const blockers = compiled.blockers ?? compile(model).blockers;
   const m = normalise(model);
-  // The AI's own words on the record each blocker names; with no aim at all, its note on the situation as a whole (a left-out
-  // record concerning nothing else) carries its question on what result they want.
+  // The AI's own words on the record each blocker names; with no aim at all, its left-out note `aim` (the drafter's declared
+  // record for the aim not stated) carries its question on what result they want. Never a guess at which note it is.
   const own = (b: Blocker): string | null => (b.code === 'asked' ? m.quantities.find((q) => q.id === b.id)?.question
     : b.code === 'measure' || b.code === 'deadline' ? [...m.goals, ...m.limits].find((r) => r.id === b.id)?.question
-      : b.code === 'no_goal' ? m.left_out.find((x) => x.concerns.length === 0 && x.question !== null)?.question : null) ?? null;
+      : b.code === 'no_goal' ? m.left_out.find((x) => x.id === NO_AIM_NOTE)?.question : null) ?? null;
   const asked = [...new Set(blockers.map(own).filter((x): x is string => x !== null && x.trim() !== ''))].slice(0, REPLY_QUESTIONS);
   const rest = blockers.filter((b) => { const q = own(b); return q === null || !asked.includes(q); }).length;
   if (asked.length > 0) lines.push(asked.map((q, i) => `${i + 1}. ${q}`).join('\n'));

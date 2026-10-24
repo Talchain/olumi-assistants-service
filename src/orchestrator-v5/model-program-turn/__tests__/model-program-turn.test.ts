@@ -13,7 +13,7 @@ import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha256 } from '../../context/graph-hash.js';
 import { stableStringify } from '../../../orchestrator/context/stable-stringify.js';
 import { APPROXIMATE_FIGURE, type CanonicalModelT, type CanonicalQuantityT } from '../../model-program/canonical.js';
-import { compile, isStructuralConstant, normalise, STRUCTURE_ASKED } from '../../model-program/compile.js';
+import { compile, isStructuralConstant, normalise } from '../../model-program/compile.js';
 import { CORE_ALIGNED_INSTRUCTIONS } from '../../core-route/instructions.js';
 import { project } from '../../model-program/project.js';
 import { simulate } from '../../model-program/simulate/simulate.js';
@@ -679,13 +679,14 @@ describe('the model-program turn on the real core route', () => {
     m.relations.push({ form: 'definition', id: 'extra_rel', defines: 'extra', op: 'sum', parts: [{ id: 'current_output', sign: 1 }], author: 'olumi', quote: null, ...at });
     replies = [JSON.stringify(m)];
     expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
-    const asked = { author: 'person', status: 'asked', value: null, question: null, basis: STRUCTURE_ASKED };
+    const asked = { author: 'person', status: 'asked', value: null, question: null, basis: null };
     expect(persisted!.living_model.canonical.quantities.find((x: Json) => x.id === 'current_output')).toMatchObject(asked);
     vi.resetModules();
     const tools = await import('../program-tools.js');
     const read = await tools.readProgramContext({ dispatch, proposals: new ProposalStore() }, { scenario_id: SCENARIO, authenticated_user_id: null }) as Json;
-    expect((read.data.model as Json).quantities.find((x: Json) => x.id === 'current_output')).toMatchObject({ author: 'person', status: 'asked', basis: STRUCTURE_ASKED });
-    expect((read.data.blockers as Json[]).find((b) => b.id === 'current_output')).toMatchObject({ code: 'structure' });
+    expect((read.data.model as Json).quantities.find((x: Json) => x.id === 'current_output')).toMatchObject({ author: 'person', status: 'asked' });
+    expect((read.data.model as Json).quantities.find((x: Json) => x.id === 'current_output')).not.toHaveProperty('question'); // compact: null left out
+    expect((read.data.blockers as Json[]).find((b) => b.id === 'current_output')).toMatchObject({ code: 'asked' });
     expect(JSON.stringify(read.data)).not.toContain('What is "current output"?');
     expect(JSON.stringify(read.data.model)).not.toMatch(/"id":"current_output"[^}]*"author":"structure"/);
   });
@@ -889,7 +890,7 @@ describe('the model-program turn on the real core route', () => {
     const structured = await propose();
     expect(structured.status, JSON.stringify(structured)).toBe('ok');
     const sm = cardModel(structured);
-    expect(sm.quantities.find((x) => x.id === 'current_output')).toMatchObject({ author: 'person', status: 'asked', value: null, quote: null, question: null, basis: STRUCTURE_ASKED });
+    expect(sm.quantities.find((x) => x.id === 'current_output')).toMatchObject({ author: 'person', status: 'asked', value: null, quote: null, question: null, basis: null });
     expect(sm.quantities.find((x) => x.id === 'months_per_year')).toMatchObject({ author: 'structure', status: 'known', value: 12 });
     expect(compile(sm, { sourceText: `${saved.brief}\n${words}` }).perGoal.find((g) => g.goal_id === 'increase_productivity')!.asks).toContain('current_output');
     // Codex r5: 1 in unit "1" is no unit scale, so an unstated "current utilisation = 1" is not structural; 0/1 is, only as a
@@ -1248,14 +1249,14 @@ describe('the model-program turn on the real core route', () => {
       { form: 'definition', id: 'growth_rel', defines: 'growth_factor', op: 'sum', parts: [{ id: 'one', sign: 1 }, { id: 'growth', sign: 1 }], author: 'olumi', quote: null, ...at });
     const n = new Map(normalise(m).quantities.map((x) => [x.id, x] as const));
     // Asked: an integer no one stated, an unused 1 in unit "1", a 1 with a unit added in a sum, and a 1 with a unit in a product.
-    for (const id of ['current_output', 'current_utilisation', 'current_customers', 'output_per_developer', 'one_customer', 'one_percent']) expect(n.get(id), id).toMatchObject({ author: 'person', status: 'asked', value: null, question: null, basis: STRUCTURE_ASKED });
+    for (const id of ['current_output', 'current_utilisation', 'current_customers', 'output_per_developer', 'one_customer', 'one_percent']) expect(n.get(id), id).toMatchObject({ author: 'person', status: 'asked', value: null, question: null, basis: null });
     // Kept: an option's switch (0 hires until an option sets one), a calendar conversion, 0 as a sum's part, and the unit-free 1.
     for (const id of ['developers_hired', 'tech_leads_hired', 'months_per_year', 'no_extra_output', 'new_customers', 'output_scale', 'productivity_indexed', 'one']) expect(n.get(id), id).toMatchObject({ author: 'structure', status: 'known' });
     // The compiler reads the question as one: what rests on it waits for the person, and no error asks the drafter to repair it.
     const c = compile(m, { sourceText: saved.brief });
     expect(c.errors).toEqual([]);
     expect(c.blockers.map((b) => b.id)).not.toContain('months_per_year');
-    expect(c.blockers.filter((b) => b.code === 'structure').map((b) => b.id)).toEqual(expect.arrayContaining(['current_output']));
+    expect(c.blockers.filter((b) => b.code === 'asked').map((b) => b.id)).toEqual(expect.arrayContaining(['current_output']));
     // Exact unit algebra: a unit-free 1 beside a term with a unit (a sum with loaves, an effect adding loaves) is no identity.
     const mixed = bakery();
     mixed.quantities.push(q('base_one', '1', { author: 'structure', value: 1 }), derived('mixed_sum', 'loaf/week'), derived('mixed_effect', 'loaf/week'));
@@ -1305,6 +1306,17 @@ describe('the model-program turn on the real core route', () => {
     expect(node(g, 'wholesale_share').observed_state).toMatchObject({ value: 40, unit: '%' });
   });
 
+  it('S1 (Codex r1 #3716): a Run stored before blockers, reused while current, still has its waits read from the model, never a pile', async () => {
+    replies = [JSON.stringify(bakery())];
+    await turn({ message: BRIEF });
+    const run = persisted!.living_model.runs[0].result.compile as Json;
+    delete run.blockers; run.asks = [{ quantity_id: 'oven_price', question: 'What would the second oven cost?' }]; run.coaching = [];
+    const r = await turn({ message: 'Run the analysis', chip: { id: 'run', action_type: 'run_analysis', label: 'Run' } });
+    expect(r.statusCode, r.body).toBe(200);
+    expect(r.json().assistant_text).toContain('1. What would the second oven cost?');
+    expect(r.json().assistant_text).not.toContain('To work out what is still missing');
+  });
+
   it('a Run press on a program needs no model call: the stored Run when current; a NEW Run, stored, when the model moved since', async () => {
     replies = [JSON.stringify(bakery())];
     await turn({ message: BRIEF });
@@ -1345,7 +1357,7 @@ describe('the model-program turn on the real core route', () => {
       { id: 'regulars', code: 'measure', label: 'Keep the regulars happy', scope: ['regulars'], answer: null },
       { id: 'staff_happy', code: 'measure', label: 'Keep the staff happy', scope: ['staff_happy'], answer: null },
       { id: 'friendly', code: 'measure', label: 'Keep it friendly', scope: ['friendly'], answer: null },
-      { id: 'base_sales', code: 'structure', label: 'base sales', scope: ['more_loaves'], answer: { quantity_id: 'base_sales' } },
+      { id: 'base_sales', code: 'asked', label: 'base sales', scope: ['more_loaves'], answer: { quantity_id: 'base_sales' } },
       { id: 'extra_per_oven', code: 'range_kind', label: 'extra per oven', scope: ['more_loaves'], answer: { quantity_id: 'extra_per_oven' } },
       { id: 'oven_price', code: 'asked', label: 'oven price', scope: ['within_budget'], answer: { quantity_id: 'oven_price' } },
     ]);
@@ -1360,14 +1372,17 @@ describe('the model-program turn on the real core route', () => {
   it('S1 (A4): with no aim at all, the first reply asks the AI\'s own question from its note on the situation, and no code question', async () => {
     const m = bakery();
     m.goals = [];
-    m.left_out.push({ id: 'outcome_unstated', text: 'What a good result would be is not stated.', why: 'No aim was given.', question: 'What result would make this worth it for you?',
-      concerns: [], author: 'olumi', quote: null, ...at });
+    // Codex r1 #3716: another note on the situation as a whole, with a question, is never taken for it; only the declared `aim`.
+    m.left_out.push({ id: 'supplier', text: 'The flour supplier is not in the model.', why: 'Not given.', question: 'Who is your supplier?', concerns: [], author: 'olumi', quote: null, ...at },
+      { id: 'aim', text: 'What a good result would be is not stated.', why: 'No aim was given.', question: 'What result would make this worth it for you?',
+        concerns: [], author: 'olumi', quote: null, ...at });
     replies = [JSON.stringify(m)];
     const r = (await turn({ message: BRIEF })).json();
     expect(r.model_program.saved).toBe(true);
     expect(r.assistant_text).toBe(['I\'ve drafted a first model of: Should the bakery buy a second oven?',
       '1. What result would make this worth it for you?\n2. What would the second oven cost?'].join('\n\n'));
     expect(r.model_program.blockers.map((b: Json) => [b.id, b.code])).toEqual([['(model)', 'no_goal'], ['oven_price', 'asked']]);
+    expect(r.assistant_text).not.toContain('Who is your supplier?');
     // Contrast: without the AI's note the no-goal blocker has no words of anyone's, so it is counted, never worded by the code.
     const bare = bakery(); bare.goals = [];
     beforeEachReset();

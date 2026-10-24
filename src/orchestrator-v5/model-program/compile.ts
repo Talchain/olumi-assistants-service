@@ -74,12 +74,11 @@ export type OptionOutcome = { option_id: string; status: Outcome | 'not_compared
 /**
  * ONE THING THE RESULT WAITS ON (simplify v1 A4): typed, in the model's order, never ranked and never worded by the code.
  * `id` is the record (a quantity, goal or limit; '(model)' when there is no goal); `scope` the goals, limits and live options
- * it holds up. asked: a figure only the person can give (the AI's own question is on the record). structure: a figure marked
- * structural that is no structural constant, so it is the person's. range_kind: their range, with no word on whether its
- * ends are hard. recount: their count, given below 0. measure: an aim or guardrail with no measure. deadline: a goal that
- * changes over time with no deadline. no_goal: no aim at all.
+ * it holds up. asked: a figure only the person can give (the AI's own question may be on the record). range_kind: their
+ * range, with no word on whether its ends are hard. recount: their count, given below 0. measure: an aim or guardrail with no
+ * measure. deadline: an aim or guardrail that changes over time with no deadline. no_goal: no aim at all.
  */
-export type BlockerCode = 'asked' | 'structure' | 'range_kind' | 'recount' | 'measure' | 'deadline' | 'no_goal';
+export type BlockerCode = 'asked' | 'range_kind' | 'recount' | 'measure' | 'deadline' | 'no_goal';
 export type Blocker = { id: string; code: BlockerCode; scope: string[] };
 export type Conversion =
   | { kind: 'percent'; quantity: string; from: string; to: string; factor: number; author: 'olumi' }
@@ -230,11 +229,9 @@ export function isStructuralConstant(model: CanonicalModelT, q: CanonicalQuantit
     || (r.form === 'definition' && r.op === 'sum' && r.parts.some((p) => p.id === q.id) && r.parts.every((p) => p.id === q.id || free(p.id)))
     || (r.form === 'effect' && r.base === q.id && r.terms.every((t) => free(t.driver, t.coefficient))));
 }
-/** The host's mark on a structure figure that is no structural constant: asked of the person, with no question of the code's. */
-export const STRUCTURE_ASKED = 'Marked structural, but it is no structural constant, so it is the person\'s figure to give.';
-/** A figure only the person can give, marked so (the AI asks for it in its own words). */
+/** A figure only the person can give: asked, with no question of the code's (the AI asks in its own words). */
 export const structureAsked = (q: CanonicalQuantityT): CanonicalQuantityT => ({ ...q, kind: 'fact', status: 'asked', author: 'person', value: null, low: null, high: null,
-  range_kind: null, basis: STRUCTURE_ASKED, quote: null, question: null });
+  range_kind: null, basis: null, quote: null, question: null });
 
 /** A figure the person gave as approximate (the host's mark, `APPROXIMATE_FIGURE`): theirs, a point, a range asked for. */
 export const isApproximate = (q: CanonicalQuantityT): boolean => q.author === 'person' && q.basis === APPROXIMATE_FIGURE && q.status === 'known' && q.value !== null && q.low === null;
@@ -356,7 +353,7 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
       if (!has(q.basis)) err('figure_status', `${n} is Olumi's estimate with no basis; say in one sentence what it rests on.`, [q.id]);
     } else {
       if (fig) err('figure_status', `${n} is marked ${q.status} but has a figure; a figure in hand is known (the person's) or estimated (Olumi's).`, [q.id]);
-      if (q.status === 'asked' && !has(q.question) && q.basis !== STRUCTURE_ASKED) err('figure_status', `${n} is asked but has no question; write the one question to the person.`, [q.id]);
+      // An asked figure needs no question of the AI's: what waits on it is typed, and the AI asks in its own words (A4).
       if (q.status !== 'asked' && !has(q.basis)) err('figure_status', `${n} is ${q.status} with no basis; say why in one sentence.`, [q.id]);
     }
   }
@@ -831,9 +828,9 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
   result.blockers = [
     ...(model.goals.length === 0 ? [blocker('(model)', 'no_goal', [])] : []),
     ...model.goals.flatMap((g) => [...(!has(g.measure) ? [blocker(g.id, 'measure', [g.id])] : []), ...(goalWin.get(g.id)?.deadline === true ? [blocker(g.id, 'deadline', [g.id])] : [])]),
-    ...model.limits.filter((l) => !has(l.measure)).map((l) => blocker(l.id, 'measure', [l.id])),
+    ...model.limits.flatMap((l) => [...(!has(l.measure) ? [blocker(l.id, 'measure', [l.id])] : []), ...(limitWin.get(l.id)?.deadline === true ? [blocker(l.id, 'deadline', [l.id])] : [])]),
     ...model.quantities.flatMap((q) => [
-      ...(q.status === 'asked' ? [blocker(q.id, q.basis === STRUCTURE_ASKED ? 'structure' : 'asked', feedsOf(q.id))] : []),
+      ...(q.status === 'asked' ? [blocker(q.id, 'asked', feedsOf(q.id))] : []),
       ...(unresolved.has(q.id) ? [blocker(q.id, 'range_kind', feedsOf(q.id))] : []),
       ...(recheck.has(q.id) ? [blocker(q.id, 'recount', feedsOf(q.id))] : []),
     ]),

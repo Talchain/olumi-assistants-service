@@ -221,7 +221,7 @@ export const PROGRAM_TOOL_DESCRIPTIONS = {
     + 'or the question still open for it; the relations, goals, limits, preferences, options and risks; and the reasoning kept beside them: claims, evidence, assumptions, dissent, conditions and what was left out); '
     + 'earlier_versions, how many earlier versions it has; blockers, what the stored Run waits on, in the model\'s order, each with its id, code and scope (what it holds up). No question is written for you: '
     + 'ask about any of them in your own words, at most three a reply, the most consequential first. What each code needs from the person: asked, the figure (the record may carry the drafter\'s question); '
-    + 'structure, the figure, which is not a fixed constant; range_kind, whether the ends of their range are firm or a rough estimate; recount, the count again (it was given below 0); '
+    + 'range_kind, whether the ends of their range are firm or a rough estimate; recount, the count again (it was given below 0); '
     + 'measure, how the aim or guardrail is measured; deadline, by when; no_goal, the result they want. A Run stored earlier gives open_questions and coaching instead; '
     + 'and run, the stored Run, with current and engine_current. Use these saved facts and ids, never an earlier reply. A Run that is not current describes an earlier model: say so, never present it as current. ' + RUN_WORDS_RULE,
   propose_change:

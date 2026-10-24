@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod-v4';
 import { APPROXIMATE_FIGURE, CanonicalModel, type CanonicalModelT, type CanonicalQuantityT, type CanonicalRelationT, type CanonicalGoalT, type CanonicalLimitT } from '../canonical.js';
-import { compile, compileJson, normalise, STRUCTURE_ASKED } from '../compile.js';
+import { compile, compileJson, normalise } from '../compile.js';
 import { project } from '../project.js';
 import { probeValue } from './probe.js';
 import { parseUnit, sameDims } from '../units.js';
@@ -354,11 +354,11 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     const hiding = bakery();
     hiding.quantities = hiding.quantities.map((q) => (q.id === 'costs' ? structure('costs', 'GBP/week', 612.5, 'Costs.') : q));
     // Codex r4/r5 #3709: it cannot hide there — it is the person's to give (never Olumi's fixed figure), and what rests on it
-    // waits for them. S1 A4: marked so, typed `structure`, with no question of the code's ("What is …?" is gone).
+    // waits for them. S1 A4: an asked figure, with no question of the code's ("What is …?" is gone).
     const hid = compile(hiding);
     expect(hid.errors).toEqual([]);
-    expect(normalise(hiding).quantities.find((q) => q.id === 'costs')).toMatchObject({ author: 'person', status: 'asked', value: null, question: null, basis: STRUCTURE_ASKED });
-    expect(hid.blockers).toEqual([{ id: 'costs', code: 'structure', scope: ['weekly_profit', 'cash_buffer'] }]);
+    expect(normalise(hiding).quantities.find((q) => q.id === 'costs')).toMatchObject({ author: 'person', status: 'asked', value: null, question: null, basis: null });
+    expect(hid.blockers).toEqual([{ id: 'costs', code: 'asked', scope: ['weekly_profit', 'cash_buffer'] }]);
   });
 
   it('finite numerical agreement cannot suppress an asked fact or invent its value', () => {
@@ -798,7 +798,11 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
       ['recount', edit(gymFilled(), (m) => { m.quantities = m.quantities.map((q) => (q.id === 'members_now' ? { ...q, value: null, low: -1010, high: -990, range_kind: 'plausible' as const } : q)); }),
         [{ id: 'members_now', code: 'recount', scope: ['reach_400'] }]],
       ['structure', edit(bakery(), (m) => { m.quantities = m.quantities.map((q) => (q.id === 'costs' ? structure('costs', 'GBP/week', 612.5, 'Costs.') : q)); }),
-        [{ id: 'costs', code: 'structure', scope: ['weekly_profit', 'cash_buffer'] }]],
+        [{ id: 'costs', code: 'asked', scope: ['weekly_profit', 'cash_buffer'] }]],
+      ['an asked figure with no question of the AI\'s: valid, typed', edit(bakery(), (m) => { m.quantities.push(qty('flour_cost', 'GBP/week', { status: 'asked' })); }),
+        [{ id: 'flour_cost', code: 'asked', scope: [] }]],
+      ['a guardrail that changes over time with no deadline', edit(bakery(), (m) => { m.limits.push(limit('cash_floor', 'Keep cash above today', 'cash', '>=', 'cash_now', 'end', 'quarter', 'at least £10,000 in the bank'));
+        m.limits = m.limits.map((l) => (l.id === 'cash_floor' ? { ...l, measure: { ...l.measure!, window: null } } : l)); }), [{ id: 'cash_floor', code: 'deadline', scope: ['cash_floor'] }]],
     ];
     for (const [name, m, blockers] of cases) {
       const r = compile(m);
@@ -807,8 +811,8 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
       // No sentence of the compiler's is a question, whatever it waits on (labels carry none here).
       expect(JSON.stringify(r), name).not.toContain('?');
     }
-    // The structure figure is asked with NO question of the code's ("What is …?" is gone): its record carries only the mark.
-    expect(normalise(cases[7]![1]).quantities.find((q) => q.id === 'costs')).toMatchObject({ status: 'asked', question: null, basis: STRUCTURE_ASKED });
+    // The structure figure is asked with NO question of the code's ("What is …?" is gone), and no mark the drafter could forge.
+    expect(normalise(cases[7]![1]).quantities.find((q) => q.id === 'costs')).toMatchObject({ status: 'asked', question: null, basis: null });
     // Contrast: the probe sees a question where there is one: the AI's own, on the record, in the model it was given.
     expect(JSON.stringify(gym())).toContain('How many members leave in a typical month?');
     expect(JSON.stringify(cases[2]![1])).toContain('How would you tell the regulars are happy?');
