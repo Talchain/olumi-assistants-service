@@ -718,6 +718,14 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
       "its spec); `hundred` is the phrase compounder the alphabet's own exclusion note calls for, " +
       "never a digit-suffix multiplier; magnitude words appear otherwise only in prose.",
   // C1: propose-handoff was deleted; the magnitude manifest still scans every surviving production source.
+    // 24 Oct 2026, measured at the bytes (both files already on staging 1fd6f8cb, where this scan was red on them).
+    // units.ts: its ONE occurrence line is `MULTIPLIERS`, a refusal set read only at `token()` — a unit word that is a
+    // multiplier ("k", "thousand", "million") is refused with "write the figure in full"; nothing multiplies or resolves.
+    // mapper.ts: ONE occurrence, in a comment recording a unit-parsing review finding; its "magnitude" keys are provenance.
+    "orchestrator-v5/model-program/units.ts":
+      "recognition-only refusal set — a unit spelled as a multiplier word is refused; never multiplies and never resolves a value",
+    "orchestrator-v5/path-b/living-model/mapper.ts":
+      "incidental — one comment occurrence; the file spells no alphabet and maps no magnitude word to a number",
 
   };
 
