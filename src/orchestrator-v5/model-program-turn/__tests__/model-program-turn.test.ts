@@ -1388,16 +1388,25 @@ describe('the model-program turn on the real core route', () => {
     const aimNoMeasure = bakery();
     aimNoMeasure.goals = aimNoMeasure.goals.map((g) => ({ ...g, measure: null, question: 'How would you know the bakery is doing well enough?' }));
     aimNoMeasure.quantities = aimNoMeasure.quantities.map((x) => (x.id === 'oven_price' ? { ...x, status: 'known', value: 2500, question: null, quote: 'We have £3,000 to spend' } : x));
-    expect(why(aimNoMeasure)).toEqual(['run', 'Not shown yet: needs your answer | The chance waits on a measure for ‘Reach 380 loaves a week’.']);
+    // What the run DID check is its own result, said apart from the reason (Codex r1 #3719): each limit on its own.
+    expect(why(aimNoMeasure)).toEqual(['run', 'Not shown yet: needs your answer | The chance waits on a measure for ‘Reach 380 loaves a week’. This run checks only the limits, each on its own: ‘spend’ is at most £3,000 with each option in effect: 100%.']);
     // The same with no limit: nothing calculates, and the waiting view says the same, from the same blockers.
     const noLimit = JSON.parse(JSON.stringify(aimNoMeasure)) as CanonicalModelT; noLimit.limits = [];
     expect(why(noLimit)).toEqual(['waiting', 'Not shown yet: needs your answer | The chance waits on a measure for ‘Reach 380 loaves a week’.']);
     // No aim at all: the result they want.
     const noAim = JSON.parse(JSON.stringify(aimNoMeasure)) as CanonicalModelT; noAim.goals = [];
-    expect(why(noAim)).toEqual(['run', 'Not shown yet: needs your answer | The chance waits on the result you want.']);
+    expect(why(noAim)).toEqual(['run', 'Not shown yet: needs your answer | The chance waits on the result you want. This run checks only the limits, each on its own: ‘spend’ is at most £3,000 with each option in effect: 100%.']);
     for (const m of [aimNoMeasure, noLimit, noAim]) expect(JSON.stringify(evaluateCanonical(m, { sourceText: BRIEF, seed: 7 }).view)).not.toMatch(/limits only|No aim has a measure/);
     // Contrast: a measured aim waiting on a figure only they can give names that figure, as before.
     expect(why(bakery())[1]).not.toContain('measure for');
+    // With nothing to run (the aim's target is asked), the waiting view's note for that aim is the blockers' words too, never
+    // the compiler's joined reasons ("is not in the chance yet: needs …"); the waiting view has no run, so no limit line.
+    const asked = bakery();
+    setQ(asked, 'sales_target', { status: 'asked', value: null, quote: null, question: 'What is the target?' });
+    const waitingView = evaluateCanonical(asked, { sourceText: BRIEF, seed: 7 });
+    expect(waitingView.compiled.executable).toBeNull();
+    expect(((waitingView.view as Json).goal_chance as Json).notes[0]).toBe('‘Reach 380 loaves a week’ waits on ‘sales target’.');
+    expect(why(asked)).toEqual(['waiting', 'Not shown yet: needs your answer | The chance waits on ‘sales target’.']);
   });
 
   it('batch 4 hiring-r1: a measured aim whose options wait on their own figures says what it waits on, never "No aim has a measure yet"', () => {

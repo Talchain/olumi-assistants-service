@@ -381,7 +381,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   /** A goal's own reason, from the blockers; for a figure no one can give (no blocker), the compiler's own words for it. */
   const goalWaits = (g: PresentGoal): string => waitsOnWords(blockers, new Set([g.goal_id])) ?? `is not in the chance yet: ${g.reasons.join(' ')}`;
   const waitingWords = waitsOnWords(blockers, new Set(waiting.map((g) => g.goal_id)));
-  const withheldCell = (): PresentCell => ({
+  const withheldCell = (): Extract<PresentCell, { kind: 'withheld' }> => ({
     kind: 'withheld', face: waitingWords !== undefined ? NEEDS_ANSWER_FACE : NOT_SHOWN_FACE,
     why: waiting.length > 0
       ? waitingWords !== undefined ? `${listWords(waiting.map((g) => q(g.label)))} ${waiting.length === 1 ? waitingWords : waitingWords.replace(/^waits/, 'wait')}.`
@@ -428,12 +428,14 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     const name = optionLabel.get(o.option_id) ?? o.option_id;
     const notRecorded = { kind: 'not_recorded' as const };
     // No aim is in this run: what the chance waits on is the blockers' (an aim's measure, a figure, or the result they want),
-    // as the waiting view says it, never "limits only"; an aim held up by a figure no one can give says the compiler's reason.
+    // as the waiting view says it; an aim held up by a figure no one can give says the compiler's reason. What the run DID
+    // check is its own result, said apart from that reason: each limit on its own (Codex r1 #3719: no reader shows them).
     if (model.goals.length === 0) {
       const waits = waitsOnWords(blockers, new Set(blockers.flatMap((b) => b.scope).filter((id) => !limitIds.has(id))));
-      if (waits === undefined && waiting.length > 0) return { option_id: o.option_id, cell: withheldCell(), main_driver: notRecorded };
-      return { option_id: o.option_id, main_driver: notRecorded, cell: { kind: 'withheld' as const, face: waits !== undefined ? NEEDS_ANSWER_FACE : NOT_SHOWN_FACE,
-        why: waits !== undefined ? `The chance ${waits}.` : 'No aim is in this run, so there is no chance to show.', reasons: [{ code: 'no_goals', message: null }] } };
+      const cell = waits === undefined && waiting.length > 0 ? withheldCell() : { kind: 'withheld' as const, face: waits !== undefined ? NEEDS_ANSWER_FACE : NOT_SHOWN_FACE,
+        why: waits !== undefined ? `The chance ${waits}.` : 'No aim is in this run, so there is no chance to show.', reasons: [{ code: 'no_goals', message: null }] };
+      const checks = model.limits.length > 0 ? ` This run checks only the limits, each on its own: ${limitLines(o).join('; ')}.` : '';
+      return { option_id: o.option_id, main_driver: notRecorded, cell: { ...cell, why: `${cell.why}${checks}` } };
     }
     if (waiting.length > 0 || jointWords === undefined) return { option_id: o.option_id, cell: withheldCell(), main_driver: notRecorded };
     const headline = o.joint_within_limits;
