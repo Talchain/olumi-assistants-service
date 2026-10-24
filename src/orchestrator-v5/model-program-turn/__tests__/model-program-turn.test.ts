@@ -353,9 +353,13 @@ describe('the model-program turn on the real core route', () => {
       ...(/\b[a-z]+_[a-z_]+\b/.test(o) ? ['a code'] : []), ...(o.includes(';') ? ['a semicolon'] : [])];
   };
 
-  it('the card in plain words (DL 24 Oct): every item of three drafts reads as one phrase, with no key: value pair, raw operator, code or "whose", and its author only as the card\'s mark', () => {
-    const hiring = JSON.parse(readFileSync(new URL('./hiring-alpha3.saved.json', import.meta.url), 'utf8')) as { brief: string; canonical: CanonicalModelT };
-    const drafts: [string, CanonicalModelT, string][] = [['bakery', bakery(), BRIEF], ['club', club(), CLUB_BRIEF], ['hiring', hiring.canonical, hiring.brief]];
+  it('the card in plain words (DL 24 Oct): every item of four drafts (the served capacity reading among them) reads as one phrase, with no key: value pair, raw operator, code or "whose", and its author only as the card\'s mark', () => {
+    const saved = (file: string) => JSON.parse(readFileSync(new URL(file, import.meta.url), 'utf8')) as { brief: string; canonical: CanonicalModelT };
+    const hiring = saved('./hiring-alpha3.saved.json');
+    // The capacity draft exactly as the served reading-card run saved it (scenario fc9ab632, CEE 1fd6f8cb): its 14 entries.
+    const capacity = saved('./capacity-s4.saved.json');
+    const drafts: [string, CanonicalModelT, string][] = [['bakery', bakery(), BRIEF], ['club', club(), CLUB_BRIEF], ['hiring', hiring.canonical, hiring.brief],
+      ['capacity', capacity.canonical, capacity.brief]];
     let entries = 0;
     for (const [name, model, brief] of drafts) {
       const v = readingOf(model, { words: [brief], approver: null });
@@ -369,7 +373,7 @@ describe('the model-program turn on the real core route', () => {
         expect((c.after ?? '').split(', ').filter((p) => p === 'yours' || p === 'Olumi’s'), `${name} ${c.id}`).toEqual([]);
       }
     }
-    expect(entries).toBe(66); // positive control: 19 bakery + 18 club + 29 hiring items read
+    expect(entries).toBe(80); // positive control: 19 bakery + 18 club + 29 hiring + 14 capacity items read
     // The words, spelled, for one item of each kind the bakery has.
     const reading = readingOf(bakery(), { words: [BRIEF], approver: null });
     const said = new Map((reading.ok ? reading.changes : []).map((c) => [c.id, c.after] as const));
