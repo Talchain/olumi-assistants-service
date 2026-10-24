@@ -53,7 +53,7 @@ export const ProgramChangeParams = z.object({
   basis: z.string().describe('Why Olumi proposes it.'),
   request: z.string().describe('The change the person asked for, in plain words, with their exact words for every figure of theirs.'),
   remove: z.array(z.string()).describe('The ids of the items the person asked to remove, from read_canonical_context; [] for none.'),
-  answers: z.array(Answer).max(12).default([]).describe('Their answers to the listed questions, each on the figure it answers (its id from read_canonical_context); [] for none. Answers and a structural change go on separate cards.'),
+  answers: z.array(Answer).max(12).default([]).describe('Their answers to the listed questions, each on the figure it answers (its id from read_canonical_context); [] for none.'),
 }).strict();
 export type ProgramChangeArgs = z.input<typeof ProgramChangeParams>;
 
@@ -134,11 +134,9 @@ async function prepare(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs)
   const words = [...program.person_words, ...new Set(turnWords)];
   // Their words THIS turn: what they typed, and nothing else (Codex r1–r2 #3727). A Challenge or chip turn has none.
   const fresh = ctx.user_turn_text?.trim() ? [ctx.user_turn_text] : [];
-  // What the AI declares: answers, set on their items exactly (no redraft); else a structural change, which Olumi's drafter writes.
+  // What the AI declares: answers, set on their items exactly (no redraft), and any structural change, which Olumi's drafter
+  // writes on the model holding those answers, with their words: ONE card (DoD 24 Oct: refusing the pair dropped their goals).
   const answers = args.answers ?? [];
-  if (answers.length > 0 && (args.request.trim() !== '' || args.remove.length > 0)) {
-    return refused('one_kind_per_card', 'Answers and a structural change go on separate cards: propose the answers now and the change after.');
-  }
   // Whose an answer is, as declared, checked literally (Codex r1 #3727): theirs only in their words THIS turn, whatever it
   // changes (a basis-only answer too); Olumi's an estimate with its range and basis, never their words.
   const stale = answers.filter((a) => a.author === 'person' && !verbatimIn(a.quote, fresh)).map((a) => a.id);
@@ -146,9 +144,16 @@ async function prepare(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs)
   const misowned = answers.filter((a) => (a.author === 'olumi') !== (a.status === 'estimated')
     || (a.author === 'olumi' && (a.low === null || a.high === null || !a.basis?.trim() || a.quote !== null || a.party !== null))).map((a) => a.id);
   if (misowned.length > 0) return refused('not_an_answer', `${misowned.join(', ')}: their answer is known or unknown, in their words; Olumi's is estimated, with low, high and a basis, never their words.`, { ids: misowned });
-  const draft = answers.length > 0 ? answered(program.canonical, answers) : await proposePostimage(program.canonical, words, args.request, args.remove, ledgeredResponsesCall());
+  const set = answered(program.canonical, answers);
+  if (typeof set === 'string') return refused('not_an_answer', set);
+  const drafted = args.request.trim() !== '' || args.remove.length > 0 ? await proposePostimage(set.model, words, args.request, args.remove, ledgeredResponsesCall()) : set;
+  if (drafted.model === null) return refused('no_model_back', 'Olumi could not write the updated model just now; nothing changed.');
+  // Their answers win on the drafter's model too, set again exactly (buddy 24 Oct); one it removed is refused by name, never dropped.
+  const postimage = drafted.model;
+  const gone = answers.filter((a) => !postimage.quantities.some((x) => x.id === a.id)).map((a) => a.id);
+  if (gone.length > 0) return refused('not_an_answer', `${gone.map((id) => `"${set.model.quantities.find((x) => x.id === id)!.label}" (${id})`).join(', ')}: the change removed what you answered, so nothing changed.`, { ids: gone });
+  const draft = answered(postimage, answers);
   if (typeof draft === 'string') return refused('not_an_answer', draft);
-  if (draft.model === null) return refused('no_model_back', 'Olumi could not write the updated model just now; nothing changed.');
   const v = validatePostimage(program.canonical, draft.model, { removals: args.remove, words, fresh, approver: ctx.authenticated_user_id });
   if (!v.ok) return refused(v.code, v.reason, { ids: v.ids });
   // The person's words this turn are kept with the model: what it was changed from, in their words.
