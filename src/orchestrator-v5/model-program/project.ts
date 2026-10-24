@@ -59,6 +59,9 @@ const QUAL_PREFIX: Record<QualitativeFamilyT, string> = {
 const has = <T>(x: T | null | undefined): x is T => x !== null && x !== undefined;
 const fmt = (n: number) => (Number.isInteger(n) ? n.toLocaleString('en-GB') : String(Number(n.toPrecision(4))));
 
+/** Olumi's figure in the canvas's value vocabulary (the canvas reads it as Olumi's estimate). */
+const OLUMIS_FIGURE = { source: 'cee_inference', extractionType: 'inferred' } as const;
+
 /** `brief`: the person's first words. A figure of theirs quoted from it is the brief's; one given later (an answer, a card
  * edit) is theirs as entered. Absent: every quoted figure of theirs is read as the brief's. */
 export function project(input: CanonicalModelT, compiled: CompileResult = compile(input), opts: { readonly brief?: string } = {}): Projection {
@@ -89,7 +92,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   /** Whose figure it is, in the canvas's value vocabulary: none claimed for a structural constant or unverified words. */
   const figureSource = (q: CanonicalQuantityT): Rec => {
     const who = whoOf(q, q.id);
-    if (who === 'olumi') return { source: 'cee_inference', extractionType: 'inferred' };
+    if (who === 'olumi') return OLUMIS_FIGURE;
     if (who !== 'person') return {};
     return fromBrief(q.quote) ? { source: 'brief_extraction', extractionType: 'explicit' } : { source: 'user_override' };
   };
@@ -283,7 +286,10 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const r = ranged ? lawFor(q) : undefined;
     const centre = has(q.value) ? q.value : r?.kind === 'normal' ? r.mean : ranged ? (q.low! + q.high!) / 2 : null;
     if (centre === null) return { observed_state: { unit: q.unit } };
-    return { observed_state: { value: centre, raw_value: centre, unit: q.unit, ...figureSource(q), ...(ranged ? { range: { low: q.low, high: q.high } } : {}) } };
+    // A figure given keeps whose it is; a centre read from a bare range is Olumi's, the range and its words staying theirs
+    // (DL 24 Oct, board 3de98183: "$40,000 to $50,000" showed 45,000 as their figure).
+    return { observed_state: { value: centre, raw_value: centre, unit: q.unit, ...(has(q.value) ? figureSource(q) : OLUMIS_FIGURE),
+      ...(ranged ? { range: { low: q.low, high: q.high } } : {}) } };
   };
 
   // ── quantities ─────────────────────────────────────────────────────────────────────────────────────────────────────
