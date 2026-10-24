@@ -43,6 +43,9 @@ const asksOf = (mp: Json): Json[] => (Array.isArray(mp.blockers)
 const coachingOf = (compile: Json | undefined): Json[] => (Array.isArray(compile?.blockers)
   ? compile!.blockers.filter((b: Json) => !QUANTITY_BLOCKER.has(b.code)).map((b: Json) => ({ record_id: b.id, question: null, kind: b.code }))
   : (compile?.coaching ?? []));
+// Step 2 (#3717): the first draft's "Check what I understood" card, carried on every reply until it is answered or lapses.
+const readingCardOf = (body: Json): Json | undefined => ((body.cards ?? []) as Json[])
+  .find((c) => c.reading === true && typeof c.proposal_id === 'string' && typeof c.approve_action?.id === 'string');
 const store = {
   readOpenAiPausedRun: vi.fn(async (sid: string) => paused.get(sid) ?? null),
   saveOpenAiPausedRun: vi.fn(async (sid: string, r: any) => { if (paused.has(sid)) return false; paused.set(sid, r); return true; }),
@@ -192,13 +195,25 @@ describe.skipIf(OUT === '')('model-program spike acceptance (live provider)', ()
       // Every reply since the operator's last message is what the person has read (class 3: never only the last press's).
       let unread: string[] = [last.assistant_text].filter((t): t is string => typeof t === 'string' && t.trim() !== '');
       let shown = new Set(((last.cards ?? []) as Json[]).map((c) => c.proposal_id));
+      let readingPressed = false;
       for (let k = 1; k <= Number(process.env.MP_ANSWER_TURNS ?? '3'); k += 1) {
         if (existsSync(STOP) || unread.length === 0) break;
         const op = await answerQuestions({ facts, replyText: unread.join('\n\n'), apiKey, fetchImpl: globalThis.fetch });
         if (op.call) { operatorCalls.push({ turn: k, ...op.call, tokens: tokensOf(op.call.usage), usd: +usdOf(op.call.usage).toFixed(4) }); spent += usdOf(op.call.usage); }
         for (const q of op.questions as Json[]) qa.push({ turn: k, question: q.question, status: q.status, answer: q.answer, fact: q.fact, flags: q.flags });
         if ((op.questions as Json[]).length === 0) qa.push({ turn: k, question: null, status: 'no_question', answer: null, flags: op.flags });
-        if (op.message === null) break;
+        if (op.message === null) {
+          // Approval never enters the calculation, so the operator never needs the reading card. Only when the turn is blocked
+          // (nothing left to answer and no chance shown) does it press the card's approve, once: the same press the UI sends.
+          const reading = readingCardOf(last);
+          if (reading === undefined || readingPressed || hasChance(last.canonical_analysis_view) || existsSync(STOP)) break;
+          readingPressed = true;
+          const pressed = await post({ message: reading.approve_action.message, source: 'chip_click', chip: { id: reading.approve_action.id, action_type: reading.approve_action.action_type } }, 'approve');
+          qa.push({ turn: k, press: reading.proposal_id, reading: true, status: pressed.error ? 'press_refused' : 'pressed', error: pressed.error?.code ?? null });
+          if (typeof pressed.assistant_text !== 'string' || pressed.assistant_text.trim() === '') break;
+          last = pressed; unread = [pressed.assistant_text]; shown = new Set([...shown, ...((last.cards ?? []) as Json[]).map((x) => x.proposal_id)]);
+          continue;
+        }
         const displayed = ((last.cards ?? []) as Json[]).filter((c) => typeof c.proposal_id === 'string').map((c) => (c.revision === undefined ? { proposal_id: c.proposal_id } : { proposal_id: c.proposal_id, revision: c.revision }));
         last = await post({ message: op.message, ...(displayed.length ? { displayed_proposals: displayed } : {}) }, 'answer');
         unread = [last.assistant_text].filter((t): t is string => typeof t === 'string' && t.trim() !== '');
