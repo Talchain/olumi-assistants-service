@@ -106,12 +106,14 @@ export const CanonicalQuantity = z.object({
     + 'estimated: Olumi\'s provisional estimate of a coefficient, always with low and high, as wide as what is genuinely unknown. Never a fact. '
     + 'asked: a figure only the person can know (their own costs, prices, headcount, dates) that they did not give: every figure null, with a question. Never estimate it, and never ask for the result itself (a goal\'s own quantity). '
     + 'derived: worked out by exactly one relation (a definition, effect or stock): every figure null. '
-    + 'unknown: it matters, but no defensible range can be given yet (at most its direction): every figure null; basis says why and what would size it. '
+    + 'unknown: it matters, but no defensible range can be given yet (at most its direction, in direction): every figure null; basis says why and what would size it. '
     + 'not_applicable: it does not apply to this situation, so nothing uses it. '
     + 'unsupported: the person stated it but these forms cannot express it: every figure null, basis says what is missing.'),
   question: z.string().nullable().describe('For asked: the one plain question to the person that would give this figure, in their words, never internal terms. Null otherwise.'),
   basis: z.string().nullable().describe(
     'For estimated: one plain sentence on what the estimate rests on. For structure: what the constant is ("12 months in a year"). For unknown, not_applicable or unsupported: why. Null otherwise.'),
+  direction: z.enum(['raises', 'lowers']).nullable().describe(
+    'For a link\'s size (a coefficient) with no figure, or with a range that spans zero: raises when more of the driver means more of what it moves, lowers when it means less; null when no one can say which. Null for every other quantity.'),
   author: z.enum(QUANTITY_AUTHORS).describe(
     "Who gave the figure. person: the person's own figure (or someone they report, in party), quoted. olumi: Olumi's estimate (ranged) or reading. structure: an exact constant the model's form needs (12 month/year, 100 for a percentage scale, 0 or 1 for an option switched off or on, a count that defines the structure): never an estimate, never shown as Olumi's, no range."),
   party: attribution.party,
@@ -262,13 +264,16 @@ export const OPTION_STATUSES = ['live', 'ruled_out', 'removed'] as const;
  *  interval k = the count). Issue map class 13: the old `from_period` ("0 = now") was written as 1 for the first period. */
 export const STARTS_AFTER_PERIODS = 'How many whole periods pass before it takes effect: 0 = from the start ("straight away", "from the first month" and "from now" are all 0), "from month 3" is 2, "in two months" is 2';
 const timing = z.union([z.number().int(), id]).describe(`${STARTS_AFTER_PERIODS}. Or the id of a quantity in the model's period unit giving that count, when the timing is the person's figure, asked, or differs by option ("when the extension opens").`);
-/** The old field, mapped ONCE, where a saved model is read (program-store): `from_period` k is `starts_after_periods` k, the
- *  same count under its old name. A model that has both, or neither, is left for the schema to judge. */
+/** The old fields, mapped ONCE, where a saved model is read (program-store): `from_period` k is `starts_after_periods` k, the
+ *  same count under its old name, and a quantity saved before `direction` existed has none (null). A model that has both
+ *  timing names, or neither, is left for the schema to judge. */
 export function withDeclaredTiming(raw: unknown): unknown {
   const rec = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
   const renamed = (x: unknown) => { if (!rec(x) || !('from_period' in x) || 'starts_after_periods' in x) return x; const { from_period, ...rest } = x; return { ...rest, starts_after_periods: from_period }; };
   if (!rec(raw) || !Array.isArray(raw['options']) || !Array.isArray(raw['risks'])) return raw;
-  return { ...raw, options: raw['options'].map((o) => (rec(o) && Array.isArray(o['sets']) ? { ...o, sets: o['sets'].map(renamed) } : o)), risks: raw['risks'].map(renamed) };
+  const directed = (x: unknown) => (rec(x) && !('direction' in x) ? { ...x, direction: null } : x);
+  return { ...raw, ...(Array.isArray(raw['quantities']) ? { quantities: raw['quantities'].map(directed) } : {}),
+    options: raw['options'].map((o) => (rec(o) && Array.isArray(o['sets']) ? { ...o, sets: o['sets'].map(renamed) } : o)), risks: raw['risks'].map(renamed) };
 }
 
 export const CanonicalOptionSet = z.object({
