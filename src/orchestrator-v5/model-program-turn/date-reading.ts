@@ -11,7 +11,8 @@
  * change goal's reference: "now" stays the level at period 0, whatever window the date places (AIE).
  *
  * Fixed when the model is written: a date the change did not alter keeps its saved reading (`saved`), so a reopen or a later
- * update never moves it as the days pass. A date the calendar cannot place is asked, never guessed.
+ * update never moves it as the days pass. A date the calendar cannot place is asked, never guessed; a date before today is
+ * unsupported (period 0 is now, so nothing counts back), whatever a rounding to whole periods would give.
  */
 import type { CanonicalModelT, CanonicalQuantityT } from '../model-program/canonical.js';
 import { readCalendarDay, readStatedDeadline, sayDate, timeBetween } from '../goal-target/deadline-date.js';
@@ -26,10 +27,10 @@ export function readStatedDate(words: string, today: string): string | null {
   return /\b\d{4}\b/.test(plain) ? readCalendarDay(plain, today) : null;
 }
 
-/** Whole periods from `today` to `date`, to the nearest whole period (a half rounds up). */
+/** Whole periods from `today` to a `date` on or after it, to the nearest whole period (a half rounds up). */
 export function periodsFromToday(today: string, date: string, period: Period): number {
   const raw = period === 'week' ? timeBetween(today, date, 'weeks') : period === 'month' ? timeBetween(today, date, 'months') : timeBetween(today, date, 'months') / 12;
-  return Math.round(raw) + 0;
+  return Math.round(raw);
 }
 
 /**
@@ -60,10 +61,12 @@ function readOne(q: CanonicalQuantityT, words: string, today: string, period: Pe
     return { ...q, ...none, status: 'asked', author: 'person', basis: null,
       question: q.question !== null && q.question.trim() !== '' ? q.question : `Which date do you mean by "${words}"? Give a day, month and year.` };
   }
-  const n = periodsFromToday(today, date, period);
-  if (n < min) {
+  // Calendar order first (buddy + Codex BLOCK on #3744): a date before today has passed, whatever a rounding would give.
+  const passed = date < today;
+  const n = passed ? null : periodsFromToday(today, date, period);
+  if (n === null || n < min) {
     return { ...q, ...none, status: 'unsupported', author: 'olumi', question: null,
-      basis: `${sayDate(date)} is ${n < 0 ? 'before today' : `less than one whole ${period} from today`}, ${sayDate(today)}, so the model cannot count it in whole ${period}s from now.` };
+      basis: `${sayDate(date)} is ${passed ? 'before today' : `less than one whole ${period} from today`}, ${sayDate(today)}, so the model cannot count it in whole ${period}s from now.` };
   }
   return { ...q, ...none, status: 'known', author: 'olumi', value: n, question: null,
     basis: `Olumi's reading of the date: ${sayDate(date)} is ${plural(n, period)} from today, ${sayDate(today)}, to the nearest whole ${period}.` };

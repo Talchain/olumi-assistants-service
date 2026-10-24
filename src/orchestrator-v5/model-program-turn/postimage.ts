@@ -22,7 +22,6 @@ import { CanonicalModel, type CanonicalModelT } from '../model-program/canonical
 import { norm } from '../model-program/compile.js';
 import { linkTargets, withUsedDirections } from '../model-program/links.js';
 import { isExactCalendarReexpression, parseUnit, sameDims } from '../model-program/units.js';
-import { sayDate } from '../goal-target/deadline-date.js';
 
 type Rec = Record<string, unknown>;
 type Family = Exclude<keyof CanonicalModelT, 'version' | 'question' | 'period' | 'history'>;
@@ -334,7 +333,8 @@ function wordsIn(m: CanonicalModelT) {
     const bare = (k: string) => n(r[k] as number);
     // What it moves is said by name; a direction on a size no link has is never said (the validator then refuses its change).
     const moves = typeof r['direction'] === 'string' && typeof r['id'] === 'string' ? linkTargets(m, r['id']) : [];
-    const dated = typeof r['stated_date'] === 'string' ? [`for the date "${sayDate(r['stated_date'])}"`] : [];
+    // The date words as stored (Codex r1 #3744): a re-spelling of the same date is a change the card can show.
+    const dated = typeof r['stated_date'] === 'string' ? [`for the date "${r['stated_date']}"`] : [];
     const sign = (said: string) => [said, ...dated, ...(moves.length > 0 ? [`${of(DIRECTION_WORDS, r['direction'])} ${and(moves.map(label))}`] : [])].filter((x) => x !== '').join(', ');
     const reading = typeof r['range_kind'] === 'string' ? ` (${of(RANGE_WORDS, r['range_kind'])})` : '';
     if (at('low') !== null && at('high') !== null) return sign(`from ${bare('low')} to ${at('high')}${at('value') !== null ? `, most likely ${bare('value')}` : ''}${reading}`);
