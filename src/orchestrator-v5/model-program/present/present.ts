@@ -14,10 +14,9 @@
  *     or an unknown) is never folded into a partial joint: the joint is withheld with its reason, and only the goals the ask
  *     feeds wait (DL ruling d). A goal waiting on exactly ONE asked quantity gets a THRESHOLD, found by bisection over that
  *     quantity in its natural domain, said as a threshold, never as a chance.
- *   - main_driver: the #87 reader `goalChanceDriverOf` needs ISL's driver block (its `resolved` / `below_resolution`
- *     status) and the Run's GraphV3 graph for authorship; this model has neither, so nothing is fed to it. The reader's own
- *     word for that is `{ kind: 'not_recorded' }`: DGAI's parser refuses the WHOLE view when `main_driver` is missing
- *     (canonicalAnalysisView.ts:128-129), so that, not a missing key, is how "absent" reaches the screen.
+ *   - main_driver (DL 24 Oct): for a computed chance, what it rests on most, by one figure at a time at its range's ends on
+ *     the Run's own draws (`mainDriverOf`, DRIVER_MIN_SWING); a withheld chance says `{ kind: 'not_recorded' }`, the word
+ *     DGAI's parser takes for "absent" (it refuses the WHOLE view when `main_driver` is missing).
  *   - Every range is named as Olumi's provisional conversion (`rangeSpread`, mapper.ts:104-110) of the person's range, or of
  *     Olumi's own: the person's bounds stay theirs and are never called their probability law (DL ruling 4).
  *   - A chance the simulator withheld for a nonfinite draw (`invalid_domain`, DL ruling 3) is a withheld cell with its count
@@ -30,9 +29,9 @@ import { comparatorWords } from '../../goal-target/goal-target-basis.js';
 import { displayRoundingFor } from '../../goal-target/goal-chance-driver.js';
 import { displayedPctAt } from '../../goal-target/goal-chance-display.js';
 import { sayDisplayedPct } from '../../goal-target/goal-targets-joint.js';
-import type { Aggregation, Cmp, ExecutableModel, FixedAuthor, Goal, Limit, Window } from '../executable.js';
+import type { Aggregation, Cmp, ExecutableModel, FixedAuthor, Goal, Limit, Quantity, Window } from '../executable.js';
 import { rangeLaw, type RangeDist } from '../simulate/range-law.js';
-import { isWithheld, type ChanceOrWithheld, type OptionResult, type SimResult, type WithheldChance } from '../simulate/result.js';
+import { isWithheld, type Chance, type ChanceOrWithheld, type OptionResult, type SimResult, type WithheldChance } from '../simulate/result.js';
 import { readingOf, simulate } from '../simulate/simulate.js';
 
 /** Whose a figure is: unverified is said to be the person's but their words were not found (compile's `unverified`). */
@@ -145,7 +144,7 @@ export interface PresentedAnalysisView {
     readonly limitation: 'Hash equality cannot detect brief, framing or stage changes.' | 'Currentness is unknown because an analysis hash is unavailable.';
   };
   readonly leader_licence: 'withheld';
-  readonly options: readonly { readonly option_id: string; readonly cell: PresentCell; readonly main_driver: { readonly kind: 'not_recorded' } }[];
+  readonly options: readonly { readonly option_id: string; readonly cell: PresentCell; readonly main_driver: PresentMainDriver }[];
   readonly goal_chance?: {
     readonly chance_words?: string;
     readonly notes?: readonly string[];
@@ -189,6 +188,24 @@ export const needsAnswer = (blockers: readonly PresentBlocker[], ids: ReadonlySe
 const NEEDS_ANSWER_FACE = 'Not shown yet: needs your answer';
 const NOT_SHOWN_FACE = 'Chance not shown yet';
 const TIPPING_DRAWS = 4000;
+
+/**
+ * WHAT A COMPUTED CHANCE RESTS ON MOST (DL 24 Oct; the guiding principle: provisional means the person can change something
+ * and see how much it matters). One figure at a time: each ranged input the option's chance rests on (never one an option
+ * sets: a choice, not an uncertainty) is set to its range's low end, then its high end (their stated ends for a person's
+ * range), and the model is simulated again on the Run's seed. Every input has its own stream (prng.ts), so the others keep
+ * the headline's draws; the sweep reads the first TIPPING_DRAWS of them. The largest swing over DRIVER_MIN_SWING is the
+ * driver; otherwise none is licensed. A finding in this model, never advice.
+ */
+export const DRIVER_MIN_SWING = 0.05;
+export const NO_DRIVER_REASON = 'No single figure moves this chance much.';
+export const NO_RANGE_REASON = 'No figure this chance rests on has a range to test.';
+type End = { readonly value: number; readonly display: string };
+export type PresentMainDriver =
+  | { readonly kind: 'available'; readonly detail: string; readonly driver: { readonly quantity: string; readonly author: 'person' | 'olumi' | 'unverified';
+      readonly low: End; readonly high: End; readonly swing_points: number; readonly draws: number } }
+  | { readonly kind: 'none_licensed'; readonly reason: string }
+  | { readonly kind: 'not_recorded' };
 
 export function listWords(parts: readonly string[]): string {
   return parts.length <= 1 ? (parts[0] ?? '') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
@@ -442,6 +459,36 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     });
     return lines.length === 0 ? undefined : `in every simulated draw ${listWords(lines)}`;
   };
+  // ── What each computed chance rests on most (DRIVER_MIN_SWING): each input at its range's ends, cached across options ──
+  const switches = new Set(model.options.flatMap((o) => o.sets.map((s) => s.quantity)));
+  const sweepDraws = Math.min(TIPPING_DRAWS, result.draws);
+  const atEnds = new Map<string, readonly SimResult[]>();
+  const endsOf = (x: Quantity & { dist: RangeDist }): readonly SimResult[] => {
+    if (!atEnds.has(x.id)) atEnds.set(x.id, [x.dist.low, x.dist.high].map((value) => simulate({ ...model, quantities: model.quantities
+      .map((z) => (z.id === x.id ? { ...z, dist: { kind: 'fixed' as const, value, author: 'olumi' as const } } : z)) }, { seed: result.seed, draws: sweepDraws })));
+    return atEnds.get(x.id)!;
+  };
+  const mainDriverOf = (o: OptionResult): PresentMainDriver => {
+    const rests = upstream(roots, o.option_id);
+    const inputs = model.quantities.filter((x): x is Quantity & { dist: RangeDist } => x.dist?.kind === 'range' && x.dist.low < x.dist.high && rests.has(x.id) && !switches.has(x.id));
+    if (inputs.length === 0) return { kind: 'none_licensed', reason: NO_RANGE_REASON };
+    let best: { readonly x: Quantity & { dist: RangeDist }; readonly lo: Chance; readonly hi: Chance; readonly swing: number } | undefined;
+    for (const x of inputs) {
+      const [lo, hi] = endsOf(x).map((r) => r.options.find((p) => p.option_id === o.option_id)!.joint_within_limits);
+      if (lo === undefined || hi === undefined || isWithheld(lo) || isWithheld(hi)) continue;
+      const swing = Math.abs(hi.chance - lo.chance);
+      if (best === undefined || swing > best.swing) best = { x, lo, hi, swing };
+    }
+    if (best === undefined) return { kind: 'not_recorded' };
+    if (best.swing <= DRIVER_MIN_SWING) return { kind: 'none_licensed', reason: NO_DRIVER_REASON };
+    const { x, lo, hi } = best;
+    const author = meta(x.id)?.author === 'unverified' ? 'unverified' as const : x.dist.basis === 'person_range' ? 'person' as const : 'olumi' as const;
+    const whose = author === 'unverified' ? NOT_IN_THEIR_WORDS : author === 'person' ? '(your range)' : '(Olumi’s estimate)';
+    const low = { value: x.dist.low, display: shown(lo, sweepDraws)!.display }, high = { value: x.dist.high, display: shown(hi, sweepDraws)!.display };
+    return { kind: 'available', driver: { quantity: x.id, author, low, high, swing_points: Number((best.swing * 100).toFixed(1)), draws: sweepDraws },
+      detail: `In this model, the chance is most sensitive to ${q(label(x.id) ?? x.id)} ${whose}: at the low end of its range (${sayOf(x.id, low.value, x.unit)}) it is ${low.display}; `
+        + `at the high end (${sayOf(x.id, high.value, x.unit)}), ${high.display}.` };
+  };
   const options = result.options.map((o: OptionResult) => {
     const name = optionLabel.get(o.option_id) ?? o.option_id;
     const notRecorded = { kind: 'not_recorded' as const };
@@ -467,7 +514,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
         + (model.limits.length > 0 ? ` Each limit on its own: ${limitLines(o).join('; ')}.` : '')
         + (uncheckedLine !== undefined ? ` ${stop(uncheckedLine)}` : ''),
       detail: { precision_95: headline.precision_95, draws: result.draws, precision_words: s.precision_words } };
-    return { option_id: o.option_id, cell, main_driver: notRecorded };
+    return { option_id: o.option_id, cell, main_driver: mainDriverOf(o) };
   });
 
   // ── The detail said once beside the chances ───────────────────────────────────────────────────────────────────────────
