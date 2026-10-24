@@ -288,6 +288,8 @@ function wordsIn(m: CanonicalModelT) {
     return q === undefined ? `"${id}"` : q.status === 'asked' ? `"${q.label}" (still to be given)` : q.status === 'derived' ? `"${q.label}"`
       : `"${q.label}" ${q.low !== null && q.high !== null ? `${n(q.low)}–${n(q.high)}${unitOf(q.unit)}` : q.value !== null ? `${n(q.value)}${unitOf(q.unit)}` : `(no figure yet${unitOf(q.unit)})`}`;
   };
+  /** A target or bound an option sets to another figure: its name only, as the results say it (#3722); its figure is on its own item. */
+  const bound = (id: string) => (m.options.some((o) => o.sets.some((s) => s.quantity === id)) ? `"${named(id)}"` : timed(id));
   const start = (t: number | string) => (typeof t === 'number' ? (t === 0 ? 'from the start' : `after ${t} ${m.period}s`) : `from ${timed(t)}`);
   const list = (ids: unknown) => (Array.isArray(ids) ? ids.map((id) => `"${named(String(id))}"`) : []);
   const and = (xs: readonly string[]) => (xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
@@ -346,7 +348,7 @@ function wordsIn(m: CanonicalModelT) {
       case 'measure': return measured(r, (mm) => {
         const frame = mm['frame'] === 'change_abs' ? `, as a change from ${reference(mm['reference'])}` : mm['frame'] === 'change_rel' ? `, as a relative change from ${reference(mm['reference'])}`
           : isRec(mm['reference']) ? `, compared with ${reference(mm['reference'])}` : '';
-        return `${timed(String(mm['quantity']))}${typeof mm['per'] === 'string' ? ` per ${timed(mm['per'])}` : ''} ${of(CMP_WORDS, mm['cmp'])} ${timed(String(mm['target'] ?? mm['bound']))}${frame}`;
+        return `${timed(String(mm['quantity']))}${typeof mm['per'] === 'string' ? ` per ${timed(mm['per'])}` : ''} ${of(CMP_WORDS, mm['cmp'])} ${bound(String(mm['target'] ?? mm['bound']))}${frame}`;
       });
       case 'when': return measured(r, (mm) => {
         const w = isRec(mm['window']) ? mm['window'] : null, agg = String(mm['aggregation']);

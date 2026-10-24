@@ -318,11 +318,18 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   };
 
   // ── The question each chance answers ────────────────────────────────────────────────────────────────────────────────────
+  /** A target or bound in words: its figure, unless an option sets it to another (a second oven's smaller budget), when the
+   * base figure is not this option's: then its name, as for a figure that is not fixed (Codex r2 #3719 case). */
+  const boundWords = (against: string): string | undefined => {
+    const target = byId.get(against);
+    if (target?.dist?.kind === 'fixed' && !model.options.some((o) => o.sets.some((s) => s.quantity === against))) return sayOf(against, target.dist.value, target.unit);
+    return label(against) === undefined ? undefined : q(label(against)!);
+  };
   const conditionWords = (c: Goal | Limit, against: string, role: 'goal' | 'limit'): string | undefined => {
     const subject = label(c.quantity), bound = comparatorWords(c.cmp), target = byId.get(against);
     if (subject === undefined || bound === undefined || target === undefined) return undefined;
     // The level template of `targetChanceWords` (goal-target-basis.ts): ‘X’ being at least T; a limit's subject "is".
-    const figure = target.dist?.kind === 'fixed' ? sayOf(against, target.dist.value, target.unit) : label(against) === undefined ? undefined : q(label(against)!);
+    const figure = boundWords(against);
     if (figure === undefined) return undefined;
     // A ratio (executable.ts r3 `per`) names both quantities: "‘Sign-ups’ per ‘Visitors’ being at least 0.05 …".
     const of = c.per === undefined ? q(subject) : label(c.per) === undefined ? undefined : `${q(subject)} per ${q(label(c.per)!)}`;
@@ -410,12 +417,12 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
    */
   const MISSED: Record<Cmp, string> = { '>=': 'below', '>': 'not above', '<=': 'above', '<': 'not below' };
   const fixedLine = (c: Goal | Limit, against: string, value: number, met: boolean): string | undefined => {
-    const subject = label(c.quantity), target = byId.get(against);
-    if (subject === undefined || target?.dist?.kind !== 'fixed') return undefined;
+    const subject = label(c.quantity), target = byId.get(against), said = boundWords(against);
+    if (subject === undefined || target?.dist?.kind !== 'fixed' || said === undefined) return undefined;
     const of = c.per === undefined ? q(subject) : label(c.per) === undefined ? undefined : `${q(subject)} per ${q(label(c.per)!)}`;
     if (of === undefined) return undefined;
     const bound = met ? comparatorWords(c.cmp) : MISSED[c.cmp];
-    return `${of} is ${sayOf(against, value, target.unit)}${c.no_deadline === true ? '' : ` ${whenWords(c)}`}, ${bound} ${sayOf(against, target.dist.value, target.unit)}`;
+    return `${of} is ${sayOf(against, value, target.unit)}${c.no_deadline === true ? '' : ` ${whenWords(c)}`}, ${bound} ${said}`;
   };
   const fixedWhy = (o: OptionResult, met: boolean): string | undefined => {
     const lines = [
