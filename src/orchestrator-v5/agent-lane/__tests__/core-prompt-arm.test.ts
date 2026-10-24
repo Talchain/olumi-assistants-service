@@ -43,7 +43,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
   it('the sent core instructions, byte for byte, plus the canvas-coaching sentence once (the route row in core-turn.route.test.ts pins the same bytes as the SDK receives them)', () => {
     expect(b.split(NOTE_ON_ITEM_INSTRUCTION)).toHaveLength(2);
     // 23 Oct (ALPHA): the model-program prompt replaces arm B's assembled reference (055841368f…, 29,512 characters sent).
-    expect(createHash('sha256').update(b, 'utf8').digest('hex')).toBe('7a9bb9088ce4e3c0175c6ae53f66c9333d580472a2b84e0936308afff148c817'); // 24 Oct: remodel coaching (after 23 Oct P1/P4: at most three questions), each once, never what their words state.
+    expect(createHash('sha256').update(b, 'utf8').digest('hex')).toBe('fee42c2fbd8f73fa578992b049157ad90b0d7d876795d4d83e9fe0afdb42cb21'); // 24 Oct: issue 30, synthetic examples only; before it, remodel coaching (after 23 Oct P1/P4: at most three questions, each once, never what their words state).
     // Candidate-3 witness kept (21 Oct): WHEN to build. Text only, not behaviour.
     expect(b).toContain('draft the first model from their brief in that same turn, even when figures are missing');
   });
@@ -102,7 +102,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       // 3. edits in chat, never a figure invented for them; a loose figure is theirs with Olumi's labelled range
       'never invent a figure for them, and never change the model because of discussion alone.',
       // Codex r1 BLOCK on #3707: never a range Olumi invents around their loose figure; ask for theirs.
-      'A loose figure ("about 20") goes in exactly as they said it: their figure, 20, with their words quoted so the "about" stays visible. Never add a range or bounds they did not give. If that figure feeds a goal or a limit, ask what range they would put on it.',
+      'A loose figure ("about 35") goes in exactly as they said it: their figure, 35, with their words quoted so the "about" stays visible. Never add a range or bounds they did not give. If that figure feeds a goal or a limit, ask what range they would put on it.',
       'A what-if question is not a change: answer from the current result, and offer to change the figure if they want it worked out.',
       'Run a new calculation only when they ask for one; a saved change may already bring its result: use that.',
       // 4. nothing calculable: what is missing in one sentence, and a science-grounded activity

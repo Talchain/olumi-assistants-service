@@ -20,7 +20,7 @@
  *    signs in one op), an effect (base + Σ coefficient × driver, each coefficient an uncertain mechanism size in natural units)
  *    or a stock (start, inflows, outflows per period). An exact identity is a definition, never an effect;
  *  · a goal is what the person is trying to achieve; a limit is a condition the plan must not break; a preference ("we'd like
- *    to spend less") is neither. An aim or guardrail with no measure yet is valid: measure null plus a coaching question;
+ *    fewer late deliveries") is neither. An aim or guardrail with no measure yet is valid: measure null plus a coaching question;
  *  · the QUESTION binds the calculation: each goal states its frame (a level, or a change from a reference), aggregation
  *    (end, sum, mean, every, max, min), optional rate denominator (`per`) and window;
  *  · a window's length and its origin's timing are quantities, and timing may name a quantity, so every ask fills exactly one
@@ -79,7 +79,7 @@ export const FIGURE_STATUSES: ReadonlySet<QuantityStatusT> = new Set(['known', '
 /** The statuses that withhold every goal they feed, with a reason (never an invented figure). */
 export const WITHHOLDING_STATUSES: ReadonlySet<QuantityStatusT> = new Set(['unknown', 'unsupported']);
 
-export const UNIT_RULES = 'The unit in singular words: a currency as GBP, USD or EUR (or £, $, €); a count noun ("loaf", "member"); "/" for per, read left to right ("GBP/loaf", "member/month", "GBP/member/month"); a rate per period as "/month" ("%/month" for 4 % a month; the stock it applies to × that rate is a flow per month); "1" for a pure number or a chance from 0 to 1; "%" for a percentage (its figures in percent, 20 for 20 %). Never a multiplier such as k or m: write the figure in full. A coefficient\'s unit is the defined quantity\'s unit per the driver\'s unit ("loaf/week/oven").';
+export const UNIT_RULES = 'The unit in singular words: a currency as GBP, USD or EUR (or £, $, €); a count noun ("loaf", "member"); "/" for per, read left to right ("GBP/loaf", "member/month", "GBP/member/month"); a rate per period as "/month" ("%/month" for 7 % a month; the stock it applies to × that rate is a flow per month); "1" for a pure number or a chance from 0 to 1; "%" for a percentage (its figures in percent, 20 for 20 %). Never a multiplier such as k or m: write the figure in full. A coefficient\'s unit is the defined quantity\'s unit per the driver\'s unit ("loaf/week/oven").';
 
 /**
  * WHAT A RANGE MEANS (PL ruling B): read from the words, never assumed. bounds: the ends are hard; plausible: a rough span.
@@ -186,19 +186,19 @@ export const AGGREGATIONS = ['end', 'sum', 'mean', 'every', 'max', 'min'] as con
 
 /**
  * A window counts in the model's periods from an origin. Its length and the origin's timing are QUANTITIES, so a missing
- * deadline or launch date is an ordinary asked quantity (phase 0 lesson 4: every ask's answer fills exactly one quantity).
+ * deadline or opening date is an ordinary asked quantity (phase 0 lesson 4: every ask's answer fills exactly one quantity).
  */
 export const CanonicalWindow = z.object({
   origin_event: z.string().nullable().describe('Null when the window counts from now. Otherwise the event it counts from, as written ("the opening").'),
   origin_offset: id.nullable().describe('For an event: a quantity in the model\'s period unit giving how many periods from now it happens (asked when not stated). Null when the window counts from now.'),
-  start: z.number().int().describe('Periods after the origin the window opens: 0 = at the origin ("in the first three months after opening" is 0). Counting is ordinal: "in months 6 to 8" opens at 5, with 3 periods.'),
-  periods: id.describe('A quantity in the model\'s period unit giving how many periods the window lasts ("within 3 months" on a monthly model: 3 month, the person\'s quote). When no deadline was stated: an asked quantity with the question "By when?". A calendar date ("by the end of March") is Olumi\'s reading: known, author olumi, its basis naming the date.'),
+  start: z.number().int().describe('Periods after the origin the window opens: 0 = at the origin ("in the first four weeks after opening" is 0). Counting is ordinal: "in months 6 to 8" opens at 5, with 3 periods.'),
+  periods: id.describe('A quantity in the model\'s period unit giving how many periods the window lasts ("within 5 weeks" on a weekly model: 5 week, the person\'s quote). When no deadline was stated: an asked quantity with the question "By when?". A calendar date ("by the end of March") is Olumi\'s reading: known, author olumi, its basis naming the date.'),
 }).strict();
 export type CanonicalWindowT = z.infer<typeof CanonicalWindow>;
 
 const aggregation = z.enum(AGGREGATIONS).describe(
   'end: the level after the window\'s last period. sum: the total over the window. mean: the average per period. every: in every period of the window. max: the highest level in the window ("reach 400 members within six months" is max ≥ 400). min: the lowest level in the window ("never below 2,000 GBP in the bank" is min ≥ 2,000).');
-const per = id.nullable().describe('For a rate over the window ("conversion over the first three months"): the denominator quantity, aggregated the same way, so the value is agg(quantity) ÷ agg(per). The target is then in quantity ÷ per units. Null otherwise; never with every.');
+const per = id.nullable().describe('For a rate over the window ("no-shows per booking over the first eight weeks"): the denominator quantity, aggregated the same way, so the value is agg(quantity) ÷ agg(per). The target is then in quantity ÷ per units. Null otherwise; never with every.');
 
 export const CanonicalGoal = z.object({
   id,
@@ -211,9 +211,9 @@ export const CanonicalGoal = z.object({
     frame: z.enum(GOAL_FRAMES).describe(
       'level: the quantity itself reaches the target ("revenue next year over 60,000 GBP" is a level, summed over the window). '
       + 'change_abs: its change from the reference, in its own unit ("grow takings by 500 GBP a month"). '
-      + 'change_rel: its change from the reference as a fraction of the reference, the target in "%" or "1" ("grow takings by 10 %").'),
+      + 'change_rel: its change from the reference as a fraction of the reference, the target in "%" or "1" ("grow takings by 12 %").'),
     reference: z.object({
-      kind: z.enum(REFERENCE_KINDS).describe('now: its level today, before any option. option: its level under the named option on the same draws (usually "carry on as now"). value: a stated reference quantity ("10 % above last year\'s 40,000 GBP").'),
+      kind: z.enum(REFERENCE_KINDS).describe('now: its level today, before any option. option: its level under the named option on the same draws (usually "carry on as now"). value: a stated reference quantity ("12 % above last year\'s 40,000 GBP").'),
       option: id.nullable().describe('For option: the option id. Null otherwise.'),
       quantity: id.nullable().describe('For value: the quantity holding the reference, in the measured quantity\'s unit. Null otherwise.'),
     }).strict().nullable().describe('Null for a level. For a change: what it is a change from.'),
@@ -221,8 +221,8 @@ export const CanonicalGoal = z.object({
     window: CanonicalWindow.nullable().describe('Null for a static level with no deadline ("keep the margin above 20 %"). A level that changes over time needs a window.'),
     measure_by: z.enum(AUTHORS).describe('person when they named the measure; olumi when the aim had none and this is Olumi\'s suggested measure (the aim stays theirs; every figure they did not give stays asked).'),
     assumptions: ids.describe('Ids of the assumption records this reading of the goal rests on (for a change from now: "carrying on leaves it unchanged" unless the model says otherwise).'),
-    exclusions: ids.describe('Ids of left_out records for parts of the aim this measure does not cover ("code quality is not in this chance"). [] when it covers the whole aim.'),
-  }).strict().nullable().describe('Null for an aim with no measure yet ("keep the regulars happy"; "a successful launch" with no metric): VALID, left out of the chance and asked about. Never invent a measure to have one.'),
+    exclusions: ids.describe('Ids of left_out records for parts of the aim this measure does not cover ("the café\'s cosy feel is not in this chance"). [] when it covers the whole aim.'),
+  }).strict().nullable().describe('Null for an aim with no measure yet ("keep the regulars happy"; "a smooth opening night" with no metric): VALID, left out of the chance and asked about. Never invent a measure to have one.'),
   question: z.string().nullable().describe('When the measure is null: the one plain question that would give it a measure ("How would you tell the regulars are happy: repeat visits a week?"). When the window is null but the level changes over time: "By when?". Null otherwise.'),
   ...attribution,
 }).strict().describe(
@@ -240,11 +240,11 @@ export const CanonicalLimit = z.object({
     bound: id.describe('A quantity holding the limit\'s figure, in the limited quantity\'s unit.'),
     aggregation,
     window: CanonicalWindow.nullable().describe('Null for a static condition with no period.'),
-  }).strict().nullable().describe('Null for a guardrail with no measure yet ("keep code quality where it is"): VALID, reported as not covered by the result, never given an invented scale.'),
+  }).strict().nullable().describe('Null for a guardrail with no measure yet ("keep the neighbours on side"): VALID, reported as not covered by the result, never given an invented scale.'),
   question: z.string().nullable().describe('When the measure is null: the one plain question that would give it a measure. Null otherwise.'),
   ...attribution,
 }).strict().describe(
-  'A CONDITION THE PLAN MUST NOT BREAK, beside the aim ("we cannot spend more than 2,000 GBP a month", "I can give it at most 10 hours a week"). Never the aim itself, never a preference, and never also a goal.');
+  'A CONDITION THE PLAN MUST NOT BREAK, beside the aim ("running costs must stay under 8,000 GBP a month", "each van can be on the road at most 11 hours a day"). Never the aim itself, never a preference, and never also a goal.');
 export type CanonicalLimitT = z.infer<typeof CanonicalLimit>;
 
 export const CanonicalPreference = z.object({
@@ -252,7 +252,7 @@ export const CanonicalPreference = z.object({
   quantity: id.describe('The quantity the person would like lower or higher.'),
   direction: z.enum(['lower', 'higher']),
   ...attribution,
-}).strict().describe('A wish without a threshold ("we\'d like to spend less"): shown and reported, never a goal or a limit, never given an invented target.');
+}).strict().describe('A wish without a threshold ("we\'d like fewer late deliveries"): shown and reported, never a goal or a limit, never given an invented target.');
 export type CanonicalPreferenceT = z.infer<typeof CanonicalPreference>;
 
 // ── Options and risks ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -373,7 +373,7 @@ export const CanonicalModel = z.object({
   relations: z.array(CanonicalRelation),
   goals: z.array(CanonicalGoal).describe('Every aim the person stated, each with its own measure (or null with a question), target and window. An aim with no measure is valid; never invent one.'),
   limits: z.array(CanonicalLimit).describe('Every condition the plan must not break. A budget or a time cap is a limit, not a goal.'),
-  preferences: z.array(CanonicalPreference).describe('Every wish without a threshold ("we\'d like to spend less").'),
+  preferences: z.array(CanonicalPreference).describe('Every wish without a threshold ("we\'d like fewer late deliveries").'),
   options: z.array(CanonicalOption).describe('Every option the person named, by its exact name; Olumi\'s own options are author olumi.'),
   risks: z.array(CanonicalRisk),
   claims: z.array(CanonicalClaim),
