@@ -920,7 +920,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
 
     it('(6) ALPHA (23 Oct) + Codex r1 BLOCK 4 on #3709: a saved PROGRAM\'s turn gets the model-program instructions; a saved Living Model keeps the old text, byte for byte', async () => {
       // Pinned from the request bodies the provider received on this route, not from the module that builds them.
-      const PROGRAM_SHA = '7a9bb9088ce4e3c0175c6ae53f66c9333d580472a2b84e0936308afff148c817'; // 24 Oct: remodel coaching (after P1/P4)
+      const PROGRAM_SHA = 'fee42c2fbd8f73fa578992b049157ad90b0d7d876795d4d83e9fe0afdb42cb21'; // 24 Oct: issue 30, synthetic examples only (after remodel coaching)
       const LIVING_MODEL_SHA = '7a1bced23a44dccc478a00d075b28bbe2dda487a4b6da868ae3a477698097e44'; // staging 646d374e's
       const sha = (c: Json) => createHash('sha256').update(String(c.instructions), 'utf8').digest('hex');
       outputs = [[{ type: 'message', text: 'Here is what the model holds.' }]];
@@ -941,6 +941,55 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
         + 'what may have been misread, ask them to restate it in their own words (the outcome they want, the options, what they know), and tell them they can start a new '
         + 'scenario from that clarified brief while this one stays as it was; never start one for them or redraft this model instead, and never raise it while they are '
         + 'answering or editing.');
+    });
+
+    it('issue 30 (24 Oct): nothing Olumi writes into the drafter\'s or the agent\'s call on a program holds a phrase from the test briefs; its examples are synthetic', async () => {
+      // Copied from the five test briefs (hiring, marketing, capacity, MRR, funding) in the harness briefs folder. They live
+      // here only, never in src. Each is a pattern: a phrase, or a figure with its unit or window ("4 % a month", "10 %",
+      // "within 3 months"); "about 20" does not count a chance ("about 20% chance" is a result, not an example).
+      const BRIEF_PHRASES = [
+        'code quality', 'spend less', 'launch date', 'three months', 'productivity',
+        'first 3 months', 'within (the first )?(3|three) months', 'conversion rate', 'feature launch', 'spend more than',
+        'about 20(?! ?%)', 'tickets', 'specialist',
+        'churn', 'mrr', '4 ?% (a|per) month', '10 ?%',
+        'investment firms', 'angel investors', 'cold emails', 'warm connections', 'run out of money',
+      ];
+      // Scanned: every string the host puts in a call (instructions, schema, tool descriptions, and its own messages in the
+      // input: state blocks, guidance, its written replies). Skipped: only the person's own typed messages, by identity.
+      const TYPED = [BAKERY_BRIEF, 'What does the model hold now?'];
+      const skipped: string[] = [];
+      const hostText = (v: unknown): string[] => {
+        if (typeof v === 'string') return [v];
+        if (Array.isArray(v)) return v.flatMap(hostText);
+        if (v === null || typeof v !== 'object') return [];
+        const m = v as Json;
+        if (m.role === 'user' && typeof m.content === 'string' && TYPED.includes(m.content)) { skipped.push(m.content); return []; }
+        return Object.values(m).flatMap(hostText);
+      };
+      const found = (c: Json) => {
+        const text = hostText(c).join(' ').replace(/\s+/g, ' ');
+        return BRIEF_PHRASES.filter((p) => new RegExp(`(?<![\\w.])${p}(?!\\w)`, 'i').test(text));
+      };
+      SCENARIO = randomUUID(); persisted = null; canonicalDraft = JSON.stringify(bakery()); calls.length = 0;
+      expect((await typed(BAKERY_BRIEF)).statusCode).toBe(200);
+      const draftCall = calls.find((c) => c.text?.format?.name === 'canonical_model')!;
+      // Contrast: the probe reads the schema's descriptions and the agent's instructions (each holds its synthetic example).
+      expect(hostText(draftCall).join(' ')).toContain('("we\'d like fewer late deliveries")');
+      skipped.length = 0;
+      expect(found(draftCall)).toEqual([]);
+      expect(skipped, 'only the person\'s brief is skipped').toEqual([BAKERY_BRIEF]);
+      calls.length = 0;
+      outputs = [[{ type: 'message', text: 'Here is what the model holds.' }]];
+      expect((await typed('What does the model hold now?')).statusCode).toBe(200);
+      expect(calls).toHaveLength(1);
+      expect(String(calls[0]!.instructions)).toContain('A loose figure ("about 35") goes in exactly as they said it: their figure, 35,');
+      expect(calls[0]!.tools, 'the tool descriptions are scanned too').toBeDefined();
+      const agentText = hostText(calls[0]!).join(' ');
+      expect(agentText, 'the host\'s state block in the input is scanned').toContain('OLUMI STATE BLOCK');
+      expect(agentText, 'the host\'s program guidance in the input is scanned').toContain('This scenario\'s model is a model program: read_canonical_context');
+      skipped.length = 0;
+      expect(found(calls[0]!)).toEqual([]);
+      expect(skipped, 'only the person\'s two typed messages are skipped').toEqual(TYPED);
     });
 
     it('Challenge on a PROGRAM board (served 502 on board 5715db98, 24 Oct): no first tool is forced, as its tools have no note_on_item; the note rides the turn and a reply comes back. A Living Model board keeps note_on_item', async () => {
@@ -1121,7 +1170,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
 
     it('(7) Codex r1 BLOCK 1 on #3707: a loose figure goes in exactly as said, with no bounds Olumi adds; Olumi asks for their range', async () => {
       const sent = await sentOnce();
-      expect(sent.split('A loose figure ("about 20") goes in exactly as they said it: their figure, 20, with their words quoted so the "about" stays visible. '
+      expect(sent.split('A loose figure ("about 35") goes in exactly as they said it: their figure, 35, with their words quoted so the "about" stays visible. '
         + 'Never add a range or bounds they did not give. If that figure feeds a goal or a limit, ask what range they would put on it.')).toHaveLength(2);
       for (const gone of ['18 to 22', 'a range that reads their word', 'the range is Olumi\'s reading']) expect(sent, gone).not.toContain(gone);
     });
