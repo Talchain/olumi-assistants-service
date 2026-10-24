@@ -64,7 +64,8 @@ export type GoalOutcome = {
   olumi_inputs: string[];
   /** The person's items it rests on whose quote is not in their words. */
   unverified_inputs: string[];
-  /** Assumptions and conditions that concern what the goal rests on, and the goal's own stated assumptions. */
+  /** The premises the goal's chance is worked out under (applied assumptions, prerequisites) that concern what it reads or the
+   * whole situation, and the goal's own applied assumptions: said in its basis (R8). */
   rests_on: string[];
   /** Left-out parts of the aim this measure does not cover: said with its chance ("productivity only"). */
   excludes: string[];
@@ -704,7 +705,14 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
     ]),
   ];
   const touchedBy = (closure: Set<string>, own: string) => new Set([...closure, own, ...relationsIn(closure).flatMap((r) => [r.id, ...(r.form === 'effect' ? r.terms.map((t) => `${r.id}:${t.driver}`) : [])])]);
-  const restsOn = (touched: Set<string>, own: string[] = []) => [...new Set([...own, ...[...model.assumptions, ...model.conditions].filter((a) => a.concerns.some((c) => touched.has(c))).map((a) => a.id)])];
+  /**
+   * R8: what a reading RESTS ON is its premises: an assumption the calculation is worked out under (`applied`) and a
+   * requirement that must be met first (`prerequisite`), when it concerns what is read or the situation as a whole (concerns
+   * [], canonical.ts). A merely noted assumption and a challenge are said beside the model, never as a premise.
+   */
+  const premise = (a: CanonicalModelT['assumptions'][number] | CanonicalModelT['conditions'][number]) => ('applied' in a ? a.applied : a.kind === 'prerequisite');
+  const restsOn = (touched: Set<string>, own: string[] = []) => [...new Set([...own.filter((id) => model.assumptions.some((a) => a.id === id && premise(a))),
+    ...[...model.assumptions, ...model.conditions].filter((a) => premise(a) && (a.concerns.length === 0 || a.concerns.some((c) => touched.has(c)))).map((a) => a.id)])];
 
   /** A window's own figures that are unknown (no figure, no question): what the goal or limit rests on, so it is listed (#3723). */
   const unknownWindowRefs = (w: CanonicalWindowT | null | undefined) => [w?.periods, w?.origin_offset].filter((x): x is string => has(x) && Q.get(x)?.status === 'unknown');

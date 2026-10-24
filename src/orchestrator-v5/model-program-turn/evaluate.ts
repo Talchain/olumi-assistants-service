@@ -19,7 +19,7 @@ import type { ExecutableModel } from '../model-program/executable.js';
 import { simulate } from '../model-program/simulate/simulate.js';
 import type { SimResult } from '../model-program/simulate/result.js';
 import {
-  needsAnswer, presentAnalysisView, tippingThresholds, waitsOnWords, type PresentAsk, type PresentBlocker, type PresentGoal, type PresentQuantity, type PresentThreshold,
+  needsAnswer, presentAnalysisView, tippingThresholds, waitsOnWords, type PresentAsk, type PresentBlocker, type PresentGoal, type PresentPremise, type PresentQuantity, type PresentThreshold,
   type PresentedAnalysisView, type TippingProbe,
 } from '../model-program/present/present.js';
 
@@ -59,7 +59,7 @@ function quantityMeta(model: CanonicalModelT, compiled: CompileResult, x: Execut
   const rel = new Map(m.relations.map((r) => [r.defines, r] as const));
   const own = new Map(m.quantities.map((q) => {
     const r = rel.get(q.id);
-    return [q.id, { label: q.label, author: who(q.author, q.id), ...(r !== undefined ? { relation_author: who(r.author, r.id) } : {}), ...(isApproximate(q) ? { approximate: { quote: q.quote ?? String(q.value) } } : {}) }] as const;
+    return [q.id, { label: q.label, author: who(q.author, q.id), approval: q.approval, ...(r !== undefined ? { relation_author: who(r.author, r.id) } : {}), ...(isApproximate(q) ? { approximate: { quote: q.quote ?? String(q.value) } } : {}) }] as const;
   }));
   const goals = new Map(m.goals.map((g) => [g.id, g] as const));
   const out: Record<string, PresentQuantity> = {};
@@ -102,10 +102,15 @@ function probeFor(model: CanonicalModelT, goalId: string, askId: string, sourceT
 export function evaluateCanonical(model: CanonicalModelT, opts: { readonly sourceText: string; readonly seed: number; readonly draws?: number; readonly brief?: string }): Evaluation {
   const compiled = compile(model, { sourceText: opts.sourceText });
   const projection = project(model, compiled, opts.brief !== undefined ? { brief: opts.brief } : {});
-  const labelOf = new Map(normalise(model).goals.map((g) => [g.id, g.label] as const));
+  const read = normalise(model);
+  const labelOf = new Map(read.goals.map((g) => [g.id, g.label] as const));
+  // R8: the compiler's premises for each goal (`rests_on`), in their own words and with whose they are, said in its basis.
+  const premiseOf = new Map<string, PresentPremise>([...read.assumptions.map((a) => [a.id, { id: a.id, text: a.text, author: a.author, kind: 'assumption' as const }] as const),
+    ...read.conditions.map((c) => [c.id, { id: c.id, text: c.text, author: c.author, kind: 'condition' as const }] as const)]);
   // Aims with no measure yet are left out of the chance (said in `leaves_out`), never a goal that waits.
   const goals: PresentGoal[] = compiled.perGoal.filter((p) => !p.needs_measure)
-    .map((p) => ({ goal_id: p.goal_id, label: labelOf.get(p.goal_id) ?? p.goal_id, status: p.status, reasons: p.reasons, asks: p.asks }));
+    .map((p) => ({ goal_id: p.goal_id, label: labelOf.get(p.goal_id) ?? p.goal_id, status: p.status, reasons: p.reasons, asks: p.asks,
+      rests_on: p.rests_on.flatMap((id) => (premiseOf.has(id) ? [premiseOf.get(id)!] : [])) }));
   const blockers = blockersOf(model, compiled.blockers);
   const asks: PresentAsk[] = normalise(model).quantities.filter((q) => blockers.some((b) => b.answer?.quantity_id === q.id))
     .map((q) => ({ quantity_id: q.id, label: q.label, unit: q.unit }));

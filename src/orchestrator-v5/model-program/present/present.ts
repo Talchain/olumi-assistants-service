@@ -9,7 +9,8 @@
  *     exactly the simulation measured the chance, never a range for the chance. No win share is computed or said.
  *   - Every chance's words restate its question: the quantity, the target with its unit, the horizon counted from now, the
  *     aggregation, and what is left out. They end with the BASIS: "on your figures" only when every input the chance rests on
- *     is the person's and no law was assumed; otherwise conditional, "if <Olumi's assumptions, listed>". Never a forecast.
+ *     is the person's and confirmed, no law was assumed and no premise applies (R8); otherwise conditional, "if <the premises
+ *     it rests on, Olumi's assumptions and the person's unconfirmed figures, listed>". Never a forecast.
  *   - Several goals: each goal's own chance per option (`per_target`), and the joint. A goal the compiler withheld (an ask
  *     or an unknown) is never folded into a partial joint: the joint is withheld with its reason, and only the goals the ask
  *     feeds wait (DL ruling d). A goal waiting on exactly ONE asked quantity gets a THRESHOLD, found by bisection over that
@@ -51,6 +52,15 @@ export interface PresentQuantity {
   readonly approximate?: { readonly quote: string };
   /** A figure the compiler converted (25 % → 0.25): said in the unit it was given in, never as the fraction. */
   readonly shown_in?: { readonly unit: string; readonly factor: number };
+  /** The canonical `approval`: proposed until the person confirms Olumi's reading of it. Absent: not recorded, said as before. */
+  readonly approval?: 'proposed' | 'approved';
+}
+/** A premise a goal's chance is worked out under (compile's `rests_on`): an applied assumption or a prerequisite, as written. */
+export interface PresentPremise {
+  readonly id: string;
+  readonly text: string;
+  readonly author: 'person' | 'olumi';
+  readonly kind: 'assumption' | 'condition';
 }
 /** S1's `GoalOutcome`, with the goal's label: every goal, calculable or not. */
 export interface PresentGoal {
@@ -59,6 +69,8 @@ export interface PresentGoal {
   readonly status: 'calculable' | 'asks' | 'withheld';
   readonly reasons: readonly string[];
   readonly asks: readonly string[];
+  /** The premises its chance rests on (R8), said in its basis. Absent: none. */
+  readonly rests_on?: readonly PresentPremise[];
 }
 /** S1's `LimitOutcome`, with the limit's label: every limit, checked or not. */
 export interface PresentLimit {
@@ -312,21 +324,37 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     if (x.equation?.form !== 'effect' || m?.relation_author === 'person') return [];
     return [m?.relation_author === 'olumi' ? `${name} follows Olumi’s assumed relationship` : `${name} follows a relationship ${NOT_RECORDED}`];
   });
-  const basisWords = (ids: ReadonlySet<string>): string => {
-    const a = assumptions(ids);
+  /** R8: each premise in its own words, with whose it is. */
+  const premiseWords = (p: PresentPremise): string => {
+    const whose = p.author === 'olumi' ? 'Olumi’s' : 'your', text = q(p.text.trim().replace(/[.!]+$/, ''));
+    return p.kind === 'condition' ? `${whose} condition ${text} is met` : `${whose} assumption ${text} holds`;
+  };
+  /** The person's own figures among these: their fixed figure or their range, never one whose words were not found. */
+  const theirs = (ids: ReadonlySet<string>): Quantity[] => model.quantities.filter((x) => ids.has(x.id) && meta(x.id)?.author !== 'unverified'
+    && (x.dist?.kind === 'fixed' ? (x.dist.author ?? meta(x.id)?.author) === 'person' : x.dist?.kind === 'range' && x.dist.basis === 'person_range'));
+  /** R8: the person's figures Olumi read that they have not confirmed yet (a first draft's, until its reading is accepted). */
+  const unconfirmed = (ids: ReadonlySet<string>): string[] => {
+    const all = theirs(ids), open = all.filter((x) => meta(x.id)?.approval === 'proposed');
+    return open.length === 0 ? [] : [`Olumi has read ${open.length === all.length ? 'your figures' : listWords(open.map((x) => q(label(x.id) ?? x.id)))} right (not yet confirmed by you)`];
+  };
+  /** "on your figures" only when every input is the person's and confirmed, and no premise applies; otherwise "if …". */
+  const basisWords = (ids: ReadonlySet<string>, premises: readonly PresentPremise[], readings: ReadonlySet<string> = ids): string => {
+    const a = [...premises.map(premiseWords), ...assumptions(ids), ...unconfirmed(readings)];
     return a.length === 0 ? 'on your figures' : `if ${listWords(a)}`;
   };
   /**
-   * A target's basis covers every option: the shared model's basis, then each option's own assumptions, named by option
-   * ("on your figures; with ‘Raise’, if ‘New price’ is £59, Olumi’s figure").
+   * A target's basis covers every option: the shared model's basis (with its premises, and the person's unconfirmed figures
+   * any option reads), then each option's own assumptions, named by option ("on your figures; with ‘Raise’, if ‘New price’ is
+   * £59, Olumi’s figure").
    */
-  const sharedBasisWords = (r: readonly string[]): string => {
-    const shared = upstream(r, null), base = assumptions(shared);
+  const sharedBasisWords = (r: readonly string[], premises: readonly PresentPremise[]): string => {
+    const shared = upstream(r, null);
+    const lead = basisWords(shared, premises, new Set([...shared, ...model.options.flatMap((o) => [...upstream(r, o.id)])]));
     const own = model.options.flatMap((o) => {
       const extra = assumptions(new Set([...upstream(r, o.id)].filter((id) => !shared.has(id))));
-      return extra.length === 0 ? [] : [`with ${q(optionLabel.get(o.id) ?? o.id)}, ${base.length > 0 ? 'also ' : ''}if ${listWords(extra)}`];
+      return extra.length === 0 ? [] : [`with ${q(optionLabel.get(o.id) ?? o.id)}, ${lead.startsWith('if ') ? 'also ' : ''}if ${listWords(extra)}`];
     });
-    return [basisWords(shared), ...own].join('; ');
+    return [lead, ...own].join('; ');
   };
 
   // ── The question each chance answers ────────────────────────────────────────────────────────────────────────────────────
@@ -356,6 +384,9 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   const leftOutGoals: PresentGoal[] = (model.withheld ?? []).filter((w) => w.kind === 'goal' && !given.some((g) => g.goal_id === w.id))
     .map((w) => ({ goal_id: w.id, label: w.label, status: 'withheld', reasons: [w.reason], asks: [] }));
   const allGoals: readonly PresentGoal[] = [...given, ...leftOutGoals];
+  /** The premises these goals' chance rests on, each once, in the goals' order. */
+  const premisesOf = (goalIds: readonly string[]): PresentPremise[] =>
+    [...new Map(goalIds.flatMap((id) => allGoals.find((g) => g.goal_id === id)?.rests_on ?? []).map((p) => [p.id, p] as const)).values()];
   const waiting = allGoals.filter((g) => g.status !== 'calculable');
   /** Options and risks the compiler left out: said in the words of every chance, with their reasons in the notes. */
   const notInRun = (model.withheld ?? []).filter((w) => w.kind === 'option' || w.kind === 'risk');
@@ -509,7 +540,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     const s = shown(headline, result.draws)!;
     const why = headline.precision_95[0] === headline.precision_95[1] ? fixedWhy(o, headline.chance === 1) : undefined;
     const cell: PresentCell = { kind: 'figure', display: s.display,
-      face: `${q(name)}: ${s.display} chance of ${jointWords}, in this model, ${basisWords(upstream(roots, o.option_id))}${why !== undefined ? `: ${why}` : ''}.`
+      face: `${q(name)}: ${s.display} chance of ${jointWords}, in this model, ${basisWords(upstream(roots, o.option_id), premisesOf(model.goals.map((g) => g.id)))}${why !== undefined ? `: ${why}` : ''}.`
         + (model.limits.length > 0 ? ` Each limit on its own: ${limitLines(o).join('; ')}.` : '')
         + (uncheckedLine !== undefined ? ` ${stop(uncheckedLine)}` : ''),
       detail: { precision_95: headline.precision_95, draws: result.draws, precision_words: s.precision_words } };
@@ -533,7 +564,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   const perTarget = !several ? [] : model.goals.flatMap((g) => {
     const words = goalWords.get(g.id);
     if (words === undefined) return [];
-    return [{ constraint_id: g.id, words: `${words}, in this model, ${sharedBasisWords([g.quantity, g.target, ...(g.per !== undefined ? [g.per] : [])])}`,
+    return [{ constraint_id: g.id, words: `${words}, in this model, ${sharedBasisWords([g.quantity, g.target, ...(g.per !== undefined ? [g.per] : [])], premisesOf([g.id]))}`,
       options: result.options.flatMap((o) => {
         const s = shown(o.per_goal.find((x) => x.goal_id === g.id)!, result.draws);
         return s === undefined ? [] : [{ option_id: o.option_id, display: s.display }];
