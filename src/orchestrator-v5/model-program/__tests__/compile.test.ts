@@ -15,6 +15,7 @@ import { simulate } from '../simulate/simulate.js';
 import { isWithheld } from '../simulate/result.js';
 import { STARTS_AFTER_PERIODS, withDeclaredTiming } from '../canonical.js';
 import { CANONICAL_JSON_SCHEMA } from '../../model-program-turn/prompt.js';
+import { revisionDigest } from '../../model-program-turn/run-receipt.js';
 
 // ── builders ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 const base = { party: null, approval: 'proposed' as const, author_id: null };
@@ -858,6 +859,31 @@ describe('issue 39: an unsized link is drawn with its stated direction, never a 
   it('a figure keeps its own sign: a stated direction never overrides it', () => {
     expect(linkOf(priced({ status: 'estimated', low: -60, high: -10, value: -30, range_kind: 'plausible', basis: 'Fewer loaves sell at a higher price.', direction: 'raises' })))
       .toEqual({ direction: 'negative', mean: -1 });
+  });
+
+  it('an unknown size with no stated direction is not drawn: no link carries a sign no one can give, and its record stays accounted for', () => {
+    const items = (m: CanonicalModelT) => new Map(project(m).items.map((i) => [i.record_id, i] as const));
+    const linked = (m: CanonicalModelT) => (project(m).graph.edges as Record<string, unknown>[]).map((e) => `${String(e.from)}>${String(e.to)}`);
+    const none = priced({ ...UNKNOWN, direction: null });
+    const lowers = priced({ ...UNKNOWN, direction: 'lowers' });
+    expect(linked(none)).not.toContain('price_rise>sales');
+    expect(linked(lowers), 'contrast: the same link with a direction is drawn').toContain('price_rise>sales');
+    expect(linked(none), 'the base level is still drawn').toContain('base_sales>sales');
+    // The size and its link stay in the model, said as before, shown nowhere on the canvas.
+    expect(none.quantities.map((x) => x.id)).toContain('price_effect');
+    expect(items(none).get('price_effect')).toMatchObject({ shown_as: {}, in_calculation: false, why_out: items(lowers).get('price_effect')!.why_out });
+    expect(items(none).get('price_effect')!.why_out).toContain('unknown: Last year\'s sales after a price change would size it.');
+    expect(items(none).get('sales_rel:price_rise')).toMatchObject({ shown_as: {} });
+    expect(items(lowers).get('sales_rel:price_rise')).toMatchObject({ shown_as: { edge: 'price_rise__sales' } });
+  });
+
+  it('the revision digest leaves a null direction out, so a Run on a program saved before the field stays current', () => {
+    const old = JSON.parse(JSON.stringify(priced(UNKNOWN))) as CanonicalModelT;
+    for (const x of old.quantities) delete (x as Partial<CanonicalQuantityT>).direction;
+    const read = CanonicalModel.parse(withDeclaredTiming(old));
+    expect(revisionDigest(read, ['the brief'])).toBe(revisionDigest(old, ['the brief']));
+    // Contrast: a stated direction is part of the model, so it moves the digest.
+    expect(revisionDigest(priced({ ...UNKNOWN, direction: 'lowers' }), ['the brief'])).not.toBe(revisionDigest(read, ['the brief']));
   });
 
   it('a program saved before direction existed is read in today\'s format, every quantity with none', () => {
