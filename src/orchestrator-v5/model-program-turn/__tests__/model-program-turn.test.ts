@@ -517,7 +517,7 @@ describe('the model-program turn on the real core route', () => {
     sent.length = 0;
     const words = 'The oven would cost about £2,500.';
     const deps = { dispatch, proposals: new ProposalStore() };
-    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] };
+    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words };
     const args = { public_label: 'Oven price £2,500', basis: 'their answer', request: 'The oven price is their answer: about £2,500.', remove: [] };
     const answer = (quote: string) => savedWith((m) => setQ(m, 'oven_price', { status: 'known', value: 2500, question: null, quote, basis: APPROXIMATE_FIGURE }));
     // Contrast first: a figure of theirs whose words are not theirs, verbatim, is refused, and nothing is proposed.
@@ -608,7 +608,7 @@ describe('the model-program turn on the real core route', () => {
     // link and its relation) stays Olumi's. 300 + 3 × (20 + 6 − 12) = 342 ≥ 340: exactly 1. A new revision, a new Run.
     const words = 'From experience a promotion brings 6 more a month.';
     const deps = { dispatch, proposals: new ProposalStore() };
-    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] };
+    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words };
     replies = [savedWith((m) => setQ(m, 'promo_effect', { value: 6, low: null, high: null, range_kind: null, status: 'known', author: 'person', basis: null, quote: 'a promotion brings 6 more a month' }))];
     const p = await proposeProgramChange(deps, ctx, { public_label: 'Promotion effect 6 a month', basis: 'their experience', request: 'The promotion brings 6 more a month, in their words.', remove: [] }) as Json;
     expect(p.data.changes.map((c: Json) => [c.id, c.action, c.before, c.after])).toEqual([['promo_effect', 'change',
@@ -628,7 +628,7 @@ describe('the model-program turn on the real core route', () => {
 
     // Contrast (stale CAS): a chat card made on the model BEFORE another change is superseded, and writes nothing.
     const later = 'Actually we can only spend £450.';
-    const ctx2 = { ...ctx, verified_user_messages: [later] };
+    const ctx2 = { ...ctx, verified_user_messages: [later], user_turn_text: later };
     replies = [savedWith((m) => setQ(m, 'budget', { value: 450, quote: 'we can only spend £450' }))];
     const stale = await proposeProgramChange(deps, ctx2, { public_label: 'Budget £450', basis: 'they said so', request: 'The budget is £450.', remove: [] }) as Json;
     expect(stale.status, JSON.stringify(stale)).toBe('ok');
@@ -673,7 +673,7 @@ describe('the model-program turn on the real core route', () => {
     await turn({ message: BRIEF });
     const deps = { dispatch, proposals: new ProposalStore() };
     const words = 'Drop keeping our one oven: the oven is £2,000, and our landlord must agree first.';
-    const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] });
+    const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words });
     const args = (remove: string[]) => ({ public_label: 'Your changes', basis: 'they said so', request: 'Remove keeping one oven; the oven costs £2,000; the landlord must agree first.', remove });
     const edited = (drop: boolean) => savedWith((d) => {
       if (drop) d.options = d.options.filter((o) => o.id !== 'keep_one');
@@ -730,7 +730,7 @@ describe('the model-program turn on the real core route', () => {
     expect((await turn({ message: `${BRIEF} We open in 2 weeks, or in 3 weeks, and want it within 4 weeks of opening.` })).json().model_program.saved).toBe(true);
     const saved = JSON.parse(JSON.stringify(persisted!.living_model.canonical)) as CanonicalModelT;
     const deps = { dispatch, proposals: new ProposalStore() };
-    const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: ['Make it 3 weeks to the opening.'] });
+    const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: ['Make it 3 weeks to the opening.'], user_turn_text: 'Make it 3 weeks to the opening.' });
     const propose = async (edit: (d: CanonicalModelT) => void) => {
       replies = [savedWith(edit)];
       return await proposeProgramChange(deps, ctx(), { public_label: 'The opening', basis: 'they said so', request: 'The opening is in 3 weeks.', remove: [] }) as Json;
@@ -770,7 +770,7 @@ describe('the model-program turn on the real core route', () => {
     expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
     const deps = { dispatch, proposals: new ProposalStore() };
     const words = 'We now bake 320 loaves a week, our baker says.';
-    const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] });
+    const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words });
     const propose = async (edit: (d: CanonicalModelT) => void) => {
       replies = [savedWith(edit)];
       return await proposeProgramChange(deps, ctx(), { public_label: 'Base sales', basis: 'their words', request: 'Base sales are now 320 a week.', remove: [] }) as Json;
@@ -808,7 +808,7 @@ describe('the model-program turn on the real core route', () => {
     replies = [JSON.stringify(m)];
     expect((await turn({ message: brief })).json().model_program.saved).toBe(true);
     const deps = { dispatch, proposals: new ProposalStore() };
-    const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: ['Make the impact 9, and add the other effect.'] });
+    const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: ['Make the impact 9, and add the other effect.'], user_turn_text: 'Make the impact 9, and add the other effect.' });
     const relink = (to: string) => async () => {
       replies = [savedWith((d) => {
         d.relations = d.relations.map((r) => (r.form === 'effect'
@@ -863,7 +863,7 @@ describe('the model-program turn on the real core route', () => {
     replies = [JSON.stringify(bakery())];
     await turn({ message: BRIEF });
     const deps = { dispatch, proposals: new ProposalStore() };
-    const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: ['The oven could break down.'] });
+    const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: ['The oven could break down.'], user_turn_text: 'The oven could break down.' });
     const estimate = (id: string, unit: string, low: number, high: number, value: number | null) => q(id, unit, { kind: 'coefficient', status: 'estimated', author: 'olumi', value, low, high, range_kind: 'plausible', basis: 'Synthetic.' });
     const risky = (label: string) => savedWith((d) => {
       d.quantities.push(estimate('breakdown_chance', '1', 0.05, 0.2, null), estimate('lost_loaves', 'loaf/week', -150, -50, -100));
@@ -998,7 +998,7 @@ describe('the model-program turn on the real core route', () => {
     const goalChance = () => (persisted!.living_model.runs.at(-1).result.canonical_analysis_view as Json).goal_chance;
     expect(goalChance().targets.per_target).toHaveLength(2);
     const deps = { dispatch, proposals: new ProposalStore() };
-    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: ['Make it 11 leaving each month.'] };
+    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: ['Make it 11 leaving each month.'], user_turn_text: 'Make it 11 leaving each month.' };
     const read = await readProgramContext(deps, ctx) as Json;
     expect(stableStringify(read.data.run.goal_chance)).toBe(stableStringify(goalChance()));
     replies = [savedWith((m) => setQ(m, 'leavers', { value: 11, quote: '11 leaving each month' }))];
@@ -1020,7 +1020,7 @@ describe('the model-program turn on the real core route', () => {
     expect(drafted.model_program.blockers.find((x: Json) => x.id === 'extra_per_oven')).toMatchObject({ code: 'range_kind' });
     const words = 'Those are firm ends: never fewer than 80, never more than 120.';
     const deps = { dispatch, proposals: new ProposalStore() };
-    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] };
+    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words };
     replies = [savedWith((d) => setQ(d, 'extra_per_oven', { range_kind: 'bounds' }))];
     // The args as the agent's tool schema admits them (the SDK parses every call with it).
     const p = await proposeProgramChange(deps, ctx, ProgramChangeParams.parse({ public_label: 'Read 80–120 as firm', basis: 'their answer', request: 'Their 80 to 120 are firm ends.', remove: [] })) as Json;
@@ -1080,7 +1080,7 @@ describe('the model-program turn on the real core route', () => {
     expect((persisted!.living_model.runs.at(-1).result.compile as Json).blockers).toContainEqual({ id: 'more_loaves', code: 'measure', scope: ['more_loaves'] });
     const words = 'Success means selling at least 380 loaves a week within 4 weeks.';
     const deps = { dispatch, proposals: new ProposalStore() };
-    const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] });
+    const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words });
     const measured = (targetQuote: string) => savedWith((d) => {
       d.quantities.push(q('more_loaves_target', 'loaf/week', { value: 380, quote: targetQuote }), q('more_loaves_window', 'week', { value: 4, quote: words }));
       d.goals = d.goals.map((g) => (g.id === 'more_loaves' ? { ...g, question: null, measure: { quantity: 'sales', per: null, cmp: '>=', target: 'more_loaves_target', frame: 'level', reference: null,
@@ -1148,6 +1148,124 @@ describe('the model-program turn on the real core route', () => {
     expect((gc.notes as string[]).some((n) => n.startsWith('Covers:'))).toBe(false);
   });
 
+  it('targeted answers (DL 24 Oct): an answer to a listed question is set on the existing item it answers, exactly, with no redraft: one item changes and every other record is byte-identical; "all" is read as 100% with Olumi\'s reading shown; "I don\'t know" is theirs and never asked again; a structural change still uses the redraft', async () => {
+    const saved = JSON.parse(readFileSync(new URL('./hiring-alpha3.saved.json', import.meta.url), 'utf8')) as { brief: string; canonical: CanonicalModelT };
+    replies = [JSON.stringify(saved.canonical)];
+    expect((await turn({ message: saved.brief })).json().model_program.saved).toBe(true);
+    // The saved model as the tools read it (a read parses it, so its keys are in the schema's order on every path).
+    const read = programReadOf(persisted!);
+    const before = (read.kind === 'program' ? read.program.canonical : null)!;
+    const deps = { dispatch, proposals: new ProposalStore() };
+    const ask = (words: string, answers: Json[], extra: Partial<{ request: string; remove: string[] }> = {}) => {
+      sent.length = 0;
+      return proposeProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words },
+        ProgramChangeParams.parse({ public_label: 'Their answer', basis: 'their answer', request: '', remove: [], answers, ...extra })) as Promise<Json>;
+    };
+    const answer = (f: Json) => ({ value: null, low: null, high: null, range_kind: null, party: null, quote: null, basis: null, author: 'person', ...f });
+    // The held program exactly as the card will write it (its raw bytes; a parse would reorder keys).
+    const heldOf = (p: Json) => deps.proposals.get(p.data.proposal_id)!.living_model as { canonical: CanonicalModelT; runs: Json[] };
+    // Every record but the answered one, each as its own bytes (the model's top-level key order is not a record's).
+    const others = (m: CanonicalModelT, id: string) => (['quantities', 'relations', 'goals', 'limits', 'preferences', 'options', 'risks', 'claims', 'evidence', 'assumptions',
+      'dissent', 'conditions', 'left_out'] as const).flatMap((f) => (m[f] as readonly { id: string }[]).filter((r) => r.id !== id).map((r) => `${f}:${JSON.stringify(r)}`));
+    // (1) The hiring cost answer: ONE item changes, as theirs in their words; every other record is the saved one, byte for
+    // byte (positive control: the records compared); no drafter call.
+    const cost = await ask('About £45,000 per developer, all in.', [answer({ id: 'developer_hiring_cost', status: 'known', value: 45000, quote: 'About £45,000 per developer, all in.' })]);
+    expect(cost.status, JSON.stringify(cost)).toBe('ok');
+    expect(sent).toHaveLength(0);
+    expect(cost.data.changes.map((c: Json) => [c.id, c.action, c.author])).toEqual([['developer_hiring_cost', 'change', 'person']]);
+    const held = heldOf(cost).canonical;
+    expect(others(held, 'developer_hiring_cost')).toEqual(others(before, 'developer_hiring_cost'));
+    expect(others(before, 'developer_hiring_cost').length).toBeGreaterThan(20);
+    expect(held.quantities.find((x) => x.id === 'developer_hiring_cost')).toMatchObject({ status: 'known', value: 45000, low: null, high: null, author: 'person',
+      quote: 'About £45,000 per developer, all in.', question: null, unit: 'GBP/developer' });
+    // (2) "I don't know": theirs, quoted, not known, with what would size it; never asked again as a number.
+    const dunno = await ask('I don\'t know what a Tech lead would cost yet.', [answer({ id: 'tech_lead_hiring_cost', status: 'unknown', value: 99,
+      quote: 'I don\'t know what a Tech lead would cost yet.', basis: 'A recruiter\'s quote for a Tech lead would size it.' })]);
+    expect(dunno.status, JSON.stringify(dunno)).toBe('ok');
+    expect(sent).toHaveLength(0);
+    const unknown = heldOf(dunno);
+    expect(unknown.canonical.quantities.find((x) => x.id === 'tech_lead_hiring_cost')).toMatchObject({ status: 'unknown', value: null, author: 'person',
+      quote: 'I don\'t know what a Tech lead would cost yet.', basis: 'A recruiter\'s quote for a Tech lead would size it.', question: null });
+    expect(((unknown.runs.at(-1)!.result as Json).compile.blockers as Json[]).filter((b) => b.id === 'tech_lead_hiring_cost' && b.code === 'asked')).toEqual([]);
+    expect(dunno.data.changes[0].after).toContain('in your words "I don\'t know what a Tech lead would cost yet."');
+    // Their "I don't know" is theirs only in THIS turn's words (buddy 24 Oct): quoting their brief instead is refused, by id.
+    expect(await ask('No idea yet.', [answer({ id: 'tech_lead_hiring_cost', status: 'unknown', quote: saved.brief.slice(0, 40), basis: 'A recruiter\'s quote would size it.' })]))
+      .toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['tech_lead_hiring_cost'] } });
+    // A range's reading is theirs to give (buddy 24 Oct): one their words declare is kept exactly; one they do not stays null,
+    // honestly unresolved, and the Run asks how to read it.
+    const firm = await ask('Firmly between £40,000 and £50,000.', [answer({ id: 'developer_hiring_cost', status: 'known', low: 40000, high: 50000, range_kind: 'bounds', quote: 'Firmly between £40,000 and £50,000.' })]);
+    expect(heldOf(firm).canonical.quantities.find((x) => x.id === 'developer_hiring_cost')).toMatchObject({ low: 40000, high: 50000, range_kind: 'bounds' });
+    const open = await ask('Between £40,000 and £50,000.', [answer({ id: 'developer_hiring_cost', status: 'known', low: 40000, high: 50000, quote: 'Between £40,000 and £50,000.' })]);
+    expect(open.status, JSON.stringify(open)).toBe('ok');
+    expect(heldOf(open).canonical.quantities.find((x) => x.id === 'developer_hiring_cost')).toMatchObject({ low: 40000, high: 50000, range_kind: null });
+    expect(((heldOf(open).runs.at(-1)!.result as Json).compile.blockers as Json[]).filter((b) => b.id === 'developer_hiring_cost').map((b) => b.code)).toEqual(['range_kind']);
+    // Codex r1 #3727: THIS turn's words only. An earlier message of theirs (verified, but not this turn's) is refused, and so is
+    // an answer that changes only its basis while quoting their brief.
+    const earlier = 'About £45,000 per developer, all in.';
+    expect(await proposeProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [earlier, 'Yes, go ahead.'],
+      user_turn_text: 'Yes, go ahead.' }, ProgramChangeParams.parse({ public_label: 'Their answer', basis: 'their answer', request: '', remove: [],
+      answers: [answer({ id: 'developer_hiring_cost', status: 'known', value: 45000, quote: earlier })] }))).toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['developer_hiring_cost'] } });
+    // Basis-only: their "I don't know" saved first, so the next answer changes nothing but its basis (and quotes their brief).
+    expect(await applyProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID() }, dunno.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
+    expect((persisted!.living_model.canonical as CanonicalModelT).quantities.find((x) => x.id === 'tech_lead_hiring_cost')).toMatchObject({ status: 'unknown', value: null, low: null, high: null });
+    expect(await ask('Still no idea.', [answer({ id: 'tech_lead_hiring_cost', status: 'unknown', quote: saved.brief.slice(0, 40), basis: 'Another basis.' })]))
+      .toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['tech_lead_hiring_cost'] } });
+    // Refused, by construction: an answer to an item the model does not hold (it never creates one), and answers with a
+    // structural change in one call; none calls the drafter.
+    expect(await ask('Unassigned costs are £10,000.', [answer({ id: 'unassigned_first_year_cost', status: 'known', value: 10000, quote: 'Unassigned costs are £10,000.' })]))
+      .toMatchObject({ status: 'refused', reason: 'not_an_answer' });
+    expect(await ask('About £45,000 per developer, all in. Also add a contractor option.', [answer({ id: 'developer_hiring_cost', status: 'known', value: 45000, quote: 'About £45,000 per developer, all in.' })],
+      { request: 'Add a contractor option.' })).toMatchObject({ status: 'refused', reason: 'one_kind_per_card' });
+    expect(sent).toHaveLength(0);
+    // On the redraft path too (buddy 24 Oct): a person's figure whose status the drafter changes needs their words this turn.
+    replies = [savedWith((d) => setQ(d, 'developer_hiring_cost', { status: 'unknown', question: null, quote: saved.brief.slice(0, 40), basis: 'They do not know it yet.' }))];
+    expect(await ask('They do not know it.', [], { request: 'Mark the developer cost as not known yet.' })).toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['developer_hiring_cost'] } });
+    expect(sent).toHaveLength(1);
+    // A structural change still goes to Olumi's drafter: one call, the whole model.
+    replies = [savedWith((d) => { d.options.push({ ...d.options[0]!, id: 'contractor', label: 'Hire a contractor', sets: [], quote: 'a contractor option' }); })];
+    const structural = await ask('Also add a contractor option.', [], { request: 'Add a contractor option.' });
+    expect(structural.status, JSON.stringify(structural)).toBe('ok');
+    expect(sent).toHaveLength(1);
+  });
+
+  it('targeted answers: "all" of a share is read as 100%, their words kept as theirs and Olumi\'s reading shown on the card before anything is saved', async () => {
+    replies = [JSON.stringify(bakery())];
+    expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
+    const deps = { dispatch, proposals: new ProposalStore() };
+    sent.length = 0;
+    const words = 'All of the new loaves sell.';
+    const p = await proposeProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words },
+      ProgramChangeParams.parse({ public_label: 'Sell-through 100%', basis: 'their answer', request: '', remove: [], answers: [{ id: 'sell_through', status: 'known', value: 1,
+        low: null, high: null, range_kind: null, party: null, quote: 'All of the new loaves sell', basis: 'Olumi reads “all” as 100%.', author: 'person' }] })) as Json;
+    expect(p.status, JSON.stringify(p)).toBe('ok');
+    expect(sent).toHaveLength(0);
+    expect(p.data.changes).toEqual([{ id: 'sell_through', kind: 'quantity', action: 'change', label: 'sell through', before: 'from 0.5 to 0.9, most likely 0.7 (a plausible range), an estimate, based on "New capacity sells only as far as demand grows.", Olumi’s, not in your words',
+      after: '1, known, based on "Olumi reads “all” as 100%.", yours, in your words "All of the new loaves sell"', author: 'person' }]);
+  });
+
+  it('targeted answers: whose an answer is comes from what the AI declares, checked literally (Codex r1 #3727): Olumi\'s estimate stays Olumi\'s, ranged, never in their words; a mismatch is refused, never re-authored', async () => {
+    replies = [JSON.stringify(bakery())];
+    expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
+    const deps = { dispatch, proposals: new ProposalStore() };
+    sent.length = 0;
+    const ask = (words: string, a: Json) => proposeProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words },
+      ProgramChangeParams.parse({ public_label: 'An answer', basis: 'their question', request: '', remove: [], answers: [{ id: 'sell_through', value: null, party: null, quote: null, ...a }] })) as Promise<Json>;
+    const estimate = { status: 'estimated', author: 'olumi', low: 0.6, high: 0.95, range_kind: 'plausible', basis: 'A busy high street sells most of what is baked.' };
+    const p = await ask('Could you estimate how much of it would sell?', estimate);
+    expect(p.status, JSON.stringify(p)).toBe('ok');
+    expect(sent).toHaveLength(0);
+    expect(p.data.changes.map((c: Json) => [c.id, c.author])).toEqual([['sell_through', 'olumi']]);
+    expect((deps.proposals.get(p.data.proposal_id)!.living_model as { canonical: CanonicalModelT }).canonical.quantities.find((x) => x.id === 'sell_through')).toMatchObject({ status: 'estimated', author: 'olumi',
+      low: 0.6, high: 0.95, range_kind: 'plausible', quote: null, party: null, basis: 'A busy high street sells most of what is baked.' });
+    // Refused, by id, and never re-authored: Olumi's estimate in their words, or without its range or basis; their answer
+    // declared as an estimate; Olumi's declared as known.
+    for (const bad of [{ ...estimate, quote: 'Could you estimate' }, { ...estimate, high: null }, { ...estimate, basis: ' ' },
+      { ...estimate, author: 'person', quote: 'Could you estimate' }, { ...estimate, status: 'known' }]) {
+      expect(await ask('Could you estimate how much of it would sell?', bad), JSON.stringify(bad)).toMatchObject({ status: 'refused', reason: 'not_an_answer', data: { ids: ['sell_through'] } });
+    }
+    expect(sent).toHaveLength(0);
+  });
+
   it('the alpha3 hiring read, through the same update path: the measure they name gets Olumi\'s mechanism on ONE card that shows every change; a figure only they know is ASKED, then the chance appears', async () => {
     const saved = JSON.parse(readFileSync(new URL('./hiring-alpha3.saved.json', import.meta.url), 'utf8')) as { brief: string; canonical: CanonicalModelT };
     replies = [JSON.stringify(saved.canonical)];
@@ -1156,7 +1274,7 @@ describe('the model-program turn on the real core route', () => {
     expect(before.goals.find((g) => g.id === 'increase_productivity')!.measure).toBeNull(); // costs-only: the aim has no measure
     const words = 'We measure productivity by the features we ship each month.';
     const deps = { dispatch, proposals: new ProposalStore() };
-    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] };
+    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words };
     // Each attempt is its own turn (a turn shows one card).
     const propose = () => proposeProgramChange(deps, { ...ctx, turn_id: randomUUID() }, ProgramChangeParams.parse({ public_label: 'Measure productivity', basis: 'their answer',
       request: 'Productivity is measured by the features shipped each month; work that out from the hires.', remove: [] })) as Promise<Json>;
@@ -1277,7 +1395,7 @@ describe('the model-program turn on the real core route', () => {
 
     // Their answer to that question, through the same path: each option's chance of the aim appears.
     const now = 'We ship about 12 features a month now.';
-    const ctx2 = { ...ctx, turn_id: randomUUID(), verified_user_messages: [now] };
+    const ctx2 = { ...ctx, turn_id: randomUUID(), verified_user_messages: [now], user_turn_text: now };
     replies = [savedWith((d) => setQ(d, 'features_now', { status: 'known', value: 12, question: null, quote: now, basis: APPROXIMATE_FIGURE }))];
     const fill = await proposeProgramChange(deps, ctx2, { public_label: 'Features now', basis: 'their answer', request: 'They ship about 12 features a month now.', remove: [] }) as Json;
     expect(fill.status, JSON.stringify(fill)).toBe('ok');

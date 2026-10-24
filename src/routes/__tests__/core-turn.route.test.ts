@@ -907,12 +907,15 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect((j.cards as Json[]).filter((c) => c.reading === true), 'the first draft\'s reading card is carried').toHaveLength(1);
       return (j.cards as Json[]).filter((c) => c.reading !== true);
     };
-    const savedProgram = async (): Promise<void> => {
+    /** Drafts and saves a program; returns the reply exactly as it was sent to the person. */
+    const savedProgram = async (): Promise<string> => {
       SCENARIO = randomUUID(); persisted = null; canonicalDraft = JSON.stringify(bakery()); calls.length = 0;
-      expect((await typed(BAKERY_BRIEF)).statusCode).toBe(200);
+      const drafted = await typed(BAKERY_BRIEF);
+      expect(drafted.statusCode).toBe(200);
       expect(calls[0]!.text?.format?.name).toBe('canonical_model');
       expect(calls[0]!.instructions).toBe(DRAFTING_INSTRUCTIONS);
       calls.length = 0;
+      return String((drafted.json() as Json).assistant_text);
     };
 
     it('(6) ALPHA (23 Oct) + Codex r1 BLOCK 4 on #3709: a saved PROGRAM\'s turn gets the model-program instructions; a saved Living Model keeps the old text, byte for byte', async () => {
@@ -954,6 +957,43 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
         'the Challenge note reached the turn').toBe(true);
     });
 
+    it('a Challenge turn has no typed words, so no answer of theirs can pass (Codex r2 #3727): one quoting their brief is refused by id, and the saved model is unchanged', async () => {
+      await savedProgram();
+      const saved = JSON.stringify((persisted as Json).living_model);
+      const item = (((persisted as Json).nodes ?? []) as Json[]).find((n) => n.kind === 'factor') ?? ((persisted as Json).nodes as Json[])[0]!;
+      const quote = BAKERY_BRIEF.slice(0, 30);
+      expect(BAKERY_BRIEF).toContain(quote);
+      outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'ans', args: { public_label: 'Oven price', basis: 'their answer', request: '', remove: [],
+        answers: [{ id: 'oven_price', value: 2500, low: null, high: null, range_kind: null, party: null, quote, basis: null, status: 'known', author: 'person' }] } }],
+      [{ type: 'message', text: 'I could not use that as your answer.' }]];
+      expect((await challengeOn(String(item.id))).statusCode).toBe(200);
+      expect(calls).toHaveLength(2);
+      const output = (calls[1]!.input as Json[]).find((i) => i.type === 'function_call_output' && i.call_id === 'ans')!.output;
+      expect(JSON.parse(typeof output === 'string' ? output : JSON.stringify(output))).toMatchObject({ status: 'refused', reason: 'unverified_person_words',
+        detail: "oven_price: your words this turn don't contain it.", data: { ids: ['oven_price'] } });
+      expect(JSON.stringify((persisted as Json).living_model)).toBe(saved);
+    });
+
+    it('a program\'s first agent turn holds the host-written draft reply (prompt audit 24 Oct: "which question did your \'I don\'t know\' answer?"): its Conversation opens with the brief, then that reply with its numbered questions, then the message', async () => {
+      const sent = await savedProgram();
+      outputs = [[{ type: 'message', text: 'Thanks; I will put that on the oven price.' }]];
+      expect((await typed('About £2,500 for the oven.')).statusCode).toBe(200);
+      const input = (calls[0]!.input ?? []) as Json[];
+      const said = input.filter((i) => i.role === 'assistant').map((i) => (i.content as Json[]).map((c) => String(c.text)).join(''));
+      // Exactly the bytes they were sent (Codex r2 #3727), no more and no less; the reply itself has its numbered questions.
+      expect(said, 'the draft reply, as the person saw it').toEqual([sent]);
+      expect(sent).toMatch(/^I've drafted a first model of: /);
+      expect(sent).toMatch(/\n1\. \S/);
+      const users = input.filter((i) => i.role === 'user').map((i) => String(i.content));
+      expect(users[0]).toContain(BAKERY_BRIEF);
+      expect(users.at(-1)).toBe('About £2,500 for the oven.');
+      // Contrast: the turn after it carries no seed again (the Conversation holds it now).
+      calls.length = 0;
+      outputs = [[{ type: 'message', text: 'Noted.' }]];
+      expect((await typed('And it takes a week to install.')).statusCode).toBe(200);
+      expect(((calls[0]!.input ?? []) as Json[]).filter((i) => i.role === 'assistant')).toEqual([]);
+    });
+
     it('S3 (DL 23 Oct): on a program turn the provider receives the PROGRAM tool descriptions, read included, and the read it gets back carries the Run\'s goal_chance block unchanged', async () => {
       // Two goals, so the block has each goal's own line and the joint.
       const m = club();
@@ -971,11 +1011,24 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       const sentTools = Object.fromEntries((calls[0]!.tools as Json[]).filter((t) => t.type === 'function').map((t) => [t.name, t.description]));
       expect(sentTools).toEqual(PROGRAM_TOOL_DESCRIPTIONS);
       for (const [name, description] of Object.entries(sentTools)) expect(description).not.toBe((TOOL_DESCRIPTIONS as Record<string, string>)[name]);
-      // Simplify v1 (S2): propose_change, as SENT, asks for the change in words and the ids to remove. Spelled here.
+      // Targeted answers (DL 24 Oct): propose_change, as SENT, puts an answer in answers on its item's id and anything else in
+      // request; its parameters carry answers, so the feature is not inert. Spelled here.
       const sentSha = (name: string) => createHash('sha256').update(String(sentTools[name]), 'utf8').digest('hex');
-      expect(String(sentTools.propose_change)).toContain('give request, the whole change in plain words with their exact words for every figure of theirs, and remove, the ids from read_canonical_context of anything they asked to remove ([] for none). '
-        + 'Olumi’s drafter writes the updated model, and the card shows every change, before and after. Anything left out without being listed, or a figure of theirs not in their words, is refused. ');
-      expect(sentSha('propose_change')).toBe('0dd7084f03bf6c3da41f68061c414b6786106626b433de68d6d427ef229581cb');
+      expect(String(sentTools.propose_change)).toContain('An answer to a listed question (a blocker, or an asked item\'s question) goes in answers, on that existing item\'s id from read_canonical_context, saying whose it is: author person, ');
+      expect(String(sentTools.propose_change)).toContain('Anything else (a new item or link, a rename, a removal) goes in request, in plain words with their exact words for every figure of theirs, '
+        + 'with remove the ids of anything they asked to remove ([] for none); Olumi’s drafter writes it. Answers and such a change go on separate cards. ');
+      expect(sentSha('propose_change')).toBe('105cd12e6493222cec7907fb474a01fc318d941eaa65723e0b4454a1c20e2ada');
+      const sentParams = (calls[0]!.tools as Json[]).find((t) => t.name === 'propose_change')!.parameters as Json;
+      expect(Object.keys(sentParams.properties)).toEqual(['public_label', 'basis', 'request', 'remove', 'answers']);
+      expect(sentParams.required).toContain('answers');
+      expect(Object.keys(sentParams.properties.answers.items.properties).sort()).toEqual(['author', 'basis', 'high', 'id', 'low', 'party', 'quote', 'range_kind', 'status', 'value']);
+      // Whose an answer is, declared by the AI (Codex r1 #3727; the host checks it, never sets it).
+      expect(sentParams.properties.answers.items.properties.author.enum).toEqual(['person', 'olumi']);
+      expect(sentParams.properties.answers.items.required).toContain('author');
+      // The program turn's guidance as SENT (its pin in core-prompt-arm is this text's): answers go in answers, on the item's id.
+      const guidance = ((calls[0]!.input ?? []) as Json[]).filter((i) => i.role === 'system').map((i) => String(i.content)).filter((c) => c.startsWith('This scenario\'s model is a model program'));
+      expect(guidance).toHaveLength(1);
+      expect(createHash('sha256').update(guidance[0]!, 'utf8').digest('hex')).toBe('4ccd4a5913bfb242ca4f771b3349ed8a2872b6fc18b7632b8d38c15c92448542');
       // The read the agent got back: the Run's goal_chance exactly as stored (each goal's own line, the joint, the notes).
       const output = (calls[1]!.input as Json[]).find((i) => i.type === 'function_call_output' && i.call_id === 'read')!.output;
       const read = JSON.parse(typeof output === 'string' ? output : JSON.stringify(output)) as Json;

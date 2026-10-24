@@ -187,6 +187,9 @@ export interface CoreTurnInput {
   readonly withheldTools?: readonly string[];
   /** A press that names its tool (the Run press): the run's first call must call it (`toolChoice`; the SDK resets it after). */
   readonly firstTool?: string;
+  /** The scenario's turns before its Conversation existed, oldest first: a host-written reply (a program's first draft, with
+   * its numbered questions) is in no Conversation otherwise, so the next turn could not map an answer to them (24 Oct). */
+  readonly earlierTurns?: readonly { readonly role: 'user' | 'assistant'; readonly text: string }[];
   readonly userId: string | null;
   /** Where the scenario's Conversation id is saved (the session store); absent → the turn stops (CoreStateUnavailableError). */
   readonly conversationStore?: ConversationIdStore;
@@ -369,8 +372,12 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
   let carrying = false;
   let delivered = false;
   const brief = typeof input.briefText === 'string' ? input.briefText.trim() : '';
-  let turnInput: string | AgentInputItem[] | RunState<unknown, Agent> = conversation.created && brief !== '' && brief !== input.message.trim()
-    ? [{ role: 'user', content: `${BRIEF_LABEL}\n${brief}` }, { role: 'user', content: input.message }] : input.message;
+  const earlier = (input.earlierTurns ?? []).map((t, i): AgentInputItem => (t.role === 'assistant'
+    ? { role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: t.text }] }
+    : { role: 'user', content: i === 0 && brief !== '' && t.text.trim() === brief ? `${BRIEF_LABEL}\n${brief}` : t.text }));
+  let turnInput: string | AgentInputItem[] | RunState<unknown, Agent> = conversation.created && earlier.length > 0 ? [...earlier, { role: 'user', content: input.message }]
+    : conversation.created && brief !== '' && brief !== input.message.trim()
+      ? [{ role: 'user', content: `${BRIEF_LABEL}\n${brief}` }, { role: 'user', content: input.message }] : input.message;
 
   /**
    * A run paused for approval is answered before anything else, from its own saved state (the Conversation holds its tool
