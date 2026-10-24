@@ -1580,7 +1580,9 @@ describe('the model-program turn on the real core route', () => {
     for (const id of ['base_sales', 'ovens_added', 'extra_per_oven', 'sales', 'oven_price', 'spend', 'more_loaves', 'second_oven', 'keep_one']) {
       expect([id, out(id).analysis_participation]).toEqual([id, 'included']);
     }
-    for (const id of ['regulars', 'busy']) expect([id, out(id).analysis_participation]).toEqual([id, 'retained_excluded']);
+    expect(['regulars', out('regulars').analysis_participation]).toEqual(['regulars', 'retained_excluded']);
+    // A claim is not a card (DL 24 Oct): the canvas draws it from the model by id.
+    expect(project(none, compiledNone).graph.nodes.find((n) => n.id === 'busy')).toBeUndefined();
 
     // (4) An option's setting says whose it is in the canvas's intervention vocabulary; a structural switch (on or off) is the
     // option's own. A worked-out figure says what it is worked out from; a structural constant says it is fixed by the model.
@@ -1624,6 +1626,33 @@ describe('the model-program turn on the real core route', () => {
     const sourceOf = (text: string) => nodeOf(project(answered, compile(answered, { sourceText: text }), { brief: BRIEF }).graph)('oven_price').observed_state;
     expect(sourceOf(`${BRIEF}\n${words}`)).toMatchObject({ source: 'user_override' });
     expect(sourceOf(BRIEF)).not.toHaveProperty('source');
+  });
+
+  it('notes and preferences are not cards (DL 24 Oct, the canvas glyph): a draft with each family saves none of them in graph.nodes, and the model keeps every word the card showed', async () => {
+    const m = bakery();
+    m.claims.push({ id: 'busy_saturdays', text: 'Saturdays are the busy day.', concerns: ['sales'], author: 'olumi', quote: null, ...at });
+    m.evidence.push({ id: 'till_records', text: 'Sales rose 8% last spring.', source: 'last year’s till records', bears: 'supports', concerns: ['sales'], author: 'olumi', quote: null, ...at });
+    m.assumptions.push({ id: 'full_speed', text: 'The new oven runs at full capacity from the first week.', applied: false, concerns: ['extra_per_oven'], author: 'olumi', quote: null, ...at });
+    m.dissent.push({ id: 'keep_one_view', holder: 'the person', position: 'One oven may be enough.', concerns: ['second_oven'], author: 'person', quote: 'we could keep our one oven', ...at });
+    m.conditions.push({ id: 'landlord', text: 'Only once the landlord agrees.', kind: 'prerequisite', concerns: ['second_oven'], author: 'olumi', quote: null, ...at });
+    m.left_out.push({ id: 'regulars_mood', text: 'Keeping the regulars happy', why: 'It has no measure yet.', question: 'How would you know?', concerns: [], author: 'olumi', quote: null, ...at });
+    m.preferences.push({ id: 'spend_less', quantity: 'spend', direction: 'lower', author: 'olumi', quote: null, ...at });
+    replies = [JSON.stringify(m)];
+    expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
+    const ids = ['busy_saturdays', 'till_records', 'full_speed', 'keep_one_view', 'landlord', 'regulars_mood', 'spend_less'];
+    // None is a card on the saved graph (positive control: the model's own cards are there).
+    expect((persisted!.nodes as Json[]).filter((n) => ids.includes(String(n.id)))).toEqual([]);
+    expect((persisted!.nodes as Json[]).map((n) => n.id)).toEqual(expect.arrayContaining(['base_sales', 'more_loaves', 'second_oven']));
+    // Every word the card showed is in the saved model, by the record's own id: text, source, why, holder and position, quote.
+    const saved = persisted!.living_model.canonical as CanonicalModelT;
+    expect(saved.claims.find((x) => x.id === 'busy_saturdays')).toMatchObject({ text: 'Saturdays are the busy day.' });
+    expect(saved.evidence.find((x) => x.id === 'till_records')).toMatchObject({ text: 'Sales rose 8% last spring.', source: 'last year’s till records' });
+    expect(saved.assumptions.find((x) => x.id === 'full_speed')).toMatchObject({ text: 'The new oven runs at full capacity from the first week.' });
+    expect(saved.dissent.find((x) => x.id === 'keep_one_view')).toMatchObject({ holder: 'the person', position: 'One oven may be enough.', quote: 'we could keep our one oven' });
+    expect(saved.conditions.find((x) => x.id === 'landlord')).toMatchObject({ text: 'Only once the landlord agrees.' });
+    expect(saved.left_out.find((x) => x.id === 'regulars_mood')).toMatchObject({ text: 'Keeping the regulars happy', why: 'It has no measure yet.' });
+    expect(saved.preferences.find((x) => x.id === 'spend_less')).toMatchObject({ quantity: 'spend', direction: 'lower' });
+    expect(saved.quantities.find((x) => x.id === 'spend')!.label).toBe('spend');
   });
 
   it('the stored Run names itself: run id, the analysis hash of the graph it was computed with, its time; stale once the model moves', async () => {

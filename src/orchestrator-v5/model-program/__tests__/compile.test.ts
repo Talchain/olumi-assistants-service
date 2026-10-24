@@ -231,7 +231,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(r2.coverage.leaves_out.map((w) => w.id)).toEqual(['regulars_happy']);
   });
 
-  it('row 6: qualitative records are drawn as display-only cards, never in the executable model', () => {
+  it('row 6: qualitative records are never in the executable model, and not cards: the canvas draws them by id from the model (DL 24 Oct)', () => {
     const m = bakery();
     m.assumptions.push({ id: 'oven_full_speed', text: 'The new oven runs at full capacity from the first week.', applied: true, concerns: ['extra_per_oven'], author: 'olumi', quote: null, ...base });
     m.dissent.push({ id: 'partner_doubts', holder: 'my business partner', position: 'thinks demand will not keep up', concerns: ['sales_rel'], author: 'person', quote: 'my business partner thinks demand will not keep up', ...base });
@@ -244,10 +244,11 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(r.perGoal[0].rests_on).toEqual(['oven_full_speed']);
     const p = project(m, r);
     const node = (id: string) => p.graph.nodes.find((n) => n.id === id)!;
-    expect(node('oven_full_speed')).toMatchObject({ kind: 'action', analysis_participation: 'retained_excluded', provenance: 'ai_inferred' });
-    expect(node('partner_doubts')).toMatchObject({ kind: 'action', analysis_participation: 'retained_excluded', provenance: 'from_brief', source_quote: 'my business partner thinks demand will not keep up' });
+    expect(p.graph.nodes.find((n) => n.id === 'oven_full_speed')).toBeUndefined();
+    expect(p.graph.nodes.find((n) => n.id === 'partner_doubts')).toBeUndefined();
     expect(node('profit')).toMatchObject({ kind: 'outcome', analysis_participation: 'included' });
-    expect(p.items.find((i) => i.record_id === 'partner_doubts')).toMatchObject({ in_calculation: false, concerns: ['sales_rel'], author: 'person' });
+    expect(p.items.find((i) => i.record_id === 'partner_doubts')).toMatchObject({ shown_as: {}, in_calculation: false, concerns: ['sales_rel'], author: 'person' });
+    expect(m.dissent.find((d) => d.id === 'partner_doubts')).toMatchObject({ quote: 'my business partner thinks demand will not keep up' });
     const recordIds = [...m.quantities, ...m.relations, ...m.goals, ...m.options, ...m.assumptions, ...m.dissent].map((x) => x.id);
     for (const id of recordIds) expect(p.items.filter((i) => i.record_id === id)).toHaveLength(1);
     const parsed = GraphV3.safeParse(p.graph);
@@ -446,7 +447,9 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(r.preferences).toEqual([{ id: 'spend_less', quantity: 'costs', direction: 'lower', label: 'costs' }]);
     expect(r.executable!.goals.map((g) => g.id)).toEqual(['weekly_profit', 'cash_buffer']);
     expect(JSON.stringify(r.executable)).not.toContain('spend_less');
-    expect(project(m, r).graph.nodes.find((n) => n.id === 'spend_less')).toMatchObject({ kind: 'action', label: 'Preference: lower costs', analysis_participation: 'retained_excluded' });
+    // Not a card (DL 24 Oct): the canvas draws it from the model by id; its item says so.
+    expect(project(m, r).graph.nodes.find((n) => n.id === 'spend_less')).toBeUndefined();
+    expect(project(m, r).items.find((i) => i.record_id === 'spend_less')).toMatchObject({ family: 'preference', shown_as: {}, in_calculation: false, concerns: ['costs'] });
   });
 
   it('asking for the result itself (an asked goal quantity) is an error; asking for a target is not', () => {
