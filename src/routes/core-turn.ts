@@ -716,8 +716,10 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
             canonicalState: canonical.status === 'ok' ? canonical.data : undefined,
             // A Run press permits calculation and reading only; any other press carries no consent to Run.
             withheldTools: runPress ? CORE_RUN_PRESS_WITHHELD : [...(chip !== null ? ['run_analysis'] : []), 'offer_public_research'],
+            // A Challenge opens on its note tool on a Living Model board; a program board has no note tool, so the AI answers its
+            // note (in turnGuidance) in words (served 502, 24 Oct: a forced tool the program tools lack).
             ...(runPress ? { firstTool: 'run_analysis' } : coreCardOnly && press !== undefined ? { firstTool: APPLY_CHANGE }
-              : challenge !== null ? { firstTool: NOTE_ON_ITEM } : {}),
+              : challenge !== null && !program ? { firstTool: NOTE_ON_ITEM } : {}),
             ...(press !== undefined ? { press } : {}),
             ...(saved.revision !== null ? { traceMeta: { revision: saved.revision, ...(saved.run?.run_id != null ? { run_id: saved.run.run_id } : {}) } } : {}),
             ...coreTurnStores(store),
