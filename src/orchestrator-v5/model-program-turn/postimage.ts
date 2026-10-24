@@ -22,6 +22,7 @@ import { CanonicalModel, type CanonicalModelT } from '../model-program/canonical
 import { norm } from '../model-program/compile.js';
 import { linkTargets, withUsedDirections } from '../model-program/links.js';
 import { isExactCalendarReexpression, parseUnit, sameDims } from '../model-program/units.js';
+import { sayDate } from '../goal-target/deadline-date.js';
 
 type Rec = Record<string, unknown>;
 type Family = Exclude<keyof CanonicalModelT, 'version' | 'question' | 'period' | 'history'>;
@@ -45,7 +46,7 @@ const MEASURE = ['measure.quantity', 'measure.per', 'measure.cmp'];
 const WHEN = ['measure.aggregation', 'measure.window.start', 'measure.window.periods', 'measure.window.origin_event', 'measure.window.origin_offset'];
 const OWN = { ...by('author', 'author'), ...by('words', 'party', 'quote') };
 export const GROUPS: Readonly<Record<Family, Readonly<Record<string, string>>>> = {
-  quantities: { ...by('name', 'label'), ...by('figure', 'value', 'low', 'high', 'range_kind', 'unit', 'direction'), ...by('kind', 'kind'), ...by('status', 'status'),
+  quantities: { ...by('name', 'label'), ...by('figure', 'value', 'low', 'high', 'range_kind', 'unit', 'direction', 'stated_date'), ...by('kind', 'kind'), ...by('status', 'status'),
     ...by('question', 'question'), ...by('basis', 'basis'), ...OWN },
   relations: { ...by('name', 'defines'), ...by('how', 'form', 'op', 'base', 'start', 'parts.*.id', 'parts.*.sign', 'parts.*.power', 'terms.*.driver', 'terms.*.coefficient', 'inflows.*', 'outflows.*'),
     ...by('link#', ...WORDS.map((k) => `terms.*.${k}`)), ...OWN },
@@ -326,13 +327,15 @@ function wordsIn(m: CanonicalModelT) {
   const start = (t: number | string) => (typeof t === 'number' ? (t === 0 ? 'from the start' : `after ${t} ${m.period}s`) : `from ${timed(t)}`);
   const list = (ids: unknown) => (Array.isArray(ids) ? ids.map((id) => `"${named(String(id))}"`) : []);
   const and = (xs: readonly string[]) => (xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
-  /** A figure from its value, range, reading and unit, all together, and a link's direction on what it moves (issue 40). */
+  /** A figure from its value, range, reading and unit, all together; the date it was read from ("6 month, for the date …"); and a
+   *  link's direction on what it moves (issue 40). */
   const figure = (r: Rec) => {
     const u = unitOf(r['unit']), at = (k: string) => (typeof r[k] === 'number' ? `${n(r[k] as number)}${u}` : null);
     const bare = (k: string) => n(r[k] as number);
     // What it moves is said by name; a direction on a size no link has is never said (the validator then refuses its change).
     const moves = typeof r['direction'] === 'string' && typeof r['id'] === 'string' ? linkTargets(m, r['id']) : [];
-    const sign = (said: string) => [said, ...(moves.length > 0 ? [`${of(DIRECTION_WORDS, r['direction'])} ${and(moves.map(label))}`] : [])].filter((x) => x !== '').join(', ');
+    const dated = typeof r['stated_date'] === 'string' ? [`for the date "${sayDate(r['stated_date'])}"`] : [];
+    const sign = (said: string) => [said, ...dated, ...(moves.length > 0 ? [`${of(DIRECTION_WORDS, r['direction'])} ${and(moves.map(label))}`] : [])].filter((x) => x !== '').join(', ');
     const reading = typeof r['range_kind'] === 'string' ? ` (${of(RANGE_WORDS, r['range_kind'])})` : '';
     if (at('low') !== null && at('high') !== null) return sign(`from ${bare('low')} to ${at('high')}${at('value') !== null ? `, most likely ${bare('value')}` : ''}${reading}`);
     const ends = [...(at('low') !== null ? [`no lower than ${at('low')}`] : []), ...(at('high') !== null ? [`no higher than ${at('high')}`] : [])].join(', ');

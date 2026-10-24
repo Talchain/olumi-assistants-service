@@ -12,6 +12,8 @@ import { coreBudget } from '../agent-lane/model-budgets.js';
 import { agentRequestIdentity } from '../agent-lane/runtime/prompt-identity.js';
 import { CanonicalModel, type CanonicalModelT } from '../model-program/canonical.js';
 import { compile, compileJson, normalise, type CompileError, type CompileResult } from '../model-program/compile.js';
+import { todayInLondon } from '../goal-target/deadline-date.js';
+import { withStatedDates } from './date-reading.js';
 import { CANONICAL_JSON_SCHEMA, CANONICAL_SCHEMA_NAME, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX, UPDATE_PREFIX } from './prompt.js';
 
 export const MAX_REPAIRS = 2;
@@ -70,11 +72,12 @@ export function ledgeredResponsesCall(): ResponsesCall {
  * Draft → compile → (repair → compile) ≤ MAX_REPAIRS. `sourceText` is the person's own words (the brief), against which the
  * compiler checks every quote. A transport failure ends the loop with what it has; it is never retried here.
  * `interpret` (a FIRST draft): the model returned, compiled, saved and sent back to the agent is the compiler's reading of
- * the draft (`normalise`: a structure figure that is no structural constant is their question), never the raw draft
+ * the draft (`normalise`: a structure figure that is no structural constant is their question; and each stated date read in code, `date-reading.ts`), never the raw draft
  * (buddy, #3709 r7). An update is read the same way, so its postimage is in the saved form.
  */
 export async function draftCanonicalModel(brief: string | readonly InputMessage[], call: ResponsesCall, sourceText: string = typeof brief === 'string' ? brief : '',
-  opts: { readonly interpret?: boolean } = {}): Promise<DraftOutcome> {
+  opts: { readonly interpret?: boolean; readonly saved?: CanonicalModelT } = {}): Promise<DraftOutcome> {
+  const today = todayInLondon(new Date());
   const input: InputMessage[] = typeof brief === 'string' ? [{ role: 'user', content: brief }] : [...brief];
   const attempts: DraftAttempt[] = [];
   let model: CanonicalModelT | null = null;
@@ -91,7 +94,8 @@ export async function draftCanonicalModel(brief: string | readonly InputMessage[
     let json: unknown;
     try { json = JSON.parse(out.text); } catch { attempts.push({ attempt: a, errors: null, failed: 'output is not JSON', status: out.status, usage: out.usage, ms }); break; }
     const parsed = CanonicalModel.safeParse(json);
-    const read = parsed.success && opts.interpret === true ? normalise(parsed.data) : undefined;
+    // A stated date is read in code, as whole periods from today; one an update did not alter keeps its saved reading.
+    const read = parsed.success && opts.interpret === true ? withStatedDates(normalise(parsed.data), today, opts.saved) : undefined;
     // A first draft (the brief alone) must give every ask its question, but its last attempt falls back to the base behaviour
     // (an ask with no question is a typed blocker), so a draft is never refused whole for one; an update keeps the saved
     // model's asks as they are.
@@ -113,5 +117,5 @@ export async function draftCanonicalModel(brief: string | readonly InputMessage[
 export async function proposePostimage(model: CanonicalModelT, personWords: readonly string[], change: string, removals: readonly string[], call: ResponsesCall): Promise<DraftOutcome> {
   const ask = `${UPDATE_PREFIX}\nThe change: ${change}\nRemove: ${removals.length > 0 ? removals.join(', ') : 'nothing'}`;
   return draftCanonicalModel([{ role: 'user', content: personWords.join('\n\n') }, { role: 'assistant', content: JSON.stringify(model) }, { role: 'user', content: ask }],
-    call, personWords.join('\n'), { interpret: true });
+    call, personWords.join('\n'), { interpret: true, saved: model });
 }

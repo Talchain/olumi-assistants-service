@@ -22,6 +22,8 @@ import { findOperationVersion } from '../path-b/tools/core-write.js';
 import { isNoModelYet, isSavedRead, readSaved } from '../path-b/tools/context-tool.js';
 import { ok, refused, unavailable, type ToolOutcome } from '../path-b/tools/outcome.js';
 import { CanonicalQuantity, type CanonicalModelT, type CanonicalQuantityT } from '../model-program/canonical.js';
+import { todayInLondon } from '../goal-target/deadline-date.js';
+import { withStatedDates } from './date-reading.js';
 import { ledgeredResponsesCall, proposePostimage } from './draft.js';
 import { validatePostimage, verbatimIn } from './postimage.js';
 import { isSaved, postimageOf, programOperationId, savePostimage, withNewRun } from './program-save.js';
@@ -43,11 +45,14 @@ export const PROGRAM_TURN_GUIDANCE = 'This scenario\'s model is a model program:
  * AN ANSWER to a listed question (DL 24 Oct): the figure it answers, declared by the AI with the canonical model's own fields,
  * its status and whose it is, as the AI declares them and the host checks literally (it never assigns them): known, their
  * figure in their exact words; unknown, their "I don't know", quoted, the basis saying what would size it (never asked again);
- * estimated, Olumi's estimate with its range and basis, never their words.
+ * estimated, Olumi's estimate with its range and basis, never their words. A date they answer with is their date words (`stated_date`),
+ * read in code as whole periods from today.
  */
 const Answer = CanonicalQuantity.pick({ id: true, value: true, low: true, high: true, range_kind: true, party: true, quote: true, basis: true })
-  .extend({ status: z.enum(['known', 'estimated', 'unknown']), author: z.enum(['person', 'olumi']).describe('Whose answer it is: person, their words this turn; olumi, Olumi\'s estimate.') }).strict();
-type AnswerT = z.infer<typeof Answer>;
+  .extend({ status: z.enum(['known', 'estimated', 'unknown']), author: z.enum(['person', 'olumi']).describe('Whose answer it is: person, their words this turn; olumi, Olumi\'s estimate.'),
+    stated_date: CanonicalQuantity.shape.stated_date.default(null) }).strict();
+// As the tools pass it: an answer given straight to the function (not parsed) may leave its date words out.
+type AnswerT = z.input<typeof Answer>;
 export const ProgramChangeParams = z.object({
   public_label: z.string().describe('What the person is asked to approve, in plain words.'),
   basis: z.string().describe('Why Olumi proposes it.'),
@@ -154,7 +159,8 @@ async function prepare(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs)
   if (gone.length > 0) return refused('not_an_answer', `${gone.map((id) => `"${set.model.quantities.find((x) => x.id === id)!.label}" (${id})`).join(', ')}: the change removed what you answered, so nothing changed.`, { ids: gone });
   const draft = answered(postimage, answers);
   if (typeof draft === 'string') return refused('not_an_answer', draft);
-  const v = validatePostimage(program.canonical, draft.model, { removals: args.remove, words, fresh, approver: ctx.authenticated_user_id });
+  // A date in an answer is read in code too, as whole periods from today; a date the change did not alter keeps its saved reading.
+  const v = validatePostimage(program.canonical, withStatedDates(draft.model, todayInLondon(new Date()), program.canonical), { removals: args.remove, words, fresh, approver: ctx.authenticated_user_id });
   if (!v.ok) return refused(v.code, v.reason, { ids: v.ids, ...(v.check ? { check: v.check } : {}) });
   // The person's words this turn are kept with the model: what it was changed from, in their words.
   const next = withNewRun({ ...program, canonical: v.model, person_words: words });
@@ -174,7 +180,8 @@ export function figurePostimage(canonical: CanonicalModelT, filled: CanonicalQua
 }
 /**
  * Answers on their items through the S2 builder: only an existing item (an answer never creates one; PB 24 Oct, 13 misbinds),
- * its status and whose it is as declared (checked before), the question cleared.
+ * its status and whose it is as declared (checked before), the question cleared, and its date words its own (none: the
+ * answer's figure stands, never an earlier date's reading).
  */
 function answered(canonical: CanonicalModelT, answers: readonly AnswerT[]): { readonly model: CanonicalModelT } | string {
   let model = canonical;
@@ -184,7 +191,7 @@ function answered(canonical: CanonicalModelT, answers: readonly AnswerT[]): { re
     if (q.status === 'derived') return `"${q.label}" is worked out by its relation; answer one of its inputs.`;
     const none = a.status === 'unknown';
     model = figurePostimage(model, { ...q, status: a.status, author: a.author, value: none ? null : a.value, low: none ? null : a.low,
-      high: none ? null : a.high, range_kind: none ? null : a.range_kind, party: a.party, quote: a.quote, basis: a.basis, question: null });
+      high: none ? null : a.high, range_kind: none ? null : a.range_kind, party: a.party, quote: a.quote, basis: a.basis, question: null, stated_date: a.stated_date ?? null });
   }
   return { model };
 }
@@ -293,9 +300,9 @@ export async function applyCanvasFigure(deps: Pick<ProgramToolDeps, 'dispatch'>,
   if (low !== null && high !== null && low > high) return { status: 'refused', reason: `The low end ${low} is above the high end ${high}.` };
   const shared = goal !== undefined && (program.canonical.goals.some((x) => x.id !== goal.id && x.measure?.target === q.id) || program.canonical.limits.some((l) => l.measure?.bound === q.id));
   const id = shared ? `${goal!.id}_target` : q.id;
-  // A typed figure is theirs: a direction stated for the figure it replaces is not kept (issue 40).
+  // A typed figure is theirs: a direction stated for the figure it replaces is not kept (issue 40), nor the date words a reading came from.
   const filled: CanonicalQuantityT = { ...q, id, value: edit.value, low, high, range_kind: onRange ? q.range_kind : null, status: 'known', author: 'person', party: null,
-    quote: words, question: null, basis: null, direction: null, approval: 'approved' };
+    quote: words, question: null, basis: null, direction: null, stated_date: null, approval: 'approved' };
   const canonical = figurePostimage(program.canonical, filled, shared ? goal!.id : undefined);
   const v = validatePostimage(program.canonical, canonical, { removals: [], words: [...program.person_words, words], fresh: [words] });
   if (!v.ok) return { status: 'refused', reason: v.reason };
