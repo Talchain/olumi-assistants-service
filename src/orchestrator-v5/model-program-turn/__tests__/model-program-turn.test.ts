@@ -22,8 +22,8 @@ import { evaluateCanonical, seedOf, RUN_DRAWS } from '../evaluate.js';
 import { programReadOf, reopenProgram, savedProgramOf, sourceTextOf } from '../program-store.js';
 import { applyCanvasFigure, applyProgramChange, ProgramChangeParams, proposeProgramChange, readProgramContext, runProgram } from '../program-tools.js';
 import { proposalPendingAction } from '../../agent-lane/durable-proposal.js';
-import { proposalFieldsWire, proposalRecord } from '../../agent-lane/proposal-object/record.js';
-import { ProposalStore, type ProposalChange } from '../../agent-lane/proposal.js';
+import { agentProposalOf, proposalFieldsWire, proposalRecord } from '../../agent-lane/proposal-object/record.js';
+import { ProposalChangeSchema, ProposalStore, type ProposalChange } from '../../agent-lane/proposal.js';
 import { withNewRun } from '../program-save.js';
 import { projectCorePostimageForPersistence } from '../../persisted-graph-projection.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
@@ -253,6 +253,94 @@ describe('the model-program turn on the real core route', () => {
     const stored = projectCorePostimageForPersistence(JSON.parse(JSON.stringify(postimage))) as Json;
     expect(JSON.stringify(stored.living_model)).toBe(JSON.stringify(postimage.living_model));
     expect(savedProgramOf(stored)!.runs).toHaveLength(1);
+  });
+
+  // ── STEP 2, "Check what I understood" (DL 24 Oct; the UI half is DGAI #2960, 128bd2db) ──────────────────────────────────
+  const hostFieldsOf = (x: unknown) => new Set(JSON.stringify(x).match(/"(approval|author_id)":("[^"]*"|null)/g));
+  const withoutHostFields = (x: unknown) => JSON.parse(JSON.stringify(x).replace(/"(approval|author_id)":("[^"]*"|null)/g, '"$1":"host"'));
+
+  it('step 2 "Check what I understood" (1): a first draft is saved as Olumi\'s reading, every record proposed and approved by no one, whatever the drafter wrote; who authored it and in whose words are untouched', async () => {
+    const m = bakery();
+    // The drafter claims approvals it cannot give: on a goal, a figure, a relation and a link inside it.
+    m.goals = m.goals.map((g) => ({ ...g, approval: 'approved' as const, author_id: 'someone-else' }));
+    m.quantities = m.quantities.map((x) => (x.id === 'base_sales' ? { ...x, approval: 'approved' as const, author_id: 'someone-else' } : x));
+    m.relations = m.relations.map((r) => (r.form === 'effect'
+      ? { ...r, approval: 'approved' as const, terms: r.terms.map((x) => ({ ...x, approval: 'approved' as const, author_id: 'someone-else' })) } : r));
+    replies = [JSON.stringify(m)];
+    expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
+    const saved = persisted!.living_model.canonical as CanonicalModelT;
+    expect(hostFieldsOf(saved)).toEqual(new Set(['"approval":"proposed"', '"author_id":null']));
+    // Positive control: the probe sees every record's host fields (the bakery's 18 records and its one link).
+    expect(JSON.stringify(saved).match(/"approval":/g)).toHaveLength(19);
+    // Contrast: everything else, who authored each item and in whose words included, is the drafter's, untouched.
+    expect(withoutHostFields(saved)).toEqual(withoutHostFields(m));
+  });
+
+  it('step 2 "Check what I understood" (2–5): after the first save ONE held card reads the draft back, every item an add, goals first and figures last, a left-out item by its why; its approve is "Yes, that’s what I meant"; its model is the draft accepted, with a new Run of the same numbers; it is carried on reload and saved by its approve', async () => {
+    const m = bakery();
+    m.left_out.push({ id: 'staff_morale', text: 'Staff morale while the second oven beds in', why: 'It has no measure in this model.', question: null, concerns: [], author: 'olumi', quote: null, ...at },
+      { id: 'longer_shifts', text: 'Longer shifts for the staff', why: 'It is not measured in this model', question: 'How will staff feel?', concerns: ['more_loaves', 'second_oven'],
+        author: 'person', quote: 'Our staff may not like longer shifts', ...at },
+      { id: 'delivery_days', text: 'Which days flour is delivered', why: 'Nobody has said how it changes sales', question: null, concerns: [],
+        author: 'person', ...at, party: 'Our supplier', quote: 'deliveries only on weekdays' });
+    replies = [JSON.stringify(m)];
+    const drafted = await turn({ message: `${BRIEF} Our staff may not like longer shifts. Our supplier says deliveries only on weekdays.` });
+    expect(drafted.statusCode, drafted.body).toBe(200);
+    const r = drafted.json();
+    expect(r.model_program.saved).toBe(true);
+    expect(sent).toHaveLength(1); // the card is the host's: no further AI call
+    expect(registered).toHaveLength(1); // the card saves nothing
+    expect(r.cards).toHaveLength(1);
+    const card = r.cards[0];
+    // (4) CEE's own flag, the literal true; (5) the approve in the person's voice, and every card's "Not now".
+    expect(card.reading).toBe(true);
+    expect(card.approve_action).toMatchObject({ label: 'Yes, that’s what I meant', message: 'Yes, that’s what I meant.' });
+    expect(card.decline_action).toMatchObject({ label: 'Not now', message: 'Not now.' });
+    // (2) Every record an add, in the reading order: goals, limits, options, what is left out, relations, then the figures.
+    expect(card.changes.map((c: Json) => [c.kind, c.id, c.action, c.before])).toEqual([
+      ['goal', 'more_loaves', 'add', null], ['record', 'within_budget', 'add', null], ['option', 'second_oven', 'add', null], ['option', 'keep_one', 'add', null],
+      ['left_out', 'staff_morale', 'add', null], ['left_out', 'longer_shifts', 'add', null], ['left_out', 'delivery_days', 'add', null], ['relation', 'sold_rel', 'add', null], ['relation', 'sales_rel', 'add', null], ['relation', 'spend_rel', 'add', null],
+      ['quantity', 'base_sales', 'add', null], ['quantity', 'ovens_added', 'add', null], ['quantity', 'one_oven', 'add', null], ['quantity', 'extra_per_oven', 'add', null],
+      ['quantity', 'sell_through', 'add', null], ['quantity', 'sold_per_oven', 'add', null], ['quantity', 'sales', 'add', null], ['quantity', 'sales_target', 'add', null],
+      ['quantity', 'budget', 'add', null], ['quantity', 'oven_price', 'add', null], ['quantity', 'spend', 'add', null]]);
+    // (6) The kinds the card reads, spelled as DGAI's proposalChangeSchema has them at 128bd2db (left_out added there first).
+    expect(ProposalChangeSchema.shape.kind.options).toEqual(['quantity', 'relation', 'goal', 'option', 'risk', 'record', 'left_out']);
+    // (3) A left-out item: its words are the label, and `after` is its substance in plain words, its why first (the card
+    // reads "Leaves out ‘…’ (after)"); every part it has is said, and none it lacks.
+    expect(card.changes[5]).toEqual({ id: 'longer_shifts', kind: 'left_out', action: 'add', label: 'Longer shifts for the staff', before: null,
+      after: 'It is not measured in this model. Olumi asks: “How will staff feel?”. It concerns Reach 380 loaves a week and A second oven. Your words: “Our staff may not like longer shifts”',
+      author: 'person' });
+    // Words the person reports from someone else are that someone's, by name, never "Your words".
+    expect(card.changes[6]).toEqual({ id: 'delivery_days', kind: 'left_out', action: 'add', label: 'Which days flour is delivered', before: null,
+      after: 'Nobody has said how it changes sales. Our supplier’s words: “deliveries only on weekdays”', author: 'person' });
+    // Contrast: a left-out item with only its why says only its why, as written.
+    expect(card.changes[4]).toEqual({ id: 'staff_morale', kind: 'left_out', action: 'add', label: 'Staff morale while the second oven beds in', before: null,
+      after: 'It has no measure in this model.', author: 'olumi' });
+    expect(card.changes[0]).toEqual({ id: 'more_loaves', kind: 'goal', action: 'add', label: 'Reach 380 loaves a week', before: null, after: 'name: "Reach 380 loaves a week"; measures: "sales"; comparison: >=; target: "sales target" 380 loaf/week; frame: level; '
+      + 'over the window: end; measure named by: person; whose: theirs; their words: "want to reach 380 loaves a week"', author: 'person' });
+    // The held card's model: the saved draft accepted by its approver (a guest here), authorship and words untouched; a new Run.
+    const held = agentProposalOf([...turnRows.values()].at(-1).pending_actions[0])!;
+    expect(held.proposal_id).toBe(card.proposal_id);
+    const saved = persisted!.living_model.canonical as CanonicalModelT;
+    const confirmed = savedProgramOf({ living_model: held.living_model })!;
+    expect(hostFieldsOf(confirmed.canonical)).toEqual(new Set(['"approval":"approved"', '"author_id":null']));
+    expect(withoutHostFields(confirmed.canonical)).toEqual(withoutHostFields(saved));
+    expect(confirmed.runs).toHaveLength(2);
+    expect(confirmed.runs[0]).toEqual(persisted!.living_model.runs[0]);
+    // Approval is in the Run's digest, so it is a new revision; on the same seed its numbers are the draft Run's exactly.
+    expect(confirmed.runs[1]!.receipt.revision_digest).not.toBe(confirmed.runs[0]!.receipt.revision_digest);
+    expect(confirmed.runs[1]!.result.chances).toEqual(confirmed.runs[0]!.result.chances);
+    expect(JSON.stringify(confirmed.runs[0]!.result.chances)).toMatch(/[0-9]/);
+    // Carried on reload: a later turn (a Run press, no AI call) still offers the same card, flagged.
+    const later = (await turn({ message: 'Run the analysis', chip: { id: 'run', action_type: 'run_analysis', label: 'Run' } })).json();
+    expect(later.cards.map((c: Json) => [c.proposal_id, c.reading, c.approve_action.label])).toEqual([[card.proposal_id, true, 'Yes, that’s what I meant']]);
+    expect(later.cards[0].changes).toEqual(card.changes);
+    expect(sent).toHaveLength(1);
+    // Its approve saves exactly that model and Run (the existing approve path), and the card is no longer waiting.
+    const deps = { dispatch, proposals: new ProposalStore() };
+    deps.proposals.put(held);
+    expect(await applyProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID() }, held.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
+    expect(stableStringify(persisted!.living_model)).toBe(stableStringify(held.living_model));
   });
 
   it('step 5, an answer in chat (the agent\'s own tools: propose, then the person approves): Olumi\'s drafter writes the WHOLE updated model; ONE figure changes, in their words, on the card; a new Run', async () => {

@@ -674,11 +674,11 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       const programTurn = async (): Promise<AgentTurnResult> => {
         const t0 = Date.now();
         const out = await runModelProgramTurn({ scenarioId, turnId, message, saved: { graph: saved.graph, identity: saved.identity }, dispatch: countingDispatch,
-          onModelRegistered: graphReadyEmitter(startedAt) });
+          onModelRegistered: graphReadyEmitter(startedAt), proposals, userId });
         if (out.verifiedSave) verifiedSave = true;
         programPayload = out.payload;
         const ms = Date.now() - t0;
-        return { assistant_text: out.assistantText, items: [], tool_calls: out.toolCalls.map((c) => ({ ...c, mutated: out.mutated })),
+        return { assistant_text: out.assistantText, items: [], tool_calls: out.toolCalls.map((c) => ({ ...c, mutated: c.mutated ?? out.mutated })),
           tool_results: out.toolResults, mutated: out.mutated, hops: 0, stopped_reason: 'answered',
           timing: { total_ms: ms, provider_ms: 0, tool_ms: ms, overhead_ms: 0, tool_provider_ms: 0, provider_calls: providerCallsMade() ?? 0, tool_calls: 1, hops: 0 } };
       };

@@ -902,6 +902,11 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
     });
 
     /** Draft a saved PROGRAM scenario (the canonical drafter's first turn), then clear the calls. */
+    /** A reply's change cards: every card but the first draft's reading card, which must be there too (step 2). */
+    const changeCards = (j: Json): Json[] => {
+      expect((j.cards as Json[]).filter((c) => c.reading === true), 'the first draft\'s reading card is carried').toHaveLength(1);
+      return (j.cards as Json[]).filter((c) => c.reading !== true);
+    };
     const savedProgram = async (): Promise<void> => {
       SCENARIO = randomUUID(); persisted = null; canonicalDraft = JSON.stringify(bakery()); calls.length = 0;
       expect((await typed(BAKERY_BRIEF)).statusCode).toBe(200);
@@ -967,10 +972,11 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       const set = { public_label: 'Oven price £2,500', basis: 'their answer', request: 'The oven price is £2,500.', remove: [] };
       outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'p1', args: set }], [{ type: 'message', text: 'I prepared the oven price; approve its card.' }]];
       const proposed = (await typed('The oven would cost £2,500.')).json() as Json;
-      expect(proposed.cards as Json[]).toHaveLength(1);
+      // This turn's card, beside the first draft's reading card (step 2), which stays on view until it is answered or lapses.
+      expect(changeCards(proposed)).toHaveLength(1);
       // A card stores no Run, so the reply names none.
       expect(proposed.run).toBeNull();
-      const card = (proposed.cards as Json[])[0]!;
+      const card = changeCards(proposed)[0]!;
       outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: 'Saved: the oven price is £2,500.' }]];
       const approved = await post({ turn_id: randomUUID(), message: card.approve_action.message, source: 'chip_click', chip: { id: card.approve_action.id, action_type: card.approve_action.action_type } });
       expect(approved.statusCode, approved.body).toBe(200);
@@ -998,7 +1004,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       // The SDK runs the two calls together: one prepares the card, the other is refused (in either order).
       expect(tools.map((c) => c.outcome).sort()).toEqual(['ok', 'refused']);
       expect(JSON.stringify(tools.find((c) => c.outcome === 'refused'))).toContain('one_card_per_turn');
-      expect(j.cards as Json[]).toHaveLength(1);
+      expect(changeCards(j)).toHaveLength(1);
       expect(registered.length, 'proposing saves nothing').toBe(1);
     });
 
@@ -1014,7 +1020,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       const r = await typed('The oven would cost £2,500.');
       expect(r.statusCode, r.body).toBe(200);
       const j = r.json() as Json;
-      expect(j.cards as Json[]).toHaveLength(1);
+      expect(changeCards(j)).toHaveLength(1);
       // The model got the schema error back as the tool's own output, in the same turn.
       const back = (calls[1]!.input as Json[]).find((i) => i.type === 'function_call_output' && i.call_id === 'bad')!.output;
       expect(JSON.stringify(back)).toContain('invalid_arguments');

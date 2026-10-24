@@ -129,12 +129,18 @@ async function prepare(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs)
   // The person's words this turn are kept with the model: what it was changed from, in their words.
   const next = withNewRun({ ...program, canonical: v.model, person_words: words });
   if (next.evaluation.compiled.errors.length > 0) return refused('does_not_compile', next.evaluation.compiled.errors.slice(0, 3).map((e) => e.message).join(' '));
-  const p = deps.proposals.put(createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
-    base_graph_identity_hash: base.saved.graphHash, base_model_identity: base.saved.identity!,
-    operations: v.changes.map((c): ProposalOperation => ({ op: 'living_change', path: `${c.kind}:${c.id}`, value: { change: c.action } })),
-    provenance: { authored_by: 'model_proposed', basis: args.basis }, validation: { admitted: true, loss_count: 0, refusals: [] },
-    public_label: args.public_label, living_model: livingModelOf(next.program), changes: v.changes }));
+  const p = holdProgramCard(deps.proposals, { scenarioId: ctx.scenario_id, userId: ctx.authenticated_user_id, graphHash: base.saved.graphHash, identity: base.saved.identity! },
+    { label: args.public_label, basis: args.basis, program: next.program, changes: v.changes });
   return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: base.saved.graphHash, changes: v.changes, would_show: runWords(next.run) });
+}
+
+/** A program card, held for the person's approval on its base revision: the complete program (model and Run) it would write, and every change. */
+export function holdProgramCard(proposals: ProposalStore, at: { readonly scenarioId: string; readonly userId: string | null; readonly graphHash: string; readonly identity: string },
+  card: { readonly label: string; readonly basis: string; readonly program: SavedProgram; readonly changes: readonly ProposalChange[]; readonly reading?: true }): StructuredProposal {
+  return proposals.put(createProposal({ scenario_id: at.scenarioId, user_id: at.userId, base_graph_identity_hash: at.graphHash, base_model_identity: at.identity,
+    operations: card.changes.map((c): ProposalOperation => ({ op: 'living_change', path: `${c.kind}:${c.id}`, value: { change: c.action } })),
+    provenance: { authored_by: 'model_proposed', basis: card.basis }, validation: { admitted: true, loss_count: 0, refusals: [] },
+    public_label: card.label, living_model: livingModelOf(card.program), changes: card.changes, ...(card.reading === true ? { reading: true as const } : {}) }));
 }
 
 /** A proposal this module prepared: it carries the complete program (model and Run) it would write. */
