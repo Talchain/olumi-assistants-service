@@ -146,11 +146,8 @@ const CONVERSIONS: readonly { per: string; of: string; value: number; tolerance:
   { of: 'hour', per: 'day', value: 24, tolerance: 0 },
 ];
 
-/**
- * True when `value` in `u` is an exact calendar conversion (12 month/year, or its inverse 1/12 year/month). `exact`: only the
- * conversions with no tolerance (an average, such as weeks in a month, is not one), equal up to floating-point rounding only.
- */
-export function isCalendarConversion(value: number, u: Unit, opts: { readonly exact?: boolean } = {}): boolean {
+/** True when `value` in `u` is an exact calendar conversion (12 month/year, or its inverse 1/12 year/month). */
+export function isCalendarConversion(value: number, u: Unit): boolean {
   if (u.scale !== 1) return false;
   const e = Object.entries(u.dims);
   if (e.length !== 2) return false;
@@ -158,8 +155,19 @@ export function isCalendarConversion(value: number, u: Unit, opts: { readonly ex
   const down = e.find(([, v]) => v === -1)?.[0];
   if (up === undefined || down === undefined) return false;
   return CONVERSIONS.some((c) => {
-    if (opts.exact === true && c.tolerance !== 0) return false;
     const want = c.of === up && c.per === down ? c.value : c.of === down && c.per === up ? 1 / c.value : null;
-    return want !== null && Math.abs(value - want) <= (opts.exact === true ? 4 * Number.EPSILON * want : want * c.tolerance + 1e-12);
+    return want !== null && Math.abs(value - want) <= want * c.tolerance + 1e-12;
   });
+}
+
+/**
+ * True when `to` in `toUnit` is `from` in `fromUnit` said EXACTLY in another calendar unit (1 year as 12 month, 6 month as
+ * 0.5 year): a conversion with no tolerance, whose float product is equal in its direction (from × 12 === to for year → month,
+ * to × 12 === from for month → year). Anything else, a rounding included, is another figure.
+ */
+export function isExactCalendarReexpression(from: number, fromUnit: Unit, to: number, toUnit: Unit): boolean {
+  const per = divide(toUnit, fromUnit);
+  const unit = (up: string, down: string): Unit => ({ dims: { [up]: 1, [down]: -1 }, scale: 1 });
+  return per.scale === 1 && CONVERSIONS.some((c) => c.tolerance === 0
+    && ((sameDims(per, unit(c.of, c.per)) && from * c.value === to) || (sameDims(per, unit(c.per, c.of)) && to * c.value === from)));
 }

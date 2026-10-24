@@ -1359,14 +1359,20 @@ describe('the model-program turn on the real core route', () => {
     for (const to of [{ value: 12, low: 12, high: 25 }, { value: 12, low: 11, high: 24 }, { value: 13, low: 12, high: 24 }, { value: 12, low: null, high: null }]) {
       expect(said(range, { unit: 'month', ...to }), JSON.stringify(to)).toMatchObject({ ok: false, code: 'unverified_person_words', ids: ['budget_window'], check: 'this_turn' });
     }
-    // Exact is exact up to floating-point rounding only (Codex BLOCK on #3739): 10^15 years as 12×10^15 + 100 months is not the
-    // same figure, as a value or as either end of a range; 0.1 year as 1.2 months is (1.2 / 0.1 is not 12 in binary).
-    expect(1.2 / 0.1).not.toBe(12);
-    expect(said({ unit: 'year', value: 0.1 }, { unit: 'month', value: 1.2 }).ok).toBe(true);
-    for (const [from, to] of [[{ value: 1e15 }, { value: 12e15 + 100 }], [{ value: null, low: 1e15, high: 2e15 }, { value: null, low: 12e15 + 100, high: 24e15 }],
-      [{ value: null, low: 1e15, high: 2e15 }, { value: null, low: 12e15, high: 24e15 + 100 }]] as const) {
-      expect(said({ unit: 'year', ...from }, { unit: 'month', ...to }), JSON.stringify(to)).toMatchObject({ ok: false, code: 'unverified_person_words', ids: ['budget_window'], check: 'this_turn' });
-      expect(said({ unit: 'year', ...from }, { unit: 'month', ...Object.fromEntries(Object.entries(from).map(([k, v]) => [k, v === null ? null : v * 12])) }).ok, `${JSON.stringify(from)} ×12`).toBe(true);
+    // Exact is the float product in the conversion's direction, nothing looser (Codex BLOCK ×2 on #3739): 1 year as 12 month and
+    // 6 month as 0.5 year are the same figure; 10^15 years as 12×10^15 + 8 or + 100 months is not, as a value or as either end of
+    // a range. Nor is 0.1 year as 1.2 month (0.1 × 12 is not 1.2 in binary): refusing it is the safe base behaviour, their
+    // words this turn asked for as for any change of their figure.
+    expect(said({ unit: 'year', value: 1 }, { unit: 'month', value: 12 }).ok).toBe(true);
+    expect(said({ unit: 'month', value: 6 }, { unit: 'year', value: 0.5 }).ok).toBe(true);
+    expect(0.1 * 12).not.toBe(1.2);
+    expect(said({ unit: 'year', value: 0.1 }, { unit: 'month', value: 1.2 })).toMatchObject({ ok: false, code: 'unverified_person_words', ids: ['budget_window'], check: 'this_turn' });
+    for (const plus of [8, 100]) {
+      for (const [from, to] of [[{ value: 1e15 }, { value: 12e15 + plus }], [{ value: null, low: 1e15, high: 2e15 }, { value: null, low: 12e15 + plus, high: 24e15 }],
+        [{ value: null, low: 1e15, high: 2e15 }, { value: null, low: 12e15, high: 24e15 + plus }]] as const) {
+        expect(said({ unit: 'year', ...from }, { unit: 'month', ...to }), JSON.stringify(to)).toMatchObject({ ok: false, code: 'unverified_person_words', ids: ['budget_window'], check: 'this_turn' });
+        expect(said({ unit: 'year', ...from }, { unit: 'month', ...Object.fromEntries(Object.entries(from).map(([k, v]) => [k, v === null ? null : v * 12])) }).ok, `${JSON.stringify(from)} ×12`).toBe(true);
+      }
     }
   });
 

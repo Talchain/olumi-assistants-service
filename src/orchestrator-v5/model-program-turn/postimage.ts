@@ -20,7 +20,7 @@
 import { ProposalChangeSchema, type ProposalChange } from '../agent-lane/proposal.js';
 import { CanonicalModel, type CanonicalModelT } from '../model-program/canonical.js';
 import { norm } from '../model-program/compile.js';
-import { divide, isCalendarConversion, isDimensionless, parseUnit } from '../model-program/units.js';
+import { isExactCalendarReexpression, parseUnit, sameDims } from '../model-program/units.js';
 
 type Rec = Record<string, unknown>;
 type Family = Exclude<keyof CanonicalModelT, 'version' | 'question' | 'period' | 'history'>;
@@ -85,12 +85,11 @@ const sameAmount = (a: Rec, b: Rec): boolean => {
   if (a['unit'] === b['unit']) return ks.every((k) => a[k] === b[k]);
   const [ua, ub] = [parseUnit(String(a['unit'])), parseUnit(String(b['unit']))];
   if (!ua.ok || !ub.ok) return false;
-  const per = divide(ub.unit, ua.unit);
-  const same = isDimensionless(per) && per.scale === 1;
+  const same = sameDims(ua.unit, ub.unit) && ua.unit.scale === ub.unit.scale;
   return ks.every((k) => {
     const [x, y] = [a[k], b[k]];
     if (typeof x !== 'number' || typeof y !== 'number') return x === y;
-    return same || x === 0 ? x === y : isCalendarConversion(y / x, per, { exact: true });
+    return same ? x === y : isExactCalendarReexpression(x, ua.unit, y, ub.unit);
   });
 };
 /**

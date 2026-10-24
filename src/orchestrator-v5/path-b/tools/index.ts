@@ -101,8 +101,8 @@ export interface TurnCheck {
 }
 // A condition is keyed by its words (`condition:<text>`): a log names only that it was one.
 const idOnly = (id: string): string => (id.startsWith('condition:') ? 'condition' : id);
-/** An id as the log holds it: a plain id as it is; any other (an id holding someone's words) a stable stand-in, never its text. */
-const loggedId = (id: string): string => (/^[A-Za-z0-9_.-]{1,64}$/.test(idOnly(id)) ? idOnly(id) : `#${createHash('sha256').update(id, 'utf8').digest('hex').slice(0, 8)}`);
+/** An id as the log holds it, whatever its characters: a stable stand-in (an id can hold someone's words), never its text. */
+const loggedId = (id: string): string => `#${createHash('sha256').update(id, 'utf8').digest('hex').slice(0, 8)}`;
 const listOf = (v: unknown): Record<string, unknown>[] =>
   (Array.isArray(v) ? v.filter((x): x is Record<string, unknown> => x !== null && typeof x === 'object') : []);
 /** Any tool's `blockers` (a Run's readiness has its own shape and words): only a code, and the self-check's verdict and ids. */
