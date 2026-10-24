@@ -362,7 +362,7 @@ describe('present: what each computed chance rests on most (one figure at a time
     expect(cell(v, 'add').kind).toBe('figure');
     expect(driver(v, 'add')).toEqual({ kind: 'available',
       driver: { quantity: 'c', author: 'olumi', low: { value: 10, display: 'less than 1%' }, middle: { value: 20, display: 'more than 99%' },
-        high: { value: 30, display: 'more than 99%' }, swing_points: 100, draws: 200 },
+        high: { value: 30, display: 'more than 99%' }, swing_points: 100, draws: 200, untested: [] },
       detail: SPEC_DETAIL('Olumi’s estimate') });
     expect(driver(v, 'keep')).toEqual({ kind: 'none_licensed', reason: NO_DRIVER_REASON });
     expect(driver(v, 'add').detail).not.toMatch(FORECAST_OR_VERDICT);
@@ -375,7 +375,7 @@ describe('present: what each computed chance rests on most (one figure at a time
       [goal('g', 'x', '>=', 'four')], [option('plan', 'Plan')], [{ id: 'l', label: 'l', quantity: 'x', cmp: '<=', bound: 'six', aggregation: 'end', window: ONE }]);
     const v = present(m, { x: { label: 'Tickets sold', author: 'olumi' }, four: person('Four'), six: person('Six') });
     expect(driver(v, 'plan')).toEqual({ kind: 'available',
-      driver: { quantity: 'x', author: 'olumi', low: { value: 0, display: '0%' }, middle: { value: 5, display: '100%' }, high: { value: 10, display: '0%' }, swing_points: 100, draws: 200 },
+      driver: { quantity: 'x', author: 'olumi', low: { value: 0, display: '0%' }, middle: { value: 5, display: '100%' }, high: { value: 10, display: '0%' }, swing_points: 100, draws: 200, untested: [] },
       detail: 'In this model, of the figures tested one at a time, the chance is most sensitive to ‘Tickets sold’ (Olumi’s estimate): at the low end (0 tickets) 0%, at the middle (5 tickets) 100%, at the high end (10 tickets) 0%.' });
   });
 
@@ -386,13 +386,47 @@ describe('present: what each computed chance rests on most (one figure at a time
     const labels = { delay: { label: 'Start delay', author: 'olumi' as const }, base: person('Tickets today'), capacity: person('Weekly capacity', true), target: person('Target') };
     const hire = present(timed('set'), labels);
     expect(driver(hire, 'hire')).toEqual({ kind: 'available',
-      driver: { quantity: 'delay', author: 'olumi', low: { value: 2, display: '100%' }, middle: { value: 6, display: '100%' }, high: { value: 10, display: '0%' }, swing_points: 100, draws: 200 },
+      driver: { quantity: 'delay', author: 'olumi', low: { value: 2, display: '100%' }, middle: { value: 6, display: '100%' }, high: { value: 10, display: '0%' }, swing_points: 100, draws: 200, untested: [] },
       detail: 'In this model, of the figures tested one at a time, the chance is most sensitive to ‘Start delay’ (Olumi’s estimate): at the low end (2 months) 100%, at the middle (6 months) 100%, at the high end (10 months) 0%.' });
     expect(cell(hire, 'hire').face).toContain('‘Start delay’ follows Olumi’s provisional conversion of Olumi’s own estimated range');
     const outage = driver(present(timed('risk'), { ...labels, delay: { label: 'Outage delay', author: 'olumi' as const } }), 'carry_on');
     expect(outage.kind).toBe('available');
     expect(outage.driver).toEqual({ quantity: 'delay', author: 'olumi', low: { value: 2, display: 'less than 1%' }, middle: { value: 6, display: 'less than 1%' },
-      high: { value: 10, display: 'more than 99%' }, swing_points: 100, draws: 200 });
+      high: { value: 10, display: 'more than 99%' }, swing_points: 100, draws: 200, untested: [] });
+  });
+
+  it('Codex r1 #3728: a setting that cannot be worked out is named as not tested, never dropped, and nothing is concluded about it', () => {
+    // (100 + noise) ÷ x, x Olumi's 0 to 10, noise the person's −1 to 1. At x = 0 the ratio divides by zero: that setting is not
+    // worked out. Goal ≥ 15: at x = 5 it is about 20 (met in every draw), at x = 10 about 10 (never): x is the driver over the
+    // settings that computed. Goal ≥ 5: at x = 5 and x = 10 it is met in every draw, so nothing tested moved the chance, and
+    // the reason says x was not tested at its low end rather than that no figure moved it.
+    const ratio = (target: number) => model([range('x', 0, 10, undefined, 'tickets', 'olumi_estimate'), fixed('hundred', 100, 'tickets'),
+      range('noise', -1, 1, undefined, 'tickets', 'person_range'), def('num', 'sum', ['hundred', 'noise'], 'tickets'), def('per', 'ratio', ['num', 'x'], ''),
+      fixed('t', target, '')], [goal('g', 'per', '>=', 't')], [option('plan', 'Plan')]);
+    const labels = { x: { label: 'Batches', author: 'olumi' as const }, noise: person('Noise'), hundred: person('Hundred'), num: person('Numerator', true), per: person('Per batch', true), t: person('Target') };
+    const fifteen = driver(present(ratio(15), labels), 'plan');
+    expect(fifteen.kind).toBe('available');
+    expect(fifteen.driver.quantity).toBe('x');
+    expect(fifteen.driver.low).toEqual({ value: 0, display: null });
+    expect(fifteen.driver.middle).toEqual({ value: 5, display: 'more than 99%' });
+    expect(fifteen.driver.high).toEqual({ value: 10, display: 'less than 1%' });
+    expect(fifteen.driver.untested).toEqual([{ quantity: 'x', settings: ['low end'] }]);
+    expect(fifteen.detail).toBe('In this model, of the figures tested one at a time, the chance is most sensitive to ‘Batches’ (Olumi’s estimate): at the low end (0 tickets) could not be tested, at the middle (5 tickets) more than 99%, at the high end (10 tickets) less than 1%.');
+    const five = driver(present(ratio(5), labels), 'plan');
+    expect(five).toEqual({ kind: 'none_licensed', reason: '‘Batches’ could not be tested at its low end. Of the settings that could be tested, none moved this chance by more than 5 points.' });
+    expect(five.reason).not.toContain(NO_DRIVER_REASON);
+  });
+
+  it('Codex r1 #3728: the sweep reads the Run’s own seed: its swing equals one worked out inline on that seed', () => {
+    // PAIR(30) at the Run's seed 20261023 and 4,000 draws: c set to 10, 20 and 30 in turn, each simulated inline on the SAME
+    // seed and draws; the swing is the highest chance less the lowest. Another seed draws e differently, so its swing differs.
+    const at = (c: number) => simulate(model([fixed('c', c, 'tickets'), range('e', 15, 25, undefined, 'tickets', 'olumi_estimate'),
+      def('total', 'sum', ['c', 'e'], 'tickets'), fixed('t', 30, 'tickets')], [goal('g', 'total', '>=', 't')], [option('plan', 'Plan')]),
+      { seed: 20261023, draws: 4000 }).options[0]!.joint_within_limits as { chance: number };
+    const chances = [at(10).chance, at(20).chance, at(30).chance];
+    const swing = Number(((Math.max(...chances) - Math.min(...chances)) * 100).toFixed(1));
+    expect(swing).toBeGreaterThan(45);
+    expect(driver(present(PAIR(30), PAIR_LABELS, {}, 4000), 'plan').driver.swing_points).toBe(swing);
   });
 
   it('determinism: the same seed gives the same driver, settings and sentence', () => {

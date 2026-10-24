@@ -31,7 +31,7 @@ import { displayedPctAt } from '../../goal-target/goal-chance-display.js';
 import { sayDisplayedPct } from '../../goal-target/goal-targets-joint.js';
 import type { Aggregation, Cmp, ExecutableModel, FixedAuthor, Goal, Limit, Quantity, Window } from '../executable.js';
 import { rangeLaw, type RangeDist } from '../simulate/range-law.js';
-import { isWithheld, type Chance, type ChanceOrWithheld, type OptionResult, type SimResult, type WithheldChance } from '../simulate/result.js';
+import { isWithheld, type ChanceOrWithheld, type OptionResult, type SimResult, type WithheldChance } from '../simulate/result.js';
 import { readingOf, restsOn, simulate } from '../simulate/simulate.js';
 
 /** Whose a figure is: unverified is said to be the person's but their words were not found (compile's `unverified`). */
@@ -201,10 +201,12 @@ const TIPPING_DRAWS = 4000;
 export const DRIVER_MIN_SWING = 0.05;
 export const NO_DRIVER_REASON = 'Tested one at a time at each figure’s low end, middle and high end, no figure moved this chance by more than 5 points.';
 export const NO_RANGE_REASON = 'No figure this chance rests on has a range to test.';
-type End = { readonly value: number; readonly display: string };
+/** A setting tried: its value, and the chance there as displayed; null where it could not be worked out (a nonfinite draw). */
+type End = { readonly value: number; readonly display: string | null };
 export type PresentMainDriver =
   | { readonly kind: 'available'; readonly detail: string; readonly driver: { readonly quantity: string; readonly author: 'person' | 'olumi' | 'unverified';
-      readonly low: End; readonly middle: End; readonly high: End; readonly swing_points: number; readonly draws: number } }
+      readonly low: End; readonly middle: End; readonly high: End; readonly swing_points: number; readonly draws: number;
+      readonly untested: readonly { readonly quantity: string; readonly settings: readonly string[] }[] } }
   | { readonly kind: 'none_licensed'; readonly reason: string }
   | { readonly kind: 'not_recorded' };
 
@@ -448,6 +450,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   };
   // ── What each computed chance rests on most (DRIVER_MIN_SWING): each input at its low end, middle and high end, cached ──
   const switches = new Set(model.options.flatMap((o) => o.sets.map((s) => s.quantity)));
+  const SETTINGS = ['low end', 'middle', 'high end'];
   const sweepDraws = Math.min(TIPPING_DRAWS, result.draws);
   const atEnds = new Map<string, readonly SimResult[]>();
   const endsOf = (x: Quantity & { dist: RangeDist }): readonly SimResult[] => {
@@ -459,24 +462,31 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     const rests = upstream(roots, o.option_id);
     const inputs = model.quantities.filter((x): x is Quantity & { dist: RangeDist } => x.dist?.kind === 'range' && x.dist.low < x.dist.high && rests.has(x.id) && !switches.has(x.id));
     if (inputs.length === 0) return { kind: 'none_licensed', reason: NO_RANGE_REASON };
-    let best: { readonly x: Quantity & { dist: RangeDist }; readonly at: readonly Chance[]; readonly swing: number } | undefined;
-    for (const x of inputs) {
+    // Codex r1 #3728: a setting that cannot be worked out (a nonfinite draw) is never dropped: the swing counts only the
+    // settings that computed, the input is named as not tested there, and nothing is concluded about a setting not tested.
+    const tested = inputs.map((x) => {
       const at = endsOf(x).map((r) => r.options.find((p) => p.option_id === o.option_id)!.joint_within_limits);
-      if (at.some((c) => isWithheld(c))) continue;
-      const chances = (at as Chance[]).map((c) => c.chance);
-      const swing = Math.max(...chances) - Math.min(...chances);
-      if (best === undefined || swing > best.swing) best = { x, at: at as Chance[], swing };
+      const chances = at.flatMap((c) => (isWithheld(c) ? [] : [c.chance]));
+      return { x, at, swing: chances.length === 0 ? 0 : Math.max(...chances) - Math.min(...chances), missing: SETTINGS.filter((_, i) => isWithheld(at[i]!)) };
+    });
+    const untested = tested.filter((t) => t.missing.length > 0);
+    const notTested = (ts: typeof tested): string => stop(listWords(ts.map((t) => `${q(label(t.x.id) ?? t.x.id)} could not be tested at its ${listWords(t.missing)}`)));
+    const best = tested.reduce((b, t) => (t.swing > b.swing ? t : b));
+    if (best.swing <= DRIVER_MIN_SWING) {
+      if (untested.length === 0) return { kind: 'none_licensed', reason: NO_DRIVER_REASON };
+      return { kind: 'none_licensed', reason: `${notTested(untested)}${tested.some((t) => t.missing.length < SETTINGS.length)
+        ? ' Of the settings that could be tested, none moved this chance by more than 5 points.' : ''}` };
     }
-    if (best === undefined) return { kind: 'not_recorded' };
-    if (best.swing <= DRIVER_MIN_SWING) return { kind: 'none_licensed', reason: NO_DRIVER_REASON };
     const { x, at } = best;
     const author = meta(x.id)?.author === 'unverified' ? 'unverified' as const : x.dist.basis === 'person_range' ? 'person' as const : 'olumi' as const;
     const whose = author === 'unverified' ? NOT_IN_THEIR_WORDS : author === 'person' ? '(your range)' : '(Olumi’s estimate)';
-    const [low, middle, high] = [x.dist.low, (x.dist.low + x.dist.high) / 2, x.dist.high].map((value, i) => ({ value, display: shown(at[i]!, sweepDraws)!.display }));
-    const said = (e: End) => `(${sayOf(x.id, e.value, x.unit)}) ${e.display}`;
-    return { kind: 'available', driver: { quantity: x.id, author, low: low!, middle: middle!, high: high!, swing_points: Number((best.swing * 100).toFixed(1)), draws: sweepDraws },
+    const [low, middle, high] = [x.dist.low, (x.dist.low + x.dist.high) / 2, x.dist.high].map((value, i) => ({ value, display: shown(at[i]!, sweepDraws)?.display ?? null }));
+    const said = (e: End) => `(${sayOf(x.id, e.value, x.unit)}) ${e.display ?? 'could not be tested'}`;
+    const others = untested.filter((t) => t.x.id !== x.id);
+    return { kind: 'available', driver: { quantity: x.id, author, low: low!, middle: middle!, high: high!, swing_points: Number((best.swing * 100).toFixed(1)), draws: sweepDraws,
+      untested: untested.map((t) => ({ quantity: t.x.id, settings: t.missing })) },
       detail: `In this model, of the figures tested one at a time, the chance is most sensitive to ${q(label(x.id) ?? x.id)} ${whose}: `
-        + `at the low end ${said(low!)}, at the middle ${said(middle!)}, at the high end ${said(high!)}.` };
+        + `at the low end ${said(low!)}, at the middle ${said(middle!)}, at the high end ${said(high!)}.${others.length > 0 ? ` ${notTested(others)}` : ''}` };
   };
   const options = result.options.map((o: OptionResult) => {
     const name = optionLabel.get(o.option_id) ?? o.option_id;
