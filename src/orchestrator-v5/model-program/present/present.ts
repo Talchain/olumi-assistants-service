@@ -54,6 +54,8 @@ export interface PresentQuantity {
   readonly shown_in?: { readonly unit: string; readonly factor: number };
   /** R8, default deny: every record behind it (its figure, or its relation and links) is the person's, accepted and in their words. */
   readonly confirmed?: boolean;
+  /** Every record behind it is accepted and in their words, whoever wrote it: only otherwise "(not yet confirmed)". */
+  readonly accepted?: boolean;
 }
 /** A premise a goal's chance is worked out under (compile's `rests_on`): an applied assumption or a prerequisite, as written. */
 export interface PresentPremise {
@@ -332,13 +334,15 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     return `${whose} ${p.kind === 'condition' ? `condition ${text} is met` : `assumption ${text} holds`}${p.author === 'person' && !p.confirmed ? ' (not yet confirmed)' : ''}`;
   };
   /** R8 (default deny): what it reads that is not `confirmed` is Olumi's reading (a structural constant is nobody's), named
-   * unless the "if" list already says it is not the person's; with none of theirs confirmed yet, "your figures". */
+   * unless the "if" list already says it is not the person's; "(not yet confirmed)" only while not accepted (DL). */
   const unconfirmed = (ids: ReadonlySet<string>): string | undefined => {
     const read = model.quantities.filter((x) => ids.has(x.id) && (x.dist?.kind === 'fixed' ? x.dist.author ?? meta(x.id)?.author : meta(x.id)?.author) !== 'structure');
     const owner = (x: Quantity) => (x.dist === undefined ? meta(x.id)?.relation_author : meta(x.id)?.author);
     const open = read.filter((x) => meta(x.id)?.confirmed !== true && (owner(x) === 'person' || assumptions(new Set([x.id])).length === 0));
-    return open.length === 0 ? undefined
-      : `on Olumi’s reading of ${read.some((x) => meta(x.id)?.confirmed === true) ? listWords(open.map((x) => q(label(x.id) ?? x.id))) : 'your figures'} (not yet confirmed)`;
+    const pending = (x: Quantity) => meta(x.id)?.accepted !== true, named = (x: Quantity) => q(label(x.id) ?? x.id), allPending = open.every(pending);
+    if (open.length === 0) return undefined;
+    if (allPending) return `on Olumi’s reading of ${read.some((x) => meta(x.id)?.confirmed === true) ? listWords(open.map(named)) : 'your figures'} (not yet confirmed)`;
+    return `on Olumi’s reading of ${listWords(open.map((x) => (pending(x) ? `${named(x)} (not yet confirmed)` : named(x))))}`;
   };
   /** What the chance is conditional on: the premises, then Olumi's assumptions. */
   const conditions = (ids: ReadonlySet<string>, premises: readonly PresentPremise[]): string[] => [...premises.map(premiseWords), ...assumptions(ids)];

@@ -50,14 +50,16 @@ export type WaitingView = {
   readonly goal_chance: { readonly notes: readonly string[]; readonly thresholds?: readonly PresentThreshold[]; readonly waits_on?: readonly PresentBlocker[] };
 };
 
-/** R8, ONE rule (default deny): the person's records (quantity, relation, link, goal, premise), accepted and in their words. */
-function confirmedOf(m: CanonicalModelT, compiled: CompileResult): ReadonlySet<string> {
+/** R8, ONE rule (default deny): the records (quantity, relation, link, goal, premise) accepted and in their words; `confirmed`: the person's. */
+type Records = { readonly accepted: ReadonlySet<string>; readonly confirmed: ReadonlySet<string> };
+function recordsOf(m: CanonicalModelT, compiled: CompileResult): Records {
   const unverified = new Set(compiled.unverified.map((u) => u.id)), links = m.relations.flatMap((r) => (r.form === 'effect' ? r.terms.map((t) => ({ ...t, id: `${r.id}:${t.driver}` })) : []));
-  return new Set([...m.quantities, ...m.relations, ...links, ...m.goals, ...m.assumptions, ...m.conditions].filter((r) => r.author === 'person' && r.approval === 'approved' && !unverified.has(r.id)).map((r) => r.id));
+  const all = [...m.quantities, ...m.relations, ...links, ...m.goals, ...m.assumptions, ...m.conditions], ok = all.filter((r) => r.approval === 'approved' && !unverified.has(r.id));
+  return { accepted: new Set(ok.map((r) => r.id)), confirmed: new Set(ok.filter((r) => r.author === 'person').map((r) => r.id)) };
 }
 
 /** Labels and authors for every quantity the executable model reads, including the ids the compiler adds. */
-function quantityMeta(model: CanonicalModelT, compiled: CompileResult, x: ExecutableModel, confirmed: ReadonlySet<string>): Record<string, PresentQuantity> {
+function quantityMeta(model: CanonicalModelT, compiled: CompileResult, x: ExecutableModel, records: Records): Record<string, PresentQuantity> {
   const m = normalise(model);
   const unverified = new Set(compiled.unverified.map((u) => u.id));
   // A quote not found in the person's words is never shown as theirs: S2 says "whose source is not confirmed" for it.
@@ -66,7 +68,7 @@ function quantityMeta(model: CanonicalModelT, compiled: CompileResult, x: Execut
   const own = new Map(m.quantities.map((q) => {
     const r = rel.get(q.id);
     const behind = r === undefined ? [q.id] : [r.id, ...(r.form === 'effect' ? r.terms.map((t) => `${r.id}:${t.driver}`) : [])];
-    return [q.id, { label: q.label, author: who(q.author, q.id), confirmed: behind.every((id) => confirmed.has(id)), ...(r !== undefined ? { relation_author: who(r.author, r.id) } : {}), ...(isApproximate(q) ? { approximate: { quote: q.quote ?? String(q.value) } } : {}) }] as const;
+    return [q.id, { label: q.label, author: who(q.author, q.id), confirmed: behind.every((id) => records.confirmed.has(id)), accepted: behind.every((id) => records.accepted.has(id)), ...(r !== undefined ? { relation_author: who(r.author, r.id) } : {}), ...(isApproximate(q) ? { approximate: { quote: q.quote ?? String(q.value) } } : {}) }] as const;
   }));
   const goals = new Map(m.goals.map((g) => [g.id, g] as const));
   const out: Record<string, PresentQuantity> = {};
@@ -79,7 +81,7 @@ function quantityMeta(model: CanonicalModelT, compiled: CompileResult, x: Execut
     const g = goals.get(root ?? '');
     if (g !== undefined && (suffix === 'change' || suffix === 'change_rel')) {
       const of = own.get(g.measure?.quantity ?? '')?.label ?? g.label;
-      out[q.id] = { label: suffix === 'change' ? `Change in ${of}` : `Relative change in ${of}`, author: who(g.author, g.id), relation_author: who(g.author, g.id), confirmed: confirmed.has(g.id) };
+      out[q.id] = { label: suffix === 'change' ? `Change in ${of}` : `Relative change in ${of}`, author: who(g.author, g.id), relation_author: who(g.author, g.id), confirmed: records.confirmed.has(g.id), accepted: records.accepted.has(g.id) };
       continue;
     }
     const base = own.get(root ?? '');
@@ -111,7 +113,7 @@ export function evaluateCanonical(model: CanonicalModelT, opts: { readonly sourc
   const projection = project(model, compiled, opts.brief !== undefined ? { brief: opts.brief } : {});
   const read = normalise(model);
   const labelOf = new Map(read.goals.map((g) => [g.id, g.label] as const));
-  const confirmed = confirmedOf(read, compiled);
+  const records = recordsOf(read, compiled), confirmed = records.confirmed;
   // R8: the compiler's premises for each goal (`rests_on`), in their own words, whose they are and whether confirmed.
   const premiseOf = new Map<string, PresentPremise>([...read.assumptions.map((a) => [a.id, { id: a.id, text: a.text, author: a.author, kind: 'assumption' as const, confirmed: confirmed.has(a.id) }] as const),
     ...read.conditions.map((c) => [c.id, { id: c.id, text: c.text, author: c.author, kind: 'condition' as const, confirmed: confirmed.has(c.id) }] as const)]);
@@ -132,7 +134,7 @@ export function evaluateCanonical(model: CanonicalModelT, opts: { readonly sourc
   }
   const sim = simulate(x, { seed: opts.seed, draws: opts.draws ?? RUN_DRAWS });
   // A limit, option or risk left out of this run is said by S2's present itself (S1's `executable.withheld`, r3).
-  const view = presentAnalysisView({ model: x, result: sim, quantities: quantityMeta(model, compiled, x, confirmed), goals, asks, blockers, leaves_out, tipping,
+  const view = presentAnalysisView({ model: x, result: sim, quantities: quantityMeta(model, compiled, x, records), goals, asks, blockers, leaves_out, tipping,
     left_out: model.left_out.map((r) => ({ text: r.text, concerns: r.concerns })) });
   return { compiled, sim, projection, view };
 }

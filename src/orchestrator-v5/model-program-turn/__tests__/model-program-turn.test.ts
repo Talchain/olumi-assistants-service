@@ -1077,11 +1077,11 @@ describe('the model-program turn on the real core route', () => {
       const m = approved(club());
       m.conditions.push(hall);
       const face = faceOf(m, HALL);
-      // The club's members stock is Olumi's (accepted, but never theirs): Olumi's reading, named.
-      expect(face).toContain(', in this model, on Olumi’s reading of ‘members’ (not yet confirmed), if your condition ‘The council must let us use the hall’ is met, ‘promo effect’ follows Olumi’s provisional conversion of Olumi’s own estimated range, 3 member / month / promotion to 7 member / month / promotion, into a bell-shaped spread and ‘joins’ follows Olumi’s assumed relationship.');
+      // The club's members stock is Olumi's (accepted, but never theirs): Olumi's reading, named, with no "(not yet confirmed)".
+      expect(face).toContain(', in this model, on Olumi’s reading of ‘members’, if your condition ‘The council must let us use the hall’ is met, ‘promo effect’ follows Olumi’s provisional conversion of Olumi’s own estimated range, 3 member / month / promotion to 7 member / month / promotion, into a bell-shaped spread and ‘joins’ follows Olumi’s assumed relationship.');
       expect(face).not.toContain('on your figures');
       // The exact 0% names it too, before what fixes it.
-      expect(faceOf(m, HALL, 'carry_on')).toContain(', in this model, on Olumi’s reading of ‘members’ (not yet confirmed), if your condition ‘The council must let us use the hall’ is met, ‘promo effect’');
+      expect(faceOf(m, HALL, 'carry_on')).toContain(', in this model, on Olumi’s reading of ‘members’, if your condition ‘The council must let us use the hall’ is met, ‘promo effect’');
     });
 
     it('a situation-wide assumption (concerns []) is named: it bears on every goal', () => {
@@ -1125,10 +1125,27 @@ describe('the model-program turn on the real core route', () => {
       };
       const terms = (t: { author?: 'person' | 'olumi'; quote?: string | null; approval?: 'proposed' | 'approved' }) =>
         (r: CanonicalModelT['relations'][number]) => (r.form === 'effect' ? { ...r, terms: r.terms.map((x) => ({ ...x, ...t })) } : r);
-      for (const face of [joins((r) => ({ ...r, approval: 'proposed' })), joins(terms({ author: 'olumi', quote: null })), joins(terms({ approval: 'proposed' }))]) {
+      for (const face of [joins((r) => ({ ...r, approval: 'proposed' })), joins(terms({ approval: 'proposed' }))]) {
         expect(face).toContain(', in this model, on Olumi’s reading of ‘joins’ (not yet confirmed): in every simulated draw');
         expect(face).not.toContain('on your figures');
       }
+      // Olumi's link, accepted: Olumi's reading, never theirs, and not "not yet confirmed".
+      expect(joins(terms({ author: 'olumi', quote: null }))).toContain(', in this model, on Olumi’s reading of ‘joins’: in every simulated draw');
+    });
+
+    it('DL #3738: an accepted Olumi stock is Olumi\'s reading with no "(not yet confirmed)"; unaccepted, it keeps it; mixed, each says its own', () => {
+      const stock = (approval: 'proposed' | 'approved', also: (m: CanonicalModelT) => void = () => {}) => {
+        const m = approved(allTheirs());
+        m.relations = m.relations.map((r) => (r.id === 'members_rel' ? { ...r, author: 'olumi', quote: null, approval } : r));
+        also(m);
+        return faceOf(m, OWN);
+      };
+      const accepted = stock('approved');
+      expect(accepted).toContain(', in this model, on Olumi’s reading of ‘members’: in every simulated draw');
+      expect(accepted).not.toMatch(/not yet confirmed|on your figures/);
+      expect(stock('proposed')).toContain(', in this model, on Olumi’s reading of ‘members’ (not yet confirmed): in every simulated draw');
+      const mixed = stock('approved', (m) => { m.quantities = m.quantities.map((x) => (x.id === 'members_now' ? { ...x, approval: 'proposed' } : x)); });
+      expect(mixed).toContain(', in this model, on Olumi’s reading of ‘members now’ (not yet confirmed) and ‘members’: in every simulated draw');
     });
 
     it('buddy #3738: their premise not found in their words, or not yet accepted, is never "your" and never Olumi\'s', () => {
