@@ -92,8 +92,10 @@ export async function draftCanonicalModel(brief: string | readonly InputMessage[
     try { json = JSON.parse(out.text); } catch { attempts.push({ attempt: a, errors: null, failed: 'output is not JSON', status: out.status, usage: out.usage, ms }); break; }
     const parsed = CanonicalModel.safeParse(json);
     const read = parsed.success && opts.interpret === true ? normalise(parsed.data) : undefined;
-    // A first draft (the brief alone) must give every ask its question; an update keeps the saved model's asks as they are.
-    const compileOpts = { sourceText, asksNeedQuestions: typeof brief === 'string' };
+    // A first draft (the brief alone) must give every ask its question, but its last attempt falls back to the base behaviour
+    // (an ask with no question is a typed blocker), so a draft is never refused whole for one; an update keeps the saved
+    // model's asks as they are.
+    const compileOpts = { sourceText, asksNeedQuestions: typeof brief === 'string' && a < MAX_REPAIRS };
     const result = read !== undefined ? compile(read, compileOpts) : compileJson(json, compileOpts);
     if (parsed.success) { model = read ?? parsed.data; compiled = result; }
     attempts.push({ attempt: a, errors: result.errors, status: out.status, usage: out.usage, ms });

@@ -36,6 +36,7 @@ import {
 import type { ExecutableModel, Quantity as XQuantity, Goal as XGoal, Limit as XLimit, Option as XOption, Risk as XRisk, Dist, Domain, Withheld, FixedAuthor } from './executable.js';
 import { parseUnit, multiply, divide, sameDims, isDimensionless, showUnit, perPeriod, isCalendarConversion, TIME_DIMS, DIMENSIONLESS_UNIT, type Unit } from './units.js';
 import { rangeLaw, type RangeReading, type RangeDist } from './simulate/range-law.js';
+import { withUsedDirections } from './links.js';
 
 /** The law's reading of an uncertain range, or HELD when the law has no room for it (its domain leaves no probability). */
 export type LawReading = Extract<RangeReading, { kind: 'normal' }> | { kind: 'held'; reason: string };
@@ -196,7 +197,8 @@ export function normalise(model: CanonicalModelT): CanonicalModelT {
   // to give: always asked of them, never Olumi's fixed figure nor read as theirs (Codex r4–r7 #3709).
   const asked = named.quantities.map((q) => (q.author === 'structure' && q.kind === 'fact' && q.status === 'known' && has(q.value) && !has(q.low) && !has(q.high)
     && !isStructuralConstant(named, q) ? structureAsked(q) : q));
-  return asked.some((q, i) => q !== named.quantities[i]) ? { ...named, quantities: asked } : named;
+  // A direction the model does not use is not kept, so the card never states a sign the model does not use (issue 40).
+  return withUsedDirections(asked.some((q, i) => q !== named.quantities[i]) ? { ...named, quantities: asked } : named);
 }
 
 /**

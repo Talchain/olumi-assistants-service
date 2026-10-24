@@ -20,6 +20,7 @@
 import { ProposalChangeSchema, type ProposalChange } from '../agent-lane/proposal.js';
 import { CanonicalModel, type CanonicalModelT } from '../model-program/canonical.js';
 import { norm } from '../model-program/compile.js';
+import { linkTargets, withUsedDirections } from '../model-program/links.js';
 import { isExactCalendarReexpression, parseUnit, sameDims } from '../model-program/units.js';
 
 type Rec = Record<string, unknown>;
@@ -43,8 +44,8 @@ const by = (group: string, ...paths: string[]) => Object.fromEntries(paths.map((
 const MEASURE = ['measure.quantity', 'measure.per', 'measure.cmp'];
 const WHEN = ['measure.aggregation', 'measure.window.start', 'measure.window.periods', 'measure.window.origin_event', 'measure.window.origin_offset'];
 const OWN = { ...by('author', 'author'), ...by('words', 'party', 'quote') };
-const GROUPS: Readonly<Record<Family, Readonly<Record<string, string>>>> = {
-  quantities: { ...by('name', 'label'), ...by('figure', 'value', 'low', 'high', 'range_kind', 'unit'), ...by('kind', 'kind'), ...by('status', 'status'),
+export const GROUPS: Readonly<Record<Family, Readonly<Record<string, string>>>> = {
+  quantities: { ...by('name', 'label'), ...by('figure', 'value', 'low', 'high', 'range_kind', 'unit', 'direction'), ...by('kind', 'kind'), ...by('status', 'status'),
     ...by('question', 'question'), ...by('basis', 'basis'), ...OWN },
   relations: { ...by('name', 'defines'), ...by('how', 'form', 'op', 'base', 'start', 'parts.*.id', 'parts.*.sign', 'parts.*.power', 'terms.*.driver', 'terms.*.coefficient', 'inflows.*', 'outflows.*'),
     ...by('link#', ...WORDS.map((k) => `terms.*.${k}`)), ...OWN },
@@ -147,11 +148,14 @@ const idsOf = (m: CanonicalModelT, f: Family): string[] => (m[f] as readonly { i
  * explicitly; `words`: every word of theirs this change may quote (their earlier words and `fresh`, this change's own);
  * `approver`: who approves the card (its items' author_id), null for a guest.
  */
-export function validatePostimage(base: CanonicalModelT, raw: unknown,
+export function validatePostimage(saved: CanonicalModelT, raw: unknown,
   opts: { readonly removals: readonly string[]; readonly words: readonly string[]; readonly fresh: readonly string[]; readonly approver?: string | null }): PostimageResult {
   const parsed = CanonicalModel.safeParse(raw);
   if (!parsed.success) return { ok: false, code: 'schema', reason: 'The proposed model is not in the model format.', ids: [] };
-  const post = parsed.data;
+  // The host's reading of directions (`links.ts`) on BOTH sides first, so only the change's own fields are compared: a
+  // direction the model does not use, cleared by the host, never shows as a change nor refuses one (issue 40).
+  const base = withUsedDirections(saved);
+  const post = withUsedDirections(parsed.data);
   const refuse = (code: Exclude<PostimageResult, { ok: true }>['code'], ids: readonly string[], reason: string, check?: 'their_words' | 'this_turn'): PostimageResult =>
     ({ ok: false, code, reason, ids, ...(check ? { check } : {}) });
   // Preservation by (family, id), before anything is compared.
@@ -288,6 +292,8 @@ export function readingOf(model: CanonicalModelT, opts: { readonly words: readon
 /** Each value of a field said in plain words: the one phrase table (never an operator or a code on the card). */
 const CMP_WORDS: Record<string, string> = { '>=': 'at least', '<=': 'at most', '>': 'more than', '<': 'less than' };
 const RANGE_WORDS: Record<string, string> = { bounds: 'firm ends', plausible: 'a plausible range' };
+/** A link's direction, before the name of what it moves (Paul 24 Oct, "Arrow + words": "↓ lowers Churn"). */
+const DIRECTION_WORDS: Record<string, string> = { raises: '↑ raises', lowers: '↓ lowers' };
 const WHO_WORDS: Record<string, string> = { person: 'yours', olumi: 'Olumi’s', structure: 'a fixed part of the model’s structure' };
 const AGG_WORDS: Record<string, string> = { end: 'by the end of', sum: 'in total over', mean: 'on average over', every: 'in every period of', max: 'at its highest over', min: 'at its lowest over' };
 const AGG_ALONE: Record<string, string> = { end: '', sum: 'in total', mean: 'on average', every: 'in every period', max: 'at its highest', min: 'at its lowest' };
@@ -320,16 +326,19 @@ function wordsIn(m: CanonicalModelT) {
   const start = (t: number | string) => (typeof t === 'number' ? (t === 0 ? 'from the start' : `after ${t} ${m.period}s`) : `from ${timed(t)}`);
   const list = (ids: unknown) => (Array.isArray(ids) ? ids.map((id) => `"${named(String(id))}"`) : []);
   const and = (xs: readonly string[]) => (xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
-  /** A figure from its value, range, reading and unit, all together. */
+  /** A figure from its value, range, reading and unit, all together, and a link's direction on what it moves (issue 40). */
   const figure = (r: Rec) => {
     const u = unitOf(r['unit']), at = (k: string) => (typeof r[k] === 'number' ? `${n(r[k] as number)}${u}` : null);
     const bare = (k: string) => n(r[k] as number);
+    // What it moves is said by name; a direction on a size no link has is never said (the validator then refuses its change).
+    const moves = typeof r['direction'] === 'string' && typeof r['id'] === 'string' ? linkTargets(m, r['id']) : [];
+    const sign = (said: string) => [said, ...(moves.length > 0 ? [`${of(DIRECTION_WORDS, r['direction'])} ${and(moves.map(label))}`] : [])].filter((x) => x !== '').join(', ');
     const reading = typeof r['range_kind'] === 'string' ? ` (${of(RANGE_WORDS, r['range_kind'])})` : '';
-    if (at('low') !== null && at('high') !== null) return `from ${bare('low')} to ${at('high')}${at('value') !== null ? `, most likely ${bare('value')}` : ''}${reading}`;
+    if (at('low') !== null && at('high') !== null) return sign(`from ${bare('low')} to ${at('high')}${at('value') !== null ? `, most likely ${bare('value')}` : ''}${reading}`);
     const ends = [...(at('low') !== null ? [`no lower than ${at('low')}`] : []), ...(at('high') !== null ? [`no higher than ${at('high')}`] : [])].join(', ');
     // A worked-out figure has no figure of its own to give: only its unit.
     const none = r['status'] === 'derived' ? (u === '' ? '' : `in${u}`) : `no figure yet${u === '' ? '' : ` (in${u})`}`;
-    return [at('value') ?? none, ...(ends === '' ? [] : [ends])].filter((x) => x !== '').join(', ') + reading;
+    return sign([at('value') ?? none, ...(ends === '' ? [] : [ends])].filter((x) => x !== '').join(', ') + reading);
   };
   /** Whose words an item is in: the person's own, or someone they report, by name. */
   const words = (r: Rec) => (typeof r['quote'] === 'string' ? `in ${typeof r['party'] === 'string' ? `${r['party']}’s` : 'your'} words "${r['quote']}"`

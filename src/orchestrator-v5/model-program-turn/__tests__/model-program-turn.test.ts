@@ -9,10 +9,11 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod-v4';
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha256 } from '../../context/graph-hash.js';
 import { stableStringify } from '../../../orchestrator/context/stable-stringify.js';
-import { APPROXIMATE_FIGURE, withDeclaredTiming, type CanonicalModelT, type CanonicalQuantityT } from '../../model-program/canonical.js';
+import { APPROXIMATE_FIGURE, CanonicalModel, withDeclaredTiming, type CanonicalModelT, type CanonicalQuantityT } from '../../model-program/canonical.js';
 import { compile, isStructuralConstant, normalise } from '../../model-program/compile.js';
 import { CORE_ALIGNED_INSTRUCTIONS } from '../../core-route/instructions.js';
 import { project } from '../../model-program/project.js';
@@ -21,7 +22,7 @@ import { CANONICAL_JSON_SCHEMA, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX, UPDATE_PRE
 import { evaluateCanonical, seedOf, RUN_DRAWS } from '../evaluate.js';
 import { programReadOf, reopenProgram, savedProgramOf, sourceTextOf } from '../program-store.js';
 import { applyCanvasFigure, applyProgramChange, ProgramChangeParams, proposeProgramChange, readProgramContext, runProgram } from '../program-tools.js';
-import { readingOf, validatePostimage } from '../postimage.js';
+import { GROUPS, readingOf, validatePostimage } from '../postimage.js';
 import { proposalPendingAction } from '../../agent-lane/durable-proposal.js';
 import { agentProposalOf, proposalFieldsWire, proposalRecord } from '../../agent-lane/proposal-object/record.js';
 import { ProposalChangeSchema, ProposalStore, type ProposalChange } from '../../agent-lane/proposal.js';
@@ -102,6 +103,14 @@ const turn = (payload: Json, headers: Record<string, string> = {}) => app.inject
 /** The drafter's WHOLE updated model for a change: the saved one with `edit` applied (what a faithful update returns). */
 const savedWith = (edit: (m: CanonicalModelT) => void): string => { const m = JSON.parse(JSON.stringify(persisted!.living_model.canonical)) as CanonicalModelT; edit(m); return JSON.stringify(m); };
 const setQ = (m: CanonicalModelT, id: string, f: Partial<CanonicalQuantityT>) => { m.quantities = m.quantities.map((x) => (x.id === id ? { ...x, ...f } : x)); };
+const LOST_BASIS = 'Nobody has said how much baking time a new oven loses while the staff learn it.';
+/** Issue 40: the bakery with Olumi's link of unknown size, stated to lower sales, and any more of Olumi's links on the oven. */
+const withOlumiLinks = (m: CanonicalModelT, ...more: CanonicalQuantityT[]): CanonicalModelT => {
+  const sizes = [q('lost_bake_time', 'loaf/week/oven', { kind: 'coefficient', status: 'unknown', author: 'olumi', direction: 'lowers', basis: LOST_BASIS }), ...more];
+  m.quantities.push(...sizes);
+  m.relations = m.relations.map((r) => (r.form === 'effect' ? { ...r, terms: [...r.terms, ...sizes.map((x) => ({ driver: 'ovens_added', coefficient: x.id, author: 'olumi' as const, quote: null, ...at }))] } : r));
+  return m;
+};
 
 describe('the model-program turn on the real core route', () => {
   beforeAll(async () => {
@@ -320,6 +329,136 @@ describe('the model-program turn on the real core route', () => {
     expect(after('sell_through')).not.toContain('1/oven');
     expect(after('base_sales')).toContain('300 loaf/week');
     expect(after('budget')).toContain('3,000 GBP');
+  });
+
+  it('issue 40: a first draft with an Olumi link of unknown size and a stated direction shows its reading card, the direction said as an arrow and words on what it moves', async () => {
+    const m = withOlumiLinks(bakery());
+    replies = [JSON.stringify(m)];
+    const r = (await turn({ message: BRIEF })).json();
+    expect(r.model_program.saved).toBe(true);
+    expect(r.cards).toHaveLength(1);
+    expect(r.cards[0].reading).toBe(true);
+    expect(r.cards[0].changes.find((c: Json) => c.id === 'lost_bake_time')).toMatchObject({ action: 'add', author: 'olumi',
+      after: `no figure yet (in loaf/week/oven), ↓ lowers sales, a rate, not known yet, based on "${LOST_BASIS}"` });
+    // Contrast: the same link stated as raising reads so; with no direction, nothing about one is said.
+    const said = (d: CanonicalQuantityT['direction']) => { const x = JSON.parse(JSON.stringify(m)) as CanonicalModelT; setQ(x, 'lost_bake_time', { direction: d });
+      const v = readingOf(x, { words: [BRIEF], approver: null }); return v.ok ? v.changes.find((c) => c.id === 'lost_bake_time')!.after : v.code; };
+    expect(said('raises')).toBe(`no figure yet (in loaf/week/oven), ↑ raises sales, a rate, not known yet, based on "${LOST_BASIS}"`);
+    expect(said(null)).toBe(`no figure yet (in loaf/week/oven), a rate, not known yet, based on "${LOST_BASIS}"`);
+  });
+
+  it('issue 40 (Codex #3742): a direction on a per-unit rate written as a two-part product (one size times one driver) is kept and worded, unknown or across zero, as on an effect\'s link; times another size it is no link, and its direction is cleared', () => {
+    const BASIS = 'Nobody has said how many loaves a new oven loses.';
+    /** The draft path (read as `normalise` reads it, then the reading card): the rate's direction kept, and its card words. */
+    const rated = (f: Partial<CanonicalQuantityT>, driver = 'ovens_added') => {
+      const m = bakery();
+      m.quantities.push(q('loss_per_oven', 'loaf/week/oven', { kind: 'coefficient', author: 'olumi', ...f }), q('extra_loss', 'loaf/week', { kind: 'derived', status: 'derived', author: 'olumi' }));
+      m.relations.push({ form: 'definition', id: 'loss_rel', defines: 'extra_loss', op: 'product', parts: [{ id: driver, power: 1 }, { id: 'loss_per_oven', power: 1 }], author: 'olumi', quote: null, ...at });
+      const read = normalise(m);
+      const v = readingOf(read, { words: [BRIEF], approver: null });
+      return { direction: read.quantities.find((x) => x.id === 'loss_per_oven')!.direction, after: v.ok ? v.changes.find((c) => c.id === 'loss_per_oven')!.after : v.code };
+    };
+    expect(rated({ status: 'unknown', basis: BASIS, direction: 'lowers' }))
+      .toEqual({ direction: 'lowers', after: `no figure yet (in loaf/week/oven), ↓ lowers extra loss, a rate, not known yet, based on "${BASIS}"` });
+    expect(rated({ status: 'estimated', low: -20, high: 10, range_kind: 'plausible', basis: BASIS, direction: 'raises' }))
+      .toEqual({ direction: 'raises', after: `from -20 to 10 loaf/week/oven (a plausible range), ↑ raises extra loss, a rate, an estimate, based on "${BASIS}"` });
+    // Contrast: times another size ("sell through", a coefficient) it is no per-unit rate and no link: cleared, never worded.
+    expect(rated({ status: 'unknown', basis: BASIS, direction: 'lowers' }, 'sell_through'))
+      .toEqual({ direction: null, after: `no figure yet (in loaf/week/oven), a rate, not known yet, based on "${BASIS}"` });
+  });
+
+  it('issue 40: a direction the host clears (on a sized link, or on a figure no link has) never shows as a change nor refuses one: a saved program holding them takes an unrelated update; the AI\'s change to a direction the model uses still shows', async () => {
+    const m = withOlumiLinks(bakery(), q('oven_delay', 'loaf/week/oven', { kind: 'coefficient', status: 'estimated', author: 'olumi', value: -10, low: -20, high: -5, range_kind: 'plausible',
+      basis: 'A new oven takes a few weeks to bed in.' }));
+    replies = [JSON.stringify(m)];
+    expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
+    // As a program saved before the host cleared them holds them: a direction on a sized link, and one on a figure no link has.
+    const saved = persisted!.living_model.canonical as CanonicalModelT;
+    setQ(saved, 'oven_delay', { direction: 'raises' });
+    setQ(saved, 'oven_price', { direction: 'lowers' });
+    const deps = { dispatch, proposals: new ProposalStore() };
+    const words = 'We now bake 320 loaves a week, our baker says.';
+    const propose = async (edit: (d: CanonicalModelT) => void) => {
+      replies = [savedWith(edit)];
+      return await proposeProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words },
+        { public_label: 'Base sales', basis: 'their words', request: 'Base sales are now 320 a week.', remove: [] }) as Json;
+    };
+    const sales = (d: CanonicalModelT) => setQ(d, 'base_sales', { value: 320, quote: 'We now bake 320 loaves a week' });
+    const p = await propose(sales);
+    expect(p.status, JSON.stringify(p)).toBe('ok');
+    expect(p.data.changes).toEqual([{ id: 'base_sales', kind: 'quantity', action: 'change', label: 'base sales', before: '300 loaf/week, in your words "We bake 300 loaves a week"',
+      after: '320 loaf/week, in your words "We now bake 320 loaves a week"', author: 'person' }]);
+    // Contrast: the AI's own change to a direction the model uses (a linked size with no figure) is on the card.
+    const flipped = await propose((d) => { sales(d); setQ(d, 'lost_bake_time', { direction: 'raises' }); });
+    expect(flipped.status, JSON.stringify(flipped)).toBe('ok');
+    expect(flipped.data.changes.map((c: Json) => c.id)).toEqual(['base_sales', 'lost_bake_time']);
+    expect(flipped.data.changes[1]).toMatchObject({ action: 'change', before: 'no figure yet (in loaf/week/oven), ↓ lowers sales', after: 'no figure yet (in loaf/week/oven), ↑ raises sales' });
+  });
+
+  it('issue 40: a figure typed on the canvas is theirs: the direction stated for the size it replaces is not kept, and the card shows it go', async () => {
+    replies = [JSON.stringify(withOlumiLinks(bakery()))];
+    expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
+    // A saved program's stray direction (on a figure no link has) is the host's to clear, on both sides: never on this card.
+    setQ(persisted!.living_model.canonical as CanonicalModelT, 'oven_price', { direction: 'lowers' });
+    // A range across zero with no most likely figure: the one figure a stated direction would still decide, so only the edit clears it.
+    const r = await applyCanvasFigure({ dispatch }, SCENARIO, { target: { quantity_id: 'lost_bake_time' }, value: null, low: -5, high: 10, operation_key: randomUUID() });
+    expect(r.status, JSON.stringify(r)).toBe('saved');
+    expect(r.changes!.map((c) => c.id)).toEqual(['lost_bake_time']);
+    const change = r.changes!.find((c) => c.id === 'lost_bake_time')!;
+    expect(change.before).toContain('no figure yet (in loaf/week/oven), ↓ lowers sales');
+    expect(change.after).toMatch(/^from -5 to 10 loaf\/week\/oven/);
+    expect(change.after).not.toMatch(/[↑↓]/u);
+    expect((persisted!.living_model.canonical as CanonicalModelT).quantities.find((x) => x.id === 'lost_bake_time')).toMatchObject({ low: -5, high: 10, author: 'person', direction: null });
+  });
+
+  it('issue 40 (the system): every field of the model and of every canonical record family is said on the card, or is a named exemption; a new field with neither fails here', () => {
+    /** The fields the card never compares, each with why. */
+    const EXEMPT: Record<string, string> = {
+      id: 'the change\'s own id: the card entry is keyed by it (postimage `bare`)',
+      approval: 'host-owned, at any depth (postimage HOST_FIELDS)',
+      author_id: 'host-owned, at any depth (postimage HOST_FIELDS)',
+    };
+    const exemptAs = (path: string) => (path === 'id' ? 'id' : ['approval', 'author_id'].find((k) => path === k || path.endsWith(`.${k}`)));
+    const defOf = (s: z.ZodType) => s._zod.def as Record<string, any>;
+    /** Every field of a schema, as the card's diff names it: records key by key, a list's entries as `*`. */
+    const fields = (s: z.ZodType, path = ''): string[] => {
+      const def = defOf(s);
+      const at = (k: string) => (path === '' ? k : `${path}.${k}`);
+      switch (def.type) {
+        case 'object': return Object.entries(def.shape as Record<string, z.ZodType>).flatMap(([k, v]) => fields(v, at(k)));
+        case 'array': return fields(def.element, at('*'));
+        case 'nullable': case 'optional': case 'default': return fields(def.innerType, path);
+        case 'union': return [...new Set((def.options as z.ZodType[]).flatMap((o) => fields(o, path)))];
+        case 'string': case 'number': case 'boolean': case 'enum': case 'literal': case 'null': return [path];
+        default: throw new Error(`the field walker does not know a ${String(def.type)} at ${path || 'the top'}`);
+      }
+    };
+    const shape = CanonicalModel.shape as Record<string, z.ZodType>;
+    const families = Object.keys(shape).filter((k) => defOf(shape[k]!).type === 'array' && k !== 'history');
+    expect(families.sort()).toEqual(Object.keys(GROUPS).sort());
+    const unsaid = (family: string, schema: z.ZodType) => fields(schema).filter((p) => GROUPS[family as keyof typeof GROUPS][p] === undefined && exemptAs(p) === undefined);
+    const element = (family: string): z.ZodType => defOf(shape[family]!).element;
+    expect(families.flatMap((f) => unsaid(f, element(f)).map((p) => `${f}.${p}`))).toEqual([]);
+    // Positive controls: the walker sees nested and listed fields, at magnitude, and every exemption is used.
+    const all = families.flatMap((f) => fields(element(f)).map((p) => `${f}.${p}`));
+    expect(all.length).toBeGreaterThan(150);
+    expect(all).toEqual(expect.arrayContaining(['quantities.direction', 'relations.terms.*.coefficient', 'relations.terms.*.approval', 'goals.measure.window.origin_offset', 'options.sets.*.starts_after_periods', 'claims.concerns.*']));
+    expect(Object.keys(EXEMPT).filter((k) => !all.some((p) => exemptAs(p.slice(p.indexOf('.') + 1)) === k))).toEqual([]);
+    // Contrast: a field the card has no words for is caught.
+    expect(unsaid('quantities', (element('quantities') as z.ZodObject).extend({ new_field: z.string() }))).toEqual(['new_field']);
+    // The model's own fields (Codex #3742): each is a record family above, one the card says as its own entry, or exempt.
+    const ROOT_SAID = ['question', 'period'];
+    const ROOT_EXEMPT: Record<string, string> = { version: 'one fixed value: the format allows no other', history: 'host-owned: appended by the host, never compared' };
+    const unsaidRoot = (keys: readonly string[]) => keys.filter((k) => !families.includes(k) && !ROOT_SAID.includes(k) && ROOT_EXEMPT[k] === undefined);
+    expect(unsaidRoot(Object.keys(shape))).toEqual([]);
+    expect(Object.keys(ROOT_EXEMPT).filter((k) => !(k in shape))).toEqual([]);
+    // Each one the card says is said: changed alone, it is the card's one entry.
+    for (const [k, v] of [['question', 'Should the bakery buy two more ovens?'], ['period', 'month']] as const) {
+      const r = validatePostimage(bakery(), { ...bakery(), [k]: v }, { removals: [], words: [BRIEF], fresh: [] });
+      expect(r.ok ? r.changes.map((c) => [c.id, c.after]) : r.code).toEqual([[k, v]]);
+    }
+    // Contrast: a field of the model's own with neither is caught.
+    expect(unsaidRoot(Object.keys(CanonicalModel.extend({ new_unlisted_field: z.string() }).shape))).toEqual(['new_unlisted_field']);
   });
 
   it('step 2 "Check what I understood" (2–5): after the first save ONE held card reads the draft back, every item an add, goals first and figures last, a left-out item by its why; its approve is "Yes, that’s what I meant"; its model is the draft accepted, with a new Run of the same numbers; it is carried on reload and saved by its approve', async () => {
@@ -996,6 +1135,21 @@ describe('the model-program turn on the real core route', () => {
     expect((read.data.blockers as Json[]).find((b) => b.id === 'current_output')).toMatchObject({ code: 'asked' });
     expect(JSON.stringify(read.data)).not.toContain('What is "current output"?');
     expect(JSON.stringify(read.data.model)).not.toMatch(/"id":"current_output"[^}]*"author":"structure"/);
+  });
+
+  it('issue 40 (marketing-r1): a first draft whose repairs keep a structural 0 as a limit\'s floor is saved on the last attempt, the floor their ask, never refused whole', async () => {
+    const m = bakery();
+    m.quantities.push(q('spend_floor', 'GBP', { author: 'structure', value: 0, basis: 'Nothing spent yet.' }));
+    m.limits.push({ ...m.limits[0]!, id: 'floor', label: 'Spend no less than the floor', measure: { ...m.limits[0]!.measure!, cmp: '>=', bound: 'spend_floor' } });
+    // The drafter follows each repair's hint (structure, known, one exact figure), so every attempt returns the same draft.
+    replies = [JSON.stringify(m), JSON.stringify(m), JSON.stringify(m)];
+    const r = (await turn({ message: BRIEF })).json();
+    const attempts = (r.model_program.draft.attempts as Json[]).map((a) => (a.errors as Json[]).map((e) => [e.code, e.items]));
+    // The earlier attempts still need its question; the last falls back to the base behaviour (an ask is a typed blocker).
+    expect(attempts).toEqual([[['asked_no_question', ['spend_floor']]], [['asked_no_question', ['spend_floor']]], []]);
+    expect(sent).toHaveLength(3);
+    expect(r.model_program.saved).toBe(true);
+    expect(persisted!.living_model.canonical.quantities.find((x: Json) => x.id === 'spend_floor')).toMatchObject({ author: 'person', status: 'asked', value: null, question: null });
   });
 
   it('several goals: each goal\'s own chance and the joint ride the Run\'s goal_chance unchanged through read, propose, apply and run', async () => {
