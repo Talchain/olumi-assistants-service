@@ -1568,6 +1568,40 @@ describe('the model-program turn on the real core route', () => {
     setQ(fixed, 'oven_price', { status: 'known', value: 2500, question: null, quote: 'The second oven costs £2,500' });
     const f = evaluateCanonical(fixed, { sourceText: `${BRIEF} The second oven costs £2,500.`, seed: 7 }).view as Json;
     expect(f.goal_chance.chance_words).toContain('‘spend’ is at most £3,000');
+
+    // The card says it the same way (Codex r1 #3722): the reading card and a change list name a moved bound or target; its
+    // figure stays on its own item and in the option's own setting. Unmoved, the card keeps the figure.
+    const said = (v: ReturnType<typeof readingOf>, id: string) => (v.ok ? v.changes.find((c) => c.id === id)?.after ?? '' : JSON.stringify(v));
+    const changeOf = (base: CanonicalModelT, edit: (d: CanonicalModelT) => void, w: string[]) => {
+      const d = JSON.parse(JSON.stringify(base)) as CanonicalModelT; edit(d);
+      const v = validatePostimage(base, d, { removals: [], words: w, fresh: w });
+      return v.ok ? v.changes.map((c) => [c.id, c.before, c.after]) : v;
+    };
+    const budgetWords = [`${BRIEF} The second oven costs £2,500. With a second oven our budget is £2,000.`];
+    const read = readingOf(m, { words: budgetWords, approver: null });
+    expect(said(read, 'within_budget')).toContain('"spend" at most "budget",');
+    expect(said(read, 'within_budget')).not.toMatch(/"budget" [0-9]|GBP/); // their own words ("We have £3,000 to spend") stay
+    expect(said(read, 'budget')).toContain('3,000 GBP');
+    expect(said(read, 'second_oven')).toContain('sets "budget" 3,000 GBP to "reduced budget" 2,000 GBP');
+    expect(changeOf(m, (d) => { d.limits[0]!.measure!.cmp = '<'; }, budgetWords)).toEqual([['within_budget', '"spend" at most "budget"', '"spend" less than "budget"']]);
+    expect(said(readingOf(fixed, { words: [`${BRIEF} The second oven costs £2,500.`], approver: null }), 'within_budget')).toContain('"spend" at most "budget" 3,000 GBP');
+    // A goal's target an option moves (keeping one oven aims for 350, not 380): the results and the card name it.
+    const target = bakery();
+    setQ(target, 'oven_price', { status: 'known', value: 2500, question: null, quote: 'The second oven costs £2,500' });
+    target.quantities.push(q('lower_target', 'loaf/week', { value: 350, quote: 'With one oven we aim for 350' }));
+    target.options[1]!.sets.push({ ...target.options[0]!.sets[0]!, quantity: 'sales_target', to: 'lower_target', quote: 'With one oven we aim for 350' });
+    const targetWords = [`${BRIEF} The second oven costs £2,500. With one oven we aim for 350.`];
+    const t = evaluateCanonical(target, { sourceText: targetWords[0], seed: 7 });
+    expect(t.compiled.errors).toEqual([]);
+    for (const o of (t.view as Json).options as Json[]) {
+      expect(o.cell.face, o.cell.face).toContain('‘sales’ being at least ‘sales target’');
+      expect(o.cell.face, o.cell.face).not.toMatch(/380 loaf|350 loaf/);
+    }
+    const targetRead = readingOf(target, { words: targetWords, approver: null });
+    expect(said(targetRead, 'more_loaves')).toContain('"sales" at least "sales target",');
+    expect(said(targetRead, 'more_loaves')).not.toContain('"sales target" 380');
+    expect(said(targetRead, 'sales_target')).toContain('380 loaf/week');
+    expect(changeOf(target, (d) => { d.goals[0]!.measure!.cmp = '>'; }, targetWords)).toEqual([['more_loaves', '"sales" at least "sales target"', '"sales" more than "sales target"']]);
   });
 
   it('DL 23 Oct (units on cards): every card that can hold a figure carries its quantity\'s own unit, a question\'s too; a worked-out card none', () => {
