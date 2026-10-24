@@ -152,7 +152,9 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     // Targeted answers (DL 24 Oct): an answer in answers on its item's id; anything else in words, with the ids to remove, which
     // Olumi's drafter writes; no op set.
     for (const gone of ['set_quantity', 'set_range_kind', 'set_goal_target', 'add_option', 'rename_option', 'define_goal_measure', 'ops']) expect(d.propose_change, gone).not.toMatch(new RegExp(`\\b${gone}\\b`));
-    expect(d.propose_change).toContain('An answer to a listed question (a blocker, or an asked item\'s question) goes in answers, on that existing item\'s id from read_canonical_context:');
+    expect(d.propose_change).toContain('An answer to a listed question (a blocker, or an asked item\'s question) goes in answers, on that existing item\'s id from read_canonical_context, saying whose it is: '
+      + 'author person, status known, with their figure and their exact words this turn as quote;');
+    expect(d.propose_change).toContain('author olumi, status estimated, for Olumi\'s estimate of a size, with low, high, range_kind and basis and no quote.');
     expect(d.propose_change).toContain('A range gives range_kind bounds or plausible only when their words say firm or rough, null otherwise;');
     expect(d.propose_change).toContain('Anything else (a new item or link, a rename, a removal) goes in request, in plain words with their exact words for every figure of theirs, with remove the ids of anything they asked to remove ([] for none); Olumi\u2019s drafter writes it.');
     expect(d.propose_change).toContain('The card shows every change, before and after.');

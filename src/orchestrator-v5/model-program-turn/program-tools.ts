@@ -23,7 +23,7 @@ import { isNoModelYet, isSavedRead, readSaved } from '../path-b/tools/context-to
 import { ok, refused, unavailable, type ToolOutcome } from '../path-b/tools/outcome.js';
 import { CanonicalQuantity, type CanonicalModelT, type CanonicalQuantityT } from '../model-program/canonical.js';
 import { ledgeredResponsesCall, proposePostimage } from './draft.js';
-import { validatePostimage } from './postimage.js';
+import { validatePostimage, verbatimIn } from './postimage.js';
 import { isSaved, postimageOf, programOperationId, savePostimage, withNewRun } from './program-save.js';
 import { livingModelOf, MODEL_PROGRAM, programReadOf, reopenProgram, savedProgramOf, unreadableWords, type SavedProgram } from './program-store.js';
 import { shownRun, type StoredRun } from './run-receipt.js';
@@ -41,11 +41,12 @@ export const PROGRAM_TURN_GUIDANCE = 'This scenario\'s model is a model program:
 
 /**
  * AN ANSWER to a listed question (DL 24 Oct): the figure it answers, declared by the AI with the canonical model's own fields,
- * and its status, from which the host sets whose it is: known, their figure in their exact words; estimated, Olumi's
- * estimate with its range; unknown, their "I don't know", quoted, the basis saying what would size it (never asked again).
+ * its status and whose it is, as the AI declares them and the host checks literally (it never assigns them): known, their
+ * figure in their exact words; unknown, their "I don't know", quoted, the basis saying what would size it (never asked again);
+ * estimated, Olumi's estimate with its range and basis, never their words.
  */
 const Answer = CanonicalQuantity.pick({ id: true, value: true, low: true, high: true, range_kind: true, party: true, quote: true, basis: true })
-  .extend({ status: z.enum(['known', 'estimated', 'unknown']) }).strict();
+  .extend({ status: z.enum(['known', 'estimated', 'unknown']), author: z.enum(['person', 'olumi']).describe('Whose answer it is: person, their words this turn; olumi, Olumi\'s estimate.') }).strict();
 type AnswerT = z.infer<typeof Answer>;
 export const ProgramChangeParams = z.object({
   public_label: z.string().describe('What the person is asked to approve, in plain words.'),
@@ -130,13 +131,21 @@ async function prepare(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs)
   const program = base.program;
   // A quote is the person's own words, from this conversation or what they gave before; never Olumi's paraphrase.
   const turnWords = [...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])].filter((w) => !program.person_words.includes(w));
-  const fresh = [...new Set(turnWords)];
-  const words = [...program.person_words, ...fresh];
+  const words = [...program.person_words, ...new Set(turnWords)];
+  // Their words THIS turn (Codex r1 #3727: an earlier message is never this turn's): the typed message, else the last verified.
+  const fresh = (ctx.user_turn_text ? [ctx.user_turn_text] : (ctx.verified_user_messages ?? []).slice(-1)).filter((w) => w.trim() !== '');
   // What the AI declares: answers, set on their items exactly (no redraft); else a structural change, which Olumi's drafter writes.
   const answers = args.answers ?? [];
   if (answers.length > 0 && (args.request.trim() !== '' || args.remove.length > 0)) {
     return refused('one_kind_per_card', 'Answers and a structural change go on separate cards: propose the answers now and the change after.');
   }
+  // Whose an answer is, as declared, checked literally (Codex r1 #3727): theirs only in their words THIS turn, whatever it
+  // changes (a basis-only answer too); Olumi's an estimate with its range and basis, never their words.
+  const stale = answers.filter((a) => a.author === 'person' && !verbatimIn(a.quote, fresh)).map((a) => a.id);
+  if (stale.length > 0) return refused('unverified_person_words', `${stale.join(', ')}: an answer of theirs quotes their words this turn, exactly.`, { ids: stale });
+  const misowned = answers.filter((a) => (a.author === 'olumi') !== (a.status === 'estimated')
+    || (a.author === 'olumi' && (a.low === null || a.high === null || !a.basis?.trim() || a.quote !== null || a.party !== null))).map((a) => a.id);
+  if (misowned.length > 0) return refused('not_an_answer', `${misowned.join(', ')}: their answer is known or unknown, in their words; Olumi's is estimated, with low, high and a basis, never their words.`, { ids: misowned });
   const draft = answers.length > 0 ? answered(program.canonical, answers) : await proposePostimage(program.canonical, words, args.request, args.remove, ledgeredResponsesCall());
   if (typeof draft === 'string') return refused('not_an_answer', draft);
   if (draft.model === null) return refused('no_model_back', 'Olumi could not write the updated model just now; nothing changed.');
@@ -160,7 +169,7 @@ export function figurePostimage(canonical: CanonicalModelT, filled: CanonicalQua
 }
 /**
  * Answers on their items through the S2 builder: only an existing item (an answer never creates one; PB 24 Oct, 13 misbinds),
- * its status as declared and whose it is from that (an "I don't know" is always theirs), the question cleared.
+ * its status and whose it is as declared (checked before), the question cleared.
  */
 function answered(canonical: CanonicalModelT, answers: readonly AnswerT[]): { readonly model: CanonicalModelT } | string {
   let model = canonical;
@@ -168,9 +177,9 @@ function answered(canonical: CanonicalModelT, answers: readonly AnswerT[]): { re
     const q = model.quantities.find((x) => x.id === a.id);
     if (q === undefined) return `${a.id} is not a figure in this model; a new item is a structural change.`;
     if (q.status === 'derived') return `"${q.label}" is worked out by its relation; answer one of its inputs.`;
-    const theirs = a.status !== 'estimated', none = a.status === 'unknown';
-    model = figurePostimage(model, { ...q, status: a.status, author: theirs ? 'person' : 'olumi', value: none ? null : a.value, low: none ? null : a.low,
-      high: none ? null : a.high, range_kind: none ? null : a.range_kind, party: theirs ? a.party : null, quote: theirs ? a.quote : null, basis: a.basis, question: null });
+    const none = a.status === 'unknown';
+    model = figurePostimage(model, { ...q, status: a.status, author: a.author, value: none ? null : a.value, low: none ? null : a.low,
+      high: none ? null : a.high, range_kind: none ? null : a.range_kind, party: a.party, quote: a.quote, basis: a.basis, question: null });
   }
   return { model };
 }

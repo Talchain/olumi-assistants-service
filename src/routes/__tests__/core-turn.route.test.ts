@@ -993,14 +993,17 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       // Targeted answers (DL 24 Oct): propose_change, as SENT, puts an answer in answers on its item's id and anything else in
       // request; its parameters carry answers, so the feature is not inert. Spelled here.
       const sentSha = (name: string) => createHash('sha256').update(String(sentTools[name]), 'utf8').digest('hex');
-      expect(String(sentTools.propose_change)).toContain('An answer to a listed question (a blocker, or an asked item\'s question) goes in answers, on that existing item\'s id from read_canonical_context: ');
+      expect(String(sentTools.propose_change)).toContain('An answer to a listed question (a blocker, or an asked item\'s question) goes in answers, on that existing item\'s id from read_canonical_context, saying whose it is: author person, ');
       expect(String(sentTools.propose_change)).toContain('Anything else (a new item or link, a rename, a removal) goes in request, in plain words with their exact words for every figure of theirs, '
         + 'with remove the ids of anything they asked to remove ([] for none); Olumi’s drafter writes it. Answers and such a change go on separate cards. ');
-      expect(sentSha('propose_change')).toBe('5b819719a191e98952a1808a4387a0d64df4c64d8861833039b3d9863eb4c83f');
+      expect(sentSha('propose_change')).toBe('105cd12e6493222cec7907fb474a01fc318d941eaa65723e0b4454a1c20e2ada');
       const sentParams = (calls[0]!.tools as Json[]).find((t) => t.name === 'propose_change')!.parameters as Json;
       expect(Object.keys(sentParams.properties)).toEqual(['public_label', 'basis', 'request', 'remove', 'answers']);
       expect(sentParams.required).toContain('answers');
-      expect(Object.keys(sentParams.properties.answers.items.properties).sort()).toEqual(['basis', 'high', 'id', 'low', 'party', 'quote', 'range_kind', 'status', 'value']);
+      expect(Object.keys(sentParams.properties.answers.items.properties).sort()).toEqual(['author', 'basis', 'high', 'id', 'low', 'party', 'quote', 'range_kind', 'status', 'value']);
+      // Whose an answer is, declared by the AI (Codex r1 #3727; the host checks it, never sets it).
+      expect(sentParams.properties.answers.items.properties.author.enum).toEqual(['person', 'olumi']);
+      expect(sentParams.properties.answers.items.required).toContain('author');
       // The program turn's guidance as SENT (its pin in core-prompt-arm is this text's): answers go in answers, on the item's id.
       const guidance = ((calls[0]!.input ?? []) as Json[]).filter((i) => i.role === 'system').map((i) => String(i.content)).filter((c) => c.startsWith('This scenario\'s model is a model program'));
       expect(guidance).toHaveLength(1);
