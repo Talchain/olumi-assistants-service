@@ -76,7 +76,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     // default, a direction-only one kept in words with its size unknown; never a forced number; quotes copied exactly; the
     // update's own text lives here with the draft's goal rule; periods counted as starts_after_periods (#3713).
     // 24 Oct (AIE 6386018855 §5, accepted by the DL): Olumi may propose a measure, options and missing drivers, at first drafting only.
-    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('3566a1c461ed84fb6522d58af83671f68767f945a155ea900248574ab4f48ba1');
+    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('a385b048c8bf7eaac14cf6570efbafb21f77fe4faee2395eef0e84771cd14304');
     expect(createHash('sha256').update(UPDATE_PREFIX, 'utf8').digest('hex')).toBe('3fc74a39f5db5290b72b37b7e2228c696a0fdeb5c2b017f96f3883bfedf3e0fb');
     expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('bed04fc58a01dbd02d8f5c8aa6ef171731a356c1cde47a85e0cd64be35416653'); // 23 Oct (DL 93d79c3e, C2 double prime): a definition's parts are factors with levels, never another definition; a STATED per-unit effect is a sized link. 22 Oct: every stated goal saved in their words, never approximated (Claude r1 on #3670); + a calendar date is Olumi's labelled reading
     // The retired constants are gone from both modules: no route can send the accreted text again.
@@ -179,7 +179,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       'Olumi\'s own additions (a suggested measure, options, drivers, risks) are made when the model is first drafted; a repair or an update changes only what it asks.',
       'Model the main reason each option could succeed and the main reason it could fail.',
       'Every driver, constraint and current state they mention feeds the calculation or the record that fits it.',
-      'Where the brief leaves out a driver, countereffect or risk that is plausible and could change the result, add it as Olumi\'s hypothesis (author olumi, with a basis); plausibility alone never justifies a figure, so size it like any other link.',
+      'Where the brief leaves out a driver, countereffect or risk that is plausible and could change the result, add it as Olumi\'s hypothesis (author olumi, with a basis and its direction); plausibility alone never justifies a figure, so size it like any other link.',
       'An aim they state without a measure stays theirs: where a measure can responsibly track it, suggest one (measure_by "olumi":',
       'its target asked unless they gave one and its exclusions naming what it misses; a suggested measure is never their definition of success.',
       'An aim no measure can responsibly track, and a guardrail without one, keep measure null and a question.',
@@ -198,12 +198,13 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       'A link or effect (an option\'s added effect included) is theirs or, by default, Olumi\'s provisional estimate with a defensible range in natural units and a plain basis.',
       // Buddy 24 Oct 08:17Z (accepted): capacity is not output.
       'A range is defensible when general knowledge of how such things work gives its order of magnitude, however wide the span (a second matched, staffed van roughly doubles available vehicle capacity, give or take; completed deliveries also depend on demand and other bottlenecks).',
-      'Only an effect with no knowable scale keeps its direction in words, its size unknown, and what would size it. Never force a number to get a chance.',
+      // DL 24 Oct (with S3's issue 39): an unsized link's direction goes in direction; one with no direction anyone can give is a note.
+      'Only an effect with no knowable scale keeps its size unknown, its direction in direction (raises or lowers) and what would size it in its basis; an effect whose direction no one can say is a note, not a link. Never force a number to get a chance.',
       'A stock\'s level after n periods is its start plus n periods of its flows.',
       'sets ovens_added to one_oven, starts_after_periods 0;',
     ]) expect(count(DRAFTING_INSTRUCTIONS, rule), rule).toBe(1);
     // What over-applied the estimate rule, and the old period numbering, are gone.
-    for (const old of ['never invent a measure', 'Important but uncalculable', 'from what the brief names', 'goes in left_out with the reason', 'a link you cannot size goes in left_out', 'Every other figure it needs stays null', 'Only coefficients are Olumi', 'never "unknown" with no question', 'flows of periods 1 to n', 'from period 0'])
+    for (const old of ['never invent a measure', 'its direction in words', 'Important but uncalculable', 'from what the brief names', 'goes in left_out with the reason', 'a link you cannot size goes in left_out', 'Every other figure it needs stays null', 'Only coefficients are Olumi', 'never "unknown" with no question', 'flows of periods 1 to n', 'from period 0'])
       expect(DRAFTING_INSTRUCTIONS, old).not.toContain(old);
     // The update's text is prompt text: here, once, with the draft's goal rule and the quote rule; draft.ts no longer holds a copy.
     for (const rule of ['return the WHOLE model, by the same rules.', 'Every option reaches every measured goal, a goal this change adds included.',
