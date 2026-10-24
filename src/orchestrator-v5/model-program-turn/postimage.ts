@@ -18,7 +18,7 @@
  * the history (each change and removal appended).
  */
 import { ProposalChangeSchema, type ProposalChange } from '../agent-lane/proposal.js';
-import { CanonicalModel, type CanonicalModelT } from '../model-program/canonical.js';
+import { CanonicalModel, NOT_THEIR_WORDS, type CanonicalModelT } from '../model-program/canonical.js';
 
 type Rec = Record<string, unknown>;
 type Family = Exclude<keyof CanonicalModelT, 'version' | 'question' | 'period' | 'history'>;
@@ -64,7 +64,7 @@ const GROUPS: Readonly<Record<Family, Readonly<Record<string, string>>>> = {
 export type PostimageResult =
   | { readonly ok: true; readonly model: CanonicalModelT; readonly changes: readonly ProposalChange[] }
   | { readonly ok: false; readonly code: 'schema' | 'duplicate_id' | 'moved_record' | 'omitted_record' | 'removal_not_applied' | 'unknown_removal' | 'recycled_id'
-    | 'unverified_person_words' | 'unshown_change' | 'invalid_change_entry' | 'no_change'; readonly reason: string; readonly ids: readonly string[] };
+    | 'unshown_change' | 'invalid_change_entry' | 'no_change'; readonly reason: string; readonly ids: readonly string[] };
 
 const squash = (s: string) => s.replace(/\s+/g, ' ').trim();
 /** The person's words: the same words in the same order, white space ignored (a quote across their line break is theirs). */
@@ -76,8 +76,19 @@ const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !
  * Every attribution in a record (itself, an option's settings, a relation's terms) that names the person as its author and
  * states something: a figure of theirs that is only ASKED (no figure, no words yet) states nothing.
  */
-const personAttributions = (v: unknown): Rec[] => (Array.isArray(v) ? v.flatMap(personAttributions)
-  : isRec(v) ? [...(v['author'] === 'person' && 'quote' in v && !(v['status'] === 'asked' && v['quote'] === null) ? [v] : []), ...Object.values(v).flatMap(personAttributions)] : []);
+const attributes = (v: Rec): boolean => v['author'] === 'person' && 'quote' in v && !(v['status'] === 'asked' && v['quote'] === null);
+/**
+ * Per item, never per card (DL 24 Oct): an attribution whose words are not theirs (`theirs` false) is Olumi's, never the
+ * person's and never a refused card: author olumi, no quote or party; a figure in hand keeps its value under the host's mark,
+ * so nothing the model computes moves. The card shows it as Olumi's, and approving it keeps it Olumi's.
+ */
+const notTheirs = (v: unknown, theirs: (a: Rec) => boolean): unknown => {
+  if (Array.isArray(v)) return v.map((x) => notTheirs(x, theirs));
+  if (!isRec(v)) return v;
+  const out = Object.fromEntries(Object.entries(v).map(([k, x]) => [k, notTheirs(x, theirs)]));
+  return !attributes(v) || theirs(v) ? out
+    : { ...out, author: 'olumi', quote: null, ...('party' in v ? { party: null } : {}), ...(v['status'] === 'known' ? { basis: NOT_THEIR_WORDS } : {}) };
+};
 const withoutHost = (v: unknown): unknown => (Array.isArray(v) ? v.map(withoutHost)
   : isRec(v) ? Object.fromEntries(Object.entries(v).filter(([k]) => !HOST_FIELDS.has(k)).map(([k, x]) => [k, withoutHost(x)])) : v);
 /** The host's own fields, set all the way down a record: its approval, and who approved it. Who authored it is unchanged. */
@@ -86,8 +97,8 @@ const hostSet = (v: unknown, approval: 'proposed' | 'approved', by: string | nul
 /** On an approved card: accepted, by the approving person. */
 const accepted = (v: unknown, by: string | null): unknown => hostSet(v, 'approved', by);
 /** A first draft, as the host saves it: every record proposed and approved by no one, whatever the drafter wrote (step 2). */
-export const asDrafted = (m: CanonicalModelT): CanonicalModelT =>
-  ({ ...m, ...Object.fromEntries(FAMILIES.map(([f]) => [f, hostSet(m[f], 'proposed', null)])) }) as CanonicalModelT;
+export const asDrafted = (m: CanonicalModelT, words: readonly string[]): CanonicalModelT =>
+  ({ ...m, ...Object.fromEntries(FAMILIES.map(([f]) => [f, hostSet(notTheirs(m[f], (a) => verbatimIn(a['quote'], words)), 'proposed', null)])) }) as CanonicalModelT;
 /** One changed field: its path (`*` for a position in a list), where in lists it sits, and its saved and proposed values. */
 type Delta = { readonly path: string; readonly pattern: string; readonly at: readonly number[]; readonly old: unknown; readonly now: unknown };
 /**
@@ -154,7 +165,6 @@ export function validatePostimage(base: CanonicalModelT, raw: unknown,
   const was = wordsIn(base);
   const now = wordsIn(post);
   const history = [...base.history];
-  const unverified: string[] = [];
   const unshown: string[] = [];
   const families = Object.fromEntries(FAMILIES.map(([family, kind]) => {
     const before = new Map((base[family] as readonly Rec[]).map((r) => [String(r['id']), r] as const));
@@ -209,13 +219,14 @@ export function validatePostimage(base: CanonicalModelT, raw: unknown,
     const entry = (id: string, action: ProposalChange['action'], fields: ReturnType<typeof said>, label: string, author: ProposalChange['author'], r: Rec): ProposalChange => ({ id, kind, action, label,
       before: action === 'add' ? null : phrase(fields, 'old', r, action === 'remove'),
       after: action === 'remove' ? null : action === 'add' && family === 'left_out' ? leftOut(r) : phrase(fields, 'now', r, action === 'add'), author });
-    const records = (post[family] as readonly Rec[]).map((r) => {
-      const old = before.get(String(r['id']));
+    const records = (post[family] as readonly Rec[]).map((raw) => {
+      const old = before.get(String(raw['id']));
+      // Their words, or Olumi's: words not verbatim in what they wrote, or a figure of theirs changed without this turn's words.
+      const refigured = family === 'quantities' && old !== undefined && raw['author'] === 'person' && (['value', 'low', 'high'] as const).some((k) => old[k] !== raw[k]);
+      const r = notTheirs(raw, (a) => verbatimIn(a['quote'], opts.words) && !(a === raw && refigured && !verbatimIn(raw['quote'], opts.fresh))) as Rec;
       const fields = said(String(r['id']), old, r);
       // Unchanged but for what the host owns: the saved record, exactly.
       if (old !== undefined && fields.length === 0 && !unshown.some((u) => u.startsWith(`${String(r['id'])} (`))) return old;
-      const refigured = family === 'quantities' && old !== undefined && r['author'] === 'person' && (['value', 'low', 'high'] as const).some((k) => old[k] !== r[k]);
-      if (personAttributions(r).some((a) => !verbatimIn(a['quote'], opts.words)) || (refigured && !verbatimIn(r['quote'], opts.fresh))) unverified.push(String(r['id']));
       const record = accepted(r, opts.approver ?? null) as Rec;
       changes.push(entry(String(r['id']), old === undefined ? 'add' : 'change', fields, now.title(family, record), authorOf(record), r));
       if (old !== undefined) history.push({ id: String(r['id']), change: 'superseded', old: JSON.stringify(old), quote: typeof r['quote'] === 'string' ? r['quote'] : null, author_id: opts.approver ?? null });
@@ -228,7 +239,6 @@ export function validatePostimage(base: CanonicalModelT, raw: unknown,
     return [family, records];
   })) as Pick<CanonicalModelT, Family>;
   if (unshown.length > 0) return refuse('unshown_change', unshown, `The card cannot show every change to ${unshown.join('; ')}; nothing is proposed.`);
-  if (unverified.length > 0) return refuse('unverified_person_words', unverified, `${unverified.join(', ')}: the person's items must quote their words exactly.`);
   for (const [key, label] of [['question', 'The question'], ['period', 'The time step']] as const) {
     if (base[key] !== post[key]) changes.push({ id: key, kind: 'record', action: 'change', label, before: base[key], after: post[key], author: 'olumi' });
   }

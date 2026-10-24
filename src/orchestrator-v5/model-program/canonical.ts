@@ -45,6 +45,8 @@ export const AUTHORS = ['person', 'olumi'] as const;
  * stated, and a range is asked for.
  */
 export const APPROXIMATE_FIGURE = 'You gave this as an approximate figure; Olumi uses it for now, until you give a range.';
+/** The host's mark on a figure given as the person's in words that are not theirs: it is Olumi's figure, used as given (DL 24 Oct). */
+export const NOT_THEIR_WORDS = 'Olumi’s figure: the words given for it are not in what you wrote.';
 export type AuthorT = (typeof AUTHORS)[number];
 /** A quantity's figure may also be STRUCTURE: an exact constant the model's form needs (phase 0b: 40 zero-width "estimates"). */
 export const QUANTITY_AUTHORS = ['person', 'olumi', 'structure'] as const;

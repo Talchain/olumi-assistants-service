@@ -12,7 +12,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha256 } from '../../context/graph-hash.js';
 import { stableStringify } from '../../../orchestrator/context/stable-stringify.js';
-import { APPROXIMATE_FIGURE, type CanonicalModelT, type CanonicalQuantityT } from '../../model-program/canonical.js';
+import { APPROXIMATE_FIGURE, NOT_THEIR_WORDS, type CanonicalModelT, type CanonicalQuantityT } from '../../model-program/canonical.js';
 import { compile, isStructuralConstant, normalise } from '../../model-program/compile.js';
 import { CORE_ALIGNED_INSTRUCTIONS } from '../../core-route/instructions.js';
 import { project } from '../../model-program/project.js';
@@ -258,6 +258,7 @@ describe('the model-program turn on the real core route', () => {
 
   // ── STEP 2, "Check what I understood" (DL 24 Oct; the UI half is DGAI #2960, 128bd2db) ──────────────────────────────────
   const hostFieldsOf = (x: unknown) => new Set(JSON.stringify(x).match(/"(approval|author_id)":("[^"]*"|null)/g));
+  const heldQuantity = (deps: { proposals: ProposalStore }, id: string, q: string) => savedProgramOf({ living_model: deps.proposals.get(id)!.living_model })!.canonical.quantities.find((x) => x.id === q);
   const withoutHostFields = (x: unknown) => JSON.parse(JSON.stringify(x).replace(/"(approval|author_id)":("[^"]*"|null)/g, '"$1":"host"'));
 
   it('step 2 "Check what I understood" (1): a first draft is saved as Olumi\'s reading, every record proposed and approved by no one, whatever the drafter wrote; who authored it and in whose words are untouched', async () => {
@@ -275,6 +276,30 @@ describe('the model-program turn on the real core route', () => {
     expect(JSON.stringify(saved).match(/"approval":/g)).toHaveLength(19);
     // Contrast: everything else, who authored each item and in whose words included, is the drafter's, untouched.
     expect(withoutHostFields(saved)).toEqual(withoutHostFields(m));
+  });
+
+  it('verbatim per item (DL 24 Oct; the combined measure\'s refused reading cards): a drafted item given as theirs in words that are not theirs is saved and read back as Olumi\'s, never refusing the card; every other item stays as drafted', async () => {
+    const m = bakery();
+    // The measured class (6 refused cards): their figure with no figure, no question and no words (unknown); and a misquote.
+    m.quantities.push(q('other_costs', 'GBP', { status: 'unknown', basis: 'Nobody has said what else the oven costs to run.', quote: null }));
+    setQ(m, 'base_sales', { quote: 'We bake about 300 loaves' });
+    replies = [JSON.stringify(m)];
+    const r = (await turn({ message: BRIEF })).json();
+    expect(r.model_program.saved).toBe(true);
+    const saved = persisted!.living_model.canonical as CanonicalModelT;
+    expect(saved.quantities.find((x) => x.id === 'other_costs')).toMatchObject({ author: 'olumi', quote: null, party: null, status: 'unknown', basis: 'Nobody has said what else the oven costs to run.' });
+    expect(saved.quantities.find((x) => x.id === 'base_sales')).toMatchObject({ author: 'olumi', quote: null, value: 300, basis: NOT_THEIR_WORDS });
+    // Every other item is the drafter's, untouched, its words theirs (positive control: the bakery's person items are many).
+    const rest = (c: CanonicalModelT) => withoutHostFields({ ...c, quantities: c.quantities.filter((x) => x.id !== 'other_costs' && x.id !== 'base_sales') });
+    expect(rest(saved)).toEqual(rest(m));
+    expect(JSON.stringify(rest(saved)).match(/"author":"person"/g)!.length).toBeGreaterThan(5);
+    // The reading card issues, each item an add, those two as Olumi's and not in their words; the rest as drafted.
+    expect(r.cards).toHaveLength(1);
+    const card = r.cards[0];
+    expect(card.reading).toBe(true);
+    expect(card.changes.filter((c: Json) => c.id === 'other_costs' || c.id === 'base_sales').map((c: Json) => [c.id, c.author, c.after])).toEqual([['base_sales', 'olumi', `300 loaf/week, a fact, known, based on "${NOT_THEIR_WORDS}"`],
+      ['other_costs', 'olumi', 'no figure yet (in GBP), a fact, not known yet, based on "Nobody has said what else the oven costs to run."']]);
+    expect(card.changes.filter((c: Json) => c.author === 'person').length).toBeGreaterThan(5);
   });
 
   it('step 2 "Check what I understood" (2–5): after the first save ONE held card reads the draft back, every item an add, goals first and figures last, a left-out item by its why; its approve is "Yes, that’s what I meant"; its model is the draft accepted, with a new Run of the same numbers; it is carried on reload and saved by its approve', async () => {
@@ -478,9 +503,13 @@ describe('the model-program turn on the real core route', () => {
     const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] };
     const args = { public_label: 'Oven price £2,500', basis: 'their answer', request: 'The oven price is their answer: about £2,500.', remove: [] };
     const answer = (quote: string) => savedWith((m) => setQ(m, 'oven_price', { status: 'known', value: 2500, question: null, quote, basis: APPROXIMATE_FIGURE }));
-    // Contrast first: a figure of theirs whose words are not theirs, verbatim, is refused, and nothing is proposed.
+    // Contrast first: a figure given as theirs in words that are not theirs, verbatim, is never theirs (DL 24 Oct: per item,
+    // never per card): the card issues with it as Olumi's figure, its value as given under the host's mark, not in their words.
     replies = [answer('about £2,500 I think')];
-    expect(await proposeProgramChange(deps, ctx, args)).toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['oven_price'] } });
+    const notTheirs = await proposeProgramChange(deps, { ...ctx, turn_id: randomUUID() }, args) as Json;
+    expect(notTheirs.status, JSON.stringify(notTheirs)).toBe('ok');
+    expect(notTheirs.data.changes.map((c: Json) => [c.id, c.author, c.after])).toEqual([['oven_price', 'olumi', `2,500 GBP/oven, known, no question, based on "${NOT_THEIR_WORDS}", Olumi’s`]]);
+    expect(heldQuantity(deps, notTheirs.data.proposal_id, 'oven_price')).toMatchObject({ author: 'olumi', quote: null, party: null, value: 2500, basis: NOT_THEIR_WORDS });
     replies = [answer(words)];
     const proposed = await proposeProgramChange(deps, ctx, args) as Json;
     expect(proposed.status, JSON.stringify(proposed)).toBe('ok');
@@ -1035,9 +1064,14 @@ describe('the model-program turn on the real core route', () => {
     });
     const propose = (c = ctx()) => proposeProgramChange(deps, c, ProgramChangeParams.parse({ public_label: 'Measure the aim', basis: 'their answer',
       request: 'The aim is measured by sales: at least 380 loaves a week, within 4 weeks.', remove: [] })) as Promise<Json>;
-    // Negative first: a figure of theirs under words they did not write is refused, and nothing is proposed.
+    // Negative first: a figure given as theirs under words they did not write is never theirs: the card issues with it as
+    // Olumi's figure, while the window and the aim, in their words, stay theirs (one bad quote among good ones, per item).
     replies = [measured('at least 400 loaves a week')];
-    expect(await propose()).toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['more_loaves_target'] } });
+    const wrong = await propose();
+    expect(wrong.status, JSON.stringify(wrong)).toBe('ok');
+    expect(wrong.data.changes.map((x: Json) => [x.id, x.author])).toEqual([['more_loaves_target', 'olumi'], ['more_loaves_window', 'person'], ['more_loaves', 'person']]);
+    expect(heldQuantity(deps, wrong.data.proposal_id, 'more_loaves_target')).toMatchObject({ author: 'olumi', quote: null, value: 380, basis: NOT_THEIR_WORDS });
+    expect(heldQuantity(deps, wrong.data.proposal_id, 'more_loaves_window')).toMatchObject({ author: 'person', quote: words, value: 4 });
     replies = [measured(words)];
     const c = ctx();
     const p = await propose(c);
@@ -1170,13 +1204,17 @@ describe('the model-program turn on the real core route', () => {
     sent.length = 0;
     expect(await propose()).toMatchObject({ status: 'refused', reason: 'does_not_compile' });
     expect(sent).toHaveLength(3);
-    // Refused: a figure only they know, INVENTED as theirs (words they never wrote).
+    // Never theirs: a figure only they know, INVENTED as theirs (words they never wrote), is Olumi's figure on the card.
     replies = [completed((d) => setQ(d, 'features_now', { status: 'known', value: 12, question: null, quote: 'about 12 a month' }))];
-    expect(await propose()).toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['features_now'] } });
-    // Refused: one of their figures rewritten under their EARLIER words (their budget, quoted from the brief).
+    const invented = await propose() as Json;
+    expect(invented.data.changes.find((c: Json) => c.id === 'features_now'), JSON.stringify(invented)).toMatchObject({ author: 'olumi' });
+    expect(heldQuantity(deps, invented.data.proposal_id, 'features_now')).toMatchObject({ author: 'olumi', quote: null, value: 12, basis: NOT_THEIR_WORDS });
+    // Never theirs: one of their figures rewritten under their EARLIER words (their budget, quoted from the brief) is Olumi's.
     const budget = before.quantities.find((x) => x.author === 'person' && x.value !== null && x.kind === 'fact')!;
     replies = [completed((d) => setQ(d, budget.id, { value: budget.value! + 1 }))];
-    expect(await propose()).toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: [budget.id] } });
+    const rewritten = await propose() as Json;
+    expect(rewritten.data.changes.find((c: Json) => c.id === budget.id), JSON.stringify(rewritten)).toMatchObject({ author: 'olumi' });
+    expect(heldQuantity(deps, rewritten.data.proposal_id, budget.id)).toMatchObject({ author: 'olumi', quote: null, value: budget.value! + 1, basis: NOT_THEIR_WORDS });
     // Refused: a record left out without a listed removal; nothing is removed unless the person asks.
     const dropped = before.options[0]!.id;
     replies = [completed((d) => { d.options = d.options.filter((o) => o.id !== dropped); })];

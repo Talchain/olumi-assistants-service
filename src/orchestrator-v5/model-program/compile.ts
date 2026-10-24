@@ -29,7 +29,7 @@
  * (`conversions`), so the executable model has one number per unit and the person's bounds are never their law.
  */
 import {
-  APPROXIMATE_FIGURE, CanonicalModel, FIGURE_STATUSES, WITHHOLDING_STATUSES, QUALITATIVE_FAMILIES,
+  APPROXIMATE_FIGURE, NOT_THEIR_WORDS, CanonicalModel, FIGURE_STATUSES, WITHHOLDING_STATUSES, QUALITATIVE_FAMILIES,
   type CanonicalModelT, type CanonicalQuantityT, type CanonicalRelationT, type CanonicalWindowT, type CanonicalOptionSetT,
   type CanonicalGoalT, type CanonicalLimitT,
 } from './canonical.js';
@@ -343,7 +343,7 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
         const point = has(q.value) && !has(q.low);
         const dateReading = point && (windowQs.has(q.id) || timingQs.has(q.id)) && Number.isInteger(q.value) && has(q.basis);
         const proposal = point && proposals.has(q.id);
-        if (!dateReading && !proposal) err('olumi_no_range', `${n} is Olumi's figure marked known; Olumi's figures are estimates: mark it estimated with low and high, ask the person, or, for an exact constant such as 12 month/year or an option switch, make its author structure.`, [q.id]);
+        if (!dateReading && !proposal && q.basis !== NOT_THEIR_WORDS) err('olumi_no_range', `${n} is Olumi's figure marked known; Olumi's figures are estimates: mark it estimated with low and high, ask the person, or, for an exact constant such as 12 month/year or an option switch, make its author structure.`, [q.id]);
       }
       needQuote(q, n, q.id);
     } else if (q.status === 'estimated') {
