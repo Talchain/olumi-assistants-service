@@ -24,7 +24,7 @@ import { CORE_INSTRUCTIONS_LIVING_MODEL, CORE_REPLY_RULES_LIVING_MODEL, instruct
 import { TOOL_DESCRIPTIONS } from '../../orchestrator-v5/path-b/tools/index.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import { ASK_CHALLENGE_CHIP_ID } from '../../orchestrator-v5/core-route/turn-request.js';
-import { bakery, BRIEF as BAKERY_BRIEF, club, CLUB_BRIEF, q } from '../../orchestrator-v5/model-program-turn/__tests__/bakery.fixture.js';
+import { bakery, BRIEF as BAKERY_BRIEF, club, CLUB_BRIEF, q, updateOf } from '../../orchestrator-v5/model-program-turn/__tests__/bakery.fixture.js';
 import { DRAFTING_INSTRUCTIONS } from '../../orchestrator-v5/model-program-turn/prompt.js';
 import type { LivingModelT } from '../../schemas/living-model.js';
 import { GOAL_CHANCE_LICENSED, PERIOD_END_EFFECTS_UNSTATED } from '../../orchestrator-v5/goal-target/goal-chance-licence.js';
@@ -1092,7 +1092,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       const saved = JSON.stringify((persisted as Json).living_model);
       const updated = bakery();
       updated.quantities = updated.quantities.map((x) => (x.id === 'base_sales' ? { ...x, value: 301 } : x));
-      canonicalDraft = JSON.stringify(updated);
+      canonicalDraft = JSON.stringify(updateOf(bakery(), updated)); // the update: only what it changes
       const info = vi.spyOn((await import('../../utils/telemetry.js')).log, 'info');
       const said = 'We bake a few more loaves now.';
       outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'more', args: { public_label: 'Weekly loaves', basis: 'their words', request: 'They bake a few more loaves a week now.', remove: [] } }],
@@ -1114,7 +1114,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       const id = said.slice(0, -1);
       const updated = bakery();
       updated.quantities.push(q(id, 'loaf/week', { value: 40, quote: 'their 40 regulars' }), q('Stop.', 'loaf/week', { value: 5, quote: 'stop at five' }));
-      canonicalDraft = JSON.stringify(updated);
+      canonicalDraft = JSON.stringify(updateOf(bakery(), updated)); // the update: only what it changes
       const telemetry = (await import('../../utils/telemetry.js')).log;
       const spies = (['info', 'warn', 'error'] as const).map((k) => vi.spyOn(telemetry, k));
       outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'rival', args: { public_label: 'A rival closing', basis: 'their words', request: 'Their rival bakery shuts in March.', remove: [] } }],
@@ -1198,7 +1198,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       await savedProgram();
       const updated = bakery();
       updated.quantities = updated.quantities.map((x) => (x.id === 'oven_price' ? { ...x, status: 'known' as const, value: 2500, question: null, quote: 'The oven would cost £2,500' } : x));
-      canonicalDraft = JSON.stringify(updated);
+      canonicalDraft = JSON.stringify(updateOf(bakery(), updated)); // the update: only what it changes
       const set = { public_label: 'Oven price £2,500', basis: 'their answer', request: 'The oven price is £2,500.', remove: [] };
       outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'p1', args: set }], [{ type: 'message', text: 'I prepared the oven price; approve its card.' }]];
       const proposed = (await typed('The oven would cost £2,500.')).json() as Json;
@@ -1222,7 +1222,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       // The drafter's updated model for whichever proposal runs: the oven price, in their words.
       const updated = bakery();
       updated.quantities = updated.quantities.map((x) => (x.id === 'oven_price' ? { ...x, status: 'known' as const, value: 2500, question: null, quote: 'The oven would cost £2,500' } : x));
-      canonicalDraft = JSON.stringify(updated);
+      canonicalDraft = JSON.stringify(updateOf(bakery(), updated)); // the update: only what it changes
       const set = (request: string, public_label: string) => ({ public_label, basis: 'their answer', request, remove: [] });
       outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'p1', args: set('The oven price is £2,500.', 'Oven price £2,500') },
         { type: 'function_call', name: 'propose_change', call_id: 'p2', args: set('Base sales are 320 a week now.', 'Base sales 320') }],
@@ -1242,7 +1242,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       await savedProgram();
       const updated = bakery();
       updated.quantities = updated.quantities.map((x) => (x.id === 'oven_price' ? { ...x, status: 'known' as const, value: 2500, question: null, quote: 'The oven would cost £2,500' } : x));
-      canonicalDraft = JSON.stringify(updated);
+      canonicalDraft = JSON.stringify(updateOf(bakery(), updated)); // the update: only what it changes
       const good = { public_label: 'Oven price £2,500', basis: 'their answer', request: 'The oven price is £2,500.', remove: [] };
       const bad = { ...good, remove: 'two and a half thousand' };
       outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'bad', args: bad }],
@@ -1257,7 +1257,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       // It names the failing field, never its value, so the model knows what to correct.
       expect(JSON.stringify(back)).toContain('remove: ');
       expect(JSON.stringify(back)).not.toContain('two and a half thousand');
-      // Three agent calls and ONE drafter call, for the good proposal's whole updated model.
+      // Three agent calls and ONE drafter call, for the good proposal's update.
       expect(calls.map((c) => (c.text?.format?.name === 'canonical_model' ? 'drafter' : 'agent'))).toEqual(['agent', 'agent', 'drafter', 'agent']);
     });
 
