@@ -120,11 +120,11 @@ describe('present: the canonical analysis view from a simulated model', () => {
     });
     for (const id of ['hold', 'add']) {
       expect(cell(v, id)).toEqual({ kind: 'withheld', face: 'Not shown yet: needs your answer',
-        why: '‘Reach 100 cases’ waits on ‘Cases per specialist’',
+        why: '‘Reach 100 cases’ waits on ‘Cases per specialist’.',
         reasons: [{ code: 'goal_asks', message: 'It needs your answer.' }] });
     }
     expect(v.goal_chance.waits_on).toEqual(waits_on);
-    expect(v.goal_chance.notes).toContain('‘Reach 100 cases’ is not in the chance yet: it waits on ‘Cases per specialist’');
+    expect(v.goal_chance.notes).toContain('‘Reach 100 cases’ waits on ‘Cases per specialist’.');
     expect(JSON.stringify(v)).not.toContain('?');
     expect(v.goal_chance.chance_words).toBeUndefined();
     expect(v.goal_chance.targets.joint).toEqual({ status: 'withheld',

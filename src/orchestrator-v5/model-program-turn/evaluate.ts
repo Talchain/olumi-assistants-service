@@ -19,7 +19,7 @@ import type { ExecutableModel } from '../model-program/executable.js';
 import { simulate } from '../model-program/simulate/simulate.js';
 import type { SimResult } from '../model-program/simulate/result.js';
 import {
-  listWords, presentAnalysisView, tippingThresholds, type PresentAsk, type PresentBlocker, type PresentGoal, type PresentQuantity, type PresentThreshold,
+  presentAnalysisView, tippingThresholds, waitsOnWords, type PresentAsk, type PresentBlocker, type PresentGoal, type PresentQuantity, type PresentThreshold,
   type PresentedAnalysisView, type TippingProbe,
 } from '../model-program/present/present.js';
 
@@ -136,6 +136,8 @@ function blockersOf(model: CanonicalModelT, list: readonly Blocker[]): PresentBl
     answer: isQuantity.has(b.id) ? { quantity_id: b.id } : null }));
 }
 
+const sentence = (x: string): string => (/[.?!]$/.test(x) ? x : `${x}.`);
+
 function waitingView(model: CanonicalModelT, compiled: CompileResult, goals: readonly PresentGoal[], asks: readonly PresentAsk[],
   blockers: readonly PresentBlocker[], tipping: Readonly<Record<string, TippingProbe>>, seed: number): WaitingView {
   const m = normalise(model);
@@ -143,18 +145,19 @@ function waitingView(model: CanonicalModelT, compiled: CompileResult, goals: rea
   const optionLabel = new Map(m.options.map((o) => [o.id, o.label] as const));
   const askOf = new Map(asks.map((a) => [a.quantity_id, a] as const));
   const failing = compiled.errors.length > 0;
-  const labelsOf = (ids: readonly string[]) => ids.map((id) => askOf.get(id)?.label).filter((q): q is string => q !== undefined);
-  const goalWaits = goals.flatMap((g) => labelsOf(g.asks));
-  // Each option's cell also says what THAT option waits on (its own setting or timing): a measured aim is never said to have
-  // no measure because an option's figure is missing (batch 4 hiring-r1).
+  const limitIds = new Set(m.limits.map((l) => l.id));
+  // What the chance waits on, from the compiler's typed blockers only (S4): the measured aims' and THIS option's own (its
+  // setting or timing, batch 4 hiring-r1); with no measured aim, every blocker not a limit's alone (an aim's measure, or the
+  // result they want). A figure no one can give has no blocker: the compiler's own reason for it is said.
   const cellOf = (optionId: string) => {
     const own = compiled.perOption.find((p) => p.option_id === optionId);
-    const waits = [...new Set([...goalWaits, ...labelsOf(own?.asks ?? [])])];
-    const measured = goals.length > 0; // the aims with a measure (those without are left out above)
+    const ids = goals.length > 0 ? new Set([...goals.map((g) => g.goal_id), optionId])
+      : new Set(blockers.flatMap((b) => b.scope).filter((id) => !limitIds.has(id)));
+    const waits = waitsOnWords(blockers, ids);
+    const withheldWhy = [...goals.filter((g) => g.status === 'withheld').flatMap((g) => g.reasons), ...(own?.reasons ?? [])].join(' ');
     const why = failing ? 'The model does not compile yet, so no chance can be worked out.'
-      : waits.length > 0 ? `The chance waits on ${listWords(waits.map((l) => `‘${l}’`))}.`
-        : goals.flatMap((g) => g.reasons).join(' ') || own?.reasons.join(' ') || (measured ? 'The chance cannot be worked out yet.' : 'No aim has a measure yet.');
-    return { kind: 'withheld' as const, face: waits.length > 0 && !failing ? 'Not shown yet: needs your answer' : 'Chance not shown yet', why,
+      : waits !== undefined ? `The chance ${waits}.` : withheldWhy || 'The chance cannot be worked out yet.';
+    return { kind: 'withheld' as const, face: waits !== undefined && !failing ? 'Not shown yet: needs your answer' : 'Chance not shown yet', why,
       reasons: failing ? [{ code: 'does_not_compile', message: compiled.errors.slice(0, 5).map((e) => e.message).join(' ') }]
         : goals.filter((g) => g.status !== 'calculable').map((g) => ({ code: g.status === 'asks' ? 'goal_asks' : 'goal_withheld', message: g.reasons.join(' ') || null })) };
   };
@@ -169,7 +172,7 @@ function waitingView(model: CanonicalModelT, compiled: CompileResult, goals: rea
     staleness: { stale: null, revision: null, run_revision: null, basis: 'analysis_graph_hash_interim', reason: null, limitation: 'Currentness is unknown because an analysis hash is unavailable.' },
     leader_licence: 'withheld',
     options: ids.map((option_id) => ({ option_id, cell: cellOf(option_id), main_driver: { kind: 'not_recorded' as const } })),
-    goal_chance: { notes: [...goals.filter((g) => g.status !== 'calculable').map((g) => `‘${g.label}’ is not in the chance yet: ${g.reasons.join(' ')}`),
+    goal_chance: { notes: [...goals.filter((g) => g.status !== 'calculable').map((g) => sentence(`‘${g.label}’ ${waitsOnWords(blockers, new Set([g.goal_id])) ?? `is not in the chance yet: ${g.reasons.join(' ')}`}`)),
       ...thresholds.map((t) => t.words)], ...(thresholds.length > 0 ? { thresholds } : {}), ...(blockers.length > 0 ? { waits_on: blockers } : {}) },
   };
 }

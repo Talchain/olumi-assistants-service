@@ -61,27 +61,37 @@ type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 /** CEE's sentence for a Run the model has moved on from (the core view's `face_when_stale`, one authority for both). */
 export const RUN_AGAIN_FOR_CHANCE = 'Run the analysis again to see the chance.';
+/** For a Run the person's model has NOT moved on from, made stale by an update (the engine, or how the model is read): S4. */
+export const RUN_AGAIN_AFTER_UPDATE = 'This result is from before an update. Run again to see the chance.';
 /**
  * A Run's view bound to its own record (run id, the analysis hash of its graph, its time) and to whether the saved model is
  * still the one it was computed from, in the core view's freshness words; the result itself is untouched.
  */
-function viewOf(view: unknown, run: { readonly run_id: string; readonly graph_hash_at_run: string; readonly computed_at: string }, current: boolean): unknown {
+function viewOf(view: unknown, run: { readonly run_id: string; readonly graph_hash_at_run: string; readonly computed_at: string }, current: boolean, updated = false): unknown {
   if (!isRec(view) || !isRec(view['staleness'])) return view;
   const { face_when_stale: _face, ...rest } = view;
-  return { ...rest, run, ...(current ? {} : { face_when_stale: RUN_AGAIN_FOR_CHANCE }),
-    staleness: { ...view['staleness'], stale: !current, reason: current ? 'graph_hash_match' : 'graph_hash_diverged', limitation: 'Hash equality cannot detect brief, framing or stage changes.' } };
+  return { ...rest, run, ...(current ? {} : { face_when_stale: updated ? RUN_AGAIN_AFTER_UPDATE : RUN_AGAIN_FOR_CHANCE }),
+    staleness: { ...view['staleness'], stale: !current, reason: current ? 'graph_hash_match' : updated ? 'engine_or_format_updated' : 'graph_hash_diverged',
+      limitation: 'Hash equality cannot detect brief, framing or stage changes.' } };
 }
-/** The stored view as a reopen shows it: stale when the saved model is no longer the one the Run was computed from. */
-export function shownView(run: StoredRun, current: boolean): unknown {
+/**
+ * The stored view as a reopen shows it: stale when the saved model is no longer the one the Run was computed from, or the
+ * engine is not the one it ran on; `updated` when the person's model has not moved (only the engine, or the model's format).
+ */
+export function shownView(run: StoredRun, current: boolean, updated = false): unknown {
   const view = run.result.canonical_analysis_view;
-  return current || !isRec(view) || !isRec(view['run']) ? view : viewOf(view, view['run'] as { run_id: string; graph_hash_at_run: string; computed_at: string }, false);
+  return current || !isRec(view) || !isRec(view['run']) ? view : viewOf(view, view['run'] as { run_id: string; graph_hash_at_run: string; computed_at: string }, false, updated);
 }
 
 /** The Run a reopen shows: the newest stored one, with whether it is the saved model's and today's engine's. */
-export function shownRun(runs: readonly StoredRun[], canonical: CanonicalModelT, personWords: readonly string[], versions: EngineVersions = ENGINE_VERSIONS):
-  { readonly run: StoredRun; readonly current: boolean; readonly engine_current: boolean } | undefined {
+export function shownRun(runs: readonly StoredRun[], canonical: CanonicalModelT, personWords: readonly string[], versions: EngineVersions = ENGINE_VERSIONS,
+  /** The model exactly as stored, before it is read (an older format is read once, in its newer form). */
+  stored?: unknown): { readonly run: StoredRun; readonly current: boolean; readonly engine_current: boolean; readonly updated: boolean } | undefined {
   const run = runs.at(-1);
   if (run === undefined) return undefined;
-  return { run, current: run.receipt.revision_digest === revisionDigest(canonical, personWords),
-    engine_current: stableStringify(run.receipt.versions) === stableStringify(versions) };
+  const current = run.receipt.revision_digest === revisionDigest(canonical, personWords);
+  const engine_current = stableStringify(run.receipt.versions) === stableStringify(versions);
+  // The person's model is the one the Run read when only its format moved (the stored bytes still give the Run's digest).
+  const unmoved = current || (stored !== undefined && run.receipt.revision_digest === revisionDigest(stored as CanonicalModelT, personWords));
+  return { run, current, engine_current, updated: unmoved && !(current && engine_current) };
 }
