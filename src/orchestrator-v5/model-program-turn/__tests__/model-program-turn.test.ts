@@ -347,6 +347,26 @@ describe('the model-program turn on the real core route', () => {
     expect(said(null)).toBe(`no figure yet (in loaf/week/oven), a rate, not known yet, based on "${LOST_BASIS}"`);
   });
 
+  it('issue 40 (Codex #3742): a direction on a per-unit rate written as a two-part product (one size times one driver) is kept and worded, unknown or across zero, as on an effect\'s link; times another size it is no link, and its direction is cleared', () => {
+    const BASIS = 'Nobody has said how many loaves a new oven loses.';
+    /** The draft path (read as `normalise` reads it, then the reading card): the rate's direction kept, and its card words. */
+    const rated = (f: Partial<CanonicalQuantityT>, driver = 'ovens_added') => {
+      const m = bakery();
+      m.quantities.push(q('loss_per_oven', 'loaf/week/oven', { kind: 'coefficient', author: 'olumi', ...f }), q('extra_loss', 'loaf/week', { kind: 'derived', status: 'derived', author: 'olumi' }));
+      m.relations.push({ form: 'definition', id: 'loss_rel', defines: 'extra_loss', op: 'product', parts: [{ id: driver, power: 1 }, { id: 'loss_per_oven', power: 1 }], author: 'olumi', quote: null, ...at });
+      const read = normalise(m);
+      const v = readingOf(read, { words: [BRIEF], approver: null });
+      return { direction: read.quantities.find((x) => x.id === 'loss_per_oven')!.direction, after: v.ok ? v.changes.find((c) => c.id === 'loss_per_oven')!.after : v.code };
+    };
+    expect(rated({ status: 'unknown', basis: BASIS, direction: 'lowers' }))
+      .toEqual({ direction: 'lowers', after: `no figure yet (in loaf/week/oven), ↓ lowers extra loss, a rate, not known yet, based on "${BASIS}"` });
+    expect(rated({ status: 'estimated', low: -20, high: 10, range_kind: 'plausible', basis: BASIS, direction: 'raises' }))
+      .toEqual({ direction: 'raises', after: `from -20 to 10 loaf/week/oven (a plausible range), ↑ raises extra loss, a rate, an estimate, based on "${BASIS}"` });
+    // Contrast: times another size ("sell through", a coefficient) it is no per-unit rate and no link: cleared, never worded.
+    expect(rated({ status: 'unknown', basis: BASIS, direction: 'lowers' }, 'sell_through'))
+      .toEqual({ direction: null, after: `no figure yet (in loaf/week/oven), a rate, not known yet, based on "${BASIS}"` });
+  });
+
   it('issue 40: a direction the host clears (on a sized link, or on a figure no link has) never shows as a change nor refuses one: a saved program holding them takes an unrelated update; the AI\'s change to a direction the model uses still shows', async () => {
     const m = withOlumiLinks(bakery(), q('oven_delay', 'loaf/week/oven', { kind: 'coefficient', status: 'estimated', author: 'olumi', value: -10, low: -20, high: -5, range_kind: 'plausible',
       basis: 'A new oven takes a few weeks to bed in.' }));
@@ -391,7 +411,7 @@ describe('the model-program turn on the real core route', () => {
     expect((persisted!.living_model.canonical as CanonicalModelT).quantities.find((x) => x.id === 'lost_bake_time')).toMatchObject({ low: -5, high: 10, author: 'person', direction: null });
   });
 
-  it('issue 40 (the system): every field of every canonical record family is said by a word group on the card, or is a named exemption; a new field with neither fails here', () => {
+  it('issue 40 (the system): every field of the model and of every canonical record family is said on the card, or is a named exemption; a new field with neither fails here', () => {
     /** The fields the card never compares, each with why. */
     const EXEMPT: Record<string, string> = {
       id: 'the change\'s own id: the card entry is keyed by it (postimage `bare`)',
@@ -426,6 +446,19 @@ describe('the model-program turn on the real core route', () => {
     expect(Object.keys(EXEMPT).filter((k) => !all.some((p) => exemptAs(p.slice(p.indexOf('.') + 1)) === k))).toEqual([]);
     // Contrast: a field the card has no words for is caught.
     expect(unsaid('quantities', (element('quantities') as z.ZodObject).extend({ new_field: z.string() }))).toEqual(['new_field']);
+    // The model's own fields (Codex #3742): each is a record family above, one the card says as its own entry, or exempt.
+    const ROOT_SAID = ['question', 'period'];
+    const ROOT_EXEMPT: Record<string, string> = { version: 'one fixed value: the format allows no other', history: 'host-owned: appended by the host, never compared' };
+    const unsaidRoot = (keys: readonly string[]) => keys.filter((k) => !families.includes(k) && !ROOT_SAID.includes(k) && ROOT_EXEMPT[k] === undefined);
+    expect(unsaidRoot(Object.keys(shape))).toEqual([]);
+    expect(Object.keys(ROOT_EXEMPT).filter((k) => !(k in shape))).toEqual([]);
+    // Each one the card says is said: changed alone, it is the card's one entry.
+    for (const [k, v] of [['question', 'Should the bakery buy two more ovens?'], ['period', 'month']] as const) {
+      const r = validatePostimage(bakery(), { ...bakery(), [k]: v }, { removals: [], words: [BRIEF], fresh: [] });
+      expect(r.ok ? r.changes.map((c) => [c.id, c.after]) : r.code).toEqual([[k, v]]);
+    }
+    // Contrast: a field of the model's own with neither is caught.
+    expect(unsaidRoot(Object.keys(CanonicalModel.extend({ new_unlisted_field: z.string() }).shape))).toEqual(['new_unlisted_field']);
   });
 
   it('step 2 "Check what I understood" (2–5): after the first save ONE held card reads the draft back, every item an add, goals first and figures last, a left-out item by its why; its approve is "Yes, that’s what I meant"; its model is the draft accepted, with a new Run of the same numbers; it is carried on reload and saved by its approve', async () => {
