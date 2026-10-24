@@ -798,6 +798,32 @@ describe('the model-program turn on the real core route', () => {
     expect(registered).toHaveLength(1); // proposing saves nothing
   });
 
+  it('Codex BLOCK on #3740: an update is read as a first draft is only where it speaks: a structure figure it returns takes the compiler\'s reading; a saved one it did not return stays exactly as saved, though its new context would read it otherwise', async () => {
+    replies = [JSON.stringify(club())];
+    expect((await turn({ message: CLUB_BRIEF })).json().model_program.saved).toBe(true);
+    const read = programReadOf(persisted!);
+    const saved = (read.kind === 'program' ? read.program.canonical : null)!;
+    const words = 'Run the promotion twice.';
+    const deps = { dispatch, proposals: new ProposalStore() };
+    // The update: a new switched-on figure, and the promotion's setting pointed at it; one_promo is not returned.
+    const promotion = saved.options.find((o) => o.id === 'promotion')!;
+    const twoPromos = q('two_promos', 'promotion', { value: 2, author: 'structure', basis: 'The promotion run twice.' });
+    replies = [JSON.stringify({ version: saved.version, question: null, period: null, quantities: [twoPromos], relations: [], goals: [], limits: [], preferences: [],
+      options: [{ ...promotion, sets: promotion.sets.map((x) => (x.quantity === 'promo_on' ? { ...x, to: 'two_promos' } : x)) }],
+      risks: [], claims: [], evidence: [], assumptions: [], dissent: [], conditions: [], left_out: [], remove: [] })];
+    const p = await proposeProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words },
+      ProgramChangeParams.parse({ public_label: 'Two promotions', basis: 'their words', request: 'Run the promotion twice.', remove: [] })) as Json;
+    expect(p.status, JSON.stringify(p)).toBe('ok');
+    expect(p.data.changes.map((c: Json) => [c.id, c.action])).toEqual([['two_promos', 'add'], ['promotion', 'change']]);
+    const held = savedProgramOf({ living_model: deps.proposals.get(p.data.proposal_id)!.living_model })!.canonical;
+    // Not returned: the saved figure exactly (no option switches it now, so a whole-model reading would make it asked).
+    const onePromo = saved.quantities.find((x) => x.id === 'one_promo')!;
+    expect(onePromo).toMatchObject({ author: 'structure', status: 'known', value: 1 });
+    expect(JSON.stringify(held.quantities.find((x) => x.id === 'one_promo'))).toBe(JSON.stringify(onePromo));
+    // Contrast: returned, the figure takes the first draft's reading (a 2 no structure defines is theirs to give).
+    expect(held.quantities.find((x) => x.id === 'two_promos')).toMatchObject({ author: 'person', status: 'asked', value: null });
+  });
+
   it('THE WITNESS: a stock, a limit and one Olumi estimate, with known answers, through draft, an in-card change, a chat correction, Runs and cold reopens', async () => {
     replies = [JSON.stringify(club())];
     const drafted = (await turn({ message: CLUB_BRIEF })).json();
