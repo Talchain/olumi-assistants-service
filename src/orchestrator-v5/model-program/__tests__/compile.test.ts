@@ -13,13 +13,13 @@ import { parseUnit, sameDims } from '../units.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { simulate } from '../simulate/simulate.js';
 import { isWithheld } from '../simulate/result.js';
-import { STARTS_AFTER_PERIODS } from '../canonical.js';
+import { STARTS_AFTER_PERIODS, withDeclaredTiming } from '../canonical.js';
 import { CANONICAL_JSON_SCHEMA } from '../../model-program-turn/prompt.js';
 
 // ── builders ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 const base = { party: null, approval: 'proposed' as const, author_id: null };
 const qty = (id: string, unit: string, f: Partial<CanonicalQuantityT>): CanonicalQuantityT => ({
-  id, label: id.replace(/_/g, ' '), unit, kind: 'fact', value: null, low: null, high: null, range_kind: null, status: 'known', question: null, basis: null, author: 'person', quote: null, ...base, ...f,
+  id, label: id.replace(/_/g, ' '), unit, kind: 'fact', value: null, low: null, high: null, range_kind: null, status: 'known', question: null, basis: null, direction: null, author: 'person', quote: null, ...base, ...f,
 });
 const person = (id: string, unit: string, value: number, quote: string) => qty(id, unit, { value, quote });
 const structure = (id: string, unit: string, value: number, basis: string) => qty(id, unit, { value, author: 'structure', basis });
@@ -816,5 +816,57 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     // Contrast: the probe sees a question where there is one: the AI's own, on the record, in the model it was given.
     expect(JSON.stringify(gym())).toContain('How many members leave in a typical month?');
     expect(JSON.stringify(cases[2]![1])).toContain('How would you tell the regulars are happy?');
+  });
+});
+
+/** Issue 39 (DL 24 Oct): a link whose size has no figure, or whose range spans zero, takes the direction the model states. */
+describe('issue 39: an unsized link is drawn with its stated direction, never a default sign', () => {
+  const priced = (c: Partial<CanonicalQuantityT>): CanonicalModelT => model({
+    question: 'Should the bakery raise its price?',
+    quantities: [
+      person('base_sales', 'loaf/week', 400, 'We sell 400 loaves a week'),
+      person('price_rise', 'GBP', 0, 'keep the price'),
+      person('fifty_p', 'GBP', 0.5, 'raise it by 50p'),
+      qty('price_effect', 'loaf/week/GBP', { kind: 'coefficient', author: 'olumi', ...c }),
+      derived('sales', 'loaf/week'),
+      person('sales_target', 'loaf/week', 380, 'keep sales at 380 or more'),
+      person('quarter', 'week', 13, 'within 13 weeks'),
+    ],
+    relations: [eff('sales_rel', 'sales', 'base_sales', [['price_rise', 'price_effect']])],
+    goals: [goal('keep_sales', 'sales', '>=', 'sales_target', 'end', 'quarter', 'keep sales at 380 or more')],
+    options: [option('raise', 'Raise the price by 50p', [set('price_rise', 'fifty_p', 'raise it by 50p')], 'raise it by 50p'), option('keep', 'Keep the price', [], 'keep the price')],
+  });
+  /** The price link as drawn: its direction and the sign of its strength. */
+  const linkOf = (m: CanonicalModelT) => {
+    const e = (project(m).graph.edges as Record<string, unknown>[]).find((x) => x.from === 'price_rise' && x.to === 'sales')!;
+    return { direction: e.effect_direction, mean: (e.strength as { mean: number }).mean };
+  };
+  const UNKNOWN = { status: 'unknown' as const, basis: 'Last year\'s sales after a price change would size it.' };
+  const STRADDLES = { status: 'estimated' as const, low: -60, high: 20, range_kind: 'plausible' as const, basis: 'It could go either way.' };
+
+  it('an unknown size that lowers what it moves is drawn negative; one that raises it, positive', () => {
+    expect(linkOf(priced({ ...UNKNOWN, direction: 'lowers' }))).toEqual({ direction: 'negative', mean: -1 });
+    expect(linkOf(priced({ ...UNKNOWN, direction: 'raises' }))).toEqual({ direction: 'positive', mean: 1 });
+  });
+
+  it('a range that spans zero takes its stated direction, not the sign of its centre', () => {
+    // Contrast: with no stated direction the centre (-20) still decides, as before.
+    expect(linkOf(priced({ ...STRADDLES, direction: null }))).toEqual({ direction: 'negative', mean: -1 });
+    expect(linkOf(priced({ ...STRADDLES, direction: 'raises' }))).toEqual({ direction: 'positive', mean: 1 });
+  });
+
+  it('a figure keeps its own sign: a stated direction never overrides it', () => {
+    expect(linkOf(priced({ status: 'estimated', low: -60, high: -10, value: -30, range_kind: 'plausible', basis: 'Fewer loaves sell at a higher price.', direction: 'raises' })))
+      .toEqual({ direction: 'negative', mean: -1 });
+  });
+
+  it('a program saved before direction existed is read in today\'s format, every quantity with none', () => {
+    const old = JSON.parse(JSON.stringify(priced(UNKNOWN))) as { quantities: Record<string, unknown>[] };
+    for (const x of old.quantities) delete x.direction;
+    // Contrast: the format needs the field, so the reader's mapping is what lets an old program open.
+    expect(CanonicalModel.safeParse(old).success).toBe(false);
+    const read = CanonicalModel.safeParse(withDeclaredTiming(old));
+    expect(read.success).toBe(true);
+    expect(read.data!.quantities.map((x) => [x.id, x.direction])).toEqual(old.quantities.map((x) => [x.id, null]));
   });
 });

@@ -186,7 +186,7 @@ export function normalise(model: CanonicalModelT): CanonicalModelT {
         kind: status === 'estimated' ? 'coefficient' : 'fact',
         value: s.value, low: s.low, high: s.high, range_kind: s.range_kind, status, question: s.question,
         basis: status === 'estimated' ? `Olumi's estimate of what "${o.label}" sets this to.` : proposal ? `Olumi's proposed setting for its option "${o.label}".` : s.author === 'structure' ? `"${o.label}" switched on.` : null,
-        author: s.author, party: null, quote: s.quote, approval: o.approval, author_id: o.author_id,
+        direction: null, author: s.author, party: null, quote: s.quote, approval: o.approval, author_id: o.author_id,
       });
       return { ...s, to: id, value: null, low: null, high: null, range_kind: null, question: null };
     }),
