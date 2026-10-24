@@ -2,7 +2,7 @@
  * THE COMPILER (spike S1): CanonicalModel → ExecutableModel, with TYPED OUTCOMES.
  *
  *   compile(model, { sourceText }) → { executable, perGoal, perLimit, perOption, joint, within_limits, coverage, errors,
- *                                     asks, coaching, unverified, preferences, conversions, implicit_as_stated }
+ *                                     blockers, unverified, preferences, conversions, implicit_as_stated }
  *
  * Four kinds of outcome, never confused:
  *  · ERRORS are the draft's own mistakes (an undefined id, a unit that does not combine, a cycle not through a stock, an
@@ -12,7 +12,8 @@
  *    unfaithful drafts).
  *  · ASKS are legitimate, successful outcomes: a figure only the person can give. Each ask fills EXACTLY ONE quantity
  *    (an update's postimage sets it) and lists what it feeds; each goal lists its own asks, so "answer these and the chance
- *    appears" is true by construction. An asked fact is NEVER removed or given a value by the compiler: finite numerical
+ *    appears" is true by construction. What the chance waits on is typed (`blockers`); the code writes no question: the AI
+ *    asks in its own words (simplify v1 A4). An asked fact is NEVER removed or given a value by the compiler: finite numerical
  *    agreement cannot prove cancellation or its domain (the buddy's BLOCK, upheld by the DL). Cancellation may only ever be
  *    PROVEN from the canonical forms with its domain conditions, and only after a PL review: not built.
  *  · WITHHELD goals rest on a quantity that is `unknown` or `unsupported`, a range the ruled law holds, or a window or timing
@@ -70,10 +71,15 @@ export type GoalOutcome = {
 };
 export type LimitOutcome = { limit_id: string; status: Outcome; reasons: string[]; asks: string[]; cancelled: string[]; needs_measure: boolean };
 export type OptionOutcome = { option_id: string; status: Outcome | 'not_compared'; reasons: string[]; asks: string[] };
-/** One question whose answer fills exactly one quantity. */
-export type Ask = { quantity_id: string; label: string; unit: string; question: string; feeds: string[]; cancels_out_of: string[]; edit: { op: 'fill_quantity' | 'set_range_kind'; quantity_id: string } };
-/** A question whose answer changes the model's structure (a measure for an aim or guardrail; a deadline; a left-out item). */
-export type Coaching = { record_id: string; kind: 'measure' | 'deadline' | 'left_out'; question: string };
+/**
+ * ONE THING THE RESULT WAITS ON (simplify v1 A4): typed, in the model's order, never ranked and never worded by the code.
+ * `id` is the record (a quantity, goal or limit; '(model)' when there is no goal); `scope` the goals, limits and live options
+ * it holds up. asked: a figure only the person can give (the AI's own question may be on the record). range_kind: their
+ * range, with no word on whether its ends are hard. recount: their count, given below 0. measure: an aim or guardrail with no
+ * measure. deadline: an aim or guardrail that changes over time with no deadline. no_goal: no aim at all.
+ */
+export type BlockerCode = 'asked' | 'range_kind' | 'recount' | 'measure' | 'deadline' | 'no_goal';
+export type Blocker = { id: string; code: BlockerCode; scope: string[] };
 export type Conversion =
   | { kind: 'percent'; quantity: string; from: string; to: string; factor: number; author: 'olumi' }
   | { kind: 'range_law'; quantity: string; low: number; high: number; range_kind: 'bounds' | 'plausible'; domain: Domain | null; reading: Extract<RangeReading, { kind: 'normal' }>; author: 'olumi'; provisional: true };
@@ -89,8 +95,7 @@ export type CompileResult = {
   /** What this run covers and what it leaves out, by label ("covers productivity and budget only"). */
   coverage: { covers: string[]; leaves_out: Withheld[] };
   errors: CompileError[];
-  asks: Ask[];
-  coaching: Coaching[];
+  blockers: Blocker[];
   unverified: { id: string; quote: string }[];
   /** Wishes without a threshold: shown and reported, never a goal or a limit. */
   preferences: { id: string; quantity: string; direction: 'lower' | 'higher'; label: string }[];
@@ -127,7 +132,6 @@ export function readRange(d: RangeDist): LawReading {
 }
 
 export const AS_STATED_OPTION_ID = 'as_stated';
-export const NO_GOAL_QUESTION = 'What result would tell you this worked, and by when?';
 const ID_RE = /^[a-z][a-z0-9_]*$/;
 const has = <T>(x: T | null | undefined): x is T => x !== null && x !== undefined;
 const norm = (s: string) => s.toLowerCase().replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[–—]/g, '-').replace(/\s+/g, ' ').trim();
@@ -146,12 +150,12 @@ export function compileJson(input: unknown, opts: { sourceText?: string } = {}):
     errors: parsed.error.issues.slice(0, 20).map((i) => ({
       code: 'schema' as const, message: `The model's shape is wrong at ${i.path.join('.') || 'its top level'}: ${i.message}.`, items: [],
     })),
-    asks: [], coaching: [], unverified: [], preferences: [], conversions: [], implicit_as_stated: false, in_model: [],
+    blockers: [], unverified: [], preferences: [], conversions: [], implicit_as_stated: false, in_model: [],
   };
 }
 
 type Win = { start_period: number; periods: number };
-type WinState = { win: Win | null; blockers: string[]; withheld: string[]; deadline?: string };
+type WinState = { win: Win | null; blockers: string[]; withheld: string[]; deadline?: true };
 type Measure = { quantity: string; per: string | null; cmp: string; target: string; aggregation: string; window: CanonicalWindowT | null };
 
 /** The id an option's inline value compiles to. */
@@ -187,7 +191,7 @@ export function normalise(model: CanonicalModelT): CanonicalModelT {
   }));
   const named = extra.length ? { ...model, quantities: [...model.quantities, ...extra], options } : model;
   // A figure labelled structure that is no structural constant ("current output = 12", stated by no one) is the person's
-  // to give: always their question, never Olumi's fixed figure nor read as theirs (Codex r4–r7 #3709).
+  // to give: always asked of them, never Olumi's fixed figure nor read as theirs (Codex r4–r7 #3709).
   const asked = named.quantities.map((q) => (q.author === 'structure' && q.kind === 'fact' && q.status === 'known' && has(q.value) && !has(q.low) && !has(q.high)
     && !isStructuralConstant(named, q) ? structureAsked(q) : q));
   return asked.some((q, i) => q !== named.quantities[i]) ? { ...named, quantities: asked } : named;
@@ -203,7 +207,7 @@ export function normalise(model: CanonicalModelT): CanonicalModelT {
  *  · 1 in unit "1" only, by exact unit algebra: a part of a product, or the base of an effect or a part of a sum whose every
  *    other term is dimensionless ("current productivity, indexed" = 1, the 1 of "1 + growth"); 1 with any unit ("one
  *    customer", "current customers = 1") never is one.
- * Any other figure labelled structure ("current output = 12", "budget for the year" = 1 year) is the person's question.
+ * Any other figure labelled structure ("current output = 12", "budget for the year" = 1 year) is the person's to give.
  */
 export function isStructuralConstant(model: CanonicalModelT, q: CanonicalQuantityT): boolean {
   const u = parseUnit(q.unit);
@@ -225,9 +229,9 @@ export function isStructuralConstant(model: CanonicalModelT, q: CanonicalQuantit
     || (r.form === 'definition' && r.op === 'sum' && r.parts.some((p) => p.id === q.id) && r.parts.every((p) => p.id === q.id || free(p.id)))
     || (r.form === 'effect' && r.base === q.id && r.terms.every((t) => free(t.driver, t.coefficient))));
 }
-/** A figure only the person can give, as their question. */
+/** A figure only the person can give: asked, with no question of the code's (the AI asks in its own words). */
 export const structureAsked = (q: CanonicalQuantityT): CanonicalQuantityT => ({ ...q, kind: 'fact', status: 'asked', author: 'person', value: null, low: null, high: null,
-  range_kind: null, basis: null, quote: null, question: `What is "${q.label}"?` });
+  range_kind: null, basis: null, quote: null, question: null });
 
 /** A figure the person gave as approximate (the host's mark, `APPROXIMATE_FIGURE`): theirs, a point, a range asked for. */
 export const isApproximate = (q: CanonicalQuantityT): boolean => q.author === 'person' && q.basis === APPROXIMATE_FIGURE && q.status === 'known' && q.value !== null && q.low === null;
@@ -328,7 +332,7 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
     }
     if (R.has(q.id)) { err('relation_on_figure', `${n} has a relation ("${R.get(q.id)!.id}") but is marked ${q.status}; mark it derived with null figures, or remove the relation.`, [q.id, R.get(q.id)!.id]); continue; }
     if (q.author === 'structure') {
-      // Its meaning is checked in `normalise` (`isStructuralConstant`): one that is no structural constant is already a question.
+      // Its meaning is checked in `normalise` (`isStructuralConstant`): one that is no structural constant is already asked.
       if (q.status !== 'known' || !has(q.value) || has(q.low)) err('structure_value', `${n} is a structural constant, so it is known with one exact figure and no range.`, [q.id]);
       if (q.kind !== 'fact') err('structure_value', `${n} is a structural constant, so its kind is fact (a coefficient is a mechanism's size, never structural: the person's figure or Olumi's ranged estimate).`, [q.id]);
       continue;
@@ -349,7 +353,7 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
       if (!has(q.basis)) err('figure_status', `${n} is Olumi's estimate with no basis; say in one sentence what it rests on.`, [q.id]);
     } else {
       if (fig) err('figure_status', `${n} is marked ${q.status} but has a figure; a figure in hand is known (the person's) or estimated (Olumi's).`, [q.id]);
-      if (q.status === 'asked' && !has(q.question)) err('figure_status', `${n} is asked but has no question; write the one question to the person.`, [q.id]);
+      // An asked figure needs no question of the AI's: what waits on it is typed, and the AI asks in its own words (A4).
       if (q.status !== 'asked' && !has(q.basis)) err('figure_status', `${n} is ${q.status} with no basis; say why in one sentence.`, [q.id]);
     }
   }
@@ -501,7 +505,7 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
     return m.aggregation === 'sum' ? sameDims(tu, multiply(qu, period)) || (sameDims(tu, qu) && !Object.keys(qu.dims).some((k) => TIME_DIMS.has(k))) : sameDims(tu, qu);
   };
   /** Shared checks for a goal's or a limit's measure; returns its window state. */
-  const measureChecks = (m: Measure, against: string, at: string, item: string, roots: readonly string[], question: string | null, frameWithheld: string[], relative = false): WinState | null => {
+  const measureChecks = (m: Measure, against: string, at: string, item: string, roots: readonly string[], frameWithheld: string[], relative = false): WinState | null => {
     if (!roots.every((x) => isQ(x, at, item))) return null;
     if (Q.get(m.quantity)!.status === 'asked') err('asks_for_result', `${at} measures ${name(m.quantity)}, which is asked: that asks the person for the result itself. Model what drives it (its definition, effect or stock), or leave the aim with measure null and a question.`, [item, m.quantity]);
     if (has(m.per) && m.aggregation === 'every') err('goal_shape', `${at} is a rate over the window (per ${name(m.per)}), which needs end, sum, mean, max or min, not every.`, [item]);
@@ -510,9 +514,9 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
     }
     if (has(m.window)) { const st = resolveWindow(m.window, at, item); st.withheld.push(...frameWithheld); return st; }
     // A static level with no deadline is read once, at period 0, with every option's change in effect. A level that
-    // changes over time (it rests on a stock) has no single reading without a deadline: a coaching question, never a guess.
+    // changes over time (it rests on a stock) has no single reading without a deadline: a typed blocker, never a guess.
     const moves = [...upstream(roots)].some((x) => R.get(x)?.form === 'stock');
-    return moves ? { win: null, blockers: [], withheld: frameWithheld, deadline: question ?? `By when should this be met?` } : { win: { start_period: 0, periods: 1 }, blockers: [], withheld: frameWithheld };
+    return moves ? { win: null, blockers: [], withheld: frameWithheld, deadline: true } : { win: { start_period: 0, periods: 1 }, blockers: [], withheld: frameWithheld };
   };
 
   const goalWin = new Map<string, WinState>();
@@ -544,7 +548,7 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
     }
     for (const a of m.assumptions) if (!model.assumptions.some((x) => x.id === a)) err('undefined_ref', `${at} rests on the assumption "${a}", which is not an assumption record.`, [g.id, a]);
     for (const x of m.exclusions) if (!model.left_out.some((y) => y.id === x)) err('undefined_ref', `${at} leaves out "${x}", which is not a left_out record.`, [g.id, x]);
-    const st = measureChecks(m, m.target, at, g.id, goalRoots(g), g.question, frameWithheld, m.frame === 'change_rel');
+    const st = measureChecks(m, m.target, at, g.id, goalRoots(g), frameWithheld, m.frame === 'change_rel');
     if (st) goalWin.set(g.id, st);
   }
   const limitWin = new Map<string, WinState>();
@@ -552,7 +556,7 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
     const at = `The limit "${l.label}" (${l.id})`;
     needQuote(l, at, l.id);
     if (!has(l.measure)) continue; // a guardrail with no measure yet is VALID: reported as not covered, never given a scale
-    const st = measureChecks({ ...l.measure, target: l.measure.bound }, l.measure.bound, at, l.id, limitRoots(l), l.question, []);
+    const st = measureChecks({ ...l.measure, target: l.measure.bound }, l.measure.bound, at, l.id, limitRoots(l), []);
     if (st) limitWin.set(l.id, st);
   }
   const wins = [...goalWin.values(), ...limitWin.values()].map((s) => s.win).filter(has);
@@ -661,9 +665,9 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
    */
   const contradictory = new Map(model.quantities.filter((q) => FIGURE_STATUSES.has(q.status) && isCount(q) && has(q.low) && has(q.high) && q.high < 0)
     .map((q) => [q.id, `"${q.label}" is given as ${q.low}–${q.high} ${q.unit}, but a count cannot be below 0`] as const));
-  /** A person's range whose words do not say whether its ends are hard: an UNRESOLVED reading, asked (PL ruling B). */
-  const unresolved = new Map(model.quantities.filter((q) => FIGURE_STATUSES.has(q.status) && q.author === 'person' && has(q.low) && has(q.high) && q.low < q.high && !has(q.range_kind) && !windowQs.has(q.id) && !contradictory.has(q.id))
-    .map((q) => [q.id, `Is ${q.low}–${q.high} ${q.unit} for "${q.label}" a firm range it cannot fall outside, or your rough estimate?`] as const));
+  /** A person's range whose words do not say whether its ends are hard: an UNRESOLVED reading, a blocker (PL ruling B). */
+  const unresolved = new Set(model.quantities.filter((q) => FIGURE_STATUSES.has(q.status) && q.author === 'person' && has(q.low) && has(q.high) && q.low < q.high && !has(q.range_kind) && !windowQs.has(q.id) && !contradictory.has(q.id))
+    .map((q) => q.id));
   const readings = new Map<string, LawReading>();
   for (const q of model.quantities) if (FIGURE_STATUSES.has(q.status) && has(q.low) && has(q.high) && q.low < q.high && U.has(q.id) && !windowQs.has(q.id)
     && !contradictory.has(q.id) && (!has(q.value) || (q.low < q.value && q.value < q.high))) {
@@ -671,22 +675,22 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
   }
   const held = new Map([...[...readings].filter(([, r]) => r.kind === 'held').map(([id, r]) => [id, (r as { reason: string }).reason] as const),
     ...[...contradictory].filter(([id]) => Q.get(id)!.author !== 'person').map(([id, why]) => [id, `${why}; Olumi's range is unsupported`] as const)]);
-  /** The person's contradictory counts: asked again, in their words. */
-  const recheck = new Map([...contradictory].filter(([id]) => Q.get(id)!.author === 'person').map(([id, why]) => [id, `${why}. What is it?`] as const));
+  /** The person's contradictory counts: theirs to give again, with the reason. */
+  const recheck = new Map([...contradictory].filter(([id]) => Q.get(id)!.author === 'person'));
 
   // ── typed outcomes: what each goal, limit and option rests on ──────────────────────────────────────────────────────
   const unverifiedIds = new Set(unverified.map((u) => u.id));
   const withholds = (q: CanonicalQuantityT) => WITHHOLDING_STATUSES.has(q.status) || held.has(q.id);
   const isAsk = (q: CanonicalQuantityT) => q.status === 'asked' || unresolved.has(q.id) || recheck.has(q.id);
   const blockersOf = (closure: Iterable<string>) => [...closure].map((x) => Q.get(x)).filter((q): q is CanonicalQuantityT => !!q && (isAsk(q) || withholds(q)));
-  const describe = (q: CanonicalQuantityT) => (q.status === 'asked' ? `needs "${q.label}": ${q.question}` : held.has(q.id) ? `rests on "${q.label}": ${held.get(q.id)}; give a most likely figure, or ask`
-    : unresolved.has(q.id) ? `needs how to read "${q.label}": ${unresolved.get(q.id)}` : recheck.has(q.id) ? `needs "${q.label}" again: ${recheck.get(q.id)}`
+  const describe = (q: CanonicalQuantityT) => (q.status === 'asked' ? `needs "${q.label}".` : held.has(q.id) ? `rests on "${q.label}": ${held.get(q.id)}; give a most likely figure, or ask`
+    : unresolved.has(q.id) ? `needs how to read "${q.label}" (firm ends, or a rough estimate).` : recheck.has(q.id) ? `needs "${q.label}" again: ${recheck.get(q.id)}.`
       : `rests on "${q.label}", which is ${q.status.replace('_', ' ')}: ${q.basis}`);
   const outcomeOf = (closure: Set<string>, win?: WinState): { status: Outcome; reasons: string[]; asks: string[] } => {
     const blockers = blockersOf([...closure, ...(win?.blockers ?? [])]);
     const withheld = [...(win?.withheld ?? []), ...blockers.filter(withholds).map(describe)];
     const asked = [...new Map(blockers.filter((q) => isAsk(q) && !withholds(q)).map((q) => [q.id, q] as const)).values()];
-    const reasons = [...withheld, ...asked.map(describe), ...(win?.deadline ? [`It changes over time, so it needs a deadline: ${win.deadline}`] : [])];
+    const reasons = [...withheld, ...asked.map(describe), ...(win?.deadline ? ['It changes over time, so it needs a deadline.'] : [])];
     return { status: withheld.length ? 'withheld' : asked.length || win?.deadline ? 'asks' : 'calculable', reasons, asks: asked.map((q) => q.id) };
   };
   const relationsIn = (closure: Set<string>) => [...closure].filter((q) => R.has(q)).map((q) => R.get(q)!);
@@ -703,18 +707,18 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
   const goalClosure = new Map<string, Set<string>>();
   const perGoal: GoalOutcome[] = model.goals.map((g) => {
     if (!has(g.measure)) {
-      return { goal_id: g.id, status: 'asks', reasons: [`"${g.label}" has no measure yet, so it is left out of the chance${has(g.question) ? `: ${g.question}` : '.'}`], asks: [], cancelled: [], needs_measure: true, needs_deadline: false, olumi_inputs: [], unverified_inputs: unverifiedIds.has(g.id) ? [g.id] : [], rests_on: restsOn(new Set([g.id])), excludes: [] };
+      return { goal_id: g.id, status: 'asks', reasons: [`"${g.label}" has no measure yet, so it is left out of the chance.`], asks: [], cancelled: [], needs_measure: true, needs_deadline: false, olumi_inputs: [], unverified_inputs: unverifiedIds.has(g.id) ? [g.id] : [], rests_on: restsOn(new Set([g.id])), excludes: [] };
     }
     const closure = upstream(goalRoots(g));
     const w = goalWin.get(g.id);
     goalClosure.set(g.id, new Set([...closure, ...(w?.blockers ?? [])]));
     const touched = touchedBy(closure, g.id);
     for (const x of [g.measure.window?.periods, g.measure.window?.origin_offset]) if (has(x)) touched.add(x);
-    return { goal_id: g.id, ...outcomeOf(closure, w), cancelled: [], needs_measure: false, needs_deadline: has(w?.deadline), olumi_inputs: olumiInputs(closure), unverified_inputs: [...touched].filter((x) => unverifiedIds.has(x)), rests_on: restsOn(touched, g.measure.assumptions), excludes: [...g.measure.exclusions] };
+    return { goal_id: g.id, ...outcomeOf(closure, w), cancelled: [], needs_measure: false, needs_deadline: w?.deadline === true, olumi_inputs: olumiInputs(closure), unverified_inputs: [...touched].filter((x) => unverifiedIds.has(x)), rests_on: restsOn(touched, g.measure.assumptions), excludes: [...g.measure.exclusions] };
   });
   const limitClosure = new Map<string, Set<string>>();
   const perLimit: LimitOutcome[] = model.limits.map((l) => {
-    if (!has(l.measure)) return { limit_id: l.id, status: 'asks', reasons: [`"${l.label}" has no measure yet, so the result does not cover it${has(l.question) ? `: ${l.question}` : '.'}`], asks: [], cancelled: [], needs_measure: true };
+    if (!has(l.measure)) return { limit_id: l.id, status: 'asks', reasons: [`"${l.label}" has no measure yet, so the result does not cover it.`], asks: [], cancelled: [], needs_measure: true };
     const closure = upstream(limitRoots(l));
     const w = limitWin.get(l.id);
     limitClosure.set(l.id, new Set([...closure, ...(w?.blockers ?? [])]));
@@ -731,7 +735,7 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
     joint: { status: 'asks', goal_ids: [], leaves_out: [], asks: [], reasons: [] },
     within_limits: { status: 'calculable', limit_ids: [], leaves_out: [], asks: [], reasons: [] },
     coverage: { covers: [], leaves_out: [] },
-    errors, asks: [], coaching: [], unverified,
+    errors, blockers: [], unverified,
     preferences: model.preferences.map((p) => ({ id: p.id, quantity: p.quantity, direction: p.direction, label: Q.get(p.quantity)?.label ?? p.quantity })),
     conversions: [], implicit_as_stated: model.options.length === 0,
     in_model: [...new Set([...goalClosure.values(), ...limitClosure.values(),
@@ -793,7 +797,7 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
   // Finite probes cannot establish an identity or its domain. Missing facts stay asked;
   // no diagnostic agreement may remove an ask or substitute an invented production value.
 
-  // ── joint, limits, coverage, asks, coaching ────────────────────────────────────────────────────────────────────────
+  // ── joint, limits, coverage, blockers ─────────────────────────────────────────────────────────────────────────────
   const worst = (xs: { status: Outcome }[]): Outcome => (xs.some((x) => x.status === 'withheld') ? 'withheld' : xs.some((x) => x.status === 'asks') ? 'asks' : 'calculable');
   const measuredOutcomes = perGoal.filter((p) => !p.needs_measure);
   const measuredLimitOutcomes = perLimit.filter((p) => !p.needs_measure);
@@ -819,21 +823,17 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
     ...perLimit.filter((p) => limitClosure.get(p.limit_id)?.has(id)).map((p) => p.limit_id),
     ...model.options.filter((o) => o.status === 'live' && optionClosure.get(o.id)!.has(id)).map((o) => o.id),
   ];
-  const figureAsks: Ask[] = model.quantities.filter((q) => q.status === 'asked' && has(q.question))
-    .map((q) => ({ quantity_id: q.id, label: q.label, unit: q.unit, question: q.question!, feeds: feedsOf(q.id), cancels_out_of: [], edit: { op: 'fill_quantity' as const, quantity_id: q.id } }));
-  const readingAsks: Ask[] = [...unresolved].map(([id, question]) => ({ quantity_id: id, label: Q.get(id)!.label, unit: Q.get(id)!.unit, question, feeds: feedsOf(id), cancels_out_of: [], edit: { op: 'set_range_kind' as const, quantity_id: id } }));
-  // A figure they gave as approximate is used exactly as stated; a range is asked for, and nothing waits on it.
-  const rangeAsks: Ask[] = model.quantities.filter((q) => isApproximate(q))
-    .map((q) => ({ quantity_id: q.id, label: q.label, unit: q.unit, question: `You said "${q.quote ?? q.value}" for "${q.label}". What range would you put on it? Olumi is using ${q.value} ${q.unit} for now.`,
-      feeds: feedsOf(q.id), cancels_out_of: [], edit: { op: 'fill_quantity' as const, quantity_id: q.id } }));
-  const recheckAsks: Ask[] = [...recheck].map(([id, question]) => ({ quantity_id: id, label: Q.get(id)!.label, unit: Q.get(id)!.unit, question, feeds: feedsOf(id), cancels_out_of: [], edit: { op: 'fill_quantity' as const, quantity_id: id } }));
-  result.asks = [...figureAsks, ...readingAsks, ...recheckAsks, ...rangeAsks].sort((a, b) => b.feeds.length - a.feeds.length);
-  result.coaching = [
-    ...(model.goals.length === 0 ? [{ record_id: '(model)', kind: 'measure' as const, question: NO_GOAL_QUESTION }] : []),
-    ...model.goals.filter((g) => !has(g.measure)).map((g) => ({ record_id: g.id, kind: 'measure' as const, question: g.question ?? NO_GOAL_QUESTION })),
-    ...model.limits.filter((l) => !has(l.measure) && has(l.question)).map((l) => ({ record_id: l.id, kind: 'measure' as const, question: l.question! })),
-    ...model.goals.filter((g) => has(goalWin.get(g.id)?.deadline)).map((g) => ({ record_id: g.id, kind: 'deadline' as const, question: goalWin.get(g.id)!.deadline! })),
-    ...model.left_out.filter((x) => has(x.question)).map((x) => ({ record_id: x.id, kind: 'left_out' as const, question: x.question! })),
+  // What the result waits on, typed and in the model's order (no ranking, no words): the AI asks in its own (A4).
+  const blocker = (id: string, code: BlockerCode, scope: string[]): Blocker => ({ id, code, scope });
+  result.blockers = [
+    ...(model.goals.length === 0 ? [blocker('(model)', 'no_goal', [])] : []),
+    ...model.goals.flatMap((g) => [...(!has(g.measure) ? [blocker(g.id, 'measure', [g.id])] : []), ...(goalWin.get(g.id)?.deadline === true ? [blocker(g.id, 'deadline', [g.id])] : [])]),
+    ...model.limits.flatMap((l) => [...(!has(l.measure) ? [blocker(l.id, 'measure', [l.id])] : []), ...(limitWin.get(l.id)?.deadline === true ? [blocker(l.id, 'deadline', [l.id])] : [])]),
+    ...model.quantities.flatMap((q) => [
+      ...(q.status === 'asked' ? [blocker(q.id, 'asked', feedsOf(q.id))] : []),
+      ...(unresolved.has(q.id) ? [blocker(q.id, 'range_kind', feedsOf(q.id))] : []),
+      ...(recheck.has(q.id) ? [blocker(q.id, 'recount', feedsOf(q.id))] : []),
+    ]),
   ];
   const withheldList: Withheld[] = [
     ...perGoal.filter((p) => p.status !== 'calculable').map((p) => ({ id: p.goal_id, kind: 'goal' as const, label: label(p.goal_id), reason: p.reasons.join(' ') })),

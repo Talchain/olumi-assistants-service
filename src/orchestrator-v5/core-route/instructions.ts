@@ -219,7 +219,10 @@ export const PROGRAM_TOOL_DESCRIPTIONS = {
   read_canonical_context:
     'Read the saved model program: its revision; model, the canonical model exactly as authored (its question and period; each quantity with its unit, status, author, words, basis and range, '
     + 'or the question still open for it; the relations, goals, limits, preferences, options and risks; and the reasoning kept beside them: claims, evidence, assumptions, dissent, conditions and what was left out); '
-    + 'earlier_versions, how many earlier versions it has; open_questions, each with what it feeds and the edit that answers it; coaching, the questions that would give an aim a measure or a deadline; '
+    + 'earlier_versions, how many earlier versions it has; blockers, what the stored Run waits on, in the model\'s order, each with its id, code and scope (what it holds up). No question is written for you: '
+    + 'ask about any of them in your own words, at most three a reply, the most consequential first. What each code needs from the person: asked, the figure (the record may carry the drafter\'s question); '
+    + 'range_kind, whether the ends of their range are firm or a rough estimate; recount, the count again (it was given below 0); '
+    + 'measure, how the aim or guardrail is measured; deadline, by when; no_goal, the result they want. A Run stored earlier gives open_questions and coaching instead; '
     + 'and run, the stored Run, with current and engine_current. Use these saved facts and ids, never an earlier reply. A Run that is not current describes an earlier model: say so, never present it as current. ' + RUN_WORDS_RULE,
   propose_change:
     'Prepare a change to the saved model for the person to approve on its card; nothing is saved until they do. Only when they ask to change the model (an answer, a correction, a new item or a removal): '

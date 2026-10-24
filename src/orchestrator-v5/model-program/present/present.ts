@@ -69,12 +69,22 @@ export interface PresentLimit {
   readonly reasons: readonly string[];
   readonly asks: readonly string[];
 }
-/** S1's `Ask`. */
+/** An asked quantity, by its label and unit (S1's `asked` blocker): never a question of the code's. */
 export interface PresentAsk {
   readonly quantity_id: string;
   readonly label: string;
   readonly unit: string;
-  readonly question: string;
+}
+/**
+ * One thing the result waits on (S1's typed `Blocker`), with its label: listed on the result as it is, in the model's order.
+ * `answer` names the figure the card's answer box fills, where there is one (a quantity); null when it is answered in chat.
+ */
+export interface PresentBlocker {
+  readonly id: string;
+  readonly code: string;
+  readonly label: string;
+  readonly scope: readonly string[];
+  readonly answer: { readonly quantity_id: string } | null;
 }
 /** How to try a value for a goal's one asked quantity: the model compiled with it set to the value tried. */
 export interface TippingProbe {
@@ -92,6 +102,8 @@ export interface PresentInput {
   /** Every limit (S1 `perLimit` with labels). A limit waiting on an ask is named as not yet checked, never dropped. */
   readonly limits?: readonly PresentLimit[];
   readonly asks?: readonly PresentAsk[];
+  /** Everything the result waits on, typed (S1's `blockers`), listed on the result as `goal_chance.waits_on`. */
+  readonly blockers?: readonly PresentBlocker[];
   /** Aims left out of the chance because they have no measure yet, by label (S1 `joint.leaves_out`). */
   readonly leaves_out?: readonly string[];
   /** The model's left-out records (what it does not represent), in their own words, with what each concerns. */
@@ -144,6 +156,8 @@ export interface PresentedAnalysisView {
     readonly limits?: readonly { readonly constraint_id: string; readonly words: string;
       readonly options: readonly { readonly option_id: string; readonly display: string }[] }[];
     readonly unchecked_limits?: readonly { readonly limit_id: string; readonly words: string }[];
+    /** Everything the result waits on, by label, with the figure its answer box fills where there is one. */
+    readonly waits_on?: readonly PresentBlocker[];
   };
 }
 
@@ -151,7 +165,7 @@ const NEEDS_ANSWER_FACE = 'Not shown yet: needs your answer';
 const NOT_SHOWN_FACE = 'Chance not shown yet';
 const TIPPING_DRAWS = 4000;
 
-function listWords(parts: readonly string[]): string {
+export function listWords(parts: readonly string[]): string {
   return parts.length <= 1 ? (parts[0] ?? '') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
 }
 const q = (label: string): string => `‘${label.trim()}’`;
@@ -328,8 +342,8 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     ...(model.withheld ?? []).filter((w) => w.kind === 'limit' && !givenLimits.some((l) => l.limit_id === w.id))
       .map((w) => ({ limit_id: w.id, label: w.label, status: 'withheld' as const, reasons: [w.reason], asks: [] }))];
   const uncheckedWords = unchecked.map((l) => {
-    const qs = l.asks.map((id) => askOf.get(id)?.question).filter((x): x is string => x !== undefined);
-    return `${q(l.label)} — ${qs.length > 0 ? `needs your answer: ${qs.join(' ')}` : l.reasons.join(' ')}`;
+    const waits = l.asks.map((id) => askOf.get(id)?.label).filter((x): x is string => x !== undefined);
+    return `${q(l.label)} — ${waits.length > 0 ? `waits on ${listWords(waits.map(q))}` : l.reasons.join(' ')}`;
   });
   const uncheckedLine = uncheckedWords.length > 0 ? `Not yet checked: ${uncheckedWords.join('; ')}` : undefined;
   /** "‘Customer cost’ is at most £1,100 at 1 month from now: about 81%", one per limit, for one option. */
@@ -340,11 +354,11 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   });
 
   // ── Cells ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  const questions = waiting.flatMap((g) => g.asks.map((id) => askOf.get(id)?.question).filter((x): x is string => x !== undefined));
+  const waitsOn = [...new Set(waiting.flatMap((g) => g.asks.map((id) => askOf.get(id)?.label).filter((x): x is string => x !== undefined)))];
   const withheldCell = (): PresentCell => ({
-    kind: 'withheld', face: questions.length > 0 ? NEEDS_ANSWER_FACE : NOT_SHOWN_FACE,
+    kind: 'withheld', face: waitsOn.length > 0 ? NEEDS_ANSWER_FACE : NOT_SHOWN_FACE,
     why: waiting.length > 0
-      ? questions.length > 0 ? `${listWords(waiting.map((g) => q(g.label)))} ${waiting.length === 1 ? 'waits' : 'wait'} for your answer: ${questions.join(' ')}`
+      ? waitsOn.length > 0 ? `${listWords(waiting.map((g) => q(g.label)))} ${waiting.length === 1 ? 'waits' : 'wait'} on ${listWords(waitsOn.map(q))}`
         : `${listWords(waiting.map((g) => q(g.label)))} ${waiting.length === 1 ? 'is' : 'are'} not in the chance yet: ${waiting.flatMap((g) => g.reasons).join(' ')}`
       : 'The words for this chance cannot be said exactly, so it is not shown.',
     reasons: waiting.length > 0 ? waiting.map((g) => ({ code: g.status === 'asks' ? 'goal_asks' : 'goal_withheld', message: g.reasons.join(' ') || null }))
@@ -409,13 +423,10 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     ...result.options.flatMap((o) => o.per_goal.flatMap((g) => (isWithheld(g)
       ? [`${q(allGoals.find((x) => x.goal_id === g.goal_id)?.label ?? g.goal_id)} with ${q(optionLabel.get(o.option_id) ?? o.option_id)} is not shown: in ${g.withheld.count.toLocaleString('en-GB')} of ${result.draws.toLocaleString('en-GB')} simulated draws ${listWords(g.withheld.quantities.map((id) => q(label(id) ?? id)))} could not be worked out.`]
       : []))),
-    ...waiting.map((g) => `${q(g.label)} is not in the chance yet: ${g.asks.length > 0 ? listWords(g.asks.map((id) => askOf.get(id)?.question ?? q(id))) : g.reasons.join(' ')}`),
+    ...waiting.map((g) => `${q(g.label)} is not in the chance yet: ${g.asks.length > 0 ? `it waits on ${listWords(g.asks.map((id) => q(askOf.get(id)?.label ?? id)))}` : g.reasons.join(' ')}`),
     // The 11 Oct decision (:74): what the chance covers (the measured aims it uses) and what it leaves out (aims with no
     // measure, the model's left-out records); never a claim that it covers everything.
     ...(covered.length > 0 && notCovered.length > 0 ? [`Covers: ${listWords(covered)} · Leaves out: ${listWords(notCovered.map(q))}`] : []),
-    // Asked only where nothing left out concerns the aim: a deadline they stated and the model cannot hold is never asked again.
-    ...model.goals.filter((g) => g.no_deadline === true && !(input.left_out ?? []).some((r) => r.concerns.includes(g.id)))
-      .map((g) => `No deadline is recorded yet for ${q(allGoals.find((x) => x.goal_id === g.id)?.label ?? g.id)}: is there one?`),
     ...notInRun.map((w) => `The ${w.kind} ${q(w.label)} is not in this run: ${w.reason}`),
     ...(uncheckedLine !== undefined ? [stop(uncheckedLine)] : []),
     ...thresholds.map((t) => t.words),
@@ -446,6 +457,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
         return s === undefined ? [] : [{ option_id: o.option_id, display: s.display }];
       }) }]) } : {}),
     ...(unchecked.length > 0 ? { unchecked_limits: unchecked.map((l, i) => ({ limit_id: l.limit_id, words: uncheckedWords[i]! })) } : {}),
+    ...((input.blockers ?? []).length > 0 ? { waits_on: input.blockers } : {}),
   };
   const known = input.current !== undefined && input.run !== undefined;
   return {

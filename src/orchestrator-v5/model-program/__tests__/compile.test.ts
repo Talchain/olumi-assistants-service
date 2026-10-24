@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod-v4';
 import { APPROXIMATE_FIGURE, CanonicalModel, type CanonicalModelT, type CanonicalQuantityT, type CanonicalRelationT, type CanonicalGoalT, type CanonicalLimitT } from '../canonical.js';
-import { compile, compileJson, normalise, NO_GOAL_QUESTION } from '../compile.js';
+import { compile, compileJson, normalise } from '../compile.js';
 import { project } from '../project.js';
 import { probeValue } from './probe.js';
 import { parseUnit, sameDims } from '../units.js';
@@ -167,10 +167,11 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(r.executable!.quantities.map((q) => q.id)).not.toContain('leavers');
     expect(r.executable!.quantities.map((q) => q.id)).toContain('class_revenue');
     expect(r.joint).toMatchObject({ status: 'asks', goal_ids: ['reach_400', 'class_income'], asks: ['leavers'] });
-    expect(r.asks).toEqual([{ quantity_id: 'leavers', label: 'leavers', unit: 'member/month', question: 'How many members leave in a typical month?', feeds: ['reach_400'], cancels_out_of: [], edit: { op: 'fill_quantity', quantity_id: 'leavers' } }]);
+    expect(r.blockers).toEqual([{ id: 'leavers', code: 'asked', scope: ['reach_400'] }]);
     // Gold gap 2: what the run leaves out is echoed on the executable model and in coverage.
     expect(r.executable!.withheld).toEqual([expect.objectContaining({ id: 'reach_400', kind: 'goal', label: 'reach 400' })]);
-    expect(r.executable!.withheld[0].reason).toContain('How many members leave');
+    expect(r.executable!.withheld[0].reason).toContain('needs "leavers".');
+    expect(r.executable!.withheld[0].reason).not.toContain('How many members leave'); // the AI's question is the AI's to ask
     expect(r.coverage.covers).toEqual(['class income']);
 
     const r2 = compile(gymFilled());
@@ -225,7 +226,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(r2.errors).toEqual([]);
     expect(r2.joint).toMatchObject({ status: 'calculable', goal_ids: ['weekly_profit', 'cash_buffer'], leaves_out: ['regulars_happy'] });
     expect(r2.perGoal.find((p) => p.goal_id === 'regulars_happy')).toMatchObject({ status: 'asks', needs_measure: true });
-    expect(r2.coaching).toEqual([{ record_id: 'regulars_happy', kind: 'measure', question: 'How would you tell the regulars are happy: repeat visits a week?' }]);
+    expect(r2.blockers).toEqual([{ id: 'regulars_happy', code: 'measure', scope: ['regulars_happy'] }]);
     expect(r2.executable!.goals.map((g) => g.id)).toEqual(['weekly_profit', 'cash_buffer']);
     expect(r2.coverage.leaves_out.map((w) => w.id)).toEqual(['regulars_happy']);
   });
@@ -276,7 +277,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     m.goals = [];
     const r = compile(m);
     expect(r.errors).toEqual([]);
-    expect(r.coaching).toEqual([{ record_id: '(model)', kind: 'measure', question: NO_GOAL_QUESTION }]);
+    expect(r.blockers).toEqual([{ id: '(model)', code: 'no_goal', scope: [] }]);
     expect(r.joint.status).toBe('asks');
     expect(r.executable!.goals).toEqual([]);
     expect(r.executable!.limits.map((l) => l.id)).toEqual(['spend_cap']);
@@ -352,12 +353,12 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(String(node.display_value)).not.toContain('Olumi');
     const hiding = bakery();
     hiding.quantities = hiding.quantities.map((q) => (q.id === 'costs' ? structure('costs', 'GBP/week', 612.5, 'Costs.') : q));
-    // Codex r4/r5 #3709: it cannot hide there — it is read as the person's question (never Olumi's fixed figure), and what
-    // rests on it waits for their answer.
+    // Codex r4/r5 #3709: it cannot hide there — it is the person's to give (never Olumi's fixed figure), and what rests on it
+    // waits for them. S1 A4: an asked figure, with no question of the code's ("What is …?" is gone).
     const hid = compile(hiding);
     expect(hid.errors).toEqual([]);
-    expect(normalise(hiding).quantities.find((q) => q.id === 'costs')).toMatchObject({ author: 'person', status: 'asked', value: null });
-    expect(hid.asks.map((a) => a.quantity_id)).toContain('costs');
+    expect(normalise(hiding).quantities.find((q) => q.id === 'costs')).toMatchObject({ author: 'person', status: 'asked', value: null, question: null, basis: null });
+    expect(hid.blockers).toEqual([{ id: 'costs', code: 'asked', scope: ['weekly_profit', 'cash_buffer'] }]);
   });
 
   it('finite numerical agreement cannot suppress an asked fact or invent its value', () => {
@@ -385,9 +386,9 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     const g = Object.fromEntries(r.perGoal.map((p) => [p.goal_id, p]));
     expect(g.more_loaves).toMatchObject({ status: 'asks', asks: ['loaves_per_baker'], cancelled: [] });
     expect(g.five_thousand).toMatchObject({ status: 'asks', asks: ['loaves_per_baker'], cancelled: [] }); // contrast: a level needs it
-    expect(r.asks).toEqual([expect.objectContaining({ quantity_id: 'loaves_per_baker', feeds: ['more_loaves', 'five_thousand'], cancels_out_of: [] })]);
+    expect(r.blockers).toEqual([{ id: 'loaves_per_baker', code: 'asked', scope: ['more_loaves', 'five_thousand'] }]);
     expect(r.executable).toBeNull();
-    expect(compile(team([growth])).asks).toEqual([expect.objectContaining({ quantity_id: 'loaves_per_baker', feeds: ['more_loaves'], cancels_out_of: [] })]);
+    expect(compile(team([growth])).blockers).toEqual([{ id: 'loaves_per_baker', code: 'asked', scope: ['more_loaves'] }]);
   });
 
   it('a nonlinear expression equal at both old probe points still depends on the missing fact', () => {
@@ -531,7 +532,8 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     const rm = compile(moving);
     expect(rm.errors).toEqual([]);
     expect(rm.perGoal.find((p) => p.goal_id === 'cash_buffer')).toMatchObject({ status: 'asks', needs_deadline: true, asks: [] });
-    expect(rm.coaching).toEqual([{ record_id: 'cash_buffer', kind: 'deadline', question: 'By when should this be met?' }]);
+    expect(rm.blockers).toEqual([{ id: 'cash_buffer', code: 'deadline', scope: ['cash_buffer'] }]);
+    expect(rm.perGoal.find((p) => p.goal_id === 'cash_buffer')!.reasons).toEqual(['It changes over time, so it needs a deadline.']);
     expect(rm.executable!.goals.map((g) => g.id)).toEqual(['weekly_profit']);
   });
 
@@ -640,8 +642,9 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     g.quantities = g.quantities.map((q) => (q.id === 'members_now' ? { ...q, value: null, low: -1010, high: -990, range_kind: 'plausible' as const } : q));
     const theirs = compile(g);
     expect(theirs.perGoal.find((p) => p.goal_id === 'reach_400')).toMatchObject({ status: 'asks', asks: ['members_now'] });
-    expect(theirs.asks.find((a) => a.quantity_id === 'members_now')).toMatchObject({ edit: { op: 'fill_quantity', quantity_id: 'members_now' } });
-    expect(theirs.asks.find((a) => a.quantity_id === 'members_now')!.question).toContain('is given as -1010–-990 member, but a count cannot be below 0');
+    expect(theirs.blockers).toContainEqual({ id: 'members_now', code: 'recount', scope: ['reach_400'] });
+    expect(theirs.perGoal.find((p) => p.goal_id === 'reach_400')!.reasons.join(' ')).toContain('is given as -1010–-990 member, but a count cannot be below 0.');
+    expect(theirs.perGoal.find((p) => p.goal_id === 'reach_400')!.reasons.join(' ')).not.toContain('What is it?');
     expect(theirs.conversions.some((c) => c.quantity === 'members_now')).toBe(false);
     expect(theirs.perGoal.find((p) => p.goal_id === 'class_income')).toMatchObject({ status: 'calculable' }); // contrast
     const olumis = gymFilled();
@@ -670,7 +673,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     const r = compile(unclear);
     expect(r.errors).toEqual([]);
     expect(r.perGoal.map((p) => [p.status, p.asks])).toEqual([['asks', ['costs']], ['asks', ['costs']]]);
-    expect(r.asks).toEqual([expect.objectContaining({ quantity_id: 'costs', edit: { op: 'set_range_kind', quantity_id: 'costs' }, feeds: ['weekly_profit', 'cash_buffer'] })]);
+    expect(r.blockers).toEqual([{ id: 'costs', code: 'range_kind', scope: ['weekly_profit', 'cash_buffer'] }]);
     const rb = compile({ ...unclear, quantities: unclear.quantities.map((q) => (q.id === 'costs' ? { ...q, range_kind: 'bounds' as const } : q)) });
     expect(rb.perGoal.map((p) => p.status)).toEqual(['calculable', 'calculable']);
     expect(xq(rb).get('costs')!.dist).toEqual({ kind: 'range', low: 500, high: 700, basis: 'person_range', range_kind: 'bounds' });
@@ -776,5 +779,42 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(sameDims(u('GBP'), u('USD'))).toBe(false);
     expect(parseUnit('£k').ok).toBe(false);
     expect(u('%').scale).toBe(0.01);
+  });
+
+  it('S1 one question channel (A4): what the result waits on is typed, in the model\'s order, and the compiler writes no question', () => {
+    const edit = (m: CanonicalModelT, f: (m: CanonicalModelT) => void) => { f(m); return m; };
+    const cases: [string, CanonicalModelT, { id: string; code: string; scope: string[] }[]][] = [
+      ['asked', gym(), [{ id: 'leavers', code: 'asked', scope: ['reach_400'] }]],
+      ['approximate: their figure as stated, no blocker (the AI asks for its range)', gymFilled(), []],
+      ['no measure', edit(bakery(), (m) => {
+        m.goals.push({ id: 'regulars_happy', label: 'Keep the regulars happy', measure: null, question: 'How would you tell the regulars are happy?', author: 'person', quote: 'keep the regulars happy', ...base });
+        m.limits.push({ id: 'friendly', label: 'Keep it friendly', measure: null, question: 'How would you tell it stays friendly?', author: 'person', quote: 'keep it friendly', ...base });
+      }), [{ id: 'regulars_happy', code: 'measure', scope: ['regulars_happy'] }, { id: 'friendly', code: 'measure', scope: ['friendly'] }]],
+      ['no goal', edit(bakery(), (m) => { m.goals = []; }), [{ id: '(model)', code: 'no_goal', scope: [] }]],
+      ['deadline', edit(bakery(), (m) => { m.goals = m.goals.map((g) => (g.id === 'cash_buffer' ? { ...g, measure: { ...g.measure!, window: null } } : g)); }),
+        [{ id: 'cash_buffer', code: 'deadline', scope: ['cash_buffer'] }]],
+      ['range kind', edit(bakery(), (m) => { m.quantities = m.quantities.map((q) => (q.id === 'costs' ? { ...q, value: null, low: 500, high: 700 } : q)); }),
+        [{ id: 'costs', code: 'range_kind', scope: ['weekly_profit', 'cash_buffer'] }]],
+      ['recount', edit(gymFilled(), (m) => { m.quantities = m.quantities.map((q) => (q.id === 'members_now' ? { ...q, value: null, low: -1010, high: -990, range_kind: 'plausible' as const } : q)); }),
+        [{ id: 'members_now', code: 'recount', scope: ['reach_400'] }]],
+      ['structure', edit(bakery(), (m) => { m.quantities = m.quantities.map((q) => (q.id === 'costs' ? structure('costs', 'GBP/week', 612.5, 'Costs.') : q)); }),
+        [{ id: 'costs', code: 'asked', scope: ['weekly_profit', 'cash_buffer'] }]],
+      ['an asked figure with no question of the AI\'s: valid, typed', edit(bakery(), (m) => { m.quantities.push(qty('flour_cost', 'GBP/week', { status: 'asked' })); }),
+        [{ id: 'flour_cost', code: 'asked', scope: [] }]],
+      ['a guardrail that changes over time with no deadline', edit(bakery(), (m) => { m.limits.push(limit('cash_floor', 'Keep cash above today', 'cash', '>=', 'cash_now', 'end', 'quarter', 'at least £10,000 in the bank'));
+        m.limits = m.limits.map((l) => (l.id === 'cash_floor' ? { ...l, measure: { ...l.measure!, window: null } } : l)); }), [{ id: 'cash_floor', code: 'deadline', scope: ['cash_floor'] }]],
+    ];
+    for (const [name, m, blockers] of cases) {
+      const r = compile(m);
+      expect(r.errors, name).toEqual([]);
+      expect(r.blockers, name).toEqual(blockers);
+      // No sentence of the compiler's is a question, whatever it waits on (labels carry none here).
+      expect(JSON.stringify(r), name).not.toContain('?');
+    }
+    // The structure figure is asked with NO question of the code's ("What is …?" is gone), and no mark the drafter could forge.
+    expect(normalise(cases[7]![1]).quantities.find((q) => q.id === 'costs')).toMatchObject({ status: 'asked', question: null, basis: null });
+    // Contrast: the probe sees a question where there is one: the AI's own, on the record, in the model it was given.
+    expect(JSON.stringify(gym())).toContain('How many members leave in a typical month?');
+    expect(JSON.stringify(cases[2]![1])).toContain('How would you tell the regulars are happy?');
   });
 });

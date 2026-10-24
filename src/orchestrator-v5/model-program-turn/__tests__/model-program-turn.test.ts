@@ -14,6 +14,7 @@ import { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha
 import { stableStringify } from '../../../orchestrator/context/stable-stringify.js';
 import { APPROXIMATE_FIGURE, type CanonicalModelT, type CanonicalQuantityT } from '../../model-program/canonical.js';
 import { compile, isStructuralConstant, normalise } from '../../model-program/compile.js';
+import { CORE_ALIGNED_INSTRUCTIONS } from '../../core-route/instructions.js';
 import { project } from '../../model-program/project.js';
 import { simulate } from '../../model-program/simulate/simulate.js';
 import { CANONICAL_JSON_SCHEMA, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX } from '../prompt.js';
@@ -201,7 +202,7 @@ describe('the model-program turn on the real core route', () => {
     expect(view.options.map((o: Json) => [o.option_id, o.cell.kind])).toEqual([['second_oven', 'figure'], ['keep_one', 'figure']]);
     // The budget limit waits on the oven price: it is never folded silently into the chance.
     expect(stored.compile.within_limits.status).toBe('asks');
-    expect(r.model_program.asks.map((a: Json) => a.quantity_id)).toEqual(['oven_price']);
+    expect(r.model_program.blockers.map((b: Json) => [b.id, b.code])).toEqual([['oven_price', 'asked']]);
     expect(view.options.every((o: Json) => o.cell.face.includes('Not yet checked: ‘Within the £3,000’'))).toBe(true);
     const { living_model: _lm, ...display } = persisted!;
     expect(display).toEqual(JSON.parse(JSON.stringify(project(bakery(), compile(bakery(), { sourceText: BRIEF })).graph)));
@@ -628,12 +629,15 @@ describe('the model-program turn on the real core route', () => {
     expect(programReadOf({ nodes: [], edges: [], living_model: { aims: [] } }).kind).toBe('none'); // contrast: a legacy living model
   });
 
-  it('an approximate answer ("about £2,500") is the person\'s figure, used for now: the compiler asks for a range on it and the words say so; their own range is their range', () => {
+  it('an approximate answer ("about £2,500") is the person\'s figure, used for now: the words say so and the AI asks for its range (no code question); their own range is their range', () => {
     const words = 'It would cost about £2,500.';
     const answered = (f: Partial<CanonicalQuantityT>) => { const m = bakery(); setQ(m, 'oven_price', { status: 'known', question: null, approval: 'approved', ...f }); return m; };
     const approx = answered({ value: 2500, quote: words, basis: APPROXIMATE_FIGURE });
     const r = compile(approx, { sourceText: `${BRIEF}\n${words}` });
-    expect(r.asks.find((a) => a.quantity_id === 'oven_price')!.question).toBe('You said "It would cost about £2,500." for "oven price". What range would you put on it? Olumi is using 2500 GBP/oven for now.');
+    // S1 A4: no question of the code's, and nothing waits on it; the AI asks for the range (the program instructions say so).
+    expect(r.blockers.some((b) => b.id === 'oven_price')).toBe(false);
+    expect(JSON.stringify(r)).not.toContain('What range would you put on it');
+    expect(CORE_ALIGNED_INSTRUCTIONS).toContain('If that figure feeds a goal or a limit, ask what range they would put on it.');
     expect(r.within_limits.status).toBe('calculable'); // the range asked for holds nothing back
     expect(r.conversions.some((c) => c.quantity === 'oven_price')).toBe(false);
     const view = evaluateCanonical(approx, { sourceText: `${BRIEF}\n${words}`, seed: 7 }).view as Json;
@@ -642,7 +646,7 @@ describe('the model-program turn on the real core route', () => {
     expect(JSON.stringify(view)).not.toContain('as you stated it');
     // Contrast: the ends in their own words are their range, read as theirs, and no range is asked for.
     const ranged = answered({ value: null, low: 2250, high: 2750, range_kind: 'bounds', quote: 'between £2,250 and £2,750' });
-    expect(compile(ranged, { sourceText: `${BRIEF}\nbetween £2,250 and £2,750` }).asks.some((a) => a.quantity_id === 'oven_price')).toBe(false);
+    expect(compile(ranged, { sourceText: `${BRIEF}\nbetween £2,250 and £2,750` }).blockers.some((b) => b.id === 'oven_price')).toBe(false);
   });
 
   it('the agent\'s context after a cold reopen is the model AS AUTHORED: relations, coefficient basis and range kind, goal windows, option timing, the qualitative records, and the Run\'s goal_chance unchanged', async () => {
@@ -675,12 +679,15 @@ describe('the model-program turn on the real core route', () => {
     m.relations.push({ form: 'definition', id: 'extra_rel', defines: 'extra', op: 'sum', parts: [{ id: 'current_output', sign: 1 }], author: 'olumi', quote: null, ...at });
     replies = [JSON.stringify(m)];
     expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
-    const asked = { author: 'person', status: 'asked', value: null, question: 'What is "current output"?' };
+    const asked = { author: 'person', status: 'asked', value: null, question: null, basis: null };
     expect(persisted!.living_model.canonical.quantities.find((x: Json) => x.id === 'current_output')).toMatchObject(asked);
     vi.resetModules();
     const tools = await import('../program-tools.js');
     const read = await tools.readProgramContext({ dispatch, proposals: new ProposalStore() }, { scenario_id: SCENARIO, authenticated_user_id: null }) as Json;
-    expect((read.data.model as Json).quantities.find((x: Json) => x.id === 'current_output')).toMatchObject({ author: 'person', status: 'asked', question: 'What is "current output"?' });
+    expect((read.data.model as Json).quantities.find((x: Json) => x.id === 'current_output')).toMatchObject({ author: 'person', status: 'asked' });
+    expect((read.data.model as Json).quantities.find((x: Json) => x.id === 'current_output')).not.toHaveProperty('question'); // compact: null left out
+    expect((read.data.blockers as Json[]).find((b) => b.id === 'current_output')).toMatchObject({ code: 'asked' });
+    expect(JSON.stringify(read.data)).not.toContain('What is "current output"?');
     expect(JSON.stringify(read.data.model)).not.toMatch(/"id":"current_output"[^}]*"author":"structure"/);
   });
 
@@ -713,7 +720,7 @@ describe('the model-program turn on the real core route', () => {
     m.quantities = m.quantities.map((x) => (x.id === 'extra_per_oven' ? { ...x, value: null, low: 80, high: 120, range_kind: null, quote: 'between 80 and 120 loaves a week' } : x));
     replies = [JSON.stringify(m)];
     const drafted = (await turn({ message: brief })).json();
-    expect(drafted.model_program.asks.find((x: Json) => x.quantity_id === 'extra_per_oven')).toMatchObject({ edit: { op: 'set_range_kind', quantity_id: 'extra_per_oven' } });
+    expect(drafted.model_program.blockers.find((x: Json) => x.id === 'extra_per_oven')).toMatchObject({ code: 'range_kind' });
     const words = 'Those are firm ends: never fewer than 80, never more than 120.';
     const deps = { dispatch, proposals: new ProposalStore() };
     const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] };
@@ -728,8 +735,8 @@ describe('the model-program turn on the real core route', () => {
     expect(after).toMatchObject({ low: 80, high: 120, range_kind: 'bounds', author: 'person', quote: 'between 80 and 120 loaves a week' });
     expect((persisted!.living_model.canonical as CanonicalModelT).history.at(-1)).toMatchObject({ id: 'extra_per_oven', change: 'superseded' });
     expect(persisted!.living_model.person_words.at(-1)).toBe(words);
-    const asks = (persisted!.living_model.runs.at(-1).result.compile as Json).asks as Json[];
-    expect(asks.some((x) => x.quantity_id === 'extra_per_oven')).toBe(false);
+    const blockers = (persisted!.living_model.runs.at(-1).result.compile as Json).blockers as Json[];
+    expect(blockers.some((x) => x.id === 'extra_per_oven')).toBe(false);
   });
 
   it('Codex r1 #3709 (2): the PRESENTED Run never says "on your figures" for a figure said to be theirs whose words were not found', () => {
@@ -746,12 +753,12 @@ describe('the model-program turn on the real core route', () => {
     expect(unverified).toContain('‘promo effect’ is 5 member / month / promotion (not found in your words)');
   });
 
-  it('DL 23 Oct (batch 1 + batch 4): an aim with no deadline never states "no deadline" as a fact; it says none is recorded yet and asks; a % target is said in %', () => {
+  it('DL 23 Oct (batch 1 + batch 4): an aim with no deadline never states "no deadline" as a fact; it says none is recorded yet, never in a question of the code\'s; a % target is said in %', () => {
     const goalWords = (m: CanonicalModelT, text: string) => String(((evaluateCanonical(m, { sourceText: text, seed: 7 }).view as Json).goal_chance as Json).chance_words);
     // The bakery's aim states no window: read once with every option in effect, and said so.
     const noDeadline = goalWords(bakery(), BRIEF);
     expect(noDeadline).toContain('‘sales’ being at least 380 loaf / week with no deadline recorded yet');
-    expect(((evaluateCanonical(bakery(), { sourceText: BRIEF, seed: 7 }).view as Json).goal_chance as Json).notes).toContain('No deadline is recorded yet for ‘Reach 380 loaves a week’: is there one?');
+    expect(JSON.stringify(((evaluateCanonical(bakery(), { sourceText: BRIEF, seed: 7 }).view as Json).goal_chance as Json).notes)).not.toContain('is there one?');
     expect(noDeadline).not.toMatch(/from now/);
     // Contrast: the club's aim states three months, and says it.
     expect(goalWords(club(), CLUB_BRIEF)).toContain('at 3 months from now');
@@ -770,7 +777,7 @@ describe('the model-program turn on the real core route', () => {
     replies = [JSON.stringify(m)];
     const drafted = (await turn({ message: BRIEF })).json();
     expect(drafted.model_program.saved).toBe(true);
-    expect((persisted!.living_model.runs.at(-1).result.compile as Json).coaching).toEqual([expect.objectContaining({ record_id: 'more_loaves', kind: 'measure' })]);
+    expect((persisted!.living_model.runs.at(-1).result.compile as Json).blockers).toContainEqual({ id: 'more_loaves', code: 'measure', scope: ['more_loaves'] });
     const words = 'Success means selling at least 380 loaves a week within 4 weeks.';
     const deps = { dispatch, proposals: new ProposalStore() };
     const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] });
@@ -804,11 +811,11 @@ describe('the model-program turn on the real core route', () => {
     // The new Run can now work out the aim: each option's chance of it is shown, and the measure question is gone.
     const run = persisted!.living_model.runs.at(-1).result as Json;
     expect((run.canonical_analysis_view as Json).options.map((o: Json) => o.cell.kind)).toEqual(['figure', 'figure']);
-    expect((run.compile as Json).coaching).toEqual([]);
+    expect(((run.compile as Json).blockers as Json[]).filter((x) => x.code === 'measure')).toEqual([]);
     // The compiler's own reading of a measure with an unstated target, or one nothing works out yet (built exactly).
     const asked = JSON.parse(measured(words)) as CanonicalModelT;
     setQ(asked, 'more_loaves_target', { status: 'asked', value: null, quote: null, question: 'What figure for "sales" would count as "Reach 380 loaves a week"?' });
-    expect(compile(asked, { sourceText: `${BRIEF}\n${words}` }).asks.map((x) => x.quantity_id)).toContain('more_loaves_target');
+    expect(compile(asked, { sourceText: `${BRIEF}\n${words}` }).blockers.map((x) => x.id)).toContain('more_loaves_target');
     const named = JSON.parse(measured(words)) as CanonicalModelT;
     named.quantities.push(q('repeat_customers', 'customer/week', { status: 'unknown', quote: 'at least 50 repeat customers a week', label: 'Repeat customers' }));
     named.goals = named.goals.map((g) => ({ ...g, measure: { ...g.measure!, quantity: 'repeat_customers' } }));
@@ -883,7 +890,7 @@ describe('the model-program turn on the real core route', () => {
     const structured = await propose();
     expect(structured.status, JSON.stringify(structured)).toBe('ok');
     const sm = cardModel(structured);
-    expect(sm.quantities.find((x) => x.id === 'current_output')).toMatchObject({ author: 'person', status: 'asked', value: null, quote: null, question: 'What is "current output"?' });
+    expect(sm.quantities.find((x) => x.id === 'current_output')).toMatchObject({ author: 'person', status: 'asked', value: null, quote: null, question: null, basis: null });
     expect(sm.quantities.find((x) => x.id === 'months_per_year')).toMatchObject({ author: 'structure', status: 'known', value: 12 });
     expect(compile(sm, { sourceText: `${saved.brief}\n${words}` }).perGoal.find((g) => g.goal_id === 'increase_productivity')!.asks).toContain('current_output');
     // Codex r5: 1 in unit "1" is no unit scale, so an unstated "current utilisation = 1" is not structural; 0/1 is, only as a
@@ -1197,11 +1204,11 @@ describe('the model-program turn on the real core route', () => {
     const edit = (value: number) => turn({ kind: 'system_event', turn_id: randomUUID(), event: { kind: 'factor_value_edit', target_id: 'extra_per_oven', value } });
     const chance = () => ((persisted!.living_model.runs.at(-1).result.chances as Json[]).find((c) => c.option_id === 'second_oven')!.per_goal[0].chance as number);
     const first = chance();
-    // Outside the range: refused with the question, nothing saved, no new Run.
+    // Outside the range: refused with its reason (no question), nothing saved, no new Run.
     const saves = registered.length;
     const out = await edit(60);
     expect(out.statusCode).toBe(409);
-    expect(out.json().error).toMatchObject({ code: 'CANVAS_EDIT_REFUSED', nothing_saved: true, message: '60 is outside your range of 80–120. Change the range as well?' });
+    expect(out.json().error).toMatchObject({ code: 'CANVAS_EDIT_REFUSED', nothing_saved: true, message: '60 is outside your range of 80–120, so nothing was saved: change the range with it.' });
     expect(registered.length).toBe(saves);
     expect(persisted!.living_model.runs).toHaveLength(1);
     // Inside it: their new most likely figure, the range and its reading kept, and the second oven's chance goes UP.
@@ -1242,13 +1249,14 @@ describe('the model-program turn on the real core route', () => {
       { form: 'definition', id: 'growth_rel', defines: 'growth_factor', op: 'sum', parts: [{ id: 'one', sign: 1 }, { id: 'growth', sign: 1 }], author: 'olumi', quote: null, ...at });
     const n = new Map(normalise(m).quantities.map((x) => [x.id, x] as const));
     // Asked: an integer no one stated, an unused 1 in unit "1", a 1 with a unit added in a sum, and a 1 with a unit in a product.
-    for (const id of ['current_output', 'current_utilisation', 'current_customers', 'output_per_developer', 'one_customer', 'one_percent']) expect(n.get(id), id).toMatchObject({ author: 'person', status: 'asked', value: null, question: `What is "${id.replace(/_/g, ' ')}"?` });
+    for (const id of ['current_output', 'current_utilisation', 'current_customers', 'output_per_developer', 'one_customer', 'one_percent']) expect(n.get(id), id).toMatchObject({ author: 'person', status: 'asked', value: null, question: null, basis: null });
     // Kept: an option's switch (0 hires until an option sets one), a calendar conversion, 0 as a sum's part, and the unit-free 1.
     for (const id of ['developers_hired', 'tech_leads_hired', 'months_per_year', 'no_extra_output', 'new_customers', 'output_scale', 'productivity_indexed', 'one']) expect(n.get(id), id).toMatchObject({ author: 'structure', status: 'known' });
     // The compiler reads the question as one: what rests on it waits for the person, and no error asks the drafter to repair it.
     const c = compile(m, { sourceText: saved.brief });
     expect(c.errors).toEqual([]);
-    expect(c.asks.map((a) => a.quantity_id)).not.toContain('months_per_year');
+    expect(c.blockers.map((b) => b.id)).not.toContain('months_per_year');
+    expect(c.blockers.filter((b) => b.code === 'asked').map((b) => b.id)).toEqual(expect.arrayContaining(['current_output']));
     // Exact unit algebra: a unit-free 1 beside a term with a unit (a sum with loaves, an effect adding loaves) is no identity.
     const mixed = bakery();
     mixed.quantities.push(q('base_one', '1', { author: 'structure', value: 1 }), derived('mixed_sum', 'loaf/week'), derived('mixed_effect', 'loaf/week'));
@@ -1269,7 +1277,7 @@ describe('the model-program turn on the real core route', () => {
     expect(normalise(cap).quantities.find((x) => x.id === 'weekly_bake')).toMatchObject({ author: 'person', status: 'asked', value: null, quote: null });
   });
 
-  it('batch 4 hiring-r1: a measured aim whose options wait on their own figures says THAT question, never "No aim has a measure yet"', () => {
+  it('batch 4 hiring-r1: a measured aim whose options wait on their own figures says what it waits on, never "No aim has a measure yet"', () => {
     const m = bakery();
     // The aim is measured and calculable; the one option waits on its own setting (how many ovens it adds), as hiring-r1's
     // options waited on their start times.
@@ -1279,7 +1287,7 @@ describe('the model-program turn on the real core route', () => {
     expect(e.compiled.perGoal[0]).toMatchObject({ status: 'calculable', needs_measure: false });
     expect(e.compiled.executable).toBeNull();
     const cell = (id: string) => ((e.view as Json).options as Json[]).find((o) => o.option_id === id)!.cell;
-    expect(cell('second_oven').why).toBe('The chance waits for your answer: How many ovens would you add?');
+    expect(cell('second_oven').why).toBe('The chance waits on ‘one oven’.');
     expect(cell('second_oven').face).toBe('Not shown yet: needs your answer');
     expect(cell('second_oven').why).not.toContain('No aim has a measure yet');
   });
@@ -1296,6 +1304,17 @@ describe('the model-program turn on the real core route', () => {
     const g = project(share, compile(share, { sourceText: BRIEF })).graph;
     expect(node(g, 'online_share').observed_state).toEqual({ unit: '%' });
     expect(node(g, 'wholesale_share').observed_state).toMatchObject({ value: 40, unit: '%' });
+  });
+
+  it('S1 (Codex r1 #3716): a Run stored before blockers, reused while current, still has its waits read from the model, never a pile', async () => {
+    replies = [JSON.stringify(bakery())];
+    await turn({ message: BRIEF });
+    const run = persisted!.living_model.runs[0].result.compile as Json;
+    delete run.blockers; run.asks = [{ quantity_id: 'oven_price', question: 'What would the second oven cost?' }]; run.coaching = [];
+    const r = await turn({ message: 'Run the analysis', chip: { id: 'run', action_type: 'run_analysis', label: 'Run' } });
+    expect(r.statusCode, r.body).toBe(200);
+    expect(r.json().assistant_text).toContain('1. What would the second oven cost?');
+    expect(r.json().assistant_text).not.toContain('To work out what is still missing');
   });
 
   it('a Run press on a program needs no model call: the stored Run when current; a NEW Run, stored, when the model moved since', async () => {
@@ -1316,6 +1335,61 @@ describe('the model-program turn on the real core route', () => {
     expect(moved.statusCode, moved.body).toBe(200);
     expect([sent.length, registered.length, persisted!.living_model.runs.length]).toEqual([0, saves + 1, 2]);
     expect(moved.json().canonical_analysis_view.run.run_id).toBe(persisted!.living_model.runs[1].run_id);
+  });
+
+  it('S1 one question channel (A4): the first reply prints at most three of the AI\'s OWN questions, in the model\'s order, then counts the rest; the result lists every blocker by label with its answer box', async () => {
+    const m = bakery();
+    m.goals.push({ id: 'regulars', label: 'Keep the regulars happy', measure: null, question: 'How would you tell the regulars are happy?', author: 'person', quote: 'want to reach 380 loaves a week', ...at },
+      { id: 'staff_happy', label: 'Keep the staff happy', measure: null, question: 'How would you tell the staff are happy?', author: 'person', quote: 'want to reach 380 loaves a week', ...at });
+    m.limits.push({ id: 'friendly', label: 'Keep it friendly', measure: null, question: 'How would you tell it stays friendly?', author: 'person', quote: 'We have £3,000 to spend', ...at });
+    setQ(m, 'base_sales', { author: 'structure', quote: null, basis: 'Today.' }); // no structural constant: the person's, with no question of the code's
+    setQ(m, 'extra_per_oven', { value: null, low: 80, high: 120 }); // their range, its kind unread: a blocker with no question
+    replies = [JSON.stringify(m)];
+    const r = (await turn({ message: BRIEF })).json();
+    expect(r.model_program.saved).toBe(true);
+    // The AI's three, in the model's order (goals, limits, then quantities): the oven price's question is the fourth, counted.
+    expect(r.assistant_text).toBe(['I\'ve drafted a first model of: Should the bakery buy a second oven?',
+      '1. How would you tell the regulars are happy?\n2. How would you tell the staff are happy?\n3. How would you tell it stays friendly?',
+      'The chance also waits on 3 other things, listed with the result.'].join('\n\n'));
+    // The result lists every one of them, by label, with the figure its answer box fills; no question of the code's anywhere.
+    const waits = r.canonical_analysis_view.goal_chance.waits_on as Json[];
+    expect(waits).toEqual([
+      { id: 'regulars', code: 'measure', label: 'Keep the regulars happy', scope: ['regulars'], answer: null },
+      { id: 'staff_happy', code: 'measure', label: 'Keep the staff happy', scope: ['staff_happy'], answer: null },
+      { id: 'friendly', code: 'measure', label: 'Keep it friendly', scope: ['friendly'], answer: null },
+      { id: 'base_sales', code: 'asked', label: 'base sales', scope: ['more_loaves'], answer: { quantity_id: 'base_sales' } },
+      { id: 'extra_per_oven', code: 'range_kind', label: 'extra per oven', scope: ['more_loaves'], answer: { quantity_id: 'extra_per_oven' } },
+      { id: 'oven_price', code: 'asked', label: 'oven price', scope: ['within_budget'], answer: { quantity_id: 'oven_price' } },
+    ]);
+    expect(waits.every((w) => typeof w.label === 'string' && w.label.trim() !== '')).toBe(true);
+    const view = JSON.stringify(r.canonical_analysis_view);
+    expect(view).not.toContain('?');
+    expect(JSON.stringify((persisted!.living_model.runs.at(-1).result as Json).compile)).not.toContain('?');
+    // Contrast: the AI's own question for the fourth is on its record, so the probe sees questions where they are.
+    expect(JSON.stringify(persisted!.living_model.canonical)).toContain('What would the second oven cost?');
+  });
+
+  it('S1 (A4): with no aim at all, the first reply asks the AI\'s own question from its note on the situation, and no code question', async () => {
+    const m = bakery();
+    m.goals = [];
+    // Codex r1 #3716: another note on the situation as a whole, with a question, is never taken for it; only the declared `aim`.
+    m.left_out.push({ id: 'supplier', text: 'The flour supplier is not in the model.', why: 'Not given.', question: 'Who is your supplier?', concerns: [], author: 'olumi', quote: null, ...at },
+      { id: 'aim', text: 'What a good result would be is not stated.', why: 'No aim was given.', question: 'What result would make this worth it for you?',
+        concerns: [], author: 'olumi', quote: null, ...at });
+    replies = [JSON.stringify(m)];
+    const r = (await turn({ message: BRIEF })).json();
+    expect(r.model_program.saved).toBe(true);
+    expect(r.assistant_text).toBe(['I\'ve drafted a first model of: Should the bakery buy a second oven?',
+      '1. What result would make this worth it for you?\n2. What would the second oven cost?'].join('\n\n'));
+    expect(r.model_program.blockers.map((b: Json) => [b.id, b.code])).toEqual([['(model)', 'no_goal'], ['oven_price', 'asked']]);
+    expect(r.assistant_text).not.toContain('Who is your supplier?');
+    // Contrast: without the AI's note the no-goal blocker has no words of anyone's, so it is counted, never worded by the code.
+    const bare = bakery(); bare.goals = [];
+    beforeEachReset();
+    replies = [JSON.stringify(bare)];
+    const b = (await turn({ message: BRIEF })).json();
+    expect(b.assistant_text).toBe(['I\'ve drafted a first model of: Should the bakery buy a second oven?', '1. What would the second oven cost?',
+      'The chance also waits on 1 other thing, listed with the result.'].join('\n\n'));
   });
 });
 

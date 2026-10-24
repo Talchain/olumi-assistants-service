@@ -110,18 +110,22 @@ describe('present: the canonical analysis view from a simulated model', () => {
     [option('hold', 'Hold'), option('add', 'Add one specialist', [{ quantity: 'count', to: 'one', from_period: 0 }])]);
     const labels: Record<string, PresentQuantity> = { count: person('Specialists'), one: person('One specialist'), salary: person('Salary'),
       cost: person('Specialist cost', true), budget: person('Budget') };
-    const question = 'How many cases does one specialist handle each month?';
+    // S1 A4: what it waits on is said by label and listed, typed, with the figure its answer box fills; never a question.
+    const waits_on = [{ id: 'each', code: 'asked', label: 'Cases per specialist', scope: ['g_cap'], answer: { quantity_id: 'each' } }];
     const v = present(base(), labels, {
       goals: [{ goal_id: 'g_cost', label: 'Stay within the budget', status: 'calculable', reasons: [], asks: [] },
         { goal_id: 'g_cap', label: 'Reach 100 cases', status: 'asks', reasons: ['It needs your answer.'], asks: ['each'] }],
-      asks: [{ quantity_id: 'each', label: 'Cases per specialist', unit: 'cases', question }],
+      asks: [{ quantity_id: 'each', label: 'Cases per specialist', unit: 'cases' }], blockers: waits_on,
       tipping: { g_cap: { build: (x) => base(x) } },
     });
     for (const id of ['hold', 'add']) {
       expect(cell(v, id)).toEqual({ kind: 'withheld', face: 'Not shown yet: needs your answer',
-        why: `‘Reach 100 cases’ waits for your answer: ${question}`,
+        why: '‘Reach 100 cases’ waits on ‘Cases per specialist’',
         reasons: [{ code: 'goal_asks', message: 'It needs your answer.' }] });
     }
+    expect(v.goal_chance.waits_on).toEqual(waits_on);
+    expect(v.goal_chance.notes).toContain('‘Reach 100 cases’ is not in the chance yet: it waits on ‘Cases per specialist’');
+    expect(JSON.stringify(v)).not.toContain('?');
     expect(v.goal_chance.chance_words).toBeUndefined();
     expect(v.goal_chance.targets.joint).toEqual({ status: 'withheld',
       line: 'The chance of meeting all 2 goals together waits for ‘Reach 100 cases’; each goal that can be worked out is shown on its own.' });
@@ -243,9 +247,9 @@ describe('present: the canonical analysis view from a simulated model', () => {
     expect(cell(own, 'hold').face.endsWith(', in this model, on your figures: in every simulated draw ‘weather’ is £12 at 1 month from now, at least £5.')).toBe(true);
   });
 
-  it('S3 fix 3: every limit\u2019s own outcome is in the words, and a limit waiting on an ask is named with its question', () => {
+  it('S3 fix 3: every limit\u2019s own outcome is in the words, and a limit waiting on an ask is named with what it waits on', () => {
     // Specialist cost = specialists × £40,000 against two limits: ≤ £50,000 (hold 0 ✓, add 40,000 ✓ → 100%, 100%) and
-    // ≤ £30,000 (hold ✓ 100%, add ✗ 0%). 'Desk space' waits on 'How many desks are free?': named, never dropped.
+    // ≤ £30,000 (hold ✓ 100%, add ✗ 0%). 'Desk space' waits on 'Desks free': named, never dropped.
     const m = model([fixed('count', 0, 'specialists'), fixed('one', 1, 'specialists'), fixed('salary', 40000, '£'),
       def('cost', 'product', ['count', 'salary'], '£'), fixed('b50', 50000, '£'), fixed('b30', 30000, '£'), fixed('zero', 0, 'specialists')],
     [goal('g', 'count', '>=', 'zero')], [option('hold', 'Hold'), option('add', 'Add one specialist', [{ quantity: 'count', to: 'one', from_period: 0 }])],
@@ -255,10 +259,10 @@ describe('present: the canonical analysis view from a simulated model', () => {
       limits: [{ limit_id: 'l50', label: 'Budget', status: 'calculable', reasons: [], asks: [] },
         { limit_id: 'l30', label: 'Hard cap', status: 'calculable', reasons: [], asks: [] },
         { limit_id: 'l_desks', label: 'Desk space', status: 'asks', reasons: [], asks: ['desks'] }],
-      asks: [{ quantity_id: 'desks', label: 'Desks free', unit: 'desks', question: 'How many desks are free?' }],
+      asks: [{ quantity_id: 'desks', label: 'Desks free', unit: 'desks' }],
     });
     const l50 = '‘Specialist cost’ is at most £50,000 at 1 month from now', l30 = '‘Specialist cost’ is at most £30,000 at 1 month from now';
-    const unchecked = 'Not yet checked: ‘Desk space’ — needs your answer: How many desks are free?';
+    const unchecked = 'Not yet checked: ‘Desk space’ — waits on ‘Desks free’';
     expect(cell(v, 'hold').face).toContain(` Each limit on its own: ${l50}: 100%; ${l30}: 100%. ${unchecked}`);
     expect(cell(v, 'add').face).toContain(` Each limit on its own: ${l50}: 100%; ${l30}: 0%. ${unchecked}`);
     // Add's 0% is exact, and the limit that fixes it is named with its value: 1 × £40,000 = £40,000 > £30,000.
@@ -266,8 +270,8 @@ describe('present: the canonical analysis view from a simulated model', () => {
     expect(v.goal_chance.limits).toEqual([
       { constraint_id: 'l50', words: l50, options: [{ option_id: 'hold', display: '100%' }, { option_id: 'add', display: '100%' }] },
       { constraint_id: 'l30', words: l30, options: [{ option_id: 'hold', display: '100%' }, { option_id: 'add', display: '0%' }] }]);
-    expect(v.goal_chance.unchecked_limits).toEqual([{ limit_id: 'l_desks', words: '‘Desk space’ — needs your answer: How many desks are free?' }]);
-    expect(v.goal_chance.notes).toContain(unchecked);
+    expect(v.goal_chance.unchecked_limits).toEqual([{ limit_id: 'l_desks', words: '‘Desk space’ — waits on ‘Desks free’' }]);
+    expect(v.goal_chance.notes).toContain(`${unchecked}.`);
   });
 
   it('Codex r1 #3709: a figure said to be the person\u2019s whose words were not found is never "on your figures", whatever its recorded author', () => {

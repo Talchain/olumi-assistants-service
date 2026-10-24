@@ -22,8 +22,8 @@ type Rec = Record<string, unknown>;
 export const compileBlock = (e: Evaluation) => ({
   compiles: e.compiled.errors.length === 0, executable: e.compiled.executable !== null,
   errors: e.compiled.errors, per_goal: e.compiled.perGoal, per_limit: e.compiled.perLimit, per_option: e.compiled.perOption,
-  joint: e.compiled.joint, within_limits: e.compiled.within_limits, coaching: e.compiled.coaching, unverified: e.compiled.unverified,
-  conversions: e.compiled.conversions, implicit_as_stated: e.compiled.implicit_as_stated, asks: e.compiled.asks,
+  joint: e.compiled.joint, within_limits: e.compiled.within_limits, blockers: e.compiled.blockers, unverified: e.compiled.unverified,
+  conversions: e.compiled.conversions, implicit_as_stated: e.compiled.implicit_as_stated,
 });
 
 /**

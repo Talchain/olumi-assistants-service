@@ -9,6 +9,7 @@
 import type { InternalDispatch } from '../agent-lane/runtime/agent-capabilities.js';
 import type { ToolResult } from '../agent-lane/runtime/agent-tools.js';
 import type { CanonicalModelT } from '../model-program/canonical.js';
+import { compile, normalise, type Blocker } from '../model-program/compile.js';
 import { draftCanonicalModel, ledgeredResponsesCall, type ResponsesCall } from './draft.js';
 import { seedOf } from './evaluate.js';
 import { isSaved, programOperationId, savePostimage, withNewRun } from './program-save.js';
@@ -47,16 +48,32 @@ const OPENING: Record<TurnKind, (m: CanonicalModelT) => string> = {
   draft: (m) => `I've drafted a first model of: ${m.question}`,
   run: () => 'Here is the analysis of the model as it stands.',
 };
-/** The reply: what calculates (S2's own words per option), what waits and on which questions, from the Run itself. Host words. */
+/** The most of the AI's own questions the first reply prints (simplify v1 A4); the rest are counted, and listed on the result. */
+export const REPLY_QUESTIONS = 3;
+/** The id of the drafter's left-out note on an aim not stated (the drafting prompt declares it): its question is the AI's. */
+export const NO_AIM_NOTE = 'aim';
+/**
+ * The reply: what calculates (S2's own words per option); then at most three of the AI's OWN questions on what the Run waits
+ * on, in the model's order (the drafter puts the most consequential first; no code ranking); then one line counting the rest. The code
+ * writes no question: a blocker with no question of the AI's (a reading, a recount) is counted, never worded.
+ */
 function replyOf(model: CanonicalModelT, run: StoredRun, kind: TurnKind): string {
   const lines: string[] = [OPENING[kind](model)];
-  const view = run.result.canonical_analysis_view as { options?: readonly { cell: { kind: string; face?: string } }[]; goal_chance?: { notes?: readonly string[] } };
-  const compiled = run.result.compile as { asks?: readonly { feeds: readonly unknown[]; question: string }[]; coaching?: readonly { question: string }[] };
+  const view = run.result.canonical_analysis_view as { options?: readonly { cell: { kind: string; face?: string } }[] };
   for (const o of view.options ?? []) if (o.cell.kind === 'figure' && typeof o.cell.face === 'string') lines.push(o.cell.face);
-  for (const n of view.goal_chance?.notes ?? []) lines.push(n);
-  const asks = (compiled.asks ?? []).filter((a) => a.feeds.length > 0);
-  if (asks.length > 0) lines.push(['To work out what is still missing, I need:', ...asks.map((a, i) => `${i + 1}. ${a.question}`)].join('\n'));
-  for (const c of compiled.coaching ?? []) lines.push(c.question);
+  const compiled = run.result.compile as { blockers?: readonly Blocker[] };
+  // A Run stored before blockers (reused while current) gets them from the model as it stands: the same compiler, typed.
+  const blockers = compiled.blockers ?? compile(model).blockers;
+  const m = normalise(model);
+  // The AI's own words on the record each blocker names; with no aim at all, its left-out note `aim` (the drafter's declared
+  // record for the aim not stated) carries its question on what result they want. Never a guess at which note it is.
+  const own = (b: Blocker): string | null => (b.code === 'asked' ? m.quantities.find((q) => q.id === b.id)?.question
+    : b.code === 'measure' || b.code === 'deadline' ? [...m.goals, ...m.limits].find((r) => r.id === b.id)?.question
+      : b.code === 'no_goal' ? m.left_out.find((x) => x.id === NO_AIM_NOTE)?.question : null) ?? null;
+  const asked = [...new Set(blockers.map(own).filter((x): x is string => x !== null && x.trim() !== ''))].slice(0, REPLY_QUESTIONS);
+  const rest = blockers.filter((b) => { const q = own(b); return q === null || !asked.includes(q); }).length;
+  if (asked.length > 0) lines.push(asked.map((q, i) => `${i + 1}. ${q}`).join('\n'));
+  if (rest > 0) lines.push(`The chance also waits on ${rest} other ${rest === 1 ? 'thing' : 'things'}, listed with the result.`);
   return lines.join('\n\n');
 }
 
@@ -103,7 +120,7 @@ export async function runModelProgramTurn(input: ProgramTurnInput): Promise<Prog
     payload: {
       canonical_analysis_view: next.run.result.canonical_analysis_view,
       // The turn's own record; the model, its compile and its chances are the saved program's (`living_model`).
-      model_program: { turn: kind, saved, write: write.status, readback, model_program: MODEL_PROGRAM, run: runOf(next.run), asks: next.evaluation.compiled.asks,
+      model_program: { turn: kind, saved, write: write.status, readback, model_program: MODEL_PROGRAM, run: runOf(next.run), blockers: next.evaluation.compiled.blockers,
         ...(draftMeta !== undefined ? { draft: draftMeta } : {}) },
     },
   };

@@ -8,17 +8,18 @@
  *    tipping threshold, probed by setting the asked figure on the compiler's reading, then `compile`;
  *  · project (S1 `project.ts`) to the GraphV3 display graph, every record shown, the calculation the compiled subset.
  * When nothing calculates yet (every measured goal waits, or the draft does not compile) there is no executable model to
- * present: the view then carries each option's withheld cell with the questions, and the thresholds alone.
+ * present: the view then carries each option's withheld cell with what it waits on, and the thresholds alone. Every view
+ * lists what the result waits on (`goal_chance.waits_on`, S1's typed blockers, by label); the code writes no question.
  */
 import { createHash } from 'node:crypto';
-import { isApproximate, normalise, compile, type CompileResult } from '../model-program/compile.js';
+import { isApproximate, normalise, compile, type Blocker, type CompileResult } from '../model-program/compile.js';
 import type { CanonicalModelT } from '../model-program/canonical.js';
 import { project, type Projection } from '../model-program/project.js';
 import type { ExecutableModel } from '../model-program/executable.js';
 import { simulate } from '../model-program/simulate/simulate.js';
 import type { SimResult } from '../model-program/simulate/result.js';
 import {
-  presentAnalysisView, tippingThresholds, type PresentAsk, type PresentGoal, type PresentQuantity, type PresentThreshold,
+  listWords, presentAnalysisView, tippingThresholds, type PresentAsk, type PresentBlocker, type PresentGoal, type PresentQuantity, type PresentThreshold,
   type PresentedAnalysisView, type TippingProbe,
 } from '../model-program/present/present.js';
 
@@ -36,7 +37,7 @@ export type Evaluation = {
   readonly view: PresentedAnalysisView | WaitingView;
   readonly projection: Projection;
 };
-/** The view when no executable model exists yet: every option withheld with its questions, and the thresholds. */
+/** The view when no executable model exists yet: every option withheld with what it waits on, and the thresholds. */
 export type WaitingView = {
   readonly schema: 'canonical_analysis_view.v1';
   readonly source: 'stored_run_facts';
@@ -46,7 +47,7 @@ export type WaitingView = {
   readonly leader_licence: 'withheld';
   readonly options: readonly { readonly option_id: string; readonly cell: { readonly kind: 'withheld'; readonly face: string; readonly why: string;
     readonly reasons: readonly { readonly code: string; readonly message: string | null }[] }; readonly main_driver: { readonly kind: 'not_recorded' } }[];
-  readonly goal_chance: { readonly notes: readonly string[]; readonly thresholds?: readonly PresentThreshold[] };
+  readonly goal_chance: { readonly notes: readonly string[]; readonly thresholds?: readonly PresentThreshold[]; readonly waits_on?: readonly PresentBlocker[] };
 };
 
 /** Labels and authors for every quantity the executable model reads, including the ids the compiler adds. */
@@ -105,41 +106,55 @@ export function evaluateCanonical(model: CanonicalModelT, opts: { readonly sourc
   // Aims with no measure yet are left out of the chance (said in `leaves_out`), never a goal that waits.
   const goals: PresentGoal[] = compiled.perGoal.filter((p) => !p.needs_measure)
     .map((p) => ({ goal_id: p.goal_id, label: labelOf.get(p.goal_id) ?? p.goal_id, status: p.status, reasons: p.reasons, asks: p.asks }));
-  const asks: PresentAsk[] = compiled.asks.map((a) => ({ quantity_id: a.quantity_id, label: a.label, unit: a.unit, question: a.question }));
+  const blockers = blockersOf(model, compiled.blockers);
+  const asks: PresentAsk[] = normalise(model).quantities.filter((q) => blockers.some((b) => b.answer?.quantity_id === q.id))
+    .map((q) => ({ quantity_id: q.id, label: q.label, unit: q.unit }));
   const tipping: Record<string, TippingProbe> = Object.fromEntries(goals.filter((g) => g.status === 'asks' && g.asks.length === 1)
     .map((g) => [g.goal_id, probeFor(model, g.goal_id, g.asks[0]!, opts.sourceText)] as const));
   const leaves_out = compiled.joint.leaves_out.map((id) => labelOf.get(id) ?? id);
 
   const x = compiled.executable;
   if (x === null) {
-    return { compiled, sim: null, projection, view: waitingView(model, compiled, goals, asks, tipping, opts.seed) };
+    return { compiled, sim: null, projection, view: waitingView(model, compiled, goals, asks, blockers, tipping, opts.seed) };
   }
   const sim = simulate(x, { seed: opts.seed, draws: opts.draws ?? RUN_DRAWS });
   // A limit, option or risk left out of this run is said by S2's present itself (S1's `executable.withheld`, r3).
-  const view = presentAnalysisView({ model: x, result: sim, quantities: quantityMeta(model, compiled, x), goals, asks, leaves_out, tipping,
+  const view = presentAnalysisView({ model: x, result: sim, quantities: quantityMeta(model, compiled, x), goals, asks, blockers, leaves_out, tipping,
     left_out: model.left_out.map((r) => ({ text: r.text, concerns: r.concerns })) });
   return { compiled, sim, projection, view };
 }
 
+/**
+ * The compiler's blockers with their labels, in its order: a quantity's answer box fills that quantity; a measure, a deadline or
+ * an aim is answered in the chat (null). Labels only: what to ask, and how, is the AI's.
+ */
+function blockersOf(model: CanonicalModelT, list: readonly Blocker[]): PresentBlocker[] {
+  const m = normalise(model);
+  const labelOf = new Map<string, string>([...m.quantities, ...m.goals, ...m.limits].map((r) => [r.id, r.label] as const));
+  const isQuantity = new Set(m.quantities.map((q) => q.id));
+  return list.map((b) => ({ id: b.id, code: b.code, label: b.code === 'no_goal' ? 'The result you want' : labelOf.get(b.id) ?? b.id, scope: b.scope,
+    answer: isQuantity.has(b.id) ? { quantity_id: b.id } : null }));
+}
+
 function waitingView(model: CanonicalModelT, compiled: CompileResult, goals: readonly PresentGoal[], asks: readonly PresentAsk[],
-  tipping: Readonly<Record<string, TippingProbe>>, seed: number): WaitingView {
+  blockers: readonly PresentBlocker[], tipping: Readonly<Record<string, TippingProbe>>, seed: number): WaitingView {
   const m = normalise(model);
   const live = m.options.filter((o) => o.status === 'live');
   const optionLabel = new Map(m.options.map((o) => [o.id, o.label] as const));
   const askOf = new Map(asks.map((a) => [a.quantity_id, a] as const));
   const failing = compiled.errors.length > 0;
-  const questionsOf = (ids: readonly string[]) => ids.map((id) => askOf.get(id)?.question).filter((q): q is string => q !== undefined);
-  const goalQuestions = goals.flatMap((g) => questionsOf(g.asks));
+  const labelsOf = (ids: readonly string[]) => ids.map((id) => askOf.get(id)?.label).filter((q): q is string => q !== undefined);
+  const goalWaits = goals.flatMap((g) => labelsOf(g.asks));
   // Each option's cell also says what THAT option waits on (its own setting or timing): a measured aim is never said to have
   // no measure because an option's figure is missing (batch 4 hiring-r1).
   const cellOf = (optionId: string) => {
     const own = compiled.perOption.find((p) => p.option_id === optionId);
-    const questions = [...new Set([...goalQuestions, ...questionsOf(own?.asks ?? [])])];
+    const waits = [...new Set([...goalWaits, ...labelsOf(own?.asks ?? [])])];
     const measured = goals.length > 0; // the aims with a measure (those without are left out above)
     const why = failing ? 'The model does not compile yet, so no chance can be worked out.'
-      : questions.length > 0 ? `The chance waits for your answer: ${questions.join(' ')}`
+      : waits.length > 0 ? `The chance waits on ${listWords(waits.map((l) => `‘${l}’`))}.`
         : goals.flatMap((g) => g.reasons).join(' ') || own?.reasons.join(' ') || (measured ? 'The chance cannot be worked out yet.' : 'No aim has a measure yet.');
-    return { kind: 'withheld' as const, face: questions.length > 0 && !failing ? 'Not shown yet: needs your answer' : 'Chance not shown yet', why,
+    return { kind: 'withheld' as const, face: waits.length > 0 && !failing ? 'Not shown yet: needs your answer' : 'Chance not shown yet', why,
       reasons: failing ? [{ code: 'does_not_compile', message: compiled.errors.slice(0, 5).map((e) => e.message).join(' ') }]
         : goals.filter((g) => g.status !== 'calculable').map((g) => ({ code: g.status === 'asks' ? 'goal_asks' : 'goal_withheld', message: g.reasons.join(' ') || null })) };
   };
@@ -155,7 +170,7 @@ function waitingView(model: CanonicalModelT, compiled: CompileResult, goals: rea
     leader_licence: 'withheld',
     options: ids.map((option_id) => ({ option_id, cell: cellOf(option_id), main_driver: { kind: 'not_recorded' as const } })),
     goal_chance: { notes: [...goals.filter((g) => g.status !== 'calculable').map((g) => `‘${g.label}’ is not in the chance yet: ${g.reasons.join(' ')}`),
-      ...thresholds.map((t) => t.words)], ...(thresholds.length > 0 ? { thresholds } : {}) },
+      ...thresholds.map((t) => t.words)], ...(thresholds.length > 0 ? { thresholds } : {}), ...(blockers.length > 0 ? { waits_on: blockers } : {}) },
   };
 }
 

@@ -132,7 +132,10 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     }
     // read_canonical_context returns model (as authored), earlier_versions, open_questions, coaching and run.
     for (const field of ['its revision; model, the canonical model exactly as authored (', 'earlier_versions, how many earlier versions it has;',
-      'open_questions, each with what it feeds and the edit that answers it;', 'coaching, the questions that would give an aim a measure or a deadline;',
+      // S1 (A4): what the Run waits on is typed; the AI asks in its own words, and each code says what the person supplies.
+      'blockers, what the stored Run waits on, in the model\'s order, each with its id, code and scope (what it holds up). No question is written for you:',
+      'asked, the figure', 'range_kind, whether the ends of their range are firm or a rough estimate;', 'recount, the count again',
+      'measure, how the aim or guardrail is measured;', 'deadline, by when;', 'no_goal, the result they want.',
       'and run, the stored Run, with current and engine_current.']) expect(d.read_canonical_context, field).toContain(field);
     // Simplify v1 (S2): the change in words and the ids to remove; Olumi's drafter writes the whole model; no op set.
     for (const gone of ['set_quantity', 'set_range_kind', 'set_goal_target', 'add_option', 'rename_option', 'define_goal_measure', 'ops']) expect(d.propose_change, gone).not.toMatch(new RegExp(`\\b${gone}\\b`));
