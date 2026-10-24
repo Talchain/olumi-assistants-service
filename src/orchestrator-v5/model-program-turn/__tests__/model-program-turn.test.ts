@@ -307,6 +307,18 @@ describe('the model-program turn on the real core route', () => {
     expect(read((d) => setQ(d, 'base_sales', { quote: 'We bake 300 loaves a week’' })).ok).toBe(false); // contrast: an extra mark is not theirs
   });
 
+  it('DL 24 Oct (#3728): on the reading card a pure-number unit reads plainly ("1/oven" is "per oven"); a real unit is unchanged', () => {
+    const d = bakery();
+    setQ(d, 'sell_through', { unit: '1/oven' });
+    const v = readingOf(d, { words: [BRIEF], approver: null }) as Json;
+    expect(v.ok).toBe(true);
+    const after = (id: string): string => v.changes.find((c: Json) => c.id === id).after;
+    expect(after('sell_through')).toContain('from 0.5 to 0.9 per oven, most likely 0.7');
+    expect(after('sell_through')).not.toContain('1/oven');
+    expect(after('base_sales')).toContain('300 loaf/week');
+    expect(after('budget')).toContain('3,000 GBP');
+  });
+
   it('step 2 "Check what I understood" (2–5): after the first save ONE held card reads the draft back, every item an add, goals first and figures last, a left-out item by its why; its approve is "Yes, that’s what I meant"; its model is the draft accepted, with a new Run of the same numbers; it is carried on reload and saved by its approve', async () => {
     const m = bakery();
     m.left_out.push({ id: 'staff_morale', text: 'Staff morale while the second oven beds in', why: 'It has no measure in this model.', question: null, concerns: [], author: 'olumi', quote: null, ...at },

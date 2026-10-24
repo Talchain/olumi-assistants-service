@@ -62,6 +62,19 @@ describe('⛔ CEE says a figure by one rule (Panel ROOT 5870330356, DL 587035394
     expect(said).not.toMatch(/GBP/);
   });
 
+  it('DL 24 Oct (#3728): the pure number "1" is never said as a unit; a real unit is said as before', () => {
+    expect(sayFigureAsWritten(-0.1, '1/tech lead')).toBe('-0.1 per tech lead');
+    expect(sayFigureAsWritten(0.35, '1 / lead')).toBe('0.35 per lead');
+    expect(sayFigureAsWritten(0.04, '1/month')).toBe('0.04 per month');
+    expect(sayFigureAsWritten(0.3, '1')).toBe('0.3');
+    // Contrast: a currency, a period and a rate keep their units; a figure of 1 is a figure, never a unit.
+    expect(sayFigureAsWritten(200000, 'GBP')).toBe('£200,000');
+    expect(sayFigureAsWritten(3, 'months')).toBe('3 months');
+    expect(sayFigureAsWritten(1, 'months')).toBe('1 month');
+    expect(sayFigureAsWritten(80, 'ticket/week')).toBe('80 ticket / week');
+    expect(sayFigureAsWritten(10, '1st_tier_seats')).toBe('10 1st tier seats');
+  });
+
   for (const [value, unit, want] of PROBE) {
     it(`probe: ${value} "${unit}" → "${want}"`, () => {
       expect(formatValueWithUnit(value, unit)).toBe(want);
