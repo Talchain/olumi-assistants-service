@@ -1266,6 +1266,41 @@ describe('the model-program turn on the real core route', () => {
     const held = (deps.proposals.get(p.data.proposal_id)!.living_model as { canonical: CanonicalModelT }).canonical;
     expect(held.quantities.find((x) => x.id === 'oven_price')).toMatchObject(price);
     expect(held.goals.map((g) => g.id)).toEqual(['more_loaves', 'stretch']);
+    // The answers win by construction, not by the drafter keeping them (buddy 24 Oct). A drafter that writes another figure on
+    // the item they answered: the card holds THEIR figure, words and authorship.
+    const mixed = (reply: string) => {
+      replies = [reply]; sent.length = 0;
+      return proposeProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words },
+        ProgramChangeParams.parse({ public_label: 'Oven price and a second goal', basis: 'their answer and their goal', request: 'Add a second goal: reach 400 loaves a week.', remove: [],
+          answers: [{ id: 'oven_price', status: 'known', author: 'person', value: 2500, low: null, high: null, range_kind: null, party: null, quote: 'The oven costs £2,500', basis: null }] })) as Promise<Json>;
+    };
+    // Codex r1 #3729, the adverse drafter: it returns the saved (unanswered) oven figure plus the new goal.
+    const dropped = await mixed(savedWith((d) => {
+      d.quantities.push(q('stretch_target', 'loaf/week', { value: 400, quote: 'reach 400 loaves a week' }));
+      d.goals.push({ ...d.goals[0]!, id: 'stretch', label: 'Reach 400 loaves a week', measure: { ...d.goals[0]!.measure!, target: 'stretch_target' }, quote: 'reach 400 loaves a week' });
+    }));
+    expect(dropped.status, JSON.stringify(dropped)).toBe('ok');
+    expect(sent).toHaveLength(1);
+    expect((deps.proposals.get(dropped.data.proposal_id)!.living_model as { canonical: CanonicalModelT }).canonical.quantities.find((x) => x.id === 'oven_price'))
+      .toMatchObject({ ...price, low: null, high: null, range_kind: null });
+    expect(dropped.data.changes.map((c: Json) => [c.id, c.action, c.author]).sort()).toEqual([['oven_price', 'change', 'person'], ['stretch', 'add', 'person'], ['stretch_target', 'add', 'person']]);
+    // And one that writes another figure on the item they answered.
+    const overwritten = await mixed(savedWith((d) => {
+      setQ(d, 'oven_price', { ...price, value: 3000 });
+      d.quantities.push(q('stretch_target', 'loaf/week', { value: 400, quote: 'reach 400 loaves a week' }));
+      d.goals.push({ ...d.goals[0]!, id: 'stretch', label: 'Reach 400 loaves a week', measure: { ...d.goals[0]!.measure!, target: 'stretch_target' }, quote: 'reach 400 loaves a week' });
+    }));
+    expect(overwritten.status, JSON.stringify(overwritten)).toBe('ok');
+    expect(sent).toHaveLength(1);
+    expect((deps.proposals.get(overwritten.data.proposal_id)!.living_model as { canonical: CanonicalModelT }).canonical.quantities.find((x) => x.id === 'oven_price'))
+      .toMatchObject({ ...price, low: null, high: null, range_kind: null });
+    expect(overwritten.data.changes.find((c: Json) => c.id === 'oven_price')).toMatchObject({ action: 'change', author: 'person' });
+    // A drafter that removes the item they answered: refused, the item named; their answer is never dropped silently.
+    const removed = await mixed(savedWith((d) => {
+      d.quantities = d.quantities.filter((x) => x.id !== 'oven_price');
+      d.relations = d.relations.filter((r) => r.id !== 'spend_rel');
+    }));
+    expect(removed).toMatchObject({ status: 'refused', reason: 'not_an_answer', detail: '"oven price" (oven_price): the change removed what you answered, so nothing changed.', data: { ids: ['oven_price'] } });
   });
 
   it('targeted answers: whose an answer is comes from what the AI declares, checked literally (Codex r1 #3727): Olumi\'s estimate stays Olumi\'s, ranged, never in their words; a mismatch is refused, never re-authored', async () => {

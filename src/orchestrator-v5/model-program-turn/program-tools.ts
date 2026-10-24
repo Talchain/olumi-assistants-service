@@ -146,8 +146,14 @@ async function prepare(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs)
   if (misowned.length > 0) return refused('not_an_answer', `${misowned.join(', ')}: their answer is known or unknown, in their words; Olumi's is estimated, with low, high and a basis, never their words.`, { ids: misowned });
   const set = answered(program.canonical, answers);
   if (typeof set === 'string') return refused('not_an_answer', set);
-  const draft = args.request.trim() !== '' || args.remove.length > 0 ? await proposePostimage(set.model, words, args.request, args.remove, ledgeredResponsesCall()) : set;
-  if (draft.model === null) return refused('no_model_back', 'Olumi could not write the updated model just now; nothing changed.');
+  const drafted = args.request.trim() !== '' || args.remove.length > 0 ? await proposePostimage(set.model, words, args.request, args.remove, ledgeredResponsesCall()) : set;
+  if (drafted.model === null) return refused('no_model_back', 'Olumi could not write the updated model just now; nothing changed.');
+  // Their answers win on the drafter's model too, set again exactly (buddy 24 Oct); one it removed is refused by name, never dropped.
+  const postimage = drafted.model;
+  const gone = answers.filter((a) => !postimage.quantities.some((x) => x.id === a.id)).map((a) => a.id);
+  if (gone.length > 0) return refused('not_an_answer', `${gone.map((id) => `"${set.model.quantities.find((x) => x.id === id)!.label}" (${id})`).join(', ')}: the change removed what you answered, so nothing changed.`, { ids: gone });
+  const draft = answered(postimage, answers);
+  if (typeof draft === 'string') return refused('not_an_answer', draft);
   const v = validatePostimage(program.canonical, draft.model, { removals: args.remove, words, fresh, approver: ctx.authenticated_user_id });
   if (!v.ok) return refused(v.code, v.reason, { ids: v.ids });
   // The person's words this turn are kept with the model: what it was changed from, in their words.
