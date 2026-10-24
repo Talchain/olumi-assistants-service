@@ -945,36 +945,51 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
 
     it('issue 30 (24 Oct): nothing Olumi writes into the drafter\'s or the agent\'s call on a program holds a phrase from the test briefs; its examples are synthetic', async () => {
       // Copied from the five test briefs (hiring, marketing, capacity, MRR, funding) in the harness briefs folder. They live
-      // here only, never in src. Scanned: every string the host puts in each call (instructions, schema, tool descriptions),
-      // the conversation itself left out.
+      // here only, never in src. Each is a pattern: a phrase, or a figure with its unit or window ("4 % a month", "10 %",
+      // "within 3 months"); "about 20" does not count a chance ("about 20% chance" is a result, not an example).
       const BRIEF_PHRASES = [
         'code quality', 'spend less', 'launch date', 'three months', 'productivity',
-        'first 3 months', 'conversion rate', 'feature launch', 'spend more than',
-        'about 20', 'tickets', 'specialist',
-        'churn', 'mrr',
+        'first 3 months', 'within (the first )?(3|three) months', 'conversion rate', 'feature launch', 'spend more than',
+        'about 20(?! ?%)', 'tickets', 'specialist',
+        'churn', 'mrr', '4 ?% (a|per) month', '10 ?%',
         'investment firms', 'angel investors', 'cold emails', 'warm connections', 'run out of money',
       ];
-      const hostText = (v: unknown, key = ''): string[] => key === 'input' ? []
-        : typeof v === 'string' ? [v]
-          : Array.isArray(v) ? v.flatMap((x) => hostText(x))
-            : v !== null && typeof v === 'object' ? Object.entries(v).flatMap(([k, x]) => hostText(x, k)) : [];
+      // Scanned: every string the host puts in a call (instructions, schema, tool descriptions, and its own messages in the
+      // input: state blocks, guidance, its written replies). Skipped: only the person's own typed messages, by identity.
+      const TYPED = [BAKERY_BRIEF, 'What does the model hold now?'];
+      const skipped: string[] = [];
+      const hostText = (v: unknown): string[] => {
+        if (typeof v === 'string') return [v];
+        if (Array.isArray(v)) return v.flatMap(hostText);
+        if (v === null || typeof v !== 'object') return [];
+        const m = v as Json;
+        if (m.role === 'user' && typeof m.content === 'string' && TYPED.includes(m.content)) { skipped.push(m.content); return []; }
+        return Object.values(m).flatMap(hostText);
+      };
       const found = (c: Json) => {
         const text = hostText(c).join(' ').replace(/\s+/g, ' ');
-        return BRIEF_PHRASES.filter((p) => new RegExp(`\\b${p}\\b`, 'i').test(text));
+        return BRIEF_PHRASES.filter((p) => new RegExp(`(?<![\\w.])${p}(?!\\w)`, 'i').test(text));
       };
       SCENARIO = randomUUID(); persisted = null; canonicalDraft = JSON.stringify(bakery()); calls.length = 0;
       expect((await typed(BAKERY_BRIEF)).statusCode).toBe(200);
       const draftCall = calls.find((c) => c.text?.format?.name === 'canonical_model')!;
       // Contrast: the probe reads the schema's descriptions and the agent's instructions (each holds its synthetic example).
       expect(hostText(draftCall).join(' ')).toContain('("we\'d like fewer late deliveries")');
+      skipped.length = 0;
       expect(found(draftCall)).toEqual([]);
+      expect(skipped, 'only the person\'s brief is skipped').toEqual([BAKERY_BRIEF]);
       calls.length = 0;
       outputs = [[{ type: 'message', text: 'Here is what the model holds.' }]];
       expect((await typed('What does the model hold now?')).statusCode).toBe(200);
       expect(calls).toHaveLength(1);
       expect(String(calls[0]!.instructions)).toContain('A loose figure ("about 35") goes in exactly as they said it: their figure, 35,');
       expect(calls[0]!.tools, 'the tool descriptions are scanned too').toBeDefined();
+      const agentText = hostText(calls[0]!).join(' ');
+      expect(agentText, 'the host\'s state block in the input is scanned').toContain('OLUMI STATE BLOCK');
+      expect(agentText, 'the host\'s program guidance in the input is scanned').toContain('This scenario\'s model is a model program: read_canonical_context');
+      skipped.length = 0;
       expect(found(calls[0]!)).toEqual([]);
+      expect(skipped, 'only the person\'s two typed messages are skipped').toEqual(TYPED);
     });
 
     it('Challenge on a PROGRAM board (served 502 on board 5715db98, 24 Oct): no first tool is forced, as its tools have no note_on_item; the note rides the turn and a reply comes back. A Living Model board keeps note_on_item', async () => {
