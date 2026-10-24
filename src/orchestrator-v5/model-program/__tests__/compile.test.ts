@@ -902,3 +902,47 @@ describe('issue 39: an unsized link is drawn with its stated direction, never a 
     expect(read.data!.quantities.map((x) => [x.id, x.direction])).toEqual(old.quantities.map((x) => [x.id, null]));
   });
 });
+
+describe('AIE §5 AMEND (DL 24 Oct): a first draft never waits on an ask no one can see', () => {
+  const withQ = (m: CanonicalModelT, id: string, f: Partial<CanonicalQuantityT>): CanonicalModelT => ({ ...m, quantities: m.quantities.map((q) => (q.id === id ? { ...q, ...f } : q)) });
+  it('an asked figure with no question is refused on a first draft; with its question, or on a saved model or an update, it compiles as before', () => {
+    const noQ = withQ(gym(), 'leavers', { question: null });
+    expect(compile(noQ, { asksNeedQuestions: true }).errors.map((e) => [e.code, e.items])).toEqual([['asked_no_question', ['leavers']]]);
+    expect(codes(compile(withQ(gym(), 'leavers', { question: '  ' }), { asksNeedQuestions: true }))).toEqual(['asked_no_question']); // blank is none
+    // Contrast: with its question a first draft compiles; a saved model or an update (no flag) keeps A4, the typed blocker only.
+    expect(codes(compile(gym(), { asksNeedQuestions: true }))).toEqual([]);
+    const saved = compile(noQ);
+    expect(codes(saved)).toEqual([]);
+    expect(saved.blockers.map((b) => [b.id, b.code])).toContainEqual(['leavers', 'asked']);
+    // A figure labelled structure that is no structural constant is the person's ask (normalise): on a first draft it needs its question too.
+    const mislabelled = withQ(gym(), 'joins', { author: 'structure', quote: null, basis: 'Today.' });
+    expect(compile(mislabelled, { asksNeedQuestions: true }).errors.map((e) => [e.code, e.items])).toEqual([['asked_no_question', ['joins']]]);
+    expect(codes(compile(mislabelled))).toEqual([]);
+  });
+
+  it('the starting level of a setting only the options change, and a whole, are structure: Olumi\'s proposed divisions compile with no ask', () => {
+    const olumiOption = (id: string, label: string, value: number): CanonicalModelT['options'][number] =>
+      ({ ...option(id, label, [set('share', null, 'x', { value, author: 'olumi', quote: null })], 'x'), author: 'olumi', quote: null });
+    const division = model({
+      question: 'How should the week be divided between baking and deliveries?',
+      quantities: [
+        structure('share', '%', 0, 'No option set yet: each option sets its own share.'),
+        structure('start', '%', 0, 'Nothing done yet.'),
+        olumi('pace', '1', 0.8, 1.6, 1.2),
+        derived('coverage', '%'),
+        structure('whole', '%', 100, 'All of it.'),
+        person('weeks', 'week', 6, 'over six weeks'),
+      ],
+      relations: [eff('coverage_rel', 'coverage', 'start', [['share', 'pace']])],
+      goals: [{ ...goal('done', 'coverage', '>=', 'whole', 'end', 'weeks', 'over six weeks'), measure: { ...goal('done', 'coverage', '>=', 'whole', 'end', 'weeks', 'x').measure!, measure_by: 'olumi' } }],
+      options: [olumiOption('even', 'Even split', 50), olumiOption('baking_led', 'Baking-led split', 80)],
+    });
+    const r = compile(division, { asksNeedQuestions: true });
+    expect(codes(r)).toEqual([]);
+    expect(r.blockers.filter((b) => b.code === 'asked')).toEqual([]);
+    expect(r.executable).not.toBeNull();
+    // Contrast (the AMEND's draft 1): the same lever asked with no question is refused on a first draft.
+    expect(compile(withQ(division, 'share', { author: 'person', status: 'asked', value: null, basis: null }), { asksNeedQuestions: true }).errors.map((e) => [e.code, e.items]))
+      .toEqual([['asked_no_question', ['share']]]);
+  });
+});

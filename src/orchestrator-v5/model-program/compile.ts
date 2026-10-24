@@ -45,7 +45,7 @@ export type CompileErrorCode =
   | 'olumi_no_range' | 'missing_quote' | 'range_order' | 'no_relation' | 'relation_on_figure' | 'two_relations'
   | 'relation_shape' | 'cycle' | 'goal_and_limit' | 'goal_shape' | 'asks_for_result' | 'window' | 'timing' | 'option_shape'
   | 'set_derived' | 'option_reaches_no_goal' | 'set_reaches_nothing' | 'risk_shape' | 'not_applicable_used'
-  | 'after_horizon' | 'fact_estimated' | 'coefficient_kind' | 'structure_value' | 'label' | 'range_kind';
+  | 'after_horizon' | 'fact_estimated' | 'coefficient_kind' | 'structure_value' | 'label' | 'range_kind' | 'asked_no_question';
 export type CompileError = { code: CompileErrorCode; message: string; items: string[] };
 export type Outcome = 'calculable' | 'asks' | 'withheld';
 export type GoalOutcome = {
@@ -141,7 +141,7 @@ const direction = (cmp: string) => (cmp.startsWith('>') ? 'up' : 'down');
 const isPowerOfTen = (v: number) => v > 0 && Math.abs(Math.log10(v) - Math.round(Math.log10(v))) < 1e-12;
 
 /** Schema-check unknown JSON (the AI's raw output), then compile. A schema failure is an error the AI can act on. */
-export function compileJson(input: unknown, opts: { sourceText?: string } = {}): CompileResult {
+export function compileJson(input: unknown, opts: CompileOptions = {}): CompileResult {
   const parsed = CanonicalModel.safeParse(input);
   if (parsed.success) return compile(parsed.data, opts);
   return {
@@ -238,10 +238,16 @@ export const structureAsked = (q: CanonicalQuantityT): CanonicalQuantityT => ({ 
 /** A figure the person gave as approximate (the host's mark, `APPROXIMATE_FIGURE`): theirs, a point, a range asked for. */
 export const isApproximate = (q: CanonicalQuantityT): boolean => q.author === 'person' && q.basis === APPROXIMATE_FIGURE && q.status === 'known' && q.value !== null && q.low === null;
 
-export function compile(input: CanonicalModelT, opts: { sourceText?: string } = {}): CompileResult {
+/** `asksNeedQuestions` (a FIRST draft only, `draft.ts`): every figure that waits on the person carries the question that asks for
+ *  it, so no goal waits on an ask no one can see. A saved model and an update are compiled as before (A4: the AI asks in its own words). */
+export type CompileOptions = { readonly sourceText?: string; readonly asksNeedQuestions?: boolean };
+
+export function compile(input: CanonicalModelT, opts: CompileOptions = {}): CompileResult {
   const model = normalise(input);
   const errors: CompileError[] = [];
   const err = (code: CompileErrorCode, message: string, items: string[]) => errors.push({ code, message, items });
+  if (opts.asksNeedQuestions === true) for (const q of model.quantities) if (q.status === 'asked' && (q.question ?? '').trim() === '')
+    err('asked_no_question', `"${q.label}" (${q.id}) waits on the person but has no question. If it is theirs to give, ask the one plain question that would give it. If it is not (the starting level of a setting only the options change, or a whole such as 100 %), it is a structural constant: author structure, known, one exact figure.`, [q.id]);
 
   // ── ids and labels ─────────────────────────────────────────────────────────────────────────────────────────────────
   const allIds = new Map<string, string>();
@@ -345,7 +351,7 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
         const point = has(q.value) && !has(q.low);
         const dateReading = point && (windowQs.has(q.id) || timingQs.has(q.id)) && Number.isInteger(q.value) && has(q.basis);
         const proposal = point && proposals.has(q.id);
-        if (!dateReading && !proposal) err('olumi_no_range', `${n} is Olumi's figure marked known; Olumi's figures are estimates: mark it estimated with low and high, ask the person, or, for an exact constant such as 12 month/year or an option switch, make its author structure.`, [q.id]);
+        if (!dateReading && !proposal) err('olumi_no_range', `${n} is Olumi's figure marked known; Olumi's figures are estimates: mark it estimated with low and high, or, for an exact constant such as 12 month/year, an option switch or the starting level of a setting only the options change, make its author structure.`, [q.id]);
       }
       needQuote(q, n, q.id);
     } else if (q.status === 'estimated') {

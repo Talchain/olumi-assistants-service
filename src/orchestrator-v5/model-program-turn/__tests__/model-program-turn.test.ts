@@ -977,15 +977,22 @@ describe('the model-program turn on the real core route', () => {
     const m = bakery();
     m.quantities.push(q('current_output', 'loaf/week', { author: 'structure', value: 12 }), q('extra', 'loaf/week', { kind: 'derived', status: 'derived', author: 'olumi' }));
     m.relations.push({ form: 'definition', id: 'extra_rel', defines: 'extra', op: 'sum', parts: [{ id: 'current_output', sign: 1 }], author: 'olumi', quote: null, ...at });
-    replies = [JSON.stringify(m)];
-    expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
-    const asked = { author: 'person', status: 'asked', value: null, question: null, basis: null };
+    // AIE §5 AMEND (DL 24 Oct): read as theirs, it waits on them with no question, so a FIRST draft is refused and repaired:
+    // the AI gives the question. The code still writes no question of its own, and never keeps 12 as known or structure.
+    const repaired = JSON.parse(JSON.stringify(m)) as CanonicalModelT;
+    setQ(repaired, 'current_output', { author: 'person', status: 'asked', value: null, basis: null, quote: null, question: 'How many loaves a week does the oven make now?' });
+    replies = [JSON.stringify(m), JSON.stringify(repaired)];
+    const r = (await turn({ message: BRIEF })).json();
+    expect(r.model_program.saved).toBe(true);
+    const first = r.model_program.draft.attempts[0].errors as Json[];
+    expect(first.map((e) => [e.code, e.items])).toEqual([['asked_no_question', ['current_output']]]);
+    expect(String(sent[1]!.input.at(-1).content)).toContain('"current output" (current_output) waits on the person but has no question.');
+    const asked = { author: 'person', status: 'asked', value: null, question: 'How many loaves a week does the oven make now?', basis: null };
     expect(persisted!.living_model.canonical.quantities.find((x: Json) => x.id === 'current_output')).toMatchObject(asked);
     vi.resetModules();
     const tools = await import('../program-tools.js');
     const read = await tools.readProgramContext({ dispatch, proposals: new ProposalStore() }, { scenario_id: SCENARIO, authenticated_user_id: null }) as Json;
-    expect((read.data.model as Json).quantities.find((x: Json) => x.id === 'current_output')).toMatchObject({ author: 'person', status: 'asked' });
-    expect((read.data.model as Json).quantities.find((x: Json) => x.id === 'current_output')).not.toHaveProperty('question'); // compact: null left out
+    expect((read.data.model as Json).quantities.find((x: Json) => x.id === 'current_output')).toMatchObject({ author: 'person', status: 'asked', question: 'How many loaves a week does the oven make now?' });
     expect((read.data.blockers as Json[]).find((b) => b.id === 'current_output')).toMatchObject({ code: 'asked' });
     expect(JSON.stringify(read.data)).not.toContain('What is "current output"?');
     expect(JSON.stringify(read.data.model)).not.toMatch(/"id":"current_output"[^}]*"author":"structure"/);
@@ -1943,7 +1950,8 @@ describe('the model-program turn on the real core route', () => {
     m.goals.push({ id: 'regulars', label: 'Keep the regulars happy', measure: null, question: 'How would you tell the regulars are happy?', author: 'person', quote: 'want to reach 380 loaves a week', ...at },
       { id: 'staff_happy', label: 'Keep the staff happy', measure: null, question: 'How would you tell the staff are happy?', author: 'person', quote: 'want to reach 380 loaves a week', ...at });
     m.limits.push({ id: 'friendly', label: 'Keep it friendly', measure: null, question: 'How would you tell it stays friendly?', author: 'person', quote: 'We have £3,000 to spend', ...at });
-    setQ(m, 'base_sales', { author: 'structure', quote: null, basis: 'Today.' }); // no structural constant: the person's, with no question of the code's
+    // AIE §5 AMEND (DL 24 Oct): a first draft's every ask carries the AI's question (an ask with none is refused at compile).
+    setQ(m, 'base_sales', { status: 'asked', value: null, quote: null, question: 'How many loaves do you sell a week now?' });
     setQ(m, 'extra_per_oven', { value: null, low: 80, high: 120 }); // their range, its kind unread: a blocker with no question
     replies = [JSON.stringify(m)];
     const r = (await turn({ message: BRIEF })).json();
