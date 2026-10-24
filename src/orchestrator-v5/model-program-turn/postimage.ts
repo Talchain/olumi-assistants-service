@@ -1,6 +1,7 @@
 /**
  * THE ONE POSTIMAGE VALIDATOR (simplify v1, A1–A3): every change to a saved program is a WHOLE updated canonical model
- * (the AI's, from the person's message; or a typed card edit's, built from its exact target and value), and every one is
+ * (the AI's changes from the person's message, merged by id onto the saved model; or a typed card edit's, built from its
+ * exact target and value), and every one is
  * checked here, exactly, before it can be proposed or saved:
  *  · schema: it is a canonical model;
  *  · preservation by (family, id): every saved record is present in its own family; a removal is only one listed

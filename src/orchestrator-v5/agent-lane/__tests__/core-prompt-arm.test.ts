@@ -7,7 +7,7 @@ import { HOST_SCIENCE_AND_SOURCE_RULES, HOST_TOOL_CONTRACT } from '../coach-rout
 import { createHash } from 'node:crypto';
 import * as drafting from '../../path-b/drafting-guidance.js';
 import * as coreInstructions from '../../core-route/instructions.js';
-import { CANONICAL_JSON_SCHEMA, DRAFTING_INSTRUCTIONS, UPDATE_PREFIX } from '../../model-program-turn/prompt.js';
+import { CANONICAL_JSON_SCHEMA, DRAFTING_INSTRUCTIONS, UPDATE_PREFIX, UPDATE_REPAIR_PREFIX } from '../../model-program-turn/prompt.js';
 import * as programDraft from '../../model-program-turn/draft.js';
 import { PROGRAM_TURN_GUIDANCE } from '../../model-program-turn/program-tools.js';
 
@@ -76,8 +76,11 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     // default, a direction-only one kept in words with its size unknown; never a forced number; quotes copied exactly; the
     // update's own text lives here with the draft's goal rule; periods counted as starts_after_periods (#3713).
     // 24 Oct (AIE 6386018855 §5, accepted by the DL): Olumi may propose a measure, options and missing drivers, at first drafting only.
-    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('c5a7b55ac7b2701fce79405bb562337dbaf67b1917dcc2bbcc1867c63e993c97');
-    expect(createHash('sha256').update(UPDATE_PREFIX, 'utf8').digest('hex')).toBe('3fc74a39f5db5290b72b37b7e2228c696a0fdeb5c2b017f96f3883bfedf3e0fb');
+    // 24 Oct (DL, marketing "no path"): a goal or limit an update adds comes with the relations from the options that affect it.
+    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('d319148c55bfc2605c6d06b773773242cf6843a0ed7cc3728e4d14d0f531219b');
+    // 24 Oct (DL, DoD-G classes 12 and 4): an update returns only the records it changes or adds; the host merges them by id.
+    expect(createHash('sha256').update(UPDATE_PREFIX, 'utf8').digest('hex')).toBe('1b1e9392b6c504837c37a97e0441c325cefdd66503902dff2bce5d6c0c9e8778');
+    expect(createHash('sha256').update(UPDATE_REPAIR_PREFIX, 'utf8').digest('hex')).toBe('1b52b62678cfab1b06670bc026504a9e63e186e458fec752c4b56ba9df918daf');
     expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('bed04fc58a01dbd02d8f5c8aa6ef171731a356c1cde47a85e0cd64be35416653'); // 23 Oct (DL 93d79c3e, C2 double prime): a definition's parts are factors with levels, never another definition; a STATED per-unit effect is a sized link. 22 Oct: every stated goal saved in their words, never approximated (Claude r1 on #3670); + a calendar date is Olumi's labelled reading
     // The retired constants are gone from both modules: no route can send the accreted text again.
     for (const name of ['CORE_REPLY_INSTRUCTION', 'CORE_RESPONSE_DISCIPLINE', 'CORE_NEXT_STEP']) expect(Object.keys(coreInstructions), name).not.toContain(name);
@@ -176,7 +179,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       // DL 24 Oct (blind score of 1510a008, mrr structure): an identity is a definition; a missing figure is asked on its item.
       'Mechanism: every option reaches every measured goal through relations from what it sets; a quantity that is by definition a product or sum of others is a definition, never an effect; each other link is sized by their coefficient or Olumi\'s estimate.',
       // AIE 6386018855 §5 (DL 24 Oct): the capture-only clauses replaced, each permission once, attributed and grounded.
-      'Olumi\'s own additions (a suggested measure, options, drivers, risks) are made when the model is first drafted; a repair or an update changes only what it asks.',
+      'Olumi\'s own additions (a suggested measure, options, drivers, risks) are made when the model is first drafted; a repair or an update changes only what it asks, and a goal or limit an update adds comes with the relations from the options that affect it, sized as for a first draft.',
       'Model the main reason each option could succeed and the main reason it could fail.',
       'Every driver, constraint and current state they mention feeds the calculation or the record that fits it.',
       'Where the brief leaves out a driver, countereffect or risk that is plausible and could change the result, add it as Olumi\'s hypothesis (author olumi, with a basis and its direction); plausibility alone never justifies a figure, so size it like any other link.',
@@ -212,7 +215,10 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     for (const old of ['never invent a measure', 'its direction in words', 'Important but uncalculable', 'from what the brief names', 'goes in left_out with the reason', 'a link you cannot size goes in left_out', 'Every other figure it needs stays null', 'Only coefficients are Olumi', 'never "unknown" with no question', 'flows of periods 1 to n', 'from period 0'])
       expect(DRAFTING_INSTRUCTIONS, old).not.toContain(old);
     // The update's text is prompt text: here, once, with the draft's goal rule and the quote rule; draft.ts no longer holds a copy.
-    for (const rule of ['return the WHOLE model, by the same rules.', 'Every option reaches every measured goal, a goal this change adds included.',
+    // DL 24 Oct (DoD-G classes 12 and 4): only the records it changes or adds; never one it did not change; removals listed.
+    for (const rule of ['return only the records you change or add, with their ids, each in full and as it was but for the change; never return a record you did not change; list removals in remove (only the ids listed to remove).',
+      // DL 24 Oct (marketing "no path"): the goals arrive in an update, so it brings the options' relations to them.
+      'Every option reaches every measured goal: a goal or limit this change adds comes with the relations from the options that affect it, sized as for a first draft. Return those relations too.',
       'A figure of theirs quotes their words copied exactly, never reworded or joined;',
       // DL 24 Oct (class 12): an answer is entered on the item it answers; a figure read from words says so in its basis.
       'Each answer goes on the item whose question it answers (a question about one option, on that option\'s item);',
@@ -220,6 +226,10 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       'Never keep an answer unassigned and ask it again.',
       // DL 24 Oct (class 12 remainder): "I don't know" is an answer; the item stays open with a new question.
       '"I don\'t know" is an answer too: the item stays open, its question changed to ask for what would size it.']) expect(count(UPDATE_PREFIX, rule), rule).toBe(1);
+    // The whole-model update is gone: from the update's text and from its repair turn.
+    for (const old of ['WHOLE model', 'Keep every record, with its id, exactly as it is', 'Leave out only the ids listed', 'Keep the history as it is.', 'a goal this change adds included'])
+      expect(`${UPDATE_PREFIX}${UPDATE_REPAIR_PREFIX}`, old).not.toContain(old);
+    expect(count(UPDATE_REPAIR_PREFIX, 'Return all your changes again with them fixed, by the same rules: only the records you change or add, each in full with its id, and the removals.')).toBe(1);
     // The program turn's guidance is prompt text: answers in order answer the questions in order, and none is asked again in the same words.
     // Targeted answers (DL 24 Oct): an answer goes in answers on its item's id, anything else in request (pinned as sent in core-turn.route).
     expect(createHash('sha256').update(PROGRAM_TURN_GUIDANCE, 'utf8').digest('hex')).toBe('4ccd4a5913bfb242ca4f771b3349ed8a2872b6fc18b7632b8d38c15c92448542');
