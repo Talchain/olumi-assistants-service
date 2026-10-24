@@ -74,7 +74,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     // 24 Oct (DL, combined measure + funding dead end + science ruling): their fact asked; a link an estimate when supportable,
     // else unknown with why and what would size it, never a forced number; quotes copied exactly; the
     // update's own text lives here with the draft's goal rule; periods counted as starts_after_periods (#3713).
-    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('dd75b74f198cc6715d542228fa8740da9c849c39ab8ccc360cec5c0ee98ddf00');
+    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('07dfa1f0f74413243240e1cd44d2c1da961e9f08b087fc250067b9113b603ca0');
     expect(createHash('sha256').update(UPDATE_PREFIX, 'utf8').digest('hex')).toBe('be829fe1012ba75665711c6f6a162c33e18053ed4dc0d0b9a3a498f10b752d8c');
     expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('bed04fc58a01dbd02d8f5c8aa6ef171731a356c1cde47a85e0cd64be35416653'); // 23 Oct (DL 93d79c3e, C2 double prime): a definition's parts are factors with levels, never another definition; a STATED per-unit effect is a sized link. 22 Oct: every stated goal saved in their words, never approximated (Claude r1 on #3670); + a calendar date is Olumi's labelled reading
     // The retired constants are gone from both modules: no route can send the accreted text again.
@@ -166,7 +166,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       'what they know or decide: current levels, prices, costs, budgets and how they split them, headcount, dates, durations, targets.',
       'Never ask them for a link\'s size or an option\'s effect.',
       'each link sized by their coefficient or Olumi\'s estimate.',
-      'Every figure a goal or limit rests on stays in: their fact (what they expect without the options included) is asked, with its question; a link or effect (an option\'s added effect included) is theirs, or Olumi\'s estimate with a range and a basis when one is supportable, else "unknown" with a basis saying why and the question, evidence or activity that would size it. Never force a number to get a chance.',
+      'Every figure a goal or limit rests on stays in: their fact (what they expect without the options included) is asked, with its question; a link or effect (an option\'s added effect included) is theirs or, by default, Olumi\'s labelled estimate with an honest range as wide as the real uncertainty (a wide range is supportable); "unknown" only when not even its direction or order of magnitude can be defended, with a basis saying why and what would size it. Never force a number to get a chance.',
       'A stock\'s level after n periods is its start plus n periods of its flows.',
       'sets ovens_added to one_oven, starts_after_periods 0;',
     ]) expect(count(DRAFTING_INSTRUCTIONS, rule), rule).toBe(1);
@@ -179,9 +179,11 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(Object.keys(programDraft)).not.toContain('UPDATE_PREFIX');
     // The schema is prompt text too (sent on every drafting call): `unknown` only where nothing rests on it (served funding dead end).
     const sentSchema = JSON.stringify(CANONICAL_JSON_SCHEMA);
-    expect(count(sentSchema, 'unknown: no responsible figure or estimate is supportable yet: every figure null; basis says why and the question, evidence or activity that would size it. A fact of theirs is asked instead; a link or effect is estimated, with a range and a basis, whenever one is supportable.')).toBe(1);
+    expect(count(sentSchema, 'unknown: not even a direction or order of magnitude can be defended yet: every figure null; basis says why and the question, evidence or activity that would size it. A fact of theirs is asked instead; a link or effect is Olumi\'s estimate by default, its range as wide as the real uncertainty.')).toBe(1);
     // Neither the old open-ended text nor a rule that forces an estimate (buddy science BLOCK, 24 Oct) is sent.
-    for (const old of ['nobody can give or responsibly estimate it yet', 'is never unknown', 'basis says why. ']) expect(sentSchema, old).not.toContain(old);
+    // Nor an open-ended unknown, a rule that forces an estimate, or one that makes unknown a link's default (1510a008: 50 links unknown).
+    for (const old of ['nobody can give or responsibly estimate it yet', 'is never unknown', 'basis says why. ', 'whenever one is supportable']) expect(sentSchema, old).not.toContain(old);
+    expect(DRAFTING_INSTRUCTIONS).not.toContain('when one is supportable, else');
   });
 
   it('the drafter saves every stated goal in their words and never approximates it, with the rule present once', () => {
