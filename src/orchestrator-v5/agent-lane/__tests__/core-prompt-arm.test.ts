@@ -7,6 +7,7 @@ import { HOST_SCIENCE_AND_SOURCE_RULES, HOST_TOOL_CONTRACT } from '../coach-rout
 import { createHash } from 'node:crypto';
 import * as drafting from '../../path-b/drafting-guidance.js';
 import * as coreInstructions from '../../core-route/instructions.js';
+import { DRAFTING_INSTRUCTIONS } from '../../model-program-turn/prompt.js';
 
 const { CORE_DRAFTER_RULES } = drafting;
 
@@ -40,7 +41,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
   it('the sent core instructions, byte for byte, plus the canvas-coaching sentence once (the route row in core-turn.route.test.ts pins the same bytes as the SDK receives them)', () => {
     expect(b.split(NOTE_ON_ITEM_INSTRUCTION)).toHaveLength(2);
     // 23 Oct (ALPHA): the model-program prompt replaces arm B's assembled reference (055841368f…, 29,512 characters sent).
-    expect(createHash('sha256').update(b, 'utf8').digest('hex')).toBe('08747cdea15ebf05c863822fb8776ef4a4b34f7ac001270018a1d90b529fd6a9');
+    expect(createHash('sha256').update(b, 'utf8').digest('hex')).toBe('e2fdcbef201e7217062abcb03d3ba21f3b948a298e5ab8dae46485aaf552b65c'); // 23 Oct (prompt builder, P1/P4): at most three questions, each once, never what their words state.
     // Candidate-3 witness kept (21 Oct): WHEN to build. Text only, not behaviour.
     expect(b).toContain('draft the first model from their brief in that same turn, even when figures are missing');
   });
@@ -66,7 +67,10 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
   });
 
   it('THE PROMPTS (DL 22 Oct, priority change): the coach\u2019s reply rules and the drafter\u2019s rules, adapted as ruled; the old constants are gone', () => {
-    expect(createHash('sha256').update(CORE_REPLY_RULES, 'utf8').digest('hex')).toBe('312c2c4bdd66fdcd8f032437d4ad2f8e0c9c4596e958245aff0890249c5a7432'); // 23 Oct (ALPHA): the reply rules for the model program.
+    expect(createHash('sha256').update(CORE_REPLY_RULES, 'utf8').digest('hex')).toBe('9607f2b0d95df9e7be7e040c975cd13a12ba7f60120d39c8c5fab6d2016d87dc'); // 23 Oct (ALPHA): the reply rules for the model program; P1: at most three questions a reply, each once.
+    // The model-program drafter's text (23 Oct, P1–P5: three questions at most, every option reaches
+    // every measured goal, a deadline is its goal's window, options named in full). Prompt text changes only with this pin.
+    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('50c3488a7bee71ab0c5003908bf03ca513b123dc64bedb5ea28cf8f2f5cb79dc');
     expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('bed04fc58a01dbd02d8f5c8aa6ef171731a356c1cde47a85e0cd64be35416653'); // 23 Oct (DL 93d79c3e, C2 double prime): a definition's parts are factors with levels, never another definition; a STATED per-unit effect is a sized link. 22 Oct: every stated goal saved in their words, never approximated (Claude r1 on #3670); + a calendar date is Olumi's labelled reading
     // The retired constants are gone from both modules: no route can send the accreted text again.
     for (const name of ['CORE_REPLY_INSTRUCTION', 'CORE_RESPONSE_DISCIPLINE', 'CORE_NEXT_STEP']) expect(Object.keys(coreInstructions), name).not.toContain(name);
@@ -82,8 +86,9 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     for (const rule of [
       // 1. after a draft: what Olumi understood, then only the blocking questions, grouped, the most consequential first, never re-asked
       "1. What Olumi understood, in two to four short lines: the question, the goals and limits, the options and the main figures. Keep their figures in their words, say which figures are Olumi's starting estimates, and say what was left out of the calculation and why.",
-      '2. Only the questions that block a goal or a limit, as one numbered list they can answer in one reply: the one that unblocks the most first, each with a few words on why it matters.',
-      'If a question asks for something they have already said, do not ask it: put their figure in with the edit tools, quoting them, and say so.',
+      '2. Only the questions that block a goal or a limit, at most three, as one numbered list they can answer in one reply: the one that unblocks the most first, each asking one thing, with a few words on why it matters.',
+      'If a question asks for something their words already state or answer, do not ask it: put it in with the edit tools, quoting them, and say so.',
+      'Ask at most three questions in a reply, each once, the blocking ones first;',
       // 2. a chance as the code words it, what it rests on, the limit lines, and ONE next step
       'report each option\u2019s chance as the result words it: the figure, the goal, target and horizon it answers, and what it rests on, "on your figures" or "if" with Olumi\'s assumptions (name them briefly; never drop the "if" or turn it into a forecast).',
       'Never work out, round, combine or rank a chance yourself.',
@@ -195,12 +200,14 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       "For a risk's chance and window, use supplied figures or, where reasonable, a labelled Olumi estimate under the estimate rule; if no reasonable estimate is possible, keep it unknown and say what is missing.",
       "An option acts through settings on factors or sized option-to-item links; retain either valid form without adding an artificial factor.",
     ];
-    const question = 'On later turns, ask the blocking questions still open in the same way.';
+    const question = 'On later turns, ask the blocking questions still open in the same way, never one they have answered, even with "I don\'t know".';
     const firstTurn = `${b}\n\n${CORE_DRAFTER_RULES}`;
     for (const rule of [...draftRules, question]) expect(count(firstTurn, rule), rule).toBe(1);
     expect(count(b, question), 'the questions survive after the first model').toBe(1);
     // ALPHA: the one-question-per-reply rule it replaces is gone (the blocking questions are one numbered list).
     expect(b).not.toContain('end every reply with exactly ONE question');
+    // P1 (23 Oct): the AI's own questions are capped at three a reply; the unlimited blocking list it replaces is gone.
+    expect(b).not.toContain('Apart from the questions that block a goal, ask at most one question');
     for (const rule of draftRules) expect(b, 'draft-only modelling rules are not repeated in standing instructions').not.toContain(rule);
     for (const old of ['A possible event is a risk; an existing condition is a factor.',
       'Otherwise explain the missing capability or ask only for the necessary input.',
