@@ -42,7 +42,9 @@ const MRR_LABELS: Record<string, PresentQuantity> = {
 const MRR_OPTIONS = [option('hold', 'Hold'), option('raise', 'Raise to £59', [{ quantity: 'price', to: 'price_59', from_period: 0 }])];
 const MRR_GOALS = [goal('g_mrr', 'mrr', '>=', 't_mrr'), goal('g_cust', 'customers', '>=', 't_cust')];
 function present(m: ExecutableModel, labels: Record<string, PresentQuantity>, more: Partial<PresentInput> = {}, draws = 200) {
-  return presentAnalysisView({ model: m, result: simulate(m, { seed: 20261023, draws }), quantities: labels, ...more }) as unknown as Rec;
+  // R8 (default deny): the rows' goals and limits are the person's, confirmed, unless a row says otherwise.
+  const aims = Object.fromEntries([...m.goals, ...m.limits].map((c) => [c.id, { confirmed: true, accepted: true }]));
+  return presentAnalysisView({ model: m, result: simulate(m, { seed: 20261023, draws }), quantities: labels, aims, ...more }) as unknown as Rec;
 }
 
 // Hand-written words (the level template of goal-target-basis.ts `targetChanceWords`, the end of month 1 for a state):

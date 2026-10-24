@@ -1148,6 +1148,28 @@ describe('the model-program turn on the real core route', () => {
       expect(mixed).toContain(', in this model, on Olumi’s reading of ‘members now’ (not yet confirmed) and ‘members’: in every simulated draw');
     });
 
+    // Codex r3 #3738: the goal is read with its own record (and its measure's author and its window's figure), and so is a limit.
+    const GOAL = '‘Reach 340 members within three months’';
+    type Goal = CanonicalModelT['goals'][number];
+    const aimCases: readonly (readonly [string, (g: Goal) => Goal, (m: CanonicalModelT) => void, string])[] = [
+      ['the goal proposed', (g) => ({ ...g, approval: 'proposed' }), () => {}, `on Olumi’s reading of ${GOAL} (not yet confirmed)`],
+      ['the goal Olumi-authored (accepted)', (g) => ({ ...g, author: 'olumi', quote: null }), () => {}, `on Olumi’s reading of ${GOAL}`],
+      ['the goal not found in their words', (g) => ({ ...g, quote: 'grow to 340 members by spring' }), () => {}, `on Olumi’s reading of ${GOAL} (not yet confirmed)`],
+      ['the goal measured by Olumi\'s suggestion', (g) => ({ ...g, measure: { ...g.measure!, measure_by: 'olumi' } }), () => {}, `on Olumi’s reading of ${GOAL}`],
+      ['the goal\'s window figure proposed', (g) => g, (m) => { m.quantities = m.quantities.map((x) => (x.id === 'months' ? { ...x, approval: 'proposed' } : x)); }, `on Olumi’s reading of ${GOAL} (not yet confirmed)`],
+      ['a limit proposed', (g) => g, (m) => { m.limits = m.limits.map((l) => ({ ...l, approval: 'proposed' })); }, 'on Olumi’s reading of ‘Within the £800’ (not yet confirmed)'],
+    ];
+    for (const [name, goal, also, lead] of aimCases) {
+      it(`Codex r3 #3738: ${name} is Olumi's reading, never "on your figures"`, () => {
+        const m = approved(allTheirs());
+        m.goals = m.goals.map((g) => (g.id === 'reach_340' ? goal(g) : g));
+        also(m);
+        const face = faceOf(m, OWN);
+        expect(face).toContain(`, in this model, ${lead}: in every simulated draw`);
+        expect(face).not.toContain('on your figures');
+      });
+    }
+
     it('buddy #3738: their premise not found in their words, or not yet accepted, is never "your" and never Olumi\'s', () => {
       for (const [m, words] of [[approved(allTheirs()), OWN], [approved(allTheirs()), `${OWN} The council must let us use the hall.`]] as const) {
         m.conditions.push(words === OWN ? hall : { ...hall, approval: 'proposed' });

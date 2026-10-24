@@ -50,11 +50,13 @@ export type WaitingView = {
   readonly goal_chance: { readonly notes: readonly string[]; readonly thresholds?: readonly PresentThreshold[]; readonly waits_on?: readonly PresentBlocker[] };
 };
 
-/** R8, ONE rule (default deny): the records (quantity, relation, link, goal, premise) accepted and in their words; `confirmed`: the person's. */
+/** R8, ONE rule (default deny): the records (quantity, relation, link, goal, limit, premise) accepted and in their words;
+ * `confirmed`: the person's. A goal whose measure is Olumi's suggestion (`measure_by`) is Olumi's. */
 type Records = { readonly accepted: ReadonlySet<string>; readonly confirmed: ReadonlySet<string> };
 function recordsOf(m: CanonicalModelT, compiled: CompileResult): Records {
   const unverified = new Set(compiled.unverified.map((u) => u.id)), links = m.relations.flatMap((r) => (r.form === 'effect' ? r.terms.map((t) => ({ ...t, id: `${r.id}:${t.driver}` })) : []));
-  const all = [...m.quantities, ...m.relations, ...links, ...m.goals, ...m.assumptions, ...m.conditions], ok = all.filter((r) => r.approval === 'approved' && !unverified.has(r.id));
+  const goals = m.goals.map((g) => (g.measure?.measure_by === 'olumi' ? { ...g, author: 'olumi' as const } : g));
+  const all = [...m.quantities, ...m.relations, ...links, ...goals, ...m.limits, ...m.assumptions, ...m.conditions], ok = all.filter((r) => r.approval === 'approved' && !unverified.has(r.id));
   return { accepted: new Set(ok.map((r) => r.id)), confirmed: new Set(ok.filter((r) => r.author === 'person').map((r) => r.id)) };
 }
 
@@ -134,7 +136,12 @@ export function evaluateCanonical(model: CanonicalModelT, opts: { readonly sourc
   }
   const sim = simulate(x, { seed: opts.seed, draws: opts.draws ?? RUN_DRAWS });
   // A limit, option or risk left out of this run is said by S2's present itself (S1's `executable.withheld`, r3).
-  const view = presentAnalysisView({ model: x, result: sim, quantities: quantityMeta(model, compiled, x, records), goals, asks, blockers, leaves_out, tipping,
+  // R8: each goal and limit is read with its own record and its window's figures (a structural one is nobody's).
+  const aims = Object.fromEntries([...read.goals, ...read.limits].map((a) => {
+    const behind = [a.id, ...[a.measure?.window?.periods, a.measure?.window?.origin_offset].filter((id): id is string => typeof id === 'string' && read.quantities.find((q) => q.id === id)?.author !== 'structure')];
+    return [a.id, { confirmed: behind.every((id) => records.confirmed.has(id)), accepted: behind.every((id) => records.accepted.has(id)) }] as const;
+  }));
+  const view = presentAnalysisView({ model: x, result: sim, quantities: quantityMeta(model, compiled, x, records), goals, asks, blockers, leaves_out, tipping, aims,
     left_out: model.left_out.map((r) => ({ text: r.text, concerns: r.concerns })) });
   return { compiled, sim, projection, view };
 }
