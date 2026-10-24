@@ -95,6 +95,8 @@ export interface TurnCheck {
   readonly run_ready?: boolean;
   readonly blockers?: readonly { readonly code: string; readonly verdict?: 'fix' | 'ask' | 'said'; readonly items?: readonly string[] }[];
   readonly relabelled?: readonly Relabelled[];
+  /** Whose-words checks (codes and ids only): the check that refused a change, and the ids it refused. */
+  readonly words?: { readonly check: string; readonly ids: readonly string[] };
 }
 // A condition is keyed by its words (`condition:<text>`): a log names only that it was one.
 const idOnly = (id: string): string => (id.startsWith('condition:') ? 'condition' : id);
@@ -108,8 +110,10 @@ function checkOf(outcome: ToolOutcome): TurnCheck | undefined {
     ...(Array.isArray(b.items) ? { items: (b.items as Blocker['items']).filter((i) => typeof i === 'string').map(idOnly) } : {}) }));
   const relabelled = listOf(outcome[OUTCOME_TRACE]?.relabelled)
     .filter((r) => typeof r.id === 'string' && typeof r.was === 'string').map((r) => ({ id: idOnly(r.id as string), was: r.was as Relabelled['was'] }));
+  const ids = (v: unknown) => (Array.isArray(v) ? v.filter((i): i is string => typeof i === 'string').map(idOnly) : []);
+  const words = typeof data.check === 'string' && ids(data.ids).length > 0 ? { check: data.check, ids: ids(data.ids) } : undefined;
   const check: TurnCheck = { ...(typeof data.run_ready === 'boolean' ? { run_ready: data.run_ready } : {}),
-    ...(blockers.length > 0 ? { blockers } : {}), ...(relabelled.length > 0 ? { relabelled } : {}) };
+    ...(blockers.length > 0 ? { blockers } : {}), ...(relabelled.length > 0 ? { relabelled } : {}), ...(words ? { words } : {}) };
   return Object.keys(check).length > 0 ? check : undefined;
 }
 export type OnToolCall = (row: TraceRow, result: ToolCallResult) => void;

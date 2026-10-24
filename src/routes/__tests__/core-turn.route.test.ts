@@ -1068,6 +1068,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       const item = (((persisted as Json).nodes ?? []) as Json[]).find((n) => n.kind === 'factor') ?? ((persisted as Json).nodes as Json[])[0]!;
       const quote = BAKERY_BRIEF.slice(0, 30);
       expect(BAKERY_BRIEF).toContain(quote);
+      const info = vi.spyOn((await import('../../utils/telemetry.js')).log, 'info');
       outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'ans', args: { public_label: 'Oven price', basis: 'their answer', request: '', remove: [],
         answers: [{ id: 'oven_price', value: 2500, low: null, high: null, range_kind: null, party: null, quote, basis: null, status: 'known', author: 'person' }] } }],
       [{ type: 'message', text: 'I could not use that as your answer.' }]];
@@ -1075,8 +1076,33 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(calls).toHaveLength(2);
       const output = (calls[1]!.input as Json[]).find((i) => i.type === 'function_call_output' && i.call_id === 'ans')!.output;
       expect(JSON.parse(typeof output === 'string' ? output : JSON.stringify(output))).toMatchObject({ status: 'refused', reason: 'unverified_person_words',
-        detail: "oven_price: your words this turn don't contain it.", data: { ids: ['oven_price'] } });
+        detail: "oven_price: your words this turn don't contain it.", data: { ids: ['oven_price'], check: 'this_turn' } });
       expect(JSON.stringify((persisted as Json).living_model)).toBe(saved);
+      // The turn's one log line names the refused ids and which check refused them, codes only (issue 37).
+      const line = info.mock.calls.flatMap(([o]) => ((o as Json)?.event === 'core_turn.summary' ? [o as Json] : [])).at(-1)!;
+      expect(line.tool_calls).toEqual([{ name: 'propose_change', outcome: 'refused', refusal: 'unverified_person_words', words: { check: 'this_turn', ids: ['oven_price'] } }]);
+      info.mockRestore();
+    });
+
+    it('issue 37: a redraft that moves a figure of theirs without their words this turn is refused; the agent receives the check and the id, and the turn log names them, never their words', async () => {
+      await savedProgram();
+      const saved = JSON.stringify((persisted as Json).living_model);
+      const updated = bakery();
+      updated.quantities = updated.quantities.map((x) => (x.id === 'base_sales' ? { ...x, value: 301 } : x));
+      canonicalDraft = JSON.stringify(updated);
+      const info = vi.spyOn((await import('../../utils/telemetry.js')).log, 'info');
+      const said = 'We bake a few more loaves now.';
+      outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'more', args: { public_label: 'Weekly loaves', basis: 'their words', request: 'They bake a few more loaves a week now.', remove: [] } }],
+        [{ type: 'message', text: 'I need the figure in your words.' }]];
+      expect((await typed(said)).statusCode).toBe(200);
+      const output = (calls.at(-1)!.input as Json[]).find((i) => i.type === 'function_call_output' && i.call_id === 'more')!.output;
+      expect(JSON.parse(typeof output === 'string' ? output : JSON.stringify(output))).toMatchObject({ status: 'refused', reason: 'unverified_person_words',
+        data: { ids: ['base_sales'], check: 'this_turn' } });
+      expect(JSON.stringify((persisted as Json).living_model)).toBe(saved);
+      const line = info.mock.calls.flatMap(([o]) => ((o as Json)?.event === 'core_turn.summary' ? [o as Json] : [])).at(-1)!;
+      expect(line.tool_calls).toEqual([{ name: 'propose_change', outcome: 'refused', refusal: 'unverified_person_words', words: { check: 'this_turn', ids: ['base_sales'] } }]);
+      for (const text of [said, 'We bake 300 loaves a week']) expect(JSON.stringify(line)).not.toContain(text);
+      info.mockRestore();
     });
 
     it('a program\'s first agent turn holds the host-written draft reply (prompt audit 24 Oct: "which question did your \'I don\'t know\' answer?"): its Conversation opens with the brief, then that reply with its numbered questions, then the message', async () => {

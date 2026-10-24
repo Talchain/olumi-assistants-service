@@ -20,6 +20,7 @@
 import { ProposalChangeSchema, type ProposalChange } from '../agent-lane/proposal.js';
 import { CanonicalModel, type CanonicalModelT } from '../model-program/canonical.js';
 import { norm } from '../model-program/compile.js';
+import { divide, isCalendarConversion, isDimensionless, parseUnit } from '../model-program/units.js';
 
 type Rec = Record<string, unknown>;
 type Family = Exclude<keyof CanonicalModelT, 'version' | 'question' | 'period' | 'history'>;
@@ -65,13 +66,33 @@ const GROUPS: Readonly<Record<Family, Readonly<Record<string, string>>>> = {
 export type PostimageResult =
   | { readonly ok: true; readonly model: CanonicalModelT; readonly changes: readonly ProposalChange[] }
   | { readonly ok: false; readonly code: 'schema' | 'duplicate_id' | 'moved_record' | 'omitted_record' | 'removal_not_applied' | 'unknown_removal' | 'recycled_id'
-    | 'unverified_person_words' | 'unshown_change' | 'invalid_change_entry' | 'no_change'; readonly reason: string; readonly ids: readonly string[] };
+    | 'unverified_person_words' | 'unshown_change' | 'invalid_change_entry' | 'no_change'; readonly reason: string; readonly ids: readonly string[];
+    /** Which words check refused it: their words anywhere, or this turn's (a figure of theirs that changes). */
+    readonly check?: 'their_words' | 'this_turn' };
 
 /** The person's words: the same words in the same order, in compile's one form (case, curly quotes, dashes, white space folded). */
 export const verbatimIn = (quote: unknown, words: readonly string[]): boolean =>
   typeof quote === 'string' && norm(quote) !== '' && words.some((w) => norm(w).includes(norm(quote)));
 
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
+/**
+ * The same amount, in its units (issue 37): value, low and high each the saved one, in the same unit (however spelled) or an
+ * EXACT calendar re-expression of it (1 year = 12 month, 1 week = 7 day). An average conversion (weeks in a month, days in a
+ * year) or any other unit is a change.
+ */
+const sameAmount = (a: Rec, b: Rec): boolean => {
+  const ks = ['value', 'low', 'high'] as const;
+  if (a['unit'] === b['unit']) return ks.every((k) => a[k] === b[k]);
+  const [ua, ub] = [parseUnit(String(a['unit'])), parseUnit(String(b['unit']))];
+  if (!ua.ok || !ub.ok) return false;
+  const per = divide(ub.unit, ua.unit);
+  const same = isDimensionless(per) && per.scale === 1;
+  return ks.every((k) => {
+    const [x, y] = [a[k], b[k]];
+    if (typeof x !== 'number' || typeof y !== 'number') return x === y;
+    return same || x === 0 ? x === y : isCalendarConversion(y / x, per, { exact: true });
+  });
+};
 /**
  * Every attribution in a record (itself, an option's settings, a relation's terms) that names the person as its author and
  * states something: a figure of theirs that is only ASKED (no figure, no words yet) states nothing.
@@ -132,7 +153,8 @@ export function validatePostimage(base: CanonicalModelT, raw: unknown,
   const parsed = CanonicalModel.safeParse(raw);
   if (!parsed.success) return { ok: false, code: 'schema', reason: 'The proposed model is not in the model format.', ids: [] };
   const post = parsed.data;
-  const refuse = (code: Exclude<PostimageResult, { ok: true }>['code'], ids: readonly string[], reason: string): PostimageResult => ({ ok: false, code, reason, ids });
+  const refuse = (code: Exclude<PostimageResult, { ok: true }>['code'], ids: readonly string[], reason: string, check?: 'their_words' | 'this_turn'): PostimageResult =>
+    ({ ok: false, code, reason, ids, ...(check ? { check } : {}) });
   // Preservation by (family, id), before anything is compared.
   const baseIn = new Map(FAMILIES.map(([f]) => [f, new Set(idsOf(base, f))] as const));
   const dup = FAMILIES.flatMap(([f]) => idsOf(post, f).filter((id, i, all) => all.indexOf(id) !== i));
@@ -157,6 +179,7 @@ export function validatePostimage(base: CanonicalModelT, raw: unknown,
   const now = wordsIn(post);
   const history = [...base.history];
   const unverified: string[] = [];
+  const unturned: string[] = [];
   const unshown: string[] = [];
   const families = Object.fromEntries(FAMILIES.map(([family, kind]) => {
     const before = new Map((base[family] as readonly Rec[]).map((r) => [String(r['id']), r] as const));
@@ -217,8 +240,10 @@ export function validatePostimage(base: CanonicalModelT, raw: unknown,
       // Unchanged but for what the host owns: the saved record, exactly.
       if (old !== undefined && fields.length === 0 && !unshown.some((u) => u.startsWith(`${String(r['id'])} (`))) return old;
       // A figure of theirs changed, or what it is (an "I don't know" turning asked into unknown): their words THIS turn (buddy 24 Oct).
-      const refigured = family === 'quantities' && old !== undefined && r['author'] === 'person' && (['value', 'low', 'high', 'status'] as const).some((k) => old[k] !== r[k]);
-      if (personAttributions(r).some((a) => !verbatimIn(a['quote'], opts.words)) || (refigured && !verbatimIn(r['quote'], opts.fresh))) unverified.push(String(r['id']));
+      // Changed is its amount, in its units (issue 37): their 1 year said exactly as 12 month is the same figure.
+      const refigured = family === 'quantities' && old !== undefined && r['author'] === 'person' && (old['status'] !== r['status'] || !sameAmount(old, r));
+      if (personAttributions(r).some((a) => !verbatimIn(a['quote'], opts.words))) unverified.push(String(r['id']));
+      else if (refigured && !verbatimIn(r['quote'], opts.fresh)) unturned.push(String(r['id']));
       const record = accepted(r, opts.approver ?? null) as Rec;
       changes.push(entry(String(r['id']), old === undefined ? 'add' : 'change', fields, now.title(family, record), authorOf(record), r));
       if (old !== undefined) history.push({ id: String(r['id']), change: 'superseded', old: JSON.stringify(old), quote: typeof r['quote'] === 'string' ? r['quote'] : null, author_id: opts.approver ?? null });
@@ -231,7 +256,9 @@ export function validatePostimage(base: CanonicalModelT, raw: unknown,
     return [family, records];
   })) as Pick<CanonicalModelT, Family>;
   if (unshown.length > 0) return refuse('unshown_change', unshown, `The card cannot show every change to ${unshown.join('; ')}; nothing is proposed.`);
-  if (unverified.length > 0) return refuse('unverified_person_words', unverified, `${unverified.join(', ')}: the person's items must quote their words exactly.`);
+  for (const [ids, check] of [[unverified, 'their_words'], [unturned, 'this_turn']] as const) {
+    if (ids.length > 0) return refuse('unverified_person_words', ids, `${ids.join(', ')}: the person's items must quote their words exactly.`, check);
+  }
   for (const [key, label] of [['question', 'The question'], ['period', 'The time step']] as const) {
     if (base[key] !== post[key]) changes.push({ id: key, kind: 'record', action: 'change', label, before: base[key], after: post[key], author: 'olumi' });
   }
