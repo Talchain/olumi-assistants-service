@@ -902,6 +902,13 @@ function lowerDefinition(base: Omit<XQuantity, 'equation' | 'dist' | 'stock'>, r
   return [{ ...base, id: times, label: `${base.label} (parts multiplied)`, unit: unitOfProduct(num), equation: { form: 'definition', op: 'product', parts: num } }, { ...base, equation: { form: 'definition', op: 'ratio', parts: [times, ...den] } }];
 }
 
+/** A shadow's label: the quantity's own, said "today" or "if carrying on as now", unless it already ends so (DoD-G hiring:
+ * "… relative to today" was said "… relative to today today"). The present view's labels (evaluate.ts) use it too. */
+export function shadowLabel(label: string, mode: 'today' | 'sq'): string {
+  const suffix = mode === 'today' ? 'today' : 'if carrying on as now', said = label.trim().toLowerCase();
+  return said === suffix || said.endsWith(` ${suffix}`) ? label : `${label} ${suffix}`;
+}
+
 /**
  * A CHANGE GOAL, LOWERED INTO DEFINITIONS (plan r3 #1), so the executable model's forms are unchanged:
  *   change_abs: `<goal>__change` = difference(X, reference)
@@ -927,7 +934,6 @@ function lowerChange(g: CanonicalGoalT, quantities: XQuantity[], options: XOptio
     return id;
   };
   const mode = m.reference.kind === 'now' ? 'today' : 'sq';
-  const suffix = mode === 'today' ? 'today' : 'if carrying on as now';
   const shadow = (u: string): string => {
     const q = byId.get(u)!;
     if (q.dist) return baseOf(u);
@@ -936,12 +942,12 @@ function lowerChange(g: CanonicalGoalT, quantities: XQuantity[], options: XOptio
     if (byId.has(id)) return id;
     if (q.stock) {
       if (mode === 'today') return shadow(q.stock.start);
-      put({ id, label: `${q.label} ${suffix}`, unit: q.unit, reading: 'state', stock: { start: q.stock.start, inflows: [], outflows: [] } }); // reserved: a stock may feed its own flows
-      put({ id, label: `${q.label} ${suffix}`, unit: q.unit, reading: 'state', stock: { start: shadow(q.stock.start), inflows: q.stock.inflows.map(shadow), outflows: q.stock.outflows.map(shadow) } });
+      put({ id, label: shadowLabel(q.label, mode), unit: q.unit, reading: 'state', stock: { start: q.stock.start, inflows: [], outflows: [] } }); // reserved: a stock may feed its own flows
+      put({ id, label: shadowLabel(q.label, mode), unit: q.unit, reading: 'state', stock: { start: shadow(q.stock.start), inflows: q.stock.inflows.map(shadow), outflows: q.stock.outflows.map(shadow) } });
       return id;
     }
     const e = q.equation!;
-    put({ id, label: `${q.label} ${suffix}`, unit: q.unit, reading: 'state', equation: e.form === 'definition' ? { form: 'definition', op: e.op, parts: e.parts.map(shadow) } : { form: 'effect', base: shadow(e.base), terms: e.terms.map((t) => ({ coefficient: shadow(t.coefficient), driver: shadow(t.driver) })) } });
+    put({ id, label: shadowLabel(q.label, mode), unit: q.unit, reading: 'state', equation: e.form === 'definition' ? { form: 'definition', op: e.op, parts: e.parts.map(shadow) } : { form: 'effect', base: shadow(e.base), terms: e.terms.map((t) => ({ coefficient: shadow(t.coefficient), driver: shadow(t.driver) })) } });
     return id;
   };
   const reference = m.reference.kind === 'value' ? m.reference.quantity! : shadow(m.quantity);

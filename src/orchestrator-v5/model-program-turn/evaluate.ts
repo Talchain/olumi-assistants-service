@@ -12,7 +12,7 @@
  * lists what the result waits on (`goal_chance.waits_on`, S1's typed blockers, by label); the code writes no question.
  */
 import { createHash } from 'node:crypto';
-import { isApproximate, normalise, compile, type Blocker, type CompileResult } from '../model-program/compile.js';
+import { isApproximate, normalise, compile, shadowLabel, type Blocker, type CompileResult } from '../model-program/compile.js';
 import type { CanonicalModelT } from '../model-program/canonical.js';
 import { project, type Projection } from '../model-program/project.js';
 import type { ExecutableModel } from '../model-program/executable.js';
@@ -77,7 +77,7 @@ function quantityMeta(model: CanonicalModelT, compiled: CompileResult, x: Execut
     }
     const base = own.get(root ?? '');
     if (base !== undefined) {
-      const label = suffix === 'today' ? `${base.label} today` : suffix === 'sq' ? `${base.label} if carrying on as now` : base.label;
+      const label = suffix === 'today' || suffix === 'sq' ? shadowLabel(base.label, suffix) : base.label;
       out[q.id] = { ...base, label };
     }
   }
