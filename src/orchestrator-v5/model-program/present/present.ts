@@ -32,7 +32,7 @@ import { sayDisplayedPct } from '../../goal-target/goal-targets-joint.js';
 import type { Aggregation, Cmp, ExecutableModel, FixedAuthor, Goal, Limit, Quantity, Window } from '../executable.js';
 import { rangeLaw, type RangeDist } from '../simulate/range-law.js';
 import { isWithheld, type Chance, type ChanceOrWithheld, type OptionResult, type SimResult, type WithheldChance } from '../simulate/result.js';
-import { readingOf, simulate } from '../simulate/simulate.js';
+import { readingOf, restsOn, simulate } from '../simulate/simulate.js';
 
 /** Whose a figure is: unverified is said to be the person's but their words were not found (compile's `unverified`). */
 type Author = 'person' | 'olumi' | 'structure' | 'unverified';
@@ -192,18 +192,19 @@ const TIPPING_DRAWS = 4000;
 /**
  * WHAT A COMPUTED CHANCE RESTS ON MOST (DL 24 Oct; the guiding principle: provisional means the person can change something
  * and see how much it matters). One figure at a time: each ranged input the option's chance rests on (never one an option
- * sets: a choice, not an uncertainty) is set to its range's low end, then its high end (their stated ends for a person's
- * range), and the model is simulated again on the Run's seed. Every input has its own stream (prng.ts), so the others keep
- * the headline's draws; the sweep reads the first TIPPING_DRAWS of them. The largest swing over DRIVER_MIN_SWING is the
- * driver; otherwise none is licensed. A finding in this model, never advice.
+ * sets: a choice, not an uncertainty) is set to its range's low end, its middle and its high end (their stated ends for a
+ * person's range), and the model is simulated again on the Run's seed. Every input has its own stream (prng.ts), so the
+ * others keep the headline's draws; the sweep reads the first TIPPING_DRAWS of them. The swing is the highest chance less
+ * the lowest of the three (buddy, #3728: a chance can peak in the middle, so the ends alone are no test). The largest swing
+ * over DRIVER_MIN_SWING is the driver; otherwise none is licensed. A finding in this model, never advice.
  */
 export const DRIVER_MIN_SWING = 0.05;
-export const NO_DRIVER_REASON = 'No single figure moves this chance much.';
+export const NO_DRIVER_REASON = 'Tested one at a time at each figure’s low end, middle and high end, no figure moved this chance by more than 5 points.';
 export const NO_RANGE_REASON = 'No figure this chance rests on has a range to test.';
 type End = { readonly value: number; readonly display: string };
 export type PresentMainDriver =
   | { readonly kind: 'available'; readonly detail: string; readonly driver: { readonly quantity: string; readonly author: 'person' | 'olumi' | 'unverified';
-      readonly low: End; readonly high: End; readonly swing_points: number; readonly draws: number } }
+      readonly low: End; readonly middle: End; readonly high: End; readonly swing_points: number; readonly draws: number } }
   | { readonly kind: 'none_licensed'; readonly reason: string }
   | { readonly kind: 'not_recorded' };
 
@@ -266,23 +267,9 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   const unit = model.period_unit;
 
   // ── What each condition rests on: its upstream quantities, through every relation, flow, set and risk ──────────────────
-  /** `optionId`: through that option's sets; null: through no option's (the model every option shares). */
-  const upstream = (roots: readonly string[], optionId: string | null): Set<string> => {
-    const seen = new Set<string>();
-    const todo = [...roots];
-    while (todo.length > 0) {
-      const id = todo.pop()!;
-      if (seen.has(id)) continue;
-      seen.add(id);
-      const x = byId.get(id);
-      if (x?.equation?.form === 'definition') todo.push(...x.equation.parts);
-      if (x?.equation?.form === 'effect') todo.push(x.equation.base, ...x.equation.terms.flatMap((t) => [t.coefficient, t.driver]));
-      if (x?.stock !== undefined) todo.push(x.stock.start, ...x.stock.inflows, ...x.stock.outflows);
-      for (const o of model.options) if (o.id === optionId) for (const s of o.sets) if (s.quantity === id) todo.push(s.to);
-      for (const r of model.risks) if (r.effect_on === id) todo.push(r.occurrence, r.severity);
-    }
-    return seen;
-  };
+  /** `optionId`: through that option's sets; null: through no option's (the model every option shares). The simulator's own
+   * dependency authority (`restsOn`), timings included, so a basis and a driver never miss what the chance rests on. */
+  const upstream = (roots: readonly string[], optionId: string | null): Set<string> => restsOn(model, roots, optionId);
 
   /** Olumi's assumptions among these quantities, in plain words, model order. Empty = every input is the person's. */
   const assumptions = (ids: ReadonlySet<string>): string[] => model.quantities.filter((x) => ids.has(x.id)).flatMap((x): string[] => {
@@ -459,12 +446,12 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     });
     return lines.length === 0 ? undefined : `in every simulated draw ${listWords(lines)}`;
   };
-  // ── What each computed chance rests on most (DRIVER_MIN_SWING): each input at its range's ends, cached across options ──
+  // ── What each computed chance rests on most (DRIVER_MIN_SWING): each input at its low end, middle and high end, cached ──
   const switches = new Set(model.options.flatMap((o) => o.sets.map((s) => s.quantity)));
   const sweepDraws = Math.min(TIPPING_DRAWS, result.draws);
   const atEnds = new Map<string, readonly SimResult[]>();
   const endsOf = (x: Quantity & { dist: RangeDist }): readonly SimResult[] => {
-    if (!atEnds.has(x.id)) atEnds.set(x.id, [x.dist.low, x.dist.high].map((value) => simulate({ ...model, quantities: model.quantities
+    if (!atEnds.has(x.id)) atEnds.set(x.id, [x.dist.low, (x.dist.low + x.dist.high) / 2, x.dist.high].map((value) => simulate({ ...model, quantities: model.quantities
       .map((z) => (z.id === x.id ? { ...z, dist: { kind: 'fixed' as const, value, author: 'olumi' as const } } : z)) }, { seed: result.seed, draws: sweepDraws })));
     return atEnds.get(x.id)!;
   };
@@ -472,22 +459,24 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     const rests = upstream(roots, o.option_id);
     const inputs = model.quantities.filter((x): x is Quantity & { dist: RangeDist } => x.dist?.kind === 'range' && x.dist.low < x.dist.high && rests.has(x.id) && !switches.has(x.id));
     if (inputs.length === 0) return { kind: 'none_licensed', reason: NO_RANGE_REASON };
-    let best: { readonly x: Quantity & { dist: RangeDist }; readonly lo: Chance; readonly hi: Chance; readonly swing: number } | undefined;
+    let best: { readonly x: Quantity & { dist: RangeDist }; readonly at: readonly Chance[]; readonly swing: number } | undefined;
     for (const x of inputs) {
-      const [lo, hi] = endsOf(x).map((r) => r.options.find((p) => p.option_id === o.option_id)!.joint_within_limits);
-      if (lo === undefined || hi === undefined || isWithheld(lo) || isWithheld(hi)) continue;
-      const swing = Math.abs(hi.chance - lo.chance);
-      if (best === undefined || swing > best.swing) best = { x, lo, hi, swing };
+      const at = endsOf(x).map((r) => r.options.find((p) => p.option_id === o.option_id)!.joint_within_limits);
+      if (at.some((c) => isWithheld(c))) continue;
+      const chances = (at as Chance[]).map((c) => c.chance);
+      const swing = Math.max(...chances) - Math.min(...chances);
+      if (best === undefined || swing > best.swing) best = { x, at: at as Chance[], swing };
     }
     if (best === undefined) return { kind: 'not_recorded' };
     if (best.swing <= DRIVER_MIN_SWING) return { kind: 'none_licensed', reason: NO_DRIVER_REASON };
-    const { x, lo, hi } = best;
+    const { x, at } = best;
     const author = meta(x.id)?.author === 'unverified' ? 'unverified' as const : x.dist.basis === 'person_range' ? 'person' as const : 'olumi' as const;
     const whose = author === 'unverified' ? NOT_IN_THEIR_WORDS : author === 'person' ? '(your range)' : '(Olumi’s estimate)';
-    const low = { value: x.dist.low, display: shown(lo, sweepDraws)!.display }, high = { value: x.dist.high, display: shown(hi, sweepDraws)!.display };
-    return { kind: 'available', driver: { quantity: x.id, author, low, high, swing_points: Number((best.swing * 100).toFixed(1)), draws: sweepDraws },
-      detail: `In this model, the chance is most sensitive to ${q(label(x.id) ?? x.id)} ${whose}: at the low end of its range (${sayOf(x.id, low.value, x.unit)}) it is ${low.display}; `
-        + `at the high end (${sayOf(x.id, high.value, x.unit)}), ${high.display}.` };
+    const [low, middle, high] = [x.dist.low, (x.dist.low + x.dist.high) / 2, x.dist.high].map((value, i) => ({ value, display: shown(at[i]!, sweepDraws)!.display }));
+    const said = (e: End) => `(${sayOf(x.id, e.value, x.unit)}) ${e.display}`;
+    return { kind: 'available', driver: { quantity: x.id, author, low: low!, middle: middle!, high: high!, swing_points: Number((best.swing * 100).toFixed(1)), draws: sweepDraws },
+      detail: `In this model, of the figures tested one at a time, the chance is most sensitive to ${q(label(x.id) ?? x.id)} ${whose}: `
+        + `at the low end ${said(low!)}, at the middle ${said(middle!)}, at the high end ${said(high!)}.` };
   };
   const options = result.options.map((o: OptionResult) => {
     const name = optionLabel.get(o.option_id) ?? o.option_id;

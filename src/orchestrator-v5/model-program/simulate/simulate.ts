@@ -269,7 +269,33 @@ function compileNode(q: Quantity, i: number, ref: (id: string, where: string) =>
   return { kind: 'stock', start: ref(s.start, where), inflows: s.inflows.map((x) => ref(x, where)), outflows: s.outflows.map((x) => ref(x, where)) };
 }
 
-function planOption(c: Compiled, option: Option): Plan {
+/**
+ * THE ONE DEPENDENCY AUTHORITY (DL 24 Oct, #3728 buddy point 2): what these quantities rest on under one option (null: no
+ * option's sets), through every edge: a definition's parts, an effect's base, coefficients and drivers, a stock's start and
+ * flows, the option's sets on a quantity (their value AND their timing), and every risk on it (its occurrence, severity AND
+ * timing). The simulator's own closure and present's basis and driver inputs both read this, so they never disagree.
+ */
+export function restsOn(model: ExecutableModel, roots: readonly string[], optionId: string | null): Set<string> {
+  const byId = new Map(model.quantities.map((x) => [x.id, x] as const));
+  const sets = model.options.find((o) => o.id === optionId)?.sets ?? [];
+  const timing = (x: OptionSet | Risk): string[] => (typeof fromOf(x) === 'string' ? [fromOf(x) as string] : []);
+  const seen = new Set<string>();
+  const todo = [...roots];
+  while (todo.length > 0) {
+    const id = todo.pop()!;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const x = byId.get(id);
+    if (x?.equation?.form === 'definition') todo.push(...x.equation.parts);
+    if (x?.equation?.form === 'effect') todo.push(x.equation.base, ...x.equation.terms.flatMap((t) => [t.coefficient, t.driver]));
+    if (x?.stock !== undefined) todo.push(x.stock.start, ...x.stock.inflows, ...x.stock.outflows);
+    for (const st of sets) if (st.quantity === id) todo.push(st.to, ...timing(st));
+    for (const r of model.risks) if (r.effect_on === id) todo.push(r.occurrence, r.severity, ...timing(r));
+  }
+  return seen;
+}
+
+function planOption(c: Compiled, option: Option, model: ExecutableModel): Plan {
   const n = c.nodes.length;
   const where = `option "${option.id}"`;
   const sets: PlanSet[][] = Array.from({ length: n }, () => []);
@@ -320,21 +346,9 @@ function planOption(c: Compiled, option: Option): Plan {
   };
   for (let q = 0; q < n; q++) visit(q);
 
-  /** What a quantity rests on through every edge (a stock's flows, a set's timing, a risk's timing included). */
-  const timingOf = (t: Timing): number[] => ('q' in t ? [t.q] : []);
-  const closure = (roots: readonly number[]): Set<number> => {
-    const reach = new Set<number>();
-    const pending = [...roots];
-    while (pending.length > 0) {
-      const q = pending.pop()!;
-      if (reach.has(q)) continue;
-      reach.add(q);
-      const node = c.nodes[q]!;
-      pending.push(...deps(q), ...(node.kind === 'stock' ? [...node.inflows, ...node.outflows] : []),
-        ...sets[q]!.flatMap((s) => timingOf(s.from)), ...risksOn[q]!.flatMap((r) => timingOf(c.risks[r]!.from)));
-    }
-    return reach;
-  };
+  /** What a quantity rests on through every edge: the one authority, `restsOn`, read by its ids. */
+  const closure = (roots: readonly number[]): Set<number> =>
+    new Set([...restsOn(model, roots.map((q) => c.ids[q]!), option.id)].flatMap((id) => (c.index.has(id) ? [c.index.get(id)!] : [])));
   const risky = (k: Check): boolean => [...closure([k.q, k.ref])].some((q) => risksOn[q]!.length > 0);
   const reach = closure([...c.goals, ...c.limits].flatMap((k) => [k.q, k.ref]));
   const drivers = c.ranged.flatMap((r, slot) => (reach.has(r.q) && !c.switches.has(r.q) ? [slot] : []));
@@ -612,7 +626,7 @@ export function simulate(model: ExecutableModel, opts: SimulateOptions): SimResu
   const c = compile(model);
   if (model.options.length === 0) throw new Error('the model has no options to simulate');
   unique(model.options.map((o) => o.id), 'option');
-  const plans = model.options.map((o) => planOption(c, o));
+  const plans = model.options.map((o) => planOption(c, o, model));
   const inputs = drawInputs(c, opts.seed, draws);
   const thirds = terciles(inputs, draws);
   const record = new Set(opts.record ?? []);

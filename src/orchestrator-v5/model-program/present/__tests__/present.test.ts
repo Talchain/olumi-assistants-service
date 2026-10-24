@@ -152,7 +152,8 @@ describe('present: the canonical analysis view from a simulated model', () => {
     const pounds = JSON.stringify(present(build(1), labels, {}, 20000));
     const thousands = JSON.stringify(present(build(1000), labels, {}, 20000));
     // The main driver's record holds its ends in the quantity's own unit, so they are the unit's own difference too.
-    const swapped = [['£39', '0.039 £k'], ['£59', '0.059 £k'], ['£5,000', '5 £k'], ['£1,100', '1.1 £k'], ['"value":39,', '"value":0.039,'], ['"value":59,', '"value":0.059,']]
+    const swapped = [['£39', '0.039 £k'], ['£59', '0.059 £k'], ['£5,000', '5 £k'], ['£1,100', '1.1 £k'], ['"value":39,', '"value":0.039,'], ['"value":59,', '"value":0.059,'],
+      ['(£49)', '(0.049 £k)'], ['"value":49,', '"value":0.049,']]
       .reduce((s, [a, b]) => s.split(a!).join(b!), pounds);
     expect(swapped).not.toBe(pounds);
     expect(thousands).toBe(swapped);
@@ -324,12 +325,12 @@ describe('present: the canonical analysis view from a simulated model', () => {
   });
 });
 
-// ── What each computed chance rests on most (DL 24 Oct): one figure at a time at its range's ends, on the Run's own draws ──
-// Capacity = (80 + d) + c × added; the goal is capacity ≥ 100. c is Olumi's estimate, 10 to 30 tickets per specialist; d is
+// ── What each computed chance rests on most (DL 24 Oct): one figure at a time at its low end, middle and high end ──────────
+// Capacity = (80 + d) + c × added; the goal is capacity ≥ 95. c is Olumi's estimate, 10 to 30 tickets per specialist; d is
 // the person's tiny day-to-day range, −0.1 to 0.1. "Add one specialist" sets added to 1.
 const SPEC = (c: Quantity, d: Quantity = range('d', -0.1, 0.1, undefined, 'tickets', 'person_range')) => model([fixed('base', 80, 'tickets'), d,
   def('start', 'sum', ['base', 'd'], 'tickets'), c, fixed('added', 0, 'specialists', 'state', 'structure'), fixed('one', 1, 'specialists', 'state', 'structure'),
-  effect('capacity', 'start', [{ coefficient: 'c', driver: 'added' }], 'tickets'), fixed('target', 100, 'tickets')],
+  effect('capacity', 'start', [{ coefficient: 'c', driver: 'added' }], 'tickets'), fixed('target', 95, 'tickets')],
   [goal('g', 'capacity', '>=', 'target')], [option('keep', 'Keep'), option('add', 'Add one specialist', [{ quantity: 'added', to: 'one', from_period: 0 }])]);
 const SPEC_LABELS: Record<string, PresentQuantity> = { base: person('Tickets today'), d: person('Day-to-day variation'), start: person('Tickets before hiring', true),
   c: { label: 'Capacity per specialist', author: 'olumi' }, added: { label: 'Specialists added', author: 'structure' }, one: { label: 'One specialist', author: 'structure' },
@@ -340,22 +341,61 @@ const PAIR = (target: number) => model([range('c', 10, 30, undefined, 'tickets',
 const PAIR_LABELS: Record<string, PresentQuantity> = { c: { label: 'Capacity per specialist', author: 'olumi' }, e: { label: 'Extra capacity', author: 'olumi' },
   total: person('Total capacity', true), t: person('Capacity target') };
 const driver = (v: Rec, id: string): Rec => v.options.find((o: Rec) => o.option_id === id).main_driver;
+const SPEC_DETAIL = (whose: string) => `In this model, of the figures tested one at a time, the chance is most sensitive to ‘Capacity per specialist’ (${whose}): `
+  + 'at the low end (10 tickets) less than 1%, at the middle (20 tickets) more than 99%, at the high end (30 tickets) more than 99%.';
+// A start that waits on a ranged delay: capacity is 80, or 110 once the hire starts; the goal is 100 at the end of month 6.
+const timed = (delayOn: 'set' | 'risk') => ({ periods: 6, period_unit: 'month', withheld: [],
+  quantities: [delayOn === 'set' ? fixed('base', 80, 'tickets') : fixed('base', 110, 'tickets'), fixed('added', 0, 'tickets', 'state', 'structure'),
+    fixed('thirty', 30, 'tickets', 'state', 'structure'), def('capacity', 'sum', ['base', 'added'], 'tickets'), fixed('target', 100, 'tickets'),
+    { id: 'delay', label: 'delay', unit: 'months', reading: 'state', dist: { kind: 'range', low: 2, high: 10, basis: 'olumi_estimate', range_kind: 'plausible', domain: { min: 0 } } },
+    fixed('fires', 1, '', 'state', 'person'), fixed('loss', -50, 'tickets')],
+  goals: [{ id: 'g', label: 'g', quantity: 'capacity', cmp: '>=', target: 'target', aggregation: 'end', window: { start_period: 0, periods: 6 } }], limits: [],
+  options: delayOn === 'set' ? [option('hire', 'Hire', [{ quantity: 'added', to: 'thirty', from_period: 'delay' }])] : [option('carry_on', 'Carry on')],
+  risks: delayOn === 'risk' ? [{ id: 'outage', occurrence: 'fires', severity: 'loss', effect_on: 'capacity', mode: 'add', from_period: 'delay' }] : [] }) as unknown as ExecutableModel;
 
-describe('present: what each computed chance rests on most (one figure at a time at its range’s ends)', () => {
-  it('a hand-calculated model: the driver and both ends are known, and an option nothing moves licenses none', () => {
-    // Add: at c = 10, capacity is 90 + d, below 100 in every draw (d moves it by about 0.06): 0 of 200, "less than 1%"; at c = 30,
-    // 110 + d, met in every draw: "more than 99%". Neither is exact (d is still drawn). Swing 100 points; d's own swing is about
-    // 1 point (it moves 80 + c across 100 only where c is within 0.1 of 20). Keep: 80 + d is never 100 at any end: swing 0.
+describe('present: what each computed chance rests on most (one figure at a time at its low end, middle and high end)', () => {
+  it('a hand-calculated model: the driver and its three settings are known, and an option nothing moves licenses none', () => {
+    // Add: at c = 10, capacity is 90 + d, below 95 in every draw (d moves it by about 0.06): 0 of 200, "less than 1%"; at c = 20,
+    // 100 + d, and at c = 30, 110 + d, met in every draw: "more than 99%". None is exact (d is still drawn). Swing 100 points;
+    // d's own is about 1 point. Keep: 80 + d is never 95 at any setting: swing 0.
     const v = present(SPEC(range('c', 10, 30, undefined, 'tickets', 'olumi_estimate')), SPEC_LABELS);
     expect(cell(v, 'add').kind).toBe('figure');
     expect(driver(v, 'add')).toEqual({ kind: 'available',
-      driver: { quantity: 'c', author: 'olumi', low: { value: 10, display: 'less than 1%' }, high: { value: 30, display: 'more than 99%' }, swing_points: 100, draws: 200 },
-      detail: 'In this model, the chance is most sensitive to ‘Capacity per specialist’ (Olumi’s estimate): at the low end of its range (10 tickets) it is less than 1%; at the high end (30 tickets), more than 99%.' });
+      driver: { quantity: 'c', author: 'olumi', low: { value: 10, display: 'less than 1%' }, middle: { value: 20, display: 'more than 99%' },
+        high: { value: 30, display: 'more than 99%' }, swing_points: 100, draws: 200 },
+      detail: SPEC_DETAIL('Olumi’s estimate') });
     expect(driver(v, 'keep')).toEqual({ kind: 'none_licensed', reason: NO_DRIVER_REASON });
     expect(driver(v, 'add').detail).not.toMatch(FORECAST_OR_VERDICT);
   });
 
-  it('determinism: the same seed gives the same driver, ends and sentence', () => {
+  it('buddy #3728: a chance that peaks in the middle of a range is a driver, which the ends alone would miss', () => {
+    // x is Olumi's 0 to 10; the goal is x ≥ 4 within the limit x ≤ 6. At x = 0 and x = 10 the chance is 0; at x = 5 it is
+    // 100%. x is the only range, so each setting is exact.
+    const m = model([range('x', 0, 10, undefined, 'tickets', 'olumi_estimate'), fixed('four', 4, 'tickets'), fixed('six', 6, 'tickets')],
+      [goal('g', 'x', '>=', 'four')], [option('plan', 'Plan')], [{ id: 'l', label: 'l', quantity: 'x', cmp: '<=', bound: 'six', aggregation: 'end', window: ONE }]);
+    const v = present(m, { x: { label: 'Tickets sold', author: 'olumi' }, four: person('Four'), six: person('Six') });
+    expect(driver(v, 'plan')).toEqual({ kind: 'available',
+      driver: { quantity: 'x', author: 'olumi', low: { value: 0, display: '0%' }, middle: { value: 5, display: '100%' }, high: { value: 10, display: '0%' }, swing_points: 100, draws: 200 },
+      detail: 'In this model, of the figures tested one at a time, the chance is most sensitive to ‘Tickets sold’ (Olumi’s estimate): at the low end (0 tickets) 0%, at the middle (5 tickets) 100%, at the high end (10 tickets) 0%.' });
+  });
+
+  it('buddy #3728: a ranged start delay is a driver (a set’s timing), and so is a ranged risk delay; both are in the basis too', () => {
+    // Hire: capacity 80, plus 30 from month ceil(delay). At the end of month 6: delay 2 or 6 starts in time (110 ≥ 100, exact);
+    // 10 does not (80). Carry on: 110, less 50 from month ceil(delay) when the outage fires (it always does): delay 2 or 6, 60;
+    // 10, 110. The outage is a risk, so its chances are sampled: "less than 1%" and "more than 99%".
+    const labels = { delay: { label: 'Start delay', author: 'olumi' as const }, base: person('Tickets today'), capacity: person('Weekly capacity', true), target: person('Target') };
+    const hire = present(timed('set'), labels);
+    expect(driver(hire, 'hire')).toEqual({ kind: 'available',
+      driver: { quantity: 'delay', author: 'olumi', low: { value: 2, display: '100%' }, middle: { value: 6, display: '100%' }, high: { value: 10, display: '0%' }, swing_points: 100, draws: 200 },
+      detail: 'In this model, of the figures tested one at a time, the chance is most sensitive to ‘Start delay’ (Olumi’s estimate): at the low end (2 months) 100%, at the middle (6 months) 100%, at the high end (10 months) 0%.' });
+    expect(cell(hire, 'hire').face).toContain('‘Start delay’ follows Olumi’s provisional conversion of Olumi’s own estimated range');
+    const outage = driver(present(timed('risk'), { ...labels, delay: { label: 'Outage delay', author: 'olumi' as const } }), 'carry_on');
+    expect(outage.kind).toBe('available');
+    expect(outage.driver).toEqual({ quantity: 'delay', author: 'olumi', low: { value: 2, display: 'less than 1%' }, middle: { value: 6, display: 'less than 1%' },
+      high: { value: 10, display: 'more than 99%' }, swing_points: 100, draws: 200 });
+  });
+
+  it('determinism: the same seed gives the same driver, settings and sentence', () => {
     const a = present(PAIR(30), PAIR_LABELS, {}, 4000), b = present(PAIR(30), PAIR_LABELS, {}, 4000);
     expect(driver(a, 'plan')).toEqual(driver(b, 'plan'));
     expect(JSON.stringify(a.options)).toBe(JSON.stringify(b.options));
@@ -364,17 +404,21 @@ describe('present: what each computed chance rests on most (one figure at a time
   });
 
   it('none is licensed when no figure moves the chance by more than 5 points; over 5 points the largest swing is the driver', () => {
-    // Target 24 (hand-calculated): at c = 10, P(e ≥ 14) = Φ(6/2.89) = 98%; at c = 30, 100%: 2 points. At e = 15, P(c ≥ 9) =
-    // Φ(11/5.77) = 97%; at e = 25, 100%: 3 points. Neither is over 5.
-    expect(driver(present(PAIR(24), PAIR_LABELS, {}, 4000), 'plan')).toEqual({ kind: 'none_licensed', reason: NO_DRIVER_REASON });
-    // Target 30: at c = 10, P(e ≥ 20) = 50%; at c = 30, 100%: 50 points. At e = 15, P(c ≥ 15) = 81%; at e = 25, P(c ≥ 5) = 99.5%:
-    // 19 points. c is the driver.
+    expect(NO_DRIVER_REASON).toBe('Tested one at a time at each figure’s low end, middle and high end, no figure moved this chance by more than 5 points.');
+    // Target 24 (hand-calculated): c at 10, 20, 30 gives P(e ≥ 14) = 98%, P(e ≥ 4) = 100%, 100%: 2 points. e at 15, 20, 25 gives
+    // P(c ≥ 9) = 97%, P(c ≥ 4) = 99.7%, P(c ≥ −1) = 100%: 3 points. Neither is over 5.
+    const none = present(PAIR(24), PAIR_LABELS, {}, 4000);
+    expect(driver(none, 'plan')).toEqual({ kind: 'none_licensed', reason: NO_DRIVER_REASON });
+    expect(JSON.stringify(none)).not.toContain('No single figure moves');
+    // Target 30: c at 10, 20, 30 gives P(e ≥ 20) = 50%, P(e ≥ 10) = 99.97%, 100%: 50 points. e at 15, 20, 25 gives P(c ≥ 15) =
+    // 81%, P(c ≥ 10) = 96%, P(c ≥ 5) = 99.5%: 19 points. c is the driver.
     const d = driver(present(PAIR(30), PAIR_LABELS, {}, 4000), 'plan');
     expect(d.kind).toBe('available');
     expect(d.driver.quantity).toBe('c');
     expect(d.driver.swing_points).toBeGreaterThan(45);
     expect(d.driver.swing_points).toBeLessThan(55);
     expect(d.driver.low.display).toMatch(/^about (4[89]|5[012])%$/);
+    expect(d.driver.middle.display).toBe('more than 99%');
     expect(d.driver.high.display).toBe('more than 99%');
     expect(d.driver.draws).toBe(4000);
   });
@@ -382,7 +426,7 @@ describe('present: what each computed chance rests on most (one figure at a time
   it('whose figure the driver is: Olumi’s estimate, the person’s range, or words not found in theirs', () => {
     const theirs = present(SPEC(range('c', 10, 30, undefined, 'tickets', 'person_range')), { ...SPEC_LABELS, c: person('Capacity per specialist') });
     expect(driver(theirs, 'add').driver.author).toBe('person');
-    expect(driver(theirs, 'add').detail).toBe('In this model, the chance is most sensitive to ‘Capacity per specialist’ (your range): at the low end of its range (10 tickets) it is less than 1%; at the high end (30 tickets), more than 99%.');
+    expect(driver(theirs, 'add').detail).toBe(SPEC_DETAIL('your range'));
     const unverified = present(SPEC(range('c', 10, 30, undefined, 'tickets', 'person_range')), { ...SPEC_LABELS, c: { label: 'Capacity per specialist', author: 'unverified' } });
     expect(driver(unverified, 'add').driver.author).toBe('unverified');
     expect(driver(unverified, 'add').detail).toContain('‘Capacity per specialist’ (not found in your words):');

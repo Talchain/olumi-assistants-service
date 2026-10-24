@@ -72,10 +72,14 @@ const PERCENT_WORD = /^(?:percent|percentage|pct)\b(?![\s_]+points?\b)/i;
 /**
  * The unit as a person says it with THIS figure (DL #2227 follow-up B, 5867621499): "percent" → "%" (it read "5 percent"
  * where it had read "5%"), `story_points` → "story points", and one of a plain count or period is singular ("1 month",
- * never "1 months"; `pluraliseUnit`'s own conservative rule). A currency unit keeps its words: the symbol says it.
+ * never "1 months"; `pluraliseUnit`'s own conservative rule). A currency unit keeps its words: the symbol says it. The pure
+ * number "1" is never said: alone it is nothing, before a "/" it is "per".
  */
 function spoken(value: number, unit: string): string {
   const u = unit.replace(PERCENT_WORD, '%').replace(/_/g, ' ');
+  // The dimensionless unit "1" is never said (DL 24 Oct, #3728): "0.3 1" is "0.3", and "-0.1 1/tech lead" is "-0.1 per tech lead".
+  const one = /^1(?:\s*\/\s*(.+))?$/.exec(u);
+  if (one !== null) return one[1] === undefined ? '' : `per ${one[1]}`;
   const head = /^[^\s/]+/.exec(u)?.[0] ?? '';
   if (u === '' || u.startsWith('%') || PREFIX_SYMBOL.has(head) || PREFIX_SYMBOL.has(head.toUpperCase())) return u;
   return pluraliseUnit(u, value);

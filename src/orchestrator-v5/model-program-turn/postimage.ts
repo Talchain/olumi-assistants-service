@@ -280,8 +280,8 @@ function wordsIn(m: CanonicalModelT) {
     }
     return id;
   };
-  /** A unit as words: a pure number has none; an identifier's underscores read as spaces ("tech_lead" → "tech lead"). */
-  const unitOf = (u: unknown) => (u === '1' || u === '' || typeof u !== 'string' ? '' : ` ${u.replace(/_/g, ' ')}`);
+  /** A unit as words: a pure number has none, and "1/x" is "per x"; an identifier's underscores read as spaces ("tech_lead" → "tech lead"). */
+  const unitOf = (u: unknown) => (u === '1' || u === '' || typeof u !== 'string' ? '' : ` ${u.replace(/^1\s*\/\s*/, 'per ').replace(/_/g, ' ')}`);
   /** A quantity as it is referred to: by name, with its value or range, or that it is asked or worked out. */
   const timed = (id: string) => {
     const q = Q.get(id);
