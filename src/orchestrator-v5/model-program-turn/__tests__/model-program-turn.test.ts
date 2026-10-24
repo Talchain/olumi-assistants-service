@@ -1537,6 +1537,39 @@ describe('the model-program turn on the real core route', () => {
     expect(cell('second_oven').why).not.toContain('No aim has a measure yet');
   });
 
+  it('a bound an option moves is never said as the base figure (Codex r2 #3719 case on the figure cell): a second oven takes the budget from £3,000 to £2,000; every chance line names the budget instead', () => {
+    const m = bakery();
+    setQ(m, 'oven_price', { status: 'known', value: 2500, question: null, quote: 'The second oven costs £2,500' });
+    m.quantities.push(q('reduced_budget', 'GBP', { value: 2000, quote: 'our budget is £2,000' }));
+    m.options[0]!.sets.push({ ...m.options[0]!.sets[0]!, quantity: 'budget', to: 'reduced_budget', quote: 'With a second oven our budget is £2,000' });
+    const e = evaluateCanonical(m, { sourceText: `${BRIEF} The second oven costs £2,500. With a second oven our budget is £2,000.`, seed: 7 });
+    expect(e.compiled.errors).toEqual([]);
+    // The run is right: spending £2,500 misses the second oven's £2,000 and keeps within keeping one oven's £3,000.
+    expect(e.sim!.options.map((o) => [o.option_id, o.per_limit[0]])).toMatchObject([['second_oven', { chance: 0 }], ['keep_one', { chance: 1 }]]);
+    const view = e.view as Json;
+    const face = (id: string) => (view.options as Json[]).find((o) => o.option_id === id)!.cell.face as string;
+    // Every line that states the bound: each option's chance and its limit on its own, and the shared chance words.
+    for (const words of [face('second_oven'), face('keep_one'), view.goal_chance.chance_words, view.goal_chance.limits[0].words]) {
+      expect(words, words).not.toMatch(/£3,000|£2,000/);
+      expect(words, words).toContain('‘spend’ is at most ‘budget’');
+    }
+    expect(face('second_oven')).toMatch(/Each limit on its own: ‘spend’ is at most ‘budget’[^:;]*: 0%\./);
+    // The exact line too: with the sell-through theirs and fixed, the second oven misses both in every draw, and its why names
+    // the budget it misses, never the base £3,000.
+    const exact = JSON.parse(JSON.stringify(m)) as CanonicalModelT;
+    setQ(exact, 'sell_through', { author: 'person', status: 'known', kind: 'fact', low: null, high: null, range_kind: null, basis: null, quote: 'seven in ten sell' });
+    const x = evaluateCanonical(exact, { sourceText: `${BRIEF} The second oven costs £2,500. With a second oven our budget is £2,000. Seven in ten sell.`, seed: 7 }).view as Json;
+    const exactFace = (x.options as Json[]).find((o) => o.option_id === 'second_oven')!.cell.face as string;
+    expect(exactFace).toContain('in every simulated draw');
+    expect(exactFace).toContain('‘spend’ is £2,500, above ‘budget’');
+    expect(exactFace).not.toMatch(/£3,000|£2,000/);
+    // Contrast: with no option moving it, the budget is said as its figure, as before.
+    const fixed = bakery();
+    setQ(fixed, 'oven_price', { status: 'known', value: 2500, question: null, quote: 'The second oven costs £2,500' });
+    const f = evaluateCanonical(fixed, { sourceText: `${BRIEF} The second oven costs £2,500.`, seed: 7 }).view as Json;
+    expect(f.goal_chance.chance_words).toContain('‘spend’ is at most £3,000');
+  });
+
   it('DL 23 Oct (units on cards): every card that can hold a figure carries its quantity\'s own unit, a question\'s too; a worked-out card none', () => {
     const saved = JSON.parse(readFileSync(new URL('./hiring-alpha3.saved.json', import.meta.url), 'utf8')) as { brief: string; canonical: CanonicalModelT };
     const node = (g: { nodes: Json[] }, id: string) => g.nodes.find((n) => n.id === id) as Json;
