@@ -162,12 +162,18 @@ export function validatePostimage(base: CanonicalModelT, raw: unknown,
       if (hidden.length > 0) unshown.push(`${id} (${hidden.join(', ')})`);
       return out.filter((x) => x !== null);
     };
-    // An added left-out item says WHY first (the card reads "Leaves out ‘its words’ (why)"), then any other field it has;
-    // its words are the label and whose it is the author, so neither is said twice.
-    const leftOut = (r: Rec, fields: ReturnType<typeof said>) => [String(r['why']), ...fields.filter((x) => !['words', 'why', 'whose'].includes(x.name)).map((x) => `${x.name}: ${x.now}`)].join('; ');
+    // An added left-out item is its substance in plain words, starting with its why (the card reads "Leaves out ‘its words’
+    // (after)"): then what Olumi asks, what it concerns and whose words it is in, each only when present. Its words are the
+    // label and whose it is the author, so neither is said twice; no field is hidden.
+    const leftOut = (r: Rec) => [String(r['why']),
+      ...(typeof r['question'] === 'string' ? [`Olumi asks: “${r['question']}”`] : []),
+      ...(Array.isArray(r['concerns']) && r['concerns'].length > 0 ? [`It concerns ${(r['concerns'] as string[]).map(now.named).join(' and ')}`] : []),
+      ...(typeof r['quote'] === 'string' ? [`Your words: “${r['quote']}”${typeof r['party'] === 'string' ? ` (from ${r['party']})` : ''}`]
+        : typeof r['party'] === 'string' ? [`From ${r['party']}`] : [])]
+      .reduce((said, part) => `${said}${/[.!?]$/.test(said) ? ' ' : '. '}${part}`);
     const entry = (id: string, action: ProposalChange['action'], fields: ReturnType<typeof said>, label: string, author: ProposalChange['author'], r?: Rec): ProposalChange => ({ id, kind, action, label,
       before: action === 'add' ? null : fields.map((x) => `${x.name}: ${x.old}`).join('; '),
-      after: action === 'remove' ? null : action === 'add' && family === 'left_out' ? leftOut(r!, fields) : fields.map((x) => `${x.name}: ${x.now}`).join('; '), author });
+      after: action === 'remove' ? null : action === 'add' && family === 'left_out' ? leftOut(r!) : fields.map((x) => `${x.name}: ${x.now}`).join('; '), author });
     const records = (post[family] as readonly Rec[]).map((r) => {
       const old = before.get(String(r['id']));
       const fields = said(String(r['id']), old, r);
@@ -255,5 +261,5 @@ function wordsIn(m: CanonicalModelT) {
   /** An item's name on the card. */
   const title = (family: Family, r: Rec): string => String(family === 'relations' ? label(String(r['defines'])) : family === 'preferences' ? label(String(r['quantity']))
     : r['label'] ?? r['text'] ?? r['holder']);
-  return { title, say };
+  return { title, say, named };
 }

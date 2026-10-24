@@ -278,9 +278,11 @@ describe('the model-program turn on the real core route', () => {
 
   it('step 2 "Check what I understood" (2–5): after the first save ONE held card reads the draft back, every item an add, goals first and figures last, a left-out item by its why; its approve is "Yes, that’s what I meant"; its model is the draft accepted, with a new Run of the same numbers; it is carried on reload and saved by its approve', async () => {
     const m = bakery();
-    m.left_out.push({ id: 'staff_morale', text: 'Staff morale while the second oven beds in', why: 'It has no measure in this model.', question: null, concerns: [], author: 'olumi', quote: null, ...at });
+    m.left_out.push({ id: 'staff_morale', text: 'Staff morale while the second oven beds in', why: 'It has no measure in this model.', question: null, concerns: [], author: 'olumi', quote: null, ...at },
+      { id: 'longer_shifts', text: 'Longer shifts for the staff', why: 'It is not measured in this model', question: 'How will staff feel?', concerns: ['more_loaves', 'second_oven'],
+        author: 'person', quote: 'Our staff may not like longer shifts', ...at });
     replies = [JSON.stringify(m)];
-    const drafted = await turn({ message: BRIEF });
+    const drafted = await turn({ message: `${BRIEF} Our staff may not like longer shifts.` });
     expect(drafted.statusCode, drafted.body).toBe(200);
     const r = drafted.json();
     expect(r.model_program.saved).toBe(true);
@@ -295,13 +297,18 @@ describe('the model-program turn on the real core route', () => {
     // (2) Every record an add, in the reading order: goals, limits, options, what is left out, relations, then the figures.
     expect(card.changes.map((c: Json) => [c.kind, c.id, c.action, c.before])).toEqual([
       ['goal', 'more_loaves', 'add', null], ['record', 'within_budget', 'add', null], ['option', 'second_oven', 'add', null], ['option', 'keep_one', 'add', null],
-      ['left_out', 'staff_morale', 'add', null], ['relation', 'sold_rel', 'add', null], ['relation', 'sales_rel', 'add', null], ['relation', 'spend_rel', 'add', null],
+      ['left_out', 'staff_morale', 'add', null], ['left_out', 'longer_shifts', 'add', null], ['relation', 'sold_rel', 'add', null], ['relation', 'sales_rel', 'add', null], ['relation', 'spend_rel', 'add', null],
       ['quantity', 'base_sales', 'add', null], ['quantity', 'ovens_added', 'add', null], ['quantity', 'one_oven', 'add', null], ['quantity', 'extra_per_oven', 'add', null],
       ['quantity', 'sell_through', 'add', null], ['quantity', 'sold_per_oven', 'add', null], ['quantity', 'sales', 'add', null], ['quantity', 'sales_target', 'add', null],
       ['quantity', 'budget', 'add', null], ['quantity', 'oven_price', 'add', null], ['quantity', 'spend', 'add', null]]);
     // (6) The kinds the card reads, spelled as DGAI's proposalChangeSchema has them at 128bd2db (left_out added there first).
     expect(ProposalChangeSchema.shape.kind.options).toEqual(['quantity', 'relation', 'goal', 'option', 'risk', 'record', 'left_out']);
-    // (3) A left-out item: its words are the label, and `after` is its why only (the card reads "Leaves out ‘…’ (why)").
+    // (3) A left-out item: its words are the label, and `after` is its substance in plain words, its why first (the card
+    // reads "Leaves out ‘…’ (after)"); every part it has is said, and none it lacks.
+    expect(card.changes[5]).toEqual({ id: 'longer_shifts', kind: 'left_out', action: 'add', label: 'Longer shifts for the staff', before: null,
+      after: 'It is not measured in this model. Olumi asks: “How will staff feel?”. It concerns Reach 380 loaves a week and A second oven. Your words: “Our staff may not like longer shifts”',
+      author: 'person' });
+    // Contrast: a left-out item with only its why says only its why, as written.
     expect(card.changes[4]).toEqual({ id: 'staff_morale', kind: 'left_out', action: 'add', label: 'Staff morale while the second oven beds in', before: null,
       after: 'It has no measure in this model.', author: 'olumi' });
     expect(card.changes[0]).toEqual({ id: 'more_loaves', kind: 'goal', action: 'add', label: 'Reach 380 loaves a week', before: null, after: 'name: "Reach 380 loaves a week"; measures: "sales"; comparison: >=; target: "sales target" 380 loaf/week; frame: level; '
