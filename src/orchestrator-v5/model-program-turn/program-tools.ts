@@ -4,10 +4,10 @@
  *  · read_canonical_context: the program as the agent reads it (quantities with their status and who gave them, the
  *    questions still open, the stored Run's words);
  *  · propose_change: an ANSWER to a listed question is set on the item it answers, exactly (`answered`, the same builder as
- *    the canvas edit; no AI call); a structural change, in words with the ids to remove, has Olumi's drafter write the
- *    WHOLE updated model (`proposePostimage`). The one validator checks either exactly (`validatePostimage`), and it is compiled
- *    and evaluated now, so the card the person approves holds the exact model, EVERY change on it, and the Run it would
- *    store; nothing is saved;
+ *    the canvas edit; no AI call); a structural change, in words with the ids to remove, has Olumi's drafter return only the
+ *    records it changes or adds, merged by id onto the saved model (`proposePostimage`). The one validator checks either
+ *    exactly (`validatePostimage`), and it is compiled and evaluated now, so the card the person approves holds the exact
+ *    model, EVERY change on it, and the Run it would store; nothing is saved;
  *  · apply_change: on the person's approval of THAT proposal, its model and Run are written as ONE core write on the
  *    proposal's base (CAS); a model that moved since is `superseded`; this operation's own earlier save is never repeated;
  *  · run_analysis: shows the stored Run when it is current; otherwise evaluates a NEW Run and stores it.
