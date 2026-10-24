@@ -148,7 +148,7 @@ const CONVERSIONS: readonly { per: string; of: string; value: number; tolerance:
 
 /**
  * True when `value` in `u` is an exact calendar conversion (12 month/year, or its inverse 1/12 year/month). `exact`: only the
- * conversions with no tolerance (an average, such as weeks in a month, is not one).
+ * conversions with no tolerance (an average, such as weeks in a month, is not one), equal up to floating-point rounding only.
  */
 export function isCalendarConversion(value: number, u: Unit, opts: { readonly exact?: boolean } = {}): boolean {
   if (u.scale !== 1) return false;
@@ -160,6 +160,6 @@ export function isCalendarConversion(value: number, u: Unit, opts: { readonly ex
   return CONVERSIONS.some((c) => {
     if (opts.exact === true && c.tolerance !== 0) return false;
     const want = c.of === up && c.per === down ? c.value : c.of === down && c.per === up ? 1 / c.value : null;
-    return want !== null && Math.abs(value - want) <= want * c.tolerance + 1e-12;
+    return want !== null && Math.abs(value - want) <= (opts.exact === true ? 4 * Number.EPSILON * want : want * c.tolerance + 1e-12);
   });
 }

@@ -1105,6 +1105,30 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       info.mockRestore();
     });
 
+    it('issue 37 (Codex BLOCK on #3739): an id holding their words reaches no log line: the turn log names it by a stable stand-in; the agent still receives the id it wrote, to correct it', async () => {
+      await savedProgram();
+      const said = 'Our rival bakery shuts in March.';
+      const id = said.slice(0, -1);
+      const updated = bakery();
+      updated.quantities.push(q(id, 'loaf/week', { value: 40, quote: 'their 40 regulars' }));
+      canonicalDraft = JSON.stringify(updated);
+      const telemetry = (await import('../../utils/telemetry.js')).log;
+      const spies = (['info', 'warn', 'error'] as const).map((k) => vi.spyOn(telemetry, k));
+      outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'rival', args: { public_label: 'A rival closing', basis: 'their words', request: 'Their rival bakery shuts in March.', remove: [] } }],
+        [{ type: 'message', text: 'I could not use that as your words.' }]];
+      expect((await typed(said)).statusCode).toBe(200);
+      const output = (calls.at(-1)!.input as Json[]).find((i) => i.type === 'function_call_output' && i.call_id === 'rival')!.output;
+      // Contrast control: what the agent receives names the id it wrote, so it can correct its draft (this is no log).
+      expect(JSON.parse(typeof output === 'string' ? output : JSON.stringify(output))).toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: [id], check: 'their_words' } });
+      const logged = spies.flatMap((s) => s.mock.calls);
+      const line = logged.flatMap(([o]) => ((o as Json)?.event === 'core_turn.summary' ? [o as Json] : [])).at(-1)!;
+      expect(line.tool_calls).toEqual([{ name: 'propose_change', outcome: 'refused', refusal: 'unverified_person_words',
+        words: { check: 'their_words', ids: [`#${createHash('sha256').update(id, 'utf8').digest('hex').slice(0, 8)}`] } }]);
+      expect(logged.length).toBeGreaterThan(0);
+      for (const text of [id, 'rival bakery']) expect(JSON.stringify(logged)).not.toContain(text);
+      for (const s of spies) s.mockRestore();
+    });
+
     it('a program\'s first agent turn holds the host-written draft reply (prompt audit 24 Oct: "which question did your \'I don\'t know\' answer?"): its Conversation opens with the brief, then that reply with its numbered questions, then the message', async () => {
       const sent = await savedProgram();
       outputs = [[{ type: 'message', text: 'Thanks; I will put that on the oven price.' }]];

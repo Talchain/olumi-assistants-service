@@ -1352,6 +1352,22 @@ describe('the model-program turn on the real core route', () => {
     };
     expect(said({ unit: 'week', value: 1 }, { unit: 'day', value: 7 })).toMatchObject({ ok: true, changes: [{ id: 'budget_window', action: 'change', before: '1 week', after: '7 day' }] });
     expect(said({ unit: 'week', value: 13 }, { unit: 'month', value: 3 })).toMatchObject({ ok: false, code: 'unverified_person_words', ids: ['budget_window'], check: 'this_turn' });
+    // A range converts end by end: every one of value, low and high exactly, or it is a change (Codex BLOCK on #3739).
+    const range = { unit: 'year', value: 1, low: 1, high: 2 };
+    expect(said(range, { unit: 'month', value: 12, low: 12, high: 24 }).ok).toBe(true);
+    expect(said({ ...range, value: null }, { unit: 'month', value: null, low: 12, high: 24 }).ok).toBe(true);
+    for (const to of [{ value: 12, low: 12, high: 25 }, { value: 12, low: 11, high: 24 }, { value: 13, low: 12, high: 24 }, { value: 12, low: null, high: null }]) {
+      expect(said(range, { unit: 'month', ...to }), JSON.stringify(to)).toMatchObject({ ok: false, code: 'unverified_person_words', ids: ['budget_window'], check: 'this_turn' });
+    }
+    // Exact is exact up to floating-point rounding only (Codex BLOCK on #3739): 10^15 years as 12×10^15 + 100 months is not the
+    // same figure, as a value or as either end of a range; 0.1 year as 1.2 months is (1.2 / 0.1 is not 12 in binary).
+    expect(1.2 / 0.1).not.toBe(12);
+    expect(said({ unit: 'year', value: 0.1 }, { unit: 'month', value: 1.2 }).ok).toBe(true);
+    for (const [from, to] of [[{ value: 1e15 }, { value: 12e15 + 100 }], [{ value: null, low: 1e15, high: 2e15 }, { value: null, low: 12e15 + 100, high: 24e15 }],
+      [{ value: null, low: 1e15, high: 2e15 }, { value: null, low: 12e15, high: 24e15 + 100 }]] as const) {
+      expect(said({ unit: 'year', ...from }, { unit: 'month', ...to }), JSON.stringify(to)).toMatchObject({ ok: false, code: 'unverified_person_words', ids: ['budget_window'], check: 'this_turn' });
+      expect(said({ unit: 'year', ...from }, { unit: 'month', ...Object.fromEntries(Object.entries(from).map(([k, v]) => [k, v === null ? null : v * 12])) }).ok, `${JSON.stringify(from)} ×12`).toBe(true);
+    }
   });
 
   it('targeted answers: whose an answer is comes from what the AI declares, checked literally (Codex r1 #3727): Olumi\'s estimate stays Olumi\'s, ranged, never in their words; a mismatch is refused, never re-authored', async () => {

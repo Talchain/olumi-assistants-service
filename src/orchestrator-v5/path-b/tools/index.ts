@@ -16,6 +16,7 @@
  * a defect) ends the turn with the route's own handlers, as on the existing loop (`errorFunction: null`).
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { createHash } from 'node:crypto';
 import { ModelBehaviorError, tool, type FunctionTool, type Tool } from '@openai/agents';
 import { toolArgumentsAsSent } from '../../agent-lane/runtime/agent-loop.js';
 import type { AgentLaneMode, AgentToolContext } from '../../agent-lane/runtime/agent-tools.js';
@@ -100,6 +101,8 @@ export interface TurnCheck {
 }
 // A condition is keyed by its words (`condition:<text>`): a log names only that it was one.
 const idOnly = (id: string): string => (id.startsWith('condition:') ? 'condition' : id);
+/** An id as the log holds it: a plain id as it is; any other (an id holding someone's words) a stable stand-in, never its text. */
+const loggedId = (id: string): string => (/^[A-Za-z0-9_.-]{1,64}$/.test(idOnly(id)) ? idOnly(id) : `#${createHash('sha256').update(id, 'utf8').digest('hex').slice(0, 8)}`);
 const listOf = (v: unknown): Record<string, unknown>[] =>
   (Array.isArray(v) ? v.filter((x): x is Record<string, unknown> => x !== null && typeof x === 'object') : []);
 /** Any tool's `blockers` (a Run's readiness has its own shape and words): only a code, and the self-check's verdict and ids. */
@@ -110,7 +113,7 @@ function checkOf(outcome: ToolOutcome): TurnCheck | undefined {
     ...(Array.isArray(b.items) ? { items: (b.items as Blocker['items']).filter((i) => typeof i === 'string').map(idOnly) } : {}) }));
   const relabelled = listOf(outcome[OUTCOME_TRACE]?.relabelled)
     .filter((r) => typeof r.id === 'string' && typeof r.was === 'string').map((r) => ({ id: idOnly(r.id as string), was: r.was as Relabelled['was'] }));
-  const ids = (v: unknown) => (Array.isArray(v) ? v.filter((i): i is string => typeof i === 'string').map(idOnly) : []);
+  const ids = (v: unknown) => (Array.isArray(v) ? v.filter((i): i is string => typeof i === 'string').map(loggedId) : []);
   const words = typeof data.check === 'string' && ids(data.ids).length > 0 ? { check: data.check, ids: ids(data.ids) } : undefined;
   const check: TurnCheck = { ...(typeof data.run_ready === 'boolean' ? { run_ready: data.run_ready } : {}),
     ...(blockers.length > 0 ? { blockers } : {}), ...(relabelled.length > 0 ? { relabelled } : {}), ...(words ? { words } : {}) };
