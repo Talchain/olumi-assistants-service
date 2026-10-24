@@ -12,17 +12,44 @@
  * needs a new fact type in the shared schemas package: a cross-repo contract change, the DL's call. Until then the Run
  * lives beside the model it was computed from, and for these scenarios it is the only Run authority.
  */
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
+import { readdirSync, readFileSync } from 'node:fs';
+import { extname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import { CANONICAL_VERSION, type CanonicalModelT } from '../model-program/canonical.js';
 
-/** The engine a Run was computed with. Bumped by hand when a change could move a stored result. */
+/** The engine's modules outside `model-program/`: the evaluation itself and the helpers present.ts imports. */
+const ENGINE_MODULES_OUTSIDE = ['model-program-turn/evaluate', 'agent-lane/say-figure', 'goal-target/goal-target-basis', 'goal-target/goal-chance-driver',
+  'goal-target/goal-chance-display', 'goal-target/goal-targets-joint'];
+/** The engine token of these modules' bytes (path and contents), so any change to one makes earlier Runs read as before an update. */
+export function engineToken(files: readonly { readonly path: string; readonly bytes: Uint8Array }[]): string {
+  const h = createHash('sha256');
+  for (const f of [...files].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))) h.update(`${f.path}\0${f.bytes.length}\0`).update(f.bytes);
+  return `mp-${h.digest('hex').slice(0, 12)}`;
+}
+/** The engine modules that actually run beside `here` (`.ts` from src, `.js` from dist): every module under `model-program/`, and the rest. */
+export function engineFilesBeside(here: string): { readonly path: string; readonly bytes: Uint8Array }[] {
+  const ext = extname(fileURLToPath(here)), root = fileURLToPath(new URL('../', here));
+  const walk = (rel: string): string[] => readdirSync(join(root, rel), { withFileTypes: true }).flatMap((d) => (d.isDirectory()
+    ? (d.name === '__tests__' ? [] : walk(`${rel}/${d.name}`)) : d.name.endsWith(ext) && !d.name.endsWith('.d.ts') ? [`${rel}/${d.name}`] : []));
+  return [...walk('model-program'), ...ENGINE_MODULES_OUTSIDE.map((m) => m + ext)].map((path) => ({ path, bytes: readFileSync(join(root, path)) }));
+}
+/** Computed once at start-up. Unreadable modules give a token no stored Run carries, so every earlier Run reads as not current. */
+function engineAtStartUp(): string {
+  try {
+    const files = engineFilesBeside(import.meta.url);
+    if (files.length > ENGINE_MODULES_OUTSIDE.length) return engineToken(files);
+  } catch { /* fall through */ }
+  return `mp-unhashed-${randomBytes(6).toString('hex')}`;
+}
+
+/** The engine a Run was computed with: `engine` is the hash of the engine's own modules, never a hand-bumped literal (R11). */
 export const ENGINE_VERSIONS = Object.freeze({
   canonical: CANONICAL_VERSION,
   /** executable.ts interface revision (S1 owns it; r5 at 84fadd52). */
   executable: 'r5',
-  /** compile.ts + simulate.ts + range-law.ts + present.ts (S1 97904b17, S2 47cc9ce3). */
-  engine: 'mp-alpha-2026-10-23.1',
+  engine: engineAtStartUp(),
 });
 export type EngineVersions = Readonly<Record<keyof typeof ENGINE_VERSIONS, string>>;
 
