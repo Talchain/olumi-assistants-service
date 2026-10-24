@@ -1694,6 +1694,19 @@ describe('the model-program turn on the real core route', () => {
     expect(r.assistant_text).toContain('The chance also waits on 2 other things, listed with the result.');
   });
 
+  it('S1 follow-up (Codex on #3723): a window\'s own unknown figure is listed too, though it withholds through the window, not the closure', async () => {
+    const m = club();
+    setQ(m, 'months', { value: null, low: null, high: null, range_kind: null, question: null, status: 'unknown', quote: null, basis: 'Not given yet.' });
+    m.limits[0]!.measure!.window = { origin_event: null, origin_offset: null, start: 0, periods: 'months' }; // a guardrail's window too
+    replies = [JSON.stringify(m)];
+    const r = (await turn({ message: CLUB_BRIEF })).json();
+    expect(r.model_program.saved).toBe(true);
+    expect(r.canonical_analysis_view.goal_chance.waits_on).toEqual([
+      { id: 'months', code: 'asked', label: 'months', scope: ['reach_340', 'within_budget'], answer: { quantity_id: 'months' } },
+    ]);
+    expect(r.model_program.blockers).toEqual([{ id: 'months', code: 'asked', scope: ['reach_340', 'within_budget'] }]);
+  });
+
   it('S1 (A4): with no aim at all, the first reply asks the AI\'s own question from its note on the situation, and no code question', async () => {
     const m = bakery();
     m.goals = [];

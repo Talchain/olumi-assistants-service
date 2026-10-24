@@ -704,6 +704,8 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
   const touchedBy = (closure: Set<string>, own: string) => new Set([...closure, own, ...relationsIn(closure).flatMap((r) => [r.id, ...(r.form === 'effect' ? r.terms.map((t) => `${r.id}:${t.driver}`) : [])])]);
   const restsOn = (touched: Set<string>, own: string[] = []) => [...new Set([...own, ...[...model.assumptions, ...model.conditions].filter((a) => a.concerns.some((c) => touched.has(c))).map((a) => a.id)])];
 
+  /** A window's own figures that are unknown (no figure, no question): what the goal or limit rests on, so it is listed (#3723). */
+  const unknownWindowRefs = (w: CanonicalWindowT | null | undefined) => [w?.periods, w?.origin_offset].filter((x): x is string => has(x) && Q.get(x)?.status === 'unknown');
   const goalClosure = new Map<string, Set<string>>();
   const perGoal: GoalOutcome[] = model.goals.map((g) => {
     if (!has(g.measure)) {
@@ -711,7 +713,7 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
     }
     const closure = upstream(goalRoots(g));
     const w = goalWin.get(g.id);
-    goalClosure.set(g.id, new Set([...closure, ...(w?.blockers ?? [])]));
+    goalClosure.set(g.id, new Set([...closure, ...(w?.blockers ?? []), ...unknownWindowRefs(g.measure.window)]));
     const touched = touchedBy(closure, g.id);
     for (const x of [g.measure.window?.periods, g.measure.window?.origin_offset]) if (has(x)) touched.add(x);
     return { goal_id: g.id, ...outcomeOf(closure, w), cancelled: [], needs_measure: false, needs_deadline: w?.deadline === true, olumi_inputs: olumiInputs(closure), unverified_inputs: [...touched].filter((x) => unverifiedIds.has(x)), rests_on: restsOn(touched, g.measure.assumptions), excludes: [...g.measure.exclusions] };
@@ -721,7 +723,7 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
     if (!has(l.measure)) return { limit_id: l.id, status: 'asks', reasons: [`"${l.label}" has no measure yet, so the result does not cover it.`], asks: [], cancelled: [], needs_measure: true };
     const closure = upstream(limitRoots(l));
     const w = limitWin.get(l.id);
-    limitClosure.set(l.id, new Set([...closure, ...(w?.blockers ?? [])]));
+    limitClosure.set(l.id, new Set([...closure, ...(w?.blockers ?? []), ...unknownWindowRefs(l.measure.window)]));
     return { limit_id: l.id, ...outcomeOf(closure, w), cancelled: [], needs_measure: false };
   });
   const optionClosure = new Map(model.options.map((o) => [o.id, upstream([...o.sets.map((s) => s.to).filter(has), ...o.sets.map((s) => s.starts_after_periods).filter((t): t is string => typeof t === 'string')])] as const));
