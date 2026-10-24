@@ -89,6 +89,18 @@ export function mergeUpdate(saved: CanonicalModelT, update: CanonicalUpdateT): C
   }));
   return { ...saved, ...families, question: update.question ?? saved.question, period: update.period ?? saved.period } as CanonicalModelT;
 }
+/**
+ * An update read as a first draft is, only where it speaks (Codex BLOCK on #3740): `read` is the compiler's reading of the
+ * merged model (`normalise`, the merged model its context); what the update returned, and what its options' inline values
+ * become, take that reading, and every saved record it did not return stays exactly as saved, whatever its new context.
+ */
+export function readUpdate(saved: CanonicalModelT, update: CanonicalUpdateT, read: CanonicalModelT): CanonicalModelT {
+  return { ...read, ...Object.fromEntries(FAMILIES.map((f) => {
+    const back = new Set((update[f] as readonly { id: string }[]).map((r) => r.id));
+    const was = new Map((saved[f] as readonly { id: string }[]).map((r) => [r.id, r] as const));
+    return [f, (read[f] as readonly { id: string }[]).map((r) => (back.has(r.id) ? r : was.get(r.id) ?? r))];
+  })) } as CanonicalModelT;
+}
 
 /** The ledgered client's Responses call, streamed (two unstreamed phase-0 calls were cut at 180 s); one per turn. */
 export function ledgeredResponsesCall(): ResponsesCall {
@@ -129,7 +141,7 @@ export async function draftCanonicalModel(brief: string | readonly InputMessage[
     const update = onto === undefined ? null : CanonicalUpdate.safeParse(json);
     const whole = update?.success ? mergeUpdate(onto!, update.data) : json;
     const parsed = CanonicalModel.safeParse(whole);
-    const read = parsed.success && opts.interpret === true ? normalise(parsed.data) : undefined;
+    const read = parsed.success && opts.interpret === true ? (update?.success ? readUpdate(onto!, update.data, normalise(parsed.data)) : normalise(parsed.data)) : undefined;
     // A first draft (the brief alone) must give every ask its question, but its last attempt falls back to the base behaviour
     // (an ask with no question is a typed blocker), so a draft is never refused whole for one; an update keeps the saved
     // model's asks as they are.
