@@ -2057,6 +2057,48 @@ describe('the model-program turn on the real core route', () => {
     expect(cell('second_oven').why).not.toContain('No aim has a measure yet');
   });
 
+  it('DoD-G marketing r2/r5: a run with no aim says no "chance of …" sentence (it said "chance of , while …"); what it did check is still said', () => {
+    const m = bakery();
+    setQ(m, 'oven_price', { status: 'known', value: 2500, question: null, quote: 'The second oven costs £2,500' });
+    m.goals = [];
+    const src = `${BRIEF} The second oven costs £2,500.`;
+    const e = evaluateCanonical(m, { sourceText: src, seed: 7 });
+    expect(e.compiled.executable).not.toBeNull();
+    const gc = (e.view as Json).goal_chance as Json;
+    expect(gc.chance_words).toBeUndefined();
+    expect(JSON.stringify(e.view)).not.toContain('chance of ,');
+    // The limit on its own, and each option's cell saying what the chance waits on, as before.
+    expect(gc.limits).toEqual([{ constraint_id: 'within_budget', words: '‘spend’ is at most £3,000 with each option in effect',
+      options: [{ option_id: 'second_oven', display: '100%' }, { option_id: 'keep_one', display: '100%' }] }]);
+    expect(((e.view as Json).options as Json[]).map((o) => o.cell.why))
+      .toEqual(Array(2).fill('The chance waits on the result you want. This run checks only the limits, each on its own: ‘spend’ within its limit: 100%.'));
+    // Contrast: with its aim, the same model says the chance in full.
+    m.goals = bakery().goals;
+    expect(((evaluateCanonical(m, { sourceText: src, seed: 7 }).view as Json).goal_chance as Json).chance_words)
+      .toBe('chance of ‘sales’ being at least 380 loaf / week with each option in effect, while ‘spend’ is at most £3,000 with each option in effect');
+  });
+
+  it('DoD-G hiring: a change from today on a quantity already named "… relative to today" never says "today today", and says its assumed relationship once', () => {
+    const rel = (label: string) => {
+      const m = bakery();
+      setQ(m, 'sales', { label });
+      m.quantities.push(q('growth', '%', { value: 10, quote: 'grow sales by 10%' }));
+      m.goals = [{ ...m.goals[0]!, measure: { ...m.goals[0]!.measure!, target: 'growth', frame: 'change_rel', reference: { kind: 'now', option: null, quantity: null } } }];
+      const e = evaluateCanonical(m, { sourceText: `${BRIEF} We want to grow sales by 10%.`, seed: 7 });
+      return { e, face: ((e.view as Json).options as Json[]).find((o) => o.option_id === 'second_oven')!.cell.face as string };
+    };
+    const today = rel('sales relative to today');
+    expect(today.e.compiled.executable!.quantities.find((x) => x.id === 'sales__today')!.label).toBe('sales relative to today');
+    expect(today.face).toBe('‘A second oven’: more than 99% chance of ‘Relative change in sales relative to today’ being at least 10% with each option in effect, in this model, '
+      + 'if ‘sell through’ follows Olumi’s provisional conversion of Olumi’s own estimated range, 0.5 to 0.9, into a bell-shaped spread and ‘sales relative to today’ follows Olumi’s assumed relationship. '
+      + 'Not yet checked: ‘Within the £3,000’ — needs "oven price".');
+    expect(JSON.stringify(today.e.view)).not.toContain('today today');
+    // Contrast: a quantity not already said "today" keeps its shadow's "today", listed as before.
+    const plain = rel('sales');
+    expect(plain.e.compiled.executable!.quantities.find((x) => x.id === 'sales__today')!.label).toBe('sales today');
+    expect(plain.face).toContain(', ‘sales’ follows Olumi’s assumed relationship and ‘sales today’ follows Olumi’s assumed relationship.');
+  });
+
   it('a bound an option moves is never said as the base figure (Codex r2 #3719 case on the figure cell): a second oven takes the budget from £3,000 to £2,000; every chance line names the budget instead', () => {
     const m = bakery();
     setQ(m, 'oven_price', { status: 'known', value: 2500, question: null, quote: 'The second oven costs £2,500' });

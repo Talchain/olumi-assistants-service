@@ -273,8 +273,9 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
    * dependency authority (`restsOn`), timings included, so a basis and a driver never miss what the chance rests on. */
   const upstream = (roots: readonly string[], optionId: string | null): Set<string> => restsOn(model, roots, optionId);
 
-  /** Olumi's assumptions among these quantities, in plain words, model order. Empty = every input is the person's. */
-  const assumptions = (ids: ReadonlySet<string>): string[] => model.quantities.filter((x) => ids.has(x.id)).flatMap((x): string[] => {
+  /** Olumi's assumptions among these quantities, in plain words, model order, each said once (a shadow named as its quantity,
+   * compile.ts `shadowLabel`, says the same words). Empty = every input is the person's. */
+  const assumptions = (ids: ReadonlySet<string>): string[] => [...new Set(model.quantities.filter((x) => ids.has(x.id)).flatMap((x): string[] => {
     const name = q(label(x.id) ?? x.id), m = meta(x.id);
     if (x.dist?.kind === 'range') {
       // DL ruling 4: every range's law is Olumi's provisional conversion (`rangeSpread`, mapper.ts:104-110), never the person's
@@ -311,7 +312,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     // DL ruling (author not recorded): an effect relation with no recorded author is listed, never read as the person's.
     if (x.equation?.form !== 'effect' || m?.relation_author === 'person') return [];
     return [m?.relation_author === 'olumi' ? `${name} follows Olumi’s assumed relationship` : `${name} follows a relationship ${NOT_RECORDED}`];
-  });
+  }))];
   const basisWords = (ids: ReadonlySet<string>): string => {
     const a = assumptions(ids);
     return a.length === 0 ? 'on your figures' : `if ${listWords(a)}`;
@@ -364,7 +365,8 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     + (notInRun.length > 0 ? `, without ${listWords(notInRun.map((w) => `the ${w.kind} ${q(w.label)}`))}, which ${notInRun.length === 1 ? 'is' : 'are'} not in this run` : '');
   const covered = model.goals.flatMap((g) => (goalWords.get(g.id) !== undefined ? [goalWords.get(g.id)!] : []));
   const notCovered = [...(input.leaves_out ?? []), ...(input.left_out ?? []).map((r) => r.text)];
-  const jointWords = sayable
+  // No aim in this run: there is no chance to name, so no "chance of …" sentence (DoD-G marketing r2/r5 said "chance of , while …").
+  const jointWords = sayable && model.goals.length > 0
     ? `${listWords(model.goals.map((g) => goalWords.get(g.id)!))}${limitWords.length > 0 ? `, while ${listWords(limitWords as string[])}` : ''}${leftOut}`
     : undefined;
   const roots = [...model.goals.flatMap((g) => [g.quantity, g.target, ...(g.per !== undefined ? [g.per] : [])]),
