@@ -96,7 +96,10 @@ import { GRAPH_MAX_EDGES, GRAPH_MAX_NODES } from "../../config/graphCaps.js";
 import { resolveCeeRateLimit } from "../../cee/config/limits.js";
 import { RATE_BUCKET_REGISTRY } from "../../cee/config/limits.js";
 import { checkPersistedGraphInvariants } from "../../orchestrator-v5/persisted-graph-invariants.js";
-import { currentTurnFenceSlot, runWithTurnFence, TurnFenceRejectedError } from "../../orchestrator-v5/session/turn-fence.js";
+import { currentTurnFenceSlot, runWithTurnFence, TurnFenceRejectedError, unclaimedTurnFenceHandle, type TurnFenceHandle } from "../../orchestrator-v5/session/turn-fence.js";
+import { writeCorePostimage } from "../../orchestrator-v5/path-b/tools/core-write.js";
+import { mapLivingModel } from "../../orchestrator-v5/path-b/living-model/mapper.js";
+import { KNOWN_ANSWER } from "../../orchestrator-v5/path-b/living-model/__tests__/fixtures.js";
 import { registrationRequestHash, registrationTurnId } from "../../orchestrator-v5/graph-registration/registration-identity.js";
 
 
@@ -1274,7 +1277,111 @@ describe("register — the write is ordered by the turn fence", () => {
     const app = await buildApp();
     const res = await post(app, SID, { graph: IMPORTED, operation_id: OP });
     expect(res.statusCode).toBe(503);
+    expect(res.json().details?.code, "named: the fence refused before anything was written").toBe("TURN_FENCE_REFUSED");
     await app.close();
+  });
+});
+
+/**
+ * ⭐ AN HONEST CORE WRITE OUTCOME (Codex r2 on #3704). The core turn's own write (`writeCorePostimage`, the one core write) goes
+ * through THIS route, dispatched in-process as the core turn dispatches it (`runAsAgentSubturn`), under the turn's fence handle.
+ * The store double reproduces the commit's gate, keyed by the BOUND handle (`supabase-store.ts`: a null generation is refused
+ * `unclaimed` before any RPC, so before the SQL replay; a stopped generation is refused in the transaction, OLTF1), and keeps
+ * each committed row and the graph it wrote. A refused write wrote nothing, so the outcome is `refused`, never "it may have
+ * saved", unless an identical copy of the operation already committed (Codex r1 on #3706): that version is this write's. A 503
+ * the fence did not decide stays unknown.
+ */
+describe("register → the core write: a fence refusal is 'refused, nothing written'", () => {
+  const SID = "3d9c2f1e-7b4a-4c8e-9f0d-1a2b3c4d5e6f";
+  const TURN = "c0de0000-0000-4000-8000-000000000001";
+  const OP = "5b1e9c7a-2d4f-4a6b-8c0e-9f1a2b3c4d5e";
+  const graph = { ...mapLivingModel(KNOWN_ANSWER).graph, living_model: KNOWN_ANSWER } as Record<string, unknown>;
+  const stopped = new Set<number>();
+  const stored: unknown[] = [];
+  const committed = new Map<string, { id: string; turn_id: string; request_hash: string }>();
+  /** This operation's own committed version, read by its registration turn id (as `findOperationVersion` reads it). */
+  let ownVersion: () => Promise<unknown | null>;
+  type Write = { graph?: unknown; turn_id: string; request_hash: string };
+  /** Runs once, at the commit, before the gate: a rival transaction that committed first (the atomic suite's `onBeforeAppend`). */
+  let beforeGate: ((write: Write) => void) | undefined;
+  const commit = (write: Write) => {
+    stored.push(write.graph);
+    committed.set(write.turn_id, { id: `row-${committed.size + 1}`, turn_id: write.turn_id, request_hash: write.request_hash });
+  };
+  beforeEach(() => {
+    stopped.clear(); stored.length = 0; committed.clear(); beforeGate = undefined;
+    ownVersion = async () => {
+      const row = committed.get(registrationTurnId(SID, OP));
+      return row === undefined ? null : { version_id: `v_${row.id}`, source_turn_id: row.turn_id };
+    };
+    // An empty scenario until a write lands: create-only, so the first write reaches the commit.
+    loadGraph.mockImplementation(async () => stored.at(-1) ?? null);
+    readCommittedTurn.mockImplementation(async (_sid: string, turnId: string) => committed.get(turnId) ?? null);
+    append.mockImplementation(async (write: Write) => {
+      const rival = beforeGate; beforeGate = undefined; rival?.(write);
+      const handle = currentTurnFenceSlot()?.handle;
+      if (handle == null || handle.generation === null) {
+        throw new TurnFenceRejectedError("refused", { verdict: "unclaimed", generation: null, maxGeneration: null });
+      }
+      if (stopped.has(handle.generation)) {
+        throw new TurnFenceRejectedError("refused", { verdict: "stopped", generation: handle.generation, maxGeneration: handle.generation });
+      }
+      commit(write);
+      return { id: `row-${committed.size}` };
+    });
+  });
+  const write = async (handle: TurnFenceHandle) => {
+    const app = await buildApp();
+    try {
+      const dispatch = async (path: string, body: unknown) => {
+        const res = await injectAsCeeWriter(app, { method: "POST", url: path, payload: body as Record<string, unknown> });
+        return { status: res.statusCode, json: res.json() as Record<string, unknown> };
+      };
+      return await runWithTurnFence(handle, () => writeCorePostimage({ dispatch }, {
+        scenarioId: SID, graph, operationId: OP, expectedIdentity: null, ownVersion: () => ownVersion(),
+      }));
+    } finally {
+      await app.close();
+    }
+  };
+
+  it("RED: a core turn whose fence claim did not land (an unclaimed handle) → refused, and nothing is in the store", async () => {
+    const outcome = await write(unclaimedTurnFenceHandle(SID, TURN));
+    expect(append, "control: the write reached the commit's gate").toHaveBeenCalledTimes(1);
+    expect(outcome).toEqual({ status: "refused" });
+    expect(stored).toEqual([]);
+  });
+
+  it("a stopped core turn's write → refused, and nothing is in the store", async () => {
+    stopped.add(7);
+    const outcome = await write({ scenarioId: SID, turnId: TURN, generation: 7 });
+    expect(append, "control: the write reached the commit's gate").toHaveBeenCalledTimes(1);
+    expect(outcome).toEqual({ status: "refused" });
+    expect(stored).toEqual([]);
+  });
+
+  it("Codex r1 on #3706: an IDENTICAL copy of the operation committed first → the unclaimed write is ALREADY SAVED, never refused", async () => {
+    // Two turns with the same brief both read the empty scenario; the other one's identical copy (same operation, same bytes)
+    // commits before this unclaimed turn's commit, which the fence then refuses before the SQL replay could answer it.
+    beforeGate = commit;
+    const outcome = await write(unclaimedTurnFenceHandle(SID, TURN));
+    expect(append, "control: this write reached the commit's gate").toHaveBeenCalledTimes(1);
+    expect(stored, "the identical copy is the one model saved").toHaveLength(1);
+    expect(outcome).toEqual({ status: "already_saved", receipt: { version_id: "v_row-1", source_turn_id: registrationTurnId(SID, OP) } });
+  });
+
+  it("the operation's own version cannot be read → UNKNOWN, never refused", async () => {
+    ownVersion = async () => { throw new Error("versions read failed"); };
+    const outcome = await write(unclaimedTurnFenceHandle(SID, TURN));
+    expect(append).toHaveBeenCalledTimes(1);
+    expect(outcome).toMatchObject({ status: "unknown", outcome: { status: "unavailable", reason: "not_confirmed", write: "unknown" } });
+  });
+
+  it("CONTRAST: a genuine transport 503 (the commit failed, the fence never decided) stays UNKNOWN", async () => {
+    append.mockRejectedValue(new Error("fetch failed: ECONNRESET"));
+    const outcome = await write({ scenarioId: SID, turnId: TURN, generation: 7 });
+    expect(append).toHaveBeenCalledTimes(1);
+    expect(outcome).toMatchObject({ status: "unknown", outcome: { status: "unavailable", reason: "not_confirmed", write: "unknown" } });
   });
 });
 

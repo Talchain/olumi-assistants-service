@@ -62,6 +62,14 @@ export async function writeCorePostimage(deps: { readonly dispatch: InternalDisp
     return unknown('not_confirmed', { check: 'ack_status', status: reg.status });
   }
   if (reg.status >= 400 && reg.status < 500) return { status: 'refused' };
+  // The turn fence refused THIS request before it committed (an unclaimed or unreadable place), so it wrote nothing. But an
+  // identical copy of the operation may have committed first, and the fence refuses before the SQL replay could answer it
+  // (Codex r1 on #3706): that version is this write's. An unreadable one is unknown. Every other 503 is unknown.
+  if (reg.status === 503 && code === 'TURN_FENCE_REFUSED') {
+    const prior = await w.ownVersion().catch(() => undefined);
+    if (prior === undefined) return unknown('not_confirmed', { check: 'ack_status', status: reg.status });
+    return prior === null ? { status: 'refused' } : { status: 'already_saved', receipt: prior };
+  }
   if (reg.status !== 200) return unknown('not_confirmed', { check: 'ack_status', status: reg.status });
 
   // The response is THIS registration's receipt; history availability is not save verification.
