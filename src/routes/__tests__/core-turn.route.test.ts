@@ -907,12 +907,15 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect((j.cards as Json[]).filter((c) => c.reading === true), 'the first draft\'s reading card is carried').toHaveLength(1);
       return (j.cards as Json[]).filter((c) => c.reading !== true);
     };
-    const savedProgram = async (): Promise<void> => {
+    /** Drafts and saves a program; returns the reply exactly as it was sent to the person. */
+    const savedProgram = async (): Promise<string> => {
       SCENARIO = randomUUID(); persisted = null; canonicalDraft = JSON.stringify(bakery()); calls.length = 0;
-      expect((await typed(BAKERY_BRIEF)).statusCode).toBe(200);
+      const drafted = await typed(BAKERY_BRIEF);
+      expect(drafted.statusCode).toBe(200);
       expect(calls[0]!.text?.format?.name).toBe('canonical_model');
       expect(calls[0]!.instructions).toBe(DRAFTING_INSTRUCTIONS);
       calls.length = 0;
+      return String((drafted.json() as Json).assistant_text);
     };
 
     it('(6) ALPHA (23 Oct) + Codex r1 BLOCK 4 on #3709: a saved PROGRAM\'s turn gets the model-program instructions; a saved Living Model keeps the old text, byte for byte', async () => {
@@ -954,15 +957,33 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
         'the Challenge note reached the turn').toBe(true);
     });
 
-    it('a program\'s first agent turn holds the host-written draft reply (prompt audit 24 Oct: "which question did your \'I don\'t know\' answer?"): its Conversation opens with the brief, then that reply with its numbered questions, then the message', async () => {
+    it('a Challenge turn has no typed words, so no answer of theirs can pass (Codex r2 #3727): one quoting their brief is refused by id, and the saved model is unchanged', async () => {
       await savedProgram();
+      const saved = JSON.stringify((persisted as Json).living_model);
+      const item = (((persisted as Json).nodes ?? []) as Json[]).find((n) => n.kind === 'factor') ?? ((persisted as Json).nodes as Json[])[0]!;
+      const quote = BAKERY_BRIEF.slice(0, 30);
+      expect(BAKERY_BRIEF).toContain(quote);
+      outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'ans', args: { public_label: 'Oven price', basis: 'their answer', request: '', remove: [],
+        answers: [{ id: 'oven_price', value: 2500, low: null, high: null, range_kind: null, party: null, quote, basis: null, status: 'known', author: 'person' }] } }],
+      [{ type: 'message', text: 'I could not use that as your answer.' }]];
+      expect((await challengeOn(String(item.id))).statusCode).toBe(200);
+      expect(calls).toHaveLength(2);
+      const output = (calls[1]!.input as Json[]).find((i) => i.type === 'function_call_output' && i.call_id === 'ans')!.output;
+      expect(JSON.parse(typeof output === 'string' ? output : JSON.stringify(output))).toMatchObject({ status: 'refused', reason: 'unverified_person_words',
+        detail: "oven_price: your words this turn don't contain it.", data: { ids: ['oven_price'] } });
+      expect(JSON.stringify((persisted as Json).living_model)).toBe(saved);
+    });
+
+    it('a program\'s first agent turn holds the host-written draft reply (prompt audit 24 Oct: "which question did your \'I don\'t know\' answer?"): its Conversation opens with the brief, then that reply with its numbered questions, then the message', async () => {
+      const sent = await savedProgram();
       outputs = [[{ type: 'message', text: 'Thanks; I will put that on the oven price.' }]];
       expect((await typed('About £2,500 for the oven.')).statusCode).toBe(200);
       const input = (calls[0]!.input ?? []) as Json[];
       const said = input.filter((i) => i.role === 'assistant').map((i) => (i.content as Json[]).map((c) => String(c.text)).join(''));
-      expect(said, 'the draft reply, as the person saw it').toHaveLength(1);
-      expect(said[0]).toMatch(/^I've drafted a first model of: /);
-      expect(said[0]).toMatch(/\n1\. \S/);
+      // Exactly the bytes they were sent (Codex r2 #3727), no more and no less; the reply itself has its numbered questions.
+      expect(said, 'the draft reply, as the person saw it').toEqual([sent]);
+      expect(sent).toMatch(/^I've drafted a first model of: /);
+      expect(sent).toMatch(/\n1\. \S/);
       const users = input.filter((i) => i.role === 'user').map((i) => String(i.content));
       expect(users[0]).toContain(BAKERY_BRIEF);
       expect(users.at(-1)).toBe('About £2,500 for the oven.');

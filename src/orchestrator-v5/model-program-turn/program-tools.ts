@@ -132,8 +132,8 @@ async function prepare(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs)
   // A quote is the person's own words, from this conversation or what they gave before; never Olumi's paraphrase.
   const turnWords = [...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])].filter((w) => !program.person_words.includes(w));
   const words = [...program.person_words, ...new Set(turnWords)];
-  // Their words THIS turn (Codex r1 #3727: an earlier message is never this turn's): the typed message, else the last verified.
-  const fresh = (ctx.user_turn_text ? [ctx.user_turn_text] : (ctx.verified_user_messages ?? []).slice(-1)).filter((w) => w.trim() !== '');
+  // Their words THIS turn: what they typed, and nothing else (Codex r1–r2 #3727). A Challenge or chip turn has none.
+  const fresh = ctx.user_turn_text?.trim() ? [ctx.user_turn_text] : [];
   // What the AI declares: answers, set on their items exactly (no redraft); else a structural change, which Olumi's drafter writes.
   const answers = args.answers ?? [];
   if (answers.length > 0 && (args.request.trim() !== '' || args.remove.length > 0)) {
@@ -142,7 +142,7 @@ async function prepare(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs)
   // Whose an answer is, as declared, checked literally (Codex r1 #3727): theirs only in their words THIS turn, whatever it
   // changes (a basis-only answer too); Olumi's an estimate with its range and basis, never their words.
   const stale = answers.filter((a) => a.author === 'person' && !verbatimIn(a.quote, fresh)).map((a) => a.id);
-  if (stale.length > 0) return refused('unverified_person_words', `${stale.join(', ')}: an answer of theirs quotes their words this turn, exactly.`, { ids: stale });
+  if (stale.length > 0) return refused('unverified_person_words', `${stale.join(', ')}: your words this turn don't contain it.`, { ids: stale });
   const misowned = answers.filter((a) => (a.author === 'olumi') !== (a.status === 'estimated')
     || (a.author === 'olumi' && (a.low === null || a.high === null || !a.basis?.trim() || a.quote !== null || a.party !== null))).map((a) => a.id);
   if (misowned.length > 0) return refused('not_an_answer', `${misowned.join(', ')}: their answer is known or unknown, in their words; Olumi's is estimated, with low, high and a basis, never their words.`, { ids: misowned });

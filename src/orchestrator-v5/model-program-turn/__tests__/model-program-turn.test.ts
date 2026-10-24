@@ -505,7 +505,7 @@ describe('the model-program turn on the real core route', () => {
     sent.length = 0;
     const words = 'The oven would cost about £2,500.';
     const deps = { dispatch, proposals: new ProposalStore() };
-    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] };
+    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words };
     const args = { public_label: 'Oven price £2,500', basis: 'their answer', request: 'The oven price is their answer: about £2,500.', remove: [] };
     const answer = (quote: string) => savedWith((m) => setQ(m, 'oven_price', { status: 'known', value: 2500, question: null, quote, basis: APPROXIMATE_FIGURE }));
     // Contrast first: a figure of theirs whose words are not theirs, verbatim, is refused, and nothing is proposed.
@@ -596,7 +596,7 @@ describe('the model-program turn on the real core route', () => {
     // link and its relation) stays Olumi's. 300 + 3 × (20 + 6 − 12) = 342 ≥ 340: exactly 1. A new revision, a new Run.
     const words = 'From experience a promotion brings 6 more a month.';
     const deps = { dispatch, proposals: new ProposalStore() };
-    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] };
+    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words };
     replies = [savedWith((m) => setQ(m, 'promo_effect', { value: 6, low: null, high: null, range_kind: null, status: 'known', author: 'person', basis: null, quote: 'a promotion brings 6 more a month' }))];
     const p = await proposeProgramChange(deps, ctx, { public_label: 'Promotion effect 6 a month', basis: 'their experience', request: 'The promotion brings 6 more a month, in their words.', remove: [] }) as Json;
     expect(p.data.changes.map((c: Json) => [c.id, c.action, c.before, c.after])).toEqual([['promo_effect', 'change',
@@ -616,7 +616,7 @@ describe('the model-program turn on the real core route', () => {
 
     // Contrast (stale CAS): a chat card made on the model BEFORE another change is superseded, and writes nothing.
     const later = 'Actually we can only spend £450.';
-    const ctx2 = { ...ctx, verified_user_messages: [later] };
+    const ctx2 = { ...ctx, verified_user_messages: [later], user_turn_text: later };
     replies = [savedWith((m) => setQ(m, 'budget', { value: 450, quote: 'we can only spend £450' }))];
     const stale = await proposeProgramChange(deps, ctx2, { public_label: 'Budget £450', basis: 'they said so', request: 'The budget is £450.', remove: [] }) as Json;
     expect(stale.status, JSON.stringify(stale)).toBe('ok');
@@ -661,7 +661,7 @@ describe('the model-program turn on the real core route', () => {
     await turn({ message: BRIEF });
     const deps = { dispatch, proposals: new ProposalStore() };
     const words = 'Drop keeping our one oven: the oven is £2,000, and our landlord must agree first.';
-    const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] });
+    const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words });
     const args = (remove: string[]) => ({ public_label: 'Your changes', basis: 'they said so', request: 'Remove keeping one oven; the oven costs £2,000; the landlord must agree first.', remove });
     const edited = (drop: boolean) => savedWith((d) => {
       if (drop) d.options = d.options.filter((o) => o.id !== 'keep_one');
@@ -718,7 +718,7 @@ describe('the model-program turn on the real core route', () => {
     expect((await turn({ message: `${BRIEF} We open in 2 weeks, or in 3 weeks, and want it within 4 weeks of opening.` })).json().model_program.saved).toBe(true);
     const saved = JSON.parse(JSON.stringify(persisted!.living_model.canonical)) as CanonicalModelT;
     const deps = { dispatch, proposals: new ProposalStore() };
-    const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: ['Make it 3 weeks to the opening.'] });
+    const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: ['Make it 3 weeks to the opening.'], user_turn_text: 'Make it 3 weeks to the opening.' });
     const propose = async (edit: (d: CanonicalModelT) => void) => {
       replies = [savedWith(edit)];
       return await proposeProgramChange(deps, ctx(), { public_label: 'The opening', basis: 'they said so', request: 'The opening is in 3 weeks.', remove: [] }) as Json;
@@ -758,7 +758,7 @@ describe('the model-program turn on the real core route', () => {
     expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
     const deps = { dispatch, proposals: new ProposalStore() };
     const words = 'We now bake 320 loaves a week, our baker says.';
-    const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] });
+    const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words });
     const propose = async (edit: (d: CanonicalModelT) => void) => {
       replies = [savedWith(edit)];
       return await proposeProgramChange(deps, ctx(), { public_label: 'Base sales', basis: 'their words', request: 'Base sales are now 320 a week.', remove: [] }) as Json;
@@ -796,7 +796,7 @@ describe('the model-program turn on the real core route', () => {
     replies = [JSON.stringify(m)];
     expect((await turn({ message: brief })).json().model_program.saved).toBe(true);
     const deps = { dispatch, proposals: new ProposalStore() };
-    const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: ['Make the impact 9, and add the other effect.'] });
+    const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: ['Make the impact 9, and add the other effect.'], user_turn_text: 'Make the impact 9, and add the other effect.' });
     const relink = (to: string) => async () => {
       replies = [savedWith((d) => {
         d.relations = d.relations.map((r) => (r.form === 'effect'
@@ -851,7 +851,7 @@ describe('the model-program turn on the real core route', () => {
     replies = [JSON.stringify(bakery())];
     await turn({ message: BRIEF });
     const deps = { dispatch, proposals: new ProposalStore() };
-    const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: ['The oven could break down.'] });
+    const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: ['The oven could break down.'], user_turn_text: 'The oven could break down.' });
     const estimate = (id: string, unit: string, low: number, high: number, value: number | null) => q(id, unit, { kind: 'coefficient', status: 'estimated', author: 'olumi', value, low, high, range_kind: 'plausible', basis: 'Synthetic.' });
     const risky = (label: string) => savedWith((d) => {
       d.quantities.push(estimate('breakdown_chance', '1', 0.05, 0.2, null), estimate('lost_loaves', 'loaf/week', -150, -50, -100));
@@ -986,7 +986,7 @@ describe('the model-program turn on the real core route', () => {
     const goalChance = () => (persisted!.living_model.runs.at(-1).result.canonical_analysis_view as Json).goal_chance;
     expect(goalChance().targets.per_target).toHaveLength(2);
     const deps = { dispatch, proposals: new ProposalStore() };
-    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: ['Make it 11 leaving each month.'] };
+    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: ['Make it 11 leaving each month.'], user_turn_text: 'Make it 11 leaving each month.' };
     const read = await readProgramContext(deps, ctx) as Json;
     expect(stableStringify(read.data.run.goal_chance)).toBe(stableStringify(goalChance()));
     replies = [savedWith((m) => setQ(m, 'leavers', { value: 11, quote: '11 leaving each month' }))];
@@ -1008,7 +1008,7 @@ describe('the model-program turn on the real core route', () => {
     expect(drafted.model_program.blockers.find((x: Json) => x.id === 'extra_per_oven')).toMatchObject({ code: 'range_kind' });
     const words = 'Those are firm ends: never fewer than 80, never more than 120.';
     const deps = { dispatch, proposals: new ProposalStore() };
-    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] };
+    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words };
     replies = [savedWith((d) => setQ(d, 'extra_per_oven', { range_kind: 'bounds' }))];
     // The args as the agent's tool schema admits them (the SDK parses every call with it).
     const p = await proposeProgramChange(deps, ctx, ProgramChangeParams.parse({ public_label: 'Read 80–120 as firm', basis: 'their answer', request: 'Their 80 to 120 are firm ends.', remove: [] })) as Json;
@@ -1068,7 +1068,7 @@ describe('the model-program turn on the real core route', () => {
     expect((persisted!.living_model.runs.at(-1).result.compile as Json).blockers).toContainEqual({ id: 'more_loaves', code: 'measure', scope: ['more_loaves'] });
     const words = 'Success means selling at least 380 loaves a week within 4 weeks.';
     const deps = { dispatch, proposals: new ProposalStore() };
-    const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] });
+    const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words });
     const measured = (targetQuote: string) => savedWith((d) => {
       d.quantities.push(q('more_loaves_target', 'loaf/week', { value: 380, quote: targetQuote }), q('more_loaves_window', 'week', { value: 4, quote: words }));
       d.goals = d.goals.map((g) => (g.id === 'more_loaves' ? { ...g, question: null, measure: { quantity: 'sales', per: null, cmp: '>=', target: 'more_loaves_target', frame: 'level', reference: null,
@@ -1146,7 +1146,7 @@ describe('the model-program turn on the real core route', () => {
     const deps = { dispatch, proposals: new ProposalStore() };
     const ask = (words: string, answers: Json[], extra: Partial<{ request: string; remove: string[] }> = {}) => {
       sent.length = 0;
-      return proposeProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] },
+      return proposeProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words },
         ProgramChangeParams.parse({ public_label: 'Their answer', basis: 'their answer', request: '', remove: [], answers, ...extra })) as Promise<Json>;
     };
     const answer = (f: Json) => ({ value: null, low: null, high: null, range_kind: null, party: null, quote: null, basis: null, author: 'person', ...f });
@@ -1222,7 +1222,7 @@ describe('the model-program turn on the real core route', () => {
     const deps = { dispatch, proposals: new ProposalStore() };
     sent.length = 0;
     const words = 'All of the new loaves sell.';
-    const p = await proposeProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] },
+    const p = await proposeProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words },
       ProgramChangeParams.parse({ public_label: 'Sell-through 100%', basis: 'their answer', request: '', remove: [], answers: [{ id: 'sell_through', status: 'known', value: 1,
         low: null, high: null, range_kind: null, party: null, quote: 'All of the new loaves sell', basis: 'Olumi reads “all” as 100%.', author: 'person' }] })) as Json;
     expect(p.status, JSON.stringify(p)).toBe('ok');
@@ -1262,7 +1262,7 @@ describe('the model-program turn on the real core route', () => {
     expect(before.goals.find((g) => g.id === 'increase_productivity')!.measure).toBeNull(); // costs-only: the aim has no measure
     const words = 'We measure productivity by the features we ship each month.';
     const deps = { dispatch, proposals: new ProposalStore() };
-    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] };
+    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words };
     // Each attempt is its own turn (a turn shows one card).
     const propose = () => proposeProgramChange(deps, { ...ctx, turn_id: randomUUID() }, ProgramChangeParams.parse({ public_label: 'Measure productivity', basis: 'their answer',
       request: 'Productivity is measured by the features shipped each month; work that out from the hires.', remove: [] })) as Promise<Json>;
@@ -1383,7 +1383,7 @@ describe('the model-program turn on the real core route', () => {
 
     // Their answer to that question, through the same path: each option's chance of the aim appears.
     const now = 'We ship about 12 features a month now.';
-    const ctx2 = { ...ctx, turn_id: randomUUID(), verified_user_messages: [now] };
+    const ctx2 = { ...ctx, turn_id: randomUUID(), verified_user_messages: [now], user_turn_text: now };
     replies = [savedWith((d) => setQ(d, 'features_now', { status: 'known', value: 12, question: null, quote: now, basis: APPROXIMATE_FIGURE }))];
     const fill = await proposeProgramChange(deps, ctx2, { public_label: 'Features now', basis: 'their answer', request: 'They ship about 12 features a month now.', remove: [] }) as Json;
     expect(fill.status, JSON.stringify(fill)).toBe('ok');
