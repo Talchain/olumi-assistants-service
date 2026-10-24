@@ -95,7 +95,7 @@ export async function draftCanonicalModel(brief: string | readonly InputMessage[
     // A first draft (the brief alone) must give every ask its question, but its last attempt falls back to the base behaviour
     // (an ask with no question is a typed blocker), so a draft is never refused whole for one; an update keeps the saved
     // model's asks as they are.
-    const compileOpts = { sourceText, asksNeedQuestions: typeof brief === 'string' && a < MAX_REPAIRS };
+    const compileOpts = { sourceText, asksNeedQuestions: typeof brief === 'string' && a < MAX_REPAIRS, goalsNeedReach: a < MAX_REPAIRS };
     const result = read !== undefined ? compile(read, compileOpts) : compileJson(json, compileOpts);
     if (parsed.success) { model = read ?? parsed.data; compiled = result; }
     attempts.push({ attempt: a, errors: result.errors, status: out.status, usage: out.usage, ms });
