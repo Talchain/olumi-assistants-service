@@ -369,11 +369,16 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   });
   const uncheckedLine = uncheckedWords.length > 0 ? `Not yet checked: ${uncheckedWords.join('; ')}` : undefined;
   /** "‘Customer cost’ is at most £1,100 at 1 month from now: about 81%", one per limit, for one option. */
-  const limitLines = (o: OptionResult): string[] => model.limits.map((l, i) => {
+  const limitShown = (o: OptionResult, l: Limit): string => {
     const pl = o.per_limit.find((x) => x.limit_id === l.id)!;
-    const s = shown(pl, result.draws);
-    return `${limitWords[i] ?? q(l.label)}: ${s?.display ?? `not shown, as ${isWithheld(pl) ? pl.withheld.count.toLocaleString('en-GB') : 0} simulated draws could not be worked out`}`;
-  });
+    return shown(pl, result.draws)?.display ?? `not shown, as ${isWithheld(pl) ? pl.withheld.count.toLocaleString('en-GB') : 0} simulated draws could not be worked out`;
+  };
+  const limitLines = (o: OptionResult): string[] => model.limits.map((l, i) => `${limitWords[i] ?? q(l.label)}: ${limitShown(o, l)}`);
+  /** A limit by what it measures, never its bound: an option can move the bound (Codex r2 #3719), and a label can hold one. */
+  const measuredBy = (l: Limit): string => {
+    const subject = label(l.quantity), per = l.per === undefined ? undefined : label(l.per);
+    return subject === undefined ? q(l.label) : `${q(subject)}${per === undefined ? '' : ` per ${q(per)}`}`;
+  };
 
   // ── Cells ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
   const blockers = input.blockers ?? [];
@@ -434,7 +439,8 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
       const waits = waitsOnWords(blockers, new Set(blockers.flatMap((b) => b.scope).filter((id) => !limitIds.has(id))));
       const cell = waits === undefined && waiting.length > 0 ? withheldCell() : { kind: 'withheld' as const, face: waits !== undefined ? NEEDS_ANSWER_FACE : NOT_SHOWN_FACE,
         why: waits !== undefined ? `The chance ${waits}.` : 'No aim is in this run, so there is no chance to show.', reasons: [{ code: 'no_goals', message: null }] };
-      const checks = model.limits.length > 0 ? ` This run checks only the limits, each on its own: ${limitLines(o).join('; ')}.` : '';
+      const checks = model.limits.length > 0
+        ? ` This run checks only the limits, each on its own: ${model.limits.map((l) => `${measuredBy(l)} within its limit: ${limitShown(o, l)}`).join('; ')}.` : '';
       return { option_id: o.option_id, main_driver: notRecorded, cell: { ...cell, why: `${cell.why}${checks}` } };
     }
     if (waiting.length > 0 || jointWords === undefined) return { option_id: o.option_id, cell: withheldCell(), main_driver: notRecorded };

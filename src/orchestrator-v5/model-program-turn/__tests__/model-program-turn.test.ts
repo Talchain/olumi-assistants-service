@@ -1389,14 +1389,26 @@ describe('the model-program turn on the real core route', () => {
     aimNoMeasure.goals = aimNoMeasure.goals.map((g) => ({ ...g, measure: null, question: 'How would you know the bakery is doing well enough?' }));
     aimNoMeasure.quantities = aimNoMeasure.quantities.map((x) => (x.id === 'oven_price' ? { ...x, status: 'known', value: 2500, question: null, quote: 'We have £3,000 to spend' } : x));
     // What the run DID check is its own result, said apart from the reason (Codex r1 #3719): each limit on its own.
-    expect(why(aimNoMeasure)).toEqual(['run', 'Not shown yet: needs your answer | The chance waits on a measure for ‘Reach 380 loaves a week’. This run checks only the limits, each on its own: ‘spend’ is at most £3,000 with each option in effect: 100%.']);
+    expect(why(aimNoMeasure)).toEqual(['run', 'Not shown yet: needs your answer | The chance waits on a measure for ‘Reach 380 loaves a week’. This run checks only the limits, each on its own: ‘spend’ within its limit: 100%.']);
     // The same with no limit: nothing calculates, and the waiting view says the same, from the same blockers.
     const noLimit = JSON.parse(JSON.stringify(aimNoMeasure)) as CanonicalModelT; noLimit.limits = [];
     expect(why(noLimit)).toEqual(['waiting', 'Not shown yet: needs your answer | The chance waits on a measure for ‘Reach 380 loaves a week’.']);
     // No aim at all: the result they want.
     const noAim = JSON.parse(JSON.stringify(aimNoMeasure)) as CanonicalModelT; noAim.goals = [];
-    expect(why(noAim)).toEqual(['run', 'Not shown yet: needs your answer | The chance waits on the result you want. This run checks only the limits, each on its own: ‘spend’ is at most £3,000 with each option in effect: 100%.']);
+    expect(why(noAim)).toEqual(['run', 'Not shown yet: needs your answer | The chance waits on the result you want. This run checks only the limits, each on its own: ‘spend’ within its limit: 100%.']);
     for (const m of [aimNoMeasure, noLimit, noAim]) expect(JSON.stringify(evaluateCanonical(m, { sourceText: BRIEF, seed: 7 }).view)).not.toMatch(/limits only|No aim has a measure/);
+    // Codex r2 #3719: an option that moves the bound (the budget to £2,000 with a second oven) is said by what each limit
+    // measures and its result only, never a bound figure, so the base model's £3,000 cannot be said for it.
+    const moved = JSON.parse(JSON.stringify(noAim)) as CanonicalModelT;
+    moved.quantities.push(q('reduced_budget', 'GBP', { value: 2000, quote: 'our budget is £2,000' }));
+    moved.options[0]!.sets.push({ ...moved.options[0]!.sets[0]!, quantity: 'budget', to: 'reduced_budget', quote: 'With a second oven our budget is £2,000' });
+    const e = evaluateCanonical(moved, { sourceText: `${BRIEF} The second oven costs £2,500. With a second oven our budget is £2,000.`, seed: 7 });
+    expect(e.compiled.errors).toEqual([]);
+    expect(e.sim!.options.find((o) => o.option_id === 'second_oven')!.per_limit[0]).toMatchObject({ chance: 0 });
+    const cellOf = (id: string) => ((e.view as Json).options as Json[]).find((o) => o.option_id === id)!.cell;
+    expect(cellOf('second_oven').why).toBe('The chance waits on the result you want. This run checks only the limits, each on its own: ‘spend’ within its limit: 0%.');
+    expect(cellOf('keep_one').why).toBe('The chance waits on the result you want. This run checks only the limits, each on its own: ‘spend’ within its limit: 100%.');
+    for (const id of ['second_oven', 'keep_one']) expect(cellOf(id).why).not.toMatch(/£3,000|£2,000/);
     // Contrast: a measured aim waiting on a figure only they can give names that figure, as before.
     expect(why(bakery())[1]).not.toContain('measure for');
     // With nothing to run (the aim's target is asked), the waiting view's note for that aim is the blockers' words too, never
