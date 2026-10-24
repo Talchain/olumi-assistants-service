@@ -277,6 +277,32 @@ describe('the model-program turn on the real core route', () => {
     expect(withoutHostFields(saved)).toEqual(withoutHostFields(m));
   });
 
+  it('verbatim (DL 24 Oct, 6 refused reading cards in the combined measure): an empty unknown slot of theirs states nothing, like an asked one, so the reading card issues; a known figure in words not theirs is still refused; a quote differing only in case or a curly quote is theirs, as compile reads it', async () => {
+    // The measured class: their figure with no figure, no question and no words, not known yet.
+    const m = bakery();
+    m.quantities.push(q('other_costs', 'GBP', { status: 'unknown', basis: 'Nobody has said what else the oven costs to run.', quote: null }));
+    replies = [JSON.stringify(m)];
+    const r = (await turn({ message: BRIEF })).json();
+    expect(r.model_program.saved).toBe(true);
+    expect(r.cards).toHaveLength(1);
+    expect(r.cards[0].reading).toBe(true);
+    expect(r.cards[0].changes.find((c: Json) => c.id === 'other_costs')).toMatchObject({ action: 'add', author: 'person' });
+    const read = (edit: (d: CanonicalModelT) => void) => { const d = bakery(); edit(d); return readingOf(d, { words: [BRIEF], approver: null }); };
+    // Still refused: a KNOWN figure of theirs in words they did not write, one with no words, and an unknown slot holding a figure.
+    expect(read((d) => setQ(d, 'base_sales', { quote: 'We bake about 300 loaves' }))).toMatchObject({ ok: false, code: 'unverified_person_words', ids: ['base_sales'] });
+    expect(read((d) => setQ(d, 'base_sales', { quote: null }))).toMatchObject({ ok: false, code: 'unverified_person_words', ids: ['base_sales'] });
+    expect(read((d) => { d.quantities.push(q('other_costs', 'GBP', { status: 'unknown', value: 50, basis: 'Synthetic.', quote: null })); }))
+      .toMatchObject({ ok: false, code: 'unverified_person_words', ids: ['other_costs'] });
+    // One form with compile: a quote differing only in case, or in a curly quote for their straight one, is theirs, on the card
+    // as in compile.
+    const folded = bakery();
+    setQ(folded, 'base_sales', { quote: 'WE BAKE 300 LOAVES A WEEK' });
+    setQ(folded, 'budget', { quote: 'We have £3,000 to spend and don’t know' });
+    expect(compile(folded, { sourceText: BRIEF }).unverified).toEqual([]);
+    expect(readingOf(folded, { words: [BRIEF], approver: null }).ok).toBe(true);
+    expect(read((d) => setQ(d, 'base_sales', { quote: 'We bake 300 loaves a week’' })).ok).toBe(false); // contrast: an extra mark is not theirs
+  });
+
   it('step 2 "Check what I understood" (2–5): after the first save ONE held card reads the draft back, every item an add, goals first and figures last, a left-out item by its why; its approve is "Yes, that’s what I meant"; its model is the draft accepted, with a new Run of the same numbers; it is carried on reload and saved by its approve', async () => {
     const m = bakery();
     m.left_out.push({ id: 'staff_morale', text: 'Staff morale while the second oven beds in', why: 'It has no measure in this model.', question: null, concerns: [], author: 'olumi', quote: null, ...at },

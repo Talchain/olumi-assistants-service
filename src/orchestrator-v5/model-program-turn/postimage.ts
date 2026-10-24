@@ -19,6 +19,7 @@
  */
 import { ProposalChangeSchema, type ProposalChange } from '../agent-lane/proposal.js';
 import { CanonicalModel, type CanonicalModelT } from '../model-program/canonical.js';
+import { norm } from '../model-program/compile.js';
 
 type Rec = Record<string, unknown>;
 type Family = Exclude<keyof CanonicalModelT, 'version' | 'question' | 'period' | 'history'>;
@@ -66,18 +67,19 @@ export type PostimageResult =
   | { readonly ok: false; readonly code: 'schema' | 'duplicate_id' | 'moved_record' | 'omitted_record' | 'removal_not_applied' | 'unknown_removal' | 'recycled_id'
     | 'unverified_person_words' | 'unshown_change' | 'invalid_change_entry' | 'no_change'; readonly reason: string; readonly ids: readonly string[] };
 
-const squash = (s: string) => s.replace(/\s+/g, ' ').trim();
-/** The person's words: the same words in the same order, white space ignored (a quote across their line break is theirs). */
+/** The person's words: the same words in the same order, in compile's one form (case, curly quotes, dashes, white space folded). */
 export const verbatimIn = (quote: unknown, words: readonly string[]): boolean =>
-  typeof quote === 'string' && squash(quote) !== '' && words.some((w) => squash(w).includes(squash(quote)));
+  typeof quote === 'string' && norm(quote) !== '' && words.some((w) => norm(w).includes(norm(quote)));
 
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 /**
  * Every attribution in a record (itself, an option's settings, a relation's terms) that names the person as its author and
  * states something: a figure of theirs that is only ASKED (no figure, no words yet) states nothing.
  */
+/** A slot of theirs that is not known yet and holds nothing (no figure): it states nothing, like an asked one (DL 24 Oct). */
+const emptyUnknown = (v: Rec): boolean => v['status'] === 'unknown' && v['value'] === null && v['low'] === null && v['high'] === null;
 const personAttributions = (v: unknown): Rec[] => (Array.isArray(v) ? v.flatMap(personAttributions)
-  : isRec(v) ? [...(v['author'] === 'person' && 'quote' in v && !(v['status'] === 'asked' && v['quote'] === null) ? [v] : []), ...Object.values(v).flatMap(personAttributions)] : []);
+  : isRec(v) ? [...(v['author'] === 'person' && 'quote' in v && !(v['quote'] === null && (v['status'] === 'asked' || emptyUnknown(v))) ? [v] : []), ...Object.values(v).flatMap(personAttributions)] : []);
 const withoutHost = (v: unknown): unknown => (Array.isArray(v) ? v.map(withoutHost)
   : isRec(v) ? Object.fromEntries(Object.entries(v).filter(([k]) => !HOST_FIELDS.has(k)).map(([k, x]) => [k, withoutHost(x)])) : v);
 /** The host's own fields, set all the way down a record: its approval, and who approved it. Who authored it is unchanged. */
