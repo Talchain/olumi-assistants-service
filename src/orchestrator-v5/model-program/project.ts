@@ -106,6 +106,10 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   };
   /** Each relation's links, in drawing order, with their ids: computed once, so a coefficient's host is its own link. */
   const relationEdgeIds = new Map<string, string[]>();
+  /** Links whose size no one has given (not worked out by a relation) and whose direction is not stated: no one can give their
+   *  sign, so they are not drawn (issue 39). */
+  const undrawn = new Set<string>();
+  const unsigned = (id: string) => { const c = Q.get(id); return c !== undefined && c.status !== 'derived' && !has(c.value) && !(has(c.low) && has(c.high)) && c.direction === null; };
 
   const nodes: Rec[] = [];
   const edges: Rec[] = [];
@@ -135,8 +139,8 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const ids = froms.map((f) => edgeId(f, r.defines));
     relationEdgeIds.set(r.id, ids);
     froms.forEach((f) => use(f, 'node'));
-    if (r.form === 'effect') r.terms.forEach((t, i) => { use(t.coefficient, 'coefficient'); hostOf.set(t.coefficient, { edge: ids[i + 1]! }); });
-    if (rate) { use(rate.coefficient, 'coefficient'); hostOf.set(rate.coefficient, { edge: ids[0]! }); }
+    if (r.form === 'effect') r.terms.forEach((t, i) => { use(t.coefficient, 'coefficient'); hostOf.set(t.coefficient, { edge: ids[i + 1]! }); if (unsigned(t.coefficient)) undrawn.add(ids[i + 1]!); });
+    if (rate) { use(rate.coefficient, 'coefficient'); hostOf.set(rate.coefficient, { edge: ids[0]! }); if (unsigned(rate.coefficient)) undrawn.add(ids[0]!); }
     use(r.defines, 'node');
   }
   for (const g of model.goals) if (g.measure) {
@@ -302,7 +306,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
       ? 'Nothing that can be worked out yet uses it.' : `${q.status.replace('_', ' ')}: ${q.basis}`;
     if (folded(q.id)) {
       const host = hostOf.get(q.id)!;
-      items.push({ record_id: q.id, family: 'quantity', shown_as: host.edge ? { on_edge: host.edge } : { on_node: host.node }, in_calculation: inCalc, why_out: why(inCalc, reason), author: who, approval: q.approval, ...lawOf(q) });
+      items.push({ record_id: q.id, family: 'quantity', shown_as: host.edge ? (undrawn.has(host.edge) ? {} : { on_edge: host.edge }) : { on_node: host.node }, in_calculation: inCalc, why_out: why(inCalc, reason), author: who, approval: q.approval, ...lawOf(q) });
       continue;
     }
     nodes.push({
@@ -323,7 +327,10 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const c = Q.get(coefficient);
     const mid = c ? (c.value ?? (has(c.low) && has(c.high) ? (c.low + c.high) / 2 : null)) : null;
     const straddles = c && has(c.low) && has(c.high) && c.low < 0 && c.high > 0;
-    const sign = mid !== null && mid < 0 ? -1 : 1;
+    // A size with no figure (no value; no range, or one across zero) has no sign of its own: the link takes its stated
+    // direction (issue 39). A given value always keeps its own sign (Codex r1 #3734).
+    const stated = c && !has(c.value) && (mid === null || straddles) ? c.direction : null;
+    const sign = stated === 'lowers' ? -1 : stated === 'raises' ? 1 : mid !== null && mid < 0 ? -1 : 1;
     const driverUnit = Q.get(driver)?.unit ?? '';
     const definedUnit = Q.get(defines)?.unit ?? '';
     // The link's figure is what the compiler uses, per ONE of the driver's unit, in the defined quantity's unit: the
@@ -345,7 +352,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const reason = 'What it works out is not used by anything that can be worked out yet.';
     const drawn: string[] = [];
     const ids = [...relationEdgeIds.get(r.id)!];
-    const push = (e: Rec) => { const id = ids.shift()!; edges.push({ ...e, id }); drawn.push(id); return id; };
+    const push = (e: Rec) => { const id = ids.shift()!; if (undrawn.has(id)) return id; edges.push({ ...e, id }); drawn.push(id); return id; };
     const rate = rateOf(r);
     if (rate) {
       push({ ...rateLink(rate.driver, rate.coefficient, r.defines, who, inCalc), coefficient_id: rate.coefficient });
@@ -364,7 +371,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
       for (const t of r.terms) {
         const termWho = whoOf(t, `${r.id}:${t.driver}`);
         const id = push({ ...rateLink(t.driver, t.coefficient, r.defines, termWho, inCalc), coefficient_id: t.coefficient });
-        items.push({ record_id: `${r.id}:${t.driver}`, family: 'term', shown_as: { edge: id }, in_calculation: inCalc, why_out: why(inCalc, reason), author: termWho, approval: t.approval });
+        items.push({ record_id: `${r.id}:${t.driver}`, family: 'term', shown_as: undrawn.has(id) ? {} : { edge: id }, in_calculation: inCalc, why_out: why(inCalc, reason), author: termWho, approval: t.approval });
       }
     }
     items.push({ record_id: r.id, family: 'relation', shown_as: { edge: drawn.join(' ') }, in_calculation: inCalc, why_out: why(inCalc, reason), author: who, approval: r.approval });

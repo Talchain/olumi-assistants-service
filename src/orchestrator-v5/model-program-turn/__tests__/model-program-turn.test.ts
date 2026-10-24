@@ -12,7 +12,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha256 } from '../../context/graph-hash.js';
 import { stableStringify } from '../../../orchestrator/context/stable-stringify.js';
-import { APPROXIMATE_FIGURE, type CanonicalModelT, type CanonicalQuantityT } from '../../model-program/canonical.js';
+import { APPROXIMATE_FIGURE, withDeclaredTiming, type CanonicalModelT, type CanonicalQuantityT } from '../../model-program/canonical.js';
 import { compile, isStructuralConstant, normalise } from '../../model-program/compile.js';
 import { CORE_ALIGNED_INSTRUCTIONS } from '../../core-route/instructions.js';
 import { project } from '../../model-program/project.js';
@@ -30,6 +30,9 @@ import { projectCorePostimageForPersistence } from '../../persisted-graph-projec
 import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { ENGINE_VERSIONS, revisionDigest, RUN_AGAIN_AFTER_UPDATE, RUN_AGAIN_FOR_CHANCE } from '../run-receipt.js';
 import { at, bakery, bakeryWithDefect, BRIEF, club, CLUB_BRIEF, q } from './bakery.fixture.js';
+
+/** A draft captured before a field existed, read in today's format (the saved-model reader's own mapping). */
+const savedDraft = (file: string) => { const s = JSON.parse(readFileSync(new URL(file, import.meta.url), 'utf8')) as { brief: string; canonical: unknown }; return { brief: s.brief, canonical: withDeclaredTiming(s.canonical) as CanonicalModelT }; };
 
 type Json = Record<string, any>;
 
@@ -396,7 +399,7 @@ describe('the model-program turn on the real core route', () => {
   };
 
   it('the card in plain words (DL 24 Oct): every item of four drafts (the served capacity reading among them) reads as one phrase, with no key: value pair, raw operator, code or "whose", and its author only as the card\'s mark', () => {
-    const saved = (file: string) => JSON.parse(readFileSync(new URL(file, import.meta.url), 'utf8')) as { brief: string; canonical: CanonicalModelT };
+    const saved = (file: string) => savedDraft(file);
     const hiring = saved('./hiring-alpha3.saved.json');
     // The capacity draft exactly as the served reading-card run saved it (scenario fc9ab632, CEE 1fd6f8cb): its 14 entries.
     const capacity = saved('./capacity-s4.saved.json');
@@ -1149,7 +1152,7 @@ describe('the model-program turn on the real core route', () => {
   });
 
   it('targeted answers (DL 24 Oct): an answer to a listed question is set on the existing item it answers, exactly, with no redraft: one item changes and every other record is byte-identical; "all" is read as 100% with Olumi\'s reading shown; "I don\'t know" is theirs and never asked again; a structural change still uses the redraft', async () => {
-    const saved = JSON.parse(readFileSync(new URL('./hiring-alpha3.saved.json', import.meta.url), 'utf8')) as { brief: string; canonical: CanonicalModelT };
+    const saved = savedDraft('./hiring-alpha3.saved.json');
     replies = [JSON.stringify(saved.canonical)];
     expect((await turn({ message: saved.brief })).json().model_program.saved).toBe(true);
     // The saved model as the tools read it (a read parses it, so its keys are in the schema's order on every path).
@@ -1327,7 +1330,7 @@ describe('the model-program turn on the real core route', () => {
   });
 
   it('the alpha3 hiring read, through the same update path: the measure they name gets Olumi\'s mechanism on ONE card that shows every change; a figure only they know is ASKED, then the chance appears', async () => {
-    const saved = JSON.parse(readFileSync(new URL('./hiring-alpha3.saved.json', import.meta.url), 'utf8')) as { brief: string; canonical: CanonicalModelT };
+    const saved = savedDraft('./hiring-alpha3.saved.json');
     replies = [JSON.stringify(saved.canonical)];
     expect((await turn({ message: saved.brief })).json().model_program.saved).toBe(true);
     const before = JSON.parse(JSON.stringify(persisted!.living_model.canonical)) as CanonicalModelT;
@@ -1710,7 +1713,7 @@ describe('the model-program turn on the real core route', () => {
   });
 
   it('Codex r4–r8 + buddy #3709: ONE structural admission on the first draft — 0 is the only additive identity; 1 only in unit "1", by exact unit algebra; any other is their question', () => {
-    const saved = JSON.parse(readFileSync(new URL('./hiring-alpha3.saved.json', import.meta.url), 'utf8')) as { brief: string; canonical: CanonicalModelT };
+    const saved = savedDraft('./hiring-alpha3.saved.json');
     const m = JSON.parse(JSON.stringify(saved.canonical)) as CanonicalModelT;
     const derived = (id: string, unit: string) => q(id, unit, { kind: 'derived', status: 'derived', author: 'olumi' });
     const product = (id: string, defines: string, parts: [string, 1 | -1][]) => ({ form: 'definition' as const, id, defines, op: 'product' as const, parts: parts.map(([pid, power]) => ({ id: pid, power })), author: 'olumi' as const, quote: null, ...at });
@@ -1891,7 +1894,7 @@ describe('the model-program turn on the real core route', () => {
   });
 
   it('DL 23 Oct (units on cards): every card that can hold a figure carries its quantity\'s own unit, a question\'s too; a worked-out card none', () => {
-    const saved = JSON.parse(readFileSync(new URL('./hiring-alpha3.saved.json', import.meta.url), 'utf8')) as { brief: string; canonical: CanonicalModelT };
+    const saved = savedDraft('./hiring-alpha3.saved.json');
     const node = (g: { nodes: Json[] }, id: string) => g.nodes.find((n) => n.id === id) as Json;
     const hiring = project(saved.canonical, compile(saved.canonical, { sourceText: saved.brief })).graph;
     expect(node(hiring, 'developer_hiring_cost').observed_state).toEqual({ unit: 'GBP/developer' });
