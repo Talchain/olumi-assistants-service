@@ -7,7 +7,8 @@ import { HOST_SCIENCE_AND_SOURCE_RULES, HOST_TOOL_CONTRACT } from '../coach-rout
 import { createHash } from 'node:crypto';
 import * as drafting from '../../path-b/drafting-guidance.js';
 import * as coreInstructions from '../../core-route/instructions.js';
-import { DRAFTING_INSTRUCTIONS } from '../../model-program-turn/prompt.js';
+import { CANONICAL_JSON_SCHEMA, DRAFTING_INSTRUCTIONS, UPDATE_PREFIX } from '../../model-program-turn/prompt.js';
+import * as programDraft from '../../model-program-turn/draft.js';
 
 const { CORE_DRAFTER_RULES } = drafting;
 
@@ -70,7 +71,11 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(createHash('sha256').update(CORE_REPLY_RULES, 'utf8').digest('hex')).toBe('9607f2b0d95df9e7be7e040c975cd13a12ba7f60120d39c8c5fab6d2016d87dc'); // 23 Oct (ALPHA): the reply rules for the model program; P1: at most three questions a reply, each once.
     // The model-program drafter's text (23 Oct, P1–P5: three questions at most, every option reaches
     // every measured goal, a deadline is its goal's window, options named in full). Prompt text changes only with this pin.
-    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('50c3488a7bee71ab0c5003908bf03ca513b123dc64bedb5ea28cf8f2f5cb79dc');
+    // 24 Oct (DL, combined measure + funding dead end + science rulings r3-r5): their fact asked; a link Olumi's estimate by
+    // default, a direction-only one kept in words with its size unknown; never a forced number; quotes copied exactly; the
+    // update's own text lives here with the draft's goal rule; periods counted as starts_after_periods (#3713).
+    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('44b1d43b43ec0bd1058c0987c56462b8ad5ab4f0f7e73b388ad10263730a1c2c');
+    expect(createHash('sha256').update(UPDATE_PREFIX, 'utf8').digest('hex')).toBe('be829fe1012ba75665711c6f6a162c33e18053ed4dc0d0b9a3a498f10b752d8c');
     expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('bed04fc58a01dbd02d8f5c8aa6ef171731a356c1cde47a85e0cd64be35416653'); // 23 Oct (DL 93d79c3e, C2 double prime): a definition's parts are factors with levels, never another definition; a STATED per-unit effect is a sized link. 22 Oct: every stated goal saved in their words, never approximated (Claude r1 on #3670); + a calendar date is Olumi's labelled reading
     // The retired constants are gone from both modules: no route can send the accreted text again.
     for (const name of ['CORE_REPLY_INSTRUCTION', 'CORE_RESPONSE_DISCIPLINE', 'CORE_NEXT_STEP']) expect(Object.keys(coreInstructions), name).not.toContain(name);
@@ -154,6 +159,38 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(d.run_analysis).toContain('Use it only when the person asks; a saved change already brings its Run.');
     // The descriptions ride the tool list, not the standing instructions (whose sent bytes the sha row above pins).
     expect(b).not.toContain(words);
+  });
+
+  it('the model-program drafter (DL 24 Oct): only their facts wait, link sizes stay Olumi\u2019s estimates, quotes are copied exactly, and an update keeps every option reaching every goal', () => {
+    for (const rule of [
+      'its quote is their words copied exactly, one unbroken stretch, never reworded or joined.',
+      'what they know or decide: current levels, prices, costs, budgets and how they split them, headcount, dates, durations, targets.',
+      'Never ask them for a link\'s size or an option\'s effect.',
+      // DL 24 Oct (blind score of 1510a008, mrr structure): an identity is a definition; a missing figure is asked on its item.
+      'Build the mechanism from what the brief names: every option reaches every measured goal through relations from what it sets; a quantity that is by definition a product or sum of others is a definition, never an effect; each other link is sized by their coefficient or Olumi\'s estimate.',
+      'feeds the calculation or, if it cannot be calculated, goes in left_out with the reason.',
+      'the reply asks at most three, and every other missing fact stays asked on its item.',
+      'Every figure a goal or limit rests on stays in: their fact (what they expect without the options included) is asked, with its question.',
+      'A link or effect (an option\'s added effect included) is theirs or, by default, Olumi\'s provisional estimate with a defensible range in natural units and a plain basis; uncertainty alone is not a reason to withhold.',
+      'If only its direction can be defended, keep that belief in words, leave its size unknown and say what would size it. Never force a number to get a chance.',
+      'A stock\'s level after n periods is its start plus n periods of its flows.',
+      'sets ovens_added to one_oven, starts_after_periods 0;',
+    ]) expect(count(DRAFTING_INSTRUCTIONS, rule), rule).toBe(1);
+    // What over-applied the estimate rule, and the old period numbering, are gone.
+    for (const old of ['a link you cannot size goes in left_out', 'Every other figure it needs stays null', 'Only coefficients are Olumi', 'never "unknown" with no question', 'flows of periods 1 to n', 'from period 0'])
+      expect(DRAFTING_INSTRUCTIONS, old).not.toContain(old);
+    // The update's text is prompt text: here, once, with the draft's goal rule and the quote rule; draft.ts no longer holds a copy.
+    for (const rule of ['return the WHOLE model, by the same rules.', 'Every option reaches every measured goal, a goal this change adds included.',
+      'A figure of theirs quotes their words copied exactly, never reworded or joined;']) expect(count(UPDATE_PREFIX, rule), rule).toBe(1);
+    expect(Object.keys(programDraft)).not.toContain('UPDATE_PREFIX');
+    // The schema is prompt text too (sent on every drafting call): `unknown` only where nothing rests on it (served funding dead end).
+    const sentSchema = JSON.stringify(CANONICAL_JSON_SCHEMA);
+    expect(count(sentSchema, 'unknown: it matters, but no defensible range can be given yet (at most its direction): every figure null; basis says why and what would size it.')).toBe(1);
+    // Neither the old open-ended text nor a rule that forces an estimate (buddy science BLOCK, 24 Oct) is sent.
+    // Nor an open-ended unknown, a rule that forces an estimate, or one that makes unknown a link's default (1510a008: 50 links unknown).
+    // r5 (buddy, accepted): never numerical bounds demanded where only a direction is defensible (r4's "order of magnitude").
+    for (const old of ['nobody can give or responsibly estimate it yet', 'is never unknown', 'basis says why. ', 'whenever one is supportable', 'order of magnitude']) expect(sentSchema, old).not.toContain(old);
+    for (const old of ['when one is supportable, else', 'order of magnitude', 'a wide range is supportable', 'At most three questions asked now']) expect(DRAFTING_INSTRUCTIONS, old).not.toContain(old);
   });
 
   it('the drafter saves every stated goal in their words and never approximates it, with the rule present once', () => {
