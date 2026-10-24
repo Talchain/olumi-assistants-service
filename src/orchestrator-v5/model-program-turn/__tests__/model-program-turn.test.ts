@@ -1603,6 +1603,19 @@ describe('the model-program turn on the real core route', () => {
     expect(pctNode.observed_state).toMatchObject({ value: 70, raw_value: 70, unit: '%', range: { low: 50, high: 90 } });
     expect(pctNode.display_value).toMatch(/^50–90 %, Olumi's estimate; Olumi reads it as a spread around 70 \(sd 11\.55\)/);
 
+    // DL 24 Oct (board 3de98183): a bare range of theirs IS the level. The centre the card draws is Olumi's reading, labelled
+    // Olumi's; the range and their words stay theirs. A figure they state keeps their source.
+    const costBrief = `${BRIEF} The oven is $40,000 to $50,000, and delivery is $10,000.`;
+    const costs = bakery();
+    costs.quantities = costs.quantities.map((x) => (x.id === 'oven_price' ? { ...x, unit: 'USD/oven', status: 'known', value: null, low: 40000, high: 50000, range_kind: 'bounds',
+      question: null, quote: '$40,000 to $50,000' } : x));
+    costs.quantities.push(q('delivery', 'USD', { value: 10000, quote: '$10,000' }));
+    const costNode = nodeOf(project(costs, compile(costs, { sourceText: costBrief }), { brief: costBrief }).graph);
+    expect(costNode('oven_price').observed_state).toEqual({ value: 45000, raw_value: 45000, unit: 'USD/oven', source: 'cee_inference', extractionType: 'inferred',
+      range: { low: 40000, high: 50000 } });
+    expect(costNode('oven_price')).toMatchObject({ provenance: 'from_brief', source_quote: '$40,000 to $50,000' });
+    expect(costNode('delivery').observed_state).toEqual({ value: 10000, raw_value: 10000, unit: 'USD', source: 'brief_extraction', extractionType: 'explicit' });
+
     // Codex r1 #3709 (5): "yours" (user_override) only for words found in what the person wrote. The same later answer,
     // compiled against the brief alone, is unverified and carries no source at all.
     const words = 'The oven would cost about £2,500.';
