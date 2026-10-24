@@ -1670,6 +1670,30 @@ describe('the model-program turn on the real core route', () => {
     expect(JSON.stringify(persisted!.living_model.canonical)).toContain('What would the second oven cost?');
   });
 
+  it('S1 follow-up (served funding dead end): every figure the chance rests on with none in hand is listed, unknown ones included; an unknown nothing rests on is not', async () => {
+    const m = bakery();
+    // What they expect anyway (their fact) and the option's added effect (a link), both unknown with no figure and no question.
+    const none = { value: null, low: null, high: null, range_kind: null, question: null };
+    setQ(m, 'base_sales', { ...none, status: 'unknown', quote: null, basis: 'Not given yet.' });
+    setQ(m, 'sell_through', { ...none, status: 'unknown', basis: 'Cannot yet be sized.' });
+    m.quantities.push(q('weather', '1', { status: 'unknown', author: 'olumi', basis: 'Nothing here uses it.' })); // contrast: nothing rests on it
+    replies = [JSON.stringify(m)];
+    const r = (await turn({ message: BRIEF })).json();
+    expect(r.model_program.saved).toBe(true);
+    const waits = r.canonical_analysis_view.goal_chance.waits_on as Json[];
+    expect(waits).toEqual([
+      { id: 'base_sales', code: 'asked', label: 'base sales', scope: ['more_loaves'], answer: { quantity_id: 'base_sales' } },
+      { id: 'sell_through', code: 'asked', label: 'sell through', scope: ['more_loaves'], answer: { quantity_id: 'sell_through' } },
+      { id: 'oven_price', code: 'asked', label: 'oven price', scope: ['within_budget'], answer: { quantity_id: 'oven_price' } },
+    ]);
+    // The AI sees the same list, typed, on its read context; the stored Run keeps it.
+    expect(r.model_program.blockers).toEqual(waits.map((w) => ({ id: w.id, code: w.code, scope: w.scope })));
+    expect((persisted!.living_model.runs.at(-1).result as Json).compile.blockers).toEqual(r.model_program.blockers);
+    // The two unknowns have no question of the AI's, so the first reply counts them; the code writes none.
+    expect(r.assistant_text).toContain('1. What would the second oven cost?');
+    expect(r.assistant_text).toContain('The chance also waits on 2 other things, listed with the result.');
+  });
+
   it('S1 (A4): with no aim at all, the first reply asks the AI\'s own question from its note on the situation, and no code question', async () => {
     const m = bakery();
     m.goals = [];

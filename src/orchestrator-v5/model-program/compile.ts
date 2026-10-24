@@ -830,7 +830,10 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
     ...model.goals.flatMap((g) => [...(!has(g.measure) ? [blocker(g.id, 'measure', [g.id])] : []), ...(goalWin.get(g.id)?.deadline === true ? [blocker(g.id, 'deadline', [g.id])] : [])]),
     ...model.limits.flatMap((l) => [...(!has(l.measure) ? [blocker(l.id, 'measure', [l.id])] : []), ...(limitWin.get(l.id)?.deadline === true ? [blocker(l.id, 'deadline', [l.id])] : [])]),
     ...model.quantities.flatMap((q) => [
-      ...(q.status === 'asked' ? [blocker(q.id, 'asked', feedsOf(q.id))] : []),
+      // Every figure the result rests on with none in hand waits: asked, or unknown where a goal, limit or option rests on it
+      // (served funding dead end: two unknowns, no figure, no question, nothing listed). Code `asked`: the figure, theirs, or
+      // Olumi's labelled estimate where it is a link or effect.
+      ...(q.status === 'asked' || (q.status === 'unknown' && feedsOf(q.id).length > 0) ? [blocker(q.id, 'asked', feedsOf(q.id))] : []),
       ...(unresolved.has(q.id) ? [blocker(q.id, 'range_kind', feedsOf(q.id))] : []),
       ...(recheck.has(q.id) ? [blocker(q.id, 'recount', feedsOf(q.id))] : []),
     ]),
