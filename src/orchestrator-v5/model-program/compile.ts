@@ -76,9 +76,10 @@ export type OptionOutcome = { option_id: string; status: Outcome | 'not_compared
  * `id` is the record (a quantity, goal or limit; '(model)' when there is no goal); `scope` the goals, limits and live options
  * it holds up. asked: a figure only the person can give (the AI's own question may be on the record). range_kind: their
  * range, with no word on whether its ends are hard. recount: their count, given below 0. measure: an aim or guardrail with no
- * measure. deadline: an aim or guardrail that changes over time with no deadline. no_goal: no aim at all.
+ * measure. deadline: an aim or guardrail that changes over time with no deadline. no_goal: no aim at all. unknown: a figure it
+ * rests on that no one can give or responsibly estimate yet; never the person's to answer (its basis says why).
  */
-export type BlockerCode = 'asked' | 'range_kind' | 'recount' | 'measure' | 'deadline' | 'no_goal';
+export type BlockerCode = 'asked' | 'range_kind' | 'recount' | 'measure' | 'deadline' | 'no_goal' | 'unknown';
 export type Blocker = { id: string; code: BlockerCode; scope: string[] };
 export type Conversion =
   | { kind: 'percent'; quantity: string; from: string; to: string; factor: number; author: 'olumi' }
@@ -705,6 +706,8 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
   const touchedBy = (closure: Set<string>, own: string) => new Set([...closure, own, ...relationsIn(closure).flatMap((r) => [r.id, ...(r.form === 'effect' ? r.terms.map((t) => `${r.id}:${t.driver}`) : [])])]);
   const restsOn = (touched: Set<string>, own: string[] = []) => [...new Set([...own, ...[...model.assumptions, ...model.conditions].filter((a) => a.concerns.some((c) => touched.has(c))).map((a) => a.id)])];
 
+  /** A window's own figures that are unknown (no figure, no question): what the goal or limit rests on, so it is listed (#3723). */
+  const unknownWindowRefs = (w: CanonicalWindowT | null | undefined) => [w?.periods, w?.origin_offset].filter((x): x is string => has(x) && Q.get(x)?.status === 'unknown');
   const goalClosure = new Map<string, Set<string>>();
   const perGoal: GoalOutcome[] = model.goals.map((g) => {
     if (!has(g.measure)) {
@@ -712,7 +715,7 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
     }
     const closure = upstream(goalRoots(g));
     const w = goalWin.get(g.id);
-    goalClosure.set(g.id, new Set([...closure, ...(w?.blockers ?? [])]));
+    goalClosure.set(g.id, new Set([...closure, ...(w?.blockers ?? []), ...unknownWindowRefs(g.measure.window)]));
     const touched = touchedBy(closure, g.id);
     for (const x of [g.measure.window?.periods, g.measure.window?.origin_offset]) if (has(x)) touched.add(x);
     return { goal_id: g.id, ...outcomeOf(closure, w), cancelled: [], needs_measure: false, needs_deadline: w?.deadline === true, olumi_inputs: olumiInputs(closure), unverified_inputs: [...touched].filter((x) => unverifiedIds.has(x)), rests_on: restsOn(touched, g.measure.assumptions), excludes: [...g.measure.exclusions] };
@@ -722,7 +725,7 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
     if (!has(l.measure)) return { limit_id: l.id, status: 'asks', reasons: [`"${l.label}" has no measure yet, so the result does not cover it.`], asks: [], cancelled: [], needs_measure: true };
     const closure = upstream(limitRoots(l));
     const w = limitWin.get(l.id);
-    limitClosure.set(l.id, new Set([...closure, ...(w?.blockers ?? [])]));
+    limitClosure.set(l.id, new Set([...closure, ...(w?.blockers ?? []), ...unknownWindowRefs(l.measure.window)]));
     return { limit_id: l.id, ...outcomeOf(closure, w), cancelled: [], needs_measure: false };
   });
   const optionClosure = new Map(model.options.map((o) => [o.id, upstream([...o.sets.map((s) => s.to).filter(has), ...o.sets.map((s) => s.starts_after_periods).filter((t): t is string => typeof t === 'string')])] as const));
@@ -831,7 +834,9 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
     ...model.goals.flatMap((g) => [...(!has(g.measure) ? [blocker(g.id, 'measure', [g.id])] : []), ...(goalWin.get(g.id)?.deadline === true ? [blocker(g.id, 'deadline', [g.id])] : [])]),
     ...model.limits.flatMap((l) => [...(!has(l.measure) ? [blocker(l.id, 'measure', [l.id])] : []), ...(limitWin.get(l.id)?.deadline === true ? [blocker(l.id, 'deadline', [l.id])] : [])]),
     ...model.quantities.flatMap((q) => [
-      ...(q.status === 'asked' ? [blocker(q.id, 'asked', feedsOf(q.id))] : []),
+      // Every figure the result rests on with none in hand waits (served funding dead end: two unknowns, nothing listed):
+      // asked, theirs to give; unknown, where a goal, limit or option rests on it, no one's to give yet.
+      ...(q.status === 'asked' ? [blocker(q.id, 'asked', feedsOf(q.id))] : q.status === 'unknown' && feedsOf(q.id).length > 0 ? [blocker(q.id, 'unknown', feedsOf(q.id))] : []),
       ...(unresolved.has(q.id) ? [blocker(q.id, 'range_kind', feedsOf(q.id))] : []),
       ...(recheck.has(q.id) ? [blocker(q.id, 'recount', feedsOf(q.id))] : []),
     ]),

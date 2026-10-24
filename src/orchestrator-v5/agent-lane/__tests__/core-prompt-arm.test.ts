@@ -140,6 +140,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       // S1 (A4): what the Run waits on is typed; the AI asks in its own words, and each code says what the person supplies.
       'blockers, what the stored Run waits on, in the model\'s order, each with its id, code and scope (what it holds up). No question is written for you:',
       'asked, the figure', 'range_kind, whether the ends of their range are firm or a rough estimate;', 'recount, the count again',
+      'unknown, a figure no one can give or responsibly estimate yet: say why (its basis) and what evidence, question or activity would size it; never ask them for the number;',
       'measure, how the aim or guardrail is measured;', 'deadline, by when;', 'no_goal, the result they want.',
       'and run, the stored Run, with current and engine_current.']) expect(d.read_canonical_context, field).toContain(field);
     // Simplify v1 (S2): the change in words and the ids to remove; Olumi's drafter writes the whole model; no op set.

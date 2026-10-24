@@ -1763,6 +1763,84 @@ describe('the model-program turn on the real core route', () => {
     expect(JSON.stringify(persisted!.living_model.canonical)).toContain('What would the second oven cost?');
   });
 
+  it('S1 follow-up (served funding dead end): every figure the chance rests on with none in hand is listed; an unknown is no one\'s to answer (no box, its own basis), an asked one keeps its box; an unknown nothing rests on is not listed', async () => {
+    const m = bakery();
+    // What they expect anyway (their fact) and the option's added effect (a link), both unknown with no figure and no question.
+    const none = { value: null, low: null, high: null, range_kind: null, question: null };
+    setQ(m, 'base_sales', { ...none, status: 'unknown', quote: null, basis: 'Not given yet.' });
+    setQ(m, 'sell_through', { ...none, status: 'unknown', basis: 'Cannot yet be sized.' });
+    m.quantities.push(q('weather', '1', { status: 'unknown', author: 'olumi', basis: 'Nothing here uses it.' })); // contrast: nothing rests on it
+    replies = [JSON.stringify(m)];
+    const r = (await turn({ message: BRIEF })).json();
+    expect(r.model_program.saved).toBe(true);
+    const waits = r.canonical_analysis_view.goal_chance.waits_on as Json[];
+    expect(waits).toEqual([
+      { id: 'base_sales', code: 'unknown', label: 'base sales', scope: ['more_loaves'], answer: null, basis: 'Not given yet.' },
+      { id: 'sell_through', code: 'unknown', label: 'sell through', scope: ['more_loaves'], answer: null, basis: 'Cannot yet be sized.' },
+      { id: 'oven_price', code: 'asked', label: 'oven price', scope: ['within_budget'], answer: { quantity_id: 'oven_price' } },
+    ]);
+    // The goal waits only on what no one can size yet: never the needs-your-answer face; the why is their own basis, said once.
+    for (const o of r.canonical_analysis_view.options as Json[]) {
+      expect(o.cell.face, o.option_id).toBe('Chance not shown yet');
+      expect(o.cell.why, o.option_id).toContain('‘base sales’, which no one can size yet (Not given yet) and ‘sell through’, which no one can size yet (Cannot yet be sized)');
+    }
+    // The AI sees the same list, typed, on its read context; the stored Run keeps it.
+    expect(r.model_program.blockers).toEqual(waits.map((w) => ({ id: w.id, code: w.code, scope: w.scope })));
+    expect((persisted!.living_model.runs.at(-1).result as Json).compile.blockers).toEqual(r.model_program.blockers);
+    // The two unknowns have no question of the AI's, so the first reply counts them; the code writes none.
+    expect(r.assistant_text).toContain('1. What would the second oven cost?');
+    expect(r.assistant_text).toContain('The chance also waits on 2 other things, listed with the result.');
+  });
+
+  it('S1 follow-up: when the run computes, a chance held up only by an unknown is not "needs your answer" either (the run\'s own cells)', async () => {
+    const none = { value: null, low: null, high: null, range_kind: null, question: null };
+    // (a) The guardrail is calculable, the one goal waits on an unknown link: the run has no goal of its own (no-aim cell).
+    const a = bakery();
+    setQ(a, 'oven_price', { status: 'known', value: 2000, quote: 'The oven would cost £2,000', question: null });
+    setQ(a, 'sell_through', { ...none, status: 'unknown', basis: 'Cannot yet be sized.' });
+    replies = [JSON.stringify(a)];
+    const ra = (await turn({ message: `${BRIEF} The oven would cost £2,000.` })).json();
+    expect(ra.model_program.saved).toBe(true);
+    expect(ra.canonical_analysis_view.goal_chance.waits_on).toEqual([{ id: 'sell_through', code: 'unknown', label: 'sell through', scope: ['more_loaves'], answer: null, basis: 'Cannot yet be sized.' }]);
+    for (const o of ra.canonical_analysis_view.options as Json[]) expect([o.option_id, o.cell.face]).toEqual([o.option_id, 'Chance not shown yet']);
+  });
+
+  it('S1 follow-up: one goal computes while another waits on an unknown: the withheld cell is not "needs your answer"', async () => {
+    const b = bakery();
+    setQ(b, 'oven_price', { status: 'known', value: 2000, quote: 'The oven would cost £2,000', question: null });
+    b.quantities.push(q('regulars', 'person', { status: 'unknown', author: 'olumi', basis: 'Not counted yet.' }), q('regulars_target', 'person', { value: 50, quote: 'want to reach 380 loaves a week' }));
+    b.goals.push({ id: 'keep_regulars', label: 'Keep 50 regulars', measure: { quantity: 'regulars', per: null, cmp: '>=', target: 'regulars_target', frame: 'level', reference: null, aggregation: 'end',
+      window: null, measure_by: 'person', assumptions: [], exclusions: [] }, question: null, author: 'person', quote: 'want to reach 380 loaves a week', ...at });
+    replies = [JSON.stringify(b)];
+    const rb = (await turn({ message: `${BRIEF} The oven would cost £2,000.` })).json();
+    expect(rb.model_program.saved).toBe(true);
+    expect(rb.canonical_analysis_view.goal_chance.waits_on).toEqual([{ id: 'regulars', code: 'unknown', label: 'regulars', scope: ['keep_regulars'], answer: null, basis: 'Not counted yet.' }]);
+    for (const o of rb.canonical_analysis_view.options as Json[]) expect([o.option_id, o.cell.face]).toEqual([o.option_id, 'Chance not shown yet']);
+  });
+
+  it('S1 follow-up contrast: a goal waiting on an asked figure of theirs keeps the needs-your-answer face and its answer box', async () => {
+    const m = bakery();
+    setQ(m, 'base_sales', { value: null, low: null, high: null, range_kind: null, status: 'asked', quote: null, question: 'How many loaves do you bake a week now?' });
+    replies = [JSON.stringify(m)];
+    const r = (await turn({ message: BRIEF })).json();
+    expect(r.model_program.saved).toBe(true);
+    expect((r.canonical_analysis_view.goal_chance.waits_on as Json[])[0]).toEqual({ id: 'base_sales', code: 'asked', label: 'base sales', scope: ['more_loaves'], answer: { quantity_id: 'base_sales' } });
+    for (const o of r.canonical_analysis_view.options as Json[]) expect(o.cell.face, o.option_id).toBe('Not shown yet: needs your answer');
+  });
+
+  it('S1 follow-up (Codex on #3723): a window\'s own unknown figure is listed too, though it withholds through the window, not the closure', async () => {
+    const m = club();
+    setQ(m, 'months', { value: null, low: null, high: null, range_kind: null, question: null, status: 'unknown', quote: null, basis: 'Not given yet.' });
+    m.limits[0]!.measure!.window = { origin_event: null, origin_offset: null, start: 0, periods: 'months' }; // a guardrail's window too
+    replies = [JSON.stringify(m)];
+    const r = (await turn({ message: CLUB_BRIEF })).json();
+    expect(r.model_program.saved).toBe(true);
+    expect(r.canonical_analysis_view.goal_chance.waits_on).toEqual([
+      { id: 'months', code: 'unknown', label: 'months', scope: ['reach_340', 'within_budget'], answer: null, basis: 'Not given yet.' },
+    ]);
+    expect(r.model_program.blockers).toEqual([{ id: 'months', code: 'unknown', scope: ['reach_340', 'within_budget'] }]);
+  });
+
   it('S1 (A4): with no aim at all, the first reply asks the AI\'s own question from its note on the situation, and no code question', async () => {
     const m = bakery();
     m.goals = [];

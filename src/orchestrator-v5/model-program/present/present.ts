@@ -85,6 +85,8 @@ export interface PresentBlocker {
   readonly label: string;
   readonly scope: readonly string[];
   readonly answer: { readonly quantity_id: string } | null;
+  /** For `unknown` only: the quantity's own basis (the AI's words on why no one can size it yet). */
+  readonly basis?: string;
 }
 /** How to try a value for a goal's one asked quantity: the model compiled with it set to the value tried. */
 export interface TippingProbe {
@@ -175,11 +177,15 @@ export function waitsOnWords(blockers: readonly PresentBlocker[], ids: ReadonlyS
       case 'deadline': return `a deadline for ${name}`;
       case 'range_kind': return `how to read the range for ${name}`;
       case 'recount': return `${name} again`;
+      case 'unknown': return `${name}, which no one can size yet${b.basis?.trim() ? ` (${b.basis.trim().replace(/[.!]+$/, '')})` : ''}`;
       default: return name;
     }
   });
   return said.length === 0 ? undefined : `waits on ${listWords([...new Set(said)])}`;
 }
+/** The needs-your-answer face only when a blocker on these ids is the person's to answer: never for an `unknown` alone. */
+export const needsAnswer = (blockers: readonly PresentBlocker[], ids: ReadonlySet<string>): boolean =>
+  blockers.some((b) => b.code !== 'unknown' && (b.code === 'no_goal' || b.scope.some((s) => ids.has(s))));
 const NEEDS_ANSWER_FACE = 'Not shown yet: needs your answer';
 const NOT_SHOWN_FACE = 'Chance not shown yet';
 const TIPPING_DRAWS = 4000;
@@ -394,7 +400,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   const goalWaits = (g: PresentGoal): string => waitsOnWords(blockers, new Set([g.goal_id])) ?? `is not in the chance yet: ${g.reasons.join(' ')}`;
   const waitingWords = waitsOnWords(blockers, new Set(waiting.map((g) => g.goal_id)));
   const withheldCell = (): Extract<PresentCell, { kind: 'withheld' }> => ({
-    kind: 'withheld', face: waitingWords !== undefined ? NEEDS_ANSWER_FACE : NOT_SHOWN_FACE,
+    kind: 'withheld', face: waitingWords !== undefined && needsAnswer(blockers, new Set(waiting.map((g) => g.goal_id))) ? NEEDS_ANSWER_FACE : NOT_SHOWN_FACE,
     why: waiting.length > 0
       ? waitingWords !== undefined ? `${listWords(waiting.map((g) => q(g.label)))} ${waiting.length === 1 ? waitingWords : waitingWords.replace(/^waits/, 'wait')}.`
         : stop(waiting.map((g) => `${q(g.label)} ${goalWaits(g)}`).join(' '))
@@ -443,8 +449,9 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     // as the waiting view says it; an aim held up by a figure no one can give says the compiler's reason. What the run DID
     // check is its own result, said apart from that reason: each limit on its own (Codex r1 #3719: no reader shows them).
     if (model.goals.length === 0) {
-      const waits = waitsOnWords(blockers, new Set(blockers.flatMap((b) => b.scope).filter((id) => !limitIds.has(id))));
-      const cell = waits === undefined && waiting.length > 0 ? withheldCell() : { kind: 'withheld' as const, face: waits !== undefined ? NEEDS_ANSWER_FACE : NOT_SHOWN_FACE,
+      const noAimIds = new Set(blockers.flatMap((b) => b.scope).filter((id) => !limitIds.has(id)));
+      const waits = waitsOnWords(blockers, noAimIds);
+      const cell = waits === undefined && waiting.length > 0 ? withheldCell() : { kind: 'withheld' as const, face: waits !== undefined && needsAnswer(blockers, noAimIds) ? NEEDS_ANSWER_FACE : NOT_SHOWN_FACE,
         why: waits !== undefined ? `The chance ${waits}.` : 'No aim is in this run, so there is no chance to show.', reasons: [{ code: 'no_goals', message: null }] };
       const checks = model.limits.length > 0
         ? ` This run checks only the limits, each on its own: ${model.limits.map((l) => `${measuredBy(l)} within its limit: ${limitShown(o, l)}`).join('; ')}.` : '';
