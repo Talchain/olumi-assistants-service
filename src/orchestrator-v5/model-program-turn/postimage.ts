@@ -216,7 +216,8 @@ export function validatePostimage(base: CanonicalModelT, raw: unknown,
       const fields = said(String(r['id']), old, r);
       // Unchanged but for what the host owns: the saved record, exactly.
       if (old !== undefined && fields.length === 0 && !unshown.some((u) => u.startsWith(`${String(r['id'])} (`))) return old;
-      const refigured = family === 'quantities' && old !== undefined && r['author'] === 'person' && (['value', 'low', 'high'] as const).some((k) => old[k] !== r[k]);
+      // A figure of theirs changed, or what it is (an "I don't know" turning asked into unknown): their words THIS turn (buddy 24 Oct).
+      const refigured = family === 'quantities' && old !== undefined && r['author'] === 'person' && (['value', 'low', 'high', 'status'] as const).some((k) => old[k] !== r[k]);
       if (personAttributions(r).some((a) => !verbatimIn(a['quote'], opts.words)) || (refigured && !verbatimIn(r['quote'], opts.fresh))) unverified.push(String(r['id']));
       const record = accepted(r, opts.approver ?? null) as Rec;
       changes.push(entry(String(r['id']), old === undefined ? 'add' : 'change', fields, now.title(family, record), authorOf(record), r));

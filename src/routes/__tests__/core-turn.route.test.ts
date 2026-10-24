@@ -971,11 +971,21 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       const sentTools = Object.fromEntries((calls[0]!.tools as Json[]).filter((t) => t.type === 'function').map((t) => [t.name, t.description]));
       expect(sentTools).toEqual(PROGRAM_TOOL_DESCRIPTIONS);
       for (const [name, description] of Object.entries(sentTools)) expect(description).not.toBe((TOOL_DESCRIPTIONS as Record<string, string>)[name]);
-      // Simplify v1 (S2): propose_change, as SENT, asks for the change in words and the ids to remove. Spelled here.
+      // Targeted answers (DL 24 Oct): propose_change, as SENT, puts an answer in answers on its item's id and anything else in
+      // request; its parameters carry answers, so the feature is not inert. Spelled here.
       const sentSha = (name: string) => createHash('sha256').update(String(sentTools[name]), 'utf8').digest('hex');
-      expect(String(sentTools.propose_change)).toContain('give request, the whole change in plain words with their exact words for every figure of theirs, and remove, the ids from read_canonical_context of anything they asked to remove ([] for none). '
-        + 'Olumi’s drafter writes the updated model, and the card shows every change, before and after. Anything left out without being listed, or a figure of theirs not in their words, is refused. ');
-      expect(sentSha('propose_change')).toBe('0dd7084f03bf6c3da41f68061c414b6786106626b433de68d6d427ef229581cb');
+      expect(String(sentTools.propose_change)).toContain('An answer to a listed question (a blocker, or an asked item\'s question) goes in answers, on that existing item\'s id from read_canonical_context: ');
+      expect(String(sentTools.propose_change)).toContain('Anything else (a new item or link, a rename, a removal) goes in request, in plain words with their exact words for every figure of theirs, '
+        + 'with remove the ids of anything they asked to remove ([] for none); Olumi’s drafter writes it. Answers and such a change go on separate cards. ');
+      expect(sentSha('propose_change')).toBe('5b819719a191e98952a1808a4387a0d64df4c64d8861833039b3d9863eb4c83f');
+      const sentParams = (calls[0]!.tools as Json[]).find((t) => t.name === 'propose_change')!.parameters as Json;
+      expect(Object.keys(sentParams.properties)).toEqual(['public_label', 'basis', 'request', 'remove', 'answers']);
+      expect(sentParams.required).toContain('answers');
+      expect(Object.keys(sentParams.properties.answers.items.properties).sort()).toEqual(['basis', 'high', 'id', 'low', 'party', 'quote', 'range_kind', 'status', 'value']);
+      // The program turn's guidance as SENT (its pin in core-prompt-arm is this text's): answers go in answers, on the item's id.
+      const guidance = ((calls[0]!.input ?? []) as Json[]).filter((i) => i.role === 'system').map((i) => String(i.content)).filter((c) => c.startsWith('This scenario\'s model is a model program'));
+      expect(guidance).toHaveLength(1);
+      expect(createHash('sha256').update(guidance[0]!, 'utf8').digest('hex')).toBe('4ccd4a5913bfb242ca4f771b3349ed8a2872b6fc18b7632b8d38c15c92448542');
       // The read the agent got back: the Run's goal_chance exactly as stored (each goal's own line, the joint, the notes).
       const output = (calls[1]!.input as Json[]).find((i) => i.type === 'function_call_output' && i.call_id === 'read')!.output;
       const read = JSON.parse(typeof output === 'string' ? output : JSON.stringify(output)) as Json;
