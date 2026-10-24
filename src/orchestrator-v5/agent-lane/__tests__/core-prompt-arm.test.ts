@@ -75,7 +75,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     // 24 Oct (DL, combined measure + funding dead end + science rulings r3-r5): their fact asked; a link Olumi's estimate by
     // default, a direction-only one kept in words with its size unknown; never a forced number; quotes copied exactly; the
     // update's own text lives here with the draft's goal rule; periods counted as starts_after_periods (#3713).
-    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('13cd8274a3fc71eea70e29d35643fbb544c997114d965850cc904983d76f397a');
+    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('cf515670c3cab6d6edcf54d46a6be263549232b08fb4995b8cf890569e19e055');
     expect(createHash('sha256').update(UPDATE_PREFIX, 'utf8').digest('hex')).toBe('3fc74a39f5db5290b72b37b7e2228c696a0fdeb5c2b017f96f3883bfedf3e0fb');
     expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('bed04fc58a01dbd02d8f5c8aa6ef171731a356c1cde47a85e0cd64be35416653'); // 23 Oct (DL 93d79c3e, C2 double prime): a definition's parts are factors with levels, never another definition; a STATED per-unit effect is a sized link. 22 Oct: every stated goal saved in their words, never approximated (Claude r1 on #3670); + a calendar date is Olumi's labelled reading
     // The retired constants are gone from both modules: no route can send the accreted text again.
@@ -173,7 +173,9 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       'the reply asks at most three, and every other missing fact stays asked on its item.',
       // DL 24 Oct (P7 hiring blind score, classes 2 and 4): a stated threshold is theirs; a goal against today is relative to today.
       'Every figure a goal or limit rests on stays in, and a threshold they state is theirs, never Olumi\'s unknown ("no worse" is today\'s level).',
-      'A goal or limit stated against today is relative to today: today is 1, carrying on keeps it there (an assumption), and each effect is a proportional change, so today\'s level is not asked.',
+      // Buddy 24 Oct 08:48Z (accepted): the frame follows their words, as canonical.ts GOAL_FRAMES and compile.lowerChange do.
+      'A goal\'s frame follows their words: a change stated as a percentage or share ("8 % more") is change_rel from now, and where they give no figure for today, today is 1, carrying on keeps it there (an assumption) and each effect is a proportional change, so today\'s level is not asked;',
+      'a change stated in units ("12 more parcels a day than now") is change_abs in those units; a target stated as a level stays a level.',
       'A level the result does need is their fact, asked as a recent measured figure ("last month\'s"), saying how they could measure it.',
       // DL 24 Oct (milestone blind score, effects-not-estimated): a range is defensible when its order of magnitude is knowable.
       'A link or effect (an option\'s added effect included) is theirs or, by default, Olumi\'s provisional estimate with a defensible range in natural units and a plain basis.',
@@ -198,7 +200,16 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     // The program turn's guidance is prompt text: answers in order answer the questions in order, and none is asked again in the same words.
     expect(createHash('sha256').update(PROGRAM_TURN_GUIDANCE, 'utf8').digest('hex')).toBe('f792d7e02338df9d8965992aef7ad8dec884d2df838a3326859b58008e3c2589');
     expect(count(PROGRAM_TURN_GUIDANCE, 'Answers in the order of your questions answer them in that order, and "I don\'t know" is an answer: say in request which question each answers, and never ask one again in the same words.')).toBe(1);
-    for (const old of ['If only its direction can be defended', 'uncertainty alone is not a reason to withhold', 'what they expect without the options included', 'roughly doubles daily deliveries']) expect(DRAFTING_INSTRUCTIONS, old).not.toContain(old);
+    for (const old of ['If only its direction can be defended', 'uncertainty alone is not a reason to withhold', 'what they expect without the options included', 'roughly doubles daily deliveries',
+      'A goal or limit stated against today is relative to today']) expect(DRAFTING_INSTRUCTIONS, old).not.toContain(old);
+    // Buddy 08:48Z: a level target and a change in units are never turned into a ratio. Only the change_rel clause sets today
+    // to 1 or makes effects proportional; the change_abs and level clauses carry neither.
+    const frames = DRAFTING_INSTRUCTIONS.slice(DRAFTING_INSTRUCTIONS.indexOf('A goal\'s frame follows their words:'));
+    const [relClause, absClause, levelClause] = frames.slice(0, frames.indexOf(' A level the result does need')).split('; ');
+    expect(relClause).toContain('is change_rel from now'); expect(relClause).toContain('today is 1'); expect(relClause).toContain('each effect is a proportional change');
+    expect(absClause).toContain('is change_abs in those units'); expect(levelClause).toBe('a target stated as a level stays a level.');
+    for (const clause of [absClause, levelClause]) for (const ratio of ['today is 1', 'proportional', 'change_rel', 'relative to today']) expect(clause, ratio).not.toContain(ratio);
+    expect(count(DRAFTING_INSTRUCTIONS, 'today is 1')).toBe(1);
     expect(Object.keys(programDraft)).not.toContain('UPDATE_PREFIX');
     // The schema is prompt text too (sent on every drafting call): `unknown` only where nothing rests on it (served funding dead end).
     const sentSchema = JSON.stringify(CANONICAL_JSON_SCHEMA);
