@@ -69,6 +69,9 @@ export function reopenProgram(graph: unknown, versions: EngineVersions = ENGINE_
   readonly run: StoredRun | null; readonly current: boolean; readonly engine_current: boolean } | undefined {
   const program = savedProgramOf(graph);
   if (program === undefined) return undefined;
-  const shown = shownRun(program.runs, program.canonical, program.person_words, versions);
-  return { program, view: shown === undefined ? null : shownView(shown.run, shown.current), run: shown?.run ?? null, current: shown?.current ?? false, engine_current: shown?.engine_current ?? false };
+  const stored = isRec(graph) && isRec(graph['living_model']) ? graph['living_model']['canonical'] : undefined;
+  const shown = shownRun(program.runs, program.canonical, program.person_words, versions, stored);
+  // Stale when the model moved or the engine did; said as "from before an update" when only an update did (S4).
+  return { program, view: shown === undefined ? null : shownView(shown.run, shown.current && shown.engine_current, shown.updated), run: shown?.run ?? null,
+    current: shown?.current ?? false, engine_current: shown?.engine_current ?? false };
 }

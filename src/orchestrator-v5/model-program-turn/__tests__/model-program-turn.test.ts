@@ -28,7 +28,7 @@ import { ProposalChangeSchema, ProposalStore, type ProposalChange } from '../../
 import { withNewRun } from '../program-save.js';
 import { projectCorePostimageForPersistence } from '../../persisted-graph-projection.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
-import { ENGINE_VERSIONS, revisionDigest, RUN_AGAIN_FOR_CHANCE } from '../run-receipt.js';
+import { ENGINE_VERSIONS, revisionDigest, RUN_AGAIN_AFTER_UPDATE, RUN_AGAIN_FOR_CHANCE } from '../run-receipt.js';
 import { at, bakery, bakeryWithDefect, BRIEF, club, CLUB_BRIEF, q } from './bakery.fixture.js';
 
 type Json = Record<string, any>;
@@ -233,12 +233,16 @@ describe('the model-program turn on the real core route', () => {
     expect(stableStringify(recomputed.view)).not.toBe(stableStringify(cold.view));
   });
 
-  it('step 4b, an engine-version bump: the reopen still shows the ORIGINAL stored result, said as from an older engine', async () => {
+  it('step 4b, an engine-version bump: the reopen still shows the ORIGINAL stored result, said as from before an update (S4: the person\'s model did not move)', async () => {
     replies = [JSON.stringify(bakery())];
     const r = (await turn({ message: BRIEF })).json();
     const bumped = { ...ENGINE_VERSIONS, engine: `${ENGINE_VERSIONS.engine}-bumped` };
     const cold = reopenProgram(JSON.parse(JSON.stringify(persisted)), bumped)!;
-    expect(stableStringify(cold.view)).toBe(stableStringify(r.canonical_analysis_view));
+    const { staleness, face_when_stale, ...result } = cold.view as Json;
+    const { staleness: was, ...stored } = r.canonical_analysis_view as Json;
+    expect(stableStringify(result)).toBe(stableStringify(stored));
+    expect([was.stale, staleness.stale, staleness.reason, face_when_stale]).toEqual([false, true, 'engine_or_format_updated', RUN_AGAIN_AFTER_UPDATE]);
+    expect(RUN_AGAIN_AFTER_UPDATE).toBe('This result is from before an update. Run again to see the chance.');
     expect([cold.run!.run_id, cold.current, cold.engine_current]).toEqual([r.model_program.run.run_id, true, false]);
     expect(cold.run!.receipt.versions).toEqual({ ...ENGINE_VERSIONS });
     // What it shows is the stored bytes: a marker written into the stored Run is what comes back (a recompute would lose it).
@@ -613,6 +617,13 @@ describe('the model-program turn on the real core route', () => {
     // Its stored Run was made on the old form, so it is not called current for the read one: a Run again shows the chance.
     expect([reopenProgram(before)!.run!.run_id, reopenProgram(before)!.current]).toEqual([lm.runs[0].run_id, false]);
     expect(reopenProgram(persisted)!.current).toBe(true); // contrast: a Run made on the new form
+    // S4: the person's model did not move (only how it is read), so the stale result says it is from before an update.
+    const old = reopenProgram(before)!.view as Json;
+    expect([old.staleness.stale, old.staleness.reason, old.face_when_stale]).toEqual([true, 'engine_or_format_updated', RUN_AGAIN_AFTER_UPDATE]);
+    // Contrast: the old-form model moved too (a word of theirs added): the model-change words, never "an update".
+    const movedOld = JSON.parse(JSON.stringify(before)); movedOld.living_model.person_words.push('and one more thing');
+    const moved = reopenProgram(movedOld)!.view as Json;
+    expect([moved.staleness.reason, moved.face_when_stale]).toEqual(['graph_hash_diverged', RUN_AGAIN_FOR_CHANCE]);
     // Both names on one setting is not mapped: the schema judges it, and the program is unreadable.
     const both = JSON.parse(JSON.stringify(lm.canonical).replace('"starts_after_periods":0', '"starts_after_periods":0,"from_period":0'));
     expect(programReadOf({ ...persisted!, living_model: { ...lm, canonical: both } }).kind).toBe('unreadable');
@@ -1000,11 +1011,14 @@ describe('the model-program turn on the real core route', () => {
     expect(unverified).toContain('‘promo effect’ is 5 member / month / promotion (not found in your words)');
   });
 
-  it('DL 23 Oct (batch 1 + batch 4): an aim with no deadline never states "no deadline" as a fact; it says none is recorded yet, never in a question of the code\'s; a % target is said in %', () => {
+  it('DL 23 Oct (batch 1 + batch 4) + S4 class 5: an aim with no window says how it is read (with each option in effect), never a missing deadline the compiler does not list; a % target is said in %', () => {
     const goalWords = (m: CanonicalModelT, text: string) => String(((evaluateCanonical(m, { sourceText: text, seed: 7 }).view as Json).goal_chance as Json).chance_words);
     // The bakery's aim states no window: read once with every option in effect, and said so.
     const noDeadline = goalWords(bakery(), BRIEF);
-    expect(noDeadline).toContain('‘sales’ being at least 380 loaf / week with no deadline recorded yet');
+    expect(noDeadline).toContain('‘sales’ being at least 380 loaf / week with each option in effect');
+    expect(noDeadline).not.toMatch(/deadline/);
+    // The compiler lists no deadline for it (a static level), so nothing on the result says one is missing.
+    expect(evaluateCanonical(bakery(), { sourceText: BRIEF, seed: 7 }).compiled.blockers.filter((b) => b.code === 'deadline')).toEqual([]);
     expect(JSON.stringify(((evaluateCanonical(bakery(), { sourceText: BRIEF, seed: 7 }).view as Json).goal_chance as Json).notes)).not.toContain('is there one?');
     expect(noDeadline).not.toMatch(/from now/);
     // Contrast: the club's aim states three months, and says it.
@@ -1520,6 +1534,48 @@ describe('the model-program turn on the real core route', () => {
     // Codex r7: a figure labelled structure is never read as theirs, even where their words write it: always their question.
     cap.quantities.push(q('weekly_bake', 'loaf/week', { author: 'structure', value: 300, quote: 'We bake 300 loaves a week' }));
     expect(normalise(cap).quantities.find((x) => x.id === 'weekly_bake')).toMatchObject({ author: 'person', status: 'asked', value: null, quote: null });
+  });
+
+  it('S4 class 7 (one reason): with no aim in the chance, the result says what it waits on from the typed blockers (an aim\'s measure, or the result they want), never "checks the limits only"', () => {
+    const why = (m: CanonicalModelT) => {
+      const e = evaluateCanonical(m, { sourceText: BRIEF, seed: 7 });
+      return [e.compiled.executable === null ? 'waiting' : 'run', ...new Set(((e.view as Json).options as Json[]).map((o) => `${o.cell.face} | ${o.cell.why}`))];
+    };
+    // The aim has no measure; the limit can be checked (its oven price is theirs): a run of the limits alone.
+    const aimNoMeasure = bakery();
+    aimNoMeasure.goals = aimNoMeasure.goals.map((g) => ({ ...g, measure: null, question: 'How would you know the bakery is doing well enough?' }));
+    aimNoMeasure.quantities = aimNoMeasure.quantities.map((x) => (x.id === 'oven_price' ? { ...x, status: 'known', value: 2500, question: null, quote: 'We have £3,000 to spend' } : x));
+    // What the run DID check is its own result, said apart from the reason (Codex r1 #3719): each limit on its own.
+    expect(why(aimNoMeasure)).toEqual(['run', 'Not shown yet: needs your answer | The chance waits on a measure for ‘Reach 380 loaves a week’. This run checks only the limits, each on its own: ‘spend’ within its limit: 100%.']);
+    // The same with no limit: nothing calculates, and the waiting view says the same, from the same blockers.
+    const noLimit = JSON.parse(JSON.stringify(aimNoMeasure)) as CanonicalModelT; noLimit.limits = [];
+    expect(why(noLimit)).toEqual(['waiting', 'Not shown yet: needs your answer | The chance waits on a measure for ‘Reach 380 loaves a week’.']);
+    // No aim at all: the result they want.
+    const noAim = JSON.parse(JSON.stringify(aimNoMeasure)) as CanonicalModelT; noAim.goals = [];
+    expect(why(noAim)).toEqual(['run', 'Not shown yet: needs your answer | The chance waits on the result you want. This run checks only the limits, each on its own: ‘spend’ within its limit: 100%.']);
+    for (const m of [aimNoMeasure, noLimit, noAim]) expect(JSON.stringify(evaluateCanonical(m, { sourceText: BRIEF, seed: 7 }).view)).not.toMatch(/limits only|No aim has a measure/);
+    // Codex r2 #3719: an option that moves the bound (the budget to £2,000 with a second oven) is said by what each limit
+    // measures and its result only, never a bound figure, so the base model's £3,000 cannot be said for it.
+    const moved = JSON.parse(JSON.stringify(noAim)) as CanonicalModelT;
+    moved.quantities.push(q('reduced_budget', 'GBP', { value: 2000, quote: 'our budget is £2,000' }));
+    moved.options[0]!.sets.push({ ...moved.options[0]!.sets[0]!, quantity: 'budget', to: 'reduced_budget', quote: 'With a second oven our budget is £2,000' });
+    const e = evaluateCanonical(moved, { sourceText: `${BRIEF} The second oven costs £2,500. With a second oven our budget is £2,000.`, seed: 7 });
+    expect(e.compiled.errors).toEqual([]);
+    expect(e.sim!.options.find((o) => o.option_id === 'second_oven')!.per_limit[0]).toMatchObject({ chance: 0 });
+    const cellOf = (id: string) => ((e.view as Json).options as Json[]).find((o) => o.option_id === id)!.cell;
+    expect(cellOf('second_oven').why).toBe('The chance waits on the result you want. This run checks only the limits, each on its own: ‘spend’ within its limit: 0%.');
+    expect(cellOf('keep_one').why).toBe('The chance waits on the result you want. This run checks only the limits, each on its own: ‘spend’ within its limit: 100%.');
+    for (const id of ['second_oven', 'keep_one']) expect(cellOf(id).why).not.toMatch(/£3,000|£2,000/);
+    // Contrast: a measured aim waiting on a figure only they can give names that figure, as before.
+    expect(why(bakery())[1]).not.toContain('measure for');
+    // With nothing to run (the aim's target is asked), the waiting view's note for that aim is the blockers' words too, never
+    // the compiler's joined reasons ("is not in the chance yet: needs …"); the waiting view has no run, so no limit line.
+    const asked = bakery();
+    setQ(asked, 'sales_target', { status: 'asked', value: null, quote: null, question: 'What is the target?' });
+    const waitingView = evaluateCanonical(asked, { sourceText: BRIEF, seed: 7 });
+    expect(waitingView.compiled.executable).toBeNull();
+    expect(((waitingView.view as Json).goal_chance as Json).notes[0]).toBe('‘Reach 380 loaves a week’ waits on ‘sales target’.');
+    expect(why(asked)).toEqual(['waiting', 'Not shown yet: needs your answer | The chance waits on ‘sales target’.']);
   });
 
   it('batch 4 hiring-r1: a measured aim whose options wait on their own figures says what it waits on, never "No aim has a measure yet"', () => {
