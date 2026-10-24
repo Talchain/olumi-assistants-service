@@ -293,8 +293,9 @@ export async function applyCanvasFigure(deps: Pick<ProgramToolDeps, 'dispatch'>,
   if (low !== null && high !== null && low > high) return { status: 'refused', reason: `The low end ${low} is above the high end ${high}.` };
   const shared = goal !== undefined && (program.canonical.goals.some((x) => x.id !== goal.id && x.measure?.target === q.id) || program.canonical.limits.some((l) => l.measure?.bound === q.id));
   const id = shared ? `${goal!.id}_target` : q.id;
+  // A typed figure is theirs: a direction stated for the figure it replaces is not kept (issue 40).
   const filled: CanonicalQuantityT = { ...q, id, value: edit.value, low, high, range_kind: onRange ? q.range_kind : null, status: 'known', author: 'person', party: null,
-    quote: words, question: null, basis: null, approval: 'approved' };
+    quote: words, question: null, basis: null, direction: null, approval: 'approved' };
   const canonical = figurePostimage(program.canonical, filled, shared ? goal!.id : undefined);
   const v = validatePostimage(program.canonical, canonical, { removals: [], words: [...program.person_words, words], fresh: [words] });
   if (!v.ok) return { status: 'refused', reason: v.reason };

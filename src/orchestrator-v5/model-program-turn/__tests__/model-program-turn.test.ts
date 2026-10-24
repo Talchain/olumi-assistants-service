@@ -103,6 +103,14 @@ const turn = (payload: Json, headers: Record<string, string> = {}) => app.inject
 /** The drafter's WHOLE updated model for a change: the saved one with `edit` applied (what a faithful update returns). */
 const savedWith = (edit: (m: CanonicalModelT) => void): string => { const m = JSON.parse(JSON.stringify(persisted!.living_model.canonical)) as CanonicalModelT; edit(m); return JSON.stringify(m); };
 const setQ = (m: CanonicalModelT, id: string, f: Partial<CanonicalQuantityT>) => { m.quantities = m.quantities.map((x) => (x.id === id ? { ...x, ...f } : x)); };
+const LOST_BASIS = 'Nobody has said how much baking time a new oven loses while the staff learn it.';
+/** Issue 40: the bakery with Olumi's link of unknown size, stated to lower sales, and any more of Olumi's links on the oven. */
+const withOlumiLinks = (m: CanonicalModelT, ...more: CanonicalQuantityT[]): CanonicalModelT => {
+  const sizes = [q('lost_bake_time', 'loaf/week/oven', { kind: 'coefficient', status: 'unknown', author: 'olumi', direction: 'lowers', basis: LOST_BASIS }), ...more];
+  m.quantities.push(...sizes);
+  m.relations = m.relations.map((r) => (r.form === 'effect' ? { ...r, terms: [...r.terms, ...sizes.map((x) => ({ driver: 'ovens_added', coefficient: x.id, author: 'olumi' as const, quote: null, ...at }))] } : r));
+  return m;
+};
 
 describe('the model-program turn on the real core route', () => {
   beforeAll(async () => {
@@ -324,22 +332,63 @@ describe('the model-program turn on the real core route', () => {
   });
 
   it('issue 40: a first draft with an Olumi link of unknown size and a stated direction shows its reading card, the direction said as an arrow and words on what it moves', async () => {
-    const m = bakery();
-    m.quantities.push(q('lost_bake_time', 'loaf/week/oven', { kind: 'coefficient', status: 'unknown', author: 'olumi', direction: 'lowers',
-      basis: 'Nobody has said how much baking time a new oven loses while the staff learn it.' }));
-    m.relations = m.relations.map((r) => (r.form === 'effect' ? { ...r, terms: [...r.terms, { driver: 'ovens_added', coefficient: 'lost_bake_time', author: 'olumi' as const, quote: null, ...at }] } : r));
+    const m = withOlumiLinks(bakery());
     replies = [JSON.stringify(m)];
     const r = (await turn({ message: BRIEF })).json();
     expect(r.model_program.saved).toBe(true);
     expect(r.cards).toHaveLength(1);
     expect(r.cards[0].reading).toBe(true);
     expect(r.cards[0].changes.find((c: Json) => c.id === 'lost_bake_time')).toMatchObject({ action: 'add', author: 'olumi',
-      after: 'no figure yet (in loaf/week/oven), ↓ lowers sales, a rate, not known yet, based on "Nobody has said how much baking time a new oven loses while the staff learn it."' });
+      after: `no figure yet (in loaf/week/oven), ↓ lowers sales, a rate, not known yet, based on "${LOST_BASIS}"` });
     // Contrast: the same link stated as raising reads so; with no direction, nothing about one is said.
     const said = (d: CanonicalQuantityT['direction']) => { const x = JSON.parse(JSON.stringify(m)) as CanonicalModelT; setQ(x, 'lost_bake_time', { direction: d });
       const v = readingOf(x, { words: [BRIEF], approver: null }); return v.ok ? v.changes.find((c) => c.id === 'lost_bake_time')!.after : v.code; };
-    expect(said('raises')).toBe('no figure yet (in loaf/week/oven), ↑ raises sales, a rate, not known yet, based on "Nobody has said how much baking time a new oven loses while the staff learn it."');
-    expect(said(null)).toBe('no figure yet (in loaf/week/oven), a rate, not known yet, based on "Nobody has said how much baking time a new oven loses while the staff learn it."');
+    expect(said('raises')).toBe(`no figure yet (in loaf/week/oven), ↑ raises sales, a rate, not known yet, based on "${LOST_BASIS}"`);
+    expect(said(null)).toBe(`no figure yet (in loaf/week/oven), a rate, not known yet, based on "${LOST_BASIS}"`);
+  });
+
+  it('issue 40: a direction the host clears (on a sized link, or on a figure no link has) never shows as a change nor refuses one: a saved program holding them takes an unrelated update; the AI\'s change to a direction the model uses still shows', async () => {
+    const m = withOlumiLinks(bakery(), q('oven_delay', 'loaf/week/oven', { kind: 'coefficient', status: 'estimated', author: 'olumi', value: -10, low: -20, high: -5, range_kind: 'plausible',
+      basis: 'A new oven takes a few weeks to bed in.' }));
+    replies = [JSON.stringify(m)];
+    expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
+    // As a program saved before the host cleared them holds them: a direction on a sized link, and one on a figure no link has.
+    const saved = persisted!.living_model.canonical as CanonicalModelT;
+    setQ(saved, 'oven_delay', { direction: 'raises' });
+    setQ(saved, 'oven_price', { direction: 'lowers' });
+    const deps = { dispatch, proposals: new ProposalStore() };
+    const words = 'We now bake 320 loaves a week, our baker says.';
+    const propose = async (edit: (d: CanonicalModelT) => void) => {
+      replies = [savedWith(edit)];
+      return await proposeProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words },
+        { public_label: 'Base sales', basis: 'their words', request: 'Base sales are now 320 a week.', remove: [] }) as Json;
+    };
+    const sales = (d: CanonicalModelT) => setQ(d, 'base_sales', { value: 320, quote: 'We now bake 320 loaves a week' });
+    const p = await propose(sales);
+    expect(p.status, JSON.stringify(p)).toBe('ok');
+    expect(p.data.changes).toEqual([{ id: 'base_sales', kind: 'quantity', action: 'change', label: 'base sales', before: '300 loaf/week, in your words "We bake 300 loaves a week"',
+      after: '320 loaf/week, in your words "We now bake 320 loaves a week"', author: 'person' }]);
+    // Contrast: the AI's own change to a direction the model uses (a linked size with no figure) is on the card.
+    const flipped = await propose((d) => { sales(d); setQ(d, 'lost_bake_time', { direction: 'raises' }); });
+    expect(flipped.status, JSON.stringify(flipped)).toBe('ok');
+    expect(flipped.data.changes.map((c: Json) => c.id)).toEqual(['base_sales', 'lost_bake_time']);
+    expect(flipped.data.changes[1]).toMatchObject({ action: 'change', before: 'no figure yet (in loaf/week/oven), ↓ lowers sales', after: 'no figure yet (in loaf/week/oven), ↑ raises sales' });
+  });
+
+  it('issue 40: a figure typed on the canvas is theirs: the direction stated for the size it replaces is not kept, and the card shows it go', async () => {
+    replies = [JSON.stringify(withOlumiLinks(bakery()))];
+    expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
+    // A saved program's stray direction (on a figure no link has) is the host's to clear, on both sides: never on this card.
+    setQ(persisted!.living_model.canonical as CanonicalModelT, 'oven_price', { direction: 'lowers' });
+    // A range across zero with no most likely figure: the one figure a stated direction would still decide, so only the edit clears it.
+    const r = await applyCanvasFigure({ dispatch }, SCENARIO, { target: { quantity_id: 'lost_bake_time' }, value: null, low: -5, high: 10, operation_key: randomUUID() });
+    expect(r.status, JSON.stringify(r)).toBe('saved');
+    expect(r.changes!.map((c) => c.id)).toEqual(['lost_bake_time']);
+    const change = r.changes!.find((c) => c.id === 'lost_bake_time')!;
+    expect(change.before).toContain('no figure yet (in loaf/week/oven), ↓ lowers sales');
+    expect(change.after).toMatch(/^from -5 to 10 loaf\/week\/oven/);
+    expect(change.after).not.toMatch(/[↑↓]/u);
+    expect((persisted!.living_model.canonical as CanonicalModelT).quantities.find((x) => x.id === 'lost_bake_time')).toMatchObject({ low: -5, high: 10, author: 'person', direction: null });
   });
 
   it('issue 40 (the system): every field of every canonical record family is said by a word group on the card, or is a named exemption; a new field with neither fails here', () => {

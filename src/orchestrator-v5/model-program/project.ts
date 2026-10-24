@@ -25,6 +25,7 @@ import type { CanonicalModelT, CanonicalQuantityT, QualitativeFamilyT } from './
 import { QUALITATIVE_FAMILIES } from './canonical.js';
 import { compile, isApproximate, normalise, rangeDistOf, readRange, type CompileResult, type LawReading } from './compile.js';
 import { parseUnit } from './units.js';
+import { directionUsed, rateOf as rateOfLink } from './links.js';
 
 type Rec = Record<string, unknown>;
 /** structure: an exact constant the model's form needs; never drawn as anyone's estimate. */
@@ -122,17 +123,8 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
   const hostOf = new Map<string, { node?: string; edge?: string }>();
   /** A window's length or origin timing is consumed into its window, so it is in the calculation exactly when its owner is. */
   const windowOwner = new Map<string, string>();
-  /**
-   * A per-unit rate (one coefficient times one driver) is ONE meaning however the draft wrote it, an effect term or a
-   * two-part product ("specialists × capacity per specialist"), so it is drawn ONE way: on its driver's link, its id as
-   * `coefficient_id` (DL 23 Oct: the link editor reads it there), never as a card of its own plus a second link.
-   */
-  const rateOf = (r: CanonicalModelT['relations'][number]): { driver: string; coefficient: string } | null => {
-    if (r.form !== 'definition' || r.op !== 'product' || r.parts.length !== 2 || r.parts.some((p) => p.power !== 1)) return null;
-    const [a, b] = r.parts.map((p) => p.id) as [string, string];
-    const rate = (id: string) => Q.get(id)?.kind === 'coefficient';
-    return rate(a) && !rate(b) ? { driver: b, coefficient: a } : rate(b) && !rate(a) ? { driver: a, coefficient: b } : null;
-  };
+  /** A per-unit rate is drawn ONE way, on its driver's link (`links.ts`). */
+  const rateOf = (r: CanonicalModelT['relations'][number]) => rateOfLink(r, Q);
   for (const r of model.relations) {
     const rate = rateOf(r);
     const froms = rate ? [rate.driver] : r.form === 'definition' ? r.parts.map((p) => p.id) : r.form === 'effect' ? [r.base, ...r.terms.map((t) => t.driver)] : [r.start, ...r.inflows, ...r.outflows];
@@ -329,7 +321,7 @@ export function project(input: CanonicalModelT, compiled: CompileResult = compil
     const straddles = c && has(c.low) && has(c.high) && c.low < 0 && c.high > 0;
     // A size with no figure (no value; no range, or one across zero) has no sign of its own: the link takes its stated
     // direction (issue 39). A given value always keeps its own sign (Codex r1 #3734).
-    const stated = c && !has(c.value) && (mid === null || straddles) ? c.direction : null;
+    const stated = c && directionUsed(c) ? c.direction : null;
     const sign = stated === 'lowers' ? -1 : stated === 'raises' ? 1 : mid !== null && mid < 0 ? -1 : 1;
     const driverUnit = Q.get(driver)?.unit ?? '';
     const definedUnit = Q.get(defines)?.unit ?? '';

@@ -19,7 +19,8 @@
  */
 import { ProposalChangeSchema, type ProposalChange } from '../agent-lane/proposal.js';
 import { CanonicalModel, type CanonicalModelT } from '../model-program/canonical.js';
-import { linkTargets, norm } from '../model-program/compile.js';
+import { norm } from '../model-program/compile.js';
+import { linkTargets, withUsedDirections } from '../model-program/links.js';
 import { isExactCalendarReexpression, parseUnit, sameDims } from '../model-program/units.js';
 
 type Rec = Record<string, unknown>;
@@ -147,11 +148,14 @@ const idsOf = (m: CanonicalModelT, f: Family): string[] => (m[f] as readonly { i
  * explicitly; `words`: every word of theirs this change may quote (their earlier words and `fresh`, this change's own);
  * `approver`: who approves the card (its items' author_id), null for a guest.
  */
-export function validatePostimage(base: CanonicalModelT, raw: unknown,
+export function validatePostimage(saved: CanonicalModelT, raw: unknown,
   opts: { readonly removals: readonly string[]; readonly words: readonly string[]; readonly fresh: readonly string[]; readonly approver?: string | null }): PostimageResult {
   const parsed = CanonicalModel.safeParse(raw);
   if (!parsed.success) return { ok: false, code: 'schema', reason: 'The proposed model is not in the model format.', ids: [] };
-  const post = parsed.data;
+  // The host's reading of directions (`links.ts`) on BOTH sides first, so only the change's own fields are compared: a
+  // direction the model does not use, cleared by the host, never shows as a change nor refuses one (issue 40).
+  const base = withUsedDirections(saved);
+  const post = withUsedDirections(parsed.data);
   const refuse = (code: Exclude<PostimageResult, { ok: true }>['code'], ids: readonly string[], reason: string, check?: 'their_words' | 'this_turn'): PostimageResult =>
     ({ ok: false, code, reason, ids, ...(check ? { check } : {}) });
   // Preservation by (family, id), before anything is compared.
