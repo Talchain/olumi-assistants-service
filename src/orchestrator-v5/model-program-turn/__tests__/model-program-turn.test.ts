@@ -702,6 +702,65 @@ describe('the model-program turn on the real core route', () => {
     expect(registered.length).toBe(saves);
   });
 
+  it('DoD-G marketing r2–r5 (DL 24 Oct): a date the drafter records is whole periods from today in code, Olumi\'s labelled reading, on the saved model and the reading card; a cold reopen and an update a month later keep it; new date words, and a date answered, are read against that day', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-10-24T09:00:00Z'));
+      // The drafter counts from a planning date itself (r2/r3) and records the words; the code's count replaces its figure.
+      const m = club();
+      m.quantities.push(q('reopen_offset', 'month', { label: 'Months from now until the reopening', status: 'known', author: 'olumi', value: 5, basis: 'Counted from the planning date.',
+        stated_date: '6 months from 9 October' }));
+      m.goals = m.goals.map((g) => ({ ...g, measure: { ...g.measure!, window: { origin_event: 'the reopening', origin_offset: 'reopen_offset', start: 0, periods: 'months' } } }));
+      const brief = `${CLUB_BRIEF} We reopen 6 months from 9 October.`;
+      const deps = { dispatch, proposals: new ProposalStore() };
+      replies = [JSON.stringify(m)];
+      const r = (await turn({ message: brief })).json();
+      expect(r.model_program.saved).toBe(true);
+      const BASIS = 'Olumi\'s reading of the date: 9 April 2027 is 6 months from today, 24 October 2026, to the nearest whole month.';
+      const offset = () => (persisted!.living_model.canonical as CanonicalModelT).quantities.find((x) => x.id === 'reopen_offset')!;
+      expect(offset()).toMatchObject({ kind: 'fact', status: 'known', author: 'olumi', value: 6, low: null, high: null, quote: null, question: null, stated_date: '6 months from 9 October', basis: BASIS });
+      expect(compile(persisted!.living_model.canonical as CanonicalModelT).executable!.goals[0]!.window).toEqual({ start_period: 6, periods: 3 });
+      expect(r.cards[0].changes.find((c: Json) => c.id === 'reopen_offset')).toMatchObject({ action: 'add', author: 'olumi',
+        after: `6 month, for the date "6 months from 9 October", a fact, known, based on "${BASIS}"` });
+      // A month later: the cold reopen shows the stored reading and its Run, current.
+      vi.setSystemTime(new Date('2026-11-30T09:00:00Z'));
+      const cold = reopenProgram(JSON.parse(JSON.stringify(persisted)))!;
+      expect(cold.program.canonical.quantities.find((x) => x.id === 'reopen_offset')).toMatchObject({ value: 6, basis: BASIS });
+      expect(cold.current).toBe(true);
+      // An update that re-emits the date with its own count changes only what it was asked: the reading stands.
+      const words = 'We now get 22 new members a month.';
+      const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words });
+      const update = (f: Partial<CanonicalQuantityT>) => savedWith((d) => { setQ(d, 'base_joins', { value: 22, quote: 'We now get 22 new members a month' }); setQ(d, 'reopen_offset', f); });
+      replies = [update({ value: 4, basis: 'Recounted.' })];
+      const kept = await proposeProgramChange(deps, ctx(), ProgramChangeParams.parse({ public_label: 'Joins', basis: 'their words', request: 'Joins are now 22 a month.', remove: [] })) as Json;
+      expect(kept.status, JSON.stringify(kept)).toBe('ok');
+      expect(kept.data.changes.map((c: Json) => c.id)).toEqual(['base_joins']);
+      // New date words are read against that day (9 May 2027 from 30 November: 5).
+      replies = [update({ stated_date: '7 months from 9 October' })];
+      const moved = await proposeProgramChange(deps, ctx(), ProgramChangeParams.parse({ public_label: 'Joins', basis: 'their words', request: 'Joins are now 22 a month.', remove: [] })) as Json;
+      expect(moved.status, JSON.stringify(moved)).toBe('ok');
+      expect(moved.data.changes.find((c: Json) => c.id === 'reopen_offset')).toMatchObject({ action: 'change',
+        after: '5 month, for the date "7 months from 9 October", based on "Olumi\'s reading of the date: 9 May 2027 is 5 months from today, 30 November 2026, to the nearest whole month."' });
+      // A date answered to a listed question: their date words, read in code; the figure the AI wrote is not kept.
+      const said = 'We reopen on 9 June 2027.';
+      const answered = await proposeProgramChange(deps, { ...ctx(), verified_user_messages: [said], user_turn_text: said }, ProgramChangeParams.parse({ public_label: 'Reopening', basis: 'their answer',
+        request: '', remove: [], answers: [{ id: 'reopen_offset', status: 'known', author: 'person', value: 7, low: null, high: null, range_kind: null, party: null, quote: 'on 9 June 2027', basis: null,
+          stated_date: '9 June 2027' }] })) as Json;
+      expect(answered.status, JSON.stringify(answered)).toBe('ok');
+      const held = savedProgramOf({ living_model: deps.proposals.get(answered.data.proposal_id)!.living_model })!.canonical;
+      expect(held.quantities.find((x) => x.id === 'reopen_offset')).toMatchObject({ status: 'known', author: 'olumi', value: 6, stated_date: '9 June 2027',
+        basis: 'Olumi\'s reading of the date: 9 June 2027 is 6 months from today, 30 November 2026, to the nearest whole month.' });
+      // A figure typed on the canvas is theirs: the date words and any direction go with the reading, and the card says so.
+      const typed = await applyCanvasFigure({ dispatch }, SCENARIO, { target: { quantity_id: 'reopen_offset' }, value: 7, operation_key: randomUUID() });
+      expect(typed.status, JSON.stringify(typed)).toBe('saved');
+      expect(offset()).toMatchObject({ value: 7, author: 'person', status: 'known', stated_date: null, direction: null, basis: null });
+      const edit = typed.changes!.find((c) => c.id === 'reopen_offset')!;
+      expect(edit.before).toContain('6 month, for the date "6 months from 9 October"');
+      expect(edit.after).toMatch(/^7 month, /);
+      expect(edit.after).not.toContain('for the date');
+    } finally { vi.useRealTimers(); }
+  });
+
   it('THE WITNESS: a stock, a limit and one Olumi estimate, with known answers, through draft, an in-card change, a chat correction, Runs and cold reopens', async () => {
     replies = [JSON.stringify(club())];
     const drafted = (await turn({ message: CLUB_BRIEF })).json();

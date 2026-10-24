@@ -177,7 +177,7 @@ const weekdayIndexOf = (isoDate: string): number => {
  * "2026-10-09". Without a year it is the year of `today` — NEVER rolled into another year (Batch B: a start day may well
  * have passed). `null` for anything else, or a day that month does not have.
  */
-function readCalendarDay(raw: string, today: string): string | null {
+export function readCalendarDay(raw: string, today: string): string | null {
   const t = raw.trim().replace(/,$/, '').replace(/^the[ \t]{1,2}/, '');
   const dayMonth = DAY_MONTH_FORM.exec(t);
   const monthDay = dayMonth === null ? MONTH_DAY_FORM.exec(t) : null;

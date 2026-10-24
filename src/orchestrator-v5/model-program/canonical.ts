@@ -89,6 +89,12 @@ export const RANGE_KINDS = ['bounds', 'plausible'] as const;
 const RANGE_KIND = z.enum(RANGE_KINDS).nullable().describe(
   'For a range only. bounds: the words fix hard ends ("between 80 and 150", "no more than", "at least"), so it cannot fall outside them. plausible: a rough span ("about", "roughly", "likely", "somewhere around"); Olumi\'s own estimates are plausible. Null when there is no range, or when the person\'s words do not say which (it is then asked).');
 
+/**
+ * A STATED DATE (DoD-G marketing r2–r5, DL 24 Oct): the AI records the person's date words; Olumi's code counts the whole
+ * periods from today to that date (`model-program-turn/date-reading.ts`), so no run does the calendar arithmetic itself.
+ */
+export const STATED_DATE = 'For a timing or a window\'s length that the person gave as a calendar date ("launch on 9 April 2027", "six months from 9 October"): their date words, quoted, or the date they mean as YYYY-MM-DD with its year, and Olumi\'s code counts the whole periods from today to it and sets the figure; null otherwise.';
+
 export const CanonicalQuantity = z.object({
   id,
   label: z.string().describe('A short plain name the person would recognise ("Loaves sold per week").'),
@@ -114,6 +120,7 @@ export const CanonicalQuantity = z.object({
     'For estimated: one plain sentence on what the estimate rests on. For structure: what the constant is ("12 months in a year"). For unknown, not_applicable or unsupported: why. Null otherwise.'),
   direction: z.enum(['raises', 'lowers']).nullable().describe(
     'For a link\'s size (a coefficient), used only when no figure is given (no most likely figure, and no range or one that spans zero): raises when more of the driver means more of what it moves, lowers when it means less; null when no one can say which. Null for every other quantity.'),
+  stated_date: z.string().nullable().describe(STATED_DATE),
   author: z.enum(QUANTITY_AUTHORS).describe(
     "Who gave the figure. person: the person's own figure (or someone they report, in party), quoted. olumi: Olumi's estimate (ranged) or reading. structure: an exact constant the model's form needs (12 month/year, 100 for a percentage scale, 0 or 1 for an option switched off or on, a count that defines the structure): never an estimate, never shown as Olumi's, no range."),
   party: attribution.party,
@@ -265,13 +272,13 @@ export const OPTION_STATUSES = ['live', 'ruled_out', 'removed'] as const;
 export const STARTS_AFTER_PERIODS = 'How many whole periods pass before it takes effect: 0 = from the start ("straight away", "from the first month" and "from now" are all 0), "from month 3" is 2, "in two months" is 2';
 const timing = z.union([z.number().int(), id]).describe(`${STARTS_AFTER_PERIODS}. Or the id of a quantity in the model's period unit giving that count, when the timing is the person's figure, asked, or differs by option ("when the extension opens").`);
 /** The old fields, mapped ONCE, where a saved model is read (program-store): `from_period` k is `starts_after_periods` k, the
- *  same count under its old name, and a quantity saved before `direction` existed has none (null). A model that has both
- *  timing names, or neither, is left for the schema to judge. */
+ *  same count under its old name, and a quantity saved before `direction` or `stated_date` existed has none (null). A model
+ *  that has both timing names, or neither, is left for the schema to judge. */
 export function withDeclaredTiming(raw: unknown): unknown {
   const rec = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
   const renamed = (x: unknown) => { if (!rec(x) || !('from_period' in x) || 'starts_after_periods' in x) return x; const { from_period, ...rest } = x; return { ...rest, starts_after_periods: from_period }; };
   if (!rec(raw) || !Array.isArray(raw['options']) || !Array.isArray(raw['risks'])) return raw;
-  const directed = (x: unknown) => (rec(x) && !('direction' in x) ? { ...x, direction: null } : x);
+  const directed = (x: unknown) => (!rec(x) ? x : { ...x, ...('direction' in x ? {} : { direction: null }), ...('stated_date' in x ? {} : { stated_date: null }) });
   return { ...raw, ...(Array.isArray(raw['quantities']) ? { quantities: raw['quantities'].map(directed) } : {}),
     options: raw['options'].map((o) => (rec(o) && Array.isArray(o['sets']) ? { ...o, sets: o['sets'].map(renamed) } : o)), risks: raw['risks'].map(renamed) };
 }

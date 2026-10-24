@@ -1178,7 +1178,11 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       const sentParams = (calls[0]!.tools as Json[]).find((t) => t.name === 'propose_change')!.parameters as Json;
       expect(Object.keys(sentParams.properties)).toEqual(['public_label', 'basis', 'request', 'remove', 'answers']);
       expect(sentParams.required).toContain('answers');
-      expect(Object.keys(sentParams.properties.answers.items.properties).sort()).toEqual(['author', 'basis', 'high', 'id', 'low', 'party', 'quote', 'range_kind', 'status', 'value']);
+      expect(Object.keys(sentParams.properties.answers.items.properties).sort()).toEqual(['author', 'basis', 'high', 'id', 'low', 'party', 'quote', 'range_kind', 'stated_date', 'status', 'value']);
+      // A date answered is their date words, required (null when none), described as on the model's quantities (DoD-G marketing r2–r5).
+      expect(sentParams.properties.answers.items.required).toContain('stated_date');
+      expect(sentParams.properties.answers.items.properties.stated_date).toEqual({ anyOf: [{ type: 'string' }, { type: 'null' }],
+        description: 'For a timing or a window\'s length that the person gave as a calendar date ("launch on 9 April 2027", "six months from 9 October"): their date words, quoted, or the date they mean as YYYY-MM-DD with its year, and Olumi\'s code counts the whole periods from today to it and sets the figure; null otherwise.' });
       // Whose an answer is, declared by the AI (Codex r1 #3727; the host checks it, never sets it).
       expect(sentParams.properties.answers.items.properties.author.enum).toEqual(['person', 'olumi']);
       expect(sentParams.properties.answers.items.required).toContain('author');
