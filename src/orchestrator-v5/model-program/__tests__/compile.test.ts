@@ -435,7 +435,7 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(compile(figure).errors.map((e) => [e.code, e.items])).toEqual([['figure_status', ['costs']]]);
     const schemaText = JSON.stringify(z.toJSONSchema(CanonicalModel));
     expect(schemaText).not.toContain('A derived or structural quantity is a fact');
-    expect(schemaText).toContain('a link\'s size stays a coefficient even when it is worked out by a relation'); // contrast: the new rule is said
+    expect(schemaText).toContain('coefficient: a link\'s size (how much a driver moves what it drives, a share, a rate of response), even when a relation works it out.'); // contrast: the rule is said (24 Oct rebuild wording)
   });
 
   it('phase 0b fix 6: a preference is shown and reported, never a goal or a limit', () => {

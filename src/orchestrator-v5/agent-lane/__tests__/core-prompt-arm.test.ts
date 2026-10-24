@@ -30,8 +30,10 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
   });
 
   it('ALPHA: the model-program prompt, each section once, the purpose once and the reply rules last; the coach template and the Living Model host rules are gone', () => {
-    for (const h of ['HOW THE MODEL WORKS', 'FIRST MODEL', 'ANSWERS AND CHANGES', 'RESULTS', 'CALCULATION BOUNDARY', 'WHEN NOTHING CAN BE CALCULATED YET', 'WORDS',
-      'EXAMPLE (a first model; synthetic)']) expect(count(b, `\n\n${h}\n`), h).toBe(1);
+    for (const h of ['HOW THE MODEL WORKS', 'QUESTIONS', 'ANSWERS AND CHANGES', 'RESULTS', 'CALCULATION BOUNDARY', 'WHEN NOTHING CAN BE CALCULATED YET', 'WORDS',
+      'EXAMPLE (an answer turn; synthetic)']) expect(count(b, `\n\n${h}\n`), h).toBe(1);
+    // Prompt rebuild (24 Oct): the agent never drafts; an empty scenario is drafted by the host (core-turn.ts modelProgram, turn.ts).
+    for (const gone of ['\n\nFIRST MODEL\n', 'EXAMPLE (a first model; synthetic)']) expect(b, gone).not.toContain(gone);
     for (const part of [OLUMI_PURPOSE_INSTRUCTION, CORE_REPLY_RULES]) expect(count(b, part)).toBe(1);
     expect(b.endsWith(CORE_REPLY_RULES)).toBe(true);
     for (const gone of [HOST_SCIENCE_AND_SOURCE_RULES, GOAL_CHANCE_RANKING_INSTRUCTION, MODEL_RELATIVE_NAMING_INSTRUCTION, '\nTRUTH\n', '\nREASONING\n',
@@ -43,9 +45,12 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
   it('the sent core instructions, byte for byte, plus the canvas-coaching sentence once (the route row in core-turn.route.test.ts pins the same bytes as the SDK receives them)', () => {
     expect(b.split(NOTE_ON_ITEM_INSTRUCTION)).toHaveLength(2);
     // 23 Oct (ALPHA): the model-program prompt replaces arm B's assembled reference (055841368f…, 29,512 characters sent).
-    expect(createHash('sha256').update(b, 'utf8').digest('hex')).toBe('e2fdcbef201e7217062abcb03d3ba21f3b948a298e5ab8dae46485aaf552b65c'); // 23 Oct (prompt builder, P1/P4): at most three questions, each once, never what their words state.
-    // Candidate-3 witness kept (21 Oct): WHEN to build. Text only, not behaviour.
-    expect(b).toContain('draft the first model from their brief in that same turn, even when figures are missing');
+    // Candidate-3 witness (21 Oct, WHEN to build) is now code: an empty scenario is drafted by the host, never the agent. The
+    // agent is told so, and how the first reply numbered its questions (24 Oct: "which question did that answer?" in 10/20 runs).
+    expect(b).not.toContain('draft the first model from their brief in that same turn');
+    expect(count(b, "Olumi's drafter and code, not you, built the first model and wrote the first reply, which you have not seen: it asked, numbered, the first three different questions on the blockers, in the order your state lists them, so a numbered answer on the next turn answers that question.")).toBe(1);
+    // The whole sent text, byte for byte, after the named rows (so a mutant fails on its own row first).
+    expect(createHash('sha256').update(b, 'utf8').digest('hex')).toBe('1d8a83607e8377d25b6ca173c93f8faa2f5994f1ae2b2073ecfe4502ad1c53db'); // 24 Oct (prompt rebuild): the host drafts and writes the first reply; the agent is told how it numbered its questions.
   });
 
   it('arm A is untouched: the legacy host contract is byte-identical to staging b76bc42c', () => {
@@ -69,19 +74,23 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
   });
 
   it('THE PROMPTS (DL 22 Oct, priority change): the coach\u2019s reply rules and the drafter\u2019s rules, adapted as ruled; the old constants are gone', () => {
-    expect(createHash('sha256').update(CORE_REPLY_RULES, 'utf8').digest('hex')).toBe('9607f2b0d95df9e7be7e040c975cd13a12ba7f60120d39c8c5fab6d2016d87dc'); // 23 Oct (ALPHA): the reply rules for the model program; P1: at most three questions a reply, each once.
+    expect(createHash('sha256').update(CORE_REPLY_RULES, 'utf8').digest('hex')).toBe('504959ed3912dead36c7ba6d45a19e84803488e07979ef184964c08aebd67126'); // 24 Oct (prompt rebuild): no note tool on a program board; a Run's report may take what its words need. P1 kept: at most three questions a reply, each once.
+    expect(count(CORE_REPLY_RULES, 'This scenario has no note_on_item tool: raise that one challenge in your reply instead.')).toBe(1);
+    expect(CORE_REPLY_RULES).not.toContain('a first model’s summary');
     // The model-program drafter's text (23 Oct, P1–P5: three questions at most, every option reaches
     // every measured goal, a deadline is its goal's window, options named in full). Prompt text changes only with this pin.
     // 24 Oct (DL, combined measure + funding dead end + science rulings r3-r5): their fact asked; a link Olumi's estimate by
     // default, a direction-only one kept in words with its size unknown; never a forced number; quotes copied exactly; the
     // update's own text lives here with the draft's goal rule; periods counted as starts_after_periods (#3713).
-    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('cf515670c3cab6d6edcf54d46a6be263549232b08fb4995b8cf890569e19e055');
-    expect(createHash('sha256').update(UPDATE_PREFIX, 'utf8').digest('hex')).toBe('3fc74a39f5db5290b72b37b7e2228c696a0fdeb5c2b017f96f3883bfedf3e0fb');
+    // 24 Oct (prompt rebuild, PROMPT-REBUILD-DESIGN-20261024.md): field rules moved to the schema; a link split into parts before
+    // it is left unknown; a later level never asked; limits reached like goals; the closing check; the example's lever is a stall.
+    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('9c0675ecdca6adcfdfae3ffa18391048cd673f688170b825ebd40f8b7cba764b');
+    expect(createHash('sha256').update(UPDATE_PREFIX, 'utf8').digest('hex')).toBe('8032cc4d4677f0988a608e1166462401804db4b9347429af1d53a1a0ae639431'); // 24 Oct: what an update keeps is named (id, words, author, approval, figures)
     expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('bed04fc58a01dbd02d8f5c8aa6ef171731a356c1cde47a85e0cd64be35416653'); // 23 Oct (DL 93d79c3e, C2 double prime): a definition's parts are factors with levels, never another definition; a STATED per-unit effect is a sized link. 22 Oct: every stated goal saved in their words, never approximated (Claude r1 on #3670); + a calendar date is Olumi's labelled reading
     // The retired constants are gone from both modules: no route can send the accreted text again.
     for (const name of ['CORE_REPLY_INSTRUCTION', 'CORE_RESPONSE_DISCIPLINE', 'CORE_NEXT_STEP']) expect(Object.keys(coreInstructions), name).not.toContain(name);
     expect(Object.keys(drafting)).toEqual(['CORE_DRAFTER_RULES']);
-    for (const old of ['<RESPONSE_DISCIPLINE>', 'DRAFTING THE FIRST MODEL', 'goal_margins', 'risk_window_not_goal_window', 'COACHING SHAPE'])
+    for (const old of ['<RESPONSE_DISCIPLINE>', 'DRAFTING THE FIRST MODEL', 'goal_margins', 'risk_window_not_goal_window', 'COACHING SHAPE', '1. What Olumi understood, in two to four short lines'])
       expect(`${b}${CORE_DRAFTER_RULES}`, old).not.toContain(old);
     // The candidates' output lines and the benchmark override do not go in (DL): the agent replies natively, with its tools.
     // Codex r1 / buddy on #3656: no sentence against Olumi's labelled estimates, and a supported goal chance may lead the headline.
@@ -91,8 +100,8 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     // ALPHA (the brief's five behaviours), each said once in what is sent.
     for (const rule of [
       // 1. after a draft: what Olumi understood, then only the blocking questions, grouped, the most consequential first, never re-asked
-      "1. What Olumi understood, in two to four short lines: the question, the goals and limits, the options and the main figures. Keep their figures in their words, say which figures are Olumi's starting estimates, and say what was left out of the calculation and why.",
-      '2. Only the questions that block a goal or a limit, at most three, as one numbered list they can answer in one reply: the one that unblocks the most first, each asking one thing, with a few words on why it matters.',
+      // 24 Oct (prompt rebuild): "what Olumi understood" is the host's first reply and reading card (turn.ts), no longer the agent's.
+      'Only the questions that block a goal or a limit, at most three, as one numbered list they can answer in one reply: the one that unblocks the most first, each asking one thing, with a few words on why it matters.',
       'If a question asks for something their words already state or answer, do not ask it: put it in with the edit tools, quoting them, and say so.',
       'Ask at most three questions in a reply, each once, the blocking ones first;',
       // 2. a chance as the code words it, what it rests on, the limit lines, and ONE next step
@@ -220,7 +229,12 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(Object.keys(programDraft)).not.toContain('UPDATE_PREFIX');
     // The schema is prompt text too (sent on every drafting call): `unknown` only where nothing rests on it (served funding dead end).
     const sentSchema = JSON.stringify(CANONICAL_JSON_SCHEMA);
-    expect(count(sentSchema, 'unknown: it matters, but no defensible range can be given yet (at most its direction): every figure null; basis says why and what would size it.')).toBe(1);
+    // 24 Oct (prompt rebuild; effects-not-estimated "neither estimating them nor asking for their parts"): parts first.
+    expect(count(sentSchema, 'unknown: it matters, but no defensible range can be given yet, even for its parts (at most its direction): every figure null; basis says why and what would size it.')).toBe(1);
+    expect(count(DRAFTING_INSTRUCTIONS, 'A link with no knowable scale as a whole is split into parts that have one (what it acts on × a share or rate per unit), each estimated or asked.')).toBe(1);
+    // The test briefs' own phrases are never sent (24 Oct audit): synthetic examples only.
+    for (const phrase of ['code quality', 'conversion over the first', 'a successful launch', 'advertising', 'local ads'])
+      expect(`${sentSchema}${DRAFTING_INSTRUCTIONS}`.toLowerCase(), phrase).not.toContain(phrase);
     // Neither the old open-ended text nor a rule that forces an estimate (buddy science BLOCK, 24 Oct) is sent.
     // Nor an open-ended unknown, a rule that forces an estimate, or one that makes unknown a link's default (1510a008: 50 links unknown).
     // r5 (buddy, accepted): never numerical bounds demanded where only a direction is defensible (r4's "order of magnitude").
