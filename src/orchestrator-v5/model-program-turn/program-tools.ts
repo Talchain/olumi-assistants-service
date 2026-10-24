@@ -3,8 +3,9 @@
  * whose saved model is a program, each tool works on the canonical model:
  *  · read_canonical_context: the program as the agent reads it (quantities with their status and who gave them, the
  *    questions still open, the stored Run's words);
- *  · propose_change: the change the person asked for, in words, and the ids they asked to remove. Olumi's drafter writes the
- *    WHOLE updated model (`proposePostimage`); the one validator checks it exactly (`validatePostimage`), and it is compiled
+ *  · propose_change: an ANSWER to a listed question is set on the item it answers, exactly (`answered`, the same builder as
+ *    the canvas edit; no AI call); a structural change, in words with the ids to remove, has Olumi's drafter write the
+ *    WHOLE updated model (`proposePostimage`). The one validator checks either exactly (`validatePostimage`), and it is compiled
  *    and evaluated now, so the card the person approves holds the exact model, EVERY change on it, and the Run it would
  *    store; nothing is saved;
  *  · apply_change: on the person's approval of THAT proposal, its model and Run are written as ONE core write on the
@@ -20,7 +21,7 @@ import { createProposal, type ProposalChange, type ProposalOperation, type Propo
 import { findOperationVersion } from '../path-b/tools/core-write.js';
 import { isNoModelYet, isSavedRead, readSaved } from '../path-b/tools/context-tool.js';
 import { ok, refused, unavailable, type ToolOutcome } from '../path-b/tools/outcome.js';
-import type { CanonicalModelT, CanonicalQuantityT } from '../model-program/canonical.js';
+import { CanonicalQuantity, type CanonicalModelT, type CanonicalQuantityT } from '../model-program/canonical.js';
 import { ledgeredResponsesCall, proposePostimage } from './draft.js';
 import { validatePostimage } from './postimage.js';
 import { isSaved, postimageOf, programOperationId, savePostimage, withNewRun } from './program-save.js';
@@ -38,13 +39,22 @@ export const PROGRAM_TURN_GUIDANCE = 'This scenario\'s model is a model program:
   + 'Olumi\'s drafter writes the updated model and the card shows every change. Explanations and questions need no proposal. '
   + 'A turn shows one card; the person approves it, and apply_change then saves the model with a new Run.';
 
+/**
+ * AN ANSWER to a listed question (DL 24 Oct): the figure it answers, declared by the AI with the canonical model's own fields,
+ * and its status, from which the host sets whose it is: known, their figure in their exact words; estimated, Olumi's
+ * estimate with its range; unknown, their "I don't know", quoted, the basis saying what would size it (never asked again).
+ */
+const Answer = CanonicalQuantity.pick({ id: true, value: true, low: true, high: true, range_kind: true, party: true, quote: true, basis: true })
+  .extend({ status: z.enum(['known', 'estimated', 'unknown']) }).strict();
+type AnswerT = z.infer<typeof Answer>;
 export const ProgramChangeParams = z.object({
   public_label: z.string().describe('What the person is asked to approve, in plain words.'),
   basis: z.string().describe('Why Olumi proposes it.'),
   request: z.string().describe('The change the person asked for, in plain words, with their exact words for every figure of theirs.'),
   remove: z.array(z.string()).describe('The ids of the items the person asked to remove, from read_canonical_context; [] for none.'),
+  answers: z.array(Answer).max(12).default([]).describe('Their answers to the listed questions, each on the figure it answers (its id from read_canonical_context); [] for none. Answers and a structural change go on separate cards.'),
 }).strict();
-export type ProgramChangeArgs = z.infer<typeof ProgramChangeParams>;
+export type ProgramChangeArgs = z.input<typeof ProgramChangeParams>;
 
 /**
  * What the agent may report of a Run: each option's own sentence, and the Run's `goal_chance` block UNCHANGED (its notes,
@@ -98,7 +108,7 @@ const preparedThisTurn = new Map<string, string>();
 const PREPARING = '';
 
 export async function proposeProgramChange(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs): Promise<ToolOutcome> {
-  if (args.request.trim() === '' && args.remove.length === 0) return refused('no_change');
+  if (args.request.trim() === '' && args.remove.length === 0 && (args.answers ?? []).length === 0) return refused('no_change');
   const turnKey = ctx.turn_id === undefined ? undefined : `${ctx.scenario_id}:${ctx.turn_id}`;
   if (turnKey === undefined) return prepare(deps, ctx, args);
   // Claimed before the first await: the SDK runs a turn's tool calls together, so two proposals race.
@@ -122,7 +132,13 @@ async function prepare(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs)
   const turnWords = [...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])].filter((w) => !program.person_words.includes(w));
   const fresh = [...new Set(turnWords)];
   const words = [...program.person_words, ...fresh];
-  const draft = await proposePostimage(program.canonical, words, args.request, args.remove, ledgeredResponsesCall());
+  // What the AI declares: answers, set on their items exactly (no redraft); else a structural change, which Olumi's drafter writes.
+  const answers = args.answers ?? [];
+  if (answers.length > 0 && (args.request.trim() !== '' || args.remove.length > 0)) {
+    return refused('one_kind_per_card', 'Answers and a structural change go on separate cards: propose the answers now and the change after.');
+  }
+  const draft = answers.length > 0 ? answered(program.canonical, answers) : await proposePostimage(program.canonical, words, args.request, args.remove, ledgeredResponsesCall());
+  if (typeof draft === 'string') return refused('not_an_answer', draft);
   if (draft.model === null) return refused('no_model_back', 'Olumi could not write the updated model just now; nothing changed.');
   const v = validatePostimage(program.canonical, draft.model, { removals: args.remove, words, fresh, approver: ctx.authenticated_user_id });
   if (!v.ok) return refused(v.code, v.reason, { ids: v.ids });
@@ -132,6 +148,33 @@ async function prepare(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs)
   const p = holdProgramCard(deps.proposals, { scenarioId: ctx.scenario_id, userId: ctx.authenticated_user_id, graphHash: base.saved.graphHash, identity: base.saved.identity! },
     { label: args.public_label, basis: args.basis, program: next.program, changes: v.changes });
   return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: base.saved.graphHash, changes: v.changes, would_show: runWords(next.run) });
+}
+
+/**
+ * THE S2 BUILDER (no AI call): one figure set on its item, every other record as saved. A goal's target it shares with
+ * another goal or a limit is split off first (`splitFor`, that goal's id), so the other keeps its figure.
+ */
+export function figurePostimage(canonical: CanonicalModelT, filled: CanonicalQuantityT, splitFor?: string): CanonicalModelT {
+  return splitFor === undefined ? { ...canonical, quantities: canonical.quantities.map((x) => (x.id === filled.id ? filled : x)) }
+    : { ...canonical, quantities: [...canonical.quantities, filled], goals: canonical.goals.map((g) => (g.id === splitFor ? { ...g, measure: { ...g.measure!, target: filled.id } } : g)) };
+}
+/**
+ * Answers on their items through the S2 builder: only an existing item (an answer never creates one; PB 24 Oct, 13 misbinds),
+ * its status as declared and whose it is from that (an "I don't know" is always theirs), the question cleared.
+ */
+function answered(canonical: CanonicalModelT, answers: readonly AnswerT[]): { readonly model: CanonicalModelT } | string {
+  let model = canonical;
+  for (const a of answers) {
+    const q = model.quantities.find((x) => x.id === a.id);
+    if (q === undefined) return `${a.id} is not a figure in this model; a new item is a structural change.`;
+    if (q.status === 'derived') return `"${q.label}" is worked out by its relation; answer one of its inputs.`;
+    // A range's reading is declared, never guessed (PB 24 Oct: 7 readings lost on the answer's own item).
+    if (a.status !== 'unknown' && (a.low !== null || a.high !== null) && a.range_kind === null) return `"${q.label}": a range needs its reading, bounds (firm ends) or plausible.`;
+    const theirs = a.status !== 'estimated', none = a.status === 'unknown';
+    model = figurePostimage(model, { ...q, status: a.status, author: theirs ? 'person' : 'olumi', value: none ? null : a.value, low: none ? null : a.low,
+      high: none ? null : a.high, range_kind: none ? null : a.range_kind, party: theirs ? a.party : null, quote: theirs ? a.quote : null, basis: a.basis, question: null });
+  }
+  return { model };
 }
 
 /** A program card, held for the person's approval on its base revision: the complete program (model and Run) it would write, and every change. */
@@ -240,9 +283,7 @@ export async function applyCanvasFigure(deps: Pick<ProgramToolDeps, 'dispatch'>,
   const id = shared ? `${goal!.id}_target` : q.id;
   const filled: CanonicalQuantityT = { ...q, id, value: edit.value, low, high, range_kind: onRange ? q.range_kind : null, status: 'known', author: 'person', party: null,
     quote: words, question: null, basis: null, approval: 'approved' };
-  const canonical: CanonicalModelT = shared
-    ? { ...program.canonical, quantities: [...program.canonical.quantities, filled], goals: program.canonical.goals.map((g) => (g.id === goal!.id ? { ...g, measure: { ...g.measure!, target: id } } : g)) }
-    : { ...program.canonical, quantities: program.canonical.quantities.map((x) => (x.id === q.id ? filled : x)) };
+  const canonical = figurePostimage(program.canonical, filled, shared ? goal!.id : undefined);
   const v = validatePostimage(program.canonical, canonical, { removals: [], words: [...program.person_words, words], fresh: [words] });
   if (!v.ok) return { status: 'refused', reason: v.reason };
   const next = withNewRun({ ...program, canonical: v.model, person_words: [...program.person_words, words] });

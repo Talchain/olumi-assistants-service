@@ -1136,6 +1136,77 @@ describe('the model-program turn on the real core route', () => {
     expect((gc.notes as string[]).some((n) => n.startsWith('Covers:'))).toBe(false);
   });
 
+  it('targeted answers (DL 24 Oct): an answer to a listed question is set on the existing item it answers, exactly, with no redraft: one item changes and every other record is byte-identical; "all" is read as 100% with Olumi\'s reading shown; "I don\'t know" is theirs and never asked again; a structural change still uses the redraft', async () => {
+    const saved = JSON.parse(readFileSync(new URL('./hiring-alpha3.saved.json', import.meta.url), 'utf8')) as { brief: string; canonical: CanonicalModelT };
+    replies = [JSON.stringify(saved.canonical)];
+    expect((await turn({ message: saved.brief })).json().model_program.saved).toBe(true);
+    // The saved model as the tools read it (a read parses it, so its keys are in the schema's order on every path).
+    const read = programReadOf(persisted!);
+    const before = (read.kind === 'program' ? read.program.canonical : null)!;
+    const deps = { dispatch, proposals: new ProposalStore() };
+    const ask = (words: string, answers: Json[], extra: Partial<{ request: string; remove: string[] }> = {}) => {
+      sent.length = 0;
+      return proposeProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] },
+        ProgramChangeParams.parse({ public_label: 'Their answer', basis: 'their answer', request: '', remove: [], answers, ...extra })) as Promise<Json>;
+    };
+    const answer = (f: Json) => ({ value: null, low: null, high: null, range_kind: null, party: null, quote: null, basis: null, ...f });
+    // The held program exactly as the card will write it (its raw bytes; a parse would reorder keys).
+    const heldOf = (p: Json) => deps.proposals.get(p.data.proposal_id)!.living_model as { canonical: CanonicalModelT; runs: Json[] };
+    // Every record but the answered one, each as its own bytes (the model's top-level key order is not a record's).
+    const others = (m: CanonicalModelT, id: string) => (['quantities', 'relations', 'goals', 'limits', 'preferences', 'options', 'risks', 'claims', 'evidence', 'assumptions',
+      'dissent', 'conditions', 'left_out'] as const).flatMap((f) => (m[f] as readonly { id: string }[]).filter((r) => r.id !== id).map((r) => `${f}:${JSON.stringify(r)}`));
+    // (1) The hiring cost answer: ONE item changes, as theirs in their words; every other record is the saved one, byte for
+    // byte (positive control: the records compared); no drafter call.
+    const cost = await ask('About £45,000 per developer, all in.', [answer({ id: 'developer_hiring_cost', status: 'known', value: 45000, quote: 'About £45,000 per developer, all in.' })]);
+    expect(cost.status, JSON.stringify(cost)).toBe('ok');
+    expect(sent).toHaveLength(0);
+    expect(cost.data.changes.map((c: Json) => [c.id, c.action, c.author])).toEqual([['developer_hiring_cost', 'change', 'person']]);
+    const held = heldOf(cost).canonical;
+    expect(others(held, 'developer_hiring_cost')).toEqual(others(before, 'developer_hiring_cost'));
+    expect(others(before, 'developer_hiring_cost').length).toBeGreaterThan(20);
+    expect(held.quantities.find((x) => x.id === 'developer_hiring_cost')).toMatchObject({ status: 'known', value: 45000, low: null, high: null, author: 'person',
+      quote: 'About £45,000 per developer, all in.', question: null, unit: 'GBP/developer' });
+    // (2) "I don't know": theirs, quoted, not known, with what would size it; never asked again as a number.
+    const dunno = await ask('I don\'t know what a Tech lead would cost yet.', [answer({ id: 'tech_lead_hiring_cost', status: 'unknown', value: 99,
+      quote: 'I don\'t know what a Tech lead would cost yet.', basis: 'A recruiter\'s quote for a Tech lead would size it.' })]);
+    expect(dunno.status, JSON.stringify(dunno)).toBe('ok');
+    expect(sent).toHaveLength(0);
+    const unknown = heldOf(dunno);
+    expect(unknown.canonical.quantities.find((x) => x.id === 'tech_lead_hiring_cost')).toMatchObject({ status: 'unknown', value: null, author: 'person',
+      quote: 'I don\'t know what a Tech lead would cost yet.', basis: 'A recruiter\'s quote for a Tech lead would size it.', question: null });
+    expect(((unknown.runs.at(-1)!.result as Json).compile.blockers as Json[]).filter((b) => b.id === 'tech_lead_hiring_cost' && b.code === 'asked')).toEqual([]);
+    expect(dunno.data.changes[0].after).toContain('in your words "I don\'t know what a Tech lead would cost yet."');
+    // Refused, by construction: an answer to an item the model does not hold (it never creates one), a range with no reading,
+    // and answers with a structural change in one call; none calls the drafter.
+    expect(await ask('Unassigned costs are £10,000.', [answer({ id: 'unassigned_first_year_cost', status: 'known', value: 10000, quote: 'Unassigned costs are £10,000.' })]))
+      .toMatchObject({ status: 'refused', reason: 'not_an_answer' });
+    expect(await ask('Between £40,000 and £50,000.', [answer({ id: 'developer_hiring_cost', status: 'known', low: 40000, high: 50000, quote: 'Between £40,000 and £50,000.' })]))
+      .toMatchObject({ status: 'refused', reason: 'not_an_answer' });
+    expect(await ask('About £45,000 per developer, all in. Also add a contractor option.', [answer({ id: 'developer_hiring_cost', status: 'known', value: 45000, quote: 'About £45,000 per developer, all in.' })],
+      { request: 'Add a contractor option.' })).toMatchObject({ status: 'refused', reason: 'one_kind_per_card' });
+    expect(sent).toHaveLength(0);
+    // A structural change still goes to Olumi's drafter: one call, the whole model.
+    replies = [savedWith((d) => { d.options.push({ ...d.options[0]!, id: 'contractor', label: 'Hire a contractor', sets: [], quote: 'a contractor option' }); })];
+    const structural = await ask('Also add a contractor option.', [], { request: 'Add a contractor option.' });
+    expect(structural.status, JSON.stringify(structural)).toBe('ok');
+    expect(sent).toHaveLength(1);
+  });
+
+  it('targeted answers: "all" of a share is read as 100%, their words kept as theirs and Olumi\'s reading shown on the card before anything is saved', async () => {
+    replies = [JSON.stringify(bakery())];
+    expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
+    const deps = { dispatch, proposals: new ProposalStore() };
+    sent.length = 0;
+    const words = 'All of the new loaves sell.';
+    const p = await proposeProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words] },
+      ProgramChangeParams.parse({ public_label: 'Sell-through 100%', basis: 'their answer', request: '', remove: [], answers: [{ id: 'sell_through', status: 'known', value: 1,
+        low: null, high: null, range_kind: null, party: null, quote: 'All of the new loaves sell', basis: 'Olumi reads “all” as 100%.' }] })) as Json;
+    expect(p.status, JSON.stringify(p)).toBe('ok');
+    expect(sent).toHaveLength(0);
+    expect(p.data.changes).toEqual([{ id: 'sell_through', kind: 'quantity', action: 'change', label: 'sell through', before: 'from 0.5 to 0.9, most likely 0.7 (a plausible range), an estimate, based on "New capacity sells only as far as demand grows.", Olumi’s, not in your words',
+      after: '1, known, based on "Olumi reads “all” as 100%.", yours, in your words "All of the new loaves sell"', author: 'person' }]);
+  });
+
   it('the alpha3 hiring read, through the same update path: the measure they name gets Olumi\'s mechanism on ONE card that shows every change; a figure only they know is ASKED, then the chance appears', async () => {
     const saved = JSON.parse(readFileSync(new URL('./hiring-alpha3.saved.json', import.meta.url), 'utf8')) as { brief: string; canonical: CanonicalModelT };
     replies = [JSON.stringify(saved.canonical)];
