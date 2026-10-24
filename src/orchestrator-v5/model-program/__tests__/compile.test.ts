@@ -901,6 +901,24 @@ describe('issue 39: an unsized link is drawn with its stated direction, never a 
     expect(read.success).toBe(true);
     expect(read.data!.quantities.map((x) => [x.id, x.direction])).toEqual(old.quantities.map((x) => [x.id, null]));
   });
+
+  it('issue 40: a direction the projection would not use is cleared when the draft is read, so the card never states it, and nothing drawn moves; one it uses is kept', () => {
+    const dirOf = (m: CanonicalModelT, id = 'price_effect') => normalise(m).quantities.find((x) => x.id === id)!.direction;
+    const without = (m: CanonicalModelT, id = 'price_effect'): CanonicalModelT => ({ ...m, quantities: m.quantities.map((x) => (x.id === id ? { ...x, direction: null } : x)) });
+    const ONE_SIDE = { status: 'estimated' as const, low: -60, high: -10, range_kind: 'plausible' as const, basis: 'Fewer loaves sell at a higher price.' };
+    const stray = priced({ ...UNKNOWN, direction: null });
+    stray.quantities.push(qty('stray_effect', 'loaf/week/GBP', { kind: 'coefficient', author: 'olumi', ...UNKNOWN, direction: 'lowers' }));
+    // Cleared: a figure is given; a range on one side of zero; a size no link has. The projection is the same with or without.
+    for (const [m, id] of [[priced({ ...ONE_SIDE, value: -30, direction: 'raises' }), 'price_effect'], [priced({ ...ONE_SIDE, direction: 'raises' }), 'price_effect'], [stray, 'stray_effect']] as const) {
+      expect(m.quantities.find((x) => x.id === id)!.direction).not.toBeNull();
+      expect(dirOf(m, id)).toBeNull();
+      expect(project(m).graph).toEqual(project(without(m, id)).graph);
+    }
+    // Kept: an unknown size, and a range across zero, take their stated direction (issue 39), and it moves what is drawn.
+    expect(dirOf(priced({ ...UNKNOWN, direction: 'lowers' }))).toBe('lowers');
+    expect(dirOf(priced({ ...STRADDLES, direction: 'raises' }))).toBe('raises');
+    expect(project(priced({ ...STRADDLES, direction: 'raises' })).graph).not.toEqual(project(priced({ ...STRADDLES, direction: null })).graph);
+  });
 });
 
 describe('AIE §5 AMEND (DL 24 Oct): a first draft never waits on an ask no one can see', () => {

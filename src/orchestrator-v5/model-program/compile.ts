@@ -195,8 +195,24 @@ export function normalise(model: CanonicalModelT): CanonicalModelT {
   // A figure labelled structure that is no structural constant ("current output = 12", stated by no one) is the person's
   // to give: always asked of them, never Olumi's fixed figure nor read as theirs (Codex r4–r7 #3709).
   const asked = named.quantities.map((q) => (q.author === 'structure' && q.kind === 'fact' && q.status === 'known' && has(q.value) && !has(q.low) && !has(q.high)
-    && !isStructuralConstant(named, q) ? structureAsked(q) : q));
+    && !isStructuralConstant(named, q) ? structureAsked(q) : q))
+    // A direction the model does not use is not kept, so the card never states a sign the model does not use (issue 40): its
+    // size has a figure (a value, or a range on one side of zero: `project.ts` rateLink), or no link has it as its size.
+    .map((q) => (q.direction !== null && (has(q.value) || (has(q.low) && has(q.high) && !(q.low < 0 && q.high > 0)) || linkTargets(named, q.id).length === 0)
+      ? { ...q, direction: null } : q));
   return asked.some((q, i) => q !== named.quantities[i]) ? { ...named, quantities: asked } : named;
+}
+
+/**
+ * What a link sized by `id` moves, as the projection draws it (`project.ts` rateOf): what an effect term with this
+ * coefficient defines, or a per-unit rate's (a two-part product of one coefficient and one driver). The card says a link's
+ * direction on these, by name (issue 40).
+ */
+export function linkTargets(model: Pick<CanonicalModelT, 'quantities' | 'relations'>, id: string): string[] {
+  const rate = (x: string) => model.quantities.find((q) => q.id === x)?.kind === 'coefficient';
+  return [...new Set(model.relations.flatMap((r) => (r.form === 'effect' ? r.terms.some((t) => t.coefficient === id)
+    : r.form === 'definition' && r.op === 'product' && r.parts.length === 2 && r.parts.every((p) => p.power === 1) && r.parts.some((p) => p.id === id)
+      && rate(id) && r.parts.filter((p) => rate(p.id)).length === 1) ? [r.defines] : []))];
 }
 
 /**
