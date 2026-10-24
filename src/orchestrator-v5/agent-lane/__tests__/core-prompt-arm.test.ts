@@ -71,9 +71,10 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(createHash('sha256').update(CORE_REPLY_RULES, 'utf8').digest('hex')).toBe('9607f2b0d95df9e7be7e040c975cd13a12ba7f60120d39c8c5fab6d2016d87dc'); // 23 Oct (ALPHA): the reply rules for the model program; P1: at most three questions a reply, each once.
     // The model-program drafter's text (23 Oct, P1–P5: three questions at most, every option reaches
     // every measured goal, a deadline is its goal's window, options named in full). Prompt text changes only with this pin.
-    // 24 Oct (DL, after the combined measure): coefficients stay Olumi's, only their facts wait; quotes copied exactly; the
+    // 24 Oct (DL, after the combined measure + served funding dead end): a figure a goal rests on is their asked fact or a
+    // labelled estimate, never unknown with no question; quotes copied exactly; the
     // update's own text lives here with the draft's goal rule; periods counted as starts_after_periods (#3713).
-    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('3b9fa17d5d1ac46835ed9f33772b0baf157c8bd40c1068a847e71f980bd03281');
+    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('a5b61c602d0dbadc56c06312faed4134f3a934f470f6a8714cfaef0e6d9b03e5');
     expect(createHash('sha256').update(UPDATE_PREFIX, 'utf8').digest('hex')).toBe('be829fe1012ba75665711c6f6a162c33e18053ed4dc0d0b9a3a498f10b752d8c');
     expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('bed04fc58a01dbd02d8f5c8aa6ef171731a356c1cde47a85e0cd64be35416653'); // 23 Oct (DL 93d79c3e, C2 double prime): a definition's parts are factors with levels, never another definition; a STATED per-unit effect is a sized link. 22 Oct: every stated goal saved in their words, never approximated (Claude r1 on #3670); + a calendar date is Olumi's labelled reading
     // The retired constants are gone from both modules: no route can send the accreted text again.
@@ -165,12 +166,12 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       'what they know or decide: current levels, prices, costs, budgets and how they split them, headcount, dates, durations, targets.',
       'Never ask them for a link\'s size or an option\'s effect.',
       'each link sized by their coefficient or Olumi\'s estimate.',
-      'Every other fact it needs is asked too, every figure null, with its question; never an Olumi estimate or assumption. Only coefficients are Olumi\'s estimates.',
+      'Every figure a goal or limit rests on is either their fact (what they expect without the options included), asked with its question, or a coefficient (an option\'s added effect included), theirs or Olumi\'s estimate with a range and a basis; never "unknown" with no question.',
       'A stock\'s level after n periods is its start plus n periods of its flows.',
       'sets ovens_added to one_oven, starts_after_periods 0;',
     ]) expect(count(DRAFTING_INSTRUCTIONS, rule), rule).toBe(1);
     // What over-applied the estimate rule, and the old period numbering, are gone.
-    for (const old of ['a link you cannot size goes in left_out', 'Every other figure it needs stays null', 'flows of periods 1 to n', 'from period 0'])
+    for (const old of ['a link you cannot size goes in left_out', 'Every other figure it needs stays null', 'Only coefficients are Olumi', 'flows of periods 1 to n', 'from period 0'])
       expect(DRAFTING_INSTRUCTIONS, old).not.toContain(old);
     // The update's text is prompt text: here, once, with the draft's goal rule and the quote rule; draft.ts no longer holds a copy.
     for (const rule of ['return the WHOLE model, by the same rules.', 'Every option reaches every measured goal, a goal this change adds included.',
