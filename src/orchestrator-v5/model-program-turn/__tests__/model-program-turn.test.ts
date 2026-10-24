@@ -1699,6 +1699,32 @@ describe('the model-program turn on the real core route', () => {
     expect(r.assistant_text).toContain('The chance also waits on 2 other things, listed with the result.');
   });
 
+  it('S1 follow-up: when the run computes, a chance held up only by an unknown is not "needs your answer" either (the run\'s own cells)', async () => {
+    const none = { value: null, low: null, high: null, range_kind: null, question: null };
+    // (a) The guardrail is calculable, the one goal waits on an unknown link: the run has no goal of its own (no-aim cell).
+    const a = bakery();
+    setQ(a, 'oven_price', { status: 'known', value: 2000, quote: 'The oven would cost £2,000', question: null });
+    setQ(a, 'sell_through', { ...none, status: 'unknown', basis: 'Cannot yet be sized.' });
+    replies = [JSON.stringify(a)];
+    const ra = (await turn({ message: `${BRIEF} The oven would cost £2,000.` })).json();
+    expect(ra.model_program.saved).toBe(true);
+    expect(ra.canonical_analysis_view.goal_chance.waits_on).toEqual([{ id: 'sell_through', code: 'unknown', label: 'sell through', scope: ['more_loaves'], answer: null, basis: 'Cannot yet be sized.' }]);
+    for (const o of ra.canonical_analysis_view.options as Json[]) expect([o.option_id, o.cell.face]).toEqual([o.option_id, 'Chance not shown yet']);
+  });
+
+  it('S1 follow-up: one goal computes while another waits on an unknown: the withheld cell is not "needs your answer"', async () => {
+    const b = bakery();
+    setQ(b, 'oven_price', { status: 'known', value: 2000, quote: 'The oven would cost £2,000', question: null });
+    b.quantities.push(q('regulars', 'person', { status: 'unknown', author: 'olumi', basis: 'Not counted yet.' }), q('regulars_target', 'person', { value: 50, quote: 'want to reach 380 loaves a week' }));
+    b.goals.push({ id: 'keep_regulars', label: 'Keep 50 regulars', measure: { quantity: 'regulars', per: null, cmp: '>=', target: 'regulars_target', frame: 'level', reference: null, aggregation: 'end',
+      window: null, measure_by: 'person', assumptions: [], exclusions: [] }, question: null, author: 'person', quote: 'want to reach 380 loaves a week', ...at });
+    replies = [JSON.stringify(b)];
+    const rb = (await turn({ message: `${BRIEF} The oven would cost £2,000.` })).json();
+    expect(rb.model_program.saved).toBe(true);
+    expect(rb.canonical_analysis_view.goal_chance.waits_on).toEqual([{ id: 'regulars', code: 'unknown', label: 'regulars', scope: ['keep_regulars'], answer: null, basis: 'Not counted yet.' }]);
+    for (const o of rb.canonical_analysis_view.options as Json[]) expect([o.option_id, o.cell.face]).toEqual([o.option_id, 'Chance not shown yet']);
+  });
+
   it('S1 follow-up contrast: a goal waiting on an asked figure of theirs keeps the needs-your-answer face and its answer box', async () => {
     const m = bakery();
     setQ(m, 'base_sales', { value: null, low: null, high: null, range_kind: null, status: 'asked', quote: null, question: 'How many loaves do you bake a week now?' });
