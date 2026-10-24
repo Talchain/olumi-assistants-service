@@ -12,6 +12,7 @@ import { coreBudget } from '../agent-lane/model-budgets.js';
 import { agentRequestIdentity } from '../agent-lane/runtime/prompt-identity.js';
 import { CanonicalModel, type CanonicalModelT } from '../model-program/canonical.js';
 import { compile, compileJson, normalise, type CompileError, type CompileResult } from '../model-program/compile.js';
+import { sayDate, todayInLondon } from '../goal-target/deadline-date.js';
 import { CANONICAL_JSON_SCHEMA, CANONICAL_SCHEMA_NAME, CanonicalUpdate, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX, UPDATE_JSON_SCHEMA, UPDATE_PREFIX, UPDATE_REPAIR_PREFIX,
   type CanonicalUpdateT } from './prompt.js';
 
@@ -41,12 +42,15 @@ export type DraftOutcome = {
   readonly attempts: readonly DraftAttempt[];
 };
 
-/** The request body: fixed instructions and schema first (the cached prefix), then the conversation. An update's schema is its changes only. */
+/** Today in Europe/London (the conversation agent's clock), so the drafter counts dates and periods from it (measurement arm). */
+const todayContext = (at: Date): string => `Today is ${todayInLondon(at)} (${at.toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'Europe/London' })} ${sayDate(todayInLondon(at))}); period 0 is today.`;
+
+/** The request body: fixed instructions and schema first (the cached prefix), then today's date, then the conversation. An update's schema is its changes only. */
 export function draftRequestBody(input: readonly InputMessage[], update = false): StreamedResponsesBody {
   return {
     model: coreBudget(DRAFT_REASONING_EFFORT).model,
     instructions: DRAFTING_INSTRUCTIONS,
-    input: input.map((m) => ({ role: m.role, content: m.content })),
+    input: [{ role: 'developer', content: todayContext(new Date()) }, ...input.map((m) => ({ role: m.role, content: m.content }))],
     reasoning: { effort: DRAFT_REASONING_EFFORT },
     max_output_tokens: DRAFT_MAX_OUTPUT_TOKENS,
     store: false,
