@@ -76,9 +76,10 @@ export type OptionOutcome = { option_id: string; status: Outcome | 'not_compared
  * `id` is the record (a quantity, goal or limit; '(model)' when there is no goal); `scope` the goals, limits and live options
  * it holds up. asked: a figure only the person can give (the AI's own question may be on the record). range_kind: their
  * range, with no word on whether its ends are hard. recount: their count, given below 0. measure: an aim or guardrail with no
- * measure. deadline: an aim or guardrail that changes over time with no deadline. no_goal: no aim at all.
+ * measure. deadline: an aim or guardrail that changes over time with no deadline. no_goal: no aim at all. unknown: a figure it
+ * rests on that no one can give or responsibly estimate yet; never the person's to answer (its basis says why).
  */
-export type BlockerCode = 'asked' | 'range_kind' | 'recount' | 'measure' | 'deadline' | 'no_goal';
+export type BlockerCode = 'asked' | 'range_kind' | 'recount' | 'measure' | 'deadline' | 'no_goal' | 'unknown';
 export type Blocker = { id: string; code: BlockerCode; scope: string[] };
 export type Conversion =
   | { kind: 'percent'; quantity: string; from: string; to: string; factor: number; author: 'olumi' }
@@ -832,10 +833,9 @@ export function compile(input: CanonicalModelT, opts: { sourceText?: string } = 
     ...model.goals.flatMap((g) => [...(!has(g.measure) ? [blocker(g.id, 'measure', [g.id])] : []), ...(goalWin.get(g.id)?.deadline === true ? [blocker(g.id, 'deadline', [g.id])] : [])]),
     ...model.limits.flatMap((l) => [...(!has(l.measure) ? [blocker(l.id, 'measure', [l.id])] : []), ...(limitWin.get(l.id)?.deadline === true ? [blocker(l.id, 'deadline', [l.id])] : [])]),
     ...model.quantities.flatMap((q) => [
-      // Every figure the result rests on with none in hand waits: asked, or unknown where a goal, limit or option rests on it
-      // (served funding dead end: two unknowns, no figure, no question, nothing listed). Code `asked`: the figure, theirs, or
-      // Olumi's labelled estimate where it is a link or effect.
-      ...(q.status === 'asked' || (q.status === 'unknown' && feedsOf(q.id).length > 0) ? [blocker(q.id, 'asked', feedsOf(q.id))] : []),
+      // Every figure the result rests on with none in hand waits (served funding dead end: two unknowns, nothing listed):
+      // asked, theirs to give; unknown, where a goal, limit or option rests on it, no one's to give yet.
+      ...(q.status === 'asked' ? [blocker(q.id, 'asked', feedsOf(q.id))] : q.status === 'unknown' && feedsOf(q.id).length > 0 ? [blocker(q.id, 'unknown', feedsOf(q.id))] : []),
       ...(unresolved.has(q.id) ? [blocker(q.id, 'range_kind', feedsOf(q.id))] : []),
       ...(recheck.has(q.id) ? [blocker(q.id, 'recount', feedsOf(q.id))] : []),
     ]),

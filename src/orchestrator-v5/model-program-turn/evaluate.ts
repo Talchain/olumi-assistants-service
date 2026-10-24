@@ -19,7 +19,7 @@ import type { ExecutableModel } from '../model-program/executable.js';
 import { simulate } from '../model-program/simulate/simulate.js';
 import type { SimResult } from '../model-program/simulate/result.js';
 import {
-  presentAnalysisView, tippingThresholds, waitsOnWords, type PresentAsk, type PresentBlocker, type PresentGoal, type PresentQuantity, type PresentThreshold,
+  needsAnswer, presentAnalysisView, tippingThresholds, waitsOnWords, type PresentAsk, type PresentBlocker, type PresentGoal, type PresentQuantity, type PresentThreshold,
   type PresentedAnalysisView, type TippingProbe,
 } from '../model-program/present/present.js';
 
@@ -132,8 +132,11 @@ function blockersOf(model: CanonicalModelT, list: readonly Blocker[]): PresentBl
   const m = normalise(model);
   const labelOf = new Map<string, string>([...m.quantities, ...m.goals, ...m.limits].map((r) => [r.id, r.label] as const));
   const isQuantity = new Set(m.quantities.map((q) => q.id));
+  const basisOf = new Map(m.quantities.map((q) => [q.id, q.basis] as const));
+  // An `unknown` is no one's to answer yet: no answer box (so no ask and no tipping probe), and its own basis says why.
   return list.map((b) => ({ id: b.id, code: b.code, label: b.code === 'no_goal' ? 'The result you want' : labelOf.get(b.id) ?? b.id, scope: b.scope,
-    answer: isQuantity.has(b.id) ? { quantity_id: b.id } : null }));
+    answer: isQuantity.has(b.id) && b.code !== 'unknown' ? { quantity_id: b.id } : null,
+    ...(b.code === 'unknown' && typeof basisOf.get(b.id) === 'string' && basisOf.get(b.id)!.trim() !== '' ? { basis: basisOf.get(b.id)! } : {}) }));
 }
 
 const sentence = (x: string): string => (/[.?!]$/.test(x) ? x : `${x}.`);
@@ -157,7 +160,7 @@ function waitingView(model: CanonicalModelT, compiled: CompileResult, goals: rea
     const withheldWhy = [...goals.filter((g) => g.status === 'withheld').flatMap((g) => g.reasons), ...(own?.reasons ?? [])].join(' ');
     const why = failing ? 'The model does not compile yet, so no chance can be worked out.'
       : waits !== undefined ? `The chance ${waits}.` : withheldWhy || 'The chance cannot be worked out yet.';
-    return { kind: 'withheld' as const, face: waits !== undefined && !failing ? 'Not shown yet: needs your answer' : 'Chance not shown yet', why,
+    return { kind: 'withheld' as const, face: waits !== undefined && !failing && needsAnswer(blockers, ids) ? 'Not shown yet: needs your answer' : 'Chance not shown yet', why,
       reasons: failing ? [{ code: 'does_not_compile', message: compiled.errors.slice(0, 5).map((e) => e.message).join(' ') }]
         : goals.filter((g) => g.status !== 'calculable').map((g) => ({ code: g.status === 'asks' ? 'goal_asks' : 'goal_withheld', message: g.reasons.join(' ') || null })) };
   };
