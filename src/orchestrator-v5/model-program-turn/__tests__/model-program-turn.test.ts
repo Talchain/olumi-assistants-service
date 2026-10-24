@@ -280,9 +280,11 @@ describe('the model-program turn on the real core route', () => {
     const m = bakery();
     m.left_out.push({ id: 'staff_morale', text: 'Staff morale while the second oven beds in', why: 'It has no measure in this model.', question: null, concerns: [], author: 'olumi', quote: null, ...at },
       { id: 'longer_shifts', text: 'Longer shifts for the staff', why: 'It is not measured in this model', question: 'How will staff feel?', concerns: ['more_loaves', 'second_oven'],
-        author: 'person', quote: 'Our staff may not like longer shifts', ...at });
+        author: 'person', quote: 'Our staff may not like longer shifts', ...at },
+      { id: 'delivery_days', text: 'Which days flour is delivered', why: 'Nobody has said how it changes sales', question: null, concerns: [],
+        author: 'person', ...at, party: 'Our supplier', quote: 'deliveries only on weekdays' });
     replies = [JSON.stringify(m)];
-    const drafted = await turn({ message: `${BRIEF} Our staff may not like longer shifts.` });
+    const drafted = await turn({ message: `${BRIEF} Our staff may not like longer shifts. Our supplier says deliveries only on weekdays.` });
     expect(drafted.statusCode, drafted.body).toBe(200);
     const r = drafted.json();
     expect(r.model_program.saved).toBe(true);
@@ -297,7 +299,7 @@ describe('the model-program turn on the real core route', () => {
     // (2) Every record an add, in the reading order: goals, limits, options, what is left out, relations, then the figures.
     expect(card.changes.map((c: Json) => [c.kind, c.id, c.action, c.before])).toEqual([
       ['goal', 'more_loaves', 'add', null], ['record', 'within_budget', 'add', null], ['option', 'second_oven', 'add', null], ['option', 'keep_one', 'add', null],
-      ['left_out', 'staff_morale', 'add', null], ['left_out', 'longer_shifts', 'add', null], ['relation', 'sold_rel', 'add', null], ['relation', 'sales_rel', 'add', null], ['relation', 'spend_rel', 'add', null],
+      ['left_out', 'staff_morale', 'add', null], ['left_out', 'longer_shifts', 'add', null], ['left_out', 'delivery_days', 'add', null], ['relation', 'sold_rel', 'add', null], ['relation', 'sales_rel', 'add', null], ['relation', 'spend_rel', 'add', null],
       ['quantity', 'base_sales', 'add', null], ['quantity', 'ovens_added', 'add', null], ['quantity', 'one_oven', 'add', null], ['quantity', 'extra_per_oven', 'add', null],
       ['quantity', 'sell_through', 'add', null], ['quantity', 'sold_per_oven', 'add', null], ['quantity', 'sales', 'add', null], ['quantity', 'sales_target', 'add', null],
       ['quantity', 'budget', 'add', null], ['quantity', 'oven_price', 'add', null], ['quantity', 'spend', 'add', null]]);
@@ -308,6 +310,9 @@ describe('the model-program turn on the real core route', () => {
     expect(card.changes[5]).toEqual({ id: 'longer_shifts', kind: 'left_out', action: 'add', label: 'Longer shifts for the staff', before: null,
       after: 'It is not measured in this model. Olumi asks: “How will staff feel?”. It concerns Reach 380 loaves a week and A second oven. Your words: “Our staff may not like longer shifts”',
       author: 'person' });
+    // Words the person reports from someone else are that someone's, by name, never "Your words".
+    expect(card.changes[6]).toEqual({ id: 'delivery_days', kind: 'left_out', action: 'add', label: 'Which days flour is delivered', before: null,
+      after: 'Nobody has said how it changes sales. Our supplier’s words: “deliveries only on weekdays”', author: 'person' });
     // Contrast: a left-out item with only its why says only its why, as written.
     expect(card.changes[4]).toEqual({ id: 'staff_morale', kind: 'left_out', action: 'add', label: 'Staff morale while the second oven beds in', before: null,
       after: 'It has no measure in this model.', author: 'olumi' });

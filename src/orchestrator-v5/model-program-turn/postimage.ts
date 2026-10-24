@@ -163,12 +163,13 @@ export function validatePostimage(base: CanonicalModelT, raw: unknown,
       return out.filter((x) => x !== null);
     };
     // An added left-out item is its substance in plain words, starting with its why (the card reads "Leaves out ‘its words’
-    // (after)"): then what Olumi asks, what it concerns and whose words it is in, each only when present. Its words are the
-    // label and whose it is the author, so neither is said twice; no field is hidden.
+    // (after)"): then what Olumi asks, what it concerns and whose words it is in, each only when present: "Your words" only
+    // for the person's own, a reported someone's by their name. Its words are the label and whose it is the author, so
+    // neither is said twice; no field is hidden.
     const leftOut = (r: Rec) => [String(r['why']),
       ...(typeof r['question'] === 'string' ? [`Olumi asks: “${r['question']}”`] : []),
       ...(Array.isArray(r['concerns']) && r['concerns'].length > 0 ? [`It concerns ${(r['concerns'] as string[]).map(now.named).join(' and ')}`] : []),
-      ...(typeof r['quote'] === 'string' ? [`Your words: “${r['quote']}”${typeof r['party'] === 'string' ? ` (from ${r['party']})` : ''}`]
+      ...(typeof r['quote'] === 'string' ? [typeof r['party'] === 'string' ? `${r['party']}’s words: “${r['quote']}”` : `Your words: “${r['quote']}”`]
         : typeof r['party'] === 'string' ? [`From ${r['party']}`] : [])]
       .reduce((said, part) => `${said}${/[.!?]$/.test(said) ? ' ' : '. '}${part}`);
     const entry = (id: string, action: ProposalChange['action'], fields: ReturnType<typeof said>, label: string, author: ProposalChange['author'], r?: Rec): ProposalChange => ({ id, kind, action, label,
