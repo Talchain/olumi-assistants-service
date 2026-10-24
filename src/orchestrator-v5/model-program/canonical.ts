@@ -106,7 +106,7 @@ export const CanonicalQuantity = z.object({
     + 'estimated: Olumi\'s provisional estimate of a coefficient, always with low and high, as wide as what is genuinely unknown. Never a fact. '
     + 'asked: a figure only the person can know (their own costs, prices, headcount, dates) that they did not give: every figure null, with a question. Never estimate it, and never ask for the result itself (a goal\'s own quantity). '
     + 'derived: worked out by exactly one relation (a definition, effect or stock): every figure null. '
-    + 'unknown: it matters, but nobody can give or responsibly estimate it yet: every figure null, basis says why. '
+    + 'unknown: only for what no goal or limit rests on, when nobody can give it yet: every figure null, basis says why. A figure a goal or limit rests on is never unknown: their fact is asked, with its question; a link or effect is estimated, with a range and a basis. '
     + 'not_applicable: it does not apply to this situation, so nothing uses it. '
     + 'unsupported: the person stated it but these forms cannot express it: every figure null, basis says what is missing.'),
   question: z.string().nullable().describe('For asked: the one plain question to the person that would give this figure, in their words, never internal terms. Null otherwise.'),

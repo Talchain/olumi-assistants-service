@@ -7,7 +7,7 @@ import { HOST_SCIENCE_AND_SOURCE_RULES, HOST_TOOL_CONTRACT } from '../coach-rout
 import { createHash } from 'node:crypto';
 import * as drafting from '../../path-b/drafting-guidance.js';
 import * as coreInstructions from '../../core-route/instructions.js';
-import { DRAFTING_INSTRUCTIONS, UPDATE_PREFIX } from '../../model-program-turn/prompt.js';
+import { CANONICAL_JSON_SCHEMA, DRAFTING_INSTRUCTIONS, UPDATE_PREFIX } from '../../model-program-turn/prompt.js';
 import * as programDraft from '../../model-program-turn/draft.js';
 
 const { CORE_DRAFTER_RULES } = drafting;
@@ -177,6 +177,10 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     for (const rule of ['return the WHOLE model, by the same rules.', 'Every option reaches every measured goal, a goal this change adds included.',
       'A figure of theirs quotes their words copied exactly, never reworded or joined;']) expect(count(UPDATE_PREFIX, rule), rule).toBe(1);
     expect(Object.keys(programDraft)).not.toContain('UPDATE_PREFIX');
+    // The schema is prompt text too (sent on every drafting call): `unknown` only where nothing rests on it (served funding dead end).
+    const sentSchema = JSON.stringify(CANONICAL_JSON_SCHEMA);
+    expect(count(sentSchema, 'unknown: only for what no goal or limit rests on, when nobody can give it yet: every figure null, basis says why. A figure a goal or limit rests on is never unknown: their fact is asked, with its question; a link or effect is estimated, with a range and a basis.')).toBe(1);
+    expect(sentSchema).not.toContain('nobody can give or responsibly estimate it yet');
   });
 
   it('the drafter saves every stated goal in their words and never approximates it, with the rule present once', () => {
