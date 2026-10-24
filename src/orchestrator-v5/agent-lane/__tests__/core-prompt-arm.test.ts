@@ -220,7 +220,9 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(Object.keys(programDraft)).not.toContain('UPDATE_PREFIX');
     // The schema is prompt text too (sent on every drafting call): `unknown` only where nothing rests on it (served funding dead end).
     const sentSchema = JSON.stringify(CANONICAL_JSON_SCHEMA);
-    expect(count(sentSchema, 'unknown: it matters, but no defensible range can be given yet (at most its direction): every figure null; basis says why and what would size it.')).toBe(1);
+    expect(count(sentSchema, 'unknown: it matters, but no defensible range can be given yet (at most its direction, in direction): every figure null; basis says why and what would size it.')).toBe(1);
+    // Issue 39 (DL 24 Oct): an unsized link's direction has its own field, said once as sent.
+    expect(count(sentSchema, 'For a link\'s size (a coefficient) with no figure, or with a range that spans zero: raises when more of the driver means more of what it moves, lowers when it means less; null when no one can say which. Null for every other quantity.')).toBe(1);
     // Neither the old open-ended text nor a rule that forces an estimate (buddy science BLOCK, 24 Oct) is sent.
     // Nor an open-ended unknown, a rule that forces an estimate, or one that makes unknown a link's default (1510a008: 50 links unknown).
     // r5 (buddy, accepted): never numerical bounds demanded where only a direction is defensible (r4's "order of magnitude").
