@@ -64,7 +64,7 @@ describe('a stated date is whole periods from today, worked out in code', () => 
     expect((await drafted(ovenArrives({ status: 'asked', stated_date: '3 November 2026' }), BRIEF)).quantity('oven_arrives')).toMatchObject({ value: 1, basis: READING('3 November 2026', '1 week', 'week') });
   });
 
-  it('a date the calendar cannot place stays asked with a question, never a figure; one already passed is not counted back', async () => {
+  it('a date the calendar cannot place stays asked with a question, never a figure; one that rounds to before now is not counted back', async () => {
     // The drafter's own figure goes: no guess survives. Its own question is kept; with none, the code asks for the date.
     const vague = await drafted(reopening({ status: 'known', author: 'olumi', value: 3, basis: 'A guess.', stated_date: 'after the summer rush', question: 'When does the club reopen?' }), CLUB_BRIEF);
     expect(vague.quantity('reopen_offset')).toMatchObject({ status: 'asked', author: 'person', value: null, low: null, high: null, basis: null, question: 'When does the club reopen?', stated_date: 'after the summer rush' });
@@ -73,20 +73,30 @@ describe('a stated date is whole periods from today, worked out in code', () => 
     const unasked = await drafted(reopening({ status: 'asked', stated_date: 'after the summer rush' }), CLUB_BRIEF);
     expect(unasked.quantity('reopen_offset')).toMatchObject({ status: 'asked', value: null, question: 'Which date do you mean by "after the summer rush"? Give a day, month and year.' });
     expect(unasked.compiled.errors).toEqual([]);
-    // Passed: 9 August is before today and is never a negative count or a guess at 0.
+    // 9 August, 76 days back, rounds to 2 months before now: never a negative count, never a guess at 0.
     const passed = await drafted(reopening({ status: 'asked', stated_date: '9 August 2026' }), CLUB_BRIEF);
     expect(passed.quantity('reopen_offset')).toMatchObject({ status: 'unsupported', value: null, question: null,
-      basis: '9 August 2026 is before today, 24 October 2026, so the model cannot count it in whole months from now.' });
+      basis: '9 August 2026 is 76 days before today, 24 October 2026, so the model cannot count it in whole months from now.' });
     expect(passed.compiled.errors).toEqual([]);
     expect(passed.compiled.perGoal[0]!.status).toBe('withheld');
   });
 
-  it('calendar order before rounding (buddy + Codex BLOCK on #3744): yesterday has passed, though it rounds to 0 months; today is 0; a date 10 days ahead is 0, known', async () => {
+  it('rounded from today, then held to what the quantity can take (DL 24 Oct): within half a month of today, before or after, is now, its basis saying which side; a start that rounds before now, or a length under one period, is unsupported', async () => {
     const at = async (words: string) => (await drafted(reopening({ status: 'asked', stated_date: words }), CLUB_BRIEF)).quantity('reopen_offset');
-    expect(await at('23 October 2026')).toMatchObject({ status: 'unsupported', value: null, basis: '23 October 2026 is before today, 24 October 2026, so the model cannot count it in whole months from now.' });
-    expect(await at('2026-10-23')).toMatchObject({ status: 'unsupported', value: null });
+    expect(await at('23 October 2026')).toMatchObject(reading(0, '23 October 2026', 'Olumi\'s reading of the date: 23 October 2026 is 1 day before today, 24 October 2026; counted as now, to the nearest whole month.'));
+    expect(await at('2026-10-23')).toMatchObject({ status: 'known', value: 0 });
     expect(await at('24 October 2026')).toMatchObject(reading(0, '24 October 2026', READING('24 October 2026', '0 months')));
-    expect(await at('3 November 2026')).toMatchObject({ status: 'known', value: 0 });
+    expect(await at('3 November 2026')).toMatchObject(reading(0, '3 November 2026', READING('3 November 2026', '0 months')));
+    // 45 days back rounds to −1, below a start's 0.
+    expect(await at('9 September 2026')).toMatchObject({ status: 'unsupported', value: null, question: null,
+      basis: '9 September 2026 is 45 days before today, 24 October 2026, so the model cannot count it in whole months from now.' });
+    // A deadline (a window's length from now) needs at least one period: 10 days ahead, or yesterday, rounds to 0.
+    const deadline = async (words: string) => { const m = club(); setQ(m, 'months', { stated_date: words }); return (await drafted(m, CLUB_BRIEF)).quantity('months'); };
+    expect(await deadline('3 November 2026')).toMatchObject({ status: 'unsupported', value: null,
+      basis: '3 November 2026 is less than half a month from today, 24 October 2026, so the model cannot count it in whole months from now.' });
+    expect(await deadline('23 October 2026')).toMatchObject({ status: 'unsupported', value: null,
+      basis: '23 October 2026 is 1 day before today, 24 October 2026, so the model cannot count it in whole months from now.' });
+    expect(await deadline('9 January 2027')).toMatchObject({ status: 'known', author: 'olumi', value: 3 });
   });
 
   it('month ends, a leap day and a year time step: whole calendar months as the deadline calendar counts them (a month end clamped), years as twelve of them', () => {
@@ -98,7 +108,8 @@ describe('a stated date is whole periods from today, worked out in code', () => 
     expect(on('2027-01-31', '28 February 2027')).toMatchObject({ status: 'known', value: 1 });
     expect(on('2027-01-31', '31 March 2027')).toMatchObject({ status: 'known', value: 2 });
     // Today a leap day: the day before has passed; 29 March is one month on; 28 February 2029 is twelve (Feb 29 clamped).
-    expect(on('2028-02-29', '28 February 2028')).toMatchObject({ status: 'unsupported', value: null });
+    expect(on('2028-02-29', '28 February 2028')).toMatchObject({ status: 'known', value: 0,
+      basis: 'Olumi\'s reading of the date: 28 February 2028 is 1 day before today, 29 February 2028; counted as now, to the nearest whole month.' });
     expect(on('2028-02-29', '29 March 2028')).toMatchObject({ status: 'known', value: 1 });
     expect(on('2028-02-29', '28 February 2029')).toMatchObject({ status: 'known', value: 12 });
     // A year time step: 24 months is 2 years; 3 months is 0; 18 months rounds up to 2.
@@ -146,7 +157,7 @@ describe('a stated date is whole periods from today, worked out in code', () => 
       before: '6 month, for the date "9 April 2027"', after: '6 month, for the date "2027-04-09"', author: 'olumi' }]);
   });
 
-  it('marketing r5 and r4 (DoD-G), their saved timing records verbatim with the date words the drafter now records: r5\'s launch is no longer unsupported, and r4\'s budget start, already passed, is no longer asked but said unsupported', async () => {
+  it('marketing r5 and r4 (DoD-G), their saved timing records verbatim with the date words the drafter now records: r5\'s launch is no longer unsupported, and r4\'s budget start, 15 days back, is now (counted as such) and no longer asked', async () => {
     // r5's launch_offset, as saved at 2164e468: unsupported, its basis on rounding; the drafter now records the launch date.
     const r5: Partial<CanonicalQuantityT> = { label: 'Time from now until the feature launch', unit: 'month', kind: 'fact', status: 'unsupported', author: 'person',
       quote: 'We are working from 9 October 2026, with launch on 9 April 2027 and the three-month sales assessment on 9 July 2027.',
@@ -169,12 +180,11 @@ describe('a stated date is whole periods from today, worked out in code', () => 
     };
     const brief = `${CLUB_BRIEF} We can spend £800 in the 12 months starting on 9 October 2026.`;
     expect((await drafted(budgeted(r4), brief)).compiled.perLimit[0]).toMatchObject({ status: 'asks', asks: ['budget_start_offset'] });
-    // 9 October is 15 days before today: passed, so never "0 months from now" (buddy + Codex BLOCK on #3744), and never asked again.
+    // 9 October is 15 days before today: within half a month, so now, its basis saying it is before today (DL 24 Oct).
     const r4after = await drafted(budgeted({ ...r4, stated_date: '9 October 2026' }), brief);
-    const PASSED = '9 October 2026 is before today, 24 October 2026, so the model cannot count it in whole months from now.';
-    expect(r4after.quantity('budget_start_offset')).toMatchObject({ status: 'unsupported', author: 'olumi', value: null, question: null, stated_date: '9 October 2026', basis: PASSED });
-    expect(r4after.compiled.perLimit[0]).toMatchObject({ status: 'withheld', asks: [] });
-    expect(r4after.compiled.perLimit[0]!.reasons.some((x) => x.includes(PASSED))).toBe(true);
+    expect(r4after.quantity('budget_start_offset')).toMatchObject(reading(0, '9 October 2026',
+      'Olumi\'s reading of the date: 9 October 2026 is 15 days before today, 24 October 2026; counted as now, to the nearest whole month.'));
+    expect(r4after.compiled.perLimit[0]).toMatchObject({ status: 'calculable', asks: [] });
     expect(r4after.compiled.errors).toEqual([]);
   });
 });

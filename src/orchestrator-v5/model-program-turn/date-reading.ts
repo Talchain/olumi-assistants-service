@@ -11,8 +11,10 @@
  * change goal's reference: "now" stays the level at period 0, whatever window the date places (AIE).
  *
  * Fixed when the model is written: a date the change did not alter keeps its saved reading (`saved`), so a reopen or a later
- * update never moves it as the days pass. A date the calendar cannot place is asked, never guessed; a date before today is
- * unsupported (period 0 is now, so nothing counts back), whatever a rounding to whole periods would give.
+ * update never moves it as the days pass. A date the calendar cannot place is asked, never guessed. Period 0 is now, so a date
+ * within half a period of today, before or after, is now (DL 24 Oct: better data never reads worse); one that rounds below what
+ * its quantity can hold (before now for a start, under one period for a length) is unsupported. The basis always says which
+ * side of today the date falls.
  */
 import type { CanonicalModelT, CanonicalQuantityT } from '../model-program/canonical.js';
 import { readCalendarDay, readStatedDeadline, sayDate, timeBetween } from '../goal-target/deadline-date.js';
@@ -27,10 +29,10 @@ export function readStatedDate(words: string, today: string): string | null {
   return /\b\d{4}\b/.test(plain) ? readCalendarDay(plain, today) : null;
 }
 
-/** Whole periods from `today` to a `date` on or after it, to the nearest whole period (a half rounds up). */
+/** Whole periods from `today` to `date`, signed, to the nearest whole period (a half rounds up, so half a period back is now). */
 export function periodsFromToday(today: string, date: string, period: Period): number {
   const raw = period === 'week' ? timeBetween(today, date, 'weeks') : period === 'month' ? timeBetween(today, date, 'months') : timeBetween(today, date, 'months') / 12;
-  return Math.round(raw);
+  return Math.round(raw) + 0;
 }
 
 /**
@@ -51,7 +53,7 @@ function fromNowTimings(model: CanonicalModelT): Map<string, number> {
   return least;
 }
 
-const plural = (n: number, period: Period) => `${n} ${period}${n === 1 ? '' : 's'}`;
+const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'}`;
 
 /** One quantity's date words read against today: Olumi's reading, or why there is none. */
 function readOne(q: CanonicalQuantityT, words: string, today: string, period: Period, min: number): CanonicalQuantityT {
@@ -61,15 +63,16 @@ function readOne(q: CanonicalQuantityT, words: string, today: string, period: Pe
     return { ...q, ...none, status: 'asked', author: 'person', basis: null,
       question: q.question !== null && q.question.trim() !== '' ? q.question : `Which date do you mean by "${words}"? Give a day, month and year.` };
   }
-  // Calendar order first (buddy + Codex BLOCK on #3744): a date before today has passed, whatever a rounding would give.
-  const passed = date < today;
-  const n = passed ? null : periodsFromToday(today, date, period);
-  if (n === null || n < min) {
+  // Rounded from today, then held to what the quantity can take; the basis says which side of today the date falls (DL 24 Oct).
+  const n = periodsFromToday(today, date, period);
+  const before = date < today ? `${sayDate(date)} is ${plural(timeBetween(date, today, 'days'), 'day')} before today, ${sayDate(today)}` : null;
+  if (n < min) {
     return { ...q, ...none, status: 'unsupported', author: 'olumi', question: null,
-      basis: `${sayDate(date)} is ${passed ? 'before today' : `less than one whole ${period} from today`}, ${sayDate(today)}, so the model cannot count it in whole ${period}s from now.` };
+      basis: `${before ?? `${sayDate(date)} is less than half a ${period} from today, ${sayDate(today)}`}, so the model cannot count it in whole ${period}s from now.` };
   }
   return { ...q, ...none, status: 'known', author: 'olumi', value: n, question: null,
-    basis: `Olumi's reading of the date: ${sayDate(date)} is ${plural(n, period)} from today, ${sayDate(today)}, to the nearest whole ${period}.` };
+    basis: before !== null ? `Olumi's reading of the date: ${before}; counted as now, to the nearest whole ${period}.`
+      : `Olumi's reading of the date: ${sayDate(date)} is ${plural(n, period)} from today, ${sayDate(today)}, to the nearest whole ${period}.` };
 }
 
 /** What a date reading sets on its quantity: the figure, what it is and whose, and why. */
