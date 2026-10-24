@@ -63,9 +63,11 @@ const GROUPS: Readonly<Record<Family, Readonly<Record<string, string>>>> = {
 };
 
 export type PostimageResult =
-  | { readonly ok: true; readonly model: CanonicalModelT; readonly changes: readonly ProposalChange[] }
+  | { readonly ok: true; readonly model: CanonicalModelT; readonly changes: readonly ProposalChange[]; readonly kept: readonly string[] }
   | { readonly ok: false; readonly code: 'schema' | 'duplicate_id' | 'moved_record' | 'omitted_record' | 'removal_not_applied' | 'unknown_removal' | 'recycled_id'
-    | 'unverified_person_words' | 'unshown_change' | 'invalid_change_entry' | 'no_change'; readonly reason: string; readonly ids: readonly string[] };
+    | 'unverified_person_words' | 'unshown_change' | 'invalid_change_entry' | 'no_change'; readonly reason: string; readonly ids: readonly string[];
+    /** Which words check refused it: their words anywhere, or this turn's. */
+    readonly check?: 'their_words' | 'this_turn' };
 
 /** The person's words: the same words in the same order, in compile's one form (case, curly quotes, dashes, white space folded). */
 export const verbatimIn = (quote: unknown, words: readonly string[]): boolean =>
@@ -132,7 +134,8 @@ export function validatePostimage(base: CanonicalModelT, raw: unknown,
   const parsed = CanonicalModel.safeParse(raw);
   if (!parsed.success) return { ok: false, code: 'schema', reason: 'The proposed model is not in the model format.', ids: [] };
   const post = parsed.data;
-  const refuse = (code: Exclude<PostimageResult, { ok: true }>['code'], ids: readonly string[], reason: string): PostimageResult => ({ ok: false, code, reason, ids });
+  const refuse = (code: Exclude<PostimageResult, { ok: true }>['code'], ids: readonly string[], reason: string, check?: 'their_words' | 'this_turn'): PostimageResult =>
+    ({ ok: false, code, reason, ids, ...(check ? { check } : {}) });
   // Preservation by (family, id), before anything is compared.
   const baseIn = new Map(FAMILIES.map(([f]) => [f, new Set(idsOf(base, f))] as const));
   const dup = FAMILIES.flatMap(([f]) => idsOf(post, f).filter((id, i, all) => all.indexOf(id) !== i));
@@ -157,6 +160,7 @@ export function validatePostimage(base: CanonicalModelT, raw: unknown,
   const now = wordsIn(post);
   const history = [...base.history];
   const unverified: string[] = [];
+  const keptAsSaved: string[] = [];
   const unshown: string[] = [];
   const families = Object.fromEntries(FAMILIES.map(([family, kind]) => {
     const before = new Map((base[family] as readonly Rec[]).map((r) => [String(r['id']), r] as const));
@@ -218,7 +222,11 @@ export function validatePostimage(base: CanonicalModelT, raw: unknown,
       if (old !== undefined && fields.length === 0 && !unshown.some((u) => u.startsWith(`${String(r['id'])} (`))) return old;
       // A figure of theirs changed, or what it is (an "I don't know" turning asked into unknown): their words THIS turn (buddy 24 Oct).
       const refigured = family === 'quantities' && old !== undefined && r['author'] === 'person' && (['value', 'low', 'high', 'status'] as const).some((k) => old[k] !== r[k]);
-      if (personAttributions(r).some((a) => !verbatimIn(a['quote'], opts.words)) || (refigured && !verbatimIn(r['quote'], opts.fresh))) unverified.push(String(r['id']));
+      const unquoted = personAttributions(r).some((a) => !verbatimIn(a['quote'], opts.words));
+      // A figure of theirs moved without their words this turn stays exactly as saved, named, and the rest goes ahead (DL 24 Oct:
+      // preservation by item); a new claim of their words still refuses the card.
+      if (refigured && !unquoted && !verbatimIn(r['quote'], opts.fresh)) { keptAsSaved.push(String(r['id'])); return old!; }
+      if (unquoted) unverified.push(String(r['id']));
       const record = accepted(r, opts.approver ?? null) as Rec;
       changes.push(entry(String(r['id']), old === undefined ? 'add' : 'change', fields, now.title(family, record), authorOf(record), r));
       if (old !== undefined) history.push({ id: String(r['id']), change: 'superseded', old: JSON.stringify(old), quote: typeof r['quote'] === 'string' ? r['quote'] : null, author_id: opts.approver ?? null });
@@ -231,15 +239,17 @@ export function validatePostimage(base: CanonicalModelT, raw: unknown,
     return [family, records];
   })) as Pick<CanonicalModelT, Family>;
   if (unshown.length > 0) return refuse('unshown_change', unshown, `The card cannot show every change to ${unshown.join('; ')}; nothing is proposed.`);
-  if (unverified.length > 0) return refuse('unverified_person_words', unverified, `${unverified.join(', ')}: the person's items must quote their words exactly.`);
+  if (unverified.length > 0) return refuse('unverified_person_words', unverified, `${unverified.join(', ')}: the person's items must quote their words exactly.`, 'their_words');
   for (const [key, label] of [['question', 'The question'], ['period', 'The time step']] as const) {
     if (base[key] !== post[key]) changes.push({ id: key, kind: 'record', action: 'change', label, before: base[key], after: post[key], author: 'olumi' });
   }
+  // Nothing else changes: the figure kept as saved was the whole change, so it is refused by name, never a silent "no change".
+  if (changes.length === 0 && keptAsSaved.length > 0) return refuse('unverified_person_words', keptAsSaved, `${keptAsSaved.join(', ')}: the person's items must quote their words this turn.`, 'this_turn');
   if (changes.length === 0) return refuse('no_change', [], 'The proposed model is the saved one: nothing changes.');
   // Every entry as the card reads it (one contract): an entry the card could not show refuses the proposal, never drops.
   const invalid = changes.filter((c) => !ProposalChangeSchema.safeParse(c).success).map((c) => c.id);
   if (invalid.length > 0) return refuse('invalid_change_entry', invalid, `The card cannot show ${invalid.join(', ')} (an item needs a name); nothing is proposed.`);
-  return { ok: true, model: { ...post, ...families, history }, changes };
+  return { ok: true, model: { ...post, ...families, history }, changes, kept: keptAsSaved };
 }
 
 /** The reading card's order: what they want and what they could do first, then the structure, then the figures. */

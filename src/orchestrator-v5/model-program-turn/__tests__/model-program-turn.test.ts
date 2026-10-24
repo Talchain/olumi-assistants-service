@@ -1303,6 +1303,41 @@ describe('the model-program turn on the real core route', () => {
     expect(removed).toMatchObject({ status: 'refused', reason: 'not_an_answer', detail: '"oven price" (oven_price): the change removed what you answered, so nothing changed.', data: { ids: ['oven_price'] } });
   });
 
+  it('a figure of theirs the drafter moves without their words this turn stays exactly as saved, named, and the rest of the card goes ahead (DL 24 Oct, marketing: the goals were refused over one such figure); a new claim of their words still refuses the card', async () => {
+    replies = [JSON.stringify(bakery())];
+    expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
+    const saved = JSON.parse(JSON.stringify(persisted!.living_model.canonical)) as CanonicalModelT;
+    const deps = { dispatch, proposals: new ProposalStore() };
+    const goal = (d: CanonicalModelT, targetQuote: string) => {
+      d.quantities.push(q('stretch_target', 'loaf/week', { value: 400, quote: targetQuote }));
+      d.goals.push({ ...d.goals[0]!, id: 'stretch', label: 'Reach 400 loaves a week', measure: { ...d.goals[0]!.measure!, target: 'stretch_target' }, quote: 'reach 400 loaves a week' });
+    };
+    const ask = (words: string, reply: string) => {
+      replies = [reply]; sent.length = 0;
+      return proposeProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words },
+        ProgramChangeParams.parse({ public_label: 'A second goal', basis: 'their goal', request: 'Add a second goal: reach 400 loaves a week.', remove: [] })) as Promise<Json>;
+    };
+    const heldOf = (p: Json) => (deps.proposals.get(p.data.proposal_id)!.living_model as { canonical: CanonicalModelT }).canonical;
+    // (1) The drafter moves their 300 (still quoting their brief) while adding the goal: the goal goes ahead; their figure stays
+    // exactly as saved and is named, so the agent can say it stayed as it was.
+    const moved = await ask('We also want to reach 400 loaves a week.', savedWith((d) => { setQ(d, 'base_sales', { value: 320 }); goal(d, 'reach 400 loaves a week'); }));
+    expect(moved.status, JSON.stringify(moved)).toBe('ok');
+    expect(moved.data.changes.map((c: Json) => [c.id, c.action]).sort()).toEqual([['stretch', 'add'], ['stretch_target', 'add']]);
+    expect(moved.data.kept_as_saved).toEqual([{ id: 'base_sales', reason: '"base sales" stays as saved: the change to it was not in their words this turn.' }]);
+    expect(heldOf(moved).quantities.find((x) => x.id === 'base_sales')).toEqual(saved.quantities.find((x) => x.id === 'base_sales'));
+    expect(heldOf(moved).goals.map((g) => g.id)).toEqual(['more_loaves', 'stretch']);
+    // (2) A NEW record claiming words of theirs they never wrote still refuses the whole card, by id.
+    expect(await ask('We also want to reach 400 loaves a week.', savedWith((d) => goal(d, 'reach four hundred loaves'))))
+      .toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['stretch_target'], check: 'their_words' } });
+    // (3) Their figure changed in their words this turn is taken, on the card as theirs.
+    const now = 'We now bake 320 loaves a week. We also want to reach 400 loaves a week.';
+    const taken = await ask(now, savedWith((d) => { setQ(d, 'base_sales', { value: 320, quote: 'We now bake 320 loaves a week' }); goal(d, 'reach 400 loaves a week'); }));
+    expect(taken.status, JSON.stringify(taken)).toBe('ok');
+    expect(taken.data.changes.find((c: Json) => c.id === 'base_sales')).toMatchObject({ action: 'change', author: 'person' });
+    expect(taken.data).not.toHaveProperty('kept_as_saved');
+    expect(heldOf(taken).quantities.find((x) => x.id === 'base_sales')).toMatchObject({ value: 320, quote: 'We now bake 320 loaves a week' });
+  });
+
   it('targeted answers: whose an answer is comes from what the AI declares, checked literally (Codex r1 #3727): Olumi\'s estimate stays Olumi\'s, ranged, never in their words; a mismatch is refused, never re-authored', async () => {
     replies = [JSON.stringify(bakery())];
     expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
@@ -1404,10 +1439,16 @@ describe('the model-program turn on the real core route', () => {
     // Refused: a figure only they know, INVENTED as theirs (words they never wrote).
     replies = [completed((d) => setQ(d, 'features_now', { status: 'known', value: 12, question: null, quote: 'about 12 a month' }))];
     expect(await propose()).toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['features_now'] } });
-    // Refused: one of their figures rewritten under their EARLIER words (their budget, quoted from the brief).
+    // Never taken: one of their figures rewritten under their EARLIER words (their budget, quoted from the brief). It stays
+    // exactly as saved, named, and the rest of the card goes ahead (DL 24 Oct: preservation by item, never a refusal of the rest).
     const budget = before.quantities.find((x) => x.author === 'person' && x.value !== null && x.kind === 'fact')!;
     replies = [completed((d) => setQ(d, budget.id, { value: budget.value! + 1 }))];
-    expect(await propose()).toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: [budget.id] } });
+    const rewritten = await propose() as Json;
+    expect(rewritten.status, JSON.stringify(rewritten)).toBe('ok');
+    expect(rewritten.data.kept_as_saved.map((k: Json) => k.id)).toEqual([budget.id]);
+    expect(rewritten.data.changes.map((c: Json) => c.id)).not.toContain(budget.id);
+    expect((deps.proposals.get(rewritten.data.proposal_id)!.living_model as { canonical: CanonicalModelT }).canonical.quantities.find((x) => x.id === budget.id))
+      .toEqual(before.quantities.find((x) => x.id === budget.id));
     // Refused: a record left out without a listed removal; nothing is removed unless the person asks.
     const dropped = before.options[0]!.id;
     replies = [completed((d) => { d.options = d.options.filter((o) => o.id !== dropped); })];

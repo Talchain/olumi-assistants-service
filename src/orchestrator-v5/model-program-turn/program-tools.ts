@@ -140,7 +140,7 @@ async function prepare(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs)
   // Whose an answer is, as declared, checked literally (Codex r1 #3727): theirs only in their words THIS turn, whatever it
   // changes (a basis-only answer too); Olumi's an estimate with its range and basis, never their words.
   const stale = answers.filter((a) => a.author === 'person' && !verbatimIn(a.quote, fresh)).map((a) => a.id);
-  if (stale.length > 0) return refused('unverified_person_words', `${stale.join(', ')}: your words this turn don't contain it.`, { ids: stale });
+  if (stale.length > 0) return refused('unverified_person_words', `${stale.join(', ')}: your words this turn don't contain it.`, { ids: stale, check: 'this_turn' });
   const misowned = answers.filter((a) => (a.author === 'olumi') !== (a.status === 'estimated')
     || (a.author === 'olumi' && (a.low === null || a.high === null || !a.basis?.trim() || a.quote !== null || a.party !== null))).map((a) => a.id);
   if (misowned.length > 0) return refused('not_an_answer', `${misowned.join(', ')}: their answer is known or unknown, in their words; Olumi's is estimated, with low, high and a basis, never their words.`, { ids: misowned });
@@ -155,13 +155,14 @@ async function prepare(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs)
   const draft = answered(postimage, answers);
   if (typeof draft === 'string') return refused('not_an_answer', draft);
   const v = validatePostimage(program.canonical, draft.model, { removals: args.remove, words, fresh, approver: ctx.authenticated_user_id });
-  if (!v.ok) return refused(v.code, v.reason, { ids: v.ids });
+  if (!v.ok) return refused(v.code, v.reason, { ids: v.ids, ...(v.check ? { check: v.check } : {}) });
   // The person's words this turn are kept with the model: what it was changed from, in their words.
   const next = withNewRun({ ...program, canonical: v.model, person_words: words });
   if (next.evaluation.compiled.errors.length > 0) return refused('does_not_compile', next.evaluation.compiled.errors.slice(0, 3).map((e) => e.message).join(' '));
   const p = holdProgramCard(deps.proposals, { scenarioId: ctx.scenario_id, userId: ctx.authenticated_user_id, graphHash: base.saved.graphHash, identity: base.saved.identity! },
     { label: args.public_label, basis: args.basis, program: next.program, changes: v.changes });
-  return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: base.saved.graphHash, changes: v.changes, would_show: runWords(next.run) });
+  return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: base.saved.graphHash, changes: v.changes, would_show: runWords(next.run),
+    ...(v.kept.length > 0 ? { kept_as_saved: v.kept.map((id) => ({ id, reason: `"${program.canonical.quantities.find((x) => x.id === id)!.label}" stays as saved: the change to it was not in their words this turn.` })) } : {}) });
 }
 
 /**
