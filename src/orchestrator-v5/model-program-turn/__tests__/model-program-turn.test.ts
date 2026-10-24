@@ -1101,12 +1101,45 @@ describe('the model-program turn on the real core route', () => {
     });
 
     it('their figures not yet confirmed (a first draft) are said as Olumi\'s reading of them, all or by name', () => {
-      expect(faceOf(allTheirs(), OWN)).toContain(', in this model, if Olumi has read your figures right (not yet confirmed by you): in every simulated draw');
+      expect(faceOf(allTheirs(), OWN)).toContain(', in this model, on Olumi’s reading of your figures (not yet confirmed): in every simulated draw');
       const one = approved(allTheirs());
       one.quantities = one.quantities.map((x) => (x.id === 'members_now' ? { ...x, approval: 'proposed' } : x));
       const face = faceOf(one, OWN);
-      expect(face).toContain(', in this model, if Olumi has read ‘members now’ right (not yet confirmed by you): in every simulated draw');
+      expect(face).toContain(', in this model, on Olumi’s reading of ‘members now’ (not yet confirmed): in every simulated draw');
       expect(face).not.toContain('on your figures');
+      // With a condition too: the reading leads, then what the chance is conditional on.
+      const both = allTheirs();
+      both.conditions.push(hall);
+      expect(faceOf(both, `${OWN} The council must let us use the hall.`)).toContain(', in this model, on Olumi’s reading of your figures (not yet confirmed), if your condition ‘The council must let us use the hall’ is met: in every simulated draw');
+    });
+
+    it('Codex #3738: a relation they have not confirmed is Olumi\'s reading; a link of Olumi\'s in their relation is Olumi\'s assumed relationship', () => {
+      const rel = approved(allTheirs());
+      rel.relations = rel.relations.map((r) => (r.id === 'joins_rel' ? { ...r, approval: 'proposed' } : r));
+      const relFace = faceOf(rel, OWN);
+      expect(relFace).toContain(', in this model, on Olumi’s reading of ‘joins’ (not yet confirmed): in every simulated draw');
+      expect(relFace).not.toContain('on your figures');
+      const link = approved(allTheirs());
+      link.relations = link.relations.map((r) => (r.form === 'effect' ? { ...r, terms: r.terms.map((t) => ({ ...t, author: 'olumi', quote: null })) } : r));
+      const linkFace = faceOf(link, OWN);
+      expect(linkFace).toContain(', in this model, if ‘joins’ follows Olumi’s assumed relationship: in every simulated draw');
+      expect(linkFace).not.toContain('on your figures');
+    });
+
+    it('Codex #3738: the same premise reaching the chance twice (both goals rest on it, one also names it) is named once', () => {
+      const m = approved(allTheirs());
+      m.quantities.push(q('floor', 'member', { value: 320, quote: 'at least 320 members', approval: 'approved' }));
+      m.goals.push({ ...m.goals[0]!, id: 'keep_320', label: 'Keep at least 320 members', measure: { ...m.goals[0]!.measure!, target: 'floor' }, quote: 'keep at least 320 members' });
+      m.assumptions.push({ id: 'fees', text: 'Membership fees stay the same.', applied: true, concerns: [], author: 'olumi', quote: null, ...at });
+      m.goals = m.goals.map((g) => (g.id === 'reach_340' ? { ...g, measure: { ...g.measure!, assumptions: ['fees'] } } : g));
+      const v = evaluateCanonical(m, { sourceText: `${OWN} And keep at least 320 members.`, seed: 7 }).view as Json;
+      const face = (v.options as Json[]).find((o) => o.option_id === 'promotion')!.cell.face as string;
+      const FEES = 'Olumi’s assumption ‘Membership fees stay the same’ holds';
+      expect(face.split(FEES).length - 1).toBe(1);
+      expect(face).toContain(`, in this model, if ${FEES}: in every simulated draw`);
+      expect((v.goal_chance.targets.per_target as Json[]).map((t) => t.words)).toEqual([
+        `‘members’ being at least 340 member at 3 months from now, in this model, if ${FEES}`,
+        `‘members’ being at least 320 member at 3 months from now, in this model, if ${FEES}`]);
     });
 
     it('several goals: each goal\'s own basis names only its own premises; the joint names every one', () => {

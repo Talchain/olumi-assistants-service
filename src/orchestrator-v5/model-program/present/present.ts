@@ -9,8 +9,9 @@
  *     exactly the simulation measured the chance, never a range for the chance. No win share is computed or said.
  *   - Every chance's words restate its question: the quantity, the target with its unit, the horizon counted from now, the
  *     aggregation, and what is left out. They end with the BASIS: "on your figures" only when every input the chance rests on
- *     is the person's and confirmed, no law was assumed and no premise applies (R8); otherwise conditional, "if <the premises
- *     it rests on, Olumi's assumptions and the person's unconfirmed figures, listed>". Never a forecast.
+ *     is the person's and confirmed, no law was assumed and no premise applies (R8); otherwise "on Olumi's reading of your
+ *     figures (not yet confirmed)" for figures they have not confirmed, and/or conditional, "if <the premises it rests on and
+ *     Olumi's assumptions, listed>". Never a forecast.
  *   - Several goals: each goal's own chance per option (`per_target`), and the joint. A goal the compiler withheld (an ask
  *     or an unknown) is never folded into a partial joint: the joint is withheld with its reason, and only the goals the ask
  *     feeds wait (DL ruling d). A goal waiting on exactly ONE asked quantity gets a THRESHOLD, found by bisection over that
@@ -54,6 +55,10 @@ export interface PresentQuantity {
   readonly shown_in?: { readonly unit: string; readonly factor: number };
   /** The canonical `approval`: proposed until the person confirms Olumi's reading of it. Absent: not recorded, said as before. */
   readonly approval?: 'proposed' | 'approved';
+  /** The canonical `approval` of the relation defining it. Absent: not recorded, said as before. */
+  readonly relation_approval?: 'proposed' | 'approved';
+  /** One of its effect relation's links is Olumi's (an effect term authored by Olumi), whoever wrote the relation. */
+  readonly olumi_term?: boolean;
 }
 /** A premise a goal's chance is worked out under (compile's `rests_on`): an applied assumption or a prerequisite, as written. */
 export interface PresentPremise {
@@ -321,26 +326,37 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     // product, a sum, a difference such as x − x for a zero start) and a stock's accumulation are never assumptions,
     // whoever wrote them; a unit conversion is a structural constant (above).
     // DL ruling (author not recorded): an effect relation with no recorded author is listed, never read as the person's.
-    if (x.equation?.form !== 'effect' || m?.relation_author === 'person') return [];
-    return [m?.relation_author === 'olumi' ? `${name} follows Olumi’s assumed relationship` : `${name} follows a relationship ${NOT_RECORDED}`];
+    // R8 (Codex, #3738): a link of Olumi's in the person's effect relation is Olumi's assumed relationship too.
+    if (x.equation?.form !== 'effect' || (m?.relation_author === 'person' && m.olumi_term !== true)) return [];
+    return [m?.relation_author === 'olumi' || m?.olumi_term === true ? `${name} follows Olumi’s assumed relationship` : `${name} follows a relationship ${NOT_RECORDED}`];
   });
   /** R8: each premise in its own words, with whose it is. */
   const premiseWords = (p: PresentPremise): string => {
     const whose = p.author === 'olumi' ? 'Olumi’s' : 'your', text = q(p.text.trim().replace(/[.!]+$/, ''));
     return p.kind === 'condition' ? `${whose} condition ${text} is met` : `${whose} assumption ${text} holds`;
   };
-  /** The person's own figures among these: their fixed figure or their range, never one whose words were not found. */
-  const theirs = (ids: ReadonlySet<string>): Quantity[] => model.quantities.filter((x) => ids.has(x.id) && meta(x.id)?.author !== 'unverified'
-    && (x.dist?.kind === 'fixed' ? (x.dist.author ?? meta(x.id)?.author) === 'person' : x.dist?.kind === 'range' && x.dist.basis === 'person_range'));
-  /** R8: the person's figures Olumi read that they have not confirmed yet (a first draft's, until its reading is accepted). */
-  const unconfirmed = (ids: ReadonlySet<string>): string[] => {
-    const all = theirs(ids), open = all.filter((x) => meta(x.id)?.approval === 'proposed');
-    return open.length === 0 ? [] : [`Olumi has read ${open.length === all.length ? 'your figures' : listWords(open.map((x) => q(label(x.id) ?? x.id)))} right (not yet confirmed by you)`];
+  /** The person's own figure: their fixed figure or their range, never one whose words were not found. */
+  const isTheirs = (x: Quantity): boolean => meta(x.id)?.author !== 'unverified'
+    && (x.dist?.kind === 'fixed' ? (x.dist.author ?? meta(x.id)?.author) === 'person' : x.dist?.kind === 'range' && x.dist.basis === 'person_range');
+  /** What Olumi read of the model among these, where its approval is recorded: the person's figures, and every relation. */
+  const readOf = (ids: ReadonlySet<string>): { readonly x: Quantity; readonly open: boolean }[] => model.quantities.flatMap((x) => {
+    const m = meta(x.id), approval = x.equation !== undefined || x.stock !== undefined ? m?.relation_approval : isTheirs(x) ? m?.approval : undefined;
+    return ids.has(x.id) && approval !== undefined ? [{ x, open: approval === 'proposed' }] : [];
+  });
+  /** R8 (Paul's wording): the figures and relations Olumi read that the person has not confirmed yet (a first draft's, until
+   * its reading is accepted), said as the lead: "on Olumi’s reading of your figures (not yet confirmed)". */
+  const unconfirmed = (ids: ReadonlySet<string>): string | undefined => {
+    const all = readOf(ids), open = all.filter((r) => r.open).map((r) => r.x);
+    return open.length === 0 ? undefined : `on Olumi’s reading of ${open.length === all.length ? 'your figures' : listWords(open.map((x) => q(label(x.id) ?? x.id)))} (not yet confirmed)`;
   };
-  /** "on your figures" only when every input is the person's and confirmed, and no premise applies; otherwise "if …". */
+  /** What the chance is conditional on: the premises, then Olumi's assumptions. */
+  const conditions = (ids: ReadonlySet<string>, premises: readonly PresentPremise[]): string[] => [...premises.map(premiseWords), ...assumptions(ids)];
+  /** "on your figures" only when every input is the person's and confirmed, and no premise applies; otherwise the reading's
+   * lead and/or "if …" ("on Olumi’s reading of your figures (not yet confirmed), if your condition ‘X’ is met"). */
   const basisWords = (ids: ReadonlySet<string>, premises: readonly PresentPremise[], readings: ReadonlySet<string> = ids): string => {
-    const a = [...premises.map(premiseWords), ...assumptions(ids), ...unconfirmed(readings)];
-    return a.length === 0 ? 'on your figures' : `if ${listWords(a)}`;
+    const lead = unconfirmed(readings), a = conditions(ids, premises);
+    const iff = a.length === 0 ? undefined : `if ${listWords(a)}`;
+    return [lead, iff].filter((x): x is string => x !== undefined).join(', ') || 'on your figures';
   };
   /**
    * A target's basis covers every option: the shared model's basis (with its premises, and the person's unconfirmed figures
@@ -348,11 +364,11 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
    * £59, Olumi’s figure").
    */
   const sharedBasisWords = (r: readonly string[], premises: readonly PresentPremise[]): string => {
-    const shared = upstream(r, null);
+    const shared = upstream(r, null), conditional = conditions(shared, premises).length > 0;
     const lead = basisWords(shared, premises, new Set([...shared, ...model.options.flatMap((o) => [...upstream(r, o.id)])]));
     const own = model.options.flatMap((o) => {
       const extra = assumptions(new Set([...upstream(r, o.id)].filter((id) => !shared.has(id))));
-      return extra.length === 0 ? [] : [`with ${q(optionLabel.get(o.id) ?? o.id)}, ${lead.startsWith('if ') ? 'also ' : ''}if ${listWords(extra)}`];
+      return extra.length === 0 ? [] : [`with ${q(optionLabel.get(o.id) ?? o.id)}, ${conditional ? 'also ' : ''}if ${listWords(extra)}`];
     });
     return [lead, ...own].join('; ');
   };

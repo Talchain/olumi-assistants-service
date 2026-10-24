@@ -59,7 +59,9 @@ function quantityMeta(model: CanonicalModelT, compiled: CompileResult, x: Execut
   const rel = new Map(m.relations.map((r) => [r.defines, r] as const));
   const own = new Map(m.quantities.map((q) => {
     const r = rel.get(q.id);
-    return [q.id, { label: q.label, author: who(q.author, q.id), approval: q.approval, ...(r !== undefined ? { relation_author: who(r.author, r.id) } : {}), ...(isApproximate(q) ? { approximate: { quote: q.quote ?? String(q.value) } } : {}) }] as const;
+    return [q.id, { label: q.label, author: who(q.author, q.id), approval: q.approval,
+      ...(r !== undefined ? { relation_author: who(r.author, r.id), relation_approval: r.approval, ...(r.form === 'effect' && r.terms.some((t) => t.author === 'olumi') ? { olumi_term: true } : {}) } : {}),
+      ...(isApproximate(q) ? { approximate: { quote: q.quote ?? String(q.value) } } : {}) }] as const;
   }));
   const goals = new Map(m.goals.map((g) => [g.id, g] as const));
   const out: Record<string, PresentQuantity> = {};
