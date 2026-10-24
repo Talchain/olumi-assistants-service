@@ -134,7 +134,8 @@ export function readRange(d: RangeDist): LawReading {
 export const AS_STATED_OPTION_ID = 'as_stated';
 const ID_RE = /^[a-z][a-z0-9_]*$/;
 const has = <T>(x: T | null | undefined): x is T => x !== null && x !== undefined;
-const norm = (s: string) => s.toLowerCase().replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[–—]/g, '-').replace(/\s+/g, ' ').trim();
+/** The one form a quote is compared in: case, curly quotes, dashes and white space folded (compile and the card alike). */
+export const norm = (s: string) => s.toLowerCase().replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[–—]/g, '-').replace(/\s+/g, ' ').trim();
 const direction = (cmp: string) => (cmp.startsWith('>') ? 'up' : 'down');
 const isPowerOfTen = (v: number) => v > 0 && Math.abs(Math.log10(v) - Math.round(Math.log10(v))) < 1e-12;
 
