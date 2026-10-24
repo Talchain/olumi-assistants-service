@@ -45,9 +45,11 @@ export type CompileErrorCode =
   | 'schema' | 'bad_id' | 'duplicate_id' | 'undefined_ref' | 'unit_unreadable' | 'unit_mismatch' | 'figure_status'
   | 'olumi_no_range' | 'missing_quote' | 'range_order' | 'no_relation' | 'relation_on_figure' | 'two_relations'
   | 'relation_shape' | 'cycle' | 'goal_and_limit' | 'goal_shape' | 'asks_for_result' | 'window' | 'timing' | 'option_shape'
-  | 'set_derived' | 'option_reaches_no_goal' | 'set_reaches_nothing' | 'risk_shape' | 'not_applicable_used'
+  | 'set_derived' | 'option_reaches_no_goal' | 'goal_reached_by_no_option' | 'set_reaches_nothing' | 'risk_shape' | 'not_applicable_used'
   | 'after_horizon' | 'fact_estimated' | 'coefficient_kind' | 'structure_value' | 'label' | 'range_kind' | 'asked_no_question';
 export type CompileError = { code: CompileErrorCode; message: string; items: string[] };
+/** An error that only asks the drafter to repair (`goalsNeedReach`): never a refusal, even when its repair call fails. */
+export const isRepairOnly = (e: CompileError): boolean => e.code === 'goal_reached_by_no_option';
 export type Outcome = 'calculable' | 'asks' | 'withheld';
 export type GoalOutcome = {
   goal_id: string;
@@ -241,8 +243,11 @@ export const structureAsked = (q: CanonicalQuantityT): CanonicalQuantityT => ({ 
 export const isApproximate = (q: CanonicalQuantityT): boolean => q.author === 'person' && q.basis === APPROXIMATE_FIGURE && q.status === 'known' && q.value !== null && q.low === null;
 
 /** `asksNeedQuestions` (a FIRST draft only, `draft.ts`): every figure that waits on the person carries the question that asks for
- *  it, so no goal waits on an ask no one can see. A saved model and an update are compiled as before (A4: the AI asks in its own words). */
-export type CompileOptions = { readonly sourceText?: string; readonly asksNeedQuestions?: boolean };
+ *  it, so no goal waits on an ask no one can see. A saved model and an update are compiled as before (A4: the AI asks in its own words).
+ *  `goalsNeedReach` (the drafter's attempts before its last, `draft.ts`): every measured goal is reached by a live option through
+ *  relations, or the repair loop says which is not. Never a refusal: the last attempt and every saved compile leave it off, so a
+ *  goal no option reaches is saved and withheld by its own reason. */
+export type CompileOptions = { readonly sourceText?: string; readonly asksNeedQuestions?: boolean; readonly goalsNeedReach?: boolean };
 
 export function compile(input: CanonicalModelT, opts: CompileOptions = {}): CompileResult {
   const model = normalise(input);
@@ -577,7 +582,8 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
   const measuredLimits = model.limits.filter((l) => has(l.measure) && limitRoots(l).every((x) => Q.has(x)));
   const goalReach = upstream(measured.flatMap(goalRoots));
   const limitReach = upstream(measuredLimits.flatMap(limitRoots));
-  // Never pressure invention: with no goal, or an aim with no measure yet (an option may act on it), no reach errors fire.
+  // Never pressure invention: with no goal, or an aim with no measure yet (an option may act on it), no OPTION reach errors
+  // fire. The per-goal check below exempts only the aim with no measure, never the measured goals beside it.
   const reachable = model.goals.length > 0 && model.goals.every((g) => has(g.measure)) && measured.length + measuredLimits.length > 0;
   const optionIds = new Set(model.options.map((o) => o.id));
   const labels = new Map<string, string>();
@@ -607,6 +613,18 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
     setTiming.set(o.id, times);
     if (reachable && o.sets.length && !reaches && o.status === 'live') {
       err('option_reaches_no_goal', `${at} changes nothing a goal or limit depends on; link what it changes to a goal's or a limit's quantity.`, [o.id]);
+    }
+  }
+  // Each measured goal is reached by a live option that changes something, through relations: reaching a limit is not reaching
+  // a goal. Only while the drafter can still repair (`goalsNeedReach`); an aim with no measure is exempt alone. The message
+  // follows the AIE's effects policy: it asks for a relation only where an option plausibly affects the goal, never a link or a
+  // size invented to connect them; "none affects it" is a valid answer, saved on the last attempt with the goal withheld.
+  const acting = model.options.filter((o) => o.status === 'live' && o.sets.length > 0);
+  if (opts.goalsNeedReach === true && acting.length > 0) for (const g of measured) {
+    const ms = g.measure!;
+    const up = upstream([ms.quantity, ...(has(ms.per) ? [ms.per] : [])]);
+    if (!acting.some((o) => o.sets.some((s) => up.has(s.quantity)))) {
+      err('goal_reached_by_no_option', `No option reaches the goal "${g.label}" (${g.id}). If an option plausibly affects it, add that relation from what the option changes: sized by the person's figure, or by Olumi's estimate with a range only where a defensible scale exists, otherwise left unknown with its direction and the evidence that would size it. Never add a link merely to connect an option to a goal; if none affects it, say so in the basis of the unknown it rests on.`, [g.id, ms.quantity]);
     }
   }
 

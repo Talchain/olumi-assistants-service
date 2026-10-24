@@ -1333,6 +1333,59 @@ describe('the model-program turn on the real core route', () => {
     expect(persisted!.living_model.canonical.quantities.find((x: Json) => x.id === 'spend_floor')).toMatchObject({ author: 'person', status: 'asked', value: null, question: null });
   });
 
+  it('DoD-G "no path": a goal no option reaches gets the repair message on each attempt but the last; the last saves, and the goal is withheld by its own reason (unknown), never refused', async () => {
+    // The marketing shape on the synthetic bakery: the oven reaches only the budget; nothing links it to what sells.
+    const noPath = bakery();
+    noPath.relations = noPath.relations.filter((r) => r.id !== 'sales_rel');
+    setQ(noPath, 'sales', { kind: 'fact', status: 'unknown', author: 'olumi', basis: 'Nothing yet links the oven to what sells.' });
+    const draft = JSON.stringify(noPath);
+    replies = [draft, draft, draft];
+    const r = (await turn({ message: BRIEF })).json();
+    expect(sent).toHaveLength(3);
+    const repair = `${REPAIR_PREFIX}\n- No option reaches the goal "Reach 380 loaves a week" (more_loaves). If an option plausibly affects it, add that relation from what the option changes: sized by the person's figure, or by Olumi's estimate with a range only where a defensible scale exists, otherwise left unknown with its direction and the evidence that would size it. Never add a link merely to connect an option to a goal; if none affects it, say so in the basis of the unknown it rests on.`;
+    expect(sent[1]!.input.at(-1)).toEqual({ role: 'user', content: repair });
+    expect(sent[2]!.input.at(-1)).toEqual({ role: 'user', content: repair });
+    expect(r.model_program.draft.attempts.map((a: Json) => a.errors.map((e: Json) => [e.code, e.items]))).toEqual([
+      [['goal_reached_by_no_option', ['more_loaves', 'sales']]], [['goal_reached_by_no_option', ['more_loaves', 'sales']]], []]);
+    expect(r.model_program.saved).toBe(true);
+    expect(persisted!.living_model.canonical).toEqual(noPath);
+    expect(r.model_program.blockers).toContainEqual({ id: 'sales', code: 'unknown', scope: ['more_loaves'] });
+    expect((persisted!.living_model.runs.at(-1).result as Json).compile.per_goal.map((g: Json) => [g.goal_id, g.status])).toEqual([['more_loaves', 'withheld']]);
+    for (const o of r.canonical_analysis_view.options as Json[]) expect([o.option_id, o.cell.face]).toEqual([o.option_id, 'Chance not shown yet']);
+
+    // A failed repair call saves the draft too: the goal's message only asks for a repair.
+    beforeEachReset();
+    replies = [draft];
+    const f = (await turn({ message: BRIEF })).json();
+    expect(f.model_program.draft.attempts.map((a: Json) => a.failed ?? null)).toEqual([null, 'call failed: Error']);
+    expect(f.model_program.saved).toBe(true);
+    // Contrast: a draft error that is not repair-only, with its repair call failing, is still refused.
+    beforeEachReset();
+    replies = [JSON.stringify(bakeryWithDefect())];
+    const d = (await turn({ message: BRIEF })).json();
+    expect(d.model_program.saved).toBe(false);
+    expect(d._agent.tool_calls).toEqual([{ name: 'draft_canonical_model', outcome: 'refused', refusal: 'does_not_compile' }]);
+  });
+
+  it('DoD-G "no path", AIE effects policy: when the AI answers that no option affects the goal (a basis note, no relation), it is asked at most twice, the last attempt saves, and the goal is withheld by that note', async () => {
+    const noPath = bakery();
+    noPath.relations = noPath.relations.filter((r) => r.id !== 'sales_rel');
+    setQ(noPath, 'sales', { kind: 'fact', status: 'unknown', author: 'olumi', basis: 'Nothing yet links the oven to what sells.' });
+    // The repair answer: no relation added, only the unknown's basis saying no option affects it.
+    const none = JSON.parse(JSON.stringify(noPath)) as CanonicalModelT;
+    setQ(none, 'sales', { basis: 'Neither option changes what sells: a second oven adds capacity, not demand.' });
+    replies = [JSON.stringify(noPath), JSON.stringify(none), JSON.stringify(none)];
+    const r = (await turn({ message: BRIEF })).json();
+    expect(sent).toHaveLength(3); // bounded: two repair messages, then the last attempt saves
+    expect(r.model_program.draft.attempts.map((a: Json) => a.errors.map((e: Json) => e.code))).toEqual([['goal_reached_by_no_option'], ['goal_reached_by_no_option'], []]);
+    expect(r.model_program.saved).toBe(true);
+    expect(persisted!.living_model.canonical).toEqual(none);
+    expect(persisted!.living_model.canonical.relations.map((x: Json) => x.id)).toEqual(['sold_rel', 'spend_rel']); // no link invented
+    expect((persisted!.living_model.runs.at(-1).result as Json).compile.per_goal.map((g: Json) => [g.goal_id, g.status])).toEqual([['more_loaves', 'withheld']]);
+    expect(r.canonical_analysis_view.goal_chance.waits_on).toContainEqual({ id: 'sales', code: 'unknown', label: 'sales', scope: ['more_loaves'], answer: null,
+      basis: 'Neither option changes what sells: a second oven adds capacity, not demand.' });
+  });
+
   it('several goals: each goal\'s own chance and the joint ride the Run\'s goal_chance unchanged through read, propose, apply and run', async () => {
     const brief = `${CLUB_BRIEF} And keep at least 320 members.`;
     const m = club();
@@ -2473,7 +2526,8 @@ describe('the model-program turn on the real core route', () => {
     b.quantities.push(q('regulars', 'person', { status: 'unknown', author: 'olumi', basis: 'Not counted yet.' }), q('regulars_target', 'person', { value: 50, quote: 'want to reach 380 loaves a week' }));
     b.goals.push({ id: 'keep_regulars', label: 'Keep 50 regulars', measure: { quantity: 'regulars', per: null, cmp: '>=', target: 'regulars_target', frame: 'level', reference: null, aggregation: 'end',
       window: null, measure_by: 'person', assumptions: [], exclusions: [] }, question: null, author: 'person', quote: 'want to reach 380 loaves a week', ...at });
-    replies = [JSON.stringify(b)];
+    // The oven reaches no regulars: the drafter is asked to repair twice, then the last attempt saves (goal_reached_by_no_option).
+    replies = Array(3).fill(JSON.stringify(b));
     const rb = (await turn({ message: `${BRIEF} The oven would cost £2,000.` })).json();
     expect(rb.model_program.saved).toBe(true);
     expect(rb.canonical_analysis_view.goal_chance.waits_on).toEqual([{ id: 'regulars', code: 'unknown', label: 'regulars', scope: ['keep_regulars'], answer: null, basis: 'Not counted yet.' }]);

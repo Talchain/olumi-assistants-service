@@ -964,3 +964,111 @@ describe('AIE §5 AMEND (DL 24 Oct): a first draft never waits on an ask no one 
       .toEqual([['asked_no_question', ['share']]]);
   });
 });
+
+describe('DoD-G marketing "no path": a measured goal no live option reaches gets a repair message, never a refusal', () => {
+  const sw = (id: string, unit: string, value: number) => structure(id, unit, value, value === 0 ? 'Nothing set yet.' : 'Switched on.');
+  /** The replayed marketing shape (synthetic gym drive): both goals rest on figures no relation links to the options, whose settings reach only the limits. */
+  const drive = (): CanonicalModelT => model({
+    question: 'How should the gym run its spring membership drive?', period: 'month',
+    quantities: [
+      person('drive_months', 'month', 3, 'over three months'),
+      qty('new_members', 'member', { status: 'unknown', author: 'olumi', basis: 'Nothing yet says how many the drive brings in.' }),
+      qty('enquiries', 'enquiry', { status: 'unknown', author: 'olumi', basis: 'Nothing yet says how many enquiries come in.' }),
+      derived('join_share', 'member/enquiry'),
+      person('members_target', 'member', 40, '40 new members'),
+      person('share_target', 'member/enquiry', 0.25, 'one in four enquiries joining'),
+      sw('spend', 'GBP', 0), person('coordinator_cost', 'GBP', 1200, 'a coordinator for £1,200'), person('ads_cost', 'GBP', 900, 'ads at £900'), person('budget', 'GBP', 1500, 'we can spend £1,500'),
+      sw('hours', 'hour/week', 0), person('coordinator_hours', 'hour/week', 2, 'two hours a week'), person('ads_hours', 'hour/week', 5, 'five hours a week'), person('hours_cap', 'hour/week', 6, 'no more than six hours a week'),
+    ],
+    relations: [def('share_rel', 'join_share', 'ratio', ['new_members', 'enquiries'])],
+    goals: [goal('members_goal', 'new_members', '>=', 'members_target', 'end', 'drive_months', '40 new members'),
+      goal('share_goal', 'join_share', '>=', 'share_target', 'end', 'drive_months', 'one in four enquiries joining')],
+    limits: [limit('within_budget', 'Within £1,500', 'spend', '<=', 'budget', 'end', 'drive_months', 'we can spend £1,500'),
+      limit('my_hours', 'No more than six hours a week', 'hours', '<=', 'hours_cap', 'every', 'drive_months', 'no more than six hours a week')],
+    options: [
+      option('coordinator', 'Hire a coordinator', [set('spend', 'coordinator_cost', 'a coordinator for £1,200'), set('hours', 'coordinator_hours', 'two hours a week')], 'Hire a coordinator'),
+      option('ads', 'Run ads', [set('spend', 'ads_cost', 'ads at £900'), set('hours', 'ads_hours', 'five hours a week')], 'Run ads'),
+    ],
+  });
+  /** The capacity shape: added capacity reaches the goal through an effect. */
+  const capacity = (): CanonicalModelT => model({
+    quantities: [person('weeks', 'week', 12, 'within 12 weeks'), person('existing', 'loaf/week', 300, 'we bake 300 loaves a week'), olumi('per_oven', 'loaf/week/oven', 80, 120, 100),
+      sw('added', 'oven', 0), structure('none_added', 'oven', 0, 'No oven added.'), sw('one_added', 'oven', 1), derived('loaves', 'loaf/week'), person('loaf_target', 'loaf/week', 380, 'reach 380 loaves a week')],
+    relations: [eff('loaves_rel', 'loaves', 'existing', [['added', 'per_oven']])],
+    goals: [goal('loaf_goal', 'loaves', '>=', 'loaf_target', 'end', 'weeks', 'reach 380 loaves a week')],
+    options: [option('keep', 'Keep one oven', [set('added', 'none_added', 'keep one oven')], 'Keep one oven'), option('second', 'A second oven', [set('added', 'one_added', 'a second oven')], 'A second oven')],
+  });
+  /** The hiring shape: both options reach the goal; one limit (quality) is reached by neither, and a limit is exempt. */
+  const hiring = (): CanonicalModelT => model({
+    question: 'Should the workshop hire a lead or two juniors?',
+    quantities: [person('weeks', 'week', 12, 'over 12 weeks'), person('base_output', 'job/week', 50, '50 jobs a week'),
+      sw('leads', 'person', 0), sw('one_lead', 'person', 1), sw('juniors', 'person', 0), person('two_juniors', 'person', 2, 'two juniors'),
+      olumi('lead_gain', 'job/week/person', 5, 15, 10), olumi('junior_gain', 'job/week/person', 3, 9, 6), derived('output', 'job/week'), person('output_target', 'job/week', 60, '60 jobs a week'),
+      person('defect_rate', '%', 4, 'about 4% come back'), person('defect_cap', '%', 5, 'under 5%'),
+      sw('spend', 'GBP', 0), person('lead_cost', 'GBP', 3000, 'a lead costs £3,000'), person('junior_cost', 'GBP', 2800, 'two juniors cost £2,800'), person('budget', 'GBP', 3500, 'up to £3,500')],
+    relations: [eff('output_rel', 'output', 'base_output', [['leads', 'lead_gain'], ['juniors', 'junior_gain']])],
+    goals: [goal('output_goal', 'output', '>=', 'output_target', 'end', 'weeks', '60 jobs a week')],
+    limits: [limit('quality', 'Under 5% come back', 'defect_rate', '<', 'defect_cap', 'end', 'weeks', 'under 5%'), limit('within_budget', 'Up to £3,500', 'spend', '<=', 'budget', 'end', 'weeks', 'up to £3,500')],
+    options: [option('lead', 'Hire a lead', [set('leads', 'one_lead', 'a lead'), set('spend', 'lead_cost', 'a lead costs £3,000')], 'Hire a lead'),
+      option('juniors_opt', 'Hire two juniors', [set('juniors', 'two_juniors', 'two juniors'), set('spend', 'junior_cost', 'two juniors cost £2,800')], 'Hire two juniors')],
+  });
+  const reach = { goalsNeedReach: true } as const;
+  const named = (r: ReturnType<typeof compile>) => r.errors.map((e) => [e.code, e.items]);
+
+  it('the marketing shape: options that reach only the limits get one repair message per goal, naming it; with the flag off (a saved model, the last attempt) it compiles and the goals are withheld', () => {
+    const r = compile(drive(), reach);
+    expect(named(r)).toEqual([['goal_reached_by_no_option', ['members_goal', 'new_members']], ['goal_reached_by_no_option', ['share_goal', 'join_share']]]);
+    expect(r.errors[0]!.message).toBe('No option reaches the goal "members goal" (members_goal). If an option plausibly affects it, add that relation from what the option changes: sized by the person\'s figure, or by Olumi\'s estimate with a range only where a defensible scale exists, otherwise left unknown with its direction and the evidence that would size it. Never add a link merely to connect an option to a goal; if none affects it, say so in the basis of the unknown it rests on.');
+    expect(r.executable).toBeNull();
+    // Contrast: the same model with the flag off compiles; each goal is withheld by its own reason, never refused.
+    const saved = compile(drive());
+    expect(codes(saved)).toEqual([]);
+    expect(saved.perGoal.map((g) => [g.goal_id, g.status])).toEqual([['members_goal', 'withheld'], ['share_goal', 'withheld']]);
+    expect(saved.blockers.map((b) => [b.id, b.code])).toEqual([['new_members', 'unknown'], ['enquiries', 'unknown']]);
+  });
+
+  it('the capacity and hiring shapes: every measured goal is reached, so no repair (a limit no option reaches is exempt)', () => {
+    expect(codes(compile(capacity(), reach))).toEqual([]);
+    expect(codes(compile(hiring(), reach))).toEqual([]);
+    // Contrast: the hiring shape's goal cut off from the options IS named, so the probe sees this shape.
+    const cut = hiring();
+    cut.relations = [eff('output_rel', 'output', 'base_output', [['base_output', 'lead_gain']])];
+    expect(named(compile(cut, reach))).toContainEqual(['goal_reached_by_no_option', ['output_goal', 'output']]);
+  });
+
+  it('only a LIVE option reaches: when the one option that reaches the goal is ruled out or removed, the goal is named', () => {
+    const withTools = (status: 'live' | 'ruled_out' | 'removed'): CanonicalModelT => {
+      const m = hiring();
+      m.quantities.push(person('tools_cost', 'GBP', 1000, 'tools for £1,000'));
+      // The lead reaches the goal; the live alternative, buying tools, reaches only the budget.
+      m.options = [{ ...m.options[0]!, status }, option('tools', 'Buy tools', [set('spend', 'tools_cost', 'tools for £1,000')], 'Buy tools')];
+      return m;
+    };
+    for (const status of ['ruled_out', 'removed'] as const) {
+      expect([status, named(compile(withTools(status), reach))]).toEqual([status, [['goal_reached_by_no_option', ['output_goal', 'output']]]]);
+    }
+    // Contrast: the same option live reaches it.
+    expect(codes(compile(withTools('live'), reach))).toEqual([]);
+  });
+
+  it('no live option sets anything (every option ruled out or removed): the check skips, never pressing for a relation', () => {
+    const m = drive();
+    m.options = [{ ...m.options[0]!, status: 'ruled_out' }, { ...m.options[1]!, status: 'removed' }];
+    expect(codes(compile(m, reach))).toEqual([]);
+    // Contrast: one of the same options live is checked, and both goals are named.
+    const live = drive();
+    live.options = [live.options[0]!, { ...live.options[1]!, status: 'removed' }];
+    expect(named(compile(live, reach)).map(([code, items]) => [code, items[0]])).toEqual([['goal_reached_by_no_option', 'members_goal'], ['goal_reached_by_no_option', 'share_goal']]);
+  });
+
+  it('an aim with no measure is exempt alone: the measured goals beside it are still checked (the option checks stay off, as before)', () => {
+    const aim: CanonicalGoalT = { id: 'better_known', label: 'Get the gym better known', measure: null, question: 'How would you tell the gym is better known?', author: 'person', quote: 'get the gym better known', ...base };
+    const m = drive();
+    m.goals.push(aim);
+    expect(named(compile(m, reach))).toEqual([['goal_reached_by_no_option', ['members_goal', 'new_members']], ['goal_reached_by_no_option', ['share_goal', 'join_share']]]);
+    // Contrast: beside a reached goal the aim adds nothing to repair.
+    const c = capacity();
+    c.goals.push(aim);
+    expect(codes(compile(c, reach))).toEqual([]);
+  });
+});

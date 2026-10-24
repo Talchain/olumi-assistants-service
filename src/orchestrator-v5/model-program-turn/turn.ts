@@ -11,7 +11,7 @@ import type { ProposalStore } from '../agent-lane/proposal.js';
 import type { InternalDispatch } from '../agent-lane/runtime/agent-capabilities.js';
 import type { ToolResult } from '../agent-lane/runtime/agent-tools.js';
 import type { CanonicalModelT } from '../model-program/canonical.js';
-import { compile, normalise, type Blocker } from '../model-program/compile.js';
+import { compile, isRepairOnly, normalise, type Blocker } from '../model-program/compile.js';
 import { draftCanonicalModel, ledgeredResponsesCall, type ResponsesCall } from './draft.js';
 import { seedOf } from './evaluate.js';
 import { asDrafted, readingOf } from './postimage.js';
@@ -95,8 +95,10 @@ export async function runModelProgramTurn(input: ProgramTurnInput): Promise<Prog
   if (prior === undefined) {
     const draft = await draftCanonicalModel(input.message, input.call ?? ledgeredResponsesCall(), input.message, { interpret: true });
     draftMeta = { prompt_sha256: DRAFTING_PROMPT_SHA256, schema_sha256: CANONICAL_SCHEMA_SHA256, attempts: draft.attempts };
-    if (draft.model === null || draft.compiled === null || draft.compiled.errors.length > 0) {
-      const why = draft.model === null ? (draft.attempts.at(-1)?.failed ?? 'no draft came back') : `${draft.compiled!.errors.length} compile error(s) remain after ${draft.attempts.length - 1} repair(s)`;
+    // A goal no option reaches only asks the drafter to repair: if a repair call fails, the draft is saved and that goal withheld.
+    const remaining = draft.compiled?.errors.filter((e) => !isRepairOnly(e)) ?? [];
+    if (draft.model === null || draft.compiled === null || remaining.length > 0) {
+      const why = draft.model === null ? (draft.attempts.at(-1)?.failed ?? 'no draft came back') : `${remaining.length} compile error(s) remain after ${draft.attempts.length - 1} repair(s)`;
       const model_program = { turn: 'draft', saved: false, draft: draftMeta, canonical: draft.model, compile: draft.compiled === null ? null : { compiles: false, errors: draft.compiled.errors } };
       return { assistantText: `I couldn't build a model that calculates from this yet (${why}). Nothing was saved.`,
         toolCalls: [{ name: 'draft_canonical_model', ok: false, outcome: 'refused', refusal: draft.model === null ? 'no_draft' : 'does_not_compile' }],
