@@ -76,7 +76,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     // default, a direction-only one kept in words with its size unknown; never a forced number; quotes copied exactly; the
     // update's own text lives here with the draft's goal rule; periods counted as starts_after_periods (#3713).
     // 24 Oct (AIE 6386018855 §5, accepted by the DL): Olumi may propose a measure, options and missing drivers, at first drafting only.
-    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('a385b048c8bf7eaac14cf6570efbafb21f77fe4faee2395eef0e84771cd14304');
+    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('19298001e9d22b735915f4d84b1b0200706e71c9ae5976b95e355c8419149266');
     expect(createHash('sha256').update(UPDATE_PREFIX, 'utf8').digest('hex')).toBe('3fc74a39f5db5290b72b37b7e2228c696a0fdeb5c2b017f96f3883bfedf3e0fb');
     expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('bed04fc58a01dbd02d8f5c8aa6ef171731a356c1cde47a85e0cd64be35416653'); // 23 Oct (DL 93d79c3e, C2 double prime): a definition's parts are factors with levels, never another definition; a STATED per-unit effect is a sized link. 22 Oct: every stated goal saved in their words, never approximated (Claude r1 on #3670); + a calendar date is Olumi's labelled reading
     // The retired constants are gone from both modules: no route can send the accreted text again.
@@ -185,6 +185,9 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       'An aim no measure can responsibly track, and a guardrail without one, keep measure null and a question.',
       'Where they named none, or the question is how to divide something (money, staff, hours), propose a small set of feasible, distinct options of Olumi\'s (author olumi, short plain names; a proposed division is a design, not a fact about today) within their stated budgets, exclusions and scope,',
       'left_out holds only what matters to the result but cannot be calculated, with the reason;',
+      // AMEND (DL 24 Oct, blind score of #3735): a lever only the options set, and a whole, are structure; a stated limit stays a limit.
+      'So are the starting level of a setting only the options change, when they gave none (0, an Olumi division\'s share included), and a whole such as 100 %: never asked.',
+      'what another record can hold goes there: a condition the plan must not break → limits, a statement about the situation → claims,',
       // DL 24 Oct: the one worked example shows the proposing half once (an aim with no measure, Olumi's suggested measure).
       'goal "to grow the bakery", measure_by olumi (a suggested measure): sales change_abs from now >= grow_target, end, window null,',
       'the reply asks at most three, and every other missing fact stays asked on its item.',

@@ -92,7 +92,9 @@ export async function draftCanonicalModel(brief: string | readonly InputMessage[
     try { json = JSON.parse(out.text); } catch { attempts.push({ attempt: a, errors: null, failed: 'output is not JSON', status: out.status, usage: out.usage, ms }); break; }
     const parsed = CanonicalModel.safeParse(json);
     const read = parsed.success && opts.interpret === true ? normalise(parsed.data) : undefined;
-    const result = read !== undefined ? compile(read, { sourceText }) : compileJson(json, { sourceText });
+    // A first draft (the brief alone) must give every ask its question; an update keeps the saved model's asks as they are.
+    const compileOpts = { sourceText, asksNeedQuestions: typeof brief === 'string' };
+    const result = read !== undefined ? compile(read, compileOpts) : compileJson(json, compileOpts);
     if (parsed.success) { model = read ?? parsed.data; compiled = result; }
     attempts.push({ attempt: a, errors: result.errors, status: out.status, usage: out.usage, ms });
     if (result.errors.length === 0 || a === MAX_REPAIRS) break;
