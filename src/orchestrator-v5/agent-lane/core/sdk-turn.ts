@@ -105,8 +105,8 @@ export interface PausedRunStore {
 export const PAUSE_DECLINED = 'Not applied: the person declined this change on its card. Nothing was changed.';
 /** What the model is told when the person writes instead of answering the card; their new message follows it. */
 export const PAUSE_SUPERSEDED = 'Not applied: the person has not approved this change; they wrote a new message instead, which follows. Nothing was changed.';
-/** What the model is told when the pause itself could not be kept; it ends this turn's run with nothing applied. */
-export const PAUSE_NOT_KEPT = 'Not applied: Olumi could not hold this change for the person\'s approval. Nothing was changed; say so, and that they can ask again.';
+/** What the model is told when the pause itself could not be kept: about THIS call only (an earlier call this turn may have saved). */
+export const PAUSE_NOT_KEPT = 'Not applied: Olumi could not hold this change for the person\'s approval, so this call changed nothing; say so, and that they can ask again.';
 /** What the model is told when it applies an id no card awaiting the person's approval has ('' included): no pause is kept. */
 export const PAUSE_NO_CARD = 'Not applied: no card with that id is waiting for the person\'s approval, so this call changed nothing.';
 

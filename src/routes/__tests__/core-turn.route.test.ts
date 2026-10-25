@@ -464,6 +464,27 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       // Both stray calls were told they changed nothing (each answer goes to the provider once, on the call after it).
       expect(calls.map((c) => JSON.stringify(c.input)).join('').split(PAUSE_NO_CARD).length - 1).toBe(2);
     });
+    it('Codex on #3758: A saves, then an empty stray, then a stray naming the other held card B: every refusal the AI reads speaks of its own call, never "nothing was changed" this turn; A\'s receipt stays', async () => {
+      const pressA = await propose();
+      const sevenSaid = 'f is at 0.7 by now.';
+      const seven = structuredClone(KNOWN_ANSWER);
+      seven.factors[0] = { ...seven.factors[0]!, value: 0.7, quote: sevenSaid };
+      outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'propB', args: { ...CHANGE, public_label: 'Set f to 0.7', model: seven } }],
+        [{ type: 'message', text: 'I prepared that change too.' }]];
+      const idB = (((await typed(sevenSaid)).json() as Json).cards as Json[]).map((c) => String(c.proposal_id)).find((id) => id !== preparedId)!;
+      calls.length = 0;
+      outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }],
+        [{ type: 'function_call', name: 'apply_change', call_id: 'stray', args: { proposal_id: '' } }],
+        [{ type: 'function_call', name: 'apply_change', call_id: 'strayB', args: { proposal_id: idB } }], [{ type: 'message', text: 'Saved: f is 0.6 now.' }]];
+      const a = (await post(pressA)).json() as Json;
+      expect(a.assistant_text).toBe('Saved: f is 0.6 now.');
+      expect(registered, 'A applied once, B never').toHaveLength(1);
+      expect(a.receipts).toEqual([expect.objectContaining({ version_id: 'v_1', authorised_by: 'person' })]);
+      // Every tool answer the AI read this turn, the two refusals included: each about its own call, none about the turn.
+      const answers = calls.flatMap((c) => ((c.input ?? []) as Json[]).filter((i) => i.type === 'function_call_output').map((i) => JSON.stringify(i.output)));
+      expect(answers.filter((t) => t.includes('Not applied'))).toHaveLength(2);
+      for (const t of answers) expect(t).not.toMatch(/nothing was changed|nothing (?:has been |was )?saved|nothing changed\b/i);
+    });
     it('BOUNDED: a third stray apply is not resumed again; the turn ends as an unfinished turn does (REPLY_INCOMPLETE), never by reading the unfinished run', async () => {
       const press = await propose();
       const warn = vi.spyOn(console, 'warn');
