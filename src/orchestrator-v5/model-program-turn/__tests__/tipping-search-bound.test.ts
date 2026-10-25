@@ -26,7 +26,7 @@ beforeEach(() => { deadline = performance.now() + BUDGET_MS; });
 
 type Json = Record<string, any>;
 
-describe('the threshold search ends, and a normal threshold is unchanged', () => {
+describe('no threshold search on the evaluation path (alpha G10); the evaluation ends fast', () => {
   it('a goal whose window opens at an asked decision date (no domain): the evaluation ends fast, with no threshold', { timeout: BUDGET_MS }, () => {
     // The bakery's loaves goal, counted for 4 weeks from a decision whose date is asked: sales do not change with the date
     // (no stock), so no date tips the goal, which is the run's shape.
@@ -46,20 +46,19 @@ describe('the threshold search ends, and a normal threshold is unchanged', () =>
     expect((gc.waits_on as Json[]).map((b) => [b.id, b.code])).toContainEqual(['decision_weeks', 'asked']);
   });
 
-  it('a goal waiting on one asked figure that is no timing keeps its threshold, value and words', { timeout: BUDGET_MS }, () => {
-    // The club with the joins a month asked and the promotion's effect the person's own 5 a month (so every probe is exact).
-    // Members after 3 months = 300 + 3 × (joins + 5 × on − 10) ≥ 340:
-    //  · promotion: joins ≥ 18.33…, said to 3 figures rounded up: 18.4 (300 + 3 × 13.4 = 340.2, met);
-    //  · carry on: joins ≥ 23.33…, rounded up: 23.4 (300 + 3 × 13.4 = 340.2, met).
+  it('alpha G10: a goal waiting on one asked figure that is no timing gets NO threshold (the search is off): it says what it waits on', { timeout: BUDGET_MS }, () => {
+    // The club with the joins a month asked and the promotion's effect the person's own 5 a month. Until the search was switched
+    // off this view said "Threshold: … is met with 'Run a promotion' if 'base joins' is at least 18.4", a claim an 11-point grid
+    // cannot support (a second crossing between grid points is not excluded). Now: no threshold, no "Threshold:" note, and the
+    // asked figure is still what the chance waits on.
     const m: CanonicalModelT = club();
     m.quantities = m.quantities.map((x) => (x.id === 'base_joins' ? q('base_joins', 'member/month', { status: 'asked', question: 'How many people join each month?' })
       : x.id === 'promo_effect' ? q('promo_effect', 'member/month/promotion', { kind: 'coefficient', value: 5, quote: 'about 5 extra joins a month' }) : x));
     const e = evaluateCanonical(m, { sourceText: `${CLUB_BRIEF} The promotion brings about 5 extra joins a month.`, seed: 7 });
     const gc = (e.view as Json).goal_chance as Json;
-    const words = (opt: string, v: string) => `Threshold: in this model, ‘Reach 340 members within three months’ is met with ‘${opt}’ if ‘base joins’ is at least ${v} member / month.`;
-    expect(gc.thresholds).toEqual([
-      { kind: 'threshold', goal_id: 'reach_340', option_id: 'promotion', quantity: 'base_joins', cmp: '>=', value: 18.4, words: words('Run a promotion', '18.4') },
-      { kind: 'threshold', goal_id: 'reach_340', option_id: 'carry_on', quantity: 'base_joins', cmp: '>=', value: 23.4, words: words('Carry on as now', '23.4') },
-    ]);
+    expect(e.compiled.perGoal.map((p) => [p.goal_id, p.status, p.asks])).toEqual([['reach_340', 'asks', ['base_joins']]]);
+    expect(gc.thresholds).toBeUndefined();
+    expect((gc.notes as string[]).some((n) => n.includes('Threshold'))).toBe(false);
+    expect((gc.waits_on as Json[]).map((b) => [b.id, b.code])).toContainEqual(['base_joins', 'asked']);
   });
 });
