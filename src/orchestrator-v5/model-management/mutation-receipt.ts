@@ -4,6 +4,8 @@ import { z } from "zod";
 import { toOutboundGraph } from "../goal-target/outbound-graph.js";
 import { GraphV3 } from "../../schemas/cee-v3.js";
 import { floorGraphSigmaForCompute } from "../../validators/numeric-bounds.js";
+import { GraphStateIngressSchema } from "../boundary/request-extensions.js";
+import { isProgramGraph, programReadOf } from "../model-program-turn/program-store.js";
 
 const Uuid = z.string().uuid();
 const Sha256 = z.string().regex(/^[0-9a-f]{64}$/);
@@ -49,8 +51,8 @@ const Lineage = z.discriminatedUnion("kind", [
  * The receipt path was left on the old pattern. This closes it the same way.
  *
  * `z.unknown()` performs no transform, so the caller's object passes through by
- * reference; the refinement still runs the full `GraphV3` shape check and
- * surfaces its issues under the `graph` path. That is the same discipline
+ * reference; the refinement runs `receiptGraphIssues` (canonical program + ingress projection, or legacy GraphV3)
+ * and surfaces its issues under the `graph` path. That is the same discipline
  * `assertIngressGraphNumericBounds` uses — "never rewrites the graph; it
  * returns the caller's object by reference or rejects it"
  * (`validators/numeric-bounds.ts`) — and it is the only form that can keep
@@ -72,24 +74,21 @@ type CanonicalReceiptGraph = NonNullable<OlumiResponse['model_version_receipt']>
  * server held the restored graph). One policy: `GraphVerbatim` below asks exactly this. Empty means receiptable.
  */
 export function receiptGraphIssues(graph: unknown): z.ZodIssue[] {
+  // A program's canonical model admits unknown/asked figures; its display projection need not have an observed value.
+  // A claimed but unreadable program never falls back to legacy admission. Both checks leave the original bytes alone.
+  if (isProgramGraph(graph)) {
+    const program = programReadOf(graph);
+    if (program.kind !== 'program') return [{ code: z.ZodIssueCode.custom, path: ['living_model'],
+      message: program.kind === 'unreadable' ? program.reason : 'The saved model is not a readable program.' }];
+    const parsed = GraphStateIngressSchema.safeParse(graph);
+    return parsed.success ? [] : parsed.error.issues;
+  }
   const parsed = GraphV3.passthrough().safeParse(floorGraphSigmaForCompute(graph).graph);
   return parsed.success ? [] : parsed.error.issues;
 }
 
 const GraphVerbatim = z.unknown().superRefine((value, ctx) => {
-  // The ADMISSIBILITY question must be the same one the version carrier asked,
-  // or a version it legitimately created cannot be receipted — and the commit
-  // would then throw AFTER the durable write, which is the split this whole
-  // slice exists to prevent. `commit.ts` gates on the sanctioned sigma
-  // projection (Codex defect 2 / H1), so this does too. Same floor, same
-  // reason, one policy: `strength.std <= 0` is invalid under the contract yet
-  // routinely emitted by the live UI writer, and the ratified treatment is to
-  // tolerate it on the identity path and floor it only where it crosses into
-  // compute (`validators/numeric-bounds.ts`, "Cut 3").
-  //
-  // The floor is used for the CHECK ONLY. `z.unknown()` performs no transform,
-  // so `value` still passes through by reference and `full_hash === H(graph)`
-  // is preserved.
+  // Save, receipt and restore share one admission check. No parse output replaces the graph or changes its hash.
   for (const issue of receiptGraphIssues(value)) {
     ctx.addIssue(issue);
   }

@@ -237,12 +237,13 @@ describe('a model program\'s postimage through the real /graph/register', () => 
     // The commit's own CAS is on the base the card was made on (the read route's identity and hash, the store's revision).
     const written = append.mock.calls[1]![0] as Rec;
     expect([written.expectedGraphIdentityHash, written.expectedGraphAnalysisHash, written.expectedRevision]).toEqual([base.identity, base.graphHash, 7]);
-    // An asked figure has no value, so this graph has no version row (step 0's watch item): no carrier, and the receipt is the acknowledgement.
-    expect(written.modelVersion).toBeUndefined();
+    // Unknown figures are valid program state: the same transaction carries its version, without inventing a value.
+    expect(written.modelVersion).toMatchObject({ creation_kind: 'committed_mutation' });
     // Its receipt names the model a fresh read serves, and that read is the approved card's program, byte for byte.
     const after = await readSaved({ dispatch }, SCENARIO);
     await app.close();
     if (!isSavedRead(after)) throw new Error('no readback');
+    expect(written.modelVersion).toMatchObject({ graph_identity_hash: after.identity });
     const data = applied.data as Rec;
     expect((data.receipt as Rec).graph_identity_hash).toBe(after.identity);
     expect((data.revision as Rec).graph_identity_hash).toBe(after.identity);
