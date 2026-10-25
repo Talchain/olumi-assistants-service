@@ -273,9 +273,10 @@ describe('numerical check: natural-unit simulator, hand-calculated rows', () => 
   });
 
   it('row 8c: a goal\u2019s denominator (per) is part of what it rests on: uncertain only there, it is the driver, never exact', () => {
-    // Revenue per customer = 1,000 \u00f7 customers \u2265 10 holds exactly when customers \u2264 100. Customers is drawn on [80, 120] with its
-    // most likely value 100, a law symmetric about 100, so the hand chance is 1/2 (Wilson interval at 20k must hold 0.5). Revenue and
-    // the target are fixed: the denominator is the ONLY uncertainty, so it must be the one driver and the chance cannot be exact.
+    // Revenue per customer = 1,000 \u00f7 customers \u2265 10 holds exactly when 0 < customers \u2264 100. Customers is a plausible range
+    // 80 to 120, most likely 100: an unbounded Normal centred on 100 (a plausible range is not a bound, row 2b), so the hand chance is
+    // P(0 < customers \u2264 100) = 1/2 less a term below 1e-17 (Wilson interval at 20k must hold 0.5). Revenue and the target are fixed:
+    // the denominator is the ONLY uncertainty, so it must be the one driver and the chance cannot be exact.
     const r = simulate(model(1, [fixed('revenue', 1000), range('customers', 80, 120, 100), fixed('t', 10)],
       [{ ...goal('per_customer', 'revenue', '>=', 't'), per: 'customers' }]), { seed: SEED, draws: N });
     const g = goalOf(first(r), 'per_customer');
