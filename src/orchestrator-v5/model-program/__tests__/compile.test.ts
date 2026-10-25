@@ -631,6 +631,20 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(probeValue(both.executable!, both.executable!.goals[0], 'raise')).toBe(312); // 12 × 26: the set is active at boundary 3
   });
 
+  it('alpha G2: the never-negative count domain is a FACT\'s (a level of their situation); a coefficient in a count unit, the size of a change, may be below 0', () => {
+    const withMembers = (f: Partial<CanonicalQuantityT>) => { const g = gymFilled(); g.quantities = g.quantities.map((q) => (q.id === 'members_now' ? { ...q, value: null, range_kind: 'plausible' as const, ...f } : q)); return compile(g); };
+    const olumiCoefficient = { kind: 'coefficient' as const, author: 'olumi' as const, status: 'estimated' as const, quote: null, basis: 'a guess' };
+    // A signed change in members (it may fall): drawn on both sides of 0, never kept to [0, inf).
+    const signed = withMembers({ ...olumiCoefficient, low: -50, high: 200 });
+    expect(signed.conversions.find((c) => c.quantity === 'members_now'), JSON.stringify(signed.errors)).toMatchObject({ kind: 'range_law', domain: null });
+    // Wholly below 0 is a fall, not a contradiction, for a coefficient.
+    const fall = withMembers({ ...olumiCoefficient, low: -1010, high: -990 });
+    expect(fall.perGoal.flatMap((p) => p.reasons).join(' ')).not.toContain('a count cannot be below 0');
+    // Contrast, the same field as a FACT (members today): the domain and its contradiction rule are unchanged.
+    expect(withMembers({ low: 280, high: 320 }).conversions.find((c) => c.quantity === 'members_now')).toMatchObject({ kind: 'range_law', domain: { min: 0 } });
+    expect(withMembers({ low: -1010, high: -990 }).blockers).toContainEqual({ id: 'members_now', code: 'recount', scope: ['reach_400'] });
+  });
+
   it('DL ruling 4 (S2 law 9d34ef05+): a plausible range is a spread, never a point and never an invented domain; one with no room is HELD; a most likely figure at an end is an error', () => {
     const withCosts = (f: Partial<CanonicalQuantityT>) => { const m = bakery(); m.quantities = m.quantities.map((q) => (q.id === 'costs' ? { ...q, value: null, ...f } : q)); return compile(m); };
     // A wide money range with no most likely figure: read unbounded (money carries no invented domain), so it calculates.

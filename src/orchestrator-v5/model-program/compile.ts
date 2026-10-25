@@ -662,10 +662,14 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
 
   // ── the ruled range law, for every range (a held range withholds what rests on it) ─────────────────────────────────
   const chances = new Set(model.risks.map((k) => k.occurrence));
-  /** A count of things (one plain unit, not time or money): never negative. */
+  /**
+   * A count of things (one plain unit, not time or money) that is a FACT, a level of the person's situation (members today,
+   * headcount): never negative. A coefficient in the same unit is the size of a mechanism (customers an option adds or
+   * loses), which can be below 0, so it is never truncated (alpha G2: a signed change was drawn on [0, inf)).
+   */
   const isCount = (q: CanonicalQuantityT): boolean => {
     const d = U.get(q.id) ? Object.entries(U.get(q.id)!.dims) : [];
-    return !chances.has(q.id) && d.length === 1 && d[0][1] === 1 && !TIME_DIMS.has(d[0][0]) && !['gbp', 'usd', 'eur'].includes(d[0][0]);
+    return q.kind === 'fact' && !chances.has(q.id) && d.length === 1 && d[0][1] === 1 && !TIME_DIMS.has(d[0][0]) && !['gbp', 'usd', 'eur'].includes(d[0][0]);
   };
   /**
    * Truncation only for a mathematical domain: a chance lies in [0, 1]; a count of things is never negative; an elapsed
