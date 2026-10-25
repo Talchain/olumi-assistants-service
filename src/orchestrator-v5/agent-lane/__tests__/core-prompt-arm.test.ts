@@ -78,7 +78,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     // 24 Oct (AIE 6386018855 §5, accepted by the DL): Olumi may propose a measure, options and missing drivers, at first drafting only.
     // 25 Oct (DL, step 0 effects-not-estimated): an added hypothesis is sized like any other link; missing case detail widens a range.
     expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('19cb9e1fd9828acc5f75f5c57afad3f9b6a06cc6bc46428dab229ce1cabb4b8e');
-    expect(createHash('sha256').update(UPDATE_PREFIX, 'utf8').digest('hex')).toBe('3fc74a39f5db5290b72b37b7e2228c696a0fdeb5c2b017f96f3883bfedf3e0fb');
+    expect(createHash('sha256').update(UPDATE_PREFIX, 'utf8').digest('hex')).toBe('a491da3a35609de1e66c3e57376f6fe5321ca910de83a73ebc328b8ee5824394'); // 25 Oct: an item of olumi's stays olumi's unless their own answer this turn
     expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('bed04fc58a01dbd02d8f5c8aa6ef171731a356c1cde47a85e0cd64be35416653'); // 23 Oct (DL 93d79c3e, C2 double prime): a definition's parts are factors with levels, never another definition; a STATED per-unit effect is a sized link. 22 Oct: every stated goal saved in their words, never approximated (Claude r1 on #3670); + a calendar date is Olumi's labelled reading
     // The retired constants are gone from both modules: no route can send the accreted text again.
     for (const name of ['CORE_REPLY_INSTRUCTION', 'CORE_RESPONSE_DISCIPLINE', 'CORE_NEXT_STEP']) expect(Object.keys(coreInstructions), name).not.toContain(name);
@@ -223,7 +223,9 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       'words that settle a figure (yes, no, all, none) are that figure, quoting them, its basis saying how they were read.',
       'Never keep an answer unassigned and ask it again.',
       // DL 24 Oct (class 12 remainder): "I don't know" is an answer; the item stays open with a new question.
-      '"I don\'t know" is an answer too: the item stays open, its question changed to ask for what would size it.']) expect(count(UPDATE_PREFIX, rule), rule).toBe(1);
+      '"I don\'t know" is an answer too: the item stays open, its question changed to ask for what would size it.',
+      // DL 25 Oct (served European refusal, unverified_person_words this_turn): olumi's item never takes their words about another item.
+      'An item of olumi\'s becomes theirs only by their own answer this turn; left open or unknown, it stays olumi\'s, its basis saying why, never quoting their words about another item.']) expect(count(UPDATE_PREFIX, rule), rule).toBe(1);
     // The program turn's guidance is prompt text: answers in order answer the questions in order, and none is asked again in the same words.
     // Targeted answers (DL 24 Oct): an answer goes in answers on its item's id, anything else in request (pinned as sent in core-turn.route).
     expect(createHash('sha256').update(PROGRAM_TURN_GUIDANCE, 'utf8').digest('hex')).toBe('4ccd4a5913bfb242ca4f771b3349ed8a2872b6fc18b7632b8d38c15c92448542');
