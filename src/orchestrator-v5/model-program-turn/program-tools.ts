@@ -146,14 +146,16 @@ async function prepare(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs)
   const misowned = answers.filter((a) => (a.author === 'olumi') !== (a.status === 'estimated')
     || (a.author === 'olumi' && (a.low === null || a.high === null || !a.basis?.trim() || a.quote !== null || a.party !== null))).map((a) => a.id);
   if (misowned.length > 0) return refused('not_an_answer', `${misowned.join(', ')}: their answer is known or unknown, in their words; Olumi's is estimated, with low, high and a basis, never their words.`, { ids: misowned });
-  // An answer with no figure to the question on a goal, limit or left-out record (a measure, a definition, a condition): no
-  // figure to set, so Olumi's drafter writes it, as any structural change (REFUSED-CHANGE-CLASS 25 Oct, #11–12). Routed by
-  // the record's family and the answer's empty figure only, never by its words.
+  // An answer with no figure has nothing to set, so Olumi's drafter writes it, as any structural change: the answer to the
+  // question on a goal, limit or left-out record (a measure, a definition, a condition; REFUSED-CHANGE-CLASS 25 Oct, #11–12),
+  // or a known answer on a figure that gives words, not a figure (a date, "launch on 9 April 2027", #8–9: the drafter has
+  // today's date and counts the whole periods). Routed by the record's family, the empty figure and the status only, never by
+  // its words; "I don't know" (unknown) is set on its item as before.
   const { quantities, goals, limits, left_out } = program.canonical;
-  const onRecord = (a: AnswerT) => a.value === null && a.low === null && a.high === null && !quantities.some((x) => x.id === a.id)
-    && [goals, limits, left_out].some((f) => f.some((r) => r.id === a.id));
-  const figures = answers.filter((a) => !onRecord(a));
-  const said = answers.filter(onRecord).map((a) => `The answer to the question on ${a.id}, in ${a.party === null ? 'their' : `${a.party}'s`} words: "${a.quote}"${a.basis?.trim() ? ` (basis: ${a.basis})` : ''}`);
+  const toDrafter = (a: AnswerT) => a.value === null && a.low === null && a.high === null && (quantities.some((x) => x.id === a.id)
+    ? a.status === 'known' : [goals, limits, left_out].some((f) => f.some((r) => r.id === a.id)));
+  const figures = answers.filter((a) => !toDrafter(a));
+  const said = answers.filter(toDrafter).map((a) => `The answer to the question on ${a.id}, in ${a.party === null ? 'their' : `${a.party}'s`} words: "${a.quote}"${a.basis?.trim() ? ` (basis: ${a.basis})` : ''}`);
   const request = said.length === 0 ? args.request : [args.request.trim(), ...said].filter((x) => x !== '').join('\n');
   const set = answered(program.canonical, figures);
   if (typeof set === 'string') return refused('not_an_answer', set);
