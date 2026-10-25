@@ -9,6 +9,7 @@ import { readFileSync } from 'node:fs';
 import { AnalysisStateV1Schema } from '@talchain/schemas/boundary';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 import { computeGraphIdentityHash } from '../../orchestrator-v5/context/graph-identity.js';
 import { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha256 } from '../../orchestrator-v5/context/graph-hash.js';
 import { registrationTurnId } from '../../orchestrator-v5/graph-registration/registration-identity.js';
@@ -19,7 +20,7 @@ import { withCanonicalAnalysisView } from '../../orchestrator-v5/agent-lane/__te
 import { streamWhenAsked } from '../../orchestrator-v5/agent-lane/__tests__/stream-when-asked.js';
 import { SELECTION_NOTE_PREFIX } from '../../orchestrator-v5/agent-lane/selection-context.js';
 import { TODAY_PREFIX } from '../../orchestrator-v5/agent-lane/turn-context.js';
-import { corePromptCacheKey, STATE_BLOCK_PREFIX } from '../../orchestrator-v5/agent-lane/core/sdk-turn.js';
+import { corePromptCacheKey, PAUSE_NO_CARD, STATE_BLOCK_PREFIX } from '../../orchestrator-v5/agent-lane/core/sdk-turn.js';
 import { CORE_INSTRUCTIONS_LIVING_MODEL, CORE_REPLY_RULES_LIVING_MODEL, instructionsForMode, PROGRAM_TOOL_DESCRIPTIONS } from '../../orchestrator-v5/core-route/instructions.js';
 import { TOOL_DESCRIPTIONS } from '../../orchestrator-v5/path-b/tools/index.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
@@ -46,6 +47,19 @@ const CHANGE = { public_label: 'Set f to 0.6, as you said', basis: 'The person c
 const ANSWER = '  The model holds **f at 0.5** today:\n\n- Push sets it to 1\n- Hold keeps it\n';
 const CONTRACT_KEYS = ['turn_id', 'durability', 'assistant_text', 'model', 'cards', 'notes', 'run', 'analysis_state', 'receipts', 'paused', 'error', 'action_bar', '_agent', '_provider_calls'];
 const LEGACY_ENVELOPE = ['response_version', 'blocks', 'suggested_actions', 'insights', 'stage_indicator'];
+/** The UI's reader of this contract, field for field (DGAI 748f20a1 `src/v5/coreTurnContract.ts`): a body it refuses shows "reply not received". */
+const uiId = z.string().min(1).nullable();
+const uiAction = z.object({ id: z.string().min(1), label: z.string().min(1), message: z.string().min(1) }).passthrough();
+const UI_CORE_TURN = z.object({ turn_id: uiId, durability: z.string().optional(), assistant_text: z.string(),
+  model: z.object({ graph: z.record(z.unknown()).optional(), revision: uiId, scenario_revision: uiId }).passthrough().nullable(),
+  cards: z.array(z.object({ proposal_id: z.string().min(1), issued_turn_id: uiId.optional(), approve_action: uiAction, decline_action: uiAction }).passthrough()).default([]),
+  notes: z.array(z.object({ element_id: z.string().min(1), text: z.string().min(1) })).default([]),
+  run: z.object({ run_key: uiId, run_id: uiId, computed_against: uiId,
+    state: z.object({ kind: z.string().min(1), computed_at: z.string().nullable().optional() }).passthrough() }).passthrough().nullable(),
+  analysis_result: z.record(z.unknown()).nullable().optional(), analysis_state: z.record(z.unknown()).nullable().optional(),
+  receipts: z.array(z.object({ authorised_by: z.enum(['person', 'olumi']) }).passthrough()).default([]),
+  paused: z.object({ proposal_id: uiId }).nullable().optional(), action_bar: z.unknown().optional(),
+  error: z.object({ code: z.string().min(1), message: z.string(), retry_safe: z.boolean(), nothing_saved: z.boolean() }).nullable() });
 
 let persisted: Json | null = null;
 let readiness: Json = { status: 'blocked', may_run: false, options: [], blockers: [] };
@@ -393,18 +407,59 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(((persisted as Json).living_model as LivingModelT).factors[0], 'A, the pressed card, never B').toMatchObject({ value: 0.6 });
     });
 
-    it('a pause the AI left on an empty id never keeps the held card from its press: the re-press applies it', async () => {
+    it('a pause the AI left on an empty id never keeps the held card from its press: none is kept now, and an older one does not block the re-press', async () => {
       const press = await propose();
-      // A typed turn on which the AI applied with an empty id: its call waits on no card this scenario holds.
-      outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'stray', args: { proposal_id: '' } }]];
+      // A typed turn on which the AI applied with an empty id: its call names no card this scenario holds, so no pause is kept.
+      outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'stray', args: { proposal_id: '' } }], [{ type: 'message', text: 'Nothing changed yet.' }]];
       expect((await typed('Go ahead with it.')).statusCode).toBe(200);
-      expect(pausedRun, 'the stray pause is kept, on no card').toMatchObject({ proposal_id: '' });
+      expect(pausedRun, 'no pause on no card').toBeNull();
+      // An older row, saved before the writer refused it (scenario 55bc5049 holds one): a real pause whose card id is ''.
+      outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'stray2' }]];
+      expect((await typed('Go ahead with it.')).statusCode).toBe(200);
+      expect(pausedRun, 'control: a pause on the held card is kept').toMatchObject({ proposal_id: preparedId });
+      pausedRun = { ...pausedRun, proposal_id: '' };
       outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply', args: { proposal_id: '' } }], [{ type: 'message', text: 'Saved.' }]];
       const r = await post(press);
       expect(r.statusCode, r.body).toBe(200);
       expect(registered).toHaveLength(1);
       expect(((persisted as Json).living_model as LivingModelT).factors[0]).toMatchObject({ value: 0.6 });
       expect((r.json() as Json).receipts).toEqual([expect.objectContaining({ authorised_by: 'person' })]);
+    });
+
+    it('STEP 0 (served 25 Oct 08:39Z): after the press applies the card, the AI applies again with an empty id: no pause is kept, the reply is paused null with the AI\'s own words, and the UI reads it', async () => {
+      const press = await propose();
+      outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }],
+        [{ type: 'function_call', name: 'apply_change', call_id: 'again', args: { proposal_id: '' } }], [{ type: 'message', text: 'Saved: f is 0.6 now.' }]];
+      const a = (await post(press)).json() as Json;
+      expect(pausedRun, JSON.stringify(a._agent)).toBeNull();
+      expect(a.paused).toBeNull();
+      expect(a.assistant_text).toBe('Saved: f is 0.6 now.');
+      expect(UI_CORE_TURN.safeParse(a).success, JSON.stringify(a.paused)).toBe(true);
+      expect(registered, 'the pressed card, applied once').toHaveLength(1);
+      expect(a.receipts).toEqual([expect.objectContaining({ version_id: 'v_1', authorised_by: 'person' })]);
+      expect(JSON.stringify(calls.at(-1)?.input), 'the AI is told that call changed nothing').toContain(PAUSE_NO_CARD);
+    });
+    it('KEPT: a typed turn that applies a card the scenario holds still pauses on that card, as before, and the UI reads it', async () => {
+      await propose();
+      outputs = [[{ type: 'message', text: 'Press its card to save it.' }, { type: 'function_call', name: 'apply_change', call_id: 'held' }]];
+      const a = (await typed('Go ahead with it.')).json() as Json;
+      expect(pausedRun, JSON.stringify(a._agent)).toMatchObject({ proposal_id: preparedId, tool: 'apply_change' });
+      expect(a.paused).toEqual({ proposal_id: preparedId });
+      expect(a.assistant_text).toBe('Press its card to save it.');
+      expect(UI_CORE_TURN.safeParse(a).success).toBe(true);
+      expect(registered, 'a pause applies nothing').toHaveLength(0);
+    });
+    it('an id that is not empty but names no card the scenario holds is refused the same way: no pause, paused null, the AI\'s own words', async () => {
+      await propose();
+      outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'unknown', args: { proposal_id: `prop_${'f'.repeat(32)}` } }],
+        [{ type: 'message', text: 'That change is not waiting for approval, so nothing changed.' }]];
+      const a = (await typed('Go ahead with it.')).json() as Json;
+      expect(pausedRun, JSON.stringify(a._agent)).toBeNull();
+      expect(a.paused).toBeNull();
+      expect(a.assistant_text).toBe('That change is not waiting for approval, so nothing changed.');
+      expect(UI_CORE_TURN.safeParse(a).success).toBe(true);
+      expect(JSON.stringify(calls.at(-1)?.input)).toContain(PAUSE_NO_CARD);
+      expect(registered).toHaveLength(0);
     });
   });
 

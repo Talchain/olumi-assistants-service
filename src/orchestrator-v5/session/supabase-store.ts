@@ -50,6 +50,7 @@ import {
   SessionReadError,
   StateCommitFailedError,
   answerRunNarrationOf,
+  cardIdOf,
   type AtomicCommittedModelVersionReceipt,
   type AnswerOffersRead,
   type CommittedTurnLedger,
@@ -3178,7 +3179,7 @@ export class SupabaseSessionStore implements SessionStore {
     }
     const run = (data as { openai_paused_run?: unknown } | null)?.openai_paused_run as Partial<OpenAiPausedRun> | null | undefined;
     return run != null && typeof run.pause_id === 'string' && typeof run.state === 'string' && typeof run.call_id === 'string'
-      && typeof run.tool === 'string' ? { pause_id: run.pause_id, proposal_id: typeof run.proposal_id === 'string' ? run.proposal_id : null,
+      && typeof run.tool === 'string' ? { pause_id: run.pause_id, proposal_id: cardIdOf(run.proposal_id),
         call_id: run.call_id, tool: run.tool, state: run.state } : null;
   }
 

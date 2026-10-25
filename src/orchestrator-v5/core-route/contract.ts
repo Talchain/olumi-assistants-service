@@ -15,6 +15,7 @@
  */
 import type { ProposalFieldsWire } from '../agent-lane/proposal-object/record.js';
 import type { TurnReceipt } from '../agent-lane/turn-receipts.js';
+import type { CardId } from '../session/store.js';
 
 /** One held proposal's card: the `_proposal_fields` record the UI already reads (`proposalFieldsWire`), its own type. */
 export type CoreTurnCard = ProposalFieldsWire['proposals'][number];
@@ -65,7 +66,8 @@ export interface CoreTurnContract {
   readonly canonical_analysis_view?: unknown;
   readonly model_program?: unknown;
   readonly receipts: readonly CoreTurnReceipt[];
-  readonly paused: { readonly proposal_id: string | null } | null;
+  /** The card the turn's run paused on: a non-empty id or null, never '' (a pause on no card is no pause). */
+  readonly paused: { readonly proposal_id: CardId | null } | null;
   readonly error: CoreTurnError | null;
   /** The panel's action bar (`action-bar.ts`), ranked from the turn's own final read; null when it offers nothing. */
   readonly action_bar: unknown;
@@ -90,7 +92,7 @@ export interface CoreTurnContractInput {
   /** A model-program turn's payload blocks (alpha). */
   readonly modelProgram?: { readonly canonical_analysis_view: unknown; readonly model_program: unknown };
   readonly receipts?: readonly CoreTurnReceipt[];
-  readonly paused?: { readonly proposal_id: string | null } | null;
+  readonly paused?: { readonly proposal_id: CardId | null } | null;
   readonly error?: CoreTurnError | null;
   readonly actionBar?: unknown;
   readonly agent?: Readonly<Record<string, unknown>>;

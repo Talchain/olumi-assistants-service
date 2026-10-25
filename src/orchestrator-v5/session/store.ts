@@ -367,13 +367,17 @@ export interface AnswerOffersRead {
   readonly run_key: string | null;
 }
 
+/** A card's id as a pause names it: never '' (the UI's core contract reads a non-empty id or null). */
+export type CardId = string & { readonly __card_id: true };
+export const cardIdOf = (x: unknown): CardId | null => (typeof x === 'string' && x !== '' ? x as CardId : null);
+
 /**
  * PATH-B `core`: an SDK run paused for the person's approval. `state` is the SDK's own `RunState.toString()`; the rest binds
  * a press to it (the proposal on the card, and the paused tool call).
  */
 export interface OpenAiPausedRun {
   readonly pause_id: string;
-  readonly proposal_id: string | null;
+  readonly proposal_id: CardId | null;
   readonly call_id: string;
   readonly tool: string;
   readonly state: string;

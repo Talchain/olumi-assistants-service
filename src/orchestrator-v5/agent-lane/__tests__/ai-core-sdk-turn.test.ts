@@ -87,6 +87,8 @@ const turn = (message: string, c: ReturnType<typeof caps>, extra: Extra & { trac
     instructions: extra.instructions ?? 'Synthetic instructions.', budget: budgetFor('gpt-6.1-sol', 'conversation'), userId: null,
     canonicalState: extra.state ?? { empty: true, entities: [] }, briefText: extra.briefText, conversationStore: 'conversationStore' in extra ? extra.conversationStore : columnStore(),
     ...(extra.pausedRunStore !== undefined ? { pausedRunStore: extra.pausedRunStore } : {}),
+    // The scenario holds PID's card, awaiting approval: the card a pause must name (`sdk-turn.ts`).
+    proposals: { outstanding: () => [{ proposal_id: PID, public_label: 'Drop option B' }] },
     ...(extra.press !== undefined ? { press: extra.press } : {}), ...(extra.traceMeta !== undefined ? { traceMeta: extra.traceMeta } : {}),
     ...(extra.replyBudget !== undefined ? { replyBudget: extra.replyBudget } : {}), ...(extra.firstTool !== undefined ? { firstTool: extra.firstTool } : {}),
     ...(extra.withheldTools !== undefined ? { withheldTools: extra.withheldTools } : {}) });
