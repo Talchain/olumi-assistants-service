@@ -1360,6 +1360,53 @@ describe('the model-program turn on the real core route', () => {
     expect(compile(named, { sourceText: `${BRIEF}\nat least 50 repeat customers a week` }).perGoal[0]).toMatchObject({ status: 'withheld' });
   });
 
+  it('REFUSED-CHANGE-CLASS 25 Oct (#11–12): a measure given as the ANSWER to a goal\'s own question goes to Olumi\'s drafter as a structural change and reaches ONE card; a figure answer still sets its item with no drafter call; a figure on a goal, a non-figure answer on an option, and words not of this turn are still refused', async () => {
+    const m = bakery();
+    m.goals = [{ ...m.goals[0]!, measure: null, question: 'How would you know the bakery is doing well enough?' }];
+    replies = [JSON.stringify(m)];
+    expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
+    const words = 'Success means selling at least 380 loaves a week within 4 weeks.';
+    const deps = { dispatch, proposals: new ProposalStore() };
+    const ctx = (w = words) => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [w], user_turn_text: w });
+    const answer = (f: Json) => ({ value: null, low: null, high: null, range_kind: null, party: null, quote: words, basis: null, status: 'known', author: 'person', ...f });
+    const ask = (answers: Json[], c = ctx()) => { sent.length = 0; return proposeProgramChange(deps, c, ProgramChangeParams.parse({ public_label: 'Their answer', basis: 'their answer', request: '', remove: [], answers })) as Promise<Json>; };
+    // Negatives first, each with no drafter call. A figure answer on a figure: set on its item exactly, as before.
+    const price = await ask([answer({ id: 'oven_price', value: 2500, quote: 'The oven costs £2,500' })], ctx('The oven costs £2,500.'));
+    expect(price.status, JSON.stringify(price)).toBe('ok');
+    expect(price.data.changes.map((x: Json) => [x.id, x.action])).toEqual([['oven_price', 'change']]);
+    expect(sent).toHaveLength(0);
+    // A figure on the goal itself: still not an answer (the routing is the empty figure AND the record's family).
+    expect(await ask([answer({ id: 'more_loaves', value: 380 })])).toEqual({ status: 'refused', reason: 'not_an_answer', detail: 'more_loaves is not a figure in this model; a new item is a structural change.' });
+    expect(sent).toHaveLength(0);
+    // A non-figure answer on an option (no goal, limit or left-out record): still not an answer.
+    expect(await ask([answer({ id: 'keep_one' })])).toEqual({ status: 'refused', reason: 'not_an_answer', detail: 'keep_one is not a figure in this model; a new item is a structural change.' });
+    expect(sent).toHaveLength(0);
+    // Their words THIS turn, as for every answer: a measure quoting words they did not write now is refused before the drafter.
+    expect(await ask([answer({ id: 'more_loaves', quote: 'reach 380 loaves a week' })])).toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['more_loaves'], check: 'this_turn' } });
+    expect(sent).toHaveLength(0);
+    // The answer on the goal: ONE drafter call whose change is that answer in their words, and ONE card with every change.
+    replies = [savedWith((d) => {
+      d.quantities.push(q('more_loaves_target', 'loaf/week', { value: 380, quote: words }), q('more_loaves_window', 'week', { value: 4, quote: words }));
+      d.goals = d.goals.map((g) => (g.id === 'more_loaves' ? { ...g, question: null, measure: { quantity: 'sales', per: null, cmp: '>=', target: 'more_loaves_target', frame: 'level', reference: null,
+        aggregation: 'end', window: { origin_event: null, origin_offset: null, start: 0, periods: 'more_loaves_window' }, measure_by: 'person', assumptions: [], exclusions: [] } } : g));
+    })];
+    const c = ctx();
+    const p = await ask([answer({ id: 'more_loaves' })], c);
+    expect(p.status, JSON.stringify(p)).toBe('ok');
+    expect(sent).toHaveLength(1);
+    expect((sent[0]!.input as Json[])[2]).toEqual({ role: 'user', content: `${UPDATE_PREFIX}\nThe change: The answer to the question on more_loaves, in their words: "${words}"\nRemove: nothing` });
+    expect(p.data.changes.map((x: Json) => [x.id, x.kind, x.action, x.before, x.after, x.author])).toEqual([
+      ['more_loaves_target', 'quantity', 'add', null, `380 loaf/week, a fact, known, in your words "${words}"`, 'person'],
+      ['more_loaves_window', 'quantity', 'add', null, `4 week, a fact, known, in your words "${words}"`, 'person'],
+      ['more_loaves', 'goal', 'change', 'no measure yet, Olumi asks "How would you know the bakery is doing well enough?"',
+        '"sales" at least "more loaves target" 380 loaf/week, by the end of "more loaves window" 4 week, the measure you named, no question', 'person'],
+    ]);
+    // Approved, it is saved with a new Run: the goal has its measure and is no longer asked about.
+    expect(await applyProgramChange(deps, c, p.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
+    expect((persisted!.living_model.canonical as CanonicalModelT).goals[0]).toMatchObject({ question: null, measure: { target: 'more_loaves_target' }, approval: 'approved' });
+    expect(((persisted!.living_model.runs.at(-1).result.compile as Json).blockers as Json[]).filter((x) => x.id === 'more_loaves')).toEqual([]);
+  });
+
   it('DL 23 Oct (batch 4 marketing-r2): what a measure leaves out is kept in their words and named; the chance says what it covers and what it leaves out, never that it covers everything', () => {
     const words = 'Success means selling at least 380 loaves a week and 50 new regulars within 4 weeks.';
     // The measured aim exactly as an approved update writes it: their target and window, and the parts it leaves out.
