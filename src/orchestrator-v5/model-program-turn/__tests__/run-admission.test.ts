@@ -48,6 +48,9 @@ describe('the Run admission limit (alpha G11)', () => {
     expect(costOf(tiny(), 10)).toEqual({ operations: 240, bytes: 424 });
     // A sum's parts are work, however few quantities hold them (Codex r1): 1,000 more parts, 2 times × 1,000 more reads a draw.
     expect(costOf(tiny(1000), 10).operations).toBe(240 + 10 * 2 * 1000);
+    // A risk on s (Codex r2): 4 reads at each of 2 times and 6 a draw, so 10 × 14 more operations, and its uniforms, 8 a draw.
+    const risky: ExecutableModel = { ...tiny(), risks: [{ id: 'k', occurrence: 'a', severity: 'a', effect_on: 's', mode: 'add', from_period: 0 }] };
+    expect(costOf(risky, 10)).toEqual({ operations: 240 + 140, bytes: 424 + 80 });
   });
 
   it('the limits by name: 450 ranged inputs pass MAX_BYTES while their work fits; 1,000,000 parts pass MAX_OPERATIONS', () => {
