@@ -1014,6 +1014,56 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
         'the Challenge note reached the turn').toBe(true);
     });
 
+    /** The bakery whose goal waits: today's weekly sales are the person's figure, not given. */
+    const waiting = () => {
+      const m = bakery();
+      m.quantities = m.quantities.map((x) => (x.id === 'base_sales' ? { ...x, status: 'asked', value: null, quote: null, question: 'How many loaves do you sell in a typical week now?' } : x));
+      return m;
+    };
+    const draftWaiting = async (): Promise<Json> => {
+      SCENARIO = randomUUID(); persisted = null; canonicalDraft = JSON.stringify(waiting()); calls.length = 0;
+      const drafted = await typed(BAKERY_BRIEF);
+      expect(drafted.statusCode).toBe(200);
+      calls.length = 0;
+      return drafted.json() as Json;
+    };
+    const NOTE = { element_id: 'more_loaves', text: 'needs "base sales". How many loaves do you sell in a typical week now?' };
+
+    it('Olumi speaks on the item (DL 24 Oct): a goal whose chance waits gets ONE note on its card, the compiler\'s reason then the AI\'s question; never on the drafting turn; a resend adds none', async () => {
+      const drafted = await draftWaiting();
+      // The drafting turn's cards reach the canvas after its notes would, so it carries none.
+      expect(drafted.notes).toEqual([]);
+      outputs = [[{ type: 'message', text: 'The chance waits on your weekly sales today.' }]];
+      const turnId = randomUUID();
+      const first = (await typed('What does the model hold now?', turnId)).json() as Json;
+      expect(first.notes).toEqual([NOTE]);
+      expect((((first.model as Json).graph as Json).nodes as Json[]).find((n) => n.id === NOTE.element_id)).toMatchObject({ kind: 'goal' });
+      // A resend of the same turn replays it and adds no second note; the next turn holds one note, never two.
+      const again = (await typed('What does the model hold now?', turnId)).json() as Json;
+      expect(again).toMatchObject({ durability: 'replayed', notes: [] });
+      outputs = [[{ type: 'message', text: 'It still waits on that figure.' }]];
+      expect(((await typed('And now?')).json() as Json).notes).toEqual([NOTE]);
+    });
+
+    it('a goal with a chance gets no note (contrast: the same board, its goal calculable)', async () => {
+      await savedProgram();
+      outputs = [[{ type: 'message', text: 'Here is what the model holds.' }]];
+      const j = (await typed('What does the model hold now?')).json() as Json;
+      expect(j.notes).toEqual([]);
+      expect((((j.model as Json).graph as Json).nodes as Json[]).find((n) => n.id === NOTE.element_id)).toMatchObject({ kind: 'goal' });
+    });
+
+    it('a held card is the person\'s next step: no goal note is asked beside the card that holds their answer', async () => {
+      await draftWaiting();
+      const words = 'We sell about 320 loaves a week now.';
+      outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'ans', args: { public_label: 'Weekly sales today', basis: 'their answer', request: '', remove: [],
+        answers: [{ id: 'base_sales', value: 320, low: null, high: null, range_kind: null, party: null, quote: 'about 320 loaves a week', basis: null, status: 'known', author: 'person' }] } }],
+      [{ type: 'message', text: 'I prepared your figure; approve its card to save it.' }]];
+      const j = (await typed(words)).json() as Json;
+      expect(changeCards(j)).toHaveLength(1);
+      expect(j.notes).toEqual([]);
+    });
+
     it('a Challenge turn has no typed words, so no answer of theirs can pass (Codex r2 #3727): one quoting their brief is refused by id, and the saved model is unchanged', async () => {
       await savedProgram();
       const saved = JSON.stringify((persisted as Json).living_model);
