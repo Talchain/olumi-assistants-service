@@ -163,7 +163,9 @@ describe('the model-program turn on the real core route', () => {
     const body = sent[0]!;
     expect(body.model).toBe('gpt-6.1-sol');
     expect(body.reasoning).toEqual({ effort: 'medium' });
-    expect(body.instructions).toBe(DRAFTING_INSTRUCTIONS);
+    // Alpha G14: today's date (Europe/London) follows the fixed instructions, so a stated date counts from it.
+    const london = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    expect(body.instructions).toBe(`${DRAFTING_INSTRUCTIONS}\n\nToday is ${london} (Europe/London). A date they state counts in whole periods from today, which is period 0.`);
     expect(body.text.format).toMatchObject({ type: 'json_schema', name: 'canonical_model', strict: true });
     expect(stableStringify(body.text.format.schema)).toBe(stableStringify(CANONICAL_JSON_SCHEMA));
     expect(body.input).toEqual([{ role: 'user', content: BRIEF }]);
@@ -237,6 +239,14 @@ describe('the model-program turn on the real core route', () => {
       expect(JSON.stringify(out.payload)).not.toContain('socket hang up');
     }
     expect(sent).toHaveLength(0);
+  });
+
+  it('alpha G4: a draft whose save cannot be confirmed (the register call throws) never says nothing was changed', async () => {
+    const throwing: typeof dispatch = async (path, body) => { if (path.endsWith('/graph/register')) throw new Error('socket hang up'); return dispatch(path, body); };
+    replies = [JSON.stringify(bakery())];
+    const out = await runModelProgramTurn({ scenarioId: SCENARIO, turnId: randomUUID(), message: BRIEF, saved: { graph: null, identity: null }, dispatch: throwing });
+    expect(out.assistantText).toBe('The save could not be confirmed, so the model may or may not have changed. Reload to see the current model before changing it again.');
+    expect(out.toolCalls[0]).toMatchObject({ name: 'draft_canonical_model', ok: false, outcome: 'unknown', refusal: 'save_unknown' });
   });
 
   it('step 3, simulate + present: the view is the simulator\'s result on the scenario\'s seed; the display graph is S1\'s projection', async () => {

@@ -11,8 +11,9 @@ import { streamedLedgeredResponse, type StreamedResponsesBody } from '../../adap
 import { coreBudget } from '../agent-lane/model-budgets.js';
 import { agentRequestIdentity } from '../agent-lane/runtime/prompt-identity.js';
 import { CanonicalModel, type CanonicalModelT } from '../model-program/canonical.js';
+import { todayInLondon } from '../goal-target/deadline-date.js';
 import { compile, compileJson, normalise, type CompileError, type CompileResult } from '../model-program/compile.js';
-import { CANONICAL_JSON_SCHEMA, CANONICAL_SCHEMA_NAME, CanonicalUpdate, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX, UPDATE_JSON_SCHEMA, UPDATE_PREFIX, UPDATE_REPAIR_PREFIX,
+import { CANONICAL_JSON_SCHEMA, CANONICAL_SCHEMA_NAME, CanonicalUpdate, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX, todayLine, UPDATE_JSON_SCHEMA, UPDATE_PREFIX, UPDATE_REPAIR_PREFIX,
   type CanonicalUpdateT } from './prompt.js';
 
 export const MAX_REPAIRS = 2;
@@ -56,10 +57,10 @@ export type DraftOutcome = {
 };
 
 /** The request body: fixed instructions and schema first (the cached prefix), then the conversation. An update's schema is its changes only. */
-export function draftRequestBody(input: readonly InputMessage[], update = false): StreamedResponsesBody {
+export function draftRequestBody(input: readonly InputMessage[], update = false, today: string = todayInLondon(new Date())): StreamedResponsesBody {
   return {
     model: coreBudget(DRAFT_REASONING_EFFORT).model,
-    instructions: DRAFTING_INSTRUCTIONS,
+    instructions: `${DRAFTING_INSTRUCTIONS}\n\n${todayLine(today)}`,
     input: input.map((m) => ({ role: m.role, content: m.content })),
     reasoning: { effort: DRAFT_REASONING_EFFORT },
     max_output_tokens: DRAFT_MAX_OUTPUT_TOKENS,

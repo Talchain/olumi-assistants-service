@@ -134,7 +134,10 @@ export async function runModelProgramTurn(input: ProgramTurnInput): Promise<Prog
     return { call: { name: CONFIRM_READING, ok: true, outcome: 'ok', mutated: false, proposal_id: p.proposal_id }, result: { ok: true, mutated: false, proposal_id: p.proposal_id, public_label: p.public_label } };
   })() : undefined;
   return {
-    assistantText: saved ? replyOf(next.program.canonical, next.run, kind) : `The model could not be saved (${write.status}). Nothing was changed.`,
+    assistantText: saved ? replyOf(next.program.canonical, next.run, kind)
+      // An unknown outcome may have been written: never say nothing changed (alpha review G4); the same operation id reconciles it.
+      : write.status === 'unknown' ? 'The save could not be confirmed, so the model may or may not have changed. Reload to see the current model before changing it again.'
+        : `The model could not be saved (${write.status}). Nothing was changed.`,
     toolCalls: [{ name: kind === 'draft' ? 'draft_canonical_model' : 'run_program', ok: saved, outcome: saved ? 'ok' : write.status, mutated: saved, ...(saved ? {} : { refusal: `save_${write.status}` }) },
       ...(reading !== undefined ? [reading.call] : [])],
     toolResults: [{ ok: saved, mutated: saved, ...(isRec(receipt) ? { model_version: receipt } : {}) }, ...(reading !== undefined ? [reading.result] : [])],
