@@ -34,8 +34,7 @@ import { getRuntimeEnv } from '../../../config/env-resolver.js';
 import { ledgeredAgentsClient } from '../../../adapters/llm/openai-agents-client.js';
 import { currentStageEmitter, emitAgentPhase } from '../../../cee/unified-pipeline/stage-stream-context.js';
 import { log } from '../../../utils/telemetry.js';
-import { cardIdOf, type CardId, type OpenAiPausedRun } from '../../session/store.js';
-import type { ProposalStore } from '../proposal.js';
+import type { CardId, OpenAiPausedRun } from '../../session/store.js';
 import type { DraftVerification } from '../../path-b/tools/outcome.js';
 import { agentRequestIdentity } from '../runtime/prompt-identity.js';
 import type { AgentToolContext, ToolResult } from '../runtime/agent-tools.js';
@@ -198,8 +197,8 @@ export interface CoreTurnInput {
   readonly conversationStore?: ConversationIdStore;
   /** Where a run paused for approval is kept; absent → a tool that needs approval ends the run with nothing applied. */
   readonly pausedRunStore?: PausedRunStore;
-  /** The cards this scenario holds (the route's proposal store): a pause must name one awaiting approval; absent → none does. */
-  readonly proposals?: Pick<ProposalStore, 'outstanding'>;
+  /** Read-only: is `id` a card this scenario holds, awaiting approval (the route's proposal store)? A pause must name one; absent → none. */
+  readonly isPendingCard?: (id: string) => boolean;
   /** The person's press on the card of the paused run's proposal. Absent = a typed turn (any paused run is declined first). */
   readonly press?: { readonly decision: 'approve' | 'decline'; readonly proposal_id: string };
   /**
@@ -508,9 +507,8 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
       if (pause !== undefined) {
         // ⛔ A pause names a card this scenario holds, awaiting approval, read from its proposal store; else it is no pause (served
         // 25 Oct 08:39Z: on a press the AI applied again with '', that was saved as the pause, and the reply was refused).
-        const asked = cardIdOf(argsOf(pause)['proposal_id']);
-        const card = asked !== null && input.proposals?.outstanding(input.ctx.scenario_id, input.ctx.authenticated_user_id)
-          .some((p) => p.proposal_id === asked) === true ? asked : null;
+        const asked = argsOf(pause)['proposal_id'];
+        const card = typeof asked === 'string' && asked !== '' && input.isPendingCard?.(asked) === true ? asked as CardId : null;
         const run0: OpenAiPausedRun | undefined = card === null ? undefined : { pause_id: randomUUID(), proposal_id: card,
           call_id: callIdOf(pause) ?? '', tool: pause.name ?? '', state: result.state.toString() };
         const kept = run0 === undefined ? undefined : await input.pausedRunStore?.save(input.ctx.scenario_id, run0).catch(() => undefined);

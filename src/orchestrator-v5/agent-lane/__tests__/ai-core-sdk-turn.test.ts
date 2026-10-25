@@ -88,7 +88,7 @@ const turn = (message: string, c: ReturnType<typeof caps>, extra: Extra & { trac
     canonicalState: extra.state ?? { empty: true, entities: [] }, briefText: extra.briefText, conversationStore: 'conversationStore' in extra ? extra.conversationStore : columnStore(),
     ...(extra.pausedRunStore !== undefined ? { pausedRunStore: extra.pausedRunStore } : {}),
     // The scenario holds PID's card, awaiting approval: the card a pause must name (`sdk-turn.ts`).
-    proposals: { outstanding: () => [{ proposal_id: PID, public_label: 'Drop option B' }] },
+    isPendingCard: (id) => id === PID,
     ...(extra.press !== undefined ? { press: extra.press } : {}), ...(extra.traceMeta !== undefined ? { traceMeta: extra.traceMeta } : {}),
     ...(extra.replyBudget !== undefined ? { replyBudget: extra.replyBudget } : {}), ...(extra.firstTool !== undefined ? { firstTool: extra.firstTool } : {}),
     ...(extra.withheldTools !== undefined ? { withheldTools: extra.withheldTools } : {}) });

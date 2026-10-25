@@ -750,7 +750,7 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
               : challenge !== null && !program ? { firstTool: NOTE_ON_ITEM } : {}),
             ...(press !== undefined ? { press } : {}),
             // A pause must name a card this scenario holds, awaiting approval (`sdk-turn.ts`).
-            proposals,
+            isPendingCard: (id) => proposals.outstanding(coreCtx.scenario_id, coreCtx.authenticated_user_id).some((p) => p.proposal_id === id),
             ...(saved.revision !== null ? { traceMeta: { revision: saved.revision, ...(saved.run?.run_id != null ? { run_id: saved.run.run_id } : {}) } } : {}),
             ...coreTurnStores(store),
           });

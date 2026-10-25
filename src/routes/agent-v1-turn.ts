@@ -4323,7 +4323,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             : challenge !== null ? { firstTool: NOTE_ON_ITEM } : {}),
           ...(corePress !== undefined ? { press: corePress } : {}),
           // A pause must name a card this scenario holds, awaiting approval (`sdk-turn.ts`).
-          proposals,
+          isPendingCard: (id) => proposals.outstanding(coreCtx.scenario_id, coreCtx.authenticated_user_id).some((p) => p.proposal_id === id),
           ...(canonicalContext?.packet?.graph_revision !== undefined ? { traceMeta: { revision: canonicalContext.packet.graph_revision } } : {}),
           // The paused run and the ONE OpenAI Conversation id, kept on the scenario. A store without the id stops the turn
           // (CoreStateUnavailableError → 503 below).
