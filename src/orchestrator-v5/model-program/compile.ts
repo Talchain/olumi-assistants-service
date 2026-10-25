@@ -487,7 +487,8 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
     const sameBound = m.target === lm.bound || (figureOf(m.target) !== null && figureOf(m.target) === figureOf(lm.bound));
     if (sameBound) err('goal_and_limit', `${name(m.quantity)} ${m.cmp} its figure appears as both a goal ("${g.label}") and a limit ("${l.label}"). ${GOAL_VS_LIMIT} Keep it as the one the person describes and remove the other.`, [g.id, l.id]);
   }
-  const resolveWindow = (w: CanonicalWindowT, at: string, item: string): WinState => {
+  /** `at` names a goal or limit for the drafter's repairs (its id too); `said` is what the person reads of it (its label only). */
+  const resolveWindow = (w: CanonicalWindowT, at: string, said: string, item: string): WinState => {
     const st: WinState = { win: null, blockers: [], withheld: [] };
     if (w.start < 0) { err('window', `${at} opens ${w.start} periods after its origin; it must be 0 or later.`, [item]); return st; }
     if (has(w.origin_event) && !has(w.origin_offset)) { err('window', `${at} counts from "${w.origin_event}" but names no quantity for when it happens; add one in ${model.period}s (asked if not stated).`, [item]); return st; }
@@ -497,8 +498,8 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
       if (U.has(ref) && !sameDims(U.get(ref)!, period)) { err('window', `${at}'s ${what} ${name(ref)} is ${showUnit(U.get(ref)!)}; it counts ${model.period}s.`, [item, ref]); return null; }
       if (q.status === 'derived') { err('window', `${at}'s ${what} ${name(ref)} is derived; a window needs a figure.`, [item, ref]); return null; }
       if (q.status === 'asked') { st.blockers.push(ref); return null; }
-      if (!FIGURE_STATUSES.has(q.status)) { st.withheld.push(`${at}'s ${what} "${q.label}" is ${q.status.replace('_', ' ')}: ${q.basis}`); return null; }
-      if (has(q.low) && has(q.high) && q.low !== q.high) { st.withheld.push(`${at}'s ${what} "${q.label}" is a range (${q.low}–${q.high} ${q.unit}); the calculation needs one whole number of ${model.period}s.`); return null; }
+      if (!FIGURE_STATUSES.has(q.status)) { st.withheld.push(`${said}'s ${what} "${q.label}" is ${q.status.replace('_', ' ')}: ${q.basis}`); return null; }
+      if (has(q.low) && has(q.high) && q.low !== q.high) { st.withheld.push(`${said}'s ${what} "${q.label}" is a range (${q.low}–${q.high} ${q.unit}); the calculation needs one whole number of ${model.period}s.`); return null; }
       const v = q.value ?? q.low!;
       if (!Number.isInteger(v) || v < min) { err('window', `${at}'s ${what} ${name(ref)} is ${v}; it must be a whole number of ${model.period}s, at least ${min} (a finer period, such as week, can hold a part ${model.period}).`, [item, ref]); return null; }
       return v;
@@ -515,14 +516,14 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
     return m.aggregation === 'sum' ? sameDims(tu, multiply(qu, period)) || (sameDims(tu, qu) && !Object.keys(qu.dims).some((k) => TIME_DIMS.has(k))) : sameDims(tu, qu);
   };
   /** Shared checks for a goal's or a limit's measure; returns its window state. */
-  const measureChecks = (m: Measure, against: string, at: string, item: string, roots: readonly string[], frameWithheld: string[], relative = false): WinState | null => {
+  const measureChecks = (m: Measure, against: string, at: string, said: string, item: string, roots: readonly string[], frameWithheld: string[], relative = false): WinState | null => {
     if (!roots.every((x) => isQ(x, at, item))) return null;
     if (Q.get(m.quantity)!.status === 'asked') err('asks_for_result', `${at} measures ${name(m.quantity)}, which is asked: that asks the person for the result itself. Model what drives it (its definition, effect or stock), or leave the aim with measure null and a question.`, [item, m.quantity]);
     if (has(m.per) && m.aggregation === 'every') err('goal_shape', `${at} is a rate over the window (per ${name(m.per)}), which needs end, sum, mean, max or min, not every.`, [item]);
     if (unitsOk(m.quantity, against) && (!has(m.per) || U.has(m.per)) && !relative && !targetUnitOk(m, against)) {
       err('unit_mismatch', `${at} compares ${name(m.quantity)}${has(m.per) ? ` per ${name(m.per)}` : ''} (${showUnit(has(m.per) && U.has(m.per) ? divide(U.get(m.quantity)!, U.get(m.per)!) : U.get(m.quantity)!)}) with ${name(against)} (${showUnit(U.get(against)!)}); for "${m.aggregation}" the figure is in ${m.aggregation === 'sum' && !has(m.per) ? `the quantity's unit × ${model.period}` : "the quantity's unit"}.`, [item, m.quantity, against]);
     }
-    if (has(m.window)) { const st = resolveWindow(m.window, at, item); st.withheld.push(...frameWithheld); return st; }
+    if (has(m.window)) { const st = resolveWindow(m.window, at, said, item); st.withheld.push(...frameWithheld); return st; }
     // A static level with no deadline is read once, at period 0, with every option's change in effect. A level that
     // changes over time (it rests on a stock) has no single reading without a deadline: a typed blocker, never a guess.
     const moves = [...upstream(roots)].some((x) => R.get(x)?.form === 'stock');
@@ -532,6 +533,7 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
   const goalWin = new Map<string, WinState>();
   for (const g of model.goals) {
     const at = `The goal "${g.label}" (${g.id})`;
+    const said = `The goal "${g.label}"`;
     needQuote(g, at, g.id);
     if (!has(g.measure)) continue; // an aim with no measure yet is VALID: coached, left out of the chance, never forced
     const m = g.measure;
@@ -542,7 +544,7 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
     const ref = m.reference;
     if (m.frame === 'level' && has(ref)) err('goal_shape', `${at} is a level but names a reference; make it a change (change_abs or change_rel), or set its reference to null.`, [g.id]);
     if (m.frame !== 'level' && !has(ref)) err('goal_shape', `${at} is a change but names no reference; say what it is a change from (now, an option such as carrying on as now, or a stated value).`, [g.id]);
-    if (m.frame !== 'level' && has(m.per)) frameWithheld.push(`${at} is a change in a rate over the window, which is not supported yet.`);
+    if (m.frame !== 'level' && has(m.per)) frameWithheld.push(`${said} is a change in a rate over the window, which is not supported yet.`);
     if (m.frame !== 'level' && has(ref)) {
       if (ref.kind === 'value') {
         if (!has(ref.quantity)) err('goal_shape', `${at} is a change from a stated value but names no quantity for it.`, [g.id]);
@@ -552,21 +554,22 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
       } else if (ref.kind === 'option') {
         const o = model.options.find((x) => x.id === ref.option);
         if (!o) err('undefined_ref', `${at} is a change from the option "${ref.option ?? ''}", which is not an option in the model.`, [g.id]);
-        else if (o.sets.length) frameWithheld.push(`${at} is a change from "${o.label}", which changes things itself; comparing on the same draws is supported only against an option that changes nothing (carrying on as now).`);
-        else if (Q.has(m.quantity) && model.risks.some((k) => upstream([m.quantity]).has(k.effect_on))) frameWithheld.push(`${at} is a change from "${o.label}", and a risk affects it; comparing with another option on the same draws under a risk is not supported yet.`);
+        else if (o.sets.length) frameWithheld.push(`${said} is a change from "${o.label}", which changes things itself; comparing on the same draws is supported only against an option that changes nothing (carrying on as now).`);
+        else if (Q.has(m.quantity) && model.risks.some((k) => upstream([m.quantity]).has(k.effect_on))) frameWithheld.push(`${said} is a change from "${o.label}", and a risk affects it; comparing with another option on the same draws under a risk is not supported yet.`);
       }
     }
     for (const a of m.assumptions) if (!model.assumptions.some((x) => x.id === a)) err('undefined_ref', `${at} rests on the assumption "${a}", which is not an assumption record.`, [g.id, a]);
     for (const x of m.exclusions) if (!model.left_out.some((y) => y.id === x)) err('undefined_ref', `${at} leaves out "${x}", which is not a left_out record.`, [g.id, x]);
-    const st = measureChecks(m, m.target, at, g.id, goalRoots(g), frameWithheld, m.frame === 'change_rel');
+    const st = measureChecks(m, m.target, at, said, g.id, goalRoots(g), frameWithheld, m.frame === 'change_rel');
     if (st) goalWin.set(g.id, st);
   }
   const limitWin = new Map<string, WinState>();
   for (const l of model.limits) {
     const at = `The limit "${l.label}" (${l.id})`;
+    const said = `The limit "${l.label}"`;
     needQuote(l, at, l.id);
     if (!has(l.measure)) continue; // a guardrail with no measure yet is VALID: reported as not covered, never given a scale
-    const st = measureChecks({ ...l.measure, target: l.measure.bound }, l.measure.bound, at, l.id, limitRoots(l), []);
+    const st = measureChecks({ ...l.measure, target: l.measure.bound }, l.measure.bound, at, said, l.id, limitRoots(l), []);
     if (st) limitWin.set(l.id, st);
   }
   const wins = [...goalWin.values(), ...limitWin.values()].map((s) => s.win).filter(has);

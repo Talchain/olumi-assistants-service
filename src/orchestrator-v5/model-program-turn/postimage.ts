@@ -311,7 +311,8 @@ function wordsIn(m: CanonicalModelT) {
   const named = (id: string) => {
     for (const [f] of FAMILIES) {
       const r = (m[f] as readonly Rec[]).find((x) => x['id'] === id);
-      const l = r?.['label'] ?? r?.['text'] ?? r?.['position'];
+      // A relation or a preference has no name of its own: it is said as the card titles it (what it works out, or is about).
+      const l = r === undefined ? undefined : r['label'] ?? r['text'] ?? r['position'] ?? title(f, r);
       if (typeof l === 'string') return l;
     }
     return id;
