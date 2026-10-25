@@ -1242,7 +1242,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(String(sentTools.propose_change)).toContain('An answer to a listed question (a blocker, or an asked item\'s question) goes in answers, on that existing item\'s id from read_canonical_context, saying whose it is: author person, ');
       expect(String(sentTools.propose_change)).toContain('Anything else (a new item or link, a rename, a removal) goes in request, in plain words with their exact words for every figure of theirs, '
         + 'with remove the ids of anything they asked to remove ([] for none); Olumi’s drafter writes it. ');
-      expect(sentSha('propose_change')).toBe('0399db22adba3942e428e51b84e1941de752e7d6cdb24f4eba416ffa73f98acd'); // 25 Oct: "never invent" is their facts; an Olumi range for an effect is never banned
+      expect(sentSha('propose_change')).toBe('73c28edf524df8951bfe28d807bf137472ec795db39207ec6eab3e663efc9875'); // 25 Oct: "never invent" is their facts; an effect is sized where general knowledge bounds it
       const sentParams = (calls[0]!.tools as Json[]).find((t) => t.name === 'propose_change')!.parameters as Json;
       expect(Object.keys(sentParams.properties)).toEqual(['public_label', 'basis', 'request', 'remove', 'answers']);
       expect(sentParams.required).toContain('answers');
