@@ -272,6 +272,19 @@ describe('numerical check: natural-unit simulator, hand-calculated rows', () => 
     expect([outcomeOf(opt(r, 'hold'), 'per_sub').p50, goalOf(opt(r, 'hold'), 'per_sub').chance]).toEqual([5, 1]);
   });
 
+  it('row 8c: a goal\u2019s denominator (per) is part of what it rests on: uncertain only there, it is the driver, never exact', () => {
+    // Revenue per customer = 1,000 \u00f7 customers \u2265 10 holds exactly when 0 < customers \u2264 100. Customers is a plausible range
+    // 80 to 120, most likely 100: an unbounded Normal centred on 100 (a plausible range is not a bound, row 2b), so the hand chance is
+    // P(0 < customers \u2264 100) = 1/2 less a term below 1e-17 (Wilson interval at 20k must hold 0.5). Revenue and the target are fixed:
+    // the denominator is the ONLY uncertainty, so it must be the one driver and the chance cannot be exact.
+    const r = simulate(model(1, [fixed('revenue', 1000), range('customers', 80, 120, 100), fixed('t', 10)],
+      [{ ...goal('per_customer', 'revenue', '>=', 't'), per: 'customers' }]), { seed: SEED, draws: N });
+    const g = goalOf(first(r), 'per_customer');
+    expect(inside(0.5, g.precision_95), JSON.stringify(g)).toBe(true);
+    expect(g.precision_95[0]).toBeLessThan(g.precision_95[1]);
+    expect(first(r).drivers.map((x: Rec) => x.quantity)).toEqual(['customers']);
+  });
+
   it('row 9: common random numbers: two options that differ in one set share every other draw', () => {
     // a ~ 10..30, b ~ 100..200, c = a + spend. 'low' sets spend to 5, 'high' to 9. In any one draw a and b are the same number
     // under both options, c differs by exactly 9 − 5 = 4, and spend is 5 or 9 in every period (never randomised). The goal

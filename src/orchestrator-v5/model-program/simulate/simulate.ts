@@ -349,8 +349,10 @@ function planOption(c: Compiled, option: Option, model: ExecutableModel): Plan {
   /** What a quantity rests on through every edge: the one authority, `restsOn`, read by its ids. */
   const closure = (roots: readonly number[]): Set<number> =>
     new Set([...restsOn(model, roots.map((q) => c.ids[q]!), option.id)].flatMap((id) => (c.index.has(id) ? [c.index.get(id)!] : [])));
-  const risky = (k: Check): boolean => [...closure([k.q, k.ref])].some((q) => risksOn[q]!.length > 0);
-  const reach = closure([...c.goals, ...c.limits].flatMap((k) => [k.q, k.ref]));
+  /** A goal's or limit's own roots: its quantity, its target or bound, and its denominator (`per`), as present.ts reads them. */
+  const roots = (k: Check): number[] => [k.q, k.ref, ...(k.per !== undefined ? [k.per.q] : [])];
+  const risky = (k: Check): boolean => [...closure(roots(k))].some((q) => risksOn[q]!.length > 0);
+  const reach = closure([...c.goals, ...c.limits].flatMap(roots));
   const drivers = c.ranged.flatMap((r, slot) => (reach.has(r.q) && !c.switches.has(r.q) ? [slot] : []));
   return { option_id: option.id, order, sets, risksOn, drivers, goalRisky: c.goals.map(risky), limitRisky: c.limits.map(risky) };
 }
