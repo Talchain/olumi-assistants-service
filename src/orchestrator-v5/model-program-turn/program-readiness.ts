@@ -10,6 +10,7 @@
  */
 import type { AnalysisReadyPayload } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { compile } from '../model-program/compile.js';
+import { admission } from './evaluate.js';
 import { savedProgramOf, sourceTextOf } from './program-store.js';
 
 type Rec = Record<string, unknown>;
@@ -27,7 +28,9 @@ export function programReadinessOf(graph: unknown): AnalysisReadyPayload | undef
   const goal = model.goals.find((g) => g.measure !== null) ?? model.goals[0];
   const goalNode = nodes.find((n) => n['id'] === goal?.id);
   const quantity = new Map(model.quantities.map((q) => [q.id, q] as const));
-  const status = compiled.errors.length > 0 ? 'blocked' : compiled.executable !== null ? 'ready' : 'needs_user_input';
+  // A model its Run would refuse for size (alpha G11) is blocked too: a Run cannot work it out until the model changes.
+  const tooLarge = compiled.errors.length === 0 && compiled.executable !== null && !admission(compiled.executable).ok;
+  const status = compiled.errors.length > 0 || tooLarge ? 'blocked' : compiled.executable !== null ? 'ready' : 'needs_user_input';
   return {
     goal_node_id: goal?.id ?? '',
     ...Object.fromEntries(GOAL_FIELDS.flatMap((k) => (goalNode?.[k] !== undefined ? [[k, goalNode[k]]] : []))),
@@ -43,7 +46,7 @@ export function programReadinessOf(graph: unknown): AnalysisReadyPayload | undef
         ...(o.sets.length === 0 ? { is_baseline: true } : {}), ...(outcome !== undefined && outcome.reasons.length > 0 ? { status_reason: outcome.reasons.join(' ') } : {}) };
     }),
     status,
-    ...(status === 'blocked' ? { blocked_reason: 'MODEL_PROGRAM_DOES_NOT_COMPILE' } : {}),
+    ...(status === 'blocked' ? { blocked_reason: tooLarge ? 'MODEL_PROGRAM_TOO_LARGE' : 'MODEL_PROGRAM_DOES_NOT_COMPILE' } : {}),
     may_run: status === 'ready',
   };
 }

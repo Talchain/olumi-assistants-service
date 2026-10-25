@@ -184,10 +184,10 @@ const SWEEP_DRAWS = 4000;
  */
 export const DRIVER_MIN_SWING = 0.05;
 /** The sweep's cost (alpha G11): three settings of every ranged input no option sets, each a run of SWEEP_DRAWS. */
-export function driverSweepEvaluations(model: ExecutableModel, draws: number): number {
+export function driverSweepOperations(model: ExecutableModel, draws: number): number {
   const switches = new Set(model.options.flatMap((o) => o.sets.map((s) => s.quantity)));
   const inputs = model.quantities.filter((x) => x.dist?.kind === 'range' && x.dist.low < x.dist.high && !switches.has(x.id)).length;
-  return 3 * inputs * costOf(model, Math.min(SWEEP_DRAWS, draws)).evaluations;
+  return 3 * inputs * costOf(model, Math.min(SWEEP_DRAWS, draws)).operations;
 }
 export const NO_DRIVER_REASON = 'Tested one at a time at each figure’s low end, middle and high end, no figure moved this chance by more than 5 points.';
 export const NO_RANGE_REASON = 'No figure this chance rests on has a range to test.';

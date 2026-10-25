@@ -20,18 +20,24 @@ import type { ExecutableModel } from '../model-program/executable.js';
 import { costOf, simulate } from '../model-program/simulate/simulate.js';
 import type { SimResult } from '../model-program/simulate/result.js';
 import {
-  driverSweepEvaluations, needsAnswer, presentAnalysisView, waitsOnWords, type PresentAsk, type PresentBlocker, type PresentGoal, type PresentQuantity,
+  driverSweepOperations, needsAnswer, presentAnalysisView, waitsOnWords, type PresentAsk, type PresentBlocker, type PresentGoal, type PresentQuantity,
   type PresentedAnalysisView,
 } from '../model-program/present/present.js';
 
 export const RUN_DRAWS = 10_000;
 /**
  * THE RUN'S ADMISSION LIMIT (alpha G11), headline and driver sweep together, checked before anything is allocated. Measured
- * 25 Oct on the Mac at 30 to 50 million evaluations a second (bakery and club, 52 and 260 weeks): about 2 s there, and about
- * 5 s on staging at a third of that speed. A Run over it is refused by name; a sweep that would pass it is not run.
+ * 25 Oct on the Mac at 70 to 100 million operations a second (`costOf`; bakery and club over 52 to 260 periods): about 2 s
+ * there, and about 5 s on staging at 40 % of that speed. A Run over it is refused by name; a sweep that would pass it is not run.
  */
-export const MAX_EVALUATIONS = 80_000_000;
+export const MAX_OPERATIONS = 150_000_000;
 export const MAX_BYTES = 64 * 1024 * 1024;
+
+/** Whether a Run of `x` is admitted (alpha G11), or which limit it would pass. */
+export function admission(x: ExecutableModel, draws: number = RUN_DRAWS): { readonly ok: true; readonly operations: number } | { readonly ok: false; readonly over: 'operations' | 'bytes' } {
+  const c = costOf(x, draws);
+  return c.operations > MAX_OPERATIONS ? { ok: false, over: 'operations' } : c.bytes > MAX_BYTES ? { ok: false, over: 'bytes' } : { ok: true, operations: c.operations };
+}
 
 /** The scenario's seed: fixed per scenario (its id's sha256, first 32 bits), saved with the model. */
 export function seedOf(scenarioId: string): number {
@@ -108,14 +114,12 @@ export function evaluateCanonical(model: CanonicalModelT, opts: { readonly sourc
   if (x === null) {
     return { compiled, sim: null, projection, view: waitingView(model, compiled, goals, blockers) };
   }
-  const draws = opts.draws ?? RUN_DRAWS, cost = costOf(x, draws);
-  if (cost.evaluations > MAX_EVALUATIONS || cost.bytes > MAX_BYTES) {
-    return { compiled, sim: null, projection, view: waitingView(model, compiled, goals, blockers, tooLarge(model, x)) };
-  }
+  const draws = opts.draws ?? RUN_DRAWS, admitted = admission(x, draws);
+  if (!admitted.ok) return { compiled, sim: null, projection, view: waitingView(model, compiled, goals, blockers, tooLarge(x, admitted.over)) };
   const sim = simulate(x, { seed: opts.seed, draws });
   // A limit, option or risk left out of this run is said by S2's present itself (S1's `executable.withheld`, r3).
   const view = presentAnalysisView({ model: x, result: sim, quantities: quantityMeta(model, compiled, x), goals, asks, blockers, leaves_out,
-    left_out: model.left_out.map((r) => ({ text: r.text, concerns: r.concerns })), sweep: cost.evaluations + driverSweepEvaluations(x, draws) <= MAX_EVALUATIONS });
+    left_out: model.left_out.map((r) => ({ text: r.text, concerns: r.concerns })), sweep: admitted.operations + driverSweepOperations(x, draws) <= MAX_OPERATIONS });
   return { compiled, sim, projection, view };
 }
 
@@ -136,9 +140,11 @@ function blockersOf(model: CanonicalModelT, list: readonly Blocker[]): PresentBl
 
 const sentence = (x: string): string => (/[.?!]$/.test(x) ? x : `${x}.`);
 const count = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`;
-/** Why a Run over the admission limit is not worked out, and what brings it within reach. */
-const tooLarge = (m: CanonicalModelT, x: ExecutableModel): string => `This model is too large to work out in one run: ${count(x.periods, m.period)} ahead for `
-  + `${count(x.options.length, 'option')}. Counting in longer periods, looking less far ahead or comparing fewer options brings it within reach.`;
+/** Why a Run over the admission limit is not worked out, by the limit it passes, and what reduces it. */
+const tooLarge = (x: ExecutableModel, over: 'operations' | 'bytes'): string => (over === 'operations'
+  ? `This model is too large to work out in one run: ${count(x.periods, x.period_unit)} ahead for ${count(x.options.length, 'option')}. `
+    + 'Counting in longer periods, looking less far ahead or comparing fewer options reduces the work.'
+  : 'This model holds too many uncertain figures, risks and conditions at once to work out in one run. Fewer of them reduce what it holds.');
 
 function waitingView(model: CanonicalModelT, compiled: CompileResult, goals: readonly PresentGoal[], blockers: readonly PresentBlocker[], refused?: string): WaitingView {
   const m = normalise(model);
