@@ -162,7 +162,15 @@ async function prepare(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs)
   const drafted = request.trim() !== '' || args.remove.length > 0 ? await proposePostimage(set.model, words, request, args.remove, ledgeredResponsesCall()) : set;
   if (drafted.model === null) return refused('no_model_back', 'Olumi could not write the updated model just now; nothing changed.');
   // Their answers win on the drafter's model too, set again exactly (buddy 24 Oct); one it removed is refused by name, never dropped.
-  const postimage = drafted.model;
+  // An answer in words on a figure stays theirs there (Codex r1 #3767): their status, party and words, the drafter's reading of
+  // them its figure; one it read no figure from is refused by name, never saved as Olumi's.
+  const worded = answers.filter((a) => toDrafter(a) && quantities.some((x) => x.id === a.id));
+  const unread = worded.filter((a) => { const x = drafted.model!.quantities.find((y) => y.id === a.id); return x === undefined || (x.value === null && x.low === null && x.high === null); }).map((a) => a.id);
+  if (unread.length > 0) return refused('not_an_answer', `${unread.join(', ')}: the change read no figure from your answer, so nothing changed.`, { ids: unread });
+  const postimage: CanonicalModelT = { ...drafted.model, quantities: drafted.model.quantities.map((x) => {
+    const a = worded.find((w) => w.id === x.id);
+    return a === undefined ? x : { ...x, status: 'known' as const, author: a.author, party: a.party, quote: a.quote, question: null };
+  }) };
   const gone = figures.filter((a) => !postimage.quantities.some((x) => x.id === a.id)).map((a) => a.id);
   if (gone.length > 0) return refused('not_an_answer', `${gone.map((id) => `"${set.model.quantities.find((x) => x.id === id)!.label}" (${id})`).join(', ')}: the change removed what you answered, so nothing changed.`, { ids: gone });
   const draft = answered(postimage, figures);

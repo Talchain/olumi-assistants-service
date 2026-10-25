@@ -1578,8 +1578,12 @@ describe('the model-program turn on the real core route', () => {
     expect(unknown.status, JSON.stringify(unknown)).toBe('ok');
     expect(sent).toHaveLength(0);
     expect(unknown.data.changes.map((x: Json) => [x.id, x.action, x.author])).toEqual([['oven_weeks', 'change', 'person']]);
+    // Codex r1 #3767: the drafter reads no figure from it: refused by name, nothing held.
+    replies = [savedWith((d) => setQ(d, 'oven_weeks', { basis: 'No date given.' }))];
+    expect(await ask([answer({})])).toEqual({ status: 'refused', reason: 'not_an_answer', detail: 'oven_weeks: the change read no figure from your answer, so nothing changed.', data: { ids: ['oven_weeks'] } });
     // The date: ONE drafter call whose change is that answer in their words, and ONE card with the drafter's whole periods.
-    replies = [savedWith((d) => setQ(d, 'oven_weeks', { status: 'known', question: null, value: 2, quote: words, basis: 'Two whole weeks from today, 25 October 2026.' }))];
+    // The drafter writes its reading as Olumi's, with no quote: the answer stays theirs, in their words (Codex r1 #3767).
+    replies = [savedWith((d) => setQ(d, 'oven_weeks', { status: 'known', question: null, value: 2, author: 'olumi', quote: null, basis: 'Two whole weeks from today, 25 October 2026.' }))];
     const c = ctx();
     const p = await ask([answer({})], c);
     expect(p.status, JSON.stringify(p)).toBe('ok');
