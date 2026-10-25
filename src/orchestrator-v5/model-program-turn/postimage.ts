@@ -97,8 +97,9 @@ const sameAmount = (a: Rec, b: Rec): boolean => {
  * Every attribution in a record (itself, an option's settings, a relation's terms) that names the person as its author and
  * states something: a figure of theirs that is only ASKED (no figure, no words yet) states nothing.
  */
+const noFigure = (v: Rec): boolean => v['value'] === null && v['low'] === null && v['high'] === null;
 /** A slot of theirs that is not known yet and holds nothing (no figure): it states nothing, like an asked one (DL 24 Oct). */
-const emptyUnknown = (v: Rec): boolean => v['status'] === 'unknown' && v['value'] === null && v['low'] === null && v['high'] === null;
+const emptyUnknown = (v: Rec): boolean => v['status'] === 'unknown' && noFigure(v);
 const personAttributions = (v: unknown): Rec[] => (Array.isArray(v) ? v.flatMap(personAttributions)
   : isRec(v) ? [...(v['author'] === 'person' && 'quote' in v && !(v['quote'] === null && (v['status'] === 'asked' || emptyUnknown(v))) ? [v] : []), ...Object.values(v).flatMap(personAttributions)] : []);
 const withoutHost = (v: unknown): unknown => (Array.isArray(v) ? v.map(withoutHost)
@@ -247,7 +248,10 @@ export function validatePostimage(saved: CanonicalModelT, raw: unknown,
       if (old !== undefined && fields.length === 0 && !unshown.some((u) => u.startsWith(`${String(r['id'])} (`))) return old;
       // A figure of theirs changed, or what it is (an "I don't know" turning asked into unknown): their words THIS turn (buddy 24 Oct).
       // Changed is its amount, in its units (issue 37): their 1 year said exactly as 12 month is the same figure.
-      const refigured = family === 'quantities' && old !== undefined && r['author'] === 'person' && (old['status'] !== r['status'] || !sameAmount(old, r));
+      // A figure that was never theirs (Olumi's or the structure's) withdrawn into an empty question of theirs states nothing of
+      // theirs, so it needs none of their words (European fix request, 25 Oct); their own figure, changed or withdrawn, does.
+      const emptied = old !== undefined && old['author'] !== 'person' && r['quote'] === null && (r['status'] === 'asked' || r['status'] === 'unknown') && noFigure(r);
+      const refigured = family === 'quantities' && old !== undefined && r['author'] === 'person' && (old['status'] !== r['status'] || !sameAmount(old, r)) && !emptied;
       if (personAttributions(r).some((a) => !verbatimIn(a['quote'], opts.words))) unverified.push(String(r['id']));
       else if (refigured && !verbatimIn(r['quote'], opts.fresh)) unturned.push(String(r['id']));
       const record = accepted(r, opts.approver ?? null) as Rec;
