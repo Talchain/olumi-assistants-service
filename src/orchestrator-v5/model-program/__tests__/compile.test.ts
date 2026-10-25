@@ -550,6 +550,39 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(codes(compile(none))).toEqual(['set_reaches_nothing', 'option_reaches_no_goal']);
   });
 
+  it('alpha G7: an id lowering generates is no record\'s own: an authored record with it is refused, never silently replaced or reused', () => {
+    // revenue = price x loaves is derived, so a change goal against today makes revenue__today and revenue_growth__change_rel.
+    // profit = revenue + grants - costs makes profit__plus, whose own today-shadow is profit__plus__today (a nested generated id).
+    const shop = (extra: CanonicalQuantityT[], goals: CanonicalGoalT[]) => model({
+      period: 'month',
+      quantities: [person('price', 'GBP/loaf', 3, 'loaves sell at £3'), person('loaves', 'loaf/month', 1600, 'about 1,600 loaves a month'), derived('revenue', 'GBP/month'),
+        person('grants', 'GBP/month', 200, 'a £200 grant'), person('costs', 'GBP/month', 3000, 'costs of £3,000'), derived('profit', 'GBP/month'),
+        person('growth_target', '%', 10, 'grow by 10%'), person('year', 'month', 12, 'next year'), ...extra],
+      relations: [def('revenue_rel', 'revenue', 'product', ['price', 'loaves']),
+        { form: 'definition', id: 'profit_rel', defines: 'profit', op: 'sum', parts: [{ id: 'revenue', sign: 1 }, { id: 'grants', sign: 1 }, { id: 'costs', sign: -1 }], ...base, ...who(null) }],
+      goals,
+    });
+    const growthOf = (id: string, quantity: string): CanonicalGoalT => ({ ...goal(id, quantity, '>=', 'growth_target', 'end', 'year', 'grow by 10%'),
+      measure: { ...goal(id, quantity, '>=', 'growth_target', 'end', 'year', 'grow by 10%').measure!, frame: 'change_rel', reference: { kind: 'now', option: null, quantity: null } } });
+    const badIds = (r: ReturnType<typeof compile>) => r.errors.filter((e) => e.code === 'bad_id').map((e) => e.items[0]);
+    // The generated reference and change: before the fix, the authored revenue__today was silently replaced by Olumi's shadow.
+    const clash = compile(shop([person('revenue__today', 'GBP/month', 4000, 'we make £4,000 today')], [growthOf('revenue_growth', 'revenue')]));
+    expect(badIds(clash)).toEqual(['revenue__today']);
+    expect(clash.errors.find((e) => e.code === 'bad_id')!.message).toBe('The id "revenue__today" is one Olumi uses for a working figure of its own; give that record another id.');
+    expect(clash.executable).toBeNull();
+    // A nested generated id (the shadow of a generated intermediate) is guarded the same way.
+    expect(badIds(compile(shop([person('profit__plus__today', 'GBP/month', 1, 'one pound')], [growthOf('profit_growth', 'profit')])))).toEqual(['profit__plus__today']);
+    // Contrast: the same goals with no clashing record compile; and an id that only LOOKS generated (no lowering makes it) is ordinary.
+    expect(compile(shop([], [growthOf('revenue_growth', 'revenue'), growthOf('profit_growth', 'profit')])).errors).toEqual([]);
+    expect(badIds(compile(shop([person('shop__today', 'GBP/month', 4000, 'we make £4,000 today')], [growthOf('revenue_growth', 'revenue')])))).toEqual([]);
+    // Codex r2: a stock's today-shadow is its start, so no cash__today is made; an authored, unused cash__today is not refused.
+    const cashModel = model({ period: 'month',
+      quantities: [person('cash_now', 'GBP', 1000, '£1,000 in the bank'), person('takings', 'GBP/month', 300, '£300 a month'), derived('cash', 'GBP'),
+        person('cash__today', 'GBP', 5, 'five pounds'), person('growth_target', '%', 10, 'grow by 10%'), person('year', 'month', 12, 'next year')],
+      relations: [stock('cash_rel', 'cash', 'cash_now', ['takings'], [])], goals: [growthOf('cash_growth', 'cash')] });
+    expect(badIds(compile(cashModel))).toEqual([]);
+  });
+
   it('plan r3 #1: the question binds the calculation: "revenue next year", "annual revenue" and "revenue growth" compile to three different executable goals', () => {
     const change = (g: CanonicalGoalT, frame: 'change_abs' | 'change_rel', reference: NonNullable<CanonicalGoalT['measure']>['reference']): CanonicalGoalT => ({ ...g, measure: { ...g.measure!, frame, reference } });
     const sundays = (goals: CanonicalGoalT[]) => model({

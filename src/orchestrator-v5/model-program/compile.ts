@@ -758,6 +758,9 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
   };
 
   // ── the executable subset: only supported goals, limits and inputs ────────────────────────────────────────────────
+  // An id lowering generates must be no record's own (alpha G7): equal to one, lowering would silently replace it or reuse it.
+  const recordIds = new Set(model.quantities.map((q) => q.id)), clashes = new Set<string>();
+  const fresh = (id: string): string => { if (recordIds.has(id)) clashes.add(id); return id; };
   const build = (goals: CanonicalGoalT[], limits: CanonicalLimitT[], options: CanonicalModelT['options'], conversions?: Conversion[]): ExecutableModel => {
     const included = upstream([...goals.flatMap(goalRoots), ...limits.flatMap(limitRoots)]);
     const xRisks = new Set<string>();
@@ -789,13 +792,13 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
       if (r === undefined) quantities.push({ ...base, dist: distOf(q, u.scale, domainOf(q)) });
       else if (r.form === 'stock') quantities.push({ ...base, stock: { start: r.start, inflows: [...r.inflows], outflows: [...r.outflows] } });
       else if (r.form === 'effect') quantities.push({ ...base, equation: { form: 'effect', base: r.base, terms: r.terms.map((t) => ({ coefficient: t.coefficient, driver: t.driver })) } });
-      else quantities.push(...lowerDefinition(base, r, (ids) => showUnit({ dims: ids.reduce((a, i) => multiply(a, U.get(i)!), { dims: {}, scale: 1 } as Unit).dims, scale: 1 })));
+      else quantities.push(...lowerDefinition(base, r, fresh, (ids) => showUnit({ dims: ids.reduce((a, i) => multiply(a, U.get(i)!), { dims: {}, scale: 1 } as Unit).dims, scale: 1 })));
     }
     const xOptions: XOption[] = model.options.length === 0
       ? [{ id: AS_STATED_OPTION_ID, label: 'As things stand', sets: [] }]
       : options.map((o) => ({ id: o.id, label: o.label, sets: o.sets.flatMap((s, i) => (xSets.get(o.id)?.has(i) ? [{ quantity: s.quantity, to: s.to ?? '', from_period: setTiming.get(o.id)?.[i] ?? 0 }] : [])) }));
     const xGoals: XGoal[] = goals.map((g) => ({
-      id: g.id, label: g.label, quantity: lowerChange(g, quantities, xOptions), ...(has(g.measure!.per) ? { per: g.measure!.per } : {}),
+      id: g.id, label: g.label, quantity: lowerChange(g, quantities, xOptions, fresh), ...(has(g.measure!.per) ? { per: g.measure!.per } : {}),
       cmp: g.measure!.cmp, target: g.measure!.target, aggregation: g.measure!.aggregation, window: goalWin.get(g.id)!.win!,
       ...(g.measure!.window === null ? { no_deadline: true as const } : {}),
     }));
@@ -873,6 +876,12 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
 
   const conversions: Conversion[] = [];
   const x = build(goodGoals, goodLimits, goodOptions, conversions);
+  if (clashes.size > 0) {
+    for (const id of clashes) err('bad_id', `The id "${id}" is one Olumi uses for a working figure of its own; give that record another id.`, [id]);
+    for (const p of perGoal) { p.status = 'withheld'; p.reasons = ['The model has errors to fix first.', ...p.reasons]; }
+    result.joint = { ...result.joint, status: 'withheld', reasons: ['The model has errors to fix first.'] };
+    return result;
+  }
   const inRun = new Set(x.risks.map((k) => k.id));
   x.withheld = [
     ...withheldList,
@@ -888,20 +897,20 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
  * first part against the rest): several added parts with subtracted ones get an exact intermediate `<q>__plus`; several
  * multiplied parts with divided ones get `<q>__times`. Both are exact, Olumi-free and drawn by nobody.
  */
-function lowerDefinition(base: Omit<XQuantity, 'equation' | 'dist' | 'stock'>, r: Extract<CanonicalRelationT, { form: 'definition' }>, unitOfProduct: (ids: string[]) => string): XQuantity[] {
+function lowerDefinition(base: Omit<XQuantity, 'equation' | 'dist' | 'stock'>, r: Extract<CanonicalRelationT, { form: 'definition' }>, fresh: (id: string) => string, unitOfProduct: (ids: string[]) => string): XQuantity[] {
   if (r.op === 'sum') {
     const pos = r.parts.filter((p) => p.sign === 1).map((p) => p.id);
     const neg = r.parts.filter((p) => p.sign === -1).map((p) => p.id);
     if (!neg.length) return [{ ...base, equation: { form: 'definition', op: 'sum', parts: pos } }];
     if (pos.length === 1) return [{ ...base, equation: { form: 'definition', op: 'difference', parts: [pos[0], ...neg] } }];
-    const plus = `${base.id}__plus`;
+    const plus = fresh(`${base.id}__plus`);
     return [{ ...base, id: plus, label: `${base.label} (parts added)`, equation: { form: 'definition', op: 'sum', parts: pos } }, { ...base, equation: { form: 'definition', op: 'difference', parts: [plus, ...neg] } }];
   }
   const num = r.parts.filter((p) => p.power === 1).map((p) => p.id);
   const den = r.parts.filter((p) => p.power === -1).map((p) => p.id);
   if (!den.length) return [{ ...base, equation: { form: 'definition', op: 'product', parts: num } }];
   if (num.length === 1) return [{ ...base, equation: { form: 'definition', op: 'ratio', parts: [num[0], ...den] } }];
-  const times = `${base.id}__times`;
+  const times = fresh(`${base.id}__times`);
   return [{ ...base, id: times, label: `${base.label} (parts multiplied)`, unit: unitOfProduct(num), equation: { form: 'definition', op: 'product', parts: num } }, { ...base, equation: { form: 'definition', op: 'ratio', parts: [times, ...den] } }];
 }
 
@@ -922,7 +931,7 @@ export function shadowLabel(label: string, mode: 'today' | 'sq'): string {
  * An input an option sets is split once into `<q>__base` (its figure, drawn once) and `<q>` = sum(`<q>__base`), which the
  * option overrides; every shadow reads `<q>__base`, so the baseline is never re-drawn.
  */
-function lowerChange(g: CanonicalGoalT, quantities: XQuantity[], options: XOption[]): string {
+function lowerChange(g: CanonicalGoalT, quantities: XQuantity[], options: XOption[], fresh: (id: string) => string): string {
   const m = g.measure!;
   if (m.frame === 'level' || !m.reference) return m.quantity;
   const byId = new Map(quantities.map((q) => [q.id, q] as const));
@@ -931,7 +940,7 @@ function lowerChange(g: CanonicalGoalT, quantities: XQuantity[], options: XOptio
   const baseOf = (u: string): string => {
     const q = byId.get(u)!;
     if (!q.dist || !setTargets.has(u)) return u;
-    const id = `${u}__base`;
+    const id = fresh(`${u}__base`);
     put({ id, label: `${q.label} (before any option)`, unit: q.unit, reading: 'state', dist: q.dist });
     put({ id: u, label: q.label, unit: q.unit, reading: 'state', equation: { form: 'definition', op: 'sum', parts: [id] } });
     return id;
@@ -940,25 +949,28 @@ function lowerChange(g: CanonicalGoalT, quantities: XQuantity[], options: XOptio
   const shadow = (u: string): string => {
     const q = byId.get(u)!;
     if (q.dist) return baseOf(u);
-    if (byId.has(`${u}__base`) && q.equation?.form === 'definition' && q.equation.parts[0] === `${u}__base`) return `${u}__base`;
+    if (byId.has(`${u}__base`) && q.equation?.form === 'definition' && q.equation.parts[0] === `${u}__base`) return fresh(`${u}__base`);
+    // `fresh` only where the shadow is reused or made: a stock's today-shadow is its start, so no id is made (Codex r2 #3762).
     const id = `${u}__${mode}`;
-    if (byId.has(id)) return id;
+    if (byId.has(id)) return fresh(id);
     if (q.stock) {
       if (mode === 'today') return shadow(q.stock.start);
+      fresh(id);
       put({ id, label: shadowLabel(q.label, mode), unit: q.unit, reading: 'state', stock: { start: q.stock.start, inflows: [], outflows: [] } }); // reserved: a stock may feed its own flows
       put({ id, label: shadowLabel(q.label, mode), unit: q.unit, reading: 'state', stock: { start: shadow(q.stock.start), inflows: q.stock.inflows.map(shadow), outflows: q.stock.outflows.map(shadow) } });
       return id;
     }
     const e = q.equation!;
+    fresh(id);
     put({ id, label: shadowLabel(q.label, mode), unit: q.unit, reading: 'state', equation: e.form === 'definition' ? { form: 'definition', op: e.op, parts: e.parts.map(shadow) } : { form: 'effect', base: shadow(e.base), terms: e.terms.map((t) => ({ coefficient: shadow(t.coefficient), driver: shadow(t.driver) })) } });
     return id;
   };
   const reference = m.reference.kind === 'value' ? m.reference.quantity! : shadow(m.quantity);
   const unit = byId.get(m.quantity)!.unit;
-  const delta = `${g.id}__change`;
+  const delta = fresh(`${g.id}__change`);
   put({ id: delta, label: `${g.label}: change`, unit, reading: 'state', equation: { form: 'definition', op: 'difference', parts: [m.quantity, reference] } });
   if (m.frame === 'change_abs') return delta;
-  const rel = `${g.id}__change_rel`;
+  const rel = fresh(`${g.id}__change_rel`);
   put({ id: rel, label: `${g.label}: change as a share`, unit: '1', reading: 'state', equation: { form: 'definition', op: 'ratio', parts: [delta, reference] } });
   return rel;
 }
