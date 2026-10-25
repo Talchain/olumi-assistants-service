@@ -14,6 +14,7 @@ import type { CanonicalModelT } from '../model-program/canonical.js';
 import { compile, isRepairOnly, normalise, type Blocker } from '../model-program/compile.js';
 import { draftCanonicalModel, ledgeredResponsesCall, type ResponsesCall } from './draft.js';
 import { seedOf } from './evaluate.js';
+import { firstReadingLines, firstReadingOf } from './first-reading.js';
 import { asDrafted, readingOf } from './postimage.js';
 import { holdProgramCard } from './program-tools.js';
 import { isSaved, programOperationId, savePostimage, withNewRun } from './program-save.js';
@@ -68,6 +69,8 @@ export const NO_AIM_NOTE = 'aim';
  */
 function replyOf(model: CanonicalModelT, run: StoredRun, kind: TurnKind): string {
   const lines: string[] = [OPENING[kind](model)];
+  // The first reply says what Olumi used, inferred and left out, from the saved model's records (placeholder wording: Paul chooses).
+  if (kind === 'draft') lines.push(firstReadingLines(firstReadingOf(model)));
   const view = run.result.canonical_analysis_view as { options?: readonly { cell: { kind: string; face?: string } }[] };
   for (const o of view.options ?? []) if (o.cell.kind === 'figure' && typeof o.cell.face === 'string') lines.push(o.cell.face);
   const compiled = run.result.compile as { blockers?: readonly Blocker[] };

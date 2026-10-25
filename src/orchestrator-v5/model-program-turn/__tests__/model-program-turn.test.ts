@@ -2458,6 +2458,8 @@ describe('the model-program turn on the real core route', () => {
     expect(r.model_program.saved).toBe(true);
     // The AI's three, in the model's order (goals, limits, then quantities): the oven price's question is the fourth, counted.
     expect(r.assistant_text).toBe(['I\'ve drafted a first model of: Should the bakery buy a second oven?',
+      ['Used from your brief (13): ‘Reach 380 loaves a week’, ‘Keep the regulars happy’, ‘Keep the staff happy’ and 10 more.',
+        'Inferred by me, for you to check (1): ‘sell through’ (my estimate).', 'Left out (0): nothing.'].join('\n'),
       '1. How would you tell the regulars are happy?\n2. How would you tell the staff are happy?\n3. How would you tell it stays friendly?',
       'The chance also waits on 3 other things, listed with the result.'].join('\n\n'));
     // The result lists every one of them, by label, with the figure its answer box fills; no question of the code's anywhere.
@@ -2568,6 +2570,8 @@ describe('the model-program turn on the real core route', () => {
     const r = (await turn({ message: BRIEF })).json();
     expect(r.model_program.saved).toBe(true);
     expect(r.assistant_text).toBe(['I\'ve drafted a first model of: Should the bakery buy a second oven?',
+      ['Used from your brief (10): ‘Within the £3,000’, ‘A second oven’, ‘Keep our one oven’ and 7 more.', 'Inferred by me, for you to check (1): ‘sell through’ (my estimate).',
+        'Left out (2): ‘The flour supplier is not in the model’ (Not given) and ‘What a good result would be is not stated’ (No aim was given).'].join('\n'),
       '1. What result would make this worth it for you?\n2. What would the second oven cost?'].join('\n\n'));
     expect(r.model_program.blockers.map((b: Json) => [b.id, b.code])).toEqual([['(model)', 'no_goal'], ['oven_price', 'asked']]);
     expect(r.assistant_text).not.toContain('Who is your supplier?');
@@ -2576,8 +2580,47 @@ describe('the model-program turn on the real core route', () => {
     beforeEachReset();
     replies = [JSON.stringify(bare)];
     const b = (await turn({ message: BRIEF })).json();
-    expect(b.assistant_text).toBe(['I\'ve drafted a first model of: Should the bakery buy a second oven?', '1. What would the second oven cost?',
+    expect(b.assistant_text).toBe(['I\'ve drafted a first model of: Should the bakery buy a second oven?',
+      ['Used from your brief (10): ‘Within the £3,000’, ‘A second oven’, ‘Keep our one oven’ and 7 more.', 'Inferred by me, for you to check (1): ‘sell through’ (my estimate).',
+        'Left out (0): nothing.'].join('\n'), '1. What would the second oven cost?',
       'The chance also waits on 1 other thing, listed with the result.'].join('\n\n'));
+  });
+
+  it('THE FIRST REPLY (Paul\'s definition of done): it says what Olumi used, inferred and left out, read off the saved model\'s own records (author, quote, status, measure_by, left_out); a Run\'s reply does not', async () => {
+    const m = withOlumiLinks(bakery());
+    m.goals[0]!.measure!.measure_by = 'olumi'; // Olumi's suggested measure for their aim: the aim stays theirs
+    m.left_out.push({ id: 'weekend_trade', text: 'Weekend trade is not in the model.', why: 'No weekend figures were given.', question: 'How much do you sell at weekends?',
+      concerns: [], author: 'olumi', quote: null, ...at });
+    replies = [JSON.stringify(m)];
+    const r = (await turn({ message: BRIEF })).json();
+    expect(r.model_program.saved).toBe(true);
+    // Used: their 11 quoted items (their aim, limit, two options, link and six figures; the asked oven price has no words yet).
+    // Inferred: the measure, Olumi's link (its size unknown, so no figure of Olumi's) and its estimate. Left out: the note, with its why.
+    expect(r.assistant_text.split('\n\n')[1]).toBe(['Used from your brief (11): ‘Reach 380 loaves a week’, ‘Within the £3,000’, ‘A second oven’ and 8 more.',
+      'Inferred by me, for you to check (3): ‘sales’ (a measure I suggested for ‘Reach 380 loaves a week’), ‘ovens added → sales’ (a link I added) and ‘sell through’ (my estimate).',
+      'Left out (1): ‘Weekend trade is not in the model’ (No weekend figures were given).'].join('\n'));
+    // Negatives: a left-out note's question is never said by the reading; no internal id is said.
+    expect(r.assistant_text).not.toContain('How much do you sell at weekends?');
+    for (const id of ['second_oven', 'sell_through', 'lost_bake_time', 'weekend_trade', 'more_loaves']) expect(r.assistant_text).not.toContain(id);
+    // Contrast: the saved model holds the same records the reply read.
+    expect((persisted!.living_model.canonical as CanonicalModelT).options.map((o) => [o.label, o.author])).toEqual([['A second oven', 'person'], ['Keep our one oven', 'person']]);
+    const run = await turn({ message: 'Run the analysis', chip: { id: 'run', action_type: 'run_analysis', label: 'Run' } });
+    expect(run.statusCode, run.body).toBe(200);
+    expect(run.json().assistant_text).toMatch(/^Here is the analysis of the model as it stands\./);
+    expect(run.json().assistant_text).not.toContain('Used from your brief');
+  });
+
+  it('THE FIRST REPLY, mutant pair: swapping ONLY an item\'s author (its words kept) moves it from used to inferred', async () => {
+    const m = withOlumiLinks(bakery());
+    m.goals[0]!.measure!.measure_by = 'olumi';
+    m.options[0] = { ...m.options[0]!, author: 'olumi' }; // ‘A second oven’, its quote unchanged
+    replies = [JSON.stringify(m)];
+    const r = (await turn({ message: BRIEF })).json();
+    expect(r.model_program.saved).toBe(true);
+    expect((persisted!.living_model.canonical as CanonicalModelT).options.map((o) => [o.label, o.author, o.quote])).toEqual([['A second oven', 'olumi', 'A second oven'], ['Keep our one oven', 'person', 'keep our one oven']]);
+    expect(r.assistant_text.split('\n\n')[1]).toBe(['Used from your brief (10): ‘Reach 380 loaves a week’, ‘Within the £3,000’, ‘Keep our one oven’ and 7 more.',
+      'Inferred by me, for you to check (4): ‘sales’ (a measure I suggested for ‘Reach 380 loaves a week’), ‘A second oven’ (an option I added), ‘ovens added → sales’ (a link I added) and 1 more.',
+      'Left out (0): nothing.'].join('\n'));
   });
 });
 
