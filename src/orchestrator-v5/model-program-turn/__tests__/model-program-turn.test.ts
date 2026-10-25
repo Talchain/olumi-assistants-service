@@ -752,8 +752,10 @@ describe('the model-program turn on the real core route', () => {
     expect(Object.keys((UPDATE_JSON_SCHEMA as Json).properties).sort()).toEqual([...families, 'period', 'question', 'remove', 'version'].sort());
     expect((UPDATE_JSON_SCHEMA as Json).properties.remove.items).toEqual({ type: 'string' });
     expect((UPDATE_JSON_SCHEMA as Json).properties.question.anyOf.map((x: Json) => x.type)).toEqual(['string', 'null']);
-    expect(sent[0]!.input.map((m: Json) => m.role)).toEqual(['user', 'assistant', 'user']);
-    expect(sent[0]!.input[2].content).toBe(`${UPDATE_PREFIX}\nThe change: Base sales are 320 a week; the landlord must agree first.\nRemove: nothing`);
+    // cand/alpha-E (3c50fa37): the drafter is told today's date first, as a developer message (draft.ts todayContext), bound by its prefix.
+    expect(sent[0]!.input.map((m: Json) => m.role)).toEqual(['developer', 'user', 'assistant', 'user']);
+    expect(String(sent[0]!.input[0].content).startsWith('Today is ')).toBe(true);
+    expect(sent[0]!.input[3].content).toBe(`${UPDATE_PREFIX}\nThe change: Base sales are 320 a week; the landlord must agree first.\nRemove: nothing`);
 
     // (2) + (3) A new id is added after the saved ones; an id in remove (listed by the person) is deleted, on the card and in
     // history; everything else is the saved one, byte for byte.

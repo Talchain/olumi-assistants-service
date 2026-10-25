@@ -92,8 +92,8 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     // where an option plausibly affects it, never added merely to connect.
     // 25 Oct (prompt rebuild R on cand/alpha-E, from the first-principles audit): option reach in E's update wording; staging's sizing
     // sentences, each once, in the Mechanisms rule; the structural constants as compile.ts isStructuralConstant admits them; a
-    // request, a fear or hope, "you", a brief with no figures. Was d6b185e9… (#3740 alone).
-    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('51332b2a773605364b5620991bcda820b6354d7eda789a87edcf03a4fa13bd46');
+    // request, a fear or hope, "you", a brief with no figures; no "affects none → left_out" clause (DL 25 Oct). Was d6b185e9… (#3740 alone).
+    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('00d4f0bfed275ae81e2d6ed514f07ef4d220d9c44ac888ccfcfd97cd7884cdaf');
     // 24 Oct (DL, DoD-G classes 12 and 4): an update returns only the records it changes or adds; the host merges them by id.
     // 25 Oct (rebuild R): "I don't know" as program-tools.ts records it (unknown, quoted, never asked again); the re-ask duplicate gone. Was b54257c1….
     expect(createHash('sha256').update(UPDATE_PREFIX, 'utf8').digest('hex')).toBe('bc72d9ad1b5530e0c708a4fdea98251768844b31f6a9025edc1c9dc64f0a42cc');
@@ -205,7 +205,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       'Never ask them for a link\'s size or an option\'s effect.',
       // DL 24 Oct (blind score of 1510a008, mrr structure): an identity is a definition; a missing figure is asked on its item.
       // Prompt rebuild R (the reach item): the policy E's update states, once for the first draft; the duplicate sizing clause gone.
-      'Mechanism: each option comes with the relations from what it sets to each measured goal or limit, only where it plausibly affects it; never added merely to connect, and sized like any other link. An option that plausibly affects none says so in left_out. A quantity that is by definition a product or sum of others is a definition, never an effect.',
+      'Mechanism: each option comes with the relations from what it sets to each measured goal or limit, only where it plausibly affects it; never added merely to connect, and sized like any other link. A quantity that is by definition a product or sum of others is a definition, never an effect.',
       // AIE 6386018855 §5 (DL 24 Oct): the capture-only clauses replaced, each permission once, attributed and grounded.
       'Olumi\'s own additions (a suggested measure, options, drivers, risks) are made when the model is first drafted; a repair or an update changes only what it asks, and a goal or limit an update adds comes with the relations from the options to it, only where an option plausibly affects it; never added merely to connect.',
       'Model the main reason each option could succeed and the main reason it could fail.',
@@ -253,7 +253,8 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       + '1 in unit "1" as an index (a product\'s part, or an effect\'s base or a sum\'s part whose other terms are pure numbers)');
     // Rebuild R: the all-to-all reach rule, the duplicate default-estimate sentences, the size/don't-size clause, the old structural
     // wording and the reply cap (turn.ts REPLY_QUESTIONS) are gone.
-    for (const old of ['every option reaches every measured goal', 'each other link is sized by their coefficient or Olumi', 'is theirs or, by default, Olumi',
+    // DL (25 Oct): no "affects none → left_out" clause while option_reaches_no_goal is a hard error; the measure counts its firings.
+    for (const old of ['affects none says so in left_out', 'every option reaches every measured goal', 'each other link is sized by their coefficient or Olumi', 'is theirs or, by default, Olumi',
       'plausibility alone never justifies a figure', 'a count that defines the structure', 'An exact constant the form needs',
       'starting level of a setting only the options change', 'the reply asks at most three']) expect(DRAFTING_INSTRUCTIONS, old).not.toContain(old);
     // What over-applied the estimate rule, and the old period numbering, are gone.
