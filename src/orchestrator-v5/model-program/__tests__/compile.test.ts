@@ -550,20 +550,31 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(codes(compile(none))).toEqual(['set_reaches_nothing', 'option_reaches_no_goal']);
   });
 
-  it('alpha G7: an id in the shape Olumi generates for one of the model\'s own quantities or goals is refused, never silently replaced or reused', () => {
-    const growth = (extra: CanonicalQuantityT[]) => model({
+  it('alpha G7: an id lowering generates is no record\'s own: an authored record with it is refused, never silently replaced or reused', () => {
+    // revenue = price x loaves is derived, so a change goal against today makes revenue__today and revenue_growth__change_rel.
+    // profit = revenue + grants - costs makes profit__plus, whose own today-shadow is profit__plus__today (a nested generated id).
+    const shop = (extra: CanonicalQuantityT[], goals: CanonicalGoalT[]) => model({
       period: 'month',
-      quantities: [person('revenue', 'GBP/month', 5000, 'about £5,000 a month'), person('growth_target', '%', 10, 'grow revenue by 10%'), person('year', 'month', 12, 'next year'), ...extra],
-      goals: [{ ...goal('revenue_growth', 'revenue', '>=', 'growth_target', 'end', 'year', 'grow revenue by 10%'),
-        measure: { ...goal('revenue_growth', 'revenue', '>=', 'growth_target', 'end', 'year', 'grow revenue by 10%').measure!, frame: 'change_rel', reference: { kind: 'now', option: null, quantity: null } } }],
+      quantities: [person('price', 'GBP/loaf', 3, 'loaves sell at £3'), person('loaves', 'loaf/month', 1600, 'about 1,600 loaves a month'), derived('revenue', 'GBP/month'),
+        person('grants', 'GBP/month', 200, 'a £200 grant'), person('costs', 'GBP/month', 3000, 'costs of £3,000'), derived('profit', 'GBP/month'),
+        person('growth_target', '%', 10, 'grow by 10%'), person('year', 'month', 12, 'next year'), ...extra],
+      relations: [def('revenue_rel', 'revenue', 'product', ['price', 'loaves']),
+        { form: 'definition', id: 'profit_rel', defines: 'profit', op: 'sum', parts: [{ id: 'revenue', sign: 1 }, { id: 'grants', sign: 1 }, { id: 'costs', sign: -1 }], ...base, ...who(null) }],
+      goals,
     });
+    const growthOf = (id: string, quantity: string): CanonicalGoalT => ({ ...goal(id, quantity, '>=', 'growth_target', 'end', 'year', 'grow by 10%'),
+      measure: { ...goal(id, quantity, '>=', 'growth_target', 'end', 'year', 'grow by 10%').measure!, frame: 'change_rel', reference: { kind: 'now', option: null, quantity: null } } });
     const badIds = (r: ReturnType<typeof compile>) => r.errors.filter((e) => e.code === 'bad_id').map((e) => e.items[0]);
-    // Lowering makes revenue__today (the reference) and revenue_growth__change: an authored record with either id would be replaced.
-    const clash = compile(growth([person('revenue__today', 'GBP/month', 4000, 'we make £4,000 today'), person('revenue_growth__change', 'GBP/month', 1, 'up by 1')]));
-    expect(badIds(clash)).toEqual(['revenue__today', 'revenue_growth__change']);
-    expect(clash.errors.find((e) => e.items[0] === 'revenue__today')!.message).toBe('The id "revenue__today" is one Olumi generates for the quantity "revenue"; give it an id without "__today".');
-    // Contrast: single underscores, and a double-underscore id whose prefix is no quantity or goal, are ordinary ids.
-    expect(badIds(compile(growth([person('revenue_today', 'GBP/month', 4000, 'we make £4,000 today'), person('shop__today', 'GBP/month', 4000, 'we make £4,000 today')])))).toEqual([]);
+    // The generated reference and change: before the fix, the authored revenue__today was silently replaced by Olumi's shadow.
+    const clash = compile(shop([person('revenue__today', 'GBP/month', 4000, 'we make £4,000 today')], [growthOf('revenue_growth', 'revenue')]));
+    expect(badIds(clash)).toEqual(['revenue__today']);
+    expect(clash.errors.find((e) => e.code === 'bad_id')!.message).toBe('The id "revenue__today" is one Olumi uses for a working figure of its own; give that record another id.');
+    expect(clash.executable).toBeNull();
+    // A nested generated id (the shadow of a generated intermediate) is guarded the same way.
+    expect(badIds(compile(shop([person('profit__plus__today', 'GBP/month', 1, 'one pound')], [growthOf('profit_growth', 'profit')])))).toEqual(['profit__plus__today']);
+    // Contrast: the same goals with no clashing record compile; and an id that only LOOKS generated (no lowering makes it) is ordinary.
+    expect(compile(shop([], [growthOf('revenue_growth', 'revenue'), growthOf('profit_growth', 'profit')])).errors).toEqual([]);
+    expect(badIds(compile(shop([person('shop__today', 'GBP/month', 4000, 'we make £4,000 today')], [growthOf('revenue_growth', 'revenue')])))).toEqual([]);
   });
 
   it('plan r3 #1: the question binds the calculation: "revenue next year", "annual revenue" and "revenue growth" compile to three different executable goals', () => {
