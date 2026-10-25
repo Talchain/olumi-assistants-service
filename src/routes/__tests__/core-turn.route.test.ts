@@ -922,7 +922,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
 
     it('(6) ALPHA (23 Oct) + Codex r1 BLOCK 4 on #3709: a saved PROGRAM\'s turn gets the model-program instructions; a saved Living Model keeps the old text, byte for byte', async () => {
       // Pinned from the request bodies the provider received on this route, not from the module that builds them.
-      const PROGRAM_SHA = 'fee42c2fbd8f73fa578992b049157ad90b0d7d876795d4d83e9fe0afdb42cb21'; // 24 Oct: issue 30, synthetic examples only (after remodel coaching)
+      const PROGRAM_SHA = '01cf15ceed4fb88ad3aa912637d770bd37c94fa193ddb7a27dbd5be22d31b810'; // J: the one-card rule (was fee42c2f…); // 24 Oct: issue 30, synthetic examples only (after remodel coaching)
       const LIVING_MODEL_SHA = '7a1bced23a44dccc478a00d075b28bbe2dda487a4b6da868ae3a477698097e44'; // staging 646d374e's
       const sha = (c: Json) => createHash('sha256').update(String(c.instructions), 'utf8').digest('hex');
       outputs = [[{ type: 'message', text: 'Here is what the model holds.' }]];
@@ -1124,7 +1124,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(String(sentTools.propose_change)).toContain('An answer to a listed question (a blocker, or an asked item\'s question) goes in answers, on that existing item\'s id from read_canonical_context, saying whose it is: author person, ');
       expect(String(sentTools.propose_change)).toContain('Anything else (a new item or link, a rename, a removal) goes in request, in plain words with their exact words for every figure of theirs, '
         + 'with remove the ids of anything they asked to remove ([] for none); Olumi’s drafter writes it. ');
-      expect(sentSha('propose_change')).toBe('24a9738ae7beb76f08dd972f7094b157f853204f1316b6165906b0b8854398ec');
+      expect(sentSha('propose_change')).toBe('83920699418d876ae6354fbdb2b9485e502a61e61547ddae792a81a01ad68a85'); // J: the one-card rule (was 24a9738a…)
       const sentParams = (calls[0]!.tools as Json[]).find((t) => t.name === 'propose_change')!.parameters as Json;
       expect(Object.keys(sentParams.properties)).toEqual(['public_label', 'basis', 'request', 'remove', 'answers']);
       expect(sentParams.required).toContain('answers');
@@ -1135,7 +1135,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       // The program turn's guidance as SENT (its pin in core-prompt-arm is this text's): answers go in answers, on the item's id.
       const guidance = ((calls[0]!.input ?? []) as Json[]).filter((i) => i.role === 'system').map((i) => String(i.content)).filter((c) => c.startsWith('This scenario\'s model is a model program'));
       expect(guidance).toHaveLength(1);
-      expect(createHash('sha256').update(guidance[0]!, 'utf8').digest('hex')).toBe('4ccd4a5913bfb242ca4f771b3349ed8a2872b6fc18b7632b8d38c15c92448542');
+      expect(createHash('sha256').update(guidance[0]!, 'utf8').digest('hex')).toBe('bebb24da678cfa6c5ce7eb6e64ba1e49362d2c258cc77fcc30796928a041ed72'); // J: the one-card rule (was 4ccd4a59…)
       // The read the agent got back: the Run's goal_chance exactly as stored (each goal's own line, the joint, the notes).
       const output = (calls[1]!.input as Json[]).find((i) => i.type === 'function_call_output' && i.call_id === 'read')!.output;
       const read = JSON.parse(typeof output === 'string' ? output : JSON.stringify(output)) as Json;
