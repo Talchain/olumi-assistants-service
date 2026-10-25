@@ -1100,6 +1100,19 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(((await typed('And now?')).json() as Json).notes).toEqual([NOTE]);
     });
 
+    it('the note names the goal and what it waits on by their labels, never their ids (Paul 25 Oct, C2: "(customer_growth_goal)\'s length")', async () => {
+      const m = bakery();
+      m.quantities.push(q('weeks_to_reach', 'week', { label: 'Weeks to get there', status: 'unknown', author: 'olumi', basis: 'No one has said by when yet.' }));
+      m.goals = m.goals.map((g) => ({ ...g, measure: { ...g.measure!, window: { origin_event: null, origin_offset: null, start: 0, periods: 'weeks_to_reach' } } }));
+      SCENARIO = randomUUID(); persisted = null; canonicalDraft = JSON.stringify(m); calls.length = 0;
+      expect((await typed(BAKERY_BRIEF)).statusCode).toBe(200);
+      outputs = [[{ type: 'message', text: 'The chance waits on when you want to get there.' }]];
+      const notes = ((await typed('What does the model hold now?')).json() as Json).notes as Json[];
+      expect(notes.map((n) => n.element_id), 'the machine field keeps the id').toEqual(['more_loaves']);
+      expect(notes[0]!.text).toContain('The goal "Reach 380 loaves a week"\'s length "Weeks to get there" is unknown: No one has said by when yet.');
+      expect(notes[0]!.text, 'no internal id in what the person reads').not.toMatch(/[a-z0-9]_[a-z0-9]/);
+    });
+
     it('a goal with a chance gets no note (contrast: the same board, its goal calculable)', async () => {
       await savedProgram();
       outputs = [[{ type: 'message', text: 'Here is what the model holds.' }]];
