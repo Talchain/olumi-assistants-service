@@ -22,10 +22,11 @@ import { findOperationVersion } from '../path-b/tools/core-write.js';
 import { isNoModelYet, isSavedRead, readSaved } from '../path-b/tools/context-tool.js';
 import { ok, refused, unavailable, type ToolOutcome } from '../path-b/tools/outcome.js';
 import { CanonicalQuantity, type CanonicalModelT, type CanonicalQuantityT } from '../model-program/canonical.js';
+import { compile } from '../model-program/compile.js';
 import { ledgeredResponsesCall, proposePostimage } from './draft.js';
 import { validatePostimage, verbatimIn } from './postimage.js';
 import { isSaved, postimageOf, programOperationId, savePostimage, withNewRun } from './program-save.js';
-import { livingModelOf, MODEL_PROGRAM, programReadOf, reopenProgram, savedProgramOf, unreadableWords, type SavedProgram } from './program-store.js';
+import { livingModelOf, MODEL_PROGRAM, programReadOf, reopenProgram, savedProgramOf, sourceTextOf, unreadableWords, type SavedProgram } from './program-store.js';
 import { shownRun, type StoredRun } from './run-receipt.js';
 
 type Rec = Record<string, unknown>;
@@ -156,9 +157,12 @@ async function prepare(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs)
   if (typeof draft === 'string') return refused('not_an_answer', draft);
   const v = validatePostimage(program.canonical, draft.model, { removals: args.remove, words, fresh, approver: ctx.authenticated_user_id });
   if (!v.ok) return refused(v.code, v.reason, { ids: v.ids, ...(v.check ? { check: v.check } : {}) });
+  // The compiler's errors first (the same compile the Run makes), before anything is projected: the display drew a range
+  // with one end as a TypeError, which reached the person as a 502 (DoD-I qualitative-r5).
+  const errors = compile(v.model, { sourceText: sourceTextOf(words) }).errors;
+  if (errors.length > 0) return refused('does_not_compile', errors.slice(0, 3).map((e) => e.message).join(' '));
   // The person's words this turn are kept with the model: what it was changed from, in their words.
   const next = withNewRun({ ...program, canonical: v.model, person_words: words });
-  if (next.evaluation.compiled.errors.length > 0) return refused('does_not_compile', next.evaluation.compiled.errors.slice(0, 3).map((e) => e.message).join(' '));
   const p = holdProgramCard(deps.proposals, { scenarioId: ctx.scenario_id, userId: ctx.authenticated_user_id, graphHash: base.saved.graphHash, identity: base.saved.identity! },
     { label: args.public_label, basis: args.basis, program: next.program, changes: v.changes });
   return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: base.saved.graphHash, changes: v.changes, would_show: runWords(next.run) });
