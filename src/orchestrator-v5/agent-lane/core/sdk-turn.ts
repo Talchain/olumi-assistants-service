@@ -34,7 +34,7 @@ import { getRuntimeEnv } from '../../../config/env-resolver.js';
 import { ledgeredAgentsClient } from '../../../adapters/llm/openai-agents-client.js';
 import { currentStageEmitter, emitAgentPhase } from '../../../cee/unified-pipeline/stage-stream-context.js';
 import { log } from '../../../utils/telemetry.js';
-import type { OpenAiPausedRun } from '../../session/store.js';
+import type { CardId, OpenAiPausedRun } from '../../session/store.js';
 import type { DraftVerification } from '../../path-b/tools/outcome.js';
 import { agentRequestIdentity } from '../runtime/prompt-identity.js';
 import type { AgentToolContext, ToolResult } from '../runtime/agent-tools.js';
@@ -107,6 +107,8 @@ export const PAUSE_DECLINED = 'Not applied: the person declined this change on i
 export const PAUSE_SUPERSEDED = 'Not applied: the person has not approved this change; they wrote a new message instead, which follows. Nothing was changed.';
 /** What the model is told when the pause itself could not be kept; it ends this turn's run with nothing applied. */
 export const PAUSE_NOT_KEPT = 'Not applied: Olumi could not hold this change for the person\'s approval. Nothing was changed; say so, and that they can ask again.';
+/** What the model is told when it applies an id no card awaiting the person's approval has ('' included): no pause is kept. */
+export const PAUSE_NO_CARD = 'Not applied: no card with that id is waiting for the person\'s approval, so this call changed nothing.';
 
 /**
  * The scenario's ONE Conversation, read from the store on every turn (no process copy): the saved one, else a new one
@@ -195,6 +197,8 @@ export interface CoreTurnInput {
   readonly conversationStore?: ConversationIdStore;
   /** Where a run paused for approval is kept; absent → a tool that needs approval ends the run with nothing applied. */
   readonly pausedRunStore?: PausedRunStore;
+  /** Read-only: is `id` a card this scenario holds, awaiting approval (the route's proposal store)? A pause must name one; absent → none. */
+  readonly isPendingCard?: (id: string) => boolean;
   /** The person's press on the card of the paused run's proposal. Absent = a typed turn (any paused run is declined first). */
   readonly press?: { readonly decision: 'approve' | 'decline'; readonly proposal_id: string };
   /**
@@ -226,7 +230,7 @@ export interface CoreTurnSdk {
   readonly conversation_created: boolean;
   readonly compact_threshold: number;
   /** This turn's run paused for the person's approval on this proposal's card (its state saved on the scenario). */
-  readonly paused?: { readonly pause_id: string; readonly proposal_id: string | null; readonly tool: string };
+  readonly paused?: { readonly pause_id: string; readonly proposal_id: CardId | null; readonly tool: string };
   /** This turn resumed the scenario's paused run, with the person's answer. */
   readonly resumed?: { readonly pause_id: string; readonly answer: 'approved' | 'declined' | 'superseded' };
 }
@@ -501,11 +505,14 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
       }
       const pause = result.interruptions[0];
       if (pause !== undefined) {
-        const args = argsOf(pause);
-        const run0: OpenAiPausedRun = { pause_id: randomUUID(), proposal_id: typeof args['proposal_id'] === 'string' ? args['proposal_id'] : null,
+        // ⛔ A pause names a card this scenario holds, awaiting approval, read from its proposal store; else it is no pause (served
+        // 25 Oct 08:39Z: on a press the AI applied again with '', that was saved as the pause, and the reply was refused).
+        const asked = argsOf(pause)['proposal_id'];
+        const card = typeof asked === 'string' && asked !== '' && input.isPendingCard?.(asked) === true ? asked as CardId : null;
+        const run0: OpenAiPausedRun | undefined = card === null ? undefined : { pause_id: randomUUID(), proposal_id: card,
           call_id: callIdOf(pause) ?? '', tool: pause.name ?? '', state: result.state.toString() };
-        const kept = await input.pausedRunStore?.save(input.ctx.scenario_id, run0).catch(() => undefined);
-        if (kept === true) {
+        const kept = run0 === undefined ? undefined : await input.pausedRunStore?.save(input.ctx.scenario_id, run0).catch(() => undefined);
+        if (run0 !== undefined && kept === true) {
           paused = { pause_id: run0.pause_id, proposal_id: run0.proposal_id, tool: run0.tool };
           toolCalls.push({ name: run0.tool, ok: true, mutated: false, outcome: 'awaiting_approval',
             ...(run0.proposal_id !== null ? { proposal_id: run0.proposal_id } : {}) });
@@ -515,8 +522,9 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
           await input.settle?.();
           return finish(words, words.trim() === '' ? 'incomplete' : 'answered', calls, words.trim() === '' ? 'host' : 'ai');
         }
-        // The pause cannot be kept, so the Conversation gets its answer now: nothing applied, said by the AI.
-        for (const item of result.interruptions) result.state.reject(item, { message: PAUSE_NOT_KEPT });
+        // No card, or the pause cannot be kept, so the Conversation gets its answer now: nothing applied, said by the AI.
+        if (card === null) log.warn({ event: 'agent_core.pause_without_card', scenario_id: input.ctx.scenario_id, tool: pause.name }, 'agent-core: a pause named no held card; refused');
+        for (const item of result.interruptions) result.state.reject(item, { message: card === null ? PAUSE_NO_CARD : PAUSE_NOT_KEPT });
         result = await go(result.state);
         calls += result.rawResponses.length;
       }
