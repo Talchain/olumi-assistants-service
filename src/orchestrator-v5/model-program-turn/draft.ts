@@ -11,8 +11,9 @@ import { streamedLedgeredResponse, type StreamedResponsesBody } from '../../adap
 import { coreBudget } from '../agent-lane/model-budgets.js';
 import { agentRequestIdentity } from '../agent-lane/runtime/prompt-identity.js';
 import { CanonicalModel, type CanonicalModelT } from '../model-program/canonical.js';
+import { todayInLondon } from '../goal-target/deadline-date.js';
 import { compile, compileJson, normalise, type CompileError, type CompileResult } from '../model-program/compile.js';
-import { CANONICAL_JSON_SCHEMA, CANONICAL_SCHEMA_NAME, CanonicalUpdate, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX, UPDATE_JSON_SCHEMA, UPDATE_PREFIX, UPDATE_REPAIR_PREFIX,
+import { CANONICAL_JSON_SCHEMA, CANONICAL_SCHEMA_NAME, CanonicalUpdate, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX, todayLine, UPDATE_JSON_SCHEMA, UPDATE_PREFIX, UPDATE_REPAIR_PREFIX,
   type CanonicalUpdateT } from './prompt.js';
 
 export const MAX_REPAIRS = 2;
@@ -53,13 +54,15 @@ export type DraftOutcome = {
   readonly model: CanonicalModelT | null;
   readonly compiled: CompileResult | null;
   readonly attempts: readonly DraftAttempt[];
+  /** Today (Europe/London) as the drafter was told it, once for the whole drafting conversation, repairs included (alpha G14). */
+  readonly today: string;
 };
 
 /** The request body: fixed instructions and schema first (the cached prefix), then the conversation. An update's schema is its changes only. */
-export function draftRequestBody(input: readonly InputMessage[], update = false): StreamedResponsesBody {
+export function draftRequestBody(input: readonly InputMessage[], update: boolean, today: string): StreamedResponsesBody {
   return {
     model: coreBudget(DRAFT_REASONING_EFFORT).model,
-    instructions: DRAFTING_INSTRUCTIONS,
+    instructions: `${DRAFTING_INSTRUCTIONS}\n\n${todayLine(today)}`,
     input: input.map((m) => ({ role: m.role, content: m.content })),
     reasoning: { effort: DRAFT_REASONING_EFFORT },
     max_output_tokens: DRAFT_MAX_OUTPUT_TOKENS,
@@ -123,6 +126,7 @@ export function ledgeredResponsesCall(): ResponsesCall {
 export async function draftCanonicalModel(brief: string | readonly InputMessage[], call: ResponsesCall, sourceText: string = typeof brief === 'string' ? brief : '',
   opts: { readonly interpret?: boolean; readonly onto?: CanonicalModelT } = {}): Promise<DraftOutcome> {
   const onto = opts.onto;
+  const today = todayInLondon(new Date());
   const input: InputMessage[] = typeof brief === 'string' ? [{ role: 'user', content: brief }] : [...brief];
   const attempts: DraftAttempt[] = [];
   let model: CanonicalModelT | null = null;
@@ -130,7 +134,7 @@ export async function draftCanonicalModel(brief: string | readonly InputMessage[
   for (let a = 0; a <= MAX_REPAIRS; a += 1) {
     const t0 = Date.now();
     let out: CallOutput;
-    try { out = await call(draftRequestBody(input, onto !== undefined)); } catch (err) {
+    try { out = await call(draftRequestBody(input, onto !== undefined, today)); } catch (err) {
       attempts.push({ attempt: a, errors: null, failed: `call failed: ${err instanceof Error ? err.name : 'error'}`, provider_error: providerErrorOf(err), status: null, usage: null, ms: Date.now() - t0 });
       break;
     }
@@ -155,7 +159,7 @@ export async function draftCanonicalModel(brief: string | readonly InputMessage[
     if (result.errors.length === 0 || a === MAX_REPAIRS) break;
     input.push({ role: 'assistant', content: out.text }, { role: 'user', content: repairMessage(result.errors, onto === undefined ? REPAIR_PREFIX : UPDATE_REPAIR_PREFIX) });
   }
-  return { model, compiled, attempts };
+  return { model, compiled, attempts, today };
 }
 
 /**

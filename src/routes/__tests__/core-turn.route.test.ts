@@ -1049,14 +1049,15 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       const drafted = await typed(BAKERY_BRIEF);
       expect(drafted.statusCode).toBe(200);
       expect(calls[0]!.text?.format?.name).toBe('canonical_model');
-      expect(calls[0]!.instructions).toBe(DRAFTING_INSTRUCTIONS);
+      const london = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+      expect(calls[0]!.instructions).toBe(`${DRAFTING_INSTRUCTIONS}\n\nToday is ${london} (Europe/London). A date they state counts in whole periods from today, which is period 0.`);
       calls.length = 0;
       return String((drafted.json() as Json).assistant_text);
     };
 
     it('(6) ALPHA (23 Oct) + Codex r1 BLOCK 4 on #3709: a saved PROGRAM\'s turn gets the model-program instructions; a saved Living Model keeps the old text, byte for byte', async () => {
       // Pinned from the request bodies the provider received on this route, not from the module that builds them.
-      const PROGRAM_SHA = 'fee42c2fbd8f73fa578992b049157ad90b0d7d876795d4d83e9fe0afdb42cb21'; // 24 Oct: issue 30, synthetic examples only (after remodel coaching)
+      const PROGRAM_SHA = '4f08cad38c255e123870f963ca217b1e790bc6b87d4b593b1f8c330fc3dc0794'; // 25 Oct: alpha G5 (no note_on_item sentence). // 24 Oct: issue 30, synthetic examples only (after remodel coaching)
       const LIVING_MODEL_SHA = '7a1bced23a44dccc478a00d075b28bbe2dda487a4b6da868ae3a477698097e44'; // staging 646d374e's
       const sha = (c: Json) => createHash('sha256').update(String(c.instructions), 'utf8').digest('hex');
       outputs = [[{ type: 'message', text: 'Here is what the model holds.' }]];

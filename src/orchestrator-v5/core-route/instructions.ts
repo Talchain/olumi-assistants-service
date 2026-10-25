@@ -243,6 +243,13 @@ export const PROGRAM_TOOL_DESCRIPTIONS = {
 
 /** Coaching on the canvas (Lenses, #3535 `note_on_item`): one question or challenge beside the item that most deserves attention. */
 export const NOTE_ON_ITEM_INSTRUCTION = "When one item in the model most deserves the person's attention (an untested assumption a result rests on, a missing cost or risk, or a link nobody has sized), use note_on_item once to put one short question or challenge beside it, in your own words; ask, do not answer or choose for them.";
+/**
+ * A program scenario's standing instructions: the core-aligned ones and the reply rules, without the note_on_item instruction,
+ * since the program tools (`path-b/tools/index.ts` programTools) do not offer that tool (alpha review G5).
+ */
+export function programInstructions(): string {
+  return `${CORE_ALIGNED_INSTRUCTIONS}\n\n${CORE_REPLY_RULES}`;
+}
 /** The instructions for one call in this lane mode: unchanged outside `core`. */
 export function instructionsForMode(mode: AgentLaneMode, instructions: string, reply: string = CORE_REPLY_RULES): string {
   return mode === 'core' ? `${instructions}\n\n${NOTE_ON_ITEM_INSTRUCTION}\n\n${reply}` : instructions;

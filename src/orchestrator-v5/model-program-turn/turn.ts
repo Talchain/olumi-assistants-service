@@ -94,7 +94,8 @@ export async function runModelProgramTurn(input: ProgramTurnInput): Promise<Prog
   let draftMeta: Rec | undefined;
   if (prior === undefined) {
     const draft = await draftCanonicalModel(input.message, input.call ?? ledgeredResponsesCall(), input.message, { interpret: true });
-    draftMeta = { prompt_sha256: DRAFTING_PROMPT_SHA256, schema_sha256: CANONICAL_SCHEMA_SHA256, attempts: draft.attempts };
+    // prompt_sha256 is the FIXED instructions; what was sent is them plus todayLine(today) (alpha G14, Codex on #3760).
+    draftMeta = { prompt_sha256: DRAFTING_PROMPT_SHA256, schema_sha256: CANONICAL_SCHEMA_SHA256, today: draft.today, attempts: draft.attempts };
     if (draft.model === null || draft.compiled === null || draft.compiled.errors.length > 0) {
       const why = draft.model === null ? (draft.attempts.at(-1)?.failed ?? 'no draft came back') : `${draft.compiled!.errors.length} compile error(s) remain after ${draft.attempts.length - 1} repair(s)`;
       const model_program = { turn: 'draft', saved: false, draft: draftMeta, canonical: draft.model, compile: draft.compiled === null ? null : { compiles: false, errors: draft.compiled.errors } };
@@ -134,7 +135,10 @@ export async function runModelProgramTurn(input: ProgramTurnInput): Promise<Prog
     return { call: { name: CONFIRM_READING, ok: true, outcome: 'ok', mutated: false, proposal_id: p.proposal_id }, result: { ok: true, mutated: false, proposal_id: p.proposal_id, public_label: p.public_label } };
   })() : undefined;
   return {
-    assistantText: saved ? replyOf(next.program.canonical, next.run, kind) : `The model could not be saved (${write.status}). Nothing was changed.`,
+    assistantText: saved ? replyOf(next.program.canonical, next.run, kind)
+      // An unknown outcome may have been written: never say nothing changed (alpha review G4); the same operation id reconciles it.
+      : write.status === 'unknown' ? 'The save could not be confirmed, so the model may or may not have changed. Reload to see the current model before changing it again.'
+        : `The model could not be saved (${write.status}). Nothing was changed.`,
     toolCalls: [{ name: kind === 'draft' ? 'draft_canonical_model' : 'run_program', ok: saved, outcome: saved ? 'ok' : write.status, mutated: saved, ...(saved ? {} : { refusal: `save_${write.status}` }) },
       ...(reading !== undefined ? [reading.call] : [])],
     toolResults: [{ ok: saved, mutated: saved, ...(isRec(receipt) ? { model_version: receipt } : {}) }, ...(reading !== undefined ? [reading.result] : [])],

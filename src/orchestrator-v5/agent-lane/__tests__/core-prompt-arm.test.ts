@@ -20,7 +20,7 @@ const CORE_TOOLS = ['read_canonical_context', 'build_model_from_brief', 'propose
 const count = (text: string, part: string): number => text.split(part).length - 1;
 
 describe('prompt arm B (programme-docs #94 6302769609): the core agent is told only about the tools it has', () => {
-  const b = instructionsForMode('core', CORE_ALIGNED_INSTRUCTIONS);
+  const b = coreInstructions.programInstructions();
 
   it('ALPHA (DL 93d79c3e, 23 Oct): names no legacy tool and no drafting or edit tool (each tool\u2019s own description says how), and keeps the card-approval rule', () => {
     for (const t of LEGACY_TOOLS) expect(b, t).not.toContain(t);
@@ -40,10 +40,11 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(b.length).toBeLessThan(29_512 / 2);
   });
 
-  it('the sent core instructions, byte for byte, plus the canvas-coaching sentence once (the route row in core-turn.route.test.ts pins the same bytes as the SDK receives them)', () => {
-    expect(b.split(NOTE_ON_ITEM_INSTRUCTION)).toHaveLength(2);
+  it('the sent program instructions, byte for byte, with no canvas-coaching sentence: the program tools offer no note_on_item (alpha G5; the route row in core-turn.route.test.ts pins the same bytes as the SDK receives them)', () => {
+    expect(b).not.toContain(NOTE_ON_ITEM_INSTRUCTION);
+    expect(b.endsWith(CORE_REPLY_RULES)).toBe(true);
     // 23 Oct (ALPHA): the model-program prompt replaces arm B's assembled reference (055841368f…, 29,512 characters sent).
-    expect(createHash('sha256').update(b, 'utf8').digest('hex')).toBe('fee42c2fbd8f73fa578992b049157ad90b0d7d876795d4d83e9fe0afdb42cb21'); // 24 Oct: issue 30, synthetic examples only; before it, remodel coaching (after 23 Oct P1/P4: at most three questions, each once, never what their words state).
+    expect(createHash('sha256').update(b, 'utf8').digest('hex')).toBe('4f08cad38c255e123870f963ca217b1e790bc6b87d4b593b1f8c330fc3dc0794'); // 25 Oct: alpha G5, no note_on_item sentence on the program path. 24 Oct: issue 30, synthetic examples only; before it, remodel coaching (after 23 Oct P1/P4: at most three questions, each once, never what their words state).
     // Candidate-3 witness kept (21 Oct): WHEN to build. Text only, not behaviour.
     expect(b).toContain('draft the first model from their brief in that same turn, even when figures are missing');
   });
@@ -78,7 +79,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     // 24 Oct (AIE 6386018855 §5, accepted by the DL): Olumi may propose a measure, options and missing drivers, at first drafting only.
     // 24 Oct (DL, marketing "no path"; AIE policy): a goal or limit an update adds comes with the options' relations to it, only
     // where an option plausibly affects it, never added merely to connect.
-    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('d6b185e94ee8012aee456b51925a83e7f97b2e518e3429d6241e590b841b596d');
+    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('669bcc7e35c673b052153e68c3cd7b01d4ada58ba1f4b13efee55b54bf92af43'); // 25 Oct: alpha G21, the reach rule is the compiler's (at least one goal or limit, only when every goal has a measure)
     // 24 Oct (DL, DoD-G classes 12 and 4): an update returns only the records it changes or adds; the host merges them by id.
     expect(createHash('sha256').update(UPDATE_PREFIX, 'utf8').digest('hex')).toBe('b54257c11969f65208dfead1d0006e17a88c65d20f0e0880588c650b58d8e4c8');
     expect(createHash('sha256').update(UPDATE_REPAIR_PREFIX, 'utf8').digest('hex')).toBe('1b52b62678cfab1b06670bc026504a9e63e186e458fec752c4b56ba9df918daf');
@@ -178,7 +179,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       'what they know or decide: current levels, prices, costs, budgets and how they split them, headcount, dates, durations, targets.',
       'Never ask them for a link\'s size or an option\'s effect.',
       // DL 24 Oct (blind score of 1510a008, mrr structure): an identity is a definition; a missing figure is asked on its item.
-      'Mechanism: every option reaches every measured goal through relations from what it sets; a quantity that is by definition a product or sum of others is a definition, never an effect; each other link is sized by their coefficient or Olumi\'s estimate.',
+      'Mechanism: when the model has a goal and every goal has a measure, each option reaches, through relations from what it sets, at least one goal or limit it plausibly affects, never a link added only to connect it; a quantity that is by definition a product or sum of others is a definition, never an effect; each other link is sized by their coefficient or Olumi\'s estimate.',
       // AIE 6386018855 §5 (DL 24 Oct): the capture-only clauses replaced, each permission once, attributed and grounded.
       'Olumi\'s own additions (a suggested measure, options, drivers, risks) are made when the model is first drafted; a repair or an update changes only what it asks, and a goal or limit an update adds comes with the relations from the options to it, only where an option plausibly affects it; never added merely to connect.',
       'Model the main reason each option could succeed and the main reason it could fail.',
@@ -212,6 +213,8 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       'A stock\'s level after n periods is its start plus n periods of its flows.',
       'sets ovens_added to one_oven, starts_after_periods 0;',
     ]) expect(count(DRAFTING_INSTRUCTIONS, rule), rule).toBe(1);
+    // Alpha G21: the old universal reach rule, stricter than the compiler's (compile.ts set_reaches_nothing / option_reaches_no_goal), is gone.
+    expect(DRAFTING_INSTRUCTIONS).not.toContain('every option reaches every measured goal');
     // What over-applied the estimate rule, and the old period numbering, are gone.
     for (const old of ['never invent a measure', 'its direction in words', 'Important but uncalculable', 'from what the brief names', 'goes in left_out with the reason', 'a link you cannot size goes in left_out', 'Every other figure it needs stays null', 'Only coefficients are Olumi', 'never "unknown" with no question', 'flows of periods 1 to n', 'from period 0'])
       expect(DRAFTING_INSTRUCTIONS, old).not.toContain(old);
