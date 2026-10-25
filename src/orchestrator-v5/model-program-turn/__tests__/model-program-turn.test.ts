@@ -1559,6 +1559,43 @@ describe('the model-program turn on the real core route', () => {
     expect(((persisted!.living_model.runs.at(-1).result.compile as Json).blockers as Json[]).filter((x) => x.id === 'more_loaves')).toEqual([]);
   });
 
+  it('REFUSED-CHANGE-CLASS 25 Oct (#8–9): a known answer that gives a date, not a figure, goes to Olumi\'s drafter (which has today\'s date) and reaches ONE card with its whole periods; "I don\'t know" still sets its item with no drafter call', async () => {
+    const m = bakery();
+    // Counted over eight weeks, so a setting from week 2 is inside the model's horizon.
+    m.quantities.push(q('oven_weeks', 'week', { status: 'asked', question: 'When will the second oven arrive?' }), q('weeks_counted', 'week', { value: 8, quote: 'We count eight weeks' }));
+    m.goals = m.goals.map((g) => ({ ...g, measure: { ...g.measure!, window: { origin_event: null, origin_offset: null, start: 0, periods: 'weeks_counted' } } }));
+    m.options = m.options.map((o) => (o.id === 'second_oven' ? { ...o, sets: o.sets.map((x) => ({ ...x, starts_after_periods: 'oven_weeks' })) } : o));
+    replies = [JSON.stringify(m)];
+    expect((await turn({ message: `${BRIEF} We count eight weeks.` })).json().model_program.saved).toBe(true);
+    const words = 'It arrives on 9 November 2026.';
+    const deps = { dispatch, proposals: new ProposalStore() };
+    const ctx = (w = words) => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [w], user_turn_text: w });
+    const answer = (f: Json) => ({ id: 'oven_weeks', value: null, low: null, high: null, range_kind: null, party: null, quote: words, basis: null, status: 'known', author: 'person', ...f });
+    const ask = (answers: Json[], c = ctx()) => { sent.length = 0; return proposeProgramChange(deps, c, ProgramChangeParams.parse({ public_label: 'Their answer', basis: 'their answer', request: '', remove: [], answers })) as Promise<Json>; };
+    // Negative first: "I don't know" on the same figure is set on its item exactly, with no drafter call.
+    const dunno = "I don't know when it arrives.";
+    const unknown = await ask([answer({ status: 'unknown', quote: dunno, basis: 'The supplier has not given a date.' })], ctx(dunno));
+    expect(unknown.status, JSON.stringify(unknown)).toBe('ok');
+    expect(sent).toHaveLength(0);
+    expect(unknown.data.changes.map((x: Json) => [x.id, x.action, x.author])).toEqual([['oven_weeks', 'change', 'person']]);
+    // Codex r1 #3767: the drafter reads no figure from it: refused by name, nothing held.
+    replies = [savedWith((d) => setQ(d, 'oven_weeks', { basis: 'No date given.' }))];
+    expect(await ask([answer({})])).toEqual({ status: 'refused', reason: 'not_an_answer', detail: 'oven_weeks: the change read no figure from your answer, so nothing changed.', data: { ids: ['oven_weeks'] } });
+    // The date: ONE drafter call whose change is that answer in their words, and ONE card with the drafter's whole periods.
+    // The drafter writes its reading as Olumi's, with no quote: the answer stays theirs, in their words (Codex r1 #3767).
+    replies = [savedWith((d) => setQ(d, 'oven_weeks', { status: 'known', question: null, value: 2, author: 'olumi', quote: null, basis: 'Two whole weeks from today, 25 October 2026.' }))];
+    const c = ctx();
+    const p = await ask([answer({})], c);
+    expect(p.status, JSON.stringify(p)).toBe('ok');
+    expect(sent).toHaveLength(1);
+    expect((sent[0]!.input as Json[])[2]).toEqual({ role: 'user', content: `${UPDATE_PREFIX}\nThe change: The answer to the question on oven_weeks, in their words: "${words}"\nRemove: nothing` });
+    expect(p.data.changes.map((x: Json) => [x.id, x.kind, x.action, x.author])).toEqual([['oven_weeks', 'quantity', 'change', 'person']]);
+    // The card shows the drafter's reading of their date, with its basis, beside their words.
+    expect([p.data.changes[0].before, p.data.changes[0].after]).toEqual([
+      'no figure yet (in week), still to be given, Olumi asks "When will the second oven arrive?", no basis given, not in your words',
+      `2 week, known, no question, based on "Two whole weeks from today, 25 October 2026.", in your words "${words}"`]);
+  });
+
   it('DL 23 Oct (batch 4 marketing-r2): what a measure leaves out is kept in their words and named; the chance says what it covers and what it leaves out, never that it covers everything', () => {
     const words = 'Success means selling at least 380 loaves a week and 50 new regulars within 4 weeks.';
     // The measured aim exactly as an approved update writes it: their target and window, and the parts it leaves out.
