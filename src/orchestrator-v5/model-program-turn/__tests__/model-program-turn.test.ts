@@ -395,6 +395,43 @@ describe('the model-program turn on the real core route', () => {
     expect(flipped.data.changes[1]).toMatchObject({ action: 'change', before: 'no figure yet (in loaf/week/oven), ↓ lowers sales', after: 'no figure yet (in loaf/week/oven), ↑ raises sales' });
   });
 
+  /** Issue 40 (marketing-r3): the bakery with Olumi's link of unknown size and a stated direction, saved; an update the AI writes on it. */
+  const linkUpdate = async () => {
+    replies = [JSON.stringify(withOlumiLinks(bakery()))];
+    expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
+    const deps = { dispatch, proposals: new ProposalStore() };
+    const words = 'Leave the lost baking time out of sales for now.';
+    return { deps, propose: async (edit: (d: CanonicalModelT) => void) => {
+      replies = [savedWith(edit)];
+      return await proposeProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words },
+        { public_label: 'Lost baking time', basis: 'their words', request: words, remove: [] }) as Json;
+    } };
+  };
+  /** The size's own entry when its direction goes: said on what it moved, before. */
+  const SIZE_SIGN_GOES = { id: 'lost_bake_time', kind: 'quantity', action: 'change', label: 'lost bake time', before: 'no figure yet (in loaf/week/oven), ↓ lowers sales', after: 'no figure yet (in loaf/week/oven)', author: 'olumi' };
+
+  it('issue 40 (marketing-r3): unlinking a link sized by Olumi\'s unknown with a stated direction, the size kept, is on the card and saved, never refused for the direction no drawn link then uses', async () => {
+    const { deps, propose } = await linkUpdate();
+    // The link taken off sales, its size kept as saved: the host clears the direction no drawn link now uses.
+    const p = await propose((d) => { d.relations = d.relations.map((r) => (r.form === 'effect' ? { ...r, terms: r.terms.filter((t) => t.coefficient !== 'lost_bake_time') } : r)); });
+    expect(p.status, JSON.stringify(p)).toBe('ok');
+    const LINKS = 'an effect on "sales", starting from "base sales" 300 loaf/week, changes by "sold per oven" for each "ovens added" 0 oven';
+    expect(p.data.changes).toEqual([SIZE_SIGN_GOES, { id: 'sales_rel', kind: 'relation', action: 'change', label: 'sales',
+      before: `${LINKS}, changes by "lost bake time" (no figure yet loaf/week/oven) for each "ovens added" 0 oven`, after: `${LINKS}, no link 2`, author: 'olumi' }]);
+    // Approved, the unlink is saved: the size kept, with no direction, and the link gone.
+    expect(await applyProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID() }, p.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
+    const saved = persisted!.living_model.canonical as CanonicalModelT;
+    expect(saved.quantities.find((x) => x.id === 'lost_bake_time')).toMatchObject({ status: 'unknown', author: 'olumi', basis: LOST_BASIS, direction: null });
+    expect(saved.relations.find((r) => r.id === 'sales_rel')).toMatchObject({ terms: [{ driver: 'ovens_added', coefficient: 'sold_per_oven' }] });
+  });
+
+  it('issue 40 (marketing-r3, the negative kept): the AI dropping the direction of a link that stays drawn is its change, and the card must say it', async () => {
+    const { propose } = await linkUpdate();
+    const dropped = await propose((d) => setQ(d, 'lost_bake_time', { direction: null }));
+    expect(dropped.status, JSON.stringify(dropped)).toBe('ok');
+    expect(dropped.data.changes).toEqual([SIZE_SIGN_GOES]);
+  });
+
   it('issue 40: a figure typed on the canvas is theirs: the direction stated for the size it replaces is not kept, and the card shows it go', async () => {
     replies = [JSON.stringify(withOlumiLinks(bakery()))];
     expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);

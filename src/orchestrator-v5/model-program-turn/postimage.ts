@@ -18,7 +18,7 @@
  * the history (each change and removal appended).
  */
 import { ProposalChangeSchema, type ProposalChange } from '../agent-lane/proposal.js';
-import { CanonicalModel, type CanonicalModelT } from '../model-program/canonical.js';
+import { CanonicalModel, type CanonicalModelT, type CanonicalQuantityT } from '../model-program/canonical.js';
 import { norm } from '../model-program/compile.js';
 import { linkTargets, withUsedDirections } from '../model-program/links.js';
 import { isExactCalendarReexpression, parseUnit, sameDims } from '../model-program/units.js';
@@ -209,10 +209,13 @@ export function validatePostimage(saved: CanonicalModelT, raw: unknown,
       // unseen beside another change: a link moved to a twin while a link is added, or a figure given where there was none
       // beside a timing the words say. A field that appears with its container is set back to empty, where empty is a state
       // the item can be in (a window's start appears with the window and has no empty); one that leaves with its container
-      // (a deadline or a setting taken away) has nowhere to go back to. Either way the container's words say it.
+      // (a deadline or a setting taken away) has nowhere to go back to. Either way the container's words say it. A direction
+      // set back where no drawn link uses it is not a state either: the host's reading clears it, so it is no one's change.
       if (r !== undefined) for (const x of out) if (x.old !== x.now) for (const d of diff.filter((y) => x.paths.includes(y.path))) {
         const back = withPath(r, d.path, d.old ?? null);
         if (d.now === undefined || (d.old === undefined && (d.now === null || !CanonicalModel.shape[family].element.safeParse(back).success))) continue;
+        if (family === 'quantities' && d.path === 'direction' && d.old != null
+          && withUsedDirections({ ...post, quantities: post.quantities.map((x) => (x.id === id ? back as CanonicalQuantityT : x)) }).quantities.find((x) => x.id === id)!.direction === null) continue;
         if (now.phrase(family, x.group, back, x.at) === x.now) hidden.push(d.path);
       }
       if (hidden.length > 0) unshown.push(`${id} (${hidden.join(', ')})`);
@@ -330,7 +333,7 @@ function wordsIn(m: CanonicalModelT) {
   const figure = (r: Rec) => {
     const u = unitOf(r['unit']), at = (k: string) => (typeof r[k] === 'number' ? `${n(r[k] as number)}${u}` : null);
     const bare = (k: string) => n(r[k] as number);
-    // What it moves is said by name; a direction on a size no link has is never said (the validator then refuses its change).
+    // What it moves is said by name; a direction on a size no link has is never said (the host clears it, on both sides).
     const moves = typeof r['direction'] === 'string' && typeof r['id'] === 'string' ? linkTargets(m, r['id']) : [];
     const sign = (said: string) => [said, ...(moves.length > 0 ? [`${of(DIRECTION_WORDS, r['direction'])} ${and(moves.map(label))}`] : [])].filter((x) => x !== '').join(', ');
     const reading = typeof r['range_kind'] === 'string' ? ` (${of(RANGE_WORDS, r['range_kind'])})` : '';
