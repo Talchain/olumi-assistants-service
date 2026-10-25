@@ -575,6 +575,12 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     // Contrast: the same goals with no clashing record compile; and an id that only LOOKS generated (no lowering makes it) is ordinary.
     expect(compile(shop([], [growthOf('revenue_growth', 'revenue'), growthOf('profit_growth', 'profit')])).errors).toEqual([]);
     expect(badIds(compile(shop([person('shop__today', 'GBP/month', 4000, 'we make £4,000 today')], [growthOf('revenue_growth', 'revenue')])))).toEqual([]);
+    // Codex r2: a stock's today-shadow is its start, so no cash__today is made; an authored, unused cash__today is not refused.
+    const cashModel = model({ period: 'month',
+      quantities: [person('cash_now', 'GBP', 1000, '£1,000 in the bank'), person('takings', 'GBP/month', 300, '£300 a month'), derived('cash', 'GBP'),
+        person('cash__today', 'GBP', 5, 'five pounds'), person('growth_target', '%', 10, 'grow by 10%'), person('year', 'month', 12, 'next year')],
+      relations: [stock('cash_rel', 'cash', 'cash_now', ['takings'], [])], goals: [growthOf('cash_growth', 'cash')] });
+    expect(badIds(compile(cashModel))).toEqual([]);
   });
 
   it('plan r3 #1: the question binds the calculation: "revenue next year", "annual revenue" and "revenue growth" compile to three different executable goals', () => {

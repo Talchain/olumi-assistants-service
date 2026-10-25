@@ -950,15 +950,18 @@ function lowerChange(g: CanonicalGoalT, quantities: XQuantity[], options: XOptio
     const q = byId.get(u)!;
     if (q.dist) return baseOf(u);
     if (byId.has(`${u}__base`) && q.equation?.form === 'definition' && q.equation.parts[0] === `${u}__base`) return fresh(`${u}__base`);
-    const id = fresh(`${u}__${mode}`);
-    if (byId.has(id)) return id;
+    // `fresh` only where the shadow is reused or made: a stock's today-shadow is its start, so no id is made (Codex r2 #3762).
+    const id = `${u}__${mode}`;
+    if (byId.has(id)) return fresh(id);
     if (q.stock) {
       if (mode === 'today') return shadow(q.stock.start);
+      fresh(id);
       put({ id, label: shadowLabel(q.label, mode), unit: q.unit, reading: 'state', stock: { start: q.stock.start, inflows: [], outflows: [] } }); // reserved: a stock may feed its own flows
       put({ id, label: shadowLabel(q.label, mode), unit: q.unit, reading: 'state', stock: { start: shadow(q.stock.start), inflows: q.stock.inflows.map(shadow), outflows: q.stock.outflows.map(shadow) } });
       return id;
     }
     const e = q.equation!;
+    fresh(id);
     put({ id, label: shadowLabel(q.label, mode), unit: q.unit, reading: 'state', equation: e.form === 'definition' ? { form: 'definition', op: e.op, parts: e.parts.map(shadow) } : { form: 'effect', base: shadow(e.base), terms: e.terms.map((t) => ({ coefficient: shadow(t.coefficient), driver: shadow(t.driver) })) } });
     return id;
   };
