@@ -421,6 +421,24 @@ describe('the model-program turn on the real core route', () => {
       .toEqual({ direction: null, after: `no figure yet (in loaf/week/oven), a rate, not known yet, based on "${BASIS}"` });
   });
 
+  it('alpha G16: approval records WHO approved (author_id) and never who said it: author, party and quote stay each item\'s own', () => {
+    const APPROVER = 'user-7f3a';
+    const draft = bakery();
+    const v = readingOf(draft, { words: [BRIEF], approver: APPROVER });
+    expect(v.ok, JSON.stringify(v)).toBe(true);
+    if (!v.ok) return;
+    const origin = (r: Json) => ({ author: r.author, party: r.party ?? null, quote: r.quote ?? null });
+    for (const family of ['quantities', 'relations', 'goals', 'options'] as const) {
+      const before = new Map((draft[family] as Json[]).map((r) => [r.id, r]));
+      for (const r of v.model[family] as Json[]) {
+        expect(origin(r), `${family}/${r.id}`).toEqual(origin(before.get(r.id)!));
+        expect([r.approval, r.author_id], `${family}/${r.id}`).toEqual(['approved', APPROVER]);
+      }
+    }
+    // Olumi's own items stay Olumi's after a person approves them: approval is not authorship.
+    expect((v.model.quantities as Json[]).filter((q) => q.author === 'olumi').length).toBeGreaterThan(0);
+  });
+
   it('issue 40: a direction the host clears (on a sized link, or on a figure no link has) never shows as a change nor refuses one: a saved program holding them takes an unrelated update; the AI\'s change to a direction the model uses still shows', async () => {
     const m = withOlumiLinks(bakery(), q('oven_delay', 'loaf/week/oven', { kind: 'coefficient', status: 'estimated', author: 'olumi', value: -10, low: -20, high: -5, range_kind: 'plausible',
       basis: 'A new oven takes a few weeks to bed in.' }));
