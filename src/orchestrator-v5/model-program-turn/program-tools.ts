@@ -34,10 +34,10 @@ export interface ProgramToolDeps { readonly dispatch: InternalDispatch; readonly
 
 /** Said with the turn's state on a program scenario: how its tools work. The standing instructions stay byte for byte. */
 export const PROGRAM_TURN_GUIDANCE = 'This scenario\'s model is a model program: read_canonical_context gives its quantities (with who gave each figure), goals, limits, options, open questions and its stored Run. '
-  + 'Only when the person asks to change the model (an answer, a correction, a new item or a removal), call propose_change ONCE: an answer to a listed question goes in answers, on that item\'s id; '
+  + 'Only when the person asks to change the model (an answer, a correction, a new item or a removal), call propose_change with the whole change: an answer to a listed question goes in answers, on that item\'s id; '
   + 'any other change goes in request, with their exact words for every figure of theirs, and in remove the ids (from read_canonical_context) of anything they asked to remove. Answers in the order of your questions answer them in that order, and "I don\'t know" is an answer: put each on the item of the question it answers, and never ask one again in the same words. '
   + 'Olumi\'s drafter writes a change in request, and the card shows every change. Explanations and questions need no proposal. '
-  + 'A turn shows one card; the person approves it, and apply_change then saves the model with a new Run.';
+  + 'A turn holds one pending card: while it waits for approval no second change is prepared, and a refused change saves nothing and may be corrected, using its reason, and proposed again in the same turn. The person approves the card, and apply_change then saves the model with a new Run.';
 
 /**
  * AN ANSWER to a listed question (DL 24 Oct): the figure it answers, declared by the AI with the canonical model's own fields,

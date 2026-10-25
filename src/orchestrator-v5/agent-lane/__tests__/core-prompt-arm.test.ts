@@ -43,9 +43,18 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
   it('the sent core instructions, byte for byte, plus the canvas-coaching sentence once (the route row in core-turn.route.test.ts pins the same bytes as the SDK receives them)', () => {
     expect(b.split(NOTE_ON_ITEM_INSTRUCTION)).toHaveLength(2);
     // 23 Oct (ALPHA): the model-program prompt replaces arm B's assembled reference (055841368f…, 29,512 characters sent).
-    expect(createHash('sha256').update(b, 'utf8').digest('hex')).toBe('fee42c2fbd8f73fa578992b049157ad90b0d7d876795d4d83e9fe0afdb42cb21'); // 24 Oct: issue 30, synthetic examples only; before it, remodel coaching (after 23 Oct P1/P4: at most three questions, each once, never what their words state).
+    expect(createHash('sha256').update(b, 'utf8').digest('hex')).toBe('01cf15ceed4fb88ad3aa912637d770bd37c94fa193ddb7a27dbd5be22d31b810'); // 25 Oct (J): the one-card rule, a refused change corrected and proposed again (was fee42c2f…). 24 Oct: issue 30, synthetic examples only; before it, remodel coaching (after 23 Oct P1/P4: at most three questions, each once, never what their words state).
     // Candidate-3 witness kept (21 Oct): WHEN to build. Text only, not behaviour.
     expect(b).toContain('draft the first model from their brief in that same turn, even when figures are missing');
+    // J (DL 25 Oct, measure H's blocking class): ONE rule, the same words in the standing text, the turn guidance and
+    // propose_change's description, as program-tools.ts proposeProgramChange does: a successful card holds the turn's slot until
+    // it is applied; a refused preparation frees it.
+    const ONE_CARD = 'A turn holds one pending card: while it waits for approval no second change is prepared, and a refused change saves nothing and may be corrected, using its reason, and proposed again in the same turn.';
+    expect(count(b, `${ONE_CARD} If its reason needs something only the person can give, ask them for that one thing.`)).toBe(1);
+    for (const [name, text] of [['standing', b], ['guidance', PROGRAM_TURN_GUIDANCE], ['propose_change', coreInstructions.PROGRAM_TOOL_DESCRIPTIONS.propose_change]] as const)
+      expect(count(text, ONE_CARD), name).toBe(1);
+    for (const old of ['call propose_change ONCE', 'a second proposal in the same turn is refused', 'A turn shows one card'])
+      for (const text of [b, PROGRAM_TURN_GUIDANCE, coreInstructions.PROGRAM_TOOL_DESCRIPTIONS.propose_change]) expect(text, old).not.toContain(old);
   });
 
   it('arm A is untouched: the legacy host contract is byte-identical to staging b76bc42c', () => {
@@ -222,9 +231,9 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       '"I don\'t know" is an answer too: the item stays open, its question changed to ask for what would size it.']) expect(count(UPDATE_PREFIX, rule), rule).toBe(1);
     // The program turn's guidance is prompt text: answers in order answer the questions in order, and none is asked again in the same words.
     // Targeted answers (DL 24 Oct): an answer goes in answers on its item's id, anything else in request (pinned as sent in core-turn.route).
-    expect(createHash('sha256').update(PROGRAM_TURN_GUIDANCE, 'utf8').digest('hex')).toBe('4ccd4a5913bfb242ca4f771b3349ed8a2872b6fc18b7632b8d38c15c92448542');
+    expect(createHash('sha256').update(PROGRAM_TURN_GUIDANCE, 'utf8').digest('hex')).toBe('bebb24da678cfa6c5ce7eb6e64ba1e49362d2c258cc77fcc30796928a041ed72'); // J: the one-card rule (was 4ccd4a59…)
     expect(count(PROGRAM_TURN_GUIDANCE, 'Answers in the order of your questions answer them in that order, and "I don\'t know" is an answer: put each on the item of the question it answers, and never ask one again in the same words.')).toBe(1);
-    expect(count(PROGRAM_TURN_GUIDANCE, 'call propose_change ONCE: an answer to a listed question goes in answers, on that item\'s id; any other change goes in request,')).toBe(1);
+    expect(count(PROGRAM_TURN_GUIDANCE, 'call propose_change with the whole change: an answer to a listed question goes in answers, on that item\'s id; any other change goes in request,')).toBe(1);
     for (const old of ['If only its direction can be defended', 'uncertainty alone is not a reason to withhold', 'what they expect without the options included', 'roughly doubles daily deliveries',
       'A goal or limit stated against today is relative to today']) expect(DRAFTING_INSTRUCTIONS, old).not.toContain(old);
     // Buddy 08:48Z: a level target and a change in units are never turned into a ratio. Only the change_rel clause sets today
