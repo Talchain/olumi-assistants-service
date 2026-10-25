@@ -664,12 +664,15 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
   const chances = new Set(model.risks.map((k) => k.occurrence));
   /**
    * A count of things (one plain unit, not time or money) that is a FACT, a level of the person's situation (members today,
-   * headcount): never negative. A coefficient in the same unit is the size of a mechanism (customers an option adds or
+   * headcount), or an option's setting of one: never negative. A coefficient in the same unit is the size of a mechanism (customers an option adds or
    * loses), which can be below 0, so it is never truncated (alpha G2: a signed change was drawn on [0, inf)).
    */
+  // An option's setting stands in for the quantity it sets, so a setting of a fact is a level too (Codex r1 #3764: Olumi's
+  // estimated setting of members today, made a coefficient by normalise, must still never draw below 0).
+  const setsFact = new Set(model.options.flatMap((o) => o.sets.flatMap((s) => (has(s.to) && Q.get(s.quantity)?.kind === 'fact' ? [s.to] : []))));
   const isCount = (q: CanonicalQuantityT): boolean => {
     const d = U.get(q.id) ? Object.entries(U.get(q.id)!.dims) : [];
-    return q.kind === 'fact' && !chances.has(q.id) && d.length === 1 && d[0][1] === 1 && !TIME_DIMS.has(d[0][0]) && !['gbp', 'usd', 'eur'].includes(d[0][0]);
+    return (q.kind === 'fact' || setsFact.has(q.id)) && !chances.has(q.id) && d.length === 1 && d[0][1] === 1 && !TIME_DIMS.has(d[0][0]) && !['gbp', 'usd', 'eur'].includes(d[0][0]);
   };
   /**
    * Truncation only for a mathematical domain: a chance lies in [0, 1]; a count of things is never negative; an elapsed

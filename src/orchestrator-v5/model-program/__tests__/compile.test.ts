@@ -643,6 +643,12 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     // Contrast, the same field as a FACT (members today): the domain and its contradiction rule are unchanged.
     expect(withMembers({ low: 280, high: 320 }).conversions.find((c) => c.quantity === 'members_now')).toMatchObject({ kind: 'range_law', domain: { min: 0 } });
     expect(withMembers({ low: -1010, high: -990 }).blockers).toContainEqual({ id: 'members_now', code: 'recount', scope: ['reach_400'] });
+    // Codex r1: an option's setting stands in for the fact it sets. Olumi's estimated setting of members today (made a
+    // coefficient by normalise) keeps the fact's domain; its inline quantity is promo__members_now.
+    const g = gymFilled();
+    g.options = g.options.map((o) => (o.id === 'promo' ? { ...o, sets: [...o.sets, { ...o.sets[0]!, quantity: 'members_now', to: null, value: 5, low: 0, high: 10, range_kind: 'plausible' as const, author: 'olumi' as const, quote: null }] } : o));
+    const setting = compile(g);
+    expect(setting.conversions.find((c) => c.quantity === 'promo__members_now'), JSON.stringify(setting.errors)).toMatchObject({ kind: 'range_law', domain: { min: 0 } });
   });
 
   it('DL ruling 4 (S2 law 9d34ef05+): a plausible range is a spread, never a point and never an invented domain; one with no room is HELD; a most likely figure at an end is an error', () => {
