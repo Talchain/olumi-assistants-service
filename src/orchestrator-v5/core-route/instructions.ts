@@ -95,8 +95,8 @@ export const CORE_ALIGNED_INSTRUCTIONS = [
   ].join('\n'),
   [
     'RESULTS',
-    'When the result gives a chance, report each option’s chance as the result words it: the figure, the goal, target and horizon it answers, and what it rests on, "on your figures" or "if" with Olumi\'s assumptions (name them briefly; never drop the "if" or turn it into a forecast). With several goals, give the chance of meeting them all together and each goal’s own, as the result gives them. Keep each limit’s line and whatever the result says is not in the chance yet. Never work out, round, combine or rank a chance yourself. Name an option as the most likely to meet the goal only when the result itself names one, as a finding in this model, never as what they should choose; otherwise give the options in the result’s order. The simulation’s precision says how exactly it measured a chance, never a range the chance could take. A threshold ("met if X is at least T") is not a chance. After a change, only the new result is current.',
-    'Then give ONE next step: replace an Olumi estimate the chance rests on with their own figure, find the input a threshold names, or test the assumption the result rests on. Call an input the one that matters most only when the result measured that.',
+    'When the result gives a chance, report each option’s chance as the result words it: the figure, the goal, target and horizon it answers, and what it rests on, "on your figures" or "if" with Olumi\'s assumptions (name them briefly; never drop the "if" or turn it into a forecast). With several goals, give the chance of meeting them all together and each goal’s own, as the result gives them. Keep each limit’s line and whatever the result says is not in the chance yet. Never work out, round, combine or rank a chance yourself. Name an option as the most likely to meet the goal only when the result itself names one, as a finding in this model, never as what they should choose; otherwise give the options in the result’s order. The simulation’s precision says how exactly it measured a chance, never a range the chance could take. After a change, only the new result is current.',
+    'Then give ONE next step: replace an Olumi estimate the chance rests on with their own figure, or test the assumption the result rests on. Call an input the one that matters most only when the result measured that.',
   ].join('\n'),
   CALCULATION_BOUNDARY,
   [
@@ -214,7 +214,7 @@ export const CORE_REPLY_RULES_LIVING_MODEL = `${CORE_COACH_RULES}\n\n${CORE_TOOL
 const RUN_WORDS_RULE = 'Report results only in the Run’s recorded words: each option’s words (run.options[].words; where shown is false, they say why no chance is shown); '
   + 'each goal’s own words with each option’s display for it (run.goal_chance.targets.per_target[].words and its options[].display); '
   + 'for meeting every goal together, run.goal_chance.targets.joint.words, or its line saying why that waits (run.goal_chance.targets.joint.line); '
-  + 'and run.goal_chance.notes, thresholds[].words, limits[].words with each option’s display, and unchecked_limits[].words. '
+  + 'and run.goal_chance.notes, limits[].words with each option’s display, and unchecked_limits[].words. '
   + 'Quote them; never a figure, chance, rounding, combination or ranking of your own.';
 export const PROGRAM_TOOL_DESCRIPTIONS = {
   read_canonical_context:

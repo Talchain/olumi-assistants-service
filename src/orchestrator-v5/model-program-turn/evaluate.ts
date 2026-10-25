@@ -37,7 +37,7 @@ export type Evaluation = {
   readonly view: PresentedAnalysisView | WaitingView;
   readonly projection: Projection;
 };
-/** The view when no executable model exists yet: every option withheld with what it waits on, and the thresholds. */
+/** The view when no executable model exists yet: every option withheld with what it waits on. */
 export type WaitingView = {
   readonly schema: 'canonical_analysis_view.v1';
   readonly source: 'stored_run_facts';
@@ -117,7 +117,7 @@ function blockersOf(model: CanonicalModelT, list: readonly Blocker[]): PresentBl
   const labelOf = new Map<string, string>([...m.quantities, ...m.goals, ...m.limits].map((r) => [r.id, r.label] as const));
   const isQuantity = new Set(m.quantities.map((q) => q.id));
   const basisOf = new Map(m.quantities.map((q) => [q.id, q.basis] as const));
-  // An `unknown` is no one's to answer yet: no answer box (so no ask and no tipping probe), and its own basis says why.
+  // An `unknown` is no one's to answer yet: no answer box (so no ask), and its own basis says why.
   return list.map((b) => ({ id: b.id, code: b.code, label: b.code === 'no_goal' ? 'The result you want' : labelOf.get(b.id) ?? b.id, scope: b.scope,
     answer: isQuantity.has(b.id) && b.code !== 'unknown' ? { quantity_id: b.id } : null,
     ...(b.code === 'unknown' && typeof basisOf.get(b.id) === 'string' && basisOf.get(b.id)!.trim() !== '' ? { basis: basisOf.get(b.id)! } : {}) }));

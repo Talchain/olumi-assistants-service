@@ -1057,7 +1057,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
 
     it('(6) ALPHA (23 Oct) + Codex r1 BLOCK 4 on #3709: a saved PROGRAM\'s turn gets the model-program instructions; a saved Living Model keeps the old text, byte for byte', async () => {
       // Pinned from the request bodies the provider received on this route, not from the module that builds them.
-      const PROGRAM_SHA = '4f08cad38c255e123870f963ca217b1e790bc6b87d4b593b1f8c330fc3dc0794'; // 25 Oct: alpha G5 (no note_on_item sentence). // 24 Oct: issue 30, synthetic examples only (after remodel coaching)
+      const PROGRAM_SHA = '5192e50e1cfce72ee67a65c6802fb14c4eab302955988daddb0088e45eeb2588'; // 25 Oct: alpha G10 (no threshold sentences). // 25 Oct: alpha G5 (no note_on_item sentence). // 24 Oct: issue 30, synthetic examples only (after remodel coaching)
       const LIVING_MODEL_SHA = '7a1bced23a44dccc478a00d075b28bbe2dda487a4b6da868ae3a477698097e44'; // staging 646d374e's
       const sha = (c: Json) => createHash('sha256').update(String(c.instructions), 'utf8').digest('hex');
       outputs = [[{ type: 'message', text: 'Here is what the model holds.' }]];
@@ -1322,7 +1322,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(String(sentTools.propose_change)).toContain('An answer to a listed question (a blocker, or an asked item\'s question) goes in answers, on that existing item\'s id from read_canonical_context, saying whose it is: author person, ');
       expect(String(sentTools.propose_change)).toContain('Anything else (a new item or link, a rename, a removal) goes in request, in plain words with their exact words for every figure of theirs, '
         + 'with remove the ids of anything they asked to remove ([] for none); Olumi’s drafter writes it. ');
-      expect(sentSha('propose_change')).toBe('24a9738ae7beb76f08dd972f7094b157f853204f1316b6165906b0b8854398ec');
+      expect(sentSha('propose_change')).toBe('806a9dedeb71c965fd35269ba43f00e2217a4ec1c498ddb5cbf0782967f07847');
       const sentParams = (calls[0]!.tools as Json[]).find((t) => t.name === 'propose_change')!.parameters as Json;
       expect(Object.keys(sentParams.properties)).toEqual(['public_label', 'basis', 'request', 'remove', 'answers']);
       expect(sentParams.required).toContain('answers');
@@ -1396,7 +1396,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(sent).toContain('superseded: the card is out of date because the model changed after it was prepared, so nothing was saved; say so, and ask whether they want that change made again.');
       expect(sent).not.toContain('prepare a new change');
       // 25 Oct (measure RL mrr-r4/r5): the superseded sentence; before it 09fd261b… said "read it again and prepare a new change".
-      expect(createHash('sha256').update(sent, 'utf8').digest('hex')).toBe('dbfb4c376cd85c1fe5bc4126f3c01a949aa7bd0d37b868dc2a8f3f5be8ae9833');
+      expect(createHash('sha256').update(sent, 'utf8').digest('hex')).toBe('4ebb01101f37861e49a7947cf594c693f588ed4894385d930d10a6f2b9988bd6');
     });
 
     it('DL 23 Oct (served capacity: a new Run unseen until reload): a program reply names the Run its turn stored in `run`, and only that Run', async () => {

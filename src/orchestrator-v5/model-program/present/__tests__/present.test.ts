@@ -98,10 +98,9 @@ describe('present: the canonical analysis view from a simulated model', () => {
     for (const v of [olumi, theirs, own]) expect(JSON.stringify(v)).not.toMatch(FORECAST_OR_VERDICT);
   });
 
-  it('(c)+(d) a goal waiting on ONE asked quantity: only it waits, and it gets a threshold, said as a threshold, never a chance', () => {
+  it('(c)+(d) a goal waiting on ONE asked quantity: only it waits, and no threshold is said for it (alpha G10)', () => {
     // The compiled model holds the budget goal only: 'Reach 100 cases' waits on 'Cases per specialist' (asked).
     // Budget: cost = specialists × £40,000 ≤ £50,000. Hold 0 ✓, Add one 40,000 ✓ → each exactly "100%".
-    // Threshold: capacity = 80 + 1 × X ≥ 100 ⇔ X ≥ 20 (Add one); Hold stays at 80 whatever X is, so it has no threshold.
     const base = (each?: number): ExecutableModel => model([fixed('count', 0, 'specialists'), fixed('one', 1, 'specialists'),
       fixed('salary', 40000, '£'), def('cost', 'product', ['count', 'salary'], '£'), fixed('budget', 50000, '£'),
       ...(each === undefined ? [] : [fixed('today', 80, 'cases'), fixed('each', each, 'cases'),
@@ -116,7 +115,6 @@ describe('present: the canonical analysis view from a simulated model', () => {
       goals: [{ goal_id: 'g_cost', label: 'Stay within the budget', status: 'calculable', reasons: [], asks: [] },
         { goal_id: 'g_cap', label: 'Reach 100 cases', status: 'asks', reasons: ['It needs your answer.'], asks: ['each'] }],
       asks: [{ quantity_id: 'each', label: 'Cases per specialist', unit: 'cases' }], blockers: waits_on,
-      tipping: { g_cap: { build: (x) => base(x) } },
     });
     for (const id of ['hold', 'add']) {
       expect(cell(v, id)).toEqual({ kind: 'withheld', face: 'Not shown yet: needs your answer',
@@ -132,10 +130,8 @@ describe('present: the canonical analysis view from a simulated model', () => {
     expect(v.goal_chance.targets.per_target).toEqual([{ constraint_id: 'g_cost',
       words: '‘Specialist cost’ being at most £50,000 at 1 month from now, in this model, on your figures',
       options: [{ option_id: 'hold', display: '100%' }, { option_id: 'add', display: '100%' }] }]);
-    const words = 'Threshold: in this model, ‘Reach 100 cases’ is met with ‘Add one specialist’ if ‘Cases per specialist’ is at least 20 cases.';
-    expect(v.goal_chance.thresholds).toEqual([{ kind: 'threshold', goal_id: 'g_cap', option_id: 'add', quantity: 'each', cmp: '>=', value: 20, words }]);
-    expect(v.goal_chance.notes).toContain(words);
-    expect(words).not.toMatch(/chance|%/);
+    expect(v.goal_chance).not.toHaveProperty('thresholds');
+    expect(JSON.stringify(v)).not.toMatch(/Threshold|at least 20/);
   });
 
   it('the same model in £ and in £k gives identical words apart from the unit, and identical figures', () => {

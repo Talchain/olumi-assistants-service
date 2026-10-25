@@ -2,7 +2,7 @@
  * The threshold search on the real evaluation path (`evaluateCanonical`), 0 provider calls.
  *
  * DoD-I hiring-r3 (25 Oct): a goal measured over a window that opens at the person's staffing decision waited on one asked
- * figure, the weeks from now to that decision. The open-ended search (present.ts `tippingThresholds`) doubled it, each probe
+ * figure, the weeks from now to that decision. The open-ended search (present.ts `tippingThresholds`, deleted with alpha G10) doubled it, each probe
  * simulating that many more weeks, and the process froze for about 15 minutes. Every expected value here is written by hand.
  *
  * The evaluation is synchronous, so vitest's own timer cannot stop a runaway search; the simulator spy below enforces the

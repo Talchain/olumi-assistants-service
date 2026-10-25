@@ -44,7 +44,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(b).not.toContain(NOTE_ON_ITEM_INSTRUCTION);
     expect(b.endsWith(CORE_REPLY_RULES)).toBe(true);
     // 23 Oct (ALPHA): the model-program prompt replaces arm B's assembled reference (055841368f…, 29,512 characters sent).
-    expect(createHash('sha256').update(b, 'utf8').digest('hex')).toBe('4f08cad38c255e123870f963ca217b1e790bc6b87d4b593b1f8c330fc3dc0794'); // 25 Oct: alpha G5, no note_on_item sentence on the program path. 24 Oct: issue 30, synthetic examples only; before it, remodel coaching (after 23 Oct P1/P4: at most three questions, each once, never what their words state).
+    expect(createHash('sha256').update(b, 'utf8').digest('hex')).toBe('5192e50e1cfce72ee67a65c6802fb14c4eab302955988daddb0088e45eeb2588'); // 25 Oct: alpha G10, no threshold sentences. 25 Oct: alpha G5, no note_on_item sentence on the program path. 24 Oct: issue 30, synthetic examples only; before it, remodel coaching (after 23 Oct P1/P4: at most three questions, each once, never what their words state).
     // Candidate-3 witness kept (21 Oct): WHEN to build. Text only, not behaviour.
     expect(b).toContain('draft the first model from their brief in that same turn, even when figures are missing');
   });
@@ -104,7 +104,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       // 2. a chance as the code words it, what it rests on, the limit lines, and ONE next step
       'report each option\u2019s chance as the result words it: the figure, the goal, target and horizon it answers, and what it rests on, "on your figures" or "if" with Olumi\'s assumptions (name them briefly; never drop the "if" or turn it into a forecast).',
       'Never work out, round, combine or rank a chance yourself.',
-      'Then give ONE next step: replace an Olumi estimate the chance rests on with their own figure, find the input a threshold names, or test the assumption the result rests on. Call an input the one that matters most only when the result measured that.',
+      'Then give ONE next step: replace an Olumi estimate the chance rests on with their own figure, or test the assumption the result rests on. Call an input the one that matters most only when the result measured that.',
       // 3. edits in chat, never a figure invented for them; a loose figure is theirs with Olumi's labelled range
       'never invent a figure for them, and never change the model because of discussion alone.',
       // Codex r1 BLOCK on #3707: never a range Olumi invents around their loose figure; ask for theirs.
@@ -135,16 +135,16 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     const words = 'Report results only in the Run\u2019s recorded words: each option\u2019s words (run.options[].words; where shown is false, they say why no chance is shown); '
       + 'each goal\u2019s own words with each option\u2019s display for it (run.goal_chance.targets.per_target[].words and its options[].display); '
       + 'for meeting every goal together, run.goal_chance.targets.joint.words, or its line saying why that waits (run.goal_chance.targets.joint.line); '
-      + 'and run.goal_chance.notes, thresholds[].words, limits[].words with each option\u2019s display, and unchecked_limits[].words. '
+      + 'and run.goal_chance.notes, limits[].words with each option\u2019s display, and unchecked_limits[].words. '
       + 'Quote them; never a figure, chance, rounding, combination or ranking of your own.';
     // The run block as S3 emits it: { run_id, options[{ option_id, shown, words }], goal_chance: the Run's own block }.
     const PATHS = ['run.options[].words', 'run.goal_chance.targets.per_target[].words', 'run.goal_chance.targets.joint.words',
-      'run.goal_chance.targets.joint.line', 'run.goal_chance.notes, thresholds[].words, limits[].words with', 'and unchecked_limits[].words'];
+      'run.goal_chance.targets.joint.line', 'run.goal_chance.notes, limits[].words with', 'and unchecked_limits[].words'];
     for (const [name, text] of Object.entries(d)) {
       expect(text.split(words), name).toHaveLength(2);
       for (const path of PATHS) expect(count(text, path), `${name}: ${path}`).toBe(1);
       // The paths S3 no longer emits (14:2xZ): no description names them.
-      for (const gone of ['run.targets', 'run.notes', 'run.thresholds', 'run.limits', 'run.unchecked_limits']) expect(text, `${name}: ${gone}`).not.toContain(gone);
+      for (const gone of ['run.targets', 'run.notes', 'run.thresholds', 'thresholds[]', 'run.limits', 'run.unchecked_limits']) expect(text, `${name}: ${gone}`).not.toContain(gone);
       for (const banned of ['recommend', 'best', 'winner', 'you should', '18 to 22']) expect(text.toLowerCase(), `${name}: ${banned}`).not.toContain(banned);
     }
     // read_canonical_context returns model (as authored), earlier_versions, open_questions, coaching and run.
