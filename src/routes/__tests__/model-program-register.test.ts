@@ -49,6 +49,8 @@ import { ProposalStore } from '../../orchestrator-v5/agent-lane/proposal.js';
 import { isSavedRead, readSaved } from '../../orchestrator-v5/path-b/tools/context-tool.js';
 import { GraphStaleWriteError } from '../../orchestrator-v5/session/store.js';
 import { GRAPH_MAX_NODES } from '../../config/graphCaps.js';
+import { computeGraphIdentityHash } from '../../orchestrator-v5/context/graph-identity.js';
+import { computeAnalysisAffectingGraphHash } from '../../orchestrator-v5/context/graph-hash.js';
 
 type Rec = Record<string, unknown>;
 beforeEach(() => {
@@ -187,7 +189,13 @@ describe('a model program\'s postimage through the real /graph/register', () => 
   async function realRoutes() {
     let saved: Rec | null = null;
     loadGraph.mockImplementation(async () => (saved === null ? null : JSON.parse(JSON.stringify(saved))));
-    append.mockImplementation(async (w: Rec) => { saved = JSON.parse(JSON.stringify(w.graph)) as Rec; return { id: `turn-${append.mock.calls.length}` }; });
+    // The store echoes the version it was asked to write, as the atomic append returns it (none without a carrier).
+    append.mockImplementation(async (w: Rec) => {
+      saved = JSON.parse(JSON.stringify(w.graph)) as Rec;
+      const n = append.mock.calls.length, mv = w.modelVersion as Rec | undefined;
+      return { id: `turn-${n}`, ...(mv === undefined ? {} : { modelVersionReceipt: { mutation_id: mv.mutation_id, version_id: `ver-${n}`, version_number: n,
+        creation_kind: mv.creation_kind, graph_identity_hash: mv.graph_identity_hash, analysis_affecting_hash: mv.analysis_affecting_hash } }) };
+    });
     store.readExistingScenario.mockImplementation(async () => (saved === null ? null
       : { userId: null, graph: JSON.parse(JSON.stringify(saved)), briefText: BRIEF, analysisInvalidatedAt: null, revision: append.mock.calls.length }));
     const app = Fastify();
@@ -226,6 +234,11 @@ describe('a model program\'s postimage through the real /graph/register', () => 
     const applied = await applyProgramChange({ dispatch, proposals }, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: 'press-1' }, card.proposal_id) as Rec;
     expect(applied, JSON.stringify(applied)).toMatchObject({ status: 'ok', data: { saved: true } });
     expect(append).toHaveBeenCalledTimes(2);
+    // The commit's own CAS is on the base the card was made on (the read route's identity and hash, the store's revision).
+    const written = append.mock.calls[1]![0] as Rec;
+    expect([written.expectedGraphIdentityHash, written.expectedGraphAnalysisHash, written.expectedRevision]).toEqual([base.identity, base.graphHash, 7]);
+    // An asked figure has no value, so this graph has no version row (step 0's watch item): no carrier, and the receipt is the acknowledgement.
+    expect(written.modelVersion).toBeUndefined();
     // Its receipt names the model a fresh read serves, and that read is the approved card's program, byte for byte.
     const after = await readSaved({ dispatch }, SCENARIO);
     await app.close();
@@ -235,6 +248,37 @@ describe('a model program\'s postimage through the real /graph/register', () => 
     expect((data.revision as Rec).graph_identity_hash).toBe(after.identity);
     expect(stableStringify(savedProgramOf(after.graph))).toBe(stableStringify(next.program));
     expect(cell(after.graph).value).toBeNull();
+  });
+
+  it('a program save whose figures are all given carries its version to the commit, and its receipt is that version, read back', async () => {
+    const { app, dispatch } = await realRoutes();
+    const first = withNewRun({ model_program: MODEL_PROGRAM, canonical: bakery(), seed: seedOf(SCENARIO), person_words: [BRIEF], runs: [] });
+    expect((await dispatch(registerUrl, { graph: first.graph, thin_core: true, expected_graph_identity_hash: null, brief_text: BRIEF })).status).toBe(200);
+    const base = await readSaved({ dispatch }, SCENARIO);
+    if (!isSavedRead(base)) throw new Error('no saved base');
+    // Their answer to the one asked figure: every figure is then given, so the graph is versionable.
+    const words = 'The oven would cost £2,500.';
+    const answered: CanonicalModelT = { ...first.program.canonical, quantities: first.program.canonical.quantities.map((x) => (x.id === 'oven_price'
+      ? { ...x, status: 'known', value: 2500, question: null, quote: words } : x)) };
+    const v = validatePostimage(first.program.canonical, answered, { removals: [], words: [BRIEF, words], fresh: [words] });
+    if (!v.ok) throw new Error(v.reason);
+    const next = withNewRun({ ...first.program, canonical: v.model, person_words: [BRIEF, words] });
+    const proposals = new ProposalStore();
+    const card = holdProgramCard(proposals, { scenarioId: SCENARIO, userId: null, graphHash: base.graphHash, identity: base.identity! },
+      { label: 'Oven price £2,500', basis: 'their answer', program: next.program, changes: v.changes });
+    const applied = await applyProgramChange({ dispatch, proposals }, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: 'press-2' }, card.proposal_id) as Rec;
+    const after = await readSaved({ dispatch }, SCENARIO);
+    await app.close();
+    if (!isSavedRead(after)) throw new Error('no readback');
+    expect(applied, JSON.stringify(applied)).toMatchObject({ status: 'ok', data: { saved: true } });
+    // The version carrier the commit was given names the model a fresh read serves.
+    const carrier = (append.mock.calls[1]![0] as Rec).modelVersion as Rec;
+    expect(carrier).toMatchObject({ graph_identity_hash: after.identity, creation_kind: 'committed_mutation' });
+    expect(typeof carrier.mutation_id).toBe('string');
+    // The receipt the person's save reports is THAT version (core-write checks its hashes against the readback).
+    expect((applied.data as Rec).receipt).toEqual({ mutation_id: carrier.mutation_id, version_id: 'ver-2', version_number: 2, creation_kind: 'committed_mutation',
+      graph_identity_hash: after.identity, analysis_affecting_hash: carrier.analysis_affecting_hash });
+    expect(stableStringify(savedProgramOf(after.graph))).toBe(stableStringify(next.program));
   });
 
   it('CONTRAST (the legacy rules stay on every other writer): the SAME two graphs as a non-program core write (no `model_program`) are still refused as untouched_level_rescaled, and nothing is written', async () => {
@@ -278,6 +322,13 @@ describe('a model program\'s postimage through the real /graph/register', () => 
       expect([name, res.statusCode, res.json().details?.code], res.body).toEqual([name, status, code]);
       // Nothing is written: only the commit's own CAS reaches the append, and its transaction refuses.
       expect([name, append.mock.calls.length]).toEqual([name, name === 'stale base (the commit\'s own CAS)' ? 1 : 0]);
+      if (name === 'stale base (the commit\'s own CAS)') {
+        // It refused on THESE expectations: the stored base's identity and analysis hash, and the revision the base read gave.
+        const w = append.mock.calls[0]![0] as Rec;
+        expect([w.expectedGraphIdentityHash, w.expectedGraphAnalysisHash, w.expectedRevision])
+          .toEqual([computeGraphIdentityHash(first.graph as never)!.value, computeAnalysisAffectingGraphHash(first.graph as never), 7]);
+        expect(w.expectedGraphIdentityHash).not.toBe(computeGraphIdentityHash(graph as never)!.value);
+      }
     }
   });
 
