@@ -938,6 +938,24 @@ describe('AIE §5 AMEND (DL 24 Oct): a first draft never waits on an ask no one 
     expect(codes(compile(mislabelled))).toEqual([]);
   });
 
+  it('prompt rebuild R (audit #3, prompt half): the two repair sentences that offer structure name only what isStructuralConstant admits, so a repair cannot loop on a figure normalise re-asks', () => {
+    // Spelled out, never the module's constant: the list as the drafting rules state it.
+    const LIST = 'an exact calendar conversion (12 month/year); a power of ten that is its unit\'s scale (100 %); '
+      + '0 or 1 on a quantity an option sets, or as the figure it sets it to (off or on; a setting\'s starting level when they gave none); '
+      + '0 as nothing extra yet (an effect\'s base, a sum\'s part, a stock\'s start); '
+      + '1 in unit "1" as an index (a product\'s part, or an effect\'s base or a sum\'s part whose other terms are pure numbers)';
+    const ask = compile(withQ(gym(), 'leavers', { question: null }), { asksNeedQuestions: true }).errors.find((e) => e.code === 'asked_no_question')!;
+    expect(ask.message).toContain('waits on the person but has no question. If it is theirs to give, write the one plain question that would give it. '
+      + `It is a structural constant (author structure, known, one exact figure) only if it is ${LIST}.`);
+    const known = bakery();
+    known.quantities.push(qty('weeks_per_year', 'week/year', { value: 52, author: 'olumi', status: 'known', basis: 'A year has 52 weeks.' }));
+    const point = compile(known).errors.find((e) => e.code === 'olumi_no_range')!;
+    expect(point.message).toContain(`Olumi's figures are estimates: mark it estimated with low and high. Only a structural constant takes author structure: ${LIST}.`);
+    // The old wording offered structure for a starting level of any figure, which normalise turns back into an ask (compile.ts:198).
+    for (const m of [ask.message, point.message]) for (const old of ['the starting level of a setting only the options change', 'a whole such as 100 %', 'an option switch or'])
+      expect(m, old).not.toContain(old);
+  });
+
   it('the starting level of a setting only the options change, and a whole, are structure: Olumi\'s proposed divisions compile with no ask', () => {
     const olumiOption = (id: string, label: string, value: number): CanonicalModelT['options'][number] =>
       ({ ...option(id, label, [set('share', null, 'x', { value, author: 'olumi', quote: null })], 'x'), author: 'olumi', quote: null });
