@@ -26,6 +26,7 @@ import { TOOL_DESCRIPTIONS } from '../../orchestrator-v5/path-b/tools/index.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import { ASK_CHALLENGE_CHIP_ID } from '../../orchestrator-v5/core-route/turn-request.js';
 import { bakery, BRIEF as BAKERY_BRIEF, club, CLUB_BRIEF, q } from '../../orchestrator-v5/model-program-turn/__tests__/bakery.fixture.js';
+import type { CanonicalQuantityT } from '../../orchestrator-v5/model-program/canonical.js';
 import { DRAFTING_INSTRUCTIONS } from '../../orchestrator-v5/model-program-turn/prompt.js';
 import type { LivingModelT } from '../../schemas/living-model.js';
 import { GOAL_CHANCE_LICENSED, PERIOD_END_EFFECTS_UNSTATED } from '../../orchestrator-v5/goal-target/goal-chance-licence.js';
@@ -438,6 +439,48 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(registered, 'the pressed card, applied once').toHaveLength(1);
       expect(a.receipts).toEqual([expect.objectContaining({ version_id: 'v_1', authorised_by: 'person' })]);
       expect(JSON.stringify(calls.at(-1)?.input), 'the AI is told that call changed nothing').toContain(PAUSE_NO_CARD);
+    });
+    it('measure RL mrr-r3 (25 Oct): after the press applies the card, the AI applies again TWICE with no card: each stray call is refused, the reply is the AI\'s own words, never an unfinished run read as empty', async () => {
+      const press = await propose();
+      const warn = vi.spyOn(console, 'warn');
+      outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }],
+        [{ type: 'function_call', name: 'apply_change', call_id: 'again', args: { proposal_id: '' } }],
+        [{ type: 'function_call', name: 'apply_change', call_id: 'again2', args: { proposal_id: '' } }], [{ type: 'message', text: 'Saved: f is 0.6 now.' }]];
+      const r = await post(press);
+      const finalOutputRead = warn.mock.calls.some((c) => String(c[0]).includes('Accessed finalOutput before agent run is completed'));
+      warn.mockRestore();
+      expect(r.statusCode, r.body).toBe(200);
+      const a = r.json() as Json;
+      expect(a.error, JSON.stringify(a._agent)).toBeNull();
+      expect(a.assistant_text).toBe('Saved: f is 0.6 now.');
+      expect(finalOutputRead, 'no unfinished run is read as the reply').toBe(false);
+      expect(a.paused).toBeNull();
+      expect(pausedRun).toBeNull();
+      expect(registered, 'the pressed card, applied once').toHaveLength(1);
+      expect((a.model as Json).scenario_revision, 'the reply reads back the saved model').toBe(computeGraphIdentityHash(persisted as never)!.value);
+      // The earlier apply's save stays this turn's: its receipt, and nothing on the turn says nothing was saved.
+      expect(a.receipts).toEqual([expect.objectContaining({ version_id: 'v_1', authorised_by: 'person' })]);
+      expect(JSON.stringify({ text: a.assistant_text, error: a.error })).not.toMatch(/nothing (?:was |has been )?(?:saved|changed)/i);
+      // Both stray calls were told they changed nothing (each answer goes to the provider once, on the call after it).
+      expect(calls.map((c) => JSON.stringify(c.input)).join('').split(PAUSE_NO_CARD).length - 1).toBe(2);
+    });
+    it('BOUNDED: a third stray apply is not resumed again; the turn ends as an unfinished turn does (REPLY_INCOMPLETE), never by reading the unfinished run', async () => {
+      const press = await propose();
+      const warn = vi.spyOn(console, 'warn');
+      outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }],
+        ...['s1', 's2', 's3'].map((id) => [{ type: 'function_call', name: 'apply_change', call_id: id, args: { proposal_id: '' } }]), [{ type: 'message', text: 'never asked for' }]];
+      calls.length = 0;
+      const a = (await post(press)).json() as Json;
+      const finalOutputRead = warn.mock.calls.some((c) => String(c[0]).includes('Accessed finalOutput before agent run is completed'));
+      warn.mockRestore();
+      // An unfinished turn after a save: the save is kept and said so (nothing_saved false), with its receipt; never "nothing saved".
+      expect(a.error).toMatchObject({ code: 'REPLY_INCOMPLETE', nothing_saved: false });
+      expect(a.receipts).toEqual([expect.objectContaining({ version_id: 'v_1', authorised_by: 'person' })]);
+      expect(JSON.stringify({ text: a.assistant_text, error: a.error })).not.toMatch(/nothing (?:was |has been )?(?:saved|changed)/i);
+      expect(finalOutputRead).toBe(false);
+      // The press's call, its approval's resume, then the two refusals' resumes: the third stray is not answered by a fifth call.
+      expect(calls).toHaveLength(4);
+      expect(registered, 'the pressed card, applied once').toHaveLength(1);
     });
     it('KEPT: a typed turn that applies a card the scenario holds still pauses on that card, as before, and the UI reads it', async () => {
       await propose();
@@ -1260,6 +1303,63 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       const run = (read.data ?? read).run as Json;
       expect(stableStringify(run.goal_chance)).toBe(stableStringify(stored));
       expect(Object.keys(run).sort()).toEqual(['current', 'engine_current', 'goal_chance', 'options', 'run_id']);
+    });
+
+    it('measure RL mrr-r3 on a PROGRAM (25 Oct): the approved apply saves with its Run, then two stray applies: the reply is the AI\'s words, with that save\'s receipt and its stored Run, never "nothing saved"', async () => {
+      await savedProgram();
+      const updated = bakery();
+      updated.quantities = updated.quantities.map((x) => (x.id === 'oven_price' ? { ...x, status: 'known' as const, value: 2500, question: null, quote: 'The oven would cost £2,500' } : x));
+      canonicalDraft = JSON.stringify(updated);
+      outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'p1', args: { public_label: 'Oven price £2,500', basis: 'their answer', request: 'The oven price is £2,500.', remove: [] } }],
+        [{ type: 'message', text: 'I prepared the oven price; approve its card.' }]];
+      const card = changeCards((await typed('The oven would cost £2,500.')).json() as Json)[0]!;
+      outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }],
+        [{ type: 'function_call', name: 'apply_change', call_id: 'again', args: { proposal_id: '' } }],
+        [{ type: 'function_call', name: 'apply_change', call_id: 'again2', args: { proposal_id: '' } }], [{ type: 'message', text: 'Saved: the oven price is £2,500.' }]];
+      const r = await post({ turn_id: randomUUID(), message: card.approve_action.message, source: 'chip_click', chip: { id: card.approve_action.id, action_type: card.approve_action.action_type } });
+      expect(r.statusCode, r.body).toBe(200);
+      const a = r.json() as Json;
+      expect(a.error).toBeNull();
+      expect(a.assistant_text).toBe('Saved: the oven price is £2,500.');
+      const runs = persisted!.living_model.runs as Json[];
+      expect(runs, 'the save stored its Run').toHaveLength(2);
+      expect(a.run).toMatchObject({ run_id: runs[1]!.run_id });
+      expect(a.receipts).toEqual([expect.objectContaining({ authorised_by: 'person' })]);
+      expect(JSON.stringify({ text: a.assistant_text, error: a.error })).not.toMatch(/nothing (?:was |has been )?(?:saved|changed)/i);
+    });
+
+    it('measure RL mrr-r4/r5 (25 Oct: 8 reads, then an empty reply): a press on a card the model has moved past tells the agent what it CAN do on a press (say it is out of date, ask again), and the reply comes well under the call limit', async () => {
+      await savedProgram();
+      const said = (id: string, f: Partial<CanonicalQuantityT>) => { const m = bakery(); m.quantities = m.quantities.map((x) => (x.id === id ? { ...x, ...f } : x)); return JSON.stringify(m); };
+      const cardFor = async (words: string, draft: string, public_label: string): Promise<Json> => {
+        canonicalDraft = draft;
+        outputs = [[{ type: 'function_call', name: 'propose_change', call_id: `p-${public_label}`, args: { public_label, basis: 'their answer', request: words, remove: [] } }],
+          [{ type: 'message', text: 'I prepared that; approve its card.' }]];
+        const j = (await typed(words)).json() as Json;
+        return changeCards(j).find((c) => c.approve_action.detail === public_label) ?? (() => { throw new Error(JSON.stringify(j.cards)); })();
+      };
+      const pressOf = (card: Json) => ({ turn_id: randomUUID(), message: card.approve_action.message, source: 'chip_click', chip: { id: card.approve_action.id, action_type: card.approve_action.action_type } });
+      const stale = await cardFor('The oven would cost £2,500.', said('oven_price', { status: 'known', value: 2500, question: null, quote: 'The oven would cost £2,500' }), 'Oven price £2,500');
+      // Another change is approved first, so the oven price card was prepared on a model that is no longer saved.
+      const moved = await cardFor('We bake 320 loaves a week now.', said('base_sales', { value: 320, quote: 'We bake 320 loaves a week now' }), 'Base sales 320');
+      outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply-moved' }], [{ type: 'message', text: 'Saved: base sales are 320 a week.' }]];
+      expect((await post(pressOf(moved))).statusCode).toBe(200);
+      calls.length = 0;
+      const reply = 'That card is out of date because the model changed after it was prepared, so nothing was saved. Do you want the oven price set to £2,500 again?';
+      outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply-stale' }], [{ type: 'message', text: reply }]];
+      const r = await post(pressOf(stale));
+      expect(r.statusCode, r.body).toBe(200);
+      const a = r.json() as Json;
+      expect(a._agent.tool_calls).toEqual([{ name: 'apply_change', outcome: 'refused', refusal: 'superseded' }]);
+      expect(a.error).toBeNull();
+      expect(a.assistant_text).toBe(reply);
+      expect(calls.length, 'well under the call limit').toBeLessThanOrEqual(2);
+      // What the agent was told it can do, as SENT on the press: the card is out of date; say so and ask; never "prepare a new change".
+      const sent = String(((calls[0]!.tools as Json[]).find((t) => t.name === 'apply_change') as Json).description);
+      expect(sent).toContain('superseded: the card is out of date because the model changed after it was prepared, so nothing was saved; say so, and ask whether they want that change made again.');
+      expect(sent).not.toContain('prepare a new change');
+      // 25 Oct (measure RL mrr-r4/r5): the superseded sentence; before it 09fd261b… said "read it again and prepare a new change".
+      expect(createHash('sha256').update(sent, 'utf8').digest('hex')).toBe('dbfb4c376cd85c1fe5bc4126f3c01a949aa7bd0d37b868dc2a8f3f5be8ae9833');
     });
 
     it('DL 23 Oct (served capacity: a new Run unseen until reload): a program reply names the Run its turn stored in `run`, and only that Run', async () => {
