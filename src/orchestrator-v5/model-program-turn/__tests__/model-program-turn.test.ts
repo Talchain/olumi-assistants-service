@@ -5,7 +5,7 @@
  * every row binds the real request the route sends and the real postimage it saves. One row per step, plus the
  * save → readback → cold reopen identity row with its contrast control.
  */
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -166,6 +166,8 @@ describe('the model-program turn on the real core route', () => {
     // Alpha G14: today's date (Europe/London) follows the fixed instructions, so a stated date counts from it.
     const london = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
     expect(body.instructions).toBe(`${DRAFTING_INSTRUCTIONS}\n\nToday is ${london} (Europe/London). A date they state counts in whole periods from today, which is period 0.`);
+    // The date sent is recorded beside the fixed instructions' hash, so the record says exactly what was sent (Codex on #3760).
+    expect(r.json().model_program.draft).toMatchObject({ prompt_sha256: createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex'), today: london });
     expect(body.text.format).toMatchObject({ type: 'json_schema', name: 'canonical_model', strict: true });
     expect(stableStringify(body.text.format.schema)).toBe(stableStringify(CANONICAL_JSON_SCHEMA));
     expect(body.input).toEqual([{ role: 'user', content: BRIEF }]);

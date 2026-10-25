@@ -54,10 +54,12 @@ export type DraftOutcome = {
   readonly model: CanonicalModelT | null;
   readonly compiled: CompileResult | null;
   readonly attempts: readonly DraftAttempt[];
+  /** Today (Europe/London) as the drafter was told it, once for the whole drafting conversation, repairs included (alpha G14). */
+  readonly today: string;
 };
 
 /** The request body: fixed instructions and schema first (the cached prefix), then the conversation. An update's schema is its changes only. */
-export function draftRequestBody(input: readonly InputMessage[], update = false, today: string = todayInLondon(new Date())): StreamedResponsesBody {
+export function draftRequestBody(input: readonly InputMessage[], update: boolean, today: string): StreamedResponsesBody {
   return {
     model: coreBudget(DRAFT_REASONING_EFFORT).model,
     instructions: `${DRAFTING_INSTRUCTIONS}\n\n${todayLine(today)}`,
@@ -124,6 +126,7 @@ export function ledgeredResponsesCall(): ResponsesCall {
 export async function draftCanonicalModel(brief: string | readonly InputMessage[], call: ResponsesCall, sourceText: string = typeof brief === 'string' ? brief : '',
   opts: { readonly interpret?: boolean; readonly onto?: CanonicalModelT } = {}): Promise<DraftOutcome> {
   const onto = opts.onto;
+  const today = todayInLondon(new Date());
   const input: InputMessage[] = typeof brief === 'string' ? [{ role: 'user', content: brief }] : [...brief];
   const attempts: DraftAttempt[] = [];
   let model: CanonicalModelT | null = null;
@@ -131,7 +134,7 @@ export async function draftCanonicalModel(brief: string | readonly InputMessage[
   for (let a = 0; a <= MAX_REPAIRS; a += 1) {
     const t0 = Date.now();
     let out: CallOutput;
-    try { out = await call(draftRequestBody(input, onto !== undefined)); } catch (err) {
+    try { out = await call(draftRequestBody(input, onto !== undefined, today)); } catch (err) {
       attempts.push({ attempt: a, errors: null, failed: `call failed: ${err instanceof Error ? err.name : 'error'}`, provider_error: providerErrorOf(err), status: null, usage: null, ms: Date.now() - t0 });
       break;
     }
@@ -156,7 +159,7 @@ export async function draftCanonicalModel(brief: string | readonly InputMessage[
     if (result.errors.length === 0 || a === MAX_REPAIRS) break;
     input.push({ role: 'assistant', content: out.text }, { role: 'user', content: repairMessage(result.errors, onto === undefined ? REPAIR_PREFIX : UPDATE_REPAIR_PREFIX) });
   }
-  return { model, compiled, attempts };
+  return { model, compiled, attempts, today };
 }
 
 /**

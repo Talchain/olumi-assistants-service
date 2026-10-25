@@ -94,7 +94,8 @@ export async function runModelProgramTurn(input: ProgramTurnInput): Promise<Prog
   let draftMeta: Rec | undefined;
   if (prior === undefined) {
     const draft = await draftCanonicalModel(input.message, input.call ?? ledgeredResponsesCall(), input.message, { interpret: true });
-    draftMeta = { prompt_sha256: DRAFTING_PROMPT_SHA256, schema_sha256: CANONICAL_SCHEMA_SHA256, attempts: draft.attempts };
+    // prompt_sha256 is the FIXED instructions; what was sent is them plus todayLine(today) (alpha G14, Codex on #3760).
+    draftMeta = { prompt_sha256: DRAFTING_PROMPT_SHA256, schema_sha256: CANONICAL_SCHEMA_SHA256, today: draft.today, attempts: draft.attempts };
     if (draft.model === null || draft.compiled === null || draft.compiled.errors.length > 0) {
       const why = draft.model === null ? (draft.attempts.at(-1)?.failed ?? 'no draft came back') : `${draft.compiled!.errors.length} compile error(s) remain after ${draft.attempts.length - 1} repair(s)`;
       const model_program = { turn: 'draft', saved: false, draft: draftMeta, canonical: draft.model, compile: draft.compiled === null ? null : { compiles: false, errors: draft.compiled.errors } };
