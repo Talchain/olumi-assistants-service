@@ -9,7 +9,7 @@ import { z } from 'zod-v4';
 import { CanonicalModel } from '../model-program/canonical.js';
 
 export const DRAFTING_INSTRUCTIONS = [
-  'Turn the person\'s brief into ONE canonical model, following the schema. Olumi\'s code compiles, simulates and draws it; never compute results yourself. Olumi\'s own additions (a suggested measure, options, drivers, risks) are made when the model is first drafted; a repair or an update changes only what it asks.',
+  'Turn the person\'s brief into ONE canonical model, following the schema. Olumi\'s code compiles, simulates and draws it; never compute results yourself. Olumi\'s own additions (a suggested measure, options, drivers, risks) are made when the model is first drafted; a repair or an update changes only what it asks, and a goal or limit an update adds comes with the relations from the options to it, only where an option plausibly affects it; never added merely to connect.',
   '',
   '- Faithful: keep their figures, units, goals, deadlines and options. Every figure, relation, goal, limit and option of theirs is author "person"; its quote is their words copied exactly, one unbroken stretch, never reworded or joined.',
   '- Every number is a named quantity, except an option\'s own inline value. An exact constant the form needs (0 or 1 to switch an option off or on, 12 month/year) is author "structure": known, one figure, no range. So are the starting level of a setting only the options change, when they gave none (0, an Olumi division\'s share included), and a whole such as 100 %: never asked.',
@@ -48,14 +48,33 @@ export const DRAFTING_INSTRUCTIONS = [
 /** What the compiler's sentences are returned with, in the same conversation (phase 0b's repair turn, verbatim). */
 export const REPAIR_PREFIX = 'The compiler found these errors. Return the whole model again with them fixed, keeping everything else as it was.';
 /** What an update asks, after the person's words and the saved model, in the same conversation (simplify v1, A3: `draft.ts` proposePostimage). */
-export const UPDATE_PREFIX = 'Update the model above for the change below, and return the WHOLE model, by the same rules. Keep every record, with its id, exactly as it is unless the change is to it. Leave out only the ids listed to remove. A new item gets a new id. Each answer goes on the item whose question it answers (a question about one option, on that option\'s item); words that settle a figure (yes, no, all, none) are that figure, quoting them, its basis saying how they were read. Never keep an answer unassigned and ask it again. "I don\'t know" is an answer too: the item stays open, its question changed to ask for what would size it. Every option reaches every measured goal, a goal this change adds included. A figure of theirs quotes their words copied exactly, never reworded or joined; anything you add yourself is olumi\'s. Keep the history as it is.';
+export const UPDATE_PREFIX = 'Update the model above for the change below, by the same rules: return only the records you change or add, with their ids, each in full and as it was but for the change; never return a record you did not change; list removals in remove (only the ids listed to remove). A new item gets a new id. Each answer goes on the item whose question it answers (a question about one option, on that option\'s item); words that settle a figure (yes, no, all, none) are that figure, quoting them, its basis saying how they were read. Never keep an answer unassigned and ask it again. "I don\'t know" is an answer too: the item stays open, its question changed to ask for what would size it. A goal or limit this change adds comes with the relations from the options to it, only where an option plausibly affects it; never added merely to connect. Size them as for a first draft, and return those relations too. A figure of theirs quotes their words copied exactly, never reworded or joined; anything you add yourself is olumi\'s.';
+/** An update's repair turn: every change again (each attempt is merged onto the saved model afresh), never the whole model. */
+export const UPDATE_REPAIR_PREFIX = 'The compiler found these errors in the model with your changes. Return all your changes again with them fixed, by the same rules: only the records you change or add, each in full with its id, and the removals.';
+
+/**
+ * AN UPDATE'S OUTPUT (DL 24 Oct, DoD-G classes 12 and 4), derived from the canonical schema, never a second copy: in each
+ * family only the records the update changes or adds, each in its family's own record schema; the question and the time
+ * step null unless the change is to them; the ids it removes in remove; no history (the host's). The host merges it onto the
+ * saved model by id (`draft.ts` mergeUpdate). The families' "every ..." descriptions are a first draft's, so they are left off.
+ */
+export const CanonicalUpdate = CanonicalModel.omit({ history: true }).extend({
+  question: CanonicalModel.shape.question.nullable().describe('Null unless the change is to the question: then the new question, in one plain sentence.'),
+  period: CanonicalModel.shape.period.nullable().describe('Null unless the change is to the time step: then the new one.'),
+  goals: z.array(CanonicalModel.shape.goals.element),
+  limits: z.array(CanonicalModel.shape.limits.element),
+  preferences: z.array(CanonicalModel.shape.preferences.element),
+  options: z.array(CanonicalModel.shape.options.element),
+  remove: z.array(z.string()).describe('The ids of the records this update removes: only the ids listed to remove; [] for none.'),
+}).describe('Only the records this update changes or adds, each in full with its id, in its own family; [] for a family with none.');
+export type CanonicalUpdateT = z.infer<typeof CanonicalUpdate>;
 
 /**
  * The canonical schema as OpenAI's strict json_schema. `z.toJSONSchema` is the shape S1 checks for strict output
  * (`compile.test.ts`, closed objects, every key required, anyOf only); two keys are dropped at this boundary: `$schema`, and
  * the safe-integer bounds `.int()` adds (S1: "no number carries a bound"; the compiler checks bounds in sentences).
  */
-function strictSchema(): Record<string, unknown> {
+function strictSchema(schema: z.ZodType): Record<string, unknown> {
   const walk = (n: unknown): unknown => {
     if (Array.isArray(n)) return n.map(walk);
     if (n === null || typeof n !== 'object') return n;
@@ -67,9 +86,11 @@ function strictSchema(): Record<string, unknown> {
     }
     return out;
   };
-  return walk(z.toJSONSchema(CanonicalModel)) as Record<string, unknown>;
+  return walk(z.toJSONSchema(schema)) as Record<string, unknown>;
 }
-export const CANONICAL_JSON_SCHEMA: Readonly<Record<string, unknown>> = Object.freeze(strictSchema());
+export const CANONICAL_JSON_SCHEMA: Readonly<Record<string, unknown>> = Object.freeze(strictSchema(CanonicalModel));
+/** The update's strict output: the same records, by the same walk. */
+export const UPDATE_JSON_SCHEMA: Readonly<Record<string, unknown>> = Object.freeze(strictSchema(CanonicalUpdate));
 export const CANONICAL_SCHEMA_NAME = 'canonical_model';
 export const DRAFTING_PROMPT_SHA256 = createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex');
 export const CANONICAL_SCHEMA_SHA256 = createHash('sha256').update(JSON.stringify(CANONICAL_JSON_SCHEMA), 'utf8').digest('hex');
