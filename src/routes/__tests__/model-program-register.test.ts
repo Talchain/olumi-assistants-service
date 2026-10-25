@@ -41,6 +41,14 @@ import { MODEL_PROGRAM, reopenProgram } from '../../orchestrator-v5/model-progra
 import { at, bakery, BRIEF, q } from '../../orchestrator-v5/model-program-turn/__tests__/bakery.fixture.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 import type { CanonicalModelT } from '../../orchestrator-v5/model-program/canonical.js';
+import { compile } from '../../orchestrator-v5/model-program/compile.js';
+import { applyProgramChange, holdProgramCard } from '../../orchestrator-v5/model-program-turn/program-tools.js';
+import { validatePostimage } from '../../orchestrator-v5/model-program-turn/postimage.js';
+import { savedProgramOf } from '../../orchestrator-v5/model-program-turn/program-store.js';
+import { ProposalStore } from '../../orchestrator-v5/agent-lane/proposal.js';
+import { isSavedRead, readSaved } from '../../orchestrator-v5/path-b/tools/context-tool.js';
+import { GraphStaleWriteError } from '../../orchestrator-v5/session/store.js';
+import { GRAPH_MAX_NODES } from '../../config/graphCaps.js';
 
 type Rec = Record<string, unknown>;
 beforeEach(() => {
@@ -161,6 +169,116 @@ describe('a model program\'s postimage through the real /graph/register', () => 
     const { living_model: _program, ...plain } = written;
     expect(JSON.stringify(buildCanonicalAnalysisReadyFromGraph(plain))).toMatch(LEGACY_ASKS);
     expect(JSON.stringify({ ...(await readOf(plain)), graph: null })).toMatch(LEGACY_ASKS);
+  });
+
+  /**
+   * Paul's test, 25 Oct 09:39–09:41Z (served CEE 1e74dbf9, scenario 19faa1f8): Olumi's card replaced its own figure for an
+   * option's setting with a question; three presses were each refused as `untouched_level_rescaled` by the legacy
+   * registration rules. The same shape, synthetic: the second oven's setting is Olumi's figure, and the card asks it instead.
+   */
+  const olumisSetting = (): CanonicalModelT => {
+    const m = bakery();
+    m.quantities = m.quantities.map((x) => (x.id === 'one_oven' ? { ...x, author: 'olumi', quote: null, basis: 'Olumi’s placeholder for the setting.' } : x));
+    return m;
+  };
+  const askedSetting = (m: CanonicalModelT): CanonicalModelT => ({ ...m, quantities: m.quantities.map((x) => (x.id === 'one_oven'
+    ? { ...x, status: 'asked', value: null, question: 'How many ovens would you add?', basis: null } : x)) });
+  /** A stateful store behind the REAL register and the REAL scenario read: what the register appends is what the read serves. */
+  async function realRoutes() {
+    let saved: Rec | null = null;
+    loadGraph.mockImplementation(async () => (saved === null ? null : JSON.parse(JSON.stringify(saved))));
+    append.mockImplementation(async (w: Rec) => { saved = JSON.parse(JSON.stringify(w.graph)) as Rec; return { id: `turn-${append.mock.calls.length}` }; });
+    store.readExistingScenario.mockImplementation(async () => (saved === null ? null
+      : { userId: null, graph: JSON.parse(JSON.stringify(saved)), briefText: BRIEF, analysisInvalidatedAt: null, revision: append.mock.calls.length }));
+    const app = Fastify();
+    await registerRoute(app);
+    await scenarioGraphRoute(app);
+    app.post('/assist/v1/scenarios/:id/versions', async () => ({ versions: [] }));
+    await app.ready();
+    // The Agent's in-process dispatch: a register inside its mark for this scenario, as `core-turn.ts` sends it.
+    const dispatch = async (path: string, payload: unknown) => {
+      const r = await injectAsCeeWriter(app, { method: 'POST', url: path, payload: payload as never });
+      return { status: r.statusCode, json: r.json() as Rec };
+    };
+    return { app, dispatch, saved: () => saved };
+  }
+  const registerUrl = `/assist/v1/scenarios/${SCENARIO}/graph/register`;
+
+  it('Paul 25 Oct 09:39Z (3 refused presses): an approved card that turns Olumi\'s figure for an option\'s setting into a question saves through the REAL register, with its receipt; the readback is the saved model', async () => {
+    const { app, dispatch } = await realRoutes();
+    const first = withNewRun({ model_program: MODEL_PROGRAM, canonical: olumisSetting(), seed: seedOf(SCENARIO), person_words: [BRIEF], runs: [] });
+    expect((await dispatch(registerUrl, { graph: first.graph, thin_core: true, operation_id: '0f9b2c1e-4a5d-4e6f-8a7b-9c0d1e2f3a4b', expected_graph_identity_hash: null, brief_text: BRIEF })).status).toBe(200);
+    const base = await readSaved({ dispatch }, SCENARIO);
+    if (!isSavedRead(base)) throw new Error('no saved base');
+    // The setting's cell on the saved option holds Olumi's figure; the card's postimage holds it with no figure.
+    const cell = (g: Rec) => ((g.nodes as Rec[]).find((n) => n.id === 'second_oven')!.interventions as Rec).ovens_added as Rec;
+    expect(cell(base.graph).value).toBe(1);
+    // The host's own card: the same validator and compile the proposal path runs, then its hold. No AI call.
+    const v = validatePostimage(first.program.canonical, askedSetting(first.program.canonical), { removals: [], words: [BRIEF], fresh: [] });
+    if (!v.ok) throw new Error(v.reason);
+    expect(v.changes.map((c) => [c.id, c.action])).toEqual([['one_oven', 'change']]);
+    expect(compile(v.model, { sourceText: BRIEF }).errors).toEqual([]);
+    const next = withNewRun({ ...first.program, canonical: v.model });
+    expect(cell(next.graph).value).toBeNull();
+    const proposals = new ProposalStore();
+    const card = holdProgramCard(proposals, { scenarioId: SCENARIO, userId: null, graphHash: base.graphHash, identity: base.identity! },
+      { label: 'Ask how many ovens', basis: 'Olumi’s figure was a placeholder', program: next.program, changes: v.changes });
+    const applied = await applyProgramChange({ dispatch, proposals }, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: 'press-1' }, card.proposal_id) as Rec;
+    expect(applied, JSON.stringify(applied)).toMatchObject({ status: 'ok', data: { saved: true } });
+    expect(append).toHaveBeenCalledTimes(2);
+    // Its receipt names the model a fresh read serves, and that read is the approved card's program, byte for byte.
+    const after = await readSaved({ dispatch }, SCENARIO);
+    await app.close();
+    if (!isSavedRead(after)) throw new Error('no readback');
+    const data = applied.data as Rec;
+    expect((data.receipt as Rec).graph_identity_hash).toBe(after.identity);
+    expect((data.revision as Rec).graph_identity_hash).toBe(after.identity);
+    expect(stableStringify(savedProgramOf(after.graph))).toBe(stableStringify(next.program));
+    expect(cell(after.graph).value).toBeNull();
+  });
+
+  it('CONTRAST (the legacy rules stay on every other writer): the SAME two graphs as a non-program core write (no `model_program`) are still refused as untouched_level_rescaled, and nothing is written', async () => {
+    const { app, dispatch } = await realRoutes();
+    const first = withNewRun({ model_program: MODEL_PROGRAM, canonical: olumisSetting(), seed: seedOf(SCENARIO), person_words: [BRIEF], runs: [] });
+    const notProgram = (g: Rec): Rec => { const { model_program: _p, ...lm } = g.living_model as Rec; return { ...g, living_model: lm }; };
+    expect((await dispatch(registerUrl, { graph: notProgram(first.graph), thin_core: true, expected_graph_identity_hash: null, brief_text: BRIEF })).status).toBe(200);
+    const base = await readSaved({ dispatch }, SCENARIO);
+    if (!isSavedRead(base)) throw new Error('no saved base');
+    const next = withNewRun({ ...first.program, canonical: askedSetting(first.program.canonical) });
+    const res = await dispatch(registerUrl, { graph: notProgram(next.graph), thin_core: true, expected_graph_identity_hash: base.identity });
+    await app.close();
+    expect(res.status, JSON.stringify(res.json)).toBe(422);
+    expect((res.json.details as Rec).violations).toEqual([{ code: 'untouched_level_rescaled', count: 1, entity_ids: ['second_oven::ovens_added'] }]);
+    expect(append).toHaveBeenCalledTimes(1);
+  });
+
+  it('KEPT NEGATIVES (storage integrity on a program save): CAS, the held cards\' read, schema, size and the structural floor each still refuse, and nothing is written', async () => {
+    const first = withNewRun({ model_program: MODEL_PROGRAM, canonical: olumisSetting(), seed: seedOf(SCENARIO), person_words: [BRIEF], runs: [] });
+    const next = withNewRun({ ...first.program, canonical: askedSetting(first.program.canonical) }).graph;
+    const nodes = next.nodes as Rec[], edges = next.edges as Rec[];
+    const stale = () => { throw new GraphStaleWriteError('stale', { conflict_category: 'rpc_cas_conflict' }); };
+    const cases: [string, Rec, number, string | undefined, () => void][] = [
+      ['stale base (route CAS)', next, 409, 'GRAPH_STALE', () => {}],
+      ['stale base (the commit\'s own CAS)', next, 409, 'GRAPH_STALE', () => append.mockImplementation(async () => stale())],
+      ['the held cards cannot be read', next, 503, undefined, () => store.readMostRecentPendingActions.mockRejectedValue(new Error('unreadable'))],
+      ['nodes not a list', { ...next, nodes: 'none' }, 422, 'GRAPH_SHAPE_INVALID', () => {}],
+      ['a node with no kind', { ...next, nodes: nodes.map((n, i) => (i === 0 ? { ...n, kind: undefined } : n)) }, 422, 'GRAPH_NODE_KIND_MISSING', () => {}],
+      ['too many nodes', { ...next, nodes: [...nodes, ...Array.from({ length: GRAPH_MAX_NODES }, (_, i) => ({ id: `extra_${i}`, kind: 'factor', label: 'x' }))] }, 422, 'GRAPH_TOO_LARGE', () => {}],
+      ['a duplicate node id', { ...next, nodes: [...nodes, { ...nodes.find((n) => n.kind === 'factor')! }] }, 422, 'GRAPH_INVARIANT_VIOLATION', () => {}],
+      ['a link to no node', { ...next, edges: [...edges, { ...edges[0]!, id: 'dangling', to: 'no_such_node' }] }, 422, 'GRAPH_INVARIANT_VIOLATION', () => {}],
+    ];
+    for (const [name, graph, status, code, setup] of cases) {
+      append.mockReset();
+      append.mockResolvedValue({ id: 'turn-2' });
+      store.readMostRecentPendingActions.mockReset();
+      store.readMostRecentPendingActions.mockResolvedValue([]);
+      loadGraph.mockResolvedValue(JSON.parse(JSON.stringify(first.graph)));
+      setup();
+      const res = await register({ graph, thin_core: true, ...(name === 'stale base (route CAS)' ? { expected_graph_identity_hash: 'f'.repeat(64) } : {}) }, true);
+      expect([name, res.statusCode, res.json().details?.code], res.body).toEqual([name, status, code]);
+      // Nothing is written: only the commit's own CAS reaches the append, and its transaction refuses.
+      expect([name, append.mock.calls.length]).toEqual([name, name === 'stale base (the commit\'s own CAS)' ? 1 : 0]);
+    }
   });
 
   it('NEGATIVE: the same graph from a client (not CEE\'s writer) is refused, and nothing is stored', async () => {
