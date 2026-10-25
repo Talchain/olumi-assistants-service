@@ -10,6 +10,7 @@ import * as coreInstructions from '../../core-route/instructions.js';
 import { CANONICAL_JSON_SCHEMA, DRAFTING_INSTRUCTIONS, UPDATE_PREFIX, UPDATE_REPAIR_PREFIX } from '../../model-program-turn/prompt.js';
 import * as programDraft from '../../model-program-turn/draft.js';
 import { PROGRAM_TURN_GUIDANCE } from '../../model-program-turn/program-tools.js';
+import { STRUCTURAL_CONSTANTS } from '../../model-program/canonical.js';
 
 const { CORE_DRAFTER_RULES } = drafting;
 
@@ -20,7 +21,8 @@ const CORE_TOOLS = ['read_canonical_context', 'build_model_from_brief', 'propose
 const count = (text: string, part: string): number => text.split(part).length - 1;
 
 describe('prompt arm B (programme-docs #94 6302769609): the core agent is told only about the tools it has', () => {
-  const b = instructionsForMode('core', CORE_ALIGNED_INSTRUCTIONS);
+  // As core-turn.ts sends them on a program scenario: the model-program text and its reply rules, no note_on_item sentence.
+  const b = coreInstructions.PROGRAM_AGENT_INSTRUCTIONS;
 
   it('ALPHA (DL 93d79c3e, 23 Oct): names no legacy tool and no drafting or edit tool (each tool\u2019s own description says how), and keeps the card-approval rule', () => {
     for (const t of LEGACY_TOOLS) expect(b, t).not.toContain(t);
@@ -30,8 +32,12 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
   });
 
   it('ALPHA: the model-program prompt, each section once, the purpose once and the reply rules last; the coach template and the Living Model host rules are gone', () => {
-    for (const h of ['HOW THE MODEL WORKS', 'FIRST MODEL', 'ANSWERS AND CHANGES', 'RESULTS', 'CALCULATION BOUNDARY', 'WHEN NOTHING CAN BE CALCULATED YET', 'WORDS',
-      'EXAMPLE (a first model; synthetic)']) expect(count(b, `\n\n${h}\n`), h).toBe(1);
+    for (const h of ['HOW THE MODEL WORKS', 'ANSWERS AND CHANGES', 'RESULTS', 'CALCULATION BOUNDARY', 'WHEN NOTHING CAN BE CALCULATED YET', 'WORDS'])
+      expect(count(b, `\n\n${h}\n`), h).toBe(1);
+    // Prompt rebuild R: the first-model section and its example are gone. No agent turn has no saved model: core-turn.ts sends
+    // that turn to the host drafter (modelProgram), and turn.ts replyOf writes its reply.
+    for (const gone of ['FIRST MODEL', 'EXAMPLE (a first model; synthetic)', 'swim school', 'draft the first model from their brief',
+      '1. What Olumi understood', 'Then reply in this order', 'a first model’s summary']) expect(b, gone).not.toContain(gone);
     for (const part of [OLUMI_PURPOSE_INSTRUCTION, CORE_REPLY_RULES]) expect(count(b, part)).toBe(1);
     expect(b.endsWith(CORE_REPLY_RULES)).toBe(true);
     for (const gone of [HOST_SCIENCE_AND_SOURCE_RULES, GOAL_CHANCE_RANKING_INSTRUCTION, MODEL_RELATIVE_NAMING_INSTRUCTION, '\nTRUTH\n', '\nREASONING\n',
@@ -40,25 +46,28 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(b.length).toBeLessThan(29_512 / 2);
   });
 
-  it('the sent core instructions, byte for byte, plus the canvas-coaching sentence once (the route row in core-turn.route.test.ts pins the same bytes as the SDK receives them)', () => {
-    expect(b.split(NOTE_ON_ITEM_INSTRUCTION)).toHaveLength(2);
+  it('the sent program instructions, byte for byte, with no canvas-coaching sentence (the program tools have no note tool; the route row in core-turn.route.test.ts pins the same bytes as the SDK receives them)', () => {
+    expect(b).not.toContain(NOTE_ON_ITEM_INSTRUCTION);
+    expect(b).not.toContain('note_on_item');
     // 23 Oct (ALPHA): the model-program prompt replaces arm B's assembled reference (055841368f…, 29,512 characters sent).
-    expect(createHash('sha256').update(b, 'utf8').digest('hex')).toBe('fee42c2fbd8f73fa578992b049157ad90b0d7d876795d4d83e9fe0afdb42cb21'); // 24 Oct: issue 30, synthetic examples only; before it, remodel coaching (after 23 Oct P1/P4: at most three questions, each once, never what their words state).
-    // Candidate-3 witness kept (21 Oct): WHEN to build. Text only, not behaviour.
-    expect(b).toContain('draft the first model from their brief in that same turn, even when figures are missing');
+    expect(createHash('sha256').update(b, 'utf8').digest('hex')).toBe('e20606362b8a4669b86aa0a625e9b1c89bd87c18c3f7dd3410ba3d32c395bc36'); // 25 Oct (prompt rebuild R): no first-model section or example, no note_on_item sentence, the question rule once in the reply rules. Before: fee42c2f… (24 Oct: issue 30, synthetic examples only; before it, remodel coaching (after 23 Oct P1/P4: at most three questions, each once, never what their words state).
+    // Candidate-3's "WHEN to build" witness (21 Oct) is retired with the dead first-model section (rebuild R): the host drafts.
+    expect(b).not.toContain('draft the first model from their brief in that same turn, even when figures are missing');
   });
 
   it('arm A is untouched: the legacy host contract is byte-identical to staging b76bc42c', () => {
     expect(createHash('sha256').update(HOST_TOOL_CONTRACT, 'utf8').digest('hex')).toBe('a118a398d9e214017df46195c40ece2105d70d8343577ed14521b10736edf64d');
   });
 
-  it('canvas coaching: every core call carries the note_on_item sentence once, on both arms; no other mode gets it', () => {
+  it('canvas coaching: every core call through instructionsForMode carries the note_on_item sentence once; a program scenario\'s call does not (its tools have no note tool); no other mode gets it', () => {
     for (const arm of [CORE_ALIGNED_INSTRUCTIONS, 'legacy arm A text']) {
       const sent = instructionsForMode('core', arm);
       expect(sent.split(NOTE_ON_ITEM_INSTRUCTION)).toHaveLength(2);
       expect(sent.endsWith(CORE_REPLY_RULES)).toBe(true);
     }
     expect(instructionsForMode('full', 'legacy arm A text')).not.toContain('note_on_item');
+    expect(coreInstructions.PROGRAM_AGENT_INSTRUCTIONS).toBe(`${CORE_ALIGNED_INSTRUCTIONS}\n\n${CORE_REPLY_RULES}`);
+    expect(coreInstructions.PROGRAM_AGENT_INSTRUCTIONS).not.toContain('note_on_item');
   });
 
   it('every core turn takes arm B, whatever the header; every other mode keeps arm A', () => {
@@ -69,7 +78,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
   });
 
   it('THE PROMPTS (DL 22 Oct, priority change): the coach\u2019s reply rules and the drafter\u2019s rules, adapted as ruled; the old constants are gone', () => {
-    expect(createHash('sha256').update(CORE_REPLY_RULES, 'utf8').digest('hex')).toBe('9607f2b0d95df9e7be7e040c975cd13a12ba7f60120d39c8c5fab6d2016d87dc'); // 23 Oct (ALPHA): the reply rules for the model program; P1: at most three questions a reply, each once.
+    expect(createHash('sha256').update(CORE_REPLY_RULES, 'utf8').digest('hex')).toBe('4e16549b7d9fde1c96ecdb9926fcc7f1a041f877f7005b287e387f2b5fbf6aac'); // 25 Oct (rebuild R): the one question rule, absorbing the dead first-model section's (numbered, most unblocking first, never one they answered); was 9607f2b0…. 23 Oct (ALPHA): the reply rules for the model program; P1: at most three questions a reply, each once.
     // The model-program drafter's text (23 Oct, P1–P5: three questions at most, every option reaches
     // every measured goal, a deadline is its goal's window, options named in full). Prompt text changes only with this pin.
     // 24 Oct (DL, combined measure + funding dead end + science rulings r3-r5): their fact asked; a link Olumi's estimate by
@@ -80,9 +89,12 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     // where an option plausibly affects it, never added merely to connect.
     // 25 Oct (AIE programme-docs 6389288710): the AIE's effect-sizing policy replaces the sizing rules, in one place
     // (cand/alpha-C: #3740's first line plus the sizing policy; was d6b185e9… with #3740 alone, a6464563… with the sizing alone).
-    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('0ca64c069f84257deb90623808ec930e1cdf753efed0ce2e64e02d6945d92c7a');
+    // 25 Oct (prompt rebuild R, from the first-principles audit): option reach as C's update and repair say it; the structural
+    // constants as compile.ts isStructuralConstant admits them; a request, a fear or hope, "you", a brief with no figures. Was 0ca64c06….
+    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('5f0df11b549d3bb384466d5457a39717b50422b07fba88c1221bef5e2e28d015');
     // 24 Oct (DL, DoD-G classes 12 and 4): an update returns only the records it changes or adds; the host merges them by id.
-    expect(createHash('sha256').update(UPDATE_PREFIX, 'utf8').digest('hex')).toBe('b54257c11969f65208dfead1d0006e17a88c65d20f0e0880588c650b58d8e4c8');
+    // 25 Oct (rebuild R): "I don't know" as program-tools.ts records it (unknown, quoted, never asked again); the re-ask duplicate gone. Was b54257c1….
+    expect(createHash('sha256').update(UPDATE_PREFIX, 'utf8').digest('hex')).toBe('bc72d9ad1b5530e0c708a4fdea98251768844b31f6a9025edc1c9dc64f0a42cc');
     expect(createHash('sha256').update(UPDATE_REPAIR_PREFIX, 'utf8').digest('hex')).toBe('1b52b62678cfab1b06670bc026504a9e63e186e458fec752c4b56ba9df918daf');
     expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('bed04fc58a01dbd02d8f5c8aa6ef171731a356c1cde47a85e0cd64be35416653'); // 23 Oct (DL 93d79c3e, C2 double prime): a definition's parts are factors with levels, never another definition; a STATED per-unit effect is a sized link. 22 Oct: every stated goal saved in their words, never approximated (Claude r1 on #3670); + a calendar date is Olumi's labelled reading
     // The retired constants are gone from both modules: no route can send the accreted text again.
@@ -97,11 +109,10 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       expect(`${CORE_REPLY_RULES}${CORE_DRAFTER_RULES}`, line).not.toContain(line);
     // ALPHA (the brief's five behaviours), each said once in what is sent.
     for (const rule of [
-      // 1. after a draft: what Olumi understood, then only the blocking questions, grouped, the most consequential first, never re-asked
-      "1. What Olumi understood, in two to four short lines: the question, the goals and limits, the options and the main figures. Keep their figures in their words, say which figures are Olumi's starting estimates, and say what was left out of the calculation and why.",
-      '2. Only the questions that block a goal or a limit, at most three, as one numbered list they can answer in one reply: the one that unblocks the most first, each asking one thing, with a few words on why it matters.',
+      // 1. the blocking questions, grouped, the most consequential first, never re-asked: once, in the reply rules (rebuild R)
       'If a question asks for something their words already state or answer, do not ask it: put it in with the edit tools, quoting them, and say so.',
-      'Ask at most three questions in a reply, each once, the blocking ones first;',
+      'Ask at most three questions in a reply, each once, as one numbered list: the blocking ones first, the one that unblocks the most at the top, each asking one thing, with a few words on why it matters;',
+      'Never ask again one they have answered, even with "I don\'t know".',
       // 2. a chance as the code words it, what it rests on, the limit lines, and ONE next step
       'report each option\u2019s chance as the result words it: the figure, the goal, target and horizon it answers, and what it rests on, "on your figures" or "if" with Olumi\'s assumptions (name them briefly; never drop the "if" or turn it into a forecast).',
       'Never work out, round, combine or rank a chance yourself.',
@@ -118,6 +129,12 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       'Never recommend or choose an option for the user, and never call one "best", the "winner" or the one to "go with".',
       'Name an option as the most likely to meet the goal only when the result itself names one, as a finding in this model, never as what they should choose;',
     ]) expect(count(b, rule), rule.slice(0, 60)).toBe(1);
+    // The dead first-model reply (rebuild R): turn 0's reply is the host's (turn.ts replyOf), so the agent is not told how to write it.
+    for (const gone of ["1. What Olumi understood, in two to four short lines:", '2. Only the questions that block a goal or a limit, at most three,',
+      'On later turns, ask the blocking questions still open in the same way', 'Leave other questions for later.']) expect(b, gone).not.toContain(gone);
+    // The question cap and the never-again rule are said once (rebuild R): not in the reader's description nor the turn guidance.
+    expect(coreInstructions.PROGRAM_TOOL_DESCRIPTIONS.read_canonical_context).not.toContain('at most three a reply');
+    expect(PROGRAM_TURN_GUIDANCE).not.toContain('never ask one again');
     // Kept from the old reply rule, each once: what the reply must report of saves and approvals, and the AIE's scope rule (K3).
     for (const kept of ['In this mode Olumi adds nothing to your reply and rewrites none of it: the user reads exactly your words.',
       'never your tools or what a tool returned', 'approving an estimate adopts it but does not make them its author',
@@ -141,9 +158,14 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     // The run block as S3 emits it: { run_id, options[{ option_id, shown, words }], goal_chance: the Run's own block }.
     const PATHS = ['run.options[].words', 'run.goal_chance.targets.per_target[].words', 'run.goal_chance.targets.joint.words',
       'run.goal_chance.targets.joint.line', 'run.goal_chance.notes, thresholds[].words, limits[].words with', 'and unchecked_limits[].words'];
+    // Said once (prompt rebuild R; it was sent four times): in the reader's description, the one tool never withheld, for every
+    // tool's Run; the other three descriptions do not repeat it.
+    expect(count(Object.values(d).join('\n'), words)).toBe(1);
+    expect(d.read_canonical_context.split(words)).toHaveLength(2);
+    expect(d.read_canonical_context).toContain('For this and every other tool\'s Run (would_show, apply_change, run_analysis): ' + words);
+    for (const path of PATHS) expect(count(d.read_canonical_context, path), path).toBe(1);
     for (const [name, text] of Object.entries(d)) {
-      expect(text.split(words), name).toHaveLength(2);
-      for (const path of PATHS) expect(count(text, path), `${name}: ${path}`).toBe(1);
+      if (name !== 'read_canonical_context') for (const path of PATHS) expect(count(text, path), `${name}: ${path}`).toBe(0);
       // The paths S3 no longer emits (14:2xZ): no description names them.
       for (const gone of ['run.targets', 'run.notes', 'run.thresholds', 'run.limits', 'run.unchecked_limits']) expect(text, `${name}: ${gone}`).not.toContain(gone);
       for (const banned of ['recommend', 'best', 'winner', 'you should', '18 to 22']) expect(text.toLowerCase(), `${name}: ${banned}`).not.toContain(banned);
@@ -181,25 +203,31 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       'Never ask them for a link\'s size or an option\'s effect.',
       // DL 24 Oct (blind score of 1510a008, mrr structure): an identity is a definition; a missing figure is asked on its item.
       // AIE 6389288710 (25 Oct): the link-sizing clause is gone from here; the Mechanisms rule is the one sizing policy.
-      'Mechanism: every option reaches every measured goal through relations from what it sets; a quantity that is by definition a product or sum of others is a definition, never an effect. Model',
+      // Prompt rebuild R (the reach item): the policy C's update and #3741's repair already say, once for the first draft.
+      'Mechanism: the relations from what each option sets reach each measured goal or limit it plausibly affects, sized or left unknown with its direction; never added merely to connect. An option that plausibly affects none says so in left_out. A quantity that is by definition a product or sum of others is a definition, never an effect. Model',
       // AIE 6386018855 §5 (DL 24 Oct): the capture-only clauses replaced, each permission once, attributed and grounded.
       'Olumi\'s own additions (a suggested measure, options, drivers, risks) are made when the model is first drafted; a repair or an update changes only what it asks, and a goal or limit an update adds comes with the relations from the options to it, only where an option plausibly affects it; never added merely to connect.',
       'Model the main reason each option could succeed and the main reason it could fail.',
       'Every driver, constraint and current state they mention feeds the calculation or the record that fits it.',
-      'Where the brief leaves out a driver, countereffect or risk that is plausible and could change the result, add it as Olumi\'s hypothesis (author olumi, with a basis and its direction); plausibility alone never justifies a figure, so size it like any other link.',
+      'Where the brief leaves out a driver, countereffect or risk that is plausible and could change the result, add it as Olumi\'s hypothesis (author olumi, with a basis and its direction), sized like any other link.',
       'An aim they state without a measure stays theirs: where a measure can responsibly track it, suggest one (measure_by "olumi":',
       'its target asked unless they gave one and its exclusions naming what it misses; a suggested measure is never their definition of success.',
       'An aim no measure can responsibly track, and a guardrail without one, keep measure null and a question.',
       'Where they named none, or the question is how to divide something (money, staff, hours), propose a small set of feasible, distinct options of Olumi\'s (author olumi, short plain names; a proposed division is a design, not a fact about today) within their stated budgets, exclusions and scope,',
       'left_out holds only what matters to the result but cannot be calculated, with the reason;',
-      // AMEND (DL 24 Oct, blind score of #3735): a lever only the options set, and a whole, are structure; a stated limit stays a limit.
-      'So are the starting level of a setting only the options change, when they gave none (0, an Olumi division\'s share included), and a whole such as 100 %: never asked.',
+      // Rebuild R (audit #3, prompt half): structure only as compile.ts isStructuralConstant admits it, said once from its one constant.
+      `A figure is author "structure" (known, one exact figure, no range, never asked) only when it is a structural constant: ${STRUCTURAL_CONSTANTS}. Any other figure is never structure: a fact they did not give is asked, with its question.`,
+      // Rebuild R: the four classes from Paul's qualitative test (24 Oct), one sentence each at its rule.
+      'A request to Olumi (write a list, help me argue, make the case) is context too: their aim is what the request serves, asked if unclear.',
+      'Something they fear or hope will happen is a risk or an assumption, never a known fact.',
+      'Text they read (labels, claims, questions, bases) speaks to them as "you", never "the person"; a quote stays their exact words.',
+      'A brief with no figures gets them too: a suggested measure for each aim, Olumi\'s options where they named none, and the mechanism by which each option acts.',
       'what another record can hold goes there: a condition the plan must not break → limits, a statement about the situation → claims,',
       // DL 24 Oct: the one worked example shows the proposing half once (an aim with no measure, Olumi's suggested measure).
       'goal "to grow the bakery", measure_by olumi (a suggested measure): sales change_abs from now >= grow_target, end, window null,',
       // Codex BLOCK on #3735: the exclusion is Olumi's reading, marked as canonical.ts attribution requires.
       'exclusions: left_out "growth beyond loaf sales, such as new lines", why "not in this model", author olumi, quote null',
-      'the reply asks at most three, and every other missing fact stays asked on its item.',
+      'never what their words state; every missing fact stays asked on its item.',
       // DL 24 Oct (P7 hiring blind score, classes 2 and 4): a stated threshold is theirs; a goal against today is relative to today.
       'Every figure a goal or limit rests on stays in, and a threshold they state is theirs, never Olumi\'s unknown ("no worse" is today\'s level).',
       // Buddy 24 Oct 08:48Z (accepted): the frame follows their words, as canonical.ts GOAL_FRAMES and compile.lowerChange do.
@@ -215,6 +243,15 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       'sets ovens_added to one_oven, starts_after_periods 0;',
     ]) expect(count(DRAFTING_INSTRUCTIONS, rule), rule).toBe(1);
     // What over-applied the estimate rule, and the old period numbering, are gone.
+    // Rebuild R: the structural list, spelled out (never the module's constant alone): exactly the cases compile.ts isStructuralConstant admits.
+    expect(STRUCTURAL_CONSTANTS).toBe('an exact calendar conversion (12 month/year); a power of ten that is its unit\'s scale (100 %); '
+      + '0 or 1 on a quantity an option sets, or as the figure it sets it to (off or on; a setting\'s starting level when they gave none); '
+      + '0 as nothing extra yet (an effect\'s base, a sum\'s part, a stock\'s start); '
+      + '1 in unit "1" as an index (a product\'s part, or an effect\'s base or a sum\'s part whose other terms are pure numbers)');
+    // Rebuild R: the all-to-all reach rule, the size/don't-size clause, the old structural wording and the reply cap (turn.ts REPLY_QUESTIONS) are gone.
+    for (const old of ['every option reaches every measured goal', 'plausibility alone never justifies a figure', 'a count that defines the structure',
+      'An exact constant the form needs', 'starting level of a setting only the options change', 'the reply asks at most three'])
+      expect(DRAFTING_INSTRUCTIONS, old).not.toContain(old);
     for (const old of ['never invent a measure', 'its direction in words', 'Important but uncalculable', 'from what the brief names', 'goes in left_out with the reason', 'a link you cannot size goes in left_out', 'Every other figure it needs stays null', 'Only coefficients are Olumi', 'never "unknown" with no question', 'flows of periods 1 to n', 'from period 0'])
       expect(DRAFTING_INSTRUCTIONS, old).not.toContain(old);
     // The update's text is prompt text: here, once, with the draft's goal rule and the quote rule; draft.ts no longer holds a copy.
@@ -227,17 +264,19 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       // DL 24 Oct (class 12): an answer is entered on the item it answers; a figure read from words says so in its basis.
       'Each answer goes on the item whose question it answers (a question about one option, on that option\'s item);',
       'words that settle a figure (yes, no, all, none) are that figure, quoting them, its basis saying how they were read.',
-      'Never keep an answer unassigned and ask it again.',
-      // DL 24 Oct (class 12 remainder): "I don't know" is an answer; the item stays open with a new question.
-      '"I don\'t know" is an answer too: the item stays open, its question changed to ask for what would size it.']) expect(count(UPDATE_PREFIX, rule), rule).toBe(1);
+      // Rebuild R (U7 against program-tools.ts): "I don't know" is recorded as the answers channel records it, never asked again.
+      '"I don\'t know" is an answer too: that figure becomes status unknown, quoting their words, its basis saying what would size it, its question null; it is never asked again.']) expect(count(UPDATE_PREFIX, rule), rule).toBe(1);
+    // Rebuild R: the old "I don't know" reading (item open, a new question) and the re-ask duplicate are gone.
+    for (const old of ['the item stays open', 'its question changed to ask', 'Never keep an answer unassigned']) expect(UPDATE_PREFIX, old).not.toContain(old);
     // The whole-model update is gone: from the update's text and from its repair turn.
     for (const old of ['WHOLE model', 'Keep every record, with its id, exactly as it is', 'Leave out only the ids listed', 'Keep the history as it is.', 'a goal this change adds included', 'Every option reaches every measured goal'])
       expect(`${UPDATE_PREFIX}${UPDATE_REPAIR_PREFIX}`, old).not.toContain(old);
     expect(count(UPDATE_REPAIR_PREFIX, 'Return all your changes again with them fixed, by the same rules: only the records you change or add, each in full with its id, and the removals.')).toBe(1);
     // The program turn's guidance is prompt text: answers in order answer the questions in order, and none is asked again in the same words.
     // Targeted answers (DL 24 Oct): an answer goes in answers on its item's id, anything else in request (pinned as sent in core-turn.route).
-    expect(createHash('sha256').update(PROGRAM_TURN_GUIDANCE, 'utf8').digest('hex')).toBe('4ccd4a5913bfb242ca4f771b3349ed8a2872b6fc18b7632b8d38c15c92448542');
-    expect(count(PROGRAM_TURN_GUIDANCE, 'Answers in the order of your questions answer them in that order, and "I don\'t know" is an answer: put each on the item of the question it answers, and never ask one again in the same words.')).toBe(1);
+    // Rebuild R: the never-again clause is said once, in the reply rules. Was 4ccd4a59….
+    expect(createHash('sha256').update(PROGRAM_TURN_GUIDANCE, 'utf8').digest('hex')).toBe('3f6f7fd97906a49d8cf3fd9925322634ace4e68a351a494f777f397331781a92');
+    expect(count(PROGRAM_TURN_GUIDANCE, 'Answers in the order of your questions answer them in that order, and "I don\'t know" is an answer: put each on the item of the question it answers. ')).toBe(1);
     expect(count(PROGRAM_TURN_GUIDANCE, 'call propose_change ONCE: an answer to a listed question goes in answers, on that item\'s id; any other change goes in request,')).toBe(1);
     for (const old of ['If only its direction can be defended', 'uncertainty alone is not a reason to withhold', 'what they expect without the options included', 'roughly doubles daily deliveries',
       'A goal or limit stated against today is relative to today']) expect(DRAFTING_INSTRUCTIONS, old).not.toContain(old);
@@ -277,6 +316,13 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       'and, where they named none or the question is how to divide something, a small set of Olumi\'s own (author olumi) within their stated budgets and scope.'])
       expect(count(sentSchema, rule), rule).toBe(1);
     for (const old of ['Never invent a measure', 'An aim with no measure is valid; never invent one']) expect(sentSchema, old).not.toContain(old);
+    // Rebuild R: approval and author_id are the host's (postimage.ts asDrafted / hostSet, HOST_FIELDS): still required fields, no
+    // longer described; the structure author names no case the code turns back into an ask.
+    const quantity = (CANONICAL_JSON_SCHEMA as any).properties.quantities.items;
+    for (const f of ['approval', 'author_id']) { expect(quantity.required, f).toContain(f); expect(quantity.properties[f].description, f).toBeUndefined(); }
+    for (const old of ['set by Olumi\'s host, never by the draft', 'Set by Olumi\'s host: which person said or approved it', 'Always null in a draft',
+      'a count that defines the structure']) expect(sentSchema, old).not.toContain(old);
+    expect(count(sentSchema, 'structure: only one of the structural constants the instructions list, exact: never an estimate, never shown as Olumi\'s, no range.')).toBe(1);
     for (const old of ['nobody can give or responsibly estimate it yet', 'is never unknown', 'basis says why. ', 'whenever one is supportable', 'order of magnitude']) expect(sentSchema, old).not.toContain(old);
     for (const old of ['when one is supportable, else', 'not even its direction or order of magnitude', 'a wide range is supportable', 'At most three questions asked now']) expect(DRAFTING_INSTRUCTIONS, old).not.toContain(old);
   });
@@ -326,7 +372,8 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       "For a risk's chance and window, use supplied figures or, where reasonable, a labelled Olumi estimate under the estimate rule; if no reasonable estimate is possible, keep it unknown and say what is missing.",
       "An option acts through settings on factors or sized option-to-item links; retain either valid form without adding an artificial factor.",
     ];
-    const question = 'On later turns, ask the blocking questions still open in the same way, never one they have answered, even with "I don\'t know".';
+    // Rebuild R: the later-turn question rule is the reply rules' one never-again sentence (the first-model section was dead).
+    const question = 'Never ask again one they have answered, even with "I don\'t know".';
     const firstTurn = `${b}\n\n${CORE_DRAFTER_RULES}`;
     for (const rule of [...draftRules, question]) expect(count(firstTurn, rule), rule).toBe(1);
     expect(count(b, question), 'the questions survive after the first model').toBe(1);
@@ -377,6 +424,7 @@ describe('the Living Model core text, kept for old scenarios byte for byte (CORE
     expect(createHash('sha256').update(old, 'utf8').digest('hex')).toBe('7a1bced23a44dccc478a00d075b28bbe2dda487a4b6da868ae3a477698097e44');
     // and it is not the program text
     expect(old).not.toBe(instructionsForMode('core', CORE_ALIGNED_INSTRUCTIONS));
+    expect(old).not.toBe(coreInstructions.PROGRAM_AGENT_INSTRUCTIONS);
   });
 
   it('names none of the legacy tools and every core tool, with the AIE authority and starting-input wording', () => {

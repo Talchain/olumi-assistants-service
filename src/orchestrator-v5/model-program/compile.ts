@@ -29,7 +29,7 @@
  * (`conversions`), so the executable model has one number per unit and the person's bounds are never their law.
  */
 import {
-  APPROXIMATE_FIGURE, CanonicalModel, FIGURE_STATUSES, WITHHOLDING_STATUSES, QUALITATIVE_FAMILIES,
+  APPROXIMATE_FIGURE, CanonicalModel, FIGURE_STATUSES, STRUCTURAL_CONSTANTS, WITHHOLDING_STATUSES, QUALITATIVE_FAMILIES,
   type CanonicalModelT, type CanonicalQuantityT, type CanonicalRelationT, type CanonicalWindowT, type CanonicalOptionSetT,
   type CanonicalGoalT, type CanonicalLimitT,
 } from './canonical.js';
@@ -254,7 +254,7 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
   const errors: CompileError[] = [];
   const err = (code: CompileErrorCode, message: string, items: string[]) => errors.push({ code, message, items });
   if (opts.asksNeedQuestions === true) for (const q of model.quantities) if (q.status === 'asked' && (q.question ?? '').trim() === '')
-    err('asked_no_question', `"${q.label}" (${q.id}) waits on the person but has no question. If it is theirs to give, ask the one plain question that would give it. If it is not (the starting level of a setting only the options change, or a whole such as 100 %), it is a structural constant: author structure, known, one exact figure.`, [q.id]);
+    err('asked_no_question', `"${q.label}" (${q.id}) waits on the person but has no question. If it is theirs to give, write the one plain question that would give it. It is a structural constant (author structure, known, one exact figure) only if it is ${STRUCTURAL_CONSTANTS}.`, [q.id]);
 
   // ── ids and labels ─────────────────────────────────────────────────────────────────────────────────────────────────
   const allIds = new Map<string, string>();
@@ -358,7 +358,7 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
         const point = has(q.value) && !has(q.low);
         const dateReading = point && (windowQs.has(q.id) || timingQs.has(q.id)) && Number.isInteger(q.value) && has(q.basis);
         const proposal = point && proposals.has(q.id);
-        if (!dateReading && !proposal) err('olumi_no_range', `${n} is Olumi's figure marked known; Olumi's figures are estimates: mark it estimated with low and high, or, for an exact constant such as 12 month/year, an option switch or the starting level of a setting only the options change, make its author structure.`, [q.id]);
+        if (!dateReading && !proposal) err('olumi_no_range', `${n} is Olumi's figure marked known; Olumi's figures are estimates: mark it estimated with low and high. Only a structural constant takes author structure: ${STRUCTURAL_CONSTANTS}.`, [q.id]);
       }
       needQuote(q, n, q.id);
     } else if (q.status === 'estimated') {

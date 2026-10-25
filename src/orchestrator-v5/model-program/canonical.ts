@@ -58,8 +58,10 @@ const attribution = {
     'When the person reports someone else\'s statement ("our accountant says"): that someone, as written. Null otherwise.'),
   quote: z.string().nullable().describe(
     "The person's exact words that state this, copied verbatim from what they wrote. Required for the person's figures and relations. Null for Olumi's own items."),
-  approval: z.enum(APPROVALS).describe('proposed: not yet accepted by the person (always, in a draft). approved: the person accepted it (set by Olumi\'s host, never by the draft).'),
-  author_id: z.string().nullable().describe('Set by Olumi\'s host: which person said or approved it, when several people work on one model. Always null in a draft.'),
+  // The host's own fields, undescribed: whatever the drafter writes, the host sets them (`postimage.ts` asDrafted on a first
+  // draft, hostSet on an update) and the diff ignores them (HOST_FIELDS). proposed: not yet accepted; approved: accepted.
+  approval: z.enum(APPROVALS),
+  author_id: z.string().nullable(),
 };
 
 // ── Quantities ───────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -78,6 +80,16 @@ export type QuantityStatusT = (typeof QUANTITY_STATUSES)[number];
 export const FIGURE_STATUSES: ReadonlySet<QuantityStatusT> = new Set(['known', 'estimated']);
 /** The statuses that withhold every goal they feed, with a reason (never an invented figure). */
 export const WITHHOLDING_STATUSES: ReadonlySet<QuantityStatusT> = new Set(['unknown', 'unsupported']);
+
+/**
+ * THE STRUCTURAL CONSTANTS, in words (audit rewrite #3, prompt half): exactly what `compile.ts` isStructuralConstant admits,
+ * said once and used by the drafting rules and the two repair sentences that name structure (asked_no_question, olumi_no_range),
+ * so no text offers "structure" for a figure `normalise` turns back into an ask.
+ */
+export const STRUCTURAL_CONSTANTS = 'an exact calendar conversion (12 month/year); a power of ten that is its unit\'s scale (100 %); '
+  + '0 or 1 on a quantity an option sets, or as the figure it sets it to (off or on; a setting\'s starting level when they gave none); '
+  + '0 as nothing extra yet (an effect\'s base, a sum\'s part, a stock\'s start); '
+  + '1 in unit "1" as an index (a product\'s part, or an effect\'s base or a sum\'s part whose other terms are pure numbers)';
 
 export const UNIT_RULES = 'The unit in singular words: a currency as GBP, USD or EUR (or £, $, €); a count noun ("loaf", "member"); "/" for per, read left to right ("GBP/loaf", "member/month", "GBP/member/month"); a rate per period as "/month" ("%/month" for 7 % a month; the stock it applies to × that rate is a flow per month); "1" for a pure number or a chance from 0 to 1; "%" for a percentage (its figures in percent, 20 for 20 %). Never a multiplier such as k or m: write the figure in full. A coefficient\'s unit is the defined quantity\'s unit per the driver\'s unit ("loaf/week/oven").';
 
@@ -122,7 +134,7 @@ export const CanonicalQuantity = z.object({
     'For a link\'s size (a coefficient), used only when no figure is given (no most likely figure, and no range or one that spans zero): raises when more of the driver means more of what it moves, lowers when it means less; null when no one can say which. Null for every other quantity.'),
   stated_date: z.string().nullable().describe(STATED_DATE),
   author: z.enum(QUANTITY_AUTHORS).describe(
-    "Who gave the figure. person: the person's own figure (or someone they report, in party), quoted. olumi: Olumi's estimate (ranged) or reading. structure: an exact constant the model's form needs (12 month/year, 100 for a percentage scale, 0 or 1 for an option switched off or on, a count that defines the structure): never an estimate, never shown as Olumi's, no range."),
+    "Who gave the figure. person: the person's own figure (or someone they report, in party), quoted. olumi: Olumi's estimate (ranged) or reading. structure: only one of the structural constants the instructions list, exact: never an estimate, never shown as Olumi's, no range."),
   party: attribution.party,
   quote: attribution.quote,
   approval: attribution.approval,
