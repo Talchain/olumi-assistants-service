@@ -485,6 +485,21 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(answers.filter((t) => t.includes('Not applied'))).toHaveLength(2);
       for (const t of answers) expect(t).not.toMatch(/nothing was changed|nothing (?:has been |was )?saved|nothing changed\b/i);
     });
+    it('Codex on #3758 (sibling): A applied, then the AI calls propose_change on the same press: the blocked call\'s answer speaks of that call only; A\'s receipt stays', async () => {
+      const pressA = await propose();
+      calls.length = 0;
+      outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }],
+        [{ type: 'function_call', name: 'propose_change', call_id: 'blocked', args: CHANGE }], [{ type: 'message', text: 'Saved: f is 0.6 now.' }]];
+      const a = (await post(pressA)).json() as Json;
+      expect(a.assistant_text).toBe('Saved: f is 0.6 now.');
+      expect(registered, 'A applied once, nothing proposed').toHaveLength(1);
+      expect(a.receipts).toEqual([expect.objectContaining({ version_id: 'v_1', authorised_by: 'person' })]);
+      const answers = calls.flatMap((c) => ((c.input ?? []) as Json[]).filter((i) => i.type === 'function_call_output').map((i) => JSON.stringify(i.output)));
+      const blocked = answers.filter((t) => t.includes('withheld_on_chip_turn'));
+      expect(blocked).toHaveLength(1);
+      expect(blocked[0]).toContain('propose_change is not available on this turn, so this call changed and ran nothing.');
+      for (const t of answers) expect(t).not.toMatch(/nothing was changed|nothing (?:has been |was )?saved|nothing changed\b/i);
+    });
     it('BOUNDED: a third stray apply is not resumed again; the turn ends as an unfinished turn does (REPLY_INCOMPLETE), never by reading the unfinished run', async () => {
       const press = await propose();
       const warn = vi.spyOn(console, 'warn');

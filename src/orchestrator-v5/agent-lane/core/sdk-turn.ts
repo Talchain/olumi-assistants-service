@@ -316,7 +316,7 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
       record({ name, ok: false, mutated: false, outcome: 'refused', refusal: WITHHELD_ON_CHIP_TURN, ran: null },
         { ok: false, mutated: false, refusal: WITHHELD_ON_CHIP_TURN });
       return JSON.stringify({ status: 'refused', reason: WITHHELD_ON_CHIP_TURN, mutated: false,
-        detail: `${name} is not available on this turn. Nothing was changed or run.` });
+        detail: `${name} is not available on this turn, so this call changed and ran nothing.` });
     } };
   });
   const restrictedTo = allowedNames.length < allTools.length
