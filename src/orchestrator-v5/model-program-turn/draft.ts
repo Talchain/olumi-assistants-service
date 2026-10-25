@@ -13,7 +13,7 @@ import { coreBudget } from '../agent-lane/model-budgets.js';
 import { agentRequestIdentity } from '../agent-lane/runtime/prompt-identity.js';
 import { CanonicalModel, type CanonicalModelT } from '../model-program/canonical.js';
 import { compile, compileJson, normalise, type CompileError, type CompileResult } from '../model-program/compile.js';
-import { CANONICAL_JSON_SCHEMA, CANONICAL_SCHEMA_NAME, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX, UPDATE_PREFIX } from './prompt.js';
+import { CANONICAL_JSON_SCHEMA, CANONICAL_SCHEMA_NAME, CHECK_PREFIX, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX, UPDATE_PREFIX } from './prompt.js';
 
 export const MAX_REPAIRS = 2;
 export const DRAFT_REASONING_EFFORT = 'medium' as const;
@@ -68,9 +68,9 @@ export function draftRequestBody(input: readonly InputMessage[]): StreamedRespon
   };
 }
 
-/** The repair turn: Olumi's own sentences on the draft (the compiler's, or an update's check's), one per line. */
-const repairOf = (lines: readonly string[]): string => `${REPAIR_PREFIX}\n${lines.map((l) => `- ${l}`).join('\n')}`;
-export const repairMessage = (errors: readonly CompileError[]): string => repairOf(errors.map((e) => e.message));
+/** The repair turn: Olumi's own sentences on the draft, one per line, after their prefix (the compiler's, or an update's checks'). */
+const repairOf = (prefix: string, lines: readonly string[]): string => `${prefix}\n${lines.map((l) => `- ${l}`).join('\n')}`;
+export const repairMessage = (errors: readonly CompileError[]): string => repairOf(REPAIR_PREFIX, errors.map((e) => e.message));
 /**
  * An update's own check on a draft that compiles (`program-tools.ts`: the one validator, `validatePostimage`): the sentences
  * the drafter can act on, [] for none. They go back as the compiler's do, in the same conversation and within the same
@@ -125,7 +125,7 @@ export async function draftCanonicalModel(brief: string | readonly InputMessage[
     const checked = parsed.success && result.errors.length === 0 && a < MAX_REPAIRS && opts.check !== undefined ? opts.check(model!) : [];
     attempts.push({ attempt: a, errors: result.errors, status: out.status, usage: out.usage, ms });
     if ((result.errors.length === 0 && checked.length === 0) || a === MAX_REPAIRS) break;
-    input.push({ role: 'assistant', content: out.text }, { role: 'user', content: result.errors.length > 0 ? repairMessage(result.errors) : repairOf(checked) });
+    input.push({ role: 'assistant', content: out.text }, { role: 'user', content: result.errors.length > 0 ? repairMessage(result.errors) : repairOf(CHECK_PREFIX, checked) });
   }
   return { model, compiled, attempts };
 }
