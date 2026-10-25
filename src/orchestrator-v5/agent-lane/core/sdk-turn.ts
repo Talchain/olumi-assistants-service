@@ -105,8 +105,8 @@ export interface PausedRunStore {
 export const PAUSE_DECLINED = 'Not applied: the person declined this change on its card. Nothing was changed.';
 /** What the model is told when the person writes instead of answering the card; their new message follows it. */
 export const PAUSE_SUPERSEDED = 'Not applied: the person has not approved this change; they wrote a new message instead, which follows. Nothing was changed.';
-/** What the model is told when the pause itself could not be kept; it ends this turn's run with nothing applied. */
-export const PAUSE_NOT_KEPT = 'Not applied: Olumi could not hold this change for the person\'s approval. Nothing was changed; say so, and that they can ask again.';
+/** What the model is told when the pause itself could not be kept: about THIS call only (an earlier call this turn may have saved). */
+export const PAUSE_NOT_KEPT = 'Not applied: Olumi could not hold this change for the person\'s approval, so this call changed nothing; say so, and that they can ask again.';
 /** What the model is told when it applies an id no card awaiting the person's approval has ('' included): no pause is kept. */
 export const PAUSE_NO_CARD = 'Not applied: no card with that id is waiting for the person\'s approval, so this call changed nothing.';
 
@@ -316,7 +316,7 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
       record({ name, ok: false, mutated: false, outcome: 'refused', refusal: WITHHELD_ON_CHIP_TURN, ran: null },
         { ok: false, mutated: false, refusal: WITHHELD_ON_CHIP_TURN });
       return JSON.stringify({ status: 'refused', reason: WITHHELD_ON_CHIP_TURN, mutated: false,
-        detail: `${name} is not available on this turn. Nothing was changed or run.` });
+        detail: `${name} is not available on this turn, so this call changed and ran nothing.` });
     } };
   });
   const restrictedTo = allowedNames.length < allTools.length
@@ -507,8 +507,9 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
       if (pause !== undefined) {
         // ⛔ A pause names a card this scenario holds, awaiting approval, read from its proposal store; else it is no pause (served
         // 25 Oct 08:39Z: on a press the AI applied again with '', that was saved as the pause, and the reply was refused).
-        const asked = argsOf(pause)['proposal_id'];
-        const card = typeof asked === 'string' && asked !== '' && input.isPendingCard?.(asked) === true ? asked as CardId : null;
+        const cardOf = (item: typeof pause): CardId | null => { const asked = argsOf(item)['proposal_id'];
+          return typeof asked === 'string' && asked !== '' && input.isPendingCard?.(asked) === true ? asked as CardId : null; };
+        const card = cardOf(pause);
         const run0: OpenAiPausedRun | undefined = card === null ? undefined : { pause_id: randomUUID(), proposal_id: card,
           call_id: callIdOf(pause) ?? '', tool: pause.name ?? '', state: result.state.toString() };
         const kept = run0 === undefined ? undefined : await input.pausedRunStore?.save(input.ctx.scenario_id, run0).catch(() => undefined);
@@ -522,13 +523,18 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
           await input.settle?.();
           return finish(words, words.trim() === '' ? 'incomplete' : 'answered', calls, words.trim() === '' ? 'host' : 'ai');
         }
-        // No card, or the pause cannot be kept, so the Conversation gets its answer now: nothing applied, said by the AI.
-        if (card === null) log.warn({ event: 'agent_core.pause_without_card', scenario_id: input.ctx.scenario_id, tool: pause.name }, 'agent-core: a pause named no held card; refused');
-        for (const item of result.interruptions) result.state.reject(item, { message: card === null ? PAUSE_NO_CARD : PAUSE_NOT_KEPT });
-        result = await go(result.state);
-        calls += result.rawResponses.length;
+        // No card, or the pause cannot be kept, so the Conversation gets its answer now: nothing applied, said by the AI. A run that
+        // stops on such a call again is refused the same way once more (measure RL mrr-r3, 25 Oct: it was read unfinished, as empty).
+        for (let refused = 0; result.interruptions.length > 0 && refused < 2; refused += 1) {
+          const noCard = cardOf(result.interruptions[0]!) === null;
+          if (noCard) log.warn({ event: 'agent_core.pause_without_card', scenario_id: input.ctx.scenario_id, tool: result.interruptions[0]!.name }, 'agent-core: a pause named no held card; refused');
+          for (const item of result.interruptions) result.state.reject(item, { message: noCard ? PAUSE_NO_CARD : PAUSE_NOT_KEPT });
+          result = await go(result.state);
+          calls += result.rawResponses.length;
+        }
       }
-      const text = typeof result.finalOutput === 'string' ? result.finalOutput : '';
+      // A run still stopped on a call is unfinished: its own words this turn, or none (the route's REPLY_INCOMPLETE), never `finalOutput`.
+      const text = result.interruptions.length > 0 ? extractAllTextOutput(result.newItems) : typeof result.finalOutput === 'string' ? result.finalOutput : '';
       await input.settle?.();
       return finish(text, text.trim() === '' ? 'incomplete' : 'answered', calls, text.trim() === '' ? 'host' : 'ai');
     }, { groupId: input.ctx.scenario_id, metadata: {

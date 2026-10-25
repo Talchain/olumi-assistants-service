@@ -236,7 +236,7 @@ export const PROGRAM_TOOL_DESCRIPTIONS = {
   apply_change:
     'Save the exact proposal the person approved on its card, with the Run its card showed. The approval is the card’s, never a typed yes. '
     + 'saved: the receipt, the new revision and run, the Run. already_saved: this same proposal was saved before; never save it again. '
-    + 'superseded: the model changed since it was prepared; read it again and prepare a new change. A refusal or an unknown outcome is not a save: say so, and never claim success or failure the result does not give. ' + RUN_WORDS_RULE,
+    + 'superseded: the card is out of date because the model changed after it was prepared, so nothing was saved; say so, and ask whether they want that change made again. A refusal or an unknown outcome is not a save: say so, and never claim success or failure the result does not give. ' + RUN_WORDS_RULE,
   run_analysis:
     'Show the Run of the saved model as run: the stored Run when it is current for this model (stored true), otherwise a new Run, worked out and stored (stored false). Use it only when the person asks; a saved change already brings its Run. ' + RUN_WORDS_RULE,
 } as const;

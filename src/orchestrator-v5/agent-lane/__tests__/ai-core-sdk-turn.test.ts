@@ -558,7 +558,9 @@ describe('PATH-B core turn on the Agents SDK', () => {
       expect(written, 'the withheld tool never ran').toBe(0);
       expect(result.tool_calls).toEqual([expect.objectContaining({ name: 'propose_change', ok: false, mutated: false, refusal: 'withheld_on_chip_turn' })]);
       expect(result.mutated).toBe(false);
-      expect(JSON.stringify(sent[1]!.input), 'the AI is told nothing was changed').toContain('Nothing was changed or run');
+      // About this call only, never the turn: an earlier call on the same press may have saved (Codex on #3758).
+      expect(JSON.stringify(sent[1]!.input), 'the AI is told this call changed nothing').toContain('propose_change is not available on this turn, so this call changed and ran nothing.');
+      expect(JSON.stringify(sent[1]!.input)).not.toContain('Nothing was changed');
       for (const b of sent) {
         expect((b.tools as Json[]).map((t) => t.name), 'still in the one fixed list').toEqual(['read_canonical_context', 'propose_change']);
         expect(b.tool_choice).toEqual({ type: 'allowed_tools', mode: 'auto', tools: [{ type: 'function', name: 'read_canonical_context' }] });
