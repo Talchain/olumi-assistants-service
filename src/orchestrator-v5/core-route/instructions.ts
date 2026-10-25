@@ -222,7 +222,7 @@ export const PROGRAM_TOOL_DESCRIPTIONS = {
     + 'or the question still open for it; the relations, goals, limits, preferences, options and risks; and the reasoning kept beside them: claims, evidence, assumptions, dissent, conditions and what was left out); '
     + 'earlier_versions, how many earlier versions it has; blockers, what the stored Run waits on, in the model\'s order, each with its id, code and scope (what it holds up). No question is written for you: '
     + 'ask about any of them in your own words, at most three a reply, the most consequential first. What each code needs from the person: asked, the figure (the record may carry the drafter\'s question); '
-    + 'range_kind, whether the ends of their range are firm or a rough estimate; recount, the count again (it was given below 0); unknown, a figure no one can give or responsibly estimate yet: say why (its basis) and what evidence, question or activity would size it; never ask them for the number; '
+    + 'range_kind, whether the ends of their range are firm or a rough estimate; recount, the count again (it was given below 0); unknown, a figure not known yet: an effect\'s size is Olumi\'s estimate unless no range can bound it; else say why (its basis) and what evidence, question or activity would size it; never ask them for the number; '
     + 'measure, how the aim or guardrail is measured; deadline, by when; no_goal, the result they want. A Run stored earlier gives open_questions and coaching instead; '
     + 'and run, the stored Run, with current and engine_current. Use these saved facts and ids, never an earlier reply. A Run that is not current describes an earlier model: say so, never present it as current. ' + RUN_WORDS_RULE,
   propose_change:
@@ -231,7 +231,7 @@ export const PROGRAM_TOOL_DESCRIPTIONS = {
     + 'Anything else (a new item or link, a rename, a removal) goes in request, in plain words with their exact words for every figure of theirs, with remove the ids of anything they asked to remove ([] for none); Olumi’s drafter writes it. '
     + 'The card shows every change, before and after. Anything left out without being listed, or a figure of theirs not in their words, is refused. '
     + 'Put the whole change in ONE propose_change: a second proposal in the same turn is refused. '
-    + 'Never invent a figure for them, and never put an Olumi estimate in as theirs. The result shows what the card would show (would_show). ' + RUN_WORDS_RULE + ' '
+    + 'Never invent a fact of theirs (levels, prices, dates and targets stay asked) or put an Olumi estimate in as theirs; an honest, labelled Olumi range for an effect\'s size is not inventing, so never tell the drafter not to size one. The result shows what the card would show (would_show). ' + RUN_WORDS_RULE + ' '
     + 'A refusal says why (their words do not contain the quote; the edit does not fit; the changed model does not calculate, with the reasons; nothing would change): say it plainly and ask for what is needed.',
   apply_change:
     'Save the exact proposal the person approved on its card, with the Run its card showed. The approval is the card’s, never a typed yes. '

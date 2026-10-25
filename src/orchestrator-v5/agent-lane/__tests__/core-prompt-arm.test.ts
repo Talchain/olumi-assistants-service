@@ -76,7 +76,8 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     // default, a direction-only one kept in words with its size unknown; never a forced number; quotes copied exactly; the
     // update's own text lives here with the draft's goal rule; periods counted as starts_after_periods (#3713).
     // 24 Oct (AIE 6386018855 §5, accepted by the DL): Olumi may propose a measure, options and missing drivers, at first drafting only.
-    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('c5a7b55ac7b2701fce79405bb562337dbaf67b1917dcc2bbcc1867c63e993c97');
+    // 25 Oct (DL, step 0 effects-not-estimated): an added hypothesis is sized like any other link; missing case detail widens a range.
+    expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('3e6f883de4869642a541dd150e4f3eda2f75ce4d1f2b622b775db6c634a92d66');
     expect(createHash('sha256').update(UPDATE_PREFIX, 'utf8').digest('hex')).toBe('3fc74a39f5db5290b72b37b7e2228c696a0fdeb5c2b017f96f3883bfedf3e0fb');
     expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('bed04fc58a01dbd02d8f5c8aa6ef171731a356c1cde47a85e0cd64be35416653'); // 23 Oct (DL 93d79c3e, C2 double prime): a definition's parts are factors with levels, never another definition; a STATED per-unit effect is a sized link. 22 Oct: every stated goal saved in their words, never approximated (Claude r1 on #3670); + a calendar date is Olumi's labelled reading
     // The retired constants are gone from both modules: no route can send the accreted text again.
@@ -147,7 +148,7 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       // S1 (A4): what the Run waits on is typed; the AI asks in its own words, and each code says what the person supplies.
       'blockers, what the stored Run waits on, in the model\'s order, each with its id, code and scope (what it holds up). No question is written for you:',
       'asked, the figure', 'range_kind, whether the ends of their range are firm or a rough estimate;', 'recount, the count again',
-      'unknown, a figure no one can give or responsibly estimate yet: say why (its basis) and what evidence, question or activity would size it; never ask them for the number;',
+      'unknown, a figure not known yet: an effect\'s size is Olumi\'s estimate unless no range can bound it; else say why (its basis) and what evidence, question or activity would size it; never ask them for the number;',
       'measure, how the aim or guardrail is measured;', 'deadline, by when;', 'no_goal, the result they want.',
       'and run, the stored Run, with current and engine_current.']) expect(d.read_canonical_context, field).toContain(field);
     // Targeted answers (DL 24 Oct): an answer in answers on its item's id; anything else in words, with the ids to remove, which
@@ -157,6 +158,8 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       + 'author person, status known, with their figure and their exact words this turn as quote;');
     expect(d.propose_change).toContain('author olumi, status estimated, for Olumi\'s estimate of a size, with low, high, range_kind and basis and no quote.');
     expect(d.propose_change).toContain('A range gives range_kind bounds or plausible only when their words say firm or rough, null otherwise;');
+    // 25 Oct (DL, step 0 effects-not-estimated): "never invent" is their facts; an Olumi range for an effect is never banned in request.
+    expect(d.propose_change).toContain('Never invent a fact of theirs (levels, prices, dates and targets stay asked) or put an Olumi estimate in as theirs; an honest, labelled Olumi range for an effect\'s size is not inventing, so never tell the drafter not to size one.');
     expect(d.propose_change).toContain('Anything else (a new item or link, a rename, a removal) goes in request, in plain words with their exact words for every figure of theirs, with remove the ids of anything they asked to remove ([] for none); Olumi\u2019s drafter writes it.');
     expect(d.propose_change).toContain('The card shows every change, before and after.');
     expect(d.propose_change).toContain('The result shows what the card would show (would_show).');
@@ -179,7 +182,8 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
       'Olumi\'s own additions (a suggested measure, options, drivers, risks) are made when the model is first drafted; a repair or an update changes only what it asks.',
       'Model the main reason each option could succeed and the main reason it could fail.',
       'Every driver, constraint and current state they mention feeds the calculation or the record that fits it.',
-      'Where the brief leaves out a driver, countereffect or risk that is plausible and could change the result, add it as Olumi\'s hypothesis (author olumi, with a basis and its direction); plausibility alone never justifies a figure, so size it like any other link.',
+      'Where the brief leaves out a driver, countereffect or risk that is plausible and could change the result, add it as Olumi\'s hypothesis (author olumi, with a basis), sized like any other link.',
+      'Missing case detail widens the range, never makes the scale unknowable.',
       'An aim they state without a measure stays theirs: where a measure can responsibly track it, suggest one (measure_by "olumi":',
       'its target asked unless they gave one and its exclusions naming what it misses; a suggested measure is never their definition of success.',
       'An aim no measure can responsibly track, and a guardrail without one, keep measure null and a question.',
