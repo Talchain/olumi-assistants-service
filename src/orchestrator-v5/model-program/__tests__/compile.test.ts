@@ -550,6 +550,22 @@ describe('spike S1: the canonical model compiles to the executable model', () =>
     expect(codes(compile(none))).toEqual(['set_reaches_nothing', 'option_reaches_no_goal']);
   });
 
+  it('alpha G7: an id in the shape Olumi generates for one of the model\'s own quantities or goals is refused, never silently replaced or reused', () => {
+    const growth = (extra: CanonicalQuantityT[]) => model({
+      period: 'month',
+      quantities: [person('revenue', 'GBP/month', 5000, 'about £5,000 a month'), person('growth_target', '%', 10, 'grow revenue by 10%'), person('year', 'month', 12, 'next year'), ...extra],
+      goals: [{ ...goal('revenue_growth', 'revenue', '>=', 'growth_target', 'end', 'year', 'grow revenue by 10%'),
+        measure: { ...goal('revenue_growth', 'revenue', '>=', 'growth_target', 'end', 'year', 'grow revenue by 10%').measure!, frame: 'change_rel', reference: { kind: 'now', option: null, quantity: null } } }],
+    });
+    const badIds = (r: ReturnType<typeof compile>) => r.errors.filter((e) => e.code === 'bad_id').map((e) => e.items[0]);
+    // Lowering makes revenue__today (the reference) and revenue_growth__change: an authored record with either id would be replaced.
+    const clash = compile(growth([person('revenue__today', 'GBP/month', 4000, 'we make £4,000 today'), person('revenue_growth__change', 'GBP/month', 1, 'up by 1')]));
+    expect(badIds(clash)).toEqual(['revenue__today', 'revenue_growth__change']);
+    expect(clash.errors.find((e) => e.items[0] === 'revenue__today')!.message).toBe('The id "revenue__today" is one Olumi generates for the quantity "revenue"; give it an id without "__today".');
+    // Contrast: single underscores, and a double-underscore id whose prefix is no quantity or goal, are ordinary ids.
+    expect(badIds(compile(growth([person('revenue_today', 'GBP/month', 4000, 'we make £4,000 today'), person('shop__today', 'GBP/month', 4000, 'we make £4,000 today')])))).toEqual([]);
+  });
+
   it('plan r3 #1: the question binds the calculation: "revenue next year", "annual revenue" and "revenue growth" compile to three different executable goals', () => {
     const change = (g: CanonicalGoalT, frame: 'change_abs' | 'change_rel', reference: NonNullable<CanonicalGoalT['measure']>['reference']): CanonicalGoalT => ({ ...g, measure: { ...g.measure!, frame, reference } });
     const sundays = (goals: CanonicalGoalT[]) => model({

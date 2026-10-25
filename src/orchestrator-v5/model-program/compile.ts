@@ -263,6 +263,15 @@ export function compile(input: CanonicalModelT, opts: CompileOptions = {}): Comp
     if (allIds.has(r.id)) err('duplicate_id', `The id "${r.id}" is used twice (a ${allIds.get(r.id)} and a ${family}); give each record its own id.`, [r.id]);
     else allIds.set(r.id, family);
   }
+  // An id Olumi generates while lowering (a quantity's `__base`, `__today`, `__sq`, `__plus` or `__times`; a goal's `__change` or
+  // `__change_rel`) is taken by nothing else, or lowering would silently replace it or reuse it as its own (alpha G7). An option's
+  // inline setting (`<option>__<quantity>`) never matches: its prefix is an option, not a quantity or goal.
+  const quantityIds = new Set(model.quantities.map((q) => q.id)), goalIds = new Set(model.goals.map((g) => g.id));
+  for (const id of allIds.keys()) {
+    const gen = /^(.+)__(base|today|sq|plus|times|change_rel|change)$/.exec(id);
+    const owner = gen === null ? undefined : ['change', 'change_rel'].includes(gen[2]!) ? (goalIds.has(gen[1]!) ? 'goal' : undefined) : (quantityIds.has(gen[1]!) ? 'quantity' : undefined);
+    if (gen !== null && owner !== undefined) err('bad_id', `The id "${id}" is one Olumi generates for the ${owner} "${gen[1]}"; give it an id without "__${gen[2]}".`, [id]);
+  }
   for (const r of [...model.quantities, ...model.goals, ...model.limits, ...model.risks]) if (r.label.trim() === '') err('label', `"${r.id}" has no label; give it a short name in the person's words.`, [r.id]);
   const Q = new Map(model.quantities.map((q) => [q.id, q] as const));
   const name = (id: string) => (Q.has(id) ? `"${Q.get(id)!.label}" (${id})` : `"${id}"`);
