@@ -27,7 +27,7 @@ import {
 export const RUN_DRAWS = 10_000;
 /**
  * THE RUN'S ADMISSION LIMIT (alpha G11), headline and driver sweep together, checked before anything is allocated. Measured
- * 25 Oct on the Mac at 70 to 100 million operations a second (`costOf`; bakery and club over 52 to 260 periods): about 2 s
+ * 25 Oct on the Mac at 70 to 100 M operations a second (`costOf`; bakery and club over 52 to 260 periods): about 2 s
  * there, and about 5 s on staging at 40 % of that speed. A Run over it is refused by name; a sweep that would pass it is not run.
  */
 export const MAX_OPERATIONS = 150_000_000;
