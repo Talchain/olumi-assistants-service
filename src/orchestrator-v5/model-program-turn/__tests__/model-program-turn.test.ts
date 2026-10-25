@@ -1442,7 +1442,9 @@ describe('the model-program turn on the real core route', () => {
     expect(sent).toHaveLength(2);
     expect(replies).toEqual(['unused']);
     expect(sent[1]!.input).toEqual([...sent[0]!.input, { role: 'assistant', content: wrong },
-      { role: 'user', content: `${REPAIR_PREFIX}\n- oven_price: the person's items must quote their words exactly.` }]);
+      { role: 'user', content: `Olumi's checks found these problems with the change. Return the whole model again with them fixed, keeping everything else as it was.\n- oven_price: the person's items must quote their words exactly.` }]);
+    // The checks' own prefix, never the compiler's (DL 25 Oct): a compiler error keeps REPAIR_PREFIX (step 2).
+    expect(String(sent[1]!.input.at(-1).content)).not.toContain(REPAIR_PREFIX);
     expect({ ...sent[1], input: null }).toEqual({ ...sent[0], input: null });
     expect(p.data.changes).toEqual([{ id: 'oven_price', kind: 'quantity', action: 'change', label: 'oven price', before: 'no figure yet (in GBP/oven), still to be given, Olumi asks "What would the second oven cost?", no basis given, not in your words',
       after: `2,500 GBP/oven, known, no question, based on "${APPROXIMATE_FIGURE}", in your words "${words}"`, author: 'person' }]);
@@ -1468,7 +1470,7 @@ describe('the model-program turn on the real core route', () => {
     expect(sent).toHaveLength(MAX_REPAIRS + 1);
     expect(replies).toEqual(['unused']);
     // Each repair: the validator's sentence and, refused for this turn's words, those words exactly.
-    const repair = `${REPAIR_PREFIX}\n- base_sales: the person's items must quote their words exactly. A figure of theirs changes only with their words in this turn, "${words}"; otherwise it stays as saved.`;
+    const repair = `Olumi's checks found these problems with the change. Return the whole model again with them fixed, keeping everything else as it was.\n- base_sales: the person's items must quote their words exactly. A figure of theirs changes only with their words in this turn, "${words}"; otherwise it stays as saved.`;
     expect(sent.at(-1)!.input.slice(3)).toEqual([{ role: 'assistant', content: bad }, { role: 'user', content: repair }, { role: 'assistant', content: bad }, { role: 'user', content: repair }]);
     expect(registered).toHaveLength(1);
     // Not one the drafter can act on (an id to remove that the model never had): one call, never sent back.
