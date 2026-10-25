@@ -13,7 +13,7 @@ import { coreBudget } from '../agent-lane/model-budgets.js';
 import { agentRequestIdentity } from '../agent-lane/runtime/prompt-identity.js';
 import { CanonicalModel, type CanonicalModelT } from '../model-program/canonical.js';
 import { compile, compileJson, normalise, type CompileError, type CompileResult } from '../model-program/compile.js';
-import { CANONICAL_JSON_SCHEMA, CANONICAL_SCHEMA_NAME, CHECK_PREFIX, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX, UPDATE_PREFIX } from './prompt.js';
+import { CANONICAL_JSON_SCHEMA, CANONICAL_SCHEMA_NAME, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX, UPDATE_PREFIX } from './prompt.js';
 
 export const MAX_REPAIRS = 2;
 export const DRAFT_REASONING_EFFORT = 'medium' as const;
@@ -71,6 +71,11 @@ export function draftRequestBody(input: readonly InputMessage[]): StreamedRespon
 /** The repair turn: Olumi's own sentences on the draft, one per line, after their prefix (the compiler's, or an update's checks'). */
 const repairOf = (prefix: string, lines: readonly string[]): string => `${prefix}\n${lines.map((l) => `- ${l}`).join('\n')}`;
 export const repairMessage = (errors: readonly CompileError[]): string => repairOf(REPAIR_PREFIX, errors.map((e) => e.message));
+/**
+ * What an update's own checks' sentences are returned with, the same way (REFUSED-CHANGE-CLASS 25 Oct: the validator's refusal
+ * of a compiling draft). Here with its only caller: a first draft never sends it, so the first-draft bytes (`prompt.ts`) are unchanged.
+ */
+export const CHECK_PREFIX = 'Olumi\'s checks found these problems with the change. Return the whole model again with them fixed, keeping everything else as it was.';
 /**
  * An update's own check on a draft that compiles (`program-tools.ts`: the one validator, `validatePostimage`): the sentences
  * the drafter can act on, [] for none. They go back as the compiler's do, in the same conversation and within the same
