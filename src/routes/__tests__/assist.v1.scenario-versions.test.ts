@@ -1,3 +1,7 @@
+import { postimageOf } from '../../orchestrator-v5/model-program-turn/program-save.js';
+import { MODEL_PROGRAM } from '../../orchestrator-v5/model-program-turn/program-store.js';
+import { projectCorePostimageForPersistence } from '../../orchestrator-v5/persisted-graph-projection.js';
+import { bakery, BRIEF } from '../../orchestrator-v5/model-program-turn/__tests__/bakery.fixture.js';
 import { goalHorizonVerdict } from '../../orchestrator-v5/goal-target/goal-horizon-verdict.js';
 import { installOwnershipHarness } from "../../../tests/utils/ownership-route-harness.js";
 import { modelVersionDoorOutcome } from "../../../tests/utils/model-version-door-outcome.js";
@@ -1720,6 +1724,27 @@ describe("POST /versions/restore — a version the receipt cannot carry is refus
     expect(res.json().details.code).toBe("VERSION_GRAPH_INCOMPATIBLE");
     expect(JSON.stringify(res.json().details.issues)).toContain("edge_type");
     expect(restoreVersionAtomic).not.toHaveBeenCalled();
+  });
+
+  it('a program with an unanswered figure restores through the real route and returns the exact graph in its receipt', async () => {
+    const graph = projectCorePostimageForPersistence(postimageOf({ model_program: MODEL_PROGRAM, canonical: bakery(), seed: 1, person_words: [BRIEF], runs: [] }));
+    const original = JSON.stringify(graph), full = computeGraphIdentityHash(graph as never)!.value;
+    getVersion.mockResolvedValue({ status: 'ok', value: { ...summary(), graph, graph_identity_hash: full } });
+    restoreVersionAtomic.mockImplementation(async (args: { graph: unknown }) => {
+      const ok = atomicRestoreOk();
+      return { ...ok, value: { ...ok.value, graph: args.graph, graph_identity_hash: computeGraphIdentityHash(args.graph as never)!.value } };
+    });
+    const app = await buildApp();
+    const res = await post(app, '/versions/restore', { version_id: VERSION_A });
+    await app.close();
+    expect(res.statusCode, res.body).toBe(200);
+    expect(restoreVersionAtomic).toHaveBeenCalledTimes(1);
+    const returned = res.json().receipt;
+    expect(returned.graph.living_model).toEqual(graph.living_model);
+    expect(returned.full_hash).toBe(full);
+    expect(returned.graph.nodes.find((n: { id: string }) => n.id === 'oven_price').observed_state).not.toHaveProperty('value');
+    expect(returned.full_hash).toBe(computeGraphIdentityHash(returned.graph)!.value);
+    expect(JSON.stringify(graph)).toBe(original);
   });
 
   it("CONTROL: a receiptable version still restores and returns its receipt", async () => {

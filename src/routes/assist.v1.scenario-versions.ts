@@ -15,7 +15,8 @@ import { buildRunDelta } from "../orchestrator-v5/coaching/build-run-delta.js";
 
 import { parseRequestExtensions } from "../orchestrator-v5/boundary/request-extensions.js";
 import { GraphStateIngressSchema } from "../orchestrator-v5/boundary/request-extensions.js";
-import { projectGraphForPersistence } from "../orchestrator-v5/persisted-graph-projection.js";
+import { projectCorePostimageForPersistence, projectGraphForPersistence } from "../orchestrator-v5/persisted-graph-projection.js";
+import { isProgramGraph } from "../orchestrator-v5/model-program-turn/program-store.js";
 import { raiseRefHighWaterForRestore } from "../orchestrator-v5/graph/entity-refs.js";
 import { PreconditionRiskLinkWriteError, assertNoPreconditionRiskLinks, assertNoIntroducedGraphViolations, isReturnLegRestore } from "../orchestrator-v5/persist-graph-write.js";
 import {
@@ -916,7 +917,8 @@ export default async function route(app: FastifyInstance) {
       // The restored refs come back exactly (a restored node brings its own ref); only `ref_high_water` rises to cover
       // everything the current graph issued, so the next new entity never reuses a number. The counter is outside the
       // identity hash, so these bytes still bind to the target version (`graph/entity-refs.ts`).
-      const graphForStore = raiseRefHighWaterForRestore(projectGraphForPersistence(parsedGraph.data, {
+      const project = isProgramGraph(parsedGraph.data) ? projectCorePostimageForPersistence : projectGraphForPersistence;
+      const graphForStore = raiseRefHighWaterForRestore(project(parsedGraph.data, {
         scenarioId: ctx.scenarioId,
         turnClass: "direct_answer",
         source: "version_restore",

@@ -7,7 +7,11 @@ beforeEachRevisionScope(() => __setUseAppendV6ForTest(false));
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { _resetConfigCache } from "../../config/index.js";
-import { commitDirectAnswer } from "../commit.js";
+import { buildAtomicCommittedModelVersion, commitDirectAnswer } from "../commit.js";
+import { postimageOf } from "../model-program-turn/program-save.js";
+import { MODEL_PROGRAM } from "../model-program-turn/program-store.js";
+import { bakery, BRIEF } from "../model-program-turn/__tests__/bakery.fixture.js";
+import { receiptGraphIssues, toModelVersionMutationReceiptV1 } from "../model-management/mutation-receipt.js";
 import { composeDirectAnswerResponse } from "../compose.js";
 import { OlumiResponseWithModelVersionReceiptLocalSchema } from "../model-management/mutation-receipt.js";
 import { computeGraphIdentityHash } from "../context/graph-identity.js";
@@ -879,5 +883,40 @@ describe("V5ModelVersionCommitted — a committed version is observable", () => 
     expect(writes[0]?.modelVersion).toBeUndefined();
     expect(committed()).toHaveLength(0);
     expect(skipAlarm()).toHaveLength(0);
+  });
+});
+
+
+describe('one admission for program versions and their receipt/restore', () => {
+  const graphOf = (status: 'asked' | 'unknown' = 'asked') => {
+    const canonical = bakery();
+    canonical.quantities = canonical.quantities.map(q => q.id === 'oven_price'
+      ? { ...q, status, question: status === 'asked' ? q.question : null } : q);
+    return postimageOf({ model_program: MODEL_PROGRAM, canonical, seed: 1, person_words: [BRIEF], runs: [] });
+  };
+
+  it.each(['asked', 'unknown'] as const)('%s figures retain a version, receiptable without inventing values or rewriting hashes', (status) => {
+    const graph = graphOf(status), original = JSON.stringify(graph);
+    expect(GraphV3.safeParse(graph).success).toBe(false); // the demonstrated legacy-reader mismatch
+    expect(receiptGraphIssues(graph)).toEqual([]); // the restore's pre-write admission
+    const plan = buildAtomicCommittedModelVersion(graph, META);
+    if (plan.kind !== 'plan') throw new Error(`program lost its version: ${plan.kind}`);
+    const receipt = toModelVersionMutationReceiptV1(SCENARIO_ID, { ...plan.write, graph,
+      version_id: VERSION_ID, version_number: 1, source_version_id: null, parent_version_id: null,
+      root_version_id: ROOT_ID, undo_version_id: null, event_id: 'program-version' });
+    expect(receipt.graph).toBe(graph);
+    expect(receipt.full_hash).toBe(computeGraphIdentityHash(graph as never)!.value);
+    expect(plan.write.graph_identity_hash).toBe(receipt.full_hash);
+    expect(JSON.stringify(graph)).toBe(original);
+    expect((graph.nodes as Record<string, unknown>[]).find(n => n.id === 'oven_price')!.observed_state).not.toHaveProperty('value');
+  });
+
+  it('legacy missing-value graphs still refuse; a program claim cannot launder invalid canonical or projection state', () => {
+    const { living_model, ...legacy } = graphOf();
+    for (const graph of [legacy, { ...GRAPH, living_model: { model_program: MODEL_PROGRAM } },
+      { ...graphOf(), nodes: [42] }, { ...graphOf(), living_model: { ...living_model as object, canonical: {} } }]) {
+      expect(receiptGraphIssues(graph).length).toBeGreaterThan(0);
+      expect(buildAtomicCommittedModelVersion(graph, META).kind).toBe('skip');
+    }
   });
 });

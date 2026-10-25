@@ -55,7 +55,7 @@ import { prepareHorizonBasisForWrite } from './goal-target/horizon-basis-provena
 import { derivePendingActionsFromFinalizedChips } from './compose/derive-pending-actions.js';
 import { applyEgressForbiddenPhraseGuard } from './compose/forbidden-user-facing-phrases.js';
 import { sanitiseUserFacingText } from './compose/output-safety.js';
-import type { ZodError } from 'zod';
+import type { ZodIssue } from 'zod';
 import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
 import type {
   PendingAction,
@@ -75,7 +75,6 @@ import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
 import { censusOptionFactorMagnitudes } from '../cee/draft/records/option-magnitude-census.js';
 import { emitContextTruncation } from './context/context-budget-telemetry.js';
 import { config } from '../config/index.js';
-import { floorGraphSigmaForCompute } from '../validators/numeric-bounds.js';
 import {
   computeGraphIdentityHash,
   computeVersionAnalysisAffectingHashRecord,
@@ -86,6 +85,7 @@ import {
 } from './model-management/version-creation-policy.js';
 import {
   attachModelVersionMutationReceipt,
+  receiptGraphIssues,
   toModelVersionMutationReceiptV1,
 } from './model-management/mutation-receipt.js';
 import type { ModelVersionMutationReceiptV1Local } from './model-management/mutation-receipt.js';
@@ -907,8 +907,6 @@ export function buildHeldLapseNotice(pa: PendingAction): string {
     : 'A held change has lapsed, say the word if you still want it.';
 }
 
-const PersistedGraphV3 = GraphV3.passthrough();
-
 /**
  * The carrier plan carries NO graph, deliberately.
  *
@@ -955,84 +953,20 @@ function deterministicMutationId(scenarioId: string, turnId: string): string {
  * history the Core journey depends on, which is worse than the dead-end this
  * change fixes, because a silent skip is indistinguishable from success.
  *
- * WHERE "VERSIONABLE" IS DECIDED — the GraphV3 parse, and it is a genuine
- * boundary rather than a convenience:
- *
- *   · A version row is GraphV3-shaped by contract, and its
- *     `analysis_affecting_hash` is what the CAS compares on. Deriving those
- *     identities from a graph that is NOT GraphV3 is the exact hazard
- *     `assertGraphForIdentity` exists to prevent — it is how something like
- *     `{nodes:[42,'x']}` would hash into the authoritative comparison value.
- *     So a non-conformant graph has NO valid version that could be written.
- *   · Therefore every parse failure is genuinely NON-VERSIONABLE. There is no
- *     "could have been versioned but something went wrong" case hiding among
- *     them — that case lives strictly AFTER a successful parse, and it throws.
- *
- * ⚠ WHY THE SKIP IS NOT NARROWED TO A "LEGACY-ONLY" PREDICATE, stated plainly
- * because the instinct to narrow it is right and the evidence refutes it.
- * An earlier revision skipped only when EVERY Zod issue was a missing required
- * field (`invalid_type` + `received: 'undefined'`) and threw on anything else,
- * to keep a corrupt graph from being laundered as legacy. Measured against the
- * real failing corpus, that predicate FAILS 15 legitimate commits, because
- * non-conformance in this estate is routinely not a missing field:
- *
- *     invalid_enum_value | causal | edges[].edge_type        (older vocabulary)
- *     invalid_type       | number | edges[].strength         (legacy scalar strength)
- *     too_small          |        | edges[].strength.std     (std: 0)
- *
- * The last one is decisive: `std: 0` is persisted VERBATIM and deliberately, by
- * a current code path whose whole point is that the numeric floor is not
- * applied at adopt so the identity hash stays stable. That is a CURRENT product
- * graph, not an old one — so "GraphV3 rejects it" cannot be read as "it is
- * corrupt", and a predicate that fails the turn on non-conformance would break
- * behaviour the product intends.
- *
- * The discrimination that was wanted is therefore delivered where it is safe
- * and useful — in the OBSERVABILITY, not the control flow. Every skip names
- * which kind of non-conformance it was, so the two populations stay countable
- * and a corruption spike is visible, without a fragile predicate deciding
- * whether a user's turn survives. What must never happen — a versionable graph
- * losing its version — is fully covered: a graph that parses ALWAYS gets a
- * version, and any failure after the parse throws.
- *
- * The DESIGNED no-version outcomes (flag off, no graph, and the policy's
- * `no_op` / `presentation_only`) stay silent: they are not faults, and an alarm
- * that fires on them would be worthless. Only non-conformance logs at `warn`
- * and emits `status: 'skipped'` with a closed-enum reason — the shape
- * `recordDecisionRecordForCommit` already uses for a skipped secondary record,
- * on the frozen registry member `v5.model_versions.version_created` whose only
- * emitter C8 removed.
+ * Save, receipt and restore use `receiptGraphIssues`: readable programs with unknown figures use their canonical
+ * contract and ingress projection, while legacy graphs keep GraphV3 admission (including the existing sigma floor).
+ * The check never replaces stored bytes; hashes below are derived from the original graph. Flag-off, absent-graph and
+ * no-op policy outcomes remain silent; an inadmissible graph still records its classified skip.
  */
 type ModelVersionCarrierSkipReason =
   | 'graph_missing_required_fields'
   | 'graph_incompatible_with_graph_v3';
 
-/**
- * Classify HOW the graph failed GraphV3. This selects a telemetry reason only —
- * both outcomes skip — so that "an old row is missing a field" and "a field is
- * present but unusable" remain separately countable.
- *
- * ⚠⚠ THE HEADER ABOVE STATES A POLICY CHOICE AS AN IMPOSSIBILITY, AND THAT IS
- * WRONG (C8-A review, 2026-08-25). It justifies skipping with "a non-conformant
- * graph has NO valid version that could be written". That sentence is FALSE for
- * at least two of the three classes it names: measured, `edge_type: 'causal'`
- * (older vocabulary) and a legacy scalar `strength` BOTH yield a computable
- * `graph_identity_hash` AND a computable `analysis_affecting_hash`, so a valid
- * version row was available for them the whole time — the same refutation that
- * closed the `std: 0` case.
- *
- * What is actually true is narrower and worth saying plainly: we CHOOSE not to
- * version a graph that fails the canonical contract, because a version row is
- * GraphV3-shaped by contract and admitting non-conformant bytes into the
- * durable record would make the version store's own guarantee untrue. That is a
- * defensible policy. It is not an impossibility, and stating it as one is how
- * the next session inherits a wrong belief and reasons from it — which is
- * exactly what happened with `std: 0`.
- */
-function classifyGraphV3NonConformance(error: ZodError): ModelVersionCarrierSkipReason {
+/** Classify the shared admission's issues for existing skip telemetry; never decide storage policy here. */
+function classifyGraphV3NonConformance(issues: readonly ZodIssue[]): ModelVersionCarrierSkipReason {
   const everyIssueIsAMissingField =
-    error.issues.length > 0 &&
-    error.issues.every(
+    issues.length > 0 &&
+    issues.every(
       (issue) => issue.code === 'invalid_type' && issue.received === 'undefined',
     );
   return everyIssueIsAMissingField
@@ -1121,46 +1055,10 @@ export function buildAtomicCommittedModelVersion(
   const policy = decideModelVersionCreation(metadata.baseGraphForInvariants, graph);
   if (!policy.create) return { kind: 'none' };
 
-  // The parse is a VALIDITY GATE over the bytes about to be persisted — its
-  // output is deliberately not used (see the plan interface).
-  //
-  // ⚠ THE GATE IS EVALUATED AGAINST THE SANCTIONED SIGMA PROJECTION, NOT THE
-  // RAW BYTES (Codex C8-A review defect 2 / H1, 2026-08-25). `EdgeStrengthV3.std`
-  // is `z.number().positive()` (schemas/cee-v3.ts:263), so a single `std: 0`
-  // edge failed this parse with `too_small` and the WHOLE scenario silently
-  // stopped versioning — turn and graph persisted, version/head/event/receipt
-  // dropped. That is the atomic-history violation this carrier's own header
-  // forbids, and the header's justification for tolerating it — that a graph
-  // GraphV3 rejects "has NO valid version that could be written" — is FALSE for
-  // this class: measured, `computeGraphIdentityHash` and
-  // `computeVersionAnalysisAffectingHashRecord` BOTH resolve on a `std: 0`
-  // graph, so a perfectly good version row was available the entire time.
-  //
-  // `std <= 0` is not a corrupt graph and not a legacy one. It is a CURRENT,
-  // routinely-produced ingress reality with an already-ratified treatment
-  // (`validators/numeric-bounds.ts`, "Cut 3"): the UI's own writer floors
-  // outbound sigma with `Math.max(0, …)` — a floor of ZERO — so it "emits std=0
-  // continuously", and the compute path handles it by flooring at the
-  // persisted-load boundary, metered as `cee.compute.sigma_floor`, while
-  // leaving the hashed bytes untouched. Skipping the version here invented a
-  // FOURTH treatment for the same value, and the only one that destroys data.
-  //
-  // So the gate reuses the sanctioned floor rather than minting a third policy.
-  // The floored graph is used for the PARSE ONLY. Everything downstream — the
-  // identity hash, the analysis-affecting hash and the bytes actually persisted
-  // — is still derived from `graph` verbatim, because `strength.std` is inside
-  // the analysis-affecting projection and rewriting it would fork identity
-  // (numeric-bounds.ts "Cut 2", the abc7d29 false-stale regression). Identity
-  // stays sacred; only the admissibility question is asked of the projection.
-  const gateGraph = floorGraphSigmaForCompute(graph).graph;
-  const parsed = PersistedGraphV3.safeParse(gateGraph);
-  if (!parsed.success) {
-    // NOT VERSIONABLE — no valid version row exists for this graph. Skip, and
-    // make the skip observable with the kind of non-conformance it was.
-    return skipAtomicCommittedModelVersion(
-      classifyGraphV3NonConformance(parsed.error),
-      metadata,
-    );
+  // The same admission the receipt/restore uses, before writing: an unknown figure is valid program state, not lost history.
+  const issues = receiptGraphIssues(graph);
+  if (issues.length > 0) {
+    return skipAtomicCommittedModelVersion(classifyGraphV3NonConformance(issues), metadata);
   }
 
   // VERSIONABLE — a version MUST be created from here on. Hash the EXACT object
