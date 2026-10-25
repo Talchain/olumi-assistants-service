@@ -61,7 +61,7 @@ export type ProgramChangeArgs = z.input<typeof ProgramChangeParams>;
 
 /**
  * What the agent may report of a Run: each option's own sentence, and the Run's `goal_chance` block UNCHANGED (its notes,
- * thresholds, each limit, the unchecked limits, and with several goals each goal's own chance and the joint).
+ * each limit, the unchecked limits, and with several goals each goal's own chance and the joint).
  */
 function runWords(run: StoredRun | null): Rec | null {
   if (run === null) return null;

@@ -12,8 +12,8 @@
  *     is the person's and no law was assumed; otherwise conditional, "if <Olumi's assumptions, listed>". Never a forecast.
  *   - Several goals: each goal's own chance per option (`per_target`), and the joint. A goal the compiler withheld (an ask
  *     or an unknown) is never folded into a partial joint: the joint is withheld with its reason, and only the goals the ask
- *     feeds wait (DL ruling d). A goal waiting on exactly ONE asked quantity gets a THRESHOLD, found by bisection over that
- *     quantity in its natural domain, said as a threshold, never as a chance.
+ *     feeds wait (DL ruling d). No threshold is searched for (alpha G10): a sampled grid cannot
+ *     prove a single crossing, so "at least X" could be false of the model itself.
  *   - main_driver (DL 24 Oct): for a computed chance, what it rests on most, by one figure at a time at its range's ends on
  *     the Run's own draws (`mainDriverOf`, DRIVER_MIN_SWING); a withheld chance says `{ kind: 'not_recorded' }`, the word
  *     DGAI's parser takes for "absent" (it refuses the WHOLE view when `main_driver` is missing).
@@ -87,12 +87,6 @@ export interface PresentBlocker {
   /** For `unknown` only: the quantity's own basis (the AI's words on why no one can size it yet). */
   readonly basis?: string;
 }
-/** How to try a value for a goal's one asked quantity: the model compiled with it set to the value tried. */
-export interface TippingProbe {
-  readonly build: (value: number) => ExecutableModel | null;
-  /** The asked quantity's natural domain, in its unit. Default from 0 upward, with no upper end. */
-  readonly domain?: readonly [number, number];
-}
 export interface PresentInput {
   readonly model: ExecutableModel;
   readonly result: SimResult;
@@ -109,8 +103,6 @@ export interface PresentInput {
   readonly leaves_out?: readonly string[];
   /** The model's left-out records (what it does not represent), in their own words, with what each concerns. */
   readonly left_out?: readonly { readonly text: string; readonly concerns: readonly string[] }[];
-  /** Per withheld goal id: how to probe its one asked quantity. */
-  readonly tipping?: Readonly<Record<string, TippingProbe>>;
   /** The Run's own record. Absent: `run` is null. */
   readonly run?: { readonly run_id: string; readonly graph_hash_at_run: string; readonly computed_at: string };
   /** The caller's currentness check of this Run (graph hash equality). Absent: unknown. */
@@ -122,15 +114,6 @@ export type PresentCell =
   | { readonly kind: 'figure'; readonly display: string; readonly face: string;
       readonly detail: { readonly precision_95: readonly [number, number]; readonly draws: number; readonly precision_words: string } }
   | { readonly kind: 'withheld'; readonly face: string; readonly why: string; readonly reasons: readonly { readonly code: string; readonly message: string | null }[] };
-export interface PresentThreshold {
-  readonly kind: 'threshold';
-  readonly goal_id: string;
-  readonly option_id: string;
-  readonly quantity: string;
-  readonly cmp: '>=' | '<=';
-  readonly value: number;
-  readonly words: string;
-}
 export interface PresentedAnalysisView {
   readonly schema: 'canonical_analysis_view.v1';
   readonly source: 'stored_run_facts';
@@ -153,7 +136,6 @@ export interface PresentedAnalysisView {
       readonly per_target: readonly { readonly constraint_id: string; readonly words: string;
         readonly options: readonly { readonly option_id: string; readonly display: string }[] }[];
     };
-    readonly thresholds?: readonly PresentThreshold[];
     readonly limits?: readonly { readonly constraint_id: string; readonly words: string;
       readonly options: readonly { readonly option_id: string; readonly display: string }[] }[];
     readonly unchecked_limits?: readonly { readonly limit_id: string; readonly words: string }[];
@@ -187,14 +169,14 @@ export const needsAnswer = (blockers: readonly PresentBlocker[], ids: ReadonlySe
   blockers.some((b) => b.code !== 'unknown' && (b.code === 'no_goal' || b.scope.some((s) => ids.has(s))));
 const NEEDS_ANSWER_FACE = 'Not shown yet: needs your answer';
 const NOT_SHOWN_FACE = 'Chance not shown yet';
-const TIPPING_DRAWS = 4000;
+const SWEEP_DRAWS = 4000;
 
 /**
  * WHAT A COMPUTED CHANCE RESTS ON MOST (DL 24 Oct; the guiding principle: provisional means the person can change something
  * and see how much it matters). One figure at a time: each ranged input the option's chance rests on (never one an option
  * sets: a choice, not an uncertainty) is set to its range's low end, its middle and its high end (their stated ends for a
  * person's range), and the model is simulated again on the Run's seed. Every input has its own stream (prng.ts), so the
- * others keep the headline's draws; the sweep reads the first TIPPING_DRAWS of them. The swing is the highest chance less
+ * others keep the headline's draws; the sweep reads the first SWEEP_DRAWS of them. The swing is the highest chance less
  * the lowest of the three (buddy, #3728: a chance can peak in the middle, so the ends alone are no test). The largest swing
  * over DRIVER_MIN_SWING is the driver; otherwise none is licensed. A finding in this model, never advice.
  */
@@ -372,12 +354,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   const roots = [...model.goals.flatMap((g) => [g.quantity, g.target, ...(g.per !== undefined ? [g.per] : [])]),
     ...model.limits.flatMap((l) => [l.quantity, l.bound, ...(l.per !== undefined ? [l.per] : [])])];
 
-  // ── The thresholds: a goal waiting on exactly one asked quantity ─────────────────────────────────────────────────────────
   const askOf = new Map((input.asks ?? []).map((a) => [a.quantity_id, a] as const));
-  const thresholds: PresentThreshold[] = waiting.flatMap((g) => {
-    const probe = input.tipping?.[g.goal_id], ask = g.asks.length === 1 ? askOf.get(g.asks[0]!) : undefined;
-    return probe === undefined || ask === undefined ? [] : tippingThresholds(g, ask, probe, result.seed, optionLabel);
-  });
 
   // ── Limits (S3 smoke fix 3): each limit's own outcome is said, and a limit not yet checked is named with what it needs ─
   const givenLimits: readonly PresentLimit[] = input.limits ?? [];
@@ -453,7 +430,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
   // ── What each computed chance rests on most (DRIVER_MIN_SWING): each input at its low end, middle and high end, cached ──
   const switches = new Set(model.options.flatMap((o) => o.sets.map((s) => s.quantity)));
   const SETTINGS = ['low end', 'middle', 'high end'];
-  const sweepDraws = Math.min(TIPPING_DRAWS, result.draws);
+  const sweepDraws = Math.min(SWEEP_DRAWS, result.draws);
   const atEnds = new Map<string, readonly SimResult[]>();
   const endsOf = (x: Quantity & { dist: RangeDist }): readonly SimResult[] => {
     if (!atEnds.has(x.id)) atEnds.set(x.id, [x.dist.low, (x.dist.low + x.dist.high) / 2, x.dist.high].map((value) => simulate({ ...model, quantities: model.quantities
@@ -529,7 +506,6 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     ...(covered.length > 0 && notCovered.length > 0 ? [`Covers: ${listWords(covered)} · Leaves out: ${listWords(notCovered.map(q))}`] : []),
     ...notInRun.map((w) => `The ${w.kind} ${q(w.label)} is not in this run: ${w.reason}`),
     ...(uncheckedLine !== undefined ? [stop(uncheckedLine)] : []),
-    ...thresholds.map((t) => t.words),
   ];
   const several = allGoals.length >= 2;
   const perTarget = !several ? [] : model.goals.flatMap((g) => {
@@ -549,7 +525,6 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
         : { status: 'withheld' as const, line: `The chance of meeting all ${allGoals.length} goals together waits for ${listWords(waiting.map((g) => q(g.label)))}; each goal that can be worked out is shown on its own.` },
       per_target: perTarget,
     } } : {}),
-    ...(thresholds.length > 0 ? { thresholds } : {}),
     // Each limit's own chance per option (additive; the DGAI reads the words in the cell and the notes).
     ...(model.limits.length > 0 ? { limits: model.limits.flatMap((l, i) => limitWords[i] === undefined ? [] : [{ constraint_id: l.id, words: limitWords[i]!,
       options: result.options.flatMap((o) => {
@@ -573,72 +548,5 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     options,
     ...(Object.keys(goal_chance).length > 0 ? { goal_chance } : {}),
   };
-}
-
-/**
- * The value of a goal's one asked quantity at which, in this model, the goal tips from not met to met, per option. Bisection
- * over the quantity's natural domain, on the Run's own seed (the same draws at every probe). Met = every draw meets it when
- * the rest of the model is fixed, else more draws meet it than not (said so). None where the goal does not tip exactly once
- * in the domain, or where a probe does not compile. A threshold is a value of the quantity, never a chance.
- */
-export function tippingThresholds(goal: PresentGoal, ask: PresentAsk, probe: TippingProbe, seed: number,
-  optionLabel: ReadonlyMap<string, string>): PresentThreshold[] {
-  const [lo0, hi0] = probe.domain ?? [0, Infinity];
-  const cache = new Map<number, { readonly result: SimResult; readonly exact: boolean } | null>();
-  const probed = (v: number): { readonly result: SimResult; readonly exact: boolean } | null => {
-    if (!cache.has(v)) {
-      const m = probe.build(v);
-      cache.set(v, m === null ? null : { result: simulate(m, { seed, draws: TIPPING_DRAWS }),
-        exact: !m.quantities.some((x) => x.dist?.kind === 'range') && m.risks.length === 0 });
-    }
-    return cache.get(v)!;
-  };
-  const run = (v: number): SimResult | null => probed(v)?.result ?? null;
-  const exact = (v: number): boolean => probed(v)?.exact === true;
-  const metAt = (v: number, optionId: string): boolean | undefined => {
-    const r = run(v);
-    const g = r?.options.find((o) => o.option_id === optionId)?.per_goal.find((x) => x.goal_id === goal.goal_id);
-    // A probe whose goal is withheld (a nonfinite draw) says nothing about the threshold.
-    if (g === undefined || isWithheld(g)) return undefined;
-    return exact(v) ? g.chance === 1 : g.chance >= 0.5;
-  };
-  const first = run(Number.isFinite(lo0) ? lo0 : 0);
-  if (first === null) return [];
-  return first.options.flatMap((o): PresentThreshold[] => {
-    const met = (v: number) => metAt(v, o.option_id);
-    let lo = lo0, hi = hi0;
-    if (!Number.isFinite(hi)) {
-      hi = Math.max(1, Math.abs(lo) * 2);
-      while (met(hi) === met(lo) && hi < 1e15) hi *= 2;
-    }
-    const mLo = met(lo), mHi = met(hi);
-    if (mLo === undefined || mHi === undefined || mLo === mHi) return [];
-    // Exactly one crossing: a second change of state on a grid means no single threshold can be said.
-    const grid = Array.from({ length: 11 }, (_, i) => lo + ((hi - lo) * i) / 10).map(met);
-    if (grid.some((x) => x === undefined) || grid.slice(1).filter((x, i) => x !== grid[i]).length !== 1) return [];
-    for (let i = 0; i < 200 && hi - lo > 1e-9 * Math.max(1, Math.abs(hi)); i++) {
-      const mid = (lo + hi) / 2;
-      if (met(mid) === mLo) lo = mid; else hi = mid;
-    }
-    // "At least" rounds up and "at most" rounds down, to three significant figures, so the threshold stays true.
-    const up = mHi === true;
-    let value = round3(up ? hi : lo, up);
-    // A strict goal is not met AT its crossing: one more step on the met side.
-    if (met(value) !== true) value = round3(value + (up ? 1 : -1) * stepOf(value), up);
-    if (met(value) !== true) return [];
-    const opt = q(optionLabel.get(o.option_id) ?? o.option_id);
-    const verb = exact(value) ? 'is met' : 'is more likely met than not';
-    return [{ kind: 'threshold', goal_id: goal.goal_id, option_id: o.option_id, quantity: ask.quantity_id, cmp: up ? '>=' : '<=', value,
-      words: `Threshold: in this model, ${q(goal.label)} ${verb} with ${opt} if ${q(ask.label)} is ${up ? 'at least' : 'at most'} ${say(value, ask.unit)}.` }];
-  });
-}
-
-const stepOf = (x: number): number => (x === 0 ? 1e-3 : 10 ** (Math.floor(Math.log10(Math.abs(x))) - 2));
-function round3(x: number, up: boolean): number {
-  if (x === 0 || !Number.isFinite(x)) return x;
-  const step = stepOf(x);
-  // The bisection stops within 1e-9 of the crossing; a 1e-6 step tolerance keeps a crossing ON a step from rounding past it.
-  const r = (up ? Math.ceil(x / step - 1e-6) : Math.floor(x / step + 1e-6)) * step;
-  return Number(r.toPrecision(12));
 }
 
