@@ -620,6 +620,20 @@ function withheldList(options: readonly OptionResult[]): WithheldChanceEntry[] {
   ]);
 }
 
+/**
+ * ADMISSION (alpha G11): what a run of this model costs, from its shape alone, before anything is allocated. `evaluations` is
+ * runOption's inner loop: every quantity at each time 0..periods, in every draw, for every option. `bytes` is what the run
+ * holds at once: each ranged input's draws with its terciles (16 per draw, the sort's index included), each risk's uniforms,
+ * every option's tallies, and one option's values.
+ */
+export function costOf(model: ExecutableModel, draws: number): { readonly evaluations: number; readonly bytes: number } {
+  const n = model.quantities.length, slots = (model.periods + 1) * n, options = model.options.length;
+  const ranged = model.quantities.filter((q) => q.dist?.kind === 'range').length;
+  const checks = model.goals.length + model.limits.length;
+  return { evaluations: options * slots * draws,
+    bytes: draws * (16 * ranged + 8 * model.risks.length + options * (9 * checks + 3)) + 8 * slots };
+}
+
 export function simulate(model: ExecutableModel, opts: SimulateOptions): SimResult {
   const draws = opts.draws ?? 10000;
   if (!wholeFrom(draws, 1)) throw new Error(`draws must be a whole number of at least 1, got ${draws}`);
