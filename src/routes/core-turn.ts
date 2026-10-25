@@ -230,7 +230,11 @@ function turnLog(result: AgentTurnResult | undefined, seen: Pick<AgentTurnResult
       outcome: c.attempt?.outcome ?? c.outcome, ms: c.duration_ms, input_tokens: c.usage?.input_tokens,
       output_tokens: c.usage?.output_tokens, cached_input_tokens: c.usage?.cached_input_tokens })),
     ...(result === undefined ? {} : { stopped_reason: result.stopped_reason, timing: result.timing }),
-    tool_calls: toolCallsOf(calls).map((c, i) => ({ ...c, ...(calls.tool_results[i] as { check?: TurnCheck } | undefined)?.check })),
+    tool_calls: toolCallsOf(calls).map((c, i) => {
+      const r = calls.tool_results[i] as { check?: TurnCheck; provider_error?: unknown } | undefined;
+      // A provider call that threw: its typed fields only (status, type, code, request id), never its message.
+      return { ...c, ...r?.check, ...(r?.provider_error !== undefined ? { provider_error: r.provider_error } : {}) };
+    }),
   };
 }
 

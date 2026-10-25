@@ -19,6 +19,7 @@ import { CORE_ALIGNED_INSTRUCTIONS } from '../../core-route/instructions.js';
 import { project } from '../../model-program/project.js';
 import { simulate } from '../../model-program/simulate/simulate.js';
 import { CANONICAL_JSON_SCHEMA, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX, UPDATE_PREFIX } from '../prompt.js';
+import { runModelProgramTurn } from '../turn.js';
 import { evaluateCanonical, seedOf, RUN_DRAWS } from '../evaluate.js';
 import { programReadOf, reopenProgram, savedProgramOf, sourceTextOf } from '../program-store.js';
 import { applyCanvasFigure, applyProgramChange, ProgramChangeParams, proposeProgramChange, readProgramContext, runProgram } from '../program-tools.js';
@@ -86,7 +87,8 @@ function graphRead(): Json {
 
 // ── the provider, stubbed at fetch: canned Responses streams, every request body kept ────────────────────────────────
 const sent: Json[] = [];
-let replies: string[] = [];
+/** Each call's answer: a model's JSON text (a completed stream), or the provider's own Response (a failure). */
+let replies: (string | (() => Response))[] = [];
 const sse = (text: string): Response => {
   const response = { id: `resp_${sent.length}`, object: 'response', status: 'completed', model: 'gpt-6.1-sol',
     output: [{ type: 'message', id: 'msg_1', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text, annotations: [] }] }],
@@ -120,7 +122,7 @@ describe('the model-program turn on the real core route', () => {
       sent.push(JSON.parse(String(init?.body ?? '{}')));
       const next = replies.shift();
       if (next === undefined) throw new Error('the test gave no reply for this call');
-      return sse(next);
+      return typeof next === 'function' ? next() : sse(next);
     }));
     vi.resetModules();
     process.env.AGENT_LANE_ENABLED = 'true';
@@ -195,6 +197,42 @@ describe('the model-program turn on the real core route', () => {
     expect(persisted).toBeNull();
     expect(r3.json().model_program.saved).toBe(false);
     expect(r3.json()._agent.tool_calls).toEqual([{ name: 'draft_canonical_model', outcome: 'refused', refusal: 'does_not_compile' }]);
+  });
+
+  it('25 Oct 03:55Z (every first draft "call failed: Error"; the cause, 429 insufficient_quota, recorded nowhere): a provider call that throws keeps its typed fields on the attempt and the summary log line, never its message or key; the same no_draft words', async () => {
+    const info = vi.spyOn((await import('../../../utils/telemetry.js')).log, 'info');
+    const QUOTA_WORDS = 'You exceeded your current quota, please check your plan and billing details.';
+    const KEY = 'sk-proj-ab**********************wxyz';
+    replies = [() => new Response(JSON.stringify({ error: { message: `${QUOTA_WORDS} Key: ${KEY}`, type: 'insufficient_quota', param: null, code: 'credit_balance_exhausted' } }),
+      { status: 429, headers: { 'content-type': 'application/json', 'x-request-id': 'req_quota_1', 'x-should-retry': 'false' } })];
+    const r = await turn({ message: BRIEF });
+    const line = info.mock.calls.flatMap(([o]) => ((o as Json)?.event === 'core_turn.summary' ? [o as Json] : [])).at(-1)!;
+    info.mockRestore();
+    expect(r.statusCode).toBe(200);
+    const j = r.json();
+    expect(sent).toHaveLength(1);
+    expect(persisted).toBeNull();
+    expect(j.assistant_text).toBe('I couldn\'t build a model that calculates from this yet (call failed: Error). Nothing was saved.');
+    expect(j._agent.tool_calls).toEqual([{ name: 'draft_canonical_model', outcome: 'refused', refusal: 'no_draft' }]);
+    const typed = { status: 429, type: 'insufficient_quota', code: 'credit_balance_exhausted', request_id: 'req_quota_1' };
+    expect(j.model_program.draft.attempts).toEqual([{ attempt: 0, errors: null, failed: 'call failed: Error', provider_error: typed, status: null, usage: null, ms: expect.any(Number) }]);
+    expect(line.tool_calls).toEqual([{ name: 'draft_canonical_model', outcome: 'refused', refusal: 'no_draft', provider_error: typed }]);
+    // Never the provider's message (it can echo input) nor the masked key in it: not on the wire, not in the log line.
+    for (const text of [r.body, JSON.stringify(line)]) for (const words of ['exceeded your current quota', 'sk-proj', 'wxyz']) expect(text).not.toContain(words);
+  });
+
+  it('25 Oct (the contrast): a call that throws a plain Error, or no Error at all, records null typed fields; nothing throws, and the words are as before', async () => {
+    const none = { status: null, type: null, code: null, request_id: null };
+    for (const [thrown, name] of [[new Error('socket hang up'), 'Error'], ['not an Error', 'error']] as const) {
+      const out = await runModelProgramTurn({ scenarioId: SCENARIO, turnId: randomUUID(), message: BRIEF, saved: { graph: null, identity: null }, dispatch,
+        call: async () => { throw thrown; } });
+      expect(out.assistantText).toBe(`I couldn't build a model that calculates from this yet (call failed: ${name}). Nothing was saved.`);
+      expect(out.toolCalls).toEqual([{ name: 'draft_canonical_model', ok: false, outcome: 'refused', refusal: 'no_draft' }]);
+      expect((out.payload.model_program['draft'] as Json).attempts).toEqual([{ attempt: 0, errors: null, failed: `call failed: ${name}`, provider_error: none, status: null, usage: null, ms: expect.any(Number) }]);
+      expect(out.toolResults[0]!.provider_error).toEqual(none);
+      expect(JSON.stringify(out.payload)).not.toContain('socket hang up');
+    }
+    expect(sent).toHaveLength(0);
   });
 
   it('step 3, simulate + present: the view is the simulator\'s result on the scenario\'s seed; the display graph is S1\'s projection', async () => {

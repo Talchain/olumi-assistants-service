@@ -98,9 +98,11 @@ export async function runModelProgramTurn(input: ProgramTurnInput): Promise<Prog
     if (draft.model === null || draft.compiled === null || draft.compiled.errors.length > 0) {
       const why = draft.model === null ? (draft.attempts.at(-1)?.failed ?? 'no draft came back') : `${draft.compiled!.errors.length} compile error(s) remain after ${draft.attempts.length - 1} repair(s)`;
       const model_program = { turn: 'draft', saved: false, draft: draftMeta, canonical: draft.model, compile: draft.compiled === null ? null : { compiles: false, errors: draft.compiled.errors } };
+      // A call that threw: its typed provider fields, for the turn's summary log line.
+      const provider_error = draft.attempts.at(-1)?.provider_error;
       return { assistantText: `I couldn't build a model that calculates from this yet (${why}). Nothing was saved.`,
         toolCalls: [{ name: 'draft_canonical_model', ok: false, outcome: 'refused', refusal: draft.model === null ? 'no_draft' : 'does_not_compile' }],
-        toolResults: [{ ok: false, mutated: false, ...model_program }], mutated: false, verifiedSave: false, payload: { canonical_analysis_view: null, model_program } };
+        toolResults: [{ ok: false, mutated: false, ...model_program, ...(provider_error !== undefined ? { provider_error } : {}) }], mutated: false, verifiedSave: false, payload: { canonical_analysis_view: null, model_program } };
     }
     // Host-owned: a draft is Olumi's reading until the person confirms it, so nothing in it is approved yet (step 2).
     program = { model_program: MODEL_PROGRAM, canonical: asDrafted(draft.model), seed: seedOf(input.scenarioId), person_words: [input.message], runs: [] };

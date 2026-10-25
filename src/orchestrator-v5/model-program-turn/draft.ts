@@ -24,11 +24,25 @@ export type CallOutput = { readonly text: string | null; readonly status: string
 /** One Responses call with the body as built here. Injectable, so a test can answer it without a network. */
 export type ResponsesCall = (body: StreamedResponsesBody) => Promise<CallOutput>;
 
+/**
+ * A failed call's typed fields as the SDK's APIError carries them (HTTP status, error type, error code, the provider's request
+ * id); null where the error has none (a plain Error). Never its message (OpenAI's can hold a masked key prefix or echo input),
+ * headers or body (25 Oct 03:55Z: every first draft failed as "call failed: Error"; the cause, 429 insufficient_quota, was lost).
+ */
+export type ProviderError = { readonly status: number | null; readonly type: string | null; readonly code: string | null; readonly request_id: string | null };
+const named = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null);
+export function providerErrorOf(err: unknown): ProviderError {
+  const e = (err !== null && typeof err === 'object' ? err : {}) as Record<string, unknown>;
+  return { status: typeof e['status'] === 'number' ? e['status'] : null, type: named(e['type']), code: named(e['code']), request_id: named(e['requestID']) };
+}
+
 export type DraftAttempt = {
   readonly attempt: number;
   /** The compiler's errors on this attempt's output; null when no model came back. */
   readonly errors: readonly CompileError[] | null;
   readonly failed?: string;
+  /** On a call that threw: the provider's typed fields (`providerErrorOf`). */
+  readonly provider_error?: ProviderError;
   readonly status: string | null;
   readonly usage: unknown;
   readonly ms: number;
@@ -83,7 +97,7 @@ export async function draftCanonicalModel(brief: string | readonly InputMessage[
     const t0 = Date.now();
     let out: CallOutput;
     try { out = await call(draftRequestBody(input)); } catch (err) {
-      attempts.push({ attempt: a, errors: null, failed: `call failed: ${err instanceof Error ? err.name : 'error'}`, status: null, usage: null, ms: Date.now() - t0 });
+      attempts.push({ attempt: a, errors: null, failed: `call failed: ${err instanceof Error ? err.name : 'error'}`, provider_error: providerErrorOf(err), status: null, usage: null, ms: Date.now() - t0 });
       break;
     }
     const ms = Date.now() - t0;
