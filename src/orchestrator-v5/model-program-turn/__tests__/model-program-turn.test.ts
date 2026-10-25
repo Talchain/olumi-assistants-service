@@ -19,6 +19,7 @@ import { CORE_ALIGNED_INSTRUCTIONS } from '../../core-route/instructions.js';
 import { project } from '../../model-program/project.js';
 import { simulate } from '../../model-program/simulate/simulate.js';
 import { CANONICAL_JSON_SCHEMA, DRAFTING_INSTRUCTIONS, REPAIR_PREFIX, UPDATE_PREFIX } from '../prompt.js';
+import { draftRequestBody, MAX_REPAIRS } from '../draft.js';
 import { runModelProgramTurn } from '../turn.js';
 import { evaluateCanonical, seedOf, RUN_DRAWS } from '../evaluate.js';
 import { programReadOf, reopenProgram, savedProgramOf, sourceTextOf } from '../program-store.js';
@@ -105,6 +106,8 @@ const turn = (payload: Json, headers: Record<string, string> = {}) => app.inject
 /** The drafter's WHOLE updated model for a change: the saved one with `edit` applied (what a faithful update returns). */
 const savedWith = (edit: (m: CanonicalModelT) => void): string => { const m = JSON.parse(JSON.stringify(persisted!.living_model.canonical)) as CanonicalModelT; edit(m); return JSON.stringify(m); };
 const setQ = (m: CanonicalModelT, id: string, f: Partial<CanonicalQuantityT>) => { m.quantities = m.quantities.map((x) => (x.id === id ? { ...x, ...f } : x)); };
+/** A drafter that returns the same model on every attempt, the first and each repair (an update's refusal is its repair). */
+const keeps = (draft: string): string[] => Array.from({ length: MAX_REPAIRS + 1 }, () => draft);
 const LOST_BASIS = 'Nobody has said how much baking time a new oven loses while the staff learn it.';
 /** Issue 40: the bakery with Olumi's link of unknown size, stated to lower sales, and any more of Olumi's links on the oven. */
 const withOlumiLinks = (m: CanonicalModelT, ...more: CanonicalQuantityT[]): CanonicalModelT => {
@@ -737,17 +740,18 @@ describe('the model-program turn on the real core route', () => {
     const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words };
     const args = { public_label: 'Oven price £2,500', basis: 'their answer', request: 'The oven price is their answer: about £2,500.', remove: [] };
     const answer = (quote: string) => savedWith((m) => setQ(m, 'oven_price', { status: 'known', value: 2500, question: null, quote, basis: APPROXIMATE_FIGURE }));
-    // Contrast first: a figure of theirs whose words are not theirs, verbatim, is refused, and nothing is proposed.
-    replies = [answer('about £2,500 I think')];
+    // Contrast first: a figure of theirs whose words are not theirs, verbatim, is refused after the drafter's repairs, and nothing is proposed.
+    replies = keeps(answer('about £2,500 I think'));
     expect(await proposeProgramChange(deps, ctx, args)).toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['oven_price'], check: 'their_words' } });
+    expect(sent).toHaveLength(MAX_REPAIRS + 1);
     replies = [answer(words)];
     const proposed = await proposeProgramChange(deps, ctx, args) as Json;
     expect(proposed.status, JSON.stringify(proposed)).toBe('ok');
-    // One drafter call per proposal: the person's words, the saved model and the change.
-    expect(sent).toHaveLength(2);
-    expect(sent[1]!.input.map((m: Json) => m.role)).toEqual(['user', 'assistant', 'user']);
+    // One drafter call for a proposal that passes: the person's words, the saved model and the change.
+    expect(sent).toHaveLength(MAX_REPAIRS + 2);
+    expect(sent.at(-1)!.input.map((m: Json) => m.role)).toEqual(['user', 'assistant', 'user']);
     // The update's request is prompt.ts's text, then the change (DL 24 Oct: the update text is prompt code).
-    expect(sent[1]!.input[2].content).toBe(`${UPDATE_PREFIX}\nThe change: The oven price is their answer: about £2,500.\nRemove: nothing`);
+    expect(sent.at(-1)!.input[2].content).toBe(`${UPDATE_PREFIX}\nThe change: The oven price is their answer: about £2,500.\nRemove: nothing`);
     // The card shows the change's substance, before and after, and whose it is.
     expect(proposed.data.changes).toEqual([{ id: 'oven_price', kind: 'quantity', action: 'change', label: 'oven price', before: 'no figure yet (in GBP/oven), still to be given, Olumi asks "What would the second oven cost?", no basis given, not in your words',
       after: `2,500 GBP/oven, known, no question, based on "${APPROXIMATE_FIGURE}", in your words "The oven would cost about £2,500."`, author: 'person' }]);
@@ -755,7 +759,7 @@ describe('the model-program turn on the real core route', () => {
     expect(registered).toHaveLength(1); // proposing saves nothing
     const applied = await applyProgramChange(deps, ctx, proposed.data.proposal_id) as Json;
     expect(applied).toMatchObject({ status: 'ok', data: { saved: true } });
-    expect(sent).toHaveLength(2);
+    expect(sent).toHaveLength(MAX_REPAIRS + 2);
     const after = persisted!.living_model.canonical as CanonicalModelT;
     expect(after.quantities.find((x) => x.id === 'oven_price')).toMatchObject({ status: 'known', value: 2500, low: null, high: null, author: 'person', quote: words, approval: 'approved', question: null });
     expect(after.quantities.filter((x) => x.id !== 'oven_price')).toEqual(before.quantities.filter((x) => x.id !== 'oven_price'));
@@ -898,10 +902,10 @@ describe('the model-program turn on the real core route', () => {
       d.conditions.push({ id: 'landlord_agrees', text: 'Only once the landlord agrees.', kind: 'prerequisite', concerns: ['second_oven'], author: 'person', party: null, quote: 'our landlord must agree first', approval: 'proposed', author_id: null });
     });
     // Left out with no listed removal: refused, and nothing is proposed.
-    replies = [edited(true)];
+    replies = keeps(edited(true));
     expect(await proposeProgramChange(deps, ctx(), args([]))).toMatchObject({ status: 'refused', reason: 'omitted_record', data: { ids: ['keep_one'] } });
     // Listed but still there; listed but no such record.
-    replies = [edited(false)];
+    replies = keeps(edited(false));
     expect(await proposeProgramChange(deps, ctx(), args(['keep_one']))).toMatchObject({ status: 'refused', reason: 'removal_not_applied', data: { ids: ['keep_one'] } });
     replies = [edited(true)];
     expect(await proposeProgramChange(deps, ctx(), args(['keep_one', 'no_such_record']))).toMatchObject({ status: 'refused', reason: 'unknown_removal', data: { ids: ['no_such_record'] } });
@@ -933,7 +937,7 @@ describe('the model-program turn on the real core route', () => {
     expect(after.history.slice(-2).map((h) => [h.id, h.change])).toEqual([['oven_price', 'superseded'], ['keep_one', 'withdrawn']]);
     expect(JSON.parse(after.history.at(-1)!.old)).toEqual(bakery().options[1]);
     // Its id is never used again: a new item under it is refused.
-    replies = [savedWith((d) => { d.options.push({ ...bakery().options[1]!, label: 'Keep one oven after all' }); })];
+    replies = keeps(savedWith((d) => { d.options.push({ ...bakery().options[1]!, label: 'Keep one oven after all' }); }));
     expect(await proposeProgramChange(deps, ctx(), { ...args([]), request: 'Bring back keeping one oven.' })).toMatchObject({ status: 'refused', reason: 'recycled_id', data: { ids: ['keep_one'] } });
   });
 
@@ -949,7 +953,7 @@ describe('the model-program turn on the real core route', () => {
     const deps = { dispatch, proposals: new ProposalStore() };
     const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: ['Make it 3 weeks to the opening.'], user_turn_text: 'Make it 3 weeks to the opening.' });
     const propose = async (edit: (d: CanonicalModelT) => void) => {
-      replies = [savedWith(edit)];
+      replies = keeps(savedWith(edit));
       return await proposeProgramChange(deps, ctx(), { public_label: 'The opening', basis: 'they said so', request: 'The opening is in 3 weeks.', remove: [] }) as Json;
     };
     const timing = (offset: string) => (d: CanonicalModelT) => { d.goals = d.goals.map((g) => ({ ...g, measure: { ...g.measure!, window: { ...g.measure!.window!, origin_offset: offset } } })); };
@@ -989,7 +993,7 @@ describe('the model-program turn on the real core route', () => {
     const words = 'We now bake 320 loaves a week, our baker says.';
     const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words });
     const propose = async (edit: (d: CanonicalModelT) => void) => {
-      replies = [savedWith(edit)];
+      replies = keeps(savedWith(edit));
       return await proposeProgramChange(deps, ctx(), { public_label: 'Base sales', basis: 'their words', request: 'Base sales are now 320 a week.', remove: [] }) as Json;
     };
     // (1) Two fields of one item change (its figure, and the question it carries): both are on the card, each saved → proposed.
@@ -1027,10 +1031,10 @@ describe('the model-program turn on the real core route', () => {
     const deps = { dispatch, proposals: new ProposalStore() };
     const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: ['Make the impact 9, and add the other effect.'], user_turn_text: 'Make the impact 9, and add the other effect.' });
     const relink = (to: string) => async () => {
-      replies = [savedWith((d) => {
+      replies = keeps(savedWith((d) => {
         d.relations = d.relations.map((r) => (r.form === 'effect'
           ? { ...r, terms: [{ ...r.terms[0]!, coefficient: to }, { driver: 'one_oven', coefficient: 'other', author: 'olumi' as const, quote: null, ...at }] } : r));
-      })];
+      }));
       return await proposeProgramChange(deps, ctx(), { public_label: 'The impact', basis: 'their words', request: 'The impact is 9, with the other effect added.', remove: [] }) as Json;
     };
     // Link 1's size moves from the 1 to the 9 (both "impact") while link 2 is added: both figures, and the new link in full.
@@ -1087,7 +1091,7 @@ describe('the model-program turn on the real core route', () => {
       d.risks.push({ id: 'breakdown', label, occurrence: 'breakdown_chance', severity: 'lost_loaves', effect_on: 'sales', mode: 'add', starts_after_periods: 0, author: 'olumi', quote: null, ...at });
     });
     const propose = async (body: string) => {
-      replies = [body];
+      replies = keeps(body);
       return await proposeProgramChange(deps, ctx(), { public_label: 'A risk', basis: 'they said so', request: 'Add the oven breaking down as a risk.', remove: [] }) as Json;
     };
     expect(await propose(risky(''))).toMatchObject({ status: 'refused', reason: 'invalid_change_entry', data: { ids: ['breakdown'] } });
@@ -1328,7 +1332,7 @@ describe('the model-program turn on the real core route', () => {
     const propose = (c = ctx()) => proposeProgramChange(deps, c, ProgramChangeParams.parse({ public_label: 'Measure the aim', basis: 'their answer',
       request: 'The aim is measured by sales: at least 380 loaves a week, within 4 weeks.', remove: [] })) as Promise<Json>;
     // Negative first: a figure of theirs under words they did not write is refused, and nothing is proposed.
-    replies = [measured('at least 400 loaves a week')];
+    replies = keeps(measured('at least 400 loaves a week'));
     expect(await propose()).toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['more_loaves_target'] } });
     replies = [measured(words)];
     const c = ctx();
@@ -1405,6 +1409,101 @@ describe('the model-program turn on the real core route', () => {
     expect(await applyProgramChange(deps, c, p.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
     expect((persisted!.living_model.canonical as CanonicalModelT).goals[0]).toMatchObject({ question: null, measure: { target: 'more_loaves_target' }, approval: 'approved' });
     expect(((persisted!.living_model.runs.at(-1).result.compile as Json).blockers as Json[]).filter((x) => x.id === 'more_loaves')).toEqual([]);
+  });
+
+  it('REFUSED-CHANGE-CLASS 25 Oct (#13, #15, the repair gap): the validator\'s refusal of a compiling draft goes back to the drafter in the same conversation, as the compiler\'s errors do; its corrected model is ONE card, approved and saved; a draft that passes first time sends the update\'s request alone, byte for byte', async () => {
+    replies = [JSON.stringify(bakery())];
+    await turn({ message: BRIEF });
+    const read = programReadOf(persisted!);
+    const saved = (read.kind === 'program' ? read.program.canonical : null)!;
+    const words = 'The oven would cost about £2,500.';
+    const request = 'The oven price is their answer: about £2,500.';
+    const deps = { dispatch, proposals: new ProposalStore() };
+    const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words });
+    const args = { public_label: 'Oven price £2,500', basis: 'their answer', request, remove: [] };
+    const priced = (quote: string) => savedWith((m) => setQ(m, 'oven_price', { status: 'known', value: 2500, question: null, quote, basis: APPROXIMATE_FIGURE }));
+    const [wrong, right] = [priced(request), priced(words)];
+    // Passing first time: ONE call, its body exactly the update's own request (no repair turn, nothing added); the next reply unused.
+    replies = [right, 'unused'];
+    sent.length = 0;
+    const once = await proposeProgramChange(deps, ctx(), args) as Json;
+    expect(once.status, JSON.stringify(once)).toBe('ok');
+    expect(sent).toHaveLength(1);
+    expect(replies).toEqual(['unused']);
+    expect(JSON.stringify(sent[0])).toBe(JSON.stringify({ ...draftRequestBody([{ role: 'user', content: `${BRIEF}\n\n${words}` }, { role: 'assistant', content: JSON.stringify(saved) },
+      { role: 'user', content: `${UPDATE_PREFIX}\nThe change: ${request}\nRemove: nothing` }]), stream: true }));
+    // The measured class: the drafter quotes Olumi's own request as their words. The validator's sentence goes back as its
+    // repair (the draft as the assistant's turn), and the corrected draft is the card.
+    replies = [wrong, right, 'unused'];
+    sent.length = 0;
+    const c = ctx();
+    const p = await proposeProgramChange(deps, c, args) as Json;
+    expect(p.status, JSON.stringify(p)).toBe('ok');
+    expect(sent).toHaveLength(2);
+    expect(replies).toEqual(['unused']);
+    expect(sent[1]!.input).toEqual([...sent[0]!.input, { role: 'assistant', content: wrong },
+      { role: 'user', content: `Olumi's checks found these problems with the change. Return the whole model again with them fixed, keeping everything else as it was.\n- oven_price: the person's items must quote their words exactly.` }]);
+    // The checks' own prefix, never the compiler's (DL 25 Oct): a compiler error keeps REPAIR_PREFIX (step 2).
+    expect(String(sent[1]!.input.at(-1).content)).not.toContain(REPAIR_PREFIX);
+    expect({ ...sent[1], input: null }).toEqual({ ...sent[0], input: null });
+    expect(p.data.changes).toEqual([{ id: 'oven_price', kind: 'quantity', action: 'change', label: 'oven price', before: 'no figure yet (in GBP/oven), still to be given, Olumi asks "What would the second oven cost?", no basis given, not in your words',
+      after: `2,500 GBP/oven, known, no question, based on "${APPROXIMATE_FIGURE}", in your words "${words}"`, author: 'person' }]);
+    expect(registered).toHaveLength(1);
+    expect(await applyProgramChange(deps, c, p.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
+    expect(registered).toHaveLength(2);
+    expect((persisted!.living_model.canonical as CanonicalModelT).quantities.find((x) => x.id === 'oven_price')).toMatchObject({ status: 'known', value: 2500, author: 'person', quote: words, approval: 'approved' });
+  });
+
+  it('REFUSED-CHANGE-CLASS 25 Oct (the budget kept): a drafter that keeps failing the validator gets its sentence back at most MAX_REPAIRS times, then the turn refuses exactly as before, with no extra call; a refusal it cannot act on never goes back', async () => {
+    replies = [JSON.stringify(bakery())];
+    await turn({ message: BRIEF });
+    const words = 'The oven would cost about £2,500.';
+    const deps = { dispatch, proposals: new ProposalStore() };
+    const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words });
+    const args = (remove: string[]) => ({ public_label: 'Oven price', basis: 'their answer', request: 'The oven price is their answer: about £2,500.', remove });
+    // Beside the answer, their base sales rewritten under their EARLIER words (the brief's): refused for this turn's words.
+    const bad = savedWith((m) => { setQ(m, 'oven_price', { status: 'known', value: 2500, question: null, quote: words, basis: APPROXIMATE_FIGURE }); setQ(m, 'base_sales', { value: 320 }); });
+    replies = [...keeps(bad), 'unused'];
+    sent.length = 0;
+    expect(await proposeProgramChange(deps, ctx(), args([]))).toEqual({ status: 'refused', reason: 'unverified_person_words',
+      detail: 'base_sales: the person\'s items must quote their words exactly.', data: { ids: ['base_sales'], check: 'this_turn' } });
+    expect(sent).toHaveLength(MAX_REPAIRS + 1);
+    expect(replies).toEqual(['unused']);
+    // Each repair: the validator's sentence and, refused for this turn's words, those words exactly.
+    const repair = `Olumi's checks found these problems with the change. Return the whole model again with them fixed, keeping everything else as it was.\n- base_sales: the person's items must quote their words exactly. A figure of theirs changes only with their words in this turn, "${words}"; otherwise it stays as saved.`;
+    expect(sent.at(-1)!.input.slice(3)).toEqual([{ role: 'assistant', content: bad }, { role: 'user', content: repair }, { role: 'assistant', content: bad }, { role: 'user', content: repair }]);
+    expect(registered).toHaveLength(1);
+    // Not one the drafter can act on (an id to remove that the model never had): one call, never sent back.
+    replies = [bad, 'unused'];
+    sent.length = 0;
+    expect(await proposeProgramChange(deps, ctx(), args(['no_such_record']))).toMatchObject({ status: 'refused', reason: 'unknown_removal', data: { ids: ['no_such_record'] } });
+    expect(sent).toHaveLength(1);
+  });
+
+  it('REFUSED-CHANGE-CLASS 25 Oct (#5–7, #14): an answer on a worked-out figure is refused naming its own inputs, from its relation in the model it sits on (the saved one, or the drafter\'s), so the agent can answer those', async () => {
+    replies = [JSON.stringify(bakery())];
+    await turn({ message: BRIEF });
+    const words = 'We sell 320 loaves a week now: 200 in the shop and 120 at the market.';
+    const deps = { dispatch, proposals: new ProposalStore() };
+    const ctx = () => ({ scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words });
+    const answer = (id: string) => ({ id, status: 'known' as const, author: 'person' as const, value: 320, low: null, high: null, range_kind: null, party: null, quote: 'We sell 320 loaves a week now', basis: null });
+    // On the saved model: sales is an effect of its base, its driver and its link's size; no drafter call.
+    sent.length = 0;
+    expect(await proposeProgramChange(deps, ctx(), { public_label: 'Sales', basis: 'their answer', request: '', remove: [], answers: [answer('sales')] })).toEqual({ status: 'refused', reason: 'not_an_answer',
+      detail: '"sales" is worked out by its relation; answer one of its inputs: "base sales" (base_sales), "ovens added" (ovens_added), "sold per oven" (sold_per_oven).' });
+    expect(sent).toHaveLength(0);
+    // On the drafter's model, whose change makes the answered figure worked out (split into two parts): its inputs THERE,
+    // and the refusal is the agent's, never sent back to the drafter.
+    const split = savedWith((m) => {
+      setQ(m, 'base_sales', { kind: 'derived', status: 'derived', author: 'olumi', value: null, quote: null });
+      m.quantities.push(q('shop_sales', 'loaf/week', { value: 200, quote: '200 in the shop' }), q('market_sales', 'loaf/week', { value: 120, quote: '120 at the market' }));
+      m.relations.push({ form: 'definition', id: 'base_rel', defines: 'base_sales', op: 'sum', parts: [{ id: 'shop_sales', sign: 1 }, { id: 'market_sales', sign: 1 }], author: 'olumi', quote: null, ...at });
+    });
+    replies = [split, 'unused'];
+    expect(await proposeProgramChange(deps, ctx(), { public_label: 'Sales', basis: 'their answer', request: 'Split base sales into the shop and the market.', remove: [], answers: [answer('base_sales')] }))
+      .toEqual({ status: 'refused', reason: 'not_an_answer', detail: '"base sales" is worked out by its relation; answer one of its inputs: "shop sales" (shop_sales), "market sales" (market_sales).' });
+    expect(sent).toHaveLength(1);
+    expect(replies).toEqual(['unused']);
   });
 
   it('DL 23 Oct (batch 4 marketing-r2): what a measure leaves out is kept in their words and named; the chance says what it covers and what it leaves out, never that it covers everything', () => {
@@ -1501,9 +1600,9 @@ describe('the model-program turn on the real core route', () => {
       .toMatchObject({ status: 'refused', reason: 'not_an_answer' });
     expect(sent).toHaveLength(0);
     // On the redraft path too (buddy 24 Oct): a person's figure whose status the drafter changes needs their words this turn.
-    replies = [savedWith((d) => setQ(d, 'developer_hiring_cost', { status: 'unknown', question: null, quote: saved.brief.slice(0, 40), basis: 'They do not know it yet.' }))];
+    replies = keeps(savedWith((d) => setQ(d, 'developer_hiring_cost', { status: 'unknown', question: null, quote: saved.brief.slice(0, 40), basis: 'They do not know it yet.' })));
     expect(await ask('They do not know it.', [], { request: 'Mark the developer cost as not known yet.' })).toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['developer_hiring_cost'] } });
-    expect(sent).toHaveLength(1);
+    expect(sent).toHaveLength(MAX_REPAIRS + 1);
     // A structural change still goes to Olumi's drafter: one call, the whole model.
     replies = [savedWith((d) => { d.options.push({ ...d.options[0]!, id: 'contractor', label: 'Hire a contractor', sets: [], quote: 'a contractor option' }); })];
     const structural = await ask('Also add a contractor option.', [], { request: 'Add a contractor option.' });
@@ -1608,7 +1707,7 @@ describe('the model-program turn on the real core route', () => {
       d.goals.push({ ...d.goals[0]!, id: 'early_loaves', label: '340 loaves a week within 3 months', quote: words.slice(0, -1),
         measure: { ...d.goals[0]!.measure!, target: 'early_target', window: { origin_event: null, origin_offset: null, start: 0, periods: 'early_months' } } });
     });
-    const propose = (reply: string) => { replies = [reply]; return proposeProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words],
+    const propose = (reply: string) => { replies = keeps(reply); return proposeProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID(), verified_user_messages: [words],
       user_turn_text: words }, ProgramChangeParams.parse({ public_label: 'An early goal', basis: 'their goal', request: 'Add their goal: 340 loaves a week within the first 3 months.', remove: [] })) as Promise<Json>; };
     // Refused, by check and id: their 1 year said as 1 month (only the unit changes, so the amount does), as 13 months, or as
     // 52 weeks (weeks in a year is an average, not exact); and their figure turned into a question.
@@ -1758,15 +1857,15 @@ describe('the model-program turn on the real core route', () => {
     expect(await propose()).toMatchObject({ status: 'refused', reason: 'does_not_compile' });
     expect(sent).toHaveLength(3);
     // Refused: a figure only they know, INVENTED as theirs (words they never wrote).
-    replies = [completed((d) => setQ(d, 'features_now', { status: 'known', value: 12, question: null, quote: 'about 12 a month' }))];
+    replies = keeps(completed((d) => setQ(d, 'features_now', { status: 'known', value: 12, question: null, quote: 'about 12 a month' })));
     expect(await propose()).toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['features_now'] } });
     // Refused: one of their figures rewritten under their EARLIER words (their budget, quoted from the brief).
     const budget = before.quantities.find((x) => x.author === 'person' && x.value !== null && x.kind === 'fact')!;
-    replies = [completed((d) => setQ(d, budget.id, { value: budget.value! + 1 }))];
+    replies = keeps(completed((d) => setQ(d, budget.id, { value: budget.value! + 1 })));
     expect(await propose()).toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: [budget.id], check: 'this_turn' } });
     // Refused: a record left out without a listed removal; nothing is removed unless the person asks.
     const dropped = before.options[0]!.id;
-    replies = [completed((d) => { d.options = d.options.filter((o) => o.id !== dropped); })];
+    replies = keeps(completed((d) => { d.options = d.options.filter((o) => o.id !== dropped); }));
     expect(await propose()).toMatchObject({ status: 'refused', reason: 'omitted_record', data: { ids: [dropped] } });
     // A change the drafter makes beyond the request is never hidden: an option it renames is on the card, before and after.
     replies = [completed((d) => { d.options = d.options.map((o) => ({ ...o, label: `${o.label} (Olumi)` })); })];

@@ -6,7 +6,8 @@
  *  · propose_change: an ANSWER to a listed question is set on the item it answers, exactly (`answered`, the same builder as
  *    the canvas edit; no AI call); a structural change, in words with the ids to remove (or an answer with no figure on a
  *    goal, limit or left-out record), has Olumi's drafter write the
- *    WHOLE updated model (`proposePostimage`). The one validator checks either exactly (`validatePostimage`), and it is compiled
+ *    WHOLE updated model (`proposePostimage`; the validator's refusal of a draft is its repair, within the compiler's budget).
+ *    The one validator checks either exactly (`validatePostimage`), and it is compiled
  *    and evaluated now, so the card the person approves holds the exact model, EVERY change on it, and the Run it would
  *    store; nothing is saved;
  *  · apply_change: on the person's approval of THAT proposal, its model and Run are written as ONE core write on the
@@ -157,7 +158,16 @@ async function prepare(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs)
   const request = said.length === 0 ? args.request : [args.request.trim(), ...said].filter((x) => x !== '').join('\n');
   const set = answered(program.canonical, figures);
   if (typeof set === 'string') return refused('not_an_answer', set);
-  const drafted = request.trim() !== '' || args.remove.length > 0 ? await proposePostimage(set.model, words, request, args.remove, ledgeredResponsesCall()) : set;
+  const checks = { removals: args.remove, words, fresh, approver: ctx.authenticated_user_id };
+  // The validator's refusal of a compiling draft is the drafter's repair while it has one left (REFUSED-CHANGE-CLASS 25 Oct,
+  // the repair gap): checked as below, on the draft with their answers set again. Never one it cannot act on: an answer the
+  // draft removed or made worked out (refused below by name), or the removal of an id the model never had.
+  const repairable = (m: CanonicalModelT): readonly string[] => {
+    const d = answered(m, figures);
+    const r = typeof d === 'string' ? null : validatePostimage(program.canonical, d.model, checks);
+    return r === null || r.ok || r.ids.length === 0 || r.code === 'unknown_removal' ? [] : [repairLine(r, fresh)];
+  };
+  const drafted = request.trim() !== '' || args.remove.length > 0 ? await proposePostimage(set.model, words, request, args.remove, ledgeredResponsesCall(), repairable) : set;
   if (drafted.model === null) return refused('no_model_back', 'Olumi could not write the updated model just now; nothing changed.');
   // Their answers win on the drafter's model too, set again exactly (buddy 24 Oct); one it removed is refused by name, never dropped.
   const postimage = drafted.model;
@@ -165,7 +175,7 @@ async function prepare(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs)
   if (gone.length > 0) return refused('not_an_answer', `${gone.map((id) => `"${set.model.quantities.find((x) => x.id === id)!.label}" (${id})`).join(', ')}: the change removed what you answered, so nothing changed.`, { ids: gone });
   const draft = answered(postimage, figures);
   if (typeof draft === 'string') return refused('not_an_answer', draft);
-  const v = validatePostimage(program.canonical, draft.model, { removals: args.remove, words, fresh, approver: ctx.authenticated_user_id });
+  const v = validatePostimage(program.canonical, draft.model, checks);
   if (!v.ok) return refused(v.code, v.reason, { ids: v.ids, ...(v.check ? { check: v.check } : {}) });
   // The compiler's errors first (the same compile the Run makes), before anything is projected: the display drew a range
   // with one end as a TypeError, which reached the person as a 502 (DoD-I qualitative-r5).
@@ -176,6 +186,21 @@ async function prepare(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs)
   const p = holdProgramCard(deps.proposals, { scenarioId: ctx.scenario_id, userId: ctx.authenticated_user_id, graphHash: base.saved.graphHash, identity: base.saved.identity! },
     { label: args.public_label, basis: args.basis, program: next.program, changes: v.changes });
   return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: base.saved.graphHash, changes: v.changes, would_show: runWords(next.run) });
+}
+
+/**
+ * A validator refusal as the drafter's repair: its own sentence. Refused for this turn's words, also those words, exactly:
+ * the drafter reads every word of theirs as one message, so it cannot tell this turn's from earlier ones.
+ */
+const repairLine = (r: { readonly reason: string; readonly check?: 'their_words' | 'this_turn' }, fresh: readonly string[]): string => (r.check !== 'this_turn' ? r.reason
+  : `${r.reason} A figure of theirs changes only with their words in this turn${fresh[0] === undefined ? ' (they gave none)' : `, "${fresh[0]}"`}; otherwise it stays as saved.`);
+
+/** A worked-out figure's inputs, from the relations that define it (never from words), each by name and id; '' for none. */
+function inputsOf(model: CanonicalModelT, id: string): string {
+  const ids = model.relations.filter((r) => r.defines === id).flatMap((r) => (r.form === 'definition' ? r.parts.map((p) => p.id)
+    : r.form === 'effect' ? [r.base, ...r.terms.flatMap((t) => [t.driver, t.coefficient])] : [r.start, ...r.inflows, ...r.outflows]));
+  const said = [...new Set(ids)].map((x) => `"${model.quantities.find((y) => y.id === x)?.label ?? x}" (${x})`);
+  return said.length === 0 ? '' : `: ${said.join(', ')}`;
 }
 
 /**
@@ -195,7 +220,7 @@ function answered(canonical: CanonicalModelT, answers: readonly AnswerT[]): { re
   for (const a of answers) {
     const q = model.quantities.find((x) => x.id === a.id);
     if (q === undefined) return `${a.id} is not a figure in this model; a new item is a structural change.`;
-    if (q.status === 'derived') return `"${q.label}" is worked out by its relation; answer one of its inputs.`;
+    if (q.status === 'derived') return `"${q.label}" is worked out by its relation; answer one of its inputs${inputsOf(model, q.id)}.`;
     const none = a.status === 'unknown';
     model = figurePostimage(model, { ...q, status: a.status, author: a.author, value: none ? null : a.value, low: none ? null : a.low,
       high: none ? null : a.high, range_kind: none ? null : a.range_kind, party: a.party, quote: a.quote, basis: a.basis, question: null });

@@ -7,7 +7,7 @@ import { HOST_SCIENCE_AND_SOURCE_RULES, HOST_TOOL_CONTRACT } from '../coach-rout
 import { createHash } from 'node:crypto';
 import * as drafting from '../../path-b/drafting-guidance.js';
 import * as coreInstructions from '../../core-route/instructions.js';
-import { CANONICAL_JSON_SCHEMA, DRAFTING_INSTRUCTIONS, UPDATE_PREFIX } from '../../model-program-turn/prompt.js';
+import { CANONICAL_JSON_SCHEMA, DRAFTING_INSTRUCTIONS, DRAFTING_PROMPT_SHA256, REPAIR_PREFIX, UPDATE_PREFIX } from '../../model-program-turn/prompt.js';
 import * as programDraft from '../../model-program-turn/draft.js';
 import { PROGRAM_TURN_GUIDANCE } from '../../model-program-turn/program-tools.js';
 
@@ -78,6 +78,11 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     // 24 Oct (AIE 6386018855 §5, accepted by the DL): Olumi may propose a measure, options and missing drivers, at first drafting only.
     expect(createHash('sha256').update(DRAFTING_INSTRUCTIONS, 'utf8').digest('hex')).toBe('c5a7b55ac7b2701fce79405bb562337dbaf67b1917dcc2bbcc1867c63e993c97');
     expect(createHash('sha256').update(UPDATE_PREFIX, 'utf8').digest('hex')).toBe('3fc74a39f5db5290b72b37b7e2228c696a0fdeb5c2b017f96f3883bfedf3e0fb');
+    // 25 Oct (DL, REFUSED-CHANGE-CLASS repair gap): an update's checks' refusal goes back to the drafter under its own prefix,
+    // which lives in draft.ts with its only caller; the first-draft bytes are unchanged: the prompt's own sha, the update's and the compiler's repair prefixes.
+    expect(createHash('sha256').update(programDraft.CHECK_PREFIX, 'utf8').digest('hex')).toBe('5c2fe44abac1933797707f19413fdbd9889f7b0dde947804b3f55e5aac3fedd2');
+    expect(DRAFTING_PROMPT_SHA256).toBe('c5a7b55ac7b2701fce79405bb562337dbaf67b1917dcc2bbcc1867c63e993c97');
+    expect(createHash('sha256').update(REPAIR_PREFIX, 'utf8').digest('hex')).toBe('851f6a2d6f46a80c8404a89bc5bb01f35ec884253f36b19f417ad9f61b16da13');
     expect(createHash('sha256').update(CORE_DRAFTER_RULES, 'utf8').digest('hex')).toBe('bed04fc58a01dbd02d8f5c8aa6ef171731a356c1cde47a85e0cd64be35416653'); // 23 Oct (DL 93d79c3e, C2 double prime): a definition's parts are factors with levels, never another definition; a STATED per-unit effect is a sized link. 22 Oct: every stated goal saved in their words, never approximated (Claude r1 on #3670); + a calendar date is Olumi's labelled reading
     // The retired constants are gone from both modules: no route can send the accreted text again.
     for (const name of ['CORE_REPLY_INSTRUCTION', 'CORE_RESPONSE_DISCIPLINE', 'CORE_NEXT_STEP']) expect(Object.keys(coreInstructions), name).not.toContain(name);
