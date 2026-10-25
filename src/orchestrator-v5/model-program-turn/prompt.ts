@@ -47,8 +47,6 @@ export const DRAFTING_INSTRUCTIONS = [
 
 /** What the compiler's sentences are returned with, in the same conversation (phase 0b's repair turn, verbatim). */
 export const REPAIR_PREFIX = 'The compiler found these errors. Return the whole model again with them fixed, keeping everything else as it was.';
-/** What an update's own checks' sentences are returned with, the same way (REFUSED-CHANGE-CLASS 25 Oct: the validator's refusal of a compiling draft). */
-export const CHECK_PREFIX = 'Olumi\'s checks found these problems with the change. Return the whole model again with them fixed, keeping everything else as it was.';
 /** What an update asks, after the person's words and the saved model, in the same conversation (simplify v1, A3: `draft.ts` proposePostimage). */
 export const UPDATE_PREFIX = 'Update the model above for the change below, and return the WHOLE model, by the same rules. Keep every record, with its id, exactly as it is unless the change is to it. Leave out only the ids listed to remove. A new item gets a new id. Each answer goes on the item whose question it answers (a question about one option, on that option\'s item); words that settle a figure (yes, no, all, none) are that figure, quoting them, its basis saying how they were read. Never keep an answer unassigned and ask it again. "I don\'t know" is an answer too: the item stays open, its question changed to ask for what would size it. Every option reaches every measured goal, a goal this change adds included. A figure of theirs quotes their words copied exactly, never reworded or joined; anything you add yourself is olumi\'s. Keep the history as it is.';
 
