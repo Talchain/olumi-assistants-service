@@ -2588,18 +2588,19 @@ describe('the model-program turn on the real core route', () => {
 
   it('THE FIRST REPLY (Paul\'s definition of done): it says what Olumi used, inferred and left out, read off the saved model\'s own records (author, quote, status, measure_by, left_out); a Run\'s reply does not', async () => {
     const m = withOlumiLinks(bakery());
-    m.goals[0]!.measure!.measure_by = 'olumi'; // Olumi's suggested measure for their aim: the aim stays theirs
     m.left_out.push({ id: 'weekend_trade', text: 'Weekend trade is not in the model.', why: 'No weekend figures were given.', question: 'How much do you sell at weekends?',
       concerns: [], author: 'olumi', quote: null, ...at });
     replies = [JSON.stringify(m)];
     const r = (await turn({ message: BRIEF })).json();
     expect(r.model_program.saved).toBe(true);
     // Used: their 11 quoted items (their aim, limit, two options, link and six figures; the asked oven price has no words yet).
-    // Inferred: the measure, Olumi's link (its size unknown, so no figure of Olumi's) and its estimate. Left out: the note, with its why.
+    // Inferred: Olumi's link, its estimate, and its link's size it cannot give yet (never called an estimate), with the direction
+    // the model uses. Left out: the note, with its why.
     expect(r.assistant_text.split('\n\n')[1]).toBe(['Used from your brief (11): ‘Reach 380 loaves a week’, ‘Within the £3,000’, ‘A second oven’ and 8 more.',
-      'Inferred by me, for you to check (3): ‘sales’ (a measure I suggested for ‘Reach 380 loaves a week’), ‘ovens added → sales’ (a link I added) and ‘sell through’ (my estimate).',
+      'Inferred by me, for you to check (3): ‘ovens added → sales’ (a link I added), ‘sell through’ (my estimate) and ‘lost bake time’ (not sized yet; it lowers ‘sales’).',
       'Left out (1): ‘Weekend trade is not in the model’ (No weekend figures were given).'].join('\n'));
-    // Negatives: a left-out note's question is never said by the reading; no internal id is said.
+    // Negatives: an unknown size is never an estimate; a left-out note's question is never said by the reading; no internal id is said.
+    expect(r.assistant_text).not.toContain('‘lost bake time’ (my estimate');
     expect(r.assistant_text).not.toContain('How much do you sell at weekends?');
     for (const id of ['second_oven', 'sell_through', 'lost_bake_time', 'weekend_trade', 'more_loaves']) expect(r.assistant_text).not.toContain(id);
     // Contrast: the saved model holds the same records the reply read.
@@ -2619,8 +2620,24 @@ describe('the model-program turn on the real core route', () => {
     expect(r.model_program.saved).toBe(true);
     expect((persisted!.living_model.canonical as CanonicalModelT).options.map((o) => [o.label, o.author, o.quote])).toEqual([['A second oven', 'olumi', 'A second oven'], ['Keep our one oven', 'person', 'keep our one oven']]);
     expect(r.assistant_text.split('\n\n')[1]).toBe(['Used from your brief (10): ‘Reach 380 loaves a week’, ‘Within the £3,000’, ‘Keep our one oven’ and 7 more.',
-      'Inferred by me, for you to check (4): ‘sales’ (a measure I suggested for ‘Reach 380 loaves a week’), ‘A second oven’ (an option I added), ‘ovens added → sales’ (a link I added) and 1 more.',
+      'Inferred by me, for you to check (5): ‘sales’ (a measure I suggested for ‘Reach 380 loaves a week’), ‘A second oven’ (an option I added), ‘ovens added → sales’ (a link I added) and 2 more.',
       'Left out (0): nothing.'].join('\n'));
+  });
+
+  it('THE FIRST REPLY, contrast (buddy BLOCK on authorship): a model whose only additions of Olumi\'s are an assumption and a condition lists both as inferred, by kind; the reply never says "nothing"', async () => {
+    const m = bakery();
+    setQ(m, 'sell_through', { author: 'person', status: 'known', value: 0.7, low: null, high: null, range_kind: null, basis: null, quote: 'adds about 100 loaves a week' });
+    m.assumptions.push({ id: 'full_capacity', text: 'The second oven runs at full capacity from the first week.', applied: false, concerns: [], author: 'olumi', quote: null, ...at });
+    m.conditions.push({ id: 'room_check', text: 'There may not be room for a second oven.', kind: 'challenge', concerns: [], author: 'olumi', quote: null, ...at });
+    m.left_out.push({ id: 'price_note', text: 'The oven price is not known yet.', why: 'No price has been quoted.', question: null, concerns: [], author: 'person', quote: 'don\'t know the oven price yet', ...at });
+    replies = [JSON.stringify(m)];
+    const r = (await turn({ message: BRIEF })).json();
+    expect(r.model_program.saved).toBe(true);
+    // Olumi's other records here are its workings (worked-out quantities and definitions), in no list.
+    expect(r.assistant_text.split('\n\n')[1]).toBe(['Used from your brief (12): ‘Reach 380 loaves a week’, ‘Within the £3,000’, ‘A second oven’ and 9 more.',
+      'Inferred by me, for you to check (2): ‘The second oven runs at full capacity from the first week’ (an assumption I made) and ‘There may not be room for a second oven’ (a challenge I raised).',
+      'Left out (1): ‘The oven price is not known yet’ (No price has been quoted).'].join('\n'));
+    expect(r.assistant_text).not.toContain('nothing');
   });
 });
 
