@@ -1589,6 +1589,37 @@ describe('the model-program turn on the real core route', () => {
     expect(removed).toMatchObject({ status: 'refused', reason: 'not_an_answer', detail: '"oven price" (oven_price): the change removed what you answered, so nothing changed.', data: { ids: ['oven_price'] } });
   });
 
+  it('European fix request (CEE bb11fd62, scenario 7a46b31e, turn 31fc7c00): Olumi\'s own figures for an option\'s setting, and the structure\'s figure, withdrawn into questions of theirs need no words this turn; a new figure of theirs, or a figure kept under the question, still does', async () => {
+    // The drafter's first model: Olumi's option, its setting Olumi's figure, and the setting's off state the structure's.
+    const m = bakery();
+    m.quantities = m.quantities.map((x) => (x.id === 'one_oven' ? { ...x, author: 'olumi' as const, quote: null, basis: 'Olumi’s proposed setting for its option.' }
+      : x.id === 'ovens_added' ? { ...x, author: 'structure' as const, quote: null, basis: 'None added until an option takes effect.' } : x));
+    m.options = m.options.map((o) => (o.id === 'second_oven' ? { ...o, author: 'olumi' as const, quote: null, sets: o.sets.map((s) => ({ ...s, author: 'olumi' as const, quote: null })) } : o));
+    replies = [JSON.stringify(m)];
+    expect((await turn({ message: BRIEF })).json().model_program.saved).toBe(true);
+    const deps = { dispatch, proposals: new ProposalStore() };
+    const words = 'Can you sort out the figures you made up for me?';
+    const propose = (edit: (d: CanonicalModelT) => void) => { replies = [savedWith(edit)]; return proposeProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null,
+      turn_id: randomUUID(), verified_user_messages: [words], user_turn_text: words },
+      ProgramChangeParams.parse({ public_label: 'Ask for the settings', basis: 'Olumi’s figures were placeholders', request: 'Ask them for the settings Olumi made up.', remove: [] })) as Promise<Json>; };
+    const asked = (question: string): Partial<CanonicalQuantityT> => ({ status: 'asked', author: 'person', value: null, low: null, high: null, range_kind: null, quote: null, question, basis: null });
+    // The withdrawal: both figures that were never theirs become their questions, with no words of theirs to quote.
+    const p = await propose((d) => { setQ(d, 'one_oven', asked('How many ovens would you add?')); setQ(d, 'ovens_added', asked('How many ovens are you adding today?')); });
+    expect(p.status, JSON.stringify(p)).toBe('ok');
+    expect(p.data.changes.map((c: Json) => [c.id, c.action, c.author])).toEqual([['ovens_added', 'change', 'person'], ['one_oven', 'change', 'person']]);
+    // Still refused: a NEW figure of theirs with no words; one quoting only their earlier words; and a figure kept under the question.
+    expect(await propose((d) => setQ(d, 'one_oven', { author: 'person', status: 'known', value: 2, quote: null, basis: null })))
+      .toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['one_oven'], check: 'their_words' } });
+    expect(await propose((d) => setQ(d, 'one_oven', { author: 'person', status: 'known', value: 2, quote: 'A second oven', basis: null })))
+      .toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['one_oven'], check: 'this_turn' } });
+    expect(await propose((d) => setQ(d, 'one_oven', { ...asked('How many ovens would you add?'), value: 1 })))
+      .toMatchObject({ status: 'refused', reason: 'unverified_person_words', data: { ids: ['one_oven'], check: 'this_turn' } });
+    // Saved as approved: their questions, no words put in their mouth.
+    expect(await applyProgramChange(deps, { scenario_id: SCENARIO, authenticated_user_id: null, turn_id: randomUUID() }, p.data.proposal_id)).toMatchObject({ status: 'ok', data: { saved: true } });
+    expect((persisted!.living_model.canonical as CanonicalModelT).quantities.find((x) => x.id === 'one_oven'))
+      .toMatchObject({ status: 'asked', author: 'person', value: null, quote: null, question: 'How many ovens would you add?' });
+  });
+
   it('issue 37 (marketing at 485ee1af, 3 of 5 runs): a figure of theirs said EXACTLY in another calendar unit (their 1 year as 12 month, the time step moved to month for a 3-month goal) is the same figure, so the goals are saved; any other change of its amount still needs their words this turn, and the refusal names the check and the id', async () => {
     const brief = `${BRIEF} The £3,000 is for 1 year.`;
     const m = bakery();
