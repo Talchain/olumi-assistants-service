@@ -278,9 +278,9 @@ describe('numerical check: natural-unit simulator, hand-calculated rows', () => 
     // the target are fixed: the denominator is the ONLY uncertainty, so it must be the one driver and the chance cannot be exact.
     const r = simulate(model(1, [fixed('revenue', 1000), range('customers', 80, 120, 100), fixed('t', 10)],
       [{ ...goal('per_customer', 'revenue', '>=', 't'), per: 'customers' }]), { seed: SEED, draws: N });
-    const g = goalOf(first(r), 'per_customer'), c = ch(g);
-    expect(inside(0.5, c.precision_95), JSON.stringify(c)).toBe(true);
-    expect(c.precision_95[0]).toBeLessThan(c.precision_95[1]);
+    const g = goalOf(first(r), 'per_customer');
+    expect(inside(0.5, g.precision_95), JSON.stringify(g)).toBe(true);
+    expect(g.precision_95[0]).toBeLessThan(g.precision_95[1]);
     expect(first(r).drivers.map((x: Rec) => x.quantity)).toEqual(['customers']);
   });
 
