@@ -32,7 +32,7 @@ import { sayDisplayedPct } from '../../goal-target/goal-targets-joint.js';
 import type { Aggregation, Cmp, ExecutableModel, FixedAuthor, Goal, Limit, Quantity, Window } from '../executable.js';
 import { rangeLaw, type RangeDist } from '../simulate/range-law.js';
 import { isWithheld, type ChanceOrWithheld, type OptionResult, type SimResult, type WithheldChance } from '../simulate/result.js';
-import { readingOf, restsOn, simulate } from '../simulate/simulate.js';
+import { costOf, readingOf, restsOn, simulate } from '../simulate/simulate.js';
 
 /** Whose a figure is: unverified is said to be the person's but their words were not found (compile's `unverified`). */
 type Author = 'person' | 'olumi' | 'structure' | 'unverified';
@@ -108,6 +108,8 @@ export interface PresentInput {
   /** The caller's currentness check of this Run (graph hash equality). Absent: unknown. */
   readonly current?: boolean;
   readonly revision?: number;
+  /** False when the driver sweep would pass the Run's admission limit (alpha G11): no driver is measured, and that is said. */
+  readonly sweep?: boolean;
 }
 
 export type PresentCell =
@@ -181,8 +183,15 @@ const SWEEP_DRAWS = 4000;
  * over DRIVER_MIN_SWING is the driver; otherwise none is licensed. A finding in this model, never advice.
  */
 export const DRIVER_MIN_SWING = 0.05;
+/** The sweep's cost (alpha G11): three settings of every ranged input no option sets, each a run of SWEEP_DRAWS. */
+export function driverSweepOperations(model: ExecutableModel, draws: number): number {
+  const switches = new Set(model.options.flatMap((o) => o.sets.map((s) => s.quantity)));
+  const inputs = model.quantities.filter((x) => x.dist?.kind === 'range' && x.dist.low < x.dist.high && !switches.has(x.id)).length;
+  return 3 * inputs * costOf(model, Math.min(SWEEP_DRAWS, draws)).operations;
+}
 export const NO_DRIVER_REASON = 'Tested one at a time at each figure’s low end, middle and high end, no figure moved this chance by more than 5 points.';
 export const NO_RANGE_REASON = 'No figure this chance rests on has a range to test.';
+export const NOT_SWEPT_REASON = 'This model is too large to test each figure one at a time in one run, so what the chance rests on most is not measured.';
 /** A setting tried: its value, and the chance there as displayed; null where it could not be worked out (a nonfinite draw). */
 type End = { readonly value: number; readonly display: string | null };
 export type PresentMainDriver =
@@ -441,6 +450,7 @@ export function presentAnalysisView(input: PresentInput): PresentedAnalysisView 
     const rests = upstream(roots, o.option_id);
     const inputs = model.quantities.filter((x): x is Quantity & { dist: RangeDist } => x.dist?.kind === 'range' && x.dist.low < x.dist.high && rests.has(x.id) && !switches.has(x.id));
     if (inputs.length === 0) return { kind: 'none_licensed', reason: NO_RANGE_REASON };
+    if (input.sweep === false) return { kind: 'none_licensed', reason: NOT_SWEPT_REASON };
     // Codex r1 #3728: a setting that cannot be worked out (a nonfinite draw) is never dropped: the swing counts only the
     // settings that computed, the input is named as not tested there, and nothing is concluded about a setting not tested.
     const tested = inputs.map((x) => {

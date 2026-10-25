@@ -17,14 +17,27 @@ import { isApproximate, normalise, compile, shadowLabel, type Blocker, type Comp
 import type { CanonicalModelT } from '../model-program/canonical.js';
 import { project, type Projection } from '../model-program/project.js';
 import type { ExecutableModel } from '../model-program/executable.js';
-import { simulate } from '../model-program/simulate/simulate.js';
+import { costOf, simulate } from '../model-program/simulate/simulate.js';
 import type { SimResult } from '../model-program/simulate/result.js';
 import {
-  needsAnswer, presentAnalysisView, waitsOnWords, type PresentAsk, type PresentBlocker, type PresentGoal, type PresentQuantity,
+  driverSweepOperations, needsAnswer, presentAnalysisView, waitsOnWords, type PresentAsk, type PresentBlocker, type PresentGoal, type PresentQuantity,
   type PresentedAnalysisView,
 } from '../model-program/present/present.js';
 
 export const RUN_DRAWS = 10_000;
+/**
+ * THE RUN'S ADMISSION LIMIT (alpha G11), headline and driver sweep together, checked before anything is allocated. Measured
+ * 25 Oct on the Mac at 70 to 100 M operations a second (`costOf`; bakery and club over 52 to 260 periods): about 2 s
+ * there, and about 5 s on staging at 40 % of that speed. A Run over it is refused by name; a sweep that would pass it is not run.
+ */
+export const MAX_OPERATIONS = 150_000_000;
+export const MAX_BYTES = 64 * 1024 * 1024;
+
+/** Whether a Run of `x` is admitted (alpha G11), or which limit it would pass. */
+export function admission(x: ExecutableModel, draws: number = RUN_DRAWS): { readonly ok: true; readonly operations: number } | { readonly ok: false; readonly over: 'operations' | 'bytes' } {
+  const c = costOf(x, draws);
+  return c.operations > MAX_OPERATIONS ? { ok: false, over: 'operations' } : c.bytes > MAX_BYTES ? { ok: false, over: 'bytes' } : { ok: true, operations: c.operations };
+}
 
 /** The scenario's seed: fixed per scenario (its id's sha256, first 32 bits), saved with the model. */
 export function seedOf(scenarioId: string): number {
@@ -101,10 +114,12 @@ export function evaluateCanonical(model: CanonicalModelT, opts: { readonly sourc
   if (x === null) {
     return { compiled, sim: null, projection, view: waitingView(model, compiled, goals, blockers) };
   }
-  const sim = simulate(x, { seed: opts.seed, draws: opts.draws ?? RUN_DRAWS });
+  const draws = opts.draws ?? RUN_DRAWS, admitted = admission(x, draws);
+  if (!admitted.ok) return { compiled, sim: null, projection, view: waitingView(model, compiled, goals, blockers, tooLarge(x, admitted.over)) };
+  const sim = simulate(x, { seed: opts.seed, draws });
   // A limit, option or risk left out of this run is said by S2's present itself (S1's `executable.withheld`, r3).
   const view = presentAnalysisView({ model: x, result: sim, quantities: quantityMeta(model, compiled, x), goals, asks, blockers, leaves_out,
-    left_out: model.left_out.map((r) => ({ text: r.text, concerns: r.concerns })) });
+    left_out: model.left_out.map((r) => ({ text: r.text, concerns: r.concerns })), sweep: admitted.operations + driverSweepOperations(x, draws) <= MAX_OPERATIONS });
   return { compiled, sim, projection, view };
 }
 
@@ -124,8 +139,14 @@ function blockersOf(model: CanonicalModelT, list: readonly Blocker[]): PresentBl
 }
 
 const sentence = (x: string): string => (/[.?!]$/.test(x) ? x : `${x}.`);
+const count = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`;
+/** Why a Run over the admission limit is not worked out, by the limit it passes, and what reduces it. */
+const tooLarge = (x: ExecutableModel, over: 'operations' | 'bytes'): string => (over === 'operations'
+  ? `This model is too large to work out in one run: ${count(x.periods, x.period_unit)} ahead for ${count(x.options.length, 'option')}. `
+    + 'Counting in longer periods, looking less far ahead or comparing fewer options reduces the work.'
+  : 'This model holds too many uncertain figures, risks and conditions at once to work out in one run. Fewer of them reduce what it holds.');
 
-function waitingView(model: CanonicalModelT, compiled: CompileResult, goals: readonly PresentGoal[], blockers: readonly PresentBlocker[]): WaitingView {
+function waitingView(model: CanonicalModelT, compiled: CompileResult, goals: readonly PresentGoal[], blockers: readonly PresentBlocker[], refused?: string): WaitingView {
   const m = normalise(model);
   const live = m.options.filter((o) => o.status === 'live');
   const failing = compiled.errors.length > 0;
@@ -139,10 +160,10 @@ function waitingView(model: CanonicalModelT, compiled: CompileResult, goals: rea
       : new Set(blockers.flatMap((b) => b.scope).filter((id) => !limitIds.has(id)));
     const waits = waitsOnWords(blockers, ids);
     const withheldWhy = [...goals.filter((g) => g.status === 'withheld').flatMap((g) => g.reasons), ...(own?.reasons ?? [])].join(' ');
-    const why = failing ? 'The model does not compile yet, so no chance can be worked out.'
+    const why = refused !== undefined ? refused : failing ? 'The model does not compile yet, so no chance can be worked out.'
       : waits !== undefined ? `The chance ${waits}.` : withheldWhy || 'The chance cannot be worked out yet.';
-    return { kind: 'withheld' as const, face: waits !== undefined && !failing && needsAnswer(blockers, ids) ? 'Not shown yet: needs your answer' : 'Chance not shown yet', why,
-      reasons: failing ? [{ code: 'does_not_compile', message: compiled.errors.slice(0, 5).map((e) => e.message).join(' ') }]
+    return { kind: 'withheld' as const, face: refused === undefined && waits !== undefined && !failing && needsAnswer(blockers, ids) ? 'Not shown yet: needs your answer' : 'Chance not shown yet', why,
+      reasons: refused !== undefined ? [{ code: 'too_large', message: refused }] : failing ? [{ code: 'does_not_compile', message: compiled.errors.slice(0, 5).map((e) => e.message).join(' ') }]
         : goals.filter((g) => g.status !== 'calculable').map((g) => ({ code: g.status === 'asks' ? 'goal_asks' : 'goal_withheld', message: g.reasons.join(' ') || null })) };
   };
   const ids = live.length > 0 ? live.map((o) => o.id) : ['as_stated'];
@@ -151,7 +172,7 @@ function waitingView(model: CanonicalModelT, compiled: CompileResult, goals: rea
     staleness: { stale: null, revision: null, run_revision: null, basis: 'analysis_graph_hash_interim', reason: null, limitation: 'Currentness is unknown because an analysis hash is unavailable.' },
     leader_licence: 'withheld',
     options: ids.map((option_id) => ({ option_id, cell: cellOf(option_id), main_driver: { kind: 'not_recorded' as const } })),
-    goal_chance: { notes: [...goals.filter((g) => g.status !== 'calculable').map((g) => sentence(`‘${g.label}’ ${waitsOnWords(blockers, new Set([g.goal_id])) ?? `is not in the chance yet: ${g.reasons.join(' ')}`}`)),
+    goal_chance: { notes: [...(refused !== undefined ? [refused] : []), ...goals.filter((g) => g.status !== 'calculable').map((g) => sentence(`‘${g.label}’ ${waitsOnWords(blockers, new Set([g.goal_id])) ?? `is not in the chance yet: ${g.reasons.join(' ')}`}`)),
     ], ...(blockers.length > 0 ? { waits_on: blockers } : {}) },
   };
 }

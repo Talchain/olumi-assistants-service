@@ -620,6 +620,29 @@ function withheldList(options: readonly OptionResult[]): WithheldChanceEntry[] {
   ]);
 }
 
+/**
+ * ADMISSION (alpha G11): what a run of this model costs, from its shape alone, before anything is allocated. `operations`
+ * counts runOption's work in every draw for every option: at each time 0..periods, each quantity's visit and every value it
+ * reads (an equation's parts or terms, a stock's start and flows, the option's sets, and eight for each risk on it, more
+ * than its timing, its fired state read three times and its severity); each condition's window, read twice for a ratio;
+ * each set's timing; eight a draw for each risk (its reset, timing, occurrence, chance, uniform and severity); and the sorts (each ranged input's terciles, each
+ * condition's quantiles per option). `bytes` is what the run holds at once: each ranged input's draws with its terciles
+ * (16 per draw, the sort's index included), each risk's uniforms, every option's tallies, one quantile copy and one
+ * option's values.
+ */
+export function costOf(model: ExecutableModel, draws: number): { readonly operations: number; readonly bytes: number } {
+  const times = model.periods + 1, options = model.options.length, checks = [...model.goals, ...model.limits];
+  const ranged = model.quantities.filter((q) => q.dist?.kind === 'range').length;
+  const reads = 8 * model.risks.length + model.quantities.reduce((s, q) => s + 1
+    + (q.equation === undefined ? 0 : q.equation.form === 'definition' ? q.equation.parts.length : 1 + 2 * q.equation.terms.length)
+    + (q.stock === undefined ? 0 : 1 + q.stock.inflows.length + q.stock.outflows.length), 0);
+  const windows = checks.reduce((s, k) => s + 2 * (k.window.periods + 1), 0);
+  const sets = model.options.reduce((s, o) => s + o.sets.length, 0);
+  const sorts = Math.ceil(Math.log2(draws + 1)) * (ranged + options * checks.length);
+  return { operations: draws * (options * (times * reads + windows + 8 * model.risks.length) + sets * (times + 1) + sorts),
+    bytes: draws * (16 * ranged + 8 * model.risks.length + options * (9 * checks.length + 3) + 8) + 8 * times * model.quantities.length };
+}
+
 export function simulate(model: ExecutableModel, opts: SimulateOptions): SimResult {
   const draws = opts.draws ?? 10000;
   if (!wholeFrom(draws, 1)) throw new Error(`draws must be a whole number of at least 1, got ${draws}`);
