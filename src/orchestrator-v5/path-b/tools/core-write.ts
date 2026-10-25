@@ -36,7 +36,8 @@ export type CoreWrite =
   | { readonly status: 'already_saved'; readonly receipt: unknown }
   /** The model moved since the base read, and not by this operation. */
   | { readonly status: 'stale' }
-  | { readonly status: 'refused' }
+  /** Refused before anything was written; `code` is the register's own reason (`details.code`), when it gave one. */
+  | { readonly status: 'refused'; readonly code: string | null }
   | { readonly status: 'unknown'; readonly outcome: ToolOutcome };
 
 /** Only verifier-owned enums and hash prefixes enter the diagnostic row. */
@@ -61,7 +62,7 @@ export async function writeCorePostimage(deps: { readonly dispatch: InternalDisp
     if (code === 'GRAPH_STALE') return { status: 'stale' };
     return unknown('not_confirmed', { check: 'ack_status', status: reg.status });
   }
-  if (reg.status >= 400 && reg.status < 500) return { status: 'refused' };
+  if (reg.status >= 400 && reg.status < 500) return { status: 'refused', code: typeof code === 'string' ? code : null };
   if (reg.status !== 200) return unknown('not_confirmed', { check: 'ack_status', status: reg.status });
 
   // The response is THIS registration's receipt; history availability is not save verification.

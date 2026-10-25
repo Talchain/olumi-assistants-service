@@ -216,6 +216,8 @@ export function holdProgramCard(proposals: ProposalStore, at: { readonly scenari
 export const isProgramProposal = (p: StructuredProposal | undefined): p is StructuredProposal & { readonly living_model: Rec } =>
   p !== undefined && savedProgramOf({ living_model: p.living_model }) !== undefined;
 
+export const SAVE_REFUSED_AFTER_APPROVAL = 'The person’s approval of this card was received; the save itself was refused by the model store’s check, so nothing '
+  + 'was written and the saved model is unchanged. Pressing the card again would be refused the same way.';
 export async function applyProgramChange(deps: ProgramToolDeps, ctx: Ctx, proposalId: string): Promise<ToolOutcome> {
   const p = deps.proposals.get(proposalId);
   if (!isProgramProposal(p)) return refused(p === undefined ? 'unknown_proposal' : 'not_a_change_proposal');
@@ -242,7 +244,8 @@ export async function applyProgramChange(deps: ProgramToolDeps, ctx: Ctx, propos
     const { write } = await savePostimage(deps.dispatch, { scenarioId: ctx.scenario_id, operationId, expectedIdentity: before.identity, ownVersion }, graph);
     if (write.status === 'unknown') return write.outcome;
     if (write.status === 'stale') return refused('superseded');
-    if (write.status === 'refused') return refused('registration_refused');
+    // Authorised, then refused: said so, with the store's code (Paul 25 Oct: told only the code, it blamed his "typed yes").
+    if (write.status === 'refused') return refused('registration_refused', SAVE_REFUSED_AFTER_APPROVAL, { code: write.code, written: false });
     if (write.status === 'already_saved') return alreadySaved(write.receipt);
     deps.proposals.markApplied(p.proposal_id, [write.receipt as never]);
     return ok({ saved: true, receipt: write.receipt, revision: { graph_hash: write.after.graphHash, graph_identity_hash: write.after.identity },
