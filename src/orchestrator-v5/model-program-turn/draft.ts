@@ -4,7 +4,8 @@
  * One strict structured call returns a CanonicalModel (S1's schema, `prompt.ts`), on the client CEE's core lane uses
  * (`ledgeredAgentsClient`: every attempt is a `_provider_calls` row), at the core budget's model with reasoning effort
  * MEDIUM. The draft is compiled; while it has errors, the compiler's own sentences go back to the SAME conversation (the
- * draft as the assistant's turn, the errors as the next user turn: phase 0b's repair shape), at most twice. Nothing here
+ * draft as the assistant's turn, the errors as the next user turn: phase 0b's repair shape), at most twice; on an update, a
+ * compiling draft the validator refuses gets the validator's sentence the same way, within the same two. Nothing here
  * edits the model: what compiles is the AI's own draft.
  */
 import { streamedLedgeredResponse, type StreamedResponsesBody } from '../../adapters/llm/openai-agents-client.js';
@@ -67,8 +68,16 @@ export function draftRequestBody(input: readonly InputMessage[]): StreamedRespon
   };
 }
 
-/** The repair turn: the compiler's sentences, one per line. */
-export const repairMessage = (errors: readonly CompileError[]): string => `${REPAIR_PREFIX}\n${errors.map((e) => `- ${e.message}`).join('\n')}`;
+/** The repair turn: Olumi's own sentences on the draft (the compiler's, or an update's check's), one per line. */
+const repairOf = (lines: readonly string[]): string => `${REPAIR_PREFIX}\n${lines.map((l) => `- ${l}`).join('\n')}`;
+export const repairMessage = (errors: readonly CompileError[]): string => repairOf(errors.map((e) => e.message));
+/**
+ * An update's own check on a draft that compiles (`program-tools.ts`: the one validator, `validatePostimage`): the sentences
+ * the drafter can act on, [] for none. They go back as the compiler's do, in the same conversation and within the same
+ * MAX_REPAIRS, so a draft the validator would refuse gets its repair (REFUSED-CHANGE-CLASS 25 Oct: the loop saw compile
+ * errors only). The caller still validates the model returned, exactly, and refuses it as before.
+ */
+export type DraftCheck = (model: CanonicalModelT) => readonly string[];
 
 /** The ledgered client's Responses call, streamed (two unstreamed phase-0 calls were cut at 180 s); one per turn. */
 export function ledgeredResponsesCall(): ResponsesCall {
@@ -88,7 +97,7 @@ export function ledgeredResponsesCall(): ResponsesCall {
  * (buddy, #3709 r7). An update is read the same way, so its postimage is in the saved form.
  */
 export async function draftCanonicalModel(brief: string | readonly InputMessage[], call: ResponsesCall, sourceText: string = typeof brief === 'string' ? brief : '',
-  opts: { readonly interpret?: boolean } = {}): Promise<DraftOutcome> {
+  opts: { readonly interpret?: boolean; readonly check?: DraftCheck | undefined } = {}): Promise<DraftOutcome> {
   const input: InputMessage[] = typeof brief === 'string' ? [{ role: 'user', content: brief }] : [...brief];
   const attempts: DraftAttempt[] = [];
   let model: CanonicalModelT | null = null;
@@ -112,9 +121,11 @@ export async function draftCanonicalModel(brief: string | readonly InputMessage[
     const compileOpts = { sourceText, asksNeedQuestions: typeof brief === 'string' && a < MAX_REPAIRS };
     const result = read !== undefined ? compile(read, compileOpts) : compileJson(json, compileOpts);
     if (parsed.success) { model = read ?? parsed.data; compiled = result; }
+    // Compiling, with a repair left: the caller's own check, whose sentences go back as the compiler's do.
+    const checked = parsed.success && result.errors.length === 0 && a < MAX_REPAIRS && opts.check !== undefined ? opts.check(model!) : [];
     attempts.push({ attempt: a, errors: result.errors, status: out.status, usage: out.usage, ms });
-    if (result.errors.length === 0 || a === MAX_REPAIRS) break;
-    input.push({ role: 'assistant', content: out.text }, { role: 'user', content: repairMessage(result.errors) });
+    if ((result.errors.length === 0 && checked.length === 0) || a === MAX_REPAIRS) break;
+    input.push({ role: 'assistant', content: out.text }, { role: 'user', content: result.errors.length > 0 ? repairMessage(result.errors) : repairOf(checked) });
   }
   return { model, compiled, attempts };
 }
@@ -122,10 +133,12 @@ export async function draftCanonicalModel(brief: string | readonly InputMessage[
 /**
  * THE AI'S POSTIMAGE (simplify v1: every intended update, the path mechanism completion began): the SAME drafter, in a
  * conversation holding the person's words, the saved model and the change, returns the whole updated model, read as a first
- * draft is. The caller validates it exactly (`validatePostimage`); nothing here merges or edits it.
+ * draft is. The caller validates it exactly (`validatePostimage`); nothing here merges or edits it. `check`: the caller's
+ * validator on each compiling draft, its refusal the drafter's repair (`DraftCheck`).
  */
-export async function proposePostimage(model: CanonicalModelT, personWords: readonly string[], change: string, removals: readonly string[], call: ResponsesCall): Promise<DraftOutcome> {
+export async function proposePostimage(model: CanonicalModelT, personWords: readonly string[], change: string, removals: readonly string[], call: ResponsesCall,
+  check?: DraftCheck): Promise<DraftOutcome> {
   const ask = `${UPDATE_PREFIX}\nThe change: ${change}\nRemove: ${removals.length > 0 ? removals.join(', ') : 'nothing'}`;
   return draftCanonicalModel([{ role: 'user', content: personWords.join('\n\n') }, { role: 'assistant', content: JSON.stringify(model) }, { role: 'user', content: ask }],
-    call, personWords.join('\n'), { interpret: true });
+    call, personWords.join('\n'), { interpret: true, check });
 }
