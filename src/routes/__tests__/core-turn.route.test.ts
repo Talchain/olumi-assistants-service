@@ -922,7 +922,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
 
     it('(6) ALPHA (23 Oct) + Codex r1 BLOCK 4 on #3709: a saved PROGRAM\'s turn gets the model-program instructions; a saved Living Model keeps the old text, byte for byte', async () => {
       // Pinned from the request bodies the provider received on this route, not from the module that builds them.
-      const PROGRAM_SHA = '3173b6d35d5cf7ef8579ef17f462e0c7c31a022c689aae52e520c1851052d497'; // 25 Oct (prompt rebuild R): no first-model section or example, no note_on_item sentence, a refused change proposed again (was fee42c2f…, 24 Oct: issue 30)
+      const PROGRAM_SHA = '0c0b2c1f95d1565e2e91c46e5e9c8626e93fe4e78c6d8e30e6b0b159bf6bf2c7'; // R2: the one-card rule (was 3173b6d3…). 25 Oct (prompt rebuild R): no first-model section or example, no note_on_item sentence, a refused change proposed again (was fee42c2f…, 24 Oct: issue 30)
       const LIVING_MODEL_SHA = '7a1bced23a44dccc478a00d075b28bbe2dda487a4b6da868ae3a477698097e44'; // staging 646d374e's
       const sha = (c: Json) => createHash('sha256').update(String(c.instructions), 'utf8').digest('hex');
       outputs = [[{ type: 'message', text: 'Here is what the model holds.' }]];
@@ -1177,7 +1177,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(String(sentTools.propose_change)).toContain('An answer to a listed question (a blocker, or an asked item\'s question) goes in answers, on that existing item\'s id from read_canonical_context, saying whose it is: author person, ');
       expect(String(sentTools.propose_change)).toContain('Anything else (a new item or link, a rename, a removal) goes in request, in plain words with their exact words for every figure of theirs, '
         + 'with remove the ids of anything they asked to remove ([] for none); Olumi’s drafter writes it. ');
-      expect(sentSha('propose_change')).toBe('ac36549b13eef0bf2800d656b0f3fa9513eb17391f671aa535825e571ee722fd'); // rebuild R: the Run-words rule once, in read_canonical_context (was 24a9738a…)
+      expect(sentSha('propose_change')).toBe('62c11751b91a915f278d601aab80f001cd3d96a72b5d73953e9f7953bd8bdbae'); // R2: the one-card rule (was ac36549b…); rebuild R: the Run-words rule once, in read_canonical_context (was 24a9738a…)
       const sentParams = (calls[0]!.tools as Json[]).find((t) => t.name === 'propose_change')!.parameters as Json;
       expect(Object.keys(sentParams.properties)).toEqual(['public_label', 'basis', 'request', 'remove', 'answers']);
       expect(sentParams.required).toContain('answers');
@@ -1188,7 +1188,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       // The program turn's guidance as SENT (its pin in core-prompt-arm is this text's): answers go in answers, on the item's id.
       const guidance = ((calls[0]!.input ?? []) as Json[]).filter((i) => i.role === 'system').map((i) => String(i.content)).filter((c) => c.startsWith('This scenario\'s model is a model program'));
       expect(guidance).toHaveLength(1);
-      expect(createHash('sha256').update(guidance[0]!, 'utf8').digest('hex')).toBe('3f6f7fd97906a49d8cf3fd9925322634ace4e68a351a494f777f397331781a92'); // rebuild R (was 4ccd4a59…)
+      expect(createHash('sha256').update(guidance[0]!, 'utf8').digest('hex')).toBe('58132459335e891c8622884c3cf56911cc3b7c1e7f3a1433891428a80c915208'); // R2: the one-card rule (was 3f6f7fd9…; 4ccd4a59… before R)
       // The read the agent got back: the Run's goal_chance exactly as stored (each goal's own line, the joint, the notes).
       const output = (calls[1]!.input as Json[]).find((i) => i.type === 'function_call_output' && i.call_id === 'read')!.output;
       const read = JSON.parse(typeof output === 'string' ? output : JSON.stringify(output)) as Json;

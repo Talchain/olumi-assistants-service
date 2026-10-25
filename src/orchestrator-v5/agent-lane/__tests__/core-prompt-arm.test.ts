@@ -50,12 +50,19 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     expect(b).not.toContain(NOTE_ON_ITEM_INSTRUCTION);
     expect(b).not.toContain('note_on_item');
     // 23 Oct (ALPHA): the model-program prompt replaces arm B's assembled reference (055841368f…, 29,512 characters sent).
-    expect(createHash('sha256').update(b, 'utf8').digest('hex')).toBe('3173b6d35d5cf7ef8579ef17f462e0c7c31a022c689aae52e520c1851052d497'); // 25 Oct (prompt rebuild R on cand/alpha-E): no first-model section or example, no note_on_item sentence, the question rule once in the reply rules, a refused change fixed and proposed again. Before: fee42c2f… (24 Oct: issue 30, synthetic examples only; before it, remodel coaching (after 23 Oct P1/P4: at most three questions, each once, never what their words state).
+    expect(createHash('sha256').update(b, 'utf8').digest('hex')).toBe('0c0b2c1f95d1565e2e91c46e5e9c8626e93fe4e78c6d8e30e6b0b159bf6bf2c7'); // 25 Oct (R2: the one-card rule, said once and the same in all three texts; was 3173b6d3…) (prompt rebuild R on cand/alpha-E): no first-model section or example, no note_on_item sentence, the question rule once in the reply rules, a refused change fixed and proposed again. Before: fee42c2f… (24 Oct: issue 30, synthetic examples only; before it, remodel coaching (after 23 Oct P1/P4: at most three questions, each once, never what their words state).
     // Candidate-3's "WHEN to build" witness (21 Oct) is retired with the dead first-model section (rebuild R): the host drafts.
     expect(b).not.toContain('draft the first model from their brief in that same turn, even when figures are missing');
     // DL (measure H, 4/7 runs: a refused change never proposed again): the refusal's reason reaches the agent (the tool result is
     // the outcome's JSON, its detail included), so it is told once to act on it.
-    expect(count(b, 'When a change is refused, fix what the refusal names and propose it again in the same turn, or ask the person the one thing needed.')).toBe(1);
+    // R2 (buddy, DL 25 Oct): ONE rule, the same words in the standing text, the turn guidance and propose_change's description, as
+    // program-tools.ts proposeProgramChange does: a successful card holds the turn's slot until applied; a refused preparation frees it.
+    const ONE_CARD = 'A turn holds one pending card: while it waits for approval no second change is prepared, and a refused change saves nothing and may be corrected, using its reason, and proposed again in the same turn.';
+    expect(count(b, `${ONE_CARD} If its reason needs something only the person can give, ask them for that one thing.`)).toBe(1);
+    for (const [name, text] of [['standing', b], ['guidance', PROGRAM_TURN_GUIDANCE], ['propose_change', coreInstructions.PROGRAM_TOOL_DESCRIPTIONS.propose_change]] as const)
+      expect(count(text, ONE_CARD), name).toBe(1);
+    for (const old of ['call propose_change ONCE', 'a second proposal in the same turn is refused', 'A turn shows one card', 'When a change is refused, fix what the refusal names'])
+      for (const text of [b, PROGRAM_TURN_GUIDANCE, coreInstructions.PROGRAM_TOOL_DESCRIPTIONS.propose_change]) expect(text, old).not.toContain(old);
   });
 
   it('arm A is untouched: the legacy host contract is byte-identical to staging b76bc42c', () => {
@@ -281,9 +288,9 @@ describe('prompt arm B (programme-docs #94 6302769609): the core agent is told o
     // The program turn's guidance is prompt text: answers in order answer the questions in order, and none is asked again in the same words.
     // Targeted answers (DL 24 Oct): an answer goes in answers on its item's id, anything else in request (pinned as sent in core-turn.route).
     // Rebuild R: the never-again clause is said once, in the reply rules. Was 4ccd4a59….
-    expect(createHash('sha256').update(PROGRAM_TURN_GUIDANCE, 'utf8').digest('hex')).toBe('3f6f7fd97906a49d8cf3fd9925322634ace4e68a351a494f777f397331781a92');
+    expect(createHash('sha256').update(PROGRAM_TURN_GUIDANCE, 'utf8').digest('hex')).toBe('58132459335e891c8622884c3cf56911cc3b7c1e7f3a1433891428a80c915208'); // R2: the one-card rule (was 3f6f7fd9…)
     expect(count(PROGRAM_TURN_GUIDANCE, 'Answers in the order of your questions answer them in that order, and "I don\'t know" is an answer: put each on the item of the question it answers. ')).toBe(1);
-    expect(count(PROGRAM_TURN_GUIDANCE, 'call propose_change ONCE: an answer to a listed question goes in answers, on that item\'s id; any other change goes in request,')).toBe(1);
+    expect(count(PROGRAM_TURN_GUIDANCE, 'call propose_change with the whole change: an answer to a listed question goes in answers, on that item\'s id; any other change goes in request,')).toBe(1);
     for (const old of ['If only its direction can be defended', 'uncertainty alone is not a reason to withhold', 'what they expect without the options included', 'roughly doubles daily deliveries',
       'A goal or limit stated against today is relative to today']) expect(DRAFTING_INSTRUCTIONS, old).not.toContain(old);
     // Buddy 08:48Z: a level target and a change in units are never turned into a ratio. Only the change_rel clause sets today
