@@ -55,6 +55,7 @@ import {
 } from "../orchestrator-v5/handlers/hold-thread-through.js";
 import { withTodayPartsAtGoalLevel } from "../orchestrator-v5/agent-lane/goal-definition-sum.js";
 import type { PendingAction } from "../orchestrator-v5/session/pending-action.js";
+import { isProgramGraph } from "../orchestrator-v5/model-program-turn/program-store.js";
 
 /** Create-only construction may retain a count range the brief itself states. Proposed ranges still need approval. */
 function onlyBriefStatedCountRanges(graph: GraphStateIngress, brief: string | undefined): boolean {
@@ -731,6 +732,8 @@ export default async function route(app: FastifyInstance) {
         );
       }
 
+      // A MODEL PROGRAM's core write: storage integrity only, never the legacy edit rules (`CheckedGraphAppendParams.programSave`).
+      const programSave = corePostimage && isProgramGraph(parsed.data);
       if (req.scenarioAccess?.provisionIfMissing && !await req.scenarioAccess.provisionIfMissing()) return;
       const store = getSessionStore();
 
@@ -792,7 +795,7 @@ export default async function route(app: FastifyInstance) {
           baseGraphForInvariants,
         ), baseGraphForInvariants), baseGraphForInvariants);
         // The canvas omits edge provenance; verify the postimage after restoring unchanged held facts.
-        assertShareByDatePreserved(baseGraphForInvariants, graphToRegister);
+        if (!programSave) assertShareByDatePreserved(baseGraphForInvariants, graphToRegister);
         // ⭐ STEP 8: a goal's compiled today part IS that goal's level today, on every write by every writer (the goal is the one
         // authority; `set_factor_value` refuses to set the part on its own and says where to change it).
         if (!corePostimage) graphToRegister = withTodayPartsAtGoalLevel(graphToRegister);
@@ -1104,8 +1107,9 @@ export default async function route(app: FastifyInstance) {
       // `commit.ts` was restructured to close.
       try {
         // Same deterministic check as the proposal writer and final append floor.
-        assertNoScopedIdentityConflict(graphToRegister);
-        assertNoPendingScopeAmendment(graphToRegister, baseGraphForInvariants, await loadMostRecentPendingActionsIntegrityStrict(scenarioId, requestId));
+        if (!programSave) assertNoScopedIdentityConflict(graphToRegister);
+        const pending = await loadMostRecentPendingActionsIntegrityStrict(scenarioId, requestId); // a failed read refuses every write
+        if (!programSave) assertNoPendingScopeAmendment(graphToRegister, baseGraphForInvariants, pending);
       } catch (err) {
         if (err instanceof GoalScopeIdentityConflict) return reply.code(422).send(buildErrorV1('BAD_INPUT', err.message, { code: err.code }, requestId));
         log.warn({ event: 'v5.scenario_graph_register.pending_wipe_risk', request_id: requestId, scenario_id: scenarioId }, 'Graph registration refused because the authoritative reconciliation read failed');
@@ -1116,18 +1120,18 @@ export default async function route(app: FastifyInstance) {
         turnClass: "direct_answer",
         source: "graph_registration",
       });
-      if (hasNewInterventionRanges(baseGraphForInvariants, projected)
+      if (!programSave && hasNewInterventionRanges(baseGraphForInvariants, projected)
         && !(callerExpectsNoGraph && (onlyBriefStatedCountRanges(projected, brief.value) || onlyRecordedSettingRanges(projected, brief.value)))) {
         return reply.code(409).send(buildErrorV1('BAD_INPUT',
           'A new or changed likely range needs approval on its stored change card. Nothing was written.',
           { code: 'INTERVENTION_RANGE_APPROVAL_REQUIRED' }, requestId));
       }
       const graphForStore = withEntityRefs(project(
-        clearInheritedInterventionSourceQuotes(baseGraphForInvariants, projected), {
+        programSave ? projected : clearInheritedInterventionSourceQuotes(baseGraphForInvariants, projected), {
           scenarioId, turnClass: "direct_answer", source: "graph_registration",
         }));
 
-      prepareHorizonBasisForWrite(graphForStore, baseGraphForInvariants, scenarioId);
+      if (!programSave) prepareHorizonBasisForWrite(graphForStore, baseGraphForInvariants, scenarioId);
       const turnId = registrationTurnId(scenarioId, operationId);
       const requestHash = registrationRequestHash(graphForStore, brief.value);
       // THE CANONICAL RECEIPT, captured rather than discarded. The RPC builds
@@ -1224,6 +1228,7 @@ export default async function route(app: FastifyInstance) {
           writesGraph: true,
           baseGraphForInvariants,
           source: "graph_registration",
+          programSave,
         });
         /**
          * ⭐ A TURN'S OWN WRITE IS THAT TURN'S (DL 93d79c3e 09:40Z; Codex r1 on #3704). A registration made inside an Agent dispatch
@@ -1247,6 +1252,7 @@ export default async function route(app: FastifyInstance) {
           store,
           writesGraph: true,
           coreWrite: corePostimage,
+          programSave,
           // Only what THIS registration introduces can refuse it — a scenario
           // whose stored graph is already invalid stays registrable.
           //

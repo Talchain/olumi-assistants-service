@@ -74,6 +74,9 @@ export interface CheckedGraphAppendParams {
    * other graph write: one would leave the graph and its meaning apart, or drop the meaning.
    */
   readonly coreWrite?: boolean;
+  /** With `coreWrite`, a MODEL PROGRAM's write (`isProgramGraph`): checked where it is made (compile, `validatePostimage`, the approved
+   * card), so only storage integrity judges it here, never the legacy edit rules (25 Oct: 3 presses refused as untouched_level_rescaled). */
+  readonly programSave?: boolean;
   /** THIN CORE: the authoritative stored graph this write replaces (the commit's own read), for the one-write rule. */
   readonly coreClassificationBase?: unknown;
   /**
@@ -160,6 +163,8 @@ export interface GraphInvariantAssertionParams {
   /** Same three-state semantics as `CheckedGraphAppendParams`. Read its JSDoc. */
   readonly baseGraphForInvariants?: unknown;
   readonly source?: string | undefined;
+  /** See `CheckedGraphAppendParams.programSave`. */
+  readonly programSave?: boolean;
 }
 
 /**
@@ -205,11 +210,12 @@ export function assertNoIntroducedGraphViolations(
 ): void {
   const { graph, identity, writesGraph, source } = params;
 
+  const legacyRules = writesGraph && params.programSave !== true;
   // RC3 is an absolute representation rule, independent of baseline absorption or GM mode.
-  if (writesGraph) assertNoPreconditionRiskLinks(graph);
+  if (legacyRules) assertNoPreconditionRiskLinks(graph);
   // ⭐ STEP 8: so is a goal's compiled today part: exactly its goal's level today, set by no option, with no link into it. Every
   // caller (append, save, restore, copy) reaches this one check; the register route sets the part before hashing.
-  const apart = writesGraph ? todayPartsApartFromGoal(graph) : [];
+  const apart = legacyRules ? todayPartsApartFromGoal(graph) : [];
   if (apart.length > 0) throw new PersistedGraphInvariantError([{ code: 'GOAL_TODAY_PART_NOT_GOAL_LEVEL', entity_ids: [...apart].sort(), count: apart.length }]);
 
   const persistedInvariants = checkPersistedGraphInvariants(graph, {
@@ -311,6 +317,7 @@ export async function appendCheckedGraphWrite(
   params: CheckedGraphAppendParams,
 ): Promise<SessionAppendOutcome> {
   const { store, writesGraph, source } = params;
+  const programSave = params.coreWrite === true && params.programSave === true;
   if (writesGraph && params.baseGraphForInvariants === undefined) {
     log.warn({ event: 'door.untouched_level_check_skipped', reason: 'no_base_supplied', source });
   }
@@ -332,7 +339,7 @@ export async function appendCheckedGraphWrite(
     if (typeof store.readMostRecentPendingActions === 'function') {
       const prior = await store.readMostRecentPendingActions(write.scenario_id, { validation: 'strict',
         ...(params.heldProposals !== undefined ? { onLatestRowId: (id: string | null) => { expectedLatestRowId = id; } } : {}) });
-      if (writesGraph) assertNoPendingScopeAmendment(write.graph, params.baseGraphForInvariants, prior);
+      if (writesGraph && !programSave) assertNoPendingScopeAmendment(write.graph, params.baseGraphForInvariants, prior);
       let supplied = write.pending_actions ?? [];
       // Per attempt: what did not fit is said from THIS read's reconciliation only (S-D slice 2 x S-D.1b).
       const heldOverCap: PendingAction[] = [];
@@ -371,14 +378,14 @@ export async function appendCheckedGraphWrite(
       }
       if (params.heldProposals?.onReconciled !== undefined) write = params.heldProposals.onReconciled(write, heldOverCap);
     }
-    if (writesGraph) {
+    if (writesGraph && !programSave) {
       assertNoScopedIdentityConflict(write.graph);
       assertUntouchedLevelQuantities(params.baseGraphForInvariants, write.graph);
     }
 
     // The check runs on `write.graph` — the same object handed to `store.append`
     // on the last line of this function, with nothing between them.
-    assertDoorProvenance(write.graph, params.storedGraphForHorizonBasis !== undefined ? params.storedGraphForHorizonBasis : params.baseGraphForInvariants, write.scenario_id, params.horizonBasisWrite);
+    if (!programSave) assertDoorProvenance(write.graph, params.storedGraphForHorizonBasis !== undefined ? params.storedGraphForHorizonBasis : params.baseGraphForInvariants, write.scenario_id, params.horizonBasisWrite);
     assertNoIntroducedGraphViolations({
       graph: write.graph,
       identity: {
@@ -389,6 +396,7 @@ export async function appendCheckedGraphWrite(
       writesGraph,
       baseGraphForInvariants: params.baseGraphForInvariants,
       source,
+      programSave,
     });
 
     // Nothing mutates the graph between the check above and this line. A row written inside one of the Agent's own
