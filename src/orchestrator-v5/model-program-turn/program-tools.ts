@@ -4,7 +4,8 @@
  *  · read_canonical_context: the program as the agent reads it (quantities with their status and who gave them, the
  *    questions still open, the stored Run's words);
  *  · propose_change: an ANSWER to a listed question is set on the item it answers, exactly (`answered`, the same builder as
- *    the canvas edit; no AI call); a structural change, in words with the ids to remove, has Olumi's drafter write the
+ *    the canvas edit; no AI call); a structural change, in words with the ids to remove (or an answer with no figure on a
+ *    goal, limit or left-out record), has Olumi's drafter write the
  *    WHOLE updated model (`proposePostimage`). The one validator checks either exactly (`validatePostimage`), and it is compiled
  *    and evaluated now, so the card the person approves holds the exact model, EVERY change on it, and the Run it would
  *    store; nothing is saved;
@@ -145,15 +146,24 @@ async function prepare(deps: ProgramToolDeps, ctx: Ctx, args: ProgramChangeArgs)
   const misowned = answers.filter((a) => (a.author === 'olumi') !== (a.status === 'estimated')
     || (a.author === 'olumi' && (a.low === null || a.high === null || !a.basis?.trim() || a.quote !== null || a.party !== null))).map((a) => a.id);
   if (misowned.length > 0) return refused('not_an_answer', `${misowned.join(', ')}: their answer is known or unknown, in their words; Olumi's is estimated, with low, high and a basis, never their words.`, { ids: misowned });
-  const set = answered(program.canonical, answers);
+  // An answer with no figure to the question on a goal, limit or left-out record (a measure, a definition, a condition): no
+  // figure to set, so Olumi's drafter writes it, as any structural change (REFUSED-CHANGE-CLASS 25 Oct, #11–12). Routed by
+  // the record's family and the answer's empty figure only, never by its words.
+  const { quantities, goals, limits, left_out } = program.canonical;
+  const onRecord = (a: AnswerT) => a.value === null && a.low === null && a.high === null && !quantities.some((x) => x.id === a.id)
+    && [goals, limits, left_out].some((f) => f.some((r) => r.id === a.id));
+  const figures = answers.filter((a) => !onRecord(a));
+  const said = answers.filter(onRecord).map((a) => `The answer to the question on ${a.id}, in ${a.party === null ? 'their' : `${a.party}'s`} words: "${a.quote}"${a.basis?.trim() ? ` (basis: ${a.basis})` : ''}`);
+  const request = said.length === 0 ? args.request : [args.request.trim(), ...said].filter((x) => x !== '').join('\n');
+  const set = answered(program.canonical, figures);
   if (typeof set === 'string') return refused('not_an_answer', set);
-  const drafted = args.request.trim() !== '' || args.remove.length > 0 ? await proposePostimage(set.model, words, args.request, args.remove, ledgeredResponsesCall()) : set;
+  const drafted = request.trim() !== '' || args.remove.length > 0 ? await proposePostimage(set.model, words, request, args.remove, ledgeredResponsesCall()) : set;
   if (drafted.model === null) return refused('no_model_back', 'Olumi could not write the updated model just now; nothing changed.');
   // Their answers win on the drafter's model too, set again exactly (buddy 24 Oct); one it removed is refused by name, never dropped.
   const postimage = drafted.model;
-  const gone = answers.filter((a) => !postimage.quantities.some((x) => x.id === a.id)).map((a) => a.id);
+  const gone = figures.filter((a) => !postimage.quantities.some((x) => x.id === a.id)).map((a) => a.id);
   if (gone.length > 0) return refused('not_an_answer', `${gone.map((id) => `"${set.model.quantities.find((x) => x.id === id)!.label}" (${id})`).join(', ')}: the change removed what you answered, so nothing changed.`, { ids: gone });
-  const draft = answered(postimage, answers);
+  const draft = answered(postimage, figures);
   if (typeof draft === 'string') return refused('not_an_answer', draft);
   const v = validatePostimage(program.canonical, draft.model, { removals: args.remove, words, fresh, approver: ctx.authenticated_user_id });
   if (!v.ok) return refused(v.code, v.reason, { ids: v.ids, ...(v.check ? { check: v.check } : {}) });
