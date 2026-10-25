@@ -109,7 +109,11 @@ export function evaluateCanonical(model: CanonicalModelT, opts: { readonly sourc
   const blockers = blockersOf(model, compiled.blockers);
   const asks: PresentAsk[] = normalise(model).quantities.filter((q) => blockers.some((b) => b.answer?.quantity_id === q.id))
     .map((q) => ({ quantity_id: q.id, label: q.label, unit: q.unit }));
-  const tipping: Record<string, TippingProbe> = Object.fromEntries(goals.filter((g) => g.status === 'asks' && g.asks.length === 1)
+  // A window's origin timing is no threshold to search: its value moves the window, so every probe simulates that many more
+  // periods, and it has no upper end, so the open-ended search doubled it (each probe dearer) and froze (DoD-I hiring-r3). It
+  // takes whole periods only, which the search's grid never tries, so it never had a threshold: it is not probed.
+  const origins = new Set([...normalise(model).goals, ...normalise(model).limits].flatMap((x) => x.measure?.window?.origin_offset ?? []));
+  const tipping: Record<string, TippingProbe> = Object.fromEntries(goals.filter((g) => g.status === 'asks' && g.asks.length === 1 && !origins.has(g.asks[0]!))
     .map((g) => [g.goal_id, probeFor(model, g.goal_id, g.asks[0]!, opts.sourceText)] as const));
   const leaves_out = compiled.joint.leaves_out.map((id) => labelOf.get(id) ?? id);
 
