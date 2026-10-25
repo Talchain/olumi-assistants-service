@@ -80,8 +80,7 @@ import {
 } from '../orchestrator-v5/core-route/contract.js';
 import { CONVERSATION_ROWS_READ } from './assist.v1.scenario-graph.js';
 import { runModelProgramTurn } from '../orchestrator-v5/model-program-turn/turn.js';
-import { isProgramGraph, programReadOf, reopenProgram, savedProgramOf, sourceTextOf, unreadableWords } from '../orchestrator-v5/model-program-turn/program-store.js';
-import { compile } from '../orchestrator-v5/model-program/compile.js';
+import { isProgramGraph, programReadOf, reopenProgram, unreadableWords } from '../orchestrator-v5/model-program-turn/program-store.js';
 import { applyCanvasFigure, PROGRAM_TURN_GUIDANCE, readProgramContext } from '../orchestrator-v5/model-program-turn/program-tools.js';
 import { log } from '../utils/telemetry.js';
 
@@ -245,22 +244,6 @@ function notesOf(result: Pick<AgentTurnResult, 'tool_results'>, identityNow: str
     const text = str(directive.note);
     return target !== null && text !== null ? [{ element_id: target, text }] : [];
   });
-}
-
-/**
- * A program's first goal whose chance is withheld, as a note on its card (DL 24 Oct, "Olumi speaks on the item"): the compiler's
- * own reason, then the AI's question (the goal's, else the first asked figure's). One per turn, as the canvas holds one. Not on
- * the turn that drafts the model: its cards reach the canvas after the turn's notes do, so the note would land on nothing.
- */
-function withheldGoalNote(graph: unknown, turn: unknown): CoreTurnNote[] {
-  const program = turn === 'draft' ? undefined : savedProgramOf(graph);
-  if (program === undefined) return [];
-  const m = program.canonical;
-  const per = compile(m, { sourceText: sourceTextOf(program.person_words) }).perGoal.find((p) => p.status !== 'calculable');
-  const goal = m.goals.find((g) => g.id === per?.goal_id);
-  if (per === undefined || goal === undefined) return [];
-  const question = goal.question ?? per.asks.map((id) => m.quantities.find((q) => q.id === id)?.question).find((x) => typeof x === 'string');
-  return [{ element_id: goal.id, text: [...per.reasons, ...(question ? [question] : [])].join(' ') }];
 }
 
 export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
@@ -859,13 +842,11 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       // the reply was written is not this turn's (Codex r1 on #3668).
       const confirmed = result.tool_results.flatMap((r) => (r.ran === true && typeof r.run_id === 'string' ? [r.run_id] : []));
       const ranThisTurn = runPress || (confirmed.length > 0 && confirmed[confirmed.length - 1] === after.run?.run_id);
-      const cards = await heldCardsOf(store, scenarioId, rowPending, after);
       return send(200, coreTurnContract({
         turnId, durability, assistantText,
         revision: after.revision, scenarioRevision: after.identity, graph: appliedGraphWire(after.graph),
-        cards,
-        // A held change card is the person's next step (it may hold their answer), so the goal's question is not asked beside it.
-        notes: [...notesOf(result, after.identity), ...(cards.some((c) => c.reading !== true) ? [] : withheldGoalNote(after.graph, programPayload?.model_program['turn']))],
+        cards: await heldCardsOf(store, scenarioId, rowPending, after),
+        notes: notesOf(result, after.identity),
         run: isProgramGraph(after.graph) ? programRunOf(after.graph, newestRunId(programRead)) : after.run, analysisState: after.analysisState, ...(ranThisTurn ? { analysisResult: after.analysisResult } : {}),
         receipts: programPayload === undefined ? receiptsOf(result)
           : collectTurnReceipts(result.tool_results).map((r) => ({ ...r, authorised_by: programPayload!.model_program['turn'] === 'draft' ? 'olumi' as const : 'person' as const })),
