@@ -127,8 +127,7 @@ it('two CAS attempts read the owner exactly once', async () => {
     .mockResolvedValueOnce({ status: 'latest_moved' }).mockResolvedValueOnce({ id: 'row' });
   f.store.appendIfLatest = appendIfLatest;
   f.store.readMostRecentPendingActions = vi.fn<SessionStore['readMostRecentPendingActions']>(async (_id, options) => { options?.onLatestRowId?.('latest'); return []; });
-  // W9: only a final answer (response_emitted) takes the conditional append; any other record is appended plainly.
-  await bound(verified, () => appendCheckedGraphWrite({ store: f.store, write: { ...write, response_emitted: true }, writesGraph: true, source: 'door_test',
+  await bound(verified, () => appendCheckedGraphWrite({ store: f.store, write, writesGraph: true, source: 'door_test',
     baseGraphForInvariants: GRAPH, heldProposals: { isHeld: () => false, seenByThisRequest: new Set() } }));
   expect(appendIfLatest).toHaveBeenCalledTimes(2); expect(f.append).not.toHaveBeenCalled();
   expect(f.getScenarioOwner).toHaveBeenCalledExactlyOnceWith(SID);

@@ -235,7 +235,7 @@ export const PROGRAM_TOOL_DESCRIPTIONS = {
     + 'Put the whole change in ONE propose_change: once a card has been prepared, a second proposal in the same turn is refused. '
     + 'Never invent a figure for them, and never put an Olumi estimate in as theirs. The result shows what the card would show (would_show). ' + RUN_WORDS_RULE + ' '
     + 'A refusal says why (their words do not contain the quote; the edit does not fit; the changed model does not calculate, with the reasons; nothing would change): say it plainly and ask for what is needed. '
-    + 'After a does_not_compile refusal you may make ONE corrected propose_change in the same turn, using the refusal\'s reasons.',
+    + 'After any refusal, while this turn has prepared no card, you may make a corrected propose_change, using the refusal\'s reasons.',
   apply_change:
     'Save the exact proposal the person approved on its card, with the Run its card showed. The approval is the card’s, never a typed yes. '
     + 'saved: the receipt, the new revision and run, the Run. already_saved: this same proposal was saved before; never save it again. '

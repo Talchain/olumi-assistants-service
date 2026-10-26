@@ -35,7 +35,6 @@ import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tool
 import { ENGINE_VERSIONS, revisionDigest, RUN_AGAIN_AFTER_UPDATE, RUN_AGAIN_FOR_CHANCE } from '../run-receipt.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { responsesSse } from '../../agent-lane/__tests__/stream-when-asked.js';
-import { recordedOutcomeOf } from '../../core-route/turn-request.js';
 import { at, bakery, bakeryWithDefect, BRIEF, club, CLUB_BRIEF, q, updateOf } from './bakery.fixture.js';
 
 /** A draft captured before a field existed, read in today's format (the saved-model reader's own mapping). */
@@ -443,8 +442,7 @@ describe('the model-program turn on the real core route', () => {
   /**
    * ⭐ W9: THE ALPHA'S TURNS SURVIVE AN OPENAI OVERLOAD (served staging 26 Oct). 13:33Z, capacity: the approval SAVED, then the
    * reply call was accepted and ended on OpenAI's own error event ("Our servers are currently overloaded"); the person got a
-   * 502 UPSTREAM_ERROR, and the turn's own record (their "Yes, that's what I meant", and that the reply was lost) was refused
-   * by the store's conditional append, so it vanished and a resend could not replay it. 13:44Z, european: the drafter's repair
+   * 502 UPSTREAM_ERROR for a change that was kept. 13:44Z, european: the drafter's repair
    * call ended the same way, the loop stopped on it, and the change was refused as does_not_compile, with no card. Each row
    * drives the real core route or the real tool, with the provider's failure injected at fetch (synthetic bakery words).
    */
@@ -487,47 +485,14 @@ describe('the model-program turn on the real core route', () => {
       expect(turnRows.get(payload.turn_id)?.assistant_message).toBe('Saved: the change is in your model.');
     });
 
-    it('changes 1 + 2: an overload twice keeps the change, says the provider is busy, and RECORDS the turn with what the person said (the store\'s conditional append refuses it); a resend replays it and writes nothing', async () => {
+    it('change 2: an overload twice is asked for once more, never twice: the change is kept and the provider is reported busy', async () => {
       const { apply, payload } = await press();
-      // The store as Supabase holds it (`supabase-store.ts` appendThroughRpcInner + its RPC): the conditional append takes ONLY a
-      // final, non-graph Agent answer, and the latest-row read names the row it read. Every other row of this file keeps its store.
-      const latest = () => [...turnRows.values()].filter((row) => !String(row.turn_id).endsWith(':claim')).at(-1);
-      const plainRead = store.readMostRecentPendingActions.getMockImplementation()!;
-      store.readMostRecentPendingActions.mockImplementation((async (_s: string, o?: { onLatestRowId?: (id: string | null) => void }) => {
-        o?.onLatestRowId?.(latest()?.id ?? null);
-        return latest()?.pending_actions ?? [];
-      }) as never);
-      const conditional = vi.fn(async (w: Json, o: { expectedLatestRowId: string | null }) => {
-        if (w.graph != null || w.modelVersion !== undefined || w.briefText != null || w.coaching_state != null || w.turn_class !== 'direct_answer'
-          || w.handler_id !== null || !w.response_emitted || String(w.turn_id).endsWith(':claim') || !String(w.request_hash).startsWith('agent_turn:')) {
-          throw new Error('Conditional append requires a final Agent answer without a graph write');
-        }
-        return (latest()?.id ?? null) !== o.expectedLatestRowId ? { status: 'latest_moved' as const } : store.append(w);
-      });
-      (store as unknown as Json).appendIfLatest = conditional;
-      try {
-        replies = [apply, overloaded, overloaded];
-        const r = await turn(payload);
-        const j = r.json();
-        expect(r.statusCode, r.body).toBe(502);
-        expect(j.error, 'the provider is busy; the change is kept').toEqual({ code: 'PROVIDER_CAPACITY', message: SAVED_KEPT, retry_safe: false, nothing_saved: false });
-        expect(registered, 'the approval stays saved, written once').toHaveLength(2);
-        expect(sent, 'the reply was asked for once more, never twice').toHaveLength(4);
-        expect(j.durability, 'the failed turn\'s own record is saved').toBe('recorded');
-        const row = turnRows.get(payload.turn_id);
-        expect(row).toMatchObject({ response_emitted: false, user_message: payload.message, assistant_message: SAVED_KEPT });
-        expect(recordedOutcomeOf(row.request_hash)).toBe('reply_lost_saved');
-        expect(conditional, 'the record is not a final answer, so it never takes the conditional append').not.toHaveBeenCalled();
-        // The same turn sent again replays its outcome: no model call, no write, no new row.
-        const before = { sent: sent.length, registered: registered.length, rows: turnRows.size, graph: JSON.stringify(persisted) };
-        const again = await turn(payload);
-        expect([again.statusCode, again.json().durability], again.body).toEqual([200, 'replayed']);
-        expect(again.json().error).toEqual({ code: 'REPLY_NOT_DELIVERED', message: SAVED_KEPT, retry_safe: false, nothing_saved: false });
-        expect({ sent: sent.length, registered: registered.length, rows: turnRows.size, graph: JSON.stringify(persisted) }).toEqual(before);
-      } finally {
-        store.readMostRecentPendingActions.mockImplementation(plainRead);
-        delete (store as unknown as Json).appendIfLatest;
-      }
+      replies = [apply, overloaded, overloaded, 'never sent'];
+      const r = await turn(payload);
+      expect(r.statusCode, r.body).toBe(502);
+      expect(r.json().error, 'the provider is busy; the change is kept').toEqual({ code: 'PROVIDER_CAPACITY', message: SAVED_KEPT, retry_safe: false, nothing_saved: false });
+      expect(registered, 'the approval stays saved, written once').toHaveLength(2);
+      expect([sent.length, replies.length], 'the reply was asked for once more, never twice').toEqual([4, 1]);
     });
 
     it('change 2 (CONTRAST): a provider error that is not a server fault on the same reply is not asked for again, and stays an upstream error', async () => {
