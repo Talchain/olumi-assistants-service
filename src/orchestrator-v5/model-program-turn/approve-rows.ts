@@ -45,9 +45,9 @@ export async function approveReadingRows(deps: { readonly dispatch: InternalDisp
   if (read.kind !== 'program') return { outcome: refused('not_a_program_scenario') };
   if (p.base_model_identity !== before.identity) return { outcome: refused('superseded') };
   const program = read.program;
-  const records = new Map(Object.values(program.canonical).flatMap((f) => (Array.isArray(f) ? f : []))
-    .flatMap((r: { id?: unknown; approval?: unknown }) => (typeof r.id === 'string' && typeof r.approval === 'string' ? [[r.id, r.approval] as const] : [])));
-  const settled = args.ids.filter((id) => records.get(id) !== 'proposed');
+  const proposed = new Set(Object.values(program.canonical).flatMap((f): unknown[] => (Array.isArray(f) ? f : []))
+    .flatMap((r) => { const x = r as { id?: unknown; approval?: unknown }; return typeof x.id === 'string' && x.approval === 'proposed' ? [x.id] : []; }));
+  const settled = args.ids.filter((id) => !proposed.has(id));
   if (settled.length > 0) return { outcome: refused('not_proposed', undefined, { ids: settled }) };
   const approver = ctx.authenticated_user_id;
   const next = withNewRun({ ...program, canonical: withApproved(program.canonical, new Set(args.ids), approver) });
