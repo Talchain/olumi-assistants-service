@@ -2012,25 +2012,56 @@ describe('the model-program turn on the real core route', () => {
       m.quantities.push(q('floor', 'member', { value: 320, quote: 'at least 320 members', approval: 'approved' }));
       m.goals.push({ ...m.goals[0]!, id: 'keep_320', label: 'Keep at least 320 members', measure: { ...m.goals[0]!.measure!, target: 'floor' }, quote: 'keep at least 320 members' });
       m.conditions.push({ ...hall, text: wrapped, quote: wrapped.slice(0, -1), concerns: ['reach_340', 'keep_320'] });
-      // A qualitative aim without a measure makes the coverage note real; it remains outside the calculation.
-      m.goals.push({ ...m.goals[0]!, id: 'welcoming', label: 'Keep the hall\nwelcoming', measure: null, question: 'How would you measure a welcoming hall?', quote: 'Keep the hall\nwelcoming' });
-      const v = evaluateCanonical(m, { sourceText: `${OWN} ${wrapped} And keep at least 320 members. Keep the hall\nwelcoming.`, seed: 7 }).view as Json;
+      const source = `${OWN} ${wrapped} And keep at least 320 members.`;
+      const v = evaluateCanonical(m, { sourceText: source, seed: 7 }).view as Json;
       const detail = v.goal_chance, premise = 'your condition ‘The council must let us use the hall’ is met';
       expect(detail.targets.per_target).toHaveLength(2);
       for (const target of detail.targets.per_target) {
         expect(target.words).toContain(premise);
         expect(target.words).not.toMatch(/[\r\n]/);
       }
+      expect(detail.targets.joint.status).toBe('licensed');
       expect(detail.targets.joint.words).not.toMatch(/[\r\n]/);
       expect(detail.chance_words).not.toMatch(/[\r\n]/);
-      expect(detail.notes.length).toBeGreaterThan(0);
-      for (const note of detail.notes) expect(note).not.toMatch(/[\r\n]/);
-      expect(detail.notes.join(' ')).toContain('Keep the hall welcoming');
       for (const o of v.options) {
         expect(o.cell.face).toContain(premise);
         expect(o.cell.face).not.toMatch(/[\r\n]/);
       }
+      // An unmeasured aim withholds the whole chance: it has a joint line, never joint words or a partial chance.
+      m.goals.push({ ...m.goals[0]!, id: 'welcoming', label: 'Keep the hall\nwelcoming', measure: null, question: 'How would you measure a welcoming hall?', quote: 'Keep the hall\nwelcoming' });
+      const waiting = evaluateCanonical(m, { sourceText: `${source} Keep the hall\nwelcoming.`, seed: 7 }).view as Json;
+      expect(waiting.goal_chance.targets.joint.status).toBe('withheld');
+      expect(waiting.goal_chance.targets.joint.line).not.toMatch(/[\r\n]/);
+      expect(waiting.goal_chance.chance_words).toBeUndefined();
+      expect(waiting.goal_chance.notes.length).toBeGreaterThan(0);
+      for (const note of waiting.goal_chance.notes) expect(note).not.toMatch(/[\r\n]/);
+      expect(waiting.goal_chance.notes.join(' ')).toContain('Keep the hall welcoming');
+      expect(waiting.goal_chance.waits_on.find((b: Json) => b.id === 'welcoming').label).toBe('Keep the hall welcoming');
+      for (const target of waiting.goal_chance.targets.per_target) expect(target.words).not.toMatch(/[\r\n]/);
+      for (const o of waiting.options) {
+        expect(o.cell.kind).toBe('withheld');
+        expect(o.cell.why).not.toMatch(/[\r\n]/);
+      }
       expect(m.conditions[0]!.text).toBe(wrapped);
+    });
+
+    it('a waiting-only result also keeps its blocker labels and notes on one line without changing the model', () => {
+      const m = approved(allTheirs()), label = 'Current\n members';
+      m.limits = [];
+      m.quantities = m.quantities.map((x) => x.id === 'members_now'
+        ? { ...x, label, value: null, status: 'asked', quote: null, question: 'How many members are there today?' } : x);
+      const result = evaluateCanonical(m, { sourceText: OWN.replace('300 members today', 'our members today'), seed: 7 });
+      expect(result.sim).toBeNull();
+      const v = result.view as Json;
+      expect(v.goal_chance.waits_on.find((b: Json) => b.id === 'members_now').label).toBe('Current members');
+      expect(v.goal_chance.notes.length).toBeGreaterThan(0);
+      for (const note of v.goal_chance.notes) expect(note).not.toMatch(/[\r\n]/);
+      for (const o of v.options) {
+        expect(o.cell.kind).toBe('withheld');
+        expect(o.cell.why).toContain('‘Current members’');
+        expect(o.cell.why).not.toMatch(/[\r\n]/);
+      }
+      expect(m.quantities.find((x) => x.id === 'members_now')!.label).toBe(label);
     });
 
     it('a stated condition and an Olumi estimate: the basis names both, never "on your figures"', () => {

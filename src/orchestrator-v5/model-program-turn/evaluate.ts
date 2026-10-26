@@ -20,7 +20,7 @@ import type { ExecutableModel } from '../model-program/executable.js';
 import { costOf, simulate } from '../model-program/simulate/simulate.js';
 import type { SimResult } from '../model-program/simulate/result.js';
 import {
-  driverSweepOperations, needsAnswer, presentAnalysisView, waitsOnWords, type PresentAsk, type PresentBlocker, type PresentGoal, type PresentPremise, type PresentQuantity,
+  driverSweepOperations, inlineWords, needsAnswer, presentAnalysisView, waitsOnWords, type PresentAsk, type PresentBlocker, type PresentGoal, type PresentPremise, type PresentQuantity,
   type PresentedAnalysisView,
 } from '../model-program/present/present.js';
 
@@ -197,8 +197,8 @@ function waitingView(model: CanonicalModelT, compiled: CompileResult, goals: rea
     staleness: { stale: null, revision: null, run_revision: null, basis: 'analysis_graph_hash_interim', reason: null, limitation: 'Currentness is unknown because an analysis hash is unavailable.' },
     leader_licence: 'withheld',
     options: ids.map((option_id) => ({ option_id, cell: cellOf(option_id), main_driver: { kind: 'not_recorded' as const } })),
-    goal_chance: { notes: [...(refused !== undefined ? [refused] : []), ...goals.filter((g) => g.status !== 'calculable').map((g) => sentence(`‘${g.label}’ ${waitsOnWords(blockers, new Set([g.goal_id])) ?? `is not in the chance yet: ${g.reasons.join(' ')}`}`)),
-    ], ...(blockers.length > 0 ? { waits_on: blockers } : {}) },
+    goal_chance: { notes: [...(refused !== undefined ? [refused] : []), ...goals.filter((g) => g.status !== 'calculable').map((g) => sentence(`‘${inlineWords(g.label)}’ ${waitsOnWords(blockers, new Set([g.goal_id])) ?? `is not in the chance yet: ${g.reasons.join(' ')}`}`)),
+    ], ...(blockers.length > 0 ? { waits_on: blockers.map((b) => ({ ...b, label: inlineWords(b.label) })) } : {}) },
   };
 }
 
