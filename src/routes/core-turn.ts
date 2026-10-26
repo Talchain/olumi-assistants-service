@@ -215,9 +215,9 @@ function receiptsOf(result: Pick<AgentTurnResult, 'tool_calls' | 'tool_results'>
   return [...byVersion.values()];
 }
 
-/** Each call's name, outcome and typed refusal reason, as the wire and the turn log name them. */
+/** Each call's name, outcome and typed refusal reason (with a refused save's register code), as the wire and the turn log name them. */
 const toolCallsOf = (result: Pick<AgentTurnResult, 'tool_calls'>) => result.tool_calls.map((c) => ({ name: c.name,
-  outcome: c.outcome ?? (c.ok ? 'ok' : 'refused'), ...(typeof c.refusal === 'string' ? { refusal: c.refusal } : {}) }));
+  outcome: c.outcome ?? (c.ok ? 'ok' : 'refused'), ...(typeof c.refusal === 'string' ? { refusal: c.refusal } : {}), ...(typeof c.code === 'string' ? { code: c.code } : {}) }));
 
 /**
  * ⭐ ONE LOG LINE PER TURN (arch plan Step 0, DL 23 Oct): each provider call (model, ms, tokens) and each tool call (outcome,
