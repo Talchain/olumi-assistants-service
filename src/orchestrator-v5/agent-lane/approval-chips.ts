@@ -20,6 +20,7 @@ import type { NewLimitValue } from './stated-limit.js';
  * the Agent ask which — a chip must not pretend to have chosen.
  */
 import type { SuggestedAction } from '../compose/types.js';
+import { AMEND_CHIP, approvalChipIdFor, CONFIRM_READING, READING_APPROVE } from '../model-program-turn/program-card.js';
 import { formatFactorValueApprox } from '../compose/format-factor-value.js';
 import { hasCardOnlyOperations, type StructuredProposal } from './proposal.js';
 import { CANVAS_BAND_WORD } from '../format/edge-strength-bands.js';
@@ -72,8 +73,6 @@ const COHORT_FORECAST_APPROVE = { label: 'Record this forecast', message: 'Yes, 
  * reading of the brief, in the person's voice (DGAI 128bd2db renders this label as sent). "Change something first" and
  * "Not now" are every card's.
  */
-export const CONFIRM_READING = 'confirm_reading';
-export const READING_APPROVE = { label: 'Yes, that’s what I meant', message: 'Yes, that’s what I meant.' } as const;
 
 /** The revised-draft card's own button (B restated goal, `runtime/draft-replacement.ts`); the card's words ride in `detail`. */
 const REPLACE_DRAFT_APPROVE = { label: 'Use the revised draft', message: 'Yes, use the revised draft.' } as const;
@@ -181,11 +180,6 @@ export const DEADLINE_CHANGE_CHIP: SuggestedAction = {
   message: 'That is not my deadline. I will give you the date.',
 };
 
-export const AMEND_CHIP: SuggestedAction = {
-  id: 'agent-amend-proposal',
-  label: 'Change something first',
-  message: 'Before you apply it, I want to change some of it.',
-};
 
 export const OPTION_RENAME_APPROVE = { label: 'Rename it', message: 'Yes, rename it.' } as const;
 /** ⭐ S5: propose_change's ONE card takes the button of what its press does (its op). */
@@ -808,22 +802,5 @@ export function approvalLabelFor(tool: string, source: ApprovalLabelSource | und
   return (figure !== null ? fitted('Set ', shown.factor, ` to ${figure}`) : null) ?? ownFallback;
 }
 
-const APPROVE_PREFIX = 'agent-approve-proposal:';
-
-/** The approve chip's id for one proposal. */
-export const approvalChipIdFor = (proposalId: string): string => `${APPROVE_PREFIX}${proposalId}`;
-
-/**
- * The proposal a request's chip names, when (and only when) it is the typed approve
- * chip. Words alone never approve on this path: "Yes, use those." typed into the
- * composer still goes to the Agent, which resolves it against what it offered.
- */
-export function typedApprovalOf(body: unknown): string | undefined {
-  const id = (body as { chip?: { id?: unknown } } | null | undefined)?.chip?.id;
-  if (typeof id !== 'string' || !id.startsWith(APPROVE_PREFIX)) return undefined;
-  const named = id.slice(APPROVE_PREFIX.length);
-  const proposalId = named.endsWith(':reserve') ? named.slice(0, -':reserve'.length)
-    : named.endsWith(':one-off') ? named.slice(0, -':one-off'.length) : named;
-  // `gmh_…` is a held add-option or add-risk on the product's own seam (C52, SLICE C2): the same typed, zero-call approval.
-  return /^prop_[0-9a-f]{6,64}$/.test(proposalId) || /^gmh_[0-9a-f]{12}$/.test(proposalId) ? proposalId : undefined;
-}
+// The approve chip's id, the typed approval it names, and the amend and reading buttons are the program card's (inventory F6 part b).
+export { AMEND_CHIP, approvalChipIdFor, CONFIRM_READING, READING_APPROVE, typedApprovalOf } from '../model-program-turn/program-card.js';

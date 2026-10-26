@@ -135,9 +135,10 @@ vi.mock('../../orchestrator/user-identity.js', async (original) => ({
   ...await original<Record<string, unknown>>(), resolveUserIdentity: async () => ({ mode: 'off' }),
 }));
 /** Spies that call the real legacy functions, so a row can say a program turn never reaches them (spec §3, DL 26 Oct). */
-const legacy = vi.hoisted(() => ({ livingView: vi.fn(), capabilities: vi.fn(), rank: vi.fn(), restoreRun: vi.fn(), heldWriter: vi.fn(), history: vi.fn() }));
+const legacy = vi.hoisted(() => ({ livingView: vi.fn(), capabilities: vi.fn(), rank: vi.fn(), restoreRun: vi.fn(), heldWriter: vi.fn(), history: vi.fn(),
+  chips: vi.fn(), lifecycle: vi.fn(), stillApplies: vi.fn(), subjectMoved: vi.fn(), appliesAt: vi.fn(), recordApplies: vi.fn() }));
 /** The program's own reader, spied the same way: the contrast that the probe sees a call the route does make. */
-const program = vi.hoisted(() => ({ read: vi.fn(), history: vi.fn() }));
+const program = vi.hoisted(() => ({ read: vi.fn(), history: vi.fn(), reconcile: vi.fn(), chips: vi.fn() }));
 vi.mock('../../orchestrator-v5/path-b/living-model/view.js', async (load) => {
   const actual = await load<typeof import('../../orchestrator-v5/path-b/living-model/view.js')>();
   legacy.livingView.mockImplementation(actual.livingViewOf);
@@ -172,6 +173,39 @@ vi.mock('../../orchestrator-v5/model-program-turn/program-history.js', async (lo
   const actual = await load<typeof import('../../orchestrator-v5/model-program-turn/program-history.js')>();
   program.history.mockImplementation(actual.programHistoryOf);
   return { ...actual, programHistoryOf: program.history };
+});
+// F6 part b: the Living Model's card rules (chips, lifecycle, still-applies, the record's applies rule) and the program's own.
+vi.mock('../../orchestrator-v5/agent-lane/approval-chips.js', async (load) => {
+  const actual = await load<typeof import('../../orchestrator-v5/agent-lane/approval-chips.js')>();
+  legacy.chips.mockImplementation(actual.approvalChipsFor);
+  return { ...actual, approvalChipsFor: legacy.chips };
+});
+vi.mock('../../orchestrator-v5/agent-lane/proposal-object/lifecycle.js', async (load) => {
+  const actual = await load<typeof import('../../orchestrator-v5/agent-lane/proposal-object/lifecycle.js')>();
+  legacy.lifecycle.mockImplementation(actual.reconcileHeldProposals);
+  return { ...actual, reconcileHeldProposals: legacy.lifecycle };
+});
+vi.mock('../../orchestrator-v5/agent-lane/proposal-object/still-applies.js', async (load) => {
+  const actual = await load<typeof import('../../orchestrator-v5/agent-lane/proposal-object/still-applies.js')>();
+  legacy.stillApplies.mockImplementation(actual.heldCardStillApplies);
+  legacy.subjectMoved.mockImplementation(actual.heldCardSubjectMoved);
+  legacy.appliesAt.mockImplementation(actual.heldCardAppliesAt);
+  return { ...actual, heldCardStillApplies: legacy.stillApplies, heldCardSubjectMoved: legacy.subjectMoved, heldCardAppliesAt: legacy.appliesAt };
+});
+vi.mock('../../orchestrator-v5/agent-lane/proposal-object/record.js', async (load) => {
+  const actual = await load<typeof import('../../orchestrator-v5/agent-lane/proposal-object/record.js')>();
+  legacy.recordApplies.mockImplementation(actual.heldRecordAppliesAt);
+  return { ...actual, heldRecordAppliesAt: legacy.recordApplies };
+});
+vi.mock('../../orchestrator-v5/model-program-turn/program-card-turn.js', async (load) => {
+  const actual = await load<typeof import('../../orchestrator-v5/model-program-turn/program-card-turn.js')>();
+  program.reconcile.mockImplementation(actual.reconcileProgramCards);
+  return { ...actual, reconcileProgramCards: program.reconcile };
+});
+vi.mock('../../orchestrator-v5/model-program-turn/program-card.js', async (load) => {
+  const actual = await load<typeof import('../../orchestrator-v5/model-program-turn/program-card.js')>();
+  program.chips.mockImplementation(actual.programChipsFor);
+  return { ...actual, programChipsFor: program.chips };
 });
 vi.mock('../../orchestrator-v5/agent-lane/run-operation.js', async (load) => {
   const actual = await load<typeof import('../../orchestrator-v5/agent-lane/run-operation.js')>();
@@ -1420,7 +1454,7 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       return String(calls[0]!.instructions);
     };
 
-    it('SPEC §3 + F1b + F7 (DL 26 Oct): a program\'s draft, typed turn, card (proposed, pressed, saved, read back), canvas edit and Run press never enter the Living Model reader, the legacy capabilities, the held-approval writer, the Run restore, the action ranker or the history window; the program\'s own readers do run', async () => {
+    it('SPEC §3 + F1b + F7 + F6b (DL 26 Oct): a program\'s draft, typed turn, card (proposed, pressed, saved, read back), canvas edit and Run press never enter the Living Model reader, the legacy capabilities, the held-approval writer, the Run restore, the action ranker, the history window or the legacy card rules (F6b); the program\'s own readers and card rules do run', async () => {
       const counts = () => Object.values(legacy).map((spy) => spy.mock.calls.length);
       const none = Object.values(legacy).map(() => 0);
       for (const spy of [...Object.values(legacy), ...Object.values(program)]) spy.mockClear();
@@ -1433,6 +1467,8 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       // CONTRAST: the probe sees the program's own readers, of its state and of its conversation (F7), which every agent turn on a program calls.
       expect(program.read).toHaveBeenCalled();
       expect(program.history).toHaveBeenCalled();
+      expect(program.reconcile).toHaveBeenCalled();
+      expect(program.chips).toHaveBeenCalled();
       const press = await propose();
       outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply' }], [{ type: 'message', text: 'Saved.' }]];
       const saved = (await post(press)).json() as Json;
@@ -1451,6 +1487,16 @@ describe('POST /agent/v1/core-turn: the thin core route', () => {
       expect(legacy.livingView).toHaveBeenCalledTimes(1);
       (await import('../../orchestrator-v5/agent-lane/history-store.js')).historyFromDurableTurns([]);
       expect(legacy.history).toHaveBeenCalledTimes(1);
+      // F6 part b: each card-rule probe counts a direct call.
+      const chipsMod = await import('../../orchestrator-v5/agent-lane/approval-chips.js');
+      const life = await import('../../orchestrator-v5/agent-lane/proposal-object/lifecycle.js');
+      const still = await import('../../orchestrator-v5/agent-lane/proposal-object/still-applies.js');
+      const rec = await import('../../orchestrator-v5/agent-lane/proposal-object/record.js');
+      for (const call of [() => chipsMod.approvalChipsFor([]), () => life.reconcileHeldProposals({ atStart: [], latest: [], approved: new Set(), declined: new Set(), graph: null,
+        graphHash: undefined, scenarioId: SCENARIO, requestId: 'r', nowMs: 0 }), () => still.heldCardStillApplies({ operations: [] }, null),
+        () => still.heldCardSubjectMoved({ operations: [] }, null), () => still.heldCardAppliesAt({ operations: [], base_graph_identity_hash: 'x' }, null, undefined),
+        () => rec.heldRecordAppliesAt({ action: { kind: 'none' } } as never, {} as never, null, undefined)]) { try { call(); } catch { /* the call is what counts */ } }
+      for (const spy of [legacy.chips, legacy.lifecycle, legacy.stillApplies, legacy.subjectMoved, legacy.appliesAt, legacy.recordApplies]) expect(spy).toHaveBeenCalledTimes(1);
     });
 
     it('(7) Codex r1 BLOCK 1 on #3707: a loose figure goes in exactly as said, with no bounds Olumi adds; Olumi asks for their range', async () => {

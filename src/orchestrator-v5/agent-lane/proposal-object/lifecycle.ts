@@ -31,14 +31,10 @@ import { isPendingActionExpired, type PendingAction } from '../../session/pendin
 import { heldOperationsOf, isProductHold, isHeldProposal, heldProposalId } from './record.js';
 import { heldCardForReview, heldCardUnderReview } from './still-applies.js';
 import type { HeldLapseReason } from './reply.js';
+import { HELD_PROPOSAL_TURN_BUDGET, PROPOSAL_IDLE_TTL_MS } from '../../model-program-turn/program-card.js';
 
-/** The idle backstop: a held proposal nobody has touched for a day lapses — said, never silent. */
-export const PROPOSAL_IDLE_TTL_MS = 24 * 60 * 60 * 1000;
-/**
- * The rows a held proposal survives between two Agent answers (canvas edits commit rows too, and each spends one).
- * Refreshed on every Agent answer row; the conventional bare-confirm never reads it as consent time (see above).
- */
-export const HELD_PROPOSAL_TURN_BUDGET = 24;
+// A held card's lifetime is the program card's (`program-card.ts`, inventory F6 part b): one definition.
+export { HELD_PROPOSAL_TURN_BUDGET, PROPOSAL_IDLE_TTL_MS } from '../../model-program-turn/program-card.js';
 
 export interface HeldLapse { readonly hold: PendingAction; readonly reason: HeldLapseReason }
 

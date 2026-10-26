@@ -36,14 +36,13 @@ import { FRESH_READ, turnReadCache } from '../orchestrator-v5/agent-lane/turn-re
 import { agentSelectionContext } from '../orchestrator-v5/agent-lane/selection-context.js';
 import { PROGRAM_HISTORY_ROWS_READ, programHistoryOf } from '../orchestrator-v5/model-program-turn/program-history.js';
 import { agentProposals as proposals } from '../orchestrator-v5/agent-lane/held-approval-offers.js';
-import { approvalChipsFor, typedApprovalOf, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
+import { programChipsFor, programHoldApplies, typedApprovalOf } from '../orchestrator-v5/model-program-turn/program-card.js';
+import { reconcileProgramCards, refreshedProgramHold } from '../orchestrator-v5/model-program-turn/program-card-turn.js';
 import { proposalPendingAction, rehydrateProposals, withApprovalOfferedOnRow } from '../orchestrator-v5/agent-lane/durable-proposal.js';
 import {
-  agentProposalOf, declinedProposalOf, heldProposalId, heldRecordAppliesAt, heldRecordsApplyAt, isHeldProposal,
+  agentProposalOf, declinedProposalOf, heldProposalId, isHeldProposal,
   issuedTurnIdsForProposalRecords, proposalFieldsWire, proposalIssuances, proposalRecord,
 } from '../orchestrator-v5/agent-lane/proposal-object/record.js';
-import { reconcileHeldProposals, refreshedHold } from '../orchestrator-v5/agent-lane/proposal-object/lifecycle.js';
-import { heldCardStillApplies, heldCardSubjectMoved } from '../orchestrator-v5/agent-lane/proposal-object/still-applies.js';
 import { parseProposalEdits } from '../orchestrator-v5/agent-lane/proposal-object/amend.js';
 import { editsRefusedSentence } from '../orchestrator-v5/agent-lane/proposal-object/reply.js';
 import { collectTurnReceipts } from '../orchestrator-v5/agent-lane/turn-receipts.js';
@@ -158,10 +157,11 @@ const newestRunId = (read: ReturnType<typeof programReadOf>): string | null => (
 async function heldCardsOf(store: ReturnType<typeof getSessionStore>, scenarioId: string, pending: readonly PendingAction[],
   read: SavedScenario): Promise<CoreTurnCard[]> {
   const graphHash = read.revision ?? undefined;
+  // A program card is shown while it applies by its own rule (`programHoldApplies`, inventory F6 part b).
   const records = pending.flatMap((p) => {
     if (!isHeldProposal(p)) return [];
     const r = proposalRecord(p, read.graph);
-    return r !== undefined && heldRecordAppliesAt(p, r, read.graph, graphHash) ? [r] : [];
+    return r !== undefined && programHoldApplies(p, read.graph, graphHash) ? [r] : [];
   });
   if (records.length === 0) return [];
   let issuers: ReadonlyMap<string, string> = new Map();
@@ -172,7 +172,8 @@ async function heldCardsOf(store: ReturnType<typeof getSessionStore>, scenarioId
   } catch (err) {
     log.warn({ scenario_id: scenarioId, err: String(err) }, 'core-turn: card issuing window unreadable');
   }
-  const wire = proposalFieldsWire(records, graphHash, issuers, heldRecordsApplyAt(pending, read.graph, graphHash));
+  const wire = proposalFieldsWire(records, graphHash, issuers,
+    (r) => pending.some((h) => h.id === r.revision && heldProposalId(h) === r.proposal_id && programHoldApplies(h, read.graph, graphHash)));
   return [...(wire?.proposals ?? [])];
 }
 
@@ -688,23 +689,23 @@ export async function coreTurnRoute(app: FastifyInstance): Promise<void> {
       let latestPending: readonly PendingAction[] = heldAtStart;
       try { latestPending = await store.readMostRecentPendingActions?.(scenarioId, { validation: 'strict' }) ?? heldAtStart; } catch { /* the floor re-reads it */ }
       const graphHash = after.revision ?? undefined;
-      const declined = new Set<string>([...withdrawnThisTurn(result.tool_calls), ...(declinedCardOnly !== undefined ? [declinedCardOnly] : []),
+      // The program's cards across this turn (`program-card-turn.ts`, inventory F6 part b): a card declined on its press or on the
+      // resumed pause goes; one whose revision moved is kept for review; an expired or vanished one lapses.
+      const declined = new Set<string>([...(declinedCardOnly !== undefined ? [declinedCardOnly] : []),
         ...(result.sdk?.resumed?.answer === 'declined' && corePaused != null && corePaused.proposal_id !== null ? [corePaused.proposal_id] : [])]);
-      const reconciled = reconcileHeldProposals({ atStart: heldAtStart, latest: latestPending, approved: new Set<string>(),
-        isApplied: (id) => proposals.isApplied(id), declined, graph: after.graph, graphHash, scenarioId, requestId: String(req.id), nowMs: Date.now(),
-        stillApplies: (hold) => { const p = agentProposalOf(hold); return p !== undefined && heldCardStillApplies(p, after.graph); },
-        subjectMoved: (hold) => { const p = agentProposalOf(hold); return p !== undefined && heldCardSubjectMoved(p, after.graph); } });
-      for (const l of reconciled.lapsed) if (agentProposalOf(l.hold) !== undefined) proposals.discard(heldProposalId(l.hold));
+      const reconciled = reconcileProgramCards({ atStart: heldAtStart, latest: latestPending, isApplied: (id) => proposals.isApplied(id), declined,
+        graph: after.graph, graphHash, scenarioId, nowMs: Date.now() });
+      for (const l of reconciled.lapsed) proposals.discard(heldProposalId(l));
       // This turn's own cards: each proposal the AI prepared (or paused on), from the STORED proposal, never its prose.
       const emittedAtIso = new Date().toISOString();
       let liveHolds: PendingAction[] = [...reconciled.carried];
-      const chips = approvalChipsFor(result.tool_calls.filter((c) => c.refusal !== WITHHELD_ON_CHIP_TURN),
+      const chips = programChipsFor(result.tool_calls.filter((c) => c.refusal !== WITHHELD_ON_CHIP_TURN),
         (id) => ({ proposal: proposals.get(id), result: result.tool_results.find((r) => r.proposal_id === id) }));
       for (const chipOffered of chips) {
         const id = typedApprovalOf({ chip: { id: chipOffered.id } });
         const p = id === undefined ? undefined : proposals.get(id);
         if (id === undefined || p === undefined || liveHolds.some((h) => heldProposalId(h) === id)) continue;
-        liveHolds.push(refreshedHold(proposalPendingAction(p, chipOffered as Parameters<typeof proposalPendingAction>[1], { scenario_id: scenarioId, emitted_at_iso: emittedAtIso }), Date.now()));
+        liveHolds.push(refreshedProgramHold(proposalPendingAction(p, chipOffered as Parameters<typeof proposalPendingAction>[1], { scenario_id: scenarioId, emitted_at_iso: emittedAtIso }), Date.now()));
       }
       liveHolds.sort((a, b) => a.emitted_at_iso.localeCompare(b.emitted_at_iso));
       if (liveHolds.length > PENDING_ACTIONS_PER_TURN_CAP) {
